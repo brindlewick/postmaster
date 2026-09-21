@@ -104,7 +104,7 @@ done
 ask FE "  fallback: effort (blank if none)" ""
 
 echo
-echo "== The postmaster: decomposes the stream, dispatches coachmen, supervises. =="
+echo "== The postmaster: takes tickets in, checks their packing, dispatches coachmen, supervises. =="
 ask PH "  postmaster: harness" ""
 need_harness "$PH"
 ask PM "  postmaster: model id" ""

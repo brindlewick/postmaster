@@ -12,7 +12,7 @@ config says it may.
 
 | role | does | never does |
 |---|---|---|
-| **postmaster** | splits a stream into tickets, dispatches one coachman per ticket, supervises, answers escalations, grants merges | run a model lane, edit source |
+| **postmaster** | takes tickets in and checks each is packed for the road (a problem, acceptance criteria that can be tested, a scope that names what is out), cutting new ones from a larger request only with approval; dispatches one coachman per ticket, keeps track of every coachman on the road, answers escalations, grants merges | run a model lane, edit source |
 | **coachman** | drives one leg of a ticket; five legs, each a fresh coachman, carry it from waybill to ship card with a written hand-off between them | take a second leg, merge on its own authority |
 | **the team** | several lanes implementing the same ticket in blinkers | see each other's work |
 

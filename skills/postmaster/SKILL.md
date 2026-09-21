@@ -144,7 +144,7 @@ postmaster ruling channel: resume the coachman's thread (harnesses.md) with the 
 
 - Bootstrap never runs the stream. Spawn and stop. The postmaster's job is `postmaster.md`.
 - The postmaster runs no model lanes and edits no source. Its tokens buy judgment:
-  decomposition, dispatch, supervision, escalation, merge grants, and talking to the
+  packing, dispatch, supervision, escalation, merge grants, and talking to the
   operator.
 - All work in worktrees; the project's default branch stays clean.
 - Verify claims against code before trusting them, above all before granting a merge.

@@ -99,7 +99,7 @@ A three-role flow for getting one ticket implemented well by several models at o
 
 | role | what it does | where it is defined |
 |---|---|---|
-| **postmaster** | decomposes a stream into tickets, dispatches one coachman per ticket leg by leg, supervises, answers escalations, grants merges | `skills/postmaster/postmaster.md` (spawned by `SKILL.md`) |
+| **postmaster** | takes tickets in and checks their packing (the three headings, criteria testable at the ticket's own interface, a scope that names what is out), cutting new ones from a larger request only with approval; dispatches one coachman per ticket leg by leg, keeps track of every coachman, answers escalations, grants merges | `skills/postmaster/postmaster.md` (spawned by `SKILL.md`) |
 | **coachman** | drives one leg of one ticket; five legs, each a fresh coachman with a written hand-off between them, carry a ticket from waybill to ship card: harnessing the team, judging their work, running review rounds, clearing the gate | `skills/postmaster/coachman.md` |
 | **the team** | several model lanes implementing the same ticket independently, in **blinkers**: separate worktrees, unable to see each other's work | `coachman.md`, lane table |
 
@@ -120,7 +120,7 @@ metaphor expresses them.
 
 **waybill** the brief that travels with a load · **harness** the CLI wrapping a model ·
 **blinkers** worktree isolation between lanes · **lead horse / wheeler** the ranked lanes ·
-**turnpike** the gate a run must clear · **remount** resuming a stalled run ·
+**packed** a ticket ready for the road: the three headings, criteria testable at its own interface, a scope that names what is out · **turnpike** the gate a run must clear · **remount** resuming a stalled run ·
 **spent** a run whose process is gone with no marker · **lame** a lane that is present but not pulling · **fleet** the
 whole system.
 
