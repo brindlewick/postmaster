@@ -1,0 +1,81 @@
+# postmaster
+
+Get one ticket implemented by several models at once, then judged before it lands.
+
+Two or more models implement the same ticket **independently, in separate worktrees, unable
+to see each other's work**. A coachman combines what each got right, puts the result through
+adversarial review rounds, and only then asks for a merge. Nothing lands on a green gate
+alone: the merge word comes from a person, or from the supervising postmaster when the
+config says it may.
+
+## The three roles
+
+| role | does | never does |
+|---|---|---|
+| **postmaster** | splits a stream into tickets, dispatches one coachman per ticket, supervises, answers escalations, grants merges | run a model lane, edit source |
+| **coachman** | drives one leg of a ticket; five legs, each a fresh coachman, carry it from waybill to ship card with a written hand-off between them | take a second leg, merge on its own authority |
+| **the team** | several lanes implementing the same ticket in blinkers | see each other's work |
+
+## Why several models rather than one good one
+
+Because they disagree usefully. Across a sample of runs, the synthesis took contributions
+from **both** lanes every time: not "pick the winner", but one lane's mechanism plus the
+other's test, wiring or edge case. And a second lane finding the same defect independently
+is corroboration you can act on; a single lane agreeing with itself is not.
+
+Disagreement is also diagnostic. When two lanes build the same mechanism and name it
+differently, the project's own conventions did not decide it, and the coachman records the
+gap as a proposed rule rather than flipping a coin the next run will flip again.
+
+## Getting started
+
+```sh
+scripts/setup.sh                # the wizard: probes your agent CLIs, assigns a harness and
+                                # model to each role, picks a tracker, writes the config
+```
+
+Then open an agent session in this repo. It will help you choose a project and launch a
+postmaster. There is no command to memorise; `AGENTS.md` tells the agent what to do.
+
+```sh
+scripts/probe-harnesses.sh      # which agent CLIs are installed
+scripts/probe-trackers.sh       # which ticket sources are reachable
+scripts/find-projects.sh        # your git projects, most recent first
+scripts/check-target.sh  <path> # 0 usable · 1 not a repo · 2 dirty
+scripts/discover-project.sh <path>
+scripts/cut-scratch.sh <repo> <source-worktree> <dest> <commit>   # reviewer scratch, deps cloned
+scripts/wait-for-markers.sh <dir> <glob> <count> <timeout>       # block until a round is in
+scripts/log-action.sh <dispatch> <actor> <action> <target> …     # one JSON line per action
+scripts/ticket.sh <repo> init|create|read|state|comment|list      # file-based tickets
+scripts/launch.sh form|launch|resume <lane-or-role> …             # any lane or role, one command
+scripts/runs-status.sh <run-root>                                  # the postmaster's poll
+scripts/handoff-check.sh <handoff-file>                            # a leg may end only on exit 0
+```
+
+## What it needs
+
+At least two agent CLIs that can run headless. Any git repository as a target. tmux, or
+another way to keep a process alive between an agent's turns. Python 3.11 or newer, which
+the scripts use to read the config, and jq for discovering a JavaScript project's gate. An agent that has loaded
+`skills/postmaster/SKILL.md`: for a harness with a skills directory, symlink or copy
+`skills/postmaster` into it; for any other, point the agent at the file.
+
+**No tracker is required.** Plain markdown tickets on a `tickets` branch of the target repo
+are a first-class choice: nothing to install, no auth, one copy of every ticket whatever
+branch you are on, and they travel with the repo. GitHub Issues
+works through the `gh` CLI, and any other tracker your agent reaches through its own tooling
+is described once, outside this repo. The adapters are in `skills/postmaster/trackers.md`.
+
+**Nothing about a target project has to be configured.** The flow discovers the gate
+command, the docs and the ticket convention. Ask only what discovery cannot answer.
+
+## Design rules
+
+Nothing repo-specific in the flow. Nothing harness-specific outside an adapter. Anything
+deterministic lives in `scripts/`, because prose is re-derived, and mis-derived, on every
+run. Every count carries a control that could have come out otherwise. Every action a run
+takes on a project is logged as a structured event, so what the flow did can be audited and
+improved from the record rather than from the narrative.
+
+See `AGENTS.md` for the full context, and `skills/postmaster/` for the runbooks
+(`postmaster.md`, `coachman.md`) and the adapters (`harnesses.md`, `trackers.md`).

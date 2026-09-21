@@ -1,0 +1,74 @@
+# ~/.postmaster/config.toml
+#
+# The operator's machine-level choices, and nothing about any target project. Projects are
+# discovered (scripts/discover-project.sh), never configured. scripts/setup.sh writes this
+# file from your answers; copy it by hand if you prefer. Model ids are whatever the provider
+# serves under the harness; confirm each with one trial launch (scripts/launch.sh form <name>
+# prints the exact command). Every value below is one that scripts/launch.sh can run today.
+
+# Where projects live. scripts/find-projects.sh reads this when given no roots.
+projects_roots = ["~/Code"]
+
+# A lane is a harness plus a model plus an effort, and is a horse (an arm) or a reviewer or
+# both, as [team] says. Name lanes for what they are. A lane may carry an env_file, loaded
+# before launch, which is how a harness reaches an alternate backend (an Anthropic-compatible
+# endpoint under the claude harness, say): the endpoint and its key live in that file, outside
+# this repo, never here. The [1m] suffix on a model id tells the claude harness the context
+# window of an id it does not know.
+[lanes.luna]
+harness = "codex"
+model = "gpt-5.6-luna"
+effort = "max"
+
+[lanes.deepseek]
+harness = "claude"
+model = "deepseek-v4.1-flash[1m]"
+env_file = "~/.postmaster/lanes/deepseek.env"   # ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN
+
+# The team for a run. At least two arms from different vendors. Reviewers are lanes too, the
+# arms by default; a third lane of another family may be added. The coachman and its fallback
+# are never a model that runs as a lane in the same run, and both need a harness with a
+# resume form (codex, grok or claude), since rulings arrive by resuming the coachman's thread.
+[team]
+arms = ["luna", "deepseek"]
+reviewers = ["luna", "deepseek"]
+coachman = { harness = "grok", model = "grok-4.6", effort = "xhigh" }
+coachman_fallback = { harness = "codex", model = "gpt-6-astra", effort = "max" }
+postmaster = { harness = "agy", model = "gemini-3.8-flash-high" }   # interactive, in tmux
+max_runs = 2                                    # concurrent runs per project
+
+# A muse coachman (Muse Spark at max, say) is usable once skills/postmaster/harnesses.md and
+# scripts/launch.sh carry its stream flag, bypass form, thread id and resume form, taken from
+# a trial run. Until then launch.sh refuses it, by design.
+
+# Optional: a different coachman per leg (synthesis, style, bug, security, ship).
+# [team.coachman_legs]
+# synthesis = { harness = "codex", model = "gpt-6-astra", effort = "max" }
+
+[postmaster]
+poll_seconds = 120
+
+# How tickets are read and written (skills/postmaster/trackers.md).
+#   files   markdown tickets on a `tickets` branch of the target repo (nothing to install, no auth)
+#   github  GitHub Issues through the gh CLI
+#   other   a tracker the agent reaches through its own tooling, named here and described in
+#           ~/.postmaster/trackers/<name>.md
+[tracker]
+kind = "files"
+prefix = "PM"                   # files only: ticket ids are <prefix>-<n>
+# name = "<tracker>"            # other only
+postmaster_may_create = false   # true lets the postmaster create tickets without asking
+
+[ship]
+# Who says the merge word for a run: "operator" (a person, live) or "postmaster" (the
+# supervising session grants the merge itself once it has verified the ship card). A
+# coachman never merges on its own authority under either setting.
+merge_authority = "operator"
+
+# "autonomous": the coachman posts checkpoint cards as information and proceeds; the ship
+# card is the one stop. "consult": every checkpoint card is a stop until a ruling arrives.
+checkpoint_mode = "autonomous"
+
+# Optional. A template for the review link the ship card carries, with {path} replaced by the
+# absolute path of the synthesis worktree. Leave empty to ship the path alone.
+review_link = ""

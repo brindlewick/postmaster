@@ -1,0 +1,4 @@
+.worktrees/
+config.toml
+*.local
+.DS_Store
