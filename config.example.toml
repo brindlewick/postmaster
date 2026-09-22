@@ -28,7 +28,7 @@ env_file = "~/.postmaster/lanes/deepseek.env"   # ANTHROPIC_BASE_URL and ANTHROP
 # The team for a run. At least two arms from different vendors. Reviewers are lanes too, the
 # arms by default; a third lane of another family may be added. The coachman and its fallback
 # are never a model that runs as a lane in the same run, and both need a harness with a
-# resume form (codex, grok or claude), since rulings arrive by resuming the coachman's thread.
+# resume form (codex, grok, claude or pi), since rulings arrive by resuming the coachman's thread.
 [team]
 arms = ["luna", "deepseek"]
 reviewers = ["luna", "deepseek"]
@@ -49,14 +49,17 @@ max_runs = 2                                    # concurrent runs per project
 poll_seconds = 120
 
 # How tickets are read and written (skills/postmaster/trackers.md).
-#   files   markdown tickets on a `tickets` branch of the target repo (nothing to install, no auth)
-#   github  GitHub Issues through the gh CLI
+#   github  GitHub Issues on a GitHub Projects board, through the gh CLI (the default; needs
+#           gh logged in with the project scope, nothing else)
+#   plane   Plane work items through its REST API; url and workspace here, the key in env_file
 #   other   a tracker the agent reaches through its own tooling, named here and described in
 #           ~/.postmaster/trackers/<name>.md
 [tracker]
-kind = "files"
-prefix = "PM"                   # files only: ticket ids are <prefix>-<n>
-# name = "<tracker>"            # other only
+kind = "github"
+# url = "https://api.plane.so"           # plane only: cloud, or a self-hosted instance's origin
+# workspace = "<slug>"                   # plane only
+# env_file = "~/.postmaster/plane.env"   # plane only: one line, PLANE_API_KEY=<key>
+# name = "<tracker>"                     # other only
 postmaster_may_create = false   # true lets the postmaster create tickets without asking
 
 [ship]
