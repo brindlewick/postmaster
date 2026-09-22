@@ -26,7 +26,7 @@ on one session messaging another; the postmaster polls files.
 | grok | `grok --prompt-file`, or `grok -p` | `--output-format streaming-json` | `AGENTS.md`, natively | yes |
 | agy (Antigravity CLI) | `agy -p` | `--output-format stream-json` | none | no, argv |
 | claude | `claude -p` | `--output-format stream-json` | `CLAUDE.md` and what it imports | no, argv |
-| pi | `pi --mode json --print` | `--mode json` | first available `AGENTS.md` or `CLAUDE.md`, natively | yes, `@file` |
+| pi | `pi --mode json --print` | `--mode json` | `AGENTS.override.md`, else `AGENTS.md` or `CLAUDE.md`, natively | yes, `@file` |
 | muse | `muse exec` | not recorded here | none | `--prompt-file` |
 
 A harness that reads no ambient context file must be handed the project's docs by name in its
@@ -140,14 +140,15 @@ cd <wt> && pi --mode json --print --approve --model <provider/model> \
 
 - `--approve` trusts project-local resources for the run. Pi has no permission prompts; its
   built-in tools run unrestricted, with the worktree as the lane's containment.
-- In each directory, reads the first available context file, preferring `AGENTS.md` over
-  `CLAUDE.md`, while walking from the worktree to its parents.
+- Reads `~/.pi/agent/AGENTS.md`, then one context file per directory while walking from the
+  filesystem root to the worktree: `AGENTS.override.md` when present, otherwise `AGENTS.md`
+  before `CLAUDE.md`.
 - Thread id: `id` in the first `session` record of the JSON stream.
 - Final message: the final authoritative `message_end` record.
 - Resume: `pi --mode json --print --approve --session <id> --model <provider/model>
   --thinking <effort> @<prompt-file>`, appending to the same stream.
-- Durable record: session JSONL under `~/.pi/agent/sessions/`. Threads persist harmlessly;
-  nothing to archive.
+- Durable record: session JSONL under `~/.pi/agent/sessions/--<path>--/`, where `<path>` is the
+  working directory with `/` replaced by `-`. Threads persist harmlessly; nothing to archive.
 - Use a provider-qualified model id when the same model name could match more than one provider.
 
 ## muse
