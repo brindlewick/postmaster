@@ -77,7 +77,15 @@ A question the wiki may already answer.
 
 ## lint
 
-A health check, and part of the repo's gate. Report every fault, fix only the mechanical ones:
+A health check, and part of the repo's gate.
+
+```sh
+scripts/wiki-lint.sh              # faults on stdout, exit 1 if any
+scripts/wiki-lint.sh --self-test  # the checks fail on faults and pass on a clean tree
+```
+
+The script is the authority on what is checked; do not re-derive its rules here or by hand.
+What it enforces, so a reader knows what passing means:
 
 - every page has front matter with `title`, `type`, `updated`, and a concept also has `standing`
 - every `[@runs/...]`, `[@papers/...]` and `[@articles/...]` resolves to something in `raw/`
@@ -95,4 +103,7 @@ A health check, and part of the repo's gate. Report every fault, fix only the me
 
 A contradiction between a standing and its records is reported, never quietly corrected: it
 means either the standing or the reading of a record is wrong, and which one is a judgement
-for the user.
+for the user. The script reports and fixes nothing for the same reason.
+
+Notation in backticks is not a citation: `[@papers/<slug>]` documents the syntax, and the
+script skips code spans and fenced blocks so that examples do not fail the check.
