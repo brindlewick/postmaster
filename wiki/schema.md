@@ -17,7 +17,7 @@ kept current, rather than re-derived from scratch each time somebody asks.
 
 | layer | what it is | who writes it |
 |---|---|---|
-| `raw/` | what runs produced and what was published elsewhere, never edited ([the contract](../raw/README.md)) | a finished run, or a web capture |
+| `raw/` | what runs produced and what was published elsewhere, never edited, **never committed** ([the contract](../raw/README.md)) | a finished run, or a web capture |
 | `wiki/` | compiled pages, revised freely, every claim cited | ingest and query |
 | `wiki/log.md` | append-only record of every operation | every operation |
 
@@ -46,6 +46,24 @@ sources: [runs/2026-09-22-postmaster-17]                    # raw ids this rests
 updated: YYYY-MM-DD
 ---
 ```
+
+## What may be published
+
+`wiki/` is committed and served publicly; `raw/` is not. Everything written here is written
+for that audience:
+
+- **Numbers and outcomes, not transcripts.** A record may say a lane produced three findings
+  of which two were corroborated; it may not quote the ledger line, the review note or the
+  diff.
+- **No instance detail.** No filesystem paths, hostnames, machine names, or the text of a
+  ticket belonging to someone's private project. A target is named by its repository name
+  where that repository is public, and by a stable label where it is not.
+- **Provenance instead of evidence.** Each citation carries the `sha256` of the raw file it
+  came from, so the holder of `raw/` can show the record matches and a reader can see what
+  was counted.
+
+When those pull against each other, the disclosure rule wins and the page says what it had to
+leave out.
 
 ## Citations and links
 

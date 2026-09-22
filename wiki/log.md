@@ -8,6 +8,15 @@ updated: 2026-09-22
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-22] lint | raw made local and uncommitted
+
+`raw/` sat in the repository root, so run evidence would have been committed to a public repo
+whatever the published site rendered. It is now gitignored, its contract aside. Runs are
+specific to the instance that made them and carry its paths and ticket text; the tool's
+history is not the place for them. Compiled records now carry the sha256 of each file they
+drew on, so provenance survives without the evidence being published, and lint checks that no
+page quotes raw or names a path.
+
 ## [2026-09-22] lint | raw widened to published sources
 
 `raw/` had been restricted to runs, which contradicted the pattern and would have blocked the

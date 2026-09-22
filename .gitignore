@@ -2,3 +2,11 @@
 config.toml
 *.local
 .DS_Store
+
+# Run evidence is local to this instance and never committed. postmaster is a tool others
+# run against their own projects: a run's ledger, narrative and harness sessions carry that
+# instance's paths, ticket text and whatever was on screen, and this repo is public. The
+# wiki commits what it compiled, not what it compiled from (raw/README.md is the contract,
+# and is kept).
+raw/*
+!raw/README.md

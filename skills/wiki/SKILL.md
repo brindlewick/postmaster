@@ -12,6 +12,12 @@ this file only says how to perform the three operations.
 Three layers, and the direction is one-way: `raw/` is written once, by a finished run or a
 web capture; `wiki/` compiles from it; and no operation ever edits `raw/`.
 
+**`raw/` is local and uncommitted; `wiki/` is public.** Never copy a ledger line, a review
+note, a diff, a path or a private target's ticket text into a wiki page. Compile numbers and
+outcomes, cite the `sha256` of the file they came from, and where a page had to leave
+something out, say so. If an operation cannot be done without disclosing instance detail, it
+does not get done.
+
 Two kinds of evidence with different force. A **run** says what this fleet did and can move a
 standing. A **paper or article** says what someone else claims: it motivates a hypothesis and
 belongs in what would settle it, but it never moves a standing on its own.
@@ -69,6 +75,8 @@ A health check, and part of the repo's gate. Report every fault, fix only the me
 - every `[@runs/...]`, `[@papers/...]` and `[@articles/...]` resolves to something in `raw/`
 - every web capture has a `source.md` with a url and a retrieval date
 - no concept whose standing rests on papers alone
+- no wiki page containing a filesystem path, a hostname, or text quoted from `raw/`
+- every citation carries the `sha256` of the raw file, and every hash resolves for the holder
 - every `[[...]]` resolves to a page
 - every claim carries a citation or is marked unverified in the sentence making it
 - no orphan page: everything is reachable from `wiki/index.md`

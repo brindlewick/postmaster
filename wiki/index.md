@@ -15,7 +15,12 @@ good model, and if so, through which mechanisms?**
 It follows the LLM-wiki pattern. Evidence lands immutably in [`raw/`](../raw/README.md) — both
 what this fleet did, as finished runs, and what others have published, as captured papers and
 articles; pages here compile it; every claim cites what it rests on; [the log](log.md) records
-each operation. A run can move a claim's standing; outside work can only motivate one. [How the wiki is kept](schema.md) is the contract, and any agent working here
+each operation. A run can move a claim's standing; outside work can only motivate one.
+
+**`raw/` stays on the machine that produced it and is never committed.** postmaster is a tool
+others run against their own projects, and a run carries that instance's paths and ticket
+text. What is published is what was compiled — counts, outcomes and the hash of the file each
+came from — never the evidence itself. [How the wiki is kept](schema.md) is the contract, and any agent working here
 reads it first.
 
 ## Catalog

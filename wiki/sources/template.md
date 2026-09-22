@@ -10,8 +10,14 @@ updated: YYYY-MM-DD
 Copy this page to `sources/YYYY-MM-DD-<target>-<ticket>.md` and fill every section from
 `raw/runs/<run-id>/`, which must already have been copied in. Name the target by its
 repository name only. **Every number carries a citation** to the file it came from:
-`[@runs/<id>/ledger.jsonl]`, `[@runs/<id>/card.md]`, `[@runs/<id>/reviews/round-2.md]`. A
-figure with no citation does not belong in a record.
+`[@runs/<id>/ledger.jsonl sha256:<first 12>]`. A figure with no citation does not belong in a
+record.
+
+**This page is public; `raw/` is not.** Compile counts and outcomes. Do not quote a ledger
+line, a review note or a diff, and do not name a path, a host, or a ticket belonging to a
+private target. Name the target by its repository name only where that repository is public,
+and by a stable label where it is not. Where something was left out, say so rather than
+implying the record is complete.
 
 ## The run
 

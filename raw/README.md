@@ -1,12 +1,25 @@
-# raw — immutable sources
+# raw — immutable sources, local to this instance
 
-Everything the wiki's claims rest on, exactly as it was produced or found. **Nothing in this
-directory is edited, corrected or deleted.** A page in `wiki/` may say a raw record is wrong;
-it may not change the record.
+Everything the wiki's claims rest on, exactly as it was produced or found. Two rules, and the
+second is as important as the first.
 
-That rule is what makes a claim checkable. A hypothesis in `wiki/concepts/` cites a record
-here, so a reader can follow any standing back to its evidence and re-derive it. A wiki that
-can edit its own evidence proves nothing.
+**Nothing here is edited, corrected or deleted.** A page in `wiki/` may say a raw record is
+wrong; it may not change the record. That is what makes a claim checkable: a hypothesis cites
+a record here, so whoever holds this directory can follow any standing back to its evidence
+and re-derive it. A wiki that can edit its own evidence proves nothing.
+
+**Nothing here is committed.** `.gitignore` excludes it, this file aside. postmaster is a
+tool other people run against their own projects, and this repository is public. A run's
+ledger, narrative and harness sessions carry that instance's paths, ticket text and whatever
+was on screen; none of it belongs in the tool's history, and a run against somebody's private
+project is not the tool's business. The wiki commits **what it compiled, never what it
+compiled from**.
+
+So a citation here is verifiable by whoever holds this directory and is a claim of provenance
+to everyone else. A compiled record therefore carries the numbers themselves plus the
+`sha256` of the raw file they came from, so the holder can prove the record was not drifted
+from and a reader can see exactly what was counted. That is the honest limit of a public
+research note, and the alternative — publishing the evidence — is not available.
 
 ## What lands here
 
@@ -53,5 +66,6 @@ tracked. Raw is only what a run produced or what was published elsewhere.
 A run is copied in when it ends, never while it runs: a live run is still writing, and a
 citation to a moving file is not a citation.
 
-Secrets never land here. A ledger carries actions, not credentials, and a harness session can
-carry anything that was on screen; check before copying.
+Secrets never land here, and being uncommitted is not a reason to relax: a harness session can
+carry anything that was on screen, and this directory sits inside a working tree where a stray
+`git add -f` or a future change to `.gitignore` would expose it. Scrub before copying.
