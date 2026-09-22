@@ -31,17 +31,16 @@ gap as a proposed rule rather than flipping a coin the next run will flip again.
 
 ## Getting started
 
-```sh
-scripts/setup.sh                # the wizard: probes your agent CLIs, assigns a harness and
-                                # model to each role, picks a tracker, writes the config
-```
-
-Then open an agent session in this repo. It will help you choose a project and launch a
-postmaster. There is no command to memorise; `AGENTS.md` tells the agent what to do.
+Clone this repo and open your agent in it. There is no command to memorise and no wizard to
+run: `AGENTS.md` tells the agent what to do, and the first time that is setting the machine
+up with you, one question at a time (which agent CLIs fill which role, where tickets live,
+where your projects are, who says the merge word). After that it helps you choose a project
+and launches a postmaster.
 
 ```sh
 scripts/probe-harnesses.sh      # which agent CLIs are installed
 scripts/probe-trackers.sh       # which ticket sources are reachable
+scripts/setup.sh --answers <file> # writes the config from the agent's collected answers (--keys lists them)
 scripts/find-projects.sh        # your git projects, most recent first
 scripts/check-target.sh  <path> # 0 usable · 1 not a repo · 2 dirty
 scripts/discover-project.sh <path>
