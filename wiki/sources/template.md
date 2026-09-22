@@ -1,12 +1,17 @@
 ---
 title: Run record template
+type: source
+sources: [runs/<run-id>]
+updated: YYYY-MM-DD
 ---
 
 # Run record: YYYY-MM-DD, `<target>`, `<ticket>`
 
-Copy this page to `runs/YYYY-MM-DD-<target>-<ticket>.md` and fill every section from the
-run's ledger. Name the target by its repository name only. Where a number comes from the
-ledger, say which line or file.
+Copy this page to `sources/YYYY-MM-DD-<target>-<ticket>.md` and fill every section from
+`raw/runs/<run-id>/`, which must already have been copied in. Name the target by its
+repository name only. **Every number carries a citation** to the file it came from:
+`[@runs/<id>/ledger.jsonl]`, `[@runs/<id>/card.md]`, `[@runs/<id>/reviews/round-2.md]`. A
+figure with no citation does not belong in a record.
 
 ## The run
 
@@ -42,6 +47,11 @@ The gate command, its exit on the synthesis before review and after the last rou
 Tokens per lane and for the coachman where the harness reports them; wall-clock from first
 launch to ship card.
 
+## Bears on
+
+Which concepts this record affects, as `[[wikilinks]]`, and in which direction. Ingest updates
+those pages' standings in the same pass and logs both.
+
 ## Source
 
-The ledger path and the run directory, as recorded at the time.
+`raw/runs/<run-id>/`, and the dispatch directory it was copied from, as recorded at the time.

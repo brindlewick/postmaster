@@ -1,53 +1,93 @@
 ---
 title: How the wiki is kept
+type: schema
+updated: 2026-09-22
 ---
 
 # How the wiki is kept
 
-This page is the contract for every other page. An agent adding to the wiki reads it first.
+This page is the contract for every other page, and for any agent operating on the wiki.
+Read it before ingesting, querying or linting.
 
-## Three kinds of page
+The shape is the LLM-wiki pattern: immutable sources in `raw/`, compiled pages in `wiki/`,
+these conventions as the schema, and an append-only `log.md`. Knowledge is compiled once and
+kept current, rather than re-derived from scratch each time somebody asks.
 
-**A hypothesis page** states one claim about combining models, its standing, the evidence for
-and against it by run record, and what would settle it. [Combining models](combining-models.md)
-holds them all for now; a hypothesis gets its own page when the evidence outgrows a section.
+## Layers
 
-**A run record** is one run of the tool on one ticket, distilled from its ledger. It lives in
-`runs/`, named `YYYY-MM-DD-<target>-<ticket>.md`, and follows [the template](runs/template.md).
-It carries numbers, not impressions: which lanes ran, what the synthesis took from each, which
-review findings each lane made and which were corroborated, what the gate said, what the run
-cost. Every number points back to the ledger line or file it came from.
+| layer | what it is | who writes it |
+|---|---|---|
+| `raw/` | what runs produced, never edited ([the contract](../raw/README.md)) | a run, copied in when it ends |
+| `wiki/` | compiled pages, revised freely, every claim cited | ingest and query |
+| `wiki/log.md` | append-only record of every operation | every operation |
 
-**A concept page** defines a term the other pages lean on (lane, synthesis, corroboration,
-blinkers) when the [vocabulary in AGENTS.md](https://github.com/brindlewick/postmaster/blob/main/AGENTS.md) is not enough.
+## Page kinds
+
+**`wiki/concepts/`** — a claim about how the fleet behaves, with its standing and what would
+settle it. This is where the hypotheses live.
+
+**`wiki/sources/`** — one page per run, distilled from `raw/runs/<run-id>/`, in the shape of
+[the template](sources/template.md). Numbers, not impressions, each citing the file it came
+from.
+
+**`wiki/entities/`** — a thing the other pages keep referring to: a lane, a harness, a target
+project. Only when it has accumulated enough to be worth a page.
+
+## Front matter
+
+Every page carries it:
+
+```yaml
+---
+title: <one line>
+type: concept | source | entity | schema
+standing: claimed | supported | mixed | refuted | settled   # concepts only
+sources: [runs/2026-09-22-postmaster-17]                    # raw ids this rests on
+updated: YYYY-MM-DD
+---
+```
+
+## Citations and links
+
+- **`[@runs/<run-id>]`** cites a raw record. Every number and every claim that came from a
+  run carries one. A claim with no citation is marked `unverified` in the sentence that makes
+  it, or it does not go in.
+- **`[[page-name]]`** cross-references another wiki page. Link liberally; a link to a page
+  that does not exist yet marks something worth writing.
+- A run record cites the exact file: `[@runs/<id>/ledger.jsonl]`, `[@runs/<id>/card.md]`.
 
 ## Standing of a claim
 
-Every hypothesis carries one of these words, and the log records when it changes:
+Concepts carry one of these, and the log records every change:
 
-- **claimed**: stated somewhere (the README, a run's narrative) with no run record here yet
-- **supported**: consistent with every run record that bears on it, and there are at least
-  three
-- **mixed**: run records on both sides; the page says what separates them
-- **refuted**: contradicted by run records that a defender of the claim would accept
-- **settled**: supported, and the measurement that would refute it has been tried
+- **claimed** — stated somewhere with no run record behind it yet
+- **supported** — consistent with every run record that bears on it, and there are at least three
+- **mixed** — run records on both sides; the page says what separates them
+- **refuted** — contradicted by run records a defender of the claim would accept
+- **settled** — supported, and the measurement that would refute it has been tried
 
-## Who writes here, and when
+## Operations
 
-A run does not write to the wiki while it runs. A session with the operator distils runs into
-the wiki afterwards, from the ledger, so that a claim never rests on a narrative alone. An
-agent that adds a run record also updates the standing of every hypothesis the record bears
-on, and adds one line to [the log](log.md).
+**ingest** — a run has ended. Copy `<dispatch>` into `raw/runs/<run-id>/` unchanged, write a
+run record in `wiki/sources/` from it, update the standing of every concept the record bears
+on, add the cross-references, and append to the log.
+
+**query** — a question. Read the relevant pages, answer with citations, and where the answer
+is worth keeping, file it back as a page rather than leaving it in a chat.
+
+**lint** — health check, and part of the repo's gate: every page has front matter; every
+claim has a citation or is marked unverified; every `[@...]` resolves to something in `raw/`;
+every `[[...]]` resolves to a page; no orphan pages; no concept whose standing contradicts
+the run records it cites; no page citing a run that has no raw record.
 
 ## Writing
 
-Plain, short sentences. A number with the control that could have come out otherwise. A run
-record names the target by its repository name and nothing else: no paths, hosts, or people.
-Links between pages are ordinary relative markdown links, so they work in the repository and
-on the published site alike.
+Plain, short sentences. A number with the control that could have come out otherwise. Name a
+target by its repository name only: no paths, hosts or people. Links are ordinary relative
+markdown, so they work in the repository and on the published site alike.
 
 ## Publishing
 
-GitHub Pages builds this folder with Jekyll on every push to `main` that touches it
-(`.github/workflows/pages.yml`). The repository's Pages setting must be "GitHub Actions",
-set once by the operator.
+GitHub Pages builds `wiki/` with Jekyll on every push to `main` that touches it
+(`.github/workflows/pages.yml`). `raw/` is deliberately not published: it is evidence, read in
+the repository. A `[@...]` citation is therefore a repository reference, not a web link.

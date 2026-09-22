@@ -1,13 +1,18 @@
 ---
 title: Combining models
+type: concept
+standing: claimed
+sources: []
+updated: 2026-09-22
 ---
 
 # Combining models
 
 The hypotheses behind the tool, each with its standing and the measurement that would move
-it. Standings follow [the schema](schema.md). As of the wiki's first day every hypothesis is
-**claimed**: the README states them from runs made before the ledger existed, and no run
-record here bears on them yet.
+it. Standings follow [the schema](../schema.md). As of the wiki's first day every hypothesis is
+**claimed**: the README states them from runs made before the ledger existed, so nothing here
+can cite a `[@runs/...]` record yet. Each hypothesis names the measurement that would move it,
+and ingest updates the standing when a run record bears on it.
 
 ## H1. Contributions are complementary
 
@@ -65,4 +70,5 @@ These have no claim yet, only a measurement waiting for runs.
 
 ## Evidence
 
-None recorded yet. Run records live in [runs/](runs/index.md).
+None recorded yet. Run records live in [sources/](../sources/index.md), compiled from
+`raw/runs/`; until one exists, every standing above is `claimed` by definition.

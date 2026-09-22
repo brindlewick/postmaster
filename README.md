@@ -31,9 +31,12 @@ gap as a proposed rule rather than flipping a coin the next run will flip again.
 
 ## Wiki
 
-Research on how combining models works, and the evidence for it from recorded runs, is in
-[`wiki/`](wiki/index.md), published with GitHub Pages. It starts from the claims above,
-marked as claims, and grows one run record at a time.
+Research on how combining models works is in [`wiki/`](wiki/index.md), published with GitHub
+Pages, on the LLM-wiki pattern: a finished run deposits its ledger and narrative unchanged in
+[`raw/`](raw/README.md), which nothing may edit; the wiki compiles pages from it; and every
+claim cites the run it rests on, so any standing can be followed back to the evidence and
+re-derived. It starts from the claims above, marked as claims, and grows one run record at a
+time. `skills/wiki` carries the three operations: ingest, query, lint.
 
 ## Getting started
 
