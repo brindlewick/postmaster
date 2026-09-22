@@ -28,7 +28,7 @@ env_file = "~/.postmaster/lanes/deepseek.env"   # ANTHROPIC_BASE_URL and ANTHROP
 # The team for a run. At least two arms from different vendors. Reviewers are lanes too, the
 # arms by default; a third lane of another family may be added. The coachman and its fallback
 # are never a model that runs as a lane in the same run, and both need a harness with a
-# resume form (codex, grok or claude), since rulings arrive by resuming the coachman's thread.
+# resume form (codex, grok, claude or pi), since rulings arrive by resuming the coachman's thread.
 [team]
 arms = ["luna", "deepseek"]
 reviewers = ["luna", "deepseek"]
