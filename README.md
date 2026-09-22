@@ -74,7 +74,7 @@ command, the docs and the ticket convention. Ask only what discovery cannot answ
 ## Native sessions
 
 Only one process in the fleet is kept alive between turns: the postmaster, which the
-human talks to, and that one needs a host that keeps an interactive process running
+user talks to, and that one needs a host that keeps an interactive process running
 (tmux today). Everything else runs as a **native session**: the harness's own thread, in its
 own store on disk. A lane or a coachman leg is launched headless, writes its events and a
 marker, and exits. When it is needed again, for a ruling to a coachman or a remount of a
