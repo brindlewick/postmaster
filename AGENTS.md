@@ -70,9 +70,11 @@ What it asks, and why none of it is guessed:
   its fallback, the postmaster. Do not assume: a harness on PATH can still be walled, out of
   credit, or reading no ambient context. The shape of the answer is `config.example.toml` at
   the repo root.
-- **How tickets are created.** GitHub Issues, plain files on a `tickets` branch of the
-  target repo, or another tracker the agent reaches through its own tooling
-  (`skills/postmaster/trackers.md`). A file-based choice is first-class, not a fallback.
+- **How tickets are created.** GitHub Issues on a GitHub Projects board is the default: a
+  kanban the operator can open, needing only `gh` logged in with the `project` scope. Plane
+  is the other named kind, needing its API origin, a workspace slug and a key the operator
+  writes to `~/.postmaster/plane.env` themselves. Anything else is `other`, described once
+  outside this repo (`skills/postmaster/trackers.md`).
 - **Where projects live.** `~/Code` is one convention, not a rule.
 - **Who says the merge word.** A person, or the postmaster itself (`ship.merge_authority`).
   A run never merges on its own authority; the config says whose authority that is.

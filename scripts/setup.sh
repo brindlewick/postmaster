@@ -113,14 +113,18 @@ ask MR "  concurrent runs per project" "2"
 ask PS "  postmaster poll interval, seconds" "120"
 
 echo
-echo "== Tickets =="
-ask TK "How are tickets tracked (files, github, other)" "files"
-PREFIX=""; OTHER=""
+echo "== Tickets: GitHub Issues on a Projects board by default; Plane; or another tracker. =="
+ask TK "How are tickets tracked (github, plane, other)" "github"
+PURL=""; PWS=""; PENV=""; OTHER=""
 case $TK in
-  files) ask PREFIX "  ticket id prefix" "PM" ;;
   github) ;;
+  plane)
+    ask PURL "  Plane API origin (https://api.plane.so for cloud; a self-hosted instance is its own)" "https://api.plane.so"
+    ask PWS "  workspace slug (the segment after the host in the workspace's web URL)" ""
+    [ -n "$PWS" ] || { echo "setup: a Plane workspace slug is needed" >&2; exit 1; }
+    ask PENV "  file holding PLANE_API_KEY=<key>, written by you, never pasted here" "~/.postmaster/plane.env" ;;
   other) ask OTHER "  tracker name (then describe it in ~/.postmaster/trackers/<name>.md)" "" ;;
-  *) echo "setup: tracker kind must be files, github or other" >&2; exit 1 ;;
+  *) echo "setup: tracker kind must be github, plane or other" >&2; exit 1 ;;
 esac
 
 echo
@@ -133,7 +137,7 @@ case $CPM in autonomous|consult) ;; *) echo "setup: checkpoint mode must be auto
 ask RL "Review link template with {path} for the synthesis worktree (blank for none)" ""
 
 TRACKER_EXTRA=""
-[ -n "$PREFIX" ] && TRACKER_EXTRA="prefix = \"$PREFIX\""
+[ -n "$PWS" ] && TRACKER_EXTRA="url = \"$PURL\""$'\n'"workspace = \"$PWS\""$'\n'"env_file = \"$PENV\""
 [ -n "$OTHER" ] && TRACKER_EXTRA="name = \"$OTHER\""
 
 OUT=$(cat <<EOF

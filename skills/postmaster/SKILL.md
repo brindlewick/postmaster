@@ -77,9 +77,12 @@ config file before it runs on a plain git repo is a tool nobody adopts.
 scripts/discover-project.sh "$TARGET"   # gate=… docs=… tracker_prefix=… ambient_context=…
 ```
 
-A files tracker is initialised here, once and idempotently: `scripts/ticket.sh "$TARGET" init
-<prefix>`. Report what you found on the launch card, and ask only about what you could not
-determine.
+A github tracker needs the target's board: `scripts/github.sh "$TARGET" board` names it, and
+exit 3 means there is none yet, so propose `board init` to the operator and hand them the URL
+it prints. A plane tracker needs the target's project identifier: the discovered
+`tracker_prefix` when the target has shipped a ticket, otherwise `scripts/plane.sh projects`
+lists the candidates and the operator picks. Report what you found on the launch card, and
+ask only about what you could not determine.
 **If the project has no `AGENTS.md` or equivalent, say so.** Lanes that read no ambient
 context start blind, and that has silently handicapped a lane before. Ask the operator for
 the project's risk surfaces (what it binds, allowlists, spawns and serves) where the docs do
