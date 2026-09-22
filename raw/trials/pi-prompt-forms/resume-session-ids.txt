@@ -1,0 +1,10 @@
+A resume must continue the same session, not start one.
+Each pair below is one launch and its own resume.
+
+manual launch / resume       launch 01a0c7e8-5863-7183-afc9-b7cbefbdcdbb
+                             resume 01a0c7e8-5863-7183-afc9-b7cbefbdcdbb
+                             identical: True
+
+launch.sh launch / resume    launch 01a0c8ee-c6d3-748d-a704-366ca6483cbf
+                             resume 01a0c8ee-c6d3-748d-a704-366ca6483cbf
+                             identical: True

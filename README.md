@@ -29,6 +29,25 @@ Disagreement is also diagnostic. When two lanes build the same mechanism and nam
 differently, the project's own conventions did not decide it, and the coachman records the
 gap as a proposed rule rather than flipping a coin the next run will flip again.
 
+## Wiki
+
+What the project has learned is in [`wiki/`](wiki/index.md), published with GitHub Pages, on
+the LLM-wiki pattern: how harnesses really behave as against what their documentation says,
+what the services the flow depends on actually do, why the design is shaped as it is, and
+what happens when several models implement one ticket. That last is the founding question,
+not the only subject.
+
+Every run writes its full record — ledger, narrative, harness logs — to its own project's
+`.postmaster/`, which is gitignored: that is the instance's business, not the tool's.
+Promoting one into [`raw/`](raw/README.md) is a separate decision, and a decision to publish:
+it happens after a scrub, only for a target that may be published, and only with what may
+lawfully be redistributed. `raw/` is committed, so any claim can be followed to the record
+behind it by anyone who clones the repository. A claim whose evidence could not be promoted
+is not made.
+
+The claims above about combining models start there marked as claims, and the wiki grows one
+record at a time. `skills/wiki` carries the three operations: ingest, query, lint.
+
 ## Getting started
 
 Clone this repo and open your agent in it. There is no command to memorise and no wizard to
@@ -52,15 +71,21 @@ scripts/plane.sh create|read|state|comment|list …                  # Plane wor
 scripts/launch.sh form|launch|resume <lane-or-role> …             # any lane or role, one command
 scripts/runs-status.sh <run-root>                                  # the postmaster's poll
 scripts/handoff-check.sh <handoff-file>                            # a leg may end only on exit 0
+scripts/wiki-lint.sh [--self-test]                                 # the wiki's rules, run not remembered
 ```
 
 ## What it needs
 
 At least two agent CLIs that can run headless. Any git repository as a target. tmux, or
 another way to keep a process alive between an agent's turns. Python 3.11 or newer, which
-the scripts use to read the config, and jq for discovering a JavaScript project's gate. An agent that has loaded
-`skills/postmaster/SKILL.md`: for a harness with a skills directory, symlink or copy
-`skills/postmaster` into it; for any other, point the agent at the file.
+the scripts use to read the config, and jq for discovering a JavaScript project's gate. An agent that has loaded the
+skills: for a harness with a skills directory, symlink or copy each directory under `skills/`
+into it; for any other, point the agent at the `SKILL.md` you need.
+
+`skills/postmaster` runs the flow and is the one a dispatch needs. `skills/wiki` operates the
+wiki and is only wanted by a session doing that. Each directory is one skill; the
+other files beside a `SKILL.md` are its reference material, loaded when its instructions send
+an agent to them rather than up front.
 
 **Tickets are GitHub Issues on a GitHub Projects board by default:** a kanban you can open,
 with each ticket a card in the column its state says, and nothing to configure beyond `gh`
