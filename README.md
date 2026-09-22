@@ -2,6 +2,8 @@
 
 Get one ticket implemented by several models at once, then judged before it lands.
 
+![Hand in the tickets. Ship with a fleet.](docs/poster.jpg)
+
 Two or more models implement the same ticket **independently, in separate worktrees, unable
 to see each other's work**. A coachman combines what each got right, puts the result through
 adversarial review rounds, and only then asks for a merge. Nothing lands on a green gate
