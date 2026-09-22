@@ -108,6 +108,31 @@ Concepts carry one of these, and the log records every change:
 - **refuted** — contradicted by run records a defender of the claim would accept
 - **settled** — supported, and the measurement that would refute it has been tried
 
+## Who reads this, and who must not
+
+**The postmaster reads the index**, and the concepts a stream touches, so that what the
+project already knows reaches the work. The index is a catalog of one-line summaries for
+exactly that: read the catalog, not the corpus.
+
+**A coachman is pointed at a concept by its waybill**, where one bears on its ticket, rather
+than reading the wiki at large.
+
+**A lane does not read the wiki at all.** Its context is the ticket, the project's docs and
+its runbook. The reason is contamination, not economy: these pages hold claims about which
+lane's mechanism tends to survive synthesis and which findings get corroborated, and a lane
+that has read them is no longer an independent measurement of them. Corroboration means two
+lanes found something without seeing each other; if both have read a page saying what tends
+to be found, the standing on that page is circular. Blinkers apply to knowledge, not only to
+each other's worktrees.
+
+That instruction cannot hold on its own, and this page does not pretend it can. When the
+target is this repository the wiki is inside the lane's own worktree and nothing prevents it
+being read. So it is measured rather than assumed: a lane's exported harness session records
+what it read, a run record says whether any lane touched `wiki/` or `raw/`, and a concept
+resting on a run with a contaminated lane says so and is weaker for it.
+
+**Nobody reads `raw/` to make a claim.** It is evidence for checking one.
+
 ## Operations
 
 **ingest a run** — a run has ended. Copy `<dispatch>` into `raw/runs/<run-id>/` unchanged,

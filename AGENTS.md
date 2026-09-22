@@ -126,6 +126,21 @@ spawns a postmaster; `postmaster.md` is what the postmaster then does. A run is 
 legs, each a fresh thread, so no context outlives a leg and a leg's hand-off document is the
 whole of what the next leg knows.
 
+## What the project has learned lives in the wiki
+
+`wiki/` is this project's knowledge base: how harnesses really behave as against their
+documentation, what the services the flow depends on actually do, why the design is shaped as
+it is, and what happens when several models implement one ticket. `wiki/index.md` is a catalog
+of one-line summaries, cheap to read; `wiki/schema.md` is the contract, including who may read
+what. `skills/wiki` operates it.
+
+A runbook says what an agent must do. The wiki says what the project knows, what it rests on,
+how sure it is and what would change it. Do not restate one in the other.
+
+**Read the index before decomposing a stream into tickets**, and the concepts that stream
+touches. **Lanes do not read the wiki**, for the reason `wiki/schema.md` gives: a lane that
+has read the project's findings about lanes is no longer an independent measurement of them.
+
 ## Vocabulary
 
 Coaching-era, because the shape fits: several horses pull one load, and blinkers stop each
