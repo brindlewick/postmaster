@@ -8,6 +8,21 @@ updated: 2026-09-22
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-22] ingest | prompt delivery differs by harness
+
+First concept outside the founding question, and the first carrying evidence: pi's attachment
+form delivers a different message from stdin, it hangs on an inherited pipe, and a resume
+against another directory's session exits 0 having done nothing. Settled by controlled trial
+against pi 0.87.0; changed harnesses.md and launch.sh in pull request #1.
+
+## [2026-09-22] lint | wiki rescoped to the whole project
+
+It had been written as though its only subject were whether combining models works. That is
+the founding question, not the scope: harness behaviour, the services the flow depends on, and
+the reasons behind design decisions all belong here. Index reorganised by area, and the line
+between a concept and a runbook stated: a runbook says what to do, a concept says what is
+known and how sure.
+
 ## [2026-09-22] lint | raw is a deliberate subset, not the default home of a run
 
 Every run's full record, harness logs included, belongs in `<project>/.postmaster/`, which is

@@ -31,8 +31,11 @@ gap as a proposed rule rather than flipping a coin the next run will flip again.
 
 ## Wiki
 
-Research on how combining models works is in [`wiki/`](wiki/index.md), published with GitHub
-Pages, on the LLM-wiki pattern.
+What the project has learned is in [`wiki/`](wiki/index.md), published with GitHub Pages, on
+the LLM-wiki pattern: how harnesses really behave as against what their documentation says,
+what the services the flow depends on actually do, why the design is shaped as it is, and
+what happens when several models implement one ticket. That last is the founding question,
+not the only subject.
 
 Every run writes its full record — ledger, narrative, harness logs — to the project's own
 `.postmaster/`, which is gitignored: those are that instance's business, not the tool's.
@@ -42,8 +45,8 @@ outcomes, and the hash of the file each came from, never the evidence itself. So
 can be re-derived by whoever holds the evidence, and is a claim of provenance to everyone
 else.
 
-It starts from the claims above, marked as claims, and grows one record at a time.
-`skills/wiki` carries the three operations: ingest, query, lint.
+The claims above about combining models start there marked as claims, and the wiki grows one
+record at a time. `skills/wiki` carries the three operations: ingest, query, lint.
 
 ## Getting started
 

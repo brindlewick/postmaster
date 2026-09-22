@@ -6,41 +6,65 @@ updated: 2026-09-22
 
 # postmaster wiki
 
-Research notes on what happens when several models implement the same ticket at once,
-compiled from the runs themselves.
+What this project has learned, compiled once and kept current, instead of being re-derived
+from chat histories and scattered across pull requests.
 
-The question it exists to answer: **does combining models produce better software than one
-good model, and if so, through which mechanisms?**
+Anything relevant to postmaster belongs here: how harnesses actually behave, what trackers
+and their APIs really do, why the design is shaped as it is, what outside work claims, and
+what happens when several models implement one ticket. The last of those is the project's
+founding question, not the wiki's only subject.
 
 It follows the LLM-wiki pattern. [`raw/`](../raw/README.md) holds the evidence these pages
 rest on and is never edited: runs somebody chose to keep, and papers and articles captured
-from elsewhere. Pages here compile it, every claim cites what it rests on, and [the log](log.md)
-records each operation. A run can move a claim's standing; outside work can only motivate one.
+from elsewhere. Pages here compile it, every claim says what it rests on, and
+[the log](log.md) records each operation.
 
 **Nothing arrives in `raw/` on its own.** A run's full record goes to that project's own
 gitignored `.postmaster/`; a copy is promoted to evidence by decision, because most runs are
 operational and only a few bear on a claim. `raw/` is not committed either: postmaster is a
 tool others run against their own projects, and a run carries that instance's paths and
 ticket text. What is published is what was compiled — counts, outcomes and the hash of the
-file each came from — never the evidence itself. [How the wiki is kept](schema.md) is the contract, and any agent working here
-reads it first.
+file each came from — never the evidence itself.
 
-## Catalog
+[How the wiki is kept](schema.md) is the contract. Read it before ingesting, querying or
+linting.
 
-### Concepts
+## Areas
 
-- [Combining models](concepts/combining-models.md) — the hypotheses, their standings, and what
-  would settle each. All **claimed**: no run records yet.
+**Combining models** — the founding question: does implementing one ticket with several
+models in blinkers produce better software than one good model, and through which mechanisms?
 
-### Sources
+- [Combining models](concepts/combining-models.md) — three hypotheses and five open
+  questions, all **claimed**: no run records yet.
 
-- [Run records](sources/index.md) — one page per finished run. None yet.
-- [Run record template](sources/template.md) — the shape every record takes.
+**Harnesses** — how each agent CLI really behaves, as distinct from what its documentation
+says. `skills/postmaster/harnesses.md` is the operating contract; pages here are what was
+found and how.
 
-### Entities
+- [Prompt delivery differs by harness](concepts/prompt-delivery.md) — **settled**.
 
-None yet. A lane, a harness or a target project gets a page here once the other pages keep
-referring to it.
+**Trackers and tooling** — what the services and CLIs the flow depends on actually do.
+
+*Nothing yet.*
+
+**Decisions** — why the design is as it is, so a later reader finds the reason rather than
+re-litigating it.
+
+*Nothing yet.*
+
+**Sources** — [run records and captured reading](sources/index.md), and
+[the run record template](sources/template.md).
+
+**Entities** — a harness, a lane or a target project, once the other pages keep referring to
+it. *Nothing yet.*
+
+## What belongs here, and what belongs in a runbook
+
+`skills/postmaster/*.md` say what an agent **must do**: terse, current, authoritative, no
+argument. The wiki holds what the project **knows**: a claim, what it rests on, how sure it
+is, and what would change it. A finding here that settles may well change a runbook, and the
+page then records that it did. Do not restate a runbook's instructions here, and do not put a
+standing or an argument in a runbook.
 
 ## State
 
@@ -49,9 +73,8 @@ referring to it.
 | raw runs | 0 |
 | raw papers and articles | 0 |
 | compiled records | 0 |
-| concepts | 1 page, 3 hypotheses, 5 open questions |
-| every standing | claimed |
+| concepts | 2 pages |
 
-Nothing here is evidence-backed yet, and the pages say so. That is the honest starting
-position: the claims come from the README, which drew on runs made before the ledger existed
-and which therefore cannot be cited.
+Only one page carries evidence so far, and it says how it was obtained. Every claim about
+combining models is `claimed`: those came from the README, which drew on runs made before the
+ledger existed and which therefore cannot be cited.

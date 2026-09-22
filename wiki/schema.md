@@ -9,6 +9,11 @@ updated: 2026-09-22
 This page is the contract for every other page, and for any agent operating on the wiki.
 Read it before ingesting, querying or linting.
 
+**Scope: anything relevant to the project.** How harnesses really behave, what the services
+the flow depends on really do, why the design is as it is, what outside work claims, and what
+happens when several models implement one ticket. That last is the founding question, not the
+only subject.
+
 The shape is the LLM-wiki pattern: immutable sources in `raw/`, compiled pages in `wiki/`,
 these conventions as the schema, and an append-only `log.md`. Knowledge is compiled once and
 kept current, rather than re-derived from scratch each time somebody asks.
@@ -24,8 +29,9 @@ kept current, rather than re-derived from scratch each time somebody asks.
 
 ## Page kinds
 
-**`wiki/concepts/`** — a claim about how the fleet behaves, with its standing and what would
-settle it. This is where the hypotheses live.
+**`wiki/concepts/`** — a claim, with its standing and what would settle it. A hypothesis about
+combining models is one kind; so is a finding about a harness, a service, or a design decision
+and its reason. If it could be wrong and evidence bears on it, it is a concept.
 
 **`wiki/sources/`** — one page per run, distilled from `raw/runs/<run-id>/`, in the shape of
 [the template](sources/template.md). Numbers, not impressions, each citing the file it came
@@ -33,6 +39,14 @@ from.
 
 **`wiki/entities/`** — a thing the other pages keep referring to: a lane, a harness, a target
 project. Only when it has accumulated enough to be worth a page.
+
+## Concepts against runbooks
+
+`skills/postmaster/*.md` say what an agent **must do**: terse, current, authoritative. A
+concept says what the project **knows**: the claim, what it rests on, how sure it is, what
+would change it. A concept that settles may change a runbook, and then records that it did.
+Never restate a runbook's instructions in a concept, and never put a standing or an argument
+in a runbook.
 
 ## Front matter
 
@@ -43,7 +57,8 @@ Every page carries it:
 title: <one line>
 type: concept | source | entity | schema
 standing: claimed | supported | mixed | refuted | settled   # concepts only
-sources: [runs/2026-09-22-postmaster-17]                    # raw ids this rests on
+sources: [runs/2026-09-22-postmaster-17]                    # raw ids this rests on,
+                                                           # or trial/<what> for a recorded trial
 updated: YYYY-MM-DD
 ---
 ```
