@@ -59,7 +59,7 @@ set -- $LANE_LIST
 [ $# -ge 2 ] || { echo "setup: at least two lanes are needed" >&2; exit 1; }
 LANE_BLOCKS=""; LANE_MODELS=""
 for lane in $LANE_LIST; do
-  ask h "  $lane: harness (codex, grok, agy, claude, muse)" ""
+  ask h "  $lane: harness (codex, grok, agy, claude, muse, pi)" ""
   need_harness "$h"
   ask m "  $lane: model id" ""
   ask e "  $lane: effort (blank if the harness has no effort flag)" ""

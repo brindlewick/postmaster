@@ -104,6 +104,12 @@ case $HARNESS in
     cmd+=(--model "$MODEL")
     [ -n "${EFFORT:-}" ] && cmd+=(--effort "$EFFORT")
     cmd+=(--output-format stream-json --verbose --dangerously-skip-permissions) ;;
+  pi)
+    cmd=(pi --mode json --print --approve)
+    [ "$CMD" = resume ] && cmd+=(--session "$THREAD")
+    cmd+=(--model "$MODEL")
+    [ -n "${EFFORT:-}" ] && cmd+=(--thinking "$EFFORT")
+    cmd+=("@$PROMPT") ;;
   muse)
     die "muse adapter is incomplete (stream flag, bypass form, thread id, resume form); fill harnesses.md and this script from a trial run first" ;;
   *) die "no form for harness '$HARNESS'" ;;

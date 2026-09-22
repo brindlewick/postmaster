@@ -26,6 +26,7 @@ on one session messaging another; the postmaster polls files.
 | grok | `grok --prompt-file`, or `grok -p` | `--output-format streaming-json` | `AGENTS.md`, natively | yes |
 | agy (Antigravity CLI) | `agy -p` | `--output-format stream-json` | none | no, argv |
 | claude | `claude -p` | `--output-format stream-json` | `CLAUDE.md` and what it imports | no, argv |
+| pi | `pi --mode json --print` | `--mode json` | `AGENTS.md` and `CLAUDE.md`, natively | yes, `@file` |
 | muse | `muse exec` | not recorded here | none | `--prompt-file` |
 
 A harness that reads no ambient context file must be handed the project's docs by name in its
@@ -129,6 +130,24 @@ cd <wt> && claude -p "$(cat <dispatch>/<lane>-prompt.txt)" --model <model> \
   lane routinely outlives that. A "stopped" notification without a quota error is the cap, not
   a failure. Resume the lane's thread in place, instruct arms to commit incrementally, and
   expect to resume any leg that needs more than 25 minutes.
+
+## pi
+
+```sh
+cd <wt> && pi --mode json --print --approve --model <provider/model> \
+  --thinking <effort> @<dispatch>/<lane>-prompt.txt
+```
+
+- `--approve` trusts project-local resources for the run. Pi has no permission prompts; its
+  built-in tools run unrestricted, with the worktree as the lane's containment.
+- Reads `AGENTS.md` and `CLAUDE.md` natively, walking from the worktree to its parents.
+- Thread id: `id` in the first `session` record of the JSON stream.
+- Final message: the final authoritative `message_end` record.
+- Resume: `pi --mode json --print --approve --session <id> --model <provider/model>
+  --thinking <effort> @<prompt-file>`, appending to the same stream.
+- Durable record: session JSONL under `~/.pi/agent/sessions/`. Threads persist harmlessly;
+  nothing to archive.
+- Use a provider-qualified model id when the same model name could match more than one provider.
 
 ## muse
 
