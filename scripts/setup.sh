@@ -32,7 +32,7 @@ while [ $# -gt 0 ]; do
 key (? = may be left out)  default            asked as
 projects_roots             ~/Code             where projects live, comma separated
 lanes                      alpha, beta        lane names, comma separated; then per lane:
-lane.<name>.harness                           harness (codex, grok, agy, claude, muse)
+lane.<name>.harness                           harness (codex, grok, agy, claude, muse, pi)
 lane.<name>.model                             model id
 lane.<name>.effort?        (none)             effort, blank if the harness has no effort flag
 lane.<name>.env_file?      (none)             env file for an alternate backend
@@ -111,7 +111,7 @@ set -- $LANE_LIST
 [ $# -ge 2 ] || { echo "setup: at least two lanes are needed" >&2; exit 1; }
 LANE_BLOCKS=""; LANE_MODELS=""
 for lane in $LANE_LIST; do
-  ask h "  $lane: harness (codex, grok, agy, claude, muse)" "" "lane.$lane.harness"
+  ask h "  $lane: harness (codex, grok, agy, claude, muse, pi)" "" "lane.$lane.harness"
   need_harness "$h"
   ask m "  $lane: model id" "" "lane.$lane.model"
   ask e "  $lane: effort (blank if the harness has no effort flag)" "" "lane.$lane.effort?"
