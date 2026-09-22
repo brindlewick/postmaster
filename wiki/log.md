@@ -8,6 +8,17 @@ updated: 2026-09-22
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-22] lint | lint claims only what it checks
+
+The skill introduced its list of checks with "what it enforces", but the script did six of
+the ten, one only in part, and three need a person. Both the skill and the schema also called
+lint part of the repo's gate, which does not exist yet. The two missing checks that are
+mechanical now run: a capture's `source.md` must give a url and a retrieval date, and a
+standing beyond `claimed` must rest on at least one run or trial, with every front-matter
+source resolving under `raw/`. The documentation now separates what the script checks from
+what a person checks, and the self-test has a failing case, asserted on its own reason, for
+every check the script claims.
+
 ## [2026-09-22] lint | the homepage is for readers
 
 The homepage carried instructions meant for whoever maintains the wiki: how evidence reaches
