@@ -18,9 +18,11 @@ outcomes, cite the `sha256` of the file they came from, and where a page had to 
 something out, say so. If an operation cannot be done without disclosing instance detail, it
 does not get done.
 
-Two kinds of evidence with different force. A **run** says what this fleet did and can move a
-standing. A **paper or article** says what someone else claims: it motivates a hypothesis and
-belongs in what would settle it, but it never moves a standing on its own.
+Three kinds of evidence with different force. A **run** says what this fleet did and can move
+a standing. A **trial** is a deliberate experiment and settles the narrow question it was
+designed for, carrying a `method.md` so it can be repeated. A **paper or article** says what
+someone else claims: it motivates a hypothesis and belongs in what would settle it, but never
+moves a standing on its own.
 
 ## ingest a run
 

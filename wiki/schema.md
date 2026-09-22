@@ -57,8 +57,7 @@ Every page carries it:
 title: <one line>
 type: concept | source | entity | schema
 standing: claimed | supported | mixed | refuted | settled   # concepts only
-sources: [runs/2026-09-22-postmaster-17]                    # raw ids this rests on,
-                                                           # or trial/<what> for a recorded trial
+sources: [runs/2026-09-22-postmaster-17, trials/pi-prompt-forms]   # raw ids this rests on
 updated: YYYY-MM-DD
 ---
 ```
@@ -83,9 +82,12 @@ leave out.
 
 ## Citations and links
 
-- **`[@runs/<run-id>]`**, **`[@papers/<slug>]`**, **`[@articles/<slug>]`** cite a raw record.
+- **`[@runs/<run-id>]`**, **`[@trials/<slug>]`**, **`[@papers/<slug>]`**, **`[@articles/<slug>]`**
+  cite a raw record.
   Every number and every claim taken from evidence carries one. A claim with no citation is
   marked `unverified` in the sentence that makes it, or it does not go in.
+- **A trial settles what it was designed to settle**, and no more: it can settle a fact about
+  a tool, and cannot settle whether combining models works, which needs runs.
 - **Outside work does not move a standing.** A paper may motivate a hypothesis and belongs in
   its "what would settle it"; only `[@runs/...]` records decide whether it holds here. A
   concept citing only papers stays `claimed`.

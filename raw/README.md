@@ -41,16 +41,26 @@ raw/runs/<run-id>/        one finished run, copied by choice from <project>/.pos
 
 raw/papers/<slug>/        a paper: the PDF or text, plus source.md
 raw/articles/<slug>/      an article, post or documentation page, plus source.md
+
+raw/trials/<slug>/        a deliberate experiment, smaller than a run
+  method.md               what was run, against what version, and what was being compared
+  <recorded output>       the streams, requests or transcripts the trial produced
 ```
 
 A run's own home is `<project>/.postmaster/runs/<run-id>/`, not here: that directory holds
 everything a run produced, including the raw harness logs, and is gitignored in whatever
 project it belongs to. `raw/` holds the subset somebody chose to keep.
 
-Two kinds of evidence, one rule. A **run** is what this fleet did, and it answers questions
-about this fleet. A **paper or article** is what someone else claims, and it answers nothing
-on its own: outside work is a source of hypotheses, not of standings. A concept may cite a
-paper for the claim it makes and must still cite runs for whether it holds here.
+Three kinds of evidence, one rule about force. A **run** is what this fleet did, and answers
+questions about this fleet. A **trial** is a deliberate experiment — a harness driven against
+a recording provider to see what it really sends, say — and answers the narrow question it was
+designed for, which is often enough to settle a fact about a tool. A **paper or article** is
+what someone else claims, and answers nothing on its own: outside work is a source of
+hypotheses, not of standings. A concept may cite a paper for the claim it makes and must still
+cite a run or a trial for whether it holds here.
+
+A trial carries `method.md` saying what was run and against which version, because a trial
+that cannot be repeated is an anecdote.
 
 Every web capture carries `source.md` beside it:
 

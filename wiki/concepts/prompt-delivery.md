@@ -2,7 +2,7 @@
 title: Prompt delivery differs by harness, and the difference is not cosmetic
 type: concept
 standing: settled
-sources: [trial/pi-0.87.0]
+sources: [trials/pi-prompt-forms]
 updated: 2026-09-22
 ---
 
@@ -17,7 +17,8 @@ the failure it predicts was reproduced and then fixed.
 
 ## The evidence
 
-pi 0.87.0, given a prompt file two ways, with a local provider recording the request:
+pi 0.87.0, given a prompt file two ways, with a local provider recording the request
+[@trials/pi-prompt-forms]:
 
 | form | what the model received |
 |---|---|
