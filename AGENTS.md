@@ -176,3 +176,18 @@ whole system.
 6. **Every action on a project is logged as it happens**, one JSON line per action through
    `scripts/log-action.sh`, per run and per project. The narrative is for reading; the log
    is what a run is audited from and what the flow is improved from.
+
+## Working on this repository
+
+**Fix an open pull request instead of deferring its gaps to a ticket.** When you find a flaw
+in work an open pull request introduces, fix it on that pull request's branch: a missing
+check, a stale sentence, an instruction with no mechanism behind it, a rule written as prose
+that belongs in a script. That does not widen the pull request. Finishing what it introduced
+is part of the same change.
+
+A ticket is for work the pull request never set out to do: it touches another contract, needs
+the fleet quiet, or depends on something that does not exist yet.
+
+The test is whether the fix completes what the pull request claims. "Is this a separate
+concern?" is the wrong test, because nearly anything can be described as one. Before filing a
+ticket, run `gh pr list` and check whether the work belongs in one of them.
