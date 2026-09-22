@@ -16,8 +16,9 @@ That reasoning outlived its cause: everything automatic now lives in each projec
 decision — scrub, publishable target, lawful redistribution — lets the evidence be committed,
 which is the point of a wiki with sources: a standing can be followed to the record behind it
 by anyone who clones the repository. The sha256 provenance mechanism goes with it, since git
-supplies integrity. The two entries below recording the opposite stand as written; this log is
-append-only and they are accurate as history.
+supplies integrity. The entry below headed "raw made local and uncommitted" is the one this
+reverses, and it stands as written: this log is append-only, and it is accurate as a record of
+what was decided at the time.
 
 ## [2026-09-22] ingest | prompt delivery differs by harness
 
