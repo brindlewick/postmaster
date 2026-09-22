@@ -40,8 +40,9 @@ scripts, docs and prose do not.
 
 ## When a session opens in this repo, do this
 
-No slash command is needed. A session starting here is almost always here to **run** the
-tool. Work out where the operator is and pick up from there.
+No slash command, and no wizard for the operator to run. They open their agent in this
+folder and this file takes it from there: set the machine up if it is not, choose a target,
+launch the postmaster. Work out where the operator is and pick up from there.
 
 **1. Is this machine set up?**
 
@@ -49,34 +50,44 @@ tool. Work out where the operator is and pick up from there.
 cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
 ```
 
-If it is missing, run setup before anything else, and do not guess the answers:
+If it is missing, set it up now, in conversation, before anything else. You conduct it:
+probe first, ask one thing at a time, verify each answer, then have the script write the
+config. Do not guess an answer, and do not hand the operator a script to run instead.
 
 ```sh
 scripts/probe-harnesses.sh     # which agent CLIs exist, and which read no ambient context
-scripts/probe-trackers.sh      # which ticket sources are reachable
+scripts/probe-trackers.sh      # which ticket sources are reachable, and what would finish each
 ```
 
-Then run the wizard, which asks one thing at a time and writes `~/.postmaster/config.toml`
-in the shape of `config.example.toml`:
-
-```sh
-scripts/setup.sh               # add --dry-run to see the config without writing it
-```
-
-What it asks, and why none of it is guessed:
+What to settle, in this order, and why none of it is guessed:
 
 - **Which harness and model fills each role:** the horses, the reviewers, the coachman and
-  its fallback, the postmaster. Do not assume: a harness on PATH can still be walled, out of
-  credit, or reading no ambient context. The shape of the answer is `config.example.toml` at
-  the repo root.
+  its fallback, the postmaster. Offer only what the probe found, and do not assume: a
+  harness on PATH can still be walled, out of credit, or reading no ambient context. The
+  shape of the answer is `config.example.toml` at the repo root.
 - **How tickets are created.** GitHub Issues on a GitHub Projects board is the default: a
-  kanban the operator can open, needing only `gh` logged in with the `project` scope. Plane
-  is the other named kind, needing its API origin, a workspace slug and a key the operator
-  writes to `~/.postmaster/plane.env` themselves. Anything else is `other`, described once
-  outside this repo (`skills/postmaster/trackers.md`).
+  kanban the operator can open, needing only `gh` logged in with the `project` scope. When
+  the probe says `partial`, it names the one command that finishes it (`gh auth login`,
+  `gh auth refresh -s project`); the operator runs it, since a login is theirs, and you probe
+  again. Plane is the other named kind: ask for the API origin and the workspace slug, ask
+  the operator to write `~/.postmaster/plane.env` with `PLANE_API_KEY=<key>` themselves,
+  since a key never passes through a conversation, and confirm with `scripts/plane.sh
+  projects`. Anything else is `other`, described once outside this repo
+  (`skills/postmaster/trackers.md`).
 - **Where projects live.** `~/Code` is one convention, not a rule.
 - **Who says the merge word.** A person, or the postmaster itself (`ship.merge_authority`).
   A run never merges on its own authority; the config says whose authority that is.
+
+Then put the answers in a file, one `key=value` per line, and let the script write and check
+the config; it refuses a harness that is not on PATH, a coachman on a lane's model and a
+config that does not parse, and a refusal is a question back to the operator, not something
+to work around.
+
+```sh
+scripts/setup.sh --keys                       # every key, its default and what it asks
+scripts/setup.sh --answers <file> --dry-run   # the config it would write
+scripts/setup.sh --answers <file>             # write ~/.postmaster/config.toml
+```
 
 **2. Which project are we dispatching against?**
 
