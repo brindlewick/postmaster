@@ -48,7 +48,8 @@ scripts/discover-project.sh <path>
 scripts/cut-scratch.sh <repo> <source-worktree> <dest> <commit>   # reviewer scratch, deps cloned
 scripts/wait-for-markers.sh <dir> <glob> <count> <timeout>       # block until a round is in
 scripts/log-action.sh <dispatch> <actor> <action> <target> …     # one JSON line per action
-scripts/ticket.sh <repo> init|create|read|state|comment|list      # file-based tickets
+scripts/github.sh <repo> board|create|read|state|comment|list     # GitHub Issues on a Projects board
+scripts/plane.sh create|read|state|comment|list …                  # Plane work items
 scripts/launch.sh form|launch|resume <lane-or-role> …             # any lane or role, one command
 scripts/runs-status.sh <run-root>                                  # the postmaster's poll
 scripts/handoff-check.sh <handoff-file>                            # a leg may end only on exit 0
@@ -62,11 +63,11 @@ the scripts use to read the config, and jq for discovering a JavaScript project'
 `skills/postmaster/SKILL.md`: for a harness with a skills directory, symlink or copy
 `skills/postmaster` into it; for any other, point the agent at the file.
 
-**No tracker is required.** Plain markdown tickets on a `tickets` branch of the target repo
-are a first-class choice: nothing to install, no auth, one copy of every ticket whatever
-branch you are on, and they travel with the repo. GitHub Issues
-works through the `gh` CLI, and any other tracker your agent reaches through its own tooling
-is described once, outside this repo. The adapters are in `skills/postmaster/trackers.md`.
+**Tickets are GitHub Issues on a GitHub Projects board by default:** a kanban you can open,
+with each ticket a card in the column its state says, and nothing to configure beyond `gh`
+being logged in. Plane works the same way through its API, cloud or self-hosted. Any other
+tracker your agent reaches through its own tooling is described once, outside this repo.
+The adapters are in `skills/postmaster/trackers.md`.
 
 **Nothing about a target project has to be configured.** The flow discovers the gate
 command, the docs and the ticket convention. Ask only what discovery cannot answer.

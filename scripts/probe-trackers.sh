@@ -2,28 +2,48 @@
 # Which ticket sources this machine can reach, detected without assuming any particular
 # agent harness. The operator chooses; this reports what is genuinely available so the
 # choice is informed rather than aspirational.
+#
+#   exit 0 always; the table is the result
 set -uo pipefail
+HERE=$(cd "$(dirname "$0")" && pwd -P)
+CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
 row() { printf '  %-12s %-12s %s\n' "$1" "$2" "$3"; }
 row TRACKER AVAILABLE "HOW IT IS REACHED"
 row ------- --------- ------------------
 
-if command -v gh >/dev/null 2>&1; then
-  if gh auth status >/dev/null 2>&1; then row github yes "gh CLI, authenticated"
-  else row github partial "gh installed but not authenticated; run: gh auth login"; fi
-else row github no "gh not installed"; fi
+# GitHub Issues on a Projects board: gh logged in, and the token carrying the project scope,
+# which `gh auth login` does not grant by default.
+if ! command -v gh >/dev/null 2>&1; then row github no "gh not installed"
+elif ! gh auth status >/dev/null 2>&1; then row github partial "gh installed but not logged in; the operator runs: gh auth login"
+elif ! gh auth status 2>&1 | grep -qE "Token scopes:.*'project'"; then
+  row github partial "gh logged in without the project scope; the operator runs: gh auth refresh -s project"
+else row github yes "gh CLI, logged in, project scope (the default)"; fi
+
+# Plane: an instance and workspace in the config and a key in the env file. The only proof
+# is a listing, so the probe asks for one when all three are present.
+plane_env=$(python3 -c '
+import sys, tomllib
+try: t = tomllib.load(open(sys.argv[1], "rb")).get("tracker", {})
+except Exception: t = {}
+print(t.get("env_file") or "~/.postmaster/plane.env"); print(t.get("url", "")); print(t.get("workspace", ""))' "$CONFIG" 2>/dev/null)
+env_file=$(printf '%s\n' "$plane_env" | sed -n 1p); env_file=${env_file/#\~/$HOME}
+plane_url=$(printf '%s\n' "$plane_env" | sed -n 2p); plane_ws=$(printf '%s\n' "$plane_env" | sed -n 3p)
+if [ -z "$plane_url" ] || [ -z "$plane_ws" ]; then
+  row plane setup "needs [tracker] url and workspace in the config and PLANE_API_KEY in ~/.postmaster/plane.env"
+elif [ -z "${PLANE_API_KEY:-}" ] && [ ! -f "$env_file" ]; then
+  row plane partial "url and workspace set; no key at $env_file"
+elif out=$(POSTMASTER_CONFIG="$CONFIG" "$HERE/plane.sh" projects 2>&1); then
+  row plane yes "$plane_url, workspace $plane_ws, $(printf '%s\n' "$out" | grep -c .) projects"
+else
+  row plane no "$(printf '%s' "$out" | head -1)"
+fi
 
 # Hosted and self-hosted trackers are reached through whatever tooling the operator's agent
 # provides (an MCP server, a CLI). That is a property of their agent setup, not of this
 # machine, and this script deliberately does not read any one harness's config to guess at it.
 row other "ask" "any tracker reached through your agent's own tooling; needs the service reachable"
-
-# File-based options need nothing installed, only a convention in the TARGET repo.
-row files    file "markdown tickets in the target repo; no service, no auth"
 echo
-echo "  \"ask\" means: this script cannot tell, so the operator must say. An MCP being"
-echo "  registered is not the same as the service being up, so a registration would be a"
-echo "  misleading thing to report as availability."
-echo
-echo "  A file-based tracker is a first-class choice, not a fallback. Nothing to be down,"
-echo "  no auth to expire, and the tickets travel with the code. What it lacks is a place"
-echo "  for state that is not a commit."
+echo "  GitHub Issues is the default: the tickets sit on a GitHub Projects board the operator"
+echo "  can open. \"partial\" names the one command the operator runs to finish it. \"ask\""
+echo "  means this script cannot tell, so the operator must say: an MCP being registered is"
+echo "  not the same as the service being up."
