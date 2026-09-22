@@ -8,6 +8,17 @@ updated: 2026-09-22
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-22] lint | sources hold what was chosen, not every run
+
+The sources index still said "one page per finished run" and that the first would arrive from
+the first dispatch to reach a ship card, which described the first draft rather than the
+design. Nothing reaches `raw/` or `sources/` on its own: a run's record stays in its project's
+`.postmaster/` unless somebody promotes it. The index, the schema's page kinds and the wiki
+skill now say so, and say that a captured paper or article also gets a sources page while a
+recorded trial is cited directly. The skill's description, which decides when an agent loads
+it, still described the wiki as answering only the multi-model question from run ledgers;
+it now matches the scope and the three kinds of evidence.
+
 ## [2026-09-22] lint | raw is committed, and promotion is the gate
 
 `raw/` had been gitignored on the grounds that logs are public-unsafe and instance-specific.

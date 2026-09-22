@@ -33,9 +33,11 @@ kept current, rather than re-derived from scratch each time somebody asks.
 combining models is one kind; so is a finding about a harness, a service, or a design decision
 and its reason. If it could be wrong and evidence bears on it, it is a concept.
 
-**`wiki/sources/`** — one page per run, distilled from `raw/runs/<run-id>/`, in the shape of
-[the template](sources/template.md). Numbers, not impressions, each citing the file it came
-from.
+**`wiki/sources/`** — one page per piece of evidence somebody chose to keep. A promoted run
+is distilled from `raw/runs/<run-id>/` in the shape of [the template](sources/template.md):
+numbers, not impressions, each citing the file it came from. A captured paper or article gets
+a page saying what it claims and what it would mean here if true. A recorded trial needs no
+page: its `method.md` describes it and the concept it settles cites it directly.
 
 **`wiki/entities/`** — a thing the other pages keep referring to: a lane, a harness, a target
 project. Only when it has accumulated enough to be worth a page.

@@ -83,7 +83,7 @@ skills: for a harness with a skills directory, symlink or copy each directory un
 into it; for any other, point the agent at the `SKILL.md` you need.
 
 `skills/postmaster` runs the flow and is the one a dispatch needs. `skills/wiki` operates the
-research wiki and is only wanted by a session doing that. Each directory is one skill; the
+wiki and is only wanted by a session doing that. Each directory is one skill; the
 other files beside a `SKILL.md` are its reference material, loaded when its instructions send
 an agent to them rather than up front.
 

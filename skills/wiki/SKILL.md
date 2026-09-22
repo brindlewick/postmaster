@@ -1,16 +1,19 @@
 ---
 name: wiki
-description: 'Operate the postmaster research wiki: ingest a finished run into immutable raw evidence and a compiled run record, query the wiki with citations, or lint it for contradictions, missing citations, broken links and orphan pages. Invoke via /wiki. The wiki answers whether combining several models produces better software than one, and every claim in it must trace to a run ledger.'
+description: 'Operate the postmaster wiki, the project knowledge base: how harnesses and services really behave, why the design is as it is, and what happens when several models implement one ticket. Ingest promotes a run somebody chose to keep, or captures a paper or article, into committed raw evidence and compiles a page from it; nothing arrives automatically. Query answers with citations. Lint runs scripts/wiki-lint.sh over citations, links, standings and orphans. Every claim traces to a promoted run, a recorded trial or a captured source. Invoke via /wiki.'
 ---
 
 # /wiki: ingest, query, lint
 
-The wiki compiles knowledge from runs once and keeps it current, instead of re-deriving it
+The wiki compiles what the project knows once and keeps it current, instead of re-deriving it
 from chat histories. **Read `wiki/schema.md` first**; it is the contract for every page, and
 this file only says how to perform the three operations.
 
-Three layers, and the direction is one-way: `raw/` is written once, by a finished run or a
-web capture; `wiki/` compiles from it; and no operation ever edits `raw/`.
+Three layers, and the direction is one-way. A run writes its full record to its own
+project's gitignored `.postmaster/`, automatically and always. `raw/` is written once, by
+decision, when a run is promoted, a trial is recorded or a source is captured. `wiki/`
+compiles from `raw/`. No operation ever edits `raw/`, and nothing moves from `.postmaster/`
+to `raw/` without somebody choosing it.
 
 **`raw/` and `wiki/` are both committed and public.** The gate is therefore at promotion, not
 at the page: a record enters `raw/` only after a scrub, only when its target may be published,
