@@ -26,6 +26,7 @@ on one session messaging another; the postmaster polls files.
 | grok | `grok --prompt-file`, or `grok -p` | `--output-format streaming-json` | `AGENTS.md`, natively | yes |
 | agy (Antigravity CLI) | `agy -p` | `--output-format stream-json` | none | no, argv |
 | claude | `claude -p` | `--output-format stream-json` | `CLAUDE.md` and what it imports | no, argv |
+| pi | `pi --mode json` | `--mode json` | `AGENTS.override.md`, else `AGENTS.md` or `CLAUDE.md`, natively | yes, on stdin |
 | muse | `muse exec` | not recorded here | none | `--prompt-file` |
 
 A harness that reads no ambient context file must be handed the project's docs by name in its
@@ -129,6 +130,40 @@ cd <wt> && claude -p "$(cat <dispatch>/<lane>-prompt.txt)" --model <model> \
   lane routinely outlives that. A "stopped" notification without a quota error is the cap, not
   a failure. Resume the lane's thread in place, instruct arms to commit incrementally, and
   expect to resume any leg that needs more than 25 minutes.
+
+## pi
+
+```sh
+cd <wt> && pi --mode json --approve --model <provider/model> \
+  --thinking <effort> < <dispatch>/<lane>-prompt.txt
+```
+
+- **The prompt goes in on stdin, never as `@<file>`.** An `@file` argument is an attachment:
+  pi sends it as `<file name="/abs/path">…</file>` with no instruction around it, so the
+  lane is handed a file rather than told to do something, and the dispatch path ends up in
+  the conversation. Stdin sends the prompt verbatim, which is the message every other
+  harness gets. pi also reads stdin to EOF before it starts in every mode but rpc, so a
+  launch that inherits an open pipe never begins; the redirect closes that case too.
+- `--mode json` already selects non-interactive mode, so `--print` adds nothing.
+- `--approve` trusts project-local resources for the run. Pi has no permission prompts; its
+  built-in tools run unrestricted, with the worktree as the lane's containment.
+- Reads `~/.pi/agent/AGENTS.md`, then one context file per directory while walking from the
+  filesystem root to the worktree: `AGENTS.override.md` when present, otherwise `AGENTS.md`
+  before `CLAUDE.md`.
+- Thread id: `id` in the first `session` record of the JSON stream.
+- Final message: the last `message_end` record whose message has role `assistant`. The
+  stream also emits `message_end` for the system and user messages.
+- Resume: `pi --mode json --approve --session <id> --model <provider/model>
+  --thinking <effort> < <prompt-file>`, appending to the same stream.
+- **Resume from the directory the thread was launched in.** `--session` looks in the current
+  working directory's sessions first. Given an id that exists only under another directory,
+  pi prints "Session found in different project", asks "Fork this session into current
+  directory? [y/N]" on stdin, reads the first line of the piped prompt as the answer, prints
+  "Aborted." and exits 0 having done nothing. `launch.sh resume` always changes to the given
+  directory first, so this bites only a caller that passes a different one.
+- Durable record: session JSONL under `~/.pi/agent/sessions/--<path>--/`, where `<path>` is the
+  working directory with `/` replaced by `-`. Threads persist harmlessly; nothing to archive.
+- Use a provider-qualified model id when the same model name could match more than one provider.
 
 ## muse
 
