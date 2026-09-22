@@ -101,7 +101,10 @@ scripts/discover-project.sh <chosen>     # gate command, docs, tracker prefix
 **The target may be this repo.** Developing postmaster with postmaster is supported; see
 the section above for the two things that differ.
 
-**3. Launch the postmaster** per `skills/postmaster/SKILL.md`, and hand over.
+**3. Launch the postmaster** per `skills/postmaster/SKILL.md`, and hand over. It checks the
+same preconditions again, cheaply, because it is also reached by someone typing `/postmaster`
+on a machine that has done none of the above. Tell it what this session has already settled —
+the config, the chosen target — and it will pick up from there rather than asking twice.
 
 **Prefer the scripts to doing it by hand.** They are the deterministic half of this flow and
 they carry their own controls. Reasoning your way to a project list or a git check is slower,
@@ -121,8 +124,9 @@ The postmaster runs no model lanes and edits no source. A coachman never takes a
 load. The **waybill** (`<dispatch>/brief.md`) is the only thing that travels between them.
 Harness-specific invocations live in `skills/postmaster/harnesses.md`, and
 `scripts/launch.sh` is their executable form: the runbooks name a form (launch, resume,
-thread id), that file gives the command, the script runs it. `SKILL.md` is the bootstrap that
-spawns a postmaster; `postmaster.md` is what the postmaster then does. A run is five coachman
+thread id), that file gives the command, the script runs it. `SKILL.md` is the front door —
+reached from this file or by typing `/postmaster`, it gets the machine ready if it is not and
+spawns a postmaster; `postmaster.md` is what that postmaster then does. A run is five coachman
 legs, each a fresh thread, so no context outlives a leg and a leg's hand-off document is the
 whole of what the next leg knows.
 
