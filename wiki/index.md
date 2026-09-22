@@ -12,9 +12,10 @@ compiled from the runs themselves.
 The question it exists to answer: **does combining models produce better software than one
 good model, and if so, through which mechanisms?**
 
-It follows the LLM-wiki pattern. Runs deposit immutable evidence in [`raw/`](../raw/README.md);
-pages here compile it; every claim cites what it rests on; [the log](log.md) records each
-operation. [How the wiki is kept](schema.md) is the contract, and any agent working here
+It follows the LLM-wiki pattern. Evidence lands immutably in [`raw/`](../raw/README.md) — both
+what this fleet did, as finished runs, and what others have published, as captured papers and
+articles; pages here compile it; every claim cites what it rests on; [the log](log.md) records
+each operation. A run can move a claim's standing; outside work can only motivate one. [How the wiki is kept](schema.md) is the contract, and any agent working here
 reads it first.
 
 ## Catalog
@@ -39,7 +40,8 @@ referring to it.
 | | |
 |---|---|
 | raw runs | 0 |
-| run records | 0 |
+| raw papers and articles | 0 |
+| compiled records | 0 |
 | concepts | 1 page, 3 hypotheses, 5 open questions |
 | every standing | claimed |
 

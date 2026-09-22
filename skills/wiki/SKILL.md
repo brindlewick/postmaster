@@ -9,15 +9,22 @@ The wiki compiles knowledge from runs once and keeps it current, instead of re-d
 from chat histories. **Read `wiki/schema.md` first**; it is the contract for every page, and
 this file only says how to perform the three operations.
 
-Three layers, and the direction is one-way: `raw/` is written once by a finished run,
-`wiki/` compiles from it, and no operation ever edits `raw/`.
+Three layers, and the direction is one-way: `raw/` is written once, by a finished run or a
+web capture; `wiki/` compiles from it; and no operation ever edits `raw/`.
 
-## ingest
+Two kinds of evidence with different force. A **run** says what this fleet did and can move a
+standing. A **paper or article** says what someone else claims: it motivates a hypothesis and
+belongs in what would settle it, but it never moves a standing on its own.
+
+## ingest a run
 
 A run has ended. It is only ingestible once it has stopped writing.
 
 1. **Copy the dispatch whole** into `raw/runs/<run-id>/`, unchanged, where `<run-id>` is the
-   dispatch directory's own name. Check first that no credential is in the ledger.
+   dispatch directory's own name: the ledger, the narrative, the cards, `logs/` with each
+   lane's harness events stream, and each lane's durable harness session exported at teardown
+   (`grok export`, codex's rollout jsonl, pi's session jsonl). Check first that no credential
+   is in any of them; a session can carry whatever was on screen.
 2. **Write the run record** in `wiki/sources/YYYY-MM-DD-<target>-<ticket>.md` from
    `wiki/sources/template.md`, filling every section from the copied files. Every number
    carries `[@runs/<id>/<file>]`.
@@ -28,6 +35,20 @@ A run has ended. It is only ingestible once it has stopped writing.
 
 Never ingest a run that is still in flight, and never ingest twice: if `raw/runs/<run-id>/`
 exists, the run is already in.
+
+## ingest a source
+
+A paper, article or documentation page worth keeping.
+
+1. **Capture the text** into `raw/papers/<slug>/` or `raw/articles/<slug>/` with its
+   `source.md` front matter (url, retrieved, title, author). A link alone is not a capture:
+   pages move and a citation to a moving page is not a citation. Fetching is bounded by the
+   machine's egress allowlist; a source behind a disallowed host is one the user supplies.
+2. **Write its page** in `wiki/sources/`: what it claims, on what evidence, and what it would
+   mean here if true.
+3. **Link it** from every concept it bears on, in the section on what would settle that
+   concept. **Do not change a standing**: outside work is a hypothesis, not a result.
+4. **Append to the log**: `## [YYYY-MM-DD] ingest | <title>`.
 
 ## query
 
@@ -45,7 +66,9 @@ A question the wiki may already answer.
 A health check, and part of the repo's gate. Report every fault, fix only the mechanical ones:
 
 - every page has front matter with `title`, `type`, `updated`, and a concept also has `standing`
-- every `[@runs/...]` resolves to something in `raw/`
+- every `[@runs/...]`, `[@papers/...]` and `[@articles/...]` resolves to something in `raw/`
+- every web capture has a `source.md` with a url and a retrieval date
+- no concept whose standing rests on papers alone
 - every `[[...]]` resolves to a page
 - every claim carries a citation or is marked unverified in the sentence making it
 - no orphan page: everything is reachable from `wiki/index.md`
