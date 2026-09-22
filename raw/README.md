@@ -1,68 +1,71 @@
-# raw — immutable sources, local to this instance
+# raw — the wiki's evidence
 
-Everything the wiki's claims rest on, exactly as it was produced or found. Two rules, and the
-second is as important as the first.
+Everything the wiki's claims rest on, exactly as it was produced or found, **committed and
+published with the pages that cite it**. A citation nobody can follow is not a citation.
 
-**Nothing here is edited, corrected or deleted.** A page in `wiki/` may say a raw record is
-wrong; it may not change the record. That is what makes a claim checkable: a hypothesis cites
-a record here, so whoever holds this directory can follow any standing back to its evidence
-and re-derive it. A wiki that can edit its own evidence proves nothing.
+Two rules govern this directory, and the second is the one that does the work.
 
-**Nothing here is committed.** `.gitignore` excludes it, this file aside. postmaster is a
-tool other people run against their own projects, and this repository is public. A run's
-ledger, narrative and harness sessions carry that instance's paths, ticket text and whatever
-was on screen; none of it belongs in the tool's history, and a run against somebody's private
-project is not the tool's business. The wiki commits **what it compiled, never what it
-compiled from**.
+**Nothing here is edited, corrected or deleted.** A page in `wiki/` may say a record is
+wrong; it may not change the record. That is what makes a claim checkable: anyone can clone
+this repository, follow a standing to the record behind it, and count again.
 
-**Nothing arrives here automatically.** Every run already writes its full record, harness
-logs included, to `<project>/.postmaster/`, which is where a run's evidence lives by default
-and which is gitignored in every project. A record is copied into `raw/` only when somebody
-decides this particular run is worth keeping as evidence for a claim. That keeps the research
-set small and deliberate, and it keeps the decision with a person: most runs are operational,
-a few are evidence.
+**Nothing arrives here automatically.** Every run already writes its full record — ledger,
+narrative, cards, harness logs — to its own project's `.postmaster/`, which is gitignored in
+whatever project it belongs to. Copying one here is a separate, deliberate act, and it is a
+**decision to publish**. Most runs are operational and stay where they are; a few bear on a
+claim and are promoted.
 
-So a citation here is verifiable by whoever holds this directory and is a claim of provenance
-to everyone else. A compiled record therefore carries the numbers themselves plus the
-`sha256` of the raw file they came from, so the holder can prove the record was not drifted
-from and a reader can see exactly what was counted. That is the honest limit of a public
-research note, and the alternative — publishing the evidence — is not available.
+## Before anything is promoted
+
+The copy is the moment of publication, so it is the moment the checks happen. Every one of
+these, every time:
+
+- **Scrub for secrets.** A harness session transcript can carry anything that was on screen,
+  including a key a lane printed while debugging. Automated first, then read what the scrub
+  reports.
+- **Check the target may be published.** A run against a private project carries that
+  project's ticket text, branch names and file paths. Those do not become publishable by
+  being evidence. Promote a run only when its target is public — which, for this repository's
+  own runs, it is. Everything else stays in `.postmaster/`, and the claim it would have
+  supported stays uncited or unmade.
+- **Check the size.** Harness session exports can be large. Promote the ledger, narrative,
+  cards and review notes as a matter of course; promote a session export when it is the
+  evidence rather than merely available.
+- **Respect what is not ours.** For a paper or article, capture what may lawfully be
+  redistributed — the citation, the retrieval date, the passages relied on — rather than a
+  wholesale copy of someone else's work.
+
+If any of those cannot be satisfied, the record is not promoted. The wiki then says what it
+could not show, rather than making a claim nobody can check.
 
 ## What lands here
 
 ```
-raw/runs/<run-id>/        one finished run, copied by choice from <project>/.postmaster/
+raw/runs/<run-id>/        a run promoted from a project's .postmaster/
   ledger.jsonl            every action, one JSON line, from scripts/log-action.sh
   run-log.md              the coachman's narrative
   card.md                 the ship card
   logs/                   one harness events stream per lane and per review round
-  sessions/               each lane's durable harness record, exported at teardown
+  sessions/               a lane's durable harness record, where it is the evidence
   reviews/  handoffs/     the review notes and the hand-off between legs
 
-raw/papers/<slug>/        a paper: the PDF or text, plus source.md
-raw/articles/<slug>/      an article, post or documentation page, plus source.md
-
 raw/trials/<slug>/        a deliberate experiment, smaller than a run
-  method.md               what was run, against what version, and what was being compared
-  <recorded output>       the streams, requests or transcripts the trial produced
+  method.md               what was run, against which version, and what was compared
+  <recorded output>       the streams, requests or transcripts it produced
+
+raw/papers/<slug>/        a paper: what may be redistributed, plus source.md
+raw/articles/<slug>/      an article, post or documentation page, plus source.md
 ```
 
-A run's own home is `<project>/.postmaster/runs/<run-id>/`, not here: that directory holds
-everything a run produced, including the raw harness logs, and is gitignored in whatever
-project it belongs to. `raw/` holds the subset somebody chose to keep.
-
-Three kinds of evidence, one rule about force. A **run** is what this fleet did, and answers
+Three kinds of evidence, differing in force. A **run** is what this fleet did, and answers
 questions about this fleet. A **trial** is a deliberate experiment — a harness driven against
 a recording provider to see what it really sends, say — and answers the narrow question it was
 designed for, which is often enough to settle a fact about a tool. A **paper or article** is
 what someone else claims, and answers nothing on its own: outside work is a source of
-hypotheses, not of standings. A concept may cite a paper for the claim it makes and must still
-cite a run or a trial for whether it holds here.
+hypotheses, not of standings.
 
 A trial carries `method.md` saying what was run and against which version, because a trial
-that cannot be repeated is an anecdote.
-
-Every web capture carries `source.md` beside it:
+that cannot be repeated is an anecdote. A web capture carries `source.md`:
 
 ```yaml
 ---
@@ -74,19 +77,12 @@ author: <as published, or unknown>
 Why it was captured, in a sentence.
 ```
 
-Capture the text, not a link alone: a link rots and a citation to a moving page is not a
-citation. Fetching is bounded by the machine's egress allowlist, so a source behind a
-disallowed host is one the user supplies rather than one the wiki fetches.
-
 ## What does not land here
 
 Anything written to make a point about this project: notes, summaries, arguments,
 conclusions. Those belong in `wiki/`, where they can be revised and where their standing is
-tracked. Raw is only what a run produced or what was published elsewhere.
+tracked. Raw is only what a run produced, what a trial recorded, or what was published
+elsewhere.
 
-A run is copied in when it ends, never while it runs: a live run is still writing, and a
+A run is promoted when it has ended, never while it runs: a live run is still writing, and a
 citation to a moving file is not a citation.
-
-Secrets never land here, and being uncommitted is not a reason to relax: a harness session can
-carry anything that was on screen, and this directory sits inside a working tree where a stray
-`git add -f` or a future change to `.gitignore` would expose it. Scrub before copying.

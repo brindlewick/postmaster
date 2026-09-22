@@ -23,7 +23,7 @@ kept current, rather than re-derived from scratch each time somebody asks.
 | layer | what it is | who writes it |
 |---|---|---|
 | `<project>/.postmaster/` | where every run's full record lives, harness logs included; gitignored in its own project | every run, automatically |
-| `raw/` | the runs somebody chose to keep as evidence, plus web captures; never edited, never committed ([the contract](../raw/README.md)) | ingest, by decision |
+| `raw/` | the evidence these pages cite: promoted runs, trials and captures; never edited, and committed so a citation can be followed ([the contract](../raw/README.md)) | ingest, by decision |
 | `wiki/` | compiled pages, revised freely, every claim cited | ingest and query |
 | `wiki/log.md` | append-only record of every operation | every operation |
 
@@ -64,26 +64,29 @@ updated: YYYY-MM-DD
 
 ## What may be published
 
-`wiki/` is committed and served publicly; `raw/` is not. Everything written here is written
-for that audience:
+`raw/` and `wiki/` are both committed and public, so the question is not what a page may show
+but what may be promoted into `raw/` at all. [The contract](../raw/README.md) governs that:
+scrub for secrets, only promote a run whose target is public, and capture only what may
+lawfully be redistributed.
 
-- **Numbers and outcomes, not transcripts.** A record may say a lane produced three findings
-  of which two were corroborated; it may not quote the ledger line, the review note or the
-  diff.
-- **No instance detail.** No filesystem paths, hostnames, machine names, or the text of a
-  ticket belonging to someone's private project. A target is named by its repository name
-  where that repository is public, and by a stable label where it is not.
-- **Provenance instead of evidence.** Each citation carries the `sha256` of the raw file it
-  came from, so the holder of `raw/` can show the record matches and a reader can see what
-  was counted.
+That decided, pages need no defensive paraphrasing. Quote a ledger line where quoting it is
+clearer, and cite it. Integrity needs no hash either: the record is in git, so its history is
+the proof that it was not drifted from after the fact.
 
-When those pull against each other, the disclosure rule wins and the page says what it had to
-leave out.
+What still holds:
+
+- **Compile, do not transcribe.** A record says a lane produced three findings of which two
+  were corroborated, and cites the lines; it does not reproduce the ledger, which is already
+  one directory away.
+- **A claim whose evidence could not be promoted is not made.** Where a run against a private
+  target would have supported a page, the page says what it could not show rather than
+  asserting it uncitably. An uncheckable claim in a wiki with sources is worse than an
+  absent one.
 
 ## Citations and links
 
 - **`[@runs/<run-id>]`**, **`[@trials/<slug>]`**, **`[@papers/<slug>]`**, **`[@articles/<slug>]`**
-  cite a raw record.
+  cite a raw record, and resolve to a path in this repository that any reader can open.
   Every number and every claim taken from evidence carries one. A claim with no citation is
   marked `unverified` in the sentence that makes it, or it does not go in.
 - **A trial settles what it was designed to settle**, and no more: it can settle a fact about

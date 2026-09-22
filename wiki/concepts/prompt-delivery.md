@@ -12,8 +12,8 @@ updated: 2026-09-22
 it is typed. Two forms that look equivalent in a shell can produce different messages, and the
 difference is invisible unless somebody checks what arrived.
 
-**Standing: settled.** Demonstrated against a real harness with a controlled comparison, and
-the failure it predicts was reproduced and then fixed.
+**Standing: settled.** Demonstrated against a real harness with a controlled comparison
+[@trials/pi-prompt-forms], and the failure it predicts was reproduced and then fixed.
 
 ## The evidence
 

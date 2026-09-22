@@ -15,16 +15,17 @@ what happens when several models implement one ticket. The last of those is the 
 founding question, not the wiki's only subject.
 
 It follows the LLM-wiki pattern. [`raw/`](../raw/README.md) holds the evidence these pages
-rest on and is never edited: runs somebody chose to keep, and papers and articles captured
-from elsewhere. Pages here compile it, every claim says what it rests on, and
-[the log](log.md) records each operation.
+rest on, committed beside them and never edited: promoted runs, recorded trials, and papers
+and articles captured from elsewhere. Pages here compile it, every claim cites what it rests
+on, and [the log](log.md) records each operation. A run or a trial can move a standing;
+outside work can only motivate one.
 
-**Nothing arrives in `raw/` on its own.** A run's full record goes to that project's own
-gitignored `.postmaster/`; a copy is promoted to evidence by decision, because most runs are
-operational and only a few bear on a claim. `raw/` is not committed either: postmaster is a
-tool others run against their own projects, and a run carries that instance's paths and
-ticket text. What is published is what was compiled — counts, outcomes and the hash of the
-file each came from — never the evidence itself.
+**Nothing arrives in `raw/` on its own.** A run's full record goes to its own project's
+gitignored `.postmaster/`. Promoting one is a separate decision, and it is a decision to
+publish: it happens only after a scrub, only when the target may be published, and only
+carrying what may lawfully be redistributed. Most runs are operational and stay where they
+are. What that buys is the thing a wiki with sources exists for — clone this repository and
+you can follow any standing to the record behind it and count again.
 
 [How the wiki is kept](schema.md) is the contract. Read it before ingesting, querying or
 linting.

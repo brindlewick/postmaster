@@ -8,6 +8,17 @@ updated: 2026-09-22
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-22] lint | raw is committed, and promotion is the gate
+
+`raw/` had been gitignored on the grounds that logs are public-unsafe and instance-specific.
+That reasoning outlived its cause: everything automatic now lives in each project's
+`.postmaster/`, so reaching `raw/` is already a deliberate act. Making that act the publication
+decision — scrub, publishable target, lawful redistribution — lets the evidence be committed,
+which is the point of a wiki with sources: a standing can be followed to the record behind it
+by anyone who clones the repository. The sha256 provenance mechanism goes with it, since git
+supplies integrity. The two entries below recording the opposite stand as written; this log is
+append-only and they are accurate as history.
+
 ## [2026-09-22] ingest | prompt delivery differs by harness
 
 First concept outside the founding question, and the first carrying evidence: pi's attachment

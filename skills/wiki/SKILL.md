@@ -12,11 +12,11 @@ this file only says how to perform the three operations.
 Three layers, and the direction is one-way: `raw/` is written once, by a finished run or a
 web capture; `wiki/` compiles from it; and no operation ever edits `raw/`.
 
-**`raw/` is local and uncommitted; `wiki/` is public.** Never copy a ledger line, a review
-note, a diff, a path or a private target's ticket text into a wiki page. Compile numbers and
-outcomes, cite the `sha256` of the file they came from, and where a page had to leave
-something out, say so. If an operation cannot be done without disclosing instance detail, it
-does not get done.
+**`raw/` and `wiki/` are both committed and public.** The gate is therefore at promotion, not
+at the page: a record enters `raw/` only after a scrub, only when its target may be published,
+and only carrying what may lawfully be redistributed. Once it is in, cite it freely — a reader
+can open it. If evidence cannot be promoted, the claim it would have supported is not made,
+and the page says what it could not show.
 
 Three kinds of evidence with different force. A **run** says what this fleet did and can move
 a standing. A **trial** is a deliberate experiment and settles the narrow question it was
@@ -36,8 +36,9 @@ It is only ingestible once it has stopped writing.
 1. **Copy the run whole** from `<project>/.postmaster/runs/<run-id>/` into `raw/runs/<run-id>/`,
    unchanged: the ledger, the narrative, the cards, `logs/` with each lane's harness events
    stream, and each lane's durable harness session exported at teardown (`grok export`,
-   codex's rollout jsonl, pi's session jsonl). Scrub first: a session can carry whatever was
-   on screen, and the copy is a decision to keep it.
+   codex's rollout jsonl, pi's session jsonl). **Run the promotion checks first** — scrub,
+   target publishable, size, redistribution — per `raw/README.md`. The copy is a decision to
+   publish, and it is the only moment those checks happen.
 2. **Write the run record** in `wiki/sources/YYYY-MM-DD-<target>-<ticket>.md` from
    `wiki/sources/template.md`, filling every section from the copied files. Every number
    carries `[@runs/<id>/<file>]`.
@@ -82,8 +83,9 @@ A health check, and part of the repo's gate. Report every fault, fix only the me
 - every `[@runs/...]`, `[@papers/...]` and `[@articles/...]` resolves to something in `raw/`
 - every web capture has a `source.md` with a url and a retrieval date
 - no concept whose standing rests on papers alone
-- no wiki page containing a filesystem path, a hostname, or text quoted from `raw/`
-- every citation carries the `sha256` of the raw file, and every hash resolves for the holder
+- nothing under `raw/` that the promotion checks would have refused: a secret, a private
+  target's detail, a wholesale copy of someone else's work
+- every citation resolves to a path under `raw/` that exists in this repository
 - every `[[...]]` resolves to a page
 - every claim carries a citation or is marked unverified in the sentence making it
 - no orphan page: everything is reachable from `wiki/index.md`

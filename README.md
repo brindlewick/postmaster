@@ -37,13 +37,13 @@ what the services the flow depends on actually do, why the design is shaped as i
 what happens when several models implement one ticket. That last is the founding question,
 not the only subject.
 
-Every run writes its full record — ledger, narrative, harness logs — to the project's own
-`.postmaster/`, which is gitignored: those are that instance's business, not the tool's.
-A record reaches [`raw/`](raw/README.md) only when somebody decides that run is evidence for
-a claim, and `raw/` is local too. What gets published is what was **compiled**: counts,
-outcomes, and the hash of the file each came from, never the evidence itself. So a standing
-can be re-derived by whoever holds the evidence, and is a claim of provenance to everyone
-else.
+Every run writes its full record — ledger, narrative, harness logs — to its own project's
+`.postmaster/`, which is gitignored: that is the instance's business, not the tool's.
+Promoting one into [`raw/`](raw/README.md) is a separate decision, and a decision to publish:
+it happens after a scrub, only for a target that may be published, and only with what may
+lawfully be redistributed. `raw/` is committed, so any claim can be followed to the record
+behind it by anyone who clones the repository. A claim whose evidence could not be promoted
+is not made.
 
 The claims above about combining models start there marked as claims, and the wiki grows one
 record at a time. `skills/wiki` carries the three operations: ingest, query, lint.
