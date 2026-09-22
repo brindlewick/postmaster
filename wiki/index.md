@@ -12,15 +12,17 @@ compiled from the runs themselves.
 The question it exists to answer: **does combining models produce better software than one
 good model, and if so, through which mechanisms?**
 
-It follows the LLM-wiki pattern. Evidence lands immutably in [`raw/`](../raw/README.md) — both
-what this fleet did, as finished runs, and what others have published, as captured papers and
-articles; pages here compile it; every claim cites what it rests on; [the log](log.md) records
-each operation. A run can move a claim's standing; outside work can only motivate one.
+It follows the LLM-wiki pattern. [`raw/`](../raw/README.md) holds the evidence these pages
+rest on and is never edited: runs somebody chose to keep, and papers and articles captured
+from elsewhere. Pages here compile it, every claim cites what it rests on, and [the log](log.md)
+records each operation. A run can move a claim's standing; outside work can only motivate one.
 
-**`raw/` stays on the machine that produced it and is never committed.** postmaster is a tool
-others run against their own projects, and a run carries that instance's paths and ticket
-text. What is published is what was compiled — counts, outcomes and the hash of the file each
-came from — never the evidence itself. [How the wiki is kept](schema.md) is the contract, and any agent working here
+**Nothing arrives in `raw/` on its own.** A run's full record goes to that project's own
+gitignored `.postmaster/`; a copy is promoted to evidence by decision, because most runs are
+operational and only a few bear on a claim. `raw/` is not committed either: postmaster is a
+tool others run against their own projects, and a run carries that instance's paths and
+ticket text. What is published is what was compiled — counts, outcomes and the hash of the
+file each came from — never the evidence itself. [How the wiki is kept](schema.md) is the contract, and any agent working here
 reads it first.
 
 ## Catalog

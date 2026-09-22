@@ -32,11 +32,18 @@ gap as a proposed rule rather than flipping a coin the next run will flip again.
 ## Wiki
 
 Research on how combining models works is in [`wiki/`](wiki/index.md), published with GitHub
-Pages, on the LLM-wiki pattern: a finished run deposits its ledger and narrative unchanged in
-[`raw/`](raw/README.md), which nothing may edit; the wiki compiles pages from it; and every
-claim cites the run it rests on, so any standing can be followed back to the evidence and
-re-derived. It starts from the claims above, marked as claims, and grows one run record at a
-time. `skills/wiki` carries the three operations: ingest, query, lint.
+Pages, on the LLM-wiki pattern.
+
+Every run writes its full record — ledger, narrative, harness logs — to the project's own
+`.postmaster/`, which is gitignored: those are that instance's business, not the tool's.
+A record reaches [`raw/`](raw/README.md) only when somebody decides that run is evidence for
+a claim, and `raw/` is local too. What gets published is what was **compiled**: counts,
+outcomes, and the hash of the file each came from, never the evidence itself. So a standing
+can be re-derived by whoever holds the evidence, and is a claim of provenance to everyone
+else.
+
+It starts from the claims above, marked as claims, and grows one record at a time.
+`skills/wiki` carries the three operations: ingest, query, lint.
 
 ## Getting started
 
