@@ -8,6 +8,15 @@ updated: 2026-09-22
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-22] lint | the homepage is for readers
+
+The homepage carried instructions meant for whoever maintains the wiki: how evidence reaches
+`raw/`, an order to read the schema before operating, the line between a concept and a
+runbook, and a table counting records. None of it helps someone reading the wiki, and all of
+it already lives in `raw/README.md` or the schema. The homepage now says what the wiki covers,
+how to read a standing and a citation, and lists the pages. It is also what the postmaster
+reads before decomposing a stream, so a shorter page costs less on every run.
+
 ## [2026-09-22] lint | sources hold what was chosen, not every run
 
 The sources index still said "one page per finished run" and that the first would arrive from

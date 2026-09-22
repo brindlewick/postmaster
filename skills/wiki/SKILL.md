@@ -102,7 +102,6 @@ What it enforces, so a reader knows what passing means:
 - no orphan page: everything is reachable from `wiki/index.md`
 - no concept whose standing contradicts the run records it cites, and none at `supported`
   with fewer than three records
-- the catalog and counts in `wiki/index.md` match what is on disk
 
 A contradiction between a standing and its records is reported, never quietly corrected: it
 means either the standing or the reading of a record is wrong, and which one is a judgement
