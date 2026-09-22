@@ -127,8 +127,34 @@ def board_statuses(b):
 # --- issues ------------------------------------------------------------------------------
 
 def issue(number):
-    return ghj("issue", "view", str(number), "-R", NWO, "--json",
-               "number,title,body,state,stateReason,labels,comments,url,createdAt")
+    # gh issue view --json has no stateReason either, so one GraphQL query per read.
+    q = ("query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){"
+         "issue(number:$number){number title body state stateReason url createdAt "
+         "labels(first:50){nodes{name}} comments(first:100){nodes{body createdAt author{login}}}}}}")
+    data = ghj("api", "graphql", "-f", "query=" + q, "-F", "owner=" + OWNER, "-F", "name=" + NAME, "-F", "number=%d" % number)
+    iss = (data.get("data", {}).get("repository") or {}).get("issue")
+    if not iss:
+        die("no issue #%d in %s" % (number, NWO))
+    iss["labels"] = iss.get("labels", {}).get("nodes", [])
+    iss["comments"] = iss.get("comments", {}).get("nodes", [])
+    return iss
+
+def all_issues():
+    # gh issue list --json has no stateReason, and cancelled needs it, so the list is one
+    # GraphQL query per 100 issues instead.
+    q = ("query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){"
+         "issues(first:100,after:$after,states:[OPEN,CLOSED],orderBy:{field:CREATED_AT,direction:ASC}){"
+         "pageInfo{hasNextPage endCursor} nodes{number title state stateReason labels(first:50){nodes{name}}}}}}")
+    out, after = [], None
+    while True:
+        argv = ["api", "graphql", "-f", "query=" + q, "-F", "owner=" + OWNER, "-F", "name=" + NAME]
+        if after: argv += ["-F", "after=" + after]
+        page = ghj(*argv).get("data", {}).get("repository", {}).get("issues", {})
+        for n in page.get("nodes", []):
+            out.append({"number": n["number"], "title": n["title"], "state": n["state"],
+                        "stateReason": n.get("stateReason"), "labels": n.get("labels", {}).get("nodes", [])})
+        if not page.get("pageInfo", {}).get("hasNextPage"): return out
+        after = page["pageInfo"]["endCursor"]
 
 def flow_state(iss, status):
     if iss.get("state") == "CLOSED":
@@ -229,9 +255,7 @@ elif cmd == "list":
     if want and want not in STATES:
         die("invalid state %s (one of: %s)" % (want, ", ".join(STATES)), 2)
     statuses = board_statuses(board())
-    issues = ghj("issue", "list", "-R", NWO, "--state", "all", "--limit", "500", "--json",
-                 "number,title,state,stateReason,labels")
-    for iss in sorted(issues, key=lambda i: i["number"]):
+    for iss in sorted(all_issues(), key=lambda i: i["number"]):
         st = flow_state(iss, statuses.get(iss["number"]))
         if want is None or st == want:
             print("#%d\t%s\t%s" % (iss["number"], st, iss.get("title", "")))
