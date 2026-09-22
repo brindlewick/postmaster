@@ -24,13 +24,18 @@ belongs in what would settle it, but it never moves a standing on its own.
 
 ## ingest a run
 
-A run has ended. It is only ingestible once it has stopped writing.
+A run has ended **and somebody has decided it is evidence**. Most runs are operational and
+stay where they are: every run writes its full record to `<project>/.postmaster/runs/<run-id>/`
+already, harness logs included, and that directory is gitignored. Ingest is the deliberate act
+of promoting one of them to evidence. Never ingest on your own initiative; ask.
 
-1. **Copy the dispatch whole** into `raw/runs/<run-id>/`, unchanged, where `<run-id>` is the
-   dispatch directory's own name: the ledger, the narrative, the cards, `logs/` with each
-   lane's harness events stream, and each lane's durable harness session exported at teardown
-   (`grok export`, codex's rollout jsonl, pi's session jsonl). Check first that no credential
-   is in any of them; a session can carry whatever was on screen.
+It is only ingestible once it has stopped writing.
+
+1. **Copy the run whole** from `<project>/.postmaster/runs/<run-id>/` into `raw/runs/<run-id>/`,
+   unchanged: the ledger, the narrative, the cards, `logs/` with each lane's harness events
+   stream, and each lane's durable harness session exported at teardown (`grok export`,
+   codex's rollout jsonl, pi's session jsonl). Scrub first: a session can carry whatever was
+   on screen, and the copy is a decision to keep it.
 2. **Write the run record** in `wiki/sources/YYYY-MM-DD-<target>-<ticket>.md` from
    `wiki/sources/template.md`, filling every section from the copied files. Every number
    carries `[@runs/<id>/<file>]`.

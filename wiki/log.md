@@ -8,6 +8,13 @@ updated: 2026-09-22
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-22] lint | raw is a deliberate subset, not the default home of a run
+
+Every run's full record, harness logs included, belongs in `<project>/.postmaster/`, which is
+gitignored in whatever project it is. Nothing reaches `raw/` automatically: a record is copied
+in only when somebody decides that run is evidence for a claim. Most runs are operational; a
+few are evidence, and the difference is a decision rather than a default.
+
 ## [2026-09-22] lint | raw made local and uncommitted
 
 `raw/` sat in the repository root, so run evidence would have been committed to a public repo

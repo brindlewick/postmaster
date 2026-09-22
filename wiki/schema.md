@@ -17,7 +17,8 @@ kept current, rather than re-derived from scratch each time somebody asks.
 
 | layer | what it is | who writes it |
 |---|---|---|
-| `raw/` | what runs produced and what was published elsewhere, never edited, **never committed** ([the contract](../raw/README.md)) | a finished run, or a web capture |
+| `<project>/.postmaster/` | where every run's full record lives, harness logs included; gitignored in its own project | every run, automatically |
+| `raw/` | the runs somebody chose to keep as evidence, plus web captures; never edited, never committed ([the contract](../raw/README.md)) | ingest, by decision |
 | `wiki/` | compiled pages, revised freely, every claim cited | ingest and query |
 | `wiki/log.md` | append-only record of every operation | every operation |
 

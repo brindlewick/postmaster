@@ -15,6 +15,13 @@ was on screen; none of it belongs in the tool's history, and a run against someb
 project is not the tool's business. The wiki commits **what it compiled, never what it
 compiled from**.
 
+**Nothing arrives here automatically.** Every run already writes its full record, harness
+logs included, to `<project>/.postmaster/`, which is where a run's evidence lives by default
+and which is gitignored in every project. A record is copied into `raw/` only when somebody
+decides this particular run is worth keeping as evidence for a claim. That keeps the research
+set small and deliberate, and it keeps the decision with a person: most runs are operational,
+a few are evidence.
+
 So a citation here is verifiable by whoever holds this directory and is a claim of provenance
 to everyone else. A compiled record therefore carries the numbers themselves plus the
 `sha256` of the raw file they came from, so the holder can prove the record was not drifted
@@ -24,7 +31,7 @@ research note, and the alternative — publishing the evidence — is not availa
 ## What lands here
 
 ```
-raw/runs/<run-id>/        one finished postmaster run, copied in whole when it ends
+raw/runs/<run-id>/        one finished run, copied by choice from <project>/.postmaster/
   ledger.jsonl            every action, one JSON line, from scripts/log-action.sh
   run-log.md              the coachman's narrative
   card.md                 the ship card
@@ -35,6 +42,10 @@ raw/runs/<run-id>/        one finished postmaster run, copied in whole when it e
 raw/papers/<slug>/        a paper: the PDF or text, plus source.md
 raw/articles/<slug>/      an article, post or documentation page, plus source.md
 ```
+
+A run's own home is `<project>/.postmaster/runs/<run-id>/`, not here: that directory holds
+everything a run produced, including the raw harness logs, and is gitignored in whatever
+project it belongs to. `raw/` holds the subset somebody chose to keep.
 
 Two kinds of evidence, one rule. A **run** is what this fleet did, and it answers questions
 about this fleet. A **paper or article** is what someone else claims, and it answers nothing
