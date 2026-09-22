@@ -80,28 +80,32 @@ A question the wiki may already answer.
 
 ## lint
 
-A health check, and part of the repo's gate.
+A health check. Run it before committing any change to the wiki.
 
 ```sh
 scripts/wiki-lint.sh              # faults on stdout, exit 1 if any
-scripts/wiki-lint.sh --self-test  # the checks fail on faults and pass on a clean tree
+scripts/wiki-lint.sh --self-test  # each check fails on its own fault; a clean tree passes
 ```
 
-The script is the authority on what is checked; do not re-derive its rules here or by hand.
-What it enforces, so a reader knows what passing means:
+**What the script checks.** The self-test has a failing case for every item here:
 
-- every page has front matter with `title`, `type`, `updated`, and a concept also has `standing`
-- every `[@runs/...]`, `[@papers/...]` and `[@articles/...]` resolves to something in `raw/`
-- every web capture has a `source.md` with a url and a retrieval date
-- no concept whose standing rests on papers alone
-- nothing under `raw/` that the promotion checks would have refused: a secret, a private
-  target's detail, a wholesale copy of someone else's work
-- every citation resolves to a path under `raw/` that exists in this repository
-- every `[[...]]` resolves to a page
-- every claim carries a citation or is marked unverified in the sentence making it
+- every page has front matter with `title`, `type` and `updated`, and a concept also has a
+  `standing` that is one of the five
+- every citation in the text, such as `[@runs/...]` or `[@trials/...]`, resolves to a path
+  under `raw/`, and so does every source a concept lists in its front matter
+- a standing other than `claimed` rests on at least one run or trial, never on papers or
+  articles alone, and `supported` rests on at least three
+- every `[[...]]` resolves to a page, and every relative link resolves
 - no orphan page: everything is reachable from `wiki/index.md`
-- no concept whose standing contradicts the run records it cites, and none at `supported`
-  with fewer than three records
+- every trial has a `method.md`, and every captured paper or article has a `source.md` giving
+  its url and retrieval date
+
+**What a person checks, because no script can.** Passing the script says nothing about these:
+
+- every claim carries a citation, or is marked unverified in the sentence making it
+- no standing contradicts what its records actually say
+- nothing under `raw/` is something the promotion checks should have refused: a secret, a
+  private target's detail, a wholesale copy of someone else's work
 
 A contradiction between a standing and its records is reported, never quietly corrected: it
 means either the standing or the reading of a record is wrong, and which one is a judgement

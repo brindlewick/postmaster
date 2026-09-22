@@ -150,10 +150,11 @@ every concept it bears on. It does not change a standing.
 **query** — a question. Read the relevant pages, answer with citations, and where the answer
 is worth keeping, file it back as a page rather than leaving it in a chat.
 
-**lint** — health check, and part of the repo's gate: every page has front matter; every
-claim has a citation or is marked unverified; every `[@...]` resolves to something in `raw/`;
-every `[[...]]` resolves to a page; no orphan pages; no concept whose standing contradicts
-the run records it cites; no page citing a run that has no raw record.
+**lint** — a health check in two halves. `scripts/wiki-lint.sh` does the mechanical half:
+front matter and standings, citations and links resolving, orphans, trial and capture records,
+and a standing beyond `claimed` resting on this fleet's own runs or trials. Whoever runs it
+does the judgement half: that every claim is cited or marked unverified, and that no standing
+contradicts what its records say. Run it before committing any change to the wiki.
 
 ## Writing
 
