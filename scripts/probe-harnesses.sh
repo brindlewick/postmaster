@@ -17,7 +17,7 @@ for h in claude codex grok agy muse pi; do
   [ "$h" = grok ] && note="--prompt-file"
   [ "$h" = agy  ] && note="reads NO ambient context file"
   [ "$h" = muse ] && note="$note; reads no ambient file"
-  [ "$h" = pi ] && note="reads AGENTS.md and CLAUDE.md; @prompt-file"
+  [ "$h" = pi ] && note="reads AGENTS.md or CLAUDE.md (AGENTS.md first); @prompt-file"
   row "$h" yes "$hl" "$note"
 done
 echo

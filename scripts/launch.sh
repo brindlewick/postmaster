@@ -72,6 +72,10 @@ case $CMD in
   *) die "unknown command: $CMD" ;;
 esac
 [ "$CMD" = form ] || [ -d "$CWD" ] || die "no such directory: $CWD"
+if [ "$HARNESS" = pi ] && [ "$CMD" != form ]; then
+  prompt_dir=$(cd "$(dirname "$PROMPT")" && pwd -P) || die "cannot resolve prompt file: $PROMPT"
+  PROMPT=$prompt_dir/$(basename "$PROMPT")
+fi
 
 cmd=()
 case $HARNESS in
