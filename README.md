@@ -77,9 +77,14 @@ scripts/handoff-check.sh <handoff-file>                            # a leg may e
 
 At least two agent CLIs that can run headless. Any git repository as a target. tmux, or
 another way to keep a process alive between an agent's turns. Python 3.11 or newer, which
-the scripts use to read the config, and jq for discovering a JavaScript project's gate. An agent that has loaded
-`skills/postmaster/SKILL.md`: for a harness with a skills directory, symlink or copy
-`skills/postmaster` into it; for any other, point the agent at the file.
+the scripts use to read the config, and jq for discovering a JavaScript project's gate. An agent that has loaded the
+skills: for a harness with a skills directory, symlink or copy each directory under `skills/`
+into it; for any other, point the agent at the `SKILL.md` you need.
+
+`skills/postmaster` runs the flow and is the one a dispatch needs. `skills/wiki` operates the
+research wiki and is only wanted by a session doing that. Each directory is one skill; the
+other files beside a `SKILL.md` are its reference material, loaded when its instructions send
+an agent to them rather than up front.
 
 **Tickets are GitHub Issues on a GitHub Projects board by default:** a kanban you can open,
 with each ticket a card in the column its state says, and nothing to configure beyond `gh`
