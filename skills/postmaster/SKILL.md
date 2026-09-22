@@ -1,21 +1,44 @@
 ---
 name: postmaster
-description: 'Bootstrap a POSTMASTER session over another git project on this machine. Run it from the postmaster tool repo: it lists the git projects on this machine by recency, asks which to dispatch against, verifies that target is a git repository and refuses if it is not, handles an uncommitted tree by offering to commit or stash rather than stopping, discovers the gate command, docs and tracker instead of demanding config, then confirms a launch card and spawns the session. The postmaster it creates decomposes a stream into tickets and dispatches one coachman per ticket; a coachman drives one ticket end to end and its runbook is coachman.md beside this file. The postmaster runs no model lanes and edits no source. Invoke via /postmaster.'
+description: 'Start work with postmaster on this machine, from the postmaster tool repo. It is the front door and establishes its own preconditions: if the machine has no ~/.postmaster/config.toml it conducts setup first rather than failing later, and if a session already chose a target it picks up from there instead of asking again. Then it lists the git projects by recency, asks which to dispatch against, verifies that target is a git repository and refuses if it is not, handles an uncommitted tree by offering to commit or stash rather than stopping, discovers the gate command, docs and tracker instead of demanding config, confirms a launch card, and spawns a POSTMASTER session which decomposes a stream into tickets and dispatches one coachman per ticket. A coachman drives one leg of one ticket and its runbook is coachman.md beside this file. The postmaster runs no model lanes and edits no source. Reached by typing /postmaster, or by AGENTS.md sending a session here.'
 ---
 
-# /postmaster: bootstrap a postmaster over a git project
+# /postmaster: start work with postmaster
 
-**You are bootstrapping a postmaster. You are not the postmaster.** Check the
-preconditions, scope the stream, confirm the launch card, spawn the session, hand over,
-report where to watch it, and stop.
+You get the machine ready if it is not, choose a target, confirm a launch card, spawn a
+postmaster session, hand over, report where to watch it, and stop. **You do not run the
+stream yourself**; the session you spawn does that, from `postmaster.md` beside this file.
 
-The postmaster you spawn works from `postmaster.md` beside this file and dispatches one
-**coachman** per ticket, one leg at a time. A coachman drives exactly one leg of one load,
-hands off to the next leg in writing, and its runbook is `coachman.md`. Harness-specific invocations are in `harnesses.md` and tracker mechanics in `trackers.md`;
-the machine's choices (which harnesses, which lanes, which tracker) are in `~/.postmaster/config.toml`,
-whose shape is `config.example.toml` at the repo root. There is no separate per-ticket
-skill: dispatching a coachman is something the postmaster does, not something a human
-invokes.
+That session dispatches one **coachman** per ticket, one leg at a time. A coachman drives
+exactly one leg of one load and hands off to the next leg in writing; its runbook is
+`coachman.md`. Harness-specific invocations are in `harnesses.md`, tracker mechanics in
+`trackers.md`, and the machine's choices — which harnesses, which lanes, which tracker — in
+`~/.postmaster/config.toml`, whose shape is `config.example.toml` at the repo root. There is
+no separate per-ticket skill: dispatching a coachman is something the postmaster does, not
+something a person invokes.
+
+## First: establish the preconditions yourself
+
+You are reached two ways, and they arrive in different states. A session opened in this repo
+comes through `AGENTS.md`, which may already have set the machine up and chosen a target.
+Someone typing `/postmaster` arrives cold. **Assume neither. Check.**
+
+```sh
+cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
+```
+
+**No config: stop and set the machine up first**, in conversation, per the setup section of
+`AGENTS.md` in this repo. Do not continue to target selection: every later step reads the
+config for the team, the tracker and the merge word, and without it the launch card cannot
+be filled. Come back here when it is written.
+
+**Config present, and this session has already chosen and verified a target:** skip to
+"Work out what the project needs" and do not ask again.
+
+**Config present, no target yet:** carry on below.
+
+Say which of these you found, in one line, before doing anything else. A session that cannot
+tell whether it is setting up or dispatching is one nobody can follow.
 
 ## Choose the target project
 
