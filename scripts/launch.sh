@@ -109,11 +109,16 @@ case $HARNESS in
     [ -n "${EFFORT:-}" ] && cmd+=(--effort "$EFFORT")
     cmd+=(--output-format stream-json --verbose --dangerously-skip-permissions) ;;
   pi)
-    cmd=(pi --mode json --print --approve)
+    # The prompt goes in on stdin. An `@file` argument is an attachment, and pi sends it as
+    # <file name="..."> ... </file> with no instruction around it, which is not the same
+    # message every other harness gets. pi also reads stdin to EOF before it starts in every
+    # mode but rpc, so the redirect is what keeps an inherited pipe from hanging the launch.
+    # `--mode json` already selects non-interactive, so no --print.
+    cmd=(pi --mode json --approve)
     [ "$CMD" = resume ] && cmd+=(--session "$THREAD")
     cmd+=(--model "$MODEL")
     [ -n "${EFFORT:-}" ] && cmd+=(--thinking "$EFFORT")
-    cmd+=("@$PROMPT") ;;
+    STDIN_FILE=$PROMPT ;;
   muse)
     die "muse adapter is incomplete (stream flag, bypass form, thread id, resume form); fill harnesses.md and this script from a trial run first" ;;
   *) die "no form for harness '$HARNESS'" ;;
@@ -123,6 +128,7 @@ if [ "$CMD" = form ]; then
   show() { case $1 in '<'*'>'|'$(cat <prompt-file>)') printf '%s ' "$1" ;; *) printf '%q ' "$1" ;; esac; }
   printf 'cd '; show "$CWD"; printf '&& '
   for a in "${cmd[@]}"; do show "$a"; done
+  [ -n "${STDIN_FILE:-}" ] && { printf '< '; show "$STDIN_FILE"; }
   echo
   exit 0
 fi
@@ -134,4 +140,7 @@ if [ "$HARNESS" = codex ] && [ "$CMD" = launch ]; then
   grep -qF "[projects.\"$CWD\"]" "$HOME/.codex/config.toml" \
     || printf '\n[projects."%s"]\ntrust_level = "trusted"\n' "$CWD" >> "$HOME/.codex/config.toml"
 fi
-cd "$CWD" && exec "${cmd[@]}"
+cd "$CWD" || die "cannot enter $CWD"
+# A harness whose prompt arrives on stdin reads it from the file, never from an inherited pipe.
+[ -n "${STDIN_FILE:-}" ] && exec "${cmd[@]}" < "$STDIN_FILE"
+exec "${cmd[@]}"
