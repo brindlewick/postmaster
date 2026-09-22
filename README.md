@@ -29,6 +29,12 @@ Disagreement is also diagnostic. When two lanes build the same mechanism and nam
 differently, the project's own conventions did not decide it, and the coachman records the
 gap as a proposed rule rather than flipping a coin the next run will flip again.
 
+## Wiki
+
+Research on how combining models works, and the evidence for it from recorded runs, is in
+[`wiki/`](wiki/index.md), published with GitHub Pages. It starts from the claims above,
+marked as claims, and grows one run record at a time.
+
 ## Getting started
 
 ```sh
