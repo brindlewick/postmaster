@@ -154,7 +154,7 @@ tracker: <kind, and how a ticket is read and written>
 risk surfaces: <what the project binds, allowlists, spawns, serves; from its docs or the operator>
 
 ## Team
-arms: <lane>=<harness>/<model>/<effort>, <lane>=…
+workhorses: <lane>=<harness>/<model>/<effort>, <lane>=…
 reviewers: <lane>, <lane>
 coachman: <harness>/<model>/<effort>      (never a lane's model)
 CHECKPOINT_MODE and MERGE_AUTHORITY come from ship.checkpoint_mode and ship.merge_authority, overridden only where the operator says so for this run

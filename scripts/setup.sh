@@ -36,8 +36,8 @@ lane.<name>.harness                           harness (codex, grok, agy, claude,
 lane.<name>.model                             model id
 lane.<name>.effort?        (none)             effort, blank if the harness has no effort flag
 lane.<name>.env_file?      (none)             env file for an alternate backend
-arms                       <lanes>            arm lanes, comma separated
-reviewers                  <arms>             reviewer lanes, comma separated
+workhorses                 <lanes>            workhorse lanes, comma separated
+reviewers                  <workhorses>       reviewer lanes, comma separated
 coachman.harness                              never a lane's model
 coachman.model
 coachman.effort?           (none)
@@ -124,13 +124,13 @@ for lane in $LANE_LIST; do
 done
 
 echo
-ask ARMS "Arm lanes, the horses, comma separated" "$LANES" "arms"
-for a in $(printf '%s' "$ARMS" | tr ',' ' '); do
+ask WORKHORSES "Workhorse lanes, comma separated" "$LANES" "workhorses"
+for a in $(printf '%s' "$WORKHORSES" | tr ',' ' '); do
   ok=0; for lane in $LANE_LIST; do [ "$lane" = "$a" ] && ok=1; done
-  [ "$ok" -eq 1 ] || { echo "setup: arm '$a' is not one of the lanes ($LANES)" >&2; exit 1; }
+  [ "$ok" -eq 1 ] || { echo "setup: workhorse '$a' is not one of the lanes ($LANES)" >&2; exit 1; }
 done
-set -- $(printf '%s' "$ARMS" | tr ',' ' '); [ $# -ge 2 ] || { echo "setup: at least two arms are needed" >&2; exit 1; }
-ask REVIEWERS "Reviewer lanes, comma separated" "$ARMS" "reviewers"
+set -- $(printf '%s' "$WORKHORSES" | tr ',' ' '); [ $# -ge 2 ] || { echo "setup: at least two workhorses are needed" >&2; exit 1; }
+ask REVIEWERS "Reviewer lanes, comma separated" "$WORKHORSES" "reviewers"
 for rv in $(printf '%s' "$REVIEWERS" | tr ',' ' '); do
   ok=0; for lane in $LANE_LIST; do [ "$lane" = "$rv" ] && ok=1; done
   [ "$ok" -eq 1 ] || { echo "setup: reviewer '$rv' is not one of the lanes ($LANES)" >&2; exit 1; }
@@ -198,7 +198,7 @@ projects_roots = $(toml_list "$ROOTS")
 ${LANE_BLOCKS}
 
 [team]
-arms = $(toml_list "$ARMS")
+workhorses = $(toml_list "$WORKHORSES")
 reviewers = $(toml_list "$REVIEWERS")
 coachman = { harness = "$CH", model = "$CM"$( [ -n "$CE" ] && printf ', effort = "%s"' "$CE" ) }
 coachman_fallback = { harness = "$FH", model = "$FM"$( [ -n "$FE" ] && printf ', effort = "%s"' "$FE" ) }

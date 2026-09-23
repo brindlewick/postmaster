@@ -9,7 +9,7 @@
 # Where projects live. scripts/find-projects.sh reads this when given no roots.
 projects_roots = ["~/Code"]
 
-# A lane is a harness plus a model plus an effort, and is a horse (an arm) or a reviewer or
+# A lane is a harness plus a model plus an effort, and is a workhorse or a reviewer or
 # both, as [team] says. Name lanes for what they are. A lane may carry an env_file, loaded
 # before launch, which is how a harness reaches an alternate backend (an Anthropic-compatible
 # endpoint under the claude harness, say): the endpoint and its key live in that file, outside
@@ -25,12 +25,12 @@ harness = "claude"
 model = "deepseek-v4.1-flash[1m]"
 env_file = "~/.postmaster/lanes/deepseek.env"   # ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN
 
-# The team for a run. At least two arms from different vendors. Reviewers are lanes too, the
-# arms by default; a third lane of another family may be added. The coachman and its fallback
+# The team for a run. At least two workhorses from different vendors. Reviewers are lanes too, the
+# workhorses by default; a third lane of another family may be added. The coachman and its fallback
 # are never a model that runs as a lane in the same run, and both need a harness with a
 # resume form (codex, grok, claude or pi), since rulings arrive by resuming the coachman's thread.
 [team]
-arms = ["luna", "deepseek"]
+workhorses = ["luna", "deepseek"]
 reviewers = ["luna", "deepseek"]
 coachman = { harness = "grok", model = "grok-4.6", effort = "xhigh" }
 coachman_fallback = { harness = "codex", model = "gpt-6-astra", effort = "max" }

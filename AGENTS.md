@@ -152,7 +152,9 @@ seeing the others. Both are load-bearing properties of the architecture, and no 
 metaphor expresses them.
 
 **waybill** the brief that travels with a load · **harness** the CLI wrapping a model ·
-**blinkers** worktree isolation between lanes · **lead horse / wheeler** the ranked lanes ·
+**blinkers** worktree isolation between lanes · **workhorse** a lane that implements the ticket,
+as against a reviewer · **workhorse spec** a workhorse's own plan for the ticket, committed before
+its code (`WORKHORSE-SPEC.md`) · **lead horse / wheeler** the ranked lanes ·
 **turnpike** the gate a run must clear · **remount** resuming a stalled run ·
 **spent** a run whose process is gone with no marker · **lame** a lane that is present but not pulling · **fleet** the
 whole system.

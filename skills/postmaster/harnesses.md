@@ -30,7 +30,7 @@ on one session messaging another; the postmaster polls files.
 | muse | `muse exec` | not recorded here | none | `--prompt-file` |
 
 A harness that reads no ambient context file must be handed the project's docs by name in its
-prompt, and must have the `ARM-SPEC.md` / `ARM-SUMMARY.md` / `ARM-BLOCKED.md` contract spelled
+prompt, and must have the `WORKHORSE-SPEC.md` / `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract spelled
 out in full. The
 others pick both up from the brief and the docs. A harness that reads a context file under a
 different name needs that file present: a `CLAUDE.md` that is a symlink to `AGENTS.md` serves
@@ -42,7 +42,7 @@ in a prompt: match on pid or working directory.
 
 ## codex
 
-Launch, arm or reviewer:
+Launch, workhorse or reviewer:
 
 ```sh
 # Mark the worktree trusted first. The grep guard is idempotent on purpose:
@@ -64,7 +64,7 @@ codex exec -C <wt> --json -o <dispatch>/logs/<lane>-last.md -m <model> \
   the id from the events log or `~/.codex/sessions/YYYY/MM/DD/`.
 - Durable record: rollout jsonl under `~/.codex/sessions/YYYY/MM/DD/`. `codex resume
   <thread_id>` opens the full TUI on a finished thread. `codex archive <thread_id>` at teardown.
-- Headless `codex exec` exposes no browser backend. An arm on codex cannot run the render gate;
+- Headless `codex exec` exposes no browser backend. A workhorse on codex cannot run the render gate;
   the coachman runs it.
 
 ## grok
@@ -100,7 +100,7 @@ cd <wt> && agy -p "$(cat <dispatch>/<lane>-prompt.txt)" \
 - `--sandbox` is opt-IN restriction. Never pass it to a lane.
 - Reads NO ambient context file: not `AGENTS.md`, `GEMINI.md`, `AGENT.md`, `.agy/` or
   `.antigravity/`. The prompt must open by naming the project's docs and must spell out the
-  `ARM-SPEC.md` / `ARM-SUMMARY.md` / `ARM-BLOCKED.md` contract.
+  `WORKHORSE-SPEC.md` / `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract.
 - Thread id: `conversationId` in the stream.
 - Final message: the last result line of the events stream.
 - Resume: relaunch against its `conversationId`; `agy --help` for the flag. Not recorded here,
@@ -129,7 +129,7 @@ cd <wt> && claude -p "$(cat <dispatch>/<lane>-prompt.txt)" --model <model> \
   its context in `AGENTS.md` needs a `CLAUDE.md` pointing at it; a symlink works.
 - As the coachman's own harness: background tasks are reaped at about 29 minutes, and a long
   lane routinely outlives that. A "stopped" notification without a quota error is the cap, not
-  a failure. Resume the lane's thread in place, instruct arms to commit incrementally, and
+  a failure. Resume the lane's thread in place, instruct workhorses to commit incrementally, and
   expect to resume any leg that needs more than 25 minutes.
 
 ## pi
