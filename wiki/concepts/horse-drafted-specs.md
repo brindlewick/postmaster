@@ -2,7 +2,7 @@
 title: Each horse drafts its own spec
 type: concept
 standing: claimed
-sources: []
+sources: [articles/spec-kit-templates]
 updated: 2026-09-23
 ---
 
@@ -27,6 +27,21 @@ comparison in [issue #9](https://github.com/brindlewick/postmaster/issues/9) is 
   meant to build. Read beside what it built, it shows whether the horses diverged at the design
   or only in the code, and where a horse departed from its own plan.
 
+## The format
+
+A horse's spec follows GitHub Spec Kit's plan and tasks templates, combined in one file
+[@articles/spec-kit-templates]. Spec Kit splits the work into three documents: a spec for the
+what and why, a plan for the how, and tasks for the order of work. In postmaster the ticket
+already holds the first, since the user owns the what, the why and the direction, so a horse
+writes only the second and third. A horse writing Spec Kit's spec would be restating
+requirements that belong to the ticket.
+
+Three things are adapted to a lane. Spec Kit's constitution check becomes a direction check,
+against the ticket's direction and the target project's own rules. Its user-story tags on tasks
+become acceptance-criterion tags, since tickets carry numbered criteria rather than stories, and
+that lets an audit see at once whether every criterion has a task. Its `NEEDS CLARIFICATION`
+markers become recorded decisions, because a horse has nobody to ask mid-run.
+
 ## What it does not do, at this stage
 
 Nobody reviews a spec during the run, and no stage waits on one. It is an audit record. A
@@ -42,4 +57,5 @@ advance: this stays the default unless a shared spec produces a clearly better s
 ## What changed because of it
 
 The arm contract in `skills/postmaster/coachman.md` gains `ARM-SPEC.md` as an arm's first act,
-and the run's audit keeps a copy of each one.
+written from `skills/postmaster/arm-spec-template.md`, and the run's audit keeps a copy of each
+one as first committed and as finished.

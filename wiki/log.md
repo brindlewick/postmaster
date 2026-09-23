@@ -8,6 +8,15 @@ updated: 2026-09-22
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-23] ingest | a horse's spec uses Spec Kit's plan and tasks format
+
+Captured GitHub Spec Kit's spec, plan and tasks templates into
+`raw/articles/spec-kit-templates/`, with their MIT license, pinned to one commit. A horse's
+`ARM-SPEC.md` now follows the plan and tasks templates in one file; the ticket plays the part of
+Spec Kit's spec. The decision page records the mapping and the three adaptations. The source is
+outside work: it shapes the format and does not move the page's standing, which stays
+`claimed`.
+
 ## [2026-09-23] ingest | each horse drafts its own spec
 
 First page in the Decisions area. The ticket carries the what, the why and the high-level

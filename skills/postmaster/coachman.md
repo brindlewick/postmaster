@@ -159,11 +159,12 @@ An arm writes one file at its worktree root before anything else, and one of two
 final act. The brief spells all three out in full, since some harnesses read nothing but the
 brief.
 
-- `ARM-SPEC.md`: written and committed first, on its own, before any code: the approach it
-  will take within the ticket's direction, the parts of the project it expects to touch, the
-  decisions it is making for itself, and how it will verify the work. It is not reviewed during
-  the run and no stage waits on it; the coachman copies it into the run's audit. The brief
-  carries this instruction without the link that follows.
+- `ARM-SPEC.md`: written from `arm-spec-template.md` beside this file and committed first, on
+  its own, before any code: its approach, technical context, how it meets the ticket's
+  direction, the files it will touch, the decisions it made, and its tasks, each tagged with
+  the acceptance criterion it serves. It is not reviewed during the run and no stage waits on
+  it; the coachman copies it into the run's audit. The brief carries this instruction without
+  the link that follows.
   [Why each horse drafts its own spec](../../wiki/concepts/horse-drafted-specs.md)
 - `ARM-SUMMARY.md`: what it built, as a list of the commits on its branch; how it verified
   it, as the commands it ran with their exit codes; every within-brief question it decided
@@ -201,7 +202,7 @@ An arm commits incrementally as it goes, never pushes, never reads other branche
    delete it. It is the run's history, and the postmaster's poll reads it.
 6. **Write each arm's brief** to `<dispatch>/<lane>-prompt.txt`: the ticket verbatim, the
    project profile, the docs to read first named explicitly, the `ARM-SPEC.md` /
-   `ARM-SUMMARY.md` / `ARM-BLOCKED.md` contract, the autonomous-defaults rule (decide within-brief questions
+   `ARM-SUMMARY.md` / `ARM-BLOCKED.md` contract with `arm-spec-template.md` in full, the autonomous-defaults rule (decide within-brief questions
    yourself and record the decision in `ARM-SUMMARY.md`), the capability statement above, the
    instruction to commit incrementally, and the line that the arm must not read other branches
    or `.worktrees/`. Where the arm's harness reads no ambient context file, the brief opens by
@@ -268,8 +269,10 @@ from it.
 - **Run audit, automatic.** Once the arms are harvested (at the stall cutoff, whatever
   exists), write `<dispatch>/audit/<lane>.md` per arm from its durable record: thread id,
   branch, key actions digested from the logs and transcript, final message, `ARM-SUMMARY.md`
-  verdict. Copy each arm's `ARM-SPEC.md` to `<dispatch>/audit/<lane>-spec.md`, and record
-  whether its commit comes before the arm's first code commit. Attach every audit to the checkpoint 1 card. Do the same for any later fix thread a
+  verdict. Copy each arm's `ARM-SPEC.md` as its first commit added it to
+  `<dispatch>/audit/<lane>-spec.md`, and its final version to `<lane>-spec-final.md`. Record
+  whether that first commit comes before the arm's first code commit, and any acceptance
+  criterion with no task. Attach every audit to the checkpoint 1 card. Do the same for any later fix thread a
   checkpoint relies on.
 - **THERE IS NO SYNTHESIS BASE. You are the synthesizer: judge, then compose.** Do not
   fast-forward the ticket branch onto any lane. Start from BASE and write the synthesis
