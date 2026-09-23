@@ -22,7 +22,7 @@ waybill carries, is `SKILL.md`. You do not need it.
 |---|---|
 | `<dispatch>` = `~/.postmaster/runs/<project>/<TICKET>/` | this run's directory; nothing else writes to it |
 | `<dispatch>/brief.md` | the waybill |
-| `<dispatch>/manifest.json` | `stage`, `leg`, `base`, `lanes.<lane>.{thread_id, outcome}`, `coachman.legs.<n>.thread_id`; the postmaster creates it and owns `leg`, `base` and `coachman`, you own `stage` and `lanes`; update fields in place, never rewrite the file |
+| `<dispatch>/manifest.json` | `stage`, `leg`, `base`, `lanes.<lane>.{thread_id, outcome}`, `coachman.legs.<n>.thread_id`; the postmaster creates it and owns `leg`, `base` and `coachman`, you own `stage` and `lanes`; change `stage` only with `scripts/stage.sh`, update the rest in place, never rewrite the file |
 | `<dispatch>/run-log.md` | running narrative, appended as you go |
 | `<dispatch>/logs/` | one events stream per lane and per review round |
 | `<dispatch>/audit/<lane>.md` | per-workhorse digest of its durable record |
@@ -53,7 +53,8 @@ which lanes found it, verified by execution or reading); `apply` per fix; `degra
 round it did not review at full strength, quoting the cause; `escalate` when a ruling is needed;
 `gate` per gate run with its exit; `ticket-state` and `ticket-comment` per tracker write; `merge`
 on the merge; `teardown` per worktree removed; `handoff-accept` as a leg's first action and
-`handoff` as its last; `note` for anything else worth a line. A lone
+`handoff` as its last; `stage` whenever the run enters a stage, written by `scripts/stage.sh`
+and never by hand; `note` for anything else worth a line. A lone
 dissenter, a convergent fix, a wall: each is one line here, computable later, rather than a
 sentence in prose that cannot be counted.
 
@@ -194,12 +195,15 @@ A workhorse commits incrementally as it goes, never pushes, never reads other br
 4. **Check the run's directories exist** (`mkdir -p <dispatch>/logs <dispatch>/audit
    <dispatch>/render` is idempotent) and that the synthesis worktree the postmaster cut is at
    BASE and is your cwd; then cut one workhorse worktree per workhorse from BASE.
-5. **Update the manifest** the postmaster created: set `stage: bootstrapped` and add one
-   `lanes` entry per lane, in place, never rewriting the file (the postmaster owns `leg`,
-   `base` and `coachman`). Keep `stage`,
-   thread ids and outcomes current at every transition: `workhorses-running`, `synthesis`,
-   `checkpoint-1`, `review-style`, `review-bug`, `review-security`, `shipped`, `done`. Never
-   delete it. It is the run's history, and the postmaster's poll reads it.
+5. **Update the manifest** the postmaster created: set the stage with
+   `scripts/stage.sh <dispatch> bootstrapped`, and add one `lanes` entry per lane, in place,
+   never rewriting the file (the postmaster owns `leg`, `base` and `coachman`). Keep thread ids
+   and outcomes current at every transition. The stage changes only through `scripts/stage.sh`,
+   in this order: `bootstrapped`, `workhorses-running`, `synthesis`, `checkpoint-1`,
+   `review-style`, `review-bug`, `review-security`, `shipping`, `shipped`, `done`. Each change is
+   logged, and the run's timings are computed from those lines by
+   `scripts/run-times.sh <dispatch>`. Never delete the manifest. It is the run's history, and
+   the postmaster's poll reads it.
 6. **Write each workhorse's brief** to `<dispatch>/<lane>-prompt.txt`: the ticket verbatim, the
    project profile, the docs to read first named explicitly, the `WORKHORSE-SPEC.md` /
    `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract with `workhorse-spec-template.md` in full, the autonomous-defaults rule (decide within-brief questions
@@ -228,7 +232,7 @@ from it.
   (`harnesses.md` says where each harness prints it). The postmaster moved the ticket to in-progress at
   dispatch; you do not touch its state before stage 5. An unrecorded
   thread is a needle in a haystack: the ids are the handles for answers, fix loops, follow-ups
-  and debugging. Bump manifest `stage` to `workhorses-running`.
+  and debugging. Set the stage: `scripts/stage.sh <dispatch> workhorses-running`.
 - **While the workhorses run, write the acceptance tests, blind.** Before you read any lane's diff
   or log beyond its thread id, turn the ticket's acceptance criteria and `User journey` into
   tests at the ticket's own interface: the route, flag, file, or visible behaviour the ticket
@@ -274,8 +278,9 @@ from it.
   whether that first commit comes before the workhorse's first code commit, and any acceptance
   criterion with no task. Attach every audit to the checkpoint 1 card. Do the same for any later fix thread a
   checkpoint relies on.
-- **THERE IS NO SYNTHESIS BASE. You are the synthesizer: judge, then compose.** Do not
-  fast-forward the ticket branch onto any lane. Start from BASE and write the synthesis
+- **THERE IS NO SYNTHESIS BASE. You are the synthesizer: judge, then compose.** Set the stage
+  first, `scripts/stage.sh <dispatch> synthesis`. Do not fast-forward the ticket branch onto any
+  lane. Start from BASE and write the synthesis
   yourself, taking the best answer to each part of the problem from whichever lane found it.
 
   **Inheriting a branch is a decision you make once, about a whole diff, before you understand
@@ -346,15 +351,16 @@ from it.
   was taken from each lane, what was rejected and why**; the code-verified evidence behind each
   choice; the convention gaps found; what was dropped; gate status. A card that presents a
   finished diff without saying which lane each part came from is the defaulting failure
-  wearing a verdict. Write it to `<dispatch>/checkpoint-1.md` with the audit bundle beside it and touch
-  `.checkpoint-1-ready`. Autonomous mode: write `handoff-1.md` and end the leg. Consult mode:
+  wearing a verdict. Set the stage, `scripts/stage.sh <dispatch> checkpoint-1`, then write it to
+  `<dispatch>/checkpoint-1.md` with the audit bundle beside it and touch `.checkpoint-1-ready`. Autonomous mode: write `handoff-1.md` and end the leg. Consult mode:
   also write `ESCALATION.md` naming the card, touch `.escalation-ready`, and exit; the ruling
   arrives as a resume, and the leg then ends with its hand-off.
 
 ## Stages 2 to 4 (legs 2, 3, 4): review passes (style, then bug, then security)
 
 Sequential, so later passes review final code, and one leg per pass, so every round of a pass
-shares one coachman and the deferred findings it carries. Per pass:
+shares one coachman and the deferred findings it carries. Per pass, first set the stage with
+`scripts/stage.sh <dispatch> review-<pass>`, then:
 
 1. **Write `review-<pass>-brief.md`** in the dispatch dir: the diff scope (synthesis worktree,
    `git diff <BASE>...HEAD`); the project profile plus this pass's specific pointers from it;
@@ -480,6 +486,8 @@ shares one coachman and the deferred findings it carries. Per pass:
 
 ## Stage 5 (leg 5): ship (review link, then a gated local merge)
 
+Set the stage first: `scripts/stage.sh <dispatch> shipping`.
+
 1. **Gates green in the synthesis worktree**, final diff stat and commit list ready. On a
    project with a UI that has a browser suite, that includes the suite, run blocking and
    unpiped. Running it is only half the gate: judge the suite against THIS change, what needs
@@ -537,16 +545,17 @@ shares one coachman and the deferred findings it carries. Per pass:
    withheld grant with its reasons. On a withheld grant, address the reasons, update the card,
    touch `.card-ready` again, and exit again. Only the operator abandons a run. On it: check out the project's default branch
    in the main checkout and `git merge --no-ff <ticket-branch>` (merge, never rebase), move the
-   ticket to done, bump manifest `stage: shipped` then `done`. Never escalate a grant the waybill gives the postmaster up to
+   ticket to done, and set the stage: `scripts/stage.sh <dispatch> shipped`. Never escalate a grant the waybill gives the postmaster up to
    the operator.
 6. If the project has an origin, pushing afterwards is a separate operator call, never part of
    this flow.
 
 ## Stage 6 (leg 5, after the merge): aftercare and teardown
 
-Final `run-log.md` entry (per-lane win record, findings counts, timings, cost) plus a closing
-dated comment on the ticket. Manifest `stage: done`; never delete the dispatch directory or the
-manifest, they are the run's history. Archive finished threads where the harness has an archive
+Final `run-log.md` entry (per-lane win record, findings counts, cost) plus a closing dated
+comment on the ticket. Then set the stage last, `scripts/stage.sh <dispatch> done`, which
+appends the run's stage timings to `run-log.md`; never write timings by hand. Never delete the
+dispatch directory or the manifest, they are the run's history. Archive finished threads where the harness has an archive
 form (`harnesses.md`). After the merge, tear down the workhorse worktrees, preserving any stray file
 first (a workhorse killed mid-run leaves real artifacts), and hand the synthesis worktree to the
 postmaster for removal from outside it. Keep the `wb/<TICKET>-<lane>` branches as a local
@@ -617,8 +626,8 @@ logical order, not file safety: check the file surfaces before mass-launching.
   <script>`, `npm run <script>`): a builtin can shadow a script name, and a builtin's misfire
   can delete files before erroring. After any misfire, check `git status` for collateral
   before the next targeted `git add` would miss it.
-- Update the manifest at bootstrap and keep `stage`, thread ids and `outcome`s current, in
-  place; never rewrite it and never delete it.
+- Update the manifest at bootstrap and keep thread ids and `outcome`s current, in place; never
+  rewrite it and never delete it. Change `stage` only with `scripts/stage.sh`.
 - **A lone dissenter in a gating pass is the finding, not the outlier.** Clean verdicts are not
   independent: they can rest on one shared unexamined premise, so a split means one reviewer
   looked somewhere the others assumed. Verify it in the code yourself before dismissing it,

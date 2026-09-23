@@ -190,11 +190,12 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-5.md`:
    .worktrees/<TICKET>`; never with force unless the tree is clean and the card confirmed it)
    and log `teardown`. The workhorse worktrees are the coachman's; if any survive, remove them the
    same way after preserving any stray file into `<dispatch>/stray/`.
-3. **Close the run** in the manifest (`stage: done`) and never delete the dispatch directory.
+3. **Close the run** with `scripts/stage.sh <dispatch> done postmaster`, which does nothing if
+   the coachman already has, and never delete the dispatch directory.
 4. **Dispatch the next ticket** in order, Stage B.
 
 **Abandoning a run** happens only on the operator's word for that run: log `note` with the
-word, set the manifest to `stage: abandoned`, remove every worktree the run created after
+word, set the stage with `scripts/stage.sh <dispatch> abandoned postmaster`, remove every worktree the run created after
 preserving stray files, and move the ticket back to todo or to cancelled as the operator
 says. The dispatch directory stays.
 
