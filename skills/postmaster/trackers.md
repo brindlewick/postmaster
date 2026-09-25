@@ -6,7 +6,7 @@ config allows (`config.example.toml`, `[tracker]`). Every write is also logged t
 `scripts/log-action.sh` as `ticket-state` or `ticket-comment`.
 
 **GitHub Issues is the default**, on a GitHub Projects board so the tickets are a kanban the
-operator can look at. Plane is the other named kind. Anything else is `other`. Tickets never
+user can look at. Plane is the other named kind. Anything else is `other`. Tickets never
 live on a branch of the target repo: a ticket is state, and state does not belong in a commit.
 
 The ticket shape is the same everywhere, three headings in this order, so opening one costs no
@@ -42,7 +42,7 @@ messages is `#`.
 
 Everything goes through `scripts/github.sh`, which reads the GitHub repository from the
 target's origin remote and needs nothing configured. `gh` must be logged in with the
-`project` scope (`gh auth login`, then `gh auth refresh -s project`); the operator does both,
+`project` scope (`gh auth login`, then `gh auth refresh -s project`); the user does both,
 never an agent, and `scripts/probe-trackers.sh` says whether they have.
 
 ```sh
@@ -57,7 +57,7 @@ scripts/github.sh <repo> list [state]
 
 - **Board:** one per target repo, found through the repo's project links. A repo with no
   board is exit 3 from every command; `board init` creates one, named after the repo, and
-  links it. Propose that to the operator before running it, and give them the URL after: a
+  links it. Propose that to the user before running it, and give them the URL after: a
   board made from the CLI opens in table layout, and the switch to the board layout is one
   click on the page.
 - **Read:** `read`, which prints the issue with its state worked out from the issue and
@@ -68,7 +68,7 @@ scripts/github.sh <repo> list [state]
   `blocked` adds the label; `done` closes the issue and moves the card to Done; `cancelled`
   closes it as not planned.
 - **Comment:** `comment`, dated to the minute, actor first (`postmaster`, `coachman`, or the
-  operator's word for themselves). The ready-to-merge comment is one such line pointing at
+  user's word for themselves). The ready-to-merge comment is one such line pointing at
   `<dispatch>/card.md`.
 
 ## plane
@@ -79,7 +79,7 @@ already, so its states are the columns: `todo` is the first state in the unstart
 group either, so `blocked` is a label named `blocked`, as on GitHub. One Plane project per
 target repo, matched by the project identifier that prefixes every work item id (`PM-12`),
 which is the prefix discovery reads from commit messages; a target that has shipped one
-ticket needs nothing configured, and one that has not is a question for the operator.
+ticket needs nothing configured, and one that has not is a question for the user.
 
 Everything goes through `scripts/plane.sh`. The instance and workspace are in the config:
 
@@ -91,7 +91,7 @@ workspace = "<slug>"             # the segment after the host in the workspace's
 ```
 
 The API key is `PLANE_API_KEY` in `~/.postmaster/plane.env` (or the file `[tracker]
-env_file` names), one line, made in Plane under profile settings, API tokens. The operator
+env_file` names), one line, made in Plane under profile settings, API tokens. The user
 writes that file; the key never passes through a conversation, the config or this repo.
 `scripts/plane.sh projects` proves the three of them agree by listing the workspace's
 projects, and `scripts/probe-trackers.sh` runs it.
@@ -117,5 +117,5 @@ scripts/plane.sh list PM [state]
 A tracker the agent reaches through its own tooling, an MCP server or a CLI. The config names
 it, and the setup session records how each of the four demands is met in
 `~/.postmaster/trackers/<name>.md`, outside this repo and in the same shape as the two sections
-above, so the operator's instance never enters the flow. Until that file exists the tracker is
+above, so the user's instance never enters the flow. Until that file exists the tracker is
 not configured, however reachable it is.

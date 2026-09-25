@@ -6,7 +6,7 @@
 #   setup.sh [--answers <file>] [--dry-run] [--config <path>]
 #   setup.sh --keys
 #
-# An agent drives it: the operator's answers go in a file, one key=value per line (--keys
+# An agent drives it: the user's answers go in a file, one key=value per line (--keys
 # lists them with their prompts and defaults), and --answers reads them by name, so the order
 # of the questions never matters. A missing key takes its default and a key with no default
 # is an error naming it. Without --answers the questions are asked on stdin one at a time, so
@@ -55,7 +55,7 @@ plane.workspace                               plane only; the slug in the worksp
 plane.env_file             ~/.postmaster/plane.env   plane only; holds PLANE_API_KEY=<key>
 tracker.name                                  other only
 postmaster_may_create      no                 yes lets the postmaster create tickets unasked
-merge_authority            operator           operator or postmaster
+merge_authority            user               user or postmaster
 checkpoint_mode            autonomous         autonomous or consult
 review_link?               (none)             template with {path}
 overwrite                  no                 yes replaces an existing config
@@ -182,8 +182,8 @@ esac
 echo
 ask PMC "May the postmaster create tickets without asking (yes/no)" "no" "postmaster_may_create"
 case $PMC in yes|no) ;; *) echo "setup: answer yes or no" >&2; exit 1 ;; esac
-ask MA "Who says the merge word (operator, postmaster)" "operator" "merge_authority"
-case $MA in operator|postmaster) ;; *) echo "setup: merge authority must be operator or postmaster" >&2; exit 1 ;; esac
+ask MA "Who says the merge word (user, postmaster)" "user" "merge_authority"
+case $MA in user|postmaster) ;; *) echo "setup: merge authority must be user or postmaster" >&2; exit 1 ;; esac
 ask CPM "Checkpoint mode (autonomous, consult)" "autonomous" "checkpoint_mode"
 case $CPM in autonomous|consult) ;; *) echo "setup: checkpoint mode must be autonomous or consult" >&2; exit 1 ;; esac
 ask RL "Review link template with {path} for the synthesis worktree (blank for none)" "" "review_link?"

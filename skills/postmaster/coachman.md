@@ -466,7 +466,7 @@ shares one coachman and the deferred findings it carries. Per pass, first set th
 4. **Apply.** Gating passes fix verified findings in the synthesis worktree and re-run the
    project's gate. In the style pass, apply what is clearly right; every other advisory
    finding is deferred in the hand-off and reaches the ship card's Style residue section, where
-   the operator picks at merge time.
+   the user picks at merge time.
 5. **Loop each gating pass until clean.** Re-run the SAME pass's reviewers on the fixed diff,
    as round `r+1` with its own markers, the brief updated with the fixes delta and the applied
    findings as known context, so they closure-check each fix AND hunt new holes the fixes
@@ -507,7 +507,7 @@ Set the stage first: `scripts/stage.sh <dispatch> shipping`.
    the config's `ship.review_link` template is set, that template with the path filled in.
    Reuse whatever review surface is already running; never start a duplicate or restart one,
    since it may be serving another run. Never trust a check from the serving machine as proof
-   the link works for the operator: verify it from the device the operator will open it on, or
+   the link works for the user: verify it from the device the user will open it on, or
    say on the card that it is unverified.
 3. **Preview build, always, on a project with a UI.** Serve the branch's production build on
    the loopback interface at a throwaway port with a THROWAWAY database seeded from the
@@ -539,21 +539,21 @@ Set the stage first: `scripts/stage.sh <dispatch> shipping`.
    thread ids. This is the flow's analogue of opening a PR.
 
    **The ship card carries the Style residue,** every advisory finding not applied, one line
-   each, for the operator to pick from at merge time.
+   each, for the user to pick from at merge time.
 
    **The ship card lists EVERY branch the run created and the state of each, not only the one
    carrying the feature.** A branch is part of the ship or it is abandoned; there is no third
    option, and the reader cannot tell which without being told. A ship card that omits a
    branch is a green check over unreviewed work.
-5. **STOP and wait for the live merge word from `MERGE_AUTHORITY`**: the operator, or the
+5. **STOP and wait for the live merge word from `MERGE_AUTHORITY`**: the user, or the
    dispatching postmaster, as the waybill says. Write `handoff-5.md` as far as the card, touch
    `.card-ready`, and exit; the word arrives as a resume of this leg's thread, and so does a
    withheld grant with its reasons. On a withheld grant, address the reasons, update the card,
-   touch `.card-ready` again, and exit again. Only the operator abandons a run. On it: check out the project's default branch
+   touch `.card-ready` again, and exit again. Only the user abandons a run. On it: check out the project's default branch
    in the main checkout and `git merge --no-ff <ticket-branch>` (merge, never rebase), move the
    ticket to done, and set the stage: `scripts/stage.sh <dispatch> shipped`. Never escalate a grant the waybill gives the postmaster up to
-   the operator.
-6. If the project has an origin, pushing afterwards is a separate operator call, never part of
+   the user.
+6. If the project has an origin, pushing afterwards is the user's call, never part of
    this flow.
 
 ## Stage 6 (leg 5, after the merge): aftercare and teardown
@@ -617,7 +617,7 @@ logical order, not file safety: check the file surfaces before mass-launching.
   paste, Enter as a separate send-keys, and check the working indicator before trusting a
   dispatch.
 - **Know your own harness's background-task lifetime** (`harnesses.md`). A long lane outlives
-  it. A "stopped" notification without a quota error is the cap, not a failure and not a human:
+  it. A "stopped" notification without a quota error is the cap, not a failure and not the user:
   resume the thread in place; worktree and context survive. Budget long legs for it.
 - **Workhorses must not read other branches or `.worktrees/`.** Those hold other runs' work,
   including abandoned and rejected approaches. Put the line in every workhorse brief; it costs

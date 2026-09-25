@@ -2,7 +2,7 @@
 # One line per run under a project's run root: the run, its stage and leg from the manifest,
 # the markers present, minutes since anything in it changed, and what the postmaster does
 # next. This is the postmaster's poll; it reads files and nothing else. A pending escalation
-# from the postmaster to the operator is printed first, since it is what everything else may
+# from the postmaster to the user is printed first, since it is what everything else may
 # be waiting on.
 #
 #   runs-status.sh <project-run-root>        e.g. ~/.postmaster/runs/<project>
@@ -29,7 +29,7 @@ import sys, os, json, time, glob
 root = sys.argv[1]; now = time.time()
 pm_esc = os.path.join(root, "postmaster", "ESCALATION.md")
 if os.path.isfile(pm_esc):
-    print("POSTMASTER     escalation to the operator is pending: %s" % pm_esc)
+    print("POSTMASTER     escalation to the user is pending: %s" % pm_esc)
 rows = []
 for run in sorted(os.listdir(root)):
     d = os.path.join(root, run)
