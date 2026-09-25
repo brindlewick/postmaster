@@ -68,6 +68,8 @@ scripts/wait-for-markers.sh <dir> <glob> <count> <timeout>       # block until a
 scripts/log-action.sh <dispatch> <actor> <action> <target> …     # one JSON line per action
 scripts/stage.sh <dispatch> <stage>                               # the one way a run changes stage
 scripts/run-times.sh <dispatch>                                   # how long each stage took, from the log
+scripts/run-log.sh <dispatch> <text> | --section <title> | --close # the narrative, timestamped
+scripts/run-meta.sh <dispatch> <repo>                             # run.json: what a run started from
 scripts/github.sh <repo> board|create|read|state|comment|list     # GitHub Issues on a Projects board
 scripts/plane.sh create|read|state|comment|list …                  # Plane work items
 scripts/launch.sh form|launch|resume <lane-or-role> …             # any lane or role, one command

@@ -63,7 +63,9 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
 3. **Create the run directory** `<runs>/<TICKET>/` with `logs/`, `audit/` and `render/`, and
    the manifest: `{"stage": "dispatched", "leg": 1, "base": "<sha>", "lanes": {}, "coachman":
    {"legs": {}}}`. You own `leg`, `base` and `coachman`; the coachman owns `stage` and
-   `lanes`; both update fields in place and neither rewrites the file.
+   `lanes`; both update fields in place and neither rewrites the file. Then record what the run
+   starts from, once: `scripts/run-meta.sh <dispatch> <repo>` writes `run.json` with the
+   postmaster commit, the config and the harness versions, and nothing edits it afterwards.
 4. **Cut the synthesis worktree** at BASE, the sha you recorded from `git -C <repo> rev-parse
    HEAD` on the default branch: `git -C <repo> worktree add .worktrees/<TICKET> -b <TICKET>
    <sha>`. The coachman's cwd is that worktree from its first leg, so the project's ambient

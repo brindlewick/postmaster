@@ -23,7 +23,8 @@ waybill carries, is `SKILL.md`. You do not need it.
 | `<dispatch>` = `~/.postmaster/runs/<project>/<TICKET>/` | this run's directory; nothing else writes to it |
 | `<dispatch>/brief.md` | the waybill |
 | `<dispatch>/manifest.json` | `stage`, `leg`, `base`, `lanes.<lane>.{thread_id, outcome}`, `coachman.legs.<n>.thread_id`; the postmaster creates it and owns `leg`, `base` and `coachman`, you own `stage` and `lanes`; change `stage` only with `scripts/stage.sh`, update the rest in place, never rewrite the file |
-| `<dispatch>/run-log.md` | running narrative, appended as you go |
+| `<dispatch>/run-log.md` | running narrative, written only through `scripts/run-log.sh`, which puts the time on every entry and times every section |
+| `<dispatch>/run.json` | the run's fixed facts: postmaster commit, config, harness versions; written once at dispatch by the postmaster, never edited |
 | `<dispatch>/logs/` | one events stream per lane and per review round |
 | `<dispatch>/audit/<lane>.md` | per-workhorse digest of its durable record |
 | `<dispatch>/leg-<n>-prompt.txt` | the postmaster's one-paragraph prompt that started leg `n` |
@@ -36,7 +37,11 @@ waybill carries, is `SKILL.md`. You do not need it.
 
 ## Audit log: every action, as it happens
 
-`run-log.md` is the narrative. `<dispatch>/actions.jsonl` is the record, and the project's
+`run-log.md` is the narrative, written through `scripts/run-log.sh <dispatch> <text>`. Start each
+part of the work as a section, `scripts/run-log.sh <dispatch> --section <title>`: harvest,
+verification, synthesis, each review round, the gate, the ship card. The time on each heading and
+entry, and the duration written when a section closes, show how long each part took.
+`<dispatch>/actions.jsonl` is the record, and the project's
 `ledger.jsonl` beside the run directories is the same record across runs. Nothing learns from
 the narrative; what the flow did is read back from these lines, so every action goes through
 the script at the moment it happens, never reconstructed afterwards:
@@ -126,7 +131,8 @@ Anything the next leg must decide or the postmaster must rule on.
 One paragraph: where the next leg starts, and what it must do first.
 ```
 
-Then log `handoff`, touch `.leg-<n>-done`, and exit. The postmaster launches the next leg;
+Then close the open section with `scripts/run-log.sh <dispatch> --close`, log `handoff`, touch
+`.leg-<n>-done`, and exit. The postmaster launches the next leg;
 you never do. A leg that exits without its hand-off is spent, and the postmaster remounts it.
 
 **Escalations stay inside the leg.** An escalation writes `ESCALATION.md`, touches
@@ -561,7 +567,8 @@ first (a workhorse killed mid-run leaves real artifacts), and hand the synthesis
 postmaster for removal from outside it. Keep the `wb/<TICKET>-<lane>` branches as a local
 archive. Durable process learnings go to the project's own docs, not this runbook. Residue
 contract: a clean run leaves only torn-down-able worktrees. Then finish `handoff-5.md`
-(the closing state of every branch and the ticket), log `handoff`, touch `.leg-5-done`, and
+(the closing state of every branch and the ticket), close the open section with
+`scripts/run-log.sh <dispatch> --close`, log `handoff`, touch `.leg-5-done`, and
 exit.
 
 ## Concurrency note (several runs on one project)

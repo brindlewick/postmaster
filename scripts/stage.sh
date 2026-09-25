@@ -68,7 +68,7 @@ with open(tmp, "w") as f:
     json.dump(m, f, indent=2); f.write("\n")
 os.replace(tmp, path)
 PY
-  printf -- '- %s stage %s, from %s%s\n' "$(date -u +%H:%MZ)" "$new" "$old" "$took" >> "$d/run-log.md"
+  "$HERE/run-log.sh" "$d" "stage $new, from $old$took"
   case $new in
     done|abandoned)
       { printf '\nStage timings, from actions.jsonl:\n\n```\n'; "$HERE/run-times.sh" "$d"; printf '```\n'; } >> "$d/run-log.md" ;;
