@@ -17,7 +17,7 @@
 #   exit 2  not one of the stages
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd -P)
-STAGES="dispatched bootstrapped workhorses-running synthesis checkpoint-1 review-style review-bug review-security shipping shipped done abandoned"
+STAGES="dispatched bootstrapped workhorses-running synthesis checkpoint-1 review shipping shipped done abandoned"
 
 set_stage() {  # set_stage <dispatch> <stage> <actor>
   local d=$1 new=$2 actor=$3
@@ -108,6 +108,9 @@ grep -q 'stage bootstrapped, from dispatched after' "$d/run-log.md" && ok "run-l
 set_stage "$d" done coachman >/dev/null
 grep -q 'Stage timings, from actions.jsonl' "$d/run-log.md" && grep -q '^bootstrapped ' "$d/run-log.md" \
   && ok "a terminal stage appends the run's timings" || fail "a terminal stage appends the run's timings"
+fresh; set_stage "$d" review coachman >/dev/null; rc=$?
+[ $rc -eq 0 ] && [ "$(count)" -eq 1 ] && grep -q '"stage": "review"' "$d/manifest.json" \
+  && ok "review is one stage" || fail "review is one stage (exit $rc, lines $(count))"
 
 echo "negative controls"
 fresh; set_stage "$d" bootstrapped coachman >/dev/null; set_stage "$d" bootstrapped coachman >/dev/null; rc=$?
@@ -115,6 +118,11 @@ fresh; set_stage "$d" bootstrapped coachman >/dev/null; set_stage "$d" bootstrap
 fresh; cp "$d/manifest.json" "$tmp/before.json"; set_stage "$d" reviewing coachman >/dev/null 2>&1; rc=$?
 [ $rc -eq 2 ] && [ "$(count)" -eq 0 ] && cmp -s "$d/manifest.json" "$tmp/before.json" \
   && ok "an unknown stage is refused, and nothing changes" || fail "an unknown stage is refused, and nothing changes (exit $rc)"
+for old in review-style review-bug review-security; do
+  fresh; cp "$d/manifest.json" "$tmp/before.json"; set_stage "$d" "$old" coachman >/dev/null 2>&1; rc=$?
+  [ $rc -eq 2 ] && [ "$(count)" -eq 0 ] && cmp -s "$d/manifest.json" "$tmp/before.json" \
+    && ok "$old is refused, and nothing changes" || fail "$old is refused, and nothing changes (exit $rc)"
+done
 rm -- "$d/manifest.json"; set_stage "$d" bootstrapped coachman >/dev/null 2>&1; rc=$?
 [ $rc -eq 1 ] && ok "no manifest is refused" || fail "no manifest is refused (exit $rc)"
 

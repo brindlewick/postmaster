@@ -76,13 +76,13 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    `ship.merge_authority`, either overridden only where the user said so for this run,
    the dispatch path and `<tool>`.
 6. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. The
-   coachman never touches the ticket's state before stage 5.
+   coachman never touches the ticket's state before stage 3.
 
 ## Stage C: dispatch a leg
 
-A run is five legs (`coachman.md`, Legs). Each leg is a fresh coachman thread, launched the
-same way; the first is launched after the waybill, every later one when the previous leg's
-marker appears.
+A run is three legs, `synthesis`, `review` and `ship` (`coachman.md`, Legs). Each leg is a
+fresh coachman thread, launched the same way; the first is launched after the waybill, every
+later one when the previous leg's marker appears.
 
 1. **Write the leg prompt** to `<runs>/<TICKET>/leg-<n>-prompt.txt`: "You are the coachman
    for leg <n> of <TICKET>. Read `<dispatch>/brief.md`, then `<tool>/skills/postmaster/coachman.md`,
@@ -103,7 +103,8 @@ marker appears.
    `coachman.legs.<n>.thread_id`, set `leg` to `<n>`, and log `dispatch` with the leg and
    the thread id.
 4. **The coachman's model for a leg** comes from `team.coachman`, or `team.coachman_legs.<leg-name>`
-   where set. It is never a lane's model, in any leg.
+   where set. It is never a lane's model, in any leg. `scripts/launch.sh` refuses a config
+   whose `[team.coachman_legs]` names any other leg; that refusal goes to the user.
 
 ## Stage D: supervise
 
@@ -118,7 +119,7 @@ Act on the `NEXT` column, run by run, and log every action:
 - **RULE:** an escalation is waiting. Stage E.
 - **GATE:** the ship card is complete. Stage F.
 - **DISPATCH:** the leg's `.leg-<n>-done` marker is present. Stage C for leg `n+1`; after leg
-  5, Stage G.
+  3, Stage G.
 - **REMOUNT:** the leg's process exited (`.leg-<n>-exited`) with no hand-off, escalation or
   card. Read the leg's `.err` file and the stream tail. A quota or provider wall, quoted,
   means the coachman is lame for this leg: log `degrade`, remove the exited marker, and
@@ -164,17 +165,17 @@ never the record.
 
 ## Stage F: the gate
 
-On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-5.md`:
+On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
 
 1. **Verify the card's claims against the code**, never against the card. In the synthesis
    worktree: the gate command exits 0 unpiped (log `gate` with its exit); every branch the
    card lists exists and is in the state the card says; the SYNTHESIS line in `run-log.md`
    names a contribution or a reason for every lane; every DEGRADED lane on the card matches
    the `degrade` lines in `actions.jsonl`; the blind acceptance tests are the first commit on
-   the branch, or the Decisions section of `handoff-5.md` carries leg 1's reason for not
+   the branch, or the Decisions section of `handoff-3.md` carries leg 1's reason for not
    writing them.
 2. **Grant or withhold.** `MERGE_AUTHORITY: postmaster` and every check above holds: deliver
-   "MERGE GRANTED" by resuming leg 5's thread, log `merge` with `granted`. Any check fails:
+   "MERGE GRANTED" by resuming leg 3's thread, log `merge` with `granted`. Any check fails:
    deliver the failure as a ruling by the same resume and log `merge` with `withheld` and the
    reason; the leg addresses it and raises the card again. `MERGE_AUTHORITY: user`: put
    the card, the review link and your verification in front of the user and wait; deliver

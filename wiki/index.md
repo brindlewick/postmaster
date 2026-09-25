@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-22
+updated: 2026-09-25
 ---
 
 # postmaster wiki
@@ -38,6 +38,8 @@ What the services and CLIs postmaster depends on actually do. Nothing yet.
 
 Why the design is shaped as it is.
 
+- [The review loop](concepts/review-loop.md): **claimed**. Style, bug and security review run
+  as one loop in one leg, so every fix is re-reviewed by both gating lenses, in fewer rounds.
 - [The workhorse spec](concepts/workhorse-spec.md): **claimed**. Each workhorse drafts its
   own, which keeps the workhorses independent of each other and of the coachman, and makes
   each run auditable.
