@@ -91,8 +91,9 @@ scripts/stage.sh <dispatch> <stage>                               # the one way 
 scripts/run-times.sh <dispatch>                                   # how long each stage took, from the log
 scripts/run-log.sh <dispatch> <text> | --section <title> | --close # the narrative, timestamped
 scripts/run-meta.sh <dispatch> <repo>                             # run.json: what a run started from
-scripts/github.sh <repo> board|create|read|state|comment|list     # GitHub Issues on a Projects board
-scripts/plane.sh create|read|state|comment|list …                  # Plane work items
+scripts/github.sh <repo> board|create|edit|read|state|comment|list # GitHub Issues on a Projects board
+scripts/plane.sh create|edit|read|state|comment|list …             # Plane work items
+scripts/ticket-check.sh <repo> <id> | --body <file> --title <t>    # a ticket's shape, before it is accepted
 scripts/launch.sh form|launch|resume <lane-or-role> …             # any lane or role, one command
 scripts/runs-status.sh <run-root>                                  # the postmaster's poll
 scripts/handoff-check.sh <handoff-file>                            # a leg may end only on exit 0

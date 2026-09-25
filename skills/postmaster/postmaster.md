@@ -36,17 +36,34 @@ ledger. `note` is the action for anything without its own verb.
    target with no board (exit 3) gets one only when the user says so: `board init`.
 1. **Read what exists.** List the tracker's open tickets (`trackers.md`) and read the ones the
    stream touches. The stream may already be ticketed in part.
-2. **Decompose.** One ticket per independently shippable change, each with the three
-   headings: the problem or feature, numbered acceptance criteria each answerable yes or no,
-   and notes. A ticket that changes something a person uses carries a `User journey`. A
-   ticket is dispatchable when its criteria can be tested at the ticket's own interface and
-   its scope names what is out. Anything else is not yet a ticket; it is a question for the
-   user.
-3. **Propose before creating** unless `tracker.postmaster_may_create` is true. Show the
+2. **Decompose.** One ticket per independently shippable change, in the ticket shape
+   (`trackers.md`): a title, the problem or feature, numbered acceptance criteria each
+   answerable yes or no, the direction, and notes. A ticket that changes something a person
+   uses carries a `User journey`. A ticket is dispatchable when its criteria can be tested at
+   the ticket's own interface and its scope names what is out. Anything else is not yet a
+   ticket; it is a question for the user.
+3. **Check every ticket's shape** before you accept it or propose it:
+   `scripts/ticket-check.sh <repo> <id>` for a ticket in the tracker, and
+   `scripts/ticket-check.sh --body <file> --title "<title>"` for one you drafted. Log
+   `ticket-check` with the ticket's id, or the draft's file, as the target, and the exit and
+   the parts named as the detail. Exit 0 accepts the ticket. Exit 1 means it could not be
+   read, and the message says why. Exit 2 names each missing or malformed part on its own
+   line: draft each part from the stream and the ticket's own text, and put the ticket, the
+   check's lines and your drafts to the user together. A direction comes only from the
+   stream, the ticket or the user; where none of them says anything about the approach, ask
+   for one instead of drafting it.
+4. **Write back the user's answer and nothing else.** Compose the ticket with each part as the
+   user gave or approved it and the rest of its text as it was. A ticket in the tracker is
+   written with the adapter's `edit` (`trackers.md`), logging `ticket-edit`; a draft is
+   rewritten in its file. Then check it again. A user who edits the ticket in the tracker has
+   answered: check it again and write nothing. A ticket that still fails stays out of the
+   plan, and `plan.md` says what it waits on.
+   [Why a ticket is checked, and only the user's answer written back](../../wiki/concepts/ticket-shape.md)
+5. **Propose before creating** unless `tracker.postmaster_may_create` is true. Show the
    user each ticket's title, priority and one-line rationale, then create the ones they
-   approve through the tracker adapter, logging `ticket-create` per ticket. Never create a
-   ticket on your own initiative.
-4. **Order them.** Dependencies first; then the file surfaces. Two tickets touching the same
+   approve through the tracker adapter, logging `ticket-create` per ticket, and check each
+   one again by its new id. Never create a ticket on your own initiative.
+6. **Order them.** Dependencies first; then the file surfaces. Two tickets touching the same
    route table, transport interface or shared module do not run at the same time. Record the
    order and the reason in `<runs>/postmaster/plan.md`, current state only.
 
@@ -213,6 +230,8 @@ only with the user's word for that specific thing, and the word is logged.
 - Never implement, review, or launch workhorses; never edit source; never write a coachman's
   hand-off or card for it.
 - Never create a ticket without the user's word unless the config says you may.
+- Never dispatch a ticket that `scripts/ticket-check.sh` fails, and never change a ticket's
+  text without the user's word for that text.
 - Never merge; never say the merge word without `MERGE_AUTHORITY` or the user behind it.
 - Never delete a dispatch directory, a manifest or a ledger line.
 - Never trust a card, a summary or a hand-off over the code; verify before every grant.

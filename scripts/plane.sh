@@ -6,6 +6,7 @@
 #
 #   plane.sh projects                             identifier, id and name of every project
 #   plane.sh create <IDENT> <title> <body-file>   new work item in the todo state; prints its id
+#   plane.sh edit <IDENT-n> <title> <body-file>   replace its title and description
 #   plane.sh read <IDENT-n>                       title, state, labels, body, comments
 #   plane.sh state <IDENT-n> <state>              todo | in-progress | blocked | done | cancelled
 #   plane.sh comment <IDENT-n> <actor> <text>     one comment, dated to the minute, actor first
@@ -19,8 +20,10 @@
 # The flow's states map onto Plane's state groups: todo is the first state in the unstarted
 # group (backlog if none), in-progress is started, done is completed, cancelled is cancelled.
 # Plane has no blocked group, so blocked is a label named `blocked`, added without moving the
-# state and removed by the next state change. Bodies are the three-heading ticket shape in
-# markdown; the script renders them to the HTML Plane stores and back to text on read.
+# state and removed by the next state change. Bodies are the ticket shape in markdown; the
+# script renders them to the HTML Plane stores and back to text on read. Only some HTML comes
+# back, so edit refuses a work item whose description holds anything else, a table, an image or
+# emphasis, and names it: writing back what read showed would lose it.
 #
 #   exit 0  ok
 #   exit 1  usage, config or key missing, the API refused or was unreachable, unknown
@@ -29,7 +32,7 @@
 set -uo pipefail
 CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
 die() { echo "plane: $*" >&2; exit 1; }
-[ $# -ge 1 ] || die "usage: plane.sh projects|create|read|state|comment|list ..."
+[ $# -ge 1 ] || die "usage: plane.sh projects|create|edit|read|state|comment|list ..."
 [ -f "$CONFIG" ] || die "no config at $CONFIG (POSTMASTER_CONFIG overrides the path)"
 python3 -c 'import tomllib' 2>/dev/null || die "python3 with tomllib (3.11 or newer) is needed to read the config"
 
@@ -133,7 +136,7 @@ def item_for(tid):
     item = api("GET", "workspaces/%s/work-items/%s-%d/" % (WS, ident, n))
     return ident, item
 
-# --- markdown <-> html, enough for the three-heading ticket shape --------------------------
+# --- markdown <-> html, enough for the ticket shape -------------------------------------------
 
 def inline(text):
     text = html.escape(text, quote=False)
@@ -231,6 +234,11 @@ def html_to_text(h):
     text = "\n".join(line.rstrip() for line in "".join(p.out).splitlines())
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
+RENDERED = {"h1", "h2", "h3", "h4", "h5", "h6", "p", "ol", "ul", "li", "br", "pre", "code", "strong", "b", "a"}
+
+def unrendered(h):  # the tags in stored HTML that html_to_text does not turn back into markdown
+    return sorted({t.lower() for t in re.findall(r"<([A-Za-z][A-Za-z0-9-]*)", h or "")} - RENDERED)
+
 # --- commands ------------------------------------------------------------------------------
 
 if cmd == "projects":
@@ -249,6 +257,23 @@ elif cmd == "create":
     made = api("POST", "workspaces/%s/projects/%s/work-items/" % (WS, proj["id"]),
                {"name": title, "description_html": md_to_html(body), "state": todo})
     print("%s-%s" % (proj["identifier"], made["sequence_id"]))
+
+elif cmd == "edit":
+    if len(args) != 4: usage("edit <IDENT-n> <title> <body-file>")
+    title, body_file = args[2], args[3]
+    if not title.strip(): die("the title is empty")
+    try:
+        body = open(body_file, encoding="utf-8").read()
+    except OSError as e:
+        die("cannot read body file: %s" % e)
+    ident, item = item_for(args[1])
+    lost = unrendered(item.get("description_html"))
+    if lost:
+        die("%s-%s holds %s, which read does not render, so writing it back would lose it; the user edits it in Plane"
+            % (ident, item["sequence_id"], ", ".join("<%s>" % t for t in lost)))
+    api("PATCH", "workspaces/%s/projects/%s/work-items/%s/" % (WS, ref(item["project"]), item["id"]),
+        {"name": title, "description_html": md_to_html(body)})
+    print("%s-%s: edited" % (ident, item["sequence_id"]))
 
 elif cmd == "read":
     if len(args) != 2: usage("read <IDENT-n>")
@@ -312,5 +337,5 @@ elif cmd == "list":
             print("%s-%s\t%s\t%s" % (proj["identifier"], it["sequence_id"], st, it.get("name", "")))
 
 else:
-    usage("projects|create|read|state|comment|list ...")
+    usage("projects|create|edit|read|state|comment|list ...")
 PY

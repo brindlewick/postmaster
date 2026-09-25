@@ -9,6 +9,7 @@
 #   github.sh <repo> board init [title]            create a board named after the repo and
 #                                                  link it; idempotent
 #   github.sh <repo> create <title> <body-file>    new issue on the board in Todo; prints its number
+#   github.sh <repo> edit <n> <title> <body-file>  replace the issue's title and body
 #   github.sh <repo> read <n>                      title, state, labels, body, comments
 #   github.sh <repo> state <n> <state>             todo | in-progress | blocked | done | cancelled
 #   github.sh <repo> comment <n> <actor> <text>    one comment, dated to the minute, actor first
@@ -24,15 +25,15 @@
 #   exit 3  the repo has no linked board (run: github.sh <repo> board init)
 set -uo pipefail
 die() { echo "github: $*" >&2; exit 1; }
-REPO=${1:?usage: github.sh <repo> board|create|read|state|comment|list ...}
-[ $# -ge 2 ] || die "usage: github.sh <repo> board|create|read|state|comment|list ..."
+REPO=${1:?usage: github.sh <repo> board|create|edit|read|state|comment|list ...}
+[ $# -ge 2 ] || die "usage: github.sh <repo> board|create|edit|read|state|comment|list ..."
 [ -d "$REPO" ] || die "no such directory: $REPO"
 command -v gh >/dev/null 2>&1 || die "gh is not on PATH"
 gh auth status >/dev/null 2>&1 || die "gh is not logged in; the user runs: gh auth login"
 REMOTE=$(git -C "$REPO" remote get-url origin 2>/dev/null) || die "$REPO has no origin remote"
 
 exec python3 - "$REMOTE" "${@:2}" <<'PY'
-import datetime, json, re, subprocess, sys
+import datetime, json, os, re, subprocess, sys
 
 STATES = ["todo", "in-progress", "blocked", "done", "cancelled"]
 COLUMN = {"todo": "todo", "in-progress": "inprogress", "done": "done", "cancelled": "done"}
@@ -198,6 +199,14 @@ elif cmd == "create":
     set_column(b, number, url, "todo")
     print(number)
 
+elif cmd == "edit":
+    if len(args) != 4: usage("edit <n> <title> <body-file>")
+    n = number_arg(args[1])
+    if not args[2].strip(): die("the title is empty")
+    if not os.path.isfile(args[3]): die("no such body file: " + args[3])
+    gh("issue", "edit", str(n), "-R", NWO, "--title", args[2], "--body-file", args[3])
+    print("#%d: edited" % n)
+
 elif cmd == "read":
     if len(args) != 2: usage("read <n>")
     n = number_arg(args[1]); iss = issue(n)
@@ -261,5 +270,5 @@ elif cmd == "list":
             print("#%d\t%s\t%s" % (iss["number"], st, iss.get("title", "")))
 
 else:
-    usage("board|create|read|state|comment|list ...")
+    usage("board|create|edit|read|state|comment|list ...")
 PY
