@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Which ticket sources this machine can reach, detected without assuming any particular
-# agent harness. The operator chooses; this reports what is genuinely available so the
+# agent harness. The user chooses; this reports what is genuinely available so the
 # choice is informed rather than aspirational.
 #
 #   exit 0 always; the table is the result
@@ -14,9 +14,9 @@ row ------- --------- ------------------
 # GitHub Issues on a Projects board: gh logged in, and the token carrying the project scope,
 # which `gh auth login` does not grant by default.
 if ! command -v gh >/dev/null 2>&1; then row github no "gh not installed"
-elif ! gh auth status >/dev/null 2>&1; then row github partial "gh installed but not logged in; the operator runs: gh auth login"
+elif ! gh auth status >/dev/null 2>&1; then row github partial "gh installed but not logged in; the user runs: gh auth login"
 elif ! gh auth status 2>&1 | grep -qE "Token scopes:.*'project'"; then
-  row github partial "gh logged in without the project scope; the operator runs: gh auth refresh -s project"
+  row github partial "gh logged in without the project scope; the user runs: gh auth refresh -s project"
 else row github yes "gh CLI, logged in, project scope (the default)"; fi
 
 # Plane: an instance and workspace in the config and a key in the env file. The only proof
@@ -38,12 +38,12 @@ else
   row plane no "$(printf '%s' "$out" | head -1)"
 fi
 
-# Hosted and self-hosted trackers are reached through whatever tooling the operator's agent
+# Hosted and self-hosted trackers are reached through whatever tooling the user's agent
 # provides (an MCP server, a CLI). That is a property of their agent setup, not of this
 # machine, and this script deliberately does not read any one harness's config to guess at it.
 row other "ask" "any tracker reached through your agent's own tooling; needs the service reachable"
 echo
-echo "  GitHub Issues is the default: the tickets sit on a GitHub Projects board the operator"
-echo "  can open. \"partial\" names the one command the operator runs to finish it. \"ask\""
-echo "  means this script cannot tell, so the operator must say: an MCP being registered is"
+echo "  GitHub Issues is the default: the tickets sit on a GitHub Projects board the user"
+echo "  can open. \"partial\" names the one command the user runs to finish it. \"ask\""
+echo "  means this script cannot tell, so the user must say: an MCP being registered is"
 echo "  not the same as the service being up."

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Work out what a target project needs, rather than demanding it be configured.
-# Prints key=value lines. Empty value means "could not determine, ask the operator".
+# Prints key=value lines. Empty value means "could not determine, ask the user".
 set -uo pipefail
 T=${1:?usage: discover-project.sh <path>}
 cd "$T" 2>/dev/null || { echo "cannot enter $T" >&2; exit 1; }

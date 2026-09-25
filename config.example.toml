@@ -1,6 +1,6 @@
 # ~/.postmaster/config.toml
 #
-# The operator's machine-level choices, and nothing about any target project. Projects are
+# The user's machine-level choices, and nothing about any target project. Projects are
 # discovered (scripts/discover-project.sh), never configured. scripts/setup.sh writes this
 # file from your answers; copy it by hand if you prefer. Model ids are whatever the provider
 # serves under the harness; confirm each with one trial launch (scripts/launch.sh form <name>
@@ -63,10 +63,10 @@ kind = "github"
 postmaster_may_create = false   # true lets the postmaster create tickets without asking
 
 [ship]
-# Who says the merge word for a run: "operator" (a person, live) or "postmaster" (the
+# Who says the merge word for a run: "user" (a person, live) or "postmaster" (the
 # supervising session grants the merge itself once it has verified the ship card). A
 # coachman never merges on its own authority under either setting.
-merge_authority = "operator"
+merge_authority = "user"
 
 # "autonomous": the coachman posts checkpoint cards as information and proceeds; the ship
 # card is the one stop. "consult": every checkpoint card is a stop until a ruling arrives.

@@ -28,7 +28,7 @@ REPO=${1:?usage: github.sh <repo> board|create|read|state|comment|list ...}
 [ $# -ge 2 ] || die "usage: github.sh <repo> board|create|read|state|comment|list ..."
 [ -d "$REPO" ] || die "no such directory: $REPO"
 command -v gh >/dev/null 2>&1 || die "gh is not on PATH"
-gh auth status >/dev/null 2>&1 || die "gh is not logged in; the operator runs: gh auth login"
+gh auth status >/dev/null 2>&1 || die "gh is not logged in; the user runs: gh auth login"
 REMOTE=$(git -C "$REPO" remote get-url origin 2>/dev/null) || die "$REPO has no origin remote"
 
 exec python3 - "$REMOTE" "${@:2}" <<'PY'

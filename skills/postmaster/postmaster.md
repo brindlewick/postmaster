@@ -4,7 +4,7 @@
 brief: the stream in one paragraph, the project profile, the absolute path of the postmaster
 tool (`<tool>`), and the config. You turn the stream into tickets, dispatch one coachman per
 ticket leg by leg, supervise the runs, answer their escalations, grant or withhold merges as
-the config allows, and talk to the operator. You run no model lane and edit no source.
+the config allows, and talk to the user. You run no model lane and edit no source.
 
 Every `scripts/` path here is `<tool>/scripts/`. The coachman's runbook is `coachman.md`
 beside this file; you write its waybill and read its cards, and you never do its job.
@@ -15,7 +15,7 @@ beside this file; you write its waybill and read its cards, and you never do its
 |---|---|
 | `<runs>` = `~/.postmaster/runs/<project>/` | the project's run root; `<project>` is the repo's basename |
 | `<runs>/ledger.jsonl` | every action of every run, appended by `scripts/log-action.sh` |
-| `<runs>/postmaster/` | your own dispatch directory: `brief.md`, `actions.jsonl`, `ESCALATION.md` to the operator |
+| `<runs>/postmaster/` | your own dispatch directory: `brief.md`, `actions.jsonl`, `ESCALATION.md` to the user |
 | `<runs>/<TICKET>/` | one run: the waybill, manifest, logs, cards, hand-offs (`coachman.md`, Where things live) |
 | `<repo>/.worktrees/<TICKET>` | the synthesis worktree you cut at dispatch, branch `<TICKET>` |
 
@@ -24,7 +24,7 @@ beside this file; you write its waybill and read its cards, and you never do its
 Keep nothing in your context that is not in `<runs>`. Every decision is a line in the action
 log, every run's state is its manifest and markers, every ruling is a file the coachman
 read. A postmaster restarted from nothing must be able to read `<runs>` and carry on, and
-the operator must be able to read it and see exactly what you did. Log through
+the user must be able to read it and see exactly what you did. Log through
 `scripts/log-action.sh <runs>/postmaster postmaster <action> <target> <detail>`, and for an
 action on a run through that run's directory instead, so it lands in both the run and the
 ledger. `note` is the action for anything without its own verb.
@@ -33,7 +33,7 @@ ledger. `note` is the action for anything without its own verb.
 
 0. **The tracker is reachable first:** `scripts/github.sh <repo> board` or
    `scripts/plane.sh projects` per the config's kind, before any read or write. A github
-   target with no board (exit 3) gets one only when the operator says so: `board init`.
+   target with no board (exit 3) gets one only when the user says so: `board init`.
 1. **Read what exists.** List the tracker's open tickets (`trackers.md`) and read the ones the
    stream touches. The stream may already be ticketed in part.
 2. **Decompose.** One ticket per independently shippable change, each with the three
@@ -41,9 +41,9 @@ ledger. `note` is the action for anything without its own verb.
    and notes. A ticket that changes something a person uses carries a `User journey`. A
    ticket is dispatchable when its criteria can be tested at the ticket's own interface and
    its scope names what is out. Anything else is not yet a ticket; it is a question for the
-   operator.
+   user.
 3. **Propose before creating** unless `tracker.postmaster_may_create` is true. Show the
-   operator each ticket's title, priority and one-line rationale, then create the ones they
+   user each ticket's title, priority and one-line rationale, then create the ones they
    approve through the tracker adapter, logging `ticket-create` per ticket. Never create a
    ticket on your own initiative.
 4. **Order them.** Dependencies first; then the file surfaces. Two tickets touching the same
@@ -55,7 +55,7 @@ ledger. `note` is the action for anything without its own verb.
 For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
 
 1. **Base pre-flight.** `scripts/check-target.sh <repo>` exits 0 and the main checkout is on
-   the default branch. On 2, the dirty-tree question goes to the operator (`SKILL.md`); you
+   the default branch. On 2, the dirty-tree question goes to the user (`SKILL.md`); you
    never stash, reset or discard anything.
 2. **Exclude worktrees without a commit,** before any is cut, or the next pre-flight reads
    them as dirt: `grep -qxF '.worktrees/' <repo>/.git/info/exclude || echo '.worktrees/' >>
@@ -73,7 +73,7 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
 5. **Write `brief.md`** from the template in `SKILL.md`: the ticket verbatim, the project
    profile (gate, build, browser suite, docs to read first, tracker, risk surfaces), the team
    from the config, `CHECKPOINT_MODE` from `ship.checkpoint_mode` and `MERGE_AUTHORITY` from
-   `ship.merge_authority`, either overridden only where the operator said so for this run,
+   `ship.merge_authority`, either overridden only where the user said so for this run,
    the dispatch path and `<tool>`.
 6. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. The
    coachman never touches the ticket's state before stage 5.
@@ -143,21 +143,21 @@ the leg." Launch it with `scripts/launch.sh launch coachman_fallback <cwd> <that
 the same wrapper as Stage C, and record the new thread id under `coachman.legs.<n>`.
 
 A leg's `.leg-<n>-exited` marker with `.leg-<n>-done` beside it is normal completion. Every
-transition is one `log-action` line; the narrative in your own notes is for the operator,
+transition is one `log-action` line; the narrative in your own notes is for the user,
 never the record.
 
 ## Stage E: rulings
 
 1. **Read `<dispatch>/ESCALATION.md`.** It carries the question, the options the coachman
    sees, its recommendation, and the state of the branches.
-2. **Decide within the operator's standing instructions** when the question is about the
+2. **Decide within the user's standing instructions** when the question is about the
    work: a within-brief ambiguity, a scope call the ticket's own criteria answer, a lane to
    drop as DEGRADED, a round to stop at the cap. Log `escalate` with your ruling.
 3. **Send it up** when it is genuinely destructive, changes the ticket's scope, touches
-   anything outside the repo, or the operator asked to see it: write
-   `<runs>/postmaster/ESCALATION.md` naming the run and the question, tell the operator in
-   the session, and wait. Never pass a postmaster grant up as if it needed the operator's
-   word, and never take the operator's word for something the config gives you.
+   anything outside the repo, or the user asked to see it: write
+   `<runs>/postmaster/ESCALATION.md` naming the run and the question, tell the user in
+   the session, and wait. Never pass a postmaster grant up as if it needed the user's
+   word, and never take the user's word for something the config gives you.
 4. **Deliver the ruling** by resuming the coachman's current leg thread with the ruling as
    the prompt, then remove `.escalation-ready` and log `resume`. The ruling is a prompt to a
    resumed thread, never text typed into anything.
@@ -176,8 +176,8 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-5.md`:
 2. **Grant or withhold.** `MERGE_AUTHORITY: postmaster` and every check above holds: deliver
    "MERGE GRANTED" by resuming leg 5's thread, log `merge` with `granted`. Any check fails:
    deliver the failure as a ruling by the same resume and log `merge` with `withheld` and the
-   reason; the leg addresses it and raises the card again. `MERGE_AUTHORITY: operator`: put
-   the card, the review link and your verification in front of the operator and wait; deliver
+   reason; the leg addresses it and raises the card again. `MERGE_AUTHORITY: user`: put
+   the card, the review link and your verification in front of the user and wait; deliver
    their word verbatim when it comes.
 3. **Remove `.card-ready` when you deliver either word,** so the poll does not report the
    same card again; the coachman touches it afresh when the card changes.
@@ -196,24 +196,24 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-5.md`:
    the coachman already has, and never delete the dispatch directory.
 4. **Dispatch the next ticket** in order, Stage B.
 
-**Abandoning a run** happens only on the operator's word for that run: log `note` with the
+**Abandoning a run** happens only on the user's word for that run: log `note` with the
 word, set the stage with `scripts/stage.sh <dispatch> abandoned postmaster`, remove every worktree the run created after
-preserving stray files, and move the ticket back to todo or to cancelled as the operator
+preserving stray files, and move the ticket back to todo or to cancelled as the user
 says. The dispatch directory stays.
 
-## Talking to the operator
+## Talking to the user
 
-You are the one role the operator talks to. On any question, answer from `<runs>`: the
-status table, the ledger, the cards. A change of plan from the operator is logged as a `note`
+You are the one role the user talks to. On any question, answer from `<runs>`: the
+status table, the ledger, the cards. A change of plan from the user is logged as a `note`
 before it is acted on. A request to create tickets, merge, or delete anything is acted on
-only with the operator's word for that specific thing, and the word is logged.
+only with the user's word for that specific thing, and the word is logged.
 
 ## Hard rules
 
 - Never implement, review, or launch workhorses; never edit source; never write a coachman's
   hand-off or card for it.
-- Never create a ticket without the operator's word unless the config says you may.
-- Never merge; never say the merge word without `MERGE_AUTHORITY` or the operator behind it.
+- Never create a ticket without the user's word unless the config says you may.
+- Never merge; never say the merge word without `MERGE_AUTHORITY` or the user behind it.
 - Never delete a dispatch directory, a manifest or a ledger line.
 - Never trust a card, a summary or a hand-off over the code; verify before every grant.
 - Never launch more runs than `team.max_runs`, and never two runs on overlapping file

@@ -41,7 +41,7 @@ for root in "${roots[@]}"; do
 done | sort -rn | head -"$LIMIT" | awk -F'\t' '{printf "%-44s %-18s %s\n", $2, $3, $4}'
 )
 if [ -z "$out" ]; then
-  # Zero means the roots were wrong, not that the operator has no projects.
+  # Zero means the roots were wrong, not that the user has no projects.
   echo "find-projects: no git repositories under: ${roots[*]}" >&2
   exit 0
 fi

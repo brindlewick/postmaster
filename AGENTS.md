@@ -13,7 +13,7 @@ the tool has: a flow that cannot improve itself is a flow nobody should trust wi
 project.
 
 A session opening here is usually here to **run** the tool against something else. Ask which
-target the operator wants before assuming either way.
+target the user wants before assuming either way.
 
 ### What is different when the target IS this repo
 
@@ -41,9 +41,9 @@ scripts, docs and prose do not.
 
 ## When a session opens in this repo, do this
 
-No slash command, and no wizard for the operator to run. They open their agent in this
+No slash command, and no wizard for the user to run. They open their agent in this
 folder and this file takes it from there: set the machine up if it is not, choose a target,
-launch the postmaster. Work out where the operator is and pick up from there.
+launch the postmaster. Work out where the user is and pick up from there.
 
 **1. Is this machine set up?**
 
@@ -53,7 +53,7 @@ cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
 
 If it is missing, set it up now, in conversation, before anything else. You conduct it:
 probe first, ask one thing at a time, verify each answer, then have the script write the
-config. Do not guess an answer, and do not hand the operator a script to run instead.
+config. Do not guess an answer, and do not hand the user a script to run instead.
 
 ```sh
 scripts/probe-harnesses.sh     # which agent CLIs exist, and which read no ambient context
@@ -67,11 +67,11 @@ What to settle, in this order, and why none of it is guessed:
   harness on PATH can still be walled, out of credit, or reading no ambient context. The
   shape of the answer is `config.example.toml` at the repo root.
 - **How tickets are created.** GitHub Issues on a GitHub Projects board is the default: a
-  kanban the operator can open, needing only `gh` logged in with the `project` scope. When
+  kanban the user can open, needing only `gh` logged in with the `project` scope. When
   the probe says `partial`, it names the one command that finishes it (`gh auth login`,
-  `gh auth refresh -s project`); the operator runs it, since a login is theirs, and you probe
+  `gh auth refresh -s project`); the user runs it, since a login is theirs, and you probe
   again. Plane is the other named kind: ask for the API origin and the workspace slug, ask
-  the operator to write `~/.postmaster/plane.env` with `PLANE_API_KEY=<key>` themselves,
+  the user to write `~/.postmaster/plane.env` with `PLANE_API_KEY=<key>` themselves,
   since a key never passes through a conversation, and confirm with `scripts/plane.sh
   projects`. Anything else is `other`, described once outside this repo
   (`skills/postmaster/trackers.md`).
@@ -81,7 +81,7 @@ What to settle, in this order, and why none of it is guessed:
 
 Then put the answers in a file, one `key=value` per line, and let the script write and check
 the config; it refuses a harness that is not on PATH, a coachman on a lane's model and a
-config that does not parse, and a refusal is a question back to the operator, not something
+config that does not parse, and a refusal is a question back to the user, not something
 to work around.
 
 ```sh
@@ -163,7 +163,7 @@ whole system.
 
 ## Design rules for the tool itself
 
-1. **Nothing repo-specific.** No hardcoded paths, hosts, trackers, build tools or operator
+1. **Nothing repo-specific.** No hardcoded paths, hosts, trackers, build tools or user
    names. The flow discovers what a project needs; it does not demand configuration.
 2. **Nothing harness-specific in the flow.** Every harness has its own flags and its own
    event format. That belongs behind an adapter (`skills/postmaster/harnesses.md`), not in
