@@ -29,6 +29,27 @@ Disagreement is also diagnostic. When two lanes build the same mechanism and nam
 differently, the project's own conventions did not decide it, and the coachman records the
 gap as a proposed rule rather than flipping a coin the next run will flip again.
 
+## Logging, auditing and tracing
+
+These are first-class concerns in postmaster, designed in from the start rather than added
+later. Several models change code in parallel, and nobody watches every step as it happens.
+The record of what they did is how the work gets checked, and how the flow itself improves.
+
+- **Every action is logged as it happens.** The postmaster and every coachman write one JSON
+  line per action, to the run's own log and to the project's ledger. The actions come from a
+  fixed set, so the log can be counted rather than read.
+- **Every run can be traced from ticket to merge.** The waybill records what was dispatched.
+  Each leg starts from the previous leg's written hand-off, and logs when it takes over and
+  when it hands off. Each lane's event stream is kept with the run, along with the id of its
+  harness thread. The ship card records what is proposed for merge and the evidence for it.
+- **Nothing is reconstructed afterwards.** The narrative in `run-log.md` is for reading.
+  Audits, and changes to the flow, work from the log.
+- **Claims trace to evidence.** The [wiki](wiki/index.md) gives every claim a standing and
+  cites the recorded runs and trials behind it.
+- **Checks are scripts with controls.** Anything deterministic is a script, and every count
+  comes with a control that could have come out the other way, so a passing check means
+  something.
+
 ## Wiki
 
 What the project has learned is in [`wiki/`](wiki/index.md), published with GitHub Pages, on
