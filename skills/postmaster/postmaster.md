@@ -63,7 +63,9 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
 3. **Create the run directory** `<runs>/<TICKET>/` with `logs/`, `audit/` and `render/`, and
    the manifest: `{"stage": "dispatched", "leg": 1, "base": "<sha>", "lanes": {}, "coachman":
    {"legs": {}}}`. You own `leg`, `base` and `coachman`; the coachman owns `stage` and
-   `lanes`; both update fields in place and neither rewrites the file.
+   `lanes`; both update fields in place and neither rewrites the file. Then record what the run
+   starts from, once: `scripts/run-meta.sh <dispatch> <repo>` writes `run.json` with the
+   postmaster commit, the config and the harness versions, and nothing edits it afterwards.
 4. **Cut the synthesis worktree** at BASE, the sha you recorded from `git -C <repo> rev-parse
    HEAD` on the default branch: `git -C <repo> worktree add .worktrees/<TICKET> -b <TICKET>
    <sha>`. The coachman's cwd is that worktree from its first leg, so the project's ambient
@@ -190,11 +192,12 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-5.md`:
    .worktrees/<TICKET>`; never with force unless the tree is clean and the card confirmed it)
    and log `teardown`. The workhorse worktrees are the coachman's; if any survive, remove them the
    same way after preserving any stray file into `<dispatch>/stray/`.
-3. **Close the run** in the manifest (`stage: done`) and never delete the dispatch directory.
+3. **Close the run** with `scripts/stage.sh <dispatch> done postmaster`, which does nothing if
+   the coachman already has, and never delete the dispatch directory.
 4. **Dispatch the next ticket** in order, Stage B.
 
 **Abandoning a run** happens only on the operator's word for that run: log `note` with the
-word, set the manifest to `stage: abandoned`, remove every worktree the run created after
+word, set the stage with `scripts/stage.sh <dispatch> abandoned postmaster`, remove every worktree the run created after
 preserving stray files, and move the ticket back to todo or to cancelled as the operator
 says. The dispatch directory stays.
 
