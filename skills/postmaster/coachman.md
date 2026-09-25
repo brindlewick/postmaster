@@ -155,9 +155,17 @@ instead of executing it, and a reasoned verdict is worth less than a run one.
 
 ## The arm contract
 
-An arm's final act is one of two files at its worktree root, and the brief spells both out in
-full, since some harnesses read nothing but the brief.
+An arm writes one file at its worktree root before anything else, and one of two files as its
+final act. The brief spells all three out in full, since some harnesses read nothing but the
+brief.
 
+- `ARM-SPEC.md`: written from `arm-spec-template.md` beside this file and committed first, on
+  its own, before any code: its approach, technical context, how it meets the ticket's
+  direction, the files it will touch, the decisions it made, and its tasks, each tagged with
+  the acceptance criterion it serves. It is not reviewed during the run and no stage waits on
+  it; the coachman copies it into the run's audit. The brief carries this instruction without
+  the link that follows.
+  [Why each horse drafts its own spec](../../wiki/concepts/horse-drafted-specs.md)
 - `ARM-SUMMARY.md`: what it built, as a list of the commits on its branch; how it verified
   it, as the commands it ran with their exit codes; every within-brief question it decided
   for itself, with the decision; what it did not do and why; and its own verdict on whether
@@ -193,8 +201,8 @@ An arm commits incrementally as it goes, never pushes, never reads other branche
    `checkpoint-1`, `review-style`, `review-bug`, `review-security`, `shipped`, `done`. Never
    delete it. It is the run's history, and the postmaster's poll reads it.
 6. **Write each arm's brief** to `<dispatch>/<lane>-prompt.txt`: the ticket verbatim, the
-   project profile, the docs to read first named explicitly, the `ARM-SUMMARY.md` /
-   `ARM-BLOCKED.md` contract, the autonomous-defaults rule (decide within-brief questions
+   project profile, the docs to read first named explicitly, the `ARM-SPEC.md` /
+   `ARM-SUMMARY.md` / `ARM-BLOCKED.md` contract with `arm-spec-template.md` in full, the autonomous-defaults rule (decide within-brief questions
    yourself and record the decision in `ARM-SUMMARY.md`), the capability statement above, the
    instruction to commit incrementally, and the line that the arm must not read other branches
    or `.worktrees/`. Where the arm's harness reads no ambient context file, the brief opens by
@@ -236,7 +244,8 @@ from it.
   (`harnesses.md` gives the per-harness location). For every arm, `ARM-SUMMARY.md` at the
   worktree root is the authoritative final act.
 - **Monitor: three exit shapes.** Each arm's final act is writing `ARM-SUMMARY.md` at its
-  worktree root. On exit, read the lane's harvest plus its worktree root:
+  worktree root. `ARM-SPEC.md` is not an exit shape: an arm that exits with a spec and no
+  summary has not finished. On exit, read the lane's harvest plus its worktree root:
   (a) **Summary present.** Mark the arm harvested; manifest `outcome: harvested`.
   (b) **Blocked.** `ARM-BLOCKED.md` present, or the last message ends in a question. Bypass
   flags do not stop a model pausing to ask mid-run; headless, the run EXITS there with the
@@ -260,7 +269,10 @@ from it.
 - **Run audit, automatic.** Once the arms are harvested (at the stall cutoff, whatever
   exists), write `<dispatch>/audit/<lane>.md` per arm from its durable record: thread id,
   branch, key actions digested from the logs and transcript, final message, `ARM-SUMMARY.md`
-  verdict. Attach every audit to the checkpoint 1 card. Do the same for any later fix thread a
+  verdict. Copy each arm's `ARM-SPEC.md` as its first commit added it to
+  `<dispatch>/audit/<lane>-spec.md`, and its final version to `<lane>-spec-final.md`. Record
+  whether that first commit comes before the arm's first code commit, and any acceptance
+  criterion with no task. Attach every audit to the checkpoint 1 card. Do the same for any later fix thread a
   checkpoint relies on.
 - **THERE IS NO SYNTHESIS BASE. You are the synthesizer: judge, then compose.** Do not
   fast-forward the ticket branch onto any lane. Start from BASE and write the synthesis

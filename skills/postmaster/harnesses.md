@@ -30,7 +30,8 @@ on one session messaging another; the postmaster polls files.
 | muse | `muse exec` | not recorded here | none | `--prompt-file` |
 
 A harness that reads no ambient context file must be handed the project's docs by name in its
-prompt, and must have the `ARM-SUMMARY.md` / `ARM-BLOCKED.md` contract spelled out in full. The
+prompt, and must have the `ARM-SPEC.md` / `ARM-SUMMARY.md` / `ARM-BLOCKED.md` contract spelled
+out in full. The
 others pick both up from the brief and the docs. A harness that reads a context file under a
 different name needs that file present: a `CLAUDE.md` that is a symlink to `AGENTS.md` serves
 both.
@@ -99,7 +100,7 @@ cd <wt> && agy -p "$(cat <dispatch>/<lane>-prompt.txt)" \
 - `--sandbox` is opt-IN restriction. Never pass it to a lane.
 - Reads NO ambient context file: not `AGENTS.md`, `GEMINI.md`, `AGENT.md`, `.agy/` or
   `.antigravity/`. The prompt must open by naming the project's docs and must spell out the
-  `ARM-SUMMARY.md` / `ARM-BLOCKED.md` contract.
+  `ARM-SPEC.md` / `ARM-SUMMARY.md` / `ARM-BLOCKED.md` contract.
 - Thread id: `conversationId` in the stream.
 - Final message: the last result line of the events stream.
 - Resume: relaunch against its `conversationId`; `agy --help` for the flag. Not recorded here,

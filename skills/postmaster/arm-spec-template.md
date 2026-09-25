@@ -1,0 +1,56 @@
+# ARM-SPEC.md template
+
+An arm copies the block below to `ARM-SPEC.md` at its worktree root, fills it in, and commits
+it on its own before writing any code. The format is adapted from GitHub Spec Kit's plan and
+tasks templates, in one file.
+
+```markdown
+# Spec: <ticket id> <ticket title>
+
+## Summary
+
+<The ticket's requirement in one sentence, and the approach this arm will take.>
+
+## Technical context
+
+<Only the lines that apply.>
+
+- **Language and version**:
+- **Dependencies used or added**:
+- **Testing**: <the commands that will show each acceptance criterion is met>
+- **Constraints**: <from the ticket's direction and the project's own rules>
+
+## Direction check
+
+<Each constraint in the ticket's direction and in the project's own rules (its AGENTS.md or
+equivalent), and how this plan meets it. A departure goes in the table under Complexity
+tracking.>
+
+## Structure
+
+<The files and directories this arm will create or change.>
+
+## Complexity tracking
+
+<Only if the direction check has a departure.>
+
+| Departure | Why needed | Simpler alternative rejected because |
+|---|---|---|
+
+## Decisions
+
+<Each choice the ticket left open, and what this arm chose. There is no one to ask during
+the run: decide, and record it here.>
+
+## Tasks
+
+Format: `- [ ] T<n> [P] [AC<n>] <description, with exact file paths>`.
+`[P]` marks a task that depends on no other. `[AC<n>]` names the acceptance criterion the
+task serves. Every acceptance criterion has at least one task.
+
+- [ ] T001 [AC1] <description>
+```
+
+Tasks may be ticked in later commits as they are done. A task dropped or added along the way
+is noted in `ARM-SUMMARY.md`. The commit that first adds `ARM-SPEC.md` is the record of intent
+and is not rewritten.

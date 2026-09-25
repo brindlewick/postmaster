@@ -8,6 +8,23 @@ updated: 2026-09-22
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-23] ingest | a horse's spec uses Spec Kit's plan and tasks format
+
+Captured GitHub Spec Kit's spec, plan and tasks templates into
+`raw/articles/spec-kit-templates/`, with their MIT license, pinned to one commit. A horse's
+A horse's own spec now follows the plan and tasks templates in one file; the ticket plays the part of
+Spec Kit's spec. The decision page records the mapping and the three adaptations. The source is
+outside work: it shapes the format and does not move the page's standing, which stays
+`claimed`.
+
+## [2026-09-23] ingest | each horse drafts its own spec
+
+First page in the Decisions area. The ticket carries the what, the why and the high-level
+direction; each horse then drafts its own detailed spec, committed before any code. It keeps the
+horses independent and the coachman a neutral judge, and at this stage it is an audit record
+that nobody reviews during the run. Standing `claimed`, since no run bears on it yet; issue #9
+is the test.
+
 ## [2026-09-22] lint | lint claims only what it checks
 
 The skill introduced its list of checks with "what it enforces", but the script did six of

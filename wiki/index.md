@@ -36,7 +36,10 @@ What the services and CLIs postmaster depends on actually do. Nothing yet.
 
 ## Decisions
 
-Why the design is shaped as it is. Nothing yet.
+Why the design is shaped as it is.
+
+- [Each horse drafts its own spec](concepts/horse-drafted-specs.md): **claimed**. It keeps the
+  horses independent of each other and of the coachman, and makes each run auditable.
 
 ## Sources
 
