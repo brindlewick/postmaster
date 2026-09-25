@@ -8,6 +8,12 @@ updated: 2026-09-22
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-23] lint | workhorse replaces arm
+
+The project no longer says arm for a lane that implements the ticket; it says workhorse, and a
+workhorse's own plan is the workhorse spec. The decision page is renamed to match, as is the
+template it describes. Entries below that say arm or horse stand as written.
+
 ## [2026-09-23] ingest | a horse's spec uses Spec Kit's plan and tasks format
 
 Captured GitHub Spec Kit's spec, plan and tasks templates into

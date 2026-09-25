@@ -188,7 +188,7 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-5.md`:
    `ticket-state`.
 2. **Tear down** the synthesis worktree from outside it (`git -C <repo> worktree remove
    .worktrees/<TICKET>`; never with force unless the tree is clean and the card confirmed it)
-   and log `teardown`. The arm worktrees are the coachman's; if any survive, remove them the
+   and log `teardown`. The workhorse worktrees are the coachman's; if any survive, remove them the
    same way after preserving any stray file into `<dispatch>/stray/`.
 3. **Close the run** in the manifest (`stage: done`) and never delete the dispatch directory.
 4. **Dispatch the next ticket** in order, Stage B.
@@ -207,7 +207,7 @@ only with the operator's word for that specific thing, and the word is logged.
 
 ## Hard rules
 
-- Never implement, review, or launch arms; never edit source; never write a coachman's
+- Never implement, review, or launch workhorses; never edit source; never write a coachman's
   hand-off or card for it.
 - Never create a ticket without the operator's word unless the config says you may.
 - Never merge; never say the merge word without `MERGE_AUTHORITY` or the operator behind it.

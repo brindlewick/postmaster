@@ -38,8 +38,9 @@ What the services and CLIs postmaster depends on actually do. Nothing yet.
 
 Why the design is shaped as it is.
 
-- [Each horse drafts its own spec](concepts/horse-drafted-specs.md): **claimed**. It keeps the
-  horses independent of each other and of the coachman, and makes each run auditable.
+- [The workhorse spec](concepts/workhorse-spec.md): **claimed**. Each workhorse drafts its
+  own, which keeps the workhorses independent of each other and of the coachman, and makes
+  each run auditable.
 
 ## Sources
 

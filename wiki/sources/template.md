@@ -22,7 +22,7 @@ than implying the record is complete.
 
 - Target: `<repository name>`
 - Ticket: `<id>`, one line on what it asked for
-- Lanes: `<name>` (`<harness>`, `<model>`), one per line; which were arms, which reviewers
+- Lanes: `<name>` (`<harness>`, `<model>`), one per line; which were workhorses, which reviewers
 - Coachman: `<harness>`, `<model>`
 - Outcome: shipped, abandoned or still open, and the date
 

@@ -1,15 +1,15 @@
-# ARM-SPEC.md template
+# Workhorse spec template
 
-An arm copies the block below to `ARM-SPEC.md` at its worktree root, fills it in, and commits
+A workhorse copies the block below to `WORKHORSE-SPEC.md` at its worktree root, fills it in, and commits
 it on its own before writing any code. The format is adapted from GitHub Spec Kit's plan and
 tasks templates, in one file.
 
 ```markdown
-# Spec: <ticket id> <ticket title>
+# Workhorse spec: <ticket id> <ticket title>
 
 ## Summary
 
-<The ticket's requirement in one sentence, and the approach this arm will take.>
+<The ticket's requirement in one sentence, and the approach this workhorse will take.>
 
 ## Technical context
 
@@ -28,7 +28,7 @@ tracking.>
 
 ## Structure
 
-<The files and directories this arm will create or change.>
+<The files and directories this workhorse will create or change.>
 
 ## Complexity tracking
 
@@ -39,7 +39,7 @@ tracking.>
 
 ## Decisions
 
-<Each choice the ticket left open, and what this arm chose. There is no one to ask during
+<Each choice the ticket left open, and what this workhorse chose. There is no one to ask during
 the run: decide, and record it here.>
 
 ## Tasks
@@ -52,5 +52,5 @@ task serves. Every acceptance criterion has at least one task.
 ```
 
 Tasks may be ticked in later commits as they are done. A task dropped or added along the way
-is noted in `ARM-SUMMARY.md`. The commit that first adds `ARM-SPEC.md` is the record of intent
+is noted in `WORKHORSE-SUMMARY.md`. The commit that first adds `WORKHORSE-SPEC.md` is the record of intent
 and is not rewritten.

@@ -9,7 +9,7 @@ over proof of delivery to the next leg or to the postmaster.
 written to disk is indistinguishable from a dead one and will be killed and restarted.
 
 Vocabulary: a **lane** is a harness plus a model plus an effort, named in the waybill. An
-**arm** is a lane implementing the ticket; a **reviewer** is a lane reviewing the synthesis.
+**workhorse** is a lane implementing the ticket; a **reviewer** is a lane reviewing the synthesis.
 Every harness-specific command in this runbook is written as a form ("launch form", "resume
 form"); `harnesses.md` beside this file gives the exact invocation per harness, and the waybill
 says which harness each lane runs on. Every `scripts/` path in this runbook is relative to the
@@ -25,12 +25,12 @@ waybill carries, is `SKILL.md`. You do not need it.
 | `<dispatch>/manifest.json` | `stage`, `leg`, `base`, `lanes.<lane>.{thread_id, outcome}`, `coachman.legs.<n>.thread_id`; the postmaster creates it and owns `leg`, `base` and `coachman`, you own `stage` and `lanes`; update fields in place, never rewrite the file |
 | `<dispatch>/run-log.md` | running narrative, appended as you go |
 | `<dispatch>/logs/` | one events stream per lane and per review round |
-| `<dispatch>/audit/<lane>.md` | per-arm digest of its durable record |
+| `<dispatch>/audit/<lane>.md` | per-workhorse digest of its durable record |
 | `<dispatch>/leg-<n>-prompt.txt` | the postmaster's one-paragraph prompt that started leg `n` |
 | `<dispatch>/handoff-<n>.md` | leg `n`'s hand-off, the whole of what leg `n+1` knows |
 | `<dispatch>/.leg-<n>-done`, `.leg-<n>-exited` | leg `n` finished its hand-off; leg `n`'s process exited |
 | `<repo>/.worktrees/<TICKET>` | synthesis worktree, branch `<TICKET>` |
-| `<repo>/.worktrees/<TICKET>-<lane>` | arm worktree, branch `ab/<TICKET>-<lane>` (`ab` for arm branch) |
+| `<repo>/.worktrees/<TICKET>-<lane>` | workhorse worktree, branch `wb/<TICKET>-<lane>` (`wb` for workhorse branch) |
 | `<dispatch>/checkpoint-<n>.md` | checkpoint cards: `1`, `style`, `bug`, `security` |
 | `<repo>/.worktrees/<TICKET>-rev-<lane>` | reviewer scratch, detached at the synthesis HEAD, fresh every round |
 
@@ -45,8 +45,8 @@ the script at the moment it happens, never reconstructed afterwards:
 scripts/log-action.sh <dispatch> coachman <action> <target> <detail>
 ```
 
-The actions, and where they fire: `dispatch` per arm launch (target the lane, detail the thread
-id); `resume` per resumed thread; `harvest` per arm (detail its exit shape); `synthesize` once,
+The actions, and where they fire: `dispatch` per workhorse launch (target the lane, detail the thread
+id); `resume` per resumed thread; `harvest` per workhorse (detail its exit shape); `synthesize` once,
 with the SYNTHESIS line as the detail; `rule` per conventional divergence recorded; `review-launch`
 and `review-harvest` per lane per round; `finding` per verified finding (detail severity, lens,
 which lanes found it, verified by execution or reading); `apply` per fix; `degrade` per lane per
@@ -132,7 +132,7 @@ you never do. A leg that exits without its hand-off is spent, and the postmaster
 `.escalation-ready` and exits; the ruling arrives as a resume of the same thread, and the
 leg continues.
 
-## Lane capability: arms and reviewers alike
+## Lane capability: workhorses and reviewers alike
 
 **Every lane may run anything it needs in its own worktree or scratch: shell commands,
 installs, builds, the full gate suite, and a browser.** Browser work uses the project's own
@@ -146,43 +146,43 @@ every gate is never blocked by a browser.
 on every launch and every resume.
 
 **The containment is the WORKTREE, not a permission flag.** No harness has verified mechanical
-write enforcement, so an arm is confined by having its own worktree and a reviewer by having its
+write enforcement, so a workhorse is confined by having its own worktree and a reviewer by having its
 own disposable scratch. **The one prohibition for a reviewer is modifying the code under
 review.**
 
 **Say so in every brief.** A lane that does not know it may run the suite reasons about the code
 instead of executing it, and a reasoned verdict is worth less than a run one.
 
-## The arm contract
+## The workhorse contract
 
-An arm writes one file at its worktree root before anything else, and one of two files as its
-final act. The brief spells all three out in full, since some harnesses read nothing but the
-brief.
+A workhorse writes one file at its worktree root before anything else, and one of two files as
+its final act. The brief spells all three out in full, since some harnesses read nothing but
+the brief.
 
-- `ARM-SPEC.md`: written from `arm-spec-template.md` beside this file and committed first, on
-  its own, before any code: its approach, technical context, how it meets the ticket's
-  direction, the files it will touch, the decisions it made, and its tasks, each tagged with
-  the acceptance criterion it serves. It is not reviewed during the run and no stage waits on
-  it; the coachman copies it into the run's audit. The brief carries this instruction without
-  the link that follows.
-  [Why each horse drafts its own spec](../../wiki/concepts/horse-drafted-specs.md)
-- `ARM-SUMMARY.md`: what it built, as a list of the commits on its branch; how it verified
+- `WORKHORSE-SPEC.md`, the **workhorse spec**: written from `workhorse-spec-template.md`
+  beside this file and committed first, on its own, before any code: its approach, technical
+  context, how it meets the ticket's direction, the files it will touch, the decisions it
+  made, and its tasks, each tagged with the acceptance criterion it serves. It is not reviewed
+  during the run and no stage waits on it; the coachman copies it into the run's audit. The
+  brief carries this instruction without the link that follows.
+  [Why each workhorse drafts its own spec](../../wiki/concepts/workhorse-spec.md)
+- `WORKHORSE-SUMMARY.md`: what it built, as a list of the commits on its branch; how it verified
   it, as the commands it ran with their exit codes; every within-brief question it decided
   for itself, with the decision; what it did not do and why; and its own verdict on whether
   the ticket's acceptance criteria are met, one line per criterion. Written last, committed,
   and the process then exits.
-- `ARM-BLOCKED.md`: written instead when the arm cannot proceed without a ruling that is
+- `WORKHORSE-BLOCKED.md`: written instead when the workhorse cannot proceed without a ruling that is
   genuinely destructive or scope-changing. The question, the options it sees, its
   recommendation, and the state of its branch. The process then exits; the coachman resumes
   it with the ruling.
 
-An arm commits incrementally as it goes, never pushes, never reads other branches or
+A workhorse commits incrementally as it goes, never pushes, never reads other branches or
 `.worktrees/`, and never edits files outside its worktree.
 
 ## Stage 0 (leg 1): bootstrap
 
 1. **Read the waybill.** It names the ticket, the project profile (gate command, docs to read
-   first, tracker, the project's own risk surfaces), the team (arms, reviewers, the coachman),
+   first, tracker, the project's own risk surfaces), the team (workhorses, reviewers, the coachman),
    `CHECKPOINT_MODE` and `MERGE_AUTHORITY`.
 2. **Base pre-flight.** The waybill's BASE is authoritative. The main checkout must be on the
    default branch at BASE (`git -C <repo> rev-parse HEAD` prints BASE) and clean
@@ -193,29 +193,29 @@ An arm commits incrementally as it goes, never pushes, never reads other branche
    `grep -qxF '.worktrees/' <repo>/.git/info/exclude || echo '.worktrees/' >> <repo>/.git/info/exclude`.
 4. **Check the run's directories exist** (`mkdir -p <dispatch>/logs <dispatch>/audit
    <dispatch>/render` is idempotent) and that the synthesis worktree the postmaster cut is at
-   BASE and is your cwd; then cut one arm worktree per arm from BASE.
+   BASE and is your cwd; then cut one workhorse worktree per workhorse from BASE.
 5. **Update the manifest** the postmaster created: set `stage: bootstrapped` and add one
    `lanes` entry per lane, in place, never rewriting the file (the postmaster owns `leg`,
    `base` and `coachman`). Keep `stage`,
-   thread ids and outcomes current at every transition: `arms-running`, `synthesis`,
+   thread ids and outcomes current at every transition: `workhorses-running`, `synthesis`,
    `checkpoint-1`, `review-style`, `review-bug`, `review-security`, `shipped`, `done`. Never
    delete it. It is the run's history, and the postmaster's poll reads it.
-6. **Write each arm's brief** to `<dispatch>/<lane>-prompt.txt`: the ticket verbatim, the
-   project profile, the docs to read first named explicitly, the `ARM-SPEC.md` /
-   `ARM-SUMMARY.md` / `ARM-BLOCKED.md` contract with `arm-spec-template.md` in full, the autonomous-defaults rule (decide within-brief questions
-   yourself and record the decision in `ARM-SUMMARY.md`), the capability statement above, the
-   instruction to commit incrementally, and the line that the arm must not read other branches
-   or `.worktrees/`. Where the arm's harness reads no ambient context file, the brief opens by
+6. **Write each workhorse's brief** to `<dispatch>/<lane>-prompt.txt`: the ticket verbatim, the
+   project profile, the docs to read first named explicitly, the `WORKHORSE-SPEC.md` /
+   `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract with `workhorse-spec-template.md` in full, the autonomous-defaults rule (decide within-brief questions
+   yourself and record the decision in `WORKHORSE-SUMMARY.md`), the capability statement above, the
+   instruction to commit incrementally, and the line that the workhorse must not read other branches
+   or `.worktrees/`. Where the workhorse's harness reads no ambient context file, the brief opens by
    naming the project's context file and index.
 
 ## Stage 1 (leg 1): implement, then synthesize
 
-**Launch every arm as a headless resumable thread**, each in its own worktree, all in the
+**Launch every workhorse as a headless resumable thread**, each in its own worktree, all in the
 same breath as background processes, through the launch script so the form is never copied
 by hand:
 
 ```sh
-( scripts/launch.sh launch <lane> <arm-wt> <dispatch>/<lane>-prompt.txt --last <dispatch>/logs/<lane>-last.md \
+( scripts/launch.sh launch <lane> <workhorse-wt> <dispatch>/<lane>-prompt.txt --last <dispatch>/logs/<lane>-last.md \
     > <dispatch>/logs/<lane>-events.jsonl 2> <dispatch>/logs/<lane>.err;
   touch <dispatch>/logs/<lane>.done ) &
 ```
@@ -224,12 +224,12 @@ No composer, no interactive session, no registration.
 The streaming output format is load-bearing: the thread id and the final message are harvested
 from it.
 
-- **Record every arm's thread id as it starts, in `run-log.md` AND the manifest**
+- **Record every workhorse's thread id as it starts, in `run-log.md` AND the manifest**
   (`harnesses.md` says where each harness prints it). The postmaster moved the ticket to in-progress at
   dispatch; you do not touch its state before stage 5. An unrecorded
   thread is a needle in a haystack: the ids are the handles for answers, fix loops, follow-ups
-  and debugging. Bump manifest `stage` to `arms-running`.
-- **While the arms run, write the acceptance tests, blind.** Before you read any lane's diff
+  and debugging. Bump manifest `stage` to `workhorses-running`.
+- **While the workhorses run, write the acceptance tests, blind.** Before you read any lane's diff
   or log beyond its thread id, turn the ticket's acceptance criteria and `User journey` into
   tests at the ticket's own interface: the route, flag, file, or visible behaviour the ticket
   names, never a function shape, which is what the lanes were dispatched to choose. Commit
@@ -241,37 +241,37 @@ from it.
   compose on reading alone. Your reading of the ticket is a single reading: the reviewers see
   these tests with the synthesis and may challenge them like any other line.
 - **Harvest.** Each lane's final message is the last result line of its events stream
-  (`harnesses.md` gives the per-harness location). For every arm, `ARM-SUMMARY.md` at the
+  (`harnesses.md` gives the per-harness location). For every workhorse, `WORKHORSE-SUMMARY.md` at the
   worktree root is the authoritative final act.
-- **Monitor: three exit shapes.** Each arm's final act is writing `ARM-SUMMARY.md` at its
-  worktree root. `ARM-SPEC.md` is not an exit shape: an arm that exits with a spec and no
+- **Monitor: three exit shapes.** Each workhorse's final act is writing `WORKHORSE-SUMMARY.md` at its
+  worktree root. `WORKHORSE-SPEC.md` is not an exit shape: a workhorse that exits with a spec and no
   summary has not finished. On exit, read the lane's harvest plus its worktree root:
-  (a) **Summary present.** Mark the arm harvested; manifest `outcome: harvested`.
-  (b) **Blocked.** `ARM-BLOCKED.md` present, or the last message ends in a question. Bypass
+  (a) **Summary present.** Mark the workhorse harvested; manifest `outcome: harvested`.
+  (b) **Blocked.** `WORKHORSE-BLOCKED.md` present, or the last message ends in a question. Bypass
   flags do not stop a model pausing to ask mid-run; headless, the run EXITS there with the
   question as its final message, a detectable and answerable state rather than a hidden hang.
   Answer within-brief questions yourself, restating the autonomous-defaults rule, via that
-  arm's resume form. Only a genuinely destructive or scope-changing decision goes up, as an
+  workhorse's resume form. Only a genuinely destructive or scope-changing decision goes up, as an
   escalation to the postmaster with your recommendation attached. Manifest `outcome: blocked`
   until resolved.
   (c) **Neither** (died mid-flight). Read the lane's log tail and transcript, then remount it
   (resume) or re-dispatch. A lane silent for about 15 minutes with no exit is inspected. Stall cutoff 90
   minutes: stop waiting and bring partial results to checkpoint 1 rather than blocking;
-  synthesis from the completed arms is an option there. Manifest `outcome: stalled`.
-- **Reap = let the thread exit.** Nothing to kill: arm threads end themselves and their
+  synthesis from the completed workhorses is an option there. Manifest `outcome: stalled`.
+- **Reap = let the thread exit.** Nothing to kill: workhorse threads end themselves and their
   conversations are durable in each harness's own store. Verification runs against the code,
-  never by interrogating an arm. Keep threads UNARCHIVED while the run lives; that preserves
+  never by interrogating a workhorse. Keep threads UNARCHIVED while the run lives; that preserves
   follow-up questions via the resume forms and the interactive scrollback each harness offers
   on a finished thread.
 - **Verify before trusting.** Read each summary, then check every load-bearing claim against
-  the arm's actual diff and the repo code. Arms ship false absolutes in docs and commit
+  the workhorse's actual diff and the repo code. Workhorses ship false absolutes in docs and commit
   messages.
-- **Run audit, automatic.** Once the arms are harvested (at the stall cutoff, whatever
-  exists), write `<dispatch>/audit/<lane>.md` per arm from its durable record: thread id,
-  branch, key actions digested from the logs and transcript, final message, `ARM-SUMMARY.md`
-  verdict. Copy each arm's `ARM-SPEC.md` as its first commit added it to
+- **Run audit, automatic.** Once the workhorses are harvested (at the stall cutoff, whatever
+  exists), write `<dispatch>/audit/<lane>.md` per workhorse from its durable record: thread id,
+  branch, key actions digested from the logs and transcript, final message, `WORKHORSE-SUMMARY.md`
+  verdict. Copy each workhorse's `WORKHORSE-SPEC.md` as its first commit added it to
   `<dispatch>/audit/<lane>-spec.md`, and its final version to `<lane>-spec-final.md`. Record
-  whether that first commit comes before the arm's first code commit, and any acceptance
+  whether that first commit comes before the workhorse's first code commit, and any acceptance
   criterion with no task. Attach every audit to the checkpoint 1 card. Do the same for any later fix thread a
   checkpoint relies on.
 - **THERE IS NO SYNTHESIS BASE. You are the synthesizer: judge, then compose.** Do not
@@ -339,10 +339,10 @@ from it.
   trends and the switch rate across many runs; never a result from a handful.
 
   **Check which branches actually moved off BASE before comparing anything.** A walled or
-  failed arm leaves its branch at BASE and has contributed nothing to read. Record that lane
+  failed workhorse leaves its branch at BASE and has contributed nothing to read. Record that lane
   DEGRADED rather than absent, say so on the card, and compose from the lanes that produced
   work.
-- **Checkpoint 1 card, then the hand-off:** per-arm outcome (or stall); **the SYNTHESIS line, the ranking, what
+- **Checkpoint 1 card, then the hand-off:** per-workhorse outcome (or stall); **the SYNTHESIS line, the ranking, what
   was taken from each lane, what was rejected and why**; the code-verified evidence behind each
   choice; the convention gaps found; what was dropped; gate status. A card that presents a
   finished diff without saying which lane each part came from is the defaulting failure
@@ -358,7 +358,7 @@ shares one coachman and the deferred findings it carries. Per pass:
 
 1. **Write `review-<pass>-brief.md`** in the dispatch dir: the diff scope (synthesis worktree,
    `git diff <BASE>...HEAD`); the project profile plus this pass's specific pointers from it;
-   findings already known (prior passes, arm divergences) so reviewers hunt residues and new
+   findings already known (prior passes, workhorse divergences) so reviewers hunt residues and new
    holes; and the output contract: severity P1 to P3, file:line, quoted code as evidence,
    confidence, and for security an exploit path. **State in every brief that the lane is
    working in its own disposable worktree with dependencies installed, that it may run anything
@@ -430,7 +430,7 @@ shares one coachman and the deferred findings it carries. Per pass:
    The script proves its reader both ways before polling, and names what never arrived on a
    timeout. Every round has its own markers (`r1`, `r2`, ...), so a later round can never
    collect an earlier round's files. An unbounded wait and an absent wait fail the same way. Same rule for the stage 1
-   arms and for every gating round.
+   workhorses and for every gating round.
 
    **At harvest, classify every lane REVIEWED or DEGRADED.** A lane that never launched, died
    and was not recovered, or ran without tool use is DEGRADED: record it, and do not count its
@@ -547,9 +547,9 @@ shares one coachman and the deferred findings it carries. Per pass:
 Final `run-log.md` entry (per-lane win record, findings counts, timings, cost) plus a closing
 dated comment on the ticket. Manifest `stage: done`; never delete the dispatch directory or the
 manifest, they are the run's history. Archive finished threads where the harness has an archive
-form (`harnesses.md`). After the merge, tear down the arm worktrees, preserving any stray file
-first (an arm killed mid-run leaves real artifacts), and hand the synthesis worktree to the
-postmaster for removal from outside it. Keep the `ab/<TICKET>-<lane>` branches as a local
+form (`harnesses.md`). After the merge, tear down the workhorse worktrees, preserving any stray file
+first (a workhorse killed mid-run leaves real artifacts), and hand the synthesis worktree to the
+postmaster for removal from outside it. Keep the `wb/<TICKET>-<lane>` branches as a local
 archive. Durable process learnings go to the project's own docs, not this runbook. Residue
 contract: a clean run leaves only torn-down-able worktrees. Then finish `handoff-5.md`
 (the closing state of every branch and the ticket), log `handoff`, touch `.leg-5-done`, and
@@ -565,7 +565,7 @@ logical order, not file safety: check the file surfaces before mass-launching.
 
 ## Hard rules
 
-- The postmaster never implements, reviews, or launches arms; you never prepare a run, write
+- The postmaster never implements, reviews, or launches workhorses; you never prepare a run, write
   your own waybill, or launch your own next leg. Neither of you does the other's job.
 - Never start a leg without logging `handoff-accept`; never end one without a hand-off that
   passes `scripts/handoff-check.sh`. What is not in the hand-off did not happen for the next
@@ -574,9 +574,9 @@ logical order, not file safety: check the file surfaces before mass-launching.
   work is invisible to a fallback coachman that takes the leg over, and unverified to it.
 - One identity everywhere: do not switch a harness onto a different profile or account part-way
   through a run. A lane that changes identity mid-run is not the lane that was gated.
-- Base pre-flight before cutting worktrees: a dirty main checkout means the arms build on stale
+- Base pre-flight before cutting worktrees: a dirty main checkout means the workhorses build on stale
   committed history and drop uncommitted work. Verify clean, or escalate, first.
-- Arms never push; only stage 5's gated local merge touches the default branch. No push, no PR,
+- Workhorses never push; only stage 5's gated local merge touches the default branch. No push, no PR,
   no outward message of any kind from this flow; the ticket comments are the outward record.
 - Launch nothing before the waybill's launch card is confirmed: every lane's model and effort,
   the coachman, the reviewer lineup, the gate selection, on one card.
@@ -584,15 +584,15 @@ logical order, not file safety: check the file surfaces before mass-launching.
   judgment between the lanes and review, and it is independent only if it did not produce one
   of the answers it is judging. A different vendor is necessary, not sufficient: the popularity
   trap is measured across families, so the rule about agreement still binds.
-- Coachmen and arms are headless and have no composer. Verify arm claims against code before
+- Coachmen and workhorses are headless and have no composer. Verify workhorse claims against code before
   trusting them. Merge, never rebase.
 - There is no synthesis base: compose the result from all lanes with a recorded reason per
   choice, and never fast-forward the ticket branch onto a lane's branch. Compare each lane's
   diff in writing before concluding anything, and record the SYNTHESIS line in `run-log.md`.
-- Reap by process exit: arms are headless resumable threads that end themselves, and nothing is
+- Reap by process exit: workhorses are headless resumable threads that end themselves, and nothing is
   killed in a standard run. Record every thread id at dispatch; prefer resuming a thread over
   re-briefing a fresh one, since the thread carries its own context. Threads stay unarchived
-  until stage 6. The rare interactive arm (live mid-run steering genuinely needed) runs in its
+  until stage 6. The rare interactive workhorse (live mid-run steering genuinely needed) runs in its
   own named tmux session, is captured (scrollback to the dispatch dir) and killed as soon as
   harvested, never left to linger, never your own session (confirm with
   `tmux display-message -p '#S'`); kill only sessions YOU spawned, and inspect the pane first
@@ -603,10 +603,10 @@ logical order, not file safety: check the file surfaces before mass-launching.
 - **Know your own harness's background-task lifetime** (`harnesses.md`). A long lane outlives
   it. A "stopped" notification without a quota error is the cap, not a failure and not a human:
   resume the thread in place; worktree and context survive. Budget long legs for it.
-- **Arms must not read other branches or `.worktrees/`.** Those hold other runs' work,
-  including abandoned and rejected approaches. Put the line in every arm brief; it costs
+- **Workhorses must not read other branches or `.worktrees/`.** Those hold other runs' work,
+  including abandoned and rejected approaches. Put the line in every workhorse brief; it costs
   nothing and closes all three paths (`git branch`, a plain recursive grep, and listing the
-  directory). Re-runs of a ticket whose `ab/<TICKET>-*` branches still exist are the loud case;
+  directory). Re-runs of a ticket whose `wb/<TICKET>-*` branches still exist are the loud case;
   concurrent lanes in a normal run are safe, since no lane has commits until it finishes.
 - Gating review passes are goal-loops, not single shots: a pass whose fixes were never
   re-reviewed is not done.
@@ -628,8 +628,8 @@ logical order, not file safety: check the file surfaces before mass-launching.
   invite the challenge. A deferral that is never restated cannot be corrected.
 - **When the lanes converge on a prescribed one-line fix, apply it and re-review; do not bank
   it as a ship-comment note.** Skipping a round that way ships a documented hole.
-- **The render gate is the coachman's job whenever an arm could not run it.** An arm on a
-  harness with no browser backend cannot run one, and an arm that did run one tested its own
+- **The render gate is the coachman's job whenever a workhorse could not run it.** A workhorse on a
+  harness with no browser backend cannot run one, and a workhorse that did run one tested its own
   UI, not the synthesis. Serve the production build on a temporary database (never the live
   database, never the app's real port), drive the project's own browser library across the
   new surfaces at phone width and desktop width in every theme the app offers, assert
@@ -666,6 +666,6 @@ logical order, not file safety: check the file surfaces before mass-launching.
   main checkout while the project's own code is clean. Establish whose file it is before
   touching shared config, and file the hygiene fix as its own ticket rather than editing lint
   config on the default branch mid-flight for another live run.
-- **A coachman cannot remove its own worktree.** Tear down the arm worktrees at stage 6,
+- **A coachman cannot remove its own worktree.** Tear down the workhorse worktrees at stage 6,
   preserving any stray file first, and hand the synthesis worktree to the postmaster for
   removal from an outside process.
