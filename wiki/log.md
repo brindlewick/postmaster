@@ -8,6 +8,16 @@ updated: 2026-09-26
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-26] query | headless stays the default; live agents become an option
+
+Asked whether headless runs are the better arrangement. On the trial, yes: a headless lane
+exits about as soon after its last reply as Herdr notices a live one finish, the rest of the
+marker's delay is a poll that can be shortened, and Herdr's settled states can mislead.
+Decided: lanes and coachman legs stay headless, the postmaster stays the one interactive agent,
+Herdr hosts every run for observability, and live agents become a config option, off by
+default. The live-agents page records the decision, keeps its measurement as what would change
+the default, and lists what the option needs. Its standing stays `claimed`.
+
 ## [2026-09-26] ingest | Herdr's agent states, and live agents against markers
 
 A trial of Herdr 0.9.1 with pi 0.87.0 and claude 2.1.283 against a stand-in model, recorded in

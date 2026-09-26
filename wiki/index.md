@@ -44,8 +44,8 @@ Why the design is shaped as it is.
 - [The workhorse spec](concepts/workhorse-spec.md): **claimed**. Each workhorse drafts its
   own, which keeps the workhorses independent of each other and of the coachman, and makes
   each run auditable.
-- [Live agents against markers and resumes](concepts/live-agents.md): **claimed**. Whether
-  lanes and legs should run as live agents in Herdr panes, and the measurement that decides.
+- [Live agents against markers and resumes](concepts/live-agents.md): **claimed**. Headless
+  stays the default and live agents become an option; what it would take to change the default.
 
 ## Sources
 
