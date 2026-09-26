@@ -522,7 +522,9 @@ wait "${hidden[@]}"
 echo "the tickets: each hidden suite fails on the app as committed and passes on its reference"
 [ "$(tickets | wc -l)" -ge 2 ] && ok "there are at least two tickets" || fail "there are at least two tickets"
 for t in $(tickets); do
-  [ -n "$(ticket_title "$t")" ] && [ -n "$(ticket_body "$t")" ] && ok "$t: a title line and a body" || fail "$t: a title line and a body"
+  ticket_body "$t" > "$tmp/body-$t.md"
+  out=$("$HERE/ticket-check.sh" --body "$tmp/body-$t.md" --title "$(ticket_title "$t")" 2>&1); rc=$?
+  [ $rc -eq 0 ] && ok "$t: in the ticket shape, by scripts/ticket-check.sh" || fail "$t: in the ticket shape, by scripts/ticket-check.sh (exit $rc)" "$out"
   [ "$(rc_of "applied-$t")" = 0 ] && ok "$t: the reference solution applies to the app" || fail "$t: the reference solution applies to the app"
   [ "$(rc_of "hidden-app-$t")" = 2 ] && ok "$t: the hidden suite fails on the app as committed" \
     || fail "$t: the hidden suite fails on the app as committed (exit $(rc_of "hidden-app-$t"))" "$(cat "$tmp/hidden-app-$t.out" "$tmp/hidden-app-$t.err")"
