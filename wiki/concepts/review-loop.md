@@ -10,8 +10,8 @@ updated: 2026-09-25
 
 **Claim.** Style, bug and security review work better as one loop in one leg than as three
 passes in three legs. Each round runs every lens still open on one snapshot: all three in round
-1, then bug and security until clean. That takes fewer rounds and one leg start-up instead of
-three, and every fix is re-reviewed by both gating lenses.
+1, then bug and security until clean. It should take fewer rounds, it needs one leg start-up
+instead of three, and every fix is re-reviewed by both gating lenses.
 
 **Standing: claimed.** This is a decision taken on reasoning. No run has been recorded under
 either design, so neither the time saved nor the coverage gained is measured yet. The change is
@@ -38,10 +38,12 @@ either design, so neither the time saved nor the coverage gained is measured yet
 - **Concurrency.** Round 1 runs every reviewer lane under every lens at once, and each may run
   the full test suite. With two reviewer lanes that is six processes where there were two. The
   levers are the run ceiling and the test runner's worker cap. A cap on reviewers per round is
-  added only if runs show one is needed.
+  added only if runs show one is needed. Each lane also runs three reviews at once on one
+  account, so it can reach a usage limit sooner. A lane that does is DEGRADED for the round, as
+  any walled lane is.
 - **Context.** One leg now carries all three lenses' findings. The five-round cap bounds it. If
-  a leg's context still runs out, the leg is split at a round boundary, never by lens, since a
-  split by lens would bring back the gap the loop closes.
+  a leg's context still runs out, the leg would be split at a round boundary, never by lens,
+  since a split by lens would bring back the gap the loop closes.
 - **Colliding fixes.** Fixes from different lenses can touch the same code. One coachman sees
   them together and reconciles them before applying.
 - **Same-lane duplicates.** Round 1 puts one snapshot in front of every lens, so one lane can

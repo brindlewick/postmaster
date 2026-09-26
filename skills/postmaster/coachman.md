@@ -53,10 +53,11 @@ scripts/log-action.sh <dispatch> coachman <action> <target> <detail>
 The actions, and where they fire: `dispatch` per workhorse launch (target the lane, detail the thread
 id); `resume` per resumed thread; `harvest` per workhorse (detail its exit shape); `synthesize` once,
 with the SYNTHESIS line as the detail; `rule` per conventional divergence recorded; `review-launch`
-and `review-harvest` per lane per lens per round, the detail naming the lens and the round;
-`finding` per verified finding (detail severity, the round, every lens and every lane that found
-it, verified by execution or reading); `apply` per fix; `degrade` per lane per lens per round it
-did not review at full strength, quoting the cause; `escalate` when a ruling is needed;
+per lane per lens per round (target the lane, detail the lens and the round), and `review-harvest`
+likewise with the thread id added; `finding` per verified finding (detail severity, the round,
+every lens and every lane that found it, verified by execution or reading); `apply` per fix;
+`degrade` per lane per lens per round it did not review at full strength (detail the lens, the
+round and the cause, quoted); `escalate` when a ruling is needed;
 `gate` per gate run with its exit; `ticket-state` and `ticket-comment` per tracker write; `merge`
 on the merge; `teardown` per worktree removed; `handoff-accept` as a leg's first action and
 `handoff` as its last; `stage` whenever the run enters a stage, written by `scripts/stage.sh`
@@ -95,9 +96,9 @@ harness-specific and the flow does not rely on it.
 
 ## Legs and hand-offs
 
-A run is three legs, each a fresh coachman thread launched by the postmaster, so no context
-outlives a leg and nothing a leg knew survives except what it wrote down. The boundaries are
-the run's own gates:
+A run is three legs, `synthesis`, `review` and `ship`, each a fresh coachman thread launched
+by the postmaster, so no context outlives a leg and nothing a leg knew survives except what it
+wrote down. The boundaries are the run's own gates:
 
 | leg | name | covers | ends with |
 |---|---|---|---|
@@ -117,13 +118,13 @@ must exit 0 before the marker is touched:
 ## Decisions
 Every decision this leg took, one per line, with its reason, marked do-not-reopen where it is settled; every do-not-reopen decision from earlier hand-offs carried forward verbatim; and always the oracle decision, blind acceptance tests written as the first commit or not written and why.
 ## Deferred findings
-Every finding not applied, with its lens where it has one, its disposition and reason (the next leg restates these to its reviewers).
+Every finding not applied, with its lens where it has one, its disposition and reason (the review leg restates these to its reviewers, and the ship leg carries the style ones to the ship card's Style residue).
 ## Verified by execution
 What was verified by running something, with the command and its exit.
 ## Unverified
 What is believed but was not run, and why.
 ## Branches and lanes
-Every branch this run has created and its state; every lane and whether it is REVIEWED, DEGRADED or absent, with causes.
+Every branch this run has created and its state; every lane and whether it is REVIEWED, DEGRADED or absent, per lens for a reviewer, with causes.
 ## Open questions
 Anything the next leg must decide or the postmaster must rule on.
 ## Next leg
@@ -370,28 +371,38 @@ then bug and security alone from round 2.
 
 Set the stage first, `scripts/stage.sh <dispatch> review`, then:
 
-1. **Write one brief per lens, `review-<lens>-brief.md`,** in the dispatch dir: the diff scope
-   (synthesis worktree, `git diff <BASE>...HEAD`); the project profile plus this lens's specific
-   pointers from it; findings already known (the hand-off's deferred findings, workhorse
-   divergences) so reviewers hunt residues and new holes; and the output contract: severity P1
-   to P3, file:line, quoted code as evidence, confidence, and for security an exploit path.
-   **State in every brief that the lane is working in its own disposable worktree with
-   dependencies installed, that it may run anything it wants there including the full gate
-   suite, and that the one thing it must not do is modify the code under review.** It is
-   expected to RUN things to check its own claims, and to say for each finding whether it was
-   verified by execution or by reading. A finding verified by execution outranks the same
-   finding filed as a hypothesis, and a test that passes is not evidence until someone has seen
-   it fail for the right reason.
+1. **Prepare each open lens from its entry below.** A lens's brief, `review-<lens>-brief.md`
+   in the dispatch dir, carries the diff scope (synthesis worktree,
+   `git diff <BASE>...HEAD`); the project profile plus the lens's specific pointers from it;
+   findings already known (the hand-off's deferred findings, workhorse divergences) so
+   reviewers hunt residues and new holes; and the output contract: severity P1 to P3,
+   file:line, quoted code as evidence, confidence, and for security an exploit path. **State
+   in every brief that the lane is working in its own disposable worktree with dependencies
+   installed, that it may run anything it wants there including the full gate suite, and that
+   the one thing it must not do is modify the code under review.** It is expected to RUN
+   things to check its own claims, and to say for each finding whether it was verified by
+   execution or by reading. A finding verified by execution outranks the same finding filed as
+   a hypothesis, and a test that passes is not evidence until someone has seen it fail for the
+   right reason.
+
+   Each entry is the one place for its lens: what its reviewers look for, and its launch step,
+   which step 2 runs for every reviewer lane.
    - **Style lens** (advisory, round 1 only): non-mechanical idiom, naming, the project's
      stated paradigm (functional core, immutability, whatever its docs say), abstraction,
      consistency, judged against the project's own style pages and the surrounding code's
-     conventions.
+     conventions. Launch step: from its brief.
    - **Bug lens** (gating): correctness, logic, absence-versus-relative checks (does any check
      pass vacuously when a row, file or entry is missing?), test adequacy against the project's
-     own testing page.
+     own testing page. Launch step: from its brief.
    - **Security lens** (gating): general exploit hunting plus the project's specific surfaces
      as the waybill names them: how it binds and authenticates, what it allowlists, how it
      handles secrets, what it spawns and with what arguments, what it serves from disk.
+     Launch step: from its brief.
+
+   **A launch from a brief** writes `<dispatch>/review-r<round>-<lens>-prompt.txt` holding:
+   "Read `<abs>/review-<lens>-brief.md` and execute it. Report findings as your final message.
+   Do not modify any file you are reviewing." It launches reviewer lane `$L` in its scratch
+   `$DEST` with `scripts/launch.sh launch $L $DEST <dispatch>/review-r<round>-<lens>-prompt.txt`.
 2. **Run every reviewer under every open lens on the same snapshot, from a fresh scratch each
    round**, pinned to the synthesis HEAD, with the installed dependencies cloned in so every
    lane is a full lane:
@@ -414,17 +425,16 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    install there first and clone from it. Every reviewer reviews from a scratch, never from the
    synthesis worktree.
 
-   Then launch every reviewer under every open lens in the same breath through the launch
-   script, each lens's prompt file holding: "Read `<abs>/review-<lens>-brief.md` and execute
-   it. Report findings as your final message. Do not modify any file you are reviewing." The
-   wrapper lands a marker naming the round, the lens and the lane when the process exits,
-   whatever its exit, and the command ends in the wait for the whole round:
+   Then launch every reviewer under every open lens in the same breath, each through its
+   lens's launch step. The wrapper lands a marker naming the round, the lens and the lane when
+   the process exits, whatever its exit, and the command ends in the wait for the whole round:
 
    ```sh
    N=0
    for LENS in <open lenses>; do
      for L in <reviewer lanes>; do
-       ( scripts/launch.sh launch $L <repo>/.worktrees/<TICKET>-rev-$LENS-$L <dispatch>/review-r<round>-$LENS-prompt.txt \
+       DEST=<repo>/.worktrees/<TICKET>-rev-$LENS-$L
+       ( <the launch step of $LENS, for $L in $DEST> \
            > <dispatch>/logs/review-r<round>-$LENS-$L.jsonl 2> <dispatch>/logs/review-r<round>-$LENS-$L.err;
          touch <dispatch>/logs/review-r<round>-$LENS-$L.done ) &
        N=$((N + 1))
@@ -433,7 +443,7 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    scripts/wait-for-markers.sh <dispatch>/logs 'review-r<round>-*.done' "$N" 2400
    ```
 
-   Record every reviewer's thread id, with its lens.
+   Record every reviewer's thread id in its `review-harvest` line.
 
    **EVERY LANE RUNS.** Every lane may run anything in its own scratch, the full gate suite
    included. The one prohibition is modifying the code under review; running the suite writes
