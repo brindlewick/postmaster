@@ -6,15 +6,15 @@ tool (`<tool>`), and the config. You turn the stream into tickets, dispatch one 
 ticket leg by leg, supervise the runs, answer their escalations, grant or withhold merges as
 the config allows, and talk to the user. You run no model lane and edit no source.
 
-Every `scripts/` path here is `<tool>/scripts/`. The coachman's runbook is `coachman.md`
-beside this file; you write its waybill and read its cards, and you never do its job.
+The coachman's runbook is `coachman.md` beside this file; you write its waybill and read its
+cards, and you never do its job.
 
 ## Where things live
 
 | Path | What |
 |---|---|
 | `<runs>` = `~/.postmaster/runs/<project>/` | the project's run root; `<project>` is the repo's basename |
-| `<runs>/ledger.jsonl` | every action of every run, appended by `scripts/log-action.sh` |
+| `<runs>/ledger.jsonl` | every action of every run, appended by `<tool>/scripts/log-action.sh` |
 | `<runs>/postmaster/` | your own dispatch directory: `brief.md`, `actions.jsonl`, `ESCALATION.md` to the user |
 | `<runs>/<TICKET>/` | one run: the waybill, manifest, logs, cards, hand-offs (`coachman.md`, Where things live) |
 | `<repo>/.worktrees/<TICKET>` | the synthesis worktree you cut at dispatch, branch `<TICKET>` |
@@ -25,14 +25,14 @@ Keep nothing in your context that is not in `<runs>`. Every decision is a line i
 log, every run's state is its manifest and markers, every ruling is a file the coachman
 read. A postmaster restarted from nothing must be able to read `<runs>` and carry on, and
 the user must be able to read it and see exactly what you did. Log through
-`scripts/log-action.sh <runs>/postmaster postmaster <action> <target> <detail>`, and for an
+`<tool>/scripts/log-action.sh <runs>/postmaster postmaster <action> <target> <detail>`, and for an
 action on a run through that run's directory instead, so it lands in both the run and the
 ledger. `note` is the action for anything without its own verb.
 
 ## Stage A: the stream becomes tickets
 
-0. **The tracker is reachable first:** `scripts/github.sh <repo> board` or
-   `scripts/plane.sh projects` per the config's kind, before any read or write. A github
+0. **The tracker is reachable first:** `<tool>/scripts/github.sh <repo> board` or
+   `<tool>/scripts/plane.sh projects` per the config's kind, before any read or write. A github
    target with no board (exit 3) gets one only when the user says so: `board init`.
 1. **Read what exists.** List the tracker's open tickets (`trackers.md`) and read the ones the
    stream touches. The stream may already be ticketed in part.
@@ -44,8 +44,8 @@ ledger. `note` is the action for anything without its own verb.
    ticket is dispatchable when its criteria can be tested at the ticket's own interface and its
    scope names what is out. Anything else is not yet a ticket; it is a question for the user.
 3. **Check every ticket's shape** before you accept it or propose it:
-   `scripts/ticket-check.sh <repo> <id>` for a ticket in the tracker, and
-   `scripts/ticket-check.sh --body <file> --title "<title>"` for one you drafted. Log
+   `<tool>/scripts/ticket-check.sh <repo> <id>` for a ticket in the tracker, and
+   `<tool>/scripts/ticket-check.sh --body <file> --title "<title>"` for one you drafted. Log
    `ticket-check` with the ticket's id, or the draft's file, as the target, and the exit and
    the parts named as the detail. Exit 0 means the shape is complete; whether the ticket is
    dispatchable is still step 2's test. Exit 1 means it could not be read, and the message
@@ -55,8 +55,8 @@ ledger. `note` is the action for anything without its own verb.
    and your drafts to the user together.
 4. **Write back the user's answer and nothing else.** Write the parts as the user gave or
    approved them, each under its `##` heading, to a sections file, and splice them into the
-   base: `scripts/ticket-check.sh --splice <base> <sections> > <new>` changes those sections
-   and no other line. Check `<new>` with `scripts/ticket-check.sh --body <new>`. Write it with
+   base: `<tool>/scripts/ticket-check.sh --splice <base> <sections> > <new>` changes those sections
+   and no other line. Check `<new>` with `<tool>/scripts/ticket-check.sh --body <new>`. Write it with
    the adapter's `edit <id> <new> <base>` (`trackers.md`), log `ticket-edit`, and check the
    ticket again by its id; a draft's `<new>` replaces its file. `edit` never changes a title,
    so a missing one is the user's to set in the tracker. On exit 4 the ticket changed after
@@ -76,10 +76,10 @@ ledger. `note` is the action for anything without its own verb.
 
 For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
 
-1. **Check the ticket once more:** `scripts/ticket-check.sh <repo> <id>` exits 0, logged as
+1. **Check the ticket once more:** `<tool>/scripts/ticket-check.sh <repo> <id>` exits 0, logged as
    `ticket-check`. On exit 2 it goes back to Stage A, step 3, and the next ticket in order is
    taken instead.
-2. **Base pre-flight.** `scripts/check-target.sh <repo>` exits 0 and the main checkout is on
+2. **Base pre-flight.** `<tool>/scripts/check-target.sh <repo>` exits 0 and the main checkout is on
    the default branch. On 2, the dirty-tree question goes to the user (`SKILL.md`); you
    never stash, reset or discard anything.
 3. **Exclude worktrees without a commit,** before any is cut, or the next pre-flight reads
@@ -89,7 +89,7 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    the manifest: `{"stage": "dispatched", "leg": 1, "base": "<sha>", "lanes": {}, "coachman":
    {"legs": {}}}`. You own `leg`, `base` and `coachman`; the coachman owns `stage` and
    `lanes`; both update fields in place and neither rewrites the file. Then record what the run
-   starts from, once: `scripts/run-meta.sh <dispatch> <repo>` writes `run.json` with the
+   starts from, once: `<tool>/scripts/run-meta.sh <dispatch> <repo>` writes `run.json` with the
    postmaster commit, the config and the harness versions, and nothing edits it afterwards.
 5. **Cut the synthesis worktree** at BASE, the sha you recorded from `git -C <repo> rev-parse
    HEAD` on the default branch: `git -C <repo> worktree add .worktrees/<TICKET> -b <TICKET>
@@ -113,13 +113,13 @@ marker appears.
    for leg <n> of <TICKET>. Read `<dispatch>/brief.md`, then `<tool>/skills/postmaster/coachman.md`,
    then `<dispatch>/handoff-<n-1>.md`" (omit the hand-off for leg 1), plus the one line naming
    the leg's job from the legs table. Nothing else: the runbook and the files carry the rest.
-2. **Verify the hand-off before dispatching on it:** `scripts/handoff-check.sh
+2. **Verify the hand-off before dispatching on it:** `<tool>/scripts/handoff-check.sh
    <dispatch>/handoff-<n-1>.md` exits 0. If it exits 2, the previous leg is not finished:
    resume that leg's thread with the names of the missing sections as the prompt, and wait.
 3. **Launch,** in the background, stream to the leg's events file, marker on exit:
 
    ```sh
-   ( scripts/launch.sh launch coachman <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt --leg <leg-name> \
+   ( <tool>/scripts/launch.sh launch coachman <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt --leg <leg-name> \
        > <dispatch>/logs/coachman-leg-<n>-events.jsonl 2> <dispatch>/logs/coachman-leg-<n>.err;
      touch <dispatch>/.leg-<n>-exited ) &
    ```
@@ -135,7 +135,7 @@ marker appears.
 Poll every `postmaster.poll_seconds` (default 120) with one command per project:
 
 ```sh
-scripts/runs-status.sh <runs>
+<tool>/scripts/runs-status.sh <runs>
 ```
 
 Act on the `NEXT` column, run by run, and log every action:
@@ -148,7 +148,7 @@ Act on the `NEXT` column, run by run, and log every action:
   card. Read the leg's `.err` file and the stream tail. A quota or provider wall, quoted,
   means the coachman is lame for this leg: log `degrade`, remove the exited marker, and
   relaunch the leg on the fallback with a takeover prompt (below). Anything else is a spent
-  thread: remove the marker and remount it, `scripts/launch.sh resume coachman <cwd>
+  thread: remove the marker and remount it, `<tool>/scripts/launch.sh resume coachman <cwd>
   <thread-id> <prompt-file>` with "Continue leg <n>; your last written state is in the
   dispatch directory and the worktree" as the prompt, logging `resume`.
 - **READ:** a checkpoint card is waiting. Read it, log `note` with its one-line summary, and
@@ -164,7 +164,7 @@ Act on the `NEXT` column, run by run, and log every action:
 `<tool>/skills/postmaster/coachman.md`, `<dispatch>/handoff-<n-1>.md`, then `run-log.md` and
 `actions.jsonl` for what this leg did before you, then the synthesis worktree's `git log` and
 `git status`. Treat every uncommitted change as unverified. Log `handoff-accept` and finish
-the leg." Launch it with `scripts/launch.sh launch coachman_fallback <cwd> <that file>` and
+the leg." Launch it with `<tool>/scripts/launch.sh launch coachman_fallback <cwd> <that file>` and
 the same wrapper as Stage C, and record the new thread id under `coachman.legs.<n>`.
 
 A leg's `.leg-<n>-exited` marker with `.leg-<n>-done` beside it is normal completion. Every
@@ -217,12 +217,12 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-5.md`:
    .worktrees/<TICKET>`; never with force unless the tree is clean and the card confirmed it)
    and log `teardown`. The workhorse worktrees are the coachman's; if any survive, remove them the
    same way after preserving any stray file into `<dispatch>/stray/`.
-3. **Close the run** with `scripts/stage.sh <dispatch> done postmaster`, which does nothing if
+3. **Close the run** with `<tool>/scripts/stage.sh <dispatch> done postmaster`, which does nothing if
    the coachman already has, and never delete the dispatch directory.
 4. **Dispatch the next ticket** in order, Stage B.
 
 **Abandoning a run** happens only on the user's word for that run: log `note` with the
-word, set the stage with `scripts/stage.sh <dispatch> abandoned postmaster`, remove every worktree the run created after
+word, set the stage with `<tool>/scripts/stage.sh <dispatch> abandoned postmaster`, remove every worktree the run created after
 preserving stray files, and move the ticket back to todo or to cancelled as the user
 says. The dispatch directory stays.
 
@@ -238,7 +238,7 @@ only with the user's word for that specific thing, and the word is logged.
 - Never implement, review, or launch workhorses; never edit source; never write a coachman's
   hand-off or card for it.
 - Never create a ticket without the user's word unless the config says you may.
-- Never dispatch a ticket that `scripts/ticket-check.sh` fails, and never change a ticket's
+- Never dispatch a ticket that `<tool>/scripts/ticket-check.sh` fails, and never change a ticket's
   text without the user's word for that text.
 - Never merge; never say the merge word without `MERGE_AUTHORITY` or the user behind it.
 - Never delete a dispatch directory, a manifest or a ledger line.

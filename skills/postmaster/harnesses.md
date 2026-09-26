@@ -3,13 +3,13 @@
 Every harness-specific fact in the flow lives here and nowhere else. The runbooks say "launch
 form", "resume form", "thread id", "final message" and "ambient context"; this file says what
 each of those means for each harness. When a harness changes, this file changes and the
-runbooks do not.
+runbooks do not. `<tool>` is the postmaster repo, as the runbook that sent you here found it.
 
 **Every form below runs in the foreground and writes its event stream to stdout.** The caller
 adds the redirect to the lane's events file, the backgrounding, and any marker that must land
 on exit; that is what makes one wrapper in the runbooks correct for every harness.
 
-**`scripts/launch.sh` is the executable form of this file.** `launch.sh form <name>` prints the
+**`<tool>/scripts/launch.sh` is the executable form of this file.** `launch.sh form <name>` prints the
 exact command for a configured lane or role; `launch` and `resume` run it. The script and this
 file change together, and a form the script refuses (muse; agy resume) is a form this file has
 not recorded yet.
@@ -39,6 +39,29 @@ both.
 Prefer `--prompt-file` wherever a harness offers it. A prompt in argv is visible to every process
 listing on the machine, and a process must never be selected by matching text that could appear
 in a prompt: match on pid or working directory.
+
+## Skills folders
+
+A skill is installed as a link from a harness's user-level skills folder to that skill in the
+postmaster repo's main checkout, never as a copy, and a session finds `<tool>`, the postmaster
+repo, from the link (`SKILL.md`, first section). `<tool>/scripts/link-skills.sh` makes the links
+and is this table's executable form; its self-test fails when the two disagree. Harnesses that
+read one folder share one link there.
+
+| harness | linked into | it also reads | only inside a project | follows a link | source |
+|---|---|---|---|---|---|
+| claude | `~/.claude/skills`, or `$CLAUDE_CONFIG_DIR/skills` when that is set | `.claude/skills` in the project | no | yes, tried | [trial](../../raw/trials/skill-folders/method.md), [docs](https://code.claude.com/docs/en/skills) |
+| codex | `~/.agents/skills` | `/etc/codex/skills`; `.agents/skills` from the cwd up to the repo root | no | yes, documented | [docs](https://learn.chatgpt.com/docs/build-skills) |
+| grok | `~/.agents/skills` | `~/.grok/skills`, `~/.claude/skills`; `.grok/skills` and `.agents/skills` up to the repo root | no | not documented | [docs](https://docs.x.ai/build/features/skills-plugins-marketplaces), [guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/08-skills.md) |
+| agy | none: its docs say `~/.gemini/antigravity-cli/skills`, its changelog puts the global config in `~/.gemini/config/`, and no trial has settled which it reads | `.agents/skills` at the workspace root | no | not documented | [docs](https://antigravity.google/docs/skills/), [changelog](https://github.com/google-antigravity/antigravity-cli/blob/main/CHANGELOG.md), [issue 103](https://github.com/google-antigravity/antigravity-cli/issues/103) |
+| muse | `~/.agents/skills` | `$XDG_CONFIG_HOME/muse/skills`, `~/.claude/skills`; `.agents/skills` in a trusted workspace | no | not documented | [docs](https://dev.meta.ai/docs/muse-code/extending) |
+| pi | `~/.agents/skills` | `~/.pi/agent/skills`; `.pi/skills` and `.agents/skills` in a trusted project | no | yes, tried | [trial](../../raw/trials/skill-folders/method.md), pi 0.87.0 `docs/skills.md` |
+
+Docs read on 2026-09-26. A harness with no folder in this table is pointed at
+`<tool>/skills/postmaster/SKILL.md` by absolute path, and every brief names the skill's documents
+by absolute path into `<tool>`, never a copy. grok and muse also read `~/.claude/skills`, so
+where claude is installed they meet each skill twice, through two links to one checkout; grok
+keeps one per name, and what muse does with the second is not recorded.
 
 ## codex
 
@@ -107,6 +130,8 @@ cd <wt> && agy -p "$(cat <dispatch>/<lane>-prompt.txt)" \
   so `launch.sh resume` refuses agy; a postmaster on agy is an interactive session in tmux and
   is never resumed this way.
 - Threads persist harmlessly; nothing to archive.
+- No skills folder is linked for agy (Skills folders, above). A session on agy is pointed at
+  `<tool>/skills/postmaster/SKILL.md` by its absolute path.
 
 ## claude
 
