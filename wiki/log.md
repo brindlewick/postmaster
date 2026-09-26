@@ -1,12 +1,28 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-26] ingest | a run keeps the config it started with
+
+A decision page. A run now launches and resumes every lane and every leg on the config it
+recorded in `run.json` at dispatch, never the live one. A config edited mid-run can no longer
+change a lane part-way through, or hand one harness's thread id to another. The page records
+what that costs: a fix to the config waits for the next run, and an env file's contents are
+still read at each launch. Standing `claimed`, since no run bears on it yet.
+
+## [2026-09-25] ingest | review runs as one loop
+
+A decision page. Style, bug and security review no longer run one after another in three legs.
+One leg runs one loop: every lens still open, in each round, on one snapshot, with style in
+round 1 only. A run now has three legs: synthesis, review and ship. The page records why, what
+the loop is expected to cost, and what the stage timings will measure. Standing `claimed`,
+since no run has been recorded under either design.
 
 ## [2026-09-25] ingest | a ticket's shape is checked before it is accepted
 
