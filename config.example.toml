@@ -63,6 +63,12 @@ kind = "github"
 # name = "<tracker>"                     # other only
 postmaster_may_create = false   # true lets the postmaster create tickets without asking
 
+[review]
+# Seconds a review round may run; a run keeps the value recorded in its run.json at dispatch.
+# A reviewer still running at the limit is stopped and recorded DEGRADED, with timeout as the
+# cause (scripts/review-round.sh). 2400 when unset.
+round_timeout_seconds = 2400
+
 [ship]
 # Who says the merge word for a run: "user" (a person, live) or "postmaster" (the
 # supervising session grants the merge itself once it has verified the ship card). A

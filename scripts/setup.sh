@@ -5,6 +5,7 @@
 #
 #   setup.sh [--answers <file>] [--dry-run] [--config <path>]
 #   setup.sh --keys
+#   setup.sh --self-test
 #
 # An agent drives it: the user's answers go in a file, one key=value per line (--keys
 # lists them with their prompts and defaults), and --answers reads them by name, so the order
@@ -14,13 +15,66 @@
 #
 #   exit 0  config written (or printed), or keys listed
 #   exit 1  a harness was named that is not on PATH, the coachman shares a lane's model, fewer
-#           than two lanes were given, an answer was missing, or an existing config was not
-#           overwritten
+#           than two lanes were given, an answer was missing, a round time limit was not a
+#           whole number of seconds, or an existing config was not overwritten
 #
 # Control: the written file is parsed back as TOML where a parser is available, so a config
 # that would fail to load is never left on disk as if it were fine.
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd -P)
+
+if [ "${1:-}" = --self-test ]; then
+  # Each control runs this script on an answers file, with stub harnesses first on PATH and a
+  # throwaway HOME, so no real config is read or written.
+  self="$HERE/$(basename "$0")"
+  tmp=$(mktemp -d) || exit 1
+  trap 'rm -r -- "$tmp" 2>/dev/null' EXIT
+  mkdir "$tmp/bin" "$tmp/home"
+  for h in claude codex; do printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$h"; chmod +x "$tmp/bin/$h"; done
+  answers() {  # answers <key=value>...: a complete answers file; a given line wins, being read first
+    printf '%s\n' "$@" "lanes=one, two" "lane.one.harness=claude" "lane.one.model=m1" "lane.two.harness=codex" \
+      "lane.two.model=m2" "coachman.harness=claude" "coachman.model=judge" "fallback.harness=codex" \
+      "fallback.model=judge-2" "postmaster.harness=claude" "postmaster.model=pm" > "$tmp/answers"
+  }
+  out="" rc=0 fails=0
+  run() { out=$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" "$self" --answers "$tmp/answers" "$@" 2>&1); rc=$?; }
+  value() {  # value <file> <python expression on the parsed config c>: prints it
+    python3 -c 'import sys, tomllib; c = tomllib.load(open(sys.argv[1], "rb")); print(eval(sys.argv[2]))' "$1" "$2" 2>&1
+  }
+  printed() { printf '%s\n' "$out" | sed -n '/^# Written by scripts\/setup.sh/,$p' > "$tmp/printed.toml"; }
+  ok()   { printf '  ok   %s\n' "$1"; }
+  fail() { printf '  FAIL %s (exit %s)\n' "$1" "$rc"; printf '%s\n' "$out" | tail -5 | sed 's/^/         /'; fails=$((fails+1)); }
+
+  echo "positive controls"
+  answers; run --dry-run; printed
+  [ $rc -eq 0 ] && [ "$(value "$tmp/printed.toml" 'c["review"]["round_timeout_seconds"]')" = 2400 ] \
+    && ok "the round time limit defaults to 2400 seconds, under [review]" || fail "the round time limit defaults to 2400 seconds, under [review]"
+  answers "round_timeout_seconds=3600"; run --dry-run; printed
+  [ $rc -eq 0 ] && [ "$(value "$tmp/printed.toml" 'c["review"]["round_timeout_seconds"]')" = 3600 ] \
+    && ok "an answer sets it" || fail "an answer sets it"
+  answers "round_timeout_seconds=900"; run --config "$tmp/written.toml"
+  [ $rc -eq 0 ] && [ "$(value "$tmp/written.toml" 'c["review"]["round_timeout_seconds"], c["team"]["coachman"]["model"]')" = "(900, 'judge')" ] \
+    && ok "the config it writes parses, and holds it" || fail "the config it writes parses, and holds it"
+
+  echo "negative controls: nothing is written"
+  for v in 0 -60 abc 1.5 0600 "40 minutes"; do
+    answers "round_timeout_seconds=$v"; run --config "$tmp/refused-$v.toml"
+    [ $rc -eq 1 ] && [ ! -e "$tmp/refused-$v.toml" ] && case $out in *round_timeout_seconds*) true ;; *) false ;; esac \
+      && ok "a round time limit of '$v' is refused" || fail "a round time limit of '$v' is refused"
+  done
+  answers "lane.two.harness=no-such-harness"; run --config "$tmp/refused-harness.toml"
+  [ $rc -eq 1 ] && [ ! -e "$tmp/refused-harness.toml" ] && ok "a harness not on PATH is refused" || fail "a harness not on PATH is refused"
+  answers "coachman.model=m1"; run --config "$tmp/refused-coachman.toml"
+  [ $rc -eq 1 ] && [ ! -e "$tmp/refused-coachman.toml" ] && ok "a coachman on a lane's model is refused" || fail "a coachman on a lane's model is refused"
+  answers "round_timeout_seconds=1200"; run --config "$tmp/written.toml"
+  [ $rc -eq 1 ] && [ "$(value "$tmp/written.toml" 'c["review"]["round_timeout_seconds"]')" = 900 ] \
+    && ok "an existing config is not overwritten without the answer" || fail "an existing config is not overwritten without the answer"
+
+  echo
+  [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }
+  echo "self-test: $fails control(s) misbehaved"; exit 1
+fi
+
 DRY=0; ANSWERS=""
 CONFIG="$HOME/.postmaster/config.toml"
 while [ $# -gt 0 ]; do
@@ -55,13 +109,14 @@ plane.workspace                               plane only; the slug in the worksp
 plane.env_file             ~/.postmaster/plane.env   plane only; holds PLANE_API_KEY=<key>
 tracker.name                                  other only
 postmaster_may_create      no                 yes lets the postmaster create tickets unasked
+round_timeout_seconds      2400               seconds a review round may run
 merge_authority            user               user or postmaster
 checkpoint_mode            autonomous         autonomous or consult
 review_link?               (none)             template with {path}
 overwrite                  no                 yes replaces an existing config
 EOF
       exit 0 ;;
-    *) echo "usage: setup.sh [--answers <file>] [--dry-run] [--config <path>] | --keys" >&2; exit 1 ;;
+    *) echo "usage: setup.sh [--answers <file>] [--dry-run] [--config <path>] | --keys | --self-test" >&2; exit 1 ;;
   esac
   shift
 done
@@ -182,6 +237,8 @@ esac
 echo
 ask PMC "May the postmaster create tickets without asking (yes/no)" "no" "postmaster_may_create"
 case $PMC in yes|no) ;; *) echo "setup: answer yes or no" >&2; exit 1 ;; esac
+ask RT "Seconds a review round may run before the reviewers still running are stopped" "2400" "round_timeout_seconds"
+case $RT in ''|0*|*[!0-9]*) echo "setup: round_timeout_seconds must be a whole number of seconds above zero, not '$RT'" >&2; exit 1 ;; esac
 ask MA "Who says the merge word (user, postmaster)" "user" "merge_authority"
 case $MA in user|postmaster) ;; *) echo "setup: merge authority must be user or postmaster" >&2; exit 1 ;; esac
 ask CPM "Checkpoint mode (autonomous, consult)" "autonomous" "checkpoint_mode"
@@ -212,6 +269,9 @@ poll_seconds = $PS
 kind = "$TK"
 ${TRACKER_EXTRA}
 postmaster_may_create = $( [ "$PMC" = yes ] && echo true || echo false )
+
+[review]
+round_timeout_seconds = $RT
 
 [ship]
 merge_authority = "$MA"
