@@ -81,10 +81,11 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    taken instead.
 2. **Base pre-flight.** `scripts/check-target.sh <repo>` exits 0 and the main checkout is on
    the default branch. On 2, the dirty-tree question goes to the user (`SKILL.md`); you
-   never stash, reset or discard anything. The config is checked too:
-   `scripts/launch.sh form coachman --leg <leg>` for each of `synthesis`, `review` and
-   `ship`, and `scripts/launch.sh form coachman_fallback`, each exit 0. A refusal names what
-   the config must change: it goes to the user, and nothing is dispatched.
+   never stash, reset or discard anything. The config is checked too: `scripts/launch.sh form
+   coachman --leg <leg>` for each of `synthesis`, `review` and `ship`, `scripts/launch.sh form
+   coachman_fallback`, and `scripts/launch.sh form <lane>` for each lane in `team.workhorses`
+   and `team.reviewers`, each exit 0. A refusal names what the config must change: it goes to
+   the user, and nothing is dispatched.
 3. **Exclude worktrees without a commit,** before any is cut, or the next pre-flight reads
    them as dirt: `grep -qxF '.worktrees/' <repo>/.git/info/exclude || echo '.worktrees/' >>
    <repo>/.git/info/exclude`.
@@ -117,7 +118,7 @@ later one when the previous leg's marker appears.
    for leg <n> of <TICKET>. Read `<dispatch>/brief.md`, then `<tool>/skills/postmaster/coachman.md`,
    then `<dispatch>/handoff-<n-1>.md`" (omit the hand-off for leg 1), plus the one line naming
    the leg's job from the legs table. Nothing else: the runbook and the files carry the rest.
-2. **Verify the hand-off before dispatching on it:** `scripts/handoff-check.sh
+2. **From leg 2 on, verify the hand-off before dispatching on it:** `scripts/handoff-check.sh
    <dispatch>/handoff-<n-1>.md` exits 0. If it exits 2, leg `n-1` is not finished: remove
    its `.leg-<n-1>-done` marker and resume leg `n-1` (step 5, with `n-1` in place of `n`),
    the prompt naming the missing sections and saying "Complete the hand-off and end the leg
@@ -136,13 +137,13 @@ later one when the previous leg's marker appears.
 4. **The coachman's model for a leg** comes from `team.coachman`, or `team.coachman_legs.<leg-name>`
    where set. It is never a lane's model, in any leg.
 5. **Resume a leg** only in the form that launched it, with its leg, in the background. Write
-   the prompt first to `<dispatch>/leg-<n>-resume-<k>.txt`, `k` counting from 1 for each leg,
-   and clear the leg's exited marker. The leg's stream is appended to, and its `.err` file
-   holds only this process's errors:
+   the prompt first to `<dispatch>/leg-<n>-resume-<time>.txt`, `<time>` being what
+   `date -u +%Y%m%dT%H%M%SZ` prints, and clear the leg's exited marker. The leg's stream is
+   appended to, and its `.err` file holds only this process's errors:
 
    ```sh
    rm -f <dispatch>/.leg-<n>-exited
-   ( scripts/launch.sh resume <name> <repo>/.worktrees/<TICKET> <thread-id> <dispatch>/leg-<n>-resume-<k>.txt --leg <leg-name> \
+   ( scripts/launch.sh resume <name> <repo>/.worktrees/<TICKET> <thread-id> <dispatch>/leg-<n>-resume-<time>.txt --leg <leg-name> \
        >> <dispatch>/logs/coachman-leg-<n>-events.jsonl 2> <dispatch>/logs/coachman-leg-<n>.err;
      touch <dispatch>/.leg-<n>-exited ) &
    ```
@@ -161,18 +162,21 @@ scripts/runs-status.sh <runs>
 
 Act on the `NEXT` column, run by run, and log every action:
 
+- **USER:** the run waits on the user (`.waiting-on-user`, Stage E step 3). Nothing to do until
+  they answer.
 - **RULE:** an escalation is waiting. Stage E.
 - **GATE:** the ship card is complete. Stage F.
 - **DISPATCH:** the leg's `.leg-<n>-done` marker is present. Stage C for leg `n+1`; after leg
   3, Stage G.
 - **REMOUNT:** the leg's process exited (`.leg-<n>-exited`) with no hand-off, escalation or
-  card. Read the leg's `.err` file and the stream tail. A `launch:` line in the `.err` is a
-  refusal, and the leg never started: it goes to the user (Stage E, step 3), and nothing is
-  relaunched. A quota or provider wall, quoted, means the coachman is lame for this leg: log
-  `degrade` and relaunch the leg on the fallback with a takeover prompt (below), unless the
-  leg already runs on the fallback, when the wall goes to the user. Anything else is a spent
-  thread: remount it by resuming the leg (Stage C) with "Continue leg <n>; your last written
-  state is in the dispatch directory and the worktree" as the prompt.
+  card. Read the leg's `.err` file and the stream tail. A leg with no thread id, none in its
+  stream and none in `coachman.legs.<n>`, never started: its `.err` goes to the user (Stage E
+  step 3), and on their answer the leg is launched again (Stage C step 3). A quota or provider
+  wall, quoted, means the coachman is lame for this leg: log `degrade` and relaunch the leg on
+  the fallback with a takeover prompt (below), unless the leg already runs on the fallback,
+  when the wall goes to the user (Stage E step 3). Anything else is a spent thread: remount it
+  by resuming the leg (Stage C) with "Continue leg <n>; your last written state is in the
+  dispatch directory and the worktree" as the prompt.
 - **READ:** a checkpoint card is waiting. Read it, log `note` with its one-line summary, and
   remove its `.checkpoint-*-ready` marker. In consult mode the card comes with an escalation,
   which RULE handles.
@@ -188,8 +192,8 @@ Act on the `NEXT` column, run by run, and log every action:
 `git status`. Treat every uncommitted change as unverified. Log `handoff-accept` and finish
 the leg." Launch it through the wrapper of Stage C step 5, with `scripts/launch.sh launch
 coachman_fallback <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-takeover.txt` in place of the
-resume, and record the new thread id as `coachman.legs.<n>.thread_id` and
-`coachman_fallback` as its `name`.
+resume. Read the new thread id from the events the takeover appended, and record it as
+`coachman.legs.<n>.thread_id`, with `coachman_fallback` as its `name`.
 
 A leg's `.leg-<n>-exited` marker with `.leg-<n>-done` beside it is normal completion. Every
 transition is one `log-action` line; the narrative in your own notes is for the user,
@@ -204,9 +208,10 @@ never the record.
    drop as DEGRADED, a round to stop at the cap. Log `escalate` with your ruling.
 3. **Send it up** when it is genuinely destructive, changes the ticket's scope, touches
    anything outside the repo, or the user asked to see it: write
-   `<runs>/postmaster/ESCALATION.md` naming the run and the question, tell the user in
-   the session, and wait. Never pass a postmaster grant up as if it needed the user's
-   word, and never take the user's word for something the config gives you.
+   `<runs>/postmaster/ESCALATION.md` naming the run and the question, touch the run's
+   `.waiting-on-user`, tell the user in the session, and wait. Never pass a postmaster grant
+   up as if it needed the user's word, and never take the user's word for something the
+   config gives you. On the user's answer, remove `.waiting-on-user` and the file.
 4. **Deliver the ruling:** remove `.escalation-ready`, then resume the current leg (Stage C,
    step 5) with the ruling as the prompt. The ruling is a prompt to a resumed thread, never
    text typed into anything.
@@ -222,15 +227,15 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    the `degrade` lines in `actions.jsonl`; the blind acceptance tests are the first commit on
    the branch, or the Decisions section of `handoff-3.md` carries leg 1's reason for not
    writing them.
-2. **Grant or withhold.** `MERGE_AUTHORITY: postmaster` and every check above holds: deliver
-   "MERGE GRANTED" by resuming leg 3 (Stage C, step 5), log `merge` with `granted`. Any check
-   fails: deliver the failure as a ruling by the same resume and log `merge` with `withheld` and
-   the reason; the leg addresses it and raises the card again. `MERGE_AUTHORITY: user`: put the
-   card, the review link and your verification in front of the user and wait; deliver their word
-   verbatim when it comes.
-3. **Remove `.card-ready` before you deliver either word,** so the poll does not report the
-   same card again; the coachman touches it afresh when the card changes.
-4. **Never merge yourself.** The coachman merges on the word; you only say it.
+2. **Grant or withhold.** Every word is delivered by resuming leg 3 (Stage C, step 5), and
+   `.card-ready` is removed before it is; the coachman touches it afresh when the card changes.
+   `MERGE_AUTHORITY: postmaster` and every check above holds: deliver "MERGE GRANTED" and log
+   `merge` with `granted`. Any check fails: deliver the failure as a ruling and log `merge` with
+   `withheld` and the reason; the leg addresses it and raises the card again.
+   `MERGE_AUTHORITY: user`: put the card, the review link and your verification in front of the
+   user, touch `.waiting-on-user`, and wait; when their word comes, remove `.waiting-on-user`
+   and deliver the word verbatim.
+3. **Never merge yourself.** The coachman merges on the word; you only say it.
 
 ## Stage G: after the merge
 

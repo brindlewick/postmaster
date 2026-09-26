@@ -38,15 +38,15 @@ What the services and CLIs postmaster depends on actually do. Nothing yet.
 
 Why the design is shaped as it is.
 
-- [The review loop](concepts/review-loop.md): **claimed**. Style, bug and security review run
-  as one loop in one leg, so each round's fixes are re-reviewed by both gating lenses in the
-  next. It should also take fewer rounds.
 - [The workhorse spec](concepts/workhorse-spec.md): **claimed**. Each workhorse drafts its
   own, which keeps the workhorses independent of each other and of the coachman, and makes
   each run auditable.
 - [A ticket's shape is checked before it is accepted](concepts/ticket-shape.md): **claimed**.
   A title, the problem, numbered criteria each answerable yes or no, and the user's direction,
   checked by a script before any ticket is dispatched. What is missing is asked of the user.
+- [The review loop](concepts/review-loop.md): **claimed**. Style, bug and security review run
+  as one loop in one leg, so each round's fixes are re-reviewed by both gating lenses in the
+  next. It should also take fewer rounds.
 
 ## Sources
 
