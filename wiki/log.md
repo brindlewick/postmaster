@@ -23,8 +23,8 @@ the default, and lists what the option needs. Its standing stays `claimed`.
 A trial of Herdr 0.9.1 with pi 0.87.0 and claude 2.1.283 against a stand-in model, recorded in
 `raw/trials/herdr-agent-lifecycle/`. Two new pages. The first, under trackers and tooling,
 records what Herdr documents against what it does: most harnesses' states are read from the
-screen, a separate wait can return the previous turn's state, and an agent killed mid-turn is
-reported done. It is `settled` for that version. The second states issue #16's claim at
+screen, a separate wait can return the previous turn's state, and a pi agent killed mid-turn
+was reported done. It is `settled` for that version. The second states issue #16's claim at
 `claimed`, with its four measures, the control, a measurement on issue #37's fixture, the
 decision rule, and what would follow for the coachman contract. No existing standing changed.
 

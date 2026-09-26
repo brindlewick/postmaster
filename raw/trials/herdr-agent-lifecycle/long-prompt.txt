@@ -7,3 +7,10 @@ pi, Herdr's pi integration: prompt --wait exit 0, "done", 1,569 ms. The user mes
 claude: prompt --wait exit 1, agent_prompt_stalled (false-stall.txt). The user message in
   claude's session record is identical to the text sent.
 Both arrived as one message; bracketed paste kept the newlines inside it.
+
+sha256 of the prompt as sent, and of the user message each harness recorded in its own session
+(the session files themselves are not kept here):
+  sent             20,497 characters  5c9e80da4e24352fdf797dd07d116dea73f890c2c986358b93fe4bd09a8d1b7c
+  pi recorded      20,497 characters  5c9e80da4e24352fdf797dd07d116dea73f890c2c986358b93fe4bd09a8d1b7c
+  claude recorded  20,497 characters  5c9e80da4e24352fdf797dd07d116dea73f890c2c986358b93fe4bd09a8d1b7c
+Both prompt --wait calls returned quickly because the stand-in answered at once.

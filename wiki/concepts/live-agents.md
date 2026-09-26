@@ -51,13 +51,15 @@ Each is read from the same records at both levels.
    returned, logged as it happens. At the control the delay splits in two, and both parts are
    kept: final message to marker, which is the process exiting, and marker to wait returning,
    which is the poll.
-2. **Ruling delay**: from a ruling being issued to the lane acting on it. Issued is the
+2. **Ruling delay**: from a ruling being issued to the coachman acting on it. Issued is the
    postmaster's `resume` line, or its live equivalent. Acting is the first assistant message
-   after the ruling in the session record.
-3. **Spent and remounts**: lost launches per launch, from the ledger. A launch is lost when
-   it ended spent, or its leg or lane had to be remounted or dispatched again. At the live
-   level also every false completion, meaning a settled state reported for an agent that had
-   died, and whether anything acted on it.
+   after the ruling in the leg's session record.
+3. **Spent and remounts**: lost launches per launch. A launch is lost when it ended spent,
+   or its lane or leg had to be remounted or dispatched again. At the live level that includes
+   an agent prompted again because it settled without its final act, which the control would
+   have remounted. The live level also counts every false completion, meaning a settled state
+   reported for an agent that had died, and whether anything acted on it. The ledger logs a
+   remount and a ruling with the same `resume` verb, so the count needs them logged apart.
 4. **Idle cost**: the processes and proportional memory held by agents that have finished a
    turn and are waiting, sampled through each run, as a peak and as process-minutes.
 
@@ -82,7 +84,7 @@ exiting took about as long as Herdr took to notice a finished live turn. Nearly 
 control's delay was the 20 s poll, a constant in a script, which can be shortened, or replaced
 by waiting on a file-system event, without touching the contract.
 
-**The live signal can mislead.** A lane killed mid-turn was reported `done` to its waiter, a
+**The live signal can mislead.** A pi lane killed mid-turn was reported `done` to its waiter, a
 wait issued after a prompt returned the previous turn's state, and two turns that had finished
 were reported stalled [@trials/herdr-agent-lifecycle/kill-mid-turn.txt]
 [@trials/herdr-agent-lifecycle/stale-wait.txt]
@@ -95,10 +97,10 @@ loses one over real runs, which is the third measure.
 to 1.6 s at their medians [@trials/herdr-agent-lifecycle/timings]. A ruling already waits for
 the postmaster's next poll before anyone reads the escalation, 120 s by default.
 
-At the trial's figures, the six idle agents of the issue's example, two concurrent runs of a
-coachman and two lanes, would hold about 0.6 to 0.9 GiB with small sessions, and more with the
-sessions of real lanes, since an agent's memory grew with its session
-[@trials/herdr-agent-lifecycle/idle-cost.txt].
+At the trial's figures, the six idle agents of the README's example of native sessions, two
+concurrent runs of a coachman and two lanes each, would hold about 0.6 to 0.9 GiB with small
+sessions, and more with the sessions of real lanes, since an agent's memory grew with its
+session [@trials/herdr-agent-lifecycle/idle-cost.txt].
 
 ## The measurement
 
@@ -113,23 +115,31 @@ hand-off from the run's own records, at either level. The constrained ticket is 
 that runs are alike in length and counts per launch compare.
 
 **Runs**: three at each level, as three pairs of one control run and one live run, back to
-back, alternating which goes first. Three records at a level are the fewest the schema accepts
-for `supported`. One pair can already refute the claim, so the first pair is read before the
-other two are dispatched.
+back, alternating which goes first. The schema needs at least three run records before a
+standing can be `supported`, and three pairs give three at each level. One pair can already
+refute the claim, so the first pair is read before the other two are dispatched.
 
 **Held the same**: the lanes and coachman the machine's config names. Consult mode, with the
 postmaster as merge authority, so every checkpoint card and the ship card are rulings the
 postmaster gives: five a run, and no run waits on a person. At the live level the pi lane runs
-with Herdr's pi integration loaded, since pi's screen rules never report `blocked`
-[@trials/herdr-agent-lifecycle/integrations.txt].
+with Herdr's pi integration loaded. With it, Herdr noticed a finished turn in 86 to 431 ms
+against 454 to 771 ms on screen rules, and did not report a false stall on the one instant
+turn tried both ways; it also reports the session the thread id comes from
+[@trials/herdr-agent-lifecycle/timings] [@trials/herdr-agent-lifecycle/false-stall.txt].
+Neither way reports pi `blocked` [@trials/herdr-agent-lifecycle/integrations.txt].
 
 **Before the first run**: issue #10 landed and used for a few runs; the machine set up; #37's
-fixture built; the live option built, as below. Then four pieces of instrumentation, each a
-script with its controls: the wait's return logged as it happens at both levels; each lane's
-final-message time read from its harness session record at teardown; an idle sampler writing
-every agent's state, process count and memory to the dispatch directory; and `run.json`
-recording the Herdr version, the detection manifest versions and which integrations are
-installed.
+fixture built; the live option built, as below. Then the instrumentation, each piece a script
+with its controls: the wait's return logged as it happens at both levels; remounts and
+re-prompts logged apart from rulings; each lane's final-message time, and each leg's first
+action after a ruling, read from the harness session records at teardown; an idle sampler
+recording every agent's state, process count and memory where the idle clock of
+`runs-status.sh` does not read, such as a dot-named file, so sampling cannot hide a stall; and
+`run.json` recording the Herdr version, the detection manifest versions and which integrations
+are installed. One flaw in the control has to be fixed first, or its effects counted apart:
+after a ruling resumes a leg, the leg's `.leg-<n>-exited` from its escalation stays (Stage E of
+`postmaster.md` removes only `.escalation-ready`), so the next poll of `runs-status.sh` reads
+REMOUNT for a leg that is working.
 
 **Cost**: six fixture runs, each costing what #37's first scored run records, which is not
 known yet. The live level holds a process per idle agent, about 100 to 160 MiB each on the
@@ -166,21 +176,35 @@ and the postmaster's poll stays the trade between tokens and delay that
 With the option on, lanes and coachman legs run as live agents in Herdr panes, and the option
 needs these:
 
-- **Completion.** The coachman gives each lane its work with one `agent prompt --wait`, never
-  a prompt followed by a separate wait. Every settled state is checked for a release and for
-  the lane's final act on disk before it counts, and the check is logged, so false completions
-  are counted. The coachman then touches the markers a headless lane's wrapper would, so the
-  postmaster's poll, `runs-status.sh` and `fixture.sh score` read a live run like any other.
-- **Setup.** Each lane's harness runs with the Herdr integration that reports its state, where
-  there is one, and its worktree is trusted before the agent starts. Without Herdr the option
-  is refused.
+- **Completion.** The coachman gives each lane its work with one `agent prompt --wait`, sent
+  only to a lane that has settled, never a prompt followed by a separate wait. A settled lane
+  counts as finished only when its final act is on disk. Its release is checked too and
+  logged, but a release can come after the waiter returns, so the on-disk check is the one that
+  catches a killed lane. A lane that settles without its final act is prompted again, and
+  counted as lost.
+- **Markers.** The coachman touches the lane markers a headless wrapper would, and whatever
+  closes a live leg's agent touches its `.leg-<n>-exited`: `runs-status.sh` reads that marker
+  to call a remount, and `fixture.sh score` requires both leg markers.
+- **Liveness.** A live lane writes no event stream into the dispatch directory, and the idle
+  clock of `runs-status.sh` reads file times there. It needs another sign of work, such as the
+  growth of the lane's harness session record, or a healthy live run reads INSPECT after 30
+  minutes.
+- **Setup.** Each lane's harness runs with its Herdr integration. pi's reports its state, and
+  claude's, codex's, grok's and agy's report the session the thread id comes from. muse has
+  none, so it cannot be a live lane until a thread id comes some other way. Each worktree is
+  trusted before its agent starts. Without Herdr the option is refused.
 - **Records.** The thread id comes from Herdr's session report instead of an event stream, and
   a lane's record becomes its exported harness session, as issue #20 proposes.
 - **Rulings.** A live leg that escalates stays open when its turn ends, so its ruling is an
-  `agent prompt`. The runbook's rule that a ruling never passes through a composer gives way
-  to a guard that a prompt from any pane but the postmaster's cannot pass as a ruling. Herdr
-  accepts a prompt from any pane of its session [@trials/herdr-agent-lifecycle/method.md].
-- **Recovery.** A resume stays the way to remount a lane or leg that died.
+  `agent prompt`. The runbook's rule that a ruling never passes through a composer gives way to
+  a guard in the flow, since Herdr's `agent.prompt` carries no sender and any pane of the
+  session can send one [@trials/herdr-agent-lifecycle/method.md]. A guard that would do: the
+  prompt carries no ruling, only the path of a ruling file the postmaster wrote, and the leg
+  acts on the file only when the ledger has the postmaster's line for it. A prompt that names
+  no logged ruling file is not a ruling.
+- **Recovery.** A resume stays the way to remount a lane or leg that died. One that settled
+  without finishing is prompted again instead, since resuming a session its agent still holds
+  would start a second process on it.
 
 The option changes the coachman contract behind its key, so it lands while the fleet is idle,
 and after issue #10, whose host adapter it builds on.

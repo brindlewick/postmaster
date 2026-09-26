@@ -34,7 +34,9 @@ muse    2026.08.26.1  working 1, idle 2, blocked 3, unknown 1
 
 A harness with no idle rule is idle whenever no working or blocked rule matches. pi's
 manifest has no blocked rule, so without its integration a blocked pi is never reported.
-On this machine the claude integration was installed and the pi integration was not.
+On this machine the claude integration was installed and the pi integration was not. The pi
+0.87.0 binary contains no "herdr:blocked" string, so pi never raises that event itself; only
+another pi extension can, and the pi integration reports blocked only when one does.
 
 With the pi integration loaded, agent get reported screen_detection_skipped: true for that pane
 and an agent_session of kind "path" (startup.txt).

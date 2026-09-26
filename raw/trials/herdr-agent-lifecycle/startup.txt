@@ -11,6 +11,8 @@ with --dangerously-skip-permissions:
   startup and is not ready for prompts"}. The screen showed claude's workspace trust question
   ("Quick safety check: Is this a project you created or one you trust?", options "No, exit" and
   "Yes, I trust this folder"). It was answered with Esc, which exits; nothing was trusted.
-  Headless claude -p, the form the flow uses, does not ask this question.
+  Not tested here: whether headless claude -p, the form the flow uses, asks this question in
+  such a directory. Every headless run used the isolated config, which already trusted its
+  directory.
 claude with an isolated config (CLAUDE_CONFIG_DIR) that already trusts the directory:
   exit 0 after 3,822 ms; status idle, interactive_ready true.

@@ -1,4 +1,6 @@
 agent prompt --wait returning agent_prompt_stalled for turns that were delivered and completed.
+Both were turns the stand-in answered at once, within 2 ms of the request arriving, and Herdr
+pushed no working state for either (herdr-events.jsonl). No held turn stalled.
 
 1. pi, screen rules, the first prompt after agent start ("one turn before idling, reply OK").
    The stand-in answers at once when no SLEEP is given.

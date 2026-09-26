@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """A stand-in model provider for timing trials. Speaks just enough of the OpenAI chat
 completions API (for pi) and the Anthropic messages API (for claude) to answer every
-request with a fixed text reply, streamed. Logs one JSON line per request: when it arrived,
-when the reply finished, the path, and the tail of the last user message. Never logs headers.
+request with a fixed text reply, streamed. Logs one JSON line per request once its reply has
+been written: when it arrived, when the reply finished, the path, and the tail of the last user
+message. A request whose client goes away before the reply is written is not logged. Never
+logs headers.
 
 A user message containing SLEEP=<seconds> delays the reply, to hold the harness in a
 working turn. PAD=<kb> pads the reply with that many KB of text, to grow a session.

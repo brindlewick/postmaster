@@ -1,6 +1,9 @@
-A live pi agent killed with SIGTERM part-way through a turn. The stand-in was holding the reply
-30 s (SLEEP=30), so the turn could not have finished. Times are from issuing the prompt. The pushed
-events behind each line are in herdr-events.jsonl.
+A live pi agent killed with SIGTERM part-way through a turn. The prompt told the stand-in to
+hold its reply 30 s (SLEEP=30), so the turn could not have finished by the kill. The stand-in
+writes its log line only when it finishes a reply, so none of these turns has a line in
+standin-requests.jsonl; the pushed working state shows each under way before the kill. Times
+are from issuing the prompt. The pushed events behind each line are in herdr-events.jsonl.
+Only pi was killed; no claude agent was.
 
 1. pi, screen rules, pane-a. Prompt without --wait, then a separate agent wait.
    The separate wait returned 100 ms after it started, with "done", before the turn had begun
@@ -19,4 +22,6 @@ events behind each line are in herdr-events.jsonl.
    agent get 3 s later: agent_not_found.
 
 In 2 and 3 the waiter was told the turn was done, with exit 0, for a turn that had been killed.
-In all three, Herdr's own release event gave the killed agent's final status as "done".
+In all three, Herdr's own release event gave the killed agent's final status as "done". It came
+within 71 ms of the pushed done, but after the waiter had returned: 38 ms after in 2, and 177 ms
+after in 3.

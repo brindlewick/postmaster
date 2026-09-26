@@ -1,7 +1,10 @@
 A separate agent wait issued straight after agent prompt, with no --wait on the prompt.
 Each turn asked the stand-in to hold the reply 6 s (SLEEP=6). "pending" means the stand-in
 had not yet finished the reply when the wait returned. t16-pi is pi on screen rules;
-t16-pix is pi with Herdr's pi integration loaded.
+t16-pix is pi with Herdr's pi integration loaded. After each try, once the separate wait had
+returned, a prompt "noop" was sent while the held turn was still running; pi queued it and ran
+it next, and two waits (until working, then settled) brought the agent back to rest before the
+next try (apparatus/checks.sh, stale_wait).
 
 t16-pi rep 1: prompt returned +313 ms; separate agent wait returned +356 ms with 'idle'; reply finished at +pending ms
 t16-pi rep 2: prompt returned +321 ms; separate agent wait returned +454 ms with 'done'; reply finished at +pending ms
