@@ -8,6 +8,15 @@ updated: 2026-09-26
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-26] ingest | a lane may review through its harness's own skill
+
+A trial of claude 2.1.283's `/security-review`, launched as the flow launches a reviewer lane,
+recorded in `raw/trials/claude-security-review/`. In a scratch clone whose `origin/HEAD` leads
+back to the base, it reported the planted command injection at its file and line in both runs.
+In a worktree where `origin/HEAD` did not resolve, it returned success with an empty report after
+no turns. One run ended with three result lines, the report on the last. A new page records why
+a security lane may run its harness's own skill, at `claimed`, and what Claude Code's needs.
+
 ## [2026-09-26] lint | each lens may have its own reviewer lanes
 
 The review-loop page records why a lens may name its own reviewer lanes: a lane chosen for one

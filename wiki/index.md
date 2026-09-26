@@ -56,6 +56,10 @@ Why the design is shaped as it is.
   next. It should also take fewer rounds.
 - [Live agents against markers and resumes](concepts/live-agents.md): **claimed**. Headless
   stays the default and live agents become an option; what it would take to change the default.
+- [A lane may review through its harness's own skill](concepts/own-review-skills.md):
+  **claimed**. A security lane runs its harness's own security review skill where it has one,
+  and the brief where it has none; Claude Code's needs a clone whose `origin/HEAD` leads back to
+  the base.
 
 ## Sources
 
