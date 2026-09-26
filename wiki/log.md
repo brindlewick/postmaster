@@ -19,6 +19,15 @@ tickets, since the waybill-only route skips the postmaster's own check of the ti
 tracker with no service does not exist yet. Standing `claimed`, since no fixture run has been
 recorded.
 
+## [2026-09-25] ingest | a ticket's shape is checked before it is accepted
+
+Second page in the Decisions area. A ticket now carries a direction after its acceptance
+criteria, and a script checks its shape before the postmaster accepts it: a title, the problem
+or feature, numbered criteria each answerable yes or no, and the direction. What is missing is
+proposed to the user, and only their answer is written back. The page also records what the
+script can judge of "answerable yes or no", and why hedging words were left out. Standing
+`claimed`, since no run bears on it yet.
+
 ## [2026-09-23] lint | workhorse replaces arm
 
 The project no longer says arm for a lane that implements the ticket; it says workhorse, and a

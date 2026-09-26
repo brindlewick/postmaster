@@ -1,16 +1,18 @@
 # Tracker adapters
 
-The runbooks make four demands of a tracker and no more: read a ticket, set its state, add a
-dated comment, and create a ticket. This file says what each means for each tracker kind the
-config allows (`config.example.toml`, `[tracker]`). Every write is also logged through
-`scripts/log-action.sh` as `ticket-state` or `ticket-comment`.
+The runbooks make five demands of a tracker and no more: read a ticket, set its state, add a
+dated comment, create a ticket, and replace a ticket's body. This file says what each means for
+each tracker kind the config allows (`config.example.toml`, `[tracker]`). Every write is also
+logged through `scripts/log-action.sh` as `ticket-create`, `ticket-edit`, `ticket-state` or
+`ticket-comment`.
 
 **GitHub Issues is the default**, on a GitHub Projects board so the tickets are a kanban the
 user can look at. Plane is the other named kind. Anything else is `other`. Tickets never
 live on a branch of the target repo: a ticket is state, and state does not belong in a commit.
 
-The ticket shape is the same everywhere, three headings in this order, so opening one costs no
-orientation:
+The ticket shape is the same everywhere: a title, then these headings in this order, so opening
+one costs no orientation. `scripts/ticket-check.sh` is its executable form. It requires the
+title and the first three headings, and does not check `Notes` or `User journey`.
 
 ```
 ## Problem / feature
@@ -19,11 +21,19 @@ One or two sentences. What is wrong, or what is wanted, and why it matters.
 ## Acceptance criteria
 Numbered. Each one answerable yes or no. What "done" looks like.
 
+## Direction
+The high-level technical direction the user wants: the approach, the constraints on how, and
+anything the workhorses must not decide differently. Not a design: each workhorse drafts its
+own spec from it. "None: any approach that meets the criteria" is a direction; leaving the
+heading out is not.
+
 ## Notes
 Everything else: context, links, decisions already taken, constraints, what is out of scope.
 A ticket that changes something a person uses also carries a `## User journey`: where they
 begin, what they tap or type, what they expect.
 ```
+
+[Why a ticket carries a direction, and is checked before it is accepted](../../wiki/concepts/ticket-shape.md)
 
 The flow's states are `todo`, `in-progress`, `blocked`, `done` and `cancelled`, and each
 adapter maps them onto what its tracker has. Every adapter script prints a ticket the same
@@ -50,6 +60,8 @@ scripts/github.sh <repo> board                        # the linked board and its
 scripts/github.sh <repo> board init                   # create a board named after the repo and link it
 scripts/github.sh <repo> create "<title>" <body-file> # prints the new issue number
 scripts/github.sh <repo> read <n>
+scripts/github.sh <repo> read <n> --body              # the body alone, exactly as stored
+scripts/github.sh <repo> edit <n> <body-file> <base-file>
 scripts/github.sh <repo> state <n> in-progress
 scripts/github.sh <repo> comment <n> coachman "<text>"
 scripts/github.sh <repo> list [state]
@@ -61,9 +73,13 @@ scripts/github.sh <repo> list [state]
   board made from the CLI opens in table layout, and the switch to the board layout is one
   click on the page.
 - **Read:** `read`, which prints the issue with its state worked out from the issue and
-  the board together.
-- **Create:** `create` with a body file carrying the three headings; the issue is added to
-  the board in Todo.
+  the board together. `read --body` prints the body alone, exactly as stored.
+- **Create:** `create` with a body file in the ticket shape; the issue is added to the board
+  in Todo. An empty body file is refused.
+- **Edit:** `edit` replaces the issue's body with `<body-file>`, and never its title.
+  `<base-file>` is the body as `read --body` printed it when the change was drafted: if the
+  issue no longer matches it, `edit` writes nothing and exits 4. It refuses an empty body
+  file, and a number that is not an issue.
 - **Set state:** `state`. `todo` and `in-progress` move the card and reopen a closed issue;
   `blocked` adds the label; `done` closes the issue and moves the card to Done; `cancelled`
   closes it as not planned.
@@ -100,22 +116,34 @@ projects, and `scripts/probe-trackers.sh` runs it.
 scripts/plane.sh projects                             # identifier, id and name of every project
 scripts/plane.sh create <IDENT> "<title>" <body-file> # prints the new id, IDENT-n
 scripts/plane.sh read PM-12
+scripts/plane.sh read PM-12 --body                    # the body alone, as markdown
+scripts/plane.sh edit PM-12 <body-file> <base-file>
 scripts/plane.sh state PM-12 in-progress
 scripts/plane.sh comment PM-12 coachman "<text>"
 scripts/plane.sh list PM [state]
 ```
 
-- **Read:** `read`; the body Plane stores as HTML comes back as the three headings in
-  markdown.
+- **Read:** `read`; the body Plane stores as HTML comes back as markdown in the ticket
+  shape. `read --body` prints that markdown alone.
 - **Create:** `create` with a markdown body file; the script renders it to the HTML Plane
-  stores and puts the item in the todo state.
+  stores and puts the item in the todo state. It refuses a body that would not read back
+  with the same words and structure.
+- **Edit:** `edit` renders the body file as `create` does and replaces the description, and
+  never the title. `<base-file>` is the body as `read --body` printed it when the change was
+  drafted: if the work item no longer matches it, `edit` writes nothing and exits 4. It
+  refuses, exit 1, a work item whose description `read` does not show as Plane stores it:
+  markup `read` does not render, such as a table, an image, emphasis or an HTML comment,
+  which it names, or text it would read back as something else. The user makes that change
+  in Plane. It also refuses an empty body, and one that would not read back with the same
+  words and structure.
 - **Set state:** `state`, one API call per change; `blocked` is the label.
 - **Comment:** `comment`, the same dated line as on GitHub.
 
 ## other
 
 A tracker the agent reaches through its own tooling, an MCP server or a CLI. The config names
-it, and the setup session records how each of the four demands is met in
+it, and the setup session records how each of the five demands is met in
 `~/.postmaster/trackers/<name>.md`, outside this repo and in the same shape as the two sections
 above, so the user's instance never enters the flow. Until that file exists the tracker is
-not configured, however reachable it is.
+not configured, however reachable it is. One written before a body could be replaced says
+nothing about it; until it does, the user makes an approved change in the tracker.
