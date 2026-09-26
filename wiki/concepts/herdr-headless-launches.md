@@ -1,16 +1,16 @@
 ---
-title: Herdr shows a headless launch truthfully only when the launch owns its pane
+title: Herdr shows a headless claude launch truthfully only when the launch owns its pane
 type: concept
 standing: settled
 sources: [trials/herdr-headless-panes]
 updated: 2026-09-26
 ---
 
-# Herdr shows a headless launch truthfully only when the launch owns its pane
+# Herdr shows a headless claude launch truthfully only when the launch owns its pane
 
 **Claim.** Herdr can be the window onto a headless fleet, but not by default. Left to itself it
-shows a working headless harness as idle, and a launch that inherits its caller's pane writes
-into its caller's pane. The view is true when the host does three things: runs each launch in a
+shows a working headless claude as idle, and a launch that inherits its caller's pane writes
+into its caller's pane. Claude is the only harness tried; the others are an open question below. The view is true when the host does three things: runs each launch in a
 pane of its own and gives it that pane's identity; reports the launch working itself, and
 releases it at the end rather than reporting it idle; and titles the pane itself, because a
 headless harness does not.

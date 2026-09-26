@@ -143,8 +143,10 @@ not say; the security lens reviews against them.
    On Herdr it opens as a tab in the target repo's space, the root of every run's tree; on tmux,
    as a window in session `postmaster-<project>`. If `spawn` says it is not ready, the harness is
    asking something on its first start there, such as claude asking whether to trust the folder:
-   the user answers it in the pane, and then the prompt is sent. With no host, `spawn` exits 3: launch it
-   headless instead, as `hosts.md` gives under none, and tell the user it answers by resume.
+   the user answers it in the pane, and then the prompt is sent. With no host, `spawn` exits 3:
+   launch it headless instead, as `hosts.md` gives under none, with a line in its brief that it
+   runs headless, so whenever it needs the user it writes `<runs>/postmaster/ESCALATION.md` and
+   ends its turn; tell the user it answers by resume.
 6. **Report** where to watch it (the space and tab, the tmux session, or with no host its events
    file), the run root, and the brief. Then stop.
 
@@ -174,7 +176,7 @@ coachman: <harness>/<model>/<effort>      (never a lane's model)
 CHECKPOINT_MODE and MERGE_AUTHORITY come from ship.checkpoint_mode and ship.merge_authority, overridden only where the user says so for this run
 
 ## Dispatch
-name: <ticket id>, <ticket title>      (every launch is named "<name> · <role or lane>", hosts.md)
+name: <ticket id>, <ticket title>
 dispatch: <abs path of this directory>
 synthesis worktree: <abs path; cut by the postmaster at BASE, the coachman's cwd for every leg>
 tool: <abs path of the postmaster repo; every scripts/ path in the runbooks is relative to it>

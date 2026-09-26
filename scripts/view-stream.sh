@@ -14,7 +14,8 @@
 # what it was called on; what the model said; an error; the result. Tool output, thinking,
 # hooks and streaming deltas are left out. A JSON event it does not know is shown by its type,
 # once per run of the same type, so an unknown harness still reads as a sequence of steps. A
-# line that is not JSON is shown as it is. Following, each line carries the local time.
+# line that is not JSON is shown as it is, less any control characters, which never reach the
+# terminal from a stream. Following, each line carries the local time.
 #
 #   exit 0  rendered
 #   exit 1  usage, or the self-test failed
@@ -23,7 +24,7 @@ HERE=$(cd "$(dirname "$0")" && pwd -P)
 
 # The program is passed with -c, not on stdin: stdin is the stream it renders.
 read -r -d '' PROG <<'PY'
-import json, os, shutil, sys, time
+import json, os, re, shutil, sys, time
 
 args = sys.argv[1:]
 follow = pid = None
@@ -171,6 +172,8 @@ def generic(e):
             return "%s: %s" % (t, short(v))
     return t
 
+CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")    # nothing a stream says reaches the terminal as a control
+
 def show(line, stamp):
     line = line.rstrip("\r\n")
     if not line.strip():
@@ -188,7 +191,7 @@ def show(line, stamp):
     else:
         out = short(line)
     if out:
-        print((time.strftime("%H:%M:%S ") if stamp else "") + out, flush=True)
+        print((time.strftime("%H:%M:%S ") if stamp else "") + CONTROL.sub("", out), flush=True)
 
 if not follow:
     for line in sys.stdin:
@@ -278,6 +281,9 @@ shows "pi: what the model said" \
   '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"All done."}]}}' 'says: All done.'
 shows "a line that is not JSON is shown as it is" 'plain text from a wrapper' 'plain text from a wrapper'
 shows "an unknown event shows its type" '{"type":"heartbeat","message":"still here"}' 'heartbeat: still here'
+shows "escape sequences in what a model said never reach the terminal" \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"hi \u001b]0;title\u0007 there"}]}}' 'says: hi ]0;title there'
+shows "nor in a line that is not JSON" "$(printf 'plain \033[2Jtext\a')" 'plain [2Jtext'
 
 echo "negative controls: noise renders nothing"
 silent "claude: a hook event" '{"type":"system","subtype":"hook_started","hook_name":"SessionStart:startup"}'

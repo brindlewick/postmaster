@@ -120,19 +120,21 @@ marker appears.
    (`hosts.md`), stream to the leg's events file, marker on exit:
 
    ```sh
-   scripts/host.sh run "<name> · coachman" <repo>/.worktrees/<TICKET> \
+   scripts/host.sh run "$(scripts/host.sh name <dispatch> coachman)" <repo>/.worktrees/<TICKET> \
        --out <dispatch>/logs/coachman-leg-<n>-events.jsonl --err <dispatch>/logs/coachman-leg-<n>.err \
        --marker <dispatch>/.leg-<n>-exited \
        -- scripts/launch.sh launch coachman <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt --leg <leg-name>
    ```
 
-   `<name>` is the waybill's `name`. **Every resume of a leg,** a remount, a ruling or the merge
-   word, runs the same way: remove `.leg-<n>-exited` first, add `--append`, and make the command
-   `scripts/launch.sh resume coachman <cwd> <thread-id> <prompt-file>`.
+   The name comes from the waybill through `host.sh name`, never typed: a ticket's title can
+   hold anything a shell would run. **Every resume of a leg,** a remount, a ruling or the merge
+   word, runs the same way with `--append`, and the command `scripts/launch.sh resume <role>
+   <cwd> <thread-id> <prompt-file> --leg <leg-name>`, where `<role>` is the one the leg runs as,
+   `coachman.legs.<n>.name`; `host.sh` clears the old marker itself.
 
    Record the thread id from the stream (`harnesses.md`) in the manifest under
-   `coachman.legs.<n>.thread_id`, set `leg` to `<n>`, and log `dispatch` with the leg and
-   the thread id.
+   `coachman.legs.<n>.thread_id` and `coachman` under `coachman.legs.<n>.name`, set `leg` to
+   `<n>`, and log `dispatch` with the leg and the thread id.
 4. **The coachman's model for a leg** comes from `team.coachman`, or `team.coachman_legs.<leg-name>`
    where set. It is never a lane's model, in any leg.
 
@@ -170,7 +172,8 @@ Act on the `NEXT` column, run by run, and log every action:
 `actions.jsonl` for what this leg did before you, then the synthesis worktree's `git log` and
 `git status`. Treat every uncommitted change as unverified. Log `handoff-accept` and finish
 the leg." Launch it with `scripts/launch.sh launch coachman_fallback <cwd> <that file>` as the
-command of Stage C's `host.sh run`, and record the new thread id under `coachman.legs.<n>`.
+command of Stage C's `host.sh run`, and record the new thread id under `coachman.legs.<n>`,
+with `coachman_fallback` as its `name`.
 
 A leg's `.leg-<n>-exited` marker with `.leg-<n>-done` beside it is normal completion. Every
 transition is one `log-action` line; the narrative in your own notes is for the user,
@@ -218,9 +221,9 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-5.md`:
 1. **Confirm** the default branch carries the merge (`git -C <repo> log -1` on it) and the
    ticket is done in the tracker; if the coachman could not move it, do so and log
    `ticket-state`.
-2. **Tear down** the synthesis worktree from outside it: close its space first
-   (`scripts/host.sh close <repo>/.worktrees/<TICKET>`; on exit 2 something still holds it, so
-   stop and report), then `git -C <repo> worktree remove .worktrees/<TICKET>`, never with force
+2. **Tear down** the synthesis worktree from outside it, once leg 5's process has exited
+   (`.leg-5-exited`): close its space first (`scripts/host.sh close <repo>/.worktrees/<TICKET>`;
+   on exit 2 the user has it open or something in it still runs, so stop and report), then `git -C <repo> worktree remove .worktrees/<TICKET>`, never with force
    unless the tree is clean and the card confirmed it, and log `teardown`. The workhorse
    worktrees are the coachman's; if any survive, remove them the same way after preserving any
    stray file into `<dispatch>/stray/`.
@@ -229,8 +232,9 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-5.md`:
 4. **Dispatch the next ticket** in order, Stage B.
 
 **Abandoning a run** happens only on the user's word for that run: log `note` with the
-word, set the stage with `scripts/stage.sh <dispatch> abandoned postmaster`, remove every worktree the run created after
-preserving stray files and closing its space (`scripts/host.sh close`), and move the ticket back to todo or to cancelled as the user
+word, set the stage with `scripts/stage.sh <dispatch> abandoned postmaster`, stop what still
+runs in each worktree the run created (`scripts/host.sh stop <wt>`), then remove each one after
+preserving stray files and closing its space (`scripts/host.sh close <wt>`), and move the ticket back to todo or to cancelled as the user
 says. The dispatch directory stays.
 
 ## Talking to the user

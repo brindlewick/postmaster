@@ -34,8 +34,8 @@ How each agent CLI really behaves, as distinct from what its documentation says.
 
 What the services and CLIs postmaster depends on actually do.
 
-- [Herdr and headless launches](concepts/herdr-headless-launches.md): **settled**. Left to
-  itself Herdr shows a working headless harness as idle, and a launch that inherits its
+- [Herdr and headless launches](concepts/herdr-headless-launches.md): **settled**, for claude.
+  Left to itself Herdr shows a working headless claude as idle, and a launch that inherits its
   caller's pane reports into it; the view is true when each launch owns its pane and the host
   reports its state.
 

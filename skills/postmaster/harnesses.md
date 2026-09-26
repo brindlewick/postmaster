@@ -135,10 +135,10 @@ cd <wt> && claude -p "$(cat <dispatch>/<lane>-prompt.txt)" --model <model> \
 - As the coachman's own harness: background tasks are reaped at about 29 minutes, and a long
   lane routinely outlives that. A launch through `scripts/host.sh` is not one of its background
   tasks: it runs in a host's pane, or detached in a session of its own, and outlives the call
-  that started it. The cap reaches only what the harness backgrounds itself. A "stopped"
-  notification without a quota error is the cap, not a failure. Resume the thread in place,
-  instruct workhorses to commit incrementally, and expect to resume any leg that needs more
-  than 25 minutes.
+  that started it. The cap reaches only what the harness runs itself, such as a wait. A
+  "stopped" notification without a quota error is that cap, not a failure: run the wait again,
+  and resume a lane only once its marker has landed, never while it still runs. Instruct
+  workhorses to commit incrementally.
 
 ## pi
 
