@@ -8,6 +8,13 @@ updated: 2026-09-26
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-26] ingest | style blocks a ship
+
+The user decided that style blocks a ship, as bug and security do. Every lens now runs every
+round, and the review loop ends only when no lens has a new verified finding. The turnpikes page
+records the decision and its cost, and the review-loop page no longer calls style advisory.
+Both stay `claimed`.
+
 ## [2026-09-26] ingest | a ticket names its turnpikes
 
 A decision page, beside the one on the ticket shape. A ticket now names the turnpikes its run

@@ -124,7 +124,7 @@ must exit 0 before the marker is touched:
 ## Decisions
 Every decision this leg took, one per line, with its reason, marked do-not-reopen where it is settled; every do-not-reopen decision from earlier hand-offs carried forward verbatim; and always the oracle decision, blind acceptance tests written as the first commit or not written and why.
 ## Deferred findings
-Every finding not applied, with its lens where it has one, its disposition and reason (the review leg restates these to its reviewers; the ship leg carries them to the ship card, the style ones to its Style residue and the rest to its open findings).
+Every finding not applied, with its lens where it has one, its disposition and reason (the review leg restates these to its reviewers, and the ship leg carries them to the ship card's open findings).
 ## Verified by execution
 What was verified by running something, with the command and its exit.
 ## Unverified
@@ -373,14 +373,14 @@ from it.
 One loop, in one leg. The lenses are the turnpikes `scripts/turnpikes.sh legs <dispatch>` lists
 for the review leg, exactly those: a turnpike the waybill does not name never runs, and one it
 names is never skipped. If the script exits 2, or lists no review leg, escalate with its
-output. Each round runs every lens still open, on one snapshot, every reviewer lane under each
-lens as its own process in its own scratch: every lens in round 1, then the gating lenses alone
-from round 2.
+output. Every round runs every lens, on one snapshot, every reviewer lane under each lens as its
+own process in its own scratch, and every lens blocks the ship: the loop ends only when no lens
+has a new verified finding.
 [Why the lenses run as one loop](../../wiki/concepts/review-loop.md)
 
 Set the stage first, `scripts/stage.sh <dispatch> review`, then:
 
-1. **Prepare each open lens from its entry below.** A lens's brief, `review-<lens>-brief.md`
+1. **Prepare each lens from its entry below.** A lens's brief, `review-<lens>-brief.md`
    in the dispatch dir, carries the diff scope (synthesis worktree,
    `git diff <BASE>...HEAD`); the project profile plus the lens's specific pointers from it;
    findings already known (the hand-off's deferred findings, workhorse divergences) so
@@ -397,14 +397,14 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    Each entry is the one place for its lens, the turnpike of the same name: what its reviewers
    look for, and how they are launched, which step 2 does for every reviewer lane. A review
    turnpike with no entry here cannot run: escalate.
-   - **Style lens** (advisory, round 1 only): non-mechanical idiom, naming, the project's
+   - **Style lens**: non-mechanical idiom, naming, the project's
      stated paradigm (functional core, immutability, whatever its docs say), abstraction,
      consistency, judged against the project's own style pages and the surrounding code's
      conventions. Launch: from its brief.
-   - **Bug lens** (gating): correctness, logic, absence-versus-relative checks (does any check
+   - **Bug lens**: correctness, logic, absence-versus-relative checks (does any check
      pass vacuously when a row, file or entry is missing?), test adequacy against the project's
      own testing page. Launch: from its brief.
-   - **Security lens** (gating): general exploit hunting plus the project's specific surfaces
+   - **Security lens**: general exploit hunting plus the project's specific surfaces
      as the waybill names them: how it binds and authenticates, what it allowlists, how it
      handles secrets, what it spawns and with what arguments, what it serves from disk.
      Launch: from its brief.
@@ -420,13 +420,13 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
 
    Its launch step starts reviewer lane `$L` in its scratch `$DEST`:
    `scripts/launch.sh launch "$L" "$DEST" <dispatch>/review-r<round>-<lens>-prompt.txt`.
-2. **Run every reviewer under every open lens on the same snapshot, from a fresh scratch each
+2. **Run every reviewer under every lens on the same snapshot, from a fresh scratch each
    round**, pinned to the synthesis HEAD, with the installed dependencies cloned in so every
    lane is a full lane:
 
    ```sh
    SNAP=$(git -C <synthesis-wt> rev-parse HEAD)
-   for LENS in <open lenses>; do
+   for LENS in <lenses>; do
      for L in <reviewer lanes>; do
        DEST=<repo>/.worktrees/<TICKET>-rev-$LENS-$L
        # ASSERT the scratch is cut at SNAP and resolves before launching a lane into it. A
@@ -442,14 +442,14 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    install there first and clone from it. Every reviewer reviews from a scratch, never from the
    synthesis worktree.
 
-   Then do every open lens's preparation, and launch every reviewer under every open lens in the
-   same breath, each through its lens's launch step. The wrapper clears the marker first and
+   Then do every lens's preparation, and launch every reviewer under every lens in the same
+   breath, each through its lens's launch step. The wrapper clears the marker first and
    lands it, naming the round, the lens and the lane, when the process exits, whatever its exit;
    the command ends in the wait for the whole round. An interrupted round is re-run whole:
 
    ```sh
    N=0
-   for LENS in <open lenses>; do
+   for LENS in <lenses>; do
      for L in <reviewer lanes>; do
        DEST=<repo>/.worktrees/<TICKET>-rev-$LENS-$L
        rm -f <dispatch>/logs/review-r<round>-$LENS-$L.done
@@ -500,29 +500,22 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    `git add <paths>` over `git add -A`.
 3. **Dedup across lenses and adversarially verify** every finding against the code before it
    reaches the card or the diff; discard what does not hold. A defect reported under more than
-   one lens is one finding, and it keeps every lens that reported it. A finding is gating or
-   advisory by what it is, not by the lens that reported it: a correctness or security defect
-   reported under the style lens is fixed as a gating finding, and keeps its lens. Several
-   reviewers produce a bigger, noisier union than one; the verification gate is what keeps the
-   checkpoint clean, so do not soften it. Where a lane says it verified a finding by execution,
-   re-run its probe rather than re-deriving the claim; where it filed a hypothesis, the
-   verification burden is yours.
-4. **Apply once per round,** in the synthesis worktree: the verified gating findings first,
-   then, in round 1 of a loop with a gating lens, the style findings that are clearly right.
-   Where fixes from different lenses touch the same code, reconcile them into one change before
-   applying it. Every other style finding is deferred in the hand-off and reaches the ship
-   card's Style residue section, where the user picks at merge time. Then re-run the project's
-   gate.
-5. **Loop until clean.** Round `r+1` runs the gating lenses alone, on the fixed diff, with its
-   own markers, each brief updated with the fixes delta and every applied finding, style ones
-   included, as known context, so they closure-check each fix AND hunt new holes the fixes
-   introduced. Done only when a round returns zero new verified gating findings and every fix
-   verifies closed, so a round that applied any change, a style change included, is never the
-   last. A loop with no gating lens is round 1 alone, and applies nothing. Cap 5 rounds for the
-   whole loop, round 1 included, then STOP and escalate with the residue and your read on why it
-   is not converging; this is `CHECKPOINT_MODE`'s sole mid-flow stop in autonomous mode. Style
-   does not run again: a style lane DEGRADED in round 1 stays DEGRADED, and the card says how
-   many lanes the style lens rested on.
+   one lens is one finding, and it keeps every lens that reported it. Several reviewers produce
+   a bigger, noisier union than one; the verification gate is what keeps the checkpoint clean,
+   so do not soften it. Where a lane says it verified a finding by execution, re-run its probe
+   rather than re-deriving the claim; where it filed a hypothesis, the verification burden is
+   yours.
+4. **Apply once per round,** in the synthesis worktree: every verified finding, whichever lens
+   reported it. Where fixes from different lenses touch the same code, reconcile them into one
+   change before applying it. A verified finding not applied is deferred, with its reason, in
+   the hand-off. Then re-run the project's gate.
+5. **Loop until clean.** Round `r+1` runs every lens again, on the fixed diff, with its own
+   markers, each brief updated with the fixes delta and every applied finding as known context,
+   so they closure-check each fix AND hunt new holes the fixes introduced. Done only when a
+   round returns zero new verified findings and every fix verifies closed, so a round that
+   applied any change is never the last. Cap 5 rounds for the whole loop, round 1 included,
+   then STOP and escalate with the residue and your read on why it is not converging; this is
+   `CHECKPOINT_MODE`'s sole mid-flow stop in autonomous mode.
 
    **ESCALATE ON A REPEATED CLASS, not only on the round cap.** If the same class of defect is
    found in three consecutive rounds, whichever lens found it, each round closing the sites it
@@ -532,9 +525,8 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    in the escalation and say which sites each round closed. Rounds 4 and 5 remain available for
    genuinely distinct findings.
 6. **One review checkpoint card.** Per lens: the findings and their overlap, across lanes and
-   with the other lenses, verified versus dismissed, applied, and the rounds it ran; for style,
-   which advisory findings were applied and which are deferred to the ship card's Style residue.
-   Then the gate status. Written to `<dispatch>/checkpoint-review.md` with its
+   with the other lenses, verified versus dismissed, applied, and the rounds it ran. Then the
+   gate status. Written to `<dispatch>/checkpoint-review.md` with its
    `.checkpoint-review-ready` marker. Autonomous mode: write the leg's hand-off and end it; the
    ship approval is stage 3's stop. Consult mode: escalate on the card and wait for the resume.
    A ruling that asks for a change is applied and followed by another round, counted toward the
@@ -589,9 +581,8 @@ Set the stage first: `scripts/stage.sh <dispatch> shipping`.
    branch name, gate output summary, diff stat, the preview link, the review link, the run's
    thread ids. This is the flow's analogue of opening a PR.
 
-   **The ship card carries the Style residue,** every advisory finding not applied, one line
-   each, for the user to pick from at merge time. **It also lists every bug or security finding
-   left open,** with its lens and disposition, one line each.
+   **The ship card lists every finding left open,** with its lens and disposition, one line
+   each.
 
    **The ship card lists the turnpikes the run passed through,** exactly the waybill's, each
    with the rounds it ran and its result, or `none` when the waybill names none. The gate is on
@@ -691,7 +682,7 @@ logical order, not file safety: check the file surfaces before mass-launching.
   before the next targeted `git add` would miss it.
 - Update the manifest at bootstrap and keep thread ids and `outcome`s current, in place; never
   rewrite it and never delete it. Change `stage` only with `scripts/stage.sh`.
-- **A lone dissenter in a gating lens is the finding, not the outlier.** Clean verdicts are not
+- **A lone dissenter in any lens is the finding, not the outlier.** Clean verdicts are not
   independent: they can rest on one shared unexamined premise, so a split means one reviewer
   looked somewhere the others assumed. Verify it in the code yourself before dismissing it,
   and never resolve a split by counting.

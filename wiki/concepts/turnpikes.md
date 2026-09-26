@@ -34,6 +34,11 @@ project's gate is not a turnpike, and runs on every run.
   turnpike, such as a fixture run from
   [issue #37](https://github.com/brindlewick/postmaster/issues/37), is one line there and a
   runbook step that runs it. The ticket shape and the check do not change.
+- **Every turnpike blocks a ship.** Style used to be advisory: it ran in round 1 only, and its
+  findings could not hold a ship back. While this change was in review, the user decided that
+  style blocks a ship as bug and security do. A turnpike is then what its definition says, a
+  check a run must pass before it ships, and a ticket that names only `style` gets the same
+  loop as any other.
 
 ## Decisions the ticket left open
 
@@ -45,16 +50,13 @@ project's gate is not a turnpike, and runs on every run.
   same way.
 - **A run with no review turnpike has no review leg.** The ship leg follows synthesis and
   starts from its hand-off. A review leg with no lens would start a coachman to do nothing.
-- **A review loop without a gating lens is one round, and applies nothing.** In
-  [the review loop](review-loop.md), every change is re-reviewed in the next round by the
-  gating lenses, bug and security. With only `style` named, nothing would re-review a style
-  change, so every style finding goes to the ship card's Style residue for the user to pick
-  from.
 - **A section holds names and nothing else.** A word that is not a turnpike is named by the
   check, so a reason for the choice goes in the ticket's notes, not beside the names.
 
 ## What it costs
 
+- Style now runs every round and can hold a ship back, which
+  [the review loop](review-loop.md) says how to measure.
 - A ticket that names fewer turnpikes ships with less review. That is the ticket writer's call
   by design. The ship card lists the turnpikes the run passed through, so the user sees it at
   merge time.
@@ -79,5 +81,7 @@ The ticket shape in `skills/postmaster/trackers.md` gains `## Turnpikes` after `
 `scripts/ticket-check.sh` requires the section and names any word that is not a turnpike. The
 postmaster copies the resolved names into the waybill, and proposes `default` for a ticket with
 no section. The coachman runs exactly the waybill's turnpikes, so a run with none goes from
-synthesis to ship, and the ship card lists the turnpikes the run passed through. `AGENTS.md`
+synthesis to ship, and the ship card lists the turnpikes the run passed through. Every lens runs
+every round and blocks the ship, and the ship card's Style residue becomes its list of every
+finding left open. `AGENTS.md`
 defines the word.
