@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-22
+updated: 2026-09-26
 ---
 
 # postmaster wiki
@@ -32,7 +32,12 @@ How each agent CLI really behaves, as distinct from what its documentation says.
 
 ## Trackers and tooling
 
-What the services and CLIs postmaster depends on actually do. Nothing yet.
+What the services and CLIs postmaster depends on actually do.
+
+- [Herdr and headless launches](concepts/herdr-headless-launches.md): **settled**. Left to
+  itself Herdr shows a working headless harness as idle, and a launch that inherits its
+  caller's pane reports into it; the view is true when each launch owns its pane and the host
+  reports its state.
 
 ## Decisions
 

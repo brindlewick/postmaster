@@ -1,12 +1,21 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-22
+updated: 2026-09-26
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-26] ingest | Herdr shows a headless launch truthfully only when it owns its pane
+
+First page on a service the flow depends on. A trial against Herdr 0.9.1 and claude 2.1.283,
+run twice: left to itself Herdr shows a working headless claude as idle; a closing `idle` report
+is ignored once an agent has run in the pane, and `release-agent` is what ends a reported state;
+claude's Herdr integration reports into whatever pane `HERDR_PANE_ID` names; and a headless
+harness does not title its pane. Settled on that trial, for claude only. It shaped
+`scripts/host.sh` and `skills/postmaster/hosts.md`, issue #10.
 
 ## [2026-09-23] lint | workhorse replaces arm
 
