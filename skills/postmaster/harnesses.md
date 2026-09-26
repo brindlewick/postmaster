@@ -105,8 +105,8 @@ cd <wt> && agy -p "$(cat <dispatch>/<lane>-prompt.txt)" \
 - Thread id: `conversationId` in the stream.
 - Final message: the last result line of the events stream.
 - Resume: relaunch against its `conversationId`; `agy --help` for the flag. Not recorded here,
-  so `launch.sh resume` refuses agy; a postmaster on agy is an interactive session in tmux and
-  is never resumed this way.
+  so `launch.sh resume` refuses agy; a postmaster on agy is an interactive session on the
+  session host (`hosts.md`) and is never resumed this way.
 - Threads persist harmlessly; nothing to archive.
 
 ## claude
