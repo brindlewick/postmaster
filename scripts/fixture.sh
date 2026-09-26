@@ -54,7 +54,7 @@ is_ticket() {
 }
 
 make_repo() {  # make_repo <dest>: a new repo holding the app's files as git sees them, one commit
-  local dest=$1
+  local dest=$1 key value
   mkdir "$dest" || return 1
   python3 - "$APP" "$dest" <<'PY' || { echo "fixture: could not copy the app to $dest" >&2; return 1; }
 import os, shutil, subprocess, sys
@@ -71,8 +71,13 @@ for rel in sorted({n for n in listed if n}):
     else:
         shutil.copy2(s, d)
 PY
-  git -C "$dest" init -q -b main && git -C "$dest" add -A && git -C "$dest" commit -q -m "Initial commit" \
-    || { echo "fixture: could not commit the app in $dest" >&2; return 1; }
+  git -C "$dest" init -q -b main || return 1
+  # A run commits in this repo, so it commits as this checkout does.
+  for key in user.name user.email; do
+    value=$(git -C "$TOOL" config "$key") && git -C "$dest" config "$key" "$value"
+  done
+  git -C "$dest" add -A && git -C "$dest" commit -q -m "Initial commit" \
+    || { echo "fixture: could not commit the app in $dest; git needs user.name and user.email" >&2; return 1; }
 }
 
 tracker_kind() {  # the config's [tracker] kind; github when there is no config yet
@@ -101,8 +106,8 @@ make_and_file() {  # make_and_file <dest> <ticket> <owner/name, or empty for the
   fi
   [[ $nwo =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "fixture: not a GitHub repo name: $nwo" >&2; return 1; }
 
-  mkdir -p "$(dirname "$dest")" && make_repo "$dest" || return 1
-  unmake() { rm -r -- "$dest" </dev/null; }   # until the ticket is filed, nothing refers to dest
+  unmake() { [ -d "$dest" ] && rm -r -- "$dest" </dev/null; }   # until the ticket is filed, nothing refers to dest
+  mkdir -p "$(dirname "$dest")" && make_repo "$dest" || { unmake; return 1; }
   git -C "$dest" remote add origin "https://github.com/$nwo.git" && git -C "$dest" remote set-url --push origin /dev/null \
     || { unmake; echo "fixture: could not set the origin of $dest" >&2; return 1; }
   "$GITHUB_SH" "$dest" board >/dev/null; rc=$?
@@ -550,6 +555,9 @@ held=$(cd "$dest" && find . -path ./.git -prune -o \( -type f -o -type l \) -pri
 [ -n "$held" ] && [ "$held" = "$same" ] && [ -L "$dest/CLAUDE.md" ] \
   && ok "it holds the app's files as git sees them, symlink included, and nothing else" \
   || fail "it holds the app's files as git sees them, symlink included, and nothing else" "$(diff <(printf '%s\n' "$same") <(printf '%s\n' "$held"))"
+[ "$(git -C "$dest" config --local user.email)" = "$(git -C "$TOOL" config user.email)" ] \
+  && [ "$(git -C "$dest" config --local user.name)" = "$(git -C "$TOOL" config user.name)" ] \
+  && ok "it commits as this checkout does" || fail "it commits as this checkout does"
 [ "$(git -C "$dest" remote get-url origin)" = https://github.com/someone/postmaster-fixture.git ] \
   && [ "$(git -C "$dest" remote get-url --push origin)" = /dev/null ] \
   && ok "its origin is the kept GitHub repo, and it cannot push" || fail "its origin is the kept GitHub repo, and it cannot push"
