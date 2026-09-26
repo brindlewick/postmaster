@@ -5,7 +5,7 @@
 #
 #   launch.sh form   <name> [--leg <leg>]
 #   launch.sh launch <name> <cwd> <prompt-file> [--leg <leg>] [--last <file>]
-#   launch.sh resume <name> <cwd> <thread-id> <prompt-file> [--leg <leg>]
+#   launch.sh resume <name> <cwd> <thread-id> <prompt-file> [--leg <leg>] [--last <file>]
 #   launch.sh --self-test
 #
 # <name> is a lane from [lanes.<name>], or `coachman`, `coachman_fallback` or `postmaster`
@@ -49,6 +49,23 @@ if [ "${1:-}" = --self-test ]; then
   rawfix() {  # rawfix <name> <[team.coachman_legs] body, \n-separated>
     fixture "$1"; printf '%b' "$2" >> "$tmp/$1.toml"
   }
+  # The codex resume form: a codex stub, lane one and the coachman on codex, and a check on
+  # the stub's exact arguments, since the form itself is what the controls test.
+  printf '#!/bin/sh\necho "$@"\n' > "$tmp/bin/codex" && chmod +x "$tmp/bin/codex"
+  codexfix() {  # codexfix <name> <lane one's keys, \n-separated>
+    { printf '[lanes.one]\nharness = "codex"\n%b\n\n[team]\n' "$2"
+      printf 'coachman = { harness = "codex", model = "coach-model" }\n\n[team.coachman_legs]\n'
+      printf 'review = { harness = "codex", model = "review-model", effort = "medium" }\n'
+    } > "$tmp/$1.toml"
+  }
+  codexfix codex 'model = "lane-model"\neffort = "high"'
+  codexfix codex-noeffort 'model = "lane-model"'
+  codexfix codex-nomodel 'effort = "high"'
+  runs_as() {  # runs_as <label> <fixture> <the harness's exact arguments> <args...>
+    local label=$1 f=$2 want=$3; shift 3; run "$f" "$@"
+    [ $rc -eq 0 ] && [ "$out" = "$want" ] && ok "$label" || fail "$label"
+  }
+  CODEX_BYPASS=--dangerously-bypass-approvals-and-sandbox
   fixture legs synthesis review ship
   fixture none
   for k in style bug security; do fixture "old-$k" review "$k"; done
@@ -82,6 +99,12 @@ if [ "${1:-}" = --self-test ]; then
   runs_on "a lane launches on a config the coachman refuses" old-bug lane-model form one
   runs_on "a launch with --leg synthesis runs on the synthesis entry" legs synthesis-model launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg synthesis
   runs_on "a resume with --leg review runs on the review entry" legs review-model resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt" --leg review
+  runs_as "a codex resume runs on its lane's model and effort, streams JSON and writes -o" codex \
+    "exec resume T-1 --json -o $tmp/last.md -m lane-model -c model_reasoning_effort=\"high\" $CODEX_BYPASS Continue." \
+    resume one "$tmp/wt" T-1 "$tmp/prompt.txt" --last "$tmp/last.md"
+  runs_as "a codex coachman resumes with --leg review on the review entry's model and effort" codex \
+    "exec resume T-1 --json -m review-model -c model_reasoning_effort=\"medium\" $CODEX_BYPASS Continue." \
+    resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt" --leg review
   runs_on "the fallback resumes on its own model, with no --leg" legs fallback-model resume coachman_fallback "$tmp/wt" T-1 "$tmp/prompt.txt"
   runs_on "form with no --leg shows team.coachman" legs coach-model form coachman
 
@@ -98,6 +121,10 @@ if [ "${1:-}" = --self-test ]; then
   for k in style bug security; do
     refused "--leg $k is refused" legs "no such leg: --leg $k" form coachman --leg "$k"
   done
+  refused "a codex lane with no model is refused, and nothing resumes on codex's default" codex-nomodel "has no model" resume one "$tmp/wt" T-1 "$tmp/prompt.txt"
+  runs_as "a codex resume with no effort and no --last passes neither -c nor -o" codex-noeffort \
+    "exec resume T-1 --json -m lane-model $CODEX_BYPASS Continue." \
+    resume one "$tmp/wt" T-1 "$tmp/prompt.txt"
   refused "resuming the coachman with no --leg is refused, and nothing runs" legs "coachman needs --leg" resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt"
   refused "launching the coachman with no --leg is refused, and nothing runs" legs "coachman needs --leg" launch coachman "$tmp/wt" "$tmp/prompt.txt"
 
@@ -202,19 +229,18 @@ fi
 cmd=()
 case $HARNESS in
   codex)
-    if [ "$CMD" = resume ]; then
-      cmd=(codex exec resume "$THREAD" --dangerously-bypass-approvals-and-sandbox "$PTEXT")
-    else
-      cmd=(codex exec -C "$CWD" --json)
-      [ -n "$LAST" ] && cmd+=(-o "$LAST")
-      cmd+=(-m "$MODEL")
-      [ -n "${EFFORT:-}" ] && cmd+=(-c "model_reasoning_effort=\"$EFFORT\"")
-      cmd+=(--dangerously-bypass-approvals-and-sandbox)
-      if [ "$CMD" = launch ] && ! git -C "$CWD" symbolic-ref -q HEAD >/dev/null 2>&1; then
-        cmd+=(--skip-git-repo-check)   # a detached scratch
-      fi
-      cmd+=("$PTEXT")
-    fi ;;
+    # A resume takes the launch's flags but -C, which `codex exec resume` refuses. Without -m
+    # and the effort it runs on codex's configured default, not on the thread's own model.
+    if [ "$CMD" = resume ]; then cmd=(codex exec resume "$THREAD" --json)
+    else cmd=(codex exec -C "$CWD" --json); fi
+    [ -n "$LAST" ] && cmd+=(-o "$LAST")
+    cmd+=(-m "$MODEL")
+    [ -n "${EFFORT:-}" ] && cmd+=(-c "model_reasoning_effort=\"$EFFORT\"")
+    cmd+=(--dangerously-bypass-approvals-and-sandbox)
+    if [ "$CMD" = launch ] && ! git -C "$CWD" symbolic-ref -q HEAD >/dev/null 2>&1; then
+      cmd+=(--skip-git-repo-check)   # a detached scratch
+    fi
+    cmd+=("$PTEXT") ;;
   grok)
     if [ "$CMD" = resume ]; then cmd=(grok --resume "$THREAD" -p "$PTEXT")
     else cmd=(grok --prompt-file "$PROMPT"); fi
