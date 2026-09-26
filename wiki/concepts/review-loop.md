@@ -11,7 +11,8 @@ updated: 2026-09-26
 **Claim.** Style, bug and security review work better as one loop in one leg than as three
 passes in three legs. Each round runs every lens still open on one snapshot: all three in round
 1, then bug and security until clean. It should take fewer rounds, it needs one leg start-up
-instead of three, and every fix is re-reviewed by both gating lenses.
+instead of three, and every fix is re-reviewed by both gating lenses unless the loop stops at
+its round cap.
 
 **Standing: claimed.** This is a decision taken on reasoning. No run has been recorded under
 either design, so neither the time saved nor the coverage gained is measured yet. The change is
@@ -46,6 +47,9 @@ either design, so neither the time saved nor the coverage gained is measured yet
   since a split by lens would bring back the gap the loop closes.
 - **Colliding fixes.** Fixes from different lenses can touch the same code. One coachman sees
   them together and reconciles them before applying.
+- **The cap ends all review.** One five-round cap covers the whole loop, so a loop stopped at
+  the cap ships its last round's fixes unreviewed. In sequence, a capped bug pass was still
+  followed by the whole security pass.
 - **Same-lane duplicates.** Round 1 puts one snapshot in front of every lens, so one lane can
   report the same defect under two lenses. That is one model agreeing with itself, not
   corroboration. H2 in [combining models](combining-models.md) counts corroboration by lane, and
@@ -59,7 +63,8 @@ them and from each run's action log:
 - the review stage's duration and its number of rounds, per run, against the estimate above;
 - how often a bug reviewer finds a defect in code that a fix for a security finding changed.
   The sequence could not find these, since no bug reviewer saw a security fix, so each one is
-  coverage the loop added;
+  coverage the loop added. The log carries what this needs: each `finding` line names its file
+  and line, and each `apply` line the findings it fixes;
 - whether round 1 makes the machine queue or swap, and whether a review leg runs out of context.
 
 The claim is weakened if the loop takes as many rounds as the sequence did, or if its costs
