@@ -427,11 +427,13 @@ rc_of() { cat "$tmp/$1.rc" 2>/dev/null || echo none; }
 
 # The records of finished runs are built with the scripts a run uses, so they follow the
 # contract as those scripts define it today: the stages from stage.sh --list, and the hand-off
-# sections from what handoff-check.sh says an empty hand-off lacks. The score counts legs from
-# the run itself, so the number of legs here is arbitrary.
+# sections from what handoff-check.sh says an empty hand-off lacks. As the runbooks have it, the
+# legs enter every stage after the first and before done, and the postmaster closes the run. The
+# score counts legs from the run itself, so the number of legs here is arbitrary.
 : > "$tmp/empty.md"
 sections=$("$HERE/handoff-check.sh" "$tmp/empty.md" 2>&1 >/dev/null | sed -n 's/^handoff-check: missing or empty section: //p')
-stages=$("$HERE/stage.sh" --list | sed '/^done$/q' | tail -n +2)
+listed=$("$HERE/stage.sh" --list)
+stages=$(printf '%s\n' "$listed" | sed '/^done$/q' | sed '1d;$d')
 record() {  # record <name> <ticket> <shipped: reference, app or broken>: a finished run
   local name=$1 t=$2 shipped=$3 legs=3 n s section done_stages=0 count
   local repo=$tmp/$name/repo d=$tmp/$name/runs/$name/7 base
@@ -459,6 +461,7 @@ record() {  # record <name> <ticket> <shipped: reference, app or broken>: a fini
     while IFS= read -r section; do printf '## %s\nLeg %s, recorded.\n\n' "$section" "$n"; done <<< "$sections" > "$d/handoff-$n.md"
     "$HERE/log-action.sh" "$d" coachman handoff "leg-$n" && touch "$d/.leg-$n-done" "$d/.leg-$n-exited" || return 1
   done
+  "$HERE/stage.sh" "$d" done postmaster >/dev/null || return 1
   printf '# Ship card: 7\n\nBranch 7 is merged into main.\n' > "$d/card.md"
   python3 - "$d/manifest.json" "$legs" <<'PY'
 import json, sys
@@ -599,7 +602,7 @@ out=$(CONFIG=$tmp/plane.toml fresh_new "$tmp/runs/plane" "$first"); rc=$?
 wait
 
 echo "score: a recorded run that meets every check scores clean"
-[ -n "$sections" ] && [ "$(printf '%s\n' "$stages" | tail -1)" = done ] \
+[ -n "$sections" ] && [ -n "$stages" ] && printf '%s\n' "$listed" | grep -qx done \
   && ok "the hand-off sections and the stages are read from the scripts that define them" \
   || fail "the hand-off sections and the stages are read from the scripts that define them"
 expect() {  # expect <label> <name> <the check that fails, or none> [<text its FAIL line carries>]
