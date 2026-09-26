@@ -59,9 +59,37 @@ round it did not review at full strength, quoting the cause; `escalate` when a r
 `gate` per gate run with its exit; `ticket-state` and `ticket-comment` per tracker write; `merge`
 on the merge; `teardown` per worktree removed; `handoff-accept` as a leg's first action and
 `handoff` as its last; `stage` whenever the run enters a stage, written by `scripts/stage.sh`
-and never by hand; `note` for anything else worth a line. A lone
+and never by hand; `tool-fault` as soon as postmaster itself misbehaves (Tool faults, below);
+`note` for anything else worth a line. A lone
 dissenter, a convergent fix, a wall: each is one line here, computable later, rather than a
 sentence in prose that cannot be counted.
+
+## Tool faults: when postmaster itself misbehaves
+
+A tool fault is postmaster misbehaving: a script that fails or answers wrong, a runbook step
+that cannot be done as written, a harness adapter whose form does not work. The target's own
+code or gate failing is not one; that is the run's work. Postmaster is never fixed during a
+run, whatever the target: the fault becomes a ticket when the run closes.
+[Why](../../wiki/concepts/tool-faults.md)
+
+1. **Log it at once**, before anything else, with your own diagnosis and proposed fix:
+
+   ```sh
+   scripts/log-action.sh <dispatch> coachman tool-fault <postmaster file> --ran "<command or step>" \
+     --failed "<what failed>" --error "<the error, or none>" --diagnosis "<why>" --fix "<proposed fix>" \
+     [--workaround "<what you did instead>"] [--control <kind>]
+   ```
+
+   The file is the one that misbehaved, relative to `tool`; for a runbook step, the runbook,
+   with the step in `--ran`. `--failed` and `--fix` are published on postmaster's own tracker:
+   write them in postmaster's terms, and put the target's names, paths, code and ticket text
+   only in `--ran`, `--error` and `--diagnosis`, which stay in the run's records. A fault seen
+   again is logged again, with the `--failed` text of its first line.
+2. **A fault in a control stops the leg.** `controls.md` beside this file lists the controls;
+   a runbook step it names takes `--control` with its kind. Never work around a control:
+   write `ESCALATION.md` naming the fault, touch `.escalation-ready`, and exit.
+3. **A fault anywhere else may be worked around**, with the workaround in the same line
+   (`--workaround`). One you cannot work around is escalated like any other question.
 
 ## Coachman lifecycle (headless)
 
@@ -583,6 +611,9 @@ logical order, not file safety: check the file surfaces before mass-launching.
 
 - The postmaster never implements, reviews, or launches workhorses; you never prepare a run, write
   your own waybill, or launch your own next leg. Neither of you does the other's job.
+- **Never modify postmaster itself during a run, whatever the target.** Its runbooks, scripts
+  and adapters change only through a ticket of their own; a fault in them is a tool fault
+  (above). When the target is postmaster, the run changes only what its own ticket asks for.
 - Never start a leg without logging `handoff-accept`; never end one without a hand-off that
   passes `scripts/handoff-check.sh`. What is not in the hand-off did not happen for the next
   leg.

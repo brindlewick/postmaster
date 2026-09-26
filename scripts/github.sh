@@ -16,7 +16,9 @@
 #   github.sh <repo> state <n> <state>             todo | in-progress | blocked | done | cancelled
 #   github.sh <repo> comment <n> <actor> <text>    one comment, dated to the minute, actor first
 #   github.sh <repo> list [state]                  one line per issue: number, state, title
-#   github.sh --self-test                          read and edit against a stub gh, offline
+#   github.sh <repo> access                        the user's permission on the repository:
+#                                                  ADMIN, MAINTAIN, WRITE, TRIAGE or READ
+#   github.sh --self-test                          read, edit and access against a stub gh, offline
 #
 # <repo> is a local checkout; the GitHub repository is read from its origin remote. Everything
 # goes through the gh CLI, which must be logged in with the `project` scope
@@ -34,8 +36,8 @@
 set -uo pipefail
 die() { echo "github: $*" >&2; exit 1; }
 if [ "${1:-}" != --self-test ]; then
-  REPO=${1:?usage: github.sh <repo> board|create|edit|read|state|comment|list ... | --self-test}
-  [ $# -ge 2 ] || die "usage: github.sh <repo> board|create|edit|read|state|comment|list ... | --self-test"
+  REPO=${1:?usage: github.sh <repo> board|create|edit|read|state|comment|list|access ... | --self-test}
+  [ $# -ge 2 ] || die "usage: github.sh <repo> board|create|edit|read|state|comment|list|access ... | --self-test"
   [ -d "$REPO" ] || die "no such directory: $REPO"
   command -v gh >/dev/null 2>&1 || die "gh is not on PATH"
   gh auth status >/dev/null 2>&1 || die "gh is not logged in; the user runs: gh auth login"
@@ -305,8 +307,17 @@ elif cmd == "list":
         if want is None or st == want:
             print("#%d\t%s\t%s" % (iss["number"], st, iss.get("title", "")))
 
+elif cmd == "access":
+    if len(args) != 1: usage("access")
+    q = "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){viewerPermission}}"
+    data = ghj("api", "graphql", "-f", "query=" + q, "-F", "owner=" + OWNER, "-F", "name=" + NAME)
+    perm = ((data.get("data") or {}).get("repository") or {}).get("viewerPermission")
+    if not perm:
+        die("no permission on %s could be read" % NWO)
+    print(perm)
+
 else:
-    usage("board|create|edit|read|state|comment|list ...")
+    usage("board|create|edit|read|state|comment|list|access ...")
 PY
 fi
 
@@ -327,6 +338,7 @@ case "$1 $2" in
     for a in "$@"; do case $a in query=*) q=$a ;; number=*) n=${a#number=} ;; esac; done
     case $q in
       *projectsV2*) cat "$d/boards.json" ;;
+      *viewerPermission*) cat "$d/access.json" ;;
       *"issue(number:"*) if [ -f "$d/issue-$n.json" ]; then cat "$d/issue-$n.json"
                          else echo '{"data": {"repository": {"issue": null}}}'; fi ;;
       *) echo "stub gh: unexpected query" >&2; exit 1 ;;
@@ -414,6 +426,18 @@ refused "no linked board exits 3" 3 "no linked board" 7 "$tmp/new.md" "$tmp/base
 gh_sh read 7 --body > /dev/null 2>&1; rc=$?
 [ $rc -eq 3 ] && ok "read --body without a linked board exits 3" || fail "read --body without a linked board exits 3 (exit $rc)"
 printf '%s\n' "$BOARD" > "$S/boards.json"
+
+echo "access"
+printf '%s\n' '{"data": {"repository": {"viewerPermission": "ADMIN"}}}' > "$S/access.json"
+out=$(gh_sh access 2>&1); rc=$?
+[ $rc -eq 0 ] && [ "$out" = ADMIN ] && ok "access prints the user's permission" || fail "access prints the user's permission (exit $rc)" "$out"
+printf '%s\n' '{"data": {"repository": {"viewerPermission": "READ"}}}' > "$S/access.json"
+out=$(gh_sh access 2>&1); rc=$?
+[ $rc -eq 0 ] && [ "$out" = READ ] && ok "a repository the user only reads says READ" || fail "a repository the user only reads says READ (exit $rc)" "$out"
+printf '%s\n' '{"data": {"repository": null}}' > "$S/access.json"
+out=$(gh_sh access 2>&1); rc=$?
+[ $rc -eq 1 ] && printf '%s\n' "$out" | grep -qF "no permission on o/r" && ok "a repository gh cannot see exits 1" \
+  || fail "a repository gh cannot see exits 1 (exit $rc)" "$out"
 
 echo
 [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }

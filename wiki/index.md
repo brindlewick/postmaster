@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # postmaster wiki
@@ -41,6 +41,10 @@ Why the design is shaped as it is.
 - [The workhorse spec](concepts/workhorse-spec.md): **claimed**. Each workhorse drafts its
   own, which keeps the workhorses independent of each other and of the coachman, and makes
   each run auditable.
+- [Faults a run finds in postmaster become tickets](concepts/tool-faults.md): **claimed**. A
+  run records each fault in postmaster as it happens and never fixes the tool; a fault in a
+  control stops the leg. When the run closes, its faults become tickets on postmaster's own
+  tracker, carrying nothing of the target.
 - [A ticket's shape is checked before it is accepted](concepts/ticket-shape.md): **claimed**.
   A title, the problem, numbered criteria each answerable yes or no, and the user's direction,
   checked by a script before any ticket is dispatched. What is missing is asked of the user.
