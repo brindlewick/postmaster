@@ -39,6 +39,10 @@ will read a new contract while an older run is still writing to the old one.
 Contract changes are the only category that needs the fleet quiet. Ordinary changes to
 scripts, docs and prose do not.
 
+**A change to the coachman contract merges only after a fixture run scores clean**: a run
+dispatched from the change's branch against a repository made by `scripts/fixture.sh new`, and
+scored by `scripts/fixture.sh score` on the same branch. [Why](wiki/concepts/fixture-runs.md).
+
 ## When a session opens in this repo, do this
 
 No slash command, and no wizard for the user to run. They open their agent in this

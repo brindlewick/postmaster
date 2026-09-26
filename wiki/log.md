@@ -1,12 +1,23 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-22
+updated: 2026-09-26
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-26] ingest | fixture runs test the flow end to end
+
+First page in a new Testing the flow area. A small app with two tickets whose outcome is known,
+one tightly specified and one open in design, each with acceptance tests written before any run
+and kept out of every run. A fixture run is scored from its records rather than its report, and
+a change to the coachman contract now merges only after one scores clean. The page records why
+the tests are hidden and how a fixture run gets its ticket: a GitHub repository kept for fixture
+tickets, since the waybill-only route skips the postmaster's own check of the ticket and the
+tracker with no service does not exist yet. Standing `claimed`, since no fixture run has been
+recorded.
 
 ## [2026-09-23] lint | workhorse replaces arm
 
