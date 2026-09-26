@@ -18,7 +18,8 @@
 #   exit 0  the stage was set, or already was
 #   exit 1  usage, no manifest, an unreadable manifest, or the log could not be written
 #   exit 2  not one of the stages
-#   exit 3  a terminal stage set, or left, by any actor but the postmaster
+#   exit 3  the run is done or abandoned, and only the postmaster moves it on
+#   exit 4  a terminal stage set by any actor but the postmaster
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd -P)
 STAGES="dispatched bootstrapped workhorses-running synthesis checkpoint-1 review shipping shipped done abandoned"
@@ -27,7 +28,7 @@ set_stage() {  # set_stage <dispatch> <stage> <actor>
   local d=$1 new=$2 actor=$3
   case " $STAGES " in *" $new "*) ;; *) echo "stage: '$new' is not a stage; one of: $STAGES" >&2; return 2 ;; esac
   case $new in
-    done|abandoned) [ "$actor" = postmaster ] || { echo "stage: only the postmaster sets $new" >&2; return 3; } ;;
+    done|abandoned) [ "$actor" = postmaster ] || { echo "stage: only the postmaster sets $new" >&2; return 4; } ;;
   esac
   [ -f "$d/manifest.json" ] || { echo "stage: no manifest at $d/manifest.json" >&2; return 1; }
   local plan
@@ -138,7 +139,7 @@ for old in review-style review-bug review-security; do
 done
 for t in done abandoned; do
   fresh; cp "$d/manifest.json" "$tmp/before.json"; set_stage "$d" "$t" coachman >/dev/null 2>&1; rc=$?
-  [ $rc -eq 3 ] && [ "$(count)" -eq 0 ] && cmp -s "$d/manifest.json" "$tmp/before.json" \
+  [ $rc -eq 4 ] && [ "$(count)" -eq 0 ] && cmp -s "$d/manifest.json" "$tmp/before.json" \
     && ok "$t from the coachman is refused, and nothing changes" || fail "$t from the coachman is refused, and nothing changes (exit $rc)"
 done
 fresh; set_stage "$d" abandoned postmaster >/dev/null; cp "$d/manifest.json" "$tmp/before.json"

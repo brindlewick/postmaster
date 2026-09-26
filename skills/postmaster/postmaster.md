@@ -123,9 +123,11 @@ later one when the previous leg's marker appears.
    its `.leg-<n-1>-done` marker and resume leg `n-1` (step 5, with `n-1` in place of `n`),
    the prompt naming the missing sections and saying "Complete the hand-off and end the leg
    as `coachman.md` says." Then wait for its done marker.
-3. **Launch,** in the background, stream to the leg's events file, marker on exit:
+3. **Launch,** in the background, stream to the leg's events file, marker on exit, with the
+   leg's exited marker cleared first:
 
    ```sh
+   rm -f <dispatch>/.leg-<n>-exited
    ( scripts/launch.sh launch coachman <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt --leg <leg-name> \
        > <dispatch>/logs/coachman-leg-<n>-events.jsonl 2> <dispatch>/logs/coachman-leg-<n>.err;
      touch <dispatch>/.leg-<n>-exited ) &
@@ -162,21 +164,23 @@ scripts/runs-status.sh <runs>
 
 Act on the `NEXT` column, run by run, and log every action:
 
-- **USER:** the run waits on the user (`.waiting-on-user`, Stage E step 3). Nothing to do until
-  they answer.
+- **USER:** the run waits on the user, and its `.waiting-on-user` holds the question (Stage E
+  step 3, Stage F step 2). Put the question to the user again if you have not in this session;
+  otherwise nothing to do until they answer.
 - **RULE:** an escalation is waiting. Stage E.
 - **GATE:** the ship card is complete. Stage F.
 - **DISPATCH:** the leg's `.leg-<n>-done` marker is present. Stage C for leg `n+1`; after leg
   3, Stage G.
 - **REMOUNT:** the leg's process exited (`.leg-<n>-exited`) with no hand-off, escalation or
-  card. Read the leg's `.err` file and the stream tail. A leg with no thread id, none in its
-  stream and none in `coachman.legs.<n>`, never started: its `.err` goes to the user (Stage E
-  step 3), and on their answer the leg is launched again (Stage C step 3). A quota or provider
-  wall, quoted, means the coachman is lame for this leg: log `degrade` and relaunch the leg on
-  the fallback with a takeover prompt (below), unless the leg already runs on the fallback,
-  when the wall goes to the user (Stage E step 3). Anything else is a spent thread: remount it
-  by resuming the leg (Stage C) with "Continue leg <n>; your last written state is in the
-  dispatch directory and the worktree" as the prompt.
+  card. Read the leg's `.err` file and the stream tail. A `.err` that opens with a `launch:`
+  line is a refusal from `scripts/launch.sh`: it goes to the user (Stage E step 3), and nothing
+  is launched or resumed until they answer. A leg with no thread id, none in its stream and none
+  in `coachman.legs.<n>`, never started: its `.err` goes to the user too, and on their answer
+  the leg is launched again (Stage C step 3). A quota or provider wall, quoted, means the
+  coachman is lame for this leg: log `degrade` and take the leg over on the fallback (below),
+  unless it already runs on the fallback, when the wall goes to the user. Anything else is a
+  spent thread: remount it by resuming the leg (Stage C step 5) with "Continue leg <n>; your
+  last written state is in the dispatch directory and the worktree" as the prompt.
 - **READ:** a checkpoint card is waiting. Read it, log `note` with its one-line summary, and
   remove its `.checkpoint-*-ready` marker. In consult mode the card comes with an escalation,
   which RULE handles.
@@ -190,9 +194,10 @@ Act on the `NEXT` column, run by run, and log every action:
 `<tool>/skills/postmaster/coachman.md`, `<dispatch>/handoff-<n-1>.md`, then `run-log.md` and
 `actions.jsonl` for what this leg did before you, then the synthesis worktree's `git log` and
 `git status`. Treat every uncommitted change as unverified. Log `handoff-accept` and finish
-the leg." Launch it through the wrapper of Stage C step 5, with `scripts/launch.sh launch
+the leg." Move the leg's stream to `<dispatch>/logs/coachman-leg-<n>-walled-events.jsonl`, then
+launch the takeover through the wrapper of Stage C step 3, with `scripts/launch.sh launch
 coachman_fallback <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-takeover.txt` in place of the
-resume. Read the new thread id from the events the takeover appended, and record it as
+coachman's launch. Record its thread id from the new stream (`harnesses.md`) as
 `coachman.legs.<n>.thread_id`, with `coachman_fallback` as its `name`.
 
 A leg's `.leg-<n>-exited` marker with `.leg-<n>-done` beside it is normal completion. Every
@@ -207,11 +212,11 @@ never the record.
    work: a within-brief ambiguity, a scope call the ticket's own criteria answer, a lane to
    drop as DEGRADED, a round to stop at the cap. Log `escalate` with your ruling.
 3. **Send it up** when it is genuinely destructive, changes the ticket's scope, touches
-   anything outside the repo, or the user asked to see it: write
-   `<runs>/postmaster/ESCALATION.md` naming the run and the question, touch the run's
-   `.waiting-on-user`, tell the user in the session, and wait. Never pass a postmaster grant
-   up as if it needed the user's word, and never take the user's word for something the
-   config gives you. On the user's answer, remove `.waiting-on-user` and the file.
+   anything outside the repo, or the user asked to see it: write the question to the run's
+   `.waiting-on-user`, add the run and the question to `<runs>/postmaster/ESCALATION.md`, tell
+   the user in the session, and wait. Never pass a postmaster grant up as if it needed the
+   user's word, and never take the user's word for something the config gives you. On the
+   user's answer, remove `.waiting-on-user` and the run's entry, and the file once it is empty.
 4. **Deliver the ruling:** remove `.escalation-ready`, then resume the current leg (Stage C,
    step 5) with the ruling as the prompt. The ruling is a prompt to a resumed thread, never
    text typed into anything.
@@ -233,8 +238,8 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    `merge` with `granted`. Any check fails: deliver the failure as a ruling and log `merge` with
    `withheld` and the reason; the leg addresses it and raises the card again.
    `MERGE_AUTHORITY: user`: put the card, the review link and your verification in front of the
-   user, touch `.waiting-on-user`, and wait; when their word comes, remove `.waiting-on-user`
-   and deliver the word verbatim.
+   user, write what you asked them to the run's `.waiting-on-user`, and wait; when their word
+   comes, remove `.waiting-on-user` and deliver the word verbatim.
 3. **Never merge yourself.** The coachman merges on the word; you only say it.
 
 ## Stage G: after the merge

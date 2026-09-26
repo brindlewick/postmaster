@@ -419,9 +419,10 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    for LENS in <open lenses>; do
      for L in <reviewer lanes>; do
        DEST=<repo>/.worktrees/<TICKET>-rev-$LENS-$L
-       # A scratch an interrupted round left behind is checked like any other, then removed.
+       # A scratch an interrupted round left behind, with no reviewer still running in it, is
+       # checked like any other, then removed.
        if [ -e "$DEST" ]; then
-         git -C "$DEST" diff --name-only | sed "s|^|LEFT BEHIND AND MODIFIED, $DEST: |"
+         git -C "$DEST" diff --name-only "$SNAP" | sed "s|^|LEFT BEHIND AND MODIFIED, $DEST: |"
          git -C <repo> worktree remove --force "$DEST"
        fi
        # ASSERT the scratch is cut at SNAP and resolves before launching a lane into it. A
@@ -442,7 +443,8 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    is at the snapshot, and launches nothing if one is not; then it clears the round's markers.
    Each wrapper lands its marker, naming the round, the lens and the lane, when its process
    exits, whatever its exit, and the command ends in the wait for the whole round. An
-   interrupted round is re-run whole:
+   interrupted round is re-run whole, once no reviewer from its first attempt is still running;
+   select them by working directory, never by prompt text:
 
    ```sh
    SNAP=$(git -C <synthesis-wt> rev-parse HEAD)
@@ -493,12 +495,13 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    and do not count its verdict toward closing the round (hard rules, below).
 
    **After harvesting the round, and BEFORE staging any fix**, check each scratch with `git -C
-   <scratch> diff --name-only`, not `status --porcelain` (scratches are expected to be dirty
-   with untracked build output). Any modified tracked file is a finding about the LANE: log it
-   with the file list and do not count that lane's verdict until it is understood. Then remove
-   the scratches; `git worktree remove --force` is sanctioned for SCRATCHES ONLY, here and at
-   the cut, since a detached scratch never holds work and its contents were just checked. Also
-   assert the synthesis worktree itself is still clean. With every lane on a copy, nothing
+   <scratch> diff --name-only <SNAP>`, which names every tracked file changed since the
+   snapshot, staged or committed included, not `status --porcelain` (scratches are expected to
+   be dirty with untracked build output). Any modified tracked file is a finding about the LANE:
+   log it with the file list and do not count that lane's verdict until it is understood. Then
+   remove the scratches; `git worktree remove --force` is sanctioned for SCRATCHES ONLY, here
+   and at the cut, since a detached scratch never holds work and its contents were just checked.
+   Also assert the synthesis worktree itself is still clean. With every lane on a copy, nothing
    should touch it during a review round; a dirty synthesis tree is an escape and an incident to
    investigate before continuing. When later staging fixes in the synthesis worktree, prefer a
    targeted `git add <paths>` over `git add -A`.

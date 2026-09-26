@@ -13,13 +13,14 @@
 # overrides the coachman for that leg. Launching or resuming `coachman` needs --leg; `form`
 # without it shows team.coachman. The coachman is refused when [team.coachman_legs] names any
 # other leg or holds an entry that is not a table, and the coachman and the fallback are
-# refused on a lane's model, a model id's bracketed suffix aside. HARNESS, MODEL, EFFORT and
-# ENV_FILE come from the config alone, never from the environment, and a lane's env file is
-# loaded last, into the harness's environment only, once the command is built. The events
-# stream goes to stdout; the caller redirects and backgrounds. A lane's env_file, if set, is
-# loaded first, so an alternate backend for a harness is an environment file outside this
-# repo, never a value in the config. --last names the file a harness writes its final message
-# to, where the harness supports it (codex -o).
+# refused on a lane's model, a model id's bracketed suffixes aside. HARNESS, MODEL, EFFORT and
+# ENV_FILE come from the config alone, never from the environment. A lane's env_file is how a
+# harness reaches an alternate backend: a file outside this repo, never a value in the config,
+# and a relative path is read from the config's directory. It is shell, sourced last, once the
+# command, its directory and its stdin are fixed, so its assignments reach the harness and not
+# this script's choices; it runs as code, and is the user's to write. The events stream goes to
+# stdout; the caller redirects and backgrounds. --last names the file a harness writes its final
+# message to, where the harness supports it (codex -o).
 #
 #   exit 0  the form was printed, or the harness exited 0
 #   exit 1  usage, config missing or unreadable, unknown name, a leg that is not synthesis,
@@ -58,6 +59,9 @@ if [ "${1:-}" = --self-test ]; then
   rawfix notable 'review = "claude"\n'
   rawfix dup 'review = { harness = "claude", model = "a" }\nreview = { harness = "claude", model = "b" }\n'
   rawfix suffix 'review = { harness = "claude", model = "lane-model[1m]" }\n'
+  rawfix suffixes 'review = { harness = "claude", model = "lane-model[1m][2m]" }\n'
+  mkdir "$tmp/elsewhere"; printf 'PROBE=config-dir\n' > "$tmp/rel.env"; printf 'PROBE=worktree\n' > "$tmp/wt/rel.env"
+  : > "$tmp/empty.txt"; printf 'x\n' > "$tmp/unreadable.txt"; chmod 000 "$tmp/unreadable.txt"
   rawfix emptyleg 'synthesis = {}\n'
   head='[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n\n[team]\n'
   printf "$head"'coachman = { harness = "claude", model = "lane-model" }\n' > "$tmp/coachlane.toml"
@@ -65,6 +69,7 @@ if [ "${1:-}" = --self-test ]; then
   printf '[lanes.one]\nharness = "claude"\n\n[team]\ncoachman = { harness = "claude" }\n' > "$tmp/bare.toml"
   printf 'MODEL=lane-model\nHARNESS=nope\nPROBE=reached\n' > "$tmp/over.env"
   printf "$head"'coachman = { harness = "claude", model = "coach-model", env_file = "%s" }\n' "$tmp/over.env" > "$tmp/envfile.toml"
+  printf "$head"'coachman = { harness = "claude", model = "coach-model", env_file = "rel.env" }\n' > "$tmp/relenv.toml"
   out="" err="" rc=0 fails=0 envx=""
   run() {  # run <fixture> <args...>; $envx is extra environment for the run
     local f=$1; shift
@@ -122,6 +127,16 @@ if [ "${1:-}" = --self-test ]; then
   runs_on "an env file cannot put the coachman on another model" envfile coach-model launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg review
   envx="STDIN_FILE=$tmp/prompt.txt"
   lacks "a STDIN_FILE from the environment is not used" legs "< " form one
+  refused "a leg entry on a lane's model with stacked suffixes is refused" suffixes "a lane's model" form coachman --leg synthesis
+  cd "$tmp/elsewhere" || exit 1
+  carries "a relative env file is read from the config's directory, never the worktree" relenv "probe=config-dir" launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg review
+  cd - >/dev/null || exit 1
+  refused "an empty prompt file is refused, and nothing runs" legs "prompt file missing, unreadable or empty" launch one "$tmp/wt" "$tmp/empty.txt"
+  if [ -r "$tmp/unreadable.txt" ]; then
+    printf '  ok   %s\n' "an unreadable prompt file is refused (skipped: this user reads every file)"
+  else
+    refused "an unreadable prompt file is refused, and nothing runs" legs "prompt file missing, unreadable or empty" launch one "$tmp/wt" "$tmp/unreadable.txt"
+  fi
   envx=""
   refused "a resume with no thread id is refused, and nothing runs" legs "launch: resume needs a thread id" resume one "$tmp/wt" "" "$tmp/prompt.txt"
   refused "an argument launch.sh does not know is refused" legs "launch needs <cwd> <prompt-file>" launch one "$tmp/wt" "$tmp/prompt.txt" --leg=review
@@ -170,8 +185,8 @@ LEGS = ("synthesis", "review", "ship")
 if leg and leg not in LEGS:
     die("no such leg: --leg %s; the legs are synthesis, review and ship" % leg)
 lanes = table(cfg.get("lanes", {}), "[lanes]")
-def base(model):  # a model id without its bracketed suffix: same[1m] is same
-    return re.sub(r"\[[^\]]*\]$", "", str(model))
+def base(model):  # a model id without its bracketed suffixes: same[1m] is same
+    return re.sub(r"(\[[^\]]*\])+$", "", str(model))
 lane_models = {base(v["model"]) for v in lanes.values() if isinstance(v, dict) and v.get("model")}
 def not_a_lane(spec, what):
     if isinstance(spec, dict) and spec.get("model") and base(spec["model"]) in lane_models:
@@ -214,19 +229,23 @@ eval "$spec"
 command -v "$HARNESS" >/dev/null 2>&1 || die "harness '$HARNESS' is not on PATH"
 if [ -n "${ENV_FILE:-}" ]; then
   ENV_FILE=${ENV_FILE/#\~/$HOME}
-  [ -f "$ENV_FILE" ] || die "env_file for $NAME not found: $ENV_FILE"
+  case $ENV_FILE in /*) ;; *) ENV_FILE=$(cd "$(dirname "$CONFIG")" && pwd -P)/$ENV_FILE ;; esac
+  [ -f "$ENV_FILE" ] && [ -r "$ENV_FILE" ] || die "env_file for $NAME not found or not readable: $ENV_FILE"
 fi
 
+prompt_text() {  # the prompt file's text; a missing, unreadable or empty file is refused
+  [ -f "$PROMPT" ] && [ -r "$PROMPT" ] && [ -s "$PROMPT" ] || die "prompt file missing, unreadable or empty: $PROMPT"
+  PTEXT=$(cat "$PROMPT") || die "cannot read the prompt file: $PROMPT"
+}
 case $CMD in
   form)   [ ${#args[@]} -eq 0 ] || die "form takes no argument but --leg"
           CWD='<cwd>'; PROMPT='<prompt-file>'; THREAD='<thread-id>'; PTEXT='$(cat <prompt-file>)' ;;
   launch) [ ${#args[@]} -eq 2 ] || die "launch needs <cwd> <prompt-file>"
-          CWD=${args[0]}; PROMPT=${args[1]}
-          [ -f "$PROMPT" ] || die "no such prompt file: $PROMPT"; PTEXT=$(cat "$PROMPT") ;;
+          CWD=${args[0]}; PROMPT=${args[1]}; prompt_text ;;
   resume) [ ${#args[@]} -eq 3 ] || die "resume needs <cwd> <thread-id> <prompt-file>"
           CWD=${args[0]}; THREAD=${args[1]}; PROMPT=${args[2]}
           [ -n "$THREAD" ] || die "resume needs a thread id, and none was given"
-          [ -f "$PROMPT" ] || die "no such prompt file: $PROMPT"; PTEXT=$(cat "$PROMPT") ;;
+          prompt_text ;;
   *) die "unknown command: $CMD" ;;
 esac
 [ "$CMD" = form ] || [ -d "$CWD" ] || die "no such directory: $CWD"
