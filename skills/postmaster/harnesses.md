@@ -9,7 +9,7 @@ runbooks do not.
 adds the redirect to the lane's events file, the backgrounding, and any marker that must land
 on exit; that is what makes one wrapper in the runbooks correct for every harness.
 
-**`scripts/launch.sh` is the executable form of this file.** `launch.sh form <name>` prints the
+**`<tool>/scripts/launch.sh` is the executable form of this file.** `launch.sh form <name>` prints the
 exact command for a configured lane or role; `launch` and `resume` run it. The script and this
 file change together, and a form the script refuses (muse; agy resume) is a form this file has
 not recorded yet.

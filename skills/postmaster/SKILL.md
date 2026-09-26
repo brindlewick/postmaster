@@ -46,7 +46,7 @@ tell whether it is setting up or dispatching is one nobody can follow.
 user which project to dispatch against, and do the finding for them:
 
 ```sh
-scripts/find-projects.sh [root ...]   # most recently worked first; ~/Code unless roots are given
+<tool>/scripts/find-projects.sh [root ...]   # most recently worked first; ~/Code unless roots are given
 ```
 
 **Sort by last commit and show about twelve.** Recency is the best available proxy for
@@ -67,7 +67,7 @@ Adjust the search roots to the machine. `~/Code` is one convention, not a rule.
 **The chosen project must be a git repository.**
 
 ```sh
-scripts/check-target.sh "$TARGET"   # 0 usable · 1 not a repo · 2 dirty, ask first
+<tool>/scripts/check-target.sh "$TARGET"   # 0 usable · 1 not a repo · 2 dirty, ask first
 ```
 
 **Read its exit code and stop on 1.** Do not offer to `git init`, do not walk up looking for
@@ -97,13 +97,13 @@ The flow is general and carries no assumptions about build tools, docs layout or
 config file before it runs on a plain git repo is a tool nobody adopts.
 
 ```sh
-scripts/discover-project.sh "$TARGET"   # gate=… docs=… tracker_prefix=… ambient_context=…
+<tool>/scripts/discover-project.sh "$TARGET"   # gate=… docs=… tracker_prefix=… ambient_context=…
 ```
 
-A github tracker needs the target's board: `scripts/github.sh "$TARGET" board` names it, and
+A github tracker needs the target's board: `<tool>/scripts/github.sh "$TARGET" board` names it, and
 exit 3 means there is none yet, so propose `board init` to the user and hand them the URL
 it prints. A plane tracker needs the target's project identifier: the discovered
-`tracker_prefix` when the target has shipped a ticket, otherwise `scripts/plane.sh projects`
+`tracker_prefix` when the target has shipped a ticket, otherwise `<tool>/scripts/plane.sh projects`
 lists the candidates and the user picks. Report what you found on the launch card, and
 ask only about what you could not determine.
 **If the project has no `AGENTS.md` or equivalent, say so.** Lanes that read no ambient
@@ -123,14 +123,14 @@ not say; the security lens reviews against them.
    the merge word (`ship.merge_authority`), and the project facts above. Launch
    nothing before the user picks.
 4. **Create the run root** `~/.postmaster/runs/<project>/` (the repo's basename) and log the
-   launch there: `scripts/log-action.sh` needs a run directory, so the postmaster's own
+   launch there: `<tool>/scripts/log-action.sh` needs a run directory, so the postmaster's own
    actions go under `~/.postmaster/runs/<project>/postmaster/`.
 5. **Spawn.** A new session of the postmaster's harness (`team.postmaster` in the config),
    rooted in the target repo, in its own tmux session named `postmaster-<project>`, briefed
    with: "You are the postmaster for <project>. Read `<tool>/skills/postmaster/postmaster.md`
    first", then the stream paragraph, the project profile, `<tool>` and the config path. An
    interactive harness gets the brief as its first prompt; a headless one gets it through
-   `scripts/launch.sh launch postmaster <repo> <brief-file>`, run inside the tmux session so
+   `<tool>/scripts/launch.sh launch postmaster <repo> <brief-file>`, run inside the tmux session so
    the user can attach.
 6. **Report** the session name, the run root, and the brief. Then stop.
 
@@ -174,7 +174,7 @@ postmaster ruling channel: resume the coachman's thread (harnesses.md) with the 
   user.
 - All work in worktrees; the project's default branch stays clean.
 - Verify claims against code before trusting them, above all before granting a merge.
-- Every action on a project is logged as it happens, through `scripts/log-action.sh`, by
+- Every action on a project is logged as it happens, through `<tool>/scripts/log-action.sh`, by
   the postmaster and by every coachman. The narrative is for reading; the log is for
   learning.
 - Prefer a script to a hand-rolled step. Anything deterministic (drift checks, collision
