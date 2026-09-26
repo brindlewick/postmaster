@@ -4,6 +4,10 @@ Quoted from the document at the url in `source.md`, retrieved 2026-09-26. Only t
 the wiki relies on are kept. Line breaks are joined, and a word the PDF hyphenated only to break a
 line is rejoined; nothing else is changed. Each passage names the section it comes from.
 
+> We construct a set of 228 code scenarios and analyze eight of the most capable LLMs across eight different investigative dimensions using our framework.
+
+Abstract.
+
 > Our evaluation shows LLMs provide non-deterministic responses, incorrect and unfaithful reasoning, and perform poorly in real-world scenarios.
 
 Abstract.

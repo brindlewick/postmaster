@@ -12,6 +12,10 @@ Abstract.
 
 1 Introduction.
 
+> Throughout the report we always use the same 20 problems, which are chosen at random; and from each problem, the same 40 C++ user submissions, also chosen at random.
+
+4 Experimental Evaluation.
+
 > Overall, we see that the damage done by pseudo-bug fixing in correct files (damage rate) is at least as large as the improvements. For SRBs, the damage rate is substantially higher than the repair rate; for whole-file edits, the two are similar.
 
 4.1 Repair Rate and Damage Rate.

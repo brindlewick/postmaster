@@ -8,6 +8,10 @@ line is rejoined; nothing else is changed. Each passage names the section it com
 
 Abstract.
 
+> A sealed five-seed study over 30 HumanEval repairs produces 900 three-revision trajectories.
+
+Abstract.
+
 > Under forced revision, current correctness with current traces falls from 0.820 after one revision to 0.673 after two, although ever-correct rises to 0.847.
 
 Abstract.

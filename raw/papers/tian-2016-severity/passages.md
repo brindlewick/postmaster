@@ -8,6 +8,10 @@ line is rejoined; nothing else is changed. Each passage names the section it com
 
 Abstract.
 
+> We manually examine a statistical-representative sample of the duplicate buckets (1,394 bug reports across 437 bucket), in order to verify whether bug reports in the same bucket describe the same problem (i.e., whether they are truly duplicates).
+
+1. Introduction.
+
 > We find that 95 % (+/- 3 %) of the buckets contain bug reports that describe the same problem.
 
 1. Introduction.

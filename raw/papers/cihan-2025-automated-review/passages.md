@@ -4,6 +4,10 @@ Quoted from the document at the url in `source.md`, retrieved 2026-09-26. Only t
 the wiki relies on are kept. Line breaks are joined, and a word the PDF hyphenated only to break a
 line is rejoined; nothing else is changed. Each passage names the section it comes from.
 
+> We focused our analysis on three projects, encompassing 4,335 pull requests, of which 1,568 underwent automated reviews.
+
+Abstract.
+
 > 73.8% of automated code review comments were labeled as resolved. However, the overall average pull request closure duration increased from five hours 52 minutes to eight hours 20 minutes, with varying trends observed across different projects.
 
 Abstract.
