@@ -1,6 +1,6 @@
 ---
 name: postmaster
-description: 'Start work with postmaster on this machine, from the postmaster tool repo. It is the front door and establishes its own preconditions: if the machine has no ~/.postmaster/config.toml it conducts setup first rather than failing later, and if a session already chose a target it picks up from there instead of asking again. Then it lists the git projects by recency, asks which to dispatch against, verifies that target is a git repository and refuses if it is not, handles an uncommitted tree by offering to commit or stash rather than stopping, discovers the gate command, docs and tracker instead of demanding config, confirms a launch card, and spawns a POSTMASTER session which decomposes a stream into tickets and dispatches one coachman per ticket. A coachman drives one leg of one ticket and its runbook is coachman.md beside this file. The postmaster runs no model lanes and edits no source. Reached by typing /postmaster, or by AGENTS.md sending a session here.'
+description: 'Start work with postmaster on this machine, from any directory. It is the front door and establishes its own preconditions: it finds the postmaster repo from its own link, if the machine has no ~/.postmaster/config.toml it conducts setup first rather than failing later, and if a session already chose a target it picks up from there instead of asking again. Then it lists the git projects by recency, asks which to dispatch against, verifies that target is a git repository and refuses if it is not, handles an uncommitted tree by offering to commit or stash rather than stopping, discovers the gate command, docs and tracker instead of demanding config, confirms a launch card, and spawns a POSTMASTER session which decomposes a stream into tickets and dispatches one coachman per ticket. A coachman drives one leg of one ticket and its runbook is coachman.md beside this file. The postmaster runs no model lanes and edits no source. Reached by typing /postmaster, or by AGENTS.md sending a session here.'
 ---
 
 # /postmaster: start work with postmaster
@@ -13,11 +13,29 @@ That session dispatches one **coachman** per ticket, one leg at a time. A coachm
 exactly one leg of one load and hands off to the next leg in writing; its runbook is
 `coachman.md`. Harness-specific invocations are in `harnesses.md`, tracker mechanics in
 `trackers.md`, and the machine's choices — which harnesses, which lanes, which tracker — in
-`~/.postmaster/config.toml`, whose shape is `config.example.toml` at the repo root. There is
+`~/.postmaster/config.toml`, whose shape is `<tool>/config.example.toml`. There is
 no separate per-ticket skill: dispatching a coachman is something the postmaster does, not
 something a person invokes.
 
-## First: establish the preconditions yourself
+## First: find the postmaster repo
+
+`<tool>` in these runbooks is the postmaster repo this skill lives in. The skill is installed as
+a link into it, never as a copy. Find it once, from `<skill>`: the absolute path of the directory
+your harness loaded this file from, or `skills/postmaster` when `AGENTS.md` sent a session in
+the repo here.
+
+```sh
+t=$(cd -P -- "<skill>/../.." 2>/dev/null && pwd) && test -f "$t/scripts/link-skills.sh" && echo "$t" || { echo "postmaster: <skill> is not a link into a postmaster checkout" >&2; false; }
+```
+
+It prints `<tool>`. Write that absolute path wherever these runbooks say `<tool>`, and give it to
+every session you brief. If it prints the error instead, stop and tell the user: the skill was
+copied, or its link points somewhere else. `<checkout>/scripts/link-skills.sh`, where
+`<checkout>` is their postmaster checkout, links it again.
+
+[Why a skill is a link, and the repo is found from it](../../wiki/concepts/skill-links.md)
+
+## Next: establish the preconditions yourself
 
 You are reached two ways, and they arrive in different states. A session opened in this repo
 comes through `AGENTS.md`, which may already have set the machine up and chosen a target.
@@ -28,9 +46,9 @@ cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
 ```
 
 **No config: stop and set the machine up first**, in conversation, per the setup section of
-`AGENTS.md` in this repo. Do not continue to target selection: every later step reads the
-config for the team, the tracker and the merge word, and without it the launch card cannot
-be filled. Come back here when it is written.
+`<tool>/AGENTS.md`; each path there is relative to `<tool>`. Do not continue to target
+selection: every later step reads the config for the team, the tracker and the merge word,
+and without it the launch card cannot be filled. Come back here when it is written.
 
 **Config present, and this session has already chosen and verified a target:** skip to
 "Work out what the project needs" and do not ask again.
@@ -42,8 +60,9 @@ tell whether it is setting up or dispatching is one nobody can follow.
 
 ## Choose the target project
 
-**You are running in the postmaster tool's own repo. The cwd is NOT the target.** Ask the
-user which project to dispatch against, and do the finding for them:
+**Ask the user which project to dispatch against, whatever the cwd.** The cwd may be `<tool>`
+itself or any other project, and neither is the target until the user says so. Do the finding
+for them:
 
 ```sh
 <tool>/scripts/find-projects.sh [root ...]   # most recently worked first; ~/Code unless roots are given

@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # postmaster wiki
@@ -44,6 +44,9 @@ Why the design is shaped as it is.
 - [A ticket's shape is checked before it is accepted](concepts/ticket-shape.md): **claimed**.
   A title, the problem, numbered criteria each answerable yes or no, and the user's direction,
   checked by a script before any ticket is dispatched. What is missing is asked of the user.
+- [A skill is a link to the postmaster repo, never a copy](concepts/skill-links.md):
+  **claimed**. Each skill is linked from a harness's own skills folder to the main checkout, and
+  a session finds the repo from that link. Claude Code and pi were tried and load a linked skill.
 
 ## Sources
 

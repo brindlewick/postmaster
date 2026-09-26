@@ -74,13 +74,16 @@ record at a time. `skills/wiki` carries the three operations: ingest, query, lin
 Clone this repo and open your agent in it. There is no command to memorise and no wizard to
 run: `AGENTS.md` tells the agent what to do, and the first time that is setting the machine
 up with you, one question at a time (which agent CLIs fill which role, where tickets live,
-where your projects are, who says the merge word). After that it helps you choose a project
-and launches a postmaster.
+where your projects are, who says the merge word), and linking the skills into your agent CLIs
+so you can start from any project afterwards. After that it helps you choose a project and
+launches a postmaster.
 
 ```sh
 scripts/probe-harnesses.sh      # which agent CLIs are installed
 scripts/probe-trackers.sh       # which ticket sources are reachable
 scripts/setup.sh --answers <file> # writes the config from the agent's collected answers (--keys lists them)
+scripts/link-skills.sh [--dry-run | --remove]                     # the skills, as links into each CLI's skills folder
+scripts/skill-refs.sh [--fix]                                      # every script path in the skill goes through <tool>
 scripts/find-projects.sh        # your git projects, most recent first
 scripts/check-target.sh  <path> # 0 usable · 1 not a repo · 2 dirty
 scripts/discover-project.sh <path>
@@ -104,14 +107,31 @@ scripts/wiki-lint.sh [--self-test]                                 # the wiki's 
 
 At least two agent CLIs that can run headless. Any git repository as a target. tmux, or
 another way to keep a process alive between an agent's turns. Python 3.11 or newer, which
-the scripts use to read the config, and jq for discovering a JavaScript project's gate. An agent that has loaded the
-skills: for a harness with a skills directory, symlink or copy each directory under `skills/`
-into it; for any other, point the agent at the `SKILL.md` you need.
+the scripts use to read the config, and jq for discovering a JavaScript project's gate.
+
+## Installing the skills
+
+Skills are installed as links, never as copies. `scripts/link-skills.sh` links each directory
+under `skills/` into the user-level skills folder of every installed agent CLI that has one,
+pointing at the main checkout of this repo, never a worktree. Setup runs it, and running it
+again changes nothing:
+
+```sh
+scripts/link-skills.sh --dry-run   # the links it would make, and anything in the way
+scripts/link-skills.sh             # make them
+scripts/link-skills.sh --remove    # remove them, and nothing else
+```
+
+It replaces nothing. A file, a folder or another link where a link belongs is named, and
+nothing changes until you move it. Once linked, the postmaster skill (`/postmaster` in Claude
+Code) works from any project, and finds this repo from its link. The folder each CLI reads is
+in `skills/postmaster/harnesses.md`. A CLI with no folder there, agy for now, is pointed at
+this repo's `skills/postmaster/SKILL.md` by its absolute path.
 
 `skills/postmaster` runs the flow and is the one a dispatch needs. `skills/wiki` operates the
-wiki and is only wanted by a session doing that. Each directory is one skill; the
-other files beside a `SKILL.md` are its reference material, loaded when its instructions send
-an agent to them rather than up front.
+wiki, works in a checkout of this repo, and is only wanted by a session doing that. Each
+directory is one skill; the other files beside a `SKILL.md` are its reference material, loaded
+when its instructions send an agent to them rather than up front.
 
 **Tickets are GitHub Issues on a GitHub Projects board by default:** a kanban you can open,
 with each ticket a card in the column its state says, and nothing to configure beyond `gh`

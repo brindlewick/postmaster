@@ -2,9 +2,9 @@
 
 The runbooks make five demands of a tracker and no more: read a ticket, set its state, add a
 dated comment, create a ticket, and replace a ticket's body. This file says what each means for
-each tracker kind the config allows (`config.example.toml`, `[tracker]`). Every write is also
+each tracker kind the config allows (`<tool>/config.example.toml`, `[tracker]`). Every write is also
 logged through `<tool>/scripts/log-action.sh` as `ticket-create`, `ticket-edit`, `ticket-state` or
-`ticket-comment`.
+`ticket-comment`. `<tool>` is the postmaster repo, as the runbook that sent you here found it.
 
 **GitHub Issues is the default**, on a GitHub Projects board so the tickets are a kanban the
 user can look at. Plane is the other named kind. Anything else is `other`. Tickets never

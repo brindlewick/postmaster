@@ -1,0 +1,13 @@
+claude 2.1.283 (Claude Code)
+  link in ~/.claude/skills:                 listed
+  no link (control):                        not listed
+  dangling link in ~/.claude/skills:        not listed; stderr 0 bytes, the missing target named 0 times (control: its working directory named 1 times)
+  link in ~/.agents/skills only:            not listed
+  link in $CLAUDE_CONFIG_DIR/skills:        listed
+  link in <project>/.claude/skills:         listed
+pi 0.87.0
+  link in ~/.pi/agent/skills:               listed 1 time(s), at $HOME/.pi/agent/skills/postmaster/SKILL.md
+  no link (control):                        not listed
+  dangling link in ~/.pi/agent/skills:      not listed; stderr 0 bytes, the missing target named 0 times (control: the request it answered named 1 times)
+  link in ~/.agents/skills:                 listed 1 time(s), at $HOME/.agents/skills/postmaster/SKILL.md
+  links in both, one target:                listed 1 time(s), at $HOME/.pi/agent/skills/postmaster/SKILL.md

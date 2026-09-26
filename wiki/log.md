@@ -1,12 +1,22 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-26] ingest | a skill is a link to the postmaster repo, never a copy
+
+Third page in the Decisions area, with a trial behind its narrower fact. Each skill is installed
+as a link from a harness's user-level skills folder to the main checkout, never as a copy, and a
+session finds the repo from that link. The trial asked Claude Code 2.1.283 and pi 0.87.0, with
+a temporary HOME, which skills they loaded: both load a linked skill from each folder they
+document, and neither lists or warns about a link that is missing or points nowhere. The page
+records why the one step that finds the repo is a line in `SKILL.md` rather than a script, and
+why Antigravity is not linked yet. Standing `claimed`: the decision is the user's, issue #15.
 
 ## [2026-09-25] ingest | a ticket's shape is checked before it is accepted
 
