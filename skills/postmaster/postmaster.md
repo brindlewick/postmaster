@@ -123,31 +123,35 @@ later one when the previous leg's marker appears.
    its `.leg-<n-1>-done` marker and resume leg `n-1` (step 5, with `n-1` in place of `n`),
    the prompt naming the missing sections and saying "Complete the hand-off and end the leg
    as `coachman.md` says." Then wait for its done marker.
-3. **Launch,** in the background, stream to the leg's events file, marker on exit, with the
-   leg's exited marker cleared first:
+3. **Launch** through the host, which shows the leg in the synthesis worktree's space
+   (`hosts.md`), stream to the leg's events file, marker on exit; `host.sh` clears the leg's
+   exited marker first:
 
    ```sh
-   rm -f <dispatch>/.leg-<n>-exited
-   ( scripts/launch.sh launch coachman <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt --leg <leg-name> \
-       > <dispatch>/logs/coachman-leg-<n>-events.jsonl 2> <dispatch>/logs/coachman-leg-<n>.err;
-     touch <dispatch>/.leg-<n>-exited ) &
+   scripts/host.sh run "$(scripts/host.sh name <dispatch> coachman)" <repo>/.worktrees/<TICKET> \
+       --out <dispatch>/logs/coachman-leg-<n>-events.jsonl --err <dispatch>/logs/coachman-leg-<n>.err \
+       --marker <dispatch>/.leg-<n>-exited \
+       -- scripts/launch.sh launch coachman <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt --leg <leg-name>
    ```
+
+   The name comes from the waybill through `host.sh name`, never typed: a ticket's title can
+   hold anything a shell would run.
 
    Record the thread id from the stream (`harnesses.md`) in the manifest as
    `coachman.legs.<n>.thread_id`, and `coachman` as `coachman.legs.<n>.name`, set `leg` to
    `<n>`, and log `dispatch` with the leg and the thread id.
 4. **The coachman's model for a leg** comes from `team.coachman`, or `team.coachman_legs.<leg-name>`
    where set. It is never a lane's model, in any leg.
-5. **Resume a leg** only in the form that launched it, with its leg, in the background. Write
+5. **Resume a leg** only in the form that launched it, with its leg, through the host. Write
    the prompt first to `<dispatch>/leg-<n>-resume-<time>.txt`, `<time>` being what
-   `date -u +%Y%m%dT%H%M%SZ` prints, and clear the leg's exited marker. The leg's stream is
-   appended to, and its `.err` file holds only this process's errors:
+   `date -u +%Y%m%dT%H%M%SZ` prints. The leg's stream is appended to, its `.err` file holds only
+   this process's errors, and `host.sh` clears the leg's exited marker:
 
    ```sh
-   rm -f <dispatch>/.leg-<n>-exited
-   ( scripts/launch.sh resume <name> <repo>/.worktrees/<TICKET> <thread-id> <dispatch>/leg-<n>-resume-<time>.txt --leg <leg-name> \
-       >> <dispatch>/logs/coachman-leg-<n>-events.jsonl 2> <dispatch>/logs/coachman-leg-<n>.err;
-     touch <dispatch>/.leg-<n>-exited ) &
+   scripts/host.sh run "$(scripts/host.sh name <dispatch> coachman)" <repo>/.worktrees/<TICKET> --append \
+       --out <dispatch>/logs/coachman-leg-<n>-events.jsonl --err <dispatch>/logs/coachman-leg-<n>.err \
+       --marker <dispatch>/.leg-<n>-exited \
+       -- scripts/launch.sh resume <name> <repo>/.worktrees/<TICKET> <thread-id> <dispatch>/leg-<n>-resume-<time>.txt --leg <leg-name>
    ```
 
    `<name>` and `<thread-id>` are the leg's `coachman.legs.<n>.name` and `.thread_id`. Log
@@ -247,17 +251,20 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
 1. **Confirm** the default branch carries the merge (`git -C <repo> log -1` on it) and the
    ticket is done in the tracker; if the coachman could not move it, do so and log
    `ticket-state`.
-2. **Tear down** the synthesis worktree from outside it (`git -C <repo> worktree remove
-   .worktrees/<TICKET>`; never with force unless the tree is clean and the card confirmed it)
-   and log `teardown`. The workhorse worktrees are the coachman's; if any survive, remove them the
+2. **Tear down** the synthesis worktree from outside it, once the last leg's process has exited
+   (`.leg-3-exited`): close its space first (`scripts/host.sh close <repo>/.worktrees/<TICKET>`;
+   on exit 2 the user has it open or something in it still runs, so stop and report), then `git
+   -C <repo> worktree remove .worktrees/<TICKET>`, never with force unless the tree is clean and
+   the card confirmed it, and log `teardown`. The workhorse worktrees are the coachman's; if any survive, remove them the
    same way after preserving any stray file into `<dispatch>/stray/`.
 3. **Close the run** with `scripts/stage.sh <dispatch> done postmaster`, and never delete the
    dispatch directory.
 4. **Dispatch the next ticket** in order, Stage B.
 
 **Abandoning a run** happens only on the user's word for that run: log `note` with the
-word, set the stage with `scripts/stage.sh <dispatch> abandoned postmaster`, remove every worktree the run created after
-preserving stray files, and move the ticket back to todo or to cancelled as the user
+word, set the stage with `scripts/stage.sh <dispatch> abandoned postmaster`, stop what still
+runs in each worktree the run created (`scripts/host.sh stop <wt>`), then remove each one after
+preserving stray files and closing its space (`scripts/host.sh close <wt>`), and move the ticket back to todo or to cancelled as the user
 says. The dispatch directory stays.
 
 ## Talking to the user

@@ -95,6 +95,8 @@ scripts/github.sh <repo> board|create|edit|read|state|comment|list # GitHub Issu
 scripts/plane.sh create|edit|read|state|comment|list …             # Plane work items
 scripts/ticket-check.sh <repo> <id> | --body <file> | --splice …   # a ticket's shape; --splice writes approved parts in
 scripts/launch.sh form|launch|resume <lane-or-role> …             # any lane or role, one command
+scripts/host.sh detect|name|run|stop|close|spawn|send|wait|read … # where a launch runs, and where you watch it
+scripts/view-stream.sh < <events-file>                            # a harness's events, one line each
 scripts/runs-status.sh <run-root>                                  # the postmaster's poll
 scripts/handoff-check.sh <handoff-file>                            # a leg may end only on exit 0
 scripts/wiki-lint.sh [--self-test]                                 # the wiki's rules, run not remembered
@@ -102,8 +104,10 @@ scripts/wiki-lint.sh [--self-test]                                 # the wiki's 
 
 ## What it needs
 
-At least two agent CLIs that can run headless. Any git repository as a target. tmux, or
-another way to keep a process alive between an agent's turns. Python 3.11 or newer, which
+At least two agent CLIs that can run headless. Any git repository as a target. A session host
+to watch the fleet in: [Herdr](https://herdr.dev) by default wherever it is running, where each
+launch appears in its worktree's space under the project's, or tmux. With neither, launches run
+in the background and the flow still works (`skills/postmaster/hosts.md`). Python 3.11 or newer, which
 the scripts use to read the config, and jq for discovering a JavaScript project's gate. An agent that has loaded the
 skills: for a harness with a skills directory, symlink or copy each directory under `skills/`
 into it; for any other, point the agent at the `SKILL.md` you need.
@@ -126,7 +130,7 @@ command, the docs and the ticket convention. Ask only what discovery cannot answ
 
 Only one process in the fleet is kept alive between turns: the postmaster, which the
 user talks to, and that one needs a host that keeps an interactive process running
-(tmux today). Everything else runs as a **native session**: the harness's own thread, in its
+(Herdr or tmux). Everything else runs as a **native session**: the harness's own thread, in its
 own store on disk. A lane or a coachman leg is launched headless, writes its events and a
 marker, and exits. When it is needed again, for a ruling to a coachman or a remount of a
 stalled lane, the flow resumes that thread with one command (`scripts/launch.sh resume`) and
@@ -138,7 +142,8 @@ concurrent runs with a coachman and two lanes each would hold six of them. An id
 session is a file. The resume costs the tokens of reloading the thread, which prompt caching
 mostly absorbs, and it leaves the harness's own record as the durable one.
 `skills/postmaster/harnesses.md` says where each harness keeps its threads and how each is
-resumed.
+resumed. On a host, each launch still gets a pane of its own while it runs, so the fleet can be
+watched: the pane is a window onto a headless process that exits when it is done.
 
 ## Design rules
 
@@ -149,4 +154,4 @@ takes on a project is logged as a structured event, so what the flow did can be 
 improved from the record rather than from the narrative.
 
 See `AGENTS.md` for the full context, and `skills/postmaster/` for the runbooks
-(`postmaster.md`, `coachman.md`) and the adapters (`harnesses.md`, `trackers.md`).
+(`postmaster.md`, `coachman.md`) and the adapters (`harnesses.md`, `hosts.md`, `trackers.md`).
