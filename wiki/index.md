@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # postmaster wiki
@@ -33,6 +33,14 @@ How each agent CLI really behaves, as distinct from what its documentation says.
 ## Trackers and tooling
 
 What the services and CLIs postmaster depends on actually do. Nothing yet.
+
+## Testing the flow
+
+How the flow is checked, and what each check can and cannot see.
+
+- [Fixture runs](concepts/fixture-runs.md): **claimed**. A run against a small app whose tickets
+  have hidden tests, scored from the run's own records, catches a broken contract between roles
+  and a run that ships the wrong thing, which the offline gate cannot.
 
 ## Decisions
 
