@@ -17,6 +17,21 @@ claude's Herdr integration reports into whatever pane `HERDR_PANE_ID` names; and
 harness does not title its pane. Settled on that trial, for claude only. It shaped
 `scripts/host.sh` and `skills/postmaster/hosts.md`, issue #10.
 
+## [2026-09-26] lint | the review loop's cap is three rounds
+
+The review loop's round cap goes from five rounds to three, by the user's decision, after #39's
+own review ran four rounds without a clean one and stopped on the repeated-class rule. It holds
+until #59, the research on what should end an AI review loop, reports. `coachman.md` and the
+decision page now say three.
+
+## [2026-09-25] ingest | review runs as one loop
+
+A decision page. Style, bug and security review no longer run one after another in three legs.
+One leg runs one loop: every lens still open, in each round, on one snapshot, with style in
+round 1 only. A run now has three legs: synthesis, review and ship. The page records why, what
+the loop is expected to cost, and what the stage timings will measure. Standing `claimed`,
+since no run has been recorded under either design.
+
 ## [2026-09-25] ingest | a ticket's shape is checked before it is accepted
 
 Second page in the Decisions area. A ticket now carries a direction after its acceptance
