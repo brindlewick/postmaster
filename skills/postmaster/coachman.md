@@ -79,7 +79,7 @@ by files in its own dispatch directory.
 | `checkpoint-<n>.md` + `.checkpoint-<n>-ready` | a checkpoint card is complete; informational in autonomous mode, a stop in consult mode |
 | `handoff-<n>.md` + `.leg-<n>-done` | the leg is finished and the next may start |
 
-**It never waits for an answer in-process.** On an escalation or the five-round cap it writes
+**It never waits for an answer in-process.** On an escalation or the three-round cap it writes
 the file and exits. The postmaster answers by resuming the coachman's thread with the ruling as
 the prompt, per the coachman harness's resume form, appending to the same stream.
 
@@ -220,15 +220,19 @@ A workhorse commits incrementally as it goes, never pushes, never reads other br
 ## Stage 1 (leg 1): implement, then synthesize
 
 **Launch every workhorse as a headless resumable thread**, each in its own worktree, all in the
-same breath as background processes, through the launch script so the form is never copied
-by hand:
+same breath, through the host script and the launch script so no form is ever copied by hand.
+`host.sh` runs each where the user can watch it (`hosts.md`) and returns at once:
 
 ```sh
-( scripts/launch.sh launch <lane> <workhorse-wt> <dispatch>/<lane>-prompt.txt --last <dispatch>/logs/<lane>-last.md \
-    > <dispatch>/logs/<lane>-events.jsonl 2> <dispatch>/logs/<lane>.err;
-  touch <dispatch>/logs/<lane>.done ) &
+scripts/host.sh run "$(scripts/host.sh name <dispatch> <lane>)" <workhorse-wt> \
+    --out <dispatch>/logs/<lane>-events.jsonl --err <dispatch>/logs/<lane>.err --marker <dispatch>/logs/<lane>.done \
+    -- scripts/launch.sh launch <lane> <workhorse-wt> <dispatch>/<lane>-prompt.txt --last <dispatch>/logs/<lane>-last.md
 ```
 
+The name comes from the waybill through `host.sh name`, never typed: a ticket's title can hold
+anything a shell would run. A resume runs the same way with `--append`, and the command
+`scripts/launch.sh resume <lane> <workhorse-wt> <thread-id> <prompt-file>`; `host.sh` clears the
+old marker itself. Resume a lane only once its marker has landed: until then it is still running.
 No composer, no interactive session, no registration.
 The streaming output format is load-bearing: the thread id and the final message are harvested
 from it.
@@ -420,10 +424,10 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
      for L in <reviewer lanes>; do
        DEST=<repo>/.worktrees/<TICKET>-rev-$LENS-$L
        # A scratch an interrupted round left behind, with no reviewer still running in it, is
-       # checked like any other, then removed.
+       # checked like any other, then its space is closed and it is removed.
        if [ -e "$DEST" ]; then
          git -C "$DEST" diff --name-only "$SNAP" | sed "s|^|LEFT BEHIND AND MODIFIED, $DEST: |"
-         git -C <repo> worktree remove --force "$DEST"
+         scripts/host.sh close "$DEST" && git -C <repo> worktree remove --force "$DEST"
        fi
        # ASSERT the scratch is cut at SNAP and resolves before launching a lane into it. A
        # broken scratch discovered by two lanes separately is two wasted rounds.
@@ -439,12 +443,13 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    synthesis worktree.
 
    Then do every open lens's preparation, and launch every reviewer under every open lens in the
-   same breath, each through its lens's launch step. The command first checks that every scratch
-   is at the snapshot, and launches nothing if one is not; then it clears the round's markers.
-   Each wrapper lands its marker, naming the round, the lens and the lane, when its process
-   exits, whatever its exit, and the command ends in the wait for the whole round. An
-   interrupted round is re-run whole, once no reviewer from its first attempt is still running;
-   select them by working directory, never by prompt text:
+   same breath, each through its lens's launch step run by `host.sh` (`hosts.md`). The command
+   first checks that every scratch is at the snapshot, and launches nothing if one is not; then
+   it clears the round's markers. `host.sh` lands each marker, naming the round, the lens and the
+   lane, when its process exits, whatever its exit, and the command ends in the wait for the
+   whole round. An interrupted round is re-run whole, once no reviewer from its first attempt
+   is still running; `scripts/host.sh stop <scratch>` ends one by the worktree it runs in, never
+   by prompt text:
 
    ```sh
    SNAP=$(git -C <synthesis-wt> rev-parse HEAD)
@@ -459,9 +464,10 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    for LENS in <open lenses>; do
      for L in <reviewer lanes>; do
        DEST=<repo>/.worktrees/<TICKET>-rev-$LENS-$L
-       ( <the launch step of $LENS, for "$L" in "$DEST"> \
-           > <dispatch>/logs/review-r<round>-$LENS-$L.jsonl 2> <dispatch>/logs/review-r<round>-$LENS-$L.err;
-         touch <dispatch>/logs/review-r<round>-$LENS-$L.done ) &
+       scripts/host.sh run "$(scripts/host.sh name <dispatch> "$L $LENS review")" "$DEST" \
+           --out <dispatch>/logs/review-r<round>-$LENS-$L.jsonl --err <dispatch>/logs/review-r<round>-$LENS-$L.err \
+           --marker <dispatch>/logs/review-r<round>-$LENS-$L.done \
+           -- <the launch step of $LENS, for "$L" in "$DEST">
        N=$((N + 1))
      done
    done
@@ -499,8 +505,11 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    snapshot, staged or committed included, not `status --porcelain` (scratches are expected to
    be dirty with untracked build output). Any modified tracked file is a finding about the LANE:
    log it with the file list and do not count that lane's verdict until it is understood. Then
-   remove the scratches; `git worktree remove --force` is sanctioned for SCRATCHES ONLY, here
-   and at the cut, since a detached scratch never holds work and its contents were just checked.
+   stop any reviewer still running in its scratch (`scripts/host.sh stop <scratch>`; its lane is
+   DEGRADED for the round), close each scratch's space (`scripts/host.sh close <scratch>`; on exit
+   2 the user has it open, so leave that scratch and report it), and remove the scratches;
+   `git worktree remove --force` is sanctioned for SCRATCHES ONLY, here and at the cut, since a
+   detached scratch never holds work and its contents were just checked.
    Also assert the synthesis worktree itself is still clean. With every lane on a copy, nothing
    should touch it during a review round; a dirty synthesis tree is an escape and an incident to
    investigate before continuing. When later staging fixes in the synthesis worktree, prefer a
@@ -524,7 +533,7 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    style ones included, as known context, so they closure-check each fix AND hunt new holes the
    fixes introduced. Done only when a round returns zero new verified gating findings and every
    fix verifies closed, so a round that applied any change, a style change included, is never
-   the last. Cap 5 rounds for the whole loop, round 1 included, then STOP and escalate with the
+   the last. Cap 3 rounds for the whole loop, round 1 included, then STOP and escalate with the
    residue and your read on why it is not converging; this is `CHECKPOINT_MODE`'s sole mid-flow
    stop in autonomous mode. Style does not run again: a style lane DEGRADED in round 1 stays
    DEGRADED, and the card says how many lanes the style lens rested on.
@@ -534,8 +543,7 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    can name while the next finds another of the same kind, stop and escalate at that point,
    whatever the severity. Three instances of one thing is a design signal: the fix is to remove
    the capability that lets a caller get it wrong, not to patch the fourth site. Name the class
-   in the escalation and say which sites each round closed. Rounds 4 and 5 remain available for
-   genuinely distinct findings.
+   in the escalation and say which sites each round closed.
 6. **One review checkpoint card.** Per lens: the findings and their overlap, across lanes and
    with the other lenses, verified versus dismissed, applied, and the rounds it ran; for style,
    which advisory findings were applied and which are deferred to the ship card's Style residue.
@@ -569,8 +577,10 @@ Set the stage first: `scripts/stage.sh <dispatch> shipping`.
 3. **Preview build, always, on a project with a UI.** Serve the branch's production build on
    the loopback interface at a throwaway port with a THROWAWAY database seeded from the
    project's own fixtures, never the live database and never the app's real port. Run the
-   server as a process that outlives a harness turn (its own tmux session, or `nohup`), and
-   add that process to the teardown checklist. The preview link goes on the ship card and the
+   server through `scripts/host.sh run` with `--pidfile <dispatch>/render/preview.pid`, which
+   keeps it alive past a harness turn and in the user's view, and put stopping it on the
+   teardown checklist: `kill -- -$(cat <dispatch>/render/preview.pid)`, its whole process group,
+   so no child of a package script survives. The preview link goes on the ship card and the
    tracker comment beside the review link. **Then QA that preview build before shipping it:
    click through the new surface like a person**, at phone width, working the actual task
    rather than ticking a checklist.
@@ -622,7 +632,8 @@ the run, and that appends the run's stage timings to `run-log.md`. Never write t
 Never delete the dispatch directory or the manifest, they are the run's history. Archive
 finished threads where the harness has an archive form (`harnesses.md`). After the merge, tear
 down the workhorse worktrees, preserving any stray file first (a workhorse killed mid-run leaves
-real artifacts), and hand the synthesis worktree to the postmaster for removal from outside it.
+real artifacts) and closing each one's space before it is removed (`scripts/host.sh close <wt>`),
+and hand the synthesis worktree to the postmaster for removal from outside it.
 Keep the `wb/<TICKET>-<lane>` branches as a local archive. Durable process learnings go to the
 project's own docs, not this runbook. Residue contract: a clean run leaves only torn-down-able
 worktrees. Then finish `handoff-3.md` (the closing state of every branch and the ticket), close
@@ -674,9 +685,10 @@ logical order, not file safety: check the file surfaces before mass-launching.
   live run holding an unsent draft. If so, leave it and report. Composer gotchas: bracketed
   paste, Enter as a separate send-keys, and check the working indicator before trusting a
   dispatch.
-- **Know your own harness's background-task lifetime** (`harnesses.md`). A long lane outlives
-  it. A "stopped" notification without a quota error is the cap, not a failure and not the user:
-  resume the thread in place; worktree and context survive. Budget long legs for it.
+- **Know your own harness's background-task lifetime** (`harnesses.md`). A launch through
+  `host.sh` outlives it: a "stopped" notification without a quota error is the cap ending a
+  command you ran, such as a wait, never a lane. Run the wait again. Never resume a lane whose
+  marker has not landed; it is still running, and a second process on one thread corrupts it.
 - **Workhorses must not read other branches or `.worktrees/`.** Those hold other runs' work,
   including abandoned and rejected approaches. Put the line in every workhorse brief; it costs
   nothing and closes all three paths (`git branch`, a plain recursive grep, and listing the

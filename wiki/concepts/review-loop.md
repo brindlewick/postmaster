@@ -42,12 +42,12 @@ either design, so neither the time saved nor the coverage gained is measured yet
   added only if runs show one is needed. Each lane also runs three reviews at once on one
   account, so it can reach a usage limit sooner. A lane that does is DEGRADED for the round, as
   any walled lane is.
-- **Context.** One leg now carries all three lenses' findings. The five-round cap bounds it. If
+- **Context.** One leg now carries all three lenses' findings. The three-round cap bounds it. If
   a leg's context still runs out, the leg would be split at a round boundary, never by lens,
   since a split by lens would bring back the gap the loop closes.
 - **Colliding fixes.** Fixes from different lenses can touch the same code. One coachman sees
   them together and reconciles them before applying.
-- **The cap ends all review.** One five-round cap covers the whole loop, so a loop stopped at
+- **The cap ends all review.** One three-round cap covers the whole loop, so a loop stopped at
   the cap ships its last round's fixes unreviewed. In sequence, a capped bug pass was still
   followed by the whole security pass.
 - **Same-lane duplicates.** Round 1 puts one snapshot in front of every lens, so one lane can
@@ -77,3 +77,8 @@ A run has three legs, `synthesis`, `review` and `ship`, where it had five.
 and `scripts/stage.sh` refuses the three review stages it replaces. `[team.coachman_legs]` in
 the config takes `synthesis`, `review` and `ship`, and `scripts/launch.sh` refuses a config
 that names `style`, `bug` or `security`.
+
+The cap was five rounds when the loop was introduced. On 2026-09-26 the user set it at three,
+after #39's own review ran four rounds without a clean one and stopped on the repeated-class
+rule. It stays at three until #59, the research on what should end an AI review loop,
+reports.

@@ -34,6 +34,10 @@ How each agent CLI really behaves, as distinct from what its documentation says.
 
 What the services and CLIs postmaster depends on actually do.
 
+- [Herdr and headless launches](concepts/herdr-headless-launches.md): **settled**, for claude.
+  Left to itself Herdr shows a working headless claude as idle, and a launch that inherits its
+  caller's pane reports into it; the view is true when each launch owns its pane and the host
+  reports its state.
 - [Herdr reads most agents' state from the screen](concepts/herdr-agent-states.md):
   **settled**, for Herdr 0.9.1. A settled state from its waits does not prove a turn finished.
 

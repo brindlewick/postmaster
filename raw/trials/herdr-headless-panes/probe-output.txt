@@ -1,0 +1,20 @@
+herdr 0.9.1, claude 2.1.283
+== 1. nesting: a worktree opened under its repository's space
+worktree space: label=lane linked=True repo_root=<tmp>/probe-repo
+repository space is its source: wE == wE
+closing the repository's space first: workspace_group_close_required
+== 2. what Herdr makes of a headless claude in a pane, with nothing reported
+while it ran, once a second: 1 agent=None status=unknown;6 agent=claude status=idle;3 agent=claude status=unknown;
+the stream says it worked: 4 assistant events
+== 3. a reported state, and a closing idle report, around a headless claude
+after claude exits, idle reported: working
+idle reported again 10 s later: working
+after release-agent: idle
+== 3, control: the same reports around a child that is not an agent
+after sleep exits, idle reported: done
+== 4. pane identity: a headless claude run outside the pane, naming it in HERDR_PANE_ID
+the pane's session before: None
+the run's session id is 27a43fed; the pane's session after: 27a43fed
+== 5. the terminal title: claude -p --name, against a title the pane set itself
+titles while it ran, once a second: 14 set-by-the-pane;
+escape bytes in its stdout and stderr: 0

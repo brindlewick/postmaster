@@ -32,8 +32,8 @@ default. Building the option does not wait for it.
 stream and exits, and its wrapper touches a marker. The coachman waits for lanes with
 `scripts/wait-for-markers.sh`, which looks every 20 s. The postmaster sees a leg's markers when
 it next polls, every `postmaster.poll_seconds` (120 by default). A ruling resumes the thread.
-Once issue #10 lands these launches run in Herdr panes, so both levels are watched the same way
-and differ only in the contract.
+Since issue #10 merged, these launches run in Herdr panes through `scripts/host.sh`, so both
+levels are watched the same way and differ only in the contract.
 
 **Live.** A lane or a leg is an interactive agent in its pane. The coachman gives a lane work
 with `herdr agent prompt --wait`, which returns when Herdr sees the agent settle, and a ruling
@@ -129,18 +129,17 @@ session the thread id comes from [@trials/herdr-agent-lifecycle/timings]
 [@trials/herdr-agent-lifecycle/false-stall.txt]. Neither way reports pi `blocked`
 [@trials/herdr-agent-lifecycle/integrations.txt].
 
-**Before the first run**: issue #10 landed and used for a few runs; the machine set up; #37's
-fixture built; the live option built, as below. Then the instrumentation, each piece a script
-with its controls: the wait's return logged as it happens at both levels; remounts and
+**Before the first run**: issue #10, merged on 2026-09-26, used for a few runs; the machine set
+up; #37's fixture built; the live option built, as below. Then the instrumentation, each piece
+a script with its controls: the wait's return logged as it happens at both levels; remounts and
 re-prompts logged apart from rulings; each lane's final-message time, and each leg's first
 action after a ruling, read from the harness session records at teardown; an idle sampler
 recording every agent's state, process count and memory where the idle clock of
 `runs-status.sh` does not read, such as a dot-named file, so sampling cannot hide a stall; and
 `run.json` recording the Herdr version, the detection manifest versions and which integrations
-are installed. The control also has to clear a leg's `.leg-<n>-exited` before it resumes the
-leg. On main as of 2026-09-26, Stage E of `postmaster.md` removes only `.escalation-ready`, so
-the next poll of `runs-status.sh` reads REMOUNT for a leg a ruling has just resumed. The open
-pull requests for #10, #45 and #46 each clear the marker before every resume.
+are installed. Runs from before issue #10 merged are no control: until then a ruling's resume
+left the leg's `.leg-<n>-exited` in place, so the next poll of `runs-status.sh` read REMOUNT
+for a leg that was working. `scripts/host.sh` now clears it on every resume.
 
 **Cost**: six fixture runs, each costing what #37's first scored run records, which is not
 known yet. The live level holds a process per idle agent, about 100 to 160 MiB each on the

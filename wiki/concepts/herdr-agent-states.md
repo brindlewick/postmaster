@@ -105,9 +105,10 @@ Against a stand-in model on the loopback interface, one machine
 ## Where it bears
 
 [Live agents against markers and resumes](live-agents.md), issue #16, rests on these facts.
-They also bear on issue #10, whose host adapter sends the interactive postmaster a message and
-waits for it to settle: that wait has to be `agent prompt --wait`, for the reason in the
-second row above.
+They also bore on issue #10: its host adapter sends the interactive postmaster a message and
+waits for it to settle in one `agent prompt --wait`, for the reason in the second row above.
+How Herdr shows a headless launch, which is how the flow runs lanes by default, has its own
+page: [Herdr and headless launches](herdr-headless-launches.md).
 
 ## What would overturn it
 

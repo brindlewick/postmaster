@@ -38,6 +38,22 @@ was reported done. It is `settled` for that version. The second states issue #16
 `claimed`, with its four measures, the control, a measurement on issue #37's fixture, the
 decision rule, and what would follow for the coachman contract. No existing standing changed.
 
+## [2026-09-26] ingest | Herdr shows a headless launch truthfully only when it owns its pane
+
+First page on a service the flow depends on. A trial against Herdr 0.9.1 and claude 2.1.283,
+run twice: left to itself Herdr shows a working headless claude as idle; a closing `idle` report
+is ignored once an agent has run in the pane, and `release-agent` is what ends a reported state;
+claude's Herdr integration reports into whatever pane `HERDR_PANE_ID` names; and a headless
+harness does not title its pane. Settled on that trial, for claude only. It shaped
+`scripts/host.sh` and `skills/postmaster/hosts.md`, issue #10.
+
+## [2026-09-26] lint | the review loop's cap is three rounds
+
+The review loop's round cap goes from five rounds to three, by the user's decision, after #39's
+own review ran four rounds without a clean one and stopped on the repeated-class rule. It holds
+until #59, the research on what should end an AI review loop, reports. `coachman.md` and the
+decision page now say three.
+
 ## [2026-09-25] ingest | review runs as one loop
 
 A decision page. Style, bug and security review no longer run one after another in three legs.
