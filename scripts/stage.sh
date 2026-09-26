@@ -12,7 +12,8 @@
 # already in does nothing, so a resumed or remounted leg can set it again safely. Setting a
 # terminal stage (done, abandoned) also appends the run's full stage timings to run-log.md.
 # Only the postmaster sets a terminal stage, or moves a run out of one: it closes a run after
-# the last leg, and abandons one on the user's word.
+# the last leg, and abandons one on the user's word. The actor is the caller's own word, so this
+# holds a coachman to its runbook; it cannot stop a process that names itself the postmaster.
 #
 #   exit 0  the stage was set, or already was
 #   exit 1  usage, no manifest, an unreadable manifest, or the log could not be written

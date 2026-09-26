@@ -20,11 +20,11 @@ either design, so neither the time saved nor the coverage gained is measured yet
 
 ## The reasoning
 
-- **Every fix is re-reviewed by both gating lenses.** When the passes ran in sequence, style,
-  then bug, then security, a fix made in the security pass was re-checked only by security
-  reviewers. No bug reviewer ever saw it. In the loop, every round after the first runs the bug
-  and security lenses on the code as fixed so far, so both see each fix, whichever lens found
-  the defect it fixes.
+- **Each round's fixes are re-reviewed by both gating lenses.** When the passes ran in sequence,
+  style, then bug, then security, a fix made in the security pass was re-checked only by
+  security reviewers. No bug reviewer ever saw it. In the loop, every round after the first runs
+  the bug and security lenses on the code as fixed so far, so both see each fix in the next
+  round, whichever lens found the defect it fixes.
 - **Later rounds still review the fixed code.** The sequence existed so that later passes
   reviewed final code. The loop keeps that: every round reviews the code as fixed so far,
   including the style changes applied in round 1.

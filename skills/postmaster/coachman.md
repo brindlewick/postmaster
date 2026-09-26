@@ -50,21 +50,20 @@ the script at the moment it happens, never reconstructed afterwards:
 scripts/log-action.sh <dispatch> coachman <action> <target> <detail>
 ```
 
-The actions, and where they fire: `dispatch` per workhorse launch (target the lane, detail the thread
-id); `resume` per resumed thread; `harvest` per workhorse (detail its exit shape); `synthesize` once,
-with the SYNTHESIS line as the detail; `rule` per conventional divergence recorded; `review-launch`
-per lane per lens per round (target the lane, detail the lens and the round), and `review-harvest`
-likewise with the thread id added; `finding` per verified finding (target its file:line, detail
-severity, the round, every lens and every lane that found it, verified by execution or reading);
-`apply` per fix (detail the findings it fixes); `degrade` per lane per lens per round it did not
-review at full strength (detail the lens, the round and the cause, quoted); `escalate` when a
-ruling is needed;
-`gate` per gate run with its exit; `ticket-state` and `ticket-comment` per tracker write; `merge`
-on the merge; `teardown` per worktree removed; `handoff-accept` as a leg's first action and
-`handoff` as its last; `stage` whenever the run enters a stage, written by `scripts/stage.sh`
-and never by hand; `note` for anything else worth a line. A lone
-dissenter, a convergent fix, a wall: each is one line here, computable later, rather than a
-sentence in prose that cannot be counted.
+The actions, and where they fire: `dispatch` per workhorse launch (target the lane, detail the
+thread id); `resume` per resumed thread; `harvest` per workhorse (detail its exit shape);
+`synthesize` once, with the SYNTHESIS line as the detail; `rule` per conventional divergence
+recorded; `review-launch` per lane per lens per round (target the lane, detail the lens and the
+round), and `review-harvest` likewise with the thread id added; `finding` per verified finding
+(target its file:line, detail severity, the round, every lens and every lane that found it,
+verified by execution or reading); `apply` per fix (target its commit, detail the findings it
+fixes); `degrade` per lane per lens per round it did not review at full strength (detail the
+lens, the round and the cause, quoted); `escalate` when a ruling is needed; `gate` per gate run
+with its exit; `ticket-state` and `ticket-comment` per tracker write; `merge` on the merge;
+`teardown` per worktree removed; `handoff-accept` as a leg's first action and `handoff` as its
+last; `stage` whenever the run enters a stage, written by `scripts/stage.sh` and never by hand;
+`note` for anything else worth a line. A lone dissenter, a convergent fix, a wall: each is one
+line here, computable later, rather than a sentence in prose that cannot be counted.
 
 ## Coachman lifecycle (headless)
 
@@ -416,9 +415,15 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
 
    ```sh
    SNAP=$(git -C <synthesis-wt> rev-parse HEAD)
+   git -C <repo> worktree prune
    for LENS in <open lenses>; do
      for L in <reviewer lanes>; do
        DEST=<repo>/.worktrees/<TICKET>-rev-$LENS-$L
+       # A scratch an interrupted round left behind is checked like any other, then removed.
+       if [ -e "$DEST" ]; then
+         git -C "$DEST" diff --name-only | sed "s|^|LEFT BEHIND AND MODIFIED, $DEST: |"
+         git -C <repo> worktree remove --force "$DEST"
+       fi
        # ASSERT the scratch is cut at SNAP and resolves before launching a lane into it. A
        # broken scratch discovered by two lanes separately is two wasted rounds.
        scripts/cut-scratch.sh <repo> <synthesis-wt> "$DEST" "$SNAP" \
@@ -433,16 +438,25 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    synthesis worktree.
 
    Then do every open lens's preparation, and launch every reviewer under every open lens in the
-   same breath, each through its lens's launch step. The wrapper clears the marker first and
-   lands it, naming the round, the lens and the lane, when the process exits, whatever its exit;
-   the command ends in the wait for the whole round. An interrupted round is re-run whole:
+   same breath, each through its lens's launch step. The command first checks that every scratch
+   is at the snapshot, and launches nothing if one is not; then it clears the round's markers.
+   Each wrapper lands its marker, naming the round, the lens and the lane, when its process
+   exits, whatever its exit, and the command ends in the wait for the whole round. An
+   interrupted round is re-run whole:
 
    ```sh
+   SNAP=$(git -C <synthesis-wt> rev-parse HEAD)
+   for LENS in <open lenses>; do
+     for L in <reviewer lanes>; do
+       [ "$(git -C <repo>/.worktrees/<TICKET>-rev-$LENS-$L rev-parse HEAD 2>/dev/null)" = "$SNAP" ] \
+         || { echo "SCRATCH NOT AT $SNAP: <TICKET>-rev-$LENS-$L; nothing launched"; exit 1; }
+     done
+   done
+   rm -f <dispatch>/logs/review-r<round>-*.done
    N=0
    for LENS in <open lenses>; do
      for L in <reviewer lanes>; do
        DEST=<repo>/.worktrees/<TICKET>-rev-$LENS-$L
-       rm -f <dispatch>/logs/review-r<round>-$LENS-$L.done
        ( <the launch step of $LENS, for "$L" in "$DEST"> \
            > <dispatch>/logs/review-r<round>-$LENS-$L.jsonl 2> <dispatch>/logs/review-r<round>-$LENS-$L.err;
          touch <dispatch>/logs/review-r<round>-$LENS-$L.done ) &
@@ -478,16 +492,16 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    never launched, died and was not recovered, or ran without tool use is DEGRADED: record it,
    and do not count its verdict toward closing the round (hard rules, below).
 
-   **After harvesting the round, and BEFORE staging any fix**, check each scratch with
-   `git -C <scratch> diff --name-only`, not `status --porcelain` (scratches are expected to be
-   dirty with untracked build output). Any modified tracked file is a finding about the LANE:
-   log it with the file list and do not count that lane's verdict until it is understood. Then
-   remove the scratches; `git worktree remove --force` is sanctioned HERE ONLY, since a detached
-   scratch never holds work and its contents were just recorded. Also assert the synthesis
-   worktree itself is still clean. With every lane on a copy, nothing should touch it during a
-   review round; a dirty synthesis tree is an escape and an incident to investigate before
-   continuing. When later staging fixes in the synthesis worktree, prefer a targeted
-   `git add <paths>` over `git add -A`.
+   **After harvesting the round, and BEFORE staging any fix**, check each scratch with `git -C
+   <scratch> diff --name-only`, not `status --porcelain` (scratches are expected to be dirty
+   with untracked build output). Any modified tracked file is a finding about the LANE: log it
+   with the file list and do not count that lane's verdict until it is understood. Then remove
+   the scratches; `git worktree remove --force` is sanctioned for SCRATCHES ONLY, here and at
+   the cut, since a detached scratch never holds work and its contents were just checked. Also
+   assert the synthesis worktree itself is still clean. With every lane on a copy, nothing
+   should touch it during a review round; a dirty synthesis tree is an escape and an incident to
+   investigate before continuing. When later staging fixes in the synthesis worktree, prefer a
+   targeted `git add <paths>` over `git add -A`.
 3. **Dedup across lenses and adversarially verify** every finding against the code before it
    reaches the card or the diff; discard what does not hold. A defect reported under more than
    one lens is one finding, and it keeps every lens that reported it. A finding is gating or
@@ -526,8 +540,9 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    `.checkpoint-review-ready` marker. Autonomous mode: write the leg's hand-off and end it; the
    ship approval is stage 3's stop. Consult mode: escalate on the card and wait for the resume.
    A ruling that asks for a change is applied and followed by another round, counted toward the
-   cap, and the card is written and escalated again; any other ruling ends the leg with its
-   hand-off. The card doubles as the ship approval, said on the card.
+   cap, and the card is written and escalated again; a round past the cap runs only when the
+   ruling says so. Any other ruling ends the leg with its hand-off. The card doubles as the ship
+   approval, said on the card.
 
 ## Stage 3 (leg 3): ship (review link, then a gated local merge)
 
@@ -674,7 +689,9 @@ logical order, not file safety: check the file surfaces before mass-launching.
   can delete files before erroring. After any misfire, check `git status` for collateral
   before the next targeted `git add` would miss it.
 - Update the manifest at bootstrap and keep thread ids and `outcome`s current, in place; never
-  rewrite it and never delete it. Change `stage` only with `scripts/stage.sh`.
+  rewrite it and never delete it. Change `stage` only with `scripts/stage.sh`. When it refuses
+  with exit 3, the postmaster has closed or abandoned the run: log a `note` quoting the refusal,
+  change nothing more, and exit.
 - **A lone dissenter in a gating lens is the finding, not the outlier.** Clean verdicts are not
   independent: they can rest on one shared unexamined premise, so a split means one reviewer
   looked somewhere the others assumed. Verify it in the code yourself before dismissing it,
