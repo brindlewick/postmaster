@@ -21,8 +21,9 @@
 #
 # run: <command> is the same headless command a caller would otherwise background with `&`. It
 # runs from the directory host.sh was called in, with the caller's environment and an empty
-# stdin, in a session of its own with no terminal; its stdout goes to --out and its stderr to
-# --err (appended with --append). --marker is removed as it starts and touched when it exits,
+# stdin, in a session of its own with no terminal; its stdout goes to --out, added to with
+# --append, and its stderr to --err, which holds only this launch's errors. --marker is removed
+# as it starts and touched when it exits,
 # whatever its exit, and also when host.sh cannot start it, with the reason in --err. --pidfile
 # gets its pid, which is also its process group: `kill -- -<pid>` stops all of it. <cwd> is the
 # directory the launch belongs to, usually its worktree: in Herdr the launch runs in a new tab of
@@ -457,12 +458,13 @@ runner() {
   for k in $keep; do [ -n "${!k+x}" ] && childenv+=("$k=${!k}"); done
   childenv+=("POSTMASTER_LAUNCH_NAME=$name")
 
-  # Its streams are truncated once and then always appended to, so a second writer on the same
-  # file, such as a resume started too soon, cannot overwrite what the first wrote.
+  # Its streams are emptied once and then only ever appended to, so a second writer on the same
+  # file, such as a resume started too soon, cannot overwrite what the first wrote. --append
+  # keeps what --out held; --err holds only this launch's errors.
   local o=/dev/null e=/dev/null from=0 cpid rc=0 vpid="" rpid="" t0
   [ "$mode" != bg ] && { o=/dev/stdout; e=/dev/stderr; }
   [ -n "$out" ] && { o=$out; [ "$append" = 1 ] || : > "$out"; }
-  [ -n "$err" ] && { e=$err; [ "$append" = 1 ] || : > "$err"; }
+  [ -n "$err" ] && { e=$err; : > "$err"; }
   [ "$append" = 1 ] && [ -f "$out" ] && from=$(wc -c < "$out" | tr -d ' ')
   t0=$(date +%s)
   ( cd "$rundir" && exec python3 -c "$START_CHILD" "${argv[@]}" 3< <(printf '%s\0' "${childenv[@]}") ) \
@@ -953,10 +955,11 @@ EOF
   (cd "$tmp/caller" && hs "$SYS" EMIT_SLEEP=3 -- run "$NAME" "$repo" --pidfile ../logs/n5.pid --marker ../logs/n5.done -- ./fixed.sh >/dev/null)
   check "and it is there, for a live process, the moment run returns" '[ -s "$tmp/logs/n5.pid" ] && kill -0 "$(cat "$tmp/logs/n5.pid")" 2>/dev/null'
   marker "$tmp/logs/n5.done"
-  printf 'before\n' > "$tmp/logs/n4.out"
-  (cd "$tmp/caller" && hs "$SYS" -- run "$NAME" "$repo" --out ../logs/n4.out --append --marker ../logs/n4.done -- ./fixed.sh >/dev/null)
+  printf 'before\n' > "$tmp/logs/n4.out"; printf 'old error\n' > "$tmp/logs/n4.err"
+  (cd "$tmp/caller" && hs "$SYS" -- run "$NAME" "$repo" --out ../logs/n4.out --err ../logs/n4.err --append --marker ../logs/n4.done -- ./fixed.sh >/dev/null)
   marker "$tmp/logs/n4.done"
-  check "--append keeps what the stream held" '[ "$(head -1 "$tmp/logs/n4.out")" = before ] && [ "$(wc -l < "$tmp/logs/n4.out")" -eq 4 ]'
+  check "--append keeps what the stream held, and --err holds only this launch's errors" \
+    '[ "$(head -1 "$tmp/logs/n4.out")" = before ] && [ "$(wc -l < "$tmp/logs/n4.out")" -eq 4 ] && [ "$(cat "$tmp/logs/n4.err")" = "a line on stderr" ]'
   hs "$SYS" -- run "$NAME" "$repo" --marker "$tmp/logs/n6.done" ./fixed.sh >/dev/null 2>&1; rc=$?
   check "a command without -- is refused, and its marker lands" '[ $rc -eq 1 ] && [ -e "$tmp/logs/n6.done" ]'
   hs "$SYS" -- run "$NAME" "$tmp/nowhere" --err "$tmp/logs/n7.err" --marker "$tmp/logs/n7.done" -- ./fixed.sh >/dev/null 2>&1; rc=$?

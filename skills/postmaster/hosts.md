@@ -72,7 +72,8 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   never mistaken for it, and touched when it exits, whatever its exit. If `host.sh` cannot start
   it at all, the marker lands anyway and `--err` says why.
 - **`--append` is for a resume**, which is a run like any other, with `scripts/launch.sh resume
-  ...` as the command. Its streams are only ever appended to after being emptied once, so a
+  ...` as the command: it adds to `--out` instead of emptying it, while `--err` always holds only
+  the latest process's errors. A stream is only ever appended to after being emptied once, so a
   second writer on the same file cannot overwrite the first.
 - **`--pidfile` gets its pid, which is also its process group:** `kill -- -<pid>` stops all of
   it. `host.sh run` returns as soon as the launch has started. The wait still goes in the same
