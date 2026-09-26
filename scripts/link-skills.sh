@@ -22,12 +22,12 @@
 #   exit 1  usage, no skills in the checkout, a bare main checkout, or something in the way
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd -P)
-HARNESSES="claude codex grok agy muse pi"
+HARNESSES="claude codex grok agy muse pi mimo"
 
 skills_folder() {  # skills_folder <harness>: the user-level folder its skills are linked into; nothing if none
   case $1 in
     claude) printf '%s\n' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills" ;;
-    codex|grok|muse|pi) printf '%s\n' "$HOME/.agents/skills" ;;
+    codex|grok|mimo|muse|pi) printf '%s\n' "$HOME/.agents/skills" ;;
   esac
 }
 

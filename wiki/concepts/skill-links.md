@@ -14,7 +14,7 @@ and tells a session where the repo is: it is wherever the link leads.
 
 **Standing: claimed.** This is the user's decision, taken in
 [issue #15](https://github.com/brindlewick/postmaster/issues/15) before any run bears on it. A
-trial settles the narrower fact it rests on for the two harnesses that were installed: they
+trial settles the narrower fact it rests on for the five harnesses that were installed: they
 load a linked skill [@trials/skill-folders].
 
 ## The reasoning
@@ -38,24 +38,26 @@ load a linked skill [@trials/skill-folders].
 
 ## What the trial found
 
-Claude Code 2.1.283 and pi 0.87.0, each with a temporary HOME holding only the link under test
-[@trials/skill-folders]:
+Claude Code 2.1.283, pi 0.87.0, MiMo Code 0.1.15, codex 0.157.1 and Muse Code 1.4.0, each with
+a temporary HOME holding only the link under test [@trials/skill-folders]:
 
-- Both list a skill whose folder is a link, in each user-level folder they document, and
-  neither lists one whose link is missing or points nowhere. Neither says anything about a link
-  that points nowhere, on stderr or in its output, so the harness is no check that a link
-  works; the resolver in `SKILL.md` and `scripts/link-skills.sh` are.
-- Claude Code reads `~/.claude/skills`, or `$CLAUDE_CONFIG_DIR/skills` when that is set, and
-  does not read `~/.agents/skills`. pi reads both `~/.pi/agent/skills` and `~/.agents/skills`,
-  and lists a skill linked from both to one target once.
-- pi reports a linked skill at the link's path, not at its target. A session given that path
-  must resolve it to find the repo, which is why the resolver uses `cd -P`.
+- All five list a skill whose folder is a link, in each user-level folder they document, and
+  none lists one whose link is missing or points nowhere. None says anything about a link that
+  points nowhere, on stderr or in its output, so the harness is no check that a link works;
+  the resolver in `SKILL.md` and `scripts/link-skills.sh` are.
+- `~/.agents/skills` serves every one of them except Claude Code, which reads only
+  `~/.claude/skills`, or `$CLAUDE_CONFIG_DIR/skills` when that is set. Each of the others also
+  has a folder of its own, and muse also reads `~/.claude/skills`; a skill linked from two
+  folders it reads, to one target, is listed once by pi and by muse.
+- pi, MiMo Code and muse report a linked skill at the link's path, not at its target, and
+  codex names it under an alias for the link's folder. A session given that path must resolve
+  it to find the repo, which is why the resolver uses `cd -P`.
 
-codex, grok and muse document a user-level folder that `~/.agents/skills` serves; codex's
-documentation says it follows a linked skill, and grok's and muse's do not say. Antigravity's
-CLI documentation names `~/.gemini/antigravity-cli/skills`, while its changelog moves its global
-configuration to `~/.gemini/config/`. It is not linked until a trial settles which folder it
-reads, and until then a session on it is pointed at the skill by absolute path.
+grok documents `~/.agents/skills` among the folders it reads, and says it keeps one skill per
+name; it was not installed to try. Antigravity's CLI documentation names
+`~/.gemini/antigravity-cli/skills`, while its changelog moves its global configuration to
+`~/.gemini/config/`. It is not linked until a trial settles which folder it reads, and until
+then a session on it is pointed at the skill by absolute path.
 `skills/postmaster/harnesses.md` records each harness's folder and its source.
 
 ## What would change it

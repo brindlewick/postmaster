@@ -53,17 +53,19 @@ read one folder share one link there.
 | harness | linked into | it also reads | only inside a project | follows a link | source |
 |---|---|---|---|---|---|
 | claude | `~/.claude/skills`, or `$CLAUDE_CONFIG_DIR/skills` when that is set | `.claude/skills` in the project | no | yes, tried | [trial](../../raw/trials/skill-folders/method.md), [docs](https://code.claude.com/docs/en/skills) |
-| codex | `~/.agents/skills` | `/etc/codex/skills`; `.agents/skills` from the cwd up to the repo root | no | yes, documented | [docs](https://learn.chatgpt.com/docs/build-skills) |
+| codex | `~/.agents/skills` | `~/.codex/skills`, `/etc/codex/skills`; `.agents/skills` from the cwd up to the repo root | no | yes, tried | [trial](../../raw/trials/skill-folders/method.md), [docs](https://learn.chatgpt.com/docs/build-skills) |
 | grok | `~/.agents/skills` | `~/.grok/skills`, `~/.claude/skills`; `.grok/skills` and `.agents/skills` up to the repo root | no | not documented | [docs](https://docs.x.ai/build/features/skills-plugins-marketplaces), [guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/08-skills.md) |
 | agy | none: its docs say `~/.gemini/antigravity-cli/skills`, its changelog puts the global config in `~/.gemini/config/`, and no trial has settled which it reads | `.agents/skills` at the workspace root | no | not documented | [docs](https://antigravity.google/docs/skills/), [changelog](https://github.com/google-antigravity/antigravity-cli/blob/main/CHANGELOG.md), [issue 103](https://github.com/google-antigravity/antigravity-cli/issues/103) |
-| muse | `~/.agents/skills` | `$XDG_CONFIG_HOME/muse/skills`, `~/.claude/skills`; `.agents/skills` in a trusted workspace | no | not documented | [docs](https://dev.meta.ai/docs/muse-code/extending) |
+| muse | `~/.agents/skills` | `$XDG_CONFIG_HOME/muse/skills`, `~/.claude/skills`, `~/.codex/skills`; `.agents/skills` in a trusted workspace | no | yes, tried | [trial](../../raw/trials/skill-folders/method.md), [docs](https://dev.meta.ai/docs/muse-code/extending) |
 | pi | `~/.agents/skills` | `~/.pi/agent/skills`; `.pi/skills` and `.agents/skills` in a trusted project | no | yes, tried | [trial](../../raw/trials/skill-folders/method.md), pi 0.87.0 `docs/skills.md` |
+| mimo | `~/.agents/skills` | `~/.config/mimocode/skills`, `~/.mimocode/skills`; `.agents/skills` and `.mimocode/skills` up to the repo root; not `~/.claude/skills` | no | yes, tried | [trial](../../raw/trials/skill-folders/method.md) |
 
-Docs read on 2026-09-26. A harness with no folder in this table is pointed at
+Docs read and trial run on 2026-09-26. A harness with no folder in this table is pointed at
 `<tool>/skills/postmaster/SKILL.md` by absolute path, and every brief names the skill's documents
 by absolute path into `<tool>`, never a copy. grok and muse also read `~/.claude/skills`, so
 where claude is installed they meet each skill twice, through two links to one checkout; grok
-keeps one per name, and what muse does with the second is not recorded.
+keeps one per name, and muse lists it once. mimo (MiMo Code) is in this table only: its launch
+and resume forms are not recorded yet, so `<tool>/scripts/launch.sh` has no form for it.
 
 ## codex
 
