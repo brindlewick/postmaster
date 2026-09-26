@@ -57,11 +57,22 @@ codex exec -C <wt> --json -o <dispatch>/logs/<lane>-last.md -m <model> \
 - A detached reviewer scratch needs `--skip-git-repo-check`.
 - Thread id: `grep '"thread_id"'` in the events stream.
 - Final message: `<lane>-last.md` from `-o`, plus the last result line of the events stream.
-- Resume: `codex exec resume <thread_id> --dangerously-bypass-approvals-and-sandbox "<prompt>"`.
-  `codex exec resume` accepts no sandbox flag (`-s` errors with "unexpected argument") and a
-  bare resume runs read-only, so the bypass flag goes on every resume that must write, reviewers
-  included. `--last` is safe only when no other codex thread has run since; otherwise recover
-  the id from the events log or `~/.codex/sessions/YYYY/MM/DD/`.
+- Resume, from the worktree the thread was launched in, appending to the same stream:
+
+  ```sh
+  cd <wt> && codex exec resume <thread_id> --json -o <dispatch>/logs/<lane>-last.md \
+    -m <model> -c model_reasoning_effort="<effort>" --dangerously-bypass-approvals-and-sandbox \
+    "<prompt>"
+  ```
+
+  These are the launch's flags without `-C`: `codex exec resume` refuses `-C` and `-s` with
+  "unexpected argument". A resume that names no model or effort runs on codex's configured
+  default, not on the thread's own, so both go on every resume. Without the bypass flag it runs
+  `workspace-write`, so the bypass goes on every resume, reviewers included. The resumed stream
+  opens with the launch's `thread.started`. codex's own `--last`, in place of the id, is safe
+  only when no other codex thread has run since; otherwise recover the id from the events log
+  or `~/.codex/sessions/YYYY/MM/DD/`.
+  [Why every resume names its model](../../wiki/concepts/codex-resume-model.md)
 - Durable record: rollout jsonl under `~/.codex/sessions/YYYY/MM/DD/`. `codex resume
   <thread_id>` opens the full TUI on a finished thread. `codex archive <thread_id>` at teardown.
 - Headless `codex exec` exposes no browser backend. A workhorse on codex cannot run the render gate;

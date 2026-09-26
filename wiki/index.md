@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # postmaster wiki
@@ -29,6 +29,8 @@ produce better software than one good model? If so, how?
 How each agent CLI really behaves, as distinct from what its documentation says.
 
 - [Prompt delivery differs by harness](concepts/prompt-delivery.md): **settled**.
+- [A resumed codex thread runs on the model its resume names](concepts/codex-resume-model.md):
+  **settled**. A resume that names no model runs on codex's default, not on the thread's own.
 
 ## Trackers and tooling
 
@@ -38,6 +40,9 @@ What the services and CLIs postmaster depends on actually do. Nothing yet.
 
 Why the design is shaped as it is.
 
+- [The review loop](concepts/review-loop.md): **claimed**. Style, bug and security review run
+  as one loop in one leg, so each round's fixes are re-reviewed by both gating lenses in the
+  next. It should also take fewer rounds.
 - [The workhorse spec](concepts/workhorse-spec.md): **claimed**. Each workhorse drafts its
   own, which keeps the workhorses independent of each other and of the coachman, and makes
   each run auditable.

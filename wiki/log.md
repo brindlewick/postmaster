@@ -1,12 +1,30 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-26] ingest | a resumed codex thread runs on the model its resume names
+
+Second harness page, from a recorded trial of codex 0.157.1 against a stand-in provider
+(`raw/trials/codex-resume-forms/`). A resume does not restore the model or the effort its thread
+was launched on. It runs on what it names, and otherwise on codex's default. It prints text
+without `--json`. `launch.sh resume` passed none of these, so a resumed codex lane or coachman
+ran on codex's default. `harnesses.md` and `launch.sh` now carry the form the trial found. The
+trial also corrects the adapter: without the bypass flag, a resume runs `workspace-write`, not
+read-only. Standing `settled`, for codex 0.157.1. Issue #45.
+
+## [2026-09-25] ingest | review runs as one loop
+
+A decision page. Style, bug and security review no longer run one after another in three legs.
+One leg runs one loop: every lens still open, in each round, on one snapshot, with style in
+round 1 only. A run now has three legs: synthesis, review and ship. The page records why, what
+the loop is expected to cost, and what the stage timings will measure. Standing `claimed`,
+since no run has been recorded under either design.
 
 ## [2026-09-25] ingest | a ticket's shape is checked before it is accepted
 

@@ -3,7 +3,7 @@ title: Prompt delivery differs by harness, and the difference is not cosmetic
 type: concept
 standing: settled
 sources: [trials/pi-prompt-forms]
-updated: 2026-09-22
+updated: 2026-09-26
 ---
 
 # Prompt delivery differs by harness, and the difference is not cosmetic
@@ -49,6 +49,8 @@ that did nothing is indistinguishable from one that had nothing to do.
 
 So the general rule, which the flow now follows: **check what a harness received, not what it
 was sent**, and check on the harness's own record rather than on the exit status.
+[A resumed codex thread](codex-resume-model.md) is a second case: it exits 0 on a model other
+than its own.
 
 ## What changed because of it
 
