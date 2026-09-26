@@ -136,10 +136,10 @@ action after a ruling, read from the harness session records at teardown; an idl
 recording every agent's state, process count and memory where the idle clock of
 `runs-status.sh` does not read, such as a dot-named file, so sampling cannot hide a stall; and
 `run.json` recording the Herdr version, the detection manifest versions and which integrations
-are installed. One flaw in the control has to be fixed first, or its effects counted apart:
-after a ruling resumes a leg, the leg's `.leg-<n>-exited` from its escalation stays (Stage E of
-`postmaster.md` removes only `.escalation-ready`), so the next poll of `runs-status.sh` reads
-REMOUNT for a leg that is working.
+are installed. The control also has to clear a leg's `.leg-<n>-exited` before it resumes the
+leg. On main as of 2026-09-26, Stage E of `postmaster.md` removes only `.escalation-ready`, so
+the next poll of `runs-status.sh` reads REMOUNT for a leg a ruling has just resumed. The open
+pull requests for #10, #45 and #46 each clear the marker before every resume.
 
 **Cost**: six fixture runs, each costing what #37's first scored run records, which is not
 known yet. The live level holds a process per idle agent, about 100 to 160 MiB each on the
