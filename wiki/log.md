@@ -1,12 +1,20 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-26] ingest | a run keeps the config it started with
+
+A decision page. A run now launches and resumes every lane and every leg on the config it
+recorded in `run.json` at dispatch, never the live one. A config edited mid-run can no longer
+change a lane part-way through, or hand one harness's thread id to another. The page records
+what that costs: a fix to the config waits for the next run, and an env file's contents are
+still read at each launch. Standing `claimed`, since no run bears on it yet.
 
 ## [2026-09-25] ingest | review runs as one loop
 

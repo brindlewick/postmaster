@@ -103,7 +103,7 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    profile (gate, build, browser suite, docs to read first, tracker, risk surfaces), the team
    from the config, `CHECKPOINT_MODE` from `ship.checkpoint_mode` and `MERGE_AUTHORITY` from
    `ship.merge_authority`, either overridden only where the user said so for this run,
-   the dispatch path and `<tool>`.
+   the dispatch path and `<tool>`. The config here is the one in `run.json`.
 7. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. The
    coachman never touches the ticket's state before stage 3.
 
@@ -111,7 +111,9 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
 
 A run is three legs, `synthesis`, `review` and `ship` (`coachman.md`, Legs). Each leg is a
 fresh coachman thread, launched the same way; the first is launched after the waybill, every
-later one when the previous leg's marker appears.
+later one when the previous leg's marker appears. Every launch and resume in a run passes
+`--run <dispatch>`, so it runs on the config in the run's `run.json`, never the live one.
+[Why a run keeps the config it started with](../../wiki/concepts/run-config.md)
 
 1. **Write the leg prompt** to `<runs>/<TICKET>/leg-<n>-prompt.txt`: "You are the coachman
    for leg <n> of <TICKET>. Read `<dispatch>/brief.md`, then `<tool>/skills/postmaster/coachman.md`,
@@ -125,7 +127,7 @@ later one when the previous leg's marker appears.
 3. **Launch,** in the background, stream to the leg's events file, marker on exit:
 
    ```sh
-   ( scripts/launch.sh launch coachman <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt --leg <leg-name> \
+   ( scripts/launch.sh launch coachman <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt --leg <leg-name> --run <dispatch> \
        > <dispatch>/logs/coachman-leg-<n>-events.jsonl 2> <dispatch>/logs/coachman-leg-<n>.err;
      touch <dispatch>/.leg-<n>-exited ) &
    ```
@@ -142,7 +144,7 @@ later one when the previous leg's marker appears.
 
    ```sh
    rm -f <dispatch>/.leg-<n>-exited
-   ( scripts/launch.sh resume <name> <repo>/.worktrees/<TICKET> <thread-id> <dispatch>/leg-<n>-resume-<k>.txt --leg <leg-name> \
+   ( scripts/launch.sh resume <name> <repo>/.worktrees/<TICKET> <thread-id> <dispatch>/leg-<n>-resume-<k>.txt --leg <leg-name> --run <dispatch> \
        >> <dispatch>/logs/coachman-leg-<n>-events.jsonl 2> <dispatch>/logs/coachman-leg-<n>.err;
      touch <dispatch>/.leg-<n>-exited ) &
    ```
@@ -187,8 +189,8 @@ Act on the `NEXT` column, run by run, and log every action:
 `actions.jsonl` for what this leg did before you, then the synthesis worktree's `git log` and
 `git status`. Treat every uncommitted change as unverified. Log `handoff-accept` and finish
 the leg." Launch it through the wrapper of Stage C step 5, with `scripts/launch.sh launch
-coachman_fallback <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-takeover.txt` in place of the
-resume, and record the new thread id as `coachman.legs.<n>.thread_id` and
+coachman_fallback <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-takeover.txt --run <dispatch>`
+in place of the resume, and record the new thread id as `coachman.legs.<n>.thread_id` and
 `coachman_fallback` as its `name`.
 
 A leg's `.leg-<n>-exited` marker with `.leg-<n>-done` beside it is normal completion. Every
