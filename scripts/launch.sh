@@ -107,6 +107,8 @@ case $HARNESS in
     else cmd=(claude -p "$PTEXT"); fi
     cmd+=(--model "$MODEL")
     [ -n "${EFFORT:-}" ] && cmd+=(--effort "$EFFORT")
+    # POSTMASTER_LAUNCH_NAME, set by scripts/host.sh, names the thread in the harness's own store.
+    [ -n "${POSTMASTER_LAUNCH_NAME:-}" ] && cmd+=(--name "$POSTMASTER_LAUNCH_NAME")
     cmd+=(--output-format stream-json --verbose --dangerously-skip-permissions) ;;
   pi)
     # The prompt goes in on stdin. An `@file` argument is an attachment, and pi sends it as
@@ -118,6 +120,7 @@ case $HARNESS in
     [ "$CMD" = resume ] && cmd+=(--session "$THREAD")
     cmd+=(--model "$MODEL")
     [ -n "${EFFORT:-}" ] && cmd+=(--thinking "$EFFORT")
+    [ -n "${POSTMASTER_LAUNCH_NAME:-}" ] && cmd+=(--name "$POSTMASTER_LAUNCH_NAME")
     STDIN_FILE=$PROMPT ;;
   muse)
     die "muse adapter is incomplete (stream flag, bypass form, thread id, resume form); fill harnesses.md and this script from a trial run first" ;;
@@ -142,5 +145,6 @@ if [ "$HARNESS" = codex ] && [ "$CMD" = launch ]; then
 fi
 cd "$CWD" || die "cannot enter $CWD"
 # A harness whose prompt arrives on stdin reads it from the file, never from an inherited pipe.
+unset POSTMASTER_LAUNCH_NAME   # the thread's own launches are named by their own host.sh call
 [ -n "${STDIN_FILE:-}" ] && exec "${cmd[@]}" < "$STDIN_FILE"
 exec "${cmd[@]}"
