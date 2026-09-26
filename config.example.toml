@@ -53,6 +53,9 @@ poll_seconds = 120
 #   github  GitHub Issues on a GitHub Projects board, through the gh CLI (the default; needs
 #           gh logged in with the project scope, nothing else)
 #   plane   Plane work items through its REST API; url and workspace here, the key in env_file
+#   local   tickets in each repository's own git directory, through scripts/local.sh; no
+#           service, no login, nothing more here. A repository whose store exists uses it
+#           whatever this kind is.
 #   other   a tracker the agent reaches through its own tooling, named here and described in
 #           ~/.postmaster/trackers/<name>.md
 [tracker]

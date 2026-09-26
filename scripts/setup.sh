@@ -49,7 +49,7 @@ postmaster.model
 postmaster.effort?         (none)
 max_runs                   2                  concurrent runs per project
 poll_seconds               120                postmaster poll interval
-tracker                    github             github, plane or other
+tracker                    github             github, plane, local or other
 plane.url                  https://api.plane.so   plane only
 plane.workspace                               plane only; the slug in the workspace's web URL
 plane.env_file             ~/.postmaster/plane.env   plane only; holds PLANE_API_KEY=<key>
@@ -165,18 +165,18 @@ ask MR "  concurrent runs per project" "2" "max_runs"
 ask PS "  postmaster poll interval, seconds" "120" "poll_seconds"
 
 echo
-echo "== Tickets: GitHub Issues on a Projects board by default; Plane; or another tracker. =="
-ask TK "How are tickets tracked (github, plane, other)" "github" "tracker"
+echo "== Tickets: GitHub Issues on a Projects board by default; Plane; local, kept in each repo; or another tracker. =="
+ask TK "How are tickets tracked (github, plane, local, other)" "github" "tracker"
 PURL=""; PWS=""; PENV=""; OTHER=""
 case $TK in
-  github) ;;
+  github|local) ;;
   plane)
     ask PURL "  Plane API origin (https://api.plane.so for cloud; a self-hosted instance is its own)" "https://api.plane.so" "plane.url"
     ask PWS "  workspace slug (the segment after the host in the workspace's web URL)" "" "plane.workspace"
     [ -n "$PWS" ] || { echo "setup: a Plane workspace slug is needed" >&2; exit 1; }
     ask PENV "  file holding PLANE_API_KEY=<key>, written by you, never pasted here" "~/.postmaster/plane.env" "plane.env_file" ;;
   other) ask OTHER "  tracker name (then describe it in ~/.postmaster/trackers/<name>.md)" "" "tracker.name" ;;
-  *) echo "setup: tracker kind must be github, plane or other" >&2; exit 1 ;;
+  *) echo "setup: tracker kind must be github, plane, local or other" >&2; exit 1 ;;
 esac
 
 echo

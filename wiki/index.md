@@ -56,6 +56,9 @@ Why the design is shaped as it is.
   next. It should also take fewer rounds.
 - [Live agents against markers and resumes](concepts/live-agents.md): **claimed**. Headless
   stays the default and live agents become an option; what it would take to change the default.
+- [The local tracker](concepts/local-tracker.md): **claimed**. With no service and no login,
+  a repository's tickets live in its own git directory, and a repository whose store exists
+  uses it whatever the config names.
 
 ## Sources
 

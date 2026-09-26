@@ -70,11 +70,12 @@ What to settle, in this order, and why none of it is guessed:
   kanban the user can open, needing only `gh` logged in with the `project` scope. When
   the probe says `partial`, it names the one command that finishes it (`gh auth login`,
   `gh auth refresh -s project`); the user runs it, since a login is theirs, and you probe
-  again. Plane is the other named kind: ask for the API origin and the workspace slug, ask
+  again. Plane is another named kind: ask for the API origin and the workspace slug, ask
   the user to write `~/.postmaster/plane.env` with `PLANE_API_KEY=<key>` themselves,
   since a key never passes through a conversation, and confirm with `scripts/plane.sh
-  projects`. Anything else is `other`, described once outside this repo
-  (`skills/postmaster/trackers.md`).
+  projects`. `local` needs no service and no login: it keeps each repo's tickets in the
+  repo's own git directory, and a repo whose store exists uses it whatever this answer is.
+  Anything else is `other`, described once outside this repo (`skills/postmaster/trackers.md`).
 - **Where projects live.** `~/Code` is one convention, not a rule.
 - **Who says the merge word.** A person, or the postmaster itself (`ship.merge_authority`).
   A run never merges on its own authority; the config says whose authority that is.
@@ -95,7 +96,7 @@ scripts/setup.sh --answers <file>             # write ~/.postmaster/config.toml
 ```sh
 scripts/find-projects.sh                 # most recently worked first
 scripts/check-target.sh <chosen>         # 0 usable · 1 not a repo · 2 dirty, ask first
-scripts/discover-project.sh <chosen>     # gate command, docs, tracker prefix
+scripts/discover-project.sh <chosen>     # gate command, docs, tracker and its prefix
 ```
 
 **The target may be this repo.** Developing postmaster with postmaster is supported; see
