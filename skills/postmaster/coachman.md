@@ -79,7 +79,7 @@ by files in its own dispatch directory.
 | `checkpoint-<n>.md` + `.checkpoint-<n>-ready` | a checkpoint card is complete; informational in autonomous mode, a stop in consult mode |
 | `handoff-<n>.md` + `.leg-<n>-done` | the leg is finished and the next may start |
 
-**It never waits for an answer in-process.** On an escalation or the five-round cap it writes
+**It never waits for an answer in-process.** On an escalation or the three-round cap it writes
 the file and exits. The postmaster answers by resuming the coachman's thread with the ruling as
 the prompt, per the coachman harness's resume form, appending to the same stream.
 
@@ -524,7 +524,7 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    style ones included, as known context, so they closure-check each fix AND hunt new holes the
    fixes introduced. Done only when a round returns zero new verified gating findings and every
    fix verifies closed, so a round that applied any change, a style change included, is never
-   the last. Cap 5 rounds for the whole loop, round 1 included, then STOP and escalate with the
+   the last. Cap 3 rounds for the whole loop, round 1 included, then STOP and escalate with the
    residue and your read on why it is not converging; this is `CHECKPOINT_MODE`'s sole mid-flow
    stop in autonomous mode. Style does not run again: a style lane DEGRADED in round 1 stays
    DEGRADED, and the card says how many lanes the style lens rested on.
@@ -534,8 +534,7 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    can name while the next finds another of the same kind, stop and escalate at that point,
    whatever the severity. Three instances of one thing is a design signal: the fix is to remove
    the capability that lets a caller get it wrong, not to patch the fourth site. Name the class
-   in the escalation and say which sites each round closed. Rounds 4 and 5 remain available for
-   genuinely distinct findings.
+   in the escalation and say which sites each round closed.
 6. **One review checkpoint card.** Per lens: the findings and their overlap, across lanes and
    with the other lenses, verified versus dismissed, applied, and the rounds it ran; for style,
    which advisory findings were applied and which are deferred to the ship card's Style residue.

@@ -1,12 +1,19 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-26] lint | the review loop's cap is three rounds
+
+The review loop's round cap goes from five rounds to three, by the user's decision, after #39's
+own review ran four rounds without a clean one and stopped on the repeated-class rule. It holds
+until #59, the research on what should end an AI review loop, reports. `coachman.md` and the
+decision page now say three.
 
 ## [2026-09-25] ingest | review runs as one loop
 
