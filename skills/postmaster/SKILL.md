@@ -97,15 +97,19 @@ The flow is general and carries no assumptions about build tools, docs layout or
 config file before it runs on a plain git repo is a tool nobody adopts.
 
 ```sh
-scripts/discover-project.sh "$TARGET"   # gate=… docs=… tracker_prefix=… ambient_context=…
+scripts/discover-project.sh "$TARGET"   # gate=… docs=… tracker=… tracker_prefix=… ambient_context=…
 ```
 
+The target's tracker is the kind `tracker` names: `local` when the target's own ticket store
+exists, whatever the config names, and the config's kind otherwise (`trackers.md`, local).
 A github tracker needs the target's board: `scripts/github.sh "$TARGET" board` names it, and
 exit 3 means there is none yet, so propose `board init` to the user and hand them the URL
 it prints. A plane tracker needs the target's project identifier: the discovered
 `tracker_prefix` when the target has shipped a ticket, otherwise `scripts/plane.sh projects`
-lists the candidates and the user picks. Report what you found on the launch card, and
-ask only about what you could not determine.
+lists the candidates and the user picks. A local tracker needs its store: exit 3 from
+`scripts/local.sh "$TARGET" store` means there is none yet, so propose `store init` to the
+user. Report what you found on the launch card, and ask only about what you could not
+determine.
 **If the project has no `AGENTS.md` or equivalent, say so.** Lanes that read no ambient
 context start blind, and that has silently handicapped a lane before. Ask the user for
 the project's risk surfaces (what it binds, allowlists, spawns and serves) where the docs do
