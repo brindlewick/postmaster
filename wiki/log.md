@@ -8,6 +8,13 @@ updated: 2026-09-26
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-26] lint | each lens may have its own reviewer lanes
+
+The review-loop page records why a lens may name its own reviewer lanes: a lane chosen for one
+lens, for a skill its harness has for that lens alone, should not have to review every other
+lens as well. `[team.lens_reviewers]` names them, `scripts/reviewers.sh` resolves them, and the
+waybill carries them to the review stage. The page's standing stays `claimed`.
+
 ## [2026-09-26] ingest | follow-up: claude's trust question, and claude killed mid-turn
 
 Two checks added to `raw/trials/herdr-agent-lifecycle/`. Headless claude answered in a

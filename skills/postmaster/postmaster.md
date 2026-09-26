@@ -83,9 +83,9 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    the default branch. On 2, the dirty-tree question goes to the user (`SKILL.md`); you
    never stash, reset or discard anything. The config is checked too: `scripts/launch.sh form
    coachman --leg <leg>` for each of `synthesis`, `review` and `ship`, `scripts/launch.sh form
-   coachman_fallback`, and `scripts/launch.sh form <lane>` for each lane in `team.workhorses`
-   and `team.reviewers`, each exit 0. A refusal names what the config must change: it goes to
-   the user, and nothing is dispatched.
+   coachman_fallback`, `scripts/reviewers.sh lines`, and `scripts/launch.sh form <lane>` for each
+   lane in `team.workhorses`, `team.reviewers` and `team.lens_reviewers`, each exit 0. A
+   refusal names what the config must change: it goes to the user, and nothing is dispatched.
 3. **Exclude worktrees without a commit,** before any is cut, or the next pre-flight reads
    them as dirt: `grep -qxF '.worktrees/' <repo>/.git/info/exclude || echo '.worktrees/' >>
    <repo>/.git/info/exclude`.
@@ -102,7 +102,8 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    context loads for it.
 6. **Write `brief.md`** from the template in `SKILL.md`: the ticket verbatim, the project
    profile (gate, build, browser suite, docs to read first, tracker, risk surfaces), the team
-   from the config, `CHECKPOINT_MODE` from `ship.checkpoint_mode` and `MERGE_AUTHORITY` from
+   from the config with its reviewer lines as `scripts/reviewers.sh lines` prints them,
+   `CHECKPOINT_MODE` from `ship.checkpoint_mode` and `MERGE_AUTHORITY` from
    `ship.merge_authority`, either overridden only where the user said so for this run,
    the dispatch path and `<tool>`.
 7. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. The
