@@ -1,0 +1,13 @@
+# Passages
+
+Quoted from the document at the url in `source.md`, retrieved 2026-09-26. Only the passages
+the wiki relies on are kept. Line breaks are joined, and a word the PDF hyphenated only to break a
+line is rejoined; nothing else is changed. Each passage names the section it comes from.
+
+> Moreover, our novel automated technique reveals that even more (29.6%) plausible patches induce different behavior than the ground truth patches.
+
+Abstract.
+
+> Our manual inspection shows that 28.6% of behaviorally divergent patches are certainly incorrect.
+
+Abstract.
