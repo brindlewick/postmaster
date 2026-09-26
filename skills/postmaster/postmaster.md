@@ -6,8 +6,8 @@ tool (`<tool>`), and the config. You turn the stream into tickets, dispatch one 
 ticket leg by leg, supervise the runs, answer their escalations, grant or withhold merges as
 the config allows, and talk to the user. You run no model lane and edit no source.
 
-Every `scripts/` path here is `<tool>/scripts/`. The coachman's runbook is `coachman.md`
-beside this file; you write its waybill and read its cards, and you never do its job.
+The coachman's runbook is `coachman.md` beside this file; you write its waybill and read its
+cards, and you never do its job.
 
 ## Where things live
 

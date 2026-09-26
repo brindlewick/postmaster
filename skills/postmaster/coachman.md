@@ -12,8 +12,8 @@ Vocabulary: a **lane** is a harness plus a model plus an effort, named in the wa
 **workhorse** is a lane implementing the ticket; a **reviewer** is a lane reviewing the synthesis.
 Every harness-specific command in this runbook is written as a form ("launch form", "resume
 form"); `harnesses.md` beside this file gives the exact invocation per harness, and the waybill
-says which harness each lane runs on. Every `scripts/` path in this runbook is relative to the
-postmaster repo, whose absolute path the waybill gives as `tool`. The postmaster's half, how a run is prepared and what the
+says which harness each lane runs on. `<tool>` is the postmaster repo, whose absolute path the
+waybill gives as `tool`. The postmaster's half, how a run is prepared and what the
 waybill carries, is `SKILL.md`. You do not need it.
 
 ## Where things live
