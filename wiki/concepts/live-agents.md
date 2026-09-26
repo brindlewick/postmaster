@@ -11,7 +11,8 @@ updated: 2026-09-26
 **Claim.** Lanes and coachman legs that run as live interactive agents in Herdr panes give
 earlier and more reliable completion detection than markers, and a lower-latency ruling channel
 than a resume. The price is a process held by every idle agent, where an idle native session is
-a file. The claim is [issue #16](https://github.com/brindlewick/postmaster/issues/16)'s.
+a file. It is the claim [issue #16](https://github.com/brindlewick/postmaster/issues/16) was
+opened with.
 
 **Standing: claimed.** No run has been recorded at either level. A trial of the mechanisms
 bears on it and is summarised below. It cannot settle the claim: it used a stand-in model,
@@ -122,13 +123,13 @@ postmaster gives: five a run, and no run waits on a person. At the live level th
 with Herdr's pi integration loaded, since pi's screen rules never report `blocked`
 [@trials/herdr-agent-lifecycle/integrations.txt].
 
-**Before the first run**: issue #10 landed and used for a few runs, as #16 requires; the
-machine set up; #37's fixture built; the live option built, as below. Then four pieces of
-instrumentation, each a script with its controls: the wait's return logged as it happens at
-both levels; each lane's final-message time read from its harness session record at teardown;
-an idle sampler writing every agent's state, process count and memory to the dispatch
-directory; and `run.json` recording the Herdr version, the detection manifest versions and
-which integrations are installed.
+**Before the first run**: issue #10 landed and used for a few runs; the machine set up; #37's
+fixture built; the live option built, as below. Then four pieces of instrumentation, each a
+script with its controls: the wait's return logged as it happens at both levels; each lane's
+final-message time read from its harness session record at teardown; an idle sampler writing
+every agent's state, process count and memory to the dispatch directory; and `run.json`
+recording the Herdr version, the detection manifest versions and which integrations are
+installed.
 
 **Cost**: six fixture runs, each costing what #37's first scored run records, which is not
 known yet. The live level holds a process per idle agent, about 100 to 160 MiB each on the
