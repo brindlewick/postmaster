@@ -17,6 +17,14 @@ proposed to the user, and only their answer is written back. The page also recor
 script can judge of "answerable yes or no", and why hedging words were left out. Standing
 `claimed`, since no run bears on it yet.
 
+## [2026-09-25] ingest | review runs as one loop
+
+A decision page. Style, bug and security review no longer run one after another in three legs.
+One leg runs one loop: every lens still open, in each round, on one snapshot, with style in
+round 1 only. A run now has three legs: synthesis, review and ship. The page records why, what
+the loop is expected to cost, and what the stage timings will measure. Standing `claimed`,
+since no run has been recorded under either design.
+
 ## [2026-09-23] lint | workhorse replaces arm
 
 The project no longer says arm for a lane that implements the ticket; it says workhorse, and a
