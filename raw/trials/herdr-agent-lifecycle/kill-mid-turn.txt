@@ -1,0 +1,22 @@
+A live pi agent killed with SIGTERM part-way through a turn. The stand-in was holding the reply
+30 s (SLEEP=30), so the turn could not have finished. Times are from issuing the prompt. The pushed
+events behind each line are in herdr-events.jsonl.
+
+1. pi, screen rules, pane-a. Prompt without --wait, then a separate agent wait.
+   The separate wait returned 100 ms after it started, with "done", before the turn had begun
+   (the stale state recorded in stale-wait.txt). pi was killed at +4400 ms.
+   events: working +775, done +4724, agent released with final_status "done" +4725, unknown +5030.
+   agent get afterwards: {"code":"agent_not_found","message":"agent target t16-pi not found"}
+
+2. pi, screen rules, pane-a. agent prompt --wait --timeout 60000, killed at +4058 ms.
+   prompt --wait: exit 0, agent_status "done", returned +4432 ms.
+   events: working +662, done +4399, agent released with final_status "done" +4470, unknown +4730.
+   agent get 3 s later: agent_not_found.
+
+3. pi, Herdr's pi integration, pane-b. agent prompt --wait --timeout 60000, killed at +4053 ms.
+   prompt --wait: exit 0, agent_status "done", returned +4441 ms.
+   events: working +560, done +4618, agent released with final_status "done" +4618, unknown +4770.
+   agent get 3 s later: agent_not_found.
+
+In 2 and 3 the waiter was told the turn was done, with exit 0, for a turn that had been killed.
+In all three, Herdr's own release event gave the killed agent's final status as "done".

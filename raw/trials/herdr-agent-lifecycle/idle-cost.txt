@@ -1,0 +1,20 @@
+The process tree under each live agent's pid, read from /proc (apparatus/idle.py): processes,
+threads, resident and proportional memory, open file descriptors, TCP connections, and CPU
+time used over the window. Each agent had finished its last turn and was idle.
+
+pi 0.87.0, screen rules, small session, after one turn
+  procs=1 threads=5 rss=120 MiB pss=98 MiB fds=17 tcp=0 cpu 0.60 s over 60 s
+  second sample: cpu 0.36 s over 60 s; third: cpu 0.16 s over 30 s, same memory
+pi 0.87.0, Herdr's pi integration, small session, after one turn
+  procs=1 threads=6 rss=131 MiB pss=108 MiB fds=17 tcp=0 cpu 0.59 s over 60 s
+pi 0.87.0, Herdr's pi integration, 4.2 MB session in memory
+  procs=1 threads=13 rss=165 MiB pss=142 MiB fds=17 tcp=0 cpu 0.74 s over 30 s
+claude 2.1.283, isolated config, model on the loopback stand-in, after six turns
+  procs=1 threads=18 rss=255 MiB pss=155 MiB fds=19 tcp=3, all 3 established to external
+  hosts on port 443, cpu 0.70 s over 60 s
+
+Native sessions, the files a headless lane leaves when it exits, at the end of the trial:
+  pi: 7,101 to 14,419 bytes for small sessions; 4,209,983 and 4,231,067 bytes after four
+      1 MB replies each
+  claude: 294,420 bytes (small); 4,458,797 bytes after four 1 MB replies
+A headless lane holds no process between turns.

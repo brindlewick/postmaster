@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-22
+updated: 2026-09-26
 ---
 
 # postmaster wiki
@@ -32,7 +32,10 @@ How each agent CLI really behaves, as distinct from what its documentation says.
 
 ## Trackers and tooling
 
-What the services and CLIs postmaster depends on actually do. Nothing yet.
+What the services and CLIs postmaster depends on actually do.
+
+- [Herdr reads most agents' state from the screen](concepts/herdr-agent-states.md):
+  **settled**, for Herdr 0.9.1. A settled state from its waits does not prove a turn finished.
 
 ## Decisions
 
@@ -41,6 +44,8 @@ Why the design is shaped as it is.
 - [The workhorse spec](concepts/workhorse-spec.md): **claimed**. Each workhorse drafts its
   own, which keeps the workhorses independent of each other and of the coachman, and makes
   each run auditable.
+- [Live agents against markers and resumes](concepts/live-agents.md): **claimed**. Whether
+  lanes and legs should run as live agents in Herdr panes, and the measurement that decides.
 
 ## Sources
 

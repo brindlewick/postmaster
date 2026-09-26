@@ -1,0 +1,9 @@
+agent prompt with a 20,498-byte, 282-line prompt (the lines "line NNNN: the quick brown fox
+jumps over the lazy dog, again and again.", between "LONGTEST start" and "LONGTEST end sha=<first
+16 hex of the sha256 of the body> reply OK").
+
+pi, Herdr's pi integration: prompt --wait exit 0, "done", 1,569 ms. The user message in pi's
+  session record is identical to the text sent (20,497 characters after the final newline).
+claude: prompt --wait exit 1, agent_prompt_stalled (false-stall.txt). The user message in
+  claude's session record is identical to the text sent.
+Both arrived as one message; bracketed paste kept the newlines inside it.

@@ -1,0 +1,16 @@
+herdr agent start, each into a shell pane created for the trial.
+
+pi, isolated agent dir, stand-in model:
+  exit 0 after 3,569 ms; status idle, interactive_ready true.
+  events: agent detected, unknown, then idle 3.2 s after detection (herdr-events.jsonl, pane-a).
+pi with Herdr's pi integration loaded (-e), same setup:
+  exit 0; status idle; screen_detection_skipped true; agent_session reported as a path.
+claude 2.1.283, the machine's own config, in a directory it had not seen before,
+with --dangerously-skip-permissions:
+  exit 1 after 3,827 ms: {"code":"agent_not_ready","message":"agent t16-cl is blocked during
+  startup and is not ready for prompts"}. The screen showed claude's workspace trust question
+  ("Quick safety check: Is this a project you created or one you trust?", options "No, exit" and
+  "Yes, I trust this folder"). It was answered with Esc, which exits; nothing was trusted.
+  Headless claude -p, the form the flow uses, does not ask this question.
+claude with an isolated config (CLAUDE_CONFIG_DIR) that already trusts the directory:
+  exit 0 after 3,822 ms; status idle, interactive_ready true.
