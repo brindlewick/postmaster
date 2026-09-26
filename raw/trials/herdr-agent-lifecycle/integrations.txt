@@ -1,0 +1,42 @@
+Where Herdr 0.9.1 gets each lifecycle state, for the harnesses postmaster can launch.
+
+Integrations are the hooks and extensions `herdr integration install <kind>` writes into a
+harness's own config. Their text is embedded in the herdr binary; what each calls on the Herdr
+socket was read from that text (and, for claude, from the installed copy, the same version).
+pane.report_agent carries a state; pane.report_agent_session carries only a session reference,
+which Herdr uses to resume the pane into its native session after a server restart
+([session] resume_agents_on_restore in herdr --default-config).
+
+harness  integration  calls                                        lifecycle state comes from
+claude   v10          report_agent_session, on SessionStart only   screen rules
+codex    v8           report_agent_session, on SessionStart only   screen rules
+grok     v2           report_agent_session, on session start only  screen rules
+agy      v3           report_agent_session ("Session-only ...      screen rules
+                      Lifecycle state comes from Herdr's screen
+                      detection", in its own header comment)
+pi       v9           report_agent (working on agent_start, idle   the integration, when loaded;
+                      on agent_settled, blocked on a herdr:blocked screen rules otherwise
+                      event from another extension) and
+                      report_agent_session; TUI mode only
+muse     none         -                                            screen rules
+
+Screen rules are per-harness manifests that Herdr fetches from herdr.dev in the background
+([update] manifest_check, default true) and caches locally. Each rule matches the terminal
+title or a region of the screen and yields one state. The states each manifest can yield, with
+the number of rules for each, at the versions cached during the trial:
+
+claude  2026.09.11.1  working 5, idle 3, blocked 6, unknown 2
+codex   2026.09.23.1  working 2, blocked 5, unknown 1
+grok    2026.09.18.1  working 6, idle 3, blocked 5
+agy     2026.06.24.1  working 2, blocked 1
+pi      2026.09.14.1  working 2
+muse    2026.08.26.1  working 1, idle 2, blocked 3, unknown 1
+
+A harness with no idle rule is idle whenever no working or blocked rule matches. pi's
+manifest has no blocked rule, so without its integration a blocked pi is never reported.
+On this machine the claude integration was installed and the pi integration was not. The pi
+0.87.0 binary contains no "herdr:blocked" string, so pi never raises that event itself; only
+another pi extension can, and the pi integration reports blocked only when one does.
+
+With the pi integration loaded, agent get reported screen_detection_skipped: true for that pane
+and an agent_session of kind "path" (startup.txt).

@@ -1,0 +1,119 @@
+{"t_ms": 1790379964097, "event": "pane_agent_detected", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": null}
+{"t_ms": 1790379965193, "event": "pane_updated", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "unknown"}
+{"t_ms": 1790379966862, "event": "pane_updated", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "unknown"}
+{"t_ms": 1790379967273, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "idle"}
+{"t_ms": 1790379981889, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790379987430, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380043869, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380047217, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380048751, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380056083, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380057640, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380069134, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380070642, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380087262, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380088800, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380112366, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380277019, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380280764, "event": "pane_updated", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380280968, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380280969, "event": "pane_agent_detected", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": null, "released": true, "final_status": "done"}
+{"t_ms": 1790380281274, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790380281274, "event": "pane_updated", "pane": "pane-a (pi, screen rules)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790380312933, "event": "pane_agent_detected", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": null}
+{"t_ms": 1790380313442, "event": "pane_updated", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "unknown"}
+{"t_ms": 1790380315584, "event": "pane_updated", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "unknown"}
+{"t_ms": 1790380316295, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "idle"}
+{"t_ms": 1790380317965, "event": "pane_agent_detected", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": null}
+{"t_ms": 1790380318964, "event": "pane_updated", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "unknown"}
+{"t_ms": 1790380319274, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "idle"}
+{"t_ms": 1790380320512, "event": "pane_updated", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "idle"}
+{"t_ms": 1790380327540, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380330634, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380332257, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380339463, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380340941, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380351889, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380353477, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380369343, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380370868, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380393988, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380408644, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380414959, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380422545, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380428931, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380436756, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380443203, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380450820, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380456825, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380464410, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380470274, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380477905, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380483860, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380510579, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380514111, "event": "pane_updated", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380514316, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380514387, "event": "pane_agent_detected", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": null, "released": true, "final_status": "done"}
+{"t_ms": 1790380514647, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790380514667, "event": "pane_updated", "pane": "pane-a (pi, screen rules)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790380518295, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380521954, "event": "pane_updated", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380522353, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380522353, "event": "pane_agent_detected", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": null, "released": true, "final_status": "done"}
+{"t_ms": 1790380522505, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790380522505, "event": "pane_updated", "pane": "pane-b (pi, Herdr's pi integration)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790380564080, "event": "pane_agent_detected", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": null}
+{"t_ms": 1790380565541, "event": "pane_updated", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "unknown"}
+{"t_ms": 1790380566768, "event": "pane_updated", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "unknown"}
+{"t_ms": 1790380567409, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "idle"}
+{"t_ms": 1790380568053, "event": "pane_agent_detected", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": null}
+{"t_ms": 1790380569425, "event": "pane_updated", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "unknown"}
+{"t_ms": 1790380569664, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "idle"}
+{"t_ms": 1790380570613, "event": "pane_updated", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "idle"}
+{"t_ms": 1790380576819, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790380576929, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790380670247, "event": "pane_agent_detected", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": null}
+{"t_ms": 1790380672880, "event": "pane_updated", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "unknown"}
+{"t_ms": 1790380673530, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "blocked"}
+{"t_ms": 1790380710695, "event": "pane_updated", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "blocked"}
+{"t_ms": 1790380710904, "event": "pane_updated", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "blocked"}
+{"t_ms": 1790380711361, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "idle"}
+{"t_ms": 1790380711362, "event": "pane_agent_detected", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": null, "released": true, "final_status": "idle"}
+{"t_ms": 1790380711504, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790380711504, "event": "pane_updated", "pane": "pane-c (claude, screen rules)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790380719600, "event": "pane_agent_detected", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": null}
+{"t_ms": 1790380720250, "event": "pane_updated", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "unknown"}
+{"t_ms": 1790380722233, "event": "pane_updated", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "unknown"}
+{"t_ms": 1790380722939, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "idle"}
+{"t_ms": 1790380730179, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790380733509, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "done"}
+{"t_ms": 1790380734996, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790380742469, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "done"}
+{"t_ms": 1790380744090, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790380755033, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "done"}
+{"t_ms": 1790380756543, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790380772580, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "done"}
+{"t_ms": 1790380774229, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790380797434, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "done"}
+{"t_ms": 1790381239053, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790381242579, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790381243537, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790381247109, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790381247913, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790381251401, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790381252460, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790381255740, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790381256874, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790381257981, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790381259830, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790381261038, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790381262917, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790381263831, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790381375761, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790381396383, "event": "pane.agent_status_changed", "pane": "pane-a (pi, screen rules)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790381397594, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790381420144, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}
+{"t_ms": 1790381421705, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790381443122, "event": "pane.agent_status_changed", "pane": "pane-c (claude, screen rules)", "agent": "claude", "agent_status": "done"}
+{"t_ms": 1790381662258, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "working"}
+{"t_ms": 1790381662360, "event": "pane.agent_status_changed", "pane": "pane-b (pi, Herdr's pi integration)", "agent": "pi", "agent_status": "done"}

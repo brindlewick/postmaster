@@ -1,0 +1,15 @@
+agent prompt --wait returning agent_prompt_stalled for turns that were delivered and completed.
+Both were turns the stand-in answered at once, within 2 ms of the request arriving, and Herdr
+pushed no working state for either (herdr-events.jsonl). No held turn stalled.
+
+1. pi, screen rules, the first prompt after agent start ("one turn before idling, reply OK").
+   The stand-in answers at once when no SLEEP is given.
+   prompt --wait: {"error":{"code":"agent_prompt_stalled","message":"agent prompt produced no
+   observed working or blocked state within 5000 ms; current status is idle"}}
+   standin-requests.jsonl holds the request and its finished reply ("one turn before idling"),
+   so the turn ran and completed. The same prompt to pi with the integration returned "done".
+
+2. claude, screen rules, a 20,498-byte prompt of 282 lines (long-prompt.txt), answered at once.
+   prompt --wait: exit 1, agent_prompt_stalled, after 5,360 ms.
+   standin-requests.jsonl holds the request (155,674 bytes) and its finished reply, and the
+   harness's own session record holds the whole prompt as one user message.

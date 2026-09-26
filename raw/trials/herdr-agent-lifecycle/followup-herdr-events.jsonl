@@ -1,0 +1,62 @@
+{"t_ms": 1790405626095, "event": "pane_agent_detected", "pane": "pane-d (claude, a folder its config never trusted)", "agent": "claude", "agent_status": null}
+{"t_ms": 1790405628754, "event": "pane_updated", "pane": "pane-d (claude, a folder its config never trusted)", "agent": "claude", "agent_status": "unknown"}
+{"t_ms": 1790405629399, "event": "pane.agent_status_changed", "pane": "pane-d (claude, a folder its config never trusted)", "agent": "claude", "agent_status": "blocked"}
+{"t_ms": 1790405637291, "event": "pane_updated", "pane": "pane-d (claude, a folder its config never trusted)", "agent": "claude", "agent_status": "blocked"}
+{"t_ms": 1790405637524, "event": "pane.agent_status_changed", "pane": "pane-d (claude, a folder its config never trusted)", "agent": "claude", "agent_status": "idle"}
+{"t_ms": 1790405637557, "event": "pane_agent_detected", "pane": "pane-d (claude, a folder its config never trusted)", "agent": "claude", "agent_status": null, "released": true, "final_status": "idle"}
+{"t_ms": 1790405637557, "event": "pane_updated", "pane": "pane-d (claude, a folder its config never trusted)", "agent": "claude", "agent_status": "blocked"}
+{"t_ms": 1790405637861, "event": "pane.agent_status_changed", "pane": "pane-d (claude, a folder its config never trusted)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790405637862, "event": "pane_updated", "pane": "pane-d (claude, a folder its config never trusted)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790405660300, "event": "pane_agent_detected", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": null}
+{"t_ms": 1790405660907, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "unknown"}
+{"t_ms": 1790405663348, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "unknown"}
+{"t_ms": 1790405663595, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "idle"}
+{"t_ms": 1790405664501, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405667834, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405668141, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "done"}
+{"t_ms": 1790405668141, "event": "pane_agent_detected", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": null, "released": true, "final_status": "done"}
+{"t_ms": 1790405668141, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405668401, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790405668401, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790405671449, "event": "pane_agent_detected", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": null}
+{"t_ms": 1790405672108, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "unknown"}
+{"t_ms": 1790405674399, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "unknown"}
+{"t_ms": 1790405674736, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405701387, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405705559, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405705805, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "done"}
+{"t_ms": 1790405705805, "event": "pane_agent_detected", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": null, "released": true, "final_status": "done"}
+{"t_ms": 1790405705805, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405706153, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790405709178, "event": "pane_agent_detected", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": null}
+{"t_ms": 1790405709844, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "unknown"}
+{"t_ms": 1790405711709, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "unknown"}
+{"t_ms": 1790405712510, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "idle"}
+{"t_ms": 1790405713421, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405716815, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405717124, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405717372, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "done"}
+{"t_ms": 1790405717372, "event": "pane_agent_detected", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": null, "released": true, "final_status": "done"}
+{"t_ms": 1790405717687, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790405717687, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790405764514, "event": "pane_agent_detected", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": null}
+{"t_ms": 1790405765713, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "unknown"}
+{"t_ms": 1790405767608, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "unknown"}
+{"t_ms": 1790405767731, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405794383, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405821426, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405821606, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405821884, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "done"}
+{"t_ms": 1790405821885, "event": "pane_agent_detected", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": null, "released": true, "final_status": "done"}
+{"t_ms": 1790405822186, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790405824791, "event": "pane_agent_detected", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": null}
+{"t_ms": 1790405825357, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "unknown"}
+{"t_ms": 1790405827388, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "unknown"}
+{"t_ms": 1790405828091, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "idle"}
+{"t_ms": 1790405829233, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405832402, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405832628, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "working"}
+{"t_ms": 1790405832861, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": "done"}
+{"t_ms": 1790405832862, "event": "pane_agent_detected", "pane": "pane-e (claude, a trusted folder)", "agent": "claude", "agent_status": null, "released": true, "final_status": "done"}
+{"t_ms": 1790405833100, "event": "pane_updated", "pane": "pane-e (claude, a trusted folder)", "agent": null, "agent_status": "unknown"}
+{"t_ms": 1790405833231, "event": "pane.agent_status_changed", "pane": "pane-e (claude, a trusted folder)", "agent": null, "agent_status": "unknown"}

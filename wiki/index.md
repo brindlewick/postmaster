@@ -38,6 +38,8 @@ What the services and CLIs postmaster depends on actually do.
   Left to itself Herdr shows a working headless claude as idle, and a launch that inherits its
   caller's pane reports into it; the view is true when each launch owns its pane and the host
   reports its state.
+- [Herdr reads most agents' state from the screen](concepts/herdr-agent-states.md):
+  **settled**, for Herdr 0.9.1. A settled state from its waits does not prove a turn finished.
 
 ## Decisions
 
@@ -52,6 +54,8 @@ Why the design is shaped as it is.
 - [The review loop](concepts/review-loop.md): **claimed**. Style, bug and security review run
   as one loop in one leg, so each round's fixes are re-reviewed by both gating lenses in the
   next. It should also take fewer rounds.
+- [Live agents against markers and resumes](concepts/live-agents.md): **claimed**. Headless
+  stays the default and live agents become an option; what it would take to change the default.
 
 ## Sources
 

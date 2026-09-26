@@ -8,6 +8,36 @@ updated: 2026-09-26
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-26] ingest | follow-up: claude's trust question, and claude killed mid-turn
+
+Two checks added to `raw/trials/herdr-agent-lifecycle/`. Headless claude answered in a
+directory its config had never trusted, with or without its bypass flag, while interactive claude
+stopped at the trust question even with it. A claude killed mid-turn was reported done, as pi
+had been, and a pane where one died mid-turn held the next start in `working` until its screen
+was cleared. The Herdr page widens its kill finding to claude and adds the restart finding; the
+live-agents page adds the bypass form and a cleared pane to what the option needs. No standing
+changed.
+
+## [2026-09-26] query | headless stays the default; live agents become an option
+
+Asked whether headless runs are the better arrangement. On the trial, yes: a headless lane
+exits about as soon after its last reply as Herdr notices a live one finish, the rest of the
+marker's delay is a poll that can be shortened, and Herdr's settled states can mislead.
+Decided: lanes and coachman legs stay headless, the postmaster stays the one interactive agent,
+Herdr hosts every run for observability, and live agents become a config option, off by
+default. The live-agents page records the decision, keeps its measurement as what would change
+the default, and lists what the option needs. Its standing stays `claimed`.
+
+## [2026-09-26] ingest | Herdr's agent states, and live agents against markers
+
+A trial of Herdr 0.9.1 with pi 0.87.0 and claude 2.1.283 against a stand-in model, recorded in
+`raw/trials/herdr-agent-lifecycle/`. Two new pages. The first, under trackers and tooling,
+records what Herdr documents against what it does: most harnesses' states are read from the
+screen, a separate wait can return the previous turn's state, and a pi agent killed mid-turn
+was reported done. It is `settled` for that version. The second states issue #16's claim at
+`claimed`, with its four measures, the control, a measurement on issue #37's fixture, the
+decision rule, and what would follow for the coachman contract. No existing standing changed.
+
 ## [2026-09-26] ingest | Herdr shows a headless launch truthfully only when it owns its pane
 
 First page on a service the flow depends on. A trial against Herdr 0.9.1 and claude 2.1.283,
