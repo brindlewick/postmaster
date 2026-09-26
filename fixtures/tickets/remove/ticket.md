@@ -27,6 +27,9 @@ Follow the existing split: the change to the list is a pure function in `src/tas
 `src/cli.ts` and `src/store.ts` do the reading and writing. Add no dependency. Every criterion
 has a test in `test/`.
 
+## Turnpikes
+default
+
 ## User journey
 In a directory whose list has three tasks, the user types `todo list` and sees ids 1, 2 and 3.
 They type `todo remove 2` and see `removed 2`. `todo list` shows tasks 1 and 3 as they were.

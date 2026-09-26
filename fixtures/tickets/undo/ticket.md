@@ -26,6 +26,9 @@ change, where it is stored, and how much of it is kept. Choose, and give the rea
 commit that adds it. Keep changes to the list pure functions in `src/tasks.ts`, with the
 reading and writing at the edges. Add no dependency. Every criterion has a test in `test/`.
 
+## Turnpikes
+default
+
 ## User journey
 The user adds `buy milk` and `post the letter`, then marks the first done by mistake with
 `todo done 1`. They type `todo undo` and see one line saying what was undone, and `todo list`
