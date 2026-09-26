@@ -121,12 +121,13 @@ refute the claim, so the first pair is read before the other two are dispatched.
 
 **Held the same**: the lanes and coachman the machine's config names. Consult mode, with the
 postmaster as merge authority, so every checkpoint card and the ship card are rulings the
-postmaster gives: five a run, and no run waits on a person. At the live level the pi lane runs
-with Herdr's pi integration loaded. With it, Herdr noticed a finished turn in 86 to 431 ms
-against 454 to 771 ms on screen rules, and did not report a false stall on the one instant
-turn tried both ways; it also reports the session the thread id comes from
-[@trials/herdr-agent-lifecycle/timings] [@trials/herdr-agent-lifecycle/false-stall.txt].
-Neither way reports pi `blocked` [@trials/herdr-agent-lifecycle/integrations.txt].
+postmaster gives: three a run, at checkpoint 1, the review checkpoint and the ship card, and no
+run waits on a person. At the live level the pi lane runs with Herdr's pi integration loaded.
+With it, Herdr noticed a finished turn in 86 to 431 ms against 454 to 771 ms on screen rules,
+and did not report a false stall on the one instant turn tried both ways; it also reports the
+session the thread id comes from [@trials/herdr-agent-lifecycle/timings]
+[@trials/herdr-agent-lifecycle/false-stall.txt]. Neither way reports pi `blocked`
+[@trials/herdr-agent-lifecycle/integrations.txt].
 
 **Before the first run**: issue #10 landed and used for a few runs; the machine set up; #37's
 fixture built; the live option built, as below. Then the instrumentation, each piece a script

@@ -41,7 +41,8 @@ max_runs = 2                                    # concurrent runs per project
 # scripts/launch.sh carry its stream flag, bypass form, thread id and resume form, taken from
 # a trial run. Until then launch.sh refuses it, by design.
 
-# Optional: a different coachman per leg (synthesis, style, bug, security, ship).
+# Optional: a different coachman per leg. The legs are synthesis, review and ship, and
+# scripts/launch.sh refuses a config that names any other.
 # [team.coachman_legs]
 # synthesis = { harness = "codex", model = "gpt-6-astra", effort = "max" }
 
