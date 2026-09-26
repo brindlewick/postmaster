@@ -3,7 +3,7 @@ title: The workhorse spec
 type: concept
 standing: claimed
 sources: [articles/spec-kit-templates]
-updated: 2026-09-23
+updated: 2026-09-25
 ---
 
 # The workhorse spec
@@ -32,9 +32,9 @@ comparison in [issue #9](https://github.com/brindlewick/postmaster/issues/9) is 
 A workhorse's spec follows GitHub Spec Kit's plan and tasks templates, combined in one file
 [@articles/spec-kit-templates]. Spec Kit splits the work into three documents: a spec for the
 what and why, a plan for the how, and tasks for the order of work. In postmaster the ticket
-already holds the first, since the user owns the what, the why and the direction, so a workhorse
-writes only the second and third. A workhorse writing Spec Kit's spec would be restating
-requirements that belong to the ticket.
+already holds the first, since the user owns the what, the why and the direction
+([the ticket's shape](ticket-shape.md)), so a workhorse writes only the second and third. A
+workhorse writing Spec Kit's spec would be restating requirements that belong to the ticket.
 
 Three things are adapted to a lane. Spec Kit's constitution check becomes a direction check,
 against the ticket's direction and the target project's own rules. Its user-story tags on tasks

@@ -156,7 +156,7 @@ everything the coachman needs and nothing it must go and find:
 # Waybill: <TICKET>
 
 ## Ticket
-<the ticket verbatim: problem, acceptance criteria, notes, User journey if it has one>
+<the ticket verbatim: problem, acceptance criteria, direction, notes, User journey if it has one>
 
 ## Project profile
 repo: <abs path>          default branch: <name>       BASE: <sha>

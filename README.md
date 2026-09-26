@@ -91,8 +91,9 @@ scripts/stage.sh <dispatch> <stage>                               # the one way 
 scripts/run-times.sh <dispatch>                                   # how long each stage took, from the log
 scripts/run-log.sh <dispatch> <text> | --section <title> | --close # the narrative, timestamped
 scripts/run-meta.sh <dispatch> <repo>                             # run.json: what a run started from
-scripts/github.sh <repo> board|create|read|state|comment|list     # GitHub Issues on a Projects board
-scripts/plane.sh create|read|state|comment|list …                  # Plane work items
+scripts/github.sh <repo> board|create|edit|read|state|comment|list # GitHub Issues on a Projects board
+scripts/plane.sh create|edit|read|state|comment|list …             # Plane work items
+scripts/ticket-check.sh <repo> <id> | --body <file> | --splice …   # a ticket's shape; --splice writes approved parts in
 scripts/launch.sh form|launch|resume <lane-or-role> …             # any lane or role, one command
 scripts/host.sh detect|run|close|spawn|send|wait|read …           # where a launch runs, and where you watch it
 scripts/view-stream.sh < <events-file>                            # a harness's events, one line each
