@@ -10,17 +10,18 @@
 #
 # <name> is a lane from [lanes.<name>], or `coachman`, `coachman_fallback` or `postmaster`
 # from [team]. <leg> is synthesis, review or ship, and with --leg, [team.coachman_legs.<leg>]
-# overrides the coachman for that leg. A config whose [team.coachman_legs] names any other leg
-# is refused, whatever is being launched. The events stream goes to stdout; the caller
-# redirects and backgrounds. A lane's env_file, if set, is loaded first, so an alternate
-# backend for a harness is an environment file outside this repo, never a value in the
-# config. --last names the file a harness writes its final message to, where the harness
-# supports it (codex -o).
+# overrides the coachman for that leg. Launching or resuming `coachman` needs --leg, so a leg
+# never runs on the wrong model; `form` without it shows team.coachman. A config whose
+# [team.coachman_legs] names any other leg is refused, whatever is being launched. The events
+# stream goes to stdout; the caller redirects and backgrounds. A lane's env_file, if set, is
+# loaded first, so an alternate backend for a harness is an environment file outside this
+# repo, never a value in the config. --last names the file a harness writes its final message
+# to, where the harness supports it (codex -o).
 #
 #   exit 0  the form was printed, or the harness exited 0
 #   exit 1  usage, config missing or unreadable, unknown name, a leg that is not synthesis,
-#           review or ship, harness not on PATH, env_file missing, or a form this script does
-#           not have (muse; agy resume)
+#           review or ship, the coachman launched or resumed with no --leg, harness not on
+#           PATH, env_file missing, or a form this script does not have (muse; agy resume)
 #   else    the harness's own exit code
 set -uo pipefail
 CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
@@ -31,11 +32,14 @@ if [ "${1:-}" = --self-test ]; then
   self=$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")
   tmp=$(mktemp -d) || exit 1
   trap 'rm -r -- "$tmp" 2>/dev/null' EXIT
-  mkdir "$tmp/bin" && printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/claude" && chmod +x "$tmp/bin/claude"
+  # The stub prints its arguments, so a launch or a resume shows the model it would run on.
+  mkdir "$tmp/bin" "$tmp/wt" && printf '#!/bin/sh\necho "$@"\n' > "$tmp/bin/claude" && chmod +x "$tmp/bin/claude"
+  printf 'Continue.\n' > "$tmp/prompt.txt"
   fixture() {  # fixture <name> [<key>...]; each key in [team.coachman_legs] runs on <key>-model
     local name=$1 k; shift
     { printf '[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n\n[team]\n'
-      printf 'coachman = { harness = "claude", model = "coach-model" }\n\n[team.coachman_legs]\n'
+      printf 'coachman = { harness = "claude", model = "coach-model" }\n'
+      printf 'coachman_fallback = { harness = "claude", model = "fallback-model" }\n\n[team.coachman_legs]\n'
       for k in "$@"; do printf '%s = { harness = "claude", model = "%s-model" }\n' "$k" "$k"; done
     } > "$tmp/$name.toml"
   }
@@ -66,6 +70,9 @@ if [ "${1:-}" = --self-test ]; then
   done
   runs_on "a leg with no entry runs on team.coachman" none coach-model form coachman --leg review
   runs_on "a lane runs on its own model" legs lane-model form one
+  runs_on "a resume with --leg review runs on the review entry" legs review-model resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt" --leg review
+  runs_on "the fallback resumes on its own model, with no --leg" legs fallback-model resume coachman_fallback "$tmp/wt" T-1 "$tmp/prompt.txt"
+  runs_on "form with no --leg shows team.coachman" legs coach-model form coachman
 
   echo "negative controls"
   for k in style bug security; do
@@ -76,6 +83,8 @@ if [ "${1:-}" = --self-test ]; then
   for k in style bug security; do
     refused "--leg $k is refused" legs "no such leg: --leg $k" form coachman --leg "$k"
   done
+  refused "resuming the coachman with no --leg is refused, and nothing runs" legs "coachman needs --leg" resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt"
+  refused "launching the coachman with no --leg is refused, and nothing runs" legs "coachman needs --leg" launch coachman "$tmp/wt" "$tmp/prompt.txt"
 
   echo
   [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }
@@ -94,6 +103,8 @@ while [ $# -gt 0 ]; do
   shift
 done
 die() { echo "launch: $*" >&2; exit 1; }
+[ "$NAME" = coachman ] && [ "$CMD" != form ] && [ -z "$LEG" ] \
+  && die "coachman needs --leg synthesis, review or ship to $CMD"
 
 [ -f "$CONFIG" ] || die "no config at $CONFIG (POSTMASTER_CONFIG overrides the path)"
 python3 -c 'import tomllib' 2>/dev/null || die "python3 with tomllib (3.11 or newer) is needed to read the config"

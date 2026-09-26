@@ -22,7 +22,7 @@ waybill carries, is `SKILL.md`. You do not need it.
 |---|---|
 | `<dispatch>` = `~/.postmaster/runs/<project>/<TICKET>/` | this run's directory; nothing else writes to it |
 | `<dispatch>/brief.md` | the waybill |
-| `<dispatch>/manifest.json` | `stage`, `leg`, `base`, `lanes.<lane>.{thread_id, outcome}`, `coachman.legs.<n>.thread_id`; the postmaster creates it and owns `leg`, `base` and `coachman`, you own `stage` and `lanes`; change `stage` only with `scripts/stage.sh`, update the rest in place, never rewrite the file |
+| `<dispatch>/manifest.json` | `stage`, `leg`, `base`, `lanes.<lane>.{thread_id, outcome}`, `coachman.legs.<n>.{thread_id, name}`; the postmaster creates it and owns `leg`, `base`, `coachman` and the terminal stages, you own `lanes` and every stage before those; change `stage` only with `scripts/stage.sh`, update the rest in place, never rewrite the file |
 | `<dispatch>/run-log.md` | running narrative, written only through `scripts/run-log.sh`, which puts the time on every entry and times every section |
 | `<dispatch>/run.json` | the run's fixed facts: postmaster commit, config, harness versions; written once at dispatch by the postmaster, never edited |
 | `<dispatch>/logs/` | one events stream per lane, and per reviewer lane, lens and round |
@@ -201,15 +201,14 @@ A workhorse commits incrementally as it goes, never pushes, never reads other br
 4. **Check the run's directories exist** (`mkdir -p <dispatch>/logs <dispatch>/audit
    <dispatch>/render` is idempotent) and that the synthesis worktree the postmaster cut is at
    BASE and is your cwd; then cut one workhorse worktree per workhorse from BASE.
-5. **Update the manifest** the postmaster created: set the stage with
-   `scripts/stage.sh <dispatch> bootstrapped`, and add one `lanes` entry per lane, in place,
-   never rewriting the file (the postmaster owns `leg`, `base` and `coachman`). Keep thread ids
-   and outcomes current at every transition. The stage changes only through `scripts/stage.sh`,
-   in this order: `bootstrapped`, `workhorses-running`, `synthesis`, `checkpoint-1`,
-   `review`, `shipping`, `shipped`, `done`. Each change is
-   logged, and the run's timings are computed from those lines by
-   `scripts/run-times.sh <dispatch>`. Never delete the manifest. It is the run's history, and
-   the postmaster's poll reads it.
+5. **Update the manifest** the postmaster created: set the stage with `scripts/stage.sh
+   <dispatch> bootstrapped`, and add one `lanes` entry per lane, in place, never rewriting the
+   file (the postmaster owns `leg`, `base` and `coachman`). Keep thread ids and outcomes current
+   at every transition. The stage changes only through `scripts/stage.sh`, in this order:
+   `bootstrapped`, `workhorses-running`, `synthesis`, `checkpoint-1`, `review`, `shipping`,
+   `shipped`; the postmaster sets `done` when it closes the run. Each change is logged, and the
+   run's timings are computed from those lines by `scripts/run-times.sh <dispatch>`. Never
+   delete the manifest. It is the run's history, and the postmaster's poll reads it.
 6. **Write each workhorse's brief** to `<dispatch>/<lane>-prompt.txt`: the ticket verbatim, the
    project profile, the docs to read first named explicitly, the `WORKHORSE-SPEC.md` /
    `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract with `workhorse-spec-template.md` in full, the autonomous-defaults rule (decide within-brief questions
@@ -584,17 +583,17 @@ Set the stage first: `scripts/stage.sh <dispatch> shipping`.
 ## Stage 4 (leg 3, after the merge): aftercare and teardown
 
 Final `run-log.md` entry (per-lane win record, findings counts, cost) plus a closing dated
-comment on the ticket. Then set the stage last, `scripts/stage.sh <dispatch> done`, which
-appends the run's stage timings to `run-log.md`; never write timings by hand. Never delete the
-dispatch directory or the manifest, they are the run's history. Archive finished threads where the harness has an archive
-form (`harnesses.md`). After the merge, tear down the workhorse worktrees, preserving any stray file
-first (a workhorse killed mid-run leaves real artifacts), and hand the synthesis worktree to the
-postmaster for removal from outside it. Keep the `wb/<TICKET>-<lane>` branches as a local
-archive. Durable process learnings go to the project's own docs, not this runbook. Residue
-contract: a clean run leaves only torn-down-able worktrees. Then finish `handoff-3.md`
-(the closing state of every branch and the ticket), close the open section with
-`scripts/run-log.sh <dispatch> --close`, log `handoff`, touch `.leg-3-done`, and
-exit.
+comment on the ticket. Leave the stage at `shipped`: the postmaster sets `done` when it closes
+the run, and that appends the run's stage timings to `run-log.md`. Never write timings by hand.
+Never delete the dispatch directory or the manifest, they are the run's history. Archive
+finished threads where the harness has an archive form (`harnesses.md`). After the merge, tear
+down the workhorse worktrees, preserving any stray file first (a workhorse killed mid-run leaves
+real artifacts), and hand the synthesis worktree to the postmaster for removal from outside it.
+Keep the `wb/<TICKET>-<lane>` branches as a local archive. Durable process learnings go to the
+project's own docs, not this runbook. Residue contract: a clean run leaves only torn-down-able
+worktrees. Then finish `handoff-3.md` (the closing state of every branch and the ticket), close
+the open section with `scripts/run-log.sh <dispatch> --close`, log `handoff`, touch
+`.leg-3-done`, and exit.
 
 ## Concurrency note (several runs on one project)
 
