@@ -2,7 +2,7 @@
 title: The review loop
 type: concept
 standing: claimed
-sources: []
+sources: [runs/2026-09-26-postmaster-36]
 updated: 2026-09-26
 ---
 
@@ -69,6 +69,14 @@ them and from each run's action log:
 
 The claim is weakened if the loop takes as many rounds as the sequence did, or if its costs
 force a cap on reviewers or a split leg on ordinary tickets.
+
+The first record, [the review rounds of #36](../sources/2026-09-26-postmaster-36.md), was run by
+hand rather than by a dispatch, and its round 1 was `/code-review`, not the lens loop, so it
+measures neither design. It ran four rounds after its criteria check, above the estimate
+[@runs/2026-09-26-postmaster-36/README.md]. In its round 3, three defects in fixes were found only
+by the lens other than the one whose finding each fix addressed: 3.06, 3.08 and 3.10
+[@runs/2026-09-26-postmaster-36/reports]. What should end the loop is a question of its own:
+[when a review loop should stop](review-convergence.md).
 
 ## What changed because of it
 

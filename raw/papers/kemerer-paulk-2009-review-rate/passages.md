@@ -4,7 +4,7 @@ Quoted from the document at the url in `source.md`, retrieved 2026-09-26. Only t
 the wiki relies on are kept. Line breaks are joined, and a word the PDF hyphenated only to break a
 line is rejoined; nothing else is changed. Each passage names the section it comes from.
 
-> Two data sets of 371 and 246 programs, respectively, from a Personal Software Process (PSP) approach were analyzed using both regression and mixed models.
+> Two data sets of 371 and 246 programs, respectively, from a Personal Software Process (PSP) approach were analyzed using both regression and mixed models. Review activities in the PSP process are those steps performed by the developer in a traditional inspection process.
 
 Abstract.
 

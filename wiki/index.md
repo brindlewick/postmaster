@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # postmaster wiki
@@ -47,7 +47,13 @@ Why the design is shaped as it is.
 - [The review loop](concepts/review-loop.md): **claimed**. Style, bug and security review run
   as one loop in one leg, so each round's fixes are re-reviewed by both gating lenses in the
   next. It should also take fewer rounds.
+- [When a review loop should stop](concepts/review-convergence.md): **claimed**. Model reviewers
+  do not run out of minor findings, so a loop should end on verified serious findings in the
+  change's own code, and a mechanism whose fixes keep breaking should be redesigned rather than
+  fixed again. From the review of #36 and outside work; the options for the loop's end are the
+  user's to choose.
 
 ## Sources
 
-[Recorded runs and captured reading](sources/index.md). None yet.
+[Recorded runs and captured reading](sources/index.md): one run, the review rounds of #36, and
+fourteen papers on review, fixes and severity.

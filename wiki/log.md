@@ -1,12 +1,37 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-26] ingest | when a review loop should stop
+
+A hypothesis page for #59, standing `claimed`. It compiles the review of #36 round by round and
+tests the implementing session's reading of it against the reports. It sets out eight candidate
+rules for ending a loop of model reviewers, and what should count toward them, each with the
+evidence for and against. It proposes a trial with its cost: fresh reviewers on code a loop has
+already passed, against code with known defects. It ends with five options for the loop's end in
+`coachman.md` and a recommendation. No runbook changes; the choice is the user's.
+
+## [2026-09-26] ingest | outside work on review, fixes and severity
+
+Fourteen papers captured into `raw/papers/`, each keeping only the passages relied on, with a
+source page each. They cover when inspections stop, what one review finds, how often fixes bring
+new defects, how people and models disagree on severity, and how often a model reviewer's findings
+are rejected. They bear on the new review-loop hypothesis and move no standing. Two sources found
+but not quotable exactly are named on that page instead.
+
+## [2026-09-26] ingest | the review rounds of #36
+
+The first run record: the review of pull request #39, which implemented #36, run by hand in five
+rounds, not by a dispatch. Promoted with local paths, a session id and the reviewer models' names
+replaced. Its record lists every finding of rounds 2 to 4 with where it sat and what became of it.
+It bears on H2 of combining models, the review loop and the new hypothesis; no standing changes,
+since one hand-run record cannot move one.
 
 ## [2026-09-25] ingest | review runs as one loop
 
