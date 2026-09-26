@@ -221,16 +221,18 @@ A workhorse commits incrementally as it goes, never pushes, never reads other br
 ## Stage 1 (leg 1): implement, then synthesize
 
 **Launch every workhorse as a headless resumable thread**, each in its own worktree, all in the
-same breath as background processes, through the launch script so the form is never copied
-by hand:
+same breath, through the host script and the launch script so no form is ever copied by hand.
+`host.sh` runs each where the user can watch it (`hosts.md`) and returns at once:
 
 ```sh
-( scripts/launch.sh launch <lane> <workhorse-wt> <dispatch>/<lane>-prompt.txt --last <dispatch>/logs/<lane>-last.md \
-    > <dispatch>/logs/<lane>-events.jsonl 2> <dispatch>/logs/<lane>.err;
-  touch <dispatch>/logs/<lane>.done ) &
+scripts/host.sh run "<name> · <lane>" <workhorse-wt> --out <dispatch>/logs/<lane>-events.jsonl \
+    --err <dispatch>/logs/<lane>.err --marker <dispatch>/logs/<lane>.done \
+    -- scripts/launch.sh launch <lane> <workhorse-wt> <dispatch>/<lane>-prompt.txt --last <dispatch>/logs/<lane>-last.md
 ```
 
-No composer, no interactive session, no registration.
+`<name>` is the waybill's `name`. A resume runs the same way: remove the lane's `.done` marker,
+add `--append`, and make the command `scripts/launch.sh resume <lane> <workhorse-wt> <thread-id>
+<prompt-file>`. No composer, no interactive session, no registration.
 The streaming output format is load-bearing: the thread id and the final message are harvested
 from it.
 
@@ -407,15 +409,15 @@ shares one coachman and the deferred findings it carries. Per pass, first set th
    install there first and clone from it. Every reviewer reviews from a scratch, never from the
    synthesis worktree.
 
-   Then launch every reviewer in the same breath through the launch script, the prompt file
-   holding: "Read `<abs>/review-<pass>-brief.md` and execute it. Report findings as your final
-   message. Do not modify any file you are reviewing." The wrapper lands a marker when the
+   Then launch every reviewer in the same breath through the host and launch scripts, the prompt
+   file holding: "Read `<abs>/review-<pass>-brief.md` and execute it. Report findings as your final
+   message. Do not modify any file you are reviewing." `host.sh` lands a marker when the
    process exits, whatever its exit:
 
    ```sh
-   ( scripts/launch.sh launch <lane> <scratch> <dispatch>/review-<pass>-r<round>-prompt.txt \
-       > <dispatch>/logs/review-<pass>-r<round>-<lane>.jsonl 2> <dispatch>/logs/review-<pass>-r<round>-<lane>.err;
-     touch <dispatch>/logs/review-<pass>-r<round>-<lane>.done ) &
+   scripts/host.sh run "<name> · <lane> review" <scratch> --out <dispatch>/logs/review-<pass>-r<round>-<lane>.jsonl \
+       --err <dispatch>/logs/review-<pass>-r<round>-<lane>.err --marker <dispatch>/logs/review-<pass>-r<round>-<lane>.done \
+       -- scripts/launch.sh launch <lane> <scratch> <dispatch>/review-<pass>-r<round>-prompt.txt
    ```
 
    Record every reviewer's thread id.
@@ -452,7 +454,8 @@ shares one coachman and the deferred findings it carries. Per pass, first set th
    `git -C <scratch> diff --name-only`, not `status --porcelain` (scratches are expected to be
    dirty with untracked build output). Any modified tracked file is a finding about the LANE:
    log it with the file list and do not count that lane's verdict until it is understood. Then
-   remove the scratches; `git worktree remove --force` is sanctioned HERE ONLY, since a detached
+   close each scratch's space, `scripts/host.sh close <scratch>`, and remove the scratches;
+   `git worktree remove --force` is sanctioned HERE ONLY, since a detached
    scratch never holds work and its contents were just recorded. Also assert the synthesis
    worktree itself is still clean. With every lane on a copy, nothing should touch it during a
    review round; a dirty synthesis tree is an escape and an incident to investigate before
@@ -512,8 +515,9 @@ Set the stage first: `scripts/stage.sh <dispatch> shipping`.
 3. **Preview build, always, on a project with a UI.** Serve the branch's production build on
    the loopback interface at a throwaway port with a THROWAWAY database seeded from the
    project's own fixtures, never the live database and never the app's real port. Run the
-   server as a process that outlives a harness turn (its own tmux session, or `nohup`), and
-   add that process to the teardown checklist. The preview link goes on the ship card and the
+   server through `scripts/host.sh run` with `--pidfile <dispatch>/render/preview.pid`, which
+   keeps it alive past a harness turn and in the user's view, and add that pid to the teardown
+   checklist. The preview link goes on the ship card and the
    tracker comment beside the review link. **Then QA that preview build before shipping it:
    click through the new surface like a person**, at phone width, working the actual task
    rather than ticking a checklist.
@@ -563,7 +567,8 @@ comment on the ticket. Then set the stage last, `scripts/stage.sh <dispatch> don
 appends the run's stage timings to `run-log.md`; never write timings by hand. Never delete the
 dispatch directory or the manifest, they are the run's history. Archive finished threads where the harness has an archive
 form (`harnesses.md`). After the merge, tear down the workhorse worktrees, preserving any stray file
-first (a workhorse killed mid-run leaves real artifacts), and hand the synthesis worktree to the
+first (a workhorse killed mid-run leaves real artifacts) and closing each one's space before it
+is removed (`scripts/host.sh close <wt>`), and hand the synthesis worktree to the
 postmaster for removal from outside it. Keep the `wb/<TICKET>-<lane>` branches as a local
 archive. Durable process learnings go to the project's own docs, not this runbook. Residue
 contract: a clean run leaves only torn-down-able worktrees. Then finish `handoff-5.md`

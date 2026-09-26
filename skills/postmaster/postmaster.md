@@ -91,13 +91,19 @@ marker appears.
 2. **Verify the hand-off before dispatching on it:** `scripts/handoff-check.sh
    <dispatch>/handoff-<n-1>.md` exits 0. If it exits 2, the previous leg is not finished:
    resume that leg's thread with the names of the missing sections as the prompt, and wait.
-3. **Launch,** in the background, stream to the leg's events file, marker on exit:
+3. **Launch** through the host, which shows the leg in the synthesis worktree's space
+   (`hosts.md`), stream to the leg's events file, marker on exit:
 
    ```sh
-   ( scripts/launch.sh launch coachman <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt --leg <leg-name> \
-       > <dispatch>/logs/coachman-leg-<n>-events.jsonl 2> <dispatch>/logs/coachman-leg-<n>.err;
-     touch <dispatch>/.leg-<n>-exited ) &
+   scripts/host.sh run "<name> · coachman" <repo>/.worktrees/<TICKET> \
+       --out <dispatch>/logs/coachman-leg-<n>-events.jsonl --err <dispatch>/logs/coachman-leg-<n>.err \
+       --marker <dispatch>/.leg-<n>-exited \
+       -- scripts/launch.sh launch coachman <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt --leg <leg-name>
    ```
+
+   `<name>` is the waybill's `name`. **Every resume of a leg,** a remount, a ruling or the merge
+   word, runs the same way: remove `.leg-<n>-exited` first, add `--append`, and make the command
+   `scripts/launch.sh resume coachman <cwd> <thread-id> <prompt-file>`.
 
    Record the thread id from the stream (`harnesses.md`) in the manifest under
    `coachman.legs.<n>.thread_id`, set `leg` to `<n>`, and log `dispatch` with the leg and
@@ -123,9 +129,8 @@ Act on the `NEXT` column, run by run, and log every action:
   card. Read the leg's `.err` file and the stream tail. A quota or provider wall, quoted,
   means the coachman is lame for this leg: log `degrade`, remove the exited marker, and
   relaunch the leg on the fallback with a takeover prompt (below). Anything else is a spent
-  thread: remove the marker and remount it, `scripts/launch.sh resume coachman <cwd>
-  <thread-id> <prompt-file>` with "Continue leg <n>; your last written state is in the
-  dispatch directory and the worktree" as the prompt, logging `resume`.
+  thread: remount it with Stage C's resume form, with "Continue leg <n>; your last written
+  state is in the dispatch directory and the worktree" as the prompt, logging `resume`.
 - **READ:** a checkpoint card is waiting. Read it, log `note` with its one-line summary, and
   remove its `.checkpoint-*-ready` marker. In consult mode the card comes with an escalation,
   which RULE handles.
@@ -139,8 +144,8 @@ Act on the `NEXT` column, run by run, and log every action:
 `<tool>/skills/postmaster/coachman.md`, `<dispatch>/handoff-<n-1>.md`, then `run-log.md` and
 `actions.jsonl` for what this leg did before you, then the synthesis worktree's `git log` and
 `git status`. Treat every uncommitted change as unverified. Log `handoff-accept` and finish
-the leg." Launch it with `scripts/launch.sh launch coachman_fallback <cwd> <that file>` and
-the same wrapper as Stage C, and record the new thread id under `coachman.legs.<n>`.
+the leg." Launch it with `scripts/launch.sh launch coachman_fallback <cwd> <that file>` as the
+command of Stage C's `host.sh run`, and record the new thread id under `coachman.legs.<n>`.
 
 A leg's `.leg-<n>-exited` marker with `.leg-<n>-done` beside it is normal completion. Every
 transition is one `log-action` line; the narrative in your own notes is for the user,
@@ -158,8 +163,8 @@ never the record.
    `<runs>/postmaster/ESCALATION.md` naming the run and the question, tell the user in
    the session, and wait. Never pass a postmaster grant up as if it needed the user's
    word, and never take the user's word for something the config gives you.
-4. **Deliver the ruling** by resuming the coachman's current leg thread with the ruling as
-   the prompt, then remove `.escalation-ready` and log `resume`. The ruling is a prompt to a
+4. **Deliver the ruling** by resuming the coachman's current leg thread (Stage C's resume form)
+   with the ruling as the prompt, then remove `.escalation-ready` and log `resume`. The ruling is a prompt to a
    resumed thread, never text typed into anything.
 
 ## Stage F: the gate
@@ -188,17 +193,19 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-5.md`:
 1. **Confirm** the default branch carries the merge (`git -C <repo> log -1` on it) and the
    ticket is done in the tracker; if the coachman could not move it, do so and log
    `ticket-state`.
-2. **Tear down** the synthesis worktree from outside it (`git -C <repo> worktree remove
-   .worktrees/<TICKET>`; never with force unless the tree is clean and the card confirmed it)
-   and log `teardown`. The workhorse worktrees are the coachman's; if any survive, remove them the
-   same way after preserving any stray file into `<dispatch>/stray/`.
+2. **Tear down** the synthesis worktree from outside it: close its space first
+   (`scripts/host.sh close <repo>/.worktrees/<TICKET>`; on exit 2 something still holds it, so
+   stop and report), then `git -C <repo> worktree remove .worktrees/<TICKET>`, never with force
+   unless the tree is clean and the card confirmed it, and log `teardown`. The workhorse
+   worktrees are the coachman's; if any survive, remove them the same way after preserving any
+   stray file into `<dispatch>/stray/`.
 3. **Close the run** with `scripts/stage.sh <dispatch> done postmaster`, which does nothing if
    the coachman already has, and never delete the dispatch directory.
 4. **Dispatch the next ticket** in order, Stage B.
 
 **Abandoning a run** happens only on the user's word for that run: log `note` with the
 word, set the stage with `scripts/stage.sh <dispatch> abandoned postmaster`, remove every worktree the run created after
-preserving stray files, and move the ticket back to todo or to cancelled as the user
+preserving stray files and closing its space (`scripts/host.sh close`), and move the ticket back to todo or to cancelled as the user
 says. The dispatch directory stays.
 
 ## Talking to the user
