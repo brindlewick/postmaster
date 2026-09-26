@@ -1,12 +1,35 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-26] ingest | style blocks a ship
+
+The user decided that style blocks a ship, as bug and security do. Every lens now runs every
+round, and the review loop ends only when no lens has a new verified finding. The turnpikes page
+records the decision and its cost, and the review-loop page no longer calls style advisory.
+Both stay `claimed`.
+
+## [2026-09-26] ingest | a ticket names its turnpikes
+
+A decision page, beside the one on the ticket shape. A ticket now names the turnpikes its run
+passes through: `default` for the style, bug and security reviews, fewer, or `none`, with no
+floor. A turnpike no longer means the gate: the gate runs on every run. The page records why,
+the decisions the ticket left open, and what the ledger will count. Standing `claimed`, since
+no run bears on it yet.
+
+## [2026-09-25] ingest | review runs as one loop
+
+A decision page. Style, bug and security review no longer run one after another in three legs.
+One leg runs one loop: every lens still open, in each round, on one snapshot, with style in
+round 1 only. A run now has three legs: synthesis, review and ship. The page records why, what
+the loop is expected to cost, and what the stage timings will measure. Standing `claimed`,
+since no run has been recorded under either design.
 
 ## [2026-09-25] ingest | a ticket's shape is checked before it is accepted
 

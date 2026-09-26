@@ -117,7 +117,7 @@ A three-role flow for getting one ticket implemented well by several models at o
 | role | what it does | where it is defined |
 |---|---|---|
 | **postmaster** | decomposes a stream into tickets, dispatches one coachman per ticket leg by leg, supervises, answers escalations, grants merges | `skills/postmaster/postmaster.md` (spawned by `SKILL.md`) |
-| **coachman** | drives one leg of one ticket; five legs, each a fresh coachman with a written hand-off between them, carry a ticket from waybill to ship card: harnessing the team, judging their work, running review rounds, clearing the gate | `skills/postmaster/coachman.md` |
+| **coachman** | drives one leg of one ticket; up to three legs, `synthesis`, `review` and `ship`, each a fresh coachman with a written hand-off between them, carry a ticket from waybill to ship card: harnessing the team, judging their work, running the turnpikes its ticket names, clearing the gate | `skills/postmaster/coachman.md` |
 | **the team** | several model lanes implementing the same ticket independently, in **blinkers**: separate worktrees, unable to see each other's work | `coachman.md`, lane table |
 
 The postmaster runs no model lanes and edits no source. A coachman never takes a second
@@ -126,9 +126,10 @@ Harness-specific invocations live in `skills/postmaster/harnesses.md`, and
 `scripts/launch.sh` is their executable form: the runbooks name a form (launch, resume,
 thread id), that file gives the command, the script runs it. `SKILL.md` is the front door —
 reached from this file or by typing `/postmaster`, it gets the machine ready if it is not and
-spawns a postmaster; `postmaster.md` is what that postmaster then does. A run is five coachman
-legs, each a fresh thread, so no context outlives a leg and a leg's hand-off document is the
-whole of what the next leg knows.
+spawns a postmaster; `postmaster.md` is what that postmaster then does. A run is up to three
+coachman legs, `synthesis`, `review` and `ship`, each a fresh thread, so no context outlives a
+leg and a leg's hand-off document is the whole of what the next leg knows. The review leg runs
+only when the ticket names a turnpike that runs in it.
 
 ## What the project has learned lives in the wiki
 
@@ -155,7 +156,9 @@ metaphor expresses them.
 **blinkers** worktree isolation between lanes · **workhorse** a lane that implements the ticket,
 as against a reviewer · **workhorse spec** a workhorse's own plan for the ticket, committed before
 its code (`WORKHORSE-SPEC.md`) · **lead horse / wheeler** the ranked lanes ·
-**turnpike** the gate a run must clear · **remount** resuming a stalled run ·
+**turnpike** a check a run must pass through before it ships, named by its ticket: `default` is
+the style, bug and security reviews, and the project's gate always runs besides them ·
+**remount** resuming a stalled run ·
 **spent** a run whose process is gone with no marker · **lame** a lane that is present but not pulling · **fleet** the
 whole system.
 

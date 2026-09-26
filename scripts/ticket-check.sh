@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Check a ticket's shape before it is accepted: a title, the problem or feature, numbered
-# acceptance criteria each answerable yes or no, and the direction. This is the executable form
-# of the ticket shape in skills/postmaster/trackers.md.
+# acceptance criteria each answerable yes or no, the direction, and the turnpikes. This is the
+# executable form of the ticket shape in skills/postmaster/trackers.md.
 #
 #   ticket-check.sh <repo> <ticket-id>                    through the tracker adapter the config
 #                                                         names ([tracker] kind)
@@ -15,9 +15,9 @@
 #
 # What it judges, and nothing more:
 #   - The title has words: the one the adapter read, or the one --title gives.
-#   - `## Problem / feature`, `## Acceptance criteria` and `## Direction` are each present once,
-#     at level two, in that order, with words under them. Headings match ignoring case, a
-#     trailing colon, a closing run of # and the spacing around the slash.
+#   - `## Problem / feature`, `## Acceptance criteria`, `## Direction` and `## Turnpikes` are
+#     each present once, at level two, in that order, with words under them. Headings match
+#     ignoring case, a trailing colon, a closing run of # and the spacing around the slash.
 #   - The acceptance criteria are a list numbered 1, 2, 3 in order, with nothing outside the
 #     list but blank lines and thematic breaks. Indented lines, nested lists and lines running
 #     straight on belong to the criterion above them.
@@ -26,8 +26,12 @@
 #     brackets and emphasis aside; and it is not marked to be decided later.
 #   - No part is marked to be decided later: TBD or TBC anywhere, or TODO as the whole text or
 #     followed by a colon. TODO as a word, as in "a TODO list", is not a mark.
+#   - The turnpikes are `default`, `none` or turnpike names, as `scripts/turnpikes.sh resolve`
+#     reads them, and every word that is not a turnpike is named. The names come from that
+#     script alone, so a turnpike added there needs no change here.
 # Code spans, fenced blocks and HTML comments are not read for questions, marks or headings,
-# and quoted text is not read for questions. A <!-- that nothing closes is text.
+# and quoted text is not read for questions. A <!-- that nothing closes is text. Turnpikes are
+# read from code spans too, and not from fenced blocks or HTML comments.
 #
 # What it does not judge: whether the description says why the change matters; whether a
 # criterion is vague ("fast enough", "where possible") or can really be tested; whether the
@@ -41,10 +45,11 @@
 # POSTMASTER_CONFIG overrides the config path (~/.postmaster/config.toml). A tracker of kind
 # `other` has no adapter script: read the ticket with its own tooling and check it with --body.
 #
-#   exit 0  well-formed, and it prints how many acceptance criteria it has; with --splice, the body
+#   exit 0  well-formed: it prints how many acceptance criteria it has, then the turnpikes as the
+#           waybill carries them, `turnpikes: <names>` or `turnpikes: none`; with --splice, the body
 #   exit 1  usage; a file that cannot be read; no config, or one that does not parse; a tracker kind
-#           with no adapter script; the adapter could not read the ticket; or, with --splice, a
-#           sections file that is not a list of `##` sections
+#           with no adapter script; the adapter could not read the ticket; scripts/turnpikes.sh
+#           could not be run; or, with --splice, a sections file that is not a list of `##` sections
 #   exit 2  malformed; one line per missing or malformed part on stdout, the part named first
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd -P)
@@ -52,8 +57,8 @@ CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
 usage() { echo "usage: ticket-check.sh <repo> <ticket-id> | --body <body-file> [--title <title>] | --splice <base-body> <sections> | --self-test" >&2; exit 1; }
 
 run_py() {  # run_py body <file> <title> | printed <adapter-read-output> | splice <base> <sections>
-  python3 - "$@" <<'PY'
-import re, sys
+  TURNPIKES="$HERE/turnpikes.sh" python3 - "$@" <<'PY'
+import os, re, subprocess, sys
 
 HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
 FENCE = re.compile(r"^\s*(`{3,})[^`]*$|^\s*(~{3,})")
@@ -67,8 +72,10 @@ BULLET = re.compile(r"^ {0,3}[-*+](?:[ \t]|$)")
 BREAK = re.compile(r"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")
 PARTS = [("problem / feature", "Problem / feature"),
          ("acceptance criteria", "Acceptance criteria"),
-         ("direction", "Direction")]
-RANK = {"problem / feature": 0, "acceptance criteria": 1, "direction": 2, "notes": 3, "user journey": 4}
+         ("direction", "Direction"),
+         ("turnpikes", "Turnpikes")]
+RANK = {"problem / feature": 0, "acceptance criteria": 1, "direction": 2, "turnpikes": 3, "notes": 4,
+        "user journey": 5}
 
 def die(msg):
     print("ticket-check: " + msg, file=sys.stderr); sys.exit(1)
@@ -213,6 +220,20 @@ def criteria(fault, part, body):
             fault(part, 'criterion %d asks a question: "%s"' % (pos, clip(asks)))
     return len(items)
 
+def turnpikes(fault, part, body):  # the section's turnpikes, read by scripts/turnpikes.sh, which defines them
+    text = "\n".join(t for t, code in body if not code)
+    try:
+        r = subprocess.run([os.environ["TURNPIKES"], "resolve", text], capture_output=True, text=True)
+    except OSError as e:
+        die("cannot run %s: %s" % (os.environ["TURNPIKES"], e.strerror))
+    if r.returncode == 2:
+        for l in r.stdout.splitlines():
+            fault(part, l)
+        return ""
+    if r.returncode != 0:
+        die("turnpikes.sh resolve exited %d: %s" % (r.returncode, r.stderr.strip()))
+    return r.stdout.strip()
+
 def check(title, text):
     raw, lines = tokenize(text)
     heads = heads_of(lines)
@@ -222,7 +243,7 @@ def check(title, text):
         faults.append("%s: %s" % (part, msg))
     if title is not None and not re.search(r"[^\W_]", title):
         fault("title", "missing")
-    at, count = {}, 0
+    at, count, named = {}, 0, ""
     for key, name in PARTS:
         found = [h for h in bounds if h[1] == 2 and h[2] == key]
         if not found:
@@ -232,6 +253,8 @@ def check(title, text):
                 msg += '; "%s" is there, at the wrong level' % near[0][3]
             elif key == "direction":
                 msg += '; one is needed even if it says "None: any approach that meets the criteria"'
+            elif key == "turnpikes":
+                msg += "; one is needed, holding default, none, or turnpike names"
             fault(key, msg)
             continue
         if len(found) > 1:
@@ -244,11 +267,13 @@ def check(title, text):
             count = criteria(fault, key, body)
         elif marked(prose(body)):
             fault(key, '"## %s" is marked %s' % (name, marked(prose(body))))
+        elif key == "turnpikes":
+            named = turnpikes(fault, key, body)
     for j, (key, name) in enumerate(PARTS):
         after = [n for k, n in PARTS[:j] if k in at and key in at and at[k] > at[key]]
         if after:
             fault(key, '"## %s" comes before "## %s"; the order is %s' % (name, after[0], ", ".join(n for _, n in PARTS)))
-    return faults, count
+    return faults, count, named
 
 def chunks(text):  # the lines before the first section, and each section's lines as written
     raw, lines = tokenize(text)
@@ -296,10 +321,11 @@ title = sys.argv[3] if len(sys.argv) > 3 else None
 if mode == "printed":  # an adapter's read: `key: value` lines, a blank line, then the body
     head, _, text = text.partition("\n\n")
     title = next((l[len("title:"):] for l in head.split("\n") if l.startswith("title:")), "")
-faults, count = check(title, text)
+faults, count, named = check(title, text)
 if faults:
     print("\n".join(faults)); sys.exit(2)
 print("well-formed, %d acceptance criteria" % count)
+print(named)
 PY
 }
 
@@ -373,6 +399,9 @@ and a line that runs straight on belongs to the criterion above it.
 D='## Direction
 <!-- a template comment is not read: TBD -->
 None: any approach that meets the criteria.'
+K='## Turnpikes
+<!-- default, none, or turnpike names -->
+`default`'
 N='## Notes
 A heading inside a fenced block is not a section:
 
@@ -384,8 +413,8 @@ body() { printf '%s\n\n' "$@" > "$tmp/body.md"; }
 run() { out=$("$SELF" --body "$tmp/body.md" --title "$1" 2>&1); rc=$?; }  # run <title>
 
 expect() {  # expect <label> <exit> <parts named, comma-separated, or none> [<text a line must hold>] [<text no line may hold>]
-  local label=$1 rc_want=$2 parts_want=$3 why=${4:-} not=${5:-} parts
-  parts=$(printf '%s\n' "$out" | grep -E '^(title|problem / feature|acceptance criteria|direction): ' | sed 's/: .*//' | LC_ALL=C sort -u | paste -sd, -)
+  local label=$1 rc_want=$2 parts_want=$3 why=${4:-} not=${5:-} parts=""
+  [ "$rc" -eq 2 ] && parts=$(printf '%s\n' "$out" | grep -E '^(title|problem / feature|acceptance criteria|direction|turnpikes): ' | sed 's/: .*//' | LC_ALL=C sort -u | paste -sd, -)
   [ -n "$parts" ] || parts=none
   if [ "$rc" -eq "$rc_want" ] && [ "$parts" = "$parts_want" ] \
      && { [ -z "$why" ] || printf '%s\n' "$out" | grep -qF -- "$why"; } \
@@ -396,158 +425,176 @@ expect() {  # expect <label> <exit> <parts named, comma-separated, or none> [<te
   fi
 }
 
+named() {  # named <label> <the turnpikes line a passing check prints, whole>
+  if [ "$rc" -eq 0 ] && [ "$(printf '%s\n' "$out" | sed -n 2p)" = "$2" ]; then ok "$1"; else fail "$1: wanted exit 0 and \"$2\", got exit $rc" "$out"; fi
+}
+
 # A stand-in adapter beside a copy of this script, so the path through a tracker runs without one.
-mkdir "$tmp/bin" && cp "$SELF" "$tmp/bin/ticket-check.sh"
+mkdir "$tmp/bin" && cp "$SELF" "$HERE/turnpikes.sh" "$tmp/bin/"
 printf '[tracker]\nkind = "github"\n' > "$tmp/github.toml"
 adapter() { printf '#!/usr/bin/env bash\n%s\n' "$1" > "$tmp/bin/github.sh"; chmod +x "$tmp/bin/github.sh"; }
 through() { out=$(POSTMASTER_CONFIG="$tmp/github.toml" "$tmp/bin/ticket-check.sh" "$tmp" 7 2>&1); rc=$?; }
 
 echo "positive controls"
-body "$P" "$A" "$D" "$N"; run "$T"
+body "$P" "$A" "$D" "$K" "$N"; run "$T"
 expect "a well-formed ticket passes" 0 none
-[ "$out" = "well-formed, 3 acceptance criteria" ] && ok "it counts three criteria, not the nested number or the lines under them" \
-  || fail "it counts three criteria, not the nested number or the lines under them" "$out"
-body "$P" "$A" "$D"; run "$T"
+[ "$out" = "well-formed, 3 acceptance criteria
+turnpikes: style, bug, security" ] && ok "it counts three criteria, not the nested number or the lines under them, then prints the turnpikes" \
+  || fail "it counts three criteria, not the nested number or the lines under them, then prints the turnpikes" "$out"
+body "$P" "$A" "$D" "$K"; run "$T"
 expect "Notes and User journey are optional" 0 none
 out=$("$SELF" --body "$tmp/body.md" 2>&1); rc=$?
 expect "without --title only the body is judged" 0 none
 body "## Problem/Feature
 Tickets arrive without criteria." "## Acceptance Criteria:
 1) The check runs on every ticket." "## Direction ##
-Use the tracker adapters."; run "$T"
+Use the tracker adapters." "## turnpikes:
+default"; run "$T"
 expect "headings match ignoring case, a colon, the slash's spacing and a closing #" 0 none
 body "$P" "## Acceptance criteria
 1.
-The check runs, the criterion's text on the line below its number." "$D"; run "$T"
+The check runs, the criterion's text on the line below its number." "$D" "$K"; run "$T"
 expect "a criterion's text may start on the line below its number" 0 none
 body "$P" '## Acceptance criteria
    1. The check runs.
    2. It names each part.
 
----' "$D"; run "$T"
+---' "$D" "$K"; run "$T"
 expect "a list indented three spaces, and a thematic break after it" 0 none
 body "$P" '## Acceptance criteria
 1. Setup asks "Overwrite the config?" before writing, and prints https://example.org/board?view=kanban.
-2. The CLI prompts "Continue? [y/N]" before it deletes an item.' "$D"; run "$T"
+2. The CLI prompts "Continue? [y/N]" before it deletes an item.' "$D" "$K"; run "$T"
 expect "a question mark in quotes or inside a word is not a question" 0 none
 body "$P" '## Acceptance criteria
 1. Setup prints `Overwrite the config?
-   [y/N]` and waits for an answer.' "$D"; run "$T"
+   [y/N]` and waits for an answer.' "$D" "$K"; run "$T"
 expect "a code span that wraps onto the next line is still code" 0 none
 body '## Problem / feature
 The template parser fails when a body holds `<!--` with no closer.' '## Acceptance criteria
 1. The check runs.
-2. The arrow in `a --> b` is kept.' "$D"; run "$T"
+2. The arrow in `a --> b` is kept.' "$D" "$K"; run "$T"
 expect "a comment marker inside code hides nothing" 0 none
 body '## Problem / feature
-The parser fails on <!-- when nothing closes it.' "$A" "$D"; run "$T"
+The parser fails on <!-- when nothing closes it.' "$A" "$D" "$K"; run "$T"
 expect "a <!-- inside a line that the line does not close is text" 0 none
 body "$P" '<!-- a comment that never closes' "$A" "## Direction
-None: any approach that meets the criteria."; run "$T"
+None: any approach that meets the criteria." "## Turnpikes
+default"; run "$T"
 expect "a <!-- at the start of a line that nothing closes is text" 0 none
 body "$P" "## Acceptance criteria
-1. The check runs. <!-- TBD: more --> It names each part." "$D"; run "$T"
+1. The check runs. <!-- TBD: more --> It names each part." "$D" "$K"; run "$T"
 expect "a comment inside a line is not read" 0 none
 body "$P" '## Acceptance criteria
 1. ```
    make check
    ```
-2. The gate passes.' "$D"; run "$T"
+2. The gate passes.' "$D" "$K"; run "$T"
 expect "a criterion that opens with a fenced block" 0 none
 body '## Problem / feature
-```ls``` prints nothing in an empty directory.' "$A" "$D"; run "$T"
+```ls``` prints nothing in an empty directory.' "$A" "$D" "$K"; run "$T"
 expect "a line opening with a three-backtick code span is not a fence" 0 none
 body '## Problem / feature
 The app has no TODO list.' '## Acceptance criteria
 1. A user can add an item to the TODO list.' '## Direction
-Store TODO items in the existing database.'; run "Add a TODO list"
+Store TODO items in the existing database.' "$K"; run "Add a TODO list"
 expect "TODO as a word is not a mark" 0 none
-printf '%s\r\n' "## Problem / feature" "Tickets arrive without criteria." "" "## Acceptance criteria" "1. The check runs." "" "## Direction" "None." > "$tmp/body.md"; run "$T"
+printf '%s\r\n' "## Problem / feature" "Tickets arrive without criteria." "" "## Acceptance criteria" "1. The check runs." "" "## Direction" "None." "" "## Turnpikes" "default" > "$tmp/body.md"; run "$T"
 expect "a body with CRLF line endings passes" 0 none
-{ printf '\xef\xbb\xbf'; printf '%s\n\n' "$P" "$A" "$D"; } > "$tmp/body.md"; run "$T"
+{ printf '\xef\xbb\xbf'; printf '%s\n\n' "$P" "$A" "$D" "$K"; } > "$tmp/body.md"; run "$T"
 expect "a byte-order mark hides no heading" 0 none
-body "$P" "$A" "$D"
+body "$P" "$A" "$D" "$K"
 out=$("$SELF" --body /dev/stdin --title "$T" < "$tmp/body.md" 2>&1); rc=$?
 expect "a body read from standard input" 0 none
-{ printf 'id: #7\ntitle: %s\nstate: todo\nlabels: \ncreated: 2026-09-23\n\n' "$T"; printf '%s\n\n' "$P" "$A" "$D"
+{ printf 'id: #7\ntitle: %s\nstate: todo\nlabels: \ncreated: 2026-09-23\n\n' "$T"; printf '%s\n\n' "$P" "$A" "$D" "$K"
   printf '## Log\n- 2026-09-25 10:00 postmaster: does a question here count?\n'; } > "$tmp/printed.txt"
 adapter "cat -- '$tmp/printed.txt'"; through
 expect "a ticket read through the adapter passes, its log included" 0 none
 
+echo "positive controls: the turnpikes, as scripts/turnpikes.sh reads them"
+body "$P" "$A" "$D" "$K"; run "$T"
+named "default, in a code span under a template comment, stands for the default set" "turnpikes: style, bug, security"
+body "$P" "$A" "$D" "## Turnpikes
+none"; run "$T"
+named "none passes, and names no turnpike" "turnpikes: none"
+body "$P" "$A" "$D" "## Turnpikes
+- Security
+- bug"; run "$T"
+named "a list passes, as the turnpikes it names" "turnpikes: bug, security"
+
 echo "negative controls: each part is named on its own"
-body "$P" "$A" "$D" "$N"; run ""
+body "$P" "$A" "$D" "$K" "$N"; run ""
 expect "no title" 2 title "title: missing"
 sed 's/^title: .*/title: /' "$tmp/printed.txt" > "$tmp/printed-untitled.txt"
 adapter "cat -- '$tmp/printed-untitled.txt'"; through
 expect "no title in the adapter's read" 2 title "title: missing"
-body "$A" "$D" "$N"; run "$T"
+body "$A" "$D" "$K" "$N"; run "$T"
 expect "no problem or feature" 2 "problem / feature" 'no "## Problem / feature" section'
-body "## Problem / feature" "$A" "$D"; run "$T"
+body "## Problem / feature" "$A" "$D" "$K"; run "$T"
 expect "an empty problem or feature" 2 "problem / feature" "is empty"
-body "$P" "$D" "$N"; run "$T"
+body "$P" "$D" "$K" "$N"; run "$T"
 expect "no acceptance criteria" 2 "acceptance criteria" 'no "## Acceptance criteria" section'
 body "$P" "## Acceptance criteria
 - The check runs.
-- It names each part." "$D"; run "$T"
+- It names each part." "$D" "$K"; run "$T"
 expect "criteria that are not numbered" 2 "acceptance criteria" "not a numbered list"
 body "$P" "## Acceptance criteria
 1. The check runs.
 1. It names each part.
-1. It exits 2." "$D"; run "$T"
+1. It exits 2." "$D" "$K"; run "$T"
 expect "criteria numbered out of order" 2 "acceptance criteria" "numbered 1, 1, 1; number them 1 to 3 in order"
 body "$P" "## Acceptance criteria
 1. The check runs.
-2. Should it also run at dispatch?" "$D"; run "$T"
+2. Should it also run at dispatch?" "$D" "$K"; run "$T"
 expect "a criterion that asks a question" 2 "acceptance criteria" "criterion 2 asks a question"
 body "$P" "## Acceptance criteria
 1. The check runs.
-2. **Should it also run at dispatch?**" "$D"; run "$T"
+2. **Should it also run at dispatch?**" "$D" "$K"; run "$T"
 expect "a question closed by emphasis" 2 "acceptance criteria" "criterion 2 asks a question"
 body "$P" "## Acceptance criteria
 1. The check runs.
-2. It retries a few times (how many?)." "$D"; run "$T"
+2. It retries a few times (how many?)." "$D" "$K"; run "$T"
 expect "a question closed by a bracket" 2 "acceptance criteria" "criterion 2 asks a question"
 body "$P" "## Acceptance criteria
 1. The check runs.
-2. Should it also run at dispatch？" "$D"; run "$T"
+2. Should it also run at dispatch？" "$D" "$K"; run "$T"
 expect "a full-width question mark" 2 "acceptance criteria" "criterion 2 asks a question"
 body "$P" "## Acceptance criteria
 1. The check runs on every ticket before it is accepted.
-   Should it also run again at dispatch?" "$D"; run "$T"
+   Should it also run again at dispatch?" "$D" "$K"; run "$T"
 expect "the fault quotes the sentence that asks" 2 "acceptance criteria" 'criterion 1 asks a question: "Should it also run again at dispatch?"'
 body "$P" "## Acceptance criteria
 1. The check runs.
-2. The retry limit is TBD." "$D"; run "$T"
+2. The retry limit is TBD." "$D" "$K"; run "$T"
 expect "a criterion marked TBD" 2 "acceptance criteria" "criterion 2 is marked TBD"
 body "$P" "## Acceptance criteria
 1. The check runs.
-2. TODO: decide the retry limit." "$D"; run "$T"
+2. TODO: decide the retry limit." "$D" "$K"; run "$T"
 expect "a criterion marked TODO:" 2 "acceptance criteria" "criterion 2 is marked TODO"
 body "$P" '## Acceptance criteria
 1. `<!--` opens a comment.
 2. The retry limit is TBD.
-3. `-->` closes one.' "$D"; run "$T"
+3. `-->` closes one.' "$D" "$K"; run "$T"
 expect "comment markers in code hide no criterion" 2 "acceptance criteria" "criterion 2 is marked TBD"
 body "$P" "## Acceptance criteria
 1. The check runs.
-2." "$D"; run "$T"
+2." "$D" "$K"; run "$T"
 expect "an empty criterion" 2 "acceptance criteria" "criterion 2 is empty"
 body "$P" "## Acceptance criteria
 1. The check runs.
 2. It names each part.
 
 Also, the README names it,
-and the runbook." "$D"; run "$T"
+and the runbook." "$D" "$K"; run "$T"
 expect "a criterion outside the numbered list" 2 "acceptance criteria" 'not part of a numbered criterion: "Also, the README names it,"'
 [ "$(printf '%s\n' "$out" | grep -c 'not part of')" -eq 1 ] && ok "a paragraph outside the list is named once, not per line" \
   || fail "a paragraph outside the list is named once, not per line" "$out"
 body "$P" "## Acceptance criteria
 1. The check runs.
-- It names each part." "$D"; run "$T"
+- It names each part." "$D" "$K"; run "$T"
 expect "an unnumbered criterion straight after a numbered one" 2 "acceptance criteria" 'not part of a numbered criterion: "- It names each part."'
 body "$P" "## Acceptance criteria
 1. The check runs.
-### Details" "$D"; run "$T"
+### Details" "$D" "$K"; run "$T"
 expect "a heading straight after a criterion" 2 "acceptance criteria" 'not part of a numbered criterion: "### Details"'
 body "$P" '## Acceptance criteria
 1. The check runs.
@@ -555,31 +602,64 @@ body "$P" '## Acceptance criteria
 ```
 a stray block
 ```
-The retry limit is TBD.' "$D"; run "$T"
+The retry limit is TBD.' "$D" "$K"; run "$T"
 expect "text after a stray block is not credited to the criterion above" 2 "acceptance criteria" \
   'not part of a numbered criterion: "```"' "criterion 1 is marked"
-body "$P" "$A" "$A" "$D"; run "$T"
+body "$P" "$A" "$A" "$D" "$K"; run "$T"
 expect "acceptance criteria twice" 2 "acceptance criteria" "appears 2 times"
-body "$P" "$A" "$N"; run "$T"
+body "$P" "$A" "$K" "$N"; run "$T"
 expect "no direction, even with one inside a fenced block" 2 direction 'no "## Direction" section; one is needed even if'
 body "$P" "$A" "## Direction
-TBD, once the spike is done."; run "$T"
+TBD, once the spike is done." "$K"; run "$T"
 expect "a direction marked TBD" 2 direction '"## Direction" is marked TBD'
 body "$P" "$A" "## Direction
-TODO"; run "$T"
+TODO" "$K"; run "$T"
 expect "a direction that says only TODO" 2 direction '"## Direction" is marked TODO'
 body "$P" "$A" "## Direction
-<!-- None: any approach that meets the criteria. -->"; run "$T"
+<!-- None: any approach that meets the criteria. -->" "$K"; run "$T"
 expect "a direction written only in a comment is empty" 2 direction '"## Direction" is empty'
-body "$P" '<!-- a comment that starts a line' "$A" "$D"; run "$T"
+body "$P" '<!-- a comment that starts a line' "$A" "$D" "$K"; run "$T"
 expect "a comment that starts a line hides everything up to the next -->" 2 "acceptance criteria,direction"
 body "$P" "$A" "### Direction
-None: any approach that meets the criteria."; run "$T"
+None: any approach that meets the criteria." "$K"; run "$T"
 expect "a direction at the wrong level" 2 direction '"### Direction" is there, at the wrong level'
-body "$P" "$D" "$A"; run "$T"
+body "$P" "$D" "$A" "$K"; run "$T"
 expect "a direction before the criteria" 2 direction '"## Direction" comes before "## Acceptance criteria"'
+body "$P" "$A" "$D" "$N"; run "$T"
+expect "no turnpikes" 2 turnpikes 'no "## Turnpikes" section; one is needed, holding default, none, or turnpike names'
+body "$P" "$A" "$D" "## Turnpikes
+bug, fixture"; run "$T"
+expect "a turnpike scripts/turnpikes.sh does not list is named" 2 turnpikes '"fixture" is not a turnpike'
+body "$P" "$A" "$D" "## Turnpikes
+none, bug"; run "$T"
+expect "none listed with another turnpike" 2 turnpikes "none stands alone"
+body "$P" "$A" "$D" "## Turnpikes"; run "$T"
+expect "an empty turnpikes section" 2 turnpikes '"## Turnpikes" is empty'
+body "$P" "$A" "$D" "## Turnpikes
+TBD"; run "$T"
+expect "turnpikes marked TBD" 2 turnpikes '"## Turnpikes" is marked TBD'
+body "$P" "$A" "$D" "### Turnpikes
+default"; run "$T"
+expect "turnpikes at the wrong level" 2 turnpikes '"### Turnpikes" is there, at the wrong level'
+body "$P" "$A" "$K" "$D"; run "$T"
+expect "turnpikes before the direction" 2 turnpikes '"## Turnpikes" comes before "## Direction"'
+body "$P" "$A" "$D" "$K" "$K"; run "$T"
+expect "turnpikes twice" 2 turnpikes '"## Turnpikes" appears 2 times'
 : > "$tmp/body.md"; run ""
-expect "an empty ticket names all four parts" 2 "acceptance criteria,direction,problem / feature,title"
+expect "an empty ticket names all five parts" 2 "acceptance criteria,direction,problem / feature,title,turnpikes"
+
+echo "a turnpike is added in scripts/turnpikes.sh alone"
+mkdir "$tmp/added" "$tmp/broken" "$tmp/alone"
+for d in added broken alone; do cp "$SELF" "$tmp/$d/"; done
+add() { awk -v row="$1" '/^TURNPIKES$/ { print row } { print }' "$HERE/turnpikes.sh" > "$2/turnpikes.sh"; chmod +x "$2/turnpikes.sh"; }
+add "fixture    -        ship    whether a run on the fixture app scores clean" "$tmp/added"
+add "none       -        review  nothing" "$tmp/broken"
+body "$P" "$A" "$D" "## Turnpikes
+default, fixture"
+out=$("$SELF" --body "$tmp/body.md" --title "$T" 2>&1); rc=$?
+expect "this check names a turnpike that turnpikes.sh does not list" 2 turnpikes '"fixture" is not a turnpike'
+out=$("$tmp/added/ticket-check.sh" --body "$tmp/body.md" --title "$T" 2>&1); rc=$?
+named "the same check passes it once turnpikes.sh lists it" "turnpikes: style, bug, security, fixture"
 
 echo "negative controls: a ticket that cannot be read is not a verdict"
 "$SELF" >/dev/null 2>&1; rc=$?
@@ -598,6 +678,13 @@ adapter 'echo "github: no board" >&2; exit 3'; through
 [ $rc -eq 1 ] && ! printf '%s\n' "$out" | grep -qE '^(title|problem / feature|acceptance criteria|direction): ' \
   && ok "an adapter that cannot read the ticket is exit 1, not a shape fault" \
   || fail "an adapter that cannot read the ticket is exit 1, not a shape fault (exit $rc)" "$out"
+body "$P" "$A" "$D" "$K"
+out=$("$tmp/alone/ticket-check.sh" --body "$tmp/body.md" --title "$T" 2>/dev/null); rc=$?
+[ $rc -eq 1 ] && [ -z "$out" ] && ok "with no turnpikes.sh beside it, the check gives no verdict" \
+  || fail "with no turnpikes.sh beside it, the check gives no verdict (exit $rc)" "$out"
+out=$("$tmp/broken/ticket-check.sh" --body "$tmp/body.md" --title "$T" 2>/dev/null); rc=$?
+[ $rc -eq 1 ] && [ -z "$out" ] && ok "a turnpikes.sh whose table breaks its rules gives no verdict" \
+  || fail "a turnpikes.sh whose table breaks its rules gives no verdict (exit $rc)" "$out"
 
 echo "positive controls: --splice changes the sections given and nothing else"
 splice() { out=$("$SELF" --splice "$tmp/base.md" "$tmp/sections.md" 2>&1); rc=$?; }
@@ -605,11 +692,16 @@ same() {  # same <label>; the last splice printed exactly want.md
   if [ "$rc" -eq 0 ] && [ "$out" = "$(cat "$tmp/want.md")" ]; then ok "$1"
   else fail "$1 (exit $rc)" "$(diff <(printf '%s\n' "$out") "$tmp/want.md")"; fi
 }
-{ printf '%s\n\n' "$P" "$A"; printf '%s\n' "$N"; } > "$tmp/base.md"; printf '%s\n' "$D" > "$tmp/sections.md"
-{ printf '%s\n\n' "$P" "$A" "$D"; printf '%s\n' "$N"; } > "$tmp/want.md"; splice
-same "a missing direction goes between the criteria and the notes"
+{ printf '%s\n\n' "$P" "$A" "$K"; printf '%s\n' "$N"; } > "$tmp/base.md"; printf '%s\n' "$D" > "$tmp/sections.md"
+{ printf '%s\n\n' "$P" "$A" "$D" "$K"; printf '%s\n' "$N"; } > "$tmp/want.md"; splice
+same "a missing direction goes between the criteria and the turnpikes"
 printf '%s\n' "$out" > "$tmp/body.md"; run "$T"
 expect "the spliced body passes the check" 0 none
+{ printf '%s\n\n' "$P" "$A" "$D"; printf '%s\n' "$N"; } > "$tmp/base.md"; printf '%s\n' "$K" > "$tmp/sections.md"
+{ printf '%s\n\n' "$P" "$A" "$D" "$K"; printf '%s\n' "$N"; } > "$tmp/want.md"; splice
+same "a missing turnpikes section goes between the direction and the notes"
+printf '%s\n' "$out" > "$tmp/body.md"; run "$T"
+named "and the spliced body passes, with the default turnpikes" "turnpikes: style, bug, security"
 C='## Acceptance criteria
 1. Only this criterion.'
 { printf '%s\n\n' "$P" "$A" "$D"; printf '%s\n' "$N"; } > "$tmp/base.md"; printf '%s\n' "$C" > "$tmp/sections.md"

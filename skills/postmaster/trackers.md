@@ -12,7 +12,7 @@ live on a branch of the target repo: a ticket is state, and state does not belon
 
 The ticket shape is the same everywhere: a title, then these headings in this order, so opening
 one costs no orientation. `scripts/ticket-check.sh` is its executable form. It requires the
-title and the first three headings, and does not check `Notes` or `User journey`.
+title and the first four headings, and does not check `Notes` or `User journey`.
 
 ```
 ## Problem / feature
@@ -27,6 +27,12 @@ anything the workhorses must not decide differently. Not a design: each workhors
 own spec from it. "None: any approach that meets the criteria" is a direction; leaving the
 heading out is not.
 
+## Turnpikes
+The checks the run must pass through before it ships, besides the project's gate, which always
+runs: `default`, `none`, or turnpikes by name, separated by commas. `default` stands for the
+default set, alone or in a list. `scripts/turnpikes.sh --list` names every turnpike and marks
+the default ones. Only names go here; the reason for a choice goes in the notes.
+
 ## Notes
 Everything else: context, links, decisions already taken, constraints, what is out of scope.
 A ticket that changes something a person uses also carries a `## User journey`: where they
@@ -34,6 +40,8 @@ begin, what they tap or type, what they expect.
 ```
 
 [Why a ticket carries a direction, and is checked before it is accepted](../../wiki/concepts/ticket-shape.md)
+
+[Why a ticket names its turnpikes](../../wiki/concepts/turnpikes.md)
 
 The flow's states are `todo`, `in-progress`, `blocked`, `done` and `cancelled`, and each
 adapter maps them onto what its tracker has. Every adapter script prints a ticket the same

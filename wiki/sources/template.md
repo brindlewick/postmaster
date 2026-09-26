@@ -24,6 +24,7 @@ than implying the record is complete.
 - Ticket: `<id>`, one line on what it asked for
 - Lanes: `<name>` (`<harness>`, `<model>`), one per line; which were workhorses, which reviewers
 - Coachman: `<harness>`, `<model>`
+- Turnpikes: the waybill's `turnpikes:` line, and the legs the run had
 - Outcome: shipped, abandoned or still open, and the date
 
 ## What the synthesis took (bears on H1)
@@ -33,9 +34,9 @@ note. Then one line: did any lane's work reach it whole?
 
 ## Review findings (bears on H2)
 
-| finding | made by | also made independently by | held up |
-|---|---|---|---|
-| … | lane | lane, or none | yes, no, dismissed |
+| finding | lens | made by | also made independently by | held up |
+|---|---|---|---|---|
+| … | style, bug or security, or more than one | lane | lane, or none | yes, no, dismissed |
 
 Counts: findings, corroborated findings, corroborated that held up, uncorroborated that held up.
 
