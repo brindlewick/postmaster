@@ -65,6 +65,7 @@ scripts/github.sh <repo> edit <n> <body-file> <base-file>
 scripts/github.sh <repo> state <n> in-progress
 scripts/github.sh <repo> comment <n> coachman "<text>"
 scripts/github.sh <repo> list [state]
+scripts/github.sh <repo> access                       # the user's permission: ADMIN, WRITE, READ...
 ```
 
 - **Board:** one per target repo, found through the repo's project links. A repo with no
@@ -86,6 +87,7 @@ scripts/github.sh <repo> list [state]
 - **Comment:** `comment`, dated to the minute, actor first (`postmaster`, `coachman`, or the
   user's word for themselves). The ready-to-merge comment is one such line pointing at
   `<dispatch>/card.md`.
+- **Access:** `access` prints the user's permission on the repository, as GitHub names it.
 
 ## plane
 
@@ -147,3 +149,11 @@ it, and the setup session records how each of the five demands is met in
 above, so the user's instance never enters the flow. Until that file exists the tracker is
 not configured, however reachable it is. One written before a body could be replaced says
 nothing about it; until it does, the user makes an approved change in the tracker.
+
+## postmaster's own tracker
+
+A fault a run meets in postmaster itself is filed on postmaster's own tracker, never the
+target's: the one the config's kind gives postmaster's own checkout. `scripts/tool-faults.sh`
+files it, and asks one thing more of it than the runbooks ask of a target's tracker: on
+GitHub, `access` must say ADMIN, since nothing is filed on a repository the user does not
+own. With no such tracker, the fault stays in the run's records.
