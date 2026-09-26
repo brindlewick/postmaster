@@ -38,7 +38,7 @@ a run dispatched without it.
 ## What a script can judge
 
 The check is a script, so "answerable yes or no" means what a script can see: a criterion has
-words, asks no question, and marks nothing TBD, TBC or TODO. The header of
+words, asks no question, and is not marked to be decided later. The header of
 `scripts/ticket-check.sh` lists what it judges and what it does not.
 
 Hedging words such as "where possible" were left out. A criterion can hedge and still say what
@@ -59,7 +59,10 @@ how often tickets arrive malformed, and which part is missing.
 The ticket shape in `skills/postmaster/trackers.md` gains `## Direction`, and
 `scripts/ticket-check.sh` is the shape's executable form. Stage A of
 `skills/postmaster/postmaster.md` runs the check on every ticket before it is accepted, and
-writes back only the user's answer, through an `edit` command added to each tracker adapter.
+Stage B runs it again before a ticket is dispatched. Only the user's answer is written back:
+`ticket-check.sh --splice` changes the sections the user approved and no other line, and the
+`edit` command added to each tracker adapter replaces the body alone, never the title, and
+writes nothing if the ticket changed since it was read.
 
 The shape later gained `## Turnpikes` after `## Direction`:
 [a ticket names the turnpikes its run passes through](turnpikes.md).

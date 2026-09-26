@@ -39,32 +39,38 @@ ledger. `note` is the action for anything without its own verb.
 2. **Decompose.** One ticket per independently shippable change, in the ticket shape
    (`trackers.md`): a title, the problem or feature, numbered acceptance criteria each
    answerable yes or no, the direction, the turnpikes, and notes. A ticket that changes
-   something a person uses carries a `User journey`. A ticket is dispatchable when its
-   criteria can be tested at the ticket's own interface and its scope names what is out.
-   Anything else is not yet a ticket; it is a question for the user.
+   something a person uses carries a `User journey`. The direction is the user's: take it from
+   the stream or the ticket's own text, or ask the user for it, and never write one yourself,
+   not even "None". A ticket is dispatchable when its criteria can be tested at the ticket's
+   own interface and its scope names what is out. Anything else is not yet a ticket; it is a
+   question for the user.
 3. **Check every ticket's shape** before you accept it or propose it:
    `scripts/ticket-check.sh <repo> <id>` for a ticket in the tracker, and
    `scripts/ticket-check.sh --body <file> --title "<title>"` for one you drafted. Log
    `ticket-check` with the ticket's id, or the draft's file, as the target, and the exit and
-   the parts named, or the `turnpikes:` line it prints, as the detail. Exit 0 accepts the
-   ticket. Exit 1 means it could not be read, and the message says why. Exit 2 names each
-   missing or malformed part on its own line: draft each part from the stream and the
-   ticket's own text, and put the ticket, the check's lines and your drafts to the user
-   together. A direction comes only from the stream, the ticket or the user; where none of
-   them says anything about the approach, ask for one instead of drafting it. A missing
+   the parts named, or the `turnpikes:` line it prints, as the detail. Exit 0 means the shape
+   is complete; whether the ticket is dispatchable is still step 2's test. Exit 1 means it
+   could not be read, and the message says why. Exit 2 names each missing or malformed part on
+   its own line: save the ticket's body as your base with the adapter's `read <id> --body` (a
+   draft is its own base), draft each part from the stream and the ticket's own text, and put
+   the ticket, the check's lines and your drafts to the user together. A missing
    `## Turnpikes` is proposed as `default`, with what `scripts/turnpikes.sh --list` says it
    stands for; the user may name fewer, others, or `none`.
-4. **Write back the user's answer and nothing else.** Compose the ticket with each part as the
-   user gave or approved it and the rest of its text as it was. A ticket in the tracker is
-   written with the adapter's `edit` (`trackers.md`), logging `ticket-edit`; a draft is
-   rewritten in its file. Then check it again. A user who edits the ticket in the tracker has
+4. **Write back the user's answer and nothing else.** Write the parts as the user gave or
+   approved them, each under its `##` heading, to a sections file, and splice them into the
+   base: `scripts/ticket-check.sh --splice <base> <sections> > <new>` changes those sections
+   and no other line. Check `<new>` with `scripts/ticket-check.sh --body <new>`. Write it with
+   the adapter's `edit <id> <new> <base>` (`trackers.md`), log `ticket-edit`, and check the
+   ticket again by its id; a draft's `<new>` replaces its file. `edit` never changes a title,
+   so a missing one is the user's to set in the tracker. On exit 4 the ticket changed after
+   you saved the base: go back to step 3. A user who edits the ticket in the tracker has
    answered: check it again and write nothing. A ticket that still fails stays out of the
    plan, and `plan.md` says what it waits on.
    [Why a ticket is checked, and only the user's answer written back](../../wiki/concepts/ticket-shape.md)
 5. **Propose before creating** unless `tracker.postmaster_may_create` is true. Show the
-   user each ticket's title, priority and one-line rationale, then create the ones they
-   approve through the tracker adapter, logging `ticket-create` per ticket, and check each
-   one again by its new id. Never create a ticket on your own initiative.
+   user each ticket's title, priority, direction, turnpikes and one-line rationale, then create
+   the ones they approve through the tracker adapter, logging `ticket-create` per ticket, and
+   check each one again by its new id. Never create a ticket on your own initiative.
 6. **Order them.** Dependencies first; then the file surfaces. Two tickets touching the same
    route table, transport interface or shared module do not run at the same time. Record the
    order and the reason in `<runs>/postmaster/plan.md`, current state only.
@@ -73,30 +79,33 @@ ledger. `note` is the action for anything without its own verb.
 
 For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
 
-1. **Base pre-flight.** `scripts/check-target.sh <repo>` exits 0 and the main checkout is on
+1. **Check the ticket once more:** `scripts/ticket-check.sh <repo> <id>` exits 0, logged as
+   `ticket-check`. On exit 2 it goes back to Stage A, step 3, and the next ticket in order is
+   taken instead.
+2. **Base pre-flight.** `scripts/check-target.sh <repo>` exits 0 and the main checkout is on
    the default branch. On 2, the dirty-tree question goes to the user (`SKILL.md`); you
    never stash, reset or discard anything.
-2. **Exclude worktrees without a commit,** before any is cut, or the next pre-flight reads
+3. **Exclude worktrees without a commit,** before any is cut, or the next pre-flight reads
    them as dirt: `grep -qxF '.worktrees/' <repo>/.git/info/exclude || echo '.worktrees/' >>
    <repo>/.git/info/exclude`.
-3. **Create the run directory** `<runs>/<TICKET>/` with `logs/`, `audit/` and `render/`, and
+4. **Create the run directory** `<runs>/<TICKET>/` with `logs/`, `audit/` and `render/`, and
    the manifest: `{"stage": "dispatched", "leg": 1, "base": "<sha>", "lanes": {}, "coachman":
    {"legs": {}}}`. You own `leg`, `base`, `coachman` and the terminal stages, `done` and
    `abandoned`; the coachman owns `lanes` and every stage before those; both update fields in
    place and neither rewrites the file. Then record what the run
    starts from, once: `scripts/run-meta.sh <dispatch> <repo>` writes `run.json` with the
    postmaster commit, the config and the harness versions, and nothing edits it afterwards.
-4. **Cut the synthesis worktree** at BASE, the sha you recorded from `git -C <repo> rev-parse
+5. **Cut the synthesis worktree** at BASE, the sha you recorded from `git -C <repo> rev-parse
    HEAD` on the default branch: `git -C <repo> worktree add .worktrees/<TICKET> -b <TICKET>
    <sha>`. The coachman's cwd is that worktree from its first leg, so the project's ambient
    context loads for it.
-5. **Write `brief.md`** from the template in `SKILL.md`: the ticket verbatim, the
-   `turnpikes:` line `scripts/ticket-check.sh <repo> <id>` prints for it on exit 0, copied as
-   printed, the project profile (gate, build, browser suite, docs to read first, tracker, risk
-   surfaces), the team from the config, `CHECKPOINT_MODE` from `ship.checkpoint_mode` and
-   `MERGE_AUTHORITY` from `ship.merge_authority`, either overridden only where the user said
-   so for this run, the dispatch path and `<tool>`.
-6. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. The
+6. **Write `brief.md`** from the template in `SKILL.md`: the ticket verbatim, the
+   `turnpikes:` line step 1's check printed, copied as printed, the project profile (gate,
+   build, browser suite, docs to read first, tracker, risk surfaces), the team from the
+   config, `CHECKPOINT_MODE` from `ship.checkpoint_mode` and `MERGE_AUTHORITY` from
+   `ship.merge_authority`, either overridden only where the user said so for this run, the
+   dispatch path and `<tool>`.
+7. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. The
    coachman never touches the ticket's state before stage 3.
 
 ## Stage C: dispatch a leg
