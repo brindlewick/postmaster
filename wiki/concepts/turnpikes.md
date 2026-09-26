@@ -22,8 +22,9 @@ project's gate is not a turnpike, and runs on every run.
   reviews, whatever the ticket was. The user's word is that some tickets need fewer, a research
   ticket may need none, and there is no floor: the ticket's own list decides.
 - **`default` keeps the usual case to one word.** A ticket with no section is not read as
-  `none`. It fails the check, and the postmaster proposes `default` to the user, as it proposes
-  a missing direction. Leaving a review out is then always a choice somebody wrote down.
+  `none`. It fails the check, and the postmaster proposes `default` to the user, who may answer
+  with fewer turnpikes, others, or `none`. Leaving a review out is then always a choice somebody
+  wrote down.
 - **The gate is not a turnpike.** `AGENTS.md` used to define a turnpike as the gate a run must
   clear. The gate is the project's own check, and it runs whatever the ticket says. Turnpikes
   are the checks a ticket names on top of it. A ticket can name `none`, but it cannot skip the

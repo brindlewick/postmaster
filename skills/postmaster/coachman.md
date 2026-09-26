@@ -369,11 +369,12 @@ from it.
 
 ## Stage 2 (leg 2): review, every lens in one loop
 
-One loop, in one leg. The lenses are the turnpikes on the review line of `scripts/turnpikes.sh
-legs <dispatch>`, exactly those: a turnpike the waybill does not name never runs, and one it
-names is never skipped. If the script exits 2, escalate with its output. Each round runs every
-lens still open, on one snapshot, every reviewer lane under each lens as its own process in its
-own scratch: every lens in round 1, then the gating lenses alone from round 2.
+One loop, in one leg. The lenses are the turnpikes `scripts/turnpikes.sh legs <dispatch>` lists
+for the review leg, exactly those: a turnpike the waybill does not name never runs, and one it
+names is never skipped. If the script exits 2, or lists no review leg, escalate with its
+output. Each round runs every lens still open, on one snapshot, every reviewer lane under each
+lens as its own process in its own scratch: every lens in round 1, then the gating lenses alone
+from round 2.
 [Why the lenses run as one loop](../../wiki/concepts/review-loop.md)
 
 Set the stage first, `scripts/stage.sh <dispatch> review`, then:
