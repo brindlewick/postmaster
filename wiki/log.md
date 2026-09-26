@@ -8,6 +8,16 @@ updated: 2026-09-26
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-26] ingest | follow-up: claude's trust question, and claude killed mid-turn
+
+Two checks added to `raw/trials/herdr-agent-lifecycle/`. Headless claude answered in a
+directory its config had never trusted, with or without its bypass flag, while interactive claude
+stopped at the trust question even with it. A claude killed mid-turn was reported done, as pi
+had been, and a pane where one died mid-turn held the next start in `working` until its screen
+was cleared. The Herdr page widens its kill finding to claude and adds the restart finding; the
+live-agents page adds the bypass form and a cleared pane to what the option needs. No standing
+changed.
+
 ## [2026-09-26] query | headless stays the default; live agents become an option
 
 Asked whether headless runs are the better arrangement. On the trial, yes: a headless lane

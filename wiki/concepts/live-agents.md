@@ -84,14 +84,14 @@ exiting took about as long as Herdr took to notice a finished live turn. Nearly 
 control's delay was the 20 s poll, a constant in a script, which can be shortened, or replaced
 by waiting on a file-system event, without touching the contract.
 
-**The live signal can mislead.** A pi lane killed mid-turn was reported `done` to its waiter, a
-wait issued after a prompt returned the previous turn's state, and two turns that had finished
-were reported stalled [@trials/herdr-agent-lifecycle/kill-mid-turn.txt]
-[@trials/herdr-agent-lifecycle/stale-wait.txt]
-[@trials/herdr-agent-lifecycle/false-stall.txt]. Each has a remedy, and the remedies are the
-same kind of check markers already need: whether the lane is still there, and what it left on
-disk. Whether the live level loses fewer lanes is open. It shows only in how often each level
-loses one over real runs, which is the third measure.
+**The live signal can mislead.** A lane killed mid-turn, pi or claude, was reported `done` to
+its waiter, a wait issued after a prompt returned the previous turn's state, and two turns that
+had finished were reported stalled [@trials/herdr-agent-lifecycle/kill-mid-turn.txt]
+[@trials/herdr-agent-lifecycle/stale-wait.txt] [@trials/herdr-agent-lifecycle/false-stall.txt].
+Each has a remedy, and the remedies are the same kind of check markers already need: whether
+the lane is still there, and what it left on disk. Whether the live level loses fewer lanes is
+open. It shows only in how often each level loses one over real runs, which is the third
+measure.
 
 **Delivery was faster by 0.6 to 2.8 s per instruction** between matching variants, and by 0.8
 to 1.6 s at their medians [@trials/herdr-agent-lifecycle/timings]. A ruling already waits for
@@ -189,10 +189,13 @@ needs these:
   clock of `runs-status.sh` reads file times there. It needs another sign of work, such as the
   growth of the lane's harness session record, or a healthy live run reads INSPECT after 30
   minutes.
-- **Setup.** Each lane's harness runs with its Herdr integration. pi's reports its state, and
+- **Setup.** Each live agent starts with its harness's bypass form from `harnesses.md`, as
+  every headless launch does, and with its Herdr integration. pi's reports its state, and
   claude's, codex's, grok's and agy's report the session the thread id comes from. muse has
   none, so it cannot be a live lane until a thread id comes some other way. Each worktree is
-  trusted before its agent starts. Without Herdr the option is refused.
+  trusted before its agent starts, because interactive claude asks its trust question even
+  with its bypass flag, where headless claude does not
+  [@trials/herdr-agent-lifecycle/startup.txt]. Without Herdr the option is refused.
 - **Records.** The thread id comes from Herdr's session report instead of an event stream, and
   a lane's record becomes its exported harness session, as issue #20 proposes.
 - **Rulings.** A live leg that escalates stays open when its turn ends, so its ruling is an
@@ -202,9 +205,12 @@ needs these:
   prompt carries no ruling, only the path of a ruling file the postmaster wrote, and the leg
   acts on the file only when the ledger has the postmaster's line for it. A prompt that names
   no logged ruling file is not a ruling.
-- **Recovery.** A resume stays the way to remount a lane or leg that died. One that settled
-  without finishing is prompted again instead, since resuming a session its agent still holds
-  would start a second process on it.
+- **Recovery.** A resume stays the way to remount a lane or leg that died, and the pane's
+  screen is cleared before an agent starts again in it: a claude killed mid-turn left a status
+  line that kept Herdr reading the next one as `working`
+  [@trials/herdr-agent-lifecycle/startup.txt]. One that settled without finishing is prompted
+  again instead, since resuming a session its agent still holds would start a second process
+  on it.
 
 The option changes the coachman contract behind its key, so it lands while the fleet is idle,
 and after issue #10, whose host adapter it builds on.

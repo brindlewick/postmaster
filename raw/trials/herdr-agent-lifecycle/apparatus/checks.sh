@@ -6,6 +6,7 @@
 #   TRIAL  a scratch directory outside any repository
 #   TOOL   the postmaster repository, at the commit method.md names
 #   A B C  the three panes (pane-a, pane-b, pane-c), from the JSON that created them
+#   D E    the follow-up's two panes (pane-d, pane-e)
 #   WS     the Herdr workspace the trial's tab was created in
 #
 # bench.py, standin.py, events.py and idle.py sit beside this file.
@@ -222,4 +223,44 @@ PY
   done
   # then compare the sha256 of the text sent with that of the user message each harness recorded
   # in its own session (pi-agent-dir/sessions, claude-config/projects)
+}
+
+# --- follow-up, the same day ------------------------------------------------------------------
+
+headless_trust() {  # claude's trust question in directories the isolated config never trusted
+  mkdir -p "$TRIAL/work-untrusted-1" "$TRIAL/work-untrusted-2" "$TRIAL/work-untrusted-3"
+  echo "Reply with OK. (headless, untrusted folder, bypass)" > "$TRIAL/prompt-untrusted-1.txt"
+  echo "Reply with OK. (headless, untrusted folder, no bypass)" > "$TRIAL/prompt-untrusted-2.txt"
+  POSTMASTER_CONFIG=$TRIAL/config.toml timeout 90 "$TOOL/scripts/launch.sh" launch standin-claude \
+    "$TRIAL/work-untrusted-1" "$TRIAL/prompt-untrusted-1.txt" < /dev/null
+  (cd "$TRIAL/work-untrusted-2" && env $(grep -v '^#' "$TRIAL/standin-claude.env" | xargs) timeout 90 \
+    claude -p "$(cat "$TRIAL/prompt-untrusted-2.txt")" --model claude-haiku-4-5 --output-format stream-json --verbose < /dev/null)
+  # the control: interactive, in a tab whose root pane (D) sits in the third directory
+  herdr tab create --workspace "$WS" --cwd "$TRIAL/work-untrusted-3" --label trial-16 \
+    --env ANTHROPIC_BASE_URL=http://127.0.0.1:18716 --env ANTHROPIC_AUTH_TOKEN=standin \
+    --env CLAUDE_CONFIG_DIR="$TRIAL/claude-config" --no-focus
+  herdr agent start t16-ctl --kind claude --pane "$D" -- --model claude-haiku-4-5 --dangerously-skip-permissions
+  herdr agent read t16-ctl --source visible
+  herdr agent send-keys t16-ctl esc
+}
+
+kill_claude() {  # pane E, split from D into the trusted directory; run three times
+  herdr pane split "$D" --direction right --cwd "$TRIAL/work-claude" \
+    --env ANTHROPIC_BASE_URL=http://127.0.0.1:18716 --env ANTHROPIC_AUTH_TOKEN=standin \
+    --env CLAUDE_CONFIG_DIR="$TRIAL/claude-config" --no-focus
+  python3 "$HERE/events.py" "$TRIAL/logs/followup-events.jsonl" "$D" "$E" &
+  local rep pid
+  for rep in 1 2 3; do
+    herdr agent start t16-cl --kind claude --pane "$E" -- --model claude-haiku-4-5 --dangerously-skip-permissions
+    pid=$(fg_pid "$E")
+    ( herdr agent prompt t16-cl "SLEEP=30 kill-claude-$rep reply OK" --wait --timeout 60000 ) &
+    sleep 4
+    kill -TERM "$pid"
+    wait
+    sleep 3
+    herdr agent get t16-cl
+  done
+  # After a start timed out (startup.txt), the misread claude was stopped, the screen cleared,
+  # and one more try run the same way:
+  herdr pane run "$E" clear
 }

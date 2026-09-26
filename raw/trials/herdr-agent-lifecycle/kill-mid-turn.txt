@@ -3,7 +3,7 @@ hold its reply 30 s (SLEEP=30), so the turn could not have finished by the kill.
 writes its log line only when it finishes a reply, so none of these turns has a line in
 standin-requests.jsonl; the pushed working state shows each under way before the kill. Times
 are from issuing the prompt. The pushed events behind each line are in herdr-events.jsonl.
-Only pi was killed; no claude agent was.
+The claude kills, a follow-up the same day, are at the end.
 
 1. pi, screen rules, pane-a. Prompt without --wait, then a separate agent wait.
    The separate wait returned 100 ms after it started, with "done", before the turn had begun
@@ -25,3 +25,23 @@ In 2 and 3 the waiter was told the turn was done, with exit 0, for a turn that h
 In all three, Herdr's own release event gave the killed agent's final status as "done". It came
 within 71 ms of the pushed done, but after the waiter had returned: 38 ms after in 2, and 177 ms
 after in 3.
+
+Follow-up, the same day: claude 2.1.283, isolated config, under agent prompt --wait --timeout
+60000, killed with SIGTERM about four seconds into a turn held 30 s. Events are in
+followup-herdr-events.jsonl (pane-e).
+
+4. Killed at +4045 ms. prompt --wait: exit 0, "done", at +4426 ms.
+   events: working +808, done +4448, released with final_status "done" +4448, unknown +4708.
+5. Not a valid try: agent start had timed out (startup.txt), so the prompt returned
+   agent_not_found at +12 ms and the claude killed at +4047 ms had no turn running.
+   events: done +4407, released with final_status "done" +4407, unknown +4755.
+6. Killed at +4049 ms. prompt --wait: exit 0, "done", at +4739 ms.
+   events: working +811, done +4762, released with final_status "done" +4762, unknown +5077.
+7. After the screen was cleared and claude started again. Killed at +4044 ms. prompt --wait:
+   exit 0, "done", at +4665 ms.
+   events: working +979, done +4607, released with final_status "done" +4608, unknown +4977.
+
+In 4, 6 and 7 the waiter was told the turn was done, with exit 0, for a claude turn that had been
+killed, and Herdr's release gave "done" as the final status. The release came 22 ms and 23 ms
+after the waiter returned in 4 and 6, and 57 ms before it in 7. agent get 3 s later found no
+agent by that name each time.

@@ -86,7 +86,7 @@ with its integration, and pi and claude by resume.
   rest before the next try.
 - Kill mid-turn: pi sent SIGTERM about four seconds into a turn held 30 s, three times: under
   a separate wait on pi with screen rules, and under `agent prompt --wait` on each pi variant
-  (`kill-mid-turn.txt`). Only pi was killed; claude was not.
+  (`kill-mid-turn.txt`). claude was killed in the follow-up below.
 - A turn of three tool calls and a closing reply on each agent (`multistep.txt`).
 - A 20,498-byte, 282-line prompt to pi with its integration and to claude. The sha256 of the
   text sent was compared with that of the user message each harness recorded in its own
@@ -96,6 +96,20 @@ with its integration, and pi and claude by resume.
   (`apparatus/idle.py`, `idle-cost.txt`), beside the size of the native session files.
 - Where each state comes from, per harness: the text of every integration embedded in the
   herdr binary, and the rules in each cached manifest (`integrations.txt`).
+
+**Follow-up, the same day.** Two checks a review of the first draft asked for, with the same
+stand-in and the isolated claude config, in a second tab the trial created and removed:
+
+- Whether claude asks its trust question when headless: `launch.sh launch` (claude's headless
+  form, bypass flag included) and plain `claude -p` without the bypass flag, each in a directory
+  the config had never trusted, with interactive claude in a third such directory as the control
+  that the question is there to be asked (`startup.txt`).
+- claude killed mid-turn under `agent prompt --wait`, as pi had been, three valid times
+  (`kill-mid-turn.txt`). One try was void because its agent had not started; why is in
+  `startup.txt`, and a check that clearing the pane's screen lets claude start again.
+
+Its stand-in lines are in `followup-standin-requests.jsonl` and its pushed events, reduced the
+same way, in `followup-herdr-events.jsonl`.
 
 **Recorded here.** `apparatus/checks.sh`, the commands the trial ran for everything but the
 timed turns, in the order it ran them. `timings/*.jsonl`, one line per turn, as `bench.py`
@@ -111,9 +125,7 @@ which runs for minutes and makes many tool calls. How often runs end spent or ne
 which needs runs. What happens across a Herdr server restart, including
 `resume_agents_on_restore`, since the server was not restarted. codex, grok, agy and muse as
 live agents: only their integrations and manifests were read. The Herdr server's own memory
-per pane. Whether headless `claude -p` asks claude's trust question in a directory its config
-has not seen: every headless run here used a config that already trusted its directory. The
-timings come from one machine that had other agents running on it.
+per pane. The timings come from one machine that had other agents running on it.
 
 **Repeating it.** `apparatus/checks.sh` holds each step as a function, from `isolate`, which
 writes the isolated configs and starts the stand-in, to `long_prompt`, in the order the trial

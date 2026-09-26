@@ -11,9 +11,9 @@ updated: 2026-09-26
 **Claim.** In Herdr 0.9.1, the lifecycle state of a claude, codex, grok, agy or muse agent is
 inferred from its screen, and pi's is reported by pi itself only when Herdr's pi integration is
 loaded. A settled state from `agent wait` or `agent prompt --wait` means the agent looked ready
-for input. It does not mean the turn it was given has finished: a pi agent killed mid-turn was
-reported `done`, a wait issued after a prompt can return the previous turn's state, and Herdr
-documents that even `agent prompt --wait` does not track turns.
+for input. It does not mean the turn it was given has finished: a pi or claude agent killed
+mid-turn was reported `done`, a wait issued after a prompt can return the previous turn's
+state, and Herdr documents that even `agent prompt --wait` does not track turns.
 
 **Standing: settled**, for Herdr 0.9.1 with the detection manifests it had cached on
 2026-09-26, by a controlled trial against a stand-in model [@trials/herdr-agent-lifecycle].
@@ -51,9 +51,10 @@ detection has to record the manifest versions it ran with.
 |---|---|
 | `agent prompt --wait` waits for observed activity, then for the first settled state | Held `working` through a turn of three tool calls on every agent, and settled 0.5 to 0.7 s after the final reply [@trials/herdr-agent-lifecycle/multistep.txt]. |
 | A standalone `agent wait` uses the same settled-state defaults | Issued straight after a prompt, it returned within 40 to 140 ms with the previous turn's `idle` or `done`, before the reply existed, in 6 of 6 tries [@trials/herdr-agent-lifecycle/stale-wait.txt]. Only `agent prompt --wait` has the activity gate. |
-| `idle` and `done` both mean ready for input; an agent's name is cleared when it exits | A pi agent killed mid-turn was reported `done`, 3 of 3 times. Under `agent prompt --wait` the waiter got exit 0 and `done` about 0.4 s after the kill, with and without pi's integration. Herdr's own release event also gave the final status as `done`. It came within 0.1 s of the pushed `done`, but up to 0.2 s after the waiter had returned, and `agent get` 3 s later found no agent by that name. Only pi was killed [@trials/herdr-agent-lifecycle/kill-mid-turn.txt]. |
+| `idle` and `done` both mean ready for input; an agent's name is cleared when it exits | An agent killed mid-turn was reported `done`, 3 of 3 times for pi and 3 of 3 for claude. Under `agent prompt --wait` the waiter got exit 0 and `done` 0.4 to 0.7 s after the kill, for pi with and without its integration and for claude. Herdr's own release event also gave the final status as `done`. It came within 0.1 s of the pushed `done`, and up to 0.2 s after the waiter had returned; `agent get` 3 s later found no agent by that name [@trials/herdr-agent-lifecycle/kill-mid-turn.txt]. |
 | No observed activity within five seconds returns `agent_prompt_stalled` | Returned for two turns that had run and finished, both answered by the stand-in within 2 ms, with no `working` state pushed for either: a pi turn on screen rules, and a claude turn whose prompt was 20 KB. No turn that was held stalled [@trials/herdr-agent-lifecycle/false-stall.txt]. |
-| `agent start` returns `agent_not_ready` for an agent blocked during startup | claude, started on the machine's own config in a directory that config had not seen, stopped at its workspace trust question, even with `--dangerously-skip-permissions`, once. Whether headless `claude -p` would ask it there was not tested [@trials/herdr-agent-lifecycle/startup.txt]. |
+| `agent start` returns `agent_not_ready` for an agent blocked during startup | Interactive claude, `--dangerously-skip-permissions` included, stopped at its workspace trust question in a directory its config had never trusted, both times it was tried: once on the machine's own config and once on the isolated one. Headless `claude -p` in such directories answered without asking, with and without that flag, and recorded no trust [@trials/herdr-agent-lifecycle/startup.txt]. |
+| `agent start` returns once Herdr sees the agent ready for input | In a pane where claude had been killed mid-turn, the next start timed out after 30 s, 2 of 2 times. The killed session's leftover status line, "esc to interrupt", kept a screen rule reading the new, idle claude as `working`. With the screen cleared first, claude started in 3.7 s [@trials/herdr-agent-lifecycle/startup.txt]. |
 | `agent prompt` sends the text and Enter as one submission, with bracketed paste | A 20,498-byte prompt of 282 lines reached pi and claude as one message: the sha256 of the message each harness recorded matched that of the text sent [@trials/herdr-agent-lifecycle/long-prompt.txt]. |
 | `agent prompt --wait` does not track turns: sent to an agent already working, that turn's completion may match | Not tested. pi queued a prompt sent while a turn ran, and ran it after that turn [@trials/herdr-agent-lifecycle/stale-wait.txt]. |
 | `events.subscribe` pushes `pane.agent_status_changed` | The trial's state changes arrived as pushed events, and so did the release of each killed agent [@trials/herdr-agent-lifecycle/herdr-events.jsonl]. |
@@ -94,8 +95,11 @@ Against a stand-in model on the loopback interface, one machine
 - `agent_prompt_stalled` is not proof that nothing ran. The harness's own session record
   says what did. Herdr's documentation says the same about a stall or a timeout
   [@trials/herdr-agent-lifecycle/method.md].
-- A live agent can stop at an interactive question before it takes any work, such as
-  claude's trust question for a directory its config has not seen
+- A live agent can stop at an interactive question before it takes any work. Interactive
+  claude asks its trust question in a directory its config has never trusted, bypass flag or
+  not, and headless claude does not [@trials/herdr-agent-lifecycle/startup.txt].
+- An agent started in a pane where another died mid-turn can be read by what the dead one left
+  on the screen. Clearing the pane first let claude start
   [@trials/herdr-agent-lifecycle/startup.txt].
 
 ## Where it bears
