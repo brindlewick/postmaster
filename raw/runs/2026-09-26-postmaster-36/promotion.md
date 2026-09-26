@@ -19,6 +19,8 @@ The record was kept outside the repository until it was promoted on 2026-09-26 f
 - `briefs/`: what the round 2 to 4 reviewers were given.
 - `code-review/final.json`: round 1's findings as `/code-review` wrote them.
 - `commits.txt`: the pull request's commits with their commit times, from `git log`.
+- `diffstat.txt`: the lines each of those commits changed, and the pull request's net change by
+  file, from `git show --shortstat` and `git diff --numstat`.
 
 ## Changed at promotion
 
