@@ -1,12 +1,28 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-26] ingest | a review round's time limit
+
+The review loop page now says what happens to a reviewer still running when its round reaches
+the time limit: it is stopped and recorded DEGRADED, with timeout as its cause. The limit moves
+from the runbook into the config as `review.round_timeout_seconds`, and keeps its default of
+2400 seconds, the limit a round had when it ran one lens. The `degrade` lines will show whether
+round 1, which runs every lens at once, needs more. The standing stays `claimed`.
+
+## [2026-09-25] ingest | review runs as one loop
+
+A decision page. Style, bug and security review no longer run one after another in three legs.
+One leg runs one loop: every lens still open, in each round, on one snapshot, with style in
+round 1 only. A run now has three legs: synthesis, review and ship. The page records why, what
+the loop is expected to cost, and what the stage timings will measure. Standing `claimed`,
+since no run has been recorded under either design.
 
 ## [2026-09-25] ingest | a ticket's shape is checked before it is accepted
 

@@ -15,7 +15,7 @@ config says it may.
 | role | does | never does |
 |---|---|---|
 | **postmaster** | splits a stream into tickets, dispatches one coachman per ticket, supervises, answers escalations, grants merges | run a model lane, edit source |
-| **coachman** | drives one leg of a ticket; five legs, each a fresh coachman, carry it from waybill to ship card with a written hand-off between them | take a second leg, merge on its own authority |
+| **coachman** | drives one leg of a ticket; three legs, synthesis, review and ship, each a fresh coachman, carry it from waybill to ship card with a written hand-off between them | take a second leg, merge on its own authority |
 | **the team** | several lanes implementing the same ticket in blinkers | see each other's work |
 
 ## Why several models rather than one good one
@@ -86,6 +86,7 @@ scripts/check-target.sh  <path> # 0 usable · 1 not a repo · 2 dirty
 scripts/discover-project.sh <path>
 scripts/cut-scratch.sh <repo> <source-worktree> <dest> <commit>   # reviewer scratch, deps cloned
 scripts/wait-for-markers.sh <dir> <glob> <count> <timeout>       # block until a round is in
+scripts/review-round.sh wait|teardown <dispatch> <round> …       # a review round's time limit, then its teardown
 scripts/log-action.sh <dispatch> <actor> <action> <target> …     # one JSON line per action
 scripts/stage.sh <dispatch> <stage>                               # the one way a run changes stage
 scripts/run-times.sh <dispatch>                                   # how long each stage took, from the log

@@ -41,7 +41,8 @@ max_runs = 2                                    # concurrent runs per project
 # scripts/launch.sh carry its stream flag, bypass form, thread id and resume form, taken from
 # a trial run. Until then launch.sh refuses it, by design.
 
-# Optional: a different coachman per leg (synthesis, style, bug, security, ship).
+# Optional: a different coachman per leg. The legs are synthesis, review and ship, and
+# scripts/launch.sh refuses a config that names any other.
 # [team.coachman_legs]
 # synthesis = { harness = "codex", model = "gpt-6-astra", effort = "max" }
 
@@ -61,6 +62,12 @@ kind = "github"
 # env_file = "~/.postmaster/plane.env"   # plane only: one line, PLANE_API_KEY=<key>
 # name = "<tracker>"                     # other only
 postmaster_may_create = false   # true lets the postmaster create tickets without asking
+
+[review]
+# Seconds a review round may run; a run keeps the value recorded in its run.json at dispatch.
+# A reviewer still running at the limit is stopped and recorded DEGRADED, with timeout as the
+# cause (scripts/review-round.sh). 2400 when unset.
+round_timeout_seconds = 2400
 
 [ship]
 # Who says the merge word for a run: "user" (a person, live) or "postmaster" (the

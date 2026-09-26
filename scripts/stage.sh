@@ -11,28 +11,37 @@
 # manifest's `stage` field, and appends the same line to run-log.md. Setting the stage a run is
 # already in does nothing, so a resumed or remounted leg can set it again safely. Setting a
 # terminal stage (done, abandoned) also appends the run's full stage timings to run-log.md.
+# Only the postmaster sets a terminal stage, or moves a run out of one: it closes a run after
+# the last leg, and abandons one on the user's word. The actor is the caller's own word, so this
+# holds a coachman to its runbook; it cannot stop a process that names itself the postmaster.
 #
 #   exit 0  the stage was set, or already was
 #   exit 1  usage, no manifest, an unreadable manifest, or the log could not be written
 #   exit 2  not one of the stages
+#   exit 3  a terminal stage set, or left, by any actor but the postmaster
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd -P)
-STAGES="dispatched bootstrapped workhorses-running synthesis checkpoint-1 review-style review-bug review-security shipping shipped done abandoned"
+STAGES="dispatched bootstrapped workhorses-running synthesis checkpoint-1 review shipping shipped done abandoned"
 
 set_stage() {  # set_stage <dispatch> <stage> <actor>
   local d=$1 new=$2 actor=$3
   case " $STAGES " in *" $new "*) ;; *) echo "stage: '$new' is not a stage; one of: $STAGES" >&2; return 2 ;; esac
+  case $new in
+    done|abandoned) [ "$actor" = postmaster ] || { echo "stage: only the postmaster sets $new" >&2; return 3; } ;;
+  esac
   [ -f "$d/manifest.json" ] || { echo "stage: no manifest at $d/manifest.json" >&2; return 1; }
   local plan
-  plan=$(python3 - "$d" "$new" <<'PY'
+  plan=$(python3 - "$d" "$new" "$actor" <<'PY'
 import datetime as dt, json, pathlib, sys
-d, new = pathlib.Path(sys.argv[1]), sys.argv[2]
+d, new, actor = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 try:
     old = json.loads((d / "manifest.json").read_text()).get("stage")
 except ValueError:
     print("unreadable"); sys.exit(0)
 if old == new:
     print("same"); sys.exit(0)
+if old in ("done", "abandoned") and actor != "postmaster":
+    print("final\t%s" % old); sys.exit(0)
 since = None                                  # when the stage being left was entered
 log = d / "actions.jsonl"
 for line in (log.read_text().splitlines() if log.exists() else []):
@@ -54,6 +63,7 @@ PY
   case $plan in
     unreadable) echo "stage: $d/manifest.json does not parse" >&2; return 1 ;;
     same) echo "stage: already $new"; return 0 ;;
+    final*) echo "stage: the run is $(printf '%s' "$plan" | cut -f2); only the postmaster moves it on" >&2; return 3 ;;
   esac
   local old took
   old=$(printf '%s' "$plan" | cut -f2); took=$(printf '%s' "$plan" | cut -f3)
@@ -105,9 +115,15 @@ python3 -c "import json,sys; m=json.load(open('$d/manifest.json')); sys.exit(0 i
   && ok "only the manifest's stage field changes" || fail "only the manifest's stage field changes"
 grep -q 'stage bootstrapped, from dispatched after' "$d/run-log.md" && ok "run-log.md records the change and how long the last stage took" \
   || fail "run-log.md records the change and how long the last stage took"
-set_stage "$d" done coachman >/dev/null
+set_stage "$d" done postmaster >/dev/null
 grep -q 'Stage timings, from actions.jsonl' "$d/run-log.md" && grep -q '^bootstrapped ' "$d/run-log.md" \
-  && ok "a terminal stage appends the run's timings" || fail "a terminal stage appends the run's timings"
+  && ok "the postmaster's terminal stage appends the run's timings" || fail "the postmaster's terminal stage appends the run's timings"
+fresh; set_stage "$d" abandoned postmaster >/dev/null; rc=$?
+[ $rc -eq 0 ] && [ "$(count)" -eq 1 ] && grep -q '"stage": "abandoned"' "$d/manifest.json" \
+  && ok "the postmaster abandons a run" || fail "the postmaster abandons a run (exit $rc, lines $(count))"
+fresh; set_stage "$d" review coachman >/dev/null; rc=$?
+[ $rc -eq 0 ] && [ "$(count)" -eq 1 ] && grep -q '"stage": "review"' "$d/manifest.json" \
+  && ok "review is one stage" || fail "review is one stage (exit $rc, lines $(count))"
 
 echo "negative controls"
 fresh; set_stage "$d" bootstrapped coachman >/dev/null; set_stage "$d" bootstrapped coachman >/dev/null; rc=$?
@@ -115,6 +131,20 @@ fresh; set_stage "$d" bootstrapped coachman >/dev/null; set_stage "$d" bootstrap
 fresh; cp "$d/manifest.json" "$tmp/before.json"; set_stage "$d" reviewing coachman >/dev/null 2>&1; rc=$?
 [ $rc -eq 2 ] && [ "$(count)" -eq 0 ] && cmp -s "$d/manifest.json" "$tmp/before.json" \
   && ok "an unknown stage is refused, and nothing changes" || fail "an unknown stage is refused, and nothing changes (exit $rc)"
+for old in review-style review-bug review-security; do
+  fresh; cp "$d/manifest.json" "$tmp/before.json"; set_stage "$d" "$old" coachman >/dev/null 2>&1; rc=$?
+  [ $rc -eq 2 ] && [ "$(count)" -eq 0 ] && cmp -s "$d/manifest.json" "$tmp/before.json" \
+    && ok "$old is refused, and nothing changes" || fail "$old is refused, and nothing changes (exit $rc)"
+done
+for t in done abandoned; do
+  fresh; cp "$d/manifest.json" "$tmp/before.json"; set_stage "$d" "$t" coachman >/dev/null 2>&1; rc=$?
+  [ $rc -eq 3 ] && [ "$(count)" -eq 0 ] && cmp -s "$d/manifest.json" "$tmp/before.json" \
+    && ok "$t from the coachman is refused, and nothing changes" || fail "$t from the coachman is refused, and nothing changes (exit $rc)"
+done
+fresh; set_stage "$d" abandoned postmaster >/dev/null; cp "$d/manifest.json" "$tmp/before.json"
+set_stage "$d" synthesis coachman >/dev/null 2>&1; rc=$?
+[ $rc -eq 3 ] && [ "$(count)" -eq 1 ] && cmp -s "$d/manifest.json" "$tmp/before.json" \
+  && ok "the coachman cannot move a run out of abandoned" || fail "the coachman cannot move a run out of abandoned (exit $rc)"
 rm -- "$d/manifest.json"; set_stage "$d" bootstrapped coachman >/dev/null 2>&1; rc=$?
 [ $rc -eq 1 ] && ok "no manifest is refused" || fail "no manifest is refused (exit $rc)"
 
