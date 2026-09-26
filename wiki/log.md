@@ -1,12 +1,20 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-26] ingest | a review round's time limit
+
+The review loop page now says what happens to a reviewer still running when its round reaches
+the time limit: it is stopped and recorded DEGRADED, with timeout as its cause. The limit moves
+from the runbook into the config as `review.round_timeout_seconds`, and keeps its default of
+2400 seconds, the limit a round had when it ran one lens. The `degrade` lines will show whether
+round 1, which runs every lens at once, needs more. The standing stays `claimed`.
 
 ## [2026-09-25] ingest | review runs as one loop
 

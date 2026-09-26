@@ -435,10 +435,10 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    Then do every open lens's preparation, and launch every reviewer under every open lens in the
    same breath, each through its lens's launch step. The wrapper clears the marker first and
    lands it, naming the round, the lens and the lane, when the process exits, whatever its exit;
-   the command ends in the wait for the whole round. An interrupted round is re-run whole:
+   the command ends in the wait for the whole round. An interrupted round is torn down, as
+   below, and re-run whole:
 
    ```sh
-   N=0
    for LENS in <open lenses>; do
      for L in <reviewer lanes>; do
        DEST=<repo>/.worktrees/<TICKET>-rev-$LENS-$L
@@ -446,10 +446,9 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
        ( <the launch step of $LENS, for "$L" in "$DEST"> \
            > <dispatch>/logs/review-r<round>-$LENS-$L.jsonl 2> <dispatch>/logs/review-r<round>-$LENS-$L.err;
          touch <dispatch>/logs/review-r<round>-$LENS-$L.done ) &
-       N=$((N + 1))
      done
    done
-   scripts/wait-for-markers.sh <dispatch>/logs 'review-r<round>-*.done' "$N" 2400
+   scripts/review-round.sh wait <dispatch> <round> <repo> "<open lenses>" "<reviewer lanes>"
    ```
 
    Record every reviewer's thread id in its `review-harvest` line.
@@ -468,26 +467,46 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
 
    **THE WAIT GOES IN THE SAME COMMAND AS THE LAUNCH. Never end a turn between launching a
    round and collecting it.** The launch above ends by blocking on every marker of the round,
-   every lens together, in one command that cannot return while the round is outstanding.
-   The script proves its reader both ways before polling, and names what never arrived on a
-   timeout. Every round has its own markers (`r1`, `r2`, ...), so a later round can never
+   every lens together, in one command that returns only when every marker is in or the
+   round's time limit has passed: `review.round_timeout_seconds` in the config the run
+   recorded in `run.json`, or the default `config.example.toml` gives. The script proves its
+   readers both ways before trusting them, and names every reviewer with no marker at the
+   limit. Every round has its own markers (`r1`, `r2`, ...), so a later round can never
    collect an earlier round's files. An unbounded wait and an absent wait fail the same way.
    Same rule for the stage 1 workhorses.
 
+   **On `WAIT-TIMEOUT` (exit 3), close the round without the reviewers that had not finished.**
+   The script has recorded each one in `run-log.md` as `<lane> <lens>: DEGRADED, timeout` and in
+   its `degrade` line, and stopped everything running in its scratch. Harvest the others, and
+   treat each timed-out lane as a review lane killed mid-run (hard rules): DEGRADED on the
+   checkpoint card, with `timeout` as its cause, and back in the next round. A round in which
+   no lane actually reviewed under a gating lens is never the last: that lens runs again in
+   the next round, which counts toward the cap. Exit 1 is a round that was not collected, and
+   the output says why: tear it down and re-run it whole.
+
    **At harvest, classify every lane under every lens REVIEWED or DEGRADED.** A lane that
-   never launched, died and was not recovered, or ran without tool use is DEGRADED: record it,
-   and do not count its verdict toward closing the round (hard rules, below).
+   never launched, died and was not recovered, had not finished at the time limit, or ran
+   without tool use is DEGRADED: record it, and do not count its verdict toward closing the
+   round (hard rules, below).
 
    **After harvesting the round, and BEFORE staging any fix**, check each scratch with
    `git -C <scratch> diff --name-only`, not `status --porcelain` (scratches are expected to be
    dirty with untracked build output). Any modified tracked file is a finding about the LANE:
    log it with the file list and do not count that lane's verdict until it is understood. Then
-   remove the scratches; `git worktree remove --force` is sanctioned HERE ONLY, since a detached
-   scratch never holds work and its contents were just recorded. Also assert the synthesis
-   worktree itself is still clean. With every lane on a copy, nothing should touch it during a
-   review round; a dirty synthesis tree is an escape and an incident to investigate before
-   continuing. When later staging fixes in the synthesis worktree, prefer a targeted
-   `git add <paths>` over `git add -A`.
+   tear the round down. The script stops whatever still runs in each scratch before it removes
+   it, and logs `teardown` for each:
+
+   ```sh
+   scripts/review-round.sh teardown <dispatch> <round> <repo> "<open lenses>" "<reviewer lanes>"
+   ```
+
+   It is the one place `git worktree remove --force` runs, since a detached scratch never holds
+   work and its contents were just recorded. A scratch it leaves in place (exit 1, named with
+   its reason) is never removed by hand. Also assert the synthesis worktree itself is still
+   clean. With every lane on a copy, nothing should touch it during a review round; a dirty
+   synthesis tree is an escape and an incident to investigate before continuing. When later
+   staging fixes in the synthesis worktree, prefer a targeted `git add <paths>` over
+   `git add -A`.
 3. **Dedup across lenses and adversarially verify** every finding against the code before it
    reaches the card or the diff; discard what does not hold. A defect reported under more than
    one lens is one finding, and it keeps every lens that reported it. A finding is gating or
@@ -703,9 +722,10 @@ logical order, not file safety: check the file surfaces before mass-launching.
 - **A lane that did not review at full strength is lame (DEGRADED), and a DEGRADED CLEAN is NOT a
   clean lane verdict. This is a MUST, not advisory: a coachman may not exercise judgment to
   skip it.** A lane is DEGRADED for a round whenever it did not read that round's snapshot
-  with tool use: it never launched (a provider wall, a usage limit, a quota wall, a spawn
-  misfire, a stale session lock), it died mid-round and was not recovered, or it ran in a
-  preloaded-diff single-turn fallback with no tool use. Three consequences, all mandatory:
+  with tool use and return a verdict: it never launched (a provider wall, a usage limit, a
+  quota wall, a spawn misfire, a stale session lock), it died mid-round and was not recovered,
+  it was still running at the round's time limit, or it ran in a preloaded-diff single-turn
+  fallback with no tool use. Three consequences, all mandatory:
   **(1)** write it in `run-log.md` for that round as `<lane> <lens>: DEGRADED, <cause>`, quoting
   the provider's own error string where there is one; **(2)** carry the word DEGRADED onto the
   checkpoint card AND the ship card, with the cause and how many lanes actually reviewed under
