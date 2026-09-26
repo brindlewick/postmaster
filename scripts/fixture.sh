@@ -99,6 +99,11 @@ make_and_file() {  # make_and_file <dest> <ticket> <owner/name, or empty for the
   fi
   runs=$HOME/.postmaster/runs/$(basename "$dest")
   [ -e "$runs" ] && { echo "fixture: $runs already holds runs of a project named $(basename "$dest"); choose another name" >&2; return 1; }
+  case $(basename "$dest") in   # a run's records are kept by the repo's name
+    "$(basename "$TOOL")"|"$(basename "$(git -C "$TOOL" worktree list --porcelain | sed -n '1s/^worktree //p')")")
+      echo "fixture: $(basename "$dest") is this repo's name, so its runs would share this repo's run records; choose another name" >&2
+      return 1 ;;
+  esac
   if [ -z "$nwo" ]; then
     login=$(gh api user --jq .login 2>/dev/null) && [ -n "$login" ] \
       || { echo "fixture: gh is not logged in, so the default GitHub repo is unknown; name one with --github <owner/name>" >&2; return 1; }
@@ -576,6 +581,8 @@ out=$(fresh_new "$tmp/app-$first/nested" "$first"); rc=$?
 mkdir -p "$tmp/home/.postmaster/runs/taken"
 out=$(fresh_new "$tmp/runs/taken" "$first"); rc=$?
 [ $rc -eq 1 ] && [ ! -e "$tmp/runs/taken" ] && ok "a name that already has runs is refused" || fail "a name that already has runs is refused (exit $rc)" "$out"
+out=$(fresh_new "$tmp/runs/$(basename "$TOOL")" "$first"); rc=$?
+[ $rc -eq 1 ] && [ ! -e "$tmp/runs/$(basename "$TOOL")" ] && ok "a name that is this repo's is refused" || fail "a name that is this repo's is refused (exit $rc)" "$out"
 out=$(fresh_new "$tmp/runs/nosuch" no-such-ticket); rc=$?
 [ $rc -eq 1 ] && [ ! -e "$tmp/runs/nosuch" ] && ok "an unknown ticket is refused" || fail "an unknown ticket is refused (exit $rc)" "$out"
 touch "$FIXTURE_STUB/no-board"; rm -f -- "$FIXTURE_STUB/title"
