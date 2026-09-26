@@ -16,8 +16,9 @@ file change together, and a form the script refuses (muse; agy resume) is a form
 not recorded yet.
 
 Every lane runs unrestricted. Its containment is its worktree (`coachman.md`, Lane capability),
-so the bypass form below is passed on every launch AND every resume. Nothing in the flow depends
-on one session messaging another; the postmaster polls files.
+so the bypass form below is passed on every launch AND every resume. The interactive postmaster
+runs unrestricted too, in its harness's interactive form (below). Nothing in the flow depends on
+one session messaging another; the postmaster polls files.
 
 **Different CLIs, different output-format flags. Never copy one into another.**
 
@@ -182,6 +183,24 @@ cd <wt> && pi --mode json --approve --model <provider/model> \
   its thread id appears and its resume form.** Fill those in from `muse --help` and a trial
   run before configuring a lane on it; the probe lists it so the gap is visible, not so it is
   chosen.
+
+## Interactive form: the postmaster
+
+The postmaster is the one interactive session (`SKILL.md` spawns it through `host.sh spawn`).
+It runs in its harness's bypass mode, like every launch, named for its project:
+
+| harness | interactive form | checked here |
+|---|---|---|
+| claude | `claude --model <model> --effort <effort> --name "<name>" --dangerously-skip-permissions` | yes |
+| pi | `pi --model <provider/model> --thinking <effort> --name "<name>" --approve`; pi has no permission prompts | flags from its help |
+| codex | `codex -m <model> -c model_reasoning_effort="<effort>" --dangerously-bypass-approvals-and-sandbox` | no |
+| grok | `grok -m <model> --reasoning-effort <effort> --always-approve` | no |
+| agy | `agy --model <model> --dangerously-skip-permissions` | no |
+
+Bypass mode does not skip claude's question, on first start in a folder it has never opened,
+whether to trust it; headless `claude -p` does not ask. The first spawn in a new target stops
+there, and the user answers it in the pane. A row not checked here takes its bypass flag from
+the headless form above; run it once before relying on it.
 
 ## The pane view
 

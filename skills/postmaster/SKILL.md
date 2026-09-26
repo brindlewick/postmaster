@@ -130,18 +130,20 @@ not say; the security lens reviews against them.
    `~/.postmaster/runs/<project>/postmaster/brief.md`: "You are the postmaster for <project>.
    Read `<tool>/skills/postmaster/postmaster.md` first", then the stream paragraph, the project
    profile, `<tool>` and the config path. Start a new interactive session of the postmaster's
-   harness (`team.postmaster` in the config), rooted in the target repo and named
-   `<project> · postmaster` where the harness takes a name (claude: `--name`), and hand it a
-   one-line prompt file that says to read the brief:
+   harness (`team.postmaster` in the config), rooted in the target repo, in the harness's
+   interactive form from `harnesses.md`: its bypass mode, named `<project> · postmaster`. Hand it
+   a one-line prompt file that says to read the brief:
 
    ```sh
-   scripts/host.sh spawn postmaster-<project> <repo> --label "<project> · postmaster" -- <harness> <its flags>
+   scripts/host.sh spawn postmaster-<project> <repo> --label "<project> · postmaster" -- <interactive form>
    scripts/host.sh send postmaster-<project> <prompt-file>
    scripts/host.sh read postmaster-<project>      # it took the message: a new session can drop one
    ```
 
    On Herdr it opens as a tab in the target repo's space, the root of every run's tree; on tmux,
-   as a window in session `postmaster-<project>`. With no host, `spawn` exits 3: launch it
+   as a window in session `postmaster-<project>`. If `spawn` says it is not ready, the harness is
+   asking something on its first start there, such as claude asking whether to trust the folder:
+   the user answers it in the pane, and then the prompt is sent. With no host, `spawn` exits 3: launch it
    headless instead, as `hosts.md` gives under none, and tell the user it answers by resume.
 6. **Report** where to watch it (the space and tab, the tmux session, or with no host its events
    file), the run root, and the brief. Then stop.
