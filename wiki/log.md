@@ -1,12 +1,20 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-26] ingest | a ticket names its turnpikes
+
+A decision page, beside the one on the ticket shape. A ticket now names the turnpikes its run
+passes through: `default` for the style, bug and security reviews, fewer, or `none`, with no
+floor. A turnpike no longer means the gate: the gate runs on every run. The page records why,
+the decisions the ticket left open, and what the ledger will count. Standing `claimed`, since
+no run bears on it yet.
 
 ## [2026-09-25] ingest | a ticket's shape is checked before it is accepted
 

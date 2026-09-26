@@ -144,7 +144,7 @@ everything the coachman needs and nothing it must go and find:
 # Waybill: <TICKET>
 
 ## Ticket
-<the ticket verbatim: problem, acceptance criteria, direction, notes, User journey if it has one>
+<the ticket verbatim: problem, acceptance criteria, direction, turnpikes, notes, User journey if it has one>
 
 ## Project profile
 repo: <abs path>          default branch: <name>       BASE: <sha>
@@ -163,6 +163,7 @@ CHECKPOINT_MODE and MERGE_AUTHORITY come from ship.checkpoint_mode and ship.merg
 dispatch: <abs path of this directory>
 synthesis worktree: <abs path; cut by the postmaster at BASE, the coachman's cwd for every leg>
 tool: <abs path of the postmaster repo; every scripts/ path in the runbooks is relative to it>
+turnpikes: <names, or none: the turnpikes: line scripts/ticket-check.sh prints for the ticket, as it prints it>
 postmaster ruling channel: resume the coachman's thread (harnesses.md) with the ruling as the prompt
 ```
 

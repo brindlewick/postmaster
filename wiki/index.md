@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # postmaster wiki
@@ -47,6 +47,9 @@ Why the design is shaped as it is.
 - [A ticket's shape is checked before it is accepted](concepts/ticket-shape.md): **claimed**.
   A title, the problem, numbered criteria each answerable yes or no, and the user's direction,
   checked by a script before any ticket is dispatched. What is missing is asked of the user.
+- [A ticket names the turnpikes its run passes through](concepts/turnpikes.md): **claimed**.
+  `default` for the style, bug and security reviews, fewer, or `none`, with no floor. The
+  project's gate is not a turnpike and always runs.
 
 ## Sources
 

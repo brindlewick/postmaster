@@ -3,7 +3,7 @@ title: A ticket's shape is checked before it is accepted
 type: concept
 standing: claimed
 sources: []
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # A ticket's shape is checked before it is accepted
@@ -60,3 +60,6 @@ The ticket shape in `skills/postmaster/trackers.md` gains `## Direction`, and
 `scripts/ticket-check.sh` is the shape's executable form. Stage A of
 `skills/postmaster/postmaster.md` runs the check on every ticket before it is accepted, and
 writes back only the user's answer, through an `edit` command added to each tracker adapter.
+
+The shape later gained `## Turnpikes` after `## Direction`:
+[a ticket names the turnpikes its run passes through](turnpikes.md).

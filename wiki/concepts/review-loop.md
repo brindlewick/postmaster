@@ -3,7 +3,7 @@ title: The review loop
 type: concept
 standing: claimed
 sources: []
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # The review loop
@@ -72,3 +72,7 @@ A run has three legs, `synthesis`, `review` and `ship`, where it had five.
 and `scripts/stage.sh` refuses the three review stages it replaces. `[team.coachman_legs]` in
 the config takes `synthesis`, `review` and `ship`, and `scripts/launch.sh` refuses a config
 that names `style`, `bug` or `security`.
+
+Since then, the lenses are the turnpikes a ticket names, all three by default, and a run whose
+ticket names none has no review leg:
+[a ticket names the turnpikes its run passes through](turnpikes.md).

@@ -2,8 +2,8 @@
 
 **You are the COACHMAN for exactly one leg of one ticket.** The postmaster spawned you and left
 a waybill at `<dispatch>/brief.md`. Read it, then the hand-off from the leg before yours, then
-drive this leg the whole way: harness the team, judge their pull, clear the turnpike, and hand
-over proof of delivery to the next leg or to the postmaster.
+drive this leg the whole way: harness the team, judge their pull, pass the waybill's turnpikes
+and the gate, and hand over proof of delivery to the next leg or to the postmaster.
 
 **You never take a second load, never a second leg, and you never stop early.** A run that ends a turn with nothing
 written to disk is indistinguishable from a dead one and will be killed and restarted.
@@ -28,7 +28,7 @@ waybill carries, is `SKILL.md`. You do not need it.
 | `<dispatch>/logs/` | one events stream per lane, and per reviewer lane, lens and round |
 | `<dispatch>/audit/<lane>.md` | per-workhorse digest of its durable record |
 | `<dispatch>/leg-<n>-prompt.txt` | the postmaster's one-paragraph prompt that started leg `n` |
-| `<dispatch>/handoff-<n>.md` | leg `n`'s hand-off, the whole of what leg `n+1` knows |
+| `<dispatch>/handoff-<n>.md` | leg `n`'s hand-off, the whole of what the next leg knows |
 | `<dispatch>/.leg-<n>-done`, `.leg-<n>-exited` | leg `n` finished its hand-off; leg `n`'s process exited |
 | `<repo>/.worktrees/<TICKET>` | synthesis worktree, branch `<TICKET>` |
 | `<repo>/.worktrees/<TICKET>-<lane>` | workhorse worktree, branch `wb/<TICKET>-<lane>` (`wb` for workhorse branch) |
@@ -96,19 +96,24 @@ harness-specific and the flow does not rely on it.
 
 ## Legs and hand-offs
 
-A run is three legs, `synthesis`, `review` and `ship`, each a fresh coachman thread launched
-by the postmaster, so no context outlives a leg and nothing a leg knew survives except what it
-wrote down. The boundaries are the run's own gates:
+A run is up to three legs, `synthesis`, `review` and `ship`, each a fresh coachman thread
+launched by the postmaster, so no context outlives a leg and nothing a leg knew survives except
+what it wrote down. The boundaries are the run's own gates:
 
 | leg | name | covers | ends with |
 |---|---|---|---|
 | 1 | `synthesis` | stage 0, stage 1, checkpoint 1 | `handoff-1.md` |
-| 2 | `review` | stage 2: the style, bug and security lenses in one loop, every round to clean | `handoff-2.md` |
+| 2 | `review` | stage 2: the waybill's review turnpikes as lenses in one loop, every round to clean | `handoff-2.md` |
 | 3 | `ship` | stage 3 and stage 4: gates, preview, QA, the card, the merge on the word, teardown | `handoff-3.md` |
 
-**A leg starts by accepting the hand-off.** Read `brief.md`, this runbook, and
-`handoff-<n-1>.md`; log `handoff-accept`; then act. A decision the hand-off marks
-`do-not-reopen` is reopened only by logging a `note` that says why, before anything else.
+The review leg runs only when the waybill names a turnpike that runs in it; without one, ship
+follows synthesis and starts from `handoff-1.md`. `scripts/turnpikes.sh legs <dispatch>` prints
+the run's legs and the turnpikes each one runs.
+
+**A leg starts by accepting the hand-off.** Read `brief.md`, this runbook, and the previous
+leg's hand-off, which the leg prompt names; log `handoff-accept`; then act. A decision the
+hand-off marks `do-not-reopen` is reopened only by logging a `note` that says why, before
+anything else.
 
 **A leg ends by writing its hand-off, and nothing else counts as ending.** `handoff-<n>.md`
 is current state only, in exactly these sections, none empty; `scripts/handoff-check.sh`
@@ -190,7 +195,7 @@ A workhorse commits incrementally as it goes, never pushes, never reads other br
 
 1. **Read the waybill.** It names the ticket, the project profile (gate command, docs to read
    first, tracker, the project's own risk surfaces), the team (workhorses, reviewers, the coachman),
-   `CHECKPOINT_MODE` and `MERGE_AUTHORITY`.
+   `CHECKPOINT_MODE`, `MERGE_AUTHORITY`, and the turnpikes the run passes through (`turnpikes:`).
 2. **Base pre-flight.** The waybill's BASE is authoritative. The main checkout must be on the
    default branch at BASE (`git -C <repo> rev-parse HEAD` prints BASE) and clean
    (`scripts/check-target.sh <repo>` exits 0). On either failing, stop and escalate rather than
@@ -205,10 +210,11 @@ A workhorse commits incrementally as it goes, never pushes, never reads other br
    <dispatch> bootstrapped`, and add one `lanes` entry per lane, in place, never rewriting the
    file (the postmaster owns `leg`, `base` and `coachman`). Keep thread ids and outcomes current
    at every transition. The stage changes only through `scripts/stage.sh`, in this order:
-   `bootstrapped`, `workhorses-running`, `synthesis`, `checkpoint-1`, `review`, `shipping`,
-   `shipped`; the postmaster sets `done` when it closes the run. Each change is logged, and the
-   run's timings are computed from those lines by `scripts/run-times.sh <dispatch>`. Never
-   delete the manifest. It is the run's history, and the postmaster's poll reads it.
+   `bootstrapped`, `workhorses-running`, `synthesis`, `checkpoint-1`, `review` (in a run with a
+   review leg), `shipping`, `shipped`; the postmaster sets `done` when it closes the run. Each
+   change is logged, and the run's timings are computed from those lines by
+   `scripts/run-times.sh <dispatch>`. Never delete the manifest. It is the run's history, and
+   the postmaster's poll reads it.
 6. **Write each workhorse's brief** to `<dispatch>/<lane>-prompt.txt`: the ticket verbatim, the
    project profile, the docs to read first named explicitly, the `WORKHORSE-SPEC.md` /
    `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract with `workhorse-spec-template.md` in full, the autonomous-defaults rule (decide within-brief questions
@@ -363,9 +369,11 @@ from it.
 
 ## Stage 2 (leg 2): review, every lens in one loop
 
-One loop, in one leg. Each round runs every lens still open, on one snapshot, every reviewer
-lane under each lens as its own process in its own scratch: style, bug and security in round 1,
-then bug and security alone from round 2.
+One loop, in one leg. The lenses are the turnpikes on the review line of `scripts/turnpikes.sh
+legs <dispatch>`, exactly those: a turnpike the waybill does not name never runs, and one it
+names is never skipped. If the script exits 2, escalate with its output. Each round runs every
+lens still open, on one snapshot, every reviewer lane under each lens as its own process in its
+own scratch: every lens in round 1, then the gating lenses alone from round 2.
 [Why the lenses run as one loop](../../wiki/concepts/review-loop.md)
 
 Set the stage first, `scripts/stage.sh <dispatch> review`, then:
@@ -384,8 +392,9 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    a hypothesis, and a test that passes is not evidence until someone has seen it fail for the
    right reason.
 
-   Each entry is the one place for its lens: what its reviewers look for, and its launch step,
-   which step 2 runs for every reviewer lane.
+   Each entry is the one place for its lens, the turnpike of the same name: what its reviewers
+   look for, and its launch step, which step 2 runs for every reviewer lane. A review turnpike
+   with no entry here cannot run: escalate.
    - **Style lens** (advisory, round 1 only): non-mechanical idiom, naming, the project's
      stated paradigm (functional core, immutability, whatever its docs say), abstraction,
      consistency, judged against the project's own style pages and the surrounding code's
@@ -485,19 +494,21 @@ Set the stage first, `scripts/stage.sh <dispatch> review`, then:
    so do not soften it. Where a lane says it verified a finding by execution, re-run its probe
    rather than re-deriving the claim; where it filed a hypothesis, the verification burden is
    yours.
-4. **Apply once per round,** in the synthesis worktree: the verified bug and security
-   findings first, then, in round 1, the style findings that are clearly right. Where fixes
-   from different lenses touch the same code, reconcile them into one change before applying
-   it. Every other style finding is deferred in the hand-off and reaches the ship card's Style
-   residue section, where the user picks at merge time. Then re-run the project's gate.
-5. **Loop until clean.** Round `r+1` runs the bug and security lenses alone, on the fixed
-   diff, with its own markers, each brief updated with the fixes delta and every applied
-   finding, style ones included, as known context, so they closure-check each fix AND hunt new
-   holes the fixes introduced. Done only when a round returns zero new verified findings from
-   the bug or the security lens and every fix verifies closed, so a round that applied any
-   change, a style change included, is never the last. Cap 5 rounds for the whole loop, round
-   1 included, then STOP and escalate with the residue and your read on why it is not
-   converging; this is `CHECKPOINT_MODE`'s sole mid-flow stop in autonomous mode.
+4. **Apply once per round,** in the synthesis worktree: the verified findings of the gating
+   lenses first, then, in round 1 of a loop with a gating lens, the style findings that are
+   clearly right. Where fixes from different lenses touch the same code, reconcile them into
+   one change before applying it. Every other style finding is deferred in the hand-off and
+   reaches the ship card's Style residue section, where the user picks at merge time. Then
+   re-run the project's gate.
+5. **Loop until clean.** Round `r+1` runs the gating lenses alone, on the fixed diff, with its
+   own markers, each brief updated with the fixes delta and every applied finding, style ones
+   included, as known context, so they closure-check each fix AND hunt new holes the fixes
+   introduced. Done only when a round returns zero new verified findings from any gating lens
+   and every fix verifies closed, so a round that applied any change, a style change included,
+   is never the last. A loop with no gating lens is round 1 alone, and applies nothing. Cap 5
+   rounds for the whole loop, round 1 included, then STOP and escalate with the residue and
+   your read on why it is not converging; this is `CHECKPOINT_MODE`'s sole mid-flow stop in
+   autonomous mode.
 
    **ESCALATE ON A REPEATED CLASS, not only on the round cap.** If the same class of defect is
    found in three consecutive rounds, whichever lens found it, each round closing the sites it
@@ -564,6 +575,10 @@ Set the stage first: `scripts/stage.sh <dispatch> shipping`.
 
    **The ship card carries the Style residue,** every advisory finding not applied, one line
    each, for the user to pick from at merge time.
+
+   **The ship card lists the turnpikes the run passed through,** exactly the waybill's, each
+   with the rounds it ran and its result, or `none` when the waybill names none. The gate is on
+   the card as the gate, never as a turnpike.
 
    **The ship card lists EVERY branch the run created and the state of each, not only the one
    carrying the feature.** A branch is part of the ship or it is abandoned; there is no third

@@ -38,20 +38,22 @@ ledger. `note` is the action for anything without its own verb.
    stream touches. The stream may already be ticketed in part.
 2. **Decompose.** One ticket per independently shippable change, in the ticket shape
    (`trackers.md`): a title, the problem or feature, numbered acceptance criteria each
-   answerable yes or no, the direction, and notes. A ticket that changes something a person
-   uses carries a `User journey`. A ticket is dispatchable when its criteria can be tested at
-   the ticket's own interface and its scope names what is out. Anything else is not yet a
-   ticket; it is a question for the user.
+   answerable yes or no, the direction, the turnpikes, and notes. A ticket that changes
+   something a person uses carries a `User journey`. A ticket is dispatchable when its
+   criteria can be tested at the ticket's own interface and its scope names what is out.
+   Anything else is not yet a ticket; it is a question for the user.
 3. **Check every ticket's shape** before you accept it or propose it:
    `scripts/ticket-check.sh <repo> <id>` for a ticket in the tracker, and
    `scripts/ticket-check.sh --body <file> --title "<title>"` for one you drafted. Log
    `ticket-check` with the ticket's id, or the draft's file, as the target, and the exit and
-   the parts named as the detail. Exit 0 accepts the ticket. Exit 1 means it could not be
-   read, and the message says why. Exit 2 names each missing or malformed part on its own
-   line: draft each part from the stream and the ticket's own text, and put the ticket, the
-   check's lines and your drafts to the user together. A direction comes only from the
-   stream, the ticket or the user; where none of them says anything about the approach, ask
-   for one instead of drafting it.
+   the parts named, or the `turnpikes:` line it prints, as the detail. Exit 0 accepts the
+   ticket. Exit 1 means it could not be read, and the message says why. Exit 2 names each
+   missing or malformed part on its own line: draft each part from the stream and the
+   ticket's own text, and put the ticket, the check's lines and your drafts to the user
+   together. A direction comes only from the stream, the ticket or the user; where none of
+   them says anything about the approach, ask for one instead of drafting it. A missing
+   `## Turnpikes` is proposed as `default`, with what `scripts/turnpikes.sh --list` says it
+   stands for; the user may name fewer, others, or `none`.
 4. **Write back the user's answer and nothing else.** Compose the ticket with each part as the
    user gave or approved it and the rest of its text as it was. A ticket in the tracker is
    written with the adapter's `edit` (`trackers.md`), logging `ticket-edit`; a draft is
@@ -88,27 +90,30 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    HEAD` on the default branch: `git -C <repo> worktree add .worktrees/<TICKET> -b <TICKET>
    <sha>`. The coachman's cwd is that worktree from its first leg, so the project's ambient
    context loads for it.
-5. **Write `brief.md`** from the template in `SKILL.md`: the ticket verbatim, the project
-   profile (gate, build, browser suite, docs to read first, tracker, risk surfaces), the team
-   from the config, `CHECKPOINT_MODE` from `ship.checkpoint_mode` and `MERGE_AUTHORITY` from
-   `ship.merge_authority`, either overridden only where the user said so for this run,
-   the dispatch path and `<tool>`.
+5. **Write `brief.md`** from the template in `SKILL.md`: the ticket verbatim, the
+   `turnpikes:` line `scripts/ticket-check.sh <repo> <id>` prints for it on exit 0, copied as
+   printed, the project profile (gate, build, browser suite, docs to read first, tracker, risk
+   surfaces), the team from the config, `CHECKPOINT_MODE` from `ship.checkpoint_mode` and
+   `MERGE_AUTHORITY` from `ship.merge_authority`, either overridden only where the user said
+   so for this run, the dispatch path and `<tool>`.
 6. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. The
    coachman never touches the ticket's state before stage 3.
 
 ## Stage C: dispatch a leg
 
-A run is three legs, `synthesis`, `review` and `ship` (`coachman.md`, Legs). Each leg is a
-fresh coachman thread, launched the same way; the first is launched after the waybill, every
-later one when the previous leg's marker appears.
+A run's legs are the lines `scripts/turnpikes.sh legs <dispatch>` prints: `synthesis` and
+`ship`, with `review` between them when the waybill names a turnpike it runs (`coachman.md`,
+Legs). Each leg is a fresh coachman thread, launched the same way; the first is launched after
+the waybill, every later one when the previous leg's marker appears. Below, `<p>` is the leg
+before leg `<n>` in that list.
 
 1. **Write the leg prompt** to `<runs>/<TICKET>/leg-<n>-prompt.txt`: "You are the coachman
    for leg <n> of <TICKET>. Read `<dispatch>/brief.md`, then `<tool>/skills/postmaster/coachman.md`,
-   then `<dispatch>/handoff-<n-1>.md`" (omit the hand-off for leg 1), plus the one line naming
+   then `<dispatch>/handoff-<p>.md`" (omit the hand-off for leg 1), plus the one line naming
    the leg's job from the legs table. Nothing else: the runbook and the files carry the rest.
 2. **Verify the hand-off before dispatching on it:** `scripts/handoff-check.sh
-   <dispatch>/handoff-<n-1>.md` exits 0. If it exits 2, the previous leg is not finished:
-   remove its `.leg-<n-1>-done` marker, resume it (step 5) with the names of the missing
+   <dispatch>/handoff-<p>.md` exits 0. If it exits 2, the previous leg is not finished:
+   remove its `.leg-<p>-done` marker, resume it (step 5) with the names of the missing
    sections as the prompt, and wait.
 3. **Launch,** in the background, stream to the leg's events file, marker on exit:
 
@@ -150,8 +155,9 @@ Act on the `NEXT` column, run by run, and log every action:
 
 - **RULE:** an escalation is waiting. Stage E.
 - **GATE:** the ship card is complete. Stage F.
-- **DISPATCH:** the leg's `.leg-<n>-done` marker is present. Stage C for leg `n+1`; after leg
-  3, Stage G.
+- **DISPATCH:** the leg's `.leg-<n>-done` marker is present. Stage C for the leg after `n` in
+  `scripts/turnpikes.sh legs <dispatch>`, logging a `note` that names any leg the list leaves
+  out; after the ship leg, Stage G. An exit 2 from the script goes to the user.
 - **REMOUNT:** the leg's process exited (`.leg-<n>-exited`) with no hand-off, escalation or
   card. Read the leg's `.err` file and the stream tail. A quota or provider wall, quoted,
   means the coachman is lame for this leg: log `degrade`, remove the exited marker, and
@@ -168,7 +174,7 @@ Act on the `NEXT` column, run by run, and log every action:
 
 **The takeover prompt** for a fallback coachman, written to `<dispatch>/leg-<n>-takeover.txt`:
 "You take over leg <n> of <TICKET> mid-way. Read `<dispatch>/brief.md`,
-`<tool>/skills/postmaster/coachman.md`, `<dispatch>/handoff-<n-1>.md`, then `run-log.md` and
+`<tool>/skills/postmaster/coachman.md`, `<dispatch>/handoff-<p>.md`, then `run-log.md` and
 `actions.jsonl` for what this leg did before you, then the synthesis worktree's `git log` and
 `git status`. Treat every uncommitted change as unverified. Log `handoff-accept` and finish
 the leg." Launch it with `scripts/launch.sh launch coachman_fallback <cwd> <that file>` and
@@ -203,9 +209,10 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    worktree: the gate command exits 0 unpiped (log `gate` with its exit); every branch the
    card lists exists and is in the state the card says; the SYNTHESIS line in `run-log.md`
    names a contribution or a reason for every lane; every DEGRADED lane on the card matches
-   the `degrade` lines in `actions.jsonl`; the blind acceptance tests are the first commit on
-   the branch, or the Decisions section of `handoff-3.md` carries leg 1's reason for not
-   writing them.
+   the `degrade` lines in `actions.jsonl`; the turnpikes on the card are the waybill's, and
+   `actions.jsonl` has `review-launch` lines under each one the review leg runs and under no
+   other lens; the blind acceptance tests are the first commit on the branch, or the Decisions
+   section of `handoff-3.md` carries leg 1's reason for not writing them.
 2. **Grant or withhold.** `MERGE_AUTHORITY: postmaster` and every check above holds: deliver
    "MERGE GRANTED" by resuming leg 3 (Stage C), log `merge` with `granted`. Any check fails:
    deliver the failure as a ruling by the same resume and log `merge` with `withheld` and the
