@@ -1,5 +1,6 @@
-Five probes, 2026-09-27, Herdr 0.9.1, claude 2.1.283, pi 0.87.0, scratch configs, stand-in model.
-<scratch> is a scratch directory; every agent ran in a space the probe opened and closed.
+Six probes, 2026-09-27, Herdr 0.9.1, claude 2.1.283, pi 0.87.0, scratch configs, stand-in model.
+<scratch> is a scratch directory; every agent ran in a space the probe opened and closed. The sixth
+started no agent.
 
 1. claude's trust question in a git worktree.
    The claude config trusted <scratch>/trusted-parent (projects[...].hasTrustDialogAccepted true).
@@ -57,3 +58,16 @@ Five probes, 2026-09-27, Herdr 0.9.1, claude 2.1.283, pi 0.87.0, scratch configs
    set: each wrote its files under the scratch directory, and status then read "current". The
    modification times of the home directory's claude settings and hook, pi's agent directory and
    codex's config were the same before and after.
+
+6. How claude saves its config.
+   Read from the claude 2.1.283 executable, which bundles proper-lockfile. Its config save takes
+   proper-lockfile's lock on the config file with lockfilePath "<file>.lock", a directory, on the
+   library's defaults: stale once its mtime is 10 s old, refreshed every 5 s by its holder. While
+   the lock is held elsewhere it retries with a backoff; a stale one is removed and taken. Under the
+   lock it re-reads the file, applies its change to what it read, writes the file with mode 0600,
+   and releases the lock.
+   scripts/launch.sh --self-test runs the race this closes, against a scratch config: a session
+   that takes the lock, reads, holds 1.5 s and writes what it read. The trust step, taking the same
+   lock, waited, and both the session's change and the trust entry landed. The trust step as first
+   committed, with no lock, lost its trust entry to that session's write. With the session skipping
+   the lock instead, the trust entry was lost the same way.

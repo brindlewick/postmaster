@@ -197,7 +197,9 @@ in a Herdr pane, and the option meets each need the trial named this way.
   its environment names, is refused with the command that installs it, which is the user's to
   run, since installing one edits that harness's own config. claude's trust question is settled
   before the start by trusting the repository, since in a git worktree a trusted folder above the
-  repository does not count [@trials/live-option/probes.txt].
+  repository does not count, and the entry is written under the lock claude itself takes to save
+  its config, since a writer that skips it can lose a session's save or its own entry
+  [@trials/live-option/probes.txt].
 - **Records.** The thread id is the session the integration reports: claude's id, and the id in
   the name of the file pi's names. The durable record is that session file.
 - **Rulings.** The guard the trial proposed. A ruling travels as a file in the dispatch directory,
@@ -215,7 +217,7 @@ Its sixth criterion, a scored run on issue #37's fixture with the key on, waits 
 
 ## What building it found
 
-Five facts the trial of the same week did not cover [@trials/live-option/probes.txt]:
+Six facts the trial of the same week did not cover [@trials/live-option/probes.txt]:
 
 - **A live agent must not start on its caller's environment.** A claude started with the
   variables a claude session exports to its own tool calls ran its turn and wrote no session
@@ -232,6 +234,8 @@ Five facts the trial of the same week did not cover [@trials/live-option/probes.
 - **Herdr's integration commands follow a harness's config dir** (`PI_CODING_AGENT_DIR`,
   `CLAUDE_CONFIG_DIR`, `CODEX_HOME`), so an integration can be installed into a scratch config
   and the user's own is left alone.
+- **claude saves its config under a lock of its own**, `<file>.lock`, re-reading the file under
+  it, so anything else that writes the file has to take the same lock or lose an update.
 
 ## What would change this page
 

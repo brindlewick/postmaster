@@ -444,7 +444,8 @@ PY
     local e=${3:-$tmp/cc.env}
     { printf '[lanes.one]\nharness = "claude"\nmodel = "lane-model"\nenv_file = "%s"\n\n' "$e"
       printf '[lanes.two]\nharness = "pi"\nmodel = "pi-model"\nenv_file = "%s"\n\n' "$tmp/pa.env"
-      printf '[lanes.three]\nharness = "agy"\nmodel = "agy-model"\n\n[team]\n'
+      printf '[lanes.three]\nharness = "agy"\nmodel = "agy-model"\n\n'
+      printf '[lanes.four]\nharness = "mimo"\nmodel = "prov/mimo-model"\n\n[lanes.five]\nharness = "muse"\nmodel = "muse-model"\n\n[team]\n'
       printf 'coachman = { harness = "claude", model = "coach-model", env_file = "%s" }\n' "$tmp/cc.env"
       printf 'coachman_fallback = { harness = "claude", model = "fallback-model" }\n'
       printf 'postmaster = { harness = "claude", model = "boss-model" }\n\n[team.coachman_legs]\n'
@@ -475,6 +476,8 @@ PY
   refused "key on, and the harness's integration missing from its config dir: refused, naming the command" onbare \
     "CLAUDE_CONFIG_DIR=$tmp/cc-bare herdr integration install claude" form one
   refused "a key that is not true or false is refused" notbool "must be true or false" form one
+  refused "a mimo lane cannot run live: Herdr has no integration for it" on "mimo has no Herdr integration" form four
+  refused "nor can a muse lane" on "muse has no Herdr integration" form five
   out=""; run on live one "$lwt"
   [ $rc -eq 0 ] && [ "$(printf '%s' "$out" | python3 -c 'import json, sys; f = json.load(sys.stdin); print(f["kind"], f["env_file"], " ".join(f["args"]))')" \
     = "claude $tmp/cc.env --model lane-model --dangerously-skip-permissions" ] \
@@ -492,6 +495,49 @@ d = json.load(open(sys.argv[1])); d["projects"] = {sys.argv[2]: {"hasTrustDialog
   python3 -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))["projects"].get(sys.argv[2], {}).get("hasTrustDialogAccepted") is True else 1)' \
     "$tmp/cc/.claude.json" "$repo" 2>/dev/null && ok "in a worktree a trusted folder above the repository counts for nothing: the repository is trusted" \
     || fail "in a worktree a trusted folder above the repository counts for nothing: the repository is trusted"
+  # claude's own save: it takes <config>.lock, reads the config, holds on, writes what it read with
+  # a change of its own, and lets go, refreshing the lock meanwhile. "unlocked" skips the lock.
+  cat > "$tmp/session-save.py" <<'PY'
+import json, os, sys, time
+path, hold, locked = sys.argv[1], float(sys.argv[2]), sys.argv[3] == "locked"
+if locked: os.mkdir(path + ".lock")
+cfg = json.load(open(path))
+open(path + ".read", "w").close()
+end = time.time() + hold
+while time.time() < end:
+    if locked: os.utime(path + ".lock")
+    time.sleep(0.2)
+cfg["numStartups"] = 7
+with open(path, "w") as f: json.dump(cfg, f, indent=2)
+if locked: os.rmdir(path + ".lock")
+PY
+  trusts() {  # trusts <dir>: the scratch claude config trusts it
+    python3 -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))["projects"].get(sys.argv[2], {}).get("hasTrustDialogAccepted") is True else 1)' \
+      "$tmp/cc/.claude.json" "$1" 2>/dev/null
+  }
+  saving() {  # saving <locked|unlocked>: a session's save under way, its read done
+    printf '{"projects": {}}\n' > "$tmp/cc/.claude.json"; rm -f "$tmp/cc/.claude.json.read"
+    python3 "$tmp/session-save.py" "$tmp/cc/.claude.json" 1.5 "$1" & spid=$!
+    while [ ! -e "$tmp/cc/.claude.json.read" ]; do sleep 0.05; done
+  }
+  mkdir -p "$tmp/plain-a" "$tmp/plain-b" "$tmp/plain-c" "$tmp/plain-d"
+  saving locked; run on live one "$tmp/plain-a"; wait "$spid"
+  [ $rc -eq 0 ] && trusts "$(cd "$tmp/plain-a" && pwd -P)" && python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1])).get("numStartups") != 7)' "$tmp/cc/.claude.json" \
+    && ok "a session holding claude's config lock is waited for: its save and the trust entry both land" \
+    || fail "a session holding claude's config lock is waited for: its save and the trust entry both land"
+  saving unlocked; run on live one "$tmp/plain-b"; wait "$spid"
+  ! trusts "$(cd "$tmp/plain-b" && pwd -P)" && ok "control: a session that skips the lock loses the trust entry in the same race" \
+    || fail "control: a session that skips the lock loses the trust entry in the same race"
+  printf '{"projects": {}}\n' > "$tmp/cc/.claude.json"; cp "$tmp/cc/.claude.json" "$tmp/claude-before.json"
+  mkdir "$tmp/cc/.claude.json.lock"
+  ( while [ -d "$tmp/cc/.claude.json.lock" ]; do touch "$tmp/cc/.claude.json.lock" 2>/dev/null; sleep 0.3; done ) & spid=$!
+  envx="HOME=$tmp/home STUB=$tmp/stub POSTMASTER_TRUST_LOCK_WAIT=1"; run on live one "$tmp/plain-c"
+  envx="HOME=$tmp/home STUB=$tmp/stub"; rmdir "$tmp/cc/.claude.json.lock"; wait "$spid"
+  [ $rc -eq 1 ] && case $err in *"stayed locked"*) cmp -s "$tmp/cc/.claude.json" "$tmp/claude-before.json" ;; *) false ;; esac \
+    && ok "a lock held past the wait is refused, and nothing is written" || fail "a lock held past the wait is refused, and nothing is written"
+  mkdir "$tmp/cc/.claude.json.lock"; touch -d '1 minute ago' "$tmp/cc/.claude.json.lock"; run on live one "$tmp/plain-d"
+  [ $rc -eq 0 ] && trusts "$(cd "$tmp/plain-d" && pwd -P)" && [ ! -e "$tmp/cc/.claude.json.lock" ] \
+    && ok "a stale lock is taken over, as claude's own sessions take one over" || fail "a stale lock is taken over, as claude's own sessions take one over"
   carries "live resumes a thread in the harness's interactive resume form" on '"--resume", "T-9", "--model"' live one "$lwt" --resume T-9
   carries "pi's live form resumes by session" on '"--session", "P-1", "--model", "pi-model"' live two "$lwt" --resume P-1
   refused "an agy lane cannot be resumed live: its resume form is not recorded" on "agy resume form is not recorded" live three "$lwt" --resume A-1
@@ -759,7 +805,7 @@ forms
 lane_env() {  # lane_env <command...>: run it with the env file loaded, in a subshell
   ( if [ -n "${ENV_FILE:-}" ]; then set -a; . "$ENV_FILE"; set +a; fi; "$@" )
 }
-integration_of() {  # the name `herdr integration` gives a harness's integration; none for muse
+integration_of() {  # the name `herdr integration` gives a harness's integration; none for muse or mimo
   case $1 in agy) echo antigravity-cli ;; claude|codex|grok|pi) echo "$1" ;; esac
 }
 live_checks() {  # refuse a live agent that Herdr or the harness's integration cannot run
@@ -805,43 +851,65 @@ trust_live() {  # trust $CWD where the harness would otherwise stop at a questio
       # Interactive claude asks whether to trust a folder its config has never trusted, bypass
       # flag or not. In a git worktree what counts is the worktree or its repository's own
       # checkout, never a folder above that; elsewhere, any folder above counts. So trust the
-      # repository, once, unless one of those is trusted already.
-      lane_env python3 - "$CWD" <<'PY' || die "could not mark $CWD trusted in claude's config"
-import json, os, subprocess, sys, tempfile
-cwd = sys.argv[1]
+      # repository, once, unless one of those is trusted already. claude saves this file holding
+      # <file>.lock, a lock directory that goes stale after 10 s unrefreshed, and re-reads the
+      # file under it; so does this, and it waits while a session holds the lock.
+      local lockwait=${POSTMASTER_TRUST_LOCK_WAIT:-30}
+      case $lockwait in ''|*[!0-9]*) die "POSTMASTER_TRUST_LOCK_WAIT must be a whole number of seconds, not '$lockwait'" ;; esac
+      lane_env python3 - "$CWD" "$lockwait" <<'PY' || die "could not mark $CWD trusted in claude's config"
+import json, os, subprocess, sys, tempfile, time
+cwd, lockwait = sys.argv[1], float(sys.argv[2])
 home = os.environ.get("CLAUDE_CONFIG_DIR")
 path = os.path.join(home, ".claude.json") if home else os.path.expanduser("~/.claude.json")
-try:
-    with open(path, encoding="utf-8") as f: cfg = json.load(f)
-except FileNotFoundError:
-    cfg = {}
-projects = cfg.get("projects") if isinstance(cfg.get("projects"), dict) else {}
-def trusted(d):
-    return isinstance(projects.get(d), dict) and projects[d].get("hasTrustDialogAccepted") is True
+lock, stale = path + ".lock", 10.0
 r = subprocess.run(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
                    capture_output=True, text=True)
-root = None
 if r.returncode == 0:
     common = os.path.realpath(r.stdout.strip())
     main = os.path.dirname(common) if os.path.basename(common) == ".git" else common
     root = main if (cwd + "/").startswith(main.rstrip("/") + "/") else cwd
-    if trusted(cwd) or trusted(root): sys.exit(0)
+    counts = [cwd, root]
 else:
-    d = root = cwd
+    root, counts, d = cwd, [], cwd
     while True:
-        if trusted(d): sys.exit(0)
-        up = os.path.dirname(d)
-        if up == d: break
-        d = up
-cfg.setdefault("projects", {})
-if not isinstance(cfg["projects"], dict): sys.exit("projects in %s is not an object" % path)
-cfg["projects"].setdefault(root, {})["hasTrustDialogAccepted"] = True
-mode = os.stat(path).st_mode & 0o777 if os.path.exists(path) else 0o600
-fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix=".claude.json.postmaster.")
-with os.fdopen(fd, "w", encoding="utf-8") as f:
-    json.dump(cfg, f, indent=2); f.flush(); os.fsync(f.fileno())
-os.chmod(tmp, mode); os.replace(tmp, path)
-print("launch: trusted %s in %s" % (root, path), file=sys.stderr)
+        counts.append(d)
+        if os.path.dirname(d) == d: break
+        d = os.path.dirname(d)
+end = time.time() + lockwait
+while True:
+    try:
+        os.mkdir(lock); break
+    except FileExistsError:
+        try:
+            if os.stat(lock).st_mtime < time.time() - stale:
+                os.rmdir(lock); continue           # stale, as claude's own processes judge it
+        except OSError:
+            continue
+        if time.time() >= end:
+            sys.exit("launch: claude's config %s stayed locked for %gs (%s is held); nothing was written"
+                     % (path, lockwait, lock))
+        time.sleep(0.1)
+try:
+    try:
+        with open(path, encoding="utf-8") as f: cfg = json.load(f)
+    except FileNotFoundError:
+        cfg = {}
+    projects = cfg.get("projects") if isinstance(cfg.get("projects"), dict) else {}
+    if any(isinstance(projects.get(d), dict) and projects[d].get("hasTrustDialogAccepted") is True for d in counts):
+        sys.exit(0)
+    cfg.setdefault("projects", {})
+    if not isinstance(cfg["projects"], dict): sys.exit("projects in %s is not an object" % path)
+    cfg["projects"].setdefault(root, {})["hasTrustDialogAccepted"] = True
+    real = os.path.realpath(path)
+    mode = os.stat(real).st_mode & 0o777 if os.path.exists(real) else 0o600
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(real), prefix=".claude.json.postmaster.")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2); f.flush(); os.fsync(f.fileno())
+    os.chmod(tmp, mode); os.replace(tmp, real)
+    print("launch: trusted %s in %s" % (root, path), file=sys.stderr)
+finally:
+    try: os.rmdir(lock)
+    except OSError: pass
 PY
       ;;
     codex)

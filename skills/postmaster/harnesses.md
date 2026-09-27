@@ -385,18 +385,23 @@ live form, a resume included.
 | codex | `-m <model> -c model_reasoning_effort="<effort>" --dangerously-bypass-approvals-and-sandbox` | `resume <id>` first | `codex` | the worktree, as a launch trusts it | its session id | no |
 | grok | `-m <model> --reasoning-effort <effort> --always-approve` | `--resume <id>` first | `grok` | not recorded | its session id | no |
 | agy | `--model <model> --dangerously-skip-permissions --add-dir <wt>` | not recorded: refused | `antigravity-cli` | not recorded | its session id | no |
-| muse | none: it has no integration, so it cannot be a live lane | | | | | |
+| muse | none: it has no Herdr integration, so it cannot be a live lane | | none | | | yes |
+| mimo | none: it has no Herdr integration, so it cannot be a live lane | | none | | | yes |
 
 - **The integration must be installed where the harness reads its config**: the config dir its
   environment names, the lane's env file included (`CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`,
   `CODEX_HOME`), or its default. `launch.sh` reads `herdr integration status` in that environment
   and refuses a lane whose integration is missing, naming the command that installs it, which the
-  user runs.
+  user runs. `herdr integration status` lists none for muse or mimo, so `launch.sh` refuses both.
 - **claude asks whether to trust a folder** on its first interactive start there, bypass flag or
   not. In a git worktree only the worktree or its repository's own checkout counts, never a folder
   above; elsewhere any folder above counts. `launch.sh live` trusts the repository in the lane's
   own claude config, `.claude.json` in `CLAUDE_CONFIG_DIR` or the home directory, unless one that
-  counts is trusted already, and writes it by replacing the file whole.
+  counts is trusted already. claude saves that file holding `<file>.lock`, a lock directory it
+  refreshes every 5 seconds and treats as stale after 10, and re-reads the file under it; the
+  trust step takes the same lock around its read, its change and its replace, waits up to
+  `POSTMASTER_TRUST_LOCK_WAIT` seconds (30) while a session holds it, and takes over a stale one as
+  claude does.
 - **The thread id comes from the session report**, through `launch.sh session`, which also names
   the harness's session record: claude keeps it in `projects/<path>/<id>.jsonl` under its config
   dir, `<path>` being the worktree's path with every character but a letter or a digit replaced

@@ -1,17 +1,17 @@
 ---
 kind: trial
-subject: The live option of issue #67 on Herdr 0.9.1, and five facts building it turned on
+subject: The live option of issue #67 on Herdr 0.9.1, and six facts building it turned on
 date: 2026-09-27
 ---
 
 # Method
 
 **Question.** Does the live option behave as issue #67's acceptance criteria say, on a running
-Herdr server with real harnesses? And five facts the build turned on, which the trial of the
+Herdr server with real harnesses? And six facts the build turned on, which the trial of the
 same week, `herdr-agent-lifecycle`, did not cover: how claude's trust question treats a git
 worktree, where claude keeps a long path's session record, what claude does when it inherits a
-claude session's variables, when Herdr will start an agent in a pane, and where Herdr's
-integration commands look for a harness's config.
+claude session's variables, when Herdr will start an agent in a pane, where Herdr's
+integration commands look for a harness's config, and how claude saves its config.
 
 **Versions.** Herdr 0.9.1, pi 0.87.0, claude 2.1.283. Herdr's pi integration v9 and claude
 integration v10.
@@ -46,6 +46,8 @@ showed is in `probes.txt`, with the scratch paths written as `<scratch>`.
    minimal one; and the same with a process substitution on the script's exec.
 5. `herdr integration status` and `herdr integration install` with each harness's config dir set
    to a scratch directory.
+6. How claude saves its config file, read from its executable, and the race a writer that skips
+   claude's lock loses, run by `scripts/launch.sh --self-test`.
 
 **Not established here.** codex, grok and agy as live agents: their forms are from their help
 and the headless forms, not run. A real model, a real turn of many minutes, or a whole run: the
