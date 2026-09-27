@@ -23,7 +23,7 @@ kept current, rather than re-derived from scratch each time somebody asks.
 | layer | what it is | who writes it |
 |---|---|---|
 | `<project>/.postmaster/` | where every run's full record lives, harness logs included; gitignored in its own project | every run, automatically |
-| `raw/` | the evidence these pages cite: promoted runs, trials and captures; never edited, and committed so a citation can be followed ([the contract](../raw/README.md)) | ingest, by decision |
+| `raw/` | the evidence these pages cite: promoted runs, trials and captures; never edited except to redact something private, and committed so a citation can be followed ([the contract](../raw/README.md)) | ingest, by decision |
 | `wiki/` | compiled pages, revised freely, every claim cited | ingest and query |
 | `wiki/log.md` | append-only record of every operation | every operation |
 
