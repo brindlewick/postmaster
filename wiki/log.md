@@ -1,12 +1,21 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-27] ingest | each project defines how a change to it is verified
+
+A page in the Decisions area. A project declares its checks in `.postmaster/project.toml`, or
+gets defaults found by discovery: the gate always, then a command-line app's ticket examples, a
+web app's browser suite and User journey, or a library's tests through its package name. A run
+records its checks at dispatch; workhorses run them before they report, and the coachman runs
+them on each branch and on the synthesis. The page says what the defaults cover and what they do
+not. Standing `claimed`, since no run bears on it yet.
 
 ## [2026-09-26] ingest | a run keeps the config it started with
 

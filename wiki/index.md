@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # postmaster wiki
@@ -62,6 +62,9 @@ Why the design is shaped as it is.
 - [A run keeps the config it started with](concepts/run-config.md): **claimed**. Every launch
   and resume in a run reads the config recorded at dispatch, so no lane changes part-way
   through. A change to the config reaches the next run.
+- [Each project defines how a change to it is verified](concepts/verification.md): **claimed**.
+  A project declares its checks or gets defaults by discovery; every workhorse runs them before
+  it reports, and the coachman runs them again on each branch and on the synthesis.
 
 ## Sources
 
