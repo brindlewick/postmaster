@@ -32,21 +32,33 @@ How each agent CLI really behaves, as distinct from what its documentation says.
 
 ## Trackers and tooling
 
-What the services and CLIs postmaster depends on actually do. Nothing yet.
+What the services and CLIs postmaster depends on actually do.
+
+- [Herdr and headless launches](concepts/herdr-headless-launches.md): **settled**, for claude.
+  Left to itself Herdr shows a working headless claude as idle, and a launch that inherits its
+  caller's pane reports into it; the view is true when each launch owns its pane and the host
+  reports its state.
+- [Herdr reads most agents' state from the screen](concepts/herdr-agent-states.md):
+  **settled**, for Herdr 0.9.1. A settled state from its waits does not prove a turn finished.
 
 ## Decisions
 
 Why the design is shaped as it is.
 
-- [The review loop](concepts/review-loop.md): **claimed**. Style, bug and security review run
-  as one loop in one leg, so each round's fixes are re-reviewed by both gating lenses in the
-  next. It should also take fewer rounds.
 - [The workhorse spec](concepts/workhorse-spec.md): **claimed**. Each workhorse drafts its
   own, which keeps the workhorses independent of each other and of the coachman, and makes
   each run auditable.
 - [A ticket's shape is checked before it is accepted](concepts/ticket-shape.md): **claimed**.
   A title, the problem, numbered criteria each answerable yes or no, and the user's direction,
   checked by a script before any ticket is dispatched. What is missing is asked of the user.
+- [The review loop](concepts/review-loop.md): **claimed**. Style, bug and security review run
+  as one loop in one leg, so each round's fixes are re-reviewed by both gating lenses in the
+  next. It should also take fewer rounds.
+- [Live agents against markers and resumes](concepts/live-agents.md): **claimed**. Headless
+  stays the default and live agents become an option; what it would take to change the default.
+- [A skill is a link to the postmaster repo, never a copy](concepts/skill-links.md):
+  **claimed**. Each skill is linked from a harness's own skills folder to the main checkout, and
+  a session finds the repo from that link. Five harnesses were tried, and each loads a linked skill.
 - [A run keeps the config it started with](concepts/run-config.md): **claimed**. Every launch
   and resume in a run reads the config recorded at dispatch, so no lane changes part-way
   through. A change to the config reaches the next run.

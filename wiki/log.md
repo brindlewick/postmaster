@@ -16,6 +16,62 @@ change a lane part-way through, or hand one harness's thread id to another. The 
 what that costs: a fix to the config waits for the next run, and an env file's contents are
 still read at each launch. Standing `claimed`, since no run bears on it yet.
 
+## [2026-09-26] ingest | a skill is a link to the postmaster repo, never a copy
+
+Third page in the Decisions area, with a trial behind its narrower fact. Each skill is installed
+as a link from a harness's user-level skills folder to the main checkout, never as a copy, and a
+session finds the repo from that link. The trial asked Claude Code, pi, MiMo Code, codex and
+Muse Code, with a temporary HOME, which skills they loaded: each loads a linked skill from each
+folder it documents, and none lists or warns about a link that is missing or points nowhere. The page
+records why the one step that finds the repo is a line in `SKILL.md` rather than a script, and
+why Antigravity is not linked yet. Standing `claimed`: the decision is the user's, issue #15.
+
+## [2026-09-26] ingest | follow-up: claude's trust question, and claude killed mid-turn
+
+Two checks added to `raw/trials/herdr-agent-lifecycle/`. Headless claude answered in a
+directory its config had never trusted, with or without its bypass flag, while interactive claude
+stopped at the trust question even with it. A claude killed mid-turn was reported done, as pi
+had been, and a pane where one died mid-turn held the next start in `working` until its screen
+was cleared. The Herdr page widens its kill finding to claude and adds the restart finding; the
+live-agents page adds the bypass form and a cleared pane to what the option needs. No standing
+changed.
+
+## [2026-09-26] query | headless stays the default; live agents become an option
+
+Asked whether headless runs are the better arrangement. On the trial, yes: a headless lane
+exits about as soon after its last reply as Herdr notices a live one finish, the rest of the
+marker's delay is a poll that can be shortened, and Herdr's settled states can mislead.
+Decided: lanes and coachman legs stay headless, the postmaster stays the one interactive agent,
+Herdr hosts every run for observability, and live agents become a config option, off by
+default. The live-agents page records the decision, keeps its measurement as what would change
+the default, and lists what the option needs. Its standing stays `claimed`.
+
+## [2026-09-26] ingest | Herdr's agent states, and live agents against markers
+
+A trial of Herdr 0.9.1 with pi 0.87.0 and claude 2.1.283 against a stand-in model, recorded in
+`raw/trials/herdr-agent-lifecycle/`. Two new pages. The first, under trackers and tooling,
+records what Herdr documents against what it does: most harnesses' states are read from the
+screen, a separate wait can return the previous turn's state, and a pi agent killed mid-turn
+was reported done. It is `settled` for that version. The second states issue #16's claim at
+`claimed`, with its four measures, the control, a measurement on issue #37's fixture, the
+decision rule, and what would follow for the coachman contract. No existing standing changed.
+
+## [2026-09-26] ingest | Herdr shows a headless launch truthfully only when it owns its pane
+
+First page on a service the flow depends on. A trial against Herdr 0.9.1 and claude 2.1.283,
+run twice: left to itself Herdr shows a working headless claude as idle; a closing `idle` report
+is ignored once an agent has run in the pane, and `release-agent` is what ends a reported state;
+claude's Herdr integration reports into whatever pane `HERDR_PANE_ID` names; and a headless
+harness does not title its pane. Settled on that trial, for claude only. It shaped
+`scripts/host.sh` and `skills/postmaster/hosts.md`, issue #10.
+
+## [2026-09-26] lint | the review loop's cap is three rounds
+
+The review loop's round cap goes from five rounds to three, by the user's decision, after #39's
+own review ran four rounds without a clean one and stopped on the repeated-class rule. It holds
+until #59, the research on what should end an AI review loop, reports. `coachman.md` and the
+decision page now say three.
+
 ## [2026-09-25] ingest | review runs as one loop
 
 A decision page. Style, bug and security review no longer run one after another in three legs.
