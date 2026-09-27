@@ -345,9 +345,9 @@ fi
 # --- self-test ----------------------------------------------------------------------------
 # read and edit run for real, against a stub gh first on PATH: it answers the queries from
 # canned files and records every issue edit, so nothing reaches GitHub.
-SELF="$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
+SELF="$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)/$(basename -- "$0")"
 tmp=$(mktemp -d) || exit 1
-trap 'rm -r -- "$tmp" 2>/dev/null' EXIT
+trap 'rm -r -- "$tmp" </dev/null 2>/dev/null' EXIT
 S="$tmp/stub"; mkdir -p "$tmp/bin" "$S" || exit 1
 cat > "$tmp/bin/gh" <<'GH'
 #!/usr/bin/env bash
