@@ -66,9 +66,10 @@ if [ "${1:-}" = --self-test ]; then
   rawfix() {  # rawfix <name> <[team.coachman_legs] body, \n-separated>
     fixture "$1"; printf '%b' "$2" >> "$tmp/$1.toml"
   }
-  # The codex resume form: a codex stub, lane one and the coachman on codex, and a check on
-  # the stub's exact arguments, since the form itself is what the controls test.
-  printf '#!/bin/sh\necho "$@"\n' > "$tmp/bin/codex" && chmod +x "$tmp/bin/codex"
+  # The codex forms: a codex stub that prints the directory it runs in and then each argument
+  # on its own line, lane one and the coachman on codex, a repo with a branch and a detached
+  # worktree of it, and a check on the stub's exact output, since the form is what is tested.
+  printf '#!/bin/sh\nprintf "%%s\\n" "$PWD" "$@"\n' > "$tmp/bin/codex" && chmod +x "$tmp/bin/codex"
   codexfix() {  # codexfix <name> <lane one's keys, \n-separated>
     { printf '[lanes.one]\nharness = "codex"\n%b\n\n[team]\n' "$2"
       printf 'coachman = { harness = "codex", model = "coach-model" }\n\n[team.coachman_legs]\n'
@@ -78,11 +79,18 @@ if [ "${1:-}" = --self-test ]; then
   codexfix codex 'model = "lane-model"\neffort = "high"'
   codexfix codex-noeffort 'model = "lane-model"'
   codexfix codex-nomodel 'effort = "high"'
-  runs_as() {  # runs_as <label> <fixture> <the harness's exact arguments> <args...>
+  printf -- '- Keep going, then stop.\n' > "$tmp/ruling.txt"
+  printf 'Keep going, then stop.\n' > "$tmp/brief.txt"
+  git init -q -b main "$tmp/cx" && git -C "$tmp/cx" -c user.name=t -c user.email=t@example.invalid \
+    commit -q --allow-empty -m init && git -C "$tmp/cx" worktree add -q --detach "$tmp/cx-detached" \
+    || { echo "self-test: cannot make the codex fixture repo"; exit 1; }
+  lines() { printf '%s\n' "$@"; }
+  runs_as() {  # runs_as <label> <fixture> <the stub's exact output> <args...>
     local label=$1 f=$2 want=$3; shift 3; run "$f" "$@"
     [ $rc -eq 0 ] && [ "$out" = "$want" ] && ok "$label" || fail "$label"
   }
   CODEX_BYPASS=--dangerously-bypass-approvals-and-sandbox
+  CODEX_HIGH='model_reasoning_effort="high"'
   fixture legs synthesis review ship
   fixture none
   for k in style bug security; do fixture "old-$k" review "$k"; done
@@ -183,12 +191,23 @@ PY
   runs_on "a lane launches on a config the coachman refuses" old-bug lane-model form one
   runs_on "a launch with --leg synthesis runs on the synthesis entry" legs synthesis-model launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg synthesis
   runs_on "a resume with --leg review runs on the review entry" legs review-model resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt" --leg review
-  runs_as "a codex resume runs on its lane's model and effort, streams JSON and writes -o" codex \
-    "exec resume T-1 --json -o $tmp/last.md -m lane-model -c model_reasoning_effort=\"high\" $CODEX_BYPASS Continue." \
-    resume one "$tmp/wt" T-1 "$tmp/prompt.txt" --last "$tmp/last.md"
+  runs_as "a codex resume runs in its worktree on its lane's model and effort, streams JSON, writes -o, and passes a prompt that starts with -" codex \
+    "$(lines "$tmp/wt" exec resume T-1 --json -o "$tmp/last.md" -m lane-model -c "$CODEX_HIGH" "$CODEX_BYPASS" -- '- Keep going, then stop.')" \
+    resume one "$tmp/wt" T-1 "$tmp/ruling.txt" --last "$tmp/last.md"
   runs_as "a codex coachman resumes with --leg review on the review entry's model and effort" codex \
-    "exec resume T-1 --json -m review-model -c model_reasoning_effort=\"medium\" $CODEX_BYPASS Continue." \
-    resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt" --leg review
+    "$(lines "$tmp/wt" exec resume T-1 --json -m review-model -c 'model_reasoning_effort="medium"' "$CODEX_BYPASS" -- '- Keep going, then stop.')" \
+    resume coachman "$tmp/wt" T-1 "$tmp/ruling.txt" --leg review
+  envx="HOME=$tmp/home"   # a codex launch marks its worktree trusted in $HOME/.codex
+  runs_as "a codex launch on a branch runs with -C and --json, and no --skip-git-repo-check" codex \
+    "$(lines "$tmp/cx" exec -C "$tmp/cx" --json -m lane-model -c "$CODEX_HIGH" "$CODEX_BYPASS" 'Keep going, then stop.')" \
+    launch one "$tmp/cx" "$tmp/brief.txt"
+  runs_as "a codex launch in a detached worktree adds --skip-git-repo-check" codex \
+    "$(lines "$tmp/cx-detached" exec -C "$tmp/cx-detached" --json -m lane-model -c "$CODEX_HIGH" "$CODEX_BYPASS" --skip-git-repo-check 'Keep going, then stop.')" \
+    launch one "$tmp/cx-detached" "$tmp/brief.txt"
+  envx=""
+  runs_as "form shows the codex launch" codex \
+    "cd <cwd> && codex exec -C <cwd> --json -m lane-model -c model_reasoning_effort=\\\"high\\\" $CODEX_BYPASS \$(cat <prompt-file>) " \
+    form one
   runs_on "the fallback resumes on its own model, with no --leg" legs fallback-model resume coachman_fallback "$tmp/wt" T-1 "$tmp/prompt.txt"
   runs_on "form with no --leg shows team.coachman" legs coach-model form coachman
   carries "a lane's env file reaches the harness's environment" envfile "probe=reached" launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg review
@@ -241,8 +260,8 @@ PY
   done
   refused "a codex lane with no model is refused, and nothing resumes on codex's default" codex-nomodel "has no model" resume one "$tmp/wt" T-1 "$tmp/prompt.txt"
   runs_as "a codex resume with no effort and no --last passes neither -c nor -o" codex-noeffort \
-    "exec resume T-1 --json -m lane-model $CODEX_BYPASS Continue." \
-    resume one "$tmp/wt" T-1 "$tmp/prompt.txt"
+    "$(lines "$tmp/wt" exec resume T-1 --json -m lane-model "$CODEX_BYPASS" -- '- Keep going, then stop.')" \
+    resume one "$tmp/wt" T-1 "$tmp/ruling.txt"
   refused "resuming the coachman with no --leg is refused, and nothing runs" legs "coachman needs --leg" resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt"
   refused "launching the coachman with no --leg is refused, and nothing runs" legs "coachman needs --leg" launch coachman "$tmp/wt" "$tmp/prompt.txt"
   refused "inside a run with no run.json, a resume is refused though the live config would serve, and nothing runs" legs "no run.json in $tmp/no-record" resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt" --leg review --run "$tmp/no-record"
@@ -383,8 +402,10 @@ fi
 cmd=()
 case $HARNESS in
   codex)
-    # A resume takes the launch's flags but -C, which `codex exec resume` refuses. Without -m
-    # and the effort it runs on codex's configured default, not on the thread's own model.
+    # A resume takes the launch's flags but -C and --skip-git-repo-check, and runs in the
+    # directory this script enters. Without -m and the effort it runs on codex's configured
+    # default, not on the thread's own model. `--` stops a prompt that starts with - from being
+    # read as a flag.
     if [ "$CMD" = resume ]; then cmd=(codex exec resume "$THREAD" --json)
     else cmd=(codex exec -C "$CWD" --json); fi
     [ -n "$LAST" ] && cmd+=(-o "$LAST")
@@ -394,6 +415,7 @@ case $HARNESS in
     if [ "$CMD" = launch ] && ! git -C "$CWD" symbolic-ref -q HEAD >/dev/null 2>&1; then
       cmd+=(--skip-git-repo-check)   # a detached scratch
     fi
+    if [ "$CMD" = resume ]; then cmd+=(--); fi
     cmd+=("$PTEXT") ;;
   grok)
     if [ "$CMD" = resume ]; then cmd=(grok --resume "$THREAD" -p "$PTEXT")
