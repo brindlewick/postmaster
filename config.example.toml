@@ -27,6 +27,12 @@ harness = "claude"
 model = "deepseek-v4.1-flash[1m]"
 env_file = "~/.postmaster/lanes/deepseek.env"   # ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN
 
+[lanes.mimo]
+harness = "mimo"                                # MiMo Code; its model is provider/model
+model = "<plan-provider>/mimo-v2.6-pro"         # the provider id of your key's plan
+effort = "high"                                 # MiMo V2.6 Pro's variants are low, medium, high
+env_file = "~/.postmaster/lanes/mimo.env"       # XIAOMI_API_KEY=<key>
+
 # The team for a run. At least two workhorses from different vendors. Reviewers are lanes too, the
 # workhorses by default; a third lane of another family may be added. The coachman and its fallback
 # are never a model that runs as a lane in the same run, and both need a harness with a
@@ -39,9 +45,9 @@ coachman_fallback = { harness = "codex", model = "gpt-6-astra", effort = "max" }
 postmaster = { harness = "agy", model = "gemini-3.8-flash-high" }   # interactive, in tmux
 max_runs = 2                                    # concurrent runs per project
 
-# A muse coachman (Muse Spark at max, say) is usable once skills/postmaster/harnesses.md and
-# scripts/launch.sh carry its stream flag, bypass form, thread id and resume form, taken from
-# a trial run. Until then launch.sh refuses it, by design.
+# A muse coachman takes its key from an env file, as any role may:
+# coachman = { harness = "muse", model = "muse-spark-1.3-contributor", effort = "max",
+#              env_file = "~/.postmaster/lanes/muse.env" }     # holds META_API_KEY=<key>
 
 # Optional: a different coachman per leg. The legs are synthesis, review and ship, and
 # scripts/launch.sh refuses a config that names any other.

@@ -53,6 +53,17 @@ if [ "${1:-}" = --self-test ]; then
   answers plain; run plain; rc=$?
   [ $rc -eq 0 ] && [ "$(team plain lens_reviewers)" = null ] && [ "$(team plain reviewers)" = '["alpha", "beta"]' ] \
     && ok "without lens answers there is no table, as before" || fail "without lens answers there is no table, as before (exit $rc)" "$(cat "$tmp/plain.out")"
+  answers roles "coachman.effort=max
+coachman.env_file=~/.postmaster/lanes/judge.env
+fallback.env_file=spare.env
+postmaster.env_file=~/.postmaster/lanes/pm.env"; run roles; rc=$?
+  [ $rc -eq 0 ] && [ "$(team roles coachman)" = '{"harness": "bash", "model": "judge", "effort": "max", "env_file": "~/.postmaster/lanes/judge.env"}' ] \
+    && [ "$(team roles coachman_fallback)" = '{"harness": "bash", "model": "spare", "env_file": "spare.env"}' ] \
+    && [ "$(team roles postmaster)" = '{"harness": "bash", "model": "pm", "env_file": "~/.postmaster/lanes/pm.env"}' ] \
+    && ok "the coachman, the fallback and the postmaster each get their env file, with or without an effort" \
+    || fail "the coachman, the fallback and the postmaster each get their env file (exit $rc)" "$(cat "$tmp/roles.out")"
+  [ "$(team plain coachman)" = '{"harness": "bash", "model": "judge"}' ] \
+    && ok "a role with no env file answer gets no env_file key" || fail "a role with no env file answer gets no env_file key" "$(team plain coachman)"
 
   echo "negative controls"
   answers ghost "reviewers.security=alpha, ghost"; run ghost; rc=$?
@@ -81,7 +92,7 @@ while [ $# -gt 0 ]; do
 key (? = may be left out)  default            asked as
 projects_roots             ~/Code             where projects live, comma separated
 lanes                      alpha, beta        lane names, comma separated; then per lane:
-lane.<name>.harness                           harness (codex, grok, agy, claude, muse, pi)
+lane.<name>.harness                           harness (codex, grok, agy, claude, muse, mimo, pi)
 lane.<name>.model                             model id
 lane.<name>.effort?        (none)             effort, blank if the harness has no effort flag
 lane.<name>.env_file?      (none)             env file for an alternate backend
@@ -91,12 +102,15 @@ reviewers.<lens>?          (reviewers)        reviewer lanes for one lens only (
 coachman.harness                              never a lane's model
 coachman.model
 coachman.effort?           (none)
+coachman.env_file?         (none)             env file for its key or backend, as for a lane
 fallback.harness                              never a lane's model
 fallback.model
 fallback.effort?           (none)
+fallback.env_file?         (none)
 postmaster.harness
 postmaster.model
 postmaster.effort?         (none)
+postmaster.env_file?       (none)
 max_runs                   2                  concurrent runs per project
 poll_seconds               120                postmaster poll interval
 tracker                    github             github, plane, local or other
@@ -161,7 +175,7 @@ set -- $LANE_LIST
 [ $# -ge 2 ] || { echo "setup: at least two lanes are needed" >&2; exit 1; }
 LANE_BLOCKS=""; LANE_MODELS=""
 for lane in $LANE_LIST; do
-  ask h "  $lane: harness (codex, grok, agy, claude, muse, pi)" "" "lane.$lane.harness"
+  ask h "  $lane: harness (codex, grok, agy, claude, muse, mimo, pi)" "" "lane.$lane.harness"
   need_harness "$h"
   ask m "  $lane: model id" "" "lane.$lane.model"
   ask e "  $lane: effort (blank if the harness has no effort flag)" "" "lane.$lane.effort?"
@@ -206,6 +220,7 @@ for m in $LANE_MODELS; do
   [ "$m" = "$CM" ] && { echo "setup: the coachman cannot run on a lane's model ($CM)" >&2; exit 1; }
 done
 ask CE "  coachman: effort (blank if none)" "" "coachman.effort?"
+ask CEF "  coachman: env file for its key or backend (blank if none)" "" "coachman.env_file?"
 echo
 echo "== The coachman's fallback: takes over a leg when the coachman hits a wall. Not a lane either. =="
 ask FH "  fallback: harness" "" "fallback.harness"
@@ -215,6 +230,7 @@ for m in $LANE_MODELS; do
   [ "$m" = "$FM" ] && { echo "setup: the fallback coachman cannot run on a lane's model ($FM)" >&2; exit 1; }
 done
 ask FE "  fallback: effort (blank if none)" "" "fallback.effort?"
+ask FEF "  fallback: env file for its key or backend (blank if none)" "" "fallback.env_file?"
 
 echo
 echo "== The postmaster: decomposes the stream, dispatches coachmen, supervises. =="
@@ -222,6 +238,7 @@ ask PH "  postmaster: harness" "" "postmaster.harness"
 need_harness "$PH"
 ask PM "  postmaster: model id" "" "postmaster.model"
 ask PE "  postmaster: effort (blank if none)" "" "postmaster.effort?"
+ask PEF "  postmaster: env file for its key or backend (blank if none)" "" "postmaster.env_file?"
 ask MR "  concurrent runs per project" "2" "max_runs"
 ask PS "  postmaster poll interval, seconds" "120" "poll_seconds"
 
@@ -253,6 +270,11 @@ TRACKER_EXTRA=""
 [ -n "$PWS" ] && TRACKER_EXTRA="url = \"$PURL\""$'\n'"workspace = \"$PWS\""$'\n'"env_file = \"$PENV\""
 [ -n "$OTHER" ] && TRACKER_EXTRA="name = \"$OTHER\""
 
+role_extra() {  # role_extra <effort> <env file>: the optional keys of a role's inline table
+  [ -n "$1" ] && printf ', effort = "%s"' "$1"
+  [ -n "$2" ] && printf ', env_file = "%s"' "$2"
+  return 0
+}
 OUT=$(cat <<EOF
 # Written by scripts/setup.sh on $(date -u +%Y-%m-%d). Shape: config.example.toml.
 projects_roots = $(toml_list "$ROOTS")
@@ -261,9 +283,9 @@ ${LANE_BLOCKS}
 [team]
 workhorses = $(toml_list "$WORKHORSES")
 reviewers = $(toml_list "$REVIEWERS")
-coachman = { harness = "$CH", model = "$CM"$( [ -n "$CE" ] && printf ', effort = "%s"' "$CE" ) }
-coachman_fallback = { harness = "$FH", model = "$FM"$( [ -n "$FE" ] && printf ', effort = "%s"' "$FE" ) }
-postmaster = { harness = "$PH", model = "$PM"$( [ -n "$PE" ] && printf ', effort = "%s"' "$PE" ) }
+coachman = { harness = "$CH", model = "$CM"$(role_extra "$CE" "$CEF") }
+coachman_fallback = { harness = "$FH", model = "$FM"$(role_extra "$FE" "$FEF") }
+postmaster = { harness = "$PH", model = "$PM"$(role_extra "$PE" "$PEF") }
 max_runs = $MR
 ${LENS_TABLE}
 [postmaster]
