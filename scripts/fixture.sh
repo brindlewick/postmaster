@@ -3,7 +3,7 @@
 # finished run from its own records. Why, and what it catches that the gate cannot:
 # wiki/concepts/fixture-runs.md.
 #
-#   fixture.sh new <dest> <ticket>
+#   fixture.sh new <name or dest> <ticket>
 #   fixture.sh score <dispatch> <repo>
 #   fixture.sh hidden <ticket> <app-dir>
 #   fixture.sh --self-test
@@ -15,9 +15,13 @@
 #
 # new     makes <dest> a fresh git repo holding the committed app, one commit on main, outside
 #         every other repo, so a run never touches this repo's branches, worktrees or run records.
-#         It has no remote. It makes the repo's own ticket store (scripts/local.sh), files the
-#         ticket there and prints its number to dispatch against <dest>; a run reads it through
-#         the local tracker whatever the config names (scripts/tracker-kind.sh).
+#         A bare name goes under ~/Code/fixtures, or $POSTMASTER_FIXTURES when that is set; a
+#         path is used as given. Claude Code asks before it works in a folder it has not been
+#         told to trust, and trusting a folder covers every folder inside it: trust
+#         ~/Code/fixtures once, and a postmaster started in any copy there does not stop at the
+#         prompt. It has no remote. It makes the repo's own ticket store (scripts/local.sh),
+#         files the ticket there and prints its number to dispatch against <dest>; a run reads
+#         it through the local tracker whatever the config names (scripts/tracker-kind.sh).
 # score   scores a finished run from its records, never its report: the ticket its waybill
 #         carries verbatim, whose hidden tests run against main; the app's gate as
 #         scripts/discover-project.sh finds it, on main; the stages scripts/stage.sh --list names,
@@ -41,7 +45,7 @@ APP=$TOOL/fixtures/app
 TICKETS=$TOOL/fixtures/tickets
 CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
 LOCAL_SH=$HERE/local.sh
-usage() { echo "usage: fixture.sh new <dest> <ticket> | score <dispatch> <repo> | hidden <ticket> <app-dir> | --self-test" >&2; exit 1; }
+usage() { echo "usage: fixture.sh new <name or dest> <ticket> | score <dispatch> <repo> | hidden <ticket> <app-dir> | --self-test" >&2; exit 1; }
 need() { local t; for t in "$@"; do command -v "$t" >/dev/null 2>&1 || { echo "fixture: $t is not on PATH" >&2; exit 1; }; done; }
 
 tickets() { local d; for d in "$TICKETS"/*/; do [ -f "$d/ticket.md" ] && basename "$d"; done; }
@@ -79,9 +83,10 @@ PY
     || { echo "fixture: could not commit the app in $dest; git needs user.name and user.email" >&2; return 1; }
 }
 
-make_and_file() {  # make_and_file <dest> <ticket>
+make_and_file() {  # make_and_file <name or dest> <ticket>
   local dest=$1 ticket=$2 probe runs body number rc
   is_ticket "$ticket" || return 1
+  case $dest in */*) ;; *) dest=${POSTMASTER_FIXTURES:-$HOME/Code/fixtures}/$dest ;; esac
   dest=$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$dest")
   [ -e "$dest" ] && { echo "fixture: $dest already exists; a run starts from a fresh repo" >&2; return 1; }
   probe=$(dirname "$dest"); while [ ! -d "$probe" ]; do probe=$(dirname "$probe"); done
@@ -110,7 +115,7 @@ make_and_file() {  # make_and_file <dest> <ticket>
   echo "fixture: dispatch ticket #$number against $dest, then: scripts/fixture.sh score <its dispatch directory> $dest"
 }
 
-new_run() {  # new_run <dest> <ticket>
+new_run() {  # new_run <name or dest> <ticket>
   [ -z "$(git -C "$TOOL" status --porcelain -- fixtures)" ] \
     || { echo "fixture: fixtures/ has uncommitted changes; a run starts from a committed fixture" >&2; return 1; }
   make_and_file "$@"
@@ -558,6 +563,14 @@ out=$(LOCAL_SH=$tmp/failing-local.sh fresh_new "$tmp/runs/unfiled" "$first"); rc
 [ $rc -eq 1 ] && [ ! -e "$tmp/runs/unfiled" ] && printf '%s\n' "$out" | grep -q "filing the ticket" \
   && ok "a ticket that cannot be filed: refused, and the repo it made is gone" \
   || fail "a ticket that cannot be filed: refused, and the repo it made is gone (exit $rc)" "$out"
+out=$(cd "$tmp/runs" && POSTMASTER_FIXTURES='' fresh_new bare-name "$first"); rc=$?
+[ $rc -eq 0 ] && [ "$(git -C "$tmp/home/Code/fixtures/bare-name" rev-list --count main 2>/dev/null)" = 1 ] && [ ! -e "$tmp/runs/bare-name" ] \
+  && ok "a bare name goes under ~/Code/fixtures, not the working directory" \
+  || fail "a bare name goes under ~/Code/fixtures, not the working directory (exit $rc)" "$out"
+out=$(POSTMASTER_FIXTURES=$tmp/elsewhere fresh_new other-name "$first"); rc=$?
+[ $rc -eq 0 ] && [ -d "$tmp/elsewhere/other-name/.git" ] && [ ! -e "$tmp/home/Code/fixtures/other-name" ] \
+  && ok "POSTMASTER_FIXTURES moves where a bare name goes" \
+  || fail "POSTMASTER_FIXTURES moves where a bare name goes (exit $rc)" "$out"
 
 wait
 

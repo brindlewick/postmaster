@@ -3,7 +3,7 @@ title: A fixture run tests the flow end to end, which the gate cannot
 type: concept
 standing: claimed
 sources: []
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # Fixture runs
@@ -93,5 +93,8 @@ scores clean is found to have shipped something its ticket did not ask for.
 
 `scripts/fixture.sh` makes a run's repository and files its ticket (`new`), scores a finished
 run (`score`), and runs a ticket's hidden tests against any copy of the app (`hidden`). The app
-and its tickets are in `fixtures/`. `AGENTS.md` holds a change to the coachman contract back
+and its tickets are in `fixtures/`. `new` puts a copy under `~/Code/fixtures` unless it is given a
+path. Claude Code stops at a trust prompt in a folder it has not been told to trust, and trusting
+a folder covers every folder inside it, so the user trusts `~/Code/fixtures` once and a
+postmaster started in any copy there begins without waiting for an answer. `AGENTS.md` holds a change to the coachman contract back
 from merging until a fixture run dispatched from its branch scores clean.

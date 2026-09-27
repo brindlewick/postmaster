@@ -8,6 +8,12 @@ updated: 2026-09-27
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-27] lint | fixture copies go under ~/Code/fixtures
+
+The fixture-runs page now records where `fixture.sh new` puts a copy when given only a name, and
+why: trusting `~/Code/fixtures` once in Claude Code covers every copy made inside it, so a
+postmaster started in one does not stop at the trust prompt. No standing changed.
+
 ## [2026-09-27] lint | fixture tickets go in the fixture's own store
 
 The fixture-runs page now records that a fixture run's ticket is filed in the fresh repository's
