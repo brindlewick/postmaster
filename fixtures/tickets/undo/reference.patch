@@ -1,0 +1,355 @@
+diff --git a/README.md b/README.md
+index 6e93218..8d825c2 100644
+--- a/README.md
++++ b/README.md
+@@ -8,6 +8,7 @@ A small command-line todo list.
+ todo add <text>    # add a task; prints its id
+ todo list          # the tasks, one per line: id, [ ] or [x], text
+ todo done <id>     # mark a task done
++todo undo          # take back the last add or done; again for the one before
+ ```
+ 
+ The list is kept in `todo.json` in the working directory, or in the file `TODO_FILE` names.
+diff --git a/src/cli.ts b/src/cli.ts
+index bc0f9b1..aeda77d 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -3,9 +3,9 @@
+ // the result. Exit codes: 0 when the command did what it says, 1 when it could not, 2 for usage.
+ 
+ import { load, save, storePath } from "./store.ts";
+-import { addTask, completeTask, formatList } from "./tasks.ts";
++import { addTask, completeTask, formatList, undo } from "./tasks.ts";
+ 
+-export const USAGE = "usage: todo add <text> | todo list | todo done <id>";
++export const USAGE = "usage: todo add <text> | todo list | todo done <id> | todo undo";
+ 
+ export type Output = {
+   readonly out: (line: string) => void;
+@@ -60,6 +60,20 @@ async function run(args: readonly string[], path: string, { out, err }: Output):
+       out(`done ${id}`);
+       return 0;
+     }
++    case "undo": {
++      if (rest.length > 0) {
++        err(USAGE);
++        return 2;
++      }
++      const result = undo(await load(path));
++      if (result === undefined) {
++        err("nothing to undo");
++        return 1;
++      }
++      await save(path, result.list);
++      out(`undid ${result.undone}`);
++      return 0;
++    }
+     default:
+       err(USAGE);
+       return 2;
+diff --git a/src/store.ts b/src/store.ts
+index 0be13d6..28373ba 100644
+--- a/src/store.ts
++++ b/src/store.ts
+@@ -4,7 +4,7 @@
+ 
+ import { readFile, rename, writeFile } from "node:fs/promises";
+ import { resolve } from "node:path";
+-import { emptyList, type Task, type TodoList } from "./tasks.ts";
++import { type Change, emptyList, type Task, type TodoList } from "./tasks.ts";
+ 
+ /** The file exists but does not hold a todo list. */
+ export class StoreError extends Error {}
+@@ -20,10 +20,18 @@ export function parseList(text: string, path: string): TodoList {
+   } catch {
+     throw new StoreError(`${path} is not valid JSON`);
+   }
+-  if (!isRecord(data) || !Array.isArray(data.tasks) || !data.tasks.every(isTask)) {
++  if (!isRecord(data)) {
+     throw new StoreError(`${path} does not hold a todo list`);
+   }
+-  return { tasks: data.tasks.map(({ id, text, done }) => ({ id, text, done })) };
++  // A list written before undo existed has no history, and so nothing to undo.
++  const { tasks, history = [] } = data;
++  if (!isTasks(tasks) || !Array.isArray(history) || !history.every(isChange)) {
++    throw new StoreError(`${path} does not hold a todo list`);
++  }
++  return {
++    tasks: tasks.map(copyTask),
++    history: history.map(({ summary, before }) => ({ summary, before: before.map(copyTask) })),
++  };
+ }
+ 
+ export function serializeList(list: TodoList): string {
+@@ -55,6 +63,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
+   return typeof value === "object" && value !== null && !Array.isArray(value);
+ }
+ 
++function isTasks(value: unknown): value is Task[] {
++  return Array.isArray(value) && value.every(isTask);
++}
++
++function isChange(value: unknown): value is Change {
++  return isRecord(value) && typeof value.summary === "string" && isTasks(value.before);
++}
++
++function copyTask({ id, text, done }: Task): Task {
++  return { id, text, done };
++}
++
+ function isTask(value: unknown): value is Task {
+   return (
+     isRecord(value) &&
+diff --git a/src/tasks.ts b/src/tasks.ts
+index 50864ae..bef546f 100644
+--- a/src/tasks.ts
++++ b/src/tasks.ts
+@@ -7,11 +7,22 @@ export type Task = {
+   readonly done: boolean;
+ };
+ 
++/** A change that can be undone: what it was, and the tasks as they were before it. */
++export type Change = {
++  readonly summary: string;
++  readonly before: readonly Task[];
++};
++
+ export type TodoList = {
+   readonly tasks: readonly Task[];
++  /** The changes that can be undone, oldest first. */
++  readonly history: readonly Change[];
+ };
+ 
+-export const emptyList: TodoList = { tasks: [] };
++/** How many changes back undo can go. */
++export const HISTORY_LIMIT = 20;
++
++export const emptyList: TodoList = { tasks: [], history: [] };
+ 
+ /** Adds a task, not done, with an id one higher than the highest in the list. */
+ export function addTask(
+@@ -20,15 +31,34 @@ export function addTask(
+ ): { readonly list: TodoList; readonly task: Task } {
+   const id = list.tasks.reduce((highest, task) => Math.max(highest, task.id), 0) + 1;
+   const task: Task = { id, text, done: false };
+-  return { list: { tasks: [...list.tasks, task] }, task };
++  return { list: change(list, [...list.tasks, task], `add ${id}: ${text}`), task };
+ }
+ 
+-/** Marks a task done, or returns undefined when the list has no task with that id. */
++/**
++ * Marks a task done, or returns undefined when the list has no task with that id. A task that is
++ * already done is left as it is, and nothing is recorded, so there is nothing to undo.
++ */
+ export function completeTask(list: TodoList, id: number): TodoList | undefined {
+-  if (!list.tasks.some((task) => task.id === id)) {
++  const target = list.tasks.find((task) => task.id === id);
++  if (target === undefined) {
+     return undefined;
+   }
+-  return { tasks: list.tasks.map((task) => (task.id === id ? { ...task, done: true } : task)) };
++  if (target.done) {
++    return list;
++  }
++  const tasks = list.tasks.map((task) => (task.id === id ? { ...task, done: true } : task));
++  return change(list, tasks, `done ${id}: ${target.text}`);
++}
++
++/** Reverts the most recent change, or returns undefined when there is none left to revert. */
++export function undo(
++  list: TodoList,
++): { readonly list: TodoList; readonly undone: string } | undefined {
++  const last = list.history.at(-1);
++  if (last === undefined) {
++    return undefined;
++  }
++  return { list: { tasks: last.before, history: list.history.slice(0, -1) }, undone: last.summary };
+ }
+ 
+ export function formatTask(task: Task): string {
+@@ -39,3 +69,10 @@ export function formatTask(task: Task): string {
+ export function formatList(list: TodoList): string[] {
+   return list.tasks.length === 0 ? ["no tasks"] : list.tasks.map(formatTask);
+ }
++
++// Snapshots rather than inverse operations: a snapshot cannot be undone wrongly, and a todo list
++// is small enough that keeping the last few copies of it costs nothing that matters.
++function change(list: TodoList, tasks: readonly Task[], summary: string): TodoList {
++  const history = [...list.history, { summary, before: list.tasks }];
++  return { tasks, history: history.slice(-HISTORY_LIMIT) };
++}
+diff --git a/test/cli.test.ts b/test/cli.test.ts
+index dd49de0..899f702 100644
+--- a/test/cli.test.ts
++++ b/test/cli.test.ts
+@@ -52,6 +52,43 @@ describe("done", () => {
+   });
+ });
+ 
++describe("undo", () => {
++  test("reverts the last change, then the one before, then has nothing left", async () => {
++    await todo("add", "buy milk");
++    await todo("add", "post the letter");
++    await todo("done", "1");
++    expect(await todo("undo")).toEqual({ code: 0, out: ["undid done 1: buy milk"], err: [] });
++    expect((await todo("list")).out).toEqual(["1 [ ] buy milk", "2 [ ] post the letter"]);
++    expect(await todo("undo")).toEqual({
++      code: 0,
++      out: ["undid add 2: post the letter"],
++      err: [],
++    });
++    expect(await todo("undo")).toEqual({ code: 0, out: ["undid add 1: buy milk"], err: [] });
++    expect(await todo("undo")).toEqual({ code: 1, out: [], err: ["nothing to undo"] });
++    expect((await todo("list")).out).toEqual(["no tasks"]);
++  });
++
++  test("a command that fails or changes nothing leaves nothing to undo", async () => {
++    await todo("add", "a");
++    await todo("done", "1");
++    await todo("done", "1");
++    await todo("done", "9");
++    await todo("list");
++    expect((await todo("undo")).out).toEqual(["undid done 1: a"]);
++    expect((await todo("undo")).out).toEqual(["undid add 1: a"]);
++    expect((await todo("undo")).code).toBe(1);
++  });
++
++  test("a list written before undo existed has nothing to undo until it changes", async () => {
++    writeFileSync(path, '{"tasks": [{"id": 1, "text": "a", "done": false}]}');
++    expect(await todo("undo")).toEqual({ code: 1, out: [], err: ["nothing to undo"] });
++    await todo("done", "1");
++    expect((await todo("undo")).out).toEqual(["undid done 1: a"]);
++    expect((await todo("list")).out).toEqual(["1 [ ] a"]);
++  });
++});
++
+ describe("usage", () => {
+   test.each([
+     [[]],
+@@ -62,6 +99,7 @@ describe("usage", () => {
+     [["done"]],
+     [["done", "one"]],
+     [["done", "1", "2"]],
++    [["undo", "2"]],
+   ])("%j prints the usage line and exits 2", async (args) => {
+     expect(await todo(...args)).toEqual({ code: 2, out: [], err: [USAGE] });
+   });
+diff --git a/test/store.test.ts b/test/store.test.ts
+index 2964804..51f0f79 100644
+--- a/test/store.test.ts
++++ b/test/store.test.ts
+@@ -10,6 +10,9 @@ const list: TodoList = {
+     { id: 1, text: "buy milk", done: false },
+     { id: 2, text: "post the letter", done: true },
+   ],
++  history: [
++    { summary: "done 2: post the letter", before: [{ id: 1, text: "buy milk", done: false }] },
++  ],
+ };
+ 
+ describe("storePath", () => {
+@@ -33,7 +36,15 @@ describe("parseList", () => {
+ 
+   test("keeps only the fields a task has", () => {
+     const text = '{"tasks": [{"id": 1, "text": "a", "done": false, "colour": "red"}]}';
+-    expect(parseList(text, "todo.json")).toEqual({ tasks: [{ id: 1, text: "a", done: false }] });
++    expect(parseList(text, "todo.json")).toEqual({
++      tasks: [{ id: 1, text: "a", done: false }],
++      history: [],
++    });
++  });
++
++  test("reads a list written before undo existed as having nothing to undo", () => {
++    const text = '{"tasks": [{"id": 1, "text": "a", "done": true}]}';
++    expect(parseList(text, "todo.json").history).toEqual([]);
+   });
+ 
+   test("refuses a file that is not JSON", () => {
+@@ -41,7 +52,13 @@ describe("parseList", () => {
+   });
+ 
+   test("refuses JSON that is not a todo list", () => {
+-    for (const text of ["[]", "{}", '{"tasks": [{"id": "1", "text": "a", "done": false}]}']) {
++    for (const text of [
++      "[]",
++      "{}",
++      '{"tasks": [{"id": "1", "text": "a", "done": false}]}',
++      '{"tasks": [], "history": {}}',
++      '{"tasks": [], "history": [{"summary": "add 1: a"}]}',
++    ]) {
+       expect(() => parseList(text, "todo.json")).toThrow("todo.json does not hold a todo list");
+     }
+   });
+diff --git a/test/tasks.test.ts b/test/tasks.test.ts
+index 00de47e..0c38856 100644
+--- a/test/tasks.test.ts
++++ b/test/tasks.test.ts
+@@ -1,11 +1,20 @@
+ import { describe, expect, test } from "bun:test";
+-import { addTask, completeTask, emptyList, formatList, type TodoList } from "../src/tasks.ts";
++import {
++  addTask,
++  completeTask,
++  emptyList,
++  formatList,
++  HISTORY_LIMIT,
++  type TodoList,
++  undo,
++} from "../src/tasks.ts";
+ 
+ const two: TodoList = {
+   tasks: [
+     { id: 1, text: "buy milk", done: false },
+     { id: 5, text: "post the letter", done: true },
+   ],
++  history: [],
+ };
+ 
+ describe("addTask", () => {
+@@ -42,6 +51,46 @@ describe("completeTask", () => {
+     expect(completeTask(two, 2)).toBeUndefined();
+     expect(completeTask(emptyList, 1)).toBeUndefined();
+   });
++
++  test("leaves a task already done as it is, and records nothing to undo", () => {
++    expect(completeTask(two, 5)).toBe(two);
++  });
++});
++
++describe("undo", () => {
++  test("reverts each change in turn, most recent first, then has nothing left", () => {
++    const added = addTask(addTask(emptyList, "buy milk").list, "post the letter").list;
++    const done = completeTask(added, 1);
++    if (done === undefined) {
++      throw new Error("task 1 is on the list");
++    }
++    const first = undo(done);
++    expect(first?.undone).toBe("done 1: buy milk");
++    expect(first?.list.tasks).toEqual(added.tasks);
++    const second = first && undo(first.list);
++    expect(second?.undone).toBe("add 2: post the letter");
++    expect(second?.list.tasks).toEqual([{ id: 1, text: "buy milk", done: false }]);
++    const third = second && undo(second.list);
++    expect(third?.list).toEqual(emptyList);
++    expect(third && undo(third.list)).toBeUndefined();
++  });
++
++  test("has nothing to undo on a new list", () => {
++    expect(undo(emptyList)).toBeUndefined();
++  });
++
++  test("keeps only the last HISTORY_LIMIT changes", () => {
++    let list = emptyList;
++    for (let n = 0; n < HISTORY_LIMIT + 5; n++) {
++      list = addTask(list, `task ${n}`).list;
++    }
++    expect(list.history).toHaveLength(HISTORY_LIMIT);
++    for (let n = 0; n < HISTORY_LIMIT; n++) {
++      list = undo(list)?.list ?? emptyList;
++    }
++    expect(list.tasks).toHaveLength(5);
++    expect(undo(list)).toBeUndefined();
++  });
+ });
+ 
+ describe("formatList", () => {

@@ -1,0 +1,350 @@
+diff --git a/README.md b/README.md
+index 6e93218..070e1ea 100644
+--- a/README.md
++++ b/README.md
+@@ -5,9 +5,10 @@ A small command-line todo list.
+ ## Use
+ 
+ ```sh
+-todo add <text>    # add a task; prints its id
+-todo list          # the tasks, one per line: id, [ ] or [x], text
+-todo done <id>     # mark a task done
++todo add <text>       # add a task; prints its id
++todo list             # the tasks, one per line: id, [ ] or [x], text
++todo done <id>        # mark a task done
++todo remove <id>...   # delete tasks; their ids are never used again
+ ```
+ 
+ The list is kept in `todo.json` in the working directory, or in the file `TODO_FILE` names.
+diff --git a/src/cli.ts b/src/cli.ts
+index bc0f9b1..a035d34 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -3,9 +3,9 @@
+ // the result. Exit codes: 0 when the command did what it says, 1 when it could not, 2 for usage.
+ 
+ import { load, save, storePath } from "./store.ts";
+-import { addTask, completeTask, formatList } from "./tasks.ts";
++import { addTask, completeTask, formatList, removeTasks } from "./tasks.ts";
+ 
+-export const USAGE = "usage: todo add <text> | todo list | todo done <id>";
++export const USAGE = "usage: todo add <text> | todo list | todo done <id> | todo remove <id>...";
+ 
+ export type Output = {
+   readonly out: (line: string) => void;
+@@ -60,6 +60,23 @@ async function run(args: readonly string[], path: string, { out, err }: Output):
+       out(`done ${id}`);
+       return 0;
+     }
++    case "remove": {
++      const ids = rest.map(parseId).filter((id) => id !== undefined);
++      if (ids.length === 0 || ids.length !== rest.length) {
++        err(USAGE);
++        return 2;
++      }
++      const result = removeTasks(await load(path), ids);
++      if ("missing" in result) {
++        err(`no task ${result.missing}`);
++        return 1;
++      }
++      await save(path, result.list);
++      for (const id of result.removed) {
++        out(`removed ${id}`);
++      }
++      return 0;
++    }
+     default:
+       err(USAGE);
+       return 2;
+diff --git a/src/store.ts b/src/store.ts
+index 0be13d6..5b88ec6 100644
+--- a/src/store.ts
++++ b/src/store.ts
+@@ -20,10 +20,19 @@ export function parseList(text: string, path: string): TodoList {
+   } catch {
+     throw new StoreError(`${path} is not valid JSON`);
+   }
+-  if (!isRecord(data) || !Array.isArray(data.tasks) || !data.tasks.every(isTask)) {
++  if (!isRecord(data)) {
+     throw new StoreError(`${path} does not hold a todo list`);
+   }
+-  return { tasks: data.tasks.map(({ id, text, done }) => ({ id, text, done })) };
++  const { tasks, lastId = 0 } = data;
++  if (!Array.isArray(tasks) || !tasks.every(isTask) || !isCount(lastId)) {
++    throw new StoreError(`${path} does not hold a todo list`);
++  }
++  // A list written before lastId was kept has never had an id higher than its highest task's.
++  const highest = tasks.reduce((most, task) => Math.max(most, task.id), 0);
++  return {
++    tasks: tasks.map(({ id, text, done }) => ({ id, text, done })),
++    lastId: Math.max(lastId, highest),
++  };
+ }
+ 
+ export function serializeList(list: TodoList): string {
+@@ -55,6 +64,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
+   return typeof value === "object" && value !== null && !Array.isArray(value);
+ }
+ 
++function isCount(value: unknown): value is number {
++  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
++}
++
+ function isTask(value: unknown): value is Task {
+   return (
+     isRecord(value) &&
+diff --git a/src/tasks.ts b/src/tasks.ts
+index 50864ae..9b87e73 100644
+--- a/src/tasks.ts
++++ b/src/tasks.ts
+@@ -9,18 +9,19 @@ export type Task = {
+ 
+ export type TodoList = {
+   readonly tasks: readonly Task[];
++  /** The highest id the list has ever given a task, so that no id is used twice. */
++  readonly lastId: number;
+ };
+ 
+-export const emptyList: TodoList = { tasks: [] };
++export const emptyList: TodoList = { tasks: [], lastId: 0 };
+ 
+-/** Adds a task, not done, with an id one higher than the highest in the list. */
++/** Adds a task, not done, with an id one higher than any the list has ever had. */
+ export function addTask(
+   list: TodoList,
+   text: string,
+ ): { readonly list: TodoList; readonly task: Task } {
+-  const id = list.tasks.reduce((highest, task) => Math.max(highest, task.id), 0) + 1;
+-  const task: Task = { id, text, done: false };
+-  return { list: { tasks: [...list.tasks, task] }, task };
++  const task: Task = { id: list.lastId + 1, text, done: false };
++  return { list: { tasks: [...list.tasks, task], lastId: task.id }, task };
+ }
+ 
+ /** Marks a task done, or returns undefined when the list has no task with that id. */
+@@ -28,7 +29,29 @@ export function completeTask(list: TodoList, id: number): TodoList | undefined {
+   if (!list.tasks.some((task) => task.id === id)) {
+     return undefined;
+   }
+-  return { tasks: list.tasks.map((task) => (task.id === id ? { ...task, done: true } : task)) };
++  return {
++    ...list,
++    tasks: list.tasks.map((task) => (task.id === id ? { ...task, done: true } : task)),
++  };
++}
++
++/**
++ * Removes the tasks with the given ids, each once, in the order given. Every id must be on the
++ * list: when one is not, nothing is removed and the first missing id is returned instead.
++ */
++export function removeTasks(
++  list: TodoList,
++  ids: readonly number[],
++): { readonly list: TodoList; readonly removed: readonly number[] } | { readonly missing: number } {
++  const missing = ids.find((id) => !list.tasks.some((task) => task.id === id));
++  if (missing !== undefined) {
++    return { missing };
++  }
++  const removed = [...new Set(ids)];
++  return {
++    list: { ...list, tasks: list.tasks.filter((task) => !removed.includes(task.id)) },
++    removed,
++  };
+ }
+ 
+ export function formatTask(task: Task): string {
+diff --git a/test/cli.test.ts b/test/cli.test.ts
+index dd49de0..c9d2fc3 100644
+--- a/test/cli.test.ts
++++ b/test/cli.test.ts
+@@ -52,6 +52,45 @@ describe("done", () => {
+   });
+ });
+ 
++describe("remove", () => {
++  test("deletes each task named and prints one line per id, in the order given", async () => {
++    for (const text of ["a", "b", "c", "d"]) {
++      await todo("add", text);
++    }
++    expect(await todo("remove", "3", "1", "3")).toEqual({
++      code: 0,
++      out: ["removed 3", "removed 1"],
++      err: [],
++    });
++    expect((await todo("list")).out).toEqual(["2 [ ] b", "4 [ ] d"]);
++  });
++
++  test("an id not on the list removes nothing and is exit 1", async () => {
++    await todo("add", "a");
++    const before = readFileSync(path, "utf8");
++    expect(await todo("remove", "1", "9", "8")).toEqual({ code: 1, out: [], err: ["no task 9"] });
++    expect(readFileSync(path, "utf8")).toBe(before);
++  });
++
++  test("a removed task's id is not used again, even after the list was empty", async () => {
++    await todo("add", "a");
++    await todo("add", "b");
++    await todo("remove", "2");
++    await todo("remove", "1");
++    expect(await todo("add", "c")).toEqual({ code: 0, out: ["added 3"], err: [] });
++  });
++
++  test("a list written before remove existed continues from its highest id", async () => {
++    writeFileSync(
++      path,
++      '{"tasks": [{"id": 1, "text": "a", "done": false}, {"id": 4, "text": "b", "done": true}]}',
++    );
++    await todo("remove", "4");
++    expect(await todo("add", "c")).toEqual({ code: 0, out: ["added 5"], err: [] });
++    expect((await todo("list")).out).toEqual(["1 [ ] a", "5 [ ] c"]);
++  });
++});
++
+ describe("usage", () => {
+   test.each([
+     [[]],
+@@ -62,6 +101,10 @@ describe("usage", () => {
+     [["done"]],
+     [["done", "one"]],
+     [["done", "1", "2"]],
++    [["remove"]],
++    [["remove", "one"]],
++    [["remove", "0"]],
++    [["remove", "1", "x"]],
+   ])("%j prints the usage line and exits 2", async (args) => {
+     expect(await todo(...args)).toEqual({ code: 2, out: [], err: [USAGE] });
+   });
+diff --git a/test/store.test.ts b/test/store.test.ts
+index 2964804..e551be1 100644
+--- a/test/store.test.ts
++++ b/test/store.test.ts
+@@ -10,6 +10,7 @@ const list: TodoList = {
+     { id: 1, text: "buy milk", done: false },
+     { id: 2, text: "post the letter", done: true },
+   ],
++  lastId: 3,
+ };
+ 
+ describe("storePath", () => {
+@@ -33,7 +34,21 @@ describe("parseList", () => {
+ 
+   test("keeps only the fields a task has", () => {
+     const text = '{"tasks": [{"id": 1, "text": "a", "done": false, "colour": "red"}]}';
+-    expect(parseList(text, "todo.json")).toEqual({ tasks: [{ id: 1, text: "a", done: false }] });
++    expect(parseList(text, "todo.json")).toEqual({
++      tasks: [{ id: 1, text: "a", done: false }],
++      lastId: 1,
++    });
++  });
++
++  test("takes lastId from the highest task in a list written before lastId was kept", () => {
++    const text =
++      '{"tasks": [{"id": 4, "text": "a", "done": false}, {"id": 2, "text": "b", "done": true}]}';
++    expect(parseList(text, "todo.json").lastId).toBe(4);
++  });
++
++  test("never takes a lastId lower than the highest task", () => {
++    const text = '{"tasks": [{"id": 4, "text": "a", "done": false}], "lastId": 2}';
++    expect(parseList(text, "todo.json").lastId).toBe(4);
+   });
+ 
+   test("refuses a file that is not JSON", () => {
+@@ -41,7 +56,13 @@ describe("parseList", () => {
+   });
+ 
+   test("refuses JSON that is not a todo list", () => {
+-    for (const text of ["[]", "{}", '{"tasks": [{"id": "1", "text": "a", "done": false}]}']) {
++    for (const text of [
++      "[]",
++      "{}",
++      '{"tasks": [{"id": "1", "text": "a", "done": false}]}',
++      '{"tasks": [], "lastId": -1}',
++      '{"tasks": [], "lastId": "3"}',
++    ]) {
+       expect(() => parseList(text, "todo.json")).toThrow("todo.json does not hold a todo list");
+     }
+   });
+diff --git a/test/tasks.test.ts b/test/tasks.test.ts
+index 00de47e..7ff9b8d 100644
+--- a/test/tasks.test.ts
++++ b/test/tasks.test.ts
+@@ -1,11 +1,19 @@
+ import { describe, expect, test } from "bun:test";
+-import { addTask, completeTask, emptyList, formatList, type TodoList } from "../src/tasks.ts";
++import {
++  addTask,
++  completeTask,
++  emptyList,
++  formatList,
++  removeTasks,
++  type TodoList,
++} from "../src/tasks.ts";
+ 
+ const two: TodoList = {
+   tasks: [
+     { id: 1, text: "buy milk", done: false },
+     { id: 5, text: "post the letter", done: true },
+   ],
++  lastId: 7,
+ };
+ 
+ describe("addTask", () => {
+@@ -15,8 +23,10 @@ describe("addTask", () => {
+     expect(list.tasks).toEqual([task]);
+   });
+ 
+-  test("gives a task an id one higher than the highest in the list", () => {
+-    expect(addTask(two, "water the plants").task.id).toBe(6);
++  test("gives a task an id one higher than any the list has had, and records it", () => {
++    const { list, task } = addTask(two, "water the plants");
++    expect(task.id).toBe(8);
++    expect(list.lastId).toBe(8);
+   });
+ 
+   test("adds to the end and leaves the list it was given alone", () => {
+@@ -44,6 +54,45 @@ describe("completeTask", () => {
+   });
+ });
+ 
++describe("removeTasks", () => {
++  const four: TodoList = {
++    tasks: [
++      { id: 1, text: "a", done: false },
++      { id: 2, text: "b", done: true },
++      { id: 3, text: "c", done: false },
++      { id: 4, text: "d", done: false },
++    ],
++    lastId: 4,
++  };
++
++  test("removes each task named, once, in the order given", () => {
++    expect(removeTasks(four, [3, 1, 3])).toEqual({
++      list: {
++        tasks: [
++          { id: 2, text: "b", done: true },
++          { id: 4, text: "d", done: false },
++        ],
++        lastId: 4,
++      },
++      removed: [3, 1],
++    });
++  });
++
++  test("keeps the highest id the list has had, so the next task does not reuse it", () => {
++    const result = removeTasks(four, [4]);
++    if ("missing" in result) {
++      throw new Error("4 is on the list");
++    }
++    expect(result.list.lastId).toBe(4);
++    expect(addTask(result.list, "e").task.id).toBe(5);
++  });
++
++  test("removes nothing and names the first id not on the list", () => {
++    expect(removeTasks(four, [2, 9, 1, 8])).toEqual({ missing: 9 });
++    expect(removeTasks(emptyList, [1])).toEqual({ missing: 1 });
++  });
++});
++
+ describe("formatList", () => {
+   test("gives one line per task: id, a box ticked when done, and the text", () => {
+     expect(formatList(two)).toEqual(["1 [ ] buy milk", "5 [x] post the letter"]);
