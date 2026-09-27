@@ -12,7 +12,10 @@ variant? What does it read as ambient context, and what does it take from Claude
 settings? Does it wait on its stdin, and how does a failure show? What does it keep between
 sessions, and does the launch keep each lane's apart?
 
-**Versions.** MiMo Code 0.1.15 on `xiaomi-token-plan-sgp/mimo-v2.6-pro` at variant `low`, git
+**Redacted 2026-09-27.** The provider id of the account's plan, which names a region, is shown
+as `<plan-provider>`. Nothing else in this record was changed.
+
+**Versions.** MiMo Code 0.1.15 on `<plan-provider>/mimo-v2.6-pro` at variant `low`, git
 2.43.0, and the flow's scripts from the branch that closes #74.
 
 **Setup.** `apparatus/run.sh` builds a one-commit repository holding an `AGENTS.md` with the

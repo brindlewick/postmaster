@@ -11,7 +11,7 @@
 # direct runs use a data directory in that folder too, so nothing touches the machine's own.
 set -uo pipefail
 ROOT=$(cd "${1:?usage: run.sh <postmaster-checkout> <out-dir> <env-file> [<model>]}" && pwd -P) || exit 1
-OUT=${2:?}; ENVF=$(cd "$(dirname "${3:?}")" && pwd -P)/$(basename "$3"); MODEL=${4:-xiaomi-token-plan-sgp/mimo-v2.6-pro}
+OUT=${2:?}; ENVF=$(cd "$(dirname "${3:?}")" && pwd -P)/$(basename "$3"); MODEL=${4:-<plan-provider>/mimo-v2.6-pro}
 mkdir -p "$OUT" && OUT=$(cd "$OUT" && pwd -P) || exit 1
 tmp=$(mktemp -d) && tmp=$(cd "$tmp" && pwd -P) || exit 1
 trap 'rm -r -- "$tmp"' EXIT
