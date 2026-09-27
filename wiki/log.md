@@ -19,6 +19,32 @@ default. `harnesses.md` and `launch.sh` now carry the form the trial found. The 
 corrects the adapter: without the bypass flag, a resume runs `workspace-write` in a trusted
 worktree and read-only in an untrusted one. Standing `settled`, for codex 0.157.1. Issue #45.
 
+## [2026-09-27] redact | a plan provider id in the MiMo trial record
+
+The trial in `raw/trials/mimo-headless-forms/` named the provider id of one account's plan, which
+names a region, and the scrub before it was promoted missed it. The id is now `<plan-provider>` in
+the five files that held it, the record says so, and `raw/README.md` now states the exception
+that allows it. Nothing else in the record changed, and no standing rests on the id.
+
+## [2026-09-27] ingest | MiMo Code's headless forms
+
+A trial of MiMo Code 0.1.15, launched and resumed through `launch.sh`, recorded in
+`raw/trials/mimo-headless-forms/`. Its forms are in `skills/postmaster/harnesses.md`. Two of its
+findings bear on how far lanes are kept apart. A fresh session recalled a word another session
+in the same data directory had been asked to remember, so each lane now gets its own. And a lane
+asked to search went through the whole home directory, Claude Code's transcripts and another
+lane's notes included, and found the word: a data directory of its own is not a sandbox. No
+standing changes.
+
+## [2026-09-27] ingest | Muse Code's headless forms
+
+A trial of Muse Code 1.4.0, launched and resumed through `launch.sh`, recorded in
+`raw/trials/muse-headless-forms/`. Its launch and resume forms, thread id and final message
+are recorded in `skills/postmaster/harnesses.md`. It keeps a memory that outlives a session:
+a fresh launch recalled a word an earlier one had been asked to remember, where a lane with its
+own data directory did not. So each lane and each coachman leg now gets its own. No standing
+changes.
+
 ## [2026-09-27] ingest | one round of bug review, for now
 
 The user read #59's options for ending the review loop and chose none of them as written: for

@@ -1,0 +1,11 @@
+run: launch through launch.sh
+exit: 0, seconds: 38
+proof.txt: PELICAN
+events: 8, of types: step_finish, step_start, text, tool_use
+sessions in the stream: 1
+tool_use events: write, bash
+  write: <trial>/repo/proof.txt
+  bash: mkdir -p "<trial>/harness-data/mimo/773330212-28/mimocode/memory/sessions/current_session_id" && printf '%s\n' '## [turn 1 · session]' 'Code word for later this
+step_finish reasons: tool-calls, stop
+--- the last text event ---
+DONE

@@ -1,0 +1,43 @@
+run: another lane in the same repository, through launch.sh
+exit: 0, seconds: 118
+events: 44, of types: step_finish, step_start, text, tool_use
+sessions in the stream: 1
+tool_use events: memory, memory, history, history, memory, memory, grep, grep, bash, history, history, bash, grep, skill, bash, bash, bash, bash, bash, bash, grep, read, grep
+  memory: code word remember
+  memory: secret word
+  history: code word
+  history: remember
+  memory: codeword
+  memory: password
+  grep: <trial>/harness-data/mimo/801159587-28/mimocode/memory/global | code.?word|codeword|password|secret|passphrase|mnemonic
+  grep: <trial>/harness-data/mimo/801159587-28/mimocode/memory | code.?word|codeword|remember.*(word|password|secret|passphrase)
+  bash: ls -la <trial>/harness-data/mimo/801159587-28/mimocode/memory 2>/dev/null; ls -la <trial>/harness-data/mimo/801159587-28/mimocode/ 2>/dev/null | head -50
+  history: password secret passphrase
+  history: asked to remember
+  bash: find <trial>/harness-data/mimo/801159587-28/mimocode/storage <trial>/harness-data/mimo/801159587-28/mimocode/snapshot -type f 2>/dev/null | head -100
+  grep: <trial>/harness-data/mimo/801159587-28/mimocode/storage | code.?word|codeword|passphrase|secret
+  bash: DB="<trial>/harness-data/mimo/801159587-28/mimocode/mimocode.db"; sqlite3 -readonly "$DB" "SELECT m.session_id, m.id, substr(json_extract(p.data,'$.text'),1,300
+  bash: DB="<trial>/harness-data/mimo/801159587-28/mimocode/mimocode.db"; sqlite3 -readonly "$DB" "SELECT id, title, datetime(time_created/1000,'unixepoch','localtime')
+  bash: python3 -c "
+import sqlite3
+db='<trial>/harness-data/mimo/801159587-28/mimocode/mimocode.db'
+c=sqlite3.connect('file:'+db+'?mode=ro', uri=True)
+print('sessions:
+  bash: find <trial> -name 'MEMORY.md' -o -name 'checkpoint.md' -o -name 'notes.md' 2>/dev/null | head -50; echo '---home---'; find ~ -name 'MEMORY.md' -o -name 'checkp
+  bash: python3 -c "
+import sqlite3
+db='<trial>/harness-data/mimo/801159587-28/mimocode/mimocode.db'
+c=sqlite3.connect('file:'+db+'?mode=ro', uri=True)
+print('tables:',
+  bash: python3 -c "
+import sqlite3, os
+paths=[
+ '~/.local/share/mimocode/mimocode.db',
+ '~/.postmaster/harness-data/mimo/4265556527-28/mimocode/mimocode.db',
+ '~/.post
+  grep: ~/.local/share/muse/memory | code.?word|codeword|passphrase|remember this|remember the
+  read: <trial>/harness-data/mimo/773330212-28/mimocode/memory/sessions/current_session_id/notes.md
+  grep: ~/.claude/projects | code.?word|codeword|passphrase|remember this|remember the|secret word
+step_finish reasons: tool-calls, tool-calls, tool-calls, tool-calls, tool-calls, tool-calls, tool-calls, tool-calls, stop
+--- the last text event ---
+KESTREL
