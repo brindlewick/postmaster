@@ -8,6 +8,19 @@ updated: 2026-09-27
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-27] lint | fixture copies go under ~/Code/fixtures
+
+The fixture-runs page now records where `fixture.sh new` puts a copy when given only a name, and
+that trusting that folder in Claude Code does not spare a copy the trust prompt: Claude Code
+2.1.283 carries a trusted folder's trust to a plain folder inside it, never to a git repository.
+No standing changed.
+
+## [2026-09-27] lint | fixture tickets go in the fixture's own store
+
+The fixture-runs page now records that a fixture run's ticket is filed in the fresh repository's
+own ticket store, through the tracker #11 added, and no longer in a GitHub repository kept for
+fixture tickets, which the user rejected. No standing changed.
+
 ## [2026-09-27] ingest | a resumed codex thread runs on the model its resume names
 
 Second harness page, from a recorded trial of codex 0.157.1 against a stand-in provider
@@ -87,6 +100,17 @@ postmaster's own repository on GitHub, when the user administers it, and why a d
 towards withholding. The drafts are shown to the user once, when a run's aftercare ends. No
 standing changed.
 
+## [2026-09-26] ingest | fixture runs test the flow end to end
+
+First page in a new Testing the flow area. A small app with two tickets whose outcome is known,
+one tightly specified and one open in design, each with acceptance tests written before any run
+and kept out of every run. A fixture run is scored from its records rather than its report, and
+a change to the coachman contract now merges only after one scores clean. The page records why
+the tests are hidden and how a fixture run gets its ticket: a GitHub repository kept for fixture
+tickets, since the waybill-only route skips the postmaster's own check of the ticket and the
+tracker with no service does not exist yet. Standing `claimed`, since no fixture run has been
+recorded.
+
 ## [2026-09-26] ingest | when a review loop should stop
 
 A hypothesis page for #59, standing `claimed`. It compiles the review of #36 round by round and
@@ -143,6 +167,7 @@ happens, with its own diagnosis and proposed fix, stops on a fault in a control 
 around anything else, and the postmaster turns the run's faults into tickets on postmaster's
 own tracker when the run closes. The page records why, and what a fault ticket may carry.
 Standing `claimed`, since no run bears on it yet.
+
 ## [2026-09-26] ingest | a run keeps the config it started with
 
 A decision page. A run now launches and resumes every lane and every leg on the config it

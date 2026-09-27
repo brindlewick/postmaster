@@ -46,6 +46,14 @@ What the services and CLIs postmaster depends on actually do.
 - [Herdr reads most agents' state from the screen](concepts/herdr-agent-states.md):
   **settled**, for Herdr 0.9.1. A settled state from its waits does not prove a turn finished.
 
+## Testing the flow
+
+How the flow is checked, and what each check can and cannot see.
+
+- [Fixture runs](concepts/fixture-runs.md): **claimed**. A run against a small app whose tickets
+  have hidden tests, scored from the run's own records, catches a broken contract between roles
+  and a run that ships the wrong thing, which the offline gate cannot.
+
 ## Decisions
 
 Why the design is shaped as it is.
