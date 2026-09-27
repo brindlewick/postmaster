@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Work out what a target project needs, rather than demanding it be configured.
-# Prints key=value lines. Empty value means "could not determine, ask the user".
+# Prints key=value lines. Empty value means "could not determine, ask the user". Each check a
+# change is verified by is a `check.<name>=<where it came from>: <what it shows>` line: declared in
+# the project's .postmaster/project.toml, or a default and which one (scripts/verify.sh).
 set -uo pipefail
+HERE=$(cd "$(dirname "$0")" && pwd -P)
 T=${1:?usage: discover-project.sh <path>}
 cd "$T" 2>/dev/null || { echo "cannot enter $T" >&2; exit 1; }
 
@@ -24,8 +27,20 @@ tracker=$(git log --oneline -200 2>/dev/null \
           | grep -oE '\b[A-Z][A-Z0-9]{1,9}-[0-9]+\b' | sed 's/-[0-9]*$//' \
           | sort | uniq -c | sort -rn | head -1 | awk '{print $2}')
 
+# The checks, declared or found as defaults; a declared gate is the gate.
+out=$("$HERE/verify.sh" checks . --gate "$gate" --lines 2>&1); rc=$?
+if [ $rc -eq 0 ]; then
+  checks=$(printf '%s\n' "$out" | awk -F'\t' 'NF >= 4')
+  gate=$(printf '%s\n' "$checks" | awk -F'\t' '$1 == "gate" {print $3}')
+  printf '%s\n' "$out" | awk -F'\t' 'NF < 4' | sed -n 's/^verify: warn: /warn=checks: /p' >&2
+else
+  checks=""
+  echo "warn=checks: $(printf '%s\n' "$out" | sed 's/^verify: //' | paste -sd' ' -)" >&2
+fi
+
 echo "gate=$gate"
 echo "docs=$(echo "$docs$dirs" | sed 's/ *$//')"
 echo "tracker_prefix=$tracker"
 echo "ambient_context=$( [ -f AGENTS.md ] && echo AGENTS.md || echo NONE )"
+printf '%s\n' "$checks" | awk -F'\t' 'NF >= 4 {print "check." $1 "=" $2 ": " $4}'
 [ -f AGENTS.md ] || echo "warn=no AGENTS.md: lanes that read no ambient file will start blind" >&2
