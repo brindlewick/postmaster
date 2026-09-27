@@ -21,6 +21,17 @@ The fixture-runs page now records that a fixture run's ticket is filed in the fr
 own ticket store, through the tracker #11 added, and no longer in a GitHub repository kept for
 fixture tickets, which the user rejected. No standing changed.
 
+## [2026-09-27] ingest | a resumed codex thread runs on the model its resume names
+
+Second harness page, from a recorded trial of codex 0.157.1 against a stand-in provider
+(`raw/trials/codex-resume-forms/`). A resume does not restore the model or the effort its thread
+was launched on. It runs on what it names, and otherwise on codex's default. It prints text
+without `--json`, and exits 2 on a prompt that starts with `-` unless `--` comes first.
+`launch.sh resume` passed none of these, so a resumed codex lane or coachman ran on codex's
+default. `harnesses.md` and `launch.sh` now carry the form the trial found. The trial also
+corrects the adapter: without the bypass flag, a resume runs `workspace-write` in a trusted
+worktree and read-only in an untrusted one. Standing `settled`, for codex 0.157.1. Issue #45.
+
 ## [2026-09-27] ingest | muse and mimo: what arrives, and resumes of a missing thread
 
 A trial of Muse Code 1.4.0 and MiMo Code 0.1.15 through `launch.sh`, recorded in
