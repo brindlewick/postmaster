@@ -6,7 +6,7 @@ Get one ticket implemented by several models at once, then judged before it land
 
 Two or more models implement the same ticket **independently, in separate worktrees, unable
 to see each other's work**. A coachman combines what each got right, puts the result through
-adversarial review rounds, and only then asks for a merge. Nothing lands on a green gate
+the adversarial review rounds its ticket names, and only then asks for a merge. Nothing lands on a green gate
 alone: the merge word comes from a person, or from the supervising postmaster when the
 config says it may.
 

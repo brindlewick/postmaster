@@ -41,7 +41,10 @@ ledger. `note` is the action for anything without its own verb.
    answerable yes or no, the direction, the turnpikes, and notes. A ticket that changes
    something a person uses carries a `User journey`. The direction is the user's: take it from
    the stream or the ticket's own text, or ask the user for it, and never write one yourself,
-   not even "None". A ticket is dispatchable when its criteria can be tested at the ticket's
+   not even "None". The turnpikes are the user's too: take them from the stream or the ticket,
+   or propose `default`, and never write fewer turnpikes than `default`, or `none`, on your own
+   judgment, even where `tracker.postmaster_may_create` lets you create the ticket. A ticket is
+   dispatchable when its criteria can be tested at the ticket's
    own interface and its scope names what is out. Anything else is not yet a ticket; it is a
    question for the user.
 3. **Check every ticket's shape** before you accept it or propose it:
@@ -84,10 +87,12 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    taken instead.
 2. **Base pre-flight.** `<tool>/scripts/check-target.sh <repo>` exits 0 and the main checkout is on
    the default branch. On 2, the dirty-tree question goes to the user (`SKILL.md`); you
-   never stash, reset or discard anything. The config is checked too: `<tool>/scripts/launch.sh form
-   coachman --leg <leg>` for each of `synthesis`, `review` and `ship`, `<tool>/scripts/launch.sh form
-   coachman_fallback`, and `<tool>/scripts/launch.sh form <lane>` for each lane in `team.workhorses`
-   and `team.reviewers`, each exit 0. A refusal names what the config must change: it goes to
+   never stash, reset or discard anything. The config is checked too, for the legs this run
+   will have, `<tool>/scripts/turnpikes.sh legs --line '<the turnpikes: line step 1 printed>'`:
+   `<tool>/scripts/launch.sh form coachman --leg <leg>` for each of those legs,
+   `<tool>/scripts/launch.sh form coachman_fallback`, `<tool>/scripts/launch.sh form <lane>` for
+   each lane in `team.workhorses`, and for each lane in `team.reviewers` when the legs include
+   `review`, each exit 0. A refusal names what the config must change: it goes to
    the user, and nothing is dispatched.
 3. **Exclude worktrees without a commit,** before any is cut, or the next pre-flight reads
    them as dirt: `grep -qxF '.worktrees/' <repo>/.git/info/exclude || echo '.worktrees/' >>
@@ -108,7 +113,8 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    build, browser suite, docs to read first, tracker, risk surfaces), the team from the
    config, `CHECKPOINT_MODE` from `ship.checkpoint_mode` and `MERGE_AUTHORITY` from
    `ship.merge_authority`, either overridden only where the user said so for this run, the
-   dispatch path and `<tool>`.
+   dispatch path and `<tool>`. Then `<tool>/scripts/turnpikes.sh legs <dispatch>` exits 0 and
+   prints the legs step 2 checked, before anything is launched.
 7. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. The
    coachman never touches the ticket's state before stage 3.
 
@@ -181,7 +187,8 @@ Act on the `NEXT` column, run by run, and log every action:
 - **GATE:** the ship card is complete. Stage F.
 - **DISPATCH:** the leg's `.leg-<n>-done` marker is present. Stage C for the leg after `n` in
   `<tool>/scripts/turnpikes.sh legs <dispatch>`, logging a `note` that names any leg the list leaves
-  out; after the ship leg, Stage G. An exit 2 from the script goes to the user.
+  out; after the ship leg, Stage G. If the script exits other than 0, nothing is dispatched:
+  its message goes to the user as Stage E step 3 says.
 - **REMOUNT:** the leg's process exited (`.leg-<n>-exited`) with no hand-off, escalation or
   card. Read the leg's `.err` file and the stream tail. A `.err` that opens with a `launch:`
   line is a refusal from `<tool>/scripts/launch.sh`: it goes to the user (Stage E step 3), and nothing
@@ -294,7 +301,8 @@ only with the user's word for that specific thing, and the word is logged.
 - Never trust a card, a summary or a hand-off over the code; verify before every grant.
 - Never launch more runs than `team.max_runs`, and never two runs on overlapping file
   surfaces.
-- Never edit `coachman.md`, `harnesses.md` or `trackers.md` while a leg is running; a leg
-  reads its runbook when it starts and a contract changed mid-run breaks the hand-off.
+- Never edit `coachman.md`, `harnesses.md`, `trackers.md` or `<tool>/scripts/turnpikes.sh` while
+  a leg is running; a leg reads its runbook when it starts and a contract changed mid-run breaks
+  the hand-off.
 - Every action is a `log-action` line at the moment it happens. If it is not in the ledger,
   it did not happen.

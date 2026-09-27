@@ -49,7 +49,13 @@ project's gate is not a turnpike, and runs on every run.
   [the review loop](review-loop.md), every change is re-reviewed in the next round by the
   gating lenses, bug and security. With only `style` named, nothing would re-review a style
   change, so every style finding goes to the ship card's Style residue for the user to pick
-  from.
+  from. A bug or security defect the style reviewer finds in such a run is not fixed either:
+  the coachman escalates it, and the user decides, since no lens would check the fix. The user
+  chose this on 2026-09-26.
+- **The turnpikes are the user's, like the direction.** The postmaster proposes `default` and
+  never writes fewer turnpikes, or `none`, on its own judgment, even where it may create tickets
+  without asking. Otherwise a postmaster that also says the merge word could remove every review
+  from a run with no person choosing or seeing it. The user chose this on 2026-09-26.
 - **A section holds names and nothing else.** A word that is not a turnpike is named by the
   check, so a reason for the choice goes in the ticket's notes, not beside the names.
 

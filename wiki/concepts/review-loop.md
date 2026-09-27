@@ -11,7 +11,7 @@ updated: 2026-09-26
 **Claim.** Style, bug and security review work better as one loop in one leg than as three
 passes in three legs. Each round runs every lens still open on one snapshot: all three in round
 1, then bug and security until clean. It should take fewer rounds, it needs one leg start-up
-instead of three, and every fix is re-reviewed by both gating lenses unless the loop stops at
+instead of three, and every fix is re-reviewed by the gating lenses unless the loop stops at
 its round cap.
 
 **Standing: claimed.** This is a decision taken on reasoning. No run has been recorded under
@@ -20,7 +20,7 @@ either design, so neither the time saved nor the coverage gained is measured yet
 
 ## The reasoning
 
-- **Each round's fixes are re-reviewed by both gating lenses.** When the passes ran in sequence,
+- **Each round's fixes are re-reviewed by the gating lenses.** When the passes ran in sequence,
   style, then bug, then security, a fix made in the security pass was re-checked only by
   security reviewers. No bug reviewer ever saw it. In the loop, every round after the first runs
   the bug and security lenses on the code as fixed so far, so both see each fix in the next

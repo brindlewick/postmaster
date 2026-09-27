@@ -108,7 +108,8 @@ what it wrote down. The boundaries are the run's own gates:
 
 The review leg runs only when the waybill names a turnpike that runs in it; without one, ship
 follows synthesis and starts from `handoff-1.md`. `<tool>/scripts/turnpikes.sh legs <dispatch>` prints
-the run's legs and the turnpikes each one runs.
+the run's legs and the turnpikes each one runs. A leg runs each turnpike listed for it from that
+turnpike's step in this runbook; a listed turnpike with no step here cannot run: escalate.
 
 **A leg starts by accepting the hand-off.** Read `brief.md`, this runbook, and the previous
 leg's hand-off, which the leg prompt names; log `handoff-accept`; then act. A decision the
@@ -257,8 +258,9 @@ from it.
   At harvest, cherry-pick that commit onto a scratch of each lane and run it: the result ranks
   the lanes on the ticket's criteria before you have read a line of either. Where the ticket's
   design question IS the interface, do not write them, say so on the checkpoint 1 card, and
-  compose on reading alone. Your reading of the ticket is a single reading: the reviewers see
-  these tests with the synthesis and may challenge them like any other line.
+  compose on reading alone. Your reading of the ticket is a single reading: in a run with a
+  review leg, the reviewers see these tests with the synthesis and may challenge them like any
+  other line.
 - **Harvest.** Each lane's final message is the last result line of its events stream
   (`harnesses.md` gives the per-harness location). For every workhorse, `WORKHORSE-SUMMARY.md` at the
   worktree root is the authoritative final act.
@@ -369,7 +371,8 @@ from it.
   wearing a verdict. Set the stage, `<tool>/scripts/stage.sh <dispatch> checkpoint-1`, then write it to
   `<dispatch>/checkpoint-1.md` with the audit bundle beside it and touch `.checkpoint-1-ready`. Autonomous mode: write `handoff-1.md` and end the leg. Consult mode:
   also write `ESCALATION.md` naming the card, touch `.escalation-ready`, and exit; the ruling
-  arrives as a resume, and the leg then ends with its hand-off.
+  arrives as a resume, and the leg then ends with its hand-off. In a run with no review leg,
+  this card doubles as the ship approval, said on the card.
 
 ## Stage 2 (leg 2): review, every lens in one loop
 
@@ -544,9 +547,11 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    included, as known context, so they closure-check each fix AND hunt new holes the fixes
    introduced. Done only when a round returns zero new verified gating findings and every fix
    verifies closed, so a round that applied any change, a style change included, is never the
-   last. A loop with no gating lens is round 1 alone, and applies nothing. Cap 3 rounds for the
-   whole loop, round 1 included, then STOP and escalate with the residue and your read on why it
-   is not converging; this is `CHECKPOINT_MODE`'s sole mid-flow stop in autonomous mode. Style
+   last. A loop with no gating lens is round 1 alone, and applies nothing: a verified gating
+   finding in it, a bug or security defect the style lens reported, is escalated with the card
+   instead of fixed, and a ruling that asks for the fix has it applied and the gate re-run, with
+   the card saying no lens re-reviewed it. Cap 3 rounds for the whole loop, round 1 included,
+   then STOP and escalate with the residue and your read on why it is not converging; this is `CHECKPOINT_MODE`'s sole mid-flow stop in autonomous mode. Style
    does not run again: a style lane DEGRADED in round 1 stays DEGRADED, and the card says how
    many lanes the style lens rested on.
 
@@ -562,9 +567,10 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    Then the gate status. Written to `<dispatch>/checkpoint-review.md` with its
    `.checkpoint-review-ready` marker. Autonomous mode: write the leg's hand-off and end it; the
    ship approval is stage 3's stop. Consult mode: escalate on the card and wait for the resume.
-   A ruling that asks for a change is applied and followed by another round, counted toward the
-   cap, and the card is written and escalated again; a round past the cap runs only when the
-   ruling says so. Any other ruling ends the leg with its hand-off. The card doubles as the ship
+   A ruling that asks for a change is applied; in a loop with a gating lens it is followed by
+   another round, counted toward the cap, and the card is written and escalated again, and a
+   round past the cap runs only when the ruling says so. Any other ruling, or a change applied in
+   a loop with no gating lens, ends the leg with its hand-off. The card doubles as the ship
    approval, said on the card.
 
 ## Stage 3 (leg 3): ship (review link, then a gated local merge)
@@ -622,7 +628,8 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    left open,** with its lens and disposition, one line each.
 
    **The ship card lists the turnpikes the run passed through,** exactly the waybill's, each
-   with the rounds it ran and its result, or `none` when the waybill names none. The gate is on
+   with the rounds it ran and its result as `checkpoint-review.md` records them, or `none` when
+   the waybill names none. The gate is on
    the card as the gate, never as a turnpike.
 
    **The ship card lists EVERY branch the run created and the state of each, not only the one
