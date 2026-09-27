@@ -17,6 +17,53 @@ git directory rather than a directory under `~/.postmaster/`, why the kind is di
 rather than configured, why a store is made or removed only from the main checkout, and what
 it costs. Standing `claimed`, since no run bears on it yet.
 
+## [2026-09-27] ingest | turnpikes: what the reviews decided
+
+Two decisions added to the turnpikes page, both the user's. In a run whose ticket names only
+style, a bug or security defect the style reviewer finds is escalated to the user rather than
+fixed, since no lens would check the fix. A ticket's turnpikes are the user's, like its
+direction, so the postmaster never names fewer than `default` on its own. The table of
+turnpikes is not changed while any run is in flight. Standing stays `claimed`.
+
+## [2026-09-27] lint | fault tickets: when they are shown, where they go, what they withhold
+
+The page on faults a run finds in postmaster now says that a fault ticket goes only to
+postmaster's own repository on GitHub, when the user administers it, and why a draft errs
+towards withholding. The drafts are shown to the user once, when a run's aftercare ends. No
+standing changed.
+
+## [2026-09-26] ingest | a lane may review through its harness's own skill
+
+A trial of claude 2.1.283's `/security-review`, launched as the flow launches a reviewer lane,
+recorded in `raw/trials/claude-security-review/`. In a scratch clone whose `origin/HEAD` leads
+back to the base, it reported the planted command injection at its file and line in both runs.
+In a worktree where `origin/HEAD` did not resolve, it returned success with an empty report after
+no turns. One run ended with three result lines, the report on the last. A new page records why
+a security lane may run its harness's own skill, at `claimed`, and what Claude Code's needs.
+
+## [2026-09-26] lint | each lens may have its own reviewer lanes
+
+The review-loop page records why a lens may name its own reviewer lanes: a lane chosen for one
+lens, for a skill its harness has for that lens alone, should not have to review every other
+lens as well. `[team.lens_reviewers]` names them, `scripts/reviewers.sh` resolves them, and the
+waybill carries them to the review stage. The page's standing stays `claimed`.
+
+## [2026-09-26] ingest | a ticket names its turnpikes
+
+A decision page, beside the one on the ticket shape. A ticket now names the turnpikes its run
+passes through: `default` for the style, bug and security reviews, fewer, or `none`, with no
+floor. A turnpike no longer means the gate: the gate runs on every run. The page records why,
+the decisions the ticket left open, and what the ledger will count. Standing `claimed`, since
+no run bears on it yet.
+
+## [2026-09-26] ingest | faults a run finds in postmaster become tickets
+
+Third page in the Decisions area. A run never fixes postmaster itself: it logs each fault as it
+happens, with its own diagnosis and proposed fix, stops on a fault in a control and works
+around anything else, and the postmaster turns the run's faults into tickets on postmaster's
+own tracker when the run closes. The page records why, and what a fault ticket may carry.
+Standing `claimed`, since no run bears on it yet.
+
 ## [2026-09-26] ingest | a run keeps the config it started with
 
 A decision page. A run now launches and resumes every lane and every leg on the config it

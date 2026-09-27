@@ -33,7 +33,7 @@ the same way, and merges are merges. There is no special mode.
 
 **Do not let a run rewrite the file that a live run is mid-way through executing and then
 expect either to be coherent.** If a ticket changes the coachman contract (markers, the
-waybill shape, completion detection), land it while the fleet is idle, or the next dispatch
+waybill shape, the turnpike table, completion detection), land it while the fleet is idle, or the next dispatch
 will read a new contract while an older run is still writing to the old one.
 
 Contract changes are the only category that needs the fleet quiet. Ordinary changes to
@@ -128,7 +128,7 @@ A three-role flow for getting one ticket implemented well by several models at o
 | role | what it does | where it is defined |
 |---|---|---|
 | **postmaster** | decomposes a stream into tickets, dispatches one coachman per ticket leg by leg, supervises, answers escalations, grants merges | `skills/postmaster/postmaster.md` (spawned by `SKILL.md`) |
-| **coachman** | drives one leg of one ticket; three legs, `synthesis`, `review` and `ship`, each a fresh coachman with a written hand-off between them, carry a ticket from waybill to ship card: harnessing the team, judging their work, running review rounds, clearing the gate | `skills/postmaster/coachman.md` |
+| **coachman** | drives one leg of one ticket; up to three legs, `synthesis`, `review` and `ship`, each a fresh coachman with a written hand-off between them, carry a ticket from waybill to ship card: harnessing the team, judging their work, running the turnpikes its ticket names, clearing the gate | `skills/postmaster/coachman.md` |
 | **the team** | several model lanes implementing the same ticket independently, in **blinkers**: separate worktrees, unable to see each other's work | `coachman.md`, lane table |
 
 The postmaster runs no model lanes and edits no source. A coachman never takes a second
@@ -139,9 +139,10 @@ thread id), that file gives the command, the script runs it. Where a launch runs
 user watches it, is the session host's: `skills/postmaster/hosts.md` records Herdr, tmux and no
 host at all, and `scripts/host.sh` runs every launch through them. `SKILL.md` is the front door —
 reached from this file or by typing `/postmaster`, it gets the machine ready if it is not and
-spawns a postmaster; `postmaster.md` is what that postmaster then does. A run is three coachman
-legs, `synthesis`, `review` and `ship`, each a fresh thread, so no context outlives a leg and a
-leg's hand-off document is the whole of what the next leg knows.
+spawns a postmaster; `postmaster.md` is what that postmaster then does. A run is up to three
+coachman legs, `synthesis`, `review` and `ship`, each a fresh thread, so no context outlives a
+leg and a leg's hand-off document is the whole of what the next leg knows. The review leg runs
+only when the ticket names a turnpike that runs in it.
 
 ## What the project has learned lives in the wiki
 
@@ -168,7 +169,9 @@ metaphor expresses them.
 **blinkers** worktree isolation between lanes · **workhorse** a lane that implements the ticket,
 as against a reviewer · **workhorse spec** a workhorse's own plan for the ticket, committed before
 its code (`WORKHORSE-SPEC.md`) · **lead horse / wheeler** the ranked lanes ·
-**turnpike** the gate a run must clear · **remount** resuming a stalled run ·
+**turnpike** a check a run must pass through before it ships, named by its ticket: `default` is
+the style, bug and security reviews, and the project's gate always runs besides them ·
+**remount** resuming a stalled run ·
 **spent** a run whose process is gone with no marker · **lame** a lane that is present but not pulling · **fleet** the
 whole system.
 
