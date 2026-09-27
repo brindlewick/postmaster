@@ -87,7 +87,7 @@ scripts/skill-refs.sh [--fix]                                      # every scrip
 scripts/find-projects.sh        # your git projects, most recent first
 scripts/check-target.sh  <path> # 0 usable · 1 not a repo · 2 dirty
 scripts/discover-project.sh <path>
-scripts/cut-scratch.sh <repo> <source-worktree> <dest> <commit>   # reviewer scratch, deps cloned
+scripts/cut-scratch.sh <repo> <source-worktree> <dest> <commit> [--clone <base>]  # reviewer scratch; --kind, --remove
 scripts/wait-for-markers.sh <dir> <glob> <count> <timeout>       # block until a round is in
 scripts/log-action.sh <dispatch> <actor> <action> <target> …     # one JSON line per action
 scripts/tool-faults.sh harvest|comment|file|decline <dispatch> …  # a closed run's tool faults, as tickets
@@ -99,7 +99,7 @@ scripts/github.sh <repo> board|create|edit|read|state|comment|list|access|search
 scripts/plane.sh create|edit|read|state|comment|list …             # Plane work items
 scripts/ticket-check.sh <repo> <id> | --body <file> | --splice …   # a ticket's shape; --splice writes approved parts in
 scripts/turnpikes.sh --list | resolve <text> | legs <dispatch>     # the turnpikes, and a run's legs
-scripts/launch.sh form|launch|resume <lane-or-role> …             # any lane or role, one command
+scripts/launch.sh form|launch|resume|skill <lane-or-role> …       # any lane or role, one command
 scripts/reviewers.sh lines|lanes <waybill> <lens>|lenses           # which lanes review under each lens
 scripts/host.sh detect|name|run|stop|close|spawn|send|wait|read … # where a launch runs, and where you watch it
 scripts/view-stream.sh < <events-file>                            # a harness's events, one line each
