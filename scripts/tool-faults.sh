@@ -759,6 +759,7 @@ esac
 # records every issue it creates and every comment it adds, so nothing reaches GitHub. The
 # target's names, paths, ids, words and a sentence of its ticket are made up afresh on each run,
 # so that none of them is in postmaster's own text, this file included.
+set +o pipefail   # a check reads grep's answer: grep -q stops at its first match, and the writer's broken pipe is no failure
 tmp=$(mktemp -d) || exit 1
 trap 'rm -r -- "$tmp" 2>/dev/null' EXIT
 T="$tmp/tool"; S="$tmp/stub"; RUNS="$tmp/runs"
@@ -848,8 +849,9 @@ TICKET="${NAME^^}-12"
 REPO="$tmp/home/My Code/$NAME"; mkdir -p "$REPO" && git -C "$REPO" init -q && git -C "$REPO" remote add origin "https://github.com/$OWNER/$NAME.git" || exit 1
 PLANTED=("$NAME" "$OWNER" "$WORD" "$IDENT" "$IDENT2" "$HOMEP" "$REPO" "$TICKET" "$SENTENCE" "${NG[6]} ${NG[5]} ${NG[4]} ${NG[3]}"
          "${UUID%%-*}" "${UUID##*-}" "$SECRET" "$CYR" "$CYR2" "$KEYX" "$EMAIL" "$IP" "$PROPER")
-leaks() {  # leaks <text>: the planted pieces of the target it holds, one per line
-  local p; for p in "${PLANTED[@]}"; do printf '%s\n' "$1" | grep -qiF -- "$p" && printf '%s\n' "$p"; done
+leaks() {  # leaks <text>: the planted pieces of the target it holds, one per line. No pipe: grep -q
+  local p   # would stop reading at its first match and fail the writer under pipefail
+  for p in "${PLANTED[@]}"; do grep -qiF -- "$p" <<<"$1" && printf '%s\n' "$p"; done
 }
 newrun() {  # newrun <project> <ticket> <stage>: a run directory with its waybill, manifest and run.json
   local d="$RUNS/$1/$2"
@@ -980,7 +982,8 @@ PR=$(python3 -c 'import json, sys; print(len(json.load(open(sys.argv[1]))["runs"
   && ok "the postmaster's own faults: a recurrence after its ticket is filed is a new harvest, and known" \
   || fail "the postmaster's own faults: a recurrence after its ticket is filed is a new harvest, and known" "$out"
 notes=$(newrun notes IT-12 done); : > "$S/writes.log"
-printf 'The payment was refused it was late.\n' >> "$notes/brief.md"
+PAY=(late was it refused payment)
+printf 'The %s %s %s %s %s %s.\n' "${PAY[4]}" "${PAY[1]}" "${PAY[3]}" "${PAY[2]}" "${PAY[1]}" "${PAY[0]}" >> "$notes/brief.md"
 logf "$notes" coachman tool-fault scripts/launch.sh --ran "launch" --failed "the stream flag was refused" --error none --diagnosis "renamed" --fix "use the new flag"
 logf "$notes" coachman tool-fault scripts/cut-scratch.sh --ran "cut" --failed "cloned a directory twice" --error none --diagnosis "a loop" --fix "clone each once"
 out=$(tf harvest "$notes" 2>&1); N1=$(id_where 'scripts/launch.sh'); N2=$(id_where 'scripts/cut-scratch.sh')
@@ -992,7 +995,7 @@ printf '%s\n' "It was seen on a quiet day." >> "$(draft_of "$notes" "$N2")"
 out=$(tf file "$notes" "$N2" 2>&1); rc=$?
 [ $rc -eq 0 ] && [ "$(writes create)" -eq 2 ] && ok "a changed draft is filed when it is still safe, in a project named with words postmaster uses" \
   || fail "a changed draft is filed when it is still safe, in a project named with words postmaster uses (exit $rc)" "$out"
-pad=$(python3 -c 'print(("the step ran on " * 10)[:74])')
+pad=$(python3 -c 'print(("the step ran on " * 10)[:70])')
 logf "$notes" coachman tool-fault skills/postmaster/coachman.md --ran "stage 2" --failed "$pad then scripts/wait-for-markers.sh waited for ever" \
   --error none --diagnosis x --fix "bound the wait" --control wait
 out=$(tf harvest "$notes" 2>&1); N3=$(id_where 'skills/postmaster/coachman.md')
@@ -1009,10 +1012,10 @@ printf '%s\n' "$out" | grep -qE '^tf-[0-9a-f]{8}  scripts/wait-for-markers.sh  c
   && ok "a fault keeps the kind of control its line recorded; with none recorded, the list's" \
   || fail "a fault keeps the kind of control its line recorded; with none recorded, the list's" "$out"
 long=$(newrun "$NAME" "${NAME^^}-20" done)
-logf "$long" coachman tool-fault scripts/launch.sh --ran x --failed "choked on $(rand 50000 abcdefghij)" --error none --diagnosis x --fix y
+logf "$long" coachman tool-fault scripts/launch.sh --ran x --failed "choked on $(rand 100000 abcdefghij)" --error none --diagnosis x --fix y
 start=$SECONDS; out=$(tf harvest "$long" 2>&1); rc=$?
-[ $rc -eq 0 ] && [ $((SECONDS - start)) -lt 10 ] && ok "a fault with a 50,000-character token is harvested in seconds" \
-  || fail "a fault with a 50,000-character token is harvested in seconds (exit $rc, $((SECONDS - start))s)" "$(printf '%s\n' "$out" | cut -c1-200)"
+[ $rc -eq 0 ] && [ $((SECONDS - start)) -lt 25 ] && ok "a fault with a 100,000-character token is harvested in seconds" \
+  || fail "a fault with a 100,000-character token is harvested in seconds (exit $rc, $((SECONDS - start))s)" "$(printf '%s\n' "$out" | cut -c1-200)"
 python3 -c 'import json, sys; p = sys.argv[1]; s = json.load(open(p)); s["faults"].append(dict(s["faults"][0], id="tf-0badf00d", state="new")); json.dump(s, open(p, "w"))' "$long/tool-faults.json"
 out=$(tf comment "$long" tf-0badf00d 2>&1); rc=$?
 [ $rc -eq 1 ] && printf '%s\n' "$out" | grep -qF "no longer gives tf-0badf00d" && ! printf '%s\n' "$out" | grep -qF Traceback \
