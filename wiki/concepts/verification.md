@@ -104,4 +104,6 @@ Each default is its own script with a self-test: `scripts/verify-examples.sh`,
 reports each check and where it came from, the waybill carries them, a workhorse's brief names
 them and its summary gives each one's command and exit. The coachman runs them at harvest and
 before each card, and the postmaster checks that the final commit has a result for each before
-it grants a merge.
+it grants a merge. The fixture app declares its own checks, and the remove ticket's User journey
+carries its journey as a transcript, so a fixture run exercises the declared path and the
+examples check alike.
