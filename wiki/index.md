@@ -55,8 +55,11 @@ Why the design is shaped as it is.
 - [A ticket's shape is checked before it is accepted](concepts/ticket-shape.md): **claimed**.
   A title, the problem, numbered criteria each answerable yes or no, and the user's direction,
   checked by a script before any ticket is dispatched. What is missing is asked of the user.
+- [A ticket names the turnpikes its run passes through](concepts/turnpikes.md): **claimed**.
+  `default` for the style, bug and security reviews, fewer, or `none`, with no floor. The
+  project's gate is not a turnpike and always runs.
 - [The review loop](concepts/review-loop.md): **claimed**. Style, bug and security review run
-  as one loop in one leg, so each round's fixes are re-reviewed by both gating lenses in the
+  as one loop in one leg, so each round's fixes are re-reviewed by the gating lenses a ticket names, in the
   next. It should also take fewer rounds.
 - [Live agents against markers and resumes](concepts/live-agents.md): **claimed**. Headless
   stays the default and live agents become an option; what it would take to change the default.

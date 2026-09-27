@@ -177,9 +177,10 @@ everything the coachman needs and nothing it must go and find:
 
 ```
 # Waybill: <TICKET>
+<the turnpikes: line <tool>/scripts/ticket-check.sh printed for the ticket, whole: turnpikes: <names> or turnpikes: none>
 
 ## Ticket
-<the ticket verbatim: problem, acceptance criteria, direction, notes, User journey if it has one>
+<the ticket verbatim: problem, acceptance criteria, direction, turnpikes, notes, User journey if it has one>
 
 ## Project profile
 repo: <abs path>          default branch: <name>       BASE: <sha>

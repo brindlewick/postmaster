@@ -6,7 +6,7 @@ Get one ticket implemented by several models at once, then judged before it land
 
 Two or more models implement the same ticket **independently, in separate worktrees, unable
 to see each other's work**. A coachman combines what each got right, puts the result through
-adversarial review rounds, and only then asks for a merge. Nothing lands on a green gate
+the adversarial review rounds its ticket names, and only then asks for a merge. Nothing lands on a green gate
 alone: the merge word comes from a person, or from the supervising postmaster when the
 config says it may.
 
@@ -15,7 +15,7 @@ config says it may.
 | role | does | never does |
 |---|---|---|
 | **postmaster** | splits a stream into tickets, dispatches one coachman per ticket, supervises, answers escalations, grants merges | run a model lane, edit source |
-| **coachman** | drives one leg of a ticket; three legs, synthesis, review and ship, each a fresh coachman, carry it from waybill to ship card with a written hand-off between them | take a second leg, merge on its own authority |
+| **coachman** | drives one leg of a ticket; up to three legs, synthesis, review and ship, each a fresh coachman, carry it from waybill to ship card with a written hand-off between them | take a second leg, merge on its own authority |
 | **the team** | several lanes implementing the same ticket in blinkers | see each other's work |
 
 ## Why several models rather than one good one
@@ -98,6 +98,7 @@ scripts/run-meta.sh <dispatch> <repo>                             # run.json: wh
 scripts/github.sh <repo> board|create|edit|read|state|comment|list|access|search # GitHub Issues on a Projects board
 scripts/plane.sh create|edit|read|state|comment|list …             # Plane work items
 scripts/ticket-check.sh <repo> <id> | --body <file> | --splice …   # a ticket's shape; --splice writes approved parts in
+scripts/turnpikes.sh --list | resolve <text> | legs <dispatch>     # the turnpikes, and a run's legs
 scripts/launch.sh form|launch|resume <lane-or-role> …             # any lane or role, one command
 scripts/host.sh detect|name|run|stop|close|spawn|send|wait|read … # where a launch runs, and where you watch it
 scripts/view-stream.sh < <events-file>                            # a harness's events, one line each
