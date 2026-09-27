@@ -94,7 +94,9 @@ scores clean is found to have shipped something its ticket did not ask for.
 `scripts/fixture.sh` makes a run's repository and files its ticket (`new`), scores a finished
 run (`score`), and runs a ticket's hidden tests against any copy of the app (`hidden`). The app
 and its tickets are in `fixtures/`. `new` puts a copy under `~/Code/fixtures` unless it is given a
-path. Claude Code stops at a trust prompt in a folder it has not been told to trust, and trusting
-a folder covers every folder inside it, so the user trusts `~/Code/fixtures` once and a
-postmaster started in any copy there begins without waiting for an answer. `AGENTS.md` holds a change to the coachman contract back
+path, so every copy is in one place. Trusting that folder in Claude Code does not spare a copy
+the trust prompt. Claude Code 2.1.283, started in a fresh folder inside a trusted one, asked
+nothing for a plain folder and asked for a git repository. Controls: it asked in a folder with no
+trusted parent, and not in the trusted folder itself. A copy is a git repository, so a postmaster
+started in one waits for the user to answer the prompt, once per copy. `AGENTS.md` holds a change to the coachman contract back
 from merging until a fixture run dispatched from its branch scores clean.

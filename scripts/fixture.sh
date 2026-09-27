@@ -16,10 +16,10 @@
 # new     makes <dest> a fresh git repo holding the committed app, one commit on main, outside
 #         every other repo, so a run never touches this repo's branches, worktrees or run records.
 #         A bare name goes under ~/Code/fixtures, or $POSTMASTER_FIXTURES when that is set; a
-#         path is used as given. Claude Code asks before it works in a folder it has not been
-#         told to trust, and trusting a folder covers every folder inside it: trust
-#         ~/Code/fixtures once, and a postmaster started in any copy there does not stop at the
-#         prompt. It has no remote. It makes the repo's own ticket store (scripts/local.sh),
+#         path is used as given. Claude Code asks whether to trust each copy the first time a
+#         session starts in it, though ~/Code/fixtures is trusted: its trust covers a plain
+#         folder inside a trusted one, never a git repository. The user answers it once per
+#         copy. It has no remote. It makes the repo's own ticket store (scripts/local.sh),
 #         files the ticket there and prints its number to dispatch against <dest>; a run reads
 #         it through the local tracker whatever the config names (scripts/tracker-kind.sh).
 # score   scores a finished run from its records, never its report: the ticket its waybill
