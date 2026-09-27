@@ -108,8 +108,9 @@ it prints. A plane tracker needs the target's project identifier: the discovered
 `tracker_prefix` when the target has shipped a ticket, otherwise `scripts/plane.sh projects`
 lists the candidates and the user picks. A local tracker needs its store: exit 3 from
 `scripts/local.sh "$TARGET" store` means there is none yet, so propose `store init` to the
-user. Report what you found on the launch card, and ask only about what you could not
-determine.
+user. A github target with no origin remote can have no board, and `discover-project.sh` warns
+of it: propose `scripts/local.sh "$TARGET" store init` to the user instead. Report what you
+found on the launch card, and ask only about what you could not determine.
 **If the project has no `AGENTS.md` or equivalent, say so.** Lanes that read no ambient
 context start blind, and that has silently handicapped a lane before. Ask the user for
 the project's risk surfaces (what it binds, allowlists, spawns and serves) where the docs do

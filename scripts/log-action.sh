@@ -27,7 +27,7 @@ DETAIL=${*:-}
 VERBS=" dispatch resume harvest synthesize review-launch review-harvest finding apply escalate rule ticket-check ticket-create ticket-edit ticket-state ticket-comment gate merge teardown degrade handoff-accept handoff stage note "
 case "$VERBS" in *" $ACTION "*) ;; *) echo "log-action: '$ACTION' is not an action in the set:$VERBS" >&2; exit 1 ;; esac
 
-DISPATCH=$(cd "$DISPATCH" 2>/dev/null && pwd -P) || { echo "log-action: no such dir: $1" >&2; exit 1; }
+DISPATCH=$(CDPATH= cd -P -- "$DISPATCH" 2>/dev/null && pwd -P) || { echo "log-action: no such dir: $1" >&2; exit 1; }
 RUN=$(basename "$DISPATCH")
 PROJECT=$(basename "$(dirname "$DISPATCH")")
 TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)

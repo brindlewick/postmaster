@@ -2,10 +2,12 @@
 # Work out what a target project needs, rather than demanding it be configured.
 # Prints key=value lines. Empty value means "could not determine, ask the user".
 set -uo pipefail
-HERE=$(cd "$(dirname "$0")" && pwd -P)
-CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
+HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 T=${1:?usage: discover-project.sh <path>}
-cd "$T" 2>/dev/null || { echo "cannot enter $T" >&2; exit 1; }
+# The tracker kind, before the cd, so a relative path or config is read from the caller's directory.
+kind=$("$HERE/tracker-kind.sh" "$T" 2>/dev/null) || kind=""
+CDPATH= cd -P -- "$T" 2>/dev/null || { echo "cannot enter $T" >&2; exit 1; }
 
 gate=""
 [ -f package.json ] && ! command -v jq >/dev/null 2>&1 && echo "warn=jq not installed: package.json scripts were not read" >&2
@@ -21,12 +23,6 @@ fi
 docs=$(ls AGENTS.md CLAUDE.md README.md CONTRIBUTING.md 2>/dev/null | tr '\n' ' ')
 dirs=$(ls -d wiki docs .github 2>/dev/null | tr '\n' ' ')
 
-# The tracker kind: a repo whose local ticket store exists uses it, whatever the config names;
-# any other repo uses the config's kind (skills/postmaster/trackers.md, local).
-if "$HERE/local.sh" . store >/dev/null 2>&1; then kind=local
-else kind=$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb")).get("tracker", {}).get("kind", "github"))' "$CONFIG" 2>/dev/null) || kind=""
-fi
-
 # The tracker is visible in how the project already writes commits; nothing to configure.
 tracker=$(git log --oneline -200 2>/dev/null \
           | grep -oE '\b[A-Z][A-Z0-9]{1,9}-[0-9]+\b' | sed 's/-[0-9]*$//' \
@@ -38,3 +34,6 @@ echo "tracker=$kind"
 echo "tracker_prefix=$tracker"
 echo "ambient_context=$( [ -f AGENTS.md ] && echo AGENTS.md || echo NONE )"
 [ -f AGENTS.md ] || echo "warn=no AGENTS.md: lanes that read no ambient file will start blind" >&2
+[ "$kind" = github ] && ! git remote get-url origin >/dev/null 2>&1 \
+  && echo "warn=no origin remote, so no github board: with the user's word, scripts/local.sh <repo> store init gives it a local store" >&2
+exit 0

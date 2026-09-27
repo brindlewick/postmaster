@@ -20,7 +20,7 @@
 # Control: the written file is parsed back as TOML where a parser is available, so a config
 # that would fail to load is never left on disk as if it were fine.
 set -uo pipefail
-HERE=$(cd "$(dirname "$0")" && pwd -P)
+HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 DRY=0; ANSWERS=""
 CONFIG="$HOME/.postmaster/config.toml"
 while [ $# -gt 0 ]; do

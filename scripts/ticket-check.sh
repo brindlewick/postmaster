@@ -3,9 +3,10 @@
 # acceptance criteria each answerable yes or no, and the direction. This is the executable form
 # of the ticket shape in skills/postmaster/trackers.md.
 #
-#   ticket-check.sh <repo> <ticket-id>                    through the repo's tracker adapter:
-#                                                         local.sh when its store exists, else
-#                                                         the one the config names ([tracker] kind)
+#   ticket-check.sh <repo> <ticket-id>                    through the adapter of the kind the repo
+#                                                         uses, as scripts/tracker-kind.sh names it:
+#                                                         local when its store exists, else the
+#                                                         config's [tracker] kind
 #   ticket-check.sh --body <body-file> [--title <title>]  a body file, as an adapter's create
 #                                                         takes it; the title is judged only when
 #                                                         --title gives one
@@ -48,8 +49,7 @@
 #           sections file that is not a list of `##` sections
 #   exit 2  malformed; one line per missing or malformed part on stdout, the part named first
 set -uo pipefail
-HERE=$(cd "$(dirname "$0")" && pwd -P)
-CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
+HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 usage() { echo "usage: ticket-check.sh <repo> <ticket-id> | --body <body-file> [--title <title>] | --splice <base-body> <sections> | --self-test" >&2; exit 1; }
 
 run_py() {  # run_py body <file> <title> | printed <adapter-read-output> | splice <base> <sections>
@@ -306,24 +306,16 @@ PY
 
 workdir() {  # a temporary directory for this run, removed on exit or interrupt
   WORK=$(mktemp -d) || exit 1
-  trap 'rm -r -- "$WORK" 2>/dev/null' EXIT
+  trap 'rm -r -- "$WORK" </dev/null 2>/dev/null' EXIT
   trap 'exit 130' INT; trap 'exit 143' TERM
 }
 copy_in() {  # copy_in <file> <name>; read it once, so a pipe or /dev/stdin works too
   { [ -r "$1" ] && [ ! -d "$1" ] && cat -- "$1" > "$WORK/$2"; } || { echo "ticket-check: cannot read $1" >&2; exit 1; }
 }
 
-config_kind() {  # the config's [tracker] kind, github when it names none
-  [ -f "$CONFIG" ] || { echo "ticket-check: no config at $CONFIG (POSTMASTER_CONFIG overrides the path)" >&2; return 1; }
-  python3 -c 'import tomllib' 2>/dev/null || { echo "ticket-check: python3 3.11 or newer is needed to read $CONFIG" >&2; return 1; }
-  python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb")).get("tracker", {}).get("kind", "github"))' "$CONFIG" 2>/dev/null \
-    || { echo "ticket-check: $CONFIG does not parse" >&2; return 1; }
-}
-
 through_adapter() {  # through_adapter <repo> <id>; checks the ticket as the repo's tracker adapter reads it
   local kind rc
-  # A repo whose local ticket store exists uses it, whatever the config names (trackers.md, local).
-  if "$HERE/local.sh" "$1" store >/dev/null 2>&1; then kind=local; else kind=$(config_kind) || return 1; fi
+  kind=$("$HERE/tracker-kind.sh" "$1") || return 1   # it says why on stderr
   case $kind in
     github) "$HERE/github.sh" "$1" read "$2" > "$WORK/read.txt" ;;
     plane)  "$HERE/plane.sh" read "$2" > "$WORK/read.txt" ;;
@@ -353,8 +345,10 @@ esac
 
 # --- self-test ----------------------------------------------------------------------------
 tmp=$(mktemp -d) || exit 1
-trap 'rm -r -- "$tmp" 2>/dev/null' EXIT
+trap 'rm -r -- "$tmp" </dev/null 2>/dev/null' EXIT
 SELF="$HERE/ticket-check.sh"
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
+git init -q "$tmp" || exit 1   # a repository with no local store, for the checks by id
 fails=0
 ok()   { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/         /'; fails=$((fails+1)); }
@@ -408,6 +402,10 @@ mkdir "$tmp/bin" && cp "$SELF" "$tmp/bin/ticket-check.sh"
 printf '[tracker]\nkind = "github"\n' > "$tmp/github.toml"
 adapter() { printf '#!/usr/bin/env bash\n%s\n' "$1" > "$tmp/bin/github.sh"; chmod +x "$tmp/bin/github.sh"; }
 through() { out=$(POSTMASTER_CONFIG="$tmp/github.toml" "$tmp/bin/ticket-check.sh" "$tmp" 7 2>&1); rc=$?; }
+cp "$HERE/tracker-kind.sh" "$tmp/bin/"
+localsh() { printf '#!/usr/bin/env bash\n%s\n' "$1" > "$tmp/bin/local.sh"; chmod +x "$tmp/bin/local.sh"; }
+NOSTORE="case \$2 in store) exit 3 ;; *) echo \"stand-in local.sh: \$*\" >&2; exit 1 ;; esac"
+localsh "$NOSTORE"   # the repo has no local store, unless a control says so
 
 echo "positive controls"
 body "$P" "$A" "$D" "$N"; run "$T"
@@ -649,7 +647,6 @@ printf '%s\n\n%s\n' "$D" "$D" > "$tmp/sections.md"; splice
 [ $rc -eq 1 ] && ok "the same section twice" || fail "the same section twice (exit $rc)" "$out"
 
 echo "controls: a repo whose local ticket store exists is read through local.sh, whatever the config names"
-localsh() { printf '#!/usr/bin/env bash\n%s\n' "$1" > "$tmp/bin/local.sh"; chmod +x "$tmp/bin/local.sh"; }
 localsh "case \$2 in store) exit 0 ;; read) : > '$tmp/local-read'; cat -- '$tmp/printed.txt' ;; *) exit 1 ;; esac"
 adapter ": > '$tmp/github-read'; exit 1"; rm -f "$tmp/local-read" "$tmp/github-read"; through
 [ $rc -eq 0 ] && [ -e "$tmp/local-read" ] && [ ! -e "$tmp/github-read" ] \
@@ -660,7 +657,12 @@ adapter ": > '$tmp/github-read'; cat -- '$tmp/printed.txt'"; rm -f "$tmp/local-r
 [ $rc -eq 0 ] && [ -e "$tmp/github-read" ] && [ ! -e "$tmp/local-read" ] \
   && ok "a repo with no store is read through the kind the config names" \
   || fail "a repo with no store is read through the kind the config names (exit $rc)" "$out"
-rm -f "$tmp/bin/local.sh"
+localsh "case \$2 in store) echo 'local: not a git repository' >&2; exit 1 ;; *) : > '$tmp/local-read'; exit 1 ;; esac"
+rm -f "$tmp/local-read" "$tmp/github-read"; through
+[ $rc -eq 1 ] && [ ! -e "$tmp/github-read" ] && [ ! -e "$tmp/local-read" ] && printf '%s\n' "$out" | grep -qF "cannot look for a local store" \
+  && ok "a store that cannot be looked for stops the check, and no adapter is read" \
+  || fail "a store that cannot be looked for stops the check, and no adapter is read (exit $rc)" "$out"
+localsh "$NOSTORE"
 
 echo
 [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }

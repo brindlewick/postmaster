@@ -14,7 +14,8 @@ A decision page under Decisions, from issue #11. A tracker with no service keeps
 repository's tickets in its own git directory, outside the working tree and every branch, and
 a repository whose store exists uses it whatever the config names. The page records why the
 git directory rather than a directory under `~/.postmaster/`, why the kind is discovered
-rather than configured, and what that costs. Standing `claimed`, since no run bears on it yet.
+rather than configured, why a store is made or removed only from the main checkout, and what
+it costs. Standing `claimed`, since no run bears on it yet.
 
 ## [2026-09-26] ingest | follow-up: claude's trust question, and claude killed mid-turn
 

@@ -93,7 +93,8 @@ scripts/run-log.sh <dispatch> <text> | --section <title> | --close # the narrati
 scripts/run-meta.sh <dispatch> <repo>                             # run.json: what a run started from
 scripts/github.sh <repo> board|create|edit|read|state|comment|list # GitHub Issues on a Projects board
 scripts/plane.sh create|edit|read|state|comment|list …             # Plane work items
-scripts/local.sh <repo> store|create|edit|read|state|comment|list  # tickets in the repo's own git directory
+scripts/local.sh <repo> store|create|edit|read|title|state|comment|list # tickets in the repo's git directory
+scripts/tracker-kind.sh <repo>                                    # the tracker kind a repo uses: local when its store exists
 scripts/ticket-check.sh <repo> <id> | --body <file> | --splice …   # a ticket's shape; --splice writes approved parts in
 scripts/launch.sh form|launch|resume <lane-or-role> …             # any lane or role, one command
 scripts/host.sh detect|name|run|stop|close|spawn|send|wait|read … # where a launch runs, and where you watch it

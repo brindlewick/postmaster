@@ -5,7 +5,7 @@
 #
 #   exit 0 always; the table is the result
 set -uo pipefail
-HERE=$(cd "$(dirname "$0")" && pwd -P)
+HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
 row() { printf '  %-12s %-12s %s\n' "$1" "$2" "$3"; }
 row TRACKER AVAILABLE "HOW IT IS REACHED"

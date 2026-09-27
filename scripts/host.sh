@@ -48,7 +48,7 @@
 #   exit 3  spawn, send, wait or read with no host that keeps an interactive session; or a send
 #           or wait that did not settle, stopped at an approval or a question, or showed no turn
 set -uo pipefail
-HERE=$(cd "$(dirname "$0")" && pwd -P)
+HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 SELF=$HERE/$(basename "$0")
 SOURCE=custom:postmaster        # Herdr source for a launch's agent state
 META=custom:postmaster-meta     # Herdr source for its name and ownership tokens
@@ -343,7 +343,7 @@ run_cmd() {
   [ -d "$cwd" ] || launch_failed "no such directory: $cwd"
   local claim_wait
   claim_wait=$(count "${POSTMASTER_HOST_CLAIM_WAIT:-20}" POSTMASTER_HOST_CLAIM_WAIT) || launch_failed "no launch: POSTMASTER_HOST_CLAIM_WAIT"
-  cwd=$(cd "$cwd" && pwd -P); name=$(clean "$name")
+  cwd=$(CDPATH= cd -P -- "$cwd" && pwd -P); name=$(clean "$name")
   [ -n "$pidfile" ] && rm -f -- "$pidfile"          # never an earlier launch's pid
   [ -n "$marker" ] && rm -f -- "$marker"            # or its marker
 
@@ -467,7 +467,7 @@ runner() {
   [ -n "$err" ] && { e=$err; : > "$err"; }
   [ "$append" = 1 ] && [ -f "$out" ] && from=$(wc -c < "$out" | tr -d ' ')
   t0=$(date +%s)
-  ( cd "$rundir" && exec python3 -c "$START_CHILD" "${argv[@]}" 3< <(printf '%s\0' "${childenv[@]}") ) \
+  ( CDPATH= cd -- "$rundir" && exec python3 -c "$START_CHILD" "${argv[@]}" 3< <(printf '%s\0' "${childenv[@]}") ) \
     >> "$o" 2>> "$e" < /dev/null &
   cpid=$!
   [ -n "$pidfile" ] && printf '%s\n' "$cpid" > "$pidfile"
@@ -507,7 +507,7 @@ runner() {
 worktree_arg() {  # worktree_arg <dir> <what>: its real path, or die
   [ -n "${1:-}" ] || die "usage: host.sh $2 <worktree>"
   [ -d "$1" ] || die "no such directory: $1"
-  (cd "$1" && pwd -P)
+  (CDPATH= cd -P -- "$1" && pwd -P)
 }
 
 stop_cmd() {  # stop <worktree>: every launch still running in it, whatever its host
@@ -604,7 +604,7 @@ spawn_cmd() {
   done
   [ $# -gt 0 ] || die "spawn needs a command after --"
   [ -d "$cwd" ] || die "no such directory: $cwd"
-  cwd=$(cd "$cwd" && pwd -P); label=$(clean "${label:-$handle}"); handle=$(handle_of "$handle")
+  cwd=$(CDPATH= cd -P -- "$cwd" && pwd -P); label=$(clean "${label:-$handle}"); handle=$(handle_of "$handle")
   # The caller's own settings for the flow reach the session, as they reach every launch.
   local tmux_env=()
   PLACE_ENV=()
@@ -728,7 +728,7 @@ test_setup() {  # a scratch repository with worktrees, and the commands the test
   git init -q -b main "$repo" && git -C "$repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m first || exit 1
   local w; for w in T-1-luna T-1-sol; do git -C "$repo" worktree add -q ".worktrees/$w" -b "wb/$w" || exit 1; done
   git -C "$repo" worktree add -q --detach .worktrees/T-1-rev-luna || exit 1
-  repo=$(cd "$repo" && pwd -P); rname=$(basename "$repo")
+  repo=$(CDPATH= cd -P -- "$repo" && pwd -P); rname=$(basename "$repo")
   mkdir -p "$tmp/caller" "$tmp/logs" "$tmp/run-1"
   cat > "$tmp/caller/fixed.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -781,7 +781,7 @@ self_test() {
   # pane or window runs what it is given with only a server's environment, never the caller's,
   # so the environment a launch sees has to have come through host.sh.
   test_setup
-  trap 'rm -r -- "$tmp" 2>/dev/null' EXIT
+  trap 'rm -r -- "$tmp" </dev/null 2>/dev/null' EXIT
   mkdir -p "$tmp/bin" "$tmp/sys" "$tmp/stub"
   local t p
   for t in bash sh python3 git env cat mkdir rmdir rm mkfifo mktemp sleep date touch wc tr sed awk \
@@ -1114,7 +1114,7 @@ live_test() {
   opened=() tsession=""
   trap 'for (( i=${#opened[@]}-1; i>=0; i-- )); do herdr workspace close "${opened[i]}" >/dev/null 2>&1; done
         [ -n "$tsession" ] && tmux kill-session -t "=$tsession" >/dev/null 2>&1
-        rm -r -- "$tmp" 2>/dev/null' EXIT
+        rm -r -- "$tmp" </dev/null 2>/dev/null' EXIT
   openspace() { herdr worktree list --cwd "$1" 2>/dev/null | python3 -c 'import json, sys
 d = json.load(sys.stdin)
 print(([w.get("open_workspace_id") for w in d["result"]["worktrees"] if w["path"] == sys.argv[1]] or [None])[0] or "")' "$1" 2>/dev/null; }

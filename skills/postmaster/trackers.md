@@ -148,11 +148,12 @@ The store is `postmaster/tickets/` in the repository's common git directory
 (`.git/postmaster/tickets/` in a plain checkout): outside the working tree and every branch,
 the same for every worktree, and removed with the repository. A ticket is `<n>.md`, its body
 as written, and `<n>.json`, its title, state, labels, created time and log. The ticket id is
-its number, and the prefix discovery reads from commit messages is `#`.
+its number, written `#<n>` as on GitHub.
 
 **A repo whose store exists uses this tracker, whatever `[tracker] kind` names**, and any other
-repo uses the config's kind. `scripts/discover-project.sh` reports the kind a target uses as
-`tracker=`, and `scripts/ticket-check.sh <repo> <id>` reads through it.
+repo uses the config's kind. `scripts/tracker-kind.sh <repo>` names the kind a repo uses:
+`scripts/discover-project.sh` reports it as `tracker=`, and `scripts/ticket-check.sh <repo>
+<id>` reads through it.
 
 Everything goes through `scripts/local.sh`, which takes any checkout of the repo, a linked
 worktree included:
@@ -160,25 +161,33 @@ worktree included:
 ```sh
 scripts/local.sh <repo> store                         # the store's path; exit 3 if none
 scripts/local.sh <repo> store init                    # make the store
+scripts/local.sh <repo> store remove                  # remove a store that holds no ticket
 scripts/local.sh <repo> create "<title>" <body-file>  # prints the new number
 scripts/local.sh <repo> read <n>
-scripts/local.sh <repo> read <n> --body               # the body alone, exactly as stored
+scripts/local.sh <repo> read <n> --body               # the body alone, as stored
 scripts/local.sh <repo> edit <n> <body-file> <base-file>
+scripts/local.sh <repo> title <n> "<title>"
 scripts/local.sh <repo> state <n> in-progress
 scripts/local.sh <repo> comment <n> coachman "<text>"
 scripts/local.sh <repo> list [state]                  # every ticket, grouped by state
 ```
 
-- **Store:** `store init` makes one, only on the user's word. Every other command on a repo
-  without a store exits 3.
+- **Store:** `store init` makes one and `store remove` removes one that holds no ticket, each
+  only on the user's word and only from the repo's main checkout; from a linked worktree both
+  refuse. Every other command on a repo without a store exits 3. `discover-project.sh` warns
+  when a github target has no origin remote, and so can have no board: a store is the one to
+  propose.
 - **Read:** `read` prints the ticket, with a `path:` line naming its body file. `read --body`
-  prints the body alone, exactly as stored. `list` is where the user sees the tickets: one
-  line each, grouped by state in the flow's order.
+  prints the body alone, as stored, ending in a newline. `list` is where the user sees the
+  tickets: one line each, grouped by state in the flow's order. It names on stderr each ticket
+  whose file it cannot read, and exits 1.
 - **Create:** `create` with a body file in the ticket shape; the ticket starts in todo. It
   refuses an empty body, and a title that is empty or more than one line.
 - **Edit:** `edit` replaces the body with `<body-file>`, and never the title. `<base-file>` is
   the body as `read --body` printed it when the change was drafted: if the ticket no longer
-  matches it, `edit` writes nothing and exits 4.
+  matches it, `edit` writes nothing and exits 4. Either file may be `/dev/stdin`.
+- **Title:** `title` is where the user sets a title, as they would on GitHub's page. Like any
+  change to a ticket's text, it waits for the user's word.
 - **Set state:** `state`. All five states are the ticket's own, `blocked` included.
 - **Comment:** `comment`, the same dated line as on GitHub, kept in the ticket's log.
 
