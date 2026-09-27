@@ -1,7 +1,7 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # Log
@@ -16,6 +16,13 @@ fixed, since no lens would check the fix. A ticket's turnpikes are the user's, l
 direction, so the postmaster never names fewer than `default` on its own. The table of
 turnpikes is not changed while any run is in flight. Standing stays `claimed`.
 
+## [2026-09-27] lint | fault tickets: when they are shown, where they go, what they withhold
+
+The page on faults a run finds in postmaster now says that a fault ticket goes only to
+postmaster's own repository on GitHub, when the user administers it, and why a draft errs
+towards withholding. The drafts are shown to the user once, when a run's aftercare ends. No
+standing changed.
+
 ## [2026-09-26] ingest | a ticket names its turnpikes
 
 A decision page, beside the one on the ticket shape. A ticket now names the turnpikes its run
@@ -23,6 +30,14 @@ passes through: `default` for the style, bug and security reviews, fewer, or `no
 floor. A turnpike no longer means the gate: the gate runs on every run. The page records why,
 the decisions the ticket left open, and what the ledger will count. Standing `claimed`, since
 no run bears on it yet.
+
+## [2026-09-26] ingest | faults a run finds in postmaster become tickets
+
+Third page in the Decisions area. A run never fixes postmaster itself: it logs each fault as it
+happens, with its own diagnosis and proposed fix, stops on a fault in a control and works
+around anything else, and the postmaster turns the run's faults into tickets on postmaster's
+own tracker when the run closes. The page records why, and what a fault ticket may carry.
+Standing `claimed`, since no run bears on it yet.
 
 ## [2026-09-26] ingest | a run keeps the config it started with
 

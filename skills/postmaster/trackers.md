@@ -73,6 +73,8 @@ never an agent, and `<tool>/scripts/probe-trackers.sh` says whether they have.
 <tool>/scripts/github.sh <repo> state <n> in-progress
 <tool>/scripts/github.sh <repo> comment <n> coachman "<text>"
 <tool>/scripts/github.sh <repo> list [state]
+<tool>/scripts/github.sh <repo> access                       # the user's permission: ADMIN, WRITE, READ...
+<tool>/scripts/github.sh <repo> search "<text>"              # issues holding it: number, open or closed, title
 ```
 
 - **Board:** one per target repo, found through the repo's project links. A repo with no
@@ -83,7 +85,9 @@ never an agent, and `<tool>/scripts/probe-trackers.sh` says whether they have.
 - **Read:** `read`, which prints the issue with its state worked out from the issue and
   the board together. `read --body` prints the body alone, exactly as stored.
 - **Create:** `create` with a body file in the ticket shape; the issue is added to the board
-  in Todo. An empty body file is refused.
+  in Todo. An empty body file is refused, and so is a board with no Todo column, before
+  anything is created. An issue created but not put on the board still prints its number, and
+  exits 5.
 - **Edit:** `edit` replaces the issue's body with `<body-file>`, and never its title.
   `<base-file>` is the body as `read --body` printed it when the change was drafted: if the
   issue no longer matches it, `edit` writes nothing and exits 4. It refuses an empty body
@@ -94,6 +98,9 @@ never an agent, and `<tool>/scripts/probe-trackers.sh` says whether they have.
 - **Comment:** `comment`, dated to the minute, actor first (`postmaster`, `coachman`, or the
   user's word for themselves). The ready-to-merge comment is one such line pointing at
   `<dispatch>/card.md`.
+- **Access:** `access` prints the user's permission on the repository, as GitHub names it.
+- **Search:** `search`, GitHub's search of titles, bodies and comments for a phrase. It is an
+  index, not an exact match, so a caller that needs one reads each issue it names.
 
 ## plane
 
@@ -155,3 +162,12 @@ it, and the setup session records how each of the five demands is met in
 above, so the user's instance never enters the flow. Until that file exists the tracker is
 not configured, however reachable it is. One written before a body could be replaced says
 nothing about it; until it does, the user makes an approved change in the tracker.
+
+## postmaster's own tracker
+
+A fault a run meets in postmaster itself is filed on postmaster's own tracker, never the
+target's. That tracker is GitHub, whatever the config's kind: the repository the origin of
+postmaster's own checkout names, when postmaster is a checkout of its own and `access` says
+ADMIN, since nothing is filed on a repository the user does not own.
+`<tool>/scripts/tool-faults.sh` finds a fault's ticket with `search` and files one with
+`create`. With no such tracker, the fault stays in the run's records.
