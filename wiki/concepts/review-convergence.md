@@ -3,18 +3,18 @@ title: When a review loop should stop, and what counts toward it
 type: concept
 standing: claimed
 sources: [runs/2026-09-26-postmaster-36, papers/petersson-2004-capture-recapture, papers/kemerer-paulk-2009-review-rate, papers/czerwonka-2015-code-reviews, papers/tian-2016-severity, papers/purushothaman-perry-2005-small-changes, papers/wang-lin-2026-iterative-bug-fixing, papers/gao-2026-looping-not-reliability, papers/olausson-2024-self-repair, papers/wang-2026-solved-issues, papers/ullah-2024-llm-vulnerabilities, papers/klishevich-2025-review-determinism, papers/cihan-2025-automated-review, papers/lin-2026-agentic-review, papers/al-haddad-2025-vulnerability-triage]
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # When a review loop should stop, and what counts toward it
 
-**The question.** The [review loop](review-loop.md) ends when a round returns no new verified
-gating finding and every fix verifies closed. It has a five-round cap, and it escalates when one
-class of defect recurs in three consecutive rounds. That follows the practice of people, who
-re-review until the reviewer has no more comments. Model reviewers may not run out of comments the
-way people do. This page asks what should end a loop of model reviewers, and what should count
-toward ending it. The question is
-[issue #59](https://github.com/brindlewick/postmaster/issues/59).
+**The question.** The [review loop](review-loop.md) ends when a round returns no new verified gating
+finding and every fix verifies closed. It has a round cap, five until #60 made it three on
+2026-09-26, and it escalates when one class of defect recurs in three consecutive rounds. That
+follows the practice of people, who re-review until the reviewer has no more comments. Model
+reviewers may not run out of comments the way people do. This page asks what should end a loop of
+model reviewers, and what should count toward ending it. The question is [issue
+#59](https://github.com/brindlewick/postmaster/issues/59).
 
 **Claim.** For a loop of model reviewers, "no findings at all" is not a reachable end. The end
 should turn on verified serious findings in what the change introduced. When serious findings keep
@@ -23,8 +23,8 @@ not another round.
 
 **Standing: claimed.** One record bears on it, the review of #36, which was run by hand and not by
 a dispatch ([run record](../sources/2026-09-26-postmaster-36.md)). The outside work below motivates
-the candidates and moves no standing. The choice of rule is the user's. The page ends with the
-options.
+the candidates and moves no standing. The page ends with the options for the loop's end and the
+user's decision: for now, one round of bug review.
 
 ## The first evidence: the review of #36
 
@@ -271,8 +271,9 @@ the fourth, and silent on which was which.
 **6. A round cap.**
 *For:* bounds the cost, about 0.8 million reviewer tokens a round in #36, and the risk that more
 revision undoes correct fixes. *Against:* it ends review regardless of what is open, and a loop
-stopped at the cap ships its last round's fixes unreviewed. *In #36:* the cap of five was never
-reached; the loop stopped at four.
+stopped at the cap ships its last round's fixes unreviewed. *In #36:* the cap was five and was
+never reached; the loop stopped at four. Under today's cap of three it would have stopped after
+round 3, where the class rule as written would also have stopped it.
 
 **7. A fixed budget.** One full round, then one round that checks the fixes and hunts holes in them,
 then the user triages everything left.
@@ -371,10 +372,11 @@ four hours, estimated the same way. The same rate falls out of every dispatched 
 What each option would say, what #36 would have done under it, and what it costs. Nothing here
 changes a runbook; the user chooses.
 
-**A. Keep the current rule.** No new verified gating finding and every fix closed; the cap of five;
-escalation on a class found in three consecutive rounds. *In #36:* the end condition was never met.
-The class rule stopped the loop after round 4; as written, it applied after round 3. *Cost:* up to
-five rounds, about 0.8 million reviewer tokens each, plus the coachman's fixes.
+**A. Keep the current rule.** No new verified gating finding and every fix closed; the cap of
+three; escalation on a class found in three consecutive rounds. *In #36:* the end condition was
+never met. The loop stopped after round 4 on the class rule, when the cap was five; under the cap of
+three, and under the class rule as written, it stops after round 3. *Cost:* up to three rounds,
+about 0.8 million reviewer tokens each, plus the coachman's fixes.
 
 **B. End on serious findings with evidence, in the change's own code.** The loop ends when a round
 has no new verified P1 or P2 in what the change introduced, and every fix is closed. The coachman
@@ -411,17 +413,26 @@ coming came from a few mechanisms whose fixes kept breaking. C picks out those t
 the loop reached two of them only after round 4. C ends on what fell, serious findings, and hands
 what did not fall, minor ones, to the user once. It stops fixing older problems inside the loop,
 which cost a round in #36. And it replaces the judgement of "the same class", applied a round late
-in #36, with a field on a log line. Keep the cap of five. If the trial finds serious defects in code
+in #36, with a field on a log line. Keep a cap. If the trial finds serious defects in code
 a loop has passed about as often as in code with known defects, no rule based on findings is safe,
 and D is the honest choice. E needs nothing new logged, so it can be judged once runs with three
 lanes exist.
 
+## Decision
+
+On 2026-09-27 the user chose, for now, one round of bug review, and to revisit the rule if many
+bugs reach production. It is none of options A to E. It is closest to D, without the round on the
+fixes, so the fixes that round's findings lead to are not reviewed again. It replaces the cap of
+three rounds that held while this research ran. No runbook changes under #59: `coachman.md`
+changes to match under a ticket of its own. The trial was not run.
+
 ## What would settle it
 
-The claim is supported if, across at least three dispatched runs, serious findings reach zero
-outside escalated mechanisms within the cap while minor ones continue, and the first trial finds
-few verified P1 or P2 in code already reviewed clean. It is refuted if fresh reviewers keep finding
-verified serious defects in code a loop has passed, or if the rate of serious defects per fix does
-not fall from round to round. Each dispatched run's `finding` and `apply` lines already carry most of
-what this needs: the round, the file and line, every lens and lane that made a finding, and the
-commit of each fix.
+The user's test for the decision is how many bugs reach production from changes that had one round
+of review. For the claim: it is supported if, across at least three dispatched runs, serious
+findings reach zero outside escalated mechanisms within the cap while minor ones continue, and the
+first trial finds few verified P1 or P2 in code already reviewed clean. It is refuted if fresh
+reviewers keep finding verified serious defects in code a loop has passed, or if the rate of serious
+defects per fix does not fall from round to round. Each dispatched run's `finding` and `apply` lines
+already carry most of what this needs: the round, the file and line, every lens and lane that made a
+finding, and the commit of each fix.

@@ -1,12 +1,19 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-27] ingest | one round of bug review, for now
+
+The user read #59's options for ending the review loop and chose none of them as written: for
+now, one round of bug review, to be revisited if many bugs reach production. The research page
+records the decision, and the review-loop page notes it. The cap of three rounds in `coachman.md`
+stays until a ticket of its own changes it. No standing changes.
 
 ## [2026-09-26] ingest | when a review loop should stop
 

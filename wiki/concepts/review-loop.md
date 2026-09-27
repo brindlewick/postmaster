@@ -3,7 +3,7 @@ title: The review loop
 type: concept
 standing: claimed
 sources: [runs/2026-09-26-postmaster-36]
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # The review loop
@@ -90,3 +90,6 @@ The cap was five rounds when the loop was introduced. On 2026-09-26 the user set
 after #39's own review ran four rounds without a clean one and stopped on the repeated-class
 rule. It stays at three until #59, the research on what should end an AI review loop,
 reports.
+On 2026-09-27, with #59 reported, the user chose one round of bug review for now, to be
+revisited if many bugs reach production ([when a review loop should stop](review-convergence.md)).
+`coachman.md` still says three rounds until the ticket that changes it lands.

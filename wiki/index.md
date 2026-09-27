@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # postmaster wiki
@@ -65,8 +65,8 @@ Why the design is shaped as it is.
 - [When a review loop should stop](concepts/review-convergence.md): **claimed**. Model reviewers
   do not run out of minor findings, so a loop should end on verified serious findings in the
   change's own code, and a mechanism whose fixes keep breaking should be redesigned rather than
-  fixed again. From the review of #36 and outside work; the options for the loop's end are the
-  user's to choose.
+  fixed again. From the review of #36 and outside work. The user chose one round of bug review
+  for now, to revisit if many bugs reach production.
 
 ## Sources
 
