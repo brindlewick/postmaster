@@ -5,9 +5,10 @@ form", "resume form", "thread id", "final message" and "ambient context"; this f
 each of those means for each harness. When a harness changes, this file changes and the
 runbooks do not.
 
-**Every form below runs in the foreground and writes its event stream to stdout.** The caller
-adds the redirect to the lane's events file, the backgrounding, and any marker that must land
-on exit; that is what makes one wrapper in the runbooks correct for every harness.
+**Every form below runs in the foreground and writes its event stream to stdout.**
+`scripts/host.sh run` adds the redirect to the lane's events file, runs it where the user can
+watch it, and lands its marker on exit (`hosts.md`); that is what makes one wrapper in the
+runbooks correct for every harness and every host.
 
 **`scripts/launch.sh` is the executable form of this file.** `launch.sh form <name>` prints the
 exact command for a configured lane or role; `launch` and `resume` run it. The script and this
@@ -15,8 +16,9 @@ file change together, and a form the script refuses (muse; agy resume) is a form
 not recorded yet.
 
 Every lane runs unrestricted. Its containment is its worktree (`coachman.md`, Lane capability),
-so the bypass form below is passed on every launch AND every resume. Nothing in the flow depends
-on one session messaging another; the postmaster polls files.
+so the bypass form below is passed on every launch AND every resume. The interactive postmaster
+runs unrestricted too, in its harness's interactive form (below). Nothing in the flow depends on
+one session messaging another; the postmaster polls files.
 
 **Different CLIs, different output-format flags. Never copy one into another.**
 
@@ -104,8 +106,8 @@ cd <wt> && agy -p "$(cat <dispatch>/<lane>-prompt.txt)" \
 - Thread id: `conversationId` in the stream.
 - Final message: the last result line of the events stream.
 - Resume: relaunch against its `conversationId`; `agy --help` for the flag. Not recorded here,
-  so `launch.sh resume` refuses agy; a postmaster on agy is an interactive session in tmux and
-  is never resumed this way.
+  so `launch.sh resume` refuses agy; a postmaster on agy is an interactive session on the
+  session host (`hosts.md`) and is never resumed this way.
 - Threads persist harmlessly; nothing to archive.
 
 ## claude
@@ -124,13 +126,19 @@ cd <wt> && claude -p "$(cat <dispatch>/<lane>-prompt.txt)" --model <model> \
   `[1m]` suffix (or the window the endpoint offers), or the harness assumes 200k and compacts
   early.
 - Thread id: `session_id` on the first event of the stream.
+- Thread name: `--name <text>`, which `launch.sh` passes from `POSTMASTER_LAUNCH_NAME` when
+  `host.sh` sets it. Headless, it names the thread in the resume picker and does not set the
+  pane's terminal title; `host.sh` sets that itself.
 - Resume: `claude -p --resume <session_id> "<prompt>"` with the same flags.
 - Ambient context: reads `CLAUDE.md` in the repo and the files it imports. A project that keeps
   its context in `AGENTS.md` needs a `CLAUDE.md` pointing at it; a symlink works.
 - As the coachman's own harness: background tasks are reaped at about 29 minutes, and a long
-  lane routinely outlives that. A "stopped" notification without a quota error is the cap, not
-  a failure. Resume the lane's thread in place, instruct workhorses to commit incrementally, and
-  expect to resume any leg that needs more than 25 minutes.
+  lane routinely outlives that. A launch through `scripts/host.sh` is not one of its background
+  tasks: it runs in a host's pane, or detached in a session of its own, and outlives the call
+  that started it. The cap reaches only what the harness runs itself, such as a wait. A
+  "stopped" notification without a quota error is that cap, not a failure: run the wait again,
+  and resume a lane only once its marker has landed, never while it still runs. Instruct
+  workhorses to commit incrementally.
 
 ## pi
 
@@ -152,6 +160,7 @@ cd <wt> && pi --mode json --approve --model <provider/model> \
   filesystem root to the worktree: `AGENTS.override.md` when present, otherwise `AGENTS.md`
   before `CLAUDE.md`.
 - Thread id: `id` in the first `session` record of the JSON stream.
+- Thread name: `--name <text>`, passed from `POSTMASTER_LAUNCH_NAME` as for claude.
 - Final message: the last `message_end` record whose message has role `assistant`. The
   stream also emits `message_end` for the system and user messages.
 - Resume: `pi --mode json --approve --session <id> --model <provider/model>
@@ -174,6 +183,33 @@ cd <wt> && pi --mode json --approve --model <provider/model> \
   its thread id appears and its resume form.** Fill those in from `muse --help` and a trial
   run before configuring a lane on it; the probe lists it so the gap is visible, not so it is
   chosen.
+
+## Interactive form: the postmaster
+
+The postmaster is the one interactive session (`SKILL.md` spawns it through `host.sh spawn`).
+It runs in its harness's bypass mode, like every launch, named for its project:
+
+| harness | interactive form | checked here |
+|---|---|---|
+| claude | `claude --model <model> --effort <effort> --name "<name>" --dangerously-skip-permissions` | yes |
+| pi | `pi --model <provider/model> --thinking <effort> --name "<name>" --approve`; pi has no permission prompts | flags from its help |
+| codex | `codex -m <model> -c model_reasoning_effort="<effort>" --dangerously-bypass-approvals-and-sandbox` | no |
+| grok | `grok -m <model> --reasoning-effort <effort> --always-approve` | no |
+| agy | `agy --model <model> --dangerously-skip-permissions` | no |
+
+Bypass mode does not skip claude's question, on first start in a folder it has never opened,
+whether to trust it; headless `claude -p` does not ask. The first spawn in a new target stops
+there, and the user answers it in the pane. A row not checked here takes its bypass flag from
+the headless form above; run it once before relying on it.
+
+## The pane view
+
+`scripts/view-stream.sh` is the other executable half of this file: it renders an events
+stream one line per event of interest, for a host's pane (`hosts.md`) and for anyone reading a
+stream by hand. It knows claude's events, checked against a recorded stream; codex's and pi's,
+written from the event names this file records and not yet checked against a recorded stream;
+any other harness shows by event type, once per run of the same type. A harness whose events it
+shows badly gets its rules there, and a line here saying they were checked.
 
 ## Walls, any harness
 

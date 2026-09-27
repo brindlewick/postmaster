@@ -32,15 +32,19 @@ How each agent CLI really behaves, as distinct from what its documentation says.
 
 ## Trackers and tooling
 
-What the services and CLIs postmaster depends on actually do. Nothing yet.
+What the services and CLIs postmaster depends on actually do.
+
+- [Herdr and headless launches](concepts/herdr-headless-launches.md): **settled**, for claude.
+  Left to itself Herdr shows a working headless claude as idle, and a launch that inherits its
+  caller's pane reports into it; the view is true when each launch owns its pane and the host
+  reports its state.
+- [Herdr reads most agents' state from the screen](concepts/herdr-agent-states.md):
+  **settled**, for Herdr 0.9.1. A settled state from its waits does not prove a turn finished.
 
 ## Decisions
 
 Why the design is shaped as it is.
 
-- [The review loop](concepts/review-loop.md): **claimed**. Style, bug and security review run
-  as one loop in one leg, so each round's fixes are re-reviewed by both gating lenses in the
-  next. It should also take fewer rounds.
 - [The workhorse spec](concepts/workhorse-spec.md): **claimed**. Each workhorse drafts its
   own, which keeps the workhorses independent of each other and of the coachman, and makes
   each run auditable.
@@ -50,6 +54,11 @@ Why the design is shaped as it is.
 - [A ticket names the turnpikes its run passes through](concepts/turnpikes.md): **claimed**.
   `default` for the style, bug and security reviews, fewer, or `none`, with no floor. The
   project's gate is not a turnpike and always runs.
+- [The review loop](concepts/review-loop.md): **claimed**. Style, bug and security review run
+  as one loop in one leg, so each round's fixes are re-reviewed by both gating lenses in the
+  next. It should also take fewer rounds.
+- [Live agents against markers and resumes](concepts/live-agents.md): **claimed**. Headless
+  stays the default and live agents become an option; what it would take to change the default.
 
 ## Sources
 
