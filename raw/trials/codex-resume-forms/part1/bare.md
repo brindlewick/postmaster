@@ -13,7 +13,7 @@ Exit: 0
 stdout:
 
 ```jsonl
-{"type":"thread.started","thread_id":"01a0dc31-0db2-70c2-b2a5-21654dfe0e01"}
+{"type":"thread.started","thread_id":"01a0e1d2-fa44-7772-b8cb-6d940dd3156f"}
 {"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `launch-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
 {"type":"turn.started"}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"stand-in reply: model=launch-model effort=high"}}
@@ -33,18 +33,24 @@ The `-o` file:
 stand-in reply: model=launch-model effort=high
 ```
 
-What each turn request to the stand-in asked for:
+Every request the stand-in received:
+
+```
+POST /v1/responses
+```
+
+What each turn request asked for:
 
 ```jsonl
 {"path": "/v1/responses", "model": "launch-model", "effort": "high", "input_items": 3, "user_prompts": ["Say the word pineapple and stop. (bare, launch)"]}
 ```
 
-## Resume
+## Resume, from <trial>/wt
 
 Command:
 
 ```sh
-codex exec resume 01a0dc31-0db2-70c2-b2a5-21654dfe0e01 --dangerously-bypass-approvals-and-sandbox 'Say the word pineapple again. (bare, resume)'
+codex exec resume 01a0e1d2-fa44-7772-b8cb-6d940dd3156f --dangerously-bypass-approvals-and-sandbox 'Say the word pineapple again. (bare, resume)'
 ```
 
 Exit: 0
@@ -68,7 +74,7 @@ approval: never
 sandbox: danger-full-access
 reasoning effort: low
 reasoning summaries: none
-session id: 01a0dc31-0db2-70c2-b2a5-21654dfe0e01
+session id: 01a0e1d2-fa44-7772-b8cb-6d940dd3156f
 --------
 user
 Say the word pineapple again. (bare, resume)
@@ -86,7 +92,13 @@ The `-o` file:
 (not written)
 ```
 
-What each turn request to the stand-in asked for:
+Every request the stand-in received:
+
+```
+POST /v1/responses
+```
+
+What each turn request asked for:
 
 ```jsonl
 {"path": "/v1/responses", "model": "config-model", "effort": "low", "input_items": 6, "user_prompts": ["Say the word pineapple and stop. (bare, launch)", "Say the word pineapple again. (bare, resume)"]}
@@ -95,7 +107,7 @@ What each turn request to the stand-in asked for:
 codex's own record of each turn, from the thread's rollout file:
 
 ```jsonl
-{"model": "launch-model", "effort": "high", "approval_policy": "never", "sandbox": "danger-full-access"}
-{"model": "config-model", "effort": "low", "approval_policy": "never", "sandbox": "danger-full-access"}
+{"model": "launch-model", "effort": "high", "approval_policy": "never", "sandbox": "danger-full-access", "cwd": "<trial>/wt"}
+{"model": "config-model", "effort": "low", "approval_policy": "never", "sandbox": "danger-full-access", "cwd": "<trial>/wt"}
 ```
 

@@ -1,11 +1,11 @@
-# no-bypass
+# the-form
 
 ## Launch
 
 Command:
 
 ```sh
-codex exec -C <trial>/wt --json -o <trial>/no-bypass-launch-last.md -m launch-model -c 'model_reasoning_effort="high"' --dangerously-bypass-approvals-and-sandbox 'Say the word pineapple and stop. (no-bypass, launch)'
+codex exec -C <trial>/wt --json -o <trial>/the-form-launch-last.md -m launch-model -c 'model_reasoning_effort="high"' --dangerously-bypass-approvals-and-sandbox 'Say the word pineapple and stop. (the-form, launch)'
 ```
 
 Exit: 0
@@ -13,7 +13,7 @@ Exit: 0
 stdout:
 
 ```jsonl
-{"type":"thread.started","thread_id":"01a0e1d3-4c16-78f0-a7cc-799fd037b80f"}
+{"type":"thread.started","thread_id":"01a0e1d3-46e8-7800-9b36-60116f4fb49e"}
 {"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `launch-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
 {"type":"turn.started"}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"stand-in reply: model=launch-model effort=high"}}
@@ -42,7 +42,7 @@ POST /v1/responses
 What each turn request asked for:
 
 ```jsonl
-{"path": "/v1/responses", "model": "launch-model", "effort": "high", "input_items": 3, "user_prompts": ["Say the word pineapple and stop. (no-bypass, launch)"]}
+{"path": "/v1/responses", "model": "launch-model", "effort": "high", "input_items": 3, "user_prompts": ["Say the word pineapple and stop. (the-form, launch)"]}
 ```
 
 ## Resume, from <trial>/wt
@@ -50,7 +50,7 @@ What each turn request asked for:
 Command:
 
 ```sh
-codex exec resume 01a0e1d3-4c16-78f0-a7cc-799fd037b80f --json -o <trial>/no-bypass-resume-last.md -m resume-model -c 'model_reasoning_effort="medium"' 'Say the word pineapple again. (no-bypass, resume)'
+codex exec resume 01a0e1d3-46e8-7800-9b36-60116f4fb49e --json -o <trial>/the-form-resume-last.md -m resume-model -c 'model_reasoning_effort="medium"' --dangerously-bypass-approvals-and-sandbox -- '- Say the word pineapple again. (the-form, resume)'
 ```
 
 Exit: 0
@@ -58,7 +58,7 @@ Exit: 0
 stdout:
 
 ```jsonl
-{"type":"thread.started","thread_id":"01a0e1d3-4c16-78f0-a7cc-799fd037b80f"}
+{"type":"thread.started","thread_id":"01a0e1d3-46e8-7800-9b36-60116f4fb49e"}
 {"type":"item.completed","item":{"id":"item_0","type":"error","message":"This session was recorded with model `launch-model` but is resuming with `resume-model`. Consider switching back to `launch-model` as it may affect Codex performance."}}
 {"type":"item.completed","item":{"id":"item_1","type":"error","message":"Model metadata for `resume-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
 {"type":"turn.started"}
@@ -87,13 +87,13 @@ POST /v1/responses
 What each turn request asked for:
 
 ```jsonl
-{"path": "/v1/responses", "model": "resume-model", "effort": "medium", "input_items": 8, "user_prompts": ["Say the word pineapple and stop. (no-bypass, launch)", "Say the word pineapple again. (no-bypass, resume)"]}
+{"path": "/v1/responses", "model": "resume-model", "effort": "medium", "input_items": 6, "user_prompts": ["Say the word pineapple and stop. (the-form, launch)", "- Say the word pineapple again. (the-form, resume)"]}
 ```
 
 codex's own record of each turn, from the thread's rollout file:
 
 ```jsonl
 {"model": "launch-model", "effort": "high", "approval_policy": "never", "sandbox": "danger-full-access", "cwd": "<trial>/wt"}
-{"model": "resume-model", "effort": "medium", "approval_policy": "never", "sandbox": "workspace-write", "cwd": "<trial>/wt"}
+{"model": "resume-model", "effort": "medium", "approval_policy": "never", "sandbox": "danger-full-access", "cwd": "<trial>/wt"}
 ```
 

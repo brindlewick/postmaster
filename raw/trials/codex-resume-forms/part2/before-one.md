@@ -1,5 +1,7 @@
 # launch.sh before, one
 
+launch.sh's git blob: `b5b0e1d815ba2ae6adc85c199c76cb02d73c09e7`
+
 The postmaster config:
 
 ```toml
@@ -25,10 +27,17 @@ launch.sh launch one <trial>/wt <trial>/before-one-launch.txt --last <trial>/bef
 
 Exit: 0
 
+What launch.sh ran, recorded by the shim (directory, then command):
+
+```sh
+<trial>/wt
+codex exec -C <trial>/wt --json -o <trial>/before-one-launch-last.md -m lane-model -c 'model_reasoning_effort="high"' --dangerously-bypass-approvals-and-sandbox 'Say the word pineapple and stop. (before one, launch)'
+```
+
 stdout:
 
 ```jsonl
-{"type":"thread.started","thread_id":"01a0dc31-cccd-7512-bf0e-b558882c6d41"}
+{"type":"thread.started","thread_id":"01a0e1d3-8567-7b83-961e-59a53a062274"}
 {"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `lane-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
 {"type":"turn.started"}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"stand-in reply: model=lane-model effort=high"}}
@@ -48,7 +57,13 @@ The `-o` file:
 stand-in reply: model=lane-model effort=high
 ```
 
-What each turn request to the stand-in asked for:
+Every request the stand-in received:
+
+```
+POST /v1/responses
+```
+
+What each turn request asked for:
 
 ```jsonl
 {"path": "/v1/responses", "model": "lane-model", "effort": "high", "input_items": 3, "user_prompts": ["Say the word pineapple and stop. (before one, launch)"]}
@@ -59,10 +74,17 @@ What each turn request to the stand-in asked for:
 Command:
 
 ```sh
-launch.sh resume one <trial>/wt 01a0dc31-cccd-7512-bf0e-b558882c6d41 <trial>/before-one-resume.txt --last <trial>/before-one-resume-last.md
+launch.sh resume one <trial>/wt 01a0e1d3-8567-7b83-961e-59a53a062274 <trial>/before-one-resume.txt --last <trial>/before-one-resume-last.md
 ```
 
 Exit: 0
+
+What launch.sh ran, recorded by the shim (directory, then command):
+
+```sh
+<trial>/wt
+codex exec resume 01a0e1d3-8567-7b83-961e-59a53a062274 --dangerously-bypass-approvals-and-sandbox 'Say the word pineapple again. (before one, resume)'
+```
 
 stdout:
 
@@ -83,7 +105,7 @@ approval: never
 sandbox: danger-full-access
 reasoning effort: low
 reasoning summaries: none
-session id: 01a0dc31-cccd-7512-bf0e-b558882c6d41
+session id: 01a0e1d3-8567-7b83-961e-59a53a062274
 --------
 user
 Say the word pineapple again. (before one, resume)
@@ -101,16 +123,76 @@ The `-o` file:
 (not written)
 ```
 
-What each turn request to the stand-in asked for:
+Every request the stand-in received:
+
+```
+POST /v1/responses
+```
+
+What each turn request asked for:
 
 ```jsonl
 {"path": "/v1/responses", "model": "config-model", "effort": "low", "input_items": 6, "user_prompts": ["Say the word pineapple and stop. (before one, launch)", "Say the word pineapple again. (before one, resume)"]}
 ```
 
+## Resume-dash
+
+Command:
+
+```sh
+launch.sh resume one <trial>/wt 01a0e1d3-8567-7b83-961e-59a53a062274 <trial>/before-one-resume-dash.txt --last <trial>/before-one-resume-dash-last.md
+```
+
+Exit: 2
+
+What launch.sh ran, recorded by the shim (directory, then command):
+
+```sh
+<trial>/wt
+codex exec resume 01a0e1d3-8567-7b83-961e-59a53a062274 --dangerously-bypass-approvals-and-sandbox '- Say the word pineapple once more. (before one, resume)'
+```
+
+stdout:
+
+```
+(empty)
+```
+
+stderr:
+
+```
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "<tmp>" (codex_home: AbsolutePathBuf("<trial>/lhome-before/.codex"))
+error: unexpected argument '- ' found
+
+  tip: to pass '- ' as a value, use '-- - '
+
+Usage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]
+
+For more information, try '--help'.
+```
+
+The `-o` file:
+
+```
+(not written)
+```
+
+Every request the stand-in received:
+
+```
+(none)
+```
+
+What each turn request asked for:
+
+```jsonl
+(empty)
+```
+
 codex's own record of each turn, from the thread's rollout file:
 
 ```jsonl
-{"model": "lane-model", "effort": "high", "approval_policy": "never", "sandbox": "danger-full-access"}
-{"model": "config-model", "effort": "low", "approval_policy": "never", "sandbox": "danger-full-access"}
+{"model": "lane-model", "effort": "high", "approval_policy": "never", "sandbox": "danger-full-access", "cwd": "<trial>/wt"}
+{"model": "config-model", "effort": "low", "approval_policy": "never", "sandbox": "danger-full-access", "cwd": "<trial>/wt"}
 ```
 

@@ -13,7 +13,7 @@ Exit: 0
 stdout:
 
 ```jsonl
-{"type":"thread.started","thread_id":"01a0dc31-a5a5-7041-9ce0-7ca0174b4f89"}
+{"type":"thread.started","thread_id":"01a0e1d3-678a-7632-a54f-ea50a2474285"}
 {"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `launch-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
 {"type":"turn.started"}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"stand-in reply: model=launch-model effort=high"}}
@@ -33,18 +33,24 @@ The `-o` file:
 stand-in reply: model=launch-model effort=high
 ```
 
-What each turn request to the stand-in asked for:
+Every request the stand-in received:
+
+```
+POST /v1/responses
+```
+
+What each turn request asked for:
 
 ```jsonl
 {"path": "/v1/responses", "model": "launch-model", "effort": "high", "input_items": 3, "user_prompts": ["Say the word pineapple and stop. (cd-flag, launch)"]}
 ```
 
-## Resume
+## Resume, from <trial>/wt
 
 Command:
 
 ```sh
-codex exec resume 01a0dc31-a5a5-7041-9ce0-7ca0174b4f89 -C <trial>/wt --dangerously-bypass-approvals-and-sandbox 'Say the word pineapple again. (cd-flag, resume)'
+codex exec resume 01a0e1d3-678a-7632-a54f-ea50a2474285 -C <trial>/wt --dangerously-bypass-approvals-and-sandbox 'Say the word pineapple again. (cd-flag, resume)'
 ```
 
 Exit: 2
@@ -74,7 +80,13 @@ The `-o` file:
 (not written)
 ```
 
-What each turn request to the stand-in asked for:
+Every request the stand-in received:
+
+```
+(none)
+```
+
+What each turn request asked for:
 
 ```jsonl
 (empty)
@@ -83,6 +95,6 @@ What each turn request to the stand-in asked for:
 codex's own record of each turn, from the thread's rollout file:
 
 ```jsonl
-{"model": "launch-model", "effort": "high", "approval_policy": "never", "sandbox": "danger-full-access"}
+{"model": "launch-model", "effort": "high", "approval_policy": "never", "sandbox": "danger-full-access", "cwd": "<trial>/wt"}
 ```
 

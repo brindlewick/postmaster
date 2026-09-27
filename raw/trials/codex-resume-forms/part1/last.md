@@ -13,7 +13,7 @@ Exit: 0
 stdout:
 
 ```jsonl
-{"type":"thread.started","thread_id":"01a0dc31-2b75-75d2-8490-68a00161e905"}
+{"type":"thread.started","thread_id":"01a0e1d3-08bb-7b53-bd3c-92941d65151a"}
 {"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `launch-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
 {"type":"turn.started"}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"stand-in reply: model=launch-model effort=high"}}
@@ -33,18 +33,24 @@ The `-o` file:
 stand-in reply: model=launch-model effort=high
 ```
 
-What each turn request to the stand-in asked for:
+Every request the stand-in received:
+
+```
+POST /v1/responses
+```
+
+What each turn request asked for:
 
 ```jsonl
 {"path": "/v1/responses", "model": "launch-model", "effort": "high", "input_items": 3, "user_prompts": ["Say the word pineapple and stop. (last, launch)"]}
 ```
 
-## Resume
+## Resume, from <trial>/wt
 
 Command:
 
 ```sh
-codex exec resume 01a0dc31-2b75-75d2-8490-68a00161e905 -o <trial>/last-resume-last.md --dangerously-bypass-approvals-and-sandbox 'Say the word pineapple again. (last, resume)'
+codex exec resume 01a0e1d3-08bb-7b53-bd3c-92941d65151a -o <trial>/last-resume-last.md --dangerously-bypass-approvals-and-sandbox 'Say the word pineapple again. (last, resume)'
 ```
 
 Exit: 0
@@ -68,7 +74,7 @@ approval: never
 sandbox: danger-full-access
 reasoning effort: low
 reasoning summaries: none
-session id: 01a0dc31-2b75-75d2-8490-68a00161e905
+session id: 01a0e1d3-08bb-7b53-bd3c-92941d65151a
 --------
 user
 Say the word pineapple again. (last, resume)
@@ -86,7 +92,13 @@ The `-o` file:
 stand-in reply: model=config-model effort=low
 ```
 
-What each turn request to the stand-in asked for:
+Every request the stand-in received:
+
+```
+POST /v1/responses
+```
+
+What each turn request asked for:
 
 ```jsonl
 {"path": "/v1/responses", "model": "config-model", "effort": "low", "input_items": 6, "user_prompts": ["Say the word pineapple and stop. (last, launch)", "Say the word pineapple again. (last, resume)"]}
@@ -95,7 +107,7 @@ What each turn request to the stand-in asked for:
 codex's own record of each turn, from the thread's rollout file:
 
 ```jsonl
-{"model": "launch-model", "effort": "high", "approval_policy": "never", "sandbox": "danger-full-access"}
-{"model": "config-model", "effort": "low", "approval_policy": "never", "sandbox": "danger-full-access"}
+{"model": "launch-model", "effort": "high", "approval_policy": "never", "sandbox": "danger-full-access", "cwd": "<trial>/wt"}
+{"model": "config-model", "effort": "low", "approval_policy": "never", "sandbox": "danger-full-access", "cwd": "<trial>/wt"}
 ```
 

@@ -13,7 +13,7 @@ Exit: 0
 stdout:
 
 ```jsonl
-{"type":"thread.started","thread_id":"01a0dc31-ace1-7ec0-b59d-0eacb540ea91"}
+{"type":"thread.started","thread_id":"01a0e1d3-735f-7e72-ab64-660bcad626c8"}
 {"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `launch-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
 {"type":"turn.started"}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"stand-in reply: model=launch-model effort=high"}}
@@ -33,18 +33,24 @@ The `-o` file:
 stand-in reply: model=launch-model effort=high
 ```
 
-What each turn request to the stand-in asked for:
+Every request the stand-in received:
+
+```
+POST /v1/responses
+```
+
+What each turn request asked for:
 
 ```jsonl
 {"path": "/v1/responses", "model": "launch-model", "effort": "high", "input_items": 3, "user_prompts": ["Say the word pineapple and stop. (detached-scratch, launch)"]}
 ```
 
-## Resume
+## Resume, from <trial>/scratch
 
 Command:
 
 ```sh
-codex exec resume 01a0dc31-ace1-7ec0-b59d-0eacb540ea91 --json -o <trial>/detached-scratch-resume-last.md -m resume-model -c 'model_reasoning_effort="medium"' --dangerously-bypass-approvals-and-sandbox 'Say the word pineapple again. (detached-scratch, resume)'
+codex exec resume 01a0e1d3-735f-7e72-ab64-660bcad626c8 --json -o <trial>/detached-scratch-resume-last.md -m resume-model -c 'model_reasoning_effort="medium"' --dangerously-bypass-approvals-and-sandbox 'Say the word pineapple again. (detached-scratch, resume)'
 ```
 
 Exit: 0
@@ -52,7 +58,7 @@ Exit: 0
 stdout:
 
 ```jsonl
-{"type":"thread.started","thread_id":"01a0dc31-ace1-7ec0-b59d-0eacb540ea91"}
+{"type":"thread.started","thread_id":"01a0e1d3-735f-7e72-ab64-660bcad626c8"}
 {"type":"item.completed","item":{"id":"item_0","type":"error","message":"This session was recorded with model `launch-model` but is resuming with `resume-model`. Consider switching back to `launch-model` as it may affect Codex performance."}}
 {"type":"item.completed","item":{"id":"item_1","type":"error","message":"Model metadata for `resume-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
 {"type":"turn.started"}
@@ -72,7 +78,13 @@ The `-o` file:
 stand-in reply: model=resume-model effort=medium
 ```
 
-What each turn request to the stand-in asked for:
+Every request the stand-in received:
+
+```
+POST /v1/responses
+```
+
+What each turn request asked for:
 
 ```jsonl
 {"path": "/v1/responses", "model": "resume-model", "effort": "medium", "input_items": 6, "user_prompts": ["Say the word pineapple and stop. (detached-scratch, launch)", "Say the word pineapple again. (detached-scratch, resume)"]}
@@ -81,7 +93,7 @@ What each turn request to the stand-in asked for:
 codex's own record of each turn, from the thread's rollout file:
 
 ```jsonl
-{"model": "launch-model", "effort": "high", "approval_policy": "never", "sandbox": "danger-full-access"}
-{"model": "resume-model", "effort": "medium", "approval_policy": "never", "sandbox": "danger-full-access"}
+{"model": "launch-model", "effort": "high", "approval_policy": "never", "sandbox": "danger-full-access", "cwd": "<trial>/scratch"}
+{"model": "resume-model", "effort": "medium", "approval_policy": "never", "sandbox": "danger-full-access", "cwd": "<trial>/scratch"}
 ```
 

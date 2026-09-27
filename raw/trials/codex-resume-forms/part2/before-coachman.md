@@ -1,5 +1,7 @@
 # launch.sh before, coachman --leg review
 
+launch.sh's git blob: `b5b0e1d815ba2ae6adc85c199c76cb02d73c09e7`
+
 The postmaster config:
 
 ```toml
@@ -25,10 +27,17 @@ launch.sh launch coachman <trial>/wt <trial>/before-coachman-launch.txt --leg re
 
 Exit: 0
 
+What launch.sh ran, recorded by the shim (directory, then command):
+
+```sh
+<trial>/wt
+codex exec -C <trial>/wt --json -m review-model -c 'model_reasoning_effort="medium"' --dangerously-bypass-approvals-and-sandbox 'Say the word pineapple and stop. (before coachman, launch)'
+```
+
 stdout:
 
 ```jsonl
-{"type":"thread.started","thread_id":"01a0dc31-dc3b-7900-9c37-47b0b409128f"}
+{"type":"thread.started","thread_id":"01a0e1d3-8d30-75f1-9de0-e07e3ecd42ee"}
 {"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `review-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
 {"type":"turn.started"}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"stand-in reply: model=review-model effort=medium"}}
@@ -42,7 +51,13 @@ WARNING: proceeding, even though we could not create PATH aliases: Refusing to c
 Reading additional input from stdin...
 ```
 
-What each turn request to the stand-in asked for:
+Every request the stand-in received:
+
+```
+POST /v1/responses
+```
+
+What each turn request asked for:
 
 ```jsonl
 {"path": "/v1/responses", "model": "review-model", "effort": "medium", "input_items": 3, "user_prompts": ["Say the word pineapple and stop. (before coachman, launch)"]}
@@ -53,10 +68,17 @@ What each turn request to the stand-in asked for:
 Command:
 
 ```sh
-launch.sh resume coachman <trial>/wt 01a0dc31-dc3b-7900-9c37-47b0b409128f <trial>/before-coachman-resume.txt --leg review
+launch.sh resume coachman <trial>/wt 01a0e1d3-8d30-75f1-9de0-e07e3ecd42ee <trial>/before-coachman-resume.txt --leg review
 ```
 
 Exit: 0
+
+What launch.sh ran, recorded by the shim (directory, then command):
+
+```sh
+<trial>/wt
+codex exec resume 01a0e1d3-8d30-75f1-9de0-e07e3ecd42ee --dangerously-bypass-approvals-and-sandbox 'Say the word pineapple again. (before coachman, resume)'
+```
 
 stdout:
 
@@ -77,7 +99,7 @@ approval: never
 sandbox: danger-full-access
 reasoning effort: low
 reasoning summaries: none
-session id: 01a0dc31-dc3b-7900-9c37-47b0b409128f
+session id: 01a0e1d3-8d30-75f1-9de0-e07e3ecd42ee
 --------
 user
 Say the word pineapple again. (before coachman, resume)
@@ -89,16 +111,70 @@ tokens used
 4
 ```
 
-What each turn request to the stand-in asked for:
+Every request the stand-in received:
+
+```
+POST /v1/responses
+```
+
+What each turn request asked for:
 
 ```jsonl
 {"path": "/v1/responses", "model": "config-model", "effort": "low", "input_items": 6, "user_prompts": ["Say the word pineapple and stop. (before coachman, launch)", "Say the word pineapple again. (before coachman, resume)"]}
 ```
 
+## Resume-dash
+
+Command:
+
+```sh
+launch.sh resume coachman <trial>/wt 01a0e1d3-8d30-75f1-9de0-e07e3ecd42ee <trial>/before-coachman-resume-dash.txt --leg review
+```
+
+Exit: 2
+
+What launch.sh ran, recorded by the shim (directory, then command):
+
+```sh
+<trial>/wt
+codex exec resume 01a0e1d3-8d30-75f1-9de0-e07e3ecd42ee --dangerously-bypass-approvals-and-sandbox '- Say the word pineapple once more. (before coachman, resume)'
+```
+
+stdout:
+
+```
+(empty)
+```
+
+stderr:
+
+```
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "<tmp>" (codex_home: AbsolutePathBuf("<trial>/lhome-before/.codex"))
+error: unexpected argument '- ' found
+
+  tip: to pass '- ' as a value, use '-- - '
+
+Usage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]
+
+For more information, try '--help'.
+```
+
+Every request the stand-in received:
+
+```
+(none)
+```
+
+What each turn request asked for:
+
+```jsonl
+(empty)
+```
+
 codex's own record of each turn, from the thread's rollout file:
 
 ```jsonl
-{"model": "review-model", "effort": "medium", "approval_policy": "never", "sandbox": "danger-full-access"}
-{"model": "config-model", "effort": "low", "approval_policy": "never", "sandbox": "danger-full-access"}
+{"model": "review-model", "effort": "medium", "approval_policy": "never", "sandbox": "danger-full-access", "cwd": "<trial>/wt"}
+{"model": "config-model", "effort": "low", "approval_policy": "never", "sandbox": "danger-full-access", "cwd": "<trial>/wt"}
 ```
 

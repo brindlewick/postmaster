@@ -13,7 +13,7 @@ Exit: 0
 stdout:
 
 ```jsonl
-{"type":"thread.started","thread_id":"01a0dc31-7d3f-7f90-aeef-8e4383ded15f"}
+{"type":"thread.started","thread_id":"01a0e1d3-3a00-7ef2-b98c-b509436e385a"}
 {"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `launch-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
 {"type":"turn.started"}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"stand-in reply: model=launch-model effort=high"}}
@@ -33,18 +33,24 @@ The `-o` file:
 stand-in reply: model=launch-model effort=high
 ```
 
-What each turn request to the stand-in asked for:
+Every request the stand-in received:
+
+```
+POST /v1/responses
+```
+
+What each turn request asked for:
 
 ```jsonl
 {"path": "/v1/responses", "model": "launch-model", "effort": "high", "input_items": 3, "user_prompts": ["Say the word pineapple and stop. (all-four-before-resume, launch)"]}
 ```
 
-## Resume
+## Resume, from <trial>/wt
 
 Command:
 
 ```sh
-codex exec --json -o <trial>/all-four-before-resume-resume-last.md -m resume-model -c 'model_reasoning_effort="medium"' --dangerously-bypass-approvals-and-sandbox resume 01a0dc31-7d3f-7f90-aeef-8e4383ded15f 'Say the word pineapple again. (all-four-before-resume, resume)'
+codex exec --json -o <trial>/all-four-before-resume-resume-last.md -m resume-model -c 'model_reasoning_effort="medium"' --dangerously-bypass-approvals-and-sandbox resume 01a0e1d3-3a00-7ef2-b98c-b509436e385a 'Say the word pineapple again. (all-four-before-resume, resume)'
 ```
 
 Exit: 0
@@ -52,7 +58,7 @@ Exit: 0
 stdout:
 
 ```jsonl
-{"type":"thread.started","thread_id":"01a0dc31-7d3f-7f90-aeef-8e4383ded15f"}
+{"type":"thread.started","thread_id":"01a0e1d3-3a00-7ef2-b98c-b509436e385a"}
 {"type":"item.completed","item":{"id":"item_0","type":"error","message":"This session was recorded with model `launch-model` but is resuming with `resume-model`. Consider switching back to `launch-model` as it may affect Codex performance."}}
 {"type":"item.completed","item":{"id":"item_1","type":"error","message":"Model metadata for `resume-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
 {"type":"turn.started"}
@@ -72,7 +78,15 @@ The `-o` file:
 stand-in reply: model=resume-model effort=medium
 ```
 
-What each turn request to the stand-in asked for:
+Every request the stand-in received:
+
+```
+GET /
+GET /
+POST /v1/responses
+```
+
+What each turn request asked for:
 
 ```jsonl
 {"path": "/v1/responses", "model": "resume-model", "effort": "medium", "input_items": 6, "user_prompts": ["Say the word pineapple and stop. (all-four-before-resume, launch)", "Say the word pineapple again. (all-four-before-resume, resume)"]}
@@ -81,7 +95,7 @@ What each turn request to the stand-in asked for:
 codex's own record of each turn, from the thread's rollout file:
 
 ```jsonl
-{"model": "launch-model", "effort": "high", "approval_policy": "never", "sandbox": "danger-full-access"}
-{"model": "resume-model", "effort": "medium", "approval_policy": "never", "sandbox": "danger-full-access"}
+{"model": "launch-model", "effort": "high", "approval_policy": "never", "sandbox": "danger-full-access", "cwd": "<trial>/wt"}
+{"model": "resume-model", "effort": "medium", "approval_policy": "never", "sandbox": "danger-full-access", "cwd": "<trial>/wt"}
 ```
 
