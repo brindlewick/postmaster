@@ -116,7 +116,7 @@ The flow is general and carries no assumptions about build tools, docs layout or
 config file before it runs on a plain git repo is a tool nobody adopts.
 
 ```sh
-<tool>/scripts/discover-project.sh "$TARGET"   # gate=… docs=… tracker_prefix=… ambient_context=…
+<tool>/scripts/discover-project.sh "$TARGET"   # gate=… docs=… tracker_prefix=… ambient_context=… check.<name>=…
 ```
 
 A github tracker needs the target's board: `<tool>/scripts/github.sh "$TARGET" board` names it, and
@@ -187,6 +187,7 @@ gate: <the real command>  build: <the real command>    browser suite: <command o
 docs to read first: <files, in order>
 tracker: <kind, and how a ticket is read and written>
 risk surfaces: <what the project binds, allowlists, spawns, serves; from its docs or the user>
+checks: <as `verify.sh record` printed them: each check's name, where it came from, its command and what it shows>
 
 ## Team
 workhorses: <lane>=<harness>/<model>/<effort>, <lane>=…

@@ -30,7 +30,9 @@ heading out is not.
 ## Notes
 Everything else: context, links, decisions already taken, constraints, what is out of scope.
 A ticket that changes something a person uses also carries a `## User journey`: where they
-begin, what they tap or type, what they expect.
+begin, what they tap or type, what they expect. A command-line app's examples are transcripts
+in its User journey: a fenced block whose `$ ` lines are commands, each followed by what it prints and, when it exits
+other than 0, a line `[exit N]`.
 ```
 
 [Why a ticket carries a direction, and is checked before it is accepted](../../wiki/concepts/ticket-shape.md)
