@@ -7,6 +7,8 @@
 #   wait-for-markers.sh --self-test
 #
 # It looks every 20 seconds, and once more at the timeout, so the timeout is kept to the second.
+# The timeout counts the seconds it has slept, so time the machine spends asleep is not counted,
+# and a clock set forward does not end the wait early. A count or a timeout is at most 9 digits.
 #
 #   exit 0  all markers present
 #   exit 3  timeout; the matches that did arrive are listed
@@ -20,9 +22,9 @@
 set -uo pipefail
 if [ "${1:-}" = --self-test ]; then
   # Each control runs this script on a directory of planted markers.
-  self=$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")
+  self=$(CDPATH= cd -P -- "$(dirname "$0")" && pwd -P)/$(basename "$0")
   tmp=$(mktemp -d) || exit 1
-  trap 'chmod -R u+w "$tmp" 2>/dev/null; rm -r -- "$tmp" 2>/dev/null' EXIT
+  trap 'chmod -R u+w "$tmp" 2>/dev/null; rm -r -- "$tmp" </dev/null 2>/dev/null' EXIT
   d="$tmp/logs"; mkdir "$d"
   fails=0 out="" rc=0 took=0
   ok()   { printf '  ok   %s\n' "$1"; }
@@ -39,9 +41,11 @@ if [ "${1:-}" = --self-test ]; then
   run "$d" 'review-r2-*.done' 1 3
   [ $rc -eq 0 ] && [ "$out" = "all 1 markers present" ] \
     && ok "a marker that lands during the wait is collected by the timeout" || fail "a marker that lands during the wait is collected by the timeout"
-  run "$d" 'review-r1-*.done' 002 05
-  [ $rc -eq 0 ] && [ "$out" = "all 2 markers present" ] \
-    && ok "a count and timeout with leading zeros are read as decimal" || fail "a count and timeout with leading zeros are read as decimal"
+  for i in 1 2 3 4 5 6 7 8 9; do touch "$d/review-r5-bug-$i.done"; done
+  run "$d" 'review-r5-*.done' 010 1
+  [ $rc -eq 3 ] && has "9 of 10 markers" \
+    && ok "a count with a leading zero is decimal: 010 is ten, which nine markers do not meet" \
+    || fail "a count with a leading zero is decimal: 010 is ten, which nine markers do not meet"
 
   echo "negative controls"
   touch "$d/review-r3-bug-one.done" "$d/review-r4-bug-two.done"
@@ -52,11 +56,20 @@ if [ "${1:-}" = --self-test ]; then
     || fail "a missing marker times out, and another round's marker is not counted"
   [ $rc -eq 3 ] && [ "$took" -le 3 ] && ok "the timeout is kept to the second, not the next 20-second look" \
     || fail "the timeout is kept to the second, not the next 20-second look"
+  mkdir "$tmp/clock"   # a clock that jumps an hour ahead after its first reading, as after a sleep
+  printf '#!/bin/sh\nf=%s/clock/n; n=$(cat "$f" 2>/dev/null || echo 0); echo $((n + 1)) > "$f"\nexec /bin/date "$@" -d "@$(( $(/bin/date +%%s) + n * 3600 ))"\n' "$tmp" > "$tmp/clock/date"
+  chmod +x "$tmp/clock/date"
+  t0=$(date +%s); out=$(PATH="$tmp/clock:$PATH" "$self" "$d" 'review-r3-*.done' 2 2 2>&1); rc=$?; took=$(( $(date +%s) - t0 ))
+  [ $rc -eq 3 ] && [ "$took" -ge 2 ] && ok "a clock that jumps ahead does not end the wait early" \
+    || fail "a clock that jumps ahead does not end the wait early"
   run "$d" 'review-r1-*.done' two 5
   [ $rc -eq 1 ] && ! has "markers present" && ok "a count that is not a number is refused, not read as every marker in" \
     || fail "a count that is not a number is refused, not read as every marker in"
   run "$d" 'review-r1-*.done' 2 soon
   [ $rc -eq 1 ] && ok "a timeout that is not a number is refused" || fail "a timeout that is not a number is refused"
+  run "$d" 'review-r1-*.done' 2 9999999999999999999
+  [ $rc -eq 1 ] && has "more than 9 digits" && ok "a timeout past 9 digits is refused, never wrapped round to a past deadline" \
+    || fail "a timeout past 9 digits is refused, never wrapped round to a past deadline"
   run "$tmp/nowhere" 'review-r1-*.done' 2 1
   [ $rc -eq 1 ] && has "no such dir" && ok "a directory that does not exist is refused" || fail "a directory that does not exist is refused"
   if [ "$(id -u)" -ne 0 ]; then
@@ -79,6 +92,8 @@ COUNT=${3:?}
 TIMEOUT=${4:?}
 for n in "$COUNT" "$TIMEOUT"; do
   case $n in *[!0-9]*) echo "wait-for-markers: '$n' is not a whole number of markers or seconds" >&2; exit 1 ;; esac
+  m=${n#"${n%%[!0]*}"}
+  [ ${#m} -le 9 ] || { echo "wait-for-markers: '$n' is more than 9 digits" >&2; exit 1; }
 done
 COUNT=$((10#$COUNT)) TIMEOUT=$((10#$TIMEOUT))
 
@@ -93,15 +108,16 @@ rm -f "$probe"
 [ "$pos" -eq 1 ] && [ "$neg" -eq 0 ] \
   || { echo "wait-for-markers: reader failed its control (positive=$pos negative=$neg)" >&2; exit 1; }
 
-deadline=$(( $(date +%s) + TIMEOUT ))
+left=$TIMEOUT
 while [ "$(count "$GLOB")" -lt "$COUNT" ]; do
-  left=$(( deadline - $(date +%s) ))
   if [ "$left" -le 0 ]; then
     echo "WAIT-TIMEOUT after ${TIMEOUT}s: $(count "$GLOB") of $COUNT markers matching $GLOB"
     find "$DIR" -maxdepth 1 -name "$GLOB" 2>/dev/null | sed 's/^/  present: /'
     exit 3
   fi
-  sleep $(( left < 20 ? left : 20 ))
+  nap=$(( left < 20 ? left : 20 ))
+  sleep "$nap"
+  left=$(( left - nap ))
 done
 echo "all $COUNT markers present"
 exit 0
