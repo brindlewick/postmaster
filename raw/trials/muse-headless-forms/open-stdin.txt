@@ -1,0 +1,10 @@
+run: an open stdin that sends nothing for 60 seconds, the launch form without its /dev/null
+exit: 0, seconds: 60
+events: 52
+first event: payload_type runtime.command.accepted, stream kind session
+session ids in the stream: 1
+run.model.configured: model_id muse-spark-1.3-contributor, source startup
+tool.result events: read_memory
+last terminal event: run.terminal.completed, terminal completed
+--- its text ---
+KESTREL

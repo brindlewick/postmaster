@@ -1,0 +1,11 @@
+run: a model that does not exist, through launch.sh
+exit: 1, seconds: 2
+stderr lines: 5
+events: 23
+first event: payload_type runtime.command.accepted, stream kind session
+session ids in the stream: 1
+run.model.configured: model_id no-such-model, source startup
+tool.result events: none
+last terminal event: run.terminal.failed, terminal failed
+--- its text ---
+

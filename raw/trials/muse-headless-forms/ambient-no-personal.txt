@@ -1,0 +1,11 @@
+run: ambient context, the launch form plus --no-foreign-personal-context
+exit: 0, seconds: 14
+events: 32
+first event: payload_type runtime.command.accepted, stream kind session
+session ids in the stream: 1
+run.model.configured: model_id muse-spark-1.3-contributor, source startup
+tool.result events: none
+last terminal event: run.terminal.completed, terminal completed
+--- its text ---
+Marker: AGENTS-OK
+no

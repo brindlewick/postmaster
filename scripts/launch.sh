@@ -29,7 +29,7 @@
 #   exit 1  usage, config missing or unreadable, unknown name, a leg that is not synthesis,
 #           review or ship, the coachman launched or resumed with no --leg, a coachman or
 #           fallback on a lane's model, harness not on PATH, env_file missing, or a form this
-#           script does not have (muse; agy resume), or a skill that is not security-review
+#           script does not have (agy resume), or a skill that is not security-review
 #   exit 3  skill: the lane's harness has no such skill recorded
 #   else    the harness's own exit code
 set -uo pipefail
@@ -44,6 +44,7 @@ if [ "${1:-}" = --self-test ]; then
   # The stub prints its arguments, so a launch or a resume shows the model it would run on.
   mkdir "$tmp/bin" "$tmp/wt" && printf '#!/bin/sh\necho "$@ probe=${PROBE:-}"\n' > "$tmp/bin/claude" && chmod +x "$tmp/bin/claude"
   cp "$tmp/bin/claude" "$tmp/bin/codex"
+  printf '#!/bin/sh\nprintf "%%s probe=%%s stdin=%%s\\n" "$*" "${PROBE:-}" "$(cat)"\n' > "$tmp/bin/muse" && chmod +x "$tmp/bin/muse"
   printf 'Continue.\n' > "$tmp/prompt.txt"
   fixture() {  # fixture <name> [<key>...]; each key in [team.coachman_legs] runs on <key>-model
     local name=$1 k; shift
@@ -151,14 +152,33 @@ if [ "${1:-}" = --self-test ]; then
   refused "resuming the coachman with no --leg is refused, and nothing runs" legs "coachman needs --leg" resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt"
   refused "launching the coachman with no --leg is refused, and nothing runs" legs "coachman needs --leg" launch coachman "$tmp/wt" "$tmp/prompt.txt"
 
+  echo "muse"
+  printf '[lanes.m]\nharness = "muse"\nmodel = "muse-model"\neffort = "max"\nenv_file = "%s"\n' "$tmp/over.env" > "$tmp/muse.toml"
+  printf '[lanes.m]\nharness = "muse"\nmodel = "muse-model"\n' > "$tmp/muse-bare.toml"
+  mkdir -p "$tmp/wt/sub" && cp "$tmp/prompt.txt" "$tmp/wt/sub/p.txt"
+  out=$(printf 'leak\n' | env POSTMASTER_CONFIG="$tmp/muse.toml" PATH="$tmp/bin:$PATH" "$self" launch m "$tmp/wt" "$tmp/prompt.txt" 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err")
+  [ $rc -eq 0 ] && [ "$out" = "exec --json --prompt-file $tmp/prompt.txt --model muse-model --reasoning-effort max --yolo probe=reached stdin=" ] \
+    && ok "a muse launch: JSON events, the prompt file, the model, the effort, the bypass form, the env file, and nothing on stdin" \
+    || fail "a muse launch: JSON events, the prompt file, the model, the effort, the bypass form, the env file, and nothing on stdin"
+  run muse resume m "$tmp/wt" 01a0-sess "$tmp/prompt.txt"
+  [ $rc -eq 0 ] && case $out in "exec --json --prompt-file $tmp/prompt.txt --session-id 01a0-sess --model muse-model --reasoning-effort max --yolo "*) true ;; *) false ;; esac \
+    && ok "a muse resume names the session, and keeps the model and the effort" || fail "a muse resume names the session, and keeps the model and the effort"
+  out=$(cd "$tmp/wt" && env POSTMASTER_CONFIG="$tmp/muse-bare.toml" PATH="$tmp/bin:$PATH" "$self" launch m "$tmp/elsewhere" sub/p.txt 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err")
+  [ $rc -eq 0 ] && case $out in "exec --json --prompt-file $tmp/wt/sub/p.txt --model muse-model --yolo "*) true ;; *) false ;; esac \
+    && ok "a relative prompt file is made absolute before the cd, and no effort means no effort flag" \
+    || fail "a relative prompt file is made absolute before the cd, and no effort means no effort flag"
+  carries "the muse form shows the bypass form and an empty stdin" muse "--yolo < /dev/null" form m
+
   echo "skills"
-  printf '[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n\n[lanes.two]\nharness = "codex"\nmodel = "other-model"\n' > "$tmp/skills.toml"
+  printf '[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n\n[lanes.two]\nharness = "codex"\nmodel = "other-model"\n\n[lanes.three]\nharness = "muse"\nmodel = "muse-model"\n' > "$tmp/skills.toml"
   run skills skill one security-review
   [ $rc -eq 0 ] && [ "$out" = /security-review ] && ok "a claude lane's security review skill is /security-review" || fail "a claude lane's security review skill is /security-review"
   run skills skill two security-review
   [ $rc -eq 3 ] && [ -z "$out" ] && case $err in *"no security review skill"*) true ;; *) false ;; esac \
     && ok "a harness with no security review skill is exit 3, never a prompt" || fail "a harness with no security review skill is exit 3, never a prompt"
   refused "a skill that is not recorded is refused" skills "no such skill: code-review" skill one code-review
+  run skills skill three security-review
+  [ $rc -eq 3 ] && [ -z "$out" ] && ok "a muse lane has no security review skill: exit 3" || fail "a muse lane has no security review skill: exit 3"
 
   echo
   [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }
@@ -272,7 +292,7 @@ case $CMD in
   *) die "unknown command: $CMD" ;;
 esac
 [ "$CMD" = form ] || [ -d "$CWD" ] || die "no such directory: $CWD"
-if [ "$HARNESS" = pi ] && [ "$CMD" != form ]; then
+if { [ "$HARNESS" = pi ] || [ "$HARNESS" = muse ]; } && [ "$CMD" != form ]; then   # read after the cd
   prompt_dir=$(cd "$(dirname "$PROMPT")" && pwd -P) || die "cannot resolve prompt file: $PROMPT"
   PROMPT=$prompt_dir/$(basename "$PROMPT")
 fi
@@ -323,7 +343,15 @@ case $HARNESS in
     [ -n "${POSTMASTER_LAUNCH_NAME:-}" ] && cmd+=(--name "$POSTMASTER_LAUNCH_NAME")
     STDIN_FILE=$PROMPT ;;
   muse)
-    die "muse adapter is incomplete (stream flag, bypass form, thread id, resume form); fill harnesses.md and this script from a trial run first" ;;
+    # --yolo is the bypass form: it turns off approval and the sandbox, which needs unprivileged
+    # user namespaces, and trusts the workspace for the run. A resume is a launch that names the
+    # session. The prompt comes from its file, so stdin carries nothing.
+    cmd=(muse exec --json --prompt-file "$PROMPT")
+    [ "$CMD" = resume ] && cmd+=(--session-id "$THREAD")
+    cmd+=(--model "$MODEL")
+    [ -n "${EFFORT:-}" ] && cmd+=(--reasoning-effort "$EFFORT")
+    cmd+=(--yolo)
+    STDIN_FILE=/dev/null ;;
   *) die "no form for harness '$HARNESS'" ;;
 esac
 
