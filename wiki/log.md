@@ -1,14 +1,14 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
-## [2026-09-26] ingest | the local tracker
+## [2026-09-27] ingest | the local tracker
 
 A decision page under Decisions, from issue #11. A tracker with no service keeps a
 repository's tickets in its own git directory, outside the working tree and every branch, and
@@ -16,6 +16,24 @@ a repository whose store exists uses it whatever the config names. The page reco
 git directory rather than a directory under `~/.postmaster/`, why the kind is discovered
 rather than configured, why a store is made or removed only from the main checkout, and what
 it costs. Standing `claimed`, since no run bears on it yet.
+
+## [2026-09-26] ingest | a run keeps the config it started with
+
+A decision page. A run now launches and resumes every lane and every leg on the config it
+recorded in `run.json` at dispatch, never the live one. A config edited mid-run can no longer
+change a lane part-way through, or hand one harness's thread id to another. The page records
+what that costs: a fix to the config waits for the next run, and an env file's contents are
+still read at each launch. Standing `claimed`, since no run bears on it yet.
+
+## [2026-09-26] ingest | a skill is a link to the postmaster repo, never a copy
+
+Third page in the Decisions area, with a trial behind its narrower fact. Each skill is installed
+as a link from a harness's user-level skills folder to the main checkout, never as a copy, and a
+session finds the repo from that link. The trial asked Claude Code, pi, MiMo Code, codex and
+Muse Code, with a temporary HOME, which skills they loaded: each loads a linked skill from each
+folder it documents, and none lists or warns about a link that is missing or points nowhere. The page
+records why the one step that finds the repo is a line in `SKILL.md` rather than a script, and
+why Antigravity is not linked yet. Standing `claimed`: the decision is the user's, issue #15.
 
 ## [2026-09-26] ingest | follow-up: claude's trust question, and claude killed mid-turn
 

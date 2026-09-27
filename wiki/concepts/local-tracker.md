@@ -3,7 +3,7 @@ title: A repository's tickets can live in its own git directory, found without c
 type: concept
 standing: claimed
 sources: []
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # The local tracker

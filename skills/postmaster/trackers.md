@@ -2,9 +2,9 @@
 
 The runbooks make five demands of a tracker and no more: read a ticket, set its state, add a
 dated comment, create a ticket, and replace a ticket's body. This file says what each means for
-each tracker kind the config allows (`config.example.toml`, `[tracker]`). Every write is also
-logged through `scripts/log-action.sh` as `ticket-create`, `ticket-edit`, `ticket-state` or
-`ticket-comment`.
+each tracker kind the config allows (`<tool>/config.example.toml`, `[tracker]`). Every write is also
+logged through `<tool>/scripts/log-action.sh` as `ticket-create`, `ticket-edit`, `ticket-state` or
+`ticket-comment`. `<tool>` is the postmaster repo, as the runbook that sent you here found it.
 
 **GitHub Issues is the default**, on a GitHub Projects board so the tickets are a kanban the
 user can look at. Plane is another named kind, and `local` keeps a repo's tickets in its own
@@ -12,7 +12,7 @@ git directory, with no service and no login. Anything else is `other`. Tickets n
 live on a branch of the target repo: a ticket is state, and state does not belong in a commit.
 
 The ticket shape is the same everywhere: a title, then these headings in this order, so opening
-one costs no orientation. `scripts/ticket-check.sh` is its executable form. It requires the
+one costs no orientation. `<tool>/scripts/ticket-check.sh` is its executable form. It requires the
 title and the first three headings, and does not check `Notes` or `User journey`.
 
 ```
@@ -51,21 +51,21 @@ it and removed by the next state change. `done` closes the issue; `cancelled` cl
 not planned. The ticket id is the issue number, and the prefix discovery reads from commit
 messages is `#`.
 
-Everything goes through `scripts/github.sh`, which reads the GitHub repository from the
+Everything goes through `<tool>/scripts/github.sh`, which reads the GitHub repository from the
 target's origin remote and needs nothing configured. `gh` must be logged in with the
 `project` scope (`gh auth login`, then `gh auth refresh -s project`); the user does both,
-never an agent, and `scripts/probe-trackers.sh` says whether they have.
+never an agent, and `<tool>/scripts/probe-trackers.sh` says whether they have.
 
 ```sh
-scripts/github.sh <repo> board                        # the linked board and its URL; exit 3 if none
-scripts/github.sh <repo> board init                   # create a board named after the repo and link it
-scripts/github.sh <repo> create "<title>" <body-file> # prints the new issue number
-scripts/github.sh <repo> read <n>
-scripts/github.sh <repo> read <n> --body              # the body alone, exactly as stored
-scripts/github.sh <repo> edit <n> <body-file> <base-file>
-scripts/github.sh <repo> state <n> in-progress
-scripts/github.sh <repo> comment <n> coachman "<text>"
-scripts/github.sh <repo> list [state]
+<tool>/scripts/github.sh <repo> board                        # the linked board and its URL; exit 3 if none
+<tool>/scripts/github.sh <repo> board init                   # create a board named after the repo and link it
+<tool>/scripts/github.sh <repo> create "<title>" <body-file> # prints the new issue number
+<tool>/scripts/github.sh <repo> read <n>
+<tool>/scripts/github.sh <repo> read <n> --body              # the body alone, exactly as stored
+<tool>/scripts/github.sh <repo> edit <n> <body-file> <base-file>
+<tool>/scripts/github.sh <repo> state <n> in-progress
+<tool>/scripts/github.sh <repo> comment <n> coachman "<text>"
+<tool>/scripts/github.sh <repo> list [state]
 ```
 
 - **Board:** one per target repo, found through the repo's project links. A repo with no
@@ -98,7 +98,7 @@ target repo, matched by the project identifier that prefixes every work item id 
 which is the prefix discovery reads from commit messages; a target that has shipped one
 ticket needs nothing configured, and one that has not is a question for the user.
 
-Everything goes through `scripts/plane.sh`. The instance and workspace are in the config:
+Everything goes through `<tool>/scripts/plane.sh`. The instance and workspace are in the config:
 
 ```toml
 [tracker]
@@ -110,18 +110,18 @@ workspace = "<slug>"             # the segment after the host in the workspace's
 The API key is `PLANE_API_KEY` in `~/.postmaster/plane.env` (or the file `[tracker]
 env_file` names), one line, made in Plane under profile settings, API tokens. The user
 writes that file; the key never passes through a conversation, the config or this repo.
-`scripts/plane.sh projects` proves the three of them agree by listing the workspace's
-projects, and `scripts/probe-trackers.sh` runs it.
+`<tool>/scripts/plane.sh projects` proves the three of them agree by listing the workspace's
+projects, and `<tool>/scripts/probe-trackers.sh` runs it.
 
 ```sh
-scripts/plane.sh projects                             # identifier, id and name of every project
-scripts/plane.sh create <IDENT> "<title>" <body-file> # prints the new id, IDENT-n
-scripts/plane.sh read PM-12
-scripts/plane.sh read PM-12 --body                    # the body alone, as markdown
-scripts/plane.sh edit PM-12 <body-file> <base-file>
-scripts/plane.sh state PM-12 in-progress
-scripts/plane.sh comment PM-12 coachman "<text>"
-scripts/plane.sh list PM [state]
+<tool>/scripts/plane.sh projects                             # identifier, id and name of every project
+<tool>/scripts/plane.sh create <IDENT> "<title>" <body-file> # prints the new id, IDENT-n
+<tool>/scripts/plane.sh read PM-12
+<tool>/scripts/plane.sh read PM-12 --body                    # the body alone, as markdown
+<tool>/scripts/plane.sh edit PM-12 <body-file> <base-file>
+<tool>/scripts/plane.sh state PM-12 in-progress
+<tool>/scripts/plane.sh comment PM-12 coachman "<text>"
+<tool>/scripts/plane.sh list PM [state]
 ```
 
 - **Read:** `read`; the body Plane stores as HTML comes back as markdown in the ticket
@@ -151,25 +151,25 @@ as written, and `<n>.json`, its title, state, labels, created time and log. The 
 its number, written `#<n>` as on GitHub.
 
 **A repo whose store exists uses this tracker, whatever `[tracker] kind` names**, and any other
-repo uses the config's kind. `scripts/tracker-kind.sh <repo>` names the kind a repo uses:
-`scripts/discover-project.sh` reports it as `tracker=`, and `scripts/ticket-check.sh <repo>
+repo uses the config's kind. `<tool>/scripts/tracker-kind.sh <repo>` names the kind a repo uses:
+`<tool>/scripts/discover-project.sh` reports it as `tracker=`, and `<tool>/scripts/ticket-check.sh <repo>
 <id>` reads through it.
 
-Everything goes through `scripts/local.sh`, which takes any checkout of the repo, a linked
+Everything goes through `<tool>/scripts/local.sh`, which takes any checkout of the repo, a linked
 worktree included:
 
 ```sh
-scripts/local.sh <repo> store                         # the store's path; exit 3 if none
-scripts/local.sh <repo> store init                    # make the store
-scripts/local.sh <repo> store remove                  # remove a store that holds no ticket
-scripts/local.sh <repo> create "<title>" <body-file>  # prints the new number
-scripts/local.sh <repo> read <n>
-scripts/local.sh <repo> read <n> --body               # the body alone, as stored
-scripts/local.sh <repo> edit <n> <body-file> <base-file>
-scripts/local.sh <repo> title <n> "<title>"
-scripts/local.sh <repo> state <n> in-progress
-scripts/local.sh <repo> comment <n> coachman "<text>"
-scripts/local.sh <repo> list [state]                  # every ticket, grouped by state
+<tool>/scripts/local.sh <repo> store                         # the store's path; exit 3 if none
+<tool>/scripts/local.sh <repo> store init                    # make the store
+<tool>/scripts/local.sh <repo> store remove                  # remove a store that holds no ticket
+<tool>/scripts/local.sh <repo> create "<title>" <body-file>  # prints the new number
+<tool>/scripts/local.sh <repo> read <n>
+<tool>/scripts/local.sh <repo> read <n> --body               # the body alone, as stored
+<tool>/scripts/local.sh <repo> edit <n> <body-file> <base-file>
+<tool>/scripts/local.sh <repo> title <n> "<title>"
+<tool>/scripts/local.sh <repo> state <n> in-progress
+<tool>/scripts/local.sh <repo> comment <n> coachman "<text>"
+<tool>/scripts/local.sh <repo> list [state]                  # every ticket, grouped by state
 ```
 
 - **Store:** `store init` makes one and `store remove` removes one that holds no ticket, each
