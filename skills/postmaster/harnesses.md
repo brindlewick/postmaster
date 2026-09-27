@@ -31,6 +31,7 @@ one session messaging another; the postmaster polls files.
 | claude | `claude -p` | `--output-format stream-json` | `CLAUDE.md` and what it imports | no, argv |
 | pi | `pi --mode json` | `--mode json` | `AGENTS.override.md`, else `AGENTS.md` or `CLAUDE.md`, natively | yes, on stdin |
 | muse | `muse exec` | `--json` | `AGENTS.md` in a trusted workspace, and Claude Code's user rules | yes, `--prompt-file` |
+| mimo | `mimo run` | `--format json` | `AGENTS.md`, a `CLAUDE.md` beside a short one, and Claude Code's user rules | yes, on stdin |
 
 A harness that reads no ambient context file must be handed the project's docs by name in its
 prompt, and must have the `WORKHORSE-SPEC.md` / `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract spelled
@@ -65,8 +66,7 @@ Docs read and trial run on 2026-09-26. A harness with no folder in this table is
 `<tool>/skills/postmaster/SKILL.md` by absolute path, and every brief names the skill's documents
 by absolute path into `<tool>`, never a copy. grok and muse also read `~/.claude/skills`, so
 where claude is installed they meet each skill twice, through two links to one checkout; grok
-keeps one per name, and muse lists it once. mimo (MiMo Code) is in this table only: its launch
-and resume forms are not recorded yet, so `<tool>/scripts/launch.sh` has no form for it.
+keeps one per name, and muse lists it once.
 
 ## codex
 
@@ -233,7 +233,8 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json \
   an earlier one had been asked to remember. So `launch.sh` gives each lane and each coachman leg
   its own `XDG_DATA_HOME`, under `POSTMASTER_HARNESS_DATA` (default
   `~/.postmaster/harness-data`), keyed by run, directory, name and leg. A resume finds its
-  session there, and nothing carries between lanes, legs or runs.
+  session there, and no lane, leg or run finds another's through Muse Code's own memory; a lane
+  can still read files elsewhere on the machine.
 - Ambient context: in a trusted workspace, which `--yolo` makes it, `AGENTS.md`, and a
   `CLAUDE.md` only where no `AGENTS.md` sits beside it. It also loads other agents' personal
   rules and skills, Claude Code's user rules among them, unless `--no-foreign-personal-context`
@@ -243,6 +244,49 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json \
 - It updates itself in the background unless `MUSE_NO_AUTO_UPDATE=1` is set. A run records the
   version it was dispatched with, and a later leg may run a newer one.
 - Source: a trial of Muse Code 1.4.0 (R4302.1), `raw/trials/muse-headless-forms/`.
+
+## mimo (MiMo Code)
+
+```sh
+cd <wt> && env XDG_DATA_HOME=<harness-data>/mimo/<key> MIMOCODE_DISABLE_CLAUDE_IMPORT=1 \
+  mimo run --format json -m <provider/model> --variant <effort> --dangerously-skip-permissions \
+  < <abs prompt-file>
+```
+
+- The prompt arrives on stdin. MiMo Code reads its stdin to the end before it starts, so an
+  open pipe holds a launch, and the prompt file is the only stdin a launch ever has.
+- `--dangerously-skip-permissions` is the bypass form: it approves whatever no rule denies.
+- The model is `provider/model`; a Singapore Token Plan key works only with the
+  `xiaomi-token-plan-sgp` provider. `--variant` sets the effort: MiMo V2.6 Pro's variants are
+  `low`, `medium` and `high`. The key is `XIAOMI_API_KEY`, from the lane's `env_file`.
+- `--format json` writes one event per line: `step_start`, `text`, `tool_use` and `step_finish`,
+  each with its `sessionID` and a `part`. A `tool_use` names its tool and input in `part`.
+- Thread id: the `sessionID` on the first event.
+- Resume: the launch form with `-s <thread id>`, the model and the variant passed again. A
+  resume that names no variant runs without one, as `mimo export <session>` shows: it records
+  each message's provider, model and variant.
+- Thread name: `--title <text>` on a launch, which `launch.sh` passes from
+  `POSTMASTER_LAUNCH_NAME`.
+- Final message: the `part.text` of the last `text` event; `step_finish` with reason `stop`
+  closes the run. **A run that fails exits 0 all the same**: on a model that does not exist it
+  wrote one `error` event and no text. Read a failure from the events, never the exit.
+- **Its data, per lane.** MiMo Code keeps its sessions under `XDG_DATA_HOME`, with a `memory`
+  tool's notes and one session-notes file that every session there shares
+  (`memory/sessions/current_session_id/notes.md`): a fresh session in the same data directory
+  recalled a word an earlier one had been asked to remember. So `launch.sh` gives each lane its
+  own `XDG_DATA_HOME`, as it does for Muse Code. That closes MiMo Code's own channel, not the
+  filesystem: a lane asked to search can still read files anywhere on the machine. In a new data
+  directory MiMo Code first copies in Claude Code's session history, 69 MB here, which
+  `MIMOCODE_DISABLE_CLAUDE_IMPORT=1` turns off.
+- Ambient context: `AGENTS.md` up to the repository's root, and a `CLAUDE.md` too when the
+  `AGENTS.md` is under 500 characters; its own config's `AGENTS.md`; and Claude Code's user rules,
+  `~/.claude/CLAUDE.md`. `MIMOCODE_DISABLE_CLAUDE_CODE_PROMPT=1` turns off both `CLAUDE.md` files.
+  The launch keeps them, as a claude lane reads the same files.
+- From Claude Code's settings: it started the MCP server a project's `.claude.json` names, and
+  did not run a project's Claude Code hook (trial). Its code also reads `~/.claude.json`'s MCP
+  servers and Claude Code's commands. The launch keeps the MCP servers and the commands, as a
+  claude lane has them; no Claude Code hook guards a MiMo Code launch.
+- Source: a trial of MiMo Code 0.1.15, `raw/trials/mimo-headless-forms/`.
 
 ## Own review skills
 
@@ -260,8 +304,7 @@ The prompt goes in the lane's prompt file, and the launch is the ordinary launch
 | grok | none: its slash commands have no review command; skills, plugins and workflows could add one | its documentation (docs.x.ai, Modes and Commands), 2026-09 |
 | agy | none: its slash commands have no security review; Google's security extension (`/security:analyze`) is for Gemini CLI only | its documentation (antigravity.google, CLI Reference), 2026-09 |
 
-MiMo Code, which has no adapter here yet, has none either: its `/review` is a general code
-review (its commands, 0.1.15). OpenAI's Codex Security is a CLI of its own
+MiMo Code has none either: its `/review` is a general code review (its commands, 0.1.15). OpenAI's Codex Security is a CLI of its own
 (`@openai/codex-security`), not a codex skill, and would need an adapter of its own.
 
 **claude's `/security-review`** reviews the change from the merge base of `origin/HEAD` and
@@ -289,6 +332,7 @@ It runs in its harness's bypass mode, like every launch, named for its project:
 | grok | `grok -m <model> --reasoning-effort <effort> --always-approve` | no |
 | agy | `agy --model <model> --dangerously-skip-permissions` | no |
 | muse | `muse --model <model> --reasoning-effort <effort> --yolo` | flags from its help |
+| mimo | `mimo -m <provider/model> --dangerously-skip-permissions`; its effort is set inside, having no flag | flags from its help |
 
 Bypass mode does not skip claude's question, on first start in a folder it has never opened,
 whether to trust it; headless `claude -p` does not ask. The first spawn in a new target stops
@@ -299,7 +343,7 @@ the headless form above; run it once before relying on it.
 
 `<tool>/scripts/view-stream.sh` is the other executable half of this file: it renders an events
 stream one line per event of interest, for a host's pane (`hosts.md`) and for anyone reading a
-stream by hand. It knows claude's and muse's events, checked against recorded streams; codex's
+stream by hand. It knows claude's, muse's and mimo's events, checked against recorded streams; codex's
 and pi's, written from the event names this file records and not yet checked against a recorded
 stream;
 any other harness shows by event type, once per run of the same type. A harness whose events it

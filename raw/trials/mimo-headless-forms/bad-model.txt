@@ -1,0 +1,10 @@
+run: a model that does not exist, through launch.sh
+exit: 0, seconds: 8
+stderr lines: 25
+events: 1, of types: error
+sessions in the stream: 1
+tool_use events: none
+step_finish reasons: none
+error events: 1, the first naming "UnknownError"
+--- the last text event ---
+(none)
