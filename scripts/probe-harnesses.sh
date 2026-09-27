@@ -7,16 +7,17 @@ LIVE=${LIVE:-0}          # LIVE=1 spends a token or two per harness to prove it 
 row() { printf '  %-8s %-9s %-13s %s\n' "$1" "$2" "$3" "$4"; }
 row HARNESS INSTALLED HEADLESS NOTES
 row ------- --------- -------- -----
-for h in claude codex grok agy muse pi; do
+for h in claude codex grok agy muse mimo pi; do
   if ! command -v "$h" >/dev/null 2>&1; then row "$h" no - "not on PATH"; continue; fi
   case $h in
-    claude) hl="-p" ;; codex) hl="exec" ;; grok) hl="-p" ;; agy) hl="-p" ;; muse) hl="exec" ;; pi) hl="--mode json" ;;
+    claude) hl="-p" ;; codex) hl="exec" ;; grok) hl="-p" ;; agy) hl="-p" ;; muse) hl="exec" ;; mimo) hl="run" ;; pi) hl="--mode json" ;;
   esac
   note=""
-  [ "$h" = muse ] && note="--prompt-file, --api-key-stdin"
+  [ "$h" = muse ] && note="--prompt-file; key from META_API_KEY"
   [ "$h" = grok ] && note="--prompt-file"
   [ "$h" = agy  ] && note="reads NO ambient context file"
-  [ "$h" = muse ] && note="$note; reads no ambient file"
+  [ "$h" = muse ] && note="$note; reads AGENTS.md in a trusted workspace, and Claude Code's user rules"
+  [ "$h" = mimo ] && note="prompt on stdin; key from XIAOMI_API_KEY; reads AGENTS.md, a CLAUDE.md beside a short one, and Claude Code's user rules"
   [ "$h" = pi ] && note="reads AGENTS.md or CLAUDE.md (AGENTS.md first); prompt on stdin"
   row "$h" yes "$hl" "$note"
 done

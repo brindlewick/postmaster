@@ -20,7 +20,7 @@
 #   exit 0  rendered
 #   exit 1  usage, or the self-test failed
 set -uo pipefail
-HERE=$(cd "$(dirname "$0")" && pwd -P)
+HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 
 # The program is passed with -c, not on stdin: stdin is the stream it renders.
 read -r -d '' PROG <<'PY'
@@ -71,7 +71,50 @@ QUIET = {
     "tool_execution_update", "auto_compaction_end", "auto_retry_end",
 }
 
+def muse(e):
+    # muse (muse exec --json): each record names its payload_type, and its stream is the session
+    pt, p = str(e.get("payload_type")), e.get("payload") or {}
+    if pt == "run.model.configured":
+        return "session %s · %s" % ((e.get("stream") or {}).get("id"), p.get("model_id"))
+    if pt == "tool.result":
+        facts = p.get("correlation_facts") or {}
+        name = facts.get("tool_name") or "tool"
+        if facts.get("outcome") not in (None, "success"):
+            return "tool error: %s" % name
+        return tool_line(name, p.get("edit_facts") or {})
+    if pt.startswith("run.terminal."):
+        said = str(p.get("text") or "").strip()
+        return "result: %s%s" % (p.get("terminal") or pt.split(".")[-1], " · " + short(said) if said else "")
+    return None      # streaming deltas, task lifecycle and bookkeeping: the result carries the text
+
+mimo_sessions = set()
+
+def mimo(e):
+    # mimo (mimo run --format json): every event carries its sessionID and a part
+    t, part = e.get("type"), e.get("part") or {}
+    out = []
+    sid = e.get("sessionID")
+    if sid and sid not in mimo_sessions:
+        mimo_sessions.add(sid)
+        out.append("session %s" % sid)
+    if t == "text" and str(part.get("text", "")).strip():
+        out.append("says: " + short(part.get("text")))
+    elif t == "tool_use":
+        state = part.get("state") or {}
+        out.append("tool error: %s" % part.get("tool") if state.get("status") == "error"
+                   else tool_line(part.get("tool"), state.get("input")))
+    elif t == "step_finish" and part.get("reason") == "stop":
+        out.append("done")
+    elif t == "error":
+        err = e.get("error") or {}
+        out.append("error: " + short((err.get("data") or {}).get("message") or err.get("name") or json.dumps(err)))
+    return out or None
+
 def render(e):
+    if "payload_type" in e:
+        return muse(e)
+    if "sessionID" in e and e.get("type") in ("step_start", "step_finish", "text", "tool_use", "error"):
+        return mimo(e)
     t = e.get("type")
     if t in QUIET:
         return None
@@ -190,8 +233,8 @@ def show(line, stamp):
             last_generic[0] = None
     else:
         out = short(line)
-    if out:
-        print((time.strftime("%H:%M:%S ") if stamp else "") + CONTROL.sub("", out), flush=True)
+    for one in (out if isinstance(out, list) else [out] if out else []):
+        print((time.strftime("%H:%M:%S ") if stamp else "") + CONTROL.sub("", one), flush=True)
 
 if not follow:
     for line in sys.stdin:
@@ -239,7 +282,7 @@ esac
 
 # --- self-test ----------------------------------------------------------------------------
 tmp=$(mktemp -d) || exit 1
-trap 'rm -r -- "$tmp" 2>/dev/null' EXIT
+trap 'rm -r -- "$tmp" </dev/null 2>/dev/null' EXIT
 fails=0
 ok()   { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; printf '%s\n' "${2:-}" | sed 's/^/         /'; fails=$((fails+1)); }
@@ -279,6 +322,31 @@ shows "pi: a session starts" '{"type":"session","version":3,"id":"01a0c7e8-5863"
 shows "pi: a tool call" '{"type":"tool_execution_start","toolCallId":"t1","toolName":"bash","args":{"command":"ls"}}' 'bash: ls'
 shows "pi: what the model said" \
   '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"All done."}]}}' 'says: All done.'
+shows "muse: a session starts, with its thread id and model" \
+  '{"stream":{"kind":"session","id":"01a0e16d-17e8"},"payload_type":"run.model.configured","payload":{"model_id":"muse-spark-1.3-contributor","source":"startup"}}' \
+  'session 01a0e16d-17e8 · muse-spark-1.3-contributor'
+shows "muse: a tool call, with what it changed" \
+  '{"stream":{"kind":"session","id":"s1"},"payload_type":"tool.result","payload":{"correlation_facts":{"tool_name":"write_file","outcome":"success"},"edit_facts":{"path":"proof.txt","added":1}}}' \
+  'write_file: proof.txt'
+shows "muse: a failed tool call" \
+  '{"stream":{"kind":"session","id":"s1"},"payload_type":"tool.result","payload":{"correlation_facts":{"tool_name":"shell","outcome":"error"}}}' \
+  'tool error: shell'
+shows "muse: the result, with what the model said" \
+  '{"stream":{"kind":"session","id":"s1"},"payload_type":"run.terminal.completed","payload":{"terminal":"completed","text":"DONE"}}' \
+  'result: completed · DONE'
+shows "muse: a failed run" '{"stream":{"kind":"session","id":"s1"},"payload_type":"run.terminal.failed","payload":{"terminal":"failed","text":""}}' 'result: failed'
+shows "mimo: a session starts, with its thread id, and a first step says nothing more" \
+  '{"type":"step_start","sessionID":"ses_ffe5f1e2","part":{"type":"step-start"}}' 'session ses_ffe5f1e2'
+shows "mimo: a tool call, with what it touched" \
+  '{"type":"tool_use","sessionID":"ses_ffe5f1e2","part":{"type":"tool","tool":"write","state":{"status":"completed","input":{"file_path":"proof.txt","content":"PELICAN"}}}}' \
+  "$(printf 'session ses_ffe5f1e2\nwrite: proof.txt')"
+shows "mimo: what the model said" '{"type":"text","sessionID":"ses_1","part":{"type":"text","text":"DONE"}}' "$(printf 'session ses_1\nsays: DONE')"
+shows "mimo: a failed tool call" '{"type":"tool_use","sessionID":"ses_1","part":{"tool":"bash","state":{"status":"error","input":{"command":"false"}}}}' \
+  "$(printf 'session ses_1\ntool error: bash')"
+got=$(printf '%s\n' '{"type":"step_start","sessionID":"ses_2","part":{}}' '{"type":"text","sessionID":"ses_2","part":{"text":"DONE"}}' \
+  '{"type":"step_finish","sessionID":"ses_2","part":{"reason":"tool-calls"}}' '{"type":"step_finish","sessionID":"ses_2","part":{"reason":"stop"}}' | view)
+[ "$got" = "$(printf 'session ses_2\nsays: DONE\ndone')" ] && ok "mimo: a session is named once, and only its last step says done" \
+  || fail "mimo: a session is named once, and only its last step says done" "$got"
 shows "a line that is not JSON is shown as it is" 'plain text from a wrapper' 'plain text from a wrapper'
 shows "an unknown event shows its type" '{"type":"heartbeat","message":"still here"}' 'heartbeat: still here'
 shows "escape sequences in what a model said never reach the terminal" \
@@ -292,6 +360,8 @@ silent "claude: a tool result that succeeded" '{"type":"user","message":{"conten
 silent "claude: a rate-limit event that allowed the call" '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}'
 silent "codex: reasoning" '{"type":"item.completed","item":{"type":"reasoning","text":"hmm"}}'
 silent "pi: a streaming delta" '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Al"}}'
+silent "muse: a task's lifecycle record" '{"stream":{"kind":"session","id":"s1"},"payload_type":"task.lifecycle.started","payload":{"kind":"task_lifecycle"}}'
+silent "muse: a streaming delta, whose text the result carries" '{"stream":{"kind":"session","id":"s1"},"payload_type":"run.output.delta","payload":{"text":"DO"}}'
 silent "pi: the user's own message ending" '{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"do it"}]}}'
 got=$(for i in $(seq 1 50); do printf '{"type":"delta","n":%d}\n' "$i"; done | view)
 [ "$got" = delta ] && ok "fifty unknown events of one type show as one line" || fail "fifty unknown events of one type show as one line" "$got"

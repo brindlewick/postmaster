@@ -45,7 +45,7 @@
 #   exit 2  ruling: not a ruling; outcome: lost
 #   exit 3  the agent is still working, so nothing was sent; outcome: running
 set -uo pipefail
-HERE=$(cd "$(dirname "$0")" && pwd -P)
+HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 SELF=$HERE/$(basename "$0")
 TOOL=$(dirname "$HERE")
 CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
@@ -66,7 +66,7 @@ print(json.dumps(eval(sys.argv[1])))' "$expr" "$@" >> "$file"
 }
 dispatch_of() {  # dispatch_of <dir>: its real path, or die
   [ -n "${1:-}" ] && [ -d "$1" ] || die "no such dispatch directory: ${1:-}"
-  (cd "$1" && pwd -P)
+  (CDPATH= cd -P -- "$1" && pwd -P)
 }
 agent_of() {  # agent_of <dispatch> <record>: the Herdr agent name for this run's record
   "$HERE/host.sh" _handle "$(basename "$(dirname "$1")")-$(basename "$1")-$2"
@@ -180,7 +180,7 @@ lane_cmd() {
   case $rec in ''|*/*) die "a record is a name, not a path: $rec" ;; esac
   [ -d "$cwd" ] || die "no such directory: $cwd"
   [ -f "$prompt" ] && [ -s "$prompt" ] || die "prompt file missing or empty: $prompt"
-  cwd=$(cd "$cwd" && pwd -P); prompt=$(cd "$(dirname "$prompt")" && pwd -P)/$(basename "$prompt")
+  cwd=$(CDPATH= cd -P -- "$cwd" && pwd -P); prompt=$(CDPATH= cd -P -- "$(dirname -- "$prompt")" && pwd -P)/$(basename -- "$prompt")
   mkdir -p "$d/logs"
   label=$("$HERE/host.sh" name "$d" "$rec"); agent=$(agent_of "$d" "$rec")
   : > "$d/logs/$rec.err"                               # this call's errors only, as for a headless launch
@@ -203,7 +203,7 @@ leg_cmd() {
   case $n in ''|*[!0-9]*) die "a leg is a number: $n" ;; esac
   [ -d "$cwd" ] || die "no such directory: $cwd"
   [ -f "$prompt" ] && [ -s "$prompt" ] || die "prompt file missing or empty: $prompt"
-  cwd=$(cd "$cwd" && pwd -P); prompt=$(cd "$(dirname "$prompt")" && pwd -P)/$(basename "$prompt")
+  cwd=$(CDPATH= cd -P -- "$cwd" && pwd -P); prompt=$(CDPATH= cd -P -- "$(dirname -- "$prompt")" && pwd -P)/$(basename -- "$prompt")
   rec=coachman-leg-$n; mkdir -p "$d/logs"
   # A leg taken over is remounted on the fallback it was taken over by.
   [ "$takeover" = 1 ] || { [ "$(last_start "$d/logs/$rec.live" name)" = coachman_fallback ] && name=coachman_fallback; }

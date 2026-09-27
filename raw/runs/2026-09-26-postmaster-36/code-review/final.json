@@ -1,0 +1,92 @@
+[
+  {
+    "file": "scripts/launch.sh",
+    "line": 121,
+    "summary": "launch.sh now refuses every launch of every lane and role whenever the live config's [team.coachman_legs] names an old or unknown leg, so a config edit made while runs are in flight makes every reviewer and workhorse launch exit at once, and the runbooks read each exit as a spawn misfire, not a config error.",
+    "failure_scenario": "A run is in leg 2 when the user adds `shipping = {...}` (the ship leg's stage name) to ~/.postmaster/config.toml for a later ticket. launch.sh reads the live file, not run.json, so every `launch.sh launch <lane> ...` in the next round exits 1 with 'names no such leg: shipping'. Each wrapper still touches its review-r<round>-<lens>-<lane>.done, wait-for-markers.sh prints 'all 6 markers present' after one poll with no reviewer run, and the DEGRADED MUST rule files every lane under every lens as 'a spawn misfire'. The prescribed fix, restoring the lane next round, is refused the same way, and step 5's done condition can close the loop on a round nobody reviewed (reproduced). origin/main launched every lane on this config. The refusal protects only coachman launches, so refusing lanes adds risk with no benefit."
+  },
+  {
+    "file": "skills/postmaster/postmaster.md",
+    "line": 108,
+    "summary": "The new line 'that refusal goes to the user' has no mechanism behind it. A leg launch refused by launch.sh's [team.coachman_legs] check only shows up as a background exit after Stage B has moved the ticket and cut the worktree, neither REMOUNT branch can act on it, and SKILL.md's headless postmaster spawn dies the same way.",
+    "failure_scenario": "The config still has `[team.coachman_legs] security = {...}`, which origin/main's example comment offered ('synthesis, style, bug, security, ship'). Stage B moves the ticket to in-progress, writes run.json and cuts the worktree. Stage C step 3's backgrounded launch exits 1, leaving the refusal only in coachman-leg-1.err, an empty events file with no thread id, and .leg-1-exited, so runs-status.sh says REMOUNT. The .err is not a wall, so REMOUNT resumes via step 5, which needs a coachman.legs.1.thread_id that was never recorded and would be refused anyway. The wall branch's `launch coachman_fallback` is refused by the same whole-config check, and no Stage D branch leads to the user. SKILL.md's headless `launch.sh launch postmaster ...` inside tmux is refused too, and step 6 then reports the session as running (reproduced)."
+  },
+  {
+    "file": "skills/postmaster/coachman.md",
+    "line": 121,
+    "summary": "The hand-off sends unapplied findings only to the review leg's reviewers, and the style ones to the Style residue. A bug or security finding the review leg leaves open (residue at a round-cap stop, or an out-of-scope deferral) therefore reaches no section of the ship card, and the merge is decided without it.",
+    "failure_scenario": "Round 5 ends with a verified P2 security finding still open. The coachman escalates, and the postmaster itself rules 'a round to stop at the cap' (Stage E; the user is not involved). handoff-2.md lists the finding under Deferred findings, but the fresh ship leg is told only to carry 'the style ones to the ship card's Style residue', and Stage 3 has no place on the card for gating findings. Stage F shows the user (merge_authority = user by default) only 'the card, the review link and your verification', so the user merges without seeing the open security finding. The routing gap predates the PR, but the PR rewrote this exact line and made the style-only routing explicit."
+  },
+  {
+    "file": "skills/postmaster/coachman.md",
+    "line": 376,
+    "summary": "Round 1 now runs every lens at once, so a style finding deferred in round 1 is never seen by a bug or security reviewer when round 1 is also the last round. A correctness defect filed under style then ships without any gating review; the old bug and security briefs listed the earlier passes' findings.",
+    "failure_scenario": "In round 1 a style lane reports that loadConfig() swallows every error and returns defaults. The coachman verifies it, judges it not 'clearly right' to apply because it changes behaviour, and defers it to the Style residue. The bug and security lanes return CLEAN and nothing is applied, so step 5 ends the loop: no gating finding and no change applied. There is no next round's brief to restate the deferral in, so the hard rule 'Put the disposition of every deferred finding in the next round's brief ... A deferral that is never restated cannot be corrected' cannot be followed. At origin/main this finding reached the bug and security legs as 'findings already known (prior passes, ...)'."
+  },
+  {
+    "file": "skills/postmaster/coachman.md",
+    "line": 514,
+    "summary": "In consult mode the only review stop now comes after the loop has closed, and step 6 says to wait for the ruling and then end the leg. Code changes a ruling asks for are therefore applied and shipped with no review round, which contradicts the goal-loop rule; before the PR, rulings on the style and bug cards were followed by the later passes.",
+    "failure_scenario": "With CHECKPOINT_MODE consult, the user reads checkpoint-review.md and rules 'apply deferred style findings S2 and S3, and revert the round-1 rename of parseArgs'. Following step 6's 'wait for the resume, then end the leg with its hand-off', the coachman applies the changes, re-runs the gate and writes handoff-2.md, and leg 3 ships code no reviewer saw. This contradicts 'Review is a goal-loop ... a loop whose fixes were never re-reviewed is not done' and step 5's 'a round that applied any change ... is never the last'. Nothing says whether another round may run after a ruling or how it counts against the 5-round cap, and none of Stage F's checks covers review coverage."
+  },
+  {
+    "file": "scripts/launch.sh",
+    "line": 173,
+    "summary": "The codex resume form passes no -m, no reasoning effort, no --json and no -o, so for a codex coachman or fallback the now-required --leg changes nothing on resume. Every remount, ruling and merge word runs on codex's default model and appends plain text to the leg's .jsonl stream, which breaks fb7d5d6's header promise that 'a leg never runs on the wrong model'.",
+    "failure_scenario": "config.example.toml puts coachman_fallback, and the sample [team.coachman_legs] synthesis entry, on codex/gpt-6-astra/max. At fb7d5d6 every remount, ruling and merge word goes through postmaster.md Stage C step 5. With a stub codex, `resume coachman ... --leg synthesis` and `resume coachman_fallback ... --leg review` both build exactly `codex exec resume <id> --dangerously-bypass-approvals-and-sandbox <prompt>`, while `launch` builds `codex exec -C <wt> --json -m gpt-6-astra -c model_reasoning_effort=\"max\" ...` (reproduced). The resumed leg therefore runs on ~/.codex/config.toml's default model and effort, which may be a lane's model. Its output lands in coachman-leg-<n>-events.jsonl as plain text rather than the JSON stream harnesses.md promises, and --last is silently dropped for resumed codex lanes. Every resume control in the new self-test uses a claude stub, so none of this is exercised."
+  },
+  {
+    "file": "scripts/stage.sh",
+    "line": 29,
+    "summary": "The new terminal-stage guard checks only the stage being entered, so a coachman leg still running after the user abandons a run can move it out of `abandoned` with its next stage.sh call, and the poll then dispatches or remounts the abandoned run.",
+    "failure_scenario": "The user abandons a run while leg 1's workhorses are running. The postmaster runs `stage.sh <d> abandoned postmaster` and removes the worktrees; nothing stops the live coachman, since the runbook says 'Never kill a running leg'. The coachman's next `scripts/stage.sh <d> synthesis` exits 0 with 'stage: abandoned -> synthesis', even from a deleted cwd. When it then touches .leg-1-done (or dies), runs-status.sh prints DISPATCH (or REMOUNT) instead of '-', and Stage D dispatches leg 2 of an abandoned run (reproduced). The gap predates the PR, which had no guard at all, but fb7d5d6's guard is meant to make terminal stages postmaster-only and does not close it. Refusing any change away from done or abandoned would."
+  },
+  {
+    "file": "skills/postmaster/postmaster.md",
+    "line": 157,
+    "summary": "The fallback takeover is launched with 'the same wrapper as Stage C', whose truncating `>`/`2>` erase the walled coachman's whole event stream and the wall text REMOUNT just read. REMOUNT also relaunches on the fallback even when the walled coachman already is the fallback. And because fb7d5d6's resumes append to the same .err with no process boundary, old wall text can make REMOUNT treat a later, ordinary exit as a wall.",
+    "failure_scenario": "Leg 2's coachman hits a quota wall. REMOUNT reads coachman-leg-2.err, logs degrade, and runs `launch coachman_fallback` through step 3's `> ...events.jsonl 2> ...err`, which leaves only the fallback's output (reproduced). fb7d5d6 also added step 5's appending wrapper, so 'the same wrapper as Stage C' is now ambiguous. Suppose the fallback is walled next: config.example.toml puts it and lane luna on one codex login, and round 1 now runs luna three times at once. The manifest's new `name` records coachman_fallback, but neither REMOUNT nor runs-status.sh reads it, so the fallback is relaunched into the same wall every poll_seconds and the user is never told. Conversely, a wall line from an earlier process in a leg that is later resumed via step 5 stays in the appended .err, and REMOUNT's wall test ('A quota or provider wall, quoted') can then send a later, ordinary exit to a needless takeover that throws away the thread's context."
+  },
+  {
+    "file": "skills/postmaster/postmaster.md",
+    "line": 94,
+    "summary": "fb7d5d6's Stage C step 2 resumes the previous leg 'via step 5', but step 5's block is written in <n>, which inside Stage C means the leg being dispatched. The resumed coachman is also not told that its done marker was removed. The poll therefore reports REMOUNT for a leg that is running or has finished, and the same thread can be resumed twice.",
+    "failure_scenario": "While leg 2 is being dispatched, handoff-check.sh exits 2 on handoff-1.md. Step 2 removes .leg-1-done and resumes leg 1 through step 5. With Stage C's n=2 substituted, that is `rm -f .leg-2-exited`, `>> coachman-leg-2-events.jsonl`, `touch .leg-2-exited`. .leg-1-exited stays, so with the manifest at leg=1 runs-status.sh prints REMOUNT while leg 1 is running, and REMOUNT resumes the same thread a second time. The stray .leg-2-exited then makes leg 2 poll REMOUNT as soon as step 3 launches it, because step 3 never clears it. Even with n-1 used correctly, a coachman resumed with only 'Missing: Unverified, Open questions' may fill them in and exit without touching .leg-1-done again, which leaves the run on REMOUNT (all three states reproduced with runs-status.sh)."
+  },
+  {
+    "file": "skills/postmaster/coachman.md",
+    "line": 498,
+    "summary": "One 5-round cap now covers the whole loop, and a stop at the cap ends all review, so the last round's fixes reach the ship leg reviewed by neither gating lens. The PR's wiki page and index nonetheless claim every fix is re-reviewed by both gating lenses.",
+    "failure_scenario": "Bug findings keep arriving and round 5 applies fixes for them. Step 5 says STOP and escalate, the postmaster rules 'a round to stop at the cap' (Stage E), and the leg writes its card and hand-off, so the round-5 fixes, bug and security alike, ship with no gating review. At origin/main, a capped bug pass was always followed by the whole security leg over the final code. The single cap is a documented choice (#36 criterion 7). But wiki/concepts/review-loop.md (lines 14 and 22) and wiki/index.md present the opposite as the design's main benefit, and 'What it costs' leaves this out, so the page's claim is false at the cap."
+  },
+  {
+    "file": "scripts/launch.sh",
+    "line": 111,
+    "summary": "The new [team.coachman_legs] validation checks key names only. A per-leg coachman on a lane's model is accepted. A non-table entry or a duplicate key crashes the heredoc, and the refusal's own 'set review instead' advice produces a duplicate key when bug and security are both renamed. `eval \"\"` swallows the crash, so launch.sh either reports the wrong problem or runs on the HARNESS and MODEL inherited from the environment.",
+    "failure_scenario": "(a) With `review = { harness = \"claude\", model = \"<a reviewer lane's model>\" }`, `form` and `resume coachman --leg review` exit 0 on the lane's model. setup.sh checks only team.coachman and the fallback, so 'never a lane's model, in any leg' is enforced nowhere for per-leg coachmen. (b) A user with `bug` and `security` entries follows 'set review instead' and renames both to `review`. tomllib raises, the heredoc prints nothing, `eval \"\"` succeeds, and launch.sh says 'coachman has no harness in the config'. With HARNESS=claude MODEL=x exported, form, launch and resume all run on `--model x` and exit 0 (reproduced). (c) `review = \"codex\"` prints a traceback and then the same misleading message. (d) With `team = \"x\"`, lane launches worked before the PR; the new `team.get(\"coachman_legs\", {})` now runs for every name and breaks them."
+  },
+  {
+    "file": "skills/postmaster/coachman.md",
+    "line": 401,
+    "summary": "The launch step writes the per-round, per-lens prompt file, and step 2 runs that step inside every reviewer lane's backgrounded subshell. All lanes of a lens therefore truncate and rewrite one shared file while their siblings read it, and writing it where $LENS must expand invites a double-quoted string in which the prompt's markdown backticks run as command substitution.",
+    "failure_scenario": "(a) In round 1, lens bug, with lanes a and b: subshell b's `> review-r1-bug-prompt.txt` can land between subshell a's write and a's read, so lane a launches with an empty prompt; `claude -p \"\"` exits 0 and the marker lands. With a reader that reads immediately this hit 61 to 113 of 2700 launches, against 0 of 2700 with the write moved before the loop. Through the real launch.sh it did not reproduce in 8100 launches, because two python3 start-ups delay the read by 90 ms or more, so any change that makes the read come sooner exposes it. (b) A coachman that writes the runbook's text as echo \"Read `$D/review-$LENS-brief.md` and execute it. ...\", or with an unquoted heredoc, makes bash run the brief path ('Permission denied'). The file then says 'Read  and execute it', and every reviewer reviews with no brief while the round looks normal (reproduced). At origin/main and b17699b the prompt file was written once, outside the per-lane subshell."
+  },
+  {
+    "file": "skills/postmaster/coachman.md",
+    "line": 442,
+    "summary": "The wait now compares a count of what this command forked (N) against .done markers that nothing clears. Re-running an interrupted round therefore returns before the relaunched reviewers finish, a partial relaunch returns at once, N=0 passes vacuously, and the relaunch's truncating `>` erases or tears the streams harvest reads.",
+    "failure_scenario": "Round 2 runs bug and security with lanes a and b, N=4. Two reviewers finish and touch their markers, then the command is interrupted and round 2 is re-run with the block as written. The interruption can be a claude coachman's roughly 29-minute reap inside the 2400 s wait, a remount, or a fallback takeover that sees review-launch lines with no review-harvest. wait-for-markers.sh prints 'all 4 markers present' at its first poll while two relaunched reviewers are still running, and their finished first-attempt streams have been cut down to a start event. Relaunching only the dead lanes (N=2) returns at 0 s, and empty loop lists give 'all 0 markers present', exit 0 (reproduced). The fork-counted \"$N\" is new in this PR (origin/main waited for the waybill's reviewer count), and nothing says to clear a round's markers before re-running it."
+  },
+  {
+    "file": "skills/postmaster/coachman.md",
+    "line": 702,
+    "summary": "A style reviewer that is DEGRADED in round 1 can never be restored, because style runs in round 1 only, yet the mandatory remedy for a DEGRADED or killed review lane is to restore it on the next round. Round 1 now runs each lane's three reviews at once on one account, which the PR's own wiki page says makes that wall more likely.",
+    "failure_scenario": "In round 1, lane deepseek runs style, bug and security at once, and its third session hits a usage limit, so its style review is DEGRADED (or every lane's is). The hard rules say 'restore the lane on the next round's fresh snapshot' and 'Restoring the lane on the next round is the fix', and line 685 even says re-running now 'buys little'. But step 5 runs bug and security alone from round 2, and step 4 applies style findings only in round 1. A literal coachman either adds style to round 2 against step 5, which forces yet another round if it applies anything, or ships a Style residue resting on fewer lanes or none. No instruction covers the case."
+  },
+  {
+    "file": "scripts/launch.sh",
+    "line": 129,
+    "summary": "launch.sh checks only that --leg is one of three names, while the postmaster tracks legs by number and maps each to a name from prose at every launch and resume. The resolved harness and model are never recorded, so a wrong mapping is accepted silently and a resume recomputes the spec from the live config.",
+    "failure_scenario": "Leg 2 launched with `--leg synthesis` exits 0 on the synthesis entry, while `--leg 2`, the value the manifest holds, is refused. Leg 1's thread resumed with `--leg review`, a mix-up Stage C step 2 invites, exits 0 on the review model. If the user edits [team.coachman_legs].review while leg 2 waits for a ruling, the resume passes leg 2's claude session id to `codex exec resume`, runs it on another model, or loads another account's env_file, each with exit 0 (reproduced). That contradicts 'One identity everywhere'. run.json already holds the config in force, but launch.sh never reads it."
+  }
+]
