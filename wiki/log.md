@@ -17,6 +17,119 @@ records its checks at dispatch; workhorses run them before they report, and the 
 them on each branch and on the synthesis. The page says what the defaults cover and what they do
 not. Standing `claimed`, since no run bears on it yet.
 
+## [2026-09-27] redact | a plan provider id in the MiMo trial record
+
+The trial in `raw/trials/mimo-headless-forms/` named the provider id of one account's plan, which
+names a region, and the scrub before it was promoted missed it. The id is now `<plan-provider>` in
+the five files that held it, the record says so, and `raw/README.md` now states the exception
+that allows it. Nothing else in the record changed, and no standing rests on the id.
+
+## [2026-09-27] ingest | MiMo Code's headless forms
+
+A trial of MiMo Code 0.1.15, launched and resumed through `launch.sh`, recorded in
+`raw/trials/mimo-headless-forms/`. Its forms are in `skills/postmaster/harnesses.md`. Two of its
+findings bear on how far lanes are kept apart. A fresh session recalled a word another session
+in the same data directory had been asked to remember, so each lane now gets its own. And a lane
+asked to search went through the whole home directory, Claude Code's transcripts and another
+lane's notes included, and found the word: a data directory of its own is not a sandbox. No
+standing changes.
+
+## [2026-09-27] ingest | Muse Code's headless forms
+
+A trial of Muse Code 1.4.0, launched and resumed through `launch.sh`, recorded in
+`raw/trials/muse-headless-forms/`. Its launch and resume forms, thread id and final message
+are recorded in `skills/postmaster/harnesses.md`. It keeps a memory that outlives a session:
+a fresh launch recalled a word an earlier one had been asked to remember, where a lane with its
+own data directory did not. So each lane and each coachman leg now gets its own. No standing
+changes.
+
+## [2026-09-27] ingest | one round of bug review, for now
+
+The user read #59's options for ending the review loop and chose none of them as written: for
+now, one round of bug review, to be revisited if many bugs reach production. The research page
+records the decision, and the review-loop page notes it. The cap of three rounds in `coachman.md`
+stays until a ticket of its own changes it. No standing changes.
+
+## [2026-09-27] ingest | the local tracker
+
+A decision page under Decisions, from issue #11. A tracker with no service keeps a
+repository's tickets in its own git directory, outside the working tree and every branch, and
+a repository whose store exists uses it whatever the config names. The page records why the
+git directory rather than a directory under `~/.postmaster/`, why the kind is discovered
+rather than configured, why a store is made or removed only from the main checkout, and what
+it costs. Standing `claimed`, since no run bears on it yet.
+
+## [2026-09-27] ingest | turnpikes: what the reviews decided
+
+Two decisions added to the turnpikes page, both the user's. In a run whose ticket names only
+style, a bug or security defect the style reviewer finds is escalated to the user rather than
+fixed, since no lens would check the fix. A ticket's turnpikes are the user's, like its
+direction, so the postmaster never names fewer than `default` on its own. The table of
+turnpikes is not changed while any run is in flight. Standing stays `claimed`.
+
+## [2026-09-27] lint | fault tickets: when they are shown, where they go, what they withhold
+
+The page on faults a run finds in postmaster now says that a fault ticket goes only to
+postmaster's own repository on GitHub, when the user administers it, and why a draft errs
+towards withholding. The drafts are shown to the user once, when a run's aftercare ends. No
+standing changed.
+
+## [2026-09-26] ingest | when a review loop should stop
+
+A hypothesis page for #59, standing `claimed`. It compiles the review of #36 round by round and
+tests the implementing session's reading of it against the reports. It sets out eight candidate
+rules for ending a loop of model reviewers, and what should count toward them, each with the
+evidence for and against. It proposes a trial with its cost: fresh reviewers on code a loop has
+already passed, against code with known defects. It ends with five options for the loop's end in
+`coachman.md` and a recommendation. No runbook changes; the choice is the user's.
+
+## [2026-09-26] ingest | outside work on review, fixes and severity
+
+Fourteen papers captured into `raw/papers/`, each keeping only the passages relied on, with a
+source page each. They cover when inspections stop, what one review finds, how often fixes bring
+new defects, how people and models disagree on severity, and how often a model reviewer's findings
+are rejected. They bear on the new review-loop hypothesis and move no standing. Two sources found
+but not quotable exactly are named on that page instead.
+
+## [2026-09-26] ingest | the review rounds of #36
+
+The first run record: the review of pull request #39, which implemented #36, run by hand in five
+rounds, not by a dispatch. Promoted with local paths, a session id and the reviewer models' names
+replaced. Its record lists every finding of rounds 2 to 4 with where it sat and what became of it.
+It bears on H2 of combining models, the review loop and the new hypothesis; no standing changes,
+since one hand-run record cannot move one.
+
+## [2026-09-26] ingest | a lane may review through its harness's own skill
+
+A trial of claude 2.1.283's `/security-review`, launched as the flow launches a reviewer lane,
+recorded in `raw/trials/claude-security-review/`. In a scratch clone whose `origin/HEAD` leads
+back to the base, it reported the planted command injection at its file and line in both runs.
+In a worktree where `origin/HEAD` did not resolve, it returned success with an empty report after
+no turns. One run ended with three result lines, the report on the last. A new page records why
+a security lane may run its harness's own skill, at `claimed`, and what Claude Code's needs.
+
+## [2026-09-26] lint | each lens may have its own reviewer lanes
+
+The review-loop page records why a lens may name its own reviewer lanes: a lane chosen for one
+lens, for a skill its harness has for that lens alone, should not have to review every other
+lens as well. `[team.lens_reviewers]` names them, `scripts/reviewers.sh` resolves them, and the
+waybill carries them to the review stage. The page's standing stays `claimed`.
+
+## [2026-09-26] ingest | a ticket names its turnpikes
+
+A decision page, beside the one on the ticket shape. A ticket now names the turnpikes its run
+passes through: `default` for the style, bug and security reviews, fewer, or `none`, with no
+floor. A turnpike no longer means the gate: the gate runs on every run. The page records why,
+the decisions the ticket left open, and what the ledger will count. Standing `claimed`, since
+no run bears on it yet.
+
+## [2026-09-26] ingest | faults a run finds in postmaster become tickets
+
+Third page in the Decisions area. A run never fixes postmaster itself: it logs each fault as it
+happens, with its own diagnosis and proposed fix, stops on a fault in a control and works
+around anything else, and the postmaster turns the run's faults into tickets on postmaster's
+own tracker when the run closes. The page records why, and what a fault ticket may carry.
+Standing `claimed`, since no run bears on it yet.
 ## [2026-09-26] ingest | a run keeps the config it started with
 
 A decision page. A run now launches and resumes every lane and every leg on the config it

@@ -4,9 +4,12 @@
 # change is verified by is a `check.<name>=<where it came from>: <what it shows>` line: declared in
 # the project's .postmaster/project.toml, or a default and which one (scripts/verify.sh).
 set -uo pipefail
-HERE=$(cd "$(dirname "$0")" && pwd -P)
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
+HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 T=${1:?usage: discover-project.sh <path>}
-cd "$T" 2>/dev/null || { echo "cannot enter $T" >&2; exit 1; }
+# The tracker kind, before the cd, so a relative path or config is read from the caller's directory.
+kind=$("$HERE/tracker-kind.sh" "$T" 2>/dev/null) || kind=""
+CDPATH= cd -P -- "$T" 2>/dev/null || { echo "cannot enter $T" >&2; exit 1; }
 
 gate=""
 [ -f package.json ] && ! command -v jq >/dev/null 2>&1 && echo "warn=jq not installed: package.json scripts were not read" >&2
@@ -40,7 +43,11 @@ fi
 
 echo "gate=$gate"
 echo "docs=$(echo "$docs$dirs" | sed 's/ *$//')"
+echo "tracker=$kind"
 echo "tracker_prefix=$tracker"
 echo "ambient_context=$( [ -f AGENTS.md ] && echo AGENTS.md || echo NONE )"
 printf '%s\n' "$checks" | awk -F'\t' 'NF >= 4 {print "check." $1 "=" $2 ": " $4}'
 [ -f AGENTS.md ] || echo "warn=no AGENTS.md: lanes that read no ambient file will start blind" >&2
+[ "$kind" = github ] && ! git remote get-url origin >/dev/null 2>&1 \
+  && echo "warn=no origin remote, so no github board: with the user's word, scripts/local.sh <repo> store init gives it a local store" >&2
+exit 0

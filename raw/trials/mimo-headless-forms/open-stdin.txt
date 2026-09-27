@@ -1,0 +1,8 @@
+run: an open stdin that sends nothing for 60 seconds, the prompt in argv, direct
+exit: 0, seconds: 76
+events: 3, of types: step_finish, step_start, text
+sessions in the stream: 1
+tool_use events: none
+step_finish reasons: stop
+--- the last text event ---
+OK
