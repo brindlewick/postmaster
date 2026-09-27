@@ -256,8 +256,8 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/mimo/<key> MIMOCODE_DISABLE_CLAUDE_I
 - The prompt arrives on stdin. MiMo Code reads its stdin to the end before it starts, so an
   open pipe holds a launch, and the prompt file is the only stdin a launch ever has.
 - `--dangerously-skip-permissions` is the bypass form: it approves whatever no rule denies.
-- The model is `provider/model`; a Singapore Token Plan key works only with the
-  `xiaomi-token-plan-sgp` provider. `--variant` sets the effort: MiMo V2.6 Pro's variants are
+- The model is `provider/model`, and a key works only with the provider id of the plan it
+  belongs to. `--variant` sets the effort: MiMo V2.6 Pro's variants are
   `low`, `medium` and `high`. The key is `XIAOMI_API_KEY`, from the lane's `env_file`.
 - `--format json` writes one event per line: `step_start`, `text`, `tool_use` and `step_finish`,
   each with its `sessionID` and a `part`. A `tool_use` names its tool and input in `part`.
