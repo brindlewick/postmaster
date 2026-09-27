@@ -286,10 +286,11 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
 
 1. **Confirm** the default branch carries the merge (`git -C <repo> log -1` on it) and the
    ticket is done in the tracker; if the coachman could not move it, do so and log
-   `ticket-state`. Check the style sort too: `<tool>/scripts/style-findings.sh check
-   <dispatch>` exits 0. On exit 2, remove `.leg-3-done` and resume leg 3 (Stage C, step 5) with
-   its lines and "Fix the style sort as `coachman.md` says, and end the leg", then wait for its
-   done marker.
+   `ticket-state`. Check the style sort too, once the last leg's process has exited
+   (`.leg-3-exited`): `<tool>/scripts/style-findings.sh check <dispatch>` exits 0. On exit 2,
+   remove `.leg-3-done` and resume leg 3 (Stage C, step 5) with its lines and "Fix the style sort
+   as `coachman.md` says, and end the leg", then wait for its done marker. On exit 1, tell the
+   user what it printed.
 2. **Tear down** the synthesis worktree from outside it, once the last leg's process has exited
    (`.leg-3-exited`): close its space first (`<tool>/scripts/host.sh close <repo>/.worktrees/<TICKET>`;
    on exit 2 the user has it open or something in it still runs, so stop and report), then `git
@@ -299,17 +300,20 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
 3. **Close the run** with `<tool>/scripts/stage.sh <dispatch> done postmaster`, and never delete the
    dispatch directory.
 4. **Put the run's tool faults to the user**, as its aftercare ends (Tool faults, below).
-5. **Put the style sort to the user,** when the run has one. For each proposal
-   `<tool>/scripts/style-findings.sh check <dispatch>` prints, other than `neither`, draft the
-   ticket it would become in the ticket shape (Stage A, step 2), with the direction the proposal
-   gives for the user to approve or change and `default` as its turnpikes, and check the draft
-   with `<tool>/scripts/ticket-check.sh --body`. Put every line of `<dispatch>/style-sort.md`,
-   with its reason, and the drafts to the user, and add the run and the question to
-   `<runs>/postmaster/ESCALATION.md`. Create each ticket the user accepts as Stage A, step 5
-   does, drafting first any they ask for that has no draft, with the proposal as the detail of
-   its `ticket-create` line; log a `note` with their word for each proposal they decline.
-   Nothing is filed without the user's word, whatever `tracker.postmaster_may_create` says. Then
-   remove the run's entry, and the file once it is empty. Nothing else waits for the answer.
+5. **Put the style sort to the user once, as the run's aftercare ends,** when the run has one.
+   `<tool>/scripts/style-findings.sh check <dispatch>` prints each proposal: the text after its
+   findings' colon, up to any bracket, which holds what the ledger records of it from any run.
+   For each proposal other than `neither` that the ledger does not mark filed, declined or asked,
+   draft the ticket it would become in `<dispatch>/style-drafts/`, in the ticket shape (Stage A,
+   step 2), with the direction the proposal gives for the user to approve or change and
+   `default` as its turnpikes; check each draft with `<tool>/scripts/ticket-check.sh --body
+   <draft> --title "<title>"`, and log `ticket-check`. Show the user every line of
+   `<dispatch>/style-sort.md` with its reason, the drafts, and the proposals the ledger already
+   marks; log a `note` with `style proposal asked: <proposal>` for each draft shown; and carry on
+   with the stream. On the user's word for a proposal, create its ticket as Stage A, step 5
+   does, with `style proposal: <proposal>` as the detail of its `ticket-create` line; on their
+   no, log a `note` with `style proposal declined: <proposal>: <their word>`. Nothing is filed
+   without the user's word, whatever `tracker.postmaster_may_create` says.
 6. **Dispatch the next ticket** in order, Stage B.
 
 **Abandoning a run** happens only on the user's word for that run: log `note` with the

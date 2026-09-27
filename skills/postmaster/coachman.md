@@ -584,8 +584,8 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    <scratch> diff --name-only <SNAP>`, which names every tracked file changed since the
    snapshot, staged or committed included, not `status --porcelain` (scratches are expected to
    be dirty with untracked build output). Any modified tracked file is a finding about the LANE:
-   log it with the file list and do not count that lane's verdict until it is understood. Then
-   stop any reviewer still running in its scratch (`<tool>/scripts/host.sh stop <scratch>`; its
+   log a `note` with the file list, and do not count that lane's verdict until it is understood.
+   Then stop any reviewer still running in its scratch (`<tool>/scripts/host.sh stop <scratch>`; its
    lane is DEGRADED for the round), close each scratch's space (`<tool>/scripts/host.sh close
    <scratch>`; on exit 2 the user has it open, so leave that scratch and report it), and remove
    the scratches with `<tool>/scripts/cut-scratch.sh --remove <repo> <scratch>`, here and at the
@@ -601,11 +601,13 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    style by what it is, not by the lens that reported it: a correctness or security defect
    reported under the style lens is a gating finding, fixed as one except in a loop with no
    gating lens (step 5), a matter of style reported under another lens is a style finding, and
-   each keeps its lens. Its `finding` line opens with its class. Several reviewers produce a
-   bigger, noisier union than one; the verification gate is what keeps the checkpoint clean, so
-   do not soften it. Where a lane says it verified a finding by execution, re-run its probe
-   rather than re-deriving the claim; where it filed a hypothesis, the verification burden is
-   yours.
+   each keeps its lens. Its `finding` line opens with its class. A finding whose class changes in
+   a later round is logged again with the same target, and its latest line counts, so two
+   findings at one place take targets that differ, such as a line and a column. Several reviewers
+   produce a bigger, noisier union than one; the verification gate is what keeps the checkpoint
+   clean, so do not soften it. Where a lane says it verified a finding by execution, re-run its
+   probe rather than re-deriving the claim; where it filed a hypothesis, the verification burden
+   is yours.
 4. **Apply once per round,** in the synthesis worktree: the verified gating findings (in a loop
    with no gating lens, none: step 5), and never a style finding. Where fixes from different
    lenses touch the same code, reconcile them into one change before applying it. Every style
@@ -634,10 +636,11 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    in the escalation and say which sites each round closed.
 6. **One review checkpoint card.** Per lens: the findings and their overlap, across lanes and
    with the other lenses, verified versus dismissed, applied, and the rounds it ran; for style,
-   how many findings go to the ship card's Style residue. Then the gate status. Written to
-   `<dispatch>/checkpoint-review.md` with its
-   `.checkpoint-review-ready` marker. Autonomous mode: write the leg's hand-off and end it; the
-   ship approval is stage 3's stop. Consult mode: escalate on the card and wait for the resume.
+   how many findings go to the ship card's Style residue, as `<tool>/scripts/style-findings.sh
+   count <dispatch>` prints it. Then the gate status. Written to
+   `<dispatch>/checkpoint-review.md` with its `.checkpoint-review-ready` marker. Autonomous
+   mode: write the leg's hand-off and end it; the ship approval is stage 3's stop. Consult mode:
+   escalate on the card and wait for the resume.
    A ruling that asks for a change is applied; in a loop with a gating lens it is followed by
    another round, counted toward the cap, and the card is written and escalated again, and a
    round past the cap runs only when the ruling says so. Any other ruling, or a change applied in
@@ -724,18 +727,23 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
 
 **Sort the style findings.** For each one `<tool>/scripts/style-findings.sh list <dispatch>`
 prints, write one line to `<dispatch>/style-sort.md`, with a one-line reason: a rule the
-project's linter could enforce, naming the linter, which must be one the gate runs
-(`<tool>/scripts/style-findings.sh gate <dispatch>` shows what the gate runs), and the existing
-rule to enable or the custom rule to write; a convention for the project's own docs, naming the
-doc; or neither. A finding that only a linter the gate does not run could enforce is sorted
-docs or neither, and that linter is proposed on a line of its own:
+project's linter could enforce, naming the linter, which must be one the gate runs, and the
+existing rule to enable or the custom rule to write; a convention for the project's own docs,
+naming the doc; or neither. `<tool>/scripts/style-findings.sh gate <dispatch>` shows what the
+gate runs, as the run's branch has it; where the gate runs a linter in a way it does not show,
+add `via` and the file that runs it after the rule. A finding that only a linter the gate does
+not run could enforce is sorted docs or neither, and that linter is proposed on a line of its
+own, once, naming every finding it would enforce, and marked `not-in-gate` when the project
+already has it:
 
 ```
 S<n> linter <linter> enable <rule>: <reason>
 S<n> linter <linter> write <rule>: <reason>
+S<n> linter <linter> enable <rule> via <file>: <reason>
 S<n> docs <doc>: <reason>
 S<n> neither: <reason>
 N<n> new-linter <linter> S<n>[,S<m>...]: <reason>
+N<n> new-linter <linter> S<n>[,S<m>...] not-in-gate: <reason>
 ```
 
 `<tool>/scripts/style-findings.sh check <dispatch>` must exit 0, which it does with no sort
@@ -836,9 +844,10 @@ logical order, not file safety: check the file surfaces before mass-launching.
 - **Reviewers argue the coachman out of wrong calls; say so in the brief and mean it.** Put the
   disposition of every deferred finding in the next round's brief with the reasoning, and
   invite the challenge. A deferral that is never restated cannot be corrected.
-- **When the lanes converge on a prescribed one-line fix, apply it and re-review; do not bank
-  it as a ship-comment note.** Skipping a round that way ships a documented hole. In a loop with
-  no gating lens, Stage 2 step 5 decides instead.
+- **When the lanes converge on a prescribed one-line fix for a gating finding, apply it and
+  re-review; do not bank it as a ship-comment note.** Skipping a round that way ships a
+  documented hole. In a loop with no gating lens, Stage 2 step 5 decides instead, and a style
+  finding is never applied, however many lanes prescribe it.
 - **The render gate is the coachman's job whenever a workhorse could not run it.** A workhorse on a
   harness with no browser backend cannot run one, and a workhorse that did run one tested its own
   UI, not the synthesis. Serve the production build on a temporary database (never the live

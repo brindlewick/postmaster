@@ -75,9 +75,19 @@ which become tickets.
   linter, so a new rule is a change to the project, made through a ticket. A rule for a linter
   the gate already runs is a small change the gate enforces at once. A linter the project does
   not run is a larger change, so it is proposed on its own, for the user to accept or not.
+- **The check reads the gate, and never runs it.** `scripts/style-findings.sh` reads the gate
+  as the run's own branch has it, so another run's merge cannot change a finished run's sort,
+  and running a project's gate to learn what it runs would run everything it runs. It follows
+  the scripts, recipes, files and tool configs the gate reaches, but no reader can follow every
+  way a gate can run a linter. A sort may therefore name the file that runs a linter the reader
+  missed (`via`). A linter the project already has is not proposed as new unless the sort says
+  the gate does not run it, since a missed linter would otherwise come back to the user as one
+  to adopt.
 - **The conversation belongs to the postmaster.** The coachman is headless and never talks to
-  the user, so the sort is written to the run's directory and the postmaster, after the merge,
-  puts it to the user. Nothing is filed without the user's word.
+  the user, so the sort is written to the run's directory, and the postmaster puts it to the
+  user once, as the run's aftercare ends, the way it puts a run's tool faults. Nothing is filed
+  without the user's word, and a proposal the ledger shows filed, declined or already asked is
+  not put again, so the same judgment does not return after every run.
 
 Earlier the same day, on the pull request for issue #40, the user had decided the opposite:
 that style blocks a ship as bug and security do, running every round. That change was reverted
@@ -91,8 +101,9 @@ What it costs:
   answer: the run is closed, and the next ticket is dispatched.
 - **A finding counts as style or gating by the coachman's reading.** A defect misread as style
   would ship. When the loop runs another round, its reviewers see every deferred finding with
-  its disposition and can argue it back to gating. Either way a finding's class is on its
-  `finding` line, so a misreading can be counted afterwards.
+  its disposition and can argue it back to gating, and the finding's latest line then counts.
+  Either way a finding's class is on its `finding` line, so a misreading can be counted
+  afterwards.
 
 ## What would settle it
 
