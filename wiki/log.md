@@ -18,6 +18,13 @@ and what would settle it; the turnpikes page says a turnpike need not gate. The 
 the same day that style blocks a ship was reverted on #40's pull request before it merged. Both
 pages stay `claimed`.
 
+## [2026-09-27] ingest | one round of bug review, for now
+
+The user read #59's options for ending the review loop and chose none of them as written: for
+now, one round of bug review, to be revisited if many bugs reach production. The research page
+records the decision, and the review-loop page notes it. The cap of three rounds in `coachman.md`
+stays until a ticket of its own changes it. No standing changes.
+
 ## [2026-09-27] ingest | the local tracker
 
 A decision page under Decisions, from issue #11. A tracker with no service keeps a
@@ -41,6 +48,31 @@ The page on faults a run finds in postmaster now says that a fault ticket goes o
 postmaster's own repository on GitHub, when the user administers it, and why a draft errs
 towards withholding. The drafts are shown to the user once, when a run's aftercare ends. No
 standing changed.
+
+## [2026-09-26] ingest | when a review loop should stop
+
+A hypothesis page for #59, standing `claimed`. It compiles the review of #36 round by round and
+tests the implementing session's reading of it against the reports. It sets out eight candidate
+rules for ending a loop of model reviewers, and what should count toward them, each with the
+evidence for and against. It proposes a trial with its cost: fresh reviewers on code a loop has
+already passed, against code with known defects. It ends with five options for the loop's end in
+`coachman.md` and a recommendation. No runbook changes; the choice is the user's.
+
+## [2026-09-26] ingest | outside work on review, fixes and severity
+
+Fourteen papers captured into `raw/papers/`, each keeping only the passages relied on, with a
+source page each. They cover when inspections stop, what one review finds, how often fixes bring
+new defects, how people and models disagree on severity, and how often a model reviewer's findings
+are rejected. They bear on the new review-loop hypothesis and move no standing. Two sources found
+but not quotable exactly are named on that page instead.
+
+## [2026-09-26] ingest | the review rounds of #36
+
+The first run record: the review of pull request #39, which implemented #36, run by hand in five
+rounds, not by a dispatch. Promoted with local paths, a session id and the reviewer models' names
+replaced. Its record lists every finding of rounds 2 to 4 with where it sat and what became of it.
+It bears on H2 of combining models, the review loop and the new hypothesis; no standing changes,
+since one hand-run record cannot move one.
 
 ## [2026-09-26] ingest | a lane may review through its harness's own skill
 
@@ -73,7 +105,6 @@ happens, with its own diagnosis and proposed fix, stops on a fault in a control 
 around anything else, and the postmaster turns the run's faults into tickets on postmaster's
 own tracker when the run closes. The page records why, and what a fault ticket may carry.
 Standing `claimed`, since no run bears on it yet.
-
 ## [2026-09-26] ingest | a run keeps the config it started with
 
 A decision page. A run now launches and resumes every lane and every leg on the config it
