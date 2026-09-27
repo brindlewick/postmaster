@@ -3,11 +3,18 @@
 # records for its harness. One command for every harness, so no form is ever copied by hand;
 # this script and harnesses.md must agree, and a change to one is a change to both.
 #
-#   launch.sh form   <name> [--leg <leg>]
-#   launch.sh launch <name> <cwd> <prompt-file> [--leg <leg>] [--last <file>]
-#   launch.sh resume <name> <cwd> <thread-id> <prompt-file> [--leg <leg>]
-#   launch.sh skill  <name> <skill>
+#   launch.sh form   <name> [--leg <leg>] [--run <dispatch>]
+#   launch.sh launch <name> <cwd> <prompt-file> [--leg <leg>] [--last <file>] [--run <dispatch>]
+#   launch.sh resume <name> <cwd> <thread-id> <prompt-file> [--leg <leg>] [--run <dispatch>]
+#   launch.sh skill  <name> <skill> [--run <dispatch>]
 #   launch.sh --self-test
+#
+# The config is the live one, ~/.postmaster/config.toml (POSTMASTER_CONFIG overrides the path),
+# unless --run names the dispatch directory of the run being served. Then it is the config that
+# run recorded at dispatch, `config` in <dispatch>/run.json (scripts/run-meta.sh): the live
+# config is not read at all, and a run.json that is missing or unreadable is refused. Every
+# launch and resume inside a run passes --run; the postmaster's own spawn and the config check
+# before dispatch do not. The checks below apply to a recorded config as to the live one.
 #
 # <name> is a lane from [lanes.<name>], or `coachman`, `coachman_fallback` or `postmaster`
 # from [team]. <leg> is synthesis, review or ship, and with --leg, [team.coachman_legs.<leg>]
@@ -17,33 +24,40 @@
 # refused on a lane's model, a model id's bracketed suffixes aside. HARNESS, MODEL, EFFORT and
 # ENV_FILE come from the config alone, never from the environment. A lane's env_file is how a
 # harness reaches an alternate backend: a file outside this repo, never a value in the config,
-# and a relative path is read from the config's directory. It is shell, sourced last, once the
-# command, its directory and its stdin are fixed, so its assignments reach the harness and not
-# this script's choices; it runs as code, and is the user's to write. The events stream goes to
-# stdout; the caller redirects and backgrounds. --last names the file a harness writes its final
-# message to, where the harness supports it (codex -o). `skill` prints the prompt that invokes
-# the lane's harness's own skill (harnesses.md, Own review skills); `launch` runs it like any
-# other prompt. The one skill is security-review.
+# and a relative path is read from the live config's directory, under --run too. It is shell,
+# sourced last, once the command, its directory and its stdin are fixed, so its assignments
+# reach the harness and not this script's choices; it runs as code, and is the user's to write.
+# The events stream goes to stdout; the caller redirects and backgrounds. --last names the file
+# a harness writes its final message to, where the harness supports it (codex -o). `skill`
+# prints the prompt that invokes the lane's harness's own skill (harnesses.md, Own review
+# skills); `launch` runs it like any other prompt. The one skill is security-review.
 #
 #   exit 0  the form or the skill's prompt was printed, or the harness exited 0
-#   exit 1  usage, config missing or unreadable, unknown name, a leg that is not synthesis,
-#           review or ship, the coachman launched or resumed with no --leg, a coachman or
-#           fallback on a lane's model, harness not on PATH, env_file missing, or a form this
-#           script does not have (muse; agy resume), or a skill that is not security-review
+#   exit 1  usage, config or run.json missing or unreadable, unknown name, a leg that is not
+#           synthesis, review or ship, the coachman launched or resumed with no --leg, a
+#           coachman or fallback on a lane's model, harness not on PATH, env_file missing, a
+#           form this script does not have (muse; agy resume), or a skill that is not
+#           security-review
 #   exit 3  skill: the lane's harness has no such skill recorded
 #   else    the harness's own exit code
 set -uo pipefail
 CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
 
 if [ "${1:-}" = --self-test ]; then
-  # Each control runs this script on a fixture config, with a stub harness first on PATH.
-  # `form` only prints, so nothing is launched.
+  # Each control runs this script on a fixture config, with stub harnesses first on PATH.
+  # `form` only prints, so nothing is launched. A run's record is written from a fixture by
+  # run-meta.sh, as at dispatch, so what this script reads is what that one writes.
   self=$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")
+  here=$(dirname "$self")
   tmp=$(mktemp -d) || exit 1
   trap 'rm -r -- "$tmp" 2>/dev/null' EXIT
-  # The stub prints its arguments, so a launch or a resume shows the model it would run on.
-  mkdir "$tmp/bin" "$tmp/wt" && printf '#!/bin/sh\necho "$@ probe=${PROBE:-}"\n' > "$tmp/bin/claude" && chmod +x "$tmp/bin/claude"
-  cp "$tmp/bin/claude" "$tmp/bin/codex"
+  # A stub prints its arguments and PROBE, which an env file may set, so a launch or a resume
+  # shows the harness, model, effort and env file it would run on.
+  mkdir "$tmp/bin" "$tmp/wt"
+  for h in claude pi codex; do
+    printf '#!/bin/sh\necho "$@ probe=${PROBE:-}"\n' > "$tmp/bin/$h" && chmod +x "$tmp/bin/$h"
+  done
+  [ -x "$tmp/bin/claude" ] && [ -x "$tmp/bin/pi" ] && [ -x "$tmp/bin/codex" ] || { echo "self-test: cannot write the stub harnesses"; exit 1; }
   printf 'Continue.\n' > "$tmp/prompt.txt"
   fixture() {  # fixture <name> [<key>...]; each key in [team.coachman_legs] runs on <key>-model
     local name=$1 k; shift
@@ -75,6 +89,11 @@ if [ "${1:-}" = --self-test ]; then
   printf 'MODEL=lane-model\nHARNESS=nope\nPROBE=reached\n' > "$tmp/over.env"
   printf "$head"'coachman = { harness = "claude", model = "coach-model", env_file = "%s" }\n' "$tmp/over.env" > "$tmp/envfile.toml"
   printf "$head"'coachman = { harness = "claude", model = "coach-model", env_file = "rel.env" }\n' > "$tmp/relenv.toml"
+  rawfix edited 'review = { harness = "claude", model = "edited-model" }\n'
+  # One lane as dispatched, and as edited since: every field a launch takes differs.
+  printf 'PROBE=then\n' > "$tmp/then.env"; printf 'PROBE=now\n' > "$tmp/now.env"
+  printf '[lanes.one]\nharness = "claude"\nmodel = "then-model"\neffort = "high"\nenv_file = "%s"\n' "$tmp/then.env" > "$tmp/then.toml"
+  printf '[lanes.one]\nharness = "pi"\nmodel = "now-model"\neffort = "low"\nenv_file = "%s"\n' "$tmp/now.env" > "$tmp/now.toml"
   out="" err="" rc=0 fails=0 envx=""
   run() {  # run <fixture> <args...>; $envx is extra environment for the run
     local f=$1; shift
@@ -99,6 +118,48 @@ if [ "${1:-}" = --self-test ]; then
     local label=$1 f=$2 bad=$3; shift 3; run "$f" "$@"
     [ $rc -eq 0 ] && case $out in *"$bad"*) false ;; *) true ;; esac && ok "$label" || fail "$label"
   }
+  printed() {  # printed <label> <text>...: the last run exited 0 and printed every <text>
+    local label=$1 t; shift
+    for t in "$@"; do case $out in *"$t"*) ;; *) fail "$label"; return ;; esac; done
+    [ $rc -eq 0 ] && ok "$label" || fail "$label"
+  }
+  record() {  # record <run> <fixture>: $tmp/<run>/run.json, recording that fixture as at dispatch
+    mkdir -p "$tmp/$1" && POSTMASTER_CONFIG="$tmp/$2.toml" PATH="$tmp/bin:$PATH" \
+      "$here/run-meta.sh" "$tmp/$1" "$tmp/repo" >/dev/null \
+      || { printf '  FAIL run-meta.sh records %s as run %s\n' "$2" "$1"; fails=$((fails+1)); }
+  }
+  calls() {  # calls <runbook>...: each launch and resume in them, one per line, marked run or unrun
+    python3 - "$@" <<'PY'
+import re, sys
+CALL = re.compile(r"scripts/launch\.sh\s+(?:launch|resume)\b")
+FENCE = re.compile(r"^([ \t]*```.*?^[ \t]*```)", re.S | re.M)
+for path in sys.argv[1:]:
+    cmds = []
+    for i, part in enumerate(FENCE.split(open(path, encoding="utf-8").read())):
+        if i % 2:   # a fenced block: a command is its line, once continuations are joined
+            cmds += [line[m.start():] for line in re.sub(r"\\\n\s*", " ", part).splitlines()
+                     for m in CALL.finditer(line)]
+        else:       # prose: a command is an inline code span, which may cross a line break
+            cmds += [span[m.start():] for span in re.findall(r"`([^`]+)`", part)
+                     for m in CALL.finditer(span)]
+    for c in cmds:
+        print("%s %s: %s" % ("run" if "--run <dispatch>" in c else "unrun", path, " ".join(c.split())))
+PY
+  }
+  printf '%s\n' 'Fenced, with no --run:' '' '```sh' '( scripts/launch.sh launch a <wt> <prompt-file> \' \
+    '    > <dispatch>/logs/a-events.jsonl ) &' '```' '' 'Fenced and indented, with it:' '' '   ```sh' \
+    '   ( scripts/launch.sh launch b <wt> <prompt-file> \' '       --run <dispatch> > <dispatch>/logs/b-events.jsonl ) &' \
+    '   ```' '' 'Inline, with no --run: `scripts/launch.sh resume c <wt> <thread-id> <prompt-file>`. Inline and' \
+    'across a line break, with it: `<tool>/scripts/launch.sh resume d <wt> <thread-id>' '<prompt-file> --run <dispatch>`.' \
+    > "$tmp/runbook.md"
+  git init -q "$tmp/repo" >/dev/null 2>&1
+  record run legs
+  record run-then then
+  record run-old-bug old-bug
+  record run-onlane onlane
+  mkdir "$tmp/no-record" "$tmp/garbled" "$tmp/unrecorded"
+  printf '{"config": \n' > "$tmp/garbled/run.json"
+  printf '{"run": "T-1"}\n' > "$tmp/unrecorded/run.json"
 
   echo "positive controls"
   for k in synthesis review ship; do
@@ -112,6 +173,17 @@ if [ "${1:-}" = --self-test ]; then
   runs_on "the fallback resumes on its own model, with no --leg" legs fallback-model resume coachman_fallback "$tmp/wt" T-1 "$tmp/prompt.txt"
   runs_on "form with no --leg shows team.coachman" legs coach-model form coachman
   carries "a lane's env file reaches the harness's environment" envfile "probe=reached" launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg review
+  runs_on "inside a run, a resume runs on the model the run recorded, not the live config's" edited review-model resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt" --leg review --run "$tmp/run"
+  runs_on "outside a run, the same resume runs on the live config's model" edited edited-model resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt" --leg review
+  run now resume one "$tmp/wt" T-1 "$tmp/prompt.txt" --run "$tmp/run-then"
+  printed "inside a run, a lane resumes on the harness, model, effort and env file the run recorded" "--resume T-1 " "--model then-model " "--effort high " "probe=then"
+  run now resume one "$tmp/wt" T-1 "$tmp/prompt.txt"
+  printed "outside a run, the same resume takes all four from the live config" "--mode json " "--session T-1 " "--model now-model " "--thinking low " "probe=now"
+  runs_on "inside a run the live config is not read: with none at all, a launch runs on the recorded model" nowhere synthesis-model launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg synthesis --run "$tmp/run"
+  out=$(calls "$tmp/runbook.md"); rc=$?; err=""
+  got=$(printf '%s\n' "$out" | sed -E 's/^([a-z]+) .*launch\.sh (launch|resume) ([a-z]) .*/\1 \3/' | tr '\n' ,)
+  [ "$got" = "unrun a,run b,unrun c,run d," ] && ok "a runbook launch or resume with no --run is found, fenced or inline" \
+    || fail "a runbook launch or resume with no --run is found, fenced or inline"
 
   echo "negative controls"
   for k in style bug security; do
@@ -150,6 +222,18 @@ if [ "${1:-}" = --self-test ]; then
   done
   refused "resuming the coachman with no --leg is refused, and nothing runs" legs "coachman needs --leg" resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt"
   refused "launching the coachman with no --leg is refused, and nothing runs" legs "coachman needs --leg" launch coachman "$tmp/wt" "$tmp/prompt.txt"
+  refused "inside a run with no run.json, a resume is refused though the live config would serve, and nothing runs" legs "no run.json in $tmp/no-record" resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt" --leg review --run "$tmp/no-record"
+  refused "inside a run whose run.json does not parse, a launch is refused, and nothing runs" legs "cannot read $tmp/garbled/run.json" launch one "$tmp/wt" "$tmp/prompt.txt" --run "$tmp/garbled"
+  refused "a run.json that records no config is refused" legs "it records no config" launch one "$tmp/wt" "$tmp/prompt.txt" --run "$tmp/unrecorded"
+  refused "an empty --run is refused, never read as outside a run" legs "--run needs a dispatch directory" resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt" --leg review --run ""
+  refused "a recorded config naming bug is refused, though the live config passes" legs "one leg now, review" resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt" --leg review --run "$tmp/run-old-bug"
+  refused "a recorded leg on a lane's model is refused, though the live config passes" legs "a lane's model" resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt" --leg synthesis --run "$tmp/run-onlane"
+  got=$(calls "$here/../skills/postmaster/coachman.md" "$here/../skills/postmaster/postmaster.md"); rc=$?
+  out=$(printf '%s\n' "$got" | grep '^unrun '); err=""
+  [ $rc -eq 0 ] && [ -z "$out" ] && printf '%s\n' "$got" | grep -q '^run .*/coachman\.md: ' \
+    && printf '%s\n' "$got" | grep -q '^run .*/postmaster\.md: ' \
+    && ok "no launch or resume in coachman.md or postmaster.md lacks --run <dispatch>" \
+    || fail "no launch or resume in coachman.md or postmaster.md lacks --run <dispatch>"
 
   echo "skills"
   printf '[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n\n[lanes.two]\nharness = "codex"\nmodel = "other-model"\n' > "$tmp/skills.toml"
@@ -168,11 +252,12 @@ fi
 die() { echo "launch: $*" >&2; exit 1; }
 [ $# -ge 2 ] || die "usage: launch.sh form|launch|resume|skill <name> ... | --self-test"
 CMD=$1; NAME=$2; shift 2
-LEG=""; LAST=""; STDIN_FILE=""; args=()
+LEG=""; LAST=""; RUN=""; STDIN_FILE=""; args=()
 while [ $# -gt 0 ]; do
   case $1 in
     --leg) [ $# -ge 2 ] || die "--leg needs a value"; LEG=$2; shift ;;
     --last) [ $# -ge 2 ] || die "--last needs a file"; LAST=$2; shift ;;
+    --run) [ $# -ge 2 ] && [ -n "$2" ] || die "--run needs a dispatch directory"; RUN=$2; shift ;;
     *) args+=("$1") ;;
   esac
   shift
@@ -180,11 +265,17 @@ done
 [ "$NAME" = coachman ] && [ "$CMD" != form ] && [ -z "$LEG" ] \
   && die "coachman needs --leg synthesis, review or ship to $CMD"
 
-[ -f "$CONFIG" ] || die "no config at $CONFIG (POSTMASTER_CONFIG overrides the path)"
+if [ -n "$RUN" ]; then
+  SOURCE=${RUN%/}/run.json
+  [ -f "$SOURCE" ] || die "no run.json in $RUN; inside a run, a launch or resume runs only on the config the run recorded at dispatch"
+else
+  SOURCE=$CONFIG
+  [ -f "$SOURCE" ] || die "no config at $CONFIG (POSTMASTER_CONFIG overrides the path)"
+fi
 python3 -c 'import tomllib' 2>/dev/null || die "python3 with tomllib (3.11 or newer) is needed to read the config"
-spec=$(python3 - "$CONFIG" "$NAME" "$LEG" <<'PY'
-import re, sys, tomllib, shlex
-path, name, leg = sys.argv[1], sys.argv[2], sys.argv[3]
+spec=$(python3 - "$SOURCE" "$NAME" "$LEG" "${RUN:+run}" <<'PY'
+import json, re, sys, tomllib, shlex
+path, name, leg, recorded = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4] == "run"
 def die(msg):
     print("die %s" % shlex.quote(msg)); sys.exit(0)
 def table(v, what):
@@ -192,9 +283,15 @@ def table(v, what):
         die("%s in %s is not a table" % (what, path))
     return v
 try:
-    cfg = tomllib.load(open(path, "rb"))
+    with open(path, "rb") as f:
+        cfg = json.load(f) if recorded else tomllib.load(f)
 except (OSError, ValueError) as e:
     die("cannot read %s: %s" % (path, e))
+if recorded:
+    # run.json is the run's whole record; its config is the one field run-meta.sh wrote as parsed.
+    cfg = cfg.get("config") if isinstance(cfg, dict) else None
+    if not isinstance(cfg, dict):
+        die("cannot read %s: it records no config" % path)
 LEGS = ("synthesis", "review", "ship")
 if leg and leg not in LEGS:
     die("no such leg: --leg %s; the legs are synthesis, review and ship" % leg)
@@ -231,15 +328,16 @@ elif name == "postmaster":
 else:
     spec = lanes.get(name)
 if not spec:
-    die("no such lane or role in the config: " + name)
+    die("no such lane or role in %s: %s" % (path, name))
 table(spec, name)
 for k in ("harness", "model", "effort", "env_file"):
-    print("%s=%s" % (k.upper(), shlex.quote(str(spec.get(k, "")))))
+    v = spec.get(k)   # JSON can say null where TOML says nothing; both are unset
+    print("%s=%s" % (k.upper(), shlex.quote("" if v is None else str(v))))
 PY
-) && [ -n "$spec" ] || die "cannot read the config at $CONFIG"
+) && [ -n "$spec" ] || die "cannot read the config at $SOURCE"
 eval "$spec"
-[ -n "${HARNESS:-}" ] || die "$NAME has no harness in the config"
-[ -n "${MODEL:-}" ] || die "$NAME has no model in the config"
+[ -n "${HARNESS:-}" ] || die "$NAME has no harness in $SOURCE"
+[ -n "${MODEL:-}" ] || die "$NAME has no model in $SOURCE"
 command -v "$HARNESS" >/dev/null 2>&1 || die "harness '$HARNESS' is not on PATH"
 if [ -n "${ENV_FILE:-}" ]; then
   ENV_FILE=${ENV_FILE/#\~/$HOME}
@@ -261,7 +359,7 @@ prompt_text() {  # the prompt file's text; a missing, unreadable or empty file i
   PTEXT=$(cat "$PROMPT") || die "cannot read the prompt file: $PROMPT"
 }
 case $CMD in
-  form)   [ ${#args[@]} -eq 0 ] || die "form takes no argument but --leg"
+  form)   [ ${#args[@]} -eq 0 ] || die "form takes no argument but --leg and --run"
           CWD='<cwd>'; PROMPT='<prompt-file>'; THREAD='<thread-id>'; PTEXT='$(cat <prompt-file>)' ;;
   launch) [ ${#args[@]} -eq 2 ] || die "launch needs <cwd> <prompt-file>"
           CWD=${args[0]}; PROMPT=${args[1]}; prompt_text ;;

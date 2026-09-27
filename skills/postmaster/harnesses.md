@@ -3,14 +3,14 @@
 Every harness-specific fact in the flow lives here and nowhere else. The runbooks say "launch
 form", "resume form", "thread id", "final message" and "ambient context"; this file says what
 each of those means for each harness. When a harness changes, this file changes and the
-runbooks do not.
+runbooks do not. `<tool>` is the postmaster repo, as the runbook that sent you here found it.
 
 **Every form below runs in the foreground and writes its event stream to stdout.**
-`scripts/host.sh run` adds the redirect to the lane's events file, runs it where the user can
+`<tool>/scripts/host.sh run` adds the redirect to the lane's events file, runs it where the user can
 watch it, and lands its marker on exit (`hosts.md`); that is what makes one wrapper in the
 runbooks correct for every harness and every host.
 
-**`scripts/launch.sh` is the executable form of this file.** `launch.sh form <name>` prints the
+**`<tool>/scripts/launch.sh` is the executable form of this file.** `launch.sh form <name>` prints the
 exact command for a configured lane or role; `launch` and `resume` run it; `skill` prints the
 prompt that invokes a harness's own review skill (Own review skills, below). The script and this
 file change together, and a form the script refuses (muse; agy resume) is a form this file has
@@ -42,6 +42,31 @@ both.
 Prefer `--prompt-file` wherever a harness offers it. A prompt in argv is visible to every process
 listing on the machine, and a process must never be selected by matching text that could appear
 in a prompt: match on pid or working directory.
+
+## Skills folders
+
+A skill is installed as a link from a harness's user-level skills folder to that skill in the
+postmaster repo's main checkout, never as a copy, and a session finds `<tool>`, the postmaster
+repo, from the link (`SKILL.md`, first section). `<tool>/scripts/link-skills.sh` makes the links
+and is this table's executable form; its self-test fails when the two disagree. Harnesses that
+read one folder share one link there.
+
+| harness | linked into | it also reads | only inside a project | follows a link | source |
+|---|---|---|---|---|---|
+| claude | `~/.claude/skills`, or `$CLAUDE_CONFIG_DIR/skills` when that is set | `.claude/skills` in the project | no | yes, tried | [trial](../../raw/trials/skill-folders/method.md), [docs](https://code.claude.com/docs/en/skills) |
+| codex | `~/.agents/skills` | `~/.codex/skills`, `/etc/codex/skills`; `.agents/skills` from the cwd up to the repo root | no | yes, tried | [trial](../../raw/trials/skill-folders/method.md), [docs](https://learn.chatgpt.com/docs/build-skills) |
+| grok | `~/.agents/skills` | `~/.grok/skills`, `~/.claude/skills`; `.grok/skills` and `.agents/skills` up to the repo root | no | not documented | [docs](https://docs.x.ai/build/features/skills-plugins-marketplaces), [guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/08-skills.md) |
+| agy | none: its docs say `~/.gemini/antigravity-cli/skills`, its changelog puts the global config in `~/.gemini/config/`, and no trial has settled which it reads | `.agents/skills` at the workspace root | no | not documented | [docs](https://antigravity.google/docs/skills/), [changelog](https://github.com/google-antigravity/antigravity-cli/blob/main/CHANGELOG.md), [issue 103](https://github.com/google-antigravity/antigravity-cli/issues/103) |
+| muse | `~/.agents/skills` | `$XDG_CONFIG_HOME/muse/skills`, `~/.claude/skills`, `~/.codex/skills`; `.agents/skills` in a trusted workspace | no | yes, tried | [trial](../../raw/trials/skill-folders/method.md), [docs](https://dev.meta.ai/docs/muse-code/extending) |
+| pi | `~/.agents/skills` | `~/.pi/agent/skills`; `.pi/skills` and `.agents/skills` in a trusted project | no | yes, tried | [trial](../../raw/trials/skill-folders/method.md), pi 0.87.0 `docs/skills.md` |
+| mimo | `~/.agents/skills` | `~/.config/mimocode/skills`, `~/.mimocode/skills`; `.agents/skills` and `.mimocode/skills` up to the repo root; not `~/.claude/skills` | no | yes, tried | [trial](../../raw/trials/skill-folders/method.md) |
+
+Docs read and trial run on 2026-09-26. A harness with no folder in this table is pointed at
+`<tool>/skills/postmaster/SKILL.md` by absolute path, and every brief names the skill's documents
+by absolute path into `<tool>`, never a copy. grok and muse also read `~/.claude/skills`, so
+where claude is installed they meet each skill twice, through two links to one checkout; grok
+keeps one per name, and muse lists it once. mimo (MiMo Code) is in this table only: its launch
+and resume forms are not recorded yet, so `<tool>/scripts/launch.sh` has no form for it.
 
 ## codex
 
@@ -110,6 +135,8 @@ cd <wt> && agy -p "$(cat <dispatch>/<lane>-prompt.txt)" \
   so `launch.sh resume` refuses agy; a postmaster on agy is an interactive session on the
   session host (`hosts.md`) and is never resumed this way.
 - Threads persist harmlessly; nothing to archive.
+- No skills folder is linked for agy (Skills folders, above). A session on agy is pointed at
+  `<tool>/skills/postmaster/SKILL.md` by its absolute path.
 
 ## claude
 
@@ -134,7 +161,7 @@ cd <wt> && claude -p "$(cat <dispatch>/<lane>-prompt.txt)" --model <model> \
 - Ambient context: reads `CLAUDE.md` in the repo and the files it imports. A project that keeps
   its context in `AGENTS.md` needs a `CLAUDE.md` pointing at it; a symlink works.
 - As the coachman's own harness: background tasks are reaped at about 29 minutes, and a long
-  lane routinely outlives that. A launch through `scripts/host.sh` is not one of its background
+  lane routinely outlives that. A launch through `<tool>/scripts/host.sh` is not one of its background
   tasks: it runs in a host's pane, or detached in a session of its own, and outlives the call
   that started it. The cap reaches only what the harness runs itself, such as a wait. A
   "stopped" notification without a quota error is that cap, not a failure: run the wait again,
@@ -188,7 +215,7 @@ cd <wt> && pi --mode json --approve --model <provider/model> \
 ## Own review skills
 
 Under the security lens, a lane whose harness has its own security review skill runs it in place
-of postmaster's brief (`coachman.md`, Security lens). `scripts/launch.sh skill <lane>
+of postmaster's brief (`coachman.md`, Security lens). `<tool>/scripts/launch.sh skill <lane>
 security-review` prints the prompt that invokes it, and exits 3 when the lane's harness has none.
 The prompt goes in the lane's prompt file, and the launch is the ordinary launch form.
 
@@ -210,7 +237,7 @@ review (its commands, 0.1.15). OpenAI's Codex Security is a CLI of its own
 0 with an empty result after no turns, having reviewed nothing. A worktree scratch cannot give it
 one: `refs/remotes/origin/HEAD` is shared by every worktree of a repository, and git 2.43
 resolves no per-worktree copy. So the security lens reviews from scratch clones, cut with
-`scripts/cut-scratch.sh ... --clone <BASE>`, whose `origin/HEAD` is the branch the repository has
+`<tool>/scripts/cut-scratch.sh ... --clone <BASE>`, whose `origin/HEAD` is the branch the repository has
 checked out. The cut, and the check before each launch, refuse a clone where that does not lead
 back to BASE. When it verifies its findings
 in background agents, a headless run ends with one result line per turn, and an earlier one can
@@ -237,7 +264,7 @@ the headless form above; run it once before relying on it.
 
 ## The pane view
 
-`scripts/view-stream.sh` is the other executable half of this file: it renders an events
+`<tool>/scripts/view-stream.sh` is the other executable half of this file: it renders an events
 stream one line per event of interest, for a host's pane (`hosts.md`) and for anyone reading a
 stream by hand. It knows claude's events, checked against a recorded stream; codex's and pi's,
 written from the event names this file records and not yet checked against a recorded stream;
