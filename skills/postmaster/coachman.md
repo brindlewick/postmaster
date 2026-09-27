@@ -33,7 +33,7 @@ waybill carries, is `SKILL.md`. You do not need it.
 | `<repo>/.worktrees/<TICKET>` | synthesis worktree, branch `<TICKET>` |
 | `<repo>/.worktrees/<TICKET>-<lane>` | workhorse worktree, branch `wb/<TICKET>-<lane>` (`wb` for workhorse branch) |
 | `<dispatch>/checkpoint-<n>.md` | checkpoint cards: `1` and `review` |
-| `<repo>/.worktrees/<TICKET>-rev-<lens>-<lane>` | reviewer scratch, one per lens per lane, detached at the synthesis HEAD, fresh every round |
+| `<repo>/.worktrees/<TICKET>-rev-<lens>-<lane>` | reviewer scratch, one per lens per lane, detached at the synthesis HEAD, fresh every round: a clone under the security lens, a worktree under the others |
 | `<dispatch>/style-sort.md` | aftercare's sort of the run's style findings, which the postmaster puts to the user |
 
 ## Audit log: every action, as it happens
@@ -412,9 +412,11 @@ from it.
 One loop, in one leg. The lenses are the turnpikes `<tool>/scripts/turnpikes.sh legs <dispatch>` lists
 for the review leg, exactly those: a turnpike the waybill does not name never runs, and one it
 names is never skipped. If the script exits 2, or lists no review leg, escalate with its
-output. Each round runs every lens still open, on one snapshot, every reviewer lane under each
-lens as its own process in its own scratch: every lens in round 1, then the gating lenses alone
-from round 2.
+output. Each round runs every lens still open, on one snapshot, every lane the waybill names for
+that lens as its own process in its own scratch: every lens in round 1, then the gating lenses
+alone from round 2. A lens's lanes are its own `<lens> reviewers:` line in the waybill where it
+has one, and the `reviewers:` line otherwise; `<tool>/scripts/reviewers.sh lanes <dispatch>/brief.md
+<lens>` prints them.
 [Why the lenses run as one loop](../../wiki/concepts/review-loop.md)
 
 Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
@@ -434,8 +436,8 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    right reason.
 
    Each entry is the one place for its lens, the turnpike of the same name: what its reviewers
-   look for, and how they are launched, which step 2 does for every reviewer lane. A review
-   turnpike with no entry here cannot run: escalate.
+   look for, and how they are launched, which step 2 does for every lane that reviews under it.
+   A review turnpike with no entry here cannot run: escalate.
    - **Style lens** (round 1 only, gates nothing): non-mechanical idiom, naming, the project's
      stated paradigm (functional core, immutability, whatever its docs say), abstraction,
      consistency, judged against the project's own style pages and the surrounding code's
@@ -446,7 +448,10 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    - **Security lens** (gating): general exploit hunting plus the project's specific surfaces
      as the waybill names them: how it binds and authenticates, what it allowlists, how it
      handles secrets, what it spawns and with what arguments, what it serves from disk.
-     Launch: from its brief.
+     Launch: each lane from a prompt file of its own, which runs its harness's own security
+     review skill where it has one and the lens's brief where it has none, so the lens never
+     loses a lane (the security lens's launch, below).
+     [Why a lane may review through its harness's own skill](../../wiki/concepts/own-review-skills.md)
 
    **A launch from a brief** has two parts. Its preparation, once per round and before any
    reviewer starts, writes the lens's prompt file verbatim:
@@ -459,6 +464,26 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
 
    Its launch step starts reviewer lane `$L` in its scratch `$DEST`:
    `<tool>/scripts/launch.sh launch "$L" "$DEST" <dispatch>/review-r<round>-<lens>-prompt.txt --run <dispatch>`.
+
+   **The security lens's launch** has the same two parts, with a prompt file for each lane. Its
+   preparation writes the lens's prompt file as above, then each lane's own, and stops the round
+   on any exit but 0 (the lane's harness has the skill) and 3 (it has none):
+
+   ```sh
+   for L in $(<tool>/scripts/reviewers.sh lanes <dispatch>/brief.md security); do
+     <tool>/scripts/launch.sh skill "$L" security-review --run <dispatch> > <dispatch>/review-r<round>-security-$L-prompt.txt
+     case $? in
+       0) ;;
+       3) cp <dispatch>/review-r<round>-security-prompt.txt <dispatch>/review-r<round>-security-$L-prompt.txt ;;
+       *) echo "NO SECURITY PROMPT FOR $L; nothing launched"; exit 1 ;;
+     esac
+   done
+   ```
+
+   Its launch step starts lane `$L` in its scratch `$DEST`:
+   `<tool>/scripts/launch.sh launch "$L" "$DEST" <dispatch>/review-r<round>-security-$L-prompt.txt --run <dispatch>`.
+   A skill reads no brief. Its findings arrive as its final message, and step 3 verifies them
+   like any other lane's.
 2. **Run every reviewer under every open lens on the same snapshot, from a fresh scratch each
    round**, pinned to the synthesis HEAD, with the installed dependencies cloned in so every
    lane is a full lane:
@@ -466,18 +491,24 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    ```sh
    SNAP=$(git -C <synthesis-wt> rev-parse HEAD)
    git -C <repo> worktree prune
+   for LENS in <open lenses>; do   # a lens whose lanes do not resolve stops the round here
+     <tool>/scripts/reviewers.sh lanes <dispatch>/brief.md "$LENS" >/dev/null || exit 1
+   done
    for LENS in <open lenses>; do
-     for L in <reviewer lanes>; do
+     for L in $(<tool>/scripts/reviewers.sh lanes <dispatch>/brief.md "$LENS"); do
        DEST=<repo>/.worktrees/<TICKET>-rev-$LENS-$L
        # A scratch an interrupted round left behind, with no reviewer still running in it, is
        # checked like any other, then its space is closed and it is removed.
        if [ -e "$DEST" ]; then
          git -C "$DEST" diff --name-only "$SNAP" | sed "s|^|LEFT BEHIND AND MODIFIED, $DEST: |"
-         <tool>/scripts/host.sh close "$DEST" && git -C <repo> worktree remove --force "$DEST"
+         <tool>/scripts/host.sh close "$DEST" && <tool>/scripts/cut-scratch.sh --remove <repo> "$DEST"
        fi
+       # The security lens reviews from clones, whose origin/HEAD leads back to BASE, which a
+       # harness's own security review skill needs (harnesses.md, Own review skills).
+       CLONE=""; [ "$LENS" = security ] && CLONE="--clone <BASE>"
        # ASSERT the scratch is cut at SNAP and resolves before launching a lane into it. A
        # broken scratch discovered by two lanes separately is two wasted rounds.
-       <tool>/scripts/cut-scratch.sh <repo> <synthesis-wt> "$DEST" "$SNAP" \
+       <tool>/scripts/cut-scratch.sh <repo> <synthesis-wt> "$DEST" "$SNAP" $CLONE \
          && ( cd "$DEST" && <project build command> >/dev/null 2>&1 ) \
          || echo "SCRATCH BROKEN: $DEST is not cut at $SNAP or does not build; fix before launching $L under $LENS"
      done
@@ -490,8 +521,9 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
 
    Then do every open lens's preparation, and launch every reviewer under every open lens in the
    same breath, each through its lens's launch step run by `host.sh` (`hosts.md`). The command
-   first checks that every scratch is at the snapshot, and launches nothing if one is not; then
-   it clears the round's markers. `host.sh` lands each marker, naming the round, the lens and the
+   first checks every scratch with `cut-scratch.sh --check`: at the snapshot, and under the
+   security lens a clone whose `origin/HEAD` leads back to BASE. It launches nothing if one
+   fails; then it clears the round's markers. `host.sh` lands each marker, naming the round, the lens and the
    lane, when its process exits, whatever its exit, and the command ends in the wait for the
    whole round. An interrupted round is re-run whole, once no reviewer from its first attempt
    is still running; `<tool>/scripts/host.sh stop <scratch>` ends one by the worktree it runs in, never
@@ -500,15 +532,17 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    ```sh
    SNAP=$(git -C <synthesis-wt> rev-parse HEAD)
    for LENS in <open lenses>; do
-     for L in <reviewer lanes>; do
-       [ "$(git -C <repo>/.worktrees/<TICKET>-rev-$LENS-$L rev-parse HEAD 2>/dev/null)" = "$SNAP" ] \
-         || { echo "SCRATCH NOT AT $SNAP: <TICKET>-rev-$LENS-$L; nothing launched"; exit 1; }
+     <tool>/scripts/reviewers.sh lanes <dispatch>/brief.md "$LENS" >/dev/null || exit 1
+     CLONE=""; [ "$LENS" = security ] && CLONE="--clone <BASE>"
+     for L in $(<tool>/scripts/reviewers.sh lanes <dispatch>/brief.md "$LENS"); do
+       <tool>/scripts/cut-scratch.sh --check <repo>/.worktrees/<TICKET>-rev-$LENS-$L "$SNAP" $CLONE \
+         || { echo "SCRATCH NOT READY: <TICKET>-rev-$LENS-$L; nothing launched"; exit 1; }
      done
    done
    rm -f <dispatch>/logs/review-r<round>-*.done
    N=0
    for LENS in <open lenses>; do
-     for L in <reviewer lanes>; do
+     for L in $(<tool>/scripts/reviewers.sh lanes <dispatch>/brief.md "$LENS"); do
        DEST=<repo>/.worktrees/<TICKET>-rev-$LENS-$L
        <tool>/scripts/host.sh run "$(<tool>/scripts/host.sh name <dispatch> "$L $LENS review")" "$DEST" \
            --out <dispatch>/logs/review-r<round>-$LENS-$L.jsonl --err <dispatch>/logs/review-r<round>-$LENS-$L.err \
@@ -551,11 +585,12 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    snapshot, staged or committed included, not `status --porcelain` (scratches are expected to
    be dirty with untracked build output). Any modified tracked file is a finding about the LANE:
    log it with the file list and do not count that lane's verdict until it is understood. Then
-   stop any reviewer still running in its scratch (`<tool>/scripts/host.sh stop <scratch>`; its lane is
-   DEGRADED for the round), close each scratch's space (`<tool>/scripts/host.sh close <scratch>`; on exit
-   2 the user has it open, so leave that scratch and report it), and remove the scratches;
-   `git worktree remove --force` is sanctioned for SCRATCHES ONLY, here and at the cut, since a
-   detached scratch never holds work and its contents were just checked.
+   stop any reviewer still running in its scratch (`<tool>/scripts/host.sh stop <scratch>`; its
+   lane is DEGRADED for the round), close each scratch's space (`<tool>/scripts/host.sh close
+   <scratch>`; on exit 2 the user has it open, so leave that scratch and report it), and remove
+   the scratches with `<tool>/scripts/cut-scratch.sh --remove <repo> <scratch>`, here and at the
+   cut. It takes away a scratch of either kind and refuses anything else; a scratch never holds
+   work, and its contents were just checked.
    Also assert the synthesis worktree itself is still clean. With every lane on a copy, nothing
    should touch it during a review round; a dirty synthesis tree is an escape and an incident to
    investigate before continuing. When later staging fixes in the synthesis worktree, prefer a

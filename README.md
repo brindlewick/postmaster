@@ -87,7 +87,7 @@ scripts/skill-refs.sh [--fix]                                      # every scrip
 scripts/find-projects.sh        # your git projects, most recent first
 scripts/check-target.sh  <path> # 0 usable · 1 not a repo · 2 dirty
 scripts/discover-project.sh <path>
-scripts/cut-scratch.sh <repo> <source-worktree> <dest> <commit>   # reviewer scratch, deps cloned
+scripts/cut-scratch.sh <repo> <source-worktree> <dest> <commit> [--clone <base>]  # reviewer scratch; --kind, --remove
 scripts/wait-for-markers.sh <dir> <glob> <count> <timeout>       # block until a round is in
 scripts/log-action.sh <dispatch> <actor> <action> <target> …     # one JSON line per action
 scripts/tool-faults.sh harvest|comment|file|decline <dispatch> …  # a closed run's tool faults, as tickets
@@ -97,10 +97,13 @@ scripts/run-log.sh <dispatch> <text> | --section <title> | --close # the narrati
 scripts/run-meta.sh <dispatch> <repo>                             # run.json: what a run started from
 scripts/github.sh <repo> board|create|edit|read|state|comment|list|access|search # GitHub Issues on a Projects board
 scripts/plane.sh create|edit|read|state|comment|list …             # Plane work items
+scripts/local.sh <repo> store|create|edit|read|title|state|comment|list # tickets in the repo's git directory
+scripts/tracker-kind.sh <repo>                                    # the tracker kind a repo uses: local when its store exists
 scripts/ticket-check.sh <repo> <id> | --body <file> | --splice …   # a ticket's shape; --splice writes approved parts in
 scripts/turnpikes.sh --list | resolve <text> | legs <dispatch>     # the turnpikes, and a run's legs
 scripts/style-findings.sh list|count|gate|check <dispatch>         # a run's style findings, what its gate runs, the sort
-scripts/launch.sh form|launch|resume <lane-or-role> …             # any lane or role, one command
+scripts/launch.sh form|launch|resume|skill <lane-or-role> …       # any lane or role, one command
+scripts/reviewers.sh lines|lanes <waybill> <lens>|lenses           # which lanes review under each lens
 scripts/host.sh detect|name|run|stop|close|spawn|send|wait|read … # where a launch runs, and where you watch it
 scripts/view-stream.sh < <events-file>                            # a harness's events, one line each
 scripts/runs-status.sh <run-root>                                  # the postmaster's poll
@@ -142,8 +145,10 @@ when its instructions send an agent to them rather than up front.
 
 **Tickets are GitHub Issues on a GitHub Projects board by default:** a kanban you can open,
 with each ticket a card in the column its state says, and nothing to configure beyond `gh`
-being logged in. Plane works the same way through its API, cloud or self-hosted. Any other
-tracker your agent reaches through its own tooling is described once, outside this repo.
+being logged in. Plane works the same way through its API, cloud or self-hosted. With no
+service and no login, the local kind keeps a repo's tickets in its own git directory, and
+`scripts/local.sh <repo> list` shows them by state. Any other tracker your agent reaches
+through its own tooling is described once, outside this repo.
 The adapters are in `skills/postmaster/trackers.md`.
 
 **Nothing about a target project has to be configured.** The flow discovers the gate

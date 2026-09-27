@@ -70,6 +70,13 @@ Why the design is shaped as it is.
 - [A run keeps the config it started with](concepts/run-config.md): **claimed**. Every launch
   and resume in a run reads the config recorded at dispatch, so no lane changes part-way
   through. A change to the config reaches the next run.
+- [A lane may review through its harness's own skill](concepts/own-review-skills.md):
+  **claimed**. A security lane runs its harness's own security review skill where it has one,
+  and the brief where it has none; Claude Code's needs a clone whose `origin/HEAD` leads back to
+  the base.
+- [The local tracker](concepts/local-tracker.md): **claimed**. With no service and no login,
+  a repository's tickets live in its own git directory, and a repository whose store exists
+  uses it whatever the config names.
 
 ## Sources
 

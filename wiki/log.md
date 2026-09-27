@@ -18,6 +18,15 @@ and what would settle it; the turnpikes page says a turnpike need not gate. The 
 the same day that style blocks a ship was reverted on #40's pull request before it merged. Both
 pages stay `claimed`.
 
+## [2026-09-27] ingest | the local tracker
+
+A decision page under Decisions, from issue #11. A tracker with no service keeps a
+repository's tickets in its own git directory, outside the working tree and every branch, and
+a repository whose store exists uses it whatever the config names. The page records why the
+git directory rather than a directory under `~/.postmaster/`, why the kind is discovered
+rather than configured, why a store is made or removed only from the main checkout, and what
+it costs. Standing `claimed`, since no run bears on it yet.
+
 ## [2026-09-27] ingest | turnpikes: what the reviews decided
 
 Two decisions added to the turnpikes page, both the user's. In a run whose ticket names only
@@ -32,6 +41,22 @@ The page on faults a run finds in postmaster now says that a fault ticket goes o
 postmaster's own repository on GitHub, when the user administers it, and why a draft errs
 towards withholding. The drafts are shown to the user once, when a run's aftercare ends. No
 standing changed.
+
+## [2026-09-26] ingest | a lane may review through its harness's own skill
+
+A trial of claude 2.1.283's `/security-review`, launched as the flow launches a reviewer lane,
+recorded in `raw/trials/claude-security-review/`. In a scratch clone whose `origin/HEAD` leads
+back to the base, it reported the planted command injection at its file and line in both runs.
+In a worktree where `origin/HEAD` did not resolve, it returned success with an empty report after
+no turns. One run ended with three result lines, the report on the last. A new page records why
+a security lane may run its harness's own skill, at `claimed`, and what Claude Code's needs.
+
+## [2026-09-26] lint | each lens may have its own reviewer lanes
+
+The review-loop page records why a lens may name its own reviewer lanes: a lane chosen for one
+lens, for a skill its harness has for that lens alone, should not have to review every other
+lens as well. `[team.lens_reviewers]` names them, `scripts/reviewers.sh` resolves them, and the
+waybill carries them to the review stage. The page's standing stays `claimed`.
 
 ## [2026-09-26] ingest | a ticket names its turnpikes
 
