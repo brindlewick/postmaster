@@ -181,9 +181,10 @@ in a Herdr pane, and the option meets each need the trial named this way.
 - **Completion.** One `agent prompt --wait` per turn, sent only to an agent that has settled, in
   a waiter that outlives its caller. A turn counts as finished only when one of its final-act
   files was written after the prompt went, whatever Herdr reports; the waiter also looks whether
-  the agent is still there, after the release a kill brings. A reviewer, whose final act was its
-  last message, also writes that message to a file. The controls include a lane killed mid-turn,
-  which Herdr reported done and the option records lost, for pi and for claude
+  the agent is still there, after the release a kill brings. A reviewer's final act is its report
+  file, or its final message read from the harness's own session record, for claude and pi. When
+  Herdr sees no turn start, the record says whether the turn ran. The controls include a lane
+  killed mid-turn, which Herdr reported done and the option records lost, for pi and for claude
   [@trials/live-option/live-test.txt].
 - **Markers.** Every marker a headless run writes, at the same moments: a lane's when its turn
   ends, whatever its outcome; a leg's `.leg-<n>-exited` when its agent ends, which the waiter does

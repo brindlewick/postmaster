@@ -373,6 +373,10 @@ live form, a resume included.
   found by its id; pi's is the file its report names; codex's is found by its id under
   `sessions/` in its config dir. The record stands in for a live lane's events stream: its
   growth is the lane's sign of work, and it is its durable record.
+- **A turn's final message** is read from that record by `launch.sh last`, from where the record
+  stood when the prompt went: claude's last entry that ended its turn (`stop_reason` `end_turn`),
+  pi's last assistant message that stopped (`stopReason` `stop`), with no user message after it.
+  The other harnesses' records are not read here, so for them only a final-act file counts.
 
 ## The pane view
 

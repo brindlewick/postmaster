@@ -21,7 +21,8 @@
 #          agent if none runs, resuming the lane's thread if it had one, and refuses a lane still
 #          working. The turn is waited on in the background with host.sh prompt, the one safe wait;
 #          when it ends, the lane counts as finished only if one of the --final files, relative to
-#          <cwd>, was written after the prompt was sent, whatever state Herdr reports. Its files are
+#          <cwd>, was written after the prompt was sent, or, for @message, the harness's session
+#          record holds the turn's final message, whatever state Herdr reports. Its files are
 #          the ones a headless launch gives <record> under <dispatch>/logs: <record>.done, the
 #          marker, touched when the turn ends, whatever its outcome, and when the agent cannot
 #          start, with the reason in <record>.err; <record>.live, one JSON line per start, prompt
@@ -109,7 +110,7 @@ ensure() {
     *) echo "live: cannot read the state of $agent" | tee -a "$err" >&2; return 1 ;;
   esac
   [ "$fresh" = 1 ] || thread=$(last_start "$live" thread)
-  form=$(POSTMASTER_LAUNCH_NAME=$label "$HERE/launch.sh" live "$name" "$cwd" ${leg:+--leg "$leg"} ${thread:+--resume "$thread"} 2>> "$err") || return 1
+  form=$(POSTMASTER_LAUNCH_NAME=$label "$HERE/launch.sh" live "$name" "$cwd" ${leg:+--leg "$leg"} ${thread:+--resume "$thread"} --run "$d" 2>> "$err") || return 1
   out=$(printf '%s' "$form" | python3 -c 'import json, sys
 f = json.load(sys.stdin); sys.stdout.buffer.write(b"".join(x.encode() + b"\0" for x in [f["kind"], f["env_file"]] + f["args"]))' | {
     local fields=() x; while IFS= read -r -d '' x; do fields+=("$x"); done
@@ -119,7 +120,7 @@ f = json.load(sys.stdin); sys.stdout.buffer.write(b"".join(x.encode() + b"\0" fo
   cat "$err.start" >> "$err" 2>/dev/null; rm -f -- "$err.start"
   [ $rc -eq 0 ] || return 1
   kind=$(printf '%s' "$out" | json 'd["session"]["kind"]'); value=$(printf '%s' "$out" | json 'd["session"]["value"]')
-  ref=$("$HERE/launch.sh" session "$name" "$cwd" "$kind" "$value" ${leg:+--leg "$leg"} 2>> "$err") || return 1
+  ref=$("$HERE/launch.sh" session "$name" "$cwd" "$kind" "$value" ${leg:+--leg "$leg"} --run "$d" 2>> "$err") || return 1
   session=${ref#*$'\t'}; thread=${ref%%$'\t'*}
   printf '%s\n' "$session" > "$d/logs/$rec.session"
   record_line "$live" '{"event": "start", "at": a["at"], "name": a["name"], "agent": a["agent"], "pane": a["pane"],
@@ -290,7 +291,9 @@ turn() {
     sleep 1
     refresh_session "$d" "$rec"
     found=$(recorded "$d/logs/$rec.session" "$prompt" "$offset")
-    if [ "$found" = yes ]; then outcome=ran; break; fi
+    if [ "$found" = yes ]; then          # it ran: judge it once the agent has settled
+      settle_after_stall "$agent"; outcome=settled; status=stalled; break
+    fi
     if [ "$resent" = 1 ]; then outcome="never reached the harness"; break; fi
     resent=1
     record_line "$live" '{"event": "resent", "at": a["at"]}' at="$(now)"
@@ -298,10 +301,12 @@ turn() {
   kill "$finder" 2>/dev/null
   sleep 1                                             # a killed agent's release follows its settle
   if "$HERE/host.sh" state "$agent" >/dev/null 2>&1; then alive=true; else alive=false; fi
-  hit=$(final_act "$cwd" "$final" "$t0")
+  refresh_session "$d" "$rec"
+  hit=$(final_act "$d" "$rec" "$cwd" "$final" "$t0" "$offset")
   # Everything the turn leaves is written before its settled line, which outcome reads.
   if [ -n "$hit" ]; then
-    cp -- "$hit" "$d/logs/$rec-last.md" 2>/dev/null
+    if [ "$hit" = @message ]; then last_message "$d" "$rec" "$cwd" "$offset" > "$d/logs/$rec-last.md"
+    else cp -- "$hit" "$d/logs/$rec-last.md" 2>/dev/null; fi
     "$HERE/log-action.sh" "$d" "$actor" settle "$rec" "finished: $(basename "$hit"); herdr: ${status:-$outcome}"
   else
     if [ "$alive" = false ]; then cause="the agent was gone when its turn ended"
@@ -335,19 +340,49 @@ turn() {
   [ -n "$marker" ] && touch "$marker"
   return 0
 }
-final_act() {  # final_act <cwd> <file,...> <t0>: the first final-act file written since t0, or nothing
-  python3 - "$1" "$2" "$3" <<'PY'
+settle_after_stall() {  # settle_after_stall <agent>: until Herdr reads the agent settled twice, a
+  # second apart, or it has gone
+  local agent=$1 st seen=0
+  while :; do
+    st=$("$HERE/host.sh" state "$agent" 2>/dev/null | json 'd.get("status")' 2>/dev/null) || return 0
+    case $st in
+      idle|done) seen=$((seen + 1)); [ $seen -ge 2 ] && return 0 ;;
+      gone|"") return 0 ;;
+      *) seen=0 ;;
+    esac
+    sleep 1
+  done
+}
+final_act() {  # final_act <dispatch> <record> <cwd> <final,...> <t0> <offset>: the first final act
+  # on disk since the prompt went, or nothing. A file counts once written since then, relative to
+  # <cwd>; @message counts once the harness's session record holds the turn's final message.
+  local d=$1 rec=$2 cwd=$3 t0=$5 offset=$6 f
+  for f in $(printf '%s' "$4" | tr ',' ' '); do
+    if [ "$f" = @message ]; then
+      last_message "$d" "$rec" "$cwd" "$offset" >/dev/null 2>&1 && { echo @message; return 0; }
+    else
+      python3 - "$cwd" "$f" "$t0" <<'PY' && return 0
 import os, sys
-cwd, files, t0 = sys.argv[1], sys.argv[2], float(sys.argv[3])
-for f in [x for x in files.split(",") if x]:
-    p = f if os.path.isabs(f) else os.path.join(cwd, f)
-    try:
-        s = os.stat(p)
-    except OSError:
-        continue
-    if s.st_mtime >= t0 - 1.0 and (s.st_size > 0 or os.path.basename(p).startswith(".")):
-        print(p); break
+cwd, f, t0 = sys.argv[1], sys.argv[2], float(sys.argv[3])
+p = f if os.path.isabs(f) else os.path.join(cwd, f)
+try:
+    s = os.stat(p)
+except OSError:
+    sys.exit(1)
+if s.st_mtime >= t0 - 1.0 and (s.st_size > 0 or os.path.basename(p).startswith(".")):
+    print(p); sys.exit(0)
+sys.exit(1)
 PY
+    fi
+  done
+  return 0
+}
+last_message() {  # last_message <dispatch> <record> <cwd> <offset>: the turn's final message, read
+  # from the harness's session record through its adapter
+  local live=$1/logs/$2.live name leg
+  name=$(last_start "$live" name); leg=$(last_start "$live" leg)
+  [ -n "$name" ] || return 1
+  "$HERE/launch.sh" last "$name" "$3" "$(cat "$1/logs/$2.session" 2>/dev/null)" "$4" ${leg:+--leg "$leg"} --run "$1"
 }
 recorded() {  # recorded <session-pointer> <prompt-file> <offset>: yes when what the harness's record
   # gained past <offset> holds the prompt, in whatever field the harness keeps a user message
@@ -391,7 +426,7 @@ print(c)
 PY
 )
   [ -n "$name" ] && [ -n "$value" ] && [ -d "$cwd" ] || return 0
-  ref=$("$HERE/launch.sh" session "$name" "$cwd" "$kind" "$value" ${leg:+--leg "$leg"} 2>/dev/null) || return 0
+  ref=$("$HERE/launch.sh" session "$name" "$cwd" "$kind" "$value" ${leg:+--leg "$leg"} --run "$d" 2>/dev/null) || return 0
   [ -n "${ref#*$'\t'}" ] && printf '%s\n' "${ref#*$'\t'}" > "$d/logs/$rec.session"
   return 0
 }
@@ -599,6 +634,16 @@ print(n)' "$1/actions.jsonl" "$2" "$3" 2>/dev/null || echo 0; }
   check "prompted again, the same agent finishes, and nothing new starts" \
     '[ "$(starts "$agent")" = "$a" ] && [ "$(L -- outcome "$d" cl)" = "finished $wt/WORKHORSE-SUMMARY.md" ]'
 
+  echo "a reviewer's final act may be its final message, read from its own session record"
+  L -- lane "$d" cl rev-cl "$repo/.worktrees/T-1-cl" "$none" --final REVIEWER-REPORT.md,@message >/dev/null
+  L -- lane "$d" pi rev-pi "$repo/.worktrees/T-1-pi" "$none" --final REVIEWER-REPORT.md,@message >/dev/null
+  landed "$d/logs/rev-cl.done"; landed "$d/logs/rev-pi.done"; settled "$d" rev-cl; settled "$d" rev-pi
+  check "claude and pi: a turn that ended with its message is finished, and the message kept" \
+    '[ "$(L -- outcome "$d" rev-cl)" = "finished @message" ] && [ "$(L -- outcome "$d" rev-pi)" = "finished @message" ] && [ "$(cat "$d/logs/rev-cl-last.md")" = OK. ]' \
+    "$(tail -2 "$d/logs/rev-cl.live" 2>/dev/null)"
+  L -- lane "$d" pi rev-pi2 "$repo/.worktrees/T-1-pi" "$kill" --final REVIEWER-REPORT.md,@message >/dev/null; landed "$d/logs/rev-pi2.done"; settled "$d" rev-pi2
+  check "a reviewer killed before its message is lost" '[ "$(L -- outcome "$d" rev-pi2)" = "lost the agent was gone when its turn ended" ]'
+
   echo "only a lane that has settled is given work"
   echo working > "$tmp/stub/agent-$agent.status"; a=$(prompts)
   L -- lane "$d" cl cl "$wt" "$sum" --final "$FINAL" >/dev/null 2>&1; rc=$?
@@ -611,6 +656,12 @@ print(n)' "$1/actions.jsonl" "$2" "$3" 2>/dev/null || echo 0; }
   rm -f "$tmp/stub/prompt.stalled"
   check "a turn that ran is not sent again, and counts by its final act" \
     '[ "$(prompts)" = $((a + 1)) ] && [ "$(L -- outcome "$d" cl)" = "finished $wt/WORKHORSE-SUMMARY.md" ]'
+  touch "$tmp/stub/prompt.stalled"
+  L -- lane "$d" cl cl "$wt" "$none" --final "$FINAL" >/dev/null; landed "$d/logs/cl.done"; settled "$d" cl
+  rm -f "$tmp/stub/prompt.stalled"
+  check "one that ran without its final act is lost as any other, and Herdr's stall is recorded" \
+    '[ "$(L -- outcome "$d" cl)" = "lost settled without its final act" ] && tail -1 "$d/logs/cl.live" | grep -q "\"herdr\": \"stalled\""' \
+    "$(tail -1 "$d/logs/cl.live")"
   touch "$tmp/stub/prompt.dropped"; a=$(prompts)
   L -- lane "$d" cl cl "$wt" "$sum" --final "$FINAL" >/dev/null; landed "$d/logs/cl.done"; settled "$d" cl
   rm -f "$tmp/stub/prompt.dropped"
@@ -887,6 +938,13 @@ CFG
     '[ $rc -eq 0 ] && [ "$("$SELF" outcome "$d" pi)" = "finished $w/WORKHORSE-SUMMARY.md" ] && [ "$(head -1 "$sess" | json "d[\"id\"]")" = "$(last_start "$d/logs/pi.live" thread)" ]' \
     "$out $(cat "$d/logs/pi.err" 2>/dev/null)"
   check "the turn is in the ledger as it ended" 'grep -q "\"action\":\"settle\",\"target\":\"pi\"" "$d/actions.jsonl"'
+  "$SELF" lane "$d" cl rev-cl "$repo/.worktrees/T-1-cl" "$tmp/p-none.txt" --final REVIEWER-REPORT.md,@message >/dev/null
+  "$SELF" lane "$d" pi rev-pi "$repo/.worktrees/T-1-pi" "$tmp/p-none.txt" --final REVIEWER-REPORT.md,@message >/dev/null
+  settled "$d" rev-cl; settled "$d" rev-pi
+  check "a reviewer's final message, read from its harness's own session record, is its final act: claude and pi" \
+    '[ "$("$SELF" outcome "$d" rev-cl)" = "finished @message" ] && [ "$("$SELF" outcome "$d" rev-pi)" = "finished @message" ] && [ "$(cat "$d/logs/rev-cl-last.md")" = OK. ] && [ "$(cat "$d/logs/rev-pi-last.md")" = OK. ]' \
+    "$(tail -1 "$d/logs/rev-cl.live" 2>/dev/null) $(tail -1 "$d/logs/rev-pi.live" 2>/dev/null)"
+  "$HERE/host.sh" end "$(agent_of "$d" rev-cl)" >/dev/null; "$HERE/host.sh" end "$(agent_of "$d" rev-pi)" >/dev/null
 
   echo "runs-status reads a live lane's session record, not only the run's files"
   "$SELF" lane "$d" pi pi "$w" "$tmp/p-long.txt" --final "$FINAL" >/dev/null; sleep 4
@@ -920,7 +978,8 @@ for dp, dn, fn in os.walk(sys.argv[1]):
   w=$repo/.worktrees/T-1-cl
   "$SELF" lane "$d" cl cl "$w" "$tmp/p-none.txt" --final "$FINAL" >/dev/null; settled "$d" cl
   check "a lane that settles without its final act is lost, and still there to prompt again" \
-    '[ "$("$SELF" outcome "$d" cl)" = "lost settled without its final act" ] && "$HERE/host.sh" state "$(agent_of "$d" cl)" >/dev/null'
+    '[ "$("$SELF" outcome "$d" cl)" = "lost settled without its final act" ] && "$HERE/host.sh" state "$(agent_of "$d" cl)" >/dev/null' \
+    "$("$SELF" outcome "$d" cl 2>&1); $(cat "$d/logs/cl.err" 2>/dev/null); $(tail -3 "$d/logs/cl.live" 2>/dev/null)"
 
   echo "legs, and rulings no other pane can forge"
   w=$repo/.worktrees/T-1

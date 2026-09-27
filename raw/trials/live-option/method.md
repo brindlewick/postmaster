@@ -26,9 +26,11 @@ scratch configs by `herdr integration install`, with `PI_CODING_AGENT_DIR` and
 own harnesses changed; the live test checks the second.
 
 **The controls.** `scripts/live.sh --live-test`, at the commit that adds it. Its output, run
-twice with the same result, is `live-test.txt`. Two earlier runs, before the fixes that probes 3
-and 4 led to, failed controls: fourteen with every live start refused as busy, then five with
-claude's session records missing.
+twice with the same result, is `live-test.txt`. Earlier runs failed controls, each fixed in the
+same change: fourteen with every live start refused as busy (probe 4); five with claude's
+session records missing (probe 3); and one where Herdr saw no start of an instant claude turn,
+which the record showed had run, and the lane was recorded lost with the cause "ran" rather than
+"settled without its final act".
 
 **The probes.** By hand, one at a time, with the stand-in and the scratch configs; what each
 showed is in `probes.txt`, with the scratch paths written as `<scratch>`.

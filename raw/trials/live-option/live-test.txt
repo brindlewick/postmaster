@@ -1,6 +1,6 @@
 scripts/live.sh --live-test, 2026-09-27, Herdr 0.9.1, pi 0.87.0, claude 2.1.283; the second of two runs with this result.
 
-detected here: herdr; stand-in on 127.0.0.1:52405
+detected here: herdr; stand-in on 127.0.0.1:40619
 the key off: nothing changes
   ok   a run dispatched with the key off is not live
   ok   its lane is the headless launch it always was: a stream, a marker, its final act
@@ -11,6 +11,7 @@ setup of a live lane
   ok   control: the same claude where nothing trusted the folder stops at the question, and is ended
   ok   pi, with its integration: its session path reported, its thread the id inside it, and finished
   ok   the turn is in the ledger as it ended
+  ok   a reviewer's final message, read from its harness's own session record, is its final act: claude and pi
 runs-status reads a live lane's session record, not only the run's files
   ok   a lane at work keeps its run out of INSPECT, though nothing in the run has changed for an hour
 a lane killed mid-turn is lost, never finished

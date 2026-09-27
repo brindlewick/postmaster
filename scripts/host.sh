@@ -1190,7 +1190,10 @@ elif cmd == "agent prompt":
         with open(v["record"], "a") as f: f.write(json.dumps(line) + "\n")
     with open(os.path.join(S, "prompts.log"), "a") as f: f.write(json.dumps({"agent": name, "text": text}) + "\n")
     if flag("prompt.dropped"): error("agent_prompt_stalled")          # never reached the harness
-    record({"type": "user", "message": {"role": "user", "content": text}})
+    # Each turn goes in the record in its harness's shape: pi's messages, or claude's entries.
+    pi = v["kind"] == "pi"
+    record({"type": "message", "message": {"role": "user", "content": [{"type": "text", "text": text}]}} if pi
+           else {"type": "user", "message": {"role": "user", "content": text}})
     for line in text.splitlines():
         if line.startswith("STUB_RUN="): subprocess.run(["bash", "-c", line[9:]], cwd=v["cwd"])
     if flag("prompt.stalled"): error("agent_prompt_stalled")          # ran at once, and no turn was seen
@@ -1200,7 +1203,8 @@ elif cmd == "agent prompt":
             if not alive(v["pgid"]): break
             time.sleep(0.05)
         out({"agent": {"name": name, "agent_status": "done"}}); sys.exit(0)
-    record({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "OK."}]}})
+    record({"type": "message", "message": {"role": "assistant", "stopReason": "stop", "content": [{"type": "text", "text": "OK."}]}} if pi
+           else {"type": "assistant", "message": {"role": "assistant", "stop_reason": "end_turn", "content": [{"type": "text", "text": "OK."}]}})
     if flag("prompt.timeout"): error("timeout")
     if "--wait" in a: out({"agent": {"name": name, "agent_status": "blocked" if flag("prompt.ends-blocked") else "done"}})
     else: out({})

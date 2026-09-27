@@ -755,8 +755,10 @@ reaping and ruling a lane or a leg. Everything else stands.
   `<dispatch>/logs/<record>.done`, lands when its turn ends, whatever the outcome, so the wait is
   the same `<tool>/scripts/wait-for-markers.sh`, in the same command.
 - **The final act.** A workhorse's is `WORKHORSE-SUMMARY.md,WORKHORSE-BLOCKED.md`. A reviewer's is
-  `REVIEWER-REPORT.md`, and each lens's prompt file adds the line "Write the same report to
-  REVIEWER-REPORT.md at the root of your worktree as your final act."
+  `REVIEWER-REPORT.md,@message`: the report file, which each lens's prompt file asks for with the
+  added line "Write the same report to REVIEWER-REPORT.md at the root of your worktree as your
+  final act.", or else its final message, which `@message` reads from its session record. A
+  lane's own skill prompt is left as it is.
 - **A resume is the same command** with the new prompt file. It prompts the lane's agent if it is
   there and has settled, resumes the lane's thread in a new agent if it has gone, and refuses a
   lane still working.

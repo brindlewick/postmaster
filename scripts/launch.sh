@@ -9,6 +9,7 @@
 #   launch.sh skill   <name> <skill> [--run <dispatch>]
 #   launch.sh live    <name> <cwd> [--leg <leg>] [--resume <thread-id>] [--run <dispatch>]
 #   launch.sh session <name> <cwd> <kind> <value> [--leg <leg>] [--run <dispatch>]
+#   launch.sh last    <name> <cwd> <record> <offset> [--leg <leg>] [--run <dispatch>]
 #   launch.sh --self-test
 #
 # The config is the live one, ~/.postmaster/config.toml (POSTMASTER_CONFIG overrides the path),
@@ -42,8 +43,10 @@
 # would otherwise ask, and prints one JSON line for scripts/host.sh start: the Herdr kind, the env
 # file and the interactive arguments, resuming <thread-id> with --resume. `session` turns the
 # session reference the integration reported to Herdr into the thread id and the path of the
-# harness's session record, tab-separated. launch and resume stay headless, and the postmaster
-# is never a live lane.
+# harness's session record, tab-separated. `last` prints the final message of the turn the
+# session record holds past byte <offset>, when that turn has ended with one, and exits 1 when it
+# has not, 3 for a harness whose record this script cannot read. launch and resume stay
+# headless, and the postmaster is never a live lane.
 #
 #   exit 0  the form or the skill's prompt was printed, or the harness exited 0
 #   exit 1  usage, config or run.json missing or unreadable, unknown name, a leg that is not
@@ -394,6 +397,25 @@ d = json.load(open(sys.argv[1])); d["projects"] = {sys.argv[2]: {"hasTrustDialog
     "T-9	$tmp/cc/projects/$(printf '%s' "$lwt" | tr -c 'A-Za-z0-9' '-')/T-9.jsonl" session one "$lwt" id T-9
   carries "session: pi's reported path names the thread" on "0199aa00-0000-7000-8000-000000000001	$tmp/pa/sessions/--x--/2026_0199aa00-0000-7000-8000-000000000001.jsonl" \
     session two "$lwt" path "$tmp/pa/sessions/--x--/2026_0199aa00-0000-7000-8000-000000000001.jsonl"
+  # Session records in each harness's shape: an earlier turn, then this one's prompt and reply.
+  { printf '%s\n' '{"type":"user","message":{"role":"user","content":"an earlier turn"}}' \
+      '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"old"}]}}'
+  } > "$tmp/cl.jsonl"; off=$(wc -c < "$tmp/cl.jsonl")
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":"review it"}}' \
+    '{"type":"assistant","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","name":"Bash"}]}}' \
+    '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}' \
+    '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"P2 a finding"}]}}' >> "$tmp/cl.jsonl"
+  carries "last: claude's final message is its last entry that ended the turn" on "P2 a finding" last one "$lwt" "$tmp/cl.jsonl" "$off"
+  head -c "$(( $(wc -c < "$tmp/cl.jsonl") - $(tail -1 "$tmp/cl.jsonl" | wc -c) ))" "$tmp/cl.jsonl" > "$tmp/cl-cut.jsonl"
+  run on last one "$lwt" "$tmp/cl-cut.jsonl" "$off"
+  [ $rc -eq 1 ] && [ -z "$out" ] && ok "a turn cut off mid-tool, and an earlier turn's reply, are no final message" \
+    || fail "a turn cut off mid-tool, and an earlier turn's reply, are no final message"
+  printf '%s\n' '{"type":"session","id":"P-1"}' '{"type":"message","message":{"role":"user","content":[{"type":"text","text":"go"}]}}' \
+    '{"type":"message","message":{"role":"assistant","stopReason":"toolUse","content":[]}}' \
+    '{"type":"message","message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"clean"}]}}' > "$tmp/pi.jsonl"
+  carries "last: pi's final message is its last assistant message that stopped" on "clean" last two "$lwt" "$tmp/pi.jsonl" 0
+  run on last three "$lwt" "$tmp/pi.jsonl" 0
+  [ $rc -eq 3 ] && ok "last: a harness whose record is not recorded here exits 3" || fail "last: a harness whose record is not recorded here exits 3"
   envx=""
 
   echo
@@ -403,7 +425,7 @@ fi
 
 die() { echo "launch: $*" >&2; exit 1; }
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
-[ $# -ge 2 ] || die "usage: launch.sh form|launch|resume|skill|live|session <name> ... | --self-test"
+[ $# -ge 2 ] || die "usage: launch.sh form|launch|resume|skill|live|session|last <name> ... | --self-test"
 CMD=$1; NAME=$2; shift 2
 LEG=""; LAST=""; RUN=""; RESUME=""; STDIN_FILE=""; args=()
 while [ $# -gt 0 ]; do
@@ -530,10 +552,12 @@ case $CMD in
           CWD=${args[0]}; THREAD=$RESUME; PROMPT='<prompt-file>'; PTEXT='' ;;
   session) [ ${#args[@]} -eq 3 ] || die "session needs <cwd> <kind> <value>"
           CWD=${args[0]}; THREAD='<thread-id>'; PROMPT='<prompt-file>'; PTEXT='' ;;
+  last)   [ ${#args[@]} -eq 3 ] || die "last needs <cwd> <record> <offset>"
+          CWD=${args[0]}; THREAD='<thread-id>'; PROMPT='<prompt-file>'; PTEXT='' ;;
   *) die "unknown command: $CMD" ;;
 esac
 [ "$CMD" = form ] || [ -d "$CWD" ] || die "no such directory: $CWD"
-case $CMD in live|session) CWD=$(CDPATH= cd -P -- "$CWD" && pwd -P) ;; esac
+case $CMD in live|session|last) CWD=$(CDPATH= cd -P -- "$CWD" && pwd -P) ;; esac
 case $HARNESS in pi|muse|mimo) [ "$CMD" = launch ] || [ "$CMD" = resume ] ;; *) false ;; esac && {   # read after the cd
   prompt_dir=$(CDPATH= cd -P -- "$(dirname -- "$PROMPT")" && pwd -P) || die "cannot resolve prompt file: $PROMPT"
   PROMPT=$prompt_dir/$(basename "$PROMPT")
@@ -733,6 +757,42 @@ if [ "$CMD" = live ]; then
   live_checks; live_args; trust_live
   python3 -c 'import json, sys
 print(json.dumps({"kind": sys.argv[1], "env_file": sys.argv[2], "args": sys.argv[3:]}))' "$KIND" "${ENV_FILE:-}" "${largs[@]}"
+  exit 0
+fi
+if [ "$CMD" = last ]; then
+  # A turn's final message, from the harness's own session record: claude's last assistant entry
+  # that ended its turn, pi's last assistant message that stopped, with no user message after it.
+  case $HARNESS in claude|pi) ;; *) echo "launch: the $HARNESS session record's form is not recorded" >&2; exit 3 ;; esac
+  python3 - "$HARNESS" "${args[1]}" "${args[2]}" <<'PY' || exit 1
+import json, os, sys
+harness, record, offset = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    f = open(record, "rb")
+    f.seek(int(offset) if os.path.getsize(record) >= int(offset) else 0)
+    lines = f.read().decode("utf-8", "replace").splitlines()
+except (OSError, ValueError):
+    sys.exit(1)
+def texts(content):
+    if isinstance(content, str): return content
+    return "".join(p.get("text", "") for p in content or [] if isinstance(p, dict) and p.get("type") == "text")
+final = None
+for line in lines:
+    try: r = json.loads(line)
+    except ValueError: continue
+    m = r.get("message") or {}
+    if harness == "claude":
+        if r.get("type") == "user":
+            c = m.get("content")
+            if isinstance(c, str) or any(isinstance(p, dict) and p.get("type") == "text" for p in c or []):
+                final = None                        # a user message opens a new turn
+        elif r.get("type") == "assistant" and m.get("stop_reason") in ("end_turn", "stop_sequence"):
+            final = texts(m.get("content"))
+    elif r.get("type") == "message":
+        if m.get("role") == "user": final = None
+        elif m.get("role") == "assistant" and m.get("stopReason") == "stop": final = texts(m.get("content"))
+if final is None: sys.exit(1)
+sys.stdout.write(final + ("" if final.endswith("\n") else "\n"))
+PY
   exit 0
 fi
 if [ "$CMD" = session ]; then
