@@ -29,7 +29,7 @@ env_file = "~/.postmaster/lanes/deepseek.env"   # ANTHROPIC_BASE_URL and ANTHROP
 
 [lanes.mimo]
 harness = "mimo"                                # MiMo Code; its model is provider/model
-model = "xiaomi-token-plan-sgp/mimo-v2.6-pro"
+model = "<plan-provider>/mimo-v2.6-pro"         # the provider id of your key's plan
 effort = "high"                                 # MiMo V2.6 Pro's variants are low, medium, high
 env_file = "~/.postmaster/lanes/mimo.env"       # XIAOMI_API_KEY=<key>
 
