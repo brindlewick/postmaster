@@ -1,20 +1,171 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
-## [2026-09-26] ingest | a review round's time limit
+## [2026-09-27] ingest | a review round's time limit
 
 The review loop page now says what happens to a reviewer still running when its round reaches
 the time limit: it is stopped and recorded DEGRADED, with timeout as its cause. The limit moves
 from the runbook into the config as `review.round_timeout_seconds`, and keeps its default of
 2400 seconds, the limit a round had when it ran one lens. The `degrade` lines will show whether
 round 1, which runs every lens at once, needs more. The standing stays `claimed`.
+
+## [2026-09-27] ingest | one round of bug review, for now
+
+The user read #59's options for ending the review loop and chose none of them as written: for
+now, one round of bug review, to be revisited if many bugs reach production. The research page
+records the decision, and the review-loop page notes it. The cap of three rounds in `coachman.md`
+stays until a ticket of its own changes it. No standing changes.
+
+## [2026-09-27] ingest | the local tracker
+
+A decision page under Decisions, from issue #11. A tracker with no service keeps a
+repository's tickets in its own git directory, outside the working tree and every branch, and
+a repository whose store exists uses it whatever the config names. The page records why the
+git directory rather than a directory under `~/.postmaster/`, why the kind is discovered
+rather than configured, why a store is made or removed only from the main checkout, and what
+it costs. Standing `claimed`, since no run bears on it yet.
+
+## [2026-09-27] ingest | turnpikes: what the reviews decided
+
+Two decisions added to the turnpikes page, both the user's. In a run whose ticket names only
+style, a bug or security defect the style reviewer finds is escalated to the user rather than
+fixed, since no lens would check the fix. A ticket's turnpikes are the user's, like its
+direction, so the postmaster never names fewer than `default` on its own. The table of
+turnpikes is not changed while any run is in flight. Standing stays `claimed`.
+
+## [2026-09-27] lint | fault tickets: when they are shown, where they go, what they withhold
+
+The page on faults a run finds in postmaster now says that a fault ticket goes only to
+postmaster's own repository on GitHub, when the user administers it, and why a draft errs
+towards withholding. The drafts are shown to the user once, when a run's aftercare ends. No
+standing changed.
+
+## [2026-09-26] ingest | when a review loop should stop
+
+A hypothesis page for #59, standing `claimed`. It compiles the review of #36 round by round and
+tests the implementing session's reading of it against the reports. It sets out eight candidate
+rules for ending a loop of model reviewers, and what should count toward them, each with the
+evidence for and against. It proposes a trial with its cost: fresh reviewers on code a loop has
+already passed, against code with known defects. It ends with five options for the loop's end in
+`coachman.md` and a recommendation. No runbook changes; the choice is the user's.
+
+## [2026-09-26] ingest | outside work on review, fixes and severity
+
+Fourteen papers captured into `raw/papers/`, each keeping only the passages relied on, with a
+source page each. They cover when inspections stop, what one review finds, how often fixes bring
+new defects, how people and models disagree on severity, and how often a model reviewer's findings
+are rejected. They bear on the new review-loop hypothesis and move no standing. Two sources found
+but not quotable exactly are named on that page instead.
+
+## [2026-09-26] ingest | the review rounds of #36
+
+The first run record: the review of pull request #39, which implemented #36, run by hand in five
+rounds, not by a dispatch. Promoted with local paths, a session id and the reviewer models' names
+replaced. Its record lists every finding of rounds 2 to 4 with where it sat and what became of it.
+It bears on H2 of combining models, the review loop and the new hypothesis; no standing changes,
+since one hand-run record cannot move one.
+
+## [2026-09-26] ingest | a lane may review through its harness's own skill
+
+A trial of claude 2.1.283's `/security-review`, launched as the flow launches a reviewer lane,
+recorded in `raw/trials/claude-security-review/`. In a scratch clone whose `origin/HEAD` leads
+back to the base, it reported the planted command injection at its file and line in both runs.
+In a worktree where `origin/HEAD` did not resolve, it returned success with an empty report after
+no turns. One run ended with three result lines, the report on the last. A new page records why
+a security lane may run its harness's own skill, at `claimed`, and what Claude Code's needs.
+
+## [2026-09-26] lint | each lens may have its own reviewer lanes
+
+The review-loop page records why a lens may name its own reviewer lanes: a lane chosen for one
+lens, for a skill its harness has for that lens alone, should not have to review every other
+lens as well. `[team.lens_reviewers]` names them, `scripts/reviewers.sh` resolves them, and the
+waybill carries them to the review stage. The page's standing stays `claimed`.
+
+## [2026-09-26] ingest | a ticket names its turnpikes
+
+A decision page, beside the one on the ticket shape. A ticket now names the turnpikes its run
+passes through: `default` for the style, bug and security reviews, fewer, or `none`, with no
+floor. A turnpike no longer means the gate: the gate runs on every run. The page records why,
+the decisions the ticket left open, and what the ledger will count. Standing `claimed`, since
+no run bears on it yet.
+
+## [2026-09-26] ingest | faults a run finds in postmaster become tickets
+
+Third page in the Decisions area. A run never fixes postmaster itself: it logs each fault as it
+happens, with its own diagnosis and proposed fix, stops on a fault in a control and works
+around anything else, and the postmaster turns the run's faults into tickets on postmaster's
+own tracker when the run closes. The page records why, and what a fault ticket may carry.
+Standing `claimed`, since no run bears on it yet.
+## [2026-09-26] ingest | a run keeps the config it started with
+
+A decision page. A run now launches and resumes every lane and every leg on the config it
+recorded in `run.json` at dispatch, never the live one. A config edited mid-run can no longer
+change a lane part-way through, or hand one harness's thread id to another. The page records
+what that costs: a fix to the config waits for the next run, and an env file's contents are
+still read at each launch. Standing `claimed`, since no run bears on it yet.
+
+## [2026-09-26] ingest | a skill is a link to the postmaster repo, never a copy
+
+Third page in the Decisions area, with a trial behind its narrower fact. Each skill is installed
+as a link from a harness's user-level skills folder to the main checkout, never as a copy, and a
+session finds the repo from that link. The trial asked Claude Code, pi, MiMo Code, codex and
+Muse Code, with a temporary HOME, which skills they loaded: each loads a linked skill from each
+folder it documents, and none lists or warns about a link that is missing or points nowhere. The page
+records why the one step that finds the repo is a line in `SKILL.md` rather than a script, and
+why Antigravity is not linked yet. Standing `claimed`: the decision is the user's, issue #15.
+
+## [2026-09-26] ingest | follow-up: claude's trust question, and claude killed mid-turn
+
+Two checks added to `raw/trials/herdr-agent-lifecycle/`. Headless claude answered in a
+directory its config had never trusted, with or without its bypass flag, while interactive claude
+stopped at the trust question even with it. A claude killed mid-turn was reported done, as pi
+had been, and a pane where one died mid-turn held the next start in `working` until its screen
+was cleared. The Herdr page widens its kill finding to claude and adds the restart finding; the
+live-agents page adds the bypass form and a cleared pane to what the option needs. No standing
+changed.
+
+## [2026-09-26] query | headless stays the default; live agents become an option
+
+Asked whether headless runs are the better arrangement. On the trial, yes: a headless lane
+exits about as soon after its last reply as Herdr notices a live one finish, the rest of the
+marker's delay is a poll that can be shortened, and Herdr's settled states can mislead.
+Decided: lanes and coachman legs stay headless, the postmaster stays the one interactive agent,
+Herdr hosts every run for observability, and live agents become a config option, off by
+default. The live-agents page records the decision, keeps its measurement as what would change
+the default, and lists what the option needs. Its standing stays `claimed`.
+
+## [2026-09-26] ingest | Herdr's agent states, and live agents against markers
+
+A trial of Herdr 0.9.1 with pi 0.87.0 and claude 2.1.283 against a stand-in model, recorded in
+`raw/trials/herdr-agent-lifecycle/`. Two new pages. The first, under trackers and tooling,
+records what Herdr documents against what it does: most harnesses' states are read from the
+screen, a separate wait can return the previous turn's state, and a pi agent killed mid-turn
+was reported done. It is `settled` for that version. The second states issue #16's claim at
+`claimed`, with its four measures, the control, a measurement on issue #37's fixture, the
+decision rule, and what would follow for the coachman contract. No existing standing changed.
+
+## [2026-09-26] ingest | Herdr shows a headless launch truthfully only when it owns its pane
+
+First page on a service the flow depends on. A trial against Herdr 0.9.1 and claude 2.1.283,
+run twice: left to itself Herdr shows a working headless claude as idle; a closing `idle` report
+is ignored once an agent has run in the pane, and `release-agent` is what ends a reported state;
+claude's Herdr integration reports into whatever pane `HERDR_PANE_ID` names; and a headless
+harness does not title its pane. Settled on that trial, for claude only. It shaped
+`scripts/host.sh` and `skills/postmaster/hosts.md`, issue #10.
+
+## [2026-09-26] lint | the review loop's cap is three rounds
+
+The review loop's round cap goes from five rounds to three, by the user's decision, after #39's
+own review ran four rounds without a clean one and stopped on the repeated-class rule. It holds
+until #59, the research on what should end an AI review loop, reports. `coachman.md` and the
+decision page now say three.
 
 ## [2026-09-25] ingest | review runs as one loop
 

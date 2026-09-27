@@ -1,0 +1,20 @@
+One turn made of three tool calls and a closing reply. The stand-in answered the prompt
+"TOOL=4x3 SLEEP=2 ..." with a shell tool call running `sleep 4`, three times, holding each
+reply 2 s, then answered in text. The question: does Herdr report the agent settled before the
+turn is over? Times are from issuing agent prompt --wait.
+
+pi, screen rules (pane-a)
+  requests: +354 tool, +6433 tool, +12459 tool, +18496 text reply finished +20498
+  states pushed: working +461, done +21083
+  prompt --wait: exit 0, "done", +21146, 648 ms after the final reply
+pi, Herdr's pi integration (pane-b)
+  requests: +697 tool, +7249 tool, +13820 tool, +20905 text reply finished +22956
+  states pushed: working +913, done +23463
+  prompt --wait: exit 0, "done", +23475, 519 ms after the final reply
+claude, screen rules (pane-c)
+  requests: +525 tool, +7445 tool, +13740 tool, +19959 text reply finished +21961
+  states pushed: working +1210, done +22627
+  prompt --wait: exit 0, "done", +22631, 670 ms after the final reply
+
+No agent was reported idle or done between its tool calls. Each request is in
+standin-requests.jsonl with its tool_call, and each state in herdr-events.jsonl.

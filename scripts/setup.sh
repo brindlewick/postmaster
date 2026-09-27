@@ -15,66 +15,76 @@
 #
 #   exit 0  config written (or printed), or keys listed
 #   exit 1  a harness was named that is not on PATH, the coachman shares a lane's model, fewer
-#           than two lanes were given, an answer was missing, a round time limit was not a
-#           whole number of seconds, or an existing config was not overwritten
+#           than two lanes were given, a reviewer is not a lane, an answer was missing, a round
+#           time limit was not a whole number of seconds from 1 to 86400, or an existing config
+#           was not overwritten
 #
-# Control: the written file is parsed back as TOML where a parser is available, so a config
-# that would fail to load is never left on disk as if it were fine.
+# Control: the written file is parsed back as TOML where a parser is available, and its reviewer
+# lanes are resolved through scripts/reviewers.sh, so a config that would fail to load is never
+# left on disk as if it were fine.
 set -uo pipefail
-HERE=$(cd "$(dirname "$0")" && pwd -P)
+HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 
 if [ "${1:-}" = --self-test ]; then
-  # Each control runs this script on an answers file, with stub harnesses first on PATH and a
-  # throwaway HOME, so no real config is read or written.
-  self="$HERE/$(basename "$0")"
   tmp=$(mktemp -d) || exit 1
   trap 'rm -r -- "$tmp" 2>/dev/null' EXIT
-  mkdir "$tmp/bin" "$tmp/home"
-  for h in claude codex; do printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$h"; chmod +x "$tmp/bin/$h"; done
-  answers() {  # answers <key=value>...: a complete answers file; a given line wins, being read first
-    printf '%s\n' "$@" "lanes=one, two" "lane.one.harness=claude" "lane.one.model=m1" "lane.two.harness=codex" \
-      "lane.two.model=m2" "coachman.harness=claude" "coachman.model=judge" "fallback.harness=codex" \
-      "fallback.model=judge-2" "postmaster.harness=claude" "postmaster.model=pm" > "$tmp/answers"
-  }
-  out="" rc=0 fails=0
-  run() { out=$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" "$self" --answers "$tmp/answers" "$@" 2>&1); rc=$?; }
-  value() {  # value <file> <python expression on the parsed config c>: prints it
-    python3 -c 'import sys, tomllib; c = tomllib.load(open(sys.argv[1], "rb")); print(eval(sys.argv[2]))' "$1" "$2" 2>&1
-  }
-  printed() { printf '%s\n' "$out" | sed -n '/^# Written by scripts\/setup.sh/,$p' > "$tmp/printed.toml"; }
+  fails=0
   ok()   { printf '  ok   %s\n' "$1"; }
-  fail() { printf '  FAIL %s (exit %s)\n' "$1" "$rc"; printf '%s\n' "$out" | tail -5 | sed 's/^/         /'; fails=$((fails+1)); }
+  fail() { printf '  FAIL %s\n' "$1"; [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/         /'; fails=$((fails+1)); }
+  answers() {  # answers <name> [extra key=value lines]: a full set of answers, bash standing in for every harness
+    { printf '%s\n' "lanes=alpha, beta, sentinel" \
+        "lane.alpha.harness=bash" "lane.alpha.model=m1" "lane.beta.harness=bash" "lane.beta.model=m2" \
+        "lane.sentinel.harness=bash" "lane.sentinel.model=m3" "workhorses=alpha, beta" \
+        "coachman.harness=bash" "coachman.model=judge" "fallback.harness=bash" "fallback.model=spare" \
+        "postmaster.harness=bash" "postmaster.model=pm"
+      [ -n "${2:-}" ] && printf '%s\n' "$2"; } > "$tmp/$1.answers"
+  }
+  run() { "$0" --answers "$tmp/$1.answers" --config "$tmp/$1.toml" >"$tmp/$1.out" 2>&1; }
+  team() { python3 -c 'import json, sys, tomllib; print(json.dumps(tomllib.load(open(sys.argv[1], "rb"))["team"].get(sys.argv[2])))' "$tmp/$1.toml" "$2"; }
 
   echo "positive controls"
-  answers; run --dry-run; printed
-  [ $rc -eq 0 ] && [ "$(value "$tmp/printed.toml" 'c["review"]["round_timeout_seconds"]')" = 2400 ] \
-    && ok "the round time limit defaults to 2400 seconds, under [review]" || fail "the round time limit defaults to 2400 seconds, under [review]"
-  answers "round_timeout_seconds=3600"; run --dry-run; printed
-  [ $rc -eq 0 ] && [ "$(value "$tmp/printed.toml" 'c["review"]["round_timeout_seconds"]')" = 3600 ] \
-    && ok "an answer sets it" || fail "an answer sets it"
-  answers "round_timeout_seconds=900"; run --config "$tmp/written.toml"
-  [ $rc -eq 0 ] && [ "$(value "$tmp/written.toml" 'c["review"]["round_timeout_seconds"], c["team"]["coachman"]["model"]')" = "(900, 'judge')" ] \
-    && ok "the config it writes parses, and holds it" || fail "the config it writes parses, and holds it"
+  answers lens "reviewers.security=alpha, beta, sentinel"
+  run lens; rc=$?
+  [ $rc -eq 0 ] && [ "$(team lens lens_reviewers)" = '{"security": ["alpha", "beta", "sentinel"]}' ] \
+    && ok "a lens given its own lanes is written to [team.lens_reviewers]" \
+    || fail "a lens given its own lanes is written to [team.lens_reviewers] (exit $rc)" "$(cat "$tmp/lens.out")"
+  [ "$("$HERE/reviewers.sh" lines --config "$tmp/lens.toml")" = "$(printf 'reviewers: alpha, beta\nsecurity reviewers: alpha, beta, sentinel')" ] \
+    && ok "the written config resolves: the reviewers default to the workhorses, and security has its own" \
+    || fail "the written config resolves" "$("$HERE/reviewers.sh" lines --config "$tmp/lens.toml" 2>&1)"
+  answers plain; run plain; rc=$?
+  [ $rc -eq 0 ] && [ "$(team plain lens_reviewers)" = null ] && [ "$(team plain reviewers)" = '["alpha", "beta"]' ] \
+    && ok "without lens answers there is no table, as before" || fail "without lens answers there is no table, as before (exit $rc)" "$(cat "$tmp/plain.out")"
 
-  echo "negative controls: nothing is written"
-  for v in 0 -60 abc 1.5 0600 "40 minutes"; do
-    answers "round_timeout_seconds=$v"; run --config "$tmp/refused-$v.toml"
-    [ $rc -eq 1 ] && [ ! -e "$tmp/refused-$v.toml" ] && case $out in *round_timeout_seconds*) true ;; *) false ;; esac \
-      && ok "a round time limit of '$v' is refused" || fail "a round time limit of '$v' is refused"
+  limit() { python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["review"]["round_timeout_seconds"])' "$tmp/$1.toml" 2>&1; }
+  [ "$(limit plain)" = 2400 ] && ok "a review round's time limit defaults to 2400 seconds, under [review]" \
+    || fail "a review round's time limit defaults to 2400 seconds, under [review]" "$(limit plain)"
+  answers limit "round_timeout_seconds=86400"; run limit; rc=$?
+  [ $rc -eq 0 ] && [ "$(limit limit)" = 86400 ] && ok "an answer sets it, up to 86400" \
+    || fail "an answer sets it, up to 86400 (exit $rc)" "$(cat "$tmp/limit.out")"
+
+  echo "negative controls"
+  n=0
+  for v in 0 -60 abc 1.5 0600 "40 minutes" 86401 9999999999999999999; do
+    n=$((n + 1)); answers "limit$n" "round_timeout_seconds=$v"; run "limit$n"; rc=$?
+    [ $rc -eq 1 ] && [ ! -e "$tmp/limit$n.toml" ] && grep -q "round_timeout_seconds must be" "$tmp/limit$n.out" \
+      && ok "a round time limit of '$v' is refused, and nothing is written" \
+      || fail "a round time limit of '$v' is refused, and nothing is written (exit $rc)" "$(cat "$tmp/limit$n.out")"
   done
-  answers "lane.two.harness=no-such-harness"; run --config "$tmp/refused-harness.toml"
-  [ $rc -eq 1 ] && [ ! -e "$tmp/refused-harness.toml" ] && ok "a harness not on PATH is refused" || fail "a harness not on PATH is refused"
-  answers "coachman.model=m1"; run --config "$tmp/refused-coachman.toml"
-  [ $rc -eq 1 ] && [ ! -e "$tmp/refused-coachman.toml" ] && ok "a coachman on a lane's model is refused" || fail "a coachman on a lane's model is refused"
-  answers "round_timeout_seconds=1200"; run --config "$tmp/written.toml"
-  [ $rc -eq 1 ] && [ "$(value "$tmp/written.toml" 'c["review"]["round_timeout_seconds"]')" = 900 ] \
-    && ok "an existing config is not overwritten without the answer" || fail "an existing config is not overwritten without the answer"
+  answers ghost "reviewers.security=alpha, ghost"; run ghost; rc=$?
+  [ $rc -eq 1 ] && [ ! -e "$tmp/ghost.toml" ] && grep -q "security reviewer 'ghost' is not one of the lanes" "$tmp/ghost.out" \
+    && ok "a lens reviewer that is not a lane is refused, and nothing is written" \
+    || fail "a lens reviewer that is not a lane is refused, and nothing is written (exit $rc)" "$(cat "$tmp/ghost.out")"
+  answers shared "coachman.model=m1"; sed -i '/^coachman.model=judge$/d' "$tmp/shared.answers"; run shared; rc=$?
+  [ $rc -eq 1 ] && [ ! -e "$tmp/shared.toml" ] && grep -q "cannot run on a lane's model" "$tmp/shared.out" \
+    && ok "a coachman on a lane's model is refused" || fail "a coachman on a lane's model is refused (exit $rc)" "$(cat "$tmp/shared.out")"
+  answers missing; sed -i '/^fallback.model=/d' "$tmp/missing.answers"; run missing; rc=$?
+  [ $rc -eq 1 ] && [ ! -e "$tmp/missing.toml" ] && grep -q "no answer for fallback.model" "$tmp/missing.out" \
+    && ok "a missing answer is refused, naming it" || fail "a missing answer is refused, naming it (exit $rc)" "$(cat "$tmp/missing.out")"
 
   echo
   [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }
   echo "self-test: $fails control(s) misbehaved"; exit 1
 fi
-
 DRY=0; ANSWERS=""
 CONFIG="$HOME/.postmaster/config.toml"
 while [ $# -gt 0 ]; do
@@ -92,6 +102,7 @@ lane.<name>.effort?        (none)             effort, blank if the harness has n
 lane.<name>.env_file?      (none)             env file for an alternate backend
 workhorses                 <lanes>            workhorse lanes, comma separated
 reviewers                  <workhorses>       reviewer lanes, comma separated
+reviewers.<lens>?          (reviewers)        reviewer lanes for one lens only (reviewers.sh lenses)
 coachman.harness                              never a lane's model
 coachman.model
 coachman.effort?           (none)
@@ -103,20 +114,20 @@ postmaster.model
 postmaster.effort?         (none)
 max_runs                   2                  concurrent runs per project
 poll_seconds               120                postmaster poll interval
-tracker                    github             github, plane or other
+tracker                    github             github, plane, local or other
 plane.url                  https://api.plane.so   plane only
 plane.workspace                               plane only; the slug in the workspace's web URL
 plane.env_file             ~/.postmaster/plane.env   plane only; holds PLANE_API_KEY=<key>
 tracker.name                                  other only
 postmaster_may_create      no                 yes lets the postmaster create tickets unasked
-round_timeout_seconds      2400               seconds a review round may run
+round_timeout_seconds      2400               seconds a review round may run, 1 to 86400
 merge_authority            user               user or postmaster
 checkpoint_mode            autonomous         autonomous or consult
 review_link?               (none)             template with {path}
 overwrite                  no                 yes replaces an existing config
 EOF
       exit 0 ;;
-    *) echo "usage: setup.sh [--answers <file>] [--dry-run] [--config <path>] | --keys | --self-test" >&2; exit 1 ;;
+    *) echo "usage: setup.sh [--answers <file>] [--dry-run] [--config <path>] | --keys" >&2; exit 1 ;;
   esac
   shift
 done
@@ -190,6 +201,17 @@ for rv in $(printf '%s' "$REVIEWERS" | tr ',' ' '); do
   ok=0; for lane in $LANE_LIST; do [ "$lane" = "$rv" ] && ok=1; done
   [ "$ok" -eq 1 ] || { echo "setup: reviewer '$rv' is not one of the lanes ($LANES)" >&2; exit 1; }
 done
+LENS_TABLE=""
+for lens in $("$HERE/reviewers.sh" lenses); do
+  ask LR "  reviewer lanes for the $lens lens alone, comma separated (blank: the reviewer lanes)" "" "reviewers.$lens?"
+  [ -n "$LR" ] || continue
+  for rv in $(printf '%s' "$LR" | tr ',' ' '); do
+    ok=0; for lane in $LANE_LIST; do [ "$lane" = "$rv" ] && ok=1; done
+    [ "$ok" -eq 1 ] || { echo "setup: $lens reviewer '$rv' is not one of the lanes ($LANES)" >&2; exit 1; }
+  done
+  LENS_TABLE="$LENS_TABLE$lens = $(toml_list "$LR")"$'\n'
+done
+[ -z "$LENS_TABLE" ] || LENS_TABLE=$'\n[team.lens_reviewers]\n'"$LENS_TABLE"
 
 echo
 echo "== The coachman: judges the lanes and runs the review rounds. Never a lane's model. =="
@@ -220,25 +242,27 @@ ask MR "  concurrent runs per project" "2" "max_runs"
 ask PS "  postmaster poll interval, seconds" "120" "poll_seconds"
 
 echo
-echo "== Tickets: GitHub Issues on a Projects board by default; Plane; or another tracker. =="
-ask TK "How are tickets tracked (github, plane, other)" "github" "tracker"
+echo "== Tickets: GitHub Issues on a Projects board by default; Plane; local, kept in each repo; or another tracker. =="
+ask TK "How are tickets tracked (github, plane, local, other)" "github" "tracker"
 PURL=""; PWS=""; PENV=""; OTHER=""
 case $TK in
-  github) ;;
+  github|local) ;;
   plane)
     ask PURL "  Plane API origin (https://api.plane.so for cloud; a self-hosted instance is its own)" "https://api.plane.so" "plane.url"
     ask PWS "  workspace slug (the segment after the host in the workspace's web URL)" "" "plane.workspace"
     [ -n "$PWS" ] || { echo "setup: a Plane workspace slug is needed" >&2; exit 1; }
     ask PENV "  file holding PLANE_API_KEY=<key>, written by you, never pasted here" "~/.postmaster/plane.env" "plane.env_file" ;;
   other) ask OTHER "  tracker name (then describe it in ~/.postmaster/trackers/<name>.md)" "" "tracker.name" ;;
-  *) echo "setup: tracker kind must be github, plane or other" >&2; exit 1 ;;
+  *) echo "setup: tracker kind must be github, plane, local or other" >&2; exit 1 ;;
 esac
 
 echo
 ask PMC "May the postmaster create tickets without asking (yes/no)" "no" "postmaster_may_create"
 case $PMC in yes|no) ;; *) echo "setup: answer yes or no" >&2; exit 1 ;; esac
 ask RT "Seconds a review round may run before the reviewers still running are stopped" "2400" "round_timeout_seconds"
-case $RT in ''|0*|*[!0-9]*) echo "setup: round_timeout_seconds must be a whole number of seconds above zero, not '$RT'" >&2; exit 1 ;; esac
+case $RT in [1-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9]|[1-9][0-9][0-9][0-9][0-9]) ;; *) RT=0 ;; esac
+[ "$RT" -ge 1 ] && [ "$RT" -le 86400 ] \
+  || { echo "setup: round_timeout_seconds must be a whole number of seconds from 1 to 86400" >&2; exit 1; }
 ask MA "Who says the merge word (user, postmaster)" "user" "merge_authority"
 case $MA in user|postmaster) ;; *) echo "setup: merge authority must be user or postmaster" >&2; exit 1 ;; esac
 ask CPM "Checkpoint mode (autonomous, consult)" "autonomous" "checkpoint_mode"
@@ -261,7 +285,7 @@ coachman = { harness = "$CH", model = "$CM"$( [ -n "$CE" ] && printf ', effort =
 coachman_fallback = { harness = "$FH", model = "$FM"$( [ -n "$FE" ] && printf ', effort = "%s"' "$FE" ) }
 postmaster = { harness = "$PH", model = "$PM"$( [ -n "$PE" ] && printf ', effort = "%s"' "$PE" ) }
 max_runs = $MR
-
+${LENS_TABLE}
 [postmaster]
 poll_seconds = $PS
 
@@ -290,6 +314,8 @@ printf '%s\n' "$OUT" > "$CONFIG"
 if python3 -c 'import tomllib' 2>/dev/null; then
   python3 -c 'import sys,tomllib; tomllib.load(open(sys.argv[1],"rb"))' "$CONFIG" \
     || { echo "setup: $CONFIG does not parse as TOML; fix it before running anything" >&2; exit 1; }
+  "$HERE/reviewers.sh" lines --config "$CONFIG" >/dev/null \
+    || { echo "setup: the reviewer lanes in $CONFIG do not resolve; fix them before running anything" >&2; exit 1; }
   echo "wrote $CONFIG (parsed back as TOML)"
 else
   echo "wrote $CONFIG (no TOML parser found to check it; python3 3.11+ would)"
