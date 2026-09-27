@@ -47,10 +47,10 @@ if [ "${1:-}" = --self-test ]; then
   # Each control runs this script on a fixture config, with stub harnesses first on PATH.
   # `form` only prints, so nothing is launched. A run's record is written from a fixture by
   # run-meta.sh, as at dispatch, so what this script reads is what that one writes.
-  self=$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")
+  self=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)/$(basename -- "$0")
   here=$(dirname "$self")
   tmp=$(mktemp -d) || exit 1
-  trap 'rm -r -- "$tmp" 2>/dev/null' EXIT
+  trap 'rm -r -- "$tmp" </dev/null 2>/dev/null' EXIT
   # A stub prints its arguments and PROBE, which an env file may set, so a launch or a resume
   # shows the harness, model, effort and env file it would run on.
   mkdir "$tmp/bin" "$tmp/wt"
@@ -341,7 +341,7 @@ eval "$spec"
 command -v "$HARNESS" >/dev/null 2>&1 || die "harness '$HARNESS' is not on PATH"
 if [ -n "${ENV_FILE:-}" ]; then
   ENV_FILE=${ENV_FILE/#\~/$HOME}
-  case $ENV_FILE in /*) ;; *) ENV_FILE=$(cd "$(dirname "$CONFIG")" && pwd -P)/$ENV_FILE ;; esac
+  case $ENV_FILE in /*) ;; *) ENV_FILE=$(CDPATH= cd -P -- "$(dirname -- "$CONFIG")" && pwd -P)/$ENV_FILE ;; esac
   [ -f "$ENV_FILE" ] && [ -r "$ENV_FILE" ] || die "env_file for $NAME not found or not readable: $ENV_FILE"
 fi
 
@@ -371,7 +371,7 @@ case $CMD in
 esac
 [ "$CMD" = form ] || [ -d "$CWD" ] || die "no such directory: $CWD"
 if [ "$HARNESS" = pi ] && [ "$CMD" != form ]; then
-  prompt_dir=$(cd "$(dirname "$PROMPT")" && pwd -P) || die "cannot resolve prompt file: $PROMPT"
+  prompt_dir=$(CDPATH= cd -P -- "$(dirname -- "$PROMPT")" && pwd -P) || die "cannot resolve prompt file: $PROMPT"
   PROMPT=$prompt_dir/$(basename "$PROMPT")
 fi
 
@@ -441,7 +441,7 @@ if [ "$HARNESS" = codex ] && [ "$CMD" = launch ]; then
   grep -qF "[projects.\"$CWD\"]" "$HOME/.codex/config.toml" \
     || printf '\n[projects."%s"]\ntrust_level = "trusted"\n' "$CWD" >> "$HOME/.codex/config.toml"
 fi
-cd "$CWD" || die "cannot enter $CWD"
+CDPATH= cd -- "$CWD" || die "cannot enter $CWD"
 # A harness whose prompt arrives on stdin reads it from the file, never from an inherited pipe.
 if [ -n "$STDIN_FILE" ]; then exec < "$STDIN_FILE" || die "cannot read $STDIN_FILE"; fi
 # The env file reaches the harness's environment only: the command above is already built.

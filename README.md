@@ -97,6 +97,8 @@ scripts/run-log.sh <dispatch> <text> | --section <title> | --close # the narrati
 scripts/run-meta.sh <dispatch> <repo>                             # run.json: what a run started from
 scripts/github.sh <repo> board|create|edit|read|state|comment|list|access|search # GitHub Issues on a Projects board
 scripts/plane.sh create|edit|read|state|comment|list …             # Plane work items
+scripts/local.sh <repo> store|create|edit|read|title|state|comment|list # tickets in the repo's git directory
+scripts/tracker-kind.sh <repo>                                    # the tracker kind a repo uses: local when its store exists
 scripts/ticket-check.sh <repo> <id> | --body <file> | --splice …   # a ticket's shape; --splice writes approved parts in
 scripts/turnpikes.sh --list | resolve <text> | legs <dispatch>     # the turnpikes, and a run's legs
 scripts/launch.sh form|launch|resume|skill <lane-or-role> …       # any lane or role, one command
@@ -142,8 +144,10 @@ when its instructions send an agent to them rather than up front.
 
 **Tickets are GitHub Issues on a GitHub Projects board by default:** a kanban you can open,
 with each ticket a card in the column its state says, and nothing to configure beyond `gh`
-being logged in. Plane works the same way through its API, cloud or self-hosted. Any other
-tracker your agent reaches through its own tooling is described once, outside this repo.
+being logged in. Plane works the same way through its API, cloud or self-hosted. With no
+service and no login, the local kind keeps a repo's tickets in its own git directory, and
+`scripts/local.sh <repo> list` shows them by state. Any other tracker your agent reaches
+through its own tooling is described once, outside this repo.
 The adapters are in `skills/postmaster/trackers.md`.
 
 **Nothing about a target project has to be configured.** The flow discovers the gate

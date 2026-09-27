@@ -99,7 +99,7 @@ log_action() {  # log_action <dispatch> <actor> <action> <target> [detail...]
   case "$VERBS" in *" $ACTION "*) ;; *) echo "log-action: '$ACTION' is not an action in the set:$VERBS" >&2; return 1 ;; esac
   if [ "$ACTION" = tool-fault ]; then tool_fault "$TARGET" "$@" || return 1; fi
 
-  dispatch=$(cd "$given" 2>/dev/null && pwd -P) || { echo "log-action: no such dir: $given" >&2; return 1; }
+  dispatch=$(CDPATH= cd -P -- "$given" 2>/dev/null && pwd -P) || { echo "log-action: no such dir: $given" >&2; return 1; }
   run=$(basename "$dispatch")
   project=$(basename "$(dirname "$dispatch")")
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)

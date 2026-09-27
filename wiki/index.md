@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # postmaster wiki
@@ -73,6 +73,9 @@ Why the design is shaped as it is.
   **claimed**. A security lane runs its harness's own security review skill where it has one,
   and the brief where it has none; Claude Code's needs a clone whose `origin/HEAD` leads back to
   the base.
+- [The local tracker](concepts/local-tracker.md): **claimed**. With no service and no login,
+  a repository's tickets live in its own git directory, and a repository whose store exists
+  uses it whatever the config names.
 
 ## Sources
 

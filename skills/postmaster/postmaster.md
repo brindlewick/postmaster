@@ -31,9 +31,12 @@ ledger. `note` is the action for anything without its own verb.
 
 ## Stage A: the stream becomes tickets
 
-0. **The tracker is reachable first:** `<tool>/scripts/github.sh <repo> board` or
-   `<tool>/scripts/plane.sh projects` per the config's kind, before any read or write. A github
-   target with no board (exit 3) gets one only when the user says so: `board init`.
+0. **The tracker is reachable first:** `<tool>/scripts/github.sh <repo> board`,
+   `<tool>/scripts/plane.sh projects` or `<tool>/scripts/local.sh <repo> store`, per the kind
+   `<tool>/scripts/discover-project.sh <repo>` names as `tracker`, before any read or write. A
+   github target with no board, or a local one with no store (exit 3), gets one only when the
+   user says so: `board init` or `store init`. A github target with no origin remote can have no
+   board; propose `store init` to the user instead.
 1. **Read what exists.** List the tracker's open tickets (`trackers.md`) and read the ones the
    stream touches. The stream may already be ticketed in part.
 2. **Decompose.** One ticket per independently shippable change, in the ticket shape
