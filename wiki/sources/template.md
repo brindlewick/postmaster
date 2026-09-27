@@ -33,9 +33,9 @@ note. Then one line: did any lane's work reach it whole?
 
 ## Review findings (bears on H2)
 
-| finding | made by | also made independently by | held up |
-|---|---|---|---|
-| … | lane | lane, or none | yes, no, dismissed |
+| finding | lens | made by | also made independently by | held up |
+|---|---|---|---|---|
+| … | style, bug or security, or more than one | lane | lane, or none | yes, no, dismissed |
 
 Counts: findings, corroborated findings, corroborated that held up, uncorroborated that held up.
 

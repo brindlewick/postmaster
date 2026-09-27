@@ -12,7 +12,7 @@ stream yourself**; the session you spawn does that, from `postmaster.md` beside 
 That session dispatches one **coachman** per ticket, one leg at a time. A coachman drives
 exactly one leg of one load and hands off to the next leg in writing; its runbook is
 `coachman.md`. Harness-specific invocations are in `harnesses.md`, tracker mechanics in
-`trackers.md`, and the machine's choices — which harnesses, which lanes, which tracker — in
+`trackers.md`, where a launch runs and how the user watches it in `hosts.md`, and the machine's choices — which harnesses, which lanes, which tracker — in
 `~/.postmaster/config.toml`, whose shape is `config.example.toml` at the repo root. There is
 no separate per-ticket skill: dispatching a coachman is something the postmaster does, not
 something a person invokes.
@@ -120,19 +120,35 @@ not say; the security lens reviews against them.
    (`trackers.md`).
 3. **Launch card**: one self-contained confirmation covering the postmaster's harness,
    model and effort (`team.postmaster` in the config), the team the config names, who says
-   the merge word (`ship.merge_authority`), and the project facts above. Launch
-   nothing before the user picks.
+   the merge word (`ship.merge_authority`), the session host the fleet will run on
+   (`scripts/host.sh detect`), and the project facts above. Launch nothing before the user
+   picks.
 4. **Create the run root** `~/.postmaster/runs/<project>/` (the repo's basename) and log the
    launch there: `scripts/log-action.sh` needs a run directory, so the postmaster's own
    actions go under `~/.postmaster/runs/<project>/postmaster/`.
-5. **Spawn.** A new session of the postmaster's harness (`team.postmaster` in the config),
-   rooted in the target repo, in its own tmux session named `postmaster-<project>`, briefed
-   with: "You are the postmaster for <project>. Read `<tool>/skills/postmaster/postmaster.md`
-   first", then the stream paragraph, the project profile, `<tool>` and the config path. An
-   interactive harness gets the brief as its first prompt; a headless one gets it through
-   `scripts/launch.sh launch postmaster <repo> <brief-file>`, run inside the tmux session so
-   the user can attach.
-6. **Report** the session name, the run root, and the brief. Then stop.
+5. **Spawn** it on the session host (`hosts.md`). Write the brief to
+   `~/.postmaster/runs/<project>/postmaster/brief.md`: "You are the postmaster for <project>.
+   Read `<tool>/skills/postmaster/postmaster.md` first", then the stream paragraph, the project
+   profile, `<tool>` and the config path. Start a new interactive session of the postmaster's
+   harness (`team.postmaster` in the config), rooted in the target repo, in the harness's
+   interactive form from `harnesses.md`: its bypass mode, named `<project> · postmaster`. Hand it
+   a one-line prompt file that says to read the brief:
+
+   ```sh
+   scripts/host.sh spawn postmaster-<project> <repo> --label "<project> · postmaster" -- <interactive form>
+   scripts/host.sh send postmaster-<project> <prompt-file>
+   scripts/host.sh read postmaster-<project>      # it took the message: a new session can drop one
+   ```
+
+   On Herdr it opens as a tab in the target repo's space, the root of every run's tree; on tmux,
+   as a window in session `postmaster-<project>`. If `spawn` says it is not ready, the harness is
+   asking something on its first start there, such as claude asking whether to trust the folder:
+   the user answers it in the pane, and then the prompt is sent. With no host, `spawn` exits 3:
+   launch it headless instead, as `hosts.md` gives under none, with a line in its brief that it
+   runs headless, so whenever it needs the user it writes `<runs>/postmaster/ESCALATION.md` and
+   ends its turn; tell the user it answers by resume.
+6. **Report** where to watch it (the space and tab, the tmux session, or with no host its events
+   file), the run root, and the brief. Then stop.
 
 ## The waybill
 
@@ -160,6 +176,7 @@ coachman: <harness>/<model>/<effort>      (never a lane's model)
 CHECKPOINT_MODE and MERGE_AUTHORITY come from ship.checkpoint_mode and ship.merge_authority, overridden only where the user says so for this run
 
 ## Dispatch
+name: <ticket id>, <ticket title>
 dispatch: <abs path of this directory>
 synthesis worktree: <abs path; cut by the postmaster at BASE, the coachman's cwd for every leg>
 tool: <abs path of the postmaster repo; every scripts/ path in the runbooks is relative to it>

@@ -117,18 +117,20 @@ A three-role flow for getting one ticket implemented well by several models at o
 | role | what it does | where it is defined |
 |---|---|---|
 | **postmaster** | decomposes a stream into tickets, dispatches one coachman per ticket leg by leg, supervises, answers escalations, grants merges | `skills/postmaster/postmaster.md` (spawned by `SKILL.md`) |
-| **coachman** | drives one leg of one ticket; five legs, each a fresh coachman with a written hand-off between them, carry a ticket from waybill to ship card: harnessing the team, judging their work, running review rounds, clearing the gate | `skills/postmaster/coachman.md` |
+| **coachman** | drives one leg of one ticket; three legs, `synthesis`, `review` and `ship`, each a fresh coachman with a written hand-off between them, carry a ticket from waybill to ship card: harnessing the team, judging their work, running review rounds, clearing the gate | `skills/postmaster/coachman.md` |
 | **the team** | several model lanes implementing the same ticket independently, in **blinkers**: separate worktrees, unable to see each other's work | `coachman.md`, lane table |
 
 The postmaster runs no model lanes and edits no source. A coachman never takes a second
 load. The **waybill** (`<dispatch>/brief.md`) is the only thing that travels between them.
 Harness-specific invocations live in `skills/postmaster/harnesses.md`, and
 `scripts/launch.sh` is their executable form: the runbooks name a form (launch, resume,
-thread id), that file gives the command, the script runs it. `SKILL.md` is the front door —
+thread id), that file gives the command, the script runs it. Where a launch runs, and how the
+user watches it, is the session host's: `skills/postmaster/hosts.md` records Herdr, tmux and no
+host at all, and `scripts/host.sh` runs every launch through them. `SKILL.md` is the front door —
 reached from this file or by typing `/postmaster`, it gets the machine ready if it is not and
-spawns a postmaster; `postmaster.md` is what that postmaster then does. A run is five coachman
-legs, each a fresh thread, so no context outlives a leg and a leg's hand-off document is the
-whole of what the next leg knows.
+spawns a postmaster; `postmaster.md` is what that postmaster then does. A run is three coachman
+legs, `synthesis`, `review` and `ship`, each a fresh thread, so no context outlives a leg and a
+leg's hand-off document is the whole of what the next leg knows.
 
 ## What the project has learned lives in the wiki
 
@@ -167,7 +169,8 @@ whole system.
    names. The flow discovers what a project needs; it does not demand configuration.
 2. **Nothing harness-specific in the flow.** Every harness has its own flags and its own
    event format. That belongs behind an adapter (`skills/postmaster/harnesses.md`), not in
-   prose telling a reader not to confuse them. Trackers likewise (`skills/postmaster/trackers.md`).
+   prose telling a reader not to confuse them. Trackers likewise (`skills/postmaster/trackers.md`),
+   and session hosts (`skills/postmaster/hosts.md`).
 3. **Deterministic work goes in `scripts/`, not in prose.** A check written as prose is
    re-derived, and mis-derived, on every run. A script gets it wrong once and is fixed.
 4. **A prompt lives in argv.** Never select a process by matching text that could appear in
