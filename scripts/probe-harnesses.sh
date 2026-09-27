@@ -13,10 +13,10 @@ for h in claude codex grok agy muse pi; do
     claude) hl="-p" ;; codex) hl="exec" ;; grok) hl="-p" ;; agy) hl="-p" ;; muse) hl="exec" ;; pi) hl="--mode json" ;;
   esac
   note=""
-  [ "$h" = muse ] && note="--prompt-file, --api-key-stdin"
+  [ "$h" = muse ] && note="--prompt-file; key from META_API_KEY"
   [ "$h" = grok ] && note="--prompt-file"
   [ "$h" = agy  ] && note="reads NO ambient context file"
-  [ "$h" = muse ] && note="$note; reads no ambient file"
+  [ "$h" = muse ] && note="$note; reads AGENTS.md in a trusted workspace, and Claude Code's user rules"
   [ "$h" = pi ] && note="reads AGENTS.md or CLAUDE.md (AGENTS.md first); prompt on stdin"
   row "$h" yes "$hl" "$note"
 done

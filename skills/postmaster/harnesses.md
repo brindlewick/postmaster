@@ -13,7 +13,7 @@ runbooks correct for every harness and every host.
 **`<tool>/scripts/launch.sh` is the executable form of this file.** `launch.sh form <name>` prints the
 exact command for a configured lane or role; `launch` and `resume` run it; `skill` prints the
 prompt that invokes a harness's own review skill (Own review skills, below). The script and this
-file change together, and a form the script refuses (muse; agy resume) is a form this file has
+file change together, and a form the script refuses (agy resume) is a form this file has
 not recorded yet.
 
 Every lane runs unrestricted. Its containment is its worktree (`coachman.md`, Lane capability),
@@ -30,7 +30,7 @@ one session messaging another; the postmaster polls files.
 | agy (Antigravity CLI) | `agy -p` | `--output-format stream-json` | none | no, argv |
 | claude | `claude -p` | `--output-format stream-json` | `CLAUDE.md` and what it imports | no, argv |
 | pi | `pi --mode json` | `--mode json` | `AGENTS.override.md`, else `AGENTS.md` or `CLAUDE.md`, natively | yes, on stdin |
-| muse | `muse exec` | not recorded here | none | `--prompt-file` |
+| muse | `muse exec` | `--json` | `AGENTS.md` in a trusted workspace, and Claude Code's user rules | yes, `--prompt-file` |
 
 A harness that reads no ambient context file must be handed the project's docs by name in its
 prompt, and must have the `WORKHORSE-SPEC.md` / `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract spelled
@@ -203,14 +203,46 @@ cd <wt> && pi --mode json --approve --model <provider/model> \
   working directory with `/` replaced by `-`. Threads persist harmlessly; nothing to archive.
 - Use a provider-qualified model id when the same model name could match more than one provider.
 
-## muse
+## muse (Muse Code)
 
-- Installed as `muse`; headless form `muse exec`, takes `--prompt-file` and `--api-key-stdin`.
-  Reads no ambient context file.
-- **Not usable as a lane until this section records its stream flag, its bypass form, where
-  its thread id appears and its resume form.** Fill those in from `muse --help` and a trial
-  run before configuring a lane on it; the probe lists it so the gap is visible, not so it is
-  chosen.
+```sh
+cd <wt> && env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json \
+  --prompt-file <abs prompt-file> --model <model> --reasoning-effort <effort> --yolo < /dev/null
+```
+
+- `--yolo` is the bypass form. It turns off tool approval and Muse Code's sandbox, and trusts
+  the workspace for the run. The sandbox uses Bubblewrap, which needs unprivileged user
+  namespaces, so a machine that blocks them still runs the launch. `--reasoning-effort` takes
+  `none`, `minimal`, `low`, `medium`, `high` (its default), `xhigh`, `max` and `ultra`.
+- Stdin: Muse Code reads its stdin to the end before it starts, and an open pipe held a launch
+  for as long as the pipe stayed open. The launch gives it `/dev/null`.
+- `--json` writes one JSON record per line. Each carries `stream` (`kind` `session`, and its
+  `id`), a `sequence`, and a `payload_type` with its `payload`.
+- Thread id: `stream.id` of the first record, a UUID.
+- Resume: the launch form with `--session-id <thread id>`, the model and the effort passed
+  again. `muse resume` opens the interactive picker and is not used.
+- Final message: `payload.text` of the last `run.terminal.*` record, `run.terminal.completed` on
+  success. A run that fails, on a model that does not exist say, ends on `run.terminal.failed`
+  with no text and exit 1, and says why on stderr.
+- The model: `run.model.configured` carries `model_id`, with `source` `startup` on a launch and
+  `replay` on a resume. No record carries the effort.
+- Tool calls: each ends in a `tool.result`, whose `correlation_facts` name the tool and its
+  outcome.
+- **Its data, per lane and per leg.** Muse Code keeps its sessions under `XDG_DATA_HOME`, and a
+  memory that outlives them (`add_memory`, `read_memory`): a fresh session there recalled a word
+  an earlier one had been asked to remember. So `launch.sh` gives each lane and each coachman leg
+  its own `XDG_DATA_HOME`, under `POSTMASTER_HARNESS_DATA` (default
+  `~/.postmaster/harness-data`), keyed by run, directory, name and leg. A resume finds its
+  session there, and nothing carries between lanes, legs or runs.
+- Ambient context: in a trusted workspace, which `--yolo` makes it, `AGENTS.md`, and a
+  `CLAUDE.md` only where no `AGENTS.md` sits beside it. It also loads other agents' personal
+  rules and skills, Claude Code's user rules among them, unless `--no-foreign-personal-context`
+  is passed. The launch keeps them, as a claude lane reads the same file.
+- Key: `META_API_KEY` in the environment, from the lane's or the role's `env_file`. On Linux,
+  `muse login` fails to save its credential to the keychain.
+- It updates itself in the background unless `MUSE_NO_AUTO_UPDATE=1` is set. A run records the
+  version it was dispatched with, and a later leg may run a newer one.
+- Source: a trial of Muse Code 1.4.0 (R4302.1), `raw/trials/muse-headless-forms/`.
 
 ## Own review skills
 
@@ -256,6 +288,7 @@ It runs in its harness's bypass mode, like every launch, named for its project:
 | codex | `codex -m <model> -c model_reasoning_effort="<effort>" --dangerously-bypass-approvals-and-sandbox` | no |
 | grok | `grok -m <model> --reasoning-effort <effort> --always-approve` | no |
 | agy | `agy --model <model> --dangerously-skip-permissions` | no |
+| muse | `muse --model <model> --reasoning-effort <effort> --yolo` | flags from its help |
 
 Bypass mode does not skip claude's question, on first start in a folder it has never opened,
 whether to trust it; headless `claude -p` does not ask. The first spawn in a new target stops
@@ -266,8 +299,9 @@ the headless form above; run it once before relying on it.
 
 `<tool>/scripts/view-stream.sh` is the other executable half of this file: it renders an events
 stream one line per event of interest, for a host's pane (`hosts.md`) and for anyone reading a
-stream by hand. It knows claude's events, checked against a recorded stream; codex's and pi's,
-written from the event names this file records and not yet checked against a recorded stream;
+stream by hand. It knows claude's and muse's events, checked against recorded streams; codex's
+and pi's, written from the event names this file records and not yet checked against a recorded
+stream;
 any other harness shows by event type, once per run of the same type. A harness whose events it
 shows badly gets its rules there, and a line here saying they were checked.
 
