@@ -11,8 +11,8 @@ updated: 2026-09-26
 **Claim.** Style, bug and security review work better as one loop in one leg than as three
 passes in three legs. Each round runs every lens still open on one snapshot: all three in round
 1, then bug and security until clean. It should take fewer rounds, it needs one leg start-up
-instead of three, and every fix is re-reviewed by both gating lenses unless the loop stops at
-its round cap.
+instead of three, and every fix is re-reviewed by the gating lenses a ticket names unless the
+loop stops at its round cap.
 
 **Standing: claimed.** This is a decision taken on reasoning. No run has been recorded under
 either design, so neither the time saved nor the coverage gained is measured yet. The change is
@@ -20,11 +20,11 @@ either design, so neither the time saved nor the coverage gained is measured yet
 
 ## The reasoning
 
-- **Every fix is re-reviewed by both gating lenses.** When the passes ran in sequence, style,
-  then bug, then security, a fix made in the security pass was re-checked only by security
-  reviewers. No bug reviewer ever saw it. In the loop, every round after the first runs the bug
-  and security lenses on the code as fixed so far, so both see each fix, whichever lens found
-  the defect it fixes.
+- **Each round's fixes are re-reviewed by the gating lenses.** When the passes ran in sequence,
+  style, then bug, then security, a fix made in the security pass was re-checked only by
+  security reviewers. No bug reviewer ever saw it. In the loop, every round after the first runs
+  the bug and security lenses on the code as fixed so far, so both see each fix in the next
+  round, whichever lens found the defect it fixes.
 - **Later rounds still review the fixed code.** The sequence existed so that later passes
   reviewed final code. The loop keeps that: every round reviews the code as fixed so far,
   including the style changes applied in round 1.
@@ -42,12 +42,12 @@ either design, so neither the time saved nor the coverage gained is measured yet
   added only if runs show one is needed. Each lane also runs three reviews at once on one
   account, so it can reach a usage limit sooner. A lane that does is DEGRADED for the round, as
   any walled lane is.
-- **Context.** One leg now carries all three lenses' findings. The five-round cap bounds it. If
+- **Context.** One leg now carries all three lenses' findings. The three-round cap bounds it. If
   a leg's context still runs out, the leg would be split at a round boundary, never by lens,
   since a split by lens would bring back the gap the loop closes.
 - **Colliding fixes.** Fixes from different lenses can touch the same code. One coachman sees
   them together and reconciles them before applying.
-- **The cap ends all review.** One five-round cap covers the whole loop, so a loop stopped at
+- **The cap ends all review.** One three-round cap covers the whole loop, so a loop stopped at
   the cap ships its last round's fixes unreviewed. In sequence, a capped bug pass was still
   followed by the whole security pass.
 - **Same-lane duplicates.** Round 1 puts one snapshot in front of every lens, so one lane can
@@ -77,3 +77,12 @@ A run has three legs, `synthesis`, `review` and `ship`, where it had five.
 and `scripts/stage.sh` refuses the three review stages it replaces. `[team.coachman_legs]` in
 the config takes `synthesis`, `review` and `ship`, and `scripts/launch.sh` refuses a config
 that names `style`, `bug` or `security`.
+
+The cap was five rounds when the loop was introduced. On 2026-09-26 the user set it at three,
+after #39's own review ran four rounds without a clean one and stopped on the repeated-class
+rule. It stays at three until #59, the research on what should end an AI review loop,
+reports.
+
+The lenses are now the turnpikes a ticket names, all three by default, and a run whose ticket
+names none has no review leg:
+[a ticket names the turnpikes its run passes through](turnpikes.md).

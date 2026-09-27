@@ -1,0 +1,6 @@
+{"t_in": 1790405585380, "method": "GET", "path": "/v1/models"}
+{"t_in": 1790405585400, "method": "GET", "path": "/v1/models"}
+{"t_in": 1790405586952, "method": "GET", "path": "/"}
+{"t_in": 1790405586962, "method": "GET", "path": "/"}
+{"t_in": 1790405605121, "method": "POST", "path": "/v1/messages", "model": "claude-haiku-4-5", "stream": true, "n_messages": 1, "request_bytes": 119587, "user_tail": "Reply with OK. (headless, untrusted folder, bypass)", "tool_call": null, "t_done": 1790405605125, "reply_bytes": 3}
+{"t_in": 1790405606734, "method": "POST", "path": "/v1/messages", "model": "claude-haiku-4-5", "stream": true, "n_messages": 1, "request_bytes": 119590, "user_tail": "Reply with OK. (headless, untrusted folder, no bypass)", "tool_call": null, "t_done": 1790405606736, "reply_bytes": 3}
