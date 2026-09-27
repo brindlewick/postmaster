@@ -53,11 +53,12 @@
 #   exit 2  run, results: a check failed; summary: a check is missing, or a claim disagrees
 #   exit 3  run, results: none failed, but a check was not run or has no result
 set -uo pipefail
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
 HERE=$(cd "$(dirname "$0")" && pwd -P)
 usage() { echo "usage: verify.sh checks <repo> [--gate <command>] [--lines | --json] | record <repo> <dispatch> [--gate <command>] | arm <worktree> <dispatch> | run <worktree> [<dispatch>] | journey-path <worktree> [<dispatch>] | results <dispatch> <worktree> | summary <summary-file> <dispatch> <worktree> | --self-test" >&2; exit 1; }
 
 core() {  # core <subcommand> <args>...
-  exec python3 - "$HERE" "$@" <<'PY'
+  exec python3 -I - "$HERE" "$@" <<'PY'
 import datetime as dt, json, os, pathlib, re, shlex, signal, subprocess, sys, tempfile, time, tomllib
 
 here, cmd, args = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3:]
@@ -826,9 +827,11 @@ wp="$tmp/writes"; mkdir -p "$wp/.postmaster"; printf '[checks.gate]\ncommand = "
 wd="$tmp/runs/writes/T-10"; mkdir -p "$wd"; printf '## Ticket\nx\n' > "$wd/brief.md"; "$SELF" record "$wp" "$wd" >/dev/null
 out=$("$SELF" run "$wp" "$wd" 2>&1)
 grep -qF "gate: fail, exit 0," <<<"$out" && grep -qF "gate.log" <<<"$out" && ok "so does a check that leaves a new file git sees" || fail "so does a check that leaves a new file git sees" "$out"
-mkdir -p "$tmp/nowaitid"; printf 'import os\nif hasattr(os, "waitid"):\n    del os.waitid\n' > "$tmp/nowaitid/sitecustomize.py"
-PYTHONPATH="$tmp/nowaitid" "$SELF" run "$q" "$e" >/dev/null 2>&1; rc=$?
-[ $rc -eq 0 ] && ok "a python without os.waitid, as on macOS before 3.13, runs the checks" || fail "a python without os.waitid, as on macOS before 3.13, runs the checks (exit $rc)"
+! sed -n '/^core() {/,/^PY$/p' "$SELF" | grep -q 'os[.]waitid' && ok "the runner waits without os.waitid, which python lacks on macOS before 3.13" || fail "the runner waits without os.waitid, which python lacks on macOS before 3.13"
+for m in json re; do printf 'open("%s/imported", "w").write("%s")\n' "$tmp" "$m" > "$q/$m.py"; done
+(cd "$q" && "$SELF" checks . --lines >/dev/null 2>&1; "$HERE/discover-project.sh" . >/dev/null 2>&1)
+rm -f -- "$q/json.py" "$q/re.py"
+[ ! -e "$tmp/imported" ] && ok "modules in the target's own directory are never imported" || fail "modules in the target's own directory are never imported" "$(cat "$tmp/imported")"
 
 echo "nothing a check starts outlives it"
 lp="$tmp/leftover"; mkdir -p "$lp/.postmaster"

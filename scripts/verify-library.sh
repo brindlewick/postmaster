@@ -22,11 +22,12 @@
 #   exit 3  not run: no package.json, no name in it, no test that imports it by name, or its
 #           runner, node or its package manager is not installed; the reason is the last line
 set -uo pipefail
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
 HERE=$(cd "$(dirname "$0")" && pwd -P)
 usage() { echo "usage: verify-library.sh [--list] [<worktree>] | --self-test" >&2; exit 1; }
 
 library() {  # library list|run <worktree>
-  python3 - "$@" <<'PY'
+  python3 -I - "$@" <<'PY'
 import json, os, pathlib, re, shutil, subprocess, sys
 
 mode, wt = sys.argv[1], pathlib.Path(sys.argv[2]).resolve()

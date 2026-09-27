@@ -24,6 +24,7 @@
 #   exit 3  not run: no User journey, no report for this commit, or a step not walked, with no
 #           verdict or with no screenshot; each is named, and the reason is the last line
 set -uo pipefail
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
 HERE=$(cd "$(dirname "$0")" && pwd -P)
 usage() { echo "usage: verify-journey.sh [<worktree>] [--ticket <file>] [--report <file>] | --path [<worktree>] [--dir <dir>] | --format | --self-test" >&2; exit 1; }
 
@@ -39,7 +40,7 @@ EOF
 }
 
 journey() {  # journey path <worktree> <dir> | judge <worktree> <ticket> <report>
-  python3 - "$@" <<'PY'
+  python3 -I - "$@" <<'PY'
 import json, os, pathlib, re, subprocess, sys
 
 mode, wt = sys.argv[1], pathlib.Path(sys.argv[2]).resolve()

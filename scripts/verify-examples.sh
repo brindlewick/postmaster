@@ -28,7 +28,7 @@ HERE=$(cd "$(dirname "$0")" && pwd -P)
 usage() { echo "usage: verify-examples.sh [<worktree>] [--ticket <file>] | --self-test" >&2; exit 1; }
 
 examples() {  # examples <worktree> <ticket-file or ''>
-  python3 - "$@" <<'PY'
+  python3 -I - "$@" <<'PY'
 import atexit, json, os, pathlib, re, shlex, shutil, subprocess, sys, tempfile
 
 wt, ticket = pathlib.Path(sys.argv[1]).resolve(), sys.argv[2]
