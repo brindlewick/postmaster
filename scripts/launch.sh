@@ -30,13 +30,16 @@
 # The events stream goes to stdout; the caller redirects and backgrounds. --last names the file
 # a harness writes its final message to, where the harness supports it (codex -o). `skill`
 # prints the prompt that invokes the lane's harness's own skill (harnesses.md, Own review
-# skills); `launch` runs it like any other prompt. The one skill is security-review.
+# skills); `launch` runs it like any other prompt. The one skill is security-review. `form`
+# prints two lines: `launch: ` and the launch form, then `resume: ` and the resume form, or
+# `resume: none: ` and why there is none.
 #
-#   exit 0  the form or the skill's prompt was printed, or the harness exited 0
+#   exit 0  the forms or the skill's prompt were printed, or the harness exited 0
 #   exit 1  usage, config or run.json missing or unreadable, unknown name, a leg that is not
 #           synthesis, review or ship, the coachman launched or resumed with no --leg, a
 #           coachman or fallback on a lane's model, harness not on PATH, env_file missing, a
-#           form this script does not have (agy resume), or a skill that is not security-review
+#           form this script does not have (agy resume), a skill that is not security-review,
+#           or a muse or mimo resume of a thread the launch's data directory does not hold
 #   exit 3  skill: the lane's harness has no such skill recorded
 #   else    the harness's own exit code
 set -uo pipefail
@@ -56,9 +59,10 @@ if [ "${1:-}" = --self-test ]; then
   for h in claude pi codex; do
     printf '#!/bin/sh\necho "$@ probe=${PROBE:-}"\n' > "$tmp/bin/$h" && chmod +x "$tmp/bin/$h"
   done
-  # The muse and mimo stubs also print what arrived on their stdin.
-  printf '#!/bin/sh\nprintf "%%s probe=%%s stdin=%%s import-off=%%s data=%%s\\n" "$*" "${PROBE:-}" "$(cat)" "${MIMOCODE_DISABLE_CLAUDE_IMPORT:-}" "${XDG_DATA_HOME:-}"\n' > "$tmp/bin/mimo" && chmod +x "$tmp/bin/mimo"
-  printf '#!/bin/sh\nprintf "%%s probe=%%s stdin=%%s data=%%s\\n" "$*" "${PROBE:-}" "$(cat)" "${XDG_DATA_HOME:-}"\n' > "$tmp/bin/muse" && chmod +x "$tmp/bin/muse"
+  # The muse and mimo stubs also print what arrived on their stdin. Their export finds a thread
+  # only where a file of its name sits in their XDG_DATA_HOME.
+  printf '#!/bin/sh\n[ "$1" = export ] && { [ -e "$XDG_DATA_HOME/$2" ] && exit 0; echo "Session not found: $2" >&2; exit 1; }\nprintf "%%s probe=%%s stdin=%%s import-off=%%s data=%%s\\n" "$*" "${PROBE:-}" "$(cat)" "${MIMOCODE_DISABLE_CLAUDE_IMPORT:-}" "${XDG_DATA_HOME:-}"\n' > "$tmp/bin/mimo" && chmod +x "$tmp/bin/mimo"
+  printf '#!/bin/sh\n[ "$1" = export ] && { [ -e "$XDG_DATA_HOME/$3" ] && : > "$5" && exit 0; echo "no retained session log found for session $3" >&2; exit 1; }\nprintf "%%s probe=%%s stdin=%%s data=%%s\\n" "$*" "${PROBE:-}" "$(cat)" "${XDG_DATA_HOME:-}"\n' > "$tmp/bin/muse" && chmod +x "$tmp/bin/muse"
   [ -x "$tmp/bin/claude" ] && [ -x "$tmp/bin/pi" ] && [ -x "$tmp/bin/codex" ] && [ -x "$tmp/bin/muse" ] \
     || { echo "self-test: cannot write the stub harnesses"; exit 1; }
   printf 'Continue.\n' > "$tmp/prompt.txt"
@@ -249,11 +253,16 @@ PY
     err=$(cat "$tmp/err")
   }
   data_of() { printf '%s\n' "$out" | sed -n 's/.* data=//p'; }
+  mrefused() {  # mrefused <label> <fixture> <text the message must carry> <args...>: refused under mrun
+    local label=$1 f=$2 want=$3; shift 3; mrun "$f" "$@"
+    [ $rc -eq 1 ] && [ -z "$out" ] && case $err in *"$want"*) true ;; *) false ;; esac && ok "$label" || fail "$label"
+  }
   mrun muse launch m "$tmp/wt" "$tmp/prompt.txt"; a=$(data_of)
   [ $rc -eq 0 ] && [ "$out" = "exec --json --prompt-file $tmp/prompt.txt --model muse-model --reasoning-effort max --yolo probe=reached stdin= data=$a" ] \
     && case $a in "$hd"/muse/?*) true ;; *) false ;; esac && [ -d "$a" ] \
     && ok "a muse launch: JSON events, the prompt file, model, effort, bypass form and env file, nothing on stdin, and its own data directory" \
     || fail "a muse launch: JSON events, the prompt file, model, effort, bypass form and env file, nothing on stdin, and its own data directory"
+  : > "$a/01a0-sess"   # the launch's thread, in its data directory
   mrun muse resume m "$tmp/wt" 01a0-sess "$tmp/prompt.txt"; b=$(data_of)
   [ $rc -eq 0 ] && case $out in "exec --json --prompt-file $tmp/prompt.txt --session-id 01a0-sess --model muse-model --reasoning-effort max --yolo "*) true ;; *) false ;; esac \
     && [ "$b" = "$a" ] && ok "a muse resume names the session, keeps the model and effort, and finds the launch's data directory" \
@@ -271,6 +280,16 @@ PY
     || fail "a relative prompt file is made absolute before the cd, and no effort means no effort flag"
   carries "the muse form shows its data directory, the bypass form and an empty stdin" muse \
     "env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json --prompt-file <prompt-file> --model muse-model --reasoning-effort max --yolo < /dev/null" form m
+  mrefused "a muse resume of a thread its data directory does not hold is refused, and nothing runs" muse \
+    "no muse thread 01a0-none in this launch's data directory" resume m "$tmp/wt" 01a0-none "$tmp/prompt.txt"
+  mrefused "a muse resume from another directory is refused: the thread is in its launch's data directory" muse \
+    "no muse thread 01a0-sess in this launch's data directory" resume m "$tmp/elsewhere" 01a0-sess "$tmp/prompt.txt"
+  : > "$d/01a0-coach"   # the synthesis leg's thread
+  mrun muse resume coachman "$tmp/wt" 01a0-coach "$tmp/prompt.txt" --leg synthesis
+  [ $rc -eq 0 ] && [ "$(data_of)" = "$d" ] && ok "a muse coachman resumes its thread on the leg it was launched on" \
+    || fail "a muse coachman resumes its thread on the leg it was launched on"
+  mrefused "a muse coachman resumed on another leg is refused, and nothing runs" muse \
+    "no muse thread 01a0-coach in this launch's data directory" resume coachman "$tmp/wt" 01a0-coach "$tmp/prompt.txt" --leg review
 
   echo "mimo"
   printf '[lanes.x]\nharness = "mimo"\nmodel = "prov/mimo-model"\neffort = "high"\nenv_file = "%s"\n\n[lanes.y]\nharness = "mimo"\nmodel = "prov/mimo-model"\n' "$tmp/over.env" > "$tmp/mimo.toml"
@@ -280,6 +299,7 @@ PY
     && case $a in "$hd"/mimo/?*) true ;; *) false ;; esac && [ -d "$a" ] \
     && ok "a mimo launch: JSON events, model, variant, bypass form, env file, the prompt on stdin, its own data directory, and no history import" \
     || fail "a mimo launch: JSON events, model, variant, bypass form, env file, the prompt on stdin, its own data directory, and no history import"
+  : > "$a/ses_01a0"   # the launch's thread, in its data directory
   mrun mimo resume x "$tmp/wt" ses_01a0 "$tmp/prompt.txt"; b=$(data_of)
   [ $rc -eq 0 ] && case $out in "run --format json -m prov/mimo-model -s ses_01a0 --variant high --dangerously-skip-permissions probe=reached stdin=Continue. "*) true ;; *) false ;; esac \
     && [ "$b" = "$a" ] && ok "a mimo resume names the session, keeps the model and the variant, and finds the launch's data directory" \
@@ -295,6 +315,41 @@ PY
     "env XDG_DATA_HOME=<harness-data>/mimo/<key> MIMOCODE_DISABLE_CLAUDE_IMPORT=1 mimo run --format json -m prov/mimo-model --variant high --dangerously-skip-permissions < <prompt-file>" form x
   run mimo skill x security-review
   [ $rc -eq 3 ] && [ -z "$out" ] && ok "a mimo lane has no security review skill: exit 3" || fail "a mimo lane has no security review skill: exit 3"
+  mrefused "a mimo resume of a thread its data directory does not hold is refused, and nothing runs" mimo \
+    "no mimo thread ses_none in this launch's data directory" resume x "$tmp/wt" ses_none "$tmp/prompt.txt"
+  mrefused "a mimo resume from another directory is refused: the thread is in its launch's data directory" mimo \
+    "no mimo thread ses_01a0 in this launch's data directory" resume x "$tmp/elsewhere" ses_01a0 "$tmp/prompt.txt"
+
+  echo "the coachman on muse, a workhorse on mimo: both forms, each with its bypass flag"
+  printf '[lanes.w]\nharness = "mimo"\nmodel = "prov/mimo-model"\neffort = "low"\n\n[lanes.v]\nharness = "claude"\nmodel = "lane-model"\n\n[team]\nworkhorses = ["w", "v"]\ncoachman = { harness = "muse", model = "coach-muse", effort = "max" }\n' > "$tmp/team.toml"
+  # Copies of this script with each bypass flag gone, and with it gone from resumes only.
+  sed -e 's/cmd+=(--yolo)/cmd+=()/' -e 's/cmd+=(--dangerously-skip-permissions)$/cmd+=()/' "$self" > "$tmp/nobypass.sh"
+  sed -e 's/cmd+=(--yolo)/[ "$CMD" = resume ] || cmd+=(--yolo)/' \
+    -e 's/cmd+=(--dangerously-skip-permissions)$/[ "$CMD" = resume ] || cmd+=(--dangerously-skip-permissions)/' "$self" > "$tmp/launchonly.sh"
+  chmod +x "$tmp/nobypass.sh" "$tmp/launchonly.sh"
+  bypassed() {  # bypassed <script> <flag> <form args...>: exit 0, and a launch line and a resume line each carry <flag>
+    local script=$1 flag=$2 l n=0; shift 2
+    out=$(POSTMASTER_CONFIG="$tmp/team.toml" PATH="$tmp/bin:$PATH" "$script" form "$@" 2>&1); rc=$?
+    while IFS= read -r l; do
+      case $l in launch:*|resume:*) case "$l " in *" $flag "*) n=$((n+1)) ;; esac ;; esac
+    done <<< "$out"
+    [ $rc -eq 0 ] && [ $n -eq 2 ]
+  }
+  for f in "coachman --yolo --leg review" "w --dangerously-skip-permissions"; do
+    set -- $f; name=$1 flag=$2; shift 2
+    bypassed "$self" "$flag" "$name" "$@" && ok "$name: the launch and resume forms both carry $flag" \
+      || fail "$name: the launch and resume forms both carry $flag"
+    printf '%s\n' "$out" | sed 's/^/         /'
+    bypassed "$tmp/nobypass.sh" "$flag" "$name" "$@" && fail "$name: a form without $flag fails this check" \
+      || ok "$name: a form without $flag fails this check"
+    bypassed "$tmp/launchonly.sh" "$flag" "$name" "$@" && fail "$name: a resume form without $flag fails this check" \
+      || ok "$name: a resume form without $flag fails this check"
+  done
+  run legs form one
+  printed "a claude lane's form shows a resume form too" "launch: cd <cwd> && claude -p " "resume: cd <cwd> && claude -p --resume <thread-id> "
+  printf '[lanes.g]\nharness = "agy"\nmodel = "agy-model"\n' > "$tmp/agy.toml"; printf '#!/bin/sh\n' > "$tmp/bin/agy"; chmod +x "$tmp/bin/agy"
+  run agy form g
+  printed "an agy lane's form says it has no resume form, and still exits 0" "launch: cd <cwd> && agy -p " "resume: none: agy resume form is not recorded"
 
   echo "skills"
   printf '[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n\n[lanes.two]\nharness = "codex"\nmodel = "other-model"\n\n[lanes.three]\nharness = "muse"\nmodel = "muse-model"\n' > "$tmp/skills.toml"
@@ -446,6 +501,7 @@ harness_data() {  # harness_data <harness>: this launch's own data directory, fo
   printf '%s/%s/%s\n' "${POSTMASTER_HARNESS_DATA:-$HOME/.postmaster/harness-data}" "$1" \
     "$(printf '%s|%s|%s|%s' "$RUN" "$(CDPATH= cd -P -- "$CWD" && pwd -P)" "$NAME" "$LEG" | cksum | tr ' ' '-')"
 }
+forms() {  # the command for $CMD in cmd, its data directory in DATA, the file its stdin reads in STDIN_FILE
 DATA=""
 cmd=()
 case $HARNESS in
@@ -521,15 +577,38 @@ case $HARNESS in
     STDIN_FILE=$PROMPT ;;
   *) die "no form for harness '$HARNESS'" ;;
 esac
+}
+forms
 
 [ -n "$DATA" ] && [ "$CMD" != form ] && { mkdir -p "$DATA" || die "cannot create $DATA"; }
 if [ "$CMD" = form ]; then
   show() { case $1 in '<'*'>'|*'=<'*'>'|'$(cat <prompt-file>)') printf '%s ' "$1" ;; *) printf '%q ' "$1" ;; esac; }
-  printf 'cd '; show "$CWD"; printf '&& '
-  for a in "${cmd[@]}"; do show "$a"; done
-  [ -n "${STDIN_FILE:-}" ] && { printf '< '; show "$STDIN_FILE"; }
-  echo
+  put_form() {
+    printf 'cd '; show "$CWD"; printf '&& '
+    for a in "${cmd[@]}"; do show "$a"; done
+    [ -n "${STDIN_FILE:-}" ] && { printf '< '; show "$STDIN_FILE"; }
+    echo
+  }
+  printf 'launch: '; put_form
+  if resume=$(CMD=resume; STDIN_FILE=""; harness_data() { echo "<harness-data>/$1/<key>"; }
+              forms 2>&1 && put_form); then printf 'resume: %s\n' "$resume"
+  else printf 'resume: none: %s\n' "${resume#launch: }"; fi
   exit 0
+fi
+
+# muse opens a new thread under an id it does not hold, and mimo exits 0 having run nothing
+# (harnesses.md). So a resume on either is refused unless the harness's own export finds the
+# thread in this launch's data directory, which is its launch's only from the same directory,
+# name, leg and run.
+if [ "$CMD" = resume ] && [ -n "$DATA" ]; then
+  held=$(mktemp -d) || die "cannot make a temporary directory"
+  ( CDPATH= cd -- "$CWD" || exit 1
+    if [ -n "${ENV_FILE:-}" ]; then set -a; . "$ENV_FILE"; set +a; fi
+    export XDG_DATA_HOME=$DATA MIMOCODE_DISABLE_CLAUDE_IMPORT=1
+    if [ "$HARNESS" = muse ]; then muse export --session "$THREAD" --out "$held/thread.json"
+    else mimo export "$THREAD" > "$held/thread.json"; fi ) </dev/null >/dev/null 2>"$held/err"
+  found=$?; why=$(sed 's/\x1b\[[0-9;]*m//g' "$held/err" | tr '\n' ' ' | cut -c1-300); rm -r -- "$held"
+  [ $found -eq 0 ] || die "no $HARNESS thread $THREAD in this launch's data directory, so nothing was resumed; resume from the directory, --leg and --run it was launched with (its export: ${why:-no message})"
 fi
 
 if [ "$HARNESS" = codex ] && [ "$CMD" = launch ]; then

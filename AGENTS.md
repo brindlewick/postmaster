@@ -1,9 +1,9 @@
 # postmaster
 
 **This file is the canonical context for every agent working in this repo, whatever harness
-it runs under.** `CLAUDE.md` imports it; codex, grok and pi read it natively; agy and muse
-read no ambient file at all and must be pointed at it explicitly by whatever brief launches
-them.
+it runs under.** `CLAUDE.md` imports it; codex, grok, pi and mimo read it natively, and muse
+does in a trusted workspace, which its bypass flag makes one; agy reads no ambient file at all
+and must be pointed at it explicitly by whatever brief launches it.
 
 ## Read this first: this repo is the tool, and it can be its own target
 
