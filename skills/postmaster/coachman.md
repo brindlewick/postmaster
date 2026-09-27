@@ -410,9 +410,11 @@ from it.
 One loop, in one leg. The lenses are the turnpikes `<tool>/scripts/turnpikes.sh legs <dispatch>` lists
 for the review leg, exactly those: a turnpike the waybill does not name never runs, and one it
 names is never skipped. If the script exits 2, or lists no review leg, escalate with its
-output. Each round runs every lens still open, on one snapshot, every reviewer lane under each
-lens as its own process in its own scratch: every lens in round 1, then the gating lenses alone
-from round 2.
+output. Each round runs every lens still open, on one snapshot, every lane the waybill names for
+that lens as its own process in its own scratch: every lens in round 1, then the gating lenses
+alone from round 2. A lens's lanes are its own `<lens> reviewers:` line in the waybill where it
+has one, and the `reviewers:` line otherwise; `<tool>/scripts/reviewers.sh lanes <dispatch>/brief.md
+<lens>` prints them.
 [Why the lenses run as one loop](../../wiki/concepts/review-loop.md)
 
 Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
@@ -432,8 +434,8 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    right reason.
 
    Each entry is the one place for its lens, the turnpike of the same name: what its reviewers
-   look for, and how they are launched, which step 2 does for every reviewer lane. A review
-   turnpike with no entry here cannot run: escalate.
+   look for, and how they are launched, which step 2 does for every lane that reviews under it.
+   A review turnpike with no entry here cannot run: escalate.
    - **Style lens** (advisory, round 1 only): non-mechanical idiom, naming, the project's
      stated paradigm (functional core, immutability, whatever its docs say), abstraction,
      consistency, judged against the project's own style pages and the surrounding code's
@@ -464,8 +466,11 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    ```sh
    SNAP=$(git -C <synthesis-wt> rev-parse HEAD)
    git -C <repo> worktree prune
+   for LENS in <open lenses>; do   # a lens whose lanes do not resolve stops the round here
+     <tool>/scripts/reviewers.sh lanes <dispatch>/brief.md "$LENS" >/dev/null || exit 1
+   done
    for LENS in <open lenses>; do
-     for L in <reviewer lanes>; do
+     for L in $(<tool>/scripts/reviewers.sh lanes <dispatch>/brief.md "$LENS"); do
        DEST=<repo>/.worktrees/<TICKET>-rev-$LENS-$L
        # A scratch an interrupted round left behind, with no reviewer still running in it, is
        # checked like any other, then its space is closed and it is removed.
@@ -498,7 +503,8 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    ```sh
    SNAP=$(git -C <synthesis-wt> rev-parse HEAD)
    for LENS in <open lenses>; do
-     for L in <reviewer lanes>; do
+     <tool>/scripts/reviewers.sh lanes <dispatch>/brief.md "$LENS" >/dev/null || exit 1
+     for L in $(<tool>/scripts/reviewers.sh lanes <dispatch>/brief.md "$LENS"); do
        [ "$(git -C <repo>/.worktrees/<TICKET>-rev-$LENS-$L rev-parse HEAD 2>/dev/null)" = "$SNAP" ] \
          || { echo "SCRATCH NOT AT $SNAP: <TICKET>-rev-$LENS-$L; nothing launched"; exit 1; }
      done
@@ -506,7 +512,7 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    rm -f <dispatch>/logs/review-r<round>-*.done
    N=0
    for LENS in <open lenses>; do
-     for L in <reviewer lanes>; do
+     for L in $(<tool>/scripts/reviewers.sh lanes <dispatch>/brief.md "$LENS"); do
        DEST=<repo>/.worktrees/<TICKET>-rev-$LENS-$L
        <tool>/scripts/host.sh run "$(<tool>/scripts/host.sh name <dispatch> "$L $LENS review")" "$DEST" \
            --out <dispatch>/logs/review-r<round>-$LENS-$L.jsonl --err <dispatch>/logs/review-r<round>-$LENS-$L.err \

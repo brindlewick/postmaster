@@ -100,6 +100,7 @@ scripts/plane.sh create|edit|read|state|comment|list …             # Plane wor
 scripts/ticket-check.sh <repo> <id> | --body <file> | --splice …   # a ticket's shape; --splice writes approved parts in
 scripts/turnpikes.sh --list | resolve <text> | legs <dispatch>     # the turnpikes, and a run's legs
 scripts/launch.sh form|launch|resume <lane-or-role> …             # any lane or role, one command
+scripts/reviewers.sh lines|lanes <waybill> <lens>|lenses           # which lanes review under each lens
 scripts/host.sh detect|name|run|stop|close|spawn|send|wait|read … # where a launch runs, and where you watch it
 scripts/view-stream.sh < <events-file>                            # a harness's events, one line each
 scripts/runs-status.sh <run-root>                                  # the postmaster's poll

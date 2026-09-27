@@ -83,6 +83,12 @@ after #39's own review ran four rounds without a clean one and stopped on the re
 rule. It stays at three until #59, the research on what should end an AI review loop,
 reports.
 
+Each lens may have its own reviewer lanes (#63). With one list, a lane chosen for one lens, a
+Claude lane for Claude Code's `/security-review` say, would review style and bugs as well, and
+the choice of a lane for what its harness does well would cost a lane in every lens. A lens
+that names no lanes of its own is reviewed by the reviewer list, as before. The waybill carries
+each lens's lanes, so a run keeps the reviewers it was dispatched with.
+
 The lenses are now the turnpikes a ticket names, all three by default, and a run whose ticket
 names none has no review leg:
 [a ticket names the turnpikes its run passes through](turnpikes.md).

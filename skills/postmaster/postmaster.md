@@ -97,9 +97,10 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    will have, `<tool>/scripts/turnpikes.sh legs --line '<the turnpikes: line step 1 printed>'`:
    `<tool>/scripts/launch.sh form coachman --leg <leg>` for each of those legs,
    `<tool>/scripts/launch.sh form coachman_fallback`, `<tool>/scripts/launch.sh form <lane>` for
-   each lane in `team.workhorses`, and for each lane in `team.reviewers` when the legs include
-   `review`, each exit 0. A refusal names what the config must change: it goes to
-   the user, and nothing is dispatched.
+   each lane in `team.workhorses`, and, when the legs include `review`,
+   `<tool>/scripts/reviewers.sh lines` and `<tool>/scripts/launch.sh form <lane>` for each lane in
+   `team.reviewers` and `team.lens_reviewers`, each exit 0. A refusal names what the config must
+   change: it goes to the user, and nothing is dispatched.
 3. **Exclude worktrees without a commit,** before any is cut, or the next pre-flight reads
    them as dirt: `grep -qxF '.worktrees/' <repo>/.git/info/exclude || echo '.worktrees/' >>
    <repo>/.git/info/exclude`.
@@ -116,10 +117,11 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    context loads for it.
 6. **Write `brief.md`** from the template in `SKILL.md`: the `turnpikes:` line step 1's check
    printed, whole, under the waybill's title, then the ticket verbatim, the project profile (gate,
-   build, browser suite, docs to read first, tracker, risk surfaces), the team from the
-   config, `CHECKPOINT_MODE` from `ship.checkpoint_mode` and `MERGE_AUTHORITY` from
-   `ship.merge_authority`, either overridden only where the user said so for this run, the
-   dispatch path and `<tool>`. The config here is the one in `run.json`. Then
+   build, browser suite, docs to read first, tracker, risk surfaces), the team from the config
+   with its reviewer lines as `<tool>/scripts/reviewers.sh lines` prints them, `CHECKPOINT_MODE`
+   from `ship.checkpoint_mode` and `MERGE_AUTHORITY` from `ship.merge_authority`, either
+   overridden only where the user said so for this run, the dispatch path and `<tool>`. The
+   config here is the one in `run.json`. Then
    `<tool>/scripts/turnpikes.sh legs <dispatch> --expect '<that turnpikes: line>'` exits 0 and
    prints the legs step 2 checked, before anything is launched.
 7. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. The
