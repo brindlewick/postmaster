@@ -198,11 +198,12 @@ The prompt goes in the lane's prompt file, and the launch is the ordinary launch
 | codex | none: `codex exec review` takes `--uncommitted`, `--base <branch>`, `--commit <sha>` or a prompt of its own, and has no security preset | its help, 0.157.1 |
 | pi | none: its help lists no review command, and its skills come from files (`--skill <path>`) | its help, 0.87.0 |
 | muse | none among its built-in skills | `muse skills list`, 1.4.0 |
-| grok | not recorded | not installed where this was checked |
-| agy | not recorded | not installed where this was checked |
+| grok | none: its slash commands have no review command; skills, plugins and workflows could add one | its documentation (docs.x.ai, Modes and Commands), 2026-09 |
+| agy | none: its slash commands have no security review; Google's security extension (`/security:analyze`) is for Gemini CLI only | its documentation (antigravity.google, CLI Reference), 2026-09 |
 
 MiMo Code, which has no adapter here yet, has none either: its `/review` is a general code
-review (its commands, 0.1.15).
+review (its commands, 0.1.15). OpenAI's Codex Security is a CLI of its own
+(`@openai/codex-security`), not a codex skill, and would need an adapter of its own.
 
 **claude's `/security-review`** reviews the change from the merge base of `origin/HEAD` and
 `HEAD`, reading it with `git diff origin/HEAD...`. Where `origin/HEAD` does not resolve, it exits
