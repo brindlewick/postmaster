@@ -2,8 +2,8 @@
 title: The review loop
 type: concept
 standing: claimed
-sources: []
-updated: 2026-09-26
+sources: [runs/2026-09-26-postmaster-36]
+updated: 2026-09-27
 ---
 
 # The review loop
@@ -70,6 +70,14 @@ them and from each run's action log:
 The claim is weakened if the loop takes as many rounds as the sequence did, or if its costs
 force a cap on reviewers or a split leg on ordinary tickets.
 
+The first record, [the review rounds of #36](../sources/2026-09-26-postmaster-36.md), was run by
+hand rather than by a dispatch, and its round 1 was `/code-review`, not the lens loop, so it
+measures neither design. It ran four rounds after its criteria check, above the estimate
+[@runs/2026-09-26-postmaster-36/README.md]. In its round 3, three defects in fixes were found only
+by the lens other than the one whose finding each fix addressed: 3.06, 3.08 and 3.10
+[@runs/2026-09-26-postmaster-36/reports]. What should end the loop is a question of its own:
+[when a review loop should stop](review-convergence.md).
+
 ## What changed because of it
 
 A run has three legs, `synthesis`, `review` and `ship`, where it had five.
@@ -82,7 +90,6 @@ The cap was five rounds when the loop was introduced. On 2026-09-26 the user set
 after #39's own review ran four rounds without a clean one and stopped on the repeated-class
 rule. It stays at three until #59, the research on what should end an AI review loop,
 reports.
-
 Each lens may have its own reviewer lanes (#63). With one list, a lane chosen for one lens, a
 Claude lane for Claude Code's `/security-review` say, would review style and bugs as well, and
 the choice of a lane for what its harness does well would cost a lane in every lens. A lens
@@ -93,3 +100,7 @@ through its harness's own skill has [a page of its own](own-review-skills.md).
 The lenses are now the turnpikes a ticket names, all three by default, and a run whose ticket
 names none has no review leg:
 [a ticket names the turnpikes its run passes through](turnpikes.md).
+
+On 2026-09-27, with #59 reported, the user chose one round of bug review for now, to be
+revisited if many bugs reach production ([when a review loop should stop](review-convergence.md)).
+`coachman.md` still says three rounds until the ticket that changes it lands.

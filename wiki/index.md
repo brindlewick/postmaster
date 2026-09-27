@@ -76,7 +76,13 @@ Why the design is shaped as it is.
 - [The local tracker](concepts/local-tracker.md): **claimed**. With no service and no login,
   a repository's tickets live in its own git directory, and a repository whose store exists
   uses it whatever the config names.
+- [When a review loop should stop](concepts/review-convergence.md): **claimed**. Model reviewers
+  do not run out of minor findings, so a loop should end on verified serious findings in the
+  change's own code, and a mechanism whose fixes keep breaking should be redesigned rather than
+  fixed again. From the review of #36 and outside work. The user chose one round of bug review
+  for now, to revisit if many bugs reach production.
 
 ## Sources
 
-[Recorded runs and captured reading](sources/index.md). None yet.
+[Recorded runs and captured reading](sources/index.md): one run, the review rounds of #36, and
+fourteen papers on review, fixes and severity.
