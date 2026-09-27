@@ -11,10 +11,10 @@ watch it, and lands its marker on exit (`hosts.md`); that is what makes one wrap
 runbooks correct for every harness and every host.
 
 **`<tool>/scripts/launch.sh` is the executable form of this file.** `launch.sh form <name>` prints the
-exact command for a configured lane or role; `launch` and `resume` run it; `skill` prints the
-prompt that invokes a harness's own review skill (Own review skills, below). The script and this
-file change together, and a form the script refuses (muse; agy resume) is a form this file has
-not recorded yet.
+exact launch and resume commands for a configured lane or role; `launch` and `resume` run them;
+`skill` prints the prompt that invokes a harness's own review skill (Own review skills, below).
+The script and this file change together, and a form the script refuses (agy resume) is a form
+this file has not recorded yet.
 
 Every lane runs unrestricted. Its containment is its worktree (`coachman.md`, Lane capability),
 so the bypass form below is passed on every launch AND every resume. The interactive postmaster
@@ -30,7 +30,8 @@ one session messaging another; the postmaster polls files.
 | agy (Antigravity CLI) | `agy -p` | `--output-format stream-json` | none | no, argv |
 | claude | `claude -p` | `--output-format stream-json` | `CLAUDE.md` and what it imports | no, argv |
 | pi | `pi --mode json` | `--mode json` | `AGENTS.override.md`, else `AGENTS.md` or `CLAUDE.md`, natively | yes, on stdin |
-| muse | `muse exec` | not recorded here | none | `--prompt-file` |
+| muse | `muse exec` | `--json` | `AGENTS.md` in a trusted workspace, and Claude Code's user rules | yes, `--prompt-file` |
+| mimo | `mimo run` | `--format json` | `AGENTS.md`, a `CLAUDE.md` beside a short one, and Claude Code's user rules | yes, on stdin |
 
 A harness that reads no ambient context file must be handed the project's docs by name in its
 prompt, and must have the `WORKHORSE-SPEC.md` / `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract spelled
@@ -65,8 +66,7 @@ Docs read and trial run on 2026-09-26. A harness with no folder in this table is
 `<tool>/skills/postmaster/SKILL.md` by absolute path, and every brief names the skill's documents
 by absolute path into `<tool>`, never a copy. grok and muse also read `~/.claude/skills`, so
 where claude is installed they meet each skill twice, through two links to one checkout; grok
-keeps one per name, and muse lists it once. mimo (MiMo Code) is in this table only: its launch
-and resume forms are not recorded yet, so `<tool>/scripts/launch.sh` has no form for it.
+keeps one per name, and muse lists it once.
 
 ## codex
 
@@ -85,11 +85,24 @@ codex exec -C <wt> --json -o <dispatch>/logs/<lane>-last.md -m <model> \
 - A detached reviewer scratch needs `--skip-git-repo-check`.
 - Thread id: `grep '"thread_id"'` in the events stream.
 - Final message: `<lane>-last.md` from `-o`, plus the last result line of the events stream.
-- Resume: `codex exec resume <thread_id> --dangerously-bypass-approvals-and-sandbox "<prompt>"`.
-  `codex exec resume` accepts no sandbox flag (`-s` errors with "unexpected argument") and a
-  bare resume runs read-only, so the bypass flag goes on every resume that must write, reviewers
-  included. `--last` is safe only when no other codex thread has run since; otherwise recover
+- Resume, from the worktree the thread was launched in, appending to the same stream:
+
+  ```sh
+  cd <wt> && codex exec resume <thread_id> --json -o <dispatch>/logs/<lane>-last.md \
+    -m <model> -c model_reasoning_effort="<effort>" --dangerously-bypass-approvals-and-sandbox \
+    -- "<prompt>"
+  ```
+
+  These are the launch's flags without `-C` and `--skip-git-repo-check`, with `--` before the
+  prompt. After `resume`, codex refuses `-C` and `-s` with "unexpected argument", and reads a
+  prompt that starts with `-` as a flag and exits 2 unless `--` comes first. A resume that
+  names no model or effort runs on codex's configured default, not on the thread's own, so both
+  go on every resume. Without the bypass flag a resume runs `workspace-write` in a trusted
+  worktree and read-only in an untrusted one, so the bypass goes on every resume, reviewers
+  included. The resumed stream opens with the launch's `thread.started`. codex's own `--last`,
+  in place of the id, is safe only when no other codex thread has run since; otherwise recover
   the id from the events log or `~/.codex/sessions/YYYY/MM/DD/`.
+  [Why every resume names its model](../../wiki/concepts/codex-resume-model.md)
 - Durable record: rollout jsonl under `~/.codex/sessions/YYYY/MM/DD/`. `codex resume
   <thread_id>` opens the full TUI on a finished thread. `codex archive <thread_id>` at teardown.
 - Headless `codex exec` exposes no browser backend. A workhorse on codex cannot run the render gate;
@@ -203,14 +216,108 @@ cd <wt> && pi --mode json --approve --model <provider/model> \
   working directory with `/` replaced by `-`. Threads persist harmlessly; nothing to archive.
 - Use a provider-qualified model id when the same model name could match more than one provider.
 
-## muse
+## muse (Muse Code)
 
-- Installed as `muse`; headless form `muse exec`, takes `--prompt-file` and `--api-key-stdin`.
-  Reads no ambient context file.
-- **Not usable as a lane until this section records its stream flag, its bypass form, where
-  its thread id appears and its resume form.** Fill those in from `muse --help` and a trial
-  run before configuring a lane on it; the probe lists it so the gap is visible, not so it is
-  chosen.
+```sh
+cd <wt> && env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json \
+  --prompt-file <abs prompt-file> --model <model> --reasoning-effort <effort> --yolo < /dev/null
+```
+
+- `--yolo` is the bypass form. It turns off tool approval and Muse Code's sandbox, and trusts
+  the workspace for the run. The sandbox uses Bubblewrap, which needs unprivileged user
+  namespaces, so a machine that blocks them still runs the launch. `--reasoning-effort` takes
+  `none`, `minimal`, `low`, `medium`, `high` (its default), `xhigh`, `max` and `ultra`.
+- Stdin: Muse Code reads its stdin to the end before it starts, and an open pipe held a launch
+  for as long as the pipe stayed open. The launch gives it `/dev/null`.
+- The prompt: `--prompt-file` delivers the file byte for byte. `turn.input.user` carries it,
+  and the echo provider answered with it unchanged.
+  [Why the form matters](../../wiki/concepts/prompt-delivery.md)
+- `--json` writes one JSON record per line. Each carries `stream` (`kind` `session`, and its
+  `id`), a `sequence`, and a `payload_type` with its `payload`.
+- Thread id: `stream.id` of the first record, a UUID.
+- Resume: the launch form with `--session-id <thread id>`, the model and the effort passed
+  again. `muse resume` opens the interactive picker and is not used. Given an id its data
+  directory does not hold, Muse Code opens a new thread under that id and exits 0. So
+  `launch.sh` refuses a resume unless Muse Code's own export (`muse export --session <id>`)
+  finds the thread in the launch's data directory. It is only there from the same directory,
+  name, leg and run. Resumed from another directory with its launch's data, Muse Code refuses
+  on its own, with exit 1. [Why the exit is not enough](../../wiki/concepts/resume-exit-status.md)
+- Final message: `payload.text` of the last `run.terminal.*` record, `run.terminal.completed` on
+  success. A run that fails, on a model that does not exist say, ends on `run.terminal.failed`
+  with no text and exit 1, and says why on stderr.
+- The model: `run.model.configured` carries `model_id`, with `source` `startup` on a launch and
+  `replay` on a resume. No record carries the effort.
+- Tool calls: each ends in a `tool.result`, whose `correlation_facts` name the tool and its
+  outcome.
+- **Its data, per lane and per leg.** Muse Code keeps its sessions under `XDG_DATA_HOME`, and a
+  memory that outlives them (`add_memory`, `read_memory`): a fresh session there recalled a word
+  an earlier one had been asked to remember. So `launch.sh` gives each lane and each coachman leg
+  its own `XDG_DATA_HOME`, under `POSTMASTER_HARNESS_DATA` (default
+  `~/.postmaster/harness-data`), keyed by run, directory, name and leg. A resume finds its
+  session there, and no lane, leg or run finds another's through Muse Code's own memory; a lane
+  can still read files elsewhere on the machine.
+- Ambient context: in a trusted workspace, which `--yolo` makes it, `AGENTS.md`, and a
+  `CLAUDE.md` only where no `AGENTS.md` sits beside it. It also loads other agents' personal
+  rules and skills, Claude Code's user rules among them, unless `--no-foreign-personal-context`
+  is passed. The launch keeps them, as a claude lane reads the same file.
+- Key: `META_API_KEY` in the environment, from the lane's or the role's `env_file`. On Linux,
+  `muse login` fails to save its credential to the keychain.
+- It updates itself in the background unless `MUSE_NO_AUTO_UPDATE=1` is set. A run records the
+  version it was dispatched with, and a later leg may run a newer one.
+- Source: trials of Muse Code 1.4.0 (R4302.1), `raw/trials/muse-headless-forms/`, and for the
+  prompt and resumes, `raw/trials/muse-mimo-controls/`.
+
+## mimo (MiMo Code)
+
+```sh
+cd <wt> && env XDG_DATA_HOME=<harness-data>/mimo/<key> MIMOCODE_DISABLE_CLAUDE_IMPORT=1 \
+  mimo run --format json -m <provider/model> --variant <effort> --dangerously-skip-permissions \
+  < <abs prompt-file>
+```
+
+- The prompt arrives on stdin. MiMo Code reads its stdin to the end before it starts, so an
+  open pipe holds a launch, and the prompt file is the only stdin a launch ever has. The model
+  receives the file byte for byte, after one newline MiMo Code puts before it. A message
+  argument that holds a space arrives wrapped in double quotes with its own quotes escaped, and
+  `-f` only attaches a file to a message. [Why the form matters](../../wiki/concepts/prompt-delivery.md)
+- `--dangerously-skip-permissions` is the bypass form: it approves whatever no rule denies.
+- The model is `provider/model`, and a key works only with the provider id of the plan it
+  belongs to. `--variant` sets the effort: MiMo V2.6 Pro's variants are
+  `low`, `medium` and `high`. The key is `XIAOMI_API_KEY`, from the lane's `env_file`.
+- `--format json` writes one event per line: `step_start`, `text`, `tool_use` and `step_finish`,
+  each with its `sessionID` and a `part`. A `tool_use` names its tool and input in `part`.
+- Thread id: the `sessionID` on the first event.
+- Resume: the launch form with `-s <thread id>`, the model and the variant passed again. A
+  resume that names no variant runs without one, as `mimo export <session>` shows: it records
+  each message's provider, model and variant. Given an id its data directory does not hold, it
+  exits 0 with no event at all, having sent nothing, and says `Session not found` only on
+  stderr. Resumed from another directory with its launch's data, it continues the thread and
+  runs its tools in that directory. So `launch.sh` refuses a resume unless `mimo export <id>`
+  finds the thread in the launch's data directory. It is only there from the same directory,
+  name, leg and run. [Why the exit is not enough](../../wiki/concepts/resume-exit-status.md)
+- Thread name: `--title <text>` on a launch, which `launch.sh` passes from
+  `POSTMASTER_LAUNCH_NAME`.
+- Final message: the `part.text` of the last `text` event; `step_finish` with reason `stop`
+  closes the run. **A run that fails exits 0 all the same**: on a model that does not exist it
+  wrote one `error` event and no text. Read a failure from the events, never the exit.
+- **Its data, per lane.** MiMo Code keeps its sessions under `XDG_DATA_HOME`, with a `memory`
+  tool's notes and one session-notes file that every session there shares
+  (`memory/sessions/current_session_id/notes.md`): a fresh session in the same data directory
+  recalled a word an earlier one had been asked to remember. So `launch.sh` gives each lane its
+  own `XDG_DATA_HOME`, as it does for Muse Code. That closes MiMo Code's own channel, not the
+  filesystem: a lane asked to search can still read files anywhere on the machine. In a new data
+  directory MiMo Code first copies in Claude Code's session history, 69 MB here, which
+  `MIMOCODE_DISABLE_CLAUDE_IMPORT=1` turns off.
+- Ambient context: `AGENTS.md` up to the repository's root, and a `CLAUDE.md` too when the
+  `AGENTS.md` is under 500 characters; its own config's `AGENTS.md`; and Claude Code's user rules,
+  `~/.claude/CLAUDE.md`. `MIMOCODE_DISABLE_CLAUDE_CODE_PROMPT=1` turns off both `CLAUDE.md` files.
+  The launch keeps them, as a claude lane reads the same files.
+- From Claude Code's settings: it started the MCP server a project's `.claude.json` names, and
+  did not run a project's Claude Code hook (trial). Its code also reads `~/.claude.json`'s MCP
+  servers and Claude Code's commands. The launch keeps the MCP servers and the commands, as a
+  claude lane has them; no Claude Code hook guards a MiMo Code launch.
+- Source: trials of MiMo Code 0.1.15, `raw/trials/mimo-headless-forms/`, and for the prompt and
+  resumes, `raw/trials/muse-mimo-controls/`.
 
 ## Own review skills
 
@@ -228,8 +335,7 @@ The prompt goes in the lane's prompt file, and the launch is the ordinary launch
 | grok | none: its slash commands have no review command; skills, plugins and workflows could add one | its documentation (docs.x.ai, Modes and Commands), 2026-09 |
 | agy | none: its slash commands have no security review; Google's security extension (`/security:analyze`) is for Gemini CLI only | its documentation (antigravity.google, CLI Reference), 2026-09 |
 
-MiMo Code, which has no adapter here yet, has none either: its `/review` is a general code
-review (its commands, 0.1.15). OpenAI's Codex Security is a CLI of its own
+MiMo Code has none either: its `/review` is a general code review (its commands, 0.1.15). OpenAI's Codex Security is a CLI of its own
 (`@openai/codex-security`), not a codex skill, and would need an adapter of its own.
 
 **claude's `/security-review`** reviews the change from the merge base of `origin/HEAD` and
@@ -256,6 +362,8 @@ It runs in its harness's bypass mode, like every launch, named for its project:
 | codex | `codex -m <model> -c model_reasoning_effort="<effort>" --dangerously-bypass-approvals-and-sandbox` | no |
 | grok | `grok -m <model> --reasoning-effort <effort> --always-approve` | no |
 | agy | `agy --model <model> --dangerously-skip-permissions` | no |
+| muse | `muse --model <model> --reasoning-effort <effort> --yolo` | flags from its help |
+| mimo | `mimo -m <provider/model> --dangerously-skip-permissions`; its effort is set inside, having no flag | flags from its help |
 
 Bypass mode does not skip claude's question, on first start in a folder it has never opened,
 whether to trust it; headless `claude -p` does not ask. The first spawn in a new target stops
@@ -266,8 +374,9 @@ the headless form above; run it once before relying on it.
 
 `<tool>/scripts/view-stream.sh` is the other executable half of this file: it renders an events
 stream one line per event of interest, for a host's pane (`hosts.md`) and for anyone reading a
-stream by hand. It knows claude's events, checked against a recorded stream; codex's and pi's,
-written from the event names this file records and not yet checked against a recorded stream;
+stream by hand. It knows claude's, muse's and mimo's events, checked against recorded streams; codex's
+and pi's, written from the event names this file records and not yet checked against a recorded
+stream;
 any other harness shows by event type, once per run of the same type. A harness whose events it
 shows badly gets its rules there, and a line here saying they were checked.
 

@@ -1,0 +1,12 @@
+run: a fresh launch of the same lane in the same repository, through launch.sh
+exit: 0, seconds: 27
+events: 9, of types: step_finish, step_start, text, tool_use
+sessions in the stream: 1
+tool_use events: memory, memory, history, history
+  memory: code word remember
+  memory: remember this word
+  history: code word remember
+  history: remember this
+step_finish reasons: tool-calls, stop
+--- the last text event ---
+KESTREL

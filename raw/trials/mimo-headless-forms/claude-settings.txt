@@ -1,0 +1,11 @@
+run: a shell command, with a project hook and a project MCP server in Claude Code's files, through launch.sh
+exit: 0, seconds: 19
+the project hook ran: no
+the project MCP server was started: yes
+events: 6, of types: step_finish, step_start, text, tool_use
+sessions in the stream: 1
+tool_use events: bash
+  bash: echo hi
+step_finish reasons: tool-calls, stop
+--- the last text event ---
+hi

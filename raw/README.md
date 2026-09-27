@@ -9,6 +9,9 @@ Two rules govern this directory, and the second is the one that does the work.
 wrong; it may not change the record. That is what makes a claim checkable: anyone can clone
 this repository, follow a standing to the record behind it, and count again.
 
+One exception: something private that the scrub missed is redacted where it appears. The record
+says what was redacted and when, `wiki/log.md` has an entry for it, and nothing else changes.
+
 **Nothing arrives here automatically.** Every run already writes its full record — ledger,
 narrative, cards, harness logs — to its own project's `.postmaster/`, which is gitignored in
 whatever project it belongs to. Copying one here is a separate, deliberate act, and it is a
