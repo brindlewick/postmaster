@@ -87,9 +87,34 @@ def muse(e):
         return "result: %s%s" % (p.get("terminal") or pt.split(".")[-1], " · " + short(said) if said else "")
     return None      # streaming deltas, task lifecycle and bookkeeping: the result carries the text
 
+mimo_sessions = set()
+
+def mimo(e):
+    # mimo (mimo run --format json): every event carries its sessionID and a part
+    t, part = e.get("type"), e.get("part") or {}
+    out = []
+    sid = e.get("sessionID")
+    if sid and sid not in mimo_sessions:
+        mimo_sessions.add(sid)
+        out.append("session %s" % sid)
+    if t == "text" and str(part.get("text", "")).strip():
+        out.append("says: " + short(part.get("text")))
+    elif t == "tool_use":
+        state = part.get("state") or {}
+        out.append("tool error: %s" % part.get("tool") if state.get("status") == "error"
+                   else tool_line(part.get("tool"), state.get("input")))
+    elif t == "step_finish" and part.get("reason") == "stop":
+        out.append("done")
+    elif t == "error":
+        err = e.get("error") or {}
+        out.append("error: " + short((err.get("data") or {}).get("message") or err.get("name") or json.dumps(err)))
+    return out or None
+
 def render(e):
     if "payload_type" in e:
         return muse(e)
+    if "sessionID" in e and e.get("type") in ("step_start", "step_finish", "text", "tool_use", "error"):
+        return mimo(e)
     t = e.get("type")
     if t in QUIET:
         return None
@@ -208,8 +233,8 @@ def show(line, stamp):
             last_generic[0] = None
     else:
         out = short(line)
-    if out:
-        print((time.strftime("%H:%M:%S ") if stamp else "") + CONTROL.sub("", out), flush=True)
+    for one in (out if isinstance(out, list) else [out] if out else []):
+        print((time.strftime("%H:%M:%S ") if stamp else "") + CONTROL.sub("", one), flush=True)
 
 if not follow:
     for line in sys.stdin:
@@ -310,6 +335,18 @@ shows "muse: the result, with what the model said" \
   '{"stream":{"kind":"session","id":"s1"},"payload_type":"run.terminal.completed","payload":{"terminal":"completed","text":"DONE"}}' \
   'result: completed · DONE'
 shows "muse: a failed run" '{"stream":{"kind":"session","id":"s1"},"payload_type":"run.terminal.failed","payload":{"terminal":"failed","text":""}}' 'result: failed'
+shows "mimo: a session starts, with its thread id, and a first step says nothing more" \
+  '{"type":"step_start","sessionID":"ses_ffe5f1e2","part":{"type":"step-start"}}' 'session ses_ffe5f1e2'
+shows "mimo: a tool call, with what it touched" \
+  '{"type":"tool_use","sessionID":"ses_ffe5f1e2","part":{"type":"tool","tool":"write","state":{"status":"completed","input":{"file_path":"proof.txt","content":"PELICAN"}}}}' \
+  "$(printf 'session ses_ffe5f1e2\nwrite: proof.txt')"
+shows "mimo: what the model said" '{"type":"text","sessionID":"ses_1","part":{"type":"text","text":"DONE"}}' "$(printf 'session ses_1\nsays: DONE')"
+shows "mimo: a failed tool call" '{"type":"tool_use","sessionID":"ses_1","part":{"tool":"bash","state":{"status":"error","input":{"command":"false"}}}}' \
+  "$(printf 'session ses_1\ntool error: bash')"
+got=$(printf '%s\n' '{"type":"step_start","sessionID":"ses_2","part":{}}' '{"type":"text","sessionID":"ses_2","part":{"text":"DONE"}}' \
+  '{"type":"step_finish","sessionID":"ses_2","part":{"reason":"tool-calls"}}' '{"type":"step_finish","sessionID":"ses_2","part":{"reason":"stop"}}' | view)
+[ "$got" = "$(printf 'session ses_2\nsays: DONE\ndone')" ] && ok "mimo: a session is named once, and only its last step says done" \
+  || fail "mimo: a session is named once, and only its last step says done" "$got"
 shows "a line that is not JSON is shown as it is" 'plain text from a wrapper' 'plain text from a wrapper'
 shows "an unknown event shows its type" '{"type":"heartbeat","message":"still here"}' 'heartbeat: still here'
 shows "escape sequences in what a model said never reach the terminal" \

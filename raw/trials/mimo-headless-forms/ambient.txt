@@ -1,0 +1,10 @@
+run: ambient context, the launch form
+exit: 0, seconds: 23
+events: 3, of types: step_finish, step_start, text
+sessions in the stream: 1
+tool_use events: none
+step_finish reasons: stop
+--- the last text event ---
+Marker: AGENTS-OK
+Marker: CLAUDE-OK
+yes

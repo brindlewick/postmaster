@@ -8,6 +8,16 @@ updated: 2026-09-27
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-27] ingest | MiMo Code's headless forms
+
+A trial of MiMo Code 0.1.15, launched and resumed through `launch.sh`, recorded in
+`raw/trials/mimo-headless-forms/`. Its forms are in `skills/postmaster/harnesses.md`. Two of its
+findings bear on how far lanes are kept apart. A fresh session recalled a word another session
+in the same data directory had been asked to remember, so each lane now gets its own. And a lane
+asked to search went through the whole home directory, Claude Code's transcripts and another
+lane's notes included, and found the word: a data directory of its own is not a sandbox. No
+standing changes.
+
 ## [2026-09-27] ingest | Muse Code's headless forms
 
 A trial of Muse Code 1.4.0, launched and resumed through `launch.sh`, recorded in

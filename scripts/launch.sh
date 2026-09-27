@@ -56,7 +56,8 @@ if [ "${1:-}" = --self-test ]; then
   for h in claude pi codex; do
     printf '#!/bin/sh\necho "$@ probe=${PROBE:-}"\n' > "$tmp/bin/$h" && chmod +x "$tmp/bin/$h"
   done
-  # The muse stub also prints what arrived on its stdin.
+  # The muse and mimo stubs also print what arrived on their stdin.
+  printf '#!/bin/sh\nprintf "%%s probe=%%s stdin=%%s import-off=%%s data=%%s\\n" "$*" "${PROBE:-}" "$(cat)" "${MIMOCODE_DISABLE_CLAUDE_IMPORT:-}" "${XDG_DATA_HOME:-}"\n' > "$tmp/bin/mimo" && chmod +x "$tmp/bin/mimo"
   printf '#!/bin/sh\nprintf "%%s probe=%%s stdin=%%s data=%%s\\n" "$*" "${PROBE:-}" "$(cat)" "${XDG_DATA_HOME:-}"\n' > "$tmp/bin/muse" && chmod +x "$tmp/bin/muse"
   [ -x "$tmp/bin/claude" ] && [ -x "$tmp/bin/pi" ] && [ -x "$tmp/bin/codex" ] && [ -x "$tmp/bin/muse" ] \
     || { echo "self-test: cannot write the stub harnesses"; exit 1; }
@@ -271,6 +272,30 @@ PY
   carries "the muse form shows its data directory, the bypass form and an empty stdin" muse \
     "env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json --prompt-file <prompt-file> --model muse-model --reasoning-effort max --yolo < /dev/null" form m
 
+  echo "mimo"
+  printf '[lanes.x]\nharness = "mimo"\nmodel = "prov/mimo-model"\neffort = "high"\nenv_file = "%s"\n\n[lanes.y]\nharness = "mimo"\nmodel = "prov/mimo-model"\n' "$tmp/over.env" > "$tmp/mimo.toml"
+  printf '[lanes.x]\nharness = "mimo"\nmodel = "prov/mimo-model"\n' > "$tmp/mimo-bare.toml"
+  mrun mimo launch x "$tmp/wt" "$tmp/prompt.txt"; a=$(data_of)
+  [ $rc -eq 0 ] && [ "$out" = "run --format json -m prov/mimo-model --variant high --dangerously-skip-permissions probe=reached stdin=Continue. import-off=1 data=$a" ] \
+    && case $a in "$hd"/mimo/?*) true ;; *) false ;; esac && [ -d "$a" ] \
+    && ok "a mimo launch: JSON events, model, variant, bypass form, env file, the prompt on stdin, its own data directory, and no history import" \
+    || fail "a mimo launch: JSON events, model, variant, bypass form, env file, the prompt on stdin, its own data directory, and no history import"
+  mrun mimo resume x "$tmp/wt" ses_01a0 "$tmp/prompt.txt"; b=$(data_of)
+  [ $rc -eq 0 ] && case $out in "run --format json -m prov/mimo-model -s ses_01a0 --variant high --dangerously-skip-permissions probe=reached stdin=Continue. "*) true ;; *) false ;; esac \
+    && [ "$b" = "$a" ] && ok "a mimo resume names the session, keeps the model and the variant, and finds the launch's data directory" \
+    || fail "a mimo resume names the session, keeps the model and the variant, and finds the launch's data directory"
+  mrun mimo launch y "$tmp/wt" "$tmp/prompt.txt"; c=$(data_of)
+  [ -n "$c" ] && [ "$c" != "$a" ] && ok "another mimo lane in the same directory gets a data directory of its own" \
+    || fail "another mimo lane in the same directory gets a data directory of its own"
+  out=$(cd "$tmp/wt" && env POSTMASTER_HARNESS_DATA="$hd" POSTMASTER_LAUNCH_NAME="#7, a run" POSTMASTER_CONFIG="$tmp/mimo-bare.toml" PATH="$tmp/bin:$PATH" "$self" launch x "$tmp/elsewhere" sub/p.txt 2>"$tmp/err" </dev/null); rc=$?; err=$(cat "$tmp/err")
+  [ $rc -eq 0 ] && case $out in "run --format json -m prov/mimo-model --title #7, a run --dangerously-skip-permissions probe= stdin=Continue. "*) true ;; *) false ;; esac \
+    && ok "a relative prompt file is read after the cd, no effort means no variant, and a launch is titled after its run" \
+    || fail "a relative prompt file is read after the cd, no effort means no variant, and a launch is titled after its run"
+  carries "the mimo form shows its data directory, the import switch and the prompt file on stdin" mimo \
+    "env XDG_DATA_HOME=<harness-data>/mimo/<key> MIMOCODE_DISABLE_CLAUDE_IMPORT=1 mimo run --format json -m prov/mimo-model --variant high --dangerously-skip-permissions < <prompt-file>" form x
+  run mimo skill x security-review
+  [ $rc -eq 3 ] && [ -z "$out" ] && ok "a mimo lane has no security review skill: exit 3" || fail "a mimo lane has no security review skill: exit 3"
+
   echo "skills"
   printf '[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n\n[lanes.two]\nharness = "codex"\nmodel = "other-model"\n\n[lanes.three]\nharness = "muse"\nmodel = "muse-model"\n' > "$tmp/skills.toml"
   run skills skill one security-review
@@ -408,11 +433,20 @@ case $CMD in
   *) die "unknown command: $CMD" ;;
 esac
 [ "$CMD" = form ] || [ -d "$CWD" ] || die "no such directory: $CWD"
-if { [ "$HARNESS" = pi ] || [ "$HARNESS" = muse ]; } && [ "$CMD" != form ]; then   # read after the cd
+case $HARNESS in pi|muse|mimo) [ "$CMD" != form ] ;; *) false ;; esac && {   # read after the cd
   prompt_dir=$(CDPATH= cd -P -- "$(dirname -- "$PROMPT")" && pwd -P) || die "cannot resolve prompt file: $PROMPT"
   PROMPT=$prompt_dir/$(basename "$PROMPT")
-fi
+}
 
+harness_data() {  # harness_data <harness>: this launch's own data directory, for a harness that keeps
+  # state between sessions. Keyed by run, directory, name and leg, so a resume finds its session
+  # and no lane, leg or run finds another's through the harness's own memory. It is not a
+  # sandbox: a lane can still read files elsewhere on the machine.
+  if [ "$CMD" = form ]; then echo "<harness-data>/$1/<key>"; return 0; fi
+  printf '%s/%s/%s\n' "${POSTMASTER_HARNESS_DATA:-$HOME/.postmaster/harness-data}" "$1" \
+    "$(printf '%s|%s|%s|%s' "$RUN" "$(CDPATH= cd -P -- "$CWD" && pwd -P)" "$NAME" "$LEG" | cksum | tr ' ' '-')"
+}
+DATA=""
 cmd=()
 case $HARNESS in
   codex)
@@ -462,24 +496,33 @@ case $HARNESS in
     # --yolo is the bypass form: it turns off approval and the sandbox, which needs unprivileged
     # user namespaces, and trusts the workspace for the run. A resume is a launch that names the
     # session. The prompt comes from its file, so stdin carries nothing. Muse Code keeps its
-    # sessions and a memory that outlives them under XDG_DATA_HOME, so each lane and each leg
-    # gets its own, keyed by run, directory, name and leg: a resume finds its session, and nothing
-    # carries between lanes, legs or runs.
-    if [ "$CMD" = form ]; then MUSE_DATA='<harness-data>/muse/<key>'
-    else
-      MUSE_DATA=$(printf '%s|%s|%s|%s' "$RUN" "$(CDPATH= cd -P -- "$CWD" && pwd -P)" "$NAME" "$LEG" | cksum | tr ' ' '-')
-      MUSE_DATA=${POSTMASTER_HARNESS_DATA:-$HOME/.postmaster/harness-data}/muse/$MUSE_DATA
-    fi
-    cmd=(env "XDG_DATA_HOME=$MUSE_DATA" muse exec --json --prompt-file "$PROMPT")
+    # sessions and a memory that outlives them under XDG_DATA_HOME, so each launch has its own.
+    DATA=$(harness_data muse)
+    cmd=(env "XDG_DATA_HOME=$DATA" muse exec --json --prompt-file "$PROMPT")
     [ "$CMD" = resume ] && cmd+=(--session-id "$THREAD")
     cmd+=(--model "$MODEL")
     [ -n "${EFFORT:-}" ] && cmd+=(--reasoning-effort "$EFFORT")
     cmd+=(--yolo)
     STDIN_FILE=/dev/null ;;
+  mimo)
+    # MiMo Code reads its prompt from stdin, which it reads to the end, so the prompt file is its
+    # stdin and an inherited pipe never is. --dangerously-skip-permissions is the bypass form: it
+    # approves whatever no rule denies. A resume is the launch form naming the session, with the
+    # model and the variant passed again; --title names a launch's session after the run. MiMo
+    # Code keeps its sessions and a memory tool's notes under XDG_DATA_HOME, so each launch has
+    # its own. In a new one it would copy Claude Code's session history in first, which the launch
+    # turns off; the instruction files it reads from Claude Code are kept.
+    DATA=$(harness_data mimo)
+    cmd=(env "XDG_DATA_HOME=$DATA" MIMOCODE_DISABLE_CLAUDE_IMPORT=1 mimo run --format json -m "$MODEL")
+    [ "$CMD" = resume ] && cmd+=(-s "$THREAD")
+    [ -n "${EFFORT:-}" ] && cmd+=(--variant "$EFFORT")
+    [ "$CMD" = launch ] && [ -n "${POSTMASTER_LAUNCH_NAME:-}" ] && cmd+=(--title "$POSTMASTER_LAUNCH_NAME")
+    cmd+=(--dangerously-skip-permissions)
+    STDIN_FILE=$PROMPT ;;
   *) die "no form for harness '$HARNESS'" ;;
 esac
 
-[ "$HARNESS" = muse ] && [ "$CMD" != form ] && { mkdir -p "$MUSE_DATA" || die "cannot create $MUSE_DATA"; }
+[ -n "$DATA" ] && [ "$CMD" != form ] && { mkdir -p "$DATA" || die "cannot create $DATA"; }
 if [ "$CMD" = form ]; then
   show() { case $1 in '<'*'>'|*'=<'*'>'|'$(cat <prompt-file>)') printf '%s ' "$1" ;; *) printf '%q ' "$1" ;; esac; }
   printf 'cd '; show "$CWD"; printf '&& '
