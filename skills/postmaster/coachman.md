@@ -24,7 +24,7 @@ waybill carries, is `SKILL.md`. You do not need it.
 | `<dispatch>/brief.md` | the waybill |
 | `<dispatch>/manifest.json` | `stage`, `leg`, `base`, `lanes.<lane>.{thread_id, outcome}`, `coachman.legs.<n>.{thread_id, name}`; the postmaster creates it and owns `leg`, `base`, `coachman` and the terminal stages, you own `lanes` and every stage before those; change `stage` only with `<tool>/scripts/stage.sh`, update the rest in place, never rewrite the file |
 | `<dispatch>/run-log.md` | running narrative, written only through `<tool>/scripts/run-log.sh`, which puts the time on every entry and times every section |
-| `<dispatch>/run.json` | the run's fixed facts: postmaster commit, config, harness versions; written once at dispatch by the postmaster, never edited |
+| `<dispatch>/run.json` | the run's fixed facts: postmaster commit, config, harness versions; written once at dispatch by the postmaster, never edited; every launch and resume in the run takes its config from here (`--run <dispatch>`) |
 | `<dispatch>/logs/` | one events stream per lane, and per reviewer lane, lens and round |
 | `<dispatch>/audit/<lane>.md` | per-workhorse digest of its durable record |
 | `<dispatch>/leg-<n>-prompt.txt` | the postmaster's one-paragraph prompt that started leg `n` |
@@ -226,14 +226,15 @@ same breath, through the host script and the launch script so no form is ever co
 ```sh
 <tool>/scripts/host.sh run "$(<tool>/scripts/host.sh name <dispatch> <lane>)" <workhorse-wt> \
     --out <dispatch>/logs/<lane>-events.jsonl --err <dispatch>/logs/<lane>.err --marker <dispatch>/logs/<lane>.done \
-    -- <tool>/scripts/launch.sh launch <lane> <workhorse-wt> <dispatch>/<lane>-prompt.txt --last <dispatch>/logs/<lane>-last.md
+    -- <tool>/scripts/launch.sh launch <lane> <workhorse-wt> <dispatch>/<lane>-prompt.txt --last <dispatch>/logs/<lane>-last.md \
+       --run <dispatch>
 ```
 
 The name comes from the waybill through `host.sh name`, never typed: a ticket's title can hold
 anything a shell would run. A resume runs the same way with `--append`, and the command
-`<tool>/scripts/launch.sh resume <lane> <workhorse-wt> <thread-id> <prompt-file>`; `host.sh` clears the
-old marker itself. Resume a lane only once its marker has landed: until then it is still running.
-No composer, no interactive session, no registration.
+`<tool>/scripts/launch.sh resume <lane> <workhorse-wt> <thread-id> <prompt-file> --run <dispatch>`;
+`host.sh` clears the old marker itself. Resume a lane only once its marker has landed: until
+then it is still running. No composer, no interactive session, no registration.
 The streaming output format is load-bearing: the thread id and the final message are harvested
 from it.
 
@@ -412,7 +413,7 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    ```
 
    Its launch step starts reviewer lane `$L` in its scratch `$DEST`:
-   `<tool>/scripts/launch.sh launch "$L" "$DEST" <dispatch>/review-r<round>-<lens>-prompt.txt`.
+   `<tool>/scripts/launch.sh launch "$L" "$DEST" <dispatch>/review-r<round>-<lens>-prompt.txt --run <dispatch>`.
 2. **Run every reviewer under every open lens on the same snapshot, from a fresh scratch each
    round**, pinned to the synthesis HEAD, with the installed dependencies cloned in so every
    lane is a full lane:
@@ -569,7 +570,7 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    old assertion obsolete. Worse than red is a run that HANGS: if the suite stops being fast,
    re-read the change rather than waiting it out.
 2. **Review link.** The ship card carries the absolute path of the synthesis worktree and, where
-   the config's `ship.review_link` template is set, that template with the path filled in.
+   the config in `run.json` sets a `ship.review_link` template, that template with the path filled in.
    Reuse whatever review surface is already running; never start a duplicate or restart one,
    since it may be serving another run. Never trust a check from the serving machine as proof
    the link works for the user: verify it from the device the user will open it on, or
