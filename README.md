@@ -110,6 +110,7 @@ scripts/view-stream.sh < <events-file>                            # a harness's 
 scripts/runs-status.sh <run-root>                                  # the postmaster's poll
 scripts/handoff-check.sh <handoff-file>                            # a leg may end only on exit 0
 scripts/wiki-lint.sh [--self-test]                                 # the wiki's rules, run not remembered
+scripts/fixture.sh new|score|hidden …                              # a run on a fixture app, scored against a known outcome
 ```
 
 A project may declare how a change to it is verified in `.postmaster/project.toml`, the one

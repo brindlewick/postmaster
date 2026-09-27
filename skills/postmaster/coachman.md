@@ -281,7 +281,8 @@ same breath, through the host script and the launch script so no form is ever co
 
 The name comes from the waybill through `host.sh name`, never typed: a ticket's title can hold
 anything a shell would run. A resume runs the same way with `--append`, and the command
-`<tool>/scripts/launch.sh resume <lane> <workhorse-wt> <thread-id> <prompt-file> --run <dispatch>`;
+`<tool>/scripts/launch.sh resume <lane> <workhorse-wt> <thread-id> <prompt-file>
+--last <dispatch>/logs/<lane>-last.md --run <dispatch>`;
 `host.sh` clears the old marker itself. Resume a lane only once its marker has landed: until
 then it is still running. No composer, no interactive session, no registration.
 The streaming output format is load-bearing: the thread id and the final message are harvested

@@ -1,9 +1,9 @@
 # postmaster
 
 **This file is the canonical context for every agent working in this repo, whatever harness
-it runs under.** `CLAUDE.md` imports it; codex, grok and pi read it natively; agy and muse
-read no ambient file at all and must be pointed at it explicitly by whatever brief launches
-them.
+it runs under.** `CLAUDE.md` imports it; codex, grok, pi and mimo read it natively, and muse
+does in a trusted workspace, which its bypass flag makes one; agy reads no ambient file at all
+and must be pointed at it explicitly by whatever brief launches it.
 
 ## Read this first: this repo is the tool, and it can be its own target
 
@@ -38,6 +38,10 @@ will read a new contract while an older run is still writing to the old one.
 
 Contract changes are the only category that needs the fleet quiet. Ordinary changes to
 scripts, docs and prose do not.
+
+**A change to the coachman contract merges only after a fixture run scores clean**: a run
+dispatched from the change's branch against a repository made by `scripts/fixture.sh new`, and
+scored by `scripts/fixture.sh score` on the same branch. [Why](wiki/concepts/fixture-runs.md).
 
 ## When a session opens in this repo, do this
 

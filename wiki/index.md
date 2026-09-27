@@ -29,6 +29,11 @@ produce better software than one good model? If so, how?
 How each agent CLI really behaves, as distinct from what its documentation says.
 
 - [Prompt delivery differs by harness](concepts/prompt-delivery.md): **settled**.
+- [A resumed codex thread runs on the model its resume names](concepts/codex-resume-model.md):
+  **settled**. A resume that names no model runs on codex's default, not on the thread's own.
+- [A resume's exit status does not say it continued its thread](concepts/resume-exit-status.md):
+  **settled**, for pi, Muse Code and MiMo Code. Resuming a thread it cannot find, a harness can
+  exit 0 having done nothing, or having started a new thread.
 
 ## Trackers and tooling
 
@@ -40,6 +45,14 @@ What the services and CLIs postmaster depends on actually do.
   reports its state.
 - [Herdr reads most agents' state from the screen](concepts/herdr-agent-states.md):
   **settled**, for Herdr 0.9.1. A settled state from its waits does not prove a turn finished.
+
+## Testing the flow
+
+How the flow is checked, and what each check can and cannot see.
+
+- [Fixture runs](concepts/fixture-runs.md): **claimed**. A run against a small app whose tickets
+  have hidden tests, scored from the run's own records, catches a broken contract between roles
+  and a run that ships the wrong thing, which the offline gate cannot.
 
 ## Decisions
 
