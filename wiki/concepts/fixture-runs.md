@@ -72,19 +72,15 @@ The flow reads tickets through a tracker, and a fresh repository has none. Three
 
 - **A waybill written straight from the ticket file.** Rejected: it skips the postmaster's own
   reading and checking of the ticket, which is part of what a fixture run should exercise.
+- **A GitHub repository kept for fixture tickets.** Built first, then rejected by the user on
+  2026-09-26: a fixture should not live in a separate repository. It needed the network, a `gh`
+  login and a board the user linked once.
 - **The tracker that needs no service and no login**
-  ([issue #11](https://github.com/brindlewick/postmaster/issues/11)). It does not exist yet.
-- **A GitHub repository kept for fixture tickets.** Chosen. The fresh repository's origin
-  points at it, since the github adapter finds a repository's issues and board through its
-  origin, and the ticket is filed there through the adapter, so the postmaster finds and checks
-  it like any other. The push address is unusable, so nothing but tickets ever reaches it.
-
-The cost: a fixture run needs the network and a `gh` login, and the user creates the repository
-and links its board once. The tracker kind is set for the whole machine, so a machine whose
-config names another kind cannot run fixtures until the script learns that kind.
-
-What would change it: issue #11 landing. A tracker with no service would let fixture runs work
-offline and keep their tickets out of any hosted service.
+  ([issue #11](https://github.com/brindlewick/postmaster/issues/11)). Chosen once it landed. The
+  fresh repository gets its own ticket store, and the ticket is filed there through
+  `scripts/local.sh`. A repository whose store exists uses that tracker whatever the config names,
+  so the postmaster finds and checks the ticket like any other, offline, and nothing leaves the
+  machine.
 
 ## What would settle it
 

@@ -3,7 +3,7 @@
 # finished run from its own records. Why, and what it catches that the gate cannot:
 # wiki/concepts/fixture-runs.md.
 #
-#   fixture.sh new <dest> <ticket> [--github <owner/name>]
+#   fixture.sh new <dest> <ticket>
 #   fixture.sh score <dispatch> <repo>
 #   fixture.sh hidden <ticket> <app-dir>
 #   fixture.sh --self-test
@@ -15,10 +15,9 @@
 #
 # new     makes <dest> a fresh git repo holding the committed app, one commit on main, outside
 #         every other repo, so a run never touches this repo's branches, worktrees or run records.
-#         Its origin is the GitHub repo kept for fixture tickets, <gh user>/postmaster-fixture
-#         unless --github names another, which must exist and have a linked board; its push URL
-#         is /dev/null, since a run never pushes. It files the ticket there through
-#         scripts/github.sh and prints the issue number to dispatch against <dest>.
+#         It has no remote. It makes the repo's own ticket store (scripts/local.sh), files the
+#         ticket there and prints its number to dispatch against <dest>; a run reads it through
+#         the local tracker whatever the config names (scripts/tracker-kind.sh).
 # score   scores a finished run from its records, never its report: the ticket its waybill
 #         carries verbatim, whose hidden tests run against main; the app's gate as
 #         scripts/discover-project.sh finds it, on main; the stages scripts/stage.sh --list names,
@@ -41,8 +40,8 @@ TOOL=$(dirname "$HERE")
 APP=$TOOL/fixtures/app
 TICKETS=$TOOL/fixtures/tickets
 CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
-GITHUB_SH=$HERE/github.sh
-usage() { echo "usage: fixture.sh new <dest> <ticket> [--github <owner/name>] | score <dispatch> <repo> | hidden <ticket> <app-dir> | --self-test" >&2; exit 1; }
+LOCAL_SH=$HERE/local.sh
+usage() { echo "usage: fixture.sh new <dest> <ticket> | score <dispatch> <repo> | hidden <ticket> <app-dir> | --self-test" >&2; exit 1; }
 need() { local t; for t in "$@"; do command -v "$t" >/dev/null 2>&1 || { echo "fixture: $t is not on PATH" >&2; exit 1; }; done; }
 
 tickets() { local d; for d in "$TICKETS"/*/; do [ -f "$d/ticket.md" ] && basename "$d"; done; }
@@ -80,16 +79,9 @@ PY
     || { echo "fixture: could not commit the app in $dest; git needs user.name and user.email" >&2; return 1; }
 }
 
-tracker_kind() {  # the config's [tracker] kind; github when there is no config yet
-  [ -f "$CONFIG" ] || { echo github; return 0; }
-  python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb")).get("tracker", {}).get("kind", "github"))' "$CONFIG"
-}
-
-make_and_file() {  # make_and_file <dest> <ticket> <owner/name, or empty for the default>
-  local dest=$1 ticket=$2 nwo=$3 kind probe runs login body number rc
+make_and_file() {  # make_and_file <dest> <ticket>
+  local dest=$1 ticket=$2 probe runs body number rc
   is_ticket "$ticket" || return 1
-  kind=$(tracker_kind) || { echo "fixture: cannot read [tracker] kind from $CONFIG" >&2; return 1; }
-  [ "$kind" = github ] || { echo "fixture: a fixture run files its ticket on GitHub, and the config's tracker is $kind (wiki/concepts/fixture-runs.md)" >&2; return 1; }
   dest=$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$dest")
   [ -e "$dest" ] && { echo "fixture: $dest already exists; a run starts from a fresh repo" >&2; return 1; }
   probe=$(dirname "$dest"); while [ ! -d "$probe" ]; do probe=$(dirname "$probe"); done
@@ -104,38 +96,21 @@ make_and_file() {  # make_and_file <dest> <ticket> <owner/name, or empty for the
       echo "fixture: $(basename "$dest") is this repo's name, so its runs would share this repo's run records; choose another name" >&2
       return 1 ;;
   esac
-  if [ -z "$nwo" ]; then
-    login=$(gh api user --jq .login 2>/dev/null) && [ -n "$login" ] \
-      || { echo "fixture: gh is not logged in, so the default GitHub repo is unknown; name one with --github <owner/name>" >&2; return 1; }
-    nwo=$login/postmaster-fixture
-  fi
-  [[ $nwo =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "fixture: not a GitHub repo name: $nwo" >&2; return 1; }
 
   unmake() { [ -d "$dest" ] && rm -r -- "$dest" </dev/null; }   # until the ticket is filed, nothing refers to dest
   mkdir -p "$(dirname "$dest")" && make_repo "$dest" || { unmake; return 1; }
-  git -C "$dest" remote add origin "https://github.com/$nwo.git" && git -C "$dest" remote set-url --push origin /dev/null \
-    || { unmake; echo "fixture: could not set the origin of $dest" >&2; return 1; }
-  "$GITHUB_SH" "$dest" board >/dev/null; rc=$?
-  case $rc in
-    0) ;;
-    3) unmake
-       echo "fixture: $nwo has no linked board. Once, with the user's word, link one from any checkout whose origin is it: scripts/github.sh <checkout> board init" >&2
-       return 1 ;;
-    *) unmake
-       echo "fixture: scripts/github.sh could not reach $nwo (exit $rc). If it does not exist, the user creates it once: gh repo create $nwo --private" >&2
-       return 1 ;;
-  esac
+  "$LOCAL_SH" "$dest" store init >/dev/null || { unmake; echo "fixture: could not make the ticket store in $dest" >&2; return 1; }
   body=$(mktemp) || { unmake; return 1; }
   ticket_body "$ticket" > "$body"
-  number=$("$GITHUB_SH" "$dest" create "$(ticket_title "$ticket")" "$body" | tail -1); rc=$?
+  number=$("$LOCAL_SH" "$dest" create "$(ticket_title "$ticket")" "$body" | tail -1); rc=$?
   rm -f -- "$body"
-  [ $rc -eq 0 ] && [[ $number =~ ^[0-9]+$ ]] || { unmake; echo "fixture: filing the ticket on $nwo failed (exit $rc)" >&2; return 1; }
+  [ $rc -eq 0 ] && [[ $number =~ ^[0-9]+$ ]] || { unmake; echo "fixture: filing the ticket in $dest's own store failed (exit $rc)" >&2; return 1; }
   echo "fixture: made $dest from fixtures/app at $(git -C "$TOOL" rev-parse --short HEAD); main is at $(git -C "$dest" rev-parse --short HEAD)"
-  echo "fixture: filed ticket $ticket on $nwo as #$number: $(ticket_title "$ticket")"
+  echo "fixture: filed ticket $ticket in $dest's own ticket store as #$number: $(ticket_title "$ticket")"
   echo "fixture: dispatch ticket #$number against $dest, then: scripts/fixture.sh score <its dispatch directory> $dest"
 }
 
-new_run() {  # new_run <dest> <ticket> <owner/name or empty>
+new_run() {  # new_run <dest> <ticket>
   [ -z "$(git -C "$TOOL" status --porcelain -- fixtures)" ] \
     || { echo "fixture: fixtures/ has uncommitted changes; a run starts from a committed fixture" >&2; return 1; }
   make_and_file "$@"
@@ -377,18 +352,10 @@ hidden_run() {  # hidden_run <ticket> <app-dir>
 
 case ${1:-} in
   new)
-    shift; nwo=""; pos=()
-    while [ $# -gt 0 ]; do
-      case $1 in
-        --github) nwo=${2:-}; [ -n "$nwo" ] || usage; shift ;;
-        -*) usage ;;
-        *) pos+=("$1") ;;
-      esac
-      shift
-    done
-    [ ${#pos[@]} -eq 2 ] || usage
+    [ $# -eq 3 ] || usage
+    case $2$3 in -*) usage ;; esac
     need git python3
-    new_run "${pos[0]}" "${pos[1]}" "$nwo"; exit $? ;;
+    new_run "$2" "$3"; exit $? ;;
   score) [ $# -eq 3 ] || usage; need git python3 bun npm jq; score_run "$2" "$3"; exit $? ;;
   hidden) [ $# -eq 3 ] || usage; need python3 bun; hidden_run "$2" "$3"; exit $? ;;
   --self-test) ;;
@@ -535,26 +502,20 @@ for t in $(tickets); do
     || fail "$t: the hidden suite passes on the reference solution (exit $(rc_of "hidden-ref-$t"))" "$(cat "$tmp/hidden-ref-$t.out" "$tmp/hidden-ref-$t.err")"
 done
 
-echo "new: a fresh repo outside every other, with its ticket filed"
-cat > "$tmp/github.sh" <<'EOF'
+echo "new: a fresh repo outside every other, with its ticket in its own store"
+cat > "$tmp/failing-local.sh" <<EOF
 #!/usr/bin/env bash
-# Stands in for scripts/github.sh: records each call, and answers as it would.
-printf '%s\n' "$*" >> "$FIXTURE_STUB/calls"
-case $2 in
-  board) [ -e "$FIXTURE_STUB/no-board" ] && exit 3; printf '#1\tpostmaster-fixture\thttps://example.invalid/board\n' ;;
-  create) printf '%s\n' "$3" > "$FIXTURE_STUB/title"; cp "$4" "$FIXTURE_STUB/body"; echo 7 ;;
-  *) exit 1 ;;
-esac
+# Stands in for scripts/local.sh: makes the store, and fails to file the ticket.
+case \$2 in store) exec "$HERE/local.sh" "\$@" ;; *) exit 1 ;; esac
 EOF
-chmod +x "$tmp/github.sh"
-export FIXTURE_STUB=$tmp/stub; mkdir -p "$FIXTURE_STUB" "$tmp/home" "$tmp/runs"
-fresh_new() {  # fresh_new <dest> <ticket> [<nwo>]: make_and_file, with a stand-in adapter and home
-  : > "$FIXTURE_STUB/calls"
-  HOME=$tmp/home GITHUB_SH=$tmp/github.sh make_and_file "$1" "$2" "${3-someone/postmaster-fixture}" 2>&1
+chmod +x "$tmp/failing-local.sh"
+mkdir -p "$tmp/home" "$tmp/runs"
+fresh_new() {  # fresh_new <dest> <ticket>: make_and_file with a home of the test's own
+  HOME=$tmp/home make_and_file "$1" "$2" 2>&1
 }
 dest=$tmp/runs/fixture-$first
 out=$(fresh_new "$dest" "$first"); rc=$?
-[ $rc -eq 0 ] && printf '%s\n' "$out" | grep -q "as #7" && ok "new makes the repo and prints the ticket's number" || fail "new makes the repo and prints the ticket's number (exit $rc)" "$out"
+[ $rc -eq 0 ] && printf '%s\n' "$out" | grep -q "own ticket store as #1:" && ok "new makes the repo and prints the ticket's number" || fail "new makes the repo and prints the ticket's number (exit $rc)" "$out"
 [ "$(git -C "$dest" rev-list --count main 2>/dev/null)" = 1 ] && [ -z "$(git -C "$dest" status --porcelain 2>/dev/null)" ] \
   && ok "one commit on main, and a clean tree" || fail "one commit on main, and a clean tree"
 same=$(git -C "$APP" ls-files --cached --others --exclude-standard | sort | while IFS= read -r f; do
@@ -568,11 +529,14 @@ held=$(cd "$dest" && find . -path ./.git -prune -o \( -type f -o -type l \) -pri
 [ "$(git -C "$dest" config --local user.email)" = "$(git -C "$TOOL" config user.email)" ] \
   && [ "$(git -C "$dest" config --local user.name)" = "$(git -C "$TOOL" config user.name)" ] \
   && ok "it commits as this checkout does" || fail "it commits as this checkout does"
-[ "$(git -C "$dest" remote get-url origin)" = https://github.com/someone/postmaster-fixture.git ] \
-  && [ "$(git -C "$dest" remote get-url --push origin)" = /dev/null ] \
-  && ok "its origin is the kept GitHub repo, and it cannot push" || fail "its origin is the kept GitHub repo, and it cannot push"
-[ "$(cat "$FIXTURE_STUB/title")" = "$(ticket_title "$first")" ] && [ "$(cat "$FIXTURE_STUB/body")" = "$(ticket_body "$first")" ] \
-  && ok "the ticket filed is the fixture ticket, title and body verbatim" || fail "the ticket filed is the fixture ticket, title and body verbatim"
+[ -z "$(git -C "$dest" remote)" ] && ok "it has no remote" || fail "it has no remote" "$(git -C "$dest" remote -v)"
+[ "$("$HERE/local.sh" "$dest" list)" = "$(printf '#1\ttodo\t%s' "$(ticket_title "$first")")" ] \
+  && [ "$("$HERE/local.sh" "$dest" read 1 --body)" = "$(ticket_body "$first")" ] \
+  && ok "its own store holds the fixture ticket, title and body verbatim, in todo" \
+  || fail "its own store holds the fixture ticket, title and body verbatim, in todo" "$("$HERE/local.sh" "$dest" list 2>&1)"
+[ "$(grep -A1 '^\[tracker\]' "$CONFIG" | tail -1)" = 'kind = "github"' ] && [ "$("$HERE/tracker-kind.sh" "$dest")" = local ] \
+  && ok "a run against it reads the local tracker, though the config names github" \
+  || fail "a run against it reads the local tracker, though the config names github" "$("$HERE/tracker-kind.sh" "$dest" 2>&1)"
 leaked=$(for t in $(tickets); do
   for f in "$TICKETS/$t/hidden"/* "$TICKETS/$t/reference.patch"; do
     find "$dest" -path "$dest/.git" -prune -o -name "$(basename "$f")" -print
@@ -590,14 +554,10 @@ out=$(fresh_new "$tmp/runs/$(basename "$TOOL")" "$first"); rc=$?
 [ $rc -eq 1 ] && [ ! -e "$tmp/runs/$(basename "$TOOL")" ] && ok "a name that is this repo's is refused" || fail "a name that is this repo's is refused (exit $rc)" "$out"
 out=$(fresh_new "$tmp/runs/nosuch" no-such-ticket); rc=$?
 [ $rc -eq 1 ] && [ ! -e "$tmp/runs/nosuch" ] && ok "an unknown ticket is refused" || fail "an unknown ticket is refused (exit $rc)" "$out"
-touch "$FIXTURE_STUB/no-board"; rm -f -- "$FIXTURE_STUB/title"
-out=$(fresh_new "$tmp/runs/noboard" "$first"); rc=$?
-[ $rc -eq 1 ] && [ ! -e "$tmp/runs/noboard" ] && [ ! -e "$FIXTURE_STUB/title" ] \
-  && ok "no board: refused, nothing filed, and the repo it made is gone" || fail "no board: refused, nothing filed, and the repo it made is gone (exit $rc)" "$out"
-rm -f -- "$FIXTURE_STUB/no-board"
-printf '[tracker]\nkind = "plane"\n' > "$tmp/plane.toml"
-out=$(CONFIG=$tmp/plane.toml fresh_new "$tmp/runs/plane" "$first"); rc=$?
-[ $rc -eq 1 ] && [ ! -e "$tmp/runs/plane" ] && ok "a tracker other than github is refused" || fail "a tracker other than github is refused (exit $rc)" "$out"
+out=$(LOCAL_SH=$tmp/failing-local.sh fresh_new "$tmp/runs/unfiled" "$first"); rc=$?
+[ $rc -eq 1 ] && [ ! -e "$tmp/runs/unfiled" ] && printf '%s\n' "$out" | grep -q "filing the ticket" \
+  && ok "a ticket that cannot be filed: refused, and the repo it made is gone" \
+  || fail "a ticket that cannot be filed: refused, and the repo it made is gone (exit $rc)" "$out"
 
 wait
 

@@ -8,6 +8,12 @@ updated: 2026-09-27
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-27] lint | fixture tickets go in the fixture's own store
+
+The fixture-runs page now records that a fixture run's ticket is filed in the fresh repository's
+own ticket store, through the tracker #11 added, and no longer in a GitHub repository kept for
+fixture tickets, which the user rejected. No standing changed.
+
 ## [2026-09-27] ingest | MiMo Code's headless forms
 
 A trial of MiMo Code 0.1.15, launched and resumed through `launch.sh`, recorded in
