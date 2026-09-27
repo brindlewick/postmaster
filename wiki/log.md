@@ -19,6 +19,13 @@ MiMo Code does nothing. `prompt-delivery` gains both harnesses and keeps its sta
 page, `resume-exit-status`, records the resume finding at `settled`, and `launch.sh` now refuses
 such a resume.
 
+## [2026-09-27] redact | a plan provider id in the MiMo trial record
+
+The trial in `raw/trials/mimo-headless-forms/` named the provider id of one account's plan, which
+names a region, and the scrub before it was promoted missed it. The id is now `<plan-provider>` in
+the five files that held it, the record says so, and `raw/README.md` now states the exception
+that allows it. Nothing else in the record changed, and no standing rests on the id.
+
 ## [2026-09-27] ingest | MiMo Code's headless forms
 
 A trial of MiMo Code 0.1.15, launched and resumed through `launch.sh`, recorded in

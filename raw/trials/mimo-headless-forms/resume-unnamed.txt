@@ -6,4 +6,4 @@ tool_use events: none
 step_finish reasons: stop
 --- the last text event ---
 KESTREL
-assistant messages, model and variant: xiaomi-token-plan-sgp/mimo-v2.6-pro low; xiaomi-token-plan-sgp/mimo-v2.6-pro low; xiaomi-token-plan-sgp/mimo-v2.6-pro low; xiaomi-token-plan-sgp/mimo-v2.6-pro None
+assistant messages, model and variant: <plan-provider>/mimo-v2.6-pro low; <plan-provider>/mimo-v2.6-pro low; <plan-provider>/mimo-v2.6-pro low; <plan-provider>/mimo-v2.6-pro None
