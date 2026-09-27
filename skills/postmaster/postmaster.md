@@ -113,8 +113,9 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    build, browser suite, docs to read first, tracker, risk surfaces), the team from the
    config, `CHECKPOINT_MODE` from `ship.checkpoint_mode` and `MERGE_AUTHORITY` from
    `ship.merge_authority`, either overridden only where the user said so for this run, the
-   dispatch path and `<tool>`. Then `<tool>/scripts/turnpikes.sh legs <dispatch>` exits 0 and
-   prints the legs step 2 checked, before anything is launched.
+   dispatch path and `<tool>`. The config here is the one in `run.json`. Then
+   `<tool>/scripts/turnpikes.sh legs <dispatch>` exits 0 and prints the legs step 2 checked,
+   before anything is launched.
 7. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. The
    coachman never touches the ticket's state before stage 3.
 
@@ -123,8 +124,10 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
 A run's legs are the lines `<tool>/scripts/turnpikes.sh legs <dispatch>` prints: `synthesis` and
 `ship`, with `review` between them when the waybill names a turnpike it runs (`coachman.md`,
 Legs). Each leg is a fresh coachman thread, launched the same way; the first is launched after
-the waybill, every later one when the previous leg's marker appears. Below, `<p>` is the leg
-before leg `<n>` in that list.
+the waybill, every later one when the previous leg's marker appears. Every launch and resume in
+a run passes `--run <dispatch>`, so it runs on the config in the run's `run.json`, never the
+live one. Below, `<p>` is the leg before leg `<n>` in that list.
+[Why a run keeps the config it started with](../../wiki/concepts/run-config.md)
 
 1. **Write the leg prompt** to `<runs>/<TICKET>/leg-<n>-prompt.txt`: "You are the coachman
    for leg <n> of <TICKET>. Read `<dispatch>/brief.md`, then `<tool>/skills/postmaster/coachman.md`,
@@ -143,7 +146,8 @@ before leg `<n>` in that list.
    <tool>/scripts/host.sh run "$(<tool>/scripts/host.sh name <dispatch> coachman)" <repo>/.worktrees/<TICKET> \
        --out <dispatch>/logs/coachman-leg-<n>-events.jsonl --err <dispatch>/logs/coachman-leg-<n>.err \
        --marker <dispatch>/.leg-<n>-exited \
-       -- <tool>/scripts/launch.sh launch coachman <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt --leg <leg-name>
+       -- <tool>/scripts/launch.sh launch coachman <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt --leg <leg-name> \
+       --run <dispatch>
    ```
 
    The name comes from the waybill through `host.sh name`, never typed: a ticket's title can
@@ -163,7 +167,8 @@ before leg `<n>` in that list.
    <tool>/scripts/host.sh run "$(<tool>/scripts/host.sh name <dispatch> coachman)" <repo>/.worktrees/<TICKET> --append \
        --out <dispatch>/logs/coachman-leg-<n>-events.jsonl --err <dispatch>/logs/coachman-leg-<n>.err \
        --marker <dispatch>/.leg-<n>-exited \
-       -- <tool>/scripts/launch.sh resume <name> <repo>/.worktrees/<TICKET> <thread-id> <dispatch>/leg-<n>-resume-<time>.txt --leg <leg-name>
+       -- <tool>/scripts/launch.sh resume <name> <repo>/.worktrees/<TICKET> <thread-id> <dispatch>/leg-<n>-resume-<time>.txt --leg <leg-name> \
+       --run <dispatch>
    ```
 
    `<name>` and `<thread-id>` are the leg's `coachman.legs.<n>.name` and `.thread_id`. Log
@@ -214,8 +219,8 @@ Act on the `NEXT` column, run by run, and log every action:
 `git status`. Treat every uncommitted change as unverified. Log `handoff-accept` and finish
 the leg." Move the leg's stream to `<dispatch>/logs/coachman-leg-<n>-walled-events.jsonl`, then
 launch the takeover through the wrapper of Stage C step 3, with `<tool>/scripts/launch.sh launch
-coachman_fallback <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-takeover.txt` in place of the
-coachman's launch. Record its thread id from the new stream (`harnesses.md`) as
+coachman_fallback <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-takeover.txt --run <dispatch>`
+in place of the coachman's launch. Record its thread id from the new stream (`harnesses.md`) as
 `coachman.legs.<n>.thread_id`, with `coachman_fallback` as its `name`.
 
 A leg's `.leg-<n>-exited` marker with `.leg-<n>-done` beside it is normal completion. Every
