@@ -11,10 +11,10 @@ watch it, and lands its marker on exit (`hosts.md`); that is what makes one wrap
 runbooks correct for every harness and every host.
 
 **`<tool>/scripts/launch.sh` is the executable form of this file.** `launch.sh form <name>` prints the
-exact command for a configured lane or role; `launch` and `resume` run it; `skill` prints the
-prompt that invokes a harness's own review skill (Own review skills, below). The script and this
-file change together, and a form the script refuses (agy resume) is a form this file has
-not recorded yet.
+exact launch and resume commands for a configured lane or role; `launch` and `resume` run them;
+`skill` prints the prompt that invokes a harness's own review skill (Own review skills, below).
+The script and this file change together, and a form the script refuses (agy resume) is a form
+this file has not recorded yet.
 
 Every lane runs unrestricted. Its containment is its worktree (`coachman.md`, Lane capability),
 so the bypass form below is passed on every launch AND every resume. The interactive postmaster
@@ -229,11 +229,19 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json \
   `none`, `minimal`, `low`, `medium`, `high` (its default), `xhigh`, `max` and `ultra`.
 - Stdin: Muse Code reads its stdin to the end before it starts, and an open pipe held a launch
   for as long as the pipe stayed open. The launch gives it `/dev/null`.
+- The prompt: `--prompt-file` delivers the file byte for byte. `turn.input.user` carries it,
+  and the echo provider answered with it unchanged.
+  [Why the form matters](../../wiki/concepts/prompt-delivery.md)
 - `--json` writes one JSON record per line. Each carries `stream` (`kind` `session`, and its
   `id`), a `sequence`, and a `payload_type` with its `payload`.
 - Thread id: `stream.id` of the first record, a UUID.
 - Resume: the launch form with `--session-id <thread id>`, the model and the effort passed
-  again. `muse resume` opens the interactive picker and is not used.
+  again. `muse resume` opens the interactive picker and is not used. Given an id its data
+  directory does not hold, Muse Code opens a new thread under that id and exits 0. So
+  `launch.sh` refuses a resume unless Muse Code's own export (`muse export --session <id>`)
+  finds the thread in the launch's data directory. It is only there from the same directory,
+  name, leg and run. Resumed from another directory with its launch's data, Muse Code refuses
+  on its own, with exit 1. [Why the exit is not enough](../../wiki/concepts/resume-exit-status.md)
 - Final message: `payload.text` of the last `run.terminal.*` record, `run.terminal.completed` on
   success. A run that fails, on a model that does not exist say, ends on `run.terminal.failed`
   with no text and exit 1, and says why on stderr.
@@ -256,7 +264,8 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json \
   `muse login` fails to save its credential to the keychain.
 - It updates itself in the background unless `MUSE_NO_AUTO_UPDATE=1` is set. A run records the
   version it was dispatched with, and a later leg may run a newer one.
-- Source: a trial of Muse Code 1.4.0 (R4302.1), `raw/trials/muse-headless-forms/`.
+- Source: trials of Muse Code 1.4.0 (R4302.1), `raw/trials/muse-headless-forms/`, and for the
+  prompt and resumes, `raw/trials/muse-mimo-controls/`.
 
 ## mimo (MiMo Code)
 
@@ -267,7 +276,10 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/mimo/<key> MIMOCODE_DISABLE_CLAUDE_I
 ```
 
 - The prompt arrives on stdin. MiMo Code reads its stdin to the end before it starts, so an
-  open pipe holds a launch, and the prompt file is the only stdin a launch ever has.
+  open pipe holds a launch, and the prompt file is the only stdin a launch ever has. The model
+  receives the file byte for byte, after one newline MiMo Code puts before it. A message
+  argument that holds a space arrives wrapped in double quotes with its own quotes escaped, and
+  `-f` only attaches a file to a message. [Why the form matters](../../wiki/concepts/prompt-delivery.md)
 - `--dangerously-skip-permissions` is the bypass form: it approves whatever no rule denies.
 - The model is `provider/model`, and a key works only with the provider id of the plan it
   belongs to. `--variant` sets the effort: MiMo V2.6 Pro's variants are
@@ -277,7 +289,12 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/mimo/<key> MIMOCODE_DISABLE_CLAUDE_I
 - Thread id: the `sessionID` on the first event.
 - Resume: the launch form with `-s <thread id>`, the model and the variant passed again. A
   resume that names no variant runs without one, as `mimo export <session>` shows: it records
-  each message's provider, model and variant.
+  each message's provider, model and variant. Given an id its data directory does not hold, it
+  exits 0 with no event at all, having sent nothing, and says `Session not found` only on
+  stderr. Resumed from another directory with its launch's data, it continues the thread and
+  runs its tools in that directory. So `launch.sh` refuses a resume unless `mimo export <id>`
+  finds the thread in the launch's data directory. It is only there from the same directory,
+  name, leg and run. [Why the exit is not enough](../../wiki/concepts/resume-exit-status.md)
 - Thread name: `--title <text>` on a launch, which `launch.sh` passes from
   `POSTMASTER_LAUNCH_NAME`.
 - Final message: the `part.text` of the last `text` event; `step_finish` with reason `stop`
@@ -299,7 +316,8 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/mimo/<key> MIMOCODE_DISABLE_CLAUDE_I
   did not run a project's Claude Code hook (trial). Its code also reads `~/.claude.json`'s MCP
   servers and Claude Code's commands. The launch keeps the MCP servers and the commands, as a
   claude lane has them; no Claude Code hook guards a MiMo Code launch.
-- Source: a trial of MiMo Code 0.1.15, `raw/trials/mimo-headless-forms/`.
+- Source: trials of MiMo Code 0.1.15, `raw/trials/mimo-headless-forms/`, and for the prompt and
+  resumes, `raw/trials/muse-mimo-controls/`.
 
 ## Own review skills
 

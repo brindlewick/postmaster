@@ -36,7 +36,8 @@ env_file = "~/.postmaster/lanes/mimo.env"       # XIAOMI_API_KEY=<key>
 # The team for a run. At least two workhorses from different vendors. Reviewers are lanes too, the
 # workhorses by default; a third lane of another family may be added. The coachman and its fallback
 # are never a model that runs as a lane in the same run, and both need a harness with a
-# resume form (codex, grok, claude or pi), since rulings arrive by resuming the coachman's thread.
+# resume form (codex, grok, claude, pi, muse or mimo), since rulings arrive by resuming the
+# coachman's thread.
 [team]
 workhorses = ["luna", "deepseek"]
 reviewers = ["luna", "deepseek"]
