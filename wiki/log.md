@@ -27,6 +27,58 @@ and what would settle it; the turnpikes page says a turnpike need not gate. The 
 the same day that style blocks a ship was reverted on #40's pull request before it merged. Both
 pages stay `claimed`.
 
+## [2026-09-27] lint | fixture copies go under ~/Code/fixtures
+
+The fixture-runs page now records where `fixture.sh new` puts a copy when given only a name, and
+that trusting that folder in Claude Code does not spare a copy the trust prompt: Claude Code
+2.1.283 carries a trusted folder's trust to a plain folder inside it, never to a git repository.
+No standing changed.
+
+## [2026-09-27] lint | fixture tickets go in the fixture's own store
+
+The fixture-runs page now records that a fixture run's ticket is filed in the fresh repository's
+own ticket store, through the tracker #11 added, and no longer in a GitHub repository kept for
+fixture tickets, which the user rejected. No standing changed.
+
+## [2026-09-27] ingest | a resumed codex thread runs on the model its resume names
+
+Second harness page, from a recorded trial of codex 0.157.1 against a stand-in provider
+(`raw/trials/codex-resume-forms/`). A resume does not restore the model or the effort its thread
+was launched on. It runs on what it names, and otherwise on codex's default. It prints text
+without `--json`, and exits 2 on a prompt that starts with `-` unless `--` comes first.
+`launch.sh resume` passed none of these, so a resumed codex lane or coachman ran on codex's
+default. `harnesses.md` and `launch.sh` now carry the form the trial found. The trial also
+corrects the adapter: without the bypass flag, a resume runs `workspace-write` in a trusted
+worktree and read-only in an untrusted one. Standing `settled`, for codex 0.157.1. Issue #45.
+
+## [2026-09-27] ingest | muse and mimo: what arrives, and resumes of a missing thread
+
+A trial of Muse Code 1.4.0 and MiMo Code 0.1.15 through `launch.sh`, recorded in
+`raw/trials/muse-mimo-controls/`, with a positive and a negative control for each check issue
+#71 names. Muse Code's `--prompt-file` delivers the prompt verbatim. MiMo Code's stdin delivers
+it after one newline of its own, and a message argument arrives quoted. Both exit 0 when resumed
+on a thread their data directory does not hold: Muse Code opens a new thread under the id, and
+MiMo Code does nothing. `prompt-delivery` gains both harnesses and keeps its standing. A new
+page, `resume-exit-status`, records the resume finding at `settled`, and `launch.sh` now refuses
+such a resume.
+
+## [2026-09-27] redact | a plan provider id in the MiMo trial record
+
+The trial in `raw/trials/mimo-headless-forms/` named the provider id of one account's plan, which
+names a region, and the scrub before it was promoted missed it. The id is now `<plan-provider>` in
+the five files that held it, the record says so, and `raw/README.md` now states the exception
+that allows it. Nothing else in the record changed, and no standing rests on the id.
+
+## [2026-09-27] ingest | MiMo Code's headless forms
+
+A trial of MiMo Code 0.1.15, launched and resumed through `launch.sh`, recorded in
+`raw/trials/mimo-headless-forms/`. Its forms are in `skills/postmaster/harnesses.md`. Two of its
+findings bear on how far lanes are kept apart. A fresh session recalled a word another session
+in the same data directory had been asked to remember, so each lane now gets its own. And a lane
+asked to search went through the whole home directory, Claude Code's transcripts and another
+lane's notes included, and found the word: a data directory of its own is not a sandbox. No
+standing changes.
+
 ## [2026-09-27] ingest | Muse Code's headless forms
 
 A trial of Muse Code 1.4.0, launched and resumed through `launch.sh`, recorded in
@@ -66,6 +118,17 @@ The page on faults a run finds in postmaster now says that a fault ticket goes o
 postmaster's own repository on GitHub, when the user administers it, and why a draft errs
 towards withholding. The drafts are shown to the user once, when a run's aftercare ends. No
 standing changed.
+
+## [2026-09-26] ingest | fixture runs test the flow end to end
+
+First page in a new Testing the flow area. A small app with two tickets whose outcome is known,
+one tightly specified and one open in design, each with acceptance tests written before any run
+and kept out of every run. A fixture run is scored from its records rather than its report, and
+a change to the coachman contract now merges only after one scores clean. The page records why
+the tests are hidden and how a fixture run gets its ticket: a GitHub repository kept for fixture
+tickets, since the waybill-only route skips the postmaster's own check of the ticket and the
+tracker with no service does not exist yet. Standing `claimed`, since no fixture run has been
+recorded.
 
 ## [2026-09-26] ingest | when a review loop should stop
 
@@ -123,6 +186,7 @@ happens, with its own diagnosis and proposed fix, stops on a fault in a control 
 around anything else, and the postmaster turns the run's faults into tickets on postmaster's
 own tracker when the run closes. The page records why, and what a fault ticket may carry.
 Standing `claimed`, since no run bears on it yet.
+
 ## [2026-09-26] ingest | a run keeps the config it started with
 
 A decision page. A run now launches and resumes every lane and every leg on the config it

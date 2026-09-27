@@ -27,10 +27,17 @@ harness = "claude"
 model = "deepseek-v4.1-flash[1m]"
 env_file = "~/.postmaster/lanes/deepseek.env"   # ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN
 
+[lanes.mimo]
+harness = "mimo"                                # MiMo Code; its model is provider/model
+model = "<plan-provider>/mimo-v2.6-pro"         # the provider id of your key's plan
+effort = "high"                                 # MiMo V2.6 Pro's variants are low, medium, high
+env_file = "~/.postmaster/lanes/mimo.env"       # XIAOMI_API_KEY=<key>
+
 # The team for a run. At least two workhorses from different vendors. Reviewers are lanes too, the
 # workhorses by default; a third lane of another family may be added. The coachman and its fallback
 # are never a model that runs as a lane in the same run, and both need a harness with a
-# resume form (codex, grok, claude or pi), since rulings arrive by resuming the coachman's thread.
+# resume form (codex, grok, claude, pi, muse or mimo), since rulings arrive by resuming the
+# coachman's thread.
 [team]
 workhorses = ["luna", "deepseek"]
 reviewers = ["luna", "deepseek"]

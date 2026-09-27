@@ -1,0 +1,44 @@
+The prompt file: 163 characters, 'Line one of the trial prompt: say "pineapple", then stop. REPLY=alpha\n- a line that starts with a dash\n$HOME `backticks` and an @README.md mention\nunicode: café ✓\n'
+
+muse: its echo provider, and its own provider (muse-spark-1.3-contributor) for the model checks
+thread id: stream.id of the first record
+  ok   + the launch's first stream.id, 01a0e25d-462e-7f80-98b1-1784c65d3b64, is on each of its 28 records, and muse's own export finds that thread in the launch's data directory (exit 0)
+  ok   - an id muse never issued: its export finds no such thread (exit 1)
+final message: payload.text of the last run.terminal.* record
+  ok   + the launch's last run.terminal.completed carries the echo provider's answer, "echo: " and the prompt file byte for byte
+  ok   - a run that fails ends on run.terminal.failed, and the reader finds no final message (exit 1)
+prompt as received: turn.input.user, and what the echo provider answered
+  ok   + the launch form's --prompt-file reached the turn byte for byte
+  ok   - the same prompt as an argument, `"$(cat <file>)"`, arrived as ' mention\nunicode: café ✓': the check tells a changed prompt apart
+resume: the same thread, on its model
+  ok   + through launch.sh the resume carries the launch's id on each record, and muse's record says session.resumed after 1 turn(s)
+  ok   - a fresh launch carries another id, 01a0e25d-5244-7f20-abb9-9b0d330c324a, and its record says session.opened with resume false and no session.resumed
+  ok   + its own provider: the launch ran on muse-spark-1.3-contributor (startup), the resume through launch.sh on the same thread and on muse-spark-1.3-contributor (replay); final messages 'kumquat' and 'damson'
+  ok   - a resume of that thread naming another model reports it: run.model.configured no-such-model (startup)
+a thread muse does not hold
+  ok   - launch.sh refuses to resume an id muse never issued, exit 1, and no thread by that id appears: launch: no muse thread 226aa364-3b6e-417b-a651-39bb535ecf32 in this launch's data directory, so nothing was resumed; resume from the directory, --leg and --run 
+       fact: muse itself, resuming that id, exited 0 having opened a new thread under it: first stream.id 226aa364-3b6e-417b-a651-39bb535ecf32, final message 'echo: Second turn. REPLY=beta\n'
+  ok   - launch.sh refuses a resume from another directory, whose data directory holds no such thread (exit 1)
+       fact: muse itself, resuming the thread from another directory with its data directory, exited 1: session 01a0e25d-462e-7f80-98b1-1784c65d3b64 was created in workspace <trial>/repo; refusing to resume in workspace <trial>/other; pass --worksp
+
+mimo: standin.py
+thread id: sessionID of the first event
+  ok   + the launch's first sessionID, ses_ffe5f1da216f4ffeLTkHEQXCDF, is on each of its 3 events, and mimo's own export finds it in the launch's data directory
+  ok   - an id mimo never issued: its export finds no such thread (exit 1)
+final message: part.text of the last text event
+  ok   + the launch's last text event is 'alpha', what the stand-in answered
+  ok   - a turn the stand-in fails has no text event and one error event, and the reader finds no final message (exit 0)
+prompt as received: the last user message the stand-in was sent
+  ok   + the launch form's stdin arrived as the prompt file byte for byte, after one newline mimo puts before it
+  ok   - the same prompt as an argument arrived as '"Line one of the trial prompt: say \\"pin'...: quoted, its own quotes escaped
+resume: the same thread, on its model
+  ok   + through launch.sh the resume carries the launch's id, sends the launch's turn and answer first, and runs on standin-a, the launch's model
+  ok   - a resume of that thread naming another model is sent as standin-b: the check tells another model apart
+  ok   - a fresh launch sends one user message and no earlier turn, under another id, ses_ffe5f1da15180ffecIf7uddEMm
+a thread mimo does not hold
+  ok   - launch.sh refuses to resume an id mimo never issued, exit 1, and nothing reaches the stand-in: launch: no mimo thread ses_ffe5f1da0000000000000none in this launch's data directory, so nothing was resumed; resume from the directory, --leg and --run it was 
+       fact: mimo itself, resuming that id, exited 0 with 0 events, sent the stand-in 0 requests, and wrote on stderr:   message: "Session not found: ses_ffe5f1da0000000000000none",
+  ok   - launch.sh refuses a resume from another directory, whose data directory holds no such thread (exit 1)
+       fact: mimo itself, resuming the thread from another directory with its data directory, exited 0, and its shell tool ran in <trial>/other
+
+checks: every control behaved
