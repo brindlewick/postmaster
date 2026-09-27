@@ -78,7 +78,8 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   second writer on the same file cannot overwrite the first.
 - **`--pidfile` gets its pid, which is also its process group:** `kill -- -<pid>` stops all of
   it. `host.sh run` returns as soon as the launch has started. The wait still goes in the same
-  command as the launch, as `<tool>/scripts/wait-for-markers.sh`.
+  command as the launch, as `<tool>/scripts/wait-for-markers.sh`, or for a review round
+  `<tool>/scripts/review-round.sh wait`.
 - **A launch outlives its caller.** It belongs to the host's server, or with no host to a session
   of its own, so a caller's background-task cap or its exit does not reach it.
 - **A launch carries its own pane's identity, never its caller's**: `HERDR_PANE_ID`, the tab and
@@ -97,9 +98,11 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   event of interest, each with its time.
 - **Every launch is registered while it runs**, under `POSTMASTER_HOST_STATE` (default
   `~/.postmaster/host`), with the worktree it was placed in, whatever host ran it. `host.sh stop
-  <worktree>` stops every launch running there, and never from inside that worktree, which would
-  stop the caller too. `host.sh close <worktree>` refuses while one runs there, after waiting 15
-  seconds for one that is just ending.
+  <worktree>` stops every launch running there and everything each one started, even in a
+  session of its own, as a harness runs a tool command: TERM first, then KILL to whatever is left
+  after 20 seconds (`POSTMASTER_HOST_STOP_WAIT`), and exit 2 naming anything still running. It
+  never runs from inside that worktree, which would stop the caller too. `host.sh close
+  <worktree>` refuses while one runs there, after waiting 15 seconds for one that is just ending.
 - **It degrades rather than refuses.** If the host cannot place the launch, or its pane has not
   started it within 20 seconds, it runs in the background instead, exactly once, and `host.sh`
   prints `host=none` rather than where it would have been.
