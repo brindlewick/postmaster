@@ -36,8 +36,7 @@
 #   exit 1  usage, config or run.json missing or unreadable, unknown name, a leg that is not
 #           synthesis, review or ship, the coachman launched or resumed with no --leg, a
 #           coachman or fallback on a lane's model, harness not on PATH, env_file missing, a
-#           form this script does not have (muse; agy resume), or a skill that is not
-#           security-review
+#           form this script does not have (agy resume), or a skill that is not security-review
 #   exit 3  skill: the lane's harness has no such skill recorded
 #   else    the harness's own exit code
 set -uo pipefail
@@ -57,7 +56,10 @@ if [ "${1:-}" = --self-test ]; then
   for h in claude pi codex; do
     printf '#!/bin/sh\necho "$@ probe=${PROBE:-}"\n' > "$tmp/bin/$h" && chmod +x "$tmp/bin/$h"
   done
-  [ -x "$tmp/bin/claude" ] && [ -x "$tmp/bin/pi" ] && [ -x "$tmp/bin/codex" ] || { echo "self-test: cannot write the stub harnesses"; exit 1; }
+  # The muse stub also prints what arrived on its stdin.
+  printf '#!/bin/sh\nprintf "%%s probe=%%s stdin=%%s data=%%s\\n" "$*" "${PROBE:-}" "$(cat)" "${XDG_DATA_HOME:-}"\n' > "$tmp/bin/muse" && chmod +x "$tmp/bin/muse"
+  [ -x "$tmp/bin/claude" ] && [ -x "$tmp/bin/pi" ] && [ -x "$tmp/bin/codex" ] && [ -x "$tmp/bin/muse" ] \
+    || { echo "self-test: cannot write the stub harnesses"; exit 1; }
   printf 'Continue.\n' > "$tmp/prompt.txt"
   fixture() {  # fixture <name> [<key>...]; each key in [team.coachman_legs] runs on <key>-model
     local name=$1 k; shift
@@ -235,14 +237,50 @@ PY
     && ok "no launch or resume in coachman.md or postmaster.md lacks --run <dispatch>" \
     || fail "no launch or resume in coachman.md or postmaster.md lacks --run <dispatch>"
 
+  echo "muse"
+  printf '[lanes.m]\nharness = "muse"\nmodel = "muse-model"\neffort = "max"\nenv_file = "%s"\n\n[lanes.n]\nharness = "muse"\nmodel = "muse-model"\n\n[team]\ncoachman = { harness = "muse", model = "coach-muse" }\ncoachman_fallback = { harness = "claude", model = "fallback-model" }\n' "$tmp/over.env" > "$tmp/muse.toml"
+  printf '[lanes.m]\nharness = "muse"\nmodel = "muse-model"\n' > "$tmp/muse-bare.toml"
+  mkdir -p "$tmp/wt/sub" && cp "$tmp/prompt.txt" "$tmp/wt/sub/p.txt"
+  hd=$tmp/harness-data
+  mrun() {  # mrun <fixture> <args...>: the harness data root in the test's own folder, stdin a pipe that carries a line
+    local f=$1; shift
+    out=$(printf 'leak\n' | env POSTMASTER_HARNESS_DATA="$hd" POSTMASTER_CONFIG="$tmp/$f.toml" PATH="$tmp/bin:$PATH" "$self" "$@" 2>"$tmp/err"); rc=$?
+    err=$(cat "$tmp/err")
+  }
+  data_of() { printf '%s\n' "$out" | sed -n 's/.* data=//p'; }
+  mrun muse launch m "$tmp/wt" "$tmp/prompt.txt"; a=$(data_of)
+  [ $rc -eq 0 ] && [ "$out" = "exec --json --prompt-file $tmp/prompt.txt --model muse-model --reasoning-effort max --yolo probe=reached stdin= data=$a" ] \
+    && case $a in "$hd"/muse/?*) true ;; *) false ;; esac && [ -d "$a" ] \
+    && ok "a muse launch: JSON events, the prompt file, model, effort, bypass form and env file, nothing on stdin, and its own data directory" \
+    || fail "a muse launch: JSON events, the prompt file, model, effort, bypass form and env file, nothing on stdin, and its own data directory"
+  mrun muse resume m "$tmp/wt" 01a0-sess "$tmp/prompt.txt"; b=$(data_of)
+  [ $rc -eq 0 ] && case $out in "exec --json --prompt-file $tmp/prompt.txt --session-id 01a0-sess --model muse-model --reasoning-effort max --yolo "*) true ;; *) false ;; esac \
+    && [ "$b" = "$a" ] && ok "a muse resume names the session, keeps the model and effort, and finds the launch's data directory" \
+    || fail "a muse resume names the session, keeps the model and effort, and finds the launch's data directory"
+  mrun muse launch n "$tmp/wt" "$tmp/prompt.txt"; c=$(data_of)
+  mrun muse launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg synthesis; d=$(data_of)
+  mrun muse launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg review; e=$(data_of)
+  mrun muse launch m "$tmp/elsewhere" "$tmp/prompt.txt"; f=$(data_of)
+  [ -n "$c" ] && [ -n "$d" ] && [ -n "$e" ] && [ -n "$f" ] && [ "$(printf '%s\n' "$a" "$c" "$d" "$e" "$f" | sort -u | wc -l | tr -d ' ')" -eq 5 ] \
+    && ok "another lane, each coachman leg, and the same lane elsewhere each get a data directory of their own" \
+    || fail "another lane, each coachman leg, and the same lane elsewhere each get a data directory of their own"
+  out=$(cd "$tmp/wt" && env POSTMASTER_HARNESS_DATA="$hd" POSTMASTER_CONFIG="$tmp/muse-bare.toml" PATH="$tmp/bin:$PATH" "$self" launch m "$tmp/elsewhere" sub/p.txt 2>"$tmp/err" </dev/null); rc=$?; err=$(cat "$tmp/err")
+  [ $rc -eq 0 ] && case $out in "exec --json --prompt-file $tmp/wt/sub/p.txt --model muse-model --yolo "*) true ;; *) false ;; esac \
+    && ok "a relative prompt file is made absolute before the cd, and no effort means no effort flag" \
+    || fail "a relative prompt file is made absolute before the cd, and no effort means no effort flag"
+  carries "the muse form shows its data directory, the bypass form and an empty stdin" muse \
+    "env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json --prompt-file <prompt-file> --model muse-model --reasoning-effort max --yolo < /dev/null" form m
+
   echo "skills"
-  printf '[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n\n[lanes.two]\nharness = "codex"\nmodel = "other-model"\n' > "$tmp/skills.toml"
+  printf '[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n\n[lanes.two]\nharness = "codex"\nmodel = "other-model"\n\n[lanes.three]\nharness = "muse"\nmodel = "muse-model"\n' > "$tmp/skills.toml"
   run skills skill one security-review
   [ $rc -eq 0 ] && [ "$out" = /security-review ] && ok "a claude lane's security review skill is /security-review" || fail "a claude lane's security review skill is /security-review"
   run skills skill two security-review
   [ $rc -eq 3 ] && [ -z "$out" ] && case $err in *"no security review skill"*) true ;; *) false ;; esac \
     && ok "a harness with no security review skill is exit 3, never a prompt" || fail "a harness with no security review skill is exit 3, never a prompt"
   refused "a skill that is not recorded is refused" skills "no such skill: code-review" skill one code-review
+  run skills skill three security-review
+  [ $rc -eq 3 ] && [ -z "$out" ] && ok "a muse lane has no security review skill: exit 3" || fail "a muse lane has no security review skill: exit 3"
 
   echo
   [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }
@@ -370,7 +408,7 @@ case $CMD in
   *) die "unknown command: $CMD" ;;
 esac
 [ "$CMD" = form ] || [ -d "$CWD" ] || die "no such directory: $CWD"
-if [ "$HARNESS" = pi ] && [ "$CMD" != form ]; then
+if { [ "$HARNESS" = pi ] || [ "$HARNESS" = muse ]; } && [ "$CMD" != form ]; then   # read after the cd
   prompt_dir=$(CDPATH= cd -P -- "$(dirname -- "$PROMPT")" && pwd -P) || die "cannot resolve prompt file: $PROMPT"
   PROMPT=$prompt_dir/$(basename "$PROMPT")
 fi
@@ -421,12 +459,29 @@ case $HARNESS in
     [ -n "${POSTMASTER_LAUNCH_NAME:-}" ] && cmd+=(--name "$POSTMASTER_LAUNCH_NAME")
     STDIN_FILE=$PROMPT ;;
   muse)
-    die "muse adapter is incomplete (stream flag, bypass form, thread id, resume form); fill harnesses.md and this script from a trial run first" ;;
+    # --yolo is the bypass form: it turns off approval and the sandbox, which needs unprivileged
+    # user namespaces, and trusts the workspace for the run. A resume is a launch that names the
+    # session. The prompt comes from its file, so stdin carries nothing. Muse Code keeps its
+    # sessions and a memory that outlives them under XDG_DATA_HOME, so each lane and each leg
+    # gets its own, keyed by run, directory, name and leg: a resume finds its session, and nothing
+    # carries between lanes, legs or runs.
+    if [ "$CMD" = form ]; then MUSE_DATA='<harness-data>/muse/<key>'
+    else
+      MUSE_DATA=$(printf '%s|%s|%s|%s' "$RUN" "$(CDPATH= cd -P -- "$CWD" && pwd -P)" "$NAME" "$LEG" | cksum | tr ' ' '-')
+      MUSE_DATA=${POSTMASTER_HARNESS_DATA:-$HOME/.postmaster/harness-data}/muse/$MUSE_DATA
+    fi
+    cmd=(env "XDG_DATA_HOME=$MUSE_DATA" muse exec --json --prompt-file "$PROMPT")
+    [ "$CMD" = resume ] && cmd+=(--session-id "$THREAD")
+    cmd+=(--model "$MODEL")
+    [ -n "${EFFORT:-}" ] && cmd+=(--reasoning-effort "$EFFORT")
+    cmd+=(--yolo)
+    STDIN_FILE=/dev/null ;;
   *) die "no form for harness '$HARNESS'" ;;
 esac
 
+[ "$HARNESS" = muse ] && [ "$CMD" != form ] && { mkdir -p "$MUSE_DATA" || die "cannot create $MUSE_DATA"; }
 if [ "$CMD" = form ]; then
-  show() { case $1 in '<'*'>'|'$(cat <prompt-file>)') printf '%s ' "$1" ;; *) printf '%q ' "$1" ;; esac; }
+  show() { case $1 in '<'*'>'|*'=<'*'>'|'$(cat <prompt-file>)') printf '%s ' "$1" ;; *) printf '%q ' "$1" ;; esac; }
   printf 'cd '; show "$CWD"; printf '&& '
   for a in "${cmd[@]}"; do show "$a"; done
   [ -n "${STDIN_FILE:-}" ] && { printf '< '; show "$STDIN_FILE"; }

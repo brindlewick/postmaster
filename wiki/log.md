@@ -8,6 +8,15 @@ updated: 2026-09-27
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-27] ingest | Muse Code's headless forms
+
+A trial of Muse Code 1.4.0, launched and resumed through `launch.sh`, recorded in
+`raw/trials/muse-headless-forms/`. Its launch and resume forms, thread id and final message
+are recorded in `skills/postmaster/harnesses.md`. It keeps a memory that outlives a session:
+a fresh launch recalled a word an earlier one had been asked to remember, where a lane with its
+own data directory did not. So each lane and each coachman leg now gets its own. No standing
+changes.
+
 ## [2026-09-27] ingest | one round of bug review, for now
 
 The user read #59's options for ending the review loop and chose none of them as written: for

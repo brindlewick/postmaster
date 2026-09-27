@@ -71,7 +71,25 @@ QUIET = {
     "tool_execution_update", "auto_compaction_end", "auto_retry_end",
 }
 
+def muse(e):
+    # muse (muse exec --json): each record names its payload_type, and its stream is the session
+    pt, p = str(e.get("payload_type")), e.get("payload") or {}
+    if pt == "run.model.configured":
+        return "session %s · %s" % ((e.get("stream") or {}).get("id"), p.get("model_id"))
+    if pt == "tool.result":
+        facts = p.get("correlation_facts") or {}
+        name = facts.get("tool_name") or "tool"
+        if facts.get("outcome") not in (None, "success"):
+            return "tool error: %s" % name
+        return tool_line(name, p.get("edit_facts") or {})
+    if pt.startswith("run.terminal."):
+        said = str(p.get("text") or "").strip()
+        return "result: %s%s" % (p.get("terminal") or pt.split(".")[-1], " · " + short(said) if said else "")
+    return None      # streaming deltas, task lifecycle and bookkeeping: the result carries the text
+
 def render(e):
+    if "payload_type" in e:
+        return muse(e)
     t = e.get("type")
     if t in QUIET:
         return None
@@ -279,6 +297,19 @@ shows "pi: a session starts" '{"type":"session","version":3,"id":"01a0c7e8-5863"
 shows "pi: a tool call" '{"type":"tool_execution_start","toolCallId":"t1","toolName":"bash","args":{"command":"ls"}}' 'bash: ls'
 shows "pi: what the model said" \
   '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"All done."}]}}' 'says: All done.'
+shows "muse: a session starts, with its thread id and model" \
+  '{"stream":{"kind":"session","id":"01a0e16d-17e8"},"payload_type":"run.model.configured","payload":{"model_id":"muse-spark-1.3-contributor","source":"startup"}}' \
+  'session 01a0e16d-17e8 · muse-spark-1.3-contributor'
+shows "muse: a tool call, with what it changed" \
+  '{"stream":{"kind":"session","id":"s1"},"payload_type":"tool.result","payload":{"correlation_facts":{"tool_name":"write_file","outcome":"success"},"edit_facts":{"path":"proof.txt","added":1}}}' \
+  'write_file: proof.txt'
+shows "muse: a failed tool call" \
+  '{"stream":{"kind":"session","id":"s1"},"payload_type":"tool.result","payload":{"correlation_facts":{"tool_name":"shell","outcome":"error"}}}' \
+  'tool error: shell'
+shows "muse: the result, with what the model said" \
+  '{"stream":{"kind":"session","id":"s1"},"payload_type":"run.terminal.completed","payload":{"terminal":"completed","text":"DONE"}}' \
+  'result: completed · DONE'
+shows "muse: a failed run" '{"stream":{"kind":"session","id":"s1"},"payload_type":"run.terminal.failed","payload":{"terminal":"failed","text":""}}' 'result: failed'
 shows "a line that is not JSON is shown as it is" 'plain text from a wrapper' 'plain text from a wrapper'
 shows "an unknown event shows its type" '{"type":"heartbeat","message":"still here"}' 'heartbeat: still here'
 shows "escape sequences in what a model said never reach the terminal" \
@@ -292,6 +323,8 @@ silent "claude: a tool result that succeeded" '{"type":"user","message":{"conten
 silent "claude: a rate-limit event that allowed the call" '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}'
 silent "codex: reasoning" '{"type":"item.completed","item":{"type":"reasoning","text":"hmm"}}'
 silent "pi: a streaming delta" '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Al"}}'
+silent "muse: a task's lifecycle record" '{"stream":{"kind":"session","id":"s1"},"payload_type":"task.lifecycle.started","payload":{"kind":"task_lifecycle"}}'
+silent "muse: a streaming delta, whose text the result carries" '{"stream":{"kind":"session","id":"s1"},"payload_type":"run.output.delta","payload":{"text":"DO"}}'
 silent "pi: the user's own message ending" '{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"do it"}]}}'
 got=$(for i in $(seq 1 50); do printf '{"type":"delta","n":%d}\n' "$i"; done | view)
 [ "$got" = delta ] && ok "fifty unknown events of one type show as one line" || fail "fifty unknown events of one type show as one line" "$got"
