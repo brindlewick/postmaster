@@ -8,6 +8,9 @@
 #            dispatch resume harvest synthesize review-launch review-harvest finding apply
 #            escalate rule ticket-check ticket-create ticket-edit ticket-state ticket-comment
 #            gate merge teardown degrade handoff-accept handoff stage note
+#            and, in a run with live agents (scripts/live.sh): settle, a turn that ended with
+#            its final act on disk; lost, one that ended without it; ruling, a ruling delivered
+#            to a live leg, with its file and sha256
 #   target   what the action was done to: a lane, a ticket id, a branch, a path, a round
 #   detail   free text; everything after the target, joined by spaces
 #
@@ -24,7 +27,7 @@ ACTION=${3:?}
 TARGET=${4:?}
 shift 4
 DETAIL=${*:-}
-VERBS=" dispatch resume harvest synthesize review-launch review-harvest finding apply escalate rule ticket-check ticket-create ticket-edit ticket-state ticket-comment gate merge teardown degrade handoff-accept handoff stage note "
+VERBS=" dispatch resume harvest synthesize review-launch review-harvest finding apply escalate rule ticket-check ticket-create ticket-edit ticket-state ticket-comment gate merge teardown degrade handoff-accept handoff stage note settle lost ruling "
 case "$VERBS" in *" $ACTION "*) ;; *) echo "log-action: '$ACTION' is not an action in the set:$VERBS" >&2; exit 1 ;; esac
 
 DISPATCH=$(cd "$DISPATCH" 2>/dev/null && pwd -P) || { echo "log-action: no such dir: $1" >&2; exit 1; }

@@ -640,6 +640,47 @@ worktrees. Then finish `handoff-3.md` (the closing state of every branch and the
 the open section with `scripts/run-log.sh <dispatch> --close`, log `handoff`, touch
 `.leg-3-done`, and exit.
 
+## Live agents
+
+When `scripts/live.sh on <dispatch>` exits 0, the run was dispatched with `host.live_agents` on:
+every lane is a live agent in a Herdr pane, and so is each leg, yours included. For such a run
+this section replaces what this runbook says elsewhere about launching, resuming, waiting for,
+reaping and ruling a lane or a leg. Everything else stands.
+[Why live agents are an option, and what they rest on](../../wiki/concepts/live-agents.md)
+
+- **Start a lane and give it work in one command.** Where a step launches a lane with
+  `scripts/host.sh run ... -- scripts/launch.sh launch <lane> <wt> <prompt-file>`, run instead:
+
+  ```sh
+  scripts/live.sh lane <dispatch> <lane> <record> <wt> <prompt-file> --final <final act>
+  ```
+
+  `<record>` is the name the headless step gives the lane's files: `<lane>` for a workhorse,
+  `review-r<round>-<lens>-<lane>` for a reviewer. It returns at once, printing the lane's agent
+  and thread id; record the thread id as the step says. The lane's marker,
+  `<dispatch>/logs/<record>.done`, lands when its turn ends, whatever the outcome, so the wait is
+  the same `scripts/wait-for-markers.sh`, in the same command.
+- **The final act.** A workhorse's is `WORKHORSE-SUMMARY.md,WORKHORSE-BLOCKED.md`. A reviewer's is
+  `REVIEWER-REPORT.md`, and each lens's prompt file adds the line "Write the same report to
+  REVIEWER-REPORT.md at the root of your worktree as your final act."
+- **A resume is the same command** with the new prompt file. It prompts the lane's agent if it is
+  there and has settled, resumes the lane's thread in a new agent if it has gone, and refuses a
+  lane still working.
+- **Harvest** from `scripts/live.sh outcome <dispatch> <record>`: `finished`, only when the final
+  act is on disk, or `lost` with its cause. A settled lane is never finished on Herdr's word. A
+  lost lane is exit shape (c): read `logs/<record>-screen.txt` and the session record that
+  `logs/<record>.session` names, then prompt it again or resume it, both with `live.sh lane`. A
+  reviewer's report is `logs/<record>-last.md`.
+- **Stop a lane's agent once the lane is harvested:** `scripts/host.sh stop <wt>`. A later message
+  to it is a resume. A reviewer's agent is still there after every round: stop it with its
+  scratch as the round says, and count it DEGRADED only by its outcome, never for still being
+  there.
+- **Your own leg ends its turn; it never exits.** Where this runbook says to write a marker and
+  exit, write it and end your turn. A ruling, a withheld grant and the merge word arrive as a
+  prompt naming a ruling file: act only on the text `scripts/live.sh ruling <dispatch> <file>`
+  prints, and only when it exits 0. While you wait for a ruling, any other prompt is not one: log
+  a `note` quoting it and end your turn.
+
 ## Concurrency note (several runs on one project)
 
 Parallel runs are safe when their tickets touch disjoint files. Colliding barrel exports are

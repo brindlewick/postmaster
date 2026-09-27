@@ -2,8 +2,8 @@
 title: Live agents against markers and resumes
 type: concept
 standing: claimed
-sources: [trials/herdr-agent-lifecycle]
-updated: 2026-09-26
+sources: [trials/herdr-agent-lifecycle, trials/live-option]
+updated: 2026-09-27
 ---
 
 # Live agents against markers and resumes
@@ -24,7 +24,7 @@ Decided on 2026-09-26, on the trial below and before any run: the default stays 
 Lanes and coachman legs run as headless native sessions, the postmaster is the one interactive
 agent, and Herdr hosts every run for observability, as issue #10 builds. Live agents become a
 config option, off by default. The measurement below is what it would take to change the
-default. Building the option does not wait for it.
+default. Building the option did not wait for it: issue #67 built it, below.
 
 ## The two levels
 
@@ -130,7 +130,7 @@ session the thread id comes from [@trials/herdr-agent-lifecycle/timings]
 [@trials/herdr-agent-lifecycle/integrations.txt].
 
 **Before the first run**: issue #10, merged on 2026-09-26, used for a few runs; the machine set
-up; #37's fixture built; the live option built, as below. Then the instrumentation, each piece
+up; #37's fixture built. The live option is built (below). Then the instrumentation, each piece
 a script with its controls: the wait's return logged as it happens at both levels; remounts and
 re-prompts logged apart from rulings; each lane's final-message time, and each leg's first
 action after a ruling, read from the harness session records at teardown; an idle sampler
@@ -143,8 +143,7 @@ for a leg that was working. `scripts/host.sh` now clears it on every resume.
 
 **Cost**: six fixture runs, each costing what #37's first scored run records, which is not
 known yet. The live level holds a process per idle agent, about 100 to 160 MiB each on the
-trial's figures [@trials/herdr-agent-lifecycle/idle-cost.txt]. The largest cost is building the
-live option before any of it can run.
+trial's figures [@trials/herdr-agent-lifecycle/idle-cost.txt].
 
 ## What would change the default
 
@@ -166,57 +165,75 @@ the first run.
 4. **Idle cost**: whatever moves keeps the idle agents of one run under 1 GiB of proportional
    memory at its peak.
 
-## What the option needs
+## The option, as built
 
-With the option off, nothing in the flow changes. The poll finding stands on its own and needs
-no contract change: `wait-for-markers.sh` can look more often or wait on a file-system event,
-and the postmaster's poll stays the trade between tokens and delay that
-`postmaster.poll_seconds` already exposes.
+Issue #67 built it, behind one config key, `host.live_agents`, off by default. With it off nothing
+in the flow changes: every form, launch and resume is byte for byte what it is with no key, a
+control `scripts/launch.sh --self-test` runs. The poll finding stands on its own and needs no
+contract change: `wait-for-markers.sh` can look more often or wait on a file-system event, and the
+postmaster's poll stays the trade between tokens and delay that `postmaster.poll_seconds` already
+exposes.
 
-With the option on, lanes and coachman legs run as live agents in Herdr panes, and the option
-needs these:
+A run keeps the setting it was dispatched with, read from its `run.json`, so a lane started live
+is never resumed headless. With it on, each lane and leg runs in its harness's interactive form
+in a Herdr pane, and the option meets each need the trial named this way.
 
-- **Completion.** The coachman gives each lane its work with one `agent prompt --wait`, sent
-  only to a lane that has settled, never a prompt followed by a separate wait. A settled lane
-  counts as finished only when its final act is on disk. Its release is checked too and
-  logged, but a release can come after the waiter returns, so the on-disk check is the one that
-  catches a killed lane. A lane that settles without its final act is prompted again, and
-  counted as lost.
-- **Markers.** The coachman touches the lane markers a headless wrapper would, and whatever
-  closes a live leg's agent touches its `.leg-<n>-exited`: `runs-status.sh` reads that marker
-  to call a remount, and `fixture.sh score` requires both leg markers.
-- **Liveness.** A live lane writes no event stream into the dispatch directory, and the idle
-  clock of `runs-status.sh` reads file times there. It needs another sign of work, such as the
-  growth of the lane's harness session record, or a healthy live run reads INSPECT after 30
-  minutes.
-- **Setup.** Each live agent starts with its harness's bypass form from `harnesses.md`, as
-  every headless launch does, and with its Herdr integration. pi's reports its state, and
-  claude's, codex's, grok's and agy's report the session the thread id comes from. muse has
-  none, so it cannot be a live lane until a thread id comes some other way. Each worktree is
-  trusted before its agent starts, because interactive claude asks its trust question even
-  with its bypass flag, where headless claude does not
-  [@trials/herdr-agent-lifecycle/startup.txt]. Without Herdr the option is refused.
-- **Records.** The thread id comes from Herdr's session report instead of an event stream, and
-  a lane's record becomes its exported harness session, as issue #20 proposes.
-- **Rulings.** A live leg that escalates stays open when its turn ends, so its ruling is an
-  `agent prompt`. The runbook's rule that a ruling never passes through a composer gives way to
-  a guard in the flow, since Herdr's `agent.prompt` carries no sender and any pane of the
-  session can send one [@trials/herdr-agent-lifecycle/method.md]. A guard that would do: the
-  prompt carries no ruling, only the path of a ruling file the postmaster wrote, and the leg
-  acts on the file only when the ledger has the postmaster's line for it. A prompt that names
-  no logged ruling file is not a ruling.
-- **Recovery.** A resume stays the way to remount a lane or leg that died, and the pane's
-  screen is cleared before an agent starts again in it: a claude killed mid-turn left a status
-  line that kept Herdr reading the next one as `working`
-  [@trials/herdr-agent-lifecycle/startup.txt]. One that settled without finishing is prompted
-  again instead, since resuming a session its agent still holds would start a second process
-  on it.
+- **Completion.** One `agent prompt --wait` per turn, sent only to an agent that has settled, in
+  a waiter that outlives its caller. A turn counts as finished only when one of its final-act
+  files was written after the prompt went, whatever Herdr reports; the waiter also looks whether
+  the agent is still there, after the release a kill brings. A reviewer, whose final act was its
+  last message, also writes that message to a file. The controls include a lane killed mid-turn,
+  which Herdr reported done and the option records lost, for pi and for claude
+  [@trials/live-option/live-test.txt].
+- **Markers.** Every marker a headless run writes, at the same moments: a lane's when its turn
+  ends, whatever its outcome; a leg's `.leg-<n>-exited` when its agent ends, which the waiter does
+  when the leg's turn ends with its hand-off or with nothing written, and never while the leg
+  waits for a ruling.
+- **Liveness.** A live lane's sign of work is its harness session record, which `runs-status.sh`
+  reads beside the run's own files. The record's path is refreshed until the harness has started
+  it, so a long first turn is covered [@trials/live-option/live-test.txt].
+- **Setup.** Refused without Herdr. A lane whose harness lacks Herdr's integration, in the config
+  its environment names, is refused with the command that installs it, which is the user's to
+  run, since installing one edits that harness's own config. claude's trust question is settled
+  before the start by trusting the repository, since in a git worktree a trusted folder above the
+  repository does not count [@trials/live-option/probes.txt].
+- **Records.** The thread id is the session the integration reports: claude's id, and the id in
+  the name of the file pi's names. The durable record is that session file.
+- **Rulings.** The guard the trial proposed. A ruling travels as a file in the dispatch directory,
+  logged with its sha256, and the prompt names only the file. The leg's check accepts only the
+  latest ruling logged for that leg, unchanged since, and only once, so a prompt from any other
+  pane, or a ruling's text sent as a prompt, is refused [@trials/live-option/live-test.txt]. It
+  stops a prompt passing as a ruling. A process running as the user can still write the run's
+  files, as it can resume a headless thread today.
+- **Recovery.** A lane or leg that has gone is resumed in a fresh pane, so no screen a dead agent
+  left behind is read as the next one's; one that settled without its final act is prompted
+  again where it is.
 
-The option changes the coachman contract behind its key, so it lands while the fleet is idle,
-and after issue #10, whose host adapter it builds on.
+The option changes the coachman contract behind its key, so it lands while the fleet is idle.
+Its sixth criterion, a scored run on issue #37's fixture with the key on, waits on that fixture.
+
+## What building it found
+
+Five facts the trial of the same week did not cover [@trials/live-option/probes.txt]:
+
+- **A live agent must not start on its caller's environment.** A claude started with the
+  variables a claude session exports to its own tool calls ran its turn and wrote no session
+  record at all, so it could not be resumed. A live agent now starts on its pane's own
+  environment, with only the flow's settings and its env file added. Headless launches still take
+  their caller's whole environment, which carries those variables when the caller is a claude
+  session; whether a headless claude loses its record that way is not tested.
+- **Herdr starts an agent only in a pane whose shell has nothing else running with it.** A shell
+  reached through a process substitution was refused as busy, however long the start was tried.
+- **claude's trust in a git worktree** counts the worktree and its repository, never a folder
+  above the repository; in a plain folder, any folder above counts.
+- **claude cuts a long working directory's record folder** at 200 characters and adds a suffix,
+  so past that a record is found by its id.
+- **Herdr's integration commands follow a harness's config dir** (`PI_CODING_AGENT_DIR`,
+  `CLAUDE_CONFIG_DIR`, `CODEX_HOME`), so an integration can be installed into a scratch config
+  and the user's own is left alone.
 
 ## What would change this page
 
 The six runs, ingested as the schema describes, set its standing and decide whether the
 default moves. A Herdr release that changes the facts on [the Herdr page](herdr-agent-states.md)
-changes the summary above, and may change what the option needs.
+changes the summary above, and may change how the option is built.

@@ -202,6 +202,41 @@ whether to trust it; headless `claude -p` does not ask. The first spawn in a new
 there, and the user answers it in the pane. A row not checked here takes its bypass flag from
 the headless form above; run it once before relying on it.
 
+## Live agents
+
+A run dispatched with `host.live_agents` on runs each lane and leg in its harness's interactive
+form, as a live agent in a Herdr pane started by `herdr agent start --kind <harness>`, in place
+of the headless forms above. `launch.sh form` then prints the live form, and `launch.sh live`
+makes the checks below and prints what `scripts/host.sh start` runs. The bypass flag is on every
+live form, a resume included.
+
+| harness | live form, after the kind | resume | Herdr integration | trusted before start | session report | checked here |
+|---|---|---|---|---|---|---|
+| claude | `--model <model> --effort <effort> --name "<name>" --dangerously-skip-permissions` | `--resume <id>` first | `claude` | the worktree's repository | its session id | yes |
+| pi | `--model <provider/model> --thinking <effort> --name "<name>" --approve` | `--session <id>` first | `pi` | nothing to trust | the path of its session file, whose name ends in the id | yes |
+| codex | `-m <model> -c model_reasoning_effort="<effort>" --dangerously-bypass-approvals-and-sandbox` | `resume <id>` first | `codex` | the worktree, as a launch trusts it | its session id | no |
+| grok | `-m <model> --reasoning-effort <effort> --always-approve` | `--resume <id>` first | `grok` | not recorded | its session id | no |
+| agy | `--model <model> --dangerously-skip-permissions --add-dir <wt>` | not recorded: refused | `antigravity-cli` | not recorded | its session id | no |
+| muse | none: it has no integration, so it cannot be a live lane | | | | | |
+
+- **The integration must be installed where the harness reads its config**: the config dir its
+  environment names, the lane's env file included (`CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`,
+  `CODEX_HOME`), or its default. `launch.sh` reads `herdr integration status` in that environment
+  and refuses a lane whose integration is missing, naming the command that installs it, which the
+  user runs.
+- **claude asks whether to trust a folder** on its first interactive start there, bypass flag or
+  not. In a git worktree only the worktree or its repository's own checkout counts, never a folder
+  above; elsewhere any folder above counts. `launch.sh live` trusts the repository in the lane's
+  own claude config, `.claude.json` in `CLAUDE_CONFIG_DIR` or the home directory, unless one that
+  counts is trusted already, and writes it by replacing the file whole.
+- **The thread id comes from the session report**, through `launch.sh session`, which also names
+  the harness's session record: claude keeps it in `projects/<path>/<id>.jsonl` under its config
+  dir, `<path>` being the worktree's path with every character but a letter or a digit replaced
+  by `-`, cut at 200 characters and given a suffix of its own beyond that, so a longer one is
+  found by its id; pi's is the file its report names; codex's is found by its id under
+  `sessions/` in its config dir. The record stands in for a live lane's events stream: its
+  growth is the lane's sign of work, and it is its durable record.
+
 ## The pane view
 
 `scripts/view-stream.sh` is the other executable half of this file: it renders an events

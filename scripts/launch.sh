@@ -6,6 +6,8 @@
 #   launch.sh form   <name> [--leg <leg>]
 #   launch.sh launch <name> <cwd> <prompt-file> [--leg <leg>] [--last <file>]
 #   launch.sh resume <name> <cwd> <thread-id> <prompt-file> [--leg <leg>]
+#   launch.sh live   <name> <cwd> [--leg <leg>] [--resume <thread-id>]
+#   launch.sh session <name> <cwd> <kind> <value>
 #   launch.sh --self-test
 #
 # <name> is a lane from [lanes.<name>], or `coachman`, `coachman_fallback` or `postmaster`
@@ -22,11 +24,23 @@
 # stdout; the caller redirects and backgrounds. --last names the file a harness writes its final
 # message to, where the harness supports it (codex -o).
 #
+# With host.live_agents true in the config, lanes and coachman legs run as live agents in Herdr
+# panes (harnesses.md and hosts.md, Live agents). `form` then prints a lane's or the coachman's
+# live form, `herdr agent start ... -- <interactive form>`, and refuses it when the session host
+# is not Herdr or the harness's Herdr integration is not installed in the config its environment
+# names, the env file included. `live` makes the same checks, trusts <cwd> where the harness
+# would otherwise ask, and prints one JSON line for scripts/host.sh start: the Herdr kind, the env
+# file and the interactive arguments, resuming <thread-id> with --resume. `session` turns the
+# session reference the integration reported to Herdr into the thread id and the path of the
+# harness's session record, tab-separated. launch and resume stay headless, and the postmaster
+# is never a live lane.
+#
 #   exit 0  the form was printed, or the harness exited 0
 #   exit 1  usage, config missing or unreadable, unknown name, a leg that is not synthesis,
 #           review or ship, the coachman launched or resumed with no --leg, a coachman or
 #           fallback on a lane's model, harness not on PATH, env_file missing, or a form this
-#           script does not have (muse; agy resume)
+#           script does not have (muse; agy resume); with the key on, no Herdr, or no
+#           integration where the harness reads its config
 #   else    the harness's own exit code
 set -uo pipefail
 CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
@@ -146,19 +160,97 @@ if [ "${1:-}" = --self-test ]; then
   refused "resuming the coachman with no --leg is refused, and nothing runs" legs "coachman needs --leg" resume coachman "$tmp/wt" T-1 "$tmp/prompt.txt"
   refused "launching the coachman with no --leg is refused, and nothing runs" legs "coachman needs --leg" launch coachman "$tmp/wt" "$tmp/prompt.txt"
 
+  echo "live agents (host.live_agents), on a stub Herdr and scratch harness configs"
+  # Live controls run with HOME and every harness config dir in scratch, so no control can write a
+  # config of the user's; the stub Herdr answers for a server and reads no live one.
+  mkdir -p "$tmp/stub" "$tmp/home" "$tmp/cc/hooks" "$tmp/cc-bare" "$tmp/pa/extensions"
+  "$(dirname "$self")/host.sh" _stubs "$tmp/bin" || exit 1   # first on PATH in every run
+  mkdir -p "$tmp/home/.gemini/config/hooks"; : > "$tmp/home/.gemini/config/hooks/herdr-agent-state.sh"
+  : > "$tmp/cc/hooks/herdr-agent-state.sh"; : > "$tmp/pa/extensions/herdr-agent-state.ts"
+  printf 'CLAUDE_CONFIG_DIR=%s\n' "$tmp/cc" > "$tmp/cc.env"; printf 'CLAUDE_CONFIG_DIR=%s\n' "$tmp/cc-bare" > "$tmp/cc-bare.env"
+  printf 'PI_CODING_AGENT_DIR=%s\n' "$tmp/pa" > "$tmp/pa.env"
+  printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/pi"; printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/agy"; chmod +x "$tmp/bin/pi" "$tmp/bin/agy"
+  git init -q -b main "$tmp/repo" && git -C "$tmp/repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m first \
+    && git -C "$tmp/repo" worktree add -q .worktrees/T-1-one -b T-1-one || exit 1
+  repo=$(cd "$tmp/repo" && pwd -P); lwt=$repo/.worktrees/T-1-one
+  livefix() {  # livefix <name> <live_agents value> [<env file>]: the legs fixture, one lane on <env file>
+    local e=${3:-$tmp/cc.env}
+    { printf '[lanes.one]\nharness = "claude"\nmodel = "lane-model"\nenv_file = "%s"\n\n' "$e"
+      printf '[lanes.two]\nharness = "pi"\nmodel = "pi-model"\nenv_file = "%s"\n\n' "$tmp/pa.env"
+      printf '[lanes.three]\nharness = "agy"\nmodel = "agy-model"\n\n[team]\n'
+      printf 'coachman = { harness = "claude", model = "coach-model", env_file = "%s" }\n' "$tmp/cc.env"
+      printf 'coachman_fallback = { harness = "claude", model = "fallback-model" }\n'
+      printf 'postmaster = { harness = "claude", model = "boss-model" }\n\n[team.coachman_legs]\n'
+      printf 'ship = { harness = "claude", model = "ship-model", env_file = "%s" }\n' "$tmp/cc.env"
+      [ -n "$2" ] && printf '\n[host]\nlive_agents = %s\n' "$2"
+    } > "$tmp/$1.toml"
+  }
+  livefix nokey ""; livefix off false; livefix on true; livefix onbare true "$tmp/cc-bare.env"; livefix notbool '"yes"'
+  envx="HOME=$tmp/home STUB=$tmp/stub"
+  same=1
+  for f in "form one" "form two" "form coachman" "form coachman --leg synthesis" "form coachman --leg ship" \
+           "form coachman_fallback" "form postmaster" "launch one $tmp/wt $tmp/prompt.txt" \
+           "resume coachman $tmp/wt T-1 $tmp/prompt.txt --leg review"; do
+    run nokey $f; a="$rc|$out|$err"; run off $f
+    [ "$a" = "$rc|$out|$err" ] && [ "$rc" -eq 0 ] || { same=0; printf '         differs: %s\n' "$f"; }
+  done
+  [ $same -eq 1 ] && ok "key off: every form, launch and resume is byte for byte what it is with no key" \
+    || { rc=-; fail "key off: every form, launch and resume is byte for byte what it is with no key"; }
+  carries "key on: a lane's form is its live form, bypass flag and all" on \
+    "herdr agent start <agent> --kind claude --pane <pane> -- --model lane-model --dangerously-skip-permissions" form one
+  carries "and the coachman's is its leg's own entry" on "-- --model ship-model --dangerously-skip-permissions" form coachman --leg ship
+  runs_on "the postmaster keeps its own form: it is never a live lane" on boss-model form postmaster
+  runs_on "launch and resume stay headless whatever the key says" on lane-model launch one "$tmp/wt" "$tmp/prompt.txt"
+  lacks "and the headless form is -p, never the live one" on "herdr agent start" launch one "$tmp/wt" "$tmp/prompt.txt"
+  envx="$envx POSTMASTER_HOST=none"
+  refused "key on, and no Herdr: refused" on "need Herdr" form one
+  envx="HOME=$tmp/home STUB=$tmp/stub"
+  refused "key on, and the harness's integration missing from its config dir: refused, naming the command" onbare \
+    "CLAUDE_CONFIG_DIR=$tmp/cc-bare herdr integration install claude" form one
+  refused "a key that is not true or false is refused" notbool "must be true or false" form one
+  out=""; run on live one "$lwt"
+  [ $rc -eq 0 ] && [ "$(printf '%s' "$out" | python3 -c 'import json, sys; f = json.load(sys.stdin); print(f["kind"], f["env_file"], " ".join(f["args"]))')" \
+    = "claude $tmp/cc.env --model lane-model --dangerously-skip-permissions" ] \
+    && ok "live prints the kind, the env file and the interactive arguments" || fail "live prints the kind, the env file and the interactive arguments"
+  python3 -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))["projects"][sys.argv[2]]["hasTrustDialogAccepted"] is True else 1)' \
+    "$tmp/cc/.claude.json" "$repo" 2>/dev/null && ok "and trusts the worktree's repository in the lane's own claude config" \
+    || fail "and trusts the worktree's repository in the lane's own claude config"
+  cp "$tmp/cc/.claude.json" "$tmp/claude-before.json"; run on live one "$lwt"
+  cmp -s "$tmp/cc/.claude.json" "$tmp/claude-before.json" && ok "a repository trusted already is left as it is" \
+    || fail "a repository trusted already is left as it is"
+  python3 -c 'import json, sys
+d = json.load(open(sys.argv[1])); d["projects"] = {sys.argv[2]: {"hasTrustDialogAccepted": True}}; json.dump(d, open(sys.argv[1], "w"))' \
+    "$tmp/cc/.claude.json" "$(dirname "$repo")"
+  run on live one "$lwt"
+  python3 -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))["projects"].get(sys.argv[2], {}).get("hasTrustDialogAccepted") is True else 1)' \
+    "$tmp/cc/.claude.json" "$repo" 2>/dev/null && ok "in a worktree a trusted folder above the repository counts for nothing: the repository is trusted" \
+    || fail "in a worktree a trusted folder above the repository counts for nothing: the repository is trusted"
+  carries "live resumes a thread in the harness's interactive resume form" on '"--resume", "T-9", "--model"' live one "$lwt" --resume T-9
+  carries "pi's live form resumes by session" on '"--session", "P-1", "--model", "pi-model"' live two "$lwt" --resume P-1
+  refused "an agy lane cannot be resumed live: its resume form is not recorded" on "agy resume form is not recorded" live three "$lwt" --resume A-1
+  refused "--resume belongs to live alone" on "--resume is for live" launch one "$tmp/wt" "$tmp/prompt.txt" --resume T-9
+  carries "session: claude's reported id is the thread, kept under its config dir" on \
+    "T-9	$tmp/cc/projects/$(printf '%s' "$lwt" | tr -c 'A-Za-z0-9' '-')/T-9.jsonl" session one "$lwt" id T-9
+  carries "session: pi's reported path names the thread" on "0199aa00-0000-7000-8000-000000000001	$tmp/pa/sessions/--x--/2026_0199aa00-0000-7000-8000-000000000001.jsonl" \
+    session two "$lwt" path "$tmp/pa/sessions/--x--/2026_0199aa00-0000-7000-8000-000000000001.jsonl"
+  envx=""
+
   echo
   [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }
   echo "self-test: $fails control(s) misbehaved"; exit 1
 fi
 
 die() { echo "launch: $*" >&2; exit 1; }
-[ $# -ge 2 ] || die "usage: launch.sh form|launch|resume <name> ... | --self-test"
+HERE=$(cd "$(dirname "$0")" && pwd -P)
+[ $# -ge 2 ] || die "usage: launch.sh form|launch|resume|live|session <name> ... | --self-test"
 CMD=$1; NAME=$2; shift 2
-LEG=""; LAST=""; STDIN_FILE=""; args=()
+LEG=""; LAST=""; RESUME=""; STDIN_FILE=""; args=()
 while [ $# -gt 0 ]; do
   case $1 in
     --leg) [ $# -ge 2 ] || die "--leg needs a value"; LEG=$2; shift ;;
     --last) [ $# -ge 2 ] || die "--last needs a file"; LAST=$2; shift ;;
+    --resume) [ "$CMD" = live ] || die "--resume is for live"
+              [ $# -ge 2 ] && [ -n "$2" ] || die "--resume needs a thread id"; RESUME=$2; shift ;;
     *) args+=("$1") ;;
   esac
   shift
@@ -219,8 +311,12 @@ else:
 if not spec:
     die("no such lane or role in the config: " + name)
 table(spec, name)
+live = table(cfg.get("host", {}), "[host]").get("live_agents", False)
+if not isinstance(live, bool):
+    die("host.live_agents in %s must be true or false, not %r" % (path, live))
 for k in ("harness", "model", "effort", "env_file"):
     print("%s=%s" % (k.upper(), shlex.quote(str(spec.get(k, "")))))
+print("LIVE=%d" % live)
 PY
 ) && [ -n "$spec" ] || die "cannot read the config at $CONFIG"
 eval "$spec"
@@ -246,10 +342,15 @@ case $CMD in
           CWD=${args[0]}; THREAD=${args[1]}; PROMPT=${args[2]}
           [ -n "$THREAD" ] || die "resume needs a thread id, and none was given"
           prompt_text ;;
+  live)   [ ${#args[@]} -eq 1 ] || die "live needs <cwd>, and takes --leg and --resume"
+          CWD=${args[0]}; THREAD=$RESUME; PROMPT='<prompt-file>'; PTEXT='' ;;
+  session) [ ${#args[@]} -eq 3 ] || die "session needs <cwd> <kind> <value>"
+          CWD=${args[0]}; THREAD='<thread-id>'; PROMPT='<prompt-file>'; PTEXT='' ;;
   *) die "unknown command: $CMD" ;;
 esac
 [ "$CMD" = form ] || [ -d "$CWD" ] || die "no such directory: $CWD"
-if [ "$HARNESS" = pi ] && [ "$CMD" != form ]; then
+case $CMD in live|session) CWD=$(cd "$CWD" && pwd -P) ;; esac
+if [ "$HARNESS" = pi ] && { [ "$CMD" = launch ] || [ "$CMD" = resume ]; }; then
   prompt_dir=$(cd "$(dirname "$PROMPT")" && pwd -P) || die "cannot resolve prompt file: $PROMPT"
   PROMPT=$prompt_dir/$(basename "$PROMPT")
 fi
@@ -304,8 +405,161 @@ case $HARNESS in
   *) die "no form for harness '$HARNESS'" ;;
 esac
 
+# --- live agents (host.live_agents) ---------------------------------------------------------
+lane_env() {  # lane_env <command...>: run it with the env file loaded, in a subshell
+  ( if [ -n "${ENV_FILE:-}" ]; then set -a; . "$ENV_FILE"; set +a; fi; "$@" )
+}
+integration_of() {  # the name `herdr integration` gives a harness's integration; none for muse
+  case $1 in agy) echo antigravity-cli ;; claude|codex|grok|pi) echo "$1" ;; esac
+}
+live_checks() {  # refuse a live agent that Herdr or the harness's integration cannot run
+  local host target line var="" val=""
+  host=$("$HERE/host.sh" detect 2>/dev/null)
+  [ "$host" = herdr ] || die "live agents (host.live_agents) need Herdr, and the session host here is ${host:-none}"
+  target=$(integration_of "$HARNESS")
+  [ -n "$target" ] || die "$HARNESS has no Herdr integration, so $NAME cannot run as a live agent"
+  line=$(lane_env herdr integration status 2>/dev/null | grep -m1 "^$target: ")
+  case $line in
+    "") die "herdr integration status names no $target integration, so $NAME cannot run as a live agent" ;;
+    *"not installed"*)
+      case $target in claude) var=CLAUDE_CONFIG_DIR ;; pi) var=PI_CODING_AGENT_DIR ;; codex) var=CODEX_HOME ;; esac
+      [ -n "$var" ] && val=$(lane_env printenv "$var" 2>/dev/null)
+      die "$NAME runs on $HARNESS, and Herdr's $target integration is not installed where it reads its config (${line#*: }); install it with: ${val:+$var=$(printf '%q' "$val") }herdr integration install $target" ;;
+  esac
+}
+live_args() {  # the harness's interactive form, into KIND and largs; resumes $THREAD when set
+  KIND=$HARNESS; largs=()
+  local n=${POSTMASTER_LAUNCH_NAME:-}
+  case $HARNESS in
+    claude) [ -n "$THREAD" ] && largs+=(--resume "$THREAD")
+            largs+=(--model "$MODEL"); [ -n "${EFFORT:-}" ] && largs+=(--effort "$EFFORT")
+            [ -n "$n" ] && largs+=(--name "$n")
+            largs+=(--dangerously-skip-permissions) ;;
+    pi)     [ -n "$THREAD" ] && largs+=(--session "$THREAD")
+            largs+=(--model "$MODEL"); [ -n "${EFFORT:-}" ] && largs+=(--thinking "$EFFORT")
+            [ -n "$n" ] && largs+=(--name "$n")
+            largs+=(--approve) ;;
+    codex)  [ -n "$THREAD" ] && largs+=(resume "$THREAD")
+            largs+=(-m "$MODEL"); [ -n "${EFFORT:-}" ] && largs+=(-c "model_reasoning_effort=\"$EFFORT\"")
+            largs+=(--dangerously-bypass-approvals-and-sandbox) ;;
+    grok)   [ -n "$THREAD" ] && largs+=(--resume "$THREAD")
+            largs+=(-m "$MODEL"); [ -n "${EFFORT:-}" ] && largs+=(--reasoning-effort "$EFFORT")
+            largs+=(--always-approve) ;;
+    agy)    [ -n "$THREAD" ] && die "agy resume form is not recorded, so a live agy lane cannot be resumed (harnesses.md)"
+            largs+=(--model "$MODEL" --dangerously-skip-permissions --add-dir "$CWD") ;;
+  esac
+}
+trust_live() {  # trust $CWD where the harness would otherwise stop at a question before any work
+  case $HARNESS in
+    claude)
+      # Interactive claude asks whether to trust a folder its config has never trusted, bypass
+      # flag or not. In a git worktree what counts is the worktree or its repository's own
+      # checkout, never a folder above that; elsewhere, any folder above counts. So trust the
+      # repository, once, unless one of those is trusted already.
+      lane_env python3 - "$CWD" <<'PY' || die "could not mark $CWD trusted in claude's config"
+import json, os, subprocess, sys, tempfile
+cwd = sys.argv[1]
+home = os.environ.get("CLAUDE_CONFIG_DIR")
+path = os.path.join(home, ".claude.json") if home else os.path.expanduser("~/.claude.json")
+try:
+    with open(path, encoding="utf-8") as f: cfg = json.load(f)
+except FileNotFoundError:
+    cfg = {}
+projects = cfg.get("projects") if isinstance(cfg.get("projects"), dict) else {}
+def trusted(d):
+    return isinstance(projects.get(d), dict) and projects[d].get("hasTrustDialogAccepted") is True
+r = subprocess.run(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                   capture_output=True, text=True)
+root = None
+if r.returncode == 0:
+    common = os.path.realpath(r.stdout.strip())
+    main = os.path.dirname(common) if os.path.basename(common) == ".git" else common
+    root = main if (cwd + "/").startswith(main.rstrip("/") + "/") else cwd
+    if trusted(cwd) or trusted(root): sys.exit(0)
+else:
+    d = root = cwd
+    while True:
+        if trusted(d): sys.exit(0)
+        up = os.path.dirname(d)
+        if up == d: break
+        d = up
+cfg.setdefault("projects", {})
+if not isinstance(cfg["projects"], dict): sys.exit("projects in %s is not an object" % path)
+cfg["projects"].setdefault(root, {})["hasTrustDialogAccepted"] = True
+mode = os.stat(path).st_mode & 0o777 if os.path.exists(path) else 0o600
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix=".claude.json.postmaster.")
+with os.fdopen(fd, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, indent=2); f.flush(); os.fsync(f.fileno())
+os.chmod(tmp, mode); os.replace(tmp, path)
+print("launch: trusted %s in %s" % (root, path), file=sys.stderr)
+PY
+      ;;
+    codex)
+      # As a headless codex launch does, in the config dir the lane's environment names.
+      lane_env bash -c 'c=${CODEX_HOME:-$HOME/.codex}/config.toml; mkdir -p "$(dirname "$c")" && touch "$c" &&
+        { grep -qF "[projects.\"$1\"]" "$c" || printf "\n[projects.\"%s\"]\ntrust_level = \"trusted\"\n" "$1" >> "$c"; }' _ "$CWD" \
+        || die "could not mark $CWD trusted in codex's config" ;;
+  esac
+}
+show() { case $1 in '<'*'>'|'$(cat <prompt-file>)') printf '%s ' "$1" ;; *) printf '%q ' "$1" ;; esac; }
+
+if [ "$CMD" = form ] && [ "$LIVE" = 1 ] && [ "$NAME" != postmaster ]; then
+  live_checks; THREAD=""; live_args
+  printf 'herdr agent start <agent> --kind %s --pane <pane> -- ' "$KIND"
+  for a in "${largs[@]}"; do show "$a"; done
+  echo
+  exit 0
+fi
+if [ "$CMD" = live ]; then
+  [ "$NAME" != postmaster ] || die "the postmaster is spawned, never started as a live lane (SKILL.md)"
+  live_checks; live_args; trust_live
+  python3 -c 'import json, sys
+print(json.dumps({"kind": sys.argv[1], "env_file": sys.argv[2], "args": sys.argv[3:]}))' "$KIND" "${ENV_FILE:-}" "${largs[@]}"
+  exit 0
+fi
+if [ "$CMD" = session ]; then
+  # Herdr's session report: claude, codex and grok report a session id; pi reports the path of
+  # its session file, whose name ends in the session id. The record is where the harness keeps
+  # the thread, in the config dir the lane's environment names; empty where it is not recorded.
+  lane_env python3 - "$HARNESS" "$CWD" "${args[1]}" "${args[2]}" <<'PY' || die "cannot read the session reference: ${args[1]} ${args[2]}"
+import glob, json, os, re, sys
+harness, cwd, kind, value = sys.argv[1:5]
+thread, record = value, ""
+def only(pattern):
+    hits = glob.glob(pattern)
+    return hits[0] if len(hits) == 1 else ""
+if harness == "claude":
+    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    if kind == "path":
+        record, thread = value, re.sub(r"\.jsonl$", "", os.path.basename(value))
+    else:
+        record = os.path.join(home, "projects", re.sub(r"[^A-Za-z0-9]", "-", cwd), value + ".jsonl")
+        if not os.path.exists(record):
+            record = only(os.path.join(home, "projects", "*", glob.escape(value) + ".jsonl")) or record
+elif harness == "pi":
+    home = os.environ.get("PI_CODING_AGENT_DIR") or os.path.expanduser("~/.pi/agent")
+    if kind == "path":
+        record = value
+        m = re.search(r"_([0-9A-Za-z-]+)\.jsonl$", value)
+        thread = m.group(1) if m else ""
+        try:
+            first = json.loads(open(value, encoding="utf-8").readline())
+            if first.get("type") == "session" and first.get("id"): thread = first["id"]
+        except (OSError, ValueError):
+            pass
+    else:
+        record = only(os.path.join(home, "sessions", "*", "*_" + glob.escape(value) + ".jsonl"))
+elif harness == "codex":
+    home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+    record = only(os.path.join(home, "sessions", "*", "*", "*", "*" + glob.escape(value) + ".jsonl"))
+if not thread:
+    sys.exit("no thread id in %s %s" % (kind, value))
+print("%s\t%s" % (thread, record))
+PY
+  exit 0
+fi
+
 if [ "$CMD" = form ]; then
-  show() { case $1 in '<'*'>'|'$(cat <prompt-file>)') printf '%s ' "$1" ;; *) printf '%q ' "$1" ;; esac; }
   printf 'cd '; show "$CWD"; printf '&& '
   for a in "${cmd[@]}"; do show "$a"; done
   [ -n "${STDIN_FILE:-}" ] && { printf '< '; show "$STDIN_FILE"; }

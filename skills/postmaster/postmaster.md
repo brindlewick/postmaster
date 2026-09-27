@@ -267,6 +267,31 @@ runs in each worktree the run created (`scripts/host.sh stop <wt>`), then remove
 preserving stray files and closing its space (`scripts/host.sh close <wt>`), and move the ticket back to todo or to cancelled as the user
 says. The dispatch directory stays.
 
+## Live agents
+
+When `scripts/live.sh on <dispatch>` exits 0, the run was dispatched with `host.live_agents` on,
+and its legs are live agents in Herdr panes; a change to the config after dispatch changes no
+run. For such a run these replace the steps they name, and everything else stands.
+
+- **Launch a leg** (Stage C, step 3):
+
+  ```sh
+  scripts/live.sh leg <dispatch> <n> <leg-name> <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt
+  ```
+
+  It prints the leg's thread id; record it as the step says. `.leg-<n>-exited` lands when the
+  leg's agent ends, which `live.sh` does when the leg's turn ends with its hand-off done or with
+  nothing written, and never while an escalation or the ship card waits.
+- **A resume** (Stage C, step 5) that remounts a leg, or has it finish its hand-off, is the same
+  command with that prompt file: it resumes the leg's thread in a new agent. A takeover adds
+  `--takeover`, with the takeover prompt, and moves no stream, since a live leg writes none.
+  Where REMOUNT or INSPECT says to read the stream tail, read `logs/coachman-leg-<n>-screen.txt`
+  and the session record that `logs/coachman-leg-<n>.session` names.
+- **A ruling, a withheld grant and the merge word** (Stage E step 4, Stage F step 2) go by
+  `scripts/live.sh rule <dispatch> <n> <file>`, with the text written to `<file>` first and the
+  marker removed first as the step says. Never by resume, and never as text typed into the leg's
+  pane. It logs `ruling` with the file and its digest; log `escalate` or `merge` as the step says.
+
 ## Talking to the user
 
 You are the one role the user talks to. On any question, answer from `<runs>`: the

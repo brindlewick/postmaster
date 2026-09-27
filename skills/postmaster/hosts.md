@@ -12,6 +12,8 @@ the interactive postmaster alive between turns. **It never changes what a launch
 lane and every coachman leg is the same headless command on every host: `scripts/launch.sh`'s
 form, its events stream to its events file, its errors to its `.err` file, its marker touched
 when it exits, and then it exits. An idle thread is a native session on disk, never a process.
+The one exception is a run dispatched with `host.live_agents` on, and only on Herdr: its lanes
+and legs are live agents (below).
 
 ## Which host
 
@@ -180,6 +182,47 @@ with `herdr agent start`. It is a pane whose agent `host.sh` reports. So when it
 - **This needs a harness with a resume form.** `launch.sh` refuses to resume agy, so with no
   host the postmaster runs on another harness.
 
+## Live agents (Herdr only)
+
+With `host.live_agents` on, `scripts/live.sh` runs each lane and leg as a harness in its
+interactive form, a live agent kept in its pane between turns, through four forms that exist on
+Herdr alone. On tmux or with no host they exit 3, and the key is refused before any run starts.
+
+```sh
+scripts/host.sh start <agent> <cwd> [--label <name>] [--exited <file>] [--err <file>] [--env-file <file>] [--timeout <s>] -- <kind> <args...>
+scripts/host.sh prompt <agent> <file> [--timeout <s>]
+scripts/host.sh state <agent>
+scripts/host.sh end <agent>
+```
+
+| form | herdr |
+|---|---|
+| start a live agent | `herdr agent start <agent> --kind <kind> --pane <pane>`, in a fresh tab of the worktree's space, placed as a launch is |
+| give it work and wait | `herdr agent prompt --wait`, sent only to an agent whose state is `idle` or `done` |
+| its state and session | `herdr agent get`: `agent_status` and `agent_session` |
+| end it | TERM to the process group in its pane's foreground, then KILL after 10 seconds |
+
+- **A fresh tab for every start**, so no screen an earlier agent left behind is read as the new
+  one's. The pane's shell hands over, by exec alone, to a bash with no startup files, on the
+  pane's own environment, the caller's `POSTMASTER_` settings, which cross by FIFO as a launch's
+  environment does, and the env file. No other variable of the caller's reaches the agent: a
+  caller that is itself a harness session carries that session's identity, and claude started
+  with claude's writes no session record. Herdr counts a pane with any other process in it as
+  busy, so nothing is forked there.
+  [What building the option found](../../wiki/concepts/live-agents.md)
+- **Start returns once the agent is ready and its integration has reported its session**, and
+  prints one JSON line: its space, tab and pane, its process group, and the session reference. It
+  exits 4 when the agent stops at a question before any work, 5 when no session report comes
+  within `POSTMASTER_HOST_SESSION_WAIT` seconds (20), and ends the agent in both cases. The agent
+  is registered as a launch in `<cwd>`, so `stop` and `close` see it, and `--exited` is removed as
+  it starts and touched when it exits, or when it could not start, with the reason in `--err`.
+- **Prompt sends only to an agent that has settled**, and waits in the same call. It exits 3 for
+  one that has not, 4 when Herdr saw no turn start, which is not proof that nothing ran, 5 on a
+  timeout and 6 when the agent has gone. On 0 it prints the settled state, which says only that
+  the agent looks ready for input: whether its work was done is read from disk.
+- **End** ends only an agent in a pane `host.sh` opened.
+  [What Herdr's states mean, and what they do not](../../wiki/concepts/herdr-agent-states.md)
+
 ## Tests
 
 `scripts/host.sh --self-test` runs every form against stub `herdr` and `tmux` on a PATH that
@@ -187,4 +230,6 @@ holds nothing else, and never reaches a live server. `scripts/host.sh --live-tes
 ticket's controls against the hosts on this machine, in a scratch repository it creates: a launch
 that lands in its worktree's space, nested under its repository's space, with its marker landing;
 the same launch with no host, backgrounded, with its marker landing; and the same on tmux. It
-opens only its own spaces and tmux session, and closes them.
+opens only its own spaces and tmux session, and closes them. The live-agent forms are tested
+the same two ways, with the rest of the live option, by `scripts/live.sh --self-test` and
+`--live-test`.

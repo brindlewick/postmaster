@@ -96,6 +96,7 @@ scripts/plane.sh create|edit|read|state|comment|list …             # Plane wor
 scripts/ticket-check.sh <repo> <id> | --body <file> | --splice …   # a ticket's shape; --splice writes approved parts in
 scripts/launch.sh form|launch|resume <lane-or-role> …             # any lane or role, one command
 scripts/host.sh detect|name|run|stop|close|spawn|send|wait|read … # where a launch runs, and where you watch it
+scripts/live.sh on|lane|leg|rule|ruling|outcome …                # lanes and legs as live agents, when the config says
 scripts/view-stream.sh < <events-file>                            # a harness's events, one line each
 scripts/runs-status.sh <run-root>                                  # the postmaster's poll
 scripts/handoff-check.sh <handoff-file>                            # a leg may end only on exit 0
@@ -144,6 +145,11 @@ mostly absorbs, and it leaves the harness's own record as the durable one.
 `skills/postmaster/harnesses.md` says where each harness keeps its threads and how each is
 resumed. On a host, each launch still gets a pane of its own while it runs, so the fleet can be
 watched: the pane is a window onto a headless process that exits when it is done.
+
+One config key, `host.live_agents`, off by default, runs lanes and coachman legs as live agents
+in Herdr panes instead, each in its harness's interactive form and given its work there. It is
+there to be used and measured; `wiki/concepts/live-agents.md` says what it would take to make it
+the default.
 
 ## Design rules
 

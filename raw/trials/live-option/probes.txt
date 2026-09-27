@@ -1,0 +1,59 @@
+Five probes, 2026-09-27, Herdr 0.9.1, claude 2.1.283, pi 0.87.0, scratch configs, stand-in model.
+<scratch> is a scratch directory; every agent ran in a space the probe opened and closed.
+
+1. claude's trust question in a git worktree.
+   The claude config trusted <scratch>/trusted-parent (projects[...].hasTrustDialogAccepted true).
+   A repository <scratch>/trusted-parent/gitrepo, never trusted, with a linked worktree
+   .worktrees/T-9-cl.
+   herdr agent start, claude --model claude-haiku-4-5 --dangerously-skip-permissions, in the
+   worktree: exit 1, agent_not_ready, and the screen showed "Accessing workspace: <the worktree>"
+   and the trust question ("Quick safety check: Is this a project you created or one you trust?").
+   Esc answered it; nothing was trusted.
+   With projects[<scratch>/trusted-parent/gitrepo] trusted as well, the same start: exit 0, idle,
+   and a turn ran.
+   Control, the same config, earlier the same day: claude started without asking in
+   <scratch>/trusted-parent/child-a, a plain folder, not a repository, under the trusted folder.
+
+2. Where claude keeps a session record.
+   Working directory of 143 characters, a plain folder: projects/<the path with every character
+   but a letter or a digit replaced by ->/<session id>.jsonl, the folder name 143 characters.
+   Working directory of 222 characters: the folder name was that replacement cut at 200
+   characters, then "-6j066h", 207 characters in all. The record was <session id>.jsonl in it.
+   In a linked worktree: the folder named for the worktree's own path, not the repository's.
+   In every case the session id in the file name was the one claude's Herdr integration reported,
+   with --name given and without it.
+
+3. claude started with a claude session's variables.
+   A pane's shell exported CLAUDECODE=1, CLAUDE_CODE_CHILD_SESSION=1,
+   CLAUDE_CODE_SESSION_ID=11111111-2222-4333-8444-555555555555 and CLAUDE_CODE_ENTRYPOINT=cli, as
+   a claude session's tool calls have them, then started claude there as in probe 1.
+   Herdr's integration reported a session id, 4737acc2-...; a prompt ran, settled, and reached the
+   stand-in, which logged it. No session record was written under the config dir, for that id or
+   any other: a search of the whole config for the prompt's text found nothing.
+   The same start in the same pane without those variables: the record was written under the
+   reported id, twice.
+   The live test's first run started its lanes on the caller's environment, which was a claude
+   session's tool call, so it carried these variables: claude's records were missing, and
+   resuming a claude lane after it was killed timed out at startup. Its lanes have started on the
+   pane's own environment since, and the live test passes (live-test.txt).
+
+4. When herdr agent start takes a pane.
+   Each pane's login shell ran ` exec <script>`, and the script ran Python, which exec'd
+   bash --noprofile --norc -i. Then, two seconds later, herdr agent start --kind pi.
+   h1, the pane's own environment: accepted. h2, a minimal environment (HOME, PATH, TERM, USER,
+   LANG and HERDR_*): accepted. (Both pi agents then timed out at startup, having no scratch config
+   named; that was not what was tested.)
+   h3, h1 with a process substitution on the script's exec (`3< <(printf ...)`): refused,
+   {"code":"agent_pane_busy","message":"agent target pane ... is not an available shell"}, and
+   still refused when tried again every half second for 20 seconds.
+   Herdr's process-info for that pane showed one foreground process, the bash, as the shell.
+
+5. Where Herdr's integration commands look.
+   herdr integration status, with PI_CODING_AGENT_DIR, CLAUDE_CONFIG_DIR and CODEX_HOME each set
+   to an empty scratch directory: "pi: not installed (<scratch>/pi/extensions/...)",
+   "claude: not installed (<scratch>/claude/hooks/...)", "codex: not installed (<scratch>/codex/...)";
+   grok and antigravity-cli still named the home directory.
+   herdr integration install pi and install claude, with PI_CODING_AGENT_DIR and CLAUDE_CONFIG_DIR
+   set: each wrote its files under the scratch directory, and status then read "current". The
+   modification times of the home directory's claude settings and hook, pi's agent directory and
+   codex's config were the same before and after.

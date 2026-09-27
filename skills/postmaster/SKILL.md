@@ -121,8 +121,8 @@ not say; the security lens reviews against them.
 3. **Launch card**: one self-contained confirmation covering the postmaster's harness,
    model and effort (`team.postmaster` in the config), the team the config names, who says
    the merge word (`ship.merge_authority`), the session host the fleet will run on
-   (`scripts/host.sh detect`), and the project facts above. Launch nothing before the user
-   picks.
+   (`scripts/host.sh detect`), whether its lanes and legs run as live agents (`host.live_agents`),
+   and the project facts above. Launch nothing before the user picks.
 4. **Create the run root** `~/.postmaster/runs/<project>/` (the repo's basename) and log the
    launch there: `scripts/log-action.sh` needs a run directory, so the postmaster's own
    actions go under `~/.postmaster/runs/<project>/postmaster/`.
@@ -180,7 +180,7 @@ name: <ticket id>, <ticket title>
 dispatch: <abs path of this directory>
 synthesis worktree: <abs path; cut by the postmaster at BASE, the coachman's cwd for every leg>
 tool: <abs path of the postmaster repo; every scripts/ path in the runbooks is relative to it>
-postmaster ruling channel: resume the coachman's thread (harnesses.md) with the ruling as the prompt
+postmaster ruling channel: resume the coachman's thread (harnesses.md) with the ruling as the prompt; in a run with live agents, a ruling file named by a prompt (coachman.md, Live agents)
 ```
 
 ## Hard rules

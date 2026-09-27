@@ -76,3 +76,10 @@ checkpoint_mode = "autonomous"
 # Optional. A template for the review link the ship card carries, with {path} replaced by the
 # absolute path of the synthesis worktree. Leave empty to ship the path alone.
 review_link = ""
+
+[host]
+# true runs every lane and coachman leg as a live agent in a Herdr pane, in its harness's
+# interactive form, instead of a headless launch (skills/postmaster/hosts.md, Live agents). Off
+# by default. Refused where no Herdr server answers, and for a lane whose harness lacks Herdr's
+# integration in the config it reads; a run keeps the setting it was dispatched with.
+live_agents = false

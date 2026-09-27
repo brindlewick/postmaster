@@ -14,8 +14,8 @@
 #
 #   exit 0  config written (or printed), or keys listed
 #   exit 1  a harness was named that is not on PATH, the coachman shares a lane's model, fewer
-#           than two lanes were given, an answer was missing, or an existing config was not
-#           overwritten
+#           than two lanes were given, an answer was missing, live agents were asked for where no
+#           Herdr server answers, or an existing config was not overwritten
 #
 # Control: the written file is parsed back as TOML where a parser is available, so a config
 # that would fail to load is never left on disk as if it were fine.
@@ -58,6 +58,7 @@ postmaster_may_create      no                 yes lets the postmaster create tic
 merge_authority            user               user or postmaster
 checkpoint_mode            autonomous         autonomous or consult
 review_link?               (none)             template with {path}
+live_agents                no                 yes runs lanes and legs as live agents in Herdr panes
 overwrite                  no                 yes replaces an existing config
 EOF
       exit 0 ;;
@@ -187,6 +188,11 @@ case $MA in user|postmaster) ;; *) echo "setup: merge authority must be user or 
 ask CPM "Checkpoint mode (autonomous, consult)" "autonomous" "checkpoint_mode"
 case $CPM in autonomous|consult) ;; *) echo "setup: checkpoint mode must be autonomous or consult" >&2; exit 1 ;; esac
 ask RL "Review link template with {path} for the synthesis worktree (blank for none)" "" "review_link?"
+ask LIVE "Run lanes and coachman legs as live agents in Herdr panes (yes/no)" "no" "live_agents"
+case $LIVE in yes|no) ;; *) echo "setup: answer yes or no" >&2; exit 1 ;; esac
+if [ "$LIVE" = yes ] && [ "$("$HERE/host.sh" detect 2>/dev/null)" != herdr ]; then
+  echo "setup: live agents need Herdr, and no Herdr server answers here; answer no, or start Herdr first" >&2; exit 1
+fi
 
 TRACKER_EXTRA=""
 [ -n "$PWS" ] && TRACKER_EXTRA="url = \"$PURL\""$'\n'"workspace = \"$PWS\""$'\n'"env_file = \"$PENV\""
@@ -217,6 +223,9 @@ postmaster_may_create = $( [ "$PMC" = yes ] && echo true || echo false )
 merge_authority = "$MA"
 checkpoint_mode = "$CPM"
 review_link = "$RL"
+
+[host]
+live_agents = $( [ "$LIVE" = yes ] && echo true || echo false )
 EOF
 )
 

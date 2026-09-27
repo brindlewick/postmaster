@@ -21,7 +21,9 @@
 #          WAIT      a leg is running and its files are moving
 #          -         the manifest says done or abandoned
 #
-# Idle time ignores the marker files themselves, so touching a marker never hides a stall.
+# Idle time ignores the marker files themselves, so touching a marker never hides a stall. In a
+# run with live agents, which write no events stream into the run, it also counts the harness
+# session record each logs/*.session file names: the record grows only while its agent works.
 #
 #   exit 0  listed (an empty root lists nothing)
 #   exit 1  usage, or no such root
@@ -54,6 +56,9 @@ for run in sorted(os.listdir(root)):
             if f.startswith("."): continue
             try: newest = max(newest, os.path.getmtime(os.path.join(dp, f)))
             except OSError: pass
+    for pointer in glob.glob(os.path.join(d, "logs", "*.session")):
+        try: newest = max(newest, os.path.getmtime(open(pointer).read().strip()))
+        except (OSError, ValueError): pass
     idle_min = int((now - newest) / 60) if newest else -1
     done = ".leg-%s-done" % leg in markers
     exited = ".leg-%s-exited" % leg in markers
@@ -118,7 +123,21 @@ run earlier review 2 .leg-1-done
 run usergate shipping 3 .card-ready .waiting-on-user
 run userclosed done 3 .waiting-on-user
 run stall review 2; age stall; : > "$tmp/root/stall/.leg-1-done"
-mkdir -p "$tmp/root/postmaster"
+mkdir -p "$tmp/root/postmaster" "$tmp/sessions"
+# Live runs: nothing in the run has changed for an hour, and each lane's session record, outside
+# the run, has changed just now, an hour ago, or does not exist.
+live() {  # live <name> <session age: fresh|old|missing>
+  run "$1" review 2; : > "$tmp/sessions/$1.jsonl"
+  printf '%s\n' "$tmp/sessions/$1.jsonl" > "$tmp/root/$1/logs/luna.session"
+  age "$1"
+  case $2 in
+    old) touch -d '1 hour ago' "$tmp/sessions/$1.jsonl" ;;
+    missing) rm -f -- "$tmp/sessions/$1.jsonl" ;;
+  esac
+}
+live livework fresh
+live livestall old
+live livegone missing
 
 echo "positive controls"
 expect "an escalation waiting is RULE" rule RULE
@@ -130,12 +149,15 @@ expect "nothing changed for an hour is INSPECT" inspect INSPECT
 expect "a leg at work is WAIT" wait WAIT
 expect "a run waiting on the user is USER, whatever else it holds" user USER
 expect "a closed run is -" closed "-"
+expect "a live run whose lane's session record is growing is at work: WAIT" livework WAIT
 
 echo "negative controls"
 expect "an earlier leg's done marker dispatches nothing" earlier WAIT
 expect "a ship card put to the user waits on the user, not the gate" usergate USER
 expect "a closed run stays closed with a stale marker" userclosed "-"
 expect "touching a marker does not hide a stall" stall INSPECT
+expect "a live run whose session records stopped growing is INSPECT" livestall INSPECT
+expect "a session record that does not exist hides nothing" livegone INSPECT
 [ -z "$(next_of postmaster)" ] && ok "the postmaster's own directory is not a run" \
   || fail "the postmaster's own directory is not a run"
 

@@ -55,7 +55,8 @@ Why the design is shaped as it is.
   as one loop in one leg, so each round's fixes are re-reviewed by both gating lenses in the
   next. It should also take fewer rounds.
 - [Live agents against markers and resumes](concepts/live-agents.md): **claimed**. Headless
-  stays the default and live agents become an option; what it would take to change the default.
+  stays the default, and live agents are built as an option, off by default; what it would take
+  to change the default.
 
 ## Sources
 

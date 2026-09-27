@@ -8,6 +8,17 @@ updated: 2026-09-26
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-27] ingest | the live option is built
+
+Issue #67 built live agents as a config option, `host.live_agents`, off by default. The
+live-agents page now says what was built, need by need, and what building it found. A trial,
+`raw/trials/live-option/`, records the option's controls on Herdr 0.9.1 with pi and claude
+against a stand-in model, and five facts: a claude started with a claude session's variables
+writes no session record; Herdr starts an agent only in a pane whose shell has nothing else
+running with it; claude's trust in a git worktree counts the repository and never a folder above
+it; claude cuts a long path's record folder at 200 characters; and Herdr's integration commands
+follow a harness's config dir. No standing changed: the page's claim still waits on runs.
+
 ## [2026-09-26] ingest | follow-up: claude's trust question, and claude killed mid-turn
 
 Two checks added to `raw/trials/herdr-agent-lifecycle/`. Headless claude answered in a

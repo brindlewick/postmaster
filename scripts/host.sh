@@ -16,6 +16,11 @@
 #                                         and with --wait block until it settles (default 600)
 #   host.sh wait <handle> [<seconds>]     block until it settles, when nothing was just sent
 #   host.sh read <handle> [<lines>]       print what it shows (default 120 lines)
+#   host.sh start <agent> <cwd> [--label <text>] [--exited <file>] [--err <file>] [--env-file <file>]
+#               [--timeout <seconds>] -- <kind> <args...>    a live agent (Herdr only, below)
+#   host.sh prompt <agent> <file> [--timeout <seconds>]     give a settled live agent work, and wait
+#   host.sh state <agent>                 a live agent's status and session reference, as JSON
+#   host.sh end <agent>                   end a live agent host.sh started
 #   host.sh --self-test                   stub hosts on PATH; never touches a live server
 #   host.sh --live-test                   the ticket's controls, against the hosts on this machine
 #
@@ -37,16 +42,36 @@
 # place it, it runs in the background. While it runs it is registered under
 # POSTMASTER_HOST_STATE (default ~/.postmaster/host), whatever its host, so stop and close see it.
 #
+# start, prompt, state and end are for live agents (hosts.md, Live agents), and need Herdr. start
+# runs <kind> with <args> as a Herdr agent named <agent>, in a fresh tab of <cwd>'s space placed as
+# run places a launch, so no screen an earlier agent left is read as this one's. The pane's shell
+# becomes a bash on the pane's own environment, with the caller's POSTMASTER_ settings, handed
+# over as run hands an environment, then the env file, and never the user's shell startup files;
+# no other variable of the caller's reaches it. The agent is registered as a launch in <cwd>, so
+# stop and close see it. --exited is removed as it
+# starts and touched when it exits, or when it cannot start, with the reason in --err. start
+# returns once the agent is ready and its Herdr integration has reported its session, and prints
+# one JSON line: where it runs, its process group and the session reference. prompt sends the
+# file's text only to an agent that has settled, and waits for it in the same call; a settled
+# state says the agent looks ready, never that its work is done, so the caller checks what the
+# turn left on disk.
+#
 # POSTMASTER_HOST=herdr|tmux|none overrides detection; nothing needs setting to get the default.
 # POSTMASTER_HOST_CLAIM_WAIT (20) is how long a new pane has to start its launch, and
 # POSTMASTER_HOST_CLOSE_WAIT (15) how long close waits for a launch that is just ending.
+# POSTMASTER_HOST_SESSION_WAIT (20) is how long start waits for the integration's session report.
 #
 #   exit 0  detected, named, started, stopped, closed, sent, settled or read
 #   exit 1  usage, or nothing could be started
 #   exit 2  close refused: a launch still runs in the worktree, or its space holds something
 #           host.sh did not open
 #   exit 3  spawn, send, wait or read with no host that keeps an interactive session; or a send
-#           or wait that did not settle, stopped at an approval or a question, or showed no turn
+#           or wait that did not settle, stopped at an approval or a question, or showed no turn;
+#           start, prompt, state or end with no Herdr; prompt to an agent that has not settled
+#   exit 4  start: the agent stopped at a question before taking any work; prompt: no turn was
+#           seen, so read the harness's session before sending the text again
+#   exit 5  start: no session report from the harness's integration; prompt: timed out
+#   exit 6  prompt or state: no live agent has that name
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd -P)
 SELF=$HERE/$(basename "$0")
@@ -210,7 +235,7 @@ print("\t".join([s.get("source_workspace_id") or "-", s.get("repo_root") or "-",
 # NUL-separated, and for a pane the caller's environment through a FIFO, so it is never written
 # to disk or put on any command line. Whoever creates <spec>/claimed first runs it; the runner
 # removes the spec once it has read it.
-SPEC_FIELDS="name cwd rundir state out err marker pidfile append"
+SPEC_FIELDS="name cwd rundir state out err marker pidfile append envfile"
 write_spec() {  # write_spec <spec> <name> <cwd> <out> <err> <marker> <pidfile> <append> <argv...>
   local s=$1; shift
   printf '%s' "$1" > "$s/name"; printf '%s' "$2" > "$s/cwd"; printf '%s' "$PWD" > "$s/rundir"
@@ -720,6 +745,249 @@ read_cmd() {  # read <handle> [<lines>]
   esac
 }
 
+# --- live agents (host.live_agents) -------------------------------------------------------
+# A live agent is a harness in its interactive form, started by Herdr in a pane of its worktree's
+# space and kept there between turns. Herdr only: nothing else reports an agent's state.
+need_herdr() {
+  local h; h=$(detect)
+  [ "$h" = herdr ] || { echo "host: live agents need Herdr, and the session host here is $h" >&2; exit 3; }
+}
+agent_json() {  # agent_json <agent>: Herdr's record of that live agent as one JSON line, or nothing
+  herdr agent get "$1" 2>/dev/null | python3 -c 'import json, sys
+try: print(json.dumps(json.load(sys.stdin)["result"]["agent"]))
+except Exception: pass'
+}
+fg_group() {  # fg_group <pane>: the process group in the pane's foreground, unless it is the shell's
+  herdr pane process-info --pane "$1" 2>/dev/null | python3 -c 'import json, sys
+try:
+    p = json.load(sys.stdin)["result"]["process_info"]
+    g = p.get("foreground_process_group_id")
+    if g and g != p.get("shell_pid"): print(g)
+except Exception: pass'
+}
+end_group() {  # end_group <pgid>: TERM, then KILL whatever is left after 10 s
+  local g=$1 i=0
+  kill -TERM -- "-$g" 2>/dev/null || kill -TERM "$g" 2>/dev/null || return 0
+  while kill -0 -- "-$g" 2>/dev/null && [ $i -lt 40 ]; do sleep 0.25; i=$((i + 1)); done
+  kill -0 -- "-$g" 2>/dev/null && kill -KILL -- "-$g" 2>/dev/null
+  return 0
+}
+
+START_FAIL_ERR="" START_FAIL_MARKER=""
+start_failed() {  # start_failed <exit> <reason>: the reason in --err, the exited marker landed
+  [ -n "$START_FAIL_ERR" ] && printf 'host: %s\n' "$2" >> "$START_FAIL_ERR" 2>/dev/null
+  [ -n "$START_FAIL_MARKER" ] && touch "$START_FAIL_MARKER" 2>/dev/null
+  echo "host: $2" >&2
+  exit "$1"
+}
+
+start_cmd() {
+  local agent=${1:-} cwd=${2:-} label="" exited="" err="" envfile="" timeout="" bad="" v
+  [ $# -ge 2 ] && shift 2 || set --
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --label|--exited|--err|--env-file|--timeout)
+        [ $# -ge 2 ] || { bad="$1 needs a value"; break; }
+        case $1 in
+          --label) label=$2 ;; --exited) exited=$2 ;; --err) err=$2 ;; --env-file) envfile=$2 ;; --timeout) timeout=$2 ;;
+        esac
+        shift ;;
+      --) shift; break ;;
+      *) bad="unknown option for start: $1 (the kind and its arguments go after --)"; set --; break ;;
+    esac
+    shift
+  done
+  abs() { case $1 in ""|/*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac; }
+  exited=$(abs "$exited"); err=$(abs "$err"); envfile=$(abs "$envfile")
+  START_FAIL_ERR=$err START_FAIL_MARKER=$exited
+  [ -n "$err" ] && : > "$err" 2>/dev/null
+  [ -z "$bad" ] || start_failed 1 "$bad"
+  [ -n "$agent" ] && [ -n "$cwd" ] && [ $# -ge 1 ] || start_failed 1 "usage: host.sh start <agent> <cwd> [options] -- <kind> <args...>"
+  [ -d "$cwd" ] || start_failed 1 "no such directory: $cwd"
+  [ -z "$envfile" ] || [ -r "$envfile" ] || start_failed 1 "env file not readable: $envfile"
+  [ -z "$timeout" ] || timeout=$(count "$timeout" "--timeout") || start_failed 1 "--timeout must be a whole number of seconds"
+  local claim_wait session_wait kind=$1; shift
+  claim_wait=$(count "${POSTMASTER_HOST_CLAIM_WAIT:-20}" POSTMASTER_HOST_CLAIM_WAIT) || start_failed 1 "POSTMASTER_HOST_CLAIM_WAIT"
+  session_wait=$(count "${POSTMASTER_HOST_SESSION_WAIT:-20}" POSTMASTER_HOST_SESSION_WAIT) || start_failed 1 "POSTMASTER_HOST_SESSION_WAIT"
+  local h; h=$(detect)
+  [ "$h" = herdr ] || start_failed 3 "live agents need Herdr, and the session host here is $h"
+  agent=$(handle_of "$agent"); cwd=$(cd "$cwd" && pwd -P); label=$(clean "${label:-$agent}")
+  [ -z "$(agent_json "$agent")" ] || start_failed 1 "a live agent is already named $agent"
+  [ -n "$exited" ] && rm -f -- "$exited"            # never an earlier agent's
+
+  # A fresh tab in the worktree's space, as run places a launch, whose shell hands over to a
+  # bash on the pane's own environment, the caller's POSTMASTER_ settings and the env file: the
+  # settings through a FIFO and never a command line, and the user's shell startup files not at
+  # all, so the agent runs in exactly the form it was given.
+  local placed space tab pane spec i=0
+  placed=$(herdr_place "$label" "$cwd") || start_failed 1 "Herdr could not open a tab for $agent in $cwd"
+  read -r space tab pane <<< "$placed"
+  spec=$(mktemp -d "${TMPDIR:-/tmp}/postmaster-host.XXXXXX") || start_failed 1 "cannot make a spec directory"
+  printf '%s' "$cwd" > "$spec/cwd"; printf '%s' "$envfile" > "$spec/envfile"
+  mkfifo "$spec/env" && start_env_writer "$spec/env"
+  herdr pane run "$pane" " exec $(q "$SELF") _shell $(q "$spec")" >/dev/null 2>&1 \
+    || { drop_spec "$spec"; start_failed 1 "Herdr could not run the shell for $agent in pane $pane"; }
+  while [ -d "$spec" ] && [ $i -lt $((claim_wait * 4)) ]; do sleep 0.25; i=$((i + 1)); done
+  if [ -d "$spec" ]; then
+    mkdir "$spec/claimed" 2>/dev/null && drop_spec "$spec"
+    start_failed 1 "the pane for $agent did not take its shell within ${claim_wait}s"
+  fi
+  i=0                                                 # until the handed-over shell is at its prompt
+  until herdr pane process-info --pane "$pane" 2>/dev/null | python3 -c 'import json, sys
+p = json.load(sys.stdin)["result"]["process_info"]
+f = p.get("foreground_processes") or [{}]
+sys.exit(0 if f[0].get("argv") == ["bash", "--noprofile", "--norc", "-i"] and p.get("foreground_process_group_id") == p.get("shell_pid") else 1)' 2>/dev/null; do
+    [ $i -lt $((claim_wait * 4)) ] || start_failed 1 "the shell for $agent never reached its prompt in pane $pane"
+    sleep 0.25; i=$((i + 1))
+  done
+
+  local out code="" screen group session
+  i=0
+  # Herdr takes a moment to see the new shell at its prompt; until it does, the pane is busy.
+  while ! out=$(herdr agent start "$agent" --kind "$kind" --pane "$pane" ${timeout:+--timeout "$((timeout * 1000))"} -- "$@" 2>&1 >/dev/null); do
+    code=$(printf '%s' "$out" | json 'd["error"]["code"]' 2>/dev/null)
+    [ "$code" = agent_pane_busy ] && [ $i -lt $((claim_wait * 2)) ] || break
+    sleep 0.5; i=$((i + 1)); code=""
+  done
+  if [ -n "$code" ]; then
+    screen=$(herdr agent read "$agent" --source visible --lines 40 2>/dev/null | grep -v '^[[:space:]]*$' | tail -8 | tr -s ' ')
+    group=$(fg_group "$pane"); [ -n "$group" ] && end_group "$group"
+    case $code in
+      agent_not_ready) start_failed 4 "$agent stopped at a question before taking any work, so it was ended: $(printf '%s' "$screen" | tr '\n' ' ')" ;;
+      *) start_failed 1 "herdr could not start $agent: ${code:-$out}" ;;
+    esac
+  fi
+  group=$(fg_group "$pane")
+  [ -n "$group" ] || start_failed 1 "$agent started, but no process of its own is in its pane's foreground"
+  reg_add "$group" "$cwd" "$label"
+  [ -n "$exited" ] && watch_exit "$group" "$exited"
+
+  # The integration's session report is where the thread id comes from; a harness that sends
+  # none is not running with its integration, and cannot be resumed.
+  i=0
+  while :; do
+    session=$(agent_json "$agent" | python3 -c 'import json, sys
+s = (json.loads(sys.stdin.read() or "{}").get("agent_session") or {})
+if s.get("value"): print(json.dumps({"kind": s.get("kind"), "value": s["value"]}))' 2>/dev/null)
+    [ -n "$session" ] && break
+    if [ $i -ge $((session_wait * 4)) ]; then
+      end_group "$group"
+      start_failed 5 "$agent started, but its $kind integration reported no session within ${session_wait}s, so it was ended; is Herdr's $kind integration installed where it reads its config?"
+    fi
+    sleep 0.25; i=$((i + 1))
+  done
+  python3 -c 'import json, sys
+print(json.dumps({"host": "herdr", "space": sys.argv[1], "tab": sys.argv[2], "pane": sys.argv[3], "agent": sys.argv[4],
+                  "group": int(sys.argv[5]), "session": json.loads(sys.argv[6])}))' "$space" "$tab" "$pane" "$agent" "$group" "$session"
+}
+
+# _shell <spec>: the pane's shell, replaced, by one exec after another and nothing forked, since
+# Herdr counts a pane with any other process in it as busy. It claims the spec and becomes an
+# interactive bash with no startup files, on the pane's own environment, the caller's POSTMASTER_
+# settings from the FIFO, and the env file. Nothing else of the caller's reaches it: a caller that
+# is itself a harness session exports its own identity to its children, and claude started with
+# claude's writes no session record of its own. Its history goes nowhere.
+START_SHELL='import os, signal, sys
+spec = sys.argv[1]
+def field(n):
+    try:
+        with open(os.path.join(spec, n)) as f: return f.read()
+    except OSError: return ""
+cwd, envfile = field("cwd"), field("envfile")
+def late(*a): raise TimeoutError()
+signal.signal(signal.SIGALRM, late); signal.alarm(30)
+try:
+    with open(os.path.join(spec, "env"), "rb") as f: data, ok = f.read(), True
+except (OSError, TimeoutError):
+    data, ok = b"", False
+signal.alarm(0)
+for n in ("cwd", "envfile", "env"):
+    try: os.unlink(os.path.join(spec, n))
+    except OSError: pass
+for d in (os.path.join(spec, "claimed"), spec):
+    try: os.rmdir(d)
+    except OSError: pass
+login = os.environ.get("SHELL") or "/bin/sh"
+if not ok:
+    print("host: the environment of the caller never arrived, so no agent starts in this pane")
+    os.execv(login, [login])
+env = dict(os.environb)
+for kv in data.split(b"\0"):
+    k, eq, v = kv.partition(b"=")
+    if eq and k.startswith(b"POSTMASTER_"): env[k] = v
+for k in (b"POSTMASTER_LAUNCH_NAME", b"OLDPWD", b"_"): env.pop(k, None)
+env[b"HISTFILE"] = b"/dev/null"; env[b"PWD"] = cwd.encode()
+try:
+    os.chdir(cwd)
+except OSError:
+    print("host: cannot enter %s" % cwd); os.execv(login, [login])
+argv = ["bash", "--noprofile", "--norc", "-i"]
+if envfile:
+    argv = ["bash", "-c", "set -a; . \"$1\"; set +a; exec bash --noprofile --norc -i", "live-agent", envfile]
+os.execvpe("bash", argv, env)'
+live_shell() {
+  local spec=$1
+  if ! mkdir "$spec/claimed" 2>/dev/null; then
+    echo "host: this shell was handed over elsewhere; nothing to do here."; exec "${SHELL:-/bin/sh}"
+  fi
+  exec python3 -c "$START_SHELL" "$spec"
+}
+
+prompt_cmd() {  # prompt <agent> <file> [--timeout <seconds>]
+  local agent=${1:-} file=${2:-} secs="" rec st out rc code
+  [ -n "$agent" ] && [ -n "$file" ] || die "usage: host.sh prompt <agent> <file> [--timeout <seconds>]"
+  if [ "${3:-}" = --timeout ]; then secs=$(count "${4:-}" seconds) || exit 1; fi
+  [ -f "$file" ] && [ -s "$file" ] || die "no such file, or it is empty: $file"
+  need_herdr
+  agent=$(handle_of "$agent")
+  rec=$(agent_json "$agent")
+  [ -n "$rec" ] || { echo '{"outcome": "gone"}'; return 6; }
+  st=$(printf '%s' "$rec" | json 'd.get("agent_status")')
+  # Only to an agent that has settled: sent to one still working, Herdr's wait can match the end
+  # of the turn already running.
+  case $st in idle|done) ;; *) printf '{"outcome": "not settled", "status": "%s"}\n' "$st"; return 3 ;; esac
+  out=$(herdr agent prompt "$agent" "$(cat "$file")" --wait ${secs:+--timeout "$((secs * 1000))"} 2>&1); rc=$?
+  if [ $rc -eq 0 ]; then
+    st=$(printf '%s' "$out" | json 'd["result"]["agent"]["agent_status"]' 2>/dev/null)
+    printf '{"outcome": "settled", "status": "%s"}\n' "$st"; return 0
+  fi
+  code=$(printf '%s' "$out" | json 'd["error"]["code"]' 2>/dev/null)
+  case $code in
+    agent_prompt_stalled) echo '{"outcome": "stalled"}'; return 4 ;;
+    timeout) echo '{"outcome": "timeout"}'; return 5 ;;
+    agent_not_found) echo '{"outcome": "gone"}'; return 6 ;;
+    agent_blocked) echo '{"outcome": "not settled", "status": "blocked"}'; return 3 ;;
+    *) printf '{"outcome": "error", "code": "%s"}\n' "${code:-unknown}"; echo "host: herdr could not prompt $agent: ${code:-$out}" >&2; return 1 ;;
+  esac
+}
+
+state_cmd() {  # state <agent>
+  local agent=${1:-} rec
+  [ -n "$agent" ] || die "usage: host.sh state <agent>"
+  need_herdr
+  rec=$(agent_json "$(handle_of "$agent")")
+  [ -n "$rec" ] || { echo '{"status": "gone"}'; return 6; }
+  printf '%s' "$rec" | python3 -c 'import json, sys
+a = json.load(sys.stdin); s = a.get("agent_session") or {}
+print(json.dumps({"status": a.get("agent_status"), "pane": a.get("pane_id"),
+                  "session": {"kind": s.get("kind"), "value": s.get("value")} if s.get("value") else None}))'
+}
+
+end_cmd() {  # end <agent>: only an agent in a pane host.sh opened
+  local agent=${1:-} rec pane tokens group
+  [ -n "$agent" ] || die "usage: host.sh end <agent>"
+  need_herdr
+  agent=$(handle_of "$agent")
+  rec=$(agent_json "$agent")
+  [ -n "$rec" ] || { echo "no live agent is named $agent"; return 0; }
+  pane=$(printf '%s' "$rec" | json 'd.get("pane_id")')
+  tokens=$(herdr pane get "$pane" 2>/dev/null | json '(d["result"]["pane"].get("tokens") or {}).get("postmaster")' 2>/dev/null)
+  [ "$tokens" = launch ] || die "$agent runs in pane $pane, which host.sh did not open; not ending it"
+  group=$(fg_group "$pane")
+  [ -n "$group" ] && end_group "$group"
+  echo "ended $agent"
+}
+
 # --- tests --------------------------------------------------------------------------------
 test_setup() {  # a scratch repository with worktrees, and the commands the tests launch
   tmp=$(mktemp -d) || exit 1
@@ -776,28 +1044,18 @@ finish() {
   echo "$1: $fails control(s) misbehaved"; return 1
 }
 
-self_test() {
-  # Stub hosts on a curated PATH, so no control can reach a live Herdr or tmux server. A stub
-  # pane or window runs what it is given with only a server's environment, never the caller's,
-  # so the environment a launch sees has to have come through host.sh.
-  test_setup
-  trap 'rm -r -- "$tmp" 2>/dev/null' EXIT
-  mkdir -p "$tmp/bin" "$tmp/sys" "$tmp/stub"
-  local t p
-  for t in bash sh python3 git env cat mkdir rmdir rm mkfifo mktemp sleep date touch wc tr sed awk \
-           dirname basename grep head tail cut sort cmp ls seq timeout find cksum; do
-    p=$(command -v "$t" 2>/dev/null) && [ ! -e "$tmp/sys/$t" ] && ln -s "$p" "$tmp/sys/$t"
-  done
-  cat > "$tmp/bin/herdr" <<'EOF'
+write_stubs() {  # write_stubs <dir>: a stub herdr and tmux, which keep their state under $STUB and
+  # reach no live server; the live-agent tests of live.sh use them too
+  cat > "$1/herdr" <<'EOF'
 #!/usr/bin/env python3
-import fcntl, json, os, subprocess, sys
+import fcntl, glob, json, os, re, signal, subprocess, sys, time
 S = os.environ["STUB"]; a = sys.argv[1:]
 with open(os.path.join(S, "herdr.calls"), "a") as f: f.write("\t".join(a) + "\n")
 if os.path.exists(os.path.join(S, "herdr.down")): sys.exit(1)
 if a == ["agent"]: print("herdr agent commands:\n  kinds: pi|claude|codex"); sys.exit(2)
 lock = open(os.path.join(S, "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
 path = os.path.join(S, "herdr.json")
-st = json.load(open(path)) if os.path.exists(path) else {"n": 0, "spaces": {}, "panes": {}, "open": {}, "agents": []}
+st = json.load(open(path)) if os.path.exists(path) else {"n": 0, "spaces": {}, "panes": {}, "open": {}, "agents": [], "live": {}}
 def save(): json.dump(st, open(path, "w"))
 def new(prefix): st["n"] += 1; return "%s%d" % (prefix, st["n"])
 def opt(name): return a[a.index(name) + 1] if name in a else None
@@ -809,10 +1067,22 @@ def git(*args): return subprocess.run(["git", *args], capture_output=True, text=
 def main_of(d):
     c = git("-C", d, "rev-parse", "--path-format=absolute", "--git-common-dir")
     return os.path.realpath(os.path.dirname(c)) if c else None
-def space(label):
+def space(label, cwd):
     ws, tab, pane = new("w"), new("t"), new("p")
-    st["spaces"][ws] = {"label": label, "tokens": {}, "panes": [pane]}; st["panes"][pane] = {"ws": ws, "tokens": {}}
+    st["spaces"][ws] = {"label": label, "tokens": {}, "panes": [pane]}; st["panes"][pane] = {"ws": ws, "tokens": {}, "cwd": cwd}
     return {"workspace": {"workspace_id": ws}, "tab": {"tab_id": tab}, "root_pane": {"pane_id": pane}}
+def alive(pid):
+    try: os.kill(pid, 0); return True
+    except ProcessLookupError: return False
+    except PermissionError: return True
+def pane_env(pane):   # what the pane's shell had when it reached its prompt: `env` output, one line each
+    p = os.path.join(S, "pane-%s.env" % pane)
+    return dict(l.split("=", 1) for l in open(p).read().splitlines() if "=" in l) if os.path.exists(p) else {}
+def live_agent(name):
+    v = st["live"].get(name)
+    if v and not alive(v["pgid"]):            # released: its name goes with it
+        del st["live"][name]; st["agents"] = [n for n in st["agents"] if n != name]; save(); v = None
+    return v
 cmd = " ".join(a[:2])
 if cmd == "workspace list": out({"workspaces": [{"workspace_id": w} for w in st["spaces"]]})
 elif cmd == "worktree list":
@@ -828,15 +1098,15 @@ elif cmd == "worktree list":
     if root in st["open"]: src["source_workspace_id"] = st["open"][root]
     out({"source": src, "worktrees": wts})
 elif cmd == "workspace create":
-    r = space(opt("--label")); cwd = os.path.realpath(opt("--cwd"))
+    cwd = os.path.realpath(opt("--cwd")); r = space(opt("--label"), cwd)
     if main_of(cwd) == cwd: st["open"][cwd] = r["workspace"]["workspace_id"]
     save(); out(r)
 elif cmd == "worktree open":
-    r = space(opt("--label")); st["open"][os.path.realpath(opt("--path"))] = r["workspace"]["workspace_id"]
+    cwd = os.path.realpath(opt("--path")); r = space(opt("--label"), cwd); st["open"][cwd] = r["workspace"]["workspace_id"]
     save(); out(r)
 elif cmd == "tab create":
     ws = opt("--workspace"); tab, pane = new("t"), new("p")
-    st["spaces"][ws]["panes"].append(pane); st["panes"][pane] = {"ws": ws, "tokens": {}}
+    st["spaces"][ws]["panes"].append(pane); st["panes"][pane] = {"ws": ws, "tokens": {}, "cwd": os.path.realpath(opt("--cwd") or S)}
     save(); out({"tab": {"tab_id": tab}, "root_pane": {"pane_id": pane}})
 elif cmd == "workspace report-metadata": st["spaces"][a[2]]["tokens"] = tokens(); save()
 elif cmd == "pane report-metadata": st["panes"][a[2]]["tokens"] = tokens(); save()
@@ -844,27 +1114,98 @@ elif cmd == "workspace get":
     out({"workspace": {"workspace_id": a[2], "tokens": st["spaces"][a[2]]["tokens"]}})
 elif cmd == "pane list":
     out({"panes": [{"pane_id": p, "tokens": st["panes"][p]["tokens"]} for p in st["spaces"][opt("--workspace")]["panes"]]})
-elif cmd == "pane get": out({"pane": {"pane_id": a[2], "agent": None}})
+elif cmd == "pane get": out({"pane": {"pane_id": a[2], "agent": None, "tokens": st["panes"].get(a[2], {}).get("tokens", {})}})
 elif cmd == "pane run":
     pane, text, ws = a[2], a[3], st["panes"][a[2]]["ws"]
     fcntl.flock(lock, fcntl.LOCK_UN)
     if flag("pane.dead"): sys.exit(0)                     # accepted, never run
     late = "sleep 5; " if flag("pane.late") else ""
     env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/"), "STUB": S, "HERDR_ENV": "1",
-           "HERDR_PANE_ID": pane, "HERDR_TAB_ID": "tab-of-" + pane, "HERDR_WORKSPACE_ID": ws}
-    proc = subprocess.Popen(["bash", "-c", late + text], env=env, stdin=subprocess.DEVNULL, start_new_session=True,
+           "HERDR_PANE_ID": pane, "HERDR_TAB_ID": "tab-of-" + pane, "HERDR_WORKSPACE_ID": ws, "TERM": "stub-term"}
+    proc = subprocess.Popen(["bash", "-c", late + text], env=env, stdin=subprocess.PIPE, start_new_session=True,
                             stdout=open(os.path.join(S, "pane-%s.out" % pane), "ab"), stderr=subprocess.STDOUT)
     open(os.path.join(S, "pane-%s.pid" % pane), "w").write(str(proc.pid))
+    # A shell that reaches an interactive prompt in this pane reads this: it records what it has.
+    proc.stdin.write(("env > '%s'\n" % os.path.join(S, "pane-%s.env" % pane)).encode()); proc.stdin.close()
+elif cmd == "pane process-info":
+    pane = opt("--pane"); pf = os.path.join(S, "pane-%s.pid" % pane)
+    shell = int(open(pf).read()) if os.path.exists(pf) else 1
+    ag = next((v for n, v in list(st["live"].items()) if v["pane"] == pane and live_agent(n)), None)
+    if ag: fg, procs = ag["pgid"], [{"pid": ag["pgid"], "argv": [ag["kind"]] + ag["args"], "name": ag["kind"]}]
+    elif pane_env(pane): fg, procs = shell, [{"pid": shell, "argv": ["bash", "--noprofile", "--norc", "-i"], "name": "bash"}]
+    else: fg, procs = shell, [{"pid": shell, "argv": ["bash"], "name": "bash"}]
+    out({"process_info": {"pane_id": pane, "shell_pid": shell, "foreground_process_group_id": fg, "foreground_processes": procs}})
 elif cmd == "agent get":
-    if a[2] not in st["agents"]: error("agent_not_found")
-    out({"agent": {"name": a[2], "agent_status": "blocked" if flag("agent.blocked") else "idle"}})
+    v = live_agent(a[2])
+    if not v: error("agent_not_found")
+    sf = os.path.join(S, "agent-%s.status" % a[2])
+    status = open(sf).read().strip() if os.path.exists(sf) else ("blocked" if flag("agent.blocked") else "idle")
+    out({"agent": {"name": a[2], "agent_status": status, "pane_id": v["pane"], "agent_session": v["session"]}})
 elif cmd == "agent start":
-    if a[2] in st["agents"]: error("agent_name_taken")
-    st["agents"].append(a[2]); save()
+    name, kind, pane = a[2], opt("--kind"), opt("--pane")
+    if live_agent(name): error("agent_name_taken")
+    args = a[a.index("--") + 1:] if "--" in a else []
+    env = pane_env(pane); cwd = env.get("PWD") or st["panes"].get(pane, {}).get("cwd") or S
+    proc = subprocess.Popen(["sleep", "120"], start_new_session=True, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with open(os.environ.get("STUB_PIDS") or os.path.join(S, "fake.pids"), "a") as f: f.write("%d\n" % proc.pid)
+    # The session the harness's integration would report, and where the harness would keep it.
+    sid = "%08x-0000-4000-8000-%012x" % (st["n"] + 1, proc.pid); st["n"] += 1
+    home = env.get("HOME") or S
+    if kind == "pi":
+        base = env.get("PI_CODING_AGENT_DIR") or os.path.join(home, ".pi", "agent")
+        ref = args[args.index("--session") + 1] if "--session" in args else None
+        if ref and not ref.endswith(".jsonl"):
+            ref = (glob.glob(os.path.join(base, "sessions", "*", "*_%s.jsonl" % ref)) or [None])[0]
+        rec = ref or os.path.join(base, "sessions", "--stub--", "2026-01-01T00-00-00-000Z_%s.jsonl" % sid)
+        session = {"agent": "pi", "kind": "path", "source": "herdr:pi", "value": rec}
+    else:
+        if "--resume" in args: sid = args[args.index("--resume") + 1]
+        base = env.get("CLAUDE_CONFIG_DIR") or os.path.join(home, ".claude")
+        rec = os.path.join(base, "projects", re.sub(r"[^A-Za-z0-9]", "-", cwd), sid + ".jsonl")
+        session = {"agent": kind, "kind": "id", "source": "herdr:" + kind, "value": sid}
+    st["agents"].append(name)
+    st["live"][name] = {"pane": pane, "pgid": proc.pid, "kind": kind, "args": args, "cwd": cwd, "record": rec,
+                        "session": None if flag("agent.nosession") else session, "env": env}
+    save()
     if flag("agent.notready"): error("agent_not_ready")
+    out({"agent": {"name": name, "agent_status": "idle", "pane_id": pane}})
+elif cmd == "agent prompt":
+    name, text = a[2], a[3]
+    v = live_agent(name)
+    if not v: error("agent_not_found")
+    if flag("prompt.blocked"): error("agent_blocked")
+    fcntl.flock(lock, fcntl.LOCK_UN)
+    def record(line):
+        os.makedirs(os.path.dirname(v["record"]), exist_ok=True)
+        with open(v["record"], "a") as f: f.write(json.dumps(line) + "\n")
+    with open(os.path.join(S, "prompts.log"), "a") as f: f.write(json.dumps({"agent": name, "text": text}) + "\n")
+    if flag("prompt.dropped"): error("agent_prompt_stalled")          # never reached the harness
+    record({"type": "user", "message": {"role": "user", "content": text}})
+    for line in text.splitlines():
+        if line.startswith("STUB_RUN="): subprocess.run(["bash", "-c", line[9:]], cwd=v["cwd"])
+    if flag("prompt.stalled"): error("agent_prompt_stalled")          # ran at once, and no turn was seen
+    if "STUB_KILL" in text:                                          # killed mid-turn: reported done
+        os.killpg(v["pgid"], signal.SIGTERM)
+        for _ in range(40):
+            if not alive(v["pgid"]): break
+            time.sleep(0.05)
+        out({"agent": {"name": name, "agent_status": "done"}}); sys.exit(0)
+    record({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "OK."}]}})
+    if flag("prompt.timeout"): error("timeout")
+    if "--wait" in a: out({"agent": {"name": name, "agent_status": "blocked" if flag("prompt.ends-blocked") else "done"}})
+    else: out({})
 elif cmd == "agent read": print("stub screen of " + a[2])
+elif cmd == "integration status":
+    home = os.environ.get("HOME", "/")
+    where = {"pi": (os.environ.get("PI_CODING_AGENT_DIR") or home + "/.pi/agent") + "/extensions/herdr-agent-state.ts",
+             "claude": (os.environ.get("CLAUDE_CONFIG_DIR") or home + "/.claude") + "/hooks/herdr-agent-state.sh",
+             "codex": (os.environ.get("CODEX_HOME") or home + "/.codex") + "/herdr-agent-state.sh",
+             "antigravity-cli": home + "/.gemini/config/hooks/herdr-agent-state.sh",
+             "grok": home + "/.grok/hooks/herdr-agent-state.sh"}
+    for k, p in where.items(): print("%s: %s (%s)" % (k, "current (v1)" if os.path.exists(p) else "not installed", p))
 EOF
-  cat > "$tmp/bin/tmux" <<'EOF'
+  cat > "$1/tmux" <<'EOF'
 #!/usr/bin/env python3
 import fcntl, json, os, subprocess, sys
 S = os.environ["STUB"]; a = sys.argv[1:]
@@ -901,12 +1242,27 @@ elif a[0] == "list-windows":
         elif v["session"] == opt("-t").lstrip("="): print("%s\t%s" % (w, v["opts"].get("@postmaster_cwd", "")))
 elif a[0] == "capture-pane": print("stub screen")
 EOF
-  chmod +x "$tmp/bin/herdr" "$tmp/bin/tmux"
+  chmod +x "$1/herdr" "$1/tmux"
+}
+
+self_test() {
+  # Stub hosts on a curated PATH, so no control can reach a live Herdr or tmux server. A stub
+  # pane or window runs what it is given with only a server's environment, never the caller's,
+  # so the environment a launch sees has to have come through host.sh.
+  test_setup
+  trap 'while read -r p; do kill -- "-$p" 2>/dev/null; done < "$tmp/fake.pids" 2>/dev/null; rm -r -- "$tmp" 2>/dev/null' EXIT
+  mkdir -p "$tmp/bin" "$tmp/sys" "$tmp/stub"
+  local t p
+  for t in bash sh python3 git env cat mkdir rmdir rm mkfifo mktemp sleep date touch wc tr sed awk \
+           dirname basename grep head tail cut sort cmp ls seq timeout find cksum; do
+    p=$(command -v "$t" 2>/dev/null) && [ ! -e "$tmp/sys/$t" ] && ln -s "$p" "$tmp/sys/$t"
+  done
+  write_stubs "$tmp/bin"
   SYS=$tmp/sys; STUBS=$tmp/bin:$tmp/sys
   hs() {  # hs <PATH> [VAR=value ...] -- <host.sh arguments>: host.sh in a clean environment
     local p=$1 vars=(); shift
     while [ "$1" != -- ]; do vars+=("$1"); shift; done; shift
-    env -i HOME="$HOME" PATH="$p" STUB="$tmp/stub" TMPDIR="$tmp" POSTMASTER_HOST_STATE="$tmp/state" \
+    env -i HOME="$HOME" PATH="$p" STUB="$tmp/stub" STUB_PIDS="$tmp/fake.pids" TMPDIR="$tmp" POSTMASTER_HOST_STATE="$tmp/state" \
       POSTMASTER_HOST_CLAIM_WAIT=3 POSTMASTER_HOST_CLOSE_WAIT=1 ${vars[@]+"${vars[@]}"} "$SELF" "$@"
   }
   reset() { rm -f -- "$tmp"/stub/*; }
@@ -1105,6 +1461,74 @@ PY
   check "tmux: wait settles on a quiet screen, and read takes the lines asked for" \
     '[ $a -eq 0 ] && calls tmux | grep -qx "capture-pane${T}-p${T}-J${T}-S${T}-7${T}-t${T}@1"'
 
+  echo "live agents (stub Herdr)"
+  reset
+  local wt group
+  printf 'SECRET_PROBE=from-the-env-file\n' > "$tmp/lane.env"
+  wt=$repo/.worktrees/T-1-luna
+  got=$(cd "$tmp/caller" && hs "$STUBS" CALLER_VAR=v HERDR_PANE_ID=caller-pane POSTMASTER_LAUNCH_NAME=stale \
+        POSTMASTER_CONFIG=/elsewhere/config.toml CLAUDECODE=1 CLAUDE_CODE_SESSION_ID=parent-session -- start t1-luna "$wt" \
+        --label "$NAME" --exited ../logs/a1.exited --err ../logs/a1.err --env-file "$tmp/lane.env" \
+        -- claude --model m --dangerously-skip-permissions); rc=$?
+  pane=$(printf '%s' "$got" | json 'd["pane"]' 2>/dev/null); group=$(printf '%s' "$got" | json 'd["group"]' 2>/dev/null)
+  check "start: the agent runs in a fresh tab of its worktree's space, and start says where" \
+    '[ $rc -eq 0 ] && [ -n "$pane" ] && [ -n "$group" ] && calls herdr | grep -q "^worktree${T}open${T}.*--path${T}$wt${T}"' "$got"
+  check "with the session its integration reported" '[ "$(printf "%s" "$got" | json "d[\"session\"][\"kind\"]")" = id ]' "$got"
+  check "Herdr started the kind with exactly its arguments, in that pane" \
+    'calls herdr | grep -qx "agent${T}start${T}t1-luna${T}--kind${T}claude${T}--pane${T}$pane${T}--${T}--model${T}m${T}--dangerously-skip-permissions"'
+  env_of() { sed -n "s/^$1=//p" "$tmp/stub/pane-$pane.env" | head -1; }
+  check "the pane's shell has the pane's own environment, the caller's POSTMASTER_ settings and the env file" \
+    '[ "$(env_of POSTMASTER_CONFIG)" = /elsewhere/config.toml ] && [ "$(env_of SECRET_PROBE)" = from-the-env-file ] && [ "$(env_of HERDR_PANE_ID)" = "$pane" ] && [ "$(env_of TERM)" = stub-term ]' \
+    "$(cat "$tmp/stub/pane-$pane.env" 2>/dev/null)"
+  check "and nothing else of the caller's: not its variables, nor a harness session's identity" \
+    '[ -z "$(env_of CALLER_VAR)" ] && [ -z "$(env_of CLAUDECODE)" ] && [ -z "$(env_of CLAUDE_CODE_SESSION_ID)" ]'
+  check "not the caller's launch name, and no history file" '[ -z "$(env_of POSTMASTER_LAUNCH_NAME)" ] && [ "$(env_of HISTFILE)" = /dev/null ]'
+  check "it runs in its worktree" '[ "$(env_of PWD)" = "$wt" ]'
+  check "the env file's values never reach a command line" '! calls herdr | grep -q from-the-env-file'
+  check "its exited marker is gone while it runs" '[ ! -e "$tmp/logs/a1.exited" ]'
+  got2=$(hs "$STUBS" -- start t1-luna "$wt" --exited "$tmp/logs/a2.exited" -- claude 2>&1); rc=$?
+  check "a second agent under the same name is refused, and that start's marker lands" '[ $rc -eq 1 ] && [ -e "$tmp/logs/a2.exited" ]' "$got2"
+  got=$(hs "$STUBS" -- state t1-luna); rc=$?
+  check "state gives its status and its session" \
+    '[ $rc -eq 0 ] && [ "$(printf "%s" "$got" | json "d[\"status\"]")" = idle ] && [ -n "$(printf "%s" "$got" | json "d[\"session\"][\"value\"]")" ]' "$got"
+  printf 'Write the summary.\nSTUB_RUN=echo done > WORKHORSE-SUMMARY.md\n' > "$tmp/p1.txt"
+  got=$(hs "$STUBS" -- prompt t1-luna "$tmp/p1.txt"); rc=$?
+  check "prompt: a settled agent takes the text, waited on in the same call" \
+    '[ $rc -eq 0 ] && [ -s "$wt/WORKHORSE-SUMMARY.md" ] && calls herdr | grep -q "SUMMARY.md${T}--wait$" && ! calls herdr | grep -q "^agent${T}wait"' "$got"
+  echo working > "$tmp/stub/agent-t1-luna.status"; a=$(wc -l < "$tmp/stub/prompts.log")
+  got=$(hs "$STUBS" -- prompt t1-luna "$tmp/p1.txt"); rc=$?
+  rm -f "$tmp/stub/agent-t1-luna.status"
+  check "an agent still working is sent nothing: exit 3" '[ $rc -eq 3 ] && [ "$(wc -l < "$tmp/stub/prompts.log")" -eq "$a" ]' "$got"
+  touch "$tmp/stub/prompt.stalled"; hs "$STUBS" -- prompt t1-luna "$tmp/p1.txt" >/dev/null; a=$?; rm -f "$tmp/stub/prompt.stalled"
+  check "no turn seen: exit 4, so the caller reads the session before sending again" '[ $a -eq 4 ]'
+  hs "$STUBS" -- close "$wt" >/dev/null 2>&1; rc=$?
+  check "close refuses while a live agent runs in the worktree" '[ $rc -eq 2 ]'
+  got=$(hs "$STUBS" -- end t1-luna); rc=$?
+  check "end: the agent stops, and its exited marker lands" '[ $rc -eq 0 ] && marker "$tmp/logs/a1.exited" 10 && ! kill -0 "$group" 2>/dev/null' "$got"
+  hs "$STUBS" -- state t1-luna >/dev/null; a=$?; hs "$STUBS" -- prompt t1-luna "$tmp/p1.txt" >/dev/null; b=$?
+  check "an agent that has gone: state and prompt exit 6" '[ $a -eq 6 ] && [ $b -eq 6 ]'
+  check "and then close closes its space" 'hs "$STUBS" -- close "$wt" >/dev/null'
+  wt=$repo/.worktrees/T-1-sol
+  touch "$tmp/stub/agent.notready"
+  got=$(hs "$STUBS" -- start t1-sol "$wt" --exited "$tmp/logs/a3.exited" --err "$tmp/logs/a3.err" -- claude 2>&1); rc=$?
+  rm -f "$tmp/stub/agent.notready"; hs "$STUBS" -- state t1-sol >/dev/null; a=$?
+  check "an agent that stops at a question before any work: exit 4, ended, its marker lands and --err says why" \
+    '[ $rc -eq 4 ] && [ $a -eq 6 ] && [ -e "$tmp/logs/a3.exited" ] && grep -q "stopped at a question" "$tmp/logs/a3.err"' "$got"
+  touch "$tmp/stub/agent.nosession"
+  got=$(hs "$STUBS" POSTMASTER_HOST_SESSION_WAIT=1 -- start t1-sol "$wt" --exited "$tmp/logs/a4.exited" -- pi 2>&1); rc=$?
+  rm -f "$tmp/stub/agent.nosession"; hs "$STUBS" -- state t1-sol >/dev/null; a=$?
+  check "an agent whose integration reports no session: exit 5, ended, and its marker lands" \
+    '[ $rc -eq 5 ] && [ $a -eq 6 ] && [ -e "$tmp/logs/a4.exited" ]' "$got"
+  got=$(hs "$STUBS" POSTMASTER_HOST=none -- start t1-sol "$wt" --exited "$tmp/logs/a5.exited" -- claude 2>&1); rc=$?
+  hs "$STUBS" POSTMASTER_HOST=none -- prompt t1-sol "$tmp/p1.txt" >/dev/null 2>&1; a=$?
+  check "no Herdr: start and prompt exit 3, and start's marker lands" '[ $rc -eq 3 ] && [ $a -eq 3 ] && [ -e "$tmp/logs/a5.exited" ]' "$got"
+  got=$(hs "$STUBS" -- start t1-own "$wt" -- claude); pane=$(printf '%s' "$got" | json 'd["pane"]' 2>/dev/null)
+  group=$(printf '%s' "$got" | json 'd["group"]' 2>/dev/null)
+  python3 -c 'import json, sys
+st = json.load(open(sys.argv[1])); st["panes"][sys.argv[2]]["tokens"] = {}; json.dump(st, open(sys.argv[1], "w"))' "$tmp/stub/herdr.json" "$pane"
+  hs "$STUBS" -- end t1-own >/dev/null 2>&1; rc=$?
+  check "end never ends an agent in a pane host.sh did not open" '[ $rc -eq 1 ] && kill -0 "$group" 2>/dev/null' "$got"
+
   finish self-test
 }
 
@@ -1206,9 +1630,15 @@ case ${1:-} in
   send) shift; send_cmd "$@" ;;
   wait) shift; wait_cmd "$@" ;;
   read) shift; read_cmd "$@" ;;
+  start) shift; start_cmd "$@" ;;
+  prompt) shift; prompt_cmd "$@" ;;
+  state) shift; state_cmd "$@" ;;
+  end) shift; end_cmd "$@" ;;
   _run) runner "$2" "$3" ;;
+  _shell) live_shell "$2" ;;
   _handle) handle_of "$2" ;;
+  _stubs) write_stubs "$2" ;;
   --self-test) self_test ;;
   --live-test) live_test ;;
-  *) echo "usage: host.sh detect | name | run | stop | close | spawn | send | wait | read | --self-test | --live-test (see the header)" >&2; exit 1 ;;
+  *) echo "usage: host.sh detect | name | run | stop | close | spawn | send | wait | read | start | prompt | state | end | --self-test | --live-test (see the header)" >&2; exit 1 ;;
 esac
