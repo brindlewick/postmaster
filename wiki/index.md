@@ -29,6 +29,9 @@ produce better software than one good model? If so, how?
 How each agent CLI really behaves, as distinct from what its documentation says.
 
 - [Prompt delivery differs by harness](concepts/prompt-delivery.md): **settled**.
+- [A resume's exit status does not say it continued its thread](concepts/resume-exit-status.md):
+  **settled**, for pi, Muse Code and MiMo Code. Resuming a thread it cannot find, a harness can
+  exit 0 having done nothing, or having started a new thread.
 
 ## Trackers and tooling
 

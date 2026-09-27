@@ -8,6 +8,17 @@ updated: 2026-09-27
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-27] ingest | muse and mimo: what arrives, and resumes of a missing thread
+
+A trial of Muse Code 1.4.0 and MiMo Code 0.1.15 through `launch.sh`, recorded in
+`raw/trials/muse-mimo-controls/`, with a positive and a negative control for each check issue
+#71 names. Muse Code's `--prompt-file` delivers the prompt verbatim. MiMo Code's stdin delivers
+it after one newline of its own, and a message argument arrives quoted. Both exit 0 when resumed
+on a thread their data directory does not hold: Muse Code opens a new thread under the id, and
+MiMo Code does nothing. `prompt-delivery` gains both harnesses and keeps its standing. A new
+page, `resume-exit-status`, records the resume finding at `settled`, and `launch.sh` now refuses
+such a resume.
+
 ## [2026-09-27] ingest | MiMo Code's headless forms
 
 A trial of MiMo Code 0.1.15, launched and resumed through `launch.sh`, recorded in
