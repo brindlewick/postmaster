@@ -278,8 +278,8 @@ says. The dispatch directory stays. Then put the run's tool faults to the user (
 **A fault you meet in postmaster itself** is logged at once, as `coachman.md` says (Tool
 faults), with `postmaster` as the actor: in the run you were acting on, or in
 `<runs>/postmaster` when you were acting on none. A fault in a control stops what you were
-doing and goes to the user (Stage E, step 3). Anything else may be worked around, with the
-workaround in the same line.
+doing: log `escalate` with the postmaster file as its target, and send it up (Stage E, step
+3). Anything else may be worked around, with the workaround in the same line.
 
 **Their tickets are shown to the user once, when a run's aftercare ends:** after the merge
 (Stage G) or on abandon. Nothing else puts them to the user.
@@ -290,16 +290,20 @@ workaround in the same line.
    gives.
 2. **known:** `<tool>/scripts/tool-faults.sh comment <dispatch> <id>` adds the dated comment that it
    was seen again.
-3. **new:** show the user each draft, `<dispatch>/tool-faults/<id>.md` and its `.title`, with
-   any ticket its line says it is like, and carry on with the stream. On their word, run
+3. **new:** show the user the draft its line names, with the `.title` beside it and any ticket
+   the line says it is like, and carry on with the stream. On their word, run
    `<tool>/scripts/tool-faults.sh file <dispatch> <id>`; when they say a ticket already holds it,
    `comment <dispatch> <id> <ticket>`; on their no, `decline <dispatch> <id> "<their word>"`.
    With `tracker.postmaster_may_create` true, file each at once and show the user what was
-   filed. A draft changes only on the user's word, and `file` refuses one that is not safe to
-   publish.
-4. **kept:** postmaster has no tracker of its own that the script can reach, and the line
+   filed. A draft changes only on the user's word, and `file` refuses one that is no longer
+   safe to publish.
+4. **asked:** shown at an earlier harvest of the same run; nothing to do until the user
+   answers.
+5. **unchecked:** the tracker could not be read. Tell the user, and harvest the run again
+   when they say.
+6. **kept:** postmaster has no tracker of its own that the script can reach, and the line
    says why. Tell the user, and where the drafts are.
-5. **A fault in a harness adapter** is also put to the user as a claim for the wiki's harness
+7. **A fault in a harness adapter** is also put to the user as a claim for the wiki's harness
    pages, under the wiki's rules for evidence (`skills/wiki`).
 
 [Why faults become tickets, not fixes made during the run](../../wiki/concepts/tool-faults.md)

@@ -82,14 +82,15 @@ run, whatever the target: the fault becomes a ticket when the run closes.
      [--workaround "<what you did instead>"] [--control <kind>]
    ```
 
-   The file is the one that misbehaved, relative to `tool`; for a runbook step, the runbook,
+   The file is the one that misbehaved, relative to `<tool>`; for a runbook step, the runbook,
    with the step in `--ran`. `--failed` and `--fix` are published on postmaster's own tracker:
    write them in postmaster's terms, and put the target's names, paths, code and ticket text
    only in `--ran`, `--error` and `--diagnosis`, which stay in the run's records. A fault seen
    again is logged again, with the `--failed` text of its first line.
 2. **A fault in a control stops the leg.** `controls.md` beside this file lists the controls;
-   a runbook step it names takes `--control` with its kind. Never work around a control:
-   write `ESCALATION.md` naming the fault, touch `.escalation-ready`, and exit.
+   a step it names takes `--control` with its kind. Never work around a control: log
+   `escalate` with the postmaster file as its target, write `ESCALATION.md` naming the fault,
+   touch `.escalation-ready`, and exit.
 3. **A fault anywhere else may be worked around**, with the workaround in the same line
    (`--workaround`). One you cannot work around is escalated like any other question.
 

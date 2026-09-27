@@ -1,12 +1,19 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-27] lint | fault tickets: when they are shown, where they go, what they withhold
+
+The page on faults a run finds in postmaster now says that a fault ticket goes only to
+postmaster's own repository on GitHub, when the user administers it, and why a draft errs
+towards withholding. The drafts are shown to the user once, when a run's aftercare ends. No
+standing changed.
 
 ## [2026-09-26] ingest | faults a run finds in postmaster become tickets
 
