@@ -59,6 +59,9 @@ Why the design is shaped as it is.
   next. It should also take fewer rounds.
 - [Live agents against markers and resumes](concepts/live-agents.md): **claimed**. Headless
   stays the default and live agents become an option; what it would take to change the default.
+- [A skill is a link to the postmaster repo, never a copy](concepts/skill-links.md):
+  **claimed**. Each skill is linked from a harness's own skills folder to the main checkout, and
+  a session finds the repo from that link. Five harnesses were tried, and each loads a linked skill.
 
 ## Sources
 

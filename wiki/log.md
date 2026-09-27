@@ -8,6 +8,16 @@ updated: 2026-09-26
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-26] ingest | a skill is a link to the postmaster repo, never a copy
+
+Third page in the Decisions area, with a trial behind its narrower fact. Each skill is installed
+as a link from a harness's user-level skills folder to the main checkout, never as a copy, and a
+session finds the repo from that link. The trial asked Claude Code, pi, MiMo Code, codex and
+Muse Code, with a temporary HOME, which skills they loaded: each loads a linked skill from each
+folder it documents, and none lists or warns about a link that is missing or points nowhere. The page
+records why the one step that finds the repo is a line in `SKILL.md` rather than a script, and
+why Antigravity is not linked yet. Standing `claimed`: the decision is the user's, issue #15.
+
 ## [2026-09-26] ingest | follow-up: claude's trust question, and claude killed mid-turn
 
 Two checks added to `raw/trials/herdr-agent-lifecycle/`. Headless claude answered in a
