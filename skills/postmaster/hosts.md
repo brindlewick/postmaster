@@ -1,21 +1,22 @@
 # Session hosts
 
 Every host-specific fact in the flow lives here and nowhere else. The runbooks say "through
-`scripts/host.sh`"; this file says what that means on each host. When a host changes, this file
-changes and the runbooks do not.
+`<tool>/scripts/host.sh`"; this file says what that means on each host. When a host changes, this file
+changes and the runbooks do not. `<tool>` is the postmaster repo, as the runbook that sent you here
+found it.
 
-**`scripts/host.sh` is the executable form of this file.** The two change together. A form the
+**`<tool>/scripts/host.sh` is the executable form of this file.** The two change together. A form the
 script does not have is a form this file has not recorded yet.
 
 A host decides two things only: where a launch runs, so the user can watch it, and what keeps
 the interactive postmaster alive between turns. **It never changes what a launch is.** Every
-lane and every coachman leg is the same headless command on every host: `scripts/launch.sh`'s
+lane and every coachman leg is the same headless command on every host: `<tool>/scripts/launch.sh`'s
 form, its events stream to its events file, its errors to its `.err` file, its marker touched
 when it exits, and then it exits. An idle thread is a native session on disk, never a process.
 
 ## Which host
 
-`scripts/host.sh detect` prints `herdr`, `tmux` or `none`:
+`<tool>/scripts/host.sh detect` prints `herdr`, `tmux` or `none`:
 
 | host | when |
 |---|---|
@@ -40,15 +41,15 @@ way on every row, only less visibly on the last.
 | close a worktree's space | `herdr workspace close`, before the worktree is removed | kill the worktree's windows | nothing to close |
 
 ```sh
-scripts/host.sh detect
-scripts/host.sh name <dispatch> [<role or lane>]
-scripts/host.sh run <name> <cwd> [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
-scripts/host.sh stop <worktree>
-scripts/host.sh close <worktree>
-scripts/host.sh spawn <handle> <cwd> [--label <name>] -- <interactive form>
-scripts/host.sh send <handle> <file> [--wait [<seconds>]]
-scripts/host.sh wait <handle> [<seconds>]
-scripts/host.sh read <handle> [<lines>]
+<tool>/scripts/host.sh detect
+<tool>/scripts/host.sh name <dispatch> [<role or lane>]
+<tool>/scripts/host.sh run <name> <cwd> [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
+<tool>/scripts/host.sh stop <worktree>
+<tool>/scripts/host.sh close <worktree>
+<tool>/scripts/host.sh spawn <handle> <cwd> [--label <name>] -- <interactive form>
+<tool>/scripts/host.sh send <handle> <file> [--wait [<seconds>]]
+<tool>/scripts/host.sh wait <handle> [<seconds>]
+<tool>/scripts/host.sh read <handle> [<lines>]
 ```
 
 **Send and wait as one command, `send --wait`.** On Herdr a separate `wait` straight after a
@@ -71,13 +72,13 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
 - **Its marker means it ended.** `--marker` is removed as the launch starts, so an earlier one is
   never mistaken for it, and touched when it exits, whatever its exit. If `host.sh` cannot start
   it at all, the marker lands anyway and `--err` says why.
-- **`--append` is for a resume**, which is a run like any other, with `scripts/launch.sh resume
+- **`--append` is for a resume**, which is a run like any other, with `<tool>/scripts/launch.sh resume
   ...` as the command: it adds to `--out` instead of emptying it, while `--err` always holds only
   the latest process's errors. A stream is only ever appended to after being emptied once, so a
   second writer on the same file cannot overwrite the first.
 - **`--pidfile` gets its pid, which is also its process group:** `kill -- -<pid>` stops all of
   it. `host.sh run` returns as soon as the launch has started. The wait still goes in the same
-  command as the launch, as `scripts/wait-for-markers.sh`.
+  command as the launch, as `<tool>/scripts/wait-for-markers.sh`.
 - **A launch outlives its caller.** It belongs to the host's server, or with no host to a session
   of its own, so a caller's background-task cap or its exit does not reach it.
 - **A launch carries its own pane's identity, never its caller's**: `HERDR_PANE_ID`, the tab and
@@ -87,12 +88,12 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   [Why a launch must own its pane](../../wiki/concepts/herdr-headless-launches.md)
 - **`<name>` is the run's name, then the role or lane:** `<ticket>, <ticket title> · <role or
   lane>`, for example `#36, Run the style, bug and security reviews in parallel · coachman`.
-  Take it from the waybill, `"$(scripts/host.sh name <dispatch> <role>)"`, never by typing it:
+  Take it from the waybill, `"$(<tool>/scripts/host.sh name <dispatch> <role>)"`, never by typing it:
   a ticket's title can hold anything a shell would run. It labels the space when `host.sh`
   opens it, and the tab or window, and is the pane's terminal title while the launch runs, which
   is what a Herdr client shows for a pane with an agent in it. `POSTMASTER_LAUNCH_NAME` carries
   it to `launch.sh`, which names the thread where the harness can (`harnesses.md`).
-- **The pane shows the stream, not the JSON**: `scripts/view-stream.sh` renders one line per
+- **The pane shows the stream, not the JSON**: `<tool>/scripts/view-stream.sh` renders one line per
   event of interest, each with its time.
 - **Every launch is registered while it runs**, under `POSTMASTER_HOST_STATE` (default
   `~/.postmaster/host`), with the worktree it was placed in, whatever host ran it. `host.sh stop
@@ -172,23 +173,23 @@ with `herdr agent start`. It is a pane whose agent `host.sh` reports. So when it
 ## none
 
 - A launch is a detached process in a session of its own, with no terminal. There is nothing to
-  watch but its files: `scripts/runs-status.sh`, the events file, and
-  `scripts/view-stream.sh < <events-file>` for the readable form.
+  watch but its files: `<tool>/scripts/runs-status.sh`, the events file, and
+  `<tool>/scripts/view-stream.sh < <events-file>` for the readable form.
 - **The postmaster runs headless, as a native session**, like every other role:
-  `scripts/host.sh run "<project> · postmaster" <repo> --out <runs>/postmaster/events.jsonl
-  --err <runs>/postmaster/postmaster.err --marker <runs>/postmaster/.exited -- scripts/launch.sh
+  `<tool>/scripts/host.sh run "<project> · postmaster" <repo> --out <runs>/postmaster/events.jsonl
+  --err <runs>/postmaster/postmaster.err --marker <runs>/postmaster/.exited -- <tool>/scripts/launch.sh
   launch postmaster <repo> <brief-file>`. Its brief says it runs headless, so whenever it needs
   the user it writes `<runs>/postmaster/ESCALATION.md` and ends its turn, and
-  `scripts/runs-status.sh` shows the escalation pending. The user answers by resuming its thread,
-  through `host.sh run --append` with `scripts/launch.sh resume postmaster <repo> <thread-id>
+  `<tool>/scripts/runs-status.sh` shows the escalation pending. The user answers by resuming its thread,
+  through `host.sh run --append` with `<tool>/scripts/launch.sh resume postmaster <repo> <thread-id>
   <message-file>`, or by opening the thread in the harness's own interactive resume.
 - **This needs a harness with a resume form.** `launch.sh` refuses to resume agy, so with no
   host the postmaster runs on another harness.
 
 ## Tests
 
-`scripts/host.sh --self-test` runs every form against stub `herdr` and `tmux` on a PATH that
-holds nothing else, and never reaches a live server. `scripts/host.sh --live-test` runs the
+`<tool>/scripts/host.sh --self-test` runs every form against stub `herdr` and `tmux` on a PATH that
+holds nothing else, and never reaches a live server. `<tool>/scripts/host.sh --live-test` runs the
 ticket's controls against the hosts on this machine, in a scratch repository it creates: a launch
 that lands in its worktree's space, nested under its repository's space, with its marker landing;
 a reviewer's scratch clone opening as a space of its own, which `close` shuts; the same launch
