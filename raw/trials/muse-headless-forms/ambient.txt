@@ -1,5 +1,5 @@
 run: ambient context, the launch form
-exit: 0, seconds: 19
+exit: 0, seconds: 20
 events: 32
 first event: payload_type runtime.command.accepted, stream kind session
 session ids in the stream: 1
@@ -9,3 +9,4 @@ last terminal event: run.terminal.completed, terminal completed
 --- its text ---
 Marker: AGENTS-OK
 yes
+

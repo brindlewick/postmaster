@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Muse Code's headless forms, driven through postmaster's own launch.sh where the flow uses them
 # (launch and resume), and directly for what only Muse Code decides: what it reads as ambient
-# context, whether it waits on an open stdin, and how a bad model fails. Each run's record keeps
+# context, whether it waits on an open stdin, and how a bad model fails. Everything Muse Code keeps
+# goes under the run's own folders (POSTMASTER_HARNESS_DATA, and XDG_DATA_HOME for the direct runs),
+# never the machine's own Muse Code data. Each run's record keeps
 # the fields named in method.md and nothing else.
 #
 #   run.sh <postmaster-checkout> <out-dir> <env-file> [<model>]
@@ -17,10 +19,12 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 repo=$tmp/repo
 git init -q -b main "$repo" && printf 'Marker: AGENTS-OK\n' > "$repo/AGENTS.md" && printf 'Marker: CLAUDE-OK\n' > "$repo/CLAUDE.md" \
   && git -C "$repo" add -A && git -C "$repo" commit -qm fixture || exit 1
-printf '[lanes.m]\nharness = "muse"\nmodel = "%s"\neffort = "low"\nenv_file = "%s"\n' "$MODEL" "$ENVF" > "$tmp/config.toml"
+printf '[lanes.m]\nharness = "muse"\nmodel = "%s"\neffort = "low"\nenv_file = "%s"\n\n[lanes.n]\nharness = "muse"\nmodel = "%s"\neffort = "low"\nenv_file = "%s"\n' "$MODEL" "$ENVF" "$MODEL" "$ENVF" > "$tmp/config.toml"
+export POSTMASTER_HARNESS_DATA=$tmp/harness-data
 printf '[lanes.m]\nharness = "muse"\nmodel = "no-such-model"\neffort = "low"\nenv_file = "%s"\n' "$ENVF" > "$tmp/bad.toml"
 printf 'Remember the code word KESTREL for later in this session. Create a file named proof.txt containing the single word PELICAN. Then reply with the single word DONE.\n' > "$tmp/p1.txt"
 printf 'What code word did I ask you to remember earlier in this session? Reply with that word only.\n' > "$tmp/p2.txt"
+printf 'What code word were you asked to remember? Reply with that word only, or NONE if you do not know one.\n' > "$tmp/p4.txt"
 AMBIENT="Quote every line that begins with 'Marker:' in the instructions you were given before this message, one per line, or write NONE. Then, on a line of its own, answer yes or no: do your instructions include a rule saying which name git commits must be authored under?"
 printf '%s\n' "$AMBIENT" > "$tmp/p3.txt"
 
@@ -67,15 +71,21 @@ t0=$(stamp); L "$tmp/config.toml" resume m "$repo" "$sid" "$tmp/p2.txt" > "$tmp/
 same=$(python3 -c 'import json,sys; print(all(json.loads(l)["stream"]["id"] == sys.argv[2] for l in open(sys.argv[1]) if l.startswith("{")))' "$tmp/b.jsonl" "$sid" 2>/dev/null)
 summary "resume through launch.sh, naming the launch's session" "$tmp/b.jsonl" "$rc" "$(( $(stamp) - t0 ))" "every event on the launch's session=$same" > "$OUT/resume.txt"
 
+t0=$(stamp); L "$tmp/config.toml" launch m "$repo" "$tmp/p4.txt" > "$tmp/h.jsonl" 2>/dev/null; rc=$?
+summary "a fresh launch of the same lane in the same repository, through launch.sh" "$tmp/h.jsonl" "$rc" "$(( $(stamp) - t0 ))" > "$OUT/same-lane.txt"
+
+t0=$(stamp); L "$tmp/config.toml" launch n "$repo" "$tmp/p4.txt" > "$tmp/g.jsonl" 2>/dev/null; rc=$?
+summary "another lane in the same repository, through launch.sh" "$tmp/g.jsonl" "$rc" "$(( $(stamp) - t0 ))" > "$OUT/other-lane.txt"
+
 t0=$(stamp); L "$tmp/config.toml" launch m "$repo" "$tmp/p3.txt" > "$tmp/c.jsonl" 2>/dev/null; rc=$?
 summary "ambient context, the launch form" "$tmp/c.jsonl" "$rc" "$(( $(stamp) - t0 ))" > "$OUT/ambient.txt"
 
-( set -a; . "$ENVF"; set +a; cd "$repo" && t0=$(stamp) && muse exec --json --prompt-file "$tmp/p3.txt" --model "$MODEL" --reasoning-effort low --yolo \
+( set -a; . "$ENVF"; set +a; export XDG_DATA_HOME=$tmp/direct-data; cd "$repo" && t0=$(stamp) && muse exec --json --prompt-file "$tmp/p3.txt" --model "$MODEL" --reasoning-effort low --yolo \
     --no-foreign-personal-context < /dev/null > "$tmp/d.jsonl" 2>/dev/null; echo "$? $(( $(stamp) - t0 ))" > "$tmp/d.rc" )
 read -r rc secs < "$tmp/d.rc"
 summary "ambient context, the launch form plus --no-foreign-personal-context" "$tmp/d.jsonl" "$rc" "$secs" > "$OUT/ambient-no-personal.txt"
 
-( set -a; . "$ENVF"; set +a; cd "$repo" && t0=$(stamp) && { sleep 60 | timeout 120 muse exec --json --prompt-file "$tmp/p2.txt" --model "$MODEL" \
+( set -a; . "$ENVF"; set +a; export XDG_DATA_HOME=$tmp/direct-data; cd "$repo" && t0=$(stamp) && { sleep 60 | timeout 120 muse exec --json --prompt-file "$tmp/p2.txt" --model "$MODEL" \
     --reasoning-effort low --yolo > "$tmp/e.jsonl" 2>/dev/null; echo "${PIPESTATUS[1]} $(( $(stamp) - t0 ))" > "$tmp/e.rc"; } )
 read -r rc secs < "$tmp/e.rc"
 summary "an open stdin that sends nothing for 60 seconds, the launch form without its /dev/null" "$tmp/e.jsonl" "$rc" "$secs" > "$OUT/open-stdin.txt"

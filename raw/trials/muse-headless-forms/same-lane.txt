@@ -1,10 +1,9 @@
-run: resume through launch.sh, naming the launch's session
-exit: 0, seconds: 20
-every event on the launch's session: True
-events: 32
+run: a fresh launch of the same lane in the same repository, through launch.sh
+exit: 0, seconds: 14
+events: 31
 first event: payload_type runtime.command.accepted, stream kind session
 session ids in the stream: 1
-run.model.configured: model_id muse-spark-1.3-contributor, source replay
+run.model.configured: model_id muse-spark-1.3-contributor, source startup
 tool.result events: none
 last terminal event: run.terminal.completed, terminal completed
 --- its text ---
