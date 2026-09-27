@@ -158,7 +158,6 @@ Act on the `NEXT` column, run by run, and log every action:
   the stream tail; a live leg that is merely slow is left alone, and a process that is gone
   is handled as REMOUNT. Never kill a running leg for being slow.
 - **WAIT:** nothing to do.
-- **FAULTS:** the run is closed and its tool faults wait on you. Stage H.
 
 **The takeover prompt** for a fallback coachman, written to `<dispatch>/leg-<n>-takeover.txt`:
 "You take over leg <n> of <TICKET> mid-way. Read `<dispatch>/brief.md`,
@@ -180,7 +179,7 @@ never the record.
    work: a within-brief ambiguity, a scope call the ticket's own criteria answer, a lane to
    drop as DEGRADED, a round to stop at the cap. Log `escalate` with your ruling.
 3. **Send it up** when it is genuinely destructive, changes the ticket's scope, touches
-   anything outside the repo, is a fault in a control (Stage H), or the user asked to see it: write
+   anything outside the repo, is a fault in a control (Tool faults), or the user asked to see it: write
    `<runs>/postmaster/ESCALATION.md` naming the run and the question, tell the user in
    the session, and wait. Never pass a postmaster grant up as if it needed the user's
    word, and never take the user's word for something the config gives you.
@@ -220,14 +219,15 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-5.md`:
    same way after preserving any stray file into `<dispatch>/stray/`.
 3. **Close the run** with `scripts/stage.sh <dispatch> done postmaster`, which does nothing if
    the coachman already has, and never delete the dispatch directory.
-4. **Dispatch the next ticket** in order, Stage B.
+4. **Put the run's tool faults to the user**, as its aftercare ends (Tool faults, below).
+5. **Dispatch the next ticket** in order, Stage B.
 
 **Abandoning a run** happens only on the user's word for that run: log `note` with the
 word, set the stage with `scripts/stage.sh <dispatch> abandoned postmaster`, remove every worktree the run created after
 preserving stray files, and move the ticket back to todo or to cancelled as the user
-says. The dispatch directory stays.
+says. The dispatch directory stays. Then put the run's tool faults to the user (Tool faults).
 
-## Stage H: tool faults
+## Tool faults
 
 **A fault you meet in postmaster itself** is logged at once, as `coachman.md` says (Tool
 faults), with `postmaster` as the actor: in the run you were acting on, or in
@@ -235,23 +235,24 @@ faults), with `postmaster` as the actor: in the run you were acting on, or in
 doing and goes to the user (Stage E, step 3). Anything else may be worked around, with the
 workaround in the same line.
 
-**When a run closes**, done or abandoned, the poll says `FAULTS` until its tool faults are
-dealt with, and a `POSTMASTER` line says the same of `<runs>/postmaster`:
+**Their tickets are shown to the user once, when a run's aftercare ends:** after the merge
+(Stage G) or on abandon. Nothing else puts them to the user.
 
-1. **Harvest them:** `scripts/tool-faults.sh harvest <dispatch>` groups the `tool-fault` lines
-   into distinct faults, drafts a ticket for each, and looks each up on postmaster's own
-   tracker. Act on the state its line gives each fault.
+1. **Harvest them:** `scripts/tool-faults.sh harvest <dispatch>`, then the same for
+   `<runs>/postmaster`. Each groups the `tool-fault` lines into distinct faults, drafts a
+   ticket for each, and looks each up on postmaster's own tracker. Act on the state each line
+   gives.
 2. **known:** `scripts/tool-faults.sh comment <dispatch> <id>` adds the dated comment that it
    was seen again.
-3. **new:** put the draft, `<dispatch>/tool-faults/<id>.md` and its `.title`, to the user,
-   with any ticket the line says it is like. File it with `scripts/tool-faults.sh file
-   <dispatch> <id>` on their word, or without asking when `tracker.postmaster_may_create` is
-   true. When they say a ticket already holds it, `scripts/tool-faults.sh comment <dispatch>
-   <id> <ticket>`; on their no, `scripts/tool-faults.sh decline <dispatch> <id> "<their
-   word>"`. A draft changes only on the user's word, and `file` refuses one that is not safe
-   to publish.
+3. **new:** show the user each draft, `<dispatch>/tool-faults/<id>.md` and its `.title`, with
+   any ticket its line says it is like, and carry on with the stream. On their word, run
+   `scripts/tool-faults.sh file <dispatch> <id>`; when they say a ticket already holds it,
+   `comment <dispatch> <id> <ticket>`; on their no, `decline <dispatch> <id> "<their word>"`.
+   With `tracker.postmaster_may_create` true, file each at once and show the user what was
+   filed. A draft changes only on the user's word, and `file` refuses one that is not safe to
+   publish.
 4. **kept:** postmaster has no tracker of its own that the script can reach, and the line
-   says why. Tell the user the faults are in `<dispatch>/tool-faults.json`, with the drafts.
+   says why. Tell the user, and where the drafts are.
 5. **A fault in a harness adapter** is also put to the user as a claim for the wiki's harness
    pages, under the wiki's rules for evidence (`skills/wiki`).
 
@@ -277,6 +278,6 @@ only with the user's word for that specific thing, and the word is logged.
 - Never launch more runs than `team.max_runs`, and never two runs on overlapping file
   surfaces.
 - Never modify postmaster itself, whatever the target: a fault you meet in it is a tool fault
-  (Stage H), and a fault in a control is never worked around.
+  (Tool faults), and a fault in a control is never worked around.
 - Every action is a `log-action` line at the moment it happens. If it is not in the ledger,
   it did not happen.

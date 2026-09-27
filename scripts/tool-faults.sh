@@ -40,9 +40,9 @@
 # scripts/ticket-check.sh fails.
 #
 # Writes <dispatch>/tool-faults.json (the public run id, how many tool-fault lines have been
-# harvested, each fault's state), a draft per fault at <dispatch>/tool-faults/<id>.md with its
-# title in <id>.title, left alone once written so a draft the user changed stays changed, and
-# <dispatch>/.tool-faults-ready while a fault waits on the postmaster. A fault's state is:
+# harvested, each fault's state), and a draft per fault at <dispatch>/tool-faults/<id>.md with
+# its title in <id>.title, left alone once written so a draft the user changed stays changed.
+# A fault's state is:
 #   known <ticket>   postmaster's tracker has it: a ticket's title carries its id, or a comment
 #                    on a fault ticket for the same file does; comment
 #   new              it has none: put the draft to the user; "like" names fault tickets for the
@@ -74,7 +74,7 @@ def die(msg, code=1):
 if not pathlib.Path(ARGS[0]).is_dir():
     die("no such dispatch directory: %s" % ARGS[0])
 D = pathlib.Path(ARGS[0]).resolve()
-LOG, STATE, DRAFTS, MARKER = D / "actions.jsonl", D / "tool-faults.json", D / "tool-faults", D / ".tool-faults-ready"
+LOG, STATE, DRAFTS = D / "actions.jsonl", D / "tool-faults.json", D / "tool-faults"
 PENDING, TERMINAL = ("known", "new"), ("commented", "filed", "declined")
 
 def run(argv, **kw):
@@ -288,10 +288,6 @@ def save_state(st):
     with open(tmp, "w") as f:
         json.dump(st, f, indent=2); f.write("\n")
     os.replace(tmp, STATE)
-    if any(x.get("state") in PENDING for x in st.get("faults", [])):
-        MARKER.touch()
-    elif MARKER.exists():
-        MARKER.unlink()
 
 def meta():
     try:
@@ -699,11 +695,11 @@ leaks() {  # leaks <text>: the planted pieces of the target it holds, one per li
 fault_line() { printf '%s\n' "$out" | grep -E "^tf-[0-9a-f]{8}  $1  " | head -1; }
 id_of() { fault_line "$1" | cut -c1-11; }
 
-poll() { "$T/scripts/runs-status.sh" "$RUNS/$NAME" | awk -v r="$1" '$1 == r { print $NF }'; }
+states() {  # states <dispatch>: each fault's state, as tool-faults.json records it, one line
+  python3 -c 'import json, sys; print(" ".join(x["state"] for x in json.load(open(sys.argv[1]))["faults"]))' "$1/tool-faults.json" 2>/dev/null
+}
 
 echo "positive controls"
-[ "$(poll "$TICKET")" = FAULTS ] && ok "the poll says FAULTS for a closed run whose faults are not harvested" \
-  || fail "the poll says FAULTS for a closed run whose faults are not harvested" "$("$T/scripts/runs-status.sh" "$RUNS/$NAME")"
 access ADMIN; issues
 out=$(tf harvest "$d" 2>&1); rc=$?
 A=$(printf '%s\n' "$out" | grep -E '^tf-[0-9a-f]{8}  scripts/wait-for-markers.sh  control \(wait\)  3 times' | cut -c1-11)
@@ -714,7 +710,7 @@ C=$(printf '%s\n' "$out" | grep -E '^tf-[0-9a-f]{8}  scripts/wait-for-markers.sh
   || fail "five planted faults, three of them one fault seen three ways, are three entries (exit $rc)" "$out"
 printf '%s\n' "$out" | grep -qE "^$A .* new$" && printf '%s\n' "$out" | grep -qE "^$B .* new$" \
   && ok "with no ticket for them on postmaster's tracker, they are new" || fail "with no ticket for them on postmaster's tracker, they are new" "$out"
-[ -f "$d/.tool-faults-ready" ] && ok "a fault waiting on the postmaster leaves the marker" || fail "a fault waiting on the postmaster leaves the marker"
+[ "$(states "$d")" = "new new new" ] && ok "tool-faults.json records each fault's state" || fail "tool-faults.json records each fault's state" "$(states "$d")"
 printf '%s\n' "$out" | grep -qxF "  $C: a fault in a control, and the run's log has no escalation after it" \
   && ! printf '%s\n' "$out" | grep -qF "  $A: a fault in a control, and" \
   && ok "a fault in a control with no escalation after it is named; one escalated is not" \
@@ -749,8 +745,8 @@ out=$(tf file "$d" "$B" 2>&1); rc=$?
 out=$(tf comment "$d" "$C" "#57" 2>&1); rc=$?
 [ $rc -eq 0 ] && [ "$(writes comment)" -eq 2 ] && tail -1 "$S/writes.log" | grep -qF "comment #57 " && tail -1 "$S/writes.log" | grep -qF "tool fault $C seen again: once in run " \
   && ok "on the user's word that a new fault is a ticket's, comment names it there" || fail "on the user's word that a new fault is a ticket's, comment names it there (exit $rc)" "$out$(printf '\n'; cat "$S/writes.log")"
-[ ! -e "$d/.tool-faults-ready" ] && [ "$(poll "$TICKET")" = - ] && ok "once every fault is dealt with, the marker goes and the poll says -" \
-  || fail "once every fault is dealt with, the marker goes and the poll says -" "$("$T/scripts/runs-status.sh" "$RUNS/$NAME")"
+[ "$(states "$d")" = "commented filed commented" ] && ok "once every fault is dealt with, tool-faults.json says so" \
+  || fail "once every fault is dealt with, tool-faults.json says so" "$(states "$d")"
 out=$(tf harvest "$d" 2>&1)
 printf '%s\n' "$out" | grep -qE "^$A .* commented #57$" && printf '%s\n' "$out" | grep -qE "^$B .* filed #60$" && printf '%s\n' "$out" | grep -qE "^$C .* commented #57$" \
   && ok "a later harvest reads what was done from the run's own records" || fail "a later harvest reads what was done from the run's own records" "$out"
@@ -772,8 +768,8 @@ clean=$(newrun "${NAME^^}-13" done)
 logf "$clean" coachman note "$TICKET" "nothing went wrong"
 out=$(tf harvest "$clean" 2>&1); rc=$?
 [ $rc -eq 0 ] && [ "$out" = "$(printf 'run %s: no tool faults' "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["run_id"])' "$clean/tool-faults.json")")" ] \
-  && [ ! -e "$clean/tool-faults" ] && [ ! -e "$clean/.tool-faults-ready" ] && [ ! -s "$S/writes.log" ] \
-  && ok "a clean log yields no fault, no draft and no marker" || fail "a clean log yields no fault, no draft and no marker (exit $rc)" "$out"
+  && [ ! -e "$clean/tool-faults" ] && [ -z "$(states "$clean")" ] && [ ! -s "$S/writes.log" ] \
+  && ok "a clean log yields no fault and no draft" || fail "a clean log yields no fault and no draft (exit $rc)" "$out"
 open=$(newrun "${NAME^^}-14" review-bug)
 logf "$open" coachman tool-fault scripts/launch.sh --ran x --failed y --error none --diagnosis z --fix w
 out=$(tf harvest "$open" 2>&1); rc=$?
@@ -785,7 +781,7 @@ issues; access READ
 out=$(tf harvest "$mine" 2>&1); rc=$?
 F=$(id_of scripts/launch.sh)
 [ $rc -eq 0 ] && printf '%s\n' "$out" | grep -qF "the user does not own postmaster's repository" && printf '%s\n' "$out" | grep -qE "^$F .* kept$" \
-  && [ ! -e "$mine/.tool-faults-ready" ] && ok "a repository the user does not own is no tracker: the faults are kept" \
+  && [ "$(states "$mine")" = kept ] && ok "a repository the user does not own is no tracker: the faults are kept" \
   || fail "a repository the user does not own is no tracker: the faults are kept (exit $rc)" "$out"
 out=$(tf file "$mine" "$F" 2>&1); rc=$?
 [ $rc -eq 1 ] && [ "$(writes create)" -eq 0 ] && ok "and nothing is filed there" || fail "and nothing is filed there (exit $rc)" "$out"
@@ -799,7 +795,7 @@ out=$(tf file "$mine" "$F" 2>&1); rc=$?
 [ $rc -eq 2 ] && [ "$(writes create)" -eq 0 ] && printf '%s\n' "$out" | grep -qF "not safe to publish" \
   && ok "file refuses a draft changed to carry the target's code" || fail "file refuses a draft changed to carry the target's code (exit $rc)" "$out"
 out=$(tf decline "$mine" "$F" "the user: not worth a ticket" 2>&1); rc=$?
-[ $rc -eq 0 ] && [ ! -e "$mine/.tool-faults-ready" ] && [ "$(writes create)" -eq 0 ] \
+[ $rc -eq 0 ] && [ "$(states "$mine")" = declined ] && [ "$(writes create)" -eq 0 ] \
   && grep -qF "\"target\":\"$F\",\"detail\":\"tool fault $F declined by the user: the user: not worth a ticket\"" "$mine/actions.jsonl" \
   && ok "decline records the user's no, and files nothing" || fail "decline records the user's no, and files nothing (exit $rc)" "$out"
 

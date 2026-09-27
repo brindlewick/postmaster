@@ -73,7 +73,7 @@ not enough, and that every draft needs the user's eye before it is filed.
 
 `scripts/log-action.sh` gains the `tool-fault` action, with the role's diagnosis and proposed
 fix as fields. `skills/postmaster/controls.md` lists the controls, and both runbooks forbid
-working around one, or modifying postmaster during a run, whatever the target. Stage H of
-`skills/postmaster/postmaster.md` runs `scripts/tool-faults.sh` when a run closes: it groups the
-run's faults, comments on the ones postmaster's tracker already has, and drafts the new ones for
-the user. The poll, `scripts/runs-status.sh`, says `FAULTS` until they are dealt with.
+working around one, or modifying postmaster during a run, whatever the target. When a run's
+aftercare ends, after the merge or on abandon, `skills/postmaster/postmaster.md` runs
+`scripts/tool-faults.sh`: it groups the run's faults, comments on the ones postmaster's tracker
+already has, and shows the user a draft ticket for each new one, once.
