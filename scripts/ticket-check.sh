@@ -40,7 +40,9 @@
 #
 # --splice changes nothing else: every line of <base-body> outside the sections it replaces is
 # printed as it was. It is how a part the user approved is written into a ticket without
-# retyping the rest.
+# retyping the rest. A part it would write whose name stands as a subheading inside a later
+# part of the base, such as `### Direction` under `## Notes`, is refused: that heading may be the
+# part at the wrong level or the user's own text, and splicing would delete it or leave two.
 #
 # POSTMASTER_CONFIG overrides the config path (~/.postmaster/config.toml). A tracker of kind
 # `other` has no adapter script: read the ticket with its own tooling and check it with --body.
@@ -50,7 +52,7 @@
 #   exit 1  usage; a file that cannot be read; no config, or one that does not parse; a tracker kind
 #           with no adapter script; the adapter could not read the ticket; scripts/turnpikes.sh
 #           could not be run or gave no verdict; or, with --splice, a sections file that is not a
-#           list of `##` sections
+#           list of `##` sections, or a part it would write named inside a later part of the base
 #   exit 2  malformed; one line per missing or malformed part on stdout, the part named first
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd -P)
@@ -147,20 +149,9 @@ def heads_of(lines):  # (line, level, normalised text, as written)
     return heads
 
 def bounds_of(heads):
-    # A section ends at the next heading of level one or two, or at a heading naming a part of the
-    # shape where that part would stand, so a part written at the wrong level is not read as the
-    # text of the part above it. A part's name as a subheading inside a later part, such as
-    # `### Turnpikes` in the notes, is that part's text.
-    bounds, top = [], -1
-    for h in heads:
-        rank = RANK.get(h[2])
-        if h[1] <= 2:
-            bounds.append(h)
-            if h[1] == 2 and rank is not None:
-                top = max(top, rank)
-        elif rank is not None and rank > top:
-            bounds.append(h)
-    return bounds
+    # A section ends at the next heading of level one or two, or at any heading naming a part of
+    # the shape, so a part written at the wrong level is not read as the text of the part above it.
+    return [h for h in heads if h[1] <= 2 or h[2] in RANK]
 
 def has_words(lines):
     return bool(re.search(r"[^\W_]", " ".join(t for t, _ in lines)))
@@ -233,9 +224,11 @@ def criteria(fault, part, body):
     return len(items)
 
 def turnpikes(fault, part, body):  # the section's turnpikes, read by scripts/turnpikes.sh, which defines them
-    text = "\n".join(t for t, code in body if not code)
+    # A list item that opens a fence is code with it, as a plain fence is.
+    text = "\n".join(t for t, code in body if not code and not FENCED_ITEM.match(t))
     try:
-        r = subprocess.run([os.environ["TURNPIKES"], "resolve"], input=text, capture_output=True, text=True)
+        r = subprocess.run([os.environ["TURNPIKES"], "resolve"], input=text, capture_output=True,
+                           encoding="utf-8", errors="replace")
     except OSError as e:
         die("cannot run %s: %s" % (os.environ["TURNPIKES"], e.strerror))
     said = r.stdout.splitlines()
@@ -262,7 +255,7 @@ def check(title, text):
     for key, name in PARTS:
         found = [h for h in bounds if h[1] == 2 and h[2] == key]
         if not found:
-            near = [h for h in bounds if h[2] == key]
+            near = [h for h in heads if h[2] == key]
             msg = 'no "## %s" section' % name
             if near:
                 msg += '; "%s" is there, at the wrong level' % near[0][3]
@@ -310,15 +303,31 @@ def splice(base_text, sections_text):
             die('"%s" in the sections file is not a ## heading' % b[3])
     if len({b[2] for b, _ in given}) != len(given):
         die("the sections file names a section twice")
+    # A part's name as a subheading inside a later part may be the part at the wrong level or the
+    # user's own text; splicing would delete it or leave two, so the user settles which first.
+    heading = {b[2]: b[3] for b, _ in given}
+    top = -1
+    for b, _ in secs:
+        rank = RANK.get(b[2])
+        if b[1] == 2 and rank is not None:
+            top = max(top, rank)
+        elif b[1] > 2 and b[2] in heading and rank is not None and rank < top:
+            die('"%s" stands inside a later part; splicing "%s" would delete it or leave two, '
+                "so move or rename it first" % (b[3], heading[b[2]]))
     out = [(b[2], c, False) for b, c in secs]
     for b, c in given:
         out = [s for s in out if s[0] != b[2]]
         rank = RANK.get(b[2])
         if rank is None:
             at = len(out)
-        else:  # after the last part ranked before it, or else before the first ranked after it
+        else:  # after the last part ranked before it and any unranked sections after that part
             before = [k for k, s in enumerate(out) if RANK.get(s[0], rank) < rank]
-            at = before[-1] + 1 if before else next((k for k, s in enumerate(out) if RANK.get(s[0], -1) > rank), len(out))
+            if before:
+                at = before[-1] + 1
+                while at < len(out) and RANK.get(out[at][0]) is None:
+                    at += 1
+            else:
+                at = next((k for k, s in enumerate(out) if RANK.get(s[0], -1) > rank), len(out))
         while c and not c[-1].strip():
             c = c[:-1]
         out.insert(at, (b[2], c, True))
@@ -402,6 +411,7 @@ fail() { printf '  FAIL %s\n' "$1"; [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 
 LIST=$("$HERE/turnpikes.sh" --list) || { echo "self-test: turnpikes.sh --list failed" >&2; exit 1; }
 DEF=$(printf '%s\n' "$LIST" | awk '$2 == "default" {print $1}' | paste -sd, - | sed 's/,/, /g')
 N1=$(printf '%s\n' "$LIST" | awk 'NR == 1 {print $1}'); N2=$(printf '%s\n' "$LIST" | awk 'NR == 2 {print $1}')
+N2UP=$(printf '%s' "$N2" | awk '{print toupper(substr($0, 1, 1)) substr($0, 2)}')
 [ -n "$DEF" ] && [ -n "$N2" ] || { echo "self-test: turnpikes.sh needs a default set and two turnpikes" >&2; exit 1; }
 NOPE=zz-not-listed
 printf '%s\n' "$LIST" | awk '{print $1}' | grep -qx "$NOPE" && { echo "self-test: $NOPE is a turnpike; pick another unused name" >&2; exit 1; }
@@ -555,7 +565,7 @@ body "$P" "$A" "$D" "## Turnpikes
 none"; run "$T"
 named "none passes, and names no turnpike" "turnpikes: none"
 body "$P" "$A" "$D" "## Turnpikes
-- ${N2^}
+- $N2UP
 - \`$N1\`"; run "$T"
 named "a list passes, as the turnpikes it names" "turnpikes: $N1, $N2"
 body "$P" "$A" "$D" "## Turnpikes
@@ -671,8 +681,13 @@ expect "a direction before the criteria" 2 direction '"## Direction" comes befor
 body "$P" "$A" "$D" "$N"; run "$T"
 expect "no turnpikes" 2 turnpikes 'no "## Turnpikes" section; one is needed, holding default, none, or turnpike names'
 body "$P" "$A" "$D" "$NT"; run "$T"
-expect "a ### Turnpikes in the notes is their text, not the section at the wrong level" 2 turnpikes \
-  'no "## Turnpikes" section; one is needed' "at the wrong level"
+expect "a ### Turnpikes in the notes, with no ## Turnpikes, is named at the wrong level" 2 turnpikes \
+  '"### Turnpikes" is there, at the wrong level'
+body "$P" "$A" "$D" '## Turnpikes
+- ```none
+  style, bug, security
+  ```'; run "$T"
+expect "a list item that opens a fence is code, and names no turnpike" 2 turnpikes "names no turnpike"
 body "$P" "$A" "$D" "## Turnpikes
 $N1, $NOPE"; run "$T"
 expect "a turnpike scripts/turnpikes.sh does not list is named" 2 turnpikes "\"$NOPE\" is not a turnpike"
@@ -752,9 +767,6 @@ expect "the spliced body passes the check" 0 none
 same "a missing turnpikes section goes between the direction and the notes"
 printf '%s\n' "$out" > "$tmp/body.md"; run "$T"
 named "and the spliced body passes, with the default turnpikes" "turnpikes: $DEF"
-{ printf '%s\n\n' "$P" "$A" "$D"; printf '%s\n' "$NT"; } > "$tmp/base.md"; printf '%s\n' "$K" > "$tmp/sections.md"
-{ printf '%s\n\n' "$P" "$A" "$D" "$K"; printf '%s\n' "$NT"; } > "$tmp/want.md"; splice
-same "a ### Turnpikes in the notes, and the subsections after it, stay where they are"
 { printf '%s\n\n' "$P" "$A" "$UJ" "$D"; printf '%s\n' "$N"; } > "$tmp/base.md"; printf '%s\n' "$K" > "$tmp/sections.md"
 { printf '%s\n\n' "$P" "$A" "$UJ" "$D" "$K"; printf '%s\n' "$N"; } > "$tmp/want.md"; splice
 same "turnpikes go after the direction, even when a user journey comes before it"
@@ -777,6 +789,9 @@ Seen twice this week.'
 { printf '%s\n\n' "Reported in the forum." "$P" "$X" "$A"; printf '%s\n' "$N"; } > "$tmp/base.md"; printf '%s\n' "$D" > "$tmp/sections.md"
 { printf '%s\n\n' "Reported in the forum." "$P" "$X" "$A" "$D"; printf '%s\n' "$N"; } > "$tmp/want.md"; splice
 same "text before the first heading and a section outside the shape are kept"
+{ printf '%s\n\n' "Reported in the forum." "$P" "$X" "$D" "$K"; printf '%s\n' "$N"; } > "$tmp/base.md"; printf '%s\n' "$A" > "$tmp/sections.md"
+{ printf '%s\n\n' "Reported in the forum." "$P" "$X" "$A" "$D" "$K"; printf '%s\n' "$N"; } > "$tmp/want.md"; splice
+same "a missing part goes after the part before it and the sections outside the shape that follow it"
 { printf '%s\n\n' "$P" "$A" "$N"; printf '\n'; } > "$tmp/base.md"; printf '%s\n' "$D" > "$tmp/sections.md"
 { printf '%s\n\n' "$P" "$A" "$D" "$N"; printf '\n'; } > "$tmp/want.md"
 "$SELF" --splice "$tmp/base.md" "$tmp/sections.md" > "$tmp/got.md" 2>&1; rc=$?
@@ -790,6 +805,18 @@ printf '### Direction\nUse the adapters.\n' > "$tmp/sections.md"; splice
 [ $rc -eq 1 ] && ok "a section that is not at level two" || fail "a section that is not at level two (exit $rc)" "$out"
 printf '%s\n\n%s\n' "$D" "$D" > "$tmp/sections.md"; splice
 [ $rc -eq 1 ] && ok "the same section twice" || fail "the same section twice (exit $rc)" "$out"
+{ printf '%s\n\n' "$P" "$A" "$D"; printf '%s\n' "$NT"; } > "$tmp/base.md"; printf '%s\n' "$K" > "$tmp/sections.md"; splice
+[ $rc -eq 1 ] && printf '%s\n' "$out" | grep -qF '"### Turnpikes" stands inside a later part' \
+  && ok "a ### Turnpikes in the notes is neither deleted nor left beside a new one" \
+  || fail "a ### Turnpikes in the notes is neither deleted nor left beside a new one (exit $rc)" "$out"
+{ printf '%s\n\n' "$P" "$A" "## Notes
+Context.
+
+### Direction
+An old approach." ; } > "$tmp/base.md"; printf '%s\n' "$D" > "$tmp/sections.md"; splice
+[ $rc -eq 1 ] && printf '%s\n' "$out" | grep -qF '"### Direction" stands inside a later part' \
+  && ok "a stale ### Direction in the notes is not left beside the new one" \
+  || fail "a stale ### Direction in the notes is not left beside the new one (exit $rc)" "$out"
 
 echo
 [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }

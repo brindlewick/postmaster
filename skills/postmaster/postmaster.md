@@ -73,7 +73,11 @@ ledger. `note` is the action for anything without its own verb.
 5. **Propose before creating** unless `tracker.postmaster_may_create` is true. Show the
    user each ticket's title, priority, direction, turnpikes and one-line rationale, then create
    the ones they approve through the tracker adapter, logging `ticket-create` per ticket, and
-   check each one again by its new id. Never create a ticket on your own initiative.
+   check each one again by its new id. Never create a ticket on your own initiative. A ticket
+   whose turnpikes leave out a default one, which `<tool>/scripts/turnpikes.sh short '<its
+   turnpikes: line>'` names, is shown to the user before it is created whatever
+   `tracker.postmaster_may_create` says, and their word on its turnpikes is logged as a `note`
+   naming the ticket and the line.
 6. **Order them.** Dependencies first; then the file surfaces. Two tickets touching the same
    route table, transport interface or shared module do not run at the same time. Record the
    order and the reason in `<runs>/postmaster/plan.md`, current state only.
@@ -84,7 +88,9 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
 
 1. **Check the ticket once more:** `<tool>/scripts/ticket-check.sh <repo> <id>` exits 0, logged as
    `ticket-check`. On exit 2 it goes back to Stage A, step 3, and the next ticket in order is
-   taken instead.
+   taken instead. When `<tool>/scripts/turnpikes.sh short '<the turnpikes: line it printed>'`
+   names any default turnpike, the ledger must hold the user's word on this ticket's turnpikes
+   (Stage A, step 5); if it does not, ask them, and log their word, before going on.
 2. **Base pre-flight.** `<tool>/scripts/check-target.sh <repo>` exits 0 and the main checkout is on
    the default branch. On 2, the dirty-tree question goes to the user (`SKILL.md`); you
    never stash, reset or discard anything. The config is checked too, for the legs this run
@@ -108,14 +114,14 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    HEAD` on the default branch: `git -C <repo> worktree add .worktrees/<TICKET> -b <TICKET>
    <sha>`. The coachman's cwd is that worktree from its first leg, so the project's ambient
    context loads for it.
-6. **Write `brief.md`** from the template in `SKILL.md`: the ticket verbatim, the
-   `turnpikes:` line step 1's check printed, copied as printed, the project profile (gate,
+6. **Write `brief.md`** from the template in `SKILL.md`: the `turnpikes:` line step 1's check
+   printed, whole, under the waybill's title, then the ticket verbatim, the project profile (gate,
    build, browser suite, docs to read first, tracker, risk surfaces), the team from the
    config, `CHECKPOINT_MODE` from `ship.checkpoint_mode` and `MERGE_AUTHORITY` from
    `ship.merge_authority`, either overridden only where the user said so for this run, the
    dispatch path and `<tool>`. The config here is the one in `run.json`. Then
-   `<tool>/scripts/turnpikes.sh legs <dispatch>` exits 0 and prints the legs step 2 checked,
-   before anything is launched.
+   `<tool>/scripts/turnpikes.sh legs <dispatch> --expect '<that turnpikes: line>'` exits 0 and
+   prints the legs step 2 checked, before anything is launched.
 7. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. The
    coachman never touches the ticket's state before stage 3.
 
@@ -214,7 +220,7 @@ Act on the `NEXT` column, run by run, and log every action:
 
 **The takeover prompt** for a fallback coachman, written to `<dispatch>/leg-<n>-takeover.txt`:
 "You take over leg <n> of <TICKET> mid-way. Read `<dispatch>/brief.md`,
-`<tool>/skills/postmaster/coachman.md`, `<dispatch>/handoff-<p>.md`, then `run-log.md` and
+`<tool>/skills/postmaster/coachman.md`, `<dispatch>/handoff-<p>.md` (none for leg 1), then `run-log.md` and
 `actions.jsonl` for what this leg did before you, then the synthesis worktree's `git log` and
 `git status`. Treat every uncommitted change as unverified. Log `handoff-accept` and finish
 the leg." Move the leg's stream to `<dispatch>/logs/coachman-leg-<n>-walled-events.jsonl`, then
@@ -235,7 +241,8 @@ never the record.
    work: a within-brief ambiguity, a scope call the ticket's own criteria answer, a lane to
    drop as DEGRADED, a round to stop at the cap. Log `escalate` with your ruling.
 3. **Send it up** when it is genuinely destructive, changes the ticket's scope, touches
-   anything outside the repo, or the user asked to see it: write the question to the run's
+   anything outside the repo, asks whether to fix a gating finding in a loop with no gating lens
+   (`coachman.md`, Stage 2 step 5), or the user asked to see it: write the question to the run's
    `.waiting-on-user`, add the run and the question to `<runs>/postmaster/ESCALATION.md`, tell
    the user in the session, and wait. Never pass a postmaster grant up as if it needed the
    user's word, and never take the user's word for something the config gives you. On the
@@ -254,7 +261,9 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    names a contribution or a reason for every lane; every DEGRADED lane on the card matches
    the `degrade` lines in `actions.jsonl`; the turnpikes on the card are the waybill's, and
    `actions.jsonl` has `review-launch` lines under each one the review leg runs and under no
-   other lens; the blind acceptance tests are the first commit on the branch, or the Decisions
+   other lens, and each other turnpike's result on the card is in the record its step writes;
+   when `<tool>/scripts/turnpikes.sh short '<the waybill's turnpikes: line>'` names any default
+   turnpike, the ledger holds the user's word on this ticket's turnpikes; the blind acceptance tests are the first commit on the branch, or the Decisions
    section of `handoff-3.md` carries leg 1's reason for not writing them.
 2. **Grant or withhold.** Every word is delivered by resuming leg 3 (Stage C, step 5), and
    `.card-ready` is removed before it is; the coachman touches it afresh when the card changes.
@@ -306,8 +315,9 @@ only with the user's word for that specific thing, and the word is logged.
 - Never trust a card, a summary or a hand-off over the code; verify before every grant.
 - Never launch more runs than `team.max_runs`, and never two runs on overlapping file
   surfaces.
-- Never edit `coachman.md`, `harnesses.md`, `trackers.md` or `<tool>/scripts/turnpikes.sh` while
-  a leg is running; a leg reads its runbook when it starts and a contract changed mid-run breaks
-  the hand-off.
+- Never edit `coachman.md`, `harnesses.md` or `trackers.md` while a leg is running, or
+  `<tool>/scripts/turnpikes.sh` while any run is in flight; a leg reads its runbook when it
+  starts, a run's legs are read from the table at each dispatch, and a contract changed mid-run
+  breaks the hand-off.
 - Every action is a `log-action` line at the moment it happens. If it is not in the ledger,
   it did not happen.

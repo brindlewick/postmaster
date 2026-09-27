@@ -8,6 +8,22 @@ updated: 2026-09-26
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-27] ingest | turnpikes: what the reviews decided
+
+Two decisions added to the turnpikes page, both the user's. In a run whose ticket names only
+style, a bug or security defect the style reviewer finds is escalated to the user rather than
+fixed, since no lens would check the fix. A ticket's turnpikes are the user's, like its
+direction, so the postmaster never names fewer than `default` on its own. The table of
+turnpikes is not changed while any run is in flight. Standing stays `claimed`.
+
+## [2026-09-26] ingest | a ticket names its turnpikes
+
+A decision page, beside the one on the ticket shape. A ticket now names the turnpikes its run
+passes through: `default` for the style, bug and security reviews, fewer, or `none`, with no
+floor. A turnpike no longer means the gate: the gate runs on every run. The page records why,
+the decisions the ticket left open, and what the ledger will count. Standing `claimed`, since
+no run bears on it yet.
+
 ## [2026-09-26] ingest | a run keeps the config it started with
 
 A decision page. A run now launches and resumes every lane and every leg on the config it
@@ -71,14 +87,6 @@ The review loop's round cap goes from five rounds to three, by the user's decisi
 own review ran four rounds without a clean one and stopped on the repeated-class rule. It holds
 until #59, the research on what should end an AI review loop, reports. `coachman.md` and the
 decision page now say three.
-
-## [2026-09-26] ingest | a ticket names its turnpikes
-
-A decision page, beside the one on the ticket shape. A ticket now names the turnpikes its run
-passes through: `default` for the style, bug and security reviews, fewer, or `none`, with no
-floor. A turnpike no longer means the gate: the gate runs on every run. The page records why,
-the decisions the ticket left open, and what the ledger will count. Standing `claimed`, since
-no run bears on it yet.
 
 ## [2026-09-25] ingest | review runs as one loop
 

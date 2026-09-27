@@ -55,7 +55,7 @@ Why the design is shaped as it is.
   `default` for the style, bug and security reviews, fewer, or `none`, with no floor. The
   project's gate is not a turnpike and always runs.
 - [The review loop](concepts/review-loop.md): **claimed**. Style, bug and security review run
-  as one loop in one leg, so each round's fixes are re-reviewed by the gating lenses in the
+  as one loop in one leg, so each round's fixes are re-reviewed by the gating lenses a ticket names, in the
   next. It should also take fewer rounds.
 - [Live agents against markers and resumes](concepts/live-agents.md): **claimed**. Headless
   stays the default and live agents become an option; what it would take to change the default.

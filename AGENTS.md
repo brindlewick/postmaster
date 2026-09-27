@@ -33,7 +33,7 @@ the same way, and merges are merges. There is no special mode.
 
 **Do not let a run rewrite the file that a live run is mid-way through executing and then
 expect either to be coherent.** If a ticket changes the coachman contract (markers, the
-waybill shape, completion detection), land it while the fleet is idle, or the next dispatch
+waybill shape, the turnpike table, completion detection), land it while the fleet is idle, or the next dispatch
 will read a new contract while an older run is still writing to the old one.
 
 Contract changes are the only category that needs the fleet quiet. Ordinary changes to

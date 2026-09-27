@@ -177,6 +177,7 @@ everything the coachman needs and nothing it must go and find:
 
 ```
 # Waybill: <TICKET>
+<the turnpikes: line <tool>/scripts/ticket-check.sh printed for the ticket, whole: turnpikes: <names> or turnpikes: none>
 
 ## Ticket
 <the ticket verbatim: problem, acceptance criteria, direction, turnpikes, notes, User journey if it has one>
@@ -199,7 +200,6 @@ name: <ticket id>, <ticket title>
 dispatch: <abs path of this directory>
 synthesis worktree: <abs path; cut by the postmaster at BASE, the coachman's cwd for every leg>
 tool: <abs path of the postmaster repo: <tool> in the runbooks>
-<the turnpikes: line <tool>/scripts/ticket-check.sh printed for the ticket, whole: turnpikes: <names> or turnpikes: none>
 postmaster ruling channel: resume the coachman's thread (harnesses.md) with the ruling as the prompt
 ```
 

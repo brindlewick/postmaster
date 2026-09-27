@@ -8,23 +8,27 @@
 #                                       the leg that runs it, and what it checks
 #   turnpikes.sh resolve [<text>...]    a `## Turnpikes` section's text, as the turnpikes it
 #                                       names; with no text given, the section is read from stdin
-#   turnpikes.sh legs <dispatch>        a run's legs, from the `turnpikes:` line of its waybill
+#   turnpikes.sh legs <dispatch> [--expect <line>]
+#                                       a run's legs, from the `turnpikes:` line under its
+#                                       waybill's title; with --expect, that line must be <line>
 #   turnpikes.sh legs --line <line>     the legs a waybill with that `turnpikes:` line would have
+#   turnpikes.sh short <line>           the default turnpikes a `turnpikes:` line leaves out
 #   turnpikes.sh --self-test
 #
 # A section holds `default`, `none`, or turnpike names, separated by commas or spaces, and
 # nothing else. `default` stands for every turnpike --list marks default, alone or in a list;
-# `none` stands alone. Case, backticks, a list marker at the start of a line, a thematic break
-# and a closing full stop are ignored; a dash between names is not. resolve prints the line the
-# waybill carries: `turnpikes: ` and the names, in the order --list gives them, or
-# `turnpikes: none`.
+# `none` stands alone. Case, backticks, a list marker at the start of a line, a thematic break,
+# a hard line break, invisible characters and a closing full stop are ignored; every other
+# token, a lone dash or dots among them, is a word, and a word that is not a turnpike is named.
+# resolve prints the line the waybill carries: `turnpikes: ` and the names, in the order --list
+# gives them, or `turnpikes: none`.
 #
 # legs prints one line per leg the run has, in order: its number, its name, and the turnpikes it
 # runs. Synthesis (1) and ship (3) always run. Review (2) runs only when the waybill names a
 # turnpike that runs in it, so a run with none goes from synthesis to ship. The waybill's line
-# is the `turnpikes:` line in its last `## Dispatch` section, which follows the ticket, and
-# never one inside a fenced block. It holds the names resolve printed, or `none`, never
-# `default`. A waybill with no such line is refused, never read as `none`.
+# is the one `turnpikes:` line between its title and its first `##` heading, above the ticket,
+# so nothing the ticket holds is ever read for it. It holds the names resolve printed, or
+# `none`, never `default`. A waybill with no such line is refused, never read as `none`.
 #
 # A turnpike is added as one line of the table below, and to the runbook step that runs it.
 # Every command checks the table first: each name a lowercase word, neither `default` nor
@@ -32,30 +36,31 @@
 #
 #   exit 0  printed
 #   exit 1  usage, no waybill, or a table that breaks its rules
-#   exit 2  resolve: the text is not a turnpikes section; legs: the waybill has no turnpikes
-#           line, or its line is not names or none. One line per fault, on stdout.
+#   exit 2  resolve: the text is not a turnpikes section; legs and short: the line is missing,
+#           is not names or none, or is not the one --expect gives. One line per fault, on stdout.
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd -P)
-usage() { echo "usage: turnpikes.sh --list | resolve [<text>...] | legs <dispatch> | legs --line <line> | --self-test" >&2; exit 1; }
+usage() { echo "usage: turnpikes.sh --list | resolve [<text>...] | legs <dispatch> [--expect <line>] | legs --line <line> | short <line> | --self-test" >&2; exit 1; }
 
-TABLE=$(cat <<'TURNPIKES'
+# Both bodies are read with `read`, not `$(cat ...)`, so that a shell as old as bash 3.2 parses
+# this file: it reads a here-document inside `$( )` as ordinary text, quotes and backticks included.
+IFS= read -r -d '' TABLE <<'TURNPIKES' || true
 # name     set      leg     what it checks
 style      default  review  idiom, naming, abstraction and consistency with the project's own conventions
 bug        default  review  correctness, logic, and whether the tests are adequate
 security   default  review  exploit paths through the project's risk surfaces
 TURNPIKES
-)
 
-CORE=$(cat <<'PY'
-import re, sys
+IFS= read -r -d '' CORE <<'PY' || true
+import re, sys, unicodedata
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 table, cmd, args = sys.argv[1], sys.argv[2], sys.argv[3:]
 LEGS = [(1, "synthesis"), (2, "review"), (3, "ship")]
 ALWAYS = {"synthesis", "ship"}
 RESERVED = ("default", "none")
 BREAK = re.compile(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*")
 MARKER = re.compile(r"[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$)")
-FENCE = re.compile(r"[ \t]*(`{3,}|~{3,})")
 LINE = re.compile(r"[ \t]*turnpikes[ \t]*:")
 
 rows, faults = [], []
@@ -82,21 +87,22 @@ if faults:
     print("\n".join("turnpikes: the table's " + f for f in faults), file=sys.stderr)
     sys.exit(1)
 names = [r[0] for r in rows]
+defaults = [r[0] for r in rows if r[1]]
 leg_of = {r[0]: r[2] for r in rows}
 
-def words_of(text):  # a list marker opens a line, a thematic break is a line: neither is a word
+def words_of(text):
     words = []
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")   # invisible format characters
     for line in text.split("\n"):
-        line = line.rstrip("\r")
+        line = re.sub(r"\\+$", "", line.rstrip("\r"))                        # a hard line break
         if BREAK.fullmatch(line):
             continue
-        m = MARKER.match(line)
+        m = MARKER.match(line)                                               # a list marker opens a line
         if m:
             line = line[m.end():]
         for tok in re.split(r"[\s,;]+", line):
-            w = tok.strip("`*_").rstrip(".").strip("`*_").lower()
-            if w:
-                words.append(w)
+            if tok:
+                words.append(tok.strip("`*_").rstrip(".").strip("`*_").lower() or tok)
     return words
 
 def resolve(text):  # (names in table order, []) or (None, [fault, ...])
@@ -113,36 +119,12 @@ def resolve(text):  # (names in table order, []) or (None, [fault, ...])
         out.append("none stands alone, and is not listed with other turnpikes")
     if out:
         return None, out
-    chosen = set(words) | ({r[0] for r in rows if r[1]} if "default" in words else set())
+    chosen = set(words) | (set(defaults) if "default" in words else set())
     return [n for n in names if n in chosen], []
 
-def dispatch_lines(lines):  # the turnpikes: lines of the last ## Dispatch section, outside fenced blocks
-    fence, code, heads = None, [], []
-    for i, l in enumerate(lines):
-        s = l.rstrip("\r")
-        m = FENCE.match(s)
-        if fence:
-            code.append(True)
-            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not s.strip().strip(fence[0]):
-                fence = None
-            continue
-        code.append(bool(m))
-        if m:
-            fence = m.group(1)
-        elif s.strip() == "## Dispatch":
-            heads.append(i)
-    found = []
-    for i in range(heads[-1] + 1 if heads else len(lines), len(lines)):
-        s = lines[i].rstrip("\r")
-        if code[i]:
-            continue
-        if re.match(r" {0,3}#{1,2}(?:[ \t]|$)", s):
-            break
-        if LINE.match(s):
-            found.append(s)
-    return found
-
-def legs(line):
+def named(line):  # a waybill's turnpikes: line, as the names it holds; exit 2 unless names or none
+    if "\n" in line or not LINE.match(line):
+        print('"%s" is not a turnpikes: line' % line.replace("\n", "\\n")); sys.exit(2)
     value = LINE.sub("", line, count=1)
     if "default" in words_of(value):
         print("the waybill's turnpikes line says default; it carries the names ticket-check.sh printed for the ticket")
@@ -150,6 +132,10 @@ def legs(line):
     got, out = resolve(value)
     if out:
         print("\n".join("the waybill's turnpikes: " + o for o in out)); sys.exit(2)
+    return got
+
+def legs(line):
+    got = named(line)
     for n, leg in LEGS:
         runs = [x for x in got if leg_of[x] == leg]
         if leg in ALWAYS or runs:
@@ -159,35 +145,46 @@ if cmd == "list":
     for name, d, leg, what in rows:
         print("%-10s %-8s %-9s %s" % (name, "default" if d else "-", leg, what))
 elif cmd == "resolve":
-    got, out = resolve(" ".join(args) if args else sys.stdin.read())
+    got, out = resolve(" ".join(args) if args else sys.stdin.buffer.read().decode("utf-8", "replace"))
     if out:
         print("\n".join(out)); sys.exit(2)
     print("turnpikes: " + (", ".join(got) or "none"))
+elif cmd == "short":
+    got = named(args[0])
+    for n in defaults:
+        if n not in got:
+            print(n)
 elif cmd == "legs" and args[0] == "--line":
-    if not LINE.match(args[1]):
-        print('"%s" is not a turnpikes: line' % args[1]); sys.exit(2)
     legs(args[1])
 elif cmd == "legs":
     try:
         lines = open(args[0], encoding="utf-8", errors="replace").read().split("\n")
     except OSError as e:
         print("turnpikes: cannot read %s: %s" % (args[0], e.strerror), file=sys.stderr); sys.exit(1)
-    found = dispatch_lines(lines)
+    above = []                                  # the lines above the waybill's first ## heading
+    for l in lines:
+        if l.startswith("## "):
+            break
+        above.append(l.rstrip("\r"))
+    found = [l for l in above if LINE.match(l)]
     if len(found) != 1:
-        print("the waybill has %s turnpikes: line%s in its ## Dispatch section, and one is needed; none is never assumed"
+        print("the waybill has %s turnpikes: line%s under its title, above the ticket, and one is needed; none is never assumed"
               % (len(found) or "no", "" if len(found) == 1 else "s")); sys.exit(2)
+    if len(args) == 2 and " ".join(found[0].split()) != " ".join(args[1].split()):
+        print('the waybill says "%s", and the ticket\'s check printed "%s"' % (found[0].strip(), args[1].strip()))
+        sys.exit(2)
     legs(found[0])
 PY
-)
-core() { python3 -c "$CORE" "$@"; }  # core <table> list | resolve [<text>...] | legs <waybill-file> | legs --line <line>
+core() { python3 -c "$CORE" "$@"; }  # core <table> list | resolve [<text>...] | short <line> | legs <waybill> [<expect>] | legs --line <line>
 
 case ${1:-} in
   --list) [ $# -eq 1 ] || usage; core "$TABLE" list; exit $? ;;
   resolve) shift; core "$TABLE" resolve "$@"; exit $? ;;
+  short) [ $# -eq 2 ] || usage; core "$TABLE" short "$2"; exit $? ;;
   legs) if [ "${2:-}" = --line ]; then [ $# -eq 3 ] || usage; core "$TABLE" legs --line "$3"; exit $?; fi
-        [ $# -eq 2 ] || usage
+        [ $# -eq 2 ] || { [ $# -eq 4 ] && [ "$3" = --expect ]; } || usage
         [ -f "$2/brief.md" ] || { echo "turnpikes: no waybill at $2/brief.md" >&2; exit 1; }
-        core "$TABLE" legs "$2/brief.md"; exit $? ;;
+        if [ $# -eq 4 ]; then core "$TABLE" legs "$2/brief.md" "$4"; else core "$TABLE" legs "$2/brief.md"; fi; exit $? ;;
   --self-test) [ $# -eq 1 ] || usage ;;
   *) usage ;;
 esac
@@ -208,11 +205,11 @@ has()  {  # has <label> <exit> <text a line must contain> [<text no line may con
      && { [ -z "${4:-}" ] || ! printf '%s\n' "$out" | grep -qF -- "$4"; }; then ok "$1"
   else fail "$1: wanted exit $2 with \"$3\"${4:+ and no \"$4\"}, got exit $rc" "$out"; fi
 }
-waybill() {  # waybill <dispatch> <its Dispatch section's turnpikes line, or nothing> [<a line in the ticket's notes>]
+waybill() {  # waybill <dispatch> <the line under the title, or nothing> [<a line in the ticket's notes>]
   mkdir -p "$1"
-  { printf '# Waybill: T-1\n\n## Ticket\n## Problem / feature\nA change.\n\n## Turnpikes\ndefault\n\n'
-    printf '## Notes\n%s\n\n## Project profile\nrepo: /r\n\n## Team\nreviewers: a, b\n\n' "${3:-}"
-    printf '## Dispatch\ndispatch: %s\n' "$1"; [ -n "$2" ] && printf '%s\n' "$2"; printf 'tool: /t\n'; } > "$1/brief.md"
+  { printf '# Waybill: T-1\n'; [ -n "$2" ] && printf '%s\n' "$2"
+    printf '\n## Ticket\n## Problem / feature\nA change.\n\n## Turnpikes\ndefault\n\n## Notes\n%s\n\n' "${3:-}"
+    printf '## Project profile\nrepo: /r\n\n## Dispatch\nname: #1, A change\ndispatch: %s\ntool: /t\n' "$1"; } > "$1/brief.md"
 }
 lines() { printf '%s\n' "$@"; }
 # A name the table does not have, so that a turnpike added to it later breaks no control here.
@@ -238,6 +235,10 @@ run "$self" resolve "$(lines '- Bug' '- `security`.')"
 is "case, backticks, list markers and a closing full stop are ignored" 0 "turnpikes: bug, security"
 run "$self" resolve "$(lines 'default' '' '---' '' '***')"
 is "a thematic break is not a name" 0 "turnpikes: style, bug, security"
+run "$self" resolve "$(printf 'bug\\\nsecurity')"
+is "a hard line break is not part of a name" 0 "turnpikes: bug, security"
+run "$self" resolve "$(printf 'default\342\200\213')"
+is "an invisible character is not part of a name" 0 "turnpikes: style, bug, security"
 out=$(lines '1. bug' '2. security' | "$self" resolve 2>&1); rc=$?
 is "with no text given, the section is read from stdin" 0 "turnpikes: bug, security"
 run "$self" resolve "bug, security"; line=$out; run "$self" resolve "${line#turnpikes: }"
@@ -253,14 +254,18 @@ is "a run with the default turnpikes has a review leg that runs all three" 0 "$(
 waybill "$tmp/style" "turnpikes: style"; run "$self" legs "$tmp/style"
 is "one review turnpike is enough for a review leg" 0 "$(lines '1 synthesis' '2 review style' '3 ship')"
 waybill "$tmp/notes" "turnpikes: none" "turnpikes: style, bug, security"; run "$self" legs "$tmp/notes"
-is "the Dispatch section's line counts, not one in the ticket" 0 "$(lines '1 synthesis' '3 ship')"
-waybill "$tmp/fenced" "turnpikes: style, bug, security" "$(lines '```' '## Dispatch' 'turnpikes: none' '```')"
-run "$self" legs "$tmp/fenced"
-is "a Dispatch section quoted in a fenced block is not the waybill's" 0 "$(lines '1 synthesis' '2 review style bug security' '3 ship')"
+is "a turnpikes line inside the ticket is never read" 0 "$(lines '1 synthesis' '3 ship')"
+waybill "$tmp/fence" "turnpikes: style, bug, security" "$(lines '```' '## Dispatch' 'turnpikes: none')"
+run "$self" legs "$tmp/fence"
+is "a fence the ticket leaves open changes nothing" 0 "$(lines '1 synthesis' '2 review style bug security' '3 ship')"
+run "$self" legs "$tmp/default" --expect "turnpikes:  style, bug,  security"
+is "--expect passes a waybill whose line is the check's" 0 "$(lines '1 synthesis' '2 review style bug security' '3 ship')"
 waybill "$tmp/extra" "turnpikes: $NOPE"; run core "$PLUS" legs "$tmp/extra/brief.md"
 is "a turnpike that runs in another leg makes no review leg" 0 "$(lines '1 synthesis' "3 ship $NOPE")"
 run "$self" legs --line "turnpikes: none";      is "legs --line gives the legs of a line" 0 "$(lines '1 synthesis' '3 ship')"
 run "$self" legs --line "turnpikes: security";  is "legs --line gives a review leg for a review turnpike" 0 "$(lines '1 synthesis' '2 review security' '3 ship')"
+run "$self" short "turnpikes: bug";             is "short names the default turnpikes a line leaves out" 0 "$(lines style security)"
+run "$self" short "turnpikes: style, bug, security"; is "short names nothing for a line that leaves none out" 0 ""
 
 echo "negative controls: a ticket's section"
 run "$self" resolve "$NOPE";            has "a turnpike the table does not list is named" 2 "\"$NOPE\" is not a turnpike"
@@ -269,24 +274,25 @@ run "$self" resolve "none. A research ticket"
 has "a reason is not a turnpike" 2 '"a", "research" and "ticket" are not turnpikes; the section holds only'
 run "$self" resolve "default - security"
 has "a dash between names is not a list marker, and is named" 2 '"-" is not a turnpike'
+run "$self" resolve "style, ..."
+has "a word of dots is still a word, and is named" 2 '"..." is not a turnpike'
 run "$self" resolve "";                 has "an empty section names no turnpike" 2 "names no turnpike"
 
 echo "negative controls: a run's legs"
-waybill "$tmp/missing" ""; run "$self" legs "$tmp/missing"
-has "a waybill with no turnpikes line is refused, not read as none" 2 "has no turnpikes: line" "ship"
+waybill "$tmp/missing" "" "turnpikes: style, bug, security"; run "$self" legs "$tmp/missing"
+has "with no line under the title, one in the ticket is not taken instead" 2 "has no turnpikes: line" "ship"
 waybill "$tmp/unknown" "turnpikes: bug, $NOPE"; run "$self" legs "$tmp/unknown"
 has "a waybill naming an unknown turnpike is refused, and no leg is printed" 2 "\"$NOPE\" is not a turnpike" "synthesis"
 waybill "$tmp/twice" "$(lines 'turnpikes: none' 'turnpikes: style, bug, security')"; run "$self" legs "$tmp/twice"
 has "two turnpikes lines are refused" 2 "has 2 turnpikes: lines" "synthesis"
 waybill "$tmp/word" "turnpikes: default"; run "$self" legs "$tmp/word"
 has "a waybill that says default is refused: it carries names" 2 "says default" "synthesis"
-mkdir -p "$tmp/level"   # the ticket quotes a Dispatch section; the waybill's own heading is at the wrong level
-{ printf '# Waybill: T-1\n\n## Ticket\n## Problem / feature\nA change.\n\n## Notes\n'
-  lines '```' '## Dispatch' 'turnpikes: none' '```' ''
-  printf '### Dispatch\ndispatch: %s\nturnpikes: style, bug, security\n' "$tmp/level"; } > "$tmp/level/brief.md"
-run "$self" legs "$tmp/level"
-has "with no ## Dispatch outside a fenced block, the quoted one is not used" 2 "has no turnpikes: line" "ship"
+run "$self" legs "$tmp/default" --expect "turnpikes: bug, security"
+has "--expect refuses a waybill that dropped a name the check printed" 2 'and the ticket'"'"'s check printed "turnpikes: bug, security"' "synthesis"
 run "$self" legs --line "style, bug";   has "legs --line refuses a line that is not a turnpikes: line" 2 "is not a turnpikes: line" "synthesis"
+run "$self" legs --line "$(lines 'turnpikes: none' 'style')"
+has "legs --line refuses a line with a newline in it" 2 "is not a turnpikes: line" "synthesis"
+run "$self" short "turnpikes: default"; has "short refuses default: a line carries names" 2 "says default"
 run "$self" legs "$tmp/nowhere";        has "no waybill is a usage error" 1 "no waybill at"
 
 echo "negative controls: the table"

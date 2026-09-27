@@ -196,7 +196,8 @@ A workhorse commits incrementally as it goes, never pushes, never reads other br
 
 1. **Read the waybill.** It names the ticket, the project profile (gate command, docs to read
    first, tracker, the project's own risk surfaces), the team (workhorses, reviewers, the coachman),
-   `CHECKPOINT_MODE`, `MERGE_AUTHORITY`, and the turnpikes the run passes through (`turnpikes:`).
+   `CHECKPOINT_MODE`, `MERGE_AUTHORITY`, and the turnpikes the run passes through (`turnpikes:`,
+   under its title).
 2. **Base pre-flight.** The waybill's BASE is authoritative. The main checkout must be on the
    default branch at BASE (`git -C <repo> rev-parse HEAD` prints BASE) and clean
    (`<tool>/scripts/check-target.sh <repo>` exits 0). On either failing, stop and escalate rather than
@@ -532,12 +533,14 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    reaches the card or the diff; discard what does not hold. A defect reported under more than
    one lens is one finding, and it keeps every lens that reported it. A finding is gating or
    advisory by what it is, not by the lens that reported it: a correctness or security defect
-   reported under the style lens is fixed as a gating finding, and keeps its lens. Several
+   reported under the style lens is fixed as a gating finding, and keeps its lens, except in a
+   loop with no gating lens (step 5). Several
    reviewers produce a bigger, noisier union than one; the verification gate is what keeps the
    checkpoint clean, so do not soften it. Where a lane says it verified a finding by execution,
    re-run its probe rather than re-deriving the claim; where it filed a hypothesis, the
    verification burden is yours.
-4. **Apply once per round,** in the synthesis worktree: the verified gating findings first,
+4. **Apply once per round,** in the synthesis worktree: the verified gating findings first (in a
+   loop with no gating lens, none: step 5),
    then, in round 1 of a loop with a gating lens, the style findings that are clearly right.
    Where fixes from different lenses touch the same code, reconcile them into one change before
    applying it. Every other style finding is deferred in the hand-off and reaches the ship
@@ -550,9 +553,11 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    verifies closed, so a round that applied any change, a style change included, is never the
    last. A loop with no gating lens is round 1 alone, and applies nothing: a verified gating
    finding in it, a bug or security defect the style lens reported, is escalated with the card
-   instead of fixed, and a ruling that asks for the fix has it applied and the gate re-run, with
-   the card saying no lens re-reviewed it. Cap 3 rounds for the whole loop, round 1 included,
-   then STOP and escalate with the residue and your read on why it is not converging; this is `CHECKPOINT_MODE`'s sole mid-flow stop in autonomous mode. Style
+   instead of fixed, which stops the leg in either `CHECKPOINT_MODE`, and a ruling that asks for
+   the fix has it applied and the gate re-run, with the card saying no lens re-reviewed it. Cap
+   3 rounds for the whole loop, round 1 included, then STOP and escalate with the residue and
+   your read on why it is not converging; this and the escalation above are `CHECKPOINT_MODE`'s
+   only mid-flow stops in autonomous mode. Style
    does not run again: a style lane DEGRADED in round 1 stays DEGRADED, and the card says how
    many lanes the style lens rested on.
 
@@ -629,7 +634,8 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    left open,** with its lens and disposition, one line each.
 
    **The ship card lists the turnpikes the run passed through,** exactly the waybill's, each
-   with the rounds it ran and its result as `checkpoint-review.md` records them, or `none` when
+   with the rounds it ran and its result as the step that ran it records them
+   (`checkpoint-review.md`, for a review turnpike), or `none` when
    the waybill names none. The gate is on
    the card as the gate, never as a turnpike.
 
@@ -719,7 +725,8 @@ logical order, not file safety: check the file surfaces before mass-launching.
   directory). Re-runs of a ticket whose `wb/<TICKET>-*` branches still exist are the loud case;
   concurrent lanes in a normal run are safe, since no lane has commits until it finishes.
 - Review is a goal-loop, not a single shot: a loop whose fixes were never re-reviewed is
-  not done.
+  not done, save a fix the user orders in a loop with no gating lens (Stage 2, step 5), which
+  the card marks as not re-reviewed.
 - Never gate-then-commit through a masking pipe: `<gate> 2>&1 | tail && git commit` reports the
   tail's exit, not the suite's, and will commit a RED tree. Check `${pipestatus[1]}` (zsh) or
   `${PIPESTATUS[0]}` (bash), or run the gate unpiped and commit only on its own exit 0.
@@ -739,7 +746,8 @@ logical order, not file safety: check the file surfaces before mass-launching.
   disposition of every deferred finding in the next round's brief with the reasoning, and
   invite the challenge. A deferral that is never restated cannot be corrected.
 - **When the lanes converge on a prescribed one-line fix, apply it and re-review; do not bank
-  it as a ship-comment note.** Skipping a round that way ships a documented hole.
+  it as a ship-comment note.** Skipping a round that way ships a documented hole. In a loop with
+  no gating lens, Stage 2 step 5 decides instead.
 - **The render gate is the coachman's job whenever a workhorse could not run it.** A workhorse on a
   harness with no browser backend cannot run one, and a workhorse that did run one tested its own
   UI, not the synthesis. Serve the production build on a temporary database (never the live

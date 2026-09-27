@@ -11,8 +11,8 @@ updated: 2026-09-26
 **Claim.** Style, bug and security review work better as one loop in one leg than as three
 passes in three legs. Each round runs every lens still open on one snapshot: all three in round
 1, then bug and security until clean. It should take fewer rounds, it needs one leg start-up
-instead of three, and every fix is re-reviewed by the gating lenses unless the loop stops at
-its round cap.
+instead of three, and every fix is re-reviewed by the gating lenses a ticket names unless the
+loop stops at its round cap.
 
 **Standing: claimed.** This is a decision taken on reasoning. No run has been recorded under
 either design, so neither the time saved nor the coverage gained is measured yet. The change is
