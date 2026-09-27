@@ -28,10 +28,10 @@ A fault in one of these is a fault in a control, whatever the step that ran it.
 | `scripts/run-meta.sh` | action-log | what a run started from |
 | `scripts/tool-faults.sh` | action-log | every fault a run met reaches a ticket or the run's records |
 
-## Runbook steps
+## Steps within a file
 
-A fault in one of these names its runbook as the file, the step in `--ran`, and the kind in
-`--control`.
+The rest of these files is not a control. A fault in one of these steps names the file, the
+step in `--ran`, and the kind in `--control`.
 
 | step | kind |
 |---|---|
@@ -42,5 +42,6 @@ A fault in one of these names its runbook as the file, the step in `--ran`, and 
 | `coachman.md`: running the project's gate, unpiped | gate |
 | `postmaster.md`: Stage F, verifying the card against the code | gate |
 | `coachman.md`, `postmaster.md`: touching or reading a marker | marker |
+| `scripts/host.sh`: removing a launch's `--marker` as it starts, and touching it when it exits | marker |
 | `coachman.md`: the wait in the same command as the launch, and the stall cutoffs | wait |
 | `coachman.md`, `postmaster.md`: a `log-action.sh` line a step writes | action-log |
