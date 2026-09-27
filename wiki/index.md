@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # postmaster wiki
@@ -56,7 +56,8 @@ Why the design is shaped as it is.
   project's gate is not a turnpike and always runs.
 - [The review loop](concepts/review-loop.md): **claimed**. Style, bug and security review run
   as one loop in one leg, so each round's fixes are re-reviewed by both gating lenses in the
-  next. It should also take fewer rounds.
+  next. It should also take fewer rounds. Style gates nothing: its findings feed the project's
+  linter.
 - [Live agents against markers and resumes](concepts/live-agents.md): **claimed**. Headless
   stays the default and live agents become an option; what it would take to change the default.
 

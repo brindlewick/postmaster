@@ -1,12 +1,22 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-27] ingest | style gates nothing, and feeds the project's linter
+
+The user's direction in issue #55: try style not gating a run, for now. The style lens applies
+nothing, the ship card counts its findings, and after the merge each is sorted into a rule for
+a linter the project's gate runs, a convention for the project's docs, or neither, which the
+postmaster puts to the user. The review-loop page records the decision, its reasons, its costs
+and what would settle it; the turnpikes page says a turnpike need not gate. The decision earlier
+the same day that style blocks a ship was reverted on #40's pull request before it merged. Both
+pages stay `claimed`.
 
 ## [2026-09-26] ingest | follow-up: claude's trust question, and claude killed mid-turn
 

@@ -243,7 +243,8 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    the `degrade` lines in `actions.jsonl`; the turnpikes on the card are the waybill's, and
    `actions.jsonl` has `review-launch` lines under each one the review leg runs and under no
    other lens; the blind acceptance tests are the first commit on the branch, or the Decisions
-   section of `handoff-3.md` carries leg 1's reason for not writing them.
+   section of `handoff-3.md` carries leg 1's reason for not writing them; the Style residue's
+   count is what `scripts/style-findings.sh count <dispatch>` prints.
 2. **Grant or withhold.** Every word is delivered by resuming leg 3 (Stage C, step 5), and
    `.card-ready` is removed before it is; the coachman touches it afresh when the card changes.
    `MERGE_AUTHORITY: postmaster` and every check above holds: deliver "MERGE GRANTED" and log
@@ -258,7 +259,10 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
 
 1. **Confirm** the default branch carries the merge (`git -C <repo> log -1` on it) and the
    ticket is done in the tracker; if the coachman could not move it, do so and log
-   `ticket-state`.
+   `ticket-state`. Check the style sort too: `scripts/style-findings.sh check <dispatch>`
+   exits 0. On exit 2, remove `.leg-3-done` and resume leg 3 (Stage C, step 5) with its lines
+   and "Fix the style sort as `coachman.md` says, and end the leg", then wait for its done
+   marker.
 2. **Tear down** the synthesis worktree from outside it, once the last leg's process has exited
    (`.leg-3-exited`): close its space first (`scripts/host.sh close <repo>/.worktrees/<TICKET>`;
    on exit 2 the user has it open or something in it still runs, so stop and report), then `git
@@ -267,7 +271,18 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    same way after preserving any stray file into `<dispatch>/stray/`.
 3. **Close the run** with `scripts/stage.sh <dispatch> done postmaster`, and never delete the
    dispatch directory.
-4. **Dispatch the next ticket** in order, Stage B.
+4. **Put the style sort to the user,** when the run has one. For each proposal
+   `scripts/style-findings.sh check <dispatch>` prints, other than `neither`, draft the ticket it
+   would become in the ticket shape (Stage A, step 2), with the direction the proposal gives for
+   the user to approve or change and `default` as its turnpikes, and check the draft with
+   `scripts/ticket-check.sh --body`. Put every line of `<dispatch>/style-sort.md`, with its
+   reason, and the drafts to the user, and add the run and the question to
+   `<runs>/postmaster/ESCALATION.md`. Create each ticket the user accepts as Stage A, step 5
+   does, drafting first any they ask for that has no draft, with the proposal as the detail of
+   its `ticket-create` line; log a `note` with their word for each proposal they decline.
+   Nothing is filed without the user's word, whatever `tracker.postmaster_may_create` says. Then
+   remove the run's entry, and the file once it is empty. Nothing else waits for the answer.
+5. **Dispatch the next ticket** in order, Stage B.
 
 **Abandoning a run** happens only on the user's word for that run: log `note` with the
 word, set the stage with `scripts/stage.sh <dispatch> abandoned postmaster`, stop what still
