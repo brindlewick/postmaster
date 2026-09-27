@@ -1,0 +1,30 @@
+# Changed lines per commit of the pull request, against its first parent
+# git show --shortstat --format='%h %s' <commit>
+b17699b Run the style, bug and security reviews as one loop
+ 12 files changed, 335 insertions(+), 150 deletions(-)
+2814e09 Keep each lens's launch step in its own entry
+ 3 files changed, 49 insertions(+), 36 deletions(-)
+fb7d5d6 Resume each leg on its own model, and close a run after its last leg
+ 4 files changed, 85 insertions(+), 49 deletions(-)
+33feb83 Fix the code review's findings on the loop, launches and legs
+ 6 files changed, 175 insertions(+), 103 deletions(-)
+86dcdfb Fix the second review round's findings
+ 7 files changed, 239 insertions(+), 101 deletions(-)
+b4b1199 Fix the third review round's findings
+ 4 files changed, 73 insertions(+), 45 deletions(-)
+
+# The pull request's net change against main as merged into it
+# git diff --numstat 9d31cd5 b4b1199
+4	4	AGENTS.md
+1	1	README.md
+2	1	config.example.toml
+212	33	scripts/launch.sh
+1	1	scripts/run-times.sh
+84	7	scripts/runs-status.sh
+36	5	scripts/stage.sh
+220	160	skills/postmaster/coachman.md
+81	47	skills/postmaster/postmaster.md
+79	0	wiki/concepts/review-loop.md
+3	0	wiki/index.md
+8	0	wiki/log.md
+3	3	wiki/sources/template.md

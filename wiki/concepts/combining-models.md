@@ -2,8 +2,8 @@
 title: Combining models
 type: concept
 standing: claimed
-sources: []
-updated: 2026-09-22
+sources: [runs/2026-09-26-postmaster-36]
+updated: 2026-09-26
 ---
 
 # Combining models
@@ -38,6 +38,12 @@ second lane made it independently, and whether it held up (was fixed and stayed 
 through the gate, or was dismissed). Supported when corroborated findings hold up at a
 clearly higher rate than uncorroborated ones. The control is the uncorroborated rate.
 
+So far: in [the review rounds of #36](../sources/2026-09-26-postmaster-36.md), run by hand, 4 of
+48 findings were made by both reviewer models, and all 4 held up; so did 42 of the other 44
+[@runs/2026-09-26-postmaster-36/reports]. The rates do not separate. "Held up" there means the
+coachman accepted the finding, the coachman shared the reviewers' vendor, and nothing reviewed had
+run, so this is weaker than the measure above asks for. It moves no standing.
+
 ## H3. Disagreement is diagnostic
 
 *When two lanes build the same mechanism and name or shape it differently, the project's own
@@ -70,5 +76,6 @@ These have no claim yet, only a measurement waiting for runs.
 
 ## Evidence
 
-None recorded yet. Run records live in [sources/](../sources/index.md), compiled from
-`raw/runs/`; until one exists, every standing above is `claimed` by definition.
+One record, run by hand rather than by a dispatch: [the review rounds of
+#36](../sources/2026-09-26-postmaster-36.md). It bears on H2 only, and moves no standing. Run
+records live in [sources/](../sources/index.md), compiled from `raw/runs/`.

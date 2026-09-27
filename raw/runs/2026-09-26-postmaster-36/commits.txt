@@ -1,0 +1,12 @@
+# git log --reverse --format='%h %cI %s' ad604e2..547687c
+5a339aa 2026-09-25T07:51:51+00:00 Check a ticket's shape before it is accepted
+b17699b 2026-09-25T23:46:10+00:00 Run the style, bug and security reviews as one loop
+2814e09 2026-09-26T00:00:02+00:00 Keep each lens's launch step in its own entry
+fb7d5d6 2026-09-26T00:46:58+00:00 Resume each leg on its own model, and close a run after its last leg
+2a044dd 2026-09-26T01:03:06+00:00 Write back only the user's answer, and read tickets as markdown does
+9d31cd5 2026-09-26T01:03:57+00:00 Merge pull request #35: check a ticket's shape before it is accepted
+33feb83 2026-09-26T03:58:43+00:00 Fix the code review's findings on the loop, launches and legs
+ad786ec 2026-09-26T04:00:18+00:00 Merge main into parallel-review
+86dcdfb 2026-09-26T05:39:44+00:00 Fix the second review round's findings
+b4b1199 2026-09-26T06:04:38+00:00 Fix the third review round's findings
+547687c 2026-09-26T06:57:25+00:00 Merge pull request #39: run the style, bug and security reviews as one loop
