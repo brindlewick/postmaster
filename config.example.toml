@@ -5,6 +5,8 @@
 # file from your answers; copy it by hand if you prefer. Model ids are whatever the provider
 # serves under the harness; confirm each with one trial launch (scripts/launch.sh form <name>
 # prints the exact command). Every value below is one that scripts/launch.sh can run today.
+# A run keeps the config it was dispatched with, recorded in its run.json: an edit here
+# reaches the next run, never one already in flight.
 
 # Where projects live. scripts/find-projects.sh reads this when given no roots.
 projects_roots = ["~/Code"]

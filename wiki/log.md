@@ -18,6 +18,55 @@ and what would settle it; the turnpikes page says a turnpike need not gate. The 
 the same day that style blocks a ship was reverted on #40's pull request before it merged. Both
 pages stay `claimed`.
 
+## [2026-09-27] ingest | turnpikes: what the reviews decided
+
+Two decisions added to the turnpikes page, both the user's. In a run whose ticket names only
+style, a bug or security defect the style reviewer finds is escalated to the user rather than
+fixed, since no lens would check the fix. A ticket's turnpikes are the user's, like its
+direction, so the postmaster never names fewer than `default` on its own. The table of
+turnpikes is not changed while any run is in flight. Standing stays `claimed`.
+
+## [2026-09-27] lint | fault tickets: when they are shown, where they go, what they withhold
+
+The page on faults a run finds in postmaster now says that a fault ticket goes only to
+postmaster's own repository on GitHub, when the user administers it, and why a draft errs
+towards withholding. The drafts are shown to the user once, when a run's aftercare ends. No
+standing changed.
+
+## [2026-09-26] ingest | a ticket names its turnpikes
+
+A decision page, beside the one on the ticket shape. A ticket now names the turnpikes its run
+passes through: `default` for the style, bug and security reviews, fewer, or `none`, with no
+floor. A turnpike no longer means the gate: the gate runs on every run. The page records why,
+the decisions the ticket left open, and what the ledger will count. Standing `claimed`, since
+no run bears on it yet.
+
+## [2026-09-26] ingest | faults a run finds in postmaster become tickets
+
+Third page in the Decisions area. A run never fixes postmaster itself: it logs each fault as it
+happens, with its own diagnosis and proposed fix, stops on a fault in a control and works
+around anything else, and the postmaster turns the run's faults into tickets on postmaster's
+own tracker when the run closes. The page records why, and what a fault ticket may carry.
+Standing `claimed`, since no run bears on it yet.
+
+## [2026-09-26] ingest | a run keeps the config it started with
+
+A decision page. A run now launches and resumes every lane and every leg on the config it
+recorded in `run.json` at dispatch, never the live one. A config edited mid-run can no longer
+change a lane part-way through, or hand one harness's thread id to another. The page records
+what that costs: a fix to the config waits for the next run, and an env file's contents are
+still read at each launch. Standing `claimed`, since no run bears on it yet.
+
+## [2026-09-26] ingest | a skill is a link to the postmaster repo, never a copy
+
+Third page in the Decisions area, with a trial behind its narrower fact. Each skill is installed
+as a link from a harness's user-level skills folder to the main checkout, never as a copy, and a
+session finds the repo from that link. The trial asked Claude Code, pi, MiMo Code, codex and
+Muse Code, with a temporary HOME, which skills they loaded: each loads a linked skill from each
+folder it documents, and none lists or warns about a link that is missing or points nowhere. The page
+records why the one step that finds the repo is a line in `SKILL.md` rather than a script, and
+why Antigravity is not linked yet. Standing `claimed`: the decision is the user's, issue #15.
+
 ## [2026-09-26] ingest | follow-up: claude's trust question, and claude killed mid-turn
 
 Two checks added to `raw/trials/herdr-agent-lifecycle/`. Headless claude answered in a
@@ -63,14 +112,6 @@ The review loop's round cap goes from five rounds to three, by the user's decisi
 own review ran four rounds without a clean one and stopped on the repeated-class rule. It holds
 until #59, the research on what should end an AI review loop, reports. `coachman.md` and the
 decision page now say three.
-
-## [2026-09-26] ingest | a ticket names its turnpikes
-
-A decision page, beside the one on the ticket shape. A ticket now names the turnpikes its run
-passes through: `default` for the style, bug and security reviews, fewer, or `none`, with no
-floor. A turnpike no longer means the gate: the gate runs on every run. The page records why,
-the decisions the ticket left open, and what the ledger will count. Standing `claimed`, since
-no run bears on it yet.
 
 ## [2026-09-25] ingest | review runs as one loop
 

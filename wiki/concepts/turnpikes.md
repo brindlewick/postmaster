@@ -43,8 +43,10 @@ project's gate is not a turnpike, and runs on every run.
 ## Decisions the ticket left open
 
 - **The waybill carries names, not `default`.** The postmaster resolves the ticket's section
-  when it writes the waybill. A run then passes through what it was dispatched with, even if
-  the default set changes while it runs. When
+  when it writes the waybill, on a line under its title and above the ticket, so nothing the
+  ticket holds is read for it. A run then passes through what it was dispatched with, even if
+  the default set changes while it runs, and the table of turnpikes is not changed while any
+  run is in flight, since a run's legs are read from it at each dispatch. When
   [issue #18](https://github.com/brindlewick/postmaster/issues/18) lets a project say what
   `default` means for it, the postmaster, which reads the project at dispatch, resolves it the
   same way.
@@ -54,7 +56,15 @@ project's gate is not a turnpike, and runs on every run.
   [the review loop](review-loop.md), every change is re-reviewed in the next round by the
   gating lenses, bug and security, and style runs in round 1 only. With only `style` named,
   round 1 is the whole loop. Since issue #55 no loop applies a style finding, so its findings go
-  to aftercare as any run's do.
+  to aftercare as any run's do. A bug or security defect the style reviewer finds in such a run
+  is not fixed either: the coachman escalates it, and the user decides, since no lens would
+  check the fix. The user chose this on 2026-09-26.
+- **The turnpikes are the user's, like the direction.** The postmaster proposes `default` and
+  never writes fewer turnpikes, or `none`, on its own judgment, even where it may create tickets
+  without asking. Otherwise a postmaster that also says the merge word could remove every review
+  from a run with no person choosing or seeing it. The user chose this on 2026-09-26. The
+  postmaster shows the user any ticket that leaves out a default turnpike before creating it,
+  dispatches one only with the user's word logged, and looks for that word before a merge.
 - **A section holds names and nothing else.** A word that is not a turnpike is named by the
   check, so a reason for the choice goes in the ticket's notes, not beside the names.
 

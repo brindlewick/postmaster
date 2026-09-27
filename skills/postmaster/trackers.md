@@ -2,16 +2,16 @@
 
 The runbooks make five demands of a tracker and no more: read a ticket, set its state, add a
 dated comment, create a ticket, and replace a ticket's body. This file says what each means for
-each tracker kind the config allows (`config.example.toml`, `[tracker]`). Every write is also
-logged through `scripts/log-action.sh` as `ticket-create`, `ticket-edit`, `ticket-state` or
-`ticket-comment`.
+each tracker kind the config allows (`<tool>/config.example.toml`, `[tracker]`). Every write is also
+logged through `<tool>/scripts/log-action.sh` as `ticket-create`, `ticket-edit`, `ticket-state` or
+`ticket-comment`. `<tool>` is the postmaster repo, as the runbook that sent you here found it.
 
 **GitHub Issues is the default**, on a GitHub Projects board so the tickets are a kanban the
 user can look at. Plane is the other named kind. Anything else is `other`. Tickets never
 live on a branch of the target repo: a ticket is state, and state does not belong in a commit.
 
 The ticket shape is the same everywhere: a title, then these headings in this order, so opening
-one costs no orientation. `scripts/ticket-check.sh` is its executable form. It requires the
+one costs no orientation. `<tool>/scripts/ticket-check.sh` is its executable form. It requires the
 title and the first four headings, and does not check `Notes` or `User journey`.
 
 ```
@@ -30,7 +30,7 @@ heading out is not.
 ## Turnpikes
 The checks the run must pass through before it ships, besides the project's gate, which always
 runs: `default`, `none`, or turnpikes by name, separated by commas. `default` stands for the
-default set, alone or in a list. `scripts/turnpikes.sh --list` names every turnpike and marks
+default set, alone or in a list. `<tool>/scripts/turnpikes.sh --list` names every turnpike and marks
 the default ones. Only names go here; the reason for a choice goes in the notes.
 
 ## Notes
@@ -58,21 +58,23 @@ it and removed by the next state change. `done` closes the issue; `cancelled` cl
 not planned. The ticket id is the issue number, and the prefix discovery reads from commit
 messages is `#`.
 
-Everything goes through `scripts/github.sh`, which reads the GitHub repository from the
+Everything goes through `<tool>/scripts/github.sh`, which reads the GitHub repository from the
 target's origin remote and needs nothing configured. `gh` must be logged in with the
 `project` scope (`gh auth login`, then `gh auth refresh -s project`); the user does both,
-never an agent, and `scripts/probe-trackers.sh` says whether they have.
+never an agent, and `<tool>/scripts/probe-trackers.sh` says whether they have.
 
 ```sh
-scripts/github.sh <repo> board                        # the linked board and its URL; exit 3 if none
-scripts/github.sh <repo> board init                   # create a board named after the repo and link it
-scripts/github.sh <repo> create "<title>" <body-file> # prints the new issue number
-scripts/github.sh <repo> read <n>
-scripts/github.sh <repo> read <n> --body              # the body alone, exactly as stored
-scripts/github.sh <repo> edit <n> <body-file> <base-file>
-scripts/github.sh <repo> state <n> in-progress
-scripts/github.sh <repo> comment <n> coachman "<text>"
-scripts/github.sh <repo> list [state]
+<tool>/scripts/github.sh <repo> board                        # the linked board and its URL; exit 3 if none
+<tool>/scripts/github.sh <repo> board init                   # create a board named after the repo and link it
+<tool>/scripts/github.sh <repo> create "<title>" <body-file> # prints the new issue number
+<tool>/scripts/github.sh <repo> read <n>
+<tool>/scripts/github.sh <repo> read <n> --body              # the body alone, exactly as stored
+<tool>/scripts/github.sh <repo> edit <n> <body-file> <base-file>
+<tool>/scripts/github.sh <repo> state <n> in-progress
+<tool>/scripts/github.sh <repo> comment <n> coachman "<text>"
+<tool>/scripts/github.sh <repo> list [state]
+<tool>/scripts/github.sh <repo> access                       # the user's permission: ADMIN, WRITE, READ...
+<tool>/scripts/github.sh <repo> search "<text>"              # issues holding it: number, open or closed, title
 ```
 
 - **Board:** one per target repo, found through the repo's project links. A repo with no
@@ -83,7 +85,9 @@ scripts/github.sh <repo> list [state]
 - **Read:** `read`, which prints the issue with its state worked out from the issue and
   the board together. `read --body` prints the body alone, exactly as stored.
 - **Create:** `create` with a body file in the ticket shape; the issue is added to the board
-  in Todo. An empty body file is refused.
+  in Todo. An empty body file is refused, and so is a board with no Todo column, before
+  anything is created. An issue created but not put on the board still prints its number, and
+  exits 5.
 - **Edit:** `edit` replaces the issue's body with `<body-file>`, and never its title.
   `<base-file>` is the body as `read --body` printed it when the change was drafted: if the
   issue no longer matches it, `edit` writes nothing and exits 4. It refuses an empty body
@@ -94,6 +98,9 @@ scripts/github.sh <repo> list [state]
 - **Comment:** `comment`, dated to the minute, actor first (`postmaster`, `coachman`, or the
   user's word for themselves). The ready-to-merge comment is one such line pointing at
   `<dispatch>/card.md`.
+- **Access:** `access` prints the user's permission on the repository, as GitHub names it.
+- **Search:** `search`, GitHub's search of titles, bodies and comments for a phrase. It is an
+  index, not an exact match, so a caller that needs one reads each issue it names.
 
 ## plane
 
@@ -105,7 +112,7 @@ target repo, matched by the project identifier that prefixes every work item id 
 which is the prefix discovery reads from commit messages; a target that has shipped one
 ticket needs nothing configured, and one that has not is a question for the user.
 
-Everything goes through `scripts/plane.sh`. The instance and workspace are in the config:
+Everything goes through `<tool>/scripts/plane.sh`. The instance and workspace are in the config:
 
 ```toml
 [tracker]
@@ -117,18 +124,18 @@ workspace = "<slug>"             # the segment after the host in the workspace's
 The API key is `PLANE_API_KEY` in `~/.postmaster/plane.env` (or the file `[tracker]
 env_file` names), one line, made in Plane under profile settings, API tokens. The user
 writes that file; the key never passes through a conversation, the config or this repo.
-`scripts/plane.sh projects` proves the three of them agree by listing the workspace's
-projects, and `scripts/probe-trackers.sh` runs it.
+`<tool>/scripts/plane.sh projects` proves the three of them agree by listing the workspace's
+projects, and `<tool>/scripts/probe-trackers.sh` runs it.
 
 ```sh
-scripts/plane.sh projects                             # identifier, id and name of every project
-scripts/plane.sh create <IDENT> "<title>" <body-file> # prints the new id, IDENT-n
-scripts/plane.sh read PM-12
-scripts/plane.sh read PM-12 --body                    # the body alone, as markdown
-scripts/plane.sh edit PM-12 <body-file> <base-file>
-scripts/plane.sh state PM-12 in-progress
-scripts/plane.sh comment PM-12 coachman "<text>"
-scripts/plane.sh list PM [state]
+<tool>/scripts/plane.sh projects                             # identifier, id and name of every project
+<tool>/scripts/plane.sh create <IDENT> "<title>" <body-file> # prints the new id, IDENT-n
+<tool>/scripts/plane.sh read PM-12
+<tool>/scripts/plane.sh read PM-12 --body                    # the body alone, as markdown
+<tool>/scripts/plane.sh edit PM-12 <body-file> <base-file>
+<tool>/scripts/plane.sh state PM-12 in-progress
+<tool>/scripts/plane.sh comment PM-12 coachman "<text>"
+<tool>/scripts/plane.sh list PM [state]
 ```
 
 - **Read:** `read`; the body Plane stores as HTML comes back as markdown in the ticket
@@ -155,3 +162,12 @@ it, and the setup session records how each of the five demands is met in
 above, so the user's instance never enters the flow. Until that file exists the tracker is
 not configured, however reachable it is. One written before a body could be replaced says
 nothing about it; until it does, the user makes an approved change in the tracker.
+
+## postmaster's own tracker
+
+A fault a run meets in postmaster itself is filed on postmaster's own tracker, never the
+target's. That tracker is GitHub, whatever the config's kind: the repository the origin of
+postmaster's own checkout names, when postmaster is a checkout of its own and `access` says
+ADMIN, since nothing is filed on a repository the user does not own.
+`<tool>/scripts/tool-faults.sh` finds a fault's ticket with `search` and files one with
+`create`. With no such tracker, the fault stays in the run's records.

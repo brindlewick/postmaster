@@ -7,7 +7,9 @@ description: 'Operate the postmaster wiki, the project knowledge base: how harne
 
 The wiki compiles what the project knows once and keeps it current, instead of re-deriving it
 from chat histories. **Read `wiki/schema.md` first**; it is the contract for every page, and
-this file only says how to perform the three operations.
+this file only says how to perform the three operations. It works in a checkout of the
+postmaster repo, the main one or a worktree, and every path here is relative to that
+checkout's root.
 
 Three layers, and the direction is one-way. A run writes its full record to its own
 project's gitignored `.postmaster/`, automatically and always. `raw/` is written once, by

@@ -33,7 +33,7 @@ the same way, and merges are merges. There is no special mode.
 
 **Do not let a run rewrite the file that a live run is mid-way through executing and then
 expect either to be coherent.** If a ticket changes the coachman contract (markers, the
-waybill shape, completion detection), land it while the fleet is idle, or the next dispatch
+waybill shape, the turnpike table, completion detection), land it while the fleet is idle, or the next dispatch
 will read a new contract while an older run is still writing to the old one.
 
 Contract changes are the only category that needs the fleet quiet. Ordinary changes to
@@ -88,6 +88,16 @@ to work around.
 scripts/setup.sh --keys                       # every key, its default and what it asks
 scripts/setup.sh --answers <file> --dry-run   # the config it would write
 scripts/setup.sh --answers <file>             # write ~/.postmaster/config.toml
+```
+
+Then link the skills, so the postmaster skill works from any project in every installed
+harness with a skills folder. Show the user the dry run first. The links go to this repo's
+main checkout, never a worktree, and nothing is ever copied; a path in the way is the user's
+to move, and the script changes nothing until it is gone.
+
+```sh
+scripts/link-skills.sh --dry-run   # the links it would make, and anything in the way
+scripts/link-skills.sh             # make them; running it again changes nothing
 ```
 
 **2. Which project are we dispatching against?**
@@ -199,3 +209,8 @@ the fleet quiet, or depends on something that does not exist yet.
 The test is whether the fix completes what the pull request claims. "Is this a separate
 concern?" is the wrong test, because nearly anything can be described as one. Before filing a
 ticket, run `gh pr list` and check whether the work belongs in one of them.
+
+**A script path in `skills/postmaster/` goes through `<tool>`**, the repo the skill finds from
+its link: `<tool>/scripts/stage.sh`, never `scripts/stage.sh`, which resolves only from this
+repo's root. `scripts/skill-refs.sh` names every path that does not, and `--fix` rewrites the
+bare ones; run both after writing a runbook and after a rebase.
