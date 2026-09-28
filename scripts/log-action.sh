@@ -13,7 +13,8 @@
 #            escalate rule ticket-check ticket-create ticket-edit ticket-state ticket-comment
 #            gate verify merge teardown degrade handoff-accept handoff stage tool-fault note
 #   target   what the action was done to: a lane, a ticket id, a branch, a path, a round
-#   detail   free text; everything after the target, joined by spaces
+#   detail   free text; everything after the target, joined by spaces. A finding's opens with its
+#            class, gating or style, so the style findings can be told apart
 #
 # A tool-fault is postmaster itself misbehaving: a script, a runbook step or a harness adapter.
 # Its target is the postmaster file, relative to the checkout this script is in or absolute,
@@ -31,8 +32,8 @@
 # in the flow reads its own narrative back to learn from it; it reads these lines.
 #
 #   exit 0  written to both files
-#   exit 1  usage, an action outside the set, a tool-fault missing a field or naming no
-#           postmaster file, or a file could not be appended
+#   exit 1  usage, an action outside the set, a finding with no class, a tool-fault missing a
+#           field or naming no postmaster file, or a file could not be appended
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd -P)
 TOOL=$(dirname "$HERE")
@@ -97,6 +98,8 @@ log_action() {  # log_action <dispatch> <actor> <action> <target> [detail...]
   shift 4
   DETAIL=${*:-}
   case "$VERBS" in *" $ACTION "*) ;; *) echo "log-action: '$ACTION' is not an action in the set:$VERBS" >&2; return 1 ;; esac
+  [ "$ACTION" != finding ] || case ${DETAIL%% *} in gating|style) ;;
+    *) echo "log-action: a finding's detail opens with its class, gating or style" >&2; return 1 ;; esac
   if [ "$ACTION" = tool-fault ]; then tool_fault "$TARGET" "$@" || return 1; fi
 
   dispatch=$(CDPATH= cd -P -- "$given" 2>/dev/null && pwd -P) || { echo "log-action: no such dir: $given" >&2; return 1; }
@@ -163,6 +166,9 @@ wrote "a path through .. that stays in the checkout is written" coachman tool-fa
 last "as the file it reaches" 'e["fault"]["failed"] == "fifth" and e["target"] == "scripts/log-action.sh" and e["fault"]["control"] == "action-log"'
 wrote "a path through a link to the checkout is written" coachman tool-fault "$tmp/link/scripts/launch.sh" "${FIELDS[@]}" --failed sixth
 last "as the real path" 'e["fault"]["failed"] == "sixth" and e["target"] == "scripts/launch.sh"'
+wrote "a style finding is written" coachman finding src/a.ts:12 style P3 r1 style luna reading: a list named map
+last "with its class as the first word of its detail" 'e["action"] == "finding" and e["detail"].split()[0] == "style"'
+wrote "a gating finding is written" coachman finding src/b.ts:40 gating P1 r1 bug luna execution: an off-by-one
 wrote "a detail ending in a newline is written" postmaster note RUN-1 $'kept whole\n'
 last "with its newline" 'e["detail"] == "kept whole\n"'
 wrote "a line separator and a byte that is not UTF-8 are written" postmaster note RUN-1 $'one\xe2\x80\xa8two \xff three'
@@ -187,6 +193,8 @@ refused() {  # refused <label> <the text the message holds> <arguments after the
 }
 refused "an action outside the set" "is not an action" tool-faults scripts/launch.sh x
 refused "an empty target" "usage:" note ""
+refused "a finding with no class" "opens with its class, gating or style" finding src/c.ts:7 P2 r1 bug luna reading: no class
+refused "a finding whose class is another word" "opens with its class, gating or style" finding src/c.ts:7 advisory P3 r1 style luna reading
 refused "a tool-fault with no fix" "needs --fix" tool-fault scripts/launch.sh "${FIELDS[@]:0:8}"
 refused "a tool-fault with a blank diagnosis" "needs --diagnosis" tool-fault scripts/launch.sh "${FIELDS[@]}" --diagnosis "  "
 refused "a tool-fault as plain words" "a tool-fault takes" tool-fault scripts/launch.sh the wait returned early

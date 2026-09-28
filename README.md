@@ -105,6 +105,7 @@ scripts/local.sh <repo> store|create|edit|read|title|state|comment|list # ticket
 scripts/tracker-kind.sh <repo>                                    # the tracker kind a repo uses: local when its store exists
 scripts/ticket-check.sh <repo> <id> | --body <file> | --splice …   # a ticket's shape; --splice writes approved parts in
 scripts/turnpikes.sh --list | resolve <text> | legs <dispatch>     # the turnpikes, and a run's legs
+scripts/style-findings.sh list|count|gate|check <dispatch>         # a run's style findings, what its gate runs, the sort
 scripts/launch.sh form|launch|resume|skill <lane-or-role> …       # any lane or role, one command
 scripts/reviewers.sh lines|lanes <waybill> <lens>|lenses           # which lanes review under each lens
 scripts/host.sh detect|name|run|stop|close|spawn|send|wait|read … # where a launch runs, and where you watch it

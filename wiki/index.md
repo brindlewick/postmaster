@@ -73,7 +73,8 @@ Why the design is shaped as it is.
   project's gate is not a turnpike and always runs.
 - [The review loop](concepts/review-loop.md): **claimed**. Style, bug and security review run
   as one loop in one leg, so each round's fixes are re-reviewed by the gating lenses a ticket names, in the
-  next. It should also take fewer rounds.
+  next. It should also take fewer rounds. Style gates nothing: its
+  findings feed the project's linter.
 - [Live agents against markers and resumes](concepts/live-agents.md): **claimed**. Headless
   stays the default and live agents become an option; what it would take to change the default.
 - [A skill is a link to the postmaster repo, never a copy](concepts/skill-links.md):

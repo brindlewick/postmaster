@@ -37,6 +37,7 @@ waybill carries, is `SKILL.md`. You do not need it.
 | `<repo>/.worktrees/<TICKET>-<lane>` | workhorse worktree, branch `wb/<TICKET>-<lane>` (`wb` for workhorse branch) |
 | `<dispatch>/checkpoint-<n>.md` | checkpoint cards: `1` and `review` |
 | `<repo>/.worktrees/<TICKET>-rev-<lens>-<lane>` | reviewer scratch, one per lens per lane, detached at the synthesis HEAD, fresh every round: a clone under the security lens, a worktree under the others |
+| `<dispatch>/style-sort.md` | aftercare's sort of the run's style findings, which the postmaster puts to the user |
 
 ## Audit log: every action, as it happens
 
@@ -58,9 +59,10 @@ thread id); `resume` per resumed thread; `harvest` per workhorse (detail its exi
 `synthesize` once, with the SYNTHESIS line as the detail; `rule` per conventional divergence
 recorded; `review-launch` per lane per lens per round (target the lane, detail the lens and the
 round), and `review-harvest` likewise with the thread id added; `finding` per verified finding
-(target its file:line, detail severity, the round, every lens and every lane that found it,
-verified by execution or reading); `apply` per fix (target its commit, detail the findings it
-fixes); `degrade` per lane per lens per round it did not review at full strength (detail the
+(target its file:line, detail its class first, `gating` or `style`, then severity, the round,
+every lens and every lane that found it, verified by execution or reading); `apply` per fix
+(target its commit, detail the findings it fixes); `degrade` per lane per lens per round it did
+not review at full strength (detail the
 lens, the round and the cause, quoted); `escalate` when a ruling is needed; `gate` per gate run
 with its exit; `verify` per check per commit it runs on, written by `<tool>/scripts/verify.sh run`
 and never by hand; `ticket-state` and `ticket-comment` per tracker write; `merge` on the merge;
@@ -137,7 +139,7 @@ what it wrote down. The boundaries are the run's own gates:
 |---|---|---|---|
 | 1 | `synthesis` | stage 0, stage 1, checkpoint 1 | `handoff-1.md` |
 | 2 | `review` | stage 2: the waybill's review turnpikes as lenses in one loop, every round to clean | `handoff-2.md` |
-| 3 | `ship` | stage 3 and stage 4: gates, preview, QA, the card, the merge on the word, teardown | `handoff-3.md` |
+| 3 | `ship` | stage 3 and stage 4: gates, preview, QA, the card, the merge on the word, the style sort, teardown | `handoff-3.md` |
 
 The review leg runs only when the waybill names a turnpike that runs in it; without one, ship
 follows synthesis and starts from `handoff-1.md`. `<tool>/scripts/turnpikes.sh legs <dispatch>` prints
@@ -467,7 +469,7 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    Each entry is the one place for its lens, the turnpike of the same name: what its reviewers
    look for, and how they are launched, which step 2 does for every lane that reviews under it.
    A review turnpike with no entry here cannot run: escalate.
-   - **Style lens** (advisory, round 1 only): non-mechanical idiom, naming, the project's
+   - **Style lens** (round 1 only, gates nothing): non-mechanical idiom, naming, the project's
      stated paradigm (functional core, immutability, whatever its docs say), abstraction,
      consistency, judged against the project's own style pages and the surrounding code's
      conventions. Launch: from its brief.
@@ -629,8 +631,8 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    <scratch> diff --name-only <SNAP>`, which names every tracked file changed since the
    snapshot, staged or committed included, not `status --porcelain` (scratches are expected to
    be dirty with untracked build output). Any modified tracked file is a finding about the LANE:
-   log it with the file list and do not count that lane's verdict until it is understood. Then
-   tear the round down, here as at the cut:
+   log a `note` with the file list, and do not count that lane's verdict until it is understood.
+   Then tear the round down, here as at the cut:
 
    ```sh
    <tool>/scripts/review-round.sh teardown <dispatch> <round> <repo>
@@ -650,26 +652,27 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
 3. **Dedup across lenses and adversarially verify** every finding against the code before it
    reaches the card or the diff; discard what does not hold. A defect reported under more than
    one lens is one finding, and it keeps every lens that reported it. A finding is gating or
-   advisory by what it is, not by the lens that reported it: a correctness or security defect
-   reported under the style lens is fixed as a gating finding, and keeps its lens, except in a
-   loop with no gating lens (step 5). Several
-   reviewers produce a bigger, noisier union than one; the verification gate is what keeps the
-   checkpoint clean, so do not soften it. Where a lane says it verified a finding by execution,
-   re-run its probe rather than re-deriving the claim; where it filed a hypothesis, the
-   verification burden is yours.
-4. **Apply once per round,** in the synthesis worktree: the verified gating findings first (in a
-   loop with no gating lens, none: step 5),
-   then, in round 1 of a loop with a gating lens, the style findings that are clearly right.
-   Where fixes from different lenses touch the same code, reconcile them into one change before
-   applying it. Every other style finding is deferred in the hand-off and reaches the ship
-   card's Style residue section, where the user picks at merge time. Then re-run the project's
-   gate.
+   style by what it is, not by the lens that reported it: a correctness or security defect
+   reported under the style lens is a gating finding, fixed as one except in a loop with no
+   gating lens (step 5), a matter of style reported under another lens is a style finding, and
+   each keeps its lens. Its `finding` line opens with its class. A finding whose class changes in
+   a later round is logged again with the same target, and its latest line counts, so two
+   findings at one place take targets that differ, such as a line and a column. Several reviewers
+   produce a bigger, noisier union than one; the verification gate is what keeps the checkpoint
+   clean, so do not soften it. Where a lane says it verified a finding by execution, re-run its
+   probe rather than re-deriving the claim; where it filed a hypothesis, the verification burden
+   is yours.
+4. **Apply once per round,** in the synthesis worktree: the verified gating findings (in a loop
+   with no gating lens, none: step 5), and never a style finding. Where fixes from different
+   lenses touch the same code, reconcile them into one change before applying it. Every style
+   finding is deferred in the hand-off, reaches the ship card's Style residue, and is sorted at
+   aftercare (stage 4). Then re-run the project's gate.
 5. **Loop until clean.** Round `r+1` runs the gating lenses alone, on the fixed diff, with its
-   own markers, each brief updated with the fixes delta and every applied finding, style ones
-   included, as known context, so they closure-check each fix AND hunt new holes the fixes
-   introduced. Done only when a round returns zero new verified gating findings and every fix
-   verifies closed, so a round that applied any change, a style change included, is never the
-   last. A loop with no gating lens is round 1 alone, and applies nothing: a verified gating
+   own markers, each brief updated with the fixes delta and every applied finding as known
+   context, so they closure-check each fix AND hunt new holes the fixes introduced. Done only
+   when a round returns zero new verified gating findings and every fix verifies closed, so a
+   round that applied any change is never the last, and a style finding never keeps the loop
+   going. A loop with no gating lens is round 1 alone, and applies nothing: a verified gating
    finding in it, a bug or security defect the style lens reported, is escalated with the card
    instead of fixed, which stops the leg in either `CHECKPOINT_MODE`, and a ruling that asks for
    the fix has it applied and the gate re-run, with the card saying no lens re-reviewed it. Cap
@@ -687,12 +690,13 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    in the escalation and say which sites each round closed.
 6. **One review checkpoint card.** Per lens: the findings and their overlap, across lanes and
    with the other lenses, verified versus dismissed, applied, and the rounds it ran; for style,
-   which advisory findings were applied and which are deferred to the ship card's Style residue.
-   Then the gate status, and the checks as `<tool>/scripts/verify.sh run <synthesis-wt> <dispatch>`
-   printed them after the last round's fixes, the journey walked first where there is one.
-   Written to `<dispatch>/checkpoint-review.md` with its
-   `.checkpoint-review-ready` marker. Autonomous mode: write the leg's hand-off and end it; the
-   ship approval is stage 3's stop. Consult mode: escalate on the card and wait for the resume.
+   how many findings go to the ship card's Style residue, as `<tool>/scripts/style-findings.sh
+   count <dispatch>` prints it. Then the gate status, and the checks as
+   `<tool>/scripts/verify.sh run <synthesis-wt> <dispatch>` printed them after the last round's
+   fixes, the journey walked first where there is one. Written to
+   `<dispatch>/checkpoint-review.md` with its `.checkpoint-review-ready` marker. Autonomous
+   mode: write the leg's hand-off and end it; the ship approval is stage 3's stop. Consult mode:
+   escalate on the card and wait for the resume.
    A ruling that asks for a change is applied; in a loop with a gating lens it is followed by
    another round, counted toward the cap, and the card is written and escalated again, and a
    round past the cap runs only when the ruling says so. Any other ruling, or a change applied in
@@ -753,9 +757,10 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    printed them on the final synthesis, with step 3's walk as the journey report where there is
    one, written to the path `verify.sh journey-path <synthesis-wt> <dispatch>` prints.
 
-   **The ship card carries the Style residue,** every advisory finding not applied, one line
-   each, for the user to pick from at merge time. **It also lists every bug or security finding
-   left open,** with its lens and disposition, one line each.
+   **The ship card carries the Style residue:** how many style findings go to aftercare, as
+   `<tool>/scripts/style-findings.sh count <dispatch>` prints it, then each one as its `list` prints
+   it. **It also lists every bug or security finding left open,** with its lens and
+   disposition, one line each.
 
    **The ship card lists the turnpikes the run passed through,** exactly the waybill's, each
    with the rounds it ran and its result as the step that ran it records them
@@ -779,6 +784,33 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    this flow.
 
 ## Stage 4 (leg 3, after the merge): aftercare and teardown
+
+**Sort the style findings.** For each one `<tool>/scripts/style-findings.sh list <dispatch>`
+prints, write one line to `<dispatch>/style-sort.md`, with a one-line reason: a rule the
+project's linter could enforce, naming the linter, which must be one the gate runs, and the
+existing rule to enable or the custom rule to write; a convention for the project's own docs,
+naming the doc; or neither. `<tool>/scripts/style-findings.sh gate <dispatch>` shows what the
+gate runs, as the run's branch has it; where the gate runs a linter in a way it does not show,
+add `via` and the file that runs it after the rule. A finding that only a linter the gate does
+not run could enforce is sorted docs or neither, and that linter is proposed on a line of its
+own, once, naming every finding it would enforce, and marked `not-in-gate` when the project
+already has it:
+
+```
+S<n> linter <linter> enable <rule>: <reason>
+S<n> linter <linter> write <rule>: <reason>
+S<n> linter <linter> enable <rule> via <file>: <reason>
+S<n> docs <doc>: <reason>
+S<n> neither: <reason>
+N<n> new-linter <linter> S<n>[,S<m>...]: <reason>
+N<n> new-linter <linter> S<n>[,S<m>...] not-in-gate: <reason>
+```
+
+`<tool>/scripts/style-findings.sh check <dispatch>` must exit 0, which it does with no sort
+when the run has no style findings. Log a `note` with its last line, and name the file in
+`handoff-3.md`'s Decisions. Change neither the project's linter nor its docs for a finding: a
+change there is a ticket, filed after the merge on the user's word.
+[Why style findings feed the project's linter](../../wiki/concepts/review-loop.md)
 
 Final `run-log.md` entry (per-lane win record, findings counts, cost) plus a closing dated
 comment on the ticket. Leave the stage at `shipped`: the postmaster sets `done` when it closes
@@ -874,9 +906,10 @@ logical order, not file safety: check the file surfaces before mass-launching.
 - **Reviewers argue the coachman out of wrong calls; say so in the brief and mean it.** Put the
   disposition of every deferred finding in the next round's brief with the reasoning, and
   invite the challenge. A deferral that is never restated cannot be corrected.
-- **When the lanes converge on a prescribed one-line fix, apply it and re-review; do not bank
-  it as a ship-comment note.** Skipping a round that way ships a documented hole. In a loop with
-  no gating lens, Stage 2 step 5 decides instead.
+- **When the lanes converge on a prescribed one-line fix for a gating finding, apply it and
+  re-review; do not bank it as a ship-comment note.** Skipping a round that way ships a
+  documented hole. In a loop with no gating lens, Stage 2 step 5 decides instead, and a style
+  finding is never applied, however many lanes prescribe it.
 - **The render gate is the coachman's job whenever a workhorse could not run it.** A workhorse on a
   harness with no browser backend cannot run one, and a workhorse that did run one tested its own
   UI, not the synthesis. Serve the production build on a temporary database (never the live

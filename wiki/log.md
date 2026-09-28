@@ -8,6 +8,25 @@ updated: 2026-09-27
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-09-27] ingest | how the style sort is checked and put to the user
+
+After the review of #55's pull request, the review-loop page records why the style check reads
+the gate as the run's branch has it and never runs it, why a sort may name the file that runs a
+linter, and why a linter the project already has is not proposed as new unless the sort says the
+gate does not run it. It also records that the postmaster puts the sort to the user once, as a
+run's aftercare ends, and that a finding's latest line gives its class. Standing stays
+`claimed`.
+
+## [2026-09-27] ingest | style gates nothing, and feeds the project's linter
+
+The user's direction in issue #55: try style not gating a run, for now. The style lens applies
+nothing, the ship card counts its findings, and after the merge each is sorted into a rule for
+a linter the project's gate runs, a convention for the project's docs, or neither, which the
+postmaster puts to the user. The review-loop page records the decision, its reasons, its costs
+and what would settle it; the turnpikes page says a turnpike need not gate. The decision earlier
+the same day that style blocks a ship was reverted on #40's pull request before it merged. Both
+pages stay `claimed`.
+
 ## [2026-09-27] ingest | a review round's time limit
 
 The review loop page now says what happens to a reviewer still running when its round reaches

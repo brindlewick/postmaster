@@ -3,7 +3,7 @@ title: A ticket names the turnpikes its run passes through
 type: concept
 standing: claimed
 sources: []
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # A ticket names the turnpikes its run passes through
@@ -29,6 +29,11 @@ project's gate is not a turnpike, and runs on every run.
   clear. The gate is the project's own check, and it runs whatever the ticket says. Turnpikes
   are the checks a ticket names on top of it. A ticket can name `none`, but it cannot skip the
   gate.
+- **A turnpike need not gate.** A run passes through every turnpike its ticket names, but of
+  the default three only bug and security can hold a ship back. Since
+  [issue #55](https://github.com/brindlewick/postmaster/issues/55), style's findings go to the
+  project's linter instead, by the user's decision to try it for now:
+  [the review loop](review-loop.md) says why.
 - **The turnpikes are listed in one place.** `scripts/turnpikes.sh` defines every turnpike and
   the default set, and the check, the postmaster and the coachman read them from it. A new
   turnpike, such as a fixture run from
@@ -49,11 +54,11 @@ project's gate is not a turnpike, and runs on every run.
   starts from its hand-off. A review leg with no lens would start a coachman to do nothing.
 - **A review loop without a gating lens is one round, and applies nothing.** In
   [the review loop](review-loop.md), every change is re-reviewed in the next round by the
-  gating lenses, bug and security. With only `style` named, nothing would re-review a style
-  change, so every style finding goes to the ship card's Style residue for the user to pick
-  from. A bug or security defect the style reviewer finds in such a run is not fixed either:
-  the coachman escalates it, and the user decides, since no lens would check the fix. The user
-  chose this on 2026-09-26.
+  gating lenses, bug and security, and style runs in round 1 only. With only `style` named,
+  round 1 is the whole loop. Since issue #55 no loop applies a style finding, so its findings go
+  to aftercare as any run's do. A bug or security defect the style reviewer finds in such a run
+  is not fixed either: the coachman escalates it, and the user decides, since no lens would
+  check the fix. The user chose this on 2026-09-26.
 - **The turnpikes are the user's, like the direction.** The postmaster proposes `default` and
   never writes fewer turnpikes, or `none`, on its own judgment, even where it may create tickets
   without asking. Otherwise a postmaster that also says the merge word could remove every review
