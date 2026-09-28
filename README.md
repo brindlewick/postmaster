@@ -158,8 +158,10 @@ command, the docs and the ticket convention. Ask only what discovery cannot answ
 ## Native sessions
 
 Only one process in the fleet is kept alive between turns: the postmaster, which the
-user talks to, and that one needs a host that keeps an interactive process running
-(Herdr or tmux). Everything else runs as a **native session**: the harness's own thread, in its
+user talks to. A spawned postmaster needs a host that keeps an interactive process
+running (Herdr or tmux); when the front-door session is the postmaster, that
+conversation is the live process and needs no host of its own. Everything else runs
+as a **native session**: the harness's own thread, in its
 own store on disk. A lane or a coachman leg is launched headless, writes its events and a
 marker, and exits. When it is needed again, for a ruling to a coachman or a remount of a
 stalled lane, the flow resumes that thread with one command (`scripts/launch.sh resume`) and

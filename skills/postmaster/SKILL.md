@@ -146,8 +146,7 @@ not say; the security lens reviews against them.
 3. **Decide who runs the stream.** Report what this session is — its harness, its model, its
    working directory, and whether a person is at the terminal — and ask the script. Report
    `yes` only when this conversation can ask a person and receive answers; a headless
-   session reports `no`. Report what this session is; do not copy the configured harness
-   or model into the report.
+   session reports `no`. Do not copy the configured harness or model into the report.
 
    ```sh
    <tool>/scripts/front-door.sh <harness> <model> <cwd> <yes|no> "$TARGET"
@@ -158,7 +157,10 @@ not say; the security lens reviews against them.
    with the user at the terminal: the postmaster is this session, and no second one is
    started. `spawn` means a separate postmaster session is needed, and the reasons say
    which conditions failed: the harness or the model differs from `team.postmaster`, the
-   target is another repo, or nobody is at the terminal.
+   target is another repo, or nobody is at the terminal. If it exits non-zero instead,
+   stop and tell the user what it said: the config is missing, does not parse, or has no
+   `team.postmaster`, or the report was malformed. Settle that first; there is no route
+   to put on the launch card until the script answers.
 4. **Launch card**: one self-contained confirmation covering whether the postmaster is this
    session or a new one, with every reason the script printed, the postmaster's harness,
    model and effort (`team.postmaster` in the config), the team the config names, who says
@@ -209,8 +211,8 @@ not say; the security lens reviews against them.
    runs headless, so whenever it needs the user it writes `<runs>/postmaster/ESCALATION.md` and
    ends its turn; tell the user it answers by resume.
 9. **Report**. `self`: say that you are the postmaster and the stream is running here. `spawn`:
-   where to watch it (the space and tab, the tmux session, or with no host its events
-   file), the run root, and the brief. Then stop.
+   say where to watch it (the space and tab, the tmux session, or with no host its events
+   file), the run root, and the brief, then stop.
 
 ## The waybill
 
