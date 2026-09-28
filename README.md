@@ -86,8 +86,10 @@ scripts/link-skills.sh [--dry-run | --remove]                     # the skills, 
 scripts/skill-refs.sh [--fix]                                      # every script path in the skill goes through <tool>
 scripts/find-projects.sh        # your git projects, most recent first
 scripts/check-target.sh  <path> # 0 usable · 1 not a repo · 2 dirty
-scripts/discover-project.sh <path>
+scripts/discover-project.sh <path>                                # gate, docs, tracker and its prefix, and the checks
 scripts/front-door.sh <harness> <model> <cwd> <yes|no> <target>   # self or spawn: who runs the stream
+scripts/verify.sh checks|record|arm|run|results|summary …          # the checks a change is verified by
+scripts/verify-examples.sh | verify-journey.sh | verify-library.sh # the defaults beyond the gate
 scripts/cut-scratch.sh <repo> <source-worktree> <dest> <commit> [--clone <base>]  # reviewer scratch; --kind, --remove
 scripts/wait-for-markers.sh <dir> <glob> <count> <timeout>       # block until a round is in
 scripts/log-action.sh <dispatch> <actor> <action> <target> …     # one JSON line per action
@@ -111,6 +113,11 @@ scripts/handoff-check.sh <handoff-file>                            # a leg may e
 scripts/wiki-lint.sh [--self-test]                                 # the wiki's rules, run not remembered
 scripts/fixture.sh new|score|hidden …                              # a run on a fixture app, scored against a known outcome
 ```
+
+A project may declare how a change to it is verified in `.postmaster/project.toml`, the one
+settings file it commits, in the shape of `project.example.toml`. One that declares nothing gets
+defaults: the gate, and by what discovery finds, a command-line app's ticket examples, a web
+app's browser suite and User journey, or a library's tests through its package name.
 
 ## What it needs
 

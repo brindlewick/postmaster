@@ -110,7 +110,7 @@ scripts/link-skills.sh             # make them; running it again changes nothing
 ```sh
 scripts/find-projects.sh                 # most recently worked first
 scripts/check-target.sh <chosen>         # 0 usable · 1 not a repo · 2 dirty, ask first
-scripts/discover-project.sh <chosen>     # gate command, docs, tracker and its prefix
+scripts/discover-project.sh <chosen>     # gate command, docs, tracker and its prefix, checks
 ```
 
 **The target may be this repo.** Developing postmaster with postmaster is supported; see
