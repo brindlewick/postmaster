@@ -88,21 +88,19 @@ field() {  # field <run.json> <key>  the postmaster.<key> of a run.json
     "$1" "$2" 2>/dev/null
 }
 
-claim() {  # claim <run.json>: `checkout:<path>` when the run names a checkout, `no` when it
-           # names none, `unknown` when its record cannot be read; the scan fails closed on unknown
+claim() {  # claim <run.json>: `checkout:<path>` when the run names a checkout, `no` when
+           # its postmaster record names none, `unknown` when the record cannot be read at all;
+           # the scan fails closed on unknown
   python3 -c '
 import json, sys
 try:
     r = json.load(open(sys.argv[1]))
 except Exception:
     print("unknown"); raise SystemExit(0)
-pm = r.get("postmaster") if isinstance(r, dict) else "absent"
-if pm is None and (not isinstance(r, dict) or "postmaster" not in r):
-    print("no")
-elif not isinstance(pm, dict):
+if not isinstance(r, dict) or not isinstance(r.get("postmaster"), dict):
     print("unknown")
 else:
-    co = pm.get("checkout")
+    co = r["postmaster"].get("checkout")
     if co is None or co == "":
         print("no")
     elif not isinstance(co, str):
@@ -162,12 +160,13 @@ check_pin() {  # check_pin <dispatch>: the run's checkout still serves its dispa
 }
 
 in_flight() {  # in_flight <runs-root> <checkout>: yes when some run still uses this pin
-  local root=$1 checkout=$2 d stage got c
+  local root=$1 checkout=$2 d stage got c dg found=1
+  dg=$(shopt -p dotglob); shopt -s dotglob  # a project is any repo basename, dot-prefixed included
   for d in "$root"/*/*/; do
     [ -f "$d/run.json" ] || continue
     c=$(claim "$d/run.json")
     case $c in
-      unknown|"") return 0 ;;   # a record that cannot be read keeps the pin
+      unknown|"") found=0; break ;;   # a record that cannot be read keeps the pin
       no) continue ;;
       checkout:*) got=${c#checkout:} ;;
     esac
@@ -181,10 +180,11 @@ in_flight() {  # in_flight <runs-root> <checkout>: yes when some run still uses 
       "$d/manifest.json" 2>/dev/null) || stage=""
     case $stage in
       done|abandoned) ;;
-      *) return 0 ;;
+      *) found=0; break ;;
     esac
   done
-  return 1
+  eval "$dg"
+  return $found
 }
 
 worktree_locked() {  # worktree_locked <common-dir> <checkout>: yes when an admin locked this pin
@@ -194,10 +194,14 @@ worktree_locked() {  # worktree_locked <common-dir> <checkout>: yes when an admi
 }
 
 release_pin() {  # release_pin <dispatch>: remove the pin when no run in flight uses it
-  local d=$1 checkout root common tools dirty
+  local d=$1 checkout root common tools dirty c
   [ -f "$d/run.json" ] || { echo "run-meta: no run.json in $d" >&2; return 1; }
-  checkout=$(field "$d/run.json" checkout) || return 1
-  [ -n "$checkout" ] || { echo "run-meta: $d/run.json records no pinned checkout; nothing to release"; return 0; }
+  c=$(claim "$d/run.json")
+  case $c in
+    unknown|"") echo "run-meta: $d/run.json records an unreadable checkout; left alone" >&2; return 1 ;;
+    no) echo "run-meta: $d/run.json records no pinned checkout; nothing to release"; return 0 ;;
+    checkout:*) checkout=${c#checkout:} ;;
+  esac
   [ -d "$checkout" ] || { echo "run-meta: no pinned checkout at $checkout; nothing to release"; return 0; }
   checkout=$(canon "$checkout") || { echo "run-meta: no pinned checkout at $checkout; nothing to release"; return 0; }
   tools=$(CDPATH= cd -P -- "$TOOLS" 2>/dev/null && pwd -P) || tools="$TOOLS"
@@ -253,6 +257,7 @@ meta() {  # meta <dispatch> <repo>
   # is kept, or cuts wholly after its removal.
   (
     exec 9>"$TOOLS/.pin.lock" && flock 9 || { echo "run-meta: could not lock $TOOLS" >&2; exit 1; }
+    [ -e "$d/run.json" ] && { echo "run-meta: $d/run.json already written; left alone"; exit 0; }
     checkout=$(pin_inner "$TOOL" "$commit" "$TOOLS/$commit") || exit 1
     python3 - "$d" "$repo" "$TOOL" "$CONFIG" "$checkout" "$commit" <<'PY' || { echo "run-meta: could not write $d/run.json" >&2; exit 1; }
 import datetime as dt, json, os, pathlib, shutil, subprocess, sys, tempfile, tomllib
@@ -439,6 +444,14 @@ printf '{"postmaster": {"commit": "abc"}}\n' > "$noco/run.json"
 try release "$noco"
 [ $rc -eq 0 ] && ok "release of a run with no pinned checkout is a no-op" \
   || fail "release of a run with no pinned checkout is a no-op" "$out"
+badown="$tmp/project/RUN-BADOWN"; mkdir -p "$badown"
+printf '{"postmaster": {"commit": "%s", "checkout": 12345}}\n' "$commitA" > "$badown/run.json"
+printf '{"stage": "done"}\n' > "$badown/manifest.json"
+try release "$badown"
+[ $rc -eq 1 ] && grep -q "unreadable" <<<"$out" \
+  && ok "release refuses a run whose own checkout is not a string" \
+  || fail "release refuses a run whose own checkout is not a string ($out)"
+rm -rf -- "$badown"  # unknown to every later scan; its control is done
 # A sibling whose record cannot be read keeps the pin; one that records no checkout is skipped.
 g4rel="$tmp/project/RUN-G4"; g4sib="$tmp/project/RUN-G4SIB"; mkdir -p "$g4rel" "$g4sib"
 pinG4=$(pin "$fake" "$commitA") || fail "a pin is cut for the unreadable-sibling controls"
@@ -460,11 +473,31 @@ try release "$g4rel"
 [ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$pinG4" ] \
   && ok "release keeps the pin for a sibling whose checkout is not a string" \
   || fail "release keeps the pin for a sibling whose checkout is not a string ($out)"
+printf '{}\n' > "$g4sib/run.json"
+try release "$g4rel"
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$pinG4" ] \
+  && ok "release keeps the pin for a sibling with no postmaster record" \
+  || fail "release keeps the pin for a sibling with no postmaster record ($out)"
 printf '{"postmaster": {"commit": "%s"}}\n' "$commitA" > "$g4sib/run.json"
 try release "$g4rel"
 [ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$pinG4" ] \
   && ok "release removes past a sibling that records no checkout" \
   || fail "release removes past a sibling that records no checkout ($out)"
+hidrun="$tmp/.hidden/RUN-HID"; hidrel="$tmp/project/RUN-HIDREL"; mkdir -p "$hidrun" "$hidrel"
+pinH=$(pin "$fake" "$commitA") || fail "a pin is cut for the hidden-project controls"
+printf '{"postmaster": {"commit": "%s", "checkout": "%s"}}\n' "$commitA" "$pinH" > "$hidrun/run.json"
+printf '{"stage": "synthesis"}\n' > "$hidrun/manifest.json"
+printf '{"postmaster": {"commit": "%s", "checkout": "%s"}}\n' "$commitA" "$pinH" > "$hidrel/run.json"
+printf '{"stage": "done"}\n' > "$hidrel/manifest.json"
+try release "$hidrel"
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$pinH" ] \
+  && ok "release keeps the pin for an in-flight run under a dot-prefixed project" \
+  || fail "release keeps the pin for an in-flight run under a dot-prefixed project ($out)"
+printf '{"stage": "done"}\n' > "$hidrun/manifest.json"
+try release "$hidrel"
+[ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$pinH" ] \
+  && ok "release removes once the hidden run is done" \
+  || fail "release removes once the hidden run is done ($out)"
 meta "$d" "$repo" >/dev/null
 try check "$d"
 [ $rc -eq 0 ] && ok "check still passes the run that shares the live tool pin" \
@@ -598,6 +631,15 @@ try check "$g1new"
 [ $g1mr -eq 0 ] && [ $g1rr -eq 0 ] && [ -n "$newco" ] && [ -d "$newco" ] && [ $rc -eq 0 ] \
   && ok "a dispatch racing a release records a pin that checks out" \
   || fail "a dispatch racing a release records a pin that checks out (meta=$g1mr release=$g1rr check=$rc)"
+# Two dispatches of one run serialize: the loser finds run.json already written.
+drace="$tmp/project/RUN-DRACE"; mkdir -p "$drace"
+meta "$drace" "$repo" >"$tmp/drace-a.out" 2>&1 & dra_pid=$!
+meta "$drace" "$repo" >"$tmp/drace-b.out" 2>&1 & drb_pid=$!
+wait $dra_pid; dra=$?; wait $drb_pid; drb=$?
+{ grep -q "already written" "$tmp/drace-a.out" || grep -q "already written" "$tmp/drace-b.out"; } \
+  && [ $dra -eq 0 ] && [ $drb -eq 0 ] \
+  && ok "two dispatches of one run write run.json once" \
+  || fail "two dispatches of one run write run.json once (a=$dra b=$drb $(cat "$tmp/drace-a.out" "$tmp/drace-b.out"))"
 # Release force-removes an unreferenced pin it cannot remove cleanly, but honors a lock.
 pinD=$(pin "$fake" "$commitA") || fail "a pin is cut for the dirty-release controls"
 g6rel="$tmp/project/RUN-G6"; mkdir -p "$g6rel"
