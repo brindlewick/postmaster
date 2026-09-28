@@ -75,8 +75,8 @@ Clone this repo and open your agent in it. There is no command to memorise and n
 run: `AGENTS.md` tells the agent what to do, and the first time that is setting the machine
 up with you, one question at a time (which agent CLIs fill which role, where tickets live,
 where your projects are, who says the merge word), and linking the skills into your agent CLIs
-so you can start from any project afterwards. After that it helps you choose a project and
-launches a postmaster.
+so you can start from any project afterwards. After that it helps you choose a project and is
+the postmaster in the session you opened, or launches one when it cannot be.
 
 ```sh
 scripts/probe-harnesses.sh      # which agent CLIs are installed
@@ -87,6 +87,7 @@ scripts/skill-refs.sh [--fix]                                      # every scrip
 scripts/find-projects.sh        # your git projects, most recent first
 scripts/check-target.sh  <path> # 0 usable · 1 not a repo · 2 dirty
 scripts/discover-project.sh <path>                                # gate, docs, tracker and its prefix, and the checks
+scripts/front-door.sh <harness> <model> <cwd> <yes|no> <target>   # self or spawn: who runs the stream
 scripts/verify.sh checks|record|arm|run|results|summary …          # the checks a change is verified by
 scripts/verify-examples.sh | verify-journey.sh | verify-library.sh # the defaults beyond the gate
 scripts/cut-scratch.sh <repo> <source-worktree> <dest> <commit> [--clone <base>]  # reviewer scratch; --kind, --remove
@@ -165,8 +166,10 @@ command, the docs and the ticket convention. Ask only what discovery cannot answ
 ## Native sessions
 
 Only one process in the fleet is kept alive between turns: the postmaster, which the
-user talks to, and that one needs a host that keeps an interactive process running
-(Herdr or tmux). Everything else runs as a **native session**: the harness's own thread, in its
+user talks to. A spawned postmaster needs a host that keeps an interactive process
+running (Herdr or tmux); when the front-door session is the postmaster, that
+conversation is the live process and needs no host of its own. Everything else runs
+as a **native session**: the harness's own thread, in its
 own store on disk. A lane or a coachman leg is launched headless, writes its events and a
 marker, and exits. When it is needed again, for a ruling to a coachman or a remount of a
 stalled lane, the flow resumes that thread with one command (`scripts/launch.sh resume`) and
