@@ -1,0 +1,47 @@
+# <project>/.postmaster/project.toml
+#
+# What a project requires of every run against it, declared once for everyone who works on it.
+# It is the one file in a project's .postmaster/ that is committed, so it names no credential, no
+# path on anyone's machine and no role assignment. A project without it is discovered, and that
+# is the normal case. Where the project ignores .postmaster/, commit this file with `git add -f`;
+# once it is tracked, git keeps it. For now it holds the checks and nothing else.
+#
+# The checks say how a change to the project is shown to work. A project that declares none gets
+# defaults (scripts/verify.sh): the gate, always, and by what discovery finds, a command-line
+# app's ticket examples run through its command, a web app's browser suite and a walk of the
+# ticket's User journey, or a library's tests through its package name. A project that declares
+# checks gets those and the gate. Why, and what the defaults cover: wiki/concepts/verification.md.
+#
+# A check is a table named for it, in a lowercase word. It has either
+#   command    a shell command, run from the root of the worktree under test with bash -e -o
+#              pipefail, so a failing line or a failing pipe fails it; exit 0 passes
+#   shows      what passing shows, in words
+# or
+#   use        a default, by name: cli-examples, browser-suite, web-journey or library-tests
+#   shows      optional, in place of the default's own words
+# and a command may add
+#   score      a regular expression with one group; the check reads the last number it captures
+#              from the command's output, so match the line the runner prints when it has finished
+#   threshold  the least score that passes; the command must also exit 0
+#   timeout    seconds before the check is stopped and fails; 1800 unless given, on use checks too
+# A check named gate is the project's gate. A command finds the run's ticket at
+# $POSTMASTER_VERIFY/ticket.md. Whatever a command leaves running is stopped when it ends, and a
+# command that leaves a file git sees fails.
+
+[checks.gate]
+command = "npm run check"
+shows = "types, lint and the unit tests pass"
+
+[checks.acceptance]
+command = "npm run test:acceptance"
+shows = "the behaviour each ticket names holds at the command line"
+
+[checks.examples]
+use = "cli-examples"
+
+[checks.answers]
+command = "python evals/run.py --set regression"
+shows = "answer quality on the regression set holds"
+score = '^final accuracy: ([0-9.]+)$'
+threshold = 0.9
+timeout = 3600

@@ -94,6 +94,9 @@ Why the design is shaped as it is.
   change's own code, and a mechanism whose fixes keep breaking should be redesigned rather than
   fixed again. From the review of #36 and outside work. The user chose one round of bug review
   for now, to revisit if many bugs reach production.
+- [Each project defines how a change to it is verified](concepts/verification.md): **claimed**.
+  A project declares its checks or gets defaults by discovery; every workhorse runs them before
+  it reports, and the coachman runs them again on each branch and on the synthesis.
 
 ## Sources
 
