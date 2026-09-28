@@ -134,6 +134,14 @@ def muse(e):
     # else: task lifecycle and bookkeeping are not pane output
     return out or None
 
+def flush_said(stamp):
+    # The stream ended mid-message: nothing left to flush the buffer, and nothing more can
+    # arrive to split it, so print what the model said since the last tool call.
+    if muse_said[0].strip():
+        for ln in wrapped("says: " + muse_said[0].strip(), stamp):
+            print(ln, flush=True)
+        muse_said[0] = ""
+
 mimo_sessions = set()
 
 def mimo(e):
@@ -185,7 +193,7 @@ def render(e):
                 lines.append(tool_line(b.get("name"), b.get("input")))
             elif t == "user" and k == "tool_result" and b.get("is_error"):
                 lines.append("tool error: " + short(text_of(b.get("content"))))
-        return " | ".join(lines) or None
+        return lines or None
     if t == "result":
         parts = [e.get("subtype") or e.get("status") or ("error" if e.get("is_error") else "done")]
         if isinstance(e.get("num_turns"), int):
@@ -306,6 +314,7 @@ def show(line, stamp):
 if not follow:
     for line in sys.stdin:
         show(line, False)
+    flush_said(False)
     sys.exit(0)
 
 def alive(p):
@@ -336,6 +345,7 @@ with open(follow, "r", errors="replace") as f:
             rest = f.read()                   # whatever landed between the last read and the exit
             for line in (buf + rest).splitlines():
                 show(line, True)
+            flush_said(True)
             break
         time.sleep(0.2)
 PY
@@ -374,6 +384,9 @@ shows "claude: a tool call, with what it ran" \
 shows "claude: every line of what the model said" \
   '{"type":"assistant","message":{"content":[{"type":"text","text":"The command printed 3 entries.\nMore detail."}]}}' \
   "$(printf 'says: The command printed 3 entries.\nMore detail.')"
+shows "claude: each content block on its own lines, never glued with a separator" \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"line one\nline two"},{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}' \
+  "$(printf 'says: line one\nline two\nBash: ls')"
 shows "claude: a failed tool call" \
   '{"type":"user","message":{"content":[{"type":"tool_result","is_error":true,"content":"No such file"}]}}' \
   'tool error: No such file'
@@ -388,6 +401,9 @@ long=$(printf '%200s' '' | tr ' ' x)
 long_command=$(printf '{"type":"item.started","item":{"type":"command_execution","command":"%s"}}' "$long")
 long_expected=$(printf 'shell: %s\n  %s' "${long:0:153}" "${long:153}")
 shows "codex: a command longer than the display width wraps without losing text" "$long_command" "$long_expected"
+long_message=$(printf '{"type":"item.completed","item":{"type":"agent_message","text":"%s"}}' "$long")
+long_msg_expected=$(printf 'says: %s\n  %s' "${long:0:154}" "${long:154}")
+shows "codex: a message line longer than the display width wraps without losing text" "$long_message" "$long_msg_expected"
 shows "codex: what the model said" '{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"Done."}}' 'says: Done.'
 shows "pi: a session starts" '{"type":"session","version":3,"id":"01a0c7e8-5863","cwd":"/w"}' 'session 01a0c7e8-5863'
 shows "pi: a tool call" '{"type":"tool_execution_start","toolCallId":"t1","toolName":"bash","args":{"command":"ls"}}' 'bash: ls'
@@ -424,6 +440,13 @@ wanted=$(printf 'says: First half. second half.\nread_file: proof.txt\nedit_file
   || fail "muse: buffered deltas flush as one message at the tool call, with read and edit paths" "wanted: $wanted"$'\n'"got:    $got"
 case $got in *'PELICAN'*) fail "muse: tool output stays out of the pane" "$got" ;;
   *) ok "muse: tool output stays out of the pane" ;; esac
+got=$(printf '%s\n' \
+  '{"stream":{"kind":"session","id":"s3"},"payload_type":"run.output.delta","payload":{"text":"a message with no "}}' \
+  '{"stream":{"kind":"session","id":"s3"},"payload_type":"run.output.delta","payload":{"text":"terminal after it."}}' \
+  | view)
+[ "$got" = "says: a message with no terminal after it." ] \
+  && ok "muse: deltas with no terminal after them still print at the end of the stream" \
+  || fail "muse: deltas with no terminal after them still print at the end of the stream" "got: $got"
 shows "mimo: a session starts, with its thread id, and a first step says nothing more" \
   '{"type":"step_start","sessionID":"ses_ffe5f1e2","part":{"type":"step-start"}}' 'session ses_ffe5f1e2'
 shows "mimo: a tool call, with what it touched" \
@@ -450,7 +473,13 @@ silent "claude: a rate-limit event that allowed the call" '{"type":"rate_limit_e
 silent "codex: reasoning" '{"type":"item.completed","item":{"type":"reasoning","text":"hmm"}}'
 silent "pi: a streaming delta" '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Al"}}'
 silent "muse: a task's lifecycle record" '{"stream":{"kind":"session","id":"s1"},"payload_type":"task.lifecycle.started","payload":{"kind":"task_lifecycle"}}'
-silent "muse: a streaming delta, whose text the result carries" '{"stream":{"kind":"session","id":"s1"},"payload_type":"run.output.delta","payload":{"text":"DO"}}'
+got=$(printf '%s\n' \
+  '{"stream":{"kind":"session","id":"s1"},"payload_type":"run.output.delta","payload":{"text":"DO"}}' \
+  '{"stream":{"kind":"session","id":"s1"},"payload_type":"run.terminal.completed","payload":{"terminal":"completed","text":"DO"}}' \
+  | view)
+[ "$got" = "result: completed · DO" ] \
+  && ok "muse: a streaming delta whose text the result carries adds no second line" \
+  || fail "muse: a streaming delta whose text the result carries adds no second line" "got: $got"
 silent "pi: the user's own message ending" '{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"do it"}]}}'
 got=$(for i in $(seq 1 50); do printf '{"type":"delta","n":%d}\n' "$i"; done | view)
 [ "$got" = delta ] && ok "fifty unknown events of one type show as one line" || fail "fifty unknown events of one type show as one line" "$got"
