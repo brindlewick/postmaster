@@ -17,10 +17,13 @@ target the user wants before assuming either way.
 
 ### What is different when the target IS this repo
 
-**A run in flight does not see your edits.** A coachman loaded its runbook when it started;
-changing `coachman.md` mid-run changes nothing for it. That is a safety property, not a
-limitation: a broken edit cannot break a fleet that is already moving. It also means a fix
-you just merged is not in effect until the next dispatch.
+**A run runs on the version it was dispatched from.** At dispatch the run is pinned to the
+postmaster commit it started on: a checkout of that commit, which the waybill names as its
+tool and `run.json` records. Every coachman leg reads its runbooks and runs its scripts from
+that checkout — later legs, resumes and takeovers included — whatever `main` has done since.
+The supervising postmaster stays on the main checkout. A change can merge with runs in
+flight; each of them finishes on the version it started with. A fix you just merged reaches
+the next dispatch, not one already running.
 
 **The supervising session is in the same position.** Whatever is supervising loaded its
 context at startup. After merging a change to the flow, restart it or accept that it is
@@ -29,19 +32,10 @@ running the previous version.
 **Everything else is ordinary.** Worktrees under `.worktrees/` are gitignored, the gate runs
 the same way, and merges are merges. There is no special mode.
 
-### The one thing that genuinely bites
-
-**Do not let a run rewrite the file that a live run is mid-way through executing and then
-expect either to be coherent.** If a ticket changes the coachman contract (markers, the
-waybill shape, the turnpike table, completion detection), land it while the fleet is idle, or the next dispatch
-will read a new contract while an older run is still writing to the old one.
-
-Contract changes are the only category that needs the fleet quiet. Ordinary changes to
-scripts, docs and prose do not.
-
 **A change to the coachman contract merges only after a fixture run scores clean**: a run
 dispatched from the change's branch against a repository made by `scripts/fixture.sh new`, and
-scored by `scripts/fixture.sh score` on the same branch. [Why](wiki/concepts/fixture-runs.md).
+scored by `scripts/fixture.sh score` on the same branch. That rule is about the change's
+quality, not about the runs in flight. [Why](wiki/concepts/fixture-runs.md).
 
 ## When a session opens in this repo, do this
 
@@ -212,8 +206,8 @@ check, a stale sentence, an instruction with no mechanism behind it, a rule writ
 that belongs in a script. That does not widen the pull request. Finishing what it introduced
 is part of the same change.
 
-A ticket is for work the pull request never set out to do: it touches another contract, needs
-the fleet quiet, or depends on something that does not exist yet.
+A ticket is for work the pull request never set out to do: it touches another contract, or
+depends on something that does not exist yet.
 
 The test is whether the fix completes what the pull request claims. "Is this a separate
 concern?" is the wrong test, because nearly anything can be described as one. Before filing a
@@ -221,5 +215,6 @@ ticket, run `gh pr list` and check whether the work belongs in one of them.
 
 **A script path in `skills/postmaster/` goes through `<tool>`**, the repo the skill finds from
 its link: `<tool>/scripts/stage.sh`, never `scripts/stage.sh`, which resolves only from this
-repo's root. `scripts/skill-refs.sh` names every path that does not, and `--fix` rewrites the
-bare ones; run both after writing a runbook and after a rebase.
+repo's root. The run's own pinned tool goes through `<rt>`, resolved per run by
+`run-meta.sh path`. `scripts/skill-refs.sh` names every other path that does not go through
+`<tool>`, and `--fix` rewrites the bare ones; run both after writing a runbook and after a rebase.
