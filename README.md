@@ -91,6 +91,7 @@ scripts/verify.sh checks|record|arm|run|results|summary …          # the check
 scripts/verify-examples.sh | verify-journey.sh | verify-library.sh # the defaults beyond the gate
 scripts/cut-scratch.sh <repo> <source-worktree> <dest> <commit> [--clone <base>]  # reviewer scratch; --kind, --remove
 scripts/wait-for-markers.sh <dir> <glob> <count> <timeout>       # block until a round is in
+scripts/review-round.sh start|wait|teardown <dispatch> <round> … # a review round's deadline, its wait, its teardown
 scripts/log-action.sh <dispatch> <actor> <action> <target> …     # one JSON line per action
 scripts/tool-faults.sh harvest|comment|file|decline <dispatch> …  # a closed run's tool faults, as tickets
 scripts/stage.sh <dispatch> <stage>                               # the one way a run changes stage
