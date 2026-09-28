@@ -198,18 +198,19 @@ if len(args) == 1 and args[0] == "coachman":
         leg_number = int(json.load(open(os.path.join(d, "manifest.json"))).get("leg", 0))
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         leg_number = 0
+    if not leg_number:
+        raise SystemExit("host: cannot resolve the coachman leg from manifest.json")
+    legs = subprocess.run([os.path.join(tool, "turnpikes.sh"), "legs", d], capture_output=True, text=True)
     leg_name = ""
-    if leg_number:
-        legs = subprocess.run([os.path.join(tool, "turnpikes.sh"), "legs", d], capture_output=True, text=True)
-        if legs.returncode == 0:
-            for line in legs.stdout.splitlines():
-                fields = line.split()
-                if len(fields) > 1 and fields[0] == str(leg_number):
-                    leg_name = fields[1]
-                    break
-        if not leg_name:
-            raise SystemExit("host: cannot resolve leg %d from the waybill's turnpikes" % leg_number)
-    args = ["coachman", leg_name, str(leg_number)] if leg_number else args
+    if legs.returncode == 0:
+        for line in legs.stdout.splitlines():
+            fields = line.split()
+            if len(fields) > 1 and fields[0] == str(leg_number):
+                leg_name = fields[1]
+                break
+    if not leg_name:
+        raise SystemExit("host: cannot resolve leg %d from the waybill's turnpikes" % leg_number)
+    args = ["coachman", leg_name, str(leg_number)]
 elif len(args) == 1 and args[0] in lanes:
     lane = args[0]
     workhorses = team.get("workhorses") or []
@@ -231,9 +232,19 @@ mode = args[0]
 parts = []
 if mode == "postmaster" and len(args) == 1:
     parts = ["postmaster"]
-elif mode == "coachman" and len(args) in (1, 3):
-    leg_name = args[1] if len(args) > 1 else ""
-    leg_number = args[2] if len(args) > 2 else ""
+elif mode == "coachman" and len(args) == 3:
+    leg_name, leg_number = args[1], args[2]
+    if not leg_name:
+        raise SystemExit("host: coachman leg name must not be empty")
+    known = set()
+    legs = subprocess.run([os.path.join(tool, "turnpikes.sh"), "legs", d], capture_output=True, text=True)
+    if legs.returncode == 0:
+        for line in legs.stdout.splitlines():
+            fields = line.split()
+            if len(fields) > 1:
+                known.add(fields[1])
+    if leg_name not in known:
+        raise SystemExit("host: unknown coachman leg " + leg_name)
     spec = (team.get("coachman_legs") or {}).get(leg_name) or team.get("coachman") or {}
     parts = ["coachman"]
     if spec.get("model"):
@@ -241,7 +252,11 @@ elif mode == "coachman" and len(args) in (1, 3):
     if leg_number:
         if not re.fullmatch(r"[0-9]+", leg_number):
             raise SystemExit("host: coachman leg number must be a whole number")
-        parts.append("leg " + str(int(leg_number)))
+        try:
+            leg_int = int(leg_number)
+        except ValueError:
+            raise SystemExit("host: coachman leg number must be a whole number") from None
+        parts.append("leg " + str(leg_int))
 elif mode == "workhorse" and len(args) == 2:
     lane = args[1]
     spec = lanes.get(lane) or {}
@@ -259,7 +274,10 @@ elif mode == "review" and len(args) == 4:
         raise SystemExit("host: review lens must be style, bug or security")
     if not re.fullmatch(r"[0-9]+", round_number):
         raise SystemExit("host: review round must be a whole number")
-    round_int = int(round_number)
+    try:
+        round_int = int(round_number)
+    except ValueError:
+        raise SystemExit("host: review round must be a whole number") from None
     if round_int < 1:
         raise SystemExit("host: review round must be 1 or more")
     if not os.path.isfile(os.path.join(d, "logs", "review-r%d.json" % round_int)):
@@ -307,7 +325,7 @@ PY
 # launch closes it once its own tab exists. A security-review clone therefore stays under
 # the run, in a tab rooted at the clone.
 herdr_run_place() {  # herdr_run_place <name> <cwd> <dispatch>: prints "<space> <tab> <pane>"
-  local name=$1 cwd=$2 dispatch=$3 info runname runpath list src root rname runspace="" opened=0 out tab pane roottab
+  local name=$1 cwd=$2 dispatch=$3 info runname runpath list src root rname runspace="" opened=0 out tab pane roottab rootpane
   info=$(dispatch_info "$dispatch") || return 1
   runname=$(clean "$(printf '%s' "$info" | json 'd.get("name")')")
   runpath=$(printf '%s' "$info" | json 'd.get("synthesis_worktree")')
@@ -335,10 +353,17 @@ print("\t".join([d.get("source", {}).get("source_workspace_id") or "-",
     out=$(herdr worktree open --workspace "$src" --path "$runpath" --label "$runname" --no-focus) || return 1
     runspace=$(printf '%s' "$out" | json 'd["result"]["workspace"]["workspace_id"]')
     roottab=$(printf '%s' "$out" | json 'd["result"]["tab"]["tab_id"]')
-    [ -n "$runspace" ] && [ -n "$roottab" ] || return 1
+    rootpane=$(printf '%s' "$out" | json 'd["result"]["root_pane"]["pane_id"]')
+    [ -n "$runspace" ] && [ -n "$roottab" ] && [ -n "$rootpane" ] || return 1
+    # Tag it first: when its close below fails, the leftover is owned, so a later
+    # close still finishes instead of refusing the space over an untagged pane.
+    herdr pane report-metadata "$rootpane" --source "$META" --title "$name" --token postmaster=launch >/dev/null 2>&1 || return 1
     out=$(herdr tab create --workspace "$runspace" --cwd "$cwd" --label "$name" --no-focus) || return 1
     tab=$(printf '%s' "$out" | json 'd["result"]["tab"]["tab_id"]')
     pane=$(printf '%s' "$out" | json 'd["result"]["root_pane"]["pane_id"]')
+    # Only then close it: a create that answers without ids must leave the root
+    # tab alone, so a failed placement never orphans an empty run space.
+    [ -n "$tab" ] && [ -n "$pane" ] || return 1
     # Its close is cosmetic: when it fails the launch still runs in the right tab,
     # and the warning names the tab left behind. Never fail a launch over it.
     herdr tab close "$roottab" >/dev/null 2>&1 \
@@ -1439,6 +1464,13 @@ EOF
   sed -e 's/^turnpikes: .*/turnpikes: default/' -e "s|^dispatch: .*|dispatch: $tmp/run-2|" "$tmp/run-1/brief.md" > "$tmp/run-2/brief.md"
   cp "$tmp/run-1/manifest.json" "$tmp/run-1/run.json" "$tmp/run-2/"
   printf '{"attempt":"test"}\n' > "$tmp/run-2/logs/review-r2.json"
+  # A dispatch whose manifest records no leg, and one with no manifest at all.
+  mkdir -p "$tmp/run-3" "$tmp/run-4"
+  sed -e "s|^dispatch: .*|dispatch: $tmp/run-3|" "$tmp/run-1/brief.md" > "$tmp/run-3/brief.md"
+  cp "$tmp/run-1/run.json" "$tmp/run-3/"
+  printf '{"leg":0}\n' > "$tmp/run-3/manifest.json"
+  sed -e "s|^dispatch: .*|dispatch: $tmp/run-4|" "$tmp/run-1/brief.md" > "$tmp/run-4/brief.md"
+  cp "$tmp/run-1/run.json" "$tmp/run-4/"
   RUN_NAME=$("$SELF" name "$tmp/run-1")
   NAME=$("$SELF" name "$tmp/run-1" workhorse luna)
   COACHMAN_LABEL=$("$SELF" name "$tmp/run-1" coachman review 2)
@@ -1512,6 +1544,16 @@ self_test() {
     '! "$SELF" name "$tmp/run-1" coachman review >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" coachman review 2>/dev/null)" ]'
   check "the old coachman form is refused when the waybill's turnpikes do not resolve" \
     '! "$SELF" name "$tmp/run-2" coachman >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-2" coachman 2>/dev/null)" ]'
+  check "and when the manifest records no leg, or there is no manifest" \
+    '! "$SELF" name "$tmp/run-3" coachman >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-3" coachman 2>/dev/null)" ] && ! "$SELF" name "$tmp/run-4" coachman >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-4" coachman 2>/dev/null)" ]'
+  check "a round past the integer conversion limit is refused cleanly" \
+    'LONG=$(python3 -c '\''print("9"*5000)'\''); [ "$("$SELF" name "$tmp/run-1" review mimo bug "$LONG" 2>&1 >/dev/null)" = "host: review round must be a whole number" ] && [ -z "$("$SELF" name "$tmp/run-1" review mimo bug "$LONG" 2>/dev/null)" ]'
+  check "a leg past it is refused the same way" \
+    'LONG=$(python3 -c '\''print("9"*5000)'\''); [ "$("$SELF" name "$tmp/run-1" coachman review "$LONG" 2>&1 >/dev/null)" = "host: coachman leg number must be a whole number" ] && [ -z "$("$SELF" name "$tmp/run-1" coachman review "$LONG" 2>/dev/null)" ]'
+  check "an empty or unknown leg name is refused, never silently generic" \
+    '! "$SELF" name "$tmp/run-1" coachman "" 2 >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" coachman "" 2 2>/dev/null)" ] && ! "$SELF" name "$tmp/run-1" coachman nonsense 2 >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" coachman nonsense 2 2>/dev/null)" ]'
+  check "while a known leg without an override still takes the generic coachman model" \
+    '[ "$("$SELF" name "$tmp/run-1" coachman synthesis 1)" = "coachman · muse-spark-1.3-contributor · leg 1" ]'
   mkdir -p "$tmp/bin" "$tmp/sys" "$tmp/stub"
   local t p
   for t in bash sh python3 git env cat mkdir rmdir rm mkfifo mktemp sleep date touch wc tr sed awk \
@@ -1567,6 +1609,7 @@ elif cmd == "worktree open":
     r = space(opt("--label"), opt("--path")); st["open"][os.path.realpath(opt("--path"))] = r["workspace"]["workspace_id"]
     save(); out(r)
 elif cmd == "tab create":
+    if flag("tabcreate.empty"): out({"tab": {"tab_id": None}, "root_pane": {"pane_id": None}}); sys.exit(0)
     ws = opt("--workspace"); tab, pane = new("t"), new("p"); cwd = opt("--cwd"); label = opt("--label")
     st["spaces"][ws]["panes"].append(pane); st["spaces"][ws]["tabs"].append(tab)
     st["panes"][pane] = {"ws": ws, "tab": tab, "cwd": cwd, "tokens": {}}
@@ -1582,6 +1625,7 @@ elif cmd == "pane list":
 elif cmd == "tab list":
     ws = opt("--workspace"); out({"tabs": [{"tab_id": t, "label": st["tabs"][t]["label"], "cwd": st["tabs"][t]["cwd"]} for t in st["spaces"][ws]["tabs"]]})
 elif cmd == "tab close":
+    if flag("tabclose.fail"): sys.exit(1)
     tab = a[2]; t = st["tabs"].pop(tab, None)
     if t:
         ws, pane = t["ws"], t["pane"]
@@ -1959,6 +2003,22 @@ PY
   hs "$STUBS" -- close "$tmp/plain" >/dev/null 2>&1; rc=$?
   check "a plain clone is no scratch: it opens as a repository, and close refuses its space" \
     'calls herdr | grep -qxF "workspace${T}create${T}--cwd${T}$tmp/plain${T}--label${T}plain${T}--no-focus" && [ $rc -eq 2 ] && ! calls herdr | grep -qx "workspace${T}close${T}$space"' "$(calls herdr)"
+
+  echo "first-launch failure paths, Herdr (stub)"
+  reset
+  touch "$tmp/stub/tabclose.fail"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --out ../logs/f1.out --err ../logs/f1.err --marker ../logs/f1.done -- ./fixed.sh 2>../logs/f1.hosterr)
+  check "a root-tab close that fails still lands the launch, with a warning" \
+    'marker "$tmp/logs/f1.done" && grep -q "could not close the run space" "$tmp/logs/f1.hosterr"' "$got"
+  rm -f "$tmp/stub/tabclose.fail"
+  check "and close still finishes afterwards: the leftover tab is owned" \
+    'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  touch "$tmp/stub/tabcreate.empty"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f2.done -- ./fixed.sh)
+  rm -f "$tmp/stub/tabcreate.empty"
+  check "a tab create that returns no ids never closes the root tab" \
+    '[ "$got" = host=none ] && [ "$(calls herdr | grep -c "^tab${T}close")" -eq 0 ] && marker "$tmp/logs/f2.done"' "$got"
 
   echo "run, stop and close, tmux (stub)"
   reset
