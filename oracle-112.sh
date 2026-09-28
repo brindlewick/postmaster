@@ -102,17 +102,29 @@ probe_4_muse() {  # AC3+AC4: a muse stream shows commands and messages, not outp
     && absent "$out" OUTPUT-SECRET-112-MUSE-BASH OUTPUT-SECRET-112-MUSE-CHUNK \
     && no_ellipsis "$out"
 }
-probe_5_quiet() {  # AC4: tool output stays out of the pane
-  local out; out=$(printf '%s\n' "$CLAUDE_RES" "$CODEX_DONE" "$MUSE_CHUNK" | bash "$1")
+probe_5_quiet() {  # AC4: tool output stays out of the pane, beside a message that shows
+  local out; out=$(printf '%s\n' "$CLAUDE_RES" "$CODEX_DONE" "$MUSE_CHUNK" "$CODEX_MSG" | bash "$1")
   # shellcheck disable=SC2086
-  absent "$out" $P5_SECRETS
+  words_present "$out" ORACLE-FIRST-LINE \
+    && absent "$out" $P5_SECRETS
 }
-probe_6_selftest() {  # AC5, new script only: its self-test passes and names the three areas
+probe_6_selftest() {  # AC5: the self-test passes, names the three controls, each fails pre-change
   local log=$tmp/selftest.txt
   bash "$1" --self-test >"$log" 2>&1 || return 1
-  grep -qiE 'multi|several|every line' "$log" \
-    && grep -qiE 'long|wrapp|width|ellipsis' "$log" \
-    && grep -qi 'muse' "$log"
+  grep -qF 'every line of what the model said' "$log" \
+    && grep -qF 'longer than the display width' "$log" \
+    && grep -qF 'recorded stream shows its full command and message' "$log" \
+    || return 1
+  # each control's fixture fails on the old behaviour
+  local c1 c2 c3
+  c1=$(printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"The command printed 3 entries.\nMore detail."}]}}' | bash "$BASE_SCRIPT")
+  case $c1 in *"More detail"*) return 1;; esac   # old renderer cuts to the first line
+  c2=$(printf '{"type":"item.started","item":{"type":"command_execution","command":"%s"}}\n' "$(printf '%200s' '' | tr ' ' x)" | bash "$BASE_SCRIPT")
+  case $c2 in *"…"*) : ;; *) return 1;; esac     # old renderer cuts with an ellipsis
+  c3=$(printf '%s\n' "$MUSE_BASH" "$MUSE_DONE" | bash "$BASE_SCRIPT")
+  case $c3 in *"ORACLE-MUSE-SENTINEL"*) return 1;; *) : ;; esac  # old pane shows a bare bash
+  case $c3 in *"ORACLE-MUSE-LINE-TWO"*) return 1;; *) : ;; esac  # ... and the first line only
+  return 0
 }
 probe_7_follow() {  # the pane path: follow mode shows full text, nothing cut
   local f=$tmp/follow.jsonl; : > "$f"
@@ -150,7 +162,7 @@ for spec in "1:multiline message" "2:long line" "3:commands in full" "4:muse str
     && base_pass="passes" || { base_pass="fails"; base_fails=$((base_fails+1)); }
   printf '       (base %s on %s)\n' "$base_pass" "$label"
 done
-run_probe 6 "self-test names the three controls" "$NEW" new || new_fails=$((new_fails+1))
+run_probe 6 "self-test covers the three areas, each failing pre-change" "$NEW" new || new_fails=$((new_fails+1))
 run_probe 7 "follow mode shows full text" "$NEW" new || new_fails=$((new_fails+1))
 
 echo
