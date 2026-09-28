@@ -90,8 +90,20 @@ fi
 FORKN=2500
 if tighter "${PIDSMAX:-}" "$AMB_PIDS"; then FORKN=$(( PIDSMAX + PIDSMAX / 2 )); fi
 [ "$FORKN" -lt 100 ] && FORKN=100
-[ "$FORKN" -gt 2500 ] && FORKN=2500
+# A workload that cannot reach the trip point proves nothing: skip it openly
+# rather than running a storm that cannot trip and calling it a failure.
+if [ "$FORKN" -gt 2500 ]; then
+  report fork UNPROVEN "sized workload $FORKN children exceeds safe probe bound 2500; trip needs a small configured cap"
+  FORKN_SKIP=1
+else
+  FORKN_SKIP=0
+fi
 # Start the fork storm and a control launch together: the control must survive it.
+# (Skipped openly when the sized storm cannot reach the trip point; the
+# isolation probe then runs against a sized storm below, or not at all.)
+if [ "$FORKN_SKIP" -eq 1 ]; then
+  report isolation UNPROVEN "no storm run (see fork); isolation needs a tripping storm beside a control"
+else
 F_OUT=$TMP/fork.out; F_ERR=$TMP/fork.err; F_MARK=$TMP/fork.done; F_PROG=$TMP/fork.progress
 "$HOST" run "oracle-fork" "$ROOT" --out "$F_OUT" --err "$F_ERR" --marker "$F_MARK" \
   -- bash "$ODIR/probe_fork.sh" "$FORKN" "$F_PROG" >/dev/null 2>&1
@@ -125,6 +137,7 @@ else
   report isolation FAIL "control launch did not complete during the fork storm (marker: ${ISO_MARK:-no})"
 fi
 pkill -f oracle-116-sleeper 2>/dev/null
+fi
 
 # --- AC2 (memory cap): alloc-without-end is stopped at its cap ----------------
 # Sized from the launch's own applied cap; skipped (UNPROVEN) when uncapped so a
@@ -132,7 +145,9 @@ pkill -f oracle-116-sleeper 2>/dev/null
 if tighter "${MEMMAX:-}" "$AMB_MEM"; then
   ALLOCMB=$(( MEMMAX / 1024 / 1024 + MEMMAX / 1024 / 1024 / 2 ))
   [ "$ALLOCMB" -lt 200 ] && ALLOCMB=200
-  [ "$ALLOCMB" -gt 6144 ] && ALLOCMB=6144
+  if [ "$ALLOCMB" -gt 6144 ]; then
+    report alloc UNPROVEN "sized workload ${ALLOCMB}MB exceeds safe probe bound 6144MB; trip needs a small configured cap"
+  else
   if launch alloc 300 python3 "$ODIR/probe_alloc.py" "$ALLOCMB"; then
     HELD=$(sed -n 's/^HELD_MB=//p' "$L_OUT" | head -1)
     HELD=${HELD:-$(sed -n 's/^MB=//p' "$L_OUT" | tail -1)}  # OOM kill leaves progress only
@@ -151,6 +166,7 @@ if tighter "${MEMMAX:-}" "$AMB_MEM"; then
     fi
   else
     report alloc FAIL "alloc launch marker never landed"
+  fi
   fi
 else
   report alloc UNPROVEN "no finite memory cap to size from (see limits); refusing to probe blind"
