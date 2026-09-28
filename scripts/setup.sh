@@ -15,8 +15,9 @@
 #
 #   exit 0  config written (or printed), or keys listed
 #   exit 1  a harness was named that is not on PATH, the coachman shares a lane's model, fewer
-#           than two lanes were given, a reviewer is not a lane, an answer was missing, or an
-#           existing config was not overwritten
+#           than two lanes were given, a reviewer is not a lane, an answer was missing, a round
+#           time limit was not a whole number of seconds from 1 to 86400, or an existing config
+#           was not overwritten
 #
 # Control: the written file is parsed back as TOML where a parser is available, and its reviewer
 # lanes are resolved through scripts/reviewers.sh, so a config that would fail to load is never
@@ -65,7 +66,21 @@ postmaster.env_file=~/.postmaster/lanes/pm.env"; run roles; rc=$?
   [ "$(team plain coachman)" = '{"harness": "bash", "model": "judge"}' ] \
     && ok "a role with no env file answer gets no env_file key" || fail "a role with no env file answer gets no env_file key" "$(team plain coachman)"
 
+  limit() { python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["review"]["round_timeout_seconds"])' "$tmp/$1.toml" 2>&1; }
+  [ "$(limit plain)" = 2400 ] && ok "a review round's time limit defaults to 2400 seconds, under [review]" \
+    || fail "a review round's time limit defaults to 2400 seconds, under [review]" "$(limit plain)"
+  answers limit "round_timeout_seconds=86400"; run limit; rc=$?
+  [ $rc -eq 0 ] && [ "$(limit limit)" = 86400 ] && ok "an answer sets it, up to 86400" \
+    || fail "an answer sets it, up to 86400 (exit $rc)" "$(cat "$tmp/limit.out")"
+
   echo "negative controls"
+  n=0
+  for v in 0 -60 abc 1.5 0600 "40 minutes" 86401 9999999999999999999; do
+    n=$((n + 1)); answers "limit$n" "round_timeout_seconds=$v"; run "limit$n"; rc=$?
+    [ $rc -eq 1 ] && [ ! -e "$tmp/limit$n.toml" ] && grep -q "round_timeout_seconds must be" "$tmp/limit$n.out" \
+      && ok "a round time limit of '$v' is refused, and nothing is written" \
+      || fail "a round time limit of '$v' is refused, and nothing is written (exit $rc)" "$(cat "$tmp/limit$n.out")"
+  done
   answers ghost "reviewers.security=alpha, ghost"; run ghost; rc=$?
   [ $rc -eq 1 ] && [ ! -e "$tmp/ghost.toml" ] && grep -q "security reviewer 'ghost' is not one of the lanes" "$tmp/ghost.out" \
     && ok "a lens reviewer that is not a lane is refused, and nothing is written" \
@@ -119,6 +134,7 @@ plane.workspace                               plane only; the slug in the worksp
 plane.env_file             ~/.postmaster/plane.env   plane only; holds PLANE_API_KEY=<key>
 tracker.name                                  other only
 postmaster_may_create      no                 yes lets the postmaster create tickets unasked
+round_timeout_seconds      2400               seconds a review round may run, 1 to 86400
 merge_authority            user               user or postmaster
 checkpoint_mode            autonomous         autonomous or consult
 review_link?               (none)             template with {path}
@@ -260,6 +276,10 @@ esac
 echo
 ask PMC "May the postmaster create tickets without asking (yes/no)" "no" "postmaster_may_create"
 case $PMC in yes|no) ;; *) echo "setup: answer yes or no" >&2; exit 1 ;; esac
+ask RT "Seconds a review round may run before the reviewers still running are stopped" "2400" "round_timeout_seconds"
+case $RT in [1-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9]|[1-9][0-9][0-9][0-9][0-9]) ;; *) RT=0 ;; esac
+[ "$RT" -ge 1 ] && [ "$RT" -le 86400 ] \
+  || { echo "setup: round_timeout_seconds must be a whole number of seconds from 1 to 86400" >&2; exit 1; }
 ask MA "Who says the merge word (user, postmaster)" "user" "merge_authority"
 case $MA in user|postmaster) ;; *) echo "setup: merge authority must be user or postmaster" >&2; exit 1 ;; esac
 ask CPM "Checkpoint mode (autonomous, consult)" "autonomous" "checkpoint_mode"
@@ -295,6 +315,9 @@ poll_seconds = $PS
 kind = "$TK"
 ${TRACKER_EXTRA}
 postmaster_may_create = $( [ "$PMC" = yes ] && echo true || echo false )
+
+[review]
+round_timeout_seconds = $RT
 
 [ship]
 merge_authority = "$MA"

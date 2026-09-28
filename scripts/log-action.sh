@@ -11,7 +11,7 @@
 #   action   a verb from a fixed set, enforced, so the log is computable:
 #            dispatch resume harvest synthesize review-launch review-harvest finding apply
 #            escalate rule ticket-check ticket-create ticket-edit ticket-state ticket-comment
-#            gate merge teardown degrade handoff-accept handoff stage tool-fault note
+#            gate verify merge teardown degrade handoff-accept handoff stage tool-fault note
 #   target   what the action was done to: a lane, a ticket id, a branch, a path, a round
 #   detail   free text; everything after the target, joined by spaces. A finding's opens with its
 #            class, gating or style, so the style findings can be told apart
@@ -38,7 +38,7 @@ set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd -P)
 TOOL=$(dirname "$HERE")
 CONTROLS=$TOOL/skills/postmaster/controls.md
-VERBS=" dispatch resume harvest synthesize review-launch review-harvest finding apply escalate rule ticket-check ticket-create ticket-edit ticket-state ticket-comment gate merge teardown degrade handoff-accept handoff stage tool-fault note "
+VERBS=" dispatch resume harvest synthesize review-launch review-harvest finding apply escalate rule ticket-check ticket-create ticket-edit ticket-state ticket-comment gate verify merge teardown degrade handoff-accept handoff stage tool-fault note "
 
 json_str() {  # the inside of a JSON string, in bash alone but for tr and iconv
   local s=$1

@@ -8,7 +8,8 @@
 #   host.sh name <dispatch> [<role>]      the run's name from its waybill, then " · <role>"
 #   host.sh run <name> <cwd> [--out <file>] [--err <file>] [--append] [--marker <file>]
 #               [--pidfile <file>] -- <command...>
-#   host.sh stop <worktree>               stop every launch still running in a worktree
+#   host.sh stop <worktree>               stop every launch still running in a worktree, and
+#                                         everything each one started
 #   host.sh close <worktree>              close its space (Herdr) and its windows (tmux)
 #   host.sh spawn <handle> <cwd> [--label <text>] -- <command...>   an interactive session;
 #                                         the handle becomes a Herdr agent name
@@ -38,14 +39,21 @@
 # place it, it runs in the background. While it runs it is registered under
 # POSTMASTER_HOST_STATE (default ~/.postmaster/host), whatever its host, so stop and close see it.
 #
+# stop: a launch's processes are its process group and everything they started, whatever session
+# that moved to, as a harness that runs each tool command in a session of its own does. They are
+# found by process id and parent, never by a command line; frozen first, so nothing forks
+# between the listing and the signal; sent TERM; and sent KILL if still there after
+# POSTMASTER_HOST_STOP_WAIT seconds. The process that ran stop, and those above it, never are.
+#
 # POSTMASTER_HOST=herdr|tmux|none overrides detection; nothing needs setting to get the default.
-# POSTMASTER_HOST_CLAIM_WAIT (20) is how long a new pane has to start its launch, and
-# POSTMASTER_HOST_CLOSE_WAIT (15) how long close waits for a launch that is just ending.
+# POSTMASTER_HOST_CLAIM_WAIT (20) is how long a new pane has to start its launch,
+# POSTMASTER_HOST_CLOSE_WAIT (15) how long close waits for a launch that is just ending, and
+# POSTMASTER_HOST_STOP_WAIT (20) how long stop waits after TERM before it sends KILL.
 #
 #   exit 0  detected, named, started, stopped, closed, sent, settled or read
 #   exit 1  usage, or nothing could be started
 #   exit 2  close refused: a launch still runs in the worktree, or its space holds something
-#           host.sh did not open
+#           host.sh did not open; or stop left something of a launch running, named
 #   exit 3  spawn, send, wait or read with no host that keeps an interactive session; or a send
 #           or wait that did not settle, stopped at an approval or a question, or showed no turn
 set -uo pipefail
@@ -516,20 +524,109 @@ worktree_arg() {  # worktree_arg <dir> <what>: its real path, or die
   (CDPATH= cd -P -- "$1" && pwd -P)
 }
 
-stop_cmd() {  # stop <worktree>: every launch still running in it, whatever its host
-  local path pg name n=0 live i=0
+stop_cmd() {  # stop <worktree>: every launch still running in it, and all it started, whatever its host
+  local path pg name n=0 live groups="" patience out rc
   path=$(worktree_arg "${1:-}" stop) || exit 1
   case $(pwd -P)/ in "$path"/*) die "not stopping the launches in $path from inside it: that stops this session too" ;; esac
+  patience=$(count "${POSTMASTER_HOST_STOP_WAIT:-20}" POSTMASTER_HOST_STOP_WAIT) || exit 1
   live=$(reg_live "$path")
   [ -n "$live" ] || { echo "no launch is running in $path"; return 0; }
-  while IFS=$'\t' read -r pg name; do
-    kill -TERM -- "-$pg" 2>/dev/null || kill -TERM "$pg" 2>/dev/null
-    n=$((n + 1))
-  done <<< "$live"
-  while [ -n "$(reg_live "$path")" ] && [ $i -lt 80 ]; do sleep 0.25; i=$((i + 1)); done
-  live=$(reg_live "$path")
-  [ -z "$live" ] || while IFS=$'\t' read -r pg name; do kill -KILL -- "-$pg" 2>/dev/null; done <<< "$live"
-  echo "stopped $n launch(es) in $path"
+  while IFS=$'\t' read -r pg name; do groups="$groups $pg"; n=$((n + 1)); done <<< "$live"
+  out=$(stop_tree "$patience" $groups); rc=$?
+  case $rc in
+    0) echo "stopped $n launch(es) in $path: ${out%%$'\t'*} process(es)" ;;
+    2) warn "stopped $n launch(es) in $path, but these still run: ${out#*$'\t'}"; return 2 ;;
+    *) warn "could not stop the launches in $path: $out"; return 1 ;;
+  esac
+}
+stop_tree() {  # stop_tree <seconds> <group>...: prints "<processes>\t<survivors>"; exits 2 if any survive
+  python3 - "$@" <<'PY'
+import os, signal, subprocess, sys, time
+
+grace, groups = float(sys.argv[1]), {int(g) for g in sys.argv[2:]}
+
+def table():
+    """pid -> (ppid, group, start, zombie, name), from /proc where there is one, else from ps."""
+    t = {}
+    if os.path.isdir("/proc/self"):
+        for pid in os.listdir("/proc"):
+            if pid.isdigit():
+                try:
+                    with open("/proc/%s/stat" % pid) as f:
+                        raw = f.read()
+                except OSError:
+                    continue
+                head, _, rest = raw.rpartition(")")
+                f = rest.split()   # state ppid pgrp session ... starttime is the 20th after the name
+                t[int(pid)] = (int(f[1]), int(f[2]), f[19], f[0] == "Z", head.partition("(")[2])
+    else:
+        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,pgid=,stat=,lstart=,comm="],
+                             capture_output=True, text=True, env=dict(os.environ, LC_ALL="C")).stdout
+        for line in out.splitlines():
+            f = line.split(None, 9)
+            if len(f) == 10 and f[0].isdigit() and f[1].isdigit() and f[2].isdigit():
+                t[int(f[0])] = (int(f[1]), int(f[2]), " ".join(f[4:9]), f[3].startswith("Z"), f[9])
+    if os.getpid() not in t:
+        print("cannot list processes"); sys.exit(1)
+    return t
+
+def tree(t, spare):
+    """Every live member of the launches' groups, and every live process descended from one."""
+    live = {p for p, v in t.items() if not v[3]} - spare
+    hit = {p for p in live if t[p][1] in groups}
+    kids = {}
+    for p, v in t.items():
+        kids.setdefault(v[0], []).append(p)
+    todo = list(hit)
+    while todo:
+        for k in kids.get(todo.pop(), ()):
+            if k in live and k not in hit:
+                hit.add(k)
+                todo.append(k)
+    return hit
+
+def sig(pids, s):
+    for p in pids:
+        try:
+            os.kill(p, s)
+        except OSError:
+            pass
+
+def left(t, spare, known):
+    """What is still there: a process signalled before, same pid and start, or one of the tree."""
+    return {p for p, st in known.items() if p in t and t[p][2] == st and not t[p][3]} | tree(t, spare)
+
+t = table()
+spare, p = {0, 1}, os.getpid()
+while p in t and p not in spare:            # this process and every process above it
+    spare.add(p)
+    p = t[p][0]
+frozen = set()
+for _ in range(20):
+    new = tree(t, spare) - frozen
+    if not new:
+        break
+    sig(new, signal.SIGSTOP)
+    frozen |= new
+    t = table()
+known = {p: t[p][2] for p in frozen if p in t}
+sig(known, signal.SIGTERM)
+sig(known, signal.SIGCONT)
+end = time.time() + grace
+while time.time() < end and left(table(), spare, known):
+    time.sleep(0.25)
+end = time.time() + 5
+while True:
+    t = table()
+    rest = left(t, spare, known)
+    if not rest or time.time() >= end:
+        break
+    sig(rest, signal.SIGKILL)               # KILL ends a stopped process too
+    known.update({p: t[p][2] for p in rest})
+    time.sleep(0.25)
+print("%d\t%s" % (len(known), " ".join("%d/%s" % (p, t[p][4]) for p in sorted(rest))))
+sys.exit(2 if rest else 0)
+PY
 }
 
 close_cmd() {  # close <worktree>: refuse while a launch runs there; then its windows and its space
@@ -794,7 +891,7 @@ self_test() {
   mkdir -p "$tmp/bin" "$tmp/sys" "$tmp/stub"
   local t p
   for t in bash sh python3 git env cat mkdir rmdir rm mkfifo mktemp sleep date touch wc tr sed awk \
-           dirname basename grep head tail cut sort cmp ls seq timeout find cksum; do
+           dirname basename grep head tail cut sort cmp ls seq timeout find cksum ps; do
     p=$(command -v "$t" 2>/dev/null) && [ ! -e "$tmp/sys/$t" ] && ln -s "$p" "$tmp/sys/$t"
   done
   cat > "$tmp/bin/herdr" <<'EOF'
@@ -979,6 +1076,32 @@ EOF
     '[ $rc -eq 1 ] && [ -e "$tmp/logs/n8.done" ] && ! printf "%s" "$got" | grep -q "controls"' "$got"
   got=$(hs "$STUBS" -- wait postmaster-x 10m 2>&1); rc=$?
   check "the same for wait" '[ $rc -eq 1 ] && ! printf "%s" "$got" | grep -q "controls"' "$got"
+
+  echo "stop: everything a launch started, and nothing else"
+  mkdir -p "$tmp/tree"
+  cat > "$tmp/caller/tree.sh" <<'EOF'
+#!/usr/bin/env bash
+# A launch with a child in a session of its own, as a harness runs a tool command, and a child
+# deaf to TERM. It notes the TERM it gets.
+trap 'echo term >> "$TREE/term"; exit 0' TERM
+python3 -c 'import os; os.setsid(); os.execvp("sleep", ["sleep", "120"])' & echo $! > "$TREE/escapee.pid"
+sh -c 'trap "" TERM; while :; do sleep 1; done' & echo $! > "$TREE/deaf.pid"
+sleep 120 & wait
+EOF
+  chmod +x "$tmp/caller/tree.sh"
+  alive() { local st; st=$(ps -o stat= -p "$1" 2>/dev/null) && [ -n "$st" ] && [ "${st#Z}" = "$st" ]; }
+  (cd "$tmp/caller" && hs "$SYS" TREE="$tmp/tree" -- run "$NAME" "$repo/.worktrees/T-1-luna" --marker ../logs/k1.done -- ./tree.sh >/dev/null)
+  a=0; while { [ ! -s "$tmp/tree/escapee.pid" ] || [ ! -s "$tmp/tree/deaf.pid" ]; } && [ $a -lt 50 ]; do sleep 0.1; a=$((a + 1)); done
+  sleep 0.5
+  (cd "$repo/.worktrees/T-1-luna" && exec sleep 60) & b=$!    # works in the worktree, but no launch started it
+  got=$(hs "$SYS" POSTMASTER_HOST_STOP_WAIT=2 -- stop "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
+  check "stop reaches a child the launch runs in a session of its own" \
+    '[ $rc -eq 0 ] && [ -s "$tmp/tree/escapee.pid" ] && ! alive "$(cat "$tmp/tree/escapee.pid")"' "$got"
+  check "the launch got TERM first, and a child deaf to it is killed after the wait" \
+    '[ -s "$tmp/tree/term" ] && [ -s "$tmp/tree/deaf.pid" ] && ! alive "$(cat "$tmp/tree/deaf.pid")"' "$got"
+  check "its marker lands" 'marker "$tmp/logs/k1.done" 10'
+  check "a process that works in the worktree but that no launch started is left alone" 'alive "$b"'
+  kill "$b" 2>/dev/null; wait "$b" 2>/dev/null
 
   echo "run, Herdr (stub): a pane in the worktree's space, nested under the repository's"
   reset
