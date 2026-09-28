@@ -35,6 +35,22 @@ In a directory whose list has three tasks, the user types `todo list` and sees i
 They type `todo remove 2` and see `removed 2`. `todo list` shows tasks 1 and 3 as they were.
 `todo add call the bank` prints `added 4`.
 
+```
+$ todo add buy milk
+added 1
+$ todo add walk the dog
+added 2
+$ todo add water the plants
+added 3
+$ todo remove 2
+removed 2
+$ todo list
+1 [ ] buy milk
+3 [ ] water the plants
+$ todo add call the bank
+added 4
+```
+
 ## Notes
 Users refer to tasks by id, so a new task that took a removed task's id would make an old note
 or a line in their shell history point at the wrong task. Out of scope: removing every done

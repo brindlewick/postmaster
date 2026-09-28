@@ -16,6 +16,15 @@ from the runbook into the config as `review.round_timeout_seconds`, and keeps it
 2400 seconds, the limit a round had when it ran one lens. The `degrade` lines will show whether
 round 1, which runs every lens at once, needs more. The standing stays `claimed`.
 
+## [2026-09-27] ingest | each project defines how a change to it is verified
+
+A page in the Decisions area. A project declares its checks in `.postmaster/project.toml`, or
+gets defaults found by discovery: the gate always, then a command-line app's ticket examples, a
+web app's browser suite and User journey, or a library's tests through its package name. A run
+records its checks at dispatch; workhorses run them before they report, and the coachman runs
+them on each branch and on the synthesis. The page says what the defaults cover and what they do
+not. Standing `claimed`, since no run bears on it yet.
+
 ## [2026-09-27] lint | fixture copies go under ~/Code/fixtures
 
 The fixture-runs page now records where `fixture.sh new` puts a copy when given only a name, and

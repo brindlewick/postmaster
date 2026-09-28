@@ -103,7 +103,9 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    each lane in `team.workhorses`, and, when the legs include `review`,
    `<tool>/scripts/reviewers.sh lines` and `<tool>/scripts/launch.sh form <lane>` for each lane in
    `team.reviewers` and `team.lens_reviewers`, each exit 0. A refusal names what the config must
-   change: it goes to the user, and nothing is dispatched.
+   change: it goes to the user, and nothing is dispatched. The project's declared checks are
+   checked too: `<tool>/scripts/verify.sh checks <repo>` exits 0, and a refusal, naming what
+   `.postmaster/project.toml` must change, goes to the user the same way.
 3. **Exclude worktrees without a commit,** before any is cut, or the next pre-flight reads
    them as dirt: `grep -qxF '.worktrees/' <repo>/.git/info/exclude || echo '.worktrees/' >>
    <repo>/.git/info/exclude`.
@@ -113,14 +115,18 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    `abandoned`; the coachman owns `lanes` and every stage before those; both update fields in
    place and neither rewrites the file. Then record what the run starts from, once:
    `<tool>/scripts/run-meta.sh <dispatch> <repo>` writes `run.json` with the postmaster commit, the
-   config and the harness versions, and nothing edits it afterwards.
+   config and the harness versions, and nothing edits it afterwards. `<tool>/scripts/verify.sh record
+   <repo> <dispatch> --gate '<gate>'` writes `checks.json`, the checks the run is held to, and
+   prints them for the waybill; a gate the project declares wins over the launch card's, and
+   `record` says so.
 5. **Cut the synthesis worktree** at BASE, the sha you recorded from `git -C <repo> rev-parse
    HEAD` on the default branch: `git -C <repo> worktree add .worktrees/<TICKET> -b <TICKET>
    <sha>`. The coachman's cwd is that worktree from its first leg, so the project's ambient
    context loads for it.
 6. **Write `brief.md`** from the template in `SKILL.md`: the `turnpikes:` line step 1's check
    printed, whole, under the waybill's title, then the ticket verbatim, the project profile (gate,
-   build, browser suite, docs to read first, tracker, risk surfaces), the team from the config
+   build, browser suite, the checks as `verify.sh record` printed them, docs to read first,
+   tracker, risk surfaces), the team from the config
    with its reviewer lines as `<tool>/scripts/reviewers.sh lines` prints them, `CHECKPOINT_MODE`
    from `ship.checkpoint_mode` and `MERGE_AUTHORITY` from `ship.merge_authority`, either
    overridden only where the user said so for this run, the dispatch path and `<tool>`. The
@@ -270,7 +276,9 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    other lens, and each other turnpike's result on the card is in the record its step writes;
    when `<tool>/scripts/turnpikes.sh short '<the waybill's turnpikes: line>'` names any default
    turnpike, the ledger holds the user's word on this ticket's turnpikes; the blind acceptance tests are the first commit on the branch, or the Decisions
-   section of `handoff-3.md` carries leg 1's reason for not writing them.
+   section of `handoff-3.md` carries leg 1's reason for not writing them;
+   `<tool>/scripts/verify.sh results <dispatch> <synthesis-wt>` gives a result for every check at
+   the synthesis HEAD, and the card gives each one that did not pass as it is.
 2. **Grant or withhold.** Every word is delivered by resuming leg 3 (Stage C, step 5), and
    `.card-ready` is removed before it is; the coachman touches it afresh when the card changes.
    `MERGE_AUTHORITY: postmaster` and every check above holds: deliver "MERGE GRANTED" and log
