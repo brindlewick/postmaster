@@ -363,7 +363,7 @@ silent() {  # silent <label> <event>
   [ -z "$got" ] && ok "$1" || fail "$1" "got: $got"
 }
 
-echo "positive controls: each event of interest is one readable line"
+echo "positive controls: event text is readable and complete"
 # claude events, trimmed from a recorded claude -p --output-format stream-json run
 shows "claude: a session starts, with its thread id and model" \
   '{"type":"system","subtype":"init","session_id":"a99db1c7-9178","model":"claude-haiku-4-5","tools":["Bash"]}' \
@@ -371,9 +371,9 @@ shows "claude: a session starts, with its thread id and model" \
 shows "claude: a tool call, with what it ran" \
   '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"ls -a","description":"List files"}}]}}' \
   'Bash: ls -a'
-shows "claude: what the model said, first line only" \
+shows "claude: every line of what the model said" \
   '{"type":"assistant","message":{"content":[{"type":"text","text":"The command printed 3 entries.\nMore detail."}]}}' \
-  'says: The command printed 3 entries.'
+  "$(printf 'says: The command printed 3 entries.\nMore detail.')"
 shows "claude: a failed tool call" \
   '{"type":"user","message":{"content":[{"type":"tool_result","is_error":true,"content":"No such file"}]}}' \
   'tool error: No such file'
@@ -384,6 +384,10 @@ shows "codex: a session starts" '{"type":"thread.started","thread_id":"0199a213-
 shows "codex: a shell command" \
   '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","status":"in_progress"}}' \
   'shell: bash -lc ls'
+long=$(printf '%200s' '' | tr ' ' x)
+long_command=$(printf '{"type":"item.started","item":{"type":"command_execution","command":"%s"}}' "$long")
+long_expected=$(printf 'shell: %s\n  %s' "${long:0:153}" "${long:153}")
+shows "codex: a command longer than the display width wraps without losing text" "$long_command" "$long_expected"
 shows "codex: what the model said" '{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"Done."}}' 'says: Done.'
 shows "pi: a session starts" '{"type":"session","version":3,"id":"01a0c7e8-5863","cwd":"/w"}' 'session 01a0c7e8-5863'
 shows "pi: a tool call" '{"type":"tool_execution_start","toolCallId":"t1","toolName":"bash","args":{"command":"ls"}}' 'bash: ls'
@@ -402,6 +406,24 @@ shows "muse: the result, with what the model said" \
   '{"stream":{"kind":"session","id":"s1"},"payload_type":"run.terminal.completed","payload":{"terminal":"completed","text":"DONE"}}' \
   'result: completed · DONE'
 shows "muse: a failed run" '{"stream":{"kind":"session","id":"s1"},"payload_type":"run.terminal.failed","payload":{"terminal":"failed","text":""}}' 'result: failed'
+recorded_muse=$(cat "$HERE/fixtures/view-stream/muse.jsonl")
+got=$(printf '%s\n' "$recorded_muse" | view)
+wanted=$(printf "bash: printf 'MUSE_COMMAND_SAMPLE'\nresult: completed · MUSE_MESSAGE_FIRST_LINE\nMUSE_MESSAGE_SECOND_LINE")
+[ "$got" = "$wanted" ] && ok "muse: a recorded stream shows its full command and message, not tool output" \
+  || fail "muse: a recorded stream shows its full command and message, not tool output" "wanted: $wanted"$'\n'"got:    $got"
+# Deltas buffer until a tool call ends the message; reads and edits name their path.
+got=$(printf '%s\n' \
+  '{"stream":{"kind":"session","id":"s2"},"payload_type":"run.output.delta","payload":{"text":"First half. "}}' \
+  '{"stream":{"kind":"session","id":"s2"},"payload_type":"task.lifecycle.status","payload":{"event":{"kind":"status"}}}' \
+  '{"stream":{"kind":"session","id":"s2"},"payload_type":"run.output.delta","payload":{"text":"second half."}}' \
+  '{"stream":{"kind":"session","id":"s2"},"payload_type":"tool.result","payload":{"correlation_facts":{"tool_name":"read_file","outcome":"success"},"text":"Read text file `proof.txt`.\n1|PELICAN\n"}}' \
+  '{"stream":{"kind":"session","id":"s2"},"payload_type":"tool.result","payload":{"correlation_facts":{"tool_name":"edit_file","outcome":"success"},"edit_facts":{"path":"notes.md"},"text":"edited\n"}}' \
+  | view)
+wanted=$(printf 'says: First half. second half.\nread_file: proof.txt\nedit_file: notes.md')
+[ "$got" = "$wanted" ] && ok "muse: buffered deltas flush as one message at the tool call, with read and edit paths" \
+  || fail "muse: buffered deltas flush as one message at the tool call, with read and edit paths" "wanted: $wanted"$'\n'"got:    $got"
+case $got in *'PELICAN'*) fail "muse: tool output stays out of the pane" "$got" ;;
+  *) ok "muse: tool output stays out of the pane" ;; esac
 shows "mimo: a session starts, with its thread id, and a first step says nothing more" \
   '{"type":"step_start","sessionID":"ses_ffe5f1e2","part":{"type":"step-start"}}' 'session ses_ffe5f1e2'
 shows "mimo: a tool call, with what it touched" \
@@ -456,6 +478,16 @@ printf 'old line\n' > "$tmp/append.jsonl"; from=$(wc -c < "$tmp/append.jsonl" | 
 out=$(view --follow "$tmp/append.jsonl" --pid "$w" --from "$from")
 case $out in *"old line"*) fail "--from skips what was there before" "$out" ;;
   *"new line"*) ok "--from skips what was there before" ;; *) fail "--from skips what was there before" "$out" ;; esac
+long=$(printf '%200s' '' | tr ' ' x)
+printf '{"type":"item.started","item":{"type":"command_execution","command":"%s"}}\n' "$long" > "$tmp/long.jsonl"
+( : ) & w=$!
+out=$(COLUMNS=60 view --follow "$tmp/long.jsonl" --pid "$w")
+wait "$w"
+plain=$(printf '%s\n' "$out" | sed -E 's/^[0-9]{2}:[0-9]{2}:[0-9]{2} //; s/^  //')
+actual=$(printf '%s' "$plain" | tr -d '\n')
+too_wide=$(printf '%s\n' "$out" | awk 'length($0) > 60 { print; exit }')
+[ "$actual" = "shell: $long" ] && [ -z "$too_wide" ] && ok "a command longer than a live pane wraps fully to its width" \
+  || fail "a command longer than a live pane wraps fully to its width" "$out"
 
 echo
 [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }
