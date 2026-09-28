@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Show a harness's event stream readably: one line per event of interest, never raw JSON. This is
-# what a session host's pane shows while a launch runs (scripts/host.sh). Event formats are
-# harness-specific, so this script belongs to the harness adapter beside launch.sh, and
-# harnesses.md says which harness's events it knows.
+# Show a harness's event stream readably: what an agent says and runs, in full and wrapped to the
+# pane, never raw JSON. This is what a session host's pane shows while a launch runs
+# (scripts/host.sh). Event formats are harness-specific, so this script belongs to the harness
+# adapter beside launch.sh, and harnesses.md says which harness's events it knows.
 #
 #   view-stream.sh < <events-file>                           render a stream, then stop
 #   view-stream.sh --follow <file> --pid <pid> [--from <byte>] render the file as it grows,
@@ -10,12 +10,13 @@
 #                                                           and everything it wrote is shown
 #   view-stream.sh --self-test
 #
-# Each event of interest is one line: a session starting, with its thread id; a tool call, with
-# what it was called on; what the model said; an error; the result. Tool output, thinking,
-# hooks and streaming deltas are left out. A JSON event it does not know is shown by its type,
-# once per run of the same type, so an unknown harness still reads as a sequence of steps. A
-# line that is not JSON is shown as it is, less any control characters, which never reach the
-# terminal from a stream. Following, each line carries the local time.
+# Each event of interest is a block of lines: a session starting, with its thread id; a tool
+# call, with what it was called on; what the model said; an error; the result. Messages and
+# commands show in full, every line, wrapped to the pane and never cut short with an ellipsis.
+# Tool output, thinking, hooks and raw streaming deltas are left out. A JSON event it does not
+# know is shown by its type, once per run of the same type, so an unknown harness still reads as
+# a sequence of steps. A line that is not JSON is shown as it is, less any control characters,
+# which never reach the terminal from a stream. Following, each line carries the local time.
 #
 #   exit 0  rendered
 #   exit 1  usage, or the self-test failed
@@ -24,7 +25,7 @@ HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 
 # The program is passed with -c, not on stdin: stdin is the stream it renders.
 read -r -d '' PROG <<'PY'
-import json, os, re, shutil, sys, time
+import json, os, re, shutil, sys, textwrap, time
 
 args = sys.argv[1:]
 follow = pid = None
@@ -51,14 +52,14 @@ def tool_line(name, inp):
     for key in ("command", "cmd", "file_path", "path", "pattern", "url", "query", "description", "prompt"):
         v = inp.get(key)
         if isinstance(v, str) and v.strip():
-            return "%s: %s" % (name, short(v))
+            return "%s: %s" % (name, v)
     return str(name)
 
 def text_of(content):
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        return " ".join(b.get("text", "") for b in content if isinstance(b, dict))
+        return "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
     return ""
 
 QUIET = {
@@ -71,21 +72,67 @@ QUIET = {
     "tool_execution_update", "auto_compaction_end", "auto_retry_end",
 }
 
+def muse_facts(p):
+    # What a Muse tool.result names as its input. edit_facts carries the path of a write or
+    # edit. A bash result's text is a JSON object whose "command" is what ran; a read_file
+    # result's text opens with "Read text file `path`". The rest of that text is tool output
+    # and never reaches the pane.
+    inp = {}
+    ef = p.get("edit_facts")
+    if isinstance(ef, dict):
+        for key in ("command", "cmd", "file_path", "path", "pattern", "url", "query", "description", "prompt"):
+            v = ef.get(key)
+            if isinstance(v, str) and v.strip():
+                inp[key] = v
+    text = p.get("text")
+    if isinstance(text, str):
+        t = text.lstrip()
+        if t.startswith("{"):
+            try:
+                blob = json.loads(t)
+            except ValueError:
+                blob = None
+            if isinstance(blob, dict):
+                for key in ("command", "cmd", "file_path", "path"):
+                    v = blob.get(key)
+                    if isinstance(v, str) and v.strip():
+                        inp.setdefault("command" if key in ("command", "cmd") else "path", v)
+                        break
+        else:
+            m = re.match(r"Read text file `([^`]+)`", t)
+            if m:
+                inp.setdefault("path", m.group(1))
+    return inp
+
+muse_said = [""]
+
 def muse(e):
     # muse (muse exec --json): each record names its payload_type, and its stream is the session
     pt, p = str(e.get("payload_type")), e.get("payload") or {}
+    if pt == "run.output.delta":
+        muse_said[0] += str(p.get("text") or "")
+        return None
+    if pt.startswith("run.terminal."):
+        muse_said[0] = ""   # the result line carries this text
+        said = str(p.get("text") or "").strip()
+        return ["result: %s%s" % (p.get("terminal") or pt.split(".")[-1], " · " + said if said else "")]
+    out = []
+    if pt in ("run.model.configured", "tool.result") and muse_said[0].strip():
+        # A tool call ends the message: flush what the model said since the last one. Task
+        # lifecycle and bookkeeping never flush, so noise between deltas cannot split a message.
+        out.append("says: " + muse_said[0].strip())
+        muse_said[0] = ""
     if pt == "run.model.configured":
-        return "session %s · %s" % ((e.get("stream") or {}).get("id"), p.get("model_id"))
-    if pt == "tool.result":
+        out.append("session %s · %s" % ((e.get("stream") or {}).get("id"), p.get("model_id")))
+    elif pt == "tool.result":
         facts = p.get("correlation_facts") or {}
         name = facts.get("tool_name") or "tool"
         if facts.get("outcome") not in (None, "success"):
-            return "tool error: %s" % name
-        return tool_line(name, p.get("edit_facts") or {})
-    if pt.startswith("run.terminal."):
-        said = str(p.get("text") or "").strip()
-        return "result: %s%s" % (p.get("terminal") or pt.split(".")[-1], " · " + short(said) if said else "")
-    return None      # streaming deltas, task lifecycle and bookkeeping: the result carries the text
+            out.append("tool error: %s" % tool_line(name, muse_facts(p)))
+        else:
+            out.append(tool_line(name, muse_facts(p)))
+    # else: task lifecycle and bookkeeping are not pane output
+    return out or None
 
 mimo_sessions = set()
 
@@ -98,7 +145,7 @@ def mimo(e):
         mimo_sessions.add(sid)
         out.append("session %s" % sid)
     if t == "text" and str(part.get("text", "")).strip():
-        out.append("says: " + short(part.get("text")))
+        out.append("says: " + str(part.get("text")))
     elif t == "tool_use":
         state = part.get("state") or {}
         out.append("tool error: %s" % part.get("tool") if state.get("status") == "error"
@@ -133,7 +180,7 @@ def render(e):
                 continue
             k = b.get("type")
             if t == "assistant" and k == "text" and str(b.get("text", "")).strip():
-                lines.append("says: " + short(b["text"]))
+                lines.append("says: " + str(b["text"]))
             elif t == "assistant" and k == "tool_use":
                 lines.append(tool_line(b.get("name"), b.get("input")))
             elif t == "user" and k == "tool_result" and b.get("is_error"):
@@ -146,7 +193,7 @@ def render(e):
         if isinstance(e.get("total_cost_usd"), (int, float)):
             parts.append("$%.2f" % e["total_cost_usd"])
         if e.get("result"):
-            parts.append(short(e["result"], 100))
+            parts.append(str(e["result"]))
         return "result: " + " · ".join(parts)
     if t == "rate_limit_event":
         status = (e.get("rate_limit_info") or {}).get("status")
@@ -158,12 +205,12 @@ def render(e):
         it = e.get("item") or {}
         k = it.get("type")
         if t == "item.started":
-            return "shell: " + short(it.get("command")) if k == "command_execution" else None
+            return "shell: " + str(it.get("command") or "") if k == "command_execution" else None
         if k == "agent_message":
-            return "says: " + short(it.get("text"))
+            return "says: " + str(it.get("text") or "")
         if k == "command_execution":
             code = it.get("exit_code")
-            return None if code in (0, None) else "shell exit %s: %s" % (code, short(it.get("command")))
+            return None if code in (0, None) else "shell exit %s: %s" % (code, it.get("command") or "")
         if k == "file_change":
             return "edit: " + ", ".join(str(c.get("path")) for c in it.get("changes") or [] if isinstance(c, dict))
         if k == "mcp_tool_call":
@@ -192,7 +239,7 @@ def render(e):
         if m.get("role") != "assistant":
             return None
         said = text_of([b for b in m.get("content") or [] if isinstance(b, dict) and b.get("type") == "text"])
-        return "says: " + short(said) if said.strip() else None
+        return "says: " + said if said.strip() else None
     if t == "agent_end":
         return "done"
     if t == "auto_retry_start":
@@ -215,7 +262,26 @@ def generic(e):
             return "%s: %s" % (t, short(v))
     return t
 
-CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")    # nothing a stream says reaches the terminal as a control
+CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")  # preserve line breaks, strip terminal controls
+
+def visible_text(s):
+    s = str(s).replace("\r\n", "\n").replace("\r", "").replace("\t", "    ")
+    return CONTROL.sub("", s)
+
+def wrapped(s, stamp):
+    # Content wraps to width; the timestamp rides outside it, so a followed line is at most
+    # width + 9, inside the pane. Continuation lines indent two spaces.
+    prefix = time.strftime("%H:%M:%S ") if stamp else ""
+    wrapper = textwrap.TextWrapper(
+        width=width, subsequent_indent="  ",
+        replace_whitespace=False, drop_whitespace=False,
+        break_long_words=True, break_on_hyphens=False,
+    )
+    lines = []
+    for source_line in visible_text(s).split("\n"):
+        parts = wrapper.wrap(source_line)
+        lines.extend(parts if parts else [""])
+    return [prefix + ln if ln else prefix.rstrip() for ln in lines]
 
 def show(line, stamp):
     line = line.rstrip("\r\n")
@@ -234,7 +300,8 @@ def show(line, stamp):
     else:
         out = short(line)
     for one in (out if isinstance(out, list) else [out] if out else []):
-        print((time.strftime("%H:%M:%S ") if stamp else "") + CONTROL.sub("", one), flush=True)
+        for line in wrapped(one, stamp):
+            print(line, flush=True)
 
 if not follow:
     for line in sys.stdin:
