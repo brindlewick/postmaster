@@ -4,9 +4,11 @@
 # carries on as the postmaster when it can; a separate postmaster is spawned only when
 # the harness or model differs, the target is another repo, or nobody is at the terminal.
 # Seven checks name one stale sentence each from before that change, matched verbatim after
-# newlines are folded, so a reflow alone does not pass; four more match the claim itself,
-# `never runs the stream`, in every file, so a new sentence saying it trips the same guard.
-# Any conditional rewrite breaks every match.
+# newlines are folded (carriage returns stripped first, so CRLF never hides one), and
+# twelve match the claim itself in every file in its plain verb forms (`never runs`,
+# `does not run`, `do not run`): a new sentence in one of these phrasings trips the same
+# guard. Further paraphrases are beyond a grep oracle. Any conditional rewrite breaks
+# every match.
 #
 #   front-door-acceptance.sh [repo-root]   default: the repo this script lives in
 #   front-door-acceptance.sh --self-test   prove each check fails on its own fault alone,
@@ -21,8 +23,9 @@
 set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 ROOT=$(dirname "$HERE")
+usage() { echo "usage: front-door-acceptance.sh [repo-root] | --self-test" >&2; exit 2; }
 
-flat() { tr '\n\t' '  ' < "$1" | sed 's/  */ /g'; }   # fold newlines so a reflow alone never passes
+flat() { tr -d '\r' < "$1" | tr '\n\t' '  ' | sed 's/  */ /g'; }   # fold newlines so a reflow alone never passes
 
 # stale <flat-text> <file> <label> <sentence...>: fault when the sentence is still claimed
 fails=0
@@ -59,23 +62,22 @@ accept() {  # accept <root>: the checks; stdout the faults, exit 0/1/2
     '(spawned by `SKILL.md`)'
   stale "$agents" AGENTS.md 'the front door only spawns a postmaster' \
     'spawns a postmaster; `postmaster.md` is what that postmaster then does'
-  # The claim itself, in every file: a new sentence saying it trips the same guard.
-  stale "$skill" skills/postmaster/SKILL.md 'the front door never runs the stream' \
-    'never runs the stream'
-  stale "$post" skills/postmaster/postmaster.md 'the front door never runs the stream' \
-    'never runs the stream'
-  stale "$agents" AGENTS.md 'the front door never runs the stream' \
-    'never runs the stream'
-  stale "$readme" README.md 'the front door never runs the stream' \
-    'never runs the stream'
+  # The claim itself, in every file, in its plain verb forms: a new sentence in one of
+  # these phrasings trips the same guard. Further paraphrases are beyond a grep oracle.
+  for claim in 'never runs the stream' 'does not run the stream' 'do not run the stream'; do
+    stale "$skill" skills/postmaster/SKILL.md 'the front door never runs the stream' "$claim"
+    stale "$post" skills/postmaster/postmaster.md 'the front door never runs the stream' "$claim"
+    stale "$agents" AGENTS.md 'the front door never runs the stream' "$claim"
+    stale "$readme" README.md 'the front door never runs the stream' "$claim"
+  done
   [ "$fails" -eq 0 ]
 }
 
 case ${1:-} in
-  --self-test) ;;
-  -*) echo "usage: front-door-acceptance.sh [repo-root] | --self-test" >&2; exit 2 ;;
-  "") accept "$ROOT"; exit $? ;;
-  *) accept "$1"; exit $? ;;
+  --self-test) [ $# -eq 1 ] || usage ;;
+  -*) usage ;;
+  "") [ $# -eq 0 ] || usage; accept "$ROOT"; exit $? ;;
+  *) [ $# -eq 1 ] || usage; accept "$1"; exit $? ;;
 esac
 
 # --- self-test ----------------------------------------------------------------------------
@@ -108,6 +110,10 @@ EOF
 printf '%s\n' 'The front door never runs the stream; it spawns.' > "$tmp/stale/README.md"
 printf '%s\n' 'The front door never runs the stream.' >> "$tmp/stale/skills/postmaster/postmaster.md"
 printf '%s\n' 'The front door never runs the stream.' >> "$tmp/stale/AGENTS.md"
+for f in skills/postmaster/SKILL.md skills/postmaster/postmaster.md AGENTS.md README.md; do
+  printf '%s\n' 'The front door does not run the stream.' >> "$tmp/stale/$f"
+  printf '%s\n' 'Front doors do not run the stream.' >> "$tmp/stale/$f"
+done
 
 cat > "$tmp/clean/skills/postmaster/SKILL.md" <<'EOF'
 You get the machine ready if it is not, choose a target, and confirm a launch card. The
@@ -140,9 +146,6 @@ alone() {  # alone <name> <file> <want-line> <fault...>: the check fires on its 
 }
 
 echo "each check fires on its own fault alone"
-alone 'SKILL itself' skills/postmaster/SKILL.md \
-  'skills/postmaster/SKILL.md: still says the front door never runs the stream itself' \
-  'You do not run the stream yourself.'
 alone 'SKILL spawn-does-it' skills/postmaster/SKILL.md \
   'skills/postmaster/SKILL.md: still says the spawned session does that instead' \
   ' carry on; the session you spawn does that.'
@@ -158,33 +161,41 @@ alone 'AGENTS table' AGENTS.md \
 alone 'AGENTS door' AGENTS.md \
   'AGENTS.md: still says the front door only spawns a postmaster' \
   'It spawns a postmaster; `postmaster.md` is what that postmaster then does.'
-alone 'SKILL general claim' skills/postmaster/SKILL.md \
-  'skills/postmaster/SKILL.md: still says the front door never runs the stream' \
-  'The front door never runs the stream.'
-alone 'postmaster general claim' skills/postmaster/postmaster.md \
-  'skills/postmaster/postmaster.md: still says the front door never runs the stream' \
-  'The front door never runs the stream.'
-alone 'AGENTS general claim' AGENTS.md \
-  'AGENTS.md: still says the front door never runs the stream' \
-  'The front door never runs the stream.'
-alone 'README general claim' README.md \
-  'README.md: still says the front door never runs the stream' \
-  'The front door never runs the stream.'
-# The bootstrap sentence carries the general claim inside it, so its fault fires two checks.
-rm -rf "$tmp/one" && cp -r "$tmp/clean" "$tmp/one"
-printf '%s\n' '- Bootstrap never runs the stream. Spawn and stop.' >> "$tmp/one/skills/postmaster/SKILL.md"
-out=$(accept "$tmp/one"); rc=$?
-[ "$rc" -eq 1 ] && [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 2 ] \
-  && printf '%s\n' "$out" | grep -qxF 'skills/postmaster/SKILL.md: still says bootstrap never runs the stream' \
-  && printf '%s\n' "$out" | grep -qxF 'skills/postmaster/SKILL.md: still says the front door never runs the stream' \
-  && printf '  ok   SKILL bootstrap fires its check and the general one\n' \
-  || { printf '  FAIL SKILL bootstrap fires its check and the general one: exit %s with:\n%s\n' "$rc" "$out"; fails=$((fails + 1)); }
+for f in skills/postmaster/SKILL.md skills/postmaster/postmaster.md AGENTS.md README.md; do
+  alone "$f never-runs claim" "$f" \
+    "$f: still says the front door never runs the stream" \
+    'The front door never runs the stream.'
+  alone "$f does-not claim" "$f" \
+    "$f: still says the front door never runs the stream" \
+    'The front door does not run the stream.'
+  alone "$f do-not claim" "$f" \
+    "$f: still says the front door never runs the stream" \
+    'Front doors do not run the stream.'
+done
+# Two historical sentences carry the general claim inside them, so each fires two checks.
+pair() {  # pair <name> <want-line> <fault...>: one fault firing its historical and general checks
+  local name=$1 want=$2 out rc; shift 2
+  rm -rf "$tmp/one" && cp -r "$tmp/clean" "$tmp/one"
+  printf '%s\n' "$*" >> "$tmp/one/skills/postmaster/SKILL.md"
+  out=$(accept "$tmp/one"); rc=$?
+  [ "$rc" -eq 1 ] && [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 2 ] \
+    && printf '%s\n' "$out" | grep -qxF "$want" \
+    && printf '%s\n' "$out" | grep -qxF 'skills/postmaster/SKILL.md: still says the front door never runs the stream' \
+    && printf '  ok   %s\n' "$name" \
+    || { printf '  FAIL %s: exit %s with:\n%s\n' "$name" "$rc" "$out"; fails=$((fails + 1)); }
+}
+pair 'SKILL itself fires its check and the general one' \
+  'skills/postmaster/SKILL.md: still says the front door never runs the stream itself' \
+  'You do not run the stream yourself.'
+pair 'SKILL bootstrap fires its check and the general one' \
+  'skills/postmaster/SKILL.md: still says bootstrap never runs the stream' \
+  '- Bootstrap never runs the stream. Spawn and stop.'
 
 echo "all faults together"
 out=$(accept "$tmp/stale"); rc=$?
 [ "$rc" -eq 1 ] && printf '  ok   stale tree exits 1\n' \
   || { printf '  FAIL stale tree exits %s, want 1\n' "$rc"; fails=$((fails + 1)); }
-[ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 11 ] && printf '  ok   stale tree lists 11 faults\n' \
+[ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 19 ] && printf '  ok   stale tree lists 19 faults\n' \
   || { printf '  FAIL stale tree lists:\n%s\n' "$out"; fails=$((fails + 1)); }
 has 'stale SKILL itself' "$out" 'skills/postmaster/SKILL.md: still says the front door never runs the stream itself'
 has 'stale SKILL spawn-does-it' "$out" 'skills/postmaster/SKILL.md: still says the spawned session does that instead'
@@ -205,6 +216,20 @@ out=$(accept "$tmp/clean"); rc=$?
 out=$(accept "$tmp/nowhere" 2>&1); rc=$?
 [ "$rc" -eq 2 ] && printf '  ok   missing tree exits 2\n' \
   || { printf '  FAIL missing tree exits %s\n' "$rc"; fails=$((fails + 1)); }
+
+"$0" "$tmp/clean" extra >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 2 ] && printf '  ok   an extra argument exits 2\n' \
+  || { printf '  FAIL an extra argument exits %s\n' "$rc"; fails=$((fails + 1)); }
+"$0" --self-test extra >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 2 ] && printf '  ok   --self-test with an extra argument exits 2\n' \
+  || { printf '  FAIL --self-test with an extra argument exits %s\n' "$rc"; fails=$((fails + 1)); }
+
+rm -rf "$tmp/crlf" && cp -r "$tmp/clean" "$tmp/crlf"
+printf 'you confirm a launch card, spawn a postmaster\r\nsession, hand over, report where to watch it, and stop.\r\n' >> "$tmp/crlf/skills/postmaster/SKILL.md"
+out=$(accept "$tmp/crlf"); rc=$?
+[ "$rc" -eq 1 ] && [ "$out" = 'skills/postmaster/SKILL.md: still says spawn, hand over and stop is the only flow' ] \
+  && printf '  ok   a CRLF stale sentence is still caught\n' \
+  || { printf '  FAIL a CRLF stale sentence: exit %s with:\n%s\n' "$rc" "$out"; fails=$((fails + 1)); }
 
 rm -rf "$tmp/locked" && cp -r "$tmp/clean" "$tmp/locked" && chmod 000 "$tmp/locked/skills/postmaster/SKILL.md"
 out=$(accept "$tmp/locked" 2>&1); rc=$?
