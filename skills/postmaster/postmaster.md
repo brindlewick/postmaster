@@ -323,7 +323,9 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    on exit 2 the user has it open or something in it still runs, so stop and report), then `git
    -C <repo> worktree remove .worktrees/<TICKET>`, never with force unless the tree is clean and
    the card confirmed it, and log `teardown`. The workhorse worktrees are the coachman's; if any survive, remove them the
-   same way after preserving any stray file into `<dispatch>/stray/`.
+   same way after preserving any stray file into `<dispatch>/stray/`. Teardown uses the live
+   checkout's host.sh, never the run's pinned one: it must work even when the pin is gone or
+   fails its check.
 3. **Close the run** with `<tool>/scripts/stage.sh <dispatch> done postmaster`, then release the
    run's pinned tool: `<tool>/scripts/run-meta.sh release <dispatch>`. It removes the checkout
    only when no run whose `run.json` names it is still in flight (manifest stage other than
@@ -347,8 +349,9 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
 6. **Dispatch the next ticket** in order, Stage B.
 
 **Abandoning a run** happens only on the user's word for that run: log `note` with the
-word, set the stage with `<tool>/scripts/stage.sh <dispatch> abandoned postmaster`, stop what still
-runs in each worktree the run created (`<tool>/scripts/host.sh stop <wt>`), then remove each one after
+word, stop what still runs in each worktree the run created (`<tool>/scripts/host.sh stop <wt>`)
+while the run still counts as in flight and holds its pin, then set the stage with
+`<tool>/scripts/stage.sh <dispatch> abandoned postmaster`, remove each worktree after
 preserving stray files and closing its space (`<tool>/scripts/host.sh close <wt>`), release the run's
 pinned tool (`<tool>/scripts/run-meta.sh release <dispatch>`, as Stage G step 3 does; log the result
 as `teardown`), and move the ticket back to todo or to cancelled as the user says. The dispatch
