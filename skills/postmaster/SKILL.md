@@ -144,7 +144,7 @@ not say; the security lens reviews against them.
 2. **Work with no ticket gets one created first**, in the project's own tracker
    (`trackers.md`).
 3. **Decide who runs the stream.** Report what this session is — its harness, its model, its
-   working directory, and whether a person is at the terminal — and ask the script. Report
+   absolute working directory, and whether a person is at the terminal — and ask the script. Report
    `yes` only when this conversation can ask a person and receive answers; a headless
    session reports `no`. Do not copy the configured harness or model into the report.
 
