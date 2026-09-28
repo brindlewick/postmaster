@@ -52,6 +52,15 @@ launch() { # name timeout cmd...  -> sets L_OUT L_ERR L_MARK, returns 0 if marke
 finite() { # value -> 0 if numeric and > 0 (not "max")
   case $1 in ''|*[!0-9]*) return 1;; *) [ "$1" -gt 0 ] ;; esac
 }
+# The oracle's own ambient maxima: a launch "under a cap" must bind tighter
+# than what it would inherit by doing nothing (pids.max is finite system-wide).
+AMB_CG=/sys/fs/cgroup/$(sed -n 's|^0::/||p' /proc/$$/cgroup | head -1)
+AMB_MEM=$(cat "$AMB_CG/memory.max" 2>/dev/null); AMB_PIDS=$(cat "$AMB_CG/pids.max" 2>/dev/null)
+tighter() { # launch-value ambient-value -> 0 if the launch binds tighter
+  finite "$1" || return 1
+  finite "$2" || return 0
+  [ "$1" -lt "$2" ]
+}
 
 # --- AC1: the launch and its children run under finite caps -------------------
 MEMMAX=""; PIDSMAX=""
@@ -66,10 +75,11 @@ if launch limits 60 bash "$ODIR/probe_limits.sh"; then
     else
       report limits FAIL "probe printed no MEMMAX (out: $(head -c 200 "$L_OUT" | tr '\n' ';'))"
     fi
-  elif finite "$MEMMAX" && finite "$PIDSMAX" && [ "$MEMMAX" = "$CMEMMAX" ] && [ "$PIDSMAX" = "$CPIDSMAX" ]; then
-    report limits PASS "memory.max=$MEMMAX pids.max=$PIDSMAX, child identical"
+  elif tighter "$MEMMAX" "$AMB_MEM" && tighter "$PIDSMAX" "$AMB_PIDS" \
+      && [ "$MEMMAX" = "$CMEMMAX" ] && [ "$PIDSMAX" = "$CPIDSMAX" ]; then
+    report limits PASS "memory.max=$MEMMAX pids.max=$PIDSMAX (ambient $AMB_MEM/$AMB_PIDS), child identical"
   else
-    report limits FAIL "memory.max=$MEMMAX pids.max=$PIDSMAX child=$CMEMMAX/$CPIDSMAX (want finite, parent==child)"
+    report limits FAIL "memory.max=$MEMMAX pids.max=$PIDSMAX child=$CMEMMAX/$CPIDSMAX ambient=$AMB_MEM/$AMB_PIDS (want finite, tighter than ambient, parent==child)"
   fi
 else
   report limits FAIL "marker never landed for limits probe"
@@ -78,7 +88,7 @@ fi
 # --- AC2 (process cap): fork-without-end is stopped at its cap ----------------
 # Size from the applied cap so the workload always exceeds it; absolute-bounded.
 FORKN=2500
-if finite "${PIDSMAX:-}"; then FORKN=$(( PIDSMAX + PIDSMAX / 2 )); fi
+if tighter "${PIDSMAX:-}" "$AMB_PIDS"; then FORKN=$(( PIDSMAX + PIDSMAX / 2 )); fi
 [ "$FORKN" -lt 100 ] && FORKN=100
 [ "$FORKN" -gt 2500 ] && FORKN=2500
 # Start the fork storm and a control launch together: the control must survive it.
@@ -117,7 +127,7 @@ pkill -f oracle-116-sleeper 2>/dev/null
 # --- AC2 (memory cap): alloc-without-end is stopped at its cap ----------------
 # Sized from the launch's own applied cap; skipped (UNPROVEN) when uncapped so a
 # broken lane is failed by `limits`, not by OOMing this machine.
-if finite "${MEMMAX:-}"; then
+if tighter "${MEMMAX:-}" "$AMB_MEM"; then
   ALLOCMB=$(( MEMMAX / 1024 / 1024 + MEMMAX / 1024 / 1024 / 2 ))
   [ "$ALLOCMB" -lt 200 ] && ALLOCMB=200
   [ "$ALLOCMB" -gt 6144 ] && ALLOCMB=6144
@@ -161,9 +171,10 @@ try:
     lines = open(sys.argv[1]).read().splitlines()
 except OSError:
     print("config.example.toml missing"); sys.exit(0)
-mem = [l for l in lines if re.search(r'(?i)mem\w*.{0,20}(max|cap|limit)|.{0,20}(max|cap|limit).{0,20}mem', l)]
-tsk = [l for l in lines if re.search(r'(?i)(tasks|process).{0,20}(max|cap|limit)|.{0,20}(max|cap|limit).{0,20}(tasks|process)', l)]
-roles = [l for l in lines if re.search(r'(?i)(lane|coachman|reviewer|role)', l) and re.search(r'(?i)(mem|task|process|cap|limit)', l)]
+code = [l for l in lines if l.strip() and not l.strip().startswith('#')]
+mem = [l for l in code if re.search(r'(?i)mem\w*.{0,20}(max|cap|limit)|.{0,20}(max|cap|limit).{0,20}mem', l)]
+tsk = [l for l in code if re.search(r'(?i)(tasks|process).{0,20}(max|cap|limit)|.{0,20}(max|cap|limit).{0,20}(tasks|process)', l)]
+roles = [l for l in code if re.search(r'(?i)(lane|coachman|reviewer|role)', l) and re.search(r'(?i)(mem|task|process|cap|limit)', l)]
 print("MEM:%d TSK:%d ROLE:%d" % (len(mem), len(tsk), len(roles)))
 for l in (mem + tsk + roles)[:10]:
     print("  | " + l.strip())
@@ -185,16 +196,18 @@ case $AC3SUM in
 esac
 
 # --- AC4: host.sh --self-test has the controls, and passes --------------------
-CHASFORK=$(grep -ciE 'fork' "$ROOT/scripts/host.sh")
-CHASALLOC=$(grep -ciE 'alloc' "$ROOT/scripts/host.sh")
+# Scoped to the self-test body: the stop logic elsewhere already says "fork".
+STBODY=$(sed -n '/^self_test()/,/^}/p' "$ROOT/scripts/host.sh")
+CHASFORK=$(printf '%s' "$STBODY" | grep -ciE 'fork|tasksmax|pids\.max')
+CHASALLOC=$(printf '%s' "$STBODY" | grep -ciE 'alloc|memorymax|memory\.max')
 if [ "$CHASFORK" -gt 0 ] && [ "$CHASALLOC" -gt 0 ]; then
   if timeout 900 "$HOST" --self-test >"$TMP/selftest.log" 2>&1; then
-    report selftest PASS "host.sh mentions fork ($CHASFORK) + alloc ($CHASALLOC), --self-test exits 0"
+    report selftest PASS "self-test body has fork ($CHASFORK) + alloc ($CHASALLOC) controls, --self-test exits 0"
   else
     report selftest FAIL "host.sh --self-test exits $?: $(tail -c 300 "$TMP/selftest.log" | tr '\n' ';')"
   fi
 else
-  report selftest FAIL "host.sh mentions fork ${CHASFORK}x + alloc ${CHASALLOC}x (want both controls)"
+  report selftest FAIL "self-test body mentions fork-ish ${CHASFORK}x + alloc-ish ${CHASALLOC}x (want both controls)"
 fi
 
 # --- AC5: no mechanism -> still runs, says uncapped ---------------------------
@@ -202,10 +215,10 @@ STUB=$TMP/nostub; mkdir -p "$STUB"
 printf '#!/usr/bin/env bash\necho "oracle stub: no systemd" >&2\nexit 1\n' >"$STUB/systemd-run"
 printf '#!/usr/bin/env bash\necho "oracle stub: no systemctl" >&2\nexit 1\n' >"$STUB/systemctl"
 chmod +x "$STUB/systemd-run" "$STUB/systemctl"
-if PATH="$STUB:$PATH" launch uncapped 120 echo uncapped-probe-ok; then
+if PATH="$STUB:$PATH" launch nomech 120 echo nomech-probe-ok; then
   if grep -qi 'uncapped' "$L_OUT" "$L_ERR" 2>/dev/null; then
     report uncapped PASS "completed without a mechanism and says uncapped"
-  elif grep -q 'uncapped-probe-ok' "$L_OUT" 2>/dev/null; then
+  elif grep -q 'nomech-probe-ok' "$L_OUT" 2>/dev/null; then
     report uncapped UNPROVEN "completed but says nothing (stub may not engage a non-systemd mechanism)"
   else
     report uncapped FAIL "marker landed but probe output missing"
