@@ -25,7 +25,7 @@ HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 
 # The program is passed with -c, not on stdin: stdin is the stream it renders.
 read -r -d '' PROG <<'PY'
-import json, os, re, shutil, sys, textwrap, time
+import json, os, re, shutil, sys, textwrap, time, unicodedata
 
 args = sys.argv[1:]
 follow = pid = None
@@ -40,7 +40,13 @@ while args:
 if follow and pid is None:
     print("view-stream: --follow needs --pid", file=sys.stderr); sys.exit(1)
 
-width = max(40, shutil.get_terminal_size((170, 24)).columns - 10) if follow else 160
+if follow:
+    columns = shutil.get_terminal_size((170, 24)).columns
+    # Content keeps a 40-column floor where the pane fits it; in a narrower pane the
+    # timestamp's 9 columns come out of the content, so a followed line stays inside.
+    width = min(max(40, columns - 10), max(1, columns - 9))
+else:
+    width = 160
 
 def short(s, n=None):
     s = " ".join(str(s).strip().splitlines()[:1]) if s is not None else ""
@@ -59,7 +65,7 @@ def text_of(content):
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        return "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
+        return "\n".join(str(b.get("text") or "") for b in content if isinstance(b, dict))
     return ""
 
 QUIET = {
@@ -276,9 +282,30 @@ def visible_text(s):
     s = str(s).replace("\r\n", "\n").replace("\r", "").replace("\t", "    ")
     return CONTROL.sub("", s)
 
+def cell_width(s):
+    # Terminal cells: wide characters take two, combining marks none.
+    return sum(0 if unicodedata.combining(c) else 2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
+
+def fit(line):
+    # A wrapped line that still exceeds the pane holds wide characters (textwrap counts
+    # code points): split it on cell boundaries. Only overflow lines reach here, so plain
+    # text keeps textwrap's word breaks and wide text breaks anywhere, as it should.
+    if cell_width(line) <= width:
+        return [line]
+    chunks, cur, cur_w = [], "", 0
+    for c in line:
+        w = cell_width(c)
+        if cur and cur_w + w > width:
+            chunks.append(cur)
+            cur, cur_w = "", 0
+        cur += c
+        cur_w += w
+    chunks.append(cur)
+    return chunks
+
 def wrapped(s, stamp):
-    # Content wraps to width; the timestamp rides outside it, so a followed line is at most
-    # width + 9, inside the pane. Continuation lines indent two spaces.
+    # Content wraps to width in terminal cells; the timestamp rides outside it, so a
+    # followed line is at most width + 9, inside the pane. Continuation lines indent.
     prefix = time.strftime("%H:%M:%S ") if stamp else ""
     wrapper = textwrap.TextWrapper(
         width=width, subsequent_indent="  ",
@@ -288,7 +315,8 @@ def wrapped(s, stamp):
     lines = []
     for source_line in visible_text(s).split("\n"):
         parts = wrapper.wrap(source_line)
-        lines.extend(parts if parts else [""])
+        for part in parts if parts else [""]:
+            lines.extend(fit(part))
     return [prefix + ln if ln else prefix.rstrip() for ln in lines]
 
 def show(line, stamp):
@@ -390,6 +418,9 @@ shows "claude: each content block on its own lines, never glued with a separator
 shows "claude: a failed tool call" \
   '{"type":"user","message":{"content":[{"type":"tool_result","is_error":true,"content":"No such file"}]}}' \
   'tool error: No such file'
+shows "claude: a failed tool call with no text renders without crashing the viewer" \
+  '{"type":"user","message":{"content":[{"type":"tool_result","is_error":true,"content":[{"type":"text","text":null}]}]}}' \
+  'tool error: '
 shows "claude: the result, with turns and cost" \
   '{"type":"result","subtype":"success","num_turns":2,"total_cost_usd":0.0060272,"result":"The command printed 3 entries."}' \
   'result: success · 2 turns · $0.01 · The command printed 3 entries.'
@@ -517,6 +548,24 @@ actual=$(printf '%s' "$plain" | tr -d '\n')
 too_wide=$(printf '%s\n' "$out" | awk 'length($0) > 60 { print; exit }')
 [ "$actual" = "shell: $long" ] && [ -z "$too_wide" ] && ok "a command longer than a live pane wraps fully to its width" \
   || fail "a command longer than a live pane wraps fully to its width" "$out"
+narrow="word $(printf '%80s' '' | tr ' ' x) end"
+printf '{"type":"item.completed","item":{"type":"agent_message","text":"%s"}}\n' "$narrow" > "$tmp/narrow.jsonl"
+( : ) & w=$!
+out=$(COLUMNS=30 view --follow "$tmp/narrow.jsonl" --pid "$w")
+wait "$w"
+too_wide=$(printf '%s\n' "$out" | awk 'length($0) > 30 { print; exit }')
+case $out in *"word "*end*) has_ends=yes;; *) has_ends=no;; esac
+[ "$has_ends" = yes ] && [ -z "$too_wide" ] && ok "a pane narrower than the width floor still fits every line" \
+  || fail "a pane narrower than the width floor still fits every line" "$out"
+cjk=$(python3 -c 'print("漢" * 70)')
+printf '{"type":"item.completed","item":{"type":"agent_message","text":"%s"}}\n' "$cjk" > "$tmp/cjk.jsonl"
+( : ) & w=$!
+out=$(COLUMNS=80 view --follow "$tmp/cjk.jsonl" --pid "$w")
+wait "$w"
+cells=$(printf '%s\n' "$out" | python3 -c 'import sys,unicodedata; print(max(sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in ln.rstrip("\n")) for ln in sys.stdin))')
+count=$(printf '%s\n' "$out" | grep -o '漢' | wc -l | tr -d ' ')
+[ "$count" = 70 ] && [ "$cells" -le 80 ] && ok "wide characters wrap to display cells, losing none" \
+  || fail "wide characters wrap to display cells, losing none" "count=$count cells=$cells"
 
 echo
 [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }
