@@ -158,8 +158,8 @@ def mimo(e):
     if sid and sid not in mimo_sessions:
         mimo_sessions.add(sid)
         out.append("session %s" % sid)
-    if t == "text" and str(part.get("text", "")).strip():
-        out.append("says: " + str(part.get("text")))
+    if t == "text" and str(part.get("text") or "").strip():
+        out.append("says: " + str(part.get("text") or ""))
     elif t == "tool_use":
         state = part.get("state") or {}
         out.append("tool error: %s" % part.get("tool") if state.get("status") == "error"
@@ -193,8 +193,8 @@ def render(e):
             if not isinstance(b, dict):
                 continue
             k = b.get("type")
-            if t == "assistant" and k == "text" and str(b.get("text", "")).strip():
-                lines.append("says: " + str(b["text"]))
+            if t == "assistant" and k == "text" and str(b.get("text") or "").strip():
+                lines.append("says: " + str(b.get("text") or ""))
             elif t == "assistant" and k == "tool_use":
                 lines.append(tool_line(b.get("name"), b.get("input")))
             elif t == "user" and k == "tool_result" and b.get("is_error"):
@@ -307,8 +307,11 @@ def wrapped(s, stamp):
     # Content wraps to width in terminal cells; the timestamp rides outside it, so a
     # followed line is at most width + 9, inside the pane. Continuation lines indent.
     prefix = time.strftime("%H:%M:%S ") if stamp else ""
+    # The indent stays below the width: textwrap never returns once the indent reaches
+    # it, which a ten-column pane would otherwise cause.
+    indent = "  "[:max(0, width - 1)]
     wrapper = textwrap.TextWrapper(
-        width=width, subsequent_indent="  ",
+        width=width, subsequent_indent=indent,
         replace_whitespace=False, drop_whitespace=False,
         break_long_words=True, break_on_hyphens=False,
     )
@@ -502,6 +505,14 @@ silent "claude: thinking" '{"type":"assistant","message":{"content":[{"type":"th
 silent "claude: a tool result that succeeded" '{"type":"user","message":{"content":[{"type":"tool_result","content":"a\nb"}]}}'
 silent "claude: a rate-limit event that allowed the call" '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}'
 silent "codex: reasoning" '{"type":"item.completed","item":{"type":"reasoning","text":"hmm"}}'
+silent "claude: a null text block renders nothing, not says None" '{"type":"assistant","message":{"content":[{"type":"text","text":null}]}}'
+got=$(printf '%s\n' \
+  '{"type":"step_start","sessionID":"ses_null1","part":{"type":"step-start"}}' \
+  '{"type":"text","sessionID":"ses_null1","part":{"type":"text","text":null}}' \
+  | view)
+[ "$got" = "session ses_null1" ] \
+  && ok "mimo: a null text block renders nothing, not says None" \
+  || fail "mimo: a null text block renders nothing, not says None" "got: $got"
 silent "pi: a streaming delta" '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Al"}}'
 silent "muse: a task's lifecycle record" '{"stream":{"kind":"session","id":"s1"},"payload_type":"task.lifecycle.started","payload":{"kind":"task_lifecycle"}}'
 got=$(printf '%s\n' \
@@ -566,6 +577,16 @@ cells=$(printf '%s\n' "$out" | python3 -c 'import sys,unicodedata; print(max(sum
 count=$(printf '%s\n' "$out" | grep -o '漢' | wc -l | tr -d ' ')
 [ "$count" = 70 ] && [ "$cells" -le 80 ] && ok "wide characters wrap to display cells, losing none" \
   || fail "wide characters wrap to display cells, losing none" "count=$count cells=$cells"
+printf '{"type":"item.completed","item":{"type":"agent_message","text":"hi there"}}\n' > "$tmp/tiny.jsonl"
+( : ) & w=$!
+out=$(COLUMNS=10 timeout 20 python3 -c "$PROG" --follow "$tmp/tiny.jsonl" --pid "$w"); rc=$?
+wait "$w"
+too_wide=$(printf '%s\n' "$out" | awk 'length($0) > 10 { print; exit }')
+plain=$(printf '%s\n' "$out" | sed -E 's/^[0-9]{2}:[0-9]{2}:[0-9]{2} //')
+actual=$(printf '%s' "$plain" | tr -d '\n')
+[ "$rc" -eq 0 ] && [ "$actual" = "says: hi there" ] && [ -z "$too_wide" ] \
+  && ok "a ten-column pane prints bounded lines instead of hanging" \
+  || fail "a ten-column pane prints bounded lines instead of hanging" "rc=$rc actual=$actual out=$out"
 
 echo
 [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }
