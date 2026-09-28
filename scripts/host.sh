@@ -184,36 +184,95 @@ ticket = ticket or os.path.basename(d)
 if not args:
     print(ticket)
     raise SystemExit(0)
+def as_dict(value):  # stores are third-party text: anything not a mapping is no store at all
+    return value if isinstance(value, dict) else {}
 try:
-    run = json.load(open(os.path.join(d, "run.json"), encoding="utf-8"))
+    run = as_dict(json.load(open(os.path.join(d, "run.json"), encoding="utf-8")))
 except (OSError, json.JSONDecodeError):
     run = {}
-config = run.get("config") or {}
-lanes = config.get("lanes") or {}
-team = config.get("team") or {}
+config = as_dict(run.get("config"))
+lanes = as_dict(config.get("lanes"))
+team = as_dict(config.get("team"))
 def shown(model):  # a model id as a label part: the provider prefix never tells launches apart
     return str(model).rsplit("/", 1)[-1]
-if len(args) == 1 and args[0] == "coachman":
+# The strict front end: every argument below passes through exactly one of these,
+# each refusing cleanly, and no branch labels from a value one did not return.
+def need_manifest_leg():
     try:
-        leg_number = int(json.load(open(os.path.join(d, "manifest.json"))).get("leg", 0))
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        leg_number = 0
-    if not leg_number:
+        raw = json.load(open(os.path.join(d, "manifest.json"))).get("leg", 0)
+    except (OSError, AttributeError, ValueError, TypeError, json.JSONDecodeError):
         raise SystemExit("host: cannot resolve the coachman leg from manifest.json")
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
+        raise SystemExit("host: cannot resolve the coachman leg from manifest.json")
+    return raw
+def need_lane_model(lane, role):
+    spec = lanes.get(lane)
+    if not isinstance(spec, dict) or not spec.get("model"):
+        raise SystemExit("host: no recorded model for %s lane %s" % (role, lane))
+    return spec
+def need_coachman_model(leg_name):
+    spec = as_dict(team.get("coachman_legs")).get(leg_name) or team.get("coachman")
+    if not isinstance(spec, dict) or not spec.get("model"):
+        raise SystemExit("host: no recorded model for coachman leg " + leg_name)
+    return spec
+def need_lens(lens):
+    if lens not in ("style", "bug", "security"):
+        raise SystemExit("host: review lens must be style, bug or security")
+    return lens
+def need_leg_name(name):
+    if not name:
+        raise SystemExit("host: coachman leg name must not be empty")
+    known = set()
     legs = subprocess.run([os.path.join(tool, "turnpikes.sh"), "legs", d], capture_output=True, text=True)
-    leg_name = ""
     if legs.returncode == 0:
         for line in legs.stdout.splitlines():
             fields = line.split()
-            if len(fields) > 1 and fields[0] == str(leg_number):
-                leg_name = fields[1]
+            if len(fields) > 1:
+                known.add(fields[1])
+    if name not in known:
+        raise SystemExit("host: unknown coachman leg " + name)
+    return name
+def need_leg_number(text):
+    if not re.fullmatch(r"[0-9]+", text or ""):
+        raise SystemExit("host: coachman leg number must be a whole number")
+    try:
+        n = int(text)
+    except ValueError:
+        raise SystemExit("host: coachman leg number must be a whole number") from None
+    if n < 1:
+        raise SystemExit("host: coachman leg number must be 1 or more")
+    return n
+def need_round(text):
+    if not re.fullmatch(r"[0-9]+", text or ""):
+        raise SystemExit("host: review round must be a whole number")
+    try:
+        n = int(text)
+    except ValueError:
+        raise SystemExit("host: review round must be a whole number") from None
+    if n < 1:
+        raise SystemExit("host: review round must be 1 or more")
+    if not os.path.isfile(os.path.join(d, "logs", "review-r%d.json" % n)):
+        raise SystemExit("host: unknown review round %d" % n)
+    return n
+if len(args) == 1 and args[0] == "coachman":
+    n = need_manifest_leg()
+    legs = subprocess.run([os.path.join(tool, "turnpikes.sh"), "legs", d], capture_output=True, text=True)
+    name = ""
+    if legs.returncode == 0:
+        for line in legs.stdout.splitlines():
+            fields = line.split()
+            if len(fields) > 1 and fields[0] == str(n):
+                name = fields[1]
                 break
-    if not leg_name:
-        raise SystemExit("host: cannot resolve leg %d from the waybill's turnpikes" % leg_number)
-    args = ["coachman", leg_name, str(leg_number)]
+    if not name:
+        raise SystemExit("host: cannot resolve leg %d from the waybill's turnpikes" % n)
+    # Resolved names re-validate below; the second listing is cheap and keeps the invariant total.
+    args = ["coachman", name, str(n)]
 elif len(args) == 1 and args[0] in lanes:
     lane = args[0]
-    workhorses = team.get("workhorses") or []
+    workhorses = team.get("workhorses")
+    if not isinstance(workhorses, list):
+        workhorses = []
     args = ["workhorse", lane] if lane in workhorses else args
 elif len(args) == 1:
     legacy = re.fullmatch(r"([^\s]+) (style|bug|security) review", args[0])
@@ -233,59 +292,17 @@ parts = []
 if mode == "postmaster" and len(args) == 1:
     parts = ["postmaster"]
 elif mode == "coachman" and len(args) == 3:
-    leg_name, leg_number = args[1], args[2]
-    if not leg_name:
-        raise SystemExit("host: coachman leg name must not be empty")
-    known = set()
-    legs = subprocess.run([os.path.join(tool, "turnpikes.sh"), "legs", d], capture_output=True, text=True)
-    if legs.returncode == 0:
-        for line in legs.stdout.splitlines():
-            fields = line.split()
-            if len(fields) > 1:
-                known.add(fields[1])
-    if leg_name not in known:
-        raise SystemExit("host: unknown coachman leg " + leg_name)
-    spec = (team.get("coachman_legs") or {}).get(leg_name) or team.get("coachman") or {}
-    parts = ["coachman"]
-    if spec.get("model"):
-        parts.append(shown(spec["model"]))
-    if leg_number:
-        if not re.fullmatch(r"[0-9]+", leg_number):
-            raise SystemExit("host: coachman leg number must be a whole number")
-        try:
-            leg_int = int(leg_number)
-        except ValueError:
-            raise SystemExit("host: coachman leg number must be a whole number") from None
-        parts.append("leg " + str(leg_int))
+    leg_name = need_leg_name(args[1])
+    leg_int = need_leg_number(args[2])
+    spec = need_coachman_model(leg_name)
+    parts = ["coachman", shown(spec["model"]), "leg " + str(leg_int)]
 elif mode == "workhorse" and len(args) == 2:
-    lane = args[1]
-    spec = lanes.get(lane) or {}
-    if not spec.get("model"):
-        raise SystemExit("host: no recorded model for workhorse lane " + lane)
-    parts = [lane, "workhorse"]
-    if spec.get("model"):
-        parts.append(shown(spec["model"]))
+    spec = need_lane_model(args[1], "workhorse")
+    parts = [args[1], "workhorse", shown(spec["model"])]
 elif mode == "review" and len(args) == 4:
-    lane, lens, round_number = args[1:]
-    spec = lanes.get(lane) or {}
-    if not spec.get("model"):
-        raise SystemExit("host: no recorded model for reviewer lane " + lane)
-    if lens not in ("style", "bug", "security"):
-        raise SystemExit("host: review lens must be style, bug or security")
-    if not re.fullmatch(r"[0-9]+", round_number):
-        raise SystemExit("host: review round must be a whole number")
-    try:
-        round_int = int(round_number)
-    except ValueError:
-        raise SystemExit("host: review round must be a whole number") from None
-    if round_int < 1:
-        raise SystemExit("host: review round must be 1 or more")
-    if not os.path.isfile(os.path.join(d, "logs", "review-r%d.json" % round_int)):
-        raise SystemExit("host: unknown review round %d" % round_int)
-    parts = [lane, lens + " review"]
-    if spec.get("model"):
-        parts.append(shown(spec["model"]))
-    parts.append("r" + str(round_int))
+    lane = args[1]
+    spec = need_lane_model(lane, "reviewer")
+    parts = [lane, need_lens(args[2]) + " review", shown(spec["model"]), "r" + str(need_round(args[3]))]
 elif mode == "role" and len(args) >= 2:
     parts = list(args[1:])
 else:
@@ -325,7 +342,7 @@ PY
 # launch closes it once its own tab exists. A security-review clone therefore stays under
 # the run, in a tab rooted at the clone.
 herdr_run_place() {  # herdr_run_place <name> <cwd> <dispatch>: prints "<space> <tab> <pane>"
-  local name=$1 cwd=$2 dispatch=$3 info runname runpath list src root rname runspace="" opened=0 out tab pane roottab rootpane
+  local name=$1 cwd=$2 dispatch=$3 info runname runpath list src root rname runspace="" out tab pane roottab rootpane
   info=$(dispatch_info "$dispatch") || return 1
   runname=$(clean "$(printf '%s' "$info" | json 'd.get("name")')")
   runpath=$(printf '%s' "$info" | json 'd.get("synthesis_worktree")')
@@ -355,9 +372,13 @@ print("\t".join([d.get("source", {}).get("source_workspace_id") or "-",
     roottab=$(printf '%s' "$out" | json 'd["result"]["tab"]["tab_id"]')
     rootpane=$(printf '%s' "$out" | json 'd["result"]["root_pane"]["pane_id"]')
     [ -n "$runspace" ] && [ -n "$roottab" ] && [ -n "$rootpane" ] || return 1
-    # Tag it first: when its close below fails, the leftover is owned, so a later
-    # close still finishes instead of refusing the space over an untagged pane.
-    herdr pane report-metadata "$rootpane" --source "$META" --title "$name" --token postmaster=launch >/dev/null 2>&1 || return 1
+    # Mark it at once: from here on every failure below leaves a space close can
+    # shut, so a failed first placement never orphans an unmarked run space.
+    herdr workspace report-metadata "$runspace" --source "$META" --token postmaster=opened >/dev/null 2>&1 || return 1
+    # Tag it best-effort: the tag only matters when the close below fails too,
+    # so a failed tag warns and proceeds instead of failing the launch.
+    herdr pane report-metadata "$rootpane" --source "$META" --title "$name" --token postmaster=launch >/dev/null 2>&1 \
+      || warn "could not tag the run space's root pane $rootpane; a later close may refuse the space"
     out=$(herdr tab create --workspace "$runspace" --cwd "$cwd" --label "$name" --no-focus) || return 1
     tab=$(printf '%s' "$out" | json 'd["result"]["tab"]["tab_id"]')
     pane=$(printf '%s' "$out" | json 'd["result"]["root_pane"]["pane_id"]')
@@ -368,14 +389,12 @@ print("\t".join([d.get("source", {}).get("source_workspace_id") or "-",
     # and the warning names the tab left behind. Never fail a launch over it.
     herdr tab close "$roottab" >/dev/null 2>&1 \
       || warn "could not close the run space's root tab $roottab; leaving it beside the launch tab"
-    opened=1
   else
     out=$(herdr tab create --workspace "$runspace" --cwd "$cwd" --label "$name" --no-focus) || return 1
     tab=$(printf '%s' "$out" | json 'd["result"]["tab"]["tab_id"]')
     pane=$(printf '%s' "$out" | json 'd["result"]["root_pane"]["pane_id"]')
   fi
   [ -n "$runspace" ] && [ -n "$tab" ] && [ -n "$pane" ] || return 1
-  [ "$opened" = 1 ] && herdr workspace report-metadata "$runspace" --source "$META" --token postmaster=opened >/dev/null 2>&1
   herdr tab rename "$tab" "$name" >/dev/null 2>&1 || return 1
   herdr pane report-metadata "$pane" --source "$META" --title "$name" --token postmaster=launch >/dev/null 2>&1 || return 1
   herdr_record_placement "$runspace" "$tab" "$pane" "$cwd" || return 1
@@ -1471,6 +1490,27 @@ EOF
   printf '{"leg":0}\n' > "$tmp/run-3/manifest.json"
   sed -e "s|^dispatch: .*|dispatch: $tmp/run-4|" "$tmp/run-1/brief.md" > "$tmp/run-4/brief.md"
   cp "$tmp/run-1/run.json" "$tmp/run-4/"
+  # A store with a wrong-typed lane, workhorse list and coachman models.
+  mkdir -p "$tmp/run-5"
+  sed -e "s|^dispatch: .*|dispatch: $tmp/run-5|" "$tmp/run-1/brief.md" > "$tmp/run-5/brief.md"
+  printf '{"leg":2}\n' > "$tmp/run-5/manifest.json"
+  cat > "$tmp/run-5/run.json" <<'EOF'
+{"config":{"lanes":{"weird":"x"},"team":{"workhorses":7,"coachman":{"harness":"muse"},"coachman_legs":{"review":{"harness":"claude"}}}}}
+EOF
+  # A run file that is valid JSON but no mapping at all.
+  mkdir -p "$tmp/run-6"
+  sed -e "s|^dispatch: .*|dispatch: $tmp/run-6|" "$tmp/run-1/brief.md" > "$tmp/run-6/brief.md"
+  printf '{"leg":2}\n' > "$tmp/run-6/manifest.json"
+  printf '[]\n' > "$tmp/run-6/run.json"
+  # Manifest legs that are not integers, and one that is not JSON.
+  for r in 7 8 9; do
+    mkdir -p "$tmp/run-$r"
+    sed -e "s|^dispatch: .*|dispatch: $tmp/run-$r|" "$tmp/run-1/brief.md" > "$tmp/run-$r/brief.md"
+    cp "$tmp/run-1/run.json" "$tmp/run-$r/"
+  done
+  printf '{"leg": true}\n' > "$tmp/run-7/manifest.json"
+  printf '{"leg": 2.5}\n' > "$tmp/run-8/manifest.json"
+  printf '{"leg": 2,\n' > "$tmp/run-9/manifest.json"
   RUN_NAME=$("$SELF" name "$tmp/run-1")
   NAME=$("$SELF" name "$tmp/run-1" workhorse luna)
   COACHMAN_LABEL=$("$SELF" name "$tmp/run-1" coachman review 2)
@@ -1554,6 +1594,18 @@ self_test() {
     '! "$SELF" name "$tmp/run-1" coachman "" 2 >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" coachman "" 2 2>/dev/null)" ] && ! "$SELF" name "$tmp/run-1" coachman nonsense 2 >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" coachman nonsense 2 2>/dev/null)" ]'
   check "while a known leg without an override still takes the generic coachman model" \
     '[ "$("$SELF" name "$tmp/run-1" coachman synthesis 1)" = "coachman · muse-spark-1.3-contributor · leg 1" ]'
+  check "an empty leg number is refused, never labelled without its leg" \
+    '[ "$("$SELF" name "$tmp/run-1" coachman review "" 2>&1 >/dev/null)" = "host: coachman leg number must be a whole number" ] && [ -z "$("$SELF" name "$tmp/run-1" coachman review "" 2>/dev/null)" ]'
+  check "leg 0 is refused like round 0" \
+    '[ "$("$SELF" name "$tmp/run-1" coachman synthesis 0 2>&1 >/dev/null)" = "host: coachman leg number must be 1 or more" ] && [ -z "$("$SELF" name "$tmp/run-1" coachman synthesis 0 2>/dev/null)" ]'
+  check "a coachman with no recorded model is refused, override, generic or legacy" \
+    '[ "$("$SELF" name "$tmp/run-5" coachman synthesis 1 2>&1 >/dev/null)" = "host: no recorded model for coachman leg synthesis" ] && [ "$("$SELF" name "$tmp/run-5" coachman review 2 2>&1 >/dev/null)" = "host: no recorded model for coachman leg review" ] && [ "$("$SELF" name "$tmp/run-5" coachman 2>&1 >/dev/null)" = "host: no recorded model for coachman leg review" ]'
+  check "a manifest leg that is not an integer is refused, never coerced" \
+    '[ "$("$SELF" name "$tmp/run-7" coachman 2>&1 >/dev/null)" = "host: cannot resolve the coachman leg from manifest.json" ] && [ "$("$SELF" name "$tmp/run-8" coachman 2>&1 >/dev/null)" = "host: cannot resolve the coachman leg from manifest.json" ]'
+  check "a manifest that is not JSON is refused" \
+    '[ "$("$SELF" name "$tmp/run-9" coachman 2>&1 >/dev/null)" = "host: cannot resolve the coachman leg from manifest.json" ]'
+  check "a malformed store is refused cleanly, never a traceback" \
+    '[ "$("$SELF" name "$tmp/run-5" workhorse weird 2>&1 >/dev/null)" = "host: no recorded model for workhorse lane weird" ] && [ "$("$SELF" name "$tmp/run-5" weird 2>&1 >/dev/null)" = "host: invalid launch identity; use coachman, workhorse, review, postmaster or role" ] && [ "$("$SELF" name "$tmp/run-6" workhorse luna 2>&1 >/dev/null)" = "host: no recorded model for workhorse lane luna" ]'
   mkdir -p "$tmp/bin" "$tmp/sys" "$tmp/stub"
   local t p
   for t in bash sh python3 git env cat mkdir rmdir rm mkfifo mktemp sleep date touch wc tr sed awk \
@@ -1617,7 +1669,9 @@ elif cmd == "tab create":
     save(); out({"tab": {"tab_id": tab}, "root_pane": {"pane_id": pane}})
 elif cmd == "tab rename": st["tabs"][a[2]]["label"] = a[3]; save()
 elif cmd == "workspace report-metadata": st["spaces"][a[2]]["tokens"] = tokens(); save()
-elif cmd == "pane report-metadata": st["panes"][a[2]]["tokens"] = tokens(); save()
+elif cmd == "pane report-metadata":
+    if flag("panemeta.fail-once"): os.remove(os.path.join(S, "panemeta.fail-once")); sys.exit(1)
+    st["panes"][a[2]]["tokens"] = tokens(); save()
 elif cmd == "workspace get":
     w = st["spaces"][a[2]]; out({"workspace": {"workspace_id": a[2], "label": w["label"], "tokens": w["tokens"], "worktree": {"path": w.get("path"), "checkout_path": w.get("path")}}})
 elif cmd == "pane list":
@@ -2019,6 +2073,15 @@ PY
   rm -f "$tmp/stub/tabcreate.empty"
   check "a tab create that returns no ids never closes the root tab" \
     '[ "$got" = host=none ] && [ "$(calls herdr | grep -c "^tab${T}close")" -eq 0 ] && marker "$tmp/logs/f2.done"' "$got"
+  check "and close still shuts the marked space it leaves behind" \
+    'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  touch "$tmp/stub/panemeta.fail-once"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f3.done -- ./fixed.sh 2>../logs/f3.hosterr)
+  check "a root-pane tag that fails still lands the launch, with a warning" \
+    'marker "$tmp/logs/f3.done" && grep -q "could not tag the run space" "$tmp/logs/f3.hosterr"' "$got"
+  check "and its space closes normally afterwards" \
+    'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
 
   echo "run, stop and close, tmux (stub)"
   reset
