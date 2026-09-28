@@ -201,11 +201,14 @@ if len(args) == 1 and args[0] == "coachman":
     leg_name = ""
     if leg_number:
         legs = subprocess.run([os.path.join(tool, "turnpikes.sh"), "legs", d], capture_output=True, text=True)
-        for line in legs.stdout.splitlines():
-            fields = line.split()
-            if len(fields) > 1 and fields[0] == str(leg_number):
-                leg_name = fields[1]
-                break
+        if legs.returncode == 0:
+            for line in legs.stdout.splitlines():
+                fields = line.split()
+                if len(fields) > 1 and fields[0] == str(leg_number):
+                    leg_name = fields[1]
+                    break
+        if not leg_name:
+            raise SystemExit("host: cannot resolve leg %d from the waybill's turnpikes" % leg_number)
     args = ["coachman", leg_name, str(leg_number)] if leg_number else args
 elif len(args) == 1 and args[0] in lanes:
     lane = args[0]
@@ -228,7 +231,7 @@ mode = args[0]
 parts = []
 if mode == "postmaster" and len(args) == 1:
     parts = ["postmaster"]
-elif mode == "coachman" and len(args) <= 3:
+elif mode == "coachman" and len(args) in (1, 3):
     leg_name = args[1] if len(args) > 1 else ""
     leg_number = args[2] if len(args) > 2 else ""
     spec = (team.get("coachman_legs") or {}).get(leg_name) or team.get("coachman") or {}
@@ -236,13 +239,13 @@ elif mode == "coachman" and len(args) <= 3:
     if spec.get("model"):
         parts.append(shown(spec["model"]))
     if leg_number:
-        if not leg_number.isdigit():
+        if not re.fullmatch(r"[0-9]+", leg_number):
             raise SystemExit("host: coachman leg number must be a whole number")
         parts.append("leg " + str(int(leg_number)))
 elif mode == "workhorse" and len(args) == 2:
     lane = args[1]
     spec = lanes.get(lane) or {}
-    if not spec:
+    if not spec.get("model"):
         raise SystemExit("host: no recorded model for workhorse lane " + lane)
     parts = [lane, "workhorse"]
     if spec.get("model"):
@@ -250,16 +253,21 @@ elif mode == "workhorse" and len(args) == 2:
 elif mode == "review" and len(args) == 4:
     lane, lens, round_number = args[1:]
     spec = lanes.get(lane) or {}
-    if not spec:
+    if not spec.get("model"):
         raise SystemExit("host: no recorded model for reviewer lane " + lane)
     if lens not in ("style", "bug", "security"):
         raise SystemExit("host: review lens must be style, bug or security")
-    if not round_number.isdigit():
+    if not re.fullmatch(r"[0-9]+", round_number):
         raise SystemExit("host: review round must be a whole number")
+    round_int = int(round_number)
+    if round_int < 1:
+        raise SystemExit("host: review round must be 1 or more")
+    if not os.path.isfile(os.path.join(d, "logs", "review-r%d.json" % round_int)):
+        raise SystemExit("host: unknown review round %d" % round_int)
     parts = [lane, lens + " review"]
     if spec.get("model"):
         parts.append(shown(spec["model"]))
-    parts.append("r" + str(int(round_number)))
+    parts.append("r" + str(round_int))
 elif mode == "role" and len(args) >= 2:
     parts = list(args[1:])
 else:
@@ -293,11 +301,13 @@ except BaseException:
 PY
 }
 
-# A dispatch's synthesis worktree is its Herdr run space. The first launch reuses the root tab
-# and pane Herdr creates with that space; later launches get a tab with their own checkout as
-# its working directory. A security-review clone therefore stays under the run.
+# A dispatch's synthesis worktree is its Herdr run space. Every launch gets a tab of its
+# own with its own checkout as the working directory, the first one included: the root tab
+# Herdr creates with the run space belongs to the space, not to the launch, so the first
+# launch closes it once its own tab exists. A security-review clone therefore stays under
+# the run, in a tab rooted at the clone.
 herdr_run_place() {  # herdr_run_place <name> <cwd> <dispatch>: prints "<space> <tab> <pane>"
-  local name=$1 cwd=$2 dispatch=$3 info runname runpath list src root rname runspace="" opened=0 out tab pane
+  local name=$1 cwd=$2 dispatch=$3 info runname runpath list src root rname runspace="" opened=0 out tab pane roottab
   info=$(dispatch_info "$dispatch") || return 1
   runname=$(clean "$(printf '%s' "$info" | json 'd.get("name")')")
   runpath=$(printf '%s' "$info" | json 'd.get("synthesis_worktree")')
@@ -324,8 +334,15 @@ print("\t".join([d.get("source", {}).get("source_workspace_id") or "-",
   if [ -z "$runspace" ]; then
     out=$(herdr worktree open --workspace "$src" --path "$runpath" --label "$runname" --no-focus) || return 1
     runspace=$(printf '%s' "$out" | json 'd["result"]["workspace"]["workspace_id"]')
+    roottab=$(printf '%s' "$out" | json 'd["result"]["tab"]["tab_id"]')
+    [ -n "$runspace" ] && [ -n "$roottab" ] || return 1
+    out=$(herdr tab create --workspace "$runspace" --cwd "$cwd" --label "$name" --no-focus) || return 1
     tab=$(printf '%s' "$out" | json 'd["result"]["tab"]["tab_id"]')
     pane=$(printf '%s' "$out" | json 'd["result"]["root_pane"]["pane_id"]')
+    # Its close is cosmetic: when it fails the launch still runs in the right tab,
+    # and the warning names the tab left behind. Never fail a launch over it.
+    herdr tab close "$roottab" >/dev/null 2>&1 \
+      || warn "could not close the run space's root tab $roottab; leaving it beside the launch tab"
     opened=1
   else
     out=$(herdr tab create --workspace "$runspace" --cwd "$cwd" --label "$name" --no-focus) || return 1
@@ -1401,7 +1418,7 @@ EOF
   # A waybill whose title is written to break any shell it is typed into.
   cat > "$tmp/run-1/brief.md" <<EOF
 # Waybill: 1
-turnpikes: default
+turnpikes: style, bug, security
 
 ## Ticket
 name: not this one
@@ -1415,8 +1432,13 @@ EOF
   printf '{"leg":2}\n' > "$tmp/run-1/manifest.json"
   printf '{"attempt":"test"}\n' > "$tmp/run-1/logs/review-r2.json"
   cat > "$tmp/run-1/run.json" <<'EOF'
-{"config":{"lanes":{"luna":{"harness":"codex","model":"gpt-6-luna"},"mimo":{"harness":"mimo","model":"xiaomi-token-plan-sgp/mimo-v2.6-pro"},"opus":{"harness":"claude","model":"claude-opus-5-5"}},"team":{"workhorses":["luna"],"coachman":{"harness":"muse","model":"muse-spark-1.3-contributor"},"coachman_legs":{"review":{"harness":"claude","model":"claude-opus-5-5"}}}}}
+{"config":{"lanes":{"luna":{"harness":"codex","model":"gpt-6-luna"},"mimo":{"harness":"mimo","model":"xiaomi-token-plan-sgp/mimo-v2.6-pro"},"opus":{"harness":"claude","model":"claude-opus-5-5"},"bare":{"harness":"codex"}},"team":{"workhorses":["luna"],"coachman":{"harness":"muse","model":"muse-spark-1.3-contributor"},"coachman_legs":{"review":{"harness":"claude","model":"claude-opus-5-5"}}}}}
 EOF
+  # A waybill as resolve never writes one: turnpikes.sh refuses a top line of `default`.
+  mkdir -p "$tmp/run-2/logs"
+  sed -e 's/^turnpikes: .*/turnpikes: default/' -e "s|^dispatch: .*|dispatch: $tmp/run-2|" "$tmp/run-1/brief.md" > "$tmp/run-2/brief.md"
+  cp "$tmp/run-1/manifest.json" "$tmp/run-1/run.json" "$tmp/run-2/"
+  printf '{"attempt":"test"}\n' > "$tmp/run-2/logs/review-r2.json"
   RUN_NAME=$("$SELF" name "$tmp/run-1")
   NAME=$("$SELF" name "$tmp/run-1" workhorse luna)
   COACHMAN_LABEL=$("$SELF" name "$tmp/run-1" coachman review 2)
@@ -1468,14 +1490,28 @@ self_test() {
     '[ "$POSTMASTER_LABEL" = postmaster ] && title_absent "$POSTMASTER_LABEL"' "$POSTMASTER_LABEL"
   check "any other launch is named by its role alone" \
     '[ "$ROLE_LABEL" = "preview server" ] && title_absent "$ROLE_LABEL"' "$ROLE_LABEL"
-  check "the old coachman name form still adds its recorded leg and coachman model" \
-    '[ "$LEGACY_COACHMAN_LABEL" = "coachman · muse-spark-1.3-contributor · leg 2" ] && title_absent "$LEGACY_COACHMAN_LABEL"' "$LEGACY_COACHMAN_LABEL"
+  check "the old coachman name form resolves the same per-leg model as the typed form" \
+    '[ "$LEGACY_COACHMAN_LABEL" = "$COACHMAN_LABEL" ] && title_absent "$LEGACY_COACHMAN_LABEL"' "$LEGACY_COACHMAN_LABEL"
   check "the old workhorse name form still adds its role and model" \
     '[ "$LEGACY_WORKHORSE_LABEL" = "luna · workhorse · gpt-6-luna" ] && title_absent "$LEGACY_WORKHORSE_LABEL"' "$LEGACY_WORKHORSE_LABEL"
   check "the old review name form still adds its model and current round" \
     '[ "$LEGACY_REVIEW_LABEL" = "mimo · bug review · mimo-v2.6-pro · r2" ] && title_absent "$LEGACY_REVIEW_LABEL"' "$LEGACY_REVIEW_LABEL"
   check "an unrecorded lane is refused, never labelled bare or empty" \
     '! "$SELF" name "$tmp/run-1" workhorse nobody >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" workhorse nobody 2>/dev/null)" ]'
+  check "a lane with no recorded model is refused, not labelled without it" \
+    '! "$SELF" name "$tmp/run-1" workhorse bare >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" workhorse bare 2>/dev/null)" ] && ! "$SELF" name "$tmp/run-1" review bare bug 2 >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" review bare bug 2 2>/dev/null)" ]'
+  check "a review round that never ran is refused, never labelled" \
+    '! "$SELF" name "$tmp/run-1" review mimo bug 999 >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" review mimo bug 999 2>/dev/null)" ]'
+  check "round 0 is refused: rounds are 1-based" \
+    '! "$SELF" name "$tmp/run-1" review mimo bug 0 >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" review mimo bug 0 2>/dev/null)" ]'
+  check "a non-ASCII round is refused with a clean error, not a traceback" \
+    '[ "$("$SELF" name "$tmp/run-1" review mimo bug "²" 2>&1 >/dev/null)" = "host: review round must be a whole number" ] && [ -z "$("$SELF" name "$tmp/run-1" review mimo bug "²" 2>/dev/null)" ]'
+  check "a non-ASCII leg number is refused the same way" \
+    '[ "$("$SELF" name "$tmp/run-1" coachman review "²" 2>&1 >/dev/null)" = "host: coachman leg number must be a whole number" ] && [ -z "$("$SELF" name "$tmp/run-1" coachman review "²" 2>/dev/null)" ]'
+  check "the two-argument coachman form is refused, never labelled without its leg" \
+    '! "$SELF" name "$tmp/run-1" coachman review >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" coachman review 2>/dev/null)" ]'
+  check "the old coachman form is refused when the waybill's turnpikes do not resolve" \
+    '! "$SELF" name "$tmp/run-2" coachman >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-2" coachman 2>/dev/null)" ]'
   mkdir -p "$tmp/bin" "$tmp/sys" "$tmp/stub"
   local t p
   for t in bash sh python3 git env cat mkdir rmdir rm mkfifo mktemp sleep date touch wc tr sed awk \
@@ -1484,7 +1520,7 @@ self_test() {
   done
   cat > "$tmp/bin/herdr" <<'EOF'
 #!/usr/bin/env python3
-import fcntl, json, os, re, subprocess, sys
+import fcntl, json, os, subprocess, sys
 S = os.environ["STUB"]; a = sys.argv[1:]
 with open(os.path.join(S, "herdr.calls"), "a") as f: f.write("\t".join(a) + "\n")
 if os.path.exists(os.path.join(S, "herdr.down")): sys.exit(1)
@@ -1562,13 +1598,9 @@ elif cmd == "workspace close":
 elif cmd == "pane get": out({"pane": {"pane_id": a[2], "agent": None}})
 elif cmd == "pane run":
     pane, text, ws = a[2], a[3], st["panes"][a[2]]["ws"]
-    match = re.search(r"_run herdr '([^']+)'", text)
-    if match:
-        launch_cwd = open(os.path.join(match.group(1), "cwd")).read()
-        st["panes"][pane]["cwd"] = launch_cwd
-        tab = st["panes"][pane].get("tab")
-        if tab: st["tabs"][tab]["cwd"] = launch_cwd
-        save()
+    # A tab keeps the working directory it was created with: running a pane never
+    # retargets it, so the stub must not either. The tab a launch runs in is the
+    # one the create and open calls above named, which is what the controls read.
     fcntl.flock(lock, fcntl.LOCK_UN)
     if flag("pane.dead"): sys.exit(0)                     # accepted, never run
     late = "sleep 5; " if flag("pane.late") else ""
@@ -1821,6 +1853,10 @@ EOF
     'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); w=s[\"spaces\"][sys.argv[2]]; t=s[\"tabs\"][w[\"tabs\"][0]]; sys.exit(not (w[\"label\"] == sys.argv[3] and t[\"label\"] == sys.argv[4] and t[\"cwd\"] == sys.argv[5]))" "$tmp/stub/herdr.json" "$space" "$RUN_NAME" "$NAME" "$repo/.worktrees/T-1-luna" && title_absent "$NAME" && [ ! -e "$tmp/canary" ]' "$RUN_NAME / $NAME"
   check "the first launch uses the run space's only tab, with no empty shell beside it" \
     'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); tabs=s[\"spaces\"][sys.argv[2]][\"tabs\"]; sys.exit(0 if len(tabs)==1 and s[\"tabs\"][tabs[0]][\"label\"]==sys.argv[3] else 1)" "$tmp/stub/herdr.json" "$space" "$NAME"'
+  check "the first launch's tab is created with its own checkout, not the root tab" \
+    'calls herdr | grep -qxF "tab${T}create${T}--workspace${T}$space${T}--cwd${T}$repo/.worktrees/T-1-luna${T}--label${T}$NAME${T}--no-focus"'
+  check "and the run space's root tab is closed once that tab exists" \
+    '[ "$(calls herdr | grep -c "^tab${T}close")" -eq 1 ]'
   marker "$tmp/logs/h1.done"
   check "the launch ran in that pane, with that pane's identity" '[ "$(field "$tmp/logs/h1.out" pane)" = "$pane" ]' "$(cat "$tmp/logs/h1.out")"
   check "and with its caller's environment, handed over by host.sh" '[ "$(field "$tmp/logs/h1.out" var)" = v ] && [ "$(field "$tmp/logs/h1.out" from)" = "$tmp/caller" ]'
@@ -1892,6 +1928,10 @@ PY
   runspace=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["open"].get(sys.argv[2], ""))' "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")
   check "the clone has no workspace of its own; its launch is a tab under the ticket" \
     'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); ws=sys.argv[2]; clone=sys.argv[3]; run=sys.argv[4]; label=sys.argv[5]; tabs=s[\"spaces\"][run][\"tabs\"]; found=[t for t in s[\"tabs\"].values() if t[\"ws\"]==run and t[\"cwd\"]==clone]; sys.exit(not (ws==run and clone not in s[\"open\"] and s[\"spaces\"][run][\"label\"]==sys.argv[6] and len(tabs)==1 and len(found)==1 and found[0][\"label\"]==label))" "$tmp/stub/herdr.json" "$space" "$clone" "$runspace" "$SECURITY_LABEL" "$RUN_NAME"' "$(calls herdr)"
+  check "the clone's tab is created with the clone as its directory, not the root tab" \
+    'calls herdr | grep -qxF "tab${T}create${T}--workspace${T}$runspace${T}--cwd${T}$clone${T}--label${T}$SECURITY_LABEL${T}--no-focus"' "$(calls herdr)"
+  check "and the run space's root tab is closed once that tab exists" \
+    '[ "$(calls herdr | grep -c "^tab${T}close")" -eq 1 ]' "$(calls herdr)"
   check "the run workspace is the only workspace host.sh creates for the clone launch" \
     '[ "$(calls herdr | grep -c "^workspace${T}create")" -eq 1 ] && calls herdr | grep -qxF "worktree${T}open${T}--workspace${T}w1${T}--path${T}$repo/.worktrees/T-1-luna${T}--label${T}$RUN_NAME${T}--no-focus"' "$(calls herdr)"
   check "the clone run tab has the security lane label, not the ticket name" \
@@ -1901,10 +1941,11 @@ PY
   check "a second launch there is a new tab in the same space" \
     '[ "$(calls herdr | grep -c "^worktree${T}open")" -eq 1 ] && calls herdr | grep -q "^tab${T}create${T}--workspace${T}$runspace${T}"' "$got2"
   marker "$tmp/logs/c2.done"
+  closes_before=$(calls herdr | grep -c "^tab${T}close")
   close_result=$(hs "$STUBS" -- close "$clone" 2>&1); close_rc=$?
   check "closing a scratch clone succeeds after its launches finish" '[ $close_rc -eq 0 ]' "$close_result"
   check "closing it removes both owned tabs" \
-    '[ "$(calls herdr | grep -c "^tab${T}close")" -eq 2 ] && ! python3 -c "import json,sys; s=json.load(open(sys.argv[1])); sys.exit(not any(t[\"cwd\"]==sys.argv[2] for t in s[\"tabs\"].values()))" "$tmp/stub/herdr.json" "$clone"' \
+    '[ "$(calls herdr | grep -c "^tab${T}close")" -eq $((closes_before + 2)) ] && ! python3 -c "import json,sys; s=json.load(open(sys.argv[1])); sys.exit(not any(t[\"cwd\"]==sys.argv[2] for t in s[\"tabs\"].values()))" "$tmp/stub/herdr.json" "$clone"' \
     "$(calls herdr) / $(python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print([(t,x.get("cwd")) for t,x in s["tabs"].items()])' "$tmp/stub/herdr.json")"
   check "closing a scratch clone leaves its run space open" \
     '[ "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" = "$runspace" ] && ! calls herdr | grep -qx "workspace${T}close${T}$runspace"' \

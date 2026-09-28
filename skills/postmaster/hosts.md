@@ -120,17 +120,20 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
 
 - **Placement.** `host.sh run --under <dispatch>` reads the ticket name and synthesis
   worktree from the waybill. `herdr worktree open --workspace <repository's space> --path
-  <synthesis worktree> --label <ticket>` opens the run's space. The first launch uses that
-  workspace's root tab and pane; each later launch gets a tab in the same space, with its own
-  checkout as the tab's working directory. That includes reviewer worktrees and security-review
-  clones. A clone is never opened as a separate workspace. Without a dispatch, the legacy
-  placement is a tab in the launch's own worktree space.
+  <synthesis worktree> --label <ticket>` opens the run's space. Every launch gets a tab
+  in the same space, with its own checkout as the tab's working directory, the first one
+  included: it closes the run space's root tab once its own tab exists. That includes
+  reviewer worktrees and security-review clones. A clone is never opened as a separate
+  workspace. Without a dispatch, the legacy placement is a tab in the launch's own worktree
+  space.
 - **The tree** is project space → ticket-labeled run space → launch tabs. The project space holds
   the postmaster, the synthesis worktree's space holds all coachman legs, workhorses and review
   launches for that ticket, and each launch's label starts with its role and lane. The synthesis
-  worktree space has no spare shell tab: the first launch takes its root tab, and each later tab
-  is opened for a launch. The tabs are panes under the run; Herdr 0.9.1 cannot nest one agent
-  under another.
+  worktree space has no spare shell tab: the first launch closes its root tab once its own
+  tab exists, and each later tab is opened for a launch. The project space keeps its shell tab:
+  Herdr closes a workspace with its last tab, and refuses the close once a worktree nests under
+  it, so host.sh never closes it. The tabs are panes under the run; Herdr 0.9.1 cannot nest one
+  agent under another.
 - **Ownership.** `host.sh` marks what it opens with Herdr metadata tokens: a space
   `postmaster=opened`, a pane `postmaster=launch`. It remembers each launch tab in the host state.
   `host.sh close <worktree>` closes tabs it opened for that checkout, then closes a space only
