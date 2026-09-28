@@ -92,9 +92,9 @@ if tighter "${PIDSMAX:-}" "$AMB_PIDS"; then FORKN=$(( PIDSMAX + PIDSMAX / 2 )); 
 [ "$FORKN" -lt 100 ] && FORKN=100
 [ "$FORKN" -gt 2500 ] && FORKN=2500
 # Start the fork storm and a control launch together: the control must survive it.
-F_OUT=$TMP/fork.out; F_ERR=$TMP/fork.err; F_MARK=$TMP/fork.done
+F_OUT=$TMP/fork.out; F_ERR=$TMP/fork.err; F_MARK=$TMP/fork.done; F_PROG=$TMP/fork.progress
 "$HOST" run "oracle-fork" "$ROOT" --out "$F_OUT" --err "$F_ERR" --marker "$F_MARK" \
-  -- bash "$ODIR/probe_fork.sh" "$FORKN" >/dev/null 2>&1
+  -- bash "$ODIR/probe_fork.sh" "$FORKN" "$F_PROG" >/dev/null 2>&1
 sleep 5
 if launch isolated 120 echo isolation-ok; then
   ISO_OUT=$L_OUT; ISO_MARK=yes
@@ -107,14 +107,16 @@ if [ ! -e "$F_MARK" ]; then
   pkill -f oracle-116-sleeper 2>/dev/null
 else
   SPAWNED=$(sed -n 's/^SPAWNED=//p' "$F_OUT" | head -1)
-  if [ -z "$SPAWNED" ]; then
-    report fork FAIL "fork probe printed no SPAWNED count (out: $(head -c 200 "$F_OUT" | tr '\n' ';'))"
-  elif [ "$SPAWNED" -ge "$FORKN" ]; then
+  PROG_N=$(sed -n 's/^N=//p' "$F_PROG" 2>/dev/null | tail -1)
+  KNOWN=${SPAWNED:-${PROG_N:-unknown}}
+  # AC2 is "stopped on its own": a launch reaped at its trip with its marker
+  # landed and its cap named passes, whether or not the probe reported first.
+  if [ -n "$SPAWNED" ] && [ "$SPAWNED" -ge "$FORKN" ]; then
     report fork FAIL "spawned $SPAWNED/$FORKN live children with no trip (no process cap bound it)"
   elif grep -qiE 'process|tasks' "$F_ERR"; then
-    report fork PASS "tripped at $SPAWNED/$FORKN live children, marker landed, .err names process cap"
+    report fork PASS "marker landed, .err names process cap (spawned $KNOWN/$FORKN)"
   else
-    report fork FAIL "tripped at $SPAWNED/$FORKN but .err names no process cap (err: $(head -c 200 "$F_ERR" | tr '\n' ';'))"
+    report fork FAIL "spawned $KNOWN/$FORKN but .err names no process cap (err: $(head -c 200 "$F_ERR" | tr '\n' ';'))"
   fi
 fi
 if [ "${ISO_MARK:-no}" = yes ] && grep -q 'isolation-ok' "$ISO_OUT" 2>/dev/null; then
@@ -133,8 +135,13 @@ if tighter "${MEMMAX:-}" "$AMB_MEM"; then
   [ "$ALLOCMB" -gt 6144 ] && ALLOCMB=6144
   if launch alloc 300 python3 "$ODIR/probe_alloc.py" "$ALLOCMB"; then
     HELD=$(sed -n 's/^HELD_MB=//p' "$L_OUT" | head -1)
+    HELD=${HELD:-$(sed -n 's/^MB=//p' "$L_OUT" | tail -1)}  # OOM kill leaves progress only
     if [ -z "$HELD" ]; then
-      report alloc FAIL "alloc probe printed no HELD_MB (out: $(head -c 200 "$L_OUT" | tr '\n' ';'))"
+      if grep -qiE 'memory' "$L_ERR"; then
+        report alloc PASS "marker landed, .err names memory cap (probe reaped before first report)"
+      else
+        report alloc FAIL "alloc probe printed nothing and .err names no memory cap (err: $(head -c 200 "$L_ERR" | tr '\n' ';'))"
+      fi
     elif [ "$HELD" -ge "$ALLOCMB" ]; then
       report alloc FAIL "held ${HELD}MB of ${ALLOCMB}MB with no trip (no memory cap bound it)"
     elif grep -qiE 'memory' "$L_ERR"; then

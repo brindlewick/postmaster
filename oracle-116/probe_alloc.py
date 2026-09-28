@@ -13,8 +13,10 @@ try:
         for off in range(0, CHUNK, 4096):
             b[off] = 1
         held.append(b)
+        # Progress per chunk, flushed: an OOM kill leaves no final line.
+        print("MB=%d" % (sum(len(c) for c in held) // (1024 * 1024)), flush=True)
 except MemoryError:
-    print("HELD_MB=%d" % (sum(len(c) for c in held) // (1024 * 1024)))
+    print("HELD_MB=%d" % (sum(len(c) for c in held) // (1024 * 1024)), flush=True)
     sys.exit(3)
-print("HELD_MB=%d" % (sum(len(c) for c in held) // (1024 * 1024)))
+print("HELD_MB=%d" % (sum(len(c) for c in held) // (1024 * 1024)), flush=True)
 sys.exit(0)

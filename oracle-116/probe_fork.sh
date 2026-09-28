@@ -4,6 +4,7 @@
 # Children carry a unique argv[0] so the oracle's cleanup matches nothing else.
 set -uo pipefail
 MAX=${1:-2500}
+PROGRESS=${2:-""}
 pids=""
 i=0
 while [ "$i" -lt "$MAX" ]; do
@@ -11,6 +12,8 @@ while [ "$i" -lt "$MAX" ]; do
   pid=$!
   if kill -0 "$pid" 2>/dev/null; then
     pids="$pids $pid"; i=$((i+1))
+    # Progress on disk, outside the scope: a reaped scope leaves no final line.
+    if [ -n "$PROGRESS" ] && [ $((i % 25)) -eq 0 ]; then echo "N=$i" >>"$PROGRESS"; fi
   else
     break # spawn refused: the cap tripped (or the child died at once)
   fi
