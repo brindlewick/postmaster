@@ -191,21 +191,25 @@ with `herdr agent start`. It is a pane whose agent `host.sh` reports. So when it
 ## Live agents (Herdr only)
 
 With `host.live_agents` on, `<tool>/scripts/live.sh` runs each lane and leg as a harness in its
-interactive form, a live agent kept in its pane between turns, through four forms that exist on
+interactive form, a live agent kept in its pane between turns, through five forms that exist on
 Herdr alone. On tmux or with no host they exit 3, and the key is refused before any run starts.
 
 ```sh
-<tool>/scripts/host.sh start <agent> <cwd> [--label <name>] [--exited <file>] [--err <file>] [--env-file <file>] [--timeout <s>] -- <kind> <args...>
-<tool>/scripts/host.sh prompt <agent> <file> [--timeout <s>]
+<tool>/scripts/host.sh start <agent> <cwd> [--label <name>] [--exited <file>] [--err <file>] [--env-file <file>] [--env <KEY=VALUE>]... [--timeout <s>] [--no-session] [--typed <title-regex>] -- <kind> <args...>
+<tool>/scripts/host.sh prompt <agent> <file> [--timeout <s>] [--no-wait]
 <tool>/scripts/host.sh state <agent>
+<tool>/scripts/host.sh report <agent> idle|working
 <tool>/scripts/host.sh end <agent>
 ```
 
 | form | herdr |
 |---|---|
 | start a live agent | `herdr agent start <agent> --kind <kind> --pane <pane>`, in a fresh tab of the worktree's space, placed as a launch is |
+| start one Herdr has no kind for (`--typed`) | `herdr pane run <pane> '<command>'` in that tab, then, once its terminal title matches, `herdr pane report-agent` and `herdr agent rename <pane> <agent>` |
 | give it work and wait | `herdr agent prompt --wait`, sent only to an agent whose state is `idle` or `done` |
+| give it work and return (`--no-wait`) | `herdr agent prompt`; for a typed agent `herdr pane send-text`, then `herdr pane send-keys enter` |
 | its state and session | `herdr agent get`: `agent_status` and `agent_session` |
+| a typed agent's state, for Herdr to show | `herdr pane report-agent --source custom:postmaster --state idle\|working --seq <ms>` |
 | end it | TERM to the process group in its pane's foreground, then KILL after 10 seconds |
 
 - **A fresh tab for every start**, so no screen an earlier agent left behind is read as the new
@@ -216,16 +220,35 @@ Herdr alone. On tmux or with no host they exit 3, and the key is refused before 
   with claude's writes no session record. Herdr counts a pane with any other process in it as
   busy, so nothing is forked there.
   [What building the option found](../../wiki/concepts/live-agents.md)
+- **Each `--env` reaches the pane's shell after the env file**, through the spec and never a
+  command line: the variables a harness's live form sets, such as the launch's own data
+  directory.
 - **Start returns once the agent is ready and its integration has reported its session**, and
   prints one JSON line: its space, tab and pane, its process group, and the session reference. It
   exits 4 when the agent stops at a question before any work, 5 when no session report comes
-  within `POSTMASTER_HOST_SESSION_WAIT` seconds (20), and ends the agent in both cases. The agent
+  within `POSTMASTER_HOST_SESSION_WAIT` seconds (20), and ends the agent in both cases. With
+  `--no-session` it returns once the agent is ready, its session `null`: for a harness whose
+  thread the caller reads from the harness's own records.
+- **A typed agent** is a harness Herdr has no agent kind for, MiMo Code among them. Its command is
+  typed into the pane's shell, each word quoted, and it is ready once it sets its terminal title
+  to match `--typed`, within `--timeout` seconds (60); it exits 4, ended, if it never does, and 1
+  if it exits first. Herdr then knows it only as `host.sh` reports it: an agent of that command's
+  name, under `<agent>`. Herdr keeps that name after the process has gone, so `state`, `prompt`
+  and `report` check that the process group its pane's tokens name still holds the pane's
+  foreground. When it does not, whatever is left of the group is ended, since MiMo Code's launcher
+  can exit and leave its binary running and busy, and the agent is forgotten: a release with a
+  newer `--seq`, then `herdr agent rename <agent> --clear`. Herdr orders a source's reports by
+  `--seq`, and an idle report after a working one reads as `done`. The agent
   is registered as a launch in `<cwd>`, so `stop` and `close` see it, and `--exited` is removed as
   it starts and touched when it exits, or when it could not start, with the reason in `--err`.
 - **Prompt sends only to an agent that has settled**, and waits in the same call. It exits 3 for
   one that has not, 4 when Herdr saw no turn start, which is not proof that nothing ran, 5 on a
   timeout and 6 when the agent has gone. On 0 it prints the settled state, which says only that
-  the agent looks ready for input: whether its work was done is read from disk.
+  the agent looks ready for input: whether its work was done is read from disk. With `--no-wait`
+  it sends and returns at once, for a caller that follows the agent's turns itself: a lane on its
+  own signal (`harnesses.md`, Live agents). Herdr prompts only agents it started, so a typed
+  agent's text is pasted into its pane, which arrives as one message however many lines it has,
+  then entered, and the agent reported working.
 - **End** ends only an agent in a pane `host.sh` opened.
   [What Herdr's states mean, and what they do not](../../wiki/concepts/herdr-agent-states.md)
 

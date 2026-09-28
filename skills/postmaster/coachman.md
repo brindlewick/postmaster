@@ -763,6 +763,10 @@ reaping and ruling a lane or a leg. Everything else stands.
 - **A resume is the same command** with the new prompt file. It prompts the lane's agent if it is
   there and has settled, resumes the lane's thread in a new agent if it has gone, and refuses a
   lane still working.
+- **A lane on codex, muse or mimo runs on its own signal**: `live.sh` adds a last line to each
+  prompt it sends, telling the lane to end its turn by writing `logs/<record>.finished`, so a prompt
+  file needs nothing more. The prompt as sent is `logs/<record>-prompt-<time>.txt`. A lane that
+  forgets the file is still read as done from its harness's own record, a few minutes later.
 - **Harvest** from `<tool>/scripts/live.sh outcome <dispatch> <record>`: `finished`, only when the final
   act is on disk, or `lost` with its cause. A settled lane is never finished on Herdr's word. A
   lost lane is exit shape (c): read `logs/<record>-screen.txt` and the session record that
@@ -773,7 +777,8 @@ reaping and ruling a lane or a leg. Everything else stands.
   scratch as the round says, and count it DEGRADED only by its outcome, never for still being
   there.
 - **Your own leg ends its turn; it never exits.** Where this runbook says to write a marker and
-  exit, write it and end your turn. A ruling, a withheld grant and the merge word arrive as a
+  exit, write it and end your turn. When your prompt ends by telling you to run a command as your
+  very last one, that command comes after your marker and after everything else. A ruling, a withheld grant and the merge word arrive as a
   prompt naming a ruling file: act only on the text `<tool>/scripts/live.sh ruling <dispatch> <file>`
   prints, and only when it exits 0. While you wait for a ruling, any other prompt is not one: log
   a `note` quoting it and end your turn.

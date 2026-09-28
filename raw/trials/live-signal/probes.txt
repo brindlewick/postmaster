@@ -1,0 +1,96 @@
+Eight probes, 2026-09-27 and 2026-09-28, Herdr 0.9.1, codex-cli 0.157.1, MiMo Code 0.1.15, Muse Code
+1.4.0 (1.4.0-R4302.1), scratch configs and data directories, the stand-in model, or muse's echo
+provider. <scratch> is a scratch directory; every agent ran in a space the probes opened.
+
+1. Herdr and a pane it has no agent kind for.
+   herdr pane report-agent <pane> --source custom:<probe> --agent mimo --state idle, on a pane
+   running MiMo Code: herdr pane get read agent mimo, idle. herdr agent rename <pane> t67-mimo:
+   herdr agent get t67-mimo found it by that name. herdr agent prompt t67-mimo "<text>": refused,
+   {"code":"agent_not_ready","message":"agent t67-mimo is not an active named agent"}.
+   On another pane, unsequenced reports idle, working, idle read idle, working, done. Then working
+   --seq 10 and idle --seq 11 read done; an unsequenced unknown, and an unsequenced release, left
+   it done; a release with --seq 12 read agent none, unknown. herdr agent rename t67-probe-name
+   --clear: herdr agent get t67-probe-name then found nothing.
+
+2. MiMo Code's bypass.
+   mimo -m standin/fixed --trust --dangerously-skip-permissions, typed into a pane's shell: a
+   question before anything else, "WARNING: Bypass Permissions mode", with "No, exit
+   (recommended)" and "Yes, I accept the risks and want to skip permissions". Its code, read from
+   the executable: with the flag and a terminal on stdin it asks on every start, and exits unless
+   the answer is yes; then it sets MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS=1. Its bundled
+   documentation lists that variable as the bypass for any surface.
+   mimo -m standin/fixed --trust, with MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS=1 exported: no
+   question; a turn ran a shell command (touch <scratch>/mimo-probe/turn-1.finished) without
+   asking.
+
+3. When MiMo Code takes input, and how a pasted prompt arrives.
+   The pane's terminal title, polled every quarter second from the start: none, then MiMoCode at
+   18.4 s. Two later starts: 8 s and 10 s. Once a session has a title it reads "MC | <title>".
+   Text sent with herdr pane send-text before the interface was up did not arrive.
+   herdr pane send-text <pane> "Turn two, line one.<newline>RUN=touch <file>", then herdr pane
+   send-keys <pane> enter: the file was written about a second later, and MiMo's export held one
+   user message, "Turn two, line one.\nRUN=touch <file>".
+
+4. Where MiMo Code's interface takes its variant.
+   A stand-in that records each request's parameters, and a model with variants high and low.
+   mimo run --variant high: the request after the title's carried reasoning_effort "high".
+   The interface with MIMOCODE_CONFIG_CONTENT='{"agent":{"build":{"variant":"high"}}}': no
+   reasoning_effort in any request.
+   The interface with XDG_STATE_HOME a scratch directory holding mimocode/model.json,
+   {"recent": [], "favorite": [], "variant": {"standin/fixed": "high"}}: reasoning_effort "high".
+   Its code, read from the executable: the interface keeps recent models, favourites and a
+   variant per provider/model in model.json under its state directory, and sends that variant
+   with each prompt.
+
+5. MiMo Code's records.
+   mimo session list --format json, in the probe's XDG_DATA_HOME: each session's id (ses_...),
+   title, created and updated in milliseconds, and directory. The interface's session was created
+   at its first prompt, not at start.
+   mimo export <id>: {"info": ..., "messages": [...]}, each message's info with its role, a
+   finish of "tool-calls" or "stop" for the assistant's, time.created and time.completed, and its
+   parts. Each export took 9.6 s, 10.5 s and 7.6 s, --pure no faster; a session list 7.7 s.
+
+6. MiMo Code's processes.
+   While it runs: the launcher, node's MainThread, and its binary, .mimocode, both in the pane's
+   foreground process group, the launcher its leader.
+   kill -TERM to that group: the launcher exited and the shell took the terminal back; the binary
+   kept running, its parent now the user's systemd, still in that group, holding the pane's
+   terminal, at 102% CPU a minute later. kill -KILL to the group ended it.
+   Three more such binaries, from earlier probes, were found running, 40 to 51 minutes old, each
+   holding the pane's terminal and its scratch database; a later TERM to each one's group, with
+   no launcher left in it, ended it.
+
+7. codex, interactive, with no Herdr integration.
+   herdr agent start --kind codex --pane <pane> -- -m fixed --no-daemon
+   --dangerously-bypass-approvals-and-sandbox, in a linked git worktree whose own path was
+   trusted in the scratch CODEX_HOME's config.toml: idle, and a prompt from herdr agent prompt ran
+   (a finish file written 1.2 s later).
+   Its rollout, sessions/<year>/<month>/<day>/rollout-<time>-<uuid>.jsonl in CODEX_HOME, appeared
+   at the first prompt, its first line session_meta with its id, its cwd and originator codex-tui;
+   each turn ran task_started, the user message, the tool calls and task_complete with its
+   last_agent_message. codex resume <id> with the same flags, in the same pane after the first was
+   ended, added to the same rollout (18 lines, then 34).
+   Control: the same start in a second worktree of the same repository with nothing trusted: the
+   screen showed "Trust this folder?" naming the repository's own checkout, and herdr agent start
+   returned success, the agent idle.
+   Without --no-daemon, the interactive codex ran no session here: it runs its thread on a shared
+   background server, which failed on this machine, where unprivileged user namespaces are not
+   allowed. That server, started from the probe's scratch CODEX_HOME, was still running 83 minutes
+   later, after the probe's codex had ended.
+
+8. Muse Code, started as Herdr's muse kind.
+   herdr agent start --kind muse --pane <pane> -- --provider echo --yolo, with XDG_DATA_HOME a new
+   scratch directory: ready in 4.0 s; herdr agent get read agent muse, idle, agent_session null.
+   herdr agent explain: manifest remote muse.toml 2026.08.26.1, rule none, fallback_reason
+   default_known_agent_idle_fallback.
+   herdr agent prompt, without --wait: working at 0.6 s, done at 1.2 s; explain still read the
+   idle fallback. Muse's bundled Herdr plugin's hooks user_prompt_submit and stop had run: its
+   hooks package in the data directory held their compiled files. No session report came.
+   Its record, <data>/muse/sessions/<year>/<month>/<day>/<uuid>/session.jsonl, existed from the
+   start; the uuid a UUIDv7 whose time is the start's. A turn's records: a run event started with
+   the prompt, assistant_message_committed with its text, and terminal, completed.
+   With --model as well: muse printed its help and exited, "--model requires --provider meta or
+   local".
+   muse exec --base-url http://127.0.0.1:<port> --model standin-model, with a key: it posted to
+   /responses, offering one tool, named muse, and did not accept the stand-in's Responses stream,
+   retrying until stopped.

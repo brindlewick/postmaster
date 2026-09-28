@@ -99,6 +99,8 @@ review_link = ""
 [host]
 # true runs every lane and coachman leg as a live agent in a Herdr pane, in its harness's
 # interactive form, instead of a headless launch (skills/postmaster/hosts.md, Live agents). Off
-# by default. Refused where no Herdr server answers, and for a lane whose harness lacks Herdr's
-# integration in the config it reads; a run keeps the setting it was dispatched with.
+# by default. Refused where no Herdr server answers, and for a claude, pi, grok or agy lane whose
+# harness lacks Herdr's integration in the config it reads; codex, muse and mimo lanes need none,
+# since each signals its own finish (skills/postmaster/harnesses.md, Live agents). A run keeps
+# the setting it was dispatched with.
 live_agents = false

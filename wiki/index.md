@@ -75,8 +75,8 @@ Why the design is shaped as it is.
   as one loop in one leg, so each round's fixes are re-reviewed by the gating lenses a ticket names, in the
   next. It should also take fewer rounds.
 - [Live agents against markers and resumes](concepts/live-agents.md): **claimed**. Headless
-  stays the default, and live agents are built as an option, off by default; what it would take
-  to change the default.
+  stays the default, and live agents are built as an option, off by default, for every harness on
+  the fleet's team; what it would take to change the default.
 - [A skill is a link to the postmaster repo, never a copy](concepts/skill-links.md):
   **claimed**. Each skill is linked from a harness's own skills folder to the main checkout, and
   a session finds the repo from that link. Five harnesses were tried, and each loads a linked skill.

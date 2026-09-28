@@ -373,26 +373,46 @@ the headless form above; run it once before relying on it.
 ## Live agents
 
 A run dispatched with `host.live_agents` on runs each lane and leg in its harness's interactive
-form, as a live agent in a Herdr pane started by `herdr agent start --kind <harness>`, in place
-of the headless forms above. `launch.sh form` then prints the live form, and `launch.sh live`
-makes the checks below and prints what `<tool>/scripts/host.sh start` runs. The bypass flag is on every
-live form, a resume included.
+form, as a live agent in a Herdr pane, in place of the headless forms above. `launch.sh form`
+then prints the live form, and `launch.sh live` makes the checks below, readies what the harness
+would otherwise stop at a question for, and prints what `<tool>/scripts/host.sh start` runs.
+Every live form bypasses approval, a resume included: by its bypass flag, or for MiMo Code by its
+variable.
 
-| harness | live form, after the kind | resume | Herdr integration | trusted before start | session report | checked here |
-|---|---|---|---|---|---|---|
-| claude | `--model <model> --effort <effort> --name "<name>" --dangerously-skip-permissions` | `--resume <id>` first | `claude` | the worktree's repository | its session id | yes |
-| pi | `--model <provider/model> --thinking <effort> --name "<name>" --approve` | `--session <id>` first | `pi` | nothing to trust | the path of its session file, whose name ends in the id | yes |
-| codex | `-m <model> -c model_reasoning_effort="<effort>" --dangerously-bypass-approvals-and-sandbox` | `resume <id>` first | `codex` | the worktree, as a launch trusts it | its session id | no |
-| grok | `-m <model> --reasoning-effort <effort> --always-approve` | `--resume <id>` first | `grok` | not recorded | its session id | no |
-| agy | `--model <model> --dangerously-skip-permissions --add-dir <wt>` | not recorded: refused | `antigravity-cli` | not recorded | its session id | no |
-| muse | none: it has no Herdr integration, so it cannot be a live lane | | none | | | yes |
-| mimo | none: it has no Herdr integration, so it cannot be a live lane | | none | | | yes |
+A harness runs live one of two ways.
+
+- **Through its Herdr integration**: claude and pi, and grok and agy on the same terms. Herdr
+  starts it with `herdr agent start --kind <harness>`, its integration reports its session and
+  its turns, and `host.sh prompt` waits on Herdr for a turn to settle.
+- **On its own signal**: codex, muse and mimo, with no integration. Each prompt gains one line
+  telling the lane to end its turn by running `touch '<dispatch>/logs/<record>.finished'` as its
+  very last command. The turn ends with that file or with the agent going. The harness's own
+  session records give the rest: the thread id, whether the prompt arrived (sent once more if
+  not), and whether a turn ended with no file, as a model can forget it. Herdr starts codex and
+  muse as kinds it knows, and shows their state; MiMo Code is no Herdr kind, so its command is
+  typed into the pane's shell and each prompt is pasted in and entered (`host.sh start --typed`).
+
+| harness | live form, after the kind | resume | way | trusted before start | thread from |
+|---|---|---|---|---|---|
+| claude | `--model <model> --effort <effort> --name "<name>" --dangerously-skip-permissions` | `--resume <id>` first | integration `claude` | the worktree's repository | its session id, reported |
+| pi | `--model <provider/model> --thinking <effort> --name "<name>" --approve` | `--session <id>` first | integration `pi` | nothing to trust | the path of its session file, reported; the name ends in the id |
+| grok | `-m <model> --reasoning-effort <effort> --always-approve` | `--resume <id>` first | integration `grok` | not recorded | its session id, reported |
+| agy | `--model <model> --dangerously-skip-permissions --add-dir <wt>` | not recorded: refused | integration `antigravity-cli` | not recorded | its session id, reported |
+| codex | `-m <model> -c model_reasoning_effort="<effort>" --no-daemon --dangerously-bypass-approvals-and-sandbox` | `resume <id>` first | own signal | the worktree itself | the first rollout under `sessions/` in its config dir whose `session_meta` names the worktree, begun since the start; codex begins it at the first prompt |
+| muse | `--model <model> --reasoning-effort <effort> --yolo`, with `XDG_DATA_HOME` the launch's own data directory | `resume <id>` first | own signal | `--yolo` trusts it | the first session under `muse/sessions` in that directory begun since the start, its UUIDv7 id carrying its time; muse begins it as it starts |
+| mimo | typed: `mimo -m <provider/model> --trust`, with `XDG_DATA_HOME` the launch's own data directory, `XDG_STATE_HOME` its `state`, `MIMOCODE_DISABLE_CLAUDE_IMPORT=1` and `MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS=1` | `-s <id>` after the model | own signal | `--trust` | the first session `mimo session list` shows begun there since the start; MiMo begins it at the first prompt |
+
+claude, pi, codex, muse and mimo are checked here, on this machine's Herdr against a stand-in
+model (`live.sh --live-test`), muse on its own echo provider, which runs no command and so gives
+no finish file. grok's and agy's forms are written from their help and are not checked.
 
 - **The integration must be installed where the harness reads its config**: the config dir its
-  environment names, the lane's env file included (`CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`,
-  `CODEX_HOME`), or its default. `launch.sh` reads `herdr integration status` in that environment
-  and refuses a lane whose integration is missing, naming the command that installs it, which the
-  user runs. `herdr integration status` lists none for muse or mimo, so `launch.sh` refuses both.
+  environment names, the lane's env file included (`CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`),
+  or its default. `launch.sh` reads `herdr integration status` in that environment and refuses a
+  claude, pi, grok or agy lane whose integration is missing, naming the command that installs
+  it, which the user runs. codex, muse and mimo are never refused for want of one: `herdr
+  integration status` lists none for muse or mimo, and a live codex lane runs on its own signal
+  whether codex's is installed or not.
 - **claude asks whether to trust a folder** on its first interactive start there, bypass flag or
   not. In a git worktree only the worktree or its repository's own checkout counts, never a folder
   above; elsewhere any folder above counts. `launch.sh live` trusts the repository in the lane's
@@ -402,17 +422,39 @@ live form, a resume included.
   trust step takes the same lock around its read, its change and its replace, waits up to
   `POSTMASTER_TRUST_LOCK_WAIT` seconds (30) while a session holds it, and takes over a stale one as
   claude does.
-- **The thread id comes from the session report**, through `launch.sh session`, which also names
-  the harness's session record: claude keeps it in `projects/<path>/<id>.jsonl` under its config
-  dir, `<path>` being the worktree's path with every character but a letter or a digit replaced
-  by `-`, cut at 200 characters and given a suffix of its own beyond that, so a longer one is
-  found by its id; pi's is the file its report names; codex's is found by its id under
-  `sessions/` in its config dir. The record stands in for a live lane's events stream: its
-  growth is the lane's sign of work, and it is its durable record.
-- **A turn's final message** is read from that record by `launch.sh last`, from where the record
-  stood when the prompt went: claude's last entry that ended its turn (`stop_reason` `end_turn`),
-  pi's last assistant message that stopped (`stopReason` `stop`), with no user message after it.
-  The other harnesses' records are not read here, so for them only a final-act file counts.
+- **codex asks whether to trust a folder** too, naming the repository's checkout for a git
+  worktree, and Herdr reads that question as an agent ready for input. Trusting the directory
+  itself answers it, a worktree included: `launch.sh live` writes `[projects."<dir>"]` once, in
+  the config dir the lane's environment names. `--no-daemon` keeps the thread in the codex process
+  in its pane, so ending the agent ends it; without it codex 0.157 runs the thread on a shared
+  background server, which outlives the agent and which failed here, on a machine without
+  unprivileged user namespaces.
+- **MiMo Code's bypass flag asks a question on a terminal**, on every start and before anything
+  else, with "No, exit" chosen. Its documented variable, `MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS=1`,
+  bypasses on any surface and asks nothing. Its interface has no `--variant`: it sends the variant
+  its state's `model.json` holds for the model, so `launch.sh live` writes the lane's effort there,
+  in the launch's own state. It is ready once its terminal title reads `MiMoCode`, or `MC |` and
+  the session's title; it took 8 to 18 seconds here.
+- **The thread id and the session record** come through `launch.sh session`, from the report or
+  from the harness's records (`records <since>`). claude keeps its record in
+  `projects/<path>/<id>.jsonl` under its config dir, `<path>` being the worktree's path with every
+  character but a letter or a digit replaced by `-`, cut at 200 characters and given a suffix of
+  its own beyond that, so a longer one is found by its id; pi's is the file its report names;
+  codex's is its rollout; muse's is `session.jsonl` in its session's directory; MiMo's is its
+  database, `mimocode/mimocode.db` in the launch's data directory. The record stands in for a
+  live lane's events stream: its growth is the lane's sign of work, and it is its durable record.
+- **A turn** is read from that record by `launch.sh turn`, from where the record stood when the
+  prompt went: whether it holds the prompt, whether the turn that took it has ended, and its final
+  message. A turn ends at claude's entry that ended it (`stop_reason` `end_turn`), pi's assistant
+  message that stopped (`stopReason` `stop`), codex's `task_complete` (its `last_agent_message`),
+  muse's run event `terminal` (the message it last committed), and MiMo's assistant message that
+  completed for any reason but a tool call, read through `mimo export`, which takes 7 to 10 seconds.
+  grok's and agy's records are not read here, so for them only a final-act file counts.
+- **muse's own Herdr plugin**, bundled with Muse Code 1.4.0, reports its working and idle states to
+  Herdr from muse's hooks, so Herdr shows a live muse's turns. It reports no session. It loaded in
+  every data directory tried here; a fixture run's "bundled plugin is invalid ... existing package
+  root is not exact" was not reproduced, and it changes nothing here, since the flow reads a muse
+  lane's turns from its signal file and its records, not from Herdr.
 
 ## The pane view
 

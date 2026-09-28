@@ -1,12 +1,24 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-27
+updated: 2026-09-28
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-28] ingest | live agents with no Herdr integration
+
+Issue #67 now runs codex, muse and MiMo Code as live agents with no Herdr integration: each such
+lane ends its turn by writing a file its prompt names, and its thread and its turns are read from
+the harness's own records. The live-agents page says how, and what building it found. A trial,
+`raw/trials/live-signal/`, records the controls on Herdr 0.9.1 and eight probes: Herdr prompts
+only agents it started; MiMo Code's bypass flag asks a question on every start and its variable
+does not; its interface takes its variant from its state; its launcher can leave its binary
+running and busy after a TERM; codex's trust question in a worktree names the repository, and
+its interactive form needs `--no-daemon` here; and muse, started as Herdr's muse kind, reports its
+turns through its own plugin and never a session. No standing changed.
 
 ## [2026-09-27] ingest | the live option is built
 

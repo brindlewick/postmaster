@@ -17,9 +17,11 @@
 #   host.sh wait <handle> [<seconds>]     block until it settles, when nothing was just sent
 #   host.sh read <handle> [<lines>]       print what it shows (default 120 lines)
 #   host.sh start <agent> <cwd> [--label <text>] [--exited <file>] [--err <file>] [--env-file <file>]
-#               [--timeout <seconds>] -- <kind> <args...>    a live agent (Herdr only, below)
-#   host.sh prompt <agent> <file> [--timeout <seconds>]     give a settled live agent work, and wait
+#               [--env <KEY=VALUE>]... [--timeout <seconds>] [--no-session] [--typed <title-regex>]
+#               -- <kind> <args...>                       a live agent (Herdr only, below)
+#   host.sh prompt <agent> <file> [--timeout <seconds>] [--no-wait]   give a live agent work
 #   host.sh state <agent>                 a live agent's status and session reference, as JSON
+#   host.sh report <agent> idle|working   a typed agent's status, for Herdr to show
 #   host.sh end <agent>                   end a live agent host.sh started
 #   host.sh --self-test                   stub hosts on PATH; never touches a live server
 #   host.sh --live-test                   the ticket's controls, against the hosts on this machine
@@ -47,15 +49,21 @@
 # runs <kind> with <args> as a Herdr agent named <agent>, in a fresh tab of <cwd>'s space placed as
 # run places a launch, so no screen an earlier agent left is read as this one's. The pane's shell
 # becomes a bash on the pane's own environment, with the caller's POSTMASTER_ settings, handed
-# over as run hands an environment, then the env file, and never the user's shell startup files;
-# no other variable of the caller's reaches it. The agent is registered as a launch in <cwd>, so
-# stop and close see it. --exited is removed as it
+# over as run hands an environment, then the env file, then each --env, and never the user's shell
+# startup files; no other variable of the caller's reaches it. The agent is registered as a launch
+# in <cwd>, so stop and close see it. --exited is removed as it
 # starts and touched when it exits, or when it cannot start, with the reason in --err. start
-# returns once the agent is ready and its Herdr integration has reported its session, and prints
-# one JSON line: where it runs, its process group and the session reference. prompt sends the
-# file's text only to an agent that has settled, and waits for it in the same call; a settled
-# state says the agent looks ready, never that its work is done, so the caller checks what the
-# turn left on disk.
+# returns once the agent is ready and its Herdr integration has reported its session, or with
+# --no-session once it is ready, and prints one JSON line: where it runs, its process group and
+# the session reference, null with --no-session. With --typed, <kind> and <args> are a command
+# typed into the pane's shell, for a harness Herdr has no agent kind for; it is ready once it
+# sets its terminal title to match <title-regex>, within --timeout (default 60), and host.sh then
+# reports it to Herdr as agent <kind> under the name <agent>. prompt sends the file's text only to
+# an agent that has settled, and waits for it in the same call; a settled state says the agent
+# looks ready, never that its work is done, so the caller checks what the turn left on disk. With
+# --no-wait it sends the text and returns at once, for a caller that follows the agent's turns
+# itself; a typed agent's text is pasted into its pane and entered. report sets the status Herdr
+# shows for a typed agent, and does nothing for any other.
 #
 # POSTMASTER_HOST=herdr|tmux|none overrides detection; nothing needs setting to get the default.
 # POSTMASTER_HOST_CLAIM_WAIT (20) is how long a new pane has to start its launch, and
@@ -68,11 +76,12 @@
 #           host.sh did not open
 #   exit 3  spawn, send, wait or read with no host that keeps an interactive session; or a send
 #           or wait that did not settle, stopped at an approval or a question, or showed no turn;
-#           start, prompt, state or end with no Herdr; prompt to an agent that has not settled
-#   exit 4  start: the agent stopped at a question before taking any work; prompt: no turn was
-#           seen, so read the harness's session before sending the text again
+#           start, prompt, state, report or end with no Herdr; prompt to an agent that has not settled
+#   exit 4  start: the agent stopped at a question before taking any work, or a typed agent never
+#           set its title; prompt: no turn was seen, so read the harness's session before sending
+#           the text again
 #   exit 5  start: no session report from the harness's integration; prompt: timed out
-#   exit 6  prompt or state: no live agent has that name
+#   exit 6  prompt, state or report: no live agent has that name
 set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 SELF=$HERE/$(basename "$0")
@@ -241,7 +250,7 @@ print("\t".join([s.get("source_workspace_id") or "-", s.get("repo_root") or "-",
 # NUL-separated, and for a pane the caller's environment through a FIFO, so it is never written
 # to disk or put on any command line. Whoever creates <spec>/claimed first runs it; the runner
 # removes the spec once it has read it.
-SPEC_FIELDS="name cwd rundir state out err marker pidfile append envfile"
+SPEC_FIELDS="name cwd rundir state out err marker pidfile append envfile setenv"
 write_spec() {  # write_spec <spec> <name> <cwd> <out> <err> <marker> <pidfile> <append> <argv...>
   local s=$1; shift
   printf '%s' "$1" > "$s/name"; printf '%s' "$2" > "$s/cwd"; printf '%s' "$PWD" > "$s/rundir"
@@ -779,6 +788,32 @@ end_group() {  # end_group <pgid>: TERM, then KILL whatever is left after 10 s
   kill -0 -- "-$g" 2>/dev/null && kill -KILL -- "-$g" 2>/dev/null
   return 0
 }
+seq_now() { python3 -c 'import time; print(int(time.time() * 1000))'; }   # Herdr orders reports by it
+pane_tokens() {  # pane_tokens <pane>: host.sh's metadata tokens on it, as JSON
+  herdr pane get "$1" 2>/dev/null | json 'json.dumps(d["result"]["pane"].get("tokens") or {})' 2>/dev/null
+}
+typed_group() {  # typed_group <pane>: a typed agent's process group, from its pane's tokens; nothing
+  # for an agent Herdr started itself
+  pane_tokens "$1" | json '(d.get("pgid") or "") if d.get("input") == "typed" else ""' 2>/dev/null
+}
+forget_typed() {  # forget_typed <agent> <pane> <label>: Herdr stops showing it, and its name is free
+  herdr pane release-agent "$2" --source "$SOURCE" --agent "$3" --seq "$(seq_now)" >/dev/null 2>&1
+  herdr agent rename "$1" --clear >/dev/null 2>&1
+}
+typed_alive() {  # typed_alive <agent> <record>: 0 unless a typed agent has gone, which Herdr does
+  # not notice itself. It has gone once its process group no longer holds its pane's foreground:
+  # MiMo Code's launcher can exit and leave its binary running in the group, busy, so whatever is
+  # left of the group is ended, and then the agent is forgotten.
+  local pane group label
+  pane=$(printf '%s' "$2" | json 'd.get("pane_id")')
+  group=$(typed_group "$pane")
+  [ -n "$group" ] || return 0
+  [ "$(fg_group "$pane")" = "$group" ] && return 0
+  kill -0 -- "-$group" 2>/dev/null && end_group "$group"
+  label=$(printf '%s' "$2" | json 'd.get("agent") or ""')
+  forget_typed "$1" "$pane" "$label"
+  return 1
+}
 
 START_FAIL_ERR="" START_FAIL_MARKER=""
 start_failed() {  # start_failed <exit> <reason>: the reason in --err, the exited marker landed
@@ -789,16 +824,20 @@ start_failed() {  # start_failed <exit> <reason>: the reason in --err, the exite
 }
 
 start_cmd() {
-  local agent=${1:-} cwd=${2:-} label="" exited="" err="" envfile="" timeout="" bad="" v
+  local agent=${1:-} cwd=${2:-} label="" exited="" err="" envfile="" timeout="" typed="" nosession=0 bad="" v
+  local setenv=()
   [ $# -ge 2 ] && shift 2 || set --
   while [ $# -gt 0 ]; do
     case $1 in
-      --label|--exited|--err|--env-file|--timeout)
+      --label|--exited|--err|--env-file|--timeout|--env|--typed)
         [ $# -ge 2 ] || { bad="$1 needs a value"; break; }
         case $1 in
           --label) label=$2 ;; --exited) exited=$2 ;; --err) err=$2 ;; --env-file) envfile=$2 ;; --timeout) timeout=$2 ;;
+          --typed) typed=$2 ;;
+          --env) case $2 in [A-Za-z_]*=*) setenv+=("$2") ;; *) bad="--env takes KEY=VALUE, not $2"; break ;; esac ;;
         esac
         shift ;;
+      --no-session) nosession=1 ;;
       --) shift; break ;;
       *) bad="unknown option for start: $1 (the kind and its arguments go after --)"; set --; break ;;
     esac
@@ -823,14 +862,15 @@ start_cmd() {
   [ -n "$exited" ] && rm -f -- "$exited"            # never an earlier agent's
 
   # A fresh tab in the worktree's space, as run places a launch, whose shell hands over to a
-  # bash on the pane's own environment, the caller's POSTMASTER_ settings and the env file: the
-  # settings through a FIFO and never a command line, and the user's shell startup files not at
-  # all, so the agent runs in exactly the form it was given.
+  # bash on the pane's own environment, the caller's POSTMASTER_ settings, the env file and each
+  # --env: the settings through a FIFO and never a command line, and the user's shell startup
+  # files not at all, so the agent runs in exactly the form it was given.
   local placed space tab pane spec i=0
   placed=$(herdr_place "$label" "$cwd") || start_failed 1 "Herdr could not open a tab for $agent in $cwd"
   read -r space tab pane <<< "$placed"
   spec=$(mktemp -d "${TMPDIR:-/tmp}/postmaster-host.XXXXXX") || start_failed 1 "cannot make a spec directory"
   printf '%s' "$cwd" > "$spec/cwd"; printf '%s' "$envfile" > "$spec/envfile"
+  printf '%s\0' ${setenv[@]+"${setenv[@]}"} > "$spec/setenv"
   mkfifo "$spec/env" && start_env_writer "$spec/env"
   herdr pane run "$pane" " exec $(q "$SELF") _shell $(q "$spec")" >/dev/null 2>&1 \
     || { drop_spec "$spec"; start_failed 1 "Herdr could not run the shell for $agent in pane $pane"; }
@@ -848,31 +888,62 @@ sys.exit(0 if f[0].get("argv") == ["bash", "--noprofile", "--norc", "-i"] and p.
     sleep 0.25; i=$((i + 1))
   done
 
-  local out code="" screen group session
-  i=0
-  # Herdr takes a moment to see the new shell at its prompt; until it does, the pane is busy.
-  while ! out=$(herdr agent start "$agent" --kind "$kind" --pane "$pane" ${timeout:+--timeout "$((timeout * 1000))"} -- "$@" 2>&1 >/dev/null); do
-    code=$(printf '%s' "$out" | json 'd["error"]["code"]' 2>/dev/null)
-    [ "$code" = agent_pane_busy ] && [ $i -lt $((claim_wait * 2)) ] || break
-    sleep 0.5; i=$((i + 1)); code=""
-  done
-  if [ -n "$code" ]; then
-    screen=$(herdr agent read "$agent" --source visible --lines 40 2>/dev/null | grep -v '^[[:space:]]*$' | tail -8 | tr -s ' ')
-    group=$(fg_group "$pane"); [ -n "$group" ] && end_group "$group"
-    case $code in
-      agent_not_ready) start_failed 4 "$agent stopped at a question before taking any work, so it was ended: $(printf '%s' "$screen" | tr '\n' ' ')" ;;
-      *) start_failed 1 "herdr could not start $agent: ${code:-$out}" ;;
-    esac
+  local out code="" screen group session="null" line w title ready_wait
+  if [ -n "$typed" ]; then
+    # A harness Herdr has no agent kind for: its command typed into the shell, ready once it has
+    # titled the terminal as it does when it takes input, then reported to Herdr under its name.
+    line=""; for w in "$kind" "$@"; do line+="$(q "$w") "; done
+    herdr pane run "$pane" "${line% }" >/dev/null 2>&1 || start_failed 1 "Herdr could not type the command for $agent into pane $pane"
+    ready_wait=${timeout:-60}; i=0
+    while :; do
+      title=$(herdr pane get "$pane" 2>/dev/null | json 'd["result"]["pane"].get("terminal_title_stripped") or ""' 2>/dev/null)
+      printf '%s' "$title" | grep -Eq -- "$typed" && break
+      group=$(fg_group "$pane")
+      if [ -z "$group" ] && [ $i -ge 8 ]; then
+        start_failed 1 "$agent exited before it was ready: $(herdr pane read "$pane" --source visible --lines 40 2>/dev/null | grep -v '^[[:space:]]*$' | tail -6 | tr -s ' ' | tr '\n' ' ')"
+      fi
+      if [ $i -ge $((ready_wait * 4)) ]; then
+        screen=$(herdr pane read "$pane" --source visible --lines 40 2>/dev/null | grep -v '^[[:space:]]*$' | tail -8 | tr -s ' ')
+        [ -n "$group" ] && end_group "$group"
+        start_failed 4 "$agent never set a terminal title matching $typed within ${ready_wait}s, so it was ended: $(printf '%s' "$screen" | tr '\n' ' ')"
+      fi
+      sleep 0.25; i=$((i + 1))
+    done
+    group=$(fg_group "$pane")
+    [ -n "$group" ] || start_failed 1 "$agent set its title, but no process of its own is in its pane's foreground"
+    herdr pane report-agent "$pane" --source "$SOURCE" --agent "$kind" --state idle --seq "$(seq_now)" >/dev/null 2>&1
+    if ! herdr agent rename "$pane" "$agent" >/dev/null 2>&1; then
+      end_group "$group"; start_failed 1 "Herdr could not name the agent in pane $pane $agent"
+    fi
+    herdr pane report-metadata "$pane" --source "$META" --title "$label" --token postmaster=launch --token input=typed \
+      --token pgid="$group" >/dev/null 2>&1
+  else
+    i=0
+    # Herdr takes a moment to see the new shell at its prompt; until it does, the pane is busy.
+    while ! out=$(herdr agent start "$agent" --kind "$kind" --pane "$pane" ${timeout:+--timeout "$((timeout * 1000))"} -- "$@" 2>&1 >/dev/null); do
+      code=$(printf '%s' "$out" | json 'd["error"]["code"]' 2>/dev/null)
+      [ "$code" = agent_pane_busy ] && [ $i -lt $((claim_wait * 2)) ] || break
+      sleep 0.5; i=$((i + 1)); code=""
+    done
+    if [ -n "$code" ]; then
+      screen=$(herdr agent read "$agent" --source visible --lines 40 2>/dev/null | grep -v '^[[:space:]]*$' | tail -8 | tr -s ' ')
+      group=$(fg_group "$pane"); [ -n "$group" ] && end_group "$group"
+      case $code in
+        agent_not_ready) start_failed 4 "$agent stopped at a question before taking any work, so it was ended: $(printf '%s' "$screen" | tr '\n' ' ')" ;;
+        *) start_failed 1 "herdr could not start $agent: ${code:-$out}" ;;
+      esac
+    fi
+    group=$(fg_group "$pane")
+    [ -n "$group" ] || start_failed 1 "$agent started, but no process of its own is in its pane's foreground"
   fi
-  group=$(fg_group "$pane")
-  [ -n "$group" ] || start_failed 1 "$agent started, but no process of its own is in its pane's foreground"
   reg_add "$group" "$cwd" "$label"
   [ -n "$exited" ] && watch_exit "$group" "$exited"
 
   # The integration's session report is where the thread id comes from; a harness that sends
-  # none is not running with its integration, and cannot be resumed.
+  # none is not running with its integration, and cannot be resumed. With --no-session the caller
+  # reads the thread from the harness's own records instead.
   i=0
-  while :; do
+  while [ "$nosession" = 0 ]; do
     session=$(agent_json "$agent" | python3 -c 'import json, sys
 s = (json.loads(sys.stdin.read() or "{}").get("agent_session") or {})
 if s.get("value"): print(json.dumps({"kind": s.get("kind"), "value": s["value"]}))' 2>/dev/null)
@@ -891,9 +962,9 @@ print(json.dumps({"host": "herdr", "space": sys.argv[1], "tab": sys.argv[2], "pa
 # _shell <spec>: the pane's shell, replaced, by one exec after another and nothing forked, since
 # Herdr counts a pane with any other process in it as busy. It claims the spec and becomes an
 # interactive bash with no startup files, on the pane's own environment, the caller's POSTMASTER_
-# settings from the FIFO, and the env file. Nothing else of the caller's reaches it: a caller that
-# is itself a harness session exports its own identity to its children, and claude started with
-# claude's writes no session record of its own. Its history goes nowhere.
+# settings from the FIFO, the env file, then each --env. Nothing else of the caller's reaches it:
+# a caller that is itself a harness session exports its own identity to its children, and claude
+# started with claude's writes no session record of its own. Its history goes nowhere.
 START_SHELL='import os, signal, sys
 spec = sys.argv[1]
 def field(n):
@@ -901,6 +972,7 @@ def field(n):
         with open(os.path.join(spec, n)) as f: return f.read()
     except OSError: return ""
 cwd, envfile = field("cwd"), field("envfile")
+setenv = [kv for kv in field("setenv").split("\0") if "=" in kv]
 def late(*a): raise TimeoutError()
 signal.signal(signal.SIGALRM, late); signal.alarm(30)
 try:
@@ -908,7 +980,7 @@ try:
 except (OSError, TimeoutError):
     data, ok = b"", False
 signal.alarm(0)
-for n in ("cwd", "envfile", "env"):
+for n in ("cwd", "envfile", "setenv", "env"):
     try: os.unlink(os.path.join(spec, n))
     except OSError: pass
 for d in (os.path.join(spec, "claimed"), spec):
@@ -929,8 +1001,9 @@ try:
 except OSError:
     print("host: cannot enter %s" % cwd); os.execv(login, [login])
 argv = ["bash", "--noprofile", "--norc", "-i"]
-if envfile:
-    argv = ["bash", "-c", "set -a; . \"$1\"; set +a; exec bash --noprofile --norc -i", "live-agent", envfile]
+if envfile or setenv:
+    argv = ["bash", "-c", "if [ -n \"$1\" ]; then set -a; . \"$1\"; set +a; fi; shift; for kv in \"$@\"; do export \"$kv\"; done; "
+            "exec bash --noprofile --norc -i", "live-agent", envfile] + setenv
 os.execvpe("bash", argv, env)'
 live_shell() {
   local spec=$1
@@ -940,23 +1013,46 @@ live_shell() {
   exec python3 -c "$START_SHELL" "$spec"
 }
 
-prompt_cmd() {  # prompt <agent> <file> [--timeout <seconds>]
-  local agent=${1:-} file=${2:-} secs="" rec st out rc code
-  [ -n "$agent" ] && [ -n "$file" ] || die "usage: host.sh prompt <agent> <file> [--timeout <seconds>]"
-  if [ "${3:-}" = --timeout ]; then secs=$(count "${4:-}" seconds) || exit 1; fi
+prompt_cmd() {  # prompt <agent> <file> [--timeout <seconds>] [--no-wait]
+  local agent=${1:-} file=${2:-} secs="" nowait=0 rec st out rc code pane label
+  [ -n "$agent" ] && [ -n "$file" ] || die "usage: host.sh prompt <agent> <file> [--timeout <seconds>] [--no-wait]"
+  shift 2
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --timeout) secs=$(count "${2:-}" seconds) || exit 1; shift ;;
+      --no-wait) nowait=1 ;;
+      *) die "unknown option for prompt: $1" ;;
+    esac
+    shift
+  done
   [ -f "$file" ] && [ -s "$file" ] || die "no such file, or it is empty: $file"
   need_herdr
   agent=$(handle_of "$agent")
   rec=$(agent_json "$agent")
-  [ -n "$rec" ] || { echo '{"outcome": "gone"}'; return 6; }
+  [ -n "$rec" ] && typed_alive "$agent" "$rec" || { echo '{"outcome": "gone"}'; return 6; }
   st=$(printf '%s' "$rec" | json 'd.get("agent_status")')
-  # Only to an agent that has settled: sent to one still working, Herdr's wait can match the end
-  # of the turn already running.
-  case $st in idle|done) ;; *) printf '{"outcome": "not settled", "status": "%s"}\n' "$st"; return 3 ;; esac
-  out=$(herdr agent prompt "$agent" "$(cat "$file")" --wait ${secs:+--timeout "$((secs * 1000))"} 2>&1); rc=$?
-  if [ $rc -eq 0 ]; then
-    st=$(printf '%s' "$out" | json 'd["result"]["agent"]["agent_status"]' 2>/dev/null)
-    printf '{"outcome": "settled", "status": "%s"}\n' "$st"; return 0
+  pane=$(printf '%s' "$rec" | json 'd.get("pane_id")')
+  if [ -n "$(typed_group "$pane")" ]; then
+    # A typed agent: its text pasted into its pane and entered, and Herdr told it is working.
+    label=$(printf '%s' "$rec" | json 'd.get("agent") or ""')
+    herdr pane report-agent "$pane" --source "$SOURCE" --agent "$label" --state working --seq "$(seq_now)" >/dev/null 2>&1
+    if herdr pane send-text "$pane" "$(cat "$file")" >/dev/null 2>&1 && sleep 0.3 && herdr pane send-keys "$pane" enter >/dev/null 2>&1; then
+      echo '{"outcome": "sent"}'; return 0
+    fi
+    echo '{"outcome": "error", "code": "send"}'; echo "host: Herdr could not type into pane $pane for $agent" >&2; return 1
+  fi
+  if [ "$nowait" = 1 ]; then
+    out=$(herdr agent prompt "$agent" "$(cat "$file")" ${secs:+--timeout "$((secs * 1000))"} 2>&1); rc=$?
+    [ $rc -eq 0 ] && { echo '{"outcome": "sent"}'; return 0; }
+  else
+    # Only to an agent that has settled: sent to one still working, Herdr's wait can match the end
+    # of the turn already running.
+    case $st in idle|done) ;; *) printf '{"outcome": "not settled", "status": "%s"}\n' "$st"; return 3 ;; esac
+    out=$(herdr agent prompt "$agent" "$(cat "$file")" --wait ${secs:+--timeout "$((secs * 1000))"} 2>&1); rc=$?
+    if [ $rc -eq 0 ]; then
+      st=$(printf '%s' "$out" | json 'd["result"]["agent"]["agent_status"]' 2>/dev/null)
+      printf '{"outcome": "settled", "status": "%s"}\n' "$st"; return 0
+    fi
   fi
   code=$(printf '%s' "$out" | json 'd["error"]["code"]' 2>/dev/null)
   case $code in
@@ -972,26 +1068,46 @@ state_cmd() {  # state <agent>
   local agent=${1:-} rec
   [ -n "$agent" ] || die "usage: host.sh state <agent>"
   need_herdr
-  rec=$(agent_json "$(handle_of "$agent")")
-  [ -n "$rec" ] || { echo '{"status": "gone"}'; return 6; }
+  agent=$(handle_of "$agent")
+  rec=$(agent_json "$agent")
+  [ -n "$rec" ] && typed_alive "$agent" "$rec" || { echo '{"status": "gone"}'; return 6; }
   printf '%s' "$rec" | python3 -c 'import json, sys
 a = json.load(sys.stdin); s = a.get("agent_session") or {}
 print(json.dumps({"status": a.get("agent_status"), "pane": a.get("pane_id"),
                   "session": {"kind": s.get("kind"), "value": s.get("value")} if s.get("value") else None}))'
 }
 
+report_cmd() {  # report <agent> idle|working: what Herdr shows for a typed agent
+  local agent=${1:-} state=${2:-} rec pane
+  case $state in idle|working) ;; *) die "usage: host.sh report <agent> idle|working" ;; esac
+  need_herdr
+  agent=$(handle_of "$agent")
+  rec=$(agent_json "$agent")
+  [ -n "$rec" ] && typed_alive "$agent" "$rec" || { echo "no live agent is named $agent" >&2; return 6; }
+  pane=$(printf '%s' "$rec" | json 'd.get("pane_id")')
+  [ -n "$(typed_group "$pane")" ] || return 0            # Herdr follows an agent it started itself
+  herdr pane report-agent "$pane" --source "$SOURCE" --agent "$(printf '%s' "$rec" | json 'd.get("agent") or ""')" \
+    --state "$state" --seq "$(seq_now)" >/dev/null 2>&1
+}
+
 end_cmd() {  # end <agent>: only an agent in a pane host.sh opened
-  local agent=${1:-} rec pane tokens group
+  local agent=${1:-} rec pane tokens group typed label
   [ -n "$agent" ] || die "usage: host.sh end <agent>"
   need_herdr
   agent=$(handle_of "$agent")
   rec=$(agent_json "$agent")
   [ -n "$rec" ] || { echo "no live agent is named $agent"; return 0; }
   pane=$(printf '%s' "$rec" | json 'd.get("pane_id")')
-  tokens=$(herdr pane get "$pane" 2>/dev/null | json '(d["result"]["pane"].get("tokens") or {}).get("postmaster")' 2>/dev/null)
-  [ "$tokens" = launch ] || die "$agent runs in pane $pane, which host.sh did not open; not ending it"
+  tokens=$(pane_tokens "$pane")
+  [ "$(printf '%s' "$tokens" | json 'd.get("postmaster")' 2>/dev/null)" = launch ] || die "$agent runs in pane $pane, which host.sh did not open; not ending it"
+  typed=$(typed_group "$pane")
   group=$(fg_group "$pane")
   [ -n "$group" ] && end_group "$group"
+  if [ -n "$typed" ]; then                              # and whatever its launcher left in its group
+    label=$(printf '%s' "$rec" | json 'd.get("agent") or ""')
+    kill -0 -- "-$typed" 2>/dev/null && end_group "$typed"
+    forget_typed "$agent" "$pane" "$label"
+  fi
   echo "ended $agent"
 }
 
@@ -1057,7 +1173,8 @@ write_stubs() {  # write_stubs <dir>: a stub herdr and tmux, which keep their st
   # reach no live server; the live-agent tests of live.sh use them too
   cat > "$1/herdr" <<'EOF'
 #!/usr/bin/env python3
-import fcntl, glob, json, os, re, signal, subprocess, sys, time
+import fcntl, glob, json, os, re, shlex, signal, subprocess, sys, time
+from datetime import datetime, timezone
 S = os.environ["STUB"]; a = sys.argv[1:]
 with open(os.path.join(S, "herdr.calls"), "a") as f: f.write("\t".join(a) + "\n")
 if os.path.exists(os.path.join(S, "herdr.down")): sys.exit(1)
@@ -1065,6 +1182,7 @@ if a == ["agent"]: print("herdr agent commands:\n  kinds: pi|claude|codex"); sys
 lock = open(os.path.join(S, "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
 path = os.path.join(S, "herdr.json")
 st = json.load(open(path)) if os.path.exists(path) else {"n": 0, "spaces": {}, "panes": {}, "open": {}, "agents": [], "live": {}}
+st.setdefault("typed", {})
 def save(): json.dump(st, open(path, "w"))
 def new(prefix): st["n"] += 1; return "%s%d" % (prefix, st["n"])
 def opt(name): return a[a.index(name) + 1] if name in a else None
@@ -1089,9 +1207,57 @@ def pane_env(pane):   # what the pane's shell had when it reached its prompt: `e
     return dict(l.split("=", 1) for l in open(p).read().splitlines() if "=" in l) if os.path.exists(p) else {}
 def live_agent(name):
     v = st["live"].get(name)
-    if v and not alive(v["pgid"]):            # released: its name goes with it
+    if v and not alive(v["pgid"]) and not v.get("typed"):   # released: its name goes with it
         del st["live"][name]; st["agents"] = [n for n in st["agents"] if n != name]; save(); v = None
-    return v
+    return v                                                 # a typed agent's name stays until cleared
+def typed_in(pane):
+    t = st["typed"].get(pane)
+    return t if t and alive(t["pgid"]) else None
+def fake_agent():   # a process standing in for a harness, in a process group of its own; with
+    # typed.straggler, a launcher whose child stays in its group when the launcher alone is ended
+    argv = (["sleep", "0"] if flag("typed.dies") else ["bash", "-c", "sleep 120 & wait"] if flag("typed.straggler")
+            else ["sleep", "120"])
+    proc = subprocess.Popen(argv, start_new_session=True,
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with open(os.environ.get("STUB_PIDS") or os.path.join(S, "fake.pids"), "a") as f: f.write("%d\n" % proc.pid)
+    return proc.pid
+def stamp(): return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+def append(rec, *lines):
+    os.makedirs(os.path.dirname(rec), exist_ok=True)
+    with open(rec, "a") as f:
+        for line in lines: f.write(json.dumps(line) + "\n")
+def turn(v, text):
+    """A turn as a harness takes it: STUB_RUN lines run, STUB_KILL kills it mid-turn, and the
+    command its finish instruction names runs last, unless STUB_NOFINISH. Returns False if killed."""
+    for line in text.splitlines():
+        if line.startswith("STUB_RUN="): subprocess.run(["bash", "-c", line[9:]], cwd=v["cwd"])
+    if "STUB_KILL" in text:
+        os.killpg(v["pgid"], signal.SIGTERM)
+        for _ in range(40):
+            if not alive(v["pgid"]): break
+            time.sleep(0.05)
+        return False
+    m = re.search(r"your very last command: (.+)$", text, re.M)
+    if m and "STUB_NOFINISH" not in text: subprocess.run(["bash", "-c", m.group(1)], cwd=v["cwd"])
+    return True
+def mimo_turn(t, text):   # MiMo's session list and its export, where the stub mimo reads them
+    data = t["env"].get("XDG_DATA_HOME") or S
+    os.makedirs(data, exist_ok=True)
+    now = int(time.time() * 1000)
+    if not t.get("session"):
+        t["session"] = "ses_stub%d" % t["pgid"]
+        lst = os.path.join(data, "sessions.json")
+        sessions = json.load(open(lst)) if os.path.exists(lst) else []
+        sessions.append({"id": t["session"], "directory": t["cwd"], "created": now})
+        json.dump(sessions, open(lst, "w"))
+    exp = os.path.join(data, t["session"])
+    d = json.load(open(exp)) if os.path.exists(exp) else {"info": {"id": t["session"]}, "messages": []}
+    d["messages"].append({"info": {"role": "user", "time": {"created": now}}, "parts": [{"type": "text", "text": text}]})
+    json.dump(d, open(exp, "w"))
+    if not turn(t, text): return
+    d["messages"].append({"info": {"role": "assistant", "finish": "stop", "time": {"created": now + 1, "completed": now + 2}},
+                          "parts": [{"type": "text", "text": "OK."}]})
+    json.dump(d, open(exp, "w"))
 cmd = " ".join(a[:2])
 if cmd == "workspace list": out({"workspaces": [{"workspace_id": w} for w in st["spaces"]]})
 elif cmd == "worktree list":
@@ -1123,7 +1289,42 @@ elif cmd == "workspace get":
     out({"workspace": {"workspace_id": a[2], "tokens": st["spaces"][a[2]]["tokens"]}})
 elif cmd == "pane list":
     out({"panes": [{"pane_id": p, "tokens": st["panes"][p]["tokens"]} for p in st["spaces"][opt("--workspace")]["panes"]]})
-elif cmd == "pane get": out({"pane": {"pane_id": a[2], "agent": None, "tokens": st["panes"].get(a[2], {}).get("tokens", {})}})
+elif cmd == "pane get":
+    pv = st["panes"].get(a[2], {}); t = typed_in(a[2]); r = pv.get("reported") or {}
+    out({"pane": {"pane_id": a[2], "agent": r.get("agent"), "agent_status": r.get("state") or "unknown", "tokens": pv.get("tokens", {}),
+                  "terminal_title_stripped": (t or {}).get("title")}})
+elif cmd == "pane report-agent":
+    st["panes"][a[2]]["reported"] = {"agent": opt("--agent"), "state": opt("--state")}; save()
+elif cmd == "pane release-agent": st["panes"][a[2]].pop("reported", None); save()
+elif cmd == "pane send-text":
+    t = typed_in(a[2])
+    if t: t["pending"] = t.get("pending", "") + a[3]; save()
+elif cmd == "pane send-keys":
+    t = typed_in(a[2])
+    if t and a[3] == "enter" and t.get("pending") and not flag("typed.deaf"):
+        text, t["pending"] = t["pending"], ""
+        with open(os.path.join(S, "prompts.log"), "a") as f: f.write(json.dumps({"pane": a[2], "text": text}) + "\n")
+        save(); fcntl.flock(lock, fcntl.LOCK_UN)
+        mimo_turn(t, text)
+        fcntl.flock(lock, fcntl.LOCK_EX); st2 = json.load(open(path)); st2["typed"][a[2]] = t; json.dump(st2, open(path, "w"))
+elif cmd == "agent rename":
+    if "--clear" in a:
+        st["live"].pop(a[2], None); st["agents"] = [n for n in st["agents"] if n != a[2]]
+    else:
+        t = typed_in(a[2])
+        if not t: error("agent_not_found")
+        st["live"][a[3]] = {"pane": a[2], "pgid": t["pgid"], "kind": t["argv"][0], "args": t["argv"][1:], "cwd": t["cwd"],
+                            "record": None, "session": None, "env": t["env"], "typed": True}
+        st["agents"].append(a[3])
+    save()
+elif cmd == "pane run" and pane_env(a[2]) and not flag("pane.dead"):
+    # A shell at its prompt runs what is typed into it: a typed agent, which titles its terminal
+    # once it takes input.
+    env, argv = pane_env(a[2]), shlex.split(a[3])
+    st["typed"][a[2]] = {"pgid": fake_agent(), "argv": argv, "cwd": env.get("PWD") or st["panes"][a[2]]["cwd"],
+                         "env": env, "title": "" if flag("typed.notitle") else "MiMoCode", "pending": "",
+                         "session": argv[argv.index("-s") + 1] if "-s" in argv[:-1] else None}
+    save()
 elif cmd == "pane run":
     pane, text, ws = a[2], a[3], st["panes"][a[2]]["ws"]
     fcntl.flock(lock, fcntl.LOCK_UN)
@@ -1139,8 +1340,10 @@ elif cmd == "pane run":
 elif cmd == "pane process-info":
     pane = opt("--pane"); pf = os.path.join(S, "pane-%s.pid" % pane)
     shell = int(open(pf).read()) if os.path.exists(pf) else 1
-    ag = next((v for n, v in list(st["live"].items()) if v["pane"] == pane and live_agent(n)), None)
-    if ag: fg, procs = ag["pgid"], [{"pid": ag["pgid"], "argv": [ag["kind"]] + ag["args"], "name": ag["kind"]}]
+    ag = next((v for n, v in list(st["live"].items()) if v["pane"] == pane and live_agent(n) and alive(v["pgid"])), None)
+    t = typed_in(pane)
+    if t: fg, procs = t["pgid"], [{"pid": t["pgid"], "argv": t["argv"], "name": t["argv"][0]}]
+    elif ag: fg, procs = ag["pgid"], [{"pid": ag["pgid"], "argv": [ag["kind"]] + ag["args"], "name": ag["kind"]}]
     elif pane_env(pane): fg, procs = shell, [{"pid": shell, "argv": ["bash", "--noprofile", "--norc", "-i"], "name": "bash"}]
     else: fg, procs = shell, [{"pid": shell, "argv": ["bash"], "name": "bash"}]
     out({"process_info": {"pane_id": pane, "shell_pid": shell, "foreground_process_group_id": fg, "foreground_processes": procs}})
@@ -1148,20 +1351,35 @@ elif cmd == "agent get":
     v = live_agent(a[2])
     if not v: error("agent_not_found")
     sf = os.path.join(S, "agent-%s.status" % a[2])
-    status = open(sf).read().strip() if os.path.exists(sf) else ("blocked" if flag("agent.blocked") else "idle")
-    out({"agent": {"name": a[2], "agent_status": status, "pane_id": v["pane"], "agent_session": v["session"]}})
+    reported = (st["panes"].get(v["pane"], {}).get("reported") or {}).get("state") if v.get("typed") else None
+    status = open(sf).read().strip() if os.path.exists(sf) else (reported or ("blocked" if flag("agent.blocked") else "idle"))
+    out({"agent": {"name": a[2], "agent": v["kind"], "agent_status": status, "pane_id": v["pane"], "agent_session": v["session"]}})
 elif cmd == "agent start":
     name, kind, pane = a[2], opt("--kind"), opt("--pane")
     if live_agent(name): error("agent_name_taken")
     args = a[a.index("--") + 1:] if "--" in a else []
     env = pane_env(pane); cwd = env.get("PWD") or st["panes"].get(pane, {}).get("cwd") or S
-    proc = subprocess.Popen(["sleep", "120"], start_new_session=True, stdin=subprocess.DEVNULL,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    with open(os.environ.get("STUB_PIDS") or os.path.join(S, "fake.pids"), "a") as f: f.write("%d\n" % proc.pid)
+    pgid = fake_agent()
     # The session the harness's integration would report, and where the harness would keep it.
-    sid = "%08x-0000-4000-8000-%012x" % (st["n"] + 1, proc.pid); st["n"] += 1
+    sid = "%08x-0000-4000-8000-%012x" % (st["n"] + 1, pgid); st["n"] += 1
     home = env.get("HOME") or S
-    if kind == "pi":
+    session = None
+    if kind in ("codex", "muse"):
+        # Neither reports a session: codex begins its rollout at its first prompt, muse its
+        # session.jsonl as it starts, each named by a UUIDv7 that carries its time.
+        sid = "%012x-7000-8000-%012x" % (int(time.time() * 1000), pgid); sid = sid[:8] + "-" + sid[8:]
+        if "resume" in args: sid = args[args.index("resume") + 1]
+        if kind == "codex":
+            base = os.path.join(env.get("CODEX_HOME") or os.path.join(home, ".codex"), "sessions")
+            rec = (glob.glob(os.path.join(base, "*", "*", "*", "*%s.jsonl" % sid)) or
+                   [os.path.join(base, "2026", "01", "01", "rollout-2026-01-01T00-00-00-%s.jsonl" % sid)])[0]
+        else:
+            base = os.path.join(env.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share"), "muse", "sessions")
+            rec = (glob.glob(os.path.join(base, "*", "*", "*", sid, "session.jsonl")) or
+                   [os.path.join(base, "2026", "01", "01", sid, "session.jsonl")])[0]
+            if not os.path.exists(rec):
+                append(rec, {"payload_type": "session.opened.observed", "payload": {"session_id": sid}})
+    elif kind == "pi":
         base = env.get("PI_CODING_AGENT_DIR") or os.path.join(home, ".pi", "agent")
         ref = args[args.index("--session") + 1] if "--session" in args else None
         if ref and not ref.endswith(".jsonl"):
@@ -1174,7 +1392,7 @@ elif cmd == "agent start":
         rec = os.path.join(base, "projects", re.sub(r"[^A-Za-z0-9]", "-", cwd), sid + ".jsonl")
         session = {"agent": kind, "kind": "id", "source": "herdr:" + kind, "value": sid}
     st["agents"].append(name)
-    st["live"][name] = {"pane": pane, "pgid": proc.pid, "kind": kind, "args": args, "cwd": cwd, "record": rec,
+    st["live"][name] = {"pane": pane, "pgid": pgid, "kind": kind, "args": args, "cwd": cwd, "record": rec,
                         "session": None if flag("agent.nosession") else session, "env": env}
     save()
     if flag("agent.notready"): error("agent_not_ready")
@@ -1183,6 +1401,7 @@ elif cmd == "agent prompt":
     name, text = a[2], a[3]
     v = live_agent(name)
     if not v: error("agent_not_found")
+    if v.get("typed"): error("agent_not_ready")                      # Herdr prompts only agents it started
     if flag("prompt.blocked"): error("agent_blocked")
     fcntl.flock(lock, fcntl.LOCK_UN)
     def record(line):
@@ -1190,21 +1409,28 @@ elif cmd == "agent prompt":
         with open(v["record"], "a") as f: f.write(json.dumps(line) + "\n")
     with open(os.path.join(S, "prompts.log"), "a") as f: f.write(json.dumps({"agent": name, "text": text}) + "\n")
     if flag("prompt.dropped"): error("agent_prompt_stalled")          # never reached the harness
-    # Each turn goes in the record in its harness's shape: pi's messages, or claude's entries.
-    pi = v["kind"] == "pi"
-    record({"type": "message", "message": {"role": "user", "content": [{"type": "text", "text": text}]}} if pi
+    # Each turn goes in the record in its harness's shape: pi's messages, claude's entries, codex's
+    # rollout events or muse's run events.
+    kind = v["kind"]
+    if kind == "codex" and not os.path.exists(v["record"]):
+        record({"type": "session_meta", "payload": {"id": re.search(r"([0-9a-f-]{36})\.jsonl$", v["record"]).group(1),
+                                                    "timestamp": stamp(), "cwd": v["cwd"], "originator": "codex-tui"}})
+    record({"type": "message", "message": {"role": "user", "content": [{"type": "text", "text": text}]}} if kind == "pi"
+           else {"type": "event_msg", "payload": {"type": "task_started"}} if kind == "codex"
+           else {"payload_type": "runtime.session", "payload": {"kind": "run", "event": {"kind": "started", "prompt": text}}} if kind == "muse"
            else {"type": "user", "message": {"role": "user", "content": text}})
-    for line in text.splitlines():
-        if line.startswith("STUB_RUN="): subprocess.run(["bash", "-c", line[9:]], cwd=v["cwd"])
+    if kind == "codex":
+        record({"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]}})
+    finished = turn(v, text)
     if flag("prompt.stalled"): error("agent_prompt_stalled")          # ran at once, and no turn was seen
-    if "STUB_KILL" in text:                                          # killed mid-turn: reported done
-        os.killpg(v["pgid"], signal.SIGTERM)
-        for _ in range(40):
-            if not alive(v["pgid"]): break
-            time.sleep(0.05)
+    if not finished:                                                 # killed mid-turn: reported done
         out({"agent": {"name": name, "agent_status": "done"}}); sys.exit(0)
-    record({"type": "message", "message": {"role": "assistant", "stopReason": "stop", "content": [{"type": "text", "text": "OK."}]}} if pi
+    record({"type": "message", "message": {"role": "assistant", "stopReason": "stop", "content": [{"type": "text", "text": "OK."}]}} if kind == "pi"
+           else {"type": "event_msg", "payload": {"type": "task_complete", "last_agent_message": "OK."}} if kind == "codex"
+           else {"payload_type": "runtime.session", "payload": {"kind": "run", "event": {"kind": "assistant_message_committed", "text": "OK."}}} if kind == "muse"
            else {"type": "assistant", "message": {"role": "assistant", "stop_reason": "end_turn", "content": [{"type": "text", "text": "OK."}]}})
+    if kind == "muse":
+        record({"payload_type": "runtime.session", "payload": {"kind": "run", "event": {"kind": "terminal", "terminal": "completed"}}})
     if flag("prompt.timeout"): error("timeout")
     if "--wait" in a: out({"agent": {"name": name, "agent_status": "blocked" if flag("prompt.ends-blocked") else "done"}})
     else: out({})
@@ -1374,6 +1600,7 @@ self_test() {
     'marker "$tmp/logs/h6.done" 10 && ! kill -0 "$(cat "$tmp/logs/h6.pid")" 2>/dev/null'
   got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --marker ../logs/h7.done --pidfile ../logs/h7.pid -- sleep 60)
   panepid=$(cat "$tmp/stub/pane-${got##*pane=}.pid")
+  i=0; while [ ! -s "$tmp/logs/h7.pid" ] && [ $i -lt 50 ]; do sleep 0.2; i=$((i + 1)); done   # the runner writes it once the launch runs
   kill -KILL -- "-$panepid" 2>/dev/null; kill -KILL -- "-$(cat "$tmp/logs/h7.pid")" 2>/dev/null
   check "its runner and the launch killed outright: the marker still lands" 'marker "$tmp/logs/h7.done" 10'
   touch "$tmp/stub/pane.dead"
@@ -1569,6 +1796,67 @@ st = json.load(open(sys.argv[1])); st["panes"][sys.argv[2]]["tokens"] = {}; json
   hs "$STUBS" -- end t1-own >/dev/null 2>&1; rc=$?
   check "end never ends an agent in a pane host.sh did not open" '[ $rc -eq 1 ] && kill -0 "$group" 2>/dev/null' "$got"
 
+  echo "live agents Herdr has no kind for, and ones that report no session (stub Herdr)"
+  wt=$repo/.worktrees/T-1-sol
+  got=$(hs "$STUBS" -- start t1-mimo "$wt" --label "$NAME" --exited "$tmp/logs/m1.exited" --env-file "$tmp/lane.env" \
+        --env XDG_DATA_HOME="$tmp/mimo-data" --env MIMO_FLAG=on --no-session --typed '^(MiMoCode|MC \|)' \
+        -- mimo -m 'prov/a model' --trust); rc=$?
+  pane=$(printf '%s' "$got" | json 'd["pane"]' 2>/dev/null); group=$(printf '%s' "$got" | json 'd["group"]' 2>/dev/null)
+  want=$(printf 'pane\trun\t%s\t%s' "$pane" "'mimo' '-m' 'prov/a model' '--trust'")
+  check "start --typed: the command is typed into the pane's shell, each word quoted, and start returns once it titles its terminal" \
+    '[ $rc -eq 0 ] && [ -n "$group" ] && calls herdr | grep -qxF "$want"' "$got"
+  check "with no session, as --no-session asks, and never through herdr agent start" \
+    '[ "$(printf "%s" "$got" | json "d[\"session\"]")" = "" ] && ! calls herdr | grep -q "^agent${T}start${T}t1-mimo"' "$got"
+  check "Herdr is told it is an agent, idle, and names it" \
+    'calls herdr | grep -q "^pane${T}report-agent${T}$pane${T}--source${T}custom:postmaster${T}--agent${T}mimo${T}--state${T}idle${T}--seq${T}[0-9]" && calls herdr | grep -qx "agent${T}rename${T}$pane${T}t1-mimo"'
+  check "each --env reaches the pane's shell after the env file, and no command line" \
+    '[ "$(env_of XDG_DATA_HOME)" = "$tmp/mimo-data" ] && [ "$(env_of MIMO_FLAG)" = on ] && [ "$(env_of SECRET_PROBE)" = from-the-env-file ] && ! calls herdr | grep -q "MIMO_FLAG"' \
+    "$(cat "$tmp/stub/pane-$pane.env" 2>/dev/null)"
+  printf 'Write it.\nSTUB_RUN=echo typed > TYPED.md\nWhen this turn is over, run this as your very last command: touch %s\n' "$tmp/logs/m1.finished" > "$tmp/p-typed.txt"
+  got=$(hs "$STUBS" -- prompt t1-mimo "$tmp/p-typed.txt" --no-wait); rc=$?
+  check "prompt to a typed agent: its text pasted into its pane and entered, and it reads as working" \
+    '[ $rc -eq 0 ] && [ "$(printf "%s" "$got" | json "d[\"outcome\"]")" = sent ] && calls herdr | grep -q "^pane${T}send-text${T}$pane${T}Write it." && calls herdr | grep -qx "pane${T}send-keys${T}$pane${T}enter" && [ "$(hs "$STUBS" -- state t1-mimo | json "d[\"status\"]")" = working ]' "$got"
+  check "and the turn it took ran its work, then its finish command" '[ -s "$wt/TYPED.md" ] && [ -e "$tmp/logs/m1.finished" ]'
+  hs "$STUBS" -- report t1-mimo idle; rc=$?
+  check "report: a typed agent's status is what host.sh tells Herdr" '[ $rc -eq 0 ] && [ "$(hs "$STUBS" -- state t1-mimo | json "d[\"status\"]")" = idle ]'
+  kill -TERM -- "-$group" 2>/dev/null; marker "$tmp/logs/m1.exited" 10
+  hs "$STUBS" -- state t1-mimo >/dev/null; a=$?
+  check "a typed agent whose process has gone is gone, though Herdr still holds its name, and the name is freed" \
+    '[ $a -eq 6 ] && calls herdr | grep -qx "agent${T}rename${T}t1-mimo${T}--clear" && ! hs "$STUBS" -- state t1-mimo >/dev/null'
+  got=$(hs "$STUBS" -- start t1-mimo2 "$wt" --no-session --typed '^MiMoCode' -- mimo --trust); group=$(printf '%s' "$got" | json 'd["group"]' 2>/dev/null)
+  hs "$STUBS" -- end t1-mimo2 >/dev/null; hs "$STUBS" -- state t1-mimo2 >/dev/null; a=$?
+  check "end: a typed agent stops, Herdr is released from it, and its name is freed" \
+    '[ -n "$group" ] && ! kill -0 "$group" 2>/dev/null && [ $a -eq 6 ] && calls herdr | grep -q "^pane${T}release-agent${T}.*--agent${T}mimo${T}--seq"' "$got"
+  touch "$tmp/stub/typed.straggler"
+  got=$(hs "$STUBS" -- start t1-mimo5 "$wt" --no-session --typed '^MiMoCode' -- mimo --trust); group=$(printf '%s' "$got" | json 'd["group"]' 2>/dev/null)
+  rm -f "$tmp/stub/typed.straggler"
+  kill -TERM "$group" 2>/dev/null; sleep 0.5
+  a=$(kill -0 -- "-$group" 2>/dev/null && echo left || echo none); hs "$STUBS" -- state t1-mimo5 >/dev/null; b=$?
+  check "a typed agent whose launcher exits is gone, and what it left running in its group is ended" \
+    '[ -n "$group" ] && [ "$a" = left ] && [ $b -eq 6 ] && ! kill -0 -- "-$group" 2>/dev/null' "$got"
+  touch "$tmp/stub/typed.notitle"
+  got=$(hs "$STUBS" -- start t1-mimo3 "$wt" --exited "$tmp/logs/m3.exited" --err "$tmp/logs/m3.err" --timeout 2 --no-session --typed '^MiMoCode' -- mimo 2>&1); rc=$?
+  rm -f "$tmp/stub/typed.notitle"
+  check "a typed agent that never sets its title: exit 4, ended, and its marker lands" \
+    '[ $rc -eq 4 ] && [ -e "$tmp/logs/m3.exited" ] && grep -q "never set a terminal title" "$tmp/logs/m3.err"' "$got"
+  touch "$tmp/stub/typed.dies"
+  got=$(hs "$STUBS" -- start t1-mimo4 "$wt" --no-session --typed '^MiMoCode' -- mimo 2>&1); rc=$?
+  rm -f "$tmp/stub/typed.dies"
+  check "one that exits before it is ready: exit 1, said so" '[ $rc -eq 1 ] && case $got in *"exited before it was ready"*) true ;; *) false ;; esac' "$got"
+  wt=$repo/.worktrees/T-1-luna
+  got=$(hs "$STUBS" POSTMASTER_HOST_SESSION_WAIT=1 -- start t1-codex "$wt" --no-session -- codex -m m --no-daemon); rc=$?
+  check "--no-session: an agent Herdr starts that reports no session still starts, with none" \
+    '[ $rc -eq 0 ] && [ "$(printf "%s" "$got" | json "d[\"session\"]")" = "" ]' "$got"
+  printf 'Look.\nWhen this turn is over, run this as your very last command: touch %s\n' "$tmp/logs/c1.finished" > "$tmp/p-codex.txt"
+  echo working > "$tmp/stub/agent-t1-codex.status"
+  got=$(hs "$STUBS" -- prompt t1-codex "$tmp/p-codex.txt" --no-wait); rc=$?
+  rm -f "$tmp/stub/agent-t1-codex.status"
+  check "prompt --no-wait sends at once, never waiting, whatever Herdr reads the agent as" \
+    '[ $rc -eq 0 ] && [ -e "$tmp/logs/c1.finished" ] && calls herdr | grep "^agent${T}prompt${T}t1-codex" | tail -1 | grep -qv -- "--wait"' "$got"
+  hs "$STUBS" -- report t1-codex working; rc=$?
+  check "report does nothing for an agent Herdr started itself" '[ $rc -eq 0 ] && ! calls herdr | grep -q "report-agent.*--agent${T}codex"'
+  hs "$STUBS" -- end t1-codex >/dev/null
+
   finish self-test
 }
 
@@ -1678,6 +1966,7 @@ case ${1:-} in
   start) shift; start_cmd "$@" ;;
   prompt) shift; prompt_cmd "$@" ;;
   state) shift; state_cmd "$@" ;;
+  report) shift; report_cmd "$@" ;;
   end) shift; end_cmd "$@" ;;
   _run) runner "$2" "$3" ;;
   _shell) live_shell "$2" ;;
@@ -1685,5 +1974,5 @@ case ${1:-} in
   _stubs) write_stubs "$2" ;;
   --self-test) self_test ;;
   --live-test) live_test ;;
-  *) echo "usage: host.sh detect | name | run | stop | close | spawn | send | wait | read | start | prompt | state | end | --self-test | --live-test (see the header)" >&2; exit 1 ;;
+  *) echo "usage: host.sh detect | name | run | stop | close | spawn | send | wait | read | start | prompt | state | report | end | --self-test | --live-test (see the header)" >&2; exit 1 ;;
 esac

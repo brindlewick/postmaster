@@ -9,8 +9,9 @@
 #                     [--run <dispatch>]
 #   launch.sh skill   <name> <skill> [--run <dispatch>]
 #   launch.sh live    <name> <cwd> [--leg <leg>] [--resume <thread-id>] [--run <dispatch>]
-#   launch.sh session <name> <cwd> <kind> <value> [--leg <leg>] [--run <dispatch>]
-#   launch.sh last    <name> <cwd> <record> <offset> [--leg <leg>] [--run <dispatch>]
+#   launch.sh session <name> <cwd> id|path|records <value> [--leg <leg>] [--run <dispatch>]
+#   launch.sh turn    <name> <cwd> <thread> <record> <offset> <since> <prompt-file> [--leg <leg>]
+#                     [--run <dispatch>]
 #   launch.sh --self-test
 #
 # The config is the live one, ~/.postmaster/config.toml (POSTMASTER_CONFIG overrides the path),
@@ -40,15 +41,23 @@
 #
 # With host.live_agents true in the config, lanes and coachman legs run as live agents in Herdr
 # panes (harnesses.md and hosts.md, Live agents). `form` then prints a lane's or the coachman's
-# live form, `herdr agent start ... -- <interactive form>`, and refuses it when the session host
-# is not Herdr or the harness's Herdr integration is not installed in the config its environment
-# names, the env file included. `live` makes the same checks, trusts <cwd> where the harness
-# would otherwise ask, and prints one JSON line for scripts/host.sh start: the Herdr kind, the env
-# file and the interactive arguments, resuming <thread-id> with --resume. `session` turns the
-# session reference the integration reported to Herdr into the thread id and the path of the
-# harness's session record, tab-separated. `last` prints the final message of the turn the
-# session record holds past byte <offset>, when that turn has ended with one, and exits 1 when it
-# has not, 3 for a harness whose record this script cannot read. launch and resume stay
+# live form: `herdr agent start ... -- <interactive form>`, or, for a harness Herdr has no agent
+# kind for, the command typed into the pane's shell. A harness that runs on its own signal adds
+# the variables its pane's shell sets and `finish: signal file`. The form is refused when the
+# session host is not Herdr, or when claude, pi, grok or agy lacks its Herdr integration in the
+# config its environment names, the env file included. codex, muse and mimo need none: such a
+# lane signals its own finish by writing a file the flow names, and its thread comes from the
+# harness's own records. `live` makes the same checks, readies what the harness would otherwise
+# stop to ask about or run without (trust; MiMo's variant), and prints one JSON line for
+# scripts/host.sh start: the kind or the typed command, the env file, the pane's variables, the
+# interactive arguments and whether the lane signals, resuming <thread-id> with --resume.
+# `session` turns a session reference into the thread id and the path of the harness's session
+# record, tab-separated: the reference the integration reported to Herdr (id or path), or
+# `records <since>`, the first thread the harness's own records hold for this launch that began
+# at or after <since>, in epoch seconds, and nothing while none has. `turn` reads a turn from the
+# harness's own record, past byte <offset> of <record>, or since <since> for a record that is not
+# a file of lines, and prints one JSON line: whether the record holds the prompt in
+# <prompt-file>, whether that turn has ended, and its final message. launch and resume stay
 # headless, and the postmaster is never a live lane.
 #
 #   exit 0  the forms or the skill's prompt were printed, or the harness exited 0
@@ -58,7 +67,8 @@
 #           form this script does not have (agy resume), a skill that is not security-review,
 #           or a muse or mimo resume of a thread the launch's data directory does not hold; with
 #           the key on, no Herdr, or no Herdr integration where the harness reads its config
-#   exit 3  skill: the lane's harness has no such skill recorded
+#   exit 3  skill: the lane's harness has no such skill recorded; turn: the harness's record is
+#           not one this script reads
 #   else    the harness's own exit code
 set -uo pipefail
 CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
@@ -78,8 +88,14 @@ if [ "${1:-}" = --self-test ]; then
     printf '#!/bin/sh\necho "$@ probe=${PROBE:-}"\n' > "$tmp/bin/$h" && chmod +x "$tmp/bin/$h"
   done
   # The muse and mimo stubs also print what arrived on their stdin. Their export finds a thread
-  # only where a file of its name sits in their XDG_DATA_HOME.
-  printf '#!/bin/sh\n[ "$1" = export ] && { [ -e "$XDG_DATA_HOME/$2" ] && exit 0; echo "Session not found: $2" >&2; exit 1; }\nprintf "%%s probe=%%s stdin=%%s import-off=%%s data=%%s\\n" "$*" "${PROBE:-}" "$(cat)" "${MIMOCODE_DISABLE_CLAUDE_IMPORT:-}" "${XDG_DATA_HOME:-}"\n' > "$tmp/bin/mimo" && chmod +x "$tmp/bin/mimo"
+  # only where a file of its name sits in their XDG_DATA_HOME; mimo's prints that file, and its
+  # session list prints sessions.json there.
+  cat > "$tmp/bin/mimo" <<'SH' && chmod +x "$tmp/bin/mimo"
+#!/bin/sh
+if [ "$1" = export ]; then [ -e "$XDG_DATA_HOME/$2" ] && { cat "$XDG_DATA_HOME/$2"; exit 0; }; echo "Session not found: $2" >&2; exit 1; fi
+if [ "$1" = session ] && [ "$2" = list ]; then cat "$XDG_DATA_HOME/sessions.json" 2>/dev/null || echo "[]"; exit 0; fi
+printf "%s probe=%s stdin=%s import-off=%s data=%s\n" "$*" "${PROBE:-}" "$(cat)" "${MIMOCODE_DISABLE_CLAUDE_IMPORT:-}" "${XDG_DATA_HOME:-}"
+SH
   printf '#!/bin/sh\n[ "$1" = export ] && { [ -e "$XDG_DATA_HOME/$3" ] && : > "$5" && exit 0; echo "no retained session log found for session $3" >&2; exit 1; }\nprintf "%%s probe=%%s stdin=%%s data=%%s\\n" "$*" "${PROBE:-}" "$(cat)" "${XDG_DATA_HOME:-}"\n' > "$tmp/bin/muse" && chmod +x "$tmp/bin/muse"
   [ -x "$tmp/bin/claude" ] && [ -x "$tmp/bin/pi" ] && [ -x "$tmp/bin/codex" ] && [ -x "$tmp/bin/muse" ] \
     || { echo "self-test: cannot write the stub harnesses"; exit 1; }
@@ -435,7 +451,7 @@ PY
   mkdir -p "$tmp/home/.gemini/config/hooks"; : > "$tmp/home/.gemini/config/hooks/herdr-agent-state.sh"
   : > "$tmp/cc/hooks/herdr-agent-state.sh"; : > "$tmp/pa/extensions/herdr-agent-state.ts"
   printf 'CLAUDE_CONFIG_DIR=%s\n' "$tmp/cc" > "$tmp/cc.env"; printf 'CLAUDE_CONFIG_DIR=%s\n' "$tmp/cc-bare" > "$tmp/cc-bare.env"
-  printf 'PI_CODING_AGENT_DIR=%s\n' "$tmp/pa" > "$tmp/pa.env"
+  printf 'PI_CODING_AGENT_DIR=%s\n' "$tmp/pa" > "$tmp/pa.env"; printf 'CODEX_HOME=%s\n' "$tmp/cx-home" > "$tmp/cx.env"
   printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/pi"; printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/agy"; chmod +x "$tmp/bin/pi" "$tmp/bin/agy"
   git init -q -b main "$tmp/repo" && git -C "$tmp/repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m first \
     && git -C "$tmp/repo" worktree add -q .worktrees/T-1-one -b T-1-one || exit 1
@@ -445,7 +461,8 @@ PY
     { printf '[lanes.one]\nharness = "claude"\nmodel = "lane-model"\nenv_file = "%s"\n\n' "$e"
       printf '[lanes.two]\nharness = "pi"\nmodel = "pi-model"\nenv_file = "%s"\n\n' "$tmp/pa.env"
       printf '[lanes.three]\nharness = "agy"\nmodel = "agy-model"\n\n'
-      printf '[lanes.four]\nharness = "mimo"\nmodel = "prov/mimo-model"\n\n[lanes.five]\nharness = "muse"\nmodel = "muse-model"\n\n[team]\n'
+      printf '[lanes.four]\nharness = "mimo"\nmodel = "prov/mimo-model"\neffort = "high"\n\n[lanes.five]\nharness = "muse"\nmodel = "muse-model"\n\n'
+      printf '[lanes.six]\nharness = "codex"\nmodel = "codex-model"\neffort = "high"\nenv_file = "%s"\n\n[team]\n' "$tmp/cx.env"
       printf 'coachman = { harness = "claude", model = "coach-model", env_file = "%s" }\n' "$tmp/cc.env"
       printf 'coachman_fallback = { harness = "claude", model = "fallback-model" }\n'
       printf 'postmaster = { harness = "claude", model = "boss-model" }\n\n[team.coachman_legs]\n'
@@ -476,8 +493,40 @@ PY
   refused "key on, and the harness's integration missing from its config dir: refused, naming the command" onbare \
     "CLAUDE_CONFIG_DIR=$tmp/cc-bare herdr integration install claude" form one
   refused "a key that is not true or false is refused" notbool "must be true or false" form one
-  refused "a mimo lane cannot run live: Herdr has no integration for it" on "mimo has no Herdr integration" form four
-  refused "nor can a muse lane" on "muse has no Herdr integration" form five
+  carries "codex runs live on its own signal, with no integration: its form keeps its thread in its pane, and bypasses" on \
+    "herdr agent start <agent> --kind codex --pane <pane> -- -m codex-model -c model_reasoning_effort=\\\"high\\\" --no-daemon --dangerously-bypass-approvals-and-sandbox; finish: signal file" form six
+  carries "and resumes its thread by id" on "resume: herdr agent start <agent> --kind codex --pane <pane> -- resume <thread-id> -m codex-model" form six
+  carries "muse runs live on its own signal, in its launch's own data directory" on \
+    "herdr agent start <agent> --kind muse --pane <pane> -- --model muse-model --yolo; pane env XDG_DATA_HOME=<harness-data>/muse/<key>; finish: signal file" form five
+  carries "and resumes its session by id" on "resume: herdr agent start <agent> --kind muse --pane <pane> -- resume <thread-id> --model muse-model --yolo" form five
+  carries "MiMo, which Herdr has no kind for, is typed into its pane, bypassed by its variable, ready once it titles its terminal" on \
+    'launch: herdr pane run <pane> "mimo -m prov/mimo-model --trust"; pane env XDG_DATA_HOME=<harness-data>/mimo/<key> XDG_STATE_HOME=<harness-data>/mimo/<key>/state MIMOCODE_DISABLE_CLAUDE_IMPORT=1 MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS=1; ready: title ^(MiMoCode|MC \|); finish: signal file' form four
+  lacks "and never with the bypass flag, which asks a question on a terminal" on "--dangerously-skip-permissions" form four
+  carries "and resumes its session with -s" on 'resume: herdr pane run <pane> "mimo -m prov/mimo-model -s <thread-id> --trust"' form four
+  lacks "a lane on its own signal needs no Herdr integration, so none is looked for" onbare "integration install" form six
+  field() { printf '%s' "$out" | python3 -c 'import json, sys; f = json.load(sys.stdin); v = eval(sys.argv[1]); print(" ".join(v) if isinstance(v, list) else v)' "$1"; }
+  run on live four "$lwt"; mdata=$(field '[e.split("=", 1)[1] for e in f["env"] if e.startswith("XDG_DATA_HOME=")]')
+  [ $rc -eq 0 ] && [ "$(field 'f["kind"]')|$(field 'f["typed"]')|$(field 'f["signal"]')|$(field 'f["args"]')" = "|mimo|True|-m prov/mimo-model --trust" ] \
+    && [ "$(field 'f["env"]')" = "XDG_DATA_HOME=$mdata XDG_STATE_HOME=$mdata/state MIMOCODE_DISABLE_CLAUDE_IMPORT=1 MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS=1" ] \
+    && case $mdata in "$tmp/home/.postmaster/harness-data/mimo/"?*) true ;; *) false ;; esac \
+    && ok "live, for MiMo: the command to type, the title it is ready at, its variables, and that it signals" \
+    || fail "live, for MiMo: the command to type, the title it is ready at, its variables, and that it signals"
+  python3 -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))["variant"] == {"prov/mimo-model": "high"} else 1)' \
+    "$mdata/state/mimocode/model.json" 2>/dev/null && ok "and puts the lane's effort where MiMo's interface reads its variant, in the launch's own state" \
+    || fail "and puts the lane's effort where MiMo's interface reads its variant, in the launch's own state"
+  run on live six "$lwt"
+  [ $rc -eq 0 ] && [ "$(field 'f["signal"]')" = True ] && grep -qxF "[projects.\"$lwt\"]" "$tmp/cx-home/config.toml" \
+    && ok "live, for codex: it signals, and its directory is trusted in the config dir its env file names" \
+    || fail "live, for codex: it signals, and its directory is trusted in the config dir its env file names"
+  run on live six "$lwt"
+  [ "$(grep -cxF "[projects.\"$lwt\"]" "$tmp/cx-home/config.toml")" = 1 ] && ok "and trusted once, however often it starts" \
+    || fail "and trusted once, however often it starts"
+  run on live five "$lwt"; udata=$(field '[e.split("=", 1)[1] for e in f["env"] if e.startswith("XDG_DATA_HOME=")]')
+  [ $rc -eq 0 ] && [ -d "$udata" ] && ok "live, for muse: its launch's data directory is made" || fail "live, for muse: its launch's data directory is made"
+  refused "a live muse resume of a thread its data directory does not hold is refused" on \
+    "no muse thread 01a0-none in this launch's data directory" live five "$lwt" --resume 01a0-none
+  : > "$udata/01a0-held"
+  carries "and one it holds is resumed" on '"resume", "01a0-held", "--model", "muse-model"' live five "$lwt" --resume 01a0-held
   out=""; run on live one "$lwt"
   [ $rc -eq 0 ] && [ "$(printf '%s' "$out" | python3 -c 'import json, sys; f = json.load(sys.stdin); print(f["kind"], f["env_file"], " ".join(f["args"]))')" \
     = "claude $tmp/cc.env --model lane-model --dangerously-skip-permissions" ] \
@@ -547,6 +596,14 @@ PY
   carries "session: pi's reported path names the thread" on "0199aa00-0000-7000-8000-000000000001	$tmp/pa/sessions/--x--/2026_0199aa00-0000-7000-8000-000000000001.jsonl" \
     session two "$lwt" path "$tmp/pa/sessions/--x--/2026_0199aa00-0000-7000-8000-000000000001.jsonl"
   # Session records in each harness's shape: an earlier turn, then this one's prompt and reply.
+  # `turn` prints whether the record holds the prompt, whether its turn has ended, and its final message.
+  turned() {  # turned <label> <heard> <ended> <final or -> <name> <record> <offset> [<thread> <since> <prompt>]
+    local label=$1 want="$2 $3 $4"; shift 4
+    run on turn "$1" "$lwt" "${4:-T}" "$2" "$3" "${5:-0}" "${6:-$tmp/p-turn.txt}"
+    [ $rc -eq 0 ] && [ "$(printf '%s' "$out" | python3 -c 'import json, sys; t = json.load(sys.stdin)
+print(str(t["heard"]).lower(), str(t["ended"]).lower(), "-" if t["final"] is None else t["final"])')" = "$want" ] && ok "$label" || fail "$label"
+  }
+  printf 'review it\n' > "$tmp/p-turn.txt"; printf 'something else\n' > "$tmp/p-other.txt"
   { printf '%s\n' '{"type":"user","message":{"role":"user","content":"an earlier turn"}}' \
       '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"old"}]}}'
   } > "$tmp/cl.jsonl"; off=$(wc -c < "$tmp/cl.jsonl")
@@ -554,17 +611,93 @@ PY
     '{"type":"assistant","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","name":"Bash"}]}}' \
     '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}' \
     '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"P2 a finding"}]}}' >> "$tmp/cl.jsonl"
-  carries "last: claude's final message is its last entry that ended the turn" on "P2 a finding" last one "$lwt" "$tmp/cl.jsonl" "$off"
-  head -c "$(( $(wc -c < "$tmp/cl.jsonl") - $(tail -1 "$tmp/cl.jsonl" | wc -c) ))" "$tmp/cl.jsonl" > "$tmp/cl-cut.jsonl"
-  run on last one "$lwt" "$tmp/cl-cut.jsonl" "$off"
-  [ $rc -eq 1 ] && [ -z "$out" ] && ok "a turn cut off mid-tool, and an earlier turn's reply, are no final message" \
-    || fail "a turn cut off mid-tool, and an earlier turn's reply, are no final message"
-  printf '%s\n' '{"type":"session","id":"P-1"}' '{"type":"message","message":{"role":"user","content":[{"type":"text","text":"go"}]}}' \
+  cut_last() { head -c "$(( $(wc -c < "$1") - $(tail -1 "$1" | wc -c) ))" "$1" > "$2"; }
+  turned "turn: claude's final message is its last entry that ended the turn" true true "P2 a finding" one "$tmp/cl.jsonl" "$off"
+  cut_last "$tmp/cl.jsonl" "$tmp/cl-cut.jsonl"
+  turned "a claude turn cut off mid-tool has not ended, and an earlier turn's reply is not its message" true false - one "$tmp/cl-cut.jsonl" "$off"
+  turned "a record that does not hold the prompt has not heard it" false false - one "$tmp/cl.jsonl" "$off" T 0 "$tmp/p-other.txt"
+  printf '%s\n' '{"type":"session","id":"P-1"}' '{"type":"message","message":{"role":"user","content":[{"type":"text","text":"review it"}]}}' \
     '{"type":"message","message":{"role":"assistant","stopReason":"toolUse","content":[]}}' \
     '{"type":"message","message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"clean"}]}}' > "$tmp/pi.jsonl"
-  carries "last: pi's final message is its last assistant message that stopped" on "clean" last two "$lwt" "$tmp/pi.jsonl" 0
-  run on last three "$lwt" "$tmp/pi.jsonl" 0
-  [ $rc -eq 3 ] && ok "last: a harness whose record is not recorded here exits 3" || fail "last: a harness whose record is not recorded here exits 3"
+  turned "turn: pi's final message is its last assistant message that stopped" true true clean two "$tmp/pi.jsonl" 0
+  # codex's rollout: session_meta first; each turn opens at task_started and ends at task_complete.
+  cxs=$tmp/cx-home/sessions/2026/09/28; mkdir -p "$cxs"
+  rollout() {  # rollout <file> <thread> <cwd> <began, epoch seconds>
+    python3 - "$@" <<'PY'
+import json, sys
+from datetime import datetime, timezone
+f, tid, cwd, began = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4])
+ts = datetime.fromtimestamp(began, timezone.utc).isoformat().replace("+00:00", "Z")
+ev = lambda t, **k: {"type": "event_msg", "payload": dict(type=t, **k)}
+rows = [{"type": "session_meta", "payload": {"id": tid, "timestamp": ts, "cwd": cwd, "originator": "codex-tui"}},
+        ev("task_started", turn_id="t1"),
+        {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "review it"}]}},
+        {"type": "response_item", "payload": {"type": "function_call", "name": "exec_command", "arguments": "{}"}},
+        ev("task_complete", turn_id="t1", last_agent_message="codex found it")]
+open(f, "w").write("".join(json.dumps(r) + "\n" for r in rows))
+PY
+  }
+  now=$(date +%s)
+  rollout "$cxs/rollout-2026-09-28T00-00-01-0199c0de-0000-7000-8000-00000000000a.jsonl" 0199c0de-0000-7000-8000-00000000000a "$lwt" $((now - 3600))
+  rollout "$cxs/rollout-2026-09-28T00-00-02-0199c0de-0000-7000-8000-00000000000b.jsonl" 0199c0de-0000-7000-8000-00000000000b "$tmp/elsewhere" "$now"
+  rollout "$cxs/rollout-2026-09-28T00-00-03-0199c0de-0000-7000-8000-00000000000c.jsonl" 0199c0de-0000-7000-8000-00000000000c "$lwt" "$now"
+  rollout "$cxs/rollout-2026-09-28T00-00-04-0199c0de-0000-7000-8000-00000000000d.jsonl" 0199c0de-0000-7000-8000-00000000000d "$lwt" $((now + 5))
+  touch -d '1 hour ago' "$cxs/rollout-2026-09-28T00-00-01-0199c0de-0000-7000-8000-00000000000a.jsonl"
+  carries "session records: codex's thread is the first rollout begun in this directory since the agent started" on \
+    "0199c0de-0000-7000-8000-00000000000c	$cxs/rollout-2026-09-28T00-00-03-0199c0de-0000-7000-8000-00000000000c.jsonl" session six "$lwt" records $((now - 1))
+  run on session six "$lwt" records $((now + 60))
+  [ $rc -eq 0 ] && [ "$out" = $'\t' ] && ok "and none, while no rollout has begun since" || fail "and none, while no rollout has begun since"
+  cxr=$cxs/rollout-2026-09-28T00-00-03-0199c0de-0000-7000-8000-00000000000c.jsonl
+  carries "session: codex's thread by id" on "0199c0de-0000-7000-8000-00000000000c	$cxr" session six "$lwt" id 0199c0de-0000-7000-8000-00000000000c
+  turned "turn: codex's final message is its task_complete's" true true "codex found it" six "$cxr" 0
+  cut_last "$cxr" "$tmp/cx-cut.jsonl"
+  turned "a codex turn with no task_complete has not ended" true false - six "$tmp/cx-cut.jsonl" 0
+  # muse's session.jsonl, in the launch's own data directory: a run starts, commits messages, and
+  # ends at its terminal event; some records sit inside a transaction's children.
+  uuid7() { python3 -c 'import sys; ms = int(float(sys.argv[1]) * 1000); h = "%012x" % ms; print("%s-%s-7000-8000-%012x" % (h[:8], h[8:], int(sys.argv[2])))' "$@"; }
+  muse_session() {  # muse_session <thread> [cut]
+    local dir=$udata/muse/sessions/2026/09/28/$1; mkdir -p "$dir"
+    python3 - "$dir/session.jsonl" "$1" "${2:-}" <<'PY'
+import json, sys
+f, sid, cut = sys.argv[1], sys.argv[2], sys.argv[3] == "cut"
+def rec(event): return {"stream": {"kind": "session", "id": sid}, "payload_type": "runtime.session", "payload": {"kind": "run", "event": event}}
+rows = [{"retained_frame": "t", "children": [{"record_json": json.dumps(rec({"kind": "started", "prompt": "review it"}))}]},
+        rec({"kind": "assistant_message_committed", "text": "looking"}),
+        rec({"kind": "assistant_message_committed", "text": "muse found it"})]
+if not cut: rows.append(rec({"kind": "terminal", "terminal": "completed"}))
+open(f, "w").write("".join(json.dumps(r) + "\n" for r in rows))
+PY
+    printf '%s\n' "$dir/session.jsonl"
+  }
+  mold=$(uuid7 $((now - 3600)) 1); mnew=$(uuid7 "$now" 2); mcut=$(uuid7 $((now + 5)) 3)
+  muse_session "$mold" >/dev/null; mrec=$(muse_session "$mnew"); mcutrec=$(muse_session "$mcut" cut)
+  carries "session records: muse's thread is the first session begun in the launch's data directory since the agent started" on \
+    "$mnew	$mrec" session five "$lwt" records $((now - 1))
+  carries "session: muse's thread by id" on "$mnew	$mrec" session five "$lwt" id "$mnew"
+  turned "turn: muse's final message is the last it committed before its run's terminal event" true true "muse found it" five "$mrec" 0
+  turned "a muse run with no terminal event has not ended" true false - five "$mcutrec" 0
+  # MiMo's own export, read through it: the stub prints the file of that name in its data directory.
+  mimo_export() {  # mimo_export <thread> <last finish>
+    python3 - "$mdata/$1" "$1" "$2" "$now" <<'PY'
+import json, sys
+f, sid, finish, now = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]) * 1000
+msg = lambda role, created, parts, **info: {"info": dict(role=role, time=dict(created=created, **({"completed": created + 1} if role == "assistant" else {})), **info),
+                                           "parts": [{"type": "text", "text": t} for t in parts]}
+json.dump({"info": {"id": sid}, "messages": [msg("user", now - 7200000, ["an earlier turn"]), msg("assistant", now - 7199000, ["old"], finish="stop"),
+                                             msg("user", now, ["review it"]), msg("assistant", now + 10, [], finish="tool-calls"),
+                                             msg("assistant", now + 20, ["mimo found it"], finish=finish)]}, open(f, "w"))
+PY
+  }
+  mimo_export ses_new stop; mimo_export ses_cut tool-calls
+  printf '[{"id": "ses_old", "directory": "%s", "created": %s}, {"id": "ses_away", "directory": "%s", "created": %s}, {"id": "ses_new", "directory": "%s", "created": %s}]\n' \
+    "$lwt" $(( (now - 3600) * 1000 )) "$tmp/elsewhere" $((now * 1000)) "$lwt" $((now * 1000)) > "$mdata/sessions.json"
+  carries "session records: MiMo's thread is the first session its own list shows begun here since the agent started, its record its database" on \
+    "ses_new	$mdata/mimocode/mimocode.db" session four "$lwt" records $((now - 1))
+  turned "turn: MiMo's final message is its last assistant message that completed for a reason but a tool call" true true "mimo found it" four "-" 0 ses_new "$now"
+  turned "a MiMo turn whose last message is a tool call has not ended" true false - four "-" 0 ses_cut "$now"
+  turned "and a MiMo prompt from before the turn began is not this turn's" false false - four "-" 0 ses_new $((now + 60))
+  run on turn three "$lwt" T "$tmp/pi.jsonl" 0 0 "$tmp/p-turn.txt"
+  [ $rc -eq 3 ] && ok "turn: a harness whose record is not recorded here exits 3" || fail "turn: a harness whose record is not recorded here exits 3"
   envx=""
 
   echo
@@ -574,7 +707,7 @@ fi
 
 die() { echo "launch: $*" >&2; exit 1; }
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
-[ $# -ge 2 ] || die "usage: launch.sh form|launch|resume|skill|live|session|last <name> ... | --self-test"
+[ $# -ge 2 ] || die "usage: launch.sh form|launch|resume|skill|live|session|turn <name> ... | --self-test"
 CMD=$1; NAME=$2; shift 2
 LEG=""; LAST=""; RUN=""; RESUME=""; STDIN_FILE=""; args=()
 while [ $# -gt 0 ]; do
@@ -701,12 +834,12 @@ case $CMD in
           CWD=${args[0]}; THREAD=$RESUME; PROMPT='<prompt-file>'; PTEXT='' ;;
   session) [ ${#args[@]} -eq 3 ] || die "session needs <cwd> <kind> <value>"
           CWD=${args[0]}; THREAD='<thread-id>'; PROMPT='<prompt-file>'; PTEXT='' ;;
-  last)   [ ${#args[@]} -eq 3 ] || die "last needs <cwd> <record> <offset>"
+  turn)   [ ${#args[@]} -eq 6 ] || die "turn needs <cwd> <thread> <record> <offset> <since> <prompt-file>"
           CWD=${args[0]}; THREAD='<thread-id>'; PROMPT='<prompt-file>'; PTEXT='' ;;
   *) die "unknown command: $CMD" ;;
 esac
 [ "$CMD" = form ] || [ -d "$CWD" ] || die "no such directory: $CWD"
-case $CMD in live|session|last) CWD=$(CDPATH= cd -P -- "$CWD" && pwd -P) ;; esac
+case $CMD in live|session|turn) CWD=$(CDPATH= cd -P -- "$CWD" && pwd -P) ;; esac
 case $HARNESS in pi|muse|mimo) [ "$CMD" = launch ] || [ "$CMD" = resume ] ;; *) false ;; esac && {   # read after the cd
   prompt_dir=$(CDPATH= cd -P -- "$(dirname -- "$PROMPT")" && pwd -P) || die "cannot resolve prompt file: $PROMPT"
   PROMPT=$prompt_dir/$(basename "$PROMPT")
@@ -808,23 +941,29 @@ lane_env() {  # lane_env <command...>: run it with the env file loaded, in a sub
 integration_of() {  # the name `herdr integration` gives a harness's integration; none for muse or mimo
   case $1 in agy) echo antigravity-cli ;; claude|codex|grok|pi) echo "$1" ;; esac
 }
-live_checks() {  # refuse a live agent that Herdr or the harness's integration cannot run
+live_checks() {  # refuse a live agent Herdr cannot run. SIGNAL is 1 for a harness whose lane
+  # signals its own finish with a file and whose thread the flow reads from the harness's own
+  # records, 0 for one whose Herdr integration reports both.
   local host target line var="" val=""
   host=$("$HERE/host.sh" detect 2>/dev/null)
   [ "$host" = herdr ] || die "live agents (host.live_agents) need Herdr, and the session host here is ${host:-none}"
+  case $HARNESS in codex|muse|mimo) SIGNAL=1; return 0 ;; esac
+  SIGNAL=0
   target=$(integration_of "$HARNESS")
   [ -n "$target" ] || die "$HARNESS has no Herdr integration, so $NAME cannot run as a live agent"
   line=$(lane_env herdr integration status 2>/dev/null | grep -m1 "^$target: ")
   case $line in
     "") die "herdr integration status names no $target integration, so $NAME cannot run as a live agent" ;;
     *"not installed"*)
-      case $target in claude) var=CLAUDE_CONFIG_DIR ;; pi) var=PI_CODING_AGENT_DIR ;; codex) var=CODEX_HOME ;; esac
+      case $target in claude) var=CLAUDE_CONFIG_DIR ;; pi) var=PI_CODING_AGENT_DIR ;; esac
       [ -n "$var" ] && val=$(lane_env printenv "$var" 2>/dev/null)
       die "$NAME runs on $HARNESS, and Herdr's $target integration is not installed where it reads its config (${line#*: }); install it with: ${val:+$var=$(printf '%q' "$val") }herdr integration install $target" ;;
   esac
 }
-live_args() {  # the harness's interactive form, into KIND and largs; resumes $THREAD when set
-  KIND=$HARNESS; largs=()
+live_args() {  # the harness's interactive form: KIND, or TYPED, the command typed into the pane's
+  # shell for a harness Herdr has no agent kind for, with READY, the terminal title it sets once it
+  # takes input; largs; and LENV, the variables its pane's shell sets. Resumes $THREAD when set.
+  KIND=$HARNESS; TYPED=""; READY=""; largs=(); LENV=()
   local n=${POSTMASTER_LAUNCH_NAME:-}
   case $HARNESS in
     claude) [ -n "$THREAD" ] && largs+=(--resume "$THREAD")
@@ -835,17 +974,31 @@ live_args() {  # the harness's interactive form, into KIND and largs; resumes $T
             largs+=(--model "$MODEL"); [ -n "${EFFORT:-}" ] && largs+=(--thinking "$EFFORT")
             [ -n "$n" ] && largs+=(--name "$n")
             largs+=(--approve) ;;
-    codex)  [ -n "$THREAD" ] && largs+=(resume "$THREAD")
+    codex)  # --no-daemon keeps the thread in this process, in its pane: ending the agent ends it.
+            [ -n "$THREAD" ] && largs+=(resume "$THREAD")
             largs+=(-m "$MODEL"); [ -n "${EFFORT:-}" ] && largs+=(-c "model_reasoning_effort=\"$EFFORT\"")
-            largs+=(--dangerously-bypass-approvals-and-sandbox) ;;
+            largs+=(--no-daemon --dangerously-bypass-approvals-and-sandbox) ;;
     grok)   [ -n "$THREAD" ] && largs+=(--resume "$THREAD")
             largs+=(-m "$MODEL"); [ -n "${EFFORT:-}" ] && largs+=(--reasoning-effort "$EFFORT")
             largs+=(--always-approve) ;;
     agy)    [ -n "$THREAD" ] && die "agy resume form is not recorded, so a live agy lane cannot be resumed (harnesses.md)"
             largs+=(--model "$MODEL" --dangerously-skip-permissions --add-dir "$CWD") ;;
+    muse)   [ -n "$THREAD" ] && largs+=(resume "$THREAD")
+            largs+=(--model "$MODEL"); [ -n "${EFFORT:-}" ] && largs+=(--reasoning-effort "$EFFORT")
+            largs+=(--yolo)
+            LENV=("XDG_DATA_HOME=$DATA") ;;
+    mimo)   # Herdr has no agent kind for MiMo Code, so its command is typed into the pane's shell,
+            # and it takes input once it has titled its terminal. On a terminal the bypass flag asks
+            # a question before anything else; MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS, its documented
+            # bypass for any surface, asks none. Its state, where its variant is kept, is the launch's.
+            KIND=""; TYPED=mimo; READY='^(MiMoCode|MC \|)'
+            largs+=(-m "$MODEL"); [ -n "$THREAD" ] && largs+=(-s "$THREAD")
+            largs+=(--trust)
+            LENV=("XDG_DATA_HOME=$DATA" "XDG_STATE_HOME=$DATA/state" MIMOCODE_DISABLE_CLAUDE_IMPORT=1
+                  MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS=1) ;;
   esac
 }
-trust_live() {  # trust $CWD where the harness would otherwise stop at a question before any work
+prepare_live() {  # ready what the harness would otherwise stop at a question for, or run without
   case $HARNESS in
     claude)
       # Interactive claude asks whether to trust a folder its config has never trusted, bypass
@@ -913,17 +1066,72 @@ finally:
 PY
       ;;
     codex)
-      # As a headless codex launch does, in the config dir the lane's environment names.
+      # Interactive codex asks whether to trust a folder, and Herdr reads that question as an
+      # agent at its prompt. Trusting the directory itself answers it, a git worktree included,
+      # in the config dir the lane's environment names. Duplicate [projects] tables are invalid
+      # TOML, so the grep guard is idempotent on purpose.
       lane_env bash -c 'c=${CODEX_HOME:-$HOME/.codex}/config.toml; mkdir -p "$(dirname "$c")" && touch "$c" &&
         { grep -qF "[projects.\"$1\"]" "$c" || printf "\n[projects.\"%s\"]\ntrust_level = \"trusted\"\n" "$1" >> "$c"; }' _ "$CWD" \
         || die "could not mark $CWD trusted in codex's config" ;;
+    muse)
+      mkdir -p "$DATA" || die "cannot create $DATA" ;;
+    mimo)
+      # MiMo Code's interface has no flag for the variant a headless launch passes. It sends the
+      # one its state's model.json holds for the model, and this launch's state is its own.
+      mkdir -p "$DATA/state/mimocode" || die "cannot create $DATA/state/mimocode"
+      [ -z "${EFFORT:-}" ] || python3 - "$DATA/state/mimocode/model.json" "$MODEL" "$EFFORT" <<'PY' || die "cannot write MiMo's variant under $DATA/state"
+import json, os, sys
+path, model, effort = sys.argv[1:4]
+try:
+    with open(path, encoding="utf-8") as f: state = json.load(f)
+except (OSError, ValueError):
+    state = {}
+if not isinstance(state, dict): state = {}
+for k in ("recent", "favorite"):
+    if not isinstance(state.get(k), list): state[k] = []
+if not isinstance(state.get("variant"), dict): state["variant"] = {}
+state["variant"][model] = effort
+with open(path + ".postmaster", "w", encoding="utf-8") as f: json.dump(state, f, indent=2)
+os.replace(path + ".postmaster", path)
+PY
+      ;;
   esac
 }
-show() { case $1 in '<'*'>'|*'=<'*'>'|'$(cat <prompt-file>)') printf '%s ' "$1" ;; *) printf '%q ' "$1" ;; esac; }
+thread_held() {  # muse opens a new thread under an id it does not hold, and mimo exits 0 having run
+  # nothing (harnesses.md). So a resume on either goes ahead only where the harness's own export
+  # finds the thread in this launch's data directory, which is its launch's only from the same
+  # directory, name, leg and run.
+  local held found why
+  held=$(mktemp -d) || die "cannot make a temporary directory"
+  ( CDPATH= cd -- "$CWD" || exit 1
+    if [ -n "${ENV_FILE:-}" ]; then set -a; . "$ENV_FILE"; set +a; fi
+    export XDG_DATA_HOME=$DATA MIMOCODE_DISABLE_CLAUDE_IMPORT=1
+    if [ "$HARNESS" = muse ]; then muse export --session "$THREAD" --out "$held/thread.json"
+    else mimo export "$THREAD" > "$held/thread.json"; fi ) </dev/null >/dev/null 2>"$held/err"
+  found=$?; why=$(sed 's/\x1b\[[0-9;]*m//g' "$held/err" | tr '\n' ' ' | cut -c1-300); rm -r -- "$held"
+  [ $found -eq 0 ] || die "no $HARNESS thread $THREAD in this launch's data directory, so nothing was resumed; resume from the directory, --leg and --run it was launched with (its export: ${why:-no message})"
+}
+show() { case $1 in '<'*|*'=<'*|'$(cat <prompt-file>)') printf '%s ' "$1" ;; *) printf '%q ' "$1" ;; esac; }
 
 if [ "$CMD" = form ] && [ "$LIVE" = 1 ] && [ "$NAME" != postmaster ]; then
   live_checks
-  put_live() { printf 'herdr agent start <agent> --kind %s --pane <pane> -- ' "$KIND"; for a in "${largs[@]}"; do show "$a"; done; echo; }
+  put_live() {
+    local l a w=""
+    if [ -n "$TYPED" ]; then
+      for a in "$TYPED" "${largs[@]}"; do w+=$(show "$a"); done
+      l="herdr pane run <pane> \"${w% }\""
+    else
+      l="herdr agent start <agent> --kind $KIND --pane <pane> -- "
+      for a in "${largs[@]}"; do l+=$(show "$a"); done
+      l=${l% }
+    fi
+    if [ "$SIGNAL" = 1 ]; then
+      if [ ${#LENV[@]} -gt 0 ]; then l+="; pane env"; for a in "${LENV[@]}"; do l+=" $(show "$a")"; l=${l% }; done; fi
+      [ -n "$READY" ] && l+="; ready: title $READY"
+      l+="; finish: signal file"
+    fi
+    printf '%s\n' "$l"
+  }
   THREAD=""; live_args; printf 'launch: '; put_live
   if resume=$(THREAD='<thread-id>'; live_args 2>&1 && put_live); then printf 'resume: %s\n' "$resume"
   else printf 'resume: none: %s\n' "${resume#launch: }"; fi
@@ -931,58 +1139,175 @@ if [ "$CMD" = form ] && [ "$LIVE" = 1 ] && [ "$NAME" != postmaster ]; then
 fi
 if [ "$CMD" = live ]; then
   [ "$NAME" != postmaster ] || die "the postmaster is spawned, never started as a live lane (SKILL.md)"
-  live_checks; live_args; trust_live
+  live_checks; live_args
+  if [ -n "$THREAD" ] && [ -n "$DATA" ]; then thread_held; fi
+  prepare_live
   python3 -c 'import json, sys
-print(json.dumps({"kind": sys.argv[1], "env_file": sys.argv[2], "args": sys.argv[3:]}))' "$KIND" "${ENV_FILE:-}" "${largs[@]}"
+a = sys.argv[1:]; i = a.index("--")
+print(json.dumps({"kind": a[0], "typed": a[1], "ready_title": a[2], "signal": a[3] == "1", "env_file": a[4],
+                  "env": a[5:i], "args": a[i + 1:]}))' "$KIND" "$TYPED" "$READY" "$SIGNAL" "${ENV_FILE:-}" "${LENV[@]}" -- "${largs[@]}"
   exit 0
 fi
-if [ "$CMD" = last ]; then
-  # A turn's final message, from the harness's own session record: claude's last assistant entry
-  # that ended its turn, pi's last assistant message that stopped, with no user message after it.
-  case $HARNESS in claude|pi) ;; *) echo "launch: the $HARNESS session record's form is not recorded" >&2; exit 3 ;; esac
-  python3 - "$HARNESS" "${args[1]}" "${args[2]}" <<'PY' || exit 1
-import json, os, sys
-harness, record, offset = sys.argv[1], sys.argv[2], sys.argv[3]
+if [ "$CMD" = turn ]; then
+  # A turn, from the harness's own session record: whether it holds the prompt, whether the turn
+  # that took it has ended, and its final message. A new turn opens at claude's or pi's user
+  # message, codex's task_started or muse's run start, and ends at claude's end_turn, pi's stop,
+  # codex's task_complete (or turn_aborted, with no message) or muse's terminal run event. MiMo
+  # keeps its record in a database, read through its own export: the turn ends at an assistant
+  # message that has completed for any reason but a tool call.
+  case $HARNESS in claude|pi|codex|muse|mimo) ;; *) echo "launch: the $HARNESS session record's form is not recorded" >&2; exit 3 ;; esac
+  lane_env python3 - "$HARNESS" "$CWD" "${args[1]}" "${args[2]}" "${args[3]}" "${args[4]}" "${args[5]}" "$DATA" <<'PY'
+import json, os, subprocess, sys
+harness, cwd, thread, record, offset, since, prompt, data = sys.argv[1:9]
+try:
+    text = open(prompt, encoding="utf-8").read()
+except OSError:
+    text = ""
+def norm(s): return " ".join(s.split())
+head = norm(text)[:200]
+def say(heard, ended, final):
+    print(json.dumps({"heard": heard, "ended": bool(heard and ended), "final": final if heard and ended else None}))
+    sys.exit(0)
+def strings(v):
+    if isinstance(v, str): yield v
+    elif isinstance(v, dict):
+        for x in v.values(): yield from strings(x)
+    elif isinstance(v, list):
+        for x in v: yield from strings(x)
+def texts(content):
+    if isinstance(content, str): return content
+    return "".join(p.get("text", "") for p in content or [] if isinstance(p, dict) and p.get("type") == "text")
+if harness == "mimo":
+    if not thread: say(False, False, None)
+    env = dict(os.environ, XDG_DATA_HOME=data, XDG_STATE_HOME=os.path.join(data, "state"), MIMOCODE_DISABLE_CLAUDE_IMPORT="1")
+    try:
+        r = subprocess.run(["mimo", "export", thread], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, timeout=120)
+        msgs = json.loads(r.stdout)["messages"]
+    except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+        say(False, False, None)
+    at, first = None, float(since) * 1000 - 2000
+    for i, m in enumerate(msgs):
+        info = m.get("info") or {}
+        if info.get("role") != "user" or ((info.get("time") or {}).get("created") or 0) < first: continue
+        if head and head in norm(texts(m.get("parts"))): at = i
+    if at is None: say(False, False, None)
+    ended, final = False, None
+    for m in msgs[at + 1:]:
+        info = m.get("info") or {}
+        if info.get("role") == "user":
+            ended, final = False, None                       # another turn has begun
+        elif info.get("role") == "assistant":
+            ended = bool((info.get("time") or {}).get("completed")) and info.get("finish") not in (None, "tool-calls", "unknown")
+            final = texts(m.get("parts")) if ended else None
+    say(True, ended, final)
 try:
     f = open(record, "rb")
     f.seek(int(offset) if os.path.getsize(record) >= int(offset) else 0)
     lines = f.read().decode("utf-8", "replace").splitlines()
 except (OSError, ValueError):
-    sys.exit(1)
-def texts(content):
-    if isinstance(content, str): return content
-    return "".join(p.get("text", "") for p in content or [] if isinstance(p, dict) and p.get("type") == "text")
-final = None
-for line in lines:
-    try: r = json.loads(line)
-    except ValueError: continue
+    say(False, False, None)
+def entries(r):   # muse writes some records inside a transaction, as children
+    if isinstance(r.get("children"), list):
+        for c in r["children"]:
+            try: yield json.loads(c.get("record_json") or "{}")
+            except (ValueError, AttributeError): pass
+    else:
+        yield r
+def kind_of(r):   # ("start" | "end" | "said" | None, text)
     m = r.get("message") or {}
+    p = r.get("payload") or {}
     if harness == "claude":
         if r.get("type") == "user":
             c = m.get("content")
-            if isinstance(c, str) or any(isinstance(p, dict) and p.get("type") == "text" for p in c or []):
-                final = None                        # a user message opens a new turn
+            if isinstance(c, str) or any(isinstance(x, dict) and x.get("type") == "text" for x in c or []): return "start", None
         elif r.get("type") == "assistant" and m.get("stop_reason") in ("end_turn", "stop_sequence"):
-            final = texts(m.get("content"))
-    elif r.get("type") == "message":
-        if m.get("role") == "user": final = None
-        elif m.get("role") == "assistant" and m.get("stopReason") == "stop": final = texts(m.get("content"))
-if final is None: sys.exit(1)
-sys.stdout.write(final + ("" if final.endswith("\n") else "\n"))
+            return "end", texts(m.get("content"))
+    elif harness == "pi":
+        if r.get("type") == "message" and m.get("role") == "user": return "start", None
+        if r.get("type") == "message" and m.get("role") == "assistant" and m.get("stopReason") == "stop":
+            return "end", texts(m.get("content"))
+    elif harness == "codex" and r.get("type") == "event_msg":
+        if p.get("type") == "task_started": return "start", None
+        if p.get("type") == "task_complete": return "end", p.get("last_agent_message") or ""
+        if p.get("type") == "turn_aborted": return "end", None
+    elif harness == "muse" and r.get("payload_type") == "runtime.session" and p.get("kind") == "run":
+        e = p.get("event") or {}
+        if e.get("kind") == "started": return "start", None
+        if e.get("kind") == "assistant_message_committed": return "said", e.get("text") or ""
+        if e.get("kind") == "terminal": return "end", "" if e.get("terminal") == "completed" else None
+    return None, None
+heard, ended, final, said = False, False, None, None
+for line in lines:
+    try: r = json.loads(line)
+    except ValueError: continue
+    if not isinstance(r, dict): continue
+    for e in entries(r):
+        if not isinstance(e, dict): continue
+        if not heard and head and any(head in norm(s) for s in strings(e)): heard = True
+        k, t = kind_of(e)
+        if k == "start": ended, final, said = False, None, None
+        elif k == "said": said = t
+        elif k == "end":
+            ended = True
+            final = (said if t is not None else None) if harness == "muse" else t
+say(heard, ended, final)
 PY
   exit 0
 fi
 if [ "$CMD" = session ]; then
   # Herdr's session report: claude, codex and grok report a session id; pi reports the path of
-  # its session file, whose name ends in the session id. The record is where the harness keeps
-  # the thread, in the config dir the lane's environment names; empty where it is not recorded.
-  lane_env python3 - "$HARNESS" "$CWD" "${args[1]}" "${args[2]}" <<'PY' || die "cannot read the session reference: ${args[1]} ${args[2]}"
-import glob, json, os, re, sys
-harness, cwd, kind, value = sys.argv[1:5]
+  # its session file, whose name ends in the session id. `records` finds the thread in the
+  # harness's own records instead: codex's rollouts name the directory each began in, and muse
+  # and MiMo keep this launch's threads in its own data directory. The record is where the
+  # harness keeps the thread, in the config dir the lane's environment names; for MiMo its
+  # database. Empty where it is not recorded.
+  lane_env python3 - "$HARNESS" "$CWD" "${args[1]}" "${args[2]}" "$DATA" <<'PY' || die "cannot read the session reference: ${args[1]} ${args[2]}"
+import glob, json, os, re, subprocess, sys
+from datetime import datetime
+harness, cwd, kind, value, data = sys.argv[1:6]
 thread, record = value, ""
 def only(pattern):
     hits = glob.glob(pattern)
     return hits[0] if len(hits) == 1 else ""
+def mimo_env():
+    return dict(os.environ, XDG_DATA_HOME=data, XDG_STATE_HOME=os.path.join(data, "state"), MIMOCODE_DISABLE_CLAUDE_IMPORT="1")
+if kind == "records":
+    since, found = float(value), []                           # (began, thread, record)
+    if harness == "codex":
+        home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+        for p in glob.glob(os.path.join(home, "sessions", "*", "*", "*", "rollout-*.jsonl")):
+            try:
+                if os.path.getmtime(p) < since - 2: continue
+                with open(p, encoding="utf-8") as f: r = json.loads(f.readline())
+                m = r.get("payload") or {}
+                began = datetime.fromisoformat(m["timestamp"].replace("Z", "+00:00")).timestamp()
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                continue
+            if r.get("type") == "session_meta" and m.get("id") and os.path.realpath(m.get("cwd") or "/") == cwd \
+                    and began >= since - 2:
+                found.append((began, m["id"], p))
+    elif harness == "muse":
+        for p in glob.glob(os.path.join(data, "muse", "sessions", "*", "*", "*", "*", "session.jsonl")):
+            sid = os.path.basename(os.path.dirname(p))
+            try: began = int(sid.replace("-", "")[:12], 16) / 1000.0      # a UUIDv7 carries its time
+            except ValueError: continue
+            if began >= since - 2: found.append((began, sid, p))
+    elif harness == "mimo":
+        try:
+            r = subprocess.run(["mimo", "session", "list", "--format", "json"], cwd=cwd, env=mimo_env(),
+                               stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
+            sessions = json.loads(r.stdout or "[]")
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            sessions = []
+        for s in sessions if isinstance(sessions, list) else []:
+            began = (s.get("created") or 0) / 1000.0
+            if s.get("id") and os.path.realpath(s.get("directory") or "/") == cwd and began >= since - 2:
+                found.append((began, s["id"], os.path.join(data, "mimocode", "mimocode.db")))
+    else:
+        sys.exit("no records form for %s" % harness)
+    thread, record = (min(found)[1:] if found else ("", ""))
+    print("%s\t%s" % (thread, record)); sys.exit(0)
 if harness == "claude":
     home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
     if kind == "path":
@@ -1007,6 +1332,10 @@ elif harness == "pi":
 elif harness == "codex":
     home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
     record = only(os.path.join(home, "sessions", "*", "*", "*", "*" + glob.escape(value) + ".jsonl"))
+elif harness == "muse":
+    record = only(os.path.join(data, "muse", "sessions", "*", "*", "*", glob.escape(value), "session.jsonl"))
+elif harness == "mimo":
+    record = os.path.join(data, "mimocode", "mimocode.db")
 if not thread:
     sys.exit("no thread id in %s %s" % (kind, value))
 print("%s\t%s" % (thread, record))
@@ -1030,20 +1359,7 @@ if [ "$CMD" = form ]; then
   exit 0
 fi
 
-# muse opens a new thread under an id it does not hold, and mimo exits 0 having run nothing
-# (harnesses.md). So a resume on either is refused unless the harness's own export finds the
-# thread in this launch's data directory, which is its launch's only from the same directory,
-# name, leg and run.
-if [ "$CMD" = resume ] && [ -n "$DATA" ]; then
-  held=$(mktemp -d) || die "cannot make a temporary directory"
-  ( CDPATH= cd -- "$CWD" || exit 1
-    if [ -n "${ENV_FILE:-}" ]; then set -a; . "$ENV_FILE"; set +a; fi
-    export XDG_DATA_HOME=$DATA MIMOCODE_DISABLE_CLAUDE_IMPORT=1
-    if [ "$HARNESS" = muse ]; then muse export --session "$THREAD" --out "$held/thread.json"
-    else mimo export "$THREAD" > "$held/thread.json"; fi ) </dev/null >/dev/null 2>"$held/err"
-  found=$?; why=$(sed 's/\x1b\[[0-9;]*m//g' "$held/err" | tr '\n' ' ' | cut -c1-300); rm -r -- "$held"
-  [ $found -eq 0 ] || die "no $HARNESS thread $THREAD in this launch's data directory, so nothing was resumed; resume from the directory, --leg and --run it was launched with (its export: ${why:-no message})"
-fi
+[ "$CMD" = resume ] && [ -n "$DATA" ] && thread_held
 
 if [ "$HARNESS" = codex ] && [ "$CMD" = launch ]; then
   # Mark the worktree trusted first. The grep guard is idempotent on purpose: duplicate

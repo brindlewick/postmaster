@@ -352,7 +352,10 @@ run. For such a run these replace the steps they name, and everything else stand
 
   It prints the leg's thread id; record it as the step says. `.leg-<n>-exited` lands when the
   leg's agent ends, which `live.sh` does when the leg's turn ends with its hand-off done or with
-  nothing written, and never while an escalation or the ship card waits.
+  nothing written, and never while an escalation or the ship card waits. A leg on codex, muse or
+  mimo ends its turn by writing a file its prompt names, a line `live.sh` adds to every prompt it
+  sends that leg, rulings included; its thread id, printed empty until the harness begins one,
+  is in `logs/coachman-leg-<n>.live` once it has.
 - **A resume** (Stage C, step 5) that remounts a leg, or has it finish its hand-off, is the same
   command with that prompt file: it resumes the leg's thread in a new agent. A takeover adds
   `--takeover`, with the takeover prompt, and moves no stream, since a live leg writes none.

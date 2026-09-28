@@ -22,12 +22,18 @@
 #          working. The turn is waited on in the background with host.sh prompt, the one safe wait;
 #          when it ends, the lane counts as finished only if one of the --final files, relative to
 #          <cwd>, was written after the prompt was sent, or, for @message, the harness's session
-#          record holds the turn's final message, whatever state Herdr reports. Its files are
+#          record holds the turn's final message, whatever state Herdr reports. A lane on a
+#          harness whose Herdr integration reports nothing (codex, muse, mimo; launch.sh says
+#          which) runs on its own signal: its prompt gains a line telling it to end its turn by
+#          writing <record>.finished, and the turn ends with that file or with its agent. The
+#          harness's own record says whether the prompt arrived, sent once more if not, and whether
+#          a turn ended with no file; its thread comes from those records too. Its files are
 #          the ones a headless launch gives <record> under <dispatch>/logs: <record>.done, the
 #          marker, touched when the turn ends, whatever its outcome, and when the agent cannot
 #          start, with the reason in <record>.err; <record>.live, one JSON line per start, prompt
 #          and settled turn; <record>.session, the path of the harness's session record;
-#          <record>-last.md, the final act's text; <record>-screen.txt, the screen of a lane lost.
+#          <record>-last.md, the final act's text; <record>-screen.txt, the screen of a lane lost;
+#          and for a lane on its own signal <record>-prompt-<time>.txt, each prompt as sent.
 # leg      the same for leg <n>'s coachman in the synthesis worktree, as record coachman-leg-<n>,
 #          with the leg's own markers as its final act: .leg-<n>-done, .escalation-ready or
 #          .card-ready. .leg-<n>-exited lands when the leg's agent ends: at once when the turn ends
@@ -95,12 +101,18 @@ PY
 # --fresh. On success prints "fresh" or "running"; exit 3 when it is still working.
 ensure() {
   local d=$1 rec=$2 agent=$3 name=$4 cwd=$5 label=$6 exited=$7; shift 7
-  local leg="" fresh=0 st rc thread="" form out session kind value ref err live=$d/logs/$rec.live
+  local leg="" fresh=0 st rc thread="" form out session kind value ref err live=$d/logs/$rec.live since signal
   while [ $# -gt 0 ]; do case $1 in --leg) leg=$2; shift ;; --fresh) fresh=1 ;; esac; shift; done
   err=$d/logs/$rec.err
   st=$("$HERE/host.sh" state "$agent" 2>/dev/null); rc=$?
   case $rc in
-    0) case $(printf '%s' "$st" | json 'd.get("status")') in
+    0) # An agent on its own signal has settled once its last turn has; any other once Herdr says so.
+       if [ "$(last_start "$live" signal)" = True ]; then
+         [ "$(turn_state "$live")" != running ] && { echo running; return 0; }
+         echo "live: $agent is still in its turn; a lane or leg is given work only once it has settled" >&2
+         return 3
+       fi
+       case $(printf '%s' "$st" | json 'd.get("status")') in
          idle|done) echo running; return 0 ;;
          *) echo "live: $agent is $(printf '%s' "$st" | json 'd.get("status")'); a lane or leg is given work only once it has settled" >&2
             return 3 ;;
@@ -111,25 +123,44 @@ ensure() {
   esac
   [ "$fresh" = 1 ] || thread=$(last_start "$live" thread)
   form=$(POSTMASTER_LAUNCH_NAME=$label "$HERE/launch.sh" live "$name" "$cwd" ${leg:+--leg "$leg"} ${thread:+--resume "$thread"} --run "$d" 2>> "$err") || return 1
+  signal=$(printf '%s' "$form" | json 'd.get("signal")')
+  since=$(python3 -c 'import time; print(repr(time.time()))')
+  # launch.sh's form, as host.sh start's words: the env file, then the options the form asks for,
+  # then the kind, or the command a harness Herdr has no kind for is typed as, and its arguments.
   out=$(printf '%s' "$form" | python3 -c 'import json, sys
-f = json.load(sys.stdin); sys.stdout.buffer.write(b"".join(x.encode() + b"\0" for x in [f["kind"], f["env_file"]] + f["args"]))' | {
+f = json.load(sys.stdin)
+words = [f["env_file"]]
+for e in f.get("env") or []: words += ["--env", e]
+if f.get("signal"): words.append("--no-session")
+if f.get("typed"): words += ["--typed", f["ready_title"]]
+words += ["--", f.get("typed") or f["kind"]] + f["args"]
+sys.stdout.buffer.write(b"".join(x.encode() + b"\0" for x in words))' | {
     local fields=() x; while IFS= read -r -d '' x; do fields+=("$x"); done
     "$HERE/host.sh" start "$agent" "$cwd" --label "$label" --err "$err.start" ${exited:+--exited "$exited"} \
-      ${fields[1]:+--env-file "${fields[1]}"} -- "${fields[0]}" "${fields[@]:2}"
+      ${fields[0]:+--env-file "${fields[0]}"} "${fields[@]:1}"
   }); rc=$?
   cat "$err.start" >> "$err" 2>/dev/null; rm -f -- "$err.start"
   [ $rc -eq 0 ] || return 1
-  kind=$(printf '%s' "$out" | json 'd["session"]["kind"]'); value=$(printf '%s' "$out" | json 'd["session"]["value"]')
+  if [ "$signal" = True ]; then
+    # No integration reports its session: the thread is the one resumed, or the first the
+    # harness's own records hold since it started, which a harness may begin only at its first
+    # prompt; refresh_session looks again until one has.
+    if [ -n "$thread" ]; then kind=id; value=$thread; else kind=records; value=$since; fi
+  else
+    kind=$(printf '%s' "$out" | json 'd["session"]["kind"]'); value=$(printf '%s' "$out" | json 'd["session"]["value"]')
+  fi
   ref=$("$HERE/launch.sh" session "$name" "$cwd" "$kind" "$value" ${leg:+--leg "$leg"} --run "$d" 2>> "$err") || return 1
   session=${ref#*$'\t'}; thread=${ref%%$'\t'*}
-  printf '%s\n' "$session" > "$d/logs/$rec.session"
+  if [ -n "$session" ]; then printf '%s\n' "$session" > "$d/logs/$rec.session"; else rm -f -- "$d/logs/$rec.session"; fi
   record_line "$live" '{"event": "start", "at": a["at"], "name": a["name"], "agent": a["agent"], "pane": a["pane"],
-    "thread": a["thread"], "session_kind": a["kind"], "session_value": a["value"], "record": a["record"], "leg": a["leg"]}' \
+    "thread": a["thread"], "session_kind": a["kind"], "session_value": a["value"], "record": a["record"], "leg": a["leg"],
+    "signal": a["signal"] == "True", "since": float(a["since"])}' \
     at="$(now)" name="$name" agent="$agent" pane="$(printf '%s' "$out" | json 'd["pane"]')" thread="$thread" \
-    kind="$kind" value="$value" record="$session" leg="$leg"
+    kind="$kind" value="$value" record="$session" leg="$leg" signal="$signal" since="$since"
   echo fresh
 }
-last_start() {  # last_start <live-file> <field>: that field of the last start line, or nothing
+last_start() {  # last_start <live-file> <field>: that field of the last start line, or of a session
+  # line after it that found the thread in the harness's own records; nothing if none has it
   [ -f "$1" ] || return 0
   python3 - "$1" "$2" <<'PY'
 import json, sys
@@ -137,16 +168,42 @@ v = ""
 for line in open(sys.argv[1], encoding="utf-8"):
     try: r = json.loads(line)
     except ValueError: continue
-    if r.get("event") == "start": v = r.get(sys.argv[2]) or ""
+    if r.get("event") == "start" or (r.get("event") == "session" and sys.argv[2] in r):
+        v = r.get(sys.argv[2])
+        v = "" if v is None or v is False else v
 print(v)
 PY
 }
+turn_state() {  # turn_state <live-file>: running, finished or lost, from its last prompt or settled line
+  python3 - "$1" <<'PY'
+import json, sys
+last = None
+try:
+    for line in open(sys.argv[1], encoding="utf-8"):
+        try: r = json.loads(line)
+        except ValueError: continue
+        if r.get("event") in ("prompt", "settled"): last = r
+except OSError:
+    pass
+print("running" if last and last["event"] == "prompt" else (last or {}).get("outcome") or "none")
+PY
+}
+sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }   # quoted for any shell
 
-# spawn_turn <err> <dispatch> <record> <agent> <cwd> <prompt> <args...>: records the prompt, before
-# returning, with the time it goes and how much of the harness's session record exists already;
-# then runs `live.sh _turn` in a session of its own, outliving its caller, its output added to <err>
+# spawn_turn <err> <dispatch> <record> <agent> <cwd> <prompt> <final> <actor> <marker> <policy>:
+# records the prompt, before returning, with the time it goes and how much of the harness's
+# session record exists already; then runs `live.sh _turn` in a session of its own, outliving its
+# caller, its output added to <err>. A lane on its own signal is sent the prompt with one line
+# added, telling it to end its turn by writing a file, which is what its turn is waited on by.
 spawn_turn() {
-  local err=$1 d=$2 rec=$3 cwd=$5 prompt=$6 t0 offset
+  local err=$1 d=$2 rec=$3 agent=$4 cwd=$5 prompt=$6 final=$7 actor=$8 marker=$9 policy=${10} t0 offset sent fin=""
+  sent=$prompt
+  if [ "$(last_start "$d/logs/$rec.live" signal)" = True ]; then
+    fin=$d/logs/$rec.finished; rm -f -- "$fin"
+    sent=$d/logs/$rec-prompt-$(date -u +%Y%m%dT%H%M%SZ)-$$.txt
+    { cat -- "$prompt"; printf '\nWhen this turn is over, whether its work is done or you have stopped, run this as your very last command: touch %s\n' "$(sq "$fin")"; } > "$sent" \
+      || { echo "live: cannot write $sent" >&2; return 1; }
+  fi
   t0=$(python3 -c 'import time; print(repr(time.time()))')
   offset=$(python3 - "$d/logs/$rec.session" <<'PY'
 import os, sys
@@ -156,16 +213,15 @@ except (OSError, ValueError):
     print(0)
 PY
 )
-  record_line "$d/logs/$rec.live" '{"event": "prompt", "at": a["at"], "t": float(a["t"]), "offset": int(a["offset"]), "prompt": a["prompt"], "cwd": a["cwd"]}' \
-    at="$(now)" t="$t0" offset="$offset" prompt="$prompt" cwd="$cwd"
-  shift
+  record_line "$d/logs/$rec.live" '{"event": "prompt", "at": a["at"], "t": float(a["t"]), "offset": int(a["offset"]), "prompt": a["prompt"], "cwd": a["cwd"], "sent": a["sent"], "finish": a["fin"]}' \
+    at="$(now)" t="$t0" offset="$offset" prompt="$prompt" cwd="$cwd" sent="$sent" fin="$fin"
   python3 -c 'import os, sys
 if os.fork(): os._exit(0)
 os.setsid()
 if os.fork(): os._exit(0)
 fd = os.open(os.devnull, os.O_RDONLY); os.dup2(fd, 0)
 out = os.open(sys.argv[1], os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644); os.dup2(out, 1); os.dup2(out, 2)
-os.execv(sys.argv[2], sys.argv[2:])' "$err" "$SELF" _turn "$@" "$t0" "$offset"
+os.execv(sys.argv[2], sys.argv[2:])' "$err" "$SELF" _turn "$d" "$rec" "$agent" "$cwd" "$sent" "$final" "$actor" "$marker" "$policy" "$t0" "$offset" "$fin"
 }
 
 # --- lane, leg and rule -------------------------------------------------------------------
@@ -271,43 +327,47 @@ PY
 
 # --- the turn, in the background -----------------------------------------------------------
 # _turn <dispatch> <record> <agent> <cwd> <prompt> <final,...> <actor> <marker> <lane|leg:<keep,...>>
-#       <t0> <offset>
+#       <t0> <offset> [<finish-file>]
 turn() {
-  local d=$1 rec=$2 agent=$3 cwd=$4 prompt=$5 final=$6 actor=$7 marker=$8 policy=$9 t0=${10} offset=${11}
-  local live=$d/logs/$rec.live out rc outcome status="" resent=0 found alive cause="" hit keep finder
+  local d=$1 rec=$2 agent=$3 cwd=$4 prompt=$5 final=$6 actor=$7 marker=$8 policy=$9 t0=${10} offset=${11} fin=${12:-}
+  local live=$d/logs/$rec.live out rc outcome status="" resent=0 found alive cause="" hit keep finder via=herdr
   # The harness starts its record as the turn begins, somewhere launch.sh may find only by the
-  # session's id; until it does, the record's path is refreshed, so the idle clock of
-  # runs-status.sh can read it from the start of a long first turn.
+  # session's id or, for a lane on its own signal, in the harness's own records; until it does,
+  # the record's path is refreshed, so the idle clock of runs-status.sh can read it from the start
+  # of a long first turn.
   ( i=0; while [ $i -lt 60 ]; do sleep 5; refresh_session "$d" "$rec"
       [ -f "$(cat "$d/logs/$rec.session" 2>/dev/null)" ] && break; i=$((i + 1)); done ) &
   finder=$!
-  while :; do
-    out=$("$HERE/host.sh" prompt "$agent" "$prompt"); rc=$?
-    outcome=$(printf '%s' "$out" | tail -1 | json 'd.get("outcome")' 2>/dev/null)
-    status=$(printf '%s' "$out" | tail -1 | json 'd.get("status")' 2>/dev/null)
-    [ $rc -eq 4 ] || break
-    # Herdr saw no turn start. That is not proof nothing ran: the harness's own record says, in
-    # what it wrote after the prompt went.
-    sleep 1
-    refresh_session "$d" "$rec"
-    found=$(recorded "$d/logs/$rec.session" "$prompt" "$offset")
-    if [ "$found" = yes ]; then          # it ran: judge it once the agent has settled
-      settle_after_stall "$agent"; outcome=settled; status=stalled; break
-    fi
-    if [ "$resent" = 1 ]; then outcome="never reached the harness"; break; fi
-    resent=1
-    record_line "$live" '{"event": "resent", "at": a["at"]}' at="$(now)"
-  done
+  if [ -n "$fin" ]; then
+    via=signal; signal_wait
+  else
+    while :; do
+      out=$("$HERE/host.sh" prompt "$agent" "$prompt"); rc=$?
+      outcome=$(printf '%s' "$out" | tail -1 | json 'd.get("outcome")' 2>/dev/null)
+      status=$(printf '%s' "$out" | tail -1 | json 'd.get("status")' 2>/dev/null)
+      [ $rc -eq 4 ] || break
+      # Herdr saw no turn start. That is not proof nothing ran: the harness's own record says, in
+      # what it wrote after the prompt went.
+      sleep 1
+      refresh_session "$d" "$rec"
+      if [ "$(heard "$d" "$rec" "$cwd" "$offset" "$t0" "$prompt")" = yes ]; then   # it ran: judge it once the agent has settled
+        settle_after_stall "$agent"; outcome=settled; status=stalled; break
+      fi
+      if [ "$resent" = 1 ]; then outcome="never reached the harness"; break; fi
+      resent=1
+      record_line "$live" '{"event": "resent", "at": a["at"]}' at="$(now)"
+    done
+  fi
   kill "$finder" 2>/dev/null
   sleep 1                                             # a killed agent's release follows its settle
   if "$HERE/host.sh" state "$agent" >/dev/null 2>&1; then alive=true; else alive=false; fi
   refresh_session "$d" "$rec"
-  hit=$(final_act "$d" "$rec" "$cwd" "$final" "$t0" "$offset")
+  hit=$(final_act "$d" "$rec" "$cwd" "$final" "$t0" "$offset" "$prompt")
   # Everything the turn leaves is written before its settled line, which outcome reads.
   if [ -n "$hit" ]; then
-    if [ "$hit" = @message ]; then last_message "$d" "$rec" "$cwd" "$offset" > "$d/logs/$rec-last.md"
+    if [ "$hit" = @message ]; then last_message "$d" "$rec" "$cwd" "$offset" "$t0" "$prompt" > "$d/logs/$rec-last.md"
     else cp -- "$hit" "$d/logs/$rec-last.md" 2>/dev/null; fi
-    "$HERE/log-action.sh" "$d" "$actor" settle "$rec" "finished: $(basename "$hit"); herdr: ${status:-$outcome}"
+    "$HERE/log-action.sh" "$d" "$actor" settle "$rec" "finished: $(basename "$hit"); $via: ${status:-$outcome}"
   else
     if [ "$alive" = false ]; then cause="the agent was gone when its turn ended"
     else
@@ -318,16 +378,17 @@ turn() {
       esac
       "$HERE/host.sh" read "$agent" 200 > "$d/logs/$rec-screen.txt" 2>/dev/null
     fi
-    "$HERE/log-action.sh" "$d" "$actor" lost "$rec" "$cause; herdr: ${status:-$outcome}"
+    "$HERE/log-action.sh" "$d" "$actor" lost "$rec" "$cause; $via: ${status:-$outcome}"
   fi
   refresh_session "$d" "$rec"
   if [ -n "$hit" ]; then
-    record_line "$live" '{"event": "settled", "at": a["at"], "outcome": "finished", "final": a["final"], "herdr": a["herdr"], "alive": a["alive"] == "true"}' \
-      at="$(now)" final="$hit" herdr="${status:-$outcome}" alive="$alive"
+    record_line "$live" '{"event": "settled", "at": a["at"], "outcome": "finished", "final": a["final"], a["via"]: a["how"], "alive": a["alive"] == "true"}' \
+      at="$(now)" final="$hit" via="$via" how="${status:-$outcome}" alive="$alive"
   else
-    record_line "$live" '{"event": "settled", "at": a["at"], "outcome": "lost", "cause": a["cause"], "herdr": a["herdr"], "alive": a["alive"] == "true"}' \
-      at="$(now)" cause="$cause" herdr="${status:-$outcome}" alive="$alive"
+    record_line "$live" '{"event": "settled", "at": a["at"], "outcome": "lost", "cause": a["cause"], a["via"]: a["how"], "alive": a["alive"] == "true"}' \
+      at="$(now)" cause="$cause" via="$via" how="${status:-$outcome}" alive="$alive"
   fi
+  [ "$via" = signal ] && [ "$alive" = true ] && "$HERE/host.sh" report "$agent" idle >/dev/null 2>&1
   case $policy in
     leg:*)
       # A leg that waits for a ruling stays open; any other end of its turn ends its agent, and
@@ -339,6 +400,53 @@ turn() {
   esac
   [ -n "$marker" ] && touch "$marker"
   return 0
+}
+signal_wait() {  # a lane on its own signal, sent its prompt once and waited on: its finish file
+  # ends the turn, and so does its agent going. The harness's own record says whether the prompt
+  # arrived, and whether a turn ended with no signal, as a model can forget to give one.
+  local started ended=0 checked=-1000 heardit=no elapsed q
+  out=$("$HERE/host.sh" prompt "$agent" "$prompt" --no-wait); rc=$?
+  outcome=$(printf '%s' "$out" | tail -1 | json 'd.get("outcome")' 2>/dev/null)
+  status=$(printf '%s' "$out" | tail -1 | json 'd.get("status")' 2>/dev/null)
+  [ $rc -eq 0 ] || return 0
+  started=$(date +%s)
+  while :; do
+    if signalled "$fin" "$t0"; then outcome=settled; status="finish file"; break; fi
+    if ! "$HERE/host.sh" state "$agent" >/dev/null 2>&1; then outcome=settled; status="gone"; break; fi
+    elapsed=$(( $(date +%s) - started ))
+    if [ "$heardit" = no ] && [ "$elapsed" -ge "${POSTMASTER_LIVE_HEARD_AFTER:-20}" ] && [ $((elapsed - checked)) -ge "${POSTMASTER_LIVE_HEARD_EVERY:-10}" ]; then
+      checked=$elapsed; refresh_session "$d" "$rec"
+      if [ "$(heard "$d" "$rec" "$cwd" "$offset" "$t0" "$prompt")" = yes ]; then heardit=yes
+      elif [ "$elapsed" -ge "${POSTMASTER_LIVE_HEARD_BY:-60}" ]; then
+        if [ "$resent" = 1 ]; then outcome="never reached the harness"; status="no record of the prompt"; break; fi
+        resent=1; record_line "$live" '{"event": "resent", "at": a["at"]}' at="$(now)"
+        "$HERE/host.sh" prompt "$agent" "$prompt" --no-wait >/dev/null 2>&1
+        started=$(date +%s); checked=-1000
+      fi
+    elif [ "$heardit" = yes ] && [ $((elapsed - checked)) -ge "${POSTMASTER_LIVE_ENDED_EVERY:-60}" ]; then
+      checked=$elapsed
+      q=$(turn_query "$d" "$rec" "$cwd" "$offset" "$t0" "$prompt")
+      if [ "$(printf '%s' "$q" | json 'd.get("ended")' 2>/dev/null)" = True ]; then ended=$((ended + 1)); else ended=0; fi
+      # Ended twice running, and still no finish file: the turn is over without its signal.
+      [ $ended -ge 2 ] && { outcome=settled; status="ended, with no finish file"; break; }
+    fi
+    sleep 1
+  done
+  # The harness writes its final message after the command that signalled; a final act that is
+  # that message waits for it, a while.
+  case ",$final," in *,@message,*)
+    local i=0
+    while [ "$status" = "finish file" ] && [ $i -lt 20 ]; do
+      [ "$(turn_query "$d" "$rec" "$cwd" "$offset" "$t0" "$prompt" | json 'd.get("ended")' 2>/dev/null)" = True ] && break
+      sleep 3; i=$((i + 1))
+    done ;;
+  esac
+  return 0
+}
+signalled() {  # signalled <finish-file> <t0>: it was written since the prompt went
+  python3 -c 'import os, sys
+try: sys.exit(0 if os.stat(sys.argv[1]).st_mtime >= float(sys.argv[2]) - 1.0 else 1)
+except OSError: sys.exit(1)' "$1" "$2"
 }
 settle_after_stall() {  # settle_after_stall <agent>: until Herdr reads the agent settled twice, a
   # second apart, or it has gone
@@ -353,13 +461,14 @@ settle_after_stall() {  # settle_after_stall <agent>: until Herdr reads the agen
     sleep 1
   done
 }
-final_act() {  # final_act <dispatch> <record> <cwd> <final,...> <t0> <offset>: the first final act
-  # on disk since the prompt went, or nothing. A file counts once written since then, relative to
-  # <cwd>; @message counts once the harness's session record holds the turn's final message.
-  local d=$1 rec=$2 cwd=$3 t0=$5 offset=$6 f
+final_act() {  # final_act <dispatch> <record> <cwd> <final,...> <t0> <offset> <prompt>: the first
+  # final act on disk since the prompt went, or nothing. A file counts once written since then,
+  # relative to <cwd>; @message counts once the harness's session record holds the turn's final
+  # message.
+  local d=$1 rec=$2 cwd=$3 t0=$5 offset=$6 prompt=$7 f
   for f in $(printf '%s' "$4" | tr ',' ' '); do
     if [ "$f" = @message ]; then
-      last_message "$d" "$rec" "$cwd" "$offset" >/dev/null 2>&1 && { echo @message; return 0; }
+      last_message "$d" "$rec" "$cwd" "$offset" "$t0" "$prompt" >/dev/null 2>&1 && { echo @message; return 0; }
     else
       python3 - "$cwd" "$f" "$t0" <<'PY' && return 0
 import os, sys
@@ -377,42 +486,30 @@ PY
   done
   return 0
 }
-last_message() {  # last_message <dispatch> <record> <cwd> <offset>: the turn's final message, read
-  # from the harness's session record through its adapter
+turn_query() {  # turn_query <dispatch> <record> <cwd> <offset> <t0> <prompt>: what the harness's own
+  # session record says of the turn, through its adapter: launch.sh turn's JSON line
   local live=$1/logs/$2.live name leg
   name=$(last_start "$live" name); leg=$(last_start "$live" leg)
   [ -n "$name" ] || return 1
-  "$HERE/launch.sh" last "$name" "$3" "$(cat "$1/logs/$2.session" 2>/dev/null)" "$4" ${leg:+--leg "$leg"} --run "$1"
+  "$HERE/launch.sh" turn "$name" "$3" "$(last_start "$live" thread)" "$(cat "$1/logs/$2.session" 2>/dev/null)" "$4" "$5" "$6" \
+    ${leg:+--leg "$leg"} --run "$1" 2>/dev/null
 }
-recorded() {  # recorded <session-pointer> <prompt-file> <offset>: yes when what the harness's record
-  # gained past <offset> holds the prompt, in whatever field the harness keeps a user message
-  python3 - "$1" "$2" "$3" <<'PY'
-import json, os, sys
-try:
-    path = open(sys.argv[1]).read().strip()
-    text = open(sys.argv[2], encoding="utf-8").read().strip()
-except OSError:
-    print("no"); sys.exit(0)
-head = " ".join(text.split())[:200]
-def strings(v):
-    if isinstance(v, str): yield v
-    elif isinstance(v, dict):
-        for x in v.values(): yield from strings(x)
-    elif isinstance(v, list):
-        for x in v: yield from strings(x)
-found = False
-if path and os.path.exists(path):
-    f = open(path, "rb")
-    f.seek(int(sys.argv[3]) if os.path.getsize(path) >= int(sys.argv[3]) else 0)
-    for line in f.read().decode("utf-8", "replace").splitlines():
-        try: r = json.loads(line)
-        except ValueError: continue
-        if any(head in " ".join(s.split()) for s in strings(r)): found = True; break
-print("yes" if found else "no")
-PY
+last_message() {  # last_message <dispatch> <record> <cwd> <offset> <t0> <prompt>: the turn's final
+  # message, when the turn has ended with one
+  turn_query "$@" | python3 -c 'import json, sys
+try: t = json.load(sys.stdin)
+except ValueError: sys.exit(1)
+if not t.get("ended") or t.get("final") is None: sys.exit(1)
+sys.stdout.write(t["final"] + ("" if t["final"].endswith("\n") else "\n"))'
 }
-refresh_session() {  # refresh_session <dispatch> <record>: the session record's path, now it may exist
-  local d=$1 rec=$2 live=$1/logs/$2.live name leg kind value cwd ref
+heard() {  # heard <dispatch> <record> <cwd> <offset> <t0> <prompt>: yes when the harness's record
+  # holds the prompt, past what it held when the prompt went
+  local h; h=$(turn_query "$@" | json 'd.get("heard")' 2>/dev/null)
+  [ "$h" = True ] && echo yes || echo no
+}
+refresh_session() {  # refresh_session <dispatch> <record>: the session record's path, now it may
+  # exist; for a lane on its own signal, the thread too, once its harness's records hold one
+  local d=$1 rec=$2 live=$1/logs/$2.live name leg kind value cwd ref thread record
   name=$(last_start "$live" name); leg=$(last_start "$live" leg)
   kind=$(last_start "$live" session_kind); value=$(last_start "$live" session_value)
   cwd=$(python3 - "$live" <<'PY'
@@ -427,7 +524,12 @@ PY
 )
   [ -n "$name" ] && [ -n "$value" ] && [ -d "$cwd" ] || return 0
   ref=$("$HERE/launch.sh" session "$name" "$cwd" "$kind" "$value" ${leg:+--leg "$leg"} --run "$d" 2>/dev/null) || return 0
-  [ -n "${ref#*$'\t'}" ] && printf '%s\n' "${ref#*$'\t'}" > "$d/logs/$rec.session"
+  thread=${ref%%$'\t'*}; record=${ref#*$'\t'}
+  [ -n "$record" ] && printf '%s\n' "$record" > "$d/logs/$rec.session"
+  if [ "$kind" = records ] && [ -n "$thread" ] && [ "$thread" != "$(last_start "$live" thread)" ]; then
+    record_line "$live" '{"event": "session", "at": a["at"], "thread": a["thread"], "record": a["record"], "session_kind": "id", "session_value": a["thread"]}' \
+      at="$(now)" thread="$thread" record="$record"
+  fi
   return 0
 }
 
@@ -517,8 +619,24 @@ self_test() {
   fails=0
   mkdir -p "$tmp/bin" "$tmp/stub" "$tmp/state" "$tmp/home" "$tmp/claude-config/hooks" "$tmp/pi-agent/extensions" "$tmp/pi-bare"
   "$HERE/host.sh" _stubs "$tmp/bin" || exit 1
-  local h; for h in claude pi; do printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$h"; chmod +x "$tmp/bin/$h"; done
+  local h; for h in claude pi codex; do printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$h"; chmod +x "$tmp/bin/$h"; done
+  # muse's and MiMo's exports find a thread where the stub Herdr's agents keep their records;
+  # MiMo's session list is the stub's sessions.json.
+  cat > "$tmp/bin/muse" <<'SH'
+#!/bin/sh
+[ "$1" = export ] || exit 0
+[ -n "$(find "$XDG_DATA_HOME/muse/sessions" -type d -name "$3" 2>/dev/null)" ] && { : > "$5"; exit 0; }
+echo "no retained session log found for session $3" >&2; exit 1
+SH
+  cat > "$tmp/bin/mimo" <<'SH'
+#!/bin/sh
+if [ "$1" = export ]; then [ -e "$XDG_DATA_HOME/$2" ] && { cat "$XDG_DATA_HOME/$2"; exit 0; }; echo "Session not found: $2" >&2; exit 1; fi
+if [ "$1" = session ] && [ "$2" = list ]; then cat "$XDG_DATA_HOME/sessions.json" 2>/dev/null || echo "[]"; exit 0; fi
+exit 0
+SH
+  chmod +x "$tmp/bin/muse" "$tmp/bin/mimo"
   : > "$tmp/claude-config/hooks/herdr-agent-state.sh"; : > "$tmp/pi-agent/extensions/herdr-agent-state.ts"
+  printf 'CODEX_HOME=%s\n' "$tmp/codex-home" > "$tmp/codex.env"
   printf 'CLAUDE_CONFIG_DIR=%s\n' "$tmp/claude-config" > "$tmp/claude.env"
   printf 'PI_CODING_AGENT_DIR=%s\n' "$tmp/pi-agent" > "$tmp/pi.env"
   printf 'PI_CODING_AGENT_DIR=%s\n' "$tmp/pi-bare" > "$tmp/pi-bare.env"
@@ -535,6 +653,14 @@ env_file = "$tmp/pi.env"
 harness = "pi"
 model = "lane-c"
 env_file = "$tmp/pi-bare.env"
+[lanes.cx]
+harness = "codex"
+model = "lane-x"
+env_file = "$tmp/codex.env"
+[lanes.mi]
+harness = "mimo"
+model = "prov/lane-m"
+effort = "high"
 [team]
 workhorses = ["cl", "pi"]
 reviewers = ["cl", "pi"]
@@ -544,9 +670,10 @@ coachman_fallback = { harness = "pi", model = "fallback", env_file = "$tmp/pi.en
 live_agents = true
 CFG
   sed 's/^live_agents = true$/live_agents = false/' "$tmp/config.toml" > "$tmp/config-off.toml"
-  local repo=$tmp/proj d=$tmp/runs/proj/T-1 d0=$tmp/runs/proj/T-0 w
+  sed 's/^coachman = .*/coachman = { harness = "muse", model = "coach-muse", effort = "max" }/' "$tmp/config.toml" > "$tmp/config-muse.toml"
+  local repo=$tmp/proj d=$tmp/runs/proj/T-1 d0=$tmp/runs/proj/T-0 d3=$tmp/runs/proj/T-3 w
   git init -q -b main "$repo" && git -C "$repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m first || exit 1
-  for w in T-1 T-1-cl T-1-pi T-1-bare; do git -C "$repo" worktree add -q ".worktrees/$w" -b "$w" || exit 1; done
+  for w in T-1 T-1-cl T-1-pi T-1-bare T-1-cx T-1-mi T-3; do git -C "$repo" worktree add -q ".worktrees/$w" -b "$w" || exit 1; done
   repo=$(cd "$repo" && pwd -P)
   mkdir -p "$d/logs" "$d0/logs"
   printf '## Dispatch\nname: #1, A ticket\n' > "$d/brief.md"
@@ -717,6 +844,81 @@ print(n)' "$1/actions.jsonl" "$2" "$3" 2>/dev/null || echo 0; }
   check "a takeover starts the fallback afresh" \
     'calls | grep "^agent	start	" | tail -1 | grep -q "	--kind	pi	.*--model	fallback	" && ! calls | grep "^agent	start	" | tail -1 | grep -q -- "--session"'
 
+  echo "lanes on their own signal: codex, MiMo and muse, whose Herdr integration reports nothing"
+  wt=$repo/.worktrees/T-1-cx
+  out=$(L -- lane "$d" cx cx "$wt" "$sum" --final "$FINAL"); rc=$?
+  agent=$(printf '%s' "$out" | sed -n 's/.*agent=\([^ ]*\).*/\1/p')
+  landed "$d/logs/cx.done"; settled "$d" cx
+  check "codex: Herdr starts it with no session to wait for, its prompt goes with no wait, and it finishes on its own signal" \
+    '[ $rc -eq 0 ] && [ "$(L -- outcome "$d" cx)" = "finished $wt/WORKHORSE-SUMMARY.md" ] && calls | grep "^agent	prompt	$agent	" | tail -1 | grep -qv -- "--wait"' \
+    "$out $(cat "$d/logs/cx.live" "$d/logs/cx.err" 2>/dev/null)"
+  check "the prompt it is sent is the lane's, then one line naming the file that ends its turn" \
+    'tail -1 "$tmp/stub/prompts.log" | grep -q "Write the summary.*your very last command: touch .*/logs/cx.finished"'
+  check "the turn is logged as it ends, and how: by its finish file" \
+    'grep -q "\"target\":\"cx\",\"detail\":\"finished: WORKHORSE-SUMMARY.md; signal: finish file\"" "$d/actions.jsonl"'
+  thread=$(last_start "$d/logs/cx.live" thread)
+  check "its thread is the rollout codex began at its first prompt, found in codex's own records" \
+    '[ -n "$thread" ] && case $(cat "$d/logs/cx.session") in "$tmp/codex-home/sessions/"*"$thread.jsonl") true ;; *) false ;; esac' "$(cat "$d/logs/cx.live")"
+  L -- lane "$d" cx cx "$wt" "$kill" --final "$FINAL" >/dev/null; landed "$d/logs/cx.done"; settled "$d" cx
+  check "killed mid-turn, it is lost" '[ "$(L -- outcome "$d" cx)" = "lost the agent was gone when its turn ended" ]'
+  L -- lane "$d" cx cx "$wt" "$sum" --final "$FINAL" >/dev/null; landed "$d/logs/cx.done"; settled "$d" cx
+  check "remounted, it resumes that thread by id, and finishes" \
+    'calls | grep "^agent	start	" | tail -1 | grep -q "	resume	$thread	" && [ "$(L -- outcome "$d" cx)" = "finished $wt/WORKHORSE-SUMMARY.md" ]'
+  printf 'Write the summary, and forget the rest.\nSTUB_RUN=echo summary > WORKHORSE-SUMMARY.md\nSTUB_NOFINISH\n' > "$tmp/p-nofin.txt"
+  printf 'Think it over, and forget the rest.\nSTUB_NOFINISH\n' > "$tmp/p-nofin-none.txt"
+  quick="POSTMASTER_LIVE_HEARD_AFTER=0 POSTMASTER_LIVE_HEARD_EVERY=1 POSTMASTER_LIVE_HEARD_BY=2 POSTMASTER_LIVE_ENDED_EVERY=1"
+  L $quick -- lane "$d" cx cx "$wt" "$tmp/p-nofin.txt" --final "$FINAL" >/dev/null; landed "$d/logs/cx.done" 30; settled "$d" cx
+  check "a turn its record shows ended with no finish file still ends, and counts by its final act" \
+    '[ "$(L -- outcome "$d" cx)" = "finished $wt/WORKHORSE-SUMMARY.md" ] && tail -1 "$d/logs/cx.live" | grep -q "\"signal\": \"ended, with no finish file\""' \
+    "$(tail -2 "$d/logs/cx.live")"
+  L $quick -- lane "$d" cx cx "$wt" "$tmp/p-nofin-none.txt" --final "$FINAL" >/dev/null; landed "$d/logs/cx.done" 30; settled "$d" cx
+  check "and one that left no final act either is lost" '[ "$(L -- outcome "$d" cx)" = "lost settled without its final act" ]' "$(tail -2 "$d/logs/cx.live")"
+
+  wt=$repo/.worktrees/T-1-mi
+  out=$(L -- lane "$d" mi mi "$wt" "$sum" --final "$FINAL"); rc=$?
+  agent=$(printf '%s' "$out" | sed -n 's/.*agent=\([^ ]*\).*/\1/p')
+  landed "$d/logs/mi.done"; settled "$d" mi
+  check "MiMo: typed into its pane, its prompt pasted and entered, and finished on its own signal" \
+    '[ $rc -eq 0 ] && [ "$(L -- outcome "$d" mi)" = "finished $wt/WORKHORSE-SUMMARY.md" ] && calls | grep -q "^pane	send-keys	[^	]*	enter" && ! calls | grep -q "^agent	start	$agent	"' \
+    "$out $(cat "$d/logs/mi.live" "$d/logs/mi.err" 2>/dev/null)"
+  pane=$(last_start "$d/logs/mi.live" pane); thread=$(last_start "$d/logs/mi.live" thread)
+  check "in its launch's own data directory, bypassed by its variable" \
+    'grep -q "^MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS=1$" "$tmp/stub/pane-$pane.env" && grep -q "^XDG_DATA_HOME=$tmp/home/.postmaster/harness-data/mimo/" "$tmp/stub/pane-$pane.env"'
+  check "its thread is the session its own list shows, and its record its database" \
+    'case $thread in ses_stub*) true ;; *) false ;; esac && case $(cat "$d/logs/mi.session") in */mimocode/mimocode.db) true ;; *) false ;; esac' "$(cat "$d/logs/mi.live")"
+  L -- lane "$d" mi rev-mi "$wt" "$none" --final REVIEWER-REPORT.md,@message >/dev/null; landed "$d/logs/rev-mi.done"; settled "$d" rev-mi
+  check "a MiMo reviewer's final message, read through MiMo's own export, is its final act" \
+    '[ "$(L -- outcome "$d" rev-mi)" = "finished @message" ] && [ "$(cat "$d/logs/rev-mi-last.md")" = OK. ]' "$(tail -2 "$d/logs/rev-mi.live")"
+  L -- lane "$d" mi mi "$wt" "$kill" --final "$FINAL" >/dev/null; landed "$d/logs/mi.done"; settled "$d" mi
+  L -- lane "$d" mi mi "$wt" "$sum" --final "$FINAL" >/dev/null; landed "$d/logs/mi.done"; settled "$d" mi
+  check "killed, then remounted: MiMo resumes its session with -s, and finishes" \
+    'calls | grep "^pane	run	" | tail -1 | grep -q "'"'"'-s'"'"' '"'"'$thread'"'"'" && [ "$(L -- outcome "$d" mi)" = "finished $wt/WORKHORSE-SUMMARY.md" ] && [ "$(last_start "$d/logs/mi.live" thread)" = "$thread" ]' \
+    "$(calls | grep "^pane	run	" | tail -1)"
+  touch "$tmp/stub/typed.deaf"; a=$(prompts)
+  L $quick -- lane "$d" mi mi2 "$wt" "$sum" --final "$FINAL" >/dev/null; landed "$d/logs/mi2.done" 30; settled "$d" mi2
+  rm -f "$tmp/stub/typed.deaf"
+  check "a prompt its harness never recorded is sent once more, then the lane is lost" \
+    '[ "$(L -- outcome "$d" mi2)" = "lost never reached the harness" ] && [ "$(calls | grep -c "^pane	send-keys	")" -ge 2 ] && grep -q "\"event\": \"resent\"" "$d/logs/mi2.live"' \
+    "$(tail -3 "$d/logs/mi2.live")"
+  a=$(calls | grep -c "^pane	run	.*mimo")
+  L -- lane "$d" mi mi "$wt" "$sum" --final "$FINAL" >/dev/null; landed "$d/logs/mi.done"; settled "$d" mi
+  check "a typed agent at rest is given its next turn in place, and nothing new is typed to start one" \
+    '[ "$(L -- outcome "$d" mi)" = "finished $wt/WORKHORSE-SUMMARY.md" ] && [ "$(calls | grep -c "^pane	run	.*mimo")" = "$a" ]'
+
+  mkdir -p "$d3/logs"; printf '## Dispatch\nname: #3, A muse ticket\n' > "$d3/brief.md"
+  env -i HOME="$tmp/home" PATH="$tmp/bin:/usr/bin:/bin" POSTMASTER_CONFIG="$tmp/config-muse.toml" "$HERE/run-meta.sh" "$d3" "$repo" >/dev/null 2>&1
+  wt=$repo/.worktrees/T-3
+  printf 'Hand off.\nSTUB_RUN=touch %s/.leg-1-done\n' "$d3" > "$tmp/p-mleg.txt"
+  out=$(L -- leg "$d3" 1 synthesis "$wt" "$tmp/p-mleg.txt"); rc=$?
+  check "muse: a coachman leg on its own signal hands off, its agent ends, and .leg-1-exited lands" \
+    '[ $rc -eq 0 ] && landed "$d3/.leg-1-exited" && [ "$(L -- outcome "$d3" coachman-leg-1)" = "finished $d3/.leg-1-done" ]' \
+    "$out $(cat "$d3/logs/coachman-leg-1.live" "$d3/logs/coachman-leg-1.err" 2>/dev/null)"
+  check "on its coachman's model and effort, bypassed, in the leg's own data directory" \
+    'calls | grep "^agent	start	" | tail -1 | grep -q "	--kind	muse	.*--model	coach-muse	--reasoning-effort	max	--yolo$"'
+  check "its thread is the session muse began as it started, found in muse's own records" \
+    '[ -n "$(last_start "$d3/logs/coachman-leg-1.live" thread)" ] && case $(cat "$d3/logs/coachman-leg-1.session") in "$tmp/home/.postmaster/harness-data/muse/"*"/session.jsonl") true ;; *) false ;; esac' \
+    "$(cat "$d3/logs/coachman-leg-1.live")"
+
   echo "refusals: the marker lands, and .err says why"
   wt=$repo/.worktrees/T-1-bare
   L -- lane "$d" bare bare "$wt" "$sum" --final "$FINAL" >/dev/null 2>&1; rc=$?
@@ -756,32 +958,53 @@ ANS
   finish self-test
 }
 
-# A stand-in model for the live test, on the loopback interface: OpenAI chat completions for pi
-# and Anthropic messages for claude, streamed, answering "OK.". In the last user message,
-# SLEEP=<s> holds the reply and RUN=<command>, to the end of its line, first answers with a call
-# of the harness's shell tool running it. It logs each request it answers, never its headers.
+# A stand-in model for the live test, on the loopback interface: OpenAI chat completions for pi and
+# mimo, the Responses API for codex and Anthropic messages for claude, streamed, answering "OK.".
+# In the last user message, SLEEP=<s> holds the reply; RUN=<command>, to the end of its line, is
+# answered first with a call of the harness's shell tool running it, and then the command a lane
+# on its own signal is told to run last, unless the message says NOFINISH. It logs each request
+# it answers, with the reasoning effort asked for, never its headers.
 STANDIN='import json, re, sys, time, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 LOG = sys.argv[2]
+def turns(body):
+    # (role, text or None) per message, across the three APIs; a tool result is ("tool", None)
+    out = []
+    for m in body.get("messages") or []:
+        c, role = m.get("content"), m.get("role")
+        if role == "tool": out.append(("tool", None)); continue
+        if isinstance(c, str): out.append((role, c)); continue
+        if any(isinstance(p, dict) and p.get("type") == "tool_result" for p in c or []): out.append(("tool", None)); continue
+        texts = [p.get("text", "") for p in c or [] if isinstance(p, dict) and p.get("type") == "text"]
+        out.append((role, texts[-1] if texts else None))
+    for it in body.get("input") or []:
+        if it.get("type") == "function_call_output": out.append(("tool", None)); continue
+        if it.get("type", "message") != "message": continue
+        c = it.get("content")
+        t = c if isinstance(c, str) else "".join(p.get("text", "") for p in c or [] if isinstance(p, dict) and p.get("type") in ("input_text", "text"))
+        out.append((it.get("role"), t or None))
+    return out
 def text_of(body):
-    for m in reversed(body.get("messages") or []):
-        if m.get("role") != "user": continue
-        c = m.get("content")
-        if isinstance(c, str): return c
-        parts = [p.get("text", "") for p in c or [] if isinstance(p, dict) and p.get("type") == "text"]
-        if parts: return parts[-1]
+    for role, t in reversed(turns(body)):
+        if role == "user" and t: return t
     return ""
 def tool_due(body, text):
-    run = re.search(r"RUN=(.*)", text)
-    if not run: return None
-    msgs = body.get("messages") or []
-    last = max((i for i, m in enumerate(msgs) if m.get("role") == "user" and text_of({"messages": [m]})), default=-1)
-    if any(m.get("role") == "tool" or (m.get("role") == "user" and isinstance(m.get("content"), list) and
-           any(isinstance(p, dict) and p.get("type") == "tool_result" for p in m["content"])) for m in msgs[last + 1:]):
-        return None
-    names = [(t.get("function") or {}).get("name") or t.get("name") for t in body.get("tools") or []]
-    name = next((n for n in names if n and n.lower() == "bash"), None)
-    return (name, run.group(1).strip()) if name else None
+    cmds = [m.group(1).strip() for m in [re.search(r"RUN=(.*)", text)] if m]
+    fin = re.search(r"your very last command: (.+)$", text, re.M)
+    if fin and "NOFINISH" not in text: cmds.append(fin.group(1).strip())
+    ts = turns(body)
+    last = max((i for i, (r, t) in enumerate(ts) if r == "user" and t), default=-1)
+    done = sum(1 for r, t in ts[last + 1:] if r == "tool")
+    if done >= len(cmds): return None
+    for t in body.get("tools") or []:
+        f = t.get("function") or t
+        n, schema = f.get("name"), f.get("parameters") or f.get("input_schema") or {}
+        key = "command" if n and n.lower() == "bash" else "cmd" if n == "exec_command" else None
+        if not key: continue
+        args = {k: "stand-in" for k in schema.get("required") or [] if (schema.get("properties") or {}).get(k, {}).get("type") == "string"}
+        args[key] = cmds[done]
+        return (n, args)
+    return None
 class H(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     def log_message(self, *a): pass
@@ -802,7 +1025,23 @@ class H(BaseHTTPRequestHandler):
         self.send_response(200); self.send_header("content-type", "text/event-stream")
         self.send_header("connection", "close"); self.end_headers(); self.close_connection = True
         def w(s): self.wfile.write(s.encode()); self.wfile.flush()
-        if path.endswith("/chat/completions"):
+        if path.endswith("/responses"):
+            rid = "resp_" + uuid.uuid4().hex[:12]
+            if tool:
+                item = {"id": "fc_" + uuid.uuid4().hex[:8], "type": "function_call", "status": "completed",
+                        "call_id": "call_" + uuid.uuid4().hex[:8], "name": tool[0], "arguments": json.dumps(tool[1])}
+            else:
+                item = {"id": "msg_" + uuid.uuid4().hex[:8], "type": "message", "role": "assistant", "status": "completed",
+                        "content": [{"type": "output_text", "text": "OK.", "annotations": []}]}
+            def ev(name, data): data["type"] = name; w("event: %s\ndata: %s\n\n" % (name, json.dumps(data)))
+            ev("response.created", {"response": {"id": rid, "object": "response", "status": "in_progress", "output": []}})
+            ev("response.output_item.added", {"output_index": 0, "item": dict(item, status="in_progress")})
+            if not tool: ev("response.output_text.delta", {"item_id": item["id"], "output_index": 0, "content_index": 0, "delta": "OK."})
+            ev("response.output_item.done", {"output_index": 0, "item": item})
+            ev("response.completed", {"response": {"id": rid, "object": "response", "status": "completed", "output": [item],
+               "usage": {"input_tokens": 100, "output_tokens": 2, "total_tokens": 102,
+                         "input_tokens_details": {"cached_tokens": 0}, "output_tokens_details": {"reasoning_tokens": 0}}}})
+        elif path.endswith("/chat/completions"):
             cid = "c-" + uuid.uuid4().hex[:10]
             def chunk(delta, finish=None):
                 w("data: " + json.dumps({"id": cid, "object": "chat.completion.chunk", "created": int(t_in), "model": body.get("model"),
@@ -810,7 +1049,7 @@ class H(BaseHTTPRequestHandler):
                   **({"usage": {"prompt_tokens": 100, "completion_tokens": 2, "total_tokens": 102}} if finish else {})}) + "\n\n")
             if tool:
                 chunk({"role": "assistant", "content": None, "tool_calls": [{"index": 0, "id": "call_" + uuid.uuid4().hex[:8], "type": "function",
-                       "function": {"name": tool[0], "arguments": json.dumps({"command": tool[1]})}}]}); chunk({}, "tool_calls")
+                       "function": {"name": tool[0], "arguments": json.dumps(tool[1])}}]}); chunk({}, "tool_calls")
             else:
                 chunk({"role": "assistant", "content": ""}); chunk({"content": "OK."}); chunk({}, "stop")
             w("data: [DONE]\n\n")
@@ -824,7 +1063,7 @@ class H(BaseHTTPRequestHandler):
                 ev("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use",
                    "id": "toolu_" + uuid.uuid4().hex[:16], "name": tool[0], "input": {}}})
                 ev("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta",
-                   "partial_json": json.dumps({"command": tool[1]})}})
+                   "partial_json": json.dumps(tool[1])}})
             else:
                 ev("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})
                 ev("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "OK."}})
@@ -833,21 +1072,24 @@ class H(BaseHTTPRequestHandler):
                "stop_sequence": None}, "usage": {"output_tokens": 2}})
             ev("message_stop", {"type": "message_stop"})
         with open(LOG, "a") as f:
-            f.write(json.dumps({"t_in": t_in, "t_done": time.time(), "path": path, "tool": tool[1] if tool else None,
+            f.write(json.dumps({"t_in": t_in, "t_done": time.time(), "path": path, "tool": (tool[1].get("command") or tool[1].get("cmd")) if tool else None,
+                                "effort": body.get("reasoning_effort") or (body.get("reasoning") or {}).get("effort"),
                                 "user_tail": text[-120:]}) + "\n")
 ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()'
 
 live_test() {
   # The ticket's controls on this machine's Herdr, in spaces this test opens and closes, with pi
   # and claude on scratch configs that trust nothing yet and hold Herdr's integrations, installed
-  # there and nowhere else, against the stand-in model above. It spends no tokens and changes no
-  # config of the user's.
+  # there and nowhere else, and codex, MiMo and muse, where they are on PATH, on scratch configs
+  # and data directories and no integration at all, against the stand-in model above; muse on its
+  # own echo provider, as it reaches no other model it could be pointed at. It spends no tokens
+  # and changes no config of the user's.
   local h
   for h in herdr pi claude git python3; do command -v "$h" >/dev/null 2>&1 || { echo "live test: $h is not on PATH; skipped"; return 0; }; done
   [ "$("$HERE/host.sh" detect)" = herdr ] || { echo "live test: no Herdr server answers here; skipped"; return 0; }
   tmp=$(mktemp -d) || exit 1
   fails=0
-  export POSTMASTER_HOST_STATE=$tmp/state TMPDIR=$tmp POSTMASTER_CONFIG=$tmp/config.toml
+  export POSTMASTER_HOST_STATE=$tmp/state TMPDIR=$tmp POSTMASTER_CONFIG=$tmp/config.toml POSTMASTER_HARNESS_DATA=$tmp/harness-data
   unset POSTMASTER_HOST
   local port home_before repo d d0 w out rc agent a b f1 group thread pane sess
   port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
@@ -866,6 +1108,23 @@ live_test() {
   printf 'PI_CODING_AGENT_DIR=%s\nPI_OFFLINE=1\n' "$tmp/pi-agent" > "$tmp/pi.env"
   printf 'PI_CODING_AGENT_DIR=%s\nPI_OFFLINE=1\n' "$tmp/pi-bare" > "$tmp/pi-bare.env"
   printf 'ANTHROPIC_BASE_URL=http://127.0.0.1:%s\nANTHROPIC_AUTH_TOKEN=standin\nCLAUDE_CONFIG_DIR=%s\n' "$port" "$tmp/claude-config" > "$tmp/claude.env"
+  # codex on the stand-in's Responses API, MiMo on its chat completions, each in scratch; muse on
+  # its echo provider, through a wrapper that puts it in the interactive form alone.
+  mkdir -p "$tmp/codex-home" "$tmp/mimo-config/mimocode" "$tmp/muse-wrap"
+  printf 'model = "fixed"\nmodel_provider = "standin"\n\n[model_providers.standin]\nname = "standin"\nbase_url = "http://127.0.0.1:%s/v1"\nwire_api = "responses"\n\n[tui]\nscreen_reader_detection_done = true\n' \
+    "$port" > "$tmp/codex-home/config.toml"
+  printf 'CODEX_HOME=%s\nOPENAI_API_KEY=standin\n' "$tmp/codex-home" > "$tmp/codex.env"
+  printf '{"provider": {"standin": {"npm": "@ai-sdk/openai-compatible", "name": "standin", "options": {"baseURL": "http://127.0.0.1:%s/v1", "apiKey": "standin"}, "models": {"fixed": {"name": "fixed", "reasoning": true, "variants": {"high": {"reasoningEffort": "high"}, "low": {"reasoningEffort": "low"}}}}}}}\n' \
+    "$port" > "$tmp/mimo-config/mimocode/mimocode.json"
+  printf 'XDG_CONFIG_HOME=%s\nXDG_CACHE_HOME=%s\n' "$tmp/mimo-config" "$tmp/mimo-cache" > "$tmp/mimo.env"
+  # muse's echo provider takes no model and no effort, so the wrapper drops those two flags.
+  { printf '#!/usr/bin/env bash\nreal=%q\n' "$(command -v muse 2>/dev/null || echo muse)"
+    printf '%s\n' 'case ${1:-} in resume|-*) ;; *) exec "$real" "$@" ;; esac' \
+      'args=(); while [ $# -gt 0 ]; do case $1 in --model|--reasoning-effort) shift ;; *) args+=("$1") ;; esac; shift; done' \
+      'exec "$real" "${args[@]}" --provider echo'
+  } > "$tmp/muse-wrap/muse"; chmod +x "$tmp/muse-wrap/muse"
+  printf 'PATH=%s:$PATH\nXDG_CONFIG_HOME=%s\nXDG_CACHE_HOME=%s\nXDG_STATE_HOME=%s\nMUSE_NO_AUTO_UPDATE=1\n' "$tmp/muse-wrap" \
+    "$tmp/muse-config" "$tmp/muse-cache" "$tmp/muse-state" > "$tmp/muse.env"
   cat > "$tmp/config.toml" <<CFG
 [lanes.pi]
 harness = "pi"
@@ -879,6 +1138,19 @@ env_file = "$tmp/claude.env"
 harness = "pi"
 model = "standin/fixed"
 env_file = "$tmp/pi-bare.env"
+[lanes.cx]
+harness = "codex"
+model = "fixed"
+env_file = "$tmp/codex.env"
+[lanes.mi]
+harness = "mimo"
+model = "standin/fixed"
+effort = "high"
+env_file = "$tmp/mimo.env"
+[lanes.mu]
+harness = "muse"
+model = "echo-model"
+env_file = "$tmp/muse.env"
 [team]
 workhorses = ["pi", "cl"]
 reviewers = ["pi", "cl"]
@@ -890,13 +1162,14 @@ CFG
   sed 's/^live_agents = true$/live_agents = false/' "$tmp/config.toml" > "$tmp/config-off.toml"
   repo=$tmp/livetest-$$ d=$tmp/runs/livetest/T-1 d0=$tmp/runs/livetest/T-0
   git init -q -b main "$repo" && git -C "$repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m first || return 1
-  for w in T-1 T-1-pi T-1-cl T-1-bare T-1-headless; do git -C "$repo" worktree add -q ".worktrees/$w" -b "$w" || return 1; done
+  for w in T-1 T-1-pi T-1-cl T-1-bare T-1-headless T-1-cx T-1-mi T-1-mu; do git -C "$repo" worktree add -q ".worktrees/$w" -b "$w" || return 1; done
   repo=$(cd "$repo" && pwd -P)
   mkdir -p "$d/logs" "$d0/logs"; printf '## Dispatch\nname: #67 live test\n' | tee "$d/brief.md" > "$d0/brief.md"
   "$HERE/run-meta.sh" "$d" "$repo" >/dev/null && POSTMASTER_CONFIG=$tmp/config-off.toml "$HERE/run-meta.sh" "$d0" "$repo" >/dev/null
   printf 'Write the summary.\nRUN=echo summary > WORKHORSE-SUMMARY.md\n' > "$tmp/p-sum.txt"
   printf 'A long turn. SLEEP=30\n' > "$tmp/p-long.txt"
   printf 'Reply OK, nothing more.\n' > "$tmp/p-none.txt"
+  printf 'Write the summary, and give no finish signal. NOFINISH\nRUN=echo summary > WORKHORSE-SUMMARY.md\n' > "$tmp/p-nofin.txt"
   local FINAL=WORKHORSE-SUMMARY.md,WORKHORSE-BLOCKED.md
   settled() { local i=0; while [ $i -lt 450 ]; do "$SELF" outcome "$1" "$2" >/dev/null 2>&1; [ $? -ne 3 ] && return 0; sleep 0.2; i=$((i + 1)); done; return 1; }
   gone() { local i=0; while "$HERE/host.sh" state "$1" >/dev/null 2>&1; do [ $i -lt 40 ] || return 1; sleep 0.25; i=$((i + 1)); done; }
@@ -981,6 +1254,89 @@ for dp, dn, fn in os.walk(sys.argv[1]):
     '[ "$("$SELF" outcome "$d" cl)" = "lost settled without its final act" ] && "$HERE/host.sh" state "$(agent_of "$d" cl)" >/dev/null' \
     "$("$SELF" outcome "$d" cl 2>&1); $(cat "$d/logs/cl.err" 2>/dev/null); $(tail -3 "$d/logs/cl.live" 2>/dev/null)"
 
+  if command -v codex >/dev/null 2>&1; then
+    echo "codex, on its own signal, with no integration, in a scratch CODEX_HOME"
+    w=$repo/.worktrees/T-1-cx
+    out=$("$SELF" lane "$d" cx cx "$w" "$tmp/p-sum.txt" --final "$FINAL"); rc=$?
+    settled "$d" cx
+    check "codex: its directory trusted first, started with no integration, and finished by its own finish file" \
+      '[ $rc -eq 0 ] && [ "$("$SELF" outcome "$d" cx)" = "finished $w/WORKHORSE-SUMMARY.md" ] && grep -qF "[projects.\"$w\"]" "$tmp/codex-home/config.toml" && grep -q "\"target\":\"cx\",\"detail\":\"finished: WORKHORSE-SUMMARY.md; signal: finish file\"" "$d/actions.jsonl"' \
+      "$out $(cat "$d/logs/cx.err" 2>/dev/null) $(tail -3 "$d/logs/cx.live" 2>/dev/null)"
+    thread=$(last_start "$d/logs/cx.live" thread)
+    check "its thread is the rollout it began at its first prompt, found in codex's own records" \
+      '[ -n "$thread" ] && [ "$(head -1 "$(cat "$d/logs/cx.session")" | json "d[\"payload\"][\"id\"]")" = "$thread" ]' "$(cat "$d/logs/cx.live")"
+    "$SELF" lane "$d" cx cx "$w" "$tmp/p-long.txt" --final "$FINAL" >/dev/null; sleep 5
+    group=$(agent_group "$(agent_of "$d" cx)"); kill -TERM -- "-$group"; settled "$d" cx
+    check "killed mid-turn, it is lost" '[ "$("$SELF" outcome "$d" cx)" = "lost the agent was gone when its turn ended" ]' "$(tail -2 "$d/logs/cx.live")"
+    out=$("$SELF" lane "$d" cx cx "$w" "$tmp/p-sum.txt" --final "$FINAL"); settled "$d" cx
+    check "remounted, it resumes its own thread in a fresh pane, and finishes" \
+      '[ "$(last_start "$d/logs/cx.live" thread)" = "$thread" ] && [ "$("$SELF" outcome "$d" cx)" = "finished $w/WORKHORSE-SUMMARY.md" ]' \
+      "$out $(tail -3 "$d/logs/cx.live")"
+    POSTMASTER_LIVE_HEARD_AFTER=2 POSTMASTER_LIVE_ENDED_EVERY=3 "$SELF" lane "$d" cx cx "$w" "$tmp/p-nofin.txt" --final "$FINAL" >/dev/null
+    settled "$d" cx
+    check "a turn it ends with no finish file is read from its rollout as ended, and judged by its final act" \
+      '[ "$("$SELF" outcome "$d" cx)" = "finished $w/WORKHORSE-SUMMARY.md" ] && tail -1 "$d/logs/cx.live" | grep -q "ended, with no finish file"' \
+      "$(tail -2 "$d/logs/cx.live")"
+    "$HERE/host.sh" end "$(agent_of "$d" cx)" >/dev/null
+  else
+    echo "codex is not on PATH; its controls are skipped"
+  fi
+
+  if command -v mimo >/dev/null 2>&1; then
+    echo "MiMo, typed into its pane, on its own signal, in scratch XDG directories"
+    w=$repo/.worktrees/T-1-mi
+    out=$("$SELF" lane "$d" mi mi "$w" "$tmp/p-sum.txt" --final "$FINAL"); rc=$?
+    settled "$d" mi
+    check "MiMo: typed into its pane, taken as ready at its title, and finished by its own finish file" \
+      '[ $rc -eq 0 ] && [ "$("$SELF" outcome "$d" mi)" = "finished $w/WORKHORSE-SUMMARY.md" ]' \
+      "$out $(cat "$d/logs/mi.err" 2>/dev/null) $(tail -3 "$d/logs/mi.live" 2>/dev/null)"
+    check "at the lane's effort, which its interface sends as the variant its own state holds" \
+      'grep "\"effort\": \"high\"" "$tmp/standin.jsonl" | grep -q "logs/mi.finished"'
+    thread=$(last_start "$d/logs/mi.live" thread)
+    check "its thread is the session its own list shows, its record the database in the launch's own data directory" \
+      'case $thread in ses_?*) true ;; *) false ;; esac && case $(cat "$d/logs/mi.session") in "$tmp/harness-data/mimo/"*/mimocode/mimocode.db) true ;; *) false ;; esac' \
+      "$(cat "$d/logs/mi.live")"
+    "$SELF" lane "$d" mi rev-mi "$w" "$tmp/p-none.txt" --final REVIEWER-REPORT.md,@message >/dev/null; settled "$d" rev-mi
+    check "a MiMo reviewer's final message, read through MiMo's own export, is its final act" \
+      '[ "$("$SELF" outcome "$d" rev-mi)" = "finished @message" ] && [ "$(cat "$d/logs/rev-mi-last.md")" = OK. ]' "$(tail -2 "$d/logs/rev-mi.live")"
+    "$HERE/host.sh" end "$(agent_of "$d" rev-mi)" >/dev/null
+    "$SELF" lane "$d" mi mi "$w" "$tmp/p-long.txt" --final "$FINAL" >/dev/null; sleep 5
+    group=$(agent_group "$(agent_of "$d" mi)"); kill -TERM -- "-$group"; settled "$d" mi
+    check "killed mid-turn, it is lost, and nothing its launcher left of it is still running" \
+      '[ "$("$SELF" outcome "$d" mi)" = "lost the agent was gone when its turn ended" ] && ! kill -0 -- "-$group" 2>/dev/null' \
+      "$(tail -2 "$d/logs/mi.live"; ps -o pid,stat,comm -g "$group" 2>/dev/null)"
+    out=$("$SELF" lane "$d" mi mi "$w" "$tmp/p-sum.txt" --final "$FINAL"); settled "$d" mi
+    check "remounted, it resumes its session with -s in a fresh pane, and finishes" \
+      '[ "$(last_start "$d/logs/mi.live" thread)" = "$thread" ] && [ "$("$SELF" outcome "$d" mi)" = "finished $w/WORKHORSE-SUMMARY.md" ]' \
+      "$out $(tail -3 "$d/logs/mi.live")"
+    "$HERE/host.sh" end "$(agent_of "$d" mi)" >/dev/null
+  else
+    echo "mimo is not on PATH; its controls are skipped"
+  fi
+
+  if command -v muse >/dev/null 2>&1; then
+    echo "muse, on its own signal, on its echo provider: it runs no command, so it gives no finish file"
+    w=$repo/.worktrees/T-1-mu
+    out=$(POSTMASTER_LIVE_HEARD_AFTER=2 POSTMASTER_LIVE_ENDED_EVERY=3 "$SELF" lane "$d" mu rev-mu "$w" "$tmp/p-none.txt" --final REVIEWER-REPORT.md,@message); rc=$?
+    settled "$d" rev-mu
+    check "muse: started with no integration, its turn read from its own record as ended, and its final message its final act" \
+      '[ $rc -eq 0 ] && [ "$("$SELF" outcome "$d" rev-mu)" = "finished @message" ] && grep -q "^echo: Reply OK" "$d/logs/rev-mu-last.md"' \
+      "$out $(cat "$d/logs/rev-mu.err" 2>/dev/null) $(tail -3 "$d/logs/rev-mu.live" 2>/dev/null)"
+    thread=$(last_start "$d/logs/rev-mu.live" thread)
+    check "its thread is the session it began as it started, in the launch's own data directory" \
+      '[ -n "$thread" ] && case $(cat "$d/logs/rev-mu.session") in "$tmp/harness-data/muse/"*"/$thread/session.jsonl") true ;; *) false ;; esac' \
+      "$(cat "$d/logs/rev-mu.live")"
+    group=$(agent_group "$(agent_of "$d" rev-mu)"); kill -TERM -- "-$group"; gone "$(agent_of "$d" rev-mu)"
+    out=$(POSTMASTER_LIVE_HEARD_AFTER=2 POSTMASTER_LIVE_ENDED_EVERY=3 "$SELF" lane "$d" mu rev-mu "$w" "$tmp/p-none.txt" --final REVIEWER-REPORT.md,@message)
+    settled "$d" rev-mu
+    check "gone, it is resumed on that session in a fresh pane" \
+      '[ "$(last_start "$d/logs/rev-mu.live" thread)" = "$thread" ] && [ "$("$SELF" outcome "$d" rev-mu)" = "finished @message" ]' \
+      "$out $(tail -3 "$d/logs/rev-mu.live")"
+    "$HERE/host.sh" end "$(agent_of "$d" rev-mu)" >/dev/null
+  else
+    echo "muse is not on PATH; its controls are skipped"
+  fi
+
   echo "legs, and rulings no other pane can forge"
   w=$repo/.worktrees/T-1
   printf 'Hand off.\nRUN=touch %s/.leg-1-done\n' "$d" > "$tmp/p-leg1.txt"
@@ -1013,7 +1369,9 @@ for dp, dn, fn in os.walk(sys.argv[1]):
 user_configs() {  # the files a harness integration or a trust step would change, with their times
   local f
   for f in "$HOME/.claude/settings.json" "$HOME/.claude/hooks/herdr-agent-state.sh" "$HOME/.pi/agent/extensions" \
-           "$HOME/.pi/agent/settings.json" "$HOME/.pi/agent/sessions" "$HOME/.codex/config.toml"; do
+           "$HOME/.pi/agent/settings.json" "$HOME/.pi/agent/sessions" "$HOME/.codex/config.toml" "$HOME/.codex/sessions" \
+           "$HOME/.config/mimocode" "$HOME/.local/share/mimocode" "$HOME/.local/state/mimocode" \
+           "$HOME/.config/muse" "$HOME/.local/share/muse"; do
     printf '%s %s\n' "$(stat -c %Y "$f" 2>/dev/null || echo absent)" "$f"
   done
 }

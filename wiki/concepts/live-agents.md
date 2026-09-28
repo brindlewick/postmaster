@@ -2,8 +2,8 @@
 title: Live agents against markers and resumes
 type: concept
 standing: claimed
-sources: [trials/herdr-agent-lifecycle, trials/live-option]
-updated: 2026-09-27
+sources: [trials/herdr-agent-lifecycle, trials/live-option, trials/live-signal]
+updated: 2026-09-28
 ---
 
 # Live agents against markers and resumes
@@ -176,16 +176,25 @@ exposes.
 
 A run keeps the setting it was dispatched with, read from its `run.json`, so a lane started live
 is never resumed headless. With it on, each lane and leg runs in its harness's interactive form
-in a Herdr pane, and the option meets each need the trial named this way.
+in a Herdr pane, one of two ways. claude and pi run through their Herdr integrations, which
+report the session and the turns. codex, muse and MiMo Code run on their own signal, with no
+integration: each prompt gains a line telling the lane to end its turn by writing a file, and the
+harness's own session records give the thread and say whether a prompt arrived and whether a
+turn ended with no file [@trials/live-signal]. The option meets each need the trial named this
+way.
 
-- **Completion.** One `agent prompt --wait` per turn, sent only to an agent that has settled, in
-  a waiter that outlives its caller. A turn counts as finished only when one of its final-act
-  files was written after the prompt went, whatever Herdr reports; the waiter also looks whether
-  the agent is still there, after the release a kill brings. A reviewer's final act is its report
-  file, or its final message read from the harness's own session record, for claude and pi. When
-  Herdr sees no turn start, the record says whether the turn ran. The controls include a lane
-  killed mid-turn, which Herdr reported done and the option records lost, for pi and for claude
-  [@trials/live-option/live-test.txt].
+- **Completion.** Through an integration, one `agent prompt --wait` per turn, sent only to an
+  agent that has settled, in a waiter that outlives its caller; on a lane's own signal, the
+  prompt sent once and the waiter watching for its finish file and for the agent going. A turn
+  counts as finished only when one of its final-act files was written after the prompt went,
+  whatever Herdr reports; the waiter also looks whether the agent is still there, after the
+  release a kill brings. A reviewer's final act is its report file, or its final message read
+  from the harness's own session record, for all five harnesses. When Herdr sees no turn start,
+  or a signalling lane's record shows no prompt, the record decides whether the turn ran, and a
+  prompt it never recorded is sent once more. A lane that forgets its finish file is read as done
+  from its record. The controls include a lane killed mid-turn, which Herdr reported done and the
+  option records lost, for pi and claude [@trials/live-option/live-test.txt] and for codex and
+  MiMo [@trials/live-signal/live-test.txt].
 - **Markers.** Every marker a headless run writes, at the same moments: a lane's when its turn
   ends, whatever its outcome; a leg's `.leg-<n>-exited` when its agent ends, which the waiter does
   when the leg's turn ends with its hand-off or with nothing written, and never while the leg
@@ -193,15 +202,20 @@ in a Herdr pane, and the option meets each need the trial named this way.
 - **Liveness.** A live lane's sign of work is its harness session record, which `runs-status.sh`
   reads beside the run's own files. The record's path is refreshed until the harness has started
   it, so a long first turn is covered [@trials/live-option/live-test.txt].
-- **Setup.** Refused without Herdr. A lane whose harness lacks Herdr's integration, in the config
-  its environment names, is refused with the command that installs it, which is the user's to
-  run, since installing one edits that harness's own config. claude's trust question is settled
-  before the start by trusting the repository, since in a git worktree a trusted folder above the
-  repository does not count, and the entry is written under the lock claude itself takes to save
-  its config, since a writer that skips it can lose a session's save or its own entry
-  [@trials/live-option/probes.txt].
-- **Records.** The thread id is the session the integration reports: claude's id, and the id in
-  the name of the file pi's names. The durable record is that session file.
+- **Setup.** Refused without Herdr. A claude or pi lane whose harness lacks Herdr's integration,
+  in the config its environment names, is refused with the command that installs it, which is the
+  user's to run, since installing one edits that harness's own config; a codex, muse or MiMo lane
+  needs none. claude's trust question is settled before the start by trusting the repository,
+  since in a git worktree a trusted folder above the repository does not count, and the entry is
+  written under the lock claude itself takes to save its config, since a writer that skips it can
+  lose a session's save or its own entry [@trials/live-option/probes.txt]. codex's is settled by
+  trusting the worktree itself, and MiMo's bypass by its variable, since its flag asks a question
+  on every start [@trials/live-signal/probes.txt].
+- **Records.** The thread id is the session the integration reports, claude's id and the id in
+  the name of the file pi's names, or the first thread the harness's own records hold since the
+  agent started: codex's rollout for the worktree, muse's session in the launch's own data
+  directory, MiMo's session in its own list. The durable record is that session file, or MiMo's
+  database.
 - **Rulings.** The guard the trial proposed. A ruling travels as a file in the dispatch directory,
   logged with its sha256, and the prompt names only the file. The leg's check accepts only the
   latest ruling logged for that leg, unchanged since, and only once, so a prompt from any other
@@ -213,11 +227,12 @@ in a Herdr pane, and the option meets each need the trial named this way.
   again where it is.
 
 The option changes the coachman contract behind its key, so it lands while the fleet is idle.
-Its sixth criterion, a scored run on issue #37's fixture with the key on, waits on that fixture.
+Its sixth criterion is a scored run on issue #37's fixture with the key on, by the fleet's own
+team, which runs on codex, muse, MiMo and claude.
 
 ## What building it found
 
-Six facts the trial of the same week did not cover [@trials/live-option/probes.txt]:
+Facts the trial of the same week did not cover [@trials/live-option/probes.txt]:
 
 - **A live agent must not start on its caller's environment.** A claude started with the
   variables a claude session exports to its own tool calls ran its turn and wrote no session
@@ -236,6 +251,38 @@ Six facts the trial of the same week did not cover [@trials/live-option/probes.t
   and the user's own is left alone.
 - **claude saves its config under a lock of its own**, `<file>.lock`, re-reading the file under
   it, so anything else that writes the file has to take the same lock or lose an update.
+
+And, running codex, muse and MiMo Code live without an integration [@trials/live-signal/probes.txt]:
+
+- **Herdr prompts only agents it started.** A custom report gives any pane an agent, and `agent
+  rename` gives it a name that `agent get` finds, but `agent prompt` refuses it as "not an active
+  named agent". Herdr orders a source's reports by `--seq`: an idle report after a working one
+  reads as `done`, and a release with no newer sequence number is ignored.
+- **MiMo Code's bypass flag asks a question on a terminal**, on every start, before anything
+  else; its documented variable `MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS=1` asks nothing. Its
+  interface has no variant flag and sends the variant its state's `model.json` holds for the
+  model, where the agent config's `variant` changed nothing. It sets its terminal title once it
+  takes input, 8 to 18 seconds after start here, and takes a pasted prompt of several lines as one
+  message.
+- **MiMo Code's launcher can exit and leave its binary running**, reparented, holding the pane's
+  terminal and busy at full CPU, after a TERM to its process group. A
+  KILL ends it, so ending a MiMo agent takes both, and it counts as gone once its group no longer
+  holds its pane's foreground.
+- **codex asks whether to trust a folder** in a git worktree, naming the repository's checkout, and
+  Herdr reads that question as an agent ready for input; trusting the worktree's own path answers
+  it. Interactive codex 0.157 runs its thread on a shared background server unless given
+  `--no-daemon`; that server outlived the agent that started it, and failed here, where
+  unprivileged user namespaces are not allowed.
+- **Muse Code 1.4.0, started as Herdr's muse kind**, is ready in about 4 seconds; Herdr's screen
+  rules for muse match nothing and fall back to idle, and muse's own bundled plugin reports its
+  working and done states from its hooks. It reports no session. Its echo provider refuses a
+  model, and its Meta provider speaks a stream of its own, so the stand-in cannot drive a muse
+  tool call.
+- **The records each harness keeps** say what the flow needs: codex's rollout begins at the first
+  prompt with a `session_meta` naming its directory and ends each turn at `task_complete`; muse's
+  `session.jsonl` begins as it starts, under a UUIDv7 id, and ends a turn at its run's `terminal`
+  event; MiMo's database, read through `mimo session list` and `mimo export`, takes 7 to 10
+  seconds a read.
 
 ## What would change this page
 
