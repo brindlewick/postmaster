@@ -149,7 +149,7 @@ not say; the security lens reviews against them.
    session reports `no`. Do not copy the configured harness or model into the report.
 
    ```sh
-   <tool>/scripts/front-door.sh <harness> <model> <cwd> <yes|no> "$TARGET"
+   <tool>/scripts/front-door.sh "<harness>" "<model>" "<cwd>" <yes|no> "$TARGET"
    ```
 
    It prints `self` or `spawn` with every reason a separate session is needed. `self` means
@@ -171,7 +171,7 @@ not say; the security lens reviews against them.
    in one variable for the steps below:
 
    ```sh
-   RUNS=~/.postmaster/runs/<project>   # <project> is the repo's basename
+   RUNS=~/.postmaster/runs/"<project>"   # <project> is the repo's basename
    mkdir -p "$RUNS/postmaster"
    ```
 
@@ -181,7 +181,9 @@ not say; the security lens reviews against them.
 6. **Write the brief** to `$RUNS/postmaster/brief.md`: "You are the postmaster for <project>.
    Read `<tool>/skills/postmaster/postmaster.md` first", then the stream paragraph, the project
    profile, the configured team, who says the merge word, the session host, `<tool>` and the
-   config path, plus this session's report and the route result. It is what you settled here,
+   config path, plus this session's report and the route result, and, when the host is none,
+   that it runs headless and writes `<runs>/postmaster/ESCALATION.md` when it needs the user.
+   It is what you settled here,
    and what a postmaster restarted from nothing reads to carry on. Then log the first action:
 
    ```sh

@@ -13,10 +13,14 @@
 #
 # POSTMASTER_CONFIG overrides the config path (~/.postmaster/config.toml).
 #
+# `--self-test` in argv position one is the flag, whatever follows; no harness is named that.
+#
 #   exit 0  printed `self` or `spawn` with its reasons
 #   exit 1  no config or one that does not parse, team.postmaster missing, or a bad value
 #   exit 2  usage
 set -uo pipefail
+# A GIT_DIR from the caller must not steer repo identity to another repository.
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
 CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
 usage() { echo "usage: front-door.sh <harness> <model> <cwd> <at-terminal> <target> [--config <path>] | --self-test" >&2; exit 2; }
 
@@ -53,6 +57,8 @@ if not isinstance(spec, dict) or not spec.get("harness") or not spec.get("model"
     print("front-door: %s has no team.postmaster with a harness and a model" % sys.argv[1], file=sys.stderr); sys.exit(1)
 if not isinstance(spec["harness"], str) or not isinstance(spec["model"], str):
     print("front-door: %s team.postmaster harness and model must be strings" % sys.argv[1], file=sys.stderr); sys.exit(1)
+if not spec["harness"].strip() or not spec["model"].strip():
+    print("front-door: %s team.postmaster harness and model must not be blank" % sys.argv[1], file=sys.stderr); sys.exit(1)
 if any(ord(c) < 0x20 or ord(c) == 0x7f for c in spec["harness"] + spec["model"]):
     print("front-door: %s team.postmaster harness and model must not contain control characters" % sys.argv[1], file=sys.stderr); sys.exit(1)
 print(spec["harness"], spec["model"], sep="\t")
@@ -202,6 +208,10 @@ closed "an empty target fails closed from inside a repo" \
 closed "an empty cwd and target fail closed from inside a repo" \
   claude pm-model "" yes "" --config "$tmp/match.toml"
 
+echo "caller environment does not steer identity"
+run "a GIT_DIR from the caller does not steer distinct repos to self" 0 spawn "target is another repo" \
+  env GIT_DIR="$tmp/there/.git" GIT_COMMON_DIR="$tmp/there/.git" "$0" claude pm-model "$tmp/here" yes "$tmp/there" --config "$tmp/match.toml"
+
 echo "negative controls"
 # Each reason is absent when it does not apply, through the identical command.
 absent "the harness matching does not print the harness reason" "harness differs" "model differs" \
@@ -249,6 +259,9 @@ run "a config with a non-string harness is refused" 1 '' - \
 config empty "" pm-model
 run "a config with an empty harness is refused" 1 '' - \
   "$0" claude pm-model "$tmp/here" yes "$tmp/here" --config "$tmp/empty.toml"
+config blank "   " pm-model
+run "a config with a blank harness is refused" 1 '' - \
+  "$0" claude pm-model "$tmp/here" yes "$tmp/here" --config "$tmp/blank.toml"
 printf '[team]\npostmaster = { harness = "claude", model = "pm-model\\nother" }\n' > "$tmp/newline.toml"
 run "a config with a newline in the model is refused" 1 '' - \
   "$0" claude pm-model "$tmp/here" yes "$tmp/here" --config "$tmp/newline.toml"
