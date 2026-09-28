@@ -24,7 +24,7 @@ repo_of() {  # the git repository a path is in, as its common .git directory, or
   git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true
 }
 
-add_reason() {  # add_reason <var> <text>: append one reason, joined with "; "
+add_reason() {  # add_reason <accumulated> <text>: append one reason, joined with "; "
   if [ -z "$1" ]; then printf '%s' "$2"; else printf '%s; %s' "$1" "$2"; fi
 }
 
@@ -45,13 +45,16 @@ try:
     cfg = tomllib.load(open(sys.argv[1], "rb"))
 except (OSError, tomllib.TOMLDecodeError) as e:
     print("front-door: %s does not parse: %s" % (sys.argv[1], e), file=sys.stderr); sys.exit(1)
-spec = (cfg.get("team") or {}).get("postmaster")
+team = cfg.get("team")
+spec = team.get("postmaster") if isinstance(team, dict) else None
 if not isinstance(spec, dict) or not spec.get("harness") or not spec.get("model"):
     print("front-door: %s has no team.postmaster with a harness and a model" % sys.argv[1], file=sys.stderr); sys.exit(1)
-print(spec["harness"], spec["model"])
+if not isinstance(spec["harness"], str) or not isinstance(spec["model"], str):
+    print("front-door: %s team.postmaster harness and model must be strings" % sys.argv[1], file=sys.stderr); sys.exit(1)
+print(spec["harness"], spec["model"], sep="\t")
 PY
 ) || return 1
-  read -r th tm <<EOF
+  IFS=$'\t' read -r th tm <<EOF
 $spec
 EOF
   if [ "$h" != "$th" ]; then
@@ -62,7 +65,9 @@ EOF
   fi
   tc=$(repo_of "$cwd")
   tt=$(repo_of "$target")
-  if [ -z "$tc" ] || [ -z "$tt" ] || [ "$tc" != "$tt" ]; then
+  if [ -z "$tc" ] || [ -z "$tt" ]; then
+    reasons=$(add_reason "$reasons" "not in a git repository: the session runs in $cwd, the target is $target")
+  elif [ "$tc" != "$tt" ]; then
     reasons=$(add_reason "$reasons" "target is another repo: the session runs in $cwd, the target is $target")
   fi
   if [ "$term" != yes ]; then
@@ -78,8 +83,8 @@ EOF
 
 case ${1:-} in
   --self-test) [ $# -eq 1 ] || usage ;;
-  "") usage ;;
 esac
+[ $# -eq 0 ] && usage   # an empty value in five arguments still decides; only arity is usage
 
 if [ "${1:-}" != --self-test ]; then
   if [ $# -eq 7 ] && [ "${6:-}" = --config ]; then CONFIG=$7; set -- "$1" "$2" "$3" "$4" "$5"
@@ -91,7 +96,7 @@ fi
 
 # --- self-test ----------------------------------------------------------------------------
 tmp=$(mktemp -d) || exit 1
-trap 'rm -r -- "$tmp" 2>/dev/null' EXIT
+trap 'rm -r -- "$tmp" </dev/null 2>/dev/null' EXIT
 fails=0
 ok()   { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/         /'; fails=$((fails+1)); }
@@ -156,6 +161,16 @@ run "a subdirectory of the target is the target's repo, so it is self" 0 self - 
   "$0" claude pm-model "$tmp/here/sub" yes "$tmp/here" --config "$tmp/match.toml"
 run "every failed condition is reported" 0 spawn "harness differs" \
   "$0" grok other-model "$tmp/there" no "$tmp/here" --config "$tmp/match.toml"
+mkdir -p "$tmp/notrepo"
+run "a directory outside any repo fails closed naming both paths" 0 spawn "not in a git repository" \
+  "$0" claude pm-model "$tmp/notrepo" yes "$tmp/here" --config "$tmp/match.toml"
+run "a target outside any repo fails closed naming both paths" 0 spawn "not in a git repository" \
+  "$0" claude pm-model "$tmp/here" yes "$tmp/notrepo" --config "$tmp/match.toml"
+config spaces "claude code" pm-model
+run "a harness name with a space still matches itself" 0 self - \
+  "$0" "claude code" pm-model "$tmp/here" yes "$tmp/here" --config "$tmp/spaces.toml"
+run "an empty harness decides spawn, not usage" 0 spawn "harness differs" \
+  "$0" "" pm-model "$tmp/here" yes "$tmp/here" --config "$tmp/match.toml"
 
 echo "negative controls"
 # Each reason is absent when it does not apply, through the identical command.
@@ -166,7 +181,9 @@ absent "the model matching does not print the model reason" "model differs" \
 absent "the target matching does not print the target reason" "target is another repo" \
   "$0" claude pm-model "$tmp/here" no "$tmp/here" --config "$tmp/match.toml"
 absent "a person at the terminal does not print the terminal reason" "nobody at the terminal" \
-  "$0" claude pm-model "$tmp/here" yes "$tmp/here" --config "$tmp/match.toml"
+  "$0" grok pm-model "$tmp/here" yes "$tmp/here" --config "$tmp/match.toml"
+absent "an unresolvable path does not print the another-repo label" "target is another repo" \
+  "$0" claude pm-model "$tmp/notrepo" yes "$tmp/here" --config "$tmp/match.toml"
 out=$("$0" grok other-model "$tmp/there" no "$tmp/here" --config "$tmp/match.toml" 2>"$tmp/err")
 for reason in "harness differs" "model differs" "target is another repo" "nobody at the terminal"; do
   case $out in
@@ -175,7 +192,7 @@ for reason in "harness differs" "model differs" "target is another repo" "nobody
   esac
 done
 case $out in
-  "spawn harness differs"*) ok "reasons print in ticket order" ;;
+  "spawn harness differs"*"; model differs"*"; target is another repo"*"; nobody at the terminal") ok "reasons print in ticket order" ;;
   *) fail "reasons print in ticket order" "$out" ;;
 esac
 
@@ -185,9 +202,28 @@ run "no config is refused" 1 '' - \
 printf '[team]\nworkhorses = ["a"]\n' > "$tmp/no-pm.toml"
 run "a config with no team.postmaster is refused" 1 '' - \
   "$0" claude pm-model "$tmp/here" yes "$tmp/here" --config "$tmp/no-pm.toml"
+printf '[team\nbroken\n' > "$tmp/bad.toml"
+run "a config that does not parse is refused" 1 '' - \
+  "$0" claude pm-model "$tmp/here" yes "$tmp/here" --config "$tmp/bad.toml"
+printf 'team = "oops"\n' > "$tmp/strteam.toml"
+run "a config whose team is not a table is refused" 1 '' - \
+  "$0" claude pm-model "$tmp/here" yes "$tmp/here" --config "$tmp/strteam.toml"
+grep -q "team.postmaster" "$tmp/err" && ! grep -q "Traceback" "$tmp/err" \
+  && ok "and refuses in its own words, with no traceback" \
+  || fail "and refuses in its own words, with no traceback" "$(cat "$tmp/err")"
+printf '[team]\npostmaster = { harness = 7, model = "pm-model" }\n' > "$tmp/nonstr.toml"
+run "a config with a non-string harness is refused" 1 '' - \
+  "$0" claude pm-model "$tmp/here" yes "$tmp/here" --config "$tmp/nonstr.toml"
+config empty "" pm-model
+run "a config with an empty harness is refused" 1 '' - \
+  "$0" claude pm-model "$tmp/here" yes "$tmp/here" --config "$tmp/empty.toml"
 run "at-terminal is yes or no, not anything else" 1 '' - \
   "$0" claude pm-model "$tmp/here" maybe "$tmp/here" --config "$tmp/match.toml"
 grep -q "at-terminal is yes or no" "$tmp/err" && ok "and says so" || fail "and says so" "$(cat "$tmp/err")"
+run "POSTMASTER_CONFIG names the config" 0 self - \
+  env POSTMASTER_CONFIG="$tmp/match.toml" "$0" claude pm-model "$tmp/here" yes "$tmp/here"
+run "--config overrides POSTMASTER_CONFIG" 0 self - \
+  env POSTMASTER_CONFIG="$tmp/no-pm.toml" "$0" claude pm-model "$tmp/here" yes "$tmp/here" --config "$tmp/match.toml"
 run "four arguments is a usage error" 2 '' - \
   "$0" claude pm-model "$tmp/here" yes
 run "--self-test takes no arguments" 2 '' - \
