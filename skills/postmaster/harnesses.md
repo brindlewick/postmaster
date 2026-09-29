@@ -387,7 +387,9 @@ session of its own: a host's pane where there is one, a detached process where t
 ```
 
 When `.watch-exited` lands, `watch.out` holds the table and the `needs` lines: act on them,
-then start the watcher again before anything else.
+then start the watcher again before anything else. The marker lands whatever the exit, so no
+`needs` lines means the watcher failed instead of waking: the reason is in `watch.err` — read
+it, fix the cause, and only then start the watcher again.
 
 | harness | nonblocking form | where the session cannot keep it in the background |
 |---|---|---|

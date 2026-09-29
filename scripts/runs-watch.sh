@@ -13,8 +13,8 @@
 # but WAIT (a leg at work), USER (already put to the user) or - (closed). A run listed in
 # <runs>/postmaster/held, one ticket per line, never does: hold a run by writing its ticket
 # there, release it by removing the line. The held list and the config are read on every look,
-# so a hold takes effect without restarting the watcher. Where the config sets no usable poll
-# interval, the interval is the default, 120 seconds, which it says.
+# so a hold takes effect without restarting the watcher. A missing config, or a poll interval
+# that is not usable, gets the default, 120 seconds, which it says; an unset one is silent.
 #
 # With --timeout, a look that finds nothing for that many seconds prints the table and exits 3;
 # the timeout counts the seconds it has slept, so a clock set forward does not end the wait
@@ -23,7 +23,7 @@
 #
 #   exit 0  a run needs the postmaster: the table, then one `needs <run> <NEXT>` line each
 #   exit 3  --timeout passed with nothing to act on: the table
-#   exit 1  usage, no such root, the held list cannot be read, or a poll interval or timeout
+#   exit 1  usage, no such root, the held list cannot be read, or a timeout
 #           that is not a whole number
 #
 # Controls: every NEXT that must wake the postmaster names its run on exit 0 (positive), and
@@ -62,8 +62,9 @@ try:
     with open(path, "rb") as f:
         cfg = tomllib.load(f)
 except FileNotFoundError:
+    print("runs-watch: no config at %s; the poll interval is the default, 120s" % path, file=sys.stderr)
     print(120); raise SystemExit(0)
-except (OSError, tomllib.TOMLDecodeError) as e:
+except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
     print("runs-watch: cannot read %s (%s); the poll interval is the default, 120s" % (path, e), file=sys.stderr)
     print(120); raise SystemExit(0)
 pm = cfg.get("postmaster", {})
@@ -136,23 +137,23 @@ for dp, dn, fn in os.walk(sys.argv[1]):
   echo "negative controls: WAIT, USER, - and a held run leave it waiting"
   root="$tmp/neg-wait"; mkdir -p "$root"; mkrun "$root" wait review 2
   watch "$root"
-  [ $rc -eq 3 ] && has "NEXT" && ! has "needs " \
+  [ $rc -eq 3 ] && has "NEXT" && has "wait " && has "WAIT" && ! has "needs " \
     && ok "a leg at work is left waiting until the timeout" \
     || fail "a leg at work is left waiting until the timeout"
   root="$tmp/neg-user"; mkdir -p "$root"; mkrun "$root" user review 2 .waiting-on-user .leg-2-exited
   watch "$root"
-  [ $rc -eq 3 ] && has "NEXT" && ! has "needs " \
+  [ $rc -eq 3 ] && has "NEXT" && has "user " && has ".waiting-on-user" && ! has "needs " \
     && ok "a run put to the user is left waiting until the timeout" \
     || fail "a run put to the user is left waiting until the timeout"
   root="$tmp/neg-closed"; mkdir -p "$root"; mkrun "$root" closed done 3 .leg-3-done
   watch "$root"
-  [ $rc -eq 3 ] && has "NEXT" && ! has "needs " \
+  [ $rc -eq 3 ] && has "NEXT" && has "closed " && has ".leg-3-done" && ! has "needs " \
     && ok "a closed run is left waiting until the timeout" \
     || fail "a closed run is left waiting until the timeout"
   root="$tmp/neg-held"; mkdir -p "$root"; mkrun "$root" held review 2 .escalation-ready
   mkdir -p "$root/postmaster"; printf 'held\n' > "$root/postmaster/held"
   watch "$root"
-  [ $rc -eq 3 ] && has "NEXT" && ! has "needs " \
+  [ $rc -eq 3 ] && has "NEXT" && has "held " && has ".escalation-ready" && ! has "needs " \
     && ok "a run on the held list never needs the postmaster" \
     || fail "a run on the held list never needs the postmaster"
   root="$tmp/neg-mixed"; mkdir -p "$root"
@@ -160,31 +161,52 @@ for dp, dn, fn in os.walk(sys.argv[1]):
   mkrun "$root" held review 2 .escalation-ready
   mkdir -p "$root/postmaster"; printf 'held\n' > "$root/postmaster/held"
   watch "$root"
-  [ $rc -eq 0 ] && has "needs free GATE" && ! has "needs held" \
+  [ $rc -eq 0 ] && has "needs free GATE" && has "held " && has ".escalation-ready" && ! has "needs held" \
     && ok "a held run is left out of the names even beside a waking run" \
     || fail "a held run is left out of the names even beside a waking run"
+  root="$tmp/neg-heldlink"; mkdir -p "$root"; mkrun "$root" held review 2 .escalation-ready
+  mkdir -p "$root/postmaster"; ln -s "$tmp/no-such-target" "$root/postmaster/held"
+  out=$("$self" --timeout 0 "$root" 2>&1); rc=$?
+  [ $rc -eq 1 ] && has "cannot read" && ! has "needs " \
+    && ok "a dangling held link is refused" || fail "a dangling held link is refused"
+  root="$tmp/neg-helddir"; mkdir -p "$root"; mkrun "$root" held review 2 .escalation-ready
+  mkdir -p "$root/postmaster/held"
+  out=$("$self" --timeout 0 "$root" 2>&1); rc=$?
+  [ $rc -eq 1 ] && has "cannot read" && ! has "needs " \
+    && ok "a held list that is a directory is refused" || fail "a held list that is a directory is refused"
+  root="$tmp/neg-heldperm"; mkdir -p "$root"; mkrun "$root" held review 2 .escalation-ready
+  mkdir -p "$root/postmaster"; printf 'held\n' > "$root/postmaster/held"; chmod 000 "$root/postmaster/held"
+  out=$("$self" --timeout 0 "$root" 2>&1); rc=$?
+  [ $rc -eq 1 ] && has "cannot read" && ! has "needs " \
+    && ok "an unreadable held list is refused" || fail "an unreadable held list is refused"
+  chmod 644 "$root/postmaster/held"
   root="$tmp/neg-none"; mkdir -p "$root"; mkrun "$root" alone done 1
   out=$("$self" --timeout 0 "$root" 2>&1); rc=$?
-  [ $rc -eq 3 ] && has "NEXT" && ! has "needs " \
+  [ $rc -eq 3 ] && has "NEXT" && has "alone " && ! has "needs " \
     && ok "an empty timeout still looks once, prints the table and exits 3" \
     || fail "an empty timeout still looks once, prints the table and exits 3"
 
   echo "config: a missing or unusable poll interval falls back to the default"
   root="$tmp/cfg-missing"; mkdir -p "$root"; mkrun "$root" wait review 2
   out=$(POSTMASTER_CONFIG="$tmp/nowhere.toml" "$self" --timeout 2 "$root" 2>&1); rc=$?
-  [ $rc -eq 3 ] && has "NEXT" && ! has "needs " \
-    && ok "a missing config still runs on the default" \
-    || fail "a missing config still runs on the default"
+  [ $rc -eq 3 ] && has "NEXT" && has "wait " && ! has "needs " && has "the poll interval is the default, 120s" \
+    && ok "a missing config still runs on the default, and says so" \
+    || fail "a missing config still runs on the default, and says so"
   printf '[postmaster]\npoll_seconds = "soon"\n' > "$tmp/bad.toml"
   out=$(POSTMASTER_CONFIG="$tmp/bad.toml" "$self" --timeout 2 "$root" 2>&1); rc=$?
-  [ $rc -eq 3 ] && has "NEXT" && has "the poll interval is the default, 120s" \
+  [ $rc -eq 3 ] && has "NEXT" && has "wait " && has "the poll interval is the default, 120s" \
     && ok "an unusable poll interval falls back to the default, and says so" \
     || fail "an unusable poll interval falls back to the default, and says so"
   printf '[postmaster]\npoll_seconds = 0\n' > "$tmp/zero.toml"
   out=$(POSTMASTER_CONFIG="$tmp/zero.toml" "$self" --timeout 2 "$root" 2>&1); rc=$?
-  [ $rc -eq 3 ] && has "the poll interval is the default, 120s" \
+  [ $rc -eq 3 ] && has "wait " && has "the poll interval is the default, 120s" \
     && ok "a zero poll interval falls back to the default, and says so" \
     || fail "a zero poll interval falls back to the default, and says so"
+  python3 -c "open('$tmp/badutf8.toml','wb').write(b'\xff\xfe\x00bad\x80')"
+  out=$(POSTMASTER_CONFIG="$tmp/badutf8.toml" "$self" --timeout 2 "$root" 2>&1); rc=$?
+  [ $rc -eq 3 ] && has "wait " && has "the poll interval is the default, 120s" && ! has "Traceback" \
+    && ok "a config that is not UTF-8 falls back to the default, and says so" \
+    || fail "a config that is not UTF-8 falls back to the default, and says so"
 
   echo "usage"
   out=$("$self" 2>&1); rc=$?
@@ -193,6 +215,9 @@ for dp, dn, fn in os.walk(sys.argv[1]):
   out=$("$self" --timeout soon "$tmp/neg-wait" 2>&1); rc=$?
   [ $rc -eq 1 ] && has "not a whole number" \
     && ok "a timeout that is not a number is refused" || fail "a timeout that is not a number is refused"
+  out=$("$self" --timeout "" "$tmp/neg-wait" 2>&1); rc=$?
+  [ $rc -eq 1 ] && has "not a whole number" \
+    && ok "an empty timeout is refused" || fail "an empty timeout is refused"
   out=$("$self" --timeout 2 "$tmp/nowhere" 2>&1); rc=$?
   [ $rc -eq 1 ] && has "no such root" \
     && ok "a run root that does not exist is refused" || fail "a run root that does not exist is refused"
@@ -210,6 +235,7 @@ while [ $# -gt 0 ]; do
   case $1 in
     --timeout)
       [ $# -ge 2 ] || { echo "usage: runs-watch.sh <project-run-root> [--timeout <seconds>] | --help | --self-test" >&2; exit 1; }
+      [ -n "$2" ] || { echo "runs-watch: '' is not a whole number of seconds" >&2; exit 1; }
       TIMEOUT=$2; shift ;;
     -*) echo "usage: runs-watch.sh <project-run-root> [--timeout <seconds>] | --help | --self-test" >&2; exit 1 ;;
     *) [ -z "$ROOT" ] || { echo "usage: runs-watch.sh <project-run-root> [--timeout <seconds>] | --help | --self-test" >&2; exit 1; }
@@ -231,8 +257,9 @@ left=${TIMEOUT:-}
 
 while :; do
   POLL=$(poll_seconds) || exit 1
-  [ "$POLL" -ge 1 ] 2>/dev/null || { echo "runs-watch: postmaster.poll_seconds must be a whole number of seconds, 1 or more" >&2; exit 1; }
-  if [ -e "$held" ] && [ ! -r "$held" ]; then echo "runs-watch: cannot read $held" >&2; exit 1; fi
+  if [ -e "$held" ] || [ -L "$held" ]; then
+    [ -f "$held" ] && [ -r "$held" ] || { echo "runs-watch: cannot read $held" >&2; exit 1; }
+  fi
   table=$("$HERE/runs-status.sh" "$ROOT") || { echo "runs-watch: runs-status.sh failed on $ROOT" >&2; exit 1; }
   needs=$(printf '%s\n' "$table" | waking_runs "$held")
   if [ -n "$needs" ]; then

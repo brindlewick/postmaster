@@ -203,8 +203,9 @@ Keep `<tool>/scripts/runs-watch.sh <runs>` running in the background, one per pr
 (`harnesses.md`, Keeping the watcher running). It looks every `postmaster.poll_seconds`
 (default 120) until a run needs you, then prints `<tool>/scripts/runs-status.sh`'s table, names
 each run that needs you with its `NEXT`, and exits 0. Act on what it names, run by run, and log
-every action; then start it again at once. A watcher that is not running is a run nobody
-notices.
+every action; then start it again at once. If it names nothing it failed: the reason is in
+`<runs>/postmaster/watch.err` — fix the cause (harnesses.md, Keeping the watcher running)
+before starting it again. A watcher that is not running is a run nobody notices.
 
 **Hold a run** by writing its ticket to `<runs>/postmaster/held`, one ticket per line: a held
 run never needs you. **Release it** by removing its line. Hold a run only while you mean to
