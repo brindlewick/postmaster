@@ -796,7 +796,7 @@ function runChecks(wt: string, dispatch: string | null): never {
       console.log(`  log: ${log}`);
     }
     if (dispatch) {
-      const detail = `on=${branch}@${sha.slice(0, 12)} result=${result.replace(" /g", "-")} exit=${code === null ? "-" : code} secs=${secs}`;
+      const detail = `on=${branch}@${sha.slice(0, 12)} result=${result.replace(/ /g, "-")} exit=${code === null ? "-" : code} secs=${secs}`;
       let detailFull = detail;
       if (why) detailFull += (result === "pass" ? " score=" : " reason=") + why;
       const lr = run("bash", [
@@ -1525,6 +1525,15 @@ use = "cli-examples"
     );
   }
   {
+    const logContent = readFileSync(join(d, "actions.jsonl"), "utf-8");
+    st.check(
+      "a result with a space is logged with dashes, so results can read it",
+      logContent.includes('"target":"absent","detail":"on=wb/T-1-a@') &&
+        logContent.includes("result=not-run exit=127"),
+      logContent.slice(-500),
+    );
+  }
+  {
     const sha = run("git", ["-C", wt, "rev-parse", "HEAD"]).out.trim().slice(0, 12);
     st.check("with its output kept in the run", existsSync(join(d, "verify", sha, "red.log")));
   }
@@ -1558,6 +1567,11 @@ use = "cli-examples"
   st.check(
     "results give each check's latest result at HEAD",
     r.code === 2 && out.includes("red: fail, exit 1, at") && out.includes("gate: pass, exit 0, at"),
+    `exit ${r.code}\n${out}`,
+  );
+  st.check(
+    "results read a not-run result back",
+    out.includes("absent: not run, exit 127, at"),
     `exit ${r.code}\n${out}`,
   );
   {
