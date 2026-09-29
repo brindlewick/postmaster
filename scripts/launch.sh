@@ -617,6 +617,60 @@ PY
     "try again later: model stream idle timeout"
   check_cell "server-busy beside transient resumes" 0 "model stream idle timeout" \
     "the server is busy, please retry: model stream idle timeout"
+  echo "realistic streams: usage-bearing harness streams resume on a transient end"
+  # Built from this run's own logs: a codex turn.completed usage record and a
+  # claude task_progress usage record (whose uuid also holds 429), each ending
+  # in a known transient. Both must resume; both vetoed before the values veto.
+  # They join the corpus as the durable realistic fixtures: the P1 shipped
+  # because every earlier fixture was thread.started plus .err only.
+  codex_usage='{"type": "turn.completed", "usage": {"input_tokens": 3072288, "cached_input_tokens": 2910208, "cache_write_input_tokens": 0, "output_tokens": 50050, "reasoning_output_tokens": 44266}}'
+  claude_usage='{"type":"system","subtype":"task_progress","task_id":"ac8fe1ebf375eff4d","tool_use_id":"toolu_013hqT2oMy1VXLYEaky3ttuc","description":"Reading scripts/runs-watch.sh","subagent_type":"general-purpose","usage":{"total_tokens":30007,"tool_uses":1,"duration_ms":4119},"last_tool_name":"Read","uuid":"c4295b17-b348-4933-8a1e-7dfe07cfb78e","session_id":"7449d3c5-8a18-45ba-aa72-1f0ae0ea8a30"}'
+  realistic_tail='{"type":"error","message":"model stream idle timeout"}'
+  realistic_wall='{"type":"error","message":"quota exceeded for this key"}'
+  printf '%s\n' "the leg ended" > "$tmp/real.err"
+  printf '%s\n' "$codex_usage" "$realistic_tail" > "$tmp/real-events.jsonl"
+  out=$("$self" transient "$tmp/real.err" "$tmp/real-events.jsonl" 2>"$tmp/err"); rc=$?
+  [ $rc -eq 0 ] && [ "$out" = "model stream idle timeout" ] \
+    && ok "a codex stream with usage records resumes on a transient end" \
+    || fail "a codex stream with usage records resumes on a transient end (exit $rc, $out)"
+  printf '%s\n' "$codex_usage" "$realistic_tail" "$realistic_wall" > "$tmp/real-events.jsonl"
+  out=$("$self" transient "$tmp/real.err" "$tmp/real-events.jsonl" 2>"$tmp/err"); rc=$?
+  [ $rc -eq 1 ] && [ "$out" = provider-wall ] \
+    && ok "the same codex stream with a wall message wakes" \
+    || fail "the same codex stream with a wall message wakes (exit $rc, $out)"
+  printf '%s\n' "$claude_usage" "$realistic_tail" > "$tmp/real-events.jsonl"
+  out=$("$self" transient "$tmp/real.err" "$tmp/real-events.jsonl" 2>"$tmp/err"); rc=$?
+  [ $rc -eq 0 ] && [ "$out" = "model stream idle timeout" ] \
+    && ok "a claude stream with usage records resumes on a transient end" \
+    || fail "a claude stream with usage records resumes on a transient end (exit $rc, $out)"
+  printf '%s\n' "$claude_usage" "$realistic_tail" "$realistic_wall" > "$tmp/real-events.jsonl"
+  out=$("$self" transient "$tmp/real.err" "$tmp/real-events.jsonl" 2>"$tmp/err"); rc=$?
+  [ $rc -eq 1 ] && [ "$out" = provider-wall ] \
+    && ok "the same claude stream with a wall message wakes" \
+    || fail "the same claude stream with a wall message wakes (exit $rc, $out)"
+  matrix_fail=0
+  check_cell "1429 beside transient resumes" 0 "model stream idle timeout" \
+    "input_tokens 1429: model stream idle timeout"
+  check_cell "4020 beside transient resumes" 0 "model stream idle timeout" \
+    "took 4020ms: model stream idle timeout"
+  check_cell "429ms beside transient resumes" 0 "model stream idle timeout" \
+    "took 429ms: model stream idle timeout"
+  check_cell "a UUID holding 429 beside transient resumes" 0 "model stream idle timeout" \
+    "id c4295b17-b348-4933: model stream idle timeout"
+  check_pair "a 1429 token count in the stream resumes" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"progress","input_tokens":1429}'
+  [ "$matrix_fail" -eq 0 ] \
+    && ok "bare digits never veto" \
+    || fail "bare digits vetoed"
+  printf '%s\n' '{"type":"error","status":418}' > "$tmp/far-events.jsonl"
+  i=2; while [ "$i" -lt 101 ]; do
+    printf '%s\n' '{"type":"step","status":"flying"}' >> "$tmp/far-events.jsonl"; i=$((i + 1))
+  done
+  printf '%s\n' '{"type":"error","message":"stream disconnected"}' >> "$tmp/far-events.jsonl"
+  out=$("$self" transient "$tmp/real.err" "$tmp/far-events.jsonl" 2>"$tmp/err"); rc=$?
+  [ $rc -eq 1 ] && [ "$out" = not-transient ] \
+    && ok "an unknown status 100 lines back still wakes" \
+    || fail "an unknown status 100 lines back still wakes (exit $rc, $out)"
   echo "structured values: known transients resume, anything else wakes"
   is_transient "a 429 status code is a wall" 1 "the leg ended" '{"type":"error","status":429}'
   is_transient "a 402 status code is a wall" 1 "the leg ended" '{"type":"error","code":402}'
@@ -817,6 +871,9 @@ tokens = [t for t in tokens if t]
 if not tokens:
     print("launch: no wall tokens: refusing to classify with an empty veto set", file=sys.stderr)
     raise SystemExit(1)
+text_stems = [t for t in tokens if not t.isdigit()]
+digit_stems = [t for t in tokens if t.isdigit()]
+code_re = re.compile(r"\b(?:" + "|".join(digit_stems) + r")\b") if digit_stems else None
 try:
     skip = int(skip_arg)
     if skip < 0: raise ValueError("negative")
@@ -831,41 +888,54 @@ except OSError as e:
     raise SystemExit(1)
 # The classifier answers one question: may the watcher resume this ending by itself?
 # The answer is positive and narrow. An ending resumes only when it carries a known
-# transient signature and no wall-like token anywhere in it; everything else wakes
-# the postmaster. A false veto is a wake, which costs one look; a missed wall is an
-# automatic remount against a wall. The transient set below is closed; the veto set
-# is token stems (argv, printed by `launch.sh wall-tokens`) matched as substrings
-# on separator-stripped text, so no spelling, span or boundary can hide a wall.
+# transient signature and no wall-like token anywhere in what it says; everything
+# else wakes the postmaster. A false veto is a wake, which costs one look; a missed
+# wall is an automatic remount against a wall. The transient set below is closed;
+# the veto set is token stems (argv, printed by `launch.sh wall-tokens`).
 #
-# Only error fields on error records contribute stream prose. User and prompt fields
-# are excluded, so prompt text can never make a process eligible for an automatic
-# remount. Prompt text CAN veto one: the veto scan reads the raw lines, and a veto
-# is the safe direction.
+# The veto reads message text only: the .err lines, non-JSON stream lines, and the
+# string values under message, code, error-name and record-shape keys in every
+# post-skip parsed event. JSON keys, field names and numeric payloads are structure,
+# not text, and never count — a "usage" key, a rate_limit key, a token count of 1429
+# and a UUID holding 429 are not walls. Text stems match as substrings on
+# separator-stripped text, so no spelling, span or boundary can hide a wall; digit
+# stems count only status-shaped, as whole numbers in text. Prompt values veto in the
+# safe direction, as since round 6; prompt text can never authorize a resume, below.
 # The first skip-lines lines are an earlier launch's: a resumed stream keeps its history
 # while .err holds only the current launch, so without the skip an old transient error
 # would classify a later unrelated failure as transient, and an old wall would veto a
 # later transient end.
 #
-# Structured values come in three classes. A status code or error type in the
-# known-transient set is a resume signal. A known-harness-internal value (a completed
-# status, a rate_limit_event slowdown, an exit code, a generic timeout) is ignored.
-# Any other value under a code or error-name key wakes: an unknown classification is
-# a wake, never a fall-through. Bare record-shape keys (type, name) are labels, not
-# classifications: a transient-set member there still signals, anything else is
-# ignored — wall-like labels are caught by the veto scan over the raw line anyway.
-# Values on records not marked as errors are progress noise, not classifications,
-# and are never inspected as such (their wall tokens still veto through the raw
-# scan). An int outside the 100-999 status shape is an exit code, not a status.
+# Only error fields on error records contribute positive transient prose, windowed to
+# the last 100 post-skip lines: a missed transient is the safe direction, it wakes.
+# User and prompt fields are excluded there, so prompt text can never make a process
+# eligible for an automatic remount.
+#
+# Structured values come in three classes, read over every post-skip line. A status
+# code or error type in the known-transient set is a resume signal, on any record. A
+# known-harness-internal value (a completed status, a rate_limit_event slowdown, an
+# exit code, a generic timeout) is ignored. Any other numeric status under a code key
+# wakes wherever it sits; any other string under a code or error-name key wakes on an
+# error record, while on a non-error record it is progress noise: an unknown
+# classification is a wake, never a fall-through. Bare record-shape keys (type, name)
+# are labels, not classifications: a transient-set member there still signals,
+# anything else is ignored. An int outside the 100-999 status shape is an exit code,
+# not a status.
 CODE_KEYS = {"status", "statuscode", "code", "errorcode", "errcode", "httpstatus"}
 NAME_KEYS = {"errortype", "errorname"}
 SHAPE_KEYS = {"type", "name"}
+MESSAGE_KEYS = {"error", "errors", "message", "detail", "reason", "description", "text"}
+SCAN_KEYS = MESSAGE_KEYS | CODE_KEYS | NAME_KEYS | SHAPE_KEYS
+PROMPT_KEYS = {"user", "prompt", "input", "transcript", "request"}
 TRANSIENT_CODES = {502, 503, 504, 529}
+WALL_CODES = {int(t) for t in digit_stems}
 TRANSIENT_TYPES = {"econnreset", "econnaborted", "overloaded", "overloadederror"}
 INTERNAL = {"completed", "ratelimitevent", "etimedout"}
 structured_transient = None
+structured_wall = False
 unknown_structured = False
-def note_structured(key, value):
-    global structured_transient, unknown_structured
+def note_structured(key, value, marked):
+    global structured_transient, structured_wall, unknown_structured
     nk = re.sub(r"[^a-z0-9]", "", key.lower())
     if isinstance(value, bool) or value is None:
         return
@@ -879,6 +949,8 @@ def note_structured(key, value):
             if value in TRANSIENT_CODES:
                 if structured_transient is None:
                     structured_transient = "gateway failure"
+            elif value in WALL_CODES:
+                structured_wall = True
             elif 100 <= value <= 999:
                 unknown_structured = True
             # else an exit code, not a status: harness-internal, ignored
@@ -889,7 +961,7 @@ def note_structured(key, value):
     if not text:
         return
     if nk in CODE_KEYS and text.isascii() and text.isdigit():
-        note_structured(key, int(text))
+        note_structured(key, int(text), marked)
         return
     nv = re.sub(r"[^a-z0-9]", "", text.lower())
     if not nv:
@@ -899,14 +971,45 @@ def note_structured(key, value):
             if structured_transient is None:
                 structured_transient = "stream drop" if nv.startswith("econn") else "gateway failure"
             return
-    if nk in CODE_KEYS or nk in NAME_KEYS:
+    if marked and (nk in CODE_KEYS or nk in NAME_KEYS):
         if nv not in INTERNAL:
             unknown_structured = True
-    # A bare type or name outside the transient set is a record label: ignored here.
+    # A bare type or name outside the transient set is a record label: ignored.
+    # A string on a non-error record is progress noise unless it signals.
 NOTICE = "ratelimitevent"  # Claude's slowdown notice: not an ending, never a veto
 def vetoed(text):
     norm = re.sub(r"[^a-z0-9]", "", text.lower()).replace(NOTICE, " ")
-    return any(tok in norm for tok in tokens)
+    if any(tok in norm for tok in text_stems):
+        return True
+    if code_re is not None:
+        if code_re.search(re.sub(r"[\s_-]+", " ", text)):
+            return True
+    return False
+def values_vetoed(value, parent=""):
+    if isinstance(value, str):
+        return parent in SCAN_KEYS and vetoed(value)
+    if isinstance(value, dict):
+        return any(values_vetoed(child, re.sub(r"[^a-z0-9]", "", str(key).lower()))
+                   for key, child in value.items())
+    if isinstance(value, list):
+        return any(values_vetoed(child, parent) for child in value)
+    return False
+def is_marked(event):
+    kind = " ".join(str(event.get(k, "")) for k in
+                    ("type", "event", "kind", "payload_type", "subtype", "status")).lower()
+    return ("error" in kind or "fail" in kind or "exception" in kind
+            or bool(event.get("error")) or bool(event.get("errors")))
+def note_record(value, marked):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            kl = str(key).lower()
+            if kl in PROMPT_KEYS:
+                continue
+            note_structured(str(key), child, marked)
+            note_record(child, marked)
+    elif isinstance(value, list):
+        for child in value:
+            note_record(child, marked)
 error_text = []
 veto_hit = False
 if stream_path:
@@ -914,39 +1017,37 @@ if stream_path:
         f = open(stream_path, encoding="utf-8", errors="replace")
     except OSError:
         f = []
-    # The veto scans every post-skip line: a missed wall would resume, so no window
-    # may hide one. Prose collection below stays windowed to the last 100 post-skip
-    # lines: a missed transient is the safe direction, it wakes.
+    # The veto and the structured read cover every post-skip line: a missed wall or
+    # an unknown status would resume, so no window may hide one. Prose collection
+    # below stays windowed to the last 100 post-skip lines: a missed transient is
+    # the safe direction, it wakes.
     window = collections.deque(maxlen=100)
     for line in itertools.islice(f, skip, None):
-        if not veto_hit and vetoed(line):
-            veto_hit = True
-        window.append(line)
-    for line in window:
         try:
             event = json.loads(line)
         except ValueError:
+            if not veto_hit and vetoed(line):
+                veto_hit = True
             continue
         if not isinstance(event, dict):
             continue
-        kind = " ".join(str(event.get(k, "")) for k in
-                         ("type", "event", "kind", "payload_type", "subtype", "status")).lower()
-        marked = ("error" in kind or "fail" in kind or "exception" in kind
-                  or bool(event.get("error")) or bool(event.get("errors")))
-        if not marked:
+        marked = is_marked(event)
+        if not veto_hit and values_vetoed(event):
+            veto_hit = True
+        note_record(event, marked)
+        window.append(event)
+    for event in window:
+        if not is_marked(event):
             continue
         def collect(value, parent=""):
             if isinstance(value, str):
-                if parent in {"error", "errors", "message", "detail", "reason",
-                              "description", "text"}:
+                if parent in MESSAGE_KEYS:
                     error_text.append(value)
                 return
             if isinstance(value, dict):
                 for key, child in value.items():
-                    if str(key).lower() in {"user", "prompt", "input", "transcript",
-                                            "request"}:
+                    if str(key).lower() in PROMPT_KEYS:
                         continue
-                    note_structured(str(key), child)
                     collect(child, str(key).lower())
             elif isinstance(value, list):
                 for child in value:
@@ -958,7 +1059,7 @@ all_errors = err + "\n" + "\n".join(error_text)
 if re.sub(r"^(?:host:[^\n]*\n)+", "", err).startswith("launch:"):
     print("launch-refusal")
     raise SystemExit(1)
-if veto_hit or vetoed(err):
+if veto_hit or vetoed(err) or structured_wall:
     print("provider-wall")
     raise SystemExit(1)
 if unknown_structured:

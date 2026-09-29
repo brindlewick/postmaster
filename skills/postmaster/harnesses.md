@@ -46,24 +46,34 @@ The adapter answers one question: may the watcher resume this ending by itself? 
 answer is positive and narrow. An ending resumes only when it carries one of the
 signatures above and no wall-like token anywhere in it; everything else wakes the
 postmaster. A wall is **never** transient: any token stem of quota, limit, exhaust,
-exceed, throttle, billing, budget, credit, payment, usage, slow, quick or too many, or
-the codes `429` and `402`, vetoes the resume wherever it appears in the ending, in any
-spelling and at any distance — there is no span limit and no word boundary to hide
-behind, and the veto scans every post-skip stream line. The one exclusion is Claude's
-`rate_limit_event` slowdown notice, which is not an ending and never vetoes. A false
-veto is a wake, which costs one look; a missed wall would be an automatic remount
-against a wall. The fifteen stems live once in `launch.sh` (`wall_tokens`, printed by
-`launch.sh wall-tokens`); the veto matrix is built from that list, a quote corpus
-beside it covers real provider messages verbatim, and each stem is pinned alone, so a
-stem that stops vetoing fails loudly. `try again later` and `server is busy` carry no
-stem on purpose: that is transient-overload language, and resuming on it is right.
+exceed, throttle, billing, budget, credit, payment, usage, slow, quick or too many
+vetoes the resume wherever it appears in what the ending says, in any spelling and at
+any distance — there is no span limit and no word boundary to hide behind. What the
+ending says is its message text: the `.err` lines and the string values under message,
+code, error-name and record-shape keys in every post-skip parsed event. JSON keys,
+field names and numeric payloads are structure, not text, and never count: a `usage`
+key, a `rate_limit` key, a token count of 1429 and a UUID holding 429 are not walls.
+The codes `429` and `402` count only status-shaped, as whole numbers in text or as the
+value of a status or code field. The one exclusion is Claude's `rate_limit_event`
+slowdown notice, which is not an ending and never vetoes. A false veto is a wake,
+which costs one look; a missed wall would be an automatic remount against a wall. The
+fifteen stems live once in `launch.sh` (`wall_tokens`, printed by `launch.sh
+wall-tokens`); the veto matrix is built from that list, a quote corpus beside it
+covers real provider messages verbatim, and each stem is pinned alone, so a stem that
+stops vetoing fails loudly. Usage-bearing codex and claude streams from real runs
+stand beside the corpus as fixtures that must resume. `try again later` and `server
+is busy` carry no stem on purpose: that is transient-overload language, and resuming
+on it is right.
 
-Where an error record carries a status code or an error type, values come in three
-classes: the known-transient set (`502`, `503`, `504`, `529`, connection-reset and
-overloaded types) resumes; known-harness-internal values (a `completed` status, a
-`rate_limit_event` slowdown, an exit code, a generic timeout) are ignored; any other
-value under a code or error-name key wakes, unknown ones included. Bare record-shape
-keys (`type`, `name`) are labels, not classifications. Per harness, as observed: mimo
+Where a record carries a status code or an error type, values come in three classes
+over every post-skip line: the known-transient set (`502`, `503`, `504`, `529`,
+connection-reset and overloaded types) resumes on any record;
+known-harness-internal values (a `completed` status, a `rate_limit_event` slowdown,
+an exit code, a generic timeout) are ignored; any other numeric status under a code
+key wakes wherever it sits, and any other string under a code or error-name key
+wakes on an error record while on another record it is progress noise. Bare
+record-shape keys (`type`, `name`) are labels, not classifications. Per harness,
+as observed: mimo
 reports errors as prose in text parts, and muse reports prose in the `reason` of
 `run.terminal.failed`. Codex error items and grok, pi and agy error shapes are
 unobserved, so those read prose. Claude additionally emits `rate_limit_event`, which is
