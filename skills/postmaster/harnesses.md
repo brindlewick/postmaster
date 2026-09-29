@@ -13,8 +13,40 @@ runbooks correct for every harness and every host.
 **`<tool>/scripts/launch.sh` is the executable form of this file.** `launch.sh form <name>` prints the
 exact launch and resume commands for a configured lane or role; `launch` and `resume` run them;
 `skill` prints the prompt that invokes a harness's own review skill (Own review skills, below).
-The script and this file change together, and a form the script refuses (agy resume) is a form
-this file has not recorded yet.
+`thread-id <events-file>` prints the thread id a stream records, from its shape; `transient
+<err-file> [<stream-file>]` exits 0 when a leg's end is a transient provider error this file
+names (below). The script and this file change together, and a form the script refuses (agy
+resume) is a form this file has not recorded yet.
+
+| harness | thread id in its stream |
+|---|---|
+| codex | `thread_id` |
+| claude | `session_id` |
+| grok | `id` on a session record, else `session_id`, `sessionId`, `conversation_id` or `conversationId` |
+| agy | `conversationId` |
+| pi | `id` on the `session` record |
+| muse | `stream.id` on a `session` record |
+| mimo | `sessionID` |
+
+## Transient provider errors, any harness
+
+Some ends are the provider's, not the leg's: the model stream dropped, a gateway failed, the
+connection reset. Those are worth resuming on rather than escalating. The set is enumerated in
+`<tool>/scripts/launch.sh` (`transient`), which matches it against the leg's durable record:
+its `.err` file and the error records in its stream tail, never a prompt or a user message.
+This file names the same set:
+
+| name | what it looks like |
+|---|---|
+| model stream idle timeout | `model stream idle timeout`, `stream idle timeout` |
+| gateway failure | `bad gateway`, `service unavailable`, `gateway timeout`, `overloaded`, `502`, `503`, `504`, `529` |
+| stream drop | `stream disconnected`, `SSE error`, `connection reset`, `connection aborted`, `broken pipe` |
+
+The adapter accepts spaces, underscores or hyphens between the words in a phrase, without
+regard to case. A quota wall, a `402 Payment Required`, a usage-limit or rate-limit message
+and a `launch:` refusal are **never** transient and take precedence over any transient
+signature: those go to the postmaster as today. Add a signature here and to `launch.sh` only
+when the adapter can distinguish it from those cases in the durable error record.
 
 Every lane runs unrestricted. Its containment is its worktree (`coachman.md`, Lane capability),
 so the bypass form below is passed on every launch AND every resume. The interactive postmaster
