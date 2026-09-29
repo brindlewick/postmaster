@@ -18,7 +18,8 @@
 #          TAKEOVER  a primary coachman hit a recorded wall: start the fallback
 #          RESUME    a leg exited with a thread id and no hand-off: resume it
 #          READ      a checkpoint card is waiting to be read (.checkpoint-*-ready)
-#          INSPECT   no marker, nothing changed for 30 minutes, run not done
+#          INSPECT   an attempt died without its record, the last record is corrupt,
+#                    or no marker and nothing changed for 30 minutes, run not done
 #          WAIT      a leg is running and its files are moving
 #          -         the manifest says done or abandoned
 #
@@ -35,6 +36,25 @@ root = sys.argv[1]; now = time.time()
 pm_esc = os.path.join(root, "postmaster", "ESCALATION.md")
 if os.path.isfile(pm_esc):
     print("POSTMASTER     escalation to the user is pending: %s" % pm_esc)
+def owner_alive(d, leg):
+    try:
+        with open(os.path.join(d, ".leg-%s-active" % leg, "owner"), encoding="utf-8") as f:
+            pid_s, _, start = f.read().strip().partition(" ")
+        pid = int(pid_s)
+    except (OSError, ValueError):
+        return False
+    if os.path.isdir("/proc/self"):
+        try:
+            with open("/proc/%d/stat" % pid) as f:
+                rest = f.read().rpartition(")")[2].split()
+        except OSError:
+            return False
+        return bool(rest) and rest[0] != "Z" and len(rest) > 19 and rest[19] == start
+    import subprocess
+    r = subprocess.run(["ps", "-o", "stat=,lstart=", "-p", str(pid)],
+                       capture_output=True, text=True, env=dict(os.environ, LC_ALL="C"))
+    f = r.stdout.split()
+    return len(f) >= 6 and not f[0].startswith("Z") and " ".join(f[1:6]) == start
 rows = []
 for run in sorted(os.listdir(root)):
     d = os.path.join(root, run)
@@ -58,24 +78,48 @@ for run in sorted(os.listdir(root)):
     idle_min = int((now - newest) / 60) if newest else -1
     done = ".leg-%s-done" % leg in markers
     exited = ".leg-%s-exited" % leg in markers
-    # An active lock that survives its exited marker is stale (the attempt's process is
-    # gone without removing it): the recorded outcome shows, never a wedged WAIT.
-    active = os.path.isdir(os.path.join(d, ".leg-%s-active" % leg)) and not exited
-    outcome, role = "", ""
+    # A lock is active only while its owner lives: a lock whose owner is gone is
+    # stale, with or without its exited marker, and a lock with no owner file
+    # predates ownership and is stale too. The recorded outcome shows, never a
+    # wedged WAIT, and the next start steals the stale lock.
+    active = os.path.isdir(os.path.join(d, ".leg-%s-active" % leg)) \
+        and not exited and owner_alive(d, leg)
+    # Only the last record decides; a corrupt middle line is superseded history.
+    # A last line that is not a record is fail-closed INSPECT, never a guess.
+    outcome, role, last_attempt, corrupt = "", "", -1, False
     try:
         attempt_path = os.path.join(d, "logs", "coachman-leg-%s-attempts.jsonl" % leg)
         with open(attempt_path, encoding="utf-8") as f:
-            records = [json.loads(line) for line in f if line.strip()]
-        if records:
-            outcome = records[-1].get("outcome", "")
-            role = records[-1].get("role", "")
-    except (OSError, ValueError, TypeError):
+            lines = [line for line in f if line.strip()]
+        if lines:
+            try:
+                last = json.loads(lines[-1])
+            except ValueError:
+                corrupt = True
+            else:
+                if isinstance(last, dict):
+                    outcome = last.get("outcome", "")
+                    role = last.get("role", "")
+                    try: last_attempt = int(last.get("attempt", -1))
+                    except (TypeError, ValueError): last_attempt = -1
+                else:
+                    corrupt = True
+    except OSError:
         pass
+    # Currency: every started attempt ends in a record. A phase file beyond the
+    # last record means an attempt died unrecorded: INSPECT, never the stale
+    # outcome. A running attempt holds the lock, so it reads WAIT above.
+    phase_max = -1
+    for p in glob.glob(os.path.join(d, "logs", "coachman-leg-%s-phase-*" % leg)):
+        tail = os.path.basename(p).rsplit("-", 1)[-1]
+        if tail.isdigit(): phase_max = max(phase_max, int(tail))
+    gap = phase_max > last_attempt
     if stage in ("done", "abandoned"): nxt = "-"
     elif ".waiting-on-user" in markers: nxt = "USER"
     elif ".escalation-ready" in markers: nxt = "RULE"
     elif ".card-ready" in markers: nxt = "GATE"
     elif active: nxt = "WAIT"
+    elif gap or corrupt: nxt = "INSPECT"
     elif outcome == "finished": nxt = "DISPATCH"
     elif outcome in ("refused", "pre-thread"): nxt = "ASK"
     elif outcome == "walled" and role == "coachman": nxt = "TAKEOVER"
@@ -115,6 +159,28 @@ run() {  # run <name> <stage> <leg> [marker...]: a run directory with a manifest
 record() {  # record <name> <outcome> <role>: one attempt result, as the leg script writes it
   printf '{"outcome":"%s","role":"%s"}\n' "$2" "$3" > "$tmp/root/$1/logs/coachman-leg-2-attempts.jsonl"
 }
+recordn() {  # recordn <name> <attempt> <outcome> <role>: append one numbered attempt result
+  printf '{"attempt":%s,"outcome":"%s","role":"%s"}\n' "$2" "$3" "$4" >> "$tmp/root/$1/logs/coachman-leg-2-attempts.jsonl"
+}
+phase() {  # phase <name> <n>: attempt <n> started, as the leg script writes it
+  printf 'started\n' > "$tmp/root/$1/logs/coachman-leg-2-phase-$2"
+}
+liveowner() {  # liveowner <name>: the lock's owner is this self-test, alive throughout it
+  python3 - "$$" "$tmp/root/$1/.leg-2-active/owner" <<'PY'
+import os, subprocess, sys
+pid = int(sys.argv[1])
+try:
+    rest = open("/proc/%d/stat" % pid).read().rpartition(")")[2].split()
+    start = rest[19]
+except (OSError, IndexError):
+    start = " ".join(subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
+                     capture_output=True, text=True).stdout.split()[:5])
+open(sys.argv[2], "w").write("%d %s\n" % (pid, start))
+PY
+}
+deadowner() {  # deadowner <name>: the lock's owner is gone (no pid starts at 0)
+  printf '999999999 0\n' > "$tmp/root/$1/.leg-2-active/owner"
+}
 age() {  # age <name>: nothing in the run has changed for an hour
   python3 -c 'import os, sys, time
 t = time.time() - 3600
@@ -149,8 +215,14 @@ run refusedanswer review 2 .waiting-on-user .leg-2-exited; record refusedanswer 
 run wallanswer review 2 .waiting-on-user .leg-2-exited; record wallanswer walled coachman_fallback
 run incompleteanswer review 2 .waiting-on-user .leg-2-exited; record incompleteanswer incomplete coachman
 run finishedclosed done 2 .leg-2-done .leg-2-exited; record finishedclosed finished coachman
-run active review 2; record active refused coachman; mkdir "$tmp/root/active/.leg-2-active"
+run active review 2; record active refused coachman; mkdir "$tmp/root/active/.leg-2-active"; liveowner active
 run staleactive review 2 .leg-2-exited; record staleactive incomplete coachman; mkdir "$tmp/root/staleactive/.leg-2-active"
+run ownergone review 2; record ownergone refused coachman; mkdir "$tmp/root/ownergone/.leg-2-active"; deadowner ownergone
+run noowner review 2; record noowner refused coachman; mkdir "$tmp/root/noowner/.leg-2-active"
+run gap review 2 .leg-2-exited; recordn gap 1 finished coachman; phase gap 1; phase gap 2
+run gapactive review 2; recordn gapactive 1 incomplete coachman; phase gapactive 1; phase gapactive 2; mkdir "$tmp/root/gapactive/.leg-2-active"; liveowner gapactive
+run corruptlast review 2 .leg-2-exited; record corruptlast incomplete coachman; printf 'NOT JSON\n' >> "$tmp/root/corruptlast/logs/coachman-leg-2-attempts.jsonl"
+run corruptmid review 2 .leg-2-exited; printf 'NOT JSON\n' > "$tmp/root/corruptmid/logs/coachman-leg-2-attempts.jsonl"; recordn corruptmid 2 incomplete coachman
 run unknown review 2 .leg-2-exited; record unknown mystery coachman
 run wallunknown review 2 .leg-2-exited; record wallunknown walled unknown
 run stall review 2; age stall; : > "$tmp/root/stall/.leg-1-done"
@@ -176,6 +248,10 @@ expect "an incomplete thread waits on the user ahead of its outcome" incompletea
 expect "a closed run ignores a stale finished attempt" finishedclosed "-"
 expect "a live attempt waits even when its previous outcome asked the user" active WAIT
 expect "an active lock that survives its exited marker reads its outcome" staleactive RESUME
+expect "a lock whose owner is gone reads its outcome, not a wedged WAIT" ownergone ASK
+expect "a lock with no owner file is stale too" noowner ASK
+expect "a phase file beyond the last record is inspected, not the stale outcome" gap INSPECT
+expect "a corrupt middle line does not hide the last good record" corruptmid RESUME
 
 echo "negative controls"
 expect "an earlier leg's done marker dispatches nothing" earlier WAIT
@@ -183,6 +259,8 @@ expect "a ship card put to the user waits on the user, not the gate" usergate US
 expect "a closed run stays closed with a stale marker" userclosed "-"
 expect "an unknown outcome is inspected instead of resumed" unknown INSPECT
 expect "a wall without a known role is inspected" wallunknown INSPECT
+expect "a running attempt's missing record is normal while it holds the lock" gapactive WAIT
+expect "a last line that is not a record is inspected" corruptlast INSPECT
 expect "touching a marker does not hide a stall" stall INSPECT
 [ -z "$(next_of postmaster)" ] && ok "the postmaster's own directory is not a run" \
   || fail "the postmaster's own directory is not a run"
