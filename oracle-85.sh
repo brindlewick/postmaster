@@ -20,6 +20,7 @@ set -uo pipefail
 
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 [ -f "$HERE/scripts/host.sh" ] || { echo "oracle: run from the repo root: scripts/host.sh not found" >&2; exit 1; }
+grep -qP 'x' <<<"x" 2>/dev/null || { echo "oracle: grep -P (PCRE) is required" >&2; exit 1; }
 LOGDIR=${ORACLE_LOG:-$(mktemp -d)}
 mkdir -p "$LOGDIR"
 fail=0
@@ -28,22 +29,31 @@ nope() { echo "FAIL $1: $2"; fail=1; }
 
 # P1 (AC5): no self-test pipes output into grep -q.
 # A literal | into grep with a -q flag (any bundle) or --quiet. Four main-logic
-# occurrences are allowlisted: they are not self-tests. There is no line-based
-# exemption for the race reproducer: one would also exempt a forbidden pipe
-# that shares its line, and the reproducer that landed is a Python heredoc
-# with no shell pipe line to exempt.
+# occurrences are allowlisted below, pinned to their exact file, line and
+# content: they are not self-tests. A pin goes stale (and fails loudly, naming
+# the line) when its line moves or changes; update the pin then, never broaden
+# it to a fragment, which would also exempt a forbidden pipe sharing its line.
+# The reproducer that landed is a Python heredoc with no shell pipe line, so it
+# needs no exemption. A search-grep failure fails the probe: an unrun probe is
+# never a pass.
 probe_static() {
-  local out
-  out=$(grep -rPn '(?<!\|)\|(?!\|)\s*e?grep\s+(-[A-Za-z]*q[A-Za-z]*|--quiet)([^A-Za-z]|$)' "$HERE/scripts" \
-    | grep -v -e 'kinds: //p' -e "grep -q '^in-the-way'" -e 'grep -qxF -- "$control"' -e 'Token scopes' \
-    || true)
-  if [ -z "$out" ]; then
-    pass P1-no-pipe-grep-q "no self-test pipes into grep -q"
-  else
+  local search_rc
+  grep -rPn '(?<!\|)\|(?!\|)\s*e?grep\s+(-[A-Za-z]*q[A-Za-z]*|--quiet)([^A-Za-z]|$)' "$HERE/scripts" 2>/dev/null \
+    | grep -v -x -F \
+      -e "$HERE/scripts/link-skills.sh:93:  if printf '%s\n' \"\$p\" | grep -q '^in-the-way'; then" \
+      -e "$HERE/scripts/probe-trackers.sh:18:elif ! gh auth status 2>&1 | grep -qE \"Token scopes:.*'project'\"; then" \
+      -e "$HERE/scripts/host.sh:1569:  printf '%s\n' \"\$help\" | sed -n 's/^ *kinds: //p' | tr '|' '\n' | grep -qxF \"\$1\"" \
+      -e "$HERE/scripts/log-action.sh:83:  [ -z \"\$control\" ] || printf '%s\n' \"\$kinds\" | grep -qxF -- \"\$control\" \\" \
+    > "$LOGDIR/p1.out"; search_rc=${PIPESTATUS[0]}
+  if [ "$search_rc" -gt 1 ]; then
+    nope P1-no-pipe-grep-q "probe engine failed (search grep exit $search_rc)"
+  elif [ -s "$LOGDIR/p1.out" ]; then
     local sites n
-    sites=$(printf '%s\n' "$out" | sed "s|$HERE/||; s|^\\([^:]*:[0-9]*\\):.*|\\1|" | tr '\n' ' ')
-    n=$(printf '%s\n' "$out" | wc -l)
+    sites=$(sed "s|$HERE/||; s|^\([^:]*:[0-9]*\):.*|\1|" "$LOGDIR/p1.out" | tr '\n' ' ')
+    n=$(wc -l < "$LOGDIR/p1.out")
     nope P1-no-pipe-grep-q "$n self-test pipe(s) into grep -q remain: ${sites:0:1200}"
+  else
+    pass P1-no-pipe-grep-q "no self-test pipes into grep -q"
   fi
 }
 
