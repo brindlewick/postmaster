@@ -33,6 +33,7 @@ import { basename, dirname, join, posix, resolve, sep } from "node:path";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { mkstempSync, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import { casefold, WORD_CHAR_RE, WORD_CLASS, WORD_RUN_RE } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
 const TOOL = toolRoot(import.meta);
@@ -255,14 +256,14 @@ const FILELIKE = /[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*\.[\p{L}][\p{L}\p{N}_]{1,
 const FAULT_ID_RE = /\btf-[0-9a-f]{8}\b/g;
 const HEX_RE = /\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/g;
 const MARK_RE = /\[(?:path|project|ticket text|ticket|code|link|address|withheld)\]/g;
-const WORD_RE = /[\p{L}]+(?:'[\p{L}]+)*/gu;
+const WORD_RE = new RegExp(`[${WORD_CLASS}]+(?:'[${WORD_CLASS}]+)*`, "gu");
 const WTOK_RE = /[\p{L}\p{N}_]+/gu;
 const TICKS_RE = /`([^`\n]+)`/g;
 const HELD_RE = /\x01(\d+)\x02/g;
 const N = 4;
 
 function wordsOf(text: string): string[] {
-  return [...text.matchAll(WORD_RE)].map((m) => m[0]?.toLowerCase());
+  return [...text.matchAll(WORD_RE)].map((m) => casefold(m[0]!));
 }
 
 function gramsOf(ws: string[]): Set<string> {
@@ -314,17 +315,15 @@ class Safe {
     const ws = wordsOf(own);
     this.vocab = new Set(ws);
     this.grams = gramsOf(ws);
-    this.tokens = new Set([...own.matchAll(WTOK_RE)].map((m) => m[0]?.toLowerCase()));
+    this.tokens = new Set([...own.matchAll(WTOK_RE)].map((m) => casefold(m[0]!)));
     const toks = [...own.matchAll(TOKEN)].map((m) => m[0]!);
-    this.paths = new Set(toks.filter((t) => t.includes("/")).map((t) => t.toLowerCase()));
+    this.paths = new Set(toks.filter((t) => t.includes("/")).map((t) => casefold(t)));
     this.files = new Set(
-      toks
-        .filter((t) => FILELIKE.test(t) && FILELIKE.exec(t)?.[0] === t)
-        .map((t) => t.toLowerCase()),
+      toks.filter((t) => FILELIKE.test(t) && FILELIKE.exec(t)?.[0] === t).map((t) => casefold(t)),
     );
-    for (const p of files) this.files.add(basename(p).toLowerCase());
+    for (const p of files) this.files.add(casefold(basename(p)));
     this.urls = new Set(
-      [...own.matchAll(URL_RE)].map((m) => m[0]?.toLowerCase().replace(/[.,;:]+$/, "")),
+      [...own.matchAll(URL_RE)].map((m) => casefold(m[0]!).replace(/[.,;:]+$/, "")),
     );
     this.keys = new Set([...own.matchAll(KEY_RE)].map((m) => m[0]!));
     this.ids = new Set(ids);
@@ -357,7 +356,7 @@ class Safe {
       }
     }
     const sortedNames = [...names]
-      .filter((n) => n.length >= 2 && !/^\d+$/.test(n) && !this.vocab.has(n.toLowerCase()))
+      .filter((n) => n.length >= 2 && !/^\d+$/.test(n) && !this.vocab.has(casefold(n)))
       .sort((a, b) => b.length - a.length);
     this.names =
       sortedNames.length > 0
@@ -386,7 +385,7 @@ class Safe {
     } catch {
       return null;
     }
-    return this.paths.has(p.toLowerCase()) ? p : null;
+    return this.paths.has(casefold(p)) ? p : null;
   }
 
   publish(text: string): string {
@@ -400,17 +399,17 @@ class Safe {
     t = t.replace(MARK_RE, (m) => hold(m));
     t = t.replace(FAULT_ID_RE, (m) => hold(m));
     t = t.replace(URL_RE, (m) =>
-      hold(this.urls.has(m.toLowerCase().replace(/[.,;:]+$/, "")) ? m : "[link]"),
+      hold(this.urls.has(casefold(m).replace(/[.,;:]+$/, "")) ? m : "[link]"),
     );
     t = t.replace(EMAIL_RE, () => hold("[address]"));
     t = t.replace(IPV4_RE, () => hold("[address]"));
     t = t.replace(TOKEN, (tok) => {
       const core = tok.replace(/[.,:]+$/, "");
-      if (core.includes("/") && /\w/.test(core)) {
+      if (core.includes("/") && WORD_CHAR_RE.test(core)) {
         return hold(this.ownPath(core) || "[path]") + tok.slice(core.length);
       }
       if (FILELIKE.test(core) && FILELIKE.exec(core)?.[0] === core) {
-        return hold(this.files.has(core.toLowerCase()) ? core : "[path]") + tok.slice(core.length);
+        return hold(this.files.has(casefold(core)) ? core : "[path]") + tok.slice(core.length);
       }
       return tok;
     });
@@ -423,7 +422,7 @@ class Safe {
     const spans = [...t.matchAll(WORD_RE)].map((m) => ({
       start: m.index!,
       end: m.index! + m[0].length,
-      word: m[0]?.toLowerCase(),
+      word: casefold(m[0]!),
     }));
     const hide = new Set<number>();
     for (let i = 0; i + N <= spans.length; i++) {
@@ -449,21 +448,23 @@ class Safe {
     }
     t = t.replace(TICKS_RE, (_m, inner: string) => {
       const replaced = inner.replace(WTOK_RE, (tok) => {
-        return this.tokens.has(tok.toLowerCase()) || (tok.length < 7 && /^\d+$/.test(tok))
+        return this.tokens.has(casefold(tok)) || (tok.length < 7 && /^\d+$/.test(tok))
           ? tok
           : hold("[code]");
       });
       return `\`${replaced}\``;
     });
     t = t.replace(WTOK_RE, (tok) => {
-      if (this.tokens.has(tok.toLowerCase()) || (tok.length < 7 && /^\d+$/.test(tok))) return tok;
+      if (this.tokens.has(casefold(tok)) || (tok.length < 7 && /^\d+$/.test(tok))) return tok;
       const looks =
         /^\d+$/.test(tok) || tok.includes("_") || /\d/.test(tok) || /[a-z][A-Z]/.test(tok);
       return looks ? hold("[code]") : tok;
     });
     t = t.replace(WORD_RE, (w) => {
-      const cf = w.toLowerCase();
+      const cf = casefold(w);
       if (this.vocab.has(cf)) return w;
+      // Lower, as BASE's `w != w.lower()`: reached only for ASCII, where
+      // lower and fold agree, so this stays exactly as it is.
       if (this.waybillWords.has(cf) || !/^[\x00-\x7f]*$/.test(w) || w !== w.toLowerCase()) {
         return hold("[withheld]");
       }
@@ -474,7 +475,7 @@ class Safe {
 
   key(failed: string): string {
     let t = failed.replace(TOKEN, (m) => {
-      if (m.includes("/") && /\w/.test(m)) {
+      if (m.includes("/") && WORD_CHAR_RE.test(m)) {
         return ` ${this.ownPath(m.replace(/[.,:]+$/, "")) || "path"} `;
       }
       return m;
@@ -482,9 +483,9 @@ class Safe {
     if (this.names) {
       t = t.replace(this.names, " project ");
     }
-    t = t.toLowerCase().replace(FAULT_ID_RE, " id ").replace(HEX_RE, " id ");
+    t = casefold(t).replace(FAULT_ID_RE, " id ").replace(HEX_RE, " id ");
     t = t.replace(/\d+/g, " n ");
-    return [...t.matchAll(/[^\W\d_]+/g)].map((m) => m[0]).join(" ");
+    return [...t.matchAll(WORD_RUN_RE)].map((m) => m[0]).join(" ");
   }
 }
 
@@ -1140,6 +1141,7 @@ withTempDir((tmp) => {
     stubGh,
     `#!/usr/bin/env bun
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
+import { casefold } from "${scriptsDir(import.meta)}/lib/text.ts";
 const d = process.env.TOOL_FAULTS_STUB!;
 const a = process.argv.slice(2);
 const dbPath = d + "/db.json";
@@ -1169,9 +1171,9 @@ if (a[0] === "api" && a[1] === "graphql") {
   }
 } else if (a[0] === "search" && a[1] === "issues") {
   if (existsSync(d + "/no-search")) { console.error("stub gh: search is down"); process.exit(1); }
-  const q = (a[2] ?? "").replace(/^"|"$/g, "").toLowerCase();
+  const q = casefold((a[2] ?? "").replace(/^"|"$/g, ""));
   const hits = Object.entries(db.issues).filter(([n, i]: [string, any]) =>
-    q in {} ? false : (i.title + "\\n" + i.body + "\\n" + i.comments.join("\\n")).toLowerCase().includes(q)
+    q in {} ? false : casefold(i.title + "\\n" + i.body + "\\n" + i.comments.join("\\n")).includes(q)
   ).map(([n, i]: [string, any]) => ({ number: parseInt(n), title: i.title, state: i.state }));
   console.log(JSON.stringify(hits));
 } else if (a[0] === "project" && a[1] === "item-list") {
@@ -1285,8 +1287,15 @@ if (a[0] === "api" && a[1] === "graphql") {
     PROPER,
   ];
 
-  const leaks = (text: string): string[] => {
-    return PLANTED.filter((p) => text.toLowerCase().includes(p.toLowerCase()));
+  // BASE's `leaks()` is `grep -qiF`, whose case-insensitivity is the C
+  // library's locale-defined 1:1 matching — not lowercasing and not
+  // casefold (it equates σ/ς/Σ but neither ß/s nor i/İ). Spawning the
+  // same binary under the same environment is the only exact port, so
+  // this runs grep itself, one marker at a time, matching on status.
+  // The markers parameter exists for the control; production passes
+  // the planted set.
+  const leaks = (text: string, markers: string[] = PLANTED): string[] => {
+    return markers.filter((p) => run("grep", ["-qiF", "--", p], { input: text }).code === 0);
   };
 
   const newrun = (project: string, ticket: string, stage: string): string => {
@@ -2353,6 +2362,290 @@ if (a[0] === "api" && a[1] === "graphql") {
       "draft digests are BASE's sha256 over title, NUL, body",
       digestsMatch,
       seen.join("\n"),
+    );
+  }
+  // The casefold primitive, pinned to goldens captured from python3's
+  // str.casefold once, on 2026-09-29: every entry below is a code point
+  // where folding differs from lowercasing (plus sigma, where the
+  // context-free fold beats the final-sigma lower). Regenerate under
+  // python3 with -c and: "print(repr('<chars>'.casefold()))".
+  {
+    const cases: Array<[string, string]> = [
+      ["ß", "ss"],
+      ["İ", "i\u0307"],
+      ["ς", "σ"],
+      ["Σ", "σ"],
+      ["ﬀ", "ff"],
+      ["ﬁ", "fi"],
+      ["ſ", "s"],
+      ["ŉ", "\u02bcn"],
+      ["ǰ", "j\u030c"],
+      ["µ", "μ"],
+      ["Straße", "strasse"],
+      ["ςigma DBΣ", "σigma dbσ"],
+    ];
+    const seen: string[] = [];
+    let foldOk = true;
+    for (const [input, want] of cases) {
+      const got = casefold(input);
+      if (got !== want) {
+        foldOk = false;
+        seen.push(`${JSON.stringify(input)}: ${JSON.stringify(got)} vs ${JSON.stringify(want)}`);
+      }
+    }
+    st.check("casefold folds as Python's str.casefold", foldOk, seen.join("\n"));
+  }
+  if (run("sh", ["-c", "command -v python3"]).code !== 0) {
+    st.skip(
+      "BASE tool-faults harvest replay (folding)",
+      "python3 not on PATH: the 11-vector casefold comparison did not run",
+    );
+  } else {
+    const T2 = join(tmp, "tool2");
+    mkdirSync(join(T2, "skills"), { recursive: true });
+    run("cp", ["-R", HERE, join(T2, "scripts")]);
+    copyFileSync(join(TOOL, "bunfig.toml"), join(T2, "bunfig.toml"));
+    run("cp", ["-R", join(TOOL, "skills/postmaster"), join(T2, "skills/postmaster")]);
+    writeFileSync(
+      join(T2, "skills/postmaster/probe.md"),
+      "see docs/straße.md and straße.md for the probe\nthe straße word lives here\nref https://straße.example/x here\n",
+    );
+    const shown = run("git", [
+      "-C",
+      TOOL,
+      "show",
+      "bb782a973e69427c820ce16a676718e87f51995b:scripts/tool-faults.sh",
+    ]);
+    const baseLines = shown.out.split("\n");
+    const ghStart = baseLines.findIndex((l) => l.startsWith("cat > ") && l.includes("<<'GH'"));
+    const ghEnd = baseLines.findIndex((l, i) => i > ghStart && l === "GH");
+    const baseTf = join(T2, "scripts", "base-tf.sh");
+    writeFileSync(baseTf, shown.out);
+    run("chmod", ["+x", baseTf]);
+    run("git", ["-C", T2, "init", "-q"]);
+    run("git", ["-C", T2, "remote", "add", "origin", "https://github.com/o/postmaster.git"]);
+    // BASE's stub gh, extracted from its self-test (the `cat ... <<'GH'` body).
+    const binB = join(tmp, "binB");
+    mkdirSync(binB, { recursive: true });
+    writeFileSync(join(binB, "gh"), `${baseLines.slice(ghStart + 1, ghEnd).join("\n")}\n`);
+    run("chmod", ["+x", join(binB, "gh")]);
+    const S2 = join(tmp, "stub2");
+    const S2B = join(tmp, "stub2B");
+    for (const s of [S2, S2B]) {
+      mkdirSync(s, { recursive: true });
+      writeFileSync(join(s, "db.json"), JSON.stringify({ access: "ADMIN", next: 60, issues: {} }));
+    }
+    const faults: Array<[string, string]> = [
+      ["scripts/launch.sh", "crash in Straße 42"],
+      ["scripts/launch.sh", "ςigma failed on DBΣ now"],
+      ["scripts/launch.sh", "İllegal instruction"],
+      ["scripts/launch.sh", "see İ/ſ docs"],
+      ["scripts/launch.sh", "see docs/STRASSE.md"],
+      ["scripts/launch.sh", "STRASSE broke it"],
+      ["scripts/launch.sh", "großartig qzxv jkwv bnpm"],
+      ["scripts/launch.sh", "run `STRASSE` now"],
+      ["scripts/launch.sh", "see STRASSE.MD"],
+      ["scripts/launch.sh", "see https://STRASSE.example/x"],
+      ["scripts/launch.sh", "plain ascii failure"],
+    ];
+    const mkDisp = (name: string): string => {
+      const d = join(tmp, name);
+      mkdirSync(d, { recursive: true });
+      writeFileSync(
+        join(d, "manifest.json"),
+        '{"stage": "done", "leg": 3, "base": "0123abc", "lanes": {}, "coachman": {"legs": {}}}\n',
+      );
+      writeFileSync(join(d, "run.json"), '{"written": "2026-01-01T00:00:00Z", "run": "t"}\n');
+      writeFileSync(
+        join(d, "brief.md"),
+        "# Waybill: t\n\nGROSSARTIG QZXV JKWV BNPM are waybill words.\n",
+      );
+      writeFileSync(
+        join(d, "actions.jsonl"),
+        `${faults
+          .map(([target, failed], i) =>
+            JSON.stringify({
+              ts: `2026-01-01T00:00:${String(i).padStart(2, "0")}Z`,
+              project: "postmaster",
+              run: "t",
+              actor: "coachman",
+              action: "tool-fault",
+              target,
+              detail: "x",
+              fault: { failed, control: "", workaround: "" },
+            }),
+          )
+          .join("\n")}\n`,
+      );
+      return d;
+    };
+    const mismatches: string[] = [];
+    if (shown.code !== 0 || ghStart < 0 || ghEnd < 0) {
+      mismatches.push("could not extract BASE tool-faults.sh and its stub gh");
+    } else {
+      const dB = mkDisp("runsB");
+      const dP = mkDisp("runsP");
+      const base = run("bash", [baseTf, "harvest", dB], {
+        env: { ...process.env, PATH: `${binB}:${process.env.PATH}`, TOOL_FAULTS_STUB: S2B },
+      });
+      const port = run("bash", [join(T2, "scripts", "tool-faults.sh"), "harvest", dP], {
+        env: {
+          ...process.env,
+          PATH: `${join(tmp, "bin")}:${process.env.PATH}`,
+          TOOL_FAULTS_STUB: S2,
+        },
+      });
+      const rid = (s: string): string =>
+        s
+          .replace(/(run )[0-9a-f]{10}\b/g, "$1RID")
+          .replace(/(tool-faults\/)[0-9a-f]{10}/g, "$1RID");
+      if (base.code !== 0 || port.code !== 0) {
+        mismatches.push(
+          `exits: base ${base.code} port ${port.code}\nbase: ${base.err}\nport: ${port.err}`,
+        );
+      } else if (rid(base.out) !== rid(port.out)) {
+        mismatches.push(
+          `harvest output differs:\n--- base\n${rid(base.out)}\n--- port\n${rid(port.out)}`,
+        );
+      } else {
+        const drafts = (d: string): Map<string, string> => {
+          const m = new Map<string, string>();
+          for (const sub of readdirSync(join(d, "tool-faults"))) {
+            for (const f of readdirSync(join(d, "tool-faults", sub))) {
+              if (f === "tool-faults.json") continue;
+              m.set(f, rid(readFileSync(join(d, "tool-faults", sub, f), "utf-8")));
+            }
+          }
+          return m;
+        };
+        const b = drafts(dB);
+        const p = drafts(dP);
+        for (const [f, body] of b) {
+          if (!p.has(f)) mismatches.push(`draft only on BASE: ${f}`);
+          else if (p.get(f) !== body) mismatches.push(`draft differs: ${f}`);
+        }
+        for (const f of p.keys()) {
+          if (!b.has(f)) mismatches.push(`draft only on port: ${f}`);
+        }
+      }
+    }
+    st.check(
+      "folding parity: BASE and port harvests agree on ids and drafts, ß/İ/ς alike",
+      mismatches.length === 0,
+      mismatches.join("\n\n").slice(0, 4000),
+    );
+  }
+  if (run("sh", ["-c", "command -v python3"]).code !== 0) {
+    st.skip(
+      "BASE stub gh search replay (folding)",
+      "python3 not on PATH: the casefold search comparison did not run",
+    );
+  } else {
+    const shown = run("git", [
+      "-C",
+      TOOL,
+      "show",
+      "bb782a973e69427c820ce16a676718e87f51995b:scripts/tool-faults.sh",
+    ]);
+    const baseLines = shown.out.split("\n");
+    const ghStart = baseLines.findIndex((l) => l.startsWith("cat > ") && l.includes("<<'GH'"));
+    const ghEnd = baseLines.findIndex((l, i) => i > ghStart && l === "GH");
+    const mismatches: string[] = [];
+    if (shown.code !== 0 || ghStart < 0 || ghEnd < 0) {
+      mismatches.push("could not extract BASE's stub gh");
+    } else {
+      const binS = join(tmp, "binS");
+      mkdirSync(binS, { recursive: true });
+      writeFileSync(join(binS, "gh"), `${baseLines.slice(ghStart + 1, ghEnd).join("\n")}\n`);
+      run("chmod", ["+x", join(binS, "gh")]);
+      const mkDb = (dir: string): void => {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(
+          join(dir, "db.json"),
+          JSON.stringify({
+            access: "ADMIN",
+            next: 80,
+            issues: {
+              "70": {
+                state: "OPEN",
+                title: "Straße outage",
+                body: "The straße broke",
+                comments: [],
+              },
+              "71": { state: "OPEN", title: "ςigma alert", body: "on DBΣ", comments: ["σighting"] },
+              "72": { state: "CLOSED", title: "İllegal state", body: "plain", comments: [] },
+              "73": { state: "OPEN", title: "plain ascii", body: "nothing special", comments: [] },
+            },
+          }),
+        );
+      };
+      const sB = join(tmp, "stubB");
+      const sP = join(tmp, "stubP");
+      mkDb(sB);
+      mkDb(sP);
+      const hits = (
+        gh: string,
+        stub: string,
+        q: string,
+      ): Array<{ number: number; title: string; state: string }> => {
+        const r = run(gh, ["search", "issues", q], {
+          env: { ...process.env, TOOL_FAULTS_STUB: stub },
+        });
+        if (r.code !== 0) {
+          mismatches.push(`search ${JSON.stringify(q)} exited ${r.code} on ${gh}: ${r.err}`);
+          return [];
+        }
+        const parsed = JSON.parse(r.out) as Array<{ number: number; title: string; state: string }>;
+        return [...parsed].sort((a, b) => a.number - b.number);
+      };
+      for (const q of ["strasse", "STRASSE", "σ", "ς", "Σ", "i", "i\u0307", "plain"]) {
+        const b = hits(join(binS, "gh"), sB, q);
+        const p = hits(join(tmp, "bin", "gh"), sP, q);
+        if (JSON.stringify(b) !== JSON.stringify(p)) {
+          mismatches.push(
+            `query ${JSON.stringify(q)}: base ${JSON.stringify(b)} vs port ${JSON.stringify(p)}`,
+          );
+        }
+      }
+    }
+    st.check(
+      "the stub tracker search folds as BASE's stub does, ß/İ/ς alike",
+      mismatches.length === 0,
+      mismatches.join("\n"),
+    );
+  }
+  // The planted-marker search is BASE's `grep -qiF` invocation, marker
+  // for marker: the port runs the same binary under the same environment,
+  // so the only thing to pin is the wiring, on the vectors where folding
+  // would lie (σ held against ς, i held out of İ). Needs no python3.
+  {
+    const markers = ["Straße", "İ", "ς", "plain", "i"];
+    const texts = [
+      "STRASSE here",
+      "nothing",
+      "İ and i",
+      "Σ ς σ",
+      "PLAIN plain",
+      "straße",
+      "σ only",
+      "İ",
+    ];
+    const mismatches: string[] = [];
+    for (const text of texts) {
+      const want = markers.filter(
+        (p) => run("grep", ["-qiF", "--", p], { input: text }).code === 0,
+      );
+      const got = leaks(text, markers);
+      if (JSON.stringify(got) !== JSON.stringify(want)) {
+        mismatches.push(
+          `${JSON.stringify(text)}: ${JSON.stringify(got)} vs ${JSON.stringify(want)}`,
+        );
+      }
+    }
+    st.check(
+      "the planted-marker search matches grep -qiF marker for marker, ß/İ/ς alike",
+      mismatches.length === 0,
+      mismatches.join("\n"),
     );
   }
 

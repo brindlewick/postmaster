@@ -24,9 +24,10 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { tryJsonFile } from "./lib/data.ts";
-import { scriptsDir } from "./lib/paths.ts";
+import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { die, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import { casefold } from "./lib/text.ts";
 
 const FENCE = /^\s*(`{3,}|~{3,})/;
 const ITEM = /^\s*(?:\d{1,9}[.)]|[-*+])\s+(.*)$/;
@@ -39,7 +40,7 @@ function notRun(msg: string): never {
 }
 
 function norm(s: string): string {
-  return s.replace(/\s+/g, " ").trim().replace(/\.+$/, "").trim().toLowerCase();
+  return casefold(s.replace(/\s+/g, " ").trim().replace(/\.+$/, "").trim());
 }
 
 function ticketLines(text: string): string[] {
@@ -595,6 +596,65 @@ Not a step.
       r.code === 3 && out.includes("no journey report at"),
       out,
     );
+  }
+
+  // Step matching folds as BASE's norm does: ticket steps in one case
+  // meet report sections in another (ß, final and capital sigma, dotted
+  // capital I), and both sides walk all three. A replay: it needs
+  // python3 for BASE's side, and a git checkout to extract BASE from.
+  {
+    const hasPy = run("sh", ["-c", "command -v python3"]).code === 0;
+    const shown = run("git", [
+      "-C",
+      toolRoot(import.meta),
+      "show",
+      "bb782a973e69427c820ce16a676718e87f51995b:scripts/verify-journey.sh",
+    ]);
+    if (!hasPy || shown.code !== 0) {
+      st.skip(
+        "BASE verify-journey norm replay (folding)",
+        !hasPy
+          ? "python3 not on PATH: the casefold step match was not compared"
+          : "BASE could not be extracted here: the casefold step match was not compared",
+      );
+    } else {
+      const baseVj = join(tmp, "base-verify-journey.sh");
+      writeFileSync(baseVj, shown.out);
+      writeFileSync(
+        join(tmp, "fold-ticket.md"),
+        "## User journey\n1. Visit the STRASSE kiosk.\n2. Read the ςummary on DBΣ.\n3. Tap İleri.\n",
+        "utf8",
+      );
+      report(
+        join(tmp, "fold-report.md"),
+        "Visit the Straße kiosk",
+        "did",
+        "shots/1.png",
+        "Read the σummary on DBσ",
+        "did",
+        "shots/1.png",
+        "Tap İleri",
+        "did",
+        "shots/1.png",
+      );
+      const args = (bin: string): string[] => [
+        bin,
+        wt,
+        "--ticket",
+        join(tmp, "fold-ticket.md"),
+        "--report",
+        join(tmp, "fold-report.md"),
+      ];
+      const base = run("bash", args(baseVj));
+      const port = run("bash", args(SELF));
+      const walked = (r: { code: number; out: string; err: string }): boolean =>
+        r.code === 0 && `${r.out}${r.err}`.includes("all 3 steps walked");
+      st.check(
+        "step matching folds as BASE's norm does, ß/İ/ς alike",
+        walked(base) && walked(port),
+        `base exit ${base.code} port exit ${port.code}\nbase: ${base.out}${base.err}\nport: ${port.out}${port.err}`,
+      );
+    }
   }
 
   // A checkout under a path with a space: URL.pathname percent-encodes it,
