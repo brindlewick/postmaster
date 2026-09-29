@@ -16,11 +16,74 @@
 # run("python3") and a planted bare import still fail). AC2, AC3, AC5 and AC6
 # are untouched and still blind.
 #
-# Usage: ./oracle-109.sh   (runs from the repo root; installs deps if needed)
+# Amended twice in review (round 3, on ruling): the AC1 pattern missed
+# versioned interpreters in spawn positions (run("python3.11") and kin), and
+# the AC4 classifier exempted every bare specifier starting with "bun"
+# ("bunyan" passed silent). Both proven by execution; a --self-test now
+# locks the patterns against fixtures. AC2, AC3, AC5 and AC6 still blind.
+#
+# Usage: ./oracle-109.sh [--self-test]   (runs from the repo root; installs deps if needed)
 # Exit 0 when every acceptance criterion holds, 1 otherwise.
 set -uo pipefail
 ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 cd "$ROOT" || exit 1
+
+# Executable Python only: a spawn of the interpreter, -c, an interpreter path,
+# a PY-heredoc or a python shebang. Vocabulary ("python3" as an interpreter
+# name, --python as a flag) and fixture strings are not execution.
+PYINV='run\(["'"'"']python3?(\.[0-9]+)*["'"'"']|spawn(Sync)?\(["'"'"']python3?(\.[0-9]+)*["'"'"']|Bun\.spawn\(\[?["'"'"']python3?(\.[0-9]+)*["'"'"']|exec +python3?([^a-zA-Z0-9_]|$)|python3?(\.[0-9]+)* +-c|/python[0-9.]*([^a-zA-Z0-9_]|$)|<<-?[[:space:]]*['"'"']?PY|#!.*python'
+
+# Reports bare external imports under $SCAN_DIR: paths Bun's own parser finds
+# that are neither relative, absolute, bun/bun:, node:, nor Node built-ins.
+IMPORT_SCAN='
+import fs from "node:fs";
+import path from "node:path";
+import mod from "node:module";
+const builtin=new Set(mod.builtinModules.map(s=>s.replace(/^node:/,"")));
+const tr=new Bun.Transpiler({loader:"ts"});
+const bad=[];
+function walk(d){ for (const e of fs.readdirSync(d,{withFileTypes:true})) {
+  const p=path.join(d,e.name);
+  if (e.isDirectory()) { if (e.name==="node_modules"||e.name===".git") continue; walk(p); }
+  else if (/\.tsx?$/.test(e.name)) {
+    let imps; try { imps=tr.scanImports(fs.readFileSync(p,"utf8")); }
+    catch(e){ bad.push(p+": unparseable"); continue; }
+    for (const i of imps) {
+      const s=i.path;
+      if (s.startsWith(".")||s.startsWith("/")||s==="bun"||s.startsWith("bun:")||s.startsWith("node:")) continue;
+      if (!builtin.has(s)) bad.push(p+": "+s);
+    }
+  }
+}} walk(process.env.SCAN_DIR);
+console.log(bad.join("\n"));'
+
+if [ "${1:-}" = "--self-test" ]; then
+  fails=0
+  hit() { printf '%s\n' "$2" | grep -qE "$PYINV" && echo "  ok   $1" || { echo "  FAIL $1"; fails=$((fails+1)); }; }
+  miss() { printf '%s\n' "$2" | grep -qE "$PYINV" && { echo "  FAIL $1"; fails=$((fails+1)); } || echo "  ok   $1"; }
+  echo "AC1 pattern: executable Python, plain and versioned"
+  hit 'run("python3") is execution' 'const r = run("python3", args);'
+  hit 'run("python3.11") is execution' 'const r = run("python3.11", args);'
+  hit 'Bun.spawn(["python3.11"]) is execution' 'Bun.spawn(["python3.11", x])'
+  hit "spawnSync('python3.11') is execution" "spawnSync('python3.11', []);"
+  hit 'python3.11 -c is execution' 'python3.11 -c "x"'
+  hit 'exec python3.11 is execution' 'exec python3.11 script.py'
+  miss 'an interpreter name as config vocabulary is not' 'harness = "python3"'
+  miss 'a gate command string in a test is not' 'command = "python evals/run.py"'
+  echo "AC4 classifier: only bun/bun:, node: and built-ins pass"
+  fix=$(mktemp -d) || exit 1
+  mkdir -p "$fix/scripts"
+  printf 'import v from "bunyan";\n' > "$fix/scripts/a.ts"
+  printf 'import fs from "node:fs";\nimport b from "bun:sqlite";\nimport r from "./rel";\n' > "$fix/scripts/b.ts"
+  (cd "$fix" && SCAN_DIR=scripts bun -e "$IMPORT_SCAN" > "$fix/out.txt" 2>/dev/null)
+  if grep -q "a.ts: bunyan" "$fix/out.txt"; then echo "  ok   bare bunyan is flagged";
+  else echo "  FAIL bare bunyan is flagged"; fails=$((fails+1)); fi
+  if grep -q "b.ts" "$fix/out.txt"; then echo "  FAIL bun:/node:/relative pass"; fails=$((fails+1));
+  else echo "  ok   bun:/node:/relative pass"; fi
+  rm -rf "$fix"
+  [ "$fails" -eq 0 ] && exit 0
+  echo "self-test: $fails control(s) misbehaved"; exit 1
+fi
 
 pass=0; failed=0
 ok()   { echo "  ok   $1"; }
@@ -38,10 +101,7 @@ ac1_bad=0
 if find scripts -name '*.py' | grep -q .; then
   bad "python files under scripts/: $(find scripts -name '*.py' | tr '\n' ' ')"; ac1_bad=1
 else ok "no .py files under scripts/"; fi
-# Executable Python only: a spawn of the interpreter, -c, an interpreter path,
-# a PY-heredoc or a python shebang. Vocabulary ("python3" as an interpreter
-# name, --python as a flag) and fixture strings are not execution.
-PYINV='run\(["'"'"']python3?["'"'"']|spawn(Sync)?\(["'"'"']python3?["'"'"']|Bun\.spawn\(\[?["'"'"']python3?["'"'"']|exec +python3?([^a-zA-Z0-9_]|$)|python3? +-c|/python[0-9.]*([^a-zA-Z0-9_]|$)|<<-?[[:space:]]*['"'"']?PY|#!.*python'
+# PYINV is defined above, beside the self-test that locks it.
 if grep -rnE "$PYINV" scripts/ 2>/dev/null | grep -q .; then
   bad "python executed under scripts/:"; grep -rnE "$PYINV" scripts/ | head -5 | sed 's/^/         /'; ac1_bad=1
 else ok "no python execution under scripts/ (spawns, -c, paths, heredocs, shebangs)"; fi
@@ -164,27 +224,12 @@ fi
 # sources (import lines written as test data) cannot match, only real imports.
 if ! command -v bun >/dev/null 2>&1; then bad "cannot scan imports: bun not installed"; ac4_bad=1
 else
-viol=$(bun -e '
-import fs from "node:fs";
-import path from "node:path";
-import mod from "node:module";
-const builtin=new Set(mod.builtinModules.map(s=>s.replace(/^node:/,"")));
-const tr=new Bun.Transpiler({loader:"ts"});
-const bad=[];
-function walk(d){ for (const e of fs.readdirSync(d,{withFileTypes:true})) {
-  const p=path.join(d,e.name);
-  if (e.isDirectory()) { if (e.name==="node_modules"||e.name===".git") continue; walk(p); }
-  else if (/\.tsx?$/.test(e.name)) {
-    let imps; try { imps=tr.scanImports(fs.readFileSync(p,"utf8")); }
-    catch(e){ bad.push(p+": unparseable"); continue; }
-    for (const i of imps) {
-      const s=i.path;
-      if (s.startsWith(".")||s.startsWith("/")||s.startsWith("bun")||s.startsWith("node:")) continue;
-      if (!builtin.has(s)) bad.push(p+": "+s);
-    }
-  }
-}} walk("scripts"); if (fs.existsSync("src")) walk("src");
-console.log(bad.join("\n"));' 2>/dev/null)
+viol=$(SCAN_DIR=scripts bun -e "$IMPORT_SCAN" 2>/dev/null)
+if [ -d src ]; then
+  viol2=$(SCAN_DIR=src bun -e "$IMPORT_SCAN" 2>/dev/null)
+  viol="${viol}${viol2:+
+$viol2}"
+fi
 if [ -z "$viol" ]; then ok "no bare external imports in TypeScript under scripts/ (and src/)"
 else bad "external imports:"; printf '%s\n' "$viol" | head -10 | sed 's/^/         /'; ac4_bad=1; fi
 fi
