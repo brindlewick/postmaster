@@ -58,6 +58,13 @@ def final_report(harness, events_path, last_path):
     if harness == "codex":
         if not last_path:
             raise ReportError("Codex review normalization needs the --last output file")
+        # The --last file is trusted only when the review's turn completed: codex
+        # writes -o only on success, so a failed turn's file is an earlier
+        # attempt's. A failed turn, or no completed turn, fails loudly.
+        if any(event.get("type") == "turn.failed" for event in events):
+            raise ReportError("codex review turn failed; refusing its --last output as stale")
+        if not any(event.get("type") == "turn.completed" for event in events):
+            raise ReportError("codex stream shows no completed turn; refusing its --last output as stale")
         try:
             return Path(last_path).read_text(encoding="utf-8")
         except OSError as exc:
@@ -172,10 +179,15 @@ def excise_first(ntext, picked):
 
 
 def normalize_text(text):
-    """The one normalization for clean-matching and JSON parsing: fence markers off,
-    edges stripped. Markdown parsing stays fence-aware: fences are structural there
+    """The one normalization for clean-matching and JSON parsing: a fence wrapping
+    the whole report, meaning its first and last lines, comes off, and edges are
+    stripped. Anything else stays byte for byte: the reader preserves or refuses,
+    never alters. Markdown parsing stays fence-aware: fences are structural there
     (evidence boundaries, quoted examples), cosmetic here."""
-    return re.sub(r"```(?:json)?\s*|```", "", text, flags=re.I).strip()
+    lines = text.strip().splitlines()
+    if len(lines) >= 2 and re.match(r"(?i)```(?:json)?\s*$", lines[0].strip()) and lines[-1].strip() == "```":
+        return "\n".join(lines[1:-1]).strip()
+    return text.strip()
 
 
 def claude_json(ntext):
@@ -721,6 +733,26 @@ def self_test():
         except ValueError:
             check("claude fenced JSON array is read as findings", False, result.stderr or result.stdout)
 
+        # The reader preserves or refuses, never alters: only a fence wrapping the
+        # whole report comes off, never one inside a string value.
+        evidence_text = "```js\nx\n```"
+        inner_fence = root / "claude-inner-fence.events"
+        inner_fence.write_text(json.dumps({"type": "result", "subtype": "success", "result": json.dumps([{"file": "src/a.js", "line": 1, "summary": "s", "evidence": evidence_text}])}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(inner_fence), "--run", str(run_config("inner-fence", "claude"))], capture_output=True, text=True)
+        try:
+            parsed = json.loads(result.stdout)
+            check("a fenced snippet inside evidence normalizes byte for byte", result.returncode == 0 and len(parsed) == 1 and parsed[0]["evidence"] == evidence_text, result.stderr or result.stdout)
+        except ValueError:
+            check("a fenced snippet inside evidence normalizes byte for byte", False, result.stderr or result.stdout)
+        wrapped = root / "claude-wrapped.events"
+        wrapped.write_text(json.dumps({"type": "result", "subtype": "success", "result": "```json\n" + json.dumps([{"file": "src/a.js", "line": 1, "summary": "s"}]) + "\n```\n"}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(wrapped), "--run", str(run_config("wrapped", "claude"))], capture_output=True, text=True)
+        try:
+            parsed = json.loads(result.stdout)
+            check("a report wrapped in one fence still parses", result.returncode == 0 and len(parsed) == 1 and parsed[0]["file"] == "src/a.js", result.stderr or result.stdout)
+        except ValueError:
+            check("a report wrapped in one fence still parses", False, result.stderr or result.stdout)
+
         prose_clean = root / "mimo-prose.events"
         prose_clean.write_text(json.dumps({"type": "text", "part": {"type": "text", "text": "Nothing to review. The worktree has no uncommitted changes.\n"}}) + "\n", encoding="utf-8")
         result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(prose_clean), "--run", str(run_config("prose", "mimo"))], capture_output=True, text=True)
@@ -732,6 +764,19 @@ def self_test():
         guarded_last.write_text("No problems found in the files I read.\n- [P1] Something is wrong somewhere\n", encoding="utf-8")
         result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(guarded), "--run", str(run_config("guarded", "codex")), "--last", str(guarded_last)], capture_output=True, text=True)
         check("a clean phrase beside a finding marker still fails loudly", result.returncode == 1 and "cannot parse review output" in result.stderr, result.stderr or result.stdout)
+
+        # Codex's --last file is trusted only when the review's turn completed:
+        # codex writes -o only on success, so a failed turn's file is stale.
+        stale_clean = root / "codex-stale.last"
+        stale_clean.write_text("No findings.\n", encoding="utf-8")
+        failed_turn = root / "codex-failed.events"
+        failed_turn.write_text(json.dumps({"type": "thread.started"}) + "\n" + json.dumps({"type": "turn.started"}) + "\n" + json.dumps({"type": "turn.failed", "error": {"message": "provider wall"}}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(failed_turn), "--run", str(run_config("failed-turn", "codex")), "--last", str(stale_clean)], capture_output=True, text=True)
+        check("a stale clean --last beside a failed turn fails loudly, never clean", result.returncode == 1 and "turn failed" in result.stderr, result.stderr or result.stdout)
+        no_turn = root / "codex-noturn.events"
+        no_turn.write_text(json.dumps({"type": "thread.started"}) + "\n" + json.dumps({"type": "turn.started"}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(no_turn), "--run", str(run_config("no-turn", "codex")), "--last", str(stale_clean)], capture_output=True, text=True)
+        check("a clean --last with no completed turn fails loudly, never clean", result.returncode == 1 and "no completed turn" in result.stderr, result.stderr or result.stdout)
 
         for harness in SUPPORTED:
             folder = run_config("bad-" + harness, harness)
@@ -828,6 +873,34 @@ def self_test():
             check("the same stream with the file present harvests and normalizes to its finding", present_harvest.returncode == 0 and len(parsed) == 1 and parsed[0]["file"] == "src/page.js" and parsed[0]["line"] == 8, present_harvest.stderr or present_harvest.stdout)
         except (ValueError, OSError, KeyError, IndexError):
             check("the same stream with the file present harvests and normalizes to its finding", False, present_harvest.stderr or present_harvest.stdout)
+        # Consequence (1): the sample's degrade arm writes the run-log line as well
+        # as the degrade action. This executes the sample itself, read from the
+        # runbook as launch.sh's self-test reads it, not a copy of its logic.
+        tool = Path(__file__).resolve().parent.parent
+        blocks = re.findall(r"```sh\n(.*?)```", (tool / "skills" / "postmaster" / "coachman.md").read_text(encoding="utf-8"), re.S)
+        samples = [block for block in blocks if 'NORMALIZE_FAILED=""' in block and "HARVEST_ERR" in block]
+        sample_dispatch = root / "sample-dispatch"
+        (sample_dispatch / "logs").mkdir(parents=True)
+        (sample_dispatch / "logs" / "review-r9-bug-one.jsonl").write_text(json.dumps({"type": "system", "subtype": "task_notification", "output_file": str(task_home / "absent.txt")}) + "\n" + json.dumps({"type": "result", "subtype": "success", "result": "[]"}) + "\n", encoding="utf-8")
+        if len(samples) != 1:
+            check("executing the sample on the missing-file fixture writes both lines", False, "%d degrade samples in coachman.md" % len(samples))
+        else:
+            sample = samples[0].replace("<tool>", str(tool))
+            sample = sample.replace("<dispatch>", str(sample_dispatch)).replace("<repo>", str(root)).replace("<TICKET>", "T").replace("<round>", "9")
+            sample = re.sub(r"for L in \$\([^;]*?; do", "for L in one; do", sample)
+            sample = sample.replace("DEST=" + str(root) + "/.worktrees/T-rev-bug-$L", "DEST=" + str(scratch))
+            (root / "sample.sh").write_text(sample, encoding="utf-8")
+            ran = subprocess.run(["bash", str(root / "sample.sh")], capture_output=True, text=True)
+            logged = []
+            if (sample_dispatch / "actions.jsonl").exists():
+                for raw in (sample_dispatch / "actions.jsonl").read_text(encoding="utf-8").splitlines():
+                    try:
+                        logged.append(json.loads(raw))
+                    except ValueError:
+                        pass
+            degraded = [entry for entry in logged if entry.get("action") == "degrade" and entry.get("target") == "one"]
+            narrative = (sample_dispatch / "run-log.md").read_text(encoding="utf-8") if (sample_dispatch / "run-log.md").exists() else ""
+            check("executing the sample on the missing-file fixture writes both lines", ran.returncode == 0 and len(degraded) == 1 and "one bug: DEGRADED," in narrative, ran.stderr or (str(logged) + narrative))
         empty_first = root / "claude-empty-first.events"
         empty_first.write_text(json.dumps({"type": "result", "subtype": "success", "result": "[]\n[{\"file\": \"src/page.js\", \"line\": 8, \"summary\": \"bug\"}]"}) + "\n", encoding="utf-8")
         result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(empty_first), "--run", str(run_config("empty-first", "claude"))], capture_output=True, text=True)

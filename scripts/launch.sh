@@ -424,6 +424,11 @@ PY
   runs_as "codex review uses --base, --last, max effort and the lane model" review-codex \
     "$(lines "$tmp/cx-detached" exec review --base "$base" --json -o "$tmp/review-last.md" -m lane-model -c 'model_reasoning_effort="max"' "$CODEX_BYPASS" --skip-git-repo-check)" \
     review one "$tmp/cx-detached" "$base" --last "$tmp/review-last.md"
+  printf 'stale from an earlier attempt\n' > "$tmp/review-last.md"
+  run review-codex review one "$tmp/cx-detached" "$base" --last "$tmp/review-last.md"
+  [ $rc -eq 0 ] && [ ! -e "$tmp/review-last.md" ] \
+    && ok "a review launch removes a stale --last file before the harness runs" \
+    || fail "a review launch removes a stale --last file before the harness runs"
   record review-run review-codex
   runs_as "codex review in a run uses the recorded config and the same top level" review-codex \
     "$(lines "$tmp/cx-detached" exec review --base "$base" --json -m lane-model -c 'model_reasoning_effort="max"' "$CODEX_BYPASS" --skip-git-repo-check)" \
@@ -762,6 +767,11 @@ if [ -n "$STDIN_FILE" ]; then exec < "$STDIN_FILE" || die "cannot read $STDIN_FI
 if [ -n "$REVIEW_PROMPT" ]; then
   rm -f -- "$REVIEW_PROMPT" || die "cannot remove the temporary MiMo review prompt: $REVIEW_PROMPT"
   REVIEW_PROMPT=""; trap - EXIT
+fi
+if [ "$CMD" = review ] && [ "$HARNESS" = codex ] && [ -n "$LAST" ]; then
+  # Codex writes -o only on success, so a stale file from an earlier attempt is
+  # removed after the cd, where a relative path resolves as the harness sees it.
+  rm -f -- "$LAST" || die "cannot clear the codex review output file: $LAST"
 fi
 # The env file reaches the harness's environment only: the command above is already built.
 if [ -n "${ENV_FILE:-}" ]; then set -a; . "$ENV_FILE"; set +a; fi

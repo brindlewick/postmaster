@@ -640,7 +640,7 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
      DEST=<repo>/.worktrees/<TICKET>-rev-bug-$L
      EVENTS=<dispatch>/logs/review-r<round>-bug-$L.jsonl
      HARVEST_ERR=$(<tool>/scripts/review-findings.sh harvest "$EVENTS" <dispatch>/logs --prefix review-r<round>-bug-$L 2>&1) \
-       || { <tool>/scripts/log-action.sh <dispatch> coachman degrade "$L" "bug round <round>: $HARVEST_ERR"; continue; }
+       || { <tool>/scripts/log-action.sh <dispatch> coachman degrade "$L" "bug round <round>: $HARVEST_ERR"; <tool>/scripts/run-log.sh <dispatch> "$L bug: DEGRADED, $HARVEST_ERR"; continue; }
      <tool>/scripts/review-findings.sh normalize "$L" "$DEST" "$EVENTS" --last <dispatch>/logs/review-r<round>-bug-$L-last.md --run <dispatch> \
        > <dispatch>/logs/review-r<round>-bug-$L-findings.json || { NORMALIZE_FAILED="$NORMALIZE_FAILED $L"; rm -f <dispatch>/logs/review-r<round>-bug-$L-findings.json; }
    done
