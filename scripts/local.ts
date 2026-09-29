@@ -1504,6 +1504,73 @@ async function selfTest(): Promise<number> {
           "without a store it goes to the github adapter, and the gh on PATH saw the call",
           output(githubCheck),
         );
+
+    // Identifiers both sides compute and read: the next ticket number counts
+    // .json and .md but never .tmp, unfinished writes clean up by BASE's exact
+    // name, and ticket files read on both sides, python's json below standing
+    // in for BASE's read.
+    const py3 = run("sh", ["-c", "command -v python3"]).code === 0;
+    if (!py3) fail("python3 runs the BASE-side identifier controls", "no python3 on PATH");
+    else {
+      const idStore = join(temp, "ids");
+      mkdirSync(idStore, { recursive: true });
+      for (const n of ["1.json", "007.json", "2.md", "3.json.99999.tmp", "README", ".lock"])
+        writeFileSync(join(idStore, n), "{}\n");
+      const pyNext = run("python3", [
+        "-c",
+        'import os,re,sys; used=[int(m.group(1)) for m in (re.fullmatch(r"(\\d+)\\.(?:json|md)", f) for f in os.listdir(sys.argv[1])) if m]; print(max(used, default=0)+1)',
+        idStore,
+      ]);
+      String(nextNumber(idStore)) === pyNext.out.trim() && pyNext.out.trim() === "8"
+        ? ok("the next number counts .json and .md past leading zeros, never .tmp")
+        : fail(
+            "the next number counts .json and .md past leading zeros, never .tmp",
+            `${nextNumber(idStore)} vs ${pyNext.out.trim()}`,
+          );
+      const idRepo = join(temp, "idrepo");
+      newRepo(idRepo);
+      lt(idRepo, "store", "init");
+      const idStoreReal = join(idRepo, ".git", "postmaster", "tickets");
+      const created = lt(idRepo, "create", "snowman ☃ title", bodyPath);
+      const createdN = created.code === 0 ? BigInt(created.out.trim()) : -1n;
+      const meta = run("python3", [
+        "-c",
+        "import json,sys; m=json.load(open(sys.argv[1])); print(m['title'], m['state'], m['created'], len(m['log']))",
+        ticketPath(idStoreReal, createdN, "json"),
+      ]);
+      meta.code === 0 && meta.out.trim().startsWith("snowman ☃ title todo 20")
+        ? ok("a ticket the port writes reads under BASE's json, non-ASCII whole")
+        : fail(
+            "a ticket the port writes reads under BASE's json, non-ASCII whole",
+            `${created.code} ${created.out}\n${meta.out}${meta.err}`,
+          );
+      run("python3", [
+        "-c",
+        "import json,sys; json.dump({'title':'BASE sides ☃','state':'todo','labels':[],'created':'2026-01-02T03:04:05Z','log':[]}, open(sys.argv[1],'w'), indent=2, ensure_ascii=False)",
+        join(idStoreReal, "9.json"),
+      ]);
+      writeFileSync(join(idStoreReal, "9.md"), "BASE body\n");
+      const readNine = lt(idRepo, "read", "9");
+      readNine.code === 0 && readNine.out.includes("BASE sides ☃")
+        ? ok("a ticket BASE's exact dump writes reads under the port")
+        : fail(
+            "a ticket BASE's exact dump writes reads under the port",
+            `${readNine.code} ${readNine.out}`,
+          );
+      const emptyRepo = join(temp, "emptyrepo");
+      newRepo(emptyRepo);
+      lt(emptyRepo, "store", "init");
+      const emptyStore = join(emptyRepo, ".git", "postmaster", "tickets");
+      writeFileSync(join(emptyStore, "1.json.12345.tmp"), "leftover\n");
+      writeFileSync(join(emptyStore, "2.md.678.tmp"), "leftover\n");
+      const removed = lt(emptyRepo, "store", "remove");
+      removed.code === 0 && removed.out.includes("store removed")
+        ? ok("unfinished writes by BASE's exact tmp name clean up on store remove")
+        : fail(
+            "unfinished writes by BASE's exact tmp name clean up on store remove",
+            `${removed.code} ${removed.out}`,
+          );
+    }
   } catch (error) {
     fail("self-test setup or execution", String(error));
   } finally {

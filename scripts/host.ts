@@ -130,7 +130,18 @@ function tmuxSession(path: string): string {
   return `postmaster-${basename(repo).replace(/[.:]/g, "_")}`;
 }
 function handleOf(text: string): string {
-  let handle = text.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  // Byte for byte the way BASE's tr sees it: tr folds ASCII case and replaces
+  // every other BYTE, so one non-ASCII character becomes several dashes.
+  let handle = "";
+  for (const b of new TextEncoder().encode(text)) {
+    const lower = b >= 0x41 && b <= 0x5a ? b + 0x20 : b;
+    const kept =
+      (lower >= 0x61 && lower <= 0x7a) ||
+      (lower >= 0x30 && lower <= 0x39) ||
+      lower === 0x5f ||
+      lower === 0x2d;
+    handle += kept ? String.fromCharCode(lower) : "-";
+  }
   if (!/^[a-z]/.test(handle)) handle = `p${handle}`;
   if (handle.length > 32) {
     const crc = run("cksum", [], { input: text }).out.split(/\s+/, 1)[0] ?? "0";

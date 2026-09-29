@@ -53,12 +53,9 @@ function bootId(): string {
   try {
     return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
   } catch {
-    try {
-      const r = run("sysctl", ["-n", "kern.boottime"]);
-      return r.code === 0 ? r.out.trim() : "";
-    } catch {
-      return "";
-    }
+    // BASE reads sysctl's stdout unchecked: a sysctl that fails still yields
+    // whatever it printed, and a missing one yields nothing. run() never throws.
+    return run("sysctl", ["-n", "kern.boottime"]).out.trim();
   }
 }
 
@@ -691,6 +688,17 @@ esac
           return false;
         }
       })(),
+  );
+  check(
+    "the round attempt is sixteen hex digits, as BASE's urandom(8) writes it",
+    (() => {
+      try {
+        const st = JSON.parse(readFileSync(join(d, "logs/review-r1.json"), "utf8"));
+        return /^[0-9a-f]{16}$/.test(st.attempt ?? "") && typeof st.boot === "string";
+      } catch {
+        return false;
+      }
+    })(),
   );
   launch(1, "bug", "one", "fast");
   launch(1, "bug", "two", "slow");

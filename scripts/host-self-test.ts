@@ -1646,6 +1646,27 @@ async function runControls(): Promise<void> {
         cloneTmuxClose.code === 0 &&
         calls(root, "tmux").filter((line) => line.startsWith("kill-window")).length === 3,
     );
+    // The session name is BASE's tmux_session: postmaster-<repo> with the
+    // characters tmux refuses replaced, so both sides address one session.
+    // After the exact kill counts above, which a new session would disturb.
+    const dotted = join(root, "dot.ted:repo");
+    mkdirSync(dotted, { recursive: true });
+    exec("git", ["init", "-q", dotted]);
+    const dottedRun = execHost(
+      ["run", "dotlane", dotted, "--marker", markerPath("td"), "--", "true"],
+      stubs,
+      f.caller,
+      { POSTMASTER_HOST: "tmux" },
+    );
+    await pass(
+      "a dotted repo opens session postmaster-<repo> with dots and colons replaced",
+      () =>
+        dottedRun.code === 0 &&
+        dottedRun.out.includes("session=postmaster-dot_ted_repo") &&
+        calls(root, "tmux").some((line) => line.includes("\t-s\tpostmaster-dot_ted_repo\t")),
+      dottedRun.out,
+    );
+    execHost(["close", dotted], stubs, root, { POSTMASTER_HOST: "tmux" });
 
     console.log("interactive sessions");
     const noSpawn = execHost(["spawn", "postmaster-repo", f.repo, "--", "claude"]);
@@ -1727,6 +1748,26 @@ async function runControls(): Promise<void> {
         long1 === callText(["_handle", "postmaster-acme-platform-service-billing"], noHost, root) &&
         long1.length <= 32 &&
         long2.length <= 32,
+    );
+    // Handles are BASE's handle_of through tr and cksum, byte for byte: tr folds
+    // ASCII case and replaces every other BYTE, so non-ASCII widens to dashes.
+    const baseHandle =
+      "h=$(printf '%s' \"$1\" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_-' '-'); " +
+      "case $h in [a-z]*) ;; *) h=p$h;; esac; " +
+      "if [ ${#h} -gt 32 ]; then sum=$(printf '%s' \"$1\" | cksum | cut -d' ' -f1); " +
+      'h=$(printf \'%s-%08x\' "${h:0:23}" "$sum"); fi; printf \'%s\' "$h"';
+    const baseOf = (text: string): string => exec("bash", ["-c", baseHandle, "_", text]).out;
+    const handleCases = [
+      "My.Project 1",
+      "9lives",
+      "café au lait",
+      "postmaster-acme-platform-service-billing",
+      "Ünïcödé-rün-näme-with-many-characters",
+      "",
+      "A",
+    ];
+    await pass("every handle is BASE's handle_of, ASCII and non-ASCII, short and long", () =>
+      handleCases.every((text) => callText(["_handle", text], noHost, root) === baseOf(text)),
     );
     const message = join(root, "message.txt");
     writeFileSync(message, "Read the brief.");

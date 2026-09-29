@@ -2264,5 +2264,71 @@ if (a[0] === "api" && a[1] === "graphql") {
     );
   }
 
+  // Fault ids are BASE's sha256 over "file\nkey", first 8 hex digits; a draft's
+  // digest is sha256 over title, NUL, body. python3's hashlib is the independent
+  // side of both controls: the same inputs must give the same id on both sides,
+  // or a run across the cutover files under another fault's name.
+  {
+    const d = join(tmp, "fid");
+    mkdirSync(d, { recursive: true });
+    const safe = new Safe([], d, false);
+    const entries = [
+      {
+        action: "tool-fault",
+        target: "scripts/launch.sh",
+        fault: { failed: "codex --json hung", control: "", workaround: "" },
+      },
+      {
+        action: "tool-fault",
+        target: "scripts/host.sh",
+        fault: { failed: "tmux: no server running", control: "retry", workaround: "" },
+      },
+    ];
+    const groups = faultsOf(entries, safe, 0);
+    let fidsMatch = groups.length === 2;
+    const seen: string[] = [];
+    for (const g of groups) {
+      const e = g.entries[0]!;
+      const key = safe.key(String(fields(e).failed || ""));
+      const want = run("python3", [
+        "-c",
+        "import hashlib,sys; print('tf-'+hashlib.sha256(('%s\\n%s' % (sys.argv[1], sys.argv[2])).encode()).hexdigest()[:8])",
+        String(e.target || ""),
+        key,
+      ]);
+      seen.push(`${g.id} vs ${want.out.trim()}`);
+      if (want.code !== 0 || g.id !== want.out.trim()) fidsMatch = false;
+    }
+    st.check("fault ids are BASE's sha256 over file, newline, key", fidsMatch, seen.join("\n"));
+  }
+  {
+    const cases: Array<[Buffer, Buffer]> = [
+      [Buffer.from("A title\n", "utf8"), Buffer.from("A body.\n", "utf8")],
+      [Buffer.from(new Uint8Array([0x54, 0xff, 0x0a])), Buffer.from("body\0with NUL\n", "utf8")],
+    ];
+    let digestsMatch = true;
+    const seen: string[] = [];
+    cases.forEach(([title, body], i) => {
+      const titlePath = join(tmp, `t${i}.title`);
+      const bodyPath = join(tmp, `b${i}.md`);
+      writeFileSync(titlePath, title);
+      writeFileSync(bodyPath, body);
+      const want = run("python3", [
+        "-c",
+        "import hashlib,sys,pathlib; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()+b'\\0'+pathlib.Path(sys.argv[2]).read_bytes()).hexdigest())",
+        titlePath,
+        bodyPath,
+      ]);
+      const got = digest(titlePath, bodyPath);
+      seen.push(`${got} vs ${want.out.trim()}`);
+      if (want.code !== 0 || got !== want.out.trim()) digestsMatch = false;
+    });
+    st.check(
+      "draft digests are BASE's sha256 over title, NUL, body",
+      digestsMatch,
+      seen.join("\n"),
+    );
+  }
+
   st.finish();
 });

@@ -171,12 +171,17 @@ function harnessData(
   if (cmdMode === "form" || cmdMode === "form-resume") return `<harness-data>/${harness}/<key>`;
   const root =
     process.env.POSTMASTER_HARNESS_DATA ?? join(process.env.HOME ?? "", ".postmaster/harness-data");
-  const key = `${runDir}|${resolve(cwd)}|${name}|${leg}`;
-  // cksum equivalent: use a simple hash
-  let sum = 0;
-  for (let i = 0; i < key.length; i++) {
-    sum = (sum * 31 + key.charCodeAt(i)) >>> 0;
+  // BASE's key, byte for byte: cksum over the run, the physical directory, the
+  // name and the leg, its two fields joined with a dash. A run in flight across
+  // the cutover keeps its sessions only if both sides compute this identically.
+  let phys = "";
+  try {
+    phys = realpathSync(cwd);
+  } catch {
+    phys = ""; // a vanished directory keys empty, as BASE's failed cd does
   }
+  const key = `${runDir}|${phys}|${name}|${leg}`;
+  const sum = run("cksum", [], { input: key }).out.trim().replace(/ /g, "-");
   return `${root}/${harness}/${sum}`;
 }
 
@@ -2774,6 +2779,48 @@ withTempDir((tmp) => {
   doRun("skills", "skill", "three", "security-review");
   if (rc === 3 && out === "") ok("a muse lane has no security review skill: exit 3");
   else fail("a muse lane has no security review skill: exit 3");
+
+  // The harness-data key is BASE's cksum over run, physical directory, name and
+  // leg. BASE's formula through the shell is the independent side of the control.
+  const baseKey = (cwd: string, runDir: string, name: string, leg: string): string =>
+    run("bash", [
+      "-c",
+      'phys=$(CDPATH= cd -P -- "$1" && pwd -P); printf "%s|%s|%s|%s" "$2" "$phys" "$3" "$4" | cksum | tr " " "-"',
+      "_",
+      cwd,
+      runDir,
+      name,
+      leg,
+    ]).out.trim();
+  const portKey = (cwd: string, runDir: string, name: string, leg: string): string =>
+    harnessData("muse", "launch", cwd, name, leg, runDir).split("/").pop() ?? "";
+  mkdirSync(join(tmp, "keydir"), { recursive: true });
+  symlinkSync(join(tmp, "keydir"), join(tmp, "keylink"));
+  const keyCases: Array<[string, string, string, string]> = [
+    [join(tmp, "keydir"), "109", "one", "synthesis"],
+    [join(tmp, "keylink"), "109", "one", "synthesis"],
+    [join(tmp, "keydir"), "R U N", "na me", "re view"],
+  ];
+  if (
+    run("bash", ["-c", `printf '%s' 'RUN|/phys/dir|NAME|LEG' | cksum`]).out.trim() ===
+    "1157329517 22"
+  )
+    ok("cksum still answers the golden vector");
+  else st.fail("cksum still answers the golden vector");
+  let keysMatch =
+    portKey(join(tmp, "nope"), "RUN", "NAME", "LEG") ===
+    baseKey(join(tmp, "nope"), "RUN", "NAME", "LEG");
+  for (const [cwd, runDir, name, leg] of keyCases) {
+    if (portKey(cwd, runDir, name, leg) !== baseKey(cwd, runDir, name, leg)) keysMatch = false;
+  }
+  if (keysMatch) ok("the harness-data key is BASE's cksum over run, physical dir, name and leg");
+  else st.fail("the harness-data key is BASE's cksum over run, physical dir, name and leg");
+  if (
+    portKey(join(tmp, "keylink"), "109", "one", "synthesis") ===
+    portKey(join(tmp, "keydir"), "109", "one", "synthesis")
+  )
+    ok("a symlinked cwd keys its physical directory");
+  else st.fail("a symlinked cwd keys its physical directory");
 
   st.finish();
 });
