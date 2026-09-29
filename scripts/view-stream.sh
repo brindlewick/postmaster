@@ -445,9 +445,13 @@ got=$(printf '%s\n' \
 [ "$got" = "$(printf 'says: The answer is seven.\nresult: success')" ] \
   && ok "claude: a result restating the message does not print it twice" \
   || fail "claude: a result restating the message does not print it twice" "got: $got"
-shows "claude: a result that says something new prints in full" \
+got=$(printf '%s\n' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"Working on it."}]}}' \
   '{"type":"result","subtype":"success","result":"All three hosts green."}' \
-  'result: success · All three hosts green.'
+  | view)
+[ "$got" = "$(printf 'says: Working on it.\nresult: success · All three hosts green.')" ] \
+  && ok "claude: a result that says something new prints in full" \
+  || fail "claude: a result that says something new prints in full" "got: $got"
 shows "codex: a session starts" '{"type":"thread.started","thread_id":"0199a213-81c0"}' 'session 0199a213-81c0'
 shows "codex: a shell command" \
   '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","status":"in_progress"}}' \
