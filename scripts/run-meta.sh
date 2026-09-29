@@ -7,31 +7,35 @@
 #   run-meta.sh pin <repo> <commit> a shared checkout of <repo> at <commit> under $POSTMASTER_TOOL_PINS
 #   run-meta.sh path <dispatch>     print the canonical path of the run's tool checkout
 #   run-meta.sh check <dispatch>    the run's checkout still serves its dispatch commit
-#   run-meta.sh release <dispatch>  drop this run's claim; remove the pin when no run is in flight
+#   run-meta.sh release <dispatch>  remove the pin when no claimed run is in flight
 #   run-meta.sh --self-test
 #
 # Records when it was written; the run and project; the target repo's HEAD and branch; the
 # postmaster commit that dispatched it, and whether that checkout had uncommitted changes,
 # since a run keeps the runbooks it started with; the pinned checkout of that commit, which
-# every leg launch, resume and takeover runs from (the waybill's `tool:`); the config in force,
-# as it was; and the version each harness named in that config reports. Env files are named by
-# the config, never read. A run.json that already exists is left alone.
+# every leg launch, resume and takeover runs from (the waybill's `tool:`); the machine config
+# with local role choices resolved; the project settings and their sources; and the version
+# each harness reports. Env files are named by the machine config, never read. A run.json that
+# already exists is left alone.
 #
 # The pin is a detached worktree of the postmaster repo at the dispatch commit, under
 # $POSTMASTER_TOOL_PINS (default ~/.postmaster/tool-pins), one directory per commit so every
 # run dispatched at that commit shares it. It is the run's `<tool>`: its host.sh, its launch.sh
 # and the runbooks its prompts name. The live checkout still serves the front door and the
-# postmaster's own supervision. A bare `pin` holds no claim: only a run.json recording the
-# checkout keeps release from removing it.
+# postmaster's own supervision. A bare `pin` holds no claim; each dispatch appends its own
+# path to the pin's claims file beside it, so release finds every run that names the pin,
+# whatever project it lives in and whichever runs layout it uses.
 #
 # check is the control that a run still runs on its own versions after main has moved on: it
 # reads the pin's HEAD and tree against the commit run.json records. release removes the pin
-# only when no run whose run.json names it is still in flight (manifest stage other than done
-# or abandoned, a record that cannot be read counting as in flight). Dispatch holds one lock
-# across its pin and run.json write and release across its scan and removal, so the two
-# serialize; release force-removes an unreferenced pin that is not clean, and leaves a locked
-# one alone. The scan covers the runs root the dispatch sits under, at
-# <runs>/<project>/<ticket>, and runs it cannot list keep the pin. The postmaster releases
+# only when no claimed run is still in flight (manifest stage other than done or abandoned,
+# a claim that cannot be read counting as in flight); a pin with no claims file falls back to
+# scanning the runs root the dispatch sits under, and runs it cannot list keep the pin.
+# Dispatch holds one lock across its pin, claim and run.json write and release across its
+# check and removal, so the two serialize; release force-removes an unreferenced pin that is
+# not clean, and leaves a locked one alone. A dispatch whose run.json write fails drops the
+# claim it just made, so the pin stays unreferenced; a crash between the two leaves a stale
+# claim that keeps the pin, for manual recovery. The postmaster releases
 # after it closes or abandons a run, never
 # before the last leg's process has exited. A run with no checkout recorded (an old unpinned
 # waybill) resolves to the tool path its waybill already names; check asks only that it is a
@@ -262,8 +266,26 @@ worktree_locked() {  # worktree_locked <common-dir> <checkout>: yes when an admi
     /^worktree /{w=substr($0,10)} w==c && /^locked/{f=1} END{exit !f}'
 }
 
-release_pin() {  # release_pin <dispatch>: remove the pin when no run in flight uses it
-  local d=$1 checkout root common tools dirty c
+unclaim() {  # unclaim <commit> <dispatch>: drop one claim line; the caller holds the lock
+  local claims="$TOOLS/$1.claims"
+  [ -f "$claims" ] || return 0
+  grep -vxF -- "$2" "$claims" >"$claims.tmp" || [ $? -eq 1 ] \
+    || { echo "run-meta: could not rewrite $claims" >&2; return 1; }
+  mv "$claims.tmp" "$claims" || { echo "run-meta: could not rewrite $claims" >&2; return 1; }
+}
+
+claimed_in_flight() {  # claimed_in_flight <claims-file>: yes when a claimed run is still in flight
+  local claims=$1 line st
+  [ -r "$claims" ] || { echo "run-meta: claims file $claims cannot be read; keeping the pin" >&2; return 0; }
+  while IFS= read -r line || [ -n "$line" ]; do
+    st=$(stage_of "$line/manifest.json")
+    case $st in done|abandoned) ;; *) return 0 ;; esac
+  done <"$claims" || { echo "run-meta: claims file $claims cannot be read; keeping the pin" >&2; return 0; }
+  return 1
+}
+
+release_pin() {  # release_pin <dispatch>: remove the pin when no claimed run is in flight
+  local d=$1 checkout root common tools dirty c commit claims
   [ -f "$d/run.json" ] || { echo "run-meta: no run.json in $d" >&2; return 1; }
   c=$(claim "$d/run.json")
   case $c in
@@ -278,31 +300,45 @@ release_pin() {  # release_pin <dispatch>: remove the pin when no run in flight 
     "$tools"/*) ;;
     *) echo "run-meta: $checkout is not a pin under $TOOLS; left alone"; return 1 ;;
   esac
-  root=$(CDPATH= cd -P -- "$d/../.." 2>/dev/null && pwd -P) \
-    || { echo "run-meta: could not determine the runs root for $d; left alone" >&2; return 1; }
-  # The scan and the removal hold one lock, which dispatch takes across its pin and run.json
-  # write: a release either sees a dispatch's record and keeps the pin, or removes wholly
-  # before the dispatch cuts. Every check below re-runs under the lock, so two releases at
-  # once serialize and the loser finds the pin already gone.
+  commit=${checkout##*/}
+  claims="$TOOLS/$commit.claims"
+  # The check and the removal hold one lock, which dispatch takes across its pin, claim and
+  # run.json write: a release either sees a dispatch's claim and keeps the pin, or removes
+  # wholly before the dispatch cuts. Every check below re-runs under the lock, so two
+  # releases at once serialize and the loser finds the pin already gone.
   (
     exec 9>"$TOOLS/.pin.lock" && flock 9 || { echo "run-meta: could not lock $TOOLS" >&2; exit 1; }
-    if in_flight "$root" "$checkout"; then
-      echo "run-meta: kept $checkout; another run in flight still uses it"
-      exit 0
+    if [ -e "$claims" ] && [ ! -f "$claims" ]; then
+      echo "run-meta: $claims is not a file; keeping $checkout" >&2; exit 0
     fi
-    [ -e "$checkout" ] || { echo "run-meta: $checkout was already removed"; exit 0; }
+    if [ -f "$claims" ]; then
+      if claimed_in_flight "$claims"; then
+        echo "run-meta: kept $checkout; another run in flight still uses it"
+        exit 0
+      fi
+    else
+      root=$(CDPATH= cd -P -- "$d/../.." 2>/dev/null && pwd -P) \
+        || { echo "run-meta: could not determine the runs root for $d; left alone" >&2; exit 1; }
+      if in_flight "$root" "$checkout"; then
+        echo "run-meta: kept $checkout; another run in flight still uses it"
+        exit 0
+      fi
+    fi
+    [ -e "$checkout" ] || { rm -f "$claims" 2>/dev/null; echo "run-meta: $checkout was already removed"; exit 0; }
     common=$(git -C "$checkout" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) \
       || { echo "run-meta: $checkout is not a git checkout; left alone" >&2; exit 1; }
     if git --git-dir="$common" worktree remove "$checkout" >/dev/null 2>&1; then
+      rm -f "$claims" 2>/dev/null
       echo "run-meta: removed $checkout"
       exit 0
     fi
-    [ -e "$checkout" ] || { echo "run-meta: $checkout was already removed"; exit 0; }
+    [ -e "$checkout" ] || { rm -f "$claims" 2>/dev/null; echo "run-meta: $checkout was already removed"; exit 0; }
     if worktree_locked "$common" "$checkout"; then
       echo "run-meta: $checkout is locked; left alone" >&2; exit 1
     fi
     dirty=$(git -C "$checkout" status --porcelain 2>/dev/null) || dirty="?"
     if [ -n "$dirty" ] && git --git-dir="$common" worktree remove --force "$checkout" >/dev/null 2>&1; then
+      rm -f "$claims" 2>/dev/null
       echo "run-meta: removed $checkout, which was not clean"
       exit 0
     fi
@@ -314,21 +350,26 @@ release_pin() {  # release_pin <dispatch>: remove the pin when no run in flight 
 }
 
 meta() {  # meta <dispatch> <repo>
-  local d=$1 repo=$2 commit checkout
+  local d=$1 repo=$2 commit checkout dc
   [ -d "$d" ] || { echo "run-meta: no such dispatch directory: $d" >&2; return 1; }
   git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || { echo "run-meta: not a git repo: $repo" >&2; return 1; }
   [ -f "$CONFIG" ] || { echo "run-meta: no config at $CONFIG" >&2; return 1; }
+  local resolved_repo
+  resolved_repo=$(CDPATH= cd -P -- "$repo" && pwd -P) || { echo "run-meta: cannot resolve project $repo" >&2; return 1; }
   [ -e "$d/run.json" ] && { echo "run-meta: $d/run.json already written; left alone"; return 0; }
   commit=$(git -C "$TOOL" rev-parse HEAD) || { echo "run-meta: no commit in $TOOL" >&2; return 1; }
   mkdir -p "$TOOLS" || { echo "run-meta: could not make $TOOLS" >&2; return 1; }
-  # The pin and the run.json that records it are cut under one lock, which release takes
-  # across its scan and removal: a dispatch either lands wholly before a release's scan and
-  # is kept, or cuts wholly after its removal.
+  # The pin, the claim on it and the run.json that records it land under one lock, which
+  # release takes across its check and removal: a dispatch either lands wholly before a
+  # release's check and is kept, or cuts wholly after its removal.
   (
     exec 9>"$TOOLS/.pin.lock" && flock 9 || { echo "run-meta: could not lock $TOOLS" >&2; exit 1; }
     [ -e "$d/run.json" ] && { echo "run-meta: $d/run.json already written; left alone"; exit 0; }
     checkout=$(pin_inner "$TOOL" "$commit" "$TOOLS/$commit") || exit 1
-    python3 - "$d" "$repo" "$TOOL" "$CONFIG" "$checkout" "$commit" <<'PY' || { echo "run-meta: could not write $d/run.json" >&2; exit 1; }
+    dc=$(canon "$d") || { echo "run-meta: cannot resolve dispatch $d" >&2; exit 1; }
+    printf '%s\n' "$dc" >>"$TOOLS/$commit.claims" \
+      || { echo "run-meta: could not record the claim on $checkout" >&2; exit 1; }
+    python3 - "$d" "$resolved_repo" "$TOOL" "$CONFIG" "$checkout" "$commit" <<'PY' || { echo "run-meta: could not write $d/run.json" >&2; unclaim "$commit" "$dc"; exit 1; }
 import datetime as dt, json, os, pathlib, shutil, subprocess, sys, tempfile, tomllib
 d, repo, tool, config, checkout = map(pathlib.Path, sys.argv[1:6])
 pinned_commit = sys.argv[6]
@@ -336,6 +377,15 @@ pinned_commit = sys.argv[6]
 def git(where, *args):
     r = subprocess.run(["git", "-C", str(where), *args], capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else None
+
+def project_name(dispatch):
+    # <project>/.postmaster/runs/<TICKET>: the project root's basename. An older
+    # runs/<project>/<TICKET> layout is still read as that project.
+    p = dispatch.resolve()
+    run_parent, grand = p.parent, p.parent.parent
+    if run_parent.name == "runs" and grand.name == ".postmaster":
+        return grand.parent.name
+    return run_parent.name
 
 def version(harness):
     if not shutil.which(harness):
@@ -347,7 +397,22 @@ def version(harness):
     except (subprocess.TimeoutExpired, OSError) as e:
         return "no version: %s" % type(e).__name__
 
-cfg = tomllib.load(open(config, "rb"))
+machine_cfg = tomllib.load(open(config, "rb"))
+settings_script = tool / "scripts" / "project-settings.sh"
+profile_result = subprocess.run([str(settings_script), "inspect", str(repo)], capture_output=True, text=True)
+if profile_result.returncode:
+    print(profile_result.stderr.strip() or "project settings could not be read", file=sys.stderr); sys.exit(1)
+try:
+    project_settings = json.loads(profile_result.stdout)
+except ValueError as e:
+    print("project settings gave no JSON: %s" % e, file=sys.stderr); sys.exit(1)
+effective_result = subprocess.run([str(settings_script), "effective", str(repo), str(config)], capture_output=True, text=True)
+if effective_result.returncode:
+    print(effective_result.stderr.strip() or "effective machine config could not be resolved", file=sys.stderr); sys.exit(1)
+try:
+    cfg = json.loads(effective_result.stdout)
+except ValueError as e:
+    print("effective machine config gave no JSON: %s" % e, file=sys.stderr); sys.exit(1)
 harnesses = set()
 for lane in (cfg.get("lanes") or {}).values():
     if lane.get("harness"): harnesses.add(lane["harness"])
@@ -359,8 +424,9 @@ for leg in (team.get("coachman_legs") or {}).values():
 
 record = {
     "written": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    "project": d.resolve().parent.name,
+    "project": project_name(d),
     "run": d.resolve().name,
+    "project_settings": project_settings,
     "target": {"head": git(repo, "rev-parse", "HEAD"), "branch": git(repo, "symbolic-ref", "--short", "-q", "HEAD")},
     "postmaster": {"commit": pinned_commit,
                    "uncommitted_changes": bool(git(tool, "status", "--porcelain")),
@@ -404,6 +470,7 @@ model = "m2"
 [team]
 workhorses = ["one", "two"]
 coachman = { harness = "bash", model = "judge" }
+coachman_fallback = { harness = "bash", model = "backup" }
 EOF
 export POSTMASTER_CONFIG="$tmp/config.toml"; CONFIG=$POSTMASTER_CONFIG
 fails=0
@@ -416,7 +483,9 @@ echo "positive controls"
 meta "$d" "$repo" >/dev/null && ok "run.json is written" || fail "run.json is written"
 check "it names the postmaster commit"            "r['postmaster']['commit'] == '$(git -C "$TOOL" rev-parse HEAD)'"
 check "it names the target's HEAD and branch"     "r['target'] == {'head': '$(git -C "$repo" rev-parse HEAD)', 'branch': 'main'}"
-check "it keeps the config as it was"             "r['config']['lanes']['one']['model'] == 'm1' and r['config']['team']['workhorses'] == ['one','two']"
+check "it keeps the resolved config as it was"     "r['config']['lanes']['one']['model'] == 'm1' and r['config']['team']['workhorses'] == ['one','two']"
+check "it names an old-layout run from its parent"     "r['project'] == 'project' and r['run'] == 'RUN-1'"
+check "it records project settings and their source" "not r['project_settings']['shared_present'] and r['project_settings']['sources']['project.default_turnpikes'] == 'discovery'"
 check "it records each harness's version"         "r['harness_versions']['bash'].startswith('GNU bash')"
 check "a harness not installed says so"           "r['harness_versions']['no-such-harness-xyz'] == 'not on PATH'"
 check "an env file is named, never read"          "r['config']['lanes']['one']['env_file'] == '~/somewhere/secret.env'"
@@ -1010,6 +1079,70 @@ try release "$g6rel"
 [ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$pinL" ] \
   && ok "release removes the pin once unlocked" \
   || fail "release removes the pin once unlocked ($out)"
+mkdir -p "$tmp/outside/legacy/RUN-2"; meta "$tmp/outside/legacy/RUN-2" "$repo" >/dev/null 2>&1; rc=$?
+python3 -c "import json,sys; r=json.load(open('$tmp/outside/legacy/RUN-2/run.json')); sys.exit(0 if (r['project'], r['run']) == ('legacy', 'RUN-2') else 1)" 2>/dev/null && rc2=0 || rc2=1
+[ $rc -eq 0 ] && [ $rc2 -eq 0 ] \
+  && ok "an older runs/<project>/<TICKET> layout is still read as that project" \
+  || fail "an older runs/<project>/<TICKET> layout is still read as that project (exit $rc/$rc2)"
+
+echo "claims across projects and layouts"
+printf '{"stage": "done"}\n' > "$d/manifest.json"
+printf '{"stage": "done"}\n' > "$shared/manifest.json"
+printf '{"stage": "done"}\n' > "$tmp/outside/legacy/RUN-2/manifest.json"
+printf '{"stage": "done"}\n' > "$tmp/project/RUN-G1NEW/manifest.json"
+printf '{"stage": "done"}\n' > "$tmp/project/RUN-DRACE/manifest.json"
+headc=$(git -C "$TOOL" rev-parse HEAD)
+grep -qF "$d" "$TOOLS/$headc.claims" 2>/dev/null \
+  && ok "dispatch records its claim on the pin" || fail "dispatch records its claim on the pin"
+# Two projects share one pin: an old-layout run beside a new-layout one.
+repo2="$tmp/other"; mkdir -p "$repo2"
+git -C "$repo2" init -q -b main && git -C "$repo2" -c user.name=t -c user.email=t@t commit -q --allow-empty -m first
+oldrun="$tmp/runs/acme/RUN-OLD"; newrun="$repo2/.postmaster/runs/RUN-NEW"
+mkdir -p "$oldrun" "$newrun"
+meta "$oldrun" "$repo" >/dev/null 2>&1; rc1=$?
+meta "$newrun" "$repo2" >/dev/null 2>&1; rc2=$?
+[ $rc1 -eq 0 ] && [ $rc2 -eq 0 ] \
+  && ok "two projects dispatch on one pin" || fail "two projects dispatch on one pin ($rc1/$rc2)"
+python3 -c "import json,sys; r=json.load(open('$newrun/run.json')); sys.exit(0 if (r['project'], r['run']) == ('other', 'RUN-NEW') else 1)" 2>/dev/null \
+  && ok "a new-layout run is named from its project root" || fail "a new-layout run is named from its project root"
+python3 -c "import json,sys; r=json.load(open('$newrun/run.json')); sys.exit(0 if (not r['project_settings']['shared_present'] and r['project_settings']['sources']['project.default_turnpikes'] == 'discovery') else 1)" 2>/dev/null \
+  && ok "it records project settings and their source" || fail "it records project settings and their source"
+grep -qF "$oldrun" "$TOOLS/$headc.claims" && grep -qF "$newrun" "$TOOLS/$headc.claims" \
+  && ok "both runs claim the shared pin" || fail "both runs claim the shared pin"
+printf '{"stage": "shipping"}\n' > "$oldrun/manifest.json"
+printf '{"stage": "review"}\n' > "$newrun/manifest.json"
+try release "$oldrun"
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$TOOLS/$headc" ] \
+  && ok "release keeps the pin while another project's run is in flight" \
+  || fail "release keeps the pin while another project's run is in flight" "$out"
+printf '{"stage": "done"}\n' > "$newrun/manifest.json"
+try release "$oldrun"
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$TOOLS/$headc" ] \
+  && ok "release keeps the pin while its own run is still in flight" \
+  || fail "release keeps the pin while its own run is still in flight" "$out"
+printf '{"stage": "done"}\n' > "$oldrun/manifest.json"
+try release "$oldrun"
+[ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$TOOLS/$headc" ] && [ ! -e "$TOOLS/$headc.claims" ] \
+  && ok "release removes the pin and its claims once no run names it" \
+  || fail "release removes the pin and its claims once no run names it" "$out"
+# A claim that cannot be read keeps the pin.
+norun="$tmp/runs/acme/RUN-NO-RECORD"; mkdir -p "$norun"; meta "$norun" "$repo" >/dev/null 2>&1
+printf 'not json\n' > "$norun/manifest.json"
+try release "$norun"
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$TOOLS/$headc" ] \
+  && ok "release keeps the pin on an unreadable claim" \
+  || fail "release keeps the pin on an unreadable claim" "$out"
+printf '{"stage": "done"}\n' > "$norun/manifest.json"
+try release "$norun"
+[ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$TOOLS/$headc" ] \
+  && ok "release removes the pin once the claim reads done" \
+  || fail "release removes the pin once the claim reads done" "$out"
+# A dispatch that cannot write run.json leaves no claim.
+rorun="$tmp/runs/acme/RUN-RO"; mkdir -p "$rorun"; chmod a-w "$rorun"
+meta "$rorun" "$repo" >/dev/null 2>&1; rc=$?; chmod u+w "$rorun"
+[ $rc -eq 1 ] && ! grep -qF "$rorun" "$TOOLS/$headc.claims" 2>/dev/null \
+  && ok "a failed dispatch drops the claim it just made" \
+  || fail "a failed dispatch drops the claim it just made (exit $rc)"
 
 echo
 [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }
