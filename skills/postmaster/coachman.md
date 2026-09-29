@@ -59,10 +59,10 @@ thread id); `resume` per resumed thread; `harvest` per workhorse (detail its exi
 `synthesize` once, with the SYNTHESIS line as the detail; `rule` per conventional divergence
 recorded; `review-launch` per lane per lens per round (target the lane, detail the lens and the
 round), and `review-harvest` likewise with the thread id added; `finding` per verified finding
-(target its file:line, detail its class first, `gating` or `style`, then severity, the round,
-every lens and every lane that found it, verified by execution or reading); `apply` per fix
-(target its commit, detail the findings it fixes); `degrade` per lane per lens per round it did
-not review at full strength (detail the
+(target its file:line, detail `<gating|style> <P1|P2|P3> r<round>` first, then every lens and
+lane that found it, verified by execution or reading); `apply` per fix (target its commit,
+detail the findings it fixes, as whitespace-separated bare finding targets);
+`degrade` per lane per lens per round it did not review at full strength (detail the
 lens, the round and the cause, quoted); `escalate` when a ruling is needed; `gate` per gate run
 with its exit; `verify` per check per commit it runs on, written by `<tool>/scripts/verify.sh run`
 and never by hand; `ticket-state` and `ticket-comment` per tracker write; `merge` on the merge;
@@ -159,7 +159,7 @@ must exit 0 before the marker is touched:
 ## Decisions
 Every decision this leg took, one per line, with its reason, marked do-not-reopen where it is settled; every do-not-reopen decision from earlier hand-offs carried forward verbatim; and always the oracle decision, blind acceptance tests written as the first commit or not written and why.
 ## Deferred findings
-Every finding not applied, with its lens where it has one, its disposition and reason (the review leg restates these to its reviewers; the ship leg carries them to the ship card, the style ones to its Style residue and the rest to its open findings).
+Every finding not applied, with its lens and originating round where known, its disposition and reason (the review leg restates these to its reviewers; the ship leg carries them to the ship card, the style ones to its Style residue and the rest to its open findings).
 ## Verified by execution
 What was verified by running something, with the command and its exit.
 ## Unverified
@@ -456,8 +456,16 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    in the dispatch dir, carries the diff scope (synthesis worktree,
    `git diff <BASE>...HEAD`); the project profile plus the lens's specific pointers from it;
    findings already known (the hand-off's deferred findings, workhorse divergences) so
-   reviewers hunt residues and new holes; and the output contract: severity P1 to P3,
-   file:line, quoted code as evidence, confidence, and for security an exploit path. **State
+   reviewers hunt residues and new holes; and the output contract: a proposed severity,
+   file:line, quoted code as evidence, confidence, and for security an exploit path. The
+   coachman chooses the verified severity after checking each finding and records it on its
+   `finding` line. Copy these definitions into every lens brief's output contract:
+
+   - **P1:** A defect can cause severe harm, irreversible loss, or loss of a critical capability.
+   - **P2:** A defect materially impairs an important capability or protection, with impact limited by its scope or a workable alternative.
+   - **P3:** A defect has limited impact and does not materially impair normal use.
+
+   **State
    in every brief that the lane is working in its own disposable worktree with dependencies
    installed, that it may run anything it wants there including the full gate suite, and that
    the one thing it must not do is modify the code under review.** It is expected to RUN
@@ -662,23 +670,37 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    clean, so do not soften it. Where a lane says it verified a finding by execution, re-run its
    probe rather than re-deriving the claim; where it filed a hypothesis, the verification burden
    is yours.
-4. **Apply once per round,** in the synthesis worktree: the verified gating findings (in a loop
-   with no gating lens, none: step 5), and never a style finding. Where fixes from different
-   lenses touch the same code, reconcile them into one change before applying it. Every style
-   finding is deferred in the hand-off, reaches the ship card's Style residue, and is sorted at
-   aftercare (stage 4). Then re-run the project's gate.
-5. **Loop until clean.** Round `r+1` runs the gating lenses alone, on the fixed diff, with its
+4. **Apply once per round,** in the synthesis worktree. Round 1 applies every verified gating
+   finding, P1, P2 and P3 alike (in a loop with no gating lens, none: step 5). A finding whose
+   fix needs a ruling is escalated, and one it cannot fix is carried to the hand-off with its
+   reason, as today. From round 2 on, only verified P1 and P2 gating findings are fixed; a P3
+   finding is not fixed and goes to the hand-off's deferred findings and the ship card's open
+   findings, with its lens and the round that found it. Never a style finding. Where fixes from
+   different lenses touch the same code, reconcile them into one change before applying it.
+   Every style finding is deferred in the hand-off, reaches the ship card's Style residue, and
+   is sorted at aftercare (stage 4). Then re-run the project's gate.
+5. **Run the review loop by its logged decision.** After the gate, call `<tool>/scripts/review-decide.sh
+   <dispatch> <round>`, which reads the round's `finding` and `apply` lines and prints whether
+   another round runs or the loop ends: round 2 runs whenever round 1 applied a fix; after that,
+   round `r+1` runs only when round `r` logged a verified P1 or P2 finding. Follow its printed
+   `RUN`, `STOP` or `CAP` decision; do not count findings by hand. A style finding never
+   keeps the loop going. Round `r+1` runs the gating lenses alone, on the fixed diff, with its
    own markers, each brief updated with the fixes delta and every applied finding as known
-   context, so they closure-check each fix AND hunt new holes the fixes introduced. Done only
-   when a round returns zero new verified gating findings and every fix verifies closed, so a
-   round that applied any change is never the last, and a style finding never keeps the loop
-   going. A loop with no gating lens is round 1 alone, and applies nothing: a verified gating
+   context, so they closure-check each fix AND hunt new holes the fixes introduced. A fix of a
+   P1 or P2 finding that does not verify closed is logged as a `finding` of its own severity in
+   the round that checked it, and a P3 fix that does not verify closed as a P3 `finding` there.
+   A round in which no lane actually reviewed under a gating lens is never the last
+   (step 2): that lens runs again in the next round regardless of the decision.
+   A loop with no gating lens is round 1 alone, and applies nothing: a verified gating
    finding in it, a bug or security defect the style lens reported, is escalated with the card
    instead of fixed, which stops the leg in either `CHECKPOINT_MODE`, and a ruling that asks for
-   the fix has it applied and the gate re-run, with the card saying no lens re-reviewed it. Cap
-   3 rounds for the whole loop, round 1 included, then STOP and escalate with the residue and
-   your read on why it is not converging; this and the escalation above are `CHECKPOINT_MODE`'s
-   only mid-flow stops in autonomous mode. Style
+   the fix has it applied and the gate re-run, with the card saying no lens re-reviewed it. The
+   cap of 3 rounds for the whole loop, round 1 included, stays as a backstop: when round 3 logs
+   a verified P1 or P2 finding, the loop stops and escalates with the residue, including any
+   fixes that have not been re-reviewed, and your read on why it is not converging; this and the
+   escalation above are `CHECKPOINT_MODE`'s only mid-flow stops in autonomous mode. Past the cap,
+   each further round — including one ordered because no lane reviewed — needs its own ruling
+   (step 6); the script decides nothing past 3. Style
    does not run again: a style lane DEGRADED in round 1 stays DEGRADED, and the card says how
    many lanes the style lens rested on.
 
@@ -691,7 +713,10 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
 6. **One review checkpoint card.** Per lens: the findings and their overlap, across lanes and
    with the other lenses, verified versus dismissed, applied, and the rounds it ran; for style,
    how many findings go to the ship card's Style residue, as `<tool>/scripts/style-findings.sh
-   count <dispatch>` prints it. Then the gate status, and the checks as
+   count <dispatch>` prints it. The card says which round ended the loop and why, as
+   `<tool>/scripts/review-decide.sh` printed it, and lists the P3 findings the loop carried to
+   the ship card's open findings, with each one's lens and the round that found it. Then the
+   gate status, and the checks as
    `<tool>/scripts/verify.sh run <synthesis-wt> <dispatch>` printed them after the last round's
    fixes, the journey walked first where there is one. Written to
    `<dispatch>/checkpoint-review.md` with its `.checkpoint-review-ready` marker. Autonomous
@@ -760,7 +785,7 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    **The ship card carries the Style residue:** how many style findings go to aftercare, as
    `<tool>/scripts/style-findings.sh count <dispatch>` prints it, then each one as its `list` prints
    it. **It also lists every bug or security finding left open,** with its lens and
-   disposition, one line each.
+   disposition, one line each. Every P3 deferred after round 1 includes its originating round.
 
    **The ship card lists the turnpikes the run passed through,** exactly the waybill's, each
    with the rounds it ran and its result as the step that ran it records them
