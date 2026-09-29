@@ -26,8 +26,10 @@ import {
   constants as fsConstants,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -338,6 +340,32 @@ function _putForm(cwd: string, cmd: string[], stdinFile: string): string {
   return s.trimEnd();
 }
 
+/** Source an env_file into target the way a shell does. The file is shell and
+ * runs as code: export, quotes, comments, expansion and unset all behave as
+ * under `.`, which assignment parsing cannot reproduce. The dump is
+ * NUL-separated so multiline values survive; SHLVL and _ are the dump
+ * machinery's own and are left out. A file that fails midway still applies
+ * whatever it set, as `.` does. */
+function sourceEnvFile(path: string, target: Record<string, string | undefined>): void {
+  const r = spawnSync("bash", ["-c", 'set -a; . "$1"; set +a; env -0', "_", path], {
+    encoding: "utf8",
+    env: target,
+  });
+  const dump = String(r.stdout ?? "");
+  if (!dump) return;
+  const next: Record<string, string> = {};
+  for (const entry of dump.split("\0")) {
+    if (!entry) continue;
+    const idx = entry.indexOf("=");
+    if (idx <= 0) continue;
+    const k = entry.slice(0, idx);
+    if (k === "SHLVL" || k === "_") continue;
+    next[k] = entry.slice(idx + 1);
+  }
+  for (const k of Object.keys(target)) delete target[k];
+  Object.assign(target, next);
+}
+
 // --- entry ------------------------------------------------------------------------------
 const argv = process.argv.slice(2);
 
@@ -407,7 +435,14 @@ if (argv[0] === "--self-test") {
       ENV_FILE = (process.env.HOME ?? "") + ENV_FILE.slice(1);
     }
     if (!ENV_FILE.startsWith("/")) {
-      ENV_FILE = join(dirname(resolve(source)), ENV_FILE);
+      // A relative path is read from the live config's directory, under --run too.
+      let configDir: string;
+      try {
+        configDir = dirname(realpathSync(CONFIG));
+      } catch {
+        configDir = dirname(resolve(CONFIG));
+      }
+      ENV_FILE = join(configDir, ENV_FILE);
     }
     try {
       accessSync(ENV_FILE, fsConstants.R_OK);
@@ -441,7 +476,7 @@ if (argv[0] === "--self-test") {
       accessSync(PROMPT, fsConstants.R_OK);
       const st = readFileSync(PROMPT);
       if (st.length === 0) throw new Error("empty");
-      PTEXT = st.toString("utf8");
+      PTEXT = st.toString("utf8").replace(/\n+$/, "");
     } catch {
       die(`prompt file missing, unreadable or empty: ${PROMPT}`);
     }
@@ -540,25 +575,16 @@ if (argv[0] === "--self-test") {
       HARNESS === "muse"
         ? ["muse", "export", "--session", THREAD, "--out", join(held, "thread.json")]
         : ["mimo", "export", THREAD];
+    const exportEnv: Record<string, string | undefined> = {
+      ...process.env,
+      XDG_DATA_HOME: DATA,
+      MIMOCODE_DISABLE_CLAUDE_IMPORT: "1",
+    };
+    if (ENV_FILE) sourceEnvFile(ENV_FILE, exportEnv);
     const expResult = spawnSync(exportCmd[0] ?? "", exportCmd.slice(1), {
       cwd: CWD,
       encoding: "utf8",
-      env: {
-        ...process.env,
-        XDG_DATA_HOME: DATA,
-        MIMOCODE_DISABLE_CLAUDE_IMPORT: "1",
-        ...(ENV_FILE
-          ? Object.fromEntries(
-              readFileSync(ENV_FILE, "utf8")
-                .split("\n")
-                .filter((l) => l.includes("="))
-                .map((l) => {
-                  const idx = l.indexOf("=");
-                  return [l.slice(0, idx), l.slice(idx + 1)];
-                }),
-            )
-          : {}),
-      },
+      env: exportEnv,
       stdio: ["ignore", "ignore", "pipe"],
     });
     const why = (expResult.stderr ?? "")
@@ -592,17 +618,7 @@ if (argv[0] === "--self-test") {
     die(`cannot enter ${CWD}`);
   }
   // Load env_file into the environment (it reaches the harness only).
-  if (ENV_FILE) {
-    try {
-      const envText = readFileSync(ENV_FILE, "utf8");
-      for (const line of envText.split("\n")) {
-        const m = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
-        if (m) process.env[m[1] ?? ""] = m[2] ?? "";
-      }
-    } catch {
-      /* already checked readable */
-    }
-  }
+  if (ENV_FILE) sourceEnvFile(ENV_FILE, process.env);
   delete process.env.POSTMASTER_LAUNCH_NAME;
 
   const child = spawnSync(forms.cmd[0] ?? "", forms.cmd.slice(1), {
@@ -1309,6 +1325,49 @@ withTempDir((tmp) => {
     );
     process.chdir(origCwd);
   }
+  writeFileSync(join(tmp, "shell.env"), 'FIRST=one\nexport PROBE="v-$FIRST/x" # trailing\n');
+  writeFileSync(
+    join(tmp, "shellenv.toml"),
+    `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "shell.env")}" }\n`,
+  );
+  carries(
+    "an env file is shell: export, quotes, comments and expansion reach the harness",
+    "shellenv",
+    "probe=v-one/x",
+    "launch",
+    "coachman",
+    join(tmp, "wt"),
+    join(tmp, "prompt.txt"),
+    "--leg",
+    "review",
+  );
+  record("run-relenv", "relenv");
+  {
+    doRun(
+      "relenv",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "review",
+      "--run",
+      join(tmp, "run-relenv"),
+    );
+    if (rc === 0 && out.includes("probe=config-dir"))
+      ok("a relative env file under --run is read from the live config's directory");
+    else fail("a relative env file under --run is read from the live config's directory");
+  }
+  writeFileSync(join(tmp, "trail.txt"), "do the thing\n\n\n");
+  carries(
+    "a prompt keeps its text without its trailing newlines, as under $()",
+    "legs",
+    "-p do the thing --model",
+    "launch",
+    "one",
+    join(tmp, "wt"),
+    join(tmp, "trail.txt"),
+  );
   refused(
     "an empty prompt file is refused, and nothing runs",
     "legs",
@@ -1848,11 +1907,11 @@ withTempDir((tmp) => {
   const launchonlySrc = selfSrc
     .replaceAll(
       'cmd.push("--yolo"); /*BYPASS*/',
-      'if (cmdMode !== "resume") cmd.push("--yolo"); /*BYPASS*/',
+      'if (!isResume) cmd.push("--yolo"); /*BYPASS*/',
     )
     .replaceAll(
       'cmd.push("--dangerously-skip-permissions"); /*BYPASS*/',
-      'if (cmdMode !== "resume") cmd.push("--dangerously-skip-permissions"); /*BYPASS*/',
+      'if (!isResume) cmd.push("--dangerously-skip-permissions"); /*BYPASS*/',
     );
   writeFileSync(join(tmp, "launchonly.ts"), launchonlySrc);
   writeFileSync(
@@ -1860,6 +1919,9 @@ withTempDir((tmp) => {
     `#!/usr/bin/env bash\nexec bun "${join(tmp, "launchonly.ts")}" "$@"\n`,
   );
   chmodSync(join(tmp, "launchonly.sh"), 0o755);
+  // The copies import ./lib/* like the original; without it they die on module
+  // load and the negative controls below pass for the wrong reason.
+  symlinkSync(join(here, "lib"), join(tmp, "lib"));
 
   const bypassed = (script: string, flag: string, ...formArgs: string[]): boolean => {
     const r = spawnSync(script, ["form", ...formArgs], {
@@ -1892,12 +1954,17 @@ withTempDir((tmp) => {
     for (const line of out.split("\n")) {
       if (line) console.log(`         ${line}`);
     }
-    if (bypassed(join(tmp, "nobypass.sh"), flag, name, ...rest)) {
-      fail(`${name}: a form without ${flag} fails this check`);
-    } else ok(`${name}: a form without ${flag} fails this check`);
-    if (bypassed(join(tmp, "launchonly.sh"), flag, name, ...rest)) {
-      fail(`${name}: a resume form without ${flag} fails this check`);
-    } else ok(`${name}: a resume form without ${flag} fails this check`);
+    // A copy that crashes fails bypassed() for the wrong reason; each copy must
+    // run cleanly and fail the flag check on its missing flag.
+    const noFlag = bypassed(join(tmp, "nobypass.sh"), flag, name, ...rest);
+    const noFlagRc = rc;
+    if (!noFlag && noFlagRc === 0) ok(`${name}: a form without ${flag} fails this check`);
+    else fail(`${name}: a form without ${flag} fails this check`);
+    const launchOnly = bypassed(join(tmp, "launchonly.sh"), flag, name, ...rest);
+    const launchOnlyRc = rc;
+    if (!launchOnly && launchOnlyRc === 0)
+      ok(`${name}: a resume form without ${flag} fails this check`);
+    else fail(`${name}: a resume form without ${flag} fails this check`);
   }
   doRun("legs", "form", "one");
   printed(
