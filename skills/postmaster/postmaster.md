@@ -249,11 +249,12 @@ Each `NEXT` names the act:
 - **INSPECT:** nothing changed for 30 minutes and no marker, an attempt that died without
   its record, or a last record line that is not a record. Read the leg's `.err` file and
   the stream tail to understand a live process; a live leg that is merely slow is left alone.
-  If it exited without an attempt record, stop and raise a control fault. On the user's answer
-  to that fault, run `<tool>/scripts/host.sh leg backfill <dispatch> <leg-name> <n>`, which
-  classifies the dead attempt from its evidence and appends its record, then act on the
-  backfilled outcome as its NEXT names. Never infer an action from `.err` text and never kill
-  a running leg for being slow.
+  If it exited without an attempt record, or its last record line is corrupt, stop and raise
+  a control fault. On the user's answer to that fault, run `<tool>/scripts/host.sh leg backfill
+  <dispatch> <leg-name> <n>`, which classifies the dead attempt from its evidence and appends
+  its record, then act on the backfilled outcome as its NEXT names. If backfill appends no
+  record, the evidence is gone and only the user can decide: escalate with the files that
+  remain. Never infer an action from `.err` text and never kill a running leg for being slow.
 - **WAIT:** nothing to do.
 
 **The takeover prompt** for a fallback coachman, written to `<dispatch>/leg-<n>-takeover.txt`:

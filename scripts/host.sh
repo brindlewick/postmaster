@@ -1858,6 +1858,25 @@ leg_self_start() {  # this process's start time, in the lock's owner format
   fi
 }
 
+leg_terminate_tail() {  # <file>: end a newline-less tail line, if it has one
+  # A record write torn by a kill leaves a tail with no line terminator; the
+  # next append would fuse onto it and stay corrupt. Terminating it first turns
+  # the fragment into superseded middle history and the new record parses. A
+  # missing, empty or already-terminated file is left alone.
+  python3 - "$1" <<'PY' || :
+import sys
+try:
+    with open(sys.argv[1], "r+b") as f:
+        f.seek(0, 2)
+        if f.tell():
+            f.seek(-1, 2)
+            if f.read(1) != b"\n":
+                f.write(b"\n")
+except OSError:
+    pass
+PY
+}
+
 leg_claim() {  # leg_claim <lock> <starter-pid> <starter-start>: the launch owns the lock
   # _leg_exec's first act: replace the starter's identity with its own, through
   # a temporary file, so a concurrent reader sees the starter or the launch,
@@ -1896,6 +1915,7 @@ leg_classify() {  # <d> <wt> <leg> <n> <request> <role> <prompt> <thread> <strea
   # stream slice for structured wall events, classify from phase, wall, thread
   # and hand-off, append the record, update the manifest. <start> and <end> are
   # byte offsets into the stream; <end> empty means EOF.
+  leg_terminate_tail "${11}"
   python3 - "$@" <<'PY'
 import datetime, json, os, pathlib, re, sys, tempfile
 (d, wt, leg, n, request, role, prompt, supplied_thread, stream, done, attempts,
@@ -2296,6 +2316,7 @@ PY
   rc=$?
   if [ "$rc" -ne 0 ]; then
     leg_release "$active"
+    leg_terminate_tail "$attempts"
     python3 - "$attempts" "$attempt" "$n" "$leg" "$request" "$role" "$prompt" "$thread" "$rc" <<'PY'
 import datetime, json, os, sys
 path, attempt, number, leg, request, role, prompt, thread, rc = sys.argv[1:]
@@ -2907,6 +2928,36 @@ PY
   got=$(python3 -c 'import json,sys; r=json.loads(open(sys.argv[1]).readlines()[-1]); print(r["request"])' "$tmp/direct-d/logs/coachman-leg-1-attempts.jsonl")
   check "retry after that refusal relaunches instead of resuming the stale thread" \
     '[ "$rc" -eq 0 ] && [ "$got" = launch ] && ! tail -1 "$tmp/leg-calls" | grep -q -- "--resume"' "$got: $(tail -1 "$tmp/leg-calls")"
+
+  mkfuse() {  # mkfuse <name>: a dispatch with one good record and a torn tail
+    mkdir -p "$tmp/$1/logs" && cp "$leg_d/run.json" "$tmp/$1/run.json"
+    printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/$1/manifest.json"
+    printf '# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, fuse\nsynthesis worktree: %s\n' "$leg_wt" > "$tmp/$1/brief.md"
+    printf 'fuse prompt\n' > "$tmp/$1/prompt.txt"
+    printf '{"attempt":1,"leg":1,"name":"synthesis","request":"launch","role":"coachman","prompt":"%s","thread_id":"T1","outcome":"incomplete","on_answer":"resume","backfilled":false,"exit":1}\n' \
+      "$tmp/$1/prompt.txt" > "$tmp/$1/logs/coachman-leg-1-attempts.jsonl"
+    printf '{"attempt":2,"leg":1,"name":"synthesis","requ' >> "$tmp/$1/logs/coachman-leg-1-attempts.jsonl"
+  }
+  mkfuse fuse-d
+  printf '{"attempt":2,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":0}' \
+    "$tmp/fuse-d/prompt.txt" > "$tmp/fuse-d/logs/coachman-leg-1-intent-2.json"
+  printf 'started\n' > "$tmp/fuse-d/logs/coachman-leg-1-phase-2"
+  : > "$tmp/fuse-d/logs/coachman-leg-1-events.jsonl"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" \
+    "$SELF" leg backfill "$tmp/fuse-d" synthesis 1 >/dev/null 2>&1; rc=$?
+  got=$(python3 -c 'import json,sys; r=json.loads(open(sys.argv[1]).readlines()[-1]); print("%d|%s" % (r["attempt"], r["outcome"]))' "$tmp/fuse-d/logs/coachman-leg-1-attempts.jsonl")
+  check "backfill terminates a torn tail instead of fusing onto it" \
+    '[ "$rc" -eq 0 ] && [ "$got" = "2|pre-thread" ] && [ "$(grep -c . "$tmp/fuse-d/logs/coachman-leg-1-attempts.jsonl")" = 3 ] && grep -Fxq "{\"attempt\":2,\"leg\":1,\"name\":\"synthesis\",\"requ" "$tmp/fuse-d/logs/coachman-leg-1-attempts.jsonl"' "$got"
+
+  mkfuse fuse2-d
+  calls_before=$(wc -l < "$tmp/leg-calls")
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" POSTMASTER_HOST_CLAIM_WAIT=garbage \
+    "$SELF" leg launch "$tmp/fuse2-d" "$leg_wt" synthesis 1 "$tmp/fuse2-d/prompt.txt" >/dev/null 2>&1; rc=$?
+  got=$(python3 -c 'import json,sys; r=json.loads(open(sys.argv[1]).readlines()[-1]); print("%d|%s" % (r["attempt"], r["outcome"]))' "$tmp/fuse2-d/logs/coachman-leg-1-attempts.jsonl")
+  check "a refused start terminates a torn tail instead of fusing onto it" \
+    '[ "$rc" -ne 0 ] && [ "$got" = "2|refused" ] && [ "$(wc -l < "$tmp/leg-calls")" = "$calls_before" ] && [ "$(grep -c . "$tmp/fuse2-d/logs/coachman-leg-1-attempts.jsonl")" = 3 ] && grep -Fxq "{\"attempt\":2,\"leg\":1,\"name\":\"synthesis\",\"requ" "$tmp/fuse2-d/logs/coachman-leg-1-attempts.jsonl"' "rc=$rc $got"
 
   before=$(grep -c . "$attempts")
   printf 'NOT JSON\n' >> "$attempts"
