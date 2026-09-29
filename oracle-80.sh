@@ -114,10 +114,12 @@ if grep -q -i -E 'unfixed|not fixed' "$COACH"; then
 else
   nope P8a-p3-unfixed "neither 'unfixed' nor 'not fixed' in $COACH"
 fi
-if grep -q -i -E 'P3.{0,60}round|round.{0,60}P3' "$COACH"; then
-  pass P8b-p3-round "a P3 is carried with its round"
+if grep -q -i -E 'P3.{0,60}round|round.{0,60}P3' "$COACH" \
+  && grep -q 'lens and originating round' "$COACH" \
+  && grep -q 'includes its originating round' "$COACH"; then
+  pass P8b-p3-round "a P3 is carried with its lens and round at both destinations"
 else
-  nope P8b-p3-round "no line ties a P3 to its round"
+  nope P8b-p3-round "no lines carry a P3 with its lens and round at both destinations"
 fi
 
 # --- one-line severity definitions (AC4) ---------------------------------------
@@ -138,10 +140,10 @@ else
 fi
 
 # --- the checkpoint card (AC7) -------------------------------------------------
-if grep -q -i 'ended the loop' "$COACH"; then
-  pass P11-card "card says which round ended the loop and why"
+if grep -q -i 'ended the loop' "$COACH" && grep -q 'lists the P3 findings the loop carried to' "$COACH"; then
+  pass P11-card "card says which round ended the loop and why, and lists the P3 findings it carried"
 else
-  nope P11-card "no 'ended the loop' in $COACH"
+  nope P11-card "no 'ended the loop' with the carried P3 list in $COACH"
 fi
 
 # --- the wiki (AC8) ------------------------------------------------------------
