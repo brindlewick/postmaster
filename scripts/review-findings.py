@@ -148,29 +148,48 @@ def pick_findings(found):
     return candidates[0] if candidates else None
 
 
-def scan_lists(text):
-    """Every JSON list embedded in the text, in order; undecodable brackets are skipped."""
+def scan_spans(ntext):
+    """Every JSON list in the text with its character span; undecodable brackets skipped."""
     decoder = json.JSONDecoder()
     found = []
-    for match in re.finditer(r"\[", text):
+    for match in re.finditer(r"\[", ntext):
         try:
-            value, _ = decoder.raw_decode(text[match.start():])
+            value, end = decoder.raw_decode(ntext[match.start():])
         except ValueError:
             continue
         if isinstance(value, list):
-            found.append(value)
+            found.append((value, match.start(), match.start() + end))
     return found
 
 
-def json_findings(text):
-    stripped = re.sub(r"```(?:json)?\s*|```", "", text, flags=re.I).strip()
+def excise_first(ntext, picked):
+    """The text with the picked list's first literal removed. A twin literal stays
+    outside, where the second-list check finds it."""
+    for value, start, end in scan_spans(ntext):
+        if value == picked:
+            return ntext[:start] + ntext[end:]
+    raise ReportError("cannot parse review output from claude")  # unreachable: the literal parsed from this text
+
+
+def normalize_text(text):
+    """The one normalization for clean-matching and JSON parsing: fence markers off,
+    edges stripped. Markdown parsing stays fence-aware: fences are structural there
+    (evidence boundaries, quoted examples), cosmetic here."""
+    return re.sub(r"```(?:json)?\s*|```", "", text, flags=re.I).strip()
+
+
+def claude_json(ntext):
+    """(items, outside) for a claude report: the one JSON findings list and the text
+    around it. None when the text holds no JSON findings structure at all, so the
+    markdown fallback tries; anything else parses or fails loudly here."""
     try:
-        whole = json.loads(stripped)
+        whole = json.loads(ntext)
     except ValueError:
         whole = None
+    if isinstance(whole, list):
+        return whole, ""
     if isinstance(whole, dict):
-        keyed = [whole[key] for key in ("findings", "review_findings", "issues")
-                 if isinstance(whole.get(key), list)]
+        keyed = [whole[key] for key in DECLARED_KEYS if isinstance(whole.get(key), list)]
         if keyed:
             # Declared keys are held strictly before anything is picked: a non-empty
             # list with no objects is a malformed report even beside a valid list, which
@@ -180,28 +199,26 @@ def json_findings(text):
                     raise ReportError("review output's findings lists hold no objects; refusing to read as clean")
             picked = pick_findings(keyed)
             if picked is not None:
-                return picked
-        # Empty or absent declared lists block nothing: the scan still runs, so findings
-        # under undeclared keys parse. A JSON report that yields no findings proves
-        # itself clean below or fails loudly; it never falls back to clean.
-        picked = pick_findings(scan_lists(text))
-        if picked is not None:
-            return picked
-        if proven_clean(text):
-            return []
-        raise ReportError("cannot parse review output from claude")
-    if isinstance(whole, list):
-        return whole
-    # Not a whole JSON value: None falls through to the markdown and clean handling, so
-    # a placeholder [] before the prose never reads as clean on its own.
-    return pick_findings(scan_lists(text))
+                return picked, excise_first(ntext, picked)
+        object_lists = [value for (value, _s, _e) in scan_spans(ntext)
+                        if value and any(isinstance(item, dict) for item in value)]
+        picked = pick_findings(object_lists)
+        if picked is None:
+            raise ReportError("cannot parse review output from claude")
+        return picked, excise_first(ntext, picked)
+    object_lists = [value for (value, _s, _e) in scan_spans(ntext)
+                    if value and any(isinstance(item, dict) for item in value)]
+    picked = pick_findings(object_lists)
+    if picked is None:
+        return None
+    return picked, excise_first(ntext, picked)
 
 
-# The bare clean verdicts: the whole report, stripped and case-folded, is exactly one of
-# these. "No findings." and "No issues found." are on record in the project's own
-# controls; the rest are retained unambiguous bare verdicts. Anything longer — a verdict
-# with trailing prose, a time, a Findings/none header with following text — is not a
-# clean form: it parses as findings or fails loudly.
+# The exact clean forms: the whole report, normalized, is a bare verdict, an empty JSON
+# list, or {"findings": []} with no other key. "No findings." is on record in the
+# project's own controls and the empty list in the trial's claude shape (fenced at max,
+# which normalization strips); the rest are retained unambiguous bare verdicts. Anything
+# longer — an extra key, prose, a second block — is not a clean form.
 CLEAN_VERDICTS = frozenset({
     "no findings", "no findings.", "no findings found", "no findings found.",
     "no bugs found", "no bugs found.", "no issues found", "no issues found.",
@@ -210,7 +227,25 @@ CLEAN_VERDICTS = frozenset({
 DECLARED_KEYS = ("findings", "review_findings", "issues")
 FILE_KEYS = ("file", "path", "file_path", "filePath", "filename")
 LINE_KEYS = ("line", "line_number", "lineNumber", "start", "start_line", "startLine")
-FINDING_MARKER = re.compile(r"\[P[123]\]|\.[A-Za-z0-9]{1,12}:\d+|[A-Za-z][^\s`*<>:]*:\d+")
+HASHLOC = re.compile(r"(?P<path>(?:[A-Za-z]:)?[^\s`*<>]+?)#L(?P<line>\d+)")
+ATLINE = re.compile(r"(?P<path>[A-Za-z][^\s`*<>:,;()]*?)\s+\bat line\s+(?P<line>\d+)", re.I)
+PRIORITY_TAG = re.compile(r"\[P[123]\]")
+FINDING_WORDS = re.compile(r"\b(?:bugs?|buggy|findings?|issues?|defects?)\b", re.I)
+NO_OTHER_PHRASES = frozenset({
+    "no other findings found", "no other bugs found", "no other issues found",
+    "no additional findings found", "no additional bugs found", "no additional issues found",
+})
+
+
+def is_clean_form(ntext):
+    """The report normalized is exactly a clean form and nothing else."""
+    if " ".join(ntext.lower().split()) in CLEAN_VERDICTS:
+        return True
+    try:
+        parsed = json.loads(ntext)
+    except ValueError:
+        return False
+    return parsed == [] or parsed == {"findings": []}
 
 
 def decoded_json_values(text):
@@ -231,60 +266,102 @@ def decoded_json_values(text):
     return values
 
 
-def walk_json(value, strings, pairs):
-    """Decoded string values, and decoded objects carrying a file-and-line pair, under
-    a JSON value. Keys are not string values: a citation smuggled into a key stays
-    visible to the raw-text guard instead."""
+def walk_json(value, strings, cited):
+    """Decoded string values, and (file, line-or-None) for objects naming a file, under
+    a JSON value. Keys are not values: a citation smuggled into a key stays visible to
+    the raw-text scan instead."""
     if isinstance(value, str):
         strings.append(value)
     elif isinstance(value, dict):
-        if (any(value.get(key) for key in FILE_KEYS)
-                and any(value.get(key) is not None for key in LINE_KEYS)):
-            pairs.append(value)
+        file_value = next((value.get(key) for key in FILE_KEYS if value.get(key)), None)
+        if file_value is not None:
+            line_value = next((value.get(key) for key in LINE_KEYS if value.get(key) is not None), None)
+            cited.append((file_value, line_value))
         for item in value.values():
-            walk_json(item, strings, pairs)
+            walk_json(item, strings, cited)
     elif isinstance(value, list):
         for item in value:
-            walk_json(item, strings, pairs)
+            walk_json(item, strings, cited)
 
 
-def proven_clean(text):
-    """The one positive clean predicate: no findings are returned unless this holds.
-    The report matches a known-clean shape exactly — a bare verdict, an empty JSON
-    list, or a JSON object whose every present declared key holds an empty list — and
-    it carries no finding signal: no marker in its raw text (keys included), no marker
-    in any decoded JSON string value, no file-and-line pair in any decoded object.
-    Every other shape parses as findings or fails loudly; nothing falls back to clean."""
-    stripped = text.strip()
-    if " ".join(stripped.lower().split()) not in CLEAN_VERDICTS:
-        try:
-            parsed = json.loads(stripped)
-        except ValueError:
-            return False
-        if isinstance(parsed, list):
-            if parsed:
-                return False
-        elif isinstance(parsed, dict):
-            if any(not isinstance(parsed.get(key), list) or parsed[key]
-                   for key in DECLARED_KEYS if key in parsed):
-                return False
-        else:
-            return False
-    if FINDING_MARKER.search(text):
+def scan_locations(s):
+    """(path, line, shown) for every location a string names: path:line with a letter in
+    it, path#L<n>, and at line <n> against a path-like name on the same line."""
+    for match in LOCATION.finditer(s):
+        if re.search(r"[A-Za-z]", match.group("path")):
+            yield match.group("path"), int(match.group("line")), "%s:%s" % (match.group("path"), match.group("line"))
+    for match in HASHLOC.finditer(s):
+        yield match.group("path"), int(match.group("line")), "%s#L%s" % (match.group("path"), match.group("line"))
+    for match in ATLINE.finditer(s):
+        if "/" in match.group("path") or "." in match.group("path"):
+            yield match.group("path"), int(match.group("line")), "%s at line %s" % (match.group("path"), match.group("line"))
+
+
+def is_finding_form_line(line):
+    """A line the markdown parser would file: a heading, item or em-dash line citing a
+    path:line with a letter in it."""
+    if not (line.startswith("#") or line.startswith(("-", "*", "**", "`")) or " — " in line or " – " in line):
         return False
-    strings, pairs = [], []
-    for value in decoded_json_values(text):
-        walk_json(value, strings, pairs)
-    if any(FINDING_MARKER.search(item) for item in strings):
-        return False
-    if pairs:
-        return False
-    return True
+    match = LOCATION.search(line)
+    return bool(match) and bool(re.search(r"[A-Za-z]", match.group("path")))
+
+
+def is_exact_no_other(line):
+    """A line that is exactly a no-other-issues phrase, heading markers and end
+    punctuation aside. Anything longer — a citation beside the phrase — is not skipped."""
+    return line.strip().lstrip("#").strip().rstrip(".:").strip().lower() in NO_OTHER_PHRASES
+
+
+def match_or_loud(path, number, shown, targets, scratch):
+    try:
+        file, line, _end = normalize_location(path, number, None, scratch)
+    except ReportError:
+        raise ReportError("review output cites %s outside its filed findings" % shown)
+    if (file, line) not in targets:
+        raise ReportError("review output cites %s outside its filed findings" % shown)
+
+
+def check_outside(outside, filed, scratch):
+    """Nothing outside the one recognised structure may look like a finding: no second
+    list, no finding-form line, no priority tag; a prose location must name a filed
+    finding's file and line, nothing more."""
+    targets = set((finding["file"], finding["line"]) for finding in filed)
+    for value, _start, _end in scan_spans(outside):
+        if value and any(isinstance(item, dict) for item in value):
+            raise ReportError("review output holds a second findings list outside its filed findings")
+    for line in outside.splitlines():
+        if is_finding_form_line(line.strip()):
+            raise ReportError("review output holds a markdown finding outside its filed findings")
+    if PRIORITY_TAG.search(outside):
+        raise ReportError("review output holds a priority tag outside its filed findings")
+    for path, number, shown in scan_locations(outside):
+        match_or_loud(path, number, shown, targets, scratch)
+    strings, cited = [], []
+    for value in decoded_json_values(outside):
+        walk_json(value, strings, cited)
+    for item in strings:
+        for path, number, shown in scan_locations(item):
+            match_or_loud(path, number, shown, targets, scratch)
+    for file_value, line_value in cited:
+        if line_value is None:
+            raise ReportError("review output names file %s outside its filed findings" % file_value)
+        match_or_loud(file_value, line_value, "%s:%s" % (file_value, line_value), targets, scratch)
+
+
+def check_finding_words(ntext):
+    """No finding words beside an empty declared list: a report claiming no findings in
+    one key while describing bugs in another fails loudly."""
+    for value in decoded_json_values(ntext):
+        if isinstance(value, dict) and any(value.get(key) == [] for key in DECLARED_KEYS):
+            for item in value.values():
+                if isinstance(item, str) and FINDING_WORDS.search(item):
+                    raise ReportError("review output describes findings beside its empty findings list")
 
 
 def finding_body(lines, index):
     """The body and evidence after a finding's line: following prose until a blank line, the
-    next heading or item; a fenced block is the finding's evidence, not its end."""
+    next heading or item; a fenced block is the finding's evidence, not its end. Also the
+    first line past the block, so the outside check knows what the finding consumed."""
     body = []
     evidence = None
     following = index + 1
@@ -310,7 +387,7 @@ def finding_body(lines, index):
             continue
         body.append(text_line)
         following += 1
-    return ("\n".join(body) if body else None, evidence)
+    return ("\n".join(body) if body else None, evidence, following)
 
 
 # Headings whose sections hold non-findings, exactly as the recorded reports use them:
@@ -339,7 +416,7 @@ def cites_location(line):
 def descope_not_issues(text):
     """Blank citations and fenced lines under recorded not-issues headings, keeping line
     numbers and prose, so their citations neither parse as findings nor trip the
-    proven-clean predicate while a bare clean verdict in the same section still reads."""
+    outside check."""
     out = []
     in_fence = False
     skip = False
@@ -363,92 +440,107 @@ def descope_not_issues(text):
     return "\n".join(out)
 
 
-def markdown_findings(text, harness, scratch):
+def markdown_findings_spans(text, harness, scratch):
+    """Findings plus the text outside them: every line no finding block consumed and no
+    fence quotes, for the outside check."""
     findings = []
+    consumed = set()
+    fenced = set()
     in_fence = False
     lines = text.splitlines()
     for index, raw in enumerate(lines):
         line = raw.strip()
         if line.startswith("```"):
             in_fence = not in_fence
+            fenced.add(index)
             continue
         if in_fence:
+            fenced.add(index)
             continue
-        if re.search(r"\bno (?:other|additional) (?:findings|bugs|issues) found\b", line, re.I):
+        if is_exact_no_other(line):
             continue
-        if not (line.startswith("#") or line.startswith(("-", "*", "**", "`")) or " — " in line or " – " in line):
+        if not is_finding_form_line(line):
             continue
         match = LOCATION.search(line)
-        if not match:
-            continue
-        if not re.search(r"[A-Za-z]", match.group("path")):
-            continue
         prefix = line[:match.start()].strip("#*-` :—–")
         suffix = line[match.end():].strip("` :—–-")
         if prefix.lower() == "bug":
             prefix = ""
         title = " ".join(part for part in (prefix, suffix) if part).strip()
-        body, evidence = finding_body(lines, index)
+        body, evidence, end = finding_body(lines, index)
         try:
             findings.append(normalize_item({"file": match.group("path"), "line": match.group("line"),
                                             "end_line": match.group("end"), "summary": title,
                                             "body": body, "evidence": evidence}, harness, scratch))
         except ReportError as exc:
             raise ReportError("report line %d: %s" % (index + 1, exc)) from exc
-    return findings
+        consumed.update(range(index, end))
+    outside = "\n".join(raw for number, raw in enumerate(lines) if number not in consumed and number not in fenced)
+    return findings, outside
 
 
-def codex_findings(text, scratch):
+def codex_findings_spans(text, scratch):
+    """Findings plus the text outside them, as markdown_findings_spans."""
     pattern = re.compile(r"^\s*[-*]\s*\[(P[1-3])\]\s*(.+?)\s+[—–]\s+(.+):(\d+)(?:-(\d+))?\s*$")
     findings = []
+    consumed = set()
+    fenced = set()
     in_fence = False
     lines = text.splitlines()
     for index, line in enumerate(lines):
         stripped = line.strip()
         if stripped.startswith("```"):
             in_fence = not in_fence
+            fenced.add(index)
             continue
         if in_fence:
+            fenced.add(index)
             continue
         match = pattern.match(line)
         if match:
             severity, title, path, start, end = match.groups()
-            body, evidence = finding_body(lines, index)
+            body, evidence, block_end = finding_body(lines, index)
             try:
                 findings.append(normalize_item({"file": path, "line": start, "end_line": end,
                                                 "severity": severity, "title": title,
                                                 "body": body, "evidence": evidence}, "codex", scratch))
             except ReportError as exc:
                 raise ReportError("report line %d: %s" % (index + 1, exc)) from exc
-    return findings
+            consumed.update(range(index, block_end))
+    outside = "\n".join(raw for number, raw in enumerate(lines) if number not in consumed and number not in fenced)
+    return findings, outside
 
 
 def parse_report(harness, text, scratch):
     if not text.strip():
         raise ReportError("review output is empty")
+    ntext = normalize_text(text)
+    if is_clean_form(ntext):
+        return []
     if harness == "claude":
-        findings = json_findings(text)
-        if findings is not None:
+        found = claude_json(ntext)
+        if found is not None:
+            items, outside = found
             normalized = []
-            for position, item in enumerate(findings):
+            for position, item in enumerate(items):
                 try:
                     normalized.append(normalize_item(item, harness, scratch))
                 except ReportError as exc:
                     raise ReportError("finding %d: %s" % (position, exc)) from exc
-            if not normalized and not proven_clean(text):
-                raise ReportError("review output holds no findings and proves nothing clean")
+            check_finding_words(ntext)
+            check_outside(outside, normalized, scratch)
             return unique_findings(normalized)
     check_fences_closed(text.splitlines())
     scoped = descope_not_issues(text)
     if harness == "codex":
-        findings = codex_findings(scoped, scratch)
+        findings, outside = codex_findings_spans(scoped, scratch)
         if findings:
+            check_outside(outside, findings, scratch)
             return unique_findings(findings)
-    findings = markdown_findings(scoped, harness, scratch)
+    findings, outside = markdown_findings_spans(scoped, harness, scratch)
     if findings:
+        check_outside(outside, findings, scratch)
         return unique_findings(findings)
-    if proven_clean(scoped):
-        return []
     raise ReportError("cannot parse review output from %s" % harness)
 
 
@@ -584,7 +676,7 @@ def self_test():
             "claude": [{"type": "system", "subtype": "task_notification", "output_file": str(external)},
                        {"type": "result", "subtype": "success", "result": '[{"file":"src/page.js","line":8,"summary":"Page includes one extra item","category":"correctness"}]\nA sentence that is not a finding.'}],
             "codex": [{"type": "turn.completed"}],
-            "mimo": [{"type": "text", "sessionID": "ses_1", "part": {"type": "text", "text": "### Bug — `src/page.js:8`: Page includes one extra item\n\nThe exclusive end repeats the boundary record.\n\n### No other issues found — `src/count.js:6`: Empty stores yield zero pages."}}],
+            "mimo": [{"type": "text", "sessionID": "ses_1", "part": {"type": "text", "text": "### Bug — `src/page.js:8`: Page includes one extra item\n\nThe exclusive end repeats the boundary record.\n\n### No other issues found."}}],
         }
         for harness, events in fixtures.items():
             folder = run_config(harness, harness)
@@ -825,7 +917,7 @@ def self_test():
         empty_plain_notes = root / "claude-empty-plain-notes.events"
         empty_plain_notes.write_text(json.dumps({"type": "result", "subtype": "success", "result": '{"findings": [], "notes": "all good"}'}) + "\n", encoding="utf-8")
         result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(empty_plain_notes), "--run", str(run_config("empty-plain-notes", "claude"))], capture_output=True, text=True)
-        check("an empty findings list with plain notes stays clean", result.returncode == 0 and result.stdout.strip() == "[]", result.stderr or result.stdout)
+        check("an empty findings list with other keys fails loudly", result.returncode == 1 and "cannot parse review output" in result.stderr, result.stderr or result.stdout)
         none_cited = root / "mimo-none-cited.events"
         none_cited.write_text(json.dumps({"type": "text", "part": {"type": "text", "text": "## Findings\nnone\n\nThe bug at src/page.js:8 is real and needs fixing.\n"}}) + "\n", encoding="utf-8")
         result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(none_cited), "--run", str(run_config("none-cited", "mimo"))], capture_output=True, text=True)
@@ -868,6 +960,87 @@ def self_test():
         key_cite.write_text(json.dumps({"type": "result", "subtype": "success", "result": '{"findings": [], "src/a.js:1": "seen"}'}) + "\n", encoding="utf-8")
         result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(key_cite), "--run", str(run_config("key-cite", "claude"))], capture_output=True, text=True)
         check("a citation as a JSON key defeats an empty findings list", result.returncode == 1 and "cannot parse review output" in result.stderr, result.stderr or result.stdout)
+        unrecog = root / "claude-unrecog.events"
+        unrecog.write_text(json.dumps({"type": "result", "subtype": "success", "result": '{"status": "error", "message": "review timed out"}'}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(unrecog), "--run", str(run_config("unrecog", "claude"))], capture_output=True, text=True)
+        check("an unrecognized JSON shape fails loudly", result.returncode == 1 and "cannot parse review output" in result.stderr, result.stderr or result.stdout)
+        trailing = root / "claude-trailing.events"
+        trailing.write_text(json.dumps({"type": "result", "subtype": "success", "result": '[{"file": "src/a.js", "line": 1, "summary": "s"}]\nAlso src/b.js:2 is wrong.'}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(trailing), "--run", str(run_config("trailing", "claude"))], capture_output=True, text=True)
+        check("an unfiled location outside the findings list fails loudly", result.returncode == 1 and "outside its filed findings" in result.stderr, result.stderr or result.stdout)
+        example = root / "claude-example.events"
+        example.write_text(json.dumps({"type": "result", "subtype": "success", "result": 'Example:\n```json\n[{"file": "src/fake.js", "line": 1, "summary": "s"}]\n```\n- Bug at src/real.js:2: actual'}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(example), "--run", str(run_config("example", "claude"))], capture_output=True, text=True)
+        check("a finding outside the findings list fails loudly", result.returncode == 1 and "outside its filed findings" in result.stderr, result.stderr or result.stdout)
+        for name, report in (("fenced-empty", "```json\n[]\n```"), ("fenced-empty-dict", "```json\n{\"findings\": []}\n```")):
+            events = root / ("claude-" + name + ".events")
+            events.write_text(json.dumps({"type": "result", "subtype": "success", "result": report}) + "\n", encoding="utf-8")
+            result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(events), "--run", str(run_config(name, "claude"))], capture_output=True, text=True)
+            check("a fenced clean report stays clean", result.returncode == 0 and result.stdout.strip() == "[]", result.stderr or result.stdout)
+        for name, report in (("noline", '{"findings": [], "bug": {"file": "src/a.js", "summary": "broken"}}'),
+                             ("nullline", '{"findings": [], "bug": {"file": "src/a.js", "line": null, "summary": "broken"}}'),
+                             ("hashline", '{"findings": [], "notes": "src/a.js#L8 is wrong"}'),
+                             ("atline", '{"findings": [], "notes": "bug in src/a.js at line 3"}'),
+                             ("prose-notes", '{"findings": [], "notes": "There is a bug in the sorting logic somewhere."}'),
+                             ("issues-empty", '{"issues": []}')):
+            events = root / ("claude-" + name + ".events")
+            events.write_text(json.dumps({"type": "result", "subtype": "success", "result": report}) + "\n", encoding="utf-8")
+            result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(events), "--run", str(run_config(name, "claude"))], capture_output=True, text=True)
+            check("a non-clean shape with no findings list fails loudly", result.returncode == 1 and "cannot parse review output" in result.stderr, result.stderr or result.stdout)
+        noother_both = root / "mimo-noother-both.events"
+        noother_both.write_text(json.dumps({"type": "text", "part": {"type": "text", "text": "### Bug \u2014 src/a.js:1: one\n\n### No other issues found \u2014 src/b.js:2: two\n"}}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(noother_both), "--run", str(run_config("noother-both", "mimo"))], capture_output=True, text=True)
+        try:
+            parsed = json.loads(result.stdout)
+            check("a citation beside the no-other phrase is filed", result.returncode == 0 and sorted(f["target"] for f in parsed) == ["src/a.js:1", "src/b.js:2"], result.stderr or result.stdout)
+        except ValueError:
+            check("a citation beside the no-other phrase is filed", False, result.stderr or result.stdout)
+        for name, report, targets in (("match-colon", '[{"file": "src/a.js", "line": 1, "summary": "s"}]\nThe bug at src/a.js:1 is the one.', ["src/a.js:1"]),
+                                      ("match-hash", '[{"file": "src/a.js", "line": 1, "summary": "s"}]\nSee src/a.js#L1.', ["src/a.js:1"]),
+                                      ("match-atline", '[{"file": "src/a.js", "line": 1, "summary": "s"}]\nBug in src/a.js at line 1.', ["src/a.js:1"])):
+            events = root / ("claude-" + name + ".events")
+            events.write_text(json.dumps({"type": "result", "subtype": "success", "result": report}) + "\n", encoding="utf-8")
+            result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(events), "--run", str(run_config(name, "claude"))], capture_output=True, text=True)
+            try:
+                parsed = json.loads(result.stdout)
+                check("an outside location naming a filed finding parses", result.returncode == 0 and [f["target"] for f in parsed] == targets, result.stderr or result.stdout)
+            except ValueError:
+                check("an outside location naming a filed finding parses", False, result.stderr or result.stdout)
+        for name, report in (("novel-hash", '[{"file": "src/a.js", "line": 1, "summary": "s"}]\nSee src/b.js#L2.'),
+                             ("novel-atline", '[{"file": "src/a.js", "line": 1, "summary": "s"}]\nBug in src/b.js at line 2.')):
+            events = root / ("claude-" + name + ".events")
+            events.write_text(json.dumps({"type": "result", "subtype": "success", "result": report}) + "\n", encoding="utf-8")
+            result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(events), "--run", str(run_config(name, "claude"))], capture_output=True, text=True)
+            check("an unfiled outside location fails loudly", result.returncode == 1 and "outside its filed findings" in result.stderr, result.stderr or result.stdout)
+        words = root / "claude-words.events"
+        words.write_text(json.dumps({"type": "result", "subtype": "success", "result": '{"findings": [], "bugs": [{"file": "src/a.js", "line": 1, "summary": "s"}], "notes": "There is a bug here too."}'}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(words), "--run", str(run_config("words", "claude"))], capture_output=True, text=True)
+        check("finding words beside an empty findings list fail loudly", result.returncode == 1 and "beside its empty findings list" in result.stderr, result.stderr or result.stdout)
+        second = root / "claude-second.events"
+        second.write_text(json.dumps({"type": "result", "subtype": "success", "result": '{"issues": [{"file": "src/a.js", "line": 1, "summary": "s"}], "bugs": [{"file": "src/b.js", "line": 2, "summary": "s"}]}'}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(second), "--run", str(run_config("second", "claude"))], capture_output=True, text=True)
+        check("a second findings list under another key fails loudly", result.returncode == 1 and "outside its filed findings" in result.stderr, result.stderr or result.stdout)
+        trial = Path(__file__).resolve().parent.parent / "raw" / "trials" / "code-review-launch"
+        recorded = (trial / "opus-report.md").read_text(encoding="utf-8")
+        rederive = root / "claude-rederive.events"
+        rederive.write_text(json.dumps({"type": "result", "subtype": "success", "result": recorded}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(rederive), "--run", str(run_config("rederive", "claude"))], capture_output=True, text=True)
+        check("the recorded claude report re-normalizes byte-identical", result.returncode == 0 and result.stdout == (trial / "opus-findings.json").read_text(encoding="utf-8"), result.stderr or result.stdout)
+        unfiled = root / "claude-unfiled.events"
+        unfiled.write_text(json.dumps({"type": "result", "subtype": "success", "result": recorded + "\nAlso src/unfiled.js:9 is wrong.\n"}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(unfiled), "--run", str(run_config("unfiled", "claude"))], capture_output=True, text=True)
+        check("the recorded report with an unfiled outside location fails loudly", result.returncode == 1 and "outside its filed findings" in result.stderr, result.stderr or result.stdout)
+        for name, report, message in (("matched-bullet", '[{"file": "src/a.js", "line": 1, "summary": "s"}]\n- See src/a.js:1 again.', "a markdown finding outside"),
+                                      ("twin-list", '{"issues": [{"file": "src/a.js", "line": 1, "summary": "s"}], "bugs": [{"file": "src/a.js", "line": 1, "summary": "s"}]}', "a second findings list"),
+                                      ("tag-only", '[{"file": "src/a.js", "line": 1, "summary": "s"}]\nDowngraded from [P1] after review.', "a priority tag")):
+            events = root / ("claude-" + name + ".events")
+            events.write_text(json.dumps({"type": "result", "subtype": "success", "result": report}) + "\n", encoding="utf-8")
+            result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(events), "--run", str(run_config(name, "claude"))], capture_output=True, text=True)
+            check("structure outside the filed findings fails loudly", result.returncode == 1 and message in result.stderr, result.stderr or result.stdout)
+        locationless = root / "claude-locationless.events"
+        locationless.write_text(json.dumps({"type": "result", "subtype": "success", "result": '{"findings": ["no locations here"], "issues": [{"file": "src/a.js", "line": 1, "summary": "s"}]}'}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(locationless), "--run", str(run_config("locationless", "claude"))], capture_output=True, text=True)
+        check("a locationless malformed list beside a valid one fails loudly", result.returncode == 1 and "hold no objects" in result.stderr, result.stderr or result.stdout)
         nested_skip = root / "mimo-nested-skip.events"
         nested_skip.write_text(json.dumps({"type": "text", "part": {"type": "text", "text": "### Not issues\n#### Sub\n- Broken \u2014 `src/a.js:1`: wrong.\n\nNo issues found.\n"}}) + "\n", encoding="utf-8")
         result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(nested_skip), "--run", str(run_config("nested-skip", "mimo"))], capture_output=True, text=True)
