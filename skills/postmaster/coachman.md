@@ -718,10 +718,11 @@ route and any merge. You do not push, open a pull request, wait for a merge word
 Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
 
 1. **Verify the final HEAD.** Run `<tool>/scripts/verify.sh run <synthesis-wt> <dispatch>` after
-   the last code change. Record every check and its result; the gate and required checks must
+   the last code change. Record every check and its result exactly as printed; the gate must
    pass before the card is ready. No P1 or P2 finding may remain open.
    If a new P1 or P2 issue appears during final QA, fix it and pass the gate again; when the
-   review loop has a gating lens, run another review round before writing the card.
+   review loop has a gating lens, run another review round and rewrite `checkpoint-review.md`
+   with the loop's rounds and outcome before writing the card.
 2. **Browser suite and QA when the project has a UI.** Run its browser suite blocking and
    unpiped. Serve the production build with a throwaway database seeded from project fixtures,
    on loopback at a throwaway port, through `<tool>/scripts/host.sh run` with
