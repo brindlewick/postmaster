@@ -24,6 +24,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { tryJsonFile } from "./lib/data.ts";
+import { scriptsDir } from "./lib/paths.ts";
 import { die, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
 
@@ -304,7 +305,7 @@ if (argv[0] === "--self-test") {
 
 // --- self-test ---------------------------------------------------------------------------------
 withTempDir((tmp) => {
-  const SELF = join(dirname(new URL(import.meta.url).pathname), "verify-journey.sh");
+  const SELF = join(scriptsDir(import.meta), "verify-journey.sh");
   const st = new SelfTest();
 
   function expect(
@@ -593,6 +594,21 @@ Not a step.
       "a walk of an earlier commit does not count for a later one",
       r.code === 3 && out.includes("no journey report at"),
       out,
+    );
+  }
+
+  // A checkout under a path with a space: URL.pathname percent-encodes it,
+  // so SELF must come from the decoded path. Recurses once, in a copy.
+  if (!process.env.POSTMASTER_SPACED_DONE) {
+    const spaced = join(tmp, "my dir", "scripts");
+    cpSync(scriptsDir(import.meta), spaced, { recursive: true });
+    const r = run(join(spaced, "verify-journey.sh"), ["--self-test"], {
+      env: { ...process.env, POSTMASTER_SPACED_DONE: "1" },
+    });
+    st.check(
+      "the self-test passes from a path with a space",
+      r.code === 0,
+      `exit ${r.code}\n${r.out}\n${r.err}`,
     );
   }
 

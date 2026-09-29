@@ -23,6 +23,7 @@
 import {
   accessSync,
   constants,
+  cpSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -31,8 +32,9 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { delimiter, dirname, join, posix, resolve } from "node:path";
+import { delimiter, join, posix, resolve } from "node:path";
 import { readJsonFile, tryJsonFile } from "./lib/data.ts";
+import { scriptsDir } from "./lib/paths.ts";
 import { die, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
 
@@ -260,7 +262,7 @@ if (argv[0] === "--self-test") {
 
 // --- self-test ---------------------------------------------------------------------------------
 withTempDir((tmp) => {
-  const SELF = join(dirname(new URL(import.meta.url).pathname), "verify-library.sh");
+  const SELF = join(scriptsDir(import.meta), "verify-library.sh");
   const st = new SelfTest();
 
   function expect(label: string, exit: number, project: string, wantIn?: string): void {
@@ -477,6 +479,21 @@ import "sample-lib";
       "tests with no node to run them are not run",
       r.code === 3 && out.includes("node is not on PATH"),
       `exit ${r.code}\n${out}`,
+    );
+  }
+
+  // A checkout under a path with a space: URL.pathname percent-encodes it,
+  // so SELF must come from the decoded path. Recurses once, in a copy.
+  if (!process.env.POSTMASTER_SPACED_DONE) {
+    const spaced = join(tmp, "my dir", "scripts");
+    cpSync(scriptsDir(import.meta), spaced, { recursive: true });
+    const r = run(join(spaced, "verify-library.sh"), ["--self-test"], {
+      env: { ...process.env, POSTMASTER_SPACED_DONE: "1" },
+    });
+    st.check(
+      "the self-test passes from a path with a space",
+      r.code === 0,
+      `exit ${r.code}\n${r.out}\n${r.err}`,
     );
   }
 
