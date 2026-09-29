@@ -487,6 +487,7 @@ import "sample-lib";
   if (!process.env.POSTMASTER_SPACED_DONE) {
     const spaced = join(tmp, "my dir", "scripts");
     cpSync(scriptsDir(import.meta), spaced, { recursive: true });
+    cpSync(join(scriptsDir(import.meta), "..", "bunfig.toml"), join(spaced, "..", "bunfig.toml"));
     const r = run(join(spaced, "verify-library.sh"), ["--self-test"], {
       env: { ...process.env, POSTMASTER_SPACED_DONE: "1" },
     });
