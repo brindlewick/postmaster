@@ -1,0 +1,17 @@
+Printable text around each match in the Muse Code 1.4.0-R4302.1 binary, 120 bytes each side;
+non-printable bytes shown as |. Offsets are byte offsets into the file.
+
+TBH_STREAM_IDLE_TIMEOUT_SECS at 0x1f193b:
+  |||||T|||||||||9|||||||||||||i|||||||||9|||||||||||||||||-|||||||||||||9|||||||||||||||||$|||session.jsonlmissing promptTBH_STREAM_IDLE_TIMEOUT_SECSretained session worktree has no absolute captured cwd for its launch source.muse/worktreesproject root changed while re
+
+TBH_STREAM_IDLE_TIMEOUT_SECS at 0xa37894:
+  rk restrictions remain recorded but are not enforced; --sandbox-network |- remains part of permission-profile authority|TBH_STREAM_IDLE_TIMEOUT_SECSTBH_STREAM_FIRST_EVENT_TIMEOUT_SECS|||||||||Reading session logValidating session dataRestoring permissionsPreparing wor
+
+TBH_STREAM_FIRST_EVENT_TIMEOUT_SECS at 0xa378b0:
+  ded but are not enforced; --sandbox-network |- remains part of permission-profile authority|TBH_STREAM_IDLE_TIMEOUT_SECSTBH_STREAM_FIRST_EVENT_TIMEOUT_SECS|||||||||Reading session logValidating session dataRestoring permissionsPreparing workspaceInitializing runtimeRestoring
+
+model stream idle timeout after  at 0x79aa0:
+  ||||||||||||||||7|||||||durable Started receipt mismatchTBH_E2E_TERMINAL_DRAIN_HOLD_FILEpermanently_terminated_ambiguousmodel stream idle timeout after -//W3C//DTD XHTML 1.0 Strict//ENenum PeerAdmissionRecoveryAction||||||||D|||||||||||||||||||||||TLS_DHE_DSS_WITH_AES_256
+
+MUSE_TRANSPORT_TRACE at 0x27aaec6:
+  ||@B|||||||||||||||||||||||||;|||||||T||||||vH||||||||||||||rN|||||@z||Z||||||~||||||o||#||||]xEc|||d||||||||||#||objectMUSE_TRANSPORT_TRACERESPONSE: SSE RESPONSE: propertiesadditionalPropertiesitemsanyOfoneOfallOf||http://[REDACTED_URL] | dnsname or service n

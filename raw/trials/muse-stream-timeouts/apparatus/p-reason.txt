@@ -1,0 +1,3 @@
+Do not use any tools, and do not read or write any file. Work this out in your head and reply with the final number only.
+
+How many distinct necklaces of 12 beads are there, counting two necklaces the same when one is a rotation of the other (but not a reflection), where each bead is one of 3 colours and no two adjacent beads share a colour?

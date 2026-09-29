@@ -244,7 +244,9 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json \
   on its own, with exit 1. [Why the exit is not enough](../../wiki/concepts/resume-exit-status.md)
 - Final message: `payload.text` of the last `run.terminal.*` record, `run.terminal.completed` on
   success. A run that fails, on a model that does not exist say, ends on `run.terminal.failed`
-  with no text and exit 1, and says why on stderr.
+  with no text and exit 1, and says why on stderr. **A response cut off at the output limit
+  ends on `run.terminal.completed` with no text and exit 0**, so an empty final message is a
+  failure too.
 - The model: `run.model.configured` carries `model_id`, with `source` `startup` on a launch and
   `replay` on a resume. No record carries the effort.
 - Tool calls: each ends in a `tool.result`, whose `correlation_facts` name the tool and its
@@ -264,8 +266,23 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json \
   `muse login` fails to save its credential to the keychain.
 - It updates itself in the background unless `MUSE_NO_AUTO_UPDATE=1` is set. A run records the
   version it was dispatched with, and a later leg may run a newer one.
-- Source: trials of Muse Code 1.4.0 (R4302.1), `raw/trials/muse-headless-forms/`, and for the
-  prompt and resumes, `raw/trials/muse-mimo-controls/`.
+- **A call that streams nothing for 180 seconds ends the run.** Once a model call has streamed a
+  reasoning summary or output, Muse Code ends it after 180 seconds with no SSE event, with
+  `run.terminal.failed` and "model stream idle timeout after 180000ms", exit 1, and does not
+  retry it. The Meta API streams at most ten reasoning summaries per response, so a model that
+  reasons past them goes quiet until it answers. `TBH_STREAM_IDLE_TIMEOUT_SECS` sets the limit;
+  SSE comment lines do not reset it. Before any summary or output,
+  `TBH_STREAM_FIRST_EVENT_TIMEOUT_SECS` applies instead, default 180, and that timeout is retried.
+  Neither is documented. A lane's or a role's `env_file` sets them.
+  [Why](../../wiki/concepts/muse-stream-timeouts.md)
+- It retries a server error, a dropped connection and a first-event timeout, with backoff, until
+  12 minutes after the first failed attempt; then the run fails.
+- The `recorded_at` of a `--json` record is a counter, not a time. Task, call and command ids are
+  UUIDv7, whose first 48 bits are Unix milliseconds, and `<XDG_DATA_HOME>/muse/local-tracing/`
+  holds a trace log with UTC times for every model attempt.
+- Source: trials of Muse Code 1.4.0 (R4302.1), `raw/trials/muse-headless-forms/`, for the
+  prompt and resumes, `raw/trials/muse-mimo-controls/`, and for timeouts and retries,
+  `raw/trials/muse-stream-timeouts/`.
 
 ## mimo (MiMo Code)
 

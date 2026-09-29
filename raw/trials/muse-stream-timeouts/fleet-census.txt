@@ -1,0 +1,77 @@
+Census of every Muse Code model attempt in the fleet's trace logs, <harness-data>/muse/*/muse/local-tracing/bootstrap/*.log*, taken 2026-09-29T01:49Z. "main" excludes Muse Code's own reminder calls, whose task ids start 018f0000.
+
+attempts 7688
+[(('tool_calls', 'none'), 7540), (('completed', 'none'), 133), (('failed', 'model_failure'), 6), (('cancelled', 'cancelled'), 3), (('timed_out', 'first_event_timeout'), 3), (('timed_out', 'idle_timeout'), 3)]
+main-thread attempts 4320
+  0- 30s ok= 3827 timed_out=0
+ 30- 60s ok=  324 timed_out=0
+ 60- 90s ok=   74 timed_out=0
+ 90-120s ok=   34 timed_out=0
+120-150s ok=   17 timed_out=0
+150-180s ok=   21 timed_out=0
+180-210s ok=    8 timed_out=0
+210-240s ok=    4 timed_out=0
+240-270s ok=    4 timed_out=0
+270-300s ok=    2 timed_out=0
+300-330s ok=    0 timed_out=3
+330-360s ok=    2 timed_out=0
+longest successful:
+2026-09-29T00:06:13.837352Z 414875736-109 355.979 tool_calls none ev 10 bytes 218610 ttfe 320
+2026-09-29T00:06:20.194809Z 15093480-109 345.974 tool_calls none ev 20 bytes 404910 ttfe 316
+2026-09-28T22:06:26.276453Z 1919751269-109 329.263 timed_out idle_timeout ev None bytes None ttfe None
+2026-09-28T22:25:04.490578Z 354954256-110 328.025 timed_out idle_timeout ev None bytes None ttfe None
+2026-09-29T01:08:19.171605Z 1691725242-107 325.243 timed_out idle_timeout ev None bytes None ttfe None
+2026-09-28T21:17:51.500775Z 3300940634-112 295.891 tool_calls none ev 10 bytes 218641 ttfe 251
+2026-09-29T01:15:21.082781Z 1691725242-107 282.283 tool_calls none ev 56 bytes 588617 ttfe 303
+2026-09-28T22:22:56.435161Z 1919751269-109 261.097 tool_calls none ev 51 bytes 580750 ttfe 14
+2026-09-28T23:32:37.112700Z 354954256-110 251.307 tool_calls none ev 52 bytes 408740 ttfe 281
+2026-09-29T01:23:34.577038Z 1691725242-107 250.453 tool_calls none ev 48 bytes 407697 ttfe 310
+2026-09-28T22:17:27.229073Z 1919751269-109 246.01 tool_calls none ev 50 bytes 405464 ttfe 282
+2026-09-28T22:03:48.434719Z 414875736-109 233.208 tool_calls none ev 51 bytes 408839 ttfe 12
+2026-09-28T00:07:49.026421Z 1274817307-130 228.383 tool_calls none ev 27 bytes 397757 ttfe 60
+2026-09-28T23:43:17.379711Z 414875736-109 221.866 tool_calls none ev 52 bytes 409854 ttfe 341
+2026-09-28T09:47:48.320280Z 2844519085-112 216.132 tool_calls none ev 40 bytes 404628 ttfe 15
+2026-09-28T23:47:49.578903Z 414875736-109 204.588 tool_calls none ev 53 bytes 432338 ttfe 339
+2026-09-28T02:08:38.922024Z 999973812-112 203.793 tool_calls none ev 32 bytes 403654 ttfe 284
+2026-09-29T00:57:45.797830Z 414875736-109 195.841 tool_calls none ev 50 bytes 405202 ttfe 320
+2026-09-28T22:10:40.585090Z 2082857558-109 193.708 tool_calls none ev 52 bytes 411188 ttfe 34
+2026-09-27T22:47:47.734223Z 3077801020-127 184.991 tool_calls none ev 44 bytes 320318 ttfe 21
+2026-09-28T21:17:27.077626Z 2082857558-109 183.199 tool_calls none ev 10 bytes 217458 ttfe 315
+2026-09-27T23:57:36.255458Z 337600838-127 182.254 tool_calls none ev 42 bytes 317531 ttfe 13
+2026-09-28T10:10:50.289903Z 2783333333-112 180.224 tool_calls none ev 52 bytes 408955 ttfe 24
+2026-09-28T03:22:36.127239Z 2028519552-109 178.632 tool_calls none ev 48 bytes 411869 ttfe 20
+2026-09-28T02:04:32.153771Z 999973812-112 177.258 tool_calls none ev 31 bytes 314587 ttfe 29
+
+wire events vs duration (main thread, successful):
+  0- 20s n=3486 events median= 10.0 max=100 min=  0
+ 20- 40s n= 507 events median= 18.0 max= 58 min=  8
+ 40- 60s n= 155 events median= 22.0 max= 33 min=  8
+ 60- 80s n=  59 events median= 27.0 max= 43 min= 13
+ 80-100s n=  32 events median= 31.5 max= 43 min=  9
+100-120s n=  17 events median= 35.0 max= 46 min=  8
+120-140s n=  12 events median= 35.5 max= 49 min= 10
+140-160s n=  13 events median= 46.0 max= 52 min= 11
+160-180s n=  13 events median= 42.0 max= 52 min=  8
+180-200s n=   6 events median= 47.0 max= 52 min= 10
+200-220s n=   3 events median= 40.0 max= 53 min= 32
+220-240s n=   3 events median= 51.0 max= 52 min= 27
+240-260s n=   3 events median= 50.0 max= 52 min= 48
+260-280s n=   1 events median= 51.0 max= 51 min= 51
+280-300s n=   2 events median= 33.0 max= 56 min= 10
+300-320s n=   2 events median= 15.0 max= 20 min= 10
+max wire events seen in any main attempt: 100
+attempts with >=45 events: 68 with >=57: 27
+
+Every attempt that ended timed_out, and every failed one:
+2026-09-27T13:31:10.807066Z task=01a0e30f-f931-7bb0-9f9a-cbec69e52669 step=9 attempt=1 outcome="failed" reason="model_failure" next_attempt=0 retry_delay_ms=0 duration_ms=780
+2026-09-27T22:53:27.258623Z task=01a0e512-c188-79c1-9da1-cc6f11b64b70 step=48 attempt=1 outcome="failed" reason="model_failure" next_attempt=0 retry_delay_ms=0 duration_ms=449
+2026-09-28T00:23:43.391472Z task=01a0e565-63f8-7e12-a847-bdfcb793131d step=2 attempt=1 outcome="failed" reason="model_failure" next_attempt=0 retry_delay_ms=0 duration_ms=1039
+2026-09-28T00:24:00.120047Z task=018f0000-0000-7000-8000-000000002710 step=0 attempt=1 outcome="failed" reason="model_failure" next_attempt=0 retry_delay_ms=0 duration_ms=376
+2026-09-28T01:14:19.363213Z task=01a0e593-b574-7c23-a9a2-e53a11668a1e step=0 attempt=1 outcome="failed" reason="model_failure" next_attempt=0 retry_delay_ms=0 duration_ms=1491
+2026-09-28T01:16:56.673729Z task=01a0e596-18af-7ed0-bbd8-c86920b40e77 step=0 attempt=1 outcome="failed" reason="model_failure" next_attempt=0 retry_delay_ms=0 duration_ms=2330
+2026-09-28T22:06:26.276453Z task=01a0ea09-0cfb-7191-8595-feb792fc5b36 step=10 attempt=1 outcome="timed_out" reason="idle_timeout" next_attempt=0 retry_delay_ms=0 duration_ms=329263
+2026-09-28T22:25:04.490578Z task=01a0ea1a-2257-7100-b41a-c10775dd91fe step=104 attempt=1 outcome="timed_out" reason="idle_timeout" next_attempt=0 retry_delay_ms=0 duration_ms=328025
+2026-09-29T00:02:07.288411Z task=018f0000-0000-7000-8000-000000002712 step=0 attempt=3 outcome="timed_out" reason="first_event_timeout" next_attempt=0 retry_delay_ms=0 duration_ms=30003
+2026-09-29T00:02:44.639882Z task=018f0000-0000-7000-8000-000000002712 step=0 attempt=3 outcome="timed_out" reason="first_event_timeout" next_attempt=0 retry_delay_ms=0 duration_ms=30001
+2026-09-29T00:05:32.369401Z task=018f0000-0000-7000-8000-000000002712 step=0 attempt=3 outcome="timed_out" reason="first_event_timeout" next_attempt=0 retry_delay_ms=0 duration_ms=30001
+2026-09-29T01:08:19.171605Z task=01a0eaaf-a1c6-70e2-b960-828c81cd2350 step=12 attempt=1 outcome="timed_out" reason="idle_timeout" next_attempt=0 retry_delay_ms=0 duration_ms=325243

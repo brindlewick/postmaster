@@ -1,12 +1,23 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-27
+updated: 2026-09-29
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-29] ingest | Muse Code's idle timeout, and why long reasoning trips it
+
+Issue #127. A new harness page, settled on a trial: once a call has streamed a reasoning summary,
+Muse Code 1.4.0 ends it after 180 seconds with no event and does not retry it. The Meta API
+streams at most ten summaries per response, so a model still reasoning after them goes quiet
+and fails. That ended three coachman legs on 2026-09-28 and 29. An undocumented environment
+variable sets the limit, and a lower effort does not avoid the failure. The trial,
+`raw/trials/muse-stream-timeouts/`, records the fleet's own trace logs for the three calls, real
+launches, and a loopback mock of the API. `harnesses.md` now records the timeouts and retries,
+and that a response cut off at the output limit ends the run as completed with no text.
 
 ## [2026-09-27] ingest | how the style sort is checked and put to the user
 

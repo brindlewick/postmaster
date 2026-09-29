@@ -1,0 +1,144 @@
+Muse Code 1.4.0-R4302.1 on muse-spark-1.3-contributor, the real Meta API, launched with
+apparatus/run.py: `muse exec --json --prompt-file <prompt> --model muse-spark-1.3-contributor
+--reasoning-effort <effort> --yolo`, stdin /dev/null, MUSE_TRANSPORT_TRACE=1, a data directory of
+its own. Wire times come from the transport trace, stamped by run.py as each line arrived.
+"main" responses answer the prompt; the others are Muse Code's own reminder calls.
+
+=== b1: prompt p-reason.txt, effort max, env TBH_PROVIDER_TRACE_ROOT=<trial>/b1/provider-trace
+exit 0 after 56.7 s
+  wire resp_6abb138859be26822b61487c start +    1.7s dur     2.0s events   6 summaries  0 last-summary-at +   0.0s max-gap    1.1s after response.output_item.added at +0.9s -> response.completed
+  wire resp_6abb1389374bc4ff777b468e start +    2.6s dur    23.1s events  32 summaries  2 last-summary-at +   9.6s max-gap   13.3s after response.reasoning_summary_part.done at +9.6s -> response.output_item.done
+  wire resp_6abb13a292421f2a483b48fc start +   27.3s dur    27.5s events  26 summaries  3 last-summary-at +  18.8s max-gap   12.9s after response.reasoning_summary_part.done at +5.9s -> response.reasoning_summary_part.added
+  summaries resp_6abb13a29242: #0 +0s, #1 +2s, #2 +15s
+  muse run.terminal: completed, reason None
+  answer: 352
+  answer check: 352, correct
+
+=== n-xhigh: prompt p-reason.txt, effort xhigh, env none
+exit 0 after 94.1 s
+  wire resp_6abb187cfadbfb793178446a start +    1.7s dur    26.1s events  13 summaries  2 last-summary-at +  18.4s max-gap   15.3s after response.output_item.added at +0.1s -> response.reasoning_summary_part.added
+  wire resp_6abb187c44459de472ba4c90 start +    2.0s dur    25.8s events  28 summaries  1 last-summary-at +   3.7s max-gap   20.5s after data at +5.3s -> response.output_item.added
+  wire resp_6abb18980ae0561d5e1d4f91 start +   29.6s dur    62.6s events  42 summaries  7 last-summary-at +  56.6s max-gap   11.8s after response.reasoning_summary_part.done at +35.5s -> response.reasoning_summary_part.added
+  summaries resp_6abb18980ae0: #0 +0s, #1 +3s, #2 +11s, #3 +21s, #4 +31s, #5 +43s, #6 +52s
+  muse run.terminal: completed, reason None
+  answer: 352
+  answer check: 352, correct
+
+=== n-high: prompt p-reason.txt, effort high, env none
+exit 0 after 70.2 s
+  wire resp_6abb187d5b9cc984b3cb4c50 start +    2.4s dur    11.0s events   9 summaries  1 last-summary-at +   5.2s max-gap    5.1s after response.output_item.added at +0.1s -> response.reasoning_summary_part.added
+  wire resp_6abb187dd0c7426487904863 start +    2.5s dur    17.0s events  32 summaries  2 last-summary-at +  12.6s max-gap    8.8s after response.output_item.added at +0.1s -> response.reasoning_summary_part.added
+  wire resp_6abb189046e9bc372ce744cc start +   21.0s dur     0.1s events   3 summaries  0 last-summary-at +   0.0s max-gap    0.1s after response.created at +0.0s -> response.in_progress
+  wire resp_6abb18b1bd59442353e14c9e start +   54.3s dur    14.1s events  21 summaries  2 last-summary-at +   6.8s max-gap    6.5s after response.reasoning_summary_part.done at +6.8s -> response.output_item.done
+  muse run.terminal: completed, reason None
+  answer: 352
+  answer check: 352, correct
+  provider stream closed at 01:47:26: abandoned, consumer_drop, open 29.8 s
+
+=== l2: prompt p-sudoku.txt, effort max, env none
+exit 1 after 380.0 s
+  wire resp_6abb142c0f7a0ad164664b6e start +    1.5s dur     5.8s events   5 summaries  0 last-summary-at +   0.0s max-gap    4.1s after response.output_item.added at +0.1s -> response.output_item.done
+  wire resp_6abb142eb6c4650baf044256 start +    2.9s dur   195.4s events  52 summaries  9 last-summary-at + 195.4s max-gap   35.7s after response.reasoning_summary_part.done at +135.0s -> response.reasoning_summary_part.added
+  summaries resp_6abb142eb6c4: #0 +0s, #1 +9s, #2 +33s, #3 +63s, #4 +89s, #5 +110s, #6 +132s, #7 +167s, #8 +192s
+  muse run.terminal: failed, reason 'model stream idle timeout after 180000ms'
+  muse step 0 attempt 1: terminal timed_out idle_timeout after 378.3 s; next attempt 0
+  provider stream closed at 01:34:30: abandoned, consumer_drop, open 375.8 s
+  stderr: run ended with Failed: model stream idle timeout after 180000ms
+
+=== l1: prompt p-sudoku.txt, effort max, env TBH_STREAM_IDLE_TIMEOUT_SECS=1200
+exit 1 after 1490.0 s
+  wire resp_6abb142bea34df07b1334a79 start +    1.9s dur     3.3s events   5 summaries  0 last-summary-at +   0.0s max-gap    1.9s after response.output_item.added at +0.1s -> response.output_item.done
+  wire resp_6abb142b923a967b88154378 start +    2.4s dur   192.3s events  55 summaries 10 last-summary-at + 192.2s max-gap   26.7s after response.reasoning_summary_part.done at +34.6s -> response.reasoning_summary_part.added
+  wire resp_6abb164f1bceb72cc8744052 start +  550.3s dur   175.0s events  43 summaries 10 last-summary-at + 174.9s max-gap   27.0s after response.reasoning_summary_part.done at +36.6s -> response.reasoning_summary_part.added
+  summaries resp_6abb142b923a: #0 +0s, #1 +5s, #2 +28s, #3 +55s, #4 +79s, #5 +102s, #6 +122s, #7 +147s, #8 +165s, #9 +186s
+  summaries resp_6abb164f1bce: #0 +0s, #1 +6s, #2 +30s, #3 +57s, #4 +79s, #5 +97s, #6 +115s, #7 +131s, #8 +151s, #9 +169s
+  muse run.terminal: failed, reason 'model call chain exceeded the 12m wall-clock ceiling measured from its first failed attempt: 2 failed attempts over 15m40s, all [transport_stream_error:body-truncated]. dominant failure [transport_stream_error] — next step: check network connectivity (VPN/proxy) and retry; if it persists, re-authenticate with the provider — a very large context can also repeatedly break streams, so consider compacting the session'
+  provider stream closed at 01:37:17: failed, transport, open 545.0 s
+  provider stream failed at 01:37:17: transport_error after 43 wire events
+  muse step 0 attempt 1: retry scheduled retryable_failure after 547.2 s; next attempt 2
+  provider stream closed at 01:52:57: failed, transport, open 937.7 s
+  provider stream failed at 01:52:57: transport_error after 43 wire events
+  muse step 0 attempt 2: terminal failed model_failure after 939.6 s; next attempt 0
+  stderr: run ended with Failed: model call chain exceeded the 12m wall-clock ceiling measured from its first failed attempt: 2 failed attempts over 15m40s, all [transport_stream_error:body-truncated]. dominant failure [transport_stream_error] — next step: check network connectivity (VPN/proxy) and retry; if it persists, re-authenticate with the provider — a very large context can also repeatedly break stre
+
+=== e1-max: prompt p-sudoku2.txt, effort max, env none
+exit 1 after 325.4 s
+  wire resp_6abb187ae21d4551f5b443cd start +    2.9s dur   140.7s events  43 summaries 10 last-summary-at + 140.7s max-gap   18.4s after response.reasoning_summary_part.done at +122.2s -> response.reasoning_summary_part.added
+  wire resp_6abb187a541ba27a8b444b6a start +    3.1s dur     3.6s events  17 summaries  0 last-summary-at +   0.0s max-gap    2.1s after response.output_item.added at +0.1s -> response.output_item.done
+  summaries resp_6abb187ae21d: #0 +0s, #1 +10s, #2 +25s, #3 +39s, #4 +56s, #5 +73s, #6 +87s, #7 +103s, #8 +119s, #9 +138s
+  muse run.terminal: failed, reason 'model stream idle timeout after 180000ms'
+  muse step 0 attempt 1: terminal timed_out idle_timeout after 323.6 s; next attempt 0
+  provider stream closed at 01:51:55: abandoned, consumer_drop, open 321.2 s
+  stderr: run ended with Failed: model stream idle timeout after 180000ms
+
+=== e1-xhigh: prompt p-sudoku2.txt, effort xhigh, env none
+exit 1 after 290.7 s
+  wire resp_6abb187a55df7e08a05d4d62 start +    1.8s dur     3.6s events   5 summaries  0 last-summary-at +   0.0s max-gap    2.5s after response.output_item.added at +0.1s -> response.output_item.done
+  wire resp_6abb187a054d0ce2a20c4fef start +    2.5s dur   106.1s events  51 summaries  9 last-summary-at + 106.1s max-gap   27.8s after response.reasoning_summary_part.done at +6.5s -> response.reasoning_summary_part.added
+  summaries resp_6abb187a054d: #0 +0s, #1 +4s, #2 +32s, #3 +43s, #4 +55s, #5 +66s, #6 +80s, #7 +92s, #8 +104s
+  muse run.terminal: failed, reason 'model stream idle timeout after 180000ms'
+  muse step 0 attempt 1: terminal timed_out idle_timeout after 288.7 s; next attempt 0
+  provider stream closed at 01:51:21: abandoned, consumer_drop, open 286.7 s
+  stderr: run ended with Failed: model stream idle timeout after 180000ms
+
+=== e1-high: prompt p-sudoku2.txt, effort high, env none
+exit 1 after 290.5 s
+  wire resp_6abb187a1a7d2d247ac8499b start +    1.3s dur    10.1s events   9 summaries  1 last-summary-at +   7.1s max-gap    7.0s after response.output_item.added at +0.1s -> response.reasoning_summary_part.added
+  wire resp_6abb187a08f051841d5f45af start +    1.7s dur   107.1s events  51 summaries  9 last-summary-at + 107.1s max-gap   19.3s after response.reasoning_summary_part.done at +39.3s -> response.reasoning_summary_part.added
+  summaries resp_6abb187a08f0: #0 +0s, #1 +6s, #2 +21s, #3 +35s, #4 +54s, #5 +68s, #6 +78s, #7 +88s, #8 +103s
+  muse run.terminal: failed, reason 'model stream idle timeout after 180000ms'
+  muse step 0 attempt 1: terminal timed_out idle_timeout after 288.8 s; next attempt 0
+  provider stream closed at 01:51:22: abandoned, consumer_drop, open 287.5 s
+  stderr: run ended with Failed: model stream idle timeout after 180000ms
+
+=== e1-medium: prompt p-sudoku2.txt, effort medium, env none
+exit 1 after 279.9 s
+  wire resp_6abb19b3b3df85e75f164340 start +    1.8s dur    96.2s events  39 summaries  9 last-summary-at +  96.2s max-gap   26.7s after response.reasoning_summary_part.done at +6.0s -> response.reasoning_summary_part.added
+  wire resp_6abb19b35a8f63dd89ec4a7f start +    2.0s dur     2.5s events  18 summaries  0 last-summary-at +   0.0s max-gap    1.5s after response.output_item.added at +0.0s -> response.output_item.done
+  summaries resp_6abb19b3b3df: #0 +0s, #1 +3s, #2 +30s, #3 +41s, #4 +50s, #5 +60s, #6 +70s, #7 +81s, #8 +93s
+  muse run.terminal: failed, reason 'model stream idle timeout after 180000ms'
+  muse step 0 attempt 1: terminal timed_out idle_timeout after 278.0 s; next attempt 0
+  provider stream closed at 01:56:24: abandoned, consumer_drop, open 276.5 s
+  stderr: run ended with Failed: model stream idle timeout after 180000ms
+
+=== e1-low: prompt p-sudoku2.txt, effort low, env none
+exit 1 after 320.6 s
+  wire resp_6abb19b490376492bdd149fe start +    1.6s dur     2.4s events   5 summaries  0 last-summary-at +   0.0s max-gap    1.5s after response.output_item.added at +0.1s -> response.output_item.done
+  wire resp_6abb19b5f6634645a8494a51 start +    2.7s dur   135.8s events  51 summaries  9 last-summary-at + 135.8s max-gap   32.2s after response.reasoning_summary_part.done at +42.9s -> response.reasoning_summary_part.added
+  summaries resp_6abb19b5f663: #0 +0s, #1 +5s, #2 +25s, #3 +41s, #4 +74s, #5 +91s, #6 +105s, #7 +119s, #8 +134s
+  muse run.terminal: failed, reason 'model stream idle timeout after 180000ms'
+  muse step 0 attempt 1: terminal timed_out idle_timeout after 318.5 s; next attempt 0
+  provider stream closed at 01:57:06: abandoned, consumer_drop, open 316.2 s
+  stderr: run ended with Failed: model stream idle timeout after 180000ms
+
+=== e2-max: prompt p-sudoku2.txt, effort max, env TBH_STREAM_IDLE_TIMEOUT_SECS=900
+exit 0 after 342.9 s
+  wire resp_6abb1a295e8920112dc84160 start +    1.7s dur     2.5s events   5 summaries  0 last-summary-at +   0.0s max-gap    1.6s after response.output_item.added at +0.0s -> response.output_item.done
+  wire resp_6abb1a29b3740e01baae4124 start +    2.3s dur   327.8s events  68 summaries 10 last-summary-at + 130.2s max-gap  197.3s after response.reasoning_summary_part.done at +130.2s -> response.output_item.done
+  wire resp_6abb1b737bc8f64b58864c99 start +  331.5s dur     9.9s events  21 summaries  2 last-summary-at +   6.6s max-gap    4.6s after response.reasoning_summary_part.done at +2.0s -> response.reasoning_summary_part.added
+  summaries resp_6abb1a29b374: #0 +0s, #1 +5s, #2 +22s, #3 +39s, #4 +55s, #5 +70s, #6 +87s, #7 +100s, #8 +116s, #9 +128s
+  muse run.terminal: completed, reason None
+  answer: 613578249 / 524391786 / 987426531 / 862147395 / 745839162 / 139652478 / 256784913 / 371965824 / 498213657
+  answer check: matches the solution
+  muse step 0 attempt 1: terminal completed none after 330.1 s; next attempt 0
+
+=== e2-xhigh: prompt p-sudoku2.txt, effort xhigh, env TBH_STREAM_IDLE_TIMEOUT_SECS=900
+exit 0 after 653.4 s
+  wire resp_6abb1a2a2e5673e37d92480a start +    1.8s dur     9.1s events  13 summaries  2 last-summary-at +   7.5s max-gap    4.6s after response.reasoning_summary_part.done at +2.9s -> response.reasoning_summary_part.added
+  wire resp_6abb1a2a88708131191b44e2 start +    2.1s dur   625.2s events  67 summaries 10 last-summary-at +  86.7s max-gap  537.9s after response.reasoning_summary_part.done at +86.8s -> response.output_item.done
+  wire resp_6abb1ca1aac8a0d314f14576 start +  632.7s dur    19.0s events  20 summaries  2 last-summary-at +   5.2s max-gap   13.1s after response.reasoning_summary_part.done at +5.2s -> response.output_item.done
+  summaries resp_6abb1a2a8870: #0 +0s, #1 +5s, #2 +19s, #3 +31s, #4 +43s, #5 +52s, #6 +59s, #7 +67s, #8 +76s, #9 +84s
+  muse run.terminal: completed, reason None
+  answer: 613578249 / 524391786 / 987426531 / 862147395 / 745839162 / 139652478 / 256784913 / 371965824 / 498213657
+  answer check: matches the solution
+  muse step 0 attempt 1: terminal completed none after 627.3 s; next attempt 0
+
+=== e2-high: prompt p-sudoku2.txt, effort high, env TBH_STREAM_IDLE_TIMEOUT_SECS=900
+exit 0 after 763.7 s
+  wire resp_6abb1a2a07efd93eaeea4a9a start +    1.3s dur   753.7s events  44 summaries 10 last-summary-at +  82.7s max-gap  671.0s after response.reasoning_summary_part.done at +82.7s -> response.incomplete
+  wire resp_6abb1d1e6062d605a6ec4167 start +  757.2s dur     4.9s events  17 summaries  1 last-summary-at +   2.7s max-gap    2.6s after response.output_item.added at +0.1s -> response.reasoning_summary_part.added
+  summaries resp_6abb1a2a07ef: #0 +0s, #1 +4s, #2 +16s, #3 +26s, #4 +36s, #5 +45s, #6 +51s, #7 +59s, #8 +69s, #9 +80s
+  muse run.terminal: completed, reason None
+  provider stream closed at 02:06:20: incomplete, server_terminal, open 753.7 s
+  muse step 0 attempt 1: terminal completed none after 755.1 s; next attempt 0
+  response.incomplete: reason max_output_tokens, output tokens 128000, of them reasoning 127997

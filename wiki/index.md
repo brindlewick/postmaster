@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-27
+updated: 2026-09-29
 ---
 
 # postmaster wiki
@@ -34,6 +34,10 @@ How each agent CLI really behaves, as distinct from what its documentation says.
 - [A resume's exit status does not say it continued its thread](concepts/resume-exit-status.md):
   **settled**, for pi, Muse Code and MiMo Code. Resuming a thread it cannot find, a harness can
   exit 0 having done nothing, or having started a new thread.
+- [Muse Code ends a model call that streams nothing for 180 seconds](concepts/muse-stream-timeouts.md):
+  **settled**, for Muse Code 1.4.0. The Meta API streams at most ten reasoning summaries per
+  response, so a long reasoning call goes quiet and fails, unretried, at any effort. An
+  undocumented variable sets the limit.
 
 ## Trackers and tooling
 

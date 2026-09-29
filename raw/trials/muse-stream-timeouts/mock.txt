@@ -1,0 +1,124 @@
+Muse Code 1.4.0-R4302.1 against apparatus/mock.py on loopback (--base-url), prompt "Say OK.",
+--reasoning-effort max, a throwaway key on stdin. Times are seconds from the main request.
+Every main response opens with response.created, response.in_progress and a reasoning item.
+A run marked "stopped" was ended by hand once its retry had been seen.
+
+=== m0b: stall 3 s, silent; env none
+exit 0 after 4.5 s
+  mock    +0.0 s  request 1 main
+  mock    +0.0 s  request 2 skill-reminder
+  mock    +0.0 s  stream 2 ended: sent
+  mock    +3.0 s  stream 1 ended: sent
+  mock    +3.2 s  request 3 verify-reminder
+  mock    +3.2 s  stream 3 ended: sent
+  muse run.terminal: completed, reason None, text 'OK'
+  muse attempt 1: terminal completed none, after 3.059 s; next attempt 0 after 0 ms
+
+=== m1: stall 200 s, silent, no content first; env none
+exit 143 after 328.3 s  (stopped)
+  mock    +0.0 s  request 1 main
+  mock    +0.0 s  request 2 skill-reminder
+  mock    +0.0 s  stream 2 ended: sent
+  mock  +181.0 s  request 3 main
+  mock  +200.0 s  stream 1 ended: client_gone
+  muse attempt 1: retry scheduled retryable_failure, after 180.005 s; next attempt 2 after 1000 ms
+  muse attempt 2: terminal cancelled cancelled, after 143.295 s; next attempt 0 after 0 ms
+
+=== m2: stall 20 s, silent, no content first; env TBH_STREAM_IDLE_TIMEOUT_SECS=5
+exit 0 after 23.5 s
+  mock    +0.0 s  request 1 main
+  mock    +0.0 s  request 2 skill-reminder
+  mock    +0.0 s  stream 2 ended: sent
+  mock   +20.0 s  stream 1 ended: sent
+  mock   +20.4 s  request 3 verify-reminder
+  mock   +20.4 s  stream 3 ended: sent
+  muse run.terminal: completed, reason None, text 'OK'
+  muse attempt 1: terminal completed none, after 20.128 s; next attempt 0 after 0 ms
+
+=== m3: stall 200 s, silent, no content first; env TBH_STREAM_IDLE_TIMEOUT_SECS=600
+exit 143 after 328.1 s  (stopped)
+  mock    +0.0 s  request 1 main
+  mock    +0.0 s  request 2 skill-reminder
+  mock    +0.0 s  stream 2 ended: sent
+  mock  +181.1 s  request 3 main
+  mock  +200.0 s  stream 1 ended: client_gone
+  muse attempt 1: retry scheduled retryable_failure, after 180.014 s; next attempt 2 after 1000 ms
+  muse attempt 2: terminal cancelled cancelled, after 143.451 s; next attempt 0 after 0 ms
+
+=== m4: stall 200 s, an SSE comment every 10 s, no content first; env none
+exit 143 after 328.3 s  (stopped)
+  mock    +0.0 s  request 1 main
+  mock    +0.0 s  request 2 skill-reminder
+  mock    +0.0 s  stream 2 ended: sent
+  mock  +181.0 s  request 3 main
+  mock  +200.0 s  stream 1 ended: client_gone
+  muse attempt 1: retry scheduled retryable_failure, after 180.011 s; next attempt 2 after 1000 ms
+  muse attempt 2: terminal cancelled cancelled, after 143.324 s; next attempt 0 after 0 ms
+
+=== m5: stall 200 s, a reasoning summary every 10 s; env none
+exit 0 after 204.0 s
+  mock    +0.0 s  request 1 main
+  mock    +0.0 s  request 2 skill-reminder
+  mock    +0.0 s  stream 2 ended: sent
+  mock  +200.0 s  stream 1 ended: sent
+  mock  +200.4 s  request 3 verify-reminder
+  mock  +200.4 s  stream 3 ended: sent
+  muse run.terminal: completed, reason None, text 'OK'
+  muse attempt 1: terminal completed none, after 200.183 s; next attempt 0 after 0 ms
+
+=== m6: summaries at 10 s and 20 s, then silent to 230 s; env TBH_STREAM_IDLE_TIMEOUT_SECS=600
+exit 0 after 233.4 s
+  mock    -0.0 s  request 1 skill-reminder
+  mock    +0.0 s  request 2 main
+  mock    +0.0 s  stream 1 ended: sent
+  mock  +230.0 s  stream 2 ended: sent
+  mock  +230.6 s  request 3 verify-reminder
+  mock  +230.6 s  stream 3 ended: sent
+  muse run.terminal: completed, reason None, text 'OK'
+  muse attempt 1: terminal completed none, after 230.203 s; next attempt 0 after 0 ms
+
+=== m7: summaries at 10 s and 20 s, then silent to 230 s; env none
+exit 1 after 203.2 s
+  mock    +0.0 s  request 1 main
+  mock    +0.0 s  request 2 skill-reminder
+  mock    +0.0 s  stream 2 ended: sent
+  muse run.terminal: failed, reason model stream idle timeout after 180000ms, text ''
+  muse attempt 1: terminal timed_out idle_timeout, after 200.123 s; next attempt 0 after 0 ms
+
+=== m8: summaries at 10 s and 20 s, then silent to 60 s; env TBH_STREAM_IDLE_TIMEOUT_SECS=5
+exit 1 after 17.5 s
+  mock    -0.0 s  request 1 skill-reminder
+  mock    +0.0 s  request 2 main
+  mock    +0.0 s  stream 1 ended: sent
+  muse run.terminal: failed, reason model stream idle timeout after 5000ms, text ''
+  muse attempt 1: terminal timed_out idle_timeout, after 15.112 s; next attempt 0 after 0 ms
+
+=== m9: summaries at 10 s and 20 s, then an SSE comment every 10 s to 230 s; env none
+exit 1 after 203.1 s
+  mock    +0.0 s  request 1 main
+  mock    +0.0 s  request 2 skill-reminder
+  mock    +0.0 s  stream 2 ended: sent
+  muse run.terminal: failed, reason model stream idle timeout after 180000ms, text ''
+  muse attempt 1: terminal timed_out idle_timeout, after 200.094 s; next attempt 0 after 0 ms
+
+=== m10: summaries at 10 s and 20 s, then silent to 90 s; env TBH_STREAM_IDLE_TIMEOUT_SECS=30
+exit 1 after 52.7 s
+  mock    +0.0 s  request 1 main
+  mock    +0.0 s  request 2 skill-reminder
+  mock    +0.0 s  stream 2 ended: sent
+  muse run.terminal: failed, reason model stream idle timeout after 30000ms, text ''
+  muse attempt 1: terminal timed_out idle_timeout, after 50.053 s; next attempt 0 after 0 ms
+
+=== m11: stall 60 s, silent, no content first; env TBH_STREAM_FIRST_EVENT_TIMEOUT_SECS=20
+exit 143 after 75.7 s  (stopped)
+  mock    +0.0 s  request 1 main
+  mock    +0.0 s  request 2 skill-reminder
+  mock    +0.0 s  stream 2 ended: sent
+  mock   +21.2 s  request 3 main
+  mock   +43.3 s  request 4 main
+  mock   +60.0 s  stream 1 ended: client_gone
+  mock   +67.3 s  request 5 main
+  muse attempt 1: retry scheduled retryable_failure, after 20.047 s; next attempt 2 after 1000 ms
+  muse attempt 2: retry scheduled retryable_failure, after 20.014 s; next attempt 3 after 2000 ms
+  muse attempt 3: retry scheduled retryable_failure, after 20.015 s; next attempt 4 after 4000 ms
+  muse attempt 4: terminal cancelled cancelled, after 5.251 s; next attempt 0 after 0 ms
