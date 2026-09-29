@@ -9,11 +9,14 @@
 //   exit 0  new: made and filed; score, hidden: every check passed
 //   exit 1  usage, a tool not on PATH, a refusal from new, or input that is not what it says
 //   exit 2  score, hidden: a check failed
+
+import { randomUUID } from "node:crypto";
 import {
   cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   readlinkSync,
@@ -183,8 +186,7 @@ function makeAndFile(dest: string, ticket: string): number {
   // file the ticket: local.sh create takes a body file, not the body text
   const body = ticketBody(ticket);
   const title = ticketTitle(ticket);
-  const bodyFile = join(makeTmpDir(), `fixture-body-${Date.now()}.md`);
-  writeFileSync(bodyFile, body);
+  const bodyFile = makeBodyFile(body);
   const createR = run("bash", [localSh, dest, "create", title, bodyFile]);
   rmSync(bodyFile, { force: true });
   const number = createR.out.trim().split("\n").pop() ?? "";
@@ -301,8 +303,7 @@ function score(dispatch: string, repo: string): { code: number; out: string } {
     );
   }
   // export main to scratch
-  const scratch = join(makeTmpDir(), `fixture-score-${Date.now()}`);
-  mkdirSync(scratch, { recursive: true });
+  const scratch = makeScoreDir();
   const app = join(scratch, "app");
   mkdirSync(app);
   const exp = sh([
@@ -339,6 +340,25 @@ function score(dispatch: string, repo: string): { code: number; out: string } {
 
 function makeTmpDir(): string {
   return tmpdir();
+}
+/** A body file as `mktemp` makes one: mode 0600, a random name, never
+ * clobbering an existing path. */
+function makeBodyFile(body: string): string {
+  for (let i = 0; i < 10; i++) {
+    const p = join(makeTmpDir(), `fixture-body-${randomUUID()}.md`);
+    try {
+      writeFileSync(p, body, { mode: 0o600, flag: "wx" });
+      return p;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code !== "EEXIST") throw e;
+    }
+  }
+  die("fixture: could not make a temporary body file");
+}
+/** A score directory as `tempfile.mkdtemp` makes one: mode 0700, a random
+ * name that never reuses an existing path. */
+function makeScoreDir(): string {
+  return mkdtempSync(join(makeTmpDir(), "fixture-score-"));
 }
 
 function legsOf(dispatch: string, manifest: Record<string, unknown> | null): number[] {
@@ -599,6 +619,35 @@ kind = "github"
   process.env.GIT_COMMITTER_EMAIL = "fixture@example.invalid";
 
   const st = new SelfTest();
+  // Temporary names are private and never reused, as `mktemp` makes them.
+  {
+    const b1 = makeBodyFile("one");
+    const b2 = makeBodyFile("two");
+    const m1 = statSync(b1).mode & 0o777;
+    const m2 = statSync(b2).mode & 0o777;
+    st.check(
+      "temporary body files are mode 0600, unique, and hold their own bytes",
+      m1 === 0o600 &&
+        m2 === 0o600 &&
+        b1 !== b2 &&
+        readFileSync(b1, "utf8") === "one" &&
+        readFileSync(b2, "utf8") === "two",
+      `${b1} ${m1.toString(8)} ${b2} ${m2.toString(8)}`,
+    );
+    rmSync(b1, { force: true });
+    rmSync(b2, { force: true });
+    const s1 = makeScoreDir();
+    const s2 = makeScoreDir();
+    const d1 = statSync(s1).mode & 0o777;
+    const d2 = statSync(s2).mode & 0o777;
+    st.check(
+      "temporary score directories are mode 0700 and never reused",
+      d1 === 0o700 && d2 === 0o700 && s1 !== s2,
+      `${s1} ${d1.toString(8)} ${s2} ${d2.toString(8)}`,
+    );
+    rmSync(s1, { recursive: true, force: true });
+    rmSync(s2, { recursive: true, force: true });
+  }
   const first = tickets()[0] ?? "";
 
   // Background runner
