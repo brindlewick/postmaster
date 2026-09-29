@@ -434,6 +434,13 @@ PY
     || fail "mimo review uses --command review, the prompt file range and high variant"
   [ -z "$(find "$tmp/cx-detached" -maxdepth 1 -name '.postmaster-review-*' -print -quit)" ] \
     && ok "mimo's temporary range prompt is removed after launch" || fail "mimo's temporary range prompt is removed after launch"
+  rel_pwd=$(pwd -P) && cd "$tmp" || { echo "self-test: cannot enter $tmp"; exit 1; }
+  run review-mimo review one "cx-detached" "$base"
+  cd "$rel_pwd" || exit 1
+  case $out in *"--command review"*) ran=true ;; *) ran=false ;; esac
+  [ $rc -eq 0 ] && $ran && [ -z "$(find "$tmp/cx-detached" -maxdepth 1 -name '.postmaster-review-*' -print -quit)" ] \
+    && ok "mimo's temporary range prompt is removed after a relative-cwd launch" \
+    || fail "mimo's temporary range prompt is removed after a relative-cwd launch"
   run review-pi review one "$tmp/cx-detached" "$base"
   [ $rc -eq 3 ] && [ -z "$out" ] && case $err in *"has no bug code-review form"*) true ;; *) false ;; esac \
     && ok "pi has no bug review form: exit 3" || fail "pi has no bug review form: exit 3"
@@ -601,6 +608,10 @@ if [ "$CMD" = review ]; then
     || die "review scratch is dirty, which would widen the review past $BASE...HEAD: $CWD"
   if [ "$HARNESS" = mimo ]; then
     REVIEW_PROMPT=$(mktemp "$CWD/.postmaster-review-XXXXXX") || die "cannot create the MiMo review prompt in $CWD"
+    # Absolute at creation: the cd below would re-resolve a relative path, and the
+    # removal after it, and the EXIT trap, would miss while rm -f still exits 0.
+    prompt_dir=$(CDPATH= cd -P -- "$(dirname -- "$REVIEW_PROMPT")" && pwd -P) || die "cannot resolve the MiMo review prompt in $CWD"
+    REVIEW_PROMPT=$prompt_dir/$(basename -- "$REVIEW_PROMPT")
     printf '%s...HEAD\n' "$BASE" > "$REVIEW_PROMPT" || die "cannot write the MiMo review prompt in $CWD"
     PROMPT=$REVIEW_PROMPT
     trap 'rm -f -- "$REVIEW_PROMPT"' EXIT

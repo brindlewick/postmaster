@@ -802,6 +802,32 @@ def self_test():
         quiet.write_text(json.dumps({"type": "turn.completed"}) + "\n", encoding="utf-8")
         result = subprocess.run([sys.executable, __file__, "harvest", str(quiet), str(logs), "--prefix", "quiet"], capture_output=True, text=True)
         check("a stream with no task_notification harvests nothing and exits 0", result.returncode == 0 and result.stdout == "", result.stderr or result.stdout)
+        # The coachman.md sample degrades a lane whose harvest failed: no normalize,
+        # no findings JSON. Both sides of that branch, on the one stream.
+        degrade_events = root / "degrade.events"
+        degrade_events.write_text(json.dumps({"type": "system", "subtype": "task_notification", "output_file": str(task_home / "absent.txt")}) + "\n" + json.dumps({"type": "result", "subtype": "success", "result": "[]"}) + "\n", encoding="utf-8")
+        degrade_harvest = subprocess.run([sys.executable, __file__, "harvest", str(degrade_events), str(root / "logs-degrade"), "--prefix", "degrade"], capture_output=True, text=True)
+        degrade_json = root / "logs-degrade-findings.json"
+        if degrade_harvest.returncode == 0:
+            passed = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(degrade_events), "--run", str(run_config("degrade", "claude"))], capture_output=True, text=True)
+            if passed.returncode == 0:
+                degrade_json.write_text(passed.stdout, encoding="utf-8")
+        check("a lane whose task file is missing ends DEGRADED with no findings JSON", degrade_harvest.returncode == 1 and "missing" in degrade_harvest.stderr and not degrade_json.exists(), degrade_harvest.stderr or degrade_harvest.stdout)
+        skipped = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(degrade_events), "--run", str(run_config("degrade-skip", "claude"))], capture_output=True, text=True)
+        check("the same stream still normalizes, so skipping it is what keeps the verdict uncounted", skipped.returncode == 0 and skipped.stdout.strip() == "[]", skipped.stderr or skipped.stdout)
+        present_events = root / "degrade-present.events"
+        present_events.write_text(json.dumps({"type": "system", "subtype": "task_notification", "output_file": str(external)}) + "\n" + json.dumps({"type": "result", "subtype": "success", "result": fixtures["claude"][1]["result"]}) + "\n", encoding="utf-8")
+        present_harvest = subprocess.run([sys.executable, __file__, "harvest", str(present_events), str(root / "logs-degrade-present"), "--prefix", "present"], capture_output=True, text=True)
+        present_json = root / "logs-degrade-present-findings.json"
+        if present_harvest.returncode == 0:
+            present = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(present_events), "--run", str(run_config("degrade-present", "claude"))], capture_output=True, text=True)
+            if present.returncode == 0:
+                present_json.write_text(present.stdout, encoding="utf-8")
+        try:
+            parsed = json.loads(present_json.read_text(encoding="utf-8"))
+            check("the same stream with the file present harvests and normalizes to its finding", present_harvest.returncode == 0 and len(parsed) == 1 and parsed[0]["file"] == "src/page.js" and parsed[0]["line"] == 8, present_harvest.stderr or present_harvest.stdout)
+        except (ValueError, OSError, KeyError, IndexError):
+            check("the same stream with the file present harvests and normalizes to its finding", False, present_harvest.stderr or present_harvest.stdout)
         empty_first = root / "claude-empty-first.events"
         empty_first.write_text(json.dumps({"type": "result", "subtype": "success", "result": "[]\n[{\"file\": \"src/page.js\", \"line\": 8, \"summary\": \"bug\"}]"}) + "\n", encoding="utf-8")
         result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(empty_first), "--run", str(run_config("empty-first", "claude"))], capture_output=True, text=True)

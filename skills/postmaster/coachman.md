@@ -625,21 +625,22 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    **Normalize the bug reports before triage.** For each lane under the bug lens, copy any
    forked task record the stream's `task_notification` named and normalize the native report
    from the same events stream.
-   Codex reads the `--last` file; the other forms read their final event message. A non-zero
-   exit is never a clean review and never a stop: the coachman reads that reviewer's raw
-   report itself and records its findings by hand, with the report's path, in place of the
-   generated JSON. The generated JSON is the bug findings contract for triage: each item has
-   its target, location, severity, summary, body, evidence, confidence, category and source.
-   A field the harness did not provide is the literal `not provided`; use the normalized
-   file as the bug report, or the hand-written one where normalization failed.
+   Codex reads the `--last` file; the other forms read their final event message. A verdict
+   counts only with its evidence: a lane whose harvest failed is DEGRADED for the round,
+   never clean, and its report is not normalized at all. A report `normalize` cannot read
+   is read by hand, with its path, never dropped and never clean. The generated JSON is
+   the bug findings contract for triage: each item has its target, location, severity,
+   summary, body, evidence, confidence, category and source. A field the harness did not
+   provide is the literal `not provided`; use the normalized file as the bug report, or
+   the hand-written one where normalization failed.
 
    ```sh
    NORMALIZE_FAILED=""
    for L in $(<tool>/scripts/reviewers.sh lanes <dispatch>/brief.md bug); do
      DEST=<repo>/.worktrees/<TICKET>-rev-bug-$L
      EVENTS=<dispatch>/logs/review-r<round>-bug-$L.jsonl
-     <tool>/scripts/review-findings.sh harvest "$EVENTS" <dispatch>/logs --prefix review-r<round>-bug-$L \
-       || <tool>/scripts/run-log.sh <dispatch> "review round <round> $L: harvest failed"
+     HARVEST_ERR=$(<tool>/scripts/review-findings.sh harvest "$EVENTS" <dispatch>/logs --prefix review-r<round>-bug-$L 2>&1) \
+       || { <tool>/scripts/log-action.sh <dispatch> coachman degrade "$L" "bug round <round>: $HARVEST_ERR"; continue; }
      <tool>/scripts/review-findings.sh normalize "$L" "$DEST" "$EVENTS" --last <dispatch>/logs/review-r<round>-bug-$L-last.md --run <dispatch> \
        > <dispatch>/logs/review-r<round>-bug-$L-findings.json || { NORMALIZE_FAILED="$NORMALIZE_FAILED $L"; rm -f <dispatch>/logs/review-r<round>-bug-$L-findings.json; }
    done
