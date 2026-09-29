@@ -261,8 +261,9 @@ A workhorse commits incrementally as it goes, never pushes, never reads other br
    `bootstrapped`, `planning`, `workhorses-running`, `synthesis`, `checkpoint-1`, `review` (in a
    run with a review leg), `shipping`, `shipped`; the postmaster sets `done` when it closes the
    run. Each change is logged, and the run's timings are computed from those lines by
-   `<tool>/scripts/run-times.sh <dispatch>`, so the `planning` row is how long the user's spec
-   review took. Never delete the manifest. It is the run's history, and
+   `<tool>/scripts/run-times.sh <dispatch>`, so the `planning` row is how long the planning
+   stage took, drafting through the last decision, with the user's review inside it.
+   Never delete the manifest. It is the run's history, and
    the postmaster's poll reads it.
 6. **Write each workhorse's brief** to `<dispatch>/<lane>-prompt.txt`: the ticket verbatim, the
    project profile, the docs to read first named explicitly, the `WORKHORSE-SPEC.md` /
@@ -332,7 +333,10 @@ one workhorse at a time.
 **Every approved workhorse was launched in the planning stage and carries its spec on its own
 thread.** Resume each approved one to implement from the spec the user approved, in the same
 breath, through the host script and the launch script so no form is ever copied by hand. The
-first launch of a workhorse is the planning stage's; the form is the same:
+resume carries the approval as its prompt: the lane's approved spec commit
+(`lanes.<lane>.spec_commit`) and the instruction to implement from that spec and finish with
+`WORKHORSE-SUMMARY.md`. The first launch of a workhorse is the planning stage's; the form is
+the same:
 
 ```sh
 <tool>/scripts/host.sh run "$(<tool>/scripts/host.sh name <dispatch> <lane>)" <workhorse-wt> \
