@@ -43,7 +43,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
-import { run, withTempDir } from "./lib/proc.ts";
+import { argvHasUndecodableBytes, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
 
 const VERBS =
@@ -52,12 +52,15 @@ const CONTROLS = join(toolRoot(import.meta), "skills/postmaster/controls.md");
 
 // JSON string escaping: drop control chars, drop non-UTF8, escape separators
 function jsonStr(s: string): string {
-  // Drop control characters (except those we escape below) and U+FFFD (non-UTF8 bytes)
+  // Drop control characters (except those we escape below). A U+FFFD is
+  // dropped only when the raw argv bytes prove it stands for undecodable
+  // input; on its own it is a legitimate character, which iconv -c keeps.
+  const stripReplacement = argvHasUndecodableBytes();
   let result = "";
   for (const ch of s) {
     const code = ch.codePointAt(0) ?? 0;
     if (code < 0x20 && ch !== "\n" && ch !== "\r" && ch !== "\t") continue;
-    if (ch === "\uFFFD") continue; // drop replacement chars (non-UTF8 bytes)
+    if (ch === "\uFFFD" && stripReplacement) continue;
     result += ch;
   }
   // Escape backslash, quote, newline, CR, tab, and Unicode separators
@@ -335,6 +338,25 @@ withTempDir((tmp) => {
     if (r.code === 0 && lines() === before + 1) st.ok(label);
     else st.fail(`${label} (exit ${r.code})`, r.err);
   };
+  const wroteRaw = (
+    label: string,
+    octalDetail: string,
+    actor: string,
+    action: string,
+    target: string,
+  ): void => {
+    // The detail carries bytes printf makes that are not UTF-8. spawnSync
+    // encodes every argument as UTF-8, so a shell builds the bytes.
+    const before = lines();
+    const q = (a: string): string => `'${a.replace(/'/g, `'\\''`)}'`;
+    const r = run("bash", [
+      "-c",
+      `${q(SELF)} ${q(d)} ${q(actor)} ${q(action)} ${q(target)} "$(printf '${octalDetail}')"`,
+    ]);
+    lastErr = r.err;
+    if (r.code === 0 && lines() === before + 1) st.ok(label);
+    else st.fail(`${label} (exit ${r.code})`, r.err);
+  };
 
   const refused = (label: string, why: string, ...args: string[]): void => {
     const before = lines();
@@ -565,18 +587,31 @@ withTempDir((tmp) => {
     st.fail("with its newline", JSON.stringify(last10));
   }
 
-  wrote(
+  wroteRaw(
     "a line separator and a byte that is not UTF-8 are written",
+    'one\\342\\200\\250two \\377 three',
     "postmaster",
     "note",
     "RUN-1",
-    "one\u2028two \uFFFD three",
   );
   const last11 = lastLine();
   if (last11 && last11.detail === "one\u2028two  three") {
     st.ok("the separator escaped and the byte dropped");
   } else {
     st.fail("the separator escaped and the byte dropped", JSON.stringify(last11));
+  }
+  wrote(
+    "a literal U+FFFD is a legitimate character and is kept",
+    "postmaster",
+    "note",
+    "RUN-1",
+    "one\u2028two \uFFFD three",
+  );
+  const last11b = lastLine();
+  if (last11b && last11b.detail === "one\u2028two \uFFFD three") {
+    st.ok("the legitimate character survives the log");
+  } else {
+    st.fail("the legitimate character survives the log", JSON.stringify(last11b));
   }
 
   // Verify every line is valid JSON and files match
