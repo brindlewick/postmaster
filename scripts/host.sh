@@ -2062,20 +2062,29 @@ leg_exec() {  # hosted executor; the caller owns paths and clears markers
 
   # Observe stderr as it arrives, while teeing it to the user-readable .err file. Classification
   # never opens or rereads .err, so a wall before the first stream event still reaches fallback.
-  # A wall is an error shaped like one: a line-anchored 402/429, or an error word beside a wall
-  # term or code. Ordinary prose (a spare capacity, 429 items processed) is not. The consumer
-  # drains to EOF: breaking early would SIGPIPE tee and lose the later stderr the postmaster
-  # reads to explain the failure.
+  # A wall is an error shaped like one: a line-anchored 402/429, an HTTP status
+  # line carrying one, a bare API term prose never holds (insufficient_quota,
+  # resource exhausted, payment required), or an error word beside a wall term
+  # or code. Ordinary prose (a spare capacity, 429 items processed, a call to an
+  # overloaded function) is not: bare "overloaded" stays gated because compiler
+  # output says it too, and a bare 429 framed as a status stays missed because
+  # counts wear that framing. The consumer drains to EOF: breaking early would
+  # SIGPIPE tee and lose the later stderr the postmaster reads to explain the
+  # failure.
   exec {errfd}> >(tee -a "$err" | python3 -c 'import re, sys
 p = sys.argv[1]
 terms = ("quota", "usage limit", "rate limit", "payment required", "insufficient_quota", "overloaded", "resource exhausted", "spawn failed", "failed to spawn", "stale session lock", "session lock")
 markers = ("error", "fail", "exceed", "denied", "exception")
+bare = ("insufficient_quota", "resource exhausted", "payment required")
 seen = False
 if hasattr(sys.stdin, "reconfigure"): sys.stdin.reconfigure(errors="replace")
 for line in sys.stdin:
     s = line.casefold()
-    if re.match(r"\s*(?:402|429)\b", s) or (any(m in s for m in markers)
-            and (re.search(r"\b(?:402|429)\b", s) or any(x in s for x in terms))):
+    if (re.match(r"\s*(?:402|429)\b", s)
+            or re.search(r"http/\S+\s+(402|429)\b", s)
+            or any(x in s for x in bare)
+            or (any(m in s for m in markers)
+                and (re.search(r"\b(?:402|429)\b", s) or any(x in s for x in terms)))):
         seen = True
 if seen:
     with open(p, "w", encoding="utf-8") as f: f.write("wall\n")' "$wall")
@@ -2519,6 +2528,26 @@ case "$*" in
     printf '{"session_id":"thread-bare-429"}\n'
     printf '429 Too Many Requests\n' >&2
     exit 1 ;;
+  *http-wall*)
+    printf '{"session_id":"thread-http"}\n'
+    printf 'HTTP/1.1 429 Too Many Requests\n' >&2
+    exit 1 ;;
+  *bare-quota*)
+    printf '{"session_id":"thread-bareq"}\n'
+    printf 'insufficient_quota: upgrade your plan\n' >&2
+    exit 1 ;;
+  *bare-exhausted*)
+    printf '{"session_id":"thread-barex"}\n'
+    printf 'resource exhausted\n' >&2
+    exit 1 ;;
+  *bare-payment*)
+    printf '{"session_id":"thread-barep"}\n'
+    printf 'payment required for this model\n' >&2
+    exit 1 ;;
+  *overloaded-fn*)
+    printf '{"session_id":"thread-overfn"}\n'
+    printf 'call to overloaded function is ambiguous\n' >&2
+    exit 1 ;;
   *wall-chatter*)
     printf '{"session_id":"thread-chatter"}\n'
     printf '429 rate limit exceeded\n' >&2
@@ -2687,6 +2716,21 @@ EOF
   prompt=$leg_d/bare-429.txt; printf 'bare-429 wall wording\n' > "$prompt"
   legrun launch "$leg_d" "$leg_wt" synthesis 1 "$prompt"; lastout
   check "a line-anchored 429 is still a wall" '[ "$rc" -eq 0 ] && [ "$got" = walled ]' "$got"
+  prompt=$leg_d/http-wall.txt; printf 'http-wall wording\n' > "$prompt"
+  legrun launch "$leg_d" "$leg_wt" synthesis 1 "$prompt"; lastout
+  check "an HTTP status line carrying 429 is a wall" '[ "$rc" -eq 0 ] && [ "$got" = walled ]' "$got"
+  prompt=$leg_d/bare-quota.txt; printf 'bare-quota wording\n' > "$prompt"
+  legrun launch "$leg_d" "$leg_wt" synthesis 1 "$prompt"; lastout
+  check "a bare insufficient_quota line is a wall" '[ "$rc" -eq 0 ] && [ "$got" = walled ]' "$got"
+  prompt=$leg_d/bare-exhausted.txt; printf 'bare-exhausted wording\n' > "$prompt"
+  legrun launch "$leg_d" "$leg_wt" synthesis 1 "$prompt"; lastout
+  check "a bare resource-exhausted line is a wall" '[ "$rc" -eq 0 ] && [ "$got" = walled ]' "$got"
+  prompt=$leg_d/bare-payment.txt; printf 'bare-payment wording\n' > "$prompt"
+  legrun launch "$leg_d" "$leg_wt" synthesis 1 "$prompt"; lastout
+  check "a bare payment-required line is a wall" '[ "$rc" -eq 0 ] && [ "$got" = walled ]' "$got"
+  prompt=$leg_d/overloaded-fn.txt; printf 'overloaded-fn wording\n' > "$prompt"
+  legrun launch "$leg_d" "$leg_wt" synthesis 1 "$prompt"; lastout
+  check "an overloaded function in prose is incomplete, not a wall" '[ "$rc" -eq 0 ] && [ "$got" = incomplete ]' "$got"
   prompt=$leg_d/rateinfo-shape.txt; printf 'rateinfo-shape event\n' > "$prompt"
   before=$(grep -c . "$attempts")
   legrun launch "$leg_d" "$leg_wt" synthesis 1 "$prompt"; lastout
