@@ -25,6 +25,7 @@ import {
   existsSync,
   constants as fsConstants,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -34,7 +35,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { readTomlFile, tryJsonFile } from "./lib/data.ts";
-import { scriptsDir } from "./lib/paths.ts";
+import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { run, signalExitCode, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
 
@@ -340,52 +341,36 @@ function _putForm(cwd: string, cmd: string[], stdinFile: string): string {
   return s.trimEnd();
 }
 
-/** Source an env_file into target the way a shell does. The file is shell and
- * runs as code: export, quotes, comments, expansion and unset all behave as
- * under `.`, which assignment parsing cannot reproduce. The dump is
- * NUL-separated so multiline values survive; only `_` is the dump
- * machinery's own and is left out. SHLVL passes through verbatim: a bash
- * child always sees its parent's level minus one, so the dump shell reports
- * exactly what BASE's launch shell hands on, whether the file sets SHLVL or
- * leaves it. `command -p` finds env on a default path, so a file that
- * unsets or empties PATH still dumps. A file that never reaches its dump
- * (exit, set -e, exec) aborts the launch with the dump shell's status, as
- * BASE never launches then; an empty dump with a zero status is an emptied
- * environment, which BASE hands on. */
-function sourceEnvFile(path: string, target: Record<string, string | undefined>): void {
-  const r = spawnSync("bash", ["-c", 'set -a; . "$1"; set +a; command -p env -0', "_", path], {
-    encoding: "utf8",
-    env: target,
-  });
-  const error = r.error as NodeJS.ErrnoException | undefined;
-  if (error && (r.status === null || r.status === undefined) && !r.signal) {
-    die(`cannot source ${path}: ${error.message}`);
-  }
-  if (r.signal) {
-    process.kill(process.pid, r.signal);
-    process.exit(signalExitCode(r.signal));
-  }
-  if (r.status !== 0) {
-    const err = String(r.stderr ?? "");
-    if (err) process.stderr.write(err);
-    process.exit(typeof r.status === "number" ? r.status : 1);
-  }
-  const dump = String(r.stdout ?? "");
-  if (!dump) {
-    for (const k of Object.keys(target)) delete target[k];
-    return;
-  }
-  const next: Record<string, string> = {};
-  for (const entry of dump.split("\0")) {
-    if (!entry) continue;
-    const idx = entry.indexOf("=");
-    if (idx <= 0) continue;
-    const k = entry.slice(0, idx);
-    if (k === "_") continue;
-    next[k] = entry.slice(idx + 1);
-  }
-  for (const k of Object.keys(target)) delete target[k];
-  Object.assign(target, next);
+/** argv for `bash` to source an env_file and exec cmd itself, as BASE's launcher
+ * does: `set -a; . file; set +a` in the shell, then the fixed assignment BASE
+ * makes after the source, then `exec`. File output reaches the launch
+ * streams, an `exit` in the file exits without launching, any environment
+ * size works, and no dump is ever parsed back: both callers end on the
+ * child's status. The file path and cmd travel as positional parameters,
+ * never interpolated into shell text. */
+function sourcedLaunch(file: string, cmd: string[]): string[] {
+  return [
+    "-c",
+    'f=$1; shift; set -a; . "$f"; set +a; unset POSTMASTER_LAUNCH_NAME; exec "$@"',
+    "_",
+    file,
+    ...cmd,
+  ];
+}
+function sourcedExport(file: string, data: string, cmd: string[]): string[] {
+  return [
+    "-c",
+    'f=$1; d=$2; shift 2; set -a; . "$f"; set +a; export XDG_DATA_HOME="$d" MIMOCODE_DISABLE_CLAUDE_IMPORT=1; exec "$@"',
+    "_",
+    file,
+    data,
+    ...cmd,
+  ];
+}
+/** A held directory for a resume's export check, as `mktemp -d` makes one:
+ * a random name that never reuses an existing path, mode 0700. */
+function makeHeldDir(): string {
+  return mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "launch-held-"));
 }
 
 // --- entry ------------------------------------------------------------------------------
@@ -591,8 +576,7 @@ if (argv[0] === "--self-test") {
 
   // muse/mimo resume: verify the thread exists in this launch's data directory.
   if (CMD === "resume" && DATA) {
-    const held = join(process.env.TMPDIR ?? "/tmp", `launch-held-${process.pid}-${Date.now()}`);
-    mkdirSync(held, { recursive: true });
+    const held = makeHeldDir();
     const exportCmd =
       HARNESS === "muse"
         ? ["muse", "export", "--session", THREAD, "--out", join(held, "thread.json")]
@@ -602,8 +586,12 @@ if (argv[0] === "--self-test") {
       XDG_DATA_HOME: DATA,
       MIMOCODE_DISABLE_CLAUDE_IMPORT: "1",
     };
-    if (ENV_FILE) sourceEnvFile(ENV_FILE, exportEnv);
-    const expResult = spawnSync(exportCmd[0] ?? "", exportCmd.slice(1), {
+    // With an env file the check runs in a shell started in CWD that sources
+    // the file and execs the export itself, as BASE's subshell does.
+    const [expBin, expArgs] = ENV_FILE
+      ? ["bash", sourcedExport(ENV_FILE, DATA, exportCmd)]
+      : [exportCmd[0] ?? "", exportCmd.slice(1)];
+    const expResult = spawnSync(expBin, expArgs, {
       cwd: CWD,
       encoding: "utf8",
       env: exportEnv,
@@ -639,11 +627,19 @@ if (argv[0] === "--self-test") {
   } catch {
     die(`cannot enter ${CWD}`);
   }
-  // Load env_file into the environment (it reaches the harness only).
-  if (ENV_FILE) sourceEnvFile(ENV_FILE, process.env);
   delete process.env.POSTMASTER_LAUNCH_NAME;
 
-  const child = spawnSync(forms.cmd[0] ?? "", forms.cmd.slice(1), {
+  // With an env file a shell sources it and execs the harness itself, as BASE
+  // does: file output reaches the launch streams, an `exit` in the file exits
+  // without launching, and nothing is parsed back.
+  let cmd = forms.cmd[0] ?? "";
+  let cmdArgs = forms.cmd.slice(1);
+  if (ENV_FILE) {
+    cmd = "bash";
+    cmdArgs = sourcedLaunch(ENV_FILE, forms.cmd);
+  }
+
+  const child = spawnSync(cmd, cmdArgs, {
     stdio: STDIN_FILE ? ["ignore", "inherit", "inherit"] : ["inherit", "inherit", "inherit"],
     ...(STDIN_FILE ? { input: readFileSync(STDIN_FILE, "utf8") } : {}),
   });
@@ -1446,7 +1442,7 @@ withTempDir((tmp) => {
     envx = {};
     writeFileSync(claude, saved);
   }
-  // A file that never reaches its dump aborts the launch with its status.
+  // A file that exits aborts the launch with its status, without launching.
   writeFileSync(join(tmp, "dumpexit.env"), "FOO=fromfile\nexit 3\n");
   writeFileSync(
     join(tmp, "dumpexit.toml"),
@@ -1504,67 +1500,282 @@ withTempDir((tmp) => {
     rc === 1 && out === "",
     `rc ${rc} out ${JSON.stringify(out)}`,
   );
-  // A file that only loses PATH still dumps: the harness lookup then fails
-  // on the emptied PATH, where ignoring the file would run it. BASE says
-  // 127 there; the bare-name lookup corner stays as it was.
-  writeFileSync(join(tmp, "dumpunpath.env"), "unset PATH\nFOO=afterunset\n");
-  writeFileSync(
-    join(tmp, "dumpunpath.toml"),
-    `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumpunpath.env")}" }\n`,
-  );
-  doRun(
-    "dumpunpath",
-    "launch",
-    "coachman",
-    join(tmp, "wt"),
-    join(tmp, "prompt.txt"),
-    "--leg",
-    "review",
-  );
-  st.check(
-    "a file that unsets PATH applies instead of ignored",
-    rc === 1 && out === "",
-    `rc ${rc} out ${JSON.stringify(out)}`,
-  );
-  writeFileSync(join(tmp, "dumpemptypath.env"), "export PATH=\nFOO=emptyok\n");
-  writeFileSync(
-    join(tmp, "dumpemptypath.toml"),
-    `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumpemptypath.env")}" }\n`,
-  );
-  doRun(
-    "dumpemptypath",
-    "launch",
-    "coachman",
-    join(tmp, "wt"),
-    join(tmp, "prompt.txt"),
-    "--leg",
-    "review",
-  );
-  st.check(
-    "a file that empties PATH applies instead of ignored",
-    rc === 1 && out === "",
-    `rc ${rc} out ${JSON.stringify(out)}`,
-  );
-  // An emptied environment is handed on, not mistaken for a failed dump.
-  writeFileSync(join(tmp, "dumponuke.env"), 'for v in $(compgen -e); do unset "$v"; done\n');
-  writeFileSync(
-    join(tmp, "dumponuke.toml"),
-    `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumponuke.env")}" }\n`,
-  );
-  doRun(
-    "dumponuke",
-    "launch",
-    "coachman",
-    join(tmp, "wt"),
-    join(tmp, "prompt.txt"),
-    "--leg",
-    "review",
-  );
-  st.check(
-    "a file that unsets everything hands on the empty environment",
-    rc === 1 && out === "",
-    `rc ${rc} out ${JSON.stringify(out)}`,
-  );
+  // Env-file parity: the port and BASE run the same file, and the harness's
+  // received environment, the exit status and both launch streams agree.
+  // BASE is the newest scripts/launch.sh in history that is a real script
+  // rather than the port's one-line wrapper; it must still carry the
+  // source-and-exec tail, or the extraction failed loudly and every parity
+  // control with it.
+  let baseLaunch = "";
+  {
+    const log = run("git", [
+      "-C",
+      toolRoot(import.meta),
+      "log",
+      "--format=%H",
+      "--",
+      "scripts/launch.sh",
+    ]);
+    for (const c of log.out
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean)) {
+      const show = run("git", ["-C", toolRoot(import.meta), "show", `${c}:scripts/launch.sh`]);
+      if (
+        show.code === 0 &&
+        show.out.split("\n").length > 10 &&
+        show.out.includes('exec "${cmd[@]}"')
+      ) {
+        baseLaunch = join(tmp, "base-launch.sh");
+        writeFileSync(baseLaunch, show.out);
+        chmodSync(baseLaunch, 0o755);
+        break;
+      }
+    }
+    const py = run("sh", ["-c", "command -v python3"]);
+    st.check(
+      "BASE launch.sh extracts with its source-and-exec tail, and python3 runs it",
+      baseLaunch !== "" && py.code === 0,
+      `base=${baseLaunch || "none"} python3=${py.code === 0 ? "yes" : "no"}`,
+    );
+  }
+  if (baseLaunch !== "") {
+    const claude = join(tmp, "bin", "claude");
+    const savedClaude = readFileSync(claude, "utf8");
+    // The stub reports the handed environment to a file, never stdout: a
+    // NUL byte the file prints would glue onto the dump there. Stdout stays
+    // pure file output, as BASE leaves it.
+    const handedPath = join(tmp, "parity-handed.out");
+    writeFileSync(
+      claude,
+      `#!/bin/sh\necho STUB-RAN >&2\nenv -0 | LC_ALL=C sort -z > "${handedPath}"\n`,
+    );
+    const savedEnvx = envx;
+    envx = { HOME: join(tmp, "home") };
+    // `_` is each launcher's own last command and always differs; a shell's
+    // `file: line N:` prefix names its own $0. Both normalize away.
+    const normStreams = (s: string): string =>
+      s
+        .split("\n")
+        .map((l) => l.replace(/^[^:]*: line \d+: /, ""))
+        .join("\n");
+    const handedEnv = (): string[] => {
+      let raw: string;
+      try {
+        raw = readFileSync(handedPath, "utf8");
+      } catch {
+        return [];
+      }
+      return raw
+        .split("\0")
+        .filter((e) => e.includes("=") && !e.startsWith("_="))
+        .sort();
+    };
+    const parity = (
+      label: string,
+      fileBody: string,
+      signature: (rc: number, out: string, err: string, handed: string[]) => boolean,
+      sigDetail: string,
+    ): void => {
+      writeFileSync(join(tmp, "parity.env"), fileBody);
+      writeFileSync(
+        join(tmp, "parity.toml"),
+        `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "parity.env")}" }\n`,
+      );
+      rmSync(handedPath, { force: true });
+      doRun(
+        "parity",
+        "launch",
+        "coachman",
+        join(tmp, "wt"),
+        join(tmp, "prompt.txt"),
+        "--leg",
+        "review",
+      );
+      const pRc = rc;
+      const pOut = out;
+      const pErr = err;
+      const pHanded = handedEnv();
+      rmSync(handedPath, { force: true });
+      const b = spawnSync(
+        "bash",
+        [
+          baseLaunch,
+          "launch",
+          "coachman",
+          join(tmp, "wt"),
+          join(tmp, "prompt.txt"),
+          "--leg",
+          "review",
+        ],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            ...envx,
+            POSTMASTER_CONFIG: join(tmp, "parity.toml"),
+            PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+      const bRc = b.status ?? 1;
+      const bOut = String(b.stdout ?? "");
+      const bErr = String(b.stderr ?? "");
+      const bHanded = handedEnv();
+      const agree =
+        pRc === bRc &&
+        normStreams(pErr) === normStreams(bErr) &&
+        JSON.stringify(pHanded) === JSON.stringify(bHanded) &&
+        normStreams(pOut) === normStreams(bOut);
+      const sig = signature(pRc, pOut, pErr, pHanded) && signature(bRc, bOut, bErr, bHanded);
+      const detail = agree
+        ? `shape missing on ${sig ? "neither" : "a"} side: ${sigDetail}`
+        : `port rc=${pRc} base rc=${bRc}; port handed ${pHanded.length}, base ${bHanded.length}; ` +
+          `first port-only: ${JSON.stringify(pHanded.filter((e) => !bHanded.includes(e)).slice(0, 3))} ` +
+          `first base-only: ${JSON.stringify(bHanded.filter((e) => !pHanded.includes(e)).slice(0, 3))}`;
+      st.check(`parity: ${label}`, agree && sig, detail);
+    };
+    const ran = (_rc: number, _out: string, err: string, _h: string[]): boolean =>
+      err.includes("STUB-RAN");
+    const notRan = (_rc: number, _out: string, err: string, _h: string[]): boolean =>
+      !err.includes("STUB-RAN");
+    parity(
+      "an echo in the file reaches stdout and the full env reaches the harness",
+      'echo "FOO=fromecho"\nexport FOO=fromexport\n',
+      (rc, out, err, handed) =>
+        ran(rc, out, err, handed) &&
+        out.includes("FOO=fromecho") &&
+        handed.includes("FOO=fromexport") &&
+        handed.some((e) => e.startsWith("SHELL=")),
+      "FOO=fromecho on stdout, FOO=fromexport + SHELL handed on",
+    );
+    parity(
+      "a printed NUL byte is file output, never a handed variable",
+      "printf 'EVIL=injected\\0'\nexport GOOD=yes\n",
+      (rc, out, err, handed) =>
+        ran(rc, out, err, handed) &&
+        out.includes("EVIL=injected") &&
+        handed.includes("GOOD=yes") &&
+        !handed.some((e) => e.startsWith("EVIL=")),
+      "EVIL=injected printed, GOOD=yes handed, no EVIL handed",
+    );
+    parity(
+      "exit 0 in the file exits 0 without launching",
+      "export FOO=bar\nexit 0\n",
+      (rc, out, err, handed) =>
+        rc === 0 && out === "" && err === "" && handed.length === 0 && notRan(rc, out, err, handed),
+      "rc 0, silent streams, harness never ran",
+    );
+    parity(
+      "exec /bin/true in the file exits 0 without launching",
+      "export FOO=bar\nexec /bin/true\n",
+      (rc, out, err, handed) =>
+        rc === 0 && out === "" && err === "" && handed.length === 0 && notRan(rc, out, err, handed),
+      "rc 0, silent streams, harness never ran",
+    );
+    parity(
+      "file output on stderr reaches the launch's stderr",
+      "echo to-stderr >&2\nexport GOOD=yes\n",
+      (rc, out, err, handed) =>
+        ran(rc, out, err, handed) && err.includes("to-stderr") && handed.includes("GOOD=yes"),
+      "to-stderr on stderr, GOOD=yes handed",
+    );
+    parity(
+      "a file that unsets everything hands on the emptied environment",
+      'export PARITY_SENTINEL=gone\nfor v in $(compgen -e); do unset "$v"; done\n',
+      (rc, out, err, handed) =>
+        rc === 127 &&
+        notRan(rc, out, err, handed) &&
+        normStreams(err).includes("No such file or directory"),
+      "rc 127 naming the unfindable harness, harness never ran",
+    );
+    {
+      const lines = ["export PARITY_BIG=yes"];
+      for (let i = 0; i < 6000; i++)
+        lines.push(`export PAD${String(i).padStart(4, "0")}=${"x".repeat(200)}`);
+      parity(
+        "a roughly 1.2 MB environment launches whole",
+        `${lines.join("\n")}\n`,
+        (rc, out, err, handed) =>
+          rc === 0 &&
+          ran(rc, out, err, handed) &&
+          handed.includes("PARITY_BIG=yes") &&
+          handed.includes(`PAD5999=${"x".repeat(200)}`),
+        "rc 0 with the first and last variables handed on",
+      );
+    }
+    parity(
+      "a file that unsets PATH applies instead of ignored",
+      "unset PATH\nFOO=afterunset\n",
+      (rc, out, err, handed) =>
+        rc === 127 &&
+        notRan(rc, out, err, handed) &&
+        normStreams(err).includes("No such file or directory"),
+      "rc 127 naming the unfindable harness",
+    );
+    parity(
+      "a file that empties PATH applies instead of ignored",
+      "export PATH=\nFOO=emptyok\n",
+      (rc, out, err, handed) =>
+        rc === 127 &&
+        notRan(rc, out, err, handed) &&
+        normStreams(err).includes("No such file or directory"),
+      "rc 127 naming the unfindable harness",
+    );
+    writeFileSync(claude, savedClaude);
+    envx = savedEnvx;
+    // The handed-on environment is observed through the harness, not the
+    // exit: one predicate over the stub's report, shared by a positive case
+    // that exports a variable and a negative that unsets everything but PATH.
+    const claude2 = join(tmp, "bin", "claude");
+    const saved2 = readFileSync(claude2, "utf8");
+    writeFileSync(claude2, "#!/bin/sh\nenv -0 | LC_ALL=C sort -z\n");
+    const handed = (key: string, val: string): boolean => out.split("\0").includes(`${key}=${val}`);
+    writeFileSync(join(tmp, "handedpos.env"), "export HANDED_OK=yes\n");
+    writeFileSync(
+      join(tmp, "handedpos.toml"),
+      `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "handedpos.env")}" }\n`,
+    );
+    doRun(
+      "handedpos",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "review",
+    );
+    st.check(
+      "a file that exports a variable hands it to the harness",
+      rc === 0 && handed("HANDED_OK", "yes"),
+      `rc ${rc} handed=${handed("HANDED_OK", "yes")}`,
+    );
+    writeFileSync(
+      join(tmp, "handedneg.env"),
+      'export HANDED_OK=gone\nfor v in $(compgen -e); do [ "$v" = PATH ] || unset "$v"; done\n',
+    );
+    writeFileSync(
+      join(tmp, "handedneg.toml"),
+      `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "handedneg.env")}" }\n`,
+    );
+    doRun(
+      "handedneg",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "review",
+    );
+    st.check(
+      "a file that unsets everything but PATH hands the harness no trace of it",
+      rc === 0 &&
+        !handed("HANDED_OK", "gone") &&
+        !out.split("\0").some((e) => e.startsWith("HANDED_OK=")),
+      `rc ${rc} handed-gone=${handed("HANDED_OK", "gone")}`,
+    );
+    writeFileSync(claude2, saved2);
+  }
   record("run-relenv", "relenv");
   doRun(
     "relenv",
@@ -1960,6 +2171,50 @@ withTempDir((tmp) => {
     "01a0-sess",
     join(tmp, "prompt.txt"),
   );
+  // The export check sources the env file with CWD as its working directory,
+  // as the real launch does: a failing export reports where the file ran.
+  {
+    const muse = join(tmp, "bin", "muse");
+    const savedMuse = readFileSync(muse, "utf8");
+    writeFileSync(
+      muse,
+      '#!/bin/sh\n[ "$1" = export ] && { echo "nogood pwd=$PWD probe=${PROBE:-}" >&2; exit 1; }\n',
+    );
+    writeFileSync(join(tmp, "cwd.env"), 'PROBE="$(pwd)/probe"\n');
+    writeFileSync(
+      join(tmp, "musecwd.toml"),
+      `[lanes.m]\nharness = "muse"\nmodel = "muse-model"\neffort = "max"\nenv_file = "${join(tmp, "cwd.env")}"\n`,
+    );
+    mrun("musecwd", "resume", "m", join(tmp, "wt"), "01a0-x", join(tmp, "prompt.txt"));
+    if (rc === 1 && err.includes(`nogood pwd=${join(tmp, "wt")} probe=${join(tmp, "wt")}/probe`)) {
+      ok(
+        "a resume's export check sources the env file in the worktree, not the caller's directory",
+      );
+    } else {
+      fail(
+        "a resume's export check sources the env file in the worktree, not the caller's directory",
+      );
+    }
+    writeFileSync(muse, savedMuse);
+  }
+  // The export check's held directory is private and never reused, as
+  // `mktemp -d` makes one.
+  {
+    const h1 = makeHeldDir();
+    const h2 = makeHeldDir();
+    const m1 = statSync(h1).mode & 0o777;
+    const m2 = statSync(h2).mode & 0o777;
+    st.check(
+      "a resume's held directory is mode 0700 and never reused",
+      m1 === 0o700 &&
+        m2 === 0o700 &&
+        h1 !== h2 &&
+        h1.startsWith(join(process.env.TMPDIR ?? "/tmp", "launch-held-")),
+      `h1=${h1} ${m1.toString(8)} h2=${h2} ${m2.toString(8)}`,
+    );
+    rmSync(h1, { recursive: true, force: true });
+    rmSync(h2, { recursive: true, force: true });
+  }
   writeFileSync(join(d, "01a0-coach"), "");
   mrun(
     "muse",
