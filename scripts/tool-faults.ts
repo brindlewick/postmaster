@@ -17,6 +17,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   appendFileSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -1120,8 +1121,9 @@ withTempDir((tmp) => {
   mkdirSync(S, { recursive: true });
   mkdirSync(join(tmp, "bin"), { recursive: true });
 
-  // Copy scripts and skills
+  // Copy scripts and skills (plus the bunfig the copied wrappers resolve beside themselves)
   run("cp", ["-R", HERE, join(T, "scripts")]);
+  copyFileSync(join(TOOL, "bunfig.toml"), join(T, "bunfig.toml"));
   run("cp", ["-R", join(TOOL, "skills/postmaster"), join(T, "skills/postmaster")]);
   run("git", ["-C", T, "init", "-q"]);
   run("git", ["-C", T, "remote", "add", "origin", "https://github.com/o/postmaster.git"]);
@@ -2182,6 +2184,7 @@ if (a[0] === "api" && a[1] === "graphql") {
   mkdirSync(join(REPO, "tools/postmaster"), { recursive: true });
   run("cp", ["-R", join(T, "scripts"), join(REPO, "tools/postmaster/")]);
   run("cp", ["-R", join(T, "skills"), join(REPO, "tools/postmaster/")]);
+  copyFileSync(join(T, "bunfig.toml"), join(REPO, "tools/postmaster/bunfig.toml"));
   const vendDir = newrun(NAME, `${NAME.toUpperCase()}-18`, "done");
   logf(
     vendDir,
