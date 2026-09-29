@@ -622,11 +622,20 @@ if (argv[0] === "--self-test") {
   }
 
   // Enter the working directory and exec the harness.
+  let prevCwd = "";
+  try {
+    prevCwd = process.cwd();
+  } catch {
+    prevCwd = "";
+  }
   try {
     process.chdir(CWD);
   } catch {
     die(`cannot enter ${CWD}`);
   }
+  // BASE's `cd` leaves OLDPWD naming the directory it came from; the harness
+  // inherits it, so the port sets it too.
+  if (prevCwd !== "") process.env.OLDPWD = prevCwd;
   delete process.env.POSTMASTER_LAUNCH_NAME;
 
   // With an env file a shell sources it and execs the harness itself, as BASE
