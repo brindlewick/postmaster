@@ -193,10 +193,10 @@ core() { python3 -I -c "$CORE" "$HERE" "$@"; }  # core <table> list | resolve [<
 case ${1:-} in
   --list) [ $# -eq 1 ] || usage; core "$TABLE" list; exit $? ;;
   resolve) shift
-           if [ "${1:-}" = --project ]; then [ $# -ge 2 ] || usage; export POSTMASTER_PROJECT=$2; shift 2; fi
+           if [ "${1:-}" = --project ]; then [ $# -ge 2 ] || usage; [ -n "$2" ] || { echo "turnpikes: no such project directory: $2" >&2; exit 1; }; export POSTMASTER_PROJECT=$2; shift 2; fi
            core "$TABLE" resolve "$@"; exit $? ;;
   short) shift
-         if [ "${1:-}" = --project ]; then [ $# -eq 3 ] || usage; export POSTMASTER_PROJECT=$2; shift 2; fi
+         if [ "${1:-}" = --project ]; then [ $# -eq 3 ] || usage; [ -n "$2" ] || { echo "turnpikes: no such project directory: $2" >&2; exit 1; }; export POSTMASTER_PROJECT=$2; shift 2; fi
          [ $# -eq 1 ] || usage; core "$TABLE" short "$1"; exit $? ;;
   legs) if [ "${2:-}" = --line ]; then [ $# -eq 3 ] || usage; core "$TABLE" legs --line "$3"; exit $?; fi
         [ $# -eq 2 ] || { [ $# -eq 4 ] && [ "$3" = --expect ]; } || usage
@@ -257,6 +257,10 @@ run "$self" resolve --project "$emptyproject" default
 is "a project may define default as no turnpikes" 0 "turnpikes: none"
 run "$self" short --project "$project" "turnpikes: none"
 is "short names the project's defaults omitted by a ticket" 0 bug
+run "$self" resolve --project "" default
+has "an explicitly empty --project is refused, never resolved as discovery" 1 "no such project directory"
+run "$self" short --project "" "turnpikes: none"
+has "short refuses an explicitly empty --project too" 1 "no such project directory"
 run "$self" resolve default;            is "default stands for the default set" 0 "turnpikes: style, bug, security"
 run "$self" resolve none;               is "none stands for no turnpike" 0 "turnpikes: none"
 run "$self" resolve "security, bug";    is "a list names its turnpikes, in the table's order" 0 "turnpikes: bug, security"

@@ -386,15 +386,15 @@ case ${1:-} in
   --self-test) unset POSTMASTER_PROJECT ;;
   --body)
     [ $# -ge 2 ] || usage
-    BODY=$2; TITLE=""; PROJECT=""; HAS_TITLE=0; shift 2
+    BODY=$2; TITLE=""; PROJECT=""; HAS_TITLE=0; HAS_PROJECT=0; shift 2
     while [ $# -gt 0 ]; do
       case $1 in
         --title) [ $# -ge 2 ] || usage; TITLE=$2; HAS_TITLE=1; shift 2 ;;
-        --project) [ $# -ge 2 ] || usage; PROJECT=$2; shift 2 ;;
+        --project) [ $# -ge 2 ] || usage; PROJECT=$2; HAS_PROJECT=1; shift 2 ;;
         *) usage ;;
       esac
     done
-    if [ -n "$PROJECT" ]; then
+    if [ "$HAS_PROJECT" -eq 1 ]; then
       [ -d "$PROJECT" ] || { echo "ticket-check: no such project directory: $PROJECT" >&2; exit 1; }
       POSTMASTER_PROJECT=$(CDPATH= cd -P -- "$PROJECT" && pwd -P); export POSTMASTER_PROJECT
     fi
@@ -590,6 +590,10 @@ body "$P" "$A" "$D" "$K"; out=$("$SELF" --body "$tmp/body.md" --title "$T" --pro
 [ $rc -eq 0 ] && printf '%s\n' "$out" | grep -qFx 'turnpikes: none' \
   && ok "an empty project default does not add a review floor" \
   || fail "an empty project default does not add a review floor (exit $rc)" "$out"
+body "$P" "$A" "$D" "$K"; out=$("$SELF" --body "$tmp/body.md" --title "$T" --project "" 2>&1); rc=$?
+[ $rc -eq 1 ] && printf '%s\n' "$out" | grep -q "no such project directory" \
+  && ok "an explicitly empty --project is refused, never checked as discovery" \
+  || fail "an explicitly empty --project is refused, never checked as discovery (exit $rc)" "$out"
 body "$P" "$A" "$D" "$K"; run "$T"
 named "default, in a code span under a template comment, stands for the default set" "turnpikes: $DEF"
 body "$P" "$A" "$D" "## Turnpikes

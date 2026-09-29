@@ -102,7 +102,7 @@ case ${1:-} in
     while [ $# -gt 0 ]; do
       case $1 in
         --config) [ $# -ge 2 ] || usage; CONFIG_PATH=$2; shift 2 ;;
-        --project) [ $# -ge 2 ] || usage; PROJECT=$2; shift 2 ;;
+        --project) [ $# -ge 2 ] || usage; [ -n "$2" ] || { echo "reviewers: no such project directory: $2" >&2; exit 1; }; PROJECT=$2; shift 2 ;;
         *) usage ;;
       esac
     done
@@ -180,6 +180,8 @@ config bad-default 'workhorses = ["luna", "mimo"]
 reviewers = ["ghost"]'
 expect "a reviewer that is not a lane is refused" 2 '' lines "$tmp/bad-default.toml"
 expect "no config is refused" 1 '' lines "$tmp/none.toml"
+expect "an explicitly empty --project is refused, never read as no project" 1 '' "$0" lines --config "$tmp/one.toml" --project ""
+grep -q 'no such project directory' "$tmp/err" && ok "and the refusal names the project" || fail "and the refusal names the project" "$(cat "$tmp/err")"
 expect "a waybill lens that is not a lens is refused" 2 '' lanes "$tmp/one.md" secruity
 waybill no-team ''
 expect "a Team section with no reviewers line is refused, never read as no reviewers" 2 '' lanes "$tmp/no-team.md" bug
