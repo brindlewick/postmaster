@@ -37,7 +37,7 @@ waybill carries, is `SKILL.md`. You do not need it.
 | `<repo>/.worktrees/<TICKET>-<lane>` | workhorse worktree, branch `wb/<TICKET>-<lane>` (`wb` for workhorse branch) |
 | `<dispatch>/checkpoint-<n>.md` | checkpoint cards: `1` and `review` |
 | `<dispatch>/spec-review.md` | the planning stage's review package: one entry per workhorse, its spec's commit and the link the postmaster puts to the user; written before `.spec-review-ready` |
-| `<dispatch>/spec-decisions.md` | the postmaster's record of the user's word on each spec: approved, changes in the user's words, or dropped; what you read on resume from the planning pause |
+| `<dispatch>/spec-decisions.md` | the postmaster's record, for the current package, of the user's word on each spec: approved, changes in the user's words, or dropped; what you read on resume from the planning pause |
 | `<repo>/.worktrees/<TICKET>-rev-<lens>-<lane>` | reviewer scratch, one per lens per lane, detached at the synthesis HEAD, fresh every round: a clone under the security lens, a worktree under the others |
 | `<dispatch>/style-sort.md` | aftercare's sort of the run's style findings, which the postmaster puts to the user |
 
@@ -307,8 +307,10 @@ one workhorse at a time.
    the postmaster; it never goes to a lane, and no entry carries another workhorse's spec.
    Touch `.spec-review-ready` and exit. The postmaster puts the specs to the user, one at a
    time, and records each decision.
-4. **On resume, read `<dispatch>/spec-decisions.md`** and act on each entry, one workhorse at a
-   time. The user's words are the only feedback a workhorse gets, and only its own:
+4. **On resume, read this package's `<dispatch>/spec-decisions.md`** and act on each entry,
+   one workhorse at a time. The file holds this package's decisions only; earlier packages
+   stay in the `spec-review` log lines. The user's words are the only feedback a workhorse
+   gets, and only its own:
    - **changes:** resume that workhorse alone, its own thread, with the user's words as the
      prompt. It revises `WORKHORSE-SPEC.md` from those words, commits the revision (a new
      commit; the first spec commit is never rewritten), and stops again. Never put another

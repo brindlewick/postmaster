@@ -263,20 +263,22 @@ link with `<tool>/scripts/spec-review-link.sh` from the run's recorded `planning
 template, as `ship.review_link` is for the ship card; with no template it is the file's path.
 A revised spec comes back as a new entry at its new commit.
 
-1. **Put one spec to the user at a time.** Show its link and its commit, and ask for a
-   decision: approved; changes requested in their words; or drop this workhorse. When the
-   first spec goes to the user, write what was asked to the run's `.waiting-on-user`, as
-   Stage F step 2 does: while it is set the poll reports USER, not SPEC, so the package is
-   never taken twice. Never show one workhorse's spec beside another's: review is for scope
-   and correctness, not for making the specs alike. Never show any of it to a workhorse.
+1. **Put one spec to the user at a time.** A new package starts a new
+   `spec-decisions.md`: write it fresh, so no stanza from an earlier package survives into
+   this one. Show its link and its commit, and ask for a decision: approved; changes
+   requested in their words; or drop this workhorse. When the first spec goes to the user,
+   write what was asked to the run's `.waiting-on-user`, as Stage F step 2 does: while it is
+   set the poll reports USER, not SPEC, so the package is never taken twice. Never show one
+   workhorse's spec beside another's: review is for scope and correctness, not for making the
+   specs alike. Never show any of it to a workhorse.
 2. **Record the decision as it comes**, in the run's log and in `<dispatch>/spec-decisions.md`:
    `<tool>/scripts/log-action.sh <dispatch> postmaster spec-review <lane> "<decision> <commit>
    <the user's words>"`, where `<decision>` is `approved`, `changes` or `dropped` and the words
    are the user's own, carried verbatim for a `changes` or `dropped`. One line per decision, at
    the moment it is given. `spec-decisions.md` holds the same for the coachman to read on
    resume: one stanza per lane, with the decision, the commit and the words. The stanzas
-   accumulate as the package is decided; the file is complete when every spec in the package
-   has one.
+   accumulate as this package is decided; the file is complete when every spec in the package
+   has one, and it holds this package's decisions only.
 3. **When every spec in the package is decided, send the package back.** Remove
    `.waiting-on-user`, check `spec-decisions.md` holds every spec in the package, remove
    `.spec-review-ready`, and resume the current leg (Stage C step 5) with the decisions file
