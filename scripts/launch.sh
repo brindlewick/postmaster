@@ -9,7 +9,7 @@
 #                    [--run <dispatch>]
 #   launch.sh skill  <name> <skill> [--run <dispatch>]
 #   launch.sh thread-id <events-file>       the thread id a stream records, from its shape
-#   launch.sh transient <err-file> [<stream-file>]
+#   launch.sh transient <err-file> [<stream-file> [<skip-lines>]]
 #                                           exit 0 when a leg's end is a transient provider
 #                                           error this adapter names (harnesses.md)
 #   launch.sh --self-test
@@ -46,8 +46,10 @@
 # escalating: a model stream idle timeout, a gateway failure, a stream drop. The set is here
 # and in harnesses.md, never in the watcher. It is matched against the leg's durable record:
 # its .err file and the error records in its stream tail, never a prompt or a user message.
-# A launch refusal, and a quota, payment, usage or rate wall, are never transient and take
-# precedence over any transient signature.
+# The tail starts after skip-lines, the lines an earlier launch wrote: a resumed stream
+# keeps its history, and an old error must not classify the current end. A launch refusal,
+# and a quota, payment, usage or rate wall, are never transient and take precedence over
+# any transient signature.
 #
 #   exit 0  the forms or the skill's prompt were printed, or the harness exited 0; thread-id
 #           found an id; transient matched a named provider error
@@ -492,6 +494,34 @@ PY
   is_transient "a generic timeout is not transient" 1 "request timeout"
   is_transient "an ordinary model error is not transient" 1 "Error: something went wrong"
   is_transient "an empty record is not transient" 1 ""
+  is_transient "a bare quota mention is not a provider wall" 1 "checking quota status before proceeding"
+  is_transient "a quota remainder is not a provider wall" 1 "quota remaining: 0 of 100"
+  is_transient "quota exhausted is a provider wall" 1 "quota exhausted for this key"
+  stale_stream='{"type":"error","message":"model stream idle timeout"}
+{"type":"assistant","message":"continued"}'
+  printf '%s\n' 'AssertionError: something the lane did wrong' > "$tmp/leg.err"
+  printf '%s\n' "$stale_stream" > "$tmp/leg-events.jsonl"
+  out=$("$self" transient "$tmp/leg.err" "$tmp/leg-events.jsonl" 1 2>"$tmp/err"); rc=$?
+  [ $rc -eq 1 ] && [ "$out" = not-transient ] \
+    && ok "an old transient error before the skip does not classify the current end" \
+    || fail "an old transient error before the skip does not classify the current end (exit $rc, $out)"
+  out=$("$self" transient "$tmp/leg.err" "$tmp/leg-events.jsonl" 0 2>"$tmp/err"); rc=$?
+  [ $rc -eq 0 ] \
+    && ok "a zero skip keeps the whole stream, proving the control above is not vacuous" \
+    || fail "a zero skip keeps the whole stream, proving the control above is not vacuous (exit $rc)"
+  printf '%s\n' 'the leg ended' > "$tmp/leg.err"
+  printf '%s\n' "$stale_stream" '{"type":"error","message":"502 Bad Gateway"}' > "$tmp/leg-events.jsonl"
+  out=$("$self" transient "$tmp/leg.err" "$tmp/leg-events.jsonl" 2 2>"$tmp/err"); rc=$?
+  [ $rc -eq 0 ] && [ "$out" = "gateway failure" ] \
+    && ok "a transient error after the skip still counts" \
+    || fail "a transient error after the skip still counts (exit $rc, $out)"
+  out=$("$self" transient "$tmp/leg.err" "$tmp/leg-events.jsonl" 99 2>"$tmp/err"); rc=$?
+  [ $rc -eq 1 ] && [ "$out" = not-transient ] \
+    && ok "a skip past the end reads the .err alone" \
+    || fail "a skip past the end reads the .err alone (exit $rc, $out)"
+  out=$("$self" transient "$tmp/leg.err" "$tmp/leg-events.jsonl" soon 2>"$tmp/err"); rc=$?
+  [ $rc -eq 1 ] && case $(cat "$tmp/err") in *"whole number"*) true ;; *) false ;; esac \
+    && ok "a skip that is not a number is refused" || fail "a skip that is not a number is refused (exit $rc)"
   out=$("$self" transient "$tmp/no-such.err" 2>"$tmp/err"); rc=$?
   [ $rc -eq 1 ] && case $(cat "$tmp/err") in *"no such error file"*) true ;; *) false ;; esac \
     && ok "a missing error file is refused" || fail "a missing error file is refused (exit $rc)"
@@ -558,12 +588,18 @@ PY
 # against the leg's .err and the error records in its stream tail, never a prompt or a user
 # message. Prints the canonical class on a match. A launch refusal and a quota, payment,
 # usage or rate wall are checked first and are never transient.
-transient() {  # transient <err-file> [<stream-file>]
-  [ $# -ge 1 ] && [ $# -le 2 ] || die "usage: launch.sh transient <err-file> [<stream-file>]"
+transient() {  # transient <err-file> [<stream-file> [<skip-lines>]]
+  [ $# -ge 1 ] && [ $# -le 3 ] || die "usage: launch.sh transient <err-file> [<stream-file> [<skip-lines>]]"
   [ -f "$1" ] || die "no such error file: $1"
-  python3 - "$1" "${2:-}" <<'PY'
-import collections, json, re, sys
-err_path, stream_path = sys.argv[1], sys.argv[2]
+  python3 - "$1" "${2:-}" "${3:-0}" <<'PY'
+import collections, itertools, json, re, sys
+err_path, stream_path, skip_arg = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    skip = int(skip_arg)
+    if skip < 0: raise ValueError("negative")
+except ValueError:
+    print("launch: skip-lines is a whole number from 0: %s" % skip_arg, file=sys.stderr)
+    raise SystemExit(1)
 try:
     with open(err_path, encoding="utf-8", errors="replace") as f:
         err = f.read()
@@ -572,13 +608,16 @@ except OSError as e:
     raise SystemExit(1)
 # Only error fields on error records contribute stream text. User and prompt fields are
 # excluded, so prompt text can never make a process eligible for an automatic remount.
+# The first skip-lines lines are an earlier launch's: a resumed stream keeps its history
+# while .err holds only the current launch, so without the skip an old transient error
+# would classify a later unrelated failure as transient.
 error_text = []
 if stream_path:
     try:
         f = open(stream_path, encoding="utf-8", errors="replace")
     except OSError:
         f = []
-    for line in collections.deque(f, maxlen=100):
+    for line in collections.deque(itertools.islice(f, skip, None), maxlen=100):
         try:
             event = json.loads(line)
         except ValueError:
@@ -611,7 +650,7 @@ all_errors = err + "\n" + "\n".join(error_text)
 if err.startswith("launch:"):
     print("launch-refusal")
     raise SystemExit(1)
-wall = re.compile(r"\b(?:402\s+payment\s+required|payment\s+required|quota(?:\s+(?:wall|exceeded|exhausted))?|usage[\s_-]+limit|rate[\s_-]+limit|provider\s+wall|resource\s+exhausted|insufficient\s+funds|too\s+many\s+requests)\b", re.I)
+wall = re.compile(r"\b(?:402\s+payment\s+required|payment\s+required|quota(?:\s+(?:wall|exceeded|exhausted))|usage[\s_-]+limit|rate[\s_-]+limit|provider\s+wall|resource\s+exhausted|insufficient\s+funds|too\s+many\s+requests)\b", re.I)
 if wall.search(all_errors):
     print("provider-wall")
     raise SystemExit(1)
@@ -638,7 +677,7 @@ case ${1:-} in
   transient) shift; transient "$@"; exit $? ;;
 esac
 
-[ $# -ge 2 ] || die "usage: launch.sh form|launch|resume|skill <name> ... | thread-id <events-file> | transient <err-file> [<stream-file>] | --self-test"
+[ $# -ge 2 ] || die "usage: launch.sh form|launch|resume|skill <name> ... | thread-id <events-file> | transient <err-file> [<stream-file> [<skip-lines>]] | --self-test"
 CMD=$1; NAME=$2; shift 2
 LEG=""; LAST=""; RUN=""; STDIN_FILE=""; args=()
 while [ $# -gt 0 ]; do
