@@ -55,6 +55,16 @@ class DieError extends Error {
 function dieP(msg: string, code = 1): never {
   throw new DieError(msg, code);
 }
+/** Every die, including no arguments, lands here: BASE's one-line `plane:`
+ * report on stderr and its exit code. Anything else is a real bug and
+ * keeps its stack. */
+function fatal(e: unknown): void {
+  if (e instanceof DieError) {
+    process.stderr.write(`plane: ${e.msg}\n`);
+    process.exit(e.code);
+  }
+  throw e;
+}
 
 // --- html -> markdown --------------------------------------------------------------------------
 const VOID = new Set([
@@ -1151,6 +1161,31 @@ async function selfTest(): Promise<number> {
     rmSync(d, { recursive: true, force: true });
   }
 
+  // No arguments dies through the same handler as every other die: BASE's
+  // usage line on stderr, nothing on stdout, before any config is read.
+  {
+    const d2 = mkdtempSync(join(tmpdir(), "plane-st-"));
+    try {
+      const r = run("bash", [SCRIPT], {
+        env: {
+          ...process.env,
+          POSTMASTER_CONFIG: join(d2, "no-config.toml"),
+          PLANE_API_KEY: undefined,
+        },
+      });
+      check(
+        "no arguments prints BASE's usage line without reading any config",
+        r.code === 1 &&
+          r.out === "" &&
+          r.err ===
+            "plane: usage: plane.sh projects|create|edit|read|state|comment|list ... | --self-test\n",
+        `exit ${r.code} out=${JSON.stringify(r.out)} err=${JSON.stringify(r.err)}`,
+      );
+    } finally {
+      rmSync(d2, { recursive: true, force: true });
+    }
+  }
+
   // BASE's 30-second API cutoff: a stalled server is cut off with BASE's words.
   {
     const held: Array<{ destroy: () => void }> = [];
@@ -1551,13 +1586,11 @@ if (firstArg === "--self-test") {
     },
   );
 } else if (!firstArg) {
-  dieP("usage: plane.sh projects|create|edit|read|state|comment|list ... | --self-test");
+  try {
+    dieP("usage: plane.sh projects|create|edit|read|state|comment|list ... | --self-test");
+  } catch (e) {
+    fatal(e);
+  }
 } else {
-  runCommands().catch((e) => {
-    if (e instanceof DieError) {
-      process.stderr.write(`plane: ${e.msg}\n`);
-      process.exit(e.code);
-    }
-    throw e;
-  });
+  runCommands().catch(fatal);
 }
