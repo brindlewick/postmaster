@@ -23,7 +23,8 @@ is its test. Outside work motivates the shape and moves no standing.
   same: "Design review happens before any code is generated, when changing course is still a
   matter of editing a document"
   [@articles/ai-native-sdlc-playbook/passages.md] ([the capture](../sources/ai-native-sdlc-playbook.md)).
-- **Weaker models gain the most from a reviewed plan.** A plan the user has already scoped and
+- **Weaker models gain the most from a reviewed plan** (unverified: no run has compared
+  reviewed plans against unreviewed ones yet). A plan the user has already scoped and
   corrected is a better starting point than one a model invented and nobody checked. The
   playbook holds the call with the human: a person decides whether the spec may progress to
   build [@articles/ai-native-sdlc-playbook/passages.md].
@@ -47,7 +48,8 @@ from the machine config's `planning.review_link` template or the path alone, and
 decision as it happens. A workhorse whose spec needs changes revises it from the user's words,
 in its own thread, and the revised spec comes back for review at a new commit. The user may
 drop a workhorse at review. Implementation needs at least two approved specs; a run with fewer
-stops and says why. The stage timings show how long the review took.
+stops and says why. The stage timings show how long the stage took, drafting through the
+last decision.
 
 ## What would change it
 
@@ -71,6 +73,6 @@ action. The cost it adds is the user's review time, which the stage timings carr
 
 Across at least three dispatched runs: whether reviewed specs lead to fewer changes of
 approach after implementation starts than unreviewed ones, whether the specs of two
-workhorses converge more after review than before it, and whether the user's review time is
-what the planning row of the stage timings says it is. A run that implements from an
+workhorses converge more after review than before it, and how the planning row's time splits
+between drafting, the user's review and revision. A run that implements from an
 unapproved spec, or shows one workhorse's spec to another, refutes the practice as written.
