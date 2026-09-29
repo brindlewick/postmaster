@@ -31,7 +31,8 @@
 # across its pin and run.json write and release across its scan and removal, so the two
 # serialize; release force-removes an unreferenced pin that is not clean, and leaves a locked
 # one alone. The scan covers the runs root the dispatch sits under, at
-# <runs>/<project>/<ticket>. The postmaster releases after it closes or abandons a run, never
+# <runs>/<project>/<ticket>, and runs it cannot list keep the pin. The postmaster releases
+# after it closes or abandons a run, never
 # before the last leg's process has exited. A run with no checkout recorded (an old unpinned
 # waybill) resolves to the tool path its waybill already names; check asks only that it is a
 # git checkout, and release leaves it alone.
@@ -115,36 +116,41 @@ canon() {  # canon <dir>: its absolute physical path, or nothing
 }
 
 path_of() {  # path_of <dispatch>: the run's tool checkout, canonical; the waybill's for an old run
-  local d=$1 checkout tool section
+  local d=$1 checkout tool section c
   [ -f "$d/run.json" ] || { echo "run-meta: no run.json in $d" >&2; return 1; }
-  checkout=$(field "$d/run.json" checkout) \
-    || { echo "run-meta: could not read $d/run.json" >&2; return 1; }
-  if [ -z "$checkout" ]; then
-    # An old unpinned waybill keeps the tool path it already names. The ticket travels in
-    # the waybill verbatim and may show a tool: line of its own, so only the Dispatch
-    # section counts; a waybill without one reads whole, as before.
-    [ -f "$d/brief.md" ] || { echo "run-meta: $d/run.json records no checkout and there is no waybill" >&2; return 1; }
-    section=$(awk '/^## Dispatch/{buf="";f=1;next} f&&/^## /{f=0} f{buf=buf $0 "\n"} END{printf "%s", buf}' "$d/brief.md")
-    [ -n "$section" ] || section=$(cat "$d/brief.md")
-    tool=$(printf '%s' "$section" | grep -E '^tool:[[:space:]]*\S' | sed 's/^tool:[[:space:]]*//;s/[[:space:]]*$//')
-    [ -n "$tool" ] && [ "$(printf '%s\n' "$tool" | wc -l | tr -d ' ')" -eq 1 ] \
-      || { echo "run-meta: the waybill must name exactly one tool: path" >&2; return 1; }
-    checkout=$tool
-  fi
+  c=$(claim "$d/run.json")
+  case $c in
+    unknown|"") echo "run-meta: $d/run.json records an unreadable checkout" >&2; return 1 ;;
+    checkout:*) checkout=${c#checkout:} ;;
+    no)
+      # An old unpinned waybill keeps the tool path it already names. The ticket travels in
+      # the waybill verbatim and may show a tool: line of its own, so only the Dispatch
+      # section counts; a waybill without one reads whole, as before.
+      [ -f "$d/brief.md" ] || { echo "run-meta: $d/run.json records no checkout and there is no waybill" >&2; return 1; }
+      section=$(awk '/^## Dispatch/{buf="";f=1;next} f&&/^## /{f=0} f{buf=buf $0 "\n"} END{printf "%s", buf}' "$d/brief.md")
+      [ -n "$section" ] || section=$(cat "$d/brief.md")
+      tool=$(printf '%s' "$section" | grep -E '^tool:[[:space:]]*\S' | sed 's/^tool:[[:space:]]*//;s/[[:space:]]*$//')
+      [ -n "$tool" ] && [ "$(printf '%s\n' "$tool" | wc -l | tr -d ' ')" -eq 1 ] \
+        || { echo "run-meta: the waybill must name exactly one tool: path" >&2; return 1; }
+      checkout=$tool ;;
+  esac
   checkout=$(canon "$checkout") \
     || { echo "run-meta: no checkout at $checkout" >&2; return 1; }
   printf '%s\n' "$checkout"
 }
 
 check_pin() {  # check_pin <dispatch>: the run's checkout still serves its dispatch commit
-  local d=$1 checkout commit at dirty
+  local d=$1 checkout commit at dirty c
   checkout=$(path_of "$d") || return 1
-  if [ -z "$(field "$d/run.json" checkout)" ]; then
-    # An old unpinned waybill: the path only has to be a git checkout.
-    git -C "$checkout" rev-parse --git-dir >/dev/null 2>&1 \
-      || { echo "run-meta: $checkout is not a git checkout" >&2; return 1; }
-    return 0
-  fi
+  c=$(claim "$d/run.json")
+  case $c in
+    unknown|"") echo "run-meta: $d/run.json records an unreadable checkout" >&2; return 1 ;;
+    no)
+      # An old unpinned waybill: the path only has to be a git checkout.
+      git -C "$checkout" rev-parse --git-dir >/dev/null 2>&1 \
+        || { echo "run-meta: $checkout is not a git checkout" >&2; return 1; }
+      return 0 ;;
+  esac
   commit=$(field "$d/run.json" commit) || return 1
   [ -n "$commit" ] || { echo "run-meta: $d/run.json records no postmaster commit" >&2; return 1; }
   [ -d "$checkout" ] || { echo "run-meta: no pinned checkout at $checkout" >&2; return 1; }
@@ -160,30 +166,41 @@ check_pin() {  # check_pin <dispatch>: the run's checkout still serves its dispa
 }
 
 in_flight() {  # in_flight <runs-root> <checkout>: yes when some run still uses this pin
-  local root=$1 checkout=$2 d stage got c dg found=1
+  local root=$1 checkout=$2 p d stage got c dg found=1 hidden=""
   dg=$(shopt -p dotglob); shopt -s dotglob  # a project is any repo basename, dot-prefixed included
-  for d in "$root"/*/*/; do
-    [ -f "$d/run.json" ] || continue
-    c=$(claim "$d/run.json")
-    case $c in
-      unknown|"") found=0; break ;;   # a record that cannot be read keeps the pin
-      no) continue ;;
-      checkout:*) got=${c#checkout:} ;;
-    esac
-    if [ "$got" != "$checkout" ]; then
-      # The same checkout recorded through a symlink spells differently; a path that
-      # resolves nowhere cannot be this pin, which exists.
-      got=$(canon "$got") || continue
-      [ "$got" = "$checkout" ] || continue
-    fi
-    stage=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("stage") or "")' \
-      "$d/manifest.json" 2>/dev/null) || stage=""
-    case $stage in
-      done|abandoned) ;;
-      *) found=0; break ;;
-    esac
+  # Two loops so an unreadable level is seen: one flat glob drops its branch silently.
+  for p in "$root"/*/; do
+    case $p in *'*'*) hidden=$root; break;; esac  # the root itself cannot be listed; keep the pin
+    if [ ! -r "$p" ] || [ ! -x "$p" ]; then hidden=$p; break; fi  # so does an unreadable project
+    for d in "$p"*/; do
+      case $d in *'*'*) break;; esac  # no runs under this project; nothing hidden
+      if [ ! -r "$d" ] || [ ! -x "$d" ]; then hidden=$d; break 2; fi  # an unreadable run hides; keep
+      [ -f "$d/run.json" ] || continue
+      c=$(claim "$d/run.json")
+      case $c in
+        unknown|"") found=0; break 2 ;;   # a record that cannot be read keeps the pin
+        no) continue ;;
+        checkout:*) got=${c#checkout:} ;;
+      esac
+      if [ "$got" != "$checkout" ]; then
+        # The same checkout recorded through a symlink spells differently; a path that
+        # resolves nowhere cannot be this pin, which exists.
+        got=$(canon "$got") || continue
+        [ "$got" = "$checkout" ] || continue
+      fi
+      stage=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("stage") or "")' \
+        "$d/manifest.json" 2>/dev/null) || stage=""
+      case $stage in
+        done|abandoned) ;;
+        *) found=0; break 2 ;;
+      esac
+    done
   done
   eval "$dg"
+  if [ -n "$hidden" ]; then
+    echo "run-meta: cannot list $hidden; keeping $checkout" >&2
+    return 0
+  fi
   return $found
 }
 
@@ -498,6 +515,33 @@ try release "$hidrel"
 [ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$pinH" ] \
   && ok "release removes once the hidden run is done" \
   || fail "release removes once the hidden run is done ($out)"
+nphid="$tmp/noproj/RUN-NP"; nprel="$tmp/project/RUN-NPREL"; mkdir -p "$nphid" "$nprel"
+pinNP=$(pin "$fake" "$commitA") || fail "a pin is cut for the unreadable-directory controls"
+printf '{"postmaster": {"commit": "%s", "checkout": "%s"}}\n' "$commitA" "$pinNP" > "$nphid/run.json"
+printf '{"stage": "synthesis"}\n' > "$nphid/manifest.json"
+printf '{"postmaster": {"commit": "%s", "checkout": "%s"}}\n' "$commitA" "$pinNP" > "$nprel/run.json"
+printf '{"stage": "done"}\n' > "$nprel/manifest.json"
+chmod 000 "$tmp/noproj"
+try release "$nprel"
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$pinNP" ] \
+  && ok "release keeps the pin when a project directory cannot be listed" \
+  || fail "release keeps the pin when a project directory cannot be listed ($out)"
+chmod 755 "$tmp/noproj"
+chmod 000 "$nphid"
+try release "$nprel"
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$pinNP" ] \
+  && ok "release keeps the pin when a run directory cannot be listed" \
+  || fail "release keeps the pin when a run directory cannot be listed ($out)"
+chmod 755 "$nphid"
+try release "$nprel"
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$pinNP" ] \
+  && ok "release still keeps the pin for the readable in-flight run" \
+  || fail "release still keeps the pin for the readable in-flight run ($out)"
+printf '{"stage": "done"}\n' > "$nphid/manifest.json"
+try release "$nprel"
+[ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$pinNP" ] \
+  && ok "release removes once the unreadable run is done" \
+  || fail "release removes once the unreadable run is done ($out)"
 meta "$d" "$repo" >/dev/null
 try check "$d"
 [ $rc -eq 0 ] && ok "check still passes the run that shares the live tool pin" \
@@ -566,6 +610,45 @@ printf '# Waybill: 7\n\n## Dispatch\ntool: %s\ntool: %s\n' "$fake" "$fake" > "$l
 try path "$legacy_run"
 [ $rc -eq 1 ] && ok "path refuses a Dispatch section with two tool lines" \
   || fail "path refuses a Dispatch section with two tool lines ($out)"
+# path and check refuse an unreadable checkout instead of taking the waybill fallback.
+badpath="$tmp/project/RUN-BADPATH"; mkdir -p "$badpath"
+printf '# Waybill: 7\n\n## Dispatch\ntool: %s\n' "$fake" > "$badpath/brief.md"
+printf '{}\n' > "$badpath/run.json"
+try path "$badpath"
+[ $rc -eq 1 ] && grep -q "unreadable" <<<"$out" \
+  && ok "path refuses a run with no postmaster record" \
+  || fail "path refuses a run with no postmaster record ($out)"
+printf '{"postmaster": {"commit": "%s", "checkout": false}}\n' "$commitA" > "$badpath/run.json"
+try path "$badpath"
+[ $rc -eq 1 ] && grep -q "unreadable" <<<"$out" \
+  && ok "path refuses a run whose checkout is not a string" \
+  || fail "path refuses a run whose checkout is not a string ($out)"
+try check "$badpath"
+[ $rc -eq 1 ] && grep -q "unreadable" <<<"$out" \
+  && ok "check refuses a run whose checkout is not a string" \
+  || fail "check refuses a run whose checkout is not a string ($out)"
+rm -rf -- "$badpath"  # unknown to every later scan; its controls are done
+# check fails a pin at the wrong commit, whatever shape the record is in.
+pinW=$(pin "$fake" "$commitB") || fail "a pin at B is cut for the mismatch controls"
+misrun="$tmp/project/RUN-MIS"; mkdir -p "$misrun"
+printf '# Waybill: 7\n\n## Dispatch\ntool: %s\n' "$fake" > "$misrun/brief.md"
+printf '{"postmaster": {"commit": "%s", "checkout": "%s"}}\n' "$commitA" "$pinW" > "$misrun/run.json"
+try check "$misrun"
+[ $rc -eq 1 ] && grep -q "not the recorded" <<<"$out" \
+  && ok "check fails a pin at the wrong commit" \
+  || fail "check fails a pin at the wrong commit ($out)"
+printf '{}\n' > "$misrun/run.json"
+try check "$misrun"
+[ $rc -eq 1 ] && grep -q "unreadable" <<<"$out" \
+  && ok "check fails a wrong-commit pin when the record has no postmaster" \
+  || fail "check fails a wrong-commit pin when the record has no postmaster ($out)"
+printf '{"postmaster": {"commit": "%s", "checkout": false}}\n' "$commitA" > "$misrun/run.json"
+try check "$misrun"
+[ $rc -eq 1 ] && grep -q "unreadable" <<<"$out" \
+  && ok "check fails a wrong-commit pin when the checkout is not a string" \
+  || fail "check fails a wrong-commit pin when the checkout is not a string ($out)"
+rm -rf -- "$misrun"  # unknown to every later scan; its controls are done
+git -C "$fake" worktree remove --force "$pinW"
 # A recorded path through a symlink resolves to the canonical checkout.
 ln -s "$TOOLS" "$tmp/tools-link"
 link_run="$tmp/project/RUN-LINK"; mkdir -p "$link_run"
