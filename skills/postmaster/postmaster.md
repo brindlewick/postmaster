@@ -282,10 +282,13 @@ On `.card-ready`, read `run.json`, the manifest's current `leg`, `card.md`, and
 route follows below.
 
 1. **Verify the card's claims against the code**, never against the card. In the synthesis
-   worktree, run the project's gate unpiped and log its exit; then
-   `<tool>/scripts/verify.sh results <dispatch> <synthesis-wt>` must report every recorded check
-   on the final HEAD. The gate must pass; every check is reported on the card exactly as
-   printed, and the postmaster judges every other non-pass, as before. Verify that every
+   worktree, run the project's gate unpiped and log its exit; the gate must pass. Then
+   `<tool>/scripts/landing.sh card-results <dispatch> <synthesis-wt> <dispatch>/card.md`
+   must print `match`: the card gives every check as the script reports it. Then
+   `<tool>/scripts/landing.sh journey <dispatch> <synthesis-wt> <dispatch>/brief.md` must
+   not print `blocked`: a journey with no report, or one that did not run where the ticket
+   has a User journey section, holds landing until the journey runs; on `judge`, weigh the
+   non-pass with its evidence, as before. Verify that every
    branch the card
    lists exists and has the stated state; `run-log.md`'s
    SYNTHESIS line accounts for each lane; every DEGRADED lane matches `degrade` actions; the
@@ -293,32 +296,35 @@ route follows below.
    the run's legs name and under no other lens, and each other turnpike's result on the card is
    in the record its step writes; when `<tool>/scripts/turnpikes.sh short '<the waybill's
    turnpikes: line>'` names any default turnpike, the ledger holds the user's word on this
-   ticket's turnpikes; where the run has a review leg, `checkpoint-review.md` exists and the
-   card matches the checkpoint's final round with the same round counts: every finding
-   verified and neither applied nor dismissed there is open on the card at the same severity,
-   and every finding closed there is absent from the card's open list; the blind acceptance
+   ticket's turnpikes; where the run has a review leg, `checkpoint-review.md` exists and
+   `<tool>/scripts/landing.sh card-findings <dispatch>/checkpoint-review.md
+   <dispatch>/card.md` prints `match`, and the card names the checkpoint's final round with
+   the same round counts; the blind acceptance
    tests are the first commit or the hand-off records why they were not written; the Style
    residue's count is what
    `<tool>/scripts/style-findings.sh count <dispatch>` prints, and the residues the card
-   lists are exactly what `<tool>/scripts/style-findings.sh list <dispatch>` prints; and for
-   every check the card gives the name and result (pass, fail or not run) that
-   `<tool>/scripts/verify.sh results <dispatch> <synthesis-wt>` prints, ignoring the `at ...`
-   and `Ns: ...` suffixes each printer adds — `no result logged` reads as `not run` — all
+   lists are exactly what `<tool>/scripts/style-findings.sh list <dispatch>` prints; all
    open findings, browser suite and QA when present, the review link, and every run-created
    branch. Log the gate result. If a claim
    fails, remove `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`, then
    resume that last leg with the exact discrepancy and wait for its corrected card.
-2. **Follow the landing route in the waybill.** First, if the ticket branch is already
-   merged — the default branch contains its HEAD and that HEAD is not the run's BASE (the
-   manifest's `base`), or the provider reports a merged pull request for it — skip landing
+2. **Follow the landing route in the waybill.** First ask whether the ticket already landed:
+   `<tool>/scripts/landing.sh already-landed --repo <repo> --default <branch> --ticket
+   <ticket-branch> --base <the manifest's base> --card-head <the card's final HEAD>`, adding
+   `--pr-merge <sha>` with the merge commit when the provider reports a merged pull request
+   for the ticket branch, and omitting it otherwise. On `landed`, skip landing
    and close instead: log `merge` noting the branch was already merged, move the ticket to
    done,
    logging `ticket-state`, remove `.waiting-on-user` and `.card-ready` (either may already
    be gone), set the stage with `<tool>/scripts/stage.sh <dispatch> shipped postmaster`,
-   and run current Stage G. Otherwise:
-   - For `landing: pull-request`, if the ticket branch holds no commit beyond the default
-     branch, write that to `.waiting-on-user` and wait; on the user's word that there is
-     nothing to land, close as the already-merged paragraph above does. Otherwise push the
+   and run current Stage G. On `re-verify`, the branch moved past the card's HEAD: remove
+   `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`, then resume that
+   last leg with the exact discrepancy and wait for its corrected card. Otherwise:
+   - For `landing: pull-request`, ask whether the branch holds anything to land:
+     `<tool>/scripts/landing.sh anything-to-land --repo <repo> --default <branch> --ticket
+     <ticket-branch> --base <the manifest's base>`. On `nothing-to-land`, write that to
+     `.waiting-on-user` and wait; on the user's word that there is
+     nothing to land, close as the already-merged paragraph above does. On `land`, push the
      ticket branch; where an open pull request already names it, adopt it instead of
      opening another. Otherwise open the pull request against the default branch
      (`gh pr create` on a GitHub project). Include the card, final checks, diff stat,
@@ -340,13 +346,12 @@ route follows below.
      `<tool>/scripts/stage.sh <dispatch> shipped postmaster`.
    - An unknown landing route is a dispatch fault to resolve before this point. Do not infer
      it from the presence of a remote.
-3. **When the user's word that they merged comes**, verify the ticket branch is merged —
-   the default branch contains its HEAD and that HEAD is not the run's BASE (the manifest's
-   `base`), or the provider reports a merged pull request for it; if neither holds, tell the
-   user and wait.
-   Otherwise remove `.waiting-on-user` and `.card-ready`, log `merge`,
-   move the ticket to done, logging `ticket-state`, and set the stage with
-   `<tool>/scripts/stage.sh <dispatch> shipped postmaster`. For a local
+3. **When the user's word that they merged comes**, ask `already-landed` as in step 2, with
+   `--pr-merge` when the provider reports the merged pull request. On `landed`, remove
+   `.waiting-on-user` and `.card-ready`, log `merge`, move the ticket to done, logging
+   `ticket-state`, and set the stage with `<tool>/scripts/stage.sh <dispatch> shipped
+   postmaster`. On `re-verify` the branch moved past the card's HEAD, and on `not-landed`
+   the merge is not there: tell the user and wait. For a local
    merge, this is already done in step 2. Then run current Stage G.
 
 ## Stage G (contract 2): after merge

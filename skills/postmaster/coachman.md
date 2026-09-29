@@ -431,10 +431,10 @@ from it.
   work.
 - **Checkpoint 1 card, then the hand-off:** per-workhorse outcome (or stall); **the SYNTHESIS line, the ranking, what
   was taken from each lane, what was rejected and why**; the code-verified evidence behind each
-  choice; the convention gaps found; what was dropped; gate status; the checks, as `verify.sh run`
-  printed them on each workhorse's branch and then on the committed synthesis
-  (`<tool>/scripts/verify.sh run <synthesis-wt> <dispatch>`, the journey walked first where there
-  is one), with each workhorse's `verify.sh summary` verdict. A card that presents a
+  choice; the convention gaps found; what was dropped; gate status; the checks, as
+  `<tool>/scripts/landing.sh results <dispatch> <wt>` prints them for each workhorse's branch
+  (`<wt>` the workhorse worktree) and then for the committed synthesis, the journey walked
+  first where there is one, with each workhorse's `verify.sh summary` verdict. A card that presents a
   finished diff without saying which lane each part came from is the defaulting failure
   wearing a verdict. Set the stage, `<tool>/scripts/stage.sh <dispatch> checkpoint-1`, then write it to
   `<dispatch>/checkpoint-1.md` with the audit bundle beside it and touch `.checkpoint-1-ready`.
@@ -681,7 +681,8 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    going. A loop with no gating lens is round 1 alone, and applies nothing: a verified gating
    finding in it, a bug or security defect the style lens reported, is escalated with the card
    instead of fixed, which stops the leg in either `CHECKPOINT_MODE`, and a ruling that asks for
-   the fix has it applied and the gate re-run, with the card saying no lens re-reviewed it. Cap
+   the fix has it applied, the checkpoint rewritten with its state `applied on user word, not
+   re-reviewed`, and the gate re-run, with the card listing it under `## Not re-reviewed`. Cap
    3 rounds for the whole loop, round 1 included, then STOP and escalate with the residue and
    your read on why it is not converging; this and the escalation above are `CHECKPOINT_MODE`'s
    only mid-flow stops in autonomous mode. Style
@@ -696,13 +697,17 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    in the escalation and say which sites each round closed.
 6. **One review checkpoint card.** Per lens: the findings and their overlap, across lanes and
    with the other lenses, verified versus dismissed, applied, and the rounds it ran, with each
-   finding's explicit final state — open, closed with its round, or dismissed with its reason;
-   for style, how many findings go to the ship card's Style residue, as
+   finding as one bullet `- [<severity>] <id>: <state>`, the id `<lens>-<n>` numbered in the
+   order verified, the state one of `open`, `closed round <r>`, `dismissed: <reason>`, or
+   `applied on user word, not re-reviewed`; for style, how many findings go to the ship card's
+   Style residue, as
    `<tool>/scripts/style-findings.sh count <dispatch>` prints it. Then the gate status, and
    the checks as
-   `<tool>/scripts/verify.sh run <synthesis-wt> <dispatch>` printed them after the last round's
+   `<tool>/scripts/landing.sh results <dispatch> <synthesis-wt>` prints them after the last round's
    fixes, the journey walked first where there is one. Written to
-   `<dispatch>/checkpoint-review.md` with its `.checkpoint-review-ready` marker. Autonomous
+   `<dispatch>/checkpoint-review.md` with its `.checkpoint-review-ready` marker. Rewrite the
+   checkpoint after any applied fix, even with no gating lens, before the card or hand-off.
+   Autonomous
    mode: for contract 2 continue to stage 3 below in this leg; for a legacy run
    write the leg's hand-off and end it. Consult mode: escalate on the card and wait for the resume.
    A ruling that asks for a change is applied; in a loop with a gating lens it is followed by
@@ -720,7 +725,9 @@ route and any merge. You do not push, open a pull request, wait for a merge word
 Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
 
 1. **Verify the final HEAD.** Run `<tool>/scripts/verify.sh run <synthesis-wt> <dispatch>` after
-   the last code change. Record every check and its result exactly as printed; the gate must
+   the last code change. Record every check and its result as
+   `<tool>/scripts/landing.sh results <dispatch> <synthesis-wt>` prints them, one
+   `- <name>: <result>` bullet each under a `## Checks` section; the gate must
    pass before the card is ready. No P1 or P2 finding may remain open.
    If a new P1 or P2 issue appears during final QA, fix it and pass the gate again; when the
    review loop has a gating lens, run another review round and rewrite `checkpoint-review.md`
@@ -742,10 +749,14 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    surface already running; never start a duplicate. Verify the link from the user's device or
    mark it unverified.
 4. **Write `card.md`.** Include the branch, final HEAD, diff stat and commit list; the final
-   `verify.sh run` results; browser suite and QA when present; the journey report path where a
+   checks as `<tool>/scripts/landing.sh results <dispatch> <synthesis-wt>` prints them, under
+   `## Checks`; browser suite and QA when present; the journey report path where a
    check's source names `web-journey`; every ticket turnpike with its
-   rounds and result from its checkpoint record, or `none`; all open findings with lens,
-   severity, disposition and reason, including the Style residue count as
+   rounds and result from its checkpoint record, or `none`; all open findings, one
+   `- [<severity>] <id>: <title>` bullet each under `## Open findings` (`none` when there are
+   none), the ids and severities the checkpoint gives; findings applied on the user's word and
+   not re-reviewed, one bullet each under `## Not re-reviewed`, or `none`; the Style residue
+   count as
    `<tool>/scripts/style-findings.sh count <dispatch>` prints it, then every Style residue from
    `<tool>/scripts/style-findings.sh list <dispatch>`; every branch created by the run and its
    state; lane outcomes; and the review link. The card's branch state is before merge: the
@@ -945,10 +956,11 @@ logical order, not file safety: check the file surfaces before mass-launching.
   concurrent lanes in a normal run are safe, since no lane has commits until it finishes.
 - Review is a goal-loop, not a single shot: a loop whose fixes were never re-reviewed is
   not done, save a fix the user orders in a loop with no gating lens (Stage 2, step 5), which
-  the card marks as not re-reviewed.
-- A check that did not run is written as not run on every card and hand-off, never as passed
-  and never left out. Where `verify.sh results` prints `no result logged`, the card gives
-  `not run`, and the postmaster judges it as a non-pass.
+  the checkpoint marks `applied on user word, not re-reviewed` and the card lists under
+  `## Not re-reviewed`.
+- On a contract-2 run, check results on the ship card and the review checkpoint are what
+  `<tool>/scripts/landing.sh results` prints for them, never reworded and never left out; a
+  check that did not run is `not run`, never passed.
 - Never gate-then-commit through a masking pipe: `<gate> 2>&1 | tail && git commit` reports the
   tail's exit, not the suite's, and will commit a RED tree. Check `${pipestatus[1]}` (zsh) or
   `${PIPESTATUS[0]}` (bash), or run the gate unpiped and commit only on its own exit 0.
