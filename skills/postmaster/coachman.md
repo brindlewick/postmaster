@@ -293,7 +293,8 @@ A run plans before it implements. Each workhorse drafts its own spec, blind to t
 stops. The postmaster puts each spec to the user in its interactive session; no workhorse
 writes code until its own spec is approved. Review is for scope and correctness, never for
 making the specs alike: one workhorse's spec is never shown to another, and feedback goes to
-one workhorse at a time.
+one workhorse at a time. In a fixture run the postmaster signs each spec off itself and the
+user is not asked; the pause, the package and the decisions file work the same.
 [Why design review happens before code](../../wiki/concepts/planning-stage.md)
 
 1. **Set the stage:** `<tool>/scripts/stage.sh <dispatch> planning`. Launch every workhorse as

@@ -36,7 +36,8 @@ is its test. Outside work motivates the shape and moves no standing.
 - **Only the user's word approves a plan.** The postmaster puts each spec to the user in its
   interactive session, one at a time, and records the decision: approved, changes requested in
   the user's words, or dropped. A model does not approve a plan here for the same reason a
-  coachman does not write one.
+  coachman does not write one. The one exception is a fixture run, where the postmaster signs
+  each spec off itself and the user is not asked.
 
 ## What it does
 

@@ -293,7 +293,11 @@ On `.spec-review-ready`, the planning stage has paused for the user. Read
 `WORKHORSE-SPEC.md`, and the link that opens it in the user's editor. The coachman built each
 link with `<tool>/scripts/spec-review-link.sh` from the run's recorded `planning.review_link`
 template, as `ship.review_link` is for the ship card; with no template it is the file's path.
-A revised spec comes back as a new entry at its new commit.
+A revised spec comes back as a new entry at its new commit. In a fixture run
+(`<tool>/scripts/fixture.sh`) there is no user to ask: you sign each spec off yourself, deciding
+approved, changes or dropped as the user would, through the same `fresh`, `record` and
+`count` steps below, and no `.waiting-on-user` is written. Every other line of this section
+holds.
 
 1. **Put one spec to the user at a time.** A new package starts a new
    `spec-decisions.md`: `<tool>/scripts/spec-decisions.sh <dispatch> fresh`, so no stanza
