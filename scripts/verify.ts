@@ -25,6 +25,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -1021,7 +1022,7 @@ if (argv[0] === "--self-test") {
   if (argv.length < 2 || argv.length > 3) usageDieV();
   const args = ["--path", argv[1]!];
   if (argv.length === 3) {
-    const r = run("bash", ["-c", `cd "${argv[2]}" 2>/dev/null && pwd -P`]);
+    const r = run("bash", ["-c", 'cd "$1" 2>/dev/null && pwd -P', "_", argv[2]]);
     if (r.code !== 0) {
       console.error(`verify: no such dispatch directory: ${argv[2]}`);
       process.exit(1);
@@ -1558,6 +1559,24 @@ use = "cli-examples"
       "a workhorse's in its worktree",
       r2.out.trim() === join(wt, ".postmaster/verify/journey", `${fullSha}.md`),
       r2.out,
+    );
+  }
+  {
+    // A dispatch path holding $(...) is taken literally, as BASE's `cd "$3"`
+    // takes it: the directory exists under that exact name, so its journey
+    // path prints, and no substitution runs.
+    const marker = join(tmp, "journey-marker");
+    const meta = join(tmp, `dx-$(touch ${marker})`);
+    mkdirSync(meta, { recursive: true });
+    const fullSha = run("git", ["-C", wt, "rev-parse", "HEAD"]).out.trim();
+    const r = run("bash", [SELF, "journey-path", wt, meta]);
+    const phys = realpathSync(meta);
+    st.check(
+      "a dispatch path holding $(...) resolves literally, and runs nothing",
+      r.code === 0 &&
+        r.out.trim() === join(phys, "journey", `${fullSha}.md`) &&
+        !existsSync(marker),
+      `exit ${r.code}\n${r.out}${r.err}marker=${existsSync(marker)}`,
     );
   }
 

@@ -154,6 +154,10 @@ interface FormsResult {
   cmd: string[];
   data: string;
   stdinFile: string;
+  // Index into cmd holding the prompt text, or -1 when the prompt travels by
+  // file or stdin: the spawn replaces that argument from the prompt file, so
+  // its bytes survive as BASE's `$(cat)` hands them.
+  promptArg: number;
 }
 
 function harnessData(
@@ -192,6 +196,7 @@ function buildForms(
 ): FormsResult {
   let data = "";
   let stdinFile = "";
+  let promptArg = -1;
   const cmd: string[] = [];
   const isResume = cmdMode === "resume" || cmdMode === "form-resume";
   switch (harness) {
@@ -208,11 +213,14 @@ function buildForms(
       }
       if (isResume) cmd.push("--");
       cmd.push(promptText);
+      promptArg = cmd.length - 1;
       break;
     }
     case "grok": {
-      if (isResume) cmd.push("grok", "--resume", thread, "-p", promptText);
-      else cmd.push("grok", "--prompt-file", prompt);
+      if (isResume) {
+        cmd.push("grok", "--resume", thread, "-p", promptText);
+        promptArg = cmd.length - 1;
+      } else cmd.push("grok", "--prompt-file", prompt);
       cmd.push("-m", model);
       if (effort) cmd.push("--reasoning-effort", effort);
       cmd.push("--max-turns", "1000", "--always-approve", "--output-format", "stream-json");
@@ -224,10 +232,9 @@ function buildForms(
           "agy resume form is not recorded; relaunch against its conversationId by hand (harnesses.md)",
         );
       }
+      cmd.push("agy", "-p", promptText);
+      promptArg = cmd.length - 1;
       cmd.push(
-        "agy",
-        "-p",
-        promptText,
         "--model",
         model,
         "--output-format",
@@ -241,6 +248,7 @@ function buildForms(
     case "claude": {
       if (isResume) cmd.push("claude", "-p", "--resume", thread, promptText);
       else cmd.push("claude", "-p", promptText);
+      promptArg = cmd.length - 1;
       cmd.push("--model", model);
       if (effort) cmd.push("--effort", effort);
       const launchName = process.env.POSTMASTER_LAUNCH_NAME;
@@ -294,7 +302,7 @@ function buildForms(
     default:
       die(`no form for harness '${harness}'`);
   }
-  return { cmd, data, stdinFile };
+  return { cmd, data, stdinFile, promptArg };
 }
 
 function shellQuote(s: string): string {
@@ -341,6 +349,25 @@ function _putForm(cwd: string, cmd: string[], stdinFile: string): string {
   return s.trimEnd();
 }
 
+/** The PWD bash exports after `cd -- dir`: the path as given, folded
+ * lexically (`.` and `..` resolved, symlinks kept), falling back to the
+ * physical directory when the logical path names something else. */
+function logicalPwd(dir: string, from: string, physical: string): string {
+  try {
+    if (!dir.startsWith("/") && !from) return physical;
+    const abs = dir.startsWith("/") ? dir : `${from}/${dir}`;
+    const parts: string[] = [];
+    for (const seg of abs.split("/")) {
+      if (seg === "" || seg === ".") continue;
+      if (seg === "..") parts.pop();
+      else parts.push(seg);
+    }
+    const logical = `/${parts.join("/")}`;
+    return realpathSync(logical) === physical ? logical : physical;
+  } catch {
+    return physical;
+  }
+}
 /** argv for `bash` to source an env_file and exec cmd itself, as BASE's launcher
  * does: `set -a; . file; set +a` in the shell, then the fixed assignment BASE
  * makes after the source, then `exec`. File output reaches the launch
@@ -364,6 +391,34 @@ function sourcedExport(file: string, data: string, cmd: string[]): string[] {
     "_",
     file,
     data,
+    ...cmd,
+  ];
+}
+/** argv for `bash` to splice the prompt file's bytes into argv position idx
+ * and exec cmd, as BASE's `$(cat)` hands them: trailing newlines stripped,
+ * every other byte raw. A prompt unreadable this late fails closed instead
+ * of launching with the wrong text. */
+function promptedArgv(promptFile: string, idx: number, cmd: string[]): string[] {
+  return [
+    "-c",
+    't=$(cat "$1") || exit 1; i=$2; shift 2; set -- "${@:1:$i}" "$t" "${@:$((i + 2))}"; exec "$@"',
+    "_",
+    promptFile,
+    String(idx),
+    ...cmd,
+  ];
+}
+/** sourcedLaunch and promptedArgv in one shell, in BASE's order: the prompt
+ * is read before the file is sourced (so `cat` runs with PATH intact and no
+ * file-defined function in scope), then the source, then the exec. */
+function sourcedPrompted(file: string, promptFile: string, idx: number, cmd: string[]): string[] {
+  return [
+    "-c",
+    't=$(cat "$1") || exit 1; f=$2; i=$3; shift 3; set -a; . "$f"; set +a; unset POSTMASTER_LAUNCH_NAME; set -- "${@:1:$i}" "$t" "${@:$((i + 2))}"; exec "$@"',
+    "_",
+    promptFile,
+    file,
+    String(idx),
     ...cmd,
   ];
 }
@@ -433,7 +488,7 @@ if (argv[0] === "--self-test") {
   let ENV_FILE = spec.envFile;
   if (!HARNESS) die(`${NAME} has no harness in ${source}`);
   if (!MODEL) die(`${NAME} has no model in ${source}`);
-  const pathCheck = spawnSync("sh", ["-c", `command -v ${JSON.stringify(HARNESS)}`], {
+  const pathCheck = spawnSync("sh", ["-c", 'command -v "$1"', "_", HARNESS], {
     encoding: "utf8",
   });
   if (pathCheck.status !== 0) die(`harness '${HARNESS}' is not on PATH`);
@@ -517,8 +572,15 @@ if (argv[0] === "--self-test") {
       die(`no such directory: ${CWD}`);
     }
   }
-  // For pi/muse/mimo, the prompt file is resolved to an absolute path (read after the cd).
-  if (["pi", "muse", "mimo"].includes(HARNESS) && CMD !== "form") {
+  // For pi/muse/mimo, the prompt file is resolved to an absolute path (read after the cd),
+  // and for the harnesses that take the prompt text as argv (codex, claude, agy, and grok's
+  // resume), whose text is spliced from the file after the cd.
+  const promptInArgv =
+    HARNESS === "codex" ||
+    HARNESS === "claude" ||
+    HARNESS === "agy" ||
+    (HARNESS === "grok" && CMD === "resume");
+  if ((["pi", "muse", "mimo"].includes(HARNESS) || promptInArgv) && CMD !== "form") {
     const promptDir = dirname(resolve(PROMPT));
     PROMPT = join(promptDir, basename(PROMPT));
   }
@@ -633,24 +695,38 @@ if (argv[0] === "--self-test") {
   } catch {
     die(`cannot enter ${CWD}`);
   }
-  // BASE's `cd` leaves OLDPWD naming the directory it came from; the harness
-  // inherits it, so the port sets it too.
+  // BASE's `cd` leaves OLDPWD naming the directory it came from, and PWD
+  // naming the directory it entered, logically; the harness inherits both.
   if (prevCwd !== "") process.env.OLDPWD = prevCwd;
+  try {
+    process.env.PWD = logicalPwd(CWD, prevCwd, process.cwd());
+  } catch {
+    /* keep the inherited PWD on any surprise */
+  }
   delete process.env.POSTMASTER_LAUNCH_NAME;
 
   // With an env file a shell sources it and execs the harness itself, as BASE
   // does: file output reaches the launch streams, an `exit` in the file exits
-  // without launching, and nothing is parsed back.
+  // without launching, and nothing is parsed back. Where the prompt travels
+  // as argv, the shell splices the file's bytes into its position, as BASE's
+  // `$(cat)` hands them; the two wraps combine into one shell.
   let cmd = forms.cmd[0] ?? "";
   let cmdArgs = forms.cmd.slice(1);
-  if (ENV_FILE) {
+  if (ENV_FILE && forms.promptArg >= 0) {
+    cmd = "bash";
+    cmdArgs = sourcedPrompted(ENV_FILE, PROMPT, forms.promptArg, forms.cmd);
+  } else if (ENV_FILE) {
     cmd = "bash";
     cmdArgs = sourcedLaunch(ENV_FILE, forms.cmd);
+  } else if (forms.promptArg >= 0) {
+    cmd = "bash";
+    cmdArgs = promptedArgv(PROMPT, forms.promptArg, forms.cmd);
   }
 
   const child = spawnSync(cmd, cmdArgs, {
     stdio: STDIN_FILE ? ["ignore", "inherit", "inherit"] : ["inherit", "inherit", "inherit"],
-    ...(STDIN_FILE ? { input: readFileSync(STDIN_FILE, "utf8") } : {}),
+    // Raw bytes, as BASE's `exec < file` hands them: no UTF-8 decode.
+    ...(STDIN_FILE ? { input: readFileSync(STDIN_FILE) } : {}),
   });
   if (child.status !== null && child.status !== undefined) process.exit(child.status);
   if (child.signal) {
@@ -1784,6 +1860,213 @@ withTempDir((tmp) => {
       `rc ${rc} handed-gone=${handed("HANDED_OK", "gone")}`,
     );
     writeFileSync(claude2, saved2);
+    // A harness name holding $(...) is a literal name, never executed: the
+    // lookup takes it as argv, as BASE's `command -v` does.
+    {
+      const marker = join(tmp, "harness-marker");
+      writeFileSync(
+        join(tmp, "metaharness.toml"),
+        `${head}[lanes.meta]\nharness = "zz-nonexistent-$(touch ${marker})"\nmodel = "m"\n`,
+      );
+      doRun("metaharness", "launch", "meta", join(tmp, "wt"), join(tmp, "prompt.txt"));
+      const pRc = rc;
+      const pErr = err;
+      const pOut = out;
+      const pMarked = existsSync(marker);
+      rmSync(marker, { force: true });
+      const b = spawnSync(
+        "bash",
+        [baseLaunch, "launch", "meta", join(tmp, "wt"), join(tmp, "prompt.txt")],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            ...envx,
+            POSTMASTER_CONFIG: join(tmp, "metaharness.toml"),
+            PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+      const bRc = b.status ?? 1;
+      const bErr = String(b.stderr ?? "");
+      st.check(
+        "a harness name holding $(...) is refused as not on PATH on both sides, and runs nothing",
+        pRc === 1 &&
+          bRc === 1 &&
+          pOut === "" &&
+          pErr.includes("is not on PATH") &&
+          bErr.includes("is not on PATH") &&
+          !pMarked &&
+          !existsSync(marker),
+        `port rc=${pRc} base rc=${bRc} port-marked=${pMarked} base-marked=${existsSync(marker)}`,
+      );
+    }
+    // Without an env file no bash stands between the launcher and the
+    // harness, so a shell stub would rewrite PWD before reporting it. A
+    // native stub dumps the handed environment; port and BASE agree on all
+    // of it, including PWD naming the worktree.
+    {
+      const codex = join(tmp, "bin", "codex");
+      const savedCodex = readFileSync(codex, "utf8");
+      writeFileSync(
+        codex,
+        `#!/usr/bin/env bun\nimport { writeFileSync } from "node:fs";\nconst e = Object.entries(process.env).sort(([a], [b]) => (a < b ? -1 : 1));\nwriteFileSync("${handedPath}", e.map(([k, v]) => k + "=" + v).join("\\0"));\nconsole.log("NATIVE-RAN");\n`,
+      );
+      writeFileSync(
+        join(tmp, "bytes.toml"),
+        `${head}[lanes.cx]\nharness = "codex"\nmodel = "m"\n\n[lanes.px]\nharness = "pi"\nmodel = "m"\n`,
+      );
+      const savedEnvx2 = envx;
+      envx = { HOME: join(tmp, "home") };
+      const nofileEnv = {
+        ...process.env,
+        ...envx,
+        POSTMASTER_CONFIG: join(tmp, "bytes.toml"),
+        PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+      };
+      rmSync(handedPath, { force: true });
+      doRun("bytes", "launch", "cx", join(tmp, "wt"), join(tmp, "prompt.txt"));
+      const nPRc = rc;
+      const nPOut = out;
+      const nPErr = err;
+      const nPHanded = handedEnv();
+      rmSync(handedPath, { force: true });
+      const nb = spawnSync(
+        "bash",
+        [baseLaunch, "launch", "cx", join(tmp, "wt"), join(tmp, "prompt.txt")],
+        {
+          encoding: "utf8",
+          env: nofileEnv,
+        },
+      );
+      const nBRc = nb.status ?? 1;
+      const nBOut = String(nb.stdout ?? "");
+      const nBErr = String(nb.stderr ?? "");
+      const nBHanded = handedEnv();
+      const pwdWant = `PWD=${join(tmp, "wt")}`;
+      st.check(
+        "parity: without an env file the harness's full environment matches BASE, PWD naming the worktree",
+        nPRc === 0 &&
+          nBRc === 0 &&
+          nPOut.includes("NATIVE-RAN") &&
+          nBOut.includes("NATIVE-RAN") &&
+          nPErr === "" &&
+          nBErr === "" &&
+          JSON.stringify(nPHanded) === JSON.stringify(nBHanded) &&
+          nPHanded.includes(pwdWant) &&
+          nBHanded.includes(pwdWant),
+        `port rc=${nPRc} base rc=${nBRc} port ${nPHanded.length} base ${nBHanded.length}`,
+      );
+      // Stdin reaches the harness byte for byte, NUL included: no UTF-8 decode.
+      const pi = join(tmp, "bin", "pi");
+      const savedPi = readFileSync(pi, "utf8");
+      writeFileSync(
+        pi,
+        '#!/usr/bin/env bun\nconst chunks = [];\nfor await (const c of process.stdin) chunks.push(c);\nconsole.log("stdin-hex=" + Buffer.concat(chunks).toString("hex"));\n',
+      );
+      const stdinBytes = Buffer.concat([
+        Buffer.from("Hello ", "utf8"),
+        Buffer.from(new Uint8Array([0xff, 0xfe, 0x00])),
+        Buffer.from(" world\n", "utf8"),
+      ]);
+      writeFileSync(join(tmp, "prompt-bytes.bin"), stdinBytes);
+      const stdinWant = `stdin-hex=${stdinBytes.toString("hex")}`;
+      doRun("bytes", "launch", "px", join(tmp, "wt"), join(tmp, "prompt-bytes.bin"));
+      const sPRc = rc;
+      const sPOut = out;
+      const sb = spawnSync(
+        "bash",
+        [baseLaunch, "launch", "px", join(tmp, "wt"), join(tmp, "prompt-bytes.bin")],
+        { encoding: "utf8", env: nofileEnv },
+      );
+      const sBRc = sb.status ?? 1;
+      const sBOut = String(sb.stdout ?? "");
+      st.check(
+        "parity: a prompt holding \\xff\\xfe and NUL reaches stdin byte for byte on both sides",
+        sPRc === 0 &&
+          sBRc === 0 &&
+          sPOut.includes(stdinWant) &&
+          sBOut.includes(stdinWant) &&
+          sPOut === sBOut,
+        `port rc=${sPRc} base rc=${sBRc}\nport ${sPOut}\nbase ${sBOut}`,
+      );
+      writeFileSync(pi, savedPi);
+      // A prompt travelling as argv reaches it byte for byte: /proc/self/cmdline
+      // is the witness, since the runtimes decode argv as UTF-8 themselves.
+      writeFileSync(
+        codex,
+        '#!/usr/bin/env bun\nimport { readFileSync } from "node:fs";\nconsole.log("cmdline-hex=" + readFileSync("/proc/self/cmdline").toString("hex"));\n',
+      );
+      const argvBytes = Buffer.concat([
+        Buffer.from("Hello ", "utf8"),
+        Buffer.from(new Uint8Array([0xff, 0xfe])),
+        Buffer.from(" world\n\n", "utf8"),
+      ]);
+      writeFileSync(join(tmp, "prompt-argv.bin"), argvBytes);
+      doRun("bytes", "launch", "cx", join(tmp, "wt"), join(tmp, "prompt-argv.bin"));
+      const aPRc = rc;
+      const aPOut = out;
+      const ab = spawnSync(
+        "bash",
+        [baseLaunch, "launch", "cx", join(tmp, "wt"), join(tmp, "prompt-argv.bin")],
+        { encoding: "utf8", env: nofileEnv },
+      );
+      const aBRc = ab.status ?? 1;
+      const aBOut = String(ab.stdout ?? "");
+      const strippedTail = `${Buffer.from("Hello ", "utf8").toString("hex")}fffe${Buffer.from(" world", "utf8").toString("hex")}00`;
+      st.check(
+        "parity: a prompt holding \\xff\\xfe reaches argv byte for byte, trailing newlines stripped, on both sides",
+        aPRc === 0 &&
+          aBRc === 0 &&
+          aPOut === aBOut &&
+          aPOut.includes("fffe") &&
+          aPOut.trimEnd().endsWith(strippedTail),
+        `port rc=${aPRc} base rc=${aBRc}\nport ${aPOut}\nbase ${aBOut}`,
+      );
+      // The combined shell sources the file and splices the prompt: the file
+      // applies, the bytes survive, and a `cat` the file defines does not
+      // hijack the read, which runs before the source, as BASE orders it.
+      writeFileSync(
+        codex,
+        '#!/usr/bin/env bun\nimport { readFileSync } from "node:fs";\nconsole.log("cmdline-hex=" + readFileSync("/proc/self/cmdline").toString("hex"));\nconsole.log("FOO=" + (process.env.FOO ?? "unset"));\n',
+      );
+      writeFileSync(
+        join(tmp, "catguard.env"),
+        "export FOO=fromfile\ncat() { echo HIJACKED; }\nexport -f cat\n",
+      );
+      writeFileSync(
+        join(tmp, "bytesenv.toml"),
+        `${head}[lanes.cx]\nharness = "codex"\nmodel = "m"\nenv_file = "${join(tmp, "catguard.env")}"\n`,
+      );
+      const combinedEnv = { ...nofileEnv, POSTMASTER_CONFIG: join(tmp, "bytesenv.toml") };
+      doRun("bytesenv", "launch", "cx", join(tmp, "wt"), join(tmp, "prompt-argv.bin"));
+      const cPRc = rc;
+      const cPOut = out;
+      const cPErr = err;
+      const cb = spawnSync(
+        "bash",
+        [baseLaunch, "launch", "cx", join(tmp, "wt"), join(tmp, "prompt-argv.bin")],
+        { encoding: "utf8", env: combinedEnv },
+      );
+      const cBRc = cb.status ?? 1;
+      const cBOut = String(cb.stdout ?? "");
+      const cBErr = String(cb.stderr ?? "");
+      const promptHex = (s: string): string =>
+        s.split("\n").find((l) => l.startsWith("cmdline-hex=")) ?? "";
+      st.check(
+        "parity: with an env file the prompt still reaches argv byte for byte and the file applies",
+        cPRc === 0 &&
+          cBRc === 0 &&
+          promptHex(cPOut) === promptHex(cBOut) &&
+          promptHex(cPOut).includes("fffe") &&
+          cPOut.includes("FOO=fromfile") &&
+          cBOut.includes("FOO=fromfile") &&
+          !(cPOut + cPErr + cBOut + cBErr).includes("HIJACKED"),
+        `port rc=${cPRc} base rc=${cBRc}\nport ${cPOut}\nbase ${cBOut}`,
+      );
+      writeFileSync(codex, savedCodex);
+      envx = savedEnvx2;
+    }
   }
   record("run-relenv", "relenv");
   doRun(
