@@ -177,7 +177,7 @@ function profile(dispatch: string): { repo: string | null; gate: string | null }
 
 // --- the repo, as the run's branch has it -------------------------------------------------------
 function git(repo: string, ...args: string[]): string | null {
-  const r = run("git", ["-C", repo, ...args], { timeout: 120000 } as any);
+  const r = run("git", ["-C", repo, ...args], { timeout: 120000 });
   return r.code === 0 ? r.out : null;
 }
 

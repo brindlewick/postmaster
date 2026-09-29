@@ -1,7 +1,7 @@
 // Process and filesystem edges: temp directories the scripts clean up, and a
 // spawn wrapper that returns exit code and output the way the bash versions read it.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,11 +11,20 @@ export interface RunResult {
   err: string;
 }
 
-/** Run a command; never throws on a non-zero exit. */
+/** Run a command; never throws on a non-zero exit.
+ * A command that never starts reports the way a shell does: 127 with a
+ * diagnostic when it is not found, 126 when it cannot be executed. `timeout`
+ * is milliseconds, past which the child is killed and the run reports 128
+ * with whatever output it produced. */
 export function run(
   cmd: string,
   args: string[],
-  options: { cwd?: string; env?: Record<string, string | undefined>; input?: string } = {},
+  options: {
+    cwd?: string;
+    env?: Record<string, string | undefined>;
+    input?: string;
+    timeout?: number;
+  } = {},
 ): RunResult {
   let env: Record<string, string | undefined> = process.env;
   if (options.env !== undefined) {
@@ -31,12 +40,48 @@ export function run(
     encoding: "utf8",
     input: options.input,
     maxBuffer: 64 * 1024 * 1024,
+    ...(options.timeout !== undefined ? { timeout: options.timeout } : {}),
   });
+  const error = r.error as NodeJS.ErrnoException | undefined;
+  if (error && (r.status === null || r.status === undefined) && !r.signal) {
+    if (error.code === "ENOENT") return { code: 127, out: "", err: `${cmd}: command not found\n` };
+    if (error.code === "EACCES") return { code: 126, out: "", err: `${cmd}: permission denied\n` };
+    return {
+      code: 1,
+      out: String(r.stdout ?? ""),
+      err: String(r.stderr ?? "") || `${cmd}: ${error.message}\n`,
+    };
+  }
   return {
     code: r.status ?? (r.signal ? 128 : 1),
     out: String(r.stdout ?? ""),
     err: String(r.stderr ?? ""),
   };
+}
+
+/** This process's raw argv bytes, or null where the kernel does not expose
+ * them (no /proc). Decoded arguments cannot tell a legitimate U+FFFD from
+ * one the runtime substituted for undecodable bytes; these bytes can. */
+export function rawArgvBytes(): Buffer | null {
+  try {
+    return readFileSync("/proc/self/cmdline");
+  } catch {
+    return null;
+  }
+}
+
+/** Whether our own argv holds bytes that are not valid UTF-8. True only when
+ * /proc proves it; without /proc there is nothing to check against, and a
+ * U+FFFD in a decoded argument is a legitimate character, not evidence. */
+export function argvHasUndecodableBytes(): boolean {
+  const raw = rawArgvBytes();
+  if (raw === null) return false;
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(raw);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 /** mkdir -d a temp dir and hand it to fn; remove it afterwards even if fn throws. */
