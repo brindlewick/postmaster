@@ -279,11 +279,20 @@ never the record.
 
 On `.card-ready`, read `run.json`, the manifest's current `leg`, `card.md`, and
 `handoff-<leg>.md`. Do not use this route for a run without `coachman_contract: 2`; its legacy
-route follows below. An exit 1 from any `<tool>/scripts/landing.sh` call below is a fault in
-its inputs, not an answer: fix the inputs and re-run; never proceed past it.
+route follows below. An exit 1 from any `<tool>/scripts/landing.sh` call in Stage F or
+Stage G below is a fault in its inputs, not an answer: fix the inputs and re-run; never
+proceed past it.
 
-1. **Verify the card's claims against the code**, never against the card. In the synthesis
-   worktree, run the project's gate unpiped and log its exit; the gate must pass. Then
+1. **Verify the card's claims against the code**, never against the card.
+   `<tool>/scripts/landing.sh fresh --repo <repo> --default <branch> --ticket
+   <ticket-branch> --dispatch <dispatch> --wt <synthesis-wt>` must print `fresh`: the
+   ticket branch holds the current default branch and the record shows the gate passing at
+   its head. The postmaster runs no gate of its own; log what the call printed. On `stale`,
+   withhold: remove `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`,
+   then resume that last leg to merge the default branch into the ticket branch, never
+   rebasing, run its gates again and raise the card again, and wait for the corrected card.
+   For a change to the coachman contract, that merge also means a new fixture run from the
+   final branch, by the user's word of the same day. Then
    `<tool>/scripts/landing.sh card-results <dispatch> <synthesis-wt> <dispatch>/card.md`
    must print `match`: the card gives every check as the script reports it. Then
    `<tool>/scripts/landing.sh journey <dispatch> <synthesis-wt> <dispatch>/brief.md` must
@@ -307,7 +316,7 @@ its inputs, not an answer: fix the inputs and re-run; never proceed past it.
    `<tool>/scripts/style-findings.sh count <dispatch>` prints, and the residues the card
    lists are exactly what `<tool>/scripts/style-findings.sh list <dispatch>` prints; all
    open findings, browser suite and QA when present, the review link, and every run-created
-   branch. Log the gate result. If a claim
+   branch. If a claim
    fails, remove `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`, then
    resume that last leg with the exact discrepancy and wait for its corrected card.
 2. **Follow the landing route in the waybill.** First ask whether the ticket already landed:
@@ -326,7 +335,9 @@ its inputs, not an answer: fix the inputs and re-run; never proceed past it.
      `<tool>/scripts/landing.sh anything-to-land --repo <repo> --default <branch> --ticket
      <ticket-branch> --base <the manifest's base>`. On `nothing-to-land`, write that to
      `.waiting-on-user` and wait; on the user's word that there is
-     nothing to land, close as the already-merged paragraph above does. On `land`, push the
+     nothing to land, close as the already-merged paragraph above does, except the `merge`
+     line notes the user's word that there is nothing to land instead of an already-merged
+     branch. On `land`, push the
      ticket branch; where an open pull request already names it, adopt it instead of
      opening another. Otherwise open the pull request against the default branch
      (`gh pr create` on a GitHub project). Include the card, final checks, diff stat,
@@ -352,17 +363,24 @@ its inputs, not an answer: fix the inputs and re-run; never proceed past it.
    `--pr-merge` when the provider reports the merged pull request. On `landed`, remove
    `.waiting-on-user` and `.card-ready`, log `merge`, move the ticket to done, logging
    `ticket-state`, and set the stage with `<tool>/scripts/stage.sh <dispatch> shipped
-   postmaster`. On `re-verify` the branch moved past the card's HEAD, and on `not-landed`
-   the merge is not there: tell the user and wait; when their word comes, ask
-   `already-landed` again. For a local
+   postmaster`. On `re-verify` the branch moved past the card's HEAD: tell the user to
+   restore the branch to the card's HEAD, and wait; when their word comes, ask
+   `already-landed` again. If the user confirms the new HEAD instead, stop: re-verifying a
+   new HEAD needs a leg that has handed off, so put the decision to the user rather than
+   looping. On `not-landed` the merge is not there: tell the user and wait; when their word
+   comes, ask `already-landed` again, and if it still says `not-landed`, ask
+   `anything-to-land` with step 2's repo, default, ticket and base: on `nothing-to-land`,
+   close as `landed` above does, with the `merge` line noting the user's merge word and the
+   no-diff evidence; on `land`, keep waiting. For a local
    merge, this is already done in step 2. Then run current Stage G.
 
 ## Stage G (contract 2): after merge
 
 1. Confirm the default branch contains the merge and the ticket is done — or, where the
-   ticket closed on nothing-to-land with no merge, that `anything-to-land` with step 2's
-   flags still says `nothing-to-land` and the ledger holds the user's word that there was
-   nothing to land. Stop the preview
+   ticket closed on nothing-to-land with no merge, that `anything-to-land --repo <repo>
+   --default <branch> --ticket <ticket-branch> --base <the manifest's base>` still says
+   `nothing-to-land` and the `merge` line holds the user's word that there was nothing to
+   land. Stop the preview
    process group from `<dispatch>/render/preview.pid`, if one was started. Run
    `<tool>/scripts/style-findings.sh check <dispatch>`. The postmaster writes or corrects
    `<dispatch>/style-sort.md` using the sorting rules in `coachman.md`, then checks it again
@@ -397,8 +415,8 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    turnpike, the ledger holds the user's word on this ticket's turnpikes; the blind acceptance tests are the first commit on the branch, or the Decisions
    section of `handoff-3.md` carries leg 1's reason for not writing them;
    `<tool>/scripts/verify.sh results <dispatch> <synthesis-wt>` gives a result for every check at
-   the synthesis HEAD, and the card gives each one that did not pass as it is; a check that
-   did not run is `not run`, never passed and never omitted; the Style
+   the synthesis HEAD, and the card gives each one that did not pass as its result is; a
+   check that did not run is `not run`, never passed and never omitted; the Style
    residue's count is what `<tool>/scripts/style-findings.sh count <dispatch>` prints.
 2. **Grant or withhold.** Every word is delivered by resuming leg 3 (Stage C, step 5), and
    `.card-ready` is removed before it is; the coachman touches it afresh when the card changes.

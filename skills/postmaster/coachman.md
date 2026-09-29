@@ -961,7 +961,8 @@ logical order, not file safety: check the file surfaces before mass-launching.
   `## Not re-reviewed`.
 - On a contract-2 run, check results on the ship card and the review checkpoint are what
   `<tool>/scripts/landing.sh results` prints for them, never reworded and never left out; a
-  check that did not run is `not run`, never passed.
+  check that did not run is `not run`, never passed. An exit 1 from the call is a fault in
+  its inputs: fix them and re-run; never proceed past it.
 - Never gate-then-commit through a masking pipe: `<gate> 2>&1 | tail && git commit` reports the
   tail's exit, not the suite's, and will commit a RED tree. Check `${pipestatus[1]}` (zsh) or
   `${PIPESTATUS[0]}` (bash), or run the gate unpiped and commit only on its own exit 0.
