@@ -728,6 +728,35 @@ async function runControls(): Promise<void> {
       "--pidfile holds the launch's pid",
       () => readFileSync(join(logs, "n3.pid"), "utf8").trim() === field(probeText, "pid"),
     );
+    writeFileSync(
+      join(f.caller, "argv.sh"),
+      ["#!/usr/bin/env bash", 'printf "<%s>\\n" "$@"', ""].join("\n"),
+    );
+    exec("chmod", ["+x", join(f.caller, "argv.sh")]);
+    execHost(
+      [
+        "run",
+        f.name,
+        f.repo,
+        "--out",
+        "../logs/n6.out",
+        "--marker",
+        "../logs/n6.done",
+        "--",
+        "./argv.sh",
+        "",
+        "hello",
+      ],
+      noHost,
+      f.caller,
+    );
+    await marker(markerPath("n6"));
+    const argvText = readFileSync(join(logs, "n6.out"), "utf8");
+    await pass(
+      "an empty argument survives the launch record",
+      () => argvText === "<>\n<hello>\n",
+      argvText,
+    );
     const live = execHost(
       [
         "run",

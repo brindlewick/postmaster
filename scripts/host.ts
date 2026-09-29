@@ -555,6 +555,10 @@ function writeSpec(spec: string, fields: Spec): void {
 }
 function readSpec(spec: string): Spec {
   const get = (name: string) => readFileSync(join(spec, name), "utf8");
+  // The writer joins argv with NUL and appends one; only that trailing empty
+  // is framing. An empty argument in the middle is data, as read -d '' reads.
+  const argvParts = get("argv").split("\0");
+  if (argvParts.length > 0 && argvParts[argvParts.length - 1] === "") argvParts.pop();
   return {
     name: get("name"),
     cwd: get("cwd"),
@@ -565,7 +569,7 @@ function readSpec(spec: string): Spec {
     marker: get("marker"),
     pidfile: get("pidfile"),
     append: get("append"),
-    argv: get("argv").split("\0").filter(Boolean),
+    argv: argvParts,
   };
 }
 function dropSpec(spec: string): void {
