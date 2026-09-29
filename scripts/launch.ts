@@ -343,9 +343,12 @@ function _putForm(cwd: string, cmd: string[], stdinFile: string): string {
 /** Source an env_file into target the way a shell does. The file is shell and
  * runs as code: export, quotes, comments, expansion and unset all behave as
  * under `.`, which assignment parsing cannot reproduce. The dump is
- * NUL-separated so multiline values survive; SHLVL and _ are the dump
- * machinery's own and are left out. A file that fails midway still applies
- * whatever it set, as `.` does. */
+ * NUL-separated so multiline values survive; only `_` is the dump
+ * machinery's own and is left out. SHLVL passes through verbatim: a bash
+ * child always sees its parent's level minus one, so the dump shell reports
+ * exactly what BASE's launch shell hands on, whether the file sets SHLVL or
+ * leaves it. A file that fails midway still applies whatever it set, as `.`
+ * does. */
 function sourceEnvFile(path: string, target: Record<string, string | undefined>): void {
   const r = spawnSync("bash", ["-c", 'set -a; . "$1"; set +a; env -0', "_", path], {
     encoding: "utf8",
@@ -359,7 +362,7 @@ function sourceEnvFile(path: string, target: Record<string, string | undefined>)
     const idx = entry.indexOf("=");
     if (idx <= 0) continue;
     const k = entry.slice(0, idx);
-    if (k === "SHLVL" || k === "_") continue;
+    if (k === "_") continue;
     next[k] = entry.slice(idx + 1);
   }
   for (const k of Object.keys(target)) delete target[k];
@@ -1386,6 +1389,44 @@ withTempDir((tmp) => {
     "--leg",
     "review",
   );
+  // An env file launch keeps the inherited SHLVL, unless the file sets it.
+  {
+    const claude = join(tmp, "bin", "claude");
+    const saved = readFileSync(claude, "utf8");
+    writeFileSync(claude, '#!/bin/sh\nprintf "%s\\n" "shlvl=${SHLVL-<unset>}"\n');
+    envx = { SHLVL: "7" };
+    carries(
+      "an env file launch keeps the inherited SHLVL",
+      "shellenv",
+      "shlvl=7",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "review",
+    );
+    writeFileSync(join(tmp, "shlvl.env"), "SHLVL=9\n");
+    writeFileSync(
+      join(tmp, "shlvlset.toml"),
+      `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "shlvl.env")}" }\n`,
+    );
+    // A file that sets SHLVL=9 hands the harness 8: a bash child always
+    // sees its parent's level minus one, as under BASE's source-and-exec.
+    carries(
+      "an env file that sets SHLVL hands on the level minus one, as BASE does",
+      "shlvlset",
+      "shlvl=8",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "review",
+    );
+    envx = {};
+    writeFileSync(claude, saved);
+  }
   record("run-relenv", "relenv");
   doRun(
     "relenv",
