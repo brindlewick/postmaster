@@ -78,7 +78,9 @@ and `retry` repeats the last refused, pre-thread or user-routed wall attempt wit
 The leg command records one of `refused`, `pre-thread`, `walled`, `incomplete` or `finished`
 before `--marker` lands. A refusal to load the env file remains `refused`; no runbook reads
 `.err` text to classify the result. One starter holds the leg's lock at a time: a lock whose
-owner is dead is stolen, a live one refuses. `leg outcome` prints the last attempt record;
+owner is dead is stolen, a live one refuses. The launch names itself in the lock as its
+first act, through a temporary file, and never runs unowned; a release removes only a lock
+that still names the releaser. `leg outcome` prints the last attempt record;
 `leg waiting` keeps the waiting list.
 
 Each attempt record keeps `attempt`, `leg`, `name`, `request`, `role`, `prompt`, `thread_id`,

@@ -1753,9 +1753,30 @@ for key in ("request", "role", "prompt", "thread_id", "outcome"):
 PY
 }
 
-leg_release() {  # release a lock taken by leg_acquire: the file, or a legacy empty dir
-  rm -f -- "$1" 2>/dev/null
-  rmdir -- "$1" 2>/dev/null || :
+leg_release() {  # release a lock taken by leg_acquire, only if it still names this process
+  # A lock that names another owner — stolen while this attempt ran — is kept:
+  # removing it would let a third starter in beside the thief. A legacy empty
+  # dir holds no owner and is always releasable.
+  local start; start=$(leg_self_start 2>/dev/null) || start=""
+  python3 - "$1" "$$" "$start" <<'PY' || :
+import os, sys
+lock, pid, start = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with open(lock, encoding="utf-8") as f:
+        content = f.read().strip()
+except OSError:
+    content = None
+if content is not None and content != "%s %s" % (pid, start):
+    raise SystemExit(0)
+try:
+    os.unlink(lock)
+except OSError:
+    pass
+try:
+    os.rmdir(lock)
+except OSError:
+    pass
+PY
 }
 
 leg_acquire() {  # leg_acquire <lock> <mutex> <pid>: hold the leg's lock, or refuse
@@ -1827,27 +1848,46 @@ print("stole")
 PY
 }
 
-leg_own() {  # leg_own <lock> <pidfile>: the launch owns the lock from here on
-  python3 - "$1" "$2" <<'PY' || :
-import os, subprocess, sys
-lock, pidfile = sys.argv[1:3]
+leg_self_start() {  # this process's start time, in the lock's owner format
+  if [ -r "/proc/$$/stat" ]; then
+    local stat rest
+    stat=$(cat "/proc/$$/stat") || return 1
+    rest=${stat##*) } && set -- $rest && [ $# -ge 20 ] && [ -n "${20:-}" ] && printf '%s\n' "${20}"
+  else
+    ps -o lstart= -p "$$" 2>/dev/null | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//'
+  fi
+}
+
+leg_claim() {  # leg_claim <lock> <starter-pid> <starter-start>: the launch owns the lock
+  # _leg_exec's first act: replace the starter's identity with its own, through
+  # a temporary file, so a concurrent reader sees the starter or the launch,
+  # never an empty lock. It replaces only a lock that names the starter, the
+  # launch or nothing readable: a lock naming anyone else means another attempt
+  # may be live, and this one aborts rather than risk joining it. Exit 0 owns,
+  # 1 owns nothing and the attempt must not run.
+  local start; start=$(leg_self_start) && [ -n "$start" ] || return 1
+  python3 - "$1" "$2" "$3" "$$" "$start" <<'PY'
+import os, sys, tempfile
+lock, starter, starter_start, self_pid, self_start = sys.argv[1:6]
+mine = "%s %s" % (self_pid, self_start)
 try:
-    cpid = int(open(pidfile, encoding="utf-8").read().strip())
-except (OSError, ValueError):
-    raise SystemExit(0)
-if os.path.isdir("/proc/self"):
-    try:
-        rest = open("/proc/%d/stat" % cpid).read().rpartition(")")[2].split()
-        start = rest[19] if rest and rest[0] != "Z" and len(rest) > 19 else None
-    except OSError:
-        start = None
-else:
-    f = subprocess.run(["ps", "-o", "stat=,lstart=", "-p", str(cpid)],
-                       capture_output=True, text=True,
-                       env=dict(os.environ, LC_ALL="C")).stdout.split()
-    start = " ".join(f[1:6]) if len(f) >= 6 and not f[0].startswith("Z") else None
-if start is not None:
-    open(lock, "w", encoding="utf-8").write("%d %s\n" % (cpid, start))
+    with open(lock, encoding="utf-8") as f:
+        content = f.read().strip()
+except OSError:
+    content = ""
+if content and content != "%s %s" % (starter, starter_start) and content != mine:
+    print("leg: the lock names another attempt; not starting", file=sys.stderr)
+    raise SystemExit(1)
+try:
+    fd, tmp = tempfile.mkstemp(prefix=".owner.", dir=os.path.dirname(lock) or ".")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(mine + "\n")
+    os.replace(tmp, lock)
+except OSError as e:
+    try: os.unlink(tmp)
+    except (OSError, NameError): pass
+    print("leg: cannot own the lock: %s" % e.strerror, file=sys.stderr)
+    raise SystemExit(1)
 PY
 }
 
@@ -1981,7 +2021,12 @@ LEG_ACTIVE_LOCK=
 leg_exec() {  # hosted executor; the caller owns paths and clears markers
   local d=$1 wt=$2 leg=$3 n=$4 request=$5 role=$6 prompt=$7 thread=$8 stream=$9 err=${10}
   local done=${11} attempts=${12} attempt=${13} phase=${14} wall=${15} active=${16}
+  local starter_pid=${17} starter_start=${18}
   local launch_mode=launch rc=0 errfd wallpid start_off
+  # Ownership is established by the owner, not inferred by the starter: the
+  # launch names itself before anything else, and never runs unowned. An abort
+  # here leaves no record; the next start backfills this attempt as refused.
+  leg_claim "$active" "$starter_pid" "$starter_start" || return 1
   LEG_ACTIVE_LOCK=$active
   trap 'leg_release "$LEG_ACTIVE_LOCK"' EXIT
   # This attempt's events start here: on a resume the stream still holds prior
@@ -2236,9 +2281,11 @@ PY
       mv -- "$err" "$err_backup" || { leg_release "$active"; die "cannot preserve the walled errors"; }
     fi
   fi
+  local starter_start; starter_start=$(leg_self_start) && [ -n "$starter_start" ] \
+    || { leg_release "$active"; die "cannot establish attempt ownership: the starter has no readable start time"; }
   local runargs=(run "$label" "$wt" --under "$d" --role coachman --run "$d" --out "$stream" --err "$err" --marker "$exited" --pidfile "$logs/coachman-leg-$n.pid")
   [ "$append" -eq 0 ] || runargs+=(--append)
-  runargs+=(-- "$SELF" _leg_exec "$d" "$wt" "$leg" "$n" "$request" "$role" "$prompt" "$thread" "$stream" "$err" "$done" "$attempts" "$attempt" "$phase" "$wall" "$active")
+  runargs+=(-- "$SELF" _leg_exec "$d" "$wt" "$leg" "$n" "$request" "$role" "$prompt" "$thread" "$stream" "$err" "$done" "$attempts" "$attempt" "$phase" "$wall" "$active" "$$" "$starter_start")
   POSTMASTER_ATTEMPT_PHASE="$phase" "$SELF" "${runargs[@]}"
   rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -2262,8 +2309,8 @@ PY
     printf 'leg: host could not start attempt %s for leg %s (exit %s)\n' "$attempt" "$n" "$rc" >&2
     return "$rc"
   fi
-  # The attempt outlives this process: its owner is the launch, not the starter.
-  leg_own "$active" "$logs/coachman-leg-$n.pid"
+  # The attempt outlives this process, and names itself in the lock as its
+  # first act; the starter infers nothing from the pidfile.
 }
 
 leg_outcome() {  # leg_outcome <dispatch> <number>: the last attempt record, as JSON
@@ -2478,6 +2525,7 @@ for fd in os.listdir("/proc/self/fd"):
     printf '{"session_id":"thread-skilled"}\n'
     exit 1 ;;
   *pre-thread*) exit 1 ;;
+  *sleepy*) sleep "${TEST_SLEEP:-5}"; printf '{"session_id":"thread-sleepy"}\n'; exit 1 ;;
   *)
     printf '{"session_id":"thread-plain"}\n'
     exit 1 ;;
@@ -2744,6 +2792,94 @@ PY
     TEST_OBSERVED="$leg_d/retry-observed" "$SELF" leg launch "$leg_d" "$leg_wt" synthesis 1 "$prompt" >/dev/null 2>&1; rc=$?
   check "a lock with a live owner refuses the next start" '[ "$rc" -ne 0 ] && [ "$(grep -c . "$attempts")" = "$before" ]'
   rm -f "$leg_d/.leg-1-active"
+
+  rm -f "$leg_d/.leg-1-exited"
+  prompt=$leg_d/owned.txt; printf 'sleepy ownership\n' > "$prompt"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" TEST_DONE="$leg_d/.leg-1-done" \
+    TEST_OBSERVED="$leg_d/retry-observed" TEST_SLEEP=8 \
+    "$SELF" leg launch "$leg_d" "$leg_wt" synthesis 1 "$prompt" >/dev/null
+  rc=$?
+  lockpid=""; i=0
+  while [ $i -lt 25 ]; do
+    lockpid=$(cut -d' ' -f1 < "$leg_d/.leg-1-active" 2>/dev/null)
+    [ -n "$lockpid" ] && [ "$lockpid" = "$(cat "$leg_d/logs/coachman-leg-1.pid" 2>/dev/null)" ] && break
+    sleep 0.2; i=$((i + 1))
+  done
+  check "a live attempt names itself, the pidfile pid, in the lock" \
+    '[ "$rc" -eq 0 ] && [ -n "$lockpid" ] && kill -0 "$lockpid" 2>/dev/null' "lock=$(cat "$leg_d/.leg-1-active" 2>/dev/null)"
+  marker "$leg_d/.leg-1-exited" 30
+  check "an exit releases its own lock" '[ ! -e "$leg_d/.leg-1-active" ]'
+
+  rm -f "$leg_d/.leg-1-exited"
+  prompt=$leg_d/foreign.txt; printf 'sleepy foreign lock\n' > "$prompt"
+  recs_before=$(grep -c . "$attempts"); calls_before=$(wc -l < "$tmp/leg-calls")
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" TEST_DONE="$leg_d/.leg-1-done" \
+    TEST_OBSERVED="$leg_d/retry-observed" TEST_SLEEP=5 \
+    "$SELF" leg launch "$leg_d" "$leg_wt" synthesis 1 "$prompt" >/dev/null
+  rc=$?
+  i=0
+  while [ $i -lt 25 ]; do
+    [ "$(cut -d' ' -f1 < "$leg_d/.leg-1-active" 2>/dev/null)" = "$(cat "$leg_d/logs/coachman-leg-1.pid" 2>/dev/null)" ] && break
+    sleep 0.2; i=$((i + 1))
+  done
+  python3 - "$$" "$leg_d/.leg-1-active" <<'PY'
+import os, subprocess, sys
+pid = int(sys.argv[1])
+try:
+    rest = open("/proc/%d/stat" % pid).read().rpartition(")")[2].split()
+    start = rest[19]
+except (OSError, IndexError):
+    start = " ".join(subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True).stdout.split()[:5])
+open(sys.argv[2], "w").write("%d %s\n" % (pid, start))
+PY
+  kept=$(cat "$leg_d/.leg-1-active")
+  marker "$leg_d/.leg-1-exited" 30
+  check "an exit keeps another owner's lock" \
+    '[ "$rc" -eq 0 ] && [ "$(cat "$leg_d/.leg-1-active" 2>/dev/null)" = "$kept" ] && [ "$(wc -l < "$tmp/leg-calls")" = "$((calls_before + 1))" ] && [ "$(grep -c . "$attempts")" = "$((recs_before + 1))" ]' "$(cat "$leg_d/.leg-1-active" 2>/dev/null)"
+  rm -f "$leg_d/.leg-1-active"
+
+  # Direct executor calls run in an isolated dispatch, so their records never
+  # join the fixture's attempt numbering.
+  mkdir -p "$tmp/direct-d/logs" && cp "$leg_d/run.json" "$tmp/direct-d/run.json"
+  printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/direct-d/manifest.json"
+  printf 'direct claim\n' > "$tmp/direct-d/prompt.txt"
+  direct() {  # direct <active> <starter-pid> <starter-start>: _leg_exec against the isolated dispatch
+    POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+      POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" TEST_DONE="$tmp/direct-d/.leg-1-done" \
+      TEST_OBSERVED="$tmp/direct-d/retry-observed" \
+      "$SELF" _leg_exec "$tmp/direct-d" "$leg_wt" synthesis 1 launch coachman "$tmp/direct-d/prompt.txt" \
+      "" "$tmp/direct-stream.jsonl" "$tmp/direct.err" "$tmp/direct-d/.leg-1-done" \
+      "$tmp/direct-attempts.jsonl" 1 "$tmp/direct-phase" "$tmp/direct-wall" "$1" "$2" "$3" >/dev/null 2>&1
+  }
+  mkdir -p "$tmp/rodir" && chmod 555 "$tmp/rodir"
+  calls_before=$(wc -l < "$tmp/leg-calls")
+  direct "$tmp/rodir/.leg-1-active" "$$" "0"; rc=$?
+  check "an attempt that cannot own its lock never starts" \
+    '[ "$rc" -ne 0 ] && [ "$(wc -l < "$tmp/leg-calls")" = "$calls_before" ] && [ ! -e "$tmp/direct-attempts.jsonl" ]' "rc=$rc"
+  chmod 755 "$tmp/rodir"
+
+  python3 - "$$" "$tmp/third.lock" <<'PY'
+import os, subprocess, sys
+pid = int(sys.argv[1])
+try:
+    rest = open("/proc/%d/stat" % pid).read().rpartition(")")[2].split()
+    start = rest[19]
+except (OSError, IndexError):
+    start = " ".join(subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True).stdout.split()[:5])
+open(sys.argv[2], "w").write("%d %s\n" % (pid, start))
+PY
+  calls_before=$(wc -l < "$tmp/leg-calls")
+  direct "$tmp/third.lock" "999999999" "0"; rc=$?
+  check "an attempt never joins a lock that names another attempt" \
+    '[ "$rc" -ne 0 ] && [ "$(wc -l < "$tmp/leg-calls")" = "$calls_before" ] && [ ! -e "$tmp/direct-attempts.jsonl" ]' "rc=$rc"
+
+  printf '999999999 0\n' > "$tmp/starter.lock"
+  calls_before=$(wc -l < "$tmp/leg-calls")
+  direct "$tmp/starter.lock" "999999999" "0"; rc=$?
+  check "a lock naming the starter is claimed and the attempt runs" \
+    '[ "$rc" -eq 0 ] && [ "$(wc -l < "$tmp/leg-calls")" = "$((calls_before + 1))" ] && [ ! -e "$tmp/starter.lock" ] && grep -q "\"attempt\":1" "$tmp/direct-attempts.jsonl" 2>/dev/null' "rc=$rc"
 
   before=$(grep -c . "$attempts")
   printf 'NOT JSON\n' >> "$attempts"
