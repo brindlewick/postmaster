@@ -37,7 +37,7 @@ waybill carries, is `SKILL.md`. You do not need it.
 | `<repo>/.worktrees/<TICKET>-<lane>` | workhorse worktree, branch `wb/<TICKET>-<lane>` (`wb` for workhorse branch) |
 | `<dispatch>/checkpoint-<n>.md` | checkpoint cards: `1` and `review` |
 | `<dispatch>/spec-review.md` | the planning stage's review package: one entry per workhorse, its spec's commit and the link the postmaster puts to the user; written before `.spec-review-ready` |
-| `<dispatch>/spec-decisions.md` | the postmaster's record, for the current package, of the user's word on each spec: approved, changes in the user's words, or dropped; what you read on resume from the planning pause |
+| `<dispatch>/spec-decisions.md` | the postmaster's record, for the current package, of the user's word on each spec: approved, changes in the user's words, or dropped; written only through `<tool>/scripts/spec-decisions.sh`, which also counts approvals run-wide; what you read on resume from the planning pause |
 | `<repo>/.worktrees/<TICKET>-rev-<lens>-<lane>` | reviewer scratch, one per lens per lane, detached at the synthesis HEAD, fresh every round: a clone under the security lens, a worktree under the others |
 | `<dispatch>/style-sort.md` | aftercare's sort of the run's style findings, which the postmaster puts to the user |
 

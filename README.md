@@ -97,6 +97,7 @@ scripts/log-action.sh <dispatch> <actor> <action> <target> …     # one JSON li
 scripts/tool-faults.sh harvest|comment|file|decline <dispatch> …  # a closed run's tool faults, as tickets
 scripts/stage.sh <dispatch> <stage>                               # the one way a run changes stage
 scripts/spec-review-link.sh <dispatch> <workhorse-worktree>        # resolve a reviewed spec's code-server link
+scripts/spec-decisions.sh <dispatch> fresh|record|count           # record spec decisions, count approvals run-wide
 scripts/run-times.sh <dispatch>                                   # how long each stage took, from the log
 scripts/run-log.sh <dispatch> <text> | --section <title> | --close # the narrative, timestamped
 scripts/run-meta.sh <dispatch> <repo>                             # run.json: what a run started from

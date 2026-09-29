@@ -66,8 +66,9 @@ spec was an audit record that nobody reviewed during the run. #29's other decisi
 the coachman does not check code against the spec. The workhorse contract in
 `skills/postmaster/coachman.md` gains the planning pause and the two-approved bar; the
 postmaster's half in `skills/postmaster/postmaster.md` gains the interactive spec review;
-`scripts/stage.sh` gains the `planning` stage and `scripts/log-action.sh` the `spec-review`
-action. The cost it adds is the user's review time, which the stage timings carry.
+`scripts/stage.sh` gains the `planning` stage, `scripts/log-action.sh` the `spec-review`
+action, and `scripts/spec-decisions.sh` owns the decisions file and the run-wide approval
+count. The cost it adds is the user's review time, which the stage timings carry.
 
 ## What would settle it
 

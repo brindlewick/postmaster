@@ -264,35 +264,39 @@ template, as `ship.review_link` is for the ship card; with no template it is the
 A revised spec comes back as a new entry at its new commit.
 
 1. **Put one spec to the user at a time.** A new package starts a new
-   `spec-decisions.md`: write it fresh, so no stanza from an earlier package survives into
-   this one. Show its link and its commit, and ask for a decision: approved; changes
-   requested in their words; or drop this workhorse. When the first spec goes to the user,
-   write what was asked to the run's `.waiting-on-user`, as Stage F step 2 does: while it is
-   set the poll reports USER, not SPEC, so the package is never taken twice. Never show one
-   workhorse's spec beside another's: review is for scope and correctness, not for making the
-   specs alike. Never show any of it to a workhorse.
-2. **Record the decision as it comes**, in the run's log and in `<dispatch>/spec-decisions.md`:
-   `<tool>/scripts/log-action.sh <dispatch> postmaster spec-review <lane> "<decision> <commit>
-   <the user's words>"`, where `<decision>` is `approved`, `changes` or `dropped` and the words
-   are the user's own, carried verbatim for a `changes` or `dropped`. One line per decision, at
-   the moment it is given. `spec-decisions.md` holds the same for the coachman to read on
-   resume: one stanza per lane, with the decision, the commit and the words. The stanzas
-   accumulate as this package is decided; the file is complete when every spec in the package
-   has one, and it holds this package's decisions only.
+   `spec-decisions.md`: `<tool>/scripts/spec-decisions.sh <dispatch> fresh`, so no stanza
+   from an earlier package survives into this one. Show its link and its commit, and ask for
+   a decision: approved; changes requested in their words; or drop this workhorse. When the
+   first spec goes to the user, write what was asked to the run's `.waiting-on-user`, as
+   Stage F step 2 does: while it is set the poll reports USER, not SPEC, so the package is
+   never taken twice. Never show one workhorse's spec beside another's: review is for scope
+   and correctness, not for making the specs alike. Never show any of it to a workhorse.
+2. **Record the decision as it comes** with `<tool>/scripts/spec-decisions.sh <dispatch>
+   record <lane> <decision> <commit> <the user's words>`, where `<decision>` is `approved`,
+   `changes` or `dropped`, `<commit>` the spec commit the user saw, and the words are the
+   user's own, carried verbatim for a `changes` or `dropped` and omitted for an `approved`.
+   One decision per call, at the moment it is given. The script appends the stanza and logs
+   the `spec-review` line; it refuses a second stanza for one lane, a `changes` with no
+   words, and a decision with no commit. The stanzas accumulate as this package is decided;
+   the file is complete when every spec in the package has one, and it holds this package's
+   decisions only.
 3. **When every spec in the package is decided, send the package back.** Remove
    `.waiting-on-user`, check `spec-decisions.md` holds every spec in the package, remove
    `.spec-review-ready`, and resume the current leg (Stage C step 5) with the decisions file
    as what it must read. The marker is consumed here, on every path, before the resume, as
    `.card-ready` is before a word is delivered: a fresh package touches it afresh, so SPEC
-   always means a package nobody has taken yet.
-   - **Any `changes`:** the coachman revises those specs alone, each in its own thread, and
-     pauses with a fresh package, which is put to the user the same way, until every spec is
-     approved or dropped.
-   - **Every workhorse approved or dropped, but fewer than two approved:** tell the user the
-     run needs two approved specs and has fewer, and that nothing is implemented from an
-     unapproved plan. The coachman stops on resume and writes an escalation carrying the
-     count; the user alone abandons the run.
-   - **Two or more approved and nothing outstanding:** the coachman goes on to implementation.
+   always means a package nobody has taken yet. Read the run-wide numbers first:
+   `<tool>/scripts/spec-decisions.sh <dispatch> count` prints `approved <n>`, every lane
+   approved in the manifest or this package counted once, and `changes <m>`, this package's
+   changes stanzas. Branch on the numbers, never by reading the files:
+   - **`changes` above zero:** the coachman revises those specs alone, each in its own
+     thread, and pauses with a fresh package, which is put to the user the same way, until
+     every spec is approved or dropped.
+   - **No changes, fewer than two approved:** tell the user the run needs two approved specs
+     and has fewer, and that nothing is implemented from an unapproved plan. The coachman
+     stops on resume and writes an escalation carrying the count; the user alone abandons
+     the run.
+   - **No changes, two or more approved:** the coachman goes on to implementation.
    Log every step; the planning span the stage timings show is this stage, drafting through
    the last decision, with the user's review inside it.
 
