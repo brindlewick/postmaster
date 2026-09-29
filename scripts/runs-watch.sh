@@ -386,11 +386,21 @@ harvest_thread_id() {  # harvest_thread_id <events-file> <marker> <limit>: print
 }
 
 prepare_dispatch() {  # prepare_dispatch <dispatch> <run> <current leg>: dispatch next leg or report why it could not
-  local d=$1 run=$2 current=$3 list next job repo worktree prompt host_name out err marker number leg
+  local d=$1 run=$2 current=$3 list next job repo worktree prompt host_name out err marker number leg listed
   ACTION_ERROR=""
   if ! list=$("$HERE/turnpikes.sh" legs "$d" 2>&1); then
     ACTION_ERROR="turnpikes.sh legs failed: $list"; return 1
   fi
+  # The manifest leg is validated before anything uses it: it must be an integer
+  # and one of the run's listed legs. Anything else is reported as corrupt and the
+  # run is skipped — never dispatched from, and never allowed near arithmetic that
+  # would abort the whole watcher. resume_transient needs no twin: its listed-leg
+  # string compare already returns on anything unlisted before any use.
+  case $current in ''|*[!0-9]*)
+    ACTION_ERROR="manifest leg '$current' is not an integer; the run is corrupt"; return 1 ;;
+  esac
+  listed=$(printf '%s\n' "$list" | awk -v n="$current" '$1 == n { print $2; exit }')
+  [ -n "$listed" ] || { ACTION_ERROR="manifest leg $current is not a listed leg; the run is corrupt"; return 1; }
   next=$(printf '%s\n' "$list" | awk -v n="$current" '$1 ~ /^[0-9]+$/ && $1 + 0 > n { print $1 "\t" $2; exit }')
   if [ -z "$next" ]; then ACTION_ERROR="no later leg is listed; Stage G remains with the postmaster"; return 1; fi
   IFS=$'\t' read -r number leg <<< "$next"
@@ -848,6 +858,28 @@ PY
   [ $rc -eq 3 ] && [ -f "$tmp/calls/dispatch-early-profile-2" ] \
     && ok "a ticket-text profile does not shadow the waybill's own" \
     || fail "a ticket-text profile does not shadow the waybill's own"
+
+  echo "corrupt manifests: reported once, never dispatched from, never fatal"
+  for bad in 0 true null 2.0 '[]'; do
+    case $bad in 0) s=0;; true) s=True;; null) s=None;; 2.0) s=2.0;; '[]') s='[]';; esac
+    root="$tmp/auto-corrupt-$s"; auto_run "$root" bad 1 ""; handoff "$root/bad" "$s"
+    python3 - "$root/bad/manifest.json" "$bad" <<'PY'
+import json, sys
+p = sys.argv[1]
+m = json.load(open(p))
+m["leg"] = json.loads(sys.argv[2])
+json.dump(m, open(p, "w"), indent=2)
+PY
+    : > "$root/bad/.leg-$s-done"; : > "$root/bad/.leg-$s-exited"
+    mkrun "$root" good review 2 .escalation-ready
+    watch_stub "$root"
+    still_bad=$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["leg"]))' "$root/bad/manifest.json")
+    launched=$(find "$tmp/calls" -name 'dispatch-bad-*' | head -1)
+    [ $rc -eq 0 ] && has "needs bad DISPATCH" && has "manifest leg" \
+      && has "needs good RULE" && [ "$still_bad" = "$bad" ] && [ -z "$launched" ] \
+      && ok "corrupt manifest leg $bad is reported, never dispatched, never fatal" \
+      || fail "corrupt manifest leg $bad is reported, never dispatched, never fatal"
+  done
 
   root="$tmp/auto-resume"; auto_run "$root" resume 1 "prior-thread"
   printf '%s\n' 'Model stream idle timeout' > "$root/resume/logs/coachman-leg-1.err"

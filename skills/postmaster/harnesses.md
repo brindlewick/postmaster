@@ -50,7 +50,9 @@ exceed, throttle, billing, budget, credit, payment, usage, slow, quick or too ma
 vetoes the resume wherever it appears in what the ending says, in any spelling and at
 any distance — there is no span limit and no word boundary to hide behind. What the
 ending says is its message text: the `.err` lines, non-JSON stream lines, and every
-string value of its error records, under any key. JSON keys,
+string value of its error records, under any key. `host:` notice lines in
+`.err` are the host's words, not the child's, and the veto reads past
+them, as the refusal check does. JSON keys,
 field names and numeric payloads are structure, not text, and never count: a `usage`
 key, a `rate_limit` key, a token count of 1429 and a UUID holding 429 are not walls.
 The codes `429` and `402` count only status-shaped, as whole numbers in text or as the
@@ -66,17 +68,31 @@ is busy` carry no stem on purpose: that is transient-overload language, and resu
 on it is right.
 
 An error record is one the adapter recognises as an error or a terminal failure:
-`error`, `fail` or `exception` in its type, event, kind, payload type, subtype or
-status, or a truthy `error` or `errors` field — plus the `.err` lines and non-JSON
-stream lines, which are stderr chunks. Per harness, as observed:
+the generic rule — `error`, `fail` or `exception` in its type, event, kind,
+payload type, subtype or status, or a truthy `error` or `errors` field — plus a
+top-level `is_error`, a nested `item.type` of `error`, and a nested `payload`
+with `outcome` `error`. The `.err` lines and non-JSON stream lines are stderr
+chunks and always count. Per harness, as observed:
 
-- codex: error items under the generic rule; no error-item shape is attested
-  beyond it, and usage-bearing `turn.completed` records are not error records.
-- claude: error events under the generic rule; observed, `run.terminal.failed`
-  with its `reason`. Usage-bearing assistant messages are not error records.
-- mimo: the generic rule; observed error prose arrives in text parts, which
-  carry no error marking, so those streams classify from the `.err` text.
-- grok, pi, agy: the generic rule; unobserved.
+- codex: the generic rule plus nested `item.type: error` (attested in
+  `raw/trials/codex-resume-forms/`). Usage-bearing `turn.completed` records
+  are not error records.
+- claude: the generic rule plus top-level `is_error` on `result` records.
+  Usage-bearing assistant messages are not error records.
+- mimo: the generic rule only; no mimo-specific error shape is attested.
+  Unmarked text parts are ordinary messages, so those streams classify
+  from the `.err` text.
+- muse: the generic rule plus `outcome: error` payloads, and
+  `run.terminal.failed` with its `reason` under the generic rule.
+- pi: the generic rule only (see the exclusion below).
+- grok, agy: the generic rule; unobserved.
+
+Deliberately excluded: tool-result errors — claude's nested
+`tool_result.is_error` and pi's `tool_execution_end.isError`. A failed
+tool call's text is the tool's, not the provider's: a coachman's failing
+gate prints cap and limit words all the time, and a provider wall still
+ends the turn through the harness's own error record, where the veto
+sees it.
 
 Where a record carries a status code or an error type, values come in three classes
 over every post-skip line: the known-transient set (`502`, `503`, `504`, `529`,

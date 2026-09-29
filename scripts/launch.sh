@@ -666,6 +666,24 @@ PY
     "model stream idle timeout" '{"type":"assistant","message":"quota exceeded for this key"}'
   check_pair "wall words in tool output resume" 0 "model stream idle timeout" \
     "model stream idle timeout" '{"type":"assistant","message":{"content":[{"type":"tool_result","text":"quota exceeded"}]}}'
+  check_cell "the uncapped notice plus a transient resumes" 0 "model stream idle timeout" \
+    $'host: launch running uncapped (no supported per-launch limits available)\nmodel stream idle timeout'
+  check_cell "the uncapped notice plus a wall wakes" 1 provider-wall \
+    $'host: launch running uncapped (no supported per-launch limits available)\nquota exceeded for this key'
+  check_pair "wall in a claude result.is_error wakes" 1 provider-wall \
+    "model stream idle timeout" '{"type":"result","is_error":true,"result":"quota exceeded"}'
+  check_pair "wall in a codex nested error item wakes" 1 provider-wall \
+    "model stream idle timeout" '{"type":"item.completed","item":{"type":"error","message":"quota exceeded"}}'
+  check_pair "wall in a muse outcome:error payload wakes" 1 provider-wall \
+    "model stream idle timeout" '{"payload_type":"tool.result","payload":{"outcome":"error","result":"quota exceeded"}}'
+  check_pair "wall in a marked mimo part wakes" 1 provider-wall \
+    "model stream idle timeout" '{"type":"error","id":"prt_x","messageID":"msg_x","sessionID":"ses_x","text":"quota exceeded"}'
+  check_pair "wall words in an unmarked mimo text part resume" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"text","id":"prt_x","messageID":"msg_x","sessionID":"ses_x","text":"quota exceeded"}'
+  check_pair "wall words in a claude tool_result error resume" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"user","message":{"content":[{"type":"tool_result","is_error":true,"content":"quota exceeded"}]}}'
+  check_pair "wall words in a pi tool error resume" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"tool_execution_end","isError":true,"errorMessage":"quota exceeded"}'
   [ "$matrix_fail" -eq 0 ] \
     && ok "the veto reads error records whole and nothing else" \
     || fail "the veto misreads error records"
@@ -1021,8 +1039,23 @@ def values_vetoed(value):
 def is_marked(event):
     kind = " ".join(str(event.get(k, "")) for k in
                     ("type", "event", "kind", "payload_type", "subtype", "status")).lower()
-    return ("error" in kind or "fail" in kind or "exception" in kind
-            or bool(event.get("error")) or bool(event.get("errors")))
+    if "error" in kind or "fail" in kind or "exception" in kind:
+        return True
+    if bool(event.get("error")) or bool(event.get("errors")):
+        return True
+    if bool(event.get("is_error")):  # claude result errors; nested tool_result flags stay out
+        return True
+    item = event.get("item")
+    if isinstance(item, dict) and str(item.get("type", "")).lower() == "error":
+        return True  # codex nests the error item inside item.completed
+    payload = event.get("payload")
+    if isinstance(payload, dict) and str(payload.get("outcome", "")).lower() == "error":
+        return True  # muse outcome:error payloads
+    return False
+# Deliberately unmarked: tool-result errors (claude's nested tool_result.is_error,
+# pi's tool_execution_end.isError). A failed tool call's text is the tool's, not the
+# provider's — a failing gate prints cap and limit words all day — and a provider
+# wall still ends the turn through the harness's own error record.
 def note_record(value, marked):
     if isinstance(value, dict):
         for key, child in value.items():
@@ -1083,7 +1116,11 @@ all_errors = err + "\n" + "\n".join(error_text)
 if re.sub(r"^(?:host:[^\n]*\n)+", "", err).startswith("launch:"):
     print("launch-refusal")
     raise SystemExit(1)
-if veto_hit or vetoed(err) or structured_wall:
+# The veto reads past host: lines everywhere in .err, as the refusal check does
+# for its leading block: host notices ("no supported per-launch limits") are the
+# host's words, and "limits" must not veto the child's transient end.
+err_prose = "\n".join(line for line in err.split("\n") if not line.startswith("host:"))
+if veto_hit or vetoed(err_prose) or structured_wall:
     print("provider-wall")
     raise SystemExit(1)
 if unknown_structured:
