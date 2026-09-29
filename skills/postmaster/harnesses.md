@@ -386,10 +386,22 @@ session of its own: a host's pane where there is one, a detached process where t
     -- "<tool>/scripts/runs-watch.sh" "<runs>"
 ```
 
+Wait for its return in the conversation with `<tool>/scripts/wait-for-markers.sh`:
+
+```sh
+<tool>/scripts/wait-for-markers.sh "<runs>/postmaster" '.watch-exited' 1 86400
+```
+
+Exit 0 means the watcher returned: read `watch.out`. Exit 3 means nothing returned in a
+day: wait again. If the wait itself is cut short by the harness, run it again: a marker
+already landed is collected at once.
+
 When `.watch-exited` lands, `watch.out` holds the table and the `needs` lines: act on them,
-then start the watcher again before anything else. The marker lands whatever the exit, so no
-`needs` lines means the watcher failed instead of waking: the reason is in `watch.err` — read
-it, fix the cause, and only then start the watcher again.
+then start the watcher again before anything else. Check `watch.err` too: a held line that
+matches no run warns there. The marker lands whatever the exit, so no `needs` lines means
+the watcher failed instead of waking: the reason is in `watch.err` — read it, fix the
+cause, and only then start the watcher again. If `watch.err` is empty too, the watcher was
+killed rather than exiting: start the watcher again.
 
 | harness | nonblocking form | where the session cannot keep it in the background |
 |---|---|---|

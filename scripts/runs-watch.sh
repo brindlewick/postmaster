@@ -12,7 +12,8 @@
 # (POSTMASTER_CONFIG overrides the path). A run needs the postmaster when its NEXT is anything
 # but WAIT (a leg at work), USER (already put to the user) or - (closed). A run listed in
 # <runs>/postmaster/held, one ticket per line, never does: hold a run by writing its ticket
-# there, release it by removing the line. The held list and the config are read on every look,
+# there exactly as the RUN column shows it, and release it by removing the line. A held line
+# that matches no run warns on stderr. The held list and the config are read on every look,
 # so a hold takes effect without restarting the watcher. A missing config, or a poll interval
 # that is not usable, gets the default, 120 seconds, which it says; an unset one is silent.
 #
@@ -32,7 +33,7 @@ set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 
 usage() {
-  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 if [ "${1:-}" = --help ] || [ "${1:-}" = -h ]; then usage; exit 0; fi
@@ -47,10 +48,14 @@ waking_runs() {  # waking_runs <held-file>: `needs <run> <NEXT>` per waking run;
   }
   $1 == "POSTMASTER" { next }
   $1 == "RUN" && $NF == "NEXT" { next }
-  $NF == "USER" || $NF == "WAIT" || $NF == "-" { next }
   NF < 2 { next }
+  { seen[$1] = 1 }
+  $NF == "USER" || $NF == "WAIT" || $NF == "-" { next }
   $1 in hold { next }
   { print "needs " $1 " " $NF }
+  END {
+    for (h in hold) if (!(h in seen)) print "runs-watch: held \"" h "\" matches no run" > "/dev/stderr"
+  }
   '
 }
 
@@ -153,9 +158,19 @@ for dp, dn, fn in os.walk(sys.argv[1]):
   root="$tmp/neg-held"; mkdir -p "$root"; mkrun "$root" held review 2 .escalation-ready
   mkdir -p "$root/postmaster"; printf 'held\n' > "$root/postmaster/held"
   watch "$root"
-  [ $rc -eq 3 ] && has "NEXT" && has "held " && has ".escalation-ready" && ! has "needs " \
+  [ $rc -eq 3 ] && has "NEXT" && has "held " && has ".escalation-ready" && ! has "needs " && ! has "matches no run" \
     && ok "a run on the held list never needs the postmaster" \
     || fail "a run on the held list never needs the postmaster"
+  root="$tmp/neg-heldhash"; mkdir -p "$root"; mkrun "$root" 121 review 2 .escalation-ready
+  mkdir -p "$root/postmaster"; printf '#121\n' > "$root/postmaster/held"
+  out=$("$self" --timeout 0 "$root" 2>&1); rc=$?
+  [ $rc -eq 0 ] && has "needs 121 RULE" && has "held \"#121\" matches no run" \
+    && ok "a #ticket held line warns that it matches no run" || fail "a #ticket held line warns that it matches no run"
+  root="$tmp/neg-heldtypo"; mkdir -p "$root"; mkrun "$root" wait review 2
+  mkdir -p "$root/postmaster"; printf '999\n' > "$root/postmaster/held"
+  out=$("$self" --timeout 0 "$root" 2>&1); rc=$?
+  [ $rc -eq 3 ] && has "wait " && has "held \"999\" matches no run" && ! has "needs " \
+    && ok "a held line for no run warns" || fail "a held line for no run warns"
   root="$tmp/neg-mixed"; mkdir -p "$root"
   mkrun "$root" free review 2 .card-ready
   mkrun "$root" held review 2 .escalation-ready
