@@ -205,8 +205,8 @@ the cause (harnesses.md, Keeping the watcher running) before starting it again. 
 that is not running is a run nobody notices.
 
 The list of runs waiting on the user is `<runs>/postmaster/ESCALATION.md`, kept by
-`<tool>/scripts/host.sh leg waiting`, never by hand. Read it with `host.sh leg waiting list
-<runs>` when the user asks which runs are waiting.
+`<tool>/scripts/host.sh leg waiting`, never by hand. Read it with
+`<tool>/scripts/host.sh leg waiting list <runs>` when the user asks which runs are waiting.
 
 **Hold a run** by writing its ticket to `<runs>/postmaster/held`, one ticket per line,
 exactly as the RUN column shows it: a held run never needs you. **Release it** by removing
@@ -222,11 +222,13 @@ Each `NEXT` names the act:
   action for the recorded outcome.
 - **ASK:** a recorded `refused`, `pre-thread` or fallback `walled` attempt needs the user.
   Read the attempt record and `.err` only to explain what happened; outcome classification comes
-  from the record. Put the question in `.waiting-on-user` and tell the user. When they answer,
-  remove the marker and run `<tool>/scripts/host.sh leg retry <dispatch>
-  <repo>/.worktrees/<TICKET> <leg-name> <n>`. The script replays the stored attempt prompt and
-  thread id. In particular, a refused resume delivers the prompt it was carrying after the user
-  answers.
+  from the record. Put the question in `.waiting-on-user`, add the run to the waiting list with
+  `<tool>/scripts/host.sh leg waiting add <runs> <ticket> <dispatch>/.waiting-on-user`, and tell
+  the user. When they answer, remove the marker and the run from the list with
+  `<tool>/scripts/host.sh leg waiting remove <runs> <ticket>`, then run
+  `<tool>/scripts/host.sh leg retry <dispatch> <repo>/.worktrees/<TICKET> <leg-name> <n>`.
+  The script replays the stored attempt prompt and thread id. In particular, a refused resume
+  delivers the prompt it was carrying after the user answers.
 - **RULE:** an escalation is waiting. Stage E.
 - **GATE:** the ship card is complete. Stage F.
 - **DISPATCH:** the leg's `.leg-<n>-done` marker is present. Stage C for the leg after `n` in
@@ -244,10 +246,14 @@ Each `NEXT` names the act:
 - **READ:** a checkpoint card is waiting. Read it, log `note` with its one-line summary, and
   remove its `.checkpoint-*-ready` marker. In consult mode the card comes with an escalation,
   which RULE handles.
-- **INSPECT:** nothing changed for 30 minutes and no marker. Read the leg's `.err` file and
+- **INSPECT:** nothing changed for 30 minutes and no marker, an attempt that died without
+  its record, or a last record line that is not a record. Read the leg's `.err` file and
   the stream tail to understand a live process; a live leg that is merely slow is left alone.
-  If it exited without an attempt record, stop and raise a control fault. Never infer an action
-  from `.err` text and never kill a running leg for being slow.
+  If it exited without an attempt record, stop and raise a control fault. On the user's answer
+  to that fault, run `<tool>/scripts/host.sh leg backfill <dispatch> <leg-name> <n>`, which
+  classifies the dead attempt from its evidence and appends its record, then act on the
+  backfilled outcome as its NEXT names. Never infer an action from `.err` text and never kill
+  a running leg for being slow.
 - **WAIT:** nothing to do.
 
 **The takeover prompt** for a fallback coachman, written to `<dispatch>/leg-<n>-takeover.txt`:
