@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 import { spawn, spawnSync } from "node:child_process";
 import {
   accessSync,
