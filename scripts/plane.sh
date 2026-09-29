@@ -662,14 +662,15 @@ def self_test():
               r.returncode == 1 and "usage:" in r.stderr and "GET" not in r.stderr, r.stderr)
         proj = os.path.join(d, "proj", ".postmaster")
         os.makedirs(proj)
+        script = os.path.abspath(SCRIPT)
         open(os.path.join(proj, "project.toml"), "w").write('[tracker]\nbinding = "other-ws"\n')
-        r = subprocess.run([SCRIPT, "read"], capture_output=True, text=True, cwd=d,
+        r = subprocess.run([script, "read"], capture_output=True, text=True, cwd=d,
                            env=dict(os.environ, POSTMASTER_CONFIG=cfg, PLANE_API_KEY="self-test",
                                     POSTMASTER_PROJECT=os.path.join(d, "proj")))
         check("a project binding that does not match the machine workspace is refused",
               r.returncode == 1 and "does not match the machine workspace" in r.stderr, r.stderr)
         open(os.path.join(proj, "project.toml"), "w").write('[tracker]\nbinding = "ws"\n')
-        r = subprocess.run([SCRIPT, "read"], capture_output=True, text=True, cwd=d,
+        r = subprocess.run([script, "read"], capture_output=True, text=True, cwd=d,
                            env=dict(os.environ, POSTMASTER_CONFIG=cfg, PLANE_API_KEY="self-test",
                                     POSTMASTER_PROJECT=os.path.join(d, "proj")))
         check("a matching binding reaches usage, with no request",
@@ -677,7 +678,7 @@ def self_test():
         scoped = dict(os.environ, POSTMASTER_CONFIG=cfg, PLANE_API_KEY="self-test")
         scoped.pop("POSTMASTER_PROJECT", None)
         scoped["GIT_CEILING_DIRECTORIES"] = d
-        r = subprocess.run([SCRIPT, "read"], capture_output=True, text=True, cwd=d, env=scoped)
+        r = subprocess.run([script, "read"], capture_output=True, text=True, cwd=d, env=scoped)
         check("with no project in scope the check is skipped and usage follows",
               r.returncode == 1 and "usage:" in r.stderr and "does not match" not in r.stderr, r.stderr)
     print()
