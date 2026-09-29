@@ -626,22 +626,32 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    forked task record the stream's `task_notification` named and normalize the native report
    from the same events stream.
    Codex reads the `--last` file; the other forms read their final event message. A non-zero
-   exit is a control fault, never a clean review; log it and escalate under Tool faults. The
-   generated JSON is the bug findings contract for triage: each item has its target, location,
-   severity, summary, body, evidence, confidence, category and source. A field the harness did
-   not provide is the literal `not provided`; use the normalized file as the bug report.
+   exit is never a clean review and never a stop: the coachman reads that reviewer's raw
+   report itself and records its findings by hand, with the report's path, in place of the
+   generated JSON. The generated JSON is the bug findings contract for triage: each item has
+   its target, location, severity, summary, body, evidence, confidence, category and source.
+   A field the harness did not provide is the literal `not provided`; use the normalized
+   file as the bug report, or the hand-written one where normalization failed.
 
    ```sh
-   NORMALIZE_FAILED=0
+   NORMALIZE_FAILED=""
    for L in $(<tool>/scripts/reviewers.sh lanes <dispatch>/brief.md bug); do
      DEST=<repo>/.worktrees/<TICKET>-rev-bug-$L
      EVENTS=<dispatch>/logs/review-r<round>-bug-$L.jsonl
-     <tool>/scripts/review-findings.sh harvest "$EVENTS" <dispatch>/logs --prefix review-r<round>-bug-$L || NORMALIZE_FAILED=1
+     <tool>/scripts/review-findings.sh harvest "$EVENTS" <dispatch>/logs --prefix review-r<round>-bug-$L \
+       || <tool>/scripts/run-log.sh <dispatch> "review round <round> $L: harvest failed"
      <tool>/scripts/review-findings.sh normalize "$L" "$DEST" "$EVENTS" --last <dispatch>/logs/review-r<round>-bug-$L-last.md --run <dispatch> \
-       > <dispatch>/logs/review-r<round>-bug-$L-findings.json || { NORMALIZE_FAILED=1; rm -f <dispatch>/logs/review-r<round>-bug-$L-findings.json; }
+       > <dispatch>/logs/review-r<round>-bug-$L-findings.json || { NORMALIZE_FAILED="$NORMALIZE_FAILED $L"; rm -f <dispatch>/logs/review-r<round>-bug-$L-findings.json; }
    done
-   [ "$NORMALIZE_FAILED" -eq 0 ] || exit 1   # a control fault still stops the leg, once every lane that could be normalized has been
+   for L in $NORMALIZE_FAILED; do   # a report the normalizer cannot read is read by hand, with its path; never dropped, never clean
+     <tool>/scripts/run-log.sh <dispatch> "review round <round> $L: normalize failed; reading the raw report by hand"
+   done
    ```
+
+   For each such lane, read its raw report — the `--last` file for codex, else the final
+   event message — and write `<dispatch>/logs/review-r<round>-bug-$L-findings.md` by hand:
+   one finding per item with target, location, severity, summary and evidence, each citing
+   the raw report's path. Triage reads the hand-written file as that lane's bug report.
 
    Record every reviewer's thread id in its `review-harvest` line.
 

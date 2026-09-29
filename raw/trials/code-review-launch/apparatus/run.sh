@@ -14,6 +14,57 @@
 # MIMO_ENV_FILE is MiMo Code's key file and is never printed.
 set -uo pipefail
 usage="usage: run.sh <postmaster-checkout> <out-dir>"
+if [ "${1:-}" = "--self-test" ]; then
+  # Stub-harness controls through the whole apparatus: launches that exit 0 with the
+  # planted finding PASS, and launches that exit non-zero FAIL the lane, whatever the
+  # stream holds.
+  HERE_ST=$(cd "$(dirname "$0")" && pwd -P)
+  CHECKOUT=$(cd "$HERE_ST/../../../.." && pwd -P) || exit 1
+  stubbin=$(mktemp -d) || exit 1
+  : > "$stubbin/empty.env"
+  cat > "$stubbin/claude" <<'EOF'
+#!/usr/bin/env bash
+echo '{"type": "result", "subtype": "success", "result": "[{\"file\": \"src/page.js\", \"line\": 8, \"summary\": \"stub bug\"}]"}'
+exit "${STUB_EXIT:-0}"
+EOF
+  cat > "$stubbin/codex" <<'EOF'
+#!/usr/bin/env bash
+last=""; prev=""
+for a in "$@"; do [ "$prev" = "-o" ] && last="$a"; prev="$a"; done
+[ -n "$last" ] && printf -- '- [P1] Stub bug \xe2\x80\x94 src/page.js:8-8\n' > "$last"
+echo '{"type": "turn.completed"}'
+exit "${STUB_EXIT:-0}"
+EOF
+  cat > "$stubbin/mimo" <<'EOF'
+#!/usr/bin/env bash
+cat >/dev/null
+printf '{"type": "text", "part": {"type": "text", "text": "### Bug \xe2\x80\x94 `src/page.js:8`: stub bug\\n"}}\n'
+exit "${STUB_EXIT:-0}"
+EOF
+  chmod +x "$stubbin/claude" "$stubbin/codex" "$stubbin/mimo"
+  out0=$(mktemp -d) || exit 1
+  out1=$(mktemp -d) || exit 1
+  trap 'rm -rf -- "$stubbin" "$out0" "$out1" "$out0.log" "$out1.log"' EXIT
+  fails=0
+  STUB_EXIT=0 PATH="$stubbin:$PATH" MIMO_ENV_FILE="$stubbin/empty.env" "$0" "$CHECKOUT" "$out0" > "$out0.log" 2>&1
+  rc0=$?
+  if [ $rc0 -eq 0 ] && grep -q '^PASS opus' "$out0.log" && grep -q '^PASS luna' "$out0.log" && grep -q '^PASS mimo' "$out0.log"; then
+    echo "  ok   launches that exit 0 with the finding PASS every lane"
+  else
+    echo "  FAIL launches that exit 0 with the finding PASS every lane"; fails=$((fails+1))
+  fi
+  STUB_EXIT=1 PATH="$stubbin:$PATH" MIMO_ENV_FILE="$stubbin/empty.env" "$0" "$CHECKOUT" "$out1" > "$out1.log" 2>&1
+  rc1=$?
+  if [ $rc1 -eq 1 ] && grep -q '^FAIL opus: launch.sh review exit 1' "$out1.log" \
+    && grep -q '^FAIL luna: launch.sh review exit 1' "$out1.log" \
+    && grep -q '^FAIL mimo: launch.sh review exit 1' "$out1.log"; then
+    echo "  ok   launches that exit non-zero FAIL every lane"
+  else
+    echo "  FAIL launches that exit non-zero FAIL every lane"; fails=$((fails+1))
+  fi
+  if [ $fails -eq 0 ]; then echo "self-test: all controls behaved"; else echo "self-test: $fails control(s) misbehaved"; fi
+  exit $fails
+fi
 ROOT=$(cd "${1:?$usage}" && pwd -P) || exit 1
 OUT=${2:?$usage}; shift 2
 HERE=$(cd "$(dirname "$0")" && pwd -P)
@@ -96,6 +147,11 @@ for lane in opus luna mimo; do
     --last "$OUT/$lane-last.md" > "$OUT/$lane.jsonl" 2> "$OUT/$lane.err"
   rc=$?
   echo "exit $rc"
+  if [ $rc -ne 0 ]; then
+    echo "FAIL $lane: launch.sh review exit $rc"
+    failed=1
+    continue
+  fi
   # Harvest the review's own record where the harness keeps it outside the stream
   # (criterion 8): claude's forked task files, named by the stream's task_notification.
   "$ROOT/scripts/review-findings.sh" harvest "$OUT/$lane.jsonl" "$OUT" --prefix "$lane" \

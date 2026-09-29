@@ -680,13 +680,32 @@ def self_test():
             ("a task_notification with an empty output file fails", {"type": "system", "subtype": "task_notification", "output_file": ""}, "names no output file"),
             ("a task_notification with a non-text output file fails", {"type": "system", "subtype": "task_notification", "output_file": 7}, "not text"),
             ("a task_notification naming a missing file fails", {"type": "system", "subtype": "task_notification", "output_file": str(task_home / "absent.txt")}, "missing"),
-            ("a task_notification naming a file outside the task tree fails", {"type": "system", "subtype": "task_notification", "output_file": str(outside)}, "outside"),
         ]
         for number, (label, notification, message) in enumerate(negatives):
             events = root / ("harvest-neg-%d.events" % number)
             events.write_text(json.dumps(notification) + "\n", encoding="utf-8")
             result = subprocess.run([sys.executable, __file__, "harvest", str(events), str(logs), "--prefix", "neg"], capture_output=True, text=True)
             check(label, result.returncode == 1 and message in result.stderr, result.stderr or result.stdout)
+        # The outside-tree case names its allowed root explicitly: a scratchpad TMPDIR
+        # sits inside the default root, so a tempfile fixture is outside it only by luck.
+        tree = root / "task-tree"
+        tree.mkdir()
+        outside_events = root / "harvest-outside.events"
+        outside_events.write_text(json.dumps({"type": "system", "subtype": "task_notification", "output_file": str(outside)}) + "\n", encoding="utf-8")
+        try:
+            harvest(str(outside_events), str(root / "logs-outside"), "outside", task_root=str(tree))
+            check("a task_notification naming a file outside the task tree fails", False, "no error")
+        except ReportError as exc:
+            check("a task_notification naming a file outside the task tree fails", "outside" in str(exc), str(exc))
+        inner = task_home / "inner-task-output.txt"
+        inner.write_text("inside the default root\n", encoding="utf-8")
+        inner_events = root / "harvest-inner.events"
+        inner_events.write_text(json.dumps({"type": "system", "subtype": "task_notification", "output_file": str(inner)}) + "\n", encoding="utf-8")
+        try:
+            harvest(str(inner_events), str(root / "logs-inner"), "inner", task_root=str(tree))
+            check("a file inside the default root but outside the named root still fails", False, "no error")
+        except ReportError as exc:
+            check("a file inside the default root but outside the named root still fails", "outside" in str(exc), str(exc))
         quiet = root / "harvest-quiet.events"
         quiet.write_text(json.dumps({"type": "turn.completed"}) + "\n", encoding="utf-8")
         result = subprocess.run([sys.executable, __file__, "harvest", str(quiet), str(logs), "--prefix", "quiet"], capture_output=True, text=True)
