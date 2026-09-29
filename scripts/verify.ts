@@ -24,6 +24,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   statSync,
@@ -1840,6 +1841,80 @@ shows = "passes only on what the gate rewrote"
     "modules in the target's own directory are never imported",
     !existsSync(join(tmp, "imported")),
   );
+
+  // Bun's own loader is isolated too: a target's bunfig.toml preload runs
+  // nothing through checks or discover. (.env rides along in the target;
+  // its vector is covered by the wrapper static check plus the flag-effect
+  // check below, since no script echoes the environment it runs in.)
+  {
+    writeFileSync(join(q, "bunfig.toml"), 'preload = ["./scary.ts"]\n');
+    writeFileSync(
+      join(q, "scary.ts"),
+      `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(join(tmp, "preloaded"))}, "x");\n`,
+    );
+    writeFileSync(join(q, ".env"), "VERIFY_ISOLATION_PROBE=loaded\n");
+    run("bash", [
+      "-c",
+      `cd "${q}" && "${SELF}" checks . --lines >/dev/null 2>&1; "${join(HERE, "discover-project.sh")}" . >/dev/null 2>&1`,
+    ]);
+    rmSync(join(q, "bunfig.toml"), { force: true });
+    rmSync(join(q, "scary.ts"), { force: true });
+    rmSync(join(q, ".env"), { force: true });
+    st.check(
+      "a target's bunfig.toml preload runs nothing through checks or discover",
+      !existsSync(join(tmp, "preloaded")),
+    );
+  }
+
+  // Every wrapper runs bun with --no-env-file and the tool-owned --config,
+  // so no working directory's bunfig.toml or .env is ever discovered.
+  {
+    const bad: string[] = [];
+    for (const w of readdirSync(HERE).filter((f) => f.endsWith(".sh"))) {
+      const text = readFileSync(join(HERE, w), "utf8");
+      if (!text.includes("--no-env-file") || !text.includes("--config=") || !text.includes("bunfig.toml"))
+        bad.push(w);
+    }
+    st.check("every wrapper isolates bun from the working directory", bad.length === 0, bad.join(" "));
+  }
+
+  // The flags mean what they say, against this bun: bare bun loads a .env
+  // where flagged bun does not. If a future bun drops --no-env-file, this
+  // fails loudly instead of silently exposing every wrapper.
+  {
+    const d = join(tmp, "flagfx");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, ".env"), "VERIFY_ISOLATION_PROBE=loaded\n");
+    const bare = run("bash", [
+      "-c",
+      `cd "${d}" && bun -e 'console.log(process.env.VERIFY_ISOLATION_PROBE ?? "unset")'`,
+    ]);
+    const flagged = run("bash", [
+      "-c",
+      `cd "${d}" && bun --no-env-file -e 'console.log(process.env.VERIFY_ISOLATION_PROBE ?? "unset")'`,
+    ]);
+    st.check(
+      "--no-env-file suppresses .env where bare bun loads it",
+      bare.out.replace(/\n+$/, "") === "loaded" && flagged.out.replace(/\n+$/, "") === "unset",
+      `bare ${JSON.stringify(bare.out)} flagged ${JSON.stringify(flagged.out)}`,
+    );
+  }
+
+  // Discover hands verify the absolute target and the tool root to stand
+  // on, so no bun ever runs with the target as its cwd.
+  {
+    const src = readFileSync(join(HERE, "discover-project.ts"), "utf8");
+    st.check(
+      "discover runs verify from the tool root against the absolute target",
+      src.includes('["checks", ABS,') && src.includes("cwd: toolRoot(import.meta)"),
+    );
+    const r = run("bash", [join(HERE, "discover-project.sh"), q]);
+    st.check(
+      "discover still reports checks through the restructured spawn",
+      r.code === 0 && (r.out + r.err).includes("check.gate="),
+      r.out + r.err,
+    );
+  }
 
   // Nothing a check starts outlives it
   console.log("nothing a check starts outlives it");

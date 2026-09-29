@@ -4,7 +4,7 @@
 // the project's .postmaster/project.toml, or a default and which one (scripts/verify.sh).
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { tryJsonFile } from "./lib/data.ts";
-import { beside } from "./lib/paths.ts";
+import { beside, toolRoot } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
 
 for (const name of [
@@ -30,9 +30,11 @@ if (T === undefined || T === "") {
 const kindRun = run(beside(import.meta, "tracker-kind.sh"), [T]);
 const kind = kindRun.code === 0 ? kindRun.out.replace(/\n+$/, "") : "";
 
+let ABS: string;
 try {
   // cd -P: enter the physical path, so a symlinked target is discovered as itself.
-  process.chdir(realpathSync(T));
+  ABS = realpathSync(T);
+  process.chdir(ABS);
 } catch {
   console.error(`cannot enter ${T}`);
   process.exit(1);
@@ -88,7 +90,13 @@ const ranked = [...counts.entries()].sort(
 const trackerPrefix = ranked[0]?.[0] ?? "";
 
 // The checks, declared or found as defaults; a declared gate is the gate.
-const verified = run(beside(import.meta, "verify.sh"), ["checks", ".", "--gate", gate, "--lines"]);
+// No bun ever runs with the target as its cwd: verify gets the absolute
+// target and the tool root to stand on. (Wrapper --no-env-file/--config
+// covers the rest; kindRun above keeps the caller's directory because a
+// relative POSTMASTER_CONFIG reads from there, as BASE has it.)
+const verified = run(beside(import.meta, "verify.sh"), ["checks", ABS, "--gate", gate, "--lines"], {
+  cwd: toolRoot(import.meta),
+});
 const fields = (line: string): number => (line === "" ? 0 : line.split("\t").length);
 let checks: string[] = [];
 if (verified.code === 0) {
