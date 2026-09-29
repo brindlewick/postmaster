@@ -287,21 +287,29 @@ read the two fields as the ref, then the remote: a blank answer means no upstrea
 `.` remote means a local upstream, which needs no fetch. Do the same for the ticket
 branch. On the pull-request route, `git fetch` each named remote before asking `fresh`,
 and again after the user's merge word (on the `landing: local` route no fetch is needed:
-every call below reads the local branch). Pass the upstream short ref wherever a landing
-call in Stage F or Stage G takes `--default` on the pull-request route, and the local
-branch on the `landing: local` route, which is what the merge lands on; `fresh` takes
-the route's own ref. Pass the ticket branch's upstream short ref wherever a landing call
-takes `--ticket` on the pull-request route — the fetched ref, so a pull request updated
-past the card answers `re-verify`, never `landed` — and the ticket branch itself on the
-`landing: local` route. When a branch has no upstream, pass the branch itself: with
-nothing tracking it there is no fresher ref, and remote movement it does not track can
-be missed.
+every call below reads the local branch). A failed fetch stops the stage like a
+`landing.sh` exit 1: fix the inputs and re-run, never decide on possibly-stale refs.
+Pass the upstream short ref wherever a landing call in Stage F or Stage G takes
+`--default` on the pull-request route, and the local branch on the `landing: local`
+route, which is what the merge lands on; `fresh` takes the route's own ref.
+`already-landed` and `anything-to-land` take the ticket branch's upstream short ref as
+`--ticket` on the pull-request route — the fetched ref, so a pull request updated past
+the card answers `re-verify`, never `landed` — and the ticket branch itself on the
+`landing: local` route. `fresh` takes the ticket branch itself as `--ticket` on both
+routes: its question is whether this worktree is current, and only the local branch
+answers that. When a branch has no upstream, pass the branch itself: with nothing
+tracking it there is no fresher ref, and remote movement it does not track can be
+missed.
 
 1. **Verify the card's claims against the code**, never against the card.
    `<tool>/scripts/landing.sh fresh --repo <repo> --default <branch> --ticket
-   <the ticket ref> --dispatch <dispatch> --wt <synthesis-wt>` must print `fresh`: the
+   <ticket-branch> --dispatch <dispatch> --wt <synthesis-wt>` must print `fresh`: the
    ticket branch holds the current default branch and the record shows the gate passing at
-   its head. The postmaster runs no gate of its own; log what the call printed. On `stale`,
+   its head. The postmaster runs no gate of its own; log what the call printed. On `head:`,
+   the worktree is not at the ticket's head: move the synthesis worktree to the ticket
+   branch's head and ask `fresh` again. On `gate:`, the record shows the gate not passing
+   at the head: withhold under the claim-fail clause below with the gate result as the
+   exact discrepancy. On `stale`,
    withhold: remove `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`,
    then resume that last leg to merge the default branch into the ticket branch, never
    rebasing, run its gates again and raise the card again, and wait for the corrected card.

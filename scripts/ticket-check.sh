@@ -18,8 +18,8 @@
 #                                                         the text, case-insensitively, with whitespace
 #                                                         runs (and zero-width joiners) collapsed, the
 #                                                         possessive `'s`/`’s` dropped, and markup (`#`,
-#                                                         `>`, `*`, `_`, backticks, apostrophes, comment
-#                                                         openers and closers) read as spaces. No headings
+#                                                         `>`, `*`, `_`, backticks, apostrophes, hyphens,
+#                                                         comment openers and closers) read as spaces. No headings
 #                                                         are read. Fail-closed: a mention in passing
 #                                                         blocks landing visibly until the journey runs
 #                                                         or the user rules.
@@ -355,7 +355,7 @@ def splice(base_text, sections_text):
             lines.append("")
     return "\n".join(lines) + "\n"
 
-JOURNEY_MARKUP = re.compile(r"<!--|-->|[#> *_`'\u2019]+")
+JOURNEY_MARKUP = re.compile(r"<!--|-->|[#> *_`'\u2019\u2013\u2014-]+")
 JOURNEY_SPACE = re.compile(r"[\s\u200b\u2060\u00ad]+")
 
 def has_journey(text):  # fail-closed: the phrase anywhere counts, whatever shapes it
@@ -951,6 +951,12 @@ jbody "$P" "$A" "$D" "$K" "## Notes" $'Improve the user\xc2\xadjourney.'
 jexpect "AE4: a soft hyphen still reads" "journey"
 jbody "$P" "$A" "$D" "$K" "## Notes" "Improve the user&#32;journey."
 jexpect "AE4: an entity is not decoded" "no journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "Improve the user-journey at checkout."
+jexpect "AF3: a hyphen joins the phrase" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "Improve the user–journey at checkout."
+jexpect "AF3: an en dash joins the phrase" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "Improve the user—journey at checkout."
+jexpect "AF3: an em dash joins the phrase" "journey"
 body "<!-- x --> ## Problem / feature
 A ticket reaches a coachman with words under it." "$A" "$D" "$K"; run "$T"
 expect "a same-line remainder does not satisfy a required part" 2 "problem / feature"
