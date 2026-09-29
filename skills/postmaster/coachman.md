@@ -535,7 +535,7 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    <tool>/scripts/verify.sh run <synthesis-wt> <dispatch> > <dispatch>/logs/review-r<round>-checks.txt || VERIFY_EXIT=$?
    cat <dispatch>/logs/review-r<round>-checks.txt
    <tool>/scripts/log-action.sh <dispatch> coachman gate "$SNAP" "review round <round>, verify.sh exit $VERIFY_EXIT"
-   [ "$VERIFY_EXIT" -ne 1 ] || exit 1   # verify.sh could not run or could not log; do not launch reviewers. A check that failed (2) or was not run (3) is the run's work: the round proceeds and the card records it
+   [ "$VERIFY_EXIT" -eq 0 ] || exit 1   # any non-zero stops the round: the gate must be green before reviewers launch. On red, fix the gate on the synthesis worktree and repeat this step
    git -C <repo> worktree prune
    for LENS in <open lenses>; do   # a lens whose lanes do not resolve stops the round here
      <tool>/scripts/reviewers.sh lanes <dispatch>/brief.md "$LENS" >/dev/null || exit 1

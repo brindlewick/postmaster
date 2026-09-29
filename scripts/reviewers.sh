@@ -14,8 +14,10 @@
 # `lines` prints `reviewers: <lane>, <lane>`, a `bug reviewers:` line containing only eligible
 # lanes, then each other lens the config gives its own lanes. `eligible` resolves a configured
 # lens and exits 2 if it has no eligible reviewers. `lanes` reads only the waybill's `## Team`
-# section: the lens's own line where it has one, the `reviewers:` line otherwise. The lenses are
-# the entries of the review stage in skills/postmaster/coachman.md, and change with it.
+# section: the lens's own line where it has one, the `reviewers:` line otherwise, except the
+# bug lens, which is refused when its own line is missing rather than reading unfiltered
+# reviewers. The lenses are the entries of the review stage in skills/postmaster/coachman.md,
+# and change with it.
 #
 #   exit 0  printed
 #   exit 1  usage, no config or one that does not parse, or no such waybill
@@ -110,6 +112,9 @@ def listed(prefix):
             return [name.strip() for name in m.group(1).split(",") if name.strip()]
     return None
 found = listed(lens + " reviewers")
+if found is None and lens == "bug":
+    print("reviewers: the Team section of %s has no bug reviewers line (the bug lens never falls back to reviewers:)" % path, file=sys.stderr)
+    sys.exit(2)
 if found is None:
     found = listed("reviewers")
 if not found:
@@ -223,6 +228,10 @@ expect "a Team section with no reviewers line is refused, never read as no revie
 expect "reviewer lines in the ticket's text are not read" 2 '' lanes "$tmp/no-team.md" security
 { printf '# Waybill: 7\n\n## Team\nreviewers: luna, mimo\nbug reviewers: \n'; } > "$tmp/empty-bug.md"
 expect "an explicit empty bug reviewers line does not fall back to reviewers" 2 '' lanes "$tmp/empty-bug.md" bug
+waybill no-bug-line 'reviewers: luna, pi'
+expect "a waybill with no bug reviewers line is refused, never fallen back" 2 '' lanes "$tmp/no-bug-line.md" bug
+grep -q 'no bug reviewers line' "$tmp/err" \
+  && ok "the refusal names the missing bug reviewers line" || fail "the refusal names the missing bug reviewers line" "$(cat "$tmp/err")"
 expect "no such waybill is refused" 1 '' lanes "$tmp/none.md" bug
 
 echo

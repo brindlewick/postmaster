@@ -132,14 +132,26 @@ def normalize_item(item, harness, scratch):
     }
 
 
+def pick_findings(found):
+    """The one findings list among candidates: non-empty and holding an object. Scalar or
+    empty lists say nothing; two findings lists fail loudly rather than guessing."""
+    candidates = [value for value in found if value and any(isinstance(item, dict) for item in value)]
+    if len(candidates) > 1:
+        raise ReportError("review output holds %d JSON finding lists; refusing to guess which holds the findings" % len(candidates))
+    return candidates[0] if candidates else None
+
+
 def json_findings(text):
     stripped = re.sub(r"```(?:json)?\s*|```", "", text, flags=re.I).strip()
     try:
         value = json.loads(stripped)
         if isinstance(value, dict):
-            for key in ("findings", "review_findings", "issues"):
-                if isinstance(value.get(key), list):
-                    return value[key]
+            keyed = [value[key] for key in ("findings", "review_findings", "issues")
+                     if isinstance(value.get(key), list)]
+            if keyed:
+                picked = pick_findings(keyed)
+                # A whole report that is only empty lists is clean, as [] is.
+                return picked if picked is not None else []
         if isinstance(value, list):
             return value
     except ValueError:
@@ -153,21 +165,15 @@ def json_findings(text):
             continue
         if isinstance(value, list):
             found.append(value)
-    # A findings list is a non-empty list holding at least one object: scalar lists such as
-    # [1, 2, 3] in the prose are incidental and say nothing. Empty lists alone say nothing too,
-    # so a placeholder [] before the prose never reads as clean on its own.
-    candidates = [value for value in found if value and any(isinstance(item, dict) for item in value)]
-    if len(candidates) > 1:
-        raise ReportError("review output holds %d JSON finding lists; refusing to guess which holds the findings" % len(candidates))
-    if candidates:
-        return candidates[0]
-    return None
+    # Empty lists alone say nothing: fall through to the markdown and clean handling, so a
+    # placeholder [] before the prose never reads as clean on its own.
+    return pick_findings(found)
 
 
 CLEAN_PHRASES = ("nothing to review", "no findings", "no bugs", "no issues",
                  "looks correct", "no problems", "no defects", "patch is correct",
                  "i found no", "found nothing", "no code changes")
-FINDING_MARKER = re.compile(r"\[P[123]\]|\.[A-Za-z0-9]{1,12}:\d+")
+FINDING_MARKER = re.compile(r"\[P[123]\]|\.[A-Za-z0-9]{1,12}:\d+|[A-Za-z][^\s`*<>:]*:\d+")
 
 
 def explicit_clean(text):
@@ -180,7 +186,8 @@ def explicit_clean(text):
         return True
     # A clean verdict in longer prose ("Nothing to review. The worktree is clean.") counts,
     # but only when no finding marker is present: a report that cites a file and line, or a
-    # priority, is parsed as findings or fails loudly, never read as clean.
+    # priority, is parsed as findings or fails loudly, never read as clean. A bare Makefile:8
+    # counts as a citation; a timestamp (12:30) does not.
     return any(phrase in compact for phrase in CLEAN_PHRASES) and not FINDING_MARKER.search(text)
 
 
@@ -215,10 +222,54 @@ def finding_body(lines, index):
     return ("\n".join(body) if body else None, evidence)
 
 
+# Headings whose sections hold non-findings, exactly as the recorded reports use them:
+# mimo's "Not issues". Anything unrecorded ("Non-issues", "Not a bug") still parses,
+# loudly, rather than being guessed at.
+SKIP_SECTIONS = ("not issues",)
+
+
+def check_fences_closed(lines):
+    depth = sum(1 for raw in lines if raw.strip().startswith("```"))
+    if depth % 2:
+        raise ReportError("review output has an unclosed code fence")
+
+
+LOCATION = re.compile(r"(?P<path>(?:[A-Za-z]:)?[^\s`*<>]+):(?P<line>\d+)(?:-(?P<end>\d+))?")
+
+
+def cites_location(line):
+    """A path:line citation: the path must hold a letter, so Makefile:8 counts and 12:30
+    does not. A bare name can over-match (localhost:8080); the coachman's verification
+    drops what does not hold, which beats losing a real citation quietly."""
+    match = LOCATION.search(line)
+    return bool(match) and bool(re.search(r"[A-Za-z]", match.group("path")))
+
+
+def descope_not_issues(text):
+    """Blank citations and fenced lines under recorded not-issues headings, keeping line
+    numbers and prose, so their citations neither parse as findings nor trip the clean
+    guard while a clean verdict in the same section still reads."""
+    out = []
+    in_fence = False
+    skip = False
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            out.append("" if skip else raw)
+            continue
+        if not in_fence and stripped.startswith("#"):
+            skip = stripped.lstrip("#").strip().lower().rstrip(":") in SKIP_SECTIONS
+        if skip and (in_fence or cites_location(stripped)):
+            out.append("")
+        else:
+            out.append(raw)
+    return "\n".join(out)
+
+
 def markdown_findings(text, harness, scratch):
     findings = []
     in_fence = False
-    location = re.compile(r"(?P<path>(?:[A-Za-z]:)?[^\s`*<>]+\.[A-Za-z0-9]{1,12}):(?P<line>\d+)(?:-(?P<end>\d+))?")
     lines = text.splitlines()
     for index, raw in enumerate(lines):
         line = raw.strip()
@@ -231,8 +282,10 @@ def markdown_findings(text, harness, scratch):
             continue
         if not (line.startswith("#") or line.startswith(("-", "*", "**", "`")) or " — " in line or " – " in line):
             continue
-        match = location.search(line)
+        match = LOCATION.search(line)
         if not match:
+            continue
+        if not re.search(r"[A-Za-z]", match.group("path")):
             continue
         prefix = line[:match.start()].strip("#*-` :—–")
         suffix = line[match.end():].strip("` :—–-")
@@ -252,8 +305,15 @@ def markdown_findings(text, harness, scratch):
 def codex_findings(text, scratch):
     pattern = re.compile(r"^\s*[-*]\s*\[(P[1-3])\]\s*(.+?)\s+[—–]\s+(.+):(\d+)(?:-(\d+))?\s*$")
     findings = []
+    in_fence = False
     lines = text.splitlines()
     for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
         match = pattern.match(line)
         if match:
             severity, title, path, start, end = match.groups()
@@ -280,14 +340,16 @@ def parse_report(harness, text, scratch):
                 except ReportError as exc:
                     raise ReportError("finding %d: %s" % (position, exc)) from exc
             return unique_findings(normalized)
+    check_fences_closed(text.splitlines())
+    scoped = descope_not_issues(text)
     if harness == "codex":
-        findings = codex_findings(text, scratch)
+        findings = codex_findings(scoped, scratch)
         if findings:
             return unique_findings(findings)
-    findings = markdown_findings(text, harness, scratch)
+    findings = markdown_findings(scoped, harness, scratch)
     if findings:
         return unique_findings(findings)
-    if explicit_clean(text):
+    if explicit_clean(scoped):
         return []
     raise ReportError("cannot parse review output from %s" % harness)
 
@@ -563,6 +625,62 @@ def self_test():
         mixed.write_text(json.dumps({"type": "result", "subtype": "success", "result": "[{\"file\": \"src/a.js\", \"line\": 1, \"summary\": \"good\"}, {\"summary\": \"no file\"}, {\"file\": \"src/b.js\", \"line\": 2, \"summary\": \"good\"}]"}) + "\n", encoding="utf-8")
         result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(mixed), "--run", str(run_config("mixed", "claude"))], capture_output=True, text=True)
         check("a bad item names its index when the batch fails", result.returncode == 1 and "finding 1" in result.stderr, result.stderr or result.stdout)
+        dict_empty_first = root / "claude-dict-empty-first.events"
+        dict_empty_first.write_text(json.dumps({"type": "result", "subtype": "success", "result": '{"findings": [], "issues": [{"file": "src/page.js", "line": 8, "summary": "bug"}]}'}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(dict_empty_first), "--run", str(run_config("dict-empty-first", "claude"))], capture_output=True, text=True)
+        try:
+            parsed = json.loads(result.stdout)
+            check("an empty findings list does not win over a real issues list", result.returncode == 0 and len(parsed) == 1 and parsed[0]["file"] == "src/page.js", result.stderr or result.stdout)
+        except ValueError:
+            check("an empty findings list does not win over a real issues list", False, result.stderr or result.stdout)
+        dict_two_full = root / "claude-dict-two-full.events"
+        dict_two_full.write_text(json.dumps({"type": "result", "subtype": "success", "result": '{"findings": [{"file": "src/a.js", "line": 1, "summary": "one"}], "issues": [{"file": "src/b.js", "line": 2, "summary": "two"}]}'}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(dict_two_full), "--run", str(run_config("dict-two-full", "claude"))], capture_output=True, text=True)
+        check("two populated dict lists fail loudly", result.returncode == 1 and "JSON finding lists" in result.stderr, result.stderr or result.stdout)
+        dict_empty_only = root / "claude-dict-empty-only.events"
+        dict_empty_only.write_text(json.dumps({"type": "result", "subtype": "success", "result": '{"findings": []}'}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(dict_empty_only), "--run", str(run_config("dict-empty-only", "claude"))], capture_output=True, text=True)
+        check("a whole report of only empty lists stays clean", result.returncode == 0 and result.stdout.strip() == "[]", result.stderr or result.stdout)
+        makefile = root / "mimo-makefile.events"
+        makefile.write_text(json.dumps({"type": "text", "part": {"type": "text", "text": "### Build\n- Check `Makefile:8`: the clean target removes the wrong dir.\n"}}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(makefile), "--run", str(run_config("makefile", "mimo"))], capture_output=True, text=True)
+        try:
+            parsed = json.loads(result.stdout)
+            check("an extensionless file with a line is a finding", result.returncode == 0 and len(parsed) == 1 and parsed[0]["file"] == "Makefile" and parsed[0]["line"] == 8, result.stderr or result.stdout)
+        except ValueError:
+            check("an extensionless file with a line is a finding", False, result.stderr or result.stdout)
+        unclosed = root / "mimo-unclosed.events"
+        unclosed.write_text(json.dumps({"type": "text", "part": {"type": "text", "text": "### Bug one `src/page.js:8`\n```js\nreturn all().slice(start, start + size + 1);\n\n### Bug two `src/count.js:6`\nSomething else is wrong.\n"}}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(unclosed), "--run", str(run_config("unclosed", "mimo"))], capture_output=True, text=True)
+        check("an unclosed fence fails loudly", result.returncode == 1 and "unclosed code fence" in result.stderr, result.stderr or result.stdout)
+        codex_unclosed = root / "codex-unclosed.events"
+        codex_unclosed.write_text(json.dumps({"type": "turn.completed"}) + "\n", encoding="utf-8")
+        codex_unclosed_last = root / "codex-unclosed.last"
+        codex_unclosed_last.write_text("- [P1] First \u2014 src/a.js:1-1\n```\n- [P1] Second \u2014 src/b.js:2-2\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(codex_unclosed), "--run", str(run_config("codex-unclosed", "codex")), "--last", str(codex_unclosed_last)], capture_output=True, text=True)
+        check("an unclosed fence in a codex report fails loudly", result.returncode == 1 and "unclosed code fence" in result.stderr, result.stderr or result.stdout)
+        codex_fenced = root / "codex-fenced.events"
+        codex_fenced.write_text(json.dumps({"type": "turn.completed"}) + "\n", encoding="utf-8")
+        codex_fenced_last = root / "codex-fenced.last"
+        codex_fenced_last.write_text("The fix is:\n```\n- [P1] Example bug \u2014 src/page.js:8-8\n```\n- [P1] Real bug \u2014 src/count.js:6-6\n  Real body.\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(codex_fenced), "--run", str(run_config("codex-fenced", "codex")), "--last", str(codex_fenced_last)], capture_output=True, text=True)
+        try:
+            parsed = json.loads(result.stdout)
+            check("a codex finding inside a fence is not filed", result.returncode == 0 and len(parsed) == 1 and parsed[0]["file"] == "src/count.js", result.stderr or result.stdout)
+        except ValueError:
+            check("a codex finding inside a fence is not filed", False, result.stderr or result.stdout)
+        notissues = root / "mimo-notissues.events"
+        notissues.write_text(json.dumps({"type": "text", "part": {"type": "text", "text": "### Not issues\n- Validation is fine \u2014 `src/count.js:6`: empty stores yield zero pages, which is correct.\n\nNo issues found.\n"}}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(notissues), "--run", str(run_config("notissues", "mimo"))], capture_output=True, text=True)
+        check("a location cited under Not issues is not a finding", result.returncode == 0 and result.stdout.strip() == "[]", result.stderr or result.stdout)
+        notissues_resume = root / "mimo-notissues-resume.events"
+        notissues_resume.write_text(json.dumps({"type": "text", "part": {"type": "text", "text": "### Bugs\n- Broken \u2014 `src/a.js:1`: wrong.\n### Not issues\n- Fine \u2014 `src/b.js:2`: not wrong.\n### More\n- Also broken \u2014 `src/c.js:3`: wrong.\n"}}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(notissues_resume), "--run", str(run_config("notissues-resume", "mimo"))], capture_output=True, text=True)
+        try:
+            parsed = json.loads(result.stdout)
+            check("findings outside Not issues still parse", result.returncode == 0 and sorted(f["target"] for f in parsed) == ["src/a.js:1", "src/c.js:3"], result.stderr or result.stdout)
+        except ValueError:
+            check("findings outside Not issues still parse", False, result.stderr or result.stdout)
         shutil.rmtree(task_home, ignore_errors=True)
 
     print()
