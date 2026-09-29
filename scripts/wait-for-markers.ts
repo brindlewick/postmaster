@@ -18,7 +18,16 @@
 // count a marker this script plants (positive control) and count zero for a pattern that cannot
 // match (negative control). A poller that can only ever say 0 is indistinguishable from lanes
 // that are still working, so it reads as patience rather than as a broken instrument.
-import { chmodSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
 import { run, withTempDir } from "./lib/proc.ts";
@@ -86,30 +95,45 @@ function wait(dirRaw: string, glob: string, countRaw: string, timeoutRaw: string
     return 1;
   }
 
-  let left = TIMEOUT;
-  while (count(glob) < COUNT) {
-    if (left <= 0) {
-      console.log(
-        `WAIT-TIMEOUT after ${TIMEOUT}s: ${count(glob)} of ${COUNT} markers matching ${glob}`,
-      );
-      try {
-        for (const f of readdirSync(DIR)
-          .filter((f) => matchGlob(f, glob))
-          .sort()) {
-          console.log(`  present: ${join(DIR, f)}`);
-        }
-      } catch {
-        /* ignore */
+  if (countdown(() => count(glob), COUNT, TIMEOUT) === "timeout") {
+    console.log(
+      `WAIT-TIMEOUT after ${TIMEOUT}s: ${count(glob)} of ${COUNT} markers matching ${glob}`,
+    );
+    try {
+      for (const f of readdirSync(DIR)
+        .filter((f) => matchGlob(f, glob))
+        .sort()) {
+        console.log(`  present: ${join(DIR, f)}`);
       }
-      return 3;
+    } catch {
+      /* ignore */
     }
-    const nap = left < 20 ? left : 20;
-    const sab = new SharedArrayBuffer(4);
-    Atomics.wait(new Int32Array(sab), 0, 0, nap * 1000);
-    left -= nap;
+    return 3;
   }
   console.log(`all ${COUNT} markers present`);
   return 0;
+}
+
+/** Poll until countFn reaches count or timeout seconds elapse. The timeout
+ * counts slept seconds through sleep alone and never reads the wall clock,
+ * so time asleep is not counted and a clock set forward cannot end the wait
+ * early. Naps are 20 seconds but the last, which is the remainder. */
+function countdown(
+  countFn: () => number,
+  count: number,
+  timeout: number,
+  sleep: (ms: number) => void = (ms) => {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  },
+): "present" | "timeout" {
+  let left = timeout;
+  while (countFn() < count) {
+    if (left <= 0) return "timeout";
+    const nap = left < 20 ? left : 20;
+    sleep(nap * 1000);
+    left -= nap;
+  }
+  return "present";
 }
 
 // --- entry ------------------------------------------------------------------------------
@@ -143,12 +167,23 @@ if (argv[0] === "--self-test") {
       ok("markers already in are collected at once");
     else fail("markers already in are collected at once");
 
-    // A marker that lands during the wait (background write after 1s)
-    const _bg = run("bash", ["-c", `( sleep 1; touch "${join(d, "review-r2-bug-one.done")}" ) &`]);
-    invoke(d, "review-r2-*.done", "1", "3");
-    if (rc === 0 && out.trim() === "all 1 markers present")
-      ok("a marker that lands during the wait is collected by the timeout");
-    else fail("a marker that lands during the wait is collected by the timeout");
+    // A marker that lands during the wait (background write after 1s). The
+    // writer is detached: a synchronous spawn waits for its background jobs,
+    // and the marker would pre-exist instead of landing mid-wait.
+    const landing = join(d, "review-r2-bug-one.done");
+    const bg = spawn("bash", ["-c", `sleep 1; touch "${landing}"`], {
+      detached: true,
+      stdio: "ignore",
+    });
+    bg.unref();
+    if (existsSync(landing)) {
+      fail("a marker that lands during the wait is collected by the timeout");
+    } else {
+      invoke(d, "review-r2-*.done", "1", "3");
+      if (rc === 0 && out.trim() === "all 1 markers present")
+        ok("a marker that lands during the wait is collected by the timeout");
+      else fail("a marker that lands during the wait is collected by the timeout");
+    }
 
     for (let i = 1; i <= 9; i++) writeFileSync(join(d, `review-r5-bug-${i}.done`), "");
     invoke(d, "review-r5-*.done", "010", "1");
@@ -172,11 +207,29 @@ if (argv[0] === "--self-test") {
     if (rc === 3 && took <= 3) ok("the timeout is kept to the second, not the next 20-second look");
     else fail("the timeout is kept to the second, not the next 20-second look");
 
-    // Clock jump test: the original creates a fake date binary. We test that timeout is respected
-    // by running with a short timeout and verifying it returns at the right time.
-    invoke(d, "review-r3-*.done", "2", "2");
-    if (rc === 3 && took >= 2) ok("a clock that jumps ahead does not end the wait early");
-    else fail("a clock that jumps ahead does not end the wait early");
+    // The timeout counts slept seconds through the countdown alone: run it with
+    // a fake sleep while a fake wall clock jumps an hour per nap, and the
+    // wait still consumes every second of its timeout in 20-second naps.
+    {
+      let fakeNow = 0;
+      const naps: number[] = [];
+      const verdict = countdown(
+        () => 0,
+        1,
+        35,
+        (ms) => {
+          naps.push(ms);
+          fakeNow += 3600000;
+        },
+      );
+      if (
+        verdict === "timeout" &&
+        JSON.stringify(naps) === "[20000,15000]" &&
+        fakeNow === 7200000
+      )
+        ok("a clock that jumps ahead does not end the wait early");
+      else fail("a clock that jumps ahead does not end the wait early");
+    }
 
     invoke(d, "review-r1-*.done", "two", "5");
     if (rc === 1 && !has("markers present"))
