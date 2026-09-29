@@ -726,9 +726,7 @@ route and any merge. You do not push, open a pull request, wait for a merge word
 Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
 
 1. **Verify the final HEAD.** Run `<tool>/scripts/verify.sh run <synthesis-wt> <dispatch>` after
-   the last code change. Record every check and its result as
-   `<tool>/scripts/landing.sh results <dispatch> <synthesis-wt>` prints them, one
-   `- <name>: <result>` bullet each under a `## Checks` section; the gate must
+   the last code change; the gate must
    pass before the card is ready. No P1 or P2 finding may remain open.
    If a new P1 or P2 issue appears during final QA, fix it and pass the gate again; when the
    review loop has a gating lens, run another review round and rewrite `checkpoint-review.md`
@@ -749,26 +747,24 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    `run.json` config has `ship.review_link`, its value with the path filled in. Reuse a review
    surface already running; never start a duplicate. Verify the link from the user's device or
    mark it unverified.
-4. **Write `card.md`.** Include the branch, final HEAD, diff stat and commit list; the final
-   checks, one `- <name>: <result>` bullet each with the result
-   `<tool>/scripts/landing.sh results <dispatch> <synthesis-wt>` prints for that check, under
-   `## Checks`; browser suite and QA when present; the journey report path where a
+4. **Write `card.md`.** Include the branch, final HEAD, diff stat and commit list; the output
+   of `<tool>/scripts/landing.sh card-block <dispatch> <synthesis-wt> <the leg's
+   checkpoint>` pasted verbatim as the card's `## Checks`,
+   `## Open findings` and `## Not re-reviewed` sections, appearing exactly once as live
+   text — never retyped, indented, fenced or commented out (the leg's checkpoint is
+   `<dispatch>/checkpoint-review.md` after a review leg, `<dispatch>/checkpoint-1.md`
+   when this leg is synthesis); browser suite and QA when
+   present; the journey report path where a
    check's source names `web-journey`; every ticket turnpike with its
-   rounds and result from its checkpoint record, or `none`; all open findings, one
-   `- [<severity>] <id>: <title>` bullet each under `## Open findings` (`none` when there are
-   none), the ids and severities the checkpoint gives; findings applied on the user's word and
-   not re-reviewed, one `- [<severity>] <id>` bullet each, with an optional `: <note>`,
-   under `## Not re-reviewed`, or `none`; the Style residue
+   rounds and result from its checkpoint record, or `none`; the Style residue
    count as
    `<tool>/scripts/style-findings.sh count <dispatch>` prints it, then every Style residue from
    `<tool>/scripts/style-findings.sh list <dispatch>`; every branch created by the run and its
-   state; lane outcomes; and the review link. The card's branch state is before merge: the
+   state; lane outcomes; and the review link. Finding titles and notes, where the reader
+   wants them, go in prose outside the pasted block, which carries only ids and severities.
+   The card's branch state is before merge: the
    ticket branch is ready, and every other branch is either retained or abandoned. The gate is
-   listed as the gate, never as a turnpike. Inside `## Checks`, `## Open findings` and
-   `## Not re-reviewed`, every line is blank, `none` at column 0, or one entry in the exact
-   form above starting at column 0; anything else — an indented line, a fence, prose — is
-   an input fault. An HTML comment opener anywhere in the card is an input fault wherever
-   it sits; other text outside those sections is never read.
+   listed as the gate, never as a turnpike.
 5. **Write the final hand-off.** Write
    `<dispatch>/handoff-<n>.md` with the verified results, all decisions and open findings, and
    state that no coachman leg follows and the postmaster must verify the card and handle

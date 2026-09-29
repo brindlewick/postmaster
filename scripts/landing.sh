@@ -29,30 +29,25 @@
 #       every recorded check's result at the worktree's HEAD, one `name: result` line each,
 #       as the cards carry them. This is the one place the vocabulary mapping lives:
 #       `no result logged` reads as `not run`, and the `at ...` suffix is dropped.
-#   landing.sh card-results <dispatch> <synthesis-wt> <card>
-#       whether the card's `## Checks` section gives every recorded check with the result
-#       `results` reports. Inside the section every line is blank, `none` at column 0,
-#       or one entry `- <name>: <result>` starting at column 0; anything else is an
-#       input fault. Prints `match`, or one fault line per check that is missing,
-#       wrong, or not a recorded check. A missing or repeated section, a heading inside
-#       a fenced block, or an HTML comment opener anywhere in the card is an input
-#       fault, never `match`. Other text outside the section is never read.
-#   landing.sh card-findings <checkpoint> <card>
-#       whether the card's open findings match the checkpoint's final states. The checkpoint
-#       gives each finding one bullet `- [<severity>] <id>: <state>` with the state `open`,
-#       `closed round <n>`, `dismissed: <reason>`, or `applied on user word, not re-reviewed`;
-#       a bullet starting `- [` or `* [` that is not such a finding is an input fault.
-#       Inside `## Open findings` every line is blank, `none` at column 0, or one entry
-#       `- [<severity>] <id>: <title>` starting at column 0; inside `## Not re-reviewed`
-#       every line is blank, `none` at column 0, or one entry `- [<severity>] <id>` with
-#       an optional `: <note>`, starting at column 0; anything else is an input fault.
-#       Prints `match`, or one fault line per finding that breaks the mapping: an open
-#       finding missing from the card's `## Open findings` or at another severity, a closed
-#       or dismissed finding on that list, a user-applied finding on that list, missing
-#       from the card's `## Not re-reviewed`, or marked there at another severity, or a
-#       card id the checkpoint never gives. A missing or repeated section, a duplicate id,
-#       a heading inside a fenced block, or an HTML comment opener anywhere in either file
-#       is an input fault, never `match`. Other text outside the sections is never read.
+#   landing.sh card-block <dispatch> <synthesis-wt> <checkpoint>
+#       the card's checked sections rendered from their sources as one exact block of
+#       text: `## Checks` with one `- <name>: <result>` bullet per recorded check in
+#       recorded order, then `## Open findings` with one `- [<severity>] <id>` bullet
+#       per open checkpoint finding in file order, then `## Not re-reviewed` with one
+#       `- [<severity>] <id>` bullet per user-applied finding in file order; an empty
+#       section renders as `none`. The checkpoint gives each finding one bullet
+#       `- [<severity>] <id>: <state>` with the state `open`, `closed round <n>`,
+#       `dismissed: <reason>`, or `applied on user word, not re-reviewed`; a bullet
+#       starting `- [`, `* [` or `+ [` that is not such a finding is an input fault.
+#       The review leg writes this block into the card verbatim. Prints the block.
+#   landing.sh card-results <dispatch> <synthesis-wt> <checkpoint> <card>
+#   landing.sh card-findings <dispatch> <synthesis-wt> <checkpoint> <card>
+#       whether the card holds the block `card-block` renders, as an exact, contiguous
+#       byte string, found once. Nothing inside the block is parsed from the card: a
+#       card whose block differs in any way, or that holds it never or more than once,
+#       is an input fault, never `match`. The occurrence must sit in live text: inside
+#       a fenced block or an HTML comment it does not count. Other text outside the
+#       block is never read.
 #   landing.sh journey <dispatch> <synthesis-wt> <waybill>
 #       whether the journey holds landing. `clear` when no check's source names
 #       `web-journey`, or when the report exists and the journey check passed. `blocked`
@@ -62,17 +57,18 @@
 #       failed with its report written: the postmaster weighs it like any other non-pass.
 #   landing.sh --self-test
 #
-#   exit 0  already-landed, anything-to-land, results: the answer, printed; card-results,
-#           card-findings: `match`; journey: `clear` or `judge`; fresh: `fresh`
+#   exit 0  already-landed, anything-to-land, results, card-block: the answer, printed;
+#           card-results, card-findings: `match`; journey: `clear` or `judge`; fresh: `fresh`
 #   exit 1  usage; a ref or SHA that does not resolve; a file that cannot be read; checks
 #           that cannot be recorded-read; `verify.sh results` or `journey-path` failing; a
-#           card or checkpoint whose structure cannot be read (a missing required section,
-#           a duplicate id, or a heading inside a fenced block)
-#   exit 2  card-results, card-findings, fresh: the faults, one line each; journey: `blocked`
+#           checkpoint whose structure cannot be read (a duplicate id, a finding-shaped
+#           line that is not a finding, an unreadable state, or a heading inside a fenced
+#           block); a card that does not hold the rendered block exactly once
+#   exit 2  fresh: the faults, one line each; journey: `blocked`
 set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
-usage() { echo "usage: landing.sh already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> --card-head <sha> [--pr-merge <sha>] | anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha> | fresh --repo <repo> --default <branch> --ticket <ref> --dispatch <dispatch> --wt <synthesis-wt> | results <dispatch> <synthesis-wt> | card-results <dispatch> <synthesis-wt> <card> | card-findings <checkpoint> <card> | journey <dispatch> <synthesis-wt> <waybill> | --self-test" >&2; exit 1; }
+usage() { echo "usage: landing.sh already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> --card-head <sha> [--pr-merge <sha>] | anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha> | fresh --repo <repo> --default <branch> --ticket <ref> --dispatch <dispatch> --wt <synthesis-wt> | results <dispatch> <synthesis-wt> | card-block <dispatch> <synthesis-wt> <checkpoint> | card-results <dispatch> <synthesis-wt> <checkpoint> <card> | card-findings <dispatch> <synthesis-wt> <checkpoint> <card> | journey <dispatch> <synthesis-wt> <waybill> | --self-test" >&2; exit 1; }
 
 run_py() {  # run_py <subcommand> <args...>; VERIFY names scripts/verify.sh beside this script
   VERIFY="$HERE/verify.sh" python3 - "$@" <<'PY'
@@ -169,40 +165,11 @@ def open_lines(text, which):  # the lines outside fenced blocks; headings inside
     check_fences(text, which)
     return [line for inside, line in spans(text) if not inside]
 
-def refuse_comments(text, which):  # the coachman never needs an HTML comment here
+def refuse_comments(text, which):  # the checkpoint never needs an HTML comment
     if "<!--" in text:
         die("%s: contains an HTML comment" % which)
 
-def section(lines, title):  # (found, lines): the ## section's lines, to the next ## or EOF
-    found, inside, out = False, False, []
-    for line in lines:
-        m = re.match(r"^ {0,3}##\s+(.*?)\s*$", line)
-        if m:
-            if m.group(1) == title and found:
-                die("card: ## %s: repeated section" % title)
-            inside = (m.group(1) == title)
-            found = found or inside
-            continue
-        if inside:
-            out.append(line)
-    return found, out
-
 FINDING = re.compile(r"^\s*[-*]\s+\[(P[123])\]\s+([A-Za-z0-9][A-Za-z0-9_.+-]*)\s*:\s*(.+?)\s*$")
-CHECK_ENTRY = re.compile(r"^- ([a-z][a-z0-9-]*): (pass|fail|not run)$")
-OPEN_ENTRY = re.compile(r"^- \[(P[123])\] ([A-Za-z0-9][A-Za-z0-9_.+-]*): (\S.*)$")
-NRR_ENTRY = re.compile(r"^- \[(P[123])\] ([A-Za-z0-9][A-Za-z0-9_.+-]*)(: .*)?$")
-
-def entries(lines, title, rx):  # the section's entry matches; every other line faults
-    out = []  # (blank and none pass; trailing whitespace is ignored)
-    for line in lines:
-        s = line.rstrip()
-        if s.strip() == "" or s == "none":
-            continue
-        m = rx.match(s)
-        if not m:
-            die("card: ## %s: not an entry: %s" % (title, s))
-        out.append(m)
-    return out
 CLOSED = re.compile(r"^closed round (\d+)$")
 DISMISSED = re.compile(r"^dismissed:\s*(.+?)\s*$")
 USER_APPLIED = "applied on user word, not re-reviewed"
@@ -217,6 +184,68 @@ def finding_state(words):
     if words == USER_APPLIED:
         return "user-applied"
     return None
+
+def checkpoint_states(path):  # [(sev, fid, state)] in file order; malformed input dies
+    text = load(path)
+    refuse_comments(text, "checkpoint")
+    out = []
+    for line in open_lines(text, "checkpoint"):
+        m = FINDING.match(line)
+        if not m:
+            if re.match(r"^\s*[-*+]\s*\[", line):
+                die("checkpoint: not a finding: %s" % line.strip())
+            continue
+        sev, fid, words = m.group(1), m.group(2), m.group(3)
+        if fid in [f for _, f, _ in out]:
+            die("checkpoint: %s: listed twice" % fid)
+        state = finding_state(words)
+        if state is None:
+            die("checkpoint: %s: unreadable state: %s" % (fid, words))
+        out.append((sev, fid, state))
+    return out
+
+def render_block(dispatch, wt, checkpoint):  # the card's checked sections, byte-exact
+    checks = recorded_results(dispatch, wt)
+    states = checkpoint_states(checkpoint)
+    bodies = []
+    bodies.append("\n".join("- %s: %s" % (name, result) for name, result in checks) or "none")
+    bodies.append("\n".join("- [%s] %s" % (sev, fid)
+                            for sev, fid, state in states if state == "open") or "none")
+    bodies.append("\n".join("- [%s] %s" % (sev, fid)
+                            for sev, fid, state in states if state == "user-applied") or "none")
+    return "## Checks\n\n%s\n\n## Open findings\n\n%s\n\n## Not re-reviewed\n\n%s\n" % tuple(bodies)
+
+def dead_spans(text):  # offset spans inside fences or HTML comments
+    out, off = [], 0
+    for (inside, _), line in zip(spans(text), text.splitlines(keepends=True)):
+        if inside:
+            out.append((off, off + len(line)))
+        off += len(line)
+    pos = 0
+    while True:
+        o = text.find("<!--", pos)
+        if o < 0:
+            break
+        c = text.find("-->", o + 4)
+        if c < 0:
+            out.append((o, len(text)))
+            break
+        out.append((o, c + 3))
+        pos = c + 3
+    return out
+
+def check_block(dispatch, wt, checkpoint, card):  # match iff the card holds the block once
+    text = load(card)
+    block = render_block(dispatch, wt, checkpoint)
+    at = text.find(block)
+    if at >= 0 and any(at < e and s < at + len(block) for s, e in dead_spans(text)):
+        die("card: does not hold the expected block")
+    n = text.count(block)
+    if n == 0:
+        die("card: does not hold the expected block")
+    if n > 1:
+        die("card: holds the expected block more than once")
+    print("match"); sys.exit(0)
 
 mode = sys.argv[1]
 
@@ -290,104 +319,24 @@ if mode == "results":
         print("%s: %s" % (name, result))
     sys.exit(0)
 
-if mode == "card-results":
+if mode == "card-block":
     if len(sys.argv) != 5:
-        print("usage: landing.sh card-results <dispatch> <synthesis-wt> <card>", file=sys.stderr)
-        sys.exit(1)
-    want = recorded_results(sys.argv[2], sys.argv[3])
-    text = load(sys.argv[4])
-    refuse_comments(text, "card")
-    check_fences(text, "card")
-    found, lines = section(text.splitlines(), "Checks")
-    if not found:
-        die("card: no ## Checks section")
-    faults, card = [], {}
-    for m in entries(lines, "Checks", CHECK_ENTRY):
-        name, words = m.group(1), m.group(2)
-        if name in card:
-            faults.append("%s: listed twice" % name)
-        else:
-            card[name] = words
-    for name, result in want:
-        if name not in card:
-            faults.append("%s: missing: results says %s" % (name, result))
-        elif card[name] != result:
-            faults.append("%s: card says %s, results says %s" % (name, card[name], result))
-    for name in card:
-        if name not in dict(want):
-            faults.append("%s: not a recorded check" % name)
-    if faults:
-        print("\n".join(faults)); sys.exit(2)
-    print("match"); sys.exit(0)
+        print("usage: landing.sh card-block <dispatch> <synthesis-wt> <checkpoint>",
+              file=sys.stderr); sys.exit(1)
+    sys.stdout.write(render_block(sys.argv[2], sys.argv[3], sys.argv[4]))
+    sys.exit(0)
+
+if mode == "card-results":
+    if len(sys.argv) != 6:
+        print("usage: landing.sh card-results <dispatch> <synthesis-wt> <checkpoint> <card>",
+              file=sys.stderr); sys.exit(1)
+    check_block(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
 
 if mode == "card-findings":
-    if len(sys.argv) != 4:
-        print("usage: landing.sh card-findings <checkpoint> <card>", file=sys.stderr); sys.exit(1)
-    checkpoint, card_text = load(sys.argv[2]), load(sys.argv[3])
-    refuse_comments(checkpoint, "checkpoint")
-    refuse_comments(card_text, "card")
-    faults, states = [], {}
-    for line in open_lines(checkpoint, "checkpoint"):
-        m = FINDING.match(line)
-        if not m:
-            if re.match(r"^\s*[-*]\s*\[", line):
-                die("checkpoint: not a finding: %s" % line.strip())
-            continue
-        sev, fid, words = m.group(1), m.group(2), m.group(3)
-        if fid in states:
-            die("checkpoint: %s: listed twice" % fid)
-        state = finding_state(words)
-        if state is None:
-            faults.append("checkpoint: %s: unreadable state: %s" % (fid, words))
-            continue
-        states[fid] = (sev, state)
-    check_fences(card_text, "card")
-    card_lines = card_text.splitlines()
-    found_open, open_section = section(card_lines, "Open findings")
-    found_nrr, nrr_section = section(card_lines, "Not re-reviewed")
-    if not found_open:
-        die("card: no ## Open findings section")
-    if not found_nrr:
-        die("card: no ## Not re-reviewed section")
-    open_list, nrr = {}, {}
-    for m in entries(open_section, "Open findings", OPEN_ENTRY):
-        if m.group(2) in open_list:
-            die("%s: listed twice on the card's open list" % m.group(2))
-        open_list[m.group(2)] = m.group(1)
-    for m in entries(nrr_section, "Not re-reviewed", NRR_ENTRY):
-        if m.group(2) in nrr:
-            die("%s: listed twice under the card's Not re-reviewed" % m.group(2))
-        nrr[m.group(2)] = m.group(1)
-    for fid, (sev, state) in states.items():
-        if state == "open":
-            if fid not in open_list:
-                faults.append("%s: open in the checkpoint, missing from the card's open list" % fid)
-            elif open_list[fid] != sev:
-                faults.append("%s: open at %s in the checkpoint, at %s on the card"
-                              % (fid, sev, open_list[fid]))
-        elif state in ("closed", "dismissed"):
-            if fid in open_list:
-                faults.append("%s: %s in the checkpoint, on the card's open list" % (fid, state))
-        else:  # user-applied
-            if fid in open_list:
-                faults.append("%s: applied on user word, on the card's open list" % fid)
-            if fid not in nrr:
-                faults.append("%s: applied on user word, not marked not re-reviewed" % fid)
-            elif nrr[fid] != sev:
-                faults.append("%s: applied on user word at %s in the checkpoint, marked %s not re-reviewed"
-                              % (fid, sev, nrr[fid]))
-    for fid in open_list:
-        if fid not in states:
-            faults.append("%s: on the card's open list, not in the checkpoint" % fid)
-    for fid in sorted(nrr):
-        if fid not in states:
-            faults.append("%s: marked not re-reviewed, not in the checkpoint" % fid)
-        elif states[fid][1] != "user-applied":
-            faults.append("%s: %s in the checkpoint, marked not re-reviewed" % (fid, states[fid][1]))
-        # A user-applied severity mismatch is faulted from the checkpoint's side above.
-    if faults:
-        print("\n".join(faults)); sys.exit(2)
-    print("match"); sys.exit(0)
+    if len(sys.argv) != 6:
+        print("usage: landing.sh card-findings <dispatch> <synthesis-wt> <checkpoint> <card>",
+              file=sys.stderr); sys.exit(1)
+    check_block(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
 
 if mode == "journey":
     if len(sys.argv) != 5:
@@ -403,8 +352,8 @@ if mode == "journey":
              and isinstance(c.get("name"), str)]
     if not names:
         print("clear: no check uses web-journey"); sys.exit(0)
-    visible = "\n".join(line for inside, line in spans(load(waybill)) if not inside)
-    visible = re.sub(r"<!--.*?-->", "", visible, flags=re.S)  # ticket text may comment
+    raw = re.sub(r"<!--.*?-->", "x", load(waybill), flags=re.S)  # ticket text may comment
+    visible = "\n".join(line for inside, line in spans(raw) if not inside)
     if not re.search(r"^ {0,3}#{1,6}[ \t]+user journey[ \t]*[:.;!?…]*[ \t]*#*[ \t]*$", visible,
                      re.M | re.I):
         print("judge: no User journey section; %s judged like any other non-pass"
@@ -440,7 +389,7 @@ PY
 case ${1:-} in
   --self-test) ;;
   already-landed|anything-to-land) run_py "$@"; exit $? ;;
-  fresh|results|card-results|card-findings|journey) run_py "$@"; exit $? ;;
+  fresh|results|card-block|card-results|card-findings|journey) run_py "$@"; exit $? ;;
   *) usage ;;
 esac
 
@@ -656,6 +605,26 @@ commit "$YO" f M2 M2
 git -C "$YC" fetch -q origin || exit 1
 out=$("$SELF" fresh --repo "$YC" --default origin/main --ticket ticket --dispatch "$YD" --wt "$YC" 2>&1); rc=$?
 expect "Y1: the remote-tracking ref sees the advanced default as stale" 2 "stale: the ticket branch does not contain the default branch"
+out=$(git -C "$YC" for-each-ref --format='%(upstream:short)' refs/heads/main); rc=$?
+expect "Z1: the default branch's upstream resolves" 0 "origin/main"
+ZO=$tmp/zo; mkrepo "$ZO"; commit "$ZO" f A A
+git clone -q -c protocol.file.allow=always "$ZO" "$tmp/zc" || exit 1
+ZC=$tmp/zc
+git -C "$ZC" config user.email t@t && git -C "$ZC" config user.name t \
+  && git -C "$ZC" config commit.gpgsign false || exit 1
+git -C "$ZC" remote rename origin upstream || exit 1
+ZX=$tmp/zx; mkrepo "$ZX"; commit "$ZX" f A A
+git -C "$ZC" remote add origin "$ZX" || exit 1
+git -C "$ZC" checkout -qb ticket || exit 1; commit "$ZC" f T T; ZH=$(git -C "$ZC" rev-parse HEAD)
+ZH12=$(printf '%s' "$ZH" | cut -c1-12)
+git -C "$ZC" push -q -u origin ticket || exit 1
+ZD=$tmp/zd; mkdir "$ZD"
+printf '{"checks": [{"name": "gate", "source": "default:gate", "command": "true", "shows": "x"}]}\n' > "$ZD/checks.json"
+printf '{"action": "verify", "target": "gate", "ts": "2026-01-01T00:00:00Z", "detail": "on=ticket@%s result=pass exit=0 secs=1"}\n' "$ZH12" > "$ZD/actions.jsonl"
+commit "$ZO" f M2 M2
+git -C "$ZC" fetch -q upstream || exit 1
+out=$("$SELF" fresh --repo "$ZC" --default upstream/main --ticket ticket --dispatch "$ZD" --wt "$ZC" 2>&1); rc=$?
+expect "Z1: a named-remote fetch with the upstream ref reads stale" 2 "stale: the ticket branch does not contain the default branch"
 
 # A dispatch with two recorded checks, one passed at the worktree's HEAD, one never run.
 D=$tmp/d; W=$tmp/wt; mkrepo "$W"; commit "$W" f X X
@@ -672,137 +641,92 @@ unit: not run"
 out=$("$SELF" results "$tmp" "$W" 2>&1); rc=$?
 [ "$rc" -eq 1 ] && ok "a dispatch with no record is usage, not results" || fail "a dispatch with no record is usage, not results" "$out"
 
-echo "card-results"
-out=$("$SELF" card-results "$D" "$W" "$D/card.md" 2>&1); rc=$?
-expect "a card giving no result logged as not run matches" 0 "match"
-printf '# Card\n\n## Checks\n\n- gate: pass\n- unit: pass\n' > "$D/card-wrong.md"
-out=$("$SELF" card-results "$D" "$W" "$D/card-wrong.md" 2>&1); rc=$?
-expect "a card giving it as pass faults" 2 "unit: card says pass, results says not run"
-printf '# Card\n\n## Checks\n\n- gate: pass\n' > "$D/card-short.md"
-out=$("$SELF" card-results "$D" "$W" "$D/card-short.md" 2>&1); rc=$?
-expect "a card missing a check faults" 2 "unit: missing: results says not run"
-printf '# Card\n\n## Checks\n\n- gate: pass\n- unit: not run\n- stray: pass\n' > "$D/card-extra.md"
-out=$("$SELF" card-results "$D" "$W" "$D/card-extra.md" 2>&1); rc=$?
-expect "a card naming a check results never printed faults" 2 "stray: not a recorded check"
-printf '# Card\n\nNo checks section.\n' > "$D/card-bare.md"
-out=$("$SELF" card-results "$D" "$W" "$D/card-bare.md" 2>&1); rc=$?
-expect "W5: a card with no Checks section is an input fault" 1 "landing: card: no ## Checks section"
-printf '# Card\n\n## Checks\n\n- gate: pass\n- unit: not run\n\n```\n## Checks\n- gate: pass\n```\n' > "$D/card-fence.md"
-out=$("$SELF" card-results "$D" "$W" "$D/card-fence.md" 2>&1); rc=$?
-expect "W8: a heading inside a fence is an input fault" 1 "landing: card: heading inside a fenced block: ## Checks"
-printf '# Card\n\n## Checks\n\n- gate: pass\n- unit: not run\n\n<!-- hidden -->\n' > "$D/card-comment.md"
-out=$("$SELF" card-results "$D" "$W" "$D/card-comment.md" 2>&1); rc=$?
-expect "X2/Y2: a comment inside Checks is an input fault" 1 "landing: card: contains an HTML comment"
-printf '# Card\n\n<!--\n## Checks\n- gate: pass\n- unit: not run\n## Divider\n-->\n' > "$D/card-hidden.md"
-out=$("$SELF" card-results "$D" "$W" "$D/card-hidden.md" 2>&1); rc=$?
-expect "Y2: a comment-hidden Checks section is an input fault" 1 "landing: card: contains an HTML comment"
-printf '# Card\n\n<!-- unclosed\n\n## Checks\n\n- gate: pass\n- unit: not run\n' > "$D/card-unclosed.md"
-out=$("$SELF" card-results "$D" "$W" "$D/card-unclosed.md" 2>&1); rc=$?
-expect "Y2: an unclosed comment anywhere in the card is an input fault" 1 "landing: card: contains an HTML comment"
-printf '# Card\n\n## Checks\n\ngate: pass\nunit: not run\n' > "$D/card-nobullet.md"
-out=$("$SELF" card-results "$D" "$W" "$D/card-nobullet.md" 2>&1); rc=$?
-expect "Y3: checks without bullets are an input fault" 1 "landing: card: ## Checks: not an entry: gate: pass"
-printf '# Card\n\n   ## Checks\n\n- gate: pass\n- unit: not run\n' > "$D/card-indenthead.md"
-out=$("$SELF" card-results "$D" "$W" "$D/card-indenthead.md" 2>&1); rc=$?
-expect "Y6: an indented Checks heading still names the section" 0 "match"
-printf '# Card\n\n## Checks\n\n- gate: pass\n\n## Checks\n\n- unit: not run\n' > "$D/card-dupchecks.md"
-out=$("$SELF" card-results "$D" "$W" "$D/card-dupchecks.md" 2>&1); rc=$?
-expect "Y7: a repeated Checks section is an input fault" 1 "landing: card: ## Checks: repeated section"
-
-echo "card-findings"
+echo "card-block"
 printf '%s\n' "## Findings (bug)" "" "- [P1] bug-1: open" "- [P2] bug-2: closed round 2" \
   "## Findings (security)" "" "- [P2] sec-1: dismissed: not reachable" "- [P2] sec-2: applied on user word, not re-reviewed" > "$D/checkpoint.md"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- [P2] sec-2" > "$D/card-f.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-f.md" 2>&1); rc=$?
-expect "all four states carried rightly match" 0 "match"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P2] bug-1: the bypass" "" "## Not re-reviewed" "" "- [P2] sec-2" > "$D/card-sev.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-sev.md" 2>&1); rc=$?
-expect "an open finding at another severity faults" 2 "bug-1: open at P1 in the checkpoint, at P2 on the card"
-printf '%s\n' "# Card" "" "## Open findings" "" "none" "" "## Not re-reviewed" "" "- [P2] sec-2" > "$D/card-drop.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-drop.md" 2>&1); rc=$?
-expect "an open finding dropped from the card faults" 2 "bug-1: open in the checkpoint, missing from the card's open list"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "- [P2] bug-2: closed?" "" "## Not re-reviewed" "" "- [P2] sec-2" > "$D/card-closed.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-closed.md" 2>&1); rc=$?
-expect "a closed finding on the open list faults" 2 "bug-2: closed in the checkpoint, on the card's open list"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "- [P2] sec-1: dismissed?" "" "## Not re-reviewed" "" "- [P2] sec-2" > "$D/card-dism.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-dism.md" 2>&1); rc=$?
-expect "a dismissed finding on the open list faults" 2 "sec-1: dismissed in the checkpoint, on the card's open list"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "- [P2] sec-2: applied?" "" "## Not re-reviewed" "" "- [P2] sec-2" > "$D/card-useropen.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-useropen.md" 2>&1); rc=$?
-expect "a user-applied finding on the open list faults" 2 "sec-2: applied on user word, on the card's open list"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "none" > "$D/card-usermark.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-usermark.md" 2>&1); rc=$?
-expect "a user-applied finding unmarked faults" 2 "sec-2: applied on user word, not marked not re-reviewed"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "- [P3] bug-9: unknown" "" "## Not re-reviewed" "" "- [P2] sec-2" > "$D/card-stray.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-stray.md" 2>&1); rc=$?
-expect "a card id the checkpoint never gives faults" 2 "bug-9: on the card's open list, not in the checkpoint"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- [P2] sec-2" "- [P2] ghost-1" > "$D/card-ghost.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-ghost.md" 2>&1); rc=$?
-expect "V2: a ghost id under Not re-reviewed faults" 2 "ghost-1: marked not re-reviewed, not in the checkpoint"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- [P2] sec-2" "- [P2] bug-2" > "$D/card-nrrclosed.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-nrrclosed.md" 2>&1); rc=$?
-expect "V2: a closed finding restated as not re-reviewed faults" 2 "bug-2: closed in the checkpoint, marked not re-reviewed"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- [P2] sec-2: applied on the user's word" > "$D/card-nrrtitle.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-nrrtitle.md" 2>&1); rc=$?
-expect "V3: the specified Not re-reviewed bullet passes, titled or bare" 0 "match"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- sec-2" > "$D/card-nrrbare.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-nrrbare.md" 2>&1); rc=$?
-expect "V3/X2: a bullet outside the specified shape is an input fault" 1 "landing: card: ## Not re-reviewed: not an entry: - sec-2"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- [P3] sec-2" > "$D/card-nrrsev.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-nrrsev.md" 2>&1); rc=$?
-expect "W4: a Not re-reviewed severity that disagrees faults" 2 "sec-2: applied on user word at P2 in the checkpoint, marked P3 not re-reviewed"
-printf '%s\n' "## Findings (bug)" "" "- [P2] bug-2: closed round 1" > "$D/cp-closed.md"
-printf '%s\n' "# Card" "" "## Not re-reviewed" "" "none" > "$D/card-noopen.md"
-out=$("$SELF" card-findings "$D/cp-closed.md" "$D/card-noopen.md" 2>&1); rc=$?
-expect "W5: a card with no Open findings section is an input fault" 1 "landing: card: no ## Open findings section"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" > "$D/card-nonrr.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-nonrr.md" 2>&1); rc=$?
-expect "W5: a card with no Not re-reviewed section is an input fault" 1 "landing: card: no ## Not re-reviewed section"
+out=$("$SELF" card-block "$D" "$W" "$D/checkpoint.md" 2>&1); rc=$?
+expect "the block renders the checks and the checkpoint states exactly" 0 "## Checks
+
+- gate: pass
+- unit: not run
+
+## Open findings
+
+- [P1] bug-1
+
+## Not re-reviewed
+
+- [P2] sec-2"
+printf '%s\n' "## Findings (bug)" "" "- [P1] bug-1: open" "- [P2] bug-1: closed round 1" > "$D/cp-dup.md"
+out=$("$SELF" card-block "$D" "$W" "$D/cp-dup.md" 2>&1); rc=$?
+expect "a duplicate id in the checkpoint faults the render" 1 "landing: checkpoint: bug-1: listed twice"
+
+echo "card-results"
+printf '# Ship card\n\nSome prose.\n\n## Checks\n\n- gate: pass\n- unit: not run\n\n## Open findings\n\n- [P1] bug-1\n\n## Not re-reviewed\n\n- [P2] sec-2\n\nTrailing prose.\n' > "$D/card.md"
+out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card.md" 2>&1); rc=$?
+expect "a faithful card holding the block once matches" 0 "match"
+out=$("$SELF" card-findings "$D" "$W" "$D/checkpoint.md" "$D/card.md" 2>&1); rc=$?
+expect "card-findings agrees on the faithful card" 0 "match"
+sed 's/- gate: pass/- gate: pasz/' "$D/card.md" > "$D/card-edited.md"
+out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-edited.md" 2>&1); rc=$?
+expect "a block edited in one character is an input fault" 1 "landing: card: does not hold the expected block"
+sed 's/^-/  -/' "$D/card.md" > "$D/card-indented.md"
+out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-indented.md" 2>&1); rc=$?
+expect "an indented block is an input fault" 1 "landing: card: does not hold the expected block"
+sed -e 's/^## Checks$/```\n## Checks/' -e 's/^- \[P2\] sec-2$/- [P2] sec-2\n```/' "$D/card.md" > "$D/card-fenced.md"
+out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-fenced.md" 2>&1); rc=$?
+expect "a fenced block is an input fault" 1 "landing: card: does not hold the expected block"
+sed -e 's/^## Checks$/<!--\n## Checks/' -e 's/^- \[P2\] sec-2$/- [P2] sec-2\n-->/' "$D/card.md" > "$D/card-commented.md"
+out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-commented.md" 2>&1); rc=$?
+expect "a commented-out block is an input fault" 1 "landing: card: does not hold the expected block"
+sed -e 's/^## Checks$/<!--\n## Checks/' "$D/card.md" > "$D/card-unclosed.md"
+out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-unclosed.md" 2>&1); rc=$?
+expect "a block inside an unclosed comment is an input fault" 1 "landing: card: does not hold the expected block"
+sed 's/^## Checks$/## Checks ##/' "$D/card.md" > "$D/card-hashes.md"
+out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-hashes.md" 2>&1); rc=$?
+expect "closing hashes on the block are an input fault" 1 "landing: card: does not hold the expected block"
+{ cat "$D/card.md"; printf '\nMore prose.\n\n'; sed -n '/^## Checks/,/sec-2$/p' "$D/card.md"; } > "$D/card-repeated.md"
+out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-repeated.md" 2>&1); rc=$?
+expect "a repeated block is an input fault" 1 "landing: card: holds the expected block more than once"
+sed '/^## Checks/,/sec-2$/d' "$D/card.md" > "$D/card-noblock.md"
+out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-noblock.md" 2>&1); rc=$?
+expect "a card missing the block is an input fault" 1 "landing: card: does not hold the expected block"
+sed 's/^Some prose\./Some prose <!-- a note -->./' "$D/card.md" > "$D/card-note.md"
+out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-note.md" 2>&1); rc=$?
+expect "a comment outside the block is never read" 0 "match"
+
+echo "card-findings"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-dup.md" "$D/card.md" 2>&1); rc=$?
+expect "W9: a duplicate id in the checkpoint is an input fault" 1 "landing: checkpoint: bug-1: listed twice"
 printf '%s\n' "## Findings (bug)" "" "- [P2] bug-2: closed round 1" "" '```' "## Example" "" "- [P1] ex-1: open" '```' > "$D/cp-fence.md"
-printf '%s\n' "# Card" "" "## Open findings" "" "none" "" "## Not re-reviewed" "" "none" > "$D/card-fenceok.md"
-out=$("$SELF" card-findings "$D/cp-fence.md" "$D/card-fenceok.md" 2>&1); rc=$?
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-fence.md" "$D/card.md" 2>&1); rc=$?
 expect "W8: a heading inside a checkpoint fence is an input fault" 1 "landing: checkpoint: heading inside a fenced block: ## Example"
 printf '%s\n' "## Findings (bug)" "" "- [P2] bug-2: closed round 1" "" '```' "- [P1] ex-1: open" '```' > "$D/cp-fbullet.md"
-out=$("$SELF" card-findings "$D/cp-fbullet.md" "$D/card-fenceok.md" 2>&1); rc=$?
+{ printf '# Card\n\nExtra prose.\n\n'; "$SELF" card-block "$D" "$W" "$D/cp-fbullet.md"; printf '\nTail.\n'; } > "$D/card-fb.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-fbullet.md" "$D/card-fb.md" 2>&1); rc=$?
 expect "W8: an example bullet inside a fence is not a finding" 0 "match"
-printf '%s\n' "## Findings (bug)" "" "- [P1] bug-1: open" > "$D/cp-one.md"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P2] bug-1: wrong" "- [P1] bug-1: right" "" "## Not re-reviewed" "" "none" > "$D/card-dup.md"
-out=$("$SELF" card-findings "$D/cp-one.md" "$D/card-dup.md" 2>&1); rc=$?
-expect "W9: a duplicate id on the open list is an input fault" 1 "landing: bug-1: listed twice on the card's open list"
-printf '%s\n' "## Findings (bug)" "" "- [P2] sec-2: applied on user word, not re-reviewed" > "$D/cp-nrr.md"
-printf '%s\n' "# Card" "" "## Open findings" "" "none" "" "## Not re-reviewed" "" "- [P2] sec-2" "- [P2] sec-2" > "$D/card-nrrdup.md"
-out=$("$SELF" card-findings "$D/cp-nrr.md" "$D/card-nrrdup.md" 2>&1); rc=$?
-expect "W9: a duplicate id under Not re-reviewed is an input fault" 1 "landing: sec-2: listed twice under the card's Not re-reviewed"
-printf '%s\n' "## Findings (bug)" "" "- [P1] bug-1: open" "- [P2] bug-1: closed round 1" > "$D/cp-dup.md"
-out=$("$SELF" card-findings "$D/cp-dup.md" "$D/card-fenceok.md" 2>&1); rc=$?
-expect "W9: a duplicate id in the checkpoint is an input fault" 1 "landing: checkpoint: bug-1: listed twice"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "    - [P2] bug-2: indented" "" "## Not re-reviewed" "" "- [P2] sec-2" > "$D/card-indent.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-indent.md" 2>&1); rc=$?
-expect "X2: an indented bullet inside Open findings is an input fault" 1 "landing: card: ## Open findings: not an entry:     - [P2] bug-2: indented"
-printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- [P2] sec-2" '````' '- [P2] sec-2: says nothing' '```' '````' > "$D/card-nest.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-nest.md" 2>&1); rc=$?
-expect "X2: a nested fence inside Not re-reviewed is an input fault" 1 "landing: card: ## Not re-reviewed: not an entry: \`\`\`\`"
-printf '%s\n' "# Card" "" "    - [P9] no: outside" '```' "- [P9] no: outside" '```' "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- [P2] sec-2" > "$D/card-outside.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-outside.md" 2>&1); rc=$?
-expect "X2/Y2: indented and fenced text outside the sections is ignored" 0 "match"
-printf '%s\n' "# Card" "" "<!--" "## Open findings" "" "- [P1] bug-1: the bypass" "## Mid" "-->" "" "## Not re-reviewed" "" "- [P2] sec-2" > "$D/card-fhidden.md"
-out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-fhidden.md" 2>&1); rc=$?
-expect "Y2: a comment-hidden Open findings section is an input fault" 1 "landing: card: contains an HTML comment"
+printf '%s\n' "## Findings (bug)" "" "- [P2] bug-2: closed round 1" "" '````' "- [P1] ghost: inside" '```' "- [P1] bug-1: open" '````' > "$D/cp-nest.md"
+{ printf '# Card\n\nExtra prose.\n\n'; "$SELF" card-block "$D" "$W" "$D/cp-nest.md"; printf '\nTail.\n'; } > "$D/card-fn.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-nest.md" "$D/card-fn.md" 2>&1); rc=$?
+expect "X2: a nested fence in the checkpoint hides both bullets" 0 "match"
 cp "$D/checkpoint.md" "$D/cp-comment.md" && printf '<!-- hidden -->\n' >> "$D/cp-comment.md"
-out=$("$SELF" card-findings "$D/cp-comment.md" "$D/card-f.md" 2>&1); rc=$?
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-comment.md" "$D/card.md" 2>&1); rc=$?
 expect "Y2: a comment anywhere in the checkpoint is an input fault" 1 "landing: checkpoint: contains an HTML comment"
 cp "$D/checkpoint.md" "$D/cp-unclosed.md" && printf '<!-- unclosed\n' >> "$D/cp-unclosed.md"
-out=$("$SELF" card-findings "$D/cp-unclosed.md" "$D/card-f.md" 2>&1); rc=$?
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-unclosed.md" "$D/card.md" 2>&1); rc=$?
 expect "Y2: an unclosed comment in the checkpoint is an input fault" 1 "landing: checkpoint: contains an HTML comment"
 cp "$D/checkpoint.md" "$D/cp-p4.md" && printf '%s\n' '- [P4] bug-9: open' >> "$D/cp-p4.md"
-out=$("$SELF" card-findings "$D/cp-p4.md" "$D/card-f.md" 2>&1); rc=$?
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-p4.md" "$D/card.md" 2>&1); rc=$?
 expect "Y4: a finding-shaped line with a bad severity is an input fault" 1 "landing: checkpoint: not a finding: - [P4] bug-9: open"
 cp "$D/checkpoint.md" "$D/cp-nostate.md" && printf '%s\n' '- [P1] bug-9' >> "$D/cp-nostate.md"
-out=$("$SELF" card-findings "$D/cp-nostate.md" "$D/card-f.md" 2>&1); rc=$?
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-nostate.md" "$D/card.md" 2>&1); rc=$?
 expect "Y4: a finding-shaped line with no state is an input fault" 1 "landing: checkpoint: not a finding: - [P1] bug-9"
-printf '%s\n' "## Findings (bug)" "" "- [P2] bug-2: closed round 1" "" '````' "- [P1] ghost: inside" '```' "- [P1] bug-1: open" '````' > "$D/cp-nest.md"
-out=$("$SELF" card-findings "$D/cp-nest.md" "$D/card-fenceok.md" 2>&1); rc=$?
-expect "X2: a nested fence in the checkpoint hides both bullets" 0 "match"
+cp "$D/checkpoint.md" "$D/cp-plus.md" && printf '%s\n' '+ [P1] bug-9: open' >> "$D/cp-plus.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-plus.md" "$D/card.md" 2>&1); rc=$?
+expect "Z5: a plus-bullet finding-shaped line is an input fault" 1 "landing: checkpoint: not a finding: + [P1] bug-9: open"
+cp "$D/checkpoint.md" "$D/cp-badstate.md" && printf '%s\n' '- [P1] bug-9: someday' >> "$D/cp-badstate.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-badstate.md" "$D/card.md" 2>&1); rc=$?
+expect "an unreadable checkpoint state is an input fault" 1 "landing: checkpoint: bug-9: unreadable state: someday"
 
 echo "journey"
 printf '{"checks": [{"name": "gate", "source": "default:gate", "command": "true", "shows": "x"}, {"name": "journey", "source": "default:web-journey", "command": "true", "shows": "x"}]}\n' > "$D/jchecks.json"
@@ -842,6 +766,12 @@ expect "X5: a fenced-only User journey is not the section" 0 "judge: no User jou
 printf '# T\n\n## Problem / feature\nA change.\n\n<!--\n## User journey\n1. Open it.\n-->\n' > "$J/commented.md"
 out=$("$SELF" journey "$J" "$JW" "$J/commented.md" 2>&1); rc=$?
 expect "Y2: a commented-only User journey is not the section" 0 "judge: no User journey section; journey judged like any other non-pass"
+printf '# T\n\n## Problem / feature\nA change.\n\n<!--\n```\n-->\n\n## User journey\n1. Open it.\n' > "$J/fencecomment.md"
+out=$("$SELF" journey "$J" "$JW" "$J/fencecomment.md" 2>&1); rc=$?
+expect "Z4: a fence inside a comment does not hide the journey" 2 "blocked: journey: not run; the journey has no evidence"
+printf '# T\n\n## Problem / feature\nA change.\n\n<!-- note --> ## User journey\n1. Open it.\n' > "$J/sameline.md"
+out=$("$SELF" journey "$J" "$JW" "$J/sameline.md" 2>&1); rc=$?
+expect "Z6: a same-line comment plus heading is not the section" 0 "judge: no User journey section; journey judged like any other non-pass"
 printf '# T\n\n## Problem / feature\nA change.\n\n   ## User journey\n1. Open it.\n' > "$J/indented.md"
 out=$("$SELF" journey "$J" "$JW" "$J/indented.md" 2>&1); rc=$?
 expect "Y6: an indented User journey still names the section" 2 "blocked: journey: not run; the journey has no evidence"

@@ -281,11 +281,13 @@ On `.card-ready`, read `run.json`, the manifest's current `leg`, `card.md`, and
 `handoff-<leg>.md`. Do not use this route for a run without `coachman_contract: 2`; its legacy
 route follows below. An exit 1 from any `<tool>/scripts/landing.sh` call in Stage F or
 Stage G below is a fault in its inputs, not an answer: fix the inputs and re-run; never
-proceed past it. Run `git fetch` in the ticket repo before asking `fresh`, and again after
-the user's merge word. A fetch moves only the remote-tracking refs, so read the default
-branch's remote with `git config branch.<branch>.remote` and pass `<remote>/<branch>`
-wherever a landing call in Stage F or Stage G takes `--default` — the branch itself only
-when it has no remote — so every ref the script resolves is current.
+proceed past it. Resolve the default branch's upstream with `git for-each-ref
+--format='%(upstream:short)' refs/heads/<branch>`; `git fetch` that upstream's remote by
+name before asking `fresh`, and again after the user's merge word. Pass the upstream short
+ref wherever a landing call in Stage F or Stage G takes `--default` on the pull-request
+route and to `fresh`; on the `landing: local` route pass the local branch, which is what
+the merge lands on. When the branch has no upstream, pass the branch itself: with nothing
+tracking it there is no fresher ref, and remote movement it does not track can be missed.
 
 1. **Verify the card's claims against the code**, never against the card.
    `<tool>/scripts/landing.sh fresh --repo <repo> --default <branch> --ticket
@@ -300,8 +302,11 @@ when it has no remote — so every ref the script resolves is current.
    earlier fixture result stands. Until #163 (a script that decides whether a change touches
    the contract) lands, that is the postmaster's judgement from the tickets the default
    branch merged. Then
-   `<tool>/scripts/landing.sh card-results <dispatch> <synthesis-wt> <dispatch>/card.md`
-   must print `match`: the card gives every check as the script reports it. Then
+   `<tool>/scripts/landing.sh card-results <dispatch> <synthesis-wt> <the leg's
+   checkpoint> <dispatch>/card.md`
+   must print `match`: the card holds the rendered block exactly once (the leg's
+   checkpoint is `<dispatch>/checkpoint-review.md` after a review leg,
+   `<dispatch>/checkpoint-1.md` otherwise). Then
    `<tool>/scripts/landing.sh journey <dispatch> <synthesis-wt> <dispatch>/brief.md` must
    not print `blocked`: a journey with no report, or one that did not run where the ticket
    has a User journey section, holds landing until the journey runs. The postmaster judges
@@ -315,8 +320,9 @@ when it has no remote — so every ref the script resolves is current.
    in the record its step writes; when `<tool>/scripts/turnpikes.sh short '<the waybill's
    turnpikes: line>'` names any default turnpike, the ledger holds the user's word on this
    ticket's turnpikes; where the run has a review leg, `checkpoint-review.md` exists and
-   `<tool>/scripts/landing.sh card-findings <dispatch>/checkpoint-review.md
-   <dispatch>/card.md` prints `match`, and the card names the checkpoint's final round with
+   `<tool>/scripts/landing.sh card-findings <dispatch> <synthesis-wt>
+   <dispatch>/checkpoint-review.md <dispatch>/card.md` prints `match`, and the card names
+   the checkpoint's final round with
    the same round counts; the blind acceptance
    tests are the first commit or the hand-off records why they were not written; the Style
    residue's count is what
