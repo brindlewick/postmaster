@@ -15,6 +15,7 @@
 #   host.sh leg resume <dispatch> <worktree> <leg> <number> <thread-id> <prompt>
 #   host.sh leg retry <dispatch> <worktree> <leg> <number>
 #   host.sh leg outcome <dispatch> <number>
+#   host.sh leg backfill <dispatch> <leg> <number>
 #   host.sh leg waiting add|remove|list <runs> <ticket> [<question-file>]
 #   host.sh run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>]
 #               [--out <file>] [--err <file>] [--append] [--marker <file>]
@@ -60,6 +61,9 @@
 #
 # `host.sh leg` owns each leg's marker and stream paths, starts or appends the harness stream as
 # required, and records its fixed outcome. Its attempt executor runs under this same host script.
+# Each start writes its intent first, so an attempt that dies without its record is classified
+# from its evidence on the next start, or by `leg backfill` on its own. One starter holds the
+# leg's lock at a time; a lock whose owner is dead is stolen, a live one refuses.
 #
 # stop: a launch's processes are its process group and everything they started, whatever session
 # that moved to, as a harness that runs each tool command in a session of its own does. They are
@@ -1758,7 +1762,8 @@ leg_acquire() {  # leg_acquire <lock> <mutex> <pid>: hold the leg's lock, or ref
   # The fast path is one atomic create. The slow path decides under a mutex, so
   # two starters never both proceed. A lock is stolen only when its owner is
   # dead; a live owner refuses, however stale the markers look. Exit 0 holds
-  # (printing held or stole), 1 refuses on a live owner, 2 on another starter.
+  # (printing held or stole), 1 refuses on a live owner, 2 on another starter,
+  # 3 on an internal error taking the lock at all.
   python3 - "$@" <<'PY'
 import fcntl, os, subprocess, sys
 active, mutex_path, self_pid = sys.argv[1], sys.argv[2], int(sys.argv[3])
@@ -1778,7 +1783,8 @@ def claim(fd):
         f.write("%d %s\n" % (self_pid, self_start))
 self_start = start_of(self_pid)
 if self_start is None:
-    sys.exit("cannot establish attempt ownership: the starter has no readable start time")
+    print("cannot establish attempt ownership: the starter has no readable start time", file=sys.stderr)
+    raise SystemExit(3)
 try:
     claim(os.open(active, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
     print("held"); raise SystemExit(0)
@@ -1787,7 +1793,8 @@ except OSError:
 try:
     mutex = open(mutex_path, "a", encoding="utf-8")
 except OSError:
-    sys.exit("cannot open the start mutex")
+    print("cannot open the start mutex", file=sys.stderr)
+    raise SystemExit(3)
 try:
     fcntl.flock(mutex.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 except OSError:
@@ -1885,19 +1892,22 @@ for line in text.splitlines():
     except ValueError: continue
     if not isinstance(e, dict): continue
     if e.get("type") == "rate_limit_event":
-        status = (e.get("rate_limit_info") or {}).get("status")
+        info = e.get("rate_limit_info")
+        status = info.get("status") if isinstance(info, dict) else None
         if status not in (None, "allowed"):
             open(wall, "w").write("wall\n"); break
     if e.get("type") in ("error", "thread.failed", "response.failed", "response.error"):
         if is_wall(e.get("error")) or is_wall(e):
             open(wall, "w").write("wall\n"); break
-try: phase_value = pathlib.Path(phase).read_text(encoding="utf-8").strip()
+try: phase_value = pathlib.Path(phase).read_text(encoding="utf-8", errors="replace").strip()
 except OSError: phase_value = "refused"
 try: walled = pathlib.Path(wall).is_file()
 except OSError: walled = False
 handoff = pathlib.Path(done).is_file()
 try:
     run = json.loads((dispatch / "run.json").read_text(encoding="utf-8"))
+    if not isinstance(run, dict):
+        run = {}
 except (OSError, ValueError):
     run = {}
 cfg = run.get("config", {})
@@ -1990,6 +2000,7 @@ p = sys.argv[1]
 terms = ("quota", "usage limit", "rate limit", "payment required", "insufficient_quota", "overloaded", "resource exhausted", "spawn failed", "failed to spawn", "stale session lock", "session lock")
 markers = ("error", "fail", "exceed", "denied", "exception")
 seen = False
+if hasattr(sys.stdin, "reconfigure"): sys.stdin.reconfigure(errors="replace")
 for line in sys.stdin:
     s = line.casefold()
     if re.match(r"\s*(?:402|429)\b", s) or (any(m in s for m in markers)
@@ -2021,8 +2032,12 @@ leg_backfill_one() {  # <d> <wt> <leg> <n> <m> <off> <end> <stream> <done> <atte
   if [ -f "$intent_f" ]; then
     mapfile -d '' -t f < <(python3 - "$intent_f" <<'PY'
 import json, sys
-try: r = json.load(open(sys.argv[1], encoding="utf-8"))
-except (OSError, ValueError): r = {}
+try:
+    r = json.load(open(sys.argv[1], encoding="utf-8"))
+    if not isinstance(r, dict):
+        r = {}
+except (OSError, ValueError):
+    r = {}
 for key in ("request", "role", "prompt", "thread_id"):
     sys.stdout.buffer.write(str(r.get(key) or "").encode() + b"\0")
 PY
@@ -2032,10 +2047,12 @@ PY
   if [ -z "$role" ]; then
     role=$(python3 - "$d/manifest.json" "$n" <<'PY'
 import json, sys
-try: m = json.load(open(sys.argv[1], encoding="utf-8"))
-except (OSError, ValueError): m = {}
-name = ((m.get("coachman") or {}).get("legs") or {}).get(sys.argv[2], {})
-print(name.get("name", "coachman"))
+try:
+    m = json.load(open(sys.argv[1], encoding="utf-8"))
+    name = ((m.get("coachman") or {}).get("legs") or {}).get(sys.argv[2], {})
+    print(name.get("name", "coachman") if isinstance(name, dict) else "coachman")
+except (OSError, ValueError, AttributeError):
+    print("coachman")
 PY
 )
     case $role in coachman|coachman_fallback) ;; *) role=coachman ;; esac
@@ -2065,14 +2082,16 @@ try:
             try: r = json.loads(line)
             except ValueError: continue
             try: have.add(int(r.get("attempt", -1)))
-            except (TypeError, ValueError): pass
+            except (TypeError, ValueError, AttributeError): pass
 except OSError:
     pass
 intents = {}
 for p in glob.glob(os.path.join(logs, "coachman-leg-%s-intent-*.json" % n)):
     tail = os.path.basename(p).rsplit("-", 1)[-1].split(".")[0]
     if tail.isdigit():
-        try: intents[int(tail)] = json.load(open(p, encoding="utf-8"))
+        try:
+            loaded = json.load(open(p, encoding="utf-8"))
+            intents[int(tail)] = loaded if isinstance(loaded, dict) else {}
         except (OSError, ValueError): pass
 phases = set()
 for p in glob.glob(os.path.join(logs, "coachman-leg-%s-phase-*" % n)):
@@ -2090,6 +2109,49 @@ for m in sorted((set(intents) | phases) - have):
     print("%d|%d|%s" % (m, off, end))
 PY
 )
+}
+
+leg_next_attempt() {  # <attempts> <logs> <n>: one past the highest attempt seen anywhere
+  python3 - "$@" <<'PY'
+import glob, json, os, sys
+attempts, logs, n = sys.argv[1:4]
+best = 0
+try:
+    with open(attempts, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line: continue
+            try: r = json.loads(line)
+            except ValueError: continue
+            try: a = int(r.get("attempt", 0))
+            except (TypeError, ValueError, AttributeError): continue
+            best = max(best, a)
+except OSError: pass
+for pat in ("coachman-leg-%s-phase-*" % n, "coachman-leg-%s-intent-*.json" % n):
+    for p in glob.glob(os.path.join(logs, pat)):
+        tail = os.path.basename(p).rsplit("-", 1)[-1].split(".")[0]
+        if tail.isdigit(): best = max(best, int(tail))
+print(best + 1)
+PY
+}
+
+leg_backfill_only() {  # <dispatch> <leg> <number>: classify unrecorded attempts, starting nothing
+  local d=$1 leg=$2 n=$3 logs attempts stream done active new rc
+  case $leg in synthesis|review|ship) ;; *) die "unknown coachman leg: $leg" ;; esac
+  n=$(leg_number "$n") || exit 1
+  d=$(CDPATH= cd -P -- "$d" 2>/dev/null && pwd -P) || die "no such dispatch: $1"
+  logs=$d/logs; attempts=$logs/coachman-leg-$n-attempts.jsonl
+  stream=$logs/coachman-leg-$n-events.jsonl; done=$d/.leg-$n-done
+  active=$d/.leg-$n-active
+  leg_acquire "$active" "$d/.leg-$n-mutex" "$$" >/dev/null || {
+    rc=$?
+    [ "$rc" -eq 2 ] && die "leg $n has another start in progress"
+    [ "$rc" -eq 3 ] && die "leg $n cannot take its lock"
+    die "leg $n has a live attempt; backfill runs only on INSPECT"
+  }
+  new=$(leg_next_attempt "$attempts" "$logs" "$n") || { leg_release "$active"; die "cannot count prior attempts"; }
+  leg_backfill "$d" "" "$leg" "$n" "$new" "$stream" "$done" "$attempts" || { leg_release "$active"; die "cannot backfill the unrecorded attempt"; }
+  leg_release "$active"
 }
 
 leg_start() {  # leg_start <request> <dispatch> <worktree> <leg> <number> <prompt> [<thread>] [<role>]
@@ -2137,30 +2199,12 @@ leg_start() {  # leg_start <request> <dispatch> <worktree> <leg> <number> <promp
   # Exactly one starter proceeds; a stale lock is stolen, a live one refuses.
   acquired=$(leg_acquire "$active" "$d/.leg-$n-mutex" "$$") || {
     rc=$?
-    [ "$rc" -eq 2 ] && die "leg $n has another start in progress" || die "leg $n already has an active attempt"
+    [ "$rc" -eq 2 ] && die "leg $n has another start in progress"
+    [ "$rc" -eq 3 ] && die "leg $n cannot take its lock"
+    die "leg $n already has an active attempt"
   }
-  attempt=$(python3 - "$attempts" "$logs" "$n" <<'PY'
-import glob, json, os, sys
-attempts, logs, n = sys.argv[1:4]
-best = 0
-try:
-    with open(attempts, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line: continue
-            try: r = json.loads(line)
-            except ValueError: continue
-            try: a = int(r.get("attempt", 0))
-            except (TypeError, ValueError): continue
-            best = max(best, a)
-except OSError: pass
-for pat in ("coachman-leg-%s-phase-*" % n, "coachman-leg-%s-intent-*.json" % n):
-    for p in glob.glob(os.path.join(logs, pat)):
-        tail = os.path.basename(p).rsplit("-", 1)[-1].split(".")[0]
-        if tail.isdigit(): best = max(best, int(tail))
-print(best + 1)
-PY
-  ) || { leg_release "$active"; die "cannot count prior attempts"; }
+  attempt=$(leg_next_attempt "$attempts" "$logs" "$n") \
+    || { leg_release "$active"; die "cannot count prior attempts"; }
   # An attempt that died without its record is classified now, from the
   # evidence it left, before the new attempt starts.
   leg_backfill "$d" "$wt" "$leg" "$n" "$attempt" "$stream" "$done" "$attempts" \
@@ -2289,7 +2333,7 @@ leg_waiting_list() {  # leg_waiting_list <runs>
 
 leg_cmd() {  # leg launch|resume|takeover|retry|outcome|waiting ...
   local request=${1:-}
-  [ $# -gt 0 ] || die "usage: host.sh leg launch|resume|takeover|retry|outcome|waiting ..."
+  [ $# -gt 0 ] || die "usage: host.sh leg launch|resume|takeover|retry|outcome|backfill|waiting ..."
   shift
   case $request in
     launch)
@@ -2304,6 +2348,9 @@ leg_cmd() {  # leg launch|resume|takeover|retry|outcome|waiting ...
     outcome)
       [ $# -eq 2 ] || die "usage: host.sh leg outcome <dispatch> <number>"
       leg_outcome "$1" "$2" ;;
+    backfill)
+      [ $# -eq 3 ] || die "usage: host.sh leg backfill <dispatch> <leg> <number>"
+      leg_backfill_only "$1" "$2" "$3" ;;
     waiting)
       case ${1:-} in
         add) shift; [ $# -eq 3 ] || die "usage: host.sh leg waiting add <runs> <ticket> <question-file>"; leg_waiting_add "$@" ;;
@@ -2323,7 +2370,7 @@ leg_cmd() {  # leg launch|resume|takeover|retry|outcome|waiting ...
       case $outcome in refused|pre-thread|walled) ;; *) die "leg $4's last attempt is $outcome, not waiting for a retry" ;; esac
       [ "$outcome $role" = "walled coachman" ] && die "leg $4's last attempt is a primary wall: take it over, do not retry it"
       leg_start "$retry_as" "$d" "$wt" "$leg" "$n" "$prompt" "$thread" "$role" ;;
-    *) die "usage: host.sh leg launch|resume|takeover|retry|outcome|waiting ..." ;;
+    *) die "usage: host.sh leg launch|resume|takeover|retry|outcome|backfill|waiting ..." ;;
   esac
 }
 
@@ -2410,9 +2457,21 @@ for fd in os.listdir("/proc/self/fd"):
         except OSError: pass'
     i=0; while [ $i -lt 50000 ]; do printf 'detail line %05d %0100d\n' "$i" "$i" >&2; i=$((i+1)); done
     exit 1 ;;
+  *break-runjson-shape*)
+    printf '{"session_id":"thread-broken-shape"}\n'
+    printf '[]' > "$TEST_RUNJSON"
+    exit 1 ;;
   *break-runjson*)
     printf '{"session_id":"thread-broken"}\n'
     printf 'this is not json' > "$TEST_RUNJSON"
+    exit 1 ;;
+  *rateinfo-shape*)
+    printf '{"type":"rate_limit_event","rate_limit_info":"limited","session_id":"thread-rl"}\n'
+    exit 1 ;;
+  *wall-binary*)
+    printf '{"session_id":"thread-bin"}\n'
+    printf 'Error: quota exceeded\n' >&2
+    i=0; while [ $i -lt 1000 ]; do printf '\xff\xfe binary\n' >&2; i=$((i+1)); done
     exit 1 ;;
   *skill-caller*)
     "$TEST_LAUNCH" skill coachman security-review --leg synthesis --run "$TEST_DISPATCH" >/dev/null 2>&1
@@ -2553,16 +2612,34 @@ EOF
   prompt=$leg_d/bare-429.txt; printf 'bare-429 wall wording\n' > "$prompt"
   legrun launch "$leg_d" "$leg_wt" synthesis 1 "$prompt"; lastout
   check "a line-anchored 429 is still a wall" '[ "$rc" -eq 0 ] && [ "$got" = walled ]' "$got"
+  prompt=$leg_d/rateinfo-shape.txt; printf 'rateinfo-shape event\n' > "$prompt"
+  before=$(grep -c . "$attempts")
+  legrun launch "$leg_d" "$leg_wt" synthesis 1 "$prompt"; lastout
+  check "a misshapen rate-limit event still gets its record" \
+    '[ "$rc" -eq 0 ] && [ "$(grep -c . "$attempts")" = "$((before + 1))" ] && [ "$got" = incomplete ]' "$got"
 
   prompt=$leg_d/wall-chatter.txt; printf 'wall-chatter flood\n' > "$prompt"
   legrun launch "$leg_d" "$leg_wt" synthesis 1 "$prompt"; lastout
   kept=$(grep -c '^detail line' "$err" 2>/dev/null)
   check "stderr after a wall line is preserved whole" '[ "$rc" -eq 0 ] && [ "$got" = walled ] && [ "$kept" = 50000 ]' "$got kept=$kept"
 
+  prompt=$leg_d/wall-binary.txt; printf 'wall-binary flood\n' > "$prompt"
+  legrun launch "$leg_d" "$leg_wt" synthesis 1 "$prompt"; lastout
+  check "non-text stderr keeps its wall signal" '[ "$rc" -eq 0 ] && [ "$got" = walled ]' "$got"
+
   prompt=$leg_d/break-runjson.txt; printf 'break-runjson now\n' > "$prompt"
   before=$(grep -c . "$attempts")
   legrun launch "$leg_d" "$leg_wt" synthesis 1 "$prompt"; lastout
   check "an unreadable run.json still gets its attempt record" \
+    '[ "$rc" -eq 0 ] && [ "$(grep -c . "$attempts")" = "$((before + 1))" ] && [ "$got" = pre-thread ]' "$got"
+  cat > "$leg_d/run.json" <<'EOF'
+{"config":{"team":{"coachman":{"harness":"claude","model":"fake-coach"},"coachman_fallback":{"harness":"claude","model":"fake-fallback"}}}}
+EOF
+
+  prompt=$leg_d/break-runjson-shape.txt; printf 'break-runjson-shape now\n' > "$prompt"
+  before=$(grep -c . "$attempts")
+  legrun launch "$leg_d" "$leg_wt" synthesis 1 "$prompt"; lastout
+  check "a run.json that is valid JSON but not an object still gets its record" \
     '[ "$rc" -eq 0 ] && [ "$(grep -c . "$attempts")" = "$((before + 1))" ] && [ "$got" = pre-thread ]' "$got"
   cat > "$leg_d/run.json" <<'EOF'
 {"config":{"team":{"coachman":{"harness":"claude","model":"fake-coach"},"coachman_fallback":{"harness":"claude","model":"fake-fallback"}}}}
@@ -2610,28 +2687,6 @@ EOF
   printf '{"attempt":99,"leg":1,"name":"synthesis","request":"launch","role":"coachman","prompt":"%s","thread_id":"","outcome":"walled","exit":1}\n' "$prompt" >> "$attempts"
   "$SELF" leg retry "$leg_d" "$leg_wt" synthesis 1 >/dev/null 2>&1; rc=$?
   check "retry refuses a primary wall: that is the takeover's job" '[ "$rc" -ne 0 ] && [ "$(grep -c . "$attempts")" = "$((before + 1))" ]'
-  python3 - "$attempts" <<'PY'
-import json, sys
-rows = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
-bad = []
-for r in rows:
-    if r.get("attempt") == 99:
-        continue
-    if r["outcome"] in ("refused", "pre-thread") \
-            or (r["outcome"] == "walled" and r.get("role") == "coachman_fallback"):
-        want = "retry"
-    elif r["outcome"] == "incomplete":
-        want = "resume"
-    else:
-        want = "none"
-    if r.get("on_answer") != want:
-        bad.append((r.get("attempt"), r.get("outcome"), r.get("on_answer"), want))
-if bad:
-    print(bad)
-    raise SystemExit(1)
-PY
-  rc=$?
-  check "every attempt record states its on-answer action" '[ "$rc" -eq 0 ]'
   python3 - "$attempts" <<'PY'
 import sys
 p = sys.argv[1]
@@ -2734,6 +2789,55 @@ PY
   check "an unrecorded death is backfilled from its evidence" '[ "$rc" -eq 0 ] && [ "$got" = "incomplete thread-dead True resume" ]' "$got"
   got2=$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).readlines()[-1])["attempt"])' "$attempts")
   check "the new attempt numbers past the backfilled one" '[ "$got2" = "$((M + 1))" ]' "$got2"
+
+  M2=$((M + 2))
+  off=$(python3 -c 'import os,sys; print(os.path.getsize(sys.argv[1]))' "$stream")
+  printf '{"type":"error","error":{"code":402,"message":"payment required"}}\n' >> "$stream"
+  printf 'started\n' > "$leg_d/logs/coachman-leg-1-phase-$M2"
+  printf '{"attempt":%s,"request":"resume","role":"coachman","prompt":"%s","thread_id":"thread-old","stream_off":%s}\n' \
+    "$M2" "$leg_d/replay.txt" "$off" > "$leg_d/logs/coachman-leg-1-intent-$M2.json"
+  calls_before=$(wc -l < "$tmp/leg-calls")
+  "$SELF" leg backfill "$leg_d" synthesis 1 >/dev/null; rc=$?
+  calls_now=$(wc -l < "$tmp/leg-calls")
+  got=$(python3 -c 'import json,sys; r=[json.loads(line) for line in open(sys.argv[1]) if line.strip().startswith("{")]; m=[x for x in r if x["attempt"]==int(sys.argv[2])][0]; print(m["outcome"],m["thread_id"],m["backfilled"],m["on_answer"])' "$attempts" "$M2")
+  check "backfill classifies without starting anything" \
+    '[ "$rc" -eq 0 ] && [ "$got" = "walled thread-old True none" ] && [ "$((calls_now - calls_before))" -eq 0 ]' "$got"
+
+  M3=$((M2 + 1))
+  off=$(python3 -c 'import os,sys; print(os.path.getsize(sys.argv[1]))' "$stream")
+  printf '\xff\xfe invalid\n' > "$leg_d/logs/coachman-leg-1-phase-$M3"
+  printf '{"attempt":%s,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":%s}\n' \
+    "$M3" "$leg_d/replay.txt" "$off" > "$leg_d/logs/coachman-leg-1-intent-$M3.json"
+  "$SELF" leg backfill "$leg_d" synthesis 1 >/dev/null; rc=$?
+  got=$(python3 -c 'import json,sys; r=[json.loads(line) for line in open(sys.argv[1]) if line.strip().startswith("{")]; m=[x for x in r if x["attempt"]==int(sys.argv[2])][0]; print(m["outcome"])' "$attempts" "$M3")
+  check "a phase file that is not text backfills as refused" '[ "$rc" -eq 0 ] && [ "$got" = refused ]' "$got"
+
+  python3 - "$attempts" <<'PY'
+import json, sys
+rows = []
+for line in open(sys.argv[1], encoding="utf-8"):
+    line = line.strip()
+    if not line: continue
+    try: rows.append(json.loads(line))
+    except ValueError: continue
+bad = []
+for r in rows:
+    if not isinstance(r, dict): continue
+    if r["outcome"] in ("refused", "pre-thread") \
+            or (r["outcome"] == "walled" and r.get("role") == "coachman_fallback"):
+        want = "retry"
+    elif r["outcome"] == "incomplete":
+        want = "resume"
+    else:
+        want = "none"
+    if r.get("on_answer") != want:
+        bad.append((r.get("attempt"), r.get("outcome"), r.get("on_answer"), want))
+if bad:
+    print(bad)
+    raise SystemExit(1)
+PY
+  rc=$?
+  check "every attempt record states its on-answer action" '[ "$rc" -eq 0 ]'
 }
 
 
