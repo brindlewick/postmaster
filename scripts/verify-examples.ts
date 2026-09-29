@@ -798,7 +798,15 @@ built ok
   }
 
   // A #! line splits as shlex.split does: quotes group, backslashes quote,
-  // and unbalanced quotes raise. python3's shlex is the independent side.
+  // and unbalanced quotes raise. The expectations are goldens captured from
+  // python3's shlex once, on 2026-09-29, over these exact vectors. Regenerate
+  // under python3 with -c, feeding the vectors below as a JSON array on stdin:
+  //   "import json,shlex,sys
+  //   out=[]
+  //   for s in json.load(sys.stdin):
+  //    try: out.append(shlex.split(s))
+  //    except ValueError: out.append('RAISES')
+  //   print(json.dumps(out))"
   {
     const vectors = [
       "",
@@ -816,31 +824,39 @@ built ok
       '"a\\$b"',
       '"a\\"b"',
     ];
-    const py = run(
-      "python3",
-      [
-        "-c",
-        "import json,shlex,sys\nout=[]\nfor s in json.load(sys.stdin):\n try: out.append(shlex.split(s))\n except ValueError: out.append('RAISES')\nprint(json.dumps(out))",
-      ],
-      { input: JSON.stringify(vectors) },
-    );
-    let splitOk = py.code === 0;
-    let detail = "";
-    if (splitOk) {
-      const wants = JSON.parse(py.out) as Array<string[] | string>;
-      wants.forEach((want, i) => {
-        let got: string[] | string;
-        try {
-          got = shlexSplit(vectors[i] ?? "");
-        } catch {
-          got = "RAISES";
-        }
-        if (JSON.stringify(got) !== JSON.stringify(want)) {
-          splitOk = false;
-          detail += `${JSON.stringify(vectors[i])}: port=${JSON.stringify(got)} base=${JSON.stringify(want)}\n`;
-        }
-      });
-    }
+    const wants: Array<string[] | string> = [
+      [],
+      ["a", "b"],
+      ["a b", "c"],
+      ["a b"],
+      ["ab cd"],
+      ["x y"],
+      "RAISES",
+      "RAISES",
+      "RAISES",
+      ["/usr/bin/env", "python3", "-u"],
+      ["ab"],
+      ["a#b"],
+      ["a\\$b"],
+      ['a"b'],
+    ];
+    let splitOk = wants.length === vectors.length;
+    let detail =
+      wants.length === vectors.length
+        ? ""
+        : `goldens cover ${wants.length} of ${vectors.length} vectors\n`;
+    wants.forEach((want, i) => {
+      let got: string[] | string;
+      try {
+        got = shlexSplit(vectors[i] ?? "");
+      } catch {
+        got = "RAISES";
+      }
+      if (JSON.stringify(got) !== JSON.stringify(want)) {
+        splitOk = false;
+        detail += `${JSON.stringify(vectors[i])}: port=${JSON.stringify(got)} base=${JSON.stringify(want)}\n`;
+      }
+    });
     st.check("a #! line splits as shlex.split does, quotes and errors alike", splitOk, detail);
   }
   if (!existsSync("/bin/echo")) {

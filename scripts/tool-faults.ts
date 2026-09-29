@@ -538,6 +538,12 @@ interface FaultGroup {
   escalated: boolean;
 }
 
+/** BASE's fault id: `tf-` plus the first 8 hex digits of sha256 over the
+ * target file, a newline, and the failure's key. */
+function faultId(file: string, key: string): string {
+  return `tf-${sha256hex(`${file}\n${key}`).slice(0, 8)}`;
+}
+
 function faultsOf(
   entries: Array<Record<string, unknown>>,
   safe: Safe,
@@ -552,7 +558,7 @@ function faultsOf(
     k++;
     if (k <= first) continue;
     const file = String(e.target || "");
-    const fid = `tf-${sha256hex(`${file}\n${safe.key(String(fields(e).failed || ""))}`).slice(0, 8)}`;
+    const fid = faultId(file, safe.key(String(fields(e).failed || "")));
     let g = groups.get(fid);
     if (!g) {
       g = { id: fid, file, entries: [], at: i, control: "", workarounds: [], escalated: false };
@@ -2265,9 +2271,33 @@ if (a[0] === "api" && a[1] === "graphql") {
   }
 
   // Fault ids are BASE's sha256 over "file\nkey", first 8 hex digits; a draft's
-  // digest is sha256 over title, NUL, body. python3's hashlib is the independent
-  // side of both controls: the same inputs must give the same id on both sides,
-  // or a run across the cutover files under another fault's name.
+  // digest is sha256 over title, NUL, body. Both pin to goldens captured from
+  // python3's hashlib once, on 2026-09-29: the same inputs must give the same
+  // id on both sides, or a run across the cutover files under another fault's
+  // name. Regenerate under python3 with -c and, respectively:
+  //   "import hashlib; print('tf-'+hashlib.sha256(b'<file>\n<key>').hexdigest()[:8])"
+  //   "import hashlib; print(hashlib.sha256(open('<title>','rb').read()+b'\0'+open('<body>','rb').read()).hexdigest())"
+  // The formula control below uses fixed keys on purpose: the keys the
+  // grouping derives come from the tool vocabulary, so end-to-end ids would
+  // bake the vocabulary into the golden. The wiring control then checks the
+  // grouping files each entry under faultId of its own target and key.
+  {
+    const cases: Array<[string, string, string]> = [
+      ["scripts/launch.sh", "codex --json hung", "tf-e2ae0dba"],
+      ["scripts/host.sh", "tmux: no server running", "tf-eb56942b"],
+      ["", "", "tf-01ba4719"],
+      ["a", "b\nc", "tf-ea7fb08b"],
+      ["snowman ☃", "key ☃", "tf-b1776d54"],
+    ];
+    const seen: string[] = [];
+    let fidsMatch = true;
+    for (const [file, key, want] of cases) {
+      const got = faultId(file, key);
+      seen.push(`${JSON.stringify(file)} ${JSON.stringify(key)}: ${got} vs ${want}`);
+      if (got !== want) fidsMatch = false;
+    }
+    st.check("fault ids are BASE's sha256 over file, newline, key", fidsMatch, seen.join("\n"));
+  }
   {
     const d = join(tmp, "fid");
     mkdirSync(d, { recursive: true });
@@ -2285,43 +2315,39 @@ if (a[0] === "api" && a[1] === "graphql") {
       },
     ];
     const groups = faultsOf(entries, safe, 0);
-    let fidsMatch = groups.length === 2;
+    let wiredOk = groups.length === 2;
     const seen: string[] = [];
     for (const g of groups) {
       const e = g.entries[0]!;
-      const key = safe.key(String(fields(e).failed || ""));
-      const want = run("python3", [
-        "-c",
-        "import hashlib,sys; print('tf-'+hashlib.sha256(('%s\\n%s' % (sys.argv[1], sys.argv[2])).encode()).hexdigest()[:8])",
-        String(e.target || ""),
-        key,
-      ]);
-      seen.push(`${g.id} vs ${want.out.trim()}`);
-      if (want.code !== 0 || g.id !== want.out.trim()) fidsMatch = false;
+      const want = faultId(String(e.target || ""), safe.key(String(fields(e).failed || "")));
+      seen.push(`${g.id} vs ${want}`);
+      if (g.id !== want) wiredOk = false;
     }
-    st.check("fault ids are BASE's sha256 over file, newline, key", fidsMatch, seen.join("\n"));
+    st.check("grouping files each entry under its fault id", wiredOk, seen.join("\n"));
   }
   {
-    const cases: Array<[Buffer, Buffer]> = [
-      [Buffer.from("A title\n", "utf8"), Buffer.from("A body.\n", "utf8")],
-      [Buffer.from(new Uint8Array([0x54, 0xff, 0x0a])), Buffer.from("body\0with NUL\n", "utf8")],
+    const cases: Array<[Buffer, Buffer, string]> = [
+      [
+        Buffer.from("A title\n", "utf8"),
+        Buffer.from("A body.\n", "utf8"),
+        "7318098db1171d190bf06cb08ac941f67a6dc4cbbd11be829fd849d3ca0d19c3",
+      ],
+      [
+        Buffer.from(new Uint8Array([0x54, 0xff, 0x0a])),
+        Buffer.from("body\0with NUL\n", "utf8"),
+        "be4624694fee7015471a8b74f6c0787794fb99db785e7bd5d554169f108ddc81",
+      ],
     ];
     let digestsMatch = true;
     const seen: string[] = [];
-    cases.forEach(([title, body], i) => {
+    cases.forEach(([title, body, want], i) => {
       const titlePath = join(tmp, `t${i}.title`);
       const bodyPath = join(tmp, `b${i}.md`);
       writeFileSync(titlePath, title);
       writeFileSync(bodyPath, body);
-      const want = run("python3", [
-        "-c",
-        "import hashlib,sys,pathlib; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()+b'\\0'+pathlib.Path(sys.argv[2]).read_bytes()).hexdigest())",
-        titlePath,
-        bodyPath,
-      ]);
       const got = digest(titlePath, bodyPath);
-      seen.push(`${got} vs ${want.out.trim()}`);
-      if (want.code !== 0 || got !== want.out.trim()) digestsMatch = false;
+      seen.push(`${got} vs ${want}`);
+      if (got !== want) digestsMatch = false;
     });
     st.check(
       "draft digests are BASE's sha256 over title, NUL, body",

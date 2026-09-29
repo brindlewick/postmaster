@@ -1507,70 +1507,86 @@ async function selfTest(): Promise<number> {
 
     // Identifiers both sides compute and read: the next ticket number counts
     // .json and .md but never .tmp, unfinished writes clean up by BASE's exact
-    // name, and ticket files read on both sides, python's json below standing
-    // in for BASE's read.
-    const py3 = run("sh", ["-c", "command -v python3"]).code === 0;
-    if (!py3) fail("python3 runs the BASE-side identifier controls", "no python3 on PATH");
-    else {
-      const idStore = join(temp, "ids");
-      mkdirSync(idStore, { recursive: true });
-      for (const n of ["1.json", "007.json", "2.md", "3.json.99999.tmp", "README", ".lock"])
-        writeFileSync(join(idStore, n), "{}\n");
-      const pyNext = run("python3", [
-        "-c",
-        'import os,re,sys; used=[int(m.group(1)) for m in (re.fullmatch(r"(\\d+)\\.(?:json|md)", f) for f in os.listdir(sys.argv[1])) if m]; print(max(used, default=0)+1)',
-        idStore,
-      ]);
-      String(nextNumber(idStore)) === pyNext.out.trim() && pyNext.out.trim() === "8"
-        ? ok("the next number counts .json and .md past leading zeros, never .tmp")
-        : fail(
-            "the next number counts .json and .md past leading zeros, never .tmp",
-            `${nextNumber(idStore)} vs ${pyNext.out.trim()}`,
-          );
-      const idRepo = join(temp, "idrepo");
-      newRepo(idRepo);
-      lt(idRepo, "store", "init");
-      const idStoreReal = join(idRepo, ".git", "postmaster", "tickets");
-      const created = lt(idRepo, "create", "snowman ☃ title", bodyPath);
-      const createdN = created.code === 0 ? BigInt(created.out.trim()) : -1n;
-      const meta = run("python3", [
-        "-c",
-        "import json,sys; m=json.load(open(sys.argv[1])); print(m['title'], m['state'], m['created'], len(m['log']))",
-        ticketPath(idStoreReal, createdN, "json"),
-      ]);
-      meta.code === 0 && meta.out.trim().startsWith("snowman ☃ title todo 20")
-        ? ok("a ticket the port writes reads under BASE's json, non-ASCII whole")
-        : fail(
-            "a ticket the port writes reads under BASE's json, non-ASCII whole",
-            `${created.code} ${created.out}\n${meta.out}${meta.err}`,
-          );
-      run("python3", [
-        "-c",
-        "import json,sys; json.dump({'title':'BASE sides ☃','state':'todo','labels':[],'created':'2026-01-02T03:04:05Z','log':[]}, open(sys.argv[1],'w'), indent=2, ensure_ascii=False)",
-        join(idStoreReal, "9.json"),
-      ]);
-      writeFileSync(join(idStoreReal, "9.md"), "BASE body\n");
-      const readNine = lt(idRepo, "read", "9");
-      readNine.code === 0 && readNine.out.includes("BASE sides ☃")
-        ? ok("a ticket BASE's exact dump writes reads under the port")
-        : fail(
-            "a ticket BASE's exact dump writes reads under the port",
-            `${readNine.code} ${readNine.out}`,
-          );
-      const emptyRepo = join(temp, "emptyrepo");
-      newRepo(emptyRepo);
-      lt(emptyRepo, "store", "init");
-      const emptyStore = join(emptyRepo, ".git", "postmaster", "tickets");
-      writeFileSync(join(emptyStore, "1.json.12345.tmp"), "leftover\n");
-      writeFileSync(join(emptyStore, "2.md.678.tmp"), "leftover\n");
-      const removed = lt(emptyRepo, "store", "remove");
-      removed.code === 0 && removed.out.includes("store removed")
-        ? ok("unfinished writes by BASE's exact tmp name clean up on store remove")
-        : fail(
-            "unfinished writes by BASE's exact tmp name clean up on store remove",
-            `${removed.code} ${removed.out}`,
-          );
-    }
+    // name, and the metadata round-trips byte for byte in both directions:
+    // the port's write matches BASE's json layout exactly, and BASE's exact
+    // dump reads back under the port. Goldens captured once, on 2026-09-29:
+    // the next number from the store layout below (max(1, 7, 2) + 1), the
+    // port-side write from the port's own create (verified readable under
+    // python3's json.load while the live oracle stood), the BASE-side dump
+    // from python3's json.dump with indent=2 and ensure_ascii=False.
+    // Regenerate that dump under python3 with -c and:
+    //   "import json,sys; json.dump({'title':'BASE sides ☃','state':'todo','labels':[],'created':'2026-01-02T03:04:05Z','log':[]}, open(sys.argv[1],'w'), indent=2, ensure_ascii=False)"
+    const idStore = join(temp, "ids");
+    mkdirSync(idStore, { recursive: true });
+    for (const n of ["1.json", "007.json", "2.md", "3.json.99999.tmp", "README", ".lock"])
+      writeFileSync(join(idStore, n), "{}\n");
+    String(nextNumber(idStore)) === "8"
+      ? ok("the next number counts .json and .md past leading zeros, never .tmp")
+      : fail(
+          "the next number counts .json and .md past leading zeros, never .tmp",
+          `${nextNumber(idStore)} vs 8`,
+        );
+    const idRepo = join(temp, "idrepo");
+    newRepo(idRepo);
+    lt(idRepo, "store", "init");
+    const idStoreReal = join(idRepo, ".git", "postmaster", "tickets");
+    const created = lt(idRepo, "create", "snowman ☃ title", bodyPath);
+    const createdN = created.code === 0 ? BigInt(created.out.trim()) : -1n;
+    // The port's write for the ticket above, byte for byte but the live
+    // timestamp: captured from the port's own create, whose output python3's
+    // json.load read whole (title, state, created, log, non-ASCII intact)
+    // while the live oracle stood. The created instant keeps its own shape
+    // control below.
+    const wantMeta = `{
+  "title": "snowman ☃ title",
+  "state": "todo",
+  "labels": [],
+  "created": "CREATED",
+  "log": []
+}
+`;
+    const metaPath = ticketPath(idStoreReal, createdN, "json");
+    const metaRaw =
+      created.code === 0 && existsSync(metaPath) ? readFileSync(metaPath, "utf8") : "";
+    const createdShape = /"created": "20\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ"/.test(metaRaw);
+    const metaNorm = metaRaw.replace(/"created": "[^"]*"/, '"created": "CREATED"');
+    created.code === 0 && createdShape && metaNorm === wantMeta
+      ? ok("a ticket the port writes matches BASE's json byte for byte, non-ASCII whole")
+      : fail(
+          "a ticket the port writes matches BASE's json byte for byte, non-ASCII whole",
+          `${created.code} ${created.out}\n${metaRaw}`,
+        );
+    // BASE's exact dump for the ticket below, byte for byte with no trailing
+    // newline: captured from the dump call the live oracle ran.
+    const baseDump = `{
+  "title": "BASE sides ☃",
+  "state": "todo",
+  "labels": [],
+  "created": "2026-01-02T03:04:05Z",
+  "log": []
+}`;
+    writeFileSync(join(idStoreReal, "9.json"), baseDump);
+    writeFileSync(join(idStoreReal, "9.md"), "BASE body\n");
+    const readNine = lt(idRepo, "read", "9");
+    readNine.code === 0 && readNine.out.includes("BASE sides ☃")
+      ? ok("a ticket BASE's exact dump writes reads under the port")
+      : fail(
+          "a ticket BASE's exact dump writes reads under the port",
+          `${readNine.code} ${readNine.out}`,
+        );
+    const emptyRepo = join(temp, "emptyrepo");
+    newRepo(emptyRepo);
+    lt(emptyRepo, "store", "init");
+    const emptyStore = join(emptyRepo, ".git", "postmaster", "tickets");
+    writeFileSync(join(emptyStore, "1.json.12345.tmp"), "leftover\n");
+    writeFileSync(join(emptyStore, "2.md.678.tmp"), "leftover\n");
+    const removed = lt(emptyRepo, "store", "remove");
+    removed.code === 0 && removed.out.includes("store removed")
+      ? ok("unfinished writes by BASE's exact tmp name clean up on store remove")
+      : fail(
+          "unfinished writes by BASE's exact tmp name clean up on store remove",
+          `${removed.code} ${removed.out}`,
+        );
   } catch (error) {
     fail("self-test setup or execution", String(error));
   } finally {
