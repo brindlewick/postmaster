@@ -522,6 +522,25 @@ PY
   out=$("$self" transient "$tmp/leg.err" "$tmp/leg-events.jsonl" soon 2>"$tmp/err"); rc=$?
   [ $rc -eq 1 ] && case $(cat "$tmp/err") in *"whole number"*) true ;; *) false ;; esac \
     && ok "a skip that is not a number is refused" || fail "a skip that is not a number is refused (exit $rc)"
+  is_transient "an underscore quota wall takes precedence" 1 "quota_exhausted: model stream idle timeout"
+  is_transient "an underscore provider wall takes precedence" 1 "provider_wall: stream disconnected"
+  is_transient "an underscore resource wall takes precedence" 1 "resource_exhausted: bad gateway"
+  is_transient "a hyphen quota wall takes precedence" 1 "quota-exceeded: model stream idle timeout"
+  printf 'host: launch running uncapped (no supported per-launch limits available)\nlaunch: no such lane\n' > "$tmp/leg.err"
+  out=$("$self" transient "$tmp/leg.err" 2>"$tmp/err"); rc=$?
+  [ $rc -eq 1 ] && [ "$out" = launch-refusal ] \
+    && ok "a refusal past a host notice is still a refusal" \
+    || fail "a refusal past a host notice is still a refusal (exit $rc, $out)"
+  printf 'host: memory cap reached (MemoryMax=64M)\nlaunch: resume needs a thread id\n' > "$tmp/leg.err"
+  out=$("$self" transient "$tmp/leg.err" 2>"$tmp/err"); rc=$?
+  [ $rc -eq 1 ] && [ "$out" = launch-refusal ] \
+    && ok "a refusal past a cap notice is still a refusal" \
+    || fail "a refusal past a cap notice is still a refusal (exit $rc, $out)"
+  printf 'host: launch running uncapped\nlaunch: stream idle timeout on resume\n' > "$tmp/leg.err"
+  out=$("$self" transient "$tmp/leg.err" 2>"$tmp/err"); rc=$?
+  [ $rc -eq 1 ] && [ "$out" = launch-refusal ] \
+    && ok "a refusal wins over transient text on its own line" \
+    || fail "a refusal wins over transient text on its own line (exit $rc, $out)"
   out=$("$self" transient "$tmp/no-such.err" 2>"$tmp/err"); rc=$?
   [ $rc -eq 1 ] && case $(cat "$tmp/err") in *"no such error file"*) true ;; *) false ;; esac \
     && ok "a missing error file is refused" || fail "a missing error file is refused (exit $rc)"
@@ -647,14 +666,16 @@ if stream_path:
                     collect(child, parent)
         collect(event)
 all_errors = err + "\n" + "\n".join(error_text)
-if err.startswith("launch:"):
+# host.sh's own notices (uncapped, cap reached) precede the child's stderr, so a
+# refusal is a launch: line past any leading host: lines, not offset 0.
+if re.sub(r"^(?:host:[^\n]*\n)+", "", err).startswith("launch:"):
     print("launch-refusal")
     raise SystemExit(1)
-wall = re.compile(r"\b(?:402\s+payment\s+required|payment\s+required|quota(?:\s+(?:wall|exceeded|exhausted))|usage[\s_-]+limit|rate[\s_-]+limit|provider\s+wall|resource\s+exhausted|insufficient\s+funds|too\s+many\s+requests)\b", re.I)
+sep = r"[\s_-]+"
+wall = re.compile(r"\b(?:402%s+payment%s+required|payment%s+required|quota(?:%s+(?:wall|exceeded|exhausted))|usage%s+limit|rate%s+limit|provider%s+wall|resource%s+exhausted|insufficient%s+funds|too%s+many%s+requests)\b" % (sep, sep, sep, sep, sep, sep, sep, sep, sep, sep, sep), re.I)
 if wall.search(all_errors):
     print("provider-wall")
     raise SystemExit(1)
-sep = r"[\s_-]+"
 idle = re.compile(r"\b(?:model%sstream%sidle%stimeout|stream%sidle%stimeout)\b" % (sep, sep, sep, sep, sep), re.I)
 if idle.search(all_errors):
     print("model stream idle timeout")
