@@ -16,9 +16,10 @@
 #             that exits non-zero, no next leg after the ship leg, or a launch it cannot
 #             complete are steps it could not complete: they wake the postmaster.
 #   REMOUNT   the leg's process ended on a transient provider error the harness adapter names
-#             (launch.sh transient): resume it on its own thread with the remount prompt, at
-#             most three times per leg (the count is in <run>/watcher.json and survives a
-#             restart). A fourth such end, a non-transient end (quota, wall, launch refusal,
+#             (launch.sh transient, reading only the current launch's stream lines past the
+#             skip in <run>/watcher.json): resume it on its own thread with the remount
+#             prompt, at most three times per leg (the count is beside the skip and survives
+#             a restart). A fourth such end, a non-transient end (quota, wall, launch refusal,
 #             no thread id), or a resume it cannot complete wakes the postmaster.
 #
 # Everything that needs judgment still wakes the postmaster: RULE (an escalation), GATE (a
@@ -31,6 +32,8 @@
 # shows it, and release it by removing the line. A held line that matches no run warns on
 # stderr. The held list and the config are read on every look, and the held list is re-read
 # immediately before every mutation, so a hold takes effect without restarting the watcher.
+# A hold that lands mid-step aborts the step: silently before its first mutation, and by
+# waking the postmaster with the partial state after one.
 # A missing config, or a poll interval that is not usable, gets the default, 120 seconds,
 # which it says; an unset one is silent.
 #
@@ -59,7 +62,7 @@ set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 
 usage() {
-  sed -n '2,57p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 if [ "${1:-}" = --help ] || [ "${1:-}" = -h ]; then usage; exit 0; fi
@@ -160,12 +163,23 @@ mark_needs() {  # mark_needs <run> <NEXT> [reason]
   [ -z "$reason" ] || printf 'runs-watch: %s %s: %s\n' "$run" "$next" "$reason" >&2
 }
 
-repo_from_brief() {  # repo_from_brief <dispatch>: the repo in the Project profile section
-  awk '
-    /^## Project profile[[:space:]]*$/ { profile=1; next }
-    /^## / { profile=0 }
-    profile && /^repo:[[:space:]]*/ { sub(/^repo:[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); print; exit }
-  ' "$1/brief.md"
+repo_from_brief() {  # repo_from_brief <dispatch>: the repo in the waybill's own Project profile, the last one, after the ticket
+  python3 - "$1/brief.md" <<'PY'
+import re, sys
+try:
+    with open(sys.argv[1], encoding="utf-8", errors="replace") as f:
+        waybill = f.read()
+except OSError:
+    raise SystemExit(0)
+starts = [m.end() for m in re.finditer(r"^## Project profile[ \t]*$", waybill, re.M)]
+if not starts:
+    raise SystemExit(0)
+body = waybill[starts[-1]:]
+end = re.search(r"^## ", body, re.M)
+m = re.search(r"^repo:[ \t]*(\S.*?)(?:[ \t]{2,}\S.*)?[ \t]*$", body[:end.start()] if end else body, re.M)
+if m:
+    print(m.group(1).strip())
+PY
 }
 
 repo_from_checks() {  # repo_from_checks <dispatch>: the repo the run recorded at dispatch
@@ -253,16 +267,41 @@ print(value)
 PY
 }
 
-set_resume_count() {  # set_resume_count <dispatch> <leg> <count>: atomically persist the count
-  python3 - "$1/watcher.json" "$2" "$3" <<'PY'
-import json, os, pathlib, sys, tempfile
-path, leg, count = pathlib.Path(sys.argv[1]), sys.argv[2], int(sys.argv[3])
+stream_skip() {  # stream_skip <dispatch> <leg>: the stream lines an earlier launch wrote, to skip when classifying
+  python3 - "$1/watcher.json" "$2" <<'PY'
+import json, pathlib, sys
+path, leg = pathlib.Path(sys.argv[1]), sys.argv[2]
+if not path.exists(): print(0); raise SystemExit(0)
 try:
+    data = json.loads(path.read_text())
+    skips = data.get("stream_skip", {})
+    value = skips.get(leg, 0)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0: raise ValueError("invalid skip")
+except (OSError, ValueError, AttributeError, TypeError) as e:
+    print("runs-watch: cannot read %s: %s" % (path, e), file=sys.stderr); raise SystemExit(1)
+print(value)
+PY
+}
+
+set_resume_count() {  # set_resume_count <dispatch> <leg> <count> [skip]: atomically persist the count and the stream lines the next launch starts after
+  python3 - "$1/watcher.json" "$2" "$3" "${4:-}" <<'PY'
+import json, os, pathlib, sys, tempfile
+path, leg, skip_arg = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[4]
+count = int(sys.argv[3])
+try:
+    skip = None
+    if skip_arg != "":
+        skip = int(skip_arg)
+        if skip < 0: raise ValueError("negative skip")
     data = json.loads(path.read_text()) if path.exists() else {}
     if not isinstance(data, dict): raise ValueError("not an object")
     counts = data.setdefault("resume_attempts", {})
     if not isinstance(counts, dict): raise ValueError("resume_attempts is not an object")
     data["resume_attempts"][leg] = count
+    if skip is not None:
+        skips = data.setdefault("stream_skip", {})
+        if not isinstance(skips, dict): raise ValueError("stream_skip is not an object")
+        data["stream_skip"][leg] = skip
 except (OSError, ValueError, TypeError) as e:
     print("runs-watch: cannot update %s: %s" % (path, e), file=sys.stderr); raise SystemExit(1)
 fd, tmp = tempfile.mkstemp(dir=str(path.parent)); os.close(fd)
@@ -320,6 +359,18 @@ watch_host() {  # watch_host <dispatch|resume> <name> <cwd> <dispatch-dir> <out>
   "$HERE/host.sh" "${command[@]}"
 }
 
+harvest_thread_id() {  # harvest_thread_id <events-file> <marker> <limit>: print the thread id once the stream carries it
+  local out=$1 marker=$2 limit=$3 i=0 adapter_out adapter_rc
+  while [ $i -lt "$limit" ]; do
+    adapter_out=$("$HERE/launch.sh" thread-id "$out" 2>&1)
+    adapter_rc=$?
+    if [ $adapter_rc -eq 0 ] && [ -n "$adapter_out" ]; then printf '%s\n' "$adapter_out"; return 0; fi
+    if [ -e "$marker" ]; then return 1; fi
+    sleep 1; i=$((i + 1))
+  done
+  return 1
+}
+
 prepare_dispatch() {  # prepare_dispatch <dispatch> <run> <current leg>: dispatch next leg or report why it could not
   local d=$1 run=$2 current=$3 list next job repo worktree prompt host_name out err marker number leg
   ACTION_ERROR=""
@@ -356,30 +407,23 @@ prepare_dispatch() {  # prepare_dispatch <dispatch> <run> <current leg>: dispatc
   if [ $held_rc -ne 1 ]; then rm -f -- "$time_file"; ACTION_ERROR="cannot re-read the held list"; return 1; fi
   mv -f -- "$time_file" "$prompt" || { ACTION_ERROR="cannot install the leg prompt: $prompt"; return 1; }
   is_held_run "$run" "$ROOT/postmaster"; held_rc=$?
-  if [ $held_rc -eq 0 ]; then return 3; fi
+  if [ $held_rc -eq 0 ]; then ACTION_ERROR="held mid-step after installing the leg $number prompt; the manifest and the launch are unchanged"; return 1; fi
   if [ $held_rc -ne 1 ]; then ACTION_ERROR="cannot re-read the held list"; return 1; fi
   if ! manifest_leg "$d" "$number" ""; then ACTION_ERROR="could not record leg $number in manifest.json"; return 1; fi
   out="$d/logs/coachman-leg-$number-events.jsonl"
   err="$d/logs/coachman-leg-$number.err"
   marker="$d/.leg-$number-exited"
   is_held_run "$run" "$ROOT/postmaster"; held_rc=$?
-  if [ $held_rc -eq 0 ]; then return 3; fi
+  if [ $held_rc -eq 0 ]; then ACTION_ERROR="held mid-step after recording leg $number in manifest.json with no launch and no thread"; return 1; fi
   if [ $held_rc -ne 1 ]; then ACTION_ERROR="cannot re-read the held list"; return 1; fi
   if ! watch_host dispatch "$host_name" "$worktree" "$d" "$out" "$err" "$marker" 0 \
       "$HERE/launch.sh" launch coachman "$worktree" "$prompt" --leg "$leg" --run "$d"; then
     ACTION_ERROR="host.sh could not start coachman leg $number; read $err"; return 1
   fi
-  local thread="" i=0 limit=30 adapter_out adapter_rc
+  local thread="" limit=30 adapter_out
   [ "${POSTMASTER_WATCH_TEST_MODE:-}" != 1 ] || limit=1
-  while [ $i -lt "$limit" ]; do
-    adapter_out=$("$HERE/launch.sh" thread-id "$out" 2>&1)
-    adapter_rc=$?
-    if [ $adapter_rc -eq 0 ] && [ -n "$adapter_out" ]; then thread=$adapter_out; break; fi
-    case $adapter_out in launch:*) break ;; esac
-    if [ -e "$marker" ]; then break; fi
-    sleep 1; i=$((i + 1))
-  done
-  if [ -z "$thread" ]; then
+  if ! thread=$(harvest_thread_id "$out" "$marker" "$limit"); then
+    adapter_out=$("$HERE/launch.sh" thread-id "$out" 2>&1) || true
     ACTION_ERROR="the launch produced no thread id for leg $number; read $err and $out${adapter_out:+ ($adapter_out)}"
     return 1
   fi
@@ -397,7 +441,7 @@ prepare_dispatch() {  # prepare_dispatch <dispatch> <run> <current leg>: dispatc
 
 resume_transient() {  # resume_transient <dispatch> <run> <leg number>
   local d=$1 run=$2 number=$3 err="$1/logs/coachman-leg-$3.err" out="$1/logs/coachman-leg-$3-events.jsonl"
-  local info name thread classifier classifier_rc count repo worktree host_name prompt stamp held_rc list leg
+  local info name thread classifier classifier_rc count skip repo worktree host_name prompt stamp held_rc list leg
   ACTION_ERROR=""
   if ! list=$("$HERE/turnpikes.sh" legs "$d" 2>&1); then ACTION_ERROR="turnpikes.sh legs failed: $list"; return 2; fi
   leg=$(printf '%s\n' "$list" | awk -v n="$number" '$1 == n { print $2; exit }')
@@ -413,7 +457,8 @@ PY
   IFS=$'\t' read -r name thread <<< "$info"
   case $name in coachman|coachman_fallback) ;; *) ACTION_ERROR="leg $number has no recorded coachman name"; return 2 ;; esac
   [ -n "$thread" ] || { ACTION_ERROR="leg $number has no recorded thread id"; return 2; }
-  classifier=$("$HERE/launch.sh" transient "$err" "$out" 2>&1)
+  skip=$(stream_skip "$d" "$number") || { ACTION_ERROR="the stream skip for leg $number is unreadable"; return 2; }
+  classifier=$("$HERE/launch.sh" transient "$err" "$out" "$skip" 2>&1)
   classifier_rc=$?
   if [ $classifier_rc -ne 0 ]; then ACTION_ERROR="the leg is not eligible for automatic resume (adapter: ${classifier:-exit $classifier_rc}); read $err and the stream tail"; return 2; fi
   count=$(resume_count "$d" "$number") || { ACTION_ERROR="the remount count for leg $number is unreadable"; return 2; }
@@ -435,7 +480,14 @@ PY
   if [ $held_rc -ne 1 ]; then ACTION_ERROR="cannot re-read the held list"; return 2; fi
   printf 'Continue leg %s; your last written state is in the dispatch directory and the worktree.\n' "$number" > "$prompt" \
     || { ACTION_ERROR="cannot write the remount prompt: $prompt"; return 2; }
-  if ! set_resume_count "$d" "$number" "$((count + 1))"; then ACTION_ERROR="cannot persist the remount count for leg $number"; return 2; fi
+  is_held_run "$run" "$ROOT/postmaster"; held_rc=$?
+  if [ $held_rc -eq 0 ]; then ACTION_ERROR="held mid-step after writing the remount prompt for leg $number; no count, no launch"; return 2; fi
+  if [ $held_rc -ne 1 ]; then ACTION_ERROR="cannot re-read the held list"; return 2; fi
+  if [ -f "$out" ]; then skip=$(wc -l < "$out" | tr -d ' '); else skip=0; fi
+  if ! set_resume_count "$d" "$number" "$((count + 1))" "$skip"; then ACTION_ERROR="cannot persist the remount count for leg $number"; return 2; fi
+  is_held_run "$run" "$ROOT/postmaster"; held_rc=$?
+  if [ $held_rc -eq 0 ]; then ACTION_ERROR="held mid-step after persisting resume $((count + 1)) for leg $number with no launch"; return 2; fi
+  if [ $held_rc -ne 1 ]; then ACTION_ERROR="cannot re-read the held list"; return 2; fi
   local launch_args=("$HERE/launch.sh" resume "$name" "$worktree" "$thread" "$prompt" --run "$d")
   [ "$name" != coachman ] || launch_args+=(--leg "$leg")
   if ! watch_host resume "$host_name" "$worktree" "$d" "$out" "$err" "$d/.leg-$number-exited" 1 "${launch_args[@]}"; then
@@ -671,6 +723,21 @@ PY
     && ok "an empty timeout still looks once, prints the table and exits 3" \
     || fail "an empty timeout still looks once, prints the table and exits 3"
 
+  echo "thread harvest: the wait for a slow stream"
+  printf '%s\n' '{"type":"setup"}' > "$tmp/slow.jsonl"
+  ( sleep 2; printf '%s\n' '{"type":"thread.started","thread_id":"slow-thread"}' >> "$tmp/slow.jsonl" ) &
+  slow=$!
+  got=$(harvest_thread_id "$tmp/slow.jsonl" "$tmp/no-marker" 10); rc_harvest=$?
+  wait "$slow"
+  [ $rc_harvest -eq 0 ] && [ "$got" = slow-thread ] \
+    && ok "an id that lands after the launch is harvested, not missed" \
+    || fail "an id that lands after the launch is harvested, not missed"
+  : > "$tmp/never.jsonl"; : > "$tmp/dead.marker"
+  got=$(harvest_thread_id "$tmp/never.jsonl" "$tmp/dead.marker" 30); rc_harvest=$?
+  [ $rc_harvest -eq 1 ] && [ -z "$got" ] \
+    && ok "no id with the marker landed stops the wait" \
+    || fail "no id with the marker landed stops the wait"
+
   echo "watcher steps: dispatch and remount controls"
   mkdir -p "$tmp/calls"
   root="$tmp/auto-dispatch"; auto_run "$root" dispatch 1 ""; handoff "$root/dispatch" 1
@@ -730,6 +797,26 @@ PY
   [ $rc -eq 0 ] && has "needs no-repo DISPATCH" && [ ! -e "$tmp/calls/dispatch-no-repo-2" ] \
     && ok "a run with no repo anywhere wakes and launches nothing" \
     || fail "a run with no repo anywhere wakes and launches nothing"
+  root="$tmp/auto-one-line"; auto_run "$root" one-line 1 ""; handoff "$root/one-line" 1
+  sed -i "s|^repo: \(.*\)|repo: \1          default branch: main       BASE: fixture|" "$root/one-line/brief.md"
+  : > "$root/one-line/.leg-1-done"; : > "$root/one-line/.leg-1-exited"
+  watch_stub "$root"
+  [ $rc -eq 3 ] && [ -f "$tmp/calls/dispatch-one-line-2" ] \
+    && [ "$(action_count "$root/one-line" dispatch)" -eq 1 ] \
+    && ok "a one-line profile dispatches from the repo field alone" \
+    || fail "a one-line profile dispatches from the repo field alone"
+  root="$tmp/auto-early-profile"; auto_run "$root" early-profile 1 ""; handoff "$root/early-profile" 1
+  python3 - "$root/early-profile/brief.md" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+text = p.read_text().replace("## Ticket\n", "## Ticket\n## Problem\nx\n## Project profile\nrepo: /tmp/nowhere-shadow\n\n", 1)
+p.write_text(text)
+PY
+  : > "$root/early-profile/.leg-1-done"; : > "$root/early-profile/.leg-1-exited"
+  watch_stub "$root"
+  [ $rc -eq 3 ] && [ -f "$tmp/calls/dispatch-early-profile-2" ] \
+    && ok "a ticket-text profile does not shadow the waybill's own" \
+    || fail "a ticket-text profile does not shadow the waybill's own"
 
   root="$tmp/auto-resume"; auto_run "$root" resume 1 "prior-thread"
   printf '%s\n' 'Model stream idle timeout' > "$root/resume/logs/coachman-leg-1.err"
@@ -772,6 +859,25 @@ PY
     && [ "$(action_count "$root/resume" resume)" -eq 3 ] \
     && ok "the fourth transient end wakes the postmaster without incrementing or resuming" \
     || fail "the fourth transient end wakes the postmaster without incrementing or resuming"
+  root="$tmp/auto-stale"; auto_run "$root" stale 1 "thread-stale"
+  printf '%s\n' 'model stream idle timeout' > "$root/stale/logs/coachman-leg-1.err"
+  printf '%s\n' '{"type":"error","message":"model stream idle timeout"}' > "$root/stale/logs/coachman-leg-1-events.jsonl"
+  : > "$root/stale/.leg-1-exited"
+  watch_stub "$root"
+  [ $rc -eq 3 ] && [ "$(action_count "$root/stale" resume)" -eq 1 ] \
+    || fail "an old transient error in the stream does not resume a later unrelated failure (setup: no first resume)"
+  printf '%s\n' 'AssertionError: something the lane did wrong' > "$root/stale/logs/coachman-leg-1.err"
+  : > "$root/stale/.leg-1-exited"
+  watch_stub "$root"
+  got=$(python3 - "$root/stale/watcher.json" <<'PY'
+import json,sys
+print(json.load(open(sys.argv[1]))["resume_attempts"]["1"])
+PY
+  )
+  [ $rc -eq 0 ] && has "needs stale REMOUNT" && [ "$got" = 1 ] \
+    && [ "$(action_count "$root/stale" resume)" -eq 1 ] \
+    && ok "an old transient error in the stream does not resume a later unrelated failure" \
+    || fail "an old transient error in the stream does not resume a later unrelated failure"
   for spec in "gateway 529 overloaded" "drop read: connection reset by peer"; do
     set -- $spec; name=$1; message=${spec#* }
     root="$tmp/auto-$name"; auto_run "$root" "$name" 1 "thread-$name"
@@ -853,9 +959,18 @@ PY
   root="$tmp/wake-no-thread"; auto_run "$root" no-thread 1 ""; handoff "$root/no-thread" 1
   : > "$root/no-thread/.leg-1-done"; : > "$root/no-thread/.leg-1-exited"
   watch_stub "$root" "no thread"
-  [ $rc -eq 0 ] && has "needs no-thread DISPATCH" \
-    && ok "a launch with no readable thread id wakes the postmaster" \
-    || fail "a launch with no readable thread id wakes the postmaster"
+  python3 - "$root/no-thread/manifest.json" "$root/no-thread/actions.jsonl" <<'PY'
+import json, sys
+m=json.load(open(sys.argv[1])); rows=[json.loads(x) for x in open(sys.argv[2])]
+assert m["leg"] == 2
+assert "thread_id" not in m["coachman"]["legs"]["2"]
+assert not [x for x in rows if x.get("action")=="dispatch"]
+PY
+  rc_test=$?
+  [ $rc -eq 0 ] && [ $rc_test -eq 0 ] && has "needs no-thread DISPATCH" \
+    && [ -f "$tmp/calls/dispatch-no-thread-2" ] \
+    && ok "a launch with no readable thread id wakes with the launch already started and unrecorded" \
+    || fail "a launch with no readable thread id wakes with the launch already started and unrecorded"
   root="$tmp/wake-resume"; auto_run "$root" resume-failure 1 "thread-resume"
   printf '%s\n' 'model stream idle timeout' > "$root/resume-failure/logs/coachman-leg-1.err"
   : > "$root/resume-failure/logs/coachman-leg-1-events.jsonl"; : > "$root/resume-failure/.leg-1-exited"
@@ -881,6 +996,16 @@ PY
     && [ -f "$tmp/calls/dispatch-log-failure-2" ] \
     && ok "a dispatch whose action cannot be logged wakes the postmaster" \
     || fail "a dispatch whose action cannot be logged wakes the postmaster"
+  root="$tmp/wake-resume-log"; auto_run "$root" resume-log 1 "thread-resume-log"
+  printf '%s\n' 'model stream idle timeout' > "$root/resume-log/logs/coachman-leg-1.err"
+  : > "$root/resume-log/logs/coachman-leg-1-events.jsonl"; : > "$root/resume-log/.leg-1-exited"
+  rm -- "$root/resume-log/actions.jsonl"; mkdir "$root/resume-log/actions.jsonl"
+  watch_stub "$root"
+  [ $rc -eq 0 ] && has "needs resume-log REMOUNT" \
+    && [ -f "$tmp/calls/resume-resume-log-1" ] \
+    && [ "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["resume_attempts"]["1"])' "$root/resume-log/watcher.json")" = 1 ] \
+    && ok "a resume whose action cannot be logged wakes the postmaster" \
+    || fail "a resume whose action cannot be logged wakes the postmaster"
 
   echo "negative controls: held runs are left untouched"
   root="$tmp/held-dispatch"; auto_run "$root" held-dispatch 1 ""; handoff "$root/held-dispatch" 1
