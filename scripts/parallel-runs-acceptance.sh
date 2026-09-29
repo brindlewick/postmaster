@@ -7,9 +7,12 @@
 # and five match the claim itself in every file in scope (`overlapping file surfaces`,
 # `never two runs on`, `not change/touch/edit the same files`): a new sentence in one
 # of these phrasings trips the same guard. Further paraphrases are beyond a grep oracle.
-# Four presence checks hold the sections that survive: the Order-them step still orders
-# by dependencies, the `team.max_runs` limit stays, and the concurrency note is rewritten,
-# not deleted. The replacement wording itself is judged by reading, not by this script.
+# Six presence checks hold the sections that survive: step 6 still exists as the
+# Order-them step under Stage A and orders by dependencies within its own lines (a
+# word-boundary match, so `independence` never satisfies it), the `team.max_runs`
+# hard-rule limit stays verbatim, and the concurrency note is rewritten, not deleted,
+# keeping second-resolves and never-rebase. The replacement wording beyond those pins
+# is judged by reading, not by this script.
 #
 #   parallel-runs-acceptance.sh [repo-root]   default: the repo this script lives in
 #   parallel-runs-acceptance.sh --self-test   prove each check fails on its own fault alone,
@@ -17,7 +20,7 @@
 #
 #   exit 0  no stale claim remains
 #   exit 1  stale claims, one per line on stdout: <file>: <what is still claimed>
-#   exit 2  usage, or a file that cannot be read
+#   exit 2  usage, a file that cannot be read, or a tree that cannot be fully swept
 #
 # The self-test fails on a tree that still carries the old claims, at its live-tree step;
 # that failure is the control proving the checks bite on the real files, not only fixtures.
@@ -50,7 +53,7 @@ accept() {  # accept <root>: the checks; stdout the faults, exit 0/1/2
     [ -r "$root/$f" ] || { echo "parallel-runs-acceptance: cannot read $root/$f" >&2; return 2; }
   done
   fails=0
-  local post coach order_line
+  local post coach step6 step6flat note noteflat scope scope_err
   post=$(flat "$root/skills/postmaster/postmaster.md") || return 2
   coach=$(flat "$root/skills/postmaster/coachman.md") || return 2
   stale "$post" skills/postmaster/postmaster.md 'step 6 orders by file surfaces' \
@@ -65,9 +68,21 @@ accept() {  # accept <root>: the checks; stdout the faults, exit 0/1/2
     'Prefer sequencing those tickets, or accept conflict resolution at each gated merge;'
   stale "$coach" skills/postmaster/coachman.md 'check file surfaces before mass-launching' \
     'check the file surfaces before mass-launching'
-  # The claim itself, in every file in scope, in its plain phrasings: a new sentence in
-  # one of these trips the same guard. Further paraphrases are beyond a grep oracle.
+  # The claim itself, in every regular file under skills/ and wiki/, whatever its
+  # suffix: a prohibition hiding in a non-Markdown file trips the same guard.
+  # Further paraphrases are beyond a grep oracle. A tree that cannot be fully
+  # swept is exit 2, not a clean result.
+  scope_err=$(mktemp) || return 2
+  scope=$(find "$root/skills" "$root/wiki" -type f -print 2>"$scope_err" | sed "s|^$root/||" | sort -u)
+  if [ -s "$scope_err" ]; then
+    echo "parallel-runs-acceptance: cannot fully sweep $root/skills and $root/wiki" >&2
+    cat "$scope_err" >&2
+    rm -f "$scope_err"
+    return 2
+  fi
+  rm -f "$scope_err"
   while IFS= read -r f; do
+    [ -n "$f" ] || continue
     local text
     text=$(flat "$root/$f") || return 2
     for claim in 'overlapping file surfaces' 'never two runs on' 'not change the same files' \
@@ -77,20 +92,38 @@ accept() {  # accept <root>: the checks; stdout the faults, exit 0/1/2
   done <<EOF
 AGENTS.md
 README.md
-$(find "$root/skills" "$root/wiki" -name '*.md' -print 2>/dev/null | sed "s|^$root/||" | sort -u)
+$scope
 EOF
-  # The sections that survive the change.
-  if printf '%s' "$post" | grep -q -F 'Order them'; then
-    order_line=$(grep -n -m1 -F 'Order them' "$root/skills/postmaster/postmaster.md" | cut -d: -f1 || true)
-    sed -n "${order_line},$((order_line + 5))p" "$root/skills/postmaster/postmaster.md" \
-      | grep -qi 'ependenc' || gone skills/postmaster/postmaster.md 'orders step 6 by dependencies'
-  else
+  # Step 6 survives as the Order-them step under Stage A, ordering by dependencies
+  # within its own lines: the range runs from the `6.` item to the next step or
+  # heading, folded, so a reflow inside the step neither passes a gutted step nor
+  # faults a kept one, and unrelated text elsewhere cannot satisfy it.
+  step6=$(awk '/^## Stage A/{sect=1; next} sect && /^## /{exit} sect && /^6\. /{on=1} on && /^[0-9][0-9]*\. / && !/^6\. /{exit} on{print}' \
+    "$root/skills/postmaster/postmaster.md")
+  step6flat=$(printf '%s' "$step6" | tr '\n\t' '  ' | sed 's/  */ /g')
+  if [ -z "$step6" ] || ! printf '%s' "$step6flat" | grep -q -F 'Order them'; then
     gone skills/postmaster/postmaster.md 'orders tickets in an Order-them step'
+  elif ! printf '%s' "$step6flat" | grep -qiE '\bdependenc(y|ies)\b'; then
+    gone skills/postmaster/postmaster.md 'orders step 6 by dependencies'
   fi
-  printf '%s' "$post" | grep -q -F 'team.max_runs' \
+  # The `team.max_runs` limit stays as its hard-rule sentence: the string occurring
+  # anywhere else does not satisfy it.
+  grep -q -F -- '- Never launch more runs than `team.max_runs`.' "$root/skills/postmaster/postmaster.md" \
     || gone skills/postmaster/postmaster.md 'limits runs with team.max_runs'
-  printf '%s' "$coach" | grep -q -F 'Concurrency note' \
-    || gone skills/postmaster/coachman.md 'keeps a concurrency note'
+  # The concurrency note survives as a section that still says the run merging
+  # second resolves the conflicts by merge, never rebase: a heading over a gutted
+  # body does not satisfy it.
+  note=$(awk '/^## Concurrency note/{on=1; next} on && /^## /{exit} on{print}' \
+    "$root/skills/postmaster/coachman.md")
+  if [ -z "$note" ]; then
+    gone skills/postmaster/coachman.md 'keeps a concurrency note'
+  else
+    noteflat=$(printf '%s' "$note" | tr '\n\t' '  ' | sed 's/  */ /g')
+    printf '%s' "$noteflat" | grep -qi -F 'merges second' \
+      || gone skills/postmaster/coachman.md 'says the second merger resolves the conflicts'
+    printf '%s' "$noteflat" | grep -qi -F 'never rebase' \
+      || gone skills/postmaster/coachman.md 'says merge, never rebase'
+  fi
   [ "$fails" -eq 0 ]
 }
 
@@ -197,6 +230,27 @@ without 'step 6 dependencies' skills/postmaster/postmaster.md \
 without 'note kept' skills/postmaster/coachman.md \
   'skills/postmaster/coachman.md: no longer keeps a concurrency note' \
   '/Concurrency note/d'
+without 'step 6 independence' skills/postmaster/postmaster.md \
+  'skills/postmaster/postmaster.md: no longer orders step 6 by dependencies' \
+  's/Dependencies first:/Order kept for independence of lanes:/'
+without 'step 6 unrelated text' skills/postmaster/postmaster.md \
+  'skills/postmaster/postmaster.md: no longer orders tickets in an Order-them step' \
+  's/^6\. \*\*Order them\.\*\* Dependencies first:/Order them whenever. Dependencies are fine:/'
+without 'max_runs relocated' skills/postmaster/postmaster.md \
+  'skills/postmaster/postmaster.md: no longer limits runs with team.max_runs' \
+  's/- Never launch more runs than `team.max_runs`./- Never launch runs without a ticket./; $a See also team.max_runs in the example config.'
+without 'note body resolves' skills/postmaster/coachman.md \
+  'skills/postmaster/coachman.md: no longer says the second merger resolves the conflicts' \
+  's/merges second/resolves things/'
+without 'note body rebase' skills/postmaster/coachman.md \
+  'skills/postmaster/coachman.md: no longer says merge, never rebase' \
+  's/never rebase/always rebase/'
+alone 'skills txt claim' skills/NOTES.txt \
+  'skills/NOTES.txt: still says two runs must not change the same files' \
+  'Two runs must not change the same files.'
+alone 'wiki yml claim' wiki/_config.yml \
+  'wiki/_config.yml: still says two runs must not change the same files' \
+  'Two runs must not edit the same files.'
 # The hard-rule clause carries two general phrasings inside it, so it fires three checks.
 rm -rf "$tmp/one" && cp -r "$tmp/clean" "$tmp/one"
 printf '%s\n' '- Never launch more runs than `team.max_runs`, and never two runs on overlapping file surfaces.' \
@@ -263,6 +317,47 @@ out=$(accept "$tmp/locked" 2>&1); rc=$?
 chmod 644 "$tmp/locked/skills/postmaster/postmaster.md"
 [ "$rc" -eq 2 ] && printf '  ok   an unreadable file exits 2, not a clean result\n' \
   || { printf '  FAIL an unreadable file exits %s with:\n%s\n' "$rc" "$out"; fails=$((fails + 1)); }
+
+rm -rf "$tmp/lockeddir" && cp -r "$tmp/clean" "$tmp/lockeddir" \
+  && mkdir "$tmp/lockeddir/skills/hidden" \
+  && printf 'Two runs must not change the same files.\n' > "$tmp/lockeddir/skills/hidden/evil.md" \
+  && chmod 000 "$tmp/lockeddir/skills/hidden"
+out=$(accept "$tmp/lockeddir" 2>&1); rc=$?
+chmod 755 "$tmp/lockeddir/skills/hidden"
+[ "$rc" -eq 2 ] && printf '  ok   an unreadable subtree exits 2, not a clean result\n' \
+  || { printf '  FAIL an unreadable subtree exits %s with:\n%s\n' "$rc" "$out"; fails=$((fails + 1)); }
+
+rm -rf "$tmp/reflow" && cp -r "$tmp/clean" "$tmp/reflow"
+cat > "$tmp/reflow/skills/postmaster/postmaster.md" <<'EOF'
+## Stage A: the stream becomes tickets
+6. **Order them.**
+   Read the stream.
+   Count the tickets.
+   Name the owners.
+   Check the board.
+   Note the risks.
+   Ask the room.
+   Dependencies first: a ticket that needs another's change waits for it to land.
+## Hard rules
+- Never launch more runs than `team.max_runs`.
+EOF
+out=$(accept "$tmp/reflow" 2>"$tmp/reflow.err"); rc=$?
+[ "$rc" -eq 0 ] && [ -z "$out" ] && [ ! -s "$tmp/reflow.err" ] \
+  && printf '  ok   a reflowed step 6 still passes, silently\n' \
+  || { printf '  FAIL a reflowed step 6: exit %s out:\n%s\nerr:\n%s\n' "$rc" "$out" "$(cat "$tmp/reflow.err")"; fails=$((fails + 1)); }
+
+rm -rf "$tmp/split" && cp -r "$tmp/clean" "$tmp/split"
+cat > "$tmp/split/skills/postmaster/postmaster.md" <<'EOF'
+## Stage A: the stream becomes tickets
+6. **Order
+them.** Dependencies first: a ticket that needs another's change waits for it to land.
+## Hard rules
+- Never launch more runs than `team.max_runs`.
+EOF
+out=$(accept "$tmp/split" 2>"$tmp/split.err"); rc=$?
+[ "$rc" -eq 0 ] && [ -z "$out" ] && [ ! -s "$tmp/split.err" ] \
+  && printf '  ok   a split Order-them still passes, silently\n' \
+  || { printf '  FAIL a split Order-them: exit %s out:\n%s\nerr:\n%s\n' "$rc" "$out" "$(cat "$tmp/split.err")"; fails=$((fails + 1)); }
 
 out=$(accept "$ROOT"); rc=$?
 [ "$rc" -eq 0 ] && printf '  ok   live tree passes\n' \
