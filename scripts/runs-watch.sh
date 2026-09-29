@@ -38,10 +38,12 @@ usage() {
 
 if [ "${1:-}" = --help ] || [ "${1:-}" = -h ]; then usage; exit 0; fi
 
-waking_runs() {  # waking_runs <held-file>: `needs <run> <NEXT>` per waking run; the table on stdin
-  awk -v held="$1" '
+waking_runs() {  # waking_runs: `needs <run> <NEXT>` per waking run; the table on stdin, held lines in $POSTMASTER_HELD_LINES
+  awk '
   BEGIN {
-    while ((getline line < held) > 0) {
+    n = split(ENVIRON["POSTMASTER_HELD_LINES"], lines, "\n")
+    for (i = 1; i <= n; i++) {
+      line = lines[i]
       gsub(/^[ \t]+|[ \t]+$/, "", line)
       if (line != "") hold[line] = 1
     }
@@ -83,6 +85,35 @@ if isinstance(ps, bool) or not isinstance(ps, int) or not 1 <= ps <= 999999999:
     print("runs-watch: postmaster.poll_seconds is %r, not a whole number of seconds from 1 to 999999999; the poll interval is the default, 120s" % (ps,), file=sys.stderr)
     print(120); raise SystemExit(0)
 print(ps)
+PY
+}
+
+held_lines() {  # held_lines <postmaster-dir>: the held tickets, one per line; nothing when no held file
+  python3 - "$1" <<'PY'
+import os, sys
+d = sys.argv[1]
+try:
+    names = os.listdir(d)
+except FileNotFoundError:
+    if os.path.lexists(d):
+        print("runs-watch: cannot read %s (dangling link)" % d, file=sys.stderr)
+        raise SystemExit(1)
+    raise SystemExit(0)
+except OSError as e:
+    print("runs-watch: cannot read %s (%s)" % (d, e), file=sys.stderr)
+    raise SystemExit(1)
+if "held" not in names:
+    raise SystemExit(0)
+p = os.path.join(d, "held")
+if not os.path.isfile(p):
+    print("runs-watch: cannot read %s (not a regular file)" % p, file=sys.stderr)
+    raise SystemExit(1)
+try:
+    with open(p) as f:
+        sys.stdout.write(f.read())
+except (OSError, ValueError) as e:
+    print("runs-watch: cannot read %s (%s)" % (p, e), file=sys.stderr)
+    raise SystemExit(1)
 PY
 }
 
@@ -135,9 +166,24 @@ for dp, dn, fn in os.walk(sys.argv[1]):
   "$self" --timeout 10 "$root" > "$tmp/late.out" 2>&1 &
   w=$!; sleep 2; : > "$root/late/.escalation-ready"; wait "$w"; rc=$?
   out=$(cat "$tmp/late.out")
-  [ $rc -eq 0 ] && has "needs late RULE" \
+  [ $rc -eq 0 ] && has "needs late RULE" && ! has "the poll interval is the default" \
     && ok "a run that becomes actionable mid-wait is named" \
     || fail "a run that becomes actionable mid-wait is named"
+  root="$tmp/pos-multi"; mkdir -p "$root"
+  mkrun "$root" first review 2 .escalation-ready
+  mkrun "$root" second shipping 3 .card-ready
+  watch "$root"
+  [ $rc -eq 0 ] && has "needs first RULE" && has "needs second GATE" && has "NEXT" \
+    && ok "every waking run is named" || fail "every waking run is named"
+  root="$tmp/pos-prompt"; mkdir -p "$root"; mkrun "$root" prompt review 2
+  t0=$(date +%s)
+  "$self" --timeout 30 "$root" > "$tmp/prompt.out" 2>&1 &
+  w=$!; sleep 2; : > "$root/prompt/.escalation-ready"; wait "$w"; rc=$?
+  took=$(( $(date +%s) - t0 ))
+  out=$(cat "$tmp/prompt.out")
+  [ $rc -eq 0 ] && has "needs prompt RULE" && [ "$took" -le 15 ] \
+    && ok "a usable poll interval wakes promptly" \
+    || fail "a usable poll interval wakes promptly"
 
   echo "negative controls: WAIT, USER, - and a held run leave it waiting"
   root="$tmp/neg-wait"; mkdir -p "$root"; mkrun "$root" wait review 2
@@ -195,6 +241,18 @@ for dp, dn, fn in os.walk(sys.argv[1]):
   [ $rc -eq 1 ] && has "cannot read" && ! has "needs " \
     && ok "an unreadable held list is refused" || fail "an unreadable held list is refused"
   chmod 644 "$root/postmaster/held"
+  root="$tmp/neg-heldlock"; mkdir -p "$root"; mkrun "$root" held review 2 .escalation-ready
+  mkdir -p "$root/postmaster"; printf 'held\n' > "$root/postmaster/held"; chmod 000 "$root/postmaster"
+  out=$("$self" --timeout 0 "$root" 2>&1); rc=$?
+  [ $rc -eq 1 ] && has "cannot read" && ! has "needs " \
+    && ok "an unlistable postmaster dir is refused" || fail "an unlistable postmaster dir is refused"
+  chmod 755 "$root/postmaster"
+  root="$tmp/neg-bsroot"; mkdir -p "$root"; mkrun "$root" heldrun review 2 .escalation-ready
+  mkdir -p "$root/postmaster"; printf 'heldrun\n' > "$root/postmaster/held"
+  bsroot="$tmp/neg-bs\\q"; mv "$root" "$bsroot"
+  out=$("$self" --timeout 0 "$bsroot" 2>&1); rc=$?
+  [ $rc -eq 3 ] && has "NEXT" && has "heldrun " && ! has "needs " && ! has "warning" \
+    && ok "a run root with a backslash still holds its held runs" || fail "a run root with a backslash still holds its held runs"
   root="$tmp/neg-none"; mkdir -p "$root"; mkrun "$root" alone done 1
   out=$("$self" --timeout 0 "$root" 2>&1); rc=$?
   [ $rc -eq 3 ] && has "NEXT" && has "alone " && ! has "needs " \
@@ -222,6 +280,13 @@ for dp, dn, fn in os.walk(sys.argv[1]):
   [ $rc -eq 3 ] && has "wait " && has "the poll interval is the default, 120s" && ! has "Traceback" \
     && ok "a config that is not UTF-8 falls back to the default, and says so" \
     || fail "a config that is not UTF-8 falls back to the default, and says so"
+  printf '[postmaster]\npoll_seconds = 8\n' > "$tmp/slow.toml"
+  t0=$(date +%s)
+  out=$(POSTMASTER_CONFIG="$tmp/slow.toml" "$self" --timeout 2 "$root" 2>&1); rc=$?
+  took=$(( $(date +%s) - t0 ))
+  [ $rc -eq 3 ] && has "wait " && [ "$took" -le 5 ] \
+    && ok "a timeout shorter than the poll interval still ends on time" \
+    || fail "a timeout shorter than the poll interval still ends on time"
 
   echo "usage"
   out=$("$self" 2>&1); rc=$?
@@ -267,16 +332,14 @@ if [ -n "$TIMEOUT" ]; then
 fi
 ROOT=$(CDPATH= cd -P -- "$ROOT" 2>/dev/null && pwd -P) || { echo "runs-watch: no such root: $ROOT" >&2; exit 1; }
 
-held="$ROOT/postmaster/held"
+pm="$ROOT/postmaster"
 left=${TIMEOUT:-}
 
 while :; do
   POLL=$(poll_seconds) || exit 1
-  if [ -e "$held" ] || [ -L "$held" ]; then
-    [ -f "$held" ] && [ -r "$held" ] || { echo "runs-watch: cannot read $held" >&2; exit 1; }
-  fi
+  HELD_LIST=$(held_lines "$pm") || exit 1
   table=$("$HERE/runs-status.sh" "$ROOT") || { echo "runs-watch: runs-status.sh failed on $ROOT" >&2; exit 1; }
-  needs=$(printf '%s\n' "$table" | waking_runs "$held")
+  needs=$(printf '%s\n' "$table" | POSTMASTER_HELD_LINES="$HELD_LIST" waking_runs)
   if [ -n "$needs" ]; then
     printf '%s\n' "$table"
     printf '%s\n' "$needs"
