@@ -164,8 +164,8 @@ if [ "${1:-}" = --self-test ]; then
     for t in "$@"; do case $out in *"$t"*) ;; *) fail "$label"; return ;; esac; done
     [ $rc -eq 0 ] && ok "$label" || fail "$label"
   }
-  record() {  # record <run> <fixture>: $tmp/<run>/run.json, recording that fixture as at dispatch
-    mkdir -p "$tmp/repo/.postmaster/runs/$1" && POSTMASTER_CONFIG="$tmp/$2.toml" PATH="$tmp/bin:$PATH" \
+  record() {  # record <run> <fixture>: $tmp/repo/.postmaster/runs/<run>/run.json, recording that fixture as at dispatch
+    mkdir -p "$tmp/repo/.postmaster/runs/$1" && POSTMASTER_CONFIG="$tmp/$2.toml" POSTMASTER_TOOL_PINS="$tmp/tools" PATH="$tmp/bin:$PATH" \
       "$here/run-meta.sh" "$tmp/repo/.postmaster/runs/$1" "$tmp/repo" >/dev/null \
       || { printf '  FAIL run-meta.sh records %s as run %s\n' "$2" "$1"; fails=$((fails+1)); }
   }
