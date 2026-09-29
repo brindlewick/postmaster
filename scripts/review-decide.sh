@@ -137,7 +137,8 @@ is()   {  # is <label> <exit> <the whole output>
   if [ "$rc" -eq "$2" ] && [ "$out" = "$3" ]; then ok "$1"; else fail "$1: wanted exit $2 and \"$3\", got exit $rc" "$out"; fi
 }
 has()  {  # has <label> <exit> <text the output must contain>
-  if [ "$rc" -eq "$2" ] && printf '%s\n' "$out" | grep -qF -- "$3"; then ok "$1"
+  # A herestring, not printf piped to grep -q: under pipefail the pipe races with SIGPIPE.
+  if [ "$rc" -eq "$2" ] && grep -qF -- "$3" <<<"$out"; then ok "$1"
   else fail "$1: wanted exit $2 with \"$3\", got exit $rc" "$out"; fi
 }
 logged() {  # logged <dispatch> <action> <target> <detail>
