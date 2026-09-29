@@ -33,7 +33,7 @@ waybill "$tmp/old-one" "turnpikes: none" old
 fails=0
 check() {  # check <label> <script> <dispatch> <want, \n-separated> <want-pass: 1|0>
   local got= rc=0
-  got=$("$2" legs "$3" 2>&1) || rc=$?
+  got=$(bash "$2" legs "$3" 2>&1) || rc=$?
   local pass=0; [ "$rc" -eq 0 ] && [ "$got" = "$(printf '%b' "$4")" ] && pass=1
   if [ "$pass" -eq "$5" ]; then printf 'ok   %s\n' "$1"
   else printf 'FAIL %s (wanted %s):\n--- wanted output ---\n%b\n--- got (exit %s) ---\n%s\n' \
@@ -41,7 +41,7 @@ check() {  # check <label> <script> <dispatch> <want, \n-separated> <want-pass: 
 }
 check_line() {  # check_line <label> <script> <turnpikes line> <want> <want-pass>
   local got= rc=0
-  got=$("$2" legs --line "$3" 2>&1) || rc=$?
+  got=$(bash "$2" legs --line "$3" 2>&1) || rc=$?
   local pass=0; [ "$rc" -eq 0 ] && [ "$got" = "$(printf '%b' "$4")" ] && pass=1
   if [ "$pass" -eq "$5" ]; then printf 'ok   %s\n' "$1"
   else printf 'FAIL %s (wanted %s):\n--- wanted output ---\n%b\n--- got (exit %s) ---\n%s\n' \

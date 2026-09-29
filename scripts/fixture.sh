@@ -404,17 +404,19 @@ rc_of() { cat "$tmp/$1.rc" 2>/dev/null || echo none; }
 
 # The records of finished runs are built with the scripts a run uses, so they follow the
 # contract as those scripts define it today: the stages from stage.sh --list, and the hand-off
-# sections from what handoff-check.sh says an empty hand-off lacks. As the runbooks have it, the
-# legs enter every stage after the first and before done (except `review`, which only a run
-# with a review leg enters), and the postmaster closes the run. The score counts legs from the
-# run itself, so records are built for a two-leg run, a one-leg run and a three-leg run
-# dispatched before this change, whose run.json carries no coachman contract.
+# sections from what handoff-check.sh says an empty hand-off lacks. As the runbooks have it, leg
+# 1 enters every stage through checkpoint-1, each later leg its own slice of the rest (review,
+# then shipping), and the postmaster closes the run: shipped and done on a current run, done
+# only before it, where the ship leg sets shipped. The score counts legs from the run itself, so
+# records are built for a two-leg run, a one-leg run and a three-leg run dispatched before this
+# change, whose run.json carries no coachman contract.
 : > "$tmp/empty.md"
 sections=$("$HERE/handoff-check.sh" "$tmp/empty.md" 2>&1 >/dev/null | sed -n 's/^handoff-check: missing or empty section: //p')
 listed=$("$HERE/stage.sh" --list)
 stages=$(printf '%s\n' "$listed" | sed '/^done$/q' | sed '1d;$d')
 record() {  # record <name> <ticket> <shipped: reference, app or broken> [<legs>: 1, 2 or 3, default 2]
-  local name=$1 t=$2 shipped=$3 legs=${4:-2} n s section done_stages=0 count walked turnpikes
+  local name=$1 t=$2 shipped=$3 legs=${4:-2} n s section walked turnpikes through1 rest slice
+  local leg_stages_1="" leg_stages_2="" leg_stages_3="" post_stages=""
   local repo=$tmp/$name/repo d=$tmp/$name/runs/$name/7 base
   mkdir -p "$d/logs" "$d/audit" "$d/render" && make_repo "$repo" >/dev/null || return 1
   base=$(git -C "$repo" rev-parse HEAD)
@@ -437,18 +439,29 @@ PY
   fi
   walked=$stages
   [ "$legs" -eq 1 ] && walked=$(printf '%s\n' "$stages" | grep -vx review)
-  count=$(printf '%s\n' "$walked" | wc -l)
+  # Leg 1 enters every stage through checkpoint-1; each later leg its own slice of the rest;
+  # the postmaster closes. A current run's shipped is the postmaster's; a pre-change ship leg
+  # sets its own, as the runbooks have it.
+  through1=$(printf '%s\n' "$walked" | sed '/^checkpoint-1$/q')
+  rest=$(printf '%s\n' "$walked" | sed '1,/^checkpoint-1$/d')
+  case $legs in
+    1) leg_stages_1="$through1 $(printf '%s\n' "$rest" | grep -vx shipped)"; post_stages="shipped done" ;;
+    2) leg_stages_1="$through1"; leg_stages_2="$(printf '%s\n' "$rest" | grep -vx shipped)"; post_stages="shipped done" ;;
+    3) leg_stages_1="$through1"; leg_stages_2="$(printf '%s\n' "$rest" | sed -n 1p)"; leg_stages_3="$(printf '%s\n' "$rest" | sed '1d')"; post_stages="done" ;;
+  esac
   for n in $(seq 1 "$legs"); do
     printf 'You are the coachman for leg %s of 7.\n' "$n" > "$d/leg-$n-prompt.txt"
     "$HERE/log-action.sh" "$d" postmaster dispatch 7 "leg $n" && "$HERE/log-action.sh" "$d" coachman handoff-accept "leg-$n" || return 1
-    for s in $(printf '%s\n' "$walked" | sed -n "$((done_stages + 1)),$((count * n / legs))p"); do
+    case $n in 1) slice=$leg_stages_1 ;; 2) slice=$leg_stages_2 ;; 3) slice=$leg_stages_3 ;; esac
+    for s in $slice; do
       "$HERE/stage.sh" "$d" "$s" >/dev/null || return 1
     done
-    done_stages=$((count * n / legs))
     while IFS= read -r section; do printf '## %s\nLeg %s, recorded.\n\n' "$section" "$n"; done <<< "$sections" > "$d/handoff-$n.md"
     "$HERE/log-action.sh" "$d" coachman handoff "leg-$n" && touch "$d/.leg-$n-done" "$d/.leg-$n-exited" || return 1
   done
-  "$HERE/stage.sh" "$d" done postmaster >/dev/null || return 1
+  for s in $post_stages; do
+    "$HERE/stage.sh" "$d" "$s" postmaster >/dev/null || return 1
+  done
   printf '# Ship card: 7\n\nBranch 7 is merged into main.\n' > "$d/card.md"
   python3 - "$d/manifest.json" "$legs" <<'PY'
 import json, sys
@@ -481,7 +494,8 @@ PY
   d=$(broken break-runjson "$clean") && rm -- "$d/run.json"
   d=$(broken break-card "$clean") && rm -- "$d/card.md"
   d=$(broken break-waybill "$clean") && printf '# Waybill: 7\nturnpikes: style, bug, security\n\n## Ticket\n\nSee the tracker.\n' > "$d/brief.md"
-  for b in stages markers handoffs runjson card waybill; do
+  d=$(broken break-legs "$clean") && sed -i '/^turnpikes: /d' "$d/brief.md"
+  for b in stages markers handoffs runjson card waybill legs; do
     background "break-$b" score_run "$tmp/break-$b/runs/break-$b/7" "$repo"
   done
   wait
@@ -621,6 +635,20 @@ expect "a leg's done marker missing: markers alone fails" break-markers markers 
 expect "a hand-off with no sections: handoffs alone fails" break-handoffs handoffs "handoff-2.md"
 expect "no run.json: run.json alone fails" break-runjson run.json "no run.json"
 expect "no ship card: ship-card alone fails" break-card ship-card "no card.md"
+expect "a waybill with no turnpikes line: stages alone fails" break-legs stages "turnpikes.sh legs"
+
+echo "score: a record's stages are entered by the legs the contract names"
+one=$tmp/clean-one/runs/clean-one/7; two=$tmp/clean-$first/runs/clean-$first/7; three=$tmp/clean-three/runs/clean-three/7
+grep -q '"actor":"postmaster","action":"stage","target":"shipped"' "$one/actions.jsonl" \
+  && ok "a one-leg record's shipped is the postmaster's" || fail "a one-leg record's shipped is the postmaster's"
+grep -q '"actor":"postmaster","action":"stage","target":"shipped"' "$two/actions.jsonl" \
+  && ok "a two-leg record's shipped is the postmaster's" || fail "a two-leg record's shipped is the postmaster's"
+grep -q '"actor":"coachman","action":"stage","target":"shipped"' "$three/actions.jsonl" \
+  && ok "a pre-change record's shipped is its ship leg's" || fail "a pre-change record's shipped is its ship leg's"
+c1=$(grep -n '"action":"stage","target":"checkpoint-1"' "$two/actions.jsonl" | cut -d: -f1)
+d2=$(grep -n '"action":"dispatch","target":"7","detail":"leg 2"' "$two/actions.jsonl" | cut -d: -f1)
+[ -n "$c1" ] && [ -n "$d2" ] && [ "$c1" -lt "$d2" ] \
+  && ok "checkpoint-1 lands before leg 2 starts" || fail "checkpoint-1 lands before leg 2 starts ($c1 vs $d2)"
 
 echo "score: input that is not a run is refused, not scored"
 clean=$tmp/clean-$first/runs/clean-$first/7; repo=$tmp/clean-$first/repo

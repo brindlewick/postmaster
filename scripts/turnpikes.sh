@@ -161,10 +161,12 @@ def legacy_dispatch(waybill):
         print("turnpikes: cannot read %s: %s" % (path, e)); sys.exit(1)
     if not isinstance(record, dict):
         print("turnpikes: %s is not a JSON object" % path); sys.exit(1)
-    contract = record.get("coachman_contract")
-    if contract == 2:
+    if "coachman_contract" not in record:
+        return True
+    contract = record["coachman_contract"]
+    if type(contract) is int and contract == 2:
         return False
-    if contract is None or contract == 1:
+    if type(contract) is int and contract == 1:
         return True
     print("turnpikes: unsupported coachman contract %r in %s" % (contract, path)); sys.exit(1)
 
@@ -328,6 +330,14 @@ waybill "$tmp/old-three" "turnpikes: none"; rm -- "$tmp/old-three/run.json"; run
 is "a run dispatched before the contract marker keeps synthesis and ship" 0 "$(lines '1 synthesis' '3 ship')"
 waybill "$tmp/old-review" "turnpikes: style"; rm -- "$tmp/old-review/run.json"; run "$self" legs "$tmp/old-review"
 is "a pre-change run with review keeps all three legs" 0 "$(lines '1 synthesis' '2 review style' '3 ship')"
+waybill "$tmp/contract-one" "turnpikes: style, bug, security"; printf '{"coachman_contract": 1}\n' > "$tmp/contract-one/run.json"
+run "$self" legs "$tmp/contract-one"
+is "an explicit contract 1 keeps all three legs" 0 "$(lines '1 synthesis' '2 review style bug security' '3 ship')"
+for bad in 'null' 'true' 'false' '2.0' '1.0' '"2"'; do
+  waybill "$tmp/contract-bad" "turnpikes: style, bug, security"; printf '{"coachman_contract": %s}\n' "$bad" > "$tmp/contract-bad/run.json"
+  run "$self" legs "$tmp/contract-bad"
+  has "a marker of $bad is refused, never read as a schedule" 1 "unsupported coachman contract" "synthesis"
+done
 
 echo "negative controls: the table"
 bad() {  # bad <label> <a line added to the table> <text the refusal must carry>

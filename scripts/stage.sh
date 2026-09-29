@@ -23,16 +23,32 @@
 #   exit 1  usage, no manifest, an unreadable manifest, or the log could not be written
 #   exit 2  not one of the stages
 #   exit 3  the run is done or abandoned, and only the postmaster moves it on
-#   exit 4  a terminal stage set by any actor but the postmaster
+#   exit 4  a terminal stage, or shipped on a contract 2 run, set by any actor but the postmaster
 set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 STAGES="dispatched bootstrapped workhorses-running synthesis checkpoint-1 review shipping shipped done abandoned"
+
+is_current() {  # is_current <dispatch>: its run.json records coachman contract 2, exactly
+  # Only an exact 2 counts: anything missing, unreadable or otherwise gets the old behavior,
+  # and scripts/turnpikes.sh is the contract's gate, not this check.
+  python3 - "$1/run.json" <<'PY' 2>/dev/null
+import json, sys
+try:
+    contract = json.load(open(sys.argv[1])).get("coachman_contract")
+except Exception:
+    sys.exit(1)
+sys.exit(0 if type(contract) is int and contract == 2 else 1)
+PY
+}
 
 set_stage() {  # set_stage <dispatch> <stage> <actor>
   local d=$1 new=$2 actor=$3
   case " $STAGES " in *" $new "*) ;; *) echo "stage: '$new' is not a stage; one of: $STAGES" >&2; return 2 ;; esac
   case $new in
     done|abandoned) [ "$actor" = postmaster ] || { echo "stage: only the postmaster sets $new" >&2; return 4; } ;;
+    shipped) if [ "$actor" != postmaster ] && is_current "$d"; then
+      echo "stage: only the postmaster sets shipped on a contract 2 run" >&2; return 4
+    fi ;;
   esac
   [ -f "$d/manifest.json" ] || { echo "stage: no manifest at $d/manifest.json" >&2; return 1; }
   local plan
@@ -146,6 +162,25 @@ for t in done abandoned; do
   [ $rc -eq 4 ] && [ "$(count)" -eq 0 ] && cmp -s "$d/manifest.json" "$tmp/before.json" \
     && ok "$t from the coachman is refused, and nothing changes" || fail "$t from the coachman is refused, and nothing changes (exit $rc)"
 done
+fresh; printf '{"coachman_contract": 2}\n' > "$d/run.json"; cp "$d/manifest.json" "$tmp/before.json"
+set_stage "$d" shipped coachman >/dev/null 2>&1; rc=$?
+[ $rc -eq 4 ] && [ "$(count)" -eq 0 ] && cmp -s "$d/manifest.json" "$tmp/before.json" \
+  && ok "shipped from the coachman is refused on a contract 2 run, and nothing changes" \
+  || fail "shipped from the coachman is refused on a contract 2 run, and nothing changes (exit $rc)"
+set_stage "$d" shipped postmaster >/dev/null; rc=$?
+[ $rc -eq 0 ] && [ "$(count)" -eq 1 ] && grep -q '"stage": "shipped"' "$d/manifest.json" \
+  && ok "shipped from the postmaster is allowed on a contract 2 run" || fail "shipped from the postmaster is allowed on a contract 2 run (exit $rc)"
+for contract in 1 '"2"' 'true' 'null'; do
+  fresh; printf '{"coachman_contract": %s}\n' "$contract" > "$d/run.json"; set_stage "$d" shipped coachman >/dev/null 2>&1; rc=$?
+  [ $rc -eq 0 ] && ok "shipped from the coachman is allowed with contract $contract" \
+    || fail "shipped from the coachman is allowed with contract $contract (exit $rc)"
+done
+fresh; rm -f "$d/run.json"; set_stage "$d" shipped coachman >/dev/null 2>&1; rc=$?
+[ $rc -eq 0 ] && ok "shipped from the coachman is allowed with no run.json" || fail "shipped from the coachman is allowed with no run.json (exit $rc)"
+fresh; printf 'not json\n' > "$d/run.json"; set_stage "$d" shipped coachman >/dev/null 2>&1; rc=$?
+[ $rc -eq 0 ] && ok "shipped from the coachman is allowed with an unreadable run.json" \
+  || fail "shipped from the coachman is allowed with an unreadable run.json (exit $rc)"
+rm -f "$d/run.json"
 fresh; set_stage "$d" abandoned postmaster >/dev/null; cp "$d/manifest.json" "$tmp/before.json"
 set_stage "$d" synthesis coachman >/dev/null 2>&1; rc=$?
 [ $rc -eq 3 ] && [ "$(count)" -eq 1 ] && cmp -s "$d/manifest.json" "$tmp/before.json" \
