@@ -71,12 +71,22 @@ ENV_PATH = re.compile(
 )
 ASSIGNMENT_SECRET = re.compile(r"(?i)\b[A-Z0-9_]*(?:API[_-]?KEY|AUTH[_-]?TOKEN|ACCESS[_-]?TOKEN|PASSWORD|SECRET|CREDENTIAL)\s*=\s*[^\s,;]+")
 TOKEN_VALUE = re.compile(r"(?i)\b(?:gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|glpat-[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{8,}|xox[a-z]-[A-Za-z0-9-]{8,})\b")
-CRED_WORD = r"(?:API[_-]?KEY|AUTH[_-]?TOKEN|ACCESS[_-]?TOKEN|TOKEN|PASSWORD|SECRET|CREDENTIALS?)"
-# A credential word joined by _ or - to identifier characters, in any case: API_KEY,
-# github_token, my-secret. Standalone natural words ("Secret Santa") are not credential names.
-NAMED_CREDENTIAL_PUNCT = re.compile(r"(?:[_-][A-Za-z0-9_-]*" + CRED_WORD + r"|" + CRED_WORD + r"[A-Za-z0-9_-]*[_-])", re.IGNORECASE)
-# Or a credential word as an all-caps token: TOKEN, SECRET, GITHUB_TOKEN.
-NAMED_CREDENTIAL_CAPS = re.compile(r"(?<![A-Za-z0-9_-])[A-Z0-9_]*" + CRED_WORD + r"[A-Z0-9_]*(?![A-Za-z0-9_-])")
+CRED_WORD = r"(?:API[_-]?KEY|AUTH[_-]?TOKEN|ACCESS[_-]?TOKEN|TOKEN|PASSWORD|SECRET|CREDENTIALS?|KEY[_-]?FILE|ENV[_-]?FILE|PRIVATE[_-]?KEY|ACCESS[_-]?KEY)"
+# A credential word in identifier position: bounded by non-letters, or split from a
+# preceding lowercase run by camelCase (githubApiKey, accessToken). Glued lowercase
+# ("secretary", "mysecret") is indistinguishable from a natural word and stays out.
+NAMED_CREDENTIAL = re.compile(r"(?:(?<![a-z])|(?<=[a-z])(?=[A-Z]))" + CRED_WORD + r"(?![A-Za-z])", re.IGNORECASE)
+# Identifier shape: a separator, a digit, a camelCase step, or all caps.
+IDENTIFIER_SHAPED = re.compile(r"[_-]|[0-9]|[a-z][A-Z]|^[A-Z0-9_]+$")
+
+def credential_name_in(value):
+    words = value.split()
+    if len(words) > 1:
+        # Phrasing: only identifier-shaped words can name a credential, so
+        # "Secret Santa" passes while "Migrate api_key usage" does not.
+        return any(IDENTIFIER_SHAPED.search(word) and NAMED_CREDENTIAL.search(word) for word in words)
+    # One token: any credential word in identifier position names one.
+    return bool(NAMED_CREDENTIAL.search(value.strip()))
 def scan_machine_data(value, location, path=()):
     if isinstance(value, dict):
         for key, item in value.items():
@@ -96,7 +106,7 @@ def scan_machine_data(value, location, path=()):
                 or ENV_PATH.search(value)):
             die("%s names a filesystem path on a machine" % location)
         if (ASSIGNMENT_SECRET.search(value) or TOKEN_VALUE.search(value)
-                or NAMED_CREDENTIAL_PUNCT.search(value) or NAMED_CREDENTIAL_CAPS.search(value)
+                or credential_name_in(value)
                 or "-----BEGIN PRIVATE KEY-----" in value.upper()):
             die("%s contains a credential value" % location)
 
@@ -521,6 +531,35 @@ def self_test():
             ("keyword-initial credential name", '[tracker]\nbinding="TOKEN"\n'),
             ("bare credential words", '[tracker]\nbinding="API_KEY"\n'),
             ("all-caps credential token", '[tracker]\nbinding="MY_TOKEN"\n'),
+            ("lowercase snake key", '[tracker]\nbinding="api_key"\n'),
+            ("lowercase kebab key", '[tracker]\nbinding="api-key"\n'),
+            ("bare lowercase key", '[tracker]\nbinding="apikey"\n'),
+            ("mixed-case snake key", '[tracker]\nbinding="Api_Key"\n'),
+            ("bare auth token", '[tracker]\nbinding="authtoken"\n'),
+            ("bare access token", '[tracker]\nbinding="accesstoken"\n'),
+            ("key file as value", '[tracker]\nbinding="keyfile"\n'),
+            ("snake key file as value", '[tracker]\nbinding="key_file"\n'),
+            ("kebab key file as value", '[tracker]\nbinding="key-file"\n'),
+            ("caps key file as value", '[tracker]\nbinding="KEYFILE"\n'),
+            ("env file as value", '[tracker]\nbinding="env_file"\n'),
+            ("bare env file as value", '[tracker]\nbinding="envfile"\n'),
+            ("kebab env file as value", '[tracker]\nbinding="env-file"\n'),
+            ("bare private key", '[tracker]\nbinding="privatekey"\n'),
+            ("snake private key", '[tracker]\nbinding="private_key"\n'),
+            ("kebab private key", '[tracker]\nbinding="private-key"\n'),
+            ("kebab access key", '[tracker]\nbinding="access-key"\n'),
+            ("snake access key", '[tracker]\nbinding="access_key"\n'),
+            ("bare password", '[tracker]\nbinding="password"\n'),
+            ("bare secret", '[tracker]\nbinding="secret"\n'),
+            ("bare token", '[tracker]\nbinding="token"\n'),
+            ("bare credentials", '[tracker]\nbinding="credentials"\n'),
+            ("bare caps secret", '[tracker]\nbinding="SECRET"\n'),
+            ("single titlecase secret", '[tracker]\nbinding="Secret"\n'),
+            ("camelCase api key", '[tracker]\nbinding="githubApiKey"\n'),
+            ("camelCase token", '[tracker]\nbinding="accessToken"\n'),
+            ("identifier word in phrasing", '[tracker]\nbinding="Migrate api_key usage"\n'),
+            ("caps word in phrasing", '[tracker]\nbinding="The TOKEN is here"\n'),
+            ("padded credential name", '[tracker]\nbinding="  api_key  "\n'),
             ("credential word in a role name", '[roles]\nworkhorses=["API_KEY"]\n'),
             ("classic token value", '[tracker]\nbinding="ghp_12345678901234567890"\n'),
             ("short classic token value", '[tracker]\nbinding="ghp_12345678"\n'),
@@ -560,6 +599,8 @@ def self_test():
             ("a colon-space board name", '[tracker]\nbinding="Team: Board"\n', True),
             ("a natural secret word", '[tracker]\nbinding="Secret Santa"\n', True),
             ("a natural token word", '[tracker]\nbinding="Password reset project"\n', True),
+            ("a glued lowercase word", '[tracker]\nbinding="secretary"\n', True),
+            ("a keyword-prefixed natural word", '[tracker]\nbinding="Tokenomics review"\n', True),
             ("a token prefix too short to be a token", '[tracker]\nbinding="ghp_abc"\n', True),
             ("an assignment without a credential word", '[tracker]\nbinding="a=b"\n', True),
         ):

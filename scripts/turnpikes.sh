@@ -202,7 +202,7 @@ case ${1:-} in
         [ $# -eq 2 ] || { [ $# -eq 4 ] && [ "$3" = --expect ]; } || usage
         [ -f "$2/brief.md" ] || { echo "turnpikes: no waybill at $2/brief.md" >&2; exit 1; }
         if [ $# -eq 4 ]; then core "$TABLE" legs "$2/brief.md" "$4"; else core "$TABLE" legs "$2/brief.md"; fi; exit $? ;;
-  --self-test) [ $# -eq 1 ] || usage ;;
+  --self-test) [ $# -eq 1 ] || usage; unset POSTMASTER_PROJECT ;;
   *) usage ;;
 esac
 

@@ -60,16 +60,47 @@ def find_id(value, harness):
                 return found
     return None
 
+def top_id(record, harness):
+    # The record's own identity, without descending: a nested id inside an
+    # earlier tool result must not win over a later top-level session identity.
+    if not isinstance(record, dict):
+        return None
+    if harness == "muse":
+        stream = record.get("stream")
+        if isinstance(stream, dict) and stream.get("kind") == "session" and isinstance(stream.get("id"), str):
+            return stream["id"]
+    if harness == "pi" and record.get("type") == "session" and isinstance(record.get("id"), str):
+        return record["id"]
+    keys = {
+        "codex": ("thread_id",),
+        "grok": ("thread_id", "session_id", "sessionId", "conversationId", "uuid"),
+        "agy": ("conversationId", "conversation_id"),
+        "claude": ("session_id",),
+        "pi": (),
+        "muse": (),
+        "mimo": ("sessionID", "session_id"),
+    }.get(harness, ())
+    for key in keys:
+        if isinstance(record.get(key), str) and record[key]:
+            return record[key]
+    return None
+
 def session_id(events, harness):
     try:
         lines = events.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError as e:
         die("cannot read the events stream: %s" % e.strerror)
+    records = []
     for line in lines:
         try:
-            record = json.loads(line)
+            records.append(json.loads(line))
         except ValueError:
             continue
+    for record in records:
+        found = top_id(record, harness)
+        if found:
+            return found
+    for record in records:
         found = find_id(record, harness)
         if found:
             return found
@@ -89,21 +120,28 @@ def native_record(harness, thread, cwd):
         die("no durable %s session store is available" % harness)
     # A store holds many threads, and one id can be a prefix of another
     # (thread-1 inside rollout-thread-10.jsonl), so a substring is not a match.
-    # Real stores name the file for the thread exactly (claude, pi) or with a
-    # fixed prefix before it (codex: rollout-<timestamp>-<thread>.jsonl).
+    # Codex names files rollout-<timestamp>-<thread>.jsonl, so a dash-suffix
+    # match is needed there; claude and pi name the file for the thread exactly,
+    # and a suffix there would misattribute another session.
     exact, suffixed = [], []
     try:
         for path in root.rglob("*.jsonl"):
             stem = path.name[:-len(".jsonl")]
             if stem == thread:
                 exact.append(path)
-            elif stem.endswith("-" + thread):
+            elif harness == "codex" and stem.endswith("-" + thread):
                 suffixed.append(path)
     except OSError:
         pass
     found = exact or suffixed
     if not found:
         die("no durable %s record was found for thread %s" % (harness, thread))
+    # Thread ids are unique, so several records for one thread should not happen;
+    # the newest is kept (a codex thread spanning midnight owns one file per day),
+    # loudly rather than silently.
+    if len(found) > 1:
+        print("export-session: %d %s records name thread %s; keeping the newest" % (len(found), harness, thread),
+              file=sys.stderr)
     found.sort(key=lambda p: p.stat().st_mtime_ns, reverse=True)
     return found[0]
 
@@ -207,6 +245,9 @@ def self_test():
         bin_dir = root / "bin"
         (dispatch / "logs").mkdir(parents=True); cwd.mkdir(); home.mkdir(); bin_dir.mkdir()
         env = {**os.environ, "HOME": str(home), "PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", "")}
+        # Store locations come from the planted HOME, never the machine's own.
+        env.pop("CODEX_HOME", None)
+        env.pop("CLAUDE_CONFIG_DIR", None)
         count = 0
         def check(harness, thread, row, native=None, data=""):
             nonlocal count
@@ -277,6 +318,48 @@ def self_test():
         saved = (dispatch / "sessions" / "lane" / "thread-2.jsonl").read_text(encoding="utf-8")
         assert saved == "RIGHT exact\n", "export preferred a suffixed decoy over the exact file"
         print("  ok   an exact store file wins over a newer suffixed decoy")
+        lone_dir = home / ".claude" / "projects" / "lone"
+        lone_dir.mkdir(parents=True, exist_ok=True)
+        (lone_dir / "other-thread-9.jsonl").write_text("DECOY\n", encoding="utf-8")
+        lone_events = dispatch / "logs" / "lone.jsonl"
+        lone_events.write_text(json.dumps({"session_id": "thread-9"}) + "\n", encoding="utf-8")
+        result = subprocess.run(
+            [str(here / "export-session.sh"), str(dispatch), "lane", "claude", str(cwd), str(lone_events), ""],
+            capture_output=True, text=True, env=env, timeout=10,
+        )
+        assert result.returncode == 1 and "no durable claude record was found" in result.stderr, result.stderr
+        print("  ok   a suffixed decoy alone is no record for claude")
+        nested_events = dispatch / "logs" / "nested.jsonl"
+        nested_events.write_text(
+            json.dumps({"type": "tool_result", "result": {"session_id": "WRONG-nested"}}) + "\n"
+            + json.dumps({"type": "session", "session_id": "RIGHT-top"}) + "\n", encoding="utf-8")
+        (claude_dir / "WRONG-nested.jsonl").write_text("WRONG\n", encoding="utf-8")
+        (claude_dir / "RIGHT-top.jsonl").write_text("RIGHT\n", encoding="utf-8")
+        result = subprocess.run(
+            [str(here / "export-session.sh"), str(dispatch), "lane", "claude", str(cwd), str(nested_events), ""],
+            capture_output=True, text=True, env=env, timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        saved = (dispatch / "sessions" / "lane" / "RIGHT-top.jsonl").read_text(encoding="utf-8")
+        assert saved == "RIGHT\n", "a nested id beat the top-level session identity"
+        print("  ok   a top-level session id wins over a nested id in an earlier line")
+        span_old = codex_sessions / "2026" / "01" / "01" / "rollout-2026-01-01T23-59-00-thread-7.jsonl"
+        span_new = codex_sessions / "2026" / "01" / "02" / "rollout-2026-01-02T00-01-00-thread-7.jsonl"
+        span_old.write_text("OLD segment\n", encoding="utf-8")
+        span_new.write_text("NEW segment\n", encoding="utf-8")
+        os.utime(span_old, (1000000000, 1000000000))
+        os.utime(span_new, (1100000000, 1100000000))
+        span_events = dispatch / "logs" / "span.jsonl"
+        span_events.write_text(json.dumps({"type": "thread.started", "thread_id": "thread-7"}) + "\n", encoding="utf-8")
+        result = subprocess.run(
+            [str(here / "export-session.sh"), str(dispatch), "lane", "codex", str(cwd), str(span_events), ""],
+            capture_output=True, text=True, env=env, timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        saved = (dispatch / "sessions" / "lane" / "thread-7.jsonl").read_text(encoding="utf-8")
+        assert saved == "NEW segment\n", "several records kept the older one"
+        assert "2 codex records name thread thread-7; keeping the newest" in result.stderr, result.stderr
+        print("  ok   several records for one thread keep the newest, loudly")
         shadow = root / "shadow"; shadow.mkdir()
         (shadow / "json.py").write_text(
             'import pathlib\npathlib.Path(r"%s").write_text("imported")\nraise SystemExit("shadow")\n' % (shadow / "marker"),
