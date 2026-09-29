@@ -105,7 +105,7 @@ the dashboard never computes a stage, a next step, a timing or a finding count a
 
 | what it shows | the record | read through |
 |---|---|---|
-| which run roots exist | `~/.postmaster/runs/<project>/`, and each project's `.postmaster/runs/` once #18 lands | one script that lists them, which #18 extends |
+| which run roots exist | each project's `.postmaster/runs/` (#18), and `~/.postmaster/runs/<project>/` for runs from before it | one script that lists them |
 | stage, leg, markers, idle time, next step, how long it has waited, review round | the run directory | `runs-status.sh --json` |
 | a run's title | the waybill | `host.sh name <dispatch>` |
 | stage timings, waiting apart | the run's `actions.jsonl` | `run-times.sh --json` |
@@ -195,8 +195,6 @@ answers GET and HEAD only.
   then is a notification from the watcher or Moshi, not an action on the dashboard.
 - **Its cost shows on a saturated machine.** Its CPU budget is written into its tickets and
   measured, so this would show as a failed criterion.
-- **#18 moves the run directories.** The dashboard follows through the one script that lists run
-  roots, so nothing else changes.
 
 ## What changed because of it
 
