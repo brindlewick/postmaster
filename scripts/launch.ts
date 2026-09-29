@@ -1342,22 +1342,20 @@ withTempDir((tmp) => {
     "review",
   );
   record("run-relenv", "relenv");
-  {
-    doRun(
-      "relenv",
-      "launch",
-      "coachman",
-      join(tmp, "wt"),
-      join(tmp, "prompt.txt"),
-      "--leg",
-      "review",
-      "--run",
-      join(tmp, "run-relenv"),
-    );
-    if (rc === 0 && out.includes("probe=config-dir"))
-      ok("a relative env file under --run is read from the live config's directory");
-    else fail("a relative env file under --run is read from the live config's directory");
-  }
+  doRun(
+    "relenv",
+    "launch",
+    "coachman",
+    join(tmp, "wt"),
+    join(tmp, "prompt.txt"),
+    "--leg",
+    "review",
+    "--run",
+    join(tmp, "run-relenv"),
+  );
+  if (rc === 0 && out.includes("probe=config-dir"))
+    ok("a relative env file under --run is read from the live config's directory");
+  else fail("a relative env file under --run is read from the live config's directory");
   writeFileSync(join(tmp, "trail.txt"), "do the thing\n\n\n");
   carries(
     "a prompt keeps its text without its trailing newlines, as under $()",
@@ -1905,10 +1903,7 @@ withTempDir((tmp) => {
   );
   chmodSync(join(tmp, "nobypass.sh"), 0o755);
   const launchonlySrc = selfSrc
-    .replaceAll(
-      'cmd.push("--yolo"); /*BYPASS*/',
-      'if (!isResume) cmd.push("--yolo"); /*BYPASS*/',
-    )
+    .replaceAll('cmd.push("--yolo"); /*BYPASS*/', 'if (!isResume) cmd.push("--yolo"); /*BYPASS*/')
     .replaceAll(
       'cmd.push("--dangerously-skip-permissions"); /*BYPASS*/',
       'if (!isResume) cmd.push("--dangerously-skip-permissions"); /*BYPASS*/',

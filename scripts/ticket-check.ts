@@ -831,9 +831,16 @@ function selfTest(): void {
       st.check("no title", rr.code === 2 && rr.out.includes("title: missing"), rr.out + rr.err);
     }
     {
-      const ru = run("bash", [SELF, "--body", join(tmp, "body.md"), "--title", "日本語のタイトル"], {
-        env: { ...(process.env as Record<string, string>), TURNPIKES: join(HERE, "turnpikes.sh") },
-      });
+      const ru = run(
+        "bash",
+        [SELF, "--body", join(tmp, "body.md"), "--title", "日本語のタイトル"],
+        {
+          env: {
+            ...(process.env as Record<string, string>),
+            TURNPIKES: join(HERE, "turnpikes.sh"),
+          },
+        },
+      );
       st.check(
         "a title in another script has words",
         ru.code === 0 && !ru.out.includes("title: missing"),

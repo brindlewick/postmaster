@@ -222,11 +222,7 @@ if (argv[0] === "--self-test") {
           fakeNow += 3600000;
         },
       );
-      if (
-        verdict === "timeout" &&
-        JSON.stringify(naps) === "[20000,15000]" &&
-        fakeNow === 7200000
-      )
+      if (verdict === "timeout" && JSON.stringify(naps) === "[20000,15000]" && fakeNow === 7200000)
         ok("a clock that jumps ahead does not end the wait early");
       else fail("a clock that jumps ahead does not end the wait early");
     }

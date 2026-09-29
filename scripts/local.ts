@@ -53,8 +53,7 @@ function utf8(value: string, what: string): string {
   // A U+FFFD in a decoded argument is undecodable input only when the raw
   // argv bytes prove it; on its own it is a legitimate character, as under
   // the surrogateescape gate it replaces.
-  if (value.includes("\ufffd") && argvHasUndecodableBytes())
-    die(`the ${what} is not UTF-8`);
+  if (value.includes("\ufffd") && argvHasUndecodableBytes()) die(`the ${what} is not UTF-8`);
   return value;
 }
 function titleArg(value: string): string {
@@ -1119,7 +1118,7 @@ async function selfTest(): Promise<number> {
       1,
       "comment is not UTF-8",
       repo,
-      'na\\357ve',
+      "na\\357ve",
       "comment",
       "1",
       "coachman",
@@ -1130,7 +1129,7 @@ async function selfTest(): Promise<number> {
       1,
       "actor is not UTF-8",
       repo,
-      'r\\351viewer',
+      "r\\351viewer",
       "comment",
       "1",
       "<RAW-BYTES>",
@@ -1168,7 +1167,7 @@ async function selfTest(): Promise<number> {
       1,
       "title is not UTF-8",
       repo,
-      'caf\\351',
+      "caf\\351",
       "create",
       "<RAW-BYTES>",
       bodyPath,
@@ -1188,7 +1187,7 @@ async function selfTest(): Promise<number> {
       1,
       "title is not UTF-8",
       repo,
-      '\\377',
+      "\\377",
       "title",
       "1",
       "<RAW-BYTES>",

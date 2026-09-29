@@ -589,7 +589,7 @@ withTempDir((tmp) => {
 
   wroteRaw(
     "a line separator and a byte that is not UTF-8 are written",
-    'one\\342\\200\\250two \\377 three',
+    "one\\342\\200\\250two \\377 three",
     "postmaster",
     "note",
     "RUN-1",

@@ -233,7 +233,9 @@ withTempDir((tmp) => {
 
   try {
     const log = readFileSync(join(d, "run-log.md"), "utf8");
-    const line = log.split("\n").find((l) => l.includes("stage bootstrapped, from dispatched after"));
+    const line = log
+      .split("\n")
+      .find((l) => l.includes("stage bootstrapped, from dispatched after"));
     if (line !== undefined && /after \d/.test(line))
       st.ok("run-log.md records the change and how long the last stage took");
     else st.fail("run-log.md records the change and how long the last stage took", line ?? log);
