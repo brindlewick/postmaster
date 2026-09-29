@@ -9,9 +9,11 @@
 #
 # Reads <dispatch>/actions.jsonl. A finding is a `finding` line whose detail opens with its class,
 # `gating` or `style`, then its severity (P1, P2 or P3), its round (r1, r2, ...) and the rest. An
-# apply is an `apply` line whose detail names the finding targets it fixes; it counts for round r
-# when any target it names has a finding of round r. A target's latest finding line counts, so a
-# fix that does not verify closed, logged again in the round that checked it, is that round's.
+# apply is an `apply` line whose detail names the finding targets it fixes, as whitespace-separated
+# bare targets; it counts for round r when any target it names has a finding of round r. A target's
+# latest finding line decides its severity, round and class, so a fix that does not verify closed,
+# logged again in the round that checked it, is that round's. Only `gating` findings keep the loop
+# going; a `style` finding never does.
 #
 # The rule (ticket #80, the user's of 2026-09-27): round 2 runs whenever round 1 applied a fix;
 # after that, round r+1 runs only when round r logged a verified P1 or P2 finding. The cap of three
@@ -24,8 +26,11 @@
 #   CAP 3: <reason>; escalate with residue
 #
 #   exit 0  the decision is printed
-#   exit 1  usage, a round past 3 or below 1, a missing or unreadable action log, a finding whose
-#           detail does not open with its class, or a finding with no readable severity or round
+#   exit 1  usage, a round past 3 or below 1, a missing or unreadable action log, a line that is
+#           not JSON or not an action object, an action object with no action, a finding whose
+#           detail does not open with its class, a finding with no readable severity or round,
+#           two findings sharing one target in one round, or an apply naming no target or a
+#           target with no finding line
 set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 
@@ -50,7 +55,9 @@ except OSError as e:
     sys.exit("review-decide: cannot read %s: %s" % (path, e))
 
 latest = {}          # target -> (severity, round, class) from the latest finding line
-apply_targets = []   # each apply line's finding targets
+rounds_seen = {}     # target -> every round from its finding lines, for the apply join
+seen_pairs = set()   # (target, round) pairs already logged; a repeat is a fault
+applies = []         # (line number, targets) per apply line; checked after the parse
 faults = []
 for n, line in enumerate(lines, 1):
     if not line.strip():
@@ -61,8 +68,12 @@ for n, line in enumerate(lines, 1):
         faults.append("actions.jsonl line %d is not JSON" % n)
         continue
     if not isinstance(e, dict):
+        faults.append("actions.jsonl line %d is not an action object" % n)
         continue
     action = e.get("action")
+    if not action:
+        faults.append("actions.jsonl line %d has no action" % n)
+        continue
     if action == "finding":
         words = str(e.get("detail", "")).split()
         if not words or words[0] not in ("gating", "style"):
@@ -79,9 +90,23 @@ for n, line in enumerate(lines, 1):
         if not m:
             faults.append("actions.jsonl line %d: a finding with round %s, not rN" % (n, rnd or "none"))
             continue
-        latest[str(e.get("target", ""))] = (sev, int(m.group(1)), cls)
+        target, rnd_n = str(e.get("target", "")), int(m.group(1))
+        if (target, rnd_n) in seen_pairs:
+            faults.append("actions.jsonl line %d: a second finding for %s in round r%d; "
+                          "two findings at one place take targets that differ" % (n, target, rnd_n))
+            continue
+        seen_pairs.add((target, rnd_n))
+        rounds_seen.setdefault(target, set()).add(rnd_n)
+        latest[target] = (sev, rnd_n, cls)
     elif action == "apply":
-        apply_targets.append(str(e.get("detail", "")).split())
+        applies.append((n, str(e.get("detail", "")).split()))
+
+for n, targets in applies:
+    if not targets:
+        faults.append("actions.jsonl line %d: an apply naming no finding target" % n)
+    for t in targets:
+        if t not in rounds_seen:
+            faults.append("actions.jsonl line %d: an apply naming %s, which has no finding line" % (n, t))
 
 if faults:
     sys.exit("review-decide: " + "; ".join(faults))
@@ -90,15 +115,14 @@ def findings_of(round_num):
     return [(t, sev, cls) for t, (sev, rnd, cls) in latest.items() if rnd == round_num]
 
 def applied_in(round_num):
-    for targets in apply_targets:
+    for _, targets in applies:
         for t in targets:
-            entry = latest.get(t)
-            if entry is not None and entry[1] == round_num:
+            if round_num in rounds_seen.get(t, ()):
                 return True
     return False
 
 def has_p1p2(round_num):
-    return any(sev in ("P1", "P2") for _, sev, _ in findings_of(round_num))
+    return any(sev in ("P1", "P2") and cls == "gating" for _, sev, cls in findings_of(round_num))
 
 if r == 1:
     if applied_in(1):
@@ -209,6 +233,8 @@ logged "$d" finding src/j.ts:10 "gating P1 r2 bug luna reading: fix did not veri
 run "$self" "$d" 2
 is "a P1 logged again in the round that checked the fix keeps the loop going" 0 \
   "RUN 3: round 2 logged a verified P1 or P2 finding"
+run "$self" "$d" 1
+is "round 1 still sees its apply after the fix is logged again" 0 "RUN 2: round 1 applied a fix"
 
 d=$(new_run reclosed-p3)
 logged "$d" finding src/k.ts:11 "gating P3 r1 bug luna reading: minor"
@@ -231,12 +257,88 @@ logged "$d" apply mno345 "src/n.ts:14"
 run "$self" "$d" 1
 is "an apply of round 2 does not run round 2" 0 "STOP 1: round 1 applied no fixes"
 
+echo "negative controls: style findings never keep the loop going"
+d=$(new_run style-p2)
+logged "$d" finding src/s1.ts:1 "style P2 r2 style luna reading: a style gap"
+run "$self" "$d" 2
+is "a style P2 in round 2 stops the loop" 0 "STOP 2: round 2 logged no P1 or P2 finding"
+
+d=$(new_run style-p1-cap)
+logged "$d" finding src/s2.ts:2 "style P1 r3 style mimo reading: a serious style gap"
+run "$self" "$d" 3
+is "a style P1 in round 3 stops, not the cap" 0 "STOP 3: round 3 logged no P1 or P2 finding"
+
+d=$(new_run style-plus-p3)
+logged "$d" finding src/s3.ts:3 "gating P3 r2 bug luna reading: minor"
+logged "$d" finding src/s4.ts:4 "style P1 r2 style mimo reading: a serious style gap"
+run "$self" "$d" 2
+is "a gating P3 beside a style P1 stops the loop" 0 "STOP 2: round 2 logged no P1 or P2 finding"
+
 echo "controls for the cap bound"
 d=$(new_run past)
 run "$self" "$d" 4
 has "a round past the cap is refused" 1 "cap of 3"
 run "$self" "$d" 0
 has "round 0 is refused" 1 "cap of 3"
+
+echo "negative controls: malformed lines fail loudly, each fault named"
+d=$(new_run bad-json)
+echo 'not json' >> "$d/actions.jsonl"
+run "$self" "$d" 2
+has "a line that is not JSON is refused" 1 "line 1 is not JSON"
+
+d=$(new_run bad-scalar)
+echo '42' >> "$d/actions.jsonl"
+run "$self" "$d" 2
+has "a line that is not an action object is refused" 1 "line 1 is not an action object"
+
+d=$(new_run no-action)
+echo '{"ts":"2026-09-27T00:00:00Z","target":"t","detail":"d"}' >> "$d/actions.jsonl"
+run "$self" "$d" 2
+has "an action object with no action is refused" 1 "line 1 has no action"
+
+d=$(new_run bad-class)
+logged "$d" finding src/t1.ts:1 "P1 r2 bug luna reading: no class first"
+run "$self" "$d" 2
+has "a finding with no class is refused" 1 'opens with "P1", not gating or style'
+
+d=$(new_run bad-severity)
+logged "$d" finding src/t2.ts:2 "gating P9 r2 bug luna reading: no such severity"
+run "$self" "$d" 2
+has "a finding with a bad severity is refused" 1 "severity P9, not P1, P2 or P3"
+
+d=$(new_run no-severity)
+logged "$d" finding src/t3.ts:3 "gating"
+run "$self" "$d" 2
+has "a finding with no severity is refused" 1 "severity none, not P1, P2 or P3"
+
+d=$(new_run bad-round)
+logged "$d" finding src/t4.ts:4 "gating P1 round1 bug luna reading: no such round"
+run "$self" "$d" 2
+has "a finding with a bad round is refused" 1 "round round1, not rN"
+
+d=$(new_run no-round)
+logged "$d" finding src/t5.ts:5 "gating P1"
+run "$self" "$d" 2
+has "a finding with no round is refused" 1 "round none, not rN"
+
+d=$(new_run dup-target)
+logged "$d" finding src/t6.ts:6 "gating P1 r2 bug luna reading: serious"
+logged "$d" finding src/t6.ts:6 "gating P3 r2 security sol reading: minor, same target"
+run "$self" "$d" 2
+has "two findings sharing one target in one round are refused" 1 "a second finding for src/t6.ts:6 in round r2"
+
+d=$(new_run unknown-apply)
+logged "$d" finding src/t7.ts:7 "gating P2 r1 bug luna reading: a defect"
+logged "$d" apply abc123 "src/nowhere.ts:99"
+run "$self" "$d" 1
+has "an apply naming an unknown target is refused" 1 "an apply naming src/nowhere.ts:99, which has no finding line"
+
+d=$(new_run empty-apply)
+logged "$d" finding src/t8.ts:8 "gating P2 r1 bug luna reading: a defect"
+logged "$d" apply abc123 ""
+run "$self" "$d" 1
+has "an apply naming no target is refused" 1 "an apply naming no finding target"
 
 "$self" "$tmp/nowhere" 1 >/dev/null 2>"$tmp/err"; rc=$?
 [ $rc -eq 1 ] && grep -qF "no dispatch directory" "$tmp/err" && ok "a missing dispatch directory is refused" \
