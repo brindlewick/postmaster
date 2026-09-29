@@ -239,12 +239,9 @@ function boundsOf(heads: Head[]): Head[] {
 }
 
 function hasWords(lines: Array<[string, boolean]>): boolean {
-  return /\w/.test(
-    lines
-      .map(([t]) => t)
-      .join(" ")
-      .replace(/_/g, ""),
-  );
+  // As the title check: Python's [^\W_] is Unicode, \w is not, so the port
+  // names the categories.
+  return /[\p{L}\p{N}]/u.test(lines.map(([t]) => t).join(" "));
 }
 
 function prose(lines: Array<[string, boolean]>): string {
@@ -391,7 +388,9 @@ function check(
   const bounds = boundsOf(heads);
   const faults: string[] = [];
   const fault = (part: string, msg: string) => faults.push(`${part}: ${msg}`);
-  if (title !== null && !/\w/.test(title.replace(/_/g, ""))) {
+  // [^\W_] in Python matches a Unicode word character but underscore; \w stays
+  // ASCII even under /u, so the port names the categories: letters and numbers.
+  if (title !== null && !/[\p{L}\p{N}]/u.test(title)) {
     fault("title", "missing");
   }
   const at: Record<string, number> = {};
@@ -831,6 +830,16 @@ function selfTest(): void {
       });
       st.check("no title", rr.code === 2 && rr.out.includes("title: missing"), rr.out + rr.err);
     }
+    {
+      const ru = run("bash", [SELF, "--body", join(tmp, "body.md"), "--title", "日本語のタイトル"], {
+        env: { ...(process.env as Record<string, string>), TURNPIKES: join(HERE, "turnpikes.sh") },
+      });
+      st.check(
+        "a title in another script has words",
+        ru.code === 0 && !ru.out.includes("title: missing"),
+        ru.out + ru.err,
+      );
+    }
     // no title in adapter's read
     writeFileSync(
       join(tmp, "printed-untitled.txt"),
@@ -848,6 +857,15 @@ function selfTest(): void {
     expect("no problem or feature", 2, "problem / feature", 'no "## Problem / feature" section');
     body("## Problem / feature", A, D, K);
     expect("an empty problem or feature", 2, "problem / feature", "is empty");
+    body(P, A, "## Direction\n日本語の方向。", K, N);
+    {
+      const rj = runCheck(T);
+      st.check(
+        "a section in another script has words",
+        rj.code === 0 && !rj.out.includes("direction:"),
+        rj.out,
+      );
+    }
     body(P, D, K, N);
     expect(
       "no acceptance criteria",
