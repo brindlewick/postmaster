@@ -635,7 +635,11 @@ while time.monotonic() < deadline and alive(runner):
     time.sleep(0.025)
 if not cgroup.startswith("/") or ".." in cgroup.split("/"):
     sys.exit(0)
-root = "/sys/fs/cgroup" + cgroup
+# POSTMASTER_CGROUP_ROOT points the watcher at a fixture tree for tests; unset,
+# it reads the live controllers. Only the launch environment sets it, which a
+# lane cannot reach back into, so a launch cannot blind its own watcher.
+cgroot = os.environ.get("POSTMASTER_CGROUP_ROOT") or "/sys/fs/cgroup"
+root = cgroot + cgroup
 pids_path = os.path.join(root, "pids.events")
 mem_path = os.path.join(root, "memory.events")
 def tripped():
@@ -1548,7 +1552,7 @@ EOF
       POSTMASTER_HOST_CLOSE_WAIT=1 POSTMASTER_CONFIG="$tmp/live-limits.toml" \
       XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}" \
       CHILD_PIDS="$tmp/logs/$prefix.pids" LAUNCH_GROUP_RECORD="$tmp/logs/$prefix.group" \
-      BRUSH_FILE="$tmp/brush-data.bin" \
+      BRUSH_FILE="$tmp/brush-data.bin" POSTMASTER_CGROUP_ROOT="${CAPCGROOT:-}" \
       "$impl" run "$NAME" "$repo/.worktrees/T-1-luna" \
       --out "$tmp/logs/$prefix.out" --err "$tmp/logs/$prefix.err" --marker "$tmp/logs/$prefix.done" \
       --pidfile "$tmp/logs/$prefix.pid" "${role_args[@]}" -- "$@"
@@ -2067,6 +2071,35 @@ EOF
     marker "$tmp/logs/watcher-mem.done" 15
     check "with the fallback blinded, an OOM is still named: the watcher notes it" \
       'grep -qFx "host: memory cap reached (MemoryMax=64M)" "$tmp/logs/watcher-mem.err" && [ "$(wc -l < "$tmp/logs/shim2-cg.log")" -ge 1 ] && [ "$(wc -l < "$tmp/logs/shim2-result.log")" -eq 0 ]' "$wmem_got"
+    mkdir -p "$tmp/fakecgroup/fixture"
+    printf 'max 0\n' > "$tmp/fakecgroup/fixture/pids.events"
+    mkdir -p "$tmp/capshim3"
+    for t in "$CAPSYS"/*; do
+      [ -e "$t" ] || continue
+      [ "$(basename "$t")" = systemctl ] && continue
+      ln -s "$t" "$tmp/capshim3/$(basename "$t")"
+    done
+    shimctl3=$(command -v systemctl)
+    cat > "$tmp/capshim3/systemctl" <<EOF
+#!/usr/bin/env bash
+# A fixture-cgroup backend: the watcher resolves this path and reads the
+# counter shapes the control stages there, while verdict queries delegate.
+if [[ "\$*" == *postmaster-host-* && "\$*" == *ControlGroup* ]]; then echo "/fixture"; exit 0; fi
+exec "$shimctl3" "\$@"
+EOF
+    chmod +x "$tmp/capshim3/systemctl"
+    CAPCGROOT=$tmp/fakecgroup
+    printf 'low 0\nhigh 0\nmax 0\noom 0\noom_kill 1\noom_group_kill 0\n' > "$tmp/fakecgroup/fixture/memory.events"
+    hostshape_got=$(cap_launch "$cap_impl" "$tmp/capshim3" hostshape -- "$tmp/caller/healthy.sh" 2>/dev/null)
+    marker "$tmp/logs/hostshape.done" 10
+    check "a host-wide OOM shape (oom_kill without oom) is not blamed on MemoryMax" \
+      'cmp -s "$tmp/direct-healthy.out" "$tmp/logs/hostshape.out" && cmp -s "$tmp/direct-healthy.err" "$tmp/logs/hostshape.err" && [ -e "$tmp/logs/hostshape.done" ]' "$hostshape_got"
+    printf 'low 0\nhigh 0\nmax 18\noom 1\noom_kill 0\noom_group_kill 0\n' > "$tmp/fakecgroup/fixture/memory.events"
+    oomshape_got=$(cap_launch "$cap_impl" "$tmp/capshim3" oomshape -- "$tmp/caller/healthy.sh" 2>/dev/null)
+    marker "$tmp/logs/oomshape.done" 10
+    check "a cgroup OOM shape (oom set) still names the memory cap" \
+      'grep -qFx "host: memory cap reached (MemoryMax=64M)" "$tmp/logs/oomshape.err" && [ -e "$tmp/logs/oomshape.done" ]' "$oomshape_got"
+    unset CAPCGROOT
     kill_got=$(cap_launch "$cap_impl" "$CAPSYS" kill-healthy -- "$tmp/caller/healthy.sh" 2>/dev/null)
     sleep 0.3; kill -KILL "$(cat "$tmp/logs/kill-healthy.pid")" 2>/dev/null
     marker "$tmp/logs/kill-healthy.done" 10
