@@ -7,6 +7,15 @@
 # paths, arguments, outputs and exits, package.json, and docs. Never a function
 # shape, which is what the lanes were dispatched to choose.
 #
+# Amended once in review (round 1): the AC1 python grep and the AC4 import
+# regex scanned raw text, so vocabulary ("python3" as an interpreter name)
+# and fixture sources (import lines written as test data) failed them on a
+# compliant port. All four round-1 lanes challenged both checks
+# independently; the amendment narrows AC1 to executable Python and AC4 to
+# imports Bun's own parser reports, each proven both ways (a planted
+# run("python3") and a planted bare import still fail). AC2, AC3, AC5 and AC6
+# are untouched and still blind.
+#
 # Usage: ./oracle-109.sh   (runs from the repo root; installs deps if needed)
 # Exit 0 when every acceptance criterion holds, 1 otherwise.
 set -uo pipefail
@@ -29,9 +38,13 @@ ac1_bad=0
 if find scripts -name '*.py' | grep -q .; then
   bad "python files under scripts/: $(find scripts -name '*.py' | tr '\n' ' ')"; ac1_bad=1
 else ok "no .py files under scripts/"; fi
-if grep -rnE 'python3|/python|python -c|<<-?[[:space:]]*['\''"]?PY' scripts/ 2>/dev/null | grep -q .; then
-  bad "python remnants under scripts/:"; grep -rnE 'python3|/python|python -c|<<-?[[:space:]]*['\''"]?PY' scripts/ | head -5 | sed 's/^/         /'; ac1_bad=1
-else ok "no python3, /python, python -c or PY-heredoc under scripts/"; fi
+# Executable Python only: a spawn of the interpreter, -c, an interpreter path,
+# a PY-heredoc or a python shebang. Vocabulary ("python3" as an interpreter
+# name, --python as a flag) and fixture strings are not execution.
+PYINV='run\(["'"'"']python3?["'"'"']|spawn(Sync)?\(["'"'"']python3?["'"'"']|Bun\.spawn\(\[?["'"'"']python3?["'"'"']|exec +python3?([^a-zA-Z0-9_]|$)|python3? +-c|/python[0-9.]*([^a-zA-Z0-9_]|$)|<<-?[[:space:]]*['"'"']?PY|#!.*python'
+if grep -rnE "$PYINV" scripts/ 2>/dev/null | grep -q .; then
+  bad "python executed under scripts/:"; grep -rnE "$PYINV" scripts/ | head -5 | sed 's/^/         /'; ac1_bad=1
+else ok "no python execution under scripts/ (spawns, -c, paths, heredocs, shebangs)"; fi
 wrap_bad=0
 for w in scripts/*.sh; do
   lines=$(wc -l < "$w" | tr -d ' ')
@@ -147,17 +160,25 @@ else
   if [ "$deps" = '{"d":[],"v":["@biomejs/biome","typescript"]}' ]; then ok "no runtime deps; devDeps exactly typescript and @biomejs/biome"
   else bad "dependencies: $deps"; ac4_bad=1; fi
 fi
-viol=$(node -e '
-const fs=require("fs"), path=require("path"), mod=require("module");
+# Syntax-aware through Bun's own parser: strings, comments and fixture
+# sources (import lines written as test data) cannot match, only real imports.
+if ! command -v bun >/dev/null 2>&1; then bad "cannot scan imports: bun not installed"; ac4_bad=1
+else
+viol=$(bun -e '
+import fs from "node:fs";
+import path from "node:path";
+import mod from "node:module";
 const builtin=new Set(mod.builtinModules.map(s=>s.replace(/^node:/,"")));
+const tr=new Bun.Transpiler({loader:"ts"});
 const bad=[];
 function walk(d){ for (const e of fs.readdirSync(d,{withFileTypes:true})) {
   const p=path.join(d,e.name);
   if (e.isDirectory()) { if (e.name==="node_modules"||e.name===".git") continue; walk(p); }
   else if (/\.tsx?$/.test(e.name)) {
-    const src=fs.readFileSync(p,"utf8");
-    const specs=[...src.matchAll(/(?:from\s+|import\s*\(\s*|require\s*\(\s*|import\s+)(["'"'"'])([^"'"'"']+)\1/g)].map(m=>m[2]);
-    for (const s of specs) {
+    let imps; try { imps=tr.scanImports(fs.readFileSync(p,"utf8")); }
+    catch(e){ bad.push(p+": unparseable"); continue; }
+    for (const i of imps) {
+      const s=i.path;
       if (s.startsWith(".")||s.startsWith("/")||s.startsWith("bun")||s.startsWith("node:")) continue;
       if (!builtin.has(s)) bad.push(p+": "+s);
     }
@@ -166,6 +187,7 @@ function walk(d){ for (const e of fs.readdirSync(d,{withFileTypes:true})) {
 console.log(bad.join("\n"));' 2>/dev/null)
 if [ -z "$viol" ]; then ok "no bare external imports in TypeScript under scripts/ (and src/)"
 else bad "external imports:"; printf '%s\n' "$viol" | head -10 | sed 's/^/         /'; ac4_bad=1; fi
+fi
 [ $ac4_bad -eq 0 ] && ac_pass 4 "imports and dependencies as required" || ac_fail 4 "see FAIL lines above"
 echo
 
