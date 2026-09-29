@@ -388,13 +388,17 @@ missed.
 2. **Follow the landing route in the waybill.** First ask whether the ticket already landed:
    `<tool>/scripts/landing.sh already-landed --repo <repo> --default <branch> --ticket
    <the ticket ref> --base <the manifest's base> --card-head <the card's final HEAD>`, adding
-   `--pr-merge <sha>` with the merge commit when the provider reports a merged pull request
-   for the ticket branch, and omitting it otherwise. On `landed`, skip landing
+   `--local-ticket <ticket-branch>` on the pull-request route and `--pr-merge <sha>` with the
+   merge commit when the provider reports a merged pull request for the ticket branch, and
+   omitting each otherwise. On `landed`, skip landing
    and close instead: log `merge` noting the branch was already merged, move the ticket to
    done,
    logging `ticket-state`, remove `.waiting-on-user` and `.card-ready` (either may already
    be gone), set the stage with `<tool>/scripts/stage.sh <dispatch> shipped postmaster`,
-   and run current Stage G. On `re-verify`, the branch moved past the card's HEAD: remove
+   and run current Stage G. On `unpushed`, the ticket branch is at the card's HEAD and only
+   the remote is behind: push the ticket branch, re-fetch, and ask `already-landed` again;
+   a push that fails means the remote moved, so resume that last leg with that discrepancy
+   instead. On `re-verify`, the ticket ref and the card's HEAD differ: remove
    `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`, then resume that
    last leg with the exact discrepancy and wait for its corrected card. Otherwise:
    - For `landing: pull-request`, ask whether the branch holds anything to land:
@@ -429,7 +433,8 @@ missed.
    `--pr-merge` when the provider reports the merged pull request. On `landed`, remove
    `.waiting-on-user` and `.card-ready`, log `merge`, move the ticket to done, logging
    `ticket-state`, and set the stage with `<tool>/scripts/stage.sh <dispatch> shipped
-   postmaster`. On `re-verify` the branch moved past the card's HEAD: tell the user to
+   postmaster`. On `unpushed`, push the ticket branch, re-fetch, and ask again, as in step 2.
+   On `re-verify` the ticket ref and the card's HEAD differ: tell the user to
    restore the branch to the card's HEAD, and wait; when their word comes, ask
    `already-landed` again. If the user confirms the new HEAD instead, stop: re-verifying a
    new HEAD needs a leg that has handed off, so put the decision to the user rather than
