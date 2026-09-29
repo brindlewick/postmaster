@@ -739,7 +739,8 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    surface already running; never start a duplicate. Verify the link from the user's device or
    mark it unverified.
 4. **Write `card.md`.** Include the branch, final HEAD, diff stat and commit list; the final
-   `verify.sh run` results; browser suite and QA when present; every ticket turnpike with its
+   `verify.sh run` results; browser suite and QA when present; the journey report path where a
+   check's source names `web-journey`; every ticket turnpike with its
    rounds and result from its checkpoint record, or `none`; all open findings with lens,
    severity, disposition and reason, including the Style residue count as
    `<tool>/scripts/style-findings.sh count <dispatch>` prints it, then every Style residue from

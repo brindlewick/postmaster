@@ -220,7 +220,7 @@ Act on the `NEXT` column, run by run, and log every action:
   `<tool>/scripts/turnpikes.sh legs <dispatch>`, logging a `note` that names any leg the list leaves
   out. Where no leg follows `n`: at stage `shipped` run current Stage G; otherwise the last
   leg's correction was interrupted before it raised the card again, so remount that leg with
-  "re-run Stage 3 step 5: verify the final HEAD, rewrite the ship card and end the leg".
+  "re-run Stage 3: verify the final HEAD, rewrite the ship card and end the leg".
   After a legacy ship leg, Legacy Stage G. If the script exits other than 0, nothing is
   dispatched: its message goes to the user as Stage E step 3 says.
 - **REMOUNT:** the leg's process exited (`.leg-<n>-exited`) with no hand-off, escalation or
@@ -292,15 +292,25 @@ route follows below.
    the run's legs name and under no other lens, and each other turnpike's result on the card is
    in the record its step writes; when `<tool>/scripts/turnpikes.sh short '<the waybill's
    turnpikes: line>'` names any default turnpike, the ledger holds the user's word on this
-   ticket's turnpikes; where the run has a review leg, the card's per-turnpike rounds and open
-   findings are consistent with `checkpoint-review.md`; the blind acceptance tests are the first
-   commit or the hand-off records why they were not written; the Style residue's count is what
-   `<tool>/scripts/style-findings.sh count <dispatch>` prints; and the card reports every failed
-   check, all open findings, browser suite and QA when present, the review link, and every
+   ticket's turnpikes; where the run has a review leg, `checkpoint-review.md` exists and the
+   card matches it: the same round counts, every finding it shows as open is open on the card
+   at the same severity, and every finding it shows as applied is absent from the card's open
+   list; the blind acceptance tests are the first commit or the hand-off records why they were
+   not written; the Style residue's count is what
+   `<tool>/scripts/style-findings.sh count <dispatch>` prints, and the residues the card
+   lists are exactly what `<tool>/scripts/style-findings.sh list <dispatch>` prints; and the
+   card reports every check's result as
+   `<tool>/scripts/verify.sh results <dispatch> <synthesis-wt>` prints it, pass or fail, all
+   open findings, browser suite and QA when present, the review link, and every
    run-created branch. Log the gate result. If a claim
    fails, remove `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`, then
    resume that last leg with the exact discrepancy and wait for its corrected card.
-2. **Follow the landing route in the waybill.**
+2. **Follow the landing route in the waybill.** First, if the ticket branch is already
+   merged — the default branch contains its HEAD, or the provider reports a merged pull
+   request for it — skip landing and close instead: log `merge` noting the branch was
+   already merged, move the ticket to done, logging `ticket-state`, remove
+   `.waiting-on-user` and `.card-ready` (either may already be gone), and set the stage
+   with `<tool>/scripts/stage.sh <dispatch> shipped postmaster`. Otherwise:
    - For `landing: pull-request`, push the ticket branch; where an open pull request already
      names the ticket branch, adopt it instead of opening another. Otherwise open the pull
      request against the default branch (`gh pr create` on a GitHub project). Include the card,
@@ -318,13 +328,15 @@ route follows below.
      tracker comment with the evidence (what the change does, branch name, gate output summary,
      diff stat, review link, thread ids), logging `ticket-comment`. Merge the ticket branch
      with `git merge --no-ff`; never rebase. Log `merge`, move the ticket to done, logging
-     `ticket-state`, remove `.card-ready`, and set the stage to `shipped`.
+     `ticket-state`, remove `.card-ready`, and set the stage with
+     `<tool>/scripts/stage.sh <dispatch> shipped postmaster`.
    - An unknown landing route is a dispatch fault to resolve before this point. Do not infer
      it from the presence of a remote.
 3. **When the user's word that they merged comes**, verify the provider reports it
    merged and the default branch contains the merge; if either check fails, tell the user and
    wait. Otherwise remove `.waiting-on-user` and `.card-ready`, log `merge`,
-   move the ticket to done, logging `ticket-state`, and set the stage to `shipped`. For a local
+   move the ticket to done, logging `ticket-state`, and set the stage with
+   `<tool>/scripts/stage.sh <dispatch> shipped postmaster`. For a local
    merge, this is already done in step 2. Then run current Stage G.
 
 ## Stage G (contract 2): after merge
