@@ -276,8 +276,9 @@ A revised spec comes back as a new entry at its new commit.
    `changes` or `dropped`, `<commit>` the spec commit the user saw, and the words are the
    user's own, carried verbatim for a `changes` or `dropped` and omitted for an `approved`.
    One decision per call, at the moment it is given. The script appends the stanza and logs
-   the `spec-review` line; it refuses a second stanza for one lane, a `changes` with no
-   words, and a decision with no commit. The stanzas accumulate as this package is decided;
+   the `spec-review` line; it refuses a lane the manifest does not name, a second stanza
+   for one lane, a `changes` with no words, and a decision with no commit. The stanzas
+   accumulate as this package is decided;
    the file is complete when every spec in the package has one, and it holds this package's
    decisions only.
 3. **When every spec in the package is decided, send the package back.** Remove
@@ -286,9 +287,11 @@ A revised spec comes back as a new entry at its new commit.
    as what it must read. The marker is consumed here, on every path, before the resume, as
    `.card-ready` is before a word is delivered: a fresh package touches it afresh, so SPEC
    always means a package nobody has taken yet. Read the run-wide numbers first:
-   `<tool>/scripts/spec-decisions.sh <dispatch> count` prints `approved <n>`, every lane
-   approved in the manifest or this package counted once, and `changes <m>`, this package's
-   changes stanzas. Branch on the numbers, never by reading the files:
+   `<tool>/scripts/spec-decisions.sh <dispatch> count` prints `approved <n>`, every manifest
+   lane approved in the manifest or this package counted once, and `changes <m>`, the
+   manifest lanes with a changes stanza in this package. A stanza for an unnamed lane, or
+   an approval with a blank commit, contributes nothing. Branch on the numbers, never by
+   reading the files:
    - **`changes` above zero:** the coachman revises those specs alone, each in its own
      thread, and pauses with a fresh package, which is put to the user the same way, until
      every spec is approved or dropped.
