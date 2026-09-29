@@ -755,7 +755,8 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    rounds and result from its checkpoint record, or `none`; all open findings, one
    `- [<severity>] <id>: <title>` bullet each under `## Open findings` (`none` when there are
    none), the ids and severities the checkpoint gives; findings applied on the user's word and
-   not re-reviewed, one bullet each under `## Not re-reviewed`, or `none`; the Style residue
+   not re-reviewed, one `- [<severity>] <id>` bullet each under `## Not re-reviewed`, or
+   `none`; the Style residue
    count as
    `<tool>/scripts/style-findings.sh count <dispatch>` prints it, then every Style residue from
    `<tool>/scripts/style-findings.sh list <dispatch>`; every branch created by the run and its

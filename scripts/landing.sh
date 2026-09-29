@@ -7,11 +7,11 @@
 #       --card-head <sha> [--pr-merge <sha>]
 #       whether the ticket branch already landed. `landed` when the default branch contains
 #       the ticket's HEAD and that HEAD is not the run's BASE, or when --pr-merge names the
-#       merge commit of a provider-reported merged pull request whose merge contains the
-#       card's final HEAD: by ancestry, or, for a squash or rebase merge, by tree, the merge
-#       on the default branch with the card HEAD's tree on every path the ticket changed
-#       since BASE. `re-verify`, never `landed`, when the ticket branch moved past the
-#       card's HEAD. Otherwise `not-landed`.
+#       merge commit of a provider-reported merged pull request where the ticket changed
+#       paths since BASE, the merge is on the default branch, and it contains the card's
+#       final HEAD: by ancestry, or, for a squash or rebase merge, by tree, with the card
+#       HEAD's tree on every path the ticket changed. `re-verify`, never `landed`, when the
+#       ticket branch moved past the card's HEAD. Otherwise `not-landed`.
 #   landing.sh anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha>
 #       whether the branch holds anything to land. `nothing-to-land` when the ticket's diff
 #       against BASE is empty (its HEAD is BASE, whatever the default branch holds), when
@@ -79,7 +79,9 @@ def contains(repo, maybe_ancestor, ref):
     return rc == 0
 
 def changed(repo, old, new):  # the paths whose content differs, by NUL-split name list
-    r = subprocess.run(["git", "-C", repo, "diff", "--name-only", "-z", old, new],
+    # Rename detection stays off: it names a rename by its new path one way and its old
+    # path the other, and the disjointness tests below compare both directions.
+    r = subprocess.run(["git", "-C", repo, "diff", "--no-renames", "--name-only", "-z", old, new],
                        capture_output=True, text=True)
     if r.returncode != 0:
         die("cannot diff %s against %s: %s" % (old, new, r.stderr.strip()))
@@ -163,9 +165,9 @@ if mode == "already-landed":
     landed = contains(repo, head, default) and head != base
     if not landed and len(o) == 12:
         merge = commit(repo, o[11], "--pr-merge")
-        landed = contains(repo, card, merge) or (
-            contains(repo, merge, default) and bool(changed(repo, base, card))
-            and changed(repo, base, card).isdisjoint(changed(repo, card, merge)))
+        paths = changed(repo, base, card)
+        landed = contains(repo, merge, default) and bool(paths) and (
+            contains(repo, card, merge) or paths.isdisjoint(changed(repo, card, merge)))
     print("landed" if landed else "not-landed"); sys.exit(0)
 
 if mode == "anything-to-land":
@@ -271,6 +273,11 @@ if mode == "card-findings":
     for fid in open_list:
         if fid not in states:
             faults.append("%s: on the card's open list, not in the checkpoint" % fid)
+    for fid in sorted(nrr):
+        if fid not in states:
+            faults.append("%s: marked not re-reviewed, not in the checkpoint" % fid)
+        elif states[fid][1] != "user-applied":
+            faults.append("%s: %s in the checkpoint, marked not re-reviewed" % (fid, states[fid][1]))
     if faults:
         print("\n".join(faults)); sys.exit(2)
     print("match"); sys.exit(0)
@@ -289,7 +296,7 @@ if mode == "journey":
              and isinstance(c.get("name"), str)]
     if not names:
         print("clear: no check uses web-journey"); sys.exit(0)
-    if not re.search(r"^#{1,6}[ \t]+user journey[ \t]*$", load(waybill), re.M | re.I):
+    if not re.search(r"^#{1,6}[ \t]+user journey[ \t]*:?[ \t]*#*[ \t]*$", load(waybill), re.M | re.I):
         print("judge: no User journey section; %s judged like any other non-pass"
               % ", ".join(names)); sys.exit(0)
     r = subprocess.run([VERIFY, "journey-path", wt, dispatch], capture_output=True, text=True)
@@ -401,6 +408,12 @@ git -C "$RB" checkout -q main || exit 1; git -C "$RB" checkout -q ticket -- f ||
 git -C "$RB" commit -qm rebase-merge || exit 1; RBM=$(git -C "$RB" rev-parse HEAD)
 out=$("$SELF" already-landed --repo "$RB" --default main --ticket ticket --base "$RB0" --card-head "$RBH" --pr-merge "$RBM" 2>&1); rc=$?
 expect "a rebase merge counts by tree" 0 "landed"
+out=$("$SELF" already-landed --repo "$R" --default main --ticket ticket --base "$BASE" --card-head "$TIP" --pr-merge "$TIP" 2>&1); rc=$?
+expect "V1: a --pr-merge equal to the tip of an unmerged branch is not landed" 0 "not-landed"
+out=$("$SELF" already-landed --repo "$R" --default main --ticket ticket --base "$BASE" --card-head "$TIP" --pr-merge "$(git -C "$R" rev-parse moved)" 2>&1); rc=$?
+expect "V1: a merge off the default branch does not count" 0 "not-landed"
+out=$("$SELF" already-landed --repo "$R" --default main --ticket empty --base "$BASE" --card-head "$BASE" --pr-merge "$TIP" 2>&1); rc=$?
+expect "V1: an empty ticket with a descendant SHA is not landed" 0 "not-landed"
 out=$("$SELF" already-landed --repo "$R" --default main --ticket missing --base "$BASE" --card-head "$TIP" 2>&1); rc=$?
 [ "$rc" -eq 1 ] && ok "an unresolvable ticket ref is usage, not an answer" || fail "an unresolvable ticket ref is usage, not an answer" "$out"
 out=$("$SELF" already-landed --repo "$R" --default main --ticket ticket 2>&1); rc=$?
@@ -433,6 +446,18 @@ out=$("$SELF" anything-to-land --repo "$R" --default main --ticket zero --base "
 expect "an empty commit on BASE lands nothing" 0 "nothing-to-land"
 out=$("$SELF" anything-to-land --repo "$R" --default main --ticket missing --base "$BASE" 2>&1); rc=$?
 [ "$rc" -eq 1 ] && ok "an unresolvable ticket ref is usage, not an answer" || fail "an unresolvable ticket ref is usage, not an answer" "$out"
+RN=$tmp/rn; mkrepo "$RN"   # a ticket that renames old to new, content unchanged
+commit "$RN" old X X; RNB=$(git -C "$RN" rev-parse HEAD)
+git -C "$RN" checkout -qb ticket || exit 1; git -C "$RN" mv old new || exit 1
+git -C "$RN" commit -qm rename || exit 1; RNH=$(git -C "$RN" rev-parse HEAD)
+git -C "$RN" checkout -q main || exit 1
+out=$("$SELF" anything-to-land --repo "$RN" --default main --ticket ticket --base "$RNB" 2>&1); rc=$?
+expect "V6: a rename absent from the default branch lands" 0 "land"
+out=$("$SELF" already-landed --repo "$RN" --default main --ticket ticket --base "$RNB" --card-head "$RNH" --pr-merge "$(git -C "$RN" rev-parse main)" 2>&1); rc=$?
+expect "V6: a rename the merge lacks does not count" 0 "not-landed"
+git -C "$RN" mv old new || exit 1; git -C "$RN" commit -qm landrename || exit 1
+out=$("$SELF" anything-to-land --repo "$RN" --default main --ticket ticket --base "$RNB" 2>&1); rc=$?
+expect "V6: a rename on the default branch lands nothing" 0 "nothing-to-land"
 
 # A dispatch with two recorded checks, one passed at the worktree's HEAD, one never run.
 D=$tmp/d; W=$tmp/wt; mkrepo "$W"; commit "$W" f X X
@@ -494,6 +519,18 @@ expect "a user-applied finding unmarked faults" 2 "sec-2: applied on user word, 
 printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "- [P3] bug-9: unknown" "" "## Not re-reviewed" "" "- [P2] sec-2" > "$D/card-stray.md"
 out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-stray.md" 2>&1); rc=$?
 expect "a card id the checkpoint never gives faults" 2 "bug-9: on the card's open list, not in the checkpoint"
+printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- [P2] sec-2" "- [P2] ghost-1" > "$D/card-ghost.md"
+out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-ghost.md" 2>&1); rc=$?
+expect "V2: a ghost id under Not re-reviewed faults" 2 "ghost-1: marked not re-reviewed, not in the checkpoint"
+printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- [P2] sec-2" "- [P2] bug-2" > "$D/card-nrrclosed.md"
+out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-nrrclosed.md" 2>&1); rc=$?
+expect "V2: a closed finding restated as not re-reviewed faults" 2 "bug-2: closed in the checkpoint, marked not re-reviewed"
+printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- [P2] sec-2: applied on the user's word" > "$D/card-nrrtitle.md"
+out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-nrrtitle.md" 2>&1); rc=$?
+expect "V3: the specified Not re-reviewed bullet passes, titled or bare" 0 "match"
+printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- sec-2" > "$D/card-nrrbare.md"
+out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-nrrbare.md" 2>&1); rc=$?
+expect "V3: a bullet outside the specified shape is not the mark" 2 "sec-2: applied on user word, not marked not re-reviewed"
 
 echo "journey"
 printf '{"checks": [{"name": "gate", "source": "default:gate", "command": "true", "shows": "x"}, {"name": "journey", "source": "default:web-journey", "command": "true", "shows": "x"}]}\n' > "$D/jchecks.json"
@@ -518,6 +555,12 @@ expect "a journey that did not run blocks with its report written" 2 "blocked: j
 printf '{"action": "verify", "target": "journey", "ts": "2026-01-01T00:00:00Z", "detail": "on=main@%s result=not-run exit=3 secs=1"}\n' "$JSHA12" >> "$J/actions.jsonl"
 out=$("$SELF" journey "$J" "$JW" "$J/journey.md" 2>&1); rc=$?
 expect "a logged not run blocks" 2 "blocked: journey: not run; the journey has no evidence"
+printf '# T\n\n## Problem / feature\nA change.\n\n## User journey:\n1. Open it.\n' > "$J/colon.md"
+out=$("$SELF" journey "$J" "$JW" "$J/colon.md" 2>&1); rc=$?
+expect "V10: a trailing colon still names the section" 2 "blocked: journey: not run; the journey has no evidence"
+printf '# T\n\n## Problem / feature\nA change.\n\n## User journey log\n1. Open it.\n' > "$J/other.md"
+out=$("$SELF" journey "$J" "$JW" "$J/other.md" 2>&1); rc=$?
+expect "V10: extra heading words still name another section" 0 "judge: no User journey section; journey judged like any other non-pass"
 printf '{"action": "verify", "target": "journey", "ts": "2026-01-01T00:00:01Z", "detail": "on=main@%s result=fail exit=1 secs=1"}\n' "$JSHA12" >> "$J/actions.jsonl"
 out=$("$SELF" journey "$J" "$JW" "$J/journey.md" 2>&1); rc=$?
 expect "a failed journey with its report is judged" 0 "judge: journey failed with its report at $JREP; weigh it"
