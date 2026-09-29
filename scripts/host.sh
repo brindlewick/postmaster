@@ -341,6 +341,17 @@ PY
 # Herdr creates with the run space belongs to the space, not to the launch, so the first
 # launch closes it once its own tab exists. A security-review clone therefore stays under
 # the run, in a tab rooted at the clone.
+# Best-effort rollback for a failed first placement: close the root tab this launch
+# just created, so a failure before the launch lands leaves nothing behind. A racing
+# first launch may own the space by now, but the root tab is still this launch's to
+# close; when it is the sole tab, Herdr destroys the childless space with it
+# (probed 2026-09-29), which is the rollback — sole means no racing launch has
+# placed a tab. Warns instead of failing: the caller is already failing, and Herdr
+# may be too sick to close.
+rollback_root_tab() {  # rollback_root_tab <root-tab-id>
+  herdr tab close "$1" >/dev/null 2>&1 \
+    || warn "could not roll back the run space's root tab $1 after a failed placement; close it by hand"
+}
 herdr_run_place() {  # herdr_run_place <name> <cwd> <dispatch>: prints "<space> <tab> <pane>"
   local name=$1 cwd=$2 dispatch=$3 info runname runpath list src root rname runspace="" out tab pane roottab rootpane
   info=$(dispatch_info "$dispatch") || return 1
@@ -372,19 +383,18 @@ print("\t".join([d.get("source", {}).get("source_workspace_id") or "-",
     roottab=$(printf '%s' "$out" | json 'd["result"]["tab"]["tab_id"]')
     rootpane=$(printf '%s' "$out" | json 'd["result"]["root_pane"]["pane_id"]')
     [ -n "$runspace" ] && [ -n "$roottab" ] && [ -n "$rootpane" ] || return 1
-    # Mark it at once: from here on every failure below leaves a space close can
-    # shut, so a failed first placement never orphans an unmarked run space.
-    herdr workspace report-metadata "$runspace" --source "$META" --token postmaster=opened >/dev/null 2>&1 || return 1
-    # Tag it best-effort: the tag only matters when the close below fails too,
-    # so a failed tag warns and proceeds instead of failing the launch.
+    # Mark it at once, then roll back on any failure below: a failed first
+    # placement leaves nothing behind, and when the rollback fails too, what
+    # survives is still a marked space close can shut.
+    herdr workspace report-metadata "$runspace" --source "$META" --token postmaster=opened >/dev/null 2>&1 \
+      || { rollback_root_tab "$roottab"; return 1; }
     herdr pane report-metadata "$rootpane" --source "$META" --title "$name" --token postmaster=launch >/dev/null 2>&1 \
-      || warn "could not tag the run space's root pane $rootpane; a later close may refuse the space"
-    out=$(herdr tab create --workspace "$runspace" --cwd "$cwd" --label "$name" --no-focus) || return 1
+      || { rollback_root_tab "$roottab"; return 1; }
+    out=$(herdr tab create --workspace "$runspace" --cwd "$cwd" --label "$name" --no-focus) \
+      || { rollback_root_tab "$roottab"; return 1; }
     tab=$(printf '%s' "$out" | json 'd["result"]["tab"]["tab_id"]')
     pane=$(printf '%s' "$out" | json 'd["result"]["root_pane"]["pane_id"]')
-    # Only then close it: a create that answers without ids must leave the root
-    # tab alone, so a failed placement never orphans an empty run space.
-    [ -n "$tab" ] && [ -n "$pane" ] || return 1
+    [ -n "$tab" ] && [ -n "$pane" ] || { rollback_root_tab "$roottab"; return 1; }
     # Its close is cosmetic: when it fails the launch still runs in the right tab,
     # and the warning names the tab left behind. Never fail a launch over it.
     herdr tab close "$roottab" >/dev/null 2>&1 \
@@ -1668,7 +1678,9 @@ elif cmd == "tab create":
     st["tabs"][tab] = {"ws": ws, "pane": pane, "cwd": cwd, "label": label}
     save(); out({"tab": {"tab_id": tab}, "root_pane": {"pane_id": pane}})
 elif cmd == "tab rename": st["tabs"][a[2]]["label"] = a[3]; save()
-elif cmd == "workspace report-metadata": st["spaces"][a[2]]["tokens"] = tokens(); save()
+elif cmd == "workspace report-metadata":
+    if flag("wsmeta.fail-once"): os.remove(os.path.join(S, "wsmeta.fail-once")); sys.exit(1)
+    st["spaces"][a[2]]["tokens"] = tokens(); save()
 elif cmd == "pane report-metadata":
     if flag("panemeta.fail-once"): os.remove(os.path.join(S, "panemeta.fail-once")); sys.exit(1)
     st["panes"][a[2]]["tokens"] = tokens(); save()
@@ -1684,6 +1696,16 @@ elif cmd == "tab close":
     if t:
         ws, pane = t["ws"], t["pane"]
         st["spaces"][ws]["tabs"].remove(tab); st["spaces"][ws]["panes"].remove(pane); st["panes"].pop(pane, None)
+        if not st["spaces"][ws]["tabs"]:
+            # Closing a sole tab destroys a childless space on live Herdr, plain or
+            # nested (probed 2026-09-29). A space with a worktree nested under it
+            # refuses the close instead (probed 2026-09-28); no control closes a
+            # tab there, so the stub does not model it.
+            w = st["spaces"].pop(ws, None)
+            if w:
+                for pane in w["panes"]: st["panes"].pop(pane, None)
+                for cwd, opened in list(st["open"].items()):
+                    if opened == ws: st["open"].pop(cwd, None)
         save()
 elif cmd == "workspace close":
     ws = a[2]; w = st["spaces"].pop(ws, None)
@@ -1765,7 +1787,7 @@ EOF
   reset() { rm -f -- "$tmp"/stub/*; }
   calls() { cat "$tmp/stub/$1.calls" 2>/dev/null; }
   T=$'\t'
-  local got got2 rc a b c space pane lunaspace live panepid o1 o2 close_result close_rc
+  local got got2 rc a b c space pane live panepid o1 o2 close_result close_rc
 
   echo "detect"
   check "a Herdr server that answers is the host" '[ "$(hs "$STUBS" -- detect)" = herdr ]'
@@ -1992,9 +2014,8 @@ EOF
   check "no launch leaves its hand-over directory behind" '[ -z "$(find "$tmp" -maxdepth 1 -name "postmaster-host.*")" ]'
 
   echo "stop and close, Herdr (stub)"
-  lunaspace=$(python3 -c "import json; print(json.load(open('$tmp/stub/herdr.json'))['open']['$repo/.worktrees/T-1-luna'])")
   check "a space host.sh opened, its launches done, is closed" \
-    'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && calls herdr | grep -qx "workspace${T}close${T}$lunaspace"'
+    'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
   hs "$STUBS" -- close "$repo" >/dev/null 2>&1; rc=$?
   check "the repository's own checkout is refused" '[ $rc -eq 2 ]'
 python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-rev-luna" <<'PY'
@@ -2045,11 +2066,13 @@ PY
   check "closing it removes both owned tabs" \
     '[ "$(calls herdr | grep -c "^tab${T}close")" -eq $((closes_before + 2)) ] && ! python3 -c "import json,sys; s=json.load(open(sys.argv[1])); sys.exit(not any(t[\"cwd\"]==sys.argv[2] for t in s[\"tabs\"].values()))" "$tmp/stub/herdr.json" "$clone"' \
     "$(calls herdr) / $(python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print([(t,x.get("cwd")) for t,x in s["tabs"].items()])' "$tmp/stub/herdr.json")"
-  check "closing a scratch clone leaves its run space open" \
-    '[ "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" = "$runspace" ] && ! calls herdr | grep -qx "workspace${T}close${T}$runspace"' \
+  check "closing a scratch clone issues no workspace close for the run space" \
+    '! calls herdr | grep -qx "workspace${T}close${T}$runspace"' \
     "$(calls herdr)"
-  check "closing the synthesis worktree closes the run space" \
-    'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && calls herdr | grep -qx "workspace${T}close${T}$runspace"'
+  check "and the run space is gone with its last tab" \
+    '[ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  check "closing the synthesis worktree after its space is gone succeeds quietly" \
+    'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
   git clone -q "$repo" "$tmp/plain" >/dev/null 2>&1
   got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$tmp/plain" --marker ../logs/c3.done -- ./fixed.sh)
   space=${got#*space=}; space=${space%% *}
@@ -2071,16 +2094,39 @@ PY
   touch "$tmp/stub/tabcreate.empty"
   got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f2.done -- ./fixed.sh)
   rm -f "$tmp/stub/tabcreate.empty"
-  check "a tab create that returns no ids never closes the root tab" \
-    '[ "$got" = host=none ] && [ "$(calls herdr | grep -c "^tab${T}close")" -eq 0 ] && marker "$tmp/logs/f2.done"' "$got"
-  check "and close still shuts the marked space it leaves behind" \
-    'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  check "a tab create that returns no ids rolls the run space back" \
+    '[ "$got" = host=none ] && [ "$(calls herdr | grep -c "^tab${T}close")" -eq 1 ] && marker "$tmp/logs/f2.done"' "$got"
+  check "and no run space survives the rollback" \
+    '[ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
   reset
   touch "$tmp/stub/panemeta.fail-once"
-  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f3.done -- ./fixed.sh 2>../logs/f3.hosterr)
-  check "a root-pane tag that fails still lands the launch, with a warning" \
-    'marker "$tmp/logs/f3.done" && grep -q "could not tag the run space" "$tmp/logs/f3.hosterr"' "$got"
-  check "and its space closes normally afterwards" \
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f3.done -- ./fixed.sh)
+  check "a root-pane tag that fails rolls the run space back instead of landing" \
+    '[ "$got" = host=none ] && [ "$(calls herdr | grep -c "^tab${T}close")" -eq 1 ] && marker "$tmp/logs/f3.done"' "$got"
+  check "and no run space survives it" \
+    '[ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  touch "$tmp/stub/panemeta.fail-once" "$tmp/stub/tabcreate.empty"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f4.done -- ./fixed.sh)
+  rm -f "$tmp/stub/tabcreate.empty"
+  check "a failed tag plus a failed create still leaves nothing behind" \
+    '[ "$got" = host=none ] && marker "$tmp/logs/f4.done"' "$got"
+  check "and no run space survives the double fault" \
+    '[ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  touch "$tmp/stub/wsmeta.fail-once"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f5.done -- ./fixed.sh)
+  check "a failed mark write rolls the run space back instead of orphaning it" \
+    '[ "$got" = host=none ] && [ "$(calls herdr | grep -c "^tab${T}close")" -eq 1 ] && marker "$tmp/logs/f5.done"' "$got"
+  check "and no run space survives it" \
+    '[ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  touch "$tmp/stub/tabclose.fail" "$tmp/stub/tabcreate.empty"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f6.done -- ./fixed.sh 2>../logs/f6.hosterr)
+  rm -f "$tmp/stub/tabclose.fail" "$tmp/stub/tabcreate.empty"
+  check "a rollback that fails too still warns instead of failing silently" \
+    '[ "$got" = host=none ] && marker "$tmp/logs/f6.done" && grep -q "could not roll back the run space" "$tmp/logs/f6.hosterr"' "$got"
+  check "and close still shuts the marked space it leaves behind" \
     'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
 
   echo "run, stop and close, tmux (stub)"
