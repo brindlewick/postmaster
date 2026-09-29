@@ -61,8 +61,8 @@ recorded; `review-launch` per lane per lens per round (target the lane, detail t
 round), and `review-harvest` likewise with the thread id added; `finding` per verified finding
 (target its file:line, detail `<gating|style> <P1|P2|P3> r<round>` first, then every lens and
 lane that found it, verified by execution or reading); `apply` per fix (target its commit,
-detail the findings it fixes); `degrade` per lane per lens per round it did
-not review at full strength (detail the
+detail the findings it fixes, as whitespace-separated bare finding targets);
+`degrade` per lane per lens per round it did not review at full strength (detail the
 lens, the round and the cause, quoted); `escalate` when a ruling is needed; `gate` per gate run
 with its exit; `verify` per check per commit it runs on, written by `<tool>/scripts/verify.sh run`
 and never by hand; `ticket-state` and `ticket-comment` per tracker write; `merge` on the merge;
@@ -688,8 +688,9 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    own markers, each brief updated with the fixes delta and every applied finding as known
    context, so they closure-check each fix AND hunt new holes the fixes introduced. A fix of a
    P1 or P2 finding that does not verify closed is logged as a `finding` of its own severity in
-   the round that checked it. A round in which no lane actually reviewed under a gating lens is
-   never the last (step 2): that lens runs again in the next round regardless of the decision.
+   the round that checked it, and a P3 fix that does not verify closed as a P3 `finding` there.
+   A round in which no lane actually reviewed under a gating lens is never the last
+   (step 2): that lens runs again in the next round regardless of the decision.
    A loop with no gating lens is round 1 alone, and applies nothing: a verified gating
    finding in it, a bug or security defect the style lens reported, is escalated with the card
    instead of fixed, which stops the leg in either `CHECKPOINT_MODE`, and a ruling that asks for
@@ -697,7 +698,9 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    cap of 3 rounds for the whole loop, round 1 included, stays as a backstop: when round 3 logs
    a verified P1 or P2 finding, the loop stops and escalates with the residue, including any
    fixes that have not been re-reviewed, and your read on why it is not converging; this and the
-   escalation above are `CHECKPOINT_MODE`'s only mid-flow stops in autonomous mode. Style
+   escalation above are `CHECKPOINT_MODE`'s only mid-flow stops in autonomous mode. Past the cap,
+   each further round — including one ordered because no lane reviewed — needs its own ruling
+   (step 6); the script decides nothing past 3. Style
    does not run again: a style lane DEGRADED in round 1 stays DEGRADED, and the card says how
    many lanes the style lens rested on.
 
