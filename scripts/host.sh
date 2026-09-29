@@ -1237,19 +1237,22 @@ PY
     [ -n "$space" ] && [ -n "$tab" ] && [ -n "$pane" ] || { warn "invalid launch placement in $file; left it open"; return 2; }
     panes=$(herdr pane list --workspace "$space" 2>/dev/null) || { warn "could not inspect launch tab $tab in space $space; left it open"; return 2; }
     ownership=$(printf '%s' "$panes" | python3 -c '
-import json, os, sys
+import json, os, re, sys
 try:
     panes = json.load(sys.stdin)["result"]["panes"]
 except (ValueError, KeyError, TypeError):
     raise SystemExit(2)
+herdr_tab = re.compile(r"^w[A-Za-z0-9]+:t[0-9]+$")
+def placed(v):
+    return isinstance(v, str) and herdr_tab.match(v) is not None
 pane = next((p for p in panes if p.get("pane_id") == sys.argv[1]), None)
 if pane is None:
     print("missing")
 elif (pane.get("tokens") or {}).get("postmaster") != "launch":
     print("unowned")
-elif pane.get("tab_id") is None:
+elif not placed(pane.get("tab_id")):
     print("idless")
-elif any(p.get("tab_id") is None for p in panes):
+elif any(not placed(p.get("tab_id")) for p in panes):
     print("mixed")
 elif all((p.get("tokens") or {}).get("postmaster") == "launch"
          for p in panes if p.get("tab_id") == sys.argv[2]):
@@ -1261,7 +1264,9 @@ else:
       owned) ;;
       # A tab closes only when every pane in it carries the launch token, as a
       # space does: a split tab keeps the user's pane. A tab the list cannot
-      # fully place refuses too. Where the recorded pane itself carries no
+      # fully place refuses too: a row counts as placed only when its tab_id
+      # is a string of the shape Herdr sends (w…:t…), and anything else is
+      # unattributable. Where the recorded pane itself carries no attributable
       # tab, only that pane closes, never the tab, whose sharers are unknown.
       split) warn "launch tab $tab in space $space holds panes host.sh did not open; left it open"; return 2 ;;
       mixed) warn "launch tab $tab in space $space holds panes host.sh cannot place; left it open"; return 2 ;;
@@ -1664,9 +1669,10 @@ if os.path.exists(os.path.join(S, "herdr.down")): sys.exit(1)
 if a == ["agent"]: print("herdr agent commands:\n  kinds: pi|claude|codex"); sys.exit(2)
 lock = open(os.path.join(S, "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
 path = os.path.join(S, "herdr.json")
-st = json.load(open(path)) if os.path.exists(path) else {"n": 0, "spaces": {}, "panes": {}, "tabs": {}, "open": {}, "agents": []}
+st = json.load(open(path)) if os.path.exists(path) else {"n": 0, "spaces": {}, "panes": {}, "tabs": {}, "open": {}, "agents": [], "tab_n": {}}
 def save(): json.dump(st, open(path, "w"))
 def new(prefix): st["n"] += 1; return "%s%d" % (prefix, st["n"])
+def newtab(ws): st.setdefault("tab_n", {}); st["tab_n"][ws] = st["tab_n"].get(ws, 0) + 1; return "%s:t%d" % (ws, st["tab_n"][ws])
 def opt(name): return a[a.index(name) + 1] if name in a else None
 def tokens(): return dict(a[i + 1].split("=", 1) for i in range(len(a) - 1) if a[i] == "--token")
 def out(obj): print(json.dumps({"id": "stub", "result": obj}))
@@ -1677,7 +1683,7 @@ def main_of(d):
     c = git("-C", d, "rev-parse", "--path-format=absolute", "--git-common-dir")
     return os.path.realpath(os.path.dirname(c)) if c else None
 def space(label, cwd=None):
-    ws, tab, pane = new("w"), new("t"), new("p")
+    ws = new("w"); tab, pane = newtab(ws), new("p")
     st["spaces"][ws] = {"label": label, "tokens": {}, "panes": [pane], "tabs": [tab], "path": os.path.realpath(cwd) if cwd else None}
     st["panes"][pane] = {"ws": ws, "tab": tab, "cwd": cwd, "tokens": {}}
     st["tabs"][tab] = {"ws": ws, "pane": pane, "cwd": cwd, "label": label}
@@ -1705,7 +1711,7 @@ elif cmd == "worktree open":
     save(); out(r)
 elif cmd == "tab create":
     if flag("tabcreate.empty"): out({"tab": {"tab_id": None}, "root_pane": {"pane_id": None}}); sys.exit(0)
-    ws = opt("--workspace"); tab, pane = new("t"), new("p"); cwd = opt("--cwd"); label = opt("--label")
+    ws = opt("--workspace"); tab, pane = newtab(ws), new("p"); cwd = opt("--cwd"); label = opt("--label")
     st["spaces"][ws]["panes"].append(pane); st["spaces"][ws]["tabs"].append(tab)
     st["panes"][pane] = {"ws": ws, "tab": tab, "cwd": cwd, "tokens": {}}
     st["tabs"][tab] = {"ws": ws, "pane": pane, "cwd": cwd, "label": label}
@@ -2205,6 +2211,31 @@ PY
   check "a split tab in an id-less response loses only the run's pane" \
     'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); ws=s[\"open\"][sys.argv[2]]; t1=s[\"spaces\"][ws][\"tabs\"][0]; ps=[p for p,x in s[\"panes\"].items() if x.get(\"tab\")==t1]; sys.exit(set(ps)!=set([\"pU\"]))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna"' "$got2"
   check "and the space refusal still stands" '[ $rc -eq 2 ]'
+  i=0
+  for spec in 'an empty string|""' 'false|false' 'zero|0' 'a list|["t1"]' 'a malformed string|"t1"'; do
+    i=$((i + 1)); spelling=${spec%%|*}; literal=${spec#*|}
+    reset
+    got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/h1-$i.done -- ./fixed.sh)
+    marker "$tmp/logs/h1-$i.done"
+    python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" "$literal" <<'PY'
+import json, sys
+st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
+# A sibling row the list cannot place: its tab is the spelling under test.
+st["panes"]["pU"] = {"ws": ws, "tab": json.loads(sys.argv[3]), "cwd": "/home/user", "tokens": {}}
+st["spaces"][ws]["panes"].append("pU")
+json.dump(st, open(sys.argv[1], "w"))
+PY
+    got2=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
+    check "a tab_id spelled as $spelling refuses the close, leaving tab and pane in place" \
+      '[ $rc -eq 2 ] && printf "%s" "$got2" | grep -q "cannot place" && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); ws=s[\"open\"][sys.argv[2]]; sys.exit(not s[\"spaces\"][ws][\"tabs\"])" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" && python3 -c "import json,sys; sys.exit(\"pU\" not in json.load(open(sys.argv[1]))[\"panes\"])" "$tmp/stub/herdr.json"' "$got2"
+  done
+  reset
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/h1-ok.done -- ./fixed.sh)
+  marker "$tmp/logs/h1-ok.done"
+  n0=$(calls herdr | grep -c "^tab${T}close" || true); m0=$(calls herdr | grep -c "^pane${T}close" || true)
+  hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null
+  check "a well-formed id still closes a tab holding only the run's panes" \
+    '[ $(calls herdr | grep -c "^tab${T}close" || true) -eq $((n0 + 1)) ] && [ $(calls herdr | grep -c "^pane${T}close" || true) -eq $m0 ] && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
 
   echo "first-launch failure paths, Herdr (stub)"
   reset
@@ -2312,7 +2343,7 @@ PY
   reset
   hs "$STUBS" POSTMASTER_CONFIG=/elsewhere/config.toml -- spawn postmaster-repo "$repo/.worktrees/T-1-luna" --label "$POSTMASTER_LABEL" -- claude --model m >/dev/null
   check "Herdr: spawn starts the agent in a tab of the repository's own space" \
-    'calls herdr | grep -qx "tab${T}rename${T}t2${T}postmaster" && calls herdr | grep -qx "agent${T}start${T}postmaster-repo${T}--kind${T}claude${T}--pane${T}p3${T}--${T}--model${T}m"' "$(calls herdr)"
+    'calls herdr | grep -qx "tab${T}rename${T}w1:t1${T}postmaster" && calls herdr | grep -qx "agent${T}start${T}postmaster-repo${T}--kind${T}claude${T}--pane${T}p2${T}--${T}--model${T}m"' "$(calls herdr)"
   check "with the caller's POSTMASTER_ settings in its pane" 'calls herdr | grep "^workspace${T}create" | grep -qF -- "--env${T}POSTMASTER_CONFIG=/elsewhere/config.toml"'
   check "the postmaster takes the project's first tab, leaving no empty shell beside it" \
     'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); w=s[\"open\"][sys.argv[2]]; tabs=s[\"spaces\"][w][\"tabs\"]; sys.exit(0 if len(tabs)==1 and s[\"tabs\"][tabs[0]][\"label\"]==\"postmaster\" else 1)" "$tmp/stub/herdr.json" "$repo"'
