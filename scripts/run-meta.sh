@@ -166,7 +166,10 @@ check_pin() {  # check_pin <dispatch>: the run's checkout still serves its dispa
 }
 
 in_flight() {  # in_flight <runs-root> <checkout>: yes when some run still uses this pin
-  local root=$1 checkout=$2 p d stage got c dg ng found=1 hidden=""
+  local root=$1 checkout=$2 p d stage got c dg ng gi_set gi_val found=1 hidden=""
+  # GLOBIGNORE first: unsetting it clears dotglob, so the shopts go after, here and at restore.
+  case ${GLOBIGNORE+set} in set) gi_val=$GLOBIGNORE; gi_set=1;; *) gi_set="";; esac
+  unset GLOBIGNORE  # ambient ignores must not hide runs from the scan
   dg=$(shopt -p dotglob); shopt -s dotglob  # a project is any repo basename, dot-prefixed included
   ng=$(shopt -p nullglob); shopt -s nullglob  # an unmatched glob expands to nothing; no name ends the scan
   # Two loops so an unreadable level is seen: one flat glob drops its branch silently.
@@ -196,6 +199,7 @@ in_flight() {  # in_flight <runs-root> <checkout>: yes when some run still uses 
       esac
     done
   done
+  if [ -n "$gi_set" ]; then GLOBIGNORE=$gi_val; else unset GLOBIGNORE; fi
   eval "$dg"; eval "$ng"
   if [ -n "$hidden" ]; then
     echo "run-meta: cannot list $hidden; keeping $checkout" >&2
@@ -564,6 +568,35 @@ try release "$starrel"
 [ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$pinS" ] \
   && ok "release removes once the star-named runs are done" \
   || fail "release removes once the star-named runs are done ($out)"
+gi_run="$tmp/giproj/RUN-GI"; gi_rel="$tmp/project/RUN-GIREL"; mkdir -p "$gi_run" "$gi_rel"
+pinGI=$(pin "$fake" "$commitA") || fail "a pin is cut for the GLOBIGNORE controls"
+printf '{"postmaster": {"commit": "%s", "checkout": "%s"}}\n' "$commitA" "$pinGI" > "$gi_run/run.json"
+printf '{"stage": "synthesis"}\n' > "$gi_run/manifest.json"
+printf '{"postmaster": {"commit": "%s", "checkout": "%s"}}\n' "$commitA" "$pinGI" > "$gi_rel/run.json"
+printf '{"stage": "done"}\n' > "$gi_rel/manifest.json"
+printf 'GLOBIGNORE=%s\n' "$tmp/giproj/" > "$tmp/benv-ignore.sh"
+export BASH_ENV="$tmp/benv-ignore.sh"
+try release "$gi_rel"
+unset BASH_ENV
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$pinGI" ] \
+  && ok "release keeps the pin under a BASH_ENV that ignores the live project" \
+  || fail "release keeps the pin under a BASH_ENV that ignores the live project ($out)"
+cat > "$tmp/benv-hostile.sh" <<EOF
+GLOBIGNORE=$tmp/giproj/
+shopt -s failglob nocaseglob extglob
+shopt -u dotglob nullglob
+EOF
+export BASH_ENV="$tmp/benv-hostile.sh"
+try release "$gi_rel"
+unset BASH_ENV
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$pinGI" ] \
+  && ok "release keeps the pin under every hostile glob setting at once" \
+  || fail "release keeps the pin under every hostile glob setting at once ($out)"
+printf '{"stage": "done"}\n' > "$gi_run/manifest.json"
+try release "$gi_rel"
+[ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$pinGI" ] \
+  && ok "release removes once the GLOBIGNORE run is done" \
+  || fail "release removes once the GLOBIGNORE run is done ($out)"
 meta "$d" "$repo" >/dev/null
 try check "$d"
 [ $rc -eq 0 ] && ok "check still passes the run that shares the live tool pin" \
