@@ -42,8 +42,8 @@ probe_static() {
     | grep -v -x -F \
       -e "$HERE/scripts/link-skills.sh:93:  if printf '%s\n' \"\$p\" | grep -q '^in-the-way'; then" \
       -e "$HERE/scripts/probe-trackers.sh:18:elif ! gh auth status 2>&1 | grep -qE \"Token scopes:.*'project'\"; then" \
-      -e "$HERE/scripts/host.sh:1569:  printf '%s\n' \"\$help\" | sed -n 's/^ *kinds: //p' | tr '|' '\n' | grep -qxF \"\$1\"" \
-      -e "$HERE/scripts/log-action.sh:83:  [ -z \"\$control\" ] || printf '%s\n' \"\$kinds\" | grep -qxF -- \"\$control\" \\" \
+      -e "$HERE/scripts/host.sh:1582:  printf '%s\n' \"\$help\" | sed -n 's/^ *kinds: //p' | tr '|' '\n' | grep -qxF \"\$1\"" \
+      -e "$HERE/scripts/log-action.sh:91:  [ -z \"\$control\" ] || printf '%s\n' \"\$kinds\" | grep -qxF -- \"\$control\" \\" \
     > "$LOGDIR/p1.out"; search_rc=${PIPESTATUS[0]}
   if [ "$search_rc" -gt 1 ]; then
     nope P1-no-pipe-grep-q "probe engine failed (search grep exit $search_rc)"

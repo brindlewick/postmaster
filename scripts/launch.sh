@@ -219,14 +219,14 @@ EOF
   empty_events=$agy_dispatch/logs/g-empty.jsonl; : > "$empty_events"
   POSTMASTER_EVENT_STREAM="$empty_events" POSTMASTER_CONFIG="$tmp/agy-run.toml" PATH="$tmp/bin:$PATH" \
     "$self" launch g "$tmp/wt" "$tmp/prompt.txt" --run "$agy_dispatch" >"$empty_events" 2>"$tmp/err"; rc=$?; err=$(cat "$tmp/err")
-  [ "$rc" -eq 0 ] && [ ! -s "$empty_events" ] && printf '%s' "$err" | grep -q "its session was not exported" \
+  [ "$rc" -eq 0 ] && [ ! -s "$empty_events" ] && grep -q "its session was not exported" <<<"$err" \
     && [ "$(ls "$agy_dispatch/sessions/g" | wc -l)" = "$sessions_before" ] \
     && ok "an empty event stream is a loud missed export, not a silent skip" \
     || fail "an empty event stream is a loud missed export, not a silent skip (exit $rc)" "$err"
   printf '#!/bin/sh\nprintf "{\\"nope\\":1}\\n"\nexit 0\n' > "$tmp/bin/agy"; chmod +x "$tmp/bin/agy"
   POSTMASTER_EVENT_STREAM="$agy_events" POSTMASTER_CONFIG="$tmp/agy-run.toml" PATH="$tmp/bin:$PATH" \
     "$self" launch g "$tmp/wt" "$tmp/prompt.txt" --run "$agy_dispatch" >"$agy_events" 2>"$tmp/err"; rc=$?; err=$(cat "$tmp/err")
-  [ "$rc" -eq 0 ] && printf '%s' "$err" | grep -q "its session was not exported" \
+  [ "$rc" -eq 0 ] && grep -q "its session was not exported" <<<"$err" \
     && ok "a failed export still exits with the harness's status" \
     || fail "a failed export still exits with the harness's status (exit $rc)" "$err"
   printf '#!/bin/sh\nprintf "{\\"conversationId\\":\\"thread-rc\\"}\\n"\nexit 3\n' > "$tmp/bin/agy"; chmod +x "$tmp/bin/agy"

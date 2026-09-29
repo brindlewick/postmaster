@@ -581,17 +581,17 @@ echo "positive controls: the turnpikes, as scripts/turnpikes.sh reads them"
 project="$tmp/project-profile"; mkdir -p "$project/.postmaster"
 printf '[project]\ndefault_turnpikes = ["bug"]\n' > "$project/.postmaster/project.toml"
 body "$P" "$A" "$D" "$K"; out=$("$SELF" --body "$tmp/body.md" --title "$T" --project "$project" 2>&1); rc=$?
-[ $rc -eq 0 ] && printf '%s\n' "$out" | grep -qFx 'turnpikes: bug' \
+[ $rc -eq 0 ] && grep -qFx 'turnpikes: bug' <<<"$out" \
   && ok "default is checked against the target project's declaration" \
   || fail "default is checked against the target project's declaration (exit $rc)" "$out"
 empty_project="$tmp/empty-project"; mkdir -p "$empty_project/.postmaster"
 printf '[project]\ndefault_turnpikes = []\n' > "$empty_project/.postmaster/project.toml"
 body "$P" "$A" "$D" "$K"; out=$("$SELF" --body "$tmp/body.md" --title "$T" --project "$empty_project" 2>&1); rc=$?
-[ $rc -eq 0 ] && printf '%s\n' "$out" | grep -qFx 'turnpikes: none' \
+[ $rc -eq 0 ] && grep -qFx 'turnpikes: none' <<<"$out" \
   && ok "an empty project default does not add a review floor" \
   || fail "an empty project default does not add a review floor (exit $rc)" "$out"
 body "$P" "$A" "$D" "$K"; out=$("$SELF" --body "$tmp/body.md" --title "$T" --project "" 2>&1); rc=$?
-[ $rc -eq 1 ] && printf '%s\n' "$out" | grep -q "no such project directory" \
+[ $rc -eq 1 ] && grep -q "no such project directory" <<<"$out" \
   && ok "an explicitly empty --project is refused, never checked as discovery" \
   || fail "an explicitly empty --project is refused, never checked as discovery (exit $rc)" "$out"
 body "$P" "$A" "$D" "$K"; run "$T"
