@@ -35,7 +35,7 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import { readTomlFile, tryJsonFile } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
-import { run, withTempDir } from "./lib/proc.ts";
+import { run, signalExitCode, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
 
 const CONFIG =
@@ -625,7 +625,15 @@ if (argv[0] === "--self-test") {
     stdio: STDIN_FILE ? ["ignore", "inherit", "inherit"] : ["inherit", "inherit", "inherit"],
     ...(STDIN_FILE ? { input: readFileSync(STDIN_FILE, "utf8") } : {}),
   });
-  process.exit(child.status ?? 1);
+  if (child.status !== null && child.status !== undefined) process.exit(child.status);
+  if (child.signal) {
+    // BASE execs the harness, so a harness dead by a signal dies as one and
+    // the caller sees the signal. Re-raise it on ourselves; if the signal
+    // does not kill us, exit as a shell reports it.
+    process.kill(process.pid, child.signal);
+    process.exit(signalExitCode(child.signal));
+  }
+  process.exit(1);
 }
 
 // --- self-test ----------------------------------------------------------------------------
@@ -1182,6 +1190,43 @@ withTempDir((tmp) => {
     } else {
       st.fail("a runbook launch or resume with no --run is found, fenced or inline", got);
     }
+  }
+
+  // A child dead by a signal reports 128 plus its number through run(),
+  // as a shell reports it; our own timeout kill still reads 128.
+  {
+    const term = run("bash", ["-c", "kill -TERM $$"]);
+    st.check("a SIGTERM child reports 143", term.code === 143, `got ${term.code}`);
+    const kil = run("bash", ["-c", "kill -KILL $$"]);
+    st.check("a SIGKILL child reports 137", kil.code === 137, `got ${kil.code}`);
+    const intr = run("bash", ["-c", "kill -INT $$"]);
+    st.check("a SIGINT child reports 130", intr.code === 130, `got ${intr.code}`);
+    const three = run("bash", ["-c", "exit 3"]);
+    st.check("a plain exit still reports its code", three.code === 3, `got ${three.code}`);
+    const slow = run("bash", ["-c", "sleep 5"], { timeout: 200 });
+    st.check("a timeout still reads 128", slow.code === 128, `got ${slow.code}`);
+  }
+
+  // A harness dead by a signal dies as one, as under BASE's exec: the
+  // launch process itself is killed by the signal, not exited.
+  {
+    const claude = join(tmp, "bin", "claude");
+    const saved = readFileSync(claude, "utf8");
+    writeFileSync(claude, "#!/bin/sh\nkill -TERM $$\n");
+    const r = spawnSync(self, ["launch", "one", join(tmp, "wt"), join(tmp, "prompt.txt")], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        POSTMASTER_CONFIG: join(tmp, "legs.toml"),
+        PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+      },
+    });
+    writeFileSync(claude, saved);
+    st.check(
+      "a SIGTERM harness kills the launch by SIGTERM",
+      r.signal === "SIGTERM",
+      `signal ${r.signal}, status ${r.status}`,
+    );
   }
 
   console.log("negative controls");
