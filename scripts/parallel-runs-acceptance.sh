@@ -2,17 +2,18 @@
 # Acceptance oracle for parallel runs: nothing in skills/, AGENTS.md, README.md or the
 # wiki still says two runs must not change the same files. Runs go in parallel up to
 # `team.max_runs`, and whichever merges second resolves the conflicts at its merge.
-# Five checks name one stale sentence each from before that change, matched verbatim
-# after newlines are folded (carriage returns stripped first, so CRLF never hides one),
+# Five checks name one stale sentence each from before that change, matched
+# case-insensitively after newlines are folded (carriage returns stripped first, so
+# CRLF never hides one),
 # and five match the claim itself in every file in scope (`overlapping file surfaces`,
 # `never two runs on`, `not change/touch/edit the same files`): a new sentence in one
 # of these phrasings trips the same guard. Further paraphrases are beyond a grep oracle.
 # Six presence checks hold the sections that survive: step 6 still exists as the
 # Order-them step under Stage A and orders by dependencies within its own lines (a
 # word-boundary match, so `independence` never satisfies it), the `team.max_runs`
-# hard-rule limit stays verbatim, and the concurrency note is rewritten, not deleted,
-# keeping second-resolves and never-rebase. The replacement wording beyond those pins
-# is judged by reading, not by this script.
+# hard-rule limit stays verbatim in its section, and the concurrency note is
+# rewritten, not deleted, keeping second-resolves and never-rebase. The replacement
+# wording beyond those pins is judged by reading, not by this script.
 #
 #   parallel-runs-acceptance.sh [repo-root]   default: the repo this script lives in
 #   parallel-runs-acceptance.sh --self-test   prove each check fails on its own fault alone,
@@ -35,7 +36,7 @@ flat() { tr -d '\r' < "$1" | tr '\n\t' '  ' | sed 's/  */ /g'; }   # fold newlin
 fails=0
 stale() {
   local text=$1 file=$2 label=$3; shift 3
-  if printf '%s' "$text" | grep -q -F -- "$*"; then
+  if printf '%s' "$text" | grep -qi -F -- "$*"; then
     printf '%s: still says %s\n' "$file" "$label"
     fails=$((fails + 1))
   fi
@@ -48,7 +49,8 @@ gone() {
 }
 
 # sweep <file> <flat-text>: the six stale sentences plus the claim itself in its
-# plain phrasings. Further paraphrases are beyond a grep oracle.
+# plain phrasings, matched case-insensitively. Further paraphrases are beyond a
+# grep oracle.
 sweep() {
   local f=$1 text=$2 claim
   stale "$text" "$f" 'step 6 orders by file surfaces' \
@@ -75,18 +77,18 @@ accept() {  # accept <root>: the checks; stdout the faults, exit 0/1/2
     [ -r "$root/$f" ] || { echo "parallel-runs-acceptance: cannot read $root/$f" >&2; return 2; }
   done
   fails=0
-  local post step6 step6flat note noteflat scope scope_err text
-  post=$(flat "$root/skills/postmaster/postmaster.md") || return 2
+  local step6 step6flat note noteflat rules rulesflat scope scope_err text
   # Every stale sentence is swept in every file in scope, not only the file it
   # was removed from: a verbatim copy planted in AGENTS.md, README.md or any
-  # regular file under skills/ or wiki/, whatever its suffix, trips the same
-  # guard. A tree that cannot be fully swept is exit 2, not a clean result.
+  # regular file under skills/ or wiki/ (symlinks followed), whatever its
+  # suffix, trips the same guard. A tree that cannot be fully swept is exit 2,
+  # not a clean result.
   for f in AGENTS.md README.md; do
     text=$(flat "$root/$f") || return 2
     sweep "$f" "$text"
   done
   scope_err=$(mktemp) || return 2
-  scope=$(find "$root/skills" "$root/wiki" -type f -print 2>"$scope_err" | sort -u)
+  scope=$(find -L "$root/skills" "$root/wiki" -type f -print 2>"$scope_err" | sort -u)
   if [ -s "$scope_err" ]; then
     echo "parallel-runs-acceptance: cannot fully sweep $root/skills and $root/wiki" >&2
     cat "$scope_err" >&2
@@ -114,10 +116,14 @@ EOF
   elif ! printf '%s' "$step6flat" | grep -qiE '\bdependenc(y|ies)\b'; then
     gone skills/postmaster/postmaster.md 'orders step 6 by dependencies'
   fi
-  # The `team.max_runs` limit stays as its hard-rule sentence, matched on the folded
-  # file so a rewrap of the bullet neither passes a relocated string nor faults a
-  # kept one.
-  printf '%s' "$post" | grep -q -F -- '- Never launch more runs than `team.max_runs`.' \
+  # The `team.max_runs` limit stays as its hard-rule sentence within the Hard rules
+  # section, matched on the folded section so a rewrap of the bullet neither
+  # passes a relocated string nor faults a kept one, and a quotation of the
+  # sentence outside its section does not satisfy it.
+  rules=$(awk '/^## Hard rules/{on=1; next} on && /^## /{exit} on{print}' \
+    "$root/skills/postmaster/postmaster.md")
+  rulesflat=$(printf '%s' "$rules" | tr '\n\t' '  ' | sed 's/  */ /g')
+  printf '%s' "$rulesflat" | grep -q -F -- '- Never launch more runs than `team.max_runs`.' \
     || gone skills/postmaster/postmaster.md 'limits runs with team.max_runs'
   # The concurrency note survives as a section that still says the run merging
   # second resolves the conflicts by merge, never rebase: a heading over a gutted
@@ -269,6 +275,9 @@ alone 'README known sentence' README.md \
 alone 'wiki known sentence' wiki/concepts/review-loop.md \
   'wiki/concepts/review-loop.md: still says parallel runs are safe only on disjoint files' \
   'Parallel runs are safe when their tickets touch disjoint files.'
+alone 'capitalised claim' skills/postmaster/SKILL.md \
+  'skills/postmaster/SKILL.md: still says two runs must not change the same files' \
+  'Two Runs Must Not Change The Same Files.'
 # The hard-rule clause carries two general phrasings inside it, so it fires three checks.
 rm -rf "$tmp/one" && cp -r "$tmp/clean" "$tmp/one"
 printf '%s\n' '- Never launch more runs than `team.max_runs`, and never two runs on overlapping file surfaces.' \
@@ -279,6 +288,16 @@ out=$(accept "$tmp/one"); rc=$?
   && [ "$(printf '%s\n' "$out" | grep -c -xF 'skills/postmaster/postmaster.md: still says two runs must not change the same files')" -eq 2 ] \
   && printf '  ok   hard-rule clause fires its check and the general one twice\n' \
   || { printf '  FAIL hard-rule clause: exit %s with:\n%s\n' "$rc" "$out"; fails=$((fails + 1)); }
+# A capitalised hard-rule clause fires the same three checks.
+rm -rf "$tmp/one" && cp -r "$tmp/clean" "$tmp/one"
+printf '%s\n' 'Never Two Runs On Overlapping File Surfaces.' \
+  >> "$tmp/one/skills/postmaster/SKILL.md"
+out=$(accept "$tmp/one"); rc=$?
+[ "$rc" -eq 1 ] && [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 3 ] \
+  && printf '%s\n' "$out" | grep -qxF 'skills/postmaster/SKILL.md: still says never two runs on overlapping file surfaces' \
+  && [ "$(printf '%s\n' "$out" | grep -c -xF 'skills/postmaster/SKILL.md: still says two runs must not change the same files')" -eq 2 ] \
+  && printf '  ok   capitalised clause fires its check and the general one twice\n' \
+  || { printf '  FAIL capitalised clause: exit %s with:\n%s\n' "$rc" "$out"; fails=$((fails + 1)); }
 
 echo "all faults together"
 rm -rf "$tmp/stale" && cp -r "$tmp/clean" "$tmp/stale"
@@ -391,6 +410,54 @@ out=$(accept "$tmp/reflowrule" 2>"$tmp/reflowrule.err"); rc=$?
 [ "$rc" -eq 0 ] && [ -z "$out" ] && [ ! -s "$tmp/reflowrule.err" ] \
   && printf '  ok   a rewrapped hard rule still passes, silently\n' \
   || { printf '  FAIL a rewrapped hard rule: exit %s out:\n%s\nerr:\n%s\n' "$rc" "$out" "$(cat "$tmp/reflowrule.err")"; fails=$((fails + 1)); }
+
+rm -rf "$tmp/quoted" && cp -r "$tmp/clean" "$tmp/quoted"
+cat > "$tmp/quoted/skills/postmaster/postmaster.md" <<'EOF'
+## Stage A: the stream becomes tickets
+6. **Order them.** Dependencies first: a ticket that needs another's change waits for it to land.
+## Hard rules
+- Never launch runs without a ticket.
+## Notes
+Quoting the old rule: - Never launch more runs than `team.max_runs`.
+EOF
+out=$(accept "$tmp/quoted" 2>"$tmp/quoted.err"); rc=$?
+[ "$rc" -eq 1 ] && [ "$out" = 'skills/postmaster/postmaster.md: no longer limits runs with team.max_runs' ] \
+  && [ ! -s "$tmp/quoted.err" ] && printf '  ok   a hard rule quoted outside its section still faults\n' \
+  || { printf '  FAIL a hard rule quoted outside its section: exit %s out:\n%s\nerr:\n%s\n' "$rc" "$out" "$(cat "$tmp/quoted.err")"; fails=$((fails + 1)); }
+
+rm -rf "$tmp/movedin" && cp -r "$tmp/clean" "$tmp/movedin"
+cat > "$tmp/movedin/skills/postmaster/postmaster.md" <<'EOF'
+## Stage A: the stream becomes tickets
+6. **Order them.** Dependencies first: a ticket that needs another's change waits for it to land.
+## Hard rules
+- Never merge without a ticket.
+- Never launch more runs than `team.max_runs`.
+EOF
+out=$(accept "$tmp/movedin" 2>"$tmp/movedin.err"); rc=$?
+[ "$rc" -eq 0 ] && [ -z "$out" ] && [ ! -s "$tmp/movedin.err" ] \
+  && printf '  ok   a hard rule moved within its section still passes, silently\n' \
+  || { printf '  FAIL a hard rule moved within its section: exit %s out:\n%s\nerr:\n%s\n' "$rc" "$out" "$(cat "$tmp/movedin.err")"; fails=$((fails + 1)); }
+
+rm -rf "$tmp/flink" && cp -r "$tmp/clean" "$tmp/flink"
+printf 'Two runs must not change the same files.\n' > "$tmp/flink/claim.txt"
+ln -s ../claim.txt "$tmp/flink/skills/evil-link.md"
+out=$(accept "$tmp/flink" 2>"$tmp/flink.err"); rc=$?
+[ "$rc" -eq 1 ] && [ "$out" = 'skills/evil-link.md: still says two runs must not change the same files' ] \
+  && [ ! -s "$tmp/flink.err" ] && printf '  ok   a claim behind a file symlink faults\n' \
+  || { printf '  FAIL a claim behind a file symlink: exit %s out:\n%s\nerr:\n%s\n' "$rc" "$out" "$(cat "$tmp/flink.err")"; fails=$((fails + 1)); }
+
+rm -rf "$tmp/dlink" && cp -r "$tmp/clean" "$tmp/dlink"
+mkdir "$tmp/dlink/realdir" && printf 'Two runs must not change the same files.\n' > "$tmp/dlink/realdir/evil.md"
+ln -s ../realdir "$tmp/dlink/wiki/sub"
+out=$(accept "$tmp/dlink" 2>"$tmp/dlink.err"); rc=$?
+[ "$rc" -eq 1 ] && [ "$out" = 'wiki/sub/evil.md: still says two runs must not change the same files' ] \
+  && [ ! -s "$tmp/dlink.err" ] && printf '  ok   a claim behind a directory symlink faults\n' \
+  || { printf '  FAIL a claim behind a directory symlink: exit %s out:\n%s\nerr:\n%s\n' "$rc" "$out" "$(cat "$tmp/dlink.err")"; fails=$((fails + 1)); }
+
+rm -rf "$tmp/eloop" && cp -r "$tmp/clean" "$tmp/eloop" && ln -s loop "$tmp/eloop/skills/loop"
+out=$(accept "$tmp/eloop" 2>&1); rc=$?
+[ "$rc" -eq 2 ] && printf '  ok   a symlink loop exits 2, not a clean result\n' \
+  || { printf '  FAIL a symlink loop exits %s with:\n%s\n' "$rc" "$out"; fails=$((fails + 1)); }
 
 out=$(accept "$ROOT"); rc=$?
 [ "$rc" -eq 0 ] && printf '  ok   live tree passes\n' \
