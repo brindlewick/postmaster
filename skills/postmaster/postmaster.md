@@ -218,9 +218,11 @@ Act on the `NEXT` column, run by run, and log every action:
   Legacy Stage F.
 - **DISPATCH:** the leg's `.leg-<n>-done` marker is present. Stage C for the leg after `n` in
   `<tool>/scripts/turnpikes.sh legs <dispatch>`, logging a `note` that names any leg the list leaves
-  out; after the last contract 2 leg a card must already be waiting at GATE. After a legacy ship
-  leg, Legacy Stage G. If the script exits other than 0, nothing is dispatched:
-  its message goes to the user as Stage E step 3 says.
+  out. Where no leg follows `n`: at stage `shipped` run current Stage G; otherwise the last
+  leg's correction was interrupted before it raised the card again, so remount that leg with
+  "re-run Stage 3 step 5: verify the final HEAD, rewrite the ship card and end the leg".
+  After a legacy ship leg, Legacy Stage G. If the script exits other than 0, nothing is
+  dispatched: its message goes to the user as Stage E step 3 says.
 - **REMOUNT:** the leg's process exited (`.leg-<n>-exited`) with no hand-off, escalation or
   card. Read the leg's `.err` file and the stream tail. A `.err` that opens with a `launch:`
   line is a refusal from `<tool>/scripts/launch.sh`: it goes to the user (Stage E step 3), and nothing
@@ -286,32 +288,44 @@ route follows below.
    and blocks landing. Verify that every branch the card
    lists exists and has the stated state; `run-log.md`'s
    SYNTHESIS line accounts for each lane; every DEGRADED lane matches `degrade` actions; the
-   turnpikes match the waybill and each review lens has the expected `review-launch` lines;
-   the blind acceptance tests are the first commit or the hand-off records why they were not
-   written; and the card reports every failed check, all open findings, browser suite and QA
-   when present, the review link, and every run-created branch. Log the gate result. If a claim
-   fails, remove `.card-ready`, then resume that last leg with the exact
-   discrepancy and wait for its corrected card.
+   turnpikes match the waybill, `actions.jsonl` has `review-launch` lines under each review lens
+   the run's legs name and under no other lens, and each other turnpike's result on the card is
+   in the record its step writes; when `<tool>/scripts/turnpikes.sh short '<the waybill's
+   turnpikes: line>'` names any default turnpike, the ledger holds the user's word on this
+   ticket's turnpikes; where the run has a review leg, the card's per-turnpike rounds and open
+   findings are consistent with `checkpoint-review.md`; the blind acceptance tests are the first
+   commit or the hand-off records why they were not written; the Style residue's count is what
+   `<tool>/scripts/style-findings.sh count <dispatch>` prints; and the card reports every failed
+   check, all open findings, browser suite and QA when present, the review link, and every
+   run-created branch. Log the gate result. If a claim
+   fails, remove `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`, then
+   resume that last leg with the exact discrepancy and wait for its corrected card.
 2. **Follow the landing route in the waybill.**
-   - For `landing: pull-request`, push the ticket branch and open the pull request against the
-     default branch (`gh pr create` on a GitHub project). Include the card, final checks, diff
-     stat, preview and review links, and thread ids. Log a `note` with the push and
-     pull-request URL, and leave a dated tracker comment linking the pull request and
-     summarizing the same evidence. Put the pull-request URL and its merge instructions in
-     `.waiting-on-user`; the user merges it in the project's review surface.
+   - For `landing: pull-request`, push the ticket branch; where an open pull request already
+     names the ticket branch, adopt it instead of opening another. Otherwise open the pull
+     request against the default branch (`gh pr create` on a GitHub project). Include the card,
+     final checks, diff stat, preview and review links, and thread ids. Log a `note` with the
+     push and pull-request URL, and leave a dated tracker comment linking the pull request and
+     summarizing the same evidence, logging `ticket-comment`. Put the pull-request URL and its
+     merge instructions in `.waiting-on-user`; the user merges it in the project's review
+     surface and says so, and that word is the answer step 3 waits on.
      Do not use `MERGE_AUTHORITY` to merge a pull request on the user's behalf.
    - For `landing: local`, obey `MERGE_AUTHORITY`. With `user`, put the card and
      verification in front of the user, write the requested merge word to `.waiting-on-user`,
-     and wait. With `postmaster`, record the grant. After the required word or grant, verify the
-     default checkout is still clean and on its default branch, then merge the ticket branch
-     with `git merge --no-ff`; never rebase. Log `merge`, move the ticket to done, and set the
-     stage to `shipped`.
+     and wait. With `postmaster`, record the grant. After the required word or grant, remove
+     `.waiting-on-user` on the `user` path. Verify the default checkout is still clean and on
+     its default branch; if it is not, stop and tell the user. Leave a dated ready-to-merge
+     tracker comment with the evidence (what the change does, branch name, gate output summary,
+     diff stat, review link, thread ids), logging `ticket-comment`. Merge the ticket branch
+     with `git merge --no-ff`; never rebase. Log `merge`, move the ticket to done, logging
+     `ticket-state`, remove `.card-ready`, and set the stage to `shipped`.
    - An unknown landing route is a dispatch fault to resolve before this point. Do not infer
      it from the presence of a remote.
-3. **After a pull request is merged**, verify the provider reports it
-   merged and the default branch contains the merge, remove `.waiting-on-user`, log `merge`,
-   move the ticket to done, and set the stage to `shipped`. For a local merge, this is already
-   done in step 2. Then run current Stage G.
+3. **When the user's word that they merged comes**, verify the provider reports it
+   merged and the default branch contains the merge; if either check fails, tell the user and
+   wait. Otherwise remove `.waiting-on-user` and `.card-ready`, log `merge`,
+   move the ticket to done, logging `ticket-state`, and set the stage to `shipped`. For a local
+   merge, this is already done in step 2. Then run current Stage G.
 
 ## Stage G (contract 2): after merge
 
@@ -322,8 +336,8 @@ route follows below.
    until exit 0; it does not resume a coachman leg that already handed off. Log a `note` with
    the check's last line.
 2. **Finish the record.** Final `run-log.md` entry (per-lane win record, findings counts, cost)
-   plus a closing dated comment on the ticket. Archive finished threads where the harness has
-   an archive form (`harnesses.md`).
+   plus a closing dated comment on the ticket, logging `ticket-comment`. Archive finished
+   threads where the harness has an archive form (`harnesses.md`).
 3. Once `.leg-<leg>-exited` is present, close the synthesis worktree's host space with
    `<tool>/scripts/host.sh close <repo>/.worktrees/<TICKET>`; on exit 2, stop and report. Remove
    the worktree from outside it, never with force unless it is clean and the card confirmed it,

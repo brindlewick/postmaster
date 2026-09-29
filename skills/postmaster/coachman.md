@@ -730,7 +730,9 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    then exercise any other changed surface that needs coverage. Record what worked, what did
    not, what suite assertions need changing because behavior deliberately changed, and what new
    surface needs coverage. A red run is a finding, not a flake. Do not update an assertion unless
-   you can name the deliberate behavior change that made it obsolete. Put the preview link and
+   you can name the deliberate behavior change that made it obsolete. Where a check's source
+   names `web-journey`, the walk is the journey report: write it to the path
+   `<tool>/scripts/verify.sh journey-path <synthesis-wt> <dispatch>` prints. Put the preview link and
    QA results on the card. If the project has no UI or browser suite, say `none`.
 3. **Review link.** Put the absolute path of the synthesis worktree on the card and, when
    `run.json` config has `ship.review_link`, its value with the path filled in. Reuse a review
@@ -739,7 +741,8 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
 4. **Write `card.md`.** Include the branch, final HEAD, diff stat and commit list; the final
    `verify.sh run` results; browser suite and QA when present; every ticket turnpike with its
    rounds and result from its checkpoint record, or `none`; all open findings with lens,
-   severity, disposition and reason, including every Style residue from
+   severity, disposition and reason, including the Style residue count as
+   `<tool>/scripts/style-findings.sh count <dispatch>` prints it, then every Style residue from
    `<tool>/scripts/style-findings.sh list <dispatch>`; every branch created by the run and its
    state; lane outcomes; and the review link. The card's branch state is before merge: the
    ticket branch is ready, and every other branch is either retained or abandoned. The gate is
