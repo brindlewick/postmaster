@@ -285,7 +285,7 @@ run_watch "$tmp/new" "$root" 2 "$root/stub.log"
 [ $rc -eq 3 ] && ! has "needs " && clean "$root/oracle" "$root/stub.log" 1 \
   && ok "a held dispatch-ready run is left alone" || { fail "a held dispatch-ready run is left alone"; }
 
-echo "P14 (AC5): the watcher's self-test passes and controls every step and wake case"
+echo "P14 (AC5): the watcher's self-test passes and names each step and wake case"
 selfout=$(bash scripts/runs-watch.sh --self-test 2>&1); selfrc=$?
 selfmiss=""
 for kw in dispatch resume held refus inspect; do
@@ -297,8 +297,8 @@ for grp in 'checkpoint|read:checkpoint/READ' 'card|gate:ship-card/GATE' 'escalat
 done
 grep -qiE 'incomplete|could not|cannot|fail|bad|invalid|missing' <<<"$selfout" || selfmiss="$selfmiss incomplete-step"
 [ $selfrc -eq 0 ] && [ -z "$selfmiss" ] \
-  && ok "the self-test passes with a control for each step and each wake case" \
-  || { out="exit $selfrc missing:$selfmiss / $(printf '%s\n' "$selfout" | tail -n 20)"; fail "the self-test passes with a control for each step and each wake case"; }
+  && ok "the self-test passes and names each step and each wake case" \
+  || { out="exit $selfrc missing:$selfmiss / $(printf '%s\n' "$selfout" | tail -n 20)"; fail "the self-test passes and names each step and each wake case"; }
 
 echo "P15 (guard): a leg at work is left waiting"
 root=$tmp/p15; mkdispatch "$root" synthesis 1; : > "$root/stub.log"

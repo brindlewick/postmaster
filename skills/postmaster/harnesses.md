@@ -43,9 +43,11 @@ This file names the same set:
 | stream drop | `stream disconnected`, `SSE error`, `connection reset`, `connection aborted`, `broken pipe` |
 
 The adapter accepts spaces, underscores or hyphens between the words in a phrase, without
-regard to case. A quota wall, a `402 Payment Required`, a usage-limit or rate-limit message
-and a `launch:` refusal are **never** transient and take precedence over any transient
-signature: those go to the postmaster as today. Add a signature here and to `launch.sh` only
+regard to case. A wall is **never** transient and takes precedence over any transient
+signature: a quota wall (quota wall, exceeded or exhausted), a `402 Payment Required` or
+other payment-required or insufficient-funds message, a usage-limit or rate-limit message
+(too many requests included), a provider wall, a resource-exhausted message, and a `launch:`
+refusal. Those go to the postmaster as today. Add a signature here and to `launch.sh` only
 when the adapter can distinguish it from those cases in the durable error record.
 
 Every lane runs unrestricted. Its containment is its worktree (`coachman.md`, Lane capability),
