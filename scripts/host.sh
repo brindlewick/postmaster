@@ -352,6 +352,14 @@ rollback_root_tab() {  # rollback_root_tab <root-tab-id>
   herdr tab close "$1" >/dev/null 2>&1 \
     || warn "could not roll back the run space's root tab $1 after a failed placement; close it by hand"
 }
+# Best-effort rollback for a failure after the launch tab exists: close the tab
+# just created, by its id, which this launch knows is its own even when the
+# tag failed. Unlike close_placements it needs no token: the id is enough, and
+# the untagged tab is exactly what must go. Warns instead of failing.
+rollback_launch_tab() {  # rollback_launch_tab <tab-id>
+  herdr tab close "$1" >/dev/null 2>&1 \
+    || warn "could not roll back launch tab $1 after a failed placement; close it by hand"
+}
 herdr_run_place() {  # herdr_run_place <name> <cwd> <dispatch>: prints "<space> <tab> <pane>"
   local name=$1 cwd=$2 dispatch=$3 info runname runpath list src root rname runspace="" out tab pane roottab rootpane
   info=$(dispatch_info "$dispatch") || return 1
@@ -404,9 +412,16 @@ print("\t".join([d.get("source", {}).get("source_workspace_id") or "-",
     tab=$(printf '%s' "$out" | json 'd["result"]["tab"]["tab_id"]')
     pane=$(printf '%s' "$out" | json 'd["result"]["root_pane"]["pane_id"]')
   fi
+  # An id-less create in a later launch names nothing to roll back: without ids
+  # there is nothing to close, and sweeping untagged panes would risk a racing
+  # launch's. The first launch never reaches this line without ids.
   [ -n "$runspace" ] && [ -n "$tab" ] && [ -n "$pane" ] || return 1
-  herdr tab rename "$tab" "$name" >/dev/null 2>&1 || return 1
-  herdr pane report-metadata "$pane" --source "$META" --title "$name" --token postmaster=launch >/dev/null 2>&1 || return 1
+  herdr tab rename "$tab" "$name" >/dev/null 2>&1 \
+    || { rollback_launch_tab "$tab"; return 1; }
+  herdr pane report-metadata "$pane" --source "$META" --title "$name" --token postmaster=launch >/dev/null 2>&1 \
+    || { rollback_launch_tab "$tab"; return 1; }
+  # A placement the record refuses still shuts: its tab is tagged, so close
+  # vouches for the space without the record. A control pins it.
   herdr_record_placement "$runspace" "$tab" "$pane" "$cwd" || return 1
   printf '%s %s %s\n' "$runspace" "$tab" "$pane"
 }
@@ -1230,13 +1245,20 @@ except (ValueError, KeyError, TypeError):
 pane = next((p for p in panes if p.get("pane_id") == sys.argv[1]), None)
 if pane is None:
     print("missing")
-elif (pane.get("tokens") or {}).get("postmaster") == "launch":
+elif (pane.get("tokens") or {}).get("postmaster") != "launch":
+    print("unowned")
+elif all((p.get("tokens") or {}).get("postmaster") == "launch"
+         for p in panes if p.get("tab_id") == sys.argv[2]):
     print("owned")
 else:
-    print("unowned")' "$pane") || { warn "could not verify ownership of launch tab $tab; left it open"; return 2; }
+    print("split")' "$pane" "$tab") || { warn "could not verify ownership of launch tab $tab; left it open"; return 2; }
     case $ownership in
       missing) rm -f -- "$file"; continue ;;
       owned) ;;
+      # A tab closes only when every pane in it carries the launch token, as a
+      # space does: a split tab keeps the user's pane. A pane list without tab
+      # ids decides on the recorded pane's token, as before.
+      split) warn "launch tab $tab in space $space holds panes host.sh did not open; left it open"; return 2 ;;
       *) warn "launch tab $tab in space $space is no longer owned by host.sh; left it open"; return 2 ;;
     esac
     herdr tab close "$tab" >/dev/null 2>&1 || { warn "herdr could not close launch tab $tab; left it open"; return 2; }
@@ -1677,17 +1699,25 @@ elif cmd == "tab create":
     st["panes"][pane] = {"ws": ws, "tab": tab, "cwd": cwd, "tokens": {}}
     st["tabs"][tab] = {"ws": ws, "pane": pane, "cwd": cwd, "label": label}
     save(); out({"tab": {"tab_id": tab}, "root_pane": {"pane_id": pane}})
-elif cmd == "tab rename": st["tabs"][a[2]]["label"] = a[3]; save()
+elif cmd == "tab rename":
+    if flag("tabrename.fail-once"): os.remove(os.path.join(S, "tabrename.fail-once")); sys.exit(1)
+    st["tabs"][a[2]]["label"] = a[3]; save()
 elif cmd == "workspace report-metadata":
     if flag("wsmeta.fail-once"): os.remove(os.path.join(S, "wsmeta.fail-once")); sys.exit(1)
     st["spaces"][a[2]]["tokens"] = tokens(); save()
 elif cmd == "pane report-metadata":
+    npath = os.path.join(S, "panemeta.n")
+    n = int(open(npath).read()) if os.path.exists(npath) else 0
+    open(npath, "w").write(str(n + 1))
     if flag("panemeta.fail-once"): os.remove(os.path.join(S, "panemeta.fail-once")); sys.exit(1)
+    failn = os.path.join(S, "panemeta.fail-nth")
+    if os.path.exists(failn) and n + 1 == int(open(failn).read().strip() or "0"):
+        os.remove(failn); sys.exit(1)
     st["panes"][a[2]]["tokens"] = tokens(); save()
 elif cmd == "workspace get":
     w = st["spaces"][a[2]]; out({"workspace": {"workspace_id": a[2], "label": w["label"], "tokens": w["tokens"], "worktree": {"path": w.get("path"), "checkout_path": w.get("path")}}})
 elif cmd == "pane list":
-    out({"panes": [{"pane_id": p, "tokens": st["panes"][p]["tokens"]} for p in st["spaces"][opt("--workspace")]["panes"]]})
+    out({"panes": [{"pane_id": p, "tab_id": st["panes"][p].get("tab"), "tokens": st["panes"][p]["tokens"]} for p in st["spaces"][opt("--workspace")]["panes"]]})
 elif cmd == "tab list":
     ws = opt("--workspace"); out({"tabs": [{"tab_id": t, "label": st["tabs"][t]["label"], "cwd": st["tabs"][t]["cwd"]} for t in st["spaces"][ws]["tabs"]]})
 elif cmd == "tab close":
@@ -2081,6 +2111,39 @@ PY
   check "a plain clone is no scratch: it opens as a repository, and close refuses its space" \
     'calls herdr | grep -qxF "workspace${T}create${T}--cwd${T}$tmp/plain${T}--label${T}plain${T}--no-focus" && [ $rc -eq 2 ] && ! calls herdr | grep -qx "workspace${T}close${T}$space"' "$(calls herdr)"
 
+  echo "a split launch tab, Herdr (stub)"
+  reset
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/g1.done -- ./fixed.sh)
+  marker "$tmp/logs/g1.done"
+  python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" <<'PY'
+import json, sys
+st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
+t1 = st["spaces"][ws]["tabs"][0]
+# The user splits the launch tab: a second, untagged pane in it.
+st["panes"]["pU"] = {"ws": ws, "tab": t1, "cwd": "/home/user", "tokens": {}}
+st["spaces"][ws]["panes"].append("pU")
+json.dump(st, open(sys.argv[1], "w"))
+PY
+  got2=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
+  check "a tab the user has split is refused, and the tab stays open" \
+    '[ $rc -eq 2 ] && printf "%s" "$got2" | grep -q "holds panes" && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); ws=s[\"open\"][sys.argv[2]]; sys.exit(not s[\"spaces\"][ws][\"tabs\"])" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna"' "$got2"
+  check "and the user's pane survives it" \
+    'python3 -c "import json,sys; sys.exit(\"pU\" not in json.load(open(sys.argv[1]))[\"panes\"])" "$tmp/stub/herdr.json"'
+  reset
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/g2.done -- ./fixed.sh)
+  marker "$tmp/logs/g2.done"
+  python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" <<'PY'
+import json, sys
+st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
+t1 = st["spaces"][ws]["tabs"][0]
+# A second pane of the run's own in the launch tab: tagged like the first.
+st["panes"]["pR"] = {"ws": ws, "tab": t1, "cwd": sys.argv[2], "tokens": {"postmaster": "launch"}}
+st["spaces"][ws]["panes"].append("pR")
+json.dump(st, open(sys.argv[1], "w"))
+PY
+  check "a tab holding only the run's panes still closes" \
+    'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+
   echo "first-launch failure paths, Herdr (stub)"
   reset
   touch "$tmp/stub/tabclose.fail"
@@ -2128,6 +2191,35 @@ PY
     '[ "$got" = host=none ] && marker "$tmp/logs/f6.done" && grep -q "could not roll back the run space" "$tmp/logs/f6.hosterr"' "$got"
   check "and close still shuts the marked space it leaves behind" \
     'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  touch "$tmp/stub/tabrename.fail-once"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f7.done -- ./fixed.sh)
+  check "a tab rename that fails rolls the launch tab back" \
+    '[ "$got" = host=none ] && [ "$(calls herdr | grep -c "^tab${T}close")" -eq 2 ] && marker "$tmp/logs/f7.done"' "$got"
+  check "and no run space survives it" \
+    '[ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  echo 2 > "$tmp/stub/panemeta.fail-nth"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f8.done -- ./fixed.sh)
+  check "a launch-pane tag that fails rolls the launch tab back" \
+    '[ "$got" = host=none ] && [ "$(calls herdr | grep -c "^tab${T}close")" -eq 2 ] && marker "$tmp/logs/f8.done"' "$got"
+  check "and no run space survives it" \
+    '[ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  mkdir -p "$tmp/poison" && : > "$tmp/poison/placements"
+  got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST_STATE="$tmp/poison" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f9.done -- ./fixed.sh)
+  check "a placement the record refuses falls back with its tab tagged" \
+    '[ "$got" = host=none ] && marker "$tmp/logs/f9.done"' "$got"
+  check "and close still shuts its space without the record" \
+    'hs "$STUBS" POSTMASTER_HOST_STATE="$tmp/poison" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  touch "$tmp/stub/tabrename.fail-once" "$tmp/stub/tabclose.fail"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f10.done -- ./fixed.sh 2>../logs/f10.hosterr)
+  rm -f "$tmp/stub/tabclose.fail"
+  check "a launch-tab rollback that fails too still warns instead of failing silently" \
+    '[ "$got" = host=none ] && marker "$tmp/logs/f10.done" && grep -q "could not roll back launch tab" "$tmp/logs/f10.hosterr"' "$got"
+  hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null 2>&1; rc=$?
+  check "and close correctly refuses the untagged tab it leaves behind" '[ $rc -eq 2 ]'
 
   echo "run, stop and close, tmux (stub)"
   reset

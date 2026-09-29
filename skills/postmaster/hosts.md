@@ -124,8 +124,9 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   in the same space, with its own checkout as the tab's working directory, the first one
   included: it closes the run space's root tab once its own tab exists. That includes
   reviewer worktrees and security-review clones: a clone is never opened as a separate
-  workspace. A failure before the launch lands rolls the root tab back instead, so a
-  failed first placement leaves nothing a later close could refuse. Without a dispatch,
+  workspace. A failure before the launch lands rolls back instead — the root tab
+  while the launch tab does not exist yet, the launch tab after — so a failed
+  placement leaves nothing a later close could refuse. Without a dispatch,
   the legacy placement is a tab in the launch's own worktree space.
 - **The tree** is project space → ticket-labeled run space → launch tabs. The project space holds
   the postmaster, the synthesis worktree's space holds all coachman legs, workhorses and review
@@ -139,7 +140,9 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   `postmaster=opened`, a pane `postmaster=launch`. It remembers each launch tab in the host state.
   `host.sh close <worktree>` closes tabs it opened for that checkout, then closes a space only
   when that space belongs to the checkout, carries the ownership token, every pane in it does,
-  and nothing registered runs there. Closing a reviewer scratch therefore removes its tabs
+  and nothing registered runs there. A tab closes only when every pane in it
+  carries the launch token: a split tab keeps the user's pane and stays open,
+  named in the refusal. Closing a reviewer scratch therefore removes its tabs
   without closing the run space; when they are its last tabs Herdr destroys the tabless space
   with them. It never closes a repository's own space, a scratch clone's aside, never uses
   `workspace close --group`, and never runs `herdr worktree remove`, which deletes the checkout.
