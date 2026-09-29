@@ -40,6 +40,8 @@
 # directory inside the run's synthesis-worktree space in Herdr. In tmux a scratch clone joins
 # the session of the repository it was cut from. <name> labels the tab or window and the pane's
 # title, and names the thread where the harness can (POSTMASTER_LAUNCH_NAME, read by launch.sh).
+# If --out is set, its absolute path also reaches launch.sh as POSTMASTER_EVENT_STREAM so that a
+# run can retain the harness's durable session beside that event stream.
 # Pass a role-specific `host.sh name` result as the launch name and pass the dispatch separately,
 # so the ticket title labels only the run space and never passes through a shell. A pane shows
 # the stream through view-stream.sh. A launch carries its own pane's
@@ -936,20 +938,30 @@ def tripped():
 # blocks in the kernel instead of waking on a timer: a trip is read within
 # milliseconds however long the launch runs, and a launch that exits right
 # after its trip is still caught while its cgroup outlives it. The first read
-# is the baseline and arms the poll; every wake re-reads, since a wake
-# promises only change, not a trip; the timeout re-reads too, for a trip that
-# lands between the baseline and the registration.
+# is the baseline; every wake re-reads, since a wake promises only change, not
+# a trip; the timeout re-reads too, for a trip that lands between the baseline
+# and the registration.
 kind = tripped()
 po = select.poll()
 try:
     pfd = open(pids_path); mfd = open(mem_path)
+    # An events file stays ready to poll until it is read again through the
+    # same descriptor: read each once to arm it, and again after every wake,
+    # or the poll returns at once forever and the watcher spins.
+    pfd.read(); mfd.read()
     po.register(pfd, select.POLLPRI | select.POLLERR)
     po.register(mfd, select.POLLPRI | select.POLLERR)
+    byfd = {pfd.fileno(): pfd, mfd.fileno(): mfd}
     armed = True
 except OSError:
     armed = False
 while not kind and os.path.isdir(root) and alive(runner):
-    if armed: po.poll(100)
+    if armed:
+        for fd, _ in po.poll(100):
+            try:
+                byfd[fd].seek(0); byfd[fd].read()
+            except OSError:
+                pass
     else: time.sleep(0.1)
     kind = tripped()
 if not kind:
@@ -1122,7 +1134,7 @@ runner() {
 
   # The launch's environment is its caller's, except for identity: which pane it is in comes
   # from where it actually runs, so nothing it reports lands in its caller's pane.
-  local drop="POSTMASTER_LAUNCH_NAME $PANE_IDS" keep=""
+  local drop="POSTMASTER_LAUNCH_NAME POSTMASTER_EVENT_STREAM $PANE_IDS" keep=""
   case $mode in
     herdr) drop="$drop HERDR_ENV HERDR_SOCKET_PATH HERDR_BIN_PATH"; keep="HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID HERDR_ENV HERDR_SOCKET_PATH HERDR_BIN_PATH" ;;
     tmux)  drop="$drop TMUX"; keep="TMUX TMUX_PANE" ;;
@@ -1135,6 +1147,7 @@ runner() {
   done
   for k in $keep; do [ -n "${!k+x}" ] && childenv+=("$k=${!k}"); done
   childenv+=("POSTMASTER_LAUNCH_NAME=$name")
+  [ -z "$out" ] || childenv+=("POSTMASTER_EVENT_STREAM=$out")
 
   # Its streams are emptied once and then only ever appended to, so a second writer on the same
   # file, such as a resume started too soon, cannot overwrite what the first wrote. --append
@@ -1730,8 +1743,8 @@ EOF
 #!/usr/bin/env bash
 printf '{"type":"system","subtype":"init","session_id":"probe-1","model":"m"}\n'
 if (: < /dev/tty) 2>/dev/null; then tty=yes; else tty=no; fi
-printf 'from=%s|name=%s|pane=%s|tmuxpane=%s|var=%s|sid=%s|pid=%s|pgid=%s|tty=%s\n' "$PWD" "${POSTMASTER_LAUNCH_NAME:-}" \
-  "${HERDR_PANE_ID:-unset}" "${TMUX_PANE:-unset}" "${CALLER_VAR:-unset}" "$(python3 -c 'import os; print(os.getsid(0))')" "$$" \
+printf 'from=%s|name=%s|pane=%s|tmuxpane=%s|var=%s|events=%s|sid=%s|pid=%s|pgid=%s|tty=%s\n' "$PWD" "${POSTMASTER_LAUNCH_NAME:-}" \
+  "${HERDR_PANE_ID:-unset}" "${TMUX_PANE:-unset}" "${CALLER_VAR:-unset}" "${POSTMASTER_EVENT_STREAM:-unset}" "$(python3 -c 'import os; print(os.getsid(0))')" "$$" \
   "$(python3 -c 'import os; print(os.getpgid(0))')" "$tty"
 echo x >> "${COUNT:-/dev/null}"
 sleep "${EMIT_SLEEP:-0}"
@@ -2203,7 +2216,72 @@ for line in open("/sys/fs/cgroup" + cg + "/memory.events"):
 if not mx:
     print("brush ran without memory pressure", file=sys.stderr); sys.exit(99)
 EOF
-  chmod +x "$tmp/caller/healthy.sh" "$tmp/caller/fork-cap.py" "$tmp/caller/fork-exit.py" "$tmp/caller/memory-cap.py" "$tmp/caller/brush-cache.py"
+  cat > "$tmp/caller/brush-steady.py" <<'EOF'
+#!/usr/bin/env python3
+import os, sys, time
+# Brushes the memory cap with reclaimable cache for the seconds given: one pass
+# past the cap, then a fresh stretch of the file every 50 ms that the cgroup must
+# reclaim room for, so its memory.events keeps changing and nothing trips.
+fd = os.open(os.environ["BRUSH_FILE"], os.O_RDONLY)
+os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+size, chunk, off = os.fstat(fd).st_size, 1 << 20, 0
+def read(n):
+    global off
+    for _ in range(n):
+        if off >= size: off = 0
+        os.pread(fd, chunk, off); off += chunk
+read(96)
+end = time.monotonic() + float(sys.argv[1])
+while time.monotonic() < end:
+    read(4); time.sleep(0.05)
+EOF
+  cat > "$tmp/caller/watcher-cpu.py" <<'EOF'
+#!/usr/bin/env python3
+# Finds a capped launch's cap watcher by ancestry from the launch's published
+# pid, waits until the launch's cgroup has met its memory cap, then reads the
+# watcher's CPU time and the cgroup's memory.events max count across a window.
+# Prints "<cpu seconds> <max events in the window>", or "none" with no watcher.
+import os, sys, time
+pidfile, window = sys.argv[1], float(sys.argv[2])
+def stat(p): return open("/proc/%s/stat" % p).read().rsplit(")", 1)[1].split()
+def cpu(p): s = stat(p); return (int(s[11]) + int(s[12])) / os.sysconf("SC_CLK_TCK")
+deadline = time.monotonic() + 10
+cpid = ""
+while not cpid and time.monotonic() < deadline:
+    try: cpid = open(pidfile).read().strip()
+    except OSError: time.sleep(0.05)
+launcher = stat(cpid)[1]
+events = "/sys/fs/cgroup" + open("/proc/%s/cgroup" % cpid).read().split(":")[-1].strip() + "/memory.events"
+def maxcount():
+    for line in open(events):
+        k, _, v = line.partition(" ")
+        if k == "max": return int(v)
+    return 0
+watcher = None
+while watcher is None and time.monotonic() < deadline:
+    for p in filter(str.isdigit, os.listdir("/proc")):
+        try:
+            argv = open("/proc/%s/cmdline" % p, "rb").read().split(b"\0")[:-1]
+            if argv[1:2] != [b"-"] or argv[-1] != cpid.encode(): continue
+            q = p
+            for _ in range(3):
+                q = stat(q)[1]
+                if q == launcher: watcher = p; break
+        except (OSError, IndexError):
+            continue
+        if watcher: break
+    else:
+        time.sleep(0.05)
+if watcher is None:
+    print("none"); sys.exit(1)
+while maxcount() == 0 and time.monotonic() < deadline: time.sleep(0.05)
+c0, m0 = cpu(watcher), maxcount()
+time.sleep(window)
+c1, m1 = cpu(watcher), maxcount()
+print("%.2f %d" % (c1 - c0, m1 - m0))
+EOF
+  chmod +x "$tmp/caller/healthy.sh" "$tmp/caller/fork-cap.py" "$tmp/caller/fork-exit.py" "$tmp/caller/memory-cap.py" "$tmp/caller/brush-cache.py" \
+    "$tmp/caller/brush-steady.py" "$tmp/caller/watcher-cpu.py"
   head -c 134217728 /dev/zero > "$tmp/brush-data.bin"
   reset() { rm -f -- "$tmp"/stub/*; }
   calls() { cat "$tmp/stub/$1.calls" 2>/dev/null; }
@@ -2241,11 +2319,13 @@ EOF
   (cd "$tmp/caller" && hs "$SYS" EMIT_SLEEP=2 -- run "$NAME" "$repo" --marker ../logs/n2.done -- ./fixed.sh >/dev/null)
   check "an earlier launch's marker is gone once run returns" '[ ! -e "$tmp/logs/n2.done" ]'
   check "and it lands again when this one exits, whatever its exit" 'marker "$tmp/logs/n2.done" 60'
-  (cd "$tmp/caller" && hs "$SYS" CALLER_VAR=v HERDR_PANE_ID=caller-pane TMUX_PANE=%9 -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+  (cd "$tmp/caller" && hs "$SYS" CALLER_VAR=v POSTMASTER_EVENT_STREAM=caller-events HERDR_PANE_ID=caller-pane TMUX_PANE=%9 -- run "$NAME" "$repo/.worktrees/T-1-luna" \
      --out ../logs/n3.out --marker ../logs/n3.done --pidfile ../logs/n3.pid -- ./probe.sh >/dev/null)
   marker "$tmp/logs/n3.done"
   check "it runs from the caller's directory, with the caller's environment and its name" \
     '[ "$(field "$tmp/logs/n3.out" from)" = "$tmp/caller" ] && [ "$(field "$tmp/logs/n3.out" var)" = v ] && [ "$(field "$tmp/logs/n3.out" name)" = "$NAME" ]' "$(cat "$tmp/logs/n3.out")"
+  check "the exact --out path reaches the launch as POSTMASTER_EVENT_STREAM" \
+    '[ "$(field "$tmp/logs/n3.out" events)" = "$tmp/caller/../logs/n3.out" ]' "$(cat "$tmp/logs/n3.out")"
   check "but never with its caller's pane" '[ "$(field "$tmp/logs/n3.out" pane)" = unset ] && [ "$(field "$tmp/logs/n3.out" tmuxpane)" = unset ]' "$(cat "$tmp/logs/n3.out")"
   check "it is a session of its own: its group is its pid, not the caller's session" \
     '[ "$(field "$tmp/logs/n3.out" pgid)" = "$(field "$tmp/logs/n3.out" pid)" ] && [ "$(field "$tmp/logs/n3.out" sid)" = "$(field "$tmp/logs/n3.out" pid)" ]'
@@ -2911,6 +2991,15 @@ EOF
     marker "$tmp/logs/brush.done" 60
     check "a launch that brushes the memory cap with reclaimable cache completes unnamed" \
       'grep -q "brushed .* pages" "$tmp/logs/brush.out" && [ -e "$tmp/logs/brush.done" ] && [ ! -s "$tmp/logs/brush.err" ]' "$brush_got"
+    spin_got=$(cap_launch "$cap_impl" "$CAPSYS" spin -- timeout --signal=TERM --kill-after=1 30 python3 "$tmp/caller/brush-steady.py" 5 2>/dev/null)
+    spin_cpu=$(python3 "$tmp/caller/watcher-cpu.py" "$tmp/logs/spin.pid" 3 2>&1)
+    spin_s=${spin_cpu%% *}; spin_n=${spin_cpu##* }
+    marker "$tmp/logs/spin.done" 20
+    # A spinning watcher burns most of a core; one that sleeps between changes
+    # wakes at most a hundred times a second, the kernel's notify rate.
+    check "a cap watcher sleeps while its launch's memory.events changes: under a tenth of a core" \
+      '[ "$spin_n" -gt 0 ] 2>/dev/null && python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) < 0.3 else 1)" "$spin_s" && [ -e "$tmp/logs/spin.done" ] && [ ! -s "$tmp/logs/spin.err" ]' \
+      "cpu s, max events in 3 s: $spin_cpu; $spin_got"
     mkdir -p "$tmp/capshim2"
     for t in "$CAPSYS"/*; do
       [ -e "$t" ] || continue
