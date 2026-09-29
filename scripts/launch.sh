@@ -687,6 +687,35 @@ PY
   [ "$matrix_fail" -eq 0 ] \
     && ok "the veto reads error records whole and nothing else" \
     || fail "the veto misreads error records"
+  echo "marked at any depth: error keys nest, tool results stay excluded"
+  matrix_fail=0
+  check_pair "wall in result.error wakes" 1 provider-wall \
+    "model stream idle timeout" '{"result":{"error":"usage limits reached"}}'
+  check_pair "wall in payload.error wakes" 1 provider-wall \
+    "model stream idle timeout" '{"payload":{"error":{"message":"quota exceeded"}}}'
+  check_pair "wall in a twice-nested outcome:error wakes" 1 provider-wall \
+    "model stream idle timeout" '{"payload":{"inner":{"outcome":"error","detail":"quota exceeded"}}}'
+  check_pair "wall in a twice-nested item type:error wakes" 1 provider-wall \
+    "model stream idle timeout" '{"item":{"nested":{"type":"error","message":"quota exceeded"}}}'
+  check_pair "wall under error_message in a nested item wakes" 1 provider-wall \
+    "model stream idle timeout" '{"type":"item.completed","item":{"type":"other","error_message":"quota exceeded"}}'
+  check_pair "wall under an error key at depth five wakes" 1 provider-wall \
+    "model stream idle timeout" '{"a":{"b":{"c":{"d":{"error":"quota exceeded"}}}}}'
+  check_pair "wall in result.error nested in a claude tool_result resumes" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"tool_result","result":{"error":"usage limits reached"}}'
+  check_pair "wall in payload error nested in a pi tool subtree resumes" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"tool_execution_end","payload":{"error":{"message":"quota exceeded"}}}'
+  check_pair "wall in a tool_result nested in message content resumes" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"user","message":{"content":[{"type":"tool_result","result":{"error":"quota exceeded"}}]}}'
+  check_pair "null error at depth resumes" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"result":{"error":null},"note":"all good"}'
+  check_pair "false error at depth resumes" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"result":{"error":false},"note":"all good"}'
+  check_pair "empty error object at depth resumes" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"result":{"error":{}},"note":"all good"}'
+  [ "$matrix_fail" -eq 0 ] \
+    && ok "error keys mark at any depth and tool results stay excluded" \
+    || fail "depth marking misreads error keys or tool results"
   matrix_fail=0
   check_cell "1429 beside transient resumes" 0 "model stream idle timeout" \
     "input_tokens 1429: model stream idle timeout"
@@ -935,7 +964,8 @@ except OSError as e:
 # The veto reads message text only: the .err lines, non-JSON stream lines (stderr
 # chunks), and every string value of the ending's error records — the records the
 # adapter recognises as errors or terminal failures (harnesses.md names them per
-# harness). Inside an error record every value counts, under any key; JSON keys,
+# harness). Inside an error record every value counts, under any key, except
+# inside a tool-result subtree, which stays excluded whatever it nests; JSON keys,
 # field names and numeric payloads are structure, not text, and never count — a
 # "usage" key, a rate_limit key, a token count of 1429 and a UUID holding 429 are
 # not walls. Text stems match as substrings on separator-stripped text, so no
@@ -1028,34 +1058,76 @@ def vetoed(text):
         if code_re.search(re.sub(r"[\s_-]+", " ", text)):
             return True
     return False
+def norm_key(key):
+    return re.sub(r"[^a-z0-9]", "", str(key).lower())
+# A subtree is a tool's result when its type or name says so, or when it sits
+# under a tool-result key: claude's tool_result, pi's tool_execution_end, and
+# any other harness's tool-result shape the adapter identifies (harnesses.md
+# names them). A failed tool call's text is the tool's, not the provider's — a
+# failing gate prints cap and limit words all day — and a provider wall still
+# ends the turn through the harness's own error record. The exclusion holds at
+# every depth, for marking and for the veto read alike, whatever the subtree
+# nests. It is deliberately narrow: only tool_result and tool_execution_end as
+# a type, a name, or a key exclude — a payload_type of tool.result (muse
+# outcome:error payloads) is an error record, not a tool's.
+TOOL_RESULT_NAMES = {"toolresult", "toolexecutionend"}
+def is_tool_result(node):
+    if not isinstance(node, dict):
+        return False
+    for key, child in node.items():
+        if norm_key(key) in ("type", "name") and norm_key(child) in TOOL_RESULT_NAMES:
+            return True
+    return False
+# Error-indicating keys, normalised: a truthy value under one of these at any
+# depth marks the record — error_message rejoined from the round-8 allowlist,
+# since a wall under an error-message key is a wall in an error field. Only a
+# truthy value marks: null, false and empty values never do.
+ERROR_KEYS = {"error", "errors", "iserror", "errormessage"}
+# Classifier keys whose value names the record's kind: error, fail or exception
+# in one marks, at any depth.
+KIND_KEYS = ("type", "event", "kind", "payload_type", "subtype", "status")
 def values_vetoed(value):
     if isinstance(value, str):
         return vetoed(value)
     if isinstance(value, dict):
-        return any(values_vetoed(child) for child in value.values())
+        if is_tool_result(value):
+            return False
+        for key, child in value.items():
+            if norm_key(key) in TOOL_RESULT_NAMES and isinstance(child, (dict, list)):
+                continue
+            if values_vetoed(child):
+                return True
+        return False
     if isinstance(value, list):
         return any(values_vetoed(child) for child in value)
     return False
 def is_marked(event):
-    kind = " ".join(str(event.get(k, "")) for k in
-                    ("type", "event", "kind", "payload_type", "subtype", "status")).lower()
-    if "error" in kind or "fail" in kind or "exception" in kind:
-        return True
-    if bool(event.get("error")) or bool(event.get("errors")):
-        return True
-    if bool(event.get("is_error")):  # claude result errors; nested tool_result flags stay out
-        return True
-    item = event.get("item")
-    if isinstance(item, dict) and str(item.get("type", "")).lower() == "error":
-        return True  # codex nests the error item inside item.completed
-    payload = event.get("payload")
-    if isinstance(payload, dict) and str(payload.get("outcome", "")).lower() == "error":
-        return True  # muse outcome:error payloads
-    return False
-# Deliberately unmarked: tool-result errors (claude's nested tool_result.is_error,
-# pi's tool_execution_end.isError). A failed tool call's text is the tool's, not the
-# provider's — a failing gate prints cap and limit words all day — and a provider
-# wall still ends the turn through the harness's own error record.
+    found = False
+    def visit(node):
+        nonlocal found
+        if found or is_tool_result(node):
+            return
+        if isinstance(node, dict):
+            kind = " ".join(str(node.get(k, "")) for k in KIND_KEYS).lower()
+            if "error" in kind or "fail" in kind or "exception" in kind:
+                found = True
+                return
+            for key, child in node.items():
+                nk = norm_key(key)
+                if nk in TOOL_RESULT_NAMES and isinstance(child, (dict, list)):
+                    continue
+                if nk in ERROR_KEYS and bool(child):
+                    found = True
+                    return
+                if nk == "outcome" and str(child).lower() == "error":
+                    found = True
+                    return
+                visit(child)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child)
+    visit(event)
+    return found
 def note_record(value, marked):
     if isinstance(value, dict):
         for key, child in value.items():
@@ -1102,8 +1174,12 @@ if stream_path:
                     error_text.append(value)
                 return
             if isinstance(value, dict):
+                if is_tool_result(value):
+                    return
                 for key, child in value.items():
                     if str(key).lower() in PROMPT_KEYS:
+                        continue
+                    if norm_key(key) in TOOL_RESULT_NAMES and isinstance(child, (dict, list)):
                         continue
                     collect(child, str(key).lower())
             elif isinstance(value, list):

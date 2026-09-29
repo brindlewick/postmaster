@@ -334,14 +334,17 @@ watch_host() {  # watch_host <dispatch|resume> <name> <cwd> <dispatch-dir> <out>
       printf '%q ' "$@"; printf '\n'
     } > "$callfile"
     rm -f -- "$marker"
-    : > "$err"
+    # A dispatch truncates .err like host.sh run does; a resume appends to it.
+    # The watcher scopes its refusal check to lines past the pre-launch offset,
+    # so truncating here would make the stale-refusal control vacuous.
+    if [ "$append" = 0 ]; then : > "$err"; fi
     if [ "${POSTMASTER_WATCH_TEST_FAIL:-}" = "$kind" ]; then
-      printf 'host: simulated %s failure\n' "$kind" > "$err"
+      printf 'host: simulated %s failure\n' "$kind" >> "$err"
       : > "$marker"
       return 1
     fi
     if [ "${POSTMASTER_WATCH_TEST_REFUSE:-}" = 1 ]; then
-      printf 'launch: simulated refusal\n' > "$err"
+      printf 'launch: simulated refusal\n' >> "$err"
       : > "$marker"
       return 0
     fi
@@ -373,6 +376,14 @@ stream_lines() {  # stream_lines <events-file>: the stream's line count, countin
   awk 'END{print NR+0}' < "$1"
 }
 
+refusal_since() {  # refusal_since <err-file> <lines-before>: this attempt's launch: refusal line, if it wrote one
+  local file=$1 before=$2 total
+  [ -f "$file" ] || return 1
+  total=$(stream_lines "$file")
+  if [ "$total" -lt "$before" ]; then before=0; fi  # truncated since: everything in it is new
+  sed -n "$((before + 1)),\$ {/^launch:/{p;q;}}" "$file"
+}
+
 harvest_thread_id() {  # harvest_thread_id <events-file> <marker> <limit>: print the thread id once the stream carries it
   local out=$1 marker=$2 limit=$3 i=0 adapter_out adapter_rc
   while [ $i -lt "$limit" ]; do
@@ -391,13 +402,14 @@ prepare_dispatch() {  # prepare_dispatch <dispatch> <run> <current leg>: dispatc
   if ! list=$("$HERE/turnpikes.sh" legs "$d" 2>&1); then
     ACTION_ERROR="turnpikes.sh legs failed: $list"; return 1
   fi
-  # The manifest leg is validated before anything uses it: it must be an integer
-  # and one of the run's listed legs. Anything else is reported as corrupt and the
-  # run is skipped — never dispatched from, and never allowed near arithmetic that
-  # would abort the whole watcher. resume_transient needs no twin: its listed-leg
-  # string compare already returns on anything unlisted before any use.
-  case $current in ''|*[!0-9]*)
-    ACTION_ERROR="manifest leg '$current' is not an integer; the run is corrupt"; return 1 ;;
+  # The manifest leg is validated before anything uses it: it must be a canonical
+  # integer and one of the run's listed legs. Anything else is reported as corrupt
+  # and the run is skipped — never dispatched from, and never allowed near
+  # arithmetic that would abort the whole watcher. resume_transient twins the
+  # integer check: its awk listed-leg match is numeric, so "02" would match leg
+  # 2 there, and only the canonical check reports it corrupt on both paths.
+  case $current in ''|*[!0-9]*|0[0-9]*)
+    ACTION_ERROR="manifest leg '$current' is not a canonical integer; the run is corrupt"; return 1 ;;
   esac
   listed=$(printf '%s\n' "$list" | awk -v n="$current" '$1 == n { print $2; exit }')
   [ -n "$listed" ] || { ACTION_ERROR="manifest leg $current is not a listed leg; the run is corrupt"; return 1; }
@@ -468,6 +480,9 @@ resume_transient() {  # resume_transient <dispatch> <run> <leg number>
   local info name thread classifier classifier_rc count skip repo worktree host_name prompt stamp held_rc list leg
   ACTION_ERROR=""
   if ! list=$("$HERE/turnpikes.sh" legs "$d" 2>&1); then ACTION_ERROR="turnpikes.sh legs failed: $list"; return 2; fi
+  case $number in ''|*[!0-9]*|0[0-9]*)
+    ACTION_ERROR="manifest leg '$number' is not a canonical integer; the run is corrupt"; return 2 ;;
+  esac
   leg=$(printf '%s\n' "$list" | awk -v n="$number" '$1 == n { print $2; exit }')
   [ -n "$leg" ] || { ACTION_ERROR="turnpikes.sh legs has no entry for current leg $number"; return 2; }
   info=$(python3 - "$d/manifest.json" "$number" <<'PY'
@@ -514,8 +529,24 @@ PY
   if [ $held_rc -ne 1 ]; then ACTION_ERROR="cannot re-read the held list"; return 2; fi
   local launch_args=("$HERE/launch.sh" resume "$name" "$worktree" "$thread" "$prompt" --run "$d")
   [ "$name" != coachman ] || launch_args+=(--leg "$leg")
+  # The .err lines before this attempt: a refusal is scoped past them, the way
+  # the dispatch path harvests its own thread id. A host that started the
+  # process does not mean the launch took it.
+  local err_lines refusal
+  err_lines=$(stream_lines "$err")
   if ! watch_host resume "$host_name" "$worktree" "$d" "$out" "$err" "$d/.leg-$number-exited" 1 "${launch_args[@]}"; then
     ACTION_ERROR="host.sh could not resume leg $number; read $err"; return 2
+  fi
+  refusal=$(refusal_since "$err" "$err_lines" 2>/dev/null || true)
+  if [ -n "$refusal" ]; then
+    # A refused resume is a refusal, not a success: the count is restored, no
+    # success line is written, the refusal is logged, and the run is named in
+    # this look. A refusal is deterministic, never retried on its own.
+    if ! set_resume_count "$d" "$number" "$count" "$skip"; then ACTION_ERROR="cannot restore the remount count for leg $number"; return 2; fi
+    if ! "$HERE/log-action.sh" "$d" postmaster refuse coachman "leg $number, thread $thread, $refusal; the attempt was refused"; then
+      ACTION_ERROR="could not log refusal of leg $number"; return 2
+    fi
+    ACTION_ERROR="launch.sh refused the resume of leg $number ($refusal); read $err"; return 2
   fi
   if ! "$HERE/log-action.sh" "$d" postmaster resume coachman "leg $number, thread $thread, $classifier, resume $((count + 1)) of 3; the watcher took it"; then
     ACTION_ERROR="could not log resume of leg $number"; return 2
@@ -614,11 +645,12 @@ PY
       "dispatch failure") extra="POSTMASTER_WATCH_TEST_FAIL=dispatch" ;;
       "resume failure") extra="POSTMASTER_WATCH_TEST_FAIL=resume" ;;
       "dispatch refusal") extra="POSTMASTER_WATCH_TEST_REFUSE=1" ;;
+      "resume refusal") extra="POSTMASTER_WATCH_TEST_REFUSE=1" ;;
       "no thread") extra="POSTMASTER_WATCH_TEST_NO_THREAD=1" ;;
     esac
     out=$(env POSTMASTER_WATCH_TEST_MODE=1 POSTMASTER_WATCH_TEST_CALLS="$tmp/calls" $extra "$self" --timeout 0 "$root" 2>&1); rc=$?
   }
-  watch_stub_wait() {  # watch_stub_wait <root>: allows one more poll to observe an asynchronous launch refusal
+  watch_stub_wait() {  # watch_stub_wait <root>: several polls under a standing refusal
     out=$(env POSTMASTER_WATCH_TEST_MODE=1 POSTMASTER_WATCH_TEST_CALLS="$tmp/calls" \
       POSTMASTER_WATCH_TEST_REFUSE=1 "$self" --timeout 3 "$1" 2>&1); rc=$?
   }
@@ -880,6 +912,47 @@ PY
       && ok "corrupt manifest leg $bad is reported, never dispatched, never fatal" \
       || fail "corrupt manifest leg $bad is reported, never dispatched, never fatal"
   done
+  echo "leading-zero legs: reported corrupt on the dispatch path, never dispatched from, never fatal"
+  for bad in 02 08; do
+    root="$tmp/auto-corrupt-$bad"; auto_run "$root" badleg 1 ""; handoff "$root/badleg" "$bad"
+    python3 - "$root/badleg/manifest.json" "$bad" <<'PY'
+import json, sys
+p = sys.argv[1]
+m = json.load(open(p))
+m["leg"] = sys.argv[2]
+json.dump(m, open(p, "w"), indent=2)
+PY
+    : > "$root/badleg/.leg-$bad-done"; : > "$root/badleg/.leg-$bad-exited"
+    mkrun "$root" good review 2 .escalation-ready
+    watch_stub "$root"
+    still_bad=$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["leg"]))' "$root/badleg/manifest.json")
+    launched=$(find "$tmp/calls" -name 'dispatch-badleg-*' | head -1)
+    [ $rc -eq 0 ] && has "needs badleg DISPATCH" && has "not a canonical integer" \
+      && has "needs good RULE" && [ "$still_bad" = "\"$bad\"" ] && [ -z "$launched" ] \
+      && ok "leading-zero leg $bad is reported corrupt, never dispatched, never fatal" \
+      || fail "leading-zero leg $bad is reported corrupt, never dispatched, never fatal"
+  done
+  echo "leading-zero legs: reported corrupt on the remount path, never resumed, never fatal"
+  for bad in 02 08; do
+    root="$tmp/auto-corrupt-remount-$bad"; auto_run "$root" badremount 1 "thread-badremount"
+    python3 - "$root/badremount/manifest.json" "$bad" <<'PY'
+import json, sys
+p = sys.argv[1]
+m = json.load(open(p))
+m["leg"] = sys.argv[2]
+json.dump(m, open(p, "w"), indent=2)
+PY
+    printf '%s\n' 'model stream idle timeout' > "$root/badremount/logs/coachman-leg-$bad.err"
+    : > "$root/badremount/logs/coachman-leg-$bad-events.jsonl"; : > "$root/badremount/.leg-$bad-exited"
+    mkrun "$root" good review 2 .escalation-ready
+    watch_stub "$root"
+    launched=$(find "$tmp/calls" -name 'resume-badremount-*' | head -1)
+    [ $rc -eq 0 ] && has "needs badremount REMOUNT" && has "not a canonical integer" \
+      && has "needs good RULE" && [ -z "$launched" ] \
+      && [ ! -e "$root/badremount/watcher.json" ] \
+      && ok "leading-zero leg $bad on a remount is reported corrupt, never resumed, never fatal" \
+      || fail "leading-zero leg $bad on a remount is reported corrupt, never resumed, never fatal"
+  done
 
   root="$tmp/auto-resume"; auto_run "$root" resume 1 "prior-thread"
   printf '%s\n' 'Model stream idle timeout' > "$root/resume/logs/coachman-leg-1.err"
@@ -1069,12 +1142,36 @@ PY
   root="$tmp/wake-resume-refusal"; auto_run "$root" resume-refusal 1 "thread-resume-refusal"
   printf '%s\n' 'model stream idle timeout' > "$root/resume-refusal/logs/coachman-leg-1.err"
   : > "$root/resume-refusal/logs/coachman-leg-1-events.jsonl"; : > "$root/resume-refusal/.leg-1-exited"
-  watch_stub_wait "$root"
+  watch_stub "$root" "resume refusal"
+  refused_count=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["resume_attempts"]["1"])' "$root/resume-refusal/watcher.json")
   [ $rc -eq 0 ] && has "needs resume-refusal REMOUNT" \
-    && [ "$(action_count "$root/resume-refusal" resume)" -eq 1 ] \
-    && [ "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["resume_attempts"]["1"])' "$root/resume-refusal/watcher.json")" = 1 ] \
-    && ok "a resumed harness refusal wakes the postmaster without another automatic resume" \
-    || fail "a resumed harness refusal wakes the postmaster without another automatic resume"
+    && has "launch: simulated refusal" \
+    && [ "$(action_count "$root/resume-refusal" refuse)" -eq 1 ] \
+    && [ "$(action_count "$root/resume-refusal" resume)" -eq 0 ] \
+    && ! grep -q 'watcher took it' "$root/resume-refusal/actions.jsonl" \
+    && [ "$refused_count" = 0 ] \
+    && ok "a refused resume wakes in the same look with a refusal record, the count unchanged, and no success line" \
+    || fail "a refused resume wakes in the same look with a refusal record, the count unchanged, and no success line"
+  root="$tmp/wake-resume-stale"; auto_run "$root" stale-refusal 1 "thread-stale"
+  printf '%s\n' 'model stream idle timeout' 'launch: simulated refusal' 'model stream idle timeout' > "$root/stale-refusal/logs/coachman-leg-1.err"
+  : > "$root/stale-refusal/logs/coachman-leg-1-events.jsonl"; : > "$root/stale-refusal/.leg-1-exited"
+  watch_stub "$root"
+  [ $rc -eq 3 ] && [ "$(action_count "$root/stale-refusal" resume)" -eq 1 ] \
+    && grep -qF 'resume 1 of 3' "$root/stale-refusal/actions.jsonl" \
+    && [ "$(action_count "$root/stale-refusal" refuse)" -eq 0 ] \
+    && grep -qF 'launch: simulated refusal' "$root/stale-refusal/logs/coachman-leg-1.err" \
+    && ok "a resume beside a stale refusal line from an earlier attempt still logs success" \
+    || fail "a resume beside a stale refusal line from an earlier attempt still logs success (exit $rc)"
+  root="$tmp/wake-resume-refusal-many"; auto_run "$root" refusal-many 1 "thread-refusal-many"
+  printf '%s\n' 'model stream idle timeout' > "$root/refusal-many/logs/coachman-leg-1.err"
+  : > "$root/refusal-many/logs/coachman-leg-1-events.jsonl"; : > "$root/refusal-many/.leg-1-exited"
+  watch_stub_wait "$root"
+  [ $rc -eq 0 ] && has "needs refusal-many REMOUNT" \
+    && [ "$(action_count "$root/refusal-many" refuse)" -ge 1 ] \
+    && [ "$(action_count "$root/refusal-many" resume)" -eq 0 ] \
+    && [ "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["resume_attempts"]["1"])' "$root/refusal-many/watcher.json")" = 0 ] \
+    && ok "a standing refusal is named every look without spending a remount" \
+    || fail "a standing refusal is named every look without spending a remount"
   root="$tmp/wake-log"; auto_run "$root" log-failure 1 ""; handoff "$root/log-failure" 1
   : > "$root/log-failure/.leg-1-done"; : > "$root/log-failure/.leg-1-exited"
   rm -- "$root/log-failure/actions.jsonl"; mkdir "$root/log-failure/actions.jsonl"

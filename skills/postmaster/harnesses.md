@@ -67,17 +67,18 @@ stand beside the corpus as fixtures that must resume. `try again later` and `ser
 is busy` carry no stem on purpose: that is transient-overload language, and resuming
 on it is right.
 
-An error record is one the adapter recognises as an error or a terminal failure:
-the generic rule — `error`, `fail` or `exception` in its type, event, kind,
-payload type, subtype or status, or a truthy `error` or `errors` field — plus a
-top-level `is_error`, a nested `item.type` of `error`, and a nested `payload`
-with `outcome` `error`. The `.err` lines and non-JSON stream lines are stderr
-chunks and always count. Per harness, as observed:
+An error record is one the adapter marks: an error-indicating key at any
+depth — `error`, `fail` or `exception` in a type, event, kind, payload
+type, subtype or status value, a truthy `error`, `errors`, `is_error`
+or `error_message` field, or an `outcome` of `error` — wherever in the
+record it sits. Only a truthy value marks: null, false and empty values
+never do. The `.err` lines and non-JSON stream lines are stderr chunks
+and always count. Per harness, as observed:
 
-- codex: the generic rule plus nested `item.type: error` (attested in
-  `raw/trials/codex-resume-forms/`). Usage-bearing `turn.completed` records
-  are not error records.
-- claude: the generic rule plus top-level `is_error` on `result` records.
+- codex: the generic rule, with nested `item.type: error` attested in
+  `raw/trials/codex-resume-forms/`. Usage-bearing `turn.completed`
+  records are not error records.
+- claude: the generic rule plus `is_error` on `result` records.
   Usage-bearing assistant messages are not error records.
 - mimo: the generic rule only; no mimo-specific error shape is attested.
   Unmarked text parts are ordinary messages, so those streams classify
@@ -87,12 +88,17 @@ chunks and always count. Per harness, as observed:
 - pi: the generic rule only (see the exclusion below).
 - grok, agy: the generic rule; unobserved.
 
-Deliberately excluded: tool-result errors — claude's nested
-`tool_result.is_error` and pi's `tool_execution_end.isError`. A failed
-tool call's text is the tool's, not the provider's: a coachman's failing
+Deliberately excluded, at every depth: tool-result subtrees — a record
+or subtree whose type or name is `tool_result` or `tool_execution_end`,
+or that sits under one of those keys. That covers claude's nested
+`tool_result` records and pi's `tool_execution_end` records, and any
+other harness's tool-result shape the adapter identifies. A failed tool
+call's text is the tool's, not the provider's: a coachman's failing
 gate prints cap and limit words all the time, and a provider wall still
 ends the turn through the harness's own error record, where the veto
-sees it.
+sees it. The exclusion is narrow on purpose: a `payload_type` of
+`tool.result` (muse `outcome: error` payloads) is an error record, not
+a tool's.
 
 Where a record carries a status code or an error type, values come in three classes
 over every post-skip line: the known-transient set (`502`, `503`, `504`, `529`,
