@@ -648,6 +648,27 @@ PY
   [ $rc -eq 1 ] && [ "$out" = provider-wall ] \
     && ok "the same claude stream with a wall message wakes" \
     || fail "the same claude stream with a wall message wakes (exit $rc, $out)"
+  echo "error records: every value counts inside one, nothing outside one vetoes"
+  matrix_fail=0
+  check_pair "wall under msg in an error record wakes" 1 provider-wall \
+    "model stream idle timeout" '{"type":"error","msg":"quota exceeded"}'
+  check_pair "wall under chunk in an error record wakes" 1 provider-wall \
+    "model stream idle timeout" '{"type":"error","chunk":"command failed: quota exceeded"}'
+  check_pair "wall under output in an error record wakes" 1 provider-wall \
+    "model stream idle timeout" '{"type":"error","output":"402 Payment Required"}'
+  check_pair "wall under body in an error record wakes" 1 provider-wall \
+    "model stream idle timeout" '{"type":"error","body":"budget exhausted"}'
+  check_pair "wall under error_message in an error record wakes" 1 provider-wall \
+    "model stream idle timeout" '{"type":"error","error_message":"usage limit reached"}'
+  check_pair "a bare prompt string in an error record wakes" 1 provider-wall \
+    "model stream idle timeout" '{"type":"error","message":"model stream idle timeout","prompt":"check quota"}'
+  check_pair "wall words in an ordinary assistant message resume" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"assistant","message":"quota exceeded for this key"}'
+  check_pair "wall words in tool output resume" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"assistant","message":{"content":[{"type":"tool_result","text":"quota exceeded"}]}}'
+  [ "$matrix_fail" -eq 0 ] \
+    && ok "the veto reads error records whole and nothing else" \
+    || fail "the veto misreads error records"
   matrix_fail=0
   check_cell "1429 beside transient resumes" 0 "model stream idle timeout" \
     "input_tokens 1429: model stream idle timeout"
@@ -893,14 +914,19 @@ except OSError as e:
 # wall is an automatic remount against a wall. The transient set below is closed;
 # the veto set is token stems (argv, printed by `launch.sh wall-tokens`).
 #
-# The veto reads message text only: the .err lines, non-JSON stream lines, and the
-# string values under message, code, error-name and record-shape keys in every
-# post-skip parsed event. JSON keys, field names and numeric payloads are structure,
-# not text, and never count — a "usage" key, a rate_limit key, a token count of 1429
-# and a UUID holding 429 are not walls. Text stems match as substrings on
-# separator-stripped text, so no spelling, span or boundary can hide a wall; digit
-# stems count only status-shaped, as whole numbers in text. Prompt values veto in the
-# safe direction, as since round 6; prompt text can never authorize a resume, below.
+# The veto reads message text only: the .err lines, non-JSON stream lines (stderr
+# chunks), and every string value of the ending's error records — the records the
+# adapter recognises as errors or terminal failures (harnesses.md names them per
+# harness). Inside an error record every value counts, under any key; JSON keys,
+# field names and numeric payloads are structure, not text, and never count — a
+# "usage" key, a rate_limit key, a token count of 1429 and a UUID holding 429 are
+# not walls. Text stems match as substrings on separator-stripped text, so no
+# spelling, span or boundary can hide a wall; digit stems count only
+# status-shaped, as whole numbers in text. An assistant's ordinary messages and
+# tool output are not error records and veto nothing: agents write limit, usage,
+# quota and exceed in working prose all day, and a veto over those would leave
+# auto-resume never firing. Prompt values inside error records veto in the safe
+# direction, as since round 6; prompt text can never authorize a resume, below.
 # The first skip-lines lines are an earlier launch's: a resumed stream keeps its history
 # while .err holds only the current launch, so without the skip an old transient error
 # would classify a later unrelated failure as transient, and an old wall would veto a
@@ -925,7 +951,6 @@ CODE_KEYS = {"status", "statuscode", "code", "errorcode", "errcode", "httpstatus
 NAME_KEYS = {"errortype", "errorname"}
 SHAPE_KEYS = {"type", "name"}
 MESSAGE_KEYS = {"error", "errors", "message", "detail", "reason", "description", "text"}
-SCAN_KEYS = MESSAGE_KEYS | CODE_KEYS | NAME_KEYS | SHAPE_KEYS
 PROMPT_KEYS = {"user", "prompt", "input", "transcript", "request"}
 TRANSIENT_CODES = {502, 503, 504, 529}
 WALL_CODES = {int(t) for t in digit_stems}
@@ -985,14 +1010,13 @@ def vetoed(text):
         if code_re.search(re.sub(r"[\s_-]+", " ", text)):
             return True
     return False
-def values_vetoed(value, parent=""):
+def values_vetoed(value):
     if isinstance(value, str):
-        return parent in SCAN_KEYS and vetoed(value)
+        return vetoed(value)
     if isinstance(value, dict):
-        return any(values_vetoed(child, re.sub(r"[^a-z0-9]", "", str(key).lower()))
-                   for key, child in value.items())
+        return any(values_vetoed(child) for child in value.values())
     if isinstance(value, list):
-        return any(values_vetoed(child, parent) for child in value)
+        return any(values_vetoed(child) for child in value)
     return False
 def is_marked(event):
     kind = " ".join(str(event.get(k, "")) for k in
@@ -1032,7 +1056,7 @@ if stream_path:
         if not isinstance(event, dict):
             continue
         marked = is_marked(event)
-        if not veto_hit and values_vetoed(event):
+        if marked and not veto_hit and values_vetoed(event):
             veto_hit = True
         note_record(event, marked)
         window.append(event)

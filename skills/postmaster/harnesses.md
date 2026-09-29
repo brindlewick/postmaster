@@ -49,8 +49,8 @@ postmaster. A wall is **never** transient: any token stem of quota, limit, exhau
 exceed, throttle, billing, budget, credit, payment, usage, slow, quick or too many
 vetoes the resume wherever it appears in what the ending says, in any spelling and at
 any distance — there is no span limit and no word boundary to hide behind. What the
-ending says is its message text: the `.err` lines and the string values under message,
-code, error-name and record-shape keys in every post-skip parsed event. JSON keys,
+ending says is its message text: the `.err` lines, non-JSON stream lines, and every
+string value of its error records, under any key. JSON keys,
 field names and numeric payloads are structure, not text, and never count: a `usage`
 key, a `rate_limit` key, a token count of 1429 and a UUID holding 429 are not walls.
 The codes `429` and `402` count only status-shaped, as whole numbers in text or as the
@@ -64,6 +64,19 @@ stops vetoing fails loudly. Usage-bearing codex and claude streams from real run
 stand beside the corpus as fixtures that must resume. `try again later` and `server
 is busy` carry no stem on purpose: that is transient-overload language, and resuming
 on it is right.
+
+An error record is one the adapter recognises as an error or a terminal failure:
+`error`, `fail` or `exception` in its type, event, kind, payload type, subtype or
+status, or a truthy `error` or `errors` field — plus the `.err` lines and non-JSON
+stream lines, which are stderr chunks. Per harness, as observed:
+
+- codex: error items under the generic rule; no error-item shape is attested
+  beyond it, and usage-bearing `turn.completed` records are not error records.
+- claude: error events under the generic rule; observed, `run.terminal.failed`
+  with its `reason`. Usage-bearing assistant messages are not error records.
+- mimo: the generic rule; observed error prose arrives in text parts, which
+  carry no error marking, so those streams classify from the `.err` text.
+- grok, pi, agy: the generic rule; unobserved.
 
 Where a record carries a status code or an error type, values come in three classes
 over every post-skip line: the known-transient set (`502`, `503`, `504`, `529`,
