@@ -388,17 +388,22 @@ missed.
 2. **Follow the landing route in the waybill.** First ask whether the ticket already landed:
    `<tool>/scripts/landing.sh already-landed --repo <repo> --default <branch> --ticket
    <the ticket ref> --base <the manifest's base> --card-head <the card's final HEAD>`, adding
-   `--local-ticket <ticket-branch>` on the pull-request route and `--pr-merge <sha>` with the
-   merge commit when the provider reports a merged pull request for the ticket branch, and
-   omitting each otherwise. On `landed`, skip landing
+   `--local-ticket <ticket-branch>` on the pull-request route, and `--pr-merge <sha>
+   --pr-head <sha>` with the merge commit and the head it merged at when the provider
+   reports a merged pull request for the ticket branch (for GitHub, `gh pr view <n> --json
+   state,mergeCommit,headRefOid`, taking the merge oid and the head oid where `state` is
+   `MERGED`), omitting each otherwise. On `landed`, skip landing
    and close instead: log `merge` noting the branch was already merged, move the ticket to
    done,
    logging `ticket-state`, remove `.waiting-on-user` and `.card-ready` (either may already
    be gone), set the stage with `<tool>/scripts/stage.sh <dispatch> shipped postmaster`,
    and run current Stage G. On `unpushed`, the ticket branch is at the card's HEAD and only
    the remote is behind: push the ticket branch, re-fetch, and ask `already-landed` again;
-   a push that fails means the remote moved, so resume that last leg with that discrepancy
-   instead. On `re-verify`, the ticket ref and the card's HEAD differ: remove
+   a push rejected because the remote contains work the pusher lacks (`[rejected]`, fetch
+   first or non-fast-forward) means the remote moved, so resume that last leg with that
+   discrepancy instead; any other push failure stops the stage like an input fault —
+   fix the inputs and re-run. On `re-verify`, the ticket ref and the card's HEAD differ,
+   or a reported merge named another head: remove
    `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`, then resume that
    last leg with the exact discrepancy and wait for its corrected card. Otherwise:
    - For `landing: pull-request`, ask whether the branch holds anything to land:
@@ -407,7 +412,8 @@ missed.
      `.waiting-on-user` and wait; on the user's word that there is
      nothing to land, close as the already-merged paragraph above does, except the `merge`
      line notes the user's word that there is nothing to land instead of an already-merged
-     branch. On `land`, push the
+     branch. A squash merge the provider did not report answers `land`: the pull request
+     shows the person what is already there. On `land`, push the
      ticket branch; where an open pull request already names it, adopt it instead of
      opening another. Otherwise open the pull request against the default branch
      (`gh pr create` on a GitHub project). Include the card, final checks, diff stat,
@@ -430,7 +436,8 @@ missed.
    - An unknown landing route is a dispatch fault to resolve before this point. Do not infer
      it from the presence of a remote.
 3. **When the user's word that they merged comes**, ask `already-landed` as in step 2, with
-   `--pr-merge` when the provider reports the merged pull request. On `landed`, remove
+   `--pr-merge --pr-head` from the report when the provider reports the merged pull request.
+   On `landed`, remove
    `.waiting-on-user` and `.card-ready`, log `merge`, move the ticket to done, logging
    `ticket-state`, and set the stage with `<tool>/scripts/stage.sh <dispatch> shipped
    postmaster`. On `unpushed`, push the ticket branch, re-fetch, and ask again, as in step 2.

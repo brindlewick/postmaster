@@ -4,26 +4,23 @@
 # judge, such as putting a non-pass to the user.
 #
 #   landing.sh already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha>
-#       --card-head <sha> [--local-ticket <branch>] [--pr-merge <sha>]
+#       --card-head <sha> [--local-ticket <branch>] [--pr-merge <sha> --pr-head <sha>]
 #       whether the ticket branch already landed. `landed` when the default branch contains
-#       the ticket's HEAD and that HEAD is not the run's BASE, or when --pr-merge names the
-#       merge commit of a provider-reported merged pull request where the ticket changed
-#       paths since BASE, the merge is on the default branch, and it contains the card's
-#       final HEAD: by ancestry, or, for a squash or rebase merge, by content, with every
-#       added and removed line of the ticket's diff on each path it changed present in the
-#       merge's diff on that path, counting duplicates, and the file modes at card
-#       and merge agree on every changed path present in both (paths with no text
-#       lines must agree between card and merge instead). `unpushed` when --local-ticket
-#       names the local branch, it is at the card's HEAD, and the ticket ref is behind
-#       that HEAD: push, re-fetch, and ask again. `re-verify`, never `landed`, when the
-#       ticket ref and the card's HEAD otherwise differ. Otherwise `not-landed`.
+#       the ticket's HEAD and that HEAD is not the run's BASE, or when the provider reports
+#       the pull request merged at the card's HEAD: --pr-merge names the merge commit it
+#       reports, --pr-head the head it reports the pull request merged at, the merge is on
+#       the default branch, and the reported head equals the card's HEAD. No content is
+#       compared: a squash or rebase merge counts only as one the provider reports, with
+#       both SHAs from its report, never from the local ticket ref, so a pruned or deleted
+#       branch still answers. `unpushed` when --local-ticket names the local branch, it is
+#       at the card's HEAD, and the ticket ref is behind that HEAD: push, re-fetch, and ask
+#       again. `re-verify`, never `landed`, when the ticket ref and the card's HEAD
+#       otherwise differ, or when a reported merge names another head. Otherwise `not-landed`.
 #   landing.sh anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha>
 #       whether the branch holds anything to land. `nothing-to-land` when the ticket's diff
-#       against BASE is empty (its HEAD is BASE, whatever the default branch holds), when
-#       the default branch contains its HEAD, or when every line-change of its diff is in
-#       the tip's diff by the content rule, as after a squash or rebase merge the provider
-#       did not report: a later independent edit to the same file does not hide landed
-#       content. Otherwise `land`.
+#       against BASE is empty (its HEAD is BASE, whatever the default branch holds), or when
+#       the default branch contains its HEAD. Otherwise `land`: a squash merge the provider
+#       did not report is out of scope, and the pull request shows a person what landed.
 #   landing.sh fresh --repo <repo> --default <branch> --ticket <ref>
 #       --dispatch <dispatch> --wt <synthesis-wt>
 #       whether the ticket is fresh to land. Prints `fresh` when the ticket branch contains
@@ -83,12 +80,11 @@
 set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
-usage() { echo "usage: landing.sh already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> --card-head <sha> [--local-ticket <branch>] [--pr-merge <sha>] | anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha> | fresh --repo <repo> --default <branch> --ticket <ref> --dispatch <dispatch> --wt <synthesis-wt> | results <dispatch> <synthesis-wt> | card-block <dispatch> <synthesis-wt> <checkpoint> | card-results <dispatch> <synthesis-wt> <checkpoint> <card> | card-findings <dispatch> <synthesis-wt> <checkpoint> <card> | card-open <checkpoint> | journey <dispatch> <synthesis-wt> <waybill> | --self-test" >&2; exit 1; }
+usage() { echo "usage: landing.sh already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> --card-head <sha> [--local-ticket <branch>] [--pr-merge <sha> --pr-head <sha>] | anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha> | fresh --repo <repo> --default <branch> --ticket <ref> --dispatch <dispatch> --wt <synthesis-wt> | results <dispatch> <synthesis-wt> | card-block <dispatch> <synthesis-wt> <checkpoint> | card-results <dispatch> <synthesis-wt> <checkpoint> <card> | card-findings <dispatch> <synthesis-wt> <checkpoint> <card> | card-open <checkpoint> | journey <dispatch> <synthesis-wt> <waybill> | --self-test" >&2; exit 1; }
 
 run_py() {  # run_py <subcommand> <args...>; VERIFY and TICKET_CHECK name the scripts beside this one
   VERIFY="$HERE/verify.sh" TICKET_CHECK="$HERE/ticket-check.sh" python3 - "$@" <<'PY'
 import json, os, re, subprocess, sys
-from collections import Counter
 
 VERIFY = os.environ["VERIFY"]
 TICKET_CHECK = os.environ["TICKET_CHECK"]
@@ -96,9 +92,9 @@ TICKET_CHECK = os.environ["TICKET_CHECK"]
 def die(msg):
     print("landing: " + msg, file=sys.stderr); sys.exit(1)
 
-def git(repo, *args):
-    r = subprocess.run(["git", "-C", repo] + list(args), capture_output=True, text=True)
-    return r.returncode, r.stdout.strip()
+def git(repo, *args):  # bytes in, surrogate-escaped: git output is not always UTF-8
+    r = subprocess.run(["git", "-C", repo] + list(args), capture_output=True)
+    return r.returncode, r.stdout.decode("utf-8", "surrogateescape").strip()
 
 def commit(repo, ref, what):
     rc, out = git(repo, "rev-parse", "--verify", "--quiet", ref + "^{commit}")
@@ -114,15 +110,16 @@ def contains(repo, maybe_ancestor, ref):
 
 def changed(repo, old, new):  # the paths whose content differs, by NUL-split name list
     # Rename detection stays off: it names a rename by its new path one way and its old
-    # path the other, and the disjointness tests below compare both directions. Submodule
-    # differences are never ignored: the argv flag beats even per-submodule ignore config,
-    # where -c would lose to it. A bumped gitlink is a path the ticket changed.
+    # path the other. Submodule differences are never ignored: the argv flag beats even
+    # per-submodule ignore config, where -c would lose to it. A bumped gitlink is a path
+    # the ticket changed.
     r = subprocess.run(["git", "-C", repo, "diff", "--no-renames", "--ignore-submodules=none",
                         "--name-only", "-z", old, new],
-                       capture_output=True, text=True)
+                       capture_output=True)
     if r.returncode != 0:
-        die("cannot diff %s against %s: %s" % (old, new, r.stderr.strip()))
-    return set(p for p in r.stdout.split("\0") if p)
+        die("cannot diff %s against %s: %s"
+            % (old, new, r.stderr.decode("utf-8", "surrogateescape").strip()))
+    return set(p for p in r.stdout.decode("utf-8", "surrogateescape").split("\0") if p)
 
 def load(path):
     try:
@@ -218,64 +215,6 @@ def render_block(dispatch, wt, checkpoint):  # the card's checked sections, byte
                             for sev, fid, state in states if state == "user-applied") or "none")
     return "## Checks\n\n%s\n\n## Open findings\n\n%s\n\n## Not re-reviewed\n\n%s\n" % tuple(bodies)
 
-def diff_lines(repo, a, b, path):  # (added, removed) line multisets, -U0, no drivers
-    r = subprocess.run(["git", "-C", repo, "diff", "-U0", "--no-color", "--no-textconv",
-                        "--no-ext-diff", a, b, "--", path], capture_output=True)
-    if r.returncode != 0:
-        die("git diff %s %s failed" % (a[:12], b[:12]))
-    out = r.stdout.decode("utf-8", "surrogateescape")  # bytes: text mode would
-    # translate \r\n away, and strict would die on latin-1; surrogates keep bytes distinct
-    added, removed = Counter(), Counter()
-    in_hunk = False  # only hunk lines count: a header test cannot tell +++ b/f
-    last = None  # the counted line a no-newline marker attaches to, if any
-    for line in out.split("\n"):  # LF only: git's sole line break; a \r stays content
-        if line.startswith("@@"):
-            in_hunk, last = True, None
-            continue
-        if line.startswith("diff --git"):
-            in_hunk, last = False, None
-            continue
-        if not in_hunk:
-            continue
-        if line.startswith("\\"):  # the marker joins its line: newline presence compares
-            if last is not None:
-                which, text = last
-                which[text] -= 1
-                which[text + "\0nonl"] += 1
-                last = None
-            continue
-        if line.startswith("+"):
-            added[line[1:]] += 1
-            last = (added, line[1:])
-        elif line.startswith("-"):
-            removed[line[1:]] += 1
-            last = (removed, line[1:])
-        else:
-            last = None
-    return added, removed
-
-def file_mode(repo, commit, path):  # the mode bits, or None when the path is absent
-    rc, out = git(repo, "ls-tree", commit, "--", path)
-    if rc != 0 or not out:
-        return None
-    return out.split()[0]
-
-def content_landed(repo, base, card, merge, paths):  # every ticket line-change is in the merge
-    changed_cm = changed(repo, card, merge)
-    for p in sorted(paths):
-        a_c, r_c = diff_lines(repo, base, card, p)
-        if not a_c and not r_c:  # binary, mode-only: the trees must agree instead
-            if p in changed_cm:
-                return False
-            continue
-        a_m, r_m = diff_lines(repo, base, merge, p)
-        if a_c - a_m or r_c - r_m:  # multisets, terminator-exact; order is not seen
-            return False
-        mc, mm = file_mode(repo, card, p), file_mode(repo, merge, p)
-        if mc is not None and mm is not None and mc != mm:
-            return False
-    return True
-
 def check_block(dispatch, wt, checkpoint, card):  # match iff the card holds the block once
     text = load(card)
     refuse_comments(text, "card")
@@ -290,36 +229,44 @@ mode = sys.argv[1]
 
 if mode == "already-landed":
     o = sys.argv[2:]
-    if len(o) not in (10, 12, 14) or o[0] != "--repo" or o[2] != "--default" \
+    if len(o) not in (10, 12, 14, 16) or o[0] != "--repo" or o[2] != "--default" \
             or o[4] != "--ticket" or o[6] != "--base" or o[8] != "--card-head":
         print("usage: landing.sh already-landed --repo <repo> --default <branch> "
               "--ticket <ref> --base <sha> --card-head <sha> [--local-ticket <branch>] "
-              "[--pr-merge <sha>]", file=sys.stderr); sys.exit(1)
-    i, local, pr_merge = 10, None, None
+              "[--pr-merge <sha> --pr-head <sha>]", file=sys.stderr); sys.exit(1)
+    i, local, pr_merge, pr_head = 10, None, None, None
     if len(o) > i and o[i] == "--local-ticket":
         local = o[i + 1]; i += 2
     if len(o) > i and o[i] == "--pr-merge":
-        pr_merge = o[i + 1]; i += 2
+        if len(o) <= i + 3 or o[i + 2] != "--pr-head":
+            print("usage: landing.sh already-landed --repo <repo> --default <branch> "
+                  "--ticket <ref> --base <sha> --card-head <sha> [--local-ticket <branch>] "
+                  "[--pr-merge <sha> --pr-head <sha>]", file=sys.stderr); sys.exit(1)
+        pr_merge, pr_head = o[i + 1], o[i + 3]; i += 4
     if i != len(o):
         print("usage: landing.sh already-landed --repo <repo> --default <branch> "
               "--ticket <ref> --base <sha> --card-head <sha> [--local-ticket <branch>] "
-              "[--pr-merge <sha>]", file=sys.stderr); sys.exit(1)
+              "[--pr-merge <sha> --pr-head <sha>]", file=sys.stderr); sys.exit(1)
     repo, default, ticket, base = o[1], o[3], o[5], commit(o[1], o[7], "--base")
-    head = commit(repo, ticket, "--ticket")
     card = commit(repo, o[9], "--card-head")
     commit(repo, default, "--default")
-    if head != card:
+    rc, out = git(repo, "rev-parse", "--verify", "--quiet", ticket + "^{commit}")
+    head = out if rc == 0 and out else None
+    if head is None and pr_merge is None:  # a pruned branch with a report still answers
+        die("--ticket does not resolve to a commit: %s" % ticket)
+    if head is not None and head != card:
         if local is not None and commit(repo, local, "--local-ticket") == card \
                 and contains(repo, head, card):
             print("unpushed"); sys.exit(0)
         print("re-verify"); sys.exit(0)
-    landed = contains(repo, head, default) and head != base
-    if not landed and pr_merge is not None:
+    if pr_merge is not None:  # the provider's report decides, never the local ref
         merge = commit(repo, pr_merge, "--pr-merge")
-        paths = changed(repo, base, card)
-        landed = contains(repo, merge, default) and bool(paths) and (
-            contains(repo, card, merge) or content_landed(repo, base, card, merge, paths))
-    print("landed" if landed else "not-landed"); sys.exit(0)
+        if commit(repo, pr_head, "--pr-head") != card:
+            print("re-verify"); sys.exit(0)
+        print("landed" if contains(repo, merge, default) else "not-landed"); sys.exit(0)
+    if head is not None and contains(repo, head, default) and head != base:
+        print("landed"); sys.exit(0)
+    print("not-landed"); sys.exit(0)
 
 if mode == "anything-to-land":
     o = sys.argv[2:]
@@ -329,10 +276,8 @@ if mode == "anything-to-land":
     repo, default, ticket = o[1], o[3], o[5]
     base = commit(repo, o[7], "--base")
     head = commit(repo, ticket, "--ticket")
-    tip = commit(repo, default, "--default")
-    paths = changed(repo, base, head)
-    if not paths or contains(repo, head, default) \
-            or content_landed(repo, base, head, tip, paths):
+    commit(repo, default, "--default")
+    if not changed(repo, base, head) or contains(repo, head, default):
         print("nothing-to-land")
     else:
         print("land")
@@ -515,209 +460,17 @@ expect "a --no-ff merge is landed" 0 "landed"
 out=$("$SELF" already-landed --repo "$R" --default main --ticket sq --base "$BASE" --card-head "$(git -C "$R" rev-parse sq)" 2>&1); rc=$?
 expect "a squash merge the provider did not report is not landed" 0 "not-landed"
 SQM=$(git -C "$R" rev-parse main)
-out=$("$SELF" already-landed --repo "$R" --default main --ticket sq --base "$BASE" --card-head "$(git -C "$R" rev-parse sq)" --pr-merge "$SQM" 2>&1); rc=$?
-expect "a squash merge counts when its merge has the card HEAD's tree" 0 "landed"
-SS=$tmp/ss; mkrepo "$SS"
-printf 'line1\nline2\nline3\n' > "$SS/f"; git -C "$SS" add f && git -C "$SS" commit -qm A || exit 1
-SSB=$(git -C "$SS" rev-parse HEAD)
-git -C "$SS" checkout -qb ticket || exit 1
-printf 'TICKET1\nline2\nline3\n' > "$SS/f"; git -C "$SS" commit -qam T || exit 1
-SSH=$(git -C "$SS" rev-parse HEAD)
-git -C "$SS" checkout -q main || exit 1
-printf 'line1\nline2\nOTHER3\n' > "$SS/f"; git -C "$SS" commit -qam O || exit 1
-git -C "$SS" merge -q --squash ticket || exit 1; git -C "$SS" commit -qm PR || exit 1
-SSM=$(git -C "$SS" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$SS" --default main --ticket ticket --base "$SSB" --card-head "$SSH" --pr-merge "$SSM" 2>&1); rc=$?
-expect "AC3: a squash merge holding the ticket plus an independent same-file change is landed" 0 "landed"
-MDUP=$tmp/mdup; mkrepo "$MDUP"   # AD1: duplicated lines count, they do not collapse
-printf 'base\n' > "$MDUP/f"; git -C "$MDUP" add f && git -C "$MDUP" commit -qm A || exit 1
-MDUPB=$(git -C "$MDUP" rev-parse HEAD)
-git -C "$MDUP" checkout -qb ticket || exit 1
-printf 'base\nsame\nsame\n' > "$MDUP/f"; git -C "$MDUP" commit -qam T || exit 1
-MDUPH=$(git -C "$MDUP" rev-parse HEAD)
-git -C "$MDUP" checkout -q main || exit 1
-printf 'base\nsame\nother\n' > "$MDUP/f"; git -C "$MDUP" commit -qam PR || exit 1
-MDUPM=$(git -C "$MDUP" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$MDUP" --default main --ticket ticket --base "$MDUPB" --card-head "$MDUPH" --pr-merge "$MDUPM" 2>&1); rc=$?
-expect "AD1: a merge holding one of two identical added lines is not landed" 0 "not-landed"
-git -C "$MDUP" checkout -q main || exit 1
-printf 'base\nsame\nsame\nextra\n' > "$MDUP/f"; git -C "$MDUP" commit -qam PR2 || exit 1
-MDUPM2=$(git -C "$MDUP" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$MDUP" --default main --ticket ticket --base "$MDUPB" --card-head "$MDUPH" --pr-merge "$MDUPM2" 2>&1); rc=$?
-expect "AD1: a merge holding both identical added lines plus more is landed" 0 "landed"
-MR=$tmp/mr; mkrepo "$MR"
-printf 'A\ndup\ndup\n' > "$MR/f"; git -C "$MR" add f && git -C "$MR" commit -qm A || exit 1
-MRB=$(git -C "$MR" rev-parse HEAD)
-git -C "$MR" checkout -qb ticket || exit 1
-printf 'A\n' > "$MR/f"; git -C "$MR" commit -qam T || exit 1
-MRH=$(git -C "$MR" rev-parse HEAD)
-git -C "$MR" checkout -q main || exit 1
-printf 'A\ndup\n' > "$MR/f"; git -C "$MR" commit -qam PR || exit 1
-MRM=$(git -C "$MR" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$MR" --default main --ticket ticket --base "$MRB" --card-head "$MRH" --pr-merge "$MRM" 2>&1); rc=$?
-expect "AD1: a merge removing one of two identical removed lines is not landed" 0 "not-landed"
-HH=$tmp/hh; mkrepo "$HH"   # AE2: content lines are counted inside hunks, never as headers
-printf 'base\n' > "$HH/f"; git -C "$HH" add f && git -C "$HH" commit -qm A || exit 1
-HHB=$(git -C "$HH" rev-parse HEAD)
-git -C "$HH" checkout -qb ticket || exit 1
-printf 'base\nordinary\n++critical\n' > "$HH/f"; git -C "$HH" commit -qam T || exit 1
-HHH=$(git -C "$HH" rev-parse HEAD)
-git -C "$HH" checkout -q main || exit 1
-printf 'base\nordinary\n' > "$HH/f"; git -C "$HH" commit -qam PR || exit 1
-HHM=$(git -C "$HH" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$HH" --default main --ticket ticket --base "$HHB" --card-head "$HHH" --pr-merge "$HHM" 2>&1); rc=$?
-expect "AE2: a merge missing an added ++ line is not landed" 0 "not-landed"
-HR=$tmp/hr; mkrepo "$HR"
-printf 'keep\n--gone\nalsogone\n' > "$HR/f"; git -C "$HR" add f && git -C "$HR" commit -qm A || exit 1
-HRB=$(git -C "$HR" rev-parse HEAD)
-git -C "$HR" checkout -qb ticket || exit 1
-printf 'keep\n' > "$HR/f"; git -C "$HR" commit -qam T || exit 1
-HRH=$(git -C "$HR" rev-parse HEAD)
-git -C "$HR" checkout -q main || exit 1
-printf 'keep\n--gone\n' > "$HR/f"; git -C "$HR" commit -qam PR || exit 1
-HRM=$(git -C "$HR" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$HR" --default main --ticket ticket --base "$HRB" --card-head "$HRH" --pr-merge "$HRM" 2>&1); rc=$?
-expect "AE2: a merge missing a removed -- line is not landed" 0 "not-landed"
-git -C "$HH" checkout -q main || exit 1
-printf 'base\nordinary\n++critical\n++more\n' > "$HH/f"; git -C "$HH" commit -qam PR2 || exit 1
-HHM2=$(git -C "$HH" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$HH" --default main --ticket ticket --base "$HHB" --card-head "$HHH" --pr-merge "$HHM2" 2>&1); rc=$?
-expect "AE2: a merge holding the ++ line plus more is landed" 0 "landed"
-MF=$tmp/mf; mkrepo "$MF"   # AE2 guard: hunk tracking spans a many-file diff
-printf 'a\n' > "$MF/f"; printf 'b\n' > "$MF/g"; git -C "$MF" add f g && git -C "$MF" commit -qm A || exit 1
-MFB=$(git -C "$MF" rev-parse HEAD)
-git -C "$MF" checkout -qb ticket || exit 1
-printf 'a\nA\n' > "$MF/f"; printf 'b\nB\n' > "$MF/g"; git -C "$MF" commit -qam T || exit 1
-MFH=$(git -C "$MF" rev-parse HEAD)
-git -C "$MF" checkout -q main || exit 1
-printf 'a\nA\nX\n' > "$MF/f"; printf 'b\nB\nY\n' > "$MF/g"; git -C "$MF" commit -qam PR || exit 1
-MFM=$(git -C "$MF" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$MF" --default main --ticket ticket --base "$MFB" --card-head "$MFH" --pr-merge "$MFM" 2>&1); rc=$?
-expect "AE2: a many-file squash holding every ticket line is landed" 0 "landed"
-XB=$tmp/xb; mkrepo "$XB"   # AE3: modes agree at card and merge, beside the lines
-printf 'base\n' > "$XB/f"; git -C "$XB" add f && git -C "$XB" commit -qm A || exit 1
-XBB=$(git -C "$XB" rev-parse HEAD)
-git -C "$XB" checkout -qb ticket || exit 1
-printf 'base\nnewline\n' > "$XB/f"; chmod +x "$XB/f"; git -C "$XB" add f && git -C "$XB" commit -qm T || exit 1
-XBH=$(git -C "$XB" rev-parse HEAD)
-git -C "$XB" checkout -q main || exit 1
-printf 'base\nnewline\n' > "$XB/f"; git -C "$XB" add f && git -C "$XB" commit -qm PR || exit 1
-XBM=$(git -C "$XB" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$XB" --default main --ticket ticket --base "$XBB" --card-head "$XBH" --pr-merge "$XBM" 2>&1); rc=$?
-expect "AE3: a merge with the text but without the executable bit is not landed" 0 "not-landed"
-git -C "$XB" checkout -q main || exit 1
-chmod +x "$XB/f"; git -C "$XB" add f && git -C "$XB" commit -qm PR2 || exit 1
-XBM2=$(git -C "$XB" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$XB" --default main --ticket ticket --base "$XBB" --card-head "$XBH" --pr-merge "$XBM2" 2>&1); rc=$?
-expect "AE3: a merge with the text and the bit is landed" 0 "landed"
-XM=$tmp/xm; mkrepo "$XM"
-printf 'base\n' > "$XM/f"; git -C "$XM" add f && git -C "$XM" commit -qm A || exit 1
-XMB=$(git -C "$XM" rev-parse HEAD)
-git -C "$XM" checkout -qb ticket || exit 1
-chmod +x "$XM/f"; git -C "$XM" add f && git -C "$XM" commit -qm T || exit 1
-XMH=$(git -C "$XM" rev-parse HEAD)
-git -C "$XM" checkout -q main || exit 1
-printf 'base\nother\n' > "$XM/f"; git -C "$XM" add f && git -C "$XM" commit -qm PR || exit 1
-XMM=$(git -C "$XM" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$XM" --default main --ticket ticket --base "$XMB" --card-head "$XMH" --pr-merge "$XMM" 2>&1); rc=$?
-expect "AE3: a mode-only change still needs the trees to agree" 0 "not-landed"
-U2=$tmp/u2; mkrepo "$U2"   # AF2: LF is the only line break; terminators compare exactly
-git -C "$U2" config core.autocrlf false || exit 1
-printf 'base\n' > "$U2/f"; git -C "$U2" add f && git -C "$U2" commit -qm A || exit 1
-U2B=$(git -C "$U2" rev-parse HEAD)
-git -C "$U2" checkout -qb ticket || exit 1
-printf 'base\nprefix\xe2\x80\xa8ticket-only\n' > "$U2/f"; git -C "$U2" commit -qam T || exit 1
-U2H=$(git -C "$U2" rev-parse HEAD)
-git -C "$U2" checkout -q main || exit 1
-printf 'base\nprefix\xe2\x80\xa8different-merge-content\n' > "$U2/f"; git -C "$U2" commit -qam PR || exit 1
-U2M=$(git -C "$U2" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$U2" --default main --ticket ticket --base "$U2B" --card-head "$U2H" --pr-merge "$U2M" 2>&1); rc=$?
-expect "AF2: a merge differing past U+2028 is not landed" 0 "not-landed"
-CR=$tmp/cr; mkrepo "$CR"; git -C "$CR" config core.autocrlf false || exit 1
-printf 'base\r\n' > "$CR/f"; git -C "$CR" add f && git -C "$CR" commit -qm A || exit 1
-CRB=$(git -C "$CR" rev-parse HEAD)
-git -C "$CR" checkout -qb ticket || exit 1
-printf 'base\r\nhello\r\n' > "$CR/f"; git -C "$CR" commit -qam T || exit 1
-CRH=$(git -C "$CR" rev-parse HEAD)
-git -C "$CR" checkout -q main || exit 1
-printf 'base\r\nhello\n' > "$CR/f"; git -C "$CR" commit -qam PR || exit 1
-CRM=$(git -C "$CR" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$CR" --default main --ticket ticket --base "$CRB" --card-head "$CRH" --pr-merge "$CRM" 2>&1); rc=$?
-expect "AF2: a merge normalizing CRLF to LF is not landed" 0 "not-landed"
-git -C "$CR" checkout -q main || exit 1
-printf 'base\r\nhello\r\nbye\r\n' > "$CR/f"; git -C "$CR" commit -qam PR2 || exit 1
-CRM2=$(git -C "$CR" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$CR" --default main --ticket ticket --base "$CRB" --card-head "$CRH" --pr-merge "$CRM2" 2>&1); rc=$?
-expect "AF2: a merge holding the CRLF line plus more is landed" 0 "landed"
-CL=$tmp/cl; mkrepo "$CL"; git -C "$CL" config core.autocrlf false || exit 1
-printf 'base\n' > "$CL/f"; git -C "$CL" add f && git -C "$CL" commit -qm A || exit 1
-CLB=$(git -C "$CL" rev-parse HEAD)
-git -C "$CL" checkout -qb ticket || exit 1
-printf 'base\nhello\n' > "$CL/f"; git -C "$CL" commit -qam T || exit 1
-CLH=$(git -C "$CL" rev-parse HEAD)
-git -C "$CL" checkout -q main || exit 1
-printf 'base\nhello\r\n' > "$CL/f"; git -C "$CL" commit -qam PR || exit 1
-CLM=$(git -C "$CL" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$CL" --default main --ticket ticket --base "$CLB" --card-head "$CLH" --pr-merge "$CLM" 2>&1); rc=$?
-expect "AF2: a merge changing LF to CRLF is not landed" 0 "not-landed"
-NL=$tmp/nl; mkrepo "$NL"
-printf 'base\n' > "$NL/f"; git -C "$NL" add f && git -C "$NL" commit -qm A || exit 1
-NLB=$(git -C "$NL" rev-parse HEAD)
-git -C "$NL" checkout -qb ticket || exit 1
-printf 'base\nhello' > "$NL/f"; git -C "$NL" commit -qam T || exit 1
-NLH=$(git -C "$NL" rev-parse HEAD)
-git -C "$NL" checkout -q main || exit 1
-printf 'base\nhello\n' > "$NL/f"; git -C "$NL" commit -qam PR || exit 1
-NLM=$(git -C "$NL" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$NL" --default main --ticket ticket --base "$NLB" --card-head "$NLH" --pr-merge "$NLM" 2>&1); rc=$?
-expect "AF2: a merge adding the ticket's missing final newline is not landed" 0 "not-landed"
-LN=$tmp/ln; mkrepo "$LN"
-printf 'base\n' > "$LN/f"; git -C "$LN" add f && git -C "$LN" commit -qm A || exit 1
-LNB=$(git -C "$LN" rev-parse HEAD)
-git -C "$LN" checkout -qb ticket || exit 1
-printf 'base\nhello\n' > "$LN/f"; git -C "$LN" commit -qam T || exit 1
-LNH=$(git -C "$LN" rev-parse HEAD)
-git -C "$LN" checkout -q main || exit 1
-printf 'base\nhello' > "$LN/f"; git -C "$LN" commit -qam PR || exit 1
-LNM=$(git -C "$LN" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$LN" --default main --ticket ticket --base "$LNB" --card-head "$LNH" --pr-merge "$LNM" 2>&1); rc=$?
-expect "AF2: a merge dropping the ticket's final newline is not landed" 0 "not-landed"
-BX=$tmp/bx; mkrepo "$BX"; git -C "$BX" config core.autocrlf false || exit 1   # AG2: bytes compare
-printf 'base\n' > "$BX/f"; git -C "$BX" add f && git -C "$BX" commit -qm A || exit 1
-BXB=$(git -C "$BX" rev-parse HEAD)
-git -C "$BX" checkout -qb ticket || exit 1
-printf 'base\nhello\xff\xfe\n' > "$BX/f"; git -C "$BX" commit -qam T || exit 1
-BXH=$(git -C "$BX" rev-parse HEAD)
-git -C "$BX" checkout -q main || exit 1
-printf 'base\nhello\xff\xfe\n' > "$BX/f"; git -C "$BX" commit -qam PR || exit 1
-BXM=$(git -C "$BX" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$BX" --default main --ticket ticket --base "$BXB" --card-head "$BXH" --pr-merge "$BXM" 2>&1); rc=$?
-expect "AG2: identical non-UTF-8 content lands without a traceback" 0 "landed"
-git -C "$BX" checkout -q main || exit 1
-printf 'base\nhello\xff\xfd\n' > "$BX/f"; git -C "$BX" commit -qam PR2 || exit 1
-BXM2=$(git -C "$BX" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$BX" --default main --ticket ticket --base "$BXB" --card-head "$BXH" --pr-merge "$BXM2" 2>&1); rc=$?
-expect "AG2: differing non-UTF-8 content does not land" 0 "not-landed"
-out=$("$SELF" already-landed --repo "$R" --default main --ticket sq --base "$BASE" --card-head "$(git -C "$R" rev-parse sq)" --pr-merge "$NOMERGE" 2>&1); rc=$?
-expect "a merge without the card HEAD's content does not count" 0 "not-landed"
+out=$("$SELF" already-landed --repo "$R" --default main --ticket sq --base "$BASE" --card-head "$(git -C "$R" rev-parse sq)" --pr-merge "$SQM" --pr-head "$(git -C "$R" rev-parse sq)" 2>&1); rc=$?
+expect "a provider-reported squash merge at the card's HEAD is landed" 0 "landed"
 git -C "$R" checkout -qb moved "$TIP" || exit 1; commit "$R" f T3 T3
 out=$("$SELF" already-landed --repo "$R" --default main --ticket moved --base "$BASE" --card-head "$TIP" 2>&1); rc=$?
 expect "a branch past the card's HEAD says re-verify, never landed" 0 "re-verify"
-out=$("$SELF" already-landed --repo "$R" --default main --ticket side --base "$BASE" --card-head "$NOMERGE" --pr-merge "$NOMERGE" 2>&1); rc=$?
+out=$("$SELF" already-landed --repo "$R" --default main --ticket side --base "$BASE" --card-head "$NOMERGE" --pr-merge "$NOMERGE" --pr-head "$NOMERGE" 2>&1); rc=$?
 expect "a moved branch says re-verify even where the merge is real" 0 "re-verify"
-RB=$tmp/rb; mkrepo "$RB"   # a rebase merge: the content on main, the commits not ancestors
-commit "$RB" f A A; RB0=$(git -C "$RB" rev-parse HEAD)
-git -C "$RB" checkout -qb ticket || exit 1; commit "$RB" f T T; RBH=$(git -C "$RB" rev-parse HEAD)
-git -C "$RB" checkout -q main || exit 1; git -C "$RB" checkout -q ticket -- f || exit 1
-git -C "$RB" commit -qm rebase-merge || exit 1; RBM=$(git -C "$RB" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$RB" --default main --ticket ticket --base "$RB0" --card-head "$RBH" --pr-merge "$RBM" 2>&1); rc=$?
-expect "a rebase merge counts by tree" 0 "landed"
-out=$("$SELF" already-landed --repo "$R" --default main --ticket ticket --base "$BASE" --card-head "$TIP" --pr-merge "$TIP" 2>&1); rc=$?
+out=$("$SELF" already-landed --repo "$R" --default main --ticket ticket --base "$BASE" --card-head "$TIP" --pr-merge "$TIP" --pr-head "$TIP" 2>&1); rc=$?
 expect "V1: a --pr-merge equal to the tip of an unmerged branch is not landed" 0 "not-landed"
-out=$("$SELF" already-landed --repo "$R" --default main --ticket ticket --base "$BASE" --card-head "$TIP" --pr-merge "$(git -C "$R" rev-parse moved)" 2>&1); rc=$?
+out=$("$SELF" already-landed --repo "$R" --default main --ticket ticket --base "$BASE" --card-head "$TIP" --pr-merge "$(git -C "$R" rev-parse moved)" --pr-head "$TIP" 2>&1); rc=$?
 expect "V1: a merge off the default branch does not count" 0 "not-landed"
-out=$("$SELF" already-landed --repo "$R" --default main --ticket empty --base "$BASE" --card-head "$BASE" --pr-merge "$TIP" 2>&1); rc=$?
-expect "V1: an empty ticket with a descendant SHA is not landed" 0 "not-landed"
 UP=$tmp/up; mkrepo "$UP"; commit "$UP" f A A   # AG1: the card at the local tip, the remote behind
 git -C "$UP" checkout -qb ticket || exit 1; commit "$UP" f T T
 UPB=$(git -C "$UP" rev-parse main)
@@ -731,6 +484,8 @@ UCH=$(git -C "$UC" rev-parse HEAD)
 git -C "$UC" fetch -q origin || exit 1
 out=$("$SELF" already-landed --repo "$UC" --default origin/main --ticket origin/ticket --base "$UPB" --card-head "$UCH" --local-ticket ticket 2>&1); rc=$?
 expect "AG1: a card at the local tip with the remote behind is unpushed" 0 "unpushed"
+out=$("$SELF" already-landed --repo "$UC" --default origin/main --ticket origin/ticket --base "$UPB" --card-head "$UCH" 2>&1); rc=$?
+expect "AH5: the remote behind without --local-ticket stays re-verify" 0 "re-verify"
 git -C "$UC" -c protocol.file.allow=always push -q origin ticket || exit 1
 git -C "$UC" fetch -q origin || exit 1
 out=$("$SELF" already-landed --repo "$UC" --default origin/main --ticket origin/ticket --base "$UPB" --card-head "$UCH" --local-ticket ticket 2>&1); rc=$?
@@ -738,12 +493,27 @@ expect "AG1: pushing clears unpushed" 0 "not-landed"
 git -C "$UP" checkout -q main || exit 1
 git -C "$UP" merge -q --no-ff ticket -m merge || exit 1; UPM=$(git -C "$UP" rev-parse HEAD)
 git -C "$UC" fetch -q origin || exit 1
-out=$("$SELF" already-landed --repo "$UC" --default origin/main --ticket origin/ticket --base "$UPB" --card-head "$UCH" --local-ticket ticket --pr-merge "$UPM" 2>&1); rc=$?
+out=$("$SELF" already-landed --repo "$UC" --default origin/main --ticket origin/ticket --base "$UPB" --card-head "$UCH" --local-ticket ticket --pr-merge "$UPM" --pr-head "$UCH" 2>&1); rc=$?
 expect "AG1: a card at the remote's tip answers as before" 0 "landed"
 git -C "$UP" checkout -q ticket || exit 1; commit "$UP" f H2 H2
 git -C "$UC" fetch -q origin || exit 1
 out=$("$SELF" already-landed --repo "$UC" --default origin/main --ticket origin/ticket --base "$UPB" --card-head "$UCH" --local-ticket ticket 2>&1); rc=$?
 expect "AG1: upstream past the card is still re-verify" 0 "re-verify"
+H2=$(git -C "$UC" rev-parse origin/ticket)
+out=$("$SELF" already-landed --repo "$UC" --default origin/main --ticket origin/ticket --base "$UPB" --card-head "$H2" --local-ticket ticket --pr-merge "$UPM" --pr-head "$UCH" 2>&1); rc=$?
+expect "a reported merge at another head answers re-verify" 0 "re-verify"
+PO=$tmp/po; mkrepo "$PO"; commit "$PO" f A A   # AH1: the branch is gone; the report decides
+git -C "$PO" checkout -qb ticket || exit 1; commit "$PO" f T T
+POB=$(git -C "$PO" rev-parse main); POH=$(git -C "$PO" rev-parse ticket)
+git -C "$PO" checkout -q main || exit 1
+git -C "$PO" merge -q --no-ff ticket -m merge || exit 1; POM=$(git -C "$PO" rev-parse HEAD)
+git -C "$PO" branch -q -D ticket || exit 1
+git clone -q -c protocol.file.allow=always "$PO" "$tmp/pc" || exit 1; PC=$tmp/pc
+git -C "$PC" fetch -q --prune origin || exit 1
+out=$("$SELF" already-landed --repo "$PC" --default origin/main --ticket origin/ticket --base "$POB" --card-head "$POH" --pr-merge "$POM" --pr-head "$POH" 2>&1); rc=$?
+expect "a pruned ticket ref with a reported merge answers from the report" 0 "landed"
+out=$("$SELF" already-landed --repo "$PC" --default origin/main --ticket origin/ticket --base "$POB" --card-head "$POH" 2>&1); rc=$?
+[ "$rc" -eq 1 ] && ok "a pruned ticket ref without a report is still usage" || fail "a pruned ticket ref without a report is still usage" "$out"
 out=$("$SELF" already-landed --repo "$R" --default main --ticket missing --base "$BASE" --card-head "$TIP" 2>&1); rc=$?
 [ "$rc" -eq 1 ] && ok "an unresolvable ticket ref is usage, not an answer" || fail "an unresolvable ticket ref is usage, not an answer" "$out"
 out=$("$SELF" already-landed --repo "$R" --default main --ticket ticket 2>&1); rc=$?
@@ -763,8 +533,6 @@ git -C "$RW" checkout -qb ticket "$RWB" || exit 1
 git -C "$RW" branch -qf main "$RWA" || exit 1
 out=$("$SELF" anything-to-land --repo "$RW" --default main --ticket ticket --base "$RWB" 2>&1); rc=$?
 expect "a branch reset to BASE lands nothing when the default branch is rewritten" 0 "nothing-to-land"
-out=$("$SELF" anything-to-land --repo "$R" --default main --ticket sq --base "$BASE" 2>&1); rc=$?
-expect "a squash-merged branch lands nothing without the provider saying so" 0 "nothing-to-land"
 git -C "$R" checkout -q main || exit 1; git -C "$R" checkout -q ticket -- f || exit 1
 git -C "$R" commit -qm partial || exit 1   # main gains f's content but not g's
 out=$("$SELF" anything-to-land --repo "$R" --default main --ticket "$TIP" --base "$BASE" 2>&1); rc=$?
@@ -783,11 +551,6 @@ git -C "$RN" commit -qm rename || exit 1; RNH=$(git -C "$RN" rev-parse HEAD)
 git -C "$RN" checkout -q main || exit 1
 out=$("$SELF" anything-to-land --repo "$RN" --default main --ticket ticket --base "$RNB" 2>&1); rc=$?
 expect "V6: a rename absent from the default branch lands" 0 "land"
-out=$("$SELF" already-landed --repo "$RN" --default main --ticket ticket --base "$RNB" --card-head "$RNH" --pr-merge "$(git -C "$RN" rev-parse main)" 2>&1); rc=$?
-expect "V6: a rename the merge lacks does not count" 0 "not-landed"
-git -C "$RN" mv old new || exit 1; git -C "$RN" commit -qm landrename || exit 1
-out=$("$SELF" anything-to-land --repo "$RN" --default main --ticket ticket --base "$RNB" 2>&1); rc=$?
-expect "V6: a rename on the default branch lands nothing" 0 "nothing-to-land"
 SM=$tmp/sm; mkrepo "$SM/sub"; commit "$SM/sub" f S S
 mkrepo "$SM/outer"
 git -C "$SM/outer" -c protocol.file.allow=always submodule -q add ../sub sub || exit 1
@@ -817,8 +580,6 @@ SIM=$(git -C "$SI/outer" rev-parse HEAD)
 git -C "$SI/outer" config submodule.sub.ignore all
 out=$("$SELF" anything-to-land --repo "$SI/outer" --default main --ticket ticket --base "$SIB" 2>&1); rc=$?
 expect "X1: a submodule bump lands with per-submodule ignore set" 0 "land"
-out=$("$SELF" already-landed --repo "$SI/outer" --default main --ticket ticket --base "$SIB" --card-head "$SIH" --pr-merge "$SIM" 2>&1); rc=$?
-expect "X1: a merge missing the ignored bump does not count" 0 "not-landed"
 SG=$tmp/sg; mkrepo "$SG/sub"; commit "$SG/sub" f S S
 mkrepo "$SG/outer"
 git -C "$SG/outer" -c protocol.file.allow=always submodule -q add ../sub sub || exit 1
@@ -840,12 +601,21 @@ git -C "$SQ" checkout -q main || exit 1
 git -C "$SQ" merge -q --squash ticket || exit 1; git -C "$SQ" commit -qm squash || exit 1
 printf 'base\nticket-line\nindependent\n' > "$SQ/f"; git -C "$SQ" commit -qam IND || exit 1
 out=$("$SELF" anything-to-land --repo "$SQ" --default main --ticket "$SQT" --base "$SQB" 2>&1); rc=$?
-expect "AG3: landed content with a later independent edit lands nothing" 0 "nothing-to-land"
+expect "an unreported squash merge answers land" 0 "land"
 git -C "$SQ" checkout -q ticket || exit 1
 printf 'base\nticket-line\nfresh\n' > "$SQ/f"; git -C "$SQ" commit -qam F || exit 1
 SQT2=$(git -C "$SQ" rev-parse HEAD)
 out=$("$SELF" anything-to-land --repo "$SQ" --default main --ticket "$SQT2" --base "$SQB" 2>&1); rc=$?
 expect "AG3: genuinely new content still lands" 0 "land"
+BP=$tmp/bp; mkrepo "$BP"; git -C "$BP" config core.quotePath false || exit 1   # AH4: paths decode
+printf 'base\n' > "$BP/f"; git -C "$BP" add f && git -C "$BP" commit -qm A || exit 1
+BPB=$(git -C "$BP" rev-parse HEAD)
+git -C "$BP" checkout -qb ticket || exit 1
+BP=$tmp/bp python3 -c "import os; open(os.path.join(os.environ['BP'].encode(), b'bad\xffname'), 'w').write('x\n')"
+git -C "$BP" add -A && git -C "$BP" commit -qam T || exit 1
+BPH=$(git -C "$BP" rev-parse HEAD)
+out=$("$SELF" anything-to-land --repo "$BP" --default main --ticket "$BPH" --base "$BPB" 2>&1); rc=$?
+expect "AH4: a raw-byte path answers without a traceback" 0 "land"
 
 echo "fresh"
 F=$tmp/fr; mkrepo "$F"
