@@ -370,6 +370,41 @@ whether to trust it; headless `claude -p` does not ask. The first spawn in a new
 there, and the user answers it in the pane. A row not checked here takes its bypass flag from
 the headless form above; run it once before relying on it.
 
+## Keeping the watcher running
+
+Stage D keeps one `<tool>/scripts/runs-watch.sh <runs>` going per project, acts on the runs it
+names, and starts it again at once. The watcher is a long wait that must outlive a turn and must
+not hold the conversation, so it is started the way any launch is, through
+`<tool>/scripts/host.sh run`, which returns as soon as the watcher has started and keeps it in a
+session of its own: a host's pane where there is one, a detached process where there is none
+(`hosts.md`).
+
+```sh
+<tool>/scripts/host.sh run "watch · <project>" "<repo>" \
+    --out "<runs>/postmaster/watch.out" --err "<runs>/postmaster/watch.err" \
+    --marker "<runs>/postmaster/.watch-exited" \
+    -- "<tool>/scripts/runs-watch.sh" "<runs>"
+```
+
+When `.watch-exited` lands, `watch.out` holds the table and the `needs` lines: act on them,
+then start the watcher again before anything else.
+
+| harness | nonblocking form | where the session cannot keep it in the background |
+|---|---|---|
+| claude | the `host.sh run` form above; never its own background tasks, which are reaped at about 29 minutes (its section above) | the foreground poll below |
+| codex | the `host.sh run` form above | the foreground poll below |
+| grok | the `host.sh run` form above | the foreground poll below |
+| agy | the `host.sh run` form above | the foreground poll below |
+| pi | the `host.sh run` form above | the foreground poll below |
+| muse | the `host.sh run` form above | the foreground poll below |
+| mimo | the `host.sh run` form above | the foreground poll below |
+
+The foreground poll is `<tool>/scripts/runs-watch.sh <runs> --timeout <postmaster.poll_seconds>`,
+run in the conversation and started again at once: it returns with the table every interval. It
+is the only form that blocks the conversation, and only for one interval. Never keep the
+watcher anywhere but `host.sh run`: no other keeping has a documented lifetime, and on
+2026-09-28 a watcher kept outside it was killed when memory ran short (#121).
+
 ## The pane view
 
 `<tool>/scripts/view-stream.sh` is the other executable half of this file: it renders an events
