@@ -190,8 +190,10 @@ live one. Below, `<p>` is the leg before leg `<n>` in that list.
    ```
 
    `<thread-id>` is `coachman.legs.<n>.thread_id`. The script keeps the role from the last
-   attempt, including a fallback takeover. Log `resume` with the leg and thread id. A ruling
-   and the merge word reach a leg this way.
+   attempt, including a fallback takeover. If the manifest has no thread id for the leg,
+   take it from `<tool>/scripts/host.sh leg outcome <dispatch> <n>` instead: the record
+   is authoritative and the manifest is best-effort. Log `resume` with the leg and thread
+   id. A ruling and the merge word reach a leg this way.
 
 ## Stage D: supervise
 
