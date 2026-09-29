@@ -14,6 +14,7 @@
 //   exit 1  usage, no such dispatch directory or repo, no config, or the file could not be written
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -23,7 +24,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { tryTomlFile } from "./lib/data.ts";
 import { toolRoot } from "./lib/paths.ts";
 import { run, withTempDir } from "./lib/proc.ts";
@@ -44,14 +45,15 @@ function git(where: string, ...args: string[]): string | null {
 
 function version(harness: string): string {
   if (Bun.which(harness) === null) return "not on PATH";
-  try {
-    const r = spawnSync(harness, ["--version"], { encoding: "utf8", timeout: 15000 });
-    const out = (r.stdout || r.stderr || "").trim().split("\n");
-    return out.length > 0 && out[0] !== "" ? (out[0] as string) : "no version output";
-  } catch (e) {
-    const name = e instanceof Error ? e.constructor.name : "Error";
-    return `no version: ${name}`;
-  }
+  // BASE names the exception: TimeoutExpired for the 15-second cutoff, the
+  // OSError kind otherwise. spawnSync reports both in error, never by throwing.
+  const r = spawnSync(harness, ["--version"], { encoding: "utf8", timeout: 15000 });
+  const err = r.error as NodeJS.ErrnoException | undefined;
+  if (err?.code === "ETIMEDOUT") return "no version: TimeoutExpired";
+  if (err?.code === "ENOENT") return "no version: FileNotFoundError";
+  if (err) return "no version: OSError";
+  const out = (r.stdout || r.stderr || "").trim().split("\n");
+  return out.length > 0 && out[0] !== "" ? (out[0] as string) : "no version output";
 }
 
 function meta(d: string, repo: string): number {
@@ -218,6 +220,38 @@ coachman = { harness = "bash", model = "judge" }
     "a harness not installed says so",
     (r) => r.harness_versions["no-such-harness-xyz"] === "not on PATH",
   );
+  // BASE gives --version 15 seconds, then records "no version: TimeoutExpired".
+  // Through the CLI: Bun.which reads PATH once, so only a child sees the stub.
+  {
+    const bindir = join(tmp, "slowbin");
+    mkdirSync(bindir, { recursive: true });
+    writeFileSync(join(bindir, "slowharness"), "#!/bin/sh\nsleep 60\n");
+    chmodSync(join(bindir, "slowharness"), 0o755);
+    const slowCfg = join(tmp, "slow.toml");
+    writeFileSync(slowCfg, '[lanes.one]\nharness = "slowharness"\nmodel = "m1"\n[team]\n');
+    const slowD = join(tmp, "slowrun");
+    mkdirSync(slowD, { recursive: true });
+    const t0 = Date.now();
+    const r = run(join(toolRoot(import.meta), "scripts", "run-meta.sh"), [slowD, repo], {
+      env: {
+        ...process.env,
+        PATH: `${bindir}${delimiter}${process.env.PATH ?? ""}`,
+        POSTMASTER_CONFIG: slowCfg,
+      },
+    });
+    const secs = (Date.now() - t0) / 1000;
+    let ver = "";
+    try {
+      ver = JSON.parse(readFileSync(join(slowD, "run.json"), "utf8")).harness_versions.slowharness;
+    } catch {
+      ver = "";
+    }
+    st.check(
+      "a harness stuck on --version records BASE's TimeoutExpired after 15 seconds",
+      r.code === 0 && ver === "no version: TimeoutExpired" && secs >= 14 && secs < 60,
+      `exit ${r.code} ver=[${ver}] after ${secs.toFixed(1)}s`,
+    );
+  }
   check(
     "an env file is named, never read",
     (r) => r.config.lanes.one.env_file === "~/somewhere/secret.env",

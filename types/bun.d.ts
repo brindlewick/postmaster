@@ -657,6 +657,18 @@ declare module "node:readline" {
   };
 }
 
+declare module "node:net" {
+  export interface Socket {
+    destroy(): void;
+    on(event: string, listener: () => void): void;
+  }
+  export interface Server {
+    listen(port: number, host: string, listening: () => void): void;
+    address(): { port: number } | null;
+    close(done: () => void): void;
+  }
+  export function createServer(onConnection: (sock: Socket) => void): Server;
+}
 declare module "node:url" {
   export function fileURLToPath(url: string | URL): string;
   export function pathToFileURL(path: string): URL;
@@ -740,3 +752,6 @@ interface RequestInit {
 interface AbortSignal {
   aborted: boolean;
 }
+declare var AbortSignal: {
+  timeout(milliseconds: number): AbortSignal;
+};

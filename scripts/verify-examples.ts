@@ -38,7 +38,7 @@ import { SelfTest } from "./lib/selftest.ts";
 const FENCE = /^(\s*)(`{3,}|~{3,})(.*)$/;
 const EXIT_RE = /\[exit (\d+)\]/;
 const BIN_NAME = /^[A-Za-z0-9@._+-]+$/;
-const _TIMEOUT = 60;
+const TIMEOUT = 60;
 
 function notRun(msg: string): never {
   console.log(`not run: ${msg}`);
@@ -157,7 +157,7 @@ function exampleEnv(
     BASH_ENV: undefined,
   };
 }
-function examples(wtArg: string, ticketArg: string): number {
+function examples(wtArg: string, ticketArg: string, timeout = TIMEOUT): number {
   const wt = resolve(wtArg);
   let ticket = ticketArg;
   if (!ticket) {
@@ -293,9 +293,11 @@ function examples(wtArg: string, ticketArg: string): number {
     const env = exampleEnv(home, shims, runpath);
     for (const c of cmds) {
       ran += 1;
-      const r = run("bash", ["-c", c.cmd], { cwd: home, env, input: "" });
-      const got = trim((r.out + r.err).replace(/\r\n/g, "\n").split("\n"));
-      const code = r.code;
+      const r = run("bash", ["-c", c.cmd], { cwd: home, env, input: "", timeout: timeout * 1000 });
+      const got = r.timedOut
+        ? [`(timed out after ${timeout}s)`]
+        : trim((r.out + r.err).replace(/\r\n/g, "\n").split("\n"));
+      const code: number | null = r.timedOut ? null : r.code;
       if (JSON.stringify(got) === JSON.stringify(c.out) && code === c.exit) {
         console.log(`ok    $ ${c.cmd}`);
         continue;
@@ -319,7 +321,9 @@ function examples(wtArg: string, ticketArg: string): number {
         );
       }
       if (code !== c.exit) {
-        console.log(`      exit: expected ${c.exit}, got ${code}`);
+        console.log(
+          `      exit: expected ${c.exit}, got ${code === null ? "none, it timed out" : code}`,
+        );
       }
     }
   }
@@ -708,6 +712,35 @@ built ok
       "the self-test passes from a path with a space",
       r.code === 0,
       `exit ${r.code}\n${r.out}\n${r.err}`,
+    );
+  }
+
+  // BASE gives each example shell 60 seconds, then reports "(timed out after
+  // 60s)" with no exit. A stalled example proves the cutoff and the message.
+  {
+    st.check("examples allow 60 seconds a shell, as BASE does", TIMEOUT === 60, String(TIMEOUT));
+    writeFileSync(
+      join(tmp, "stall.md"),
+      "## User journey\nA stuck shell.\n\n```\n$ sleep 30\nnothing comes\n```\n",
+      "utf8",
+    );
+    const lines: string[] = [];
+    const origLog = console.log;
+    console.log = (...a: unknown[]) => {
+      lines.push(a.map(String).join(" "));
+    };
+    let rc = 0;
+    try {
+      rc = examples(join(tmp, "app"), join(tmp, "stall.md"), 1);
+    } finally {
+      console.log = origLog;
+    }
+    st.check(
+      "a stalled example is cut off with BASE's message and no exit",
+      rc === 1 &&
+        lines.some((l) => l.includes("(timed out after 1s)")) &&
+        lines.some((l) => l.includes("got none, it timed out")),
+      `exit ${rc}\n${lines.join("\n")}`,
     );
   }
 

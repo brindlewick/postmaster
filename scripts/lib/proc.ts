@@ -9,6 +9,9 @@ export interface RunResult {
   code: number;
   out: string;
   err: string;
+  /** True only when our own timeout killed the child. A child that exits 128
+   * on its own is not a timeout; the code alone cannot tell them apart. */
+  timedOut: boolean;
 }
 
 /** Linux signal numbers, so a child dead by a signal reports 128 plus its
@@ -87,25 +90,30 @@ export function run(
   });
   const error = r.error as NodeJS.ErrnoException | undefined;
   if (error && (r.status === null || r.status === undefined) && !r.signal) {
-    if (error.code === "ENOENT") return { code: 127, out: "", err: `${cmd}: command not found\n` };
-    if (error.code === "EACCES") return { code: 126, out: "", err: `${cmd}: permission denied\n` };
+    if (error.code === "ENOENT")
+      return { code: 127, out: "", err: `${cmd}: command not found\n`, timedOut: false };
+    if (error.code === "EACCES")
+      return { code: 126, out: "", err: `${cmd}: permission denied\n`, timedOut: false };
     return {
       code: 1,
       out: String(r.stdout ?? ""),
       err: String(r.stderr ?? "") || `${cmd}: ${error.message}\n`,
+      timedOut: false,
     };
   }
   // Our own timeout kill carries ETIMEDOUT in both runtimes; a child dead
   // by any other signal reports 128 plus its number, as a shell reports it.
+  const killed = error?.code === "ETIMEDOUT" && (r.status === null || r.status === undefined);
   let code: number;
   if (r.status !== null && r.status !== undefined) code = r.status;
-  else if (error?.code === "ETIMEDOUT") code = 128;
+  else if (killed) code = 128;
   else if (r.signal) code = signalExitCode(r.signal);
   else code = 1;
   return {
     code,
     out: String(r.stdout ?? ""),
     err: String(r.stderr ?? ""),
+    timedOut: killed,
   };
 }
 

@@ -240,8 +240,12 @@ function sh(
   cmd: string[],
   cwd?: string,
   env?: Record<string, string>,
+  timeout = TIMEOUT,
 ): { code: number | null; out: string } {
-  const r = run(cmd[0]!, cmd.slice(1), { cwd, env, input: "" });
+  const r = run(cmd[0]!, cmd.slice(1), { cwd, env, input: "", timeout: timeout * 1000 });
+  // BASE's TimeoutExpired discards whatever the command printed and says only
+  // this; a child that exits 128 on its own is not a timeout.
+  if (r.timedOut) return { code: null, out: `timed out after ${timeout}s` };
   return { code: r.code, out: r.out + r.err };
 }
 
@@ -1279,6 +1283,30 @@ case $2 in store) exec "${join(HERE, "local.sh")}" "$@" ;; *) exit 1 ;; esac
       "a repo whose main does not hold the run's base",
       r2.code === 1 && out.includes("is this the run's repo"),
       `exit ${r2.code}\n${out}`,
+    );
+  }
+
+  // BASE's sh() gives an install, a gate or a hidden suite 1200 seconds, then
+  // reports only "timed out after 1200s". A stalled stub proves the cutoff and
+  // the message; a child that exits 128 on its own proves the cutoff is real,
+  // not the code.
+  {
+    st.check(
+      "score allows 1200 seconds a command, as BASE does",
+      TIMEOUT === 1200,
+      String(TIMEOUT),
+    );
+    const stalled = sh(["bash", "-c", "echo partial; sleep 30"], undefined, undefined, 1);
+    st.check(
+      "a stalled command is cut off with BASE's message, its output discarded",
+      stalled.code === null && stalled.out === "timed out after 1s",
+      `${stalled.code} ${stalled.out}`,
+    );
+    const died128 = sh(["bash", "-c", "exit 128"]);
+    st.check(
+      "a child that exits 128 on its own is exit 128, never a timeout",
+      died128.code === 128,
+      `${died128.code} ${died128.out}`,
     );
   }
 

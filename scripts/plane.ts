@@ -37,6 +37,7 @@
 //   exit 2  invalid state
 //   exit 4  the work item changed since the base was read
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tryTomlFile } from "./lib/data.ts";
@@ -950,7 +951,7 @@ function planEdit(stored: string, base: string, body: string): [number, string] 
 }
 
 // --- self-test ---------------------------------------------------------------------------------
-function selfTest(): number {
+async function selfTest(): Promise<number> {
   const SCRIPT = join(import.meta.dir, "plane.sh");
   const fails = [0];
   const check = (label: string, good: boolean, detail: unknown = ""): void => {
@@ -1150,6 +1151,36 @@ function selfTest(): number {
     rmSync(d, { recursive: true, force: true });
   }
 
+  // BASE's 30-second API cutoff: a stalled server is cut off with BASE's words.
+  {
+    const held: Array<{ destroy: () => void }> = [];
+    const stall = createServer((sock) => {
+      held.push(sock);
+      sock.on("error", () => {});
+    });
+    await new Promise<void>((resolve) => stall.listen(0, "127.0.0.1", () => resolve()));
+    const port = (stall.address() as { port: number }).port;
+    const t0 = Date.now();
+    let msg = "";
+    try {
+      await api(
+        { BASE: `http://127.0.0.1:${port}`, WS: "ws", KEY: "self-test" },
+        "GET",
+        "workspaces/ws/projects",
+      );
+    } catch (e) {
+      msg = e instanceof DieError ? e.msg : String(e);
+    }
+    const secs = (Date.now() - t0) / 1000;
+    for (const sock of held) sock.destroy();
+    await new Promise<void>((resolve) => stall.close(() => resolve()));
+    check(
+      "a stalled API is cut off after 30 seconds with BASE's words",
+      msg === "GET workspaces/ws/projects: timed out" && secs >= 29 && secs < 45,
+      `${msg} after ${secs.toFixed(1)}s`,
+    );
+  }
+
   console.log("");
   if (fails[0] === 0) {
     console.log("self-test: all controls behaved");
@@ -1241,7 +1272,11 @@ async function api(
     "Content-Type": "application/json",
     Accept: "application/json",
   };
-  const opts: RequestInit = { method, headers };
+  // BASE's urlopen(timeout=30): a stalled API is cut off after 30 seconds. In
+  // BASE the cutoff escapes as an uncaught TimeoutError traceback (urllib does
+  // not wrap it); the port reports it through the same die the neighboring
+  // handlers use, with the same words, and the same exit.
+  const opts: RequestInit = { method, headers, signal: AbortSignal.timeout(30000) };
   if (body !== undefined) opts.body = JSON.stringify(body);
   try {
     const r = await fetch(url, opts);
@@ -1252,6 +1287,10 @@ async function api(
     return raw ? JSON.parse(raw) : null;
   } catch (e: any) {
     if (e instanceof DieError) throw e;
+    // Our own 30-second cutoff: Bun reports it as TimeoutError, Node as
+    // AbortError. Nothing else aborts this signal, so either name is our cutoff.
+    if (e?.name === "AbortError" || e?.name === "TimeoutError")
+      dieP(`${method} ${path}: timed out`);
     dieP(`${method} ${path}: ${e?.message ?? e}`);
   }
 }
@@ -1347,7 +1386,14 @@ async function runCommands(): Promise<void> {
   const args = argv.slice(1);
 
   if (cmd === "--self-test") {
-    process.exit(selfTest());
+    selfTest().then(
+      (code) => process.exit(code),
+      (e) => {
+        console.error(e);
+        process.exit(1);
+      },
+    );
+    return;
   }
 
   const cfg = loadConfig();
@@ -1497,7 +1543,13 @@ async function runCommands(): Promise<void> {
 // --- dispatch ---------------------------------------------------------------------------------
 const firstArg = process.argv[2];
 if (firstArg === "--self-test") {
-  process.exit(selfTest());
+  selfTest().then(
+    (code) => process.exit(code),
+    (e) => {
+      console.error(e);
+      process.exit(1);
+    },
+  );
 } else if (!firstArg) {
   dieP("usage: plane.sh projects|create|edit|read|state|comment|list ... | --self-test");
 } else {

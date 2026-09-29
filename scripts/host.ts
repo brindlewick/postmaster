@@ -1063,11 +1063,20 @@ async function runCmd(args: string[]): Promise<void> {
     dropSpec(specDir);
     appendFailure(err, marker, `'${launchName}' did not start in the background`);
   }
+  // BASE waits for a NONEMPTY pid file: the runner creates it before its first
+  // write lands, and a reader that stops at created reads an empty pid.
   if (pidfile && !existsSync(specDir))
-    for (let i = 0; i < 40 && !existsSync(pidfile); i++) await Bun.sleep(250);
+    for (let i = 0; i < 40 && pidSize(pidfile) === 0; i++) await Bun.sleep(250);
   console.log(where);
 }
 
+function pidSize(path: string): number {
+  try {
+    return statSync(path).size;
+  } catch {
+    return 0;
+  }
+}
 type ProcRow = { ppid: number; group: number; start: string; zombie: boolean; name: string };
 function processTable(): Map<number, ProcRow> {
   const rows = new Map<number, ProcRow>();
