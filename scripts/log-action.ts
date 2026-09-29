@@ -40,27 +40,27 @@ import {
   readFileSync,
   realpathSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
-import { argvHasUndecodableBytes, run, withTempDir } from "./lib/proc.ts";
+import { argvDecoded, decodeDropInvalid, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
 
 const VERBS =
   " dispatch resume harvest synthesize review-launch review-harvest finding apply escalate rule ticket-check ticket-create ticket-edit ticket-state ticket-comment gate verify merge teardown degrade handoff-accept handoff stage tool-fault note ";
 const CONTROLS = join(toolRoot(import.meta), "skills/postmaster/controls.md");
 
-// JSON string escaping: drop control chars, drop non-UTF8, escape separators
+// JSON string escaping: drop control chars, escape separators. Bytes that
+// are not UTF-8 never reach here: the arguments arrive re-derived from the
+// raw argv bytes with invalid sequences dropped, as iconv -c drops them, so
+// a U+FFFD in a field is always a legitimate character, which is kept.
 function jsonStr(s: string): string {
-  // Drop control characters (except those we escape below). A U+FFFD is
-  // dropped only when the raw argv bytes prove it stands for undecodable
-  // input; on its own it is a legitimate character, which iconv -c keeps.
-  const stripReplacement = argvHasUndecodableBytes();
+  // Drop control characters (except those we escape below).
   let result = "";
   for (const ch of s) {
     const code = ch.codePointAt(0) ?? 0;
     if (code < 0x20 && ch !== "\n" && ch !== "\r" && ch !== "\t") continue;
-    if (ch === "\uFFFD" && stripReplacement) continue;
     result += ch;
   }
   // Escape backslash, quote, newline, CR, tab, and Unicode separators
@@ -283,7 +283,7 @@ function logAction(
 }
 
 // --- entry ------------------------------------------------------------------------------
-const argv = process.argv.slice(2);
+const argv = argvDecoded();
 if (argv[0] !== "--self-test") {
   if (argv.length < 4 || !argv[0] || !argv[1] || !argv[2] || !argv[3]) {
     console.error(
@@ -612,6 +612,117 @@ withTempDir((tmp) => {
     st.ok("the legitimate character survives the log");
   } else {
     st.fail("the legitimate character survives the log", JSON.stringify(last11b));
+  }
+
+  // A bad byte in one detail argument must not cost another its characters:
+  // the damage is dropped entry by entry, as iconv -c drops it.
+  {
+    const before = lines();
+    const q = (a: string): string => `'${a.replace(/'/g, `'\\''`)}'`;
+    const r = run("bash", [
+      "-c",
+      `${q(SELF)} ${q(d)} ${q("postmaster")} ${q("note")} ${q("RUN-1")} "$(printf 'x\\377y')" ${q("keep \uFFFDhere")}`,
+    ]);
+    if (r.code === 0 && lines() === before + 1)
+      st.ok("a mixed bad byte and literal U+FFFD are written");
+    else st.fail("a mixed bad byte and literal U+FFFD are written", r.err);
+  }
+  const last11c = lastLine();
+  if (last11c && last11c.detail === "xy keep \uFFFDhere") {
+    st.ok("the damage dropped and the legitimate character kept");
+  } else {
+    st.fail("the damage dropped and the legitimate character kept", JSON.stringify(last11c));
+  }
+
+  // decodeDropInvalid keeps valid input byte for byte and drops damage,
+  // and agrees with iconv -c on seeded random input. glibc's iconv passes
+  // F5-F7 leads, 5-byte forms and values past U+10FFFF straight through
+  // (BASE's log can hold those raw bytes); the port validates strictly, so
+  // the fuzz stays clear of those corners and the edges assert them direct.
+  {
+    const edges: Array<[number[], string]> = [
+      [[], ""],
+      [[0x61], "a"],
+      [[0x80], ""],
+      [[0xc2], ""],
+      [[0xc0, 0xaf], ""],
+      [[0xe1, 0x80], ""],
+      [[0xe2, 0x82], ""],
+      [[0xed, 0xa0, 0x80], ""],
+      [[0xe0, 0x80, 0x80], ""],
+      [[0xf0, 0x80, 0x80, 0x80], ""],
+      [[0xf0, 0x8f, 0xbf, 0xbd], ""],
+      [[0xf4, 0x8f, 0xbf, 0xbd], String.fromCodePoint(0x10fffd)],
+      [[0xf4, 0x8f, 0xbf, 0xbf], String.fromCodePoint(0x10ffff)],
+      [[0xf4, 0x90, 0x80, 0x80], ""],
+      [[0xf5, 0x80, 0x80, 0x80], ""],
+      [[0xf8, 0x88, 0x80, 0x80, 0x80], ""],
+      [[0xef, 0xbf, 0xbd], String.fromCodePoint(0xfffd)],
+      [[0x61, 0xc3, 0xa9, 0xe2, 0x82, 0xac, 0xf0, 0x9d, 0x84, 0x9e], "aé€𝄞"],
+      [[0xff, 0xef, 0xbf, 0xbd], String.fromCodePoint(0xfffd)],
+      [[0xef, 0xbf, 0xbd, 0xff], String.fromCodePoint(0xfffd)],
+    ];
+    let edgeBad = 0;
+    let edgeFirst = "";
+    for (const [bytes, want] of edges) {
+      const got = decodeDropInvalid(Buffer.from(bytes));
+      if (got !== want) {
+        edgeBad++;
+        if (!edgeFirst)
+          edgeFirst = `${Buffer.from(bytes).toString("hex")}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`;
+      }
+    }
+    st.check("the decoder drops damage and keeps valid edges", edgeBad === 0, edgeFirst);
+
+    // BASE itself runs iconv only where present.
+    const hasIconv = run("bash", ["-c", "command -v iconv"]).code === 0;
+    if (!hasIconv) {
+      st.ok("the decoder matches iconv -c (no iconv here; BASE skips it too)");
+    } else {
+      let seed = 109;
+      const rnd = (): number => {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        return seed;
+      };
+      const boundary = [
+        0x00, 0x7f, 0x80, 0xbf, 0xc0, 0xc1, 0xc2, 0xdf, 0xe0, 0xed, 0xef, 0xf0, 0xf4,
+        0x8f, 0x90, 0xa0,
+      ];
+      const cases: Buffer[] = [];
+      for (let n = 0; n < 300; n++) {
+        const len = rnd() % 9;
+        const b = Buffer.alloc(len);
+        for (let i = 0; i < len; i++) {
+          const v = rnd() % 2 === 0 ? boundary[rnd() % boundary.length]! : rnd() % 256;
+          b[i] = v >= 0xf5 ? v - 0x0b : v; // out of glibc's lenient corners
+        }
+        for (let i = 0; i + 1 < len; i++) {
+          if (b[i] === 0xf4 && b[i + 1]! >= 0x90 && b[i + 1]! <= 0xbf)
+            b[i + 1] = 0x80 | (b[i + 1]! & 0x0f); // past U+10FFFF is glibc's corner too
+        }
+        cases.push(b);
+      }
+      let bad = 0;
+      let first = "";
+      // The bytes travel in a file: run() sends input as UTF-8, which would
+      // re-encode them on the way to iconv's stdin.
+      const q = (p: string): string => `'${p.replace(/'/g, `'\\''`)}'`;
+      const bin = join(tmp, "fuzz.bin");
+      for (const c of cases) {
+        writeFileSync(bin, c);
+        const r = run("bash", ["-c", `iconv -f UTF-8 -t UTF-8 -c < ${q(bin)}`]);
+        // iconv still drops trailing damage, but exits 1 for it
+        // ("incomplete character at end of buffer"); the output is the oracle.
+        const want = r.code === 0 || r.code === 1 ? r.out : null;
+        const got = decodeDropInvalid(c);
+        if (want === null || got !== want) {
+          bad++;
+          if (!first)
+            first = `${c.toString("hex")}: got ${JSON.stringify(got)}, iconv ${JSON.stringify(want)}`;
+        }
+      }
+      st.check("the decoder matches iconv -c on 300 seeded cases", bad === 0, first);
+    }
   }
 
   // Verify every line is valid JSON and files match

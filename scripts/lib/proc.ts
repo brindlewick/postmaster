@@ -84,6 +84,82 @@ export function argvHasUndecodableBytes(): boolean {
   }
 }
 
+/** Decode bytes as UTF-8, dropping invalid sequences the way `iconv -c`
+ * does: a byte that cannot start a valid sequence is skipped and decoding
+ * resumes after it, so damaged input loses bytes and never gains a
+ * replacement character. Overlongs, surrogates, strays past U+10FFFF and
+ * truncated tails are all damage. */
+export function decodeDropInvalid(bytes: Uint8Array): string {
+  const out: string[] = [];
+  let i = 0;
+  while (i < bytes.length) {
+    const b = bytes[i]!;
+    if (b < 0x80) {
+      out.push(String.fromCharCode(b));
+      i++;
+      continue;
+    }
+    let len = 0;
+    let min = 0;
+    if (b >= 0xc2 && b <= 0xdf) {
+      len = 2;
+      min = 0x80;
+    } else if (b >= 0xe0 && b <= 0xef) {
+      len = 3;
+      min = 0x800;
+    } else if (b >= 0xf0 && b <= 0xf4) {
+      len = 4;
+      min = 0x10000;
+    } else {
+      i++; // a stray continuation, C0/C1, F5+: drop one byte
+      continue;
+    }
+    if (i + len > bytes.length) {
+      i++; // truncated tail: drop, retry after
+      continue;
+    }
+    let cp = b & (len === 2 ? 0x1f : len === 3 ? 0x0f : 0x07);
+    let ok = true;
+    for (let j = 1; j < len; j++) {
+      const c = bytes[i + j]!;
+      if (c < 0x80 || c > 0xbf) {
+        ok = false;
+        break;
+      }
+      cp = (cp << 6) | (c & 0x3f);
+    }
+    if (!ok || cp < min || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) {
+      i++;
+      continue;
+    }
+    out.push(String.fromCodePoint(cp));
+    i += len;
+  }
+  return out.join("");
+}
+
+/** This process's arguments re-derived from the raw argv bytes, with invalid
+ * sequences dropped the way `iconv -c` drops them. The raw bytes tell entry
+ * by entry, so a bad byte in one argument never costs another its
+ * characters. Without /proc, or when the raw entries do not align with the
+ * decoded arguments, the runtime's decoding stands. */
+export function argvDecoded(): string[] {
+  const args = process.argv.slice(2);
+  const raw = rawArgvBytes();
+  if (raw === null) return args;
+  const parts: Buffer[] = [];
+  let start = 0;
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] === 0) {
+      parts.push(raw.subarray(start, i));
+      start = i + 1;
+    }
+  }
+  if (start < raw.length) parts.push(raw.subarray(start));
+  if (parts.length !== args.length + 2) return args;
+  return parts.slice(2).map((p) => decodeDropInvalid(p));
+}
+
 /** mkdir -d a temp dir and hand it to fn; remove it afterwards even if fn throws. */
 export function withTempDir<T>(fn: (dir: string) => T, prefix = "postmaster-"): T {
   const dir = mkdtempSync(join(tmpdir(), prefix));
