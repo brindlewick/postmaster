@@ -26,11 +26,12 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
-import { run, withTempDir } from "./lib/proc.ts";
+import { mkstempSync, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
 
 const STAGES =
@@ -129,7 +130,7 @@ function setStage(d: string, newStage: string, actor: string): number {
   try {
     const m = JSON.parse(readFileSync(manifestPath, "utf8"));
     m.stage = newStage;
-    const tmp = join(d, `.manifest.json.tmp.${process.pid}`);
+    const tmp = mkstempSync(d, "tmp");
     writeFileSync(tmp, `${JSON.stringify(m, null, 2)}\n`);
     renameSync(tmp, manifestPath);
   } catch {
@@ -312,6 +313,27 @@ withTempDir((tmp) => {
   rc = setStage(d, "bootstrapped", "coachman");
   if (rc === 1) st.ok("no manifest is refused");
   else st.fail(`no manifest is refused (exit ${rc})`);
+
+  // Atomic writes go through mkstemp names, as BASE's do: random, private,
+  // never a predictable pid name. One control for the shared helper every
+  // atomic write uses.
+  {
+    const a = mkstempSync(tmp, "tmp");
+    const b = mkstempSync(tmp, "tmp");
+    writeFileSync(a, "a");
+    writeFileSync(b, "b");
+    const ma = statSync(a).mode & 0o777;
+    const mb = statSync(b).mode & 0o777;
+    st.check(
+      "mkstemp names are unique, mode 0600, and hold their own bytes",
+      a !== b &&
+        ma === 0o600 &&
+        mb === 0o600 &&
+        readFileSync(a, "utf8") === "a" &&
+        readFileSync(b, "utf8") === "b",
+      `${a} ${ma.toString(8)} vs ${b} ${mb.toString(8)}`,
+    );
+  }
 
   st.finish();
 });

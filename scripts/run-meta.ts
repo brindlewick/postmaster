@@ -27,7 +27,7 @@ import { homedir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { tryTomlFile } from "./lib/data.ts";
 import { toolRoot } from "./lib/paths.ts";
-import { run, withTempDir } from "./lib/proc.ts";
+import { mkstempSync, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
 
 function isDir(p: string): boolean {
@@ -116,7 +116,7 @@ function meta(d: string, repo: string): number {
     harness_versions: Object.fromEntries([...harnesses].sort().map((h) => [h, version(h)])),
   };
 
-  const tmp = join(d, `.run.json.tmp.${process.pid}`);
+  const tmp = mkstempSync(d, "tmp");
   try {
     writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`);
     renameSync(tmp, join(d, "run.json"));

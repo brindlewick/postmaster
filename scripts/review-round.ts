@@ -24,9 +24,9 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
-import { run, withTempDir } from "./lib/proc.ts";
+import { mkstempSync, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
 
 const HERE = scriptsDir(import.meta);
@@ -81,7 +81,7 @@ function stateLoad(path: string): RoundState {
 }
 
 function stateSave(path: string, st: RoundState): void {
-  const tmp = `${path}.tmp.${process.pid}`;
+  const tmp = mkstempSync(dirname(path), "tmp");
   writeFileSync(tmp, `${JSON.stringify(st, null, 2)}\n`);
   renameSync(tmp, path);
 }

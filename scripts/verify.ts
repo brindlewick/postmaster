@@ -35,7 +35,7 @@ import { constants as osConstants } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseTomlText, tryTomlFile } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
-import { run, withTempDir } from "./lib/proc.ts";
+import { mkstempSync, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
 
 const HERE = scriptsDir(import.meta);
@@ -455,11 +455,14 @@ function writeSpec(spec: string, dispatch: string, journey: string): Check[] {
     dieV(`no waybill at ${join(dispatch, "brief.md")} to take the ticket from`);
   }
   mkdirSync(spec, { recursive: true });
-  writeFileSync(join(spec, "ticket.md"), ticket);
-  writeFileSync(
-    join(spec, "spec.json"),
-    `${JSON.stringify({ checks, journey_dir: journey }, null, 2)}\n`,
-  );
+  for (const [name, text] of [
+    ["ticket.md", ticket],
+    ["spec.json", `${JSON.stringify({ checks, journey_dir: journey }, null, 2)}\n`],
+  ] as Array<[string, string]>) {
+    const tmp = mkstempSync(spec, "tmp");
+    writeFileSync(tmp, text);
+    renameSync(tmp, join(spec, name));
+  }
   return checks;
 }
 
@@ -915,7 +918,7 @@ if (argv[0] === "--self-test") {
       gate_given: gate || null,
       checks,
     };
-    const tmpF = `${f}.tmp.${process.pid}`;
+    const tmpF = mkstempSync(dispatch, "tmp");
     writeFileSync(tmpF, `${JSON.stringify(record, null, 2)}\n`);
     renameSync(tmpF, f);
     console.log(human(checks));

@@ -31,7 +31,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join, posix, resolve, sep } from "node:path";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
-import { run, withTempDir } from "./lib/proc.ts";
+import { mkstempSync, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
 
 const HERE = scriptsDir(import.meta);
@@ -152,7 +152,7 @@ function loadState(statePath: string): Record<string, any> {
 }
 
 function saveState(statePath: string, st: Record<string, any>): void {
-  const tmp = `${statePath}.tmp.${process.pid}`;
+  const tmp = mkstempSync(dirname(statePath), "tmp");
   writeFileSync(tmp, `${JSON.stringify(st, null, 2)}\n`);
   renameSync(tmp, statePath);
 }

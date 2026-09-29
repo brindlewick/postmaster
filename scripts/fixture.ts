@@ -12,6 +12,7 @@
 
 import { randomUUID } from "node:crypto";
 import {
+  chmodSync,
   cpSync,
   existsSync,
   lstatSync,
@@ -85,31 +86,53 @@ function isTicket(t: string): boolean {
   return false;
 }
 
-function appFiles(dir: string): string[] {
+function lexists(p: string): boolean {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function appFiles(dir: string): string[] | null {
   const r = run("git", ["-C", dir, "ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+  // BASE's check=True: a listing that fails fails the copy, never an empty app.
+  if (r.code !== 0) return null;
   return r.out.split("\0").filter((n) => n !== "");
 }
-function makeRepo(dest: string): boolean {
-  mkdirSync(dest, { recursive: true });
-  const listed = appFiles(APP);
-  for (const rel of [...new Set(listed)].sort()) {
-    const s = join(APP, rel);
-    const d = join(dest, rel);
-    if (!existsSync(s)) continue;
-    mkdirSync(dirname(d), { recursive: true });
-    try {
+function makeRepo(dest: string, src = APP): boolean {
+  try {
+    mkdirSync(dest, { recursive: true });
+  } catch {
+    return false;
+  }
+  const listed = appFiles(src);
+  if (!listed) {
+    console.error(`fixture: could not copy the app to ${dest}`);
+    return false;
+  }
+  // BASE's copy fails the repo on the first file it cannot copy; carrying on
+  // would commit a partial app as whole. lexists, as BASE's does: a dangling
+  // symlink is listed and copied, never skipped as missing.
+  try {
+    for (const rel of [...new Set(listed)].sort()) {
+      const s = join(src, rel);
+      const d = join(dest, rel);
+      if (!lexists(s)) continue;
+      mkdirSync(dirname(d), { recursive: true });
       if (lstatSync(s).isSymbolicLink()) {
         symlinkSync(readlinkSync(s), d);
       } else {
-        cpSync(s, d, { preserveTimestamps: true });
-      }
-    } catch {
-      try {
-        cpSync(s, d);
-      } catch {
-        /* skip */
+        try {
+          cpSync(s, d, { preserveTimestamps: true });
+        } catch {
+          cpSync(s, d);
+        }
       }
     }
+  } catch {
+    console.error(`fixture: could not copy the app to ${dest}`);
+    return false;
   }
   if (run("git", ["-C", dest, "init", "-q", "-b", "main"]).code !== 0) return false;
   for (const key of ["user.name", "user.email"]) {
@@ -644,8 +667,8 @@ kind = "github"
     const listed = appFiles(join(tmp, `nonesuch-$(touch ${marker2})`));
     st.check(
       "a directory holding $(...) lists literally, and runs nothing",
-      listed.length === 0 && !existsSync(marker2),
-      `listed=${listed.length} marker=${existsSync(marker2)}`,
+      listed === null && !existsSync(marker2),
+      `listed=${listed} marker=${existsSync(marker2)}`,
     );
   }
   // Temporary names are private and never reused, as `mktemp` makes them.
@@ -1307,6 +1330,88 @@ case $2 in store) exec "${join(HERE, "local.sh")}" "$@" ;; *) exit 1 ;; esac
       "a child that exits 128 on its own is exit 128, never a timeout",
       died128.code === 128,
       `${died128.code} ${died128.out}`,
+    );
+  }
+
+  // BASE's check=True on the app listing: a listing that fails fails the repo
+  // with "could not copy the app", never an empty app; a file that cannot be
+  // copied fails it too, never a partial app committed as whole.
+  {
+    const errs: string[] = [];
+    const origErr = console.error;
+    console.error = (...a: unknown[]) => {
+      errs.push(a.map(String).join(" "));
+    };
+    let listFail = true;
+    let copyFail = true;
+    try {
+      listFail = makeRepo(join(tmp, "fail-list"), join(tmp, "nonesuch-src"));
+      const src = join(tmp, "denied-src");
+      mkdirSync(src, { recursive: true });
+      run("git", ["-C", src, "init", "-q", "-b", "main"]);
+      writeFileSync(join(src, "secret.txt"), "shh\n");
+      run("git", ["-C", src, "add", "-A"]);
+      run("git", [
+        "-C",
+        src,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-q",
+        "-m",
+        "one",
+      ]);
+      chmodSync(join(src, "secret.txt"), 0);
+      copyFail = makeRepo(join(tmp, "fail-copy"), src);
+    } finally {
+      console.error = origErr;
+    }
+    st.check(
+      "a failed app listing fails the repo with BASE's message",
+      listFail === false && errs.some((l) => l.includes("could not copy the app to")),
+      `listed=${listFail}\n${errs.join("\n")}`,
+    );
+    st.check(
+      "a file that cannot be copied fails the repo, never a partial app",
+      copyFail === false,
+      `copied=${copyFail}`,
+    );
+  }
+
+  // lexists, as BASE's copy does: a dangling symlink is listed and copied,
+  // never skipped as missing.
+  {
+    const src = join(tmp, "dangling-src");
+    mkdirSync(src, { recursive: true });
+    run("git", ["-C", src, "init", "-q", "-b", "main"]);
+    symlinkSync("nowhere-at-all", join(src, "dangling"));
+    run("git", ["-C", src, "add", "-A"]);
+    run("git", [
+      "-C",
+      src,
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "commit",
+      "-q",
+      "-m",
+      "one",
+    ]);
+    const dest = join(tmp, "dangling-dest");
+    const ok = makeRepo(dest, src);
+    let linked = false;
+    try {
+      linked = lstatSync(join(dest, "dangling")).isSymbolicLink();
+    } catch {
+      linked = false;
+    }
+    st.check(
+      "a dangling symlink is copied as a link, as lexists does",
+      ok && linked,
+      `made=${ok} linked=${linked}`,
     );
   }
 

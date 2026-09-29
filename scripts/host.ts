@@ -21,7 +21,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
-import { run } from "./lib/proc.ts";
+import { mkstempSync, run } from "./lib/proc.ts";
 
 const HERE = scriptsDir(import.meta);
 const SELF = join(HERE, "host.ts");
@@ -292,7 +292,7 @@ function loadRecord(path: string): Registry | null {
 }
 function saveRecord(path: string, rec: Registry): void {
   mkdirSync(dirname(path), { recursive: true });
-  const temp = `${path}.new`;
+  const temp = mkstempSync(dirname(path), "tmp");
   const body =
     rec.dir +
     "\n" +

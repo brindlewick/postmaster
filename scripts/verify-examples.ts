@@ -108,6 +108,59 @@ function trim(lines: string[]): string[] {
   return out;
 }
 
+/** shlex.split in POSIX mode, as BASE splits a #! line: whitespace splits,
+ * single and double quotes group, and a backslash quotes any next character
+ * outside quotes (even a newline, which stays literal content); inside double
+ * quotes only " and \ unescape, every other backslash stays. Unbalanced
+ * quotes and a trailing backslash throw, as BASE's shlex raises. */
+function shlexSplit(s: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let has = false;
+  let quote: string | null = null;
+  const flush = (): void => {
+    if (has) out.push(cur);
+    cur = "";
+    has = false;
+  };
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]!;
+    if (quote === "'") {
+      if (c === "'") quote = null;
+      else cur += c;
+      continue;
+    }
+    if (c === "\\" && quote !== "'") {
+      const n = s[i + 1];
+      if (n === undefined) throw new Error("No escaped character");
+      i++;
+      if (quote === '"' && n !== '"' && n !== "\\") cur += `\\${n}`;
+      else cur += n;
+      has = true;
+      continue;
+    }
+    if (quote === '"') {
+      if (c === '"') quote = null;
+      else cur += c;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      has = true;
+      continue;
+    }
+    if (c === " " || c === "\t" || c === "\r" || c === "\n") {
+      flush();
+      continue;
+    }
+    cur += c;
+    has = true;
+  }
+  if (quote !== null) throw new Error("No closing quotation");
+  flush();
+  return out;
+}
+
 interface Cmd {
   cmd: string;
   out: string[];
@@ -263,7 +316,7 @@ function examples(wtArg: string, ticketArg: string, timeout = TIMEOUT): number {
     const first = readFileSync(f, "utf8").split("\n")[0] ?? "";
     let argv: string[];
     if (first.startsWith("#!")) {
-      argv = first.slice(2).trim().split(/\s+/);
+      argv = shlexSplit(first.slice(2).trim());
     } else if (f.endsWith(".js") || f.endsWith(".mjs") || f.endsWith(".cjs")) {
       argv = ["node"];
     } else {
@@ -741,6 +794,95 @@ built ok
         lines.some((l) => l.includes("(timed out after 1s)")) &&
         lines.some((l) => l.includes("got none, it timed out")),
       `exit ${rc}\n${lines.join("\n")}`,
+    );
+  }
+
+  // A #! line splits as shlex.split does: quotes group, backslashes quote,
+  // and unbalanced quotes raise. python3's shlex is the independent side.
+  {
+    const vectors = [
+      "",
+      "a b",
+      '"a b" c',
+      "'a b'",
+      'a"b c"d',
+      "x\\ y",
+      '"unclosed',
+      "'unclosed",
+      "trailing\\",
+      "/usr/bin/env python3 -u",
+      '"a""b"',
+      "a#b",
+      '"a\\$b"',
+      '"a\\"b"',
+    ];
+    const py = run(
+      "python3",
+      [
+        "-c",
+        "import json,shlex,sys\nout=[]\nfor s in json.load(sys.stdin):\n try: out.append(shlex.split(s))\n except ValueError: out.append('RAISES')\nprint(json.dumps(out))",
+      ],
+      { input: JSON.stringify(vectors) },
+    );
+    let splitOk = py.code === 0;
+    let detail = "";
+    if (splitOk) {
+      const wants = JSON.parse(py.out) as Array<string[] | string>;
+      wants.forEach((want, i) => {
+        let got: string[] | string;
+        try {
+          got = shlexSplit(vectors[i] ?? "");
+        } catch {
+          got = "RAISES";
+        }
+        if (JSON.stringify(got) !== JSON.stringify(want)) {
+          splitOk = false;
+          detail += `${JSON.stringify(vectors[i])}: port=${JSON.stringify(got)} base=${JSON.stringify(want)}\n`;
+        }
+      });
+    }
+    st.check("a #! line splits as shlex.split does, quotes and errors alike", splitOk, detail);
+  }
+  if (!existsSync("/bin/echo")) {
+    st.fail("a quoted #! program runs", "/bin/echo is not on PATH");
+  } else {
+    mkdirSync(join(tmp, "quoted", "bin"), { recursive: true });
+    writeFileSync(
+      join(tmp, "quoted", "package.json"),
+      '{"name": "quoted", "bin": {"q": "bin/q"}}\n',
+      "utf8",
+    );
+    writeFileSync(join(tmp, "quoted", "bin", "q"), '#!"/bin/echo" tagged\necho never\n', "utf8");
+    const qf = resolve(join(tmp, "quoted", "bin", "q"));
+    writeFileSync(
+      join(tmp, "quoted.md"),
+      `## User journey\nA quoted interpreter.\n\n\`\`\`\n$ q hello\ntagged ${qf} hello\n\`\`\`\n`,
+      "utf8",
+    );
+    expect(
+      "a quoted #! program splits as shlex splits, and runs",
+      0,
+      "quoted",
+      join(tmp, "quoted.md"),
+      "1 of 1",
+    );
+    mkdirSync(join(tmp, "unbalanced", "bin"), { recursive: true });
+    writeFileSync(
+      join(tmp, "unbalanced", "package.json"),
+      '{"name": "unbalanced", "bin": {"u": "bin/u"}}\n',
+      "utf8",
+    );
+    writeFileSync(join(tmp, "unbalanced", "bin", "u"), '#!/bin/echo "oops\necho never\n', "utf8");
+    writeFileSync(
+      join(tmp, "unbalanced.md"),
+      "## User journey\nAn unbalanced quote.\n\n```\n$ u hello\nwhatever\n```\n",
+      "utf8",
+    );
+    expect(
+      "an unbalanced #! quote fails as BASE's shlex raises",
+      1,
+      "unbalanced",
+      join(tmp, "unbalanced.md"),
     );
   }
 

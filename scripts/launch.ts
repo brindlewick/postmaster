@@ -570,12 +570,16 @@ if (argv[0] === "--self-test") {
   } else {
     die(`unknown command: ${CMD}`);
   }
+  // BASE's `[ -d ]`: a file is no working directory, and nothing is mutated
+  // for one — no trust entry, no chdir, no launch.
   if (CMD !== "form") {
+    let isDir = false;
     try {
-      accessSync(CWD, fsConstants.F_OK);
+      isDir = statSync(CWD).isDirectory();
     } catch {
-      die(`no such directory: ${CWD}`);
+      isDir = false;
     }
+    if (!isDir) die(`no such directory: ${CWD}`);
   }
   // For pi/muse/mimo, the prompt file is resolved to an absolute path (read after the cd),
   // and for the harnesses that take the prompt text as argv (codex, claude, agy, and grok's
@@ -641,6 +645,15 @@ if (argv[0] === "--self-test") {
     }
   }
 
+  // The directory the launch leaves: BASE's subshell cds to CWD before the
+  // resume check, and the launch itself cds after it. Both see the same pair.
+  let prevCwd = "";
+  try {
+    prevCwd = process.cwd();
+  } catch {
+    prevCwd = "";
+  }
+
   // muse/mimo resume: verify the thread exists in this launch's data directory.
   if (CMD === "resume" && DATA) {
     const held = makeHeldDir();
@@ -653,6 +666,14 @@ if (argv[0] === "--self-test") {
       XDG_DATA_HOME: DATA,
       MIMOCODE_DISABLE_CLAUDE_IMPORT: "1",
     };
+    // The check runs where the launch will, seeing what it will: PWD names
+    // CWD logically and OLDPWD the directory it came from, as below.
+    if (prevCwd !== "") exportEnv.OLDPWD = prevCwd;
+    try {
+      exportEnv.PWD = logicalPwd(CWD, prevCwd, realpathSync(CWD));
+    } catch {
+      /* keep the inherited PWD on any surprise */
+    }
     // With an env file the check runs in a shell started in CWD that sources
     // the file and execs the export itself, as BASE's subshell does.
     const [expBin, expArgs] = ENV_FILE
@@ -689,12 +710,6 @@ if (argv[0] === "--self-test") {
   }
 
   // Enter the working directory and exec the harness.
-  let prevCwd = "";
-  try {
-    prevCwd = process.cwd();
-  } catch {
-    prevCwd = "";
-  }
   try {
     process.chdir(CWD);
   } catch {
@@ -2821,6 +2836,67 @@ withTempDir((tmp) => {
   )
     ok("a symlinked cwd keys its physical directory");
   else st.fail("a symlinked cwd keys its physical directory");
+
+  // BASE's `[ -d ]`: a file is no working directory, and nothing is mutated
+  // for one — the codex trust write below the guard never runs.
+  writeFileSync(join(tmp, "afile"), "not a dir\n");
+  envx = { HOME: join(tmp, "fakehome") };
+  refused(
+    "a file as cwd is no directory",
+    "codex",
+    "no such directory",
+    "launch",
+    "one",
+    join(tmp, "afile"),
+    join(tmp, "prompt.txt"),
+  );
+  if (!existsSync(join(tmp, "fakehome", ".codex", "config.toml")))
+    ok("a file as cwd mutates nothing, no trust entry");
+  else fail("a file as cwd mutates nothing, no trust entry");
+  envx = {};
+
+  // The resume export check sees the same PWD, OLDPWD and SHLVL the launch
+  // hands the harness: BASE's subshell cds to CWD before the check. Through
+  // a symlinked cwd the PWD is the logical path on both sides.
+  {
+    const mimo = join(tmp, "bin", "mimo");
+    const savedMimo = readFileSync(mimo, "utf8");
+    const rec = join(tmp, "exp-env.txt");
+    writeFileSync(
+      mimo,
+      `#!/bin/sh\nprintf '%s\\n' "$PWD|$OLDPWD|\${SHLVL:-unset}" >> "${rec}"\n[ "$1" = export ] && { [ -e "$XDG_DATA_HOME/$2" ] && exit 0; echo "Session not found: $2" >&2; exit 1; }\nprintf '%s\\n' "resumed $*"\n`,
+    );
+    mkdirSync(join(tmp, "resdir"), { recursive: true });
+    try {
+      symlinkSync(join(tmp, "resdir"), join(tmp, "reslink"));
+    } catch {
+      /* exists */
+    }
+    writeFileSync(
+      join(tmp, "mimo-resume.toml"),
+      '[lanes.x]\nharness = "mimo"\nmodel = "prov/mimo-model"\n',
+    );
+    const savedHd = process.env.POSTMASTER_HARNESS_DATA;
+    process.env.POSTMASTER_HARNESS_DATA = hd;
+    const rdata = harnessData("mimo", "resume", join(tmp, "reslink"), "x", "", "");
+    if (savedHd === undefined) delete process.env.POSTMASTER_HARNESS_DATA;
+    else process.env.POSTMASTER_HARNESS_DATA = savedHd;
+    mkdirSync(rdata, { recursive: true });
+    writeFileSync(join(rdata, "ses_env"), "");
+    rmSync(rec, { force: true });
+    mrun("mimo-resume", "resume", "x", join(tmp, "reslink"), "ses_env", join(tmp, "prompt.txt"));
+    writeFileSync(mimo, savedMimo);
+    const lines = existsSync(rec) ? readFileSync(rec, "utf8").trim().split("\n") : [];
+    const pwdOk = lines.length === 2 && lines[0] === lines[1];
+    const logicalOk = lines.length === 2 && (lines[0] ?? "").split("|")[0] === join(tmp, "reslink");
+    if (rc === 0 && pwdOk && logicalOk)
+      ok("a resume check sees the launch's PWD, OLDPWD and SHLVL");
+    else
+      st.fail(
+        "a resume check sees the launch's PWD, OLDPWD and SHLVL",
+        `exit ${rc}\n${lines.join("\n")}`,
+      );
+  }
 
   st.finish();
 });

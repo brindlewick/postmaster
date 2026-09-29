@@ -1,7 +1,8 @@
 // Process and filesystem edges: temp directories the scripts clean up, and a
 // spawn wrapper that returns exit code and output the way the bash versions read it.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -219,6 +220,22 @@ export function argvDecoded(): string[] {
   if (start < raw.length) parts.push(raw.subarray(start));
   if (parts.length < args.length + 2) return args;
   return parts.slice(parts.length - args.length).map((p) => decodeDropInvalid(p));
+}
+
+/** A fresh temporary file in dir, as `mkstemp` makes one: a random name that
+ * never reuses an existing path, created O_EXCL, mode 0600. For an atomic
+ * write: write the file, then rename it over the target. */
+export function mkstempSync(dir: string, prefix: string): string {
+  for (;;) {
+    const name = join(dir, `${prefix}${randomBytes(8).toString("hex")}`);
+    try {
+      closeSync(openSync(name, "wx", 0o600));
+      return name;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code === "EEXIST") continue;
+      throw e;
+    }
+  }
 }
 
 /** mkdir -d a temp dir and hand it to fn; remove it afterwards even if fn throws. */
