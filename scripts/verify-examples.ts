@@ -141,6 +141,22 @@ function transcript(body: string[]): Cmd[] | null {
   return result;
 }
 
+function exampleEnv(
+  home: string,
+  shims: string,
+  runpath: string,
+): Record<string, string | undefined> {
+  return {
+    ...process.env,
+    HOME: home,
+    PWD: home,
+    NO_COLOR: "1",
+    PATH: shims + delimiter + runpath,
+    // Truly unset, as BASE's `env.pop` unsets it: run() merges over
+    // process.env, so only an explicit undefined deletes the key.
+    BASH_ENV: undefined,
+  };
+}
 function examples(wtArg: string, ticketArg: string): number {
   const wt = resolve(wtArg);
   let ticket = ticketArg;
@@ -274,14 +290,7 @@ function examples(wtArg: string, ticketArg: string): number {
     const cmds = scripts[n]!;
     const home = join(scratch, `block-${n + 1}`);
     mkdirSync(home);
-    const env = {
-      ...process.env,
-      HOME: home,
-      PWD: home,
-      NO_COLOR: "1",
-      PATH: shims + delimiter + runpath,
-    };
-    delete (env as Record<string, unknown>).BASH_ENV;
+    const env = exampleEnv(home, shims, runpath);
     for (const c of cmds) {
       ran += 1;
       const r = run("bash", ["-c", c.cmd], { cwd: home, env, input: "" });
@@ -396,6 +405,26 @@ withTempDir((tmp) => {
     } else {
       st.fail(`${label} (exit ${r.code})`, out);
     }
+  }
+
+  // Example shells run with BASH_ENV truly unset even when the ambient
+  // environment sets it, as BASE's `env.pop` unsets it.
+  {
+    const probeEnv = join(tmp, "bash-env-probe.sh");
+    writeFileSync(probeEnv, "echo BASH-ENV-LEAKED\n");
+    const bashAbs = run("bash", ["-c", "command -v bash"]).out.trim() || "/bin/bash";
+    const saved = process.env.BASH_ENV;
+    process.env.BASH_ENV = probeEnv;
+    const r = run(bashAbs, ["-c", 'echo "BASH_ENV=${BASH_ENV-unset}"'], {
+      env: exampleEnv(join(tmp, "envhome"), "/nonexistent-shims", "/nonexistent-run"),
+    });
+    if (saved === undefined) delete process.env.BASH_ENV;
+    else process.env.BASH_ENV = saved;
+    st.check(
+      "example shells run with BASH_ENV truly unset, as BASE unsets it",
+      r.out.includes("BASH_ENV=unset") && !r.out.includes("LEAKED"),
+      r.out,
+    );
   }
 
   mkdirSync(join(tmp, "app", "bin"), { recursive: true });

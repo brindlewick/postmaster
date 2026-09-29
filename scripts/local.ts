@@ -173,8 +173,9 @@ function load(store: string, number: bigint): { meta?: Meta; why?: string } {
   }
   // Strictly decoded through the file's fatal decoder, as BASE reads it:
   // undecodable bytes refuse the ticket rather than listing it with
-  // replacements. A leading BOM still parses, as JSON.parse skips it and
-  // BASE's utf-8-sig strips it.
+  // replacements. A leading BOM still parses, as the decoder strips it by
+  // default and BASE's utf-8-sig strips it; JSON.parse would throw on one,
+  // so the decoder must keep stripping.
   let text: string;
   try {
     text = decodeFatal(raw);
