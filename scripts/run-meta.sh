@@ -91,8 +91,9 @@ field() {  # field <run.json> <key>  the postmaster.<key> of a run.json
 
 claim() {  # claim <run.json>: `checkout:<path>` when the run names a checkout, `no` when
            # its postmaster record names none, `unknown` when the record cannot be read at all;
-           # the scan fails closed on unknown
-  python3 -c '
+           # the scan fails closed on unknown. Isolated mode: no user site, PYTHON*
+           # variable or startup file reaches the read.
+  python3 -I -c '
 import json, sys
 try:
     r = json.load(open(sys.argv[1]))
@@ -113,6 +114,11 @@ else:
 
 canon() {  # canon <dir>: its absolute physical path, or nothing
   CDPATH= cd -P -- "$1" 2>/dev/null && pwd -P
+}
+
+stage_of() {  # stage_of <manifest>: its stage, or "" when it cannot be read
+  python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("stage") or "")' \
+    "$1" 2>/dev/null || echo ""
 }
 
 path_of() {  # path_of <dispatch>: the run's tool checkout, canonical; the waybill's for an old run
@@ -189,7 +195,19 @@ pin_scan() {  # pin_scan <runs-root> <checkout>: exit 42 when no run uses this p
     if [ ! -r "$p" ] || [ ! -x "$p" ]; then hidden=$p; break; fi  # an unreadable project hides runs; keep
     for d in "$p"*/; do
       if [ ! -r "$d" ] || [ ! -x "$d" ]; then hidden=$d; break 2; fi  # an unreadable run hides; keep
-      [ -f "$d/run.json" ] || continue
+      if [ ! -f "$d/run.json" ]; then
+        # No record attributes this directory: a live manifest keeps the pin, so a
+        # run whose record vanished still protects it; no manifest or a done one
+        # drops, which is what an empty directory is. An unreadable manifest is a
+        # file, so it reads as "" below and keeps.
+        [ -f "$d/manifest.json" ] || continue
+        stage=$(stage_of "$d/manifest.json")
+        case $stage in
+          done|abandoned) ;;
+          *) found=0; break 2 ;;
+        esac
+        continue
+      fi
       c=$(claim "$d/run.json")
       # got stays uninitialized on purpose: *) below always sets it before use, and
       # under set -u any future fall-through dies, which in_flight reads as keep.
@@ -205,8 +223,7 @@ pin_scan() {  # pin_scan <runs-root> <checkout>: exit 42 when no run uses this p
         got=$(canon "$got") || continue
         [ "$got" = "$checkout" ] || continue
       fi
-      stage=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("stage") or "")' \
-        "$d/manifest.json" 2>/dev/null) || stage=""
+      stage=$(stage_of "$d/manifest.json")
       case $stage in
         done|abandoned) ;;
         *) found=0; break 2 ;;
@@ -223,13 +240,14 @@ pin_scan() {  # pin_scan <runs-root> <checkout>: exit 42 when no run uses this p
 
 in_flight() {  # in_flight <runs-root> <checkout>: yes when some run still uses this pin
   local root=$1 checkout=$2 st prog
-  prog=$(declare -f claim canon pin_scan; printf '%s\n' 'set -uo pipefail' 'pin_scan "$@"')
+  prog=$(declare -f claim canon stage_of pin_scan; printf '%s\n' 'set -uo pipefail' 'pin_scan "$@"')
   # The scan runs in a clean shell the caller's environment cannot reach: a fresh
   # bash with no startup files under an empty environment, so BASH_ENV, SHELLOPTS,
   # exported functions, readonly variables and every option start from the default
   # and the explicit block inside sets what the scan needs. Only PATH, which finds
-  # python3, and HOME cross over.
-  env -i PATH="$PATH" HOME="$HOME" bash --noprofile --norc -c "$prog" run-meta-scan "$root" "$checkout"
+  # python3, crosses over; not even HOME, so no user site reaches the scan, and its
+  # Python runs isolated besides.
+  env -i PATH="$PATH" bash --noprofile --norc -c "$prog" run-meta-scan "$root" "$checkout"
   st=$?
   case $st in
     42) return 1 ;;  # the scan's drop signal: nothing in flight
@@ -712,6 +730,78 @@ PATH=$oldpath
 [ $rc -eq 0 ] && grep -q "kept" <<<"$out" && ! grep -q "unbound variable" <<<"$out" && [ -d "$pinU" ] \
   && ok "release keeps the pin for a sibling whose record claims an unexpected shape" \
   || fail "release keeps the pin for a sibling whose record claims an unexpected shape ($out)"
+# A run whose run.json is missing, a directory or a broken link keeps the pin while
+# its manifest is live — the record's absence is not safety — and drops once done.
+mroot=$tmp/mroot
+mkdir -p "$mroot/missing/RUN-MM" "$mroot/dirrec/RUN-MD" "$mroot/linkrec/RUN-ML" "$mroot/project/RUN-MREL"
+pinM=$(pin "$fake" "$commitH") || fail "a pin is cut for the missing-record controls"
+mkdir -p "$mroot/dirrec/RUN-MD/run.json"
+ln -s "$tmp/nowhere-at-all" "$mroot/linkrec/RUN-ML/run.json"
+for r in "$mroot/missing/RUN-MM" "$mroot/dirrec/RUN-MD" "$mroot/linkrec/RUN-ML"; do
+  printf '{"stage": "done"}\n' > "$r/manifest.json"
+done
+printf '{"postmaster": {"commit": "%s", "checkout": "%s"}}\n' "$commitH" "$pinM" > "$mroot/project/RUN-MREL/run.json"
+printf '{"stage": "done"}\n' > "$mroot/project/RUN-MREL/manifest.json"
+printf '{"stage": "synthesis"}\n' > "$mroot/missing/RUN-MM/manifest.json"
+try release "$mroot/project/RUN-MREL"
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$pinM" ] \
+  && ok "release keeps the pin for a live run whose run.json is missing" \
+  || fail "release keeps the pin for a live run whose run.json is missing ($out)"
+printf '{"stage": "done"}\n' > "$mroot/missing/RUN-MM/manifest.json"
+printf '{"stage": "synthesis"}\n' > "$mroot/dirrec/RUN-MD/manifest.json"
+try release "$mroot/project/RUN-MREL"
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$pinM" ] \
+  && ok "release keeps the pin for a live run whose run.json is a directory" \
+  || fail "release keeps the pin for a live run whose run.json is a directory ($out)"
+printf '{"stage": "done"}\n' > "$mroot/dirrec/RUN-MD/manifest.json"
+printf '{"stage": "synthesis"}\n' > "$mroot/linkrec/RUN-ML/manifest.json"
+try release "$mroot/project/RUN-MREL"
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$pinM" ] \
+  && ok "release keeps the pin for a live run whose run.json is a broken link" \
+  || fail "release keeps the pin for a live run whose run.json is a broken link ($out)"
+printf '{"stage": "done"}\n' > "$mroot/linkrec/RUN-ML/manifest.json"
+try release "$mroot/project/RUN-MREL"
+[ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$pinM" ] \
+  && ok "release removes once the recordless runs are done" \
+  || fail "release removes once the recordless runs are done ($out)"
+# A hostile HOME cannot reach the scan: no HOME crosses into the clean shell, and
+# its Python runs isolated besides, so a user site forging done changes nothing.
+pyver=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+usite=$tmp/fakehome/.local/lib/python$pyver/site-packages; mkdir -p "$usite"
+cat > "$usite/usercustomize.py" <<'EOF'
+import json as _j
+_real_load = _j.load
+def _fake_load(fp, *a, **k):
+    d = _real_load(fp, *a, **k)
+    if isinstance(d, dict) and d.get("stage") == "synthesis":
+        d = dict(d); d["stage"] = "done"
+    return d
+_j.load = _fake_load
+EOF
+hhomeroot=$tmp/hhroot; mkdir -p "$hhomeroot/project/RUN-HLIVE" "$hhomeroot/project/RUN-HHREL"
+pinHH=$(pin "$fake" "$commitH") || fail "a pin is cut for the hostile-HOME controls"
+for r in "$hhomeroot/project/RUN-HLIVE" "$hhomeroot/project/RUN-HHREL"; do
+  printf '{"postmaster": {"commit": "%s", "checkout": "%s"}}\n' "$commitH" "$pinHH" > "$r/run.json"
+  printf '{"stage": "done"}\n' > "$r/manifest.json"
+done
+printf '{"stage": "synthesis"}\n' > "$hhomeroot/project/RUN-HLIVE/manifest.json"
+forged=$(HOME=$tmp/fakehome python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("stage"))' \
+  "$hhomeroot/project/RUN-HLIVE/manifest.json")
+[ "$forged" = "done" ] && ok "the hostile HOME demonstrably forges done" \
+  || fail "the hostile HOME demonstrably forges done (saw $forged)"
+oldhome=$HOME; HOME=$tmp/fakehome
+try release "$hhomeroot/project/RUN-HHREL"
+HOME=$oldhome
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$pinHH" ] \
+  && ok "release keeps the pin under a hostile HOME forging done" \
+  || fail "release keeps the pin under a hostile HOME forging done ($out)"
+printf '{"stage": "done"}\n' > "$hhomeroot/project/RUN-HLIVE/manifest.json"
+oldhome=$HOME; HOME=$tmp/fakehome
+try release "$hhomeroot/project/RUN-HHREL"
+HOME=$oldhome
+[ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$pinHH" ] \
+  && ok "release removes under a hostile HOME once nothing is live" \
+  || fail "release removes under a hostile HOME once nothing is live ($out)"
 printf '{"stage": "done"}\n' > "$gi_run/manifest.json"
 try release "$gi_rel"
 [ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$pinGI" ] \
