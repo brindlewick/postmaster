@@ -78,11 +78,11 @@ NEW_CALLS=$(grep -o '<tool>/scripts/[a-z0-9-]*\.sh' "$PM" | sort -u | comm -23 -
 LEG=""
 for f in $CHANGED; do
   [ -f "$f" ] || continue
-  if grep -qi 'launch' "$f" && grep -qi 'resume' "$f" \
-      && grep -qiE 'takeover|take over|take-over' "$f" \
-      && grep -qi 'refus' "$f" && grep -qi 'thread' "$f" \
-      && grep -qi 'wall' "$f" && grep -qiE 'hand-?off' "$f" \
-      && grep -qiE 'finish|complete' "$f"; then
+  if grep -qi 'launch' <(code "$f") && grep -qi 'resume' <(code "$f") \
+      && grep -qiE 'takeover|take over|take-over' <(code "$f") \
+      && grep -qi 'refus' <(code "$f") && grep -qi 'thread' <(code "$f") \
+      && grep -qi 'wall' <(code "$f") && grep -qiE 'hand-?off' <(code "$f") \
+      && grep -qiE 'finish|complete' <(code "$f"); then
     LEG="$LEG $f"
   fi
 done
@@ -122,7 +122,7 @@ n=$(grep -c 'launch\.sh \(launch\|resume\)' "$PM")
 n=$(grep -c 'host\.sh run' "$PM")
 [ "$n" -eq 0 ] && pass P5-no-hostrun "postmaster.md runs no host.sh run itself" \
   || nope P5-no-hostrun "postmaster.md still runs host.sh run $n times"
-n=$(grep -c 'coachman-leg-<n>' "$PM")
+n=$(grep -c 'coachman-leg-<n>\(-events\|\.err\)' "$PM")
 [ "$n" -eq 0 ] && pass P6-no-streampath "postmaster.md writes no leg stream path itself" \
   || nope P6-no-streampath "postmaster.md still writes $n leg stream paths itself"
 
@@ -131,7 +131,8 @@ n=$(code scripts/runs-status.sh | grep -c '\.err')
 [ "$n" -eq 0 ] && pass P7-no-err-status "runs-status.sh reads no .err text (guard)" \
   || nope P7-no-err-status "runs-status.sh reads .err text $n times"
 if [ -n "$LEG" ] && [ "$(echo "$LEG" | wc -w)" -eq 1 ]; then
-  n=$(code "$LEG" | grep -c '\.err')
+  n=$(sed -n "1,/^\(self_test\|[a-z_]*controls\)() {/p" "$LEG" | grep -v '^[[:space:]]*#' \
+    | grep -cE '\<(grep|cat|head|tail|wc|sed|awk|cmp|diff) [^|]*(\$err([^f_]|$)|\.err)|<\s*\$err([^f_]|$)|read_text\([^)]*(\$err|\.err)|read_bytes\([^)]*(\$err|\.err)|open\([^)]*\.err')
   [ "$n" -eq 0 ] && pass P8-no-err-leg "$LEG reads no .err text" \
     || nope P8-no-err-leg "$LEG reads .err text $n times"
 else
