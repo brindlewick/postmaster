@@ -538,7 +538,10 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    case "$VERIFY_EXIT" in
      0|3) ;;
      *) exit 1 ;;
-   esac   # 0 green and 3 not-run proceed; a failed check (2), an unrunnable verify (1), a signal, or an unstartable shell (126/127) stops the round
+   esac   # 0 green and 3 not-run proceed; 2 (a check failed), 1 (verify unrunnable), a signal, or verify.sh itself unstartable (126/127) stops the round
+   # A 126/127 inside a check is that check's `not run` ("bash could not start it"),
+   # which aggregates to 3 and proceeds; only verify.sh itself failing to start stops
+   # the round on 126/127
    if [ "$VERIFY_EXIT" -eq 3 ]; then
      awk '/: not run, /{print; p=1; next} p==1 && /^  /{print; next} {p=0}' <dispatch>/logs/review-r<round>-checks.txt | while IFS= read -r NOTRUN; do
        <tool>/scripts/run-log.sh <dispatch> "review round <round> gate not run: $NOTRUN"
