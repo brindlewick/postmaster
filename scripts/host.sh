@@ -1242,9 +1242,9 @@ try:
     panes = json.load(sys.stdin)["result"]["panes"]
 except (ValueError, KeyError, TypeError):
     raise SystemExit(2)
-herdr_tab = re.compile(r"^w[A-Za-z0-9]+:t[0-9]+$")
+herdr_tab = re.compile(r"w[A-Za-z0-9]+:t[0-9A-Za-z]+")
 def placed(v):
-    return isinstance(v, str) and herdr_tab.match(v) is not None
+    return isinstance(v, str) and herdr_tab.fullmatch(v) is not None
 pane = next((p for p in panes if p.get("pane_id") == sys.argv[1]), None)
 if pane is None:
     print("missing")
@@ -1672,7 +1672,12 @@ path = os.path.join(S, "herdr.json")
 st = json.load(open(path)) if os.path.exists(path) else {"n": 0, "spaces": {}, "panes": {}, "tabs": {}, "open": {}, "agents": [], "tab_n": {}}
 def save(): json.dump(st, open(path, "w"))
 def new(prefix): st["n"] += 1; return "%s%d" % (prefix, st["n"])
-def newtab(ws): st.setdefault("tab_n", {}); st["tab_n"][ws] = st["tab_n"].get(ws, 0) + 1; return "%s:t%d" % (ws, st["tab_n"][ws])
+# Live Herdr numbers tabs 1-9,A-Z (observed to tF); past Z this assumes plain base-36.
+def b36(n):
+    s = ""
+    while n: n, r = divmod(n, 36); s = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[r] + s
+    return s
+def newtab(ws): st.setdefault("tab_n", {}); st["tab_n"][ws] = st["tab_n"].get(ws, 0) + 1; return "%s:t%s" % (ws, b36(st["tab_n"][ws]))
 def opt(name): return a[a.index(name) + 1] if name in a else None
 def tokens(): return dict(a[i + 1].split("=", 1) for i in range(len(a) - 1) if a[i] == "--token")
 def out(obj): print(json.dumps({"id": "stub", "result": obj}))
@@ -2212,7 +2217,7 @@ PY
     'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); ws=s[\"open\"][sys.argv[2]]; t1=s[\"spaces\"][ws][\"tabs\"][0]; ps=[p for p,x in s[\"panes\"].items() if x.get(\"tab\")==t1]; sys.exit(set(ps)!=set([\"pU\"]))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna"' "$got2"
   check "and the space refusal still stands" '[ $rc -eq 2 ]'
   i=0
-  for spec in 'an empty string|""' 'false|false' 'zero|0' 'a list|["t1"]' 'a malformed string|"t1"'; do
+  for spec in 'an empty string|""' 'false|false' 'zero|0' 'a list|["t1"]' 'a malformed string|"t1"' 'a trailing newline|"w1:t1\n"'; do
     i=$((i + 1)); spelling=${spec%%|*}; literal=${spec#*|}
     reset
     got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/h1-$i.done -- ./fixed.sh)
@@ -2235,6 +2240,32 @@ PY
   n0=$(calls herdr | grep -c "^tab${T}close" || true); m0=$(calls herdr | grep -c "^pane${T}close" || true)
   hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null
   check "a well-formed id still closes a tab holding only the run's panes" \
+    '[ $(calls herdr | grep -c "^tab${T}close" || true) -eq $((n0 + 1)) ] && [ $(calls herdr | grep -c "^pane${T}close" || true) -eq $m0 ] && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+
+  reset
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/b1.done -- ./fixed.sh)
+  marker "$tmp/logs/b1.done"
+  python3 - "$tmp/stub/herdr.json" "$tmp/state/placements" "$repo/.worktrees/T-1-luna" <<'PY'
+import glob, json, os, sys
+st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[3]]
+# Retab the launch as the tenth tab: rename its tab id to the base-36 shape
+# live Herdr issues, in the stub state and the recorded placement alike.
+old = st["spaces"][ws]["tabs"][-1]
+new = "%s:tA" % ws
+st["spaces"][ws]["tabs"] = [new if t == old else t for t in st["spaces"][ws]["tabs"]]
+st["tabs"][new] = st["tabs"].pop(old)
+for r in st["panes"].values():
+    if r.get("tab") == old: r["tab"] = new
+st.setdefault("tab_n", {})[ws] = 10
+for f in glob.glob(os.path.join(sys.argv[2], "*.json")):
+    d = json.load(open(f))
+    if d.get("cwd") == os.path.realpath(sys.argv[3]) and d.get("tab") == old:
+        d["tab"] = new; json.dump(d, open(f, "w"))
+json.dump(st, open(sys.argv[1], "w"))
+PY
+  n0=$(calls herdr | grep -c "^tab${T}close" || true); m0=$(calls herdr | grep -c "^pane${T}close" || true)
+  hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null
+  check "a tA tab holding only the run's panes closes" \
     '[ $(calls herdr | grep -c "^tab${T}close" || true) -eq $((n0 + 1)) ] && [ $(calls herdr | grep -c "^pane${T}close" || true) -eq $m0 ] && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
 
   echo "first-launch failure paths, Herdr (stub)"
