@@ -177,15 +177,16 @@ file; the postmaster keeps using its main `<tool>` for every other supervision s
    exited marker first:
 
    ```sh
-   <rt>/scripts/host.sh run "$(<rt>/scripts/host.sh name <dispatch> coachman)" <repo>/.worktrees/<TICKET> \
+   <rt>/scripts/host.sh run "$(<rt>/scripts/host.sh name <dispatch> coachman <leg-name> <n>)" <repo>/.worktrees/<TICKET> \
+       --under <dispatch> --role coachman --run <dispatch> \
        --out <dispatch>/logs/coachman-leg-<n>-events.jsonl --err <dispatch>/logs/coachman-leg-<n>.err \
        --marker <dispatch>/.leg-<n>-exited \
        -- <rt>/scripts/launch.sh launch coachman <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt --leg <leg-name> \
        --run <dispatch>
    ```
 
-   The name comes from the waybill through `host.sh name`, never typed: a ticket's title can
-   hold anything a shell would run.
+   The tab name comes from the run config and leg identity through `host.sh name`; the dispatch
+   makes the synthesis worktree space carry the ticket name. Neither name is typed into a shell.
 
    Record the thread id from the stream (`harnesses.md`) in the manifest as
    `coachman.legs.<n>.thread_id`, and `coachman` as `coachman.legs.<n>.name`, set `leg` to
@@ -198,7 +199,8 @@ file; the postmaster keeps using its main `<tool>` for every other supervision s
    this process's errors, and `host.sh` clears the leg's exited marker:
 
    ```sh
-   <rt>/scripts/host.sh run "$(<rt>/scripts/host.sh name <dispatch> coachman)" <repo>/.worktrees/<TICKET> --append \
+   <rt>/scripts/host.sh run "$(<rt>/scripts/host.sh name <dispatch> coachman <leg-name> <n>)" <repo>/.worktrees/<TICKET> --append \
+       --under <dispatch> --role coachman --run <dispatch> \
        --out <dispatch>/logs/coachman-leg-<n>-events.jsonl --err <dispatch>/logs/coachman-leg-<n>.err \
        --marker <dispatch>/.leg-<n>-exited \
        -- <rt>/scripts/launch.sh resume <name> <repo>/.worktrees/<TICKET> <thread-id> <dispatch>/leg-<n>-resume-<time>.txt --leg <leg-name> \
@@ -211,13 +213,22 @@ file; the postmaster keeps using its main `<tool>` for every other supervision s
 
 ## Stage D: supervise
 
-Poll every `postmaster.poll_seconds` (default 120) with one command per project:
+Keep `<tool>/scripts/runs-watch.sh <runs>` running in the background, one per project
+(`harnesses.md`, Keeping the watcher running). It looks every `postmaster.poll_seconds`
+(default 120) until a run needs you, then prints `<tool>/scripts/runs-status.sh`'s table, names
+each run that needs you with its `NEXT`, and exits 0. Wait for its return as harnesses.md
+says, then act on what it names, run by run, and log every action; then start it again at
+once. If it names nothing it failed: the reason is in `<runs>/postmaster/watch.err` — fix
+the cause (harnesses.md, Keeping the watcher running) before starting it again. A watcher
+that is not running is a run nobody notices.
 
-```sh
-<tool>/scripts/runs-status.sh <runs>
-```
+**Hold a run** by writing its ticket to `<runs>/postmaster/held`, one ticket per line,
+exactly as the RUN column shows it: a held run never needs you. **Release it** by removing
+its line, and remove the line when the run closes. Hold a run only while you mean to leave
+it alone — a question already put to the user, a deliberate pause — never to stop a wake
+you have not acted on.
 
-Act on the `NEXT` column, run by run, and log every action:
+Each `NEXT` names the act:
 
 - **USER:** the run waits on the user, and its `.waiting-on-user` holds the question (Stage E
   step 3, Stage F step 2). Put the question to the user again if you have not in this session;
