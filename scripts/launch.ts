@@ -347,15 +347,34 @@ function _putForm(cwd: string, cmd: string[], stdinFile: string): string {
  * machinery's own and is left out. SHLVL passes through verbatim: a bash
  * child always sees its parent's level minus one, so the dump shell reports
  * exactly what BASE's launch shell hands on, whether the file sets SHLVL or
- * leaves it. A file that fails midway still applies whatever it set, as `.`
- * does. */
+ * leaves it. `command -p` finds env on a default path, so a file that
+ * unsets or empties PATH still dumps. A file that never reaches its dump
+ * (exit, set -e, exec) aborts the launch with the dump shell's status, as
+ * BASE never launches then; an empty dump with a zero status is an emptied
+ * environment, which BASE hands on. */
 function sourceEnvFile(path: string, target: Record<string, string | undefined>): void {
-  const r = spawnSync("bash", ["-c", 'set -a; . "$1"; set +a; env -0', "_", path], {
+  const r = spawnSync("bash", ["-c", 'set -a; . "$1"; set +a; command -p env -0', "_", path], {
     encoding: "utf8",
     env: target,
   });
+  const error = r.error as NodeJS.ErrnoException | undefined;
+  if (error && (r.status === null || r.status === undefined) && !r.signal) {
+    die(`cannot source ${path}: ${error.message}`);
+  }
+  if (r.signal) {
+    process.kill(process.pid, r.signal);
+    process.exit(signalExitCode(r.signal));
+  }
+  if (r.status !== 0) {
+    const err = String(r.stderr ?? "");
+    if (err) process.stderr.write(err);
+    process.exit(typeof r.status === "number" ? r.status : 1);
+  }
   const dump = String(r.stdout ?? "");
-  if (!dump) return;
+  if (!dump) {
+    for (const k of Object.keys(target)) delete target[k];
+    return;
+  }
   const next: Record<string, string> = {};
   for (const entry of dump.split("\0")) {
     if (!entry) continue;
@@ -1426,6 +1445,137 @@ withTempDir((tmp) => {
     );
     envx = {};
     writeFileSync(claude, saved);
+  }
+  // A file that never reaches its dump aborts the launch with its status.
+  writeFileSync(join(tmp, "dumpexit.env"), "FOO=fromfile\nexit 3\n");
+  writeFileSync(
+    join(tmp, "dumpexit.toml"),
+    `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumpexit.env")}" }\n`,
+  );
+  {
+    doRun(
+      "dumpexit",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "review",
+    );
+    st.check(
+      "an env file that exits aborts the launch with its status",
+      rc === 3 && out === "",
+      `rc ${rc} out ${JSON.stringify(out)}`,
+    );
+  }
+  writeFileSync(join(tmp, "dumpsete.env"), "FOO=fromfile\nset -e\nfalse\n");
+  writeFileSync(
+    join(tmp, "dumpsete.toml"),
+    `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumpsete.env")}" }\n`,
+  );
+  {
+    doRun(
+      "dumpsete",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "review",
+    );
+    st.check(
+      "an env file that fails under set -e aborts with its status",
+      rc === 1 && out === "",
+      `rc ${rc} out ${JSON.stringify(out)}`,
+    );
+  }
+  writeFileSync(join(tmp, "dumpexec.env"), "exec /bin/false\n");
+  writeFileSync(
+    join(tmp, "dumpexec.toml"),
+    `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumpexec.env")}" }\n`,
+  );
+  {
+    doRun(
+      "dumpexec",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "review",
+    );
+    st.check(
+      "an env file that execs never launches",
+      rc === 1 && out === "",
+      `rc ${rc} out ${JSON.stringify(out)}`,
+    );
+  }
+  // A file that only loses PATH still dumps: the harness lookup then fails
+  // on the emptied PATH, where ignoring the file would run it. BASE says
+  // 127 there; the bare-name lookup corner stays as it was.
+  writeFileSync(join(tmp, "dumpunpath.env"), "unset PATH\nFOO=afterunset\n");
+  writeFileSync(
+    join(tmp, "dumpunpath.toml"),
+    `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumpunpath.env")}" }\n`,
+  );
+  {
+    doRun(
+      "dumpunpath",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "review",
+    );
+    st.check(
+      "a file that unsets PATH applies instead of ignored",
+      rc === 1 && out === "",
+      `rc ${rc} out ${JSON.stringify(out)}`,
+    );
+  }
+  writeFileSync(join(tmp, "dumpemptypath.env"), "export PATH=\nFOO=emptyok\n");
+  writeFileSync(
+    join(tmp, "dumpemptypath.toml"),
+    `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumpemptypath.env")}" }\n`,
+  );
+  {
+    doRun(
+      "dumpemptypath",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "review",
+    );
+    st.check(
+      "a file that empties PATH applies instead of ignored",
+      rc === 1 && out === "",
+      `rc ${rc} out ${JSON.stringify(out)}`,
+    );
+  }
+  // An emptied environment is handed on, not mistaken for a failed dump.
+  writeFileSync(join(tmp, "dumponuke.env"), 'for v in $(compgen -e); do unset "$v"; done\n');
+  writeFileSync(
+    join(tmp, "dumponuke.toml"),
+    `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumponuke.env")}" }\n`,
+  );
+  {
+    doRun(
+      "dumponuke",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "review",
+    );
+    st.check(
+      "a file that unsets everything hands on the empty environment",
+      rc === 1 && out === "",
+      `rc ${rc} out ${JSON.stringify(out)}`,
+    );
   }
   record("run-relenv", "relenv");
   doRun(
