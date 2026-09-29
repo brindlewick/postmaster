@@ -15,7 +15,8 @@
 # run recorded at dispatch, `config` in <dispatch>/run.json (scripts/run-meta.sh): the live
 # config is not read at all, and a run.json that is missing or unreadable is refused. Every
 # launch and resume inside a run passes --run; the postmaster's own spawn and the config check
-# before dispatch do not. A run launch exports its durable session beside the events stream.
+# before dispatch do not. A run launch exports its durable session beside the events stream;
+# a launch whose export fails says so loudly and still exits with the harness's status.
 # The checks below apply to a recorded config as to the live one.
 #
 # A form with --project resolves the target's local role choices. <name> is a lane from
@@ -209,6 +210,28 @@ EOF
     && cmp -s "$agy_events" "$agy_dispatch/sessions/g/thread-agy.events.jsonl" \
     && ok "a run launch exports its durable session beside the harness event stream" \
     || fail "a run launch exports its durable session beside the harness event stream"
+  sessions_before=$(ls "$agy_dispatch/sessions/g" | wc -l)
+  printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/agy"; chmod +x "$tmp/bin/agy"
+  empty_events=$agy_dispatch/logs/g-empty.jsonl; : > "$empty_events"
+  POSTMASTER_EVENT_STREAM="$empty_events" POSTMASTER_CONFIG="$tmp/agy-run.toml" PATH="$tmp/bin:$PATH" \
+    "$self" launch g "$tmp/wt" "$tmp/prompt.txt" --run "$agy_dispatch" >"$empty_events" 2>"$tmp/err"; rc=$?; err=$(cat "$tmp/err")
+  [ "$rc" -eq 0 ] && [ ! -s "$empty_events" ] && printf '%s' "$err" | grep -q "its session was not exported" \
+    && [ "$(ls "$agy_dispatch/sessions/g" | wc -l)" = "$sessions_before" ] \
+    && ok "an empty event stream is a loud missed export, not a silent skip" \
+    || fail "an empty event stream is a loud missed export, not a silent skip (exit $rc)" "$err"
+  printf '#!/bin/sh\nprintf "{\\"nope\\":1}\\n"\nexit 0\n' > "$tmp/bin/agy"; chmod +x "$tmp/bin/agy"
+  POSTMASTER_EVENT_STREAM="$agy_events" POSTMASTER_CONFIG="$tmp/agy-run.toml" PATH="$tmp/bin:$PATH" \
+    "$self" launch g "$tmp/wt" "$tmp/prompt.txt" --run "$agy_dispatch" >"$agy_events" 2>"$tmp/err"; rc=$?; err=$(cat "$tmp/err")
+  [ "$rc" -eq 0 ] && printf '%s' "$err" | grep -q "its session was not exported" \
+    && ok "a failed export still exits with the harness's status" \
+    || fail "a failed export still exits with the harness's status (exit $rc)" "$err"
+  printf '#!/bin/sh\nprintf "{\\"conversationId\\":\\"thread-rc\\"}\\n"\nexit 3\n' > "$tmp/bin/agy"; chmod +x "$tmp/bin/agy"
+  rc_events=$agy_dispatch/logs/g-rc.jsonl
+  POSTMASTER_EVENT_STREAM="$rc_events" POSTMASTER_CONFIG="$tmp/agy-run.toml" PATH="$tmp/bin:$PATH" \
+    "$self" launch g "$tmp/wt" "$tmp/prompt.txt" --run "$agy_dispatch" >"$rc_events" 2>"$tmp/err"; rc=$?
+  [ "$rc" -eq 3 ] && cmp -s "$rc_events" "$agy_dispatch/sessions/g/thread-rc.events.jsonl" \
+    && ok "a harness failure keeps its exit when the export succeeds" \
+    || fail "a harness failure keeps its exit when the export succeeds (exit $rc)" "$(cat "$tmp/err")"
   mkdir -p "$tmp/repo/.postmaster/runs/no-record" "$tmp/repo/.postmaster/runs/garbled" "$tmp/repo/.postmaster/runs/unrecorded"
   printf '{"config": \n' > "$tmp/repo/.postmaster/runs/garbled/run.json"
   printf '{"run": "T-1"}\n' > "$tmp/repo/.postmaster/runs/unrecorded/run.json"
@@ -712,7 +735,12 @@ if [ -n "${ENV_FILE:-}" ]; then set -a; . "$ENV_FILE"; set +a; fi
 unset POSTMASTER_LAUNCH_NAME   # the thread's own launches are named by their own host.sh call
 "${cmd[@]}"
 rc=$?
-if [ -n "$RUN" ] && [ -n "${POSTMASTER_EVENT_STREAM:-}" ] && [ -s "$POSTMASTER_EVENT_STREAM" ]; then
-  "$HERE/export-session.sh" "$RUN" "$NAME" "$HARNESS" "$CWD" "$POSTMASTER_EVENT_STREAM" "${DATA:-}" || exit 1
+# The session export is attempted on every run launch with a stream, including an
+# empty one: a missing session is loud on stderr, never a silent skip. The launch
+# still exits with the harness's status: a lane that did the work must not look
+# failed because its session could not be retained.
+if [ -n "$RUN" ] && [ -n "${POSTMASTER_EVENT_STREAM:-}" ]; then
+  "$HERE/export-session.sh" "$RUN" "$NAME" "$HARNESS" "$CWD" "$POSTMASTER_EVENT_STREAM" "${DATA:-}" \
+    || echo "launch: the harness exited $rc but its session was not exported" >&2
 fi
 exit "$rc"

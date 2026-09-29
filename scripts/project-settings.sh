@@ -57,7 +57,7 @@ def settings_dir(repo):
         die("%s is not a directory" % p)
     return p
 
-BAD_KEY = re.compile(r"(?i)(?:secret|credential|password|token|env[_-]?file|api[_-]?key|private[_-]?key|auth[_-]?token)")
+BAD_KEY = re.compile(r"(?i)(?:secret|credential|password|token|key[_-]?file|env[_-]?file|api[_-]?key|private[_-]?key|auth[_-]?token)")
 ABS_PATH = re.compile(r"(?:^|[\s=\"'(])/(?!/)(?:[^\s\"']+)")
 HOME_PATH = re.compile(r"(?:^|[\s=\"'(])(?:~(?:/|$)|\$HOME(?:/|$)|\$USERPROFILE(?:\\|/|$)|%USERPROFILE%(?:\\|/|$))")
 PARENT_PATH = re.compile(r"(?:^|[/\\])\.\.(?:[/\\]|$)")
@@ -70,12 +70,19 @@ ENV_PATH = re.compile(
     r"|%(?:USERPROFILE|HOMEDRIVE|HOMEPATH|APPDATA|LOCALAPPDATA|TMP|TEMP)%)"
 )
 ASSIGNMENT_SECRET = re.compile(r"(?i)\b[A-Z0-9_]*(?:API[_-]?KEY|AUTH[_-]?TOKEN|ACCESS[_-]?TOKEN|PASSWORD|SECRET|CREDENTIAL)\s*=\s*[^\s,;]+")
-TOKEN_VALUE = re.compile(r"(?i)\b(?:gh[pousr]_[A-Za-z0-9]{12,}|sk-[A-Za-z0-9_-]{16,}|xox[baprs]-[A-Za-z0-9-]{12,})\b")
-NAMED_CREDENTIAL = re.compile(r"\b[A-Z][A-Z0-9_]*(?:API[_-]?KEY|AUTH[_-]?TOKEN|ACCESS[_-]?TOKEN|TOKEN|PASSWORD|SECRET|CREDENTIALS?)[A-Z0-9_]*\b")
+TOKEN_VALUE = re.compile(r"(?i)\b(?:gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|glpat-[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{8,}|xox[a-z]-[A-Za-z0-9-]{8,})\b")
+CRED_WORD = r"(?:API[_-]?KEY|AUTH[_-]?TOKEN|ACCESS[_-]?TOKEN|TOKEN|PASSWORD|SECRET|CREDENTIALS?)"
+# A credential word joined by _ or - to identifier characters, in any case: API_KEY,
+# github_token, my-secret. Standalone natural words ("Secret Santa") are not credential names.
+NAMED_CREDENTIAL_PUNCT = re.compile(r"(?:[_-][A-Za-z0-9_-]*" + CRED_WORD + r"|" + CRED_WORD + r"[A-Za-z0-9_-]*[_-])", re.IGNORECASE)
+# Or a credential word as an all-caps token: TOKEN, SECRET, GITHUB_TOKEN.
+NAMED_CREDENTIAL_CAPS = re.compile(r"(?<![A-Za-z0-9_-])[A-Z0-9_]*" + CRED_WORD + r"[A-Z0-9_]*(?![A-Za-z0-9_-])")
 def scan_machine_data(value, location, path=()):
     if isinstance(value, dict):
         for key, item in value.items():
-            if BAD_KEY.search(str(key)):
+            # Check names are validated by shape below, not scanned: a check called
+            # secret-scan names no credential field.
+            if path[:1] != ("checks",) and BAD_KEY.search(str(key)):
                 die("%s names a credential or machine file field: %s" % (location, key))
             scan_machine_data(item, location + "." + str(key), path + (str(key),))
     elif isinstance(value, list):
@@ -88,7 +95,8 @@ def scan_machine_data(value, location, path=()):
                 or WINDOWS_PATH.search(value) or UNC_PATH.search(value) or FILE_URL_PATH.search(value)
                 or ENV_PATH.search(value)):
             die("%s names a filesystem path on a machine" % location)
-        if (ASSIGNMENT_SECRET.search(value) or TOKEN_VALUE.search(value) or NAMED_CREDENTIAL.search(value)
+        if (ASSIGNMENT_SECRET.search(value) or TOKEN_VALUE.search(value)
+                or NAMED_CREDENTIAL_PUNCT.search(value) or NAMED_CREDENTIAL_CAPS.search(value)
                 or "-----BEGIN PRIVATE KEY-----" in value.upper()):
             die("%s contains a credential value" % location)
 
@@ -130,6 +138,47 @@ def name_list(value, where, allow_empty=False):
             die("%s has an invalid name: %s" % (where, name))
     return names
 
+CHECK_KEYS = ("command", "shows", "use", "score", "threshold", "timeout")
+CHECK_USES = ("cli-examples", "browser-suite", "web-journey", "library-tests")
+
+def validate_check(name, spec, where):
+    # Mirrors the declared-check rules in scripts/verify.sh, which stays
+    # authoritative: write must never persist a shape checks would reject, and
+    # the self-test runs both validators on every bad shape below.
+    if not re.fullmatch(r"[a-z][a-z0-9-]*", name):
+        die("%s: a check's name is a lowercase word" % where)
+    table(spec, where)
+    extra = sorted(set(spec) - set(CHECK_KEYS))
+    if extra:
+        die("%s: %s is not a key; the keys are %s" % (where, ", ".join(extra), ", ".join(CHECK_KEYS)))
+    if ("command" in spec) == ("use" in spec):
+        die("%s needs a command or a use, not both" % where)
+    shows = spec.get("shows")
+    if shows is not None and (not isinstance(shows, str) or not shows.strip()):
+        die("%s: shows is words saying what the check shows" % where)
+    if "timeout" in spec and (isinstance(spec["timeout"], bool) or not isinstance(spec["timeout"], int) or spec["timeout"] <= 0):
+        die("%s: timeout is a whole number of seconds" % where)
+    if "use" in spec:
+        if name == "gate" or spec["use"] not in CHECK_USES:
+            die("%s: use names a default, one of %s; the gate takes a command" % (where, ", ".join(CHECK_USES)))
+        if "score" in spec or "threshold" in spec:
+            die("%s: a score is read from a command's output, so it goes with command, not use" % where)
+    else:
+        if not isinstance(spec["command"], str) or not spec["command"].strip():
+            die("%s: command is the shell command that runs the check" % where)
+        if shows is None:
+            die("%s: shows says what the check shows" % where)
+        if ("score" in spec) != ("threshold" in spec):
+            die("%s: score and threshold go together" % where)
+        elif "score" in spec:
+            try:
+                if not isinstance(spec["score"], str) or re.compile(spec["score"]).groups != 1:
+                    die("%s: score is a regular expression with one group, the number" % where)
+            except re.error as e:
+                die("%s: score is not a regular expression: %s" % (where, e))
+            if isinstance(spec["threshold"], bool) or not isinstance(spec["threshold"], (int, float)):
+                die("%s: threshold is a number" % where)
+
 def validate_common(data, label, local):
     allowed = {"project", "tracker"} | ({"roles"} if local else {"checks"})
     unknown = sorted(set(data) - allowed)
@@ -160,15 +209,19 @@ def validate_common(data, label, local):
         die("%s.tracker has unsupported key: %s" % (label, unknown[0]))
     if "binding" in tracker:
         binding = nonblank_string(tracker["binding"], label + ".tracker.binding")
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _.-]*", binding):
+        # A name admits board-title punctuation; a path or URL does not pass. The value
+        # scan above already refuses absolute, home, parent, Windows, UNC, file: and
+        # env-var paths, so this refuses only what it misses: separators anywhere, a
+        # URL scheme, and a leading ~ or $ expansion.
+        if ("/" in binding or "\\" in binding or "://" in binding
+                or re.match(r"(?i)^[a-z][a-z0-9+.-]*:[^ ]", binding)
+                or binding.startswith(("~", "$"))):
             die("%s.tracker.binding must be a tracker name, not a path or URL" % label)
         tracker["binding"] = binding
     if not local and "checks" in data:
         checks = table(data["checks"], label + ".checks")
         for name, spec in checks.items():
-            if not re.fullmatch(r"[a-z][a-z0-9-]*", name):
-                die("%s.checks name %s is not a lowercase word" % (label, name))
-            table(spec, label + ".checks." + name)
+            validate_check(name, spec, label + ".checks." + name)
     if local:
         roles = table(data.get("roles", {}), label + ".roles")
         unknown = sorted(set(roles) - {"workhorses", "reviewers", "coachman", "lens_reviewers"})
@@ -332,7 +385,11 @@ def ensure_ignore(repo, quiet=False):
     if ignore.exists() and not ignore.is_file():
         die("%s is not a regular file" % ignore)
     existing = ignore.read_text(encoding="utf-8") if ignore.exists() else ""
-    if "*" not in [line.strip() for line in existing.splitlines()]:
+    # A bare star anywhere is not enough: a later negation (!settings.toml) re-includes
+    # what it ignored. The last effective rule decides, so it must be the star.
+    effective = [line.strip() for line in existing.splitlines()]
+    effective = [line for line in effective if line and not line.startswith("#")]
+    if not effective or effective[-1] != "*":
         prefix = existing
         if prefix and not prefix.endswith("\n"):
             prefix += "\n"
@@ -384,6 +441,24 @@ def self_test():
         kept = (repo / ".postmaster" / ".gitignore").read_text()
         assert kept.startswith("# existing local rules\n") and kept.endswith("*\n")
         print("  ok   ensure completes an existing ignore file without discarding its rules")
+        negated = tmp / "negated"; negated.mkdir()
+        ensure_ignore(negated)
+        (negated / ".postmaster" / ".gitignore").write_text("*\n!settings.toml\n", encoding="utf-8")
+        ensure_ignore(negated)
+        repaired = (negated / ".postmaster" / ".gitignore").read_text()
+        assert repaired.endswith("*\n") and "!settings.toml\n" in repaired
+        assert subprocess.run(["git", "init", "-q", str(negated)]).returncode == 0
+        assert subprocess.run(["git", "-C", str(negated), "check-ignore", "-q", ".postmaster/settings.toml"]).returncode == 0
+        assert subprocess.run(["git", "-C", str(negated), "check-ignore", "-q", ".postmaster/runs/T-1/card.md"]).returncode == 0
+        print("  ok   ensure re-ignores a folder a negation had re-included, keeping its rules")
+        (negated / ".postmaster" / ".gitignore").write_text("*\n!runs/\n!runs/**\n", encoding="utf-8")
+        ensure_ignore(negated)
+        assert subprocess.run(["git", "-C", str(negated), "check-ignore", "-q", ".postmaster/runs/T-1/card.md"]).returncode == 0
+        print("  ok   ensure re-ignores run artifacts a negation had re-included")
+        before = (negated / ".postmaster" / ".gitignore").read_text()
+        ensure_ignore(negated)
+        assert (negated / ".postmaster" / ".gitignore").read_text() == before
+        print("  ok   ensure is a no-op once the last rule is the star")
         candidate = tmp / "shared.toml"
         candidate.write_text('''[project]\ndefault_turnpikes=["bug"]\nrisk_surfaces="the API and subprocess boundary"\n[tracker]\nbinding="Team board"\n''', encoding="utf-8")
         write_profile(repo, "project", str(candidate))
@@ -431,7 +506,31 @@ def self_test():
             ("home path in a binding", '[tracker]\nbinding="~/.config/key"\n'),
             ("absolute path in a binding", '[tracker]\nbinding="/srv/boards/main"\n'),
             ("credential field", '[tracker]\nenv_file="credential.env"\n'),
+            ("key file field", '[tracker]\nkeyfile="my.key"\n'),
             ("unknown role", '[roles]\nworkhorses=["ghost"]\n'),
+            ("slash in a binding", '[tracker]\nbinding="user/board"\n'),
+            ("backslash in a binding", "[tracker]\nbinding='C:\\boards\\x'\n"),
+            ("URL in a binding", '[tracker]\nbinding="https://example.com/b"\n'),
+            ("scheme in a binding", '[tracker]\nbinding="file:boards"\n'),
+            ("colon-no-space in a binding", '[tracker]\nbinding="Team:Board"\n'),
+            ("leading tilde in a binding", '[tracker]\nbinding="~other"\n'),
+            ("leading dollar in a binding", '[tracker]\nbinding="$FOO"\n'),
+            ("parent traversal in a binding", '[tracker]\nbinding=".."\n'),
+            ("lowercase credential name", '[tracker]\nbinding="github_token"\n'),
+            ("credential word with a dash", '[tracker]\nbinding="my-secret"\n'),
+            ("keyword-initial credential name", '[tracker]\nbinding="TOKEN"\n'),
+            ("bare credential words", '[tracker]\nbinding="API_KEY"\n'),
+            ("all-caps credential token", '[tracker]\nbinding="MY_TOKEN"\n'),
+            ("credential word in a role name", '[roles]\nworkhorses=["API_KEY"]\n'),
+            ("classic token value", '[tracker]\nbinding="ghp_12345678901234567890"\n'),
+            ("short classic token value", '[tracker]\nbinding="ghp_12345678"\n'),
+            ("fine-grained token value", '[tracker]\nbinding="github_pat_ABCDEFGHIJKL"\n'),
+            ("gitlab token value", '[tracker]\nbinding="glpat-ABCDEFGHIJKL"\n'),
+            ("chat token value", '[tracker]\nbinding="xoxc-123456789012"\n'),
+            ("key-like token value", '[tracker]\nbinding="sk-1234567890123456"\n'),
+            ("credential assignment", '[tracker]\nbinding="X_API_KEY=abc123"\n'),
+            ("lowercase credential assignment", '[tracker]\nbinding="password = hunter2"\n'),
+            ("private key block", '[tracker]\nbinding="-----BEGIN PRIVATE KEY-----"\n'),
         ):
             bad = tmp / "bad.toml"; bad.write_text(contents, encoding="utf-8")
             try:
@@ -451,6 +550,18 @@ def self_test():
             ("risk prose naming a secret", '[project]\nrisk_surfaces="reads PLANE_API_KEY and lane env files"\n', True),
             ("risk prose naming a machine", '[project]\nrisk_surfaces="runs on build-01 beside //server/share"\n', True),
             ("a check command with paths", '[checks.x]\ncommand="cat /tmp/out $HOME/f"\nshows="y"\n', False),
+            ("a check named secret-scan", '[checks.secret-scan]\ncommand="true"\nshows="s"\n', False),
+            ("a plain board name", '[tracker]\nbinding="Team board"\n', True),
+            ("an ampersand board name", '[tracker]\nbinding="Platform & DevEx"\n', True),
+            ("a comma board name", '[tracker]\nbinding="Team, Platform"\n', True),
+            ("the documented example binding", '[tracker]\nbinding="the board, workspace or team name"\n', True),
+            ("the documented local binding", '[tracker]\nbinding="the board, workspace or team name for this checkout"\n', True),
+            ("a dotted board name", '[tracker]\nbinding="Board_1.v2"\n', True),
+            ("a colon-space board name", '[tracker]\nbinding="Team: Board"\n', True),
+            ("a natural secret word", '[tracker]\nbinding="Secret Santa"\n', True),
+            ("a natural token word", '[tracker]\nbinding="Password reset project"\n', True),
+            ("a token prefix too short to be a token", '[tracker]\nbinding="ghp_abc"\n', True),
+            ("an assignment without a credential word", '[tracker]\nbinding="a=b"\n', True),
         ):
             try:
                 scan_machine_data(tomllib.loads(contents), "settings input")
@@ -458,6 +569,59 @@ def self_test():
             except SystemExit as e:
                 raise AssertionError("rejected " + label + ": %s" % e)
             print("  ok   accepts " + label)
+        verify = str(here / "verify.sh")
+        bad_shapes = (
+            ("unknown key", '[checks.x]\ncommand = "true"\nshows = "s"\nunknown = 1\n'),
+            ("command and use", '[checks.x]\ncommand = "true"\nuse = "cli-examples"\nshows = "s"\n'),
+            ("neither command nor use", '[checks.x]\nshows = "s"\n'),
+            ("command without shows", '[checks.x]\ncommand = "true"\n'),
+            ("score without threshold", '[checks.x]\ncommand = "true"\nshows = "s"\nscore = "(x)"\n'),
+            ("threshold without score", '[checks.x]\ncommand = "true"\nshows = "s"\nthreshold = 1\n'),
+            ("score with two groups", '[checks.x]\ncommand = "true"\nshows = "s"\nscore = "(a)(b)"\nthreshold = 1\n'),
+            ("score that is not a regex", '[checks.x]\ncommand = "true"\nshows = "s"\nscore = "(a"\nthreshold = 1\n'),
+            ("string threshold", '[checks.x]\ncommand = "true"\nshows = "s"\nscore = "(x)"\nthreshold = "high"\n'),
+            ("zero timeout", '[checks.x]\ncommand = "true"\nshows = "s"\ntimeout = 0\n'),
+            ("boolean timeout", '[checks.x]\ncommand = "true"\nshows = "s"\ntimeout = true\n'),
+            ("unknown default", '[checks.x]\nuse = "nope"\n'),
+            ("gate with use", '[checks.gate]\nuse = "cli-examples"\n'),
+            ("score with use", '[checks.x]\nuse = "cli-examples"\nscore = "(x)"\nthreshold = 1\n'),
+            ("blank shows", '[checks.x]\ncommand = "true"\nshows = ""\n'),
+            ("blank command", '[checks.x]\ncommand = "  "\nshows = "s"\n'),
+            ("non-lowercase name", '[checks.Bad]\ncommand = "true"\nshows = "s"\n'),
+        )
+        for i, (label, contents) in enumerate(bad_shapes):
+            shape_repo = tmp / ("bad-shape-%d" % i); shape_repo.mkdir()
+            shape_in = tmp / ("bad-shape-%d.toml" % i); shape_in.write_text(contents, encoding="utf-8")
+            try:
+                write_profile(shape_repo, "project", str(shape_in))
+            except SystemExit:
+                write_refused = True
+            else:
+                write_refused = False
+            planted = shape_repo / ".postmaster" / "project.toml"
+            planted.parent.mkdir(parents=True, exist_ok=True)
+            planted.write_text(contents, encoding="utf-8")
+            checked = subprocess.run(["timeout", "10", verify, "checks", str(shape_repo)],
+                                     capture_output=True, text=True)
+            assert write_refused and checked.returncode != 0, "accepted bad check shape: " + label
+            print("  ok   write and verify.sh agree in refusing " + label)
+        good_shapes = (
+            ("command with shows and timeout", '[checks.x]\ncommand = "true"\nshows = "s"\ntimeout = 60\n'),
+            ("scored command", '[checks.x]\ncommand = "true"\nshows = "s"\nscore = "(x)"\nthreshold = 0.5\n'),
+            ("bare default", '[checks.x]\nuse = "cli-examples"\n'),
+            ("default with shows and timeout", '[checks.x]\nuse = "library-tests"\nshows = "s"\ntimeout = 60\n'),
+            ("gate command", '[checks.gate]\ncommand = "true"\nshows = "s"\n'),
+        )
+        for i, (label, contents) in enumerate(good_shapes):
+            shape_repo = tmp / ("good-shape-%d" % i); shape_repo.mkdir()
+            shape_in = tmp / ("good-shape-%d.toml" % i); shape_in.write_text(contents, encoding="utf-8")
+            write_profile(shape_repo, "project", str(shape_in))
+            checked = subprocess.run(["timeout", "10", verify, "checks", str(shape_repo)],
+                                     capture_output=True, text=True)
+            assert checked.returncode == 0, "verify.sh refused " + label + ": " + checked.stderr
+            print("  ok   write and verify.sh agree in accepting " + label)
+        inspect(here.parent)
+        print("  ok   this repo's own committed profile validates")
         print("self-test: all controls behaved")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

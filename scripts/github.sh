@@ -434,6 +434,17 @@ out=$(gh_sh board 2>&1); rc=$?
 [ $rc -eq 0 ] && [ "$out" = $'#2\tchosen\thttps://github.com/users/o/projects/2' ] \
   && ok "the shared tracker binding selects its named linked board" \
   || fail "the shared tracker binding selects its named linked board (exit $rc)" "$out"
+printf '[tracker]\nbinding = "missing"\n' > "$tmp/repo/.postmaster/project.toml"
+out=$(gh_sh board 2>&1); rc=$?
+[ $rc -eq 1 ] && printf '%s\n' "$out" | grep -q "is not a linked GitHub Projects board" \
+  && ok "a binding naming no linked board is refused" \
+  || fail "a binding naming no linked board is refused (exit $rc)" "$out"
+printf '%s\n' '{"data":{"repository":{"projectsV2":{"nodes":[{"id":"PVT_1","number":1,"title":"dup","closed":false,"url":"https://github.com/users/o/projects/1","owner":{"login":"o"}},{"id":"PVT_2","number":2,"title":"dup","closed":false,"url":"https://github.com/users/o/projects/2","owner":{"login":"o"}}]}}}}' > "$S/boards.json"
+printf '[tracker]\nbinding = "dup"\n' > "$tmp/repo/.postmaster/project.toml"
+out=$(gh_sh board 2>&1); rc=$?
+[ $rc -eq 1 ] && printf '%s\n' "$out" | grep -q "matches more than one linked board" \
+  && ok "a binding matching two linked boards is refused" \
+  || fail "a binding matching two linked boards is refused (exit $rc)" "$out"
 rm -- "$tmp/repo/.postmaster/project.toml"
 printf '%s\n' "$BOARD" > "$S/boards.json"
 stored 7 "$tmp/lf.md"; gh_sh read 7 --body > "$tmp/out" 2>&1; rc=$?

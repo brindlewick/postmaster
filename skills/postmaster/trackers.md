@@ -120,8 +120,11 @@ which is the prefix discovery reads from commit messages; a target that has ship
 ticket needs nothing configured, and one that has not is a question for the user.
 
 Everything goes through `<tool>/scripts/plane.sh`. The instance and workspace are in the config:
-An optional project `[tracker].binding` names the workspace slug and must match the machine
-config's `workspace`; the instance URL and API key remain machine-side.
+An optional project `[tracker].binding` names the workspace slug. When the project is in
+scope — `POSTMASTER_PROJECT` set, or run from the project's checkout — the binding must
+match the machine config's `workspace`, and a mismatch is refused; with no project in
+scope there is nothing to match, and the machine workspace is used as before. The instance
+URL and API key remain machine-side.
 
 ```toml
 [tracker]

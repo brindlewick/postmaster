@@ -10,7 +10,9 @@
 set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 
-python3 - "$HERE" "$@" <<'PY'
+# A caller may be in the target worktree (launch.sh cds there first), so do not
+# import modules from that worktree by accident.
+python3 -I - "$HERE" "$@" <<'PY'
 import json
 import os
 import pathlib
@@ -85,16 +87,24 @@ def native_record(harness, thread, cwd):
         return None
     if not root.is_dir():
         die("no durable %s session store is available" % harness)
-    found = []
+    # A store holds many threads, and one id can be a prefix of another
+    # (thread-1 inside rollout-thread-10.jsonl), so a substring is not a match.
+    # Real stores name the file for the thread exactly (claude, pi) or with a
+    # fixed prefix before it (codex: rollout-<timestamp>-<thread>.jsonl).
+    exact, suffixed = [], []
     try:
         for path in root.rglob("*.jsonl"):
-            if thread in path.name:
-                found.append(path)
+            stem = path.name[:-len(".jsonl")]
+            if stem == thread:
+                exact.append(path)
+            elif stem.endswith("-" + thread):
+                suffixed.append(path)
     except OSError:
         pass
+    found = exact or suffixed
     if not found:
         die("no durable %s record was found for thread %s" % (harness, thread))
-    found.sort(key=lambda p: (p.name == thread + ".jsonl", p.stat().st_mtime_ns), reverse=True)
+    found.sort(key=lambda p: p.stat().st_mtime_ns, reverse=True)
     return found[0]
 
 def external_export(harness, thread, data, destination):
@@ -232,6 +242,55 @@ def self_test():
         (bin_dir / "mimo").chmod(0o755)
         check("mimo", "thread-mimo", {"sessionID": "thread-mimo"}, data=str(root / "mimo-data"))
         assert count == 7
+        codex_sessions = home / ".codex" / "sessions"
+        (codex_sessions / "2026" / "01" / "01").mkdir(parents=True, exist_ok=True)
+        (codex_sessions / "2026" / "01" / "02").mkdir(parents=True, exist_ok=True)
+        right = codex_sessions / "2026" / "01" / "01" / "rollout-2026-01-01T00-00-00-thread-1.jsonl"
+        wrong = codex_sessions / "2026" / "01" / "02" / "rollout-2026-01-02T00-00-00-thread-10.jsonl"
+        right.write_text("RIGHT thread one\n", encoding="utf-8")
+        wrong.write_text("WRONG thread ten\n", encoding="utf-8")
+        os.utime(right, (1000000000, 1000000000))
+        os.utime(wrong, (1100000000, 1100000000))
+        decoy_events = dispatch / "logs" / "decoy.jsonl"
+        decoy_events.write_text(json.dumps({"type": "thread.started", "thread_id": "thread-1"}) + "\n", encoding="utf-8")
+        result = subprocess.run(
+            [str(here / "export-session.sh"), str(dispatch), "lane", "codex", str(cwd), str(decoy_events), ""],
+            capture_output=True, text=True, env=env, timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        saved = (dispatch / "sessions" / "lane" / "thread-1.jsonl").read_text(encoding="utf-8")
+        assert saved == "RIGHT thread one\n", "export copied the newer prefix-sharing decoy"
+        print("  ok   a newer thread whose id extends the thread's does not shadow its session")
+        claude_dir = home / ".claude" / "projects" / "project"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        (claude_dir / "thread-2.jsonl").write_text("RIGHT exact\n", encoding="utf-8")
+        (claude_dir / "other-thread-2.jsonl").write_text("WRONG suffix\n", encoding="utf-8")
+        os.utime(claude_dir / "thread-2.jsonl", (1000000000, 1000000000))
+        os.utime(claude_dir / "other-thread-2.jsonl", (1100000000, 1100000000))
+        decoy2_events = dispatch / "logs" / "decoy2.jsonl"
+        decoy2_events.write_text(json.dumps({"session_id": "thread-2"}) + "\n", encoding="utf-8")
+        result = subprocess.run(
+            [str(here / "export-session.sh"), str(dispatch), "lane", "claude", str(cwd), str(decoy2_events), ""],
+            capture_output=True, text=True, env=env, timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        saved = (dispatch / "sessions" / "lane" / "thread-2.jsonl").read_text(encoding="utf-8")
+        assert saved == "RIGHT exact\n", "export preferred a suffixed decoy over the exact file"
+        print("  ok   an exact store file wins over a newer suffixed decoy")
+        shadow = root / "shadow"; shadow.mkdir()
+        (shadow / "json.py").write_text(
+            'import pathlib\npathlib.Path(r"%s").write_text("imported")\nraise SystemExit("shadow")\n' % (shadow / "marker"),
+            encoding="utf-8")
+        shadow_events = dispatch / "logs" / "shadow.jsonl"
+        shadow_events.write_text(json.dumps({"conversationId": "thread-shadow"}) + "\n", encoding="utf-8")
+        result = subprocess.run(
+            [str(here / "export-session.sh"), str(dispatch), "lane", "agy", str(shadow), str(shadow_events), ""],
+            capture_output=True, text=True, env=env, timeout=10, cwd=shadow,
+        )
+        assert result.returncode == 0, result.stderr
+        assert not (shadow / "marker").exists(), "a worktree module shadowed the exporter"
+        assert (dispatch / "sessions" / "lane" / "thread-shadow.events.jsonl").is_file()
+        print("  ok   worktree modules cannot shadow the exporter's standard library imports")
         legacy = root / "legacy" / "RUN-0"
         (legacy / "logs").mkdir(parents=True)
         legacy_events = legacy / "logs" / "lane.jsonl"
