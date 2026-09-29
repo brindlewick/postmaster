@@ -323,6 +323,8 @@ has()   { case $out in *"$1"*) true ;; *) false ;; esac; }
 lines() { grep -c -- "$1" "$d/actions.jsonl" 2>/dev/null || true; }
 alive() { local st; st=$(ps -o stat= -p "$1" 2>/dev/null) && [ -n "$st" ] && [ "${st#Z}" = "$st" ]; }
 dead()  {  # dead <pid> [<seconds>]: wait until a process is gone (or a zombie)
+  # An empty pid is a failed fixture, never a dead process: fail, do not pass.
+  [ -n "${1:-}" ] || return 1
   local i=0; while alive "$1" && [ $i -lt $(( ${2:-60} * 5 )) ]; do sleep 0.2; i=$((i + 1)); done; ! alive "$1"
 }
 wait_line() {  # wait_line <file> <pattern> [<seconds>]: wait until a file holds a matching line
@@ -347,9 +349,13 @@ launch() {  # launch <round> <lens> <lane> <fast|slow|leaves>: through host.sh, 
       --role reviewer --run "$d" \
       --marker "$d/logs/review-r$1-$2-$3.done" --pidfile "$tmp/pids/launch.$n" -- "$tmp/reviewer.sh" "$4" "$tmp/pids/child.$n" ) >/dev/null \
     || { echo "  (could not launch $2 $3)"; return 1; }
+  # host.sh run waits 10s for the launch pid itself; this covers a slower
+  # runner, so an empty pid below means the launch failed, never that it lags.
+  local i=0; while [ ! -s "$tmp/pids/launch.$n" ] && [ $i -lt 300 ]; do sleep 0.2; i=$((i + 1)); done
+  [ -s "$tmp/pids/launch.$n" ] || { echo "  (the $4 reviewer's launch pid never appeared)"; return 1; }
   [ "$4" = fast ] && return 0
   # Child startup under load (was 5s); the pid file is the event.
-  local i=0; while [ ! -s "$tmp/pids/child.$n" ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
+  i=0; while [ ! -s "$tmp/pids/child.$n" ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
   [ -s "$tmp/pids/child.$n" ] || { echo "  (the $4 reviewer never started)"; return 1; }
 }
 
@@ -377,14 +383,14 @@ run start "$d" 2; launch 2 bug three slow; slow=$(cat "$tmp/pids/launch.$n")
 attempt0=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["attempt"])' "$d/logs/review-r2.json")
 deadline0=$(python3 -c 'import json,sys; print(repr(json.load(open(sys.argv[1]))["deadline"]))' "$d/logs/review-r2.json")
 "$self" wait "$d" 2 "$repo" bug:three > "$tmp/first.out" 2>&1 & first=$!
-wait_line "$tmp/first.out" "round 2," 60
+wait_line "$tmp/first.out" "round 2," 60; first_rc=$?
 # Let some deadline age while the first wait runs, so a reset (left back to the limit) stands out.
 i=0; while [ "$(remaining "$d/logs/review-r2.json")" -gt 25 ] && [ $i -lt 150 ]; do sleep 0.2; i=$((i + 1)); done
 kill "$first" 2>/dev/null; wait "$first" 2>/dev/null
 left=$(remaining "$d/logs/review-r2.json")
 run wait "$d" 2 "$repo"
 check "a wait run again keeps the round's deadline rather than starting a new one" \
-  '[ $rc -eq 3 ] && has "TIMEOUT bug three" && [ "$left" -lt 28 ] && [ "$took" -le $((left + 25)) ] \
+  '[ $first_rc -eq 0 ] && [ $rc -eq 3 ] && has "TIMEOUT bug three" && [ "$left" -lt 28 ] && [ "$took" -le $((left + 25)) ] \
    && [ "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"attempt\"])" "$d/logs/review-r2.json")" = "$attempt0" ] \
    && [ "$(python3 -c "import json,sys; print(repr(json.load(open(sys.argv[1]))[\"deadline\"]))" "$d/logs/review-r2.json")" = "$deadline0" ] && dead "$slow" 60'
 run teardown "$d" 2 "$repo" bug:three
@@ -409,11 +415,11 @@ limit 20; cut bug four
 run start "$d" 4; launch 4 bug four slow; slow=$(cat "$tmp/pids/launch.$n")
 "$self" wait "$d" 4 "$repo" bug:four > "$tmp/stale.out" 2>&1 & stale=$!
 # The wait must have read this start's attempt before the next start replaces it.
-wait_line "$tmp/stale.out" "round 4," 60
+wait_line "$tmp/stale.out" "round 4," 60; stale_rc=$?
 limit 60; run start "$d" 4
 wait "$stale"; rc=$?; out=$(cat "$tmp/stale.out")
 check "a wait from an earlier start of the round stands down, and records and stops nothing" \
-  '[ $rc -eq 1 ] && has "started again" && alive "$slow" && ! grep -q "four bug: DEGRADED" "$d/run-log.md"'
+  '[ $stale_rc -eq 0 ] && [ $rc -eq 1 ] && has "started again" && alive "$slow" && ! grep -q "four bug: DEGRADED" "$d/run-log.md"'
 ( cd "$repo/.worktrees/T-1-rev-bug-four" && "$self" teardown "$d" 4 "$repo" bug:four > "$tmp/inside.out" 2>&1; exit $? ); rc=$?; out=$(cat "$tmp/inside.out")
 check "teardown from inside a scratch leaves it in place, and stops nothing" \
   '[ $rc -eq 1 ] && has "LEFT IN PLACE" && [ -e "$repo/.worktrees/T-1-rev-bug-four" ] && alive "$slow"'

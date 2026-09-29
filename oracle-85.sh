@@ -74,7 +74,7 @@ probe_load() {
   local bg_pids=()
   for i in $(seq 1 "$n"); do
     for s in launch verify ticket-check style-findings; do
-      setsid bash -c "while true; do scripts/$s.sh --self-test >/dev/null 2>&1; done" & bg_pids+=($!)
+      setsid bash -c "cd \"$HERE\" && while true; do scripts/$s.sh --self-test >/dev/null 2>&1; done" & bg_pids+=($!)
     done
     sleep 2  # let the load start before the target runs
     (cd "$HERE" && scripts/host.sh --self-test >"$LOGDIR/host-$i.log" 2>&1); rc=$?

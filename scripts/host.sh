@@ -2444,8 +2444,9 @@ EOF
   rm -f "$tmp/stub/pane.dead"; rm -f "$tmp/stub/pane.late.fired"; touch "$tmp/stub/pane.late"
   got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST_CLAIM_WAIT=1 COUNT="$tmp/logs/h5.count" -- run "$NAME" "$repo/.worktrees/T-1-sol" --marker ../logs/h5.done -- ./probe.sh 2>/dev/null)
   # The late start is the event: asserting the count before it fires passes vacuously under load.
-  marker "$tmp/logs/h5.done"; wait_file "$tmp/stub/pane.late.fired" 60
-  check "a pane that starts it late: it still runs exactly once" '[ "$got" = host=none ] && [ "$(wc -l < "$tmp/logs/h5.count")" -eq 1 ]' "$(cat "$tmp/logs/h5.count" 2>/dev/null)"
+  # The stub touches the fired file empty, so this waits on existence (marker), not content.
+  marker "$tmp/logs/h5.done"; marker "$tmp/stub/pane.late.fired" 60; fired=$?
+  check "a pane that starts it late: it still runs exactly once" '[ $fired -eq 0 ] && [ "$got" = host=none ] && [ "$(wc -l < "$tmp/logs/h5.count")" -eq 1 ]' "$(cat "$tmp/logs/h5.count" 2>/dev/null)"
   rm -f "$tmp/stub/pane.late"
   check "no launch leaves its hand-over directory behind" '[ -z "$(find "$tmp" -maxdepth 1 -name "postmaster-host.*")" ]'
 
