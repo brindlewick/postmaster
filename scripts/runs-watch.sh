@@ -359,6 +359,15 @@ watch_host() {  # watch_host <dispatch|resume> <name> <cwd> <dispatch-dir> <out>
   "$HERE/host.sh" "${command[@]}"
 }
 
+no_thread_error() {  # no_thread_error <leg> <marker> <limit> <err> <out> [adapter-out]: the wake reason when no thread id was harvested
+  local extra=${6:-}
+  if [ -e "$2" ]; then
+    printf 'the launch produced no thread id for leg %s; read %s and %s%s' "$1" "$4" "$5" "${extra:+ ($extra)}"
+  else
+    printf 'the launch produced no thread id within %ss for leg %s and may still be running; read %s and %s%s' "$3" "$1" "$4" "$5" "${extra:+ ($extra)}"
+  fi
+}
+
 harvest_thread_id() {  # harvest_thread_id <events-file> <marker> <limit>: print the thread id once the stream carries it
   local out=$1 marker=$2 limit=$3 i=0 adapter_out adapter_rc
   while [ $i -lt "$limit" ]; do
@@ -424,7 +433,7 @@ prepare_dispatch() {  # prepare_dispatch <dispatch> <run> <current leg>: dispatc
   [ "${POSTMASTER_WATCH_TEST_MODE:-}" != 1 ] || limit=1
   if ! thread=$(harvest_thread_id "$out" "$marker" "$limit"); then
     adapter_out=$("$HERE/launch.sh" thread-id "$out" 2>&1) || true
-    ACTION_ERROR="the launch produced no thread id for leg $number; read $err and $out${adapter_out:+ ($adapter_out)}"
+    ACTION_ERROR=$(no_thread_error "$number" "$marker" "$limit" "$err" "$out" "$adapter_out")
     return 1
   fi
   if ! manifest_leg "$d" "$number" "$thread"; then ACTION_ERROR="could not record thread id for leg $number"; return 1; fi
@@ -737,6 +746,14 @@ PY
   [ $rc_harvest -eq 1 ] && [ -z "$got" ] \
     && ok "no id with the marker landed stops the wait" \
     || fail "no id with the marker landed stops the wait"
+  got=$(no_thread_error 2 "$tmp/dead.marker" 30 "$tmp/e.err" "$tmp/e.out")
+  [ "$got" = "the launch produced no thread id for leg 2; read $tmp/e.err and $tmp/e.out" ] \
+    && ok "a landed marker wakes without a running process" \
+    || fail "a landed marker wakes without a running process"
+  got=$(no_thread_error 2 "$tmp/no-marker" 30 "$tmp/e.err" "$tmp/e.out")
+  [ "$got" = "the launch produced no thread id within 30s for leg 2 and may still be running; read $tmp/e.err and $tmp/e.out" ] \
+    && ok "a missing marker wakes saying the launch may still be running" \
+    || fail "a missing marker wakes saying the launch may still be running"
 
   echo "watcher steps: dispatch and remount controls"
   mkdir -p "$tmp/calls"
@@ -968,6 +985,7 @@ assert not [x for x in rows if x.get("action")=="dispatch"]
 PY
   rc_test=$?
   [ $rc -eq 0 ] && [ $rc_test -eq 0 ] && has "needs no-thread DISPATCH" \
+    && has "may still be running" \
     && [ -f "$tmp/calls/dispatch-no-thread-2" ] \
     && ok "a launch with no readable thread id wakes with the launch already started and unrecorded" \
     || fail "a launch with no readable thread id wakes with the launch already started and unrecorded"
