@@ -282,7 +282,10 @@ On `.card-ready`, read `run.json`, the manifest's current `leg`, `card.md`, and
 route follows below. An exit 1 from any `<tool>/scripts/landing.sh` call in Stage F or
 Stage G below is a fault in its inputs, not an answer: fix the inputs and re-run; never
 proceed past it. Run `git fetch` in the ticket repo before asking `fresh`, and again after
-the user's merge word, so every ref the script resolves is current.
+the user's merge word. A fetch moves only the remote-tracking refs, so read the default
+branch's remote with `git config branch.<branch>.remote` and pass `<remote>/<branch>`
+wherever a landing call in Stage F or Stage G takes `--default` — the branch itself only
+when it has no remote — so every ref the script resolves is current.
 
 1. **Verify the card's claims against the code**, never against the card.
    `<tool>/scripts/landing.sh fresh --repo <repo> --default <branch> --ticket

@@ -699,7 +699,8 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    with the other lenses, verified versus dismissed, applied, and the rounds it ran, with each
    finding as one bullet `- [<severity>] <id>: <state>`, the id `<lens>-<n>` numbered in the
    order verified, the state one of `open`, `closed round <r>`, `dismissed: <reason>`, or
-   `applied on user word, not re-reviewed`; for style, how many findings go to the ship card's
+   `applied on user word, not re-reviewed`, and no HTML comment anywhere in the file;
+   for style, how many findings go to the ship card's
    Style residue, as
    `<tool>/scripts/style-findings.sh count <dispatch>` prints it. Then the gate status, and
    the checks as
@@ -749,7 +750,8 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    surface already running; never start a duplicate. Verify the link from the user's device or
    mark it unverified.
 4. **Write `card.md`.** Include the branch, final HEAD, diff stat and commit list; the final
-   checks as `<tool>/scripts/landing.sh results <dispatch> <synthesis-wt>` prints them, under
+   checks, one `- <name>: <result>` bullet each with the result
+   `<tool>/scripts/landing.sh results <dispatch> <synthesis-wt>` prints for that check, under
    `## Checks`; browser suite and QA when present; the journey report path where a
    check's source names `web-journey`; every ticket turnpike with its
    rounds and result from its checkpoint record, or `none`; all open findings, one
@@ -763,9 +765,10 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    state; lane outcomes; and the review link. The card's branch state is before merge: the
    ticket branch is ready, and every other branch is either retained or abandoned. The gate is
    listed as the gate, never as a turnpike. Inside `## Checks`, `## Open findings` and
-   `## Not re-reviewed`, every line is blank, `none`, or one entry in the exact form above
-   starting at column 0; anything else — a comment, an indented line, a fence, prose — is
-   an input fault, and text outside those sections is never read.
+   `## Not re-reviewed`, every line is blank, `none` at column 0, or one entry in the exact
+   form above starting at column 0; anything else — an indented line, a fence, prose — is
+   an input fault. An HTML comment opener anywhere in the card is an input fault wherever
+   it sits; other text outside those sections is never read.
 5. **Write the final hand-off.** Write
    `<dispatch>/handoff-<n>.md` with the verified results, all decisions and open findings, and
    state that no coachman leg follows and the postmaster must verify the card and handle
