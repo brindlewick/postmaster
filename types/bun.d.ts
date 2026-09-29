@@ -232,9 +232,9 @@ declare module "node:fs" {
   export function readFileSync(fd: number, encoding: BufferEncoding): string;
   export function readFileSync(fd: number): Buffer;
   export function writeFileSync(
-    path: string,
+    path: string | number,
     data: string | Uint8Array,
-    encoding?: BufferEncoding | { encoding?: BufferEncoding; flag?: string },
+    encoding?: BufferEncoding | { encoding?: BufferEncoding; flag?: string; mode?: number },
   ): void;
   export function appendFileSync(
     path: string,
@@ -314,6 +314,7 @@ declare module "node:fs" {
     O_EXCL: number;
     O_TRUNC: number;
     O_APPEND: number;
+    O_NONBLOCK: number;
   };
   export function accessSync(path: string, mode?: number): void;
   export function mkdtempSync(prefix: string): string;
@@ -327,6 +328,19 @@ declare module "node:fs" {
     position: number | null,
   ): number;
   export function writeSync(fd: number, data: string | Uint8Array): number;
+  export function writeSync(
+    fd: number,
+    buffer: Uint8Array,
+    offset: number,
+    length: number,
+    position?: number | null,
+  ): number;
+  export function writeSync(
+    fd: number,
+    data: string,
+    position?: number | null,
+    encoding?: BufferEncoding,
+  ): number;
   export function fstatSync(fd: number): {
     size: number;
     isFile(): boolean;
@@ -593,6 +607,16 @@ declare module "node:child_process" {
     ): ChildProcess;
     on(event: "error", listener: (err: Error) => void): ChildProcess;
     on(event: string, listener: (...args: never[]) => void): ChildProcess;
+    once(
+      event: "exit",
+      listener: (code: number | null, signal: string | null) => void,
+    ): ChildProcess;
+    once(
+      event: "close",
+      listener: (code: number | null, signal: string | null) => void,
+    ): ChildProcess;
+    once(event: "error", listener: (err: Error) => void): ChildProcess;
+    once(event: string, listener: (...args: never[]) => void): ChildProcess;
   }
   export function spawn(
     command: string,
@@ -678,6 +702,17 @@ declare class TextDecoder {
 declare class TextEncoder {
   constructor();
   encode(input?: string): Uint8Array;
+}
+interface ReadableStream<R = unknown> {
+  readonly locked: boolean;
+  cancel(reason?: unknown): Promise<void>;
+}
+interface WritableStream<W = unknown> {
+  readonly locked: boolean;
+}
+declare class Response {
+  constructor(body?: ReadableStream<Uint8Array> | Uint8Array | string | null);
+  text(): Promise<string>;
 }
 declare const crypto: {
   getRandomValues<T extends Uint8Array>(array: T): T;
