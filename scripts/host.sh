@@ -640,14 +640,15 @@ pids_path = os.path.join(root, "pids.events")
 mem_path = os.path.join(root, "memory.events")
 def tripped():
     if events(pids_path).get("max", 0): return "process"
-    # Memory trips on a kill decision, not on pressure: `max` fires hundreds of
-    # times while reclaim succeeds (a healthy cache-heavy launch brushing the
-    # cap), while `oom` fires exactly when the kernel kills for memory. A refused
-    # fork has no reclaim analogue, so the process cap keeps `max`. The kill
-    # counters vary by kernel (one OOM recorded oom_kill 0, 1 and 2 across three
-    # runs here), so every counter that only a kill moves joins the verdict.
+    # Memory trips on this cgroup's OOM decision, not on pressure and not on any
+    # victim here: `max` fires hundreds of times while reclaim succeeds (a healthy
+    # cache-heavy launch brushing the cap), and `oom_kill` counts victims of any
+    # OOM killer including a host-wide one, which would blame MemoryMax for the
+    # machine running out. `oom` fires exactly when this cgroup's usage reached
+    # its limit and allocation was about to fail. A refused fork has no reclaim
+    # analogue, so the process cap keeps `max`.
     mem = events(mem_path)
-    if mem.get("oom", 0) or mem.get("oom_kill", 0) or mem.get("oom_group_kill", 0): return "memory"
+    if mem.get("oom", 0): return "memory"
     return ""
 # The events files wake a poller when their counters change, so the watch
 # blocks in the kernel instead of waking on a timer: a trip is read within
@@ -2039,6 +2040,33 @@ EOF
     marker "$tmp/logs/brush.done" 20
     check "a launch that brushes the memory cap with reclaimable cache completes unnamed" \
       'grep -q "brushed .* pages" "$tmp/logs/brush.out" && [ -e "$tmp/logs/brush.done" ] && [ ! -s "$tmp/logs/brush.err" ]' "$brush_got"
+    mkdir -p "$tmp/capshim2"
+    for t in "$CAPSYS"/*; do
+      [ -e "$t" ] || continue
+      [ "$(basename "$t")" = systemctl ] && continue
+      ln -s "$t" "$tmp/capshim2/$(basename "$t")"
+    done
+    shimctl2=$(command -v systemctl)
+    cat > "$tmp/capshim2/systemctl" <<EOF
+#!/usr/bin/env bash
+# A fallback-blind backend: every verdict reads settled success, while the
+# watcher resolves the real cgroup. An OOM named here was named by the watcher.
+if [[ "\$*" == *postmaster-host-* && "\$*" == *ControlGroup* ]]; then
+  echo x >> "$tmp/logs/shim2-cg.log"
+fi
+if [[ "\$*" == *postmaster-host-* && "\$*" == *Result* ]]; then
+  echo x >> "$tmp/logs/shim2-result.log"
+  echo "Result=success"; echo "ActiveState=inactive"; exit 0
+fi
+exec "$shimctl2" "\$@"
+EOF
+    chmod +x "$tmp/capshim2/systemctl"
+    rm -f "$tmp/logs/shim2-cg.log" "$tmp/logs/shim2-result.log"
+    touch "$tmp/logs/shim2-cg.log" "$tmp/logs/shim2-result.log"
+    wmem_got=$(cap_launch "$cap_impl" "$tmp/capshim2" watcher-mem -- timeout --signal=TERM --kill-after=1 6 python3 "$tmp/caller/memory-cap.py" 2>/dev/null)
+    marker "$tmp/logs/watcher-mem.done" 15
+    check "with the fallback blinded, an OOM is still named: the watcher notes it" \
+      'grep -qFx "host: memory cap reached (MemoryMax=64M)" "$tmp/logs/watcher-mem.err" && [ "$(wc -l < "$tmp/logs/shim2-cg.log")" -ge 1 ] && [ "$(wc -l < "$tmp/logs/shim2-result.log")" -eq 0 ]' "$wmem_got"
     kill_got=$(cap_launch "$cap_impl" "$CAPSYS" kill-healthy -- "$tmp/caller/healthy.sh" 2>/dev/null)
     sleep 0.3; kill -KILL "$(cat "$tmp/logs/kill-healthy.pid")" 2>/dev/null
     marker "$tmp/logs/kill-healthy.done" 10
