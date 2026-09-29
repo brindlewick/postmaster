@@ -276,9 +276,14 @@ CHECKPOINT_MODE and MERGE_AUTHORITY come from ship.checkpoint_mode and ship.merg
 name: <ticket id>, <ticket title>
 dispatch: <abs path of this directory>
 synthesis worktree: <abs path; cut by the postmaster at BASE, the coachman's cwd for every leg>
-tool: <abs path of the postmaster repo: <tool> in the runbooks>
+tool: <abs path of the run's pinned postmaster checkout, at the dispatch commit: <tool> in the coachman's runbook>
 postmaster ruling channel: resume the coachman's thread (harnesses.md) with the ruling as the prompt
 ```
+
+The postmaster's own session continues to use the main checkout it found from the skill. The
+waybill's `tool:` path is the run's pinned checkout; coachman launches, resumes and takeovers
+use that path for their host, launch and runbook files. An older waybill keeps the tool path it
+already names.
 
 ## Hard rules
 
