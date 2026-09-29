@@ -134,7 +134,10 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    `<tool>/scripts/verify.sh record
    <repo> <dispatch> --gate '<gate>'` writes `checks.json`, the checks the run is held to, and
    prints them for the waybill; a gate the project declares wins over the launch card's, and
-   `record` says so.
+   `record` says so. `<tool>/scripts/spec-review-link.sh --validate <dispatch>` also exits 0:
+   the captured `planning.review_link`, if set, must contain `{path}`. On refusal, log a `note`
+   with the config error, tell the user what to fix, set the undispatched run to `abandoned`,
+   and do not cut worktrees or move the ticket in progress.
 5. **Cut the synthesis worktree** at BASE, the sha you recorded from `git -C <repo> rev-parse
    HEAD` on the default branch: `git -C <repo> worktree add .worktrees/<TICKET> -b <TICKET>
    <sha>`. The coachman's cwd is that worktree from its first leg, so the project's ambient
@@ -240,10 +243,11 @@ you have not acted on.
 Each `NEXT` names the act:
 
 - **USER:** the run waits on the user, and its `.waiting-on-user` holds the question (Stage E
-  step 3, Stage F step 2). Put the question to the user again if you have not in this session;
+  step 3, Stage F step 2, Spec review). Put the question to the user again if you have not in this session;
   otherwise nothing to do until they answer.
 - **RULE:** an escalation is waiting. Stage E.
 - **GATE:** the ship card is complete. Stage F.
+- **SPEC:** a spec review package is waiting (`.spec-review-ready`). Spec review, below.
 - **DISPATCH:** the leg's `.leg-<n>-done` marker is present. Stage C for the leg after `n` in
   `<tool>/scripts/turnpikes.sh legs <dispatch>`, logging a `note` that names any leg the list leaves
   out; after the ship leg, Stage G. If the script exits other than 0, nothing is dispatched:
@@ -281,6 +285,59 @@ in place of the coachman's launch. Record its thread id from the new stream (`ha
 A leg's `.leg-<n>-exited` marker with `.leg-<n>-done` beside it is normal completion. Every
 transition is one `log-action` line; the narrative in your own notes is for the user,
 never the record.
+
+## Spec review: every workhorse's spec to the user before any code
+
+On `.spec-review-ready`, the planning stage has paused for the user. Read
+`<dispatch>/spec-review.md`: one entry per workhorse, each with its lane, the commit of its
+`WORKHORSE-SPEC.md`, and the link that opens it in the user's editor. The coachman built each
+link with `<tool>/scripts/spec-review-link.sh` from the run's recorded `planning.review_link`
+template, as `ship.review_link` is for the ship card; with no template it is the file's path.
+A revised spec comes back as a new entry at its new commit. In a fixture run
+(`<tool>/scripts/fixture.sh`) there is no user to ask: you sign each spec off yourself, deciding
+approved, changes or dropped as the user would, through the same `fresh`, `record` and
+`count` steps below, and no `.waiting-on-user` is written. Every other line of this section
+holds.
+
+1. **Put one spec to the user at a time.** A new package starts a new
+   `spec-decisions.md`: `<tool>/scripts/spec-decisions.sh <dispatch> fresh`, so no stanza
+   from an earlier package survives into this one. Show its link and its commit, and ask for
+   a decision: approved; changes requested in their words; or drop this workhorse. When the
+   first spec goes to the user, write what was asked to the run's `.waiting-on-user`, as
+   Stage F step 2 does: while it is set the poll reports USER, not SPEC, so the package is
+   never taken twice. Never show one workhorse's spec beside another's: review is for scope
+   and correctness, not for making the specs alike. Never show any of it to a workhorse.
+2. **Record the decision as it comes** with `<tool>/scripts/spec-decisions.sh <dispatch>
+   record <lane> <decision> <commit> <the user's words>`, where `<decision>` is `approved`,
+   `changes` or `dropped`, `<commit>` the spec commit the user saw, and the words are the
+   user's own, carried verbatim for a `changes` or `dropped` and omitted for an `approved`.
+   One decision per call, at the moment it is given. The script appends the stanza and logs
+   the `spec-review` line; it refuses a lane the manifest does not name, a second stanza
+   for one lane, a `changes` with no words, and a decision with no commit. The stanzas
+   accumulate as this package is decided;
+   the file is complete when every spec in the package has one, and it holds this package's
+   decisions only.
+3. **When every spec in the package is decided, send the package back.** Remove
+   `.waiting-on-user`, check `spec-decisions.md` holds every spec in the package, remove
+   `.spec-review-ready`, and resume the current leg (Stage C step 5) with the decisions file
+   as what it must read. The marker is consumed here, on every path, before the resume, as
+   `.card-ready` is before a word is delivered: a fresh package touches it afresh, so SPEC
+   always means a package nobody has taken yet. Read the run-wide numbers first:
+   `<tool>/scripts/spec-decisions.sh <dispatch> count` prints `approved <n>`, every manifest
+   lane approved in the manifest or this package counted once, and `changes <m>`, the
+   manifest lanes with a changes stanza in this package. A stanza for an unnamed lane, or
+   an approval with a blank commit, contributes nothing. Branch on the numbers, never by
+   reading the files:
+   - **`changes` above zero:** the coachman revises those specs alone, each in its own
+     thread, and pauses with a fresh package, which is put to the user the same way, until
+     every spec is approved or dropped.
+   - **No changes, fewer than two approved:** tell the user the run needs two approved specs
+     and has fewer, and that nothing is implemented from an unapproved plan. The coachman
+     stops on resume and writes an escalation carrying the count; the user alone abandons
+     the run.
+   - **No changes, two or more approved:** the coachman goes on to implementation.
+   Log every step; the planning span the stage timings show is this stage, drafting through
+   the last decision, with the user's review inside it.
 
 ## Stage E: rulings
 
@@ -420,8 +477,8 @@ only with the user's word for that specific thing, and the word is logged.
 
 ## Hard rules
 
-- Never implement, review, or launch workhorses; never edit source; never write a coachman's
-  hand-off or card for it.
+- Never implement or judge a workhorse, or launch one; facilitate the user's spec review as
+  Spec review says. Never edit source or write a coachman's hand-off or card for it.
 - Never create a ticket without the user's word unless the config says you may.
 - Never dispatch a ticket that `<tool>/scripts/ticket-check.sh` fails, and never change a ticket's
   text without the user's word for that text.
