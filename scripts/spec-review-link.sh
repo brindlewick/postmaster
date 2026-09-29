@@ -129,6 +129,11 @@ rm -- "$w/WORKHORSE-SPEC.md"
 render "$d" "$w" >/dev/null 2>"$tmp/err"; rc=$?
 [ $rc -eq 1 ] && has "$(cat "$tmp/err")" "no WORKHORSE-SPEC.md" \
   && ok "a missing spec is refused" || fail "a missing spec is refused (exit $rc)" "$(cat "$tmp/err")"
+mkdir -- "$w/WORKHORSE-SPEC.md"
+render "$d" "$w" >/dev/null 2>"$tmp/err"; rc=$?
+[ $rc -eq 1 ] && has "$(cat "$tmp/err")" "no WORKHORSE-SPEC.md" \
+  && ok "a directory as the spec is refused" || fail "a directory as the spec is refused (exit $rc)" "$(cat "$tmp/err")"
+rmdir -- "$w/WORKHORSE-SPEC.md"
 
 echo
 [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }
