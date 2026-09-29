@@ -14,6 +14,8 @@
 #   host.sh leg launch|takeover <dispatch> <worktree> <leg> <number> <prompt>
 #   host.sh leg resume <dispatch> <worktree> <leg> <number> <thread-id> <prompt>
 #   host.sh leg retry <dispatch> <worktree> <leg> <number>
+#   host.sh leg outcome <dispatch> <number>
+#   host.sh leg waiting add|remove|list <runs> <ticket> [<question-file>]
 #   host.sh run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>]
 #               [--out <file>] [--err <file>] [--append] [--marker <file>]
 #               [--pidfile <file>] -- <command...>
@@ -1839,14 +1841,19 @@ try:
                 break
         if thread: break
 except OSError: pass
-if phase_value != "started": outcome = "refused"
+if handoff: outcome = "finished"
+elif phase_value != "started": outcome = "refused"
 elif walled: outcome = "walled"
-elif handoff: outcome = "finished"
 elif not thread: outcome = "pre-thread"
 else: outcome = "incomplete"
+if outcome in ("refused", "pre-thread") or (outcome == "walled" and role == "coachman_fallback"):
+    on_answer = "retry"
+else:
+    on_answer = "none"
 record = {
     "attempt": int(attempt), "leg": number, "name": leg, "request": request,
     "role": role, "prompt": prompt, "thread_id": thread, "outcome": outcome,
+    "on_answer": on_answer,
     "exit": int(rc), "ended": datetime.datetime.now(datetime.timezone.utc).isoformat(),
 }
 with open(attempts, "a", encoding="utf-8") as f:
@@ -1894,7 +1901,14 @@ print(n + 1)
 PY
   ) || die "cannot count prior attempts"
   active=$d/.leg-$n-active
-  mkdir "$active" 2>/dev/null || die "leg $n already has an active attempt"
+  if ! mkdir "$active" 2>/dev/null; then
+    if [ -e "$exited" ]; then
+      rmdir "$active" 2>/dev/null || die "leg $n already has an active attempt"
+      mkdir "$active" 2>/dev/null || die "leg $n already has an active attempt"
+    else
+      die "leg $n already has an active attempt"
+    fi
+  fi
   phase=$logs/coachman-leg-$n-phase-$attempt
   wall=$logs/coachman-leg-$n-wall-$attempt
   printf 'refused\n' > "$phase" || { rmdir "$active"; die "cannot write attempt phase"; }
@@ -1949,6 +1963,7 @@ except (OSError, ValueError):
 if not rows or rows[-1].get("attempt") != int(attempt):
     record = {"attempt": int(attempt), "leg": int(number), "name": leg, "request": request,
               "role": role, "prompt": prompt, "thread_id": thread, "outcome": "refused",
+              "on_answer": "retry",
               "exit": int(rc), "ended": datetime.datetime.now(datetime.timezone.utc).isoformat()}
     with open(path, "a", encoding="utf-8") as f: f.write(json.dumps(record, separators=(",", ":")) + "\n")
 PY
@@ -1957,9 +1972,75 @@ PY
   fi
 }
 
-leg_cmd() {  # leg launch|resume|takeover|retry <dispatch> <worktree> <leg> <number> ...
+leg_outcome() {  # leg_outcome <dispatch> <number>: the last attempt record, as JSON
+  local d=$1 n=$2
+  n=$(leg_number "$n") || exit 1
+  python3 - "$d/logs/coachman-leg-$n-attempts.jsonl" <<'PY'
+import sys
+try:
+    rows = [line for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+except OSError:
+    raise SystemExit("no attempt recorded for that leg")
+if not rows:
+    raise SystemExit("no attempt recorded for that leg")
+sys.stdout.write(rows[-1] if rows[-1].endswith("\n") else rows[-1] + "\n")
+PY
+}
+
+leg_waiting_add() {  # leg_waiting_add <runs> <ticket> <question-file>
+  local runs=$1 ticket=$2 qfile=$3 f
+  [ -f "$qfile" ] || die "no such question file: $qfile"
+  f=$runs/postmaster/ESCALATION.md
+  mkdir -p "$(dirname "$f")" || die "cannot create $(dirname "$f")"
+  python3 - "$f" "$ticket" "$qfile" <<'PY'
+import pathlib, re, sys
+path, ticket, qfile = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+question = pathlib.Path(qfile).read_text(encoding="utf-8", errors="replace").strip()
+text = path.read_text(encoding="utf-8") if path.is_file() else ""
+blocks = re.split(r"(?m)^## ", text)
+head = blocks[0] if blocks else ""
+rest = [b for b in blocks[1:] if b.strip()]
+rest = [b for b in rest if not b.splitlines()[0].strip() == ticket]
+rest.append(ticket + "\n" + question + "\n")
+path.write_text(head + "".join("## " + b if not b.endswith("\n") else "## " + b for b in rest), encoding="utf-8")
+text = path.read_text(encoding="utf-8")
+parts = re.split(r"(?m)^## ", text)
+out = [parts[0]]
+for b in parts[1:]:
+    out.append("## " + b if not b.startswith("## ") else b)
+path.write_text("".join(out), encoding="utf-8")
+PY
+}
+
+leg_waiting_remove() {  # leg_waiting_remove <runs> <ticket>
+  local runs=$1 ticket=$2 f
+  f=$runs/postmaster/ESCALATION.md
+  [ -f "$f" ] || return 0
+  python3 - "$f" "$ticket" <<'PY'
+import pathlib, re, sys
+path, ticket = pathlib.Path(sys.argv[1]), sys.argv[2]
+text = path.read_text(encoding="utf-8")
+parts = re.split(r"(?m)^## ", text)
+keep = [parts[0]]
+for b in parts[1:]:
+    if b.splitlines()[0].strip() != ticket:
+        keep.append("## " + b)
+out = "".join(keep)
+path.write_text(out if out.strip() else "", encoding="utf-8")
+if not out.strip():
+    path.unlink()
+PY
+}
+
+leg_waiting_list() {  # leg_waiting_list <runs>
+  local f=$1/postmaster/ESCALATION.md
+  [ -f "$f" ] && cat "$f"
+  return 0
+}
+
+leg_cmd() {  # leg launch|resume|takeover|retry|outcome|waiting ...
   local request=${1:-}
-  [ $# -gt 0 ] || die "usage: host.sh leg launch|resume|takeover|retry ..."
+  [ $# -gt 0 ] || die "usage: host.sh leg launch|resume|takeover|retry|outcome|waiting ..."
   shift
   case $request in
     launch)
@@ -1971,6 +2052,16 @@ leg_cmd() {  # leg launch|resume|takeover|retry <dispatch> <worktree> <leg> <num
     takeover)
       [ $# -eq 5 ] || die "usage: host.sh leg takeover <dispatch> <worktree> <leg> <number> <prompt>"
       leg_start takeover "$1" "$2" "$3" "$4" "$5" ;;
+    outcome)
+      [ $# -eq 2 ] || die "usage: host.sh leg outcome <dispatch> <number>"
+      leg_outcome "$1" "$2" ;;
+    waiting)
+      case ${1:-} in
+        add) shift; [ $# -eq 3 ] || die "usage: host.sh leg waiting add <runs> <ticket> <question-file>"; leg_waiting_add "$@" ;;
+        remove) shift; [ $# -eq 2 ] || die "usage: host.sh leg waiting remove <runs> <ticket>"; leg_waiting_remove "$@" ;;
+        list) shift; [ $# -eq 1 ] || die "usage: host.sh leg waiting list <runs>"; leg_waiting_list "$@" ;;
+        *) die "usage: host.sh leg waiting add|remove|list ..." ;;
+      esac ;;
     retry)
       [ $# -eq 4 ] || die "usage: host.sh leg retry <dispatch> <worktree> <leg> <number>"
       local d=$1 wt=$2 leg=$3 n=$4 attempts=$1/logs/coachman-leg-$4-attempts.jsonl
@@ -1980,8 +2071,9 @@ leg_cmd() {  # leg launch|resume|takeover|retry <dispatch> <worktree> <leg> <num
       local role=${last[1]} prompt=${last[2]} thread=${last[3]} outcome=${last[4]} retry_as=launch
       [ -n "$thread" ] && retry_as=resume
       case $outcome in refused|pre-thread|walled) ;; *) die "leg $4's last attempt is $outcome, not waiting for a retry" ;; esac
+      [ "$outcome $role" = "walled coachman" ] && die "leg $4's last attempt is a primary wall: take it over, do not retry it"
       leg_start "$retry_as" "$d" "$wt" "$leg" "$n" "$prompt" "$thread" "$role" ;;
-    *) die "usage: host.sh leg launch|resume|takeover|retry ..." ;;
+    *) die "usage: host.sh leg launch|resume|takeover|retry|outcome|waiting ..." ;;
   esac
 }
 
@@ -2026,6 +2118,13 @@ case "$*" in
     printf '{"session_id":"thread-prose"}\n'
     printf '{"type":"assistant","message":{"content":[{"type":"text","text":"quota"}]}}\n'
     exit 1 ;;
+  *cap-no-thread*)
+    printf 'host: memory cap reached (MemoryMax=8G)\n' >&2
+    exit 137 ;;
+  *cap-with-thread*)
+    printf '{"session_id":"thread-capped"}\n'
+    printf 'host: memory cap reached (MemoryMax=8G)\n' >&2
+    exit 137 ;;
   *pre-thread*) exit 1 ;;
   *)
     printf '{"session_id":"thread-plain"}\n'
@@ -2107,6 +2206,82 @@ EOF
   rc=$?; marker "$leg_d/.leg-1-exited" 30
   got=$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).readlines()[-1])["outcome"])' "$attempts")
   check "quota in assistant prose does not turn an incomplete thread into a wall" '[ "$rc" -eq 0 ] && [ "$got" = incomplete ]' "$got"
+
+  prompt=$leg_d/cap-none.txt; printf 'cap-no-thread kill\n' > "$prompt"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" TEST_DONE="$leg_d/.leg-1-done" \
+    TEST_OBSERVED="$leg_d/retry-observed" "$SELF" leg launch "$leg_d" "$leg_wt" synthesis 1 "$prompt" >/dev/null
+  rc=$?; marker "$leg_d/.leg-1-exited" 30
+  got=$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).readlines()[-1])["outcome"])' "$attempts")
+  check "a host cap kill with no thread id is pre-thread, not a wall" '[ "$rc" -eq 0 ] && [ "$got" = pre-thread ]' "$got"
+
+  prompt=$leg_d/cap-thread.txt; printf 'cap-with-thread kill\n' > "$prompt"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" TEST_DONE="$leg_d/.leg-1-done" \
+    TEST_OBSERVED="$leg_d/retry-observed" "$SELF" leg launch "$leg_d" "$leg_wt" synthesis 1 "$prompt" >/dev/null
+  rc=$?; marker "$leg_d/.leg-1-exited" 30
+  got=$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).readlines()[-1])["outcome"])' "$attempts")
+  check "a host cap kill with a thread id is incomplete, not a wall" '[ "$rc" -eq 0 ] && [ "$got" = incomplete ]' "$got"
+
+  got=$("$SELF" leg outcome "$leg_d" 1)
+  check "leg outcome prints the last attempt record" \
+    '[ "$(printf "%s" "$got" | python3 -c "import json,sys; print(json.load(sys.stdin)[\"outcome\"])")" = incomplete ]' "$got"
+  "$SELF" leg outcome "$leg_d" 9 >/dev/null 2>&1; rc=$?
+  check "leg outcome with no attempt recorded refuses" '[ "$rc" -ne 0 ]'
+
+  runs=$tmp/waitruns; mkdir -p "$runs"
+  printf 'What about the merge?\n' > "$tmp/wq1.txt"
+  printf 'Ship or not?\n' > "$tmp/wq2.txt"
+  "$SELF" leg waiting add "$runs" T-1 "$tmp/wq1.txt"
+  "$SELF" leg waiting add "$runs" T-2 "$tmp/wq2.txt"
+  got=$("$SELF" leg waiting list "$runs" | grep -c '^## ')
+  check "two waiting runs are listed" '[ "$got" = 2 ]' "$got"
+  "$SELF" leg waiting add "$runs" T-1 "$tmp/wq2.txt"
+  got=$("$SELF" leg waiting list "$runs" | grep -c '^## ')
+  check "adding a ticket already waiting replaces its question, and does not duplicate" '[ "$got" = 2 ]' "$got"
+  got=$("$SELF" leg waiting list "$runs" | awk '/^## T-1$/{getline; print}')
+  check "the replaced question is the new one" '[ "$got" = "Ship or not?" ]' "$got"
+  "$SELF" leg waiting remove "$runs" T-1
+  got=$("$SELF" leg waiting list "$runs" | grep -c '^## ')
+  check "removing one leaves the other" '[ "$got" = 1 ]' "$got"
+  "$SELF" leg waiting remove "$runs" T-2
+  got=$("$SELF" leg waiting list "$runs" | grep -c '^## ' || true)
+  check "removing the last empties the list" '[ -z "$got" ] || [ "$got" = 0 ]' "$got"
+  check "an empty waiting list removes the file" '[ ! -f "$runs/postmaster/ESCALATION.md" ]'
+
+  before=$(grep -c . "$attempts")
+  "$SELF" leg retry "$leg_d" "$leg_wt" synthesis 1 >/dev/null 2>&1; rc=$?
+  check "retry refuses an attempt that never waited on the user" '[ "$rc" -ne 0 ] && [ "$(grep -c . "$attempts")" = "$before" ]'
+  printf '{"attempt":99,"leg":1,"name":"synthesis","request":"launch","role":"coachman","prompt":"%s","thread_id":"","outcome":"walled","exit":1}\n' "$prompt" >> "$attempts"
+  "$SELF" leg retry "$leg_d" "$leg_wt" synthesis 1 >/dev/null 2>&1; rc=$?
+  check "retry refuses a primary wall: that is the takeover's job" '[ "$rc" -ne 0 ] && [ "$(grep -c . "$attempts")" = "$((before + 1))" ]'
+  python3 - "$attempts" <<'PY'
+import json, sys
+rows = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+bad = []
+for r in rows:
+    if r.get("attempt") == 99:
+        continue
+    want = "retry" if (r["outcome"] in ("refused", "pre-thread")
+                        or (r["outcome"] == "walled" and r.get("role") == "coachman_fallback")) else "none"
+    if r.get("on_answer") != want:
+        bad.append((r.get("attempt"), r.get("outcome"), r.get("on_answer"), want))
+if bad:
+    print(bad)
+    raise SystemExit(1)
+PY
+  rc=$?
+  check "every attempt record states its on-answer action" '[ "$rc" -eq 0 ]'
+
+  mkdir "$leg_d/.leg-1-active"
+  : > "$leg_d/.leg-1-exited"
+  prompt=$leg_d/stale.txt; printf 'pre-thread stale lock\n' > "$prompt"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" TEST_DONE="$leg_d/.leg-1-done" \
+    TEST_OBSERVED="$leg_d/retry-observed" "$SELF" leg launch "$leg_d" "$leg_wt" synthesis 1 "$prompt" >/dev/null
+  rc=$?; marker "$leg_d/.leg-1-exited" 30
+  got=$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).readlines()[-1])["outcome"])' "$attempts")
+  check "a stale active lock is stolen once its attempt exited" '[ "$rc" -eq 0 ] && [ "$got" = pre-thread ]' "$got"
 }
 
 
