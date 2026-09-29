@@ -197,7 +197,7 @@ export function argvDecoded(): string[] {
   const args = process.argv.slice(2);
   const raw = rawArgvBytes();
   if (raw === null) return args;
-  const parts: Buffer[] = [];
+  const parts: Uint8Array[] = [];
   let start = 0;
   for (let i = 0; i < raw.length; i++) {
     if (raw[i] === 0) {

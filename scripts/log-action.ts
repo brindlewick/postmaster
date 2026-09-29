@@ -665,11 +665,12 @@ withTempDir((tmp) => {
     let edgeBad = 0;
     let edgeFirst = "";
     for (const [bytes, want] of edges) {
-      const got = decodeDropInvalid(Buffer.from(bytes));
+      const buf = Buffer.from(Uint8Array.from(bytes));
+      const got = decodeDropInvalid(buf);
       if (got !== want) {
         edgeBad++;
         if (!edgeFirst)
-          edgeFirst = `${Buffer.from(bytes).toString("hex")}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`;
+          edgeFirst = `${buf.toString("hex")}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`;
       }
     }
     st.check("the decoder drops damage and keeps valid edges", edgeBad === 0, edgeFirst);
@@ -685,8 +686,8 @@ withTempDir((tmp) => {
         return seed;
       };
       const boundary = [
-        0x00, 0x7f, 0x80, 0xbf, 0xc0, 0xc1, 0xc2, 0xdf, 0xe0, 0xed, 0xef, 0xf0, 0xf4,
-        0x8f, 0x90, 0xa0,
+        0x00, 0x7f, 0x80, 0xbf, 0xc0, 0xc1, 0xc2, 0xdf, 0xe0, 0xed, 0xef, 0xf0, 0xf4, 0x8f, 0x90,
+        0xa0,
       ];
       const cases: Buffer[] = [];
       for (let n = 0; n < 300; n++) {
