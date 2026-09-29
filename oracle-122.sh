@@ -246,6 +246,22 @@ mktransient "$root/oracle" "provider error: quota exceeded: monthly spend budget
 run_watch "$tmp/new" "$root" 2 "$root/stub.log"
 [ $rc -eq 0 ] && has "needs oracle REMOUNT" && clean "$root/oracle" "$root/stub.log" 1 \
   && ok "a quota wall wakes and is never resumed" || { fail "a quota wall wakes and is never resumed"; }
+i=0
+while IFS= read -r quote; do
+  [ -n "$quote" ] || continue
+  i=$((i + 1)); root=$tmp/p7r5-$i; mkdispatch "$root" synthesis 1
+  mktransient "$root/oracle" "$quote: model stream idle timeout"; : > "$root/stub.log"
+  run_watch "$tmp/new" "$root" 2 "$root/stub.log"
+  [ $rc -eq 0 ] && has "needs oracle REMOUNT" && clean "$root/oracle" "$root/stub.log" 1 \
+    && ok "round-5 wall [$quote] beside a transient wakes and is never resumed" \
+    || { fail "round-5 wall [$quote] beside a transient wakes and is never resumed"; }
+done <<'QUOTES'
+Resource has been exhausted (e.g. check quota)
+Error: rate_limit_exceeded
+Error: usage_limit_reached
+quota for this project was finally exceeded
+budget for the current month has been exhausted
+QUOTES
 root=$tmp/p8; mkdispatch "$root" synthesis 1
 mktransient "$root/oracle" "launch: no such lane 'oracle'"; : > "$root/stub.log"
 run_watch "$tmp/new" "$root" 2 "$root/stub.log"

@@ -12,7 +12,7 @@
 #   launch.sh transient <err-file> [<stream-file> [<skip-lines>]]
 #                                           exit 0 when a leg's end is a transient provider
 #                                           error this adapter names (harnesses.md)
-#   launch.sh walls                         the wall phrases transient matches, one per line
+#   launch.sh wall-tokens                   the wall token stems transient vetoes on, one per line
 #   launch.sh wall-quotes                   the quote corpus, one wall phrasing per line
 #   launch.sh --self-test
 #
@@ -54,7 +54,7 @@
 # any transient signature.
 #
 #   exit 0  the forms or the skill's prompt were printed, or the harness exited 0; thread-id
-#           found an id; transient matched a named provider error; walls or wall-quotes
+#           found an id; transient matched a named provider error; wall-tokens or wall-quotes
 #           listed their lines
 #   exit 1  usage, config or run.json missing or unreadable, unknown name, a leg that is not
 #           synthesis, review or ship, the coachman launched or resumed with no --leg, a
@@ -497,8 +497,8 @@ PY
   is_transient "a generic timeout is not transient" 1 "request timeout"
   is_transient "an ordinary model error is not transient" 1 "Error: something went wrong"
   is_transient "an empty record is not transient" 1 ""
-  is_transient "a bare quota mention is not a provider wall" 1 "checking quota status before proceeding"
-  is_transient "a quota remainder is not a provider wall" 1 "quota remaining: 0 of 100"
+  is_transient "a bare quota mention wakes" 1 "checking quota status before proceeding"
+  is_transient "a quota remainder wakes" 1 "quota remaining: 0 of 100"
   is_transient "quota exhausted is a provider wall" 1 "quota exhausted for this key"
   stale_stream='{"type":"error","message":"model stream idle timeout"}
 {"type":"assistant","message":"continued"}'
@@ -526,7 +526,7 @@ PY
   [ $rc -eq 1 ] && case $(cat "$tmp/err") in *"whole number"*) true ;; *) false ;; esac \
     && ok "a skip that is not a number is refused" || fail "a skip that is not a number is refused (exit $rc)"
   is_transient "an underscore quota wall takes precedence" 1 "quota_exhausted: model stream idle timeout"
-  is_transient "an underscore provider wall takes precedence" 1 "provider_wall: stream disconnected"
+  is_transient "a bare provider-wall mention without a stem is not a veto" 0 "provider_wall: stream disconnected"
   is_transient "an underscore resource wall takes precedence" 1 "resource_exhausted: bad gateway"
   is_transient "a hyphen quota wall takes precedence" 1 "quota-exceeded: model stream idle timeout"
   printf 'host: launch running uncapped (no supported per-launch limits available)\nlaunch: no such lane\n' > "$tmp/leg.err"
@@ -544,33 +544,66 @@ PY
   [ $rc -eq 1 ] && [ "$out" = launch-refusal ] \
     && ok "a refusal wins over transient text on its own line" \
     || fail "a refusal wins over transient text on its own line (exit $rc, $out)"
-  echo "walls: every phrase in every separator wins precedence, by construction"
+  echo "vetoes: any wall token anywhere in an ending wakes, beside every transient"
   check_cell() {  # check_cell <label> <want-exit> <want-out> <err-text>
     printf '%s\n' "$4" > "$tmp/cell.err"
     out=$("$self" transient "$tmp/cell.err" 2>"$tmp/err"); rc=$?
     [ $rc -eq "$2" ] && [ "$out" = "$3" ] \
-      || { fail "wall cover [$1]: got exit $rc $out"; matrix_fail=1; }
+      || { fail "veto cover [$1]: got exit $rc $out"; matrix_fail=1; }
   }
-  "$self" walls > "$tmp/walls.txt"; rc=$?
-  [ $rc -eq 0 ] && [ -s "$tmp/walls.txt" ] \
-    && ok "walls lists the adapter's wall phrases" \
-    || fail "walls lists the adapter's wall phrases (exit $rc)"
-  check_cell "transient proves itself" 0 "model stream idle timeout" "model stream idle timeout"
-  cells=0
-  while IFS= read -r phrase; do
-    [ -n "$phrase" ] || continue
-    matrix_fail=0
-    for sep in " " "_" "-"; do
-      wall=$(printf '%s' "$phrase" | sed "s/ /$sep/g")
+  check_pair() {  # check_pair <label> <want-exit> <want-out> <err-text> <stream-text>
+    printf '%s\n' "$4" > "$tmp/cell.err"
+    printf '%s\n' "$5" > "$tmp/cell-events.jsonl"
+    out=$("$self" transient "$tmp/cell.err" "$tmp/cell-events.jsonl" 2>"$tmp/err"); rc=$?
+    [ $rc -eq "$2" ] && [ "$out" = "$3" ] \
+      || { fail "veto cover [$1]: got exit $rc $out"; matrix_fail=1; }
+  }
+  "$self" wall-tokens > "$tmp/tokens.txt"; rc=$?
+  [ $rc -eq 0 ] && [ -s "$tmp/tokens.txt" ] \
+    && ok "wall-tokens lists the adapter's wall token stems" \
+    || fail "wall-tokens lists the adapter's wall token stems (exit $rc)"
+  printf '%s\n' \
+    "model stream idle timeout" \
+    "stream idle timeout" \
+    "502 Bad Gateway" \
+    "503 Service Unavailable" \
+    "529 overloaded" \
+    "stream disconnected" \
+    "SSE error" \
+    "connection reset by peer" \
+    "connection aborted" \
+    "broken pipe" > "$tmp/transients.txt"
+  transient_verdict() {  # transient_verdict <exemplar>: the verdict a lone exemplar prints
+    case $1 in
+      *idle*timeout*) printf 'model stream idle timeout' ;;
+      502*|503*|529*) printf 'gateway failure' ;;
+      *) printf 'stream drop' ;;
+    esac
+  }
+  matrix_fail=0; cells=0
+  while IFS= read -r sig; do
+    [ -n "$sig" ] || continue
+    check_cell "lone [$sig] resumes" 0 "$(transient_verdict "$sig")" "$sig"
+    while IFS= read -r tok; do
+      [ -n "$tok" ] || continue
       cells=$((cells + 1))
-      check_cell "$wall beside transient" 1 provider-wall "$wall: model stream idle timeout"
-      check_cell "transient beside $wall" 1 provider-wall "model stream idle timeout, $wall"
-      check_cell "$wall alone" 1 provider-wall "$wall reached"
-    done
-    [ $matrix_fail -eq 0 ] && ok "wall matrix covers [$phrase] in every separator"
-  done < "$tmp/walls.txt"
-  [ "$cells" -gt 0 ] || fail "wall matrix ran no cell"
-  echo "structured signals: codes and error types classify before prose"
+      check_cell "[$tok] vetoes [$sig]" 1 provider-wall "$sig [$tok]"
+    done < "$tmp/tokens.txt"
+  done < "$tmp/transients.txt"
+  [ "$cells" -gt 0 ] && [ "$matrix_fail" -eq 0 ] \
+    && ok "every token vetoes every transient ($cells cells)" \
+    || fail "token veto matrix misclassifies or is empty"
+  matrix_fail=0
+  for tok in quota limit exhaust exceed throttl bill budget credit payment usage 429 402 toomanyrequests; do
+    check_cell "lone stem [$tok] vetoes" 1 provider-wall "witness $tok here"
+  done
+  [ "$matrix_fail" -eq 0 ] \
+    && ok "every pinned stem vetoes alone" \
+    || fail "a pinned stem does not veto alone"
+  [ "$(tr '\n' ' ' < "$tmp/tokens.txt")" = "quota limit exhaust exceed throttl bill budget credit payment usage 429 402 toomanyrequests " ] \
+    && ok "wall-tokens lists exactly the pinned stems" \
+    || fail "wall-tokens lists exactly the pinned stems"
+  echo "structured values: known transients resume, anything else wakes"
   is_transient "a 429 status code is a wall" 1 "the leg ended" '{"type":"error","status":429}'
   is_transient "a 402 status code is a wall" 1 "the leg ended" '{"type":"error","code":402}'
   is_transient "a string 429 code is a wall" 1 "the leg ended" '{"type":"error","status_code":"429"}'
@@ -582,30 +615,52 @@ PY
   is_transient "a structured wall beats prose transient" 1 "model stream idle timeout" '{"type":"error","code":429}'
   is_transient "a prose wall beats a structured transient" 1 "quota exceeded, slow down" '{"type":"error","status":503}'
   is_transient "a completed status is not a signal" 1 "the leg ended" '{"type":"error","status":"completed"}'
-  is_transient "a rate_limit_event is a slowdown, not a wall" 0 "model stream idle timeout" '{"type":"error","event":"rate_limit_event"}'
   is_transient "an exit code is not a status code" 1 "the leg ended" '{"type":"error","code":1}'
+  is_transient "an exit code does not veto a transient end" 0 "model stream idle timeout" '{"type":"error","code":1}'
   is_transient "a timeout type is not a transient type" 1 "the leg ended" '{"type":"error","code":"ETIMEDOUT"}'
-  echo "wall spans: quota and budget stems with function words, either order"
-  is_transient "quota was exceeded is a wall" 1 "quota was exceeded, try later"
-  is_transient "quota has been exceeded is a wall" 1 "quota has been exceeded"
-  is_transient "exceeded quota is a wall" 1 "exceeded quota for the key"
-  is_transient "exceeded your current quota is a wall" 1 "You exceeded your current quota."
-  is_transient "budget was exhausted is a wall" 1 "budget was exhausted yesterday"
-  is_transient "exhausted budget is a wall" 1 "exhausted budget for this project"
-  is_transient "a quota span beats prose transient" 1 "quota was exceeded: model stream idle timeout"
-  is_transient "a span with three words between still counts" 1 "quota was very recently exceeded"
-  is_transient "stems five words apart are not a span" 1 "quota for this project was finally exceeded"
-  is_transient "quota without an exceed stem is not a span" 1 "quota reviewed and approved"
-  echo "quote corpus: real wall phrasings classify, alone and beside transient"
+  matrix_fail=0
+  check_pair "a rate_limit_event slowdown does not veto a transient end" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"error","event":"rate_limit_event","message":"model stream idle timeout"}'
+  check_pair "a rate_limit_event alone is not a wall" 1 not-transient \
+    "the leg ended" '{"type":"error","event":"rate_limit_event"}'
+  check_cell "a rate_limit_event in .err does not veto" 0 "model stream idle timeout" \
+    "model stream idle timeout (rate_limit_event seen earlier)"
+  check_pair "an unknown error code wakes" 1 not-transient \
+    "model stream idle timeout" '{"type":"error","code":"WIDGET_7","message":"model stream idle timeout"}'
+  check_pair "an unknown status wakes" 1 not-transient \
+    "model stream idle timeout" '{"type":"error","status":418,"message":"model stream idle timeout"}'
+  check_pair "an unknown error type wakes" 1 not-transient \
+    "model stream idle timeout" '{"type":"error","errortype":"SomethingNew","message":"model stream idle timeout"}'
+  check_pair "a wall-like code wakes as a wall" 1 provider-wall \
+    "model stream idle timeout" '{"type":"error","code":"too_many_requests","message":"model stream idle timeout"}'
+  check_pair "a 429 on a non-error record still vetoes" 1 provider-wall \
+    "model stream idle timeout" '{"type":"response","status":429,"message":"model stream idle timeout"}'
+  check_pair "an unknown value on a non-error record is progress noise" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"response","status":"flying"}'
+  check_pair "a non-JSON wall line vetoes" 1 provider-wall \
+    "model stream idle timeout" 'Error: quota exceeded'
+  check_pair "a wall token in a prompt vetoes" 1 provider-wall \
+    "model stream idle timeout" '{"type":"error","message":"model stream idle timeout","prompt":{"text":"check quota"}}'
+  check_pair "a bare tool name is a label, not a classification" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"error","name":"Bash","message":"model stream idle timeout"}'
+  check_pair "an empty code value is noise" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"error","code":"","message":"model stream idle timeout"}'
+  [ "$matrix_fail" -eq 0 ] \
+    && ok "structured and veto edge controls all behaved" \
+    || fail "structured and veto edge controls misclassified"
+  echo "quote corpus: real wall phrasings wake, alone and beside every transient"
   quotes=0; matrix_fail=0
   while IFS= read -r quote; do
     [ -n "$quote" ] || continue
     quotes=$((quotes + 1))
     check_cell "corpus [$quote]" 1 provider-wall "$quote"
-    check_cell "corpus [$quote] beside transient" 1 provider-wall "$quote: model stream idle timeout"
+    while IFS= read -r sig; do
+      [ -n "$sig" ] || continue
+      check_cell "corpus [$quote] beside [$sig]" 1 provider-wall "$quote: $sig"
+    done < "$tmp/transients.txt"
   done < <("$self" wall-quotes)
   [ "$quotes" -gt 0 ] && [ "$matrix_fail" -eq 0 ] \
-    && ok "quote corpus: $quotes phrasings classify alone and beside transient" \
+    && ok "quote corpus: $quotes phrasings wake alone and beside every transient" \
     || fail "quote corpus misclassifies or is empty"
   out=$("$self" transient "$tmp/no-such.err" 2>"$tmp/err"); rc=$?
   [ $rc -eq 1 ] && case $(cat "$tmp/err") in *"no such error file"*) true ;; *) false ;; esac \
@@ -676,45 +731,39 @@ PY
 # The wall phrases live here once: transient builds its matcher from them and the
 # self-test builds its coverage matrix from them, so a phrase added here is matched
 # and covered with no other edit.
-wall_phrases() {  # wall_phrases: the adapter's wall phrases, one space-joined phrase per line
+wall_tokens() {  # wall_tokens: the adapter's wall token stems, one per line; any of these anywhere in an ending vetoes an automatic resume
   printf '%s\n' \
-    "402 payment required" \
-    "payment required" \
-    "quota wall" \
-    "quota exceeded" \
-    "quota exhausted" \
-    "usage limit" \
-    "usage limits" \
-    "usage limited" \
-    "rate limit" \
-    "rate limits" \
-    "rate limited" \
-    "provider wall" \
-    "resource exhausted" \
-    "insufficient funds" \
-    "too many requests" \
-    "insufficient quota" \
-    "http 429" \
-    "http 402" \
-    "budget exhausted" \
-    "budget exceeded" \
-    "throttled" \
-    "throttling" \
-    "ratelimited" \
-    "ratelimiterror" \
-    "ratelimitexceeded"
+    quota \
+    limit \
+    exhaust \
+    exceed \
+    throttl \
+    bill \
+    budget \
+    credit \
+    payment \
+    usage \
+    429 \
+    402 \
+    toomanyrequests
 }
-# Single words above are exact whole words: throttled and throttling are event outcomes,
-# while bare throttle is usually a mechanism description. Flattened SDK spellings are
-# admitted only with real attestation; add more when a run meets them.
+# The stems are deliberately broad and matched as substrings on
+# separator-stripped text, with no span limit and no word boundary: a false veto
+# is a wake, which costs the postmaster one look, while a missed wall is an
+# automatic remount against a wall. The one exclusion is Claude's
+# rate_limit_event slowdown notice, which is stripped before the veto scan.
 
-# The quote corpus: wall phrasings as runs met them, verbatim with provenance. The matrix
-# covers the phrase list by construction; the corpus covers the wild. When a run meets a
-# wall phrasing, append it here verbatim with where it was found. No wall verbatim was
-# found in run logs through 2026-09-29 (legs hit transient timeouts, never walls), so the
-# seeds below are probe-attested: round-4 review probes, the oracle wall probe, and the
-# HTTP status lines.
-wall_quotes() {  # wall_quotes: real wall phrasings, one per line; the corpus control classifies each alone and beside a transient signature
+# The quote corpus: wall phrasings as runs met them, verbatim with provenance.
+# The token matrix covers the veto set by construction; the corpus covers the
+# wild, each quote alone and beside every transient exemplar. When a run meets a
+# wall phrasing, append it here verbatim with where it was found. No wall
+# verbatim was found in run logs through 2026-09-29 (legs hit transient
+# timeouts, never walls), so the seeds below are probe-attested: round-4 and
+# round-5 review probes, the oracle wall probe, and the HTTP status lines. The
+# round-2 provider_wall seed carries no stem, so it reads here in its
+# capacity-exhausted control form; a bare provider-wall mention without a stem
+# wakes as not-transient, which is still a wake.
+wall_quotes() {  # wall_quotes: real wall phrasings, one per line; the corpus control wakes on each alone and beside every transient exemplar
   printf '%s\n' \
     "You exceeded your current quota, please check your plan and billing details." \
     "quota was exceeded for this key" \
@@ -725,21 +774,31 @@ wall_quotes() {  # wall_quotes: real wall phrasings, one per line; the corpus co
     "budget exhausted for this billing period" \
     "quota exceeded: monthly spend budget exhausted" \
     "Error: quota_exhausted" \
-    "provider_wall: no capacity for this model" \
+    "provider wall: model capacity exhausted" \
     "resource_exhausted: try again later" \
     "You have been rate limited. Slow down." \
     "usage limits reached for this account" \
     "RateLimitError: slow down" \
     "429 Too Many Requests" \
-    "402 Payment Required"
+    "402 Payment Required" \
+    "Resource has been exhausted (e.g. check quota)" \
+    "Error: rate_limit_exceeded" \
+    "Error: usage_limit_reached" \
+    "quota for this project was finally exceeded" \
+    "budget for the current month has been exhausted"
 }
 
 transient() {  # transient <err-file> [<stream-file> [<skip-lines>]]
   [ $# -ge 1 ] && [ $# -le 3 ] || die "usage: launch.sh transient <err-file> [<stream-file> [<skip-lines>]]"
   [ -f "$1" ] || die "no such error file: $1"
-  python3 - "$1" "${2:-}" "${3:-0}" "$(wall_phrases)" <<'PY'
+  python3 - "$1" "${2:-}" "${3:-0}" "$(wall_tokens)" <<'PY'
 import collections, itertools, json, re, sys
-err_path, stream_path, skip_arg, wall_text = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+err_path, stream_path, skip_arg, token_text = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+tokens = [re.sub(r"[^a-z0-9]", "", t.lower()) for t in token_text.split()]
+tokens = [t for t in tokens if t]
+if not tokens:
+    print("launch: no wall tokens: refusing to classify with an empty veto set", file=sys.stderr)
+    raise SystemExit(1)
 try:
     skip = int(skip_arg)
     if skip < 0: raise ValueError("negative")
@@ -752,56 +811,93 @@ try:
 except OSError as e:
     print("launch: cannot read %s: %s" % (err_path, e), file=sys.stderr)
     raise SystemExit(1)
-# Only error fields on error records contribute stream text. User and prompt fields are
-# excluded, so prompt text can never make a process eligible for an automatic remount.
+# The classifier answers one question: may the watcher resume this ending by itself?
+# The answer is positive and narrow. An ending resumes only when it carries a known
+# transient signature and no wall-like token anywhere in it; everything else wakes
+# the postmaster. A false veto is a wake, which costs one look; a missed wall is an
+# automatic remount against a wall. The transient set below is closed; the veto set
+# is token stems (argv, printed by `launch.sh wall-tokens`) matched as substrings
+# on separator-stripped text, so no spelling, span or boundary can hide a wall.
+#
+# Only error fields on error records contribute stream prose. User and prompt fields
+# are excluded, so prompt text can never make a process eligible for an automatic
+# remount. Prompt text CAN veto one: the veto scan reads the raw lines, and a veto
+# is the safe direction.
 # The first skip-lines lines are an earlier launch's: a resumed stream keeps its history
 # while .err holds only the current launch, so without the skip an old transient error
-# would classify a later unrelated failure as transient.
+# would classify a later unrelated failure as transient, and an old wall would veto a
+# later transient end.
 #
-# Structured signals first: where an error record carries a status code or an error
-# type, it classifies from that field before any prose is read. Prose patterns are the
-# fallback for harnesses that give only text (all observed traffic so far). Harness
-# values that are not provider signals (completed, rate_limit_event slowdowns, exit
-# codes) match neither set and fall through to prose.
+# Structured values come in three classes. A status code or error type in the
+# known-transient set is a resume signal. A known-harness-internal value (a completed
+# status, a rate_limit_event slowdown, an exit code, a generic timeout) is ignored.
+# Any other value under a code or error-name key wakes: an unknown classification is
+# a wake, never a fall-through. Bare record-shape keys (type, name) are labels, not
+# classifications: a transient-set member there still signals, anything else is
+# ignored — wall-like labels are caught by the veto scan over the raw line anyway.
+# Values on records not marked as errors are progress noise, not classifications,
+# and are never inspected as such (their wall tokens still veto through the raw
+# scan). An int outside the 100-999 status shape is an exit code, not a status.
 CODE_KEYS = {"status", "statuscode", "code", "errorcode", "errcode", "httpstatus"}
-TYPE_KEYS = {"type", "errortype", "name", "errorname", "code", "errorcode"}
-WALL_CODES = {429, 402}
+NAME_KEYS = {"errortype", "errorname"}
+SHAPE_KEYS = {"type", "name"}
 TRANSIENT_CODES = {502, 503, 504, 529}
-WALL_TYPES = {"insufficientquota", "quotaexceeded", "ratelimitexceeded", "ratelimiterror",
-              "throttling", "throttlingexception", "throttledexception"}
 TRANSIENT_TYPES = {"econnreset", "econnaborted", "overloaded", "overloadederror"}
-structured_wall = False
+INTERNAL = {"completed", "ratelimitevent", "etimedout"}
 structured_transient = None
+unknown_structured = False
 def note_structured(key, value):
-    global structured_wall, structured_transient
+    global structured_transient, unknown_structured
     nk = re.sub(r"[^a-z0-9]", "", key.lower())
-    if isinstance(value, bool):
+    if isinstance(value, bool) or value is None:
         return
+    if isinstance(value, float):
+        if value.is_integer():
+            value = int(value)
+        else:
+            return
     if isinstance(value, int):
         if nk in CODE_KEYS:
-            if value in WALL_CODES:
-                structured_wall = True
-            elif value in TRANSIENT_CODES and structured_transient is None:
-                structured_transient = "gateway failure"
+            if value in TRANSIENT_CODES:
+                if structured_transient is None:
+                    structured_transient = "gateway failure"
+            elif 100 <= value <= 999:
+                unknown_structured = True
+            # else an exit code, not a status: harness-internal, ignored
         return
-    if isinstance(value, str):
-        text = value.strip()
-        if nk in CODE_KEYS and text.isascii() and text.isdigit():
-            note_structured(key, int(text))
-            return
-        if nk in TYPE_KEYS or nk in CODE_KEYS:
-            nv = re.sub(r"[^a-z0-9]", "", text.lower())
-            if nv in WALL_TYPES:
-                structured_wall = True
-            elif nv in TRANSIENT_TYPES and structured_transient is None:
+    if not isinstance(value, str):
+        return
+    text = value.strip()
+    if not text:
+        return
+    if nk in CODE_KEYS and text.isascii() and text.isdigit():
+        note_structured(key, int(text))
+        return
+    nv = re.sub(r"[^a-z0-9]", "", text.lower())
+    if not nv:
+        return
+    if nk in CODE_KEYS or nk in NAME_KEYS or nk in SHAPE_KEYS:
+        if nv in TRANSIENT_TYPES:
+            if structured_transient is None:
                 structured_transient = "stream drop" if nv.startswith("econn") else "gateway failure"
+            return
+    if nk in CODE_KEYS or nk in NAME_KEYS:
+        if nv not in INTERNAL:
+            unknown_structured = True
+    # A bare type or name outside the transient set is a record label: ignored here.
+NOTICE = "ratelimitevent"  # Claude's slowdown notice: not an ending, never a veto
+def vetoed(text):
+    norm = re.sub(r"[^a-z0-9]", "", text.lower()).replace(NOTICE, " ")
+    return any(tok in norm for tok in tokens)
 error_text = []
+raw_lines = []
 if stream_path:
     try:
         f = open(stream_path, encoding="utf-8", errors="replace")
     except OSError:
         f = []
     for line in collections.deque(itertools.islice(f, skip, None), maxlen=100):
+        raw_lines.append(line)
         try:
             event = json.loads(line)
         except ValueError:
@@ -837,18 +933,16 @@ all_errors = err + "\n" + "\n".join(error_text)
 if re.sub(r"^(?:host:[^\n]*\n)+", "", err).startswith("launch:"):
     print("launch-refusal")
     raise SystemExit(1)
-sep = r"[\s_-]+"
-wall = re.compile(r"\b(?:" + "|".join(sep.join(map(re.escape, phrase.split())) for phrase in wall_text.split("\n") if phrase.split()) + r")\b", re.I)
-first = r"(?:quotas?|budgets?)"
-second = r"(?:exceeds?|exceeded|exceeding|exhausts?|exhausted|exhausting)"
-gap = r"(?:[\s_-]+\w+){0,3}?[\s_-]+"
-span = re.compile(r"\b(?:" + first + gap + second + r"|" + second + gap + first + r")\b", re.I)
-if structured_wall or wall.search(all_errors) or span.search(all_errors):
+if vetoed(err) or any(vetoed(line) for line in raw_lines):
     print("provider-wall")
+    raise SystemExit(1)
+if unknown_structured:
+    print("not-transient")
     raise SystemExit(1)
 if structured_transient is not None:
     print(structured_transient)
     raise SystemExit(0)
+sep = r"[\s_-]+"
 idle = re.compile(r"\b(?:model%sstream%sidle%stimeout|stream%sidle%stimeout)\b" % (sep, sep, sep, sep, sep), re.I)
 if idle.search(all_errors):
     print("model stream idle timeout")
@@ -869,11 +963,11 @@ PY
 case ${1:-} in
   thread-id) shift; thread_id "$@"; exit $? ;;
   transient) shift; transient "$@"; exit $? ;;
-  walls) shift; [ $# -eq 0 ] || die "usage: launch.sh walls"; wall_phrases; exit 0 ;;
+  wall-tokens) shift; [ $# -eq 0 ] || die "usage: launch.sh wall-tokens"; wall_tokens; exit 0 ;;
   wall-quotes) shift; [ $# -eq 0 ] || die "usage: launch.sh wall-quotes"; wall_quotes; exit 0 ;;
 esac
 
-[ $# -ge 2 ] || die "usage: launch.sh form|launch|resume|skill <name> ... | thread-id <events-file> | transient <err-file> [<stream-file> [<skip-lines>]] | walls | wall-quotes | --self-test"
+[ $# -ge 2 ] || die "usage: launch.sh form|launch|resume|skill <name> ... | thread-id <events-file> | transient <err-file> [<stream-file> [<skip-lines>]] | wall-tokens | wall-quotes | --self-test"
 CMD=$1; NAME=$2; shift 2
 LEG=""; LAST=""; RUN=""; STDIN_FILE=""; args=()
 while [ $# -gt 0 ]; do

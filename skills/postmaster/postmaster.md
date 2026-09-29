@@ -220,11 +220,11 @@ with `the watcher took it` in the detail:
   that fails, a `turnpikes.sh legs` that exits non-zero, no next leg after the ship leg, or a
   launch it cannot complete are steps it could not complete: it names the run and you act.
 - **A resume on a transient provider error.** When a leg's process ended with no hand-off,
-  escalation or card and its end matches a transient provider error the harness adapter names
-  (`<tool>/scripts/launch.sh transient`, `harnesses.md`), it resumes the leg on its own thread
-  with the remount prompt, at most three times per leg (the count is in
-  `<dispatch>/watcher.json` and survives a restart). A fourth such end, a
-  non-transient end, or a resume it cannot complete is named to you.
+  escalation or card and its end is a positively known transient — a signature the harness
+  adapter names, with no wall-like token anywhere in it (`<tool>/scripts/launch.sh transient`,
+  `harnesses.md`) — it resumes the leg on its own thread with the remount prompt, at most
+  three times per leg (the count is in `<dispatch>/watcher.json` and survives a restart).
+  A fourth such end, a non-transient end, or a resume it cannot complete is named to you.
 
 **Hold a run** by writing its ticket to `<runs>/postmaster/held`, one ticket per line,
 exactly as the RUN column shows it: a held run never needs you and the watcher never touches
@@ -265,9 +265,11 @@ is what needs judgment or what it could not complete:
   (Stage E step 3), and nothing is launched or resumed until they answer. A leg with no thread
   id, none in its stream and none in `coachman.legs.<n>`, never started: its `.err` goes to
   the user too, and on their answer the leg is launched again (Stage C step 3). A quota or
-  provider wall, quoted, means the coachman is lame for this leg: log `degrade` and take the
-  leg over on the fallback (below), unless it already runs on the fallback, when the wall goes
-  to the user. Anything else is a spent thread: remount it by resuming the leg (Stage C step 5)
+  provider wall, quoted from the leg's `.err`, means the coachman is lame for this leg:
+  log `degrade` and take the leg over on the fallback (below), unless it already runs on the
+  fallback, when the wall goes to the user. The adapter vetoes on any wall-like token, so
+  confirm the wall in the `.err` before degrading; a veto with no wall behind it is handled
+  as whatever the end is. Anything else is a spent thread: remount it by resuming the leg (Stage C step 5)
   with "Continue leg <n>; your last written state is in the dispatch directory and the
   worktree" as the prompt.
 - **READ:** a checkpoint card is waiting. Read it, log `note` with its one-line summary, and
