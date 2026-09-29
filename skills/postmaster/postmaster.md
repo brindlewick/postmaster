@@ -281,13 +281,14 @@ On `.card-ready`, read `run.json`, the manifest's current `leg`, `card.md`, and
 `handoff-<leg>.md`. Do not use this route for a run without `coachman_contract: 2`; its legacy
 route follows below. An exit 1 from any `<tool>/scripts/landing.sh` call in Stage F or
 Stage G below is a fault in its inputs, not an answer: fix the inputs and re-run; never
-proceed past it. Resolve the default branch's upstream with `git for-each-ref
---format='%(upstream:short)' refs/heads/<branch>`; `git fetch` that upstream's remote by
-name before asking `fresh`, and again after the user's merge word. Pass the upstream short
-ref wherever a landing call in Stage F or Stage G takes `--default` on the pull-request
-route and to `fresh`; on the `landing: local` route pass the local branch, which is what
-the merge lands on. When the branch has no upstream, pass the branch itself: with nothing
-tracking it there is no fresher ref, and remote movement it does not track can be missed.
+proceed past it. Resolve the default branch's upstream ref and remote with
+`git for-each-ref --format='%(upstream:short)'` and `--format='%(upstream:remotename)'`
+on `refs/heads/<branch>`; `git fetch` that remote by name before asking `fresh`, and
+again after the user's merge word. Pass the upstream short ref wherever a landing call in
+Stage F or Stage G takes `--default` on the pull-request route, and the local branch on
+the `landing: local` route, which is what the merge lands on; `fresh` takes the route's
+own ref. When the branch has no upstream, pass the branch itself: with nothing tracking
+it there is no fresher ref, and remote movement it does not track can be missed.
 
 1. **Verify the card's claims against the code**, never against the card.
    `<tool>/scripts/landing.sh fresh --repo <repo> --default <branch> --ticket

@@ -37,44 +37,47 @@
 #       `- [<severity>] <id>` bullet per user-applied finding in file order; an empty
 #       section renders as `none`. The checkpoint gives each finding one bullet
 #       `- [<severity>] <id>: <state>` with the state `open`, `closed round <n>`,
-#       `dismissed: <reason>`, or `applied on user word, not re-reviewed`; a bullet
-#       starting `- [`, `* [` or `+ [` that is not such a finding is an input fault.
+#       `dismissed: <reason>`, or `applied on user word, not re-reviewed`; a bulleted,
+#       numbered or bare line starting `[` that is not such a finding is an input fault.
 #       The review leg writes this block into the card verbatim. Prints the block.
 #   landing.sh card-results <dispatch> <synthesis-wt> <checkpoint> <card>
 #   landing.sh card-findings <dispatch> <synthesis-wt> <checkpoint> <card>
 #       whether the card holds the block `card-block` renders, as an exact, contiguous
-#       byte string, found once. Nothing inside the block is parsed from the card: a
-#       card whose block differs in any way, or that holds it never or more than once,
-#       is an input fault, never `match`. The occurrence must sit in live text: inside
-#       a fenced block or an HTML comment it does not count. Other text outside the
-#       block is never read.
+#       byte string, found once. Nothing is parsed: a card holding `<!--` anywhere is an
+#       input fault, and otherwise a card whose block differs in any way, or that holds
+#       it never or more than once, is an input fault, never `match`. A copy inside a
+#       code fence is text a reader sees, so it counts like any other copy.
 #   landing.sh journey <dispatch> <synthesis-wt> <waybill>
-#       whether the journey holds landing. `clear` when no check's source names
-#       `web-journey`, or when the report exists and the journey check passed. `blocked`
-#       when the waybill has a User journey section, a check uses `web-journey`, and the
-#       report is missing or the check did not run: missing evidence, not a result to
-#       weigh. `judge` when the waybill has no User journey section, or the journey check
-#       failed with its report written: the postmaster weighs it like any other non-pass.
+#       whether the journey holds landing. Whether the waybill has a User journey section
+#       is asked of `ticket-check.sh --has-journey`, the flow's one reading of a ticket.
+#       `clear` when no check's source names `web-journey`, or when the report exists and
+#       the journey check passed. `blocked` when the waybill has a User journey section,
+#       a check uses `web-journey`, and the report is missing or the check did not run:
+#       missing evidence, not a result to weigh. `judge` when the waybill has no User
+#       journey section, or the journey check failed with its report written: the
+#       postmaster weighs it like any other non-pass.
 #   landing.sh --self-test
 #
 #   exit 0  already-landed, anything-to-land, results, card-block: the answer, printed;
 #           card-results, card-findings: `match`; journey: `clear` or `judge`; fresh: `fresh`
 #   exit 1  usage; a ref or SHA that does not resolve; a file that cannot be read; checks
-#           that cannot be recorded-read; `verify.sh results` or `journey-path` failing; a
-#           checkpoint whose structure cannot be read (a duplicate id, a finding-shaped
-#           line that is not a finding, an unreadable state, or a heading inside a fenced
-#           block); a card that does not hold the rendered block exactly once
+#           that cannot be recorded-read; `verify.sh results`, `journey-path` or
+#           `ticket-check.sh --has-journey` failing; a checkpoint whose structure cannot
+#           be read (a duplicate id, a finding-shaped line that is not a finding, an
+#           unreadable state, or a heading inside a fenced block); a card holding an
+#           HTML comment or not holding the rendered block exactly once
 #   exit 2  fresh: the faults, one line each; journey: `blocked`
 set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
 usage() { echo "usage: landing.sh already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> --card-head <sha> [--pr-merge <sha>] | anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha> | fresh --repo <repo> --default <branch> --ticket <ref> --dispatch <dispatch> --wt <synthesis-wt> | results <dispatch> <synthesis-wt> | card-block <dispatch> <synthesis-wt> <checkpoint> | card-results <dispatch> <synthesis-wt> <checkpoint> <card> | card-findings <dispatch> <synthesis-wt> <checkpoint> <card> | journey <dispatch> <synthesis-wt> <waybill> | --self-test" >&2; exit 1; }
 
-run_py() {  # run_py <subcommand> <args...>; VERIFY names scripts/verify.sh beside this script
-  VERIFY="$HERE/verify.sh" python3 - "$@" <<'PY'
+run_py() {  # run_py <subcommand> <args...>; VERIFY and TICKET_CHECK name the scripts beside this one
+  VERIFY="$HERE/verify.sh" TICKET_CHECK="$HERE/ticket-check.sh" python3 - "$@" <<'PY'
 import json, os, re, subprocess, sys
 
 VERIFY = os.environ["VERIFY"]
+TICKET_CHECK = os.environ["TICKET_CHECK"]
 
 def die(msg):
     print("landing: " + msg, file=sys.stderr); sys.exit(1)
@@ -165,7 +168,7 @@ def open_lines(text, which):  # the lines outside fenced blocks; headings inside
     check_fences(text, which)
     return [line for inside, line in spans(text) if not inside]
 
-def refuse_comments(text, which):  # the checkpoint never needs an HTML comment
+def refuse_comments(text, which):  # neither the card nor the checkpoint needs a comment
     if "<!--" in text:
         die("%s: contains an HTML comment" % which)
 
@@ -192,7 +195,7 @@ def checkpoint_states(path):  # [(sev, fid, state)] in file order; malformed inp
     for line in open_lines(text, "checkpoint"):
         m = FINDING.match(line)
         if not m:
-            if re.match(r"^\s*[-*+]\s*\[", line):
+            if re.match(r"^\s*(?:[-*+]|\d{1,9}[.)])\s*\[", line) or re.match(r"^\s*\[", line):
                 die("checkpoint: not a finding: %s" % line.strip())
             continue
         sev, fid, words = m.group(1), m.group(2), m.group(3)
@@ -215,32 +218,10 @@ def render_block(dispatch, wt, checkpoint):  # the card's checked sections, byte
                             for sev, fid, state in states if state == "user-applied") or "none")
     return "## Checks\n\n%s\n\n## Open findings\n\n%s\n\n## Not re-reviewed\n\n%s\n" % tuple(bodies)
 
-def dead_spans(text):  # offset spans inside fences or HTML comments
-    out, off = [], 0
-    for (inside, _), line in zip(spans(text), text.splitlines(keepends=True)):
-        if inside:
-            out.append((off, off + len(line)))
-        off += len(line)
-    pos = 0
-    while True:
-        o = text.find("<!--", pos)
-        if o < 0:
-            break
-        c = text.find("-->", o + 4)
-        if c < 0:
-            out.append((o, len(text)))
-            break
-        out.append((o, c + 3))
-        pos = c + 3
-    return out
-
 def check_block(dispatch, wt, checkpoint, card):  # match iff the card holds the block once
     text = load(card)
-    block = render_block(dispatch, wt, checkpoint)
-    at = text.find(block)
-    if at >= 0 and any(at < e and s < at + len(block) for s, e in dead_spans(text)):
-        die("card: does not hold the expected block")
-    n = text.count(block)
+    refuse_comments(text, "card")
+    n = text.count(render_block(dispatch, wt, checkpoint))
     if n == 0:
         die("card: does not hold the expected block")
     if n > 1:
@@ -352,10 +333,14 @@ if mode == "journey":
              and isinstance(c.get("name"), str)]
     if not names:
         print("clear: no check uses web-journey"); sys.exit(0)
-    raw = re.sub(r"<!--.*?-->", "x", load(waybill), flags=re.S)  # ticket text may comment
-    visible = "\n".join(line for inside, line in spans(raw) if not inside)
-    if not re.search(r"^ {0,3}#{1,6}[ \t]+user journey[ \t]*[:.;!?…]*[ \t]*#*[ \t]*$", visible,
-                     re.M | re.I):
+    r = subprocess.run([TICKET_CHECK, "--has-journey", waybill],
+                       capture_output=True, text=True)
+    said = r.stdout.strip()
+    if r.returncode != 0 or said not in ("journey", "no journey"):
+        die("ticket-check --has-journey gave no verdict: %s"
+            % ((r.stderr.strip() or r.stdout.strip() or "no output") if r.returncode != 0
+               else "said %r" % said))
+    if said == "no journey":
         print("judge: no User journey section; %s judged like any other non-pass"
               % ", ".join(names)); sys.exit(0)
     r = subprocess.run([VERIFY, "journey-path", wt, dispatch], capture_output=True, text=True)
@@ -607,6 +592,8 @@ out=$("$SELF" fresh --repo "$YC" --default origin/main --ticket ticket --dispatc
 expect "Y1: the remote-tracking ref sees the advanced default as stale" 2 "stale: the ticket branch does not contain the default branch"
 out=$(git -C "$YC" for-each-ref --format='%(upstream:short)' refs/heads/main); rc=$?
 expect "Z1: the default branch's upstream resolves" 0 "origin/main"
+out=$(git -C "$YC" for-each-ref --format='%(upstream:remotename)' refs/heads/main); rc=$?
+expect "AA5: the default branch's upstream remote resolves" 0 "origin"
 ZO=$tmp/zo; mkrepo "$ZO"; commit "$ZO" f A A
 git clone -q -c protocol.file.allow=always "$ZO" "$tmp/zc" || exit 1
 ZC=$tmp/zc
@@ -675,13 +662,16 @@ out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-indented.md" 2>
 expect "an indented block is an input fault" 1 "landing: card: does not hold the expected block"
 sed -e 's/^## Checks$/```\n## Checks/' -e 's/^- \[P2\] sec-2$/- [P2] sec-2\n```/' "$D/card.md" > "$D/card-fenced.md"
 out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-fenced.md" 2>&1); rc=$?
-expect "a fenced block is an input fault" 1 "landing: card: does not hold the expected block"
+expect "a fenced block counts like any other copy" 0 "match"
+{ cat "$D/card.md"; printf '\nMore prose.\n\n```\n'; sed -n '/^## Checks/,/sec-2$/p' "$D/card.md"; printf '```\n'; } > "$D/card-fencedtwice.md"
+out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-fencedtwice.md" 2>&1); rc=$?
+expect "a second copy inside a fence is still a second copy" 1 "landing: card: holds the expected block more than once"
 sed -e 's/^## Checks$/<!--\n## Checks/' -e 's/^- \[P2\] sec-2$/- [P2] sec-2\n-->/' "$D/card.md" > "$D/card-commented.md"
 out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-commented.md" 2>&1); rc=$?
-expect "a commented-out block is an input fault" 1 "landing: card: does not hold the expected block"
+expect "a commented-out block is an input fault" 1 "landing: card: contains an HTML comment"
 sed -e 's/^## Checks$/<!--\n## Checks/' "$D/card.md" > "$D/card-unclosed.md"
 out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-unclosed.md" 2>&1); rc=$?
-expect "a block inside an unclosed comment is an input fault" 1 "landing: card: does not hold the expected block"
+expect "a block inside an unclosed comment is an input fault" 1 "landing: card: contains an HTML comment"
 sed 's/^## Checks$/## Checks ##/' "$D/card.md" > "$D/card-hashes.md"
 out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-hashes.md" 2>&1); rc=$?
 expect "closing hashes on the block are an input fault" 1 "landing: card: does not hold the expected block"
@@ -693,7 +683,7 @@ out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-noblock.md" 2>&
 expect "a card missing the block is an input fault" 1 "landing: card: does not hold the expected block"
 sed 's/^Some prose\./Some prose <!-- a note -->./' "$D/card.md" > "$D/card-note.md"
 out=$("$SELF" card-results "$D" "$W" "$D/checkpoint.md" "$D/card-note.md" 2>&1); rc=$?
-expect "a comment outside the block is never read" 0 "match"
+expect "a comment anywhere in the card is an input fault" 1 "landing: card: contains an HTML comment"
 
 echo "card-findings"
 out=$("$SELF" card-findings "$D" "$W" "$D/cp-dup.md" "$D/card.md" 2>&1); rc=$?
@@ -724,6 +714,12 @@ expect "Y4: a finding-shaped line with no state is an input fault" 1 "landing: c
 cp "$D/checkpoint.md" "$D/cp-plus.md" && printf '%s\n' '+ [P1] bug-9: open' >> "$D/cp-plus.md"
 out=$("$SELF" card-findings "$D" "$W" "$D/cp-plus.md" "$D/card.md" 2>&1); rc=$?
 expect "Z5: a plus-bullet finding-shaped line is an input fault" 1 "landing: checkpoint: not a finding: + [P1] bug-9: open"
+cp "$D/checkpoint.md" "$D/cp-numbered.md" && printf '%s\n' '1. [P1] bug-9: open' >> "$D/cp-numbered.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-numbered.md" "$D/card.md" 2>&1); rc=$?
+expect "AA4: a numbered finding-shaped line is an input fault" 1 "landing: checkpoint: not a finding: 1. [P1] bug-9: open"
+cp "$D/checkpoint.md" "$D/cp-bare.md" && printf '%s\n' '[P2] bug-8: open' >> "$D/cp-bare.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-bare.md" "$D/card.md" 2>&1); rc=$?
+expect "AA4: a bare finding-shaped line is an input fault" 1 "landing: checkpoint: not a finding: [P2] bug-8: open"
 cp "$D/checkpoint.md" "$D/cp-badstate.md" && printf '%s\n' '- [P1] bug-9: someday' >> "$D/cp-badstate.md"
 out=$("$SELF" card-findings "$D" "$W" "$D/cp-badstate.md" "$D/card.md" 2>&1); rc=$?
 expect "an unreadable checkpoint state is an input fault" 1 "landing: checkpoint: bug-9: unreadable state: someday"
@@ -772,6 +768,15 @@ expect "Z4: a fence inside a comment does not hide the journey" 2 "blocked: jour
 printf '# T\n\n## Problem / feature\nA change.\n\n<!-- note --> ## User journey\n1. Open it.\n' > "$J/sameline.md"
 out=$("$SELF" journey "$J" "$JW" "$J/sameline.md" 2>&1); rc=$?
 expect "Z6: a same-line comment plus heading is not the section" 0 "judge: no User journey section; journey judged like any other non-pass"
+printf '# T\n\n## Problem / feature\nA change.\n\n## User journey <!-- draft -->\n1. Open it.\n' > "$J/trailcomment.md"
+out=$("$SELF" journey "$J" "$JW" "$J/trailcomment.md" 2>&1); rc=$?
+expect "a comment inside the heading leaves it a heading" 2 "blocked: journey: not run; the journey has no evidence"
+printf '# T\n\n## Problem / feature\nA change.\n\n# <!-- -->User journey\n1. Open it.\n' > "$J/midcomment.md"
+out=$("$SELF" journey "$J" "$JW" "$J/midcomment.md" 2>&1); rc=$?
+expect "a comment between the hashes and the words leaves it a heading" 2 "blocked: journey: not run; the journey has no evidence"
+printf '# T\n\n## Problem / feature\nA change.\n\n```\nWrite <!-- to open\n```\n\n## User journey\n1. Open it.\n\n<!-- done -->\n' > "$J/fenceliteral.md"
+out=$("$SELF" journey "$J" "$JW" "$J/fenceliteral.md" 2>&1); rc=$?
+expect "a comment opener inside a fence does not eat the journey" 2 "blocked: journey: not run; the journey has no evidence"
 printf '# T\n\n## Problem / feature\nA change.\n\n   ## User journey\n1. Open it.\n' > "$J/indented.md"
 out=$("$SELF" journey "$J" "$JW" "$J/indented.md" 2>&1); rc=$?
 expect "Y6: an indented User journey still names the section" 2 "blocked: journey: not run; the journey has no evidence"

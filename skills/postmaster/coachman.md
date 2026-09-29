@@ -700,6 +700,8 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    finding as one bullet `- [<severity>] <id>: <state>`, the id `<lens>-<n>` numbered in the
    order verified, the state one of `open`, `closed round <r>`, `dismissed: <reason>`, or
    `applied on user word, not re-reviewed`, and no HTML comment anywhere in the file;
+   a finding-shaped line in any other shape — numbered, bare, or another bullet — is
+   refused, to be rewritten as a `-` bullet;
    for style, how many findings go to the ship card's
    Style residue, as
    `<tool>/scripts/style-findings.sh count <dispatch>` prints it. Then the gate status, and
@@ -750,8 +752,9 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
 4. **Write `card.md`.** Include the branch, final HEAD, diff stat and commit list; the output
    of `<tool>/scripts/landing.sh card-block <dispatch> <synthesis-wt> <the leg's
    checkpoint>` pasted verbatim as the card's `## Checks`,
-   `## Open findings` and `## Not re-reviewed` sections, appearing exactly once as live
-   text — never retyped, indented, fenced or commented out (the leg's checkpoint is
+   `## Open findings` and `## Not re-reviewed` sections, appearing exactly once —
+   never retyped or indented, never repeated even inside a fence — and no HTML comment
+   anywhere in the card (the leg's checkpoint is
    `<dispatch>/checkpoint-review.md` after a review leg, `<dispatch>/checkpoint-1.md`
    when this leg is synthesis); browser suite and QA when
    present; the journey report path where a
