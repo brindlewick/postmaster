@@ -264,26 +264,35 @@ template, as `ship.review_link` is for the ship card; with no template it is the
 A revised spec comes back as a new entry at its new commit.
 
 1. **Put one spec to the user at a time.** Show its link and its commit, and ask for a
-   decision: approved; changes requested in their words; or drop this workhorse. Never show one
-   workhorse's spec beside another's: review is for scope and correctness, not for making the
-   specs alike. Never show any of it to a workhorse.
+   decision: approved; changes requested in their words; or drop this workhorse. When the
+   first spec goes to the user, write what was asked to the run's `.waiting-on-user`, as
+   Stage F step 2 does: while it is set the poll reports USER, not SPEC, so the package is
+   never taken twice. Never show one workhorse's spec beside another's: review is for scope
+   and correctness, not for making the specs alike. Never show any of it to a workhorse.
 2. **Record the decision as it comes**, in the run's log and in `<dispatch>/spec-decisions.md`:
    `<tool>/scripts/log-action.sh <dispatch> postmaster spec-review <lane> "<decision> <commit>
    <the user's words>"`, where `<decision>` is `approved`, `changes` or `dropped` and the words
    are the user's own, carried verbatim for a `changes` or `dropped`. One line per decision, at
    the moment it is given. `spec-decisions.md` holds the same for the coachman to read on
-   resume: one stanza per lane, with the decision, the commit and the words.
-3. **A workhorse whose spec needs changes is not finished.** Carry the user's words on the
-   resume that sends that one workhorse back to revise; the coachman does the rest. The revised
-   spec returns as a new package entry and is put to the user the same way, until it is
-   approved or dropped.
-4. **The run goes on to implementation only with at least two approved specs.** When every
-   workhorse is approved or dropped and fewer than two are approved, the run stops and says
-   why: tell the user the run needs two approved specs and has fewer, and that nothing is
-   implemented from an unapproved plan. The user alone abandons it. When two or more are
-   approved and nothing is outstanding, write `spec-decisions.md` whole, remove
-   `.spec-review-ready`, and resume the current leg (Stage C step 5) with the decisions file as
-   what it must read. Log every step; the planning span the stage timings show is this review.
+   resume: one stanza per lane, with the decision, the commit and the words. The stanzas
+   accumulate as the package is decided; the file is complete when every spec in the package
+   has one.
+3. **When every spec in the package is decided, send the package back.** Remove
+   `.waiting-on-user`, check `spec-decisions.md` holds every spec in the package, remove
+   `.spec-review-ready`, and resume the current leg (Stage C step 5) with the decisions file
+   as what it must read. The marker is consumed here, on every path, before the resume, as
+   `.card-ready` is before a word is delivered: a fresh package touches it afresh, so SPEC
+   always means a package nobody has taken yet.
+   - **Any `changes`:** the coachman revises those specs alone, each in its own thread, and
+     pauses with a fresh package, which is put to the user the same way, until every spec is
+     approved or dropped.
+   - **Every workhorse approved or dropped, but fewer than two approved:** tell the user the
+     run needs two approved specs and has fewer, and that nothing is implemented from an
+     unapproved plan. The coachman stops on resume and writes an escalation carrying the
+     count; the user alone abandons the run.
+   - **Two or more approved and nothing outstanding:** the coachman goes on to implementation.
+   Log every step; the planning span the stage timings show is this stage, drafting through
+   the last decision, with the user's review inside it.
 
 ## Stage E: rulings
 
