@@ -131,6 +131,7 @@ def normalize_item(item, harness, scratch):
                     ("summary", "short_summary", "title", "description", "message", "failure_scenario")
                     if item.get(key)), None)
     evidence = next((item.get(key) for key in ("evidence", "quoted_code", "code", "snippet") if item.get(key)), None)
+    body = item.get("body") or item.get("failure_scenario")
     return {
         "file": file,
         "line": number,
@@ -138,7 +139,7 @@ def normalize_item(item, harness, scratch):
         "target": "%s:%d" % (file, number),
         "severity": value_or_missing(severity),
         "summary": value_or_missing(summary),
-        "body": value_or_missing(item.get("body")),
+        "body": value_or_missing(body),
         "evidence": value_or_missing(evidence),
         "confidence": value_or_missing(item.get("confidence")),
         "category": value_or_missing(item.get("category")),
@@ -752,6 +753,18 @@ def self_test():
             check("a report wrapped in one fence still parses", result.returncode == 0 and len(parsed) == 1 and parsed[0]["file"] == "src/a.js", result.stderr or result.stdout)
         except ValueError:
             check("a report wrapped in one fence still parses", False, result.stderr or result.stdout)
+
+        # A claude item's reproduction reaches triage: with no body, its
+        # failure_scenario becomes the body instead of being dropped.
+        scenario = "Store holds r0..r9; page(1, 3) returns 4 items."
+        scenario_events = root / "claude-scenario.events"
+        scenario_events.write_text(json.dumps({"type": "result", "subtype": "success", "result": json.dumps([{"file": "src/a.js", "line": 1, "summary": "Off by one", "failure_scenario": scenario}])}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(scenario_events), "--run", str(run_config("scenario", "claude"))], capture_output=True, text=True)
+        try:
+            parsed = json.loads(result.stdout)
+            check("an item with summary and failure_scenario normalizes with that scenario as its body", result.returncode == 0 and len(parsed) == 1 and parsed[0]["body"] == scenario, result.stderr or result.stdout)
+        except ValueError:
+            check("an item with summary and failure_scenario normalizes with that scenario as its body", False, result.stderr or result.stdout)
 
         prose_clean = root / "mimo-prose.events"
         prose_clean.write_text(json.dumps({"type": "text", "part": {"type": "text", "text": "Nothing to review. The worktree has no uncommitted changes.\n"}}) + "\n", encoding="utf-8")
