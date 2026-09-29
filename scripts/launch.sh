@@ -232,6 +232,20 @@ EOF
   [ "$rc" -eq 3 ] && cmp -s "$rc_events" "$agy_dispatch/sessions/g/thread-rc.events.jsonl" \
     && ok "a harness failure keeps its exit when the export succeeds" \
     || fail "a harness failure keeps its exit when the export succeeds (exit $rc)" "$(cat "$tmp/err")"
+  printf '[lanes.g]\nharness = "agy"\nmodel = "agy-model"\nenv_file = "%s"\n' "$tmp/poison.env" > "$tmp/agy-env.toml"
+  record run-agy-env agy-env
+  env_dispatch=$tmp/repo/.postmaster/runs/run-agy-env
+  mkdir -p "$env_dispatch/logs"
+  printf '{"conversationId":"thread-decoy"}\n' > "$env_dispatch/logs/g-decoy.jsonl"
+  printf 'POSTMASTER_EVENT_STREAM="%s"\n' "$env_dispatch/logs/g-decoy.jsonl" > "$tmp/poison.env"
+  printf '#!/bin/sh\nprintf "{\\"conversationId\\":\\"thread-real\\"}\\n"\nexit 0\n' > "$tmp/bin/agy"; chmod +x "$tmp/bin/agy"
+  real_events=$env_dispatch/logs/g-real.jsonl
+  POSTMASTER_EVENT_STREAM="$real_events" POSTMASTER_CONFIG="$tmp/agy-env.toml" PATH="$tmp/bin:$PATH" \
+    "$self" launch g "$tmp/wt" "$tmp/prompt.txt" --run "$env_dispatch" >"$real_events" 2>"$tmp/err"; rc=$?
+  [ "$rc" -eq 0 ] && cmp -s "$real_events" "$env_dispatch/sessions/g/thread-real.events.jsonl" \
+    && [ ! -e "$env_dispatch/sessions/g/thread-decoy.events.jsonl" ] \
+    && ok "a lane env file cannot redirect the session export" \
+    || fail "a lane env file cannot redirect the session export (exit $rc)" "$(cat "$tmp/err")"
   mkdir -p "$tmp/repo/.postmaster/runs/no-record" "$tmp/repo/.postmaster/runs/garbled" "$tmp/repo/.postmaster/runs/unrecorded"
   printf '{"config": \n' > "$tmp/repo/.postmaster/runs/garbled/run.json"
   printf '{"run": "T-1"}\n' > "$tmp/repo/.postmaster/runs/unrecorded/run.json"
@@ -731,7 +745,13 @@ CDPATH= cd -- "$CWD" || die "cannot enter $CWD"
 # A harness whose prompt arrives on stdin reads it from the file, never from an inherited pipe.
 if [ -n "$STDIN_FILE" ]; then exec < "$STDIN_FILE" || die "cannot read $STDIN_FILE"; fi
 # The env file reaches the harness's environment only: the command above is already built.
-if [ -n "${ENV_FILE:-}" ]; then set -a; . "$ENV_FILE"; set +a; fi
+# The host-provided event-stream path is not the env file's to change: it decides which
+# session the export hook retains, so it is restored after sourcing.
+if [ -n "${ENV_FILE:-}" ]; then
+  saved_event_stream=${POSTMASTER_EVENT_STREAM:-}
+  set -a; . "$ENV_FILE"; set +a
+  POSTMASTER_EVENT_STREAM=$saved_event_stream
+fi
 unset POSTMASTER_LAUNCH_NAME   # the thread's own launches are named by their own host.sh call
 "${cmd[@]}"
 rc=$?

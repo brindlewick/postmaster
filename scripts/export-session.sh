@@ -118,18 +118,21 @@ def native_record(harness, thread, cwd):
         return None
     if not root.is_dir():
         die("no durable %s session store is available" % harness)
-    # A store holds many threads, and one id can be a prefix of another
-    # (thread-1 inside rollout-thread-10.jsonl), so a substring is not a match.
-    # Codex names files rollout-<timestamp>-<thread>.jsonl, so a dash-suffix
-    # match is needed there; claude and pi name the file for the thread exactly,
-    # and a suffix there would misattribute another session.
+    # A store holds many threads, and one id can hide inside another
+    # (thread-1 inside thread-10, or inside other-thread-1), so neither a
+    # substring nor a bare dash-suffix is a match. Codex names files
+    # rollout-<timestamp>-<thread>.jsonl with a fixed timestamp shape, and only
+    # that shape is matched; claude and pi name the file for the thread exactly.
+    # If codex ever changes its timestamp shape this fails loudly, refusing the
+    # export, rather than silently misattributing another session.
+    codex_stem = re.compile(r"rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-" + re.escape(thread) + r"\Z")
     exact, suffixed = [], []
     try:
         for path in root.rglob("*.jsonl"):
             stem = path.name[:-len(".jsonl")]
             if stem == thread:
                 exact.append(path)
-            elif harness == "codex" and stem.endswith("-" + thread):
+            elif harness == "codex" and codex_stem.match(stem):
                 suffixed.append(path)
     except OSError:
         pass
@@ -268,7 +271,7 @@ def self_test():
             count += 1
 
         # Native local stores are copied without reading or printing their contents.
-        check("codex", "thread-codex", {"type": "thread.started", "thread_id": "thread-codex"}, ".codex/sessions/rollout-thread-codex.jsonl")
+        check("codex", "thread-codex", {"type": "thread.started", "thread_id": "thread-codex"}, ".codex/sessions/2026/01/03/rollout-2026-01-03T00-00-00-thread-codex.jsonl")
         check("claude", "thread-claude", {"session_id": "thread-claude"}, ".claude/projects/project/thread-claude.jsonl")
         check("pi", "thread-pi", {"type": "session", "id": "thread-pi"}, ".pi/agent/sessions/--project--/thread-pi.jsonl")
         check("agy", "thread-agy", {"conversationId": "thread-agy"})
@@ -302,6 +305,20 @@ def self_test():
         saved = (dispatch / "sessions" / "lane" / "thread-1.jsonl").read_text(encoding="utf-8")
         assert saved == "RIGHT thread one\n", "export copied the newer prefix-sharing decoy"
         print("  ok   a newer thread whose id extends the thread's does not shadow its session")
+        lone_home = root / "lone-home"
+        lone_sessions = lone_home / ".codex" / "sessions" / "2026" / "01" / "04"
+        lone_sessions.mkdir(parents=True, exist_ok=True)
+        (lone_sessions / "rollout-2026-01-04T00-00-00-other-thread-1.jsonl").write_text(
+            "WRONG other thread\n", encoding="utf-8")
+        lone_env = {**env, "HOME": str(lone_home)}
+        lone_events = dispatch / "logs" / "suffix.jsonl"
+        lone_events.write_text(json.dumps({"type": "thread.started", "thread_id": "thread-1"}) + "\n", encoding="utf-8")
+        result = subprocess.run(
+            [str(here / "export-session.sh"), str(dispatch), "lone", "codex", str(cwd), str(lone_events), ""],
+            capture_output=True, text=True, env=lone_env, timeout=10,
+        )
+        assert result.returncode == 1 and "no durable codex record was found" in result.stderr, result.stderr
+        print("  ok   a thread whose id extends the thread's with a dash does not shadow its session")
         claude_dir = home / ".claude" / "projects" / "project"
         claude_dir.mkdir(parents=True, exist_ok=True)
         (claude_dir / "thread-2.jsonl").write_text("RIGHT exact\n", encoding="utf-8")

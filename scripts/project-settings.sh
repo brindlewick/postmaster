@@ -72,10 +72,14 @@ ENV_PATH = re.compile(
 ASSIGNMENT_SECRET = re.compile(r"(?i)\b[A-Z0-9_]*(?:API[_-]?KEY|AUTH[_-]?TOKEN|ACCESS[_-]?TOKEN|PASSWORD|SECRET|CREDENTIAL)\s*=\s*[^\s,;]+")
 TOKEN_VALUE = re.compile(r"(?i)\b(?:gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|glpat-[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{8,}|xox[a-z]-[A-Za-z0-9-]{8,})\b")
 CRED_WORD = r"(?:API[_-]?KEY|AUTH[_-]?TOKEN|ACCESS[_-]?TOKEN|TOKEN|PASSWORD|SECRET|CREDENTIALS?|KEY[_-]?FILE|ENV[_-]?FILE|PRIVATE[_-]?KEY|ACCESS[_-]?KEY)"
-# A credential word in identifier position: bounded by non-letters, or split from a
-# preceding lowercase run by camelCase (githubApiKey, accessToken). Glued lowercase
-# ("secretary", "mysecret") is indistinguishable from a natural word and stays out.
-NAMED_CREDENTIAL = re.compile(r"(?:(?<![a-z])|(?<=[a-z])(?=[A-Z]))" + CRED_WORD + r"(?![A-Za-z])", re.IGNORECASE)
+# A credential word in identifier position: bounded by non-letters on each side, or
+# split from a lowercase run by a camelCase step on either side (githubApiKey,
+# secretKey). The boundary tests are case-sensitive while the word itself matches
+# in any case. Glued lowercase ("secretary", "mysecret") is indistinguishable
+# from a natural word and stays out.
+NAMED_CREDENTIAL = re.compile(
+    r"(?:(?<![A-Za-z])|(?<=[a-z])(?=[A-Z]))" + r"(?i:" + CRED_WORD + r")"
+    + r"(?:(?![A-Za-z])|(?<=[a-z])(?=[A-Z]))")
 # Identifier shape: a separator, a digit, a camelCase step, or all caps.
 IDENTIFIER_SHAPED = re.compile(r"[_-]|[0-9]|[a-z][A-Z]|^[A-Z0-9_]+$")
 
@@ -557,6 +561,13 @@ def self_test():
             ("single titlecase secret", '[tracker]\nbinding="Secret"\n'),
             ("camelCase api key", '[tracker]\nbinding="githubApiKey"\n'),
             ("camelCase token", '[tracker]\nbinding="accessToken"\n'),
+            ("camelCase continuation", '[tracker]\nbinding="secretKey"\n'),
+            ("camelCase sandwich", '[tracker]\nbinding="mySecretKey"\n'),
+            ("credential value word", '[tracker]\nbinding="secretValue"\n'),
+            ("token value word", '[tracker]\nbinding="tokenValue"\n'),
+            ("password hash word", '[tracker]\nbinding="passwordHash"\n'),
+            ("credential name word", '[tracker]\nbinding="credentialName"\n'),
+            ("token value sandwich", '[tracker]\nbinding="authTokenValue"\n'),
             ("identifier word in phrasing", '[tracker]\nbinding="Migrate api_key usage"\n'),
             ("caps word in phrasing", '[tracker]\nbinding="The TOKEN is here"\n'),
             ("padded credential name", '[tracker]\nbinding="  api_key  "\n'),
@@ -600,6 +611,7 @@ def self_test():
             ("a natural secret word", '[tracker]\nbinding="Secret Santa"\n', True),
             ("a natural token word", '[tracker]\nbinding="Password reset project"\n', True),
             ("a glued lowercase word", '[tracker]\nbinding="secretary"\n', True),
+            ("a glued lowercase credential", '[tracker]\nbinding="mysecret"\n', True),
             ("a keyword-prefixed natural word", '[tracker]\nbinding="Tokenomics review"\n', True),
             ("a token prefix too short to be a token", '[tracker]\nbinding="ghp_abc"\n', True),
             ("an assignment without a credential word", '[tracker]\nbinding="a=b"\n', True),
