@@ -166,14 +166,14 @@ check_pin() {  # check_pin <dispatch>: the run's checkout still serves its dispa
 }
 
 in_flight() {  # in_flight <runs-root> <checkout>: yes when some run still uses this pin
-  local root=$1 checkout=$2 p d stage got c dg found=1 hidden=""
+  local root=$1 checkout=$2 p d stage got c dg ng found=1 hidden=""
   dg=$(shopt -p dotglob); shopt -s dotglob  # a project is any repo basename, dot-prefixed included
+  ng=$(shopt -p nullglob); shopt -s nullglob  # an unmatched glob expands to nothing; no name ends the scan
   # Two loops so an unreadable level is seen: one flat glob drops its branch silently.
+  if [ ! -r "$root" ] || [ ! -x "$root" ]; then hidden=$root; fi
   for p in "$root"/*/; do
-    case $p in *'*'*) hidden=$root; break;; esac  # the root itself cannot be listed; keep the pin
-    if [ ! -r "$p" ] || [ ! -x "$p" ]; then hidden=$p; break; fi  # so does an unreadable project
+    if [ ! -r "$p" ] || [ ! -x "$p" ]; then hidden=$p; break; fi  # an unreadable project hides runs; keep
     for d in "$p"*/; do
-      case $d in *'*'*) break;; esac  # no runs under this project; nothing hidden
       if [ ! -r "$d" ] || [ ! -x "$d" ]; then hidden=$d; break 2; fi  # an unreadable run hides; keep
       [ -f "$d/run.json" ] || continue
       c=$(claim "$d/run.json")
@@ -196,7 +196,7 @@ in_flight() {  # in_flight <runs-root> <checkout>: yes when some run still uses 
       esac
     done
   done
-  eval "$dg"
+  eval "$dg"; eval "$ng"
   if [ -n "$hidden" ]; then
     echo "run-meta: cannot list $hidden; keeping $checkout" >&2
     return 0
@@ -542,6 +542,28 @@ try release "$nprel"
 [ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$pinNP" ] \
   && ok "release removes once the unreadable run is done" \
   || fail "release removes once the unreadable run is done ($out)"
+# A literal star in a directory name is data: the scan reads through it and keeps the pin
+# for the in-flight runs, without crying unreadable.
+mkdir -p "$tmp/project/*EMPTY" "$tmp/project/RUN-SALIVE" "$tmp/project/STAR*RUN" "$tmp/star*proj/RUN-PALIVE"
+pinS=$(pin "$fake" "$commitA") || fail "a pin is cut for the star-name controls"
+for r in "$tmp/project/RUN-SALIVE" "$tmp/project/STAR*RUN" "$tmp/star*proj/RUN-PALIVE"; do
+  printf '{"postmaster": {"commit": "%s", "checkout": "%s"}}\n' "$commitA" "$pinS" > "$r/run.json"
+  printf '{"stage": "synthesis"}\n' > "$r/manifest.json"
+done
+starrel="$tmp/project/RUN-STARREL"; mkdir -p "$starrel"
+printf '{"postmaster": {"commit": "%s", "checkout": "%s"}}\n' "$commitA" "$pinS" > "$starrel/run.json"
+printf '{"stage": "done"}\n' > "$starrel/manifest.json"
+try release "$starrel"
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && ! grep -q "cannot list" <<<"$out" && [ -d "$pinS" ] \
+  && ok "release keeps the pin past star-named directories, crying nothing unreadable" \
+  || fail "release keeps the pin past star-named directories, crying nothing unreadable ($out)"
+for r in "$tmp/project/RUN-SALIVE" "$tmp/project/STAR*RUN" "$tmp/star*proj/RUN-PALIVE"; do
+  printf '{"stage": "done"}\n' > "$r/manifest.json"
+done
+try release "$starrel"
+[ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$pinS" ] \
+  && ok "release removes once the star-named runs are done" \
+  || fail "release removes once the star-named runs are done ($out)"
 meta "$d" "$repo" >/dev/null
 try check "$d"
 [ $rc -eq 0 ] && ok "check still passes the run that shares the live tool pin" \
