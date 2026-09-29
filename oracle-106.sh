@@ -51,7 +51,14 @@ echo
 # --- AC3: nothing left says or implies the agent starts on its own ---
 echo "AC3: nothing left implies the agent starts on its own"
 ac3_bad=0
-if grep -q "open your agent in it" README.md 2>/dev/null; then bad "README still has BASE 'open your agent in it' (open with no hi)"; ac3_bad=1; else ok "README has no BASE 'open your agent in it'"; fi
+if grep -q "open your agent in it" README.md 2>/dev/null; then
+  # Acceptable only when hi is beside it (open and say hi in one instruction),
+  # the same proximity rule as the AGENTS.md check below. The blind version
+  # failed both lanes on this line; both had hi in the same sentence.
+  if grep -B3 -A3 "open your agent in it" README.md | grep -qi "say hi"; then ok "'open your agent in it' remains but 'say hi' is beside it"; else bad "README still has 'open your agent in it' with no hi beside it"; ac3_bad=1; fi
+else
+  ok "README has no 'open your agent in it'"
+fi
 if grep -qi "takes it from there" AGENTS.md 2>/dev/null; then
   # Acceptable only when hi is beside it (after hi, the file takes it from there).
   if grep -qi -B3 -A3 "takes it from there" AGENTS.md | grep -qi "hi"; then ok "'takes it from there' remains but hi is beside it"; else bad "AGENTS.md still has 'takes it from there' with no hi beside it"; ac3_bad=1; fi
