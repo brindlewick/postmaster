@@ -191,8 +191,11 @@ export function decodeDropInvalid(bytes: Uint8Array): string {
 /** This process's arguments re-derived from the raw argv bytes, with invalid
  * sequences dropped the way `iconv -c` drops them. The raw bytes tell entry
  * by entry, so a bad byte in one argument never costs another its
- * characters. Without /proc, or when the raw entries do not align with the
- * decoded arguments, the runtime's decoding stands. */
+ * characters. Bun strips its own flags from process.argv but not from the
+ * raw command line (and the wrappers pass some), so the raw entries align
+ * with the decoded arguments from the end, not the start. Without /proc, or
+ * when the raw entries do not align with the decoded arguments, the
+ * runtime's decoding stands. */
 export function argvDecoded(): string[] {
   const args = process.argv.slice(2);
   const raw = rawArgvBytes();
@@ -206,8 +209,8 @@ export function argvDecoded(): string[] {
     }
   }
   if (start < raw.length) parts.push(raw.subarray(start));
-  if (parts.length !== args.length + 2) return args;
-  return parts.slice(2).map((p) => decodeDropInvalid(p));
+  if (parts.length < args.length + 2) return args;
+  return parts.slice(parts.length - args.length).map((p) => decodeDropInvalid(p));
 }
 
 /** mkdir -d a temp dir and hand it to fn; remove it afterwards even if fn throws. */
