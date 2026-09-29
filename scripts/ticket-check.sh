@@ -72,8 +72,8 @@ run_py() {  # run_py body <file> <title> | printed <adapter-read-output> | splic
 import os, re, subprocess, sys
 
 HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
-FENCE = re.compile(r"^\s*(`{3,})[^`]*$|^\s*(~{3,})")
-FENCED_ITEM = re.compile(r"^ *(?:[-*+]|\d{1,9}[.)])[ \t]+(?:(`{3,})[^`]*|(~{3,}).*)$")  # 1. ``` opens a fence
+FENCE = re.compile(r"^ {0,3}(`{3,})[^`]*$|^ {0,3}(~{3,})")
+FENCED_ITEM = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+(?:(`{3,})[^`]*|(~{3,}).*)$")  # 1. ``` opens a fence
 TICKS = re.compile(r"`+")
 SPAN = re.compile(r"(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n).)+?)(?<!`)\1(?!`)", re.S)
 QUOTED = re.compile(r'"[^"\n]*"|“[^”\n]*”')
@@ -350,7 +350,7 @@ def splice(base_text, sections_text):
             lines.append("")
     return "\n".join(lines) + "\n"
 
-JOURNEY_TAIL = re.compile(r"[.;!?…\s]+$")
+JOURNEY_TAIL = re.compile(r"[.;!?…:\s]+$")
 
 def has_journey(text):  # whether any heading at any level names the User journey section
     raw, lines = tokenize(text)
@@ -899,6 +899,14 @@ jbody "$P" "$A" "$D" "$K" "## User journey log" "1. Open it."
 jexpect "extra heading words still name another section" "no journey"
 jbody "$P" "$A" "$D" "$K" "# User journey" "1. Open it."
 jexpect "a level-one journey still names the section" "journey"
+jbody "$P" "$A" "$D" "$K" "    \`\`\`" "    literal indented text" "## User journey" "1. Open it."
+jexpect "indented code does not open a fence around the journey" "journey"
+jbody "$P" "$A" "$D" "$K" "     1. \`\`\`" "     not code" "## User journey" "1. Open it."
+jexpect "a deeply indented item fence does not hide the journey" "journey"
+jbody "$P" "$A" "$D" "$K" "## User journey:." "1. Open it."
+jexpect "a trailing colon and full stop still name the section" "journey"
+jbody "$P" "$A" "$D" "$K" "## User journey:;" "1. Open it."
+jexpect "a trailing colon and semicolon still name the section" "journey"
 body "<!-- x --> ## Problem / feature
 A ticket reaches a coachman with words under it." "$A" "$D" "$K"; run "$T"
 expect "a same-line remainder does not satisfy a required part" 2 "problem / feature"

@@ -37,15 +37,17 @@
 #       `- [<severity>] <id>` bullet per user-applied finding in file order; an empty
 #       section renders as `none`. The checkpoint gives each finding one bullet
 #       `- [<severity>] <id>: <state>` with the state `open`, `closed round <n>`,
-#       `dismissed: <reason>`, or `applied on user word, not re-reviewed`; a bulleted,
-#       numbered or bare line starting `[` that is not such a finding is an input fault.
+#       `dismissed: <reason>`, or `applied on user word, not re-reviewed`; a `-`, `*`
+#       or `+` bullet starting `[`, or a numbered or bare line starting `[` plus a
+#       severity digit, that is not such a finding is an input fault.
 #       The review leg writes this block into the card verbatim. Prints the block.
 #   landing.sh card-results <dispatch> <synthesis-wt> <checkpoint> <card>
 #   landing.sh card-findings <dispatch> <synthesis-wt> <checkpoint> <card>
 #       whether the card holds the block `card-block` renders, as an exact, contiguous
 #       byte string, found once. Nothing is parsed: a card holding `<!--` anywhere is an
 #       input fault, and otherwise a card whose block differs in any way, or that holds
-#       it never or more than once, is an input fault, never `match`. A copy inside a
+#       it never or more than once, is an input fault, never `match`. A card quoting
+#       `<!--` escapes it, for example as `&lt;!--`. A copy inside a
 #       code fence is text a reader sees, so it counts like any other copy.
 #   landing.sh journey <dispatch> <synthesis-wt> <waybill>
 #       whether the journey holds landing. Whether the waybill has a User journey section
@@ -195,7 +197,8 @@ def checkpoint_states(path):  # [(sev, fid, state)] in file order; malformed inp
     for line in open_lines(text, "checkpoint"):
         m = FINDING.match(line)
         if not m:
-            if re.match(r"^\s*(?:[-*+]|\d{1,9}[.)])\s*\[", line) or re.match(r"^\s*\[", line):
+            if re.match(r"^\s*[-*+]\s*\[", line) \
+                    or re.match(r"^\s*(?:\d{1,9}[.)]\s*)?\[[Pp]\d", line):
                 die("checkpoint: not a finding: %s" % line.strip())
             continue
         sev, fid, words = m.group(1), m.group(2), m.group(3)
@@ -594,6 +597,8 @@ out=$(git -C "$YC" for-each-ref --format='%(upstream:short)' refs/heads/main); r
 expect "Z1: the default branch's upstream resolves" 0 "origin/main"
 out=$(git -C "$YC" for-each-ref --format='%(upstream:remotename)' refs/heads/main); rc=$?
 expect "AA5: the default branch's upstream remote resolves" 0 "origin"
+out=$(git -C "$YC" for-each-ref --format='%(upstream:short) %(upstream:remotename)' refs/heads/main); rc=$?
+expect "AB2: one format names the upstream ref and its remote" 0 "origin/main origin"
 ZO=$tmp/zo; mkrepo "$ZO"; commit "$ZO" f A A
 git clone -q -c protocol.file.allow=always "$ZO" "$tmp/zc" || exit 1
 ZC=$tmp/zc
@@ -647,6 +652,20 @@ expect "the block renders the checks and the checkpoint states exactly" 0 "## Ch
 printf '%s\n' "## Findings (bug)" "" "- [P1] bug-1: open" "- [P2] bug-1: closed round 1" > "$D/cp-dup.md"
 out=$("$SELF" card-block "$D" "$W" "$D/cp-dup.md" 2>&1); rc=$?
 expect "a duplicate id in the checkpoint faults the render" 1 "landing: checkpoint: bug-1: listed twice"
+printf '%s\n' "## Findings (bug)" "" "* [P1] bug-9: open" > "$D/cp-star.md"
+out=$("$SELF" card-block "$D" "$W" "$D/cp-star.md" 2>&1); rc=$?
+expect "AB5: a star bullet parses as a finding" 0 "## Checks
+
+- gate: pass
+- unit: not run
+
+## Open findings
+
+- [P1] bug-9
+
+## Not re-reviewed
+
+none"
 
 echo "card-results"
 printf '# Ship card\n\nSome prose.\n\n## Checks\n\n- gate: pass\n- unit: not run\n\n## Open findings\n\n- [P1] bug-1\n\n## Not re-reviewed\n\n- [P2] sec-2\n\nTrailing prose.\n' > "$D/card.md"
@@ -720,6 +739,12 @@ expect "AA4: a numbered finding-shaped line is an input fault" 1 "landing: check
 cp "$D/checkpoint.md" "$D/cp-bare.md" && printf '%s\n' '[P2] bug-8: open' >> "$D/cp-bare.md"
 out=$("$SELF" card-findings "$D" "$W" "$D/cp-bare.md" "$D/card.md" 2>&1); rc=$?
 expect "AA4: a bare finding-shaped line is an input fault" 1 "landing: checkpoint: not a finding: [P2] bug-8: open"
+cp "$D/checkpoint.md" "$D/cp-linkref.md" && printf '%s\n' '[spec]: https://example.com/spec' >> "$D/cp-linkref.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-linkref.md" "$D/card.md" 2>&1); rc=$?
+expect "AB3: a link reference is prose, not a finding" 0 "match"
+cp "$D/checkpoint.md" "$D/cp-numlink.md" && printf '%s\n' '1. [roundup](https://example.com)' >> "$D/cp-numlink.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-numlink.md" "$D/card.md" 2>&1); rc=$?
+expect "AB3: a numbered link is prose, not a finding" 0 "match"
 cp "$D/checkpoint.md" "$D/cp-badstate.md" && printf '%s\n' '- [P1] bug-9: someday' >> "$D/cp-badstate.md"
 out=$("$SELF" card-findings "$D" "$W" "$D/cp-badstate.md" "$D/card.md" 2>&1); rc=$?
 expect "an unreadable checkpoint state is an input fault" 1 "landing: checkpoint: bug-9: unreadable state: someday"
@@ -777,6 +802,11 @@ expect "a comment between the hashes and the words leaves it a heading" 2 "block
 printf '# T\n\n## Problem / feature\nA change.\n\n```\nWrite <!-- to open\n```\n\n## User journey\n1. Open it.\n\n<!-- done -->\n' > "$J/fenceliteral.md"
 out=$("$SELF" journey "$J" "$JW" "$J/fenceliteral.md" 2>&1); rc=$?
 expect "a comment opener inside a fence does not eat the journey" 2 "blocked: journey: not run; the journey has no evidence"
+printf '# T\n\n## Problem / feature\nA change.\n\n    ```\n    literal indented text\n\n## User journey\n1. Open it.\n' > "$J/indfence.md"
+out=$("$SELF" journey "$J" "$JW" "$J/indfence.md" 2>&1); rc=$?
+expect "AB1: indented code does not hide the journey" 2 "blocked: journey: not run; the journey has no evidence"
+out=$("$SELF" journey "$J" "$JW" "$tmp/does-not-exist.md" 2>&1); rc=$?
+expect "AB7: an unreadable waybill fails the delegation without a verdict" 1 "landing: ticket-check --has-journey gave no verdict: ticket-check: cannot read $tmp/does-not-exist.md"
 printf '# T\n\n## Problem / feature\nA change.\n\n   ## User journey\n1. Open it.\n' > "$J/indented.md"
 out=$("$SELF" journey "$J" "$JW" "$J/indented.md" 2>&1); rc=$?
 expect "Y6: an indented User journey still names the section" 2 "blocked: journey: not run; the journey has no evidence"

@@ -700,7 +700,7 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    finding as one bullet `- [<severity>] <id>: <state>`, the id `<lens>-<n>` numbered in the
    order verified, the state one of `open`, `closed round <r>`, `dismissed: <reason>`, or
    `applied on user word, not re-reviewed`, and no HTML comment anywhere in the file;
-   a finding-shaped line in any other shape — numbered, bare, or another bullet — is
+   a finding-shaped line in any other shape — numbered, bare, or a `+` bullet — is
    refused, to be rewritten as a `-` bullet;
    for style, how many findings go to the ship card's
    Style residue, as
@@ -754,7 +754,8 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    checkpoint>` pasted verbatim as the card's `## Checks`,
    `## Open findings` and `## Not re-reviewed` sections, appearing exactly once —
    never retyped or indented, never repeated even inside a fence — and no HTML comment
-   anywhere in the card (the leg's checkpoint is
+   anywhere in the card; a card quoting `<!--`, in a commit subject or finding title,
+   escapes it, for example as `&lt;!--` (the leg's checkpoint is
    `<dispatch>/checkpoint-review.md` after a review leg, `<dispatch>/checkpoint-1.md`
    when this leg is synthesis); browser suite and QA when
    present; the journey report path where a
