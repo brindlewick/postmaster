@@ -535,7 +535,20 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    <tool>/scripts/verify.sh run <synthesis-wt> <dispatch> > <dispatch>/logs/review-r<round>-checks.txt || VERIFY_EXIT=$?
    cat <dispatch>/logs/review-r<round>-checks.txt
    <tool>/scripts/log-action.sh <dispatch> coachman gate "$SNAP" "review round <round>, verify.sh exit $VERIFY_EXIT"
-   [ "$VERIFY_EXIT" -eq 0 ] || exit 1   # any non-zero stops the round: the gate must be green before reviewers launch. On red, fix the gate on the synthesis worktree and repeat this step
+   case "$VERIFY_EXIT" in
+     0|3) ;;
+     *) exit 1 ;;
+   esac   # 0 green and 3 not-run proceed; a failed check (2), an unrunnable verify (1), a signal, or an unstartable shell (126/127) stops the round
+   if [ "$VERIFY_EXIT" -eq 3 ]; then
+     awk '/: not run, /{print; p=1; next} p==1 && /^  /{print; next} {p=0}' <dispatch>/logs/review-r<round>-checks.txt | while IFS= read -r NOTRUN; do
+       <tool>/scripts/run-log.sh <dispatch> "review round <round> gate not run: $NOTRUN"
+     done
+   fi
+   # A check not run is never read as passed: each goes on the card as `not run` with
+   # verify.sh's reason. Example: a ticket with no User journey makes the journey check
+   # `not run` (`journey: not run, exit 3, ...` plus its reason line); the round proceeds,
+   # the run log carries those lines, and the card records `journey: not run`. On a stopping
+   # exit, fix the cause on the synthesis worktree and repeat this step
    git -C <repo> worktree prune
    for LENS in <open lenses>; do   # a lens whose lanes do not resolve stops the round here
      <tool>/scripts/reviewers.sh lanes <dispatch>/brief.md "$LENS" >/dev/null || exit 1

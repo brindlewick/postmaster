@@ -36,11 +36,17 @@ def read_events(path):
 def final_report(harness, events_path, last_path):
     events = read_events(events_path)
     if harness == "claude":
-        results = [event["result"] for event in events
+        results = [event for event in events
                    if event.get("type") == "result" and isinstance(event.get("result"), str)]
         if not results:
             raise ReportError("Claude stream has no final result text")
-        return results[-1]
+        # The last result rules: a run that ended in error is a failed reviewer, never a
+        # clean review, whatever its text reads as. Real streams carry the success subtype;
+        # anything else, or none at all, fails loudly.
+        last = results[-1]
+        if last.get("subtype") != "success":
+            raise ReportError("claude review run did not succeed (subtype: %s)" % (last.get("subtype") or "missing"))
+        return last["result"]
     if harness == "mimo":
         reports = [(event.get("part") or {}).get("text") for event in events
                    if event.get("type") == "text"
@@ -150,8 +156,16 @@ def json_findings(text):
                      if isinstance(value.get(key), list)]
             if keyed:
                 picked = pick_findings(keyed)
+                if picked is not None:
+                    return picked
+                # Declared keys are held strictly: a non-empty list with no objects is a
+                # malformed report, as it was before the findings-like rule.
+                if any(keyed):
+                    raise ReportError("review output's findings lists hold no objects; refusing to read as clean")
+                if FINDING_MARKER.search(text):
+                    raise ReportError("review output declares no findings but cites a file and line")
                 # A whole report that is only empty lists is clean, as [] is.
-                return picked if picked is not None else []
+                return []
         if isinstance(value, list):
             return value
     except ValueError:
@@ -252,6 +266,7 @@ def descope_not_issues(text):
     out = []
     in_fence = False
     skip = False
+    skip_level = 0
     for raw in text.splitlines():
         stripped = raw.strip()
         if stripped.startswith("```"):
@@ -259,7 +274,11 @@ def descope_not_issues(text):
             out.append("" if skip else raw)
             continue
         if not in_fence and stripped.startswith("#"):
-            skip = stripped.lstrip("#").strip().lower().rstrip(":") in SKIP_SECTIONS
+            hashes = len(stripped) - len(stripped.lstrip("#"))
+            if stripped.lstrip("#").strip().lower().rstrip(":") in SKIP_SECTIONS:
+                skip, skip_level = True, hashes
+            elif skip and hashes <= skip_level:
+                skip = False
         if skip and (in_fence or cites_location(stripped)):
             out.append("")
         else:
@@ -382,7 +401,7 @@ def normalize_cli(lane, scratch, events_path, run_dir, last_path):
     return parse_report(harness, final_report(harness, events_path, last_path), scratch)
 
 
-def harvest(events_path, logs_dir, prefix):
+def harvest(events_path, logs_dir, prefix, task_root=None):
     wanted = []
     for event in read_events(events_path):
         if event.get("type") == "system" and event.get("subtype") == "task_notification":
@@ -395,7 +414,9 @@ def harvest(events_path, logs_dir, prefix):
                 wanted.append(path)
     os.makedirs(logs_dir, exist_ok=True)
     prefix = re.sub(r"[^A-Za-z0-9_.-]+", "-", prefix).strip(".-") or "review"
-    task_root = Path("/tmp/claude-%d" % os.getuid())
+    # The root is resolved before comparing: the task path always is, so an unresolved root
+    # under a symlinked /tmp would refuse its own files. The override exists for fixtures.
+    root = Path(task_root).resolve() if task_root is not None else Path("/tmp/claude-%d" % os.getuid()).resolve()
     planned = []
     for index, path in enumerate(wanted, 1):
         try:
@@ -403,19 +424,21 @@ def harvest(events_path, logs_dir, prefix):
         except (OSError, RuntimeError) as exc:
             raise ReportError("Claude task output named by task_notification is missing: %s" % path) from exc
         try:
-            resolved.relative_to(task_root)
+            resolved.relative_to(root)
         except ValueError as exc:
-            raise ReportError("Claude task output is outside %s: %s" % (task_root, path)) from exc
+            raise ReportError("Claude task output is outside %s: %s" % (root, path)) from exc
         if not resolved.is_file():
             raise ReportError("Claude task output named by task_notification is not a file: %s" % path)
-        planned.append((resolved, os.path.join(logs_dir, "%s-claude-task-%02d-%s" % (prefix, index, os.path.basename(path)))))
+        destination = os.path.join(logs_dir, "%s-claude-task-%02d-%s" % (prefix, index, os.path.basename(path)))
+        if os.path.exists(destination) and not filecmp.cmp(resolved, destination, shallow=False):
+            raise ReportError("refusing to overwrite harvested task output: %s" % destination)
+        planned.append((resolved, destination))
     copied = []
     for resolved, destination in planned:
+        # Every destination was vetted above: a refused harvest copies nothing.
         if os.path.exists(destination):
-            if filecmp.cmp(resolved, destination, shallow=False):
-                copied.append(destination)
-                continue
-            raise ReportError("refusing to overwrite harvested task output: %s" % destination)
+            copied.append(destination)
+            continue
         try:
             shutil.copy2(resolved, destination)
         except OSError as exc:
@@ -681,6 +704,60 @@ def self_test():
             check("findings outside Not issues still parse", result.returncode == 0 and sorted(f["target"] for f in parsed) == ["src/a.js:1", "src/c.js:3"], result.stderr or result.stdout)
         except ValueError:
             check("findings outside Not issues still parse", False, result.stderr or result.stdout)
+        err_subtype = root / "claude-err-subtype.events"
+        err_subtype.write_text(json.dumps({"type": "result", "subtype": "error_during_execution", "result": "No findings."}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(err_subtype), "--run", str(run_config("err-subtype", "claude"))], capture_output=True, text=True)
+        check("an error result is a failed reviewer, never clean", result.returncode == 1 and "did not succeed" in result.stderr, result.stderr or result.stdout)
+        str_list = root / "claude-str-list.events"
+        str_list.write_text(json.dumps({"type": "result", "subtype": "success", "result": '{"findings": ["bug at src/a.js:1"]}'}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(str_list), "--run", str(run_config("str-list", "claude"))], capture_output=True, text=True)
+        check("a findings list of strings fails closed", result.returncode == 1, result.stderr or result.stdout)
+        null_list = root / "claude-null-list.events"
+        null_list.write_text(json.dumps({"type": "result", "subtype": "success", "result": '{"findings": [null, null]}'}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(null_list), "--run", str(run_config("null-list", "claude"))], capture_output=True, text=True)
+        check("a findings list of nulls fails closed", result.returncode == 1, result.stderr or result.stdout)
+        mixed_list = root / "claude-mixed-list.events"
+        mixed_list.write_text(json.dumps({"type": "result", "subtype": "success", "result": '{"issues": [{"file": "src/a.js", "line": 1, "summary": "one"}, "junk"]}'}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(mixed_list), "--run", str(run_config("mixed-list", "claude"))], capture_output=True, text=True)
+        check("a findings list mixing an object with junk fails closed", result.returncode == 1, result.stderr or result.stdout)
+        empty_notes = root / "claude-empty-notes.events"
+        empty_notes.write_text(json.dumps({"type": "result", "subtype": "success", "result": '{"findings": [], "notes": "Bug at src/page.js:8"}'}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(empty_notes), "--run", str(run_config("empty-notes", "claude"))], capture_output=True, text=True)
+        check("a citation in another key defeats an empty findings list", result.returncode == 1 and "declares no findings" in result.stderr, result.stderr or result.stdout)
+        empty_plain_notes = root / "claude-empty-plain-notes.events"
+        empty_plain_notes.write_text(json.dumps({"type": "result", "subtype": "success", "result": '{"findings": [], "notes": "all good"}'}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(empty_plain_notes), "--run", str(run_config("empty-plain-notes", "claude"))], capture_output=True, text=True)
+        check("an empty findings list with plain notes stays clean", result.returncode == 0 and result.stdout.strip() == "[]", result.stderr or result.stdout)
+        nested_skip = root / "mimo-nested-skip.events"
+        nested_skip.write_text(json.dumps({"type": "text", "part": {"type": "text", "text": "### Not issues\n#### Sub\n- Broken \u2014 `src/a.js:1`: wrong.\n\nNo issues found.\n"}}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(nested_skip), "--run", str(run_config("nested-skip", "mimo"))], capture_output=True, text=True)
+        check("a subsection under Not issues stays skipped", result.returncode == 0 and result.stdout.strip() == "[]", result.stderr or result.stdout)
+        second = task_home / "second-task-output.txt"
+        second.write_text("second task tools\n", encoding="utf-8")
+        clash_logs = root / "logs-clash"
+        clash_logs.mkdir()
+        (clash_logs / ("clash-claude-task-02-" + second.name)).write_text("changed\n", encoding="utf-8")
+        clash = root / "harvest-clash.events"
+        clash.write_text(json.dumps({"type": "system", "subtype": "task_notification", "output_file": str(external)}) + "\n" + json.dumps({"type": "system", "subtype": "task_notification", "output_file": str(second)}) + "\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, __file__, "harvest", str(clash), str(clash_logs), "--prefix", "clash"], capture_output=True, text=True)
+        check("a refused harvest copies nothing", result.returncode == 1 and "refusing to overwrite" in result.stderr and not (clash_logs / ("clash-claude-task-01-" + external.name)).exists(), result.stderr or result.stdout)
+        link_root = root / "task-link"
+        real_root = root / "task-real"
+        real_root.mkdir()
+        (real_root / "linked-task-output.txt").write_text("linked task tools\n", encoding="utf-8")
+        link_root.symlink_to(real_root, target_is_directory=True)
+        link_events = root / "harvest-link.events"
+        link_events.write_text(json.dumps({"type": "system", "subtype": "task_notification", "output_file": str(real_root / "linked-task-output.txt")}) + "\n", encoding="utf-8")
+        try:
+            got = harvest(str(link_events), str(root / "logs-link"), "link", task_root=str(link_root))
+            check("a symlinked task root still contains its files", len(got) == 1 and Path(got[0]).is_file(), "")
+        except (ReportError, TypeError) as exc:
+            check("a symlinked task root still contains its files", False, str(exc))
+        try:
+            harvest(str(link_events), str(root / "logs-link2"), "link", task_root=str(root / "elsewhere"))
+            check("a task file outside the given root is still refused", False, "no error")
+        except (ReportError, TypeError) as exc:
+            check("a task file outside the given root is still refused", "outside" in str(exc), str(exc))
         shutil.rmtree(task_home, ignore_errors=True)
 
     print()
