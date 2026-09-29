@@ -96,7 +96,7 @@ than 140 s, the wire events level off at about 50.
 **The mock** (`mock.txt`).
 
 - After a summary, silence fails at the idle limit: at 180 s by default, 5 s and 30 s with the
-  variable at 5 and 30. With it at 600, a 205 s silence completes. The failure is terminal, with
+  variable at 5 and 30. With it at 600, a 210 s silence completes. The failure is terminal, with
   `next_attempt=0`.
 - SSE comment lines every 10 s do not reset the idle limit.
 - With no summary or output at all, the idle variable has no effect. After 180 s, or after

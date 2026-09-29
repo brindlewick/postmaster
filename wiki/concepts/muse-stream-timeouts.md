@@ -73,7 +73,7 @@ Tested against a loopback mock of the Meta API (`--base-url`), and on the real A
 | on the stream | Muse Code |
 |---|---|
 | a reasoning summary, then silence | fails after `TBH_STREAM_IDLE_TIMEOUT_SECS`, default 180; not retried |
-| the same, with the variable at 5, 30 or 600 | fails after 5 s, fails after 30 s, completes after a 205 s silence |
+| the same, with the variable at 5, 30 or 600 | fails after 5 s, fails after 30 s, completes after a 210 s silence |
 | the same, with SSE comment lines every 10 s | fails after 180 s: comments do not count |
 | no summary or output at all | retries after `TBH_STREAM_FIRST_EVENT_TIMEOUT_SECS`, default 180 |
 | a reasoning summary every 10 s for 200 s | completes |
