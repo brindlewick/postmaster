@@ -1910,7 +1910,8 @@ if a == ["agent"]: print("herdr agent commands:\n  kinds: pi|claude|codex"); sys
 lock = open(os.path.join(S, "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
 path = os.path.join(S, "herdr.json")
 st = json.load(open(path)) if os.path.exists(path) else {"n": 0, "spaces": {}, "panes": {}, "tabs": {}, "open": {}, "agents": [], "tab_n": {}}
-def save(): json.dump(st, open(path, "w"))
+# Atomic: readers without the lock never see a torn store.
+def save(): tmp = path + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, path)
 def new(prefix): st["n"] += 1; return "%s%d" % (prefix, st["n"])
 # Live Herdr numbers tabs 1-9,A-Z (observed to tF); past Z this assumes plain base-36.
 def b36(n):
@@ -2454,12 +2455,14 @@ EOF
   hs "$STUBS" -- close "$repo" >/dev/null 2>&1; rc=$?
   check "the repository's own checkout is refused" '[ $rc -eq 2 ]'
 python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-rev-luna" <<'PY'
-import json, os, sys
+import fcntl, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
 st = json.load(open(sys.argv[1])); st["n"] += 1; ws, p = "w%d" % st["n"], "p%d" % st["n"]
 # A space the user opened, holding nothing now but a tab host.sh added, its launch done.
 st["spaces"][ws] = {"label": "the user's", "tokens": {}, "panes": [p], "tabs": [], "path": os.path.realpath(sys.argv[2])}
 st["panes"][p] = {"ws": ws, "tokens": {"postmaster": "launch", "state": "done"}}
-st["open"][sys.argv[2]] = ws; json.dump(st, open(sys.argv[1], "w"))
+st["open"][sys.argv[2]] = ws; tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
 PY
   hs "$STUBS" -- close "$repo/.worktrees/T-1-rev-luna" >/dev/null 2>&1; rc=$?
   check "a space host.sh did not open is refused, and left open" '[ $rc -eq 2 ] && ! grep -q "^workspace${T}close${T}w$(python3 -c "import json; print(json.load(open(\"$tmp/stub/herdr.json\"))[\"n\"])")$" <<<"$(calls herdr)"'
@@ -2522,13 +2525,15 @@ PY
   got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/g1.done -- ./fixed.sh)
   marker "$tmp/logs/g1.done"
   python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" <<'PY'
-import json, sys
+import fcntl, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
 st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
 t1 = st["spaces"][ws]["tabs"][0]
 # The user splits the launch tab: a second, untagged pane in it.
 st["panes"]["pU"] = {"ws": ws, "tab": t1, "cwd": "/home/user", "tokens": {}}
 st["spaces"][ws]["panes"].append("pU")
-json.dump(st, open(sys.argv[1], "w"))
+tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
 PY
   got2=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
   check "a tab the user has split is refused, and the tab stays open" \
@@ -2539,13 +2544,15 @@ PY
   got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/g2.done -- ./fixed.sh)
   marker "$tmp/logs/g2.done"
   python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" <<'PY'
-import json, sys
+import fcntl, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
 st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
 t1 = st["spaces"][ws]["tabs"][0]
 # A second pane of the run's own in the launch tab: tagged like the first.
 st["panes"]["pR"] = {"ws": ws, "tab": t1, "cwd": sys.argv[2], "tokens": {"postmaster": "launch"}}
 st["spaces"][ws]["panes"].append("pR")
-json.dump(st, open(sys.argv[1], "w"))
+tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
 PY
   check "a tab holding only the run's panes still closes" \
     'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
@@ -2553,13 +2560,15 @@ PY
   got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/g3.done -- ./fixed.sh)
   marker "$tmp/logs/g3.done"
   python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" <<'PY'
-import json, sys
+import fcntl, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
 st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
 t1 = st["spaces"][ws]["tabs"][0]
 # A sibling row the list cannot place: no tab on its record.
 st["panes"]["pU"] = {"ws": ws, "cwd": "/home/user", "tokens": {}}
 st["spaces"][ws]["panes"].append("pU")
-json.dump(st, open(sys.argv[1], "w"))
+tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
 PY
   got2=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
   check "a tab the list cannot fully place is refused, and the tab stays open" \
@@ -2570,12 +2579,14 @@ PY
   got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/g4.done -- ./fixed.sh)
   marker "$tmp/logs/g4.done"
   python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" <<'PY'
-import json, sys
+import fcntl, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
 st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
 t1 = st["spaces"][ws]["tabs"][0]
 st["panes"]["pU"] = {"ws": ws, "tab": t1, "cwd": "/home/user", "tokens": {}}
 st["spaces"][ws]["panes"].append("pU")
-json.dump(st, open(sys.argv[1], "w"))
+tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
 PY
   touch "$tmp/stub/panes.notabids"
   got2=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
@@ -2590,12 +2601,14 @@ PY
     got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/h1-$i.done -- ./fixed.sh)
     marker "$tmp/logs/h1-$i.done"
     python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" "$literal" <<'PY'
-import json, sys
+import fcntl, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
 st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
 # A sibling row the list cannot place: its tab is the spelling under test.
 st["panes"]["pU"] = {"ws": ws, "tab": json.loads(sys.argv[3]), "cwd": "/home/user", "tokens": {}}
 st["spaces"][ws]["panes"].append("pU")
-json.dump(st, open(sys.argv[1], "w"))
+tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
 PY
     got2=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
     check "a tab_id spelled as $spelling refuses the close, leaving tab and pane in place" \
@@ -2609,11 +2622,53 @@ PY
   check "a well-formed id still closes a tab holding only the run's panes" \
     '[ $(calls herdr | grep -c "^tab${T}close" || true) -eq $((n0 + 1)) ] && [ $(calls herdr | grep -c "^pane${T}close" || true) -eq $m0 ] && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
 
+  echo "stub state under concurrent saves, Herdr (stub)"
+  reset
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/q1.done -- ./fixed.sh)
+  marker "$tmp/logs/q1.done"
+  pane=${got##*pane=}
+  # The launch's reporter closes after the marker lands; let its closing report
+  # land before racing the stub, so the burst measures the mechanism, not the tail.
+  a=0
+  while ! python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); sys.exit(s["panes"][sys.argv[2]]["tokens"].get("state") != "done")' "$tmp/stub/herdr.json" "$pane" 2>/dev/null && [ $a -lt 300 ]; do sleep 0.2; a=$((a + 1)); done
+  # A burst of stub saves racing locked fixture edits the way the reporter's
+  # tail does, with reads throughout: every update must land, every read parse.
+  epids=""; spids=""; rpids=""; efail=0; sfail=0; rfail=0
+  for ((i = 1; i <= 30; i++)); do
+    python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" "$i" <<'PY' &
+import fcntl, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
+st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
+t1 = st["spaces"][ws]["tabs"][0]
+st["panes"]["q" + sys.argv[3]] = {"ws": ws, "tab": t1, "cwd": "/home/user", "tokens": {}}
+st["spaces"][ws]["panes"].append("q" + sys.argv[3])
+tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
+PY
+    epids="$epids $!"
+    STUB="$tmp/stub" "$tmp/bin/herdr" pane report-metadata "$pane" --token q="$i" >/dev/null 2>&1 &
+    spids="$spids $!"
+    python3 - "$tmp/stub/herdr.json" <<'PY' &
+import json, sys
+for _ in range(50):
+    json.load(open(sys.argv[1]))
+PY
+    rpids="$rpids $!"
+  done
+  for pid in $epids; do wait "$pid" || efail=1; done
+  for pid in $spids; do wait "$pid" || sfail=1; done
+  for pid in $rpids; do wait "$pid" || rfail=1; done
+  check "a burst of stub saves racing locked fixture edits keeps every update" \
+    '[ $efail -eq 0 ] && [ $sfail -eq 0 ] && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); sys.exit(not all(\"q%d\" % i in s[\"panes\"] for i in range(1, 31)))" "$tmp/stub/herdr.json"'
+  check "and no concurrent read sees a torn store" '[ $rfail -eq 0 ]'
+
   reset
   got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/b1.done -- ./fixed.sh)
   marker "$tmp/logs/b1.done"
   python3 - "$tmp/stub/herdr.json" "$tmp/state/placements" "$repo/.worktrees/T-1-luna" <<'PY'
-import glob, json, os, sys
+import fcntl, glob, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
 st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[3]]
 # Retab the launch as the tenth tab: rename its tab id to the base-36 shape
 # live Herdr issues, in the stub state and the recorded placement alike.
@@ -2628,7 +2683,7 @@ for f in glob.glob(os.path.join(sys.argv[2], "*.json")):
     d = json.load(open(f))
     if d.get("cwd") == os.path.realpath(sys.argv[3]) and d.get("tab") == old:
         d["tab"] = new; json.dump(d, open(f, "w"))
-json.dump(st, open(sys.argv[1], "w"))
+tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
 PY
   n0=$(calls herdr | grep -c "^tab${T}close" || true); m0=$(calls herdr | grep -c "^pane${T}close" || true)
   hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null
