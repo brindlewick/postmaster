@@ -165,55 +165,77 @@ check_pin() {  # check_pin <dispatch>: the run's checkout still serves its dispa
   return 0
 }
 
-in_flight() {  # in_flight <runs-root> <checkout>: yes when some run still uses this pin
+pin_scan() {  # pin_scan <runs-root> <checkout>: exit 42 when no run uses this pin, 0
+            # otherwise; runs in the clean shell in_flight builds, never in the caller
   local root=$1 checkout=$2 p d stage got c found=1 hidden=""
-  (
-    # The scan owns its shell: every glob-affecting state is set explicitly here, and
-    # nothing is saved or restored, so no ambient shell state can reach the enumeration.
-    # dotglob on: a project is any repo basename, dot-prefixed included.
-    # nullglob on: an unmatched glob expands to nothing; no name ends the scan.
-    # globskipdots on: defensive; only .* patterns can yield . and .., and the scan
-    # uses none, but every glob-affecting state is explicit here regardless.
-    # globasciiranges on: ranges match ASCII whatever the locale (the bash 5.2 default).
-    # failglob, extglob, nocaseglob, globstar off: the scan uses no failing, extended,
-    # case-folded or ** match; each stays at what the scan needs.
-    # nocasematch off: the claim and stage dispatch below matches exactly.
-    unset GLOBIGNORE  # ambient ignores must not hide runs from the scan
-    shopt -s dotglob nullglob globskipdots globasciiranges
-    shopt -u failglob extglob nocaseglob globstar nocasematch
-    # Two loops so an unreadable level is seen: one flat glob drops its branch silently.
-    if [ ! -r "$root" ] || [ ! -x "$root" ]; then hidden=$root; fi
-    for p in "$root"/*/; do
-      if [ ! -r "$p" ] || [ ! -x "$p" ]; then hidden=$p; break; fi  # an unreadable project hides runs; keep
-      for d in "$p"*/; do
-        if [ ! -r "$d" ] || [ ! -x "$d" ]; then hidden=$d; break 2; fi  # an unreadable run hides; keep
-        [ -f "$d/run.json" ] || continue
-        c=$(claim "$d/run.json")
-        case $c in
-          unknown|"") found=0; break 2 ;;   # a record that cannot be read keeps the pin
-          no) continue ;;
-          checkout:*) got=${c#checkout:} ;;
-        esac
-        if [ "$got" != "$checkout" ]; then
-          # The same checkout recorded through a symlink spells differently; a path that
-          # resolves nowhere cannot be this pin, which exists.
-          got=$(canon "$got") || continue
-          [ "$got" = "$checkout" ] || continue
-        fi
-        stage=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("stage") or "")' \
-          "$d/manifest.json" 2>/dev/null) || stage=""
-        case $stage in
-          done|abandoned) ;;
-          *) found=0; break 2 ;;
-        esac
-      done
+  # The scan owns its shell: every glob-affecting state is set explicitly here, so no
+  # ambient shell state can reach the enumeration, whatever the caller holds.
+  # dotglob on: a project is any repo basename, dot-prefixed included.
+  # nullglob on: an unmatched glob expands to nothing; no name ends the scan.
+  # globskipdots on: defensive; only .* patterns can yield . and .., and the scan
+  # uses none, but every glob-affecting state is explicit here regardless.
+  # globasciiranges on: ranges match ASCII whatever the locale (the bash 5.2 default).
+  # failglob, extglob, nocaseglob, globstar off: the scan uses no failing, extended,
+  # case-folded or ** match; each stays at what the scan needs.
+  # nocasematch off: the claim and stage dispatch below matches exactly.
+  # noglob off: set -f would freeze every glob literal; a set option, not a shopt.
+  unset GLOBIGNORE  # ambient ignores must not hide runs from the scan
+  set +f
+  shopt -s dotglob nullglob globskipdots globasciiranges
+  shopt -u failglob extglob nocaseglob globstar nocasematch
+  # Two loops so an unreadable level is seen: one flat glob drops its branch silently.
+  if [ ! -r "$root" ] || [ ! -x "$root" ]; then hidden=$root; fi
+  for p in "$root"/*/; do
+    if [ ! -r "$p" ] || [ ! -x "$p" ]; then hidden=$p; break; fi  # an unreadable project hides runs; keep
+    for d in "$p"*/; do
+      if [ ! -r "$d" ] || [ ! -x "$d" ]; then hidden=$d; break 2; fi  # an unreadable run hides; keep
+      [ -f "$d/run.json" ] || continue
+      c=$(claim "$d/run.json")
+      # got stays uninitialized on purpose: *) below always sets it before use, and
+      # under set -u any future fall-through dies, which in_flight reads as keep.
+      case $c in
+        unknown|"") found=0; break 2 ;;   # a record that cannot be read keeps the pin
+        no) continue ;;
+        checkout:*) got=${c#checkout:} ;;
+        *) found=0; break 2 ;;   # an unexpected record shape keeps the pin
+      esac
+      if [ "$got" != "$checkout" ]; then
+        # The same checkout recorded through a symlink spells differently; a path that
+        # resolves nowhere cannot be this pin, which exists.
+        got=$(canon "$got") || continue
+        [ "$got" = "$checkout" ] || continue
+      fi
+      stage=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("stage") or "")' \
+        "$d/manifest.json" 2>/dev/null) || stage=""
+      case $stage in
+        done|abandoned) ;;
+        *) found=0; break 2 ;;
+      esac
     done
-    if [ -n "$hidden" ]; then
-      echo "run-meta: cannot list $hidden; keeping $checkout" >&2
-      exit 0
-    fi
-    exit $found
-  )
+  done
+  if [ -n "$hidden" ]; then
+    echo "run-meta: cannot list $hidden; keeping $checkout" >&2
+    exit 0
+  fi
+  if [ "$found" -eq 0 ]; then exit 0; fi
+  exit 42  # the one reserved drop signal; in_flight keeps on every other status
+}
+
+in_flight() {  # in_flight <runs-root> <checkout>: yes when some run still uses this pin
+  local root=$1 checkout=$2 st prog
+  prog=$(declare -f claim canon pin_scan; printf '%s\n' 'set -uo pipefail' 'pin_scan "$@"')
+  # The scan runs in a clean shell the caller's environment cannot reach: a fresh
+  # bash with no startup files under an empty environment, so BASH_ENV, SHELLOPTS,
+  # exported functions, readonly variables and every option start from the default
+  # and the explicit block inside sets what the scan needs. Only PATH, which finds
+  # python3, and HOME cross over.
+  env -i PATH="$PATH" HOME="$HOME" bash --noprofile --norc -c "$prog" run-meta-scan "$root" "$checkout"
+  st=$?
+  case $st in
+    42) return 1 ;;  # the scan's drop signal: nothing in flight
+    0) return 0 ;;
+    *) echo "run-meta: pin scan ended status $st, not its drop signal; keeping $checkout" >&2; return 0 ;;
+  esac
 }
 
 worktree_locked() {  # worktree_locked <common-dir> <checkout>: yes when an admin locked this pin
@@ -589,10 +611,12 @@ unset BASH_ENV
 [ $rc -eq 0 ] && grep -q "kept" <<<"$out" && [ -d "$pinGI" ] \
   && ok "release keeps the pin under a BASH_ENV that ignores the live project" \
   || fail "release keeps the pin under a BASH_ENV that ignores the live project ($out)"
-# The hostile controls: release under a BASH_ENV holding the opposite of every
-# explicit scan setting, over a fixture shaped to show each one: an empty project
-# level, a dot-named project holding the live run, and star-named, bracket-named
-# and mixed-case projects.
+# The hostile controls: release under every ambient vector at once — a BASH_ENV
+# holding a readonly GLOBIGNORE, set -f, failglob, the opposite of every other
+# explicit scan setting and a python3 shadow, plus an exported SHELLOPTS with
+# noglob and an exported python3 function — over a fixture shaped to show each
+# one: an empty project level, a dot-named project holding the live run, and
+# star-named, bracket-named and mixed-case projects.
 hroot=$tmp/hruns
 mkdir -p "$hroot/empty-proj" "$hroot/.dotproj/RUN-HDOT" "$hroot/giproj/RUN-HGI" \
   "$hroot/STAR*PROJ/RUN-HS" "$hroot/br[ack]et/RUN-HB" "$hroot/MiXeD/RUN-HM" \
@@ -609,22 +633,85 @@ done
 printf '{"stage": "synthesis"}\n' > "$hroot/.dotproj/RUN-HDOT/manifest.json"
 cat > "$tmp/benv-hostile.sh" <<EOF
 GLOBIGNORE=$hroot/giproj/
+readonly GLOBIGNORE
+set -f
 shopt -s failglob nocaseglob extglob globstar nocasematch
 shopt -u dotglob nullglob globskipdots globasciiranges
+python3() { case "\$*" in *RUN-HS*) echo weird;; *) command python3 "\$@";; esac; }
 EOF
-export BASH_ENV="$tmp/benv-hostile.sh"
-try release "$hroot/project/RUN-HREL"
-unset BASH_ENV
-[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && ! grep -q "cannot list" <<<"$out" && [ -d "$pinH" ] \
-  && ok "release keeps the pin under every hostile glob setting at once" \
-  || fail "release keeps the pin under every hostile glob setting at once ($out)"
+# The python3 shadows answer weird for one sibling only and delegate otherwise, so
+# the releaser's own record still reads; SHELLOPTS is readonly in a running shell,
+# so the noglob vector goes through env, and try's two lines are written out.
+hostile_release() {
+  python3() { case "$*" in *RUN-HS*) echo weird;; *) command python3 "$@";; esac; }
+  export -f python3
+  export BASH_ENV="$tmp/benv-hostile.sh"
+  out=$(env SHELLOPTS=noglob "$0" release "$hroot/project/RUN-HREL" 2>&1); rc=$?
+  unset BASH_ENV
+  unset -f python3
+}
+hostile_release
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && ! grep -q "cannot list" <<<"$out" \
+  && ! grep -q "not its drop signal" <<<"$out" && [ -d "$pinH" ] \
+  && ok "release keeps the pin under every hostile vector at once" \
+  || fail "release keeps the pin under every hostile vector at once ($out)"
 printf '{"stage": "done"}\n' > "$hroot/.dotproj/RUN-HDOT/manifest.json"
-export BASH_ENV="$tmp/benv-hostile.sh"
-try release "$hroot/project/RUN-HREL"
-unset BASH_ENV
+hostile_release
 [ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$pinH" ] \
-  && ok "release removes under every hostile glob setting at once when nothing is live" \
-  || fail "release removes under every hostile glob setting at once when nothing is live ($out)"
+  && ok "release removes under every hostile vector at once when nothing is live" \
+  || fail "release removes under every hostile vector at once when nothing is live ($out)"
+# A scan that dies mid-way keeps the pin: only the reserved drop signal removes.
+# The fixture is wide enough that the scan is still running when the kill lands;
+# the kill is scoped to a scan whose command line holds this test's own tmp.
+kroot=$tmp/kroot; mkdir -p "$kroot/project/RUN-KREL"
+pinK=$(pin "$fake" "$commitH") || fail "a pin is cut for the killed-scan control"
+for i in $(seq 1 150); do
+  r="$kroot/project/RUN-K$i"; mkdir -p "$r"
+  printf '{"postmaster": {"commit": "%s", "checkout": "%s"}}\n' "$commitH" "$pinK" > "$r/run.json"
+  printf '{"stage": "done"}\n' > "$r/manifest.json"
+done
+printf '{"postmaster": {"commit": "%s", "checkout": "%s"}}\n' "$commitH" "$pinK" > "$kroot/project/RUN-KREL/run.json"
+printf '{"stage": "done"}\n' > "$kroot/project/RUN-KREL/manifest.json"
+"$0" release "$kroot/project/RUN-KREL" >"$tmp/kill.out" 2>&1 & killpid=$!
+killed=""
+for i in $(seq 1 300); do
+  for pid in $(pgrep -f run-meta-scan 2>/dev/null); do
+    if tr '\0' ' ' </proc/$pid/cmdline 2>/dev/null | grep -qF "$tmp"; then
+      kill -9 $pid 2>/dev/null && killed=1
+    fi
+  done
+  [ -n "$killed" ] && break
+  kill -0 $killpid 2>/dev/null || break
+  sleep 0.1
+done
+wait $killpid; rc=$?
+out=$(cat "$tmp/kill.out")
+[ -n "$killed" ] && [ $rc -eq 0 ] && grep -q "kept" <<<"$out" \
+  && grep -q "not its drop signal" <<<"$out" && [ -d "$pinK" ] \
+  && ok "release keeps the pin when the pin scan is killed" \
+  || fail "release keeps the pin when the pin scan is killed (killed=$killed rc=$rc $out)"
+rm -rf -- "$kroot"
+# A sibling whose record claims an unexpected shape keeps the pin, without noise:
+# the shadow python3 on PATH answers weird for it and delegates otherwise.
+mkdir -p "$tmp/shadowbin"
+realpy=$(command -v python3)
+cat > "$tmp/shadowbin/python3" <<EOF
+#!/bin/sh
+case "\$*" in *RUN-WEIRD*) echo weird;; *) exec "$realpy" "\$@";; esac
+EOF
+chmod +x "$tmp/shadowbin/python3"
+wroot=$tmp/wroot; mkdir -p "$wroot/project/RUN-WEIRD" "$wroot/project/RUN-WREL"
+pinU=$(pin "$fake" "$commitH") || fail "a pin is cut for the unexpected-shape control"
+for r in "$wroot/project/RUN-WEIRD" "$wroot/project/RUN-WREL"; do
+  printf '{"postmaster": {"commit": "%s", "checkout": "%s"}}\n' "$commitH" "$pinU" > "$r/run.json"
+  printf '{"stage": "done"}\n' > "$r/manifest.json"
+done
+oldpath=$PATH; PATH="$tmp/shadowbin:$PATH"
+try release "$wroot/project/RUN-WREL"
+PATH=$oldpath
+[ $rc -eq 0 ] && grep -q "kept" <<<"$out" && ! grep -q "unbound variable" <<<"$out" && [ -d "$pinU" ] \
+  && ok "release keeps the pin for a sibling whose record claims an unexpected shape" \
+  || fail "release keeps the pin for a sibling whose record claims an unexpected shape ($out)"
 printf '{"stage": "done"}\n' > "$gi_run/manifest.json"
 try release "$gi_rel"
 [ $rc -eq 0 ] && grep -q "removed" <<<"$out" && [ ! -e "$pinGI" ] \
