@@ -46,9 +46,12 @@ The adapter accepts spaces, underscores or hyphens between the words in a phrase
 regard to case. A wall is **never** transient and takes precedence over any transient
 signature: a quota wall (quota wall, exceeded or exhausted), a `402 Payment Required` or
 other payment-required or insufficient-funds message, a usage-limit or rate-limit message
-(too many requests included), a provider wall, a resource-exhausted message, and a `launch:`
-refusal. Those go to the postmaster as today. Add a signature here and to `launch.sh` only
-when the adapter can distinguish it from those cases in the durable error record.
+in any separator spelling (`usage limits` and `rate limited` included), a provider wall,
+a resource-exhausted message, a too-many-requests message, and a `launch:` refusal. Those
+go to the postmaster as today.
+The phrases live once in `launch.sh` (`wall_phrases`, printed by `launch.sh walls`); the
+matcher and the self-test matrix are both built from that list. Add a phrase there and
+here only when the adapter can distinguish it from those cases in the durable error record.
 
 Every lane runs unrestricted. Its containment is its worktree (`coachman.md`, Lane capability),
 so the bypass form below is passed on every launch AND every resume. The interactive postmaster

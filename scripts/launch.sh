@@ -12,6 +12,7 @@
 #   launch.sh transient <err-file> [<stream-file> [<skip-lines>]]
 #                                           exit 0 when a leg's end is a transient provider
 #                                           error this adapter names (harnesses.md)
+#   launch.sh walls                         the wall phrases transient matches, one per line
 #   launch.sh --self-test
 #
 # The config is the live one, ~/.postmaster/config.toml (POSTMASTER_CONFIG overrides the path),
@@ -52,7 +53,7 @@
 # any transient signature.
 #
 #   exit 0  the forms or the skill's prompt were printed, or the harness exited 0; thread-id
-#           found an id; transient matched a named provider error
+#           found an id; transient matched a named provider error; walls listed the phrases
 #   exit 1  usage, config or run.json missing or unreadable, unknown name, a leg that is not
 #           synthesis, review or ship, the coachman launched or resumed with no --leg, a
 #           coachman or fallback on a lane's model, harness not on PATH, env_file missing, a
@@ -541,6 +542,32 @@ PY
   [ $rc -eq 1 ] && [ "$out" = launch-refusal ] \
     && ok "a refusal wins over transient text on its own line" \
     || fail "a refusal wins over transient text on its own line (exit $rc, $out)"
+  echo "walls: every phrase in every separator wins precedence, by construction"
+  check_cell() {  # check_cell <label> <want-exit> <want-out> <err-text>
+    printf '%s\n' "$4" > "$tmp/cell.err"
+    out=$("$self" transient "$tmp/cell.err" 2>"$tmp/err"); rc=$?
+    [ $rc -eq "$2" ] && [ "$out" = "$3" ] \
+      || { fail "wall matrix [$1]: got exit $rc $out"; matrix_fail=1; }
+  }
+  "$self" walls > "$tmp/walls.txt"; rc=$?
+  [ $rc -eq 0 ] && [ -s "$tmp/walls.txt" ] \
+    && ok "walls lists the adapter's wall phrases" \
+    || fail "walls lists the adapter's wall phrases (exit $rc)"
+  check_cell "transient proves itself" 0 "model stream idle timeout" "model stream idle timeout"
+  cells=0
+  while IFS= read -r phrase; do
+    [ -n "$phrase" ] || continue
+    matrix_fail=0
+    for sep in " " "_" "-"; do
+      wall=$(printf '%s' "$phrase" | sed "s/ /$sep/g")
+      cells=$((cells + 1))
+      check_cell "$wall beside transient" 1 provider-wall "$wall: model stream idle timeout"
+      check_cell "transient beside $wall" 1 provider-wall "model stream idle timeout, $wall"
+      check_cell "$wall alone" 1 provider-wall "$wall reached"
+    done
+    [ $matrix_fail -eq 0 ] && ok "wall matrix covers [$phrase] in every separator"
+  done < "$tmp/walls.txt"
+  [ "$cells" -gt 0 ] || fail "wall matrix ran no cell"
   out=$("$self" transient "$tmp/no-such.err" 2>"$tmp/err"); rc=$?
   [ $rc -eq 1 ] && case $(cat "$tmp/err") in *"no such error file"*) true ;; *) false ;; esac \
     && ok "a missing error file is refused" || fail "a missing error file is refused (exit $rc)"
@@ -607,12 +634,34 @@ PY
 # against the leg's .err and the error records in its stream tail, never a prompt or a user
 # message. Prints the canonical class on a match. A launch refusal and a quota, payment,
 # usage or rate wall are checked first and are never transient.
+# The wall phrases live here once: transient builds its matcher from them and the
+# self-test builds its coverage matrix from them, so a phrase added here is matched
+# and covered with no other edit.
+wall_phrases() {  # wall_phrases: the adapter's wall phrases, one space-joined phrase per line
+  printf '%s\n' \
+    "402 payment required" \
+    "payment required" \
+    "quota wall" \
+    "quota exceeded" \
+    "quota exhausted" \
+    "usage limit" \
+    "usage limits" \
+    "usage limited" \
+    "rate limit" \
+    "rate limits" \
+    "rate limited" \
+    "provider wall" \
+    "resource exhausted" \
+    "insufficient funds" \
+    "too many requests"
+}
+
 transient() {  # transient <err-file> [<stream-file> [<skip-lines>]]
   [ $# -ge 1 ] && [ $# -le 3 ] || die "usage: launch.sh transient <err-file> [<stream-file> [<skip-lines>]]"
   [ -f "$1" ] || die "no such error file: $1"
-  python3 - "$1" "${2:-}" "${3:-0}" <<'PY'
+  python3 - "$1" "${2:-}" "${3:-0}" "$(wall_phrases)" <<'PY'
 import collections, itertools, json, re, sys
-err_path, stream_path, skip_arg = sys.argv[1], sys.argv[2], sys.argv[3]
+err_path, stream_path, skip_arg, wall_text = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 try:
     skip = int(skip_arg)
     if skip < 0: raise ValueError("negative")
@@ -672,7 +721,7 @@ if re.sub(r"^(?:host:[^\n]*\n)+", "", err).startswith("launch:"):
     print("launch-refusal")
     raise SystemExit(1)
 sep = r"[\s_-]+"
-wall = re.compile(r"\b(?:402%s+payment%s+required|payment%s+required|quota(?:%s+(?:wall|exceeded|exhausted))|usage%s+limit|rate%s+limit|provider%s+wall|resource%s+exhausted|insufficient%s+funds|too%s+many%s+requests)\b" % (sep, sep, sep, sep, sep, sep, sep, sep, sep, sep, sep), re.I)
+wall = re.compile(r"\b(?:" + "|".join(sep.join(map(re.escape, phrase.split())) for phrase in wall_text.split("\n") if phrase.split()) + r")\b", re.I)
 if wall.search(all_errors):
     print("provider-wall")
     raise SystemExit(1)
@@ -696,9 +745,10 @@ PY
 case ${1:-} in
   thread-id) shift; thread_id "$@"; exit $? ;;
   transient) shift; transient "$@"; exit $? ;;
+  walls) shift; [ $# -eq 0 ] || die "usage: launch.sh walls"; wall_phrases; exit 0 ;;
 esac
 
-[ $# -ge 2 ] || die "usage: launch.sh form|launch|resume|skill <name> ... | thread-id <events-file> | transient <err-file> [<stream-file> [<skip-lines>]] | --self-test"
+[ $# -ge 2 ] || die "usage: launch.sh form|launch|resume|skill <name> ... | thread-id <events-file> | transient <err-file> [<stream-file> [<skip-lines>]] | walls | --self-test"
 CMD=$1; NAME=$2; shift 2
 LEG=""; LAST=""; RUN=""; STDIN_FILE=""; args=()
 while [ $# -gt 0 ]; do
