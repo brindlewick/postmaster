@@ -2341,9 +2341,10 @@ EOF
   ln -s "$(command -v python3)" "$tmp/sys/moshi-hook"; ln -s "$(command -v python3)" "$tmp/sys/systemd"
   cat > "$tmp/caller/guarded.sh" <<'EOF'
 #!/usr/bin/env bash
-# A launch with a process that looks like one stop must never touch.
-"$LOOKS_LIKE" -c 'import time; time.sleep(60)' $ARGS & echo $! > "$TREE/guarded.pid"
-sleep 60 & wait
+# A launch with a process that looks like one stop must never touch. Both sleep past the
+# 60s marker bound, so a kill the control misses still fails instead of completing in time.
+"$LOOKS_LIKE" -c 'import time; time.sleep(300)' $ARGS & echo $! > "$TREE/guarded.pid"
+sleep 300 & wait
 EOF
   chmod +x "$tmp/caller/guarded.sh"
   local spec look args why
@@ -2361,7 +2362,8 @@ EOF
 
   cat > "$tmp/caller/wide.sh" <<'EOF'
 #!/usr/bin/env bash
-for i in 1 2 3 4; do sleep 60 & echo $! >> "$TREE/wide.pids"; done
+# Sleep past the 60s marker bound, so a stop the control misses still fails.
+for i in 1 2 3 4; do sleep 300 & echo $! >> "$TREE/wide.pids"; done
 wait
 EOF
   chmod +x "$tmp/caller/wide.sh"
@@ -2419,15 +2421,16 @@ EOF
   (cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --out ../logs/h3.out --err ../logs/h3.err --marker ../logs/h3.done -- ./fixed.sh >/dev/null)
   marker "$tmp/logs/h3.done"
   check "the command streams and marker are what a background run writes, with any cap notice" 'cmp -s "$tmp/direct.out" "$tmp/logs/h3.out" && err_stream_equal "$tmp/direct.err" "$tmp/logs/h3.err"'
-  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --marker ../logs/h6.done --pidfile ../logs/h6.pid -- sleep 60)
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --marker ../logs/h6.done --pidfile ../logs/h6.pid -- sleep 300)
   # run can return before either pid file lands under load; signalling a missing pid kills
   # nothing, and the old separate 10s marker window could then expire before the launch ended.
+  # The fixture sleeps 300, past the bound, so a launch the kill misses still fails.
   wait_file "$tmp/logs/h6.pid" 60 && wait_file "$tmp/stub/pane-${got##*pane=}.pid" 60
   panepid=$(cat "$tmp/stub/pane-${got##*pane=}.pid" 2>/dev/null)
   kill -HUP -- "-$panepid" 2>/dev/null
   check "a pane closed mid-run: the launch stops, and its marker lands" \
     'marker "$tmp/logs/h6.done" 60 && ! kill -0 "$(cat "$tmp/logs/h6.pid")" 2>/dev/null'
-  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --marker ../logs/h7.done --pidfile ../logs/h7.pid -- sleep 60)
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --marker ../logs/h7.done --pidfile ../logs/h7.pid -- sleep 300)
   # As above: both pid files are the event, then 60s for the marker after the kill.
   wait_file "$tmp/logs/h7.pid" 60 && wait_file "$tmp/stub/pane-${got##*pane=}.pid" 60
   panepid=$(cat "$tmp/stub/pane-${got##*pane=}.pid" 2>/dev/null)
@@ -2461,7 +2464,8 @@ PY
   hs "$STUBS" -- close "$repo/.worktrees/T-1-rev-luna" >/dev/null 2>&1; rc=$?
   check "a space host.sh did not open is refused, and left open" '[ $rc -eq 2 ] && ! grep -q "^workspace${T}close${T}w$(python3 -c "import json; print(json.load(open(\"$tmp/stub/herdr.json\"))[\"n\"])")$" <<<"$(calls herdr)"'
   touch "$tmp/stub/pane.dead"
-  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-sol" --marker ../logs/s1.done -- sleep 60 2>/dev/null)
+  # sleep 300 outlives the 60s marker bound: a stop that misses still fails.
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-sol" --marker ../logs/s1.done -- sleep 300 2>/dev/null)
   rm -f "$tmp/stub/pane.dead"
   got2=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-sol" 2>&1); rc=$?
   check "a launch that fell back to the background still holds its worktree: close refuses" '[ "$got" = host=none ] && [ $rc -eq 2 ]' "$got / $got2"
@@ -2715,7 +2719,8 @@ PY
   check "a first launch opens session postmaster-<repo>, a window named for it" \
     'grep -q "^new-session${T}-d${T}-P${T}-F${T}#{window_id}${T}-s${T}postmaster-$rname${T}-n${T}$NAME${T}" <<<"$(calls tmux)"' "$got"
   check "the launch ran with that window's pane and its caller's environment" '[ "$(field "$tmp/logs/t1.out" tmuxpane)" = %1 ] && [ "$(field "$tmp/logs/t1.out" var)" = v ]' "$(cat "$tmp/logs/t1.out")"
-  (cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux -- run "$NAME" "$repo/.worktrees/T-1-sol" --marker ../logs/t2.done -- sleep 60 >/dev/null)
+  # sleep 300 outlives the 60s marker bound: a stop that misses still fails.
+  (cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux -- run "$NAME" "$repo/.worktrees/T-1-sol" --marker ../logs/t2.done -- sleep 300 >/dev/null)
   check "the next is a window in the same session" 'grep -q "^new-window${T}-d${T}-P${T}-F${T}#{window_id}${T}-t${T}=postmaster-$rname:${T}" <<<"$(calls tmux)"'
   hs "$STUBS" POSTMASTER_HOST=tmux -- close "$repo/.worktrees/T-1-sol" >/dev/null 2>&1; rc=$?
   check "close refuses while a launch still runs in the worktree" '[ $rc -eq 2 ] && [ "$(calls tmux | grep -c "^kill-window")" -eq 0 ]'
