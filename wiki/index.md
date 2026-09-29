@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-27
+updated: 2026-09-29
 ---
 
 # postmaster wiki
@@ -22,7 +22,9 @@ Does implementing one ticket with several models, each unable to see the others'
 produce better software than one good model? If so, how?
 
 - [Combining models](concepts/combining-models.md): three hypotheses and five open questions,
-  all **claimed**, since no runs have been recorded yet.
+  all **claimed**, since no dispatched run has been promoted yet. An audit of 25 syntheses bears
+  on H1: the coachman's record of what it took from each lane cannot fail, and the second lane's
+  share, counted in git, ranges from nothing to most of the code.
 
 ## Harnesses
 
@@ -102,6 +104,9 @@ Why the design is shaped as it is.
 - [Each project defines how a change to it is verified](concepts/verification.md): **claimed**.
   A project declares its checks or gets defaults by discovery; every workhorse runs them before
   it reports, and the coachman runs them again on each branch and on the synthesis.
+- [A project's .postmaster/ holds its settings and every run's record](concepts/project-settings.md):
+  **claimed**. Optional, gitignored whole, shared through one narrow file; run artifacts live
+  with the project so two checkouts with the same basename no longer share a ledger.
 
 ## Sources
 
