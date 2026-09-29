@@ -16,12 +16,13 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
-import { run } from "./lib/proc.ts";
+import { argvHasUndecodableBytes, run } from "./lib/proc.ts";
 
 const states = ["todo", "in-progress", "blocked", "done", "cancelled"];
 const args = process.argv.slice(2);
@@ -49,7 +50,11 @@ function usage(text: string): never {
   return die(`usage: local.sh <repo> ${text}`);
 }
 function utf8(value: string, what: string): string {
-  if (value.includes("\ufffd")) die(`the ${what} is not UTF-8`);
+  // A U+FFFD in a decoded argument is undecodable input only when the raw
+  // argv bytes prove it; on its own it is a legitimate character, as under
+  // the surrogateescape gate it replaces.
+  if (value.includes("\ufffd") && argvHasUndecodableBytes())
+    die(`the ${what} is not UTF-8`);
   return value;
 }
 function titleArg(value: string): string {
@@ -246,9 +251,13 @@ function locked<T>(store: string, action: () => T): T {
       try {
         const contents = readFileSync(lock, "utf8").trim();
         const pid = Number(contents);
-        if (contents && Number.isInteger(pid) && pid > 0 && !alive(pid))
+        if (contents && Number.isInteger(pid) && pid > 0) {
+          // A live owner keeps its lock whatever its age, as under flock;
+          // only a confirmed dead owner is reaped.
+          if (!alive(pid)) rmSync(lock, { force: true });
+        } else if (Date.now() - statSync(lock).mtimeMs > 60000) {
           rmSync(lock, { force: true });
-        else if (Date.now() - statSync(lock).mtimeMs > 60000) rmSync(lock, { force: true });
+        }
       } catch {
         /* A competing process may have released it. */
       }
@@ -614,6 +623,32 @@ async function selfTest(): Promise<number> {
           result.out,
         );
   };
+  const refusedRaw = (
+    label: string,
+    wanted: number,
+    text: string,
+    repo: string,
+    octal: string,
+    ...commandArgs: string[]
+  ) => {
+    // One argument carries bytes printf makes that are not UTF-8, in place of
+    // the marker. spawnSync encodes every argument as UTF-8, so a shell builds
+    // the bytes, as BASE's fixtures do.
+    const before = snapshot(trackerStore);
+    const line = [self, repo, ...commandArgs]
+      .map((a) =>
+        a === "<RAW-BYTES>" ? `"$(printf '${octal}')"` : `'${a.replace(/'/g, `'\\''`)}'`,
+      )
+      .join(" ");
+    const result = run("bash", ["-c", line]);
+    const got = { code: result.code, out: output(result) };
+    got.code === wanted && got.out.includes(text) && snapshot(trackerStore) === before
+      ? ok(label)
+      : fail(
+          `${label}: wanted exit ${wanted} with "${text}" and no file changed, got exit ${got.code}`,
+          got.out,
+        );
+  };
   const put = (path: string, text: string) => writeFileSync(path, text);
   try {
     const bodyPath = join(temp, "body.md");
@@ -904,6 +939,47 @@ async function selfTest(): Promise<number> {
           "ten creates at once get ten different numbers",
           `${ids.join(" ")}\n${childResults.map((c) => c.code).join(",")}`,
         );
+    const ufd = join(temp, "ufd");
+    if (!newRepo(ufd) || invoke(ufd, "store", "init").code !== 0)
+      throw new Error("could not make U+FFFD fixture");
+    check(
+      "a title with a literal U+FFFD is valid UTF-8",
+      lt(ufd, "create", "caf\ufffd", bodyPath),
+      0,
+      "1",
+    );
+    const livelock = join(temp, "livelock");
+    if (!newRepo(livelock) || invoke(livelock, "store", "init").code !== 0)
+      throw new Error("could not make live-lock fixture");
+    const liveLock = join(livelock, ".git", "postmaster", "tickets", ".lock");
+    writeFileSync(liveLock, `${process.pid}\n`);
+    const aged = new Date(Date.now() - 61000);
+    utimesSync(liveLock, aged, aged);
+    const waiter = Bun.spawn([self, livelock, "create", "Live holder keeps its lock", bodyPath], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    // Still waiting, not exited: a waiter that never ran would pass kept vacuously.
+    const status = await Promise.race([
+      waiter.exited.then((code) => code as number | "waiting"),
+      Promise.resolve("waiting" as const),
+    ]);
+    let kept = false;
+    try {
+      kept = readFileSync(liveLock, "utf8").trim() === String(process.pid);
+    } catch {
+      kept = false;
+    }
+    waiter.kill(9);
+    await waiter.exited;
+    rmSync(liveLock, { force: true });
+    kept && status === "waiting"
+      ? ok("a lock whose owner is alive is never reaped, whatever its age")
+      : fail(
+          "a lock whose owner is alive is never reaped, whatever its age",
+          `kept=${kept} waiter=${status}`,
+        );
 
     console.log("controls: what the caller's environment must not change");
     const mine = lt(repo, "store").out;
@@ -1038,24 +1114,26 @@ async function selfTest(): Promise<number> {
       "coachman",
       "hello",
     );
-    refused(
+    refusedRaw(
       "a comment that is not UTF-8 exits 1",
       1,
       "comment is not UTF-8",
       repo,
+      'na\\357ve',
       "comment",
       "1",
       "coachman",
-      "na\ufffdve",
+      "<RAW-BYTES>",
     );
-    refused(
+    refusedRaw(
       "an actor that is not UTF-8 exits 1",
       1,
       "actor is not UTF-8",
       repo,
+      'r\\351viewer',
       "comment",
       "1",
-      "r\ufffdviewer",
+      "<RAW-BYTES>",
       "hello",
     );
     refused(
@@ -1085,13 +1163,14 @@ async function selfTest(): Promise<number> {
       "Two\nlines",
       bodyPath,
     );
-    refused(
+    refusedRaw(
       "create with a title that is not UTF-8 exits 1",
       1,
       "title is not UTF-8",
       repo,
+      'caf\\351',
       "create",
-      "caf\ufffd",
+      "<RAW-BYTES>",
       bodyPath,
     );
     refused("title with an empty title exits 1", 1, "title is empty", repo, "title", "1", " ");
@@ -1104,14 +1183,15 @@ async function selfTest(): Promise<number> {
       "1",
       "Two\nlines",
     );
-    refused(
+    refusedRaw(
       "title that is not UTF-8 exits 1",
       1,
       "title is not UTF-8",
       repo,
+      '\\377',
       "title",
       "1",
-      "\ufffd",
+      "<RAW-BYTES>",
     );
     refused(
       "title on an unknown ticket exits 1",
