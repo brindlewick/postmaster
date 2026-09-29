@@ -294,10 +294,11 @@ one workhorse at a time.
 [Why design review happens before code](../../wiki/concepts/planning-stage.md)
 
 1. **Set the stage:** `<tool>/scripts/stage.sh <dispatch> planning`. Launch every workhorse as
-   a headless resumable thread, exactly as Stage 1 does, but its work is the spec alone: write
-   `WORKHORSE-SPEC.md` from the template, commit it on its own, and stop. No code, no summary.
-   Record every thread id as at a normal launch. While they draft, write the blind acceptance
-   tests as Stage 1 says — before you read any spec's content or any lane's diff.
+   a headless resumable thread, exactly as Stage 1 does and from the run's pin — `<tool>` is the
+   pinned checkout, and every launch passes `--run <dispatch>` — but its work is the spec alone:
+   write `WORKHORSE-SPEC.md` from the template, commit it on its own, and stop. No code, no
+   summary. Record every thread id as at a normal launch. While they draft, write the blind
+   acceptance tests as Stage 1 says — before you read any spec's content or any lane's diff.
 2. **Harvest the specs.** A workhorse that committed `WORKHORSE-SPEC.md` and exited is
    `planned`. `WORKHORSE-BLOCKED.md` is `blocked`, answered as Stage 1 says. Neither is died
    mid-flight: remount or re-dispatch. Log `harvest` per workhorse with its exit shape.
@@ -314,7 +315,8 @@ one workhorse at a time.
    one workhorse at a time. The file holds this package's decisions only; earlier packages
    stay in the `spec-review` log lines. The user's words are the only feedback a workhorse
    gets, and only its own:
-   - **changes:** resume that workhorse alone, its own thread, with the user's words as the
+   - **changes:** resume that workhorse alone, its own thread, through Stage 1's resume
+     form from the run's pin (`--run <dispatch>`), with the user's words as the
      prompt. It revises `WORKHORSE-SPEC.md` from those words, commits the revision (a new
      commit; the first spec commit is never rewritten), and stops again. Never put another
      workhorse's spec, decision or feedback in this prompt. When every revision is in, harvest
@@ -328,7 +330,8 @@ one workhorse at a time.
      which spec was agreed; the `spec-review` line in the log carries it too.
 5. **Implementation needs two approved specs.** When no revision is outstanding: if at least
    two workhorses are approved, go on to Stage 1 and resume each approved workhorse to
-   implement from its approved spec. Otherwise the run stops and says why — fewer than two
+   implement from its approved spec, through the pinned resume form as step 4 does.
+   Otherwise the run stops and says why — fewer than two
    approved specs — in `run-log.md` and in an escalation carrying the count, and the user
    alone abandons it. Never implement from a spec the user has not approved, and never drop
    the bar to keep going.

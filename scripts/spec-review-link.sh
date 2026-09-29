@@ -81,10 +81,10 @@ case ${1:-} in
 esac
 
 tmp=$(mktemp -d) || exit 1
-d="$tmp/project/RUN-1"; w="$tmp/project/.worktrees/RUN-1-lane"
+d="$tmp/project/.postmaster/runs/RUN-1"; w="$tmp/project/.worktrees/RUN-1-lane"
 cleanup() {
   rm -f -- "$d/run.json" "$w/WORKHORSE-SPEC.md" "$tmp/err"
-  rmdir "$d" "$w" "$tmp/project/.worktrees" "$tmp/project" "$tmp" 2>/dev/null || :
+  rmdir "$d" "$w" "$tmp/project/.postmaster/runs" "$tmp/project/.postmaster" "$tmp/project/.worktrees" "$tmp/project" "$tmp" 2>/dev/null || :
 }
 trap cleanup EXIT
 mkdir -p "$d" "$w"
