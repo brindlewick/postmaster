@@ -1,0 +1,24 @@
+Muse Code updated itself to 1.4.1 (R4380.1) at 03:42 UTC on 2026-09-29, after the trials above.
+The same mock cases, run again on 1.4.1 with apparatus/mockpair.sh, and two launches through
+scripts/launch.sh with the live config once the coachman and fallback had env_file set to a file
+holding TBH_STREAM_IDLE_TIMEOUT_SECS=900.
+
+=== v8: summaries at 10 s and 20 s, then silent to 60 s; env TBH_STREAM_IDLE_TIMEOUT_SECS=5; product_version 1.4.1
+exit 1 after 16.4 s
+  muse run.terminal: failed, reason model stream idle timeout after 5000ms, text ''
+  muse attempt 1: terminal timed_out idle_timeout, after 15.045 s; next attempt 0
+
+=== v7: summaries at 10 s and 20 s, then silent to 230 s; env none; product_version 1.4.1
+exit 1 after 201.5 s
+  muse run.terminal: failed, reason model stream idle timeout after 180000ms, text ''
+  muse attempt 1: terminal timed_out idle_timeout, after 200.062 s; next attempt 0
+
+=== v6: summaries at 10 s and 20 s, then silent to 230 s; env TBH_STREAM_IDLE_TIMEOUT_SECS=900; product_version 1.4.1
+exit 0 after 231.7 s
+  muse run.terminal: completed, reason None, text 'OK'
+  muse attempt 1: terminal completed none, after 230.158 s; next attempt 0
+
+=== launches through scripts/launch.sh with the live config, POSTMASTER_HARNESS_DATA a scratch folder
+prompt "Say OK and nothing else."; the muse process found by its executable and working directory
+  coachman --leg synthesis: executable muse-bin-1.4.1-R4380.1, environment TBH_STREAM_IDLE_TIMEOUT_SECS=900, exit 0, final 'OK'
+  coachman_fallback: executable muse-bin-1.4.1-R4380.1, environment TBH_STREAM_IDLE_TIMEOUT_SECS=900, exit 0, final 'OK'

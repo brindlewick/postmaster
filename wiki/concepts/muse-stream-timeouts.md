@@ -16,8 +16,8 @@ after 180000ms", and the leg that made it ends with no hand-off. The limit is an
 variable Muse Code does not document, `TBH_STREAM_IDLE_TIMEOUT_SECS`. A lower reasoning effort
 does not avoid the failure on a problem that needs long reasoning.
 
-**Standing: settled**, for Muse Code 1.4.0-R4302.1 on `muse-spark-1.3-contributor`. The failure
-was reproduced on the real API. Each part was then tested against a mock of the API, including
+**Standing: settled**, for Muse Code 1.4.0-R4302.1 on `muse-spark-1.3-contributor`, and rechecked
+on 1.4.1-R4380.1. The failure was reproduced on the real API. Each part was then tested against a mock of the API, including
 the settings that could have shown otherwise [@trials/muse-stream-timeouts].
 
 ## The three legs
@@ -97,9 +97,10 @@ fallback is the same harness and model, so it fails the same way.
 
 ## What changed because of it
 
-`skills/postmaster/harnesses.md` records the timeouts, the retries and the variables. Setting
-`TBH_STREAM_IDLE_TIMEOUT_SECS` for the coachman is a change to the config, which is the user's
-to make, and is proposed on issue #127.
+`skills/postmaster/harnesses.md` records the timeouts, the retries and the variables. On
+2026-09-29, on the user's word, the coachman and its fallback were given an `env_file` that sets
+`TBH_STREAM_IDLE_TIMEOUT_SECS=900` (issue #127). It reaches runs dispatched after the change; a run
+launches from the config it recorded at dispatch.
 
 ## What would overturn it
 

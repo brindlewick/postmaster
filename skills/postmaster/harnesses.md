@@ -282,7 +282,7 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json \
   holds a trace log with UTC times for every model attempt.
 - Source: trials of Muse Code 1.4.0 (R4302.1), `raw/trials/muse-headless-forms/`, for the
   prompt and resumes, `raw/trials/muse-mimo-controls/`, and for timeouts and retries,
-  `raw/trials/muse-stream-timeouts/`.
+  `raw/trials/muse-stream-timeouts/`, rechecked on 1.4.1 (R4380.1).
 
 ## mimo (MiMo Code)
 

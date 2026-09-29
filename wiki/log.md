@@ -18,6 +18,8 @@ variable sets the limit, and a lower effort does not avoid the failure. The tria
 `raw/trials/muse-stream-timeouts/`, records the fleet's own trace logs for the three calls, real
 launches, and a loopback mock of the API. `harnesses.md` now records the timeouts and retries,
 and that a response cut off at the output limit ends the run as completed with no text.
+Rechecked on 1.4.1 the same day, after Muse Code updated itself; the coachman and its fallback
+now set the variable to 900 through their `env_file`.
 
 ## [2026-09-27] ingest | how the style sort is checked and put to the user
 

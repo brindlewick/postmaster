@@ -107,9 +107,15 @@ than 140 s, the wire events level off at about 50.
 **Through `launch.sh`** (`through-launch.txt`). The variable was in the Muse Code process's
 environment, and the launch answered.
 
+**Recheck on 1.4.1** (`recheck-1.4.1.txt`). Muse Code updated itself to 1.4.1 (R4380.1) at 03:42 UTC,
+after the trials. On 1.4.1 the variable at 5 failed after 5 s, the default failed after 180 s
+unretried, and the variable at 900 let a 210 s silence complete. Two launches through `launch.sh`
+with the live config, once the coachman and its fallback had the `env_file`, ran 1.4.1 with
+`TBH_STREAM_IDLE_TIMEOUT_SECS=900` in the process's environment, and answered.
+
 # What it settles
 
-Facts about Muse Code 1.4.0-R4302.1 with the Meta API on `muse-spark-1.3-contributor`. Once a
+Facts about Muse Code 1.4.0-R4302.1, rechecked on 1.4.1-R4380.1, with the Meta API on `muse-spark-1.3-contributor`. Once a
 call has streamed a reasoning summary or output, Muse Code ends it after 180 s without an event
 and does not retry it. The limit is `TBH_STREAM_IDLE_TIMEOUT_SECS`, and a role's `env_file` sets
 it through `launch.sh`. The API sends at most ten reasoning summaries per response, so a model

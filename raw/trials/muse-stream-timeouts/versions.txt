@@ -3,3 +3,4 @@ binary: muse-bin-1.4.0-R4302.1, 355154136 bytes, sha256 ad21c22965f8600b4473b4ab
 release channel file: muse-stable 1.4.0-R4302.1 urgency none
 model: muse-spark-1.3-contributor, provider meta
 trials run: 2026-09-29, 01:25 to 02:07 UTC, on a machine with 18 cores at a load of about 27
+recheck: Muse Code 1.4.1 (1.4.1-R4380.1), installed by its own updater at 03:42 UTC on 2026-09-29

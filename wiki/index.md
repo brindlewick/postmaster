@@ -35,7 +35,7 @@ How each agent CLI really behaves, as distinct from what its documentation says.
   **settled**, for pi, Muse Code and MiMo Code. Resuming a thread it cannot find, a harness can
   exit 0 having done nothing, or having started a new thread.
 - [Muse Code ends a model call that streams nothing for 180 seconds](concepts/muse-stream-timeouts.md):
-  **settled**, for Muse Code 1.4.0. The Meta API streams at most ten reasoning summaries per
+  **settled**, for Muse Code 1.4.0 and 1.4.1. The Meta API streams at most ten reasoning summaries per
   response, so a long reasoning call goes quiet and fails, unretried, at any effort. An
   undocumented variable sets the limit.
 
