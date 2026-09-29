@@ -372,6 +372,7 @@ def run(wt, dispatch):
     for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(s, stop)
     env = dict(os.environ, POSTMASTER_VERIFY=str(spec))
+    env.pop("POSTMASTER_LAUNCH_NAME", None)   # host.sh run names this runner's launch, not the checks it runs
     results, unlogged, spoiled = [], [], None
     for c in checks:
         log = logs / (c["name"] + ".log")
@@ -805,6 +806,12 @@ f="$r/.postmaster/runs/T-3"; mkdir -p "$f"; printf '## Ticket\nx\n' > "$f/brief.
 s="$q/.postmaster/runs/T-4"; mkdir -p "$s"
 "$SELF" arm "$q" "$s" >/dev/null 2>&1; rc=$?
 [ $rc -eq 1 ] && ok "a run that recorded no checks cannot arm a worktree" || fail "a run that recorded no checks cannot arm a worktree (exit $rc)"
+
+echo "a check sees what it would from a terminal"
+np="$tmp/named"; mkdir -p "$np/.postmaster"; printf '[checks.gate]\ncommand = "! printenv POSTMASTER_LAUNCH_NAME"\nshows = "x"\n' > "$np/.postmaster/project.toml"; repo "$np"
+nd="$tmp/runs/named/T-11"; mkdir -p "$nd"; printf '## Ticket\nx\n' > "$nd/brief.md"; "$SELF" record "$np" "$nd" >/dev/null
+POSTMASTER_LAUNCH_NAME="#11, a run" "$SELF" run "$np" "$nd" >/dev/null 2>&1; rc=$?
+[ $rc -eq 0 ] && ok "a run started by host.sh run keeps its launch's name from its checks" || fail "a run started by host.sh run keeps its launch's name from its checks (exit $rc)"
 
 echo "a result belongs to a commit"
 printf 'new\n' > "$q/new.txt"

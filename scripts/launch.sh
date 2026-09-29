@@ -54,6 +54,7 @@ if [ "${1:-}" = --self-test ]; then
   # Each control runs this script on a fixture config, with stub harnesses first on PATH.
   # `form` only prints, so nothing is launched. A run's record is written from a fixture by
   # run-meta.sh, as at dispatch, so what this script reads is what that one writes.
+  unset POSTMASTER_LAUNCH_NAME   # a gate run through host.sh run inherits one; a control that needs one sets its own
   self=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)/$(basename -- "$0")
   here=$(dirname "$self")
   tmp=$(mktemp -d) || exit 1
