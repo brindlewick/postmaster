@@ -88,15 +88,8 @@ function parseTable(table: string): { rows: Row[]; faults: string[] } {
 
 function wordsOf(text: string): string[] {
   const words: string[] = [];
-  // remove Cf (format) characters
-  const cleaned = [...text]
-    .filter((ch) => {
-      const _cp = ch.codePointAt(0) ?? 0;
-      // Cf category approx: ZWSP U+200B, ZWNJ U+200C, ZWJ U+200D, LRM U+200E, RLM U+200F, etc.
-      // We'll use a simpler check for common ones plus a regex
-      return !/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/.test(ch);
-    })
-    .join("");
+  // remove Cf (format) characters, the whole category as unicodedata does
+  const cleaned = [...text].filter((ch) => !/\p{Cf}/u.test(ch)).join("");
   for (const rawLine of cleaned.split("\n")) {
     let line = rawLine.replace(/\r$/, "").replace(/\\+$/, "");
     if (BREAK.test(line)) continue;
@@ -369,6 +362,20 @@ withTempDir((tmp) => {
     ];
     st.check("the three run in the review leg", legs.length === 1 && legs[0] === "review", out);
   }
+  {
+    const descs = out
+      .split("\n")
+      .filter((l) => /^(style|bug|security)$/.test(l.split(/\s+/)[0] ?? ""))
+      .map((l) => l.split(/\s+/).slice(3).join(" "));
+    st.check(
+      "each line carries its full description, not its first word",
+      descs.length === 3 &&
+        (descs[0] ?? "").startsWith("idiom, naming, abstraction") &&
+        (descs[1] ?? "").startsWith("correctness, logic,") &&
+        (descs[2] ?? "").startsWith("exploit paths through"),
+      out,
+    );
+  }
 
   console.log("positive controls: a ticket's section");
   runSelf("resolve", "default");
@@ -391,6 +398,12 @@ withTempDir((tmp) => {
   is("a hard line break is not part of a name", 0, "turnpikes: bug, security");
   runSelf("resolve", "default\u200B");
   is("an invisible character is not part of a name", 0, "turnpikes: style, bug, security");
+  runSelf("resolve", "defau\u2066lt\u00AD");
+  is(
+    "an isolate or soft hyphen is not part of a name either",
+    0,
+    "turnpikes: style, bug, security",
+  );
   {
     const r = run("bash", ["-c", `printf '1. bug\\n2. security\\n' | "${self}" resolve`]);
     out = (r.out + r.err).replace(/\n+$/, "");
