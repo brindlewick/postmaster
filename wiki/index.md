@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-27
+updated: 2026-09-29
 ---
 
 # postmaster wiki
@@ -34,6 +34,9 @@ How each agent CLI really behaves, as distinct from what its documentation says.
 - [A resume's exit status does not say it continued its thread](concepts/resume-exit-status.md):
   **settled**, for pi, Muse Code and MiMo Code. Resuming a thread it cannot find, a harness can
   exit 0 having done nothing, or having started a new thread.
+- [A headless MiMo Code lane's CPU goes to its Bun's garbage collector while a reply streams](concepts/mimo-cpu.md):
+  **settled**, for MiMo Code 0.1.15. Its Bun, 1.3.14, collects on nearly every tick of a stream;
+  the same code on Bun 1.4.2 uses a quarter to a third as much.
 
 ## Trackers and tooling
 

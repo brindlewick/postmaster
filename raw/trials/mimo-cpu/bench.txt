@@ -1,0 +1,11 @@
+## fetch reading 20 events a second for 20 s, 150 bytes each, at once on each runtime
+{"runtime":"bun 1.4.2","retained_mb":0,"chunks":400,"cpu_pct":1,"ms_per_chunk":0.52,"faults_per_chunk":1,"backing_buffer_bytes":{"150":400},"kept":0}
+{"runtime":"bun 1.3.14","retained_mb":0,"chunks":400,"cpu_pct":11.1,"ms_per_chunk":5.57,"faults_per_chunk":64,"backing_buffer_bytes":{"150":1,"262144":399},"kept":0}
+{"runtime":"node v24.21.0","retained_mb":0,"chunks":400,"cpu_pct":2.4,"ms_per_chunk":1.2,"faults_per_chunk":18,"backing_buffer_bytes":{"150":400},"kept":0}
+## the same with 250 MB of objects retained, eden collections counted (BUN_JSC_logGC=1)
+{"runtime":"bun 1.3.14","retained_mb":250,"chunks":397,"cpu_pct":22.6,"ms_per_chunk":11.39,"faults_per_chunk":63,"backing_buffer_bytes":{"150":1,"262144":396},"kept":4096000} eden_collections=903
+{"runtime":"bun 1.4.2","retained_mb":250,"chunks":393,"cpu_pct":10.4,"ms_per_chunk":5.28,"faults_per_chunk":42,"backing_buffer_bytes":{"150":388,"300":4,"600":1},"kept":4096000} eden_collections=18
+## Bun's cadence workload (test/js/bun/gc/gc-controller-cadence.test.ts): 100 small objects every 20 ms, 150 times
+bun 1.3.14: 132 eden collections
+bun 1.3.14 with BUN_GC_TIMER_DISABLE=1: 136 eden collections
+bun 1.4.2: 4 eden collections

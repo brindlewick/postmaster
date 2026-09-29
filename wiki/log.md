@@ -1,12 +1,20 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-27
+updated: 2026-09-29
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-29] ingest | where a headless mimo lane's CPU goes
+
+The trial of issue #115, `raw/trials/mimo-cpu/`, gives a new page, mimo-cpu, at **settled** for
+MiMo Code 0.1.15. While a reply streams, its Bun, 1.3.14, runs an eden collection on nearly every
+event-loop tick: 40 to 50% of a core, against 12 to 19% for the same modules on Bun 1.4.2 and 13%
+for codex. Bun fixed the cadence in 1.4.0. The page records the upstream report and the stopgap
+trialled, which the flow does not use.
 
 ## [2026-09-27] ingest | how the style sort is checked and put to the user
 
