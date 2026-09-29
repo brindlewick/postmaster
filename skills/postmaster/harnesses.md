@@ -248,7 +248,9 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json \
 - The model: `run.model.configured` carries `model_id`, with `source` `startup` on a launch and
   `replay` on a resume. No record carries the effort.
 - Tool calls: each ends in a `tool.result`, whose `correlation_facts` name the tool and its
-  outcome.
+  outcome. For `bash`, `payload.text` is JSON text with the command and its output; the pane
+  shows the command and leaves the output out. The full response is in `payload.text` on the
+  last `run.terminal.*` record.
 - **Its data, per lane and per leg.** Muse Code keeps its sessions under `XDG_DATA_HOME`, and a
   memory that outlives them (`add_memory`, `read_memory`): a fresh session there recalled a word
   an earlier one had been asked to remember. So `launch.sh` gives each lane and each coachman leg
@@ -370,11 +372,62 @@ whether to trust it; headless `claude -p` does not ask. The first spawn in a new
 there, and the user answers it in the pane. A row not checked here takes its bypass flag from
 the headless form above; run it once before relying on it.
 
+## Keeping the watcher running
+
+Stage D keeps one `<tool>/scripts/runs-watch.sh <runs>` going per project, acts on the runs it
+names, and starts it again at once. The watcher is a long wait that must outlive a turn and must
+not hold the conversation, so it is started the way any launch is, through
+`<tool>/scripts/host.sh run`, which returns as soon as the watcher has started and keeps it in a
+session of its own: a host's pane where there is one, a detached process where there is none
+(`hosts.md`).
+
+```sh
+<tool>/scripts/host.sh run "watch · <project>" "<repo>" \
+    --out "<runs>/postmaster/watch.out" --err "<runs>/postmaster/watch.err" \
+    --marker "<runs>/postmaster/.watch-exited" \
+    -- "<tool>/scripts/runs-watch.sh" "<runs>"
+```
+
+Wait for its return in the conversation with `<tool>/scripts/wait-for-markers.sh`:
+
+```sh
+<tool>/scripts/wait-for-markers.sh "<runs>/postmaster" '.watch-exited' 1 86400
+```
+
+Exit 0 means the watcher returned: read `watch.out`. Exit 3 means nothing returned in a
+day: wait again. If the wait itself is cut short by the harness, run it again: a marker
+already landed is collected at once.
+
+When `.watch-exited` lands, `watch.out` holds the table and the `needs` lines: act on them,
+then start the watcher again before anything else. Check `watch.err` too: a held line that
+matches no run warns there. The marker lands whatever the exit, so no `needs` lines means
+the watcher failed instead of waking: the reason is in `watch.err` — read it, fix the
+cause, and only then start the watcher again. If `watch.err` is empty too, the watcher was
+killed rather than exiting: start the watcher again.
+
+| harness | nonblocking form | where the session cannot keep it in the background |
+|---|---|---|
+| claude | the `host.sh run` form above; never its own background tasks, which are reaped at about 29 minutes (its section above) | the foreground poll below |
+| codex | the `host.sh run` form above | the foreground poll below |
+| grok | the `host.sh run` form above | the foreground poll below |
+| agy | the `host.sh run` form above | the foreground poll below |
+| pi | the `host.sh run` form above | the foreground poll below |
+| muse | the `host.sh run` form above | the foreground poll below |
+| mimo | the `host.sh run` form above | the foreground poll below |
+
+The foreground poll is `<tool>/scripts/runs-watch.sh <runs> --timeout <postmaster.poll_seconds>`,
+run in the conversation and started again at once: it returns with the table every interval. It
+is the only form that blocks the conversation, and only for one interval. Never keep the
+watcher anywhere but `host.sh run`: no other keeping has a documented lifetime, and on
+2026-09-28 a watcher kept outside it was killed when memory ran short (#121).
+
 ## The pane view
 
 `<tool>/scripts/view-stream.sh` is the other executable half of this file: it renders an events
-stream one line per event of interest, for a host's pane (`hosts.md`) and for anyone reading a
-stream by hand. It knows claude's, muse's and mimo's events, checked against recorded streams; codex's
+stream as wrapped blocks for a host's pane (`hosts.md`) and for anyone reading a stream by hand.
+What an agent says and what it runs shows in full, every line, wrapped to the pane and never cut
+short; tool output stays out. It knows claude's, muse's and mimo's events, checked against recorded
+streams; codex's
 and pi's, written from the event names this file records and not yet checked against a recorded
 stream;
 any other harness shows by event type, once per run of the same type. A harness whose events it

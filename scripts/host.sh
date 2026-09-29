@@ -11,7 +11,8 @@
 #   host.sh name <dispatch> review <lane> <lens> <round>
 #   host.sh name <dispatch> postmaster
 #   host.sh name <dispatch> role <text...>                          any other launch, by its role alone
-#   host.sh run <name> <cwd> [--under <dispatch>] [--out <file>] [--err <file>] [--append] [--marker <file>]
+#   host.sh run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>]
+#               [--out <file>] [--err <file>] [--append] [--marker <file>]
 #               [--pidfile <file>] -- <command...>
 #   host.sh stop <worktree>               stop every launch still running in a worktree, and
 #                                         everything each one started
@@ -43,7 +44,9 @@
 # so the ticket title labels only the run space and never passes through a shell. A pane shows
 # the stream through view-stream.sh. A launch carries its own pane's
 # identity (HERDR_PANE_ID and the like, or TMUX_PANE), never its caller's. If the host cannot
-# place it, it runs in the background. While it runs it is registered under
+# place it, it runs in the background. On Linux with a working systemd user manager, the command
+# and its descendants run in a transient scope with MemoryMax, MemorySwapMax=0 and TasksMax;
+# otherwise it runs uncapped and records that in --err. While it runs it is registered under
 # POSTMASTER_HOST_STATE (default ~/.postmaster/host), whatever its host, so stop and close see it.
 # The record names its group leader by start time and boot, so a pid another process reuses,
 # after a reboot or within one, is never taken for the launch.
@@ -691,13 +694,16 @@ print("\t".join([s.get("source_workspace_id") or "-", s.get("repo_root") or "-",
 # NUL-separated, and for a pane the caller's environment through a FIFO, so it is never written
 # to disk or put on any command line. Whoever creates <spec>/claimed first runs it; the runner
 # removes the spec once it has read it.
-SPEC_FIELDS="name cwd rundir state out err marker pidfile append"
-write_spec() {  # write_spec <spec> <name> <cwd> <out> <err> <marker> <pidfile> <append> <argv...>
+SPEC_FIELDS="name cwd rundir state out err marker pidfile append role memory tasks capmode systemd_run systemctl setsid unit"
+write_spec() {  # write_spec <spec> <name> <cwd> <out> <err> <marker> <pidfile> <append> <role> <memory> <tasks> <capmode> <systemd-run> <systemctl> <setsid> <unit> <argv...>
   local s=$1; shift
   printf '%s' "$1" > "$s/name"; printf '%s' "$2" > "$s/cwd"; printf '%s' "$PWD" > "$s/rundir"
   printf '%s' "$STATE" > "$s/state"; printf '%s' "$3" > "$s/out"; printf '%s' "$4" > "$s/err"
   printf '%s' "$5" > "$s/marker"; printf '%s' "$6" > "$s/pidfile"; printf '%s' "$7" > "$s/append"
-  shift 7
+  printf '%s' "$8" > "$s/role"; printf '%s' "$9" > "$s/memory"; printf '%s' "${10}" > "$s/tasks"
+  printf '%s' "${11}" > "$s/capmode"; printf '%s' "${12}" > "$s/systemd_run"; printf '%s' "${13}" > "$s/systemctl"
+  printf '%s' "${14}" > "$s/setsid"; printf '%s' "${15}" > "$s/unit"
+  shift 15
   printf '%s\0' "$@" > "$s/argv"
 }
 drop_spec() {  # drop_spec <spec>: its files, then the directory
@@ -754,11 +760,11 @@ with os.fdopen(3, "rb") as f:
     for kv in f.read().split(b"\0"):
         k, eq, v = kv.partition(b"=")
         if eq: env[k] = v
-os.setsid()
+if sys.argv[1] != "capped": os.setsid()
 try:
-    os.execvpe(sys.argv[1], sys.argv[1:], env)
+    os.execvpe(sys.argv[2], sys.argv[2:], env)
 except OSError as e:
-    sys.stderr.write("host: cannot run %s: %s\n" % (sys.argv[1], e.strerror)); os._exit(127)'
+    sys.stderr.write("host: cannot run %s: %s\n" % (sys.argv[2], e.strerror)); os._exit(127)'
 
 watch_exit() {  # watch_exit <pid> <marker>: touch the marker once <pid> is gone, from outside the
   # pane, so it lands even when the pane is closed and takes its runner with it
@@ -791,6 +797,168 @@ herdr_report() {  # herdr_report <pid> <name>: the pane's launch working while <
     --token postmaster=launch --token state=done --token pgid="$cpid" >/dev/null 2>&1
 }
 
+# --- per-launch limits --------------------------------------------------------------------
+launch_limits() {  # launch_limits <role> <dispatch-or-empty> <live-config>: memory and task caps
+  python3 - "$1" "$2" "$3" <<'PY'
+import json, os, re, sys, tomllib
+
+role, dispatch, config_path = sys.argv[1:]
+memory_default, tasks_default = "8G", 512
+try:
+    if dispatch:
+        with open(os.path.join(dispatch, "run.json"), encoding="utf-8") as f:
+            top = json.load(f)
+        if not isinstance(top, dict):
+            print("host: run.json must hold an object", file=sys.stderr); sys.exit(1)
+        config = top.get("config", {})
+    elif os.path.isfile(config_path):
+        with open(config_path, "rb") as f:
+            config = tomllib.load(f)
+    else:
+        config = {}
+except (OSError, json.JSONDecodeError, tomllib.TOMLDecodeError) as e:
+    print("host: cannot read launch limits: %s" % type(e).__name__, file=sys.stderr)
+    sys.exit(1)
+
+if not isinstance(config, dict):
+    print("host: config must be a table", file=sys.stderr); sys.exit(1)
+limits = config.get("limits", {})
+if not isinstance(limits, dict):
+    print("host: limits must be a table", file=sys.stderr); sys.exit(1)
+role_limits = limits.get(role, {}) if role != "default" else {}
+if not isinstance(role_limits, dict):
+    print("host: limits.%s must be a table" % role, file=sys.stderr); sys.exit(1)
+memory = role_limits.get("memory_max", limits.get("memory_max", memory_default))
+tasks = role_limits.get("tasks_max", limits.get("tasks_max", tasks_default))
+if not isinstance(memory, str) or not re.fullmatch(r"[1-9][0-9]*(?:K|M|G|T)", memory):
+    print("host: memory_max must be a positive whole number followed by K, M, G or T", file=sys.stderr)
+    sys.exit(1)
+if isinstance(tasks, bool) or not isinstance(tasks, int) or not 1 <= tasks <= 2147483647:
+    print("host: tasks_max must be a whole number from 1 to 2147483647", file=sys.stderr)
+    sys.exit(1)
+print("%s\t%d" % (memory, tasks))
+PY
+}
+
+systemd_capability() {  # print the verified systemd-run, systemctl and setsid paths, or nothing
+  local runbin ctlbin sidbin sleepbin unit probe cg mem swap tasks oom i verified=0
+  [ "$(uname -s 2>/dev/null)" = Linux ] || return 1
+  runbin=$(command -v systemd-run) || return 1
+  ctlbin=$(command -v systemctl) || return 1
+  sidbin=$(command -v setsid) || return 1
+  sleepbin=$(command -v sleep) || return 1
+  [ -r /sys/fs/cgroup/cgroup.controllers ] || return 1
+  grep -qw memory /sys/fs/cgroup/cgroup.controllers || return 1
+  grep -qw pids /sys/fs/cgroup/cgroup.controllers || return 1
+  limit 2 "$ctlbin" --user show-environment >/dev/null 2>&1 || return 1
+  unit="postmaster-cap-probe-${BASHPID:-$$}-${RANDOM}.scope"
+  limit 2 "$runbin" --user --scope --quiet --unit="$unit" \
+    --property=MemoryMax=128M --property=MemorySwapMax=0 --property=TasksMax=32 --property=OOMPolicy=kill \
+    -- "$sleepbin" 0.35 >/dev/null 2>&1 &
+  probe=$!
+  for i in {1..30}; do
+    cg=$(limit 1 "$ctlbin" --user show "$unit" --property=ControlGroup --value 2>/dev/null) || cg=""
+    case $cg in /*) ;; *) cg="" ;; esac
+    if [ -n "$cg" ] && [ -r "/sys/fs/cgroup$cg/memory.max" ] && [ -r "/sys/fs/cgroup$cg/pids.max" ]; then
+      mem=$(cat "/sys/fs/cgroup$cg/memory.max" 2>/dev/null)
+      swap=$(cat "/sys/fs/cgroup$cg/memory.swap.max" 2>/dev/null)
+      tasks=$(cat "/sys/fs/cgroup$cg/pids.max" 2>/dev/null)
+      oom=$(cat "/sys/fs/cgroup$cg/memory.oom.group" 2>/dev/null)
+      [ "$mem" = 134217728 ] && [ "$swap" = 0 ] && [ "$tasks" = 32 ] && [ "$oom" = 1 ] && verified=1
+      break
+    fi
+    kill -0 "$probe" 2>/dev/null || break
+    sleep 0.025
+  done
+  wait "$probe" >/dev/null 2>&1 || return 1
+  [ "$verified" -eq 1 ] || return 1
+  printf '%s\t%s\t%s\n' "$runbin" "$ctlbin" "$sidbin"
+}
+
+watch_cap_events() {  # watch_cap_events <systemctl> <unit> <event-file> <runner-pid>
+  python3 - "$1" "$2" "$3" "$4" <<'PY'
+import os, select, subprocess, sys, time
+
+systemctl, unit, event_file, runner = sys.argv[1:]
+def alive(pid):
+    try: os.kill(int(pid), 0); return True
+    except (ProcessLookupError, ValueError): return False
+def show(prop):
+    try:
+        p = subprocess.run([systemctl, "--user", "show", unit, "--property=" + prop, "--value"],
+                           capture_output=True, text=True, timeout=0.4)
+        return p.stdout.strip() if p.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+def events(path):
+    try:
+        return dict((k, int(v)) for k, v in (line.split() for line in open(path)))
+    except (OSError, ValueError):
+        return {}
+def note(kind):
+    with open(event_file, "w", encoding="ascii") as f:
+        f.write(kind + "\n")
+    try:
+        subprocess.run([systemctl, "--user", "kill", "--kill-whom=all", "--signal=SIGKILL", unit],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+deadline = time.monotonic() + 5
+cgroup = ""
+while time.monotonic() < deadline and alive(runner):
+    cgroup = show("ControlGroup")
+    if cgroup.startswith("/") and ".." not in cgroup.split("/"):
+        break
+    time.sleep(0.025)
+if not cgroup.startswith("/") or ".." in cgroup.split("/"):
+    sys.exit(0)
+# POSTMASTER_CGROUP_ROOT points the watcher at a fixture tree for tests; unset,
+# it reads the live controllers. Only the launch environment sets it, which a
+# lane cannot reach back into, so a launch cannot blind its own watcher.
+cgroot = os.environ.get("POSTMASTER_CGROUP_ROOT") or "/sys/fs/cgroup"
+root = cgroot + cgroup
+pids_path = os.path.join(root, "pids.events")
+mem_path = os.path.join(root, "memory.events")
+def tripped():
+    if events(pids_path).get("max", 0): return "process"
+    # Memory trips on this cgroup's OOM decision, not on pressure and not on any
+    # victim here: `max` fires hundreds of times while reclaim succeeds (a healthy
+    # cache-heavy launch brushing the cap), and `oom_kill` counts victims of any
+    # OOM killer including a host-wide one, which would blame MemoryMax for the
+    # machine running out. `oom` fires exactly when this cgroup's usage reached
+    # its limit and allocation was about to fail. A refused fork has no reclaim
+    # analogue, so the process cap keeps `max`.
+    mem = events(mem_path)
+    if mem.get("oom", 0): return "memory"
+    return ""
+# The events files wake a poller when their counters change, so the watch
+# blocks in the kernel instead of waking on a timer: a trip is read within
+# milliseconds however long the launch runs, and a launch that exits right
+# after its trip is still caught while its cgroup outlives it. The first read
+# is the baseline and arms the poll; every wake re-reads, since a wake
+# promises only change, not a trip; the timeout re-reads too, for a trip that
+# lands between the baseline and the registration.
+kind = tripped()
+po = select.poll()
+try:
+    pfd = open(pids_path); mfd = open(mem_path)
+    po.register(pfd, select.POLLPRI | select.POLLERR)
+    po.register(mfd, select.POLLPRI | select.POLLERR)
+    armed = True
+except OSError:
+    armed = False
+while not kind and os.path.isdir(root) and alive(runner):
+    if armed: po.poll(100)
+    else: time.sleep(0.1)
+    kind = tripped()
+if not kind:
+    kind = tripped()
+if kind:
+    note(kind)
+PY
+}
+
 # --- run ----------------------------------------------------------------------------------
 FAIL_ERR="" FAIL_MARKER=""
 launch_failed() {  # launch_failed <reason>: what a backgrounded launch left when nothing ran, the
@@ -802,13 +970,16 @@ launch_failed() {  # launch_failed <reason>: what a backgrounded launch left whe
 
 run_cmd() {
   local name=${1:-} cwd=${2:-} under="" out="" err="" marker="" pidfile="" append=0 bad=""
+  local role=default dispatch="" memory tasks cap_mode=uncapped systemd_run="" systemctl="" setsid="" unit="" caps="" paths=""
   [ $# -ge 2 ] && shift 2 || set --
   while [ $# -gt 0 ]; do
     case $1 in
-      --under|--out|--err|--marker|--pidfile)
+      --under|--role|--run|--out|--err|--marker|--pidfile)
         [ $# -ge 2 ] || { bad="$1 needs a value"; break; }
         case $1 in
           --under) under=$2 ;;
+          --role) role=$2 ;;
+          --run) dispatch=$2 ;;
           --out) out=$2 ;;
           --err) err=$2 ;;
           --marker) marker=$2 ;;
@@ -822,12 +993,23 @@ run_cmd() {
     shift
   done
   abs() { case $1 in ""|/*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac; }
-  out=$(abs "$out"); err=$(abs "$err"); marker=$(abs "$marker"); pidfile=$(abs "$pidfile")
+  out=$(abs "$out"); err=$(abs "$err"); marker=$(abs "$marker"); pidfile=$(abs "$pidfile"); dispatch=$(abs "$dispatch")
   FAIL_ERR=$err FAIL_MARKER=$marker
   [ -z "$bad" ] || launch_failed "$bad"
   [ -n "$name" ] && [ -n "$cwd" ] || launch_failed "usage: host.sh run <name> <cwd> [options] -- <command...>"
   [ $# -gt 0 ] || launch_failed "run needs a command after --"
   [ -d "$cwd" ] || launch_failed "no such directory: $cwd"
+  case $role in default|lane|coachman|reviewer) ;; *) launch_failed "unknown launch role: $role" ;; esac
+  caps=$(launch_limits "$role" "$dispatch" "${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}" 2>&1) \
+    || launch_failed "could not resolve launch limits: ${caps#host: }"
+  IFS=$'\t' read -r memory tasks <<< "$caps"
+  paths=$(systemd_capability) && {
+    IFS=$'\t' read -r systemd_run systemctl setsid <<< "$paths"
+    cap_mode=systemd
+  } || {
+    warn "launch '$name' running uncapped: per-launch cgroup limits are unavailable"
+  }
+  [ "$cap_mode" != systemd ] || unit="postmaster-host-$$-$RANDOM-$RANDOM.scope"
   local claim_wait
   claim_wait=$(count "${POSTMASTER_HOST_CLAIM_WAIT:-20}" POSTMASTER_HOST_CLAIM_WAIT) || launch_failed "no launch: POSTMASTER_HOST_CLAIM_WAIT"
   cwd=$(CDPATH= cd -P -- "$cwd" && pwd -P); name=$(clean "$name")
@@ -836,7 +1018,8 @@ run_cmd() {
 
   local spec host where="" rpid=""
   spec=$(mktemp -d "${TMPDIR:-/tmp}/postmaster-host.XXXXXX") || launch_failed "cannot make a spec directory"
-  write_spec "$spec" "$name" "$cwd" "$out" "$err" "$marker" "$pidfile" "$append" "$@"
+  write_spec "$spec" "$name" "$cwd" "$out" "$err" "$marker" "$pidfile" "$append" \
+    "$role" "$memory" "$tasks" "$cap_mode" "$systemd_run" "$systemctl" "$setsid" "$unit" "$@"
   host=$(detect)
   case $host in
     herdr)
@@ -912,10 +1095,13 @@ runner() {
   if [ "$mode" != bg ]; then
     mkdir "$spec/claimed" 2>/dev/null || { echo "host: this launch was started elsewhere; nothing to do here."; return 0; }
   fi
-  local name cwd rundir out err marker pidfile append argv=() envs=() kv k last=""
+  local name cwd rundir out err marker pidfile append role memory tasks cap_mode systemd_run systemctl setsid unit
+  local argv=() envs=() kv k last="" capwatch="" cap_event="" event_file="$spec.cap"
   name=$(cat "$spec/name"); cwd=$(cat "$spec/cwd"); rundir=$(cat "$spec/rundir"); STATE=$(cat "$spec/state")
   out=$(cat "$spec/out"); err=$(cat "$spec/err"); marker=$(cat "$spec/marker")
   pidfile=$(cat "$spec/pidfile"); append=$(cat "$spec/append")
+  role=$(cat "$spec/role"); memory=$(cat "$spec/memory"); tasks=$(cat "$spec/tasks"); cap_mode=$(cat "$spec/capmode")
+  systemd_run=$(cat "$spec/systemd_run"); systemctl=$(cat "$spec/systemctl"); setsid=$(cat "$spec/setsid"); unit=$(cat "$spec/unit")
   FAIL_ERR=$err FAIL_MARKER=$marker
   while IFS= read -r -d '' kv; do argv+=("$kv"); done < "$spec/argv"
   if [ "$mode" = bg ]; then
@@ -959,14 +1145,26 @@ runner() {
   [ -n "$err" ] && { e=$err; : > "$err"; }
   [ "$append" = 1 ] && [ -f "$out" ] && from=$(wc -c < "$out" | tr -d ' ')
   t0=$(date +%s)
-  ( CDPATH= cd -- "$rundir" && exec python3 -c "$START_CHILD" "${argv[@]}" 3< <(printf '%s\0' "${childenv[@]}") ) \
-    >> "$o" 2>> "$e" < /dev/null &
+  rm -f -- "$event_file"
+  if [ "$cap_mode" = systemd ]; then
+    ( CDPATH= cd -- "$rundir" && exec "$setsid" "$systemd_run" --user --scope --quiet --unit="$unit" \
+        --property="MemoryMax=$memory" --property=MemorySwapMax=0 --property="TasksMax=$tasks" --property=OOMPolicy=kill \
+        -- python3 -c "$START_CHILD" capped "${argv[@]}" 3< <(printf '%s\0' "${childenv[@]}") ) \
+      >> "$o" 2>> "$e" < /dev/null &
+  else
+    launch_notice "launch running uncapped (no supported per-launch limits available)"
+    ( CDPATH= cd -- "$rundir" && exec python3 -c "$START_CHILD" uncapped "${argv[@]}" 3< <(printf '%s\0' "${childenv[@]}") ) \
+      >> "$o" 2>> "$e" < /dev/null &
+  fi
   cpid=$!
   # The marker's watcher and the registry record come before the pidfile, since run returns to
   # its caller the moment the pidfile holds a pid: a caller that stops or kills the launch then
   # finds it registered, and its marker still lands.
   trap 'kill -TERM -- "-$cpid" 2>/dev/null || kill -TERM "$cpid" 2>/dev/null' HUP INT TERM
   [ "$mode" != bg ] && [ -n "$marker" ] && watch_exit "$cpid" "$marker"
+  if [ "$cap_mode" = systemd ]; then
+    watch_cap_events "$systemctl" "$unit" "$event_file" "$cpid" & capwatch=$!
+  fi
   reg_add "$cpid" "$cwd" "$name"
   [ -n "$pidfile" ] && printf '%s\n' "$cpid" > "$pidfile"
 
@@ -985,9 +1183,36 @@ runner() {
     wait "$cpid"; rc=$?
     kill -0 "$cpid" 2>/dev/null || break            # a trapped signal interrupts wait, not the launch
   done
+  [ -z "$capwatch" ] || wait "$capwatch" 2>/dev/null || :
+  if [ "$cap_mode" = systemd ]; then
+    cap_event=$(cat "$event_file" 2>/dev/null)
+    if [ -z "$cap_event" ]; then
+      # systemctl's Result can lag an OOM kill, reading success or nothing for a
+      # while after the scope is dead; poll briefly while the scope is not yet
+      # settled so a fast OOM is still named. success with the scope still
+      # active is transient, not a verdict; a settled scope breaks at once,
+      # so a launch that never tripped pays for one query only.
+      local tries=0 result="" active="" verdict=""
+      while [ "$tries" -lt 40 ]; do
+        # By name, not by line: --value prints properties in its own order no
+        # matter the --property order, so positional parsing would silently swap.
+        verdict=$("$systemctl" --user show "$unit" --property=Result --property=ActiveState 2>/dev/null)
+        result=$(printf '%s\n' "$verdict" | sed -n 's/^Result=//p'); active=$(printf '%s\n' "$verdict" | sed -n 's/^ActiveState=//p')
+        if [ "$result" = oom-kill ]; then cap_event=memory; break; fi
+        case $active in inactive|failed) break ;; esac
+        tries=$((tries + 1)); sleep 0.05
+      done
+    fi
+    case $cap_event in
+      process) launch_notice "process cap reached (TasksMax=$tasks)" ;;
+      memory) launch_notice "memory cap reached (MemoryMax=$memory)" ;;
+    esac
+    "$systemctl" --user reset-failed "$unit" >/dev/null 2>&1 || :
+  fi
   [ -n "$marker" ] && touch "$marker"
   trap - HUP INT TERM
   reg_members "$cpid"                              # what the leader left in its group, or nothing
+  rm -f -- "$event_file"
   [ "$mode" = bg ] && return 0
 
   [ -n "$vpid" ] && wait "$vpid" 2>/dev/null
@@ -996,6 +1221,11 @@ runner() {
   printf '%s\nexit %s at %s after %ss%s\n' "----" "$rc" "$(date '+%H:%M:%S')" "$(( $(date +%s) - t0 ))" \
     "${marker:+, marker $marker}"
   return 0
+}
+
+launch_notice() {  # launch_notice <text>: append a host finding to .err and show it in a pane
+  [ -n "${err:-}" ] && printf 'host: %s\n' "$1" >> "$err" 2>/dev/null
+  [ "${mode:-bg}" = bg ] || printf 'host: %s\n' "$1" >&2
 }
 
 # --- stop and close -----------------------------------------------------------------------
@@ -1579,6 +1809,7 @@ marker() {  # marker <file> [<seconds>]: wait for a marker to land
 }
 field() { tr '|' '\n' < "$1" | sed -n "s/^$2=//p" | head -1; }   # field <probe output> <key>
 title_absent() { [[ "$1" != *"#1"* && "$1" != *"Stop"* && "$1" != *"touch"* && "$1" != *"canary"* && "$1" != *"breaking"* && "$1" != *"shell"* ]]; }
+err_stream_equal() { cmp -s "$1" <(sed -e '/^host: launch running uncapped (no supported per-launch limits available)$/d' "$2"); }
 finish() {
   echo
   [ "$fails" -eq 0 ] && { echo "$1: all controls behaved"; return 0; }
@@ -1846,13 +2077,123 @@ elif a[0] == "capture-pane": print("stub screen")
 EOF
   chmod +x "$tmp/bin/herdr" "$tmp/bin/tmux"
   SYS=$tmp/sys; STUBS=$tmp/bin:$tmp/sys
+  mkdir -p "$tmp/capsys"
+  for p in "$tmp/sys"/*; do [ -e "$p" ] && ln -s "$p" "$tmp/capsys/$(basename "$p")"; done
+  for t in systemd-run systemctl setsid uname; do
+    p=$(command -v "$t" 2>/dev/null) && [ ! -e "$tmp/capsys/$t" ] && ln -s "$p" "$tmp/capsys/$t"
+  done
+  CAPSYS=$tmp/capsys
   hs() {  # hs <PATH> [VAR=value ...] -- <host.sh arguments>: host.sh in a clean environment
     local p=$1 vars=(); shift
     while [ "$1" != -- ]; do vars+=("$1"); shift; done; shift
-    env -i HOME="$HOME" PATH="$p" STUB="$tmp/stub" TMPDIR="$tmp" POSTMASTER_HOST_STATE="$tmp/state" \
+    env -i HOME="$HOME" PATH="$p" STUB="$tmp/stub" TMPDIR="$tmp" POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$tmp/state" \
       POSTMASTER_HOST_FIXTURE="$tmp" POSTMASTER_HOST_CLAIM_WAIT=3 POSTMASTER_HOST_CLOSE_WAIT=1 \
       ${vars[@]+"${vars[@]}"} "$SELF" "$@"
   }
+  cat > "$tmp/live-limits.toml" <<'EOF'
+[limits]
+memory_max = "8G"
+tasks_max = 512
+EOF
+  mkdir -p "$tmp/cap-dispatch"
+  cat > "$tmp/cap-dispatch/run.json" <<'EOF'
+{"config":{"limits":{"memory_max":"8G","tasks_max":512,"lane":{"memory_max":"64M","tasks_max":16},"coachman":{"memory_max":"128M","tasks_max":32},"reviewer":{"tasks_max":24}}}}
+EOF
+  cap_launch() {  # cap_launch <host-impl> <PATH> <prefix> -- <command...>
+    local impl=$1 path=$2 prefix=$3; shift 3
+    local role_args=()
+    [ "$impl" != "$SELF" ] || role_args=(--role lane --run "$tmp/cap-dispatch")
+    [ "$1" = -- ] && shift
+    env -i HOME="$HOME" PATH="$path" STUB="$tmp/stub" TMPDIR="$tmp" POSTMASTER_HOST=none \
+      POSTMASTER_HOST_STATE="$tmp/state" POSTMASTER_HOST_FIXTURE="$tmp" POSTMASTER_HOST_CLAIM_WAIT=3 \
+      POSTMASTER_HOST_CLOSE_WAIT=1 POSTMASTER_CONFIG="$tmp/live-limits.toml" \
+      XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}" \
+      CHILD_PIDS="$tmp/logs/$prefix.pids" LAUNCH_GROUP_RECORD="$tmp/logs/$prefix.group" \
+      BRUSH_FILE="$tmp/brush-data.bin" POSTMASTER_CGROUP_ROOT="${CAPCGROOT:-}" \
+      "$impl" run "$NAME" "$repo/.worktrees/T-1-luna" \
+      --out "$tmp/logs/$prefix.out" --err "$tmp/logs/$prefix.err" --marker "$tmp/logs/$prefix.done" \
+      --pidfile "$tmp/logs/$prefix.pid" "${role_args[@]}" -- "$@"
+  }
+  cat > "$tmp/caller/healthy.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'healthy stdout\n'
+printf 'healthy stderr\n' >&2
+if [ -n "${LAUNCH_GROUP_RECORD:-}" ]; then
+  printf '%s %s\n' "$$" "$(ps -o pgid= -p "$$" | tr -d ' ')" > "$LAUNCH_GROUP_RECORD"
+fi
+sleep 1.5
+# The completion line: a launch killed mid-sleep matches a direct run's early
+# streams, so the isolation checks compare whole streams including this one.
+printf 'healthy done\n'
+EOF
+  cat > "$tmp/caller/fork-cap.py" <<'EOF'
+#!/usr/bin/env python3
+import os, signal, sys, time
+kids = []
+def cleanup(*_):
+    for pid in kids:
+        try: os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError: pass
+    sys.exit(124)
+signal.signal(signal.SIGTERM, cleanup)
+path = os.environ["CHILD_PIDS"]
+while len(kids) < 64:
+    try: pid = os.fork()
+    except BlockingIOError:
+        time.sleep(0.01); continue
+    if pid == 0: os.execl("/bin/sleep", "sleep", "30")
+    kids.append(pid)
+    with open(path, "a", encoding="ascii") as f: f.write(str(pid) + "\n")
+while True: time.sleep(1)
+EOF
+  cat > "$tmp/caller/fork-exit.py" <<'EOF'
+#!/usr/bin/env python3
+import os, signal, sys, time
+kids = []
+while len(kids) < 64:
+    try: pid = os.fork()
+    except BlockingIOError: break
+    if pid == 0: os.execl("/bin/sleep", "sleep", "30")
+    kids.append(pid)
+# The lane gives up after the trip: pause past any watcher wake, then clean up
+# its children and exit promptly, naming the cap it reached on the way out.
+time.sleep(1)
+for pid in kids:
+    try: os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError: pass
+sys.exit(2)
+EOF
+  cat > "$tmp/caller/memory-cap.py" <<'EOF'
+#!/usr/bin/env python3
+import time
+blocks = []
+while True:
+    block = bytearray(1 << 20)
+    for offset in range(0, len(block), 4096): block[offset] = 1
+    blocks.append(block)
+    time.sleep(0.02)
+EOF
+  cat > "$tmp/caller/brush-cache.py" <<'EOF'
+#!/usr/bin/env python3
+import mmap, os, sys
+f = open(os.environ["BRUSH_FILE"], "rb")
+m = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+s = 0
+for off in range(0, len(m), 4096):
+    s += m[off]
+print("brushed %d pages, checksum %d" % (len(m) // 4096, s % 256))
+# Pressure proof: our own cgroup must have throttled on the way past the cap,
+# or this control ran without the pressure it claims to survive.
+cg = open("/proc/self/cgroup").read().split(":")[-1].strip()
+mx = 0
+for line in open("/sys/fs/cgroup" + cg + "/memory.events"):
+    k, _, v = line.partition(" ")
+    if k == "max": mx = int(v)
+if not mx:
+    print("brush ran without memory pressure", file=sys.stderr); sys.exit(99)
+EOF
+  chmod +x "$tmp/caller/healthy.sh" "$tmp/caller/fork-cap.py" "$tmp/caller/fork-exit.py" "$tmp/caller/memory-cap.py" "$tmp/caller/brush-cache.py"
+  head -c 134217728 /dev/zero > "$tmp/brush-data.bin"
   reset() { rm -f -- "$tmp"/stub/*; }
   calls() { cat "$tmp/stub/$1.calls" 2>/dev/null; }
   T=$'\t'
@@ -1882,7 +2223,8 @@ EOF
         --marker ../logs/n1.done -- ./fixed.sh)
   check "it says it ran in the background" '[ "$got" = host=none ]' "$got"
   marker "$tmp/logs/n1.done"
-  check "stdout and stderr are byte for byte a direct run's" 'cmp -s "$tmp/direct.out" "$tmp/logs/n1.out" && cmp -s "$tmp/direct.err" "$tmp/logs/n1.err"'
+  check "the command's output matches a direct run, and uncapped execution is disclosed" \
+    'cmp -s "$tmp/direct.out" "$tmp/logs/n1.out" && err_stream_equal "$tmp/direct.err" "$tmp/logs/n1.err" && grep -qFx "host: launch running uncapped (no supported per-launch limits available)" "$tmp/logs/n1.err"'
   check "and the title's shell syntax never ran" '[ ! -e "$tmp/canary" ]'
   touch "$tmp/logs/n2.done"
   (cd "$tmp/caller" && hs "$SYS" EMIT_SLEEP=2 -- run "$NAME" "$repo" --marker ../logs/n2.done -- ./fixed.sh >/dev/null)
@@ -1904,7 +2246,7 @@ EOF
   (cd "$tmp/caller" && hs "$SYS" -- run "$NAME" "$repo" --out ../logs/n4.out --err ../logs/n4.err --append --marker ../logs/n4.done -- ./fixed.sh >/dev/null)
   marker "$tmp/logs/n4.done"
   check "--append keeps what the stream held, and --err holds only this launch's errors" \
-    '[ "$(head -1 "$tmp/logs/n4.out")" = before ] && [ "$(wc -l < "$tmp/logs/n4.out")" -eq 4 ] && [ "$(cat "$tmp/logs/n4.err")" = "a line on stderr" ]'
+    '[ "$(head -1 "$tmp/logs/n4.out")" = before ] && [ "$(wc -l < "$tmp/logs/n4.out")" -eq 4 ] && err_stream_equal "$tmp/direct.err" "$tmp/logs/n4.err" && grep -qFx "host: launch running uncapped (no supported per-launch limits available)" "$tmp/logs/n4.err"'
   hs "$SYS" -- run "$NAME" "$repo" --marker "$tmp/logs/n6.done" ./fixed.sh >/dev/null 2>&1; rc=$?
   check "a command without -- is refused, and its marker lands" '[ $rc -eq 1 ] && [ -e "$tmp/logs/n6.done" ]'
   hs "$SYS" -- run "$NAME" "$tmp/nowhere" --err "$tmp/logs/n7.err" --marker "$tmp/logs/n7.done" -- ./fixed.sh >/dev/null 2>&1; rc=$?
@@ -2061,7 +2403,7 @@ EOF
   ( cd "$tmp/caller" && ./fixed.sh > "$tmp/direct.out" 2> "$tmp/direct.err" )
   (cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --out ../logs/h3.out --err ../logs/h3.err --marker ../logs/h3.done -- ./fixed.sh >/dev/null)
   marker "$tmp/logs/h3.done"
-  check "the stream and the marker are what a background run writes" 'cmp -s "$tmp/direct.out" "$tmp/logs/h3.out" && cmp -s "$tmp/direct.err" "$tmp/logs/h3.err"'
+  check "the command streams and marker are what a background run writes, with any cap notice" 'cmp -s "$tmp/direct.out" "$tmp/logs/h3.out" && err_stream_equal "$tmp/direct.err" "$tmp/logs/h3.err"'
   got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --marker ../logs/h6.done --pidfile ../logs/h6.pid -- sleep 60)
   panepid=$(cat "$tmp/stub/pane-${got##*pane=}.pid")
   kill -HUP -- "-$panepid" 2>/dev/null
@@ -2413,6 +2755,170 @@ PY
   check "tmux: wait settles on a quiet screen, and read takes the lines asked for" \
     '[ $a -eq 0 ] && calls tmux | grep -qx "capture-pane${T}-p${T}-J${T}-S${T}-7${T}-t${T}@1"'
 
+  echo "uncapped fallback: cap mechanism absent from PATH"
+  (cd "$tmp/caller" && ./healthy.sh > "$tmp/direct-healthy.out" 2> "$tmp/direct-healthy.err")
+  got=$(cap_launch "$SELF" "$SYS" uncapped -- "$tmp/caller/healthy.sh" 2>/dev/null)
+  check "without the cap tools, the launch still completes and .err says uncapped" \
+    'marker "$tmp/logs/uncapped.done" 10 && grep -qFx "host: launch running uncapped (no supported per-launch limits available)" "$tmp/logs/uncapped.err" && cmp -s "$tmp/direct-healthy.out" "$tmp/logs/uncapped.out" && err_stream_equal "$tmp/direct-healthy.err" "$tmp/logs/uncapped.err"' "$got"
+
+  if systemd_capability >/dev/null 2>&1; then
+    echo "per-launch caps: systemd user scope controls"
+    cap_impl=${POSTMASTER_HOST_TEST_IMPL:-$SELF}
+    fork_other=$(cap_launch "$cap_impl" "$CAPSYS" fork-other -- "$tmp/caller/healthy.sh" 2>/dev/null)
+    check "a capped launch publishes its pid while the command is still running" \
+      '[ -s "$tmp/logs/fork-other.pid" ] && [ ! -e "$tmp/logs/fork-other.done" ]' "$fork_other"
+    fork_got=$(cap_launch "$cap_impl" "$CAPSYS" fork -- timeout --signal=TERM --kill-after=1 2 python3 "$tmp/caller/fork-cap.py" 2>/dev/null)
+    marker "$tmp/logs/fork.done" 10
+    marker "$tmp/logs/fork-other.done" 10
+    no_live_pids() {
+      local pid st
+      while IFS= read -r pid; do
+        [ -n "$pid" ] || continue
+        st=$(ps -o stat= -p "$pid" 2>/dev/null) || st=""
+        [ -z "$st" ] || [ "${st#Z}" != "$st" ] || return 1
+      done < "$1"
+    }
+    check "a fork runaway is stopped at TasksMax, leaves its marker and no children" \
+      'grep -qFx "host: process cap reached (TasksMax=16)" "$tmp/logs/fork.err" && [ -e "$tmp/logs/fork.done" ] && no_live_pids "$tmp/logs/fork.pids"' "$fork_got"
+    check "the bounded fork fixture leaves no live child processes" \
+      'no_live_pids "$tmp/logs/fork.pids"' "$(cat "$tmp/logs/fork.pids" 2>/dev/null)"
+    check "a healthy launch completes while the fork cap is reached" \
+      'marker "$tmp/logs/fork-other.done" 1 && cmp -s "$tmp/direct-healthy.out" "$tmp/logs/fork-other.out" && err_stream_equal "$tmp/direct-healthy.err" "$tmp/logs/fork-other.err" && [ "$(cut -d" " -f2 "$tmp/logs/fork-other.group")" = "$(cat "$tmp/logs/fork-other.pid")" ]' "$fork_other"
+    exit_got=$(cap_launch "$cap_impl" "$CAPSYS" fork-exit -- timeout --signal=TERM --kill-after=1 4 python3 "$tmp/caller/fork-exit.py" 2>/dev/null)
+    marker "$tmp/logs/fork-exit.done" 10
+    check "a launch that exits after tripping the process cap still names the cap" \
+      'grep -qFx "host: process cap reached (TasksMax=16)" "$tmp/logs/fork-exit.err" && [ -e "$tmp/logs/fork-exit.done" ]' "$exit_got"
+
+    memory_other=$(cap_launch "$cap_impl" "$CAPSYS" memory-other -- "$tmp/caller/healthy.sh" 2>/dev/null)
+    memory_got=$(cap_launch "$cap_impl" "$CAPSYS" memory -- timeout --signal=TERM --kill-after=1 2 python3 "$tmp/caller/memory-cap.py" 2>/dev/null)
+    marker "$tmp/logs/memory.done" 10
+    marker "$tmp/logs/memory-other.done" 10
+    check "an allocation runaway is stopped at MemoryMax and leaves its marker" \
+      'grep -qFx "host: memory cap reached (MemoryMax=64M)" "$tmp/logs/memory.err" && [ -e "$tmp/logs/memory.done" ]' "$memory_got"
+    check "a healthy launch completes while the memory cap is reached" \
+      'marker "$tmp/logs/memory-other.done" 1 && cmp -s "$tmp/direct-healthy.out" "$tmp/logs/memory-other.out" && err_stream_equal "$tmp/direct-healthy.err" "$tmp/logs/memory-other.err" && [ "$(cut -d" " -f2 "$tmp/logs/memory-other.group")" = "$(cat "$tmp/logs/memory-other.pid")" ]' "$memory_other"
+    mkdir -p "$tmp/capshim"
+    for t in "$CAPSYS"/*; do
+      [ -e "$t" ] || continue
+      [ "$(basename "$t")" = systemctl ] && continue
+      ln -s "$t" "$tmp/capshim/$(basename "$t")"
+    done
+    shimctl=$(command -v systemctl)
+    cat > "$tmp/capshim/systemctl" <<EOF
+#!/usr/bin/env bash
+# A watcher-blind backend whose first verdict reads success-with-active and
+# whose second prints the properties in reverse order: the verdict must poll
+# past the transient one and read the OOM by name, not by line.
+if [[ "\$*" == *postmaster-host-* && "\$*" == *ControlGroup* ]]; then exit 0; fi
+if [[ "\$*" == *postmaster-host-* && "\$*" == *Result* ]]; then
+  echo x >> "$tmp/logs/shim-queries.log"
+  n=\$(wc -l < "$tmp/logs/shim-queries.log")
+  if [ "\$n" -eq 1 ]; then echo "Result=success"; echo "ActiveState=active"; exit 0; fi
+  if [ "\$n" -eq 2 ]; then echo "ActiveState=failed"; echo "Result=oom-kill"; exit 0; fi
+fi
+exec "$shimctl" "\$@"
+EOF
+    chmod +x "$tmp/capshim/systemctl"
+    rm -f "$tmp/logs/shim-queries.log"; touch "$tmp/logs/shim-queries.log"
+    shim_got=$(cap_launch "$cap_impl" "$tmp/capshim" shim-oom -- timeout --signal=TERM --kill-after=1 6 python3 "$tmp/caller/memory-cap.py" 2>/dev/null)
+    marker "$tmp/logs/shim-oom.done" 15
+    check "a transient success verdict does not hide an OOM, and the verdict reads properties by name" \
+      'grep -qFx "host: memory cap reached (MemoryMax=64M)" "$tmp/logs/shim-oom.err" && [ "$(wc -l < "$tmp/logs/shim-queries.log")" -eq 2 ]' "$shim_got"
+    python3 -c "import os; fd=os.open('$tmp/brush-data.bin',os.O_RDONLY); os.posix_fadvise(fd,0,0,os.POSIX_FADV_DONTNEED); os.close(fd)"
+    brush_got=$(cap_launch "$cap_impl" "$CAPSYS" brush -- timeout --signal=TERM --kill-after=1 30 python3 "$tmp/caller/brush-cache.py" 2>/dev/null)
+    marker "$tmp/logs/brush.done" 20
+    check "a launch that brushes the memory cap with reclaimable cache completes unnamed" \
+      'grep -q "brushed .* pages" "$tmp/logs/brush.out" && [ -e "$tmp/logs/brush.done" ] && [ ! -s "$tmp/logs/brush.err" ]' "$brush_got"
+    mkdir -p "$tmp/capshim2"
+    for t in "$CAPSYS"/*; do
+      [ -e "$t" ] || continue
+      [ "$(basename "$t")" = systemctl ] && continue
+      ln -s "$t" "$tmp/capshim2/$(basename "$t")"
+    done
+    shimctl2=$(command -v systemctl)
+    cat > "$tmp/capshim2/systemctl" <<EOF
+#!/usr/bin/env bash
+# A fallback-blind backend: every verdict reads settled success, while the
+# watcher resolves the real cgroup. An OOM named here was named by the watcher.
+if [[ "\$*" == *postmaster-host-* && "\$*" == *ControlGroup* ]]; then
+  echo x >> "$tmp/logs/shim2-cg.log"
+fi
+if [[ "\$*" == *postmaster-host-* && "\$*" == *Result* ]]; then
+  echo x >> "$tmp/logs/shim2-result.log"
+  echo "Result=success"; echo "ActiveState=inactive"; exit 0
+fi
+exec "$shimctl2" "\$@"
+EOF
+    chmod +x "$tmp/capshim2/systemctl"
+    rm -f "$tmp/logs/shim2-cg.log" "$tmp/logs/shim2-result.log"
+    touch "$tmp/logs/shim2-cg.log" "$tmp/logs/shim2-result.log"
+    wmem_got=$(cap_launch "$cap_impl" "$tmp/capshim2" watcher-mem -- timeout --signal=TERM --kill-after=1 6 python3 "$tmp/caller/memory-cap.py" 2>/dev/null)
+    marker "$tmp/logs/watcher-mem.done" 15
+    check "with the fallback blinded, an OOM is still named: the watcher notes it" \
+      'grep -qFx "host: memory cap reached (MemoryMax=64M)" "$tmp/logs/watcher-mem.err" && [ "$(wc -l < "$tmp/logs/shim2-cg.log")" -ge 1 ] && [ "$(wc -l < "$tmp/logs/shim2-result.log")" -eq 0 ]' "$wmem_got"
+    mkdir -p "$tmp/fakecgroup/fixture"
+    printf 'max 0\n' > "$tmp/fakecgroup/fixture/pids.events"
+    mkdir -p "$tmp/capshim3"
+    for t in "$CAPSYS"/*; do
+      [ -e "$t" ] || continue
+      [ "$(basename "$t")" = systemctl ] && continue
+      ln -s "$t" "$tmp/capshim3/$(basename "$t")"
+    done
+    shimctl3=$(command -v systemctl)
+    cat > "$tmp/capshim3/systemctl" <<EOF
+#!/usr/bin/env bash
+# A fixture-cgroup backend: the watcher resolves this path and reads the
+# counter shapes the control stages there, while verdict queries delegate.
+if [[ "\$*" == *postmaster-host-* && "\$*" == *ControlGroup* ]]; then echo "/fixture"; exit 0; fi
+exec "$shimctl3" "\$@"
+EOF
+    chmod +x "$tmp/capshim3/systemctl"
+    CAPCGROOT=$tmp/fakecgroup
+    printf 'low 0\nhigh 0\nmax 0\noom 0\noom_kill 1\noom_group_kill 0\n' > "$tmp/fakecgroup/fixture/memory.events"
+    hostshape_got=$(cap_launch "$cap_impl" "$tmp/capshim3" hostshape -- "$tmp/caller/healthy.sh" 2>/dev/null)
+    marker "$tmp/logs/hostshape.done" 10
+    check "a host-wide OOM shape (oom_kill without oom) is not blamed on MemoryMax" \
+      'cmp -s "$tmp/direct-healthy.out" "$tmp/logs/hostshape.out" && cmp -s "$tmp/direct-healthy.err" "$tmp/logs/hostshape.err" && [ -e "$tmp/logs/hostshape.done" ]' "$hostshape_got"
+    printf 'low 0\nhigh 0\nmax 18\noom 1\noom_kill 0\noom_group_kill 0\n' > "$tmp/fakecgroup/fixture/memory.events"
+    oomshape_got=$(cap_launch "$cap_impl" "$tmp/capshim3" oomshape -- "$tmp/caller/healthy.sh" 2>/dev/null)
+    marker "$tmp/logs/oomshape.done" 10
+    check "a cgroup OOM shape (oom set) still names the memory cap" \
+      'grep -qFx "host: memory cap reached (MemoryMax=64M)" "$tmp/logs/oomshape.err" && [ -e "$tmp/logs/oomshape.done" ]' "$oomshape_got"
+    unset CAPCGROOT
+    kill_got=$(cap_launch "$cap_impl" "$CAPSYS" kill-healthy -- "$tmp/caller/healthy.sh" 2>/dev/null)
+    sleep 0.3; kill -KILL "$(cat "$tmp/logs/kill-healthy.pid")" 2>/dev/null
+    marker "$tmp/logs/kill-healthy.done" 10
+    check "a launch killed mid-sleep is told apart: its streams no longer match a completed run" \
+      '[ -e "$tmp/logs/kill-healthy.done" ] && ! cmp -s "$tmp/direct-healthy.out" "$tmp/logs/kill-healthy.out"' "$kill_got"
+    check "a capped launch's .err never carries the uncapped notice" \
+      '[ -s "$tmp/logs/fork-other.err" ] && [ -s "$tmp/logs/memory-other.err" ] && ! grep -qF "launch running uncapped" "$tmp/logs/fork-other.err" "$tmp/logs/memory-other.err"'
+  else
+    echo "per-launch cap controls skipped: no working systemd user scope"
+  fi
+  printf '[limits]\ntasks_max = 0\n' > "$tmp/badlimits.toml"
+  got=$(cd "$tmp/caller" && hs "$SYS" POSTMASTER_CONFIG="$tmp/badlimits.toml" -- run "$NAME" "$repo" \
+    --err ../logs/badlim.err --marker ../logs/badlim.done -- ./fixed.sh 2>&1); rc=$?
+  check "limits that fail validation refuse the launch, the marker lands and .err says why" \
+    '[ $rc -eq 1 ] && [ -e "$tmp/logs/badlim.done" ] && grep -q "tasks_max must be" "$tmp/logs/badlim.err"' "$got"
+  mkdir -p "$tmp/bad-dispatch"
+  printf '{"config": [1, 2, 3]}' > "$tmp/bad-dispatch/run.json"
+  got=$(cd "$tmp/caller" && hs "$SYS" -- run "$NAME" "$repo" --role lane --run "$tmp/bad-dispatch" \
+    --err ../logs/badcfg.err --marker ../logs/badcfg.done -- ./fixed.sh 2>&1); rc=$?
+  check "a dispatch whose config is no table refuses the launch cleanly, with no traceback" \
+    '[ $rc -eq 1 ] && [ -e "$tmp/logs/badcfg.done" ] && grep -q "config must be a table" "$tmp/logs/badcfg.err" && ! grep -qi "traceback" "$tmp/logs/badcfg.err"' "$got"
+  mkdir -p "$tmp/bad-top"
+  printf '[1, 2, 3]' > "$tmp/bad-top/run.json"
+  got=$(cd "$tmp/caller" && hs "$SYS" -- run "$NAME" "$repo" --role lane --run "$tmp/bad-top" \
+    --err ../logs/badtop.err --marker ../logs/badtop.done -- ./fixed.sh 2>&1); rc=$?
+  check "a dispatch whose run.json holds no object refuses the launch cleanly, with no traceback" \
+    '[ $rc -eq 1 ] && [ -e "$tmp/logs/badtop.done" ] && grep -q "run.json must hold an object" "$tmp/logs/badtop.err" && ! grep -qi "traceback" "$tmp/logs/badtop.err"' "$got"
+  got=$(cd "$tmp/caller" && hs "$SYS" -- run "$NAME" "$repo" --role bogus \
+    --err ../logs/badrole.err --marker ../logs/badrole.done -- ./fixed.sh 2>&1); rc=$?
+  check "an unknown launch role refuses the launch, the marker lands and .err says why" \
+    '[ $rc -eq 1 ] && [ -e "$tmp/logs/badrole.done" ] && grep -q "unknown launch role" "$tmp/logs/badrole.err"' "$got"
+  check "every role resolves from the dispatch run, inheriting each value it does not set" \
+    '[ "$(launch_limits lane "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "64M\t16")" ] && [ "$(launch_limits coachman "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "128M\t32")" ] && [ "$(launch_limits reviewer "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "8G\t24")" ] && [ "$(launch_limits default "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "8G\t512")" ] && [ "$(launch_limits lane "" "$tmp/live-limits.toml")" = "$(printf "8G\t512")" ]'
+
   finish self-test
 }
 
@@ -2458,9 +2964,9 @@ print(([w.get("open_workspace_id") for w in d["result"]["worktrees"] if w["path"
     done
     check "while it runs, the pane is working and its terminal title is the coachman label" '[ "$seen" = "working|$COACHMAN_LABEL" ]' "$seen"
     check "its marker lands" 'marker "$tmp/logs/l1.done" 60'
-    check "its stream and errors are what a direct run writes" 'cmp -s "$tmp/direct.out" "$tmp/logs/l1.out" && cmp -s "$tmp/direct.err" "$tmp/logs/l1.err"'
+    check "its command streams are what a direct run writes" 'cmp -s "$tmp/direct.out" "$tmp/logs/l1.out" && err_stream_equal "$tmp/direct.err" "$tmp/logs/l1.err"'
     sleep 1; screen=$(herdr pane read "$pane" --source recent-unwrapped --lines 40 2>/dev/null)
-    check "the pane shows one line per event, not raw JSON" \
+    check "the pane shows rendered events, not raw JSON" \
       'printf "%s" "$screen" | grep -q "says: step one" && printf "%s" "$screen" | grep -q "result: success" && ! printf "%s" "$screen" | grep -qF "{\"type\""' "$screen"
     check "and the launch is released when it ends" \
       '[ "$(herdr pane get "$pane" | json "d[\"result\"][\"pane\"].get(\"agent_status\")")" != working ]'
@@ -2505,7 +3011,7 @@ print(([w.get("open_workspace_id") for w in d["result"]["worktrees"] if w["path"
     check "the same launch runs in the background" '[ "$got" = host=none ]' "$got"
     check "no space opens for it" '[ -z "$(openspace "$wt")" ] && [ "$(herdr workspace list | json "len(d[\"result\"][\"workspaces\"])")" = "$before" ]'
     check "its marker lands" 'marker "$tmp/logs/l3.done" 60'
-    check "its stream and errors are the same" 'cmp -s "$tmp/direct.out" "$tmp/logs/l3.out" && cmp -s "$tmp/direct.err" "$tmp/logs/l3.err"'
+    check "its command streams are the same" 'cmp -s "$tmp/direct.out" "$tmp/logs/l3.out" && err_stream_equal "$tmp/direct.err" "$tmp/logs/l3.err"'
   else
     echo "Herdr: no server answers here; its controls are skipped"
   fi
@@ -2518,7 +3024,7 @@ print(([w.get("open_workspace_id") for w in d["result"]["worktrees"] if w["path"
     check "the launch runs in a window of session postmaster-<repo>, named for it" \
       '[ "$tsession" = "postmaster-$rname" ] && tmux list-windows -t "=$tsession" -F "#{window_name}" | grep -qxF "$NAME"' "$got"
     check "its marker lands" 'marker "$tmp/logs/l4.done" 60'
-    check "its stream and errors are the same" 'cmp -s "$tmp/direct.out" "$tmp/logs/l4.out" && cmp -s "$tmp/direct.err" "$tmp/logs/l4.err"'
+    check "its command streams are the same" 'cmp -s "$tmp/direct.out" "$tmp/logs/l4.out" && err_stream_equal "$tmp/direct.err" "$tmp/logs/l4.err"'
     check "close kills the worktree's window" 'POSTMASTER_HOST=tmux "$SELF" close "$wt" >/dev/null && ! tmux list-windows -t "=$tsession" -F "#{window_name}" 2>/dev/null | grep -qxF "$NAME"'
   else
     echo "tmux: not on PATH; its controls are skipped"
@@ -2541,5 +3047,5 @@ case ${1:-} in
   _handle) handle_of "$2" ;;
   --self-test) self_test ;;
   --live-test) live_test ;;
-  *) echo "usage: host.sh detect | name | run | stop | close | spawn | send | wait | read | --self-test | --live-test (see the header)" >&2; exit 1 ;;
+  *) echo "usage: host.sh detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] | stop | close | spawn | send | wait | read | --self-test | --live-test (see the header)" >&2; exit 1 ;;
 esac

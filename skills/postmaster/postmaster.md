@@ -86,9 +86,8 @@ the action for anything without its own verb.
    turnpikes: line>'` names, is shown to the user before it is created whatever
    `tracker.postmaster_may_create` says, and their word on its turnpikes is logged as a `note`
    naming the ticket and the line.
-6. **Order them.** Dependencies first; then the file surfaces. Two tickets touching the same
-   route table, transport interface or shared module do not run at the same time. Record the
-   order and the reason in `<runs>/postmaster/plan.md`, current state only.
+6. **Order them.** Dependencies first: a ticket that needs another's change waits for it to
+   land. Record the order and the reason in `<runs>/postmaster/plan.md`, current state only.
 
 ## Stage B: the waybill
 
@@ -166,7 +165,7 @@ live one. Below, `<p>` is the leg before leg `<n>` in that list.
 
    ```sh
    <tool>/scripts/host.sh run "$(<tool>/scripts/host.sh name <dispatch> coachman <leg-name> <n>)" <repo>/.worktrees/<TICKET> \
-       --under <dispatch> \
+       --under <dispatch> --role coachman --run <dispatch> \
        --out <dispatch>/logs/coachman-leg-<n>-events.jsonl --err <dispatch>/logs/coachman-leg-<n>.err \
        --marker <dispatch>/.leg-<n>-exited \
        -- <tool>/scripts/launch.sh launch coachman <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt --leg <leg-name> \
@@ -188,7 +187,7 @@ live one. Below, `<p>` is the leg before leg `<n>` in that list.
 
    ```sh
    <tool>/scripts/host.sh run "$(<tool>/scripts/host.sh name <dispatch> coachman <leg-name> <n>)" <repo>/.worktrees/<TICKET> --append \
-       --under <dispatch> \
+       --under <dispatch> --role coachman --run <dispatch> \
        --out <dispatch>/logs/coachman-leg-<n>-events.jsonl --err <dispatch>/logs/coachman-leg-<n>.err \
        --marker <dispatch>/.leg-<n>-exited \
        -- <tool>/scripts/launch.sh resume <name> <repo>/.worktrees/<TICKET> <thread-id> <dispatch>/leg-<n>-resume-<time>.txt --leg <leg-name> \
@@ -201,13 +200,22 @@ live one. Below, `<p>` is the leg before leg `<n>` in that list.
 
 ## Stage D: supervise
 
-Poll every `postmaster.poll_seconds` (default 120) with one command per project:
+Keep `<tool>/scripts/runs-watch.sh <runs>` running in the background, one per project
+(`harnesses.md`, Keeping the watcher running). It looks every `postmaster.poll_seconds`
+(default 120) until a run needs you, then prints `<tool>/scripts/runs-status.sh`'s table, names
+each run that needs you with its `NEXT`, and exits 0. Wait for its return as harnesses.md
+says, then act on what it names, run by run, and log every action; then start it again at
+once. If it names nothing it failed: the reason is in `<runs>/postmaster/watch.err` — fix
+the cause (harnesses.md, Keeping the watcher running) before starting it again. A watcher
+that is not running is a run nobody notices.
 
-```sh
-<tool>/scripts/runs-status.sh <runs>
-```
+**Hold a run** by writing its ticket to `<runs>/postmaster/held`, one ticket per line,
+exactly as the RUN column shows it: a held run never needs you. **Release it** by removing
+its line, and remove the line when the run closes. Hold a run only while you mean to leave
+it alone — a question already put to the user, a deliberate pause — never to stop a wake
+you have not acted on.
 
-Act on the `NEXT` column, run by run, and log every action:
+Each `NEXT` names the act:
 
 - **USER:** the run waits on the user, and its `.waiting-on-user` holds the question (Stage E
   step 3, Stage F step 2). Put the question to the user again if you have not in this session;
@@ -389,8 +397,7 @@ only with the user's word for that specific thing, and the word is logged.
 - Never merge; never say the merge word without `MERGE_AUTHORITY` or the user behind it.
 - Never delete a dispatch directory, a manifest or a ledger line.
 - Never trust a card, a summary or a hand-off over the code; verify before every grant.
-- Never launch more runs than `team.max_runs`, and never two runs on overlapping file
-  surfaces.
+- Never launch more runs than `team.max_runs`.
 - Never modify postmaster itself, whatever the target: a fault you meet in it is a tool fault
   (Tool faults), and a fault in a control is never worked around.
 - Every action is a `log-action` line at the moment it happens. If it is not in the ledger,

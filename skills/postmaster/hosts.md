@@ -48,7 +48,7 @@ way on every row, only less visibly on the last.
 <tool>/scripts/host.sh name <dispatch> review <lane> <lens> <round>
 <tool>/scripts/host.sh name <dispatch> postmaster
 <tool>/scripts/host.sh name <dispatch> role <text...>
-<tool>/scripts/host.sh run <name> <cwd> [--under <dispatch>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
+<tool>/scripts/host.sh run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
 <tool>/scripts/host.sh stop <worktree>
 <tool>/scripts/host.sh close <worktree>
 <tool>/scripts/host.sh spawn <handle> <cwd> [--label <name>] -- <interactive form>
@@ -85,6 +85,23 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   it. `host.sh run` returns as soon as the launch has started. The wait still goes in the same
   command as the launch, as `<tool>/scripts/wait-for-markers.sh`, or for a review round
   `<tool>/scripts/review-round.sh wait`.
+- **`--role` selects per-role limits; `--run` selects the dispatch's recorded config.** Use
+  `lane` for a workhorse, `coachman` for a leg, and `reviewer` for a review launch. Direct host
+  launches use the default limits. With `--run <dispatch>`, the limits come from the config in
+  `<dispatch>/run.json`, so an edit to the live config does not change an in-flight run.
+- **A Linux user scope contains each launch and its descendants.** When systemd can verify a
+  cgroup v2 memory controller, pids controller and the requested scope properties, `host.sh`
+  applies `MemoryMax` (default `8G`), `MemorySwapMax=0` and `TasksMax` (default `512`). Systemd
+  kills the scope on memory exhaustion; when the pids controller records a refused fork,
+  `host.sh` kills that scope. `.err` says `host: memory cap reached (MemoryMax=<value>)` or
+  `host: process cap reached (TasksMax=<value>)`. The notice also appears in the pane's stderr.
+  A machine without a working per-launch cgroup backend still runs the command and records
+  `host: launch running uncapped (no supported per-launch limits available)` in `.err`, with a
+  warning to the caller. The limits live under `[limits]` in `config.toml`; `[limits.lane]`,
+  `[limits.coachman]` and `[limits.reviewer]` can override either setting. The caps bind an
+  accidental runaway, not a deliberate escape: every launch runs as the same user, which can
+  always start work outside the launch's scope, so the caps are resource bounds, not a
+  security boundary.
 - **A launch outlives its caller.** It belongs to the host's server, or with no host to a session
   of its own, so a caller's background-task cap or its exit does not reach it.
 - **A launch carries its own pane's identity, never its caller's**: `HERDR_PANE_ID`, the tab and
@@ -103,8 +120,8 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   synthesis worktree space and every launch label on its tab or window, pane title, and
   harness thread name (`POSTMASTER_LAUNCH_NAME`, `harnesses.md`). A title can contain shell
   syntax, so take every value from `host.sh name`; never type it into a shell.
-- **The pane shows the stream, not the JSON**: `<tool>/scripts/view-stream.sh` renders one line per
-  event of interest, each with its time.
+- **The pane shows the stream, not the JSON**: `<tool>/scripts/view-stream.sh` renders each event
+  of interest as wrapped lines — what the agent says and runs, in full — each with its time.
 - **Every launch is registered while it runs**, under `POSTMASTER_HOST_STATE` (default
   `~/.postmaster/host`), with the worktree it was placed in, whatever host ran it. `host.sh stop
   <worktree>` stops every launch running there and everything each one started, even in a
@@ -220,6 +237,9 @@ with `herdr agent start`. It is a pane whose agent `host.sh` reports. So when it
 holds nothing else, and never reaches a live server. It also checks the labels: each kind of
 launch (a coachman leg, a workhorse, each review lens with its round, the postmaster) leads
 with its role and holds no part of the ticket title, and the run's level carries the ticket.
+Where a working systemd user scope exists, it also checks that a bounded fork and allocation
+launch are stopped at their caps while a healthy launch completes. Without that backend it
+checks the uncapped notice and successful launch.
 `<tool>/scripts/host.sh --live-test` runs the
 ticket's controls against the hosts on this machine, in a scratch repository it creates: a
 postmaster using the project's first tab; a coachman in a ticket-labeled run space with no spare
