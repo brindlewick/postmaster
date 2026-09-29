@@ -232,6 +232,15 @@ function discover(repo: string): { found: string[]; suite: string } {
   return { found: [], suite: "" };
 }
 
+/** Python's `shlex.quote`, byte for byte: safe strings pass through
+ * bare, anything else is single-quoted with embedded quotes spliced
+ * as `'"'"'`. */
+function shlexQuote(s: string): string {
+  if (s === "") return "''";
+  if (/^[a-zA-Z0-9_@%+=:,./-]+$/.test(s)) return s;
+  return `'${s.replace(/'/g, `'"'"'`)}'`;
+}
+
 function mkDefault(
   which: string,
   gate: string,
@@ -242,7 +251,11 @@ function mkDefault(
 ): Check {
   const d = DEFAULTS[which]!;
   const command =
-    which === "gate" ? gate : which === "browser-suite" ? suite : `'${join(HERE, d.script ?? "")}'`;
+    which === "gate"
+      ? gate
+      : which === "browser-suite"
+        ? suite
+        : shlexQuote(join(HERE, d.script ?? ""));
   return {
     name: name || d.name,
     source: source || `default:${which}`,
@@ -2054,6 +2067,39 @@ shows = "passes only on what the gate rewrote"
       "a broken declaration is warned of, and no check is guessed",
       out2.includes("warn=checks: ") && !/^check\./m.test(out2),
       out2,
+    );
+  }
+  // The default check path quotes as BASE's shlex.quote does: safe paths
+  // pass through bare, and a path holding an apostrophe splices it as
+  // '"'"'. Goldens captured from python3's shlex once, on 2026-09-29;
+  // regenerate under python3 with -c and: "import shlex,sys;
+  // print(shlex.quote(open(sys.argv[1]).read().rstrip('\n')))".
+  {
+    const cases: Array<[string, string]> = [
+      ["", "''"],
+      ["/tool/check.sh", "/tool/check.sh"],
+      ["/tmp/o'clock/check.sh", `'/tmp/o'"'"'clock/check.sh'`],
+      ["it's o'clock", `'it'"'"'s o'"'"'clock'`],
+      ["a b", "'a b'"],
+      ["a$b", "'a$b'"],
+      ["Ünï", "'Ünï'"],
+      ["a\nb", "'a\nb'"],
+      ["-n", "-n"],
+      ['a"b', `'a"b'`],
+    ];
+    const seen: string[] = [];
+    let quoteOk = true;
+    for (const [input, want] of cases) {
+      const got = shlexQuote(input);
+      if (got !== want) {
+        quoteOk = false;
+        seen.push(`${JSON.stringify(input)}: ${JSON.stringify(got)} vs ${JSON.stringify(want)}`);
+      }
+    }
+    st.check(
+      "a check path quotes as shlex.quote does, apostrophes spliced",
+      quoteOk,
+      seen.join("\n"),
     );
   }
 
