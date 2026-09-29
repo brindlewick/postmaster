@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-27
+updated: 2026-09-29
 ---
 
 # postmaster wiki
@@ -22,7 +22,9 @@ Does implementing one ticket with several models, each unable to see the others'
 produce better software than one good model? If so, how?
 
 - [Combining models](concepts/combining-models.md): three hypotheses and five open questions,
-  all **claimed**, since no runs have been recorded yet.
+  all **claimed**, since no dispatched run has been promoted yet. An audit of 25 syntheses bears
+  on H1: the coachman's record of what it took from each lane cannot fail, and the second lane's
+  share, counted in git, ranges from nothing to most of the code.
 
 ## Harnesses
 
@@ -86,18 +88,23 @@ Why the design is shaped as it is.
 - [A lane may review through its harness's own skill](concepts/own-review-skills.md):
   **claimed**. A security lane runs its harness's own security review skill where it has one,
   and the brief where it has none; Claude Code's needs a clone whose `origin/HEAD` leads back to
-  the base.
+  the base. A bug lane runs its harness's code-review skill where it has one, names the change
+  from BASE, and does not review at all where it has none.
 - [The local tracker](concepts/local-tracker.md): **claimed**. With no service and no login,
   a repository's tickets live in its own git directory, and a repository whose store exists
   uses it whatever the config names.
 - [When a review loop should stop](concepts/review-convergence.md): **claimed**. Model reviewers
   do not run out of minor findings, so a loop should end on verified serious findings in the
   change's own code, and a mechanism whose fixes keep breaking should be redesigned rather than
-  fixed again. From the review of #36 and outside work. The user chose one round of bug review
-  for now, to revisit if many bugs reach production.
+  fixed again. From the review of #36 and outside work. The user chose: fix as much as can be
+  fixed in the first round, then repeat until there are no more P1 and P2 findings, with the cap
+  of three rounds as a backstop; many bugs reaching production stays the signal to revisit.
 - [Each project defines how a change to it is verified](concepts/verification.md): **claimed**.
   A project declares its checks or gets defaults by discovery; every workhorse runs them before
   it reports, and the coachman runs them again on each branch and on the synthesis.
+- [A project's .postmaster/ holds its settings and every run's record](concepts/project-settings.md):
+  **claimed**. Optional, gitignored whole, shared through one narrow file; run artifacts live
+  with the project so two checkouts with the same basename no longer share a ledger.
 
 ## Sources
 
