@@ -46,12 +46,20 @@
 #           or a muse or mimo resume of a thread the launch's data directory does not hold
 #   exit 3  skill: the lane's harness has no such skill recorded
 #   else    the harness's own exit code
+#
+# POSTMASTER_ATTEMPT_PHASE names the file this attempt's phase is written to:
+# `refused` before a launch or resume runs its preflight, `started` once the env
+# file has loaded and the harness is still callable. Only launch and resume ever
+# write it; form and skill do not, whatever the environment holds. The harness
+# does not inherit the variable, so nothing the attempt runs can overwrite it.
 set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
 ATTEMPT_PHASE_FILE=${POSTMASTER_ATTEMPT_PHASE:-}
 readonly ATTEMPT_PHASE_FILE
-attempt_phase() {
+PHASE_TRACKING=0
+attempt_phase() {  # launch and resume only: form and skill never touch the phase file
+  [ "$PHASE_TRACKING" -eq 1 ] || return 0
   [ -z "$ATTEMPT_PHASE_FILE" ] || printf '%s\n' "$1" > "$ATTEMPT_PHASE_FILE"
 }
 
@@ -196,6 +204,18 @@ if [ "${1:-}" = --self-test ]; then
   rm -f "$phasefile"; run phase-start resume coachman "$tmp/wt" thread-already-known "$tmp/no-prompt.txt" --leg synthesis
   [ "$rc" -eq 1 ] && [ "$(cat "$phasefile")" = refused ] \
     && ok "a refused resume with an existing thread id remains refused" || fail "a refused resume with an existing thread id remains refused"
+  printf 'started\n' > "$phasefile"; run phase-start skill coachman security-review --leg synthesis
+  [ "$rc" -eq 0 ] && [ "$(cat "$phasefile")" = started ] \
+    && ok "skill leaves the attempt phase file untouched" || fail "skill leaves the attempt phase file untouched"
+  printf 'started\n' > "$phasefile"; run phase-start form coachman --leg synthesis
+  [ "$rc" -eq 0 ] && [ "$(cat "$phasefile")" = started ] \
+    && ok "form leaves the attempt phase file untouched" || fail "form leaves the attempt phase file untouched"
+  mkdir "$tmp/phasebin"
+  printf '#!/bin/sh\nprintf "phase-var=%%s\\n" "${POSTMASTER_ATTEMPT_PHASE:-unset}"\n' > "$tmp/phasebin/claude" && chmod +x "$tmp/phasebin/claude"
+  rm -f "$phasefile"
+  out=$(env POSTMASTER_ATTEMPT_PHASE="$phasefile" POSTMASTER_CONFIG="$tmp/phase-start.toml" PATH="$tmp/phasebin:$tmp/bin:$PATH" "$self" launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg synthesis 2>"$tmp/err"); rc=$?
+  [ "$rc" -eq 0 ] && [ "$out" = "phase-var=unset" ] && [ "$(cat "$phasefile")" = started ] \
+    && ok "the harness does not inherit the attempt phase variable" || fail "the harness does not inherit the attempt phase variable"
   envx=""
   calls() {  # calls <runbook>...: each launch and resume in them, one per line, marked run or unrun
     python3 - "$@" <<'PY'
@@ -505,9 +525,9 @@ EOF
 fi
 
 die() { attempt_phase refused; echo "launch: $*" >&2; exit 1; }
-attempt_phase refused
 [ $# -ge 2 ] || die "usage: launch.sh form|launch|resume|skill <name> ... | --self-test"
 CMD=$1; NAME=$2; shift 2
+case $CMD in launch|resume) PHASE_TRACKING=1; attempt_phase refused ;; esac
 LEG=""; LAST=""; RUN=""; PROJECT=""; STDIN_FILE=""; args=()
 while [ $# -gt 0 ]; do
   case $1 in
@@ -794,6 +814,7 @@ if [ -n "${ENV_FILE:-}" ]; then
 fi
 command -v "$LAUNCH_HARNESS" >/dev/null 2>&1 || die "harness '$LAUNCH_HARNESS' is not on PATH after loading env_file for $NAME"
 unset POSTMASTER_LAUNCH_NAME   # the thread's own launches are named by their own host.sh call
+unset POSTMASTER_ATTEMPT_PHASE # the phase file is this attempt's: the harness must not inherit it
 attempt_phase started || die "cannot record that the harness started"
 "${cmd[@]}"
 rc=$?
