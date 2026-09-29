@@ -755,14 +755,17 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    rounds and result from its checkpoint record, or `none`; all open findings, one
    `- [<severity>] <id>: <title>` bullet each under `## Open findings` (`none` when there are
    none), the ids and severities the checkpoint gives; findings applied on the user's word and
-   not re-reviewed, one `- [<severity>] <id>` bullet each under `## Not re-reviewed`, or
-   `none`; the Style residue
+   not re-reviewed, one `- [<severity>] <id>` bullet each, with an optional `: <note>`,
+   under `## Not re-reviewed`, or `none`; the Style residue
    count as
    `<tool>/scripts/style-findings.sh count <dispatch>` prints it, then every Style residue from
    `<tool>/scripts/style-findings.sh list <dispatch>`; every branch created by the run and its
    state; lane outcomes; and the review link. The card's branch state is before merge: the
    ticket branch is ready, and every other branch is either retained or abandoned. The gate is
-   listed as the gate, never as a turnpike.
+   listed as the gate, never as a turnpike. Inside `## Checks`, `## Open findings` and
+   `## Not re-reviewed`, every line is blank, `none`, or one entry in the exact form above
+   starting at column 0; anything else — a comment, an indented line, a fence, prose — is
+   an input fault, and text outside those sections is never read.
 5. **Write the final hand-off.** Write
    `<dispatch>/handoff-<n>.md` with the verified results, all decisions and open findings, and
    state that no coachman leg follows and the postmaster must verify the card and handle

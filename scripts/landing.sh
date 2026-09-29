@@ -30,20 +30,27 @@
 #       as the cards carry them. This is the one place the vocabulary mapping lives:
 #       `no result logged` reads as `not run`, and the `at ...` suffix is dropped.
 #   landing.sh card-results <dispatch> <synthesis-wt> <card>
-#       whether the card's `## Checks` section (`- <name>: <result>` lines) gives every
-#       recorded check with the result `results` reports. Prints `match`, or one fault
-#       line per check that is missing, wrong, or not a recorded check. A missing section
-#       or a heading inside a fenced block is an input fault, never `match`.
+#       whether the card's `## Checks` section gives every recorded check with the result
+#       `results` reports. Inside the section every line is blank, `none`, or one entry
+#       `- <name>: <result>` starting at column 0; anything else is an input fault.
+#       Prints `match`, or one fault line per check that is missing, wrong, or not a
+#       recorded check. A missing section or a heading inside a fenced block is an input
+#       fault, never `match`. Text outside the section is never read.
 #   landing.sh card-findings <checkpoint> <card>
 #       whether the card's open findings match the checkpoint's final states. The checkpoint
 #       gives each finding one bullet `- [<severity>] <id>: <state>` with the state `open`,
 #       `closed round <n>`, `dismissed: <reason>`, or `applied on user word, not re-reviewed`.
+#       Inside `## Open findings` every line is blank, `none`, or one entry
+#       `- [<severity>] <id>: <title>` starting at column 0; inside `## Not re-reviewed`
+#       every line is blank, `none`, or one entry `- [<severity>] <id>` with an optional
+#       `: <note>`, starting at column 0; anything else is an input fault.
 #       Prints `match`, or one fault line per finding that breaks the mapping: an open
 #       finding missing from the card's `## Open findings` or at another severity, a closed
 #       or dismissed finding on that list, a user-applied finding on that list, missing
 #       from the card's `## Not re-reviewed`, or marked there at another severity, or a
 #       card id the checkpoint never gives. A missing section, a duplicate id, or a
-#       heading inside a fenced block is an input fault, never `match`.
+#       heading inside a fenced block is an input fault, never `match`. Text outside the
+#       sections is never read.
 #   landing.sh journey <dispatch> <synthesis-wt> <waybill>
 #       whether the journey holds landing. `clear` when no check's source names
 #       `web-journey`, or when the report exists and the journey check passed. `blocked`
@@ -93,9 +100,10 @@ def contains(repo, maybe_ancestor, ref):
 def changed(repo, old, new):  # the paths whose content differs, by NUL-split name list
     # Rename detection stays off: it names a rename by its new path one way and its old
     # path the other, and the disjointness tests below compare both directions. Submodule
-    # differences are never ignored: a bumped gitlink is a path the ticket changed.
-    r = subprocess.run(["git", "-C", repo, "-c", "diff.ignoreSubmodules=none", "diff",
-                        "--no-renames", "--name-only", "-z", old, new],
+    # differences are never ignored: the argv flag beats even per-submodule ignore config,
+    # where -c would lose to it. A bumped gitlink is a path the ticket changed.
+    r = subprocess.run(["git", "-C", repo, "diff", "--no-renames", "--ignore-submodules=none",
+                        "--name-only", "-z", old, new],
                        capture_output=True, text=True)
     if r.returncode != 0:
         die("cannot diff %s against %s: %s" % (old, new, r.stderr.strip()))
@@ -131,21 +139,33 @@ def recorded_results(dispatch, wt):  # [(name, result)]: verify.sh results with 
         die("verify.sh results reported no checks")
     return out
 
-FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 FENCED_HEAD = re.compile(r"^##\s+")
 
-def unfenced(text, which):  # the lines outside fenced blocks; a heading inside one is unreadable
-    out, inside = [], False
+def spans(text):  # [(inside, line)]: CommonMark fence tracking; only a run at least as
+    out, inside, fence = [], False, None  # long as the opener, same mark, closes it
     for line in text.splitlines():
-        if FENCE.match(line):
-            inside = not inside
+        m = FENCE.match(line)
+        if m:
+            mark = m.group(1)
+            if not inside:
+                inside, fence = True, (mark[0], len(mark))
+            elif mark[0] == fence[0] and len(mark) >= fence[1] \
+                    and line[m.end(1):].strip() == "":
+                inside, fence = False, None
+            out.append((True, line))
             continue
-        if inside:
-            if FENCED_HEAD.match(line):
-                die("%s: heading inside a fenced block: %s" % (which, line.strip()))
-            continue
-        out.append(line)
+        out.append((inside, line))
     return out
+
+def check_fences(text, which):  # a heading inside a fenced block is unreadable
+    for inside, line in spans(text):
+        if inside and FENCED_HEAD.match(line):
+            die("%s: heading inside a fenced block: %s" % (which, line.strip()))
+
+def open_lines(text, which):  # the lines outside fenced blocks; headings inside die above
+    check_fences(text, which)
+    return [line for inside, line in spans(text) if not inside]
 
 def section(lines, title):  # (found, lines): the ## section's lines, to the next ## or EOF
     found, inside, out = False, False, []
@@ -159,9 +179,22 @@ def section(lines, title):  # (found, lines): the ## section's lines, to the nex
             out.append(line)
     return found, out
 
-CHECK_BULLET = re.compile(r"^\s*[-*]\s+([a-z][a-z0-9-]*)\s*:\s*(.*?)\s*$")
 FINDING = re.compile(r"^\s*[-*]\s+\[(P[123])\]\s+([A-Za-z0-9][A-Za-z0-9_.+-]*)\s*:\s*(.+?)\s*$")
-OPENREF = re.compile(r"^\s*[-*]\s+\[(P[123])\]\s+([A-Za-z0-9][A-Za-z0-9_.+-]*)\b")
+CHECK_ENTRY = re.compile(r"^- ([a-z][a-z0-9-]*): (pass|fail|not run)$")
+OPEN_ENTRY = re.compile(r"^- \[(P[123])\] ([A-Za-z0-9][A-Za-z0-9_.+-]*): (\S.*)$")
+NRR_ENTRY = re.compile(r"^- \[(P[123])\] ([A-Za-z0-9][A-Za-z0-9_.+-]*)(: .*)?$")
+
+def entries(lines, title, rx):  # the section's entry matches; every other line faults
+    out = []  # (blank and none pass; trailing whitespace is ignored)
+    for line in lines:
+        s = line.rstrip()
+        if s.strip() == "" or s == "none":
+            continue
+        m = rx.match(s)
+        if not m:
+            die("card: ## %s: not an entry: %s" % (title, s))
+        out.append(m)
+    return out
 CLOSED = re.compile(r"^closed round (\d+)$")
 DISMISSED = re.compile(r"^dismissed:\s*(.+?)\s*$")
 USER_APPLIED = "applied on user word, not re-reviewed"
@@ -254,19 +287,16 @@ if mode == "card-results":
         print("usage: landing.sh card-results <dispatch> <synthesis-wt> <card>", file=sys.stderr)
         sys.exit(1)
     want = recorded_results(sys.argv[2], sys.argv[3])
-    found, lines = section(unfenced(load(sys.argv[4]), "card"), "Checks")
-    faults, card = [], {}
+    text = load(sys.argv[4])
+    check_fences(text, "card")
+    found, lines = section(text.splitlines(), "Checks")
     if not found:
         die("card: no ## Checks section")
-    for line in lines:
-        m = CHECK_BULLET.match(line)
-        if not m:
-            continue
+    faults, card = [], {}
+    for m in entries(lines, "Checks", CHECK_ENTRY):
         name, words = m.group(1), m.group(2)
         if name in card:
             faults.append("%s: listed twice" % name)
-        elif words not in ("pass", "fail", "not run"):
-            faults.append("%s: unreadable result: %s" % (name, words))
         else:
             card[name] = words
     for name, result in want:
@@ -286,7 +316,7 @@ if mode == "card-findings":
         print("usage: landing.sh card-findings <checkpoint> <card>", file=sys.stderr); sys.exit(1)
     checkpoint, card_text = load(sys.argv[2]), load(sys.argv[3])
     faults, states = [], {}
-    for line in unfenced(checkpoint, "checkpoint"):
+    for line in open_lines(checkpoint, "checkpoint"):
         m = FINDING.match(line)
         if not m:
             continue
@@ -298,26 +328,23 @@ if mode == "card-findings":
             faults.append("checkpoint: %s: unreadable state: %s" % (fid, words))
             continue
         states[fid] = (sev, state)
-    card_lines = unfenced(card_text, "card")
-    found_open, open_lines = section(card_lines, "Open findings")
-    found_nrr, nrr_lines = section(card_lines, "Not re-reviewed")
+    check_fences(card_text, "card")
+    card_lines = card_text.splitlines()
+    found_open, open_section = section(card_lines, "Open findings")
+    found_nrr, nrr_section = section(card_lines, "Not re-reviewed")
     if not found_open:
         die("card: no ## Open findings section")
     if not found_nrr:
         die("card: no ## Not re-reviewed section")
     open_list, nrr = {}, {}
-    for line in open_lines:
-        m = OPENREF.match(line)
-        if m:
-            if m.group(2) in open_list:
-                die("%s: listed twice on the card's open list" % m.group(2))
-            open_list[m.group(2)] = m.group(1)
-    for line in nrr_lines:
-        m = OPENREF.match(line)
-        if m:
-            if m.group(2) in nrr:
-                die("%s: listed twice under the card's Not re-reviewed" % m.group(2))
-            nrr[m.group(2)] = m.group(1)
+    for m in entries(open_section, "Open findings", OPEN_ENTRY):
+        if m.group(2) in open_list:
+            die("%s: listed twice on the card's open list" % m.group(2))
+        open_list[m.group(2)] = m.group(1)
+    for m in entries(nrr_section, "Not re-reviewed", NRR_ENTRY):
+        if m.group(2) in nrr:
+            die("%s: listed twice under the card's Not re-reviewed" % m.group(2))
+        nrr[m.group(2)] = m.group(1)
     for fid, (sev, state) in states.items():
         if state == "open":
             if fid not in open_list:
@@ -363,7 +390,8 @@ if mode == "journey":
              and isinstance(c.get("name"), str)]
     if not names:
         print("clear: no check uses web-journey"); sys.exit(0)
-    if not re.search(r"^#{1,6}[ \t]+user journey[ \t]*[:.;!?…]*[ \t]*#*[ \t]*$", load(waybill),
+    visible = "\n".join(line for inside, line in spans(load(waybill)) if not inside)
+    if not re.search(r"^#{1,6}[ \t]+user journey[ \t]*[:.;!?…]*[ \t]*#*[ \t]*$", visible,
                      re.M | re.I):
         print("judge: no User journey section; %s judged like any other non-pass"
               % ", ".join(names)); sys.exit(0)
@@ -538,6 +566,25 @@ git -C "$SM/outer" checkout -q main || exit 1
 git -C "$SM/outer" config diff.ignoreSubmodules all
 out=$("$SELF" anything-to-land --repo "$SM/outer" --default main --ticket ticket --base "$SMB" 2>&1); rc=$?
 expect "W2: a submodule bump lands with ignoreSubmodules set" 0 "land"
+SI=$tmp/si; mkrepo "$SI/sub"; commit "$SI/sub" f S S
+mkrepo "$SI/outer"
+git -C "$SI/outer" -c protocol.file.allow=always submodule -q add ../sub sub || exit 1
+git -C "$SI/outer/sub" config user.email t@t && git -C "$SI/outer/sub" config user.name t || exit 1
+git -C "$SI/outer" commit -qm addsub || exit 1; SIB=$(git -C "$SI/outer" rev-parse HEAD)
+git -C "$SI/outer" checkout -qb ticket || exit 1
+printf 'T\n' > "$SI/outer/real.txt"
+printf 'S2\n' > "$SI/outer/sub/f"; git -C "$SI/outer/sub" commit -qam s2 || exit 1
+git -C "$SI/outer" add sub real.txt && git -C "$SI/outer" commit -qm both || exit 1
+SIH=$(git -C "$SI/outer" rev-parse HEAD)
+git -C "$SI/outer" checkout -q main || exit 1
+printf 'T\n' > "$SI/outer/real.txt"
+git -C "$SI/outer" add real.txt && git -C "$SI/outer" commit -qm squashlike || exit 1
+SIM=$(git -C "$SI/outer" rev-parse HEAD)
+git -C "$SI/outer" config submodule.sub.ignore all
+out=$("$SELF" anything-to-land --repo "$SI/outer" --default main --ticket ticket --base "$SIB" 2>&1); rc=$?
+expect "X1: a submodule bump lands with per-submodule ignore set" 0 "land"
+out=$("$SELF" already-landed --repo "$SI/outer" --default main --ticket ticket --base "$SIB" --card-head "$SIH" --pr-merge "$SIM" 2>&1); rc=$?
+expect "X1: a merge missing the ignored bump does not count" 0 "not-landed"
 
 echo "fresh"
 F=$tmp/fr; mkrepo "$F"
@@ -604,6 +651,9 @@ expect "W5: a card with no Checks section is an input fault" 1 "landing: card: n
 printf '# Card\n\n## Checks\n\n- gate: pass\n- unit: not run\n\n```\n## Checks\n- gate: pass\n```\n' > "$D/card-fence.md"
 out=$("$SELF" card-results "$D" "$W" "$D/card-fence.md" 2>&1); rc=$?
 expect "W8: a heading inside a fence is an input fault" 1 "landing: card: heading inside a fenced block: ## Checks"
+printf '# Card\n\n## Checks\n\n- gate: pass\n- unit: not run\n\n<!-- hidden -->\n' > "$D/card-comment.md"
+out=$("$SELF" card-results "$D" "$W" "$D/card-comment.md" 2>&1); rc=$?
+expect "X2: a comment inside Checks is an input fault" 1 "landing: card: ## Checks: not an entry: <!-- hidden -->"
 
 echo "card-findings"
 printf '%s\n' "## Findings (bug)" "" "- [P1] bug-1: open" "- [P2] bug-2: closed round 2" \
@@ -643,7 +693,7 @@ out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-nrrtitle.md" 2>&1); rc=$
 expect "V3: the specified Not re-reviewed bullet passes, titled or bare" 0 "match"
 printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- sec-2" > "$D/card-nrrbare.md"
 out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-nrrbare.md" 2>&1); rc=$?
-expect "V3: a bullet outside the specified shape is not the mark" 2 "sec-2: applied on user word, not marked not re-reviewed"
+expect "V3/X2: a bullet outside the specified shape is an input fault" 1 "landing: card: ## Not re-reviewed: not an entry: - sec-2"
 printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- [P3] sec-2" > "$D/card-nrrsev.md"
 out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-nrrsev.md" 2>&1); rc=$?
 expect "W4: a Not re-reviewed severity that disagrees faults" 2 "sec-2: applied on user word at P2 in the checkpoint, marked P3 not re-reviewed"
@@ -672,6 +722,18 @@ expect "W9: a duplicate id under Not re-reviewed is an input fault" 1 "landing: 
 printf '%s\n' "## Findings (bug)" "" "- [P1] bug-1: open" "- [P2] bug-1: closed round 1" > "$D/cp-dup.md"
 out=$("$SELF" card-findings "$D/cp-dup.md" "$D/card-fenceok.md" 2>&1); rc=$?
 expect "W9: a duplicate id in the checkpoint is an input fault" 1 "landing: checkpoint: bug-1: listed twice"
+printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "    - [P2] bug-2: indented" "" "## Not re-reviewed" "" "- [P2] sec-2" > "$D/card-indent.md"
+out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-indent.md" 2>&1); rc=$?
+expect "X2: an indented bullet inside Open findings is an input fault" 1 "landing: card: ## Open findings: not an entry:     - [P2] bug-2: indented"
+printf '%s\n' "# Card" "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- [P2] sec-2" '````' '- [P2] sec-2: says nothing' '```' '````' > "$D/card-nest.md"
+out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-nest.md" 2>&1); rc=$?
+expect "X2: a nested fence inside Not re-reviewed is an input fault" 1 "landing: card: ## Not re-reviewed: not an entry: \`\`\`\`"
+printf '%s\n' "# Card" "" "<!-- outside -->" "    - [P9] no: outside" '```' "- [P9] no: outside" '```' "" "## Open findings" "" "- [P1] bug-1: the bypass" "" "## Not re-reviewed" "" "- [P2] sec-2" > "$D/card-outside.md"
+out=$("$SELF" card-findings "$D/checkpoint.md" "$D/card-outside.md" 2>&1); rc=$?
+expect "X2: the same text outside the sections is ignored" 0 "match"
+printf '%s\n' "## Findings (bug)" "" "- [P2] bug-2: closed round 1" "" '````' "- [P1] ghost: inside" '```' "- [P1] bug-1: open" '````' > "$D/cp-nest.md"
+out=$("$SELF" card-findings "$D/cp-nest.md" "$D/card-fenceok.md" 2>&1); rc=$?
+expect "X2: a nested fence in the checkpoint hides both bullets" 0 "match"
 
 echo "journey"
 printf '{"checks": [{"name": "gate", "source": "default:gate", "command": "true", "shows": "x"}, {"name": "journey", "source": "default:web-journey", "command": "true", "shows": "x"}]}\n' > "$D/jchecks.json"
@@ -705,6 +767,9 @@ expect "W10: a trailing full stop still names the section" 2 "blocked: journey: 
 printf '# T\n\n## Problem / feature\nA change.\n\n## User journey log\n1. Open it.\n' > "$J/other.md"
 out=$("$SELF" journey "$J" "$JW" "$J/other.md" 2>&1); rc=$?
 expect "V10: extra heading words still name another section" 0 "judge: no User journey section; journey judged like any other non-pass"
+printf '# T\n\n## Problem / feature\nA change.\n\n```\n## User journey\n1. Open it.\n```\n' > "$J/fenced.md"
+out=$("$SELF" journey "$J" "$JW" "$J/fenced.md" 2>&1); rc=$?
+expect "X5: a fenced-only User journey is not the section" 0 "judge: no User journey section; journey judged like any other non-pass"
 printf '{"action": "verify", "target": "journey", "ts": "2026-01-01T00:00:01Z", "detail": "on=main@%s result=fail exit=1 secs=1"}\n' "$JSHA12" >> "$J/actions.jsonl"
 out=$("$SELF" journey "$J" "$JW" "$J/journey.md" 2>&1); rc=$?
 expect "a failed journey with its report is judged" 0 "judge: journey failed with its report at $JREP; weigh it"

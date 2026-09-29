@@ -281,7 +281,8 @@ On `.card-ready`, read `run.json`, the manifest's current `leg`, `card.md`, and
 `handoff-<leg>.md`. Do not use this route for a run without `coachman_contract: 2`; its legacy
 route follows below. An exit 1 from any `<tool>/scripts/landing.sh` call in Stage F or
 Stage G below is a fault in its inputs, not an answer: fix the inputs and re-run; never
-proceed past it.
+proceed past it. Run `git fetch` in the ticket repo before asking `fresh`, and again after
+the user's merge word, so every ref the script resolves is current.
 
 1. **Verify the card's claims against the code**, never against the card.
    `<tool>/scripts/landing.sh fresh --repo <repo> --default <branch> --ticket
@@ -291,8 +292,11 @@ proceed past it.
    withhold: remove `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`,
    then resume that last leg to merge the default branch into the ticket branch, never
    rebasing, run its gates again and raise the card again, and wait for the corrected card.
-   For a change to the coachman contract, that merge also means a new fixture run from the
-   final branch, by the user's word of the same day. Then
+   For a change to the coachman contract, that merge means a new fixture run from the final
+   branch only when what the merge brought in changes the coachman contract; otherwise the
+   earlier fixture result stands. Until #163 (a script that decides whether a change touches
+   the contract) lands, that is the postmaster's judgement from the tickets the default
+   branch merged. Then
    `<tool>/scripts/landing.sh card-results <dispatch> <synthesis-wt> <dispatch>/card.md`
    must print `match`: the card gives every check as the script reports it. Then
    `<tool>/scripts/landing.sh journey <dispatch> <synthesis-wt> <dispatch>/brief.md` must
@@ -379,8 +383,9 @@ proceed past it.
 1. Confirm the default branch contains the merge and the ticket is done — or, where the
    ticket closed on nothing-to-land with no merge, that `anything-to-land --repo <repo>
    --default <branch> --ticket <ticket-branch> --base <the manifest's base>` still says
-   `nothing-to-land` and the `merge` line holds the user's word that there was nothing to
-   land. Stop the preview
+   `nothing-to-land` and the `merge` line holds the step's evidence: the user's word that
+   there was nothing to land (step 2), or the merge word with the no-diff evidence
+   (step 3). Stop the preview
    process group from `<dispatch>/render/preview.pid`, if one was started. Run
    `<tool>/scripts/style-findings.sh check <dispatch>`. The postmaster writes or corrects
    `<dispatch>/style-sort.md` using the sorting rules in `coachman.md`, then checks it again
