@@ -11,9 +11,10 @@
 #       paths since BASE, the merge is on the default branch, and it contains the card's
 #       final HEAD: by ancestry, or, for a squash or rebase merge, by content, with every
 #       added and removed line of the ticket's diff on each path it changed present in the
-#       merge's diff on that path, counting duplicates (paths with no text lines must
-#       agree between card and merge instead). `re-verify`, never `landed`, when the
-#       ticket branch moved
+#       merge's diff on that path, counting duplicates, and the file modes at card
+#       and merge agree on every changed path present in both (paths with no text
+#       lines must agree between card and merge instead). `re-verify`, never
+#       `landed`, when the ticket branch moved
 #       past the card's HEAD. Otherwise `not-landed`.
 #   landing.sh anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha>
 #       whether the branch holds anything to land. `nothing-to-land` when the ticket's diff
@@ -221,12 +222,27 @@ def diff_lines(repo, a, b, path):  # (added, removed) line multisets, -U0, no dr
     if r.returncode != 0:
         die("git diff %s %s failed" % (a[:12], b[:12]))
     added, removed = Counter(), Counter()
-    for line in r.stdout.splitlines():
-        if line.startswith("+") and not line.startswith("+++"):
+    in_hunk = False  # only hunk lines count: a header test cannot tell +++ b/f
+    for line in r.stdout.splitlines():  # from an added ++ line, which git emits the same way
+        if line.startswith("@@"):
+            in_hunk = True
+            continue
+        if line.startswith("diff --git"):
+            in_hunk = False
+            continue
+        if not in_hunk:
+            continue
+        if line.startswith("+"):
             added[line[1:]] += 1
-        elif line.startswith("-") and not line.startswith("---"):
+        elif line.startswith("-"):
             removed[line[1:]] += 1
     return added, removed
+
+def file_mode(repo, commit, path):  # the mode bits, or None when the path is absent
+    rc, out = git(repo, "ls-tree", commit, "--", path)
+    if rc != 0 or not out:
+        return None
+    return out.split()[0]
 
 def content_landed(repo, base, card, merge, paths):  # every ticket line-change is in the merge
     changed_cm = changed(repo, card, merge)
@@ -238,6 +254,9 @@ def content_landed(repo, base, card, merge, paths):  # every ticket line-change 
             continue
         a_m, r_m = diff_lines(repo, base, merge, p)
         if a_c - a_m or r_c - r_m:  # multisets: duplicates count; order is not seen
+            return False
+        mc, mm = file_mode(repo, card, p), file_mode(repo, merge, p)
+        if mc is not None and mm is not None and mc != mm:
             return False
     return True
 
@@ -372,7 +391,7 @@ if mode == "journey":
             % ((r.stderr.strip() or r.stdout.strip() or "no output") if r.returncode != 0
                else "said %r" % said))
     if said == "no journey":
-        print("judge: no User journey section; %s judged like any other non-pass"
+        print("judge: no user journey mentioned; %s judged like any other non-pass"
               % ", ".join(names)); sys.exit(0)
     r = subprocess.run([VERIFY, "journey-path", wt, dispatch], capture_output=True, text=True)
     if r.returncode != 0 or not r.stdout.strip():
@@ -481,21 +500,21 @@ git -C "$SS" merge -q --squash ticket || exit 1; git -C "$SS" commit -qm PR || e
 SSM=$(git -C "$SS" rev-parse HEAD)
 out=$("$SELF" already-landed --repo "$SS" --default main --ticket ticket --base "$SSB" --card-head "$SSH" --pr-merge "$SSM" 2>&1); rc=$?
 expect "AC3: a squash merge holding the ticket plus an independent same-file change is landed" 0 "landed"
-MD=$tmp/md; mkrepo "$MD"   # AD1: duplicated lines count, they do not collapse
-printf 'base\n' > "$MD/f"; git -C "$MD" add f && git -C "$MD" commit -qm A || exit 1
-MDB=$(git -C "$MD" rev-parse HEAD)
-git -C "$MD" checkout -qb ticket || exit 1
-printf 'base\nsame\nsame\n' > "$MD/f"; git -C "$MD" commit -qam T || exit 1
-MDH=$(git -C "$MD" rev-parse HEAD)
-git -C "$MD" checkout -q main || exit 1
-printf 'base\nsame\nother\n' > "$MD/f"; git -C "$MD" commit -qam PR || exit 1
-MDM=$(git -C "$MD" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$MD" --default main --ticket ticket --base "$MDB" --card-head "$MDH" --pr-merge "$MDM" 2>&1); rc=$?
+MDUP=$tmp/mdup; mkrepo "$MDUP"   # AD1: duplicated lines count, they do not collapse
+printf 'base\n' > "$MDUP/f"; git -C "$MDUP" add f && git -C "$MDUP" commit -qm A || exit 1
+MDUPB=$(git -C "$MDUP" rev-parse HEAD)
+git -C "$MDUP" checkout -qb ticket || exit 1
+printf 'base\nsame\nsame\n' > "$MDUP/f"; git -C "$MDUP" commit -qam T || exit 1
+MDUPH=$(git -C "$MDUP" rev-parse HEAD)
+git -C "$MDUP" checkout -q main || exit 1
+printf 'base\nsame\nother\n' > "$MDUP/f"; git -C "$MDUP" commit -qam PR || exit 1
+MDUPM=$(git -C "$MDUP" rev-parse HEAD)
+out=$("$SELF" already-landed --repo "$MDUP" --default main --ticket ticket --base "$MDUPB" --card-head "$MDUPH" --pr-merge "$MDUPM" 2>&1); rc=$?
 expect "AD1: a merge holding one of two identical added lines is not landed" 0 "not-landed"
-git -C "$MD" checkout -q main || exit 1
-printf 'base\nsame\nsame\nextra\n' > "$MD/f"; git -C "$MD" commit -qam PR2 || exit 1
-MDM2=$(git -C "$MD" rev-parse HEAD)
-out=$("$SELF" already-landed --repo "$MD" --default main --ticket ticket --base "$MDB" --card-head "$MDH" --pr-merge "$MDM2" 2>&1); rc=$?
+git -C "$MDUP" checkout -q main || exit 1
+printf 'base\nsame\nsame\nextra\n' > "$MDUP/f"; git -C "$MDUP" commit -qam PR2 || exit 1
+MDUPM2=$(git -C "$MDUP" rev-parse HEAD)
+out=$("$SELF" already-landed --repo "$MDUP" --default main --ticket ticket --base "$MDUPB" --card-head "$MDUPH" --pr-merge "$MDUPM2" 2>&1); rc=$?
 expect "AD1: a merge holding both identical added lines plus more is landed" 0 "landed"
 MR=$tmp/mr; mkrepo "$MR"
 printf 'A\ndup\ndup\n' > "$MR/f"; git -C "$MR" add f && git -C "$MR" commit -qm A || exit 1
@@ -508,6 +527,71 @@ printf 'A\ndup\n' > "$MR/f"; git -C "$MR" commit -qam PR || exit 1
 MRM=$(git -C "$MR" rev-parse HEAD)
 out=$("$SELF" already-landed --repo "$MR" --default main --ticket ticket --base "$MRB" --card-head "$MRH" --pr-merge "$MRM" 2>&1); rc=$?
 expect "AD1: a merge removing one of two identical removed lines is not landed" 0 "not-landed"
+HH=$tmp/hh; mkrepo "$HH"   # AE2: content lines are counted inside hunks, never as headers
+printf 'base\n' > "$HH/f"; git -C "$HH" add f && git -C "$HH" commit -qm A || exit 1
+HHB=$(git -C "$HH" rev-parse HEAD)
+git -C "$HH" checkout -qb ticket || exit 1
+printf 'base\nordinary\n++critical\n' > "$HH/f"; git -C "$HH" commit -qam T || exit 1
+HHH=$(git -C "$HH" rev-parse HEAD)
+git -C "$HH" checkout -q main || exit 1
+printf 'base\nordinary\n' > "$HH/f"; git -C "$HH" commit -qam PR || exit 1
+HHM=$(git -C "$HH" rev-parse HEAD)
+out=$("$SELF" already-landed --repo "$HH" --default main --ticket ticket --base "$HHB" --card-head "$HHH" --pr-merge "$HHM" 2>&1); rc=$?
+expect "AE2: a merge missing an added ++ line is not landed" 0 "not-landed"
+HR=$tmp/hr; mkrepo "$HR"
+printf 'keep\n--gone\nalsogone\n' > "$HR/f"; git -C "$HR" add f && git -C "$HR" commit -qm A || exit 1
+HRB=$(git -C "$HR" rev-parse HEAD)
+git -C "$HR" checkout -qb ticket || exit 1
+printf 'keep\n' > "$HR/f"; git -C "$HR" commit -qam T || exit 1
+HRH=$(git -C "$HR" rev-parse HEAD)
+git -C "$HR" checkout -q main || exit 1
+printf 'keep\n--gone\n' > "$HR/f"; git -C "$HR" commit -qam PR || exit 1
+HRM=$(git -C "$HR" rev-parse HEAD)
+out=$("$SELF" already-landed --repo "$HR" --default main --ticket ticket --base "$HRB" --card-head "$HRH" --pr-merge "$HRM" 2>&1); rc=$?
+expect "AE2: a merge missing a removed -- line is not landed" 0 "not-landed"
+git -C "$HH" checkout -q main || exit 1
+printf 'base\nordinary\n++critical\n++more\n' > "$HH/f"; git -C "$HH" commit -qam PR2 || exit 1
+HHM2=$(git -C "$HH" rev-parse HEAD)
+out=$("$SELF" already-landed --repo "$HH" --default main --ticket ticket --base "$HHB" --card-head "$HHH" --pr-merge "$HHM2" 2>&1); rc=$?
+expect "AE2: a merge holding the ++ line plus more is landed" 0 "landed"
+MF=$tmp/mf; mkrepo "$MF"   # AE2 guard: hunk tracking spans a many-file diff
+printf 'a\n' > "$MF/f"; printf 'b\n' > "$MF/g"; git -C "$MF" add f g && git -C "$MF" commit -qm A || exit 1
+MFB=$(git -C "$MF" rev-parse HEAD)
+git -C "$MF" checkout -qb ticket || exit 1
+printf 'a\nA\n' > "$MF/f"; printf 'b\nB\n' > "$MF/g"; git -C "$MF" commit -qam T || exit 1
+MFH=$(git -C "$MF" rev-parse HEAD)
+git -C "$MF" checkout -q main || exit 1
+printf 'a\nA\nX\n' > "$MF/f"; printf 'b\nB\nY\n' > "$MF/g"; git -C "$MF" commit -qam PR || exit 1
+MFM=$(git -C "$MF" rev-parse HEAD)
+out=$("$SELF" already-landed --repo "$MF" --default main --ticket ticket --base "$MFB" --card-head "$MFH" --pr-merge "$MFM" 2>&1); rc=$?
+expect "AE2: a many-file squash holding every ticket line is landed" 0 "landed"
+XB=$tmp/xb; mkrepo "$XB"   # AE3: modes agree at card and merge, beside the lines
+printf 'base\n' > "$XB/f"; git -C "$XB" add f && git -C "$XB" commit -qm A || exit 1
+XBB=$(git -C "$XB" rev-parse HEAD)
+git -C "$XB" checkout -qb ticket || exit 1
+printf 'base\nnewline\n' > "$XB/f"; chmod +x "$XB/f"; git -C "$XB" add f && git -C "$XB" commit -qm T || exit 1
+XBH=$(git -C "$XB" rev-parse HEAD)
+git -C "$XB" checkout -q main || exit 1
+printf 'base\nnewline\n' > "$XB/f"; git -C "$XB" add f && git -C "$XB" commit -qm PR || exit 1
+XBM=$(git -C "$XB" rev-parse HEAD)
+out=$("$SELF" already-landed --repo "$XB" --default main --ticket ticket --base "$XBB" --card-head "$XBH" --pr-merge "$XBM" 2>&1); rc=$?
+expect "AE3: a merge with the text but without the executable bit is not landed" 0 "not-landed"
+git -C "$XB" checkout -q main || exit 1
+chmod +x "$XB/f"; git -C "$XB" add f && git -C "$XB" commit -qm PR2 || exit 1
+XBM2=$(git -C "$XB" rev-parse HEAD)
+out=$("$SELF" already-landed --repo "$XB" --default main --ticket ticket --base "$XBB" --card-head "$XBH" --pr-merge "$XBM2" 2>&1); rc=$?
+expect "AE3: a merge with the text and the bit is landed" 0 "landed"
+XM=$tmp/xm; mkrepo "$XM"
+printf 'base\n' > "$XM/f"; git -C "$XM" add f && git -C "$XM" commit -qm A || exit 1
+XMB=$(git -C "$XM" rev-parse HEAD)
+git -C "$XM" checkout -qb ticket || exit 1
+chmod +x "$XM/f"; git -C "$XM" add f && git -C "$XM" commit -qm T || exit 1
+XMH=$(git -C "$XM" rev-parse HEAD)
+git -C "$XM" checkout -q main || exit 1
+printf 'base\nother\n' > "$XM/f"; git -C "$XM" add f && git -C "$XM" commit -qm PR || exit 1
+XMM=$(git -C "$XM" rev-parse HEAD)
+out=$("$SELF" already-landed --repo "$XM" --default main --ticket ticket --base "$XMB" --card-head "$XMH" --pr-merge "$XMM" 2>&1); rc=$?
+expect "AE3: a mode-only change still needs the trees to agree" 0 "not-landed"
 out=$("$SELF" already-landed --repo "$R" --default main --ticket sq --base "$BASE" --card-head "$(git -C "$R" rev-parse sq)" --pr-merge "$NOMERGE" 2>&1); rc=$?
 expect "a merge without the card HEAD's content does not count" 0 "not-landed"
 git -C "$R" checkout -qb moved "$TIP" || exit 1; commit "$R" f T3 T3
@@ -882,7 +966,7 @@ NJ=$tmp/njd; mkdir "$NJ"; cp "$tmp/nj.json" "$NJ/checks.json"; cp "$J/actions.js
 out=$("$SELF" journey "$NJ" "$JW" "$J/journey.md" 2>&1); rc=$?
 expect "no check using web-journey is clear" 0 "clear: no check uses web-journey"
 out=$("$SELF" journey "$J" "$JW" "$J/plain.md" 2>&1); rc=$?
-expect "no User journey section is judged, not blocked" 0 "judge: no User journey section; journey judged like any other non-pass"
+expect "AE5: no mentioned journey is judged, not blocked" 0 "judge: no user journey mentioned; journey judged like any other non-pass"
 out=$("$SELF" journey "$J" "$JW" "$J/journey.md" 2>&1); rc=$?
 expect "a missing report blocks" 2 "blocked: journey: no journey report at $JREP"
 mkdir -p "$(dirname "$JREP")" && printf 'walked\n' > "$JREP"

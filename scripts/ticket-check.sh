@@ -16,11 +16,13 @@
 #   ticket-check.sh --has-journey <file>                  print `journey` or `no journey`: whether
 #                                                         the phrase "user journey" occurs anywhere in
 #                                                         the text, case-insensitively, with whitespace
-#                                                         runs collapsed and markup (`#`, `>`, `*`, `_`,
-#                                                         backticks, comment openers and closers) read
-#                                                         as spaces. No headings are read. Fail-closed:
-#                                                         a mention in passing blocks landing visibly
-#                                                         until the journey runs or the user rules.
+#                                                         runs (and zero-width joiners) collapsed, the
+#                                                         possessive `'s`/`’s` dropped, and markup (`#`,
+#                                                         `>`, `*`, `_`, backticks, apostrophes, comment
+#                                                         openers and closers) read as spaces. No headings
+#                                                         are read. Fail-closed: a mention in passing
+#                                                         blocks landing visibly until the journey runs
+#                                                         or the user rules.
 #   ticket-check.sh --self-test
 #
 # What it judges, and nothing more:
@@ -353,10 +355,12 @@ def splice(base_text, sections_text):
             lines.append("")
     return "\n".join(lines) + "\n"
 
-JOURNEY_MARKUP = re.compile(r"<!--|-->|[#> *_`]+")
+JOURNEY_MARKUP = re.compile(r"<!--|-->|[#> *_`'\u2019]+")
+JOURNEY_SPACE = re.compile(r"[\s\u200b\u2060\u00ad]+")
 
 def has_journey(text):  # fail-closed: the phrase anywhere counts, whatever shapes it
-    flat = re.sub(r"\s+", " ", JOURNEY_MARKUP.sub(" ", text))
+    text = re.sub(r"['\u2019][sS]\b", "", text)  # the possessive reads as the bare phrase
+    flat = JOURNEY_SPACE.sub(" ", JOURNEY_MARKUP.sub(" ", text))
     return "user journey" in flat.lower()
 
 mode = sys.argv[1]
@@ -935,6 +939,18 @@ jbody "$P" "$A" "$D" "$K" "## Notes" "The user journeys through checkout."
 jexpect "journey-phrase: the phrase as a substring still reads" "journey"
 jbody "$P" "$A" "$D" "$K" "## Notes" "The journey is long and winding."
 jexpect "journey-phrase: the word journey alone is not the phrase" "no journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "Improve the user's journey at checkout."
+jexpect "AE4: the ASCII possessive still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "Improve the user’s journey at checkout."
+jexpect "AE4: the curly possessive still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" $'Improve the user\xe2\x80\x8bjourney.'
+jexpect "AE4: a zero-width space still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" $'Improve the user\xe2\x81\xa0journey.'
+jexpect "AE4: a word joiner still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" $'Improve the user\xc2\xadjourney.'
+jexpect "AE4: a soft hyphen still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "Improve the user&#32;journey."
+jexpect "AE4: an entity is not decoded" "no journey"
 body "<!-- x --> ## Problem / feature
 A ticket reaches a coachman with words under it." "$A" "$D" "$K"; run "$T"
 expect "a same-line remainder does not satisfy a required part" 2 "problem / feature"

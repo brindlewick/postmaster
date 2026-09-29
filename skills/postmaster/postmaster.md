@@ -284,18 +284,22 @@ Stage G below is a fault in its inputs, not an answer: fix the inputs and re-run
 proceed past it. Resolve the default branch's upstream ref and remote with one command,
 `git for-each-ref --format='%(upstream:short) %(upstream:remotename)' refs/heads/<branch>`;
 read the two fields as the ref, then the remote: a blank answer means no upstream, and a
-`.` remote means a local upstream, which needs no fetch. On the pull-request route, `git
-fetch` that remote by name before asking `fresh`, and again after the user's merge word
-(on the `landing: local` route no fetch is needed: every call below reads the local
-branch). Pass the upstream short ref wherever a landing call in
-Stage F or Stage G takes `--default` on the pull-request route, and the local branch on
-the `landing: local` route, which is what the merge lands on; `fresh` takes the route's
-own ref. When the branch has no upstream, pass the branch itself: with nothing tracking
-it there is no fresher ref, and remote movement it does not track can be missed.
+`.` remote means a local upstream, which needs no fetch. Do the same for the ticket
+branch. On the pull-request route, `git fetch` each named remote before asking `fresh`,
+and again after the user's merge word (on the `landing: local` route no fetch is needed:
+every call below reads the local branch). Pass the upstream short ref wherever a landing
+call in Stage F or Stage G takes `--default` on the pull-request route, and the local
+branch on the `landing: local` route, which is what the merge lands on; `fresh` takes
+the route's own ref. Pass the ticket branch's upstream short ref wherever a landing call
+takes `--ticket` on the pull-request route — the fetched ref, so a pull request updated
+past the card answers `re-verify`, never `landed` — and the ticket branch itself on the
+`landing: local` route. When a branch has no upstream, pass the branch itself: with
+nothing tracking it there is no fresher ref, and remote movement it does not track can
+be missed.
 
 1. **Verify the card's claims against the code**, never against the card.
    `<tool>/scripts/landing.sh fresh --repo <repo> --default <branch> --ticket
-   <ticket-branch> --dispatch <dispatch> --wt <synthesis-wt>` must print `fresh`: the
+   <the ticket ref> --dispatch <dispatch> --wt <synthesis-wt>` must print `fresh`: the
    ticket branch holds the current default branch and the record shows the gate passing at
    its head. The postmaster runs no gate of its own; log what the call printed. On `stale`,
    withhold: remove `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`,
@@ -343,7 +347,7 @@ it there is no fresher ref, and remote movement it does not track can be missed.
    resume that last leg with the exact discrepancy and wait for its corrected card.
 2. **Follow the landing route in the waybill.** First ask whether the ticket already landed:
    `<tool>/scripts/landing.sh already-landed --repo <repo> --default <branch> --ticket
-   <ticket-branch> --base <the manifest's base> --card-head <the card's final HEAD>`, adding
+   <the ticket ref> --base <the manifest's base> --card-head <the card's final HEAD>`, adding
    `--pr-merge <sha>` with the merge commit when the provider reports a merged pull request
    for the ticket branch, and omitting it otherwise. On `landed`, skip landing
    and close instead: log `merge` noting the branch was already merged, move the ticket to
@@ -355,7 +359,7 @@ it there is no fresher ref, and remote movement it does not track can be missed.
    last leg with the exact discrepancy and wait for its corrected card. Otherwise:
    - For `landing: pull-request`, ask whether the branch holds anything to land:
      `<tool>/scripts/landing.sh anything-to-land --repo <repo> --default <branch> --ticket
-     <ticket-branch> --base <the manifest's base>`. On `nothing-to-land`, write that to
+     <the ticket ref> --base <the manifest's base>`. On `nothing-to-land`, write that to
      `.waiting-on-user` and wait; on the user's word that there is
      nothing to land, close as the already-merged paragraph above does, except the `merge`
      line notes the user's word that there is nothing to land instead of an already-merged
@@ -400,7 +404,7 @@ it there is no fresher ref, and remote movement it does not track can be missed.
 
 1. Confirm the default branch contains the merge and the ticket is done — or, where the
    ticket closed on nothing-to-land with no merge, that `anything-to-land --repo <repo>
-   --default <branch> --ticket <ticket-branch> --base <the manifest's base>` still says
+   --default <branch> --ticket <the ticket ref> --base <the manifest's base>` still says
    `nothing-to-land` and the `merge` line holds the step's evidence: the user's word that
    there was nothing to land (step 2), or the merge word with the no-diff evidence
    (step 3). Stop the preview
