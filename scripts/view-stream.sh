@@ -148,6 +148,8 @@ def flush_said(stamp):
             print(ln, flush=True)
         muse_said[0] = ""
 
+last_said = [""]   # the most recent shown says: text, so a restating result need not repeat it
+
 mimo_sessions = set()
 
 def mimo(e):
@@ -194,7 +196,9 @@ def render(e):
                 continue
             k = b.get("type")
             if t == "assistant" and k == "text" and str(b.get("text") or "").strip():
-                lines.append("says: " + str(b.get("text") or ""))
+                said = str(b.get("text") or "")
+                lines.append("says: " + said)
+                last_said[0] = said.strip()
             elif t == "assistant" and k == "tool_use":
                 lines.append(tool_line(b.get("name"), b.get("input")))
             elif t == "user" and k == "tool_result" and b.get("is_error"):
@@ -207,7 +211,9 @@ def render(e):
         if isinstance(e.get("total_cost_usd"), (int, float)):
             parts.append("$%.2f" % e["total_cost_usd"])
         if e.get("result"):
-            parts.append(str(e["result"]))
+            result = str(e["result"])
+            if result.strip() != last_said[0]:   # a restating result need not repeat the message
+                parts.append(result)
         return "result: " + " · ".join(parts)
     if t == "rate_limit_event":
         status = (e.get("rate_limit_info") or {}).get("status")
@@ -219,14 +225,19 @@ def render(e):
         it = e.get("item") or {}
         k = it.get("type")
         if t == "item.started":
-            return "shell: " + str(it.get("command") or "") if k == "command_execution" else None
+            if k != "command_execution":
+                return None
+            command = str(it.get("command") or "")
+            return "shell: " + command if command.strip() else None
         if k == "agent_message":
-            return "says: " + str(it.get("text") or "")
+            said = str(it.get("text") or "")
+            return "says: " + said if said.strip() else None
         if k == "command_execution":
             code = it.get("exit_code")
             return None if code in (0, None) else "shell exit %s: %s" % (code, it.get("command") or "")
         if k == "file_change":
-            return "edit: " + ", ".join(str(c.get("path")) for c in it.get("changes") or [] if isinstance(c, dict))
+            paths = [p for p in (str(c.get("path") or "") for c in it.get("changes") or [] if isinstance(c, dict)) if p.strip()]
+            return "edit: " + ", ".join(paths) if paths else None
         if k == "mcp_tool_call":
             return "tool: %s.%s" % (it.get("server"), it.get("tool"))
         if k == "web_search":
@@ -427,6 +438,16 @@ shows "claude: a failed tool call with no text renders without crashing the view
 shows "claude: the result, with turns and cost" \
   '{"type":"result","subtype":"success","num_turns":2,"total_cost_usd":0.0060272,"result":"The command printed 3 entries."}' \
   'result: success · 2 turns · $0.01 · The command printed 3 entries.'
+got=$(printf '%s\n' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"The answer is seven."}]}}' \
+  '{"type":"result","subtype":"success","result":"The answer is seven."}' \
+  | view)
+[ "$got" = "$(printf 'says: The answer is seven.\nresult: success')" ] \
+  && ok "claude: a result restating the message does not print it twice" \
+  || fail "claude: a result restating the message does not print it twice" "got: $got"
+shows "claude: a result that says something new prints in full" \
+  '{"type":"result","subtype":"success","result":"All three hosts green."}' \
+  'result: success · All three hosts green.'
 shows "codex: a session starts" '{"type":"thread.started","thread_id":"0199a213-81c0"}' 'session 0199a213-81c0'
 shows "codex: a shell command" \
   '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","status":"in_progress"}}' \
@@ -505,6 +526,12 @@ silent "claude: thinking" '{"type":"assistant","message":{"content":[{"type":"th
 silent "claude: a tool result that succeeded" '{"type":"user","message":{"content":[{"type":"tool_result","content":"a\nb"}]}}'
 silent "claude: a rate-limit event that allowed the call" '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}'
 silent "codex: reasoning" '{"type":"item.completed","item":{"type":"reasoning","text":"hmm"}}'
+silent "codex: a null message renders nothing" '{"type":"item.completed","item":{"type":"agent_message","text":null}}'
+silent "codex: a blank command renders nothing" '{"type":"item.started","item":{"type":"command_execution","command":"   "}}'
+silent "codex: an edit with no paths renders nothing" '{"type":"item.completed","item":{"type":"file_change","changes":[{"path":null}]}}'
+shows "codex: an edit lists only its real paths" \
+  '{"type":"item.completed","item":{"type":"file_change","changes":[{"path":null},{"path":"a.ts"},{"path":""}]}}' \
+  'edit: a.ts'
 silent "claude: a null text block renders nothing, not says None" '{"type":"assistant","message":{"content":[{"type":"text","text":null}]}}'
 got=$(printf '%s\n' \
   '{"type":"step_start","sessionID":"ses_null1","part":{"type":"step-start"}}' \
