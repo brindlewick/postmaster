@@ -31,7 +31,8 @@ call, and none was retried [@trials/muse-stream-timeouts].
 | #18 leg 1, synthesis | read both workhorses' diffs, decisions and gaps | 265k tokens | about 148 s in | 180 s | 328.0 s |
 | #18 leg 2, review | read the round-1 verdicts of every lens | 173k tokens | about 145 s in | 180 s | 325.2 s |
 
-Each had just gathered what one of the coachman's hardest calls needs: ruling on a round's
+While Muse Code 1.4.1 was installed, #135's synthesis leg ended the same way twice, on
+2026-09-29 [@trials/muse-stream-timeouts]. Each had just gathered what one of the coachman's hardest calls needs: ruling on a round's
 findings, or choosing what the synthesis takes from each workhorse. Of the fleet's 7,688 Muse
 Code model attempts up to 01:49 UTC on 2026-09-29, these three are the only ones that ended on
 the idle timeout. The long

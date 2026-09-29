@@ -111,7 +111,10 @@ environment, and the launch answered.
 after the trials. On 1.4.1 the variable at 5 failed after 5 s, the default failed after 180 s
 unretried, and the variable at 900 let a 210 s silence complete. Two launches through `launch.sh`
 with the live config, once the coachman and its fallback had the `env_file`, ran 1.4.1 with
-`TBH_STREAM_IDLE_TIMEOUT_SECS=900` in the process's environment, and answered.
+`TBH_STREAM_IDLE_TIMEOUT_SECS=900` in the process's environment, and answered. While 1.4.1 was
+installed, #135's synthesis leg ended on the idle timeout twice. At 05:49 UTC the updater put
+1.4.0-R4302.1 back. Two more runs of `p-sudoku2.txt` on it, at `max` and `xhigh` with the default
+limit, failed on the idle timeout again after 7 and 9 summaries.
 
 # What it settles
 

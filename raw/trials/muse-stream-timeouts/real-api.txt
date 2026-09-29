@@ -142,3 +142,23 @@ exit 0 after 763.7 s
   provider stream closed at 02:06:20: incomplete, server_terminal, open 753.7 s
   muse step 0 attempt 1: terminal completed none after 755.1 s; next attempt 0
   response.incomplete: reason max_output_tokens, output tokens 128000, of them reasoning 127997
+
+=== e3-max: prompt p-sudoku2.txt, effort max, env none
+exit 1 after 319.3 s
+  wire resp_6abb7084ee1a66a725734abc start +    1.9s dur   132.3s events  31 summaries  7 last-summary-at + 132.3s max-gap   44.6s after response.reasoning_summary_part.done at +54.7s -> response.reasoning_summary_part.added
+  wire resp_6abb70849239a75b850b4d62 start +    2.0s dur     3.1s events  18 summaries  0 last-summary-at +   0.0s max-gap    1.4s after response.output_item.added at +0.1s -> response.output_item.done
+  summaries resp_6abb7084ee1a: #0 +0s, #1 +4s, #2 +33s, #3 +51s, #4 +96s, #5 +113s, #6 +129s
+  muse run.terminal: failed, reason 'model stream idle timeout after 180000ms'
+  muse step 0 attempt 1: terminal timed_out idle_timeout after 314.3 s; next attempt 0
+  provider stream closed at 08:07:24: abandoned, consumer_drop, open 312.7 s
+  stderr: run ended with Failed: model stream idle timeout after 180000ms
+
+=== e3-xhigh: prompt p-sudoku2.txt, effort xhigh, env none
+exit 1 after 306.1 s
+  wire resp_6abb708489abf5d045e241de start +    1.6s dur     2.9s events   5 summaries  0 last-summary-at +   0.0s max-gap    1.5s after response.output_item.done at +1.3s -> response.completed
+  wire resp_6abb70856ce47b3363a746ea start +    2.0s dur   119.1s events  52 summaries  9 last-summary-at + 119.0s max-gap   24.0s after response.reasoning_summary_part.done at +64.8s -> response.reasoning_summary_part.added
+  summaries resp_6abb70856ce4: #0 +0s, #1 +5s, #2 +21s, #3 +34s, #4 +48s, #5 +60s, #6 +84s, #7 +98s, #8 +114s
+  muse run.terminal: failed, reason 'model stream idle timeout after 180000ms'
+  muse step 0 attempt 1: terminal timed_out idle_timeout after 301.2 s; next attempt 0
+  provider stream closed at 08:07:12: abandoned, consumer_drop, open 299.4 s
+  stderr: run ended with Failed: model stream idle timeout after 180000ms
