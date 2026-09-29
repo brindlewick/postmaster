@@ -111,7 +111,7 @@ scripts/launch.sh form|launch|review|resume|skill <lane-or-role> … # any lane 
 scripts/reviewers.sh lines|eligible <lens>|lanes <waybill> <lens>|lenses # which lanes review under each lens
 scripts/review-forms.sh has <harness>                            # whether the harness has a code-review form
 scripts/review-findings.sh normalize|harvest …                   # native bug-review output into the finding contract
-scripts/host.sh detect|name|run|stop|close|spawn|send|wait|read … # where a launch runs, and where you watch it
+scripts/host.sh detect|name|run|stop|close|stop-run|close-run|spawn|send|wait|read … # launch placement and teardown
 scripts/view-stream.sh < <events-file>                            # a harness's events, wrapped: what it says and runs, in full
 scripts/runs-status.sh <run-root>                                  # the postmaster's poll
 scripts/runs-watch.sh <run-root> [--timeout <seconds>]              # wait until a run needs the postmaster
