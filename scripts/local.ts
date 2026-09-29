@@ -21,7 +21,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { scriptsDir } from "./lib/paths.ts";
+import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { argvHasUndecodableBytes, run } from "./lib/proc.ts";
 
 const states = ["todo", "in-progress", "blocked", "done", "cancelled"];
@@ -133,9 +133,12 @@ function readBytes(path: string, what: string): Uint8Array {
     die(`cannot read ${what} ${path}: ${reason}`);
   }
 }
+function decodeFatal(bytes: Uint8Array): string {
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
 function decode(bytes: Uint8Array, path: string, what: string, fatal = true): string {
   try {
-    return new TextDecoder("utf-8", { fatal }).decode(bytes);
+    return fatal ? decodeFatal(bytes) : new TextDecoder("utf-8").decode(bytes);
   } catch {
     die(`cannot read ${what} ${path}: it is not UTF-8`);
   }
@@ -158,14 +161,26 @@ function normal(value: string): string {
 }
 function load(store: string, number: bigint): { meta?: Meta; why?: string } {
   const path = ticketPath(store, number, "json");
-  let text: string;
+  let raw: Uint8Array;
   try {
-    text = new TextDecoder("utf-8").decode(readFileSync(path) as Uint8Array);
+    raw = readFileSync(path) as Uint8Array;
   } catch (error) {
     const code = (error as any)?.code;
     if (code === "ENOENT") return { why: `no ticket #${number} in ${store}` };
     return {
       why: `cannot read ticket #${number} at ${path}: ${String((error as any)?.message ?? error)}`,
+    };
+  }
+  // Strictly decoded through the file's fatal decoder, as BASE reads it:
+  // undecodable bytes refuse the ticket rather than listing it with
+  // replacements. A leading BOM still parses, as JSON.parse skips it and
+  // BASE's utf-8-sig strips it.
+  let text: string;
+  try {
+    text = decodeFatal(raw);
+  } catch {
+    return {
+      why: `ticket #${number} at ${path} is not valid JSON: it is not UTF-8`,
     };
   }
   let value: unknown;
@@ -874,6 +889,70 @@ async function selfTest(): Promise<number> {
           "read shows the first heading of a body that gained a byte-order mark",
           bodyline(bomStored.out),
         );
+    // A ticket whose JSON is not UTF-8 is refused, as BASE refuses it: BASE
+    // is the newest scripts/local.sh in history that is a real script rather
+    // than the port's one-line wrapper, and it must still carry the strict
+    // ticket read.
+    let baseLocal = "";
+    {
+      const log = run("git", [
+        "-C",
+        toolRoot(import.meta),
+        "log",
+        "--format=%H",
+        "--",
+        "scripts/local.sh",
+      ]);
+      for (const c of log.out
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean)) {
+        const show = run("git", ["-C", toolRoot(import.meta), "show", `${c}:scripts/local.sh`]);
+        if (
+          show.code === 0 &&
+          show.out.split("\n").length > 10 &&
+          show.out.includes('json.loads(raw.decode("utf-8-sig"))')
+        ) {
+          baseLocal = join(temp, "base-local.sh");
+          writeFileSync(baseLocal, show.out);
+          chmodSync(baseLocal, 0o755);
+          break;
+        }
+      }
+      const py = run("sh", ["-c", "command -v python3"]);
+      baseLocal !== "" && py.code === 0
+        ? ok("BASE local.sh extracts with its strict ticket read, and python3 runs it")
+        : fail(
+            "BASE local.sh extracts with its strict ticket read, and python3 runs it",
+            baseLocal,
+          );
+    }
+    if (baseLocal !== "") {
+      const bad = lt(repo, "create", "healthy title", bodyPath);
+      const badJson = ticketPath(store, BigInt(bad.out), "json");
+      writeFileSync(
+        badJson,
+        Buffer.from(
+          readFileSync(badJson, "utf8").replace("healthy title", "health\u00ff title"),
+          "latin1",
+        ),
+      );
+      const portList = lt(repo, "list");
+      const baseRun = run("bash", [baseLocal, repo, "list"]);
+      const baseList = output(baseRun);
+      const baseCode = baseRun.code;
+      portList.code === 1 &&
+      baseCode === 1 &&
+      portList.out.includes("not valid JSON") &&
+      baseList.includes("not valid JSON") &&
+      !portList.out.includes("health") &&
+      !baseList.includes("health")
+        ? ok("a 0xff byte in a title refuses the ticket on both sides, as BASE does")
+        : fail(
+            "a 0xff byte in a title refuses the ticket on both sides, as BASE does",
+            `${portList.code} ${portList.out}\n${baseCode} ${baseList}`,
+          );
+    }
     const stdinCreate = run(self, [repo, "create", "From a pipe", "/dev/stdin"], {
       input: readFileSync(bodyPath, "utf8"),
     });
