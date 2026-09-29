@@ -1,12 +1,24 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-27
+updated: 2026-09-29
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-29] ingest | what 25 syntheses took from each lane
+
+Issue #157. A trial over the records of every run that reached synthesis by 2026-09-29, 16
+against this repository and 9 fixture runs, recorded in `raw/trials/2026-09-29-synthesis-audit/`
+with its script, its output and one row per run. No run was promoted: the claim rests on the
+SYNTHESIS lines, the cards and a count in git, and the harness logs stay with each run. Every
+SYNTHESIS line names something taken from each lane, as `coachman.md` requires, so the test H1
+gave could not fail. Counted in runs of six words, the second-ranked lane's own share of the
+synthesis was 2% or less in 8 runs and 10% or more in 15. H1 now names four measurements that
+would settle it: #158, #159, #160 and a single-lane baseline. The cost question gains the
+minutes the runs recorded. Standing stays `claimed`.
 
 ## [2026-09-27] ingest | how the style sort is checked and put to the user
 

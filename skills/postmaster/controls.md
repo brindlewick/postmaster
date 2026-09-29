@@ -23,13 +23,14 @@ A fault in one of these is a fault in a control, whatever the step that ran it.
 | `<tool>/scripts/discover-project.sh` | gate | which command is the project's gate |
 | `<tool>/scripts/wait-for-markers.sh` | wait | a round is collected only when every marker is in |
 | `<tool>/scripts/review-round.sh` | wait | a review round is collected by its deadline, its reviewers that miss it are recorded and stopped, and its scratches are removed only once nothing of it runs there |
+| `<tool>/scripts/review-findings.sh` | check | native bug-review output is normalized, and an unrecognized report cannot count as clean |
 | `<tool>/scripts/runs-status.sh` | marker | the next action from a leg's fixed outcome record; refreshes the user-waiting index |
 | `<tool>/scripts/runs-watch.sh` | wait | a run needs the postmaster only when its NEXT is not WAIT, USER or `-`, and never when its ticket is on the held list |
 | `<tool>/scripts/host.sh leg` | marker | launch, resume and takeover lifecycle, including the recorded attempt outcome |
 | `<tool>/scripts/launch.sh` | marker | whether the harness started; a preflight or env-file failure remains refused |
 | `<tool>/scripts/log-action.sh` | action-log | every action is recorded as it happens |
 | `<tool>/scripts/stage.sh` | action-log | every stage change is recorded, and the run is timed from the record |
-| `<tool>/scripts/run-meta.sh` | action-log | what a run started from |
+| `<tool>/scripts/run-meta.sh` | action-log | what a run started from, and the pinned checkout it runs on |
 | `<tool>/scripts/tool-faults.sh` | action-log | every fault a run met reaches a ticket or the run's records |
 
 ## Steps within a file

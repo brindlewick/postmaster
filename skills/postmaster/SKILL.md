@@ -268,6 +268,7 @@ checks: <as `verify.sh record` printed them: each check's name, where it came fr
 ## Team
 workhorses: <lane>=<harness>/<model>/<effort>, <lane>=…
 reviewers: <lane>, <lane>
+bug reviewers: <lane>, <lane>             (always; only the chosen bug reviewers whose harness has a code-review form, which is the bug lens's whole team)
 <lens> reviewers: <lane>, <lane>          (one line for each lens the config gives its own lanes)
 coachman: <harness>/<model>/<effort>      (never a lane's model)
 CHECKPOINT_MODE and MERGE_AUTHORITY come from ship.checkpoint_mode and ship.merge_authority, overridden only where the user says so for this run
@@ -276,9 +277,14 @@ CHECKPOINT_MODE and MERGE_AUTHORITY come from ship.checkpoint_mode and ship.merg
 name: <ticket id>, <ticket title>
 dispatch: <abs path of this directory>
 synthesis worktree: <abs path; cut by the postmaster at BASE, the coachman's cwd for every leg>
-tool: <abs path of the postmaster repo: <tool> in the runbooks>
+tool: <abs path of the run's pinned postmaster checkout, at the dispatch commit: <tool> in the coachman's runbook>
 postmaster ruling channel: resume the coachman's thread (harnesses.md) with the ruling as the prompt
 ```
+
+The postmaster's own session continues to use the main checkout it found from the skill. The
+waybill's `tool:` path is the run's pinned checkout; coachman launches, resumes and takeovers
+use that path for their host, launch and runbook files. An older waybill keeps the tool path it
+already names.
 
 ## Hard rules
 

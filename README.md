@@ -99,7 +99,7 @@ scripts/tool-faults.sh harvest|comment|file|decline <dispatch> …  # a closed r
 scripts/stage.sh <dispatch> <stage>                               # the one way a run changes stage
 scripts/run-times.sh <dispatch>                                   # how long each stage took, from the log
 scripts/run-log.sh <dispatch> <text> | --section <title> | --close # the narrative, timestamped
-scripts/run-meta.sh <dispatch> <repo>                             # run.json: what a run started from
+scripts/run-meta.sh <dispatch> <repo> | path|check|release <dispatch> # run.json and the pinned tool a run started from
 scripts/github.sh <repo> board|create|edit|read|state|comment|list|access|search # GitHub Issues on a Projects board
 scripts/plane.sh create|edit|read|state|comment|list …             # Plane work items
 scripts/local.sh <repo> store|create|edit|read|title|state|comment|list # tickets in the repo's git directory
@@ -107,8 +107,10 @@ scripts/tracker-kind.sh <repo>                                    # the tracker 
 scripts/ticket-check.sh <repo> <id> | --body <file> | --splice …   # a ticket's shape; --splice writes approved parts in
 scripts/turnpikes.sh --list | resolve <text> | legs <dispatch>     # the turnpikes, and a run's legs
 scripts/style-findings.sh list|count|gate|check <dispatch>         # a run's style findings, what its gate runs, the sort
-scripts/launch.sh form|launch|resume|skill <lane-or-role> …       # any lane or role, one command
-scripts/reviewers.sh lines|lanes <waybill> <lens>|lenses           # which lanes review under each lens
+scripts/launch.sh form|launch|review|resume|skill <lane-or-role> … # any lane or role, one command
+scripts/reviewers.sh lines|eligible <lens>|lanes <waybill> <lens>|lenses # which lanes review under each lens
+scripts/review-forms.sh has <harness>                            # whether the harness has a code-review form
+scripts/review-findings.sh normalize|harvest …                   # native bug-review output into the finding contract
 scripts/host.sh leg launch|resume|takeover|retry|outcome|backfill|waiting … | detect|name|run|stop|close|spawn|send|wait|read … # leg lifecycle and session host
 scripts/view-stream.sh < <events-file>                            # a harness's events, wrapped: what it says and runs, in full
 scripts/runs-status.sh <run-root>                                  # the postmaster's poll
