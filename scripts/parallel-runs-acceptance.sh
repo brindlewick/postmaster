@@ -47,33 +47,46 @@ gone() {
   fails=$((fails + 1))
 }
 
+# sweep <file> <flat-text>: the six stale sentences plus the claim itself in its
+# plain phrasings. Further paraphrases are beyond a grep oracle.
+sweep() {
+  local f=$1 text=$2 claim
+  stale "$text" "$f" 'step 6 orders by file surfaces' \
+    'then the file surfaces'
+  stale "$text" "$f" 'two tickets on one module do not run together' \
+    'Two tickets touching the same route table, transport interface or shared module do not run at the same time'
+  stale "$text" "$f" 'never two runs on overlapping file surfaces' \
+    'never two runs on overlapping file surfaces'
+  stale "$text" "$f" 'parallel runs are safe only on disjoint files' \
+    'Parallel runs are safe when their tickets touch disjoint files'
+  stale "$text" "$f" 'prefer sequencing colliding tickets' \
+    'Prefer sequencing those tickets, or accept conflict resolution at each gated merge;'
+  stale "$text" "$f" 'check file surfaces before mass-launching' \
+    'check the file surfaces before mass-launching'
+  for claim in 'overlapping file surfaces' 'never two runs on' 'not change the same files' \
+      'not touch the same files' 'not edit the same files'; do
+    stale "$text" "$f" 'two runs must not change the same files' "$claim"
+  done
+}
+
 accept() {  # accept <root>: the checks; stdout the faults, exit 0/1/2
   local root=$1 f
   for f in AGENTS.md README.md skills/postmaster/postmaster.md skills/postmaster/coachman.md; do
     [ -r "$root/$f" ] || { echo "parallel-runs-acceptance: cannot read $root/$f" >&2; return 2; }
   done
   fails=0
-  local post coach step6 step6flat note noteflat scope scope_err
+  local post step6 step6flat note noteflat scope scope_err text
   post=$(flat "$root/skills/postmaster/postmaster.md") || return 2
-  coach=$(flat "$root/skills/postmaster/coachman.md") || return 2
-  stale "$post" skills/postmaster/postmaster.md 'step 6 orders by file surfaces' \
-    'then the file surfaces'
-  stale "$post" skills/postmaster/postmaster.md 'two tickets on one module do not run together' \
-    'Two tickets touching the same route table, transport interface or shared module do not run at the same time'
-  stale "$post" skills/postmaster/postmaster.md 'never two runs on overlapping file surfaces' \
-    'never two runs on overlapping file surfaces'
-  stale "$coach" skills/postmaster/coachman.md 'parallel runs are safe only on disjoint files' \
-    'Parallel runs are safe when their tickets touch disjoint files'
-  stale "$coach" skills/postmaster/coachman.md 'prefer sequencing colliding tickets' \
-    'Prefer sequencing those tickets, or accept conflict resolution at each gated merge;'
-  stale "$coach" skills/postmaster/coachman.md 'check file surfaces before mass-launching' \
-    'check the file surfaces before mass-launching'
-  # The claim itself, in every regular file under skills/ and wiki/, whatever its
-  # suffix: a prohibition hiding in a non-Markdown file trips the same guard.
-  # Further paraphrases are beyond a grep oracle. A tree that cannot be fully
-  # swept is exit 2, not a clean result.
+  # Every stale sentence is swept in every file in scope, not only the file it
+  # was removed from: a verbatim copy planted in AGENTS.md, README.md or any
+  # regular file under skills/ or wiki/, whatever its suffix, trips the same
+  # guard. A tree that cannot be fully swept is exit 2, not a clean result.
+  for f in AGENTS.md README.md; do
+    text=$(flat "$root/$f") || return 2
+    sweep "$f" "$text"
+  done
   scope_err=$(mktemp) || return 2
-  scope=$(find "$root/skills" "$root/wiki" -type f -print 2>"$scope_err" | sed "s|^$root/||" | sort -u)
+  scope=$(find "$root/skills" "$root/wiki" -type f -print 2>"$scope_err" | sort -u)
   if [ -s "$scope_err" ]; then
     echo "parallel-runs-acceptance: cannot fully sweep $root/skills and $root/wiki" >&2
     cat "$scope_err" >&2
@@ -83,15 +96,10 @@ accept() {  # accept <root>: the checks; stdout the faults, exit 0/1/2
   rm -f "$scope_err"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    local text
+    f=${f#"$root"/}   # strip in the shell: $root may hold sed delimiters
     text=$(flat "$root/$f") || return 2
-    for claim in 'overlapping file surfaces' 'never two runs on' 'not change the same files' \
-        'not touch the same files' 'not edit the same files'; do
-      stale "$text" "$f" 'two runs must not change the same files' "$claim"
-    done
+    sweep "$f" "$text"
   done <<EOF
-AGENTS.md
-README.md
 $scope
 EOF
   # Step 6 survives as the Order-them step under Stage A, ordering by dependencies
@@ -106,9 +114,10 @@ EOF
   elif ! printf '%s' "$step6flat" | grep -qiE '\bdependenc(y|ies)\b'; then
     gone skills/postmaster/postmaster.md 'orders step 6 by dependencies'
   fi
-  # The `team.max_runs` limit stays as its hard-rule sentence: the string occurring
-  # anywhere else does not satisfy it.
-  grep -q -F -- '- Never launch more runs than `team.max_runs`.' "$root/skills/postmaster/postmaster.md" \
+  # The `team.max_runs` limit stays as its hard-rule sentence, matched on the folded
+  # file so a rewrap of the bullet neither passes a relocated string nor faults a
+  # kept one.
+  printf '%s' "$post" | grep -q -F -- '- Never launch more runs than `team.max_runs`.' \
     || gone skills/postmaster/postmaster.md 'limits runs with team.max_runs'
   # The concurrency note survives as a section that still says the run merging
   # second resolves the conflicts by merge, never rebase: a heading over a gutted
@@ -251,6 +260,15 @@ alone 'skills txt claim' skills/NOTES.txt \
 alone 'wiki yml claim' wiki/_config.yml \
   'wiki/_config.yml: still says two runs must not change the same files' \
   'Two runs must not edit the same files.'
+alone 'AGENTS known sentence' AGENTS.md \
+  'AGENTS.md: still says prefer sequencing colliding tickets' \
+  'Prefer sequencing those tickets, or accept conflict resolution at each gated merge;'
+alone 'README known sentence' README.md \
+  'README.md: still says check file surfaces before mass-launching' \
+  'check the file surfaces before mass-launching.'
+alone 'wiki known sentence' wiki/concepts/review-loop.md \
+  'wiki/concepts/review-loop.md: still says parallel runs are safe only on disjoint files' \
+  'Parallel runs are safe when their tickets touch disjoint files.'
 # The hard-rule clause carries two general phrasings inside it, so it fires three checks.
 rm -rf "$tmp/one" && cp -r "$tmp/clean" "$tmp/one"
 printf '%s\n' '- Never launch more runs than `team.max_runs`, and never two runs on overlapping file surfaces.' \
@@ -358,6 +376,21 @@ out=$(accept "$tmp/split" 2>"$tmp/split.err"); rc=$?
 [ "$rc" -eq 0 ] && [ -z "$out" ] && [ ! -s "$tmp/split.err" ] \
   && printf '  ok   a split Order-them still passes, silently\n' \
   || { printf '  FAIL a split Order-them: exit %s out:\n%s\nerr:\n%s\n' "$rc" "$out" "$(cat "$tmp/split.err")"; fails=$((fails + 1)); }
+
+rm -rf "$tmp/piped" && mkdir "$tmp/piped" && cp -r "$tmp/clean" "$tmp/piped/we|ird"
+printf 'Two runs must not change the same files.\n' >> "$tmp/piped/we|ird/skills/postmaster/SKILL.md"
+out=$(accept "$tmp/piped/we|ird" 2>"$tmp/piped.err"); rc=$?
+[ "$rc" -eq 1 ] && [ "$out" = 'skills/postmaster/SKILL.md: still says two runs must not change the same files' ] \
+  && [ ! -s "$tmp/piped.err" ] && printf '  ok   a root path with a pipe still sweeps, silently\n' \
+  || { printf '  FAIL a root path with a pipe: exit %s out:\n%s\nerr:\n%s\n' "$rc" "$out" "$(cat "$tmp/piped.err")"; fails=$((fails + 1)); }
+
+rm -rf "$tmp/reflowrule" && cp -r "$tmp/clean" "$tmp/reflowrule"
+sed -i 's/- Never launch more runs than `team.max_runs`./- Never launch more runs than\n  `team.max_runs`./' \
+  "$tmp/reflowrule/skills/postmaster/postmaster.md"
+out=$(accept "$tmp/reflowrule" 2>"$tmp/reflowrule.err"); rc=$?
+[ "$rc" -eq 0 ] && [ -z "$out" ] && [ ! -s "$tmp/reflowrule.err" ] \
+  && printf '  ok   a rewrapped hard rule still passes, silently\n' \
+  || { printf '  FAIL a rewrapped hard rule: exit %s out:\n%s\nerr:\n%s\n' "$rc" "$out" "$(cat "$tmp/reflowrule.err")"; fails=$((fails + 1)); }
 
 out=$(accept "$ROOT"); rc=$?
 [ "$rc" -eq 0 ] && printf '  ok   live tree passes\n' \
