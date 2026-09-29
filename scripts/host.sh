@@ -1753,40 +1753,52 @@ for key in ("request", "role", "prompt", "thread_id", "outcome"):
 PY
 }
 
-leg_release() {  # release a lock taken by leg_acquire, only if it still names this process
-  # A lock that names another owner — stolen while this attempt ran — is kept:
+leg_release() {  # leg_release <lock> <mutex>: release a lock taken by leg_acquire, only if it still names this process
+  # The check and the removal hold the mutex, so a steal decision in another
+  # process cannot land between them: a claim is released only by its owner. A
+  # lock that names another owner — stolen while this attempt ran — is kept:
   # removing it would let a third starter in beside the thief. A legacy empty
-  # dir holds no owner and is always releasable.
+  # dir holds no owner and is always releasable. Best-effort: a mutex that
+  # cannot be opened keeps the claim, and the next start steals it once this
+  # process is gone.
   local start; start=$(leg_self_start 2>/dev/null) || start=""
-  python3 - "$1" "$$" "$start" <<'PY' || :
-import os, sys
-lock, pid, start = sys.argv[1], sys.argv[2], sys.argv[3]
+  python3 - "$1" "$2" "$$" "$start" <<'PY' || :
+import fcntl, os, sys
+lock, mutex_path, pid, start = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 try:
-    with open(lock, encoding="utf-8") as f:
-        content = f.read().strip()
+    mutex = open(mutex_path, "a", encoding="utf-8")
 except OSError:
-    content = None
-if content is not None and content != "%s %s" % (pid, start):
     raise SystemExit(0)
-try:
-    os.unlink(lock)
-except OSError:
-    pass
-try:
-    os.rmdir(lock)
-except OSError:
-    pass
+with mutex:
+    fcntl.flock(mutex.fileno(), fcntl.LOCK_EX)
+    try:
+        with open(lock, encoding="utf-8") as f:
+            content = f.read().strip()
+    except OSError:
+        content = None
+    if content is not None and content != "%s %s" % (pid, start):
+        raise SystemExit(0)
+    try:
+        os.unlink(lock)
+    except OSError:
+        pass
+    try:
+        os.rmdir(lock)
+    except OSError:
+        pass
 PY
 }
 
 leg_acquire() {  # leg_acquire <lock> <mutex> <pid>: hold the leg's lock, or refuse
   # The fast path is one atomic create. The slow path decides under a mutex, so
-  # two starters never both proceed. A lock is stolen only when its owner is
-  # dead; a live owner refuses, however stale the markers look. Exit 0 holds
-  # (printing held or stole), 1 refuses on a live owner, 2 on another starter,
-  # 3 on an internal error taking the lock at all.
+  # two starters never both proceed, and waits out a claim or release section
+  # in flight — both hold the mutex only across one check-and-write — before
+  # refusing on a genuinely contended start. A lock is stolen only when its
+  # owner is dead; a live owner refuses, however stale the markers look. Exit 0
+  # holds (printing held or stole), 1 refuses on a live owner, 2 on another
+  # starter, 3 on an internal error taking the lock at all.
   python3 - "$@" <<'PY'
-import fcntl, os, subprocess, sys
+import fcntl, os, subprocess, sys, time
 active, mutex_path, self_pid = sys.argv[1], sys.argv[2], int(sys.argv[3])
 def start_of(pid):
     if os.path.isdir("/proc/self"):
@@ -1816,9 +1828,13 @@ try:
 except OSError:
     print("cannot open the start mutex", file=sys.stderr)
     raise SystemExit(3)
-try:
-    fcntl.flock(mutex.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-except OSError:
+for _ in range(200):
+    try:
+        fcntl.flock(mutex.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        break
+    except OSError:
+        time.sleep(0.01)
+else:
     raise SystemExit(2)
 try:
     claim(os.open(active, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
@@ -1877,36 +1893,47 @@ except OSError:
 PY
 }
 
-leg_claim() {  # leg_claim <lock> <starter-pid> <starter-start>: the launch owns the lock
+leg_claim() {  # leg_claim <lock> <mutex> <starter-pid> <starter-start>: the launch owns the lock
   # _leg_exec's first act: replace the starter's identity with its own, through
   # a temporary file, so a concurrent reader sees the starter or the launch,
-  # never an empty lock. It replaces only a lock that names the starter, the
+  # never an empty lock. The check and the replace hold the mutex, so two
+  # launches racing one lock serialize and exactly one passes the check; the
+  # flock releases on process death, so a launch killed mid-claim leaves no
+  # stale lock behind it. It replaces only a lock that names the starter, the
   # launch or nothing readable: a lock naming anyone else means another attempt
-  # may be live, and this one aborts rather than risk joining it. Exit 0 owns,
-  # 1 owns nothing and the attempt must not run.
+  # may be live, and this one aborts rather than risk joining it. A mutex that
+  # cannot be opened aborts too: without arbitration the attempt must not run.
+  # Exit 0 owns, 1 owns nothing and the attempt must not run.
   local start; start=$(leg_self_start) && [ -n "$start" ] || return 1
-  python3 - "$1" "$2" "$3" "$$" "$start" <<'PY'
-import os, sys, tempfile
-lock, starter, starter_start, self_pid, self_start = sys.argv[1:6]
+  python3 - "$1" "$2" "$3" "$4" "$$" "$start" <<'PY'
+import fcntl, os, sys, tempfile
+lock, mutex_path, starter, starter_start, self_pid, self_start = sys.argv[1:7]
 mine = "%s %s" % (self_pid, self_start)
 try:
-    with open(lock, encoding="utf-8") as f:
-        content = f.read().strip()
-except OSError:
-    content = ""
-if content and content != "%s %s" % (starter, starter_start) and content != mine:
-    print("leg: the lock names another attempt; not starting", file=sys.stderr)
-    raise SystemExit(1)
-try:
-    fd, tmp = tempfile.mkstemp(prefix=".owner.", dir=os.path.dirname(lock) or ".")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(mine + "\n")
-    os.replace(tmp, lock)
+    mutex = open(mutex_path, "a", encoding="utf-8")
 except OSError as e:
-    try: os.unlink(tmp)
-    except (OSError, NameError): pass
-    print("leg: cannot own the lock: %s" % e.strerror, file=sys.stderr)
+    print("leg: cannot open the start mutex: %s" % e.strerror, file=sys.stderr)
     raise SystemExit(1)
+with mutex:
+    fcntl.flock(mutex.fileno(), fcntl.LOCK_EX)
+    try:
+        with open(lock, encoding="utf-8") as f:
+            content = f.read().strip()
+    except OSError:
+        content = ""
+    if content and content != "%s %s" % (starter, starter_start) and content != mine:
+        print("leg: the lock names another attempt; not starting", file=sys.stderr)
+        raise SystemExit(1)
+    try:
+        fd, tmp = tempfile.mkstemp(prefix=".owner.", dir=os.path.dirname(lock) or ".")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(mine + "\n")
+        os.replace(tmp, lock)
+    except OSError as e:
+        try: os.unlink(tmp)
+        except (OSError, NameError): pass
+        print("leg: cannot own the lock: %s" % e.strerror, file=sys.stderr)
+        raise SystemExit(1)
 PY
 }
 
@@ -1941,11 +1968,13 @@ if end_off > len(raw) or end_off < start_off:
 text = raw[start_off:end_off].decode("utf-8", errors="replace")
 try: phase_value = pathlib.Path(phase).read_text(encoding="utf-8", errors="replace").strip()
 except OSError: phase_value = "refused"
-if phase_value == "refused":
-    # The harness never started, so no event here is this attempt's: the
-    # stream still holds a previous attempt's, from a death between the intent
-    # and the runner's truncate. Scanning it would attach a stale thread id
-    # that retry then resumes. The record keeps the intent's thread only.
+if phase_value != "started":
+    # Only a started attempt is scanned. Anything else — refused, missing,
+    # empty or foreign — means the harness never ran for this attempt, so no
+    # event here is its: the stream still holds a previous attempt's, from a
+    # death between the intent and the runner's truncate. Scanning it would
+    # attach a stale thread id that retry then resumes. The record keeps the
+    # intent's thread only.
     text = ""
 terms = ("quota", "usage limit", "rate limit", "payment required", "insufficient_quota", "overloaded", "resource exhausted", "spawn failed", "failed to spawn", "stale session lock", "session lock")
 def selected(value):
@@ -2044,17 +2073,18 @@ PY
 }
 
 LEG_ACTIVE_LOCK=
+LEG_ACTIVE_MUTEX=
 leg_exec() {  # hosted executor; the caller owns paths and clears markers
   local d=$1 wt=$2 leg=$3 n=$4 request=$5 role=$6 prompt=$7 thread=$8 stream=$9 err=${10}
   local done=${11} attempts=${12} attempt=${13} phase=${14} wall=${15} active=${16}
   local starter_pid=${17} starter_start=${18}
-  local launch_mode=launch rc=0 errfd wallpid start_off
+  local launch_mode=launch rc=0 errfd wallpid start_off mutex=$d/.leg-$n-mutex
   # Ownership is established by the owner, not inferred by the starter: the
   # launch names itself before anything else, and never runs unowned. An abort
   # here leaves no record; the next start backfills this attempt as refused.
-  leg_claim "$active" "$starter_pid" "$starter_start" || return 1
-  LEG_ACTIVE_LOCK=$active
-  trap 'leg_release "$LEG_ACTIVE_LOCK"' EXIT
+  leg_claim "$active" "$mutex" "$starter_pid" "$starter_start" || return 1
+  LEG_ACTIVE_LOCK=$active LEG_ACTIVE_MUTEX=$mutex
+  trap 'leg_release "$LEG_ACTIVE_LOCK" "$LEG_ACTIVE_MUTEX"' EXIT
   # This attempt's events start here: on a resume the stream still holds prior
   # attempts, whose wall events and thread ids must not classify this one.
   start_off=$(python3 -c 'import os,sys; print(os.path.getsize(sys.argv[1]))' "$stream" 2>/dev/null || echo 0)
@@ -2182,7 +2212,13 @@ for m in sorted((set(intents) | phases) - have):
     try: off = int((intents.get(m) or {}).get("stream_off", 0))
     except (TypeError, ValueError): off = 0
     end = ""
-    later = [v for k, v in intents.items() if k > m]
+    def off0(v):
+        try: return int(v.get("stream_off", 0)) == 0
+        except (TypeError, ValueError): return False
+    # An unrecorded later launch never ran far enough to bound this slice: it
+    # wrote no byte, and its zero would either empty the slice or mask a
+    # recorded bound. Its end is ignored.
+    later = [v for k, v in intents.items() if k > m and (k in have or not off0(v))]
     if later:
         try: end = str(min(int(v.get("stream_off", 0)) for v in later))
         except (TypeError, ValueError): end = ""
@@ -2229,9 +2265,9 @@ leg_backfill_only() {  # <dispatch> <leg> <number>: classify unrecorded attempts
     [ "$rc" -eq 3 ] && die "leg $n cannot take its lock"
     die "leg $n has a live attempt; backfill runs only on INSPECT"
   }
-  new=$(leg_next_attempt "$attempts" "$logs" "$n") || { leg_release "$active"; die "cannot count prior attempts"; }
-  leg_backfill "$d" "" "$leg" "$n" "$new" "$stream" "$done" "$attempts" || { leg_release "$active"; die "cannot backfill the unrecorded attempt"; }
-  leg_release "$active"
+  new=$(leg_next_attempt "$attempts" "$logs" "$n") || { leg_release "$active" "$d/.leg-$n-mutex"; die "cannot count prior attempts"; }
+  leg_backfill "$d" "" "$leg" "$n" "$new" "$stream" "$done" "$attempts" || { leg_release "$active" "$d/.leg-$n-mutex"; die "cannot backfill the unrecorded attempt"; }
+  leg_release "$active" "$d/.leg-$n-mutex"
 }
 
 leg_start() {  # leg_start <request> <dispatch> <worktree> <leg> <number> <prompt> [<thread>] [<role>]
@@ -2243,7 +2279,7 @@ leg_start() {  # leg_start <request> <dispatch> <worktree> <leg> <number> <promp
   d=$(CDPATH= cd -P -- "$d" 2>/dev/null && pwd -P) || die "no such dispatch: $2"
   wt=$(CDPATH= cd -P -- "$wt" 2>/dev/null && pwd -P) || die "no such worktree: $3"
   case $prompt in /*) ;; *) prompt=$PWD/$prompt ;; esac
-  [ -s "$prompt" ] && [ -r "$prompt" ] || die "prompt file missing, unreadable or empty: $prompt"
+  [ -f "$prompt" ] && [ -s "$prompt" ] && [ -r "$prompt" ] || die "prompt file missing, unreadable or empty: $prompt"
   [ -f "$d/run.json" ] && [ -f "$d/manifest.json" ] || die "dispatch needs run.json and manifest.json"
   local logs=$d/logs
   mkdir -p "$logs" || die "cannot create the dispatch log directory"
@@ -2284,47 +2320,73 @@ leg_start() {  # leg_start <request> <dispatch> <worktree> <leg> <number> <promp
     die "leg $n already has an active attempt"
   }
   attempt=$(leg_next_attempt "$attempts" "$logs" "$n") \
-    || { leg_release "$active"; die "cannot count prior attempts"; }
+    || { leg_release "$active" "$d/.leg-$n-mutex"; die "cannot count prior attempts"; }
   # An attempt that died without its record is classified now, from the
   # evidence it left, before the new attempt starts.
   leg_backfill "$d" "$wt" "$leg" "$n" "$attempt" "$stream" "$done" "$attempts" \
-    || { leg_release "$active"; die "cannot backfill the unrecorded attempt"; }
+    || { leg_release "$active" "$d/.leg-$n-mutex"; die "cannot backfill the unrecorded attempt"; }
   phase=$logs/coachman-leg-$n-phase-$attempt
   wall=$logs/coachman-leg-$n-wall-$attempt
   intent=$logs/coachman-leg-$n-intent-$attempt.json
-  printf 'refused\n' > "$phase" || { leg_release "$active"; die "cannot write attempt phase"; }
   stream_off=0
   [ "$request" = resume ] && stream_off=$(python3 -c 'import os,sys; print(os.path.getsize(sys.argv[1]))' "$stream" 2>/dev/null || echo 0)
+  # The intent lands before the phase, and each lands whole: a temp file and a
+  # rename, so a kill between or inside the writes leaves intent-without-phase
+  # at worst — never phase-without-intent, and never a torn file a reader can
+  # half-see. A refused resume is therefore always backfilled with the prompt
+  # and thread it was carrying, and a retry always has something to replay.
   python3 - "$intent" "$attempt" "$request" "$role" "$prompt" "$thread" "$stream_off" <<'PY' \
-    || { leg_release "$active"; die "cannot write the attempt intent"; }
-import json, sys
+    || { leg_release "$active" "$d/.leg-$n-mutex"; die "cannot write the attempt intent"; }
+import json, os, sys, tempfile
 path, attempt, request, role, prompt, thread, off = sys.argv[1:]
-json.dump({"attempt": int(attempt), "request": request, "role": role,
-           "prompt": prompt, "thread_id": thread, "stream_off": int(off)},
-          open(path, "w", encoding="utf-8"), separators=(",", ":"))
+fd, tmp = tempfile.mkstemp(prefix=".intent.", dir=os.path.dirname(path))
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"attempt": int(attempt), "request": request, "role": role,
+                   "prompt": prompt, "thread_id": thread, "stream_off": int(off)},
+                  f, separators=(",", ":"))
+    os.replace(tmp, path)
+except OSError:
+    try: os.unlink(tmp)
+    except OSError: pass
+    raise
+PY
+  python3 - "$phase" <<'PY' \
+    || { leg_release "$active" "$d/.leg-$n-mutex"; die "cannot write attempt phase"; }
+import os, sys, tempfile
+path = sys.argv[1]
+fd, tmp = tempfile.mkstemp(prefix=".phase.", dir=os.path.dirname(path))
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("refused\n")
+    os.replace(tmp, path)
+except OSError:
+    try: os.unlink(tmp)
+    except OSError: pass
+    raise
 PY
   rm -f -- "$wall" "$done" "$exited"
   if [ "$request" = takeover ]; then
     if [ -f "$stream" ]; then
       local backup=$logs/coachman-leg-$n-walled-events.jsonl
       [ ! -e "$backup" ] || backup=$logs/coachman-leg-$n-walled-attempt-$attempt-events.jsonl
-      mv -- "$stream" "$backup" || { leg_release "$active"; die "cannot preserve the walled stream"; }
+      mv -- "$stream" "$backup" || { leg_release "$active" "$d/.leg-$n-mutex"; die "cannot preserve the walled stream"; }
     fi
     if [ -f "$err" ]; then
       local err_backup=$logs/coachman-leg-$n-walled.err
       [ ! -e "$err_backup" ] || err_backup=$logs/coachman-leg-$n-walled-attempt-$attempt.err
-      mv -- "$err" "$err_backup" || { leg_release "$active"; die "cannot preserve the walled errors"; }
+      mv -- "$err" "$err_backup" || { leg_release "$active" "$d/.leg-$n-mutex"; die "cannot preserve the walled errors"; }
     fi
   fi
   local starter_start; starter_start=$(leg_self_start) && [ -n "$starter_start" ] \
-    || { leg_release "$active"; die "cannot establish attempt ownership: the starter has no readable start time"; }
+    || { leg_release "$active" "$d/.leg-$n-mutex"; die "cannot establish attempt ownership: the starter has no readable start time"; }
   local runargs=(run "$label" "$wt" --under "$d" --role coachman --run "$d" --out "$stream" --err "$err" --marker "$exited" --pidfile "$logs/coachman-leg-$n.pid")
   [ "$append" -eq 0 ] || runargs+=(--append)
   runargs+=(-- "$SELF" _leg_exec "$d" "$wt" "$leg" "$n" "$request" "$role" "$prompt" "$thread" "$stream" "$err" "$done" "$attempts" "$attempt" "$phase" "$wall" "$active" "$$" "$starter_start")
   POSTMASTER_ATTEMPT_PHASE="$phase" "$SELF" "${runargs[@]}"
   rc=$?
   if [ "$rc" -ne 0 ]; then
-    leg_release "$active"
+    leg_release "$active" "$d/.leg-$n-mutex"
     leg_terminate_tail "$attempts"
     python3 - "$attempts" "$attempt" "$n" "$leg" "$request" "$role" "$prompt" "$thread" "$rc" <<'PY'
 import datetime, json, os, sys
@@ -2955,6 +3017,257 @@ PY
   direct "$tmp/starter.lock" "999999999" "0"; rc=$?
   check "a lock naming the starter is claimed and the attempt runs" \
     '[ "$rc" -eq 0 ] && [ "$(wc -l < "$tmp/leg-calls")" = "$((calls_before + 1))" ] && [ ! -e "$tmp/starter.lock" ] && grep -q "\"attempt\":1" "$tmp/direct-attempts.jsonl" 2>/dev/null' "rc=$rc"
+
+  # Paired simultaneous claims: two launches racing one lock that names their
+  # dead starter. Both checks would pass without arbitration; the mutex
+  # serializes check-and-replace, so exactly one runs live each time.
+  pairs_bad=0
+  i=0
+  while [ $i -lt 50 ]; do
+    printf '999999999 0\n' > "$tmp/pair.lock"
+    calls_before=$(wc -l < "$tmp/leg-calls")
+    direct "$tmp/pair.lock" "999999999" "0" & p1=$!
+    direct "$tmp/pair.lock" "999999999" "0" & p2=$!
+    wait "$p1"; r1=$?; wait "$p2"; r2=$?
+    live=0
+    [ "$r1" -eq 0 ] && live=$((live + 1))
+    [ "$r2" -eq 0 ] && live=$((live + 1))
+    [ "$live" -eq 1 ] && [ "$(wc -l < "$tmp/leg-calls")" = "$((calls_before + 1))" ] \
+      || pairs_bad=$((pairs_bad + 1))
+    i=$((i + 1))
+  done
+  check "fifty paired claims each run exactly one attempt live" '[ "$pairs_bad" -eq 0 ]' "bad=$pairs_bad"
+
+  # The mutex releases on process death: a holder killed -9 leaves the next
+  # take free. The first probe must observe the hold (a negative control that
+  # never bites proves nothing); the second must observe the release.
+  python3 - "$tmp/kill.mutex" <<'PY' & holder=$!
+import fcntl, sys, time
+m = open(sys.argv[1], "w", encoding="utf-8")
+fcntl.flock(m.fileno(), fcntl.LOCK_EX)
+time.sleep(30)
+PY
+  held=""; i=0
+  while [ $i -lt 200 ]; do
+    python3 - "$tmp/kill.mutex" <<'PY' 2>/dev/null || { held=yes; break; }
+import fcntl, sys
+m = open(sys.argv[1], "a", encoding="utf-8")
+fcntl.flock(m.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+PY
+    sleep 0.1; i=$((i + 1))
+  done
+  kill -9 "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
+  freed=""; i=0
+  while [ $i -lt 200 ]; do
+    if python3 - "$tmp/kill.mutex" <<'PY' 2>/dev/null; then freed=yes; break; fi
+import fcntl, sys
+m = open(sys.argv[1], "a", encoding="utf-8")
+fcntl.flock(m.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+PY
+    sleep 0.1; i=$((i + 1))
+  done
+  check "a mutex held across a kill is observed held, then free" \
+    '[ "$held" = yes ] && [ "$freed" = yes ]' "held=$held freed=$freed"
+
+  # A holder killed mid-attempt leaves the next claim free: the lock names a
+  # dead process, the next start steals it, backfills the killed attempt and
+  # runs. Isolated dispatch, so the kills touch no other control's records.
+  mkdir -p "$tmp/kill-d/logs" && cp "$leg_d/run.json" "$tmp/kill-d/run.json"
+  printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/kill-d/manifest.json"
+  printf '# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, kill\nsynthesis worktree: %s\n' "$leg_wt" > "$tmp/kill-d/brief.md"
+  printf 'sleepy kill holder\n' > "$tmp/kill-d/prompt.txt"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" TEST_DONE="$tmp/kill-d/.leg-1-done" \
+    TEST_OBSERVED="$tmp/kill-d/retry-observed" TEST_SLEEP=30 \
+    "$SELF" leg launch "$tmp/kill-d" "$leg_wt" synthesis 1 "$tmp/kill-d/prompt.txt" >/dev/null
+  rc=$?
+  lockpid=""; i=0
+  while [ $i -lt 50 ]; do
+    lockpid=$(cut -d' ' -f1 < "$tmp/kill-d/.leg-1-active" 2>/dev/null)
+    [ -n "$lockpid" ] && [ "$lockpid" = "$(cat "$tmp/kill-d/logs/coachman-leg-1.pid" 2>/dev/null)" ] && break
+    sleep 0.1; i=$((i + 1))
+  done
+  kill -9 "$lockpid" 2>/dev/null
+  marker "$tmp/kill-d/.leg-1-exited" 30
+  calls_mid=$(wc -l < "$tmp/leg-calls")
+  printf 'second start after kill\n' > "$tmp/kill-d/prompt2.txt"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" TEST_DONE="$tmp/kill-d/.leg-1-done" \
+    TEST_OBSERVED="$tmp/kill-d/retry-observed" \
+    "$SELF" leg launch "$tmp/kill-d" "$leg_wt" synthesis 1 "$tmp/kill-d/prompt2.txt" >/dev/null 2>&1
+  rc2=$?
+  marker "$tmp/kill-d/.leg-1-exited" 30
+  got=$(python3 -c 'import json,sys; rs=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]; print("ok" if len(rs) == 2 and rs[0]["outcome"] in ("refused", "pre-thread") else "BAD:%d:%s" % (len(rs), rs[0]["outcome"] if rs else "?"))' "$tmp/kill-d/logs/coachman-leg-1-attempts.jsonl")
+  check "a killed holder's lock is stolen and the next attempt runs" \
+    '[ "$rc" -eq 0 ] && [ -n "$lockpid" ] && [ "$rc2" -eq 0 ] && [ "$(wc -l < "$tmp/leg-calls")" = "$((calls_mid + 1))" ] && [ "$got" = ok ]' "rc=$rc rc2=$rc2 got=$got"
+
+  # The intent write precedes the phase write in leg_start: the order is the
+  # guarantee (a kill can leave intent-without-phase, never the reverse), so
+  # a reorder breaks loudly here.
+  order=$(awk '/cannot write the attempt inten[t]/{i=NR} /cannot write attempt phas[e]/{p=NR} END{print (i>0 && p>0 && i<p) ? "ok" : "BAD"}' "$SELF")
+  check "the intent write precedes the phase write" '[ "$order" = ok ]' "$order"
+
+  # Gap states: a kill before the intent write leaves nothing to backfill; a
+  # kill between the writes leaves intent-without-phase, and a refused resume
+  # is backfilled with the prompt and thread it was carrying.
+  mkdir -p "$tmp/gap-d/logs" && cp "$leg_d/run.json" "$tmp/gap-d/run.json"
+  printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/gap-d/manifest.json"
+  printf '# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, gap\nsynthesis worktree: %s\n' "$leg_wt" > "$tmp/gap-d/brief.md"
+  printf 'gap resume prompt\n' > "$tmp/gap-d/prompt.txt"
+  printf '{"attempt":1,"request":"resume","role":"coachman","prompt":"%s","thread_id":"T-RESUME","stream_off":0}' \
+    "$tmp/gap-d/prompt.txt" > "$tmp/gap-d/logs/coachman-leg-1-intent-1.json"
+  printf '{"session_id":"thread-foreign","type":"assistant"}\n' > "$tmp/gap-d/logs/coachman-leg-1-events.jsonl"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" \
+    "$SELF" leg backfill "$tmp/gap-d" synthesis 1 >/dev/null 2>&1; rc=$?
+  got=$(python3 -c 'import json,sys; r=json.loads(open(sys.argv[1]).readlines()[-1]); print(r["outcome"]+"|"+r["request"]+"|"+r["prompt"]+"|"+r["thread_id"])' "$tmp/gap-d/logs/coachman-leg-1-attempts.jsonl")
+  check "intent-without-phase backfills a refused resume with its prompt and thread" \
+    '[ "$rc" -eq 0 ] && [ "$got" = "refused|resume|'"$tmp/gap-d/prompt.txt"'|T-RESUME" ]' "$got"
+  calls_before=$(wc -l < "$tmp/leg-calls")
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" TEST_DONE="$tmp/gap-d/.leg-1-done" \
+    TEST_OBSERVED="$tmp/gap-d/retry-observed" \
+    "$SELF" leg retry "$tmp/gap-d" "$leg_wt" synthesis 1 >/dev/null 2>&1; rc=$?
+  marker "$tmp/gap-d/.leg-1-exited" 30
+  got=$(python3 -c 'import json,sys; r=json.loads(open(sys.argv[1]).readlines()[-1]); print(r["request"]+"|"+r["thread_id"])' "$tmp/gap-d/logs/coachman-leg-1-attempts.jsonl")
+  check "retry after that refusal resumes the carried thread instead of wedging" \
+    '[ "$rc" -eq 0 ] && [ "$got" = "resume|T-RESUME" ] && [ "$(wc -l < "$tmp/leg-calls")" = "$((calls_before + 1))" ] && tail -1 "$tmp/leg-calls" | grep -q T-RESUME' "$got: $(tail -1 "$tmp/leg-calls")"
+  mkdir -p "$tmp/gap0-d/logs" && cp "$leg_d/run.json" "$tmp/gap0-d/run.json"
+  printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/gap0-d/manifest.json"
+  printf '{"session_id":"thread-foreign","type":"assistant"}\n' > "$tmp/gap0-d/logs/coachman-leg-1-events.jsonl"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" \
+    "$SELF" leg backfill "$tmp/gap0-d" synthesis 1 >/dev/null 2>&1; rc=$?
+  check "no intent and no phase backfills nothing" \
+    '[ "$rc" -eq 0 ] && [ ! -s "$tmp/gap0-d/logs/coachman-leg-1-attempts.jsonl" ]' "rc=$rc"
+
+  # A kill fuzz over real starts: every pass ends backfilled, and no pass
+  # leaves a resume without its prompt and thread. Launches and resumes
+  # alternate, so refused resumes are exercised too. Only the starter or the
+  # lock-named live pid is ever killed, and backfill success — not the marker —
+  # is the pass signal, so no timing is asserted.
+  mkdir -p "$tmp/fuzz-d/logs" && cp "$leg_d/run.json" "$tmp/fuzz-d/run.json"
+  printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/fuzz-d/manifest.json"
+  printf '# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, fuzz\nsynthesis worktree: %s\n' "$leg_wt" > "$tmp/fuzz-d/brief.md"
+  printf 'fuzz prompt\n' > "$tmp/fuzz-d/prompt.txt"
+  fuzz_bad=0
+  i=0
+  while [ $i -lt 10 ]; do
+    intents_before=$(ls "$tmp/fuzz-d/logs"/coachman-leg-1-intent-*.json 2>/dev/null | wc -l)
+    if [ "$i" -eq 0 ] || [ $((i % 2)) -eq 0 ]; then
+      POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+        POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" TEST_DONE="$tmp/fuzz-d/.leg-1-done" \
+        TEST_OBSERVED="$tmp/fuzz-d/retry-observed" \
+        "$SELF" leg launch "$tmp/fuzz-d" "$leg_wt" synthesis 1 "$tmp/fuzz-d/prompt.txt" >/dev/null 2>&1 & starter=$!
+    else
+      POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+        POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" TEST_DONE="$tmp/fuzz-d/.leg-1-done" \
+        TEST_OBSERVED="$tmp/fuzz-d/retry-observed" \
+        "$SELF" leg resume "$tmp/fuzz-d" "$leg_wt" synthesis 1 "T-FUZZ-$i" "$tmp/fuzz-d/prompt.txt" >/dev/null 2>&1 & starter=$!
+    fi
+    j=0
+    while [ $j -lt 20 ]; do
+      [ "$(ls "$tmp/fuzz-d/logs"/coachman-leg-1-intent-*.json 2>/dev/null | wc -l)" != "$intents_before" ] && break
+      kill -0 "$starter" 2>/dev/null || break
+      sleep 0.05; j=$((j + 1))
+    done
+    kill -9 "$starter" 2>/dev/null; wait "$starter" 2>/dev/null
+    lp=$(cut -d' ' -f1 < "$tmp/fuzz-d/.leg-1-active" 2>/dev/null)
+    pp=$(cat "$tmp/fuzz-d/logs/coachman-leg-1.pid" 2>/dev/null)
+    if [ -n "$lp" ] && [ "$lp" = "$pp" ] && kill -0 "$lp" 2>/dev/null; then kill -9 "$lp" 2>/dev/null; fi
+    j=0
+    while [ $j -lt 10 ]; do
+      POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+        POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" \
+        "$SELF" leg backfill "$tmp/fuzz-d" synthesis 1 >/dev/null 2>&1 && break
+      lp=$(cut -d' ' -f1 < "$tmp/fuzz-d/.leg-1-active" 2>/dev/null)
+      pp=$(cat "$tmp/fuzz-d/logs/coachman-leg-1.pid" 2>/dev/null)
+      if [ -n "$lp" ] && [ "$lp" = "$pp" ] && kill -0 "$lp" 2>/dev/null; then kill -9 "$lp" 2>/dev/null; fi
+      sleep 0.5; j=$((j + 1))
+    done
+    [ "$j" -lt 10 ] || fuzz_bad=$((fuzz_bad + 1))
+    i=$((i + 1))
+  done
+  check "ten kill passes all backfill cleanly" '[ "$fuzz_bad" -eq 0 ]' "bad=$fuzz_bad"
+  bad_resumes=$(python3 - "$tmp/fuzz-d/logs/coachman-leg-1-attempts.jsonl" <<'PY'
+import json, sys
+bad = 0
+try:
+    rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+except OSError:
+    rows = []
+for r in rows:
+    if not isinstance(r, dict): continue
+    if r.get("request") == "resume" and (not r.get("prompt") or not r.get("thread_id")):
+        bad += 1
+print(bad)
+PY
+)
+  check "no killed pass leaves a resume without its prompt and thread" '[ "$bad_resumes" = 0 ]' "bad=$bad_resumes"
+
+  # An unrecorded later launch writes no byte, so its zero end is ignored: the
+  # earlier attempt keeps its slice. A recorded later resume still bounds it.
+  mkdir -p "$tmp/slice-d/logs" && cp "$leg_d/run.json" "$tmp/slice-d/run.json"
+  printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/slice-d/manifest.json"
+  printf 'slice prompt\n' > "$tmp/slice-d/prompt.txt"
+  printf '{"attempt":1,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":0}' \
+    "$tmp/slice-d/prompt.txt" > "$tmp/slice-d/logs/coachman-leg-1-intent-1.json"
+  printf 'started\n' > "$tmp/slice-d/logs/coachman-leg-1-phase-1"
+  printf '{"attempt":2,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":0}' \
+    "$tmp/slice-d/prompt.txt" > "$tmp/slice-d/logs/coachman-leg-1-intent-2.json"
+  printf '{"session_id":"T-ONE","type":"assistant"}\n' > "$tmp/slice-d/logs/coachman-leg-1-events.jsonl"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" \
+    "$SELF" leg backfill "$tmp/slice-d" synthesis 1 >/dev/null 2>&1; rc=$?
+  got=$(python3 -c 'import json,sys; rs=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]; print("%s|%s|%s" % (rs[0]["outcome"], rs[0]["thread_id"], rs[1]["outcome"]))' "$tmp/slice-d/logs/coachman-leg-1-attempts.jsonl")
+  check "an unrecorded later zero end is ignored" '[ "$rc" -eq 0 ] && [ "$got" = "incomplete|T-ONE|refused" ]' "$got"
+  mkdir -p "$tmp/bound-d/logs" && cp "$leg_d/run.json" "$tmp/bound-d/run.json"
+  printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/bound-d/manifest.json"
+  printf 'bound prompt\n' > "$tmp/bound-d/prompt.txt"
+  printf '{"session_id":"T-ONE","type":"assistant"}\n{"session_id":"T-TWO","type":"assistant"}\n' > "$tmp/bound-d/logs/coachman-leg-1-events.jsonl"
+  off_two=$(head -1 "$tmp/bound-d/logs/coachman-leg-1-events.jsonl" | wc -c)
+  printf '{"attempt":1,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":0}' \
+    "$tmp/bound-d/prompt.txt" > "$tmp/bound-d/logs/coachman-leg-1-intent-1.json"
+  printf 'started\n' > "$tmp/bound-d/logs/coachman-leg-1-phase-1"
+  printf '{"attempt":2,"request":"resume","role":"coachman","prompt":"%s","thread_id":"T-TWO","stream_off":%s}' \
+    "$tmp/bound-d/prompt.txt" "$off_two" > "$tmp/bound-d/logs/coachman-leg-1-intent-2.json"
+  printf '{"attempt":2,"leg":1,"name":"synthesis","request":"resume","role":"coachman","prompt":"%s","thread_id":"T-TWO","outcome":"incomplete","on_answer":"resume","backfilled":false,"exit":1}\n' \
+    "$tmp/bound-d/prompt.txt" > "$tmp/bound-d/logs/coachman-leg-1-attempts.jsonl"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" \
+    "$SELF" leg backfill "$tmp/bound-d" synthesis 1 >/dev/null 2>&1; rc=$?
+  got=$(python3 -c 'import json,sys; rs=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]; print("%s|%s" % (rs[-1]["outcome"], rs[-1]["thread_id"]))' "$tmp/bound-d/logs/coachman-leg-1-attempts.jsonl")
+  check "a recorded later resume still bounds the slice" '[ "$rc" -eq 0 ] && [ "$got" = "incomplete|T-ONE" ]' "$got"
+
+  # Only a started attempt is scanned: a foreign phase blanks the slice (no
+  # thread, no wall file), while a started attempt over the same bytes scans.
+  mkdir -p "$tmp/scan-d/logs" && cp "$leg_d/run.json" "$tmp/scan-d/run.json"
+  printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/scan-d/manifest.json"
+  printf 'scan prompt\n' > "$tmp/scan-d/prompt.txt"
+  printf '{"attempt":1,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":0}' \
+    "$tmp/scan-d/prompt.txt" > "$tmp/scan-d/logs/coachman-leg-1-intent-1.json"
+  printf 'bogus\n' > "$tmp/scan-d/logs/coachman-leg-1-phase-1"
+  printf '{"attempt":2,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":0}' \
+    "$tmp/scan-d/prompt.txt" > "$tmp/scan-d/logs/coachman-leg-1-intent-2.json"
+  printf 'started\n' > "$tmp/scan-d/logs/coachman-leg-1-phase-2"
+  printf '{"session_id":"T-F","type":"assistant"}\n{"type":"error","error":{"code":429,"message":"rate limit"}}\n' > "$tmp/scan-d/logs/coachman-leg-1-events.jsonl"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" \
+    "$SELF" leg backfill "$tmp/scan-d" synthesis 1 >/dev/null 2>&1; rc=$?
+  got=$(python3 -c 'import json,sys; rs=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]; print("%s|%s|%s|%s" % (rs[0]["outcome"], rs[0]["thread_id"], rs[1]["outcome"], rs[1]["thread_id"]))' "$tmp/scan-d/logs/coachman-leg-1-attempts.jsonl")
+  check "a foreign phase scans nothing while a started attempt scans" \
+    '[ "$rc" -eq 0 ] && [ "$got" = "refused||walled|T-F" ] && [ ! -e "$tmp/scan-d/logs/coachman-leg-1-wall-1" ] && [ -e "$tmp/scan-d/logs/coachman-leg-1-wall-2" ]' "$got"
+
+  # A prompt that is not a file is refused before the lock: no intent, no
+  # phase, no record. A directory passes -s and -r, so it is the -f control.
+  intents_before=$(ls "$tmp/gap-d/logs"/coachman-leg-1-intent-*.json 2>/dev/null | wc -l)
+  phases_before=$(ls "$tmp/gap-d/logs"/coachman-leg-1-phase-* 2>/dev/null | wc -l)
+  recs_before=$(grep -c . "$tmp/gap-d/logs/coachman-leg-1-attempts.jsonl")
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" \
+    "$SELF" leg launch "$tmp/gap-d" "$leg_wt" synthesis 1 "$tmp" >/dev/null 2>&1; rc=$?
+  check "a directory prompt is refused before the lock" \
+    '[ "$rc" -ne 0 ] && [ "$(ls "$tmp/gap-d/logs"/coachman-leg-1-intent-*.json 2>/dev/null | wc -l)" = "$intents_before" ] && [ "$(ls "$tmp/gap-d/logs"/coachman-leg-1-phase-* 2>/dev/null | wc -l)" = "$phases_before" ] && [ "$(grep -c . "$tmp/gap-d/logs/coachman-leg-1-attempts.jsonl")" = "$recs_before" ]' "rc=$rc"
 
   printf '{"attempt":1,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":0}' \
     "$tmp/direct-d/prompt.txt" > "$tmp/direct-d/logs/coachman-leg-1-intent-1.json"
