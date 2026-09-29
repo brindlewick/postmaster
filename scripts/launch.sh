@@ -594,15 +594,29 @@ PY
     && ok "every token vetoes every transient ($cells cells)" \
     || fail "token veto matrix misclassifies or is empty"
   matrix_fail=0
-  for tok in quota limit exhaust exceed throttl bill budget credit payment usage 429 402 toomanyrequests; do
+  for tok in quota limit exhaust exceed throttl bill budget credit payment usage slow quick toomany 429 402; do
     check_cell "lone stem [$tok] vetoes" 1 provider-wall "witness $tok here"
   done
   [ "$matrix_fail" -eq 0 ] \
     && ok "every pinned stem vetoes alone" \
     || fail "a pinned stem does not veto alone"
-  [ "$(tr '\n' ' ' < "$tmp/tokens.txt")" = "quota limit exhaust exceed throttl bill budget credit payment usage 429 402 toomanyrequests " ] \
+  [ "$(tr '\n' ' ' < "$tmp/tokens.txt")" = "quota limit exhaust exceed throttl bill budget credit payment usage slow quick toomany 429 402 " ] \
     && ok "wall-tokens lists exactly the pinned stems" \
     || fail "wall-tokens lists exactly the pinned stems"
+  printf '%s\n' '{"type":"error","message":"quota exceeded for this key"}' > "$tmp/long-events.jsonl"
+  i=2; while [ "$i" -lt 101 ]; do
+    printf '%s\n' '{"type":"step","status":"flying"}' >> "$tmp/long-events.jsonl"; i=$((i + 1))
+  done
+  printf '%s\n' '{"type":"error","message":"model stream idle timeout"}' >> "$tmp/long-events.jsonl"
+  printf '%s\n' "the leg ended" > "$tmp/long.err"
+  out=$("$self" transient "$tmp/long.err" "$tmp/long-events.jsonl" 2>"$tmp/err"); rc=$?
+  [ $rc -eq 1 ] && [ "$out" = provider-wall ] \
+    && ok "a wall 100 lines back still vetoes" \
+    || fail "a wall 100 lines back still vetoes (exit $rc, $out)"
+  check_cell "try-again-later beside transient resumes" 0 "model stream idle timeout" \
+    "try again later: model stream idle timeout"
+  check_cell "server-busy beside transient resumes" 0 "model stream idle timeout" \
+    "the server is busy, please retry: model stream idle timeout"
   echo "structured values: known transients resume, anything else wakes"
   is_transient "a 429 status code is a wall" 1 "the leg ended" '{"type":"error","status":429}'
   is_transient "a 402 status code is a wall" 1 "the leg ended" '{"type":"error","code":402}'
@@ -743,9 +757,11 @@ wall_tokens() {  # wall_tokens: the adapter's wall token stems, one per line; an
     credit \
     payment \
     usage \
+    slow \
+    quick \
+    toomany \
     429 \
-    402 \
-    toomanyrequests
+    402
 }
 # The stems are deliberately broad and matched as substrings on
 # separator-stripped text, with no span limit and no word boundary: a false veto
@@ -758,11 +774,11 @@ wall_tokens() {  # wall_tokens: the adapter's wall token stems, one per line; an
 # wild, each quote alone and beside every transient exemplar. When a run meets a
 # wall phrasing, append it here verbatim with where it was found. No wall
 # verbatim was found in run logs through 2026-09-29 (legs hit transient
-# timeouts, never walls), so the seeds below are probe-attested: round-4 and
-# round-5 review probes, the oracle wall probe, and the HTTP status lines. The
-# round-2 provider_wall seed carries no stem, so it reads here in its
-# capacity-exhausted control form; a bare provider-wall mention without a stem
-# wakes as not-transient, which is still a wake.
+# timeouts, never walls), so the seeds below are probe-attested: round-4
+# through round-6 review probes, the oracle wall probe, and the HTTP status
+# lines. The round-2 provider_wall seed carries no stem, so it reads here in
+# its capacity-exhausted control form; a bare provider-wall mention without a
+# stem wakes as not-transient, which is still a wake.
 wall_quotes() {  # wall_quotes: real wall phrasings, one per line; the corpus control wakes on each alone and beside every transient exemplar
   printf '%s\n' \
     "You exceeded your current quota, please check your plan and billing details." \
@@ -785,7 +801,9 @@ wall_quotes() {  # wall_quotes: real wall phrasings, one per line; the corpus co
     "Error: rate_limit_exceeded" \
     "Error: usage_limit_reached" \
     "quota for this project was finally exceeded" \
-    "budget for the current month has been exhausted"
+    "budget for the current month has been exhausted" \
+    "Please slow down, you're sending requests too quickly." \
+    "You are sending requests too quickly. Slow down."
 }
 
 transient() {  # transient <err-file> [<stream-file> [<skip-lines>]]
@@ -890,14 +908,21 @@ def vetoed(text):
     norm = re.sub(r"[^a-z0-9]", "", text.lower()).replace(NOTICE, " ")
     return any(tok in norm for tok in tokens)
 error_text = []
-raw_lines = []
+veto_hit = False
 if stream_path:
     try:
         f = open(stream_path, encoding="utf-8", errors="replace")
     except OSError:
         f = []
-    for line in collections.deque(itertools.islice(f, skip, None), maxlen=100):
-        raw_lines.append(line)
+    # The veto scans every post-skip line: a missed wall would resume, so no window
+    # may hide one. Prose collection below stays windowed to the last 100 post-skip
+    # lines: a missed transient is the safe direction, it wakes.
+    window = collections.deque(maxlen=100)
+    for line in itertools.islice(f, skip, None):
+        if not veto_hit and vetoed(line):
+            veto_hit = True
+        window.append(line)
+    for line in window:
         try:
             event = json.loads(line)
         except ValueError:
@@ -933,7 +958,7 @@ all_errors = err + "\n" + "\n".join(error_text)
 if re.sub(r"^(?:host:[^\n]*\n)+", "", err).startswith("launch:"):
     print("launch-refusal")
     raise SystemExit(1)
-if vetoed(err) or any(vetoed(line) for line in raw_lines):
+if veto_hit or vetoed(err):
     print("provider-wall")
     raise SystemExit(1)
 if unknown_structured:

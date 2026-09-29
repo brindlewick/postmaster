@@ -46,15 +46,17 @@ The adapter answers one question: may the watcher resume this ending by itself? 
 answer is positive and narrow. An ending resumes only when it carries one of the
 signatures above and no wall-like token anywhere in it; everything else wakes the
 postmaster. A wall is **never** transient: any token stem of quota, limit, exhaust,
-exceed, throttle, billing, budget, credit, payment or usage, the codes `429` and `402`,
-or an identifier form such as `too_many_requests`, vetoes the resume wherever it appears
-in the ending, in any spelling and at any distance — there is no span limit and no word
-boundary to hide behind. The one exclusion is Claude's `rate_limit_event` slowdown
-notice, which is not an ending and never vetoes. A false veto is a wake, which costs one
-look; a missed wall would be an automatic remount against a wall. The stems live once in
-`launch.sh` (`wall_tokens`, printed by `launch.sh wall-tokens`); the veto matrix is built
-from that list, a quote corpus beside it covers real provider messages verbatim, and each
-stem is pinned alone, so a stem that stops vetoing fails loudly.
+exceed, throttle, billing, budget, credit, payment, usage, slow, quick or too many, or
+the codes `429` and `402`, vetoes the resume wherever it appears in the ending, in any
+spelling and at any distance — there is no span limit and no word boundary to hide
+behind, and the veto scans every post-skip stream line. The one exclusion is Claude's
+`rate_limit_event` slowdown notice, which is not an ending and never vetoes. A false
+veto is a wake, which costs one look; a missed wall would be an automatic remount
+against a wall. The fifteen stems live once in `launch.sh` (`wall_tokens`, printed by
+`launch.sh wall-tokens`); the veto matrix is built from that list, a quote corpus
+beside it covers real provider messages verbatim, and each stem is pinned alone, so a
+stem that stops vetoing fails loudly. `try again later` and `server is busy` carry no
+stem on purpose: that is transient-overload language, and resuming on it is right.
 
 Where an error record carries a status code or an error type, values come in three
 classes: the known-transient set (`502`, `503`, `504`, `529`, connection-reset and
