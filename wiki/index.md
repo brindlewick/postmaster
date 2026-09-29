@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-27
+updated: 2026-09-29
 ---
 
 # postmaster wiki
@@ -99,6 +99,11 @@ Why the design is shaped as it is.
 - [Each project defines how a change to it is verified](concepts/verification.md): **claimed**.
   A project declares its checks or gets defaults by discovery; every workhorse runs them before
   it reports, and the coachman runs them again on each branch and on the synthesis.
+- [The dashboard shows the fleet and can do nothing to it](concepts/dashboard.md): **claimed**.
+  A read-only web page for phone, iPad and desktop. It takes every figure from the scripts that
+  already compute it, listens on a Unix socket, and is reached only by the machine's owner
+  through Tailscale's proxy over plain HTTP. It never acts, because anything it could do, an
+  agent running as the user could do too.
 
 ## Sources
 
