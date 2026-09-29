@@ -18,7 +18,14 @@
 //   exit 1  usage, no waybill, or a table that breaks its rules
 //   exit 2  resolve: the text is not a turnpikes section; legs and short: the line is missing,
 //           is not names or none, or is not the one --expect gives. One line per fault, on stdout.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
 import { die, run, withTempDir } from "./lib/proc.ts";
@@ -38,7 +45,16 @@ const LEGS: Array<[number, string]> = [
 ];
 const ALWAYS = new Set(["synthesis", "ship"]);
 const RESERVED = ["default", "none"];
-const BREAK = /^[ \t]{0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+const BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+// Python's strerror, for the read errors BASE reports concisely.
+const STRERROR: Record<string, string> = {
+  EACCES: "Permission denied",
+  EISDIR: "Is a directory",
+  ELOOP: "Too many levels of symbolic links",
+  ENAMETOOLONG: "File name too long",
+  ENOENT: "No such file or directory",
+  ENOTDIR: "Not a directory",
+};
 const MARKER = /^[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$)/;
 const LINE = /^[ \t]*turnpikes[ \t]*:/;
 
@@ -253,11 +269,24 @@ if (argv[0] === "--self-test") {
       1,
     );
   const brief = join(argv[1] ?? "", "brief.md");
-  if (!existsSync(brief)) {
+  let regular = false;
+  try {
+    regular = existsSync(brief) && statSync(brief).isFile();
+  } catch {
+    regular = false;
+  }
+  if (!regular) {
     console.error(`turnpikes: no waybill at ${brief}`);
     process.exit(1);
   }
-  const lines = readFileSync(brief, "utf8").split("\n");
+  let lines: string[];
+  try {
+    lines = readFileSync(brief, "utf8").split("\n");
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code ?? "";
+    console.error(`turnpikes: cannot read ${brief}: ${STRERROR[code] ?? code}`);
+    process.exit(1);
+  }
   const above: string[] = [];
   for (const l of lines) {
     if (l.startsWith("## ")) break;
@@ -362,6 +391,13 @@ withTempDir((tmp) => {
     ];
     st.check("the three run in the review leg", legs.length === 1 && legs[0] === "review", out);
   }
+  const wantDescs = [
+    "idiom, naming, abstraction and consistency with the project's own conventions",
+    "correctness, logic, and whether the tests are adequate",
+    "exploit paths through the project's risk surfaces",
+  ];
+  const descsFull = (ds: string[]): boolean =>
+    ds.length === 3 && ds.every((d, i) => d === wantDescs[i]);
   {
     const descs = out
       .split("\n")
@@ -369,12 +405,20 @@ withTempDir((tmp) => {
       .map((l) => l.split(/\s+/).slice(3).join(" "));
     st.check(
       "each line carries its full description, not its first word",
-      descs.length === 3 &&
-        (descs[0] ?? "").startsWith("idiom, naming, abstraction") &&
-        (descs[1] ?? "").startsWith("correctness, logic,") &&
-        (descs[2] ?? "").startsWith("exploit paths through"),
+      descsFull(descs),
       out,
     );
+  }
+  {
+    const short = TABLE.replace(
+      "idiom, naming, abstraction and consistency with the project's own conventions",
+      "idiom, naming, abstraction",
+    );
+    const { rows } = parseTable(short);
+    const got = rows
+      .filter((r) => ["style", "bug", "security"].includes(r.name))
+      .map((r) => r.what);
+    st.check("a truncated description fails the full-description control", !descsFull(got));
   }
 
   console.log("positive controls: a ticket's section");
@@ -394,6 +438,14 @@ withTempDir((tmp) => {
   );
   runSelf("resolve", lines("default", "", "---", "", "***"));
   is("a thematic break is not a name", 0, "turnpikes: style, bug, security");
+  runSelf("resolve", lines("default", "", "\t---"));
+  is(
+    "a tab-indented rule is a name, not a break, as BASE has it",
+    2,
+    '"---" is not a turnpike; the section holds only default, none, or names from: style, bug, security',
+  );
+  runSelf("resolve", lines("default", "", "   ---"));
+  is("a three-space-indented rule is still a break", 0, "turnpikes: style, bug, security");
   runSelf("resolve", "bug\\\nsecurity");
   is("a hard line break is not part of a name", 0, "turnpikes: bug, security");
   runSelf("resolve", "default\u200B");
@@ -564,6 +616,31 @@ withTempDir((tmp) => {
   has("short refuses default: a line carries names", 2, "says default");
   runSelf("legs", join(tmp, "nowhere"));
   has("no waybill is a usage error", 1, "no waybill at");
+  {
+    const d = join(tmp, "briefdir");
+    mkdirSync(join(d, "brief.md"), { recursive: true });
+    runSelf("legs", d);
+    has("a brief.md that is a directory is no waybill", 1, "no waybill at");
+  }
+  {
+    const d = join(tmp, "noperm");
+    waybill(d, "turnpikes: none");
+    chmodSync(join(d, "brief.md"), 0o000);
+    let unreadable = true;
+    try {
+      readFileSync(join(d, "brief.md"));
+      unreadable = false;
+    } catch {
+      unreadable = true;
+    }
+    if (!unreadable) {
+      st.ok("an unreadable brief.md names the read error (skipped: this user reads every file)");
+    } else {
+      runSelf("legs", d);
+      has("an unreadable brief.md names the read error", 1, "cannot read", "Bun v");
+    }
+    chmodSync(join(d, "brief.md"), 0o644);
+  }
 
   console.log("negative controls: the table");
   function bad(label: string, extra: string, want: string): void {
