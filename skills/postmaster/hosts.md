@@ -93,7 +93,10 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   A machine without a working per-launch cgroup backend still runs the command and records
   `host: launch running uncapped (no supported per-launch limits available)` in `.err`, with a
   warning to the caller. The limits live under `[limits]` in `config.toml`; `[limits.lane]`,
-  `[limits.coachman]` and `[limits.reviewer]` can override either setting.
+  `[limits.coachman]` and `[limits.reviewer]` can override either setting. The caps bind an
+  accidental runaway, not a deliberate escape: every launch runs as the same user, which can
+  always start work outside the launch's scope, so the caps are resource bounds, not a
+  security boundary.
 - **A launch outlives its caller.** It belongs to the host's server, or with no host to a session
   of its own, so a caller's background-task cap or its exit does not reach it.
 - **A launch carries its own pane's identity, never its caller's**: `HERDR_PANE_ID`, the tab and

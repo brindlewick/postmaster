@@ -529,7 +529,10 @@ memory_default, tasks_default = "8G", 512
 try:
     if dispatch:
         with open(os.path.join(dispatch, "run.json"), encoding="utf-8") as f:
-            config = json.load(f).get("config", {})
+            top = json.load(f)
+        if not isinstance(top, dict):
+            print("host: run.json must hold an object", file=sys.stderr); sys.exit(1)
+        config = top.get("config", {})
     elif os.path.isfile(config_path):
         with open(config_path, "rb") as f:
             config = tomllib.load(f)
@@ -637,7 +640,14 @@ pids_path = os.path.join(root, "pids.events")
 mem_path = os.path.join(root, "memory.events")
 def tripped():
     if events(pids_path).get("max", 0): return "process"
-    if events(mem_path).get("max", 0): return "memory"
+    # Memory trips on a kill decision, not on pressure: `max` fires hundreds of
+    # times while reclaim succeeds (a healthy cache-heavy launch brushing the
+    # cap), while `oom` fires exactly when the kernel kills for memory. A refused
+    # fork has no reclaim analogue, so the process cap keeps `max`. The kill
+    # counters vary by kernel (one OOM recorded oom_kill 0, 1 and 2 across three
+    # runs here), so every counter that only a kill moves joins the verdict.
+    mem = events(mem_path)
+    if mem.get("oom", 0) or mem.get("oom_kill", 0) or mem.get("oom_group_kill", 0): return "memory"
     return ""
 # The events files wake a poller when their counters change, so the watch
 # blocks in the kernel instead of waking on a timer: a trip is read within
@@ -893,10 +903,12 @@ runner() {
       # settled so a fast OOM is still named. success with the scope still
       # active is transient, not a verdict; a settled scope breaks at once,
       # so a launch that never tripped pays for one query only.
-      local tries=0 result="" active="" out=""
+      local tries=0 result="" active="" verdict=""
       while [ "$tries" -lt 40 ]; do
-        out=$("$systemctl" --user show "$unit" --property=Result --property=ActiveState --value 2>/dev/null)
-        result=$(printf '%s\n' "$out" | sed -n '1p'); active=$(printf '%s\n' "$out" | sed -n '2p')
+        # By name, not by line: --value prints properties in its own order no
+        # matter the --property order, so positional parsing would silently swap.
+        verdict=$("$systemctl" --user show "$unit" --property=Result --property=ActiveState 2>/dev/null)
+        result=$(printf '%s\n' "$verdict" | sed -n 's/^Result=//p'); active=$(printf '%s\n' "$verdict" | sed -n 's/^ActiveState=//p')
         if [ "$result" = oom-kill ]; then cap_event=memory; break; fi
         case $active in inactive|failed) break ;; esac
         tries=$((tries + 1)); sleep 0.05
@@ -1535,6 +1547,7 @@ EOF
       POSTMASTER_HOST_CLOSE_WAIT=1 POSTMASTER_CONFIG="$tmp/live-limits.toml" \
       XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}" \
       CHILD_PIDS="$tmp/logs/$prefix.pids" LAUNCH_GROUP_RECORD="$tmp/logs/$prefix.group" \
+      BRUSH_FILE="$tmp/brush-data.bin" \
       "$impl" run "$NAME" "$repo/.worktrees/T-1-luna" \
       --out "$tmp/logs/$prefix.out" --err "$tmp/logs/$prefix.err" --marker "$tmp/logs/$prefix.done" \
       --pidfile "$tmp/logs/$prefix.pid" "${role_args[@]}" -- "$@"
@@ -1598,7 +1611,27 @@ while True:
     blocks.append(block)
     time.sleep(0.02)
 EOF
-  chmod +x "$tmp/caller/healthy.sh" "$tmp/caller/fork-cap.py" "$tmp/caller/fork-exit.py" "$tmp/caller/memory-cap.py"
+  cat > "$tmp/caller/brush-cache.py" <<'EOF'
+#!/usr/bin/env python3
+import mmap, os, sys
+f = open(os.environ["BRUSH_FILE"], "rb")
+m = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+s = 0
+for off in range(0, len(m), 4096):
+    s += m[off]
+print("brushed %d pages, checksum %d" % (len(m) // 4096, s % 256))
+# Pressure proof: our own cgroup must have throttled on the way past the cap,
+# or this control ran without the pressure it claims to survive.
+cg = open("/proc/self/cgroup").read().split(":")[-1].strip()
+mx = 0
+for line in open("/sys/fs/cgroup" + cg + "/memory.events"):
+    k, _, v = line.partition(" ")
+    if k == "max": mx = int(v)
+if not mx:
+    print("brush ran without memory pressure", file=sys.stderr); sys.exit(99)
+EOF
+  chmod +x "$tmp/caller/healthy.sh" "$tmp/caller/fork-cap.py" "$tmp/caller/fork-exit.py" "$tmp/caller/memory-cap.py" "$tmp/caller/brush-cache.py"
+  head -c 134217728 /dev/zero > "$tmp/brush-data.bin"
   reset() { rm -f -- "$tmp"/stub/*; }
   calls() { cat "$tmp/stub/$1.calls" 2>/dev/null; }
   T=$'\t'
@@ -1983,12 +2016,15 @@ PY
     shimctl=$(command -v systemctl)
     cat > "$tmp/capshim/systemctl" <<EOF
 #!/usr/bin/env bash
-# A watcher-blind backend whose first Result reads success: the verdict must
-# poll past it to the OOM the launch really died of, not break on it.
+# A watcher-blind backend whose first verdict reads success-with-active and
+# whose second prints the properties in reverse order: the verdict must poll
+# past the transient one and read the OOM by name, not by line.
 if [[ "\$*" == *postmaster-host-* && "\$*" == *ControlGroup* ]]; then exit 0; fi
 if [[ "\$*" == *postmaster-host-* && "\$*" == *Result* ]]; then
   echo x >> "$tmp/logs/shim-queries.log"
-  if [ "\$(wc -l < "$tmp/logs/shim-queries.log")" -eq 1 ]; then echo success; exit 0; fi
+  n=\$(wc -l < "$tmp/logs/shim-queries.log")
+  if [ "\$n" -eq 1 ]; then echo "Result=success"; echo "ActiveState=active"; exit 0; fi
+  if [ "\$n" -eq 2 ]; then echo "ActiveState=failed"; echo "Result=oom-kill"; exit 0; fi
 fi
 exec "$shimctl" "\$@"
 EOF
@@ -1996,8 +2032,13 @@ EOF
     rm -f "$tmp/logs/shim-queries.log"; touch "$tmp/logs/shim-queries.log"
     shim_got=$(cap_launch "$cap_impl" "$tmp/capshim" shim-oom -- timeout --signal=TERM --kill-after=1 6 python3 "$tmp/caller/memory-cap.py" 2>/dev/null)
     marker "$tmp/logs/shim-oom.done" 15
-    check "a transient success verdict does not hide an OOM: the memory cap is still named" \
-      'grep -qFx "host: memory cap reached (MemoryMax=64M)" "$tmp/logs/shim-oom.err" && [ "$(wc -l < "$tmp/logs/shim-queries.log")" -ge 2 ]' "$shim_got"
+    check "a transient success verdict does not hide an OOM, and the verdict reads properties by name" \
+      'grep -qFx "host: memory cap reached (MemoryMax=64M)" "$tmp/logs/shim-oom.err" && [ "$(wc -l < "$tmp/logs/shim-queries.log")" -eq 2 ]' "$shim_got"
+    python3 -c "import os; fd=os.open('$tmp/brush-data.bin',os.O_RDONLY); os.posix_fadvise(fd,0,0,os.POSIX_FADV_DONTNEED); os.close(fd)"
+    brush_got=$(cap_launch "$cap_impl" "$CAPSYS" brush -- timeout --signal=TERM --kill-after=1 30 python3 "$tmp/caller/brush-cache.py" 2>/dev/null)
+    marker "$tmp/logs/brush.done" 20
+    check "a launch that brushes the memory cap with reclaimable cache completes unnamed" \
+      'grep -q "brushed .* pages" "$tmp/logs/brush.out" && [ -e "$tmp/logs/brush.done" ] && [ ! -s "$tmp/logs/brush.err" ]' "$brush_got"
     kill_got=$(cap_launch "$cap_impl" "$CAPSYS" kill-healthy -- "$tmp/caller/healthy.sh" 2>/dev/null)
     sleep 0.3; kill -KILL "$(cat "$tmp/logs/kill-healthy.pid")" 2>/dev/null
     marker "$tmp/logs/kill-healthy.done" 10
@@ -2019,6 +2060,12 @@ EOF
     --err ../logs/badcfg.err --marker ../logs/badcfg.done -- ./fixed.sh 2>&1); rc=$?
   check "a dispatch whose config is no table refuses the launch cleanly, with no traceback" \
     '[ $rc -eq 1 ] && [ -e "$tmp/logs/badcfg.done" ] && grep -q "config must be a table" "$tmp/logs/badcfg.err" && ! grep -qi "traceback" "$tmp/logs/badcfg.err"' "$got"
+  mkdir -p "$tmp/bad-top"
+  printf '[1, 2, 3]' > "$tmp/bad-top/run.json"
+  got=$(cd "$tmp/caller" && hs "$SYS" -- run "$NAME" "$repo" --role lane --run "$tmp/bad-top" \
+    --err ../logs/badtop.err --marker ../logs/badtop.done -- ./fixed.sh 2>&1); rc=$?
+  check "a dispatch whose run.json holds no object refuses the launch cleanly, with no traceback" \
+    '[ $rc -eq 1 ] && [ -e "$tmp/logs/badtop.done" ] && grep -q "run.json must hold an object" "$tmp/logs/badtop.err" && ! grep -qi "traceback" "$tmp/logs/badtop.err"' "$got"
   got=$(cd "$tmp/caller" && hs "$SYS" -- run "$NAME" "$repo" --role bogus \
     --err ../logs/badrole.err --marker ../logs/badrole.done -- ./fixed.sh 2>&1); rc=$?
   check "an unknown launch role refuses the launch, the marker lands and .err says why" \
