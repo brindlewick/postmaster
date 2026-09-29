@@ -9,9 +9,11 @@
 #       the ticket's HEAD and that HEAD is not the run's BASE, or when --pr-merge names the
 #       merge commit of a provider-reported merged pull request where the ticket changed
 #       paths since BASE, the merge is on the default branch, and it contains the card's
-#       final HEAD: by ancestry, or, for a squash or rebase merge, by tree, with the card
-#       HEAD's tree on every path the ticket changed. `re-verify`, never `landed`, when the
-#       ticket branch moved past the card's HEAD. Otherwise `not-landed`.
+#       final HEAD: by ancestry, or, for a squash or rebase merge, by content, with every
+#       added and removed line of the ticket's diff on each path it changed present in the
+#       merge's diff on that path (paths with no text lines must agree between card and
+#       merge instead). `re-verify`, never `landed`, when the ticket branch moved
+#       past the card's HEAD. Otherwise `not-landed`.
 #   landing.sh anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha>
 #       whether the branch holds anything to land. `nothing-to-land` when the ticket's diff
 #       against BASE is empty (its HEAD is BASE, whatever the default branch holds), when
@@ -38,8 +40,9 @@
 #       section renders as `none`. The checkpoint gives each finding one bullet
 #       `- [<severity>] <id>: <state>` with the state `open`, `closed round <n>`,
 #       `dismissed: <reason>`, or `applied on user word, not re-reviewed`; a `-`, `*`
-#       or `+` bullet starting `[`, or a numbered or bare line starting `[` plus a
-#       severity digit, that is not such a finding is an input fault.
+#       or `+` bullet starting `[`, or a numbered or bare line shaped as a finding
+#       (`[` plus severity digit, an id, then a colon or end of line), that is not
+#       such a finding is an input fault. A fence marker line is an input fault too.
 #       The review leg writes this block into the card verbatim. Prints the block.
 #   landing.sh card-results <dispatch> <synthesis-wt> <checkpoint> <card>
 #   landing.sh card-findings <dispatch> <synthesis-wt> <checkpoint> <card>
@@ -49,6 +52,9 @@
 #       it never or more than once, is an input fault, never `match`. A card quoting
 #       `<!--` escapes it, for example as `&lt;!--`. A copy inside a
 #       code fence is text a reader sees, so it counts like any other copy.
+#   landing.sh card-open <checkpoint>
+#       the checkpoint's open P1 and P2 findings, one `- [<severity>] <id>` bullet
+#       each, or `none`. Open P3 residue prints `none`: it lands.
 #   landing.sh journey <dispatch> <synthesis-wt> <waybill>
 #       whether the journey holds landing. Whether the waybill has a User journey section
 #       is asked of `ticket-check.sh --has-journey`, the flow's one reading of a ticket.
@@ -60,19 +66,20 @@
 #       postmaster weighs it like any other non-pass.
 #   landing.sh --self-test
 #
-#   exit 0  already-landed, anything-to-land, results, card-block: the answer, printed;
-#           card-results, card-findings: `match`; journey: `clear` or `judge`; fresh: `fresh`
+#   exit 0  already-landed, anything-to-land, results, card-block, card-open: the answer,
+#           printed; card-results, card-findings: `match`; journey: `clear` or `judge`;
+#           fresh: `fresh`
 #   exit 1  usage; a ref or SHA that does not resolve; a file that cannot be read; checks
 #           that cannot be recorded-read; `verify.sh results`, `journey-path` or
 #           `ticket-check.sh --has-journey` failing; a checkpoint whose structure cannot
 #           be read (a duplicate id, a finding-shaped line that is not a finding, an
-#           unreadable state, or a heading inside a fenced block); a card holding an
+#           unreadable state, or a fence marker line); a card holding an
 #           HTML comment or not holding the rendered block exactly once
 #   exit 2  fresh: the faults, one line each; journey: `blocked`
 set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
-usage() { echo "usage: landing.sh already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> --card-head <sha> [--pr-merge <sha>] | anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha> | fresh --repo <repo> --default <branch> --ticket <ref> --dispatch <dispatch> --wt <synthesis-wt> | results <dispatch> <synthesis-wt> | card-block <dispatch> <synthesis-wt> <checkpoint> | card-results <dispatch> <synthesis-wt> <checkpoint> <card> | card-findings <dispatch> <synthesis-wt> <checkpoint> <card> | journey <dispatch> <synthesis-wt> <waybill> | --self-test" >&2; exit 1; }
+usage() { echo "usage: landing.sh already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> --card-head <sha> [--pr-merge <sha>] | anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha> | fresh --repo <repo> --default <branch> --ticket <ref> --dispatch <dispatch> --wt <synthesis-wt> | results <dispatch> <synthesis-wt> | card-block <dispatch> <synthesis-wt> <checkpoint> | card-results <dispatch> <synthesis-wt> <checkpoint> <card> | card-findings <dispatch> <synthesis-wt> <checkpoint> <card> | card-open <checkpoint> | journey <dispatch> <synthesis-wt> <waybill> | --self-test" >&2; exit 1; }
 
 run_py() {  # run_py <subcommand> <args...>; VERIFY and TICKET_CHECK name the scripts beside this one
   VERIFY="$HERE/verify.sh" TICKET_CHECK="$HERE/ticket-check.sh" python3 - "$@" <<'PY'
@@ -142,34 +149,12 @@ def recorded_results(dispatch, wt):  # [(name, result)]: verify.sh results with 
         die("verify.sh results reported no checks")
     return out
 
-FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-FENCED_HEAD = re.compile(r"^##\s+")
+FENCE_MARK = re.compile(r"^\s*(?:(?:[-*+]|\d{1,9}[.)])\s+)?(`{3,}|~{3,})")
 
-def spans(text):  # [(inside, line)]: CommonMark fence tracking; only a run at least as
-    out, inside, fence = [], False, None  # long as the opener, same mark, closes it
+def refuse_fences(text, which):  # no fence semantics: a marker line is an input fault
     for line in text.splitlines():
-        m = FENCE.match(line)
-        if m:
-            mark = m.group(1)
-            if not inside:
-                inside, fence = True, (mark[0], len(mark))
-            elif mark[0] == fence[0] and len(mark) >= fence[1] \
-                    and line[m.end(1):].strip() == "":
-                inside, fence = False, None
-            out.append((True, line))
-            continue
-        out.append((inside, line))
-    return out
-
-def check_fences(text, which):  # a heading inside a fenced block is unreadable
-    for inside, line in spans(text):
-        if inside and FENCED_HEAD.match(line):
-            die("%s: heading inside a fenced block: %s" % (which, line.strip()))
-
-def open_lines(text, which):  # the lines outside fenced blocks; headings inside die above
-    check_fences(text, which)
-    return [line for inside, line in spans(text) if not inside]
-
+        if FENCE_MARK.match(line):
+            die("%s: fence marker line: %s" % (which, line.strip()))
 def refuse_comments(text, which):  # neither the card nor the checkpoint needs a comment
     if "<!--" in text:
         die("%s: contains an HTML comment" % which)
@@ -193,12 +178,14 @@ def finding_state(words):
 def checkpoint_states(path):  # [(sev, fid, state)] in file order; malformed input dies
     text = load(path)
     refuse_comments(text, "checkpoint")
+    refuse_fences(text, "checkpoint")
     out = []
-    for line in open_lines(text, "checkpoint"):
+    for line in text.splitlines():
         m = FINDING.match(line)
         if not m:
-            if re.match(r"^\s*[-*+]\s*\[", line) \
-                    or re.match(r"^\s*(?:\d{1,9}[.)]\s*)?\[[Pp]\d", line):
+            if re.match(r"^\s*[-*+]\s*\[", line) or re.match(
+                    r"^\s*(?:\d{1,9}[.)]\s*)?\[[Pp]\d\]\s*[A-Za-z0-9][A-Za-z0-9_.+-]*(\s*:|\s*$)",
+                    line):
                 die("checkpoint: not a finding: %s" % line.strip())
             continue
         sev, fid, words = m.group(1), m.group(2), m.group(3)
@@ -220,6 +207,32 @@ def render_block(dispatch, wt, checkpoint):  # the card's checked sections, byte
     bodies.append("\n".join("- [%s] %s" % (sev, fid)
                             for sev, fid, state in states if state == "user-applied") or "none")
     return "## Checks\n\n%s\n\n## Open findings\n\n%s\n\n## Not re-reviewed\n\n%s\n" % tuple(bodies)
+
+def diff_lines(repo, a, b, path):  # (added, removed) line sets, -U0, no drivers
+    r = subprocess.run(["git", "-C", repo, "diff", "-U0", "--no-color", "--no-textconv",
+                        "--no-ext-diff", a, b, "--", path], capture_output=True, text=True)
+    if r.returncode != 0:
+        die("git diff %s %s failed" % (a[:12], b[:12]))
+    added, removed = set(), set()
+    for line in r.stdout.splitlines():
+        if line.startswith("+") and not line.startswith("+++"):
+            added.add(line[1:])
+        elif line.startswith("-") and not line.startswith("---"):
+            removed.add(line[1:])
+    return added, removed
+
+def content_landed(repo, base, card, merge, paths):  # every ticket line-change is in the merge
+    changed_cm = changed(repo, card, merge)
+    for p in sorted(paths):
+        a_c, r_c = diff_lines(repo, base, card, p)
+        if not a_c and not r_c:  # binary, mode-only: the trees must agree instead
+            if p in changed_cm:
+                return False
+            continue
+        a_m, r_m = diff_lines(repo, base, merge, p)
+        if not (a_c <= a_m and r_c <= r_m):
+            return False
+    return True
 
 def check_block(dispatch, wt, checkpoint, card):  # match iff the card holds the block once
     text = load(card)
@@ -251,7 +264,7 @@ if mode == "already-landed":
         merge = commit(repo, o[11], "--pr-merge")
         paths = changed(repo, base, card)
         landed = contains(repo, merge, default) and bool(paths) and (
-            contains(repo, card, merge) or paths.isdisjoint(changed(repo, card, merge)))
+            contains(repo, card, merge) or content_landed(repo, base, card, merge, paths))
     print("landed" if landed else "not-landed"); sys.exit(0)
 
 if mode == "anything-to-land":
@@ -322,6 +335,14 @@ if mode == "card-findings":
               file=sys.stderr); sys.exit(1)
     check_block(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
 
+if mode == "card-open":
+    if len(sys.argv) != 3:
+        print("usage: landing.sh card-open <checkpoint>", file=sys.stderr); sys.exit(1)
+    out = ["- [%s] %s" % (sev, fid)
+           for sev, fid, state in checkpoint_states(sys.argv[2])
+           if state == "open" and sev in ("P1", "P2")]
+    print("\n".join(out) if out else "none"); sys.exit(0)
+
 if mode == "journey":
     if len(sys.argv) != 5:
         print("usage: landing.sh journey <dispatch> <synthesis-wt> <waybill>", file=sys.stderr)
@@ -377,7 +398,7 @@ PY
 case ${1:-} in
   --self-test) ;;
   already-landed|anything-to-land) run_py "$@"; exit $? ;;
-  fresh|results|card-block|card-results|card-findings|journey) run_py "$@"; exit $? ;;
+  fresh|results|card-block|card-results|card-findings|card-open|journey) run_py "$@"; exit $? ;;
   *) usage ;;
 esac
 
@@ -441,6 +462,18 @@ expect "a squash merge the provider did not report is not landed" 0 "not-landed"
 SQM=$(git -C "$R" rev-parse main)
 out=$("$SELF" already-landed --repo "$R" --default main --ticket sq --base "$BASE" --card-head "$(git -C "$R" rev-parse sq)" --pr-merge "$SQM" 2>&1); rc=$?
 expect "a squash merge counts when its merge has the card HEAD's tree" 0 "landed"
+SS=$tmp/ss; mkrepo "$SS"
+printf 'line1\nline2\nline3\n' > "$SS/f"; git -C "$SS" add f && git -C "$SS" commit -qm A || exit 1
+SSB=$(git -C "$SS" rev-parse HEAD)
+git -C "$SS" checkout -qb ticket || exit 1
+printf 'TICKET1\nline2\nline3\n' > "$SS/f"; git -C "$SS" commit -qam T || exit 1
+SSH=$(git -C "$SS" rev-parse HEAD)
+git -C "$SS" checkout -q main || exit 1
+printf 'line1\nline2\nOTHER3\n' > "$SS/f"; git -C "$SS" commit -qam O || exit 1
+git -C "$SS" merge -q --squash ticket || exit 1; git -C "$SS" commit -qm PR || exit 1
+SSM=$(git -C "$SS" rev-parse HEAD)
+out=$("$SELF" already-landed --repo "$SS" --default main --ticket ticket --base "$SSB" --card-head "$SSH" --pr-merge "$SSM" 2>&1); rc=$?
+expect "AC3: a squash merge holding the ticket plus an independent same-file change is landed" 0 "landed"
 out=$("$SELF" already-landed --repo "$R" --default main --ticket sq --base "$BASE" --card-head "$(git -C "$R" rev-parse sq)" --pr-merge "$NOMERGE" 2>&1); rc=$?
 expect "a merge without the card HEAD's content does not count" 0 "not-landed"
 git -C "$R" checkout -qb moved "$TIP" || exit 1; commit "$R" f T3 T3
@@ -599,6 +632,14 @@ out=$(git -C "$YC" for-each-ref --format='%(upstream:remotename)' refs/heads/mai
 expect "AA5: the default branch's upstream remote resolves" 0 "origin"
 out=$(git -C "$YC" for-each-ref --format='%(upstream:short) %(upstream:remotename)' refs/heads/main); rc=$?
 expect "AB2: one format names the upstream ref and its remote" 0 "origin/main origin"
+GN=$tmp/gn; mkrepo "$GN"; commit "$GN" f A A
+out=$(git -C "$GN" for-each-ref --format='%(upstream:short) %(upstream:remotename)' refs/heads/main); rc=$?
+expect "AC6: no upstream prints a blank answer" 0 " "
+git -C "$GN" checkout -qb local-base || exit 1
+git -C "$GN" checkout -qb ticket || exit 1
+git -C "$GN" branch --set-upstream-to=local-base >/dev/null || exit 1
+out=$(git -C "$GN" for-each-ref --format='%(upstream:short) %(upstream:remotename)' refs/heads/ticket); rc=$?
+expect "AC6: a local upstream prints a dot remote" 0 "local-base ."
 ZO=$tmp/zo; mkrepo "$ZO"; commit "$ZO" f A A
 git clone -q -c protocol.file.allow=always "$ZO" "$tmp/zc" || exit 1
 ZC=$tmp/zc
@@ -709,15 +750,22 @@ out=$("$SELF" card-findings "$D" "$W" "$D/cp-dup.md" "$D/card.md" 2>&1); rc=$?
 expect "W9: a duplicate id in the checkpoint is an input fault" 1 "landing: checkpoint: bug-1: listed twice"
 printf '%s\n' "## Findings (bug)" "" "- [P2] bug-2: closed round 1" "" '```' "## Example" "" "- [P1] ex-1: open" '```' > "$D/cp-fence.md"
 out=$("$SELF" card-findings "$D" "$W" "$D/cp-fence.md" "$D/card.md" 2>&1); rc=$?
-expect "W8: a heading inside a checkpoint fence is an input fault" 1 "landing: checkpoint: heading inside a fenced block: ## Example"
+expect "a fence marker line in the checkpoint is an input fault" 1 "landing: checkpoint: fence marker line: \`\`\`"
 printf '%s\n' "## Findings (bug)" "" "- [P2] bug-2: closed round 1" "" '```' "- [P1] ex-1: open" '```' > "$D/cp-fbullet.md"
-{ printf '# Card\n\nExtra prose.\n\n'; "$SELF" card-block "$D" "$W" "$D/cp-fbullet.md"; printf '\nTail.\n'; } > "$D/card-fb.md"
-out=$("$SELF" card-findings "$D" "$W" "$D/cp-fbullet.md" "$D/card-fb.md" 2>&1); rc=$?
-expect "W8: an example bullet inside a fence is not a finding" 0 "match"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-fbullet.md" "$D/card.md" 2>&1); rc=$?
+expect "an example bullet inside a fence is refused with its markers" 1 "landing: checkpoint: fence marker line: \`\`\`"
+printf '%s\n' "## Findings (bug)" "" "- [P2] bug-2: closed round 1" "" "1. \`\`\`" "- [P1] ex-9: open" '```' '```' > "$D/cp-itemfence.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-itemfence.md" "$D/card.md" 2>&1); rc=$?
+expect "an item fence marker line is an input fault" 1 "landing: checkpoint: fence marker line: 1. \`\`\`"
+printf '%s\n' "## Findings (bug)" "" "- [P2] bug-2: closed round 1" "" "    \`\`\`" "    - [P1] ex-9: open" "    \`\`\`" > "$D/cp-listfence.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-listfence.md" "$D/card.md" 2>&1); rc=$?
+expect "a list-column fence marker line is an input fault" 1 "landing: checkpoint: fence marker line: \`\`\`"
+printf '%s\n' "# Notes" "" "Some prose." "" '```' "quoted" '```' "" "## Findings (bug)" "" "- [P2] bug-2: closed round 1" > "$D/cp-prosefence.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-prosefence.md" "$D/card.md" 2>&1); rc=$?
+expect "a fence marker outside the findings list is still an input fault" 1 "landing: checkpoint: fence marker line: \`\`\`"
 printf '%s\n' "## Findings (bug)" "" "- [P2] bug-2: closed round 1" "" '````' "- [P1] ghost: inside" '```' "- [P1] bug-1: open" '````' > "$D/cp-nest.md"
-{ printf '# Card\n\nExtra prose.\n\n'; "$SELF" card-block "$D" "$W" "$D/cp-nest.md"; printf '\nTail.\n'; } > "$D/card-fn.md"
-out=$("$SELF" card-findings "$D" "$W" "$D/cp-nest.md" "$D/card-fn.md" 2>&1); rc=$?
-expect "X2: a nested fence in the checkpoint hides both bullets" 0 "match"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-nest.md" "$D/card.md" 2>&1); rc=$?
+expect "a nested fence marker line is an input fault" 1 "landing: checkpoint: fence marker line: \`\`\`\`"
 cp "$D/checkpoint.md" "$D/cp-comment.md" && printf '<!-- hidden -->\n' >> "$D/cp-comment.md"
 out=$("$SELF" card-findings "$D" "$W" "$D/cp-comment.md" "$D/card.md" 2>&1); rc=$?
 expect "Y2: a comment anywhere in the checkpoint is an input fault" 1 "landing: checkpoint: contains an HTML comment"
@@ -745,9 +793,37 @@ expect "AB3: a link reference is prose, not a finding" 0 "match"
 cp "$D/checkpoint.md" "$D/cp-numlink.md" && printf '%s\n' '1. [roundup](https://example.com)' >> "$D/cp-numlink.md"
 out=$("$SELF" card-findings "$D" "$W" "$D/cp-numlink.md" "$D/card.md" 2>&1); rc=$?
 expect "AB3: a numbered link is prose, not a finding" 0 "match"
+cp "$D/checkpoint.md" "$D/cp-sevlink.md" && printf '%s\n' '[P1](https://example.com/p1) is the paper.' >> "$D/cp-sevlink.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-sevlink.md" "$D/card.md" 2>&1); rc=$?
+expect "AC5: a severity link is prose, not a finding" 0 "match"
+cp "$D/checkpoint.md" "$D/cp-numsevlink.md" && printf '%s\n' '1. [P1](https://example.com)' >> "$D/cp-numsevlink.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-numsevlink.md" "$D/card.md" 2>&1); rc=$?
+expect "AC5: a numbered severity link is prose, not a finding" 0 "match"
+cp "$D/checkpoint.md" "$D/cp-sevref.md" && printf '%s\n' '[P1]: https://example.com/p1' >> "$D/cp-sevref.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-sevref.md" "$D/card.md" 2>&1); rc=$?
+expect "AC5: a severity link reference is prose, not a finding" 0 "match"
+cp "$D/checkpoint.md" "$D/cp-sevsent.md" && printf '%s\n' '[P1] and [P2] are discussed above.' >> "$D/cp-sevsent.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-sevsent.md" "$D/card.md" 2>&1); rc=$?
+expect "AC5: a severity sentence is prose, not a finding" 0 "match"
+cp "$D/checkpoint.md" "$D/cp-barestate.md" && printf '%s\n' '[P1] bug-9' >> "$D/cp-barestate.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-barestate.md" "$D/card.md" 2>&1); rc=$?
+expect "AC5: a bare stateless finding shape still faults" 1 "landing: checkpoint: not a finding: [P1] bug-9"
+cp "$D/checkpoint.md" "$D/cp-numstate.md" && printf '%s\n' '1. [P1] bug-9' >> "$D/cp-numstate.md"
+out=$("$SELF" card-findings "$D" "$W" "$D/cp-numstate.md" "$D/card.md" 2>&1); rc=$?
+expect "AC5: a numbered stateless finding shape still faults" 1 "landing: checkpoint: not a finding: 1. [P1] bug-9"
 cp "$D/checkpoint.md" "$D/cp-badstate.md" && printf '%s\n' '- [P1] bug-9: someday' >> "$D/cp-badstate.md"
 out=$("$SELF" card-findings "$D" "$W" "$D/cp-badstate.md" "$D/card.md" 2>&1); rc=$?
 expect "an unreadable checkpoint state is an input fault" 1 "landing: checkpoint: bug-9: unreadable state: someday"
+
+echo "card-open"
+out=$("$SELF" card-open "$D/checkpoint.md" 2>&1); rc=$?
+expect "an open P1 is named" 0 "- [P1] bug-1"
+printf '%s\n' "## Findings (bug)" "" "- [P2] bug-2: closed round 1" > "$D/cp-allclosed.md"
+out=$("$SELF" card-open "$D/cp-allclosed.md" 2>&1); rc=$?
+expect "all closed prints none" 0 "none"
+printf '%s\n' "## Findings (bug)" "" "- [P3] bug-9: open" > "$D/cp-p3open.md"
+out=$("$SELF" card-open "$D/cp-p3open.md" 2>&1); rc=$?
+expect "open P3 residue prints none" 0 "none"
 
 echo "journey"
 printf '{"checks": [{"name": "gate", "source": "default:gate", "command": "true", "shows": "x"}, {"name": "journey", "source": "default:web-journey", "command": "true", "shows": "x"}]}\n' > "$D/jchecks.json"
@@ -783,16 +859,16 @@ out=$("$SELF" journey "$J" "$JW" "$J/other.md" 2>&1); rc=$?
 expect "V10: extra heading words still name another section" 0 "judge: no User journey section; journey judged like any other non-pass"
 printf '# T\n\n## Problem / feature\nA change.\n\n```\n## User journey\n1. Open it.\n```\n' > "$J/fenced.md"
 out=$("$SELF" journey "$J" "$JW" "$J/fenced.md" 2>&1); rc=$?
-expect "X5: a fenced-only User journey is not the section" 0 "judge: no User journey section; journey judged like any other non-pass"
+expect "fail-closed: a fenced User journey blocks" 2 "blocked: journey: not run; the journey has no evidence"
 printf '# T\n\n## Problem / feature\nA change.\n\n<!--\n## User journey\n1. Open it.\n-->\n' > "$J/commented.md"
 out=$("$SELF" journey "$J" "$JW" "$J/commented.md" 2>&1); rc=$?
-expect "Y2: a commented-only User journey is not the section" 0 "judge: no User journey section; journey judged like any other non-pass"
+expect "fail-closed: a commented-out User journey blocks" 2 "blocked: journey: not run; the journey has no evidence"
 printf '# T\n\n## Problem / feature\nA change.\n\n<!--\n```\n-->\n\n## User journey\n1. Open it.\n' > "$J/fencecomment.md"
 out=$("$SELF" journey "$J" "$JW" "$J/fencecomment.md" 2>&1); rc=$?
 expect "Z4: a fence inside a comment does not hide the journey" 2 "blocked: journey: not run; the journey has no evidence"
 printf '# T\n\n## Problem / feature\nA change.\n\n<!-- note --> ## User journey\n1. Open it.\n' > "$J/sameline.md"
 out=$("$SELF" journey "$J" "$JW" "$J/sameline.md" 2>&1); rc=$?
-expect "Z6: a same-line comment plus heading is not the section" 0 "judge: no User journey section; journey judged like any other non-pass"
+expect "fail-closed: a same-line remainder blocks" 2 "blocked: journey: not run; the journey has no evidence"
 printf '# T\n\n## Problem / feature\nA change.\n\n## User journey <!-- draft -->\n1. Open it.\n' > "$J/trailcomment.md"
 out=$("$SELF" journey "$J" "$JW" "$J/trailcomment.md" 2>&1); rc=$?
 expect "a comment inside the heading leaves it a heading" 2 "blocked: journey: not run; the journey has no evidence"

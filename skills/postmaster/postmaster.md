@@ -283,9 +283,11 @@ route follows below. An exit 1 from any `<tool>/scripts/landing.sh` call in Stag
 Stage G below is a fault in its inputs, not an answer: fix the inputs and re-run; never
 proceed past it. Resolve the default branch's upstream ref and remote with one command,
 `git for-each-ref --format='%(upstream:short) %(upstream:remotename)' refs/heads/<branch>`;
-on the pull-request route, `git fetch` that remote by name before asking `fresh`, and again
-after the user's merge word (on the `landing: local` route no fetch is needed: every call
-below reads the local branch). Pass the upstream short ref wherever a landing call in
+read the two fields as the ref, then the remote: a blank answer means no upstream, and a
+`.` remote means a local upstream, which needs no fetch. On the pull-request route, `git
+fetch` that remote by name before asking `fresh`, and again after the user's merge word
+(on the `landing: local` route no fetch is needed: every call below reads the local
+branch). Pass the upstream short ref wherever a landing call in
 Stage F or Stage G takes `--default` on the pull-request route, and the local branch on
 the `landing: local` route, which is what the merge lands on; `fresh` takes the route's
 own ref. When the branch has no upstream, pass the branch itself: with nothing tracking
@@ -325,7 +327,9 @@ it there is no fresher ref, and remote movement it does not track can be missed.
    `<tool>/scripts/landing.sh card-findings <dispatch> <synthesis-wt>
    <dispatch>/checkpoint-review.md <dispatch>/card.md` prints `match`, and the card names
    the checkpoint's final round with
-   the same round counts; the blind acceptance
+   the same round counts; `<tool>/scripts/landing.sh card-open <the leg's checkpoint>`
+   prints `none`: with an open P1 or P2 the postmaster withholds like a stale `fresh`,
+   whatever the card matches — open P3 residue lands; the blind acceptance
    tests are the first commit or the hand-off records why they were not written; the Style
    residue's count is what
    `<tool>/scripts/style-findings.sh count <dispatch>` prints, and the residues the card

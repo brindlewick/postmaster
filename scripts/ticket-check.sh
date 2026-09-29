@@ -14,10 +14,12 @@
 #                                                         of <sections> in place of the one it
 #                                                         names, or added where the shape puts it
 #   ticket-check.sh --has-journey <file>                  print `journey` or `no journey`: whether
-#                                                         any heading at any level names the User
-#                                                         journey section, read as below, with a
-#                                                         trailing full stop or other sentence
-#                                                         punctuation allowed besides the colon
+#                                                         any line, with complete same-line comments
+#                                                         removed, reads User journey after stripping
+#                                                         leading spaces and `#` marks (case-insensitive;
+#                                                         trailing punctuation and closing hashes allowed).
+#                                                         Fail-closed: inside a fence or not, at any indent;
+#                                                         a false yes blocks landing visibly
 #   ticket-check.sh --self-test
 #
 # What it judges, and nothing more:
@@ -350,12 +352,13 @@ def splice(base_text, sections_text):
             lines.append("")
     return "\n".join(lines) + "\n"
 
-JOURNEY_TAIL = re.compile(r"[.;!?…:\s]+$")
+JOURNEY_HEAD = re.compile(r"^[\s#]*")
+JOURNEY_TAIL = re.compile(r"[#.;!?…:\s]+$")
 
-def has_journey(text):  # whether any heading at any level names the User journey section
-    raw, lines = tokenize(text)
-    for i, level, key, written in heads_of(raw, lines):
-        if JOURNEY_TAIL.sub("", key) == "user journey":
+def has_journey(text):  # fail-closed: any line reading as the journey counts, fenced or not
+    for raw_line in text.split("\n"):
+        line = re.sub(r"<!--.*?-->", "", raw_line)
+        if JOURNEY_TAIL.sub("", JOURNEY_HEAD.sub("", line)).lower() == "user journey":
             return True
     return False
 
@@ -882,11 +885,15 @@ jexpect "a comment between the hashes and the words leaves it a heading" "journe
 jbody "$P" "$A" "$D" "$K" '```' "Write <!-- to open" '```' "## User journey" "1. x" "<!-- done -->"
 jexpect "a comment opener inside a fence does not eat the journey" "journey"
 jbody "$P" "$A" "$D" "$K" "<!-- note --> ## User journey" "1. x"
-jexpect "a same-line remainder after a comment is not a heading" "no journey"
+jexpect "fail-closed: a same-line remainder still answers yes" "journey"
 jbody "$P" "$A" "$D" "$K" "<!--" "## User journey" "1. Open it." "-->"
-jexpect "a commented-out journey is not a heading" "no journey"
+jexpect "fail-closed: a commented-out journey still answers yes" "journey"
 jbody "$P" "$A" "$D" "$K" '```' "## User journey" "1. Open it." '```'
-jexpect "a fenced journey is not a heading" "no journey"
+jexpect "fail-closed: a fenced journey still answers yes" "journey"
+jbody "$P" "$A" "$D" "$K" "User journey" "============" "1. Open it."
+jexpect "a setext subject line reads as a journey line" "journey"
+jbody "$P" "$A" "$D" "$K" "User journey" "------------" "1. Open it."
+jexpect "a setext dashed subject line reads as a journey line" "journey"
 jbody "$P" "$A" "$D" "$K" "   ## User journey" "1. Open it."
 jexpect "an indented journey still names the section" "journey"
 jbody "$P" "$A" "$D" "$K" "## User journey ##" "1. Open it."
