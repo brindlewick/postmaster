@@ -1919,6 +1919,14 @@ if start_off > len(raw):
 if end_off > len(raw) or end_off < start_off:
     end_off = len(raw)
 text = raw[start_off:end_off].decode("utf-8", errors="replace")
+try: phase_value = pathlib.Path(phase).read_text(encoding="utf-8", errors="replace").strip()
+except OSError: phase_value = "refused"
+if phase_value == "refused":
+    # The harness never started, so no event here is this attempt's: the
+    # stream still holds a previous attempt's, from a death between the intent
+    # and the runner's truncate. Scanning it would attach a stale thread id
+    # that retry then resumes. The record keeps the intent's thread only.
+    text = ""
 terms = ("quota", "usage limit", "rate limit", "payment required", "insufficient_quota", "overloaded", "resource exhausted", "spawn failed", "failed to spawn", "stale session lock", "session lock")
 def selected(value):
     if isinstance(value, dict):
@@ -1939,8 +1947,6 @@ for line in text.splitlines():
     if e.get("type") in ("error", "thread.failed", "response.failed", "response.error"):
         if is_wall(e.get("error")) or is_wall(e):
             open(wall, "w").write("wall\n"); break
-try: phase_value = pathlib.Path(phase).read_text(encoding="utf-8", errors="replace").strip()
-except OSError: phase_value = "refused"
 try: walled = pathlib.Path(wall).is_file()
 except OSError: walled = False
 handoff = pathlib.Path(done).is_file()
@@ -2845,6 +2851,7 @@ PY
   mkdir -p "$tmp/direct-d/logs" && cp "$leg_d/run.json" "$tmp/direct-d/run.json"
   printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/direct-d/manifest.json"
   printf 'direct claim\n' > "$tmp/direct-d/prompt.txt"
+  printf '# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, direct\nsynthesis worktree: %s\n' "$leg_wt" > "$tmp/direct-d/brief.md"
   direct() {  # direct <active> <starter-pid> <starter-start>: _leg_exec against the isolated dispatch
     POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
       POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" TEST_DONE="$tmp/direct-d/.leg-1-done" \
@@ -2880,6 +2887,26 @@ PY
   direct "$tmp/starter.lock" "999999999" "0"; rc=$?
   check "a lock naming the starter is claimed and the attempt runs" \
     '[ "$rc" -eq 0 ] && [ "$(wc -l < "$tmp/leg-calls")" = "$((calls_before + 1))" ] && [ ! -e "$tmp/starter.lock" ] && grep -q "\"attempt\":1" "$tmp/direct-attempts.jsonl" 2>/dev/null' "rc=$rc"
+
+  printf '{"attempt":1,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":0}' \
+    "$tmp/direct-d/prompt.txt" > "$tmp/direct-d/logs/coachman-leg-1-intent-1.json"
+  printf 'refused\n' > "$tmp/direct-d/logs/coachman-leg-1-phase-1"
+  printf '{"session_id":"thread-old","type":"assistant"}\n' > "$tmp/direct-d/logs/coachman-leg-1-events.jsonl"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" \
+    "$SELF" leg backfill "$tmp/direct-d" synthesis 1 >/dev/null 2>&1; rc=$?
+  got=$(python3 -c 'import json,sys; r=json.loads(open(sys.argv[1]).readlines()[-1]); print(r["outcome"]+"|"+r["thread_id"])' "$tmp/direct-d/logs/coachman-leg-1-attempts.jsonl")
+  check "a refused launch takes no thread id from another attempt's stream" '[ "$rc" -eq 0 ] && [ "$got" = "refused|" ]' "$got"
+
+  calls_before=$(wc -l < "$tmp/leg-calls")
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" TEST_DONE="$tmp/direct-d/.leg-1-done" \
+    TEST_OBSERVED="$tmp/direct-d/retry-observed" \
+    "$SELF" leg retry "$tmp/direct-d" "$leg_wt" synthesis 1 >/dev/null 2>&1; rc=$?
+  marker "$tmp/direct-d/.leg-1-exited" 30
+  got=$(python3 -c 'import json,sys; r=json.loads(open(sys.argv[1]).readlines()[-1]); print(r["request"])' "$tmp/direct-d/logs/coachman-leg-1-attempts.jsonl")
+  check "retry after that refusal relaunches instead of resuming the stale thread" \
+    '[ "$rc" -eq 0 ] && [ "$got" = launch ] && ! tail -1 "$tmp/leg-calls" | grep -q -- "--resume"' "$got: $(tail -1 "$tmp/leg-calls")"
 
   before=$(grep -c . "$attempts")
   printf 'NOT JSON\n' >> "$attempts"
