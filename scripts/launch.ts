@@ -373,6 +373,23 @@ function logicalPwd(dir: string, from: string, physical: string): string {
     return physical;
   }
 }
+/** The SHLVL a fresh bash reports when started with `seen` inherited: a
+ * decimal integer steps up by one (floored at zero, and 1000 or more warns
+ * and restarts at 1, which the real bash downstream still does); anything
+ * else restarts at 1. Pinned against bash: "040" steps to 41, "-5" to 0,
+ * and "4 0", "0x10" and "" to 1. */
+function nextShlvl(seen: string | undefined): string {
+  let v = 1;
+  if (seen !== undefined && /^[ \t\n\v\f\r]*[+-]?[0-9]+[ \t\n\v\f\r]*$/.test(seen)) {
+    const n = Number(seen);
+    if (Number.isSafeInteger(n)) {
+      v = n + 1;
+      if (v < 0) v = 0;
+      if (v >= 1000) v = 1;
+    }
+  }
+  return String(v);
+}
 /** argv for `bash` to source an env_file and exec cmd itself, as BASE's launcher
  * does: `set -a; . file; set +a` in the shell, then the fixed assignment BASE
  * makes after the source, then `exec`. File output reaches the launch
@@ -389,10 +406,16 @@ function sourcedLaunch(file: string, cmd: string[]): string[] {
     ...cmd,
   ];
 }
+/** As sourcedLaunch, for the resume export check — except the tail. BASE runs
+ * the check's export as the last command of an `if` in its subshell, which
+ * forks: the export sees the subshell's SHLVL, one above the caller's, and a
+ * file that sets SHLVL lands verbatim. `exec` would decrement, so the shell
+ * execs only when the file left SHLVL alone and otherwise forks and hands
+ * on the status, matching BASE's fork in both cases. */
 function sourcedExport(file: string, data: string, cmd: string[]): string[] {
   return [
     "-c",
-    'f=$1; d=$2; shift 2; set -a; . "$f"; set +a; export XDG_DATA_HOME="$d" MIMOCODE_DISABLE_CLAUDE_IMPORT=1; exec "$@"',
+    'f=$1; d=$2; shift 2; l=$SHLVL; set -a; . "$f"; set +a; export XDG_DATA_HOME="$d" MIMOCODE_DISABLE_CLAUDE_IMPORT=1; if [ "$SHLVL" = "$l" ]; then exec "$@"; else "$@"; s=$?; exit $s; fi',
     "_",
     file,
     data,
@@ -645,13 +668,16 @@ if (argv[0] === "--self-test") {
     }
   }
 
-  // The directory the launch leaves: BASE's subshell cds to CWD before the
-  // resume check, and the launch itself cds after it. Both see the same pair.
-  let prevCwd = "";
+  // The directory the launch leaves: BASE's `cd` takes it from $PWD — the
+  // logical path when the caller came through a symlink — falling back to
+  // the physical directory only when PWD is unset. The resume check's
+  // subshell cds before the check and the launch itself cds after it, so
+  // both see the same pair.
+  let from = "";
   try {
-    prevCwd = process.cwd();
+    from = process.env.PWD || process.cwd();
   } catch {
-    prevCwd = "";
+    from = "";
   }
 
   // muse/mimo resume: verify the thread exists in this launch's data directory.
@@ -667,10 +693,14 @@ if (argv[0] === "--self-test") {
       MIMOCODE_DISABLE_CLAUDE_IMPORT: "1",
     };
     // The check runs where the launch will, seeing what it will: PWD names
-    // CWD logically and OLDPWD the directory it came from, as below.
-    if (prevCwd !== "") exportEnv.OLDPWD = prevCwd;
+    // CWD logically and OLDPWD the directory it came from, as below. Its
+    // SHLVL is one above this process's: BASE's subshell is a fork, so the
+    // export sees the launcher's level, and the wrapper's exec left this
+    // process one below it.
+    exportEnv.SHLVL = nextShlvl(process.env.SHLVL);
+    if (from !== "") exportEnv.OLDPWD = from;
     try {
-      exportEnv.PWD = logicalPwd(CWD, prevCwd, realpathSync(CWD));
+      exportEnv.PWD = logicalPwd(CWD, from, realpathSync(CWD));
     } catch {
       /* keep the inherited PWD on any surprise */
     }
@@ -717,9 +747,9 @@ if (argv[0] === "--self-test") {
   }
   // BASE's `cd` leaves OLDPWD naming the directory it came from, and PWD
   // naming the directory it entered, logically; the harness inherits both.
-  if (prevCwd !== "") process.env.OLDPWD = prevCwd;
+  if (from !== "") process.env.OLDPWD = from;
   try {
-    process.env.PWD = logicalPwd(CWD, prevCwd, process.cwd());
+    process.env.PWD = logicalPwd(CWD, from, process.cwd());
   } catch {
     /* keep the inherited PWD on any surprise */
   }
@@ -2855,47 +2885,134 @@ withTempDir((tmp) => {
   else fail("a file as cwd mutates nothing, no trust entry");
   envx = {};
 
-  // The resume export check sees the same PWD, OLDPWD and SHLVL the launch
-  // hands the harness: BASE's subshell cds to CWD before the check. Through
-  // a symlinked cwd the PWD is the logical path on both sides.
+  // The resume export check and the resumed harness see the directory the
+  // launch came from through $PWD, logically: BASE's subshell cds from $PWD
+  // before the check and the launch itself cds after it, so both see PWD
+  // naming CWD and OLDPWD the directory it came from. The check's SHLVL is
+  // one above the caller's — a fork, not an exec — and a file that sets
+  // SHLVL lands verbatim in the check. Each scenario below runs the BASE
+  // launcher and this one from behind a symlink with a relative cwd and the
+  // same environment, and compares both paths against BASE's own recorded
+  // values, never against each other.
   {
-    const mimo = join(tmp, "bin", "mimo");
-    const savedMimo = readFileSync(mimo, "utf8");
-    const rec = join(tmp, "exp-env.txt");
-    writeFileSync(
-      mimo,
-      `#!/bin/sh\nprintf '%s\\n' "$PWD|$OLDPWD|\${SHLVL:-unset}" >> "${rec}"\n[ "$1" = export ] && { [ -e "$XDG_DATA_HOME/$2" ] && exit 0; echo "Session not found: $2" >&2; exit 1; }\nprintf '%s\\n' "resumed $*"\n`,
-    );
-    mkdirSync(join(tmp, "resdir"), { recursive: true });
+    const f1 = join(tmp, "f1");
+    const f1bin = join(f1, "bin");
+    const realStart = join(f1, "real", "start");
+    const physSub = join(realStart, "sub");
+    mkdirSync(physSub, { recursive: true });
+    mkdirSync(f1bin, { recursive: true });
+    const startlink = join(f1, "startlink");
     try {
-      symlinkSync(join(tmp, "resdir"), join(tmp, "reslink"));
+      symlinkSync(realStart, startlink);
     } catch {
       /* exists */
     }
-    writeFileSync(
-      join(tmp, "mimo-resume.toml"),
-      '[lanes.x]\nharness = "mimo"\nmodel = "prov/mimo-model"\n',
+    // BASE's launcher at run 109's BASE; it sources nothing, so the one
+    // file is the whole launcher.
+    const baseLaunch = join(f1, "base-launch.sh");
+    const shown = spawnSync(
+      "git",
+      ["-C", dirname(here), "show", "bb782a973e69427c820ce16a676718e87f51995b:scripts/launch.sh"],
+      { encoding: "utf8" },
     );
-    const savedHd = process.env.POSTMASTER_HARNESS_DATA;
-    process.env.POSTMASTER_HARNESS_DATA = hd;
-    const rdata = harnessData("mimo", "resume", join(tmp, "reslink"), "x", "", "");
-    if (savedHd === undefined) delete process.env.POSTMASTER_HARNESS_DATA;
-    else process.env.POSTMASTER_HARNESS_DATA = savedHd;
-    mkdirSync(rdata, { recursive: true });
-    writeFileSync(join(rdata, "ses_env"), "");
-    rmSync(rec, { force: true });
-    mrun("mimo-resume", "resume", "x", join(tmp, "reslink"), "ses_env", join(tmp, "prompt.txt"));
-    writeFileSync(mimo, savedMimo);
-    const lines = existsSync(rec) ? readFileSync(rec, "utf8").trim().split("\n") : [];
-    const pwdOk = lines.length === 2 && lines[0] === lines[1];
-    const logicalOk = lines.length === 2 && (lines[0] ?? "").split("|")[0] === join(tmp, "reslink");
-    if (rc === 0 && pwdOk && logicalOk)
-      ok("a resume check sees the launch's PWD, OLDPWD and SHLVL");
-    else
+    if (shown.status !== 0) {
       st.fail(
-        "a resume check sees the launch's PWD, OLDPWD and SHLVL",
-        `exit ${rc}\n${lines.join("\n")}`,
+        "a resume's check and harness match BASE's PWD, OLDPWD and SHLVL",
+        `git show BASE launch.sh: ${shown.stderr ?? ""}`,
       );
+    } else {
+      writeFileSync(baseLaunch, shown.stdout ?? "");
+      const recOf = (h: string): string => join(f1, `${h}.rec`);
+      const stubOf = (h: string, threadArg: string): string =>
+        `#!/bin/sh\nprintf '%s\\n' "$PWD|$OLDPWD|\${SHLVL:-unset}" >> "${recOf(h)}"\n[ "$1" = export ] && { [ -e "$XDG_DATA_HOME/${threadArg}" ] && exit 0; echo "Session not found" >&2; exit 1; }\nprintf '%s\\n' "resumed $*"\n`;
+      writeFileSync(join(f1bin, "mimo"), stubOf("mimo", "$2"));
+      writeFileSync(join(f1bin, "muse"), stubOf("muse", "$3"));
+      chmodSync(join(f1bin, "mimo"), 0o755);
+      chmodSync(join(f1bin, "muse"), 0o755);
+      writeFileSync(join(f1, "benign.env"), "export FROM_ENV_FILE=1\n");
+      writeFileSync(join(f1, "shlvl.env"), "export SHLVL=7\n");
+      const cfgs: Record<string, string> = {
+        plain: '[lanes.x]\nharness = "mimo"\nmodel = "m"\n',
+        senv: `[lanes.x]\nharness = "mimo"\nmodel = "m"\nenv_file = "${join(f1, "benign.env")}"\n`,
+        senv7: `[lanes.x]\nharness = "mimo"\nmodel = "m"\nenv_file = "${join(f1, "shlvl.env")}"\n`,
+        muse: '[lanes.x]\nharness = "muse"\nmodel = "m"\n',
+      };
+      for (const [n, body] of Object.entries(cfgs)) writeFileSync(join(f1, `${n}.toml`), body);
+      // The thread where BASE's own key formula puts it: RUN, the physical
+      // cwd, NAME and LEG through cksum exactly as harness_data does.
+      const keyed = spawnSync(
+        "bash",
+        [
+          "-c",
+          'printf "%s|%s|%s|%s" "$1" "$2" "$3" "$4" | cksum | tr " " "-"',
+          "_",
+          "",
+          physSub,
+          "x",
+          "",
+        ],
+        { encoding: "utf8" },
+      );
+      const key = (keyed.stdout ?? "").trim();
+      for (const h of ["mimo", "muse"]) {
+        const tdir = join(hd, h, key);
+        mkdirSync(tdir, { recursive: true });
+        writeFileSync(join(tdir, "ses_x"), "");
+      }
+      const mismatches: string[] = [];
+      const scenario = (label: string, harness: string, cfg: string, unsetPwd: boolean): void => {
+        const env: Record<string, string | undefined> = {
+          ...process.env,
+          PWD: startlink,
+          OLDPWD: "/before",
+          SHLVL: "40",
+          POSTMASTER_HARNESS_DATA: hd,
+          POSTMASTER_CONFIG: join(f1, `${cfg}.toml`),
+          PATH: `${f1bin}:${process.env.PATH ?? ""}`,
+        };
+        if (unsetPwd) delete env.PWD;
+        const args = ["resume", "x", "sub", "ses_x", join(tmp, "prompt.txt")];
+        const sides: Record<string, string[]> = {};
+        const codes: Record<string, number> = {};
+        for (const [side, bin, argv] of [
+          ["base", "bash", [baseLaunch, ...args]],
+          ["port", self, args],
+        ] as Array<[string, string, string[]]>) {
+          rmSync(recOf(harness), { force: true });
+          const r = spawnSync(bin, argv, { cwd: startlink, encoding: "utf8", env });
+          codes[side] = r.status ?? -1;
+          sides[side] = existsSync(recOf(harness))
+            ? readFileSync(recOf(harness), "utf8").trim().split("\n")
+            : [`<no record: exit ${r.status ?? -1} ${(r.stderr ?? "").slice(0, 200)}>`];
+        }
+        const b = sides.base ?? [];
+        const p = sides.port ?? [];
+        if (
+          codes.base !== 0 ||
+          codes.port !== 0 ||
+          b.length !== 2 ||
+          p.length !== 2 ||
+          b[0] !== p[0] ||
+          b[1] !== p[1]
+        ) {
+          mismatches.push(
+            `${label}: base exit ${codes.base ?? -1} [${b.join(" / ")}] vs port exit ${codes.port ?? -1} [${p.join(" / ")}]`,
+          );
+        }
+      };
+      scenario("mimo-plain", "mimo", "plain", false);
+      scenario("mimo-sourced", "mimo", "senv", false);
+      scenario("mimo-sourced-shlvl", "mimo", "senv7", false);
+      scenario("mimo-no-pwd", "mimo", "plain", true);
+      scenario("muse-plain", "muse", "muse", false);
+      if (mismatches.length === 0)
+        ok("a resume's check and harness match BASE's PWD, OLDPWD and SHLVL");
+      else
+        st.fail(
+          "a resume's check and harness match BASE's PWD, OLDPWD and SHLVL",
+          mismatches.join("\n"),
+        );
+    }
   }
 
   st.finish();
