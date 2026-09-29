@@ -636,7 +636,7 @@ expect "no ship card: ship-card alone fails" break-card ship-card "no card.md"
 expect "a waybill with no turnpikes line: stages alone fails" break-legs stages "turnpikes.sh legs"
 
 echo "score: a record's stages are entered by the legs the contract names"
-one=$tmp/clean-one/runs/clean-one/7; two=$tmp/clean-$first/runs/clean-$first/7; three=$tmp/clean-three/runs/clean-three/7
+one=$tmp/clean-one/repo/.postmaster/runs/7; two=$tmp/clean-$first/repo/.postmaster/runs/7; three=$tmp/clean-three/repo/.postmaster/runs/7
 grep -q '"actor":"postmaster","action":"stage","target":"shipped"' "$one/actions.jsonl" \
   && ok "a one-leg record's shipped is the postmaster's" || fail "a one-leg record's shipped is the postmaster's"
 grep -q '"actor":"postmaster","action":"stage","target":"shipped"' "$two/actions.jsonl" \
