@@ -120,11 +120,13 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
 3. **Exclude worktrees without a commit,** before any is cut, or the next pre-flight reads
    them as dirt: `grep -qxF '.worktrees/' <repo>/.git/info/exclude || echo '.worktrees/' >>
    <repo>/.git/info/exclude`.
+   <!-- coachman-contract:stage-ownership:start -->
 4. **Create the run directory** `<runs>/<TICKET>/` with `logs/`, `audit/` and `render/`, and the
    manifest: `{"stage": "dispatched", "leg": 1, "base": "<sha>", "lanes": {}, "coachman":
    {"legs": {}}}`. You own `leg`, `base`, `coachman` and the terminal stages, `done` and
    `abandoned`; the coachman owns `lanes` and every stage before those; both update fields in
    place and neither rewrites the file. Then record what the run starts from, once:
+   <!-- coachman-contract:stage-ownership:end -->
    `<tool>/scripts/run-meta.sh <dispatch> <repo>` writes `run.json` with the postmaster commit,
    the pinned checkout of that commit, the resolved machine config, project settings and their
    sources, and the harness versions, and nothing edits it afterwards. The pin is a worktree of
@@ -139,6 +141,7 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    HEAD` on the default branch: `git -C <repo> worktree add .worktrees/<TICKET> -b <TICKET>
    <sha>`. The coachman's cwd is that worktree from its first leg, so the project's ambient
    context loads for it.
+   <!-- coachman-contract:waybill-write:start -->
 6. **Write `brief.md`** from the template in `SKILL.md`: the `turnpikes:` line step 1's check
    printed, whole, under the waybill's title, then the ticket verbatim, the project profile (gate,
    build, browser suite, the checks as `verify.sh record` printed them, docs to read first,
@@ -152,6 +155,7 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    config here is the one in `run.json`. Then
    `<tool>/scripts/turnpikes.sh legs <dispatch> --expect '<that turnpikes: line>'` exits 0 and
    prints the legs step 2 checked, before anything is launched.
+   <!-- coachman-contract:waybill-write:end -->
 7. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. The
    coachman never touches the ticket's state before stage 3.
 
@@ -185,6 +189,7 @@ file; the postmaster keeps using its main `<tool>` for every other supervision s
    (`hosts.md`), stream to the leg's events file, marker on exit; `host.sh` clears the leg's
    exited marker first:
 
+   <!-- coachman-contract:postmaster-marker-run:start -->
    ```sh
    <rt>/scripts/host.sh run "$(<rt>/scripts/host.sh name <dispatch> coachman <leg-name> <n>)" <repo>/.worktrees/<TICKET> \
        --under <dispatch> --role coachman --run <dispatch> \
@@ -193,6 +198,7 @@ file; the postmaster keeps using its main `<tool>` for every other supervision s
        -- <rt>/scripts/launch.sh launch coachman <repo>/.worktrees/<TICKET> <dispatch>/leg-<n>-prompt.txt --leg <leg-name> \
        --run <dispatch>
    ```
+   <!-- coachman-contract:postmaster-marker-run:end -->
 
    The tab name comes from the run config and leg identity through `host.sh name`; the dispatch
    makes the synthesis worktree space carry the ticket name. Neither name is typed into a shell.
@@ -207,6 +213,7 @@ file; the postmaster keeps using its main `<tool>` for every other supervision s
    `date -u +%Y%m%dT%H%M%SZ` prints. The leg's stream is appended to, its `.err` file holds only
    this process's errors, and `host.sh` clears the leg's exited marker:
 
+   <!-- coachman-contract:postmaster-marker-resume:start -->
    ```sh
    <rt>/scripts/host.sh run "$(<rt>/scripts/host.sh name <dispatch> coachman <leg-name> <n>)" <repo>/.worktrees/<TICKET> --append \
        --under <dispatch> --role coachman --run <dispatch> \
@@ -215,6 +222,7 @@ file; the postmaster keeps using its main `<tool>` for every other supervision s
        -- <rt>/scripts/launch.sh resume <name> <repo>/.worktrees/<TICKET> <thread-id> <dispatch>/leg-<n>-resume-<time>.txt --leg <leg-name> \
        --run <dispatch>
    ```
+   <!-- coachman-contract:postmaster-marker-resume:end -->
 
    `<name>` and `<thread-id>` are the leg's `coachman.legs.<n>.name` and `.thread_id`. Log
    `resume` with the leg and the thread id. A remount, a ruling and the merge word all reach
@@ -237,6 +245,7 @@ its line, and remove the line when the run closes. Hold a run only while you mea
 it alone — a question already put to the user, a deliberate pause — never to stop a wake
 you have not acted on.
 
+<!-- coachman-contract:marker-reader:start -->
 Each `NEXT` names the act:
 
 - **USER:** the run waits on the user, and its `.waiting-on-user` holds the question (Stage E
@@ -266,6 +275,7 @@ Each `NEXT` names the act:
   the stream tail; a live leg that is merely slow is left alone, and a process that is gone
   is handled as REMOUNT. Never kill a running leg for being slow.
 - **WAIT:** nothing to do.
+<!-- coachman-contract:marker-reader:end -->
 
 **The takeover prompt** for a fallback coachman, written to `<dispatch>/leg-<n>-takeover.txt`:
 "You take over leg <n> of <TICKET> mid-way. Read `<dispatch>/brief.md`,
