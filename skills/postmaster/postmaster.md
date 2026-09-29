@@ -246,19 +246,22 @@ is what needs judgment or what it could not complete:
   `n` in place of the next leg), the prompt naming the missing sections and saying "Complete
   the hand-off and end the leg as `coachman.md` says." If `turnpikes.sh legs` exits other than
   0, nothing is dispatched: its message goes to the user as Stage E step 3 says. If the new
-  leg's `.err` opens with a `launch:` line, the launch was refused: put the error to the user
+  leg's `.err` opens with a `launch:` line past any leading `host:` notices, the launch
+  was refused: put the error to the user
   (Stage E step 3) and wait for their answer before launching again. After the ship
-  leg, Stage G. Otherwise Stage C for the leg after `n` — but if that leg already has a
-  recorded thread id or a non-empty stream and no `.leg-<n>-exited` marker, the watcher's
-  launch may have succeeded: inspect (`.err`, stream tail) and launch again only if the
-  previous attempt is clearly dead, never a second leg onto a running one. A wake that says
-  the run was held mid-step names its partial state: complete or unwind that state (finish
-  the remaining part, or restore `manifest.json`'s leg) rather than taking the step fresh.
+  leg, Stage G. Otherwise Stage C for the leg after `n`, call it `m` — but if
+  `.leg-<m>-exited` is absent, the watcher's launch may have succeeded or still be running:
+  a silent launch has no thread id and an empty stream yet is live, so inspect (`.err`,
+  stream tail) and launch again only if the previous attempt is clearly dead, never a
+  second leg onto a running one. A wake that says the run was held mid-step names its
+  partial state: complete or unwind that state (finish the remaining part, or restore
+  `manifest.json`'s leg) rather than taking the step fresh.
 - **REMOUNT:** the watcher could not take the resume: a non-transient end, a fourth transient
   end, or a resume that failed. Read the leg's `.err` file and the stream tail. If
   `.leg-<n>-exited` is absent, the leg may be running — a resume landed but its log line did
   not: inspect before resuming, and never resume a live thread. A `.err` that
-  opens with a `launch:` line is a refusal from `<tool>/scripts/launch.sh`: it goes to the user
+  opens with a `launch:` line past any leading `host:` notices is a refusal from
+  `<tool>/scripts/launch.sh`: it goes to the user
   (Stage E step 3), and nothing is launched or resumed until they answer. A leg with no thread
   id, none in its stream and none in `coachman.legs.<n>`, never started: its `.err` goes to
   the user too, and on their answer the leg is launched again (Stage C step 3). A quota or
