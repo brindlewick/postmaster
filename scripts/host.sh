@@ -1247,6 +1247,10 @@ if pane is None:
     print("missing")
 elif (pane.get("tokens") or {}).get("postmaster") != "launch":
     print("unowned")
+elif pane.get("tab_id") is None:
+    print("idless")
+elif any(p.get("tab_id") is None for p in panes):
+    print("mixed")
 elif all((p.get("tokens") or {}).get("postmaster") == "launch"
          for p in panes if p.get("tab_id") == sys.argv[2]):
     print("owned")
@@ -1256,9 +1260,16 @@ else:
       missing) rm -f -- "$file"; continue ;;
       owned) ;;
       # A tab closes only when every pane in it carries the launch token, as a
-      # space does: a split tab keeps the user's pane. A pane list without tab
-      # ids decides on the recorded pane's token, as before.
+      # space does: a split tab keeps the user's pane. A tab the list cannot
+      # fully place refuses too. Where the recorded pane itself carries no
+      # tab, only that pane closes, never the tab, whose sharers are unknown.
       split) warn "launch tab $tab in space $space holds panes host.sh did not open; left it open"; return 2 ;;
+      mixed) warn "launch tab $tab in space $space holds panes host.sh cannot place; left it open"; return 2 ;;
+      idless)
+        herdr pane close "$pane" >/dev/null 2>&1 || { warn "herdr could not close launch pane $pane; left it open"; return 2; }
+        rm -f -- "$file"
+        echo "host=herdr: closed launch pane $pane"
+        continue ;;
       *) warn "launch tab $tab in space $space is no longer owned by host.sh; left it open"; return 2 ;;
     esac
     herdr tab close "$tab" >/dev/null 2>&1 || { warn "herdr could not close launch tab $tab; left it open"; return 2; }
@@ -1717,7 +1728,7 @@ elif cmd == "pane report-metadata":
 elif cmd == "workspace get":
     w = st["spaces"][a[2]]; out({"workspace": {"workspace_id": a[2], "label": w["label"], "tokens": w["tokens"], "worktree": {"path": w.get("path"), "checkout_path": w.get("path")}}})
 elif cmd == "pane list":
-    out({"panes": [{"pane_id": p, "tab_id": st["panes"][p].get("tab"), "tokens": st["panes"][p]["tokens"]} for p in st["spaces"][opt("--workspace")]["panes"]]})
+    out({"panes": [{"pane_id": p, "tab_id": None if flag("panes.notabids") else st["panes"][p].get("tab"), "tokens": st["panes"][p]["tokens"]} for p in st["spaces"][opt("--workspace")]["panes"]]})
 elif cmd == "tab list":
     ws = opt("--workspace"); out({"tabs": [{"tab_id": t, "label": st["tabs"][t]["label"], "cwd": st["tabs"][t]["cwd"]} for t in st["spaces"][ws]["tabs"]]})
 elif cmd == "tab close":
@@ -1734,6 +1745,23 @@ elif cmd == "tab close":
             w = st["spaces"].pop(ws, None)
             if w:
                 for pane in w["panes"]: st["panes"].pop(pane, None)
+                for cwd, opened in list(st["open"].items()):
+                    if opened == ws: st["open"].pop(cwd, None)
+        save()
+elif cmd == "pane close":
+    pane = a[2]; p = st["panes"].pop(pane, None)
+    if p:
+        ws = p["ws"]
+        st["spaces"][ws]["panes"].remove(pane)
+        # Closing a sole pane destroys its tab, and a last tab its space, on
+        # live Herdr (probed 2026-09-29), like closing a sole tab.
+        for tab in [t for t in st["spaces"][ws]["tabs"]
+                    if not any((q.get("tab") or t) == t for q in st["panes"].values() if q.get("ws") == ws)]:
+            st["spaces"][ws]["tabs"].remove(tab); st["tabs"].pop(tab, None)
+        if not st["spaces"][ws]["tabs"]:
+            w = st["spaces"].pop(ws, None)
+            if w:
+                for q in w["panes"]: st["panes"].pop(q, None)
                 for cwd, opened in list(st["open"].items()):
                     if opened == ws: st["open"].pop(cwd, None)
         save()
@@ -2143,6 +2171,40 @@ json.dump(st, open(sys.argv[1], "w"))
 PY
   check "a tab holding only the run's panes still closes" \
     'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/g3.done -- ./fixed.sh)
+  marker "$tmp/logs/g3.done"
+  python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" <<'PY'
+import json, sys
+st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
+t1 = st["spaces"][ws]["tabs"][0]
+# A sibling row the list cannot place: no tab on its record.
+st["panes"]["pU"] = {"ws": ws, "cwd": "/home/user", "tokens": {}}
+st["spaces"][ws]["panes"].append("pU")
+json.dump(st, open(sys.argv[1], "w"))
+PY
+  got2=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
+  check "a tab the list cannot fully place is refused, and the tab stays open" \
+    '[ $rc -eq 2 ] && printf "%s" "$got2" | grep -q "cannot place" && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); ws=s[\"open\"][sys.argv[2]]; sys.exit(not s[\"spaces\"][ws][\"tabs\"])" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna"' "$got2"
+  check "and the unplaced pane survives it" \
+    'python3 -c "import json,sys; sys.exit(\"pU\" not in json.load(open(sys.argv[1]))[\"panes\"])" "$tmp/stub/herdr.json"'
+  reset
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/g4.done -- ./fixed.sh)
+  marker "$tmp/logs/g4.done"
+  python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" <<'PY'
+import json, sys
+st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
+t1 = st["spaces"][ws]["tabs"][0]
+st["panes"]["pU"] = {"ws": ws, "tab": t1, "cwd": "/home/user", "tokens": {}}
+st["spaces"][ws]["panes"].append("pU")
+json.dump(st, open(sys.argv[1], "w"))
+PY
+  touch "$tmp/stub/panes.notabids"
+  got2=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
+  rm -f "$tmp/stub/panes.notabids"
+  check "a split tab in an id-less response loses only the run's pane" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); ws=s[\"open\"][sys.argv[2]]; t1=s[\"spaces\"][ws][\"tabs\"][0]; ps=[p for p,x in s[\"panes\"].items() if x.get(\"tab\")==t1]; sys.exit(set(ps)!=set([\"pU\"]))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna"' "$got2"
+  check "and the space refusal still stands" '[ $rc -eq 2 ]'
 
   echo "first-launch failure paths, Herdr (stub)"
   reset

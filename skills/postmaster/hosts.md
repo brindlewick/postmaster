@@ -142,7 +142,9 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   when that space belongs to the checkout, carries the ownership token, every pane in it does,
   and nothing registered runs there. A tab closes only when every pane in it
   carries the launch token: a split tab keeps the user's pane and stays open,
-  named in the refusal. Closing a reviewer scratch therefore removes its tabs
+  named in the refusal, and so does a tab whose pane list cannot place every
+  row. Where the list carries no tab at all, only the run's pane closes, never
+  the tab. Closing a reviewer scratch therefore removes its tabs
   without closing the run space; when they are its last tabs Herdr destroys the tabless space
   with them. It never closes a repository's own space, a scratch clone's aside, never uses
   `workspace close --group`, and never runs `herdr worktree remove`, which deletes the checkout.
