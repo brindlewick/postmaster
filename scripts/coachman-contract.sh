@@ -393,6 +393,29 @@ def exercise_self_test(source_root):
 
     merge_control(True)
     merge_control(False)
+
+    def repo_form_control():
+        nonlocal passed, failed
+        label = "the [repo] base head form classifies from outside the repo"
+        with tempfile.TemporaryDirectory(prefix="coachman-contract-", dir=source_root) as scratch:
+            repo = pathlib.Path(scratch) / "repo"
+            base = git_fixture(repo, pathlib.Path(scratch), source_root, manifest_data)
+            replace_once(repo, "scripts/stage.sh", "done abandoned", "done abandoned paused")
+            head = commit_fixture(repo, label)
+            result = subprocess.run([str(repo / "coachman-contract.sh"), str(repo), base, head],
+                                    cwd=source_root, capture_output=True, text=True)
+            ok = result.returncode == 1 and any(
+                line.startswith("yes legs-stages ") for line in result.stdout.splitlines())
+            if control(ok, label, "exit %d" % result.returncode):
+                passed += 1
+            else:
+                failed += 1
+                if result.stderr:
+                    print("       " + result.stderr.strip().replace("\n", "\n       "))
+                if result.stdout:
+                    print("       " + result.stdout.strip().replace("\n", "\n       "))
+
+    repo_form_control()
     print("coachman-contract self-test: %d passed, %d failed" % (passed, failed))
     return 0 if failed == 0 else 1
 

@@ -205,3 +205,33 @@ file = "scripts/runs-status.sh"
 start = "# coachman-contract:completion-poll:start"
 end = "# coachman-contract:completion-poll:end"
 
+[[parts]]
+id = "fixture-policy"
+title = "Fixture requirement and repeat rule"
+definition = """
+Dispatch records the fixture requirement as pending because there is no completed branch
+to classify yet. At the final card, the postmaster runs coachman-contract.sh from the run's
+pinned tool against the target repository's dispatch BASE and final branch. Yes requires a
+clean fixture run on that final branch before the merge word. Record the command, the
+answer, the tested commit and, when a fixture runs, its score on the waybill's fixture
+field and in a note. If the branch moves before a clean score exists, compare dispatch BASE
+with the final branch again. If main is merged into a branch after a clean fixture, compare
+the previously scored commit with the final branch: yes repeats the fixture from the final
+branch; no preserves the clean result. The decision is derived from changed contract regions,
+never from ticket prose or a whole-file list.
+"""
+
+[[parts.implementation]]
+file = "skills/postmaster/postmaster.md"
+start = "<!-- coachman-contract:fixture-dispatch:start -->"
+end = "<!-- coachman-contract:fixture-dispatch:end -->"
+
+[[parts.implementation]]
+file = "skills/postmaster/postmaster.md"
+start = "<!-- coachman-contract:fixture-card:start -->"
+end = "<!-- coachman-contract:fixture-card:end -->"
+
+[[parts.implementation]]
+file = "scripts/coachman-contract.sh"
+start = "# coachman-contract:fixture-detector:start"
+end = "# coachman-contract:fixture-detector:end"

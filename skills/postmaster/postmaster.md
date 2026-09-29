@@ -155,6 +155,9 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    config here is the one in `run.json`. Then
    `<tool>/scripts/turnpikes.sh legs <dispatch> --expect '<that turnpikes: line>'` exits 0 and
    prints the legs step 2 checked, before anything is launched.
+   <!-- coachman-contract:fixture-dispatch:start -->
+   Record `coachman contract fixture: pending`; no implementation branch exists yet to classify.
+   <!-- coachman-contract:fixture-dispatch:end -->
    <!-- coachman-contract:waybill-write:end -->
 7. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. The
    coachman never touches the ticket's state before stage 3.
@@ -328,6 +331,25 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    `<tool>/scripts/verify.sh results <dispatch> <synthesis-wt>` gives a result for every check at
    the synthesis HEAD, and the card gives each one that did not pass as it is; the Style
    residue's count is what `<tool>/scripts/style-findings.sh count <dispatch>` prints.
+   <!-- coachman-contract:fixture-card:start -->
+   **Classify the final branch.** Run `<tool>/scripts/coachman-contract.sh <repo> <BASE>
+   <ticket-branch>` and record its command, result, and checked commit: replace
+   `coachman contract fixture: pending` on the waybill with `yes` or `no`, and log a `note`
+   with the command, the result and the commit. Exit 1 means yes: make a fresh fixture repo
+   with `<tool>/scripts/fixture.sh new <fixture-name> <fixture-ticket>`, dispatch its ticket
+   with the postmaster tool checked out at the final branch, and withhold the merge word
+   until `<tool>/scripts/fixture.sh score <fixture-dispatch> <fixture-repo>` exits 0. Exit 0
+   from the contract checker means no; any other exit is an error to resolve before the
+   merge word.
+
+   Record the commit that the clean fixture score covered, on the waybill and in a `note`.
+   Before granting the merge word, check the final branch again if it moved. With no clean
+   fixture score yet, compare dispatch BASE to the final branch; a yes requires the first
+   fixture. With a clean score, compare its commit to the final branch; a yes repeats the
+   fixture from the final branch, made with `<tool>/scripts/fixture.sh new`, while a no lets
+   the recorded clean score stand. This is the check for a merge of main into the ticket
+   branch after the earlier score.
+   <!-- coachman-contract:fixture-card:end -->
 2. **Grant or withhold.** Every word is delivered by resuming leg 3 (Stage C, step 5), and
    `.card-ready` is removed before it is; the coachman touches it afresh when the card changes.
    `MERGE_AUTHORITY: postmaster` and every check above holds: deliver "MERGE GRANTED" and log
