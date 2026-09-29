@@ -20,7 +20,7 @@ waybill carries, is `SKILL.md`. You do not need it.
 
 | Path | What |
 |---|---|
-| `<dispatch>` = `~/.postmaster/runs/<project>/<TICKET>/` | this run's directory; nothing else writes to it |
+| `<dispatch>` = `<repo>/.postmaster/runs/<TICKET>/` | this run's directory; nothing else writes to it |
 | `<dispatch>/brief.md` | the waybill |
 | `<dispatch>/manifest.json` | `stage`, `leg`, `base`, `lanes.<lane>.{thread_id, outcome}`, `coachman.legs.<n>.{thread_id, name}`; the postmaster creates it and owns `leg`, `base`, `coachman` and the terminal stages, you own `lanes` and every stage before those; change `stage` only with `<tool>/scripts/stage.sh`, update the rest in place, never rewrite the file |
 | `<dispatch>/run-log.md` | running narrative, written only through `<tool>/scripts/run-log.sh`, which puts the time on every entry and times every section |
@@ -29,6 +29,7 @@ waybill carries, is `SKILL.md`. You do not need it.
 | `<dispatch>/journey/` | your journey reports, one per commit walked, at the path `<tool>/scripts/verify.sh journey-path` gives |
 | `<worktree>/.postmaster/verify/` | a worktree's copy of the run's checks and ticket, written by `<tool>/scripts/verify.sh arm`; git ignores it |
 | `<dispatch>/logs/` | one events stream per lane, and per reviewer lane, lens and round; each review round's deadline and reviewers, `review-r<round>.json` |
+| `<dispatch>/sessions/` | each launched lane's and coachman leg's exported durable session, by lane and thread id |
 | `<dispatch>/audit/<lane>.md` | per-workhorse digest of its durable record |
 | `<dispatch>/leg-<n>-prompt.txt` | the postmaster's one-paragraph prompt that started leg `n` |
 | `<dispatch>/handoff-<n>.md` | leg `n`'s hand-off, the whole of what the next leg knows |
@@ -275,15 +276,16 @@ same breath, through the host script and the launch script so no form is ever co
 `host.sh` runs each where the user can watch it (`hosts.md`) and returns at once:
 
 ```sh
-<tool>/scripts/host.sh run "$(<tool>/scripts/host.sh name <dispatch> <lane>)" <workhorse-wt> \
-    --role lane --run <dispatch> --out <dispatch>/logs/<lane>-events.jsonl \
-    --err <dispatch>/logs/<lane>.err --marker <dispatch>/logs/<lane>.done \
+<tool>/scripts/host.sh run "$(<tool>/scripts/host.sh name <dispatch> workhorse <lane>)" <workhorse-wt> \
+    --under <dispatch> --role lane --run <dispatch> \
+    --out <dispatch>/logs/<lane>-events.jsonl --err <dispatch>/logs/<lane>.err --marker <dispatch>/logs/<lane>.done \
     -- <tool>/scripts/launch.sh launch <lane> <workhorse-wt> <dispatch>/<lane>-prompt.txt --last <dispatch>/logs/<lane>-last.md \
        --run <dispatch>
 ```
 
-The name comes from the waybill through `host.sh name`, never typed: a ticket's title can hold
-anything a shell would run. A resume runs the same way with `--append`, and the command
+The tab name comes from the lane and its recorded model through `host.sh name`; the dispatch
+makes its synthesis worktree space carry the ticket name. Neither name is typed into a shell.
+A resume runs the same way with `--append`, and the command
 `<tool>/scripts/launch.sh resume <lane> <workhorse-wt> <thread-id> <prompt-file>
 --last <dispatch>/logs/<lane>-last.md --run <dispatch>`;
 `host.sh` clears the old marker itself. Resume a lane only once its marker has landed: until
@@ -309,8 +311,9 @@ from it.
   review leg, the reviewers see these tests with the synthesis and may challenge them like any
   other line.
 - **Harvest.** Each lane's final message is the last result line of its events stream
-  (`harnesses.md` gives the per-harness location). For every workhorse, `WORKHORSE-SUMMARY.md` at the
-  worktree root is the authoritative final act.
+  (`harnesses.md` gives the per-harness location). `launch.sh` exports each completed thread into
+  `<dispatch>/sessions/` beside its event stream. For every workhorse, `WORKHORSE-SUMMARY.md` at
+  the worktree root is the authoritative final act.
 - **Monitor: three exit shapes.** Each workhorse's final act is writing `WORKHORSE-SUMMARY.md` at its
   worktree root. `WORKHORSE-SPEC.md` is not an exit shape: a workhorse that exits with a spec and no
   summary has not finished. On exit, read the lane's harvest plus its worktree root:
@@ -342,8 +345,8 @@ from it.
   first walk the ticket's User journey on that branch, in the format
   `<tool>/scripts/verify-journey.sh --format` gives, to the path `<tool>/scripts/verify.sh
   journey-path <workhorse-wt> <dispatch>` prints. A `verify.sh run` that can outlast your harness's
-  command cap (`harnesses.md`) runs through `<tool>/scripts/host.sh run` with `--role coachman`,
-  `--run <dispatch>`, `--out`, `--err` and
+  command cap (`harnesses.md`) runs through `<tool>/scripts/host.sh run` with `--under <dispatch>`,
+  `--role coachman`, `--run <dispatch>`, `--out`, `--err` and
   `--marker`, as a lane does, and you wait for its marker with `<tool>/scripts/wait-for-markers.sh`. Then hold its
   summary to your run: `<tool>/scripts/verify.sh summary <workhorse-wt>/WORKHORSE-SUMMARY.md
   <dispatch> <workhorse-wt>`. Exit 2 names each check the summary does not give, which makes the
@@ -587,8 +590,8 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    for LENS in <open lenses>; do
      for L in $(<tool>/scripts/reviewers.sh lanes <dispatch>/brief.md "$LENS"); do
        DEST=<repo>/.worktrees/<TICKET>-rev-$LENS-$L
-       <tool>/scripts/host.sh run "$(<tool>/scripts/host.sh name <dispatch> "$L $LENS review")" "$DEST" \
-           --role reviewer --run <dispatch> \
+       <tool>/scripts/host.sh run "$(<tool>/scripts/host.sh name <dispatch> review "$L" "$LENS" <round>)" "$DEST" \
+           --under <dispatch> --role reviewer --run <dispatch> \
            --out <dispatch>/logs/review-r<round>-$LENS-$L.jsonl --err <dispatch>/logs/review-r<round>-$LENS-$L.err \
            --marker <dispatch>/logs/review-r<round>-$LENS-$L.done \
            -- <the launch step of $LENS, for "$L" in "$DEST">
@@ -753,8 +756,9 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
 3. **Preview build, always, on a project with a UI.** Serve the branch's production build on
    the loopback interface at a throwaway port with a THROWAWAY database seeded from the
    project's own fixtures, never the live database and never the app's real port. Run the
-   server through `<tool>/scripts/host.sh run` with `--role coachman`, `--run <dispatch>` and
-   `--pidfile <dispatch>/render/preview.pid`, which
+   server through `<tool>/scripts/host.sh run` with `--under <dispatch>`, `--role coachman`,
+   `--run <dispatch>` and `--pidfile <dispatch>/render/preview.pid`, named for its role alone
+   (`preview server`), which
    keeps it alive past a harness turn and in the user's view, and put stopping it on the
    teardown checklist: `kill -- -$(cat <dispatch>/render/preview.pid)`, its whole process group,
    so no child of a package script survives. The preview link goes on the ship card and the
