@@ -22,6 +22,12 @@ export class SelfTest {
     else this.fail(label, detail);
   }
 
+  /** Skip a control that cannot run here; print a notice naming what was
+   * not compared, never a failure. */
+  skip(label: string, reason: string): void {
+    console.log(`  skip ${label}: ${reason}`);
+  }
+
   /**
    * Expect the call to pass or fail. When the call must fail for a reason,
    * pass `expectIn` so a fail for another reason is itself a failure.

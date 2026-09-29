@@ -1642,6 +1642,7 @@ withTempDir((tmp) => {
   // source-and-exec tail, or the extraction failed loudly and every parity
   // control with it.
   let baseLaunch = "";
+  let hasPy3 = false;
   {
     const log = run("git", [
       "-C",
@@ -1667,14 +1668,20 @@ withTempDir((tmp) => {
         break;
       }
     }
-    const py = run("sh", ["-c", "command -v python3"]);
+    hasPy3 = run("sh", ["-c", "command -v python3"]).code === 0;
     st.check(
-      "BASE launch.sh extracts with its source-and-exec tail, and python3 runs it",
-      baseLaunch !== "" && py.code === 0,
-      `base=${baseLaunch || "none"} python3=${py.code === 0 ? "yes" : "no"}`,
+      "BASE launch.sh extracts with its source-and-exec tail",
+      baseLaunch !== "",
+      `base=${baseLaunch || "none"}`,
     );
   }
-  if (baseLaunch !== "") {
+  if (baseLaunch !== "" && !hasPy3) {
+    st.skip(
+      "BASE launch.sh parity replay",
+      "python3 not on PATH: the handed-environment, prompt-bytes and env-file comparisons did not run",
+    );
+  }
+  if (baseLaunch !== "" && hasPy3) {
     const claude = join(tmp, "bin", "claude");
     const savedClaude = readFileSync(claude, "utf8");
     // The stub reports the handed environment to a file, never stdout: a
@@ -2894,7 +2901,12 @@ withTempDir((tmp) => {
   // launcher and this one from behind a symlink with a relative cwd and the
   // same environment, and compares both paths against BASE's own recorded
   // values, never against each other.
-  {
+  if (!hasPy3) {
+    st.skip(
+      "a resume's check and harness match BASE's PWD, OLDPWD and SHLVL",
+      "python3 not on PATH: BASE's launcher could not run, so neither path was compared",
+    );
+  } else {
     const f1 = join(tmp, "f1");
     const f1bin = join(f1, "bin");
     const realStart = join(f1, "real", "start");

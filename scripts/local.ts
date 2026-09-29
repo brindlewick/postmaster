@@ -550,6 +550,7 @@ async function selfTest(): Promise<number> {
   process.env.GIT_COMMITTER_NAME = "self-test";
   process.env.GIT_COMMITTER_EMAIL = "self-test@example.org";
   const ok = (label: string) => console.log(`  ok   ${label}`);
+  const skip = (label: string, reason: string) => console.log(`  skip ${label}: ${reason}`);
   let fails = 0;
   const fail = (label: string, detail = "") => {
     console.log(
@@ -895,6 +896,7 @@ async function selfTest(): Promise<number> {
     // than the port's one-line wrapper, and it must still carry the strict
     // ticket read.
     let baseLocal = "";
+    let hasPy3 = false;
     {
       const log = run("git", [
         "-C",
@@ -920,15 +922,18 @@ async function selfTest(): Promise<number> {
           break;
         }
       }
-      const py = run("sh", ["-c", "command -v python3"]);
-      baseLocal !== "" && py.code === 0
-        ? ok("BASE local.sh extracts with its strict ticket read, and python3 runs it")
-        : fail(
-            "BASE local.sh extracts with its strict ticket read, and python3 runs it",
-            baseLocal,
-          );
+      hasPy3 = run("sh", ["-c", "command -v python3"]).code === 0;
+      baseLocal !== ""
+        ? ok("BASE local.sh extracts with its strict ticket read")
+        : fail("BASE local.sh extracts with its strict ticket read", baseLocal);
     }
-    if (baseLocal !== "") {
+    if (baseLocal !== "" && !hasPy3) {
+      skip(
+        "BASE local.sh strict-read replay",
+        "python3 not on PATH: the 0xff refusal was not compared against BASE",
+      );
+    }
+    if (baseLocal !== "" && hasPy3) {
       const bad = lt(repo, "create", "healthy title", bodyPath);
       const badJson = ticketPath(store, BigInt(bad.out), "json");
       writeFileSync(
