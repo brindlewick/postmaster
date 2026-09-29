@@ -65,7 +65,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { scriptsDir } from "./lib/paths.ts";
+import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
 
@@ -537,6 +537,9 @@ function selfTest(): void {
   withTempDir((tmp) => {
     if (run("git", ["init", "-q", tmp]).code !== 0) process.exit(1);
     const st = new SelfTest();
+
+    // Staged stand-in tools resolve their wrappers' --config beside them.
+    copyFileSync(join(toolRoot(import.meta), "bunfig.toml"), join(tmp, "bunfig.toml"));
 
     // Get turnpikes list
     const listR = run(join(HERE, "turnpikes.sh"), ["--list"]);
