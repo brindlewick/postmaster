@@ -2457,6 +2457,9 @@ leg_cmd() {  # leg launch|resume|takeover|retry|outcome|waiting ...
   esac
 }
 
+# --- self-test ---
+# The suite starts here: leg attempt controls, the older host controls, and
+# their runner. The oracle scopes its control probes to this region.
 
 leg_controls() {
   echo "leg attempt controls"

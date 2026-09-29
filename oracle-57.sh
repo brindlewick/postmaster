@@ -67,6 +67,17 @@ after_within() {
 # code <file>: the file without full-line comments.
 code() { grep -v '^[[:space:]]*#' "$1"; }
 
+# selftest_region <file>: the self-test region of a script, after its marker,
+# or the whole file when it has none. Control probes read the region, never
+# production: production already puts every ticket word near every other.
+selftest_region() {
+  if grep -q '^# --- self-test ---' "$1" 2>/dev/null; then
+    sed -n '/^# --- self-test ---/,$p' "$1"
+  else
+    cat "$1"
+  fi
+}
+
 # --- the leg script (AC1, AC2): discovered, never named ------------------------
 # The ticket names no script, so the interface is the lanes' to choose: either
 # host.sh extended or one script beside it ("in it or beside it, not in a second
@@ -221,29 +232,32 @@ else
 fi
 
 # --- positive and negative controls per outcome (AC7) ------------------------------
-if [ -n "$LEG" ] && [ "$(echo "$LEG" | wc -w)" -eq 1 ] \
-    && near "$LEG" 5 'env' 'fail|invalid|bad|unload|missing'; then
+LEG_REGION=""
+if [ -n "$LEG" ] && [ "$(echo "$LEG" | wc -w)" -eq 1 ]; then
+  LEG_REGION=$(mktemp /tmp/oracle-57-region.XXXXXX) && selftest_region "$LEG" >"$LEG_REGION"
+fi
+if [ -n "$LEG_REGION" ] && near "$LEG_REGION" 5 'env' 'fail|invalid|bad|unload|missing'; then
   pass P18-env-control "self-test covers an env file that fails to load"
 else
   nope P18-env-control "no env failure control in ${LEG:-no leg script}"
 fi
-if [ -n "$LEG" ] && [ "$(echo "$LEG" | wc -w)" -eq 1 ] \
-    && near "$LEG" 5 'resum' 'refus' && near "$LEG" 10 'resum' 'thread'; then
+if [ -n "$LEG_REGION" ] \
+    && near "$LEG_REGION" 5 'resum' 'refus' && near "$LEG_REGION" 10 'resum' 'thread'; then
   pass P19-refused-resume-control "self-test covers a resume refused after the leg has a thread id"
 else
   nope P19-refused-resume-control "no refused-resume-with-thread-id control in ${LEG:-no leg script}"
 fi
 if [ -f "$SELFTEST_LOG" ] \
-    && grep -qi 'refus' "$SELFTEST_LOG" \
-    && grep -qi 'thread' "$SELFTEST_LOG" \
-    && grep -qi 'wall' "$SELFTEST_LOG" \
-    && grep -qiE 'hand-?off' "$SELFTEST_LOG" \
-    && grep -qiE 'finish|complete' "$SELFTEST_LOG"; then
+    && grep -qiE '^[[:space:]]*ok[[:space:]]+.*refus' "$SELFTEST_LOG" \
+    && grep -qiE '^[[:space:]]*ok[[:space:]]+.*thread' "$SELFTEST_LOG" \
+    && grep -qiE '^[[:space:]]*ok[[:space:]]+.*wall' "$SELFTEST_LOG" \
+    && grep -qiE '^[[:space:]]*ok[[:space:]]+.*hand-?off' "$SELFTEST_LOG" \
+    && grep -qiE '^[[:space:]]*ok[[:space:]]+.*(finish|complete)' "$SELFTEST_LOG"; then
   pass P20-outcome-span "self-test output covers every outcome"
 else
   nope P20-outcome-span "self-test output does not cover every outcome"
 fi
-rm -f "$SELFTEST_LOG"
+rm -f "$SELFTEST_LOG" ${LEG_REGION:+"$LEG_REGION"}
 
 echo "oracle-57: $([ "$fail" -eq 0 ] && echo PASS || echo FAIL)"
 exit "$fail"
