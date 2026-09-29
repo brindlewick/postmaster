@@ -22,7 +22,7 @@ waybill carries, is `SKILL.md`. You do not need it.
 |---|---|
 | `<dispatch>` = `~/.postmaster/runs/<project>/<TICKET>/` | this run's directory; nothing else writes to it |
 | `<dispatch>/brief.md` | the waybill |
-| `<dispatch>/manifest.json` | `stage`, `leg`, `base`, `lanes.<lane>.{thread_id, outcome}`, `coachman.legs.<n>.{thread_id, name}`; the postmaster creates it and owns `leg`, `base`, `coachman` and the terminal stages, you own `lanes` and every stage before those; change `stage` only with `<tool>/scripts/stage.sh`, update the rest in place, never rewrite the file |
+| `<dispatch>/manifest.json` | `stage`, `leg`, `base`, `lanes.<lane>.{thread_id, outcome, spec_commit}`, `coachman.legs.<n>.{thread_id, name}`; the postmaster creates it and owns `leg`, `base`, `coachman` and the terminal stages, you own `lanes` and every stage before those; change `stage` only with `<tool>/scripts/stage.sh`, update the rest in place, never rewrite the file |
 | `<dispatch>/run-log.md` | running narrative, written only through `<tool>/scripts/run-log.sh`, which puts the time on every entry and times every section |
 | `<dispatch>/run.json` | the run's fixed facts: postmaster commit, config, harness versions; written once at dispatch by the postmaster, never edited; every launch and resume in the run takes its config from here (`--run <dispatch>`) |
 | `<dispatch>/checks.json` | the checks the run is held to, recorded once at dispatch by `<tool>/scripts/verify.sh record`; never edited |
@@ -115,6 +115,7 @@ by files in its own dispatch directory.
 | `run-log.md` | running narrative |
 | `card.md` + `.card-ready` | the ship card is complete; the postmaster may gate |
 | `ESCALATION.md` + `.escalation-ready` | it needs a ruling and has stopped |
+| `spec-review.md` + `.spec-review-ready` | the planning stage paused for the user's spec review |
 | `logs/coachman-leg-<n>-events.jsonl` | its own stream for leg `n`; errors in `logs/coachman-leg-<n>.err` |
 | `checkpoint-<n>.md` + `.checkpoint-<n>-ready` | a checkpoint card is complete; informational in autonomous mode, a stop in consult mode |
 | `handoff-<n>.md` + `.leg-<n>-done` | the leg is finished and the next may start |
@@ -298,12 +299,13 @@ one workhorse at a time.
    mid-flight: remount or re-dispatch. Log `harvest` per workhorse with its exit shape.
 3. **Build the review package, without reading the specs.** For each planned workhorse take
    the commit that added or last changed its spec (`git -C <worktree> log -1 --format=%H --
-   WORKHORSE-SPEC.md`) and the absolute path of that file. Where the config in `run.json` sets
-   a `planning.review_link` template, the link is that template with `{path}` filled in;
-   otherwise the path alone. Write `<dispatch>/spec-review.md`, one entry per workhorse: its
-   lane, the commit, the link and the path. The package is for the postmaster; it never goes
-   to a lane, and no entry carries another workhorse's spec. Touch `.spec-review-ready` and
-   exit. The postmaster puts the specs to the user, one at a time, and records each decision.
+   WORKHORSE-SPEC.md`) and the link from `<tool>/scripts/spec-review-link.sh <dispatch>
+   <workhorse-wt>`, which fills the run's recorded `planning.review_link` template with
+   `{path}` or prints the path where no template is set. Write `<dispatch>/spec-review.md`,
+   one entry per workhorse: its lane, the commit, the link and the path. The package is for
+   the postmaster; it never goes to a lane, and no entry carries another workhorse's spec.
+   Touch `.spec-review-ready` and exit. The postmaster puts the specs to the user, one at a
+   time, and records each decision.
 4. **On resume, read `<dispatch>/spec-decisions.md`** and act on each entry, one workhorse at a
    time. The user's words are the only feedback a workhorse gets, and only its own:
    - **changes:** resume that workhorse alone, its own thread, with the user's words as the
@@ -321,8 +323,9 @@ one workhorse at a time.
 5. **Implementation needs two approved specs.** When no revision is outstanding: if at least
    two workhorses are approved, go on to Stage 1 and resume each approved workhorse to
    implement from its approved spec. Otherwise the run stops and says why — fewer than two
-   approved specs — in `run-log.md` and in the hand-off or escalation the stop leaves. Never
-   implement from a spec the user has not approved, and never drop the bar to keep going.
+   approved specs — in `run-log.md` and in an escalation carrying the count, and the user
+   alone abandons it. Never implement from a spec the user has not approved, and never drop
+   the bar to keep going.
 
 ## Stage 1 (leg 1): implement, then synthesize
 
