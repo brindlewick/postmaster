@@ -46,10 +46,14 @@ function usage(): never {
   );
 }
 
+function onPath(t: string): boolean {
+  // `command -v` is a shell builtin, so ask a shell for it, with the name as
+  // a positional parameter, never pasted into the command string.
+  return run("bash", ["-c", 'command -v "$1"', "_", t]).code === 0;
+}
 function need(...tools: string[]): void {
   for (const t of tools) {
-    const r = run("bash", ["-c", `command -v "${t}"`]);
-    if (r.code !== 0) {
+    if (!onPath(t)) {
       die(`fixture: ${t} is not on PATH`, 1);
     }
   }
@@ -81,10 +85,13 @@ function isTicket(t: string): boolean {
   return false;
 }
 
+function appFiles(dir: string): string[] {
+  const r = run("git", ["-C", dir, "ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+  return r.out.split("\0").filter((n) => n !== "");
+}
 function makeRepo(dest: string): boolean {
   mkdirSync(dest, { recursive: true });
-  const r = run("bash", ["-c", `git -C "${APP}" ls-files -z --cached --others --exclude-standard`]);
-  const listed = r.out.split("\0").filter((n) => n !== "");
+  const listed = appFiles(APP);
   for (const rel of [...new Set(listed)].sort()) {
     const s = join(APP, rel);
     const d = join(dest, rel);
@@ -619,6 +626,24 @@ kind = "github"
   process.env.GIT_COMMITTER_EMAIL = "fixture@example.invalid";
 
   const st = new SelfTest();
+  // Shell lookups take their operand as argv, never pasted into a command
+  // string: a name holding $(...) is looked up literally, and runs nothing.
+  {
+    const marker = join(tmp, "onpath-marker");
+    const found = onPath(`zz-nonexistent-$(touch ${marker})`);
+    st.check(
+      "a tool name holding $(...) is looked up literally, and runs nothing",
+      !found && !existsSync(marker),
+      `found=${found} marker=${existsSync(marker)}`,
+    );
+    const marker2 = join(tmp, "appfiles-marker");
+    const listed = appFiles(join(tmp, `nonesuch-$(touch ${marker2})`));
+    st.check(
+      "a directory holding $(...) lists literally, and runs nothing",
+      listed.length === 0 && !existsSync(marker2),
+      `listed=${listed.length} marker=${existsSync(marker2)}`,
+    );
+  }
   // Temporary names are private and never reused, as `mktemp` makes them.
   {
     const b1 = makeBodyFile("one");

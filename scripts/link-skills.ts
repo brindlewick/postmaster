@@ -87,6 +87,11 @@ function isLink(p: string): boolean {
   }
 }
 
+function harnessInstalled(h: string): boolean {
+  // `command -v` is a shell builtin, so ask a shell for it, with the name as
+  // a positional parameter, never pasted into the command string.
+  return run("sh", ["-c", 'command -v "$1"', "_", h]).code === 0;
+}
 function plan(root: string): string[] | null {
   const skills = [];
   try {
@@ -106,8 +111,7 @@ function plan(root: string): string[] | null {
   const lines: string[] = [];
   let seen = "";
   for (const h of HARNESSES) {
-    // `command -v` is a shell builtin, so ask a shell for it.
-    if (run("sh", ["-c", `command -v ${h}`]).code !== 0) {
+    if (!harnessInstalled(h)) {
       lines.push(`absent\t${h}`);
       continue;
     }
@@ -276,6 +280,17 @@ if (argv[0] === "--self-test") {
 withTempDir((tmp) => {
   const TOOL = toolRoot(import.meta);
   const st = new SelfTest();
+  // The harness lookup takes its operand as argv, never pasted into a command
+  // string: a name holding $(...) is looked up literally, and runs nothing.
+  {
+    const marker = join(tmp, "harness-marker");
+    const found = harnessInstalled(`zz-nonexistent-$(touch ${marker})`);
+    st.check(
+      "a harness name holding $(...) is looked up literally, and runs nothing",
+      !found && !existsSync(marker),
+      `found=${found} marker=${existsSync(marker)}`,
+    );
+  }
   const bin = join(tmp, "bin");
   const home = join(tmp, "home");
   const elsewhere = join(tmp, "elsewhere");
