@@ -37,8 +37,11 @@ pm_esc = os.path.join(root, "postmaster", "ESCALATION.md")
 if os.path.isfile(pm_esc):
     print("POSTMASTER     escalation to the user is pending: %s" % pm_esc)
 def owner_alive(d, leg):
+    p = os.path.join(d, ".leg-%s-active" % leg)
+    if os.path.isdir(p):
+        p = os.path.join(p, "owner")  # a legacy directory lock holds no owner: stale
     try:
-        with open(os.path.join(d, ".leg-%s-active" % leg, "owner"), encoding="utf-8") as f:
+        with open(p, encoding="utf-8") as f:
             pid_s, _, start = f.read().strip().partition(" ")
         pid = int(pid_s)
     except (OSError, ValueError):
@@ -79,10 +82,10 @@ for run in sorted(os.listdir(root)):
     done = ".leg-%s-done" % leg in markers
     exited = ".leg-%s-exited" % leg in markers
     # A lock is active only while its owner lives: a lock whose owner is gone is
-    # stale, with or without its exited marker, and a lock with no owner file
-    # predates ownership and is stale too. The recorded outcome shows, never a
+    # stale, with or without its exited marker, and a legacy directory lock
+    # holds no owner and is stale too. The recorded outcome shows, never a
     # wedged WAIT, and the next start steals the stale lock.
-    active = os.path.isdir(os.path.join(d, ".leg-%s-active" % leg)) \
+    active = os.path.exists(os.path.join(d, ".leg-%s-active" % leg)) \
         and not exited and owner_alive(d, leg)
     # Only the last record decides; a corrupt middle line is superseded history.
     # A last line that is not a record is fail-closed INSPECT, never a guess.
@@ -166,7 +169,7 @@ phase() {  # phase <name> <n>: attempt <n> started, as the leg script writes it
   printf 'started\n' > "$tmp/root/$1/logs/coachman-leg-2-phase-$2"
 }
 liveowner() {  # liveowner <name>: the lock's owner is this self-test, alive throughout it
-  python3 - "$$" "$tmp/root/$1/.leg-2-active/owner" <<'PY'
+  python3 - "$$" "$tmp/root/$1/.leg-2-active" <<'PY'
 import os, subprocess, sys
 pid = int(sys.argv[1])
 try:
@@ -179,7 +182,7 @@ open(sys.argv[2], "w").write("%d %s\n" % (pid, start))
 PY
 }
 deadowner() {  # deadowner <name>: the lock's owner is gone (no pid starts at 0)
-  printf '999999999 0\n' > "$tmp/root/$1/.leg-2-active/owner"
+  printf '999999999 0\n' > "$tmp/root/$1/.leg-2-active"
 }
 age() {  # age <name>: nothing in the run has changed for an hour
   python3 -c 'import os, sys, time
@@ -215,12 +218,12 @@ run refusedanswer review 2 .waiting-on-user .leg-2-exited; record refusedanswer 
 run wallanswer review 2 .waiting-on-user .leg-2-exited; record wallanswer walled coachman_fallback
 run incompleteanswer review 2 .waiting-on-user .leg-2-exited; record incompleteanswer incomplete coachman
 run finishedclosed done 2 .leg-2-done .leg-2-exited; record finishedclosed finished coachman
-run active review 2; record active refused coachman; mkdir "$tmp/root/active/.leg-2-active"; liveowner active
+run active review 2; record active refused coachman; liveowner active
 run staleactive review 2 .leg-2-exited; record staleactive incomplete coachman; mkdir "$tmp/root/staleactive/.leg-2-active"
-run ownergone review 2; record ownergone refused coachman; mkdir "$tmp/root/ownergone/.leg-2-active"; deadowner ownergone
+run ownergone review 2; record ownergone refused coachman; deadowner ownergone
 run noowner review 2; record noowner refused coachman; mkdir "$tmp/root/noowner/.leg-2-active"
 run gap review 2 .leg-2-exited; recordn gap 1 finished coachman; phase gap 1; phase gap 2
-run gapactive review 2; recordn gapactive 1 incomplete coachman; phase gapactive 1; phase gapactive 2; mkdir "$tmp/root/gapactive/.leg-2-active"; liveowner gapactive
+run gapactive review 2; recordn gapactive 1 incomplete coachman; phase gapactive 1; phase gapactive 2; liveowner gapactive
 run corruptlast review 2 .leg-2-exited; record corruptlast incomplete coachman; printf 'NOT JSON\n' >> "$tmp/root/corruptlast/logs/coachman-leg-2-attempts.jsonl"
 run corruptmid review 2 .leg-2-exited; printf 'NOT JSON\n' > "$tmp/root/corruptmid/logs/coachman-leg-2-attempts.jsonl"; recordn corruptmid 2 incomplete coachman
 run unknown review 2 .leg-2-exited; record unknown mystery coachman
