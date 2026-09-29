@@ -96,7 +96,8 @@ function setStage(d: string, newStage: string, actor: string): number {
   let took = "";
   if (since) {
     const now = Math.floor(Date.now() / 1000);
-    const sinceSec = Math.floor(new Date(`${since.replace(" ", "T")}Z`).getTime() / 1000);
+    const iso = since.endsWith("Z") ? since : `${since.replace(" ", "T")}Z`;
+    const sinceSec = Math.floor(new Date(iso).getTime() / 1000);
     const sec = Math.max(0, now - sinceSec);
     const h = Math.floor(sec / 3600);
     const rem = sec % 3600;
@@ -232,9 +233,10 @@ withTempDir((tmp) => {
 
   try {
     const log = readFileSync(join(d, "run-log.md"), "utf8");
-    if (log.includes("stage bootstrapped, from dispatched after"))
+    const line = log.split("\n").find((l) => l.includes("stage bootstrapped, from dispatched after"));
+    if (line !== undefined && /after \d/.test(line))
       st.ok("run-log.md records the change and how long the last stage took");
-    else st.fail("run-log.md records the change and how long the last stage took");
+    else st.fail("run-log.md records the change and how long the last stage took", line ?? log);
   } catch {
     st.fail("run-log.md records the change and how long the last stage took");
   }
