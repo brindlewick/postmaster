@@ -539,6 +539,8 @@ except (OSError, json.JSONDecodeError, tomllib.TOMLDecodeError) as e:
     print("host: cannot read launch limits: %s" % type(e).__name__, file=sys.stderr)
     sys.exit(1)
 
+if not isinstance(config, dict):
+    print("host: config must be a table", file=sys.stderr); sys.exit(1)
 limits = config.get("limits", {})
 if not isinstance(limits, dict):
     print("host: limits must be a table", file=sys.stderr); sys.exit(1)
@@ -594,7 +596,7 @@ systemd_capability() {  # print the verified systemd-run, systemctl and setsid p
 
 watch_cap_events() {  # watch_cap_events <systemctl> <unit> <event-file> <runner-pid>
   python3 - "$1" "$2" "$3" "$4" <<'PY'
-import os, subprocess, sys, time
+import os, select, subprocess, sys, time
 
 systemctl, unit, event_file, runner = sys.argv[1:]
 def alive(pid):
@@ -631,14 +633,36 @@ while time.monotonic() < deadline and alive(runner):
 if not cgroup.startswith("/") or ".." in cgroup.split("/"):
     sys.exit(0)
 root = "/sys/fs/cgroup" + cgroup
-while os.path.isdir(root) and alive(runner):
-    pids = events(os.path.join(root, "pids.events"))
-    if pids.get("max", 0):
-        note("process"); break
-    mem = events(os.path.join(root, "memory.events"))
-    if mem.get("max", 0):
-        note("memory"); break
-    time.sleep(0.02)
+pids_path = os.path.join(root, "pids.events")
+mem_path = os.path.join(root, "memory.events")
+def tripped():
+    if events(pids_path).get("max", 0): return "process"
+    if events(mem_path).get("max", 0): return "memory"
+    return ""
+# The events files wake a poller when their counters change, so the watch
+# blocks in the kernel instead of waking on a timer: a trip is read within
+# milliseconds however long the launch runs, and a launch that exits right
+# after its trip is still caught while its cgroup outlives it. The first read
+# is the baseline and arms the poll; every wake re-reads, since a wake
+# promises only change, not a trip; the timeout re-reads too, for a trip that
+# lands between the baseline and the registration.
+kind = tripped()
+po = select.poll()
+try:
+    pfd = open(pids_path); mfd = open(mem_path)
+    po.register(pfd, select.POLLPRI | select.POLLERR)
+    po.register(mfd, select.POLLPRI | select.POLLERR)
+    armed = True
+except OSError:
+    armed = False
+while not kind and os.path.isdir(root) and alive(runner):
+    if armed: po.poll(100)
+    else: time.sleep(0.1)
+    kind = tripped()
+if not kind:
+    kind = tripped()
+if kind:
+    note(kind)
 PY
 }
 
@@ -865,13 +889,16 @@ runner() {
     cap_event=$(cat "$event_file" 2>/dev/null)
     if [ -z "$cap_event" ]; then
       # systemctl's Result can lag an OOM kill, reading success or nothing for a
-      # while after the scope is dead; poll briefly while it is unsettled so a fast
-      # OOM is still named. A settled Result breaks at once: no delay otherwise.
-      local tries=0 result=""
+      # while after the scope is dead; poll briefly while the scope is not yet
+      # settled so a fast OOM is still named. success with the scope still
+      # active is transient, not a verdict; a settled scope breaks at once,
+      # so a launch that never tripped pays for one query only.
+      local tries=0 result="" active="" out=""
       while [ "$tries" -lt 40 ]; do
-        result=$("$systemctl" --user show "$unit" --property=Result --value 2>/dev/null)
-        [ "$result" = oom-kill ] && cap_event=memory
-        [ -n "$result" ] && break
+        out=$("$systemctl" --user show "$unit" --property=Result --property=ActiveState --value 2>/dev/null)
+        result=$(printf '%s\n' "$out" | sed -n '1p'); active=$(printf '%s\n' "$out" | sed -n '2p')
+        if [ "$result" = oom-kill ]; then cap_event=memory; break; fi
+        case $active in inactive|failed) break ;; esac
         tries=$((tries + 1)); sleep 0.05
       done
     fi
@@ -1496,7 +1523,7 @@ tasks_max = 512
 EOF
   mkdir -p "$tmp/cap-dispatch"
   cat > "$tmp/cap-dispatch/run.json" <<'EOF'
-{"config":{"limits":{"memory_max":"8G","tasks_max":512,"lane":{"memory_max":"64M","tasks_max":16}}}}
+{"config":{"limits":{"memory_max":"8G","tasks_max":512,"lane":{"memory_max":"64M","tasks_max":16},"coachman":{"memory_max":"128M","tasks_max":32},"reviewer":{"tasks_max":24}}}}
 EOF
   cap_launch() {  # cap_launch <host-impl> <PATH> <prefix> -- <command...>
     local impl=$1 path=$2 prefix=$3; shift 3
@@ -1520,6 +1547,9 @@ if [ -n "${LAUNCH_GROUP_RECORD:-}" ]; then
   printf '%s %s\n' "$$" "$(ps -o pgid= -p "$$" | tr -d ' ')" > "$LAUNCH_GROUP_RECORD"
 fi
 sleep 1.5
+# The completion line: a launch killed mid-sleep matches a direct run's early
+# streams, so the isolation checks compare whole streams including this one.
+printf 'healthy done\n'
 EOF
   cat > "$tmp/caller/fork-cap.py" <<'EOF'
 #!/usr/bin/env python3
@@ -1541,6 +1571,23 @@ while len(kids) < 64:
     with open(path, "a", encoding="ascii") as f: f.write(str(pid) + "\n")
 while True: time.sleep(1)
 EOF
+  cat > "$tmp/caller/fork-exit.py" <<'EOF'
+#!/usr/bin/env python3
+import os, signal, sys, time
+kids = []
+while len(kids) < 64:
+    try: pid = os.fork()
+    except BlockingIOError: break
+    if pid == 0: os.execl("/bin/sleep", "sleep", "30")
+    kids.append(pid)
+# The lane gives up after the trip: pause past any watcher wake, then clean up
+# its children and exit promptly, naming the cap it reached on the way out.
+time.sleep(1)
+for pid in kids:
+    try: os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError: pass
+sys.exit(2)
+EOF
   cat > "$tmp/caller/memory-cap.py" <<'EOF'
 #!/usr/bin/env python3
 import time
@@ -1551,7 +1598,7 @@ while True:
     blocks.append(block)
     time.sleep(0.02)
 EOF
-  chmod +x "$tmp/caller/healthy.sh" "$tmp/caller/fork-cap.py" "$tmp/caller/memory-cap.py"
+  chmod +x "$tmp/caller/healthy.sh" "$tmp/caller/fork-cap.py" "$tmp/caller/fork-exit.py" "$tmp/caller/memory-cap.py"
   reset() { rm -f -- "$tmp"/stub/*; }
   calls() { cat "$tmp/stub/$1.calls" 2>/dev/null; }
   T=$'\t'
@@ -1914,6 +1961,10 @@ PY
       'no_live_pids "$tmp/logs/fork.pids"' "$(cat "$tmp/logs/fork.pids" 2>/dev/null)"
     check "a healthy launch completes while the fork cap is reached" \
       'marker "$tmp/logs/fork-other.done" 1 && cmp -s "$tmp/direct-healthy.out" "$tmp/logs/fork-other.out" && err_stream_equal "$tmp/direct-healthy.err" "$tmp/logs/fork-other.err" && [ "$(cut -d" " -f2 "$tmp/logs/fork-other.group")" = "$(cat "$tmp/logs/fork-other.pid")" ]' "$fork_other"
+    exit_got=$(cap_launch "$cap_impl" "$CAPSYS" fork-exit -- timeout --signal=TERM --kill-after=1 4 python3 "$tmp/caller/fork-exit.py" 2>/dev/null)
+    marker "$tmp/logs/fork-exit.done" 10
+    check "a launch that exits after tripping the process cap still names the cap" \
+      'grep -qFx "host: process cap reached (TasksMax=16)" "$tmp/logs/fork-exit.err" && [ -e "$tmp/logs/fork-exit.done" ]' "$exit_got"
 
     memory_other=$(cap_launch "$cap_impl" "$CAPSYS" memory-other -- "$tmp/caller/healthy.sh" 2>/dev/null)
     memory_got=$(cap_launch "$cap_impl" "$CAPSYS" memory -- timeout --signal=TERM --kill-after=1 2 python3 "$tmp/caller/memory-cap.py" 2>/dev/null)
@@ -1923,8 +1974,37 @@ PY
       'grep -qFx "host: memory cap reached (MemoryMax=64M)" "$tmp/logs/memory.err" && [ -e "$tmp/logs/memory.done" ]' "$memory_got"
     check "a healthy launch completes while the memory cap is reached" \
       'marker "$tmp/logs/memory-other.done" 1 && cmp -s "$tmp/direct-healthy.out" "$tmp/logs/memory-other.out" && err_stream_equal "$tmp/direct-healthy.err" "$tmp/logs/memory-other.err" && [ "$(cut -d" " -f2 "$tmp/logs/memory-other.group")" = "$(cat "$tmp/logs/memory-other.pid")" ]' "$memory_other"
+    mkdir -p "$tmp/capshim"
+    for t in "$CAPSYS"/*; do
+      [ -e "$t" ] || continue
+      [ "$(basename "$t")" = systemctl ] && continue
+      ln -s "$t" "$tmp/capshim/$(basename "$t")"
+    done
+    shimctl=$(command -v systemctl)
+    cat > "$tmp/capshim/systemctl" <<EOF
+#!/usr/bin/env bash
+# A watcher-blind backend whose first Result reads success: the verdict must
+# poll past it to the OOM the launch really died of, not break on it.
+if [[ "\$*" == *postmaster-host-* && "\$*" == *ControlGroup* ]]; then exit 0; fi
+if [[ "\$*" == *postmaster-host-* && "\$*" == *Result* ]]; then
+  echo x >> "$tmp/logs/shim-queries.log"
+  if [ "\$(wc -l < "$tmp/logs/shim-queries.log")" -eq 1 ]; then echo success; exit 0; fi
+fi
+exec "$shimctl" "\$@"
+EOF
+    chmod +x "$tmp/capshim/systemctl"
+    rm -f "$tmp/logs/shim-queries.log"; touch "$tmp/logs/shim-queries.log"
+    shim_got=$(cap_launch "$cap_impl" "$tmp/capshim" shim-oom -- timeout --signal=TERM --kill-after=1 6 python3 "$tmp/caller/memory-cap.py" 2>/dev/null)
+    marker "$tmp/logs/shim-oom.done" 15
+    check "a transient success verdict does not hide an OOM: the memory cap is still named" \
+      'grep -qFx "host: memory cap reached (MemoryMax=64M)" "$tmp/logs/shim-oom.err" && [ "$(wc -l < "$tmp/logs/shim-queries.log")" -ge 2 ]' "$shim_got"
+    kill_got=$(cap_launch "$cap_impl" "$CAPSYS" kill-healthy -- "$tmp/caller/healthy.sh" 2>/dev/null)
+    sleep 0.3; kill -KILL "$(cat "$tmp/logs/kill-healthy.pid")" 2>/dev/null
+    marker "$tmp/logs/kill-healthy.done" 10
+    check "a launch killed mid-sleep is told apart: its streams no longer match a completed run" \
+      '[ -e "$tmp/logs/kill-healthy.done" ] && ! cmp -s "$tmp/direct-healthy.out" "$tmp/logs/kill-healthy.out"' "$kill_got"
     check "a capped launch's .err never carries the uncapped notice" \
-      '! grep -qF "launch running uncapped" "$tmp/logs/fork-other.err" "$tmp/logs/memory-other.err"'
+      '[ -s "$tmp/logs/fork-other.err" ] && [ -s "$tmp/logs/memory-other.err" ] && ! grep -qF "launch running uncapped" "$tmp/logs/fork-other.err" "$tmp/logs/memory-other.err"'
   else
     echo "per-launch cap controls skipped: no working systemd user scope"
   fi
@@ -1933,6 +2013,18 @@ PY
     --err ../logs/badlim.err --marker ../logs/badlim.done -- ./fixed.sh 2>&1); rc=$?
   check "limits that fail validation refuse the launch, the marker lands and .err says why" \
     '[ $rc -eq 1 ] && [ -e "$tmp/logs/badlim.done" ] && grep -q "tasks_max must be" "$tmp/logs/badlim.err"' "$got"
+  mkdir -p "$tmp/bad-dispatch"
+  printf '{"config": [1, 2, 3]}' > "$tmp/bad-dispatch/run.json"
+  got=$(cd "$tmp/caller" && hs "$SYS" -- run "$NAME" "$repo" --role lane --run "$tmp/bad-dispatch" \
+    --err ../logs/badcfg.err --marker ../logs/badcfg.done -- ./fixed.sh 2>&1); rc=$?
+  check "a dispatch whose config is no table refuses the launch cleanly, with no traceback" \
+    '[ $rc -eq 1 ] && [ -e "$tmp/logs/badcfg.done" ] && grep -q "config must be a table" "$tmp/logs/badcfg.err" && ! grep -qi "traceback" "$tmp/logs/badcfg.err"' "$got"
+  got=$(cd "$tmp/caller" && hs "$SYS" -- run "$NAME" "$repo" --role bogus \
+    --err ../logs/badrole.err --marker ../logs/badrole.done -- ./fixed.sh 2>&1); rc=$?
+  check "an unknown launch role refuses the launch, the marker lands and .err says why" \
+    '[ $rc -eq 1 ] && [ -e "$tmp/logs/badrole.done" ] && grep -q "unknown launch role" "$tmp/logs/badrole.err"' "$got"
+  check "every role resolves from the dispatch run, inheriting each value it does not set" \
+    '[ "$(launch_limits lane "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "64M\t16")" ] && [ "$(launch_limits coachman "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "128M\t32")" ] && [ "$(launch_limits reviewer "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "8G\t24")" ] && [ "$(launch_limits default "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "8G\t512")" ] && [ "$(launch_limits lane "" "$tmp/live-limits.toml")" = "$(printf "8G\t512")" ]'
 
   finish self-test
 }
