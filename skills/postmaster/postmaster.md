@@ -312,8 +312,9 @@ it there is no fresher ref, and remote movement it does not track can be missed.
    checkpoint is `<dispatch>/checkpoint-review.md` after a review leg,
    `<dispatch>/checkpoint-1.md` otherwise). Then
    `<tool>/scripts/landing.sh journey <dispatch> <synthesis-wt> <dispatch>/brief.md` must
-   not print `blocked`: a journey with no report, or one that did not run where the ticket
-   has a User journey section, holds landing until the journey runs. The postmaster judges
+   not print `blocked`: a journey with no report, or one that did not run where the
+   waybill mentions a user journey, holds landing until the journey runs or the user
+   rules. The postmaster judges
    every other non-pass with its evidence, as before: on `judge`, and on any other check
    but the gate that is not pass, weigh the result and put it to the user. Verify that every
    branch the card
@@ -328,8 +329,10 @@ it there is no fresher ref, and remote movement it does not track can be missed.
    <dispatch>/checkpoint-review.md <dispatch>/card.md` prints `match`, and the card names
    the checkpoint's final round with
    the same round counts; `<tool>/scripts/landing.sh card-open <the leg's checkpoint>`
-   prints `none`: with an open P1 or P2 the postmaster withholds like a stale `fresh`,
-   whatever the card matches — open P3 residue lands; the blind acceptance
+   prints `none`: with an open P1 or P2 the postmaster withholds as a failed claim below
+   (resume the last leg with the open findings as the exact discrepancy, not with a
+   default-branch merge), whatever the card matches — open P3 residue lands; the blind
+   acceptance
    tests are the first commit or the hand-off records why they were not written; the Style
    residue's count is what
    `<tool>/scripts/style-findings.sh count <dispatch>` prints, and the residues the card

@@ -11,8 +11,9 @@
 #       paths since BASE, the merge is on the default branch, and it contains the card's
 #       final HEAD: by ancestry, or, for a squash or rebase merge, by content, with every
 #       added and removed line of the ticket's diff on each path it changed present in the
-#       merge's diff on that path (paths with no text lines must agree between card and
-#       merge instead). `re-verify`, never `landed`, when the ticket branch moved
+#       merge's diff on that path, counting duplicates (paths with no text lines must
+#       agree between card and merge instead). `re-verify`, never `landed`, when the
+#       ticket branch moved
 #       past the card's HEAD. Otherwise `not-landed`.
 #   landing.sh anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha>
 #       whether the branch holds anything to land. `nothing-to-land` when the ticket's diff
@@ -56,14 +57,14 @@
 #       the checkpoint's open P1 and P2 findings, one `- [<severity>] <id>` bullet
 #       each, or `none`. Open P3 residue prints `none`: it lands.
 #   landing.sh journey <dispatch> <synthesis-wt> <waybill>
-#       whether the journey holds landing. Whether the waybill has a User journey section
+#       whether the journey holds landing. Whether the waybill mentions a user journey
 #       is asked of `ticket-check.sh --has-journey`, the flow's one reading of a ticket.
 #       `clear` when no check's source names `web-journey`, or when the report exists and
-#       the journey check passed. `blocked` when the waybill has a User journey section,
-#       a check uses `web-journey`, and the report is missing or the check did not run:
-#       missing evidence, not a result to weigh. `judge` when the waybill has no User
-#       journey section, or the journey check failed with its report written: the
-#       postmaster weighs it like any other non-pass.
+#       the journey check passed. `blocked` when the waybill mentions one, a check uses
+#       `web-journey`, and the report is missing or the check did not run: missing
+#       evidence, not a result to weigh. `judge` when the waybill mentions none, or the
+#       journey check failed with its report written: the postmaster weighs it like any
+#       other non-pass.
 #   landing.sh --self-test
 #
 #   exit 0  already-landed, anything-to-land, results, card-block, card-open: the answer,
@@ -73,7 +74,7 @@
 #           that cannot be recorded-read; `verify.sh results`, `journey-path` or
 #           `ticket-check.sh --has-journey` failing; a checkpoint whose structure cannot
 #           be read (a duplicate id, a finding-shaped line that is not a finding, an
-#           unreadable state, or a fence marker line); a card holding an
+#           unreadable state, a fence marker line, or a quoted line); a card holding an
 #           HTML comment or not holding the rendered block exactly once
 #   exit 2  fresh: the faults, one line each; journey: `blocked`
 set -uo pipefail
@@ -84,6 +85,7 @@ usage() { echo "usage: landing.sh already-landed --repo <repo> --default <branch
 run_py() {  # run_py <subcommand> <args...>; VERIFY and TICKET_CHECK name the scripts beside this one
   VERIFY="$HERE/verify.sh" TICKET_CHECK="$HERE/ticket-check.sh" python3 - "$@" <<'PY'
 import json, os, re, subprocess, sys
+from collections import Counter
 
 VERIFY = os.environ["VERIFY"]
 TICKET_CHECK = os.environ["TICKET_CHECK"]
@@ -155,6 +157,10 @@ def refuse_fences(text, which):  # no fence semantics: a marker line is an input
     for line in text.splitlines():
         if FENCE_MARK.match(line):
             die("%s: fence marker line: %s" % (which, line.strip()))
+def refuse_quotes(text, which):  # nothing is unquoted: a quoted line is an input fault
+    for line in text.splitlines():
+        if re.match(r"^\s*>", line):
+            die("%s: quoted line: %s" % (which, line.strip()))
 def refuse_comments(text, which):  # neither the card nor the checkpoint needs a comment
     if "<!--" in text:
         die("%s: contains an HTML comment" % which)
@@ -179,6 +185,7 @@ def checkpoint_states(path):  # [(sev, fid, state)] in file order; malformed inp
     text = load(path)
     refuse_comments(text, "checkpoint")
     refuse_fences(text, "checkpoint")
+    refuse_quotes(text, "checkpoint")
     out = []
     for line in text.splitlines():
         m = FINDING.match(line)
@@ -208,17 +215,17 @@ def render_block(dispatch, wt, checkpoint):  # the card's checked sections, byte
                             for sev, fid, state in states if state == "user-applied") or "none")
     return "## Checks\n\n%s\n\n## Open findings\n\n%s\n\n## Not re-reviewed\n\n%s\n" % tuple(bodies)
 
-def diff_lines(repo, a, b, path):  # (added, removed) line sets, -U0, no drivers
+def diff_lines(repo, a, b, path):  # (added, removed) line multisets, -U0, no drivers
     r = subprocess.run(["git", "-C", repo, "diff", "-U0", "--no-color", "--no-textconv",
                         "--no-ext-diff", a, b, "--", path], capture_output=True, text=True)
     if r.returncode != 0:
         die("git diff %s %s failed" % (a[:12], b[:12]))
-    added, removed = set(), set()
+    added, removed = Counter(), Counter()
     for line in r.stdout.splitlines():
         if line.startswith("+") and not line.startswith("+++"):
-            added.add(line[1:])
+            added[line[1:]] += 1
         elif line.startswith("-") and not line.startswith("---"):
-            removed.add(line[1:])
+            removed[line[1:]] += 1
     return added, removed
 
 def content_landed(repo, base, card, merge, paths):  # every ticket line-change is in the merge
@@ -230,7 +237,7 @@ def content_landed(repo, base, card, merge, paths):  # every ticket line-change 
                 return False
             continue
         a_m, r_m = diff_lines(repo, base, merge, p)
-        if not (a_c <= a_m and r_c <= r_m):
+        if a_c - a_m or r_c - r_m:  # multisets: duplicates count; order is not seen
             return False
     return True
 
@@ -474,6 +481,33 @@ git -C "$SS" merge -q --squash ticket || exit 1; git -C "$SS" commit -qm PR || e
 SSM=$(git -C "$SS" rev-parse HEAD)
 out=$("$SELF" already-landed --repo "$SS" --default main --ticket ticket --base "$SSB" --card-head "$SSH" --pr-merge "$SSM" 2>&1); rc=$?
 expect "AC3: a squash merge holding the ticket plus an independent same-file change is landed" 0 "landed"
+MD=$tmp/md; mkrepo "$MD"   # AD1: duplicated lines count, they do not collapse
+printf 'base\n' > "$MD/f"; git -C "$MD" add f && git -C "$MD" commit -qm A || exit 1
+MDB=$(git -C "$MD" rev-parse HEAD)
+git -C "$MD" checkout -qb ticket || exit 1
+printf 'base\nsame\nsame\n' > "$MD/f"; git -C "$MD" commit -qam T || exit 1
+MDH=$(git -C "$MD" rev-parse HEAD)
+git -C "$MD" checkout -q main || exit 1
+printf 'base\nsame\nother\n' > "$MD/f"; git -C "$MD" commit -qam PR || exit 1
+MDM=$(git -C "$MD" rev-parse HEAD)
+out=$("$SELF" already-landed --repo "$MD" --default main --ticket ticket --base "$MDB" --card-head "$MDH" --pr-merge "$MDM" 2>&1); rc=$?
+expect "AD1: a merge holding one of two identical added lines is not landed" 0 "not-landed"
+git -C "$MD" checkout -q main || exit 1
+printf 'base\nsame\nsame\nextra\n' > "$MD/f"; git -C "$MD" commit -qam PR2 || exit 1
+MDM2=$(git -C "$MD" rev-parse HEAD)
+out=$("$SELF" already-landed --repo "$MD" --default main --ticket ticket --base "$MDB" --card-head "$MDH" --pr-merge "$MDM2" 2>&1); rc=$?
+expect "AD1: a merge holding both identical added lines plus more is landed" 0 "landed"
+MR=$tmp/mr; mkrepo "$MR"
+printf 'A\ndup\ndup\n' > "$MR/f"; git -C "$MR" add f && git -C "$MR" commit -qm A || exit 1
+MRB=$(git -C "$MR" rev-parse HEAD)
+git -C "$MR" checkout -qb ticket || exit 1
+printf 'A\n' > "$MR/f"; git -C "$MR" commit -qam T || exit 1
+MRH=$(git -C "$MR" rev-parse HEAD)
+git -C "$MR" checkout -q main || exit 1
+printf 'A\ndup\n' > "$MR/f"; git -C "$MR" commit -qam PR || exit 1
+MRM=$(git -C "$MR" rev-parse HEAD)
+out=$("$SELF" already-landed --repo "$MR" --default main --ticket ticket --base "$MRB" --card-head "$MRH" --pr-merge "$MRM" 2>&1); rc=$?
+expect "AD1: a merge removing one of two identical removed lines is not landed" 0 "not-landed"
 out=$("$SELF" already-landed --repo "$R" --default main --ticket sq --base "$BASE" --card-head "$(git -C "$R" rev-parse sq)" --pr-merge "$NOMERGE" 2>&1); rc=$?
 expect "a merge without the card HEAD's content does not count" 0 "not-landed"
 git -C "$R" checkout -qb moved "$TIP" || exit 1; commit "$R" f T3 T3
@@ -824,6 +858,15 @@ expect "all closed prints none" 0 "none"
 printf '%s\n' "## Findings (bug)" "" "- [P3] bug-9: open" > "$D/cp-p3open.md"
 out=$("$SELF" card-open "$D/cp-p3open.md" 2>&1); rc=$?
 expect "open P3 residue prints none" 0 "none"
+printf '%s\n' "## Findings (bug)" "" "> - [P1] bug-9: open" > "$D/cp-quoted.md"
+out=$("$SELF" card-open "$D/cp-quoted.md" 2>&1); rc=$?
+expect "a quoted finding is an input fault" 1 "landing: checkpoint: quoted line: > - [P1] bug-9: open"
+printf '%s\n' "## Findings (bug)" "" ">> - [P1] bug-9: open" > "$D/cp-nested.md"
+out=$("$SELF" card-open "$D/cp-nested.md" 2>&1); rc=$?
+expect "a nested quoted finding is an input fault" 1 "landing: checkpoint: quoted line: >> - [P1] bug-9: open"
+printf '%s\n' "## Findings (bug)" "" "> \`\`\`" "> - [P1] bug-9: open" "> \`\`\`" > "$D/cp-qfence.md"
+out=$("$SELF" card-open "$D/cp-qfence.md" 2>&1); rc=$?
+expect "a quoted fence is an input fault" 1 "landing: checkpoint: quoted line: > \`\`\`"
 
 echo "journey"
 printf '{"checks": [{"name": "gate", "source": "default:gate", "command": "true", "shows": "x"}, {"name": "journey", "source": "default:web-journey", "command": "true", "shows": "x"}]}\n' > "$D/jchecks.json"
@@ -856,7 +899,7 @@ out=$("$SELF" journey "$J" "$JW" "$J/dot.md" 2>&1); rc=$?
 expect "W10: a trailing full stop still names the section" 2 "blocked: journey: not run; the journey has no evidence"
 printf '# T\n\n## Problem / feature\nA change.\n\n## User journey log\n1. Open it.\n' > "$J/other.md"
 out=$("$SELF" journey "$J" "$JW" "$J/other.md" 2>&1); rc=$?
-expect "V10: extra heading words still name another section" 0 "judge: no User journey section; journey judged like any other non-pass"
+expect "journey-phrase: extra heading words still hold the phrase" 2 "blocked: journey: not run; the journey has no evidence"
 printf '# T\n\n## Problem / feature\nA change.\n\n```\n## User journey\n1. Open it.\n```\n' > "$J/fenced.md"
 out=$("$SELF" journey "$J" "$JW" "$J/fenced.md" 2>&1); rc=$?
 expect "fail-closed: a fenced User journey blocks" 2 "blocked: journey: not run; the journey has no evidence"

@@ -14,12 +14,13 @@
 #                                                         of <sections> in place of the one it
 #                                                         names, or added where the shape puts it
 #   ticket-check.sh --has-journey <file>                  print `journey` or `no journey`: whether
-#                                                         any line, with complete same-line comments
-#                                                         removed, reads User journey after stripping
-#                                                         leading spaces and `#` marks (case-insensitive;
-#                                                         trailing punctuation and closing hashes allowed).
-#                                                         Fail-closed: inside a fence or not, at any indent;
-#                                                         a false yes blocks landing visibly
+#                                                         the phrase "user journey" occurs anywhere in
+#                                                         the text, case-insensitively, with whitespace
+#                                                         runs collapsed and markup (`#`, `>`, `*`, `_`,
+#                                                         backticks, comment openers and closers) read
+#                                                         as spaces. No headings are read. Fail-closed:
+#                                                         a mention in passing blocks landing visibly
+#                                                         until the journey runs or the user rules.
 #   ticket-check.sh --self-test
 #
 # What it judges, and nothing more:
@@ -352,15 +353,11 @@ def splice(base_text, sections_text):
             lines.append("")
     return "\n".join(lines) + "\n"
 
-JOURNEY_HEAD = re.compile(r"^[\s#]*")
-JOURNEY_TAIL = re.compile(r"[#.;!?…:\s]+$")
+JOURNEY_MARKUP = re.compile(r"<!--|-->|[#> *_`]+")
 
-def has_journey(text):  # fail-closed: any line reading as the journey counts, fenced or not
-    for raw_line in text.split("\n"):
-        line = re.sub(r"<!--.*?-->", "", raw_line)
-        if JOURNEY_TAIL.sub("", JOURNEY_HEAD.sub("", line)).lower() == "user journey":
-            return True
-    return False
+def has_journey(text):  # fail-closed: the phrase anywhere counts, whatever shapes it
+    flat = re.sub(r"\s+", " ", JOURNEY_MARKUP.sub(" ", text))
+    return "user journey" in flat.lower()
 
 mode = sys.argv[1]
 if mode == "splice":
@@ -903,7 +900,7 @@ jexpect "a trailing colon still names the section" "journey"
 jbody "$P" "$A" "$D" "$K" "## User journey." "1. Open it."
 jexpect "a trailing full stop still names the section" "journey"
 jbody "$P" "$A" "$D" "$K" "## User journey log" "1. Open it."
-jexpect "extra heading words still name another section" "no journey"
+jexpect "journey-phrase: extra heading words still hold the phrase" "journey"
 jbody "$P" "$A" "$D" "$K" "# User journey" "1. Open it."
 jexpect "a level-one journey still names the section" "journey"
 jbody "$P" "$A" "$D" "$K" "    \`\`\`" "    literal indented text" "## User journey" "1. Open it."
@@ -914,6 +911,30 @@ jbody "$P" "$A" "$D" "$K" "## User journey:." "1. Open it."
 jexpect "a trailing colon and full stop still name the section" "journey"
 jbody "$P" "$A" "$D" "$K" "## User journey:;" "1. Open it."
 jexpect "a trailing colon and semicolon still name the section" "journey"
+jbody "$P" "$A" "$D" "$K" "## User  journey" "1. Open it."
+jexpect "journey-phrase: a doubled space still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## User	journey" "1. Open it."
+jexpect "journey-phrase: a tab still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## User journey -->" "1. Open it."
+jexpect "journey-phrase: a closer on the heading line still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "--> ## User journey" "1. Open it."
+jexpect "journey-phrase: a heading after a closer still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## User journey," "1. Open it."
+jexpect "journey-phrase: a trailing comma still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "This changes the user journey for checkout."
+jexpect "journey-phrase: a mention in passing still blocks landing visibly" "journey"
+jbody "$P" "$A" "$D" "$K" "## *User journey*" "1. Open it."
+jexpect "journey-phrase: emphasis still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## USER JOURNEY" "1. Open it."
+jexpect "journey-phrase: all caps still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "> ## User journey" "1. Open it."
+jexpect "journey-phrase: a quoted heading still reads" "journey"
+jbody "$P" "$A" "$D" "$K" '## `User journey`' "1. Open it."
+jexpect "journey-phrase: backticks still read" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "The user journeys through checkout."
+jexpect "journey-phrase: the phrase as a substring still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "The journey is long and winding."
+jexpect "journey-phrase: the word journey alone is not the phrase" "no journey"
 body "<!-- x --> ## Problem / feature
 A ticket reaches a coachman with words under it." "$A" "$D" "$K"; run "$T"
 expect "a same-line remainder does not satisfy a required part" 2 "problem / feature"
