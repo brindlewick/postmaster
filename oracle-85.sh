@@ -28,15 +28,14 @@ nope() { echo "FAIL $1: $2"; fail=1; }
 
 # P1 (AC5): no self-test pipes output into grep -q.
 # A literal | into grep with a -q flag (any bundle) or --quiet. Four main-logic
-# occurrences at BASE are allowlisted: they are not self-tests. So is a line
-# that captures the pipeline's exit (echo $?): that is the race reproducer AC5
-# requires, which runs the old form to show it fails rather than checking
-# output through it. (Exemption added after mimo's harvest: its only flagged
-# line was that reproducer. It changes nothing on BASE or luna.)
+# occurrences are allowlisted: they are not self-tests. There is no line-based
+# exemption for the race reproducer: one would also exempt a forbidden pipe
+# that shares its line, and the reproducer that landed is a Python heredoc
+# with no shell pipe line to exempt.
 probe_static() {
   local out
   out=$(grep -rPn '(?<!\|)\|(?!\|)\s*e?grep\s+(-[A-Za-z]*q[A-Za-z]*|--quiet)([^A-Za-z]|$)' "$HERE/scripts" \
-    | grep -v -e 'kinds: //p' -e "grep -q '^in-the-way'" -e 'grep -qxF -- "$control"' -e 'Token scopes' -e 'echo $?' \
+    | grep -v -e 'kinds: //p' -e "grep -q '^in-the-way'" -e 'grep -qxF -- "$control"' -e 'Token scopes' \
     || true)
   if [ -z "$out" ]; then
     pass P1-no-pipe-grep-q "no self-test pipes into grep -q"
