@@ -23,8 +23,8 @@ import {
   existsSync,
   mkdirSync,
   openSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   statSync,
@@ -1841,30 +1841,23 @@ shows = "passes only on what the gate rewrote"
     "modules in the target's own directory are never imported",
     !existsSync(join(tmp, "imported")),
   );
-
-  // Bun's own loader is isolated too: a target's bunfig.toml preload runs
-  // nothing through checks or discover. (.env rides along in the target;
-  // its vector is covered by the wrapper static check plus the flag-effect
-  // check below, since no script echoes the environment it runs in.)
-  {
-    writeFileSync(join(q, "bunfig.toml"), 'preload = ["./scary.ts"]\n');
-    writeFileSync(
-      join(q, "scary.ts"),
-      `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(join(tmp, "preloaded"))}, "x");\n`,
-    );
-    writeFileSync(join(q, ".env"), "VERIFY_ISOLATION_PROBE=loaded\n");
-    run("bash", [
-      "-c",
-      `cd "${q}" && "${SELF}" checks . --lines >/dev/null 2>&1; "${join(HERE, "discover-project.sh")}" . >/dev/null 2>&1`,
-    ]);
-    rmSync(join(q, "bunfig.toml"), { force: true });
-    rmSync(join(q, "scary.ts"), { force: true });
-    rmSync(join(q, ".env"), { force: true });
-    st.check(
-      "a target's bunfig.toml preload runs nothing through checks or discover",
-      !existsSync(join(tmp, "preloaded")),
-    );
-  }
+  writeFileSync(join(q, "bunfig.toml"), 'preload = ["./scary.ts"]\n');
+  writeFileSync(
+    join(q, "scary.ts"),
+    `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(join(tmp, "preloaded"))}, "x");\n`,
+  );
+  writeFileSync(join(q, ".env"), "VERIFY_ISOLATION_PROBE=loaded\n");
+  run("bash", [
+    "-c",
+    `cd "${q}" && "${SELF}" checks . --lines >/dev/null 2>&1; "${join(HERE, "discover-project.sh")}" . >/dev/null 2>&1`,
+  ]);
+  rmSync(join(q, "bunfig.toml"), { force: true });
+  rmSync(join(q, "scary.ts"), { force: true });
+  rmSync(join(q, ".env"), { force: true });
+  st.check(
+    "a target's bunfig.toml preload runs nothing through checks or discover",
+    !existsSync(join(tmp, "preloaded")),
+  );
 
   // Every wrapper runs bun with --no-env-file and the tool-owned --config,
   // so no working directory's bunfig.toml or .env is ever discovered.
@@ -1872,10 +1865,18 @@ shows = "passes only on what the gate rewrote"
     const bad: string[] = [];
     for (const w of readdirSync(HERE).filter((f) => f.endsWith(".sh"))) {
       const text = readFileSync(join(HERE, w), "utf8");
-      if (!text.includes("--no-env-file") || !text.includes("--config=") || !text.includes("bunfig.toml"))
+      if (
+        !text.includes("--no-env-file") ||
+        !text.includes("--config=") ||
+        !text.includes("bunfig.toml")
+      )
         bad.push(w);
     }
-    st.check("every wrapper isolates bun from the working directory", bad.length === 0, bad.join(" "));
+    st.check(
+      "every wrapper isolates bun from the working directory",
+      bad.length === 0,
+      bad.join(" "),
+    );
   }
 
   // The flags mean what they say, against this bun: bare bun loads a .env

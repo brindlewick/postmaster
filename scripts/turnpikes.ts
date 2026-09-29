@@ -18,14 +18,7 @@
 //   exit 1  usage, no waybill, or a table that breaks its rules
 //   exit 2  resolve: the text is not a turnpikes section; legs and short: the line is missing,
 //           is not names or none, or is not the one --expect gives. One line per fault, on stdout.
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
 import { die, run, withTempDir } from "./lib/proc.ts";
@@ -403,11 +396,7 @@ withTempDir((tmp) => {
       .split("\n")
       .filter((l) => /^(style|bug|security)$/.test(l.split(/\s+/)[0] ?? ""))
       .map((l) => l.split(/\s+/).slice(3).join(" "));
-    st.check(
-      "each line carries its full description, not its first word",
-      descsFull(descs),
-      out,
-    );
+    st.check("each line carries its full description, not its first word", descsFull(descs), out);
   }
   {
     const short = TABLE.replace(

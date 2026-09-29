@@ -1452,64 +1452,58 @@ withTempDir((tmp) => {
     join(tmp, "dumpexit.toml"),
     `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumpexit.env")}" }\n`,
   );
-  {
-    doRun(
-      "dumpexit",
-      "launch",
-      "coachman",
-      join(tmp, "wt"),
-      join(tmp, "prompt.txt"),
-      "--leg",
-      "review",
-    );
-    st.check(
-      "an env file that exits aborts the launch with its status",
-      rc === 3 && out === "",
-      `rc ${rc} out ${JSON.stringify(out)}`,
-    );
-  }
+  doRun(
+    "dumpexit",
+    "launch",
+    "coachman",
+    join(tmp, "wt"),
+    join(tmp, "prompt.txt"),
+    "--leg",
+    "review",
+  );
+  st.check(
+    "an env file that exits aborts the launch with its status",
+    rc === 3 && out === "",
+    `rc ${rc} out ${JSON.stringify(out)}`,
+  );
   writeFileSync(join(tmp, "dumpsete.env"), "FOO=fromfile\nset -e\nfalse\n");
   writeFileSync(
     join(tmp, "dumpsete.toml"),
     `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumpsete.env")}" }\n`,
   );
-  {
-    doRun(
-      "dumpsete",
-      "launch",
-      "coachman",
-      join(tmp, "wt"),
-      join(tmp, "prompt.txt"),
-      "--leg",
-      "review",
-    );
-    st.check(
-      "an env file that fails under set -e aborts with its status",
-      rc === 1 && out === "",
-      `rc ${rc} out ${JSON.stringify(out)}`,
-    );
-  }
+  doRun(
+    "dumpsete",
+    "launch",
+    "coachman",
+    join(tmp, "wt"),
+    join(tmp, "prompt.txt"),
+    "--leg",
+    "review",
+  );
+  st.check(
+    "an env file that fails under set -e aborts with its status",
+    rc === 1 && out === "",
+    `rc ${rc} out ${JSON.stringify(out)}`,
+  );
   writeFileSync(join(tmp, "dumpexec.env"), "exec /bin/false\n");
   writeFileSync(
     join(tmp, "dumpexec.toml"),
     `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumpexec.env")}" }\n`,
   );
-  {
-    doRun(
-      "dumpexec",
-      "launch",
-      "coachman",
-      join(tmp, "wt"),
-      join(tmp, "prompt.txt"),
-      "--leg",
-      "review",
-    );
-    st.check(
-      "an env file that execs never launches",
-      rc === 1 && out === "",
-      `rc ${rc} out ${JSON.stringify(out)}`,
-    );
-  }
+  doRun(
+    "dumpexec",
+    "launch",
+    "coachman",
+    join(tmp, "wt"),
+    join(tmp, "prompt.txt"),
+    "--leg",
+    "review",
+  );
+  st.check(
+    "an env file that execs never launches",
+    rc === 1 && out === "",
+    `rc ${rc} out ${JSON.stringify(out)}`,
+  );
   // A file that only loses PATH still dumps: the harness lookup then fails
   // on the emptied PATH, where ignoring the file would run it. BASE says
   // 127 there; the bare-name lookup corner stays as it was.
@@ -1518,65 +1512,59 @@ withTempDir((tmp) => {
     join(tmp, "dumpunpath.toml"),
     `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumpunpath.env")}" }\n`,
   );
-  {
-    doRun(
-      "dumpunpath",
-      "launch",
-      "coachman",
-      join(tmp, "wt"),
-      join(tmp, "prompt.txt"),
-      "--leg",
-      "review",
-    );
-    st.check(
-      "a file that unsets PATH applies instead of ignored",
-      rc === 1 && out === "",
-      `rc ${rc} out ${JSON.stringify(out)}`,
-    );
-  }
+  doRun(
+    "dumpunpath",
+    "launch",
+    "coachman",
+    join(tmp, "wt"),
+    join(tmp, "prompt.txt"),
+    "--leg",
+    "review",
+  );
+  st.check(
+    "a file that unsets PATH applies instead of ignored",
+    rc === 1 && out === "",
+    `rc ${rc} out ${JSON.stringify(out)}`,
+  );
   writeFileSync(join(tmp, "dumpemptypath.env"), "export PATH=\nFOO=emptyok\n");
   writeFileSync(
     join(tmp, "dumpemptypath.toml"),
     `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumpemptypath.env")}" }\n`,
   );
-  {
-    doRun(
-      "dumpemptypath",
-      "launch",
-      "coachman",
-      join(tmp, "wt"),
-      join(tmp, "prompt.txt"),
-      "--leg",
-      "review",
-    );
-    st.check(
-      "a file that empties PATH applies instead of ignored",
-      rc === 1 && out === "",
-      `rc ${rc} out ${JSON.stringify(out)}`,
-    );
-  }
+  doRun(
+    "dumpemptypath",
+    "launch",
+    "coachman",
+    join(tmp, "wt"),
+    join(tmp, "prompt.txt"),
+    "--leg",
+    "review",
+  );
+  st.check(
+    "a file that empties PATH applies instead of ignored",
+    rc === 1 && out === "",
+    `rc ${rc} out ${JSON.stringify(out)}`,
+  );
   // An emptied environment is handed on, not mistaken for a failed dump.
   writeFileSync(join(tmp, "dumponuke.env"), 'for v in $(compgen -e); do unset "$v"; done\n');
   writeFileSync(
     join(tmp, "dumponuke.toml"),
     `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumponuke.env")}" }\n`,
   );
-  {
-    doRun(
-      "dumponuke",
-      "launch",
-      "coachman",
-      join(tmp, "wt"),
-      join(tmp, "prompt.txt"),
-      "--leg",
-      "review",
-    );
-    st.check(
-      "a file that unsets everything hands on the empty environment",
-      rc === 1 && out === "",
-      `rc ${rc} out ${JSON.stringify(out)}`,
-    );
-  }
+  doRun(
+    "dumponuke",
+    "launch",
+    "coachman",
+    join(tmp, "wt"),
+    join(tmp, "prompt.txt"),
+    "--leg",
+    "review",
+  );
+  st.check(
+    "a file that unsets everything hands on the empty environment",
+    rc === 1 && out === "",
+    `rc ${rc} out ${JSON.stringify(out)}`,
+  );
   record("run-relenv", "relenv");
   doRun(
     "relenv",
