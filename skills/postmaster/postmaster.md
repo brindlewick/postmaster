@@ -303,14 +303,16 @@ route follows below.
    lists are exactly what `<tool>/scripts/style-findings.sh list <dispatch>` prints; and for
    every check the card gives the name and result (pass, fail or not run) that
    `<tool>/scripts/verify.sh results <dispatch> <synthesis-wt>` prints, ignoring the `at ...`
-   and `Ns: ...` suffixes each printer adds, all open findings, browser suite and QA when
-   present, the review link, and every run-created branch. Log the gate result. If a claim
+   and `Ns: ...` suffixes each printer adds — `no result logged` reads as `not run` — all
+   open findings, browser suite and QA when present, the review link, and every run-created
+   branch. Log the gate result. If a claim
    fails, remove `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`, then
    resume that last leg with the exact discrepancy and wait for its corrected card.
 2. **Follow the landing route in the waybill.** First, if the ticket branch is already
-   merged — the default branch contains its HEAD and the two refs point at different
-   commits, or the provider reports a merged pull request for it — skip landing and close
-   instead: log `merge` noting the branch was already merged, move the ticket to done,
+   merged — the default branch contains its HEAD and that HEAD is not the run's BASE (the
+   manifest's `base`), or the provider reports a merged pull request for it — skip landing
+   and close instead: log `merge` noting the branch was already merged, move the ticket to
+   done,
    logging `ticket-state`, remove `.waiting-on-user` and `.card-ready` (either may already
    be gone), set the stage with `<tool>/scripts/stage.sh <dispatch> shipped postmaster`,
    and run current Stage G. Otherwise:
@@ -339,8 +341,9 @@ route follows below.
    - An unknown landing route is a dispatch fault to resolve before this point. Do not infer
      it from the presence of a remote.
 3. **When the user's word that they merged comes**, verify the ticket branch is merged —
-   the default branch contains its HEAD and the two refs point at different commits, or the
-   provider reports a merged pull request for it; if neither holds, tell the user and wait.
+   the default branch contains its HEAD and that HEAD is not the run's BASE (the manifest's
+   `base`), or the provider reports a merged pull request for it; if neither holds, tell the
+   user and wait.
    Otherwise remove `.waiting-on-user` and `.card-ready`, log `merge`,
    move the ticket to done, logging `ticket-state`, and set the stage with
    `<tool>/scripts/stage.sh <dispatch> shipped postmaster`. For a local

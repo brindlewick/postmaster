@@ -695,9 +695,11 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    the capability that lets a caller get it wrong, not to patch the fourth site. Name the class
    in the escalation and say which sites each round closed.
 6. **One review checkpoint card.** Per lens: the findings and their overlap, across lanes and
-   with the other lenses, verified versus dismissed, applied, and the rounds it ran; for style,
-   how many findings go to the ship card's Style residue, as `<tool>/scripts/style-findings.sh
-   count <dispatch>` prints it. Then the gate status, and the checks as
+   with the other lenses, verified versus dismissed, applied, and the rounds it ran, with each
+   finding's explicit final state — open, closed with its round, or dismissed with its reason;
+   for style, how many findings go to the ship card's Style residue, as
+   `<tool>/scripts/style-findings.sh count <dispatch>` prints it. Then the gate status, and
+   the checks as
    `<tool>/scripts/verify.sh run <synthesis-wt> <dispatch>` printed them after the last round's
    fixes, the journey walked first where there is one. Written to
    `<dispatch>/checkpoint-review.md` with its `.checkpoint-review-ready` marker. Autonomous
@@ -945,7 +947,8 @@ logical order, not file safety: check the file surfaces before mass-launching.
   not done, save a fix the user orders in a loop with no gating lens (Stage 2, step 5), which
   the card marks as not re-reviewed.
 - A check that did not run is written as not run on every card and hand-off, never as passed
-  and never left out.
+  and never left out. Where `verify.sh results` prints `no result logged`, the card gives
+  `not run`, and the postmaster judges it as a non-pass.
 - Never gate-then-commit through a masking pipe: `<gate> 2>&1 | tail && git commit` reports the
   tail's exit, not the suite's, and will commit a RED tree. Check `${pipestatus[1]}` (zsh) or
   `${PIPESTATUS[0]}` (bash), or run the gate unpiped and commit only on its own exit 0.
