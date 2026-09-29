@@ -368,6 +368,11 @@ no_thread_error() {  # no_thread_error <leg> <marker> <limit> <err> <out> [adapt
   fi
 }
 
+stream_lines() {  # stream_lines <events-file>: the stream's line count, counting an unterminated last line, which wc -l misses
+  [ -f "$1" ] && [ -r "$1" ] || { echo 0; return 0; }
+  awk 'END{print NR+0}' < "$1"
+}
+
 harvest_thread_id() {  # harvest_thread_id <events-file> <marker> <limit>: print the thread id once the stream carries it
   local out=$1 marker=$2 limit=$3 i=0 adapter_out adapter_rc
   while [ $i -lt "$limit" ]; do
@@ -492,7 +497,7 @@ PY
   is_held_run "$run" "$ROOT/postmaster"; held_rc=$?
   if [ $held_rc -eq 0 ]; then ACTION_ERROR="held mid-step after writing the remount prompt for leg $number; no count, no launch"; return 2; fi
   if [ $held_rc -ne 1 ]; then ACTION_ERROR="cannot re-read the held list"; return 2; fi
-  if [ -f "$out" ]; then skip=$(wc -l < "$out" | tr -d ' '); else skip=0; fi
+  if [ -f "$out" ]; then skip=$(stream_lines "$out"); else skip=0; fi
   if ! set_resume_count "$d" "$number" "$((count + 1))" "$skip"; then ACTION_ERROR="cannot persist the remount count for leg $number"; return 2; fi
   is_held_run "$run" "$ROOT/postmaster"; held_rc=$?
   if [ $held_rc -eq 0 ]; then ACTION_ERROR="held mid-step after persisting resume $((count + 1)) for leg $number with no launch"; return 2; fi
@@ -754,6 +759,15 @@ PY
   [ "$got" = "the launch produced no thread id within 30s for leg 2 and may still be running; read $tmp/e.err and $tmp/e.out" ] \
     && ok "a missing marker wakes saying the launch may still be running" \
     || fail "a missing marker wakes saying the launch may still be running"
+  printf 'a\nb' > "$tmp/unterminated.jsonl"
+  printf 'a\nb\n' > "$tmp/terminated.jsonl"
+  : > "$tmp/empty.jsonl"
+  [ "$(stream_lines "$tmp/unterminated.jsonl")" = 2 ] \
+    && [ "$(stream_lines "$tmp/terminated.jsonl")" = 2 ] \
+    && [ "$(stream_lines "$tmp/empty.jsonl")" = 0 ] \
+    && [ "$(stream_lines "$tmp/no-such.jsonl")" = 0 ] \
+    && ok "the skip counts lines, including an unterminated last line" \
+    || fail "the skip counts lines, including an unterminated last line"
 
   echo "watcher steps: dispatch and remount controls"
   mkdir -p "$tmp/calls"
@@ -895,6 +909,29 @@ PY
     && [ "$(action_count "$root/stale" resume)" -eq 1 ] \
     && ok "an old transient error in the stream does not resume a later unrelated failure" \
     || fail "an old transient error in the stream does not resume a later unrelated failure"
+  root="$tmp/auto-unterm"; auto_run "$root" unterm 1 "thread-unterm"
+  printf '%s\n' 'model stream idle timeout' > "$root/unterm/logs/coachman-leg-1.err"
+  printf '{"type":"assistant","message":"hi"}\n{"type":"error","message":"model stream idle timeout"}' > "$root/unterm/logs/coachman-leg-1-events.jsonl"
+  : > "$root/unterm/.leg-1-exited"
+  watch_stub "$root"
+  [ $rc -eq 3 ] && [ "$(action_count "$root/unterm" resume)" -eq 1 ] \
+    || fail "an unterminated old error stays out of the new classification (setup: no first resume)"
+  # The stub always appends; a resumed launch that dies silent appends nothing. Restore the
+  # lane's exact shape to model it: the old error last and unterminated, nothing after.
+  printf '{"type":"assistant","message":"hi"}\n{"type":"error","message":"model stream idle timeout"}' > "$root/unterm/logs/coachman-leg-1-events.jsonl"
+  printf '%s\n' 'AssertionError: something the lane did wrong' > "$root/unterm/logs/coachman-leg-1.err"
+  : > "$root/unterm/.leg-1-exited"
+  watch_stub "$root"
+  got=$(python3 - "$root/unterm/watcher.json" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+print("%s/%s" % (d["resume_attempts"]["1"], d["stream_skip"]["1"]))
+PY
+  )
+  [ $rc -eq 0 ] && has "needs unterm REMOUNT" && [ "$got" = 1/2 ] \
+    && [ "$(action_count "$root/unterm" resume)" -eq 1 ] \
+    && ok "an unterminated old error stays out of the new classification" \
+    || fail "an unterminated old error stays out of the new classification (got $got)"
   for spec in "gateway 529 overloaded" "drop read: connection reset by peer"; do
     set -- $spec; name=$1; message=${spec#* }
     root="$tmp/auto-$name"; auto_run "$root" "$name" 1 "thread-$name"
