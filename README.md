@@ -87,6 +87,7 @@ scripts/skill-refs.sh [--fix]                                      # every scrip
 scripts/find-projects.sh        # your git projects, most recent first
 scripts/check-target.sh  <path> # 0 usable · 1 not a repo · 2 dirty
 scripts/discover-project.sh <path>                                # gate, docs, tracker and its prefix, and the checks
+scripts/project-settings.sh inspect|report|ensure|write …        # optional project settings and their source
 scripts/front-door.sh <harness> <model> <cwd> <yes|no> <target>   # self or spawn: who runs the stream
 scripts/verify.sh checks|record|arm|run|results|summary …          # the checks a change is verified by
 scripts/verify-examples.sh | verify-journey.sh | verify-library.sh # the defaults beyond the gate
@@ -117,10 +118,27 @@ scripts/wiki-lint.sh [--self-test]                                 # the wiki's 
 scripts/fixture.sh new|score|hidden …                              # a run on a fixture app, scored against a known outcome
 ```
 
-A project may declare how a change to it is verified in `.postmaster/project.toml`, the one
-settings file it commits, in the shape of `project.example.toml`. One that declares nothing gets
-defaults: the gate, and by what discovery finds, a command-line app's ticket examples, a web
-app's browser suite and User journey, or a library's tests through its package name.
+A project may carry a `.postmaster/` folder. It holds the project's settings and every run's
+full record — the ledger, the narrative, the cards, each lane's harness events stream and its
+exported durable session — under `runs/`. Nothing in the folder is committed by default; it
+carries its own `.gitignore`, so a checkout never brings another instance's ledgers, paths,
+ticket text, harness sessions or choices. A project that has never been run against looks
+exactly like one that has.
+
+What a project may declare to everyone who works on it is one file, `.postmaster/project.toml`,
+committed on purpose with `git add -f`: the checks that show a change works, the default
+turnpikes, the tracker binding by name, and the risk surfaces. It names no credential, no
+filesystem path, no machine name and no role assignment. This person's choices on this machine
+— which lanes fill the roles — are in `.postmaster/settings.toml`, which never travels. The
+shapes are `project.example.toml` and `settings.example.toml`. With neither file, the flow
+discovers what it can and the agent conducts the rest in conversation: a missing settings file
+is never an error and never a prompt to create one.
+
+Precedence is stated once and followed everywhere: discovery supplies defaults; the shared
+file declares what the project requires; local settings are this person's choices; the machine
+config supplies what is machine-specific and is never overridden by a project. None of these
+sets a floor of turnpikes: a ticket names the turnpikes its run passes through, and project
+settings only say what `default` means for that project.
 
 ## What it needs
 
@@ -162,8 +180,10 @@ service and no login, the local kind keeps a repo's tickets in its own git direc
 through its own tooling is described once, outside this repo.
 The adapters are in `skills/postmaster/trackers.md`.
 
-**Nothing about a target project has to be configured.** The flow discovers the gate
-command, the docs and the ticket convention. Ask only what discovery cannot answer.
+**Nothing about a target project has to be configured to run.** The flow discovers the gate,
+docs and ticket convention. When a conversation settles a project decision that discovery cannot
+answer, the agent offers the local settings file or the shared declaration and writes it only
+with agreement. A missing file is never a prompt to create an empty one.
 
 ## Native sessions
 
@@ -188,7 +208,8 @@ watched: the pane is a window onto a headless process that exits when it is done
 
 ## Design rules
 
-Nothing repo-specific in the flow. Nothing harness-specific outside an adapter. Anything
+Project files are optional and discovery remains the default; they record only project decisions
+discovery cannot infer. Nothing harness-specific outside an adapter. Anything
 deterministic lives in `scripts/`, because prose is re-derived, and mis-derived, on every
 run. Every count carries a control that could have come out otherwise. Every action a run
 takes on a project is logged as a structured event, so what the flow did can be audited and
