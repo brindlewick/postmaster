@@ -3168,7 +3168,7 @@ PY
   # A pinned run serves only its own checkout: a retry from the pin
   # proceeds, while a retry — or any launch — from anywhere else is
   # refused before anything is written or spawned.
-  pin_here=$(CDPATH= cd -P -- "$repo" && pwd -P)
+  pin_here=$(CDPATH= cd -P -- "$(dirname -- "$SELF")/.." && pwd -P)
   mkdir -p "$tmp/pin-d/logs" && cp "$leg_d/run.json" "$tmp/pin-d/run.json"
   printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/pin-d/manifest.json"
   printf 'pin retry prompt\n' > "$tmp/pin-d/prompt.txt"
@@ -3189,7 +3189,7 @@ PY
   marker "$tmp/pin-d/.leg-1-exited" 30
   got=$(python3 -c 'import json,sys; r=json.loads(open(sys.argv[1]).readlines()[-1]); print(r["request"]+"|"+r["thread_id"])' "$tmp/pin-d/logs/coachman-leg-1-attempts.jsonl")
   check "a retry on a pinned run uses the pin" \
-    '[ "$rc" -eq 0 ] && [ "$got" = "resume|T-PIN" ] && [ "$(wc -l < "$tmp/leg-calls")" = "$((calls_before + 1))" ]' "$got: rc=$rc"
+    '[ "$rc" -eq 0 ] && [ "$got" = "resume|T-PIN" ] && [ "$(grep -c . "$tmp/pin-d/logs/coachman-leg-1-attempts.jsonl")" = 2 ] && [ "$(wc -l < "$tmp/leg-calls")" = "$((calls_before + 1))" ]' "$got: rc=$rc"
   mkdir -p "$tmp/pinlive-d/logs" && cp "$leg_d/run.json" "$tmp/pinlive-d/run.json"
   printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/pinlive-d/manifest.json"
   printf 'pin retry prompt\n' > "$tmp/pinlive-d/prompt.txt"
