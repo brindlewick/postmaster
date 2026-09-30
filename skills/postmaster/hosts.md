@@ -113,7 +113,8 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   identity.** The caller's environment is handed over minus:
   - `CLAUDECODE`, `CLAUDE_PID`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`,
     `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_EXECPATH`, `CLAUDE_CODE_SESSION_ATTENDED`,
-    `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`, and the families
+    `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`,
+    `CLAUDE_CODE_TOOL_USE_ID`, and the families
     `CLAUDE_CODE_SESSION_*`, `CLAUDE_CODE_MESSAGING_*`, `CLAUDE_CODE_CHILD_*` — a lane that
     inherits the calling session's identity can message it or keep no session record of its own.
   - every `HERDR_*` of the caller's. In a Herdr pane the launch gets only that pane's own six
