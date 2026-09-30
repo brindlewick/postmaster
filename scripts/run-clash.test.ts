@@ -16,6 +16,8 @@ import {
   isTicketBranch,
   parseBranchNames,
   runDirPath,
+  stripGitLocationEnv,
+  GIT_LOCATION_ENV,
   ADVICE,
 } from "./run-clash";
 
@@ -52,8 +54,11 @@ function plantBranch(repo: string, name: string): void {
   git(repo, "branch", name);
 }
 
-function runClash(repo: string, ticketId: string) {
-  const r = spawnSync("bun", [script, repo, ticketId], { encoding: "utf8" });
+function runClash(repo: string, ticketId: string, extraEnv?: Record<string, string>) {
+  const r = spawnSync("bun", [script, repo, ticketId], {
+    encoding: "utf8",
+    env: { ...process.env, ...extraEnv },
+  });
   return {
     code: r.status ?? -1,
     out: `${r.stdout ?? ""}${r.stderr ?? ""}`,
@@ -107,6 +112,15 @@ describe("pure core", () => {
     ]);
     expect(parseBranchNames("refs/heads/main\n\nrefs/tags/75\n")).toEqual(["main"]);
     expect(parseBranchNames("")).toEqual([]);
+  });
+
+  test("stripGitLocationEnv drops git's location variables and keeps the rest", () => {
+    expect(stripGitLocationEnv({ GIT_DIR: "/x", PATH: "/bin", EMPTY: undefined })).toEqual({
+      PATH: "/bin",
+    });
+    const all: Record<string, string | undefined> = { KEEP: "1" };
+    for (const name of GIT_LOCATION_ENV) all[name] = "/x";
+    expect(stripGitLocationEnv(all)).toEqual({ KEEP: "1" });
   });
 
   test("collectClashes names the run directory and every matching branch, in order", () => {
@@ -220,6 +234,15 @@ describe("run-clash.ts through its own command line", () => {
     expect(code).toBe(2);
     expect(out).toContain("run-clash: branch already exists: 75");
     expect(out).toContain("run-clash: branch already exists: wb/75-mimo");
+  });
+
+  test("a GIT_DIR from the caller does not steer the check to another repository", () => {
+    const repo = freshRepo(root, "git-dir");
+    plantBranch(repo, "75");
+    const other = freshRepo(root, "git-dir-other");
+    const { code, out } = runClash(repo, "75", { GIT_DIR: join(other, ".git") });
+    expect(code).toBe(2);
+    expect(out).toContain("run-clash: branch already exists: 75");
   });
 
   test("near-misses do not clash: ticket 7 against 70 and wb/70-*", () => {

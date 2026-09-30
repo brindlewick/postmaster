@@ -95,11 +95,33 @@ type GitResult = {
   stderr: string;
 };
 
+// Git's own location variables, as a hook or rebase --exec can export them. They override
+// -C, so every git child runs without them; the same seven local.sh and verify.sh unset.
+export const GIT_LOCATION_ENV = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_NAMESPACE",
+];
+
+export function stripGitLocationEnv(env: Record<string, string | undefined>): Record<string, string> {
+  const clean: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined || GIT_LOCATION_ENV.includes(key)) continue;
+    clean[key] = value;
+  }
+  return clean;
+}
+
 function runGit(repo: string, args: string[]): GitResult {
   const result = Bun.spawnSync({
     cmd: ["git", "-C", repo, ...args],
     stdout: "pipe",
     stderr: "pipe",
+    env: stripGitLocationEnv(process.env),
   });
   const decoder = new TextDecoder();
   return {
