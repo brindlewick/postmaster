@@ -42,7 +42,7 @@ import { PY_DOT, PY_S_CLASS, pySplitLines } from "./lib/text.ts";
 const HERE = scriptsDir(import.meta);
 const DECLARATION = ".postmaster/project.toml";
 const SPEC = ".postmaster/verify";
-const NAME_RE = /^[a-z][a-z0-9-]*$/;
+const NAME_RE = /^[a-z][a-z0-9-]*$/u;
 const KEYS = ["command", "shows", "use", "score", "threshold", "timeout"];
 const TIMEOUT = 1800;
 const USABLE = ["cli-examples", "browser-suite", "web-journey", "library-tests"];
@@ -65,9 +65,10 @@ const RESULT_RE = new RegExp(
 );
 const DETAIL_RE = new RegExp(
   `^on=([^${PY_S_CLASS}]+)@([0-9a-f]+) result=([^${PY_S_CLASS}]+) exit=([^${PY_S_CLASS}]+)`,
+  "u",
 );
-const ANSI_RE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])/g;
-const CONTROL_RE = /[\x00-\x08\x0b-\x1f\x7f]/g;
+const ANSI_RE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])/gu;
+const CONTROL_RE = /[\x00-\x08\x0b-\x1f\x7f]/gu;
 
 interface Check {
   name: string;
@@ -126,8 +127,8 @@ function signalExit(signal: string): { code: number; num: number } {
 
 function plain(text: string): string {
   return text
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
+    .replace(/\r\n/gu, "\n")
+    .replace(/\r/gu, "\n")
     .replace(ANSI_RE, "")
     .replace(CONTROL_RE, "");
 }
@@ -136,10 +137,10 @@ function oneline(command: string): string {
   const c = command.trim();
   if (!c.includes("\n")) return c;
   const quoted = c
-    .replace(/\\/g, "\\\\")
-    .replace(/'/g, "\\'")
-    .replace(/\n/g, "\\n")
-    .replace(/\t/g, "\\t");
+    .replace(/\\/gu, "\\\\")
+    .replace(/'/gu, "\\'")
+    .replace(/\n/gu, "\\n")
+    .replace(/\t/gu, "\\t");
   return `bash -eo pipefail -c $'${quoted}'`;
 }
 
@@ -242,8 +243,8 @@ function discover(repo: string): { found: string[]; suite: string } {
  * as `'"'"'`. */
 function shlexQuote(s: string): string {
   if (s === "") return "''";
-  if (/^[a-zA-Z0-9_@%+=:,./-]+$/.test(s)) return s;
-  return `'${s.replace(/'/g, `'"'"'`)}'`;
+  if (/^[a-zA-Z0-9_@%+=:,./-]+$/u.test(s)) return s;
+  return `'${s.replace(/'/gu, `'"'"'`)}'`;
 }
 
 function mkDefault(
@@ -271,6 +272,8 @@ function mkDefault(
 }
 
 function declared(repo: string, gate: string, suite: string): Check[] | null {
+  const settings = run(join(scriptsDir(import.meta), "project-settings.sh"), ["inspect", repo]);
+  if (settings.code !== 0) dieV(settings.err.trim() || "project settings could not be read");
   const p = join(repo, DECLARATION);
   if (!existsSync(p)) return null;
   let table: Record<string, any>;
@@ -354,8 +357,9 @@ function declared(repo: string, gate: string, suite: string): Check[] | null {
         faults.push(`${at}: score and threshold go together`);
       } else if (hasScore) {
         try {
+          // ASCII: BASE compiles user score patterns with no flags.
           const re = new RegExp(c.score);
-          if (typeof c.score !== "string" || re.source.match(/\((?!\?)/g)?.length !== 1) {
+          if (typeof c.score !== "string" || re.source.match(/\((?!\?)/gu)?.length !== 1) {
             faults.push(`${at}: score is a regular expression with one group, the number`);
           }
         } catch (e: any) {
@@ -447,8 +451,8 @@ function recordedChecks(dispatch: string): Check[] {
   return (d as any).checks;
 }
 
-const TICKET_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Ticket[${PY_S_CLASS}]*$`);
-const PROFILE_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Project profile[${PY_S_CLASS}]*$`);
+const TICKET_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Ticket[${PY_S_CLASS}]*$`, "u");
+const PROFILE_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Project profile[${PY_S_CLASS}]*$`, "u");
 
 function ticketPart(text: string): string {
   const lines = pySplitLines(text);
@@ -464,7 +468,7 @@ function ticketPart(text: string): string {
   return `${lines
     .slice(start + 1, end)
     .join("\n")
-    .replace(/^\n+|\n+$/g, "")}\n`;
+    .replace(/^\n+|\n+$/gu, "")}\n`;
 }
 
 function writeSpec(spec: string, dispatch: string, journey: string): Check[] {
@@ -508,7 +512,7 @@ function uncommitted(top: string): string[] {
   const r = run("git", ["-C", top, "status", "--porcelain", "--untracked-files=all"]);
   return r.out
     .split("\n")
-    .filter((l) => l.slice(3) && !l.slice(3).replace(/^"|"$/g, "").startsWith(`${SPEC}/`))
+    .filter((l) => l.slice(3) && !l.slice(3).replace(/^"|"$/gu, "").startsWith(`${SPEC}/`))
     .map((l) => l.slice(3));
 }
 
@@ -605,9 +609,11 @@ function _runOne(
             why = "";
           } else {
             result = code === 3 ? "not run" : "fail";
-            why = last.replace(/^not run: /, "");
+            why = last.replace(/^not run: /u, "");
           }
+          // ASCII: BASE compiles user score patterns with no flags.
         } else if (c.threshold !== undefined) {
+          // ASCII: BASE compiles user score patterns with no flags.
           const scoreRe = new RegExp(c.score!, "g");
           const found = [...out.matchAll(scoreRe)].map((m) => m[1] ?? m[0]);
           if (code !== 0) {
@@ -721,9 +727,11 @@ function runOneSync(
         why = "";
       } else {
         result = code === 3 ? "not run" : "fail";
-        why = last.replace(/^not run: /, "");
+        why = last.replace(/^not run: /u, "");
+        // ASCII: BASE compiles user score patterns with no flags.
       }
     } else if (c.threshold !== undefined) {
+      // ASCII: BASE compiles user score patterns with no flags.
       const scoreRe = new RegExp(c.score!, "g");
       const found = [...out.matchAll(scoreRe)].map((m) => m[1] ?? m[0]);
       if (code !== 0) {
@@ -822,7 +830,7 @@ function runChecks(wt: string, dispatch: string | null): never {
       console.log(`  log: ${log}`);
     }
     if (dispatch) {
-      const detail = `on=${branch}@${sha.slice(0, 12)} result=${result.replace(/ /g, "-")} exit=${code === null ? "-" : code} secs=${secs}`;
+      const detail = `on=${branch}@${sha.slice(0, 12)} result=${result.replace(/ /gu, "-")} exit=${code === null ? "-" : code} secs=${secs}`;
       let detailFull = detail;
       if (why) detailFull += (result === "pass" ? " score=" : " reason=") + why;
       const lr = run("bash", [
@@ -932,7 +940,7 @@ if (argv[0] === "--self-test") {
     }
     const { checks, decl } = resolveChecks(repo, gate, true);
     const record = {
-      written: new Date().toISOString().replace(/\.[0-9]+Z$/, "Z"),
+      written: new Date().toISOString().replace(/\.[0-9]+Z$/u, "Z"),
       repo,
       head: git(repo, "rev-parse", "HEAD"),
       declaration: decl,
@@ -949,7 +957,7 @@ if (argv[0] === "--self-test") {
   if (form === "json") {
     console.log(JSON.stringify(checks, null, 2));
   } else if (form === "lines") {
-    const clean = (s: string) => String(s).replace(/[\t\r\n]+/g, " ");
+    const clean = (s: string) => String(s).replace(/[\t\r\n]+/gu, " ");
     console.log(
       checks
         .map((c) => [c.name, c.source, clean(oneline(c.command)), clean(c.shows)].join("\t"))
@@ -981,7 +989,7 @@ if (argv[0] === "--self-test") {
   for (const c of recordedChecks(dispatch)) {
     const got = latest.get(c.name);
     if (got) {
-      const result = got.m[3]?.replace(/-/g, " ");
+      const result = got.m[3]?.replace(/-/gu, " ");
       states.push(got.m[3]!);
       console.log(`${c.name}: ${result}, exit ${got.m[4]}, at ${got.ts}`);
     } else {
@@ -1026,9 +1034,9 @@ if (argv[0] === "--self-test") {
       continue;
     }
     const k = coach.get(c.name);
-    if (k && k[3] !== m[3]?.replace(/ /g, "-")) {
+    if (k && k[3] !== m[3]?.replace(/ /gu, "-")) {
       problems.push(
-        `${c.name}: the summary says ${m[3]}; the coachman's run at ${sha} says ${k[3]?.replace(/-/g, " ")}`,
+        `${c.name}: the summary says ${m[3]}; the coachman's run at ${sha} says ${k[3]?.replace(/-/gu, " ")}`,
       );
     }
   }
@@ -1092,8 +1100,12 @@ withTempDir((tmp) => {
 
   function mkRepo(dir: string): void {
     mkdirSync(dir, { recursive: true });
+    run("bash", [join(HERE, "project-settings.sh"), "ensure", dir]);
     run("git", ["-C", dir, "init", "-q", "-b", "main"]);
     G(dir, "add", "-A");
+    if (existsSync(join(dir, ".postmaster", "project.toml"))) {
+      G(dir, "add", "-f", ".postmaster/project.toml");
+    }
     G(dir, "commit", "-q", "--allow-empty", "-m", "first");
   }
 
@@ -1283,13 +1295,13 @@ timeout = 120
     st.check("a check that uses a default keeps its timeout", tryCheck?.timeout === 120, r.out);
   }
   {
-    mkdirSync(join(tmp, "runs/decl/T-0"), { recursive: true });
-    writeFileSync(join(tmp, "runs/decl/T-0/brief.md"), "## Ticket\nx\n");
+    mkdirSync(join(tmp, "decl", ".postmaster", "runs", "T-0"), { recursive: true });
+    writeFileSync(join(tmp, "decl", ".postmaster", "runs", "T-0", "brief.md"), "## Ticket\nx\n");
     const r = run("bash", [
       SELF,
       "record",
       join(tmp, "decl"),
-      join(tmp, "runs/decl/T-0"),
+      join(tmp, "decl", ".postmaster", "runs", "T-0"),
       "--gate",
       "make ci",
     ]);
@@ -1444,7 +1456,7 @@ use = "cli-examples"
 `,
   );
   mkRepo(p);
-  const d = join(tmp, "runs/proj/T-1");
+  const d = join(p, ".postmaster", "runs", "T-1");
   mkdirSync(d, { recursive: true });
   writeFileSync(
     join(d, "brief.md"),
@@ -1638,7 +1650,7 @@ use = "cli-examples"
     `exit ${r.code}\n${out}`,
   );
   {
-    const brokenDir = join(tmp, "runs/proj/T-1-broken");
+    const brokenDir = join(p, ".postmaster", "runs", "T-1-broken");
     run("cp", ["-r", d, brokenDir]);
     appendFileSync(
       join(brokenDir, "actions.jsonl"),
@@ -1675,7 +1687,7 @@ use = "cli-examples"
   }
   {
     const claims = readFileSync(join(tmp, "summary.md"), "utf-8").replace(
-      /^red: fail, exit 1/m,
+      /^red: fail, exit 1/mu,
       "red: pass, exit 0",
     );
     writeFileSync(join(tmp, "claims.md"), claims);
@@ -1691,7 +1703,7 @@ use = "cli-examples"
   }
   {
     const other = readFileSync(join(tmp, "summary.md"), "utf-8").replace(
-      /^gate: pass, exit 0, ([0-9]+)s: true/m,
+      /^gate: pass, exit 0, ([0-9]+)s: true/mu,
       "gate: pass, exit 0, $1s: make",
     );
     writeFileSync(join(tmp, "other.md"), other);
@@ -1721,17 +1733,11 @@ use = "cli-examples"
       `{"name": "w", "private": true, "scripts": {"e2e": "${e2e}"}, "devDependencies": {"next": "1"}}\n`,
     );
     mkRepo(join(tmp, project));
-    mkdirSync(join(tmp, `runs/${project}/T-5`), { recursive: true });
-    writeFileSync(join(tmp, `runs/${project}/T-5/brief.md`), "## Ticket\nx\n");
-    run("bash", [
-      SELF,
-      "record",
-      join(tmp, project),
-      join(tmp, `runs/${project}/T-5`),
-      "--gate",
-      gate,
-    ]);
-    const r = run("bash", [SELF, "run", join(tmp, project), join(tmp, `runs/${project}/T-5`)]);
+    const dd = join(tmp, project, ".postmaster", "runs", "T-5");
+    mkdirSync(dd, { recursive: true });
+    writeFileSync(join(dd, "brief.md"), "## Ticket\nx\n");
+    run("bash", [SELF, "record", join(tmp, project), dd, "--gate", gate]);
+    const r = run("bash", [SELF, "run", join(tmp, project), dd]);
     return r.out + r.err;
   }
   out = defaultRun("webpass", "true", "echo suite ran");
@@ -1758,7 +1764,7 @@ use = "cli-examples"
     '[checks.gate]\ncommand = "true"\nshows = "x"\n',
   );
   mkRepo(q);
-  const e = join(tmp, "runs/green/T-2");
+  const e = join(q, ".postmaster", "runs", "T-2");
   mkdirSync(e, { recursive: true });
   writeFileSync(join(e, "brief.md"), "## Ticket\nx\n");
   run("bash", [SELF, "record", q, e]);
@@ -1771,7 +1777,7 @@ use = "cli-examples"
     '[checks.gate]\ncommand = "true"\nshows = "x"\n[checks.try]\nuse = "library-tests"\n',
   );
   mkRepo(rg);
-  const f = join(tmp, "runs/grey/T-3");
+  const f = join(rg, ".postmaster", "runs", "T-3");
   mkdirSync(f, { recursive: true });
   writeFileSync(join(f, "brief.md"), "## Ticket\nx\n");
   run("bash", [SELF, "record", rg, f]);
@@ -1779,7 +1785,7 @@ use = "cli-examples"
   st.check("a run with a check not run and none failed exits 3", r.code === 3, `exit ${r.code}`);
   r = run("bash", [SELF, "run", join(tmp, "plain")]);
   st.check("a worktree nobody armed is refused", r.code === 1, `exit ${r.code}`);
-  const s = join(tmp, "runs/none/T-4");
+  const s = join(q, ".postmaster", "runs", "T-4");
   mkdirSync(s, { recursive: true });
   r = run("bash", [SELF, "arm", q, s]);
   st.check("a run that recorded no checks cannot arm a worktree", r.code === 1, `exit ${r.code}`);
@@ -1840,7 +1846,7 @@ shows = "passes only on what the gate rewrote"
 `,
   );
   mkRepo(sp);
-  const sd = join(tmp, "runs/spoil/T-9");
+  const sd = join(sp, ".postmaster", "runs", "T-9");
   mkdirSync(sd, { recursive: true });
   writeFileSync(join(sd, "brief.md"), "## Ticket\nx\n");
   run("bash", [SELF, "record", sp, sd]);
@@ -1870,7 +1876,7 @@ shows = "passes only on what the gate rewrote"
     '[checks.gate]\ncommand = "echo ok | tee gate.log"\nshows = "x"\n',
   );
   mkRepo(wp);
-  const wd = join(tmp, "runs/writes/T-10");
+  const wd = join(wp, ".postmaster", "runs", "T-10");
   mkdirSync(wd, { recursive: true });
   writeFileSync(join(wd, "brief.md"), "## Ticket\nx\n");
   run("bash", [SELF, "record", wp, wd]);
@@ -1958,7 +1964,7 @@ shows = "passes only on what the gate rewrote"
     ]);
     st.check(
       "--no-env-file suppresses .env where bare bun loads it",
-      bare.out.replace(/\n+$/, "") === "loaded" && flagged.out.replace(/\n+$/, "") === "unset",
+      bare.out.replace(/\n+$/u, "") === "loaded" && flagged.out.replace(/\n+$/u, "") === "unset",
       `bare ${JSON.stringify(bare.out)} flagged ${JSON.stringify(flagged.out)}`,
     );
   }
@@ -1985,16 +1991,16 @@ shows = "passes only on what the gate rewrote"
   mkdirSync(join(lp, ".postmaster"), { recursive: true });
   writeFileSync(
     join(lp, ".postmaster", "project.toml"),
-    `[checks.gate]\ncommand = "sleep 300 & echo $! > ${join(tmp, "leftover.pid")}"\nshows = "x"\n`,
+    `[checks.gate]\ncommand = "sleep 300 & echo $! > leftover.pid"\nshows = "x"\n`,
   );
   mkRepo(lp);
-  const ld = join(tmp, "runs/leftover/T-6");
+  const ld = join(lp, ".postmaster", "runs", "T-6");
   mkdirSync(ld, { recursive: true });
   writeFileSync(join(ld, "brief.md"), "## Ticket\nx\n");
   run("bash", [SELF, "record", lp, ld]);
   run("bash", [SELF, "run", lp, ld]);
   {
-    const pid = parseInt(readFileSync(join(tmp, "leftover.pid"), "utf-8").trim() || "0", 10);
+    const pid = parseInt(readFileSync(join(lp, "leftover.pid"), "utf-8").trim() || "0", 10);
     let gone = false;
     for (let i = 0; i < 40; i++) {
       try {
@@ -2020,7 +2026,7 @@ shows = "passes only on what the gate rewrote"
     mkdirSync(join(mp, ".postmaster"), { recursive: true });
     writeFileSync(join(mp, ".postmaster", "project.toml"), '[checks.try]\nuse = "library-tests"\n');
     mkRepo(mp);
-    const md = join(tmp, "runs/moved/T-8");
+    const md = join(mp, ".postmaster", "runs", "T-8");
     mkdirSync(md, { recursive: true });
     writeFileSync(join(md, "brief.md"), "## Ticket\nx\n");
     run("bash", [SELF, "record", mp, md]);
@@ -2061,7 +2067,7 @@ shows = "passes only on what the gate rewrote"
     const r2 = run("bash", [join(HERE, "discover-project.sh"), join(tmp, "cli")]);
     st.check(
       "a default says which one it is",
-      /check\.examples=default:cli-examples: /.test(r2.out),
+      /check\.examples=default:cli-examples: /u.test(r2.out),
       r2.out,
     );
   }
@@ -2091,9 +2097,11 @@ shows = "passes only on what the gate rewrote"
     const r2 = run("bash", [join(HERE, "discover-project.sh"), join(tmp, "bad")]);
     const out2 = r2.out + r2.err;
     st.check(
-      "a broken declaration is warned of, and no check is guessed",
-      out2.includes("warn=checks: ") && !/^check\./m.test(out2),
-      out2,
+      "a broken declaration stops discovery before it guesses checks",
+      r2.code === 1 &&
+        out2.includes("project settings could not be read") &&
+        !/^check\./mu.test(out2),
+      `exit ${r2.code}\n${out2}`,
     );
   }
   // The default check path quotes as BASE's shlex.quote does: safe paths

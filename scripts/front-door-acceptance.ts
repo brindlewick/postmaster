@@ -30,9 +30,9 @@ function usage(): never {
 /** flat <path>: fold newlines so a reflow alone never passes. */
 function flat(path: string): string {
   const text = readFileSync(path, "utf8")
-    .replace(/\r/g, "")
-    .replace(/[\n\t]/g, "  ");
-  return text.replace(/ {2,}/g, " ");
+    .replace(/\r/gu, "")
+    .replace(/[\n\t]/gu, "  ");
+  return text.replace(/ {2,}/gu, " ");
 }
 
 interface AcceptResult {
@@ -238,7 +238,7 @@ the stream itself or starts a postmaster; \`postmaster.md\` is what the postmast
     cpSync(join(tmp, "clean"), join(tmp, "one"), { recursive: true });
     writeFileSync(join(tmp, "one", file), `${fault}\n`, { flag: "a" });
     const r = accept(join(tmp, "one"));
-    if (r.code === 1 && r.out.replace(/\n+$/, "") === want) st.ok(name);
+    if (r.code === 1 && r.out.replace(/\n+$/u, "") === want) st.ok(name);
     else st.fail(`${name}: exit ${r.code} with:`, r.out + r.err);
   };
 
@@ -303,7 +303,7 @@ the stream itself or starts a postmaster; \`postmaster.md\` is what the postmast
     cpSync(join(tmp, "clean"), join(tmp, "one"), { recursive: true });
     writeFileSync(join(tmp, "one/skills/postmaster/SKILL.md"), `${fault}\n`, { flag: "a" });
     const r = accept(join(tmp, "one"));
-    const lines = r.out.replace(/\n+$/, "").split("\n");
+    const lines = r.out.replace(/\n+$/u, "").split("\n");
     if (
       r.code === 1 &&
       lines.length === 2 &&
@@ -329,7 +329,7 @@ the stream itself or starts a postmaster; \`postmaster.md\` is what the postmast
   if (staleR.code === 1) st.ok("stale tree exits 1");
   else st.fail(`stale tree exits ${staleR.code}, want 1`, staleR.out + staleR.err);
   const staleLines = staleR.out
-    .replace(/\n+$/, "")
+    .replace(/\n+$/u, "")
     .split("\n")
     .filter((l) => l !== "");
   if (staleLines.length === 19) st.ok("stale tree lists 19 faults");
@@ -404,7 +404,7 @@ the stream itself or starts a postmaster; \`postmaster.md\` is what the postmast
   const crlfR = accept(join(tmp, "crlf"));
   if (
     crlfR.code === 1 &&
-    crlfR.out.replace(/\n+$/, "") ===
+    crlfR.out.replace(/\n+$/u, "") ===
       "skills/postmaster/SKILL.md: still says spawn, hand over and stop is the only flow"
   ) {
     st.ok("a CRLF stale sentence is still caught");
@@ -417,6 +417,28 @@ the stream itself or starts a postmaster; \`postmaster.md\` is what the postmast
   chmodSync(join(tmp, "locked/skills/postmaster/SKILL.md"), 0o644);
   if (lockedR.code === 2) st.ok("an unreadable file exits 2, not a clean result");
   else st.fail(`an unreadable file exits ${lockedR.code}`, lockedR.out + lockedR.err);
+
+  // Main's early-exit grep pipe race: a needle at the start of megabytes
+  // killed the producer under pipefail. The port matches in-process, so a
+  // stale sentence up front with 16 MB behind it is still caught, and a
+  // clean 16 MB file still passes.
+  rmSync(join(tmp, "big"), { recursive: true, force: true });
+  cpSync(join(tmp, "clean"), join(tmp, "big"), { recursive: true });
+  writeFileSync(
+    join(tmp, "big/skills/postmaster/SKILL.md"),
+    `You do not run the stream yourself.\n${"x".repeat(16777216)}\n`,
+  );
+  const bigR = accept(join(tmp, "big"));
+  if (
+    bigR.code === 1 &&
+    bigR.out.includes("still says the front door never runs the stream itself")
+  ) {
+    st.ok("a stale sentence ahead of 16 MB is still caught");
+  } else st.fail("a stale sentence ahead of 16 MB:", `exit ${bigR.code} with:\n${bigR.out}`);
+  writeFileSync(join(tmp, "big/skills/postmaster/SKILL.md"), `${"y".repeat(16777216)}\n`);
+  const bigCleanR = accept(join(tmp, "big"));
+  if (bigCleanR.code === 0) st.ok("a clean 16 MB file still passes");
+  else st.fail("a clean 16 MB file:", `exit ${bigCleanR.code} with:\n${bigCleanR.out}`);
 
   const liveR = accept(ROOT);
   if (liveR.code === 0) st.ok("live tree passes");

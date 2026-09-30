@@ -51,7 +51,7 @@ function die(msg: string): never {
 function read(path: string, what: string): string {
   try {
     // BASE opened text with utf-8-sig: a byte-order mark is not part of the content.
-    return readFileSync(path, "utf8").replace(/^\uFEFF/, "");
+    return readFileSync(path, "utf8").replace(/^\uFEFF/u, "");
   } catch (e: any) {
     if (e?.code === "ENOENT") die(`no ${what} at ${path}`);
     die(`cannot read ${path}: ${e?.message ?? "error"}`);
@@ -59,20 +59,23 @@ function read(path: string, what: string): string {
 }
 
 function plain(word: string): string {
-  return word.replace(/^[`*_"]+|[`*_"]+$/g, "");
+  return word.replace(/^[`*_"]+|[`*_"]+$/gu, "");
 }
 
 function named(name: string, text: string): boolean {
   const re = new RegExp(
-    `(?<![A-Za-z0-9_-])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9_-])`,
-    "i",
+    `(?<![A-Za-z0-9_-])${name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?![A-Za-z0-9_-])`,
+    "iu",
   );
   return re.test(text);
 }
 
-const JSTARS = new RegExp("^[" + PY_S_CLASS + "]*\\*");
-const JSCOM = new RegExp("(^|[" + PY_S_CLASS + "])\\/\\/(" + PY_DOT + "*)" + END_OF_STRING + "");
-const SHCOM = new RegExp("(^|[" + PY_S_CLASS + "])[#;](" + PY_DOT + "*)" + END_OF_STRING + "");
+const JSTARS = new RegExp("^[" + PY_S_CLASS + "]*\\*", "u");
+const JSCOM = new RegExp(
+  "(^|[" + PY_S_CLASS + "])\\/\\/(" + PY_DOT + "*)" + END_OF_STRING + "",
+  "u",
+);
+const SHCOM = new RegExp("(^|[" + PY_S_CLASS + "])[#;](" + PY_DOT + "*)" + END_OF_STRING + "", "u");
 const JALIAS = new RegExp(
   "^alias[" +
     PY_S_CLASS +
@@ -118,12 +121,14 @@ const JRECIPE = new RegExp(
 const JDEPS = new RegExp("[A-Za-z_][" + W_CLASS + "-]*", "gu");
 const MAKEINC = new RegExp(
   "^(?:-include|sinclude|include)[" + PY_S_CLASS + "]+(" + PY_DOT + "*)" + END_OF_STRING + "",
+  "u",
 );
 const RULE = new RegExp(
   "^([^:=]+?)[" + PY_S_CLASS + "]*::?(?!=)(" + PY_DOT + "*)" + END_OF_STRING + "",
+  "u",
 );
-const YPKGS = new RegExp("^packages[" + PY_S_CLASS + "]*:");
-const YITEM = new RegExp("^[" + PY_S_CLASS + "]+-[" + PY_S_CLASS + "]*");
+const YPKGS = new RegExp("^packages[" + PY_S_CLASS + "]*:", "u");
+const YITEM = new RegExp("^[" + PY_S_CLASS + "]+-[" + PY_S_CLASS + "]*", "u");
 const YOUT = new RegExp(
   "^[" +
     PY_S_CLASS +
@@ -136,15 +141,15 @@ const YOUT = new RegExp(
     "*)" +
     END_OF_STRING +
     "",
-  "g",
+  "gu",
 );
-const YIND = new RegExp("^[" + PY_S_CLASS + "]");
+const YIND = new RegExp("^[" + PY_S_CLASS + "]", "u");
 const MVER = /^\p{Nd}+(\.\p{Nd}+)?$/u;
 const MUSTACHE = new RegExp(
   "\\{\\{[" + PY_S_CLASS + "]*([A-Za-z_][" + W_CLASS + "-]*)[" + PY_S_CLASS + "]*\\}\\}",
   "gu",
 );
-const COVERSPLIT = new RegExp("[," + PY_S_CLASS + "]+" + "");
+const COVERSPLIT = new RegExp("[," + PY_S_CLASS + "]+" + "", "u");
 const YARNRE = /^yarn@(\p{Nd}+)/u;
 const MENDEF = new RegExp("^[" + PY_S_CLASS + "]*endef" + BOUND_R + "", "u");
 const MIFCOND = new RegExp("^(?:ifeq|ifneq|ifdef|ifndef|else|endif)" + BOUND_R + "", "u");
@@ -155,7 +160,7 @@ const MDEFINE = new RegExp(
 
 function stripJs(text: string): string {
   // text.ts: [\s\S] is every char in both languages; DOT_ALL spells it bare.
-  text = text.replace(new RegExp("/\\*" + DOT_ALL + "*?" + "\\*/", "g"), " ");
+  text = text.replace(new RegExp("/\\*" + DOT_ALL + "*?" + "\\*/", "gu"), " ");
   return text
     .split("\n")
     .filter((l) => !JSTARS.test(l))
@@ -164,7 +169,7 @@ function stripJs(text: string): string {
 }
 
 function configText(text: string, path: string): string {
-  if (/\.[cm]?[jt]s$/.test(path)) return stripJs(text);
+  if (/\.[cm]?[jt]s$/u.test(path)) return stripJs(text);
   if (path.endsWith(".json")) return text;
   return text
     .split("\n")
@@ -177,10 +182,11 @@ function fnmatchCase(name: string, pattern: string): boolean {
   const re = new RegExp(
     "^" +
       pattern
-        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-        .replace(/\*/g, "[^/]*")
-        .replace(/\?/g, ".") +
+        .replace(/[.+^${}()|[\]\\]/gu, "\\$&")
+        .replace(/\*/gu, "[^/]*")
+        .replace(/\?/gu, ".") +
       "$",
+    "u",
   );
   return re.test(name);
 }
@@ -239,14 +245,14 @@ function field(line: string, key: string, stops: string[]): string | null {
   // text.ts: BASE re.match(r"\s*(?:[-*+]\s+)?MARK key MARK\s*:MARK(.*)$", re.I).
   const m = new RegExp(
     `[${PY_S_CLASS}]*(?:[-*+][${PY_S_CLASS}]+)?${MARK}${key}${MARK}[${PY_S_CLASS}]*:${MARK}(${PY_DOT}*)${END_OF_STRING}`,
-    "i",
+    "iu",
   ).exec(line);
   if (!m) return null;
   let v = m[1] ?? "";
-  const stopPat = stops.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const stopPat = stops.map((s) => s.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("|");
   const nxt = new RegExp(
     `[${PY_S_CLASS}]+${MARK}(?:${stopPat})${MARK}[${PY_S_CLASS}]*:${MARK}(?=[${PY_S_CLASS}]|${END_OF_STRING})`,
-    "i",
+    "iu",
   ).exec(v);
   if (nxt) v = v.slice(0, nxt.index);
   v = pyTrim(v);
@@ -258,14 +264,14 @@ function profile(dispatch: string): { repo: string | null; gate: string | null }
   const lines = read(join(dispatch, "brief.md"), "waybill").split("\n");
   const heads: number[] = [];
   for (let i = 0; i < lines.length; i++) {
-    if (/^ {0,3}##[ \t]+project profile[ \t:#]*\r?$/i.test(lines[i]!)) heads.push(i);
+    if (/^ {0,3}##[ \t]+project profile[ \t:#]*\r?$/iu.test(lines[i]!)) heads.push(i);
   }
   let repo: string | null = null;
   let gate: string | null = null;
   const start = heads.length > 0 ? heads[heads.length - 1]! + 1 : 0;
   for (let i = start; i < lines.length; i++) {
     const l = lines[i]!;
-    if (/^ {0,3}#{1,2}(?:[ \t]|\r?$)/.test(l)) break;
+    if (/^ {0,3}#{1,2}(?:[ \t]|\r?$)/u.test(l)) break;
     const r = field(l, "repo", ["default branch", "BASE"]);
     const g = field(l, "gate", ["build", "browser suite"]);
     if (repo === null && r !== null) repo = r;
@@ -307,7 +313,7 @@ class Tree {
       const meta = ent.slice(0, tabIdx);
       const path = ent.slice(tabIdx + 1);
       // ASCII: git ls-tree --format prints mode, blob-sha and path tab-separated in ASCII.
-      const f = meta.split(/\s+/);
+      const f = meta.split(/\s+/u);
       if (f.length === 3 && f[1] === "blob") {
         this.blobs.set(path, { mode: f[0]!, sha: f[2]! });
         let d = posix.dirname(path);
@@ -350,7 +356,7 @@ class Tree {
       const data = entry ? git(this.repo, "cat-file", "blob", entry.sha) : null;
       const ok = data !== null && data.length <= 512 * 1024 && !data.slice(0, 8192).includes("\0");
       // BASE decoded utf-8-sig: a byte-order mark is not part of the content.
-      this.cache.set(p, ok ? data?.replace(/^\uFEFF/, "") : null);
+      this.cache.set(p, ok ? data?.replace(/^\uFEFF/u, "") : null);
     }
     return this.cache.get(p) ?? null;
   }
@@ -358,7 +364,7 @@ class Tree {
   glob(cwd: string, pattern: string): string[] {
     const q = this.path(cwd, pattern);
     if (q === null) return [];
-    if (!/[*?[]/.test(q)) return this.blobs.has(q) ? [q] : [];
+    if (!/[*?[]/u.test(q)) return this.blobs.has(q) ? [q] : [];
     return [...this.blobs.keys()].filter((p) => fnmatchCase(p, q)).sort();
   }
 
@@ -601,14 +607,14 @@ const RUNNERS: Record<string, string[]> = {
 };
 
 function subst(line: string): string {
-  line = line.replace(/\$\(MAKE\)|\$\{MAKE\}/g, "make");
-  line = line.replace(/\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=]([^{}]*)\}/g, "$1");
+  line = line.replace(/\$\(MAKE\)|\$\{MAKE\}/gu, "make");
+  line = line.replace(/\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=]([^{}]*)\}/gu, "$1");
   for (let i = 0; i < 10; i++) {
-    const next = line.replace(/\$\(([^()]*)\)/g, "$1");
+    const next = line.replace(/\$\(([^()]*)\)/gu, "$1");
     if (next === line) break;
     line = next;
   }
-  return line.replace(/\$\{[^{}]*\}/g, "_").replace(/`/g, " ");
+  return line.replace(/\$\{[^{}]*\}/gu, "_").replace(/`/gu, " ");
 }
 
 function uncomment(line: string): string {
@@ -734,7 +740,7 @@ function unwrap(words: string[]): string[] {
     const w = words[i]!;
     const b = posix.basename(w);
     const nxt = i + 1 < n ? words[i + 1]! : "";
-    if (SHELL_WORDS.has(w) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) {
+    if (SHELL_WORDS.has(w) || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(w)) {
       i++;
     } else if (b === "command") {
       if (nxt === "-v" || nxt === "-V") return [];
@@ -811,13 +817,13 @@ function parseJust(text: string): JustRecipes {
     }
     m = JVAR.exec(s);
     if (m) {
-      vars.set(m[1]!, m[2]?.trim().replace(/^['"]|['"]$/g, ""));
+      vars.set(m[1]!, m[2]?.trim().replace(/^['"]|['"]$/gu, ""));
       continue;
     }
     m = JRECIPE.exec(s);
     if (m) {
       current = m[1]!;
-      const deps = m[2]?.replace(/\([^)]*\)/g, "").match(JDEPS) ?? [];
+      const deps = m[2]?.replace(/\([^)]*\)/gu, "").match(JDEPS) ?? [];
       recipes.set(current, { deps, body: [] });
       if (first === null) first = current;
     }
@@ -849,6 +855,7 @@ class Makefile {
       "*)" +
       END_OF_STRING +
       "",
+    "u",
   );
 
   constructor(tree: Tree, path: string, cwd: string, sets: Record<string, string>) {
@@ -870,16 +877,16 @@ class Makefile {
       return name === "MAKE" ? "make" : m;
     };
     return s
-      .replace(/\$\$/g, "\0")
-      .replace(/\$\(([A-Za-z0-9_.-]+)\)|\$\{([A-Za-z0-9_.-]+)\}/g, (m, p1, p2) =>
+      .replace(/\$\$/gu, "\0")
+      .replace(/\$\(([A-Za-z0-9_.-]+)\)|\$\{([A-Za-z0-9_.-]+)\}/gu, (m, p1, p2) =>
         one(m, p1 ?? "", p2 ?? ""),
       )
-      .replace(/\0/g, "$$");
+      .replace(/\0/gu, "$$");
   }
 
   recipe(line: string): string {
-    return this.expand(line.replace(new RegExp("^[" + PY_S_CLASS + "]*[@+-]*"), "")).replace(
-      /\$\$/g,
+    return this.expand(line.replace(new RegExp("^[" + PY_S_CLASS + "]*[@+-]*", "u"), "")).replace(
+      /\$\$/gu,
       "$",
     );
   }
@@ -888,7 +895,7 @@ class Makefile {
     const text = this.t.read(path);
     let current: string[] | null = null;
     let define = false;
-    for (const line of (text ?? "").replace(/\\\r?\n/g, " ").split("\n")) {
+    for (const line of (text ?? "").replace(/\\\r?\n/gu, " ").split("\n")) {
       if (define) {
         define = !MENDEF.test(line);
         continue;
@@ -899,7 +906,7 @@ class Makefile {
         }
         continue;
       }
-      const s = line.replace(/(?<!\\)#.*$/, "").trim();
+      const s = line.replace(/(?<!\\)#.*$/u, "").trim();
       if (!s || MIFCOND.test(s)) continue;
       if (MDEFINE.test(s)) {
         define = true;
@@ -969,7 +976,7 @@ class Reach {
   }
 
   shell(where: string, text: string, cwd: string, keepCd = false): void {
-    for (const raw of text.replace(/\\\r?\n/g, " ").split("\n")) {
+    for (const raw of text.replace(/\\\r?\n/gu, " ").split("\n")) {
       const line = uncomment(raw).trim();
       if (!line) continue;
       this.lines.push({ where, line });
@@ -992,7 +999,7 @@ class Reach {
       const [newCwd, nested] = this.command(where, words, cwd);
       cwd = newCwd;
       for (const w of nested ? words : []) {
-        if (/[ \t\r\n]/.test(w)) this.scan(where, w, cwd);
+        if (/[ \t\r\n]/u.test(w)) this.scan(where, w, cwd);
       }
     }
     return cwd;
@@ -1105,13 +1112,13 @@ class Reach {
             l
               .replace(YOUT, "")
               .trim()
-              .replace(/^['"]|['"]$/g, ""),
+              .replace(/^['"]|['"]$/gu, ""),
           );
         else if (inside && l.trim() && !YIND.test(l)) inside = false;
       }
     }
-    const keep = globs.filter((g) => !g.startsWith("!")).map((g) => g.replace(/\/$/, ""));
-    const drop = globs.filter((g) => g.startsWith("!")).map((g) => g.slice(1).replace(/\/$/, ""));
+    const keep = globs.filter((g) => !g.startsWith("!")).map((g) => g.replace(/\/$/u, ""));
+    const drop = globs.filter((g) => g.startsWith("!")).map((g) => g.slice(1).replace(/\/$/u, ""));
     const dirs = [...this.t.blobs.keys()]
       .filter((p) => posix.basename(p) === "package.json")
       .map((p) => posix.dirname(p))
@@ -1124,8 +1131,8 @@ class Reach {
   selects(sel: string, d: string): boolean {
     let s = sel
       .trim()
-      .replace(/^\.\.\.|\.\.\.$/g, "")
-      .replace(/^\{|\}$/g, "")
+      .replace(/^\.\.\.|\.\.\.$/gu, "")
+      .replace(/^\{|\}$/gu, "")
       .trim();
     if (s.startsWith("./")) s = s.slice(2);
     const name = String(this.package(d).name ?? "");
@@ -1224,7 +1231,7 @@ class Reach {
   }
 
   scriptsLike(pattern: string, cwd: string): void {
-    const parts = pattern.match(/\*\*|\*|\?|[^*?]+/g) ?? [];
+    const parts = pattern.match(/\*\*|\*|\?|[^*?]+/gu) ?? [];
     const patSrc = parts
       .map((t) =>
         t === "**"
@@ -1233,10 +1240,10 @@ class Reach {
             ? "[^:]*"
             : t === "?"
               ? "[^:]"
-              : t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+              : t.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"),
       )
       .join("");
-    const pat = new RegExp(`${patSrc}$`);
+    const pat = new RegExp(`${patSrc}$`, "u");
     for (const d of this.packages(null, cwd)) {
       for (const n of Object.keys(this.scripts(d)).sort()) {
         if (pat.test(n)) this.script(d, n, "npm");
@@ -1412,7 +1419,7 @@ class Reach {
     for (const dep of deps) this.recipe(p, dep, d);
     for (let line of body) {
       line = line.replace(MUSTACHE, (_, name) => vars.get(name) ?? `{{${name}}}`);
-      this.shell(`${p} ${n}`, line.replace(/^[@-]+/, ""), d);
+      this.shell(`${p} ${n}`, line.replace(/^[@-]+/u, ""), d);
     }
   }
 
@@ -1446,13 +1453,13 @@ class Reach {
     this.seen.add(`file|${p}`);
     const text = this.t.read(p);
     if (text !== null) {
-      this.shell(p, /\.[cm]?[jt]sx?$/.test(p) ? stripJs(text) : text, cwd, true);
+      this.shell(p, /\.[cm]?[jt]sx?$/u.test(p) ? stripJs(text) : text, cwd, true);
     }
   }
 
   runs(linter: string): string | null {
     for (const { where, words } of this.cmds) {
-      if (words.some((w) => !/[ \t\r\n]/.test(w) && named(linter, w))) return where;
+      if (words.some((w) => !/[ \t\r\n]/u.test(w) && named(linter, w))) return where;
     }
     for (const { where, text } of this.texts) {
       if (named(linter, text)) return where;
@@ -1463,12 +1470,12 @@ class Reach {
 
 // --- linter detection ---------------------------------------------------------------------------
 const MANIFESTS =
-  /(^|\/)(package\.json|pyproject\.toml|setup\.cfg|tox\.ini|requirements[^/]*\.txt|Pipfile|Gemfile|go\.mod|Cargo\.toml|composer\.json|\.pre-commit-config\.ya?ml|\.tool-versions|mise\.toml)$/;
+  /(^|\/)(package\.json|pyproject\.toml|setup\.cfg|tox\.ini|requirements[^/]*\.txt|Pipfile|Gemfile|go\.mod|Cargo\.toml|composer\.json|\.pre-commit-config\.ya?ml|\.tool-versions|mise\.toml)$/u;
 
 function hasLinter(tree: Tree, linter: string): string | null {
   const own = new RegExp(
-    `\\.?${linter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(rc)?([._-].*)?$`,
-    "i",
+    `\\.?${linter.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(rc)?([._-].*)?$`,
+    "iu",
   );
   for (const p of [...tree.blobs.keys()].sort()) {
     if (own.test(posix.basename(p))) return p;
@@ -1486,7 +1493,7 @@ function states(dispatch: string): Record<string, string> {
   try {
     // BASE opened the ledger with utf-8-sig: a byte-order mark is not part of the content.
     rows = readFileSync(LEDGER, "utf8")
-      .replace(/^\uFEFF/, "")
+      .replace(/^\uFEFF/u, "")
       .split("\n");
   } catch {
     return out;
@@ -1825,7 +1832,7 @@ withTempDir((tmp) => {
   const invoke = (...args: string[]): void => {
     const r = run("bash", [SELF, ...args]);
     // BASE's run() used $(...), which strips trailing newlines.
-    out = (r.out + r.err).replace(/\n+$/, "");
+    out = (r.out + r.err).replace(/\n+$/u, "");
     rc = r.code;
   };
   // BASE ran `run core forms <file>`: the core function in the same shell, not the script.
@@ -1853,7 +1860,7 @@ withTempDir((tmp) => {
       console.error = origErr;
       process.exit = origExit;
     }
-    out = chunks.join("").replace(/\n+$/, "");
+    out = chunks.join("").replace(/\n+$/u, "");
   };
   const is = (label: string, wantExit: number, wantOut: string): void => {
     if (rc === wantExit && out === wantOut) ok(label);
@@ -1925,7 +1932,7 @@ withTempDir((tmp) => {
     writeFileSync(join(dispatch, "style-sort.md"), `${args.join("\n")}\n`);
   };
 
-  const R = join(tmp, "runs", "proj");
+  const R = join(tmp, "proj", ".postmaster", "runs");
 
   // === Fixture: npm project ===
   const npmDir = join(tmp, "npm");
@@ -2457,7 +2464,7 @@ withTempDir((tmp) => {
     } else if (sedScript === "$a S9 neither: no such finding") {
       text += "S9 neither: no such finding\n";
     } else if (sedScript === "s/^S3 neither: .*/S3 neither:/") {
-      text = text.replace(/^S3 neither: .*/m, "S3 neither:");
+      text = text.replace(/^S3 neither: .*/mu, "S3 neither:");
     } else if (sedScript === "s/^S4 docs/S4 convention/") {
       text = text.replace("S4 docs", "S4 convention");
     } else if (sedScript === "1s/biome enable/biome/") {
@@ -2571,7 +2578,7 @@ withTempDir((tmp) => {
   has("a sort that opens with a byte-order mark is read", 0, "S1 S2: neither");
 
   // Ledger state test
-  const ledRoot = join(tmp, "runs", "led");
+  const ledRoot = join(tmp, "led", ".postmaster", "runs");
   const past = join(ledRoot, "T-15");
   mkdirSync(past, { recursive: true });
   const nowDir = join(ledRoot, "T-16");
@@ -2643,7 +2650,7 @@ withTempDir((tmp) => {
     (t) => `${t}S9 neither: no such finding\n`,
   );
   redo2("a line with no reason", 2, "line 3: S3 has no reason", (t) =>
-    t.replace(/^S3 neither: .*/m, "S3 neither:"),
+    t.replace(/^S3 neither: .*/mu, "S3 neither:"),
   );
   redo2("a kind that is not one of the three", 2, "line 4 is not a sort line", (t) =>
     t.replace("S4 docs", "S4 convention"),
@@ -2795,7 +2802,7 @@ withTempDir((tmp) => {
   const subs = new Set<string>();
   for (const f of skillFiles) {
     const text = readFileSync(join(SKILL, f), "utf8");
-    for (const m of text.matchAll(/style-findings\.sh ([a-z-]*)/g)) {
+    for (const m of text.matchAll(/style-findings\.sh ([a-z-]*)/gu)) {
       if (m[1]) subs.add(m[1]);
     }
   }
@@ -2807,7 +2814,7 @@ withTempDir((tmp) => {
   // A subcommand the script lacks would be caught
   const planted = join(tmp, "planted.md");
   writeFileSync(planted, "run `<tool>/scripts/style-findings.sh sort <dispatch>`\n");
-  const plantedSubs = [...readFileSync(planted, "utf8").matchAll(/style-findings\.sh ([a-z-]*)/g)]
+  const plantedSubs = [...readFileSync(planted, "utf8").matchAll(/style-findings\.sh ([a-z-]*)/gu)]
     .map((m) => m[1])
     .join(" ");
   if (plantedSubs === "sort") ok("and a subcommand the script lacks would be caught");
@@ -2818,18 +2825,19 @@ withTempDir((tmp) => {
   const formBlock = coachmanText.match(
     new RegExp(
       "\\*\\*Sort the style findings\\.\\*\\*" + DOT_ALL + "*?```\\n(" + DOT_ALL + "*?)```",
+      "u",
     ),
   );
   if (formBlock) {
     const forms = formBlock[1]
-      ?.replace(/<n>/g, "1")
-      .replace(/<m>/g, "2")
-      .replace(/\[,S2\.\.\.\]/g, "")
-      .replace(/<linter>/g, "biome")
-      .replace(/<rule>/g, "style/useConst")
-      .replace(/<doc>/g, "AGENTS.md")
-      .replace(/<file>/g, "biome.json")
-      .replace(/<reason>/g, "a reason");
+      ?.replace(/<n>/gu, "1")
+      .replace(/<m>/gu, "2")
+      .replace(/\[,S2\.\.\.\]/gu, "")
+      .replace(/<linter>/gu, "biome")
+      .replace(/<rule>/gu, "style/useConst")
+      .replace(/<doc>/gu, "AGENTS.md")
+      .replace(/<file>/gu, "biome.json")
+      .replace(/<reason>/gu, "a reason");
     const formsFile = join(tmp, "forms");
     writeFileSync(formsFile, forms);
     runCore("forms", formsFile);
@@ -2850,8 +2858,8 @@ withTempDir((tmp) => {
   // The runbooks say certain things
   const says = (file: string, want: string): boolean => {
     const text = readFileSync(file, "utf8")
-      .replace(/\n/g, " ")
-      .replace(new RegExp("[" + PY_S_CLASS + "]+", "g"), " ");
+      .replace(/\n/gu, " ")
+      .replace(new RegExp("[" + PY_S_CLASS + "]+", "gu"), " ");
     return text.includes(want);
   };
   for (const want of [
@@ -2864,7 +2872,7 @@ withTempDir((tmp) => {
   }
   for (const want of [
     "Check the style sort too, once the last leg's process has exited",
-    '--title "<title>"`, and log `ticket-check`',
+    '--title "<title>" --project <repo>`, and log `ticket-check`',
     "log a `note` with `style proposal asked: <proposal>` for each draft shown",
     "and carry on with the stream",
   ]) {
@@ -2875,7 +2883,7 @@ withTempDir((tmp) => {
   // Style sort is no escalation
   const pmText = readFileSync(join(SKILL, "postmaster.md"), "utf8");
   const step5Match = pmText.match(
-    new RegExp("5\\. \\*\\*Put the style sort to the user" + DOT_ALL + "*?6\\. "),
+    new RegExp("5\\. \\*\\*Put the style sort to the user" + DOT_ALL + "*?6\\. ", "u"),
   );
   if (step5Match) {
     const step5 = step5Match[0];

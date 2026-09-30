@@ -28,7 +28,7 @@ if (T === undefined || T === "") {
 
 // The tracker kind, before the cd, so a relative path or config is read from the caller's directory.
 const kindRun = run(beside(import.meta, "tracker-kind.sh"), [T]);
-const kind = kindRun.code === 0 ? kindRun.out.replace(/\n+$/, "") : "";
+const kind = kindRun.code === 0 ? kindRun.out.replace(/\n+$/u, "") : "";
 
 let ABS: string;
 try {
@@ -60,7 +60,7 @@ if (existsSync("package.json")) {
   }
 }
 if (gate === "" && existsSync("Makefile")) {
-  if (/^(check|test):/m.test(readFileSync("Makefile", "utf8"))) gate = "make check";
+  if (/^(check|test):/mu.test(readFileSync("Makefile", "utf8"))) gate = "make check";
 }
 if (gate === "" && existsSync("Cargo.toml")) gate = "cargo test";
 
@@ -82,7 +82,7 @@ const ticketOut = run("grep", ["-oE", "--", "\\b[A-Z][A-Z0-9]{1,9}-[0-9]+\\b"], 
 }).out;
 for (const m of ticketOut.split("\n")) {
   if (!m) continue;
-  const prefix = m.replace(/-[0-9]*$/, "");
+  const prefix = m.replace(/-[0-9]*$/u, "");
   counts.set(prefix, (counts.get(prefix) ?? 0) + 1);
 }
 // sort | uniq -c | sort -rn | head -1 | awk '{print $2}': ties break descending, as sort -rn does.
@@ -90,6 +90,16 @@ const ranked = [...counts.entries()].sort(
   (a, b) => b[1] - a[1] || (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0),
 );
 const trackerPrefix = ranked[0]?.[0] ?? "";
+
+// Optional project settings are validated and reported with their source. Missing files are not
+// an error; their values remain discovery defaults for the session to settle in conversation.
+const settings = run(beside(import.meta, "project-settings.sh"), ["report", ABS], {
+  cwd: toolRoot(import.meta),
+});
+if (settings.code !== 0) {
+  console.error(`discover-project: project settings could not be read for ${T}`);
+  process.exit(1);
+}
 
 // The checks, declared or found as defaults; a declared gate is the gate.
 // No bun ever runs with the target as its cwd: verify gets the absolute
@@ -107,24 +117,25 @@ if (verified.code === 0) {
   if (gateLine !== undefined) gate = gateLine.split("\t")[2] ?? "";
   for (const l of (verified.out + verified.err).split("\n")) {
     if (fields(l) >= 4) continue;
-    const warn = l.replace(/^verify: warn: /, "");
+    const warn = l.replace(/^verify: warn: /u, "");
     if (warn !== l) console.error(`warn=checks: ${warn}`);
   }
 } else {
   checks = [];
   // sed 's/^verify: //' | paste -sd' ' -: every line, empty ones included, joined by one space.
-  const text = (verified.out + verified.err).replace(/\n+$/, "");
+  const text = (verified.out + verified.err).replace(/\n+$/u, "");
   const joined = text
     .split("\n")
-    .map((l) => l.replace(/^verify: /, ""))
+    .map((l) => l.replace(/^verify: /u, ""))
     .join(" ");
   console.error(`warn=checks: ${joined}`);
 }
 
 console.log(`gate=${gate}`);
-console.log(`docs=${(docs + dirs).replace(/ *$/, "")}`);
+console.log(`docs=${(docs + dirs).replace(/ *$/u, "")}`);
 console.log(`tracker=${kind}`);
 console.log(`tracker_prefix=${trackerPrefix}`);
+for (const l of settings.out.replace(/\n$/u, "").split("\n")) console.log(l);
 console.log(`ambient_context=${existsSync("AGENTS.md") ? "AGENTS.md" : "NONE"}`);
 for (const l of checks) {
   const f = l.split("\t");

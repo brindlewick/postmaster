@@ -202,7 +202,8 @@ withTempDir((tmp) => {
     line("12:00", "dispatch", "r"),
     line("12:01", "handoff-accept", "1"),
     line("12:02", "stage", "bootstrapped"),
-    line("12:05", "stage", "workhorses-running"),
+    line("12:05", "stage", "planning"),
+    line("12:25", "stage", "workhorses-running"),
     line("12:35", "stage", "synthesis"),
     line("12:50", "stage", "checkpoint-1"),
     line("12:52", "handoff", "1"),
@@ -217,9 +218,14 @@ withTempDir((tmp) => {
     "dispatched                 2026-01-01 12:00:00   2m 00s     1m 00s",
   );
   check(
+    "the planning stage times the review",
+    0,
+    "planning                   2026-01-01 12:05:00   20m 00s    0s",
+  );
+  check(
     "a stage inside one leg has no waiting",
     0,
-    "workhorses-running         2026-01-01 12:05:00   30m 00s    0s",
+    "workhorses-running         2026-01-01 12:25:00   10m 00s    0s",
   );
   check(
     "a stage across the leg boundary counts the gap",

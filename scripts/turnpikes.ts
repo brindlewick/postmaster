@@ -5,13 +5,13 @@
 //
 //   turnpikes.sh --list                 every turnpike, one per line: its name, `default` or `-`,
 //                                       the leg that runs it, and what it checks
-//   turnpikes.sh resolve [<text>...]    a `## Turnpikes` section's text, as the turnpikes it
+//   turnpikes.sh resolve [--project <repo>] [<text>...] a `## Turnpikes` section's text, as the turnpikes it
 //                                       names; with no text given, the section is read from stdin
 //   turnpikes.sh legs <dispatch> [--expect <line>]
 //                                       a run's legs, from the `turnpikes:` line under its
 //                                       waybill's title; with --expect, that line must be <line>
 //   turnpikes.sh legs --line <line>     the legs a waybill with that `turnpikes:` line would have
-//   turnpikes.sh short <line>           the default turnpikes a `turnpikes:` line leaves out
+//   turnpikes.sh short [--project <repo>] <line> the default turnpikes a `turnpikes:` line leaves out
 //   turnpikes.sh --self-test
 //
 //   exit 0  printed
@@ -39,7 +39,7 @@ const LEGS: Array<[number, string]> = [
 ];
 const ALWAYS = new Set(["synthesis", "ship"]);
 const RESERVED = ["default", "none"];
-const BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+const BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/u;
 // Python's strerror, for the read errors BASE reports concisely.
 const STRERROR: Record<string, string> = {
   EACCES: "Permission denied",
@@ -51,11 +51,12 @@ const STRERROR: Record<string, string> = {
 };
 const STRIP3_RE = new RegExp(
   `^[^${PY_S_CLASS}]+[${PY_S_CLASS}]+[^${PY_S_CLASS}]+[${PY_S_CLASS}]+[^${PY_S_CLASS}]+[${PY_S_CLASS}]+`,
+  "u",
 );
-const WORD_SPLIT_RE = new RegExp(`[${PY_S_CLASS},;]+`);
+const WORD_SPLIT_RE = new RegExp(`[${PY_S_CLASS},;]+`, "u");
 const NAME_CHAR_RE = new RegExp(`[${NAME_CLASS}]`, "u");
 const MARKER = /^[ \t]*(?:[-*+]|\p{Nd}{1,9}[.)])(?:[ \t]+|$)/u;
-const LINE = /^[ \t]*turnpikes[ \t]*:/;
+const LINE = /^[ \t]*turnpikes[ \t]*:/u;
 
 type Row = { name: string; d: boolean; leg: string; what: string };
 
@@ -76,7 +77,7 @@ function parseTable(table: string): { rows: Row[]; faults: string[] } {
     const mark = parts[1] ?? "";
     const leg = parts[2] ?? "";
     const what = pyTrim(pyTrim(line).replace(STRIP3_RE, ""));
-    if (!/^[a-z][a-z0-9-]*$/.test(name)) {
+    if (!/^[a-z][a-z0-9-]*$/u.test(name)) {
       faults.push(`line ${n + 1}: "${name}" is not a lowercase word`);
     } else if (RESERVED.includes(name)) {
       faults.push(
@@ -103,7 +104,7 @@ function wordsOf(text: string): string[] {
   // remove Cf (format) characters, the whole category as unicodedata does
   const cleaned = [...text].filter((ch) => !/\p{Cf}/u.test(ch)).join("");
   for (const rawLine of cleaned.split("\n")) {
-    let line = rawLine.replace(/\r$/, "").replace(/\\+$/, "");
+    let line = rawLine.replace(/\r$/u, "").replace(/\\+$/u, "");
     if (BREAK.test(line)) continue;
     const m = MARKER.exec(line);
     if (m) line = line.slice(m[0].length);
@@ -112,11 +113,11 @@ function wordsOf(text: string): string[] {
         // BASE: tok.strip("`*_").rstrip(".").strip("`*_").lower() or tok
         const stripped = pyLower(
           tok
-            .replace(/^[*_`]+/, "")
-            .replace(/[*_`]+$/, "")
-            .replace(/\.+$/, "")
-            .replace(/^[*_`]+/, "")
-            .replace(/[*_`]+$/, ""),
+            .replace(/^[*_`]+/u, "")
+            .replace(/[*_`]+$/u, "")
+            .replace(/\.+$/u, "")
+            .replace(/^[*_`]+/u, "")
+            .replace(/[*_`]+$/u, ""),
         );
         words.push(stripped || tok);
       }
@@ -125,13 +126,40 @@ function wordsOf(text: string): string[] {
   return words;
 }
 
+let cachedProject = "\n";
+let cachedDefaults: string[] | null = null;
+
+function projectDefaults(): string[] | null {
+  const project = process.env.POSTMASTER_PROJECT ?? "";
+  if (project === "") return null;
+  if (project === cachedProject) return cachedDefaults;
+  const r = run(join(scriptsDir(import.meta), "project-settings.sh"), ["inspect", project]);
+  if (r.code !== 0) {
+    console.error(r.err.trim() || "turnpikes: cannot read project settings");
+    process.exit(1);
+  }
+  let profile: Record<string, any>;
+  try {
+    profile = JSON.parse(r.out);
+  } catch (e) {
+    console.error(
+      `turnpikes: project settings gave no JSON: ${e instanceof Error ? e.message : String(e)}`,
+    );
+    process.exit(1);
+  }
+  const declared = profile.project?.default_turnpikes;
+  cachedProject = project;
+  cachedDefaults = declared === undefined || declared === null ? null : declared;
+  return cachedDefaults;
+}
+
 function resolve(table: string, text: string): { names: string[] | null; faults: string[] } {
   const { rows, faults: tableFaults } = parseTable(table);
   if (tableFaults.length > 0) {
     // already handled by caller
   }
   const names = rows.map((r) => r.name);
-  const defaults = rows.filter((r) => r.d).map((r) => r.name);
+  const defaults = projectDefaults() ?? rows.filter((r) => r.d).map((r) => r.name);
   const words = wordsOf(text);
   const holds = `the section holds only default, none, or names from: ${names.join(", ") || "(no turnpikes)"}`;
   if (words.length === 0) {
@@ -162,12 +190,12 @@ function resolve(table: string, text: string): { names: string[] | null; faults:
 
 function named(table: string, line: string): string[] | null {
   if (line.includes("\n") || !LINE.test(line)) {
-    console.log(`"${line.replace(/\n/g, "\\n")}" is not a turnpikes: line`);
+    console.log(`"${line.replace(/\n/gu, "\\n")}" is not a turnpikes: line`);
     process.exit(2);
   }
-  const _value = line.replace(LINE, "").replace(/^([ \t]*turnpikes[ \t]*:)/, "");
+  const _value = line.replace(LINE, "").replace(/^([ \t]*turnpikes[ \t]*:)/u, "");
   // LINE.sub("", line, count=1) removes the matched prefix
-  const value2 = line.replace(/^[ \t]*turnpikes[ \t]*:/, "");
+  const value2 = line.replace(/^[ \t]*turnpikes[ \t]*:/u, "");
   if (wordsOf(value2).includes("default")) {
     console.log(
       "the waybill's turnpikes line says default; it carries the names ticket-check.sh printed for the ticket",
@@ -195,21 +223,16 @@ function legsOf(table: string, line: string): void {
   }
 }
 
+const USAGE =
+  "usage: turnpikes.sh --list | resolve [--project <repo>] [<text>...] | legs <dispatch> [--expect <line>] | legs --line <line> | short [--project <repo>] <line> | --self-test";
+
 // --- entry -----------------------------------------------------------------------------------
 const argv = process.argv.slice(2);
 if (argv[0] === "--self-test") {
-  if (argv.length !== 1)
-    die(
-      "usage: turnpikes.sh --list | resolve [<text>...] | legs <dispatch> [--expect <line>] | legs --line <line> | short <line> | --self-test",
-      1,
-    );
+  if (argv.length !== 1) die(USAGE, 1);
   // fall through
 } else if (argv[0] === "--list") {
-  if (argv.length !== 1)
-    die(
-      "usage: turnpikes.sh --list | resolve [<text>...] | legs <dispatch> [--expect <line>] | legs --line <line> | short <line> | --self-test",
-      1,
-    );
+  if (argv.length !== 1) die(USAGE, 1);
   const { rows, faults } = parseTable(TABLE);
   if (faults.length > 0) {
     console.error(faults.map((f) => `turnpikes: the table's ${f}`).join("\n"));
@@ -222,7 +245,17 @@ if (argv[0] === "--self-test") {
   }
   process.exit(0);
 } else if (argv[0] === "resolve") {
-  const text = argv.length > 1 ? argv.slice(1).join(" ") : readFileSync(0, "utf8");
+  let rest = argv.slice(1);
+  if (rest[0] === "--project") {
+    if (rest.length < 2) die(USAGE, 1);
+    if (rest[1] === "") {
+      console.error("turnpikes: no such project directory: ");
+      process.exit(1);
+    }
+    process.env.POSTMASTER_PROJECT = rest[1];
+    rest = rest.slice(2);
+  }
+  const text = rest.length > 0 ? rest.join(" ") : readFileSync(0, "utf8");
   // BASE's core refused any command on a table that breaks its rules; resolve must too.
   const tableCheck = parseTable(TABLE);
   if (tableCheck.faults.length > 0) {
@@ -237,34 +270,33 @@ if (argv[0] === "--self-test") {
   console.log(`turnpikes: ${(names ?? []).join(", ") || "none"}`);
   process.exit(0);
 } else if (argv[0] === "short") {
-  if (argv.length !== 2)
-    die(
-      "usage: turnpikes.sh --list | resolve [<text>...] | legs <dispatch> [--expect <line>] | legs --line <line> | short <line> | --self-test",
-      1,
-    );
-  const got = named(TABLE, argv[1] ?? "");
+  let rest = argv.slice(1);
+  if (rest[0] === "--project") {
+    if (rest.length !== 3) die(USAGE, 1);
+    if (rest[1] === "") {
+      console.error("turnpikes: no such project directory: ");
+      process.exit(1);
+    }
+    process.env.POSTMASTER_PROJECT = rest[1];
+    rest = rest.slice(2);
+  }
+  if (rest.length !== 1) die(USAGE, 1);
+  const got = named(TABLE, rest[0] ?? "");
   const { rows } = parseTable(TABLE);
-  for (const r of rows.filter((r) => r.d)) {
-    if (!(got ?? []).includes(r.name)) console.log(r.name);
+  const defaults = projectDefaults() ?? rows.filter((r) => r.d).map((r) => r.name);
+  for (const name of defaults) {
+    if (!(got ?? []).includes(name)) console.log(name);
   }
   process.exit(0);
 } else if (argv[0] === "legs") {
   if (argv[1] === "--line") {
-    if (argv.length !== 3)
-      die(
-        "usage: turnpikes.sh --list | resolve [<text>...] | legs <dispatch> [--expect <line>] | legs --line <line> | short <line> | --self-test",
-        1,
-      );
+    if (argv.length !== 3) die(USAGE, 1);
     legsOf(TABLE, argv[2] ?? "");
     process.exit(0);
   }
   const ok1 = argv.length === 2;
   const ok2 = argv.length === 4 && argv[2] === "--expect";
-  if (!ok1 && !ok2)
-    die(
-      "usage: turnpikes.sh --list | resolve [<text>...] | legs <dispatch> [--expect <line>] | legs --line <line> | short <line> | --self-test",
-      1,
-    );
+  if (!ok1 && !ok2) die(USAGE, 1);
   const brief = join(argv[1] ?? "", "brief.md");
   let regular = false;
   try {
@@ -287,7 +319,7 @@ if (argv[0] === "--self-test") {
   const above: string[] = [];
   for (const l of lines) {
     if (l.startsWith("## ")) break;
-    above.push(l.replace(/\r$/, ""));
+    above.push(l.replace(/\r$/u, ""));
   }
   const found = above.filter((l) => LINE.test(l));
   if (found.length !== 1) {
@@ -305,14 +337,12 @@ if (argv[0] === "--self-test") {
   legsOf(TABLE, found[0] ?? "");
   process.exit(0);
 } else {
-  die(
-    "usage: turnpikes.sh --list | resolve [<text>...] | legs <dispatch> [--expect <line>] | legs --line <line> | short <line> | --self-test",
-    1,
-  );
+  die(USAGE, 1);
 }
 
 // --- self-test ---------------------------------------------------------------------------------
 withTempDir((tmp) => {
+  delete process.env.POSTMASTER_PROJECT;
   const self = join(HERE, "turnpikes.sh");
   const st = new SelfTest();
   let out = "";
@@ -354,7 +384,7 @@ withTempDir((tmp) => {
   function runSelf(...args: string[]): void {
     const r = run("bash", [self, ...args]);
     // BASE's run() used $(...), which strips trailing newlines.
-    out = (r.out + r.err).replace(/\n+$/, "");
+    out = (r.out + r.err).replace(/\n+$/u, "");
     rc = r.code;
   }
 
@@ -396,6 +426,7 @@ withTempDir((tmp) => {
 
   console.log("positive controls: the list");
   runSelf("--list");
+  const listOut = rc === 0 ? out : "";
   {
     const allPresent = ["style", "bug", "security"].every(
       (n) => out.split("\n").filter((l) => pyWords(l)[0] === n).length === 1,
@@ -415,7 +446,7 @@ withTempDir((tmp) => {
       ...new Set(
         out
           .split("\n")
-          .filter((l) => /^(style|bug|security)$/.test(pyWords(l)[0] ?? ""))
+          .filter((l) => /^(style|bug|security)$/u.test(pyWords(l)[0] ?? ""))
           .map((l) => pyWords(l)[2]),
       ),
     ];
@@ -431,7 +462,7 @@ withTempDir((tmp) => {
   {
     const descs = out
       .split("\n")
-      .filter((l) => /^(style|bug|security)$/.test(pyWords(l)[0] ?? ""))
+      .filter((l) => /^(style|bug|security)$/u.test(pyWords(l)[0] ?? ""))
       .map((l) => pyWords(l).slice(3).join(" "));
     st.check("each line carries its full description, not its first word", descsFull(descs), out);
   }
@@ -448,6 +479,43 @@ withTempDir((tmp) => {
   }
 
   console.log("positive controls: a ticket's section");
+  const project = join(tmp, "project-profile");
+  mkdirSync(join(project, ".postmaster"), { recursive: true });
+  writeFileSync(
+    join(project, ".postmaster", "project.toml"),
+    '[project]\ndefault_turnpikes = ["bug"]\n',
+  );
+  {
+    const r = run("bash", [self, "--list"], {
+      env: {
+        ...(process.env as Record<string, string>),
+        POSTMASTER_PROJECT: join(tmp, "no-such-project"),
+      },
+    });
+    out = (r.out + r.err).replace(/\n+$/u, "");
+    rc = r.code;
+    is("--list does not read project settings", 0, listOut);
+  }
+  runSelf("resolve", "--project", project, "default");
+  is("default resolves to the target project's declared turnpikes", 0, "turnpikes: bug");
+  const emptyProject = join(tmp, "empty-project");
+  mkdirSync(join(emptyProject, ".postmaster"), { recursive: true });
+  writeFileSync(
+    join(emptyProject, ".postmaster", "project.toml"),
+    "[project]\ndefault_turnpikes = []\n",
+  );
+  runSelf("resolve", "--project", emptyProject, "default");
+  is("a project may define default as no turnpikes", 0, "turnpikes: none");
+  runSelf("short", "--project", project, "turnpikes: none");
+  is("short names the project's defaults omitted by a ticket", 0, "bug");
+  runSelf("resolve", "--project", "", "default");
+  has(
+    "an explicitly empty --project is refused, never resolved as discovery",
+    1,
+    "no such project directory",
+  );
+  runSelf("short", "--project", "", "turnpikes: none");
+  has("short refuses an explicitly empty --project too", 1, "no such project directory");
   runSelf("resolve", "default");
   is("default stands for the default set", 0, "turnpikes: style, bug, security");
   runSelf("resolve", "none");
@@ -484,13 +552,13 @@ withTempDir((tmp) => {
   );
   {
     const r = run("bash", ["-c", `printf '1. bug\\n2. security\\n' | "${self}" resolve`]);
-    out = (r.out + r.err).replace(/\n+$/, "");
+    out = (r.out + r.err).replace(/\n+$/u, "");
     rc = r.code;
     is("with no text given, the section is read from stdin", 0, "turnpikes: bug, security");
   }
   runSelf("resolve", "bug, security");
   const line = out;
-  runSelf("resolve", line.replace(/^turnpikes: /, ""));
+  runSelf("resolve", line.replace(/^turnpikes: /u, ""));
   is("the waybill's line resolves to itself", 0, line);
   // a turnpike added to the table resolves with nothing else changed
   {
@@ -714,7 +782,7 @@ withTempDir((tmp) => {
   console.log(
     "a run with no turnpikes, walked from synthesis to ship through the poll, the hand-off check and the stages",
   );
-  const d = join(tmp, "runs", "proj", "T-9");
+  const d = join(tmp, "repo", ".postmaster", "runs", "T-9");
   waybill(d, "turnpikes: none");
   writeFileSync(join(d, "run-log.md"), "", "utf8");
   writeFileSync(
@@ -732,7 +800,7 @@ withTempDir((tmp) => {
   writeFileSync(join(d, ".leg-1-exited"), "", "utf8");
 
   function poll(): string {
-    const r = run("bash", [join(HERE, "runs-status.sh"), join(tmp, "runs", "proj")]);
+    const r = run("bash", [join(HERE, "runs-status.sh"), join(tmp, "repo", ".postmaster", "runs")]);
     const t9 = r.out.split("\n").find((l) => l.startsWith("T-9"));
     return t9 ? (pyWords(t9).pop() ?? "") : "";
   }

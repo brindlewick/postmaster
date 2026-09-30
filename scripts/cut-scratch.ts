@@ -209,7 +209,7 @@ function cut(repo: string, src: string, dest: string, snap: string, base = ""): 
     }
   }
   let cloned = 0;
-  for (const d of DEPS.split(/[ \t\n]+/).filter(Boolean)) {
+  for (const d of DEPS.split(/[ \t\n]+/u).filter(Boolean)) {
     if (cloneDir(join(src, d), join(dest, d))) {
       cloned += 1;
       out.push(`cloned ${d}`);

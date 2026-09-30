@@ -26,7 +26,7 @@ if (Bun.which("gh") === null) {
     row("github", "partial", "gh installed but not logged in; the user runs: gh auth login");
   } else {
     const joined = authed.out + authed.err;
-    if (!/Token scopes:.*'project'/.test(joined)) {
+    if (!/Token scopes:.*'project'/u.test(joined)) {
       row(
         "github",
         "partial",
@@ -70,7 +70,7 @@ if (planeUrl === "" || planeWs === "") {
   const listed = run(beside(import.meta, "plane.sh"), ["projects"], {
     env: { POSTMASTER_CONFIG: CONFIG },
   });
-  const out = (listed.out + listed.err).replace(/\n+$/, "");
+  const out = (listed.out + listed.err).replace(/\n+$/u, "");
   if (listed.code === 0) {
     const projects = out.split("\n").filter((l) => l !== "").length;
     row("plane", "yes", `${planeUrl}, workspace ${planeWs}, ${projects} projects`);

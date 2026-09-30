@@ -2,8 +2,9 @@
 // records for its harness. One command for every harness, so no form is ever copied by hand;
 // this script and harnesses.md must agree, and a change to one is a change to both.
 //
-//   launch.sh form   <name> [--leg <leg>] [--run <dispatch>]
+//   launch.sh form   <name> [--leg <leg>] [--run <dispatch>] [--project <repo>]
 //   launch.sh launch <name> <cwd> <prompt-file> [--leg <leg>] [--last <file>] [--run <dispatch>]
+//   launch.sh review <name> <cwd> <base> [--last <file>] [--run <dispatch>]
 //   launch.sh resume <name> <cwd> <thread-id> <prompt-file> [--leg <leg>] [--last <file>]
 //                    [--run <dispatch>]
 //   launch.sh skill  <name> <skill> [--run <dispatch>]
@@ -15,17 +16,20 @@
 //           coachman or fallback on a lane's model, harness not on PATH, env_file missing, a
 //           form this script does not have (agy resume), a skill that is not security-review,
 //           or a muse or mimo resume of a thread the launch's data directory does not hold
-//   exit 3  skill: the lane's harness has no such skill recorded
+//   exit 3  skill or review: the lane's harness has no such review form recorded
 //   else    the harness's own exit code
 
 import { spawnSync } from "node:child_process";
 import {
   accessSync,
   chmodSync,
+  closeSync,
   existsSync,
   constants as fsConstants,
   mkdirSync,
   mkdtempSync,
+  openSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -57,10 +61,16 @@ interface Spec {
 }
 
 function baseModel(model: unknown): string {
-  return String(model ?? "").replace(/(\[[^\]]*\])+$/, "");
+  return String(model ?? "").replace(/(\[[^\]]*\])+$/u, "");
 }
 
-function resolveSpec(sourcePath: string, name: string, leg: string, recorded: boolean): Spec {
+function resolveSpec(
+  sourcePath: string,
+  name: string,
+  leg: string,
+  recorded: boolean,
+  project: string,
+): Spec {
   let cfg: Record<string, unknown>;
   if (recorded) {
     const data = tryJsonFile<Record<string, unknown>>(sourcePath);
@@ -70,6 +80,23 @@ function resolveSpec(sourcePath: string, name: string, leg: string, recorded: bo
       die(`cannot read ${sourcePath}: it records no config`);
     }
     cfg = c as Record<string, unknown>;
+  } else if (project) {
+    try {
+      readTomlFile(sourcePath);
+    } catch (e) {
+      die(`cannot read ${sourcePath}: ${String(e)}`);
+    }
+    const r = run(join(scriptsDir(import.meta), "project-settings.sh"), [
+      "effective",
+      project,
+      sourcePath,
+    ]);
+    if (r.code !== 0) die(r.err.trim() || "cannot resolve project role choices");
+    try {
+      cfg = JSON.parse(r.out);
+    } catch (e) {
+      die(`project settings gave no effective config: ${String(e)}`);
+    }
   } else {
     try {
       cfg = readTomlFile(sourcePath);
@@ -182,7 +209,7 @@ function harnessData(
     phys = ""; // a vanished directory keys empty, as BASE's failed cd does
   }
   const key = `${runDir}|${phys}|${name}|${leg}`;
-  const sum = run("cksum", [], { input: key }).out.trim().replace(/ /g, "-");
+  const sum = run("cksum", [], { input: key }).out.trim().replace(/ /gu, "-");
   return `${root}/${harness}/${sum}`;
 }
 
@@ -199,27 +226,33 @@ function buildForms(
   name: string,
   leg: string,
   runDir: string,
+  base: string,
 ): FormsResult {
   let data = "";
   let stdinFile = "";
   let promptArg = -1;
   const cmd: string[] = [];
   const isResume = cmdMode === "resume" || cmdMode === "form-resume";
+  const isReview = cmdMode === "review";
   switch (harness) {
     case "codex": {
-      if (isResume) cmd.push("codex", "exec", "resume", thread, "--json");
+      if (isReview) cmd.push("codex", "exec", "review", "--base", base, "--json");
+      else if (isResume) cmd.push("codex", "exec", "resume", thread, "--json");
       else cmd.push("codex", "exec", "-C", cwd, "--json");
       if (last) cmd.push("-o", last);
       cmd.push("-m", model);
-      if (effort) cmd.push("-c", `model_reasoning_effort="${effort}"`);
+      if (isReview) cmd.push("-c", 'model_reasoning_effort="max"');
+      else if (effort) cmd.push("-c", `model_reasoning_effort="${effort}"`);
       cmd.push("--dangerously-bypass-approvals-and-sandbox");
-      if (cmdMode === "launch") {
+      if (cmdMode === "launch" || isReview) {
         const ref = run("git", ["-C", cwd, "symbolic-ref", "-q", "HEAD"]);
         if (ref.code !== 0) cmd.push("--skip-git-repo-check");
       }
       if (isResume) cmd.push("--");
-      cmd.push(promptText);
-      promptArg = cmd.length - 1;
+      if (!isReview) {
+        cmd.push(promptText);
+        promptArg = cmd.length - 1;
+      }
       break;
     }
     case "grok": {
@@ -252,11 +285,14 @@ function buildForms(
       break;
     }
     case "claude": {
-      if (isResume) cmd.push("claude", "-p", "--resume", thread, promptText);
-      else cmd.push("claude", "-p", promptText);
-      promptArg = cmd.length - 1;
+      const text = isReview ? `/code-review max ${base}...HEAD` : promptText;
+      if (isResume) cmd.push("claude", "-p", "--resume", thread, text);
+      else cmd.push("claude", "-p", text);
+      // A review's text is already literal; only a launch or resume splices the file after the cd.
+      if (!isReview) promptArg = cmd.length - 1;
       cmd.push("--model", model);
-      if (effort) cmd.push("--effort", effort);
+      if (isReview) cmd.push("--effort", "max");
+      else if (effort) cmd.push("--effort", effort);
       const launchName = process.env.POSTMASTER_LAUNCH_NAME;
       if (launchName) cmd.push("--name", launchName);
       cmd.push("--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions");
@@ -295,8 +331,10 @@ function buildForms(
         "-m",
         model,
       );
+      if (isReview) cmd.push("--command", "review");
       if (isResume) cmd.push("-s", thread);
-      if (effort) cmd.push("--variant", effort);
+      if (isReview) cmd.push("--variant", "high");
+      else if (effort) cmd.push("--variant", effort);
       if (cmdMode === "launch") {
         const launchName = process.env.POSTMASTER_LAUNCH_NAME;
         if (launchName) cmd.push("--title", launchName);
@@ -316,7 +354,7 @@ function shellQuote(s: string): string {
   // backslash before each character outside bash's unquoted-safe set otherwise.
   if (s === "") return "''";
   // eslint-disable-next-line no-control-regex
-  if (/[\x00-\x1f\x7f]/.test(s)) {
+  if (/[\x00-\x1f\x7f]/u.test(s)) {
     const named: Record<string, string> = {
       "\\": "\\\\",
       "'": "\\'",
@@ -334,17 +372,17 @@ function shellQuote(s: string): string {
       "$'" +
       // eslint-disable-next-line no-control-regex
       s.replace(
-        /[\x00-\x1f\x7f\\']/g,
+        /[\x00-\x1f\x7f\\']/gu,
         (c) => named[c] ?? `\\${c.charCodeAt(0).toString(8).padStart(3, "0")}`,
       ) +
       "'"
     );
   }
-  return s.replace(/[ !"#$&'()*,;:<>?[\\\]^`{|}~]/g, "\\$&");
+  return s.replace(/[ !"#$&'()*,;:<>?[\\\]^`{|}~]/gu, "\\$&");
 }
 
 function showArg(a: string): string {
-  if (/^<.*>$/.test(a) || /=<.*>$/.test(a) || a === "$(cat <prompt-file>)") return `${a} `;
+  if (/^<.*>$/u.test(a) || /=<.*>$/u.test(a) || a === "$(cat <prompt-file>)") return `${a} `;
   return `${shellQuote(a)} `;
 }
 
@@ -381,7 +419,7 @@ function logicalPwd(dir: string, from: string, physical: string): string {
  * and "4 0", "0x10" and "" to 1. */
 function nextShlvl(seen: string | undefined): string {
   let v = 1;
-  if (seen !== undefined && /^[ \t\n\v\f\r]*[+-]?[0-9]+[ \t\n\v\f\r]*$/.test(seen)) {
+  if (seen !== undefined && /^[ \t\n\v\f\r]*[+-]?[0-9]+[ \t\n\v\f\r]*$/u.test(seen)) {
     const n = Number(seen);
     if (Number.isSafeInteger(n)) {
       v = n + 1;
@@ -391,33 +429,37 @@ function nextShlvl(seen: string | undefined): string {
   }
   return String(v);
 }
-/** argv for `bash` to source an env_file and exec cmd itself, as BASE's launcher
- * does: `set -a; . file; set +a` in the shell, then the fixed assignment BASE
- * makes after the source, then `exec`. File output reaches the launch
- * streams, an `exit` in the file exits without launching, any environment
- * size works, and no dump is ever parsed back: both callers end on the
- * child's status. The file path and cmd travel as positional parameters,
- * never interpolated into shell text. */
-function sourcedLaunch(file: string, cmd: string[]): string[] {
+/** argv for `bash` to source an env_file and run cmd, as main's launcher
+ * does: `set -a; . file; set +a` in the shell, then the fixed assignment main
+ * makes after the source, then the harness as a child. File output reaches
+ * the launch streams, an `exit` in the file exits without launching, any
+ * environment size works, and no dump is ever parsed back: both callers end
+ * on the child's status. The file path and cmd travel as positional
+ * parameters, never interpolated into shell text. The shell starts with
+ * SHLVL unset and takes the launcher's level as $1: its own startup bump
+ * would otherwise collide with a file that sets the bumped level, and
+ * main's child spawn hands a file-set level verbatim. */
+function sourcedLaunch(file: string, cmd: string[], level: string): string[] {
   return [
     "-c",
-    'f=$1; shift; set -a; . "$f"; set +a; unset POSTMASTER_LAUNCH_NAME; exec "$@"',
+    'SHLVL=$1; export SHLVL; f=$2; shift 2; s=${POSTMASTER_EVENT_STREAM:-}; set -a; . "$f"; set +a; POSTMASTER_EVENT_STREAM=$s; unset POSTMASTER_LAUNCH_NAME POSTMASTER_LAUNCH_ROLE; "$@"; s=$?; exit $s',
     "_",
+    level,
     file,
     ...cmd,
   ];
 }
-/** As sourcedLaunch, for the resume export check — except the tail. BASE runs
- * the check's export as the last command of an `if` in its subshell, which
- * forks: the export sees the subshell's SHLVL, one above the caller's, and a
- * file that sets SHLVL lands verbatim. `exec` would decrement, so the shell
- * execs only when the file left SHLVL alone and otherwise forks and hands
- * on the status, matching BASE's fork in both cases. */
-function sourcedExport(file: string, data: string, cmd: string[]): string[] {
+/** As sourcedLaunch, for the resume export check. Main runs the check's
+ * export as the last command of an `if` in its subshell, which forks: the
+ * export sees the subshell's SHLVL, one above the caller's, and a file that
+ * sets SHLVL lands verbatim — so the shell takes the level as $1 with SHLVL
+ * unset, as in sourcedLaunch, and always forks. */
+function sourcedExport(file: string, data: string, cmd: string[], level: string): string[] {
   return [
     "-c",
-    'f=$1; d=$2; shift 2; l=$SHLVL; set -a; . "$f"; set +a; export XDG_DATA_HOME="$d" MIMOCODE_DISABLE_CLAUDE_IMPORT=1; if [ "$SHLVL" = "$l" ]; then exec "$@"; else "$@"; s=$?; exit $s; fi',
+    'SHLVL=$1; export SHLVL; f=$2; d=$3; shift 3; set -a; . "$f"; set +a; export XDG_DATA_HOME="$d" MIMOCODE_DISABLE_CLAUDE_IMPORT=1; "$@"; s=$?; exit $s',
     "_",
+    level,
     file,
     data,
     ...cmd,
@@ -437,14 +479,23 @@ function promptedArgv(promptFile: string, idx: number, cmd: string[]): string[] 
     ...cmd,
   ];
 }
-/** sourcedLaunch and promptedArgv in one shell, in BASE's order: the prompt
+/** sourcedLaunch and promptedArgv in one shell, in main's order: the prompt
  * is read before the file is sourced (so `cat` runs with PATH intact and no
- * file-defined function in scope), then the source, then the exec. */
-function sourcedPrompted(file: string, promptFile: string, idx: number, cmd: string[]): string[] {
+ * file-defined function in scope), then the source, then the harness as a
+ * child — always forked, with the level as $1 and SHLVL unset, as in
+ * sourcedLaunch. */
+function sourcedPrompted(
+  file: string,
+  promptFile: string,
+  idx: number,
+  cmd: string[],
+  level: string,
+): string[] {
   return [
     "-c",
-    't=$(cat "$1") || exit 1; f=$2; i=$3; shift 3; set -a; . "$f"; set +a; unset POSTMASTER_LAUNCH_NAME; set -- "${@:1:$i}" "$t" "${@:$((i + 2))}"; exec "$@"',
+    'SHLVL=$1; export SHLVL; t=$(cat "$2") || exit 1; f=$3; i=$4; shift 4; s=${POSTMASTER_EVENT_STREAM:-}; set -a; . "$f"; set +a; POSTMASTER_EVENT_STREAM=$s; unset POSTMASTER_LAUNCH_NAME POSTMASTER_LAUNCH_ROLE; set -- "${@:1:$i}" "$t" "${@:$((i + 2))}"; "$@"; s=$?; exit $s',
     "_",
+    level,
     promptFile,
     file,
     String(idx),
@@ -463,12 +514,17 @@ const argv = process.argv.slice(2);
 if (argv[0] === "--self-test") {
   // self-test below
 } else {
-  if (argv.length < 2) die("usage: launch.sh form|launch|resume|skill <name> ... | --self-test");
+  // This process is main's bash launcher: a fresh bash reports SHLVL one
+  // above what it inherited, and everything below inherits that level.
+  process.env.SHLVL = nextShlvl(process.env.SHLVL);
+  if (argv.length < 2)
+    die("usage: launch.sh form|launch|review|resume|skill <name> ... | --self-test");
   const CMD: string = argv[0] ?? "";
   const NAME = argv[1] ?? "";
   let LEG = "";
   let LAST = "";
   let RUN = "";
+  let PROJECT = "";
   const args: string[] = [];
   let i = 2;
   while (i < argv.length) {
@@ -485,6 +541,10 @@ if (argv[0] === "--self-test") {
       if (i + 1 >= argv.length || !argv[i + 1]) die("--run needs a dispatch directory");
       RUN = argv[i + 1] ?? "";
       i += 2;
+    } else if (a === "--project") {
+      if (i + 1 >= argv.length || !argv[i + 1]) die("--project needs a project directory");
+      PROJECT = argv[i + 1] ?? "";
+      i += 2;
     } else {
       args.push(a ?? "");
       i += 1;
@@ -497,7 +557,8 @@ if (argv[0] === "--self-test") {
   let source: string;
   let recorded = false;
   if (RUN) {
-    source = join(RUN.replace(/\/$/, ""), "run.json");
+    if (PROJECT) die("use --run or --project, not both");
+    source = join(RUN.replace(/\/$/u, ""), "run.json");
     if (!existsSync(source)) {
       die(
         `no run.json in ${RUN}; inside a run, a launch or resume runs only on the config the run recorded at dispatch`,
@@ -510,13 +571,22 @@ if (argv[0] === "--self-test") {
       die(`no config at ${CONFIG} (POSTMASTER_CONFIG overrides the path)`);
     }
   }
-  const spec = resolveSpec(source, NAME, LEG, recorded);
+  const spec = resolveSpec(source, NAME, LEG, recorded, PROJECT);
   const HARNESS = spec.harness;
   const MODEL = spec.model;
   const EFFORT = spec.effort;
   let ENV_FILE = spec.envFile;
   if (!HARNESS) die(`${NAME} has no harness in ${source}`);
   if (!MODEL) die(`${NAME} has no model in ${source}`);
+  if (CMD === "review") {
+    const forms = run(join(scriptsDir(import.meta), "review-forms.sh"), ["has", HARNESS]);
+    if (forms.code !== 0) {
+      console.error(
+        `launch: ${NAME} runs on ${HARNESS}, which has no bug code-review form recorded in harnesses.md`,
+      );
+      process.exit(3);
+    }
+  }
   const pathCheck = spawnSync("sh", ["-c", 'command -v "$1"', "_", HARNESS], {
     encoding: "utf8",
   });
@@ -561,13 +631,15 @@ if (argv[0] === "--self-test") {
   let CWD = "";
   let PROMPT = "";
   let THREAD = "";
+  let BASE = "";
   let PTEXT = "";
+  let REVIEW_PROMPT = "";
   const promptText = (): void => {
     try {
       accessSync(PROMPT, fsConstants.R_OK);
       const st = readFileSync(PROMPT);
       if (st.length === 0) throw new Error("empty");
-      PTEXT = st.toString("utf8").replace(/\n+$/, "");
+      PTEXT = st.toString("utf8").replace(/\n+$/u, "");
     } catch {
       die(`prompt file missing, unreadable or empty: ${PROMPT}`);
     }
@@ -584,6 +656,11 @@ if (argv[0] === "--self-test") {
     CWD = args[0] ?? "";
     PROMPT = args[1] ?? "";
     promptText();
+  } else if (CMD === "review") {
+    if (args.length !== 2) die("review needs <cwd> <base>");
+    CWD = args[0] ?? "";
+    BASE = args[1] ?? "";
+    PROMPT = "<review-prompt-file>";
   } else if (CMD === "resume") {
     if (args.length !== 3) die("resume needs <cwd> <thread-id> <prompt-file>");
     CWD = args[0] ?? "";
@@ -605,6 +682,36 @@ if (argv[0] === "--self-test") {
     }
     if (!isDir) die(`no such directory: ${CWD}`);
   }
+  if (CMD === "review") {
+    if (run("git", ["-C", CWD, "rev-parse", "--verify", `${BASE}^{commit}`]).code !== 0)
+      die(`review base is not a commit in ${CWD}: ${BASE}`);
+    if (run("git", ["-C", CWD, "diff", "--quiet", "HEAD", "--"]).code !== 0)
+      die(`review scratch is dirty, which would widen the review past ${BASE}...HEAD: ${CWD}`);
+    if (HARNESS === "mimo") {
+      // Absolute at creation: the cd below would re-resolve a relative path, and the
+      // removal after it would miss while rm -f still exits 0. Exclusive create, as mktemp.
+      let promptDir = "";
+      try {
+        promptDir = realpathSync(CWD);
+      } catch {
+        die(`cannot resolve the MiMo review prompt in ${CWD}`);
+      }
+      REVIEW_PROMPT = join(promptDir, `.postmaster-review-${process.pid}`);
+      try {
+        writeFileSync(REVIEW_PROMPT, `${BASE}...HEAD\n`, { flag: "wx" });
+      } catch {
+        die(`cannot create the MiMo review prompt in ${CWD}`);
+      }
+      PROMPT = REVIEW_PROMPT;
+      process.on("exit", () => {
+        try {
+          if (REVIEW_PROMPT) rmSync(REVIEW_PROMPT, { force: true });
+        } catch {
+          /* best effort */
+        }
+      });
+    }
+  }
   // For pi/muse/mimo, the prompt file is resolved to an absolute path (read after the cd),
   // and for the harnesses that take the prompt text as argv (codex, claude, agy, and grok's
   // resume), whose text is spliced from the file after the cd.
@@ -619,7 +726,21 @@ if (argv[0] === "--self-test") {
   }
 
   const mkForms = (cmdMode: string): FormsResult =>
-    buildForms(HARNESS, cmdMode, CWD, PROMPT, PTEXT, THREAD, MODEL, EFFORT, LAST, NAME, LEG, RUN);
+    buildForms(
+      HARNESS,
+      cmdMode,
+      CWD,
+      PROMPT,
+      PTEXT,
+      THREAD,
+      MODEL,
+      EFFORT,
+      LAST,
+      NAME,
+      LEG,
+      RUN,
+      BASE,
+    );
 
   if (CMD === "form") {
     const show = (a: string): string => showArg(a);
@@ -647,11 +768,12 @@ if (argv[0] === "--self-test") {
           NAME,
           LEG,
           RUN,
+          BASE,
         );
       })();
       process.stdout.write(`resume: ${put(CWD, resumeForms.cmd, resumeForms.stdinFile)}\n`);
     } catch (e) {
-      const msg = String(e instanceof Error ? e.message : e).replace(/^launch: /, "");
+      const msg = String(e instanceof Error ? e.message : e).replace(/^launch: /u, "");
       process.stdout.write(`resume: none: ${msg}\n`);
     }
     process.exit(0);
@@ -694,11 +816,8 @@ if (argv[0] === "--self-test") {
       MIMOCODE_DISABLE_CLAUDE_IMPORT: "1",
     };
     // The check runs where the launch will, seeing what it will: PWD names
-    // CWD logically and OLDPWD the directory it came from, as below. Its
-    // SHLVL is one above this process's: BASE's subshell is a fork, so the
-    // export sees the launcher's level, and the wrapper's exec left this
-    // process one below it.
-    exportEnv.SHLVL = nextShlvl(process.env.SHLVL);
+    // CWD logically and OLDPWD the directory it came from, as below. Main's
+    // check subshell is a fork, so the export inherits the launcher's level.
     if (from !== "") exportEnv.OLDPWD = from;
     try {
       exportEnv.PWD = logicalPwd(CWD, from, realpathSync(CWD));
@@ -706,9 +825,10 @@ if (argv[0] === "--self-test") {
       /* keep the inherited PWD on any surprise */
     }
     // With an env file the check runs in a shell started in CWD that sources
-    // the file and execs the export itself, as BASE's subshell does.
+    // the file and forks the export, as main's subshell does.
+    if (ENV_FILE) exportEnv.SHLVL = undefined;
     const [expBin, expArgs] = ENV_FILE
-      ? ["bash", sourcedExport(ENV_FILE, DATA, exportCmd)]
+      ? ["bash", sourcedExport(ENV_FILE, DATA, exportCmd, process.env.SHLVL ?? "1")]
       : [exportCmd[0] ?? "", exportCmd.slice(1)];
     const expResult = spawnSync(expBin, expArgs, {
       cwd: CWD,
@@ -717,8 +837,8 @@ if (argv[0] === "--self-test") {
       stdio: ["ignore", "ignore", "pipe"],
     });
     const why = (expResult.stderr ?? "")
-      .replace(/\x1b\[[0-9;]*m/g, "")
-      .replace(/\n/g, " ")
+      .replace(/\x1b\[[0-9;]*m/gu, "")
+      .replace(/\n/gu, " ")
       .slice(0, 300);
     rmSync(held, { recursive: true, force: true });
     if (expResult.status !== 0) {
@@ -740,11 +860,42 @@ if (argv[0] === "--self-test") {
     }
   }
 
-  // Enter the working directory and exec the harness.
+  // Enter the working directory and exec the harness. The directory is physical first:
+  // a review prompt created in a symlinked cwd resolves the same from base or HEAD.
+  try {
+    CWD = realpathSync(CWD);
+  } catch {
+    die(`cannot resolve ${CWD}`);
+  }
   try {
     process.chdir(CWD);
   } catch {
     die(`cannot enter ${CWD}`);
+  }
+  // BASE's `exec < file` opens the prompt before the review file is unlinked; the
+  // harness inherits the open fd. The port reads the bytes at the same point.
+  let stdinBytes: Buffer | null = null;
+  if (STDIN_FILE) {
+    try {
+      stdinBytes = readFileSync(STDIN_FILE);
+    } catch {
+      die(`cannot read ${STDIN_FILE}`);
+    }
+  }
+  if (REVIEW_PROMPT) {
+    try {
+      rmSync(REVIEW_PROMPT, { force: true });
+    } catch {
+      /* best effort */
+    }
+    REVIEW_PROMPT = "";
+  }
+  if (HARNESS === "codex" && CMD === "review" && LAST) {
+    try {
+      rmSync(LAST, { force: true });
+    } catch {
+      /* best effort */
+    }
   }
   // BASE's `cd` leaves OLDPWD naming the directory it came from, and PWD
   // naming the directory it entered, logically; the harness inherits both.
@@ -754,21 +905,34 @@ if (argv[0] === "--self-test") {
   } catch {
     /* keep the inherited PWD on any surprise */
   }
+  // The role is read before the spawn: an env file the child sources can
+  // neither change nor export it, as main's save/restore and unset do.
+  const launchRole = process.env.POSTMASTER_LAUNCH_ROLE ?? "";
   delete process.env.POSTMASTER_LAUNCH_NAME;
+  delete process.env.POSTMASTER_LAUNCH_ROLE;
 
-  // With an env file a shell sources it and execs the harness itself, as BASE
-  // does: file output reaches the launch streams, an `exit` in the file exits
-  // without launching, and nothing is parsed back. Where the prompt travels
-  // as argv, the shell splices the file's bytes into its position, as BASE's
-  // `$(cat)` hands them; the two wraps combine into one shell.
+  // With an env file a shell sources it and runs the harness as a child, as
+  // main does: file output reaches the launch streams, an `exit` in the file
+  // exits without launching, and nothing is parsed back. Where the prompt
+  // travels as argv, the shell splices the file's bytes into its position, as
+  // main's `$(cat)` hands them; the two wraps combine into one shell.
   let cmd = forms.cmd[0] ?? "";
   let cmdArgs = forms.cmd.slice(1);
+  let freshShell = false;
   if (ENV_FILE && forms.promptArg >= 0) {
     cmd = "bash";
-    cmdArgs = sourcedPrompted(ENV_FILE, PROMPT, forms.promptArg, forms.cmd);
+    cmdArgs = sourcedPrompted(
+      ENV_FILE,
+      PROMPT,
+      forms.promptArg,
+      forms.cmd,
+      process.env.SHLVL ?? "1",
+    );
+    freshShell = true;
   } else if (ENV_FILE) {
     cmd = "bash";
-    cmdArgs = sourcedLaunch(ENV_FILE, forms.cmd);
+    cmdArgs = sourcedLaunch(ENV_FILE, forms.cmd, process.env.SHLVL ?? "1");
+    freshShell = true;
   } else if (forms.promptArg >= 0) {
     cmd = "bash";
     cmdArgs = promptedArgv(PROMPT, forms.promptArg, forms.cmd);
@@ -776,18 +940,73 @@ if (argv[0] === "--self-test") {
 
   const child = spawnSync(cmd, cmdArgs, {
     stdio: STDIN_FILE ? ["ignore", "inherit", "inherit"] : ["inherit", "inherit", "inherit"],
-    // Raw bytes, as BASE's `exec < file` hands them: no UTF-8 decode.
-    ...(STDIN_FILE ? { input: readFileSync(STDIN_FILE) } : {}),
+    // Raw bytes, as main's `exec < file` hands them: no UTF-8 decode.
+    ...(stdinBytes ? { input: stdinBytes } : {}),
+    // A sourcing shell starts with SHLVL unset and takes the level as $1.
+    ...(freshShell ? { env: { ...process.env, SHLVL: undefined } } : {}),
   });
-  if (child.status !== null && child.status !== undefined) process.exit(child.status);
+  const rc =
+    child.status !== null && child.status !== undefined
+      ? child.status
+      : child.signal
+        ? signalExitCode(child.signal)
+        : 1;
+  const stream = process.env.POSTMASTER_EVENT_STREAM ?? "";
+  if (RUN && stream) {
+    const r = run(join(scriptsDir(import.meta), "export-session.sh"), [
+      RUN,
+      NAME,
+      HARNESS,
+      CWD,
+      stream,
+      forms.data,
+    ]);
+    if (r.code !== 0) {
+      console.error(`launch: the harness exited ${rc} but its session was not exported`);
+    }
+    let recordRole = "";
+    let recordLane = "";
+    if (launchRole === "lane") {
+      recordRole = "workhorse";
+      recordLane = NAME;
+    } else if (launchRole === "reviewer") {
+      recordRole = "reviewer";
+      recordLane = NAME;
+    } else if (launchRole === "coachman") {
+      recordRole = "coachman";
+      recordLane = LEG;
+      if (!recordLane && NAME !== "coachman_fallback") recordLane = NAME;
+    }
+    if (recordRole && recordLane) {
+      const u = run("bun", [
+        join(scriptsDir(import.meta), "usage.ts"),
+        "record",
+        stream,
+        HARNESS,
+        NAME,
+        RUN,
+        "--role",
+        recordRole,
+        "--lane",
+        recordLane,
+      ]);
+      if (u.code !== 0) {
+        console.error(`launch: the harness exited ${rc} but its usage was not recorded`);
+      }
+    } else {
+      console.error(
+        `launch: the harness exited ${rc} but its usage was not recorded; launch role or lane is missing`,
+      );
+    }
+  }
   if (child.signal) {
     // BASE execs the harness, so a harness dead by a signal dies as one and
     // the caller sees the signal. Re-raise it on ourselves; if the signal
     // does not kill us, exit as a shell reports it.
     process.kill(process.pid, child.signal);
-    process.exit(signalExitCode(child.signal));
+    process.exit(rc);
   }
-  process.exit(1);
+  process.exit(rc);
 }
 
 // --- self-test ----------------------------------------------------------------------------
@@ -796,6 +1015,7 @@ const here = scriptsDir(import.meta);
 
 withTempDir((tmp) => {
   delete process.env.POSTMASTER_LAUNCH_NAME;
+  delete process.env.POSTMASTER_LAUNCH_ROLE;
   const st = new SelfTest();
   let out = "";
   let err = "";
@@ -845,6 +1065,7 @@ withTempDir((tmp) => {
   codexfix("codex", 'model = "lane-model"\neffort = "high"');
   codexfix("codex-noeffort", 'model = "lane-model"');
   codexfix("codex-nomodel", 'effort = "high"');
+  codexfix("review-codex", 'model = "lane-model"\neffort = "low"');
   writeFileSync(join(tmp, "ruling.txt"), "- Keep going, then stop.\n");
   writeFileSync(join(tmp, "brief.txt"), "Keep going, then stop.\n");
   run("git", ["init", "-q", "-b", "main", join(tmp, "cx")]);
@@ -873,7 +1094,7 @@ withTempDir((tmp) => {
 
   const lines = (...args: string[]): string => args.join("\n");
   // bash's $(...) strips trailing newlines; comparisons are made on that form.
-  const bashOut = (s: string): string => s.replace(/\n+$/, "");
+  const bashOut = (s: string): string => s.replace(/\n+$/u, "");
 
   const doRun = (...args: string[]): void => {
     const f = args[0] ?? "";
@@ -929,13 +1150,15 @@ withTempDir((tmp) => {
     else fail(label);
   };
 
+  const runDir = (runName: string): string => join(tmp, "repo", ".postmaster", "runs", runName);
   const record = (runName: string, f: string): void => {
-    mkdirSync(join(tmp, runName), { recursive: true });
-    const r = spawnSync(join(here, "run-meta.sh"), [join(tmp, runName), join(tmp, "repo")], {
+    mkdirSync(runDir(runName), { recursive: true });
+    const r = spawnSync(join(here, "run-meta.sh"), [runDir(runName), join(tmp, "repo")], {
       encoding: "utf8",
       env: {
         ...process.env,
         POSTMASTER_CONFIG: join(tmp, `${f}.toml`),
+        POSTMASTER_TOOL_PINS: join(tmp, "tools"),
         PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
       },
     });
@@ -944,9 +1167,10 @@ withTempDir((tmp) => {
     }
   };
 
-  const CONT_RE = new RegExp(`\\\\\\n[${PY_S_CLASS}]*`, "g");
+  const CONT_RE = new RegExp(`\\\\\\n[${PY_S_CLASS}]*`, "gu");
   const FENCE_SPLIT_RE = new RegExp(
     `(${PY_M_START}[ \t]*\`\`\`${DOT_ALL}*?${PY_M_START}[ \t]*\`\`\`)`,
+    "u",
   );
   // calls(): scan runbooks for launch/resume invocations.
   const calls = (...paths: string[]): { code: number; out: string } => {
@@ -973,7 +1197,7 @@ withTempDir((tmp) => {
           }
         } else {
           // prose: inline code spans
-          for (const span of part.match(/`([^`]+)`/g) ?? []) {
+          for (const span of part.match(/`([^`]+)`/gu) ?? []) {
             const inner = span.slice(1, -1);
             let m: RegExpExecArray | null;
             CALL.lastIndex = 0;
@@ -1095,6 +1319,257 @@ withTempDir((tmp) => {
   record("run-then", "then");
   record("run-old-bug", "old-bug");
   record("run-onlane", "onlane");
+
+  // A run launch exports its durable session beside the harness event stream. The harness's
+  // stdout is redirected into the stream file for real, as the caller does, so the export
+  // inside the launch reads what the harness wrote.
+  const streamRun = (
+    fixture: string,
+    dispatch: string,
+    streamFile: string,
+    args: string[],
+    role = "lane",
+  ): { rc: number; err: string } => {
+    mkdirSync(dirname(streamFile), { recursive: true });
+    const fd = openSync(streamFile, "w");
+    const r = spawnSync(self, args, {
+      encoding: "utf8",
+      stdio: ["inherit", fd, "pipe"],
+      env: {
+        ...process.env,
+        POSTMASTER_LAUNCH_ROLE: role,
+        POSTMASTER_EVENT_STREAM: streamFile,
+        POSTMASTER_CONFIG: join(tmp, `${fixture}.toml`),
+        PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+      },
+    });
+    closeSync(fd);
+    return { rc: r.status ?? 1, err: String(r.stderr ?? "") };
+  };
+  const usageRecord = (dispatch: string, streamFile: string): Record<string, unknown> => {
+    const stem = basename(streamFile).endsWith(".jsonl")
+      ? basename(streamFile).slice(0, -".jsonl".length)
+      : basename(streamFile);
+    return JSON.parse(readFileSync(join(dispatch, "logs", `${stem}-usage.json`), "utf8")) as Record<
+      string,
+      unknown
+    >;
+  };
+  const agyStub = (body: string): void => {
+    writeFileSync(join(tmp, "bin/agy"), body, "utf8");
+    chmodSync(join(tmp, "bin/agy"), 0o755);
+  };
+  writeFileSync(join(tmp, "agy-run.toml"), '[lanes.g]\nharness = "agy"\nmodel = "agy-model"\n');
+  agyStub('#!/bin/sh\nprintf \'{"conversationId":"thread-agy"}\\n\'\n');
+  record("run-agy", "agy-run");
+  {
+    const dispatch = runDir("run-agy");
+    const events = join(dispatch, "logs", "g-events.jsonl");
+    const r = streamRun("agy-run", dispatch, events, [
+      "launch",
+      "g",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--run",
+      dispatch,
+    ]);
+    const kept = join(dispatch, "sessions", "g", "thread-agy.events.jsonl");
+    let same = false;
+    try {
+      same = readFileSync(events, "utf8") === readFileSync(kept, "utf8");
+    } catch {
+      same = false;
+    }
+    if (r.rc === 0 && readFileSync(events, "utf8") === '{"conversationId":"thread-agy"}\n' && same)
+      ok("a run launch exports its durable session beside the harness event stream");
+    else fail("a run launch exports its durable session beside the harness event stream");
+    try {
+      const rec = usageRecord(dispatch, events);
+      if (
+        rec.role === "workhorse" &&
+        rec.lane === "g" &&
+        rec.harness === "agy" &&
+        !("input_tokens" in rec) &&
+        !("output_tokens" in rec) &&
+        !("cost_usd" in rec)
+      )
+        ok("a run launch records its explicit role and lane without inventing figures");
+      else fail("a run launch records its explicit role and lane without inventing figures");
+    } catch {
+      fail("a run launch records its explicit role and lane without inventing figures");
+    }
+  }
+  {
+    writeFileSync(
+      join(tmp, "agy-roles.toml"),
+      '[lanes.g]\nharness = "agy"\nmodel = "agy-model"\n\n[team]\ncoachman = { harness = "agy", model = "coach-model" }\ncoachman_fallback = { harness = "agy", model = "fallback-model" }\n',
+    );
+    record("run-agy-roles", "agy-roles");
+    const dispatch = runDir("run-agy-roles");
+    const checkRole = (
+      label: string,
+      streamFile: string,
+      args: string[],
+      role: string,
+      wantRole: string,
+      wantLane: string,
+    ): void => {
+      const r = streamRun("agy-roles", dispatch, streamFile, args, role);
+      let good = r.rc === 0;
+      try {
+        const rec = usageRecord(dispatch, streamFile);
+        good = good && rec.role === wantRole && rec.lane === wantLane;
+      } catch {
+        good = false;
+      }
+      if (good) ok(label);
+      else fail(label);
+    };
+    checkRole(
+      "a reviewer launch records its reviewer lane",
+      join(dispatch, "logs", "reviewer-events.jsonl"),
+      ["launch", "g", join(tmp, "wt"), join(tmp, "prompt.txt"), "--run", dispatch],
+      "reviewer",
+      "reviewer",
+      "g",
+    );
+    checkRole(
+      "a coachman launch records its leg",
+      join(dispatch, "logs", "coachman-events.jsonl"),
+      [
+        "launch",
+        "coachman",
+        join(tmp, "wt"),
+        join(tmp, "prompt.txt"),
+        "--leg",
+        "synthesis",
+        "--run",
+        dispatch,
+      ],
+      "coachman",
+      "coachman",
+      "synthesis",
+    );
+    checkRole(
+      "a fallback coachman launch records its leg",
+      join(dispatch, "logs", "fallback-events.jsonl"),
+      [
+        "launch",
+        "coachman_fallback",
+        join(tmp, "wt"),
+        join(tmp, "prompt.txt"),
+        "--leg",
+        "ship",
+        "--run",
+        dispatch,
+      ],
+      "coachman",
+      "coachman",
+      "ship",
+    );
+  }
+  {
+    const dispatch = runDir("run-agy");
+    const sessionsBefore = readdirSync(join(dispatch, "sessions", "g")).length;
+    agyStub("#!/bin/sh\nexit 0\n");
+    const events = join(dispatch, "logs", "g-empty.jsonl");
+    const r = streamRun("agy-run", dispatch, events, [
+      "launch",
+      "g",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--run",
+      dispatch,
+    ]);
+    if (
+      r.rc === 0 &&
+      readFileSync(events, "utf8") === "" &&
+      r.err.includes("its session was not exported") &&
+      readdirSync(join(dispatch, "sessions", "g")).length === sessionsBefore
+    )
+      ok("an empty event stream is a loud missed export, not a silent skip");
+    else fail("an empty event stream is a loud missed export, not a silent skip");
+  }
+  {
+    const dispatch = runDir("run-agy");
+    agyStub("#!/bin/sh\nprintf '{\"nope\":1}\\n'\nexit 0\n");
+    const events = join(dispatch, "logs", "g-events.jsonl");
+    const r = streamRun("agy-run", dispatch, events, [
+      "launch",
+      "g",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--run",
+      dispatch,
+    ]);
+    if (r.rc === 0 && r.err.includes("its session was not exported"))
+      ok("a failed export still exits with the harness's status");
+    else fail("a failed export still exits with the harness's status");
+  }
+  {
+    const dispatch = runDir("run-agy");
+    agyStub('#!/bin/sh\nprintf \'{"conversationId":"thread-rc"}\\n\'\nexit 3\n');
+    const events = join(dispatch, "logs", "g-rc.jsonl");
+    const r = streamRun("agy-run", dispatch, events, [
+      "launch",
+      "g",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--run",
+      dispatch,
+    ]);
+    const kept = join(dispatch, "sessions", "g", "thread-rc.events.jsonl");
+    let same = false;
+    try {
+      same = readFileSync(events, "utf8") === readFileSync(kept, "utf8");
+    } catch {
+      same = false;
+    }
+    if (r.rc === 3 && same) ok("a harness failure keeps its exit when the export succeeds");
+    else fail("a harness failure keeps its exit when the export succeeds");
+  }
+  {
+    writeFileSync(
+      join(tmp, "agy-env.toml"),
+      `[lanes.g]\nharness = "agy"\nmodel = "agy-model"\nenv_file = "${join(tmp, "poison.env")}"\n`,
+    );
+    record("run-agy-env", "agy-env");
+    const dispatch = runDir("run-agy-env");
+    mkdirSync(join(dispatch, "logs"), { recursive: true });
+    writeFileSync(join(dispatch, "logs", "g-decoy.jsonl"), '{"conversationId":"thread-decoy"}\n');
+    writeFileSync(
+      join(tmp, "poison.env"),
+      `POSTMASTER_EVENT_STREAM="${join(dispatch, "logs", "g-decoy.jsonl")}"\nPOSTMASTER_LAUNCH_ROLE=reviewer\n`,
+    );
+    agyStub('#!/bin/sh\nprintf \'{"conversationId":"thread-real"}\\n\'\nexit 0\n');
+    const events = join(dispatch, "logs", "g-real.jsonl");
+    const r = streamRun("agy-env", dispatch, events, [
+      "launch",
+      "g",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--run",
+      dispatch,
+    ]);
+    const kept = join(dispatch, "sessions", "g", "thread-real.events.jsonl");
+    const decoy = join(dispatch, "sessions", "g", "thread-decoy.events.jsonl");
+    let same = false;
+    try {
+      same = readFileSync(events, "utf8") === readFileSync(kept, "utf8");
+    } catch {
+      same = false;
+    }
+    if (r.rc === 0 && same && !existsSync(decoy))
+      ok("a lane env file cannot redirect the session export");
+    else fail("a lane env file cannot redirect the session export");
+    try {
+      if (usageRecord(dispatch, events).role === "workhorse")
+        ok("a lane env file cannot change the recorded role");
+      else fail("a lane env file cannot change the recorded role");
+    } catch {
+      fail("a lane env file cannot change the recorded role");
+    }
+  }
   mkdirSync(join(tmp, "no-record"), { recursive: true });
   mkdirSync(join(tmp, "garbled"), { recursive: true });
   mkdirSync(join(tmp, "unrecorded"), { recursive: true });
@@ -1297,7 +1772,7 @@ withTempDir((tmp) => {
     "--leg",
     "review",
     "--run",
-    join(tmp, "run"),
+    runDir("run"),
   );
   runsOn(
     "outside a run, the same resume runs on the live config's model",
@@ -1319,7 +1794,7 @@ withTempDir((tmp) => {
     "T-1",
     join(tmp, "prompt.txt"),
     "--run",
-    join(tmp, "run-then"),
+    runDir("run-then"),
   );
   printed(
     "inside a run, a lane resumes on the harness, model, effort and env file the run recorded",
@@ -1348,7 +1823,7 @@ withTempDir((tmp) => {
     "--leg",
     "synthesis",
     "--run",
-    join(tmp, "run"),
+    runDir("run"),
   );
   {
     const c = calls(join(tmp, "runbook.md"));
@@ -1356,9 +1831,9 @@ withTempDir((tmp) => {
     rc = c.code;
     err = "";
     const got = `${out
-      .replace(/\n+$/, "")
+      .replace(/\n+$/u, "")
       .split("\n")
-      .map((l) => l.replace(/^([a-z]+) .*launch\.sh (launch|resume) ([a-z]) .*/, "$1 $3"))
+      .map((l) => l.replace(/^([a-z]+) .*launch\.sh (launch|resume) ([a-z]) .*/u, "$1 $3"))
       .join(",")},`;
     if (got === "unrun a,run b,unrun c,run d,") {
       ok("a runbook launch or resume with no --run is found, fenced or inline");
@@ -1561,16 +2036,17 @@ withTempDir((tmp) => {
     "--leg",
     "review",
   );
-  // An env file launch keeps the inherited SHLVL, unless the file sets it.
+  // An env file launch hands the launcher's level — one above the
+  // inherited SHLVL, as a fresh bash reports — unless the file sets it.
   {
     const claude = join(tmp, "bin", "claude");
     const saved = readFileSync(claude, "utf8");
     writeFileSync(claude, '#!/bin/sh\nprintf "%s\\n" "shlvl=${SHLVL-<unset>}"\n');
     envx = { SHLVL: "7" };
     carries(
-      "an env file launch keeps the inherited SHLVL",
+      "an env file launch hands the launcher's level",
       "shellenv",
-      "shlvl=7",
+      "shlvl=8",
       "launch",
       "coachman",
       join(tmp, "wt"),
@@ -1583,12 +2059,13 @@ withTempDir((tmp) => {
       join(tmp, "shlvlset.toml"),
       `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "shlvl.env")}" }\n`,
     );
-    // A file that sets SHLVL=9 hands the harness 8: a bash child always
-    // sees its parent's level minus one, as under BASE's source-and-exec.
+    // A file that sets SHLVL=9 hands the harness 9 verbatim — one above the
+    // launcher's 8, where a naive bump-then-compare would collide — as main's
+    // child spawn does.
     carries(
-      "an env file that sets SHLVL hands on the level minus one, as BASE does",
+      "an env file that sets SHLVL hands it on verbatim, as main does",
       "shlvlset",
-      "shlvl=8",
+      "shlvl=9",
       "launch",
       "coachman",
       join(tmp, "wt"),
@@ -1717,11 +2194,14 @@ withTempDir((tmp) => {
     const savedEnvx = envx;
     envx = { HOME: join(tmp, "home") };
     // `_` is each launcher's own last command and always differs; a shell's
-    // `file: line N:` prefix names its own $0. Both normalize away.
+    // `file: line N:` prefix names its own $0. Both normalize away. So does
+    // the exec/fork split: BASE execs the harness, which fails `$PWD/<cmd>:`,
+    // while the merged main fork-spawns it, which fails `<cmd>:` — the port
+    // follows main.
     const normStreams = (s: string): string =>
       s
         .split("\n")
-        .map((l) => l.replace(/^[^:]*: line [0-9]+: /, ""))
+        .map((l) => l.replace(/^[^:]*: line [0-9]+: /u, "").replace(/^\/[^:]+?([^/]+): /u, "$1: "))
         .join("\n");
     const handedEnv = (): string[] => {
       let raw: string;
@@ -1730,9 +2210,13 @@ withTempDir((tmp) => {
       } catch {
         return [];
       }
+      // SHLVL is compared nowhere here: BASE execs the harness (its level)
+      // while the merged main fork-spawns it (one above), so the two oracles
+      // differ by construction. SHLVL follows main, pinned by the resume
+      // control against main's launcher.
       return raw
         .split("\0")
-        .filter((e) => e.includes("=") && !e.startsWith("_="))
+        .filter((e) => e.includes("=") && !e.startsWith("_=") && !e.startsWith("SHLVL="))
         .sort();
     };
     const parity = (
@@ -2157,7 +2641,7 @@ withTempDir((tmp) => {
     "--leg",
     "review",
     "--run",
-    join(tmp, "run-relenv"),
+    runDir("run-relenv"),
   );
   if (rc === 0 && out.includes("probe=config-dir"))
     ok("a relative env file under --run is read from the live config's directory");
@@ -2346,7 +2830,7 @@ withTempDir((tmp) => {
     "--leg",
     "review",
     "--run",
-    join(tmp, "run-old-bug"),
+    runDir("run-old-bug"),
   );
   refused(
     "a recorded leg on a lane's model is refused, though the live config passes",
@@ -2360,7 +2844,7 @@ withTempDir((tmp) => {
     "--leg",
     "synthesis",
     "--run",
-    join(tmp, "run-onlane"),
+    runDir("run-onlane"),
   );
   {
     const c = calls(
@@ -2409,7 +2893,7 @@ withTempDir((tmp) => {
     rc = r.status ?? 1;
   };
   const dataOf = (): string => {
-    const m = out.match(/.* data=(.*)/);
+    const m = out.match(/.* data=(.*)/u);
     return m?.[1]?.trim() ?? "";
   };
   const mrefused = (label: string, f: string, want: string, ...args: string[]): void => {
@@ -2854,6 +3338,176 @@ withTempDir((tmp) => {
   if (rc === 3 && out === "") ok("a muse lane has no security review skill: exit 3");
   else fail("a muse lane has no security review skill: exit 3");
 
+  console.log("bug review forms");
+  const base = run("git", ["-C", join(tmp, "cx"), "rev-parse", "HEAD"]).out.trim();
+  writeFileSync(
+    join(tmp, "review-claude.toml"),
+    '[lanes.one]\nharness = "claude"\nmodel = "claude-model"\neffort = "low"\n\n[team]\ncoachman = { harness = "claude", model = "coach-model" }\n',
+  );
+  writeFileSync(
+    join(tmp, "review-mimo.toml"),
+    '[lanes.one]\nharness = "mimo"\nmodel = "prov/mimo-model"\neffort = "low"\n\n[team]\ncoachman = { harness = "mimo", model = "coach-model" }\n',
+  );
+  writeFileSync(
+    join(tmp, "review-pi.toml"),
+    '[lanes.one]\nharness = "pi"\nmodel = "pi-model"\n\n[team]\ncoachman = { harness = "pi", model = "coach-model" }\n',
+  );
+  runsAs(
+    "claude review names the range and runs /code-review at max",
+    "review-claude",
+    `-p /code-review max ${base}...HEAD --model claude-model --effort max --output-format stream-json --verbose --dangerously-skip-permissions probe=`,
+    "review",
+    "one",
+    join(tmp, "cx-detached"),
+    base,
+  );
+  runsAs(
+    "codex review uses --base, --last, max effort and the lane model",
+    "review-codex",
+    lines(
+      join(tmp, "cx-detached"),
+      "exec",
+      "review",
+      "--base",
+      base,
+      "--json",
+      "-o",
+      join(tmp, "review-last.md"),
+      "-m",
+      "lane-model",
+      "-c",
+      'model_reasoning_effort="max"',
+      CODEX_BYPASS,
+      "--skip-git-repo-check",
+    ),
+    "review",
+    "one",
+    join(tmp, "cx-detached"),
+    base,
+    "--last",
+    join(tmp, "review-last.md"),
+  );
+  writeFileSync(join(tmp, "review-last.md"), "stale from an earlier attempt\n");
+  doRun(
+    "review-codex",
+    "review",
+    "one",
+    join(tmp, "cx-detached"),
+    base,
+    "--last",
+    join(tmp, "review-last.md"),
+  );
+  if (rc === 0 && !existsSync(join(tmp, "review-last.md"))) {
+    ok("a review launch removes a stale --last file before the harness runs");
+  } else {
+    fail("a review launch removes a stale --last file before the harness runs");
+  }
+  record("review-run", "review-codex");
+  runsAs(
+    "codex review in a run uses the recorded config and the same top level",
+    "review-codex",
+    lines(
+      join(tmp, "cx-detached"),
+      "exec",
+      "review",
+      "--base",
+      base,
+      "--json",
+      "-m",
+      "lane-model",
+      "-c",
+      'model_reasoning_effort="max"',
+      CODEX_BYPASS,
+      "--skip-git-repo-check",
+    ),
+    "review",
+    "one",
+    join(tmp, "cx-detached"),
+    base,
+    "--run",
+    runDir("review-run"),
+  );
+  mrun("review-mimo", "review", "one", join(tmp, "cx-detached"), base);
+  if (
+    rc === 0 &&
+    out.includes("--command review") &&
+    out.includes("--variant high") &&
+    out.includes(`stdin=${base}...HEAD`)
+  ) {
+    ok("mimo review uses --command review, the prompt file range and high variant");
+  } else {
+    fail("mimo review uses --command review, the prompt file range and high variant");
+  }
+  const noPromptLeft = (): boolean =>
+    !readdirSync(join(tmp, "cx-detached")).some((f) => f.startsWith(".postmaster-review-"));
+  if (noPromptLeft()) ok("mimo's temporary range prompt is removed after launch");
+  else fail("mimo's temporary range prompt is removed after launch");
+  {
+    const relPwd = process.cwd();
+    process.chdir(tmp);
+    mrun("review-mimo", "review", "one", "cx-detached", base);
+    process.chdir(relPwd);
+    const ran = out.includes("--command review");
+    if (rc === 0 && ran && noPromptLeft()) {
+      ok("mimo's temporary range prompt is removed after a relative-cwd launch");
+    } else {
+      fail("mimo's temporary range prompt is removed after a relative-cwd launch");
+    }
+  }
+  doRun("review-pi", "review", "one", join(tmp, "cx-detached"), base);
+  if (rc === 3 && out === "" && err.includes("has no bug code-review form")) {
+    ok("pi has no bug review form: exit 3");
+  } else {
+    fail("pi has no bug review form: exit 3");
+  }
+  writeFileSync(
+    join(tmp, "review-unsupported.toml"),
+    '[lanes.one]\nharness = "not-installed"\nmodel = "model"\n',
+  );
+  doRun("review-unsupported", "review", "one", join(tmp, "cx-detached"), base);
+  if (rc === 3 && out === "" && err.includes("has no bug code-review form")) {
+    ok("a harness without a review form exits 3 even when its CLI is absent");
+  } else {
+    fail("a harness without a review form exits 3 even when its CLI is absent");
+  }
+  run("git", ["-C", join(tmp, "cx"), "worktree", "add", "-q", "--detach", join(tmp, "cx-dirty")]);
+  writeFileSync(join(tmp, "cx-dirty", "tracked.txt"), "v1\n");
+  run("git", [
+    "-C",
+    join(tmp, "cx-dirty"),
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@example.invalid",
+    "add",
+    "tracked.txt",
+  ]);
+  run("git", [
+    "-C",
+    join(tmp, "cx-dirty"),
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@example.invalid",
+    "commit",
+    "-q",
+    "-m",
+    "tracked",
+  ]);
+  const dirtyBase = run("git", ["-C", join(tmp, "cx-dirty"), "rev-parse", "HEAD"]).out.trim();
+  writeFileSync(join(tmp, "cx-dirty", "tracked.txt"), "v2\n");
+  doRun("review-codex", "review", "one", join(tmp, "cx-dirty"), dirtyBase);
+  if (rc === 1 && out === "" && err.includes("would widen the review past")) {
+    ok("a review on a dirty scratch is refused before the harness runs");
+  } else {
+    fail("a review on a dirty scratch is refused before the harness runs");
+  }
+  run("git", ["-C", join(tmp, "cx-dirty"), "checkout", "-q", "--", "tracked.txt"]);
+  writeFileSync(join(tmp, "cx-dirty", "untracked.txt"), "untracked\n");
+  doRun("review-codex", "review", "one", join(tmp, "cx-dirty"), dirtyBase);
+  if (rc === 0 && out.includes(dirtyBase)) ok("untracked scratch files do not block a review");
+  else fail("untracked scratch files do not block a review");
+
   // The harness-data key is BASE's cksum over run, physical directory, name and
   // leg. BASE's formula through the shell is the independent side of the control.
   const baseKey = (cwd: string, runDir: string, name: string, leg: string): string =>
@@ -2914,19 +3568,19 @@ withTempDir((tmp) => {
   else fail("a file as cwd mutates nothing, no trust entry");
   envx = {};
 
-  // The resume export check and the resumed harness see the directory the
-  // launch came from through $PWD, logically: BASE's subshell cds from $PWD
-  // before the check and the launch itself cds after it, so both see PWD
-  // naming CWD and OLDPWD the directory it came from. The check's SHLVL is
-  // one above the caller's — a fork, not an exec — and a file that sets
-  // SHLVL lands verbatim in the check. Each scenario below runs the BASE
-  // launcher and this one from behind a symlink with a relative cwd and the
-  // same environment, and compares both paths against BASE's own recorded
-  // values, never against each other.
+  // The resume export check cds logically from $PWD, before main resolves
+  // the launch directory to its physical path; the resumed harness cds after,
+  // so the check sees PWD naming CWD through the symlink and the harness sees
+  // it resolved, with OLDPWD the directory the launch came from in both. The
+  // check's SHLVL is one above the caller's — a fork, not an exec — and a file
+  // that sets SHLVL lands verbatim in the check. Each scenario below runs the
+  // merged main's launcher and this one from behind a symlink with a relative
+  // cwd and the same environment, and compares both paths against main's own
+  // recorded values, never against each other.
   if (!hasPy3) {
     st.skip(
-      "a resume's check and harness match BASE's PWD, OLDPWD and SHLVL",
-      "python3 not on PATH: BASE's launcher could not run, so neither path was compared",
+      "a resume's check and harness match main's PWD, OLDPWD and SHLVL",
+      "python3 not on PATH: main's launcher could not run, so neither path was compared",
     );
   } else {
     const f1 = join(tmp, "f1");
@@ -2941,18 +3595,18 @@ withTempDir((tmp) => {
     } catch {
       /* exists */
     }
-    // BASE's launcher at run 109's BASE; it sources nothing, so the one
-    // file is the whole launcher.
+    // Main's launcher at the merged main (e902378); it sources nothing, so
+    // the one file is the whole launcher.
     const baseLaunch = join(f1, "base-launch.sh");
     const shown = spawnSync(
       "git",
-      ["-C", dirname(here), "show", "bb782a973e69427c820ce16a676718e87f51995b:scripts/launch.sh"],
+      ["-C", dirname(here), "show", "e902378fd4a4b39aa41870da2c771b6963525517:scripts/launch.sh"],
       { encoding: "utf8" },
     );
     if (shown.status !== 0) {
       st.fail(
-        "a resume's check and harness match BASE's PWD, OLDPWD and SHLVL",
-        `git show BASE launch.sh: ${shown.stderr ?? ""}`,
+        "a resume's check and harness match main's PWD, OLDPWD and SHLVL",
+        `git show main launch.sh: ${shown.stderr ?? ""}`,
       );
     } else {
       writeFileSync(baseLaunch, shown.stdout ?? "");
@@ -3040,10 +3694,10 @@ withTempDir((tmp) => {
       scenario("mimo-no-pwd", "mimo", "plain", true);
       scenario("muse-plain", "muse", "muse", false);
       if (mismatches.length === 0)
-        ok("a resume's check and harness match BASE's PWD, OLDPWD and SHLVL");
+        ok("a resume's check and harness match main's PWD, OLDPWD and SHLVL");
       else
         st.fail(
-          "a resume's check and harness match BASE's PWD, OLDPWD and SHLVL",
+          "a resume's check and harness match main's PWD, OLDPWD and SHLVL",
           mismatches.join("\n"),
         );
     }

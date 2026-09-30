@@ -7,11 +7,9 @@
 // Generated from python3 unicodedata 15.0.0: every code point where
 // casefold(c) != lower(c), plus U+03A3 (context-free fold beats final sigma).
 // Regen: the loop in the round-9 notes (python3 -c over 0..0x10FFFF).
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { run } from "./proc.ts";
 import { SelfTest } from "./selftest.ts";
 
 const CASEFOLD_EXTRA: Record<string, string> = {
@@ -359,7 +357,10 @@ export const WORD_CHAR_RE = /[\p{L}\p{N}_]/u;
 export const W_CLASS = "\\p{L}\\p{N}_";
 
 /** Python `\d` as a class atom: Unicode decimal digits (category Nd).
- * Enumerated against `re` over the full range: zero mismatches. */
+ * Enumerated against `re` (Unicode 15) over the full range: the only
+ * mismatches are the 90 code points of the nine Unicode 16/17 runs,
+ * which ICU 17 matches and CPython 15 leaves unassigned. INTENDED
+ * DIVERGENCE, pinned by a divergent golden: the port follows ICU. */
 export const D_CLASS = "\\p{Nd}";
 
 /** The halves of Python `\b`: no word char (`W_CLASS`) on that side.
@@ -399,7 +400,7 @@ export const END_OR_BEFORE_NL = "(?=\\n?$)";
  * caller with the `iu` flags; without `u`, `i` stays ASCII. */
 const I_EQUIVS = "[iI\u0130\u0131]";
 export function literalI(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/[iI\u0130\u0131]/g, I_EQUIVS);
+  return s.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&").replace(/[iI\u0130\u0131]/gu, I_EQUIVS);
 }
 
 /** `str.isdigit`, enumerated from CPython over the full range: nonempty,
@@ -411,9 +412,17 @@ const INT_NO_CHARS =
 const INT_NO = new Set<string>();
 for (const ch of INT_NO_CHARS) INT_NO.add(ch);
 
-/** Decimal-digit runs `[first, last]` (Unicode 15), for digitValue:
- * 64 runs, one of 50 code points (the five math styles, value mod 10),
- * the rest of 10. */
+/** Decimal-digit runs `[first, last]` (Unicode 17), for digitValue:
+ * 73 runs: one of 50 code points (the five math styles, value mod 10),
+ * the rest of 10. The nine past the Unicode 15 set are Garay, Myanmar
+ * Pao, Myanmar Eastern Pwo Karen (adjacent to Pao, hence a second run),
+ * Sunuwar, Tolong Siki, Gurung Khema, Kirat Rai, the legacy-computing
+ * outlined digits, and Ol Onal. Verified against UCD 17.0.0: the table
+ * holds exactly its 770 Nd, each with decimal value `(cp - first) % 10`.
+ * INTENDED DIVERGENCE from Python: `unicodedata` (15.0) leaves these 90
+ * unassigned, so `int()` rejects what digitValue now accepts. The port
+ * follows its runtime (ICU 17, which `D_CLASS` matches with), not the
+ * reference's older table. */
 const ND_RUNS: Array<[number, number]> = [
   [0x30, 0x39],
   [0x660, 0x669],
@@ -454,6 +463,7 @@ const ND_RUNS: Array<[number, number]> = [
   [0xff10, 0xff19],
   [0x104a0, 0x104a9],
   [0x10d30, 0x10d39],
+  [0x10d40, 0x10d49],
   [0x11066, 0x1106f],
   [0x110f0, 0x110f9],
   [0x11136, 0x1113f],
@@ -463,20 +473,28 @@ const ND_RUNS: Array<[number, number]> = [
   [0x114d0, 0x114d9],
   [0x11650, 0x11659],
   [0x116c0, 0x116c9],
+  [0x116d0, 0x116d9],
+  [0x116da, 0x116e3],
   [0x11730, 0x11739],
   [0x118e0, 0x118e9],
   [0x11950, 0x11959],
+  [0x11bf0, 0x11bf9],
   [0x11c50, 0x11c59],
   [0x11d50, 0x11d59],
   [0x11da0, 0x11da9],
+  [0x11de0, 0x11de9],
   [0x11f50, 0x11f59],
+  [0x16130, 0x16139],
   [0x16a60, 0x16a69],
   [0x16ac0, 0x16ac9],
   [0x16b50, 0x16b59],
+  [0x16d70, 0x16d79],
+  [0x1ccf0, 0x1ccf9],
   [0x1d7ce, 0x1d7ff],
   [0x1e140, 0x1e149],
   [0x1e2f0, 0x1e2f9],
   [0x1e4f0, 0x1e4f9],
+  [0x1e5f1, 0x1e5fa],
   [0x1e950, 0x1e959],
   [0x1fbf0, 0x1fbf9],
 ];
@@ -591,6 +609,8 @@ interface GoldenCase {
   tsSrc?: string;
   flags?: string;
   lit?: string;
+  // An intended divergence: both sides pinned exactly, never equal.
+  diverge?: { ts: unknown; py: unknown };
 }
 
 interface GoldenOut {
@@ -650,7 +670,7 @@ function tsGolden(c: GoldenCase): GoldenOut {
       case "fullmatchI":
         return { ok: true, r: new RegExp(`^(?:${literalI(c.lit!)})$`, "iu").test(s) };
       case "search": {
-        const m = new RegExp(c.tsSrc!, c.flags === "m" ? "m" : "u").exec(s);
+        const m = new RegExp(c.tsSrc!, c.flags === "m" ? "mu" : "u").exec(s);
         return { ok: true, r: m ? [m[0]] : [] };
       }
       case "findall":
@@ -695,6 +715,12 @@ function goldenCases(): GoldenCase[] {
   const dFull = { pyPat: "\\d+", tsSrc: `[${D_CLASS}]+` };
   for (const s of ["123", "١٢" + "٣", "½", "²", "Ⅷ", "1a", "", "१२", "०", "５"])
     cases.push({ op: "fullmatch", s, ...dFull });
+  cases.push({
+    op: "fullmatch",
+    s: "\u{10D40}\u{10D41}",
+    ...dFull,
+    diverge: { ts: true, py: false },
+  });
   const sides = ["", " ", "_", "1", "é", "١", ".", "-", "\n", "ﬁ", "\u{1d518}"];
   for (const l of sides)
     for (const r of sides) {
@@ -830,13 +856,21 @@ function goldenCases(): GoldenCase[] {
     "𝔘",
   ])
     cases.push({ op: "lower", s: ch });
+  // Firsts of the nine Unicode 16/17 runs: ICU 17 calls them Nd and
+  // CPython 15 (unassigned) does not. Both sides pinned, never equal.
+  const NEW_ND = new Set([
+    0x10d40, 0x116d0, 0x116da, 0x11bf0, 0x11de0, 0x16130, 0x16d70, 0x1ccf0, 0x1e5f1,
+  ]);
   const ndSamples: string[] = [];
+  const ndDivergent = new Set<string>();
   for (const [first, last] of ND_RUNS) {
-    ndSamples.push(
+    const samples = [
       String.fromCodePoint(first),
       String.fromCodePoint(first + 5),
       String.fromCodePoint(last),
-    );
+    ];
+    ndSamples.push(...samples);
+    if (NEW_ND.has(first)) for (const ch of samples) ndDivergent.add(ch);
   }
   for (const ch of [...INT_NO_CHARS]) cases.push({ op: "isdigit", s: ch });
   for (const s of [
@@ -857,11 +891,24 @@ function goldenCases(): GoldenCase[] {
     "١٢" + "٣",
     "²²",
   ]) {
-    cases.push({ op: "isdigit", s });
+    cases.push({
+      op: "isdigit",
+      s,
+      ...(ndDivergent.has(s) ? { diverge: { ts: true, py: false } } : {}),
+    });
   }
   for (const [first] of ND_RUNS) {
-    cases.push({ op: "digitvalue", s: String.fromCodePoint(first) });
-    cases.push({ op: "digitvalue", s: String.fromCodePoint(first + 5) });
+    const dv = NEW_ND.has(first);
+    cases.push({
+      op: "digitvalue",
+      s: String.fromCodePoint(first),
+      ...(dv ? { diverge: { ts: "0", py: "ValueError" } } : {}),
+    });
+    cases.push({
+      op: "digitvalue",
+      s: String.fromCodePoint(first + 5),
+      ...(dv ? { diverge: { ts: "5", py: "ValueError" } } : {}),
+    });
   }
   for (const s of ["123", "١٢" + "٣", "²", "a", "", "1a", "½", " ", "²²", "१२३"])
     cases.push({ op: "digitvalue", s });
@@ -908,49 +955,79 @@ function sameValue(a: unknown, b: unknown): boolean {
 function runGoldens(st: SelfTest): void {
   // Invariants that hold without any interpreter: the tables' shapes.
   st.check("isdigit table holds its 128 integer-valued others", [...INT_NO_CHARS].length === 128);
-  st.check("digit runs cover their 64 blocks", ND_RUNS.length === 64);
-  const pyProbe = run("python3", ["--version"]);
-  if (pyProbe.code !== 0) {
-    st.skip("module goldens vs python3", "python3 absent: primitives not differenced");
-    return;
-  }
-  const cases = goldenCases();
-  const dir = mkdtempSync(join(tmpdir(), "text-golden-"));
-  try {
-    const prog = join(dir, "golden.py");
-    writeFileSync(prog, PY_GOLDEN_PROG);
-    const r = run("python3", [prog], { input: JSON.stringify(cases) });
-    if (r.code !== 0) {
-      st.fail("module goldens vs python3", `python3 failed: ${r.err.slice(0, 500)}`);
-      return;
-    }
-    const truth = JSON.parse(r.out) as GoldenOut[];
-    if (truth.length !== cases.length) {
-      st.fail(
-        "module goldens vs python3",
-        `truth has ${truth.length} rows for ${cases.length} cases`,
-      );
-      return;
-    }
-    const bad: string[] = [];
-    for (let i = 0; i < cases.length; i++) {
-      const mine = tsGolden(cases[i]!);
-      const want = truth[i]!;
-      if (mine.ok !== want.ok || !sameValue(mine.r, want.r)) {
-        const c = cases[i]!;
-        bad.push(
-          `${c.op} ${JSON.stringify(c.s.slice(0, 40))}: port ${JSON.stringify(mine.r)} vs py ${JSON.stringify(want.r)}`,
-        );
+  st.check("digit runs cover their 73 blocks", ND_RUNS.length === 73);
+  st.check(
+    "digitValue reads the finding's witness, Garay zero (U+10D40)",
+    digitValue("\u{10D40}") === "0",
+  );
+  {
+    // ND_RUNS covers the runtime's \p{Nd} exactly: no matcher can hand
+    // digitValue a digit the table throws on. Full range, ~0.1 s.
+    const one = /^\p{Nd}$/u;
+    let missing = 0;
+    let missingCp = 0;
+    for (let cp = 0; cp <= 0x10ffff; cp++) {
+      if (cp >= 0xd800 && cp <= 0xdfff) continue;
+      one.lastIndex = 0;
+      if (!one.test(String.fromCodePoint(cp))) continue;
+      let v = -1;
+      for (const [first, last] of ND_RUNS) {
+        if (cp >= first && cp <= last) {
+          v = (cp - first) % 10;
+          break;
+        }
+      }
+      if (v < 0) {
+        missing += 1;
+        missingCp = cp;
       }
     }
     st.check(
-      `module goldens vs python3 (${cases.length} cases)`,
-      bad.length === 0,
-      bad.slice(0, 12).join("\n"),
+      "every Nd the runtime matches is a digit the table values",
+      missing === 0,
+      missing === 0 ? "" : `${missing} missing, first U+${missingCp.toString(16)}`,
     );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
   }
+  // The BASE side is committed, not run: the cases still build live, and
+  // the truth comes from the fixture (regen per its _note). A case added
+  // or edited without a regen fails the length check or its row.
+  const cases = goldenCases();
+  const fixture = JSON.parse(
+    readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "text-goldens.json"),
+      "utf-8",
+    ),
+  ) as { python: string; truth: GoldenOut[] };
+  const truth = fixture.truth;
+  if (truth.length !== cases.length) {
+    st.fail(
+      "module goldens vs python3",
+      `fixture has ${truth.length} rows for ${cases.length} cases: regen per scripts/fixtures/text-goldens.json _note`,
+    );
+    return;
+  }
+  const bad: string[] = [];
+  for (let i = 0; i < cases.length; i++) {
+    const mine = tsGolden(cases[i]!);
+    const want = truth[i]!;
+    const c = cases[i]!;
+    if (c.diverge !== undefined) {
+      if (!sameValue(mine.r, c.diverge.ts) || !sameValue(want.r, c.diverge.py)) {
+        bad.push(
+          `${c.op} ${JSON.stringify(c.s.slice(0, 40))}: intended split drifted: port ${JSON.stringify(mine.r)} (want ${JSON.stringify(c.diverge.ts)}) vs py ${JSON.stringify(want.r)} (want ${JSON.stringify(c.diverge.py)})`,
+        );
+      }
+    } else if (mine.ok !== want.ok || !sameValue(mine.r, want.r)) {
+      bad.push(
+        `${c.op} ${JSON.stringify(c.s.slice(0, 40))}: port ${JSON.stringify(mine.r)} vs py ${JSON.stringify(want.r)}`,
+      );
+    }
+  }
+  st.check(
+    `module goldens vs python3 (${cases.length} cases, fixture ${fixture.python})`,
+    bad.length === 0,
+    bad.slice(0, 12).join("\n"),
+  );
 }
 
 // --- the guard: no hand-written Unicode-meaning escape outside this module ---
@@ -961,10 +1038,18 @@ function runGoldens(st: SelfTest): void {
 // (the text is machine-made ASCII, or BASE itself is ASCII-explicit
 // there), `ASCII:` or `LOWER:` for a case-op (`LOWER:` where the line
 // ports BASE's own `.lower()` exactly — Unicode lowering, never a fold).
+// Every regex also carries u, or the same `ASCII:` marker (#171): without
+// u, `\p` throws and `/i` folds ASCII-only, both silent divergences.
 // The lexer is small on purpose: strings and comments are skipped, template
 // bodies are scanned (their ${} holds code), and a `//` inside a template
 // or regex literal ends the scan for that line. Whatever it misses, the
 // planted failure below would miss too — and fail the run if it did.
+// The five forms in PLANTED_MISS are missed on purpose and pinned missed:
+// the guard is a tripwire for the common shapes, not a parser. Review
+// covers what it cannot see; quoted or commented `new RegExp(` text would
+// false-positive, and none exists in the port. A literal inside template
+// text or `${}` is missed for u the same single-line way (its escapes are
+// still scanned); those few carry u by review.
 
 export interface GuardHit {
   file: string;
@@ -978,18 +1063,18 @@ export function scanSource(name: string, src: string): GuardHit[] {
   const hits: GuardHit[] = [];
   let inBlock = false;
   const marked = (n: number, kind: "esc" | "fold"): boolean => {
-    const re = kind === "esc" ? /\/\/.*ASCII:/ : /\/\/.*(ASCII|LOWER):/;
+    const re = kind === "esc" ? /\/\/.*ASCII:/u : /\/\/.*(ASCII|LOWER):/u;
     if (re.test(lines[n]!)) return true;
     // A shielding comment on the line above must LEAD that line: a trailing
     // comment shields its own line only, never the line below it.
-    const above = kind === "esc" ? /^\s*\/\/.*ASCII:/ : /^\s*\/\/.*(ASCII|LOWER):/;
+    const above = kind === "esc" ? /^\s*\/\/.*ASCII:/u : /^\s*\/\/.*(ASCII|LOWER):/u;
     return n > 0 && above.test(lines[n - 1]!);
-    return re.test(lines[n]!) || (n > 0 && re.test(lines[n - 1]!));
   };
   for (let n = 0; n < lines.length; n++) {
     const raw = lines[n]!;
     let code = "";
     let i = 0;
+    const litFlags: string[] = [];
     while (i < raw.length) {
       if (inBlock) {
         const end = raw.indexOf("*/", i);
@@ -1012,10 +1097,13 @@ export function scanSource(name: string, src: string): GuardHit[] {
       if (ch === "/" && !inBlock) {
         // A /.../ literal is code even when it holds quotes: swallow it whole
         // so a quote inside cannot fake string-mode and blind the scan.
-        const tail = code.replace(/\s+$/, "");
+        const tail = code.replace(/\s+$/u, "");
         const prev = tail.length > 0 ? tail[tail.length - 1]! : ";";
-        const kw = /(?:return|typeof|case|in|of|new|delete|void|yield|await|do|else)$/.test(tail);
-        if (kw || "(. ,=:!&|?{};+-*%^~<>".includes(prev)) {
+        const kw = /(?:return|typeof|case|in|of|new|delete|void|yield|await|do|else)$/u.test(tail);
+        // No `}` `.` `~` `)` `#!`: a slash there is a template path
+        // (`${dir}/file`), member access, a home directory, division, or a
+        // shebang — not a literal.
+        if ((kw || "(. ,=:!&|?{;+-*%^<>".includes(prev)) && !tail.endsWith("#!")) {
           let j = i + 1;
           let inCls = false;
           while (j < raw.length) {
@@ -1030,7 +1118,8 @@ export function scanSource(name: string, src: string): GuardHit[] {
             j++;
           }
           let k = j + 1;
-          while (k < raw.length && /[a-z]/.test(raw[k]!)) k++;
+          while (k < raw.length && /[a-z]/u.test(raw[k]!)) k++;
+          if (j < raw.length && !inTemplateText(raw, i)) litFlags.push(raw.slice(j + 1, k));
           code += raw.slice(i, k);
           i = k;
           continue;
@@ -1038,7 +1127,7 @@ export function scanSource(name: string, src: string): GuardHit[] {
       }
       if (ch === "'" || ch === '"') {
         // A RegExp("...") argument is pattern text: scan its inside.
-        const isArg = /RegExp\($/.test(code.replace(/\s+$/, ""));
+        const isArg = /RegExp\($/u.test(code.replace(/\s+$/u, ""));
         i++;
         let inner = "";
         while (i < raw.length && raw[i] !== ch) {
@@ -1057,17 +1146,104 @@ export function scanSource(name: string, src: string): GuardHit[] {
       code += ch;
       i++;
     }
-    const esc = code.match(/\\{1,2}[wWdDbBsS]/);
+    const esc = code.match(/\\{1,2}[wWdDbBsS]/u);
     if (esc) {
       if (!marked(n, "esc"))
         hits.push({ file: name, line: n + 1, kind: esc[0], text: raw.trim().slice(0, 100) });
       continue;
     }
-    const fold = code.match(/\.to(Lower|Upper)Case\(/);
+    const fold = code.match(/\.to(Lower|Upper)Case\(/u);
     if (fold && !marked(n, "fold"))
       hits.push({ file: name, line: n + 1, kind: fold[0], text: raw.trim().slice(0, 100) });
+    for (const flags of litFlags) {
+      if (!flags.includes("u") && !marked(n, "esc"))
+        hits.push({ file: name, line: n + 1, kind: "no-u-flag", text: raw.trim().slice(0, 100) });
+    }
+    for (const flags of ctorFlags(raw)) {
+      if (!flags.includes("u") && !marked(n, "esc"))
+        hits.push({ file: name, line: n + 1, kind: "no-u-flag", text: raw.trim().slice(0, 100) });
+    }
   }
   return hits;
+}
+
+// Whether position i on the line sits in template text: an odd count of
+// unescaped backticks before it, outside '...'/"..." spans. Single-line
+// and ${}-blind on purpose: a literal inside ${} is missed for u (its
+// escapes are still scanned), and a backtick inside a regex literal on
+// the same line can flip the count — both per-line-local, never carried.
+function inTemplateText(raw: string, i: number): boolean {
+  let backticks = 0;
+  let quote = "";
+  let j = 0;
+  while (j < i) {
+    const ch = raw[j]!;
+    if (quote !== "") {
+      if (ch === "\\") j += 1;
+      else if (ch === quote) quote = "";
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+    } else if (ch === "`") {
+      let bs = 0;
+      let q = j - 1;
+      while (q >= 0 && raw[q] === "\\") {
+        bs += 1;
+        q -= 1;
+      }
+      if (bs % 2 === 0) backticks += 1;
+    }
+    j += 1;
+  }
+  return backticks % 2 === 1;
+}
+
+// Flags of each single-line `new RegExp(` on the line: "" when the call
+// carries none. Multi-line calls, spaced calls, aliased constructors,
+// variable flags and indirect patterns are misses (see PLANTED_MISS);
+// quoted or commented `new RegExp(` text would false-positive.
+function ctorFlags(raw: string): string[] {
+  const out: string[] = [];
+  let at = 0;
+  for (;;) {
+    const idx = raw.indexOf("new RegExp(", at);
+    if (idx < 0) return out;
+    at = idx + "new RegExp(".length;
+    let depth = 0;
+    let quote = "";
+    let comma = -1;
+    let closed = -1;
+    let j = at;
+    while (j < raw.length) {
+      const ch = raw[j]!;
+      if (quote !== "") {
+        if (ch === "\\") j += 1;
+        else if (ch === quote) quote = "";
+      } else if (ch === "'" || ch === '"' || ch === "`") {
+        quote = ch;
+      } else if (ch === "(" || ch === "[" || ch === "{") {
+        depth += 1;
+      } else if (ch === ")" || ch === "]" || ch === "}") {
+        if (depth === 0 && ch === ")") {
+          closed = j;
+          break;
+        }
+        depth -= 1;
+      } else if (ch === "," && depth === 0 && comma < 0) {
+        comma = j;
+      }
+      j += 1;
+    }
+    if (closed < 0) continue;
+    if (comma < 0) {
+      const arg = raw.slice(at, closed).trim();
+      const lit = arg.match(/^\/(?:\\.|[^/])+\/([a-z]*)$/u);
+      out.push(lit ? lit[1]! : "");
+    } else {
+      const flagArg = raw.slice(comma + 1, closed).trim();
+      const lit = flagArg.match(/^("([a-z]*)"|'([a-z]*)')$/u);
+      if (lit) out.push(lit[2] ?? lit[3] ?? "");
+    }
+  }
 }
 
 const PLANTED = [
@@ -1080,6 +1256,26 @@ const PLANTED = [
   "const g = /[\\p{L}]+/u;",
   "const h = /\\d+/; // ASCII: machine hex",
   'const q = /"v": \\d+/.test(s);',
+];
+
+// The five forms the guard misses on purpose (round-10 finding, upheld as
+// documented misses, not fixed): each pins zero hits, so any future
+// hardening — or any drift that starts catching one — fails loudly here
+// instead of silently changing the tripwire.
+const PLANTED_MISS = [
+  // 1. A string holding `// ASCII:` shields real code: marked() reads the
+  // raw line, strings included.
+  'const re = /\\d+/; const note = "// ASCII: nothing";',
+  // 2. `RegExp (` with a space: the arg test wants `RegExp(` exactly.
+  'const re = new RegExp ("\\\\w+");',
+  // 3. A multi-line constructor: the scan is line-based, so the pattern
+  // line never sees the `RegExp(` that opens it.
+  'const re = new RegExp(\n  "\\\\w+");',
+  // 4. An aliased constructor: only the name `RegExp` is recognized.
+  'const R = RegExp; const re = new R("\\\\w+");',
+  // 5. An indirect pattern variable: the string is not a call argument.
+  // The call carries u, so the miss is the pattern's, not the flags'.
+  'const pat = "\\\\w+"; const re = new RegExp(pat, "u");',
 ];
 
 function runGuard(st: SelfTest): void {
@@ -1113,6 +1309,12 @@ function runGuard(st: SelfTest): void {
     JSON.stringify(got) === JSON.stringify([1, 2, 3, 4, 5, 6, 9]),
     `got lines ${JSON.stringify(got)}, want [1,2,3,4,5,6,9]`,
   );
+  const missed = scanSource("planted-miss.ts", PLANTED_MISS.join("\n"));
+  st.check(
+    "guard documents its five known misses",
+    missed.length === 0,
+    missed.map((h) => `${h.line}: ${h.kind} ${h.text}`).join("\n"),
+  );
   st.check(
     "guard scanned the port's scripts",
     targets.some((f) => f.endsWith("tool-faults.ts")) && targets.length > 5,
@@ -1129,6 +1331,11 @@ if (typeof entryArg === "string" && resolve(entryArg) === fileURLToPath(import.m
     runGoldens(st);
     runGuard(st);
     st.finish();
+  } else if (argv.length === 1 && argv[0] === "--dump-golden-cases") {
+    // Hidden: fixture regen only, not flow. Prints {cases, prog} for
+    // scripts/fixtures/text-goldens.json (see its _note to regen).
+    console.log(JSON.stringify({ cases: goldenCases(), prog: PY_GOLDEN_PROG }));
+    process.exit(0);
   } else {
     console.error("usage: text.sh --self-test");
     process.exit(2);

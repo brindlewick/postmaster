@@ -15,13 +15,13 @@
 //   exit 0  config written (or printed), or keys listed
 //   exit 1  a harness was named that is not on PATH, the coachman shares a lane's model, fewer
 //           than two lanes were given, a reviewer is not a lane, an answer was missing, a round
-//           time limit was not a whole number of seconds from 1 to 86400, or an existing config
-//           was not overwritten
+//           time limit was not a whole number of seconds from 1 to 86400, a planning review link
+//           omitted {path}, or an existing config was not overwritten
 //
 // Control: the written file is parsed back as TOML where a parser is available, and its reviewer
 // lanes are resolved through scripts/reviewers.sh, so a config that would fail to load is never
 // left on disk as if it were fine.
-import { existsSync, mkdirSync, readFileSync, readSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { readTomlFile, tryTomlFile } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
@@ -48,6 +48,11 @@ function roleExtra(effort: string, envFile: string): string {
 function installed(tool: string): boolean {
   // command -v is a shell builtin: BASE ran it in the shell, so the port must too.
   return run("bash", ["-c", 'command -v "$1" >/dev/null 2>&1', "_", tool]).code === 0;
+}
+
+function validTasks(v: string): boolean {
+  if (!/^[1-9][0-9]*$/u.test(v)) return false;
+  return v.length <= 10 && Number(v) <= 2147483647;
 }
 
 function needHarness(h: string): void {
@@ -158,7 +163,7 @@ lane.<name>.effort?        (none)             effort, blank if the harness has n
 lane.<name>.env_file?      (none)             env file for an alternate backend
 workhorses                 <lanes>            workhorse lanes, comma separated
 reviewers                  <workhorses>       reviewer lanes, comma separated
-reviewers.<lens>?          (reviewers)        reviewer lanes for one lens only (reviewers.sh lenses)
+reviewers.<lens>?          (reviewers)        reviewer lanes for one lens only; bug reviewers need a code-review form
 coachman.harness                              never a lane's model
 coachman.model
 coachman.effort?           (none)
@@ -173,6 +178,14 @@ postmaster.effort?         (none)
 postmaster.env_file?       (none)
 max_runs                   2                  concurrent runs per project
 poll_seconds               120                postmaster poll interval
+limits.memory_max          8G                 default memory cap per launch (K, M, G or T)
+limits.tasks_max           512                default process cap per launch
+limits.lane.memory_max?    (default)          lane memory cap override
+limits.lane.tasks_max?     (default)          lane process cap override
+limits.coachman.memory_max? (default)         coachman memory cap override
+limits.coachman.tasks_max? (default)         coachman process cap override
+limits.reviewer.memory_max? (default)         reviewer memory cap override
+limits.reviewer.tasks_max? (default)          reviewer process cap override
 tracker                    github             github, plane, local or other
 plane.url                  https://api.plane.so   plane only
 plane.workspace                               plane only; the slug in the workspace's web URL
@@ -183,6 +196,7 @@ round_timeout_seconds      2400               seconds a review round may run, 1 
 merge_authority            user               user or postmaster
 checkpoint_mode            autonomous         autonomous or consult
 review_link?               (none)             template with {path}
+planning.review_link?      (none)             code-server template with {path} for workhorse specs
 overwrite                  no                 yes replaces an existing config`);
       process.exit(0);
     } else {
@@ -212,6 +226,7 @@ overwrite                  no                 yes replaces an existing config`);
   if (laneList.length < 2) die("setup: at least two lanes are needed", 1);
   let LANE_BLOCKS = "";
   const LANE_MODELS: string[] = [];
+  const LANE_HARNESSES: string[] = [];
   for (const lane of laneList) {
     const h = ask(
       `  ${lane}: harness (codex, grok, agy, claude, muse, mimo, pi)`,
@@ -238,6 +253,7 @@ overwrite                  no                 yes replaces an existing config`);
     if (ef) block += `\nenv_file = "${ef}"`;
     LANE_BLOCKS += `\n${block}\n`;
     LANE_MODELS.push(m);
+    LANE_HARNESSES.push(`${lane}=${h}`);
   }
 
   console.log("");
@@ -262,6 +278,7 @@ overwrite                  no                 yes replaces an existing config`);
       die(`setup: reviewer '${rv}' is not one of the lanes (${LANES})`, 1);
   }
   let LENS_TABLE = "";
+  let BUG_REVIEWERS = REVIEWERS;
   const lensesR = run("bash", [join(HERE, "reviewers.sh"), "lenses"]);
   const lenses = lensesR.out
     .trim()
@@ -274,6 +291,7 @@ overwrite                  no                 yes replaces an existing config`);
       `reviewers.${lens}?`,
       opts,
     );
+    if (lens === "bug") BUG_REVIEWERS = LR || REVIEWERS;
     if (!LR) continue;
     for (const rv of LR.split(",")
       .map((x) => x.trim())
@@ -284,6 +302,33 @@ overwrite                  no                 yes replaces an existing config`);
     LENS_TABLE += `${lens} = ${tomlList(LR)}\n`;
   }
   if (LENS_TABLE) LENS_TABLE = `\n[team.lens_reviewers]\n${LENS_TABLE}`;
+
+  console.log("");
+  console.log("== Bug review capability ==");
+  let BUG_REVIEWABLE = 0;
+  for (const reviewer of BUG_REVIEWERS.split(",")
+    .map((x) => x.trim())
+    .filter((x) => x !== "")) {
+    let harness = "";
+    for (const lh of LANE_HARNESSES) {
+      if (lh.startsWith(`${reviewer}=`)) {
+        harness = lh.slice(reviewer.length + 1);
+        break;
+      }
+    }
+    if (run("bash", [join(HERE, "review-forms.sh"), "has", harness]).code === 0) {
+      BUG_REVIEWABLE += 1;
+    } else {
+      console.log(
+        `setup: bug reviewer '${reviewer}' uses ${harness}, which has no code-review form`,
+      );
+    }
+  }
+  if (BUG_REVIEWABLE === 0) {
+    console.log(
+      "setup: warning: no configured bug reviewer has a code-review form; runs whose turnpikes include bug review will be refused at pre-flight",
+    );
+  }
 
   console.log("");
   console.log(
@@ -331,6 +376,48 @@ overwrite                  no                 yes replaces an existing config`);
   );
   const MR = ask("  concurrent runs per project", "2", "max_runs", opts);
   const PS = ask("  postmaster poll interval, seconds", "120", "poll_seconds", opts);
+
+  console.log("");
+  console.log(
+    "== Launch limits: per-launch memory and process caps when the host supports them. ==",
+  );
+  const LM = ask(
+    "  default memory cap (number plus K, M, G or T)",
+    "8G",
+    "limits.memory_max",
+    opts,
+  );
+  if (!/^[1-9][0-9]*[KMGT]$/u.test(LM))
+    die("setup: memory_max must be a positive whole number followed by K, M, G or T", 1);
+  const LT = ask("  default process cap (whole number)", "512", "limits.tasks_max", opts);
+  if (!validTasks(LT)) die("setup: tasks_max must be a whole number from 1 to 2147483647", 1);
+  let LIMIT_ROLE_TABLES = "";
+  for (const limitRole of ["lane", "coachman", "reviewer"]) {
+    const LR_MEM = ask(
+      `  ${limitRole} memory cap override (blank inherits the default)`,
+      "",
+      `limits.${limitRole}.memory_max?`,
+      opts,
+    );
+    if (LR_MEM && !/^[1-9][0-9]*[KMGT]$/u.test(LR_MEM))
+      die(
+        `setup: limits.${limitRole}.memory_max must be a positive whole number followed by K, M, G or T`,
+        1,
+      );
+    const LR_TASKS = ask(
+      `  ${limitRole} process cap override (blank inherits the default)`,
+      "",
+      `limits.${limitRole}.tasks_max?`,
+      opts,
+    );
+    if (LR_TASKS && !validTasks(LR_TASKS))
+      die(`setup: limits.${limitRole}.tasks_max must be a whole number from 1 to 2147483647`, 1);
+    if (LR_MEM || LR_TASKS) {
+      LIMIT_ROLE_TABLES += `\n[limits.${limitRole}]\n`;
+      if (LR_MEM) LIMIT_ROLE_TABLES += `memory_max = "${LR_MEM}"\n`;
+      if (LR_TASKS) LIMIT_ROLE_TABLES += `tasks_max = ${LR_TASKS}\n`;
+    }
+  }
 
   console.log("");
   console.log(
@@ -392,7 +479,7 @@ overwrite                  no                 yes replaces an existing config`);
     opts,
   );
   // BASE matched 1 to 5 digits with no leading zero, else refused: '0600' is not a number it takes.
-  const rtNum = /^[1-9][0-9]{0,4}$/.test(RT) ? parseInt(RT, 10) : 0;
+  const rtNum = /^[1-9][0-9]{0,4}$/u.test(RT) ? parseInt(RT, 10) : 0;
   if (rtNum < 1 || rtNum > 86400) {
     die("setup: round_timeout_seconds must be a whole number of seconds from 1 to 86400", 1);
   }
@@ -408,6 +495,13 @@ overwrite                  no                 yes replaces an existing config`);
     "review_link?",
     opts,
   );
+  const PRL = ask(
+    "Code-server link template with {path} for a workhorse spec (blank for none)",
+    "",
+    "planning.review_link?",
+    opts,
+  );
+  if (PRL && !PRL.includes("{path}")) die("setup: planning.review_link must contain {path}", 1);
 
   let TRACKER_EXTRA = "";
   if (PWS) TRACKER_EXTRA = `url = "${PURL}"\nworkspace = "${PWS}"\nenv_file = "${PENV}"`;
@@ -426,6 +520,11 @@ coachman_fallback = { harness = "${FH}", model = "${FM}"${roleExtra(FE, FEF)} }
 postmaster = { harness = "${PH}", model = "${PM}"${roleExtra(PE, PEF)} }
 max_runs = ${MR}
 ${LENS_TABLE}
+
+[limits]
+memory_max = "${LM}"
+tasks_max = ${LT}
+${LIMIT_ROLE_TABLES}
 [postmaster]
 poll_seconds = ${PS}
 
@@ -437,6 +536,9 @@ postmaster_may_create = ${PMC === "yes" ? "true" : "false"}
 [review]
 round_timeout_seconds = ${RT}
 
+[planning]
+review_link = "${PRL}"
+
 [ship]
 merge_authority = "${MA}"
 checkpoint_mode = "${CPM}"
@@ -444,7 +546,7 @@ review_link = "${RL}"
 `;
 
   if (DRY === 1) {
-    console.log(OUT.replace(/\n+$/, ""));
+    console.log(OUT.replace(/\n+$/u, ""));
     process.exit(0);
   }
   if (existsSync(CONFIG)) {
@@ -453,7 +555,7 @@ review_link = "${RL}"
   }
   mkdirSync(dirname(CONFIG), { recursive: true });
   // BASE's $(heredoc) stripped trailing newlines and printf '%s\n' added exactly one back.
-  writeFileSync(CONFIG, `${OUT.replace(/\n+$/, "")}\n`, "utf8");
+  writeFileSync(CONFIG, `${OUT.replace(/\n+$/u, "")}\n`, "utf8");
   // parse back as TOML
   try {
     readTomlFile(CONFIG);
@@ -497,14 +599,24 @@ withTempDir((tmp) => {
     writeFileSync(join(tmp, `${name}.answers`), `${lines.join("\n")}\n`, "utf8");
   }
 
+  mkdirSync(join(tmp, "bin"), { recursive: true });
+  for (const h of ["claude", "codex", "grok", "agy", "muse", "mimo", "pi"]) {
+    const p = join(tmp, "bin", h);
+    writeFileSync(p, "#!/bin/sh\nexit 0\n", "utf8");
+    chmodSync(p, 0o755);
+  }
+
   function runSetup(name: string): number {
-    const r = run("bash", [
-      SELF,
-      "--answers",
-      join(tmp, `${name}.answers`),
-      "--config",
-      join(tmp, `${name}.toml`),
-    ]);
+    const r = run(
+      "bash",
+      [SELF, "--answers", join(tmp, `${name}.answers`), "--config", join(tmp, `${name}.toml`)],
+      {
+        env: {
+          ...(process.env as Record<string, string>),
+          PATH: `${join(tmp, "bin")}:${process.env.PATH}`,
+        },
+      },
+    );
     writeFileSync(join(tmp, `${name}.out`), r.out + r.err, "utf8");
     return r.code;
   }
@@ -522,6 +634,21 @@ withTempDir((tmp) => {
     if (!cfg) return "error";
     const r = cfg.review as Record<string, unknown> | undefined;
     return String(r?.round_timeout_seconds ?? "error");
+  }
+
+  function capLimit(name: string, role: string, key: string): string {
+    const cfg = tryTomlFile(join(tmp, `${name}.toml`));
+    if (!cfg) return "";
+    const c = (cfg.limits as Record<string, unknown> | undefined) ?? {};
+    const r = (c[role] as Record<string, unknown> | undefined) ?? {};
+    return String(r[key] ?? c[key] ?? "");
+  }
+
+  function planningLink(name: string): string {
+    const cfg = tryTomlFile(join(tmp, `${name}.toml`));
+    if (!cfg) return "";
+    const p = cfg.planning as Record<string, unknown> | undefined;
+    return String(p?.review_link ?? "");
   }
 
   console.log("positive controls");
@@ -545,7 +672,8 @@ withTempDir((tmp) => {
       "--config",
       join(tmp, "lens.toml"),
     ]);
-    const expected = "reviewers: alpha, beta\nsecurity reviewers: alpha, beta, sentinel";
+    const expected =
+      "reviewers: alpha, beta\nbug reviewers: \nsecurity reviewers: alpha, beta, sentinel";
     st.check(
       "the written config resolves: the reviewers default to the workhorses, and security has its own",
       r.out.trim() === expected,
@@ -594,6 +722,65 @@ withTempDir((tmp) => {
       JSON.stringify(t?.coachman) === '{"harness":"bash","model":"judge"}',
     );
   }
+  st.check(
+    "a planning link defaults to empty under [planning]",
+    planningLink("plain") === "",
+    planningLink("plain"),
+  );
+  answers("planlink", "planning.review_link=https://code.example/open?file={path}");
+  const planlinkRc = runSetup("planlink");
+  st.check(
+    "the planning link template is stored under [planning]",
+    planlinkRc === 0 && planningLink("planlink") === "https://code.example/open?file={path}",
+    `exit ${planlinkRc}`,
+  );
+
+  st.check(
+    "launch memory and process caps default to 8G and 512",
+    capLimit("plain", "default", "memory_max") === "8G" &&
+      capLimit("plain", "default", "tasks_max") === "512",
+    `${capLimit("plain", "default", "memory_max")} ${capLimit("plain", "default", "tasks_max")}`,
+  );
+  answers(
+    "caps",
+    "limits.memory_max=8G\nlimits.tasks_max=384\nlimits.lane.memory_max=2G\nlimits.reviewer.tasks_max=96",
+  );
+  const capsRc = runSetup("caps");
+  st.check(
+    "a role can override either cap and inherit the other",
+    capsRc === 0 &&
+      capLimit("caps", "default", "memory_max") === "8G" &&
+      capLimit("caps", "default", "tasks_max") === "384" &&
+      capLimit("caps", "lane", "memory_max") === "2G" &&
+      capLimit("caps", "lane", "tasks_max") === "384" &&
+      capLimit("caps", "reviewer", "memory_max") === "8G" &&
+      capLimit("caps", "reviewer", "tasks_max") === "96",
+    `exit ${capsRc}`,
+  );
+  answers("badmemory", "limits.memory_max=4.5G");
+  const badmemoryRc = runSetup("badmemory");
+  {
+    const out = readFileSync(join(tmp, "badmemory.out"), "utf8");
+    st.check(
+      "a malformed default memory cap is refused, and nothing is written",
+      badmemoryRc === 1 &&
+        !existsSync(join(tmp, "badmemory.toml")) &&
+        out.includes("memory_max must be"),
+      `exit ${badmemoryRc}`,
+    );
+  }
+  answers("badtasks", "limits.reviewer.tasks_max=0");
+  const badtasksRc = runSetup("badtasks");
+  {
+    const out = readFileSync(join(tmp, "badtasks.out"), "utf8");
+    st.check(
+      "a zero role process cap is refused, and nothing is written",
+      badtasksRc === 1 &&
+        !existsSync(join(tmp, "badtasks.toml")) &&
+        out.includes("reviewer.tasks_max must be"),
+      `exit ${badtasksRc}`,
+    );
+  }
 
   st.check(
     "a review round's time limit defaults to 2400 seconds, under [review]",
@@ -607,6 +794,46 @@ withTempDir((tmp) => {
     limitRc === 0 && limit("limit") === "86400",
     `exit ${limitRc} limit=${limit("limit")}`,
   );
+
+  answers("no-bug", "reviewers.bug=alpha, beta");
+  const noBugRc = runSetup("no-bug");
+  {
+    const out = readFileSync(join(tmp, "no-bug.out"), "utf8");
+    st.check(
+      "setup names unsupported bug reviewers and warns when none has a review form",
+      noBugRc === 0 &&
+        out.includes("bug reviewer 'alpha' uses bash, which has no code-review form") &&
+        out.includes("bug reviewer 'beta' uses bash, which has no code-review form") &&
+        out.includes("warning: no configured bug reviewer has a code-review form"),
+      `exit ${noBugRc}\n${out}`,
+    );
+  }
+  answers("mixed-bug", "reviewers.bug=alpha, beta");
+  {
+    const ap = join(tmp, "mixed-bug.answers");
+    const swapped = readFileSync(ap, "utf8")
+      .replace(/^lane\.alpha\.harness=bash$/mu, "lane.alpha.harness=claude")
+      .replace(/^lane\.beta\.harness=bash$/mu, "lane.beta.harness=pi");
+    writeFileSync(ap, swapped, "utf8");
+  }
+  const mixedBugRc = runSetup("mixed-bug");
+  {
+    const out = readFileSync(join(tmp, "mixed-bug.out"), "utf8");
+    const er = run("bash", [
+      join(HERE, "reviewers.sh"),
+      "eligible",
+      "bug",
+      "--config",
+      join(tmp, "mixed-bug.toml"),
+    ]);
+    st.check(
+      "setup warns for the ineligible lane and resolves the eligible bug reviewer",
+      mixedBugRc === 0 &&
+        out.includes("bug reviewer 'beta' uses pi, which has no code-review form") &&
+        er.out.trim() === "alpha",
+      `exit ${mixedBugRc}\n${out}\n${er.out}${er.err}`,
+    );
+  }
 
   console.log("negative controls");
   const badLimits = [
@@ -649,7 +876,7 @@ withTempDir((tmp) => {
   // remove the default coachman.model=judge line
   {
     const f = join(tmp, "shared.answers");
-    const text = readFileSync(f, "utf8").replace(/^coachman\.model=judge$\n?/m, "");
+    const text = readFileSync(f, "utf8").replace(/^coachman\.model=judge$\n?/mu, "");
     writeFileSync(f, text, "utf8");
   }
   const sharedRc = runSetup("shared");
@@ -667,7 +894,7 @@ withTempDir((tmp) => {
   // remove fallback.model= line
   {
     const f = join(tmp, "missing.answers");
-    const text = readFileSync(f, "utf8").replace(/^fallback\.model=.*$\n?/m, "");
+    const text = readFileSync(f, "utf8").replace(/^fallback\.model=.*$\n?/mu, "");
     writeFileSync(f, text, "utf8");
   }
   const missingRc = runSetup("missing");
@@ -679,6 +906,18 @@ withTempDir((tmp) => {
         !existsSync(join(tmp, "missing.toml")) &&
         out.includes("no answer for fallback.model"),
       out,
+    );
+  }
+  answers("badlink", "planning.review_link=https://code.example/open");
+  const badlinkRc = runSetup("badlink");
+  {
+    const out = readFileSync(join(tmp, "badlink.out"), "utf8");
+    st.check(
+      "a non-empty planning link without {path} is refused",
+      badlinkRc === 1 &&
+        !existsSync(join(tmp, "badlink.toml")) &&
+        out.includes("planning.review_link must contain {path}"),
+      `exit ${badlinkRc}\n${out}`,
     );
   }
 

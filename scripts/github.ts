@@ -113,7 +113,7 @@ interface ListItem {
 }
 
 // --- remote parsing ---------------------------------------------------------------------------
-const REMOTE_RE = /github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/;
+const REMOTE_RE = /github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/u;
 
 // --- gh helper --------------------------------------------------------------------------------
 function gh(argv: string[], ok: number[] = [0]): string {
@@ -153,12 +153,31 @@ function linkedBoards(owner: string, name: string): Board[] {
   return (nodes as Board[]).filter((n) => !n.closed);
 }
 
+let REPO_DIR = "";
+
+function trackerBinding(): string | null {
+  const r = run(join(scriptsDir(import.meta), "project-settings.sh"), ["inspect", REPO_DIR]);
+  if (r.code !== 0) dieGh(r.err.trim() || "cannot read the project's tracker binding");
+  try {
+    return JSON.parse(r.out).tracker?.binding ?? null;
+  } catch (e) {
+    dieGh(`project settings gave no JSON: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 function boardOf(nwo: string, owner: string, name: string): Board {
   const boards = linkedBoards(owner, name);
   if (boards.length === 0) {
     dieGh(`${nwo} has no linked board; run: github.sh <repo> board init`, 3);
   }
-  const named = boards.filter((b) => b.title === name);
+  const binding = trackerBinding();
+  const named = boards.filter((b) => b.title === (binding || name));
+  if (binding) {
+    if (named.length === 0)
+      dieGh(`the project's tracker binding '${binding}' is not a linked GitHub Projects board`);
+    if (named.length > 1)
+      dieGh(`the project's tracker binding '${binding}' matches more than one linked board`);
+  }
   const b = boards.length > 1 && named.length > 0 ? named[0] : boards[0];
   if (!b) dieGh(`${nwo} has no linked board; run: github.sh <repo> board init`, 3);
   b.ownerLogin = b.owner?.login || owner;
@@ -397,7 +416,7 @@ const DATE_PREFIX_RE = /^\p{Nd}{4}-\p{Nd}{2}-\p{Nd}{2} /u;
 // --- helpers ----------------------------------------------------------------------------------
 function numberArg(s: string): number {
   if (!NUMBER_RE.test(s)) dieGh(`not an issue number: ${s}`);
-  return parseInt(digitValue(s.replace(/^#/, "")), 10);
+  return parseInt(digitValue(s.replace(/^#/u, "")), 10);
 }
 
 function textOf(path: string, what: string): string {
@@ -417,9 +436,9 @@ function bodyFile(path: string): string {
 
 function normal(text: string): string {
   const lines = text
-    .replace(/\r\n/g, "\n")
+    .replace(/\r\n/gu, "\n")
     .split("\n")
-    .map((l) => l.replace(/[ \t]+$/, ""));
+    .map((l) => l.replace(/[ \t]+$/u, ""));
   while (lines.length > 0 && lines[0] === "") lines.shift();
   while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   return lines.join("\n");
@@ -444,6 +463,7 @@ function main(): void {
     );
   }
   if (!existsSync(REPO) || !statSync(REPO).isDirectory()) dieGh(`no such directory: ${REPO}`);
+  REPO_DIR = REPO;
   if (!Bun.which("gh")) dieGh("gh is not on PATH");
   const ghCheck = run("gh", ["auth", "status"]);
   if (ghCheck.code !== 0) dieGh("gh is not logged in; the user runs: gh auth login");
@@ -464,7 +484,7 @@ function main(): void {
       const b = boardOf(NWO, OWNER, NAME);
       console.log(`#${b.number}\t${b.title}\t${b.url}`);
     } else if (args[1] === "init" && (args.length === 2 || args.length === 3)) {
-      boardInit(OWNER, NAME, NWO, args.length === 3 ? (args[2] ?? NAME) : NAME);
+      boardInit(OWNER, NAME, NWO, args.length === 3 ? (args[2] ?? NAME) : trackerBinding() || NAME);
     } else {
       dieGh("usage: github.sh <repo> board [init [title]]");
     }
@@ -487,7 +507,7 @@ function main(): void {
       args[2] ?? "",
     ]);
     const url = createOut.trim().split("\n").pop() ?? "";
-    const number = parseInt(url.replace(/\/$/, "").split("/").pop() ?? "0", 10);
+    const number = parseInt(url.replace(/\/$/u, "").split("/").pop() ?? "0", 10);
     try {
       setColumn(b, NWO, number, url, "todo");
     } catch (e) {
@@ -618,7 +638,7 @@ function main(): void {
     console.log(perm);
   } else if (cmd === "search") {
     if (args.length !== 2) dieGh("usage: github.sh <repo> search <text>");
-    const text = (args[1] ?? "").replace(/[":]/g, " ").trim();
+    const text = (args[1] ?? "").replace(/[":]/gu, " ").trim();
     const hits = ghj<Array<{ number: number; title: string; state: string }>>([
       "search",
       "issues",
@@ -644,7 +664,7 @@ function main(): void {
 
 function catA(text: string): string {
   return text
-    .replace(/\t/g, "^I")
+    .replace(/\t/gu, "^I")
     .split("\n")
     .map((l, i, arr) => (i < arr.length - 1 ? `${l}$` : l))
     .join("\n");
@@ -796,6 +816,52 @@ esac
 
     console.log("positive controls");
 
+    // The shared tracker binding selects its named linked board.
+    mkdirSync(join(tmp, "repo", ".postmaster"), { recursive: true });
+    writeFileSync(
+      join(tmp, "repo", ".postmaster", "project.toml"),
+      '[tracker]\nbinding = "chosen"\n',
+    );
+    writeFileSync(
+      join(S, "boards.json"),
+      '{"data":{"repository":{"projectsV2":{"nodes":[{"id":"PVT_1","number":1,"title":"r","closed":false,"url":"https://github.com/users/o/projects/1","owner":{"login":"o"}},{"id":"PVT_2","number":2,"title":"chosen","closed":false,"url":"https://github.com/users/o/projects/2","owner":{"login":"o"}}]}}}}\n',
+    );
+    {
+      const rb = ghSh(["board"]);
+      st.check(
+        "the shared tracker binding selects its named linked board",
+        rb.code === 0 && rb.out === "#2\tchosen\thttps://github.com/users/o/projects/2\n",
+        `exit ${rb.code}\n${rb.out}${rb.err}`,
+      );
+    }
+    writeFileSync(
+      join(tmp, "repo", ".postmaster", "project.toml"),
+      '[tracker]\nbinding = "missing"\n',
+    );
+    {
+      const rb = ghSh(["board"]);
+      st.check(
+        "a binding naming no linked board is refused",
+        rb.code === 1 && rb.err.includes("is not a linked GitHub Projects board"),
+        `exit ${rb.code}\n${rb.out}${rb.err}`,
+      );
+    }
+    writeFileSync(
+      join(S, "boards.json"),
+      '{"data":{"repository":{"projectsV2":{"nodes":[{"id":"PVT_1","number":1,"title":"dup","closed":false,"url":"https://github.com/users/o/projects/1","owner":{"login":"o"}},{"id":"PVT_2","number":2,"title":"dup","closed":false,"url":"https://github.com/users/o/projects/2","owner":{"login":"o"}}]}}}}\n',
+    );
+    writeFileSync(join(tmp, "repo", ".postmaster", "project.toml"), '[tracker]\nbinding = "dup"\n');
+    {
+      const rb = ghSh(["board"]);
+      st.check(
+        "a binding matching two linked boards is refused",
+        rb.code === 1 && rb.err.includes("matches more than one linked board"),
+        `exit ${rb.code}\n${rb.out}${rb.err}`,
+      );
+    }
+    rmSync(join(tmp, "repo", ".postmaster", "project.toml"));
+    writeFileSync(join(S, "boards.json"), `${BOARD}\n`);
+
     // 1. read --body prints the stored body byte for byte, then one newline
     stored(7, join(tmp, "lf.md"));
     let r = ghSh(["read", "7", "--body"]);
@@ -861,7 +927,7 @@ esac
     stored(7, join(tmp, "crlf.md"));
     writeFileSync(
       join(tmp, "base-lf.md"),
-      readFileSync(join(tmp, "crlf.md"), "utf8").replace(/\r/g, ""),
+      readFileSync(join(tmp, "crlf.md"), "utf8").replace(/\r/gu, ""),
     );
     writeFileSync(join(S, "edits.log"), "");
     r = ghSh(["edit", "7", join(tmp, "new.md"), join(tmp, "base-lf.md")]);

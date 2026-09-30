@@ -38,7 +38,7 @@ function closeOpen(log: string, now: string): void {
   // drop a trailing empty line from the final newline
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   const head =
-    /^## (.+) \(([0-9]{4}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]) UTC\)$/;
+    /^## (.+) \(([0-9]{4}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]) UTC\)$/u;
   const found: Array<{ i: number; m: RegExpMatchArray }> = [];
   lines.forEach((l, i) => {
     const m = head.exec(l);

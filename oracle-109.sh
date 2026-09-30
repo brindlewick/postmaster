@@ -22,6 +22,13 @@
 # ("bunyan" passed silent). Both proven by execution; a --self-test now
 # locks the patterns against fixtures. AC2, AC3, AC5 and AC6 still blind.
 #
+# Amended thrice in review (round 10, on ruling): the live python3 the old
+# self-tests spawned is committed fixtures now, so any spawn is a failure
+# again — and the pattern covers every spawn form (execFile and exec joined
+# run/spawn/Bun.spawn, sync and versioned alike). Full-line // comments are
+# prose, not execution, and no longer match; trailing prose with spawn
+# syntax would still flag (none exists). AC2, AC3, AC5 and AC6 still blind.
+#
 # Usage: ./oracle-109.sh [--self-test]   (runs from the repo root; installs deps if needed)
 # Exit 0 when every acceptance criterion holds, 1 otherwise.
 set -uo pipefail
@@ -31,7 +38,10 @@ cd "$ROOT" || exit 1
 # Executable Python only: a spawn of the interpreter, -c, an interpreter path,
 # a PY-heredoc or a python shebang. Vocabulary ("python3" as an interpreter
 # name, --python as a flag) and fixture strings are not execution.
-PYINV='run\(["'"'"']python3?(\.[0-9]+)*["'"'"']|spawn(Sync)?\(["'"'"']python3?(\.[0-9]+)*["'"'"']|Bun\.spawn\(\[?["'"'"']python3?(\.[0-9]+)*["'"'"']|exec +python3?([^a-zA-Z0-9_]|$)|python3?(\.[0-9]+)* +-c|/python[0-9.]*([^a-zA-Z0-9_]|$)|<<-?[[:space:]]*['"'"']?PY|#!.*python'
+PYINV='run\(["'"'"']python3?(\.[0-9]+)*["'"'"']|spawn(Sync)?\(["'"'"']python3?(\.[0-9]+)*["'"'"']|execFile(Sync)?\(["'"'"']python3?(\.[0-9]+)*["'"'"']|exec(Sync)?\(["'"'"']python3?(\.[0-9]+)*|Bun\.spawn(Sync)?\(\[?["'"'"']python3?(\.[0-9]+)*["'"'"']|\$`python3?([^a-zA-Z0-9_]|$)|exec +python3?([^a-zA-Z0-9_]|$)|python3?(\.[0-9]+)* +-c|/python[0-9.]*([^a-zA-Z0-9_]|$)|<<-?[[:space:]]*['"'"']?PY|#!.*python'
+# Full-line // comments are prose: a match there never counts, wherever the
+# file lives. Code before a // still counts (pinned by the self-test).
+PYINV_NOT=':[0-9]+:[[:space:]]*//'
 
 # Reports bare external imports under $SCAN_DIR: paths Bun's own parser finds
 # that are neither relative, absolute, bun/bun:, node:, nor Node built-ins.
@@ -65,11 +75,30 @@ if [ "${1:-}" = "--self-test" ]; then
   hit 'run("python3") is execution' 'const r = run("python3", args);'
   hit 'run("python3.11") is execution' 'const r = run("python3.11", args);'
   hit 'Bun.spawn(["python3.11"]) is execution' 'Bun.spawn(["python3.11", x])'
+  hit 'Bun.spawnSync("python3") is execution' 'Bun.spawnSync("python3");'
   hit "spawnSync('python3.11') is execution" "spawnSync('python3.11', []);"
+  hit 'execFileSync("python3") is execution' 'execFileSync("python3", []);'
+  hit "execFile('python3.11') is execution" "execFile('python3.11', []);"
+  hit 'execSync("python3 --version") is execution' 'execSync("python3 --version");'
+  hit 'a Bun shell python3 is execution' 'await $`python3 prog.py`;'
   hit 'python3.11 -c is execution' 'python3.11 -c "x"'
   hit 'exec python3.11 is execution' 'exec python3.11 script.py'
   miss 'an interpreter name as config vocabulary is not' 'harness = "python3"'
   miss 'a gate command string in a test is not' 'command = "python evals/run.py"'
+  echo "AC1 filter: full-line comments are prose, code is not"
+  fix2=$(mktemp -d) || exit 1
+  mkdir -p "$fix2/scripts"
+  printf '// regen with python3 -c over the range\n' > "$fix2/scripts/prose.ts"
+  printf 'const v = run("python3", a); // trailing comment\n' > "$fix2/scripts/code.ts"
+  if grep -rnE "$PYINV" "$fix2/scripts/" 2>/dev/null | grep -vE "$PYINV_NOT" | grep -q .; then
+    if grep -rnE "$PYINV" "$fix2/scripts/" 2>/dev/null | grep -vE "$PYINV_NOT" | grep -q 'code.ts'; then
+      echo "  ok   code before a trailing comment still flags"
+    else echo "  FAIL code before a trailing comment still flags"; fails=$((fails+1)); fi
+    if grep -rnE "$PYINV" "$fix2/scripts/" 2>/dev/null | grep -vE "$PYINV_NOT" | grep -q 'prose.ts'; then
+      echo "  FAIL a full-line comment does not flag"; fails=$((fails+1));
+    else echo "  ok   a full-line comment does not flag"; fi
+  else echo "  FAIL the filter kept nothing (both fixtures missed)"; fails=$((fails+1)); fi
+  rm -rf "$fix2"
   echo "AC4 classifier: only bun/bun:, node: and built-ins pass"
   fix=$(mktemp -d) || exit 1
   mkdir -p "$fix/scripts"
@@ -102,9 +131,9 @@ if find scripts -name '*.py' | grep -q .; then
   bad "python files under scripts/: $(find scripts -name '*.py' | tr '\n' ' ')"; ac1_bad=1
 else ok "no .py files under scripts/"; fi
 # PYINV is defined above, beside the self-test that locks it.
-if grep -rnE "$PYINV" scripts/ 2>/dev/null | grep -q .; then
-  bad "python executed under scripts/:"; grep -rnE "$PYINV" scripts/ | head -5 | sed 's/^/         /'; ac1_bad=1
-else ok "no python execution under scripts/ (spawns, -c, paths, heredocs, shebangs)"; fi
+if grep -rnE "$PYINV" scripts/ 2>/dev/null | grep -vE "$PYINV_NOT" | grep -q .; then
+  bad "python executed under scripts/:"; grep -rnE "$PYINV" scripts/ | grep -vE "$PYINV_NOT" | head -5 | sed 's/^/         /'; ac1_bad=1
+else ok "no python execution under scripts/ (spawns, -c, paths, heredocs, shebangs; full-line comments are prose)"; fi
 wrap_bad=0
 for w in scripts/*.sh; do
   lines=$(wc -l < "$w" | tr -d ' ')
@@ -153,7 +182,9 @@ TABLE
 if [ $rc -eq 0 ] && [ "$got" = "$want" ]; then
   ok "turnpikes.sh --list exits 0 with the BASE table"
 else bad "turnpikes.sh --list diverges from BASE (exit $rc)"; ac2_bad=1; fi
-want_stages='dispatched bootstrapped workhorses-running synthesis checkpoint-1 review shipping shipped done abandoned'
+# main added the planning stage after this oracle was written; the list below
+# is main's scripts/stage.sh STAGES verbatim, not the port's output.
+want_stages='dispatched bootstrapped planning workhorses-running synthesis checkpoint-1 review shipping shipped done abandoned'
 if [ "$(scripts/stage.sh --list 2>/dev/null | tr '\n' ' ' | sed 's/ $//')" = "$want_stages" ]; then
   ok "stage.sh --list exits 0 with the BASE stage order"
 else bad "stage.sh --list diverges from BASE"; ac2_bad=1; fi

@@ -4,17 +4,20 @@
 // from the postmaster to the user is printed first, since it is what everything else may
 // be waiting on.
 //
-//   runs-status.sh <project-run-root>        e.g. ~/.postmaster/runs/<project>
+//   runs-status.sh <project-run-root>        e.g. <project>/.postmaster/runs
 //   runs-status.sh --self-test
 //
 //   next   USER      the postmaster has put this run's question to the user and waits for the
 //                    answer (.waiting-on-user)
 //          RULE      an escalation is waiting (.escalation-ready)
 //          GATE      the ship card is complete (.card-ready)
+//          SPEC      a spec review package is waiting (.spec-review-ready): the postmaster puts
+//                    each workhorse's spec to the user, one at a time
 //          DISPATCH  the current leg is done (.leg-<n>-done): the next leg, or after the last,
 //                    the postmaster's close
 //          REMOUNT   the current leg's process exited (.leg-<n>-exited) with no hand-off,
-//                    escalation or card: resume it, or relaunch it on the fallback after a wall
+//                    escalation, card or spec package: resume it, or relaunch it on the fallback
+//                    after a wall
 //          READ      a checkpoint card is waiting to be read (.checkpoint-*-ready)
 //          INSPECT   no marker, nothing changed for 30 minutes, run not done
 //          WAIT      a leg is running and its files are moving
@@ -106,6 +109,7 @@ function status(root: string): number {
     else if (markers.includes(".waiting-on-user")) next = "USER";
     else if (markers.includes(".escalation-ready")) next = "RULE";
     else if (markers.includes(".card-ready")) next = "GATE";
+    else if (markers.includes(".spec-review-ready")) next = "SPEC";
     else if (done) next = "DISPATCH";
     else if (exited) next = "REMOUNT";
     else if (markers.some((mk) => mk.startsWith(".checkpoint-"))) next = "READ";
@@ -131,10 +135,11 @@ function matchMarker(name: string, pat: string): boolean {
   const re = new RegExp(
     "^" +
       pat
-        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-        .replace(/\*/g, "[^/]*")
-        .replace(/\?/g, ".") +
+        .replace(/[.+^${}()|[\]\\]/gu, "\\$&")
+        .replace(/\*/gu, "[^/]*")
+        .replace(/\?/gu, ".") +
       "$",
+    "u",
   );
   return re.test(name);
 }
@@ -229,6 +234,7 @@ withTempDir((tmp) => {
 
   mkRun("rule", "review", 2, ".escalation-ready");
   mkRun("gate", "shipping", 3, ".card-ready");
+  mkRun("spec", "planning", 1, ".spec-review-ready", ".leg-1-exited");
   mkRun("dispatch", "review", 2, ".leg-2-done", ".leg-2-exited");
   mkRun("remount", "review", 2, ".leg-2-exited");
   mkRun("read", "review", 2, ".checkpoint-review-ready");
@@ -239,6 +245,7 @@ withTempDir((tmp) => {
   mkRun("closed", "done", 3, ".leg-3-done", ".leg-3-exited");
   mkRun("earlier", "review", 2, ".leg-1-done");
   mkRun("usergate", "shipping", 3, ".card-ready", ".waiting-on-user");
+  mkRun("userspec", "planning", 1, ".spec-review-ready", ".waiting-on-user");
   mkRun("userclosed", "done", 3, ".waiting-on-user");
   mkRun("stall", "review", 2);
   age("stall");
@@ -248,6 +255,7 @@ withTempDir((tmp) => {
   console.log("positive controls");
   expect("an escalation waiting is RULE", "rule", "RULE");
   expect("a complete ship card is GATE", "gate", "GATE");
+  expect("a spec review package waiting is SPEC", "spec", "SPEC");
   expect("the current leg done is DISPATCH", "dispatch", "DISPATCH");
   expect("the current leg gone with nothing written is REMOUNT", "remount", "REMOUNT");
   expect("a checkpoint card waiting is READ", "read", "READ");
@@ -259,6 +267,7 @@ withTempDir((tmp) => {
   console.log("negative controls");
   expect("an earlier leg's done marker dispatches nothing", "earlier", "WAIT");
   expect("a ship card put to the user waits on the user, not the gate", "usergate", "USER");
+  expect("a spec package put to the user waits on the user, not the package", "userspec", "USER");
   expect("a closed run stays closed with a stale marker", "userclosed", "-");
   expect("touching a marker does not hide a stall", "stall", "INSPECT");
   if (nextOf("postmaster") === "") st.ok("the postmaster's own directory is not a run");

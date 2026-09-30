@@ -6,7 +6,7 @@
 //                                                         uses, as scripts/tracker-kind.sh names it:
 //                                                         local when its store exists, else the
 //                                                         config's [tracker] kind
-//   ticket-check.sh --body <body-file> [--title <title>]  a body file, as an adapter's create
+//   ticket-check.sh --body <body-file> [--title <title>] [--project <repo>] a body file, as an adapter's create
 //                                                         takes it; the title is judged only when
 //                                                         --title gives one
 //   ticket-check.sh --splice <base-body> <sections>       print <base-body> with each `##` section
@@ -28,7 +28,7 @@
 //   - No part is marked to be decided later: TBD or TBC anywhere, or TODO as the whole text or
 //     followed by a colon. TODO as a word, as in "a TODO list", is not a mark.
 //   - The turnpikes are `default`, `none` or turnpike names, as `scripts/turnpikes.sh resolve`
-//     reads them, and every word that is not a turnpike is named. The names come from that
+//     reads them for the target project, and every word that is not a turnpike is named. The names come from that
 //     script alone, so a turnpike added there needs no change here.
 // Code spans, fenced blocks and HTML comments are not read for questions, marks or headings,
 // and quoted text is not read for questions. A <!-- that nothing closes is text. Turnpikes are
@@ -61,7 +61,9 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -96,28 +98,33 @@ function dieT(msg: string): never {
 // --- regex constants ---------------------------------------------------------------------------
 const HEADING = new RegExp(
   "^ {0,3}(#{1,6})(?:[ \t]+(" + PY_DOT + "*?))?[ \t]*" + END_OF_STRING + "",
+  "u",
 );
 const FENCE = new RegExp(
   "^[" + PY_S_CLASS + "]*(`{3,})[^`]*" + END_OF_STRING + "|^[" + PY_S_CLASS + "]*(~{3,})",
+  "u",
 );
 const FENCED_ITEM = new RegExp(
   "^ *(?:[-*+]|\\p{Nd}{1,9}[.)])[ \t]+(?:(`{3,})[^`]*|(~{3,})" + PY_DOT + "*)" + END_OF_STRING + "",
   "u",
 );
-const TICKS = /`+/g;
-const SPAN = /(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n).)+?)(?<!`)\1(?!`)/gs;
-const QUOTED = /"[^"\n]*"|"[^"\n]*"/g;
-const QUESTION = new RegExp("[?？][*_)\\]]*[.,;:]?(?=[" + PY_S_CLASS + "]|" + END_OF_STRING + ")");
+const TICKS = /`+/gu;
+const SPAN = /(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n).)+?)(?<!`)\1(?!`)/gsu;
+const QUOTED = /"[^"\n]*"|"[^"\n]*"/gu;
+const QUESTION = new RegExp(
+  "[?？][*_)\\]]*[.,;:]?(?=[" + PY_S_CLASS + "]|" + END_OF_STRING + ")",
+  "u",
+);
 const ITEM = new RegExp(
   "^( *)(\\p{Nd}{1,9})[.)](?:[ \t]+(" + PY_DOT + "*))?" + END_OF_STRING + "",
   "u",
 );
-const BULLET = /^ {0,3}[-*+](?:[ \t]|$)/;
-const BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+const BULLET = /^ {0,3}[-*+](?:[ \t]|$)/u;
+const BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/u;
 const MARK1 = new RegExp(BOUND_L + "(TBD|TBC)" + BOUND_R + "", "u");
 const MARK2 = new RegExp(BOUND_L + "(TODO)" + BOUND_R + "[" + PY_S_CLASS + "]*:", "u");
 const MARK3 = new RegExp("^[^" + W_CLASS + "]*(TODO)[^" + W_CLASS + "]*" + END_OF_STRING + "", "u");
-const QSPLIT = new RegExp("(?<=[.!?？]+)[" + PY_S_CLASS + "]+|\\n[" + PY_S_CLASS + "]*");
+const QSPLIT = new RegExp("(?<=[.!?？]+)[" + PY_S_CLASS + "]+|\\n[" + PY_S_CLASS + "]*", "u");
 const PARTS: Array<[string, string]> = [
   ["problem / feature", "Problem / feature"],
   ["acceptance criteria", "Acceptance criteria"],
@@ -135,7 +142,7 @@ const RANK: Record<string, number> = {
 
 function loadText(path: string): string {
   try {
-    return readFileSync(path, "utf8").replace(/^\ufeff/, "");
+    return readFileSync(path, "utf8").replace(/^\ufeff/u, "");
   } catch (e: any) {
     dieT(`cannot read ${path}: ${e?.message ?? e}`);
   }
@@ -163,7 +170,10 @@ function uncomment(
     const bm = TICKS.exec(t);
     const bStart = bm?.index ?? -1;
     if (bm && (c < 0 || bStart < c)) {
-      const closeRe = new RegExp(`(?<!\`)${bm[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\`)`);
+      const closeRe = new RegExp(
+        `(?<!\`)${bm[0].replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?!\`)`,
+        "u",
+      );
       const after = t.slice(bm.index + bm[0].length);
       const cm = closeRe.exec(after);
       const end = cm ? bm.index + bm[0].length + cm.index + cm[0].length : bm.index + bm[0].length;
@@ -204,7 +214,7 @@ function tokenize(text: string): [string[], Array<[string, boolean]>] {
   for (let k = 0; k < raw.length; k++) {
     // A CRLF body keeps its \r in raw (splice prints the body byte for byte); the analysis
     // line is stripped, so the regexes below see a line as BASE's `.`-matches-\r did.
-    const t = raw[k]?.replace(/\r$/, "");
+    const t = raw[k]?.replace(/\r$/u, "");
     if (fence) {
       lines.push([t, true]);
       const s = t.trim();
@@ -230,9 +240,9 @@ function tokenize(text: string): [string[], Array<[string, boolean]>] {
 
 function norm(h: string): string {
   // text.ts: BASE norm strips like Python, spaces slashes, squashes \s-runs, lowers.
-  const s = pyTrim(pyTrim(pyTrim(h).replace(/[ \t]+#+$/, "")).replace(/:$/, ""));
-  const slashed = s.replace(new RegExp("[" + PY_S_CLASS + "]*/[" + PY_S_CLASS + "]*", "g"), " / ");
-  return pyLower(pyTrim(slashed.replace(new RegExp("[" + PY_S_CLASS + "]+", "g"), " ")));
+  const s = pyTrim(pyTrim(pyTrim(h).replace(/[ \t]+#+$/u, "")).replace(/:$/u, ""));
+  const slashed = s.replace(new RegExp("[" + PY_S_CLASS + "]*/[" + PY_S_CLASS + "]*", "gu"), " / ");
+  return pyLower(pyTrim(slashed.replace(new RegExp("[" + PY_S_CLASS + "]+", "gu"), " ")));
 }
 
 interface Head {
@@ -572,14 +582,14 @@ function selfTest(): void {
     const listLines = LIST.trim().split("\n").filter(Boolean);
     const DEF = listLines
       // ASCII: turnpikes.sh --list emits ASCII slug-names; fields split on its runs.
-      .filter((l) => l.split(/\s+/)[1] === "default")
+      .filter((l) => l.split(/\s+/u)[1] === "default")
       // ASCII: turnpike slugs from --list are ASCII by the TABLE.
-      .map((l) => l.split(/\s+/)[0])
+      .map((l) => l.split(/\s+/u)[0])
       .join(", ");
     // ASCII: turnpike slugs from --list are ASCII by the TABLE.
-    const N1 = listLines[0]?.split(/\s+/)[0] ?? "";
+    const N1 = listLines[0]?.split(/\s+/u)[0] ?? "";
     // ASCII: turnpike slugs from --list are ASCII by the TABLE.
-    const N2 = listLines[1]?.split(/\s+/)[0] ?? "";
+    const N2 = listLines[1]?.split(/\s+/u)[0] ?? "";
     // LOWER: turnpike slugs from --list are ASCII by the TABLE.
     const N2UP = N2.charAt(0).toUpperCase() + N2.slice(1);
     const NOPE = "zz-not-listed";
@@ -588,7 +598,7 @@ function selfTest(): void {
       process.exit(1);
     }
     // ASCII: turnpike slugs from --list are ASCII by the TABLE.
-    if (listLines.some((l) => l.split(/\s+/)[0] === NOPE)) {
+    if (listLines.some((l) => l.split(/\s+/u)[0] === NOPE)) {
       console.error(`self-test: ${NOPE} is a turnpike; pick another unused name`);
       process.exit(1);
     }
@@ -635,7 +645,7 @@ function selfTest(): void {
           ? out
               .split("\n")
               .filter((l) =>
-                /^(title|problem \/ feature|acceptance criteria|direction|turnpikes): /.test(l),
+                /^(title|problem \/ feature|acceptance criteria|direction|turnpikes): /u.test(l),
               )
               .map((l) => l.split(":")[0])
               .filter((v, i, a) => a.indexOf(v) === i)
@@ -668,6 +678,8 @@ function selfTest(): void {
     copyFileSync(join(HERE, "ticket-check.ts"), join(tmp, "bin", "ticket-check.ts"));
     copyFileSync(join(HERE, "turnpikes.sh"), join(tmp, "bin", "turnpikes.sh"));
     copyFileSync(join(HERE, "turnpikes.ts"), join(tmp, "bin", "turnpikes.ts"));
+    copyFileSync(join(HERE, "project-settings.sh"), join(tmp, "bin", "project-settings.sh"));
+    copyFileSync(join(HERE, "project-settings.ts"), join(tmp, "bin", "project-settings.ts"));
     copyFileSync(join(HERE, "tracker-kind.sh"), join(tmp, "bin", "tracker-kind.sh"));
     copyFileSync(join(HERE, "tracker-kind.ts"), join(tmp, "bin", "tracker-kind.ts"));
     mkdirSync(join(tmp, "bin", "lib"), { recursive: true });
@@ -840,6 +852,67 @@ function selfTest(): void {
     st.check("a ticket read through the adapter passes, its log included", r.code === 0, r.out);
 
     console.log("positive controls: the turnpikes, as scripts/turnpikes.sh reads them");
+    const project = join(tmp, "project-profile");
+    mkdirSync(join(project, ".postmaster"), { recursive: true });
+    writeFileSync(
+      join(project, ".postmaster", "project.toml"),
+      '[project]\ndefault_turnpikes = ["bug"]\n',
+    );
+    body(P, A, D, K);
+    {
+      const r = run(
+        "bash",
+        [SELF, "--body", join(tmp, "body.md"), "--title", T, "--project", project],
+        {
+          env: {
+            ...(process.env as Record<string, string>),
+            TURNPIKES: join(HERE, "turnpikes.sh"),
+          },
+        },
+      );
+      const lines = r.out.split("\n");
+      st.check(
+        "default is checked against the target project's declaration",
+        r.code === 0 && lines.includes("turnpikes: bug"),
+        `exit ${r.code}\n${r.out}${r.err}`,
+      );
+    }
+    const emptyProject = join(tmp, "empty-project");
+    mkdirSync(join(emptyProject, ".postmaster"), { recursive: true });
+    writeFileSync(
+      join(emptyProject, ".postmaster", "project.toml"),
+      "[project]\ndefault_turnpikes = []\n",
+    );
+    body(P, A, D, K);
+    {
+      const r = run(
+        "bash",
+        [SELF, "--body", join(tmp, "body.md"), "--title", T, "--project", emptyProject],
+        {
+          env: {
+            ...(process.env as Record<string, string>),
+            TURNPIKES: join(HERE, "turnpikes.sh"),
+          },
+        },
+      );
+      const lines = r.out.split("\n");
+      st.check(
+        "an empty project default does not add a review floor",
+        r.code === 0 && lines.includes("turnpikes: none"),
+        `exit ${r.code}\n${r.out}${r.err}`,
+      );
+    }
+    body(P, A, D, K);
+    {
+      const r = run("bash", [SELF, "--body", join(tmp, "body.md"), "--title", T, "--project", ""], {
+        env: { ...(process.env as Record<string, string>), TURNPIKES: join(HERE, "turnpikes.sh") },
+      });
+      st.check(
+        "an explicitly empty --project is refused, never checked as discovery",
+        r.code === 1 && (r.out + r.err).includes("no such project directory"),
+        `exit ${r.code}\n${r.out}${r.err}`,
+      );
+    }
     body(P, A, D, K);
     named(
       "default, in a code span under a template comment, stands for the default set",
@@ -880,7 +953,7 @@ function selfTest(): void {
     // no title in adapter's read
     writeFileSync(
       join(tmp, "printed-untitled.txt"),
-      printedContent.replace(/^title: .*/m, "title: "),
+      printedContent.replace(/^title: .*/mu, "title: "),
     );
     adapter(`cat -- '${join(tmp, "printed-untitled.txt")}'`);
     r = through();
@@ -1159,7 +1232,7 @@ function selfTest(): void {
       chmodSync(join(dir, "turnpikes.sh"), 0o755);
       const src = readFileSync(join(HERE, "turnpikes.ts"), "utf8");
       const out = src.replace(
-        new RegExp("(const TABLE = `" + DOT_ALL + "*?)(`;)"),
+        new RegExp("(const TABLE = `" + DOT_ALL + "*?)(`;)", "u"),
         (_m, a: string, b: string) => `${a}\n${row}${b}`,
       );
       writeFileSync(join(dir, "turnpikes.ts"), out);
@@ -1240,7 +1313,7 @@ function selfTest(): void {
     st.check(
       "an adapter that cannot read the ticket is exit 1, not a shape fault",
       r.code === 1 &&
-        !/^(title|problem \/ feature|acceptance criteria|direction|turnpikes): /.test(r.out),
+        !/^(title|problem \/ feature|acceptance criteria|direction|turnpikes): /u.test(r.out),
       r.out,
     );
     body(P, A, D, K);
@@ -1509,39 +1582,82 @@ const TURNPIKES = join(scriptsDir(import.meta), "turnpikes.sh");
 const argv = process.argv.slice(2);
 const mode = argv[0] ?? "";
 
+const USAGE =
+  "usage: ticket-check.sh <repo> <ticket-id> | --body <body-file> [--title <title>] [--project <repo>] | --splice <base-body> <sections> | --self-test";
+
+function usage(): never {
+  console.error(USAGE);
+  process.exit(1);
+}
+
+function isDir(p: string): boolean {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 if (mode === "--self-test") {
+  delete process.env.POSTMASTER_PROJECT;
   selfTest();
 } else if (mode === "--body") {
-  if (argv.length === 2 || (argv.length === 4 && argv[2] === "--title")) {
-    try {
-      const text = loadText(argv[1]!);
-      const title = argv.length === 4 ? argv[3]! : null;
-      const [faults, count, named] = check(title, text, TURNPIKES);
-      if (faults.length > 0) {
-        console.log(faults.join("\n"));
-        process.exit(2);
+  if (argv.length >= 2) {
+    let title: string | null = null;
+    let hasTitle = false;
+    let project = "";
+    let hasProject = false;
+    const rest = argv.slice(2);
+    let ok = true;
+    for (let i = 0; i < rest.length; i += 2) {
+      const flag = rest[i];
+      const val = rest[i + 1];
+      if (val === undefined) {
+        ok = false;
+        break;
       }
-      console.log(`well-formed, ${count} acceptance criteria`);
-      console.log(named);
-      process.exit(0);
-    } catch (e) {
-      if (e instanceof DieError) {
-        process.stderr.write(`ticket-check: ${e.msg}\n`);
-        process.exit(e.code);
+      if (flag === "--title") {
+        title = val;
+        hasTitle = true;
+      } else if (flag === "--project") {
+        project = val;
+        hasProject = true;
+      } else {
+        ok = false;
+        break;
       }
-      throw e;
+    }
+    if (ok) {
+      if (hasProject) {
+        if (!isDir(project)) {
+          console.error(`ticket-check: no such project directory: ${project}`);
+          process.exit(1);
+        }
+        process.env.POSTMASTER_PROJECT = realpathSync(project);
+      }
+      try {
+        const text = loadText(argv[1]!);
+        const [faults, count, named] = check(hasTitle ? title : null, text, TURNPIKES);
+        if (faults.length > 0) {
+          console.log(faults.join("\n"));
+          process.exit(2);
+        }
+        console.log(`well-formed, ${count} acceptance criteria`);
+        console.log(named);
+        process.exit(0);
+      } catch (e) {
+        if (e instanceof DieError) {
+          process.stderr.write(`ticket-check: ${e.msg}\n`);
+          process.exit(e.code);
+        }
+        throw e;
+      }
     }
   }
-  console.error(
-    "usage: ticket-check.sh <repo> <ticket-id> | --body <body-file> [--title <title>] | --splice <base-body> <sections> | --self-test",
-  );
-  process.exit(1);
+  usage();
 } else if (mode === "--splice") {
   if (argv.length !== 3) {
-    console.error(
-      "usage: ticket-check.sh <repo> <ticket-id> | --body <body-file> [--title <title>] | --splice <base-body> <sections> | --self-test",
-    );
-    process.exit(1);
+    usage();
   }
   try {
     const baseText = loadText(argv[1]!);
@@ -1556,18 +1672,17 @@ if (mode === "--self-test") {
     throw e;
   }
 } else if (mode === "" || mode.startsWith("-")) {
-  console.error(
-    "usage: ticket-check.sh <repo> <ticket-id> | --body <body-file> [--title <title>] | --splice <base-body> <sections> | --self-test",
-  );
-  process.exit(1);
+  usage();
 } else {
   // <repo> <ticket-id> through adapter
   if (argv.length !== 2) {
-    console.error(
-      "usage: ticket-check.sh <repo> <ticket-id> | --body <body-file> [--title <title>] | --splice <base-body> <sections> | --self-test",
-    );
+    usage();
+  }
+  if (!isDir(mode)) {
+    console.error(`ticket-check: no such project directory: ${mode}`);
     process.exit(1);
   }
+  process.env.POSTMASTER_PROJECT = realpathSync(mode);
   try {
     const HERE = scriptsDir(import.meta);
     const kindR = run(join(HERE, "tracker-kind.sh"), [mode]);

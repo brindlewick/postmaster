@@ -87,7 +87,7 @@ function stateSave(path: string, st: RoundState): void {
   renameSync(tmp, path);
 }
 
-const ARG_SPLIT_RE = new RegExp(`[${PY_S_CLASS},]+`);
+const ARG_SPLIT_RE = new RegExp(`[${PY_S_CLASS},]+`, "u");
 
 function stateCmd(
   what: string,
@@ -154,7 +154,7 @@ function stateCmd(
       limit: limit!,
       source: source!,
       deadline: monotonic() + limit!,
-      started: now.toISOString().replace(/\.[0-9]+Z$/, "Z"),
+      started: now.toISOString().replace(/\.[0-9]+Z$/u, "Z"),
       reviewers: [],
     });
     out.push(`${limit!}\t${source!}`);
@@ -194,7 +194,7 @@ function stateCmd(
       const pairs: Array<[string, string]> = [];
       const bad: string[] = [];
       for (const x of given) {
-        const m = /^([A-Za-z0-9._-]+):([A-Za-z0-9._-]+)$/.exec(x);
+        const m = /^([A-Za-z0-9._-]+):([A-Za-z0-9._-]+)$/u.exec(x);
         if (!m || ["", ".", ".."].includes(m[1] ?? "") || ["", ".", ".."].includes(m[2] ?? "")) {
           bad.push(x);
         } else if (!pairs.some((p) => p[0] === m[1] && p[1] === m[2])) {
@@ -247,7 +247,7 @@ if (argv[0] !== "--self-test") {
   const dR = run("bash", ["-c", `cd "$1" 2>/dev/null && pwd -P`, "_", dRaw]);
   const D = dR.code === 0 ? dR.out.trim() : die(`no such dispatch directory: ${dRaw}`);
   const roundArg = argv[2] ?? "";
-  if (!/^[0-9]+$/.test(roundArg) || roundArg.startsWith("0") || roundArg.length > 6) {
+  if (!/^[0-9]+$/u.test(roundArg) || roundArg.startsWith("0") || roundArg.length > 6) {
     die(`a round is a whole number from 1: ${roundArg}`);
   }
   const R = roundArg;
@@ -497,7 +497,7 @@ if (argv[0] !== "--self-test") {
         console.log(`NOT RECORDED in actions.jsonl: teardown ${s}`);
       }
     } else {
-      why = why.replace(/\n/g, " ");
+      why = why.replace(/\n/gu, " ");
       console.log(`LEFT IN PLACE ${s}: ${why}`);
       kept += 1;
       record(
@@ -539,7 +539,7 @@ withTempDir((tmpRaw) => {
   });
 
   const repo = join(tmp, "repo");
-  const d = join(tmp, "runs/proj/T-1");
+  const d = join(tmp, "repo", ".postmaster", "runs", "T-1");
   mkdirSync(join(d, "logs"), { recursive: true });
   mkdirSync(join(tmp, "bin"), { recursive: true });
   mkdirSync(join(tmp, "host"), { recursive: true });
@@ -625,6 +625,42 @@ esac
       return false;
     }
   };
+  // dead <pid> [<seconds>]: wait until a process is gone (or a zombie).
+  // An empty pid is a failed fixture, never a dead process: fail, do not pass.
+  // Bun's Subprocess carries pid at runtime; the bundled type omits it.
+  const pidOf = (proc: object): number => (proc as { pid?: number }).pid ?? 0;
+  const dead = (pid: number, secs = 60): boolean => {
+    if (!pid || Number.isNaN(pid)) return false;
+    let i = 0;
+    while (alive(pid) && i < secs * 5) {
+      run("sleep", ["0.2"]);
+      i += 1;
+    }
+    return !alive(pid);
+  };
+  // waitLine <file> <pattern> [<seconds>]: wait until a file holds a matching line.
+  const waitLine = (file: string, pattern: string, secs = 60): boolean => {
+    let i = 0;
+    while (i < secs * 5) {
+      try {
+        if (readFileSync(file, "utf8").includes(pattern)) return true;
+      } catch {
+        /* not yet */
+      }
+      run("sleep", ["0.2"]);
+      i += 1;
+    }
+    return false;
+  };
+  // remaining <state-file>: seconds left on the round's deadline, or -1.
+  const remaining = (stateFile: string): number => {
+    try {
+      const st = JSON.parse(readFileSync(stateFile, "utf8"));
+      return Math.max(0, Math.ceil(st.deadline - monotonic()));
+    } catch {
+      return -1;
+    }
+  };
   const limit = (v: string): void => {
     writeFileSync(join(d, "run.json"), `{"config": {"review": {"round_timeout_seconds": ${v}}}}\n`);
   };
@@ -648,6 +684,10 @@ esac
         "run",
         `T-1 · ${lane} ${lens} review`,
         join(repo, ".worktrees", `T-1-rev-${lens}-${lane}`),
+        "--role",
+        "reviewer",
+        "--run",
+        d,
         "--marker",
         join(d, "logs", `review-r${round}-${lens}-${lane}.done`),
         "--pidfile",
@@ -663,12 +703,35 @@ esac
       console.log(`  (could not launch ${lens} ${lane})`);
       return;
     }
-    if (kind === "fast") return;
+    // host.sh run waits 10s for the launch pid itself; this covers a slower
+    // runner, so an empty pid below means the launch failed, never that it lags.
+    const launchPidFile = join(tmp, "pids", `launch.${n}`);
     let i = 0;
-    while (i < 50) {
+    while (i < 300) {
       try {
-        const s = readFileSync(join(tmp, "pids", `child.${n}`), "utf8").trim();
-        if (s) break;
+        if (readFileSync(launchPidFile, "utf8").trim()) break;
+      } catch {
+        /* not yet */
+      }
+      run("sleep", ["0.2"]);
+      i += 1;
+    }
+    try {
+      if (!readFileSync(launchPidFile, "utf8").trim()) {
+        console.log(`  (the ${kind} reviewer's launch pid never appeared)`);
+        return;
+      }
+    } catch {
+      console.log(`  (the ${kind} reviewer's launch pid never appeared)`);
+      return;
+    }
+    if (kind === "fast") return;
+    // Child startup under load (was 5s); the pid file is the event.
+    const childPidFile = join(tmp, "pids", `child.${n}`);
+    i = 0;
+    while (i < 300) {
+      try {
+        if (readFileSync(childPidFile, "utf8").trim()) break;
       } catch {
         /* not yet */
       }
@@ -676,8 +739,8 @@ esac
       i += 1;
     }
     try {
-      const s = readFileSync(join(tmp, "pids", `child.${n}`), "utf8").trim();
-      if (!s) console.log(`  (the ${kind} reviewer never started)`);
+      if (!readFileSync(childPidFile, "utf8").trim())
+        console.log(`  (the ${kind} reviewer never started)`);
     } catch {
       console.log(`  (the ${kind} reviewer never started)`);
     }
@@ -705,7 +768,7 @@ esac
     (() => {
       try {
         const st = JSON.parse(readFileSync(join(d, "logs/review-r1.json"), "utf8"));
-        return /^[0-9a-f]{16}$/.test(st.attempt ?? "") && typeof st.boot === "string";
+        return /^[0-9a-f]{16}$/u.test(st.attempt ?? "") && typeof st.boot === "string";
       } catch {
         return false;
       }
@@ -739,7 +802,7 @@ esac
   }
   check(
     "run-log.md records it as <lane> <lens>: DEGRADED, timeout",
-    runLog.includes(" two bug: DEGRADED, timeout"),
+    runLog.split("\n").some((l) => l.endsWith(" two bug: DEGRADED, timeout")),
   );
   check(
     "a degrade line records it, with the lens, the round and the cause",
@@ -757,7 +820,7 @@ esac
   );
   check(
     "host.sh stop ends it, and its child in a session of its own",
-    !alive(slow) && !alive(child),
+    dead(slow, 60) && dead(child, 60),
   );
   runSelf("teardown", d, "1", repo);
   check(
@@ -768,7 +831,9 @@ esac
       actionsLines('"action":"teardown"') === 2,
   );
 
-  limit("4");
+  // The old timeout-1/sleep-1/took<=3 assumed prompt scheduling; under load the cap cut
+  // the wait before it polled, or the second run outlasted its 3s window. Age a real deadline.
+  limit("30");
   cutScratch("bug", "three");
   runSelf("start", d, "2");
   launch(2, "bug", "three", "slow");
@@ -777,12 +842,48 @@ esac
   } catch {
     /* ignore */
   }
-  run("timeout", ["1", self, "wait", d, "2", repo, "bug:three"]);
-  run("sleep", ["1"]);
+  const readState2 = (): Record<string, any> => {
+    try {
+      return JSON.parse(readFileSync(join(d, "logs/review-r2.json"), "utf8"));
+    } catch {
+      return {};
+    }
+  };
+  const attempt0 = readState2().attempt;
+  const deadline0 = readState2().deadline;
+  const firstOut = join(tmp, "first.out");
+  const first = Bun.spawn([
+    "bash",
+    "-c",
+    `exec "${self}" wait "${d}" 2 "${repo}" bug:three > "${firstOut}" 2>&1`,
+  ]);
+  const firstRc = waitLine(firstOut, "round 2,", 60);
+  // Let some deadline age while the first wait runs, so a reset (left back to the limit) stands out.
+  {
+    let i = 0;
+    while (remaining(join(d, "logs/review-r2.json")) > 25 && i < 150) {
+      run("sleep", ["0.2"]);
+      i += 1;
+    }
+  }
+  try {
+    first.kill();
+  } catch {
+    /* already gone */
+  }
+  dead(pidOf(first), 60);
+  const left = remaining(join(d, "logs/review-r2.json"));
   runSelf("wait", d, "2", repo);
   check(
     "a wait run again keeps the round's deadline rather than starting a new one",
-    rc === 3 && took <= 3 && has("TIMEOUT bug three") && !alive(slow),
+    firstRc &&
+      rc === 3 &&
+      has("TIMEOUT bug three") &&
+      left < 28 &&
+      took <= left + 25 &&
+      readState2().attempt === attempt0 &&
+      readState2().deadline === deadline0 &&
+      dead(slow, 60),
   );
   runSelf("teardown", d, "2", repo, "bug:three");
 
@@ -790,10 +891,10 @@ esac
   cutScratch("style", "one");
   runSelf("start", d, "3");
   launch(3, "style", "one", "leaves");
-  let left = 0;
+  let childPid = 0;
   try {
-    left = parseInt(readFileSync(join(tmp, "pids", `child.${n}`), "utf8").trim(), 10);
-    cleanupPids.push(left);
+    childPid = parseInt(readFileSync(join(tmp, "pids", `child.${n}`), "utf8").trim(), 10);
+    cleanupPids.push(childPid);
   } catch {
     /* ignore */
   }
@@ -806,7 +907,7 @@ esac
   runSelf("teardown", d, "3", repo, "style:one");
   check(
     "teardown stops what a finished reviewer's launch left running, and says so",
-    rc === 0 && !alive(left) && has("left behind by a reviewer that had finished"),
+    rc === 0 && dead(childPid, 60) && has("left behind by a reviewer that had finished"),
   );
   check(
     "a scratch a reviewer switched onto a branch is still removed, and the branch kept",
@@ -822,7 +923,9 @@ esac
     "a reviewer that reported is neither recorded nor stopped",
     !has("TIMEOUT bug one") && !runLog.includes("one bug: DEGRADED"),
   );
-  limit("2");
+  // The old limit-2/sleep-0.5 raced the re-start: a loaded machine could spend the whole
+  // round before the stale waiter polled. Limit 20 leaves it room to stand down.
+  limit("20");
   cutScratch("bug", "four");
   runSelf("start", d, "4");
   launch(4, "bug", "four", "slow");
@@ -833,18 +936,17 @@ esac
     /* ignore */
   }
   const staleOut = join(tmp, "stale.out");
-  // Background the stale wait, restart the round, then collect the result.
-  const staleScript = [
-    `"${self}" wait "${d}" 4 "${repo}" bug:four > "${staleOut}" 2>&1 &`,
-    "stale=$!",
-    "sleep 0.5",
-    `printf '{"config": {"review": {"round_timeout_seconds": 60}}}\\n' > "${d}/run.json"`,
-    `"${self}" start "${d}" 4`,
-    "wait $stale",
-    "echo exit:$?",
-  ].join("\n");
-  const staleR = run("bash", ["-c", staleScript]);
-  const staleExit = (staleR.out.match(/exit:([0-9]+)/)?.[1] ?? "1").trim();
+  const staleRcFile = join(tmp, "stale.rc");
+  const stale = Bun.spawn([
+    "bash",
+    "-c",
+    `"${self}" wait "${d}" 4 "${repo}" bug:four > "${staleOut}" 2>&1; echo $? > "${staleRcFile}"`,
+  ]);
+  // The wait must have read this start's attempt before the next start replaces it.
+  const staleRc = waitLine(staleOut, "round 4,", 60);
+  limit("60");
+  runSelf("start", d, "4");
+  dead(pidOf(stale), 120);
   let staleStdout = "";
   try {
     staleStdout = readFileSync(staleOut, "utf8");
@@ -852,10 +954,19 @@ esac
     staleStdout = "";
   }
   out = staleStdout;
-  rc = parseInt(staleExit, 10);
+  try {
+    rc = parseInt(readFileSync(staleRcFile, "utf8").trim(), 10);
+    if (Number.isNaN(rc)) rc = 1;
+  } catch {
+    rc = 1;
+  }
   check(
     "a wait from an earlier start of the round stands down, and records and stops nothing",
-    rc === 1 && has("started again") && alive(slow) && !runLog.includes("four bug: DEGRADED"),
+    staleRc &&
+      rc === 1 &&
+      has("started again") &&
+      alive(slow) &&
+      !runLog.includes("four bug: DEGRADED"),
   );
   const _insideOut = join(tmp, "inside.out");
   const insideR = run("bash", [
@@ -877,7 +988,7 @@ esac
   check(
     "from outside, teardown stops the unfinished reviewer first, says so, then removes it",
     rc === 0 &&
-      !alive(slow) &&
+      dead(slow, 60) &&
       has("its reviewer had not finished") &&
       !existsSync(join(repo, ".worktrees/T-1-rev-bug-four")),
   );

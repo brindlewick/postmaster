@@ -78,6 +78,7 @@ declare const process: {
   cwd(): string;
   chdir(dir: string): void;
   exit(code?: number): never;
+  exitCode?: number;
   pid: number;
   ppid: number;
   platform: string;
@@ -278,6 +279,21 @@ declare module "node:fs" {
     uid: number;
     gid: number;
   };
+  export function lstatSync(
+    path: string,
+    options: { throwIfNoEntry: false },
+  ):
+    | {
+        isFile(): boolean;
+        isDirectory(): boolean;
+        isSymbolicLink(): boolean;
+        mtimeMs: number;
+        size: number;
+        mode: number;
+        uid: number;
+        gid: number;
+      }
+    | undefined;
   export function realpathSync(path: string): string;
   export function renameSync(from: string, to: string): void;
   export function unlinkSync(path: string): void;
@@ -755,3 +771,28 @@ interface AbortSignal {
 declare var AbortSignal: {
   timeout(milliseconds: number): AbortSignal;
 };
+
+declare module "bun:test" {
+  export interface Matchers {
+    toBe(expected: unknown): void;
+    toEqual(expected: unknown): void;
+    toBeUndefined(): void;
+    toBeDefined(): void;
+    toBeNull(): void;
+    toBeTruthy(): void;
+    toBeFalsy(): void;
+    toContain(expected: unknown): void;
+    toMatch(expected: string | RegExp): void;
+    toBeGreaterThan(expected: number): void;
+    toBeGreaterThanOrEqual(expected: number): void;
+    toBeLessThan(expected: number): void;
+    toBeLessThanOrEqual(expected: number): void;
+    toBeCloseTo(expected: number, digits?: number): void;
+    toThrow(expected?: unknown): void;
+    toHaveLength(expected: number): void;
+    not: Matchers;
+  }
+  export function expect(actual: unknown): Matchers;
+  export function test(name: string, fn: () => unknown, timeout?: number): void;
+  export function describe(name: string, fn: () => void): void;
+}

@@ -29,12 +29,9 @@ import { DOT_ALL, PY_DOT, PY_M_END, PY_M_START, PY_S_CLASS } from "./lib/text.ts
 const STANDINGS = new Set(["claimed", "supported", "mixed", "refuted", "settled"]);
 const OWN_EVIDENCE = ["runs", "trials"]; // what this fleet did; papers and articles are not
 
-const FM_RE = new RegExp(
-  `${PY_M_START}([a-z_]+):[${PY_S_CLASS}]*(${PY_DOT}*)${PY_M_END}`,
-  "g",
-);
-const SOURCES_RE = new RegExp(`([a-z]+)/([^,\\]${PY_S_CLASS}]+)`, "g");
-const CITE_RE = new RegExp(`\\[@([a-z]+)/([^\\]${PY_S_CLASS}]+)`, "g");
+const FM_RE = new RegExp(`${PY_M_START}([a-z_]+):[${PY_S_CLASS}]*(${PY_DOT}*)${PY_M_END}`, "gu");
+const SOURCES_RE = new RegExp(`([a-z]+)/([^,\\]${PY_S_CLASS}]+)`, "gu");
+const CITE_RE = new RegExp(`\\[@([a-z]+)/([^\\]${PY_S_CLASS}]+)`, "gu");
 
 function frontMatter(text: string): Record<string, string> | null {
   if (!text.startsWith("---")) return null;
@@ -51,7 +48,7 @@ function frontMatter(text: string): Record<string, string> | null {
 function prose(text: string): string {
   // Notation is documented in backticks: `[@papers/<slug>]` is an example of a citation,
   // not one. Fenced blocks and inline code spans are examples, so they are not scanned.
-  return text.replace(new RegExp(`\`\`\`${DOT_ALL}*?\`\`\``, "g"), "").replace(/`[^`]*`/g, "");
+  return text.replace(new RegExp(`\`\`\`${DOT_ALL}*?\`\`\``, "gu"), "").replace(/`[^`]*`/gu, "");
 }
 
 function dirExists(p: string): boolean {
@@ -104,7 +101,7 @@ function lint(repo: string): number {
   const byStem = new Map<string, string>();
   for (const p of pages) {
     const stem = p.split("/").pop() ?? "";
-    byStem.set(stem.replace(/\.md$/, ""), p);
+    byStem.set(stem.replace(/\.md$/u, ""), p);
   }
 
   for (const p of pages) {
@@ -151,21 +148,21 @@ function lint(repo: string): number {
     // citations resolve to something under raw/
     for (const m of text.matchAll(CITE_RE)) {
       const kind = m[1] ?? "";
-      const ident = (m[2] ?? "").replace(/[/.,;)]+$/, "");
+      const ident = (m[2] ?? "").replace(/[/.,;)]+$/u, "");
       if (!existsSync(join(raw, kind, ident))) {
         fault(p, `citation [@${kind}/${ident}] does not resolve under raw/`);
       }
     }
 
     // wikilinks resolve to a page
-    for (const m of text.matchAll(/\[\[([^\]]+)\]\]/g)) {
+    for (const m of text.matchAll(/\[\[([^\]]+)\]\]/gu)) {
       if (!byStem.has(m[1] ?? "")) {
         fault(p, `wikilink [[${m[1] ?? ""}]] has no page`);
       }
     }
 
     // relative markdown links resolve
-    for (const m of text.matchAll(/\]\(([^)#]+)\)/g)) {
+    for (const m of text.matchAll(/\]\(([^)#]+)\)/gu)) {
       const t = m[1] ?? "";
       if (t.startsWith("http://") || t.startsWith("https://") || t.startsWith("mailto:")) continue;
       if (!existsSync(join(p.split("/").slice(0, -1).join("/"), t))) {
@@ -191,7 +188,7 @@ function lint(repo: string): number {
       } catch {
         continue;
       }
-      for (const m of prose(curText).matchAll(/\]\(([^)#]+)\)/g)) {
+      for (const m of prose(curText).matchAll(/\]\(([^)#]+)\)/gu)) {
         const t = m[1] ?? "";
         if (t.startsWith("http://") || t.startsWith("https://") || t.startsWith("mailto:"))
           continue;

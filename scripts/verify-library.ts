@@ -39,8 +39,8 @@ import { die, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
 import { BOUND_L, PY_M_START, PY_S_CLASS, W_CLASS } from "./lib/text.ts";
 
-const CODE = /\.(?:c|m)?(?:j|t)sx?$/;
-const TEST_NAME = /\.(?:test|spec)\.(?:c|m)?(?:j|t)sx?$/;
+const CODE = /\.(?:c|m)?(?:j|t)sx?$/u;
+const TEST_NAME = /\.(?:test|spec)\.(?:c|m)?(?:j|t)sx?$/u;
 const TEST_DIRS = new Set(["test", "tests", "__tests__"]);
 const SUPPORT_DIRS = new Set(["fixtures", "__fixtures__", "helpers", "support", "__mocks__"]);
 const IMPORT = new RegExp(
@@ -372,7 +372,7 @@ export const three = add(1, 2);
   writeFileSync(
     join(lib, "test", "utils", "api.js"),
     `import { add } from "sample-lib";
-export const digits = (s) => /^[0-9]+$/.test(s);
+export const digits = (s) => /^[0-9]+$/u.test(s);
 `,
     "utf8",
   );

@@ -35,8 +35,79 @@ import { mkstempSync, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
 
 const STAGES =
-  "dispatched bootstrapped workhorses-running synthesis checkpoint-1 review shipping shipped done abandoned";
+  "dispatched bootstrapped planning workhorses-running synthesis checkpoint-1 review shipping shipped done abandoned";
 const STAGE_LIST = STAGES.split(" ");
+
+// Lines with their endings kept, as str.splitlines(keepends=True) cuts
+// them: every Python boundary ends a line, and the file round-trips.
+function keependsLines(text: string): string[] {
+  const m =
+    text.match(
+      /[^\r\n\x0b\f\x1c-\x1e\x85\u2028\u2029]*(?:\r\n|\n|\r|\x0b|\f|\x1c|\x1d|\x1e|\x85|\u2028|\u2029|$)/gu,
+    ) ?? [];
+  return m.filter((l) => l !== "");
+}
+
+// Refresh the final usage sum after the last launch has exited: the sum
+// into run-log.md, and the ship card's ## Cost block rewritten around it.
+function closeUsage(d: string): number {
+  const here = scriptsDir(import.meta);
+  const s = run("bun", [join(here, "usage.ts"), "sum", d]);
+  let logStatus = 0;
+  let summary: string;
+  if (s.code === 0) {
+    summary = s.out + s.err;
+    if (run("bash", [join(here, "run-log.sh"), d, "final cost block:", summary]).code !== 0)
+      logStatus = 1;
+  } else {
+    const combined = s.out + s.err;
+    summary = combined === "" ? "usage sum failed" : combined;
+    if (
+      run("bash", [join(here, "run-log.sh"), d, "final cost block unreadable:", summary]).code !== 0
+    )
+      logStatus = 1;
+  }
+  const cardPath = join(d, "card.md");
+  try {
+    if (!statSync(cardPath).isFile()) return logStatus;
+  } catch {
+    return logStatus;
+  }
+  let text: string;
+  try {
+    text = readFileSync(cardPath, "utf8");
+  } catch (e) {
+    console.error(
+      `stage: cannot refresh the ship card's cost block: ${e instanceof Error ? e.message : e}`,
+    );
+    return 1;
+  }
+  const block = `## Cost\n\n\`\`\`\n${summary.replace(/\n+$/u, "")}\n\`\`\`\n`;
+  const lines = keependsLines(text);
+  const start = lines.findIndex((l) => l.replace(/[\r\n]+$/u, "") === "## Cost");
+  let next: string;
+  if (start === -1) {
+    next = `${text.replace(/\s+$/u, "")}\n\n${block}`;
+  } else {
+    const tail = lines.slice(start + 1);
+    const endAt = tail.findIndex((l) => l.startsWith("## "));
+    const rest = endAt === -1 ? "" : tail.slice(endAt).join("");
+    next = `${lines.slice(0, start).join("")}${block}\n${rest}`;
+  }
+  const temporary = mkstempSync(d, ".card-cost-");
+  try {
+    writeFileSync(temporary, next);
+    renameSync(temporary, cardPath);
+  } catch {
+    try {
+      rmSync(temporary, { force: true });
+    } catch {
+      /* best effort */
+    }
+    return 1;
+  }
+  return logStatus;
+}
 
 function setStage(d: string, newStage: string, actor: string): number {
   const HERE = scriptsDir(import.meta);
@@ -150,6 +221,9 @@ function setStage(d: string, newStage: string, actor: string): number {
     } catch {
       /* ignore */
     }
+    if (closeUsage(d) !== 0) {
+      console.error("stage: the run closed, but its final cost block could not be written");
+    }
   }
 
   console.log(`stage: ${old ?? "none"} -> ${newStage}${took}`);
@@ -178,17 +252,20 @@ if (argv[0] === "--self-test") {
 // --- self-test ----------------------------------------------------------------------------
 withTempDir((tmp) => {
   const HERE = scriptsDir(import.meta);
-  const d = join(tmp, "project", "RUN-1");
+  const d = join(tmp, "project", ".postmaster", "runs", "RUN-1");
   mkdirSync(d, { recursive: true });
   const st = new SelfTest();
 
   const fresh = (): void => {
+    mkdirSync(join(d, "logs"), { recursive: true });
     writeFileSync(
       join(d, "manifest.json"),
       '{"stage": "dispatched", "leg": 1, "base": "abc123", "lanes": {"luna": {"outcome": "running"}}, "coachman": {"legs": {}}}\n',
     );
     writeFileSync(join(d, "actions.jsonl"), "");
     writeFileSync(join(d, "run-log.md"), "");
+    rmSync(join(d, "card.md"), { force: true });
+    rmSync(join(d, "logs", "luna-events-usage.json"), { force: true });
     run("bash", [join(HERE, "log-action.sh"), d, "postmaster", "dispatch", "RUN-1", "test"]);
   };
 
@@ -237,13 +314,21 @@ withTempDir((tmp) => {
     const line = log
       .split("\n")
       .find((l) => l.includes("stage bootstrapped, from dispatched after"));
-    if (line !== undefined && /after [0-9]/.test(line))
+    if (line !== undefined && /after [0-9]/u.test(line))
       st.ok("run-log.md records the change and how long the last stage took");
     else st.fail("run-log.md records the change and how long the last stage took", line ?? log);
   } catch {
     st.fail("run-log.md records the change and how long the last stage took");
   }
 
+  writeFileSync(
+    join(d, "logs", "luna-events-usage.json"),
+    '{"schema_version":1,"name":"luna","role":"workhorse","lane":"luna","harness":"codex","stream":"logs/luna-events.jsonl","input_tokens":4,"output_tokens":2,"cost_usd":0.25}\n',
+  );
+  writeFileSync(
+    join(d, "card.md"),
+    "# Ship card\n\n## Cost\n\nold estimate\n\n## Checks\n\npassed\n",
+  );
   setStage(d, "done", "postmaster");
   try {
     const log = readFileSync(join(d, "run-log.md"), "utf8");
@@ -252,6 +337,19 @@ withTempDir((tmp) => {
     else st.fail("the postmaster's terminal stage appends the run's timings");
   } catch {
     st.fail("the postmaster's terminal stage appends the run's timings");
+  }
+  try {
+    const log = readFileSync(join(d, "run-log.md"), "utf8");
+    const card = readFileSync(join(d, "card.md"), "utf8");
+    if (log.includes("4 in") && card.includes("4 in") && !card.includes("old estimate"))
+      st.ok("terminal closure refreshes the final usage sum in the run log and ship card");
+    else
+      st.fail(
+        "terminal closure refreshes the final usage sum in the run log and ship card",
+        `${log}\n--- card ---\n${card}`,
+      );
+  } catch {
+    st.fail("terminal closure refreshes the final usage sum in the run log and ship card");
   }
 
   fresh();
@@ -264,6 +362,14 @@ withTempDir((tmp) => {
   rc = setStage(d, "review", "coachman");
   if (rc === 0 && count() === 1 && manifestStage() === "review") st.ok("review is one stage");
   else st.fail(`review is one stage (exit ${rc}, lines ${count()})`);
+
+  fresh();
+  rc = setStage(d, "planning", "coachman");
+  if (rc === 0 && count() === 1 && manifestStage() === "planning") st.ok("planning is one stage");
+  else st.fail(`planning is one stage (exit ${rc}, lines ${count()})`);
+  if (STAGES.includes(" bootstrapped planning workhorses-running "))
+    st.ok("planning sits between bootstrapped and workhorses-running");
+  else st.fail(`planning sits between bootstrapped and workhorses-running (${STAGES})`);
 
   console.log("negative controls");
   fresh();
@@ -290,6 +396,15 @@ withTempDir((tmp) => {
     if (rc === 2 && count() === 0 && readFileSync(join(d, "manifest.json"), "utf8") === before)
       st.ok(`${oldStage} is refused, and nothing changes`);
     else st.fail(`${oldStage} is refused, and nothing changes (exit ${rc})`);
+  }
+
+  fresh();
+  {
+    const before = readFileSync(join(d, "manifest.json"), "utf8");
+    rc = setStage(d, "planning-review", "coachman");
+    if (rc === 2 && count() === 0 && readFileSync(join(d, "manifest.json"), "utf8") === before)
+      st.ok("an unknown planning stage is refused, and nothing changes");
+    else st.fail(`an unknown planning stage is refused, and nothing changes (exit ${rc})`);
   }
 
   for (const t of ["done", "abandoned"]) {

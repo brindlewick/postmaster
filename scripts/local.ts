@@ -74,7 +74,7 @@ const STORE_TMP_RE = /^\p{Nd}+\.(?:json|md)\.\p{Nd}+\.tmp$/u;
 
 function numberArg(value: string): bigint {
   if (!NUMBER_RE.test(value)) die(`not a ticket number: ${value}`);
-  return BigInt(digitValue(value.replace(/^#/, "")));
+  return BigInt(digitValue(value.replace(/^#/u, "")));
 }
 function stateArg(value: string): string {
   if (!states.includes(value)) die(`invalid state ${value} (one of: ${states.join(", ")})`, 2);
@@ -106,7 +106,7 @@ function repoInfo(repo: string): RepoInfo {
     const result = run("git", ["-C", repo, "worktree", "list", "--porcelain"], { env: unsetGit });
     main =
       result.out
-        .split(/\r?\n/)
+        .split(/\r?\n/u)
         .find((line: string) => line.startsWith("worktree "))
         ?.slice("worktree ".length) ?? "the main checkout";
   }
@@ -162,8 +162,8 @@ function bodyFile(path: string): Uint8Array {
 }
 function normal(value: string): string {
   const lines = value
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
+    .replace(/\r\n/gu, "\n")
+    .replace(/\r/gu, "\n")
     .split("\n")
     .map((line) => line.trimEnd());
   while (lines.length && !lines[0]) lines.shift();
@@ -388,7 +388,7 @@ function main(args: string[]): number {
     const number = locked(store, () => {
       const n = nextNumber(store);
       atomicFile(ticketPath(store, n, "md"), content);
-      const created = new Date().toISOString().replace(/\.[0-9]{3}Z$/, "Z");
+      const created = new Date().toISOString().replace(/\.[0-9]{3}Z$/u, "Z");
       writeMeta(store, n, { title, state: "todo", labels: [], created, log: [] });
       return n;
     });
@@ -407,7 +407,7 @@ function main(args: string[]): number {
     locked(store, () => {
       metaOrDie(store, number);
       const current = new TextDecoder("utf-8").decode(body(store, number));
-      if (normal(current) !== normal(base.replace(/^\ufeff/, "")))
+      if (normal(current) !== normal(base.replace(/^\ufeff/u, "")))
         die(`#${number} changed since ${rest[2]} was read; read it again`, 4);
       atomicFile(ticketPath(store, number, "md"), content);
     });
@@ -427,7 +427,7 @@ function main(args: string[]): number {
     }
     const displayBody = new TextDecoder("utf-8")
       .decode(data)
-      .replace(/^\ufeff/, "")
+      .replace(/^\ufeff/u, "")
       .trim();
     const lines = [
       `id: #${number}`,
@@ -568,7 +568,7 @@ async function selfTest(): Promise<number> {
       `  FAIL ${label}${
         detail
           ? `\n${detail
-              .split(/\r?\n/)
+              .split(/\r?\n/u)
               .map((line) => `         ${line}`)
               .join("\n")}`
           : ""
@@ -578,7 +578,7 @@ async function selfTest(): Promise<number> {
   };
   const invoke = (repo: string, ...commandArgs: string[]) => run(self, [repo, ...commandArgs]);
   const output = (result: { out: string; err: string }) =>
-    `${result.out.replace(/\n+$/, "")}${result.err ? `${result.out && !result.out.endsWith("\n") ? "\n" : ""}${result.err.replace(/\n+$/, "")}` : ""}`;
+    `${result.out.replace(/\n+$/u, "")}${result.err ? `${result.out && !result.out.endsWith("\n") ? "\n" : ""}${result.err.replace(/\n+$/u, "")}` : ""}`;
   const lt = (repo: string, ...commandArgs: string[]) => {
     const result = invoke(repo, ...commandArgs);
     return { code: result.code, out: output(result) };
@@ -664,7 +664,7 @@ async function selfTest(): Promise<number> {
     const before = snapshot(trackerStore);
     const line = [self, repo, ...commandArgs]
       .map((a) =>
-        a === "<RAW-BYTES>" ? `"$(printf '${octal}')"` : `'${a.replace(/'/g, `'\\''`)}'`,
+        a === "<RAW-BYTES>" ? `"$(printf '${octal}')"` : `'${a.replace(/'/gu, `'\\''`)}'`,
       )
       .join(" ");
     const result = run("bash", ["-c", line]);
@@ -743,7 +743,7 @@ async function selfTest(): Promise<number> {
 
     console.log("positive controls");
     const refs = run("git", ["-C", repo, "for-each-ref"]).out;
-    const commits = run("git", ["-C", repo, "rev-list", "--all"]).out.trim().split(/\r?\n/).length;
+    const commits = run("git", ["-C", repo, "rev-list", "--all"]).out.trim().split(/\r?\n/u).length;
     check(
       "store init from the main checkout makes the store in the repository's git directory",
       lt(join(repo, "sub"), "store", "init"),
@@ -808,12 +808,12 @@ async function selfTest(): Promise<number> {
     const comment = lt(join(repo, "sub"), "comment", "1", "coachman", "Harvested both\nlanes.");
     const commentRead = lt(repo, "read", "1");
     const commentLine =
-      /#1: [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} coachman: Harvested both lanes\./;
+      /#1: [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} coachman: Harvested both lanes\./u;
     commentLine.test(comment.out) &&
     commentRead.out
       .split("\n")
       .some((line) =>
-        /^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} coachman: Harvested both lanes\.$/.test(
+        /^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} coachman: Harvested both lanes\.$/u.test(
           line,
         ),
       )
@@ -1003,7 +1003,7 @@ async function selfTest(): Promise<number> {
     const refsAfter = run("git", ["-C", repo, "for-each-ref"]).out;
     const commitsAfter = run("git", ["-C", repo, "rev-list", "--all"])
       .out.trim()
-      .split(/\r?\n/).length;
+      .split(/\r?\n/u).length;
     const wtClean = run("git", ["-C", worktree, "status", "--porcelain"]).out.trim() === "";
     cleanTree && refs === refsAfter && commits === commitsAfter && wtClean
       ? ok("no ticket is in a working tree, on a branch or in a commit")
@@ -1133,7 +1133,7 @@ async function selfTest(): Promise<number> {
       cwd: shadow,
       env: { POSTMASTER_CONFIG: join(temp, "github.toml") },
     });
-    const shadowKind = discovered.out.match(/^tracker=(.*)$/m)?.[1];
+    const shadowKind = discovered.out.match(/^tracker=(.*)$/mu)?.[1];
     const otherKind = run("bun", [join(here, "tracker-kind.ts"), unticketed], {
       cwd: shadow,
       env: { POSTMASTER_CONFIG: join(temp, "github.toml") },
@@ -1426,7 +1426,7 @@ async function selfTest(): Promise<number> {
     const tracker = (configPath: string, path: string) =>
       run("bun", [join(here, "discover-project.ts"), path], {
         env: { POSTMASTER_CONFIG: configPath },
-      }).out.match(/^tracker=(.*)$/m)?.[1] ?? "";
+      }).out.match(/^tracker=(.*)$/mu)?.[1] ?? "";
     tracker(join(temp, "github.toml"), repo) === "local" &&
     tracker(join(temp, "github.toml"), worktree) === "local"
       ? ok("discover-project.sh names local for it and its worktree, with a config naming github")
@@ -1450,7 +1450,7 @@ async function selfTest(): Promise<number> {
       cwd: temp,
       env: { POSTMASTER_CONFIG: "plane.toml" },
     });
-    relativeConfig.out.match(/^tracker=(.*)$/m)?.[1] === "plane"
+    relativeConfig.out.match(/^tracker=(.*)$/mu)?.[1] === "plane"
       ? ok("a relative POSTMASTER_CONFIG is read from the caller's directory")
       : fail(
           "a relative POSTMASTER_CONFIG is read from the caller's directory",
@@ -1459,7 +1459,7 @@ async function selfTest(): Promise<number> {
     const noHome = run("bun", [join(here, "discover-project.ts"), unticketed], {
       env: { HOME: undefined, POSTMASTER_CONFIG: undefined },
     });
-    noHome.code === 0 && /^tracker=$/m.test(noHome.out) && /^gate=/m.test(noHome.out)
+    noHome.code === 0 && /^tracker=$/mu.test(noHome.out) && /^gate=/mu.test(noHome.out)
       ? ok("with HOME unset, discover-project.sh still reports, with the kind left to ask")
       : fail(
           "with HOME unset, discover-project.sh still reports, with the kind left to ask",
@@ -1469,7 +1469,7 @@ async function selfTest(): Promise<number> {
       cwd: dirname(here),
       env: { CDPATH: ".:/nonexistent", POSTMASTER_CONFIG: join(temp, "github.toml") },
     });
-    relativePath.out.match(/^tracker=(.*)$/m)?.[1] === "local"
+    relativePath.out.match(/^tracker=(.*)$/mu)?.[1] === "local"
       ? ok("discover-project.sh run by a relative path with CDPATH exported still finds the rule")
       : fail(
           "discover-project.sh run by a relative path with CDPATH exported still finds the rule",
@@ -1568,10 +1568,10 @@ async function selfTest(): Promise<number> {
     const metaRaw =
       created.code === 0 && existsSync(metaPath) ? readFileSync(metaPath, "utf8") : "";
     const createdShape =
-      /"created": "20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z"/.test(
+      /"created": "20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z"/u.test(
         metaRaw,
       );
-    const metaNorm = metaRaw.replace(/"created": "[^"]*"/, '"created": "CREATED"');
+    const metaNorm = metaRaw.replace(/"created": "[^"]*"/u, '"created": "CREATED"');
     created.code === 0 && createdShape && metaNorm === wantMeta
       ? ok("a ticket the port writes matches BASE's json byte for byte, non-ASCII whole")
       : fail(
@@ -1660,7 +1660,7 @@ function BufferLike(value: string | Uint8Array): string {
   return typeof value === "string" ? value : new TextDecoder().decode(value);
 }
 function bodyline(value: string): string {
-  return value.split(/\r?\n/)[7] ?? "";
+  return value.split(/\r?\n/u)[7] ?? "";
 }
 function makeTemp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));

@@ -88,11 +88,11 @@ for (const root of roots) {
     if (EXCLUDE !== "" && d.includes(`/${EXCLUDE}/`)) continue;
     const stamp = run("git", ["-C", d, "log", "-1", "--format=%ct"]);
     if (stamp.code !== 0) continue;
-    const tsText = stamp.out.replace(/\n+$/, "");
+    const tsText = stamp.out.replace(/\n+$/u, "");
     if (tsText === "") continue;
     const ts = Number.parseInt(tsText, 10);
     if (Number.isNaN(ts)) continue;
-    const rel = run("git", ["-C", d, "log", "-1", "--format=%cr"]).out.replace(/\n+$/, "");
+    const rel = run("git", ["-C", d, "log", "-1", "--format=%cr"]).out.replace(/\n+$/u, "");
     const isRemote = run("git", ["-C", d, "remote", "get-url", "origin"]).code === 0;
     // ${d/#$HOME/~} is a no-op under bash 5.2's patsub_replacement (the replacement's `~`
     // expands to HOME), so the original prints absolute paths and so does this.

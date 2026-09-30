@@ -27,7 +27,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tryJsonFile } from "./lib/data.ts";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { die, run, withTempDir } from "./lib/proc.ts";
@@ -85,12 +85,12 @@ function tickets(): string[] {
 
 function ticketTitle(t: string): string {
   const text = readFileSync(join(TICKETS, t, "ticket.md"), "utf8");
-  return text.split("\n")[0]?.replace(/^# /, "") ?? "";
+  return text.split("\n")[0]?.replace(/^# /u, "") ?? "";
 }
 
 function ticketBody(t: string): string {
   const text = readFileSync(join(TICKETS, t, "ticket.md"), "utf8");
-  return text.split("\n").slice(1).join("\n").replace(/^\n+/, "");
+  return text.split("\n").slice(1).join("\n").replace(/^\n+/u, "");
 }
 
 function isTicket(t: string): boolean {
@@ -172,7 +172,7 @@ function makeAndFile(dest: string, ticket: string): number {
   if (!dest.includes("/")) {
     dest = join(process.env.POSTMASTER_FIXTURES || join(home, "Code", "fixtures"), dest);
   }
-  dest = resolve(dest.replace(/^~(?=\/|$)/, home));
+  dest = resolve(dest.replace(/^~(?=\/|$)/u, home));
   if (existsSync(dest)) {
     console.error(`fixture: ${dest} already exists; a run starts from a fresh repo`);
     return 1;
@@ -188,27 +188,6 @@ function makeAndFile(dest: string, ticket: string): number {
     );
     return 1;
   }
-  // refuse a name that already has runs
-  const runsDir = join(home, ".postmaster", "runs", basename(dest));
-  if (existsSync(runsDir)) {
-    console.error(
-      `fixture: ${runsDir} already holds runs of a project named ${basename(dest)}; choose another name`,
-    );
-    return 1;
-  }
-  // refuse this repo's name
-  const toolBasename = basename(TOOL);
-  const mainWorktree =
-    run("git", ["-C", TOOL, "worktree", "list", "--porcelain"])
-      .out.split("\n")[0]
-      ?.replace(/^worktree /, "") ?? TOOL;
-  if (basename(dest) === toolBasename || basename(dest) === basename(mainWorktree)) {
-    console.error(
-      `fixture: ${basename(dest)} is this repo's name, so its runs would share this repo's run records; choose another name`,
-    );
-    return 1;
-  }
-
   const unmake = (): void => {
     if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
   };
@@ -671,6 +650,7 @@ kind = "github"
 `,
   );
   process.env.POSTMASTER_CONFIG = configPath;
+  process.env.POSTMASTER_TOOL_PINS = join(tmp, "tools");
   process.env.GIT_AUTHOR_NAME = "fixture";
   process.env.GIT_AUTHOR_EMAIL = "fixture@example.invalid";
   process.env.GIT_COMMITTER_NAME = "fixture";
@@ -807,11 +787,12 @@ kind = "github"
   const record = (name: string, t: string, shipped: "reference" | "app" | "broken"): number => {
     const legs = 3;
     const repo = join(tmp, name, "repo");
-    const d = join(tmp, name, "runs", name, "7");
+    const d = join(tmp, name, "repo", ".postmaster", "runs", "7");
+    mkdirSync(join(tmp, name), { recursive: true });
+    if (!makeRepo(repo)) return 1;
     mkdirSync(join(d, "logs"), { recursive: true });
     mkdirSync(join(d, "audit"), { recursive: true });
     mkdirSync(join(d, "render"), { recursive: true });
-    if (!makeRepo(repo)) return 1;
     const base = run("git", ["-C", repo, "rev-parse", "HEAD"]).out.trim();
     if (run("git", ["-C", repo, "checkout", "-q", "-b", "7"]).code !== 0) return 1;
     const patchPath = join(TICKETS, t, "reference.patch");
@@ -881,7 +862,7 @@ kind = "github"
   };
 
   const brokenCopy = (name: string, clean: string): string => {
-    const d = join(tmp, name, "runs", name, "7");
+    const d = join(tmp, name, "repo", ".postmaster", "runs", "7");
     mkdirSync(dirname(d), { recursive: true });
     cpSync(clean, d, { recursive: true });
     return d;
@@ -924,7 +905,7 @@ kind = "github"
 
     for (const b of ["stages", "markers", "handoffs", "runjson", "card", "waybill"]) {
       background(`break-${b}`, () =>
-        score(join(tmp, `break-${b}`, "runs", `break-${b}`, "7"), repo),
+        score(join(tmp, `break-${b}`, "repo", ".postmaster", "runs", "7"), repo),
       );
     }
   };
@@ -940,9 +921,9 @@ kind = "github"
       return 1;
     }
     if (name === `clean-${first}`) {
-      breaks(join(tmp, name, "runs", name, "7"), join(tmp, name, "repo"));
+      breaks(join(tmp, name, "repo", ".postmaster", "runs", "7"), join(tmp, name, "repo"));
     }
-    return score(join(tmp, name, "runs", name, "7"), join(tmp, name, "repo"));
+    return score(join(tmp, name, "repo", ".postmaster", "runs", "7"), join(tmp, name, "repo"));
   };
 
   // Build and score everything
@@ -1173,20 +1154,38 @@ case $2 in store) exec "${join(HERE, "local.sh")}" "$@" ;; *) exit 1 ;; esac
     r.code === 1 && !existsSync(nestedDest),
     `exit ${r.code}\n${r.out}`,
   );
-  mkdirSync(join(tmp, "home", ".postmaster", "runs", "taken"), { recursive: true });
-  const takenDest = join(tmp, "runs", "taken");
-  r = freshNew(takenDest, first);
+  const sameA = join(tmp, "one", "widgets");
+  const sameB = join(tmp, "two", "widgets");
+  mkdirSync(join(sameA, ".postmaster", "runs", "T-1"), { recursive: true });
+  mkdirSync(join(sameB, ".postmaster", "runs", "T-1"), { recursive: true });
+  const aRc = run("bash", [
+    join(HERE, "log-action.sh"),
+    join(sameA, ".postmaster", "runs", "T-1"),
+    "postmaster",
+    "note",
+    "same-a",
+    "one",
+  ]).code;
+  const bRc = run("bash", [
+    join(HERE, "log-action.sh"),
+    join(sameB, ".postmaster", "runs", "T-1"),
+    "postmaster",
+    "note",
+    "same-b",
+    "two",
+  ]).code;
+  const ledA = join(sameA, ".postmaster", "runs", "ledger.jsonl");
+  const ledB = join(sameB, ".postmaster", "runs", "ledger.jsonl");
+  let ledgersDiffer = false;
+  try {
+    ledgersDiffer = readFileSync(ledA, "utf8") !== readFileSync(ledB, "utf8");
+  } catch {
+    ledgersDiffer = false;
+  }
   st.check(
-    "a name that already has runs is refused",
-    r.code === 1 && !existsSync(takenDest),
-    `exit ${r.code}\n${r.out}`,
-  );
-  const toolNameDest = join(tmp, "runs", basename(TOOL));
-  r = freshNew(toolNameDest, first);
-  st.check(
-    "a name that is this repo's is refused",
-    r.code === 1 && !existsSync(toolNameDest),
-    `exit ${r.code}\n${r.out}`,
+    "same-basename projects keep separate project-local ledgers",
+    aRc === 0 && bRc === 0 && existsSync(ledA) && existsSync(ledB) && ledgersDiffer,
+    `a=${aRc} b=${bRc}`,
   );
   const nosuchDest = join(tmp, "runs", "nosuch");
   r = freshNew(nosuchDest, "no-such-ticket");
@@ -1348,7 +1347,7 @@ case $2 in store) exec "${join(HERE, "local.sh")}" "$@" ;; *) exit 1 ;; esac
   expectScore("no ship card: ship-card alone fails", "break-card", "ship-card", "no card.md");
 
   console.log("score: input that is not a run is refused, not scored");
-  const cleanDir = join(tmp, `clean-${first}`, "runs", `clean-${first}`, "7");
+  const cleanDir = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
   const cleanRepo = join(tmp, `clean-${first}`, "repo");
   {
     const r2 = run("bash", [join(HERE, "fixture.sh"), "score", join(tmp, "nowhere"), cleanRepo], {

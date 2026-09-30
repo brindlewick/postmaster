@@ -28,7 +28,7 @@ const config = process.env.POSTMASTER_CONFIG || `${process.env.HOME ?? ""}/.post
 
 // why=$(local.sh store 2>&1 >/dev/null): stderr is the reason, stdout is the store path.
 const looked = run(beside(import.meta, "local.sh"), [repo, "store"]);
-const why = looked.err.replace(/\n+$/, "");
+const why = looked.err.replace(/\n+$/u, "");
 if (looked.code === 0) {
   console.log("local");
   process.exit(0);

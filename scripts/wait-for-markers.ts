@@ -37,10 +37,11 @@ function matchGlob(name: string, pattern: string): boolean {
   const re = new RegExp(
     "^" +
       pattern
-        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-        .replace(/\*/g, "[^/]*")
-        .replace(/\?/g, ".") +
+        .replace(/[.+^${}()|[\]\\]/gu, "\\$&")
+        .replace(/\*/gu, "[^/]*")
+        .replace(/\?/gu, ".") +
       "$",
+    "u",
   );
   return re.test(name);
 }
@@ -55,18 +56,18 @@ function countMarkers(dir: string, glob: string): number {
 
 function wait(dirRaw: string, glob: string, countRaw: string, timeoutRaw: string): number {
   for (const n of [countRaw, timeoutRaw]) {
-    if (!/^[0-9]+$/.test(n)) {
+    if (!/^[0-9]+$/u.test(n)) {
       console.error(`wait-for-markers: '${n}' is not a whole number of markers or seconds`);
       return 1;
     }
-    const stripped = n.replace(/^0+(?=[0-9])/, "");
+    const stripped = n.replace(/^0+(?=[0-9])/u, "");
     if (stripped.length > 9) {
       console.error(`wait-for-markers: '${n}' is more than 9 digits`);
       return 1;
     }
   }
-  const COUNT = parseInt(countRaw.replace(/^0+(?=[0-9])/, ""), 10);
-  const TIMEOUT = parseInt(timeoutRaw.replace(/^0+(?=[0-9])/, ""), 10);
+  const COUNT = parseInt(countRaw.replace(/^0+(?=[0-9])/u, ""), 10);
+  const TIMEOUT = parseInt(timeoutRaw.replace(/^0+(?=[0-9])/u, ""), 10);
 
   let DIR: string;
   try {

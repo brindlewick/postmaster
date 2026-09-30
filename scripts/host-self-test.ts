@@ -75,13 +75,36 @@ function mainRepo(path: string): string {
   const common = git("-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir");
   return common ? resolve(dirname(common)) : "";
 }
-function space(st: any, label: string): any {
+function b36(n: number): string {
+  let s = "";
+  while (n > 0) {
+    const r = n % 36;
+    n = Math.floor(n / 36);
+    s = `${"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[r]!}${s}`;
+  }
+  return s;
+}
+function newTab(st: any, ws: string): string {
+  st.tab_n[ws] = (st.tab_n[ws] ?? 0) + 1;
+  return `${ws}:t${b36(st.tab_n[ws])}`;
+}
+function space(st: any, label: string, cwd = ""): any {
   const ws = next(st, "w"),
-    tab = next(st, "t"),
+    tab = newTab(st, ws),
     pane = next(st, "p");
-  st.spaces[ws] = { label, tokens: {}, panes: [pane] };
-  st.panes[pane] = { ws, tokens: {} };
+  const path = cwd ? resolve(cwd) : null;
+  st.spaces[ws] = { label, tokens: {}, panes: [pane], tabs: [tab], path };
+  st.panes[pane] = { ws, tab, cwd, tokens: {} };
+  st.tabs[tab] = { ws, pane, cwd, label };
   return { workspace: { workspace_id: ws }, tab: { tab_id: tab }, root_pane: { pane_id: pane } };
+}
+function destroySpace(st: any, ws: string): void {
+  const w = st.spaces[ws];
+  delete st.spaces[ws];
+  if (!w) return;
+  for (const tab of w.tabs ?? []) delete st.tabs[tab];
+  for (const pane of w.panes ?? []) delete st.panes[pane];
+  for (const [cwd, opened] of Object.entries(st.open)) if (opened === ws) delete st.open[cwd];
 }
 function tokens(args: string[]): Record<string, string> {
   const result: Record<string, string> = {};
@@ -102,7 +125,16 @@ async function herdrStub(args: string[]): Promise<void> {
     process.exit(2);
   }
   const path = join(stateDir, "herdr.json");
-  const st = json(path, { n: 0, spaces: {}, panes: {}, open: {}, agents: [], prompt: [] });
+  const st = json(path, {
+    n: 0,
+    spaces: {},
+    panes: {},
+    tabs: {},
+    tab_n: {},
+    open: {},
+    agents: [],
+    prompt: [],
+  });
   const command = args.slice(0, 2).join(" ");
   if (command === "workspace list") {
     out({ workspaces: Object.keys(st.spaces).map((workspace_id) => ({ workspace_id })) });
@@ -128,7 +160,7 @@ async function herdrStub(args: string[]): Promise<void> {
     return;
   }
   if (command === "workspace create") {
-    const result = space(st, opt(args, "--label") ?? "");
+    const result = space(st, opt(args, "--label") ?? "", opt(args, "--cwd") ?? "");
     const cwd = resolve(opt(args, "--cwd") ?? "");
     if (mainRepo(cwd) === cwd) st.open[cwd] = result.workspace.workspace_id;
     save(path, st);
@@ -136,7 +168,7 @@ async function herdrStub(args: string[]): Promise<void> {
     return;
   }
   if (command === "worktree open") {
-    const result = space(st, opt(args, "--label") ?? "");
+    const result = space(st, opt(args, "--label") ?? "", opt(args, "--path") ?? "");
     st.open[resolve(opt(args, "--path") ?? "")] = result.workspace.workspace_id;
     save(path, st);
     out(result);
@@ -144,12 +176,56 @@ async function herdrStub(args: string[]): Promise<void> {
   }
   if (command === "tab create") {
     const ws = opt(args, "--workspace") ?? "";
-    const tab = next(st, "t"),
+    const tab = newTab(st, ws),
       pane = next(st, "p");
+    const cwd = opt(args, "--cwd") ?? "";
+    const label = opt(args, "--label") ?? "";
     st.spaces[ws].panes.push(pane);
-    st.panes[pane] = { ws, tokens: {} };
+    st.spaces[ws].tabs.push(tab);
+    st.panes[pane] = { ws, tab, cwd, tokens: {} };
+    st.tabs[tab] = { ws, pane, cwd, label };
     save(path, st);
     out({ tab: { tab_id: tab }, root_pane: { pane_id: pane } });
+    return;
+  }
+  if (command === "tab rename") {
+    if (st.tabs[args[2]!]) st.tabs[args[2]!].label = args[3];
+    save(path, st);
+    return;
+  }
+  if (command === "tab close") {
+    const tab = args[2]!;
+    const t = st.tabs[tab];
+    delete st.tabs[tab];
+    if (t) {
+      const ws = t.ws;
+      st.spaces[ws].tabs = st.spaces[ws].tabs.filter((id: string) => id !== tab);
+      st.spaces[ws].panes = st.spaces[ws].panes.filter((id: string) => id !== t.pane);
+      delete st.panes[t.pane];
+      if (!st.spaces[ws].tabs.length) destroySpace(st, ws);
+    }
+    save(path, st);
+    return;
+  }
+  if (command === "pane close") {
+    const pane = args[2]!;
+    const p = st.panes[pane];
+    delete st.panes[pane];
+    if (p) {
+      const ws = p.ws;
+      st.spaces[ws].panes = st.spaces[ws].panes.filter((id: string) => id !== pane);
+      for (const tab of [...st.spaces[ws].tabs]) {
+        const kept = Object.values(st.panes as Record<string, any>).some(
+          (q) => q.ws === ws && (q.tab || tab) === tab,
+        );
+        if (!kept) {
+          st.spaces[ws].tabs = st.spaces[ws].tabs.filter((id: string) => id !== tab);
+          delete st.tabs[tab];
+        }
+      }
+      if (!st.spaces[ws].tabs.length) destroySpace(st, ws);
+    }
+    save(path, st);
     return;
   }
   if (command === "workspace report-metadata") {
@@ -163,7 +239,20 @@ async function herdrStub(args: string[]): Promise<void> {
     return;
   }
   if (command === "workspace get") {
-    out({ workspace: { workspace_id: args[2], tokens: st.spaces[args[2]!]?.tokens ?? {} } });
+    const w = st.spaces[args[2]!] ?? {};
+    out({
+      workspace: {
+        workspace_id: args[2],
+        label: w.label,
+        tokens: w.tokens ?? {},
+        worktree: { path: w.path ?? null, checkout_path: w.path ?? null },
+      },
+    });
+    return;
+  }
+  if (command === "workspace close") {
+    destroySpace(st, args[2]!);
+    save(path, st);
     return;
   }
   if (command === "pane list") {
@@ -171,7 +260,8 @@ async function herdrStub(args: string[]): Promise<void> {
     out({
       panes: (st.spaces[ws]?.panes ?? []).map((pane_id: string) => ({
         pane_id,
-        tokens: st.panes[pane_id].tokens,
+        tab_id: st.panes[pane_id]?.tab ?? null,
+        tokens: st.panes[pane_id]?.tokens ?? {},
       })),
     });
     return;
@@ -191,7 +281,9 @@ async function herdrStub(args: string[]): Promise<void> {
       PATH: process.env.PATH,
       HOME: process.env.HOME,
       STUB: stateDir,
-      HERDR_ENV: "1",
+      HERDR_ENV: "pane-env",
+      HERDR_SOCKET_PATH: "/stub/herdr.sock",
+      HERDR_BIN_PATH: "/stub/herdr-bin",
       HERDR_PANE_ID: pane,
       HERDR_TAB_ID: `tab-of-${pane}`,
       HERDR_WORKSPACE_ID: ws,
@@ -294,19 +386,19 @@ function tmuxStub(args: string[]): void {
   };
   const command = args[0] ?? "";
   if (command === "has-session") {
-    process.exit(st.sessions.includes((opt(args, "-t") ?? "").replace(/^=/, "")) ? 0 : 1);
+    process.exit(st.sessions.includes((opt(args, "-t") ?? "").replace(/^=/u, "")) ? 0 : 1);
   }
   if (command === "new-session") {
     launch(opt(args, "-s") ?? "");
     return;
   }
   if (command === "new-window") {
-    launch((opt(args, "-t") ?? "").replace(/^=/, "").replace(/:$/, ""));
+    launch((opt(args, "-t") ?? "").replace(/^=/u, "").replace(/:$/u, ""));
     return;
   }
   if (command === "set-option") {
     const target = opt(args, "-t") ?? "";
-    const win = target in st.windows ? target : `@${target.replace(/^%/, "")}`;
+    const win = target in st.windows ? target : `@${target.replace(/^%/u, "")}`;
     if (st.windows[win]) {
       st.windows[win].opts[args[args.length - 2]!] = args[args.length - 1];
       save(path, st);
@@ -321,7 +413,7 @@ function tmuxStub(args: string[]): void {
   if (command === "list-windows") {
     for (const [win, value] of Object.entries(st.windows) as Array<[string, any]>) {
       if (flag("-a")) console.log(fmt.includes("window_id") ? `${win}\t${value.name}` : value.name);
-      else if (value.session === (opt(args, "-t") ?? "").replace(/^=/, ""))
+      else if (value.session === (opt(args, "-t") ?? "").replace(/^=/u, ""))
         console.log(`${win}\t${value.opts["@postmaster_cwd"] ?? ""}`);
     }
     return;
@@ -384,7 +476,20 @@ function calls(root: string, which: string): string[] {
   }
 }
 function field(text: string, key: string): string {
-  return new RegExp(`(?:^|\\n|\\|)${key}=([^|\\n]*)`).exec(text)?.[1] ?? "";
+  return new RegExp(`(?:^|\\n|\\|)${key}=([^|\\n]*)`, "u").exec(text)?.[1] ?? "";
+}
+const UNCAPPED_NOTICE = "host: launch running uncapped (no supported per-launch limits available)";
+function titleAbsent(text: string): boolean {
+  return ["#1", "Stop", "touch", "canary", "breaking", "shell"].every(
+    (word) => !text.includes(word),
+  );
+}
+function errStreamEqual(directErrPath: string, launchErrPath: string): boolean {
+  const kept = readFileSync(launchErrPath, "utf8")
+    .split("\n")
+    .filter((line) => line !== UNCAPPED_NOTICE)
+    .join("\n");
+  return readFileSync(directErrPath, "utf8") === kept;
 }
 async function marker(path: string, seconds = 20): Promise<boolean> {
   for (let i = 0; i < seconds * 10; i++) {
@@ -479,17 +584,58 @@ async function setup(
   for (const path of [join(caller, "fixed.sh"), join(caller, "probe.sh")])
     exec("chmod", ["+x", path]);
   const run = join(root, "run-1");
-  mkdirSync(run, { recursive: true });
-  const hostile = `#1, Stop $(touch ${join(root, "canary")}) "breaking" a shell`;
+  const canary = join(root, "canary");
+  const hostile = `#1, Stop \`touch ${canary}\` $(touch ${canary}) "breaking" a shell`;
+  const briefFor = (dispatch: string, turnpikes: string): string =>
+    `# Waybill: 1\nturnpikes: ${turnpikes}\n\n## Ticket\nname: not this one\n\n## Dispatch\nname: ${hostile}\ndispatch: ${dispatch}\nsynthesis worktree: ${join(repo, ".worktrees", "T-1-luna")}\n`;
+  const storeRun1 =
+    '{"config":{"lanes":{"luna":{"harness":"codex","model":"gpt-6-luna"},"mimo":{"harness":"mimo","model":"xiaomi-token-plan-sgp/mimo-v2.6-pro"},"opus":{"harness":"claude","model":"claude-opus-5-5"},"bare":{"harness":"codex"}},"team":{"workhorses":["luna"],"coachman":{"harness":"muse","model":"muse-spark-1.3-contributor"},"coachman_legs":{"review":{"harness":"claude","model":"claude-opus-5-5"}}}}}\n';
+  mkdirSync(join(run, "logs"), { recursive: true });
+  writeFileSync(join(run, "brief.md"), briefFor(run, "style, bug, security"));
+  writeFileSync(join(run, "manifest.json"), '{"leg":2}\n');
+  writeFileSync(join(run, "run.json"), storeRun1);
+  writeFileSync(join(run, "logs", "review-r2.json"), '{"attempt":"test"}\n');
+  const run2 = join(root, "run-2");
+  mkdirSync(join(run2, "logs"), { recursive: true });
+  writeFileSync(join(run2, "brief.md"), briefFor(run2, "default"));
+  writeFileSync(join(run2, "manifest.json"), '{"leg":2}\n');
+  writeFileSync(join(run2, "run.json"), storeRun1);
+  writeFileSync(join(run2, "logs", "review-r2.json"), '{"attempt":"test"}\n');
+  const run3 = join(root, "run-3");
+  mkdirSync(run3, { recursive: true });
+  writeFileSync(join(run3, "brief.md"), briefFor(run3, "style, bug, security"));
+  writeFileSync(join(run3, "run.json"), storeRun1);
+  writeFileSync(join(run3, "manifest.json"), '{"leg":0}\n');
+  const run4 = join(root, "run-4");
+  mkdirSync(run4, { recursive: true });
+  writeFileSync(join(run4, "brief.md"), briefFor(run4, "style, bug, security"));
+  writeFileSync(join(run4, "run.json"), storeRun1);
+  const run5 = join(root, "run-5");
+  mkdirSync(run5, { recursive: true });
+  writeFileSync(join(run5, "brief.md"), briefFor(run5, "style, bug, security"));
+  writeFileSync(join(run5, "manifest.json"), '{"leg":2}\n');
   writeFileSync(
-    join(run, "brief.md"),
-    `# Waybill: 1\n\n## Ticket\nname: not this one\n\n## Dispatch\nname: ${hostile}\ndispatch: ${run}\n`,
+    join(run5, "run.json"),
+    '{"config":{"lanes":{"weird":"x"},"team":{"workhorses":7,"coachman":{"harness":"muse"},"coachman_legs":{"review":{"harness":"claude"}}}}}\n',
   );
+  const run6 = join(root, "run-6");
+  mkdirSync(run6, { recursive: true });
+  writeFileSync(join(run6, "brief.md"), briefFor(run6, "style, bug, security"));
+  writeFileSync(join(run6, "manifest.json"), '{"leg":2}\n');
+  writeFileSync(join(run6, "run.json"), "[]\n");
+  const badLegs = ['{"leg": true}\n', '{"leg": 2.5}\n', '{"leg": 2,\n'];
+  for (const [index, leg] of badLegs.entries()) {
+    const dispatch = join(root, `run-${7 + index}`);
+    mkdirSync(dispatch, { recursive: true });
+    writeFileSync(join(dispatch, "brief.md"), briefFor(dispatch, "style, bug, security"));
+    writeFileSync(join(dispatch, "run.json"), storeRun1);
+    writeFileSync(join(dispatch, "manifest.json"), leg);
+  }
   return { repo: resolve(repo), clone: resolve(clone), name: hostile, caller, logs };
 }
 
 function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
+  return `'${value.replace(/'/gu, "'\\''")}'`;
 }
 async function makeHarness(root: string): Promise<{ sys: string; stubs: string }> {
   const bin = join(root, "bin"),
@@ -573,7 +719,7 @@ async function check(
     detail = detail || String((error as Error).message ?? error);
   }
   console.log(`  FAIL ${label}`);
-  if (detail) console.log(`         ${detail.replace(/\n/g, "\n         ")}`);
+  if (detail) console.log(`         ${detail.replace(/\n/gu, "\n         ")}`);
   return false;
 }
 // text.ts: BASE cuts where-values at the first ASCII space (${v%% *}, host.sh:1111);
@@ -581,9 +727,9 @@ async function check(
 export function kvOf(text: string, key: string): string {
   // [^ \r\n]: BASE reads command-substitution (trailing newlines already
   // stripped); the port reads .out raw, so the value stops at line breaks itself.
-  return new RegExp("(?:^|[ \t\r\n])" + key + "=([^ \r\n]+)").exec(text)?.[1] ?? "";
+  return new RegExp(`(?:^|[ \t\r\n])${key}=([^ \r\n]+)`, "u").exec(text)?.[1] ?? "";
 }
-export const TRIPLE_RE = /space=([^ \r\n]+) tab=([^ \r\n]+) pane=([^ \r\n]+)/;
+export const TRIPLE_RE = /space=([^ \r\n]+) tab=([^ \r\n]+) pane=([^ \r\n]+)/u;
 
 async function runControls(): Promise<void> {
   const root = mkdtempSync(join(HERE, ".host-self-test-"));
@@ -644,14 +790,214 @@ async function runControls(): Promise<void> {
       "POSTMASTER_HOST=tmux wins over a live Herdr",
       () => callText(["detect"], stubs, root, undefined, { POSTMASTER_HOST: "tmux" }) === "tmux",
     );
-    console.log("name: from the waybill");
+    console.log("launch labels and run identity");
+    const run1 = join(root, "run-1");
+    const RUN_NAME = callText(["name", run1], noHost, root);
+    const NAME = callText(["name", run1, "workhorse", "luna"], noHost, root);
+    const COACHMAN_LABEL = callText(["name", run1, "coachman", "review", "2"], noHost, root);
+    const STYLE_LABEL = callText(["name", run1, "review", "mimo", "style", "2"], noHost, root);
+    const BUG_LABEL = callText(["name", run1, "review", "mimo", "bug", "2"], noHost, root);
+    const SECURITY_LABEL = callText(
+      ["name", run1, "review", "opus", "security", "2"],
+      noHost,
+      root,
+    );
+    const POSTMASTER_LABEL = callText(["name", run1, "postmaster"], noHost, root);
+    const LEGACY_COACHMAN_LABEL = callText(["name", run1, "coachman"], noHost, root);
+    const LEGACY_WORKHORSE_LABEL = callText(["name", run1, "luna"], noHost, root);
+    const LEGACY_REVIEW_LABEL = callText(["name", run1, "mimo bug review"], noHost, root);
+    const ROLE_LABEL = callText(["name", run1, "role", "preview server"], noHost, root);
+    const refused = (result: Result): boolean => result.code !== 0 && result.out === "";
     await pass(
-      "it is the Dispatch section's name, then the role",
-      () => callText(["name", join(root, "run-1"), "luna"], noHost, root) === `${f.name} · luna`,
+      "the run level carries the ticket number and title",
+      () => RUN_NAME.startsWith("#1, Stop") && RUN_NAME.includes("breaking"),
+      RUN_NAME,
+    );
+    await pass(
+      "a coachman label leads with its role, then model and leg",
+      () => COACHMAN_LABEL === "coachman · claude-opus-5-5 · leg 2" && titleAbsent(COACHMAN_LABEL),
+      COACHMAN_LABEL,
+    );
+    await pass(
+      "a workhorse label leads with its lane and role, then model",
+      () => NAME === "luna · workhorse · gpt-6-luna" && titleAbsent(NAME),
+      NAME,
+    );
+    await pass(
+      "the style reviewer label includes its model and round",
+      () => STYLE_LABEL === "mimo · style review · mimo-v2.6-pro · r2" && titleAbsent(STYLE_LABEL),
+      STYLE_LABEL,
+    );
+    await pass(
+      "the bug reviewer label includes its model and round",
+      () => BUG_LABEL === "mimo · bug review · mimo-v2.6-pro · r2" && titleAbsent(BUG_LABEL),
+      BUG_LABEL,
+    );
+    await pass(
+      "a provider-prefixed model id shows its basename, so the round survives the ellipsis",
+      () => !BUG_LABEL.includes("xiaomi") && !BUG_LABEL.includes("/"),
+      BUG_LABEL,
+    );
+    await pass(
+      "the security reviewer label includes its model and round",
+      () =>
+        SECURITY_LABEL === "opus · security review · claude-opus-5-5 · r2" &&
+        titleAbsent(SECURITY_LABEL),
+      SECURITY_LABEL,
+    );
+    await pass(
+      "the project-level postmaster label leads with its role and has no ticket",
+      () => POSTMASTER_LABEL === "postmaster" && titleAbsent(POSTMASTER_LABEL),
+      POSTMASTER_LABEL,
+    );
+    await pass(
+      "any other launch is named by its role alone",
+      () => ROLE_LABEL === "preview server" && titleAbsent(ROLE_LABEL),
+      ROLE_LABEL,
+    );
+    await pass(
+      "the old coachman name form resolves the same per-leg model as the typed form",
+      () => LEGACY_COACHMAN_LABEL === COACHMAN_LABEL && titleAbsent(LEGACY_COACHMAN_LABEL),
+      LEGACY_COACHMAN_LABEL,
+    );
+    await pass(
+      "the old workhorse name form still adds its role and model",
+      () =>
+        LEGACY_WORKHORSE_LABEL === "luna · workhorse · gpt-6-luna" &&
+        titleAbsent(LEGACY_WORKHORSE_LABEL),
+      LEGACY_WORKHORSE_LABEL,
+    );
+    await pass(
+      "the old review name form still adds its model and current round",
+      () =>
+        LEGACY_REVIEW_LABEL === "mimo · bug review · mimo-v2.6-pro · r2" &&
+        titleAbsent(LEGACY_REVIEW_LABEL),
+      LEGACY_REVIEW_LABEL,
+    );
+    await pass("an unrecorded lane is refused, never labelled bare or empty", () =>
+      refused(execHost(["name", run1, "workhorse", "nobody"])),
+    );
+    await pass(
+      "a lane with no recorded model is refused, not labelled without it",
+      () =>
+        refused(execHost(["name", run1, "workhorse", "bare"])) &&
+        refused(execHost(["name", run1, "review", "bare", "bug", "2"])),
+    );
+    await pass("a review round that never ran is refused, never labelled", () =>
+      refused(execHost(["name", run1, "review", "mimo", "bug", "999"])),
+    );
+    await pass("round 0 is refused: rounds are 1-based", () =>
+      refused(execHost(["name", run1, "review", "mimo", "bug", "0"])),
+    );
+    await pass("a non-ASCII round is refused with a clean error, not a traceback", () => {
+      const result = execHost(["name", run1, "review", "mimo", "bug", "²"]);
+      return result.err.trim() === "host: review round must be a whole number" && result.out === "";
+    });
+    await pass("a non-ASCII leg number is refused the same way", () => {
+      const result = execHost(["name", run1, "coachman", "review", "²"]);
+      return (
+        result.err.trim() === "host: coachman leg number must be a whole number" &&
+        result.out === ""
+      );
+    });
+    await pass("the two-argument coachman form is refused, never labelled without its leg", () =>
+      refused(execHost(["name", run1, "coachman", "review"])),
+    );
+    await pass("the old coachman form is refused when the waybill's turnpikes do not resolve", () =>
+      refused(execHost(["name", join(root, "run-2"), "coachman"])),
+    );
+    await pass(
+      "and when the manifest records no leg, or there is no manifest",
+      () =>
+        refused(execHost(["name", join(root, "run-3"), "coachman"])) &&
+        refused(execHost(["name", join(root, "run-4"), "coachman"])),
+    );
+    const LONG = "9".repeat(5000);
+    await pass("a round past the integer conversion limit is refused cleanly", () => {
+      const result = execHost(["name", run1, "review", "mimo", "bug", LONG]);
+      return result.err.trim() === "host: review round must be a whole number" && result.out === "";
+    });
+    await pass("a leg past it is refused the same way", () => {
+      const result = execHost(["name", run1, "coachman", "review", LONG]);
+      return (
+        result.err.trim() === "host: coachman leg number must be a whole number" &&
+        result.out === ""
+      );
+    });
+    await pass(
+      "an empty or unknown leg name is refused, never silently generic",
+      () =>
+        refused(execHost(["name", run1, "coachman", "", "2"])) &&
+        refused(execHost(["name", run1, "coachman", "nonsense", "2"])),
+    );
+    await pass(
+      "while a known leg without an override still takes the generic coachman model",
+      () =>
+        callText(["name", run1, "coachman", "synthesis", "1"], noHost, root) ===
+        "coachman · muse-spark-1.3-contributor · leg 1",
+    );
+    await pass("an empty leg number is refused, never labelled without its leg", () => {
+      const result = execHost(["name", run1, "coachman", "review", ""]);
+      return (
+        result.err.trim() === "host: coachman leg number must be a whole number" &&
+        result.out === ""
+      );
+    });
+    await pass("leg 0 is refused like round 0", () => {
+      const result = execHost(["name", run1, "coachman", "synthesis", "0"]);
+      return (
+        result.err.trim() === "host: coachman leg number must be 1 or more" && result.out === ""
+      );
+    });
+    await pass("a coachman with no recorded model is refused, override, generic or legacy", () => {
+      const run5 = join(root, "run-5");
+      return (
+        execHost(["name", run5, "coachman", "synthesis", "1"]).err.trim() ===
+          "host: no recorded model for coachman leg synthesis" &&
+        execHost(["name", run5, "coachman", "review", "2"]).err.trim() ===
+          "host: no recorded model for coachman leg review" &&
+        execHost(["name", run5, "coachman"]).err.trim() ===
+          "host: no recorded model for coachman leg review"
+      );
+    });
+    await pass(
+      "a manifest leg that is not an integer is refused, never coerced",
+      () =>
+        execHost(["name", join(root, "run-7"), "coachman"]).err.trim() ===
+          "host: cannot resolve the coachman leg from manifest.json" &&
+        execHost(["name", join(root, "run-8"), "coachman"]).err.trim() ===
+          "host: cannot resolve the coachman leg from manifest.json",
+    );
+    await pass(
+      "a manifest that is not JSON is refused",
+      () =>
+        execHost(["name", join(root, "run-9"), "coachman"]).err.trim() ===
+        "host: cannot resolve the coachman leg from manifest.json",
+    );
+    await pass(
+      "a malformed store is refused cleanly, never a traceback",
+      () =>
+        execHost(["name", join(root, "run-5"), "workhorse", "weird"]).err.trim() ===
+          "host: no recorded model for workhorse lane weird" &&
+        execHost(["name", join(root, "run-5"), "weird"]).err.trim() ===
+          "host: invalid launch identity; use coachman, workhorse, review, postmaster or role" &&
+        execHost(["name", join(root, "run-6"), "workhorse", "luna"]).err.trim() ===
+          "host: no recorded model for workhorse lane luna",
+    );
+
+    console.log("name: from the waybill, so no title is typed into a shell");
+    await pass(
+      "a role-first launch name comes from the recorded lane model",
+      () => NAME === "luna · workhorse · gpt-6-luna" && titleAbsent(NAME),
+      NAME,
     );
     await pass(
       "a waybill without one falls back to the run's directory",
-      () => callText(["name", logs, "coachman"], noHost, root) === "logs · coachman",
+      () => callText(["name", logs], noHost, root) === "logs",
+    );
+    await pass(
+      "and a role name with no waybill is still only its parts",
+      () => callText(["name", logs, "role", "verify x"], noHost, root) === "verify x",
     );
     writeFileSync(
       join(logs, "brief.md"),
@@ -670,6 +1016,8 @@ async function runControls(): Promise<void> {
 
     console.log("run, no host: headless launch");
     const direct = exec(join(f.caller, "fixed.sh"), [], { cwd: f.caller, env: { ...process.env } });
+    writeFileSync(join(root, "direct.out"), direct.out);
+    writeFileSync(join(root, "direct.err"), direct.err);
     const headless = execHost([
       "run",
       f.name,
@@ -690,10 +1038,12 @@ async function runControls(): Promise<void> {
     );
     await marker(markerPath("n1"));
     await pass(
-      "stdout and stderr are byte for byte a direct run's",
+      "the command's output matches a direct run, and uncapped execution is disclosed",
       () =>
-        readFileSync(join(logs, "n1.out"), "utf8") === direct.out &&
-        readFileSync(join(logs, "n1.err"), "utf8") === direct.err,
+        readFileSync(join(logs, "n1.out"), "utf8") ===
+          readFileSync(join(root, "direct.out"), "utf8") &&
+        errStreamEqual(join(root, "direct.err"), join(logs, "n1.err")) &&
+        readFileSync(join(logs, "n1.err"), "utf8").split("\n").includes(UNCAPPED_NOTICE),
     );
     await pass("and the title's shell syntax never ran", () => !existsSync(join(root, "canary")));
     writeFileSync(markerPath("n2"), "old marker");
@@ -831,7 +1181,9 @@ async function runControls(): Promise<void> {
       "--append keeps what the stream held, and --err holds only this launch's errors",
       () =>
         readFileSync(join(logs, "n4.out"), "utf8").split("\n")[0] === "before" &&
-        readFileSync(join(logs, "n4.err"), "utf8").trim() === "a line on stderr",
+        readFileSync(join(logs, "n4.out"), "utf8").split("\n").length - 1 === 4 &&
+        errStreamEqual(join(root, "direct.err"), join(logs, "n4.err")) &&
+        readFileSync(join(logs, "n4.err"), "utf8").split("\n").includes(UNCAPPED_NOTICE),
     );
     const missingSeparator = execHost([
       "run",
@@ -991,7 +1343,7 @@ async function runControls(): Promise<void> {
         .split("\n")
         .find((line: string) => line.startsWith("btime ")) ?? "btime 0";
     // ASCII: /proc/stat is kernel-emitted ASCII; btime's fields split on spaces.
-    const bootSeconds = Number(bootLine.split(/\s+/)[1]);
+    const bootSeconds = Number(bootLine.split(/\s+/u)[1]);
     const ticks = Number(exec("getconf", ["CLK_TCK"]).out.trim()) || 100;
     const procStart = (pid: string): string => {
       const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -1000,7 +1352,7 @@ async function runControls(): Promise<void> {
           .slice(stat.lastIndexOf(")") + 1)
           .trim()
           // ASCII: /proc/<pid>/stat past the name is kernel-emitted ASCII numerics.
-          .split(/\s+/)[19] ?? ""
+          .split(/\s+/u)[19] ?? ""
       );
     };
     const startedSeconds = (pid: string) => bootSeconds + Number(procStart(pid)) / ticks;
@@ -1366,6 +1718,8 @@ async function runControls(): Promise<void> {
     );
     await marker(markerPath("h2"));
     const directOut = exec(join(f.caller, "fixed.sh"), [], { cwd: f.caller, env: process.env });
+    writeFileSync(join(root, "direct.out"), directOut.out);
+    writeFileSync(join(root, "direct.err"), directOut.err);
     const sameStreams = execHost(
       [
         "run",
@@ -1385,11 +1739,12 @@ async function runControls(): Promise<void> {
     );
     await marker(markerPath("h3"));
     await pass(
-      "the stream and the marker are what a background run writes",
+      "the command streams and marker are what a background run writes, with any cap notice",
       () =>
         sameStreams.code === 0 &&
-        readFileSync(join(logs, "h3.out"), "utf8") === directOut.out &&
-        readFileSync(join(logs, "h3.err"), "utf8") === directOut.err,
+        readFileSync(join(logs, "h3.out"), "utf8") ===
+          readFileSync(join(root, "direct.out"), "utf8") &&
+        errStreamEqual(join(root, "direct.err"), join(logs, "h3.err")),
     );
 
     writeFileSync(join(stub, "pane.dead"), "");
@@ -1448,13 +1803,13 @@ async function runControls(): Promise<void> {
     );
 
     console.log("stop and close, Herdr (stub)");
-    const openedSpace = json(join(stub, "herdr.json"), { open: {} }).open[worktree] ?? spaceId;
     const closedHerdr = execHost(["close", worktree], stubs, root);
     await pass(
       "a space host.sh opened, its launches done, is closed",
       () =>
         closedHerdr.code === 0 &&
-        calls(root, "herdr").some((line) => line === `workspace\tclose\t${openedSpace}`),
+        (json(join(stub, "herdr.json"), { open: {} }).open[worktree] ?? "") === "",
+      closedHerdr.err,
     );
     const ownClose = execHost(["close", f.repo], stubs, root);
     await pass(
@@ -1462,29 +1817,41 @@ async function runControls(): Promise<void> {
       () => ownClose.code === 2 && ownClose.err.includes("own checkout"),
     );
     const herdrStatePath = join(stub, "herdr.json");
-    const currentState = json(herdrStatePath, { n: 0, spaces: {}, panes: {}, open: {} });
+    const currentState = json(herdrStatePath, {
+      n: 0,
+      spaces: {},
+      panes: {},
+      tabs: {},
+      tab_n: {},
+      open: {},
+      agents: [],
+      prompt: [],
+    });
     currentState.n++;
     const userSpace = `w${currentState.n}`;
     currentState.n++;
     const userPane = `p${currentState.n}`;
-    currentState.spaces[userSpace] = { label: "the user's", tokens: {}, panes: [userPane] };
+    const revLuna = join(f.repo, ".worktrees/T-1-rev-luna");
+    currentState.spaces[userSpace] = {
+      label: "the user's",
+      tokens: {},
+      panes: [userPane],
+      tabs: [],
+      path: resolve(revLuna),
+    };
     currentState.panes[userPane] = {
       ws: userSpace,
       tokens: { postmaster: "launch", state: "done" },
     };
-    currentState.open[join(f.repo, ".worktrees/T-1-rev-luna")] = userSpace;
+    currentState.open[revLuna] = userSpace;
     save(herdrStatePath, currentState);
-    const userSpaceClose = execHost(
-      ["close", join(f.repo, ".worktrees/T-1-rev-luna")],
-      stubs,
-      root,
-    );
+    const userSpaceClose = execHost(["close", revLuna], stubs, root);
     await pass(
       "a space host.sh did not open is refused, and left open",
       () =>
         userSpaceClose.code === 2 &&
-        userSpaceClose.err.includes("was not opened by host.sh") &&
         !calls(root, "herdr").includes(`workspace\tclose\t${userSpace}`),
+      userSpaceClose.err,
     );
     writeFileSync(join(stub, "pane.dead"), "");
     const liveFallback = execHost(
@@ -1558,7 +1925,9 @@ async function runControls(): Promise<void> {
     await pass(
       "close shuts it",
       () =>
-        cloneClose.code === 0 && calls(root, "herdr").includes(`workspace\tclose\t${cloneSpace}`),
+        cloneClose.code === 0 &&
+        (json(join(stub, "herdr.json"), { open: {} }).open[f.clone] ?? "") === "",
+      cloneClose.err,
     );
     const plain = join(root, "plain");
     exec("git", ["clone", "-q", f.repo, plain]);
@@ -1717,7 +2086,7 @@ async function runControls(): Promise<void> {
         "postmaster-repo",
         join(f.repo, ".worktrees/T-1-luna"),
         "--label",
-        "repo · postmaster",
+        POSTMASTER_LABEL,
         "--",
         "claude",
         "--model",
@@ -1732,13 +2101,9 @@ async function runControls(): Promise<void> {
       "Herdr: spawn starts the agent in a tab of the repository's own space",
       () =>
         spawnHerdr.code === 0 &&
-        herdrCalls.some((line) =>
-          line.includes(`tab\tcreate\t--workspace\tw1\t--cwd\t${f.repo}/.worktrees/T-1-luna`),
-        ) &&
-        herdrCalls.some(
-          (line) =>
-            line.startsWith("agent\tstart\tpostmaster-repo\t--kind\tclaude\t--pane\tp") &&
-            line.endsWith("\t--\t--model\tm"),
+        herdrCalls.includes("tab\trename\tw1:t1\tpostmaster") &&
+        herdrCalls.includes(
+          "agent\tstart\tpostmaster-repo\t--kind\tclaude\t--pane\tp2\t--\t--model\tm",
         ),
       herdrCalls.join("\n"),
     );
@@ -1884,6 +2249,519 @@ async function runControls(): Promise<void> {
         calls(root, "tmux").some((line) => line === "capture-pane\t-p\t-J\t-S\t-7\t-t\t@1") &&
         tmuxRead.code === 0,
     );
+
+    console.log("run role: the explicit host role");
+    const capDispatch = join(root, "cap-dispatch");
+    mkdirSync(join(capDispatch, "logs"), { recursive: true });
+    writeFileSync(
+      join(capDispatch, "run.json"),
+      '{"config":{"limits":{"memory_max":"8G","tasks_max":512,"lane":{"memory_max":"64M","tasks_max":16},"coachman":{"memory_max":"128M","tasks_max":32},"reviewer":{"tasks_max":24}}}}\n',
+    );
+    writeFileSync(
+      join(f.caller, "launch.sh"),
+      ["#!/usr/bin/env bash", "printf 'role=%s\\n' \"${POSTMASTER_LAUNCH_ROLE:-unset}\"", ""].join(
+        "\n",
+      ),
+    );
+    exec("chmod", ["+x", join(f.caller, "launch.sh")]);
+    execHost(
+      [
+        "run",
+        NAME,
+        f.repo,
+        "--role",
+        "reviewer",
+        "--run",
+        capDispatch,
+        "--out",
+        "../logs/role.out",
+        "--marker",
+        "../logs/role.done",
+        "--",
+        "./launch.sh",
+      ],
+      noHost,
+      f.caller,
+      { POSTMASTER_LAUNCH_ROLE: "spoof" },
+    );
+    await marker(markerPath("role"));
+    const roleOut = readFileSync(join(logs, "role.out"), "utf8");
+    await pass(
+      "the run's explicit host role reaches launch.sh and an inherited role cannot replace it",
+      () => roleOut === "role=reviewer\n",
+      roleOut,
+    );
+
+    console.log(
+      "run environment identity, Claude session and lane env file: Herdr, tmux and no host",
+    );
+    const claudeIdentityNames = [
+      "CLAUDECODE",
+      "CLAUDE_PID",
+      "CLAUDE_CODE_SESSION_ID",
+      "CLAUDE_CODE_CHILD_SESSION",
+      "CLAUDE_CODE_ENTRYPOINT",
+      "CLAUDE_CODE_EXECPATH",
+      "CLAUDE_CODE_SESSION_ATTENDED",
+      "CLAUDE_CODE_MESSAGING_SOCKET",
+      "CLAUDE_CODE_MESSAGING_TOKEN",
+      "CLAUDE_CODE_TOOL_USE_ID",
+      "CLAUDE_CODE_SESSION_EXTRA",
+      "CLAUDE_CODE_MESSAGING_EXTRA",
+      "CLAUDE_CODE_CHILD_EXTRA",
+    ];
+    const herdrIdentityNames = [
+      "HERDR_PANE_ID",
+      "HERDR_TAB_ID",
+      "HERDR_WORKSPACE_ID",
+      "HERDR_ENV",
+      "HERDR_SOCKET_PATH",
+      "HERDR_BIN_PATH",
+      "HERDR_CUSTOM",
+    ];
+    const claudeIdentityEnv: Record<string, string> = {
+      CLAUDECODE: "caller-claudecode",
+      CLAUDE_PID: "caller-pid",
+      CLAUDE_CODE_SESSION_ID: "caller-thread",
+      CLAUDE_CODE_CHILD_SESSION: "caller-child",
+      CLAUDE_CODE_ENTRYPOINT: "caller-entry",
+      CLAUDE_CODE_EXECPATH: "caller-exec",
+      CLAUDE_CODE_SESSION_ATTENDED: "caller-attended",
+      CLAUDE_CODE_MESSAGING_SOCKET: "caller-socket",
+      CLAUDE_CODE_MESSAGING_TOKEN: "caller-token",
+      CLAUDE_CODE_TOOL_USE_ID: "caller-tool-use",
+      CLAUDE_CODE_SESSION_EXTRA: "caller-session-extra",
+      CLAUDE_CODE_MESSAGING_EXTRA: "caller-messaging-extra",
+      CLAUDE_CODE_CHILD_EXTRA: "caller-child-extra",
+    };
+    const herdrIdentityEnv: Record<string, string> = {
+      HERDR_PANE_ID: "caller-pane",
+      HERDR_TAB_ID: "caller-tab",
+      HERDR_WORKSPACE_ID: "caller-workspace",
+      HERDR_ENV: "caller-env",
+      HERDR_SOCKET_PATH: "/caller/herdr.sock",
+      HERDR_BIN_PATH: "/caller/herdr-bin",
+      HERDR_CUSTOM: "caller-herdr-extra",
+    };
+    const callerConfigEnv: Record<string, string> = {
+      CALLER_VAR: "caller-value",
+      POSTMASTER_CUSTOM: "caller-postmaster",
+      POSTMASTER_CONFIG: join(root, "claude-launch.toml"),
+      CLAUDE_CONFIG_DIR: join(root, "claude-config"),
+      CLAUDE_EFFORT: "high",
+      CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "123",
+      CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1",
+      ANTHROPIC_BASE_URL: "https://caller.invalid",
+      ANTHROPIC_AUTH_TOKEN: "fixture-auth-token",
+    };
+    const exactIdentity =
+      " CLAUDECODE CLAUDE_PID CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_CODE_TOOL_USE_ID ";
+    writeFileSync(
+      join(f.caller, "env-probe.sh"),
+      [
+        "#!/usr/bin/env bash",
+        "# Reports the caller identity a launch still sees: every Claude session name and family",
+        "# member present, every HERDR_* variable present, the pane's six values, and caller",
+        "# configuration.",
+        `exact="${exactIdentity}"`,
+        'claude_keys=""',
+        'herdr_keys=""',
+        "while IFS= read -r name; do",
+        '  case "$name" in',
+        "    CLAUDE_CODE_SESSION_*|CLAUDE_CODE_MESSAGING_*|CLAUDE_CODE_CHILD_*)",
+        '      claude_keys="${claude_keys}${claude_keys:+,}$name" ;;',
+        '    HERDR_*) herdr_keys="${herdr_keys}${herdr_keys:+,}$name" ;;',
+        "    *)",
+        '      case "$exact" in *" $name "*) claude_keys="${claude_keys}${claude_keys:+,}$name" ;; esac ;;',
+        "  esac",
+        "done < <(compgen -e | sort)",
+        "printf '%s\\n' \"claude_keys=$claude_keys|herdr_keys=$herdr_keys|herdr_pane=${HERDR_PANE_ID:-unset}|herdr_tab=${HERDR_TAB_ID:-unset}|herdr_workspace=${HERDR_WORKSPACE_ID:-unset}|herdr_env=${HERDR_ENV:-unset}|herdr_socket=${HERDR_SOCKET_PATH:-unset}|herdr_bin=${HERDR_BIN_PATH:-unset}|herdr_custom=${HERDR_CUSTOM:-unset}|caller=${CALLER_VAR:-unset}|postmaster_custom=${POSTMASTER_CUSTOM:-unset}|postmaster_config=${POSTMASTER_CONFIG:-unset}|claude_config_dir=${CLAUDE_CONFIG_DIR:-unset}|claude_effort=${CLAUDE_EFFORT:-unset}|claude_bg_wait=${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-unset}|claude_feedback=${CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY:-unset}|anthropic_base=${ANTHROPIC_BASE_URL:-unset}|anthropic_auth=${ANTHROPIC_AUTH_TOKEN:-unset}\"",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(f.caller, "lane.env"),
+      [
+        "LANE_ENV_ONLY=from-lane-env-file",
+        "ANTHROPIC_BASE_URL=https://lane.invalid",
+        "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=456",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(root, "claude-launch.toml"),
+      [
+        "[lanes.test]",
+        'harness = "claude"',
+        'model = "host-self-test"',
+        `env_file = "${join(f.caller, "lane.env")}"`,
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(join(f.caller, "prompt.txt"), "Continue.\n");
+    writeFileSync(
+      join(root, "bin", "claude"),
+      [
+        "#!/usr/bin/env bash",
+        "# A claude harness for the identity controls: it records the session identity and",
+        "# configuration it saw, then behaves like a headless run. Inherited session identity",
+        "# answers without owning a record; a fresh launch owns thread-$HOST_TEST_RUN; a resume",
+        "# continues its thread.",
+        `exact="${exactIdentity}"`,
+        "identity_names=()",
+        "herdr_names=()",
+        "while IFS= read -r name; do",
+        '  case "$name" in',
+        "    CLAUDE_CODE_SESSION_*|CLAUDE_CODE_MESSAGING_*|CLAUDE_CODE_CHILD_*)",
+        '      identity_names+=("$name") ;;',
+        '    HERDR_*) herdr_names+=("$name") ;;',
+        "    *)",
+        '      case "$exact" in *" $name "*) identity_names+=("$name") ;; esac ;;',
+        "  esac",
+        "done < <(compgen -e | sort)",
+        'identity_json=""',
+        'for name in "${identity_names[@]}"; do',
+        '  identity_json="${identity_json}${identity_json:+,}\\"$name\\""',
+        "done",
+        'herdr_json=""',
+        'for name in "${herdr_names[@]}"; do',
+        "  value=${!name}",
+        "  value=${value//\\\\/\\\\\\\\}",
+        '  value=${value//\\"/\\\\\\"}',
+        '  herdr_json="${herdr_json}${herdr_json:+,}\\"$name\\":\\"$value\\""',
+        "done",
+        'env_json=""',
+        "for name in CALLER_VAR POSTMASTER_CUSTOM POSTMASTER_CONFIG CLAUDE_CONFIG_DIR CLAUDE_EFFORT CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN LANE_ENV_ONLY; do",
+        '  if [ -n "${!name+x}" ]; then value=${!name}; else value=unset; fi',
+        "  value=${value//\\\\/\\\\\\\\}",
+        '  value=${value//\\"/\\\\\\"}',
+        '  env_json="${env_json}${env_json:+,}\\"$name\\":\\"$value\\""',
+        "done",
+        'if [ -n "${HOST_TEST_OBSERVED:-}" ]; then',
+        `  printf '{"env":{%s},"herdr":{%s},"identity":[%s]}\\n' "$env_json" "$herdr_json" "$identity_json" >> "$HOST_TEST_OBSERVED"`,
+        "fi",
+        'if [ "${#identity_names[@]}" -gt 0 ]; then',
+        "  # Model #67's failure: a nested headless run can finish without owning a record.",
+        `  printf '{"type":"system","subtype":"init","session_id":"%s","model":"stub"}\\n' "\${CLAUDE_CODE_SESSION_ID:-caller-thread}"`,
+        `  printf '{"type":"result","subtype":"success","num_turns":1}\\n'`,
+        "  exit 0",
+        "fi",
+        "resume=0",
+        'session_id=""',
+        'prev=""',
+        'for arg in "$@"; do',
+        '  if [ "$prev" = "--resume" ]; then resume=1; session_id="$arg"; fi',
+        '  prev="$arg"',
+        "done",
+        'if [ "$resume" = 1 ]; then',
+        '  record="$CLAUDE_CONFIG_DIR/sessions/$session_id.jsonl"',
+        '  if [ ! -f "$record" ]; then echo "Session not found" >&2; exit 1; fi',
+        "  printf 'resume\\n' >> \"$record\"",
+        "else",
+        '  session_id="thread-$HOST_TEST_RUN"',
+        '  record="$CLAUDE_CONFIG_DIR/sessions/$session_id.jsonl"',
+        '  mkdir -p "$CLAUDE_CONFIG_DIR/sessions"',
+        "  printf 'new\\n' > \"$record\"",
+        "fi",
+        `printf '{"type":"system","subtype":"init","session_id":"%s","model":"stub"}\\n' "$session_id"`,
+        `printf '{"type":"result","subtype":"success","num_turns":1}\\n'`,
+        "",
+      ].join("\n"),
+    );
+    exec("chmod", ["+x", join(f.caller, "env-probe.sh")]);
+    exec("chmod", ["+x", join(root, "bin", "claude")]);
+    const containsAll = (values: string, names: string[]): boolean =>
+      names.every((name) => `,${values},`.includes(`,${name},`));
+    const readText = (path: string): string => {
+      try {
+        return readFileSync(path, "utf8");
+      } catch {
+        return "";
+      }
+    };
+    const lastLine = (path: string): string => {
+      const lines = readText(path).trimEnd().split("\n");
+      return lines[lines.length - 1] ?? "";
+    };
+    const observe = (path: string, key: string): string => {
+      const record = JSON.parse(lastLine(path));
+      if (key === "identity_keys") return (record.identity as string[]).join(",");
+      if (key === "herdr_keys")
+        return Object.keys(record.herdr as Record<string, string>)
+          .sort()
+          .join(",");
+      if (key.startsWith("herdr:"))
+        return (record.herdr as Record<string, string>)[key.slice("herdr:".length)] ?? "unset";
+      return (record.env as Record<string, string>)[key] ?? "unset";
+    };
+    const streamSessions = (path: string): string =>
+      readText(path)
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((line) => JSON.parse(line))
+        .filter((event: any) => event.subtype === "init")
+        .map((event: any) => String(event.session_id ?? ""))
+        .join(",");
+    const lunaWorktree = join(f.repo, ".worktrees/T-1-luna");
+    for (const mode of ["herdr", "tmux", "none"]) {
+      const under = mode === "herdr" ? ["--under", run1] : [];
+      const launchEnv = { ...claudeIdentityEnv, ...herdrIdentityEnv, ...callerConfigEnv };
+      const inputProbe = exec(join(f.caller, "env-probe.sh"), [], {
+        cwd: f.caller,
+        env: { HOME: process.env.HOME ?? "/", PATH: stubs, STUB: stub, ...launchEnv },
+      }).out;
+      await pass(
+        `AC1 ${mode} positive control: caller carries every Claude identity name`,
+        () => containsAll(field(inputProbe, "claude_keys"), claudeIdentityNames),
+        inputProbe,
+      );
+      await pass(
+        `AC2 ${mode} positive control: caller carries every Herdr variable`,
+        () =>
+          containsAll(field(inputProbe, "herdr_keys"), herdrIdentityNames) &&
+          field(inputProbe, "herdr_custom") === "caller-herdr-extra",
+        inputProbe,
+      );
+      await pass(
+        `AC3 ${mode} positive control: caller configuration is present before the handoff`,
+        () =>
+          field(inputProbe, "caller") === "caller-value" &&
+          field(inputProbe, "postmaster_custom") === "caller-postmaster" &&
+          field(inputProbe, "claude_bg_wait") === "123" &&
+          field(inputProbe, "anthropic_base") === "https://caller.invalid",
+        inputProbe,
+      );
+
+      const outputProbe = join(logs, `${mode}.identity-output`);
+      const probeMarker = join(logs, `${mode}.identity-probe.done`);
+      const probeRun = execHost(
+        [
+          "run",
+          NAME,
+          lunaWorktree,
+          ...under,
+          "--out",
+          outputProbe,
+          "--marker",
+          probeMarker,
+          "--",
+          "./env-probe.sh",
+        ],
+        stubs,
+        f.caller,
+        { ...launchEnv, POSTMASTER_HOST: mode },
+      );
+      await marker(probeMarker, 60);
+      const placed = probeRun.out.trim();
+      const placedHost =
+        mode === "herdr"
+          ? placed.startsWith("host=herdr ")
+          : mode === "tmux"
+            ? placed.startsWith("host=tmux ")
+            : placed === "host=none";
+      await pass(
+        `AC5 ${mode} positive host control: launch used the requested host`,
+        () => placedHost,
+        placed,
+      );
+      const output = readFileSync(outputProbe, "utf8");
+      await pass(
+        `AC1 ${mode} negative control: launch receives no Claude session identity`,
+        () => field(output, "claude_keys") === "",
+        output,
+      );
+      if (mode === "herdr") {
+        await pass(
+          "AC2 Herdr negative control: launch receives only its pane's six Herdr values",
+          () =>
+            field(output, "herdr_keys") ===
+              "HERDR_BIN_PATH,HERDR_ENV,HERDR_PANE_ID,HERDR_SOCKET_PATH,HERDR_TAB_ID,HERDR_WORKSPACE_ID" &&
+            field(output, "herdr_pane") === kvOf(placed, "pane") &&
+            field(output, "herdr_tab") === `tab-of-${kvOf(placed, "pane")}` &&
+            field(output, "herdr_workspace") === kvOf(placed, "space") &&
+            field(output, "herdr_env") === "pane-env" &&
+            field(output, "herdr_socket") === "/stub/herdr.sock" &&
+            field(output, "herdr_bin") === "/stub/herdr-bin" &&
+            field(output, "herdr_custom") === "unset",
+          output,
+        );
+      } else {
+        await pass(
+          `AC2 ${mode} negative control: launch receives no Herdr variables`,
+          () =>
+            field(output, "herdr_keys") === "" &&
+            field(output, "herdr_pane") === "unset" &&
+            field(output, "herdr_custom") === "unset",
+          output,
+        );
+      }
+      await pass(
+        `AC3 ${mode} negative identity control: other caller configuration still reaches launch`,
+        () =>
+          field(output, "caller") === "caller-value" &&
+          field(output, "postmaster_custom") === "caller-postmaster" &&
+          field(output, "postmaster_config") === join(root, "claude-launch.toml") &&
+          field(output, "claude_config_dir") === join(root, "claude-config") &&
+          field(output, "claude_effort") === "high" &&
+          field(output, "claude_bg_wait") === "123" &&
+          field(output, "claude_feedback") === "1" &&
+          field(output, "anthropic_base") === "https://caller.invalid" &&
+          field(output, "anthropic_auth") === "fixture-auth-token",
+        output,
+      );
+
+      const directStream = join(logs, `${mode}.inherited-identity.events`);
+      const directObserved = join(logs, `${mode}.inherited-identity.jsonl`);
+      const directClaude = exec(join(root, "bin", "claude"), ["-p", "direct"], {
+        cwd: f.caller,
+        env: {
+          HOME: process.env.HOME ?? "/",
+          PATH: stubs,
+          STUB: stub,
+          ...launchEnv,
+          HOST_TEST_RUN: mode,
+          HOST_TEST_OBSERVED: directObserved,
+        },
+      });
+      writeFileSync(directStream, directClaude.out);
+      const sessionRecord = join(root, "claude-config", "sessions", `thread-${mode}.jsonl`);
+      await pass(
+        `AC4 ${mode} negative control: inherited Claude identity writes no caller-thread record`,
+        () =>
+          streamSessions(directStream) === "caller-thread" &&
+          !existsSync(join(root, "claude-config", "sessions", "caller-thread.jsonl")) &&
+          observe(directObserved, "identity_keys") !== "",
+        directClaude.out,
+      );
+
+      const launchEvents = join(logs, `${mode}.claude.events`);
+      const launchErr = join(logs, `${mode}.claude.err`);
+      const launchMarker = join(logs, `${mode}.claude.done`);
+      const launchObserved = join(logs, `${mode}.claude.jsonl`);
+      const claudeRun = execHost(
+        [
+          "run",
+          NAME,
+          lunaWorktree,
+          ...under,
+          "--out",
+          launchEvents,
+          "--err",
+          launchErr,
+          "--marker",
+          launchMarker,
+          "--",
+          join(HERE, "launch.sh"),
+          "launch",
+          "test",
+          lunaWorktree,
+          join(f.caller, "prompt.txt"),
+        ],
+        stubs,
+        f.caller,
+        {
+          ...launchEnv,
+          POSTMASTER_HOST: mode,
+          HOST_TEST_RUN: mode,
+          HOST_TEST_OBSERVED: launchObserved,
+        },
+      );
+      await marker(launchMarker, 60);
+      const claudePlaced = claudeRun.out.trim();
+      const thread = streamSessions(launchEvents);
+      await pass(
+        `AC1 ${mode} Claude control: host launch strips caller identity before the harness`,
+        () => observe(launchObserved, "identity_keys") === "",
+        lastLine(launchObserved),
+      );
+      await pass(
+        `AC2 ${mode} Claude control: harness sees only the pane's Herdr identity`,
+        () =>
+          mode === "herdr"
+            ? observe(launchObserved, "herdr_keys") ===
+                "HERDR_BIN_PATH,HERDR_ENV,HERDR_PANE_ID,HERDR_SOCKET_PATH,HERDR_TAB_ID,HERDR_WORKSPACE_ID" &&
+              observe(launchObserved, "herdr:HERDR_PANE_ID") === kvOf(claudePlaced, "pane") &&
+              observe(launchObserved, "herdr:HERDR_TAB_ID") ===
+                `tab-of-${kvOf(claudePlaced, "pane")}` &&
+              observe(launchObserved, "herdr:HERDR_WORKSPACE_ID") === kvOf(claudePlaced, "space") &&
+              observe(launchObserved, "herdr:HERDR_ENV") === "pane-env" &&
+              observe(launchObserved, "herdr:HERDR_SOCKET_PATH") === "/stub/herdr.sock" &&
+              observe(launchObserved, "herdr:HERDR_BIN_PATH") === "/stub/herdr-bin"
+            : observe(launchObserved, "herdr_keys") === "",
+        lastLine(launchObserved),
+      );
+      await pass(
+        `AC3 ${mode} Claude control: caller and lane env-file settings reach the harness`,
+        () =>
+          observe(launchObserved, "CALLER_VAR") === "caller-value" &&
+          observe(launchObserved, "POSTMASTER_CUSTOM") === "caller-postmaster" &&
+          observe(launchObserved, "POSTMASTER_CONFIG") === join(root, "claude-launch.toml") &&
+          observe(launchObserved, "CLAUDE_CONFIG_DIR") === join(root, "claude-config") &&
+          observe(launchObserved, "CLAUDE_EFFORT") === "high" &&
+          observe(launchObserved, "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS") === "456" &&
+          observe(launchObserved, "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY") === "1" &&
+          observe(launchObserved, "ANTHROPIC_BASE_URL") === "https://lane.invalid" &&
+          observe(launchObserved, "ANTHROPIC_AUTH_TOKEN") === "fixture-auth-token" &&
+          observe(launchObserved, "LANE_ENV_ONLY") === "from-lane-env-file",
+        lastLine(launchObserved),
+      );
+      await pass(
+        `AC4 ${mode} positive control: streamed session id owns its record`,
+        () =>
+          thread === `thread-${mode}` &&
+          existsSync(sessionRecord) &&
+          readText(sessionRecord).split("\n").includes("new"),
+        thread,
+      );
+
+      const resumeMarker = join(logs, `${mode}.resume.done`);
+      execHost(
+        [
+          "run",
+          NAME,
+          lunaWorktree,
+          ...under,
+          "--append",
+          "--out",
+          launchEvents,
+          "--err",
+          launchErr,
+          "--marker",
+          resumeMarker,
+          "--",
+          join(HERE, "launch.sh"),
+          "resume",
+          "test",
+          lunaWorktree,
+          `thread-${mode}`,
+          join(f.caller, "prompt.txt"),
+        ],
+        stubs,
+        f.caller,
+        {
+          ...launchEnv,
+          POSTMASTER_HOST: mode,
+          HOST_TEST_RUN: mode,
+          HOST_TEST_OBSERVED: launchObserved,
+        },
+      );
+      await marker(resumeMarker, 60);
+      await pass(
+        `AC4 ${mode} positive resume control: resume continues the streamed thread`,
+        () =>
+          streamSessions(launchEvents) === `thread-${mode},thread-${mode}` &&
+          readText(sessionRecord).split("\n").includes("resume"),
+        `${streamSessions(launchEvents)} / ${readText(sessionRecord)}`,
+      );
+      await pass(
+        `AC1 and AC3 ${mode} resume control: identity stays stripped and env file stays present`,
+        () =>
+          observe(launchObserved, "identity_keys") === "" &&
+          observe(launchObserved, "LANE_ENV_ONLY") === "from-lane-env-file" &&
+          observe(launchObserved, "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS") === "456",
+        lastLine(launchObserved),
+      );
+    }
   } catch (error) {
     failures++;
     console.error(`host self-test setup failed: ${String((error as Error).message ?? error)}`);

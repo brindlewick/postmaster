@@ -12,9 +12,17 @@ runbooks correct for every harness and every host.
 
 **`<tool>/scripts/launch.sh` is the executable form of this file.** `launch.sh form <name>` prints the
 exact launch and resume commands for a configured lane or role; `launch` and `resume` run them;
-`skill` prints the prompt that invokes a harness's own review skill (Own review skills, below).
-The script and this file change together, and a form the script refuses (agy resume) is a form
-this file has not recorded yet.
+`review` runs a lane's bug-review form at the harness's top level on the named base-to-HEAD
+range; `skill` prints the prompt that invokes a harness's own security review skill (Own review
+skills, below). The script and this file change together, and a form the script refuses (agy
+resume or a bug-review form the harness does not have) is a form this file has not recorded.
+
+For a launch in a run, `<tool>/scripts/host.sh run --out` passes the events path to `launch.sh`.
+After the harness exits, `launch.sh` reads the thread id from that stream and writes the durable
+session under `<dispatch>/sessions/<lane>/<thread-id>`. Codex, Claude Code and pi sessions are
+copied from their durable stores; grok, Muse Code and MiMo Code use their export command;
+Antigravity has no export command, so its complete event stream is kept as the session transcript.
+The export and event stream are separate files in the project-local run record.
 
 Every lane runs unrestricted. Its containment is its worktree (`coachman.md`, Lane capability),
 so the bypass form below is passed on every launch AND every resume. The interactive postmaster
@@ -248,7 +256,9 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json \
 - The model: `run.model.configured` carries `model_id`, with `source` `startup` on a launch and
   `replay` on a resume. No record carries the effort.
 - Tool calls: each ends in a `tool.result`, whose `correlation_facts` name the tool and its
-  outcome.
+  outcome. For `bash`, `payload.text` is JSON text with the command and its output; the pane
+  shows the command and leaves the output out. The full response is in `payload.text` on the
+  last `run.terminal.*` record.
 - **Its data, per lane and per leg.** Muse Code keeps its sessions under `XDG_DATA_HOME`, and a
   memory that outlives them (`add_memory`, `read_memory`): a fresh session there recalled a word
   an earlier one had been asked to remember. So `launch.sh` gives each lane and each coachman leg
@@ -321,10 +331,16 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/mimo/<key> MIMOCODE_DISABLE_CLAUDE_I
 
 ## Own review skills
 
-Under the security lens, a lane whose harness has its own security review skill runs it in place
-of postmaster's brief (`coachman.md`, Security lens). `<tool>/scripts/launch.sh skill <lane>
-security-review` prints the prompt that invokes it, and exits 3 when the lane's harness has none.
-The prompt goes in the lane's prompt file, and the launch is the ordinary launch form.
+Under a review lens, a lane whose harness has its own review skill for that lens runs it in
+place of postmaster's brief. Under the security lens that is `security-review`
+(`coachman.md`, Security lens): `<tool>/scripts/launch.sh skill <lane> security-review` prints
+the prompt that invokes it, and exits 3 when the lane's harness has none. The prompt goes in
+the lane's prompt file and the launch is the ordinary launch form. Under the bug lens the form
+is run by `<tool>/scripts/launch.sh review`, below, and no brief is written. A lane whose
+harness has no code-review skill does not review for bugs at all: unlike the security lens
+there is no fallback to the brief.
+
+### Security review skill
 
 | harness | security review skill | source |
 |---|---|---|
@@ -335,7 +351,8 @@ The prompt goes in the lane's prompt file, and the launch is the ordinary launch
 | grok | none: its slash commands have no review command; skills, plugins and workflows could add one | its documentation (docs.x.ai, Modes and Commands), 2026-09 |
 | agy | none: its slash commands have no security review; Google's security extension (`/security:analyze`) is for Gemini CLI only | its documentation (antigravity.google, CLI Reference), 2026-09 |
 
-MiMo Code has none either: its `/review` is a general code review (its commands, 0.1.15). OpenAI's Codex Security is a CLI of its own
+MiMo Code has none either: its `/review` is a general code review (its commands, 0.1.15), covered
+under Code review skill below. OpenAI's Codex Security is a CLI of its own
 (`@openai/codex-security`), not a codex skill, and would need an adapter of its own.
 
 **claude's `/security-review`** reviews the change from the merge base of `origin/HEAD` and
@@ -349,6 +366,76 @@ back to BASE. When it verifies its findings
 in background agents, a headless run ends with one result line per turn, and an earlier one can
 say the agents are still running. Its report is the last result line, which is where the harvest
 reads a lane's final message.
+
+### Code review skill
+
+The bug lens runs each harness's own code-review skill on the run's change, never postmaster's
+brief. Every form below names that change explicitly: a skill left to choose its own diff
+cannot be trusted in a review scratch, which is a worktree detached at the snapshot with no
+upstream. `<tool>/scripts/launch.sh review <lane> <cwd> <base>` runs the form on the change
+from `<base>` to the scratch's `HEAD`, and exits 3 for a harness with none. It runs every
+review at its harness's top level and names that level on every launch: `max` for claude and
+codex, and `high` for MiMo Code on MiMo V2.6 Pro, whose variants stop there, whatever effort
+the lane is configured at. `<tool>/scripts/review-forms.sh has <harness>` answers whether a
+harness has one, and is what the scripts ask instead of carrying their own copy of the table.
+
+| harness | code-review skill | source |
+|---|---|---|
+| claude | `/code-review` | a trial, 2.1.283 (`raw/trials/code-review-scope/`) |
+| codex | `codex exec review` | a trial and its help, 0.157.1 (`raw/trials/code-review-scope/`) |
+| mimo | `/review`, `mimo run --command review` | a trial and its commands, 0.1.15 (`raw/trials/code-review-scope/`) |
+| pi | none: its help lists no review command | its help, 0.87.0 |
+| muse | none among its built-in skills | `muse skills list`, 1.4.0 |
+| grok | none: its slash commands have no review command | its documentation (docs.x.ai, Modes and Commands), 2026-09 |
+| agy | none recorded: its CLI reference lists no code-review form | its documentation (antigravity.google, CLI Reference), 2026-09 |
+
+**claude's `/code-review`.** The form is its ordinary launch form with the prompt
+`/code-review <level> <BASE>...HEAD`, level `max`:
+
+| | |
+|---|---|
+| command | the launch form, prompt `/code-review max <BASE>...HEAD` |
+| the change | `<BASE>...HEAD` named in the prompt; the skill's own diff rule is `git diff <target>` then `git diff HEAD` |
+| level | the form always names it. `/code-review` given no level reuses the level the user last typed in an interactive session (read from the 2.1.283 code), so the form never leaves it unset. At `max` its prompt asks for ten finder angles, through subagents where it has them, then verification of each finding and a sweep for gaps |
+| findings | at `low`, one `path:line — …` line per finding in the final message; at `medium`, a findings-tool call inside the forked task (`file`, `line`, `summary`, `short_summary`, `failure_scenario`, `category`; no severity) and the findings again in its final message in a shape of its own; at `xhigh` and `max`, a JSON array in the final message (read from the 2.1.283 binary, not run). Prose around the array may cite a location only when it names a filed finding's file and line; anything else outside the array fails the normalize and is read by hand |
+| known findings | cannot be given: the argument parser reads the first word as the level and joins the rest into the target (read from the 2.1.283 code), so extra instructions would land in the review target |
+| tool calls | not in the `-p` stream. `/code-review` runs as a forked task; its tool calls, and at `medium` its findings tool call, are in the task's output file under `/tmp/claude-<uid>/`, which the stream's `task_notification` names. The harvest copies that file into the run's logs |
+
+Given no target, at `low` and at `medium`, it looked at the last commit alone first and
+reached the whole change only because the branch list showed the target's default branch
+(`trunk`), not by rule. Named `<BASE>...HEAD`, it ran one `git diff` of that range and
+reported the planted bug at its line, in 2 runs of 2 (trial).
+
+**codex's `codex exec review`.** The form is `codex exec review --base <BASE>` with its launch
+form's flags (`--json`, `-o`, `-m`, `-c model_reasoning_effort="max"`, the bypass flag, and
+`--skip-git-repo-check` in a detached scratch):
+
+| | |
+|---|---|
+| command | `codex exec review --base <BASE> --json -o <last> -m <model> -c model_reasoning_effort="max" --dangerously-bypass-approvals-and-sandbox [--skip-git-repo-check]` |
+| the change | `--base <BASE>`; codex takes a commit and computes the merge base itself, then the review thread runs `git diff` against the base commit |
+| level | `-c model_reasoning_effort="max"` on every launch |
+| findings | the `-o` message is `- [P<n>] <title> — <absolute path>:<start>-<end>` with a body; its session file holds the same findings structured (`review_output`: title, body, priority, confidence, file, line range) |
+| known findings | a custom prompt is an alternative to `--base`; whether the two combine is untested. The form does not pass one |
+| tool calls | in the `--json` stream (`command_execution`); the review thread's model, effort and prompt are in the rollouts under `~/.codex/sessions/YYYY/MM/DD/` |
+
+Given no target it exits 1 before any model call: `Specify --uncommitted, --base, --commit, or
+provide custom review instructions` (trial).
+
+**MiMo Code's `/review`.** The form is its ordinary launch form with `--command review`, and
+`<BASE>...HEAD` in the prompt file:
+
+| | |
+|---|---|
+| command | the launch form with `--command review` and `--variant high`; the prompt file (stdin) holds `<BASE>...HEAD` |
+| the change | `<BASE>...HEAD` in the prompt file. MiMo Code's arguments are free text, and `mimo run` appends its stdin to them (read from the 0.1.15 code), so the range rides in the prompt file, not as a bare argument. Its rules read a bare SHA as one commit (`git show <sha>`) |
+| level | `--variant high`, the top of MiMo V2.6 Pro's variants (`low`, `medium`, `high`) |
+| findings | free markdown in the final message; no severity or confidence fields |
+| known findings | free text in the same arguments; the form carries the range alone so nothing else lands there |
+| tool calls | a subtask's calls stream inline under the parent's session id. Its subtask launch fails in every run (`subagent_type build`, where only `explore` and `general` exist); the review runs because the model recovers |
+
+Given no target it reviewed uncommitted changes, found none in a clean scratch, and exited 0
+(trial). Named `<BASE>...HEAD` it reviewed the range and reported the planted bug at its line.
 
 ## Interactive form: the postmaster
 
@@ -370,11 +457,89 @@ whether to trust it; headless `claude -p` does not ask. The first spawn in a new
 there, and the user answers it in the pane. A row not checked here takes its bypass flag from
 the headless form above; run it once before relying on it.
 
+## Keeping the watcher running
+
+Stage D keeps one `<tool>/scripts/runs-watch.sh <runs>` going per project, acts on the runs it
+names, and starts it again at once. The watcher is a long wait that must outlive a turn and must
+not hold the conversation, so it is started the way any launch is, through
+`<tool>/scripts/host.sh run`, which returns as soon as the watcher has started and keeps it in a
+session of its own: a host's pane where there is one, a detached process where there is none
+(`hosts.md`).
+
+```sh
+<tool>/scripts/host.sh run "watch · <project>" "<repo>" \
+    --out "<runs>/postmaster/watch.out" --err "<runs>/postmaster/watch.err" \
+    --marker "<runs>/postmaster/.watch-exited" \
+    -- "<tool>/scripts/runs-watch.sh" "<runs>"
+```
+
+Wait for its return in the conversation with `<tool>/scripts/wait-for-markers.sh`:
+
+```sh
+<tool>/scripts/wait-for-markers.sh "<runs>/postmaster" '.watch-exited' 1 86400
+```
+
+Exit 0 means the watcher returned: read `watch.out`. Exit 3 means nothing returned in a
+day: wait again. If the wait itself is cut short by the harness, run it again: a marker
+already landed is collected at once.
+
+When `.watch-exited` lands, `watch.out` holds the table and the `needs` lines: act on them,
+then start the watcher again before anything else. Check `watch.err` too: a held line that
+matches no run warns there. The marker lands whatever the exit, so no `needs` lines means
+the watcher failed instead of waking: the reason is in `watch.err` — read it, fix the
+cause, and only then start the watcher again. If `watch.err` is empty too, the watcher was
+killed rather than exiting: start the watcher again.
+
+| harness | nonblocking form | where the session cannot keep it in the background |
+|---|---|---|
+| claude | the `host.sh run` form above; never its own background tasks, which are reaped at about 29 minutes (its section above) | the foreground poll below |
+| codex | the `host.sh run` form above | the foreground poll below |
+| grok | the `host.sh run` form above | the foreground poll below |
+| agy | the `host.sh run` form above | the foreground poll below |
+| pi | the `host.sh run` form above | the foreground poll below |
+| muse | the `host.sh run` form above | the foreground poll below |
+| mimo | the `host.sh run` form above | the foreground poll below |
+
+The foreground poll is `<tool>/scripts/runs-watch.sh <runs> --timeout <postmaster.poll_seconds>`,
+run in the conversation and started again at once: it returns with the table every interval. It
+is the only form that blocks the conversation, and only for one interval. Never keep the
+watcher anywhere but `host.sh run`: no other keeping has a documented lifetime, and on
+2026-09-28 a watcher kept outside it was killed when memory ran short (#121).
+
+## Usage
+
+`bun <tool>/scripts/usage.ts` is this file's executable form for what a launch cost: it reads the
+input and output tokens each harness reports, and the cost where the harness reports one, from
+the launch's own event stream or session record. A figure the harness did not report is omitted
+and never written as zero; a harness that reports nothing is named as reporting nothing. Its
+paired controls (`bun test <tool>/scripts/usage.test.ts`) are one made-up stream per harness
+that reports usage and one that does not, in each harness's exact event shape below.
+
+| harness | where it reports | input / output | cost | shape source |
+|---|---|---|---|---|
+| codex | the last terminal turn event (`turn.completed`, `turn.failed`, `turn.interrupted`) of `codex exec --json`; turns report cumulative session usage | `usage.input_tokens`, `usage.output_tokens` | not reported | [Codex event type](https://github.com/openai/codex/blob/main/sdk/typescript/src/events.ts), recorded turns |
+| grok | the terminal `type: "end"` event; chunk-level usage is ignored | `usage.input_tokens`, `usage.output_tokens` | `total_cost_usd` on that event | [Grok headless event format](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/14-headless-mode.md) |
+| agy | the last `event: "result"` event; results report cumulative session usage | `result.usageMetadata.promptTokenCount`, `.candidatesTokenCount`, or `result.usage.input_tokens`, `.output_tokens` | not reported | Gemini-family usageMetadata, [Antigravity CLI headless mode](https://antigravity.google/docs/cli/headless/) |
+| claude | the `result` events of `--output-format stream-json` (usage summed, cost from the last), else the assistant messages | `usage.input_tokens`, `usage.output_tokens` | `total_cost_usd` | [Claude Code stream-json output](https://code.claude.com/docs/en/agent-sdk/overview), a live resumed thread |
+| pi | assistant `message.usage` on `message_end` | `input` / `input_tokens`, `output` / `output_tokens` | `usage.cost.total` | [Pi RPC event format](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md) |
+| muse | the session record's `model_completed` events (`muse export`), not the event stream | `usage.input_tokens`, `usage.output_tokens` | not reported | a recorded `muse export` |
+| mimo | each `step_finish` part of `mimo run --format json` | `part.tokens.input`, `part.tokens.output` | `part.cost` | [MiMo Code JSON mode](https://github.com/XiaomiMiMo/MiMo-Code) |
+
+Codex and Antigravity figures are cumulative across the stream, so the last report carrying
+a figure wins and summing would count every token twice. Claude's `result` usage is
+per-invocation and is summed across the appended stream, while its `total_cost_usd` is
+cumulative across the session and is taken from the last result; a stream that ends without
+one falls back to summing its assistant messages. Mimo and pi per-step figures are summed.
+Muse Code's `goal_usage_attribution` repeats its `model_completed` values per call, so the
+reader takes `model_completed` alone.
+
 ## The pane view
 
 `<tool>/scripts/view-stream.sh` is the other executable half of this file: it renders an events
-stream one line per event of interest, for a host's pane (`hosts.md`) and for anyone reading a
-stream by hand. It knows claude's, muse's and mimo's events, checked against recorded streams; codex's
+stream as wrapped blocks for a host's pane (`hosts.md`) and for anyone reading a stream by hand.
+What an agent says and what it runs shows in full, every line, wrapped to the pane and never cut
+short; tool output stays out. It knows claude's, muse's and mimo's events, checked against recorded
+streams; codex's
 and pi's, written from the event names this file records and not yet checked against a recorded
 stream;
 any other harness shows by event type, once per run of the same type. A harness whose events it

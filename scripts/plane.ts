@@ -36,11 +36,12 @@
 //           project or id, or a body create or edit refuses
 //   exit 2  invalid state
 //   exit 4  the work item changed since the base was read
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tryTomlFile } from "./lib/data.ts";
+import { scriptsDir } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
 import {
   digitValue,
@@ -163,7 +164,7 @@ class Tree {
       let tagText = html.slice(lt + 1, gt);
       const selfClose = tagText.endsWith("/");
       if (selfClose) tagText = tagText.slice(0, -1);
-      const m = /^([a-zA-Z][a-zA-Z0-9]*)/.exec(tagText);
+      const m = /^([a-zA-Z][a-zA-Z0-9]*)/u.exec(tagText);
       if (!m) {
         i = gt + 1;
         continue;
@@ -220,7 +221,7 @@ class Tree {
 
 function endTagOf(inner: string): string {
   // text.ts: html.parser strips/lowers/splits end-tag names with Python atoms.
-  return pyLower(pyTrim(inner)).split(new RegExp("[" + PY_S_CLASS + ">]"))[0] ?? "";
+  return pyLower(pyTrim(inner)).split(new RegExp("[" + PY_S_CLASS + ">]", "u"))[0] ?? "";
 }
 
 function parseAttrs(s: string): Record<string, string> {
@@ -234,7 +235,7 @@ function parseAttrs(s: string): Record<string, string> {
       "]*(?:\"([^\"]*)\"|'([^']*)'|([^" +
       PY_S_CLASS +
       "'\">]+)))?",
-    "g",
+    "gu",
   );
   let m: RegExpExecArray | null;
   while ((m = re.exec(s))) {
@@ -246,7 +247,7 @@ function parseAttrs(s: string): Record<string, string> {
 }
 
 function unescapeHtml(s: string): string {
-  return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (full, body: string) => {
+  return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/gu, (full, body: string) => {
     if (body.startsWith("#x") || body.startsWith("#X")) {
       const code = parseInt(body.slice(2), 16);
       return Number.isNaN(code) ? full : String.fromCodePoint(code);
@@ -287,8 +288,8 @@ function unescapeHtml(s: string): string {
 }
 
 function escapeHtml(s: string, quote = false): string {
-  let out = s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  if (quote) out = out.replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
+  let out = s.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;");
+  if (quote) out = out.replace(/"/gu, "&quot;").replace(/'/gu, "&#x27;");
   return out;
 }
 
@@ -347,7 +348,7 @@ function mdStrong(n: Node): string {
 function mdCode(n: Node): string {
   const code = pyWords(textOf(n)).join(" ");
   if (!code) return "";
-  const runs = code.match(/`+/g) ?? [];
+  const runs = code.match(/`+/gu) ?? [];
   const maxRun = runs.reduce((mx, r) => Math.max(mx, r.length), 0);
   const ticks = "`".repeat(maxRun + 1);
   const pad = code.startsWith("`") || code.endsWith("`") ? " " : "";
@@ -358,7 +359,7 @@ function mdLink(n: Node): string {
   const text = pyWords(mdInline(n.children)).join(" ");
   const href = (n.attrs.href ?? "").trim();
   if (!href) return text;
-  const escaped = href.replace(/ /g, "%20").replace(/\(/g, "%28").replace(/\)/g, "%29");
+  const escaped = href.replace(/ /gu, "%20").replace(/\(/gu, "%28").replace(/\)/gu, "%29");
   return `[${text || escaped}](${escaped})`;
 }
 
@@ -371,7 +372,7 @@ const INLINE: Record<string, (n: Node) => string> = {
 };
 
 function paraLines(nodes: (Node | string)[]): string[] {
-  const raw = mdInline(nodes).replace(new RegExp("[" + PY_S_CLASS + "]+", "g"), " ");
+  const raw = mdInline(nodes).replace(new RegExp("[" + PY_S_CLASS + "]+", "gu"), " ");
   const segs = raw
     .split(BR)
     .map((s) => pyTrim(s))
@@ -400,7 +401,7 @@ function codeText(n: Node): string {
 
 function mdPre(n: Node): string[] {
   const text = codeText(n);
-  const runs = [...text.matchAll(/^[ \t]*(`{3,})/gm)].map((m) => m[1]?.length ?? 0);
+  const runs = [...text.matchAll(/^[ \t]*(`{3,})/gmu)].map((m) => m[1]?.length ?? 0);
   const longest = runs.reduce((mx, r) => Math.max(mx, r), 0);
   const fence = "`".repeat(Math.max(3, longest + 1));
   return [fence + codeLang(n), ...(text ? text.split("\n") : []), fence];
@@ -493,26 +494,26 @@ function mdBlocks(children: (Node | string)[], inItem = false): string[] {
 function htmlToText(h: string): string {
   return mdBlocks(new Tree(h).root.children)
     .join("\n")
-    .replace(/^\n+|\n+$/g, "");
+    .replace(/^\n+|\n+$/gu, "");
 }
 
 // --- markdown -> html --------------------------------------------------------------------------
-const ATX = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/;
-const THEMATIC = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
-const BULLET = /^( {0,3})([-*+])(?:([ \t]+)(.*))?$/;
+const ATX = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/u;
+const THEMATIC = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/u;
+const BULLET = /^( {0,3})([-*+])(?:([ \t]+)(.*))?$/u;
 const ORDERED = new RegExp(
   "^( {0,3})(\\p{Nd}{1,9})([.)])(?:([ \t]+)(" + PY_DOT + "*))?" + END_OF_STRING + "",
   "u",
 );
-const FENCE = new RegExp("^( *)(`{3,}|~{3,})(" + PY_DOT + "*)" + END_OF_STRING + "");
-const COMMENT = /^ {0,3}<!--/;
+const FENCE = new RegExp("^( *)(`{3,}|~{3,})(" + PY_DOT + "*)" + END_OF_STRING + "", "u");
+const COMMENT = /^ {0,3}<!--/u;
 const LINK_RE = new RegExp(
   "\\[([^\\]]+)\\]\\(((?:[^" + PY_S_CLASS + "()]+|\\([^" + PY_S_CLASS + "()]*\\))+)\\)",
-  "g",
+  "gu",
 );
 const BOLD = new RegExp(
   "\\*\\*(?=[^" + PY_S_CLASS + "])(" + PY_DOT + "+?)(?<=[^" + PY_S_CLASS + "])\\*\\*",
-  "g",
+  "gu",
 );
 
 function indentOf(line: string): number {
@@ -614,7 +615,7 @@ function codeSpans(text: string): [string, string[]] {
     // count leading backticks
     let nb = 0;
     while (k + nb < text.length && text[k + nb] === "`") nb++;
-    const closeRe = new RegExp(`(?<!\`)${"`".repeat(nb)}(?!\`)`);
+    const closeRe = new RegExp(`(?<!\`)${"`".repeat(nb)}(?!\`)`, "u");
     const after = text.slice(k + nb);
     const cm = closeRe.exec(after);
     if (!cm) {
@@ -657,7 +658,7 @@ function inlineMd(text: string): string {
   return out
     .join("")
     .replace(
-      /\x02([0-9]+)\x03/g,
+      /\x02([0-9]+)\x03/gu,
       (_f, i: string) => `<code>${esc(spans[parseInt(i, 10)] ?? "")}</code>`,
     );
 }
@@ -756,7 +757,7 @@ function htmlBlocks(lines: string[]): string[] {
     const m = ATX.exec(line);
     if (m) {
       const level = (m[1] ?? "").length;
-      const text = (m[2] ?? "").replace(/(^|[ \t]+)#+$/, "").trim();
+      const text = (m[2] ?? "").replace(/(^|[ \t]+)#+$/u, "").trim();
       out.push(`<h${level}>${inlineMd(text)}</h${level}>`);
       i++;
       continue;
@@ -791,17 +792,17 @@ function htmlBlocks(lines: string[]): string[] {
 
 function mdToHtml(md: string): string {
   const lines = md
-    .replace(/^\ufeff/, "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
+    .replace(/^\ufeff/u, "")
+    .replace(/\r\n/gu, "\n")
+    .replace(/\r/gu, "\n")
     .split("\n")
-    .map((l) => l.replace(/^[ \t]+/, (m) => m.replace(/\t/g, "    ")));
+    .map((l) => l.replace(/^[ \t]+/u, (m) => m.replace(/\t/gu, "    ")));
   return htmlBlocks(lines).join("\n");
 }
 
 // --- the same words and structure --------------------------------------------------------------
 function hrefKey(h: string): string {
-  return h.trim().replace(/%28/g, "(").replace(/%29/g, ")").replace(/%20/g, " ");
+  return h.trim().replace(/%28/gu, "(").replace(/%29/gu, ")").replace(/%20/gu, " ");
 }
 
 function shape(h: string): string[] {
@@ -916,7 +917,7 @@ function tokenName(toks: string[], n: number): string {
   const tag0 = spIdx >= 0 ? inner.slice(0, spIdx) : inner;
   const detail = spIdx >= 0 ? inner.slice(spIdx + 1) : "";
   const end = tag0.startsWith("/");
-  const tag = tag0.replace(/^\/+/, "");
+  const tag = tag0.replace(/^\/+/u, "");
   let name = HEADINGS.has(tag) ? `a level-${tag[1]} heading` : (NAMES[tag] ?? tag);
   if (detail && !end) {
     const suffix: Record<string, string> = {
@@ -950,10 +951,10 @@ function readback(md: string, read?: (h: string) => string): [string, string | n
 
 function normText(t: string): string {
   const lines = t
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
+    .replace(/\r\n/gu, "\n")
+    .replace(/\r/gu, "\n")
     .split("\n")
-    .map((l) => l.replace(/[ \t]+$/, ""));
+    .map((l) => l.replace(/[ \t]+$/u, ""));
   while (lines.length > 0 && lines[0] === "") lines.shift();
   while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   return lines.join("\n");
@@ -1166,7 +1167,7 @@ async function selfTest(): Promise<number> {
   );
   check("the read-back check reports a flattened list", !!flat?.includes("a bullet list"), flat);
   const [, diff3] = readback("1. A\n   - x\n   - y\n", (ht) =>
-    htmlToText(ht).replace(/\n {3}- /g, "\n- "),
+    htmlToText(ht).replace(/\n {3}- /gu, "\n- "),
   );
   check("a body a reader would flatten is refused", !!diff3?.includes("a bullet list"), diff3);
 
@@ -1187,6 +1188,65 @@ async function selfTest(): Promise<number> {
     );
   } finally {
     rmSync(d, { recursive: true, force: true });
+  }
+
+  // Project workspace binding: the project's binding must match the machine workspace.
+  {
+    const bd = mkdtempSync(join(tmpdir(), "plane-st-"));
+    try {
+      const cfg = join(bd, "config.toml");
+      writeFileSync(
+        cfg,
+        '[tracker]\nkind = "plane"\nurl = "http://127.0.0.1:9"\nworkspace = "ws"\n',
+      );
+      const proj = join(bd, "proj", ".postmaster");
+      mkdirSync(proj, { recursive: true });
+      writeFileSync(join(proj, "project.toml"), '[tracker]\nbinding = "other-ws"\n');
+      const r = run("bash", [SCRIPT, "read"], {
+        cwd: bd,
+        env: {
+          ...process.env,
+          POSTMASTER_CONFIG: cfg,
+          PLANE_API_KEY: "self-test",
+          POSTMASTER_PROJECT: join(bd, "proj"),
+        },
+      });
+      check(
+        "a project binding that does not match the machine workspace is refused",
+        r.code === 1 && r.err.includes("does not match the machine workspace"),
+        r.err,
+      );
+      writeFileSync(join(proj, "project.toml"), '[tracker]\nbinding = "ws"\n');
+      const r2 = run("bash", [SCRIPT, "read"], {
+        cwd: bd,
+        env: {
+          ...process.env,
+          POSTMASTER_CONFIG: cfg,
+          PLANE_API_KEY: "self-test",
+          POSTMASTER_PROJECT: join(bd, "proj"),
+        },
+      });
+      check(
+        "a matching binding reaches usage, with no request",
+        r2.code === 1 && r2.err.includes("usage:") && !r2.err.includes("does not match"),
+        r2.err,
+      );
+      const scoped: Record<string, string | undefined> = {
+        ...process.env,
+        POSTMASTER_CONFIG: cfg,
+        PLANE_API_KEY: "self-test",
+      };
+      delete scoped.POSTMASTER_PROJECT;
+      scoped.GIT_CEILING_DIRECTORIES = bd;
+      const r3 = run("bash", [SCRIPT, "read"], { cwd: bd, env: scoped });
+      check(
+        "with no project in scope the check is skipped and usage follows",
+        r3.code === 1 && r3.err.includes("usage:") && !r3.err.includes("does not match"),
+        r3.err,
+      );
+    } finally {
+      rmSync(bd, { recursive: true, force: true });
+    }
   }
 
   // No arguments dies through the same handler as every other die: BASE's
@@ -1359,7 +1419,29 @@ function loadConfig(): PlaneConfig {
   if (!cfg) dieP(`cannot read ${configPath}`);
   const tracker = (cfg.tracker ?? {}) as Record<string, unknown>;
   const envFileRaw = (tracker.env_file as string) || "~/.postmaster/plane.env";
-  const envFile = envFileRaw.replace(/^~/, process.env.HOME ?? "");
+  const envFile = envFileRaw.replace(/^~/u, process.env.HOME ?? "");
+  const machineWorkspace = String(tracker.workspace ?? "");
+  const toplevel = run("git", ["rev-parse", "--show-toplevel"]);
+  const project =
+    process.env.POSTMASTER_PROJECT || (toplevel.code === 0 ? toplevel.out.trim() : "");
+  if (project !== "") {
+    const insp = run(join(scriptsDir(import.meta), "project-settings.sh"), ["inspect", project]);
+    if (insp.code !== 0) {
+      if (insp.err.trim() !== "") console.error(insp.err.trim());
+      dieP("cannot read the project's tracker binding");
+    }
+    let binding = "";
+    try {
+      binding = (JSON.parse(insp.out).tracker ?? {}).binding ?? "";
+    } catch (e) {
+      console.error(`project settings gave no JSON: ${e instanceof Error ? e.message : e}`);
+      dieP("cannot read the project's tracker binding");
+    }
+    if (binding !== "" && binding !== machineWorkspace)
+      dieP(
+        `the project's Plane workspace binding '${binding}' does not match the machine workspace '${machineWorkspace}' in ${configPath}`,
+      );
+  }
   if (!process.env.PLANE_API_KEY && existsSync(envFile)) {
     const text = readFileSync(envFile, "utf8");
     for (const line of text.split("\n")) {
@@ -1372,7 +1454,7 @@ function loadConfig(): PlaneConfig {
     dieP(
       `no PLANE_API_KEY in the environment or in ${envFile} (skills/postmaster/trackers.md, plane)`,
     );
-  const BASE = String(tracker.url ?? "").replace(/\/+$/, "");
+  const BASE = String(tracker.url ?? "").replace(/\/+$/u, "");
   const WS = String(tracker.workspace ?? "");
   if (!BASE || !WS) {
     dieP(
@@ -1443,7 +1525,7 @@ function parseId(tid: string): [string, number] {
   return [(m[1] ?? "").toUpperCase(), Number(digitValue(m[2] ?? "0"))]; // ASCII: group 1 is [A-Za-z0-9]* by the match.
 }
 
-const ENV_LINE = /^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*([^\n]*)$/; // bash-WS-exact.
+const ENV_LINE = /^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*([^\n]*)$/u; // bash-WS-exact.
 function envOf(line: string): [string, string] | null {
   const m = ENV_LINE.exec(line);
   if (!m) return null;
@@ -1509,7 +1591,7 @@ async function itemFor(cfg: PlaneConfig, tid: string): Promise<[string, any]> {
 
 function readFileP(path: string): string {
   try {
-    return readFileSync(path, "utf8").replace(/^\ufeff/, "");
+    return readFileSync(path, "utf8").replace(/^\ufeff/u, "");
   } catch (e: any) {
     dieP(`cannot read ${path}: ${e?.message ?? e}`);
   }

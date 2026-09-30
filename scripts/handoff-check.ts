@@ -40,7 +40,7 @@ if (!isFile) {
 const text = readFileSync(f, "utf8");
 const sections = new Map<string, string[]>();
 let current: string | null = null;
-const heading = new RegExp(`^##[${PY_S_CLASS}]+(${PY_DOT}*?)[${PY_S_CLASS}]*$`);
+const heading = new RegExp(`^##[${PY_S_CLASS}]+(${PY_DOT}*?)[${PY_S_CLASS}]*$`, "u");
 for (const line of pySplitLines(text)) {
   const m = heading.exec(line);
   if (m) {

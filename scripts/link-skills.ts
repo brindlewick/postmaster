@@ -5,15 +5,17 @@
 // script's own tree when that is not a git checkout at all, as with an installed package.
 //
 //   link-skills.sh [--dry-run]   link every skill for every installed harness with a skills folder
+//   link-skills.sh --check       report missing or blocked links without changing anything
 //   link-skills.sh --remove      remove the links to this checkout's skills, and nothing else
 //   link-skills.sh --self-test
 //
-//   exit 0  every link is in place, or would be (--dry-run), or is removed (--remove)
-//   exit 1  usage, no skills in the checkout, a bare main checkout, or something in the way
+//   exit 0  every link is in place, would be (--dry-run), or is removed (--remove); --check is complete
+//   exit 1  usage, no skills in the checkout, a bare main checkout, or something in the way; --check is incomplete
 
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -67,7 +69,7 @@ function checkoutRoot(tree: string): string | null {
     );
     return null;
   }
-  const first = lines[0]?.replace(/^worktree /, "") ?? tree;
+  const first = lines[0]?.replace(/^worktree /u, "") ?? tree;
   return resolve(first);
 }
 
@@ -197,6 +199,50 @@ function report(line: string): string {
   }
 }
 
+// printf %q for a path: safe characters bare, anything else single-quoted.
+function shellQuote(s: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/u.test(s)) return s;
+  return `'${s.replace(/'/gu, `'\\''`)}'`;
+}
+
+function checkLinks(root: string): number {
+  const p = plan(root);
+  if (p === null) return 1;
+  let problems = false;
+  let planned = false;
+  for (const line of p) {
+    const parts = line.split("\t");
+    const verdict = parts[0] ?? "";
+    const a = parts[1] ?? "";
+    const b = parts[2] ?? "";
+    const c = parts[3] ?? "";
+    if (verdict === "link") {
+      console.log(`MISSING LINK    ${a} -> ${b} (${c})`);
+      problems = true;
+      planned = true;
+    } else if (verdict === "in-the-way") {
+      console.log(`IN THE WAY      ${a} is ${b}`);
+      problems = true;
+      planned = true;
+    } else {
+      console.log(report(line));
+      if (verdict === "linked" || verdict === "shared") planned = true;
+    }
+  }
+  if (problems) {
+    console.log(
+      `link-skills: to install missing links after resolving any blockers, run: ${shellQuote(join(scriptsDir(import.meta), "link-skills.sh"))}`,
+    );
+    return 1;
+  }
+  if (!planned) {
+    console.log("link-skills: no harness skills folders found; nothing was changed");
+    return 0;
+  }
+  console.log("link-skills: all skills are linked; nothing was changed");
+  return 0;
+}
+
 function makeLinks(root: string, dry: number): number {
   const p = plan(root);
   if (p === null) return 1;
@@ -264,6 +310,10 @@ if (argv[0] === "--self-test") {
   const ROOT = checkoutRoot(toolRoot(import.meta));
   if (ROOT === null) process.exit(1);
   process.exit(makeLinks(ROOT, 1));
+} else if (argv[0] === "--check") {
+  const ROOT = checkoutRoot(toolRoot(import.meta));
+  if (ROOT === null) process.exit(1);
+  process.exit(checkLinks(ROOT));
 } else if (argv[0] === "--remove") {
   const ROOT = checkoutRoot(toolRoot(import.meta));
   if (ROOT === null) process.exit(1);
@@ -273,7 +323,7 @@ if (argv[0] === "--self-test") {
   if (ROOT === null) process.exit(1);
   process.exit(makeLinks(ROOT, 0));
 } else {
-  die("usage: link-skills.sh [--dry-run] | --remove | --self-test", 1);
+  die("usage: link-skills.sh [--dry-run | --check] | --remove | --self-test", 1);
 }
 
 // --- self-test ---------------------------------------------------------------------------------
@@ -379,6 +429,135 @@ withTempDir((tmp) => {
       }
     }
     return items.join("\n");
+  }
+
+  console.log("--check: the same command reports missing links and passes when complete");
+  const checkToolBase = join(tmp, "check-tool");
+  const checkHomeBase = join(tmp, "check-home");
+  mkdirSync(join(checkToolBase, "scripts"), { recursive: true });
+  mkdirSync(checkHomeBase, { recursive: true });
+  const checkTool = realpathSync(checkToolBase);
+  const checkHome = realpathSync(checkHomeBase);
+  cpSync(join(TOOL, "skills"), join(checkTool, "skills"), { recursive: true });
+  // The install command names the script being run: in-process, the real one.
+  const checkRun = shellQuote(join(scriptsDir(import.meta), "link-skills.sh"));
+  function stateAt(h: string): string {
+    const items: string[] = [];
+    try {
+      items.push(...readdirSync(h).sort());
+    } catch {
+      /* empty */
+    }
+    for (const dir of [join(h, ".claude", "skills"), join(h, ".agents", "skills")]) {
+      try {
+        for (const n of readdirSync(dir)) {
+          const p = join(dir, n);
+          items.push(`${p} ${isLink(p) ? readlinkSync(p) : ""}`);
+        }
+      } catch {
+        /* empty */
+      }
+    }
+    return items.join("\n");
+  }
+  function runCheck(root: string, h: string, path?: string): { rc: number; out: string } {
+    const savedHome = process.env.HOME;
+    const savedPath = process.env.PATH;
+    process.env.HOME = h;
+    if (path !== undefined) process.env.PATH = path;
+    let buf = "";
+    const savedLog = console.log;
+    const savedErr = console.error;
+    console.log = (...a: unknown[]) => {
+      buf += `${a.map(String).join(" ")}\n`;
+    };
+    console.error = (...a: unknown[]) => {
+      buf += `${a.map(String).join(" ")}\n`;
+    };
+    const rc = checkLinks(root);
+    console.log = savedLog;
+    console.error = savedErr;
+    process.env.HOME = savedHome;
+    if (path !== undefined) process.env.PATH = savedPath;
+    return { rc, out: buf };
+  }
+  {
+    const before = stateAt(checkHome);
+    const r = runCheck(checkTool, checkHome);
+    st.check(
+      "a missing link is named, the install command is shown, and --check changes nothing",
+      r.rc === 1 &&
+        r.out.includes(`MISSING LINK    ${join(checkHome, ".claude", "skills", "postmaster")}`) &&
+        r.out.includes(`run: ${checkRun}`) &&
+        stateAt(checkHome) === before,
+      `exit ${r.rc}\n${r.out}`,
+    );
+  }
+  const blockedPath = join(checkHome, ".claude", "skills", "postmaster");
+  mkdirSync(dirname(blockedPath), { recursive: true });
+  writeFileSync(blockedPath, "keep this file\n", "utf8");
+  {
+    const before = stateAt(checkHome);
+    const r = runCheck(checkTool, checkHome);
+    st.check(
+      "a blocked path is named, the install command is shown, and --check changes nothing",
+      r.rc === 1 &&
+        r.out.includes(`IN THE WAY      ${blockedPath} is a file`) &&
+        r.out.includes(`run: ${checkRun}`) &&
+        stateAt(checkHome) === before,
+      `exit ${r.rc}\n${r.out}`,
+    );
+  }
+  rmSync(blockedPath);
+  {
+    // Install for real, through the same in-process call the command uses.
+    const savedHome = process.env.HOME;
+    process.env.HOME = checkHome;
+    const savedLog = console.log;
+    const savedErr = console.error;
+    console.log = () => {};
+    console.error = () => {};
+    const irc = makeLinks(checkTool, 0);
+    console.log = savedLog;
+    console.error = savedErr;
+    process.env.HOME = savedHome;
+    if (irc !== 0) {
+      console.error("self-test: install into check-home failed");
+      process.exit(1);
+    }
+    const before = stateAt(checkHome);
+    const r = runCheck(checkTool, checkHome);
+    st.check(
+      "a complete set passes through the same --check command without changes",
+      r.rc === 0 && r.out.includes("all skills are linked") && stateAt(checkHome) === before,
+      `exit ${r.rc}\n${r.out}`,
+    );
+  }
+  {
+    // No harness installed: a PATH holding only plumbing (plus sh, which the
+    // port's harness lookup shells) and an empty HOME.
+    const noneBin = join(tmp, "none-bin");
+    const noneHome = join(tmp, "none-home");
+    mkdirSync(noneBin, { recursive: true });
+    mkdirSync(noneHome, { recursive: true });
+    for (const t of ["sh", "bash", "env", "git", "readlink", "dirname", "basename", "sed"]) {
+      const r = spawnSync("sh", ["-c", `command -v ${t}`], { encoding: "utf8" });
+      const p = r.stdout.trim().split("\n").pop() ?? "";
+      if (!p.startsWith("/")) {
+        console.error(`self-test: ${t} is not on PATH`);
+        process.exit(1);
+      }
+      symlinkSync(p, join(noneBin, t));
+    }
+    const before = stateAt(noneHome);
+    const r = runCheck(checkTool, noneHome, noneBin);
+    st.check(
+      "with no harness installed, --check says so and changes nothing",
+      r.rc === 0 &&
+        r.out.includes("no harness skills folders found") &&
+        stateAt(noneHome) === before,
+      `exit ${r.rc}\n${r.out}`,
+    );
   }
 
   console.log("installing: every skill, for every installed harness with a skills folder");
@@ -487,8 +666,8 @@ withTempDir((tmp) => {
     documented =
       readFileSync(trackersMd, "utf8")
         .split("\n")
-        .find((l) => /^<tool>\/scripts\/github\.sh <repo> board +#/.test(l))
-        ?.replace(/ *#.*$/, "") ?? "";
+        .find((l) => /^<tool>\/scripts\/github\.sh <repo> board +#/u.test(l))
+        ?.replace(/ *#.*$/u, "") ?? "";
   } catch {
     /* files not found */
   }
@@ -514,8 +693,10 @@ esac
   run("git", ["-C", join(tmp, "target"), "remote", "add", "origin", "https://github.com/o/r.git"]);
 
   function through(skillDir: string): { code: number; out: string } {
-    const findTool = resolver.replace(/<skill>/g, skillDir);
-    const command = documented.replace(/<repo>/g, join(tmp, "target")).replace(/<tool>/g, "$tool");
+    const findTool = resolver.replace(/<skill>/gu, skillDir);
+    const command = documented
+      .replace(/<repo>/gu, join(tmp, "target"))
+      .replace(/<tool>/gu, "$tool");
     const r = run("bash", ["-c", `tool=$(${findTool}) && ${command}`], {
       cwd: elsewhere,
       env: { ...process.env, PATH: bin, HOME: home },
@@ -524,7 +705,7 @@ esac
   }
 
   {
-    const r = run("bash", ["-c", resolver.replace(/<skill>/g, join(C, "postmaster"))], {
+    const r = run("bash", ["-c", resolver.replace(/<skill>/gu, join(C, "postmaster"))], {
       cwd: elsewhere,
       env: { ...process.env, PATH: bin, HOME: home },
     });
@@ -543,7 +724,7 @@ esac
     );
   }
   {
-    const r = run("bash", ["-c", resolver.replace(/<skill>/g, "skills/postmaster")], {
+    const r = run("bash", ["-c", resolver.replace(/<skill>/gu, "skills/postmaster")], {
       cwd: TOOL,
       env: { ...process.env, PATH: bin, HOME: home },
     });
@@ -786,12 +967,12 @@ esac
     const lines = text.split("\n");
     let on = false;
     for (const l of lines) {
-      if (/^## Skills folders/.test(l)) {
+      if (/^## Skills folders/u.test(l)) {
         on = true;
         continue;
       }
-      if (on && /^## /.test(l)) break;
-      if (on && /^\| [a-z]+ \|/.test(l)) table += `${l}\n`;
+      if (on && /^## /u.test(l)) break;
+      if (on && /^\| [a-z]+ \|/u.test(l)) table += `${l}\n`;
     }
   } catch {
     /* no harnesses.md */
@@ -799,11 +980,11 @@ esac
   st.check("harnesses.md has a Skills folders table", table !== "", table);
   for (const h of HARNESSES) {
     const row = table.split("\n").find((l) => {
-      const name = (l.split("|")[1] ?? "").replace(/ /g, "");
+      const name = (l.split("|")[1] ?? "").replace(/ /gu, "");
       return name === h;
     });
     const cell = row ? (row.split("|")[2] ?? "") : "";
-    const wantMatch = cell.match(/^ *`([^`]*)`/);
+    const wantMatch = cell.match(/^ *`([^`]*)`/u);
     let want = wantMatch ? (wantMatch[1] ?? "") : "";
     if (want.startsWith("~")) want = (process.env.HOME ?? "~") + want.slice(1);
     const scriptSays = skillsFolder(h) ?? "";

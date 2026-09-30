@@ -2,7 +2,8 @@
 // skill. An installed skill is a link from a harness's skills folder into the postmaster repo,
 // and a session reaches the repo only as <tool>, the path SKILL.md finds from that link once.
 // A reference resolves from any working directory only when it goes through <tool> and names
-// a script the repo has.
+// a script the repo has. The run's pinned checkout goes through <rt> instead, resolved per run
+// by run-meta.sh path; it is a checkout of the same repo, so the same existence check applies.
 //
 //   skill-refs.sh [<file>...]          default: skills/postmaster/*.md beside this script's repo
 //   skill-refs.sh --fix [<file>...]    put <tool>/ before every bare scripts/ path, in place
@@ -10,8 +11,8 @@
 //
 // A reference is any scripts/ path. It is a fault when it is bare (scripts/x.sh, which resolves
 // only from the repo's own root), when it reaches scripts/ some other way (../../scripts/x.sh),
-// or when it goes through <tool> to a script the repo does not have. A path under another
-// placeholder or variable, such as <repo>/scripts/, is that directory's and not the tool's.
+// or when it goes through <tool> or <rt> to a script the repo does not have. A path under
+// another placeholder or variable, such as <repo>/scripts/, is that directory's and not the tool's.
 // --fix rewrites the bare form only, so it can be run again after a rebase and changes nothing
 // the second time; the check that follows it names whatever it could not fix.
 //
@@ -24,9 +25,9 @@ import { toolRoot } from "./lib/paths.ts";
 import { withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
 
-const REF = /scripts\/[A-Za-z0-9._-]*/g;
-const BARE = /(?<![A-Za-z0-9_./-])scripts\//g;
-const OTHER = /(<[A-Za-z0-9_-]+>|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)\/$/;
+const REF = /scripts\/[A-Za-z0-9._-]*/gu;
+const BARE = /(?<![A-Za-z0-9_./-])scripts\//gu;
+const OTHER = /(<[A-Za-z0-9_-]+>|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)\/$/u;
 
 type Fault = { file: string; line: number; why: string; ref: string };
 
@@ -65,18 +66,19 @@ function refs(
       REF.lastIndex = 0;
       for (const m of line.matchAll(REF)) {
         const before = line.slice(0, m.index ?? 0);
-        const ref = (m[0] ?? "").replace(/\.+$/, "");
-        if (before.length > 0 && /[A-Za-z0-9_]/.test(before[before.length - 1] ?? "")) {
+        const ref = (m[0] ?? "").replace(/\.+$/u, "");
+        if (before.length > 0 && /[A-Za-z0-9_]/u.test(before[before.length - 1] ?? "")) {
           continue; // part of a longer name
         }
         const name = ref.slice("scripts/".length);
-        if (before.endsWith("<tool>/")) {
+        if (before.endsWith("<tool>/") || before.endsWith("<rt>/")) {
+          const which = before.endsWith("<tool>/") ? "<tool>/" : "<rt>/";
           if (name !== "" && !isFile(join(root, "scripts", name))) {
             faults.push({
               file: f,
               line: i + 1,
               why: "no such script in the postmaster repo",
-              ref: `<tool>/${ref}`,
+              ref: `${which}${ref}`,
             });
           }
         } else if (OTHER.test(before)) {
@@ -167,6 +169,7 @@ withTempDir((tmp) => {
   const good = join(tmp, "good.md");
   const relative = join(tmp, "relative.md");
   const missing = join(tmp, "missing.md");
+  const rtMissing = join(tmp, "rt-missing.md");
 
   writeFileSync(
     bare,
@@ -183,6 +186,7 @@ withTempDir((tmp) => {
     [
       "Set the stage with `<tool>/scripts/stage.sh <dispatch> synthesis`.",
       "( <tool>/scripts/launch.sh launch <lane> <wt> <prompt> ) &",
+      "The run's own `<rt>/scripts/stage.sh` is the same repo, pinned.",
       "The project's own `<repo>/scripts/build.sh` and \"$HERE/scripts/x\" are not the tool's.",
       "Every `<tool>/scripts/` path is the repo's; postscripts/ and myscripts/x.sh are other words.",
       "",
@@ -191,6 +195,7 @@ withTempDir((tmp) => {
   );
   writeFileSync(relative, "Run `../../scripts/stage.sh` from the skill.\n", "utf8");
   writeFileSync(missing, "Run `<tool>/scripts/no-such.sh`.\n", "utf8");
+  writeFileSync(rtMissing, "Run `<rt>/scripts/no-such.sh` from the pin.\n", "utf8");
 
   console.log("positive controls: each fault is found, on its own line");
   st.check("three bare references are three faults", faults(bare) === 3);
@@ -205,6 +210,7 @@ withTempDir((tmp) => {
   }
   st.check("a path that reaches scripts/ another way is a fault", faults(relative) === 1);
   st.check("a script the repo does not have is a fault", faults(missing) === 1);
+  st.check("a script the repo does not have is a fault through <rt> too", faults(rtMissing) === 1);
 
   console.log("negative controls: nothing is found where nothing is wrong");
   {

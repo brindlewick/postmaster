@@ -1,0 +1,16 @@
+# <project>/.postmaster/project.toml
+# What this project requires of every run against it. Committed with `git add -f`, the one
+# file in .postmaster/ that travels. The shape is project.example.toml.
+
+[project]
+risk_surfaces = [
+  "spawns agent CLIs in their bypass modes, in Herdr over its socket or in tmux",
+  "uses the user's gh login, and reads PLANE_API_KEY and lane env files under ~/.postmaster",
+  "writes ~/.postmaster, skill links into each harness's skills folder, and worktrees, branches, pushes and pull requests in target repos",
+  "merges on the merge word",
+  "binds no port, and serves only the GitHub Pages site",
+]
+
+[checks.gate]
+command = '''bun run check'''
+shows = "tsc strict, biome, the Bun usage tests, the runbook references and wiki lint, and every script self-test pass."

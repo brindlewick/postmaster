@@ -44,13 +44,13 @@ import {
   pyTrim,
 } from "./lib/text.ts";
 
-const FENCE = new RegExp(`^([${PY_S_CLASS}]*)(\`\`\`|~{3,})(${PY_DOT}*)$`);
+const FENCE = new RegExp(`^([${PY_S_CLASS}]*)(\`\`\`|~{3,})(${PY_DOT}*)$`, "u");
 const EXIT_LINE_RE = /^\[exit (\p{Nd}+)\]$/u;
-const TICKET_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Ticket[${PY_S_CLASS}]*$`);
-const PROFILE_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Project profile[${PY_S_CLASS}]*$`);
-const HEAD_BREAK_RE = new RegExp(`^#{1,2}[${PY_S_CLASS}]`);
-const CLOSE_FENCE_RE = new RegExp(`^[${PY_S_CLASS}]*(\`\`\`|~{3,})[${PY_S_CLASS}]*$`);
-const BIN_NAME = /^[A-Za-z0-9@._+-]+$/;
+const TICKET_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Ticket[${PY_S_CLASS}]*$`, "u");
+const PROFILE_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Project profile[${PY_S_CLASS}]*$`, "u");
+const HEAD_BREAK_RE = new RegExp(`^#{1,2}[${PY_S_CLASS}]`, "u");
+const CLOSE_FENCE_RE = new RegExp(`^[${PY_S_CLASS}]*(\`\`\`|~{3,})[${PY_S_CLASS}]*$`, "u");
+const BIN_NAME = /^[A-Za-z0-9@._+-]+$/u;
 const TIMEOUT = 60;
 
 function notRun(msg: string): never {
@@ -105,7 +105,7 @@ function blocks(lines: string[]): string[][] {
       while (i < lines.length) {
         const c = CLOSE_FENCE_RE.exec(lines[i]!);
         if (c && c[1]?.[0] === fence[0] && c[1]?.length >= fence.length) break;
-        body.push(lines[i]?.replace(new RegExp(`^ {0,${indent}}`), ""));
+        body.push(lines[i]?.replace(new RegExp(`^ {0,${indent}}`, "u"), ""));
         i += 1;
       }
       out.push(body);
@@ -363,7 +363,7 @@ function examples(wtArg: string, ticketArg: string, timeout = TIMEOUT): number {
       const r = run("bash", ["-c", c.cmd], { cwd: home, env, input: "", timeout: timeout * 1000 });
       const got = r.timedOut
         ? [`(timed out after ${timeout}s)`]
-        : trim((r.out + r.err).replace(/\r\n/g, "\n").split("\n"));
+        : trim((r.out + r.err).replace(/\r\n/gu, "\n").split("\n"));
       const code: number | null = r.timedOut ? null : r.code;
       if (JSON.stringify(got) === JSON.stringify(c.out) && code === c.exit) {
         console.log(`ok    $ ${c.cmd}`);
@@ -426,7 +426,7 @@ function which(prog: string, path: string): boolean {
 }
 
 function shQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
+  return `'${s.replace(/'/gu, `'\\''`)}'`;
 }
 
 // --- entry -----------------------------------------------------------------------------------

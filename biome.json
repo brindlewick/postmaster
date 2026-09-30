@@ -4,6 +4,14 @@
   "files": {
     "includes": ["scripts/**", "types/**", "package.json", "tsconfig.json", "biome.json"]
   },
+  "overrides": [
+    {
+      "includes": ["scripts/fixtures/**"],
+      "formatter": { "enabled": false },
+      "linter": { "enabled": false },
+      "assist": { "enabled": false }
+    }
+  ],
   "linter": {
     "enabled": true,
     "rules": {

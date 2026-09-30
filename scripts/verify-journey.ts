@@ -37,7 +37,7 @@ import {
   pyTrim,
 } from "./lib/text.ts";
 
-const FENCE = new RegExp("^[" + PY_S_CLASS + "]*(`{3,}|~{3,})");
+const FENCE = new RegExp(`^[${PY_S_CLASS}]*(\`{3,}|~{3,})`, "u");
 const ITEM = new RegExp(
   "^[" +
     PY_S_CLASS +
@@ -62,20 +62,20 @@ const HEADING = new RegExp(
     "]*" +
     END_OF_STRING +
     "",
+  "u",
 );
-const TICKET_HEAD = new RegExp(
-  "^##[" + PY_S_CLASS + "]+Ticket[" + PY_S_CLASS + "]*" + END_OF_STRING + "",
-);
+const TICKET_HEAD = new RegExp(`^##[${PY_S_CLASS}]+Ticket[${PY_S_CLASS}]*${END_OF_STRING}`, "u");
 const PROFILE_HEAD = new RegExp(
-  "^##[" + PY_S_CLASS + "]+Project profile[" + PY_S_CLASS + "]*" + END_OF_STRING + "",
+  `^##[${PY_S_CLASS}]+Project profile[${PY_S_CLASS}]*${END_OF_STRING}`,
+  "u",
 );
 const JOURNEY_HEAD = new RegExp(
-  "^##[" + PY_S_CLASS + "]+User journey[" + PY_S_CLASS + "]*" + END_OF_STRING + "",
-  "i",
+  `^##[${PY_S_CLASS}]+User journey[${PY_S_CLASS}]*${END_OF_STRING}`,
+  "iu",
 );
-const BREAK_HEAD = new RegExp("^#{1,2}[" + PY_S_CLASS + "]");
-const SENT_SPLIT = new RegExp("[.!?][\"')\\]]*(?=[" + PY_S_CLASS + "]|" + END_OF_STRING + ")", "g");
-const VERDICT_GUARD = new RegExp("^[" + PY_S_CLASS + "]*(did not|did)" + BOUND_R + "", "iu");
+const BREAK_HEAD = new RegExp(`^#{1,2}[${PY_S_CLASS}]`, "u");
+const SENT_SPLIT = new RegExp(`[.!?]["')\\]]*(?=[${PY_S_CLASS}]|${END_OF_STRING})`, "gu");
+const VERDICT_GUARD = new RegExp(`^[${PY_S_CLASS}]*(did not|did)${BOUND_R}`, "iu");
 const VERDICT = new RegExp(
   "^[" +
     PY_S_CLASS +
@@ -90,10 +90,7 @@ const VERDICT = new RegExp(
     "",
   "iu",
 );
-const SHOT_GUARD = new RegExp(
-  "^[" + PY_S_CLASS + "]*screenshot:[" + PY_S_CLASS + "]*[^" + PY_S_CLASS + "]",
-  "i",
-);
+const SHOT_GUARD = new RegExp(`^[${PY_S_CLASS}]*screenshot:[${PY_S_CLASS}]*[^${PY_S_CLASS}]`, "iu");
 const SHOT = new RegExp(
   "^[" +
     PY_S_CLASS +
@@ -106,7 +103,7 @@ const SHOT = new RegExp(
     "]*" +
     END_OF_STRING +
     "",
-  "i",
+  "iu",
 );
 
 function notRun(msg: string): never {
@@ -117,12 +114,19 @@ function notRun(msg: string): never {
 
 function norm(s: string): string {
   // text.ts: BASE norm is re.sub(r"\s+", " ", s).strip().rstrip(".").strip().casefold().
-  const squashed = s.replace(new RegExp("[" + PY_S_CLASS + "]+", "g"), " ");
-  return casefold(pyTrim(pyTrim(squashed).replace(/\.+$/, "")));
+  const squashed = s.replace(new RegExp(`[${PY_S_CLASS}]+`, "gu"), " ");
+  return casefold(pyTrim(pyTrim(squashed).replace(/\.+$/u, "")));
+}
+
+// BASE reads with .splitlines(); the flow's tickets and reports only ever
+// carry \n or \r\n, so the port splits \n and drops one trailing \r.
+// Other splitlines boundaries (\x0b, \u2028, …) stay: they never occur here.
+function dropCR(l: string): string {
+  return l.endsWith("\r") ? l.slice(0, -1) : l;
 }
 
 function ticketLines(text: string): string[] {
-  const lines = text.split("\n");
+  const lines = text.split("\n").map(dropCR);
   const start = lines.findIndex((l) => TICKET_HEAD.test(l));
   if (start === -1) return lines;
   const end = lines.findIndex((l, i) => i > start && PROFILE_HEAD.test(l));
@@ -168,7 +172,7 @@ function steps(lines: string[]): string[] | null {
     .filter((l) => l.trim())
     .map((l) => l.trim())
     .join(" ");
-  const masked = text.replace(/`[^`]*`/g, (m) => "x".repeat(m.length));
+  const masked = text.replace(/`[^`]*`/gu, (m) => "x".repeat(m.length));
   const out: string[] = [];
   let last = 0;
   for (const m of masked.matchAll(SENT_SPLIT)) {
@@ -233,7 +237,7 @@ function journey(mode: "path" | "judge", wtArg: string, ...rest: string[]): numb
   const report = reportArg ? reportArg : reportPath(null);
   let got: string[];
   try {
-    got = readFileSync(report, "utf8").split("\n");
+    got = readFileSync(report, "utf8").split("\n").map(dropCR);
   } catch {
     notRun(`no journey report at ${report}: walk the journey in a browser and write it there`);
   }
@@ -502,6 +506,20 @@ Not a step.
     "shots/2.png",
   );
 
+  const crlf = (s: string): string => s.split("\n").join("\r\n");
+  writeFileSync(join(tmp, "prose-crlf.md"), crlf(prose), "utf8");
+  writeFileSync(
+    join(tmp, "good-crlf.md"),
+    crlf(readFileSync(join(tmp, "good.md"), "utf8")),
+    "utf8",
+  );
+  writeFileSync(join(tmp, "list-crlf.md"), crlf(list), "utf8");
+  writeFileSync(
+    join(tmp, "listgood-crlf.md"),
+    crlf(readFileSync(join(tmp, "listgood.md"), "utf8")),
+    "utf8",
+  );
+
   console.log("positive controls");
   expect(
     "a complete report passes",
@@ -522,6 +540,20 @@ Not a step.
     0,
     join(tmp, "list.md"),
     join(tmp, "listgood.md"),
+    "all 2 steps walked",
+  );
+  expect(
+    "windows endings pass, ticket and report alike",
+    0,
+    join(tmp, "prose-crlf.md"),
+    join(tmp, "good-crlf.md"),
+    "all 2 steps walked",
+  );
+  expect(
+    "windows endings pass for a list's items too",
+    0,
+    join(tmp, "list-crlf.md"),
+    join(tmp, "listgood-crlf.md"),
     "all 2 steps walked",
   );
   {

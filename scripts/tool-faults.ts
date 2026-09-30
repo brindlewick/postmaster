@@ -65,31 +65,31 @@ const DONE_RE =
 function normRid(s: string): string {
   return s
     .replace(/(run )[0-9a-f]{10}(?![\p{L}\p{N}_])/gu, "$1RID")
-    .replace(/(tool-faults\/)[0-9a-f]{10}/g, "$1RID");
+    .replace(/(tool-faults\/)[0-9a-f]{10}/gu, "$1RID");
 }
 
 // File-scope so the pattern-parity suite diffs these exact objects.
 const TICKET_RE = /^#?\p{Nd}+$/u; // text.ts: BASE fullmatches #?\d+ in Unicode.
-const STATE_RE = new RegExp(`${PY_M_START}state: ([^${PY_S_CLASS}]+)`, "m");
+const STATE_RE = new RegExp(`${PY_M_START}state: ([^${PY_S_CLASS}]+)`, "mu");
 const RURL_M1 =
   /^[A-Za-z][A-Za-z0-9+.-]*:\/\/(?:[^@/]*@)?([^/:?#]+)(?::\p{Nd}+)?\/+([^\n]*?)(?:\.git)?\/?$/u;
-const RURL_M2 = /^(?:[^@/:]+@)?([^/:]+):(?!\/\/)([^\n]*?)(?:\.git)?\/?$/;
+const RURL_M2 = /^(?:[^@/:]+@)?([^/:]+):(?!\/\/)([^\n]*?)(?:\.git)?\/?$/u;
 
 function fidBoundaryRe(fid: string): RegExp {
   // text.ts: BASE's [\w-] lookarounds are Unicode; \w needs the \p spelling.
   return new RegExp(
-    `(?<![\\p{L}\\p{N}_-])${fid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_-])`,
+    `(?<![\\p{L}\\p{N}_-])${fid.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?![\\p{L}\\p{N}_-])`,
     "u",
   );
 }
 
 // text.ts: BASE's re.M ^/$ split \n only; its \S and dots are Python's.
-const PROFILE_HEAD_RE = new RegExp(`${PY_M_START}## Project profile[ \\t]*${PY_M_END}`, "gm");
-const PROFILE_END_RE = new RegExp(`${PY_M_START}## `, "m");
+const PROFILE_HEAD_RE = new RegExp(`${PY_M_START}## Project profile[ \\t]*${PY_M_END}`, "gmu");
+const PROFILE_END_RE = new RegExp(`${PY_M_START}## `, "mu");
 const CONTROLS_VALUE_RE = /^[\p{L}\p{N}_-]+$/u; // text.ts: BASE's [\w-] is Unicode.
 const PROFILE_REPO_RE = new RegExp(
   `${PY_M_START}repo:[ \\t]*([^${PY_S_CLASS}]${PY_DOT}*?)(?:[ \\t]{2,}[^${PY_S_CLASS}]${PY_DOT}*)?[ \\t]*${PY_M_END}`,
-  "m",
+  "mu",
 );
 const ASKING = new Set(["new", "asked", "unchecked", "kept"]);
 
@@ -170,7 +170,7 @@ function clip(text: string, n: number): string {
   if (text.length <= n) return text;
   const cut = text.slice(0, n - 3);
   const lastSpace = cut.lastIndexOf(" ");
-  return `${(lastSpace > 0 ? cut.slice(0, lastSpace) : cut).replace(/[,;:]+$/, "")}...`;
+  return `${(lastSpace > 0 ? cut.slice(0, lastSpace) : cut).replace(/[,;:]+$/u, "")}...`;
 }
 
 // --- run helpers -------------------------------------------------------------------------------
@@ -276,7 +276,7 @@ function remoteUrl(where: string): [string, string] | null {
   const m = m1 || m2;
   // LOWER: BASE's own .lower() on the host, ported exactly, never folded.
   if (m?.[2]) return [m[1]?.toLowerCase(), m[2]!];
-  return ["", url.replace(/\/+$/, "")];
+  return ["", url.replace(/\/+$/u, "")];
 }
 
 function sameRepo(repo: string): boolean {
@@ -300,7 +300,7 @@ function profileRepo(waybill: string): string | null {
   const searchIn = endM ? body.slice(0, endM.index) : body;
   const rm = PROFILE_REPO_RE.exec(searchIn);
   // text.ts: BASE strips the group Python-style before expanduser.
-  return rm ? resolve(pyTrim(rm[1]!).replace(/^~(?=\/|$)/, homedir())) : null;
+  return rm ? resolve(pyTrim(rm[1]!).replace(/^~(?=\/|$)/u, homedir())) : null;
 }
 
 // --- what may be published ----------------------------------------------------------------------
@@ -318,14 +318,14 @@ const KEY_RE = /(?<![\p{L}\p{N}_-])[A-Z][A-Z0-9]{1,9}-\p{Nd}+(?![\p{L}\p{N}_-])/
 const FILELIKE = /[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*\.[A-Za-z][\p{L}\p{N}_]{1,7}/u;
 const FAULT_ID_RE = /(?<![\p{L}\p{N}_])tf-[0-9a-f]{8}(?![\p{L}\p{N}_])/gu;
 const HEX_RE = /(?<![\p{L}\p{N}_])(?=[0-9a-f]*\p{Nd})[0-9a-f]{7,40}(?![\p{L}\p{N}_])/gu;
-const MARK_RE = /\[(?:path|project|ticket text|ticket|code|link|address|withheld)\]/g;
+const MARK_RE = /\[(?:path|project|ticket text|ticket|code|link|address|withheld)\]/gu;
 const WORD_RE = new RegExp(`[${WORD_CLASS}]+(?:'[${WORD_CLASS}]+)*`, "gu");
 const WTOK_RE = /[\p{L}\p{N}_]+/gu;
-const TICKS_RE = /`([^`\n]+)`/g;
+const TICKS_RE = /`([^`\n]+)`/gu;
 // ASCII: publish strips \x01/\x02 from input first, so only our own
 // decimal holds reach this; BASE's twin matches the same ASCII.
 // ASCII: placeholders are machine counters, and publish strips \x01/\x02 first.
-const HELD_RE = /\x01(\d+)\x02/g;
+const HELD_RE = /\x01(\d+)\x02/gu;
 const N = 4;
 
 function wordsOf(text: string): string[] {
@@ -389,7 +389,7 @@ class Safe {
     );
     for (const p of files) this.files.add(casefold(basename(p)));
     this.urls = new Set(
-      [...own.matchAll(URL_RE)].map((m) => casefold(m[0]!).replace(/[.,;:]+$/, "")),
+      [...own.matchAll(URL_RE)].map((m) => casefold(m[0]!).replace(/[.,;:]+$/u, "")),
     );
     this.keys = new Set([...own.matchAll(KEY_RE)].map((m) => m[0]!));
     this.ids = new Set(ids);
@@ -404,7 +404,12 @@ class Safe {
     if (repo && existsSync(repo) && sameRepo(repo)) {
       waybill = "";
     } else {
-      names.add(basename(dirname(d)));
+      // <project>/.postmaster/runs/<TICKET>: the project root's name, not "runs".
+      const parent = dirname(d);
+      const grand = dirname(parent);
+      const root =
+        basename(parent) === "runs" && basename(grand) === ".postmaster" ? dirname(grand) : parent;
+      names.add(basename(root));
       if (!ongoing) names.add(basename(d));
       if (!ongoing) {
         // text.ts: \d is \p{Nd}, $ is END_OR_BEFORE_NL (BASE re.match, not fullmatch).
@@ -464,16 +469,16 @@ class Safe {
       return `\x01${held.length - 1}\x02`;
     };
 
-    let t = text.replace(/\x01/g, "").replace(/\x02/g, "");
+    let t = text.replace(/\x01/gu, "").replace(/\x02/gu, "");
     t = t.replace(MARK_RE, (m) => hold(m));
     t = t.replace(FAULT_ID_RE, (m) => hold(m));
     t = t.replace(URL_RE, (m) =>
-      hold(this.urls.has(casefold(m).replace(/[.,;:]+$/, "")) ? m : "[link]"),
+      hold(this.urls.has(casefold(m).replace(/[.,;:]+$/u, "")) ? m : "[link]"),
     );
     t = t.replace(EMAIL_RE, () => hold("[address]"));
     t = t.replace(IPV4_RE, () => hold("[address]"));
     t = t.replace(TOKEN, (tok) => {
-      const core = tok.replace(/[.,:]+$/, "");
+      const core = tok.replace(/[.,:]+$/u, "");
       if (core.includes("/") && WORD_CHAR_RE.test(core)) {
         return hold(this.ownPath(core) || "[path]") + tok.slice(core.length);
       }
@@ -530,14 +535,14 @@ class Safe {
         isDigit(tok) ||
         tok.includes("_") ||
         [...tok].some((ch) => isDigitChar(ch)) ||
-        /[a-z][A-Z]/.test(tok);
+        /[a-z][A-Z]/u.test(tok);
       return looks ? hold("[code]") : tok;
     });
     t = t.replace(WORD_RE, (w) => {
       const cf = casefold(w);
       if (this.vocab.has(cf)) return w;
       // LOWER: BASE's own w.lower() on both sides, ported exactly, never folded.
-      if (this.waybillWords.has(cf) || !/^[\x00-\x7f]*$/.test(w) || w !== w.toLowerCase()) {
+      if (this.waybillWords.has(cf) || !/^[\x00-\x7f]*$/u.test(w) || w !== w.toLowerCase()) {
         return hold("[withheld]");
       }
       return w;
@@ -548,7 +553,7 @@ class Safe {
   key(failed: string): string {
     let t = failed.replace(TOKEN, (m) => {
       if (m.includes("/") && WORD_CHAR_RE.test(m)) {
-        return ` ${this.ownPath(m.replace(/[.,:]+$/, "")) || "path"} `;
+        return ` ${this.ownPath(m.replace(/[.,:]+$/u, "")) || "path"} `;
       }
       return m;
     });
@@ -588,11 +593,11 @@ function controlsList(): Record<string, string> {
   // text.ts: BASE walks splitlines() and strips Python-style.
   for (const line of pySplitLines(text)) {
     const cells = pyTrim(line)
-      .replace(/^\||\|$/g, "")
+      .replace(/^\||\|$/gu, "")
       .split("|")
       .map((c) => pyTrim(c));
     if (cells.length >= 2) {
-      const m = cells[0]?.match(/^`(?:<tool>\/)?([^`]+)`$/);
+      const m = cells[0]?.match(/^`(?:<tool>\/)?([^`]+)`$/u);
       if (m && CONTROLS_VALUE_RE.test(cells[1]!)) {
         out[m[1]!] = cells[1]!;
       }
@@ -689,7 +694,7 @@ class GitHub {
       .filter((t) => t[0] && t[1]);
   }
   read(number: string): string {
-    const r = this.call("read", number.replace(/^#/, ""));
+    const r = this.call("read", number.replace(/^#/u, ""));
     if (r.code !== 0) throw new Unreached(`github.sh read ${number}: ${whyR(r)}`);
     return r.out;
   }
@@ -743,7 +748,7 @@ function draft(g: FaultGroup, rid: string, safe: Safe, runJsonPath: string): [st
   const failed = tidy(safe.publish(String(fields(es[0]!).failed || "")));
   const fixes = [...new Set(es.map((e) => tidy(safe.publish(String(fields(e).fix || "")))))];
   const roles = safe.publish([...new Set(es.map((e) => String(e.actor || "")))].join(" and "));
-  const title = `Tool fault in ${file}: ${clip(failed.replace(/\.$/, ""), 90)} [${g.id}]`;
+  const title = `Tool fault in ${file}: ${clip(failed.replace(/\.$/u, ""), 90)} [${g.id}]`;
   const facts: string[] = [
     `A run met a fault in \`${file}\`: ${failed}${failed.endsWith(".") || failed.endsWith("!") || failed.endsWith("?") ? "" : "."}`,
   ];
@@ -846,7 +851,7 @@ function harvestCmd(d: string, ongoing: boolean): void {
         run_id: newId(),
         first: runs.length > 0 ? st.lines || 0 : 0,
         // ASCII: toISOString is machine ASCII; BASE formats the same stamp.
-        harvested: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+        harvested: new Date().toISOString().replace(/\.\d+Z$/u, "Z"),
       },
     ];
     st.runs = runs;
@@ -943,7 +948,7 @@ function harvestCmd(d: string, ongoing: boolean): void {
     if (ASKING.has(x.state)) {
       const problem = checked(titlePath, bodyPath, safe, x.sha);
       if (problem) {
-        notes.push(`  ${fid}: ${problem.replace(/\n/g, "\n    ")}`);
+        notes.push(`  ${fid}: ${problem.replace(/\n/gu, "\n    ")}`);
       }
     }
     found.push(x);
@@ -1040,7 +1045,7 @@ function commentCmd(fid: string, ticket: string, d: string, ongoing: boolean): v
       if (!TICKET_RE.test(ticket)) {
         dieTF(`not a ticket number: ${ticket}`);
       }
-      number = `#${ticket.replace(/^#/, "")}`;
+      number = `#${ticket.replace(/^#/u, "")}`;
       const body = t.read(number);
       const m = body.match(STATE_RE);
       state = m ? m[1]! : "";
@@ -1061,7 +1066,7 @@ function commentCmd(fid: string, ticket: string, d: string, ongoing: boolean): v
   }
   let text = `tool fault ${fid} seen again: ${seen(g?.entries.length)} in run ${x.run_id}${metaStr(join(d, "run.json"))}.`;
   if (["closed", "done", "cancelled"].includes(state)) text += " This ticket is closed.";
-  const r = t.call("comment", number.replace(/^#/, ""), "postmaster", text);
+  const r = t.call("comment", number.replace(/^#/u, ""), "postmaster", text);
   if (r.code !== 0) {
     dieTF(`the tracker refused the comment: ${whyR(r)}`);
   }
@@ -1142,170 +1147,28 @@ function declineCmd(fid: string, word: string, d: string, ongoing: boolean): voi
 }
 
 // --- entry ---------------------------------------------------------------------------------------
-const argv = process.argv.slice(2);
-function usageDie(): never {
-  console.error(usage);
-  process.exit(1);
-  throw new Error("unreachable");
-}
-const usage =
-  "usage: tool-faults.sh harvest <dispatch> | comment <dispatch> <id> [<ticket>] | file <dispatch> <id> | decline <dispatch> <id> <the user's word> | --self-test";
+// Round-10 pattern parity, fixture side: the case list and the BASE-side
+// program live at module level so --dump-parity-cases can print them for
+// fixture regen (scripts/fixtures/tool-faults-parity.json). The self-test
+// below runs the same cases against the committed truth.
 
-if (argv[0] === "--self-test") {
-  // fall through to self-test below
-} else {
-  if (!argv[0]) usageDie();
-  const dispatch = argv[1];
-  if (!dispatch) usageDie();
-  if (!existsSync(dispatch) || !statSync(dispatch).isDirectory()) {
-    dieTF(`no such dispatch directory: ${dispatch}`);
-  }
-  const d = resolve(dispatch);
-  const ongoing = basename(d) === "postmaster";
-
-  if (argv[0] === "harvest") {
-    if (argv.length !== 2) usageDie();
-    harvestCmd(d, ongoing);
-  } else if (argv[0] === "comment") {
-    if (argv.length < 3 || argv.length > 4) usageDie();
-    const fid = argv[2]!;
-    if (!/^tf-[0-9a-f]{8}$/.test(fid)) dieTF(`not a fault id: ${fid}`);
-    commentCmd(fid, argv[3] || "", d, ongoing);
-  } else if (argv[0] === "file") {
-    if (argv.length !== 3) usageDie();
-    const fid = argv[2]!;
-    if (!/^tf-[0-9a-f]{8}$/.test(fid)) dieTF(`not a fault id: ${fid}`);
-    fileCmd(fid, d, ongoing);
-  } else if (argv[0] === "decline") {
-    if (argv.length < 4) usageDie();
-    const fid = argv[2]!;
-    if (!/^tf-[0-9a-f]{8}$/.test(fid)) dieTF(`not a fault id: ${fid}`);
-    declineCmd(fid, argv.slice(3).join(" "), d, ongoing);
-  } else {
-    usageDie();
-  }
-  process.exit(0);
+interface PatCase {
+  id: string;
+  op: "search" | "fullmatch" | "findall" | "profile" | "remote";
+  pyPat: string;
+  pyFlags: string;
+  s: string;
 }
 
-// Round-10 pattern parity: every regex above, diffed against BASE's own
-// pattern text (bb782a9 scripts/tool-faults.sh) on the vectors where
-// Unicode meets the pattern. The port side runs the real consts, so a
-// routed pattern that drifts fails here before any harvest runs.
-// Multi-slash remote tails are absent on purpose: BASE's /*$ and the
-// port's /?$ disagree there, and that P3 rides a card, not this suite.
-function runPatternParity(st: SelfTest, tmp: string): void {
-  interface PatCase {
-    id: string;
-    op: "search" | "fullmatch" | "findall" | "profile" | "remote";
-    pyPat: string;
-    pyFlags: string;
-    s: string;
-  }
-  const FID = "tf-abcdef12";
-  // Split for the same reason the harvest vectors split: whole, these
-  // would sit in this file, hence in the tool's own tokens, and the
-  // harvest control's matching vectors would keep by membership instead
-  // of exercising their patterns.
-  const S_AR3 = "١٢" + "٣";
-  const S_HXAB = "abcdefab" + "٣";
-  const namesShape = (words: string[]): RegExp =>
-    new RegExp(`${NAME_L}(${words.map((w) => literalI(w)).join("|")})${NAME_R}`, "giu");
-  const NAMES_WORDS = ["harbor", "illegal", "straße"];
-  const NAMES_PY = "(?<![^\\W_])(harbor|illegal|straße)(?![^\\W_])";
-  const normGroup = (v: unknown): unknown => (v === undefined ? "" : v);
-  const runPort = (c: PatCase): unknown => {
-    if (c.op === "profile") return profileRepo(c.s);
-    if (c.op === "remote") return remoteUrl(c.s);
-    let re: RegExp;
-    switch (c.id) {
-      case "done":
-        re = DONE_RE;
-        break;
-      case "url":
-        re = URL_RE;
-        break;
-      case "email":
-        re = EMAIL_RE;
-        break;
-      case "ipv4":
-        re = IPV4_RE;
-        break;
-      case "key":
-        re = KEY_RE;
-        break;
-      case "filelike":
-        re = FILELIKE;
-        break;
-      case "faultid":
-        re = FAULT_ID_RE;
-        break;
-      case "hex":
-        re = HEX_RE;
-        break;
-      case "mark":
-        re = MARK_RE;
-        break;
-      case "word":
-        re = WORD_RE;
-        break;
-      case "wtok":
-        re = WTOK_RE;
-        break;
-      case "ticks":
-        re = TICKS_RE;
-        break;
-      case "token":
-        re = TOKEN;
-        break;
-      case "names":
-        re = namesShape(NAMES_WORDS);
-        break;
-      case "ticket":
-        re = TICKET_RE;
-        break;
-      case "state":
-        re = STATE_RE;
-        break;
-      case "fid":
-        re = fidBoundaryRe(FID);
-        break;
-      case "controls":
-        re = CONTROLS_VALUE_RE;
-        break;
-      case "rurl1":
-        re = RURL_M1;
-        break;
-      case "rurl2":
-        re = RURL_M2;
-        break;
-      case "phead":
-        re = PROFILE_HEAD_RE;
-        break;
-      case "pend":
-        re = PROFILE_END_RE;
-        break;
-      case "prepo":
-        re = PROFILE_REPO_RE;
-        break;
-      default:
-        throw new Error(`unknown pattern ${c.id}`);
-    }
-    re.lastIndex = 0;
-    if (c.op === "search") {
-      const m = re.exec(c.s);
-      return m ? [m[0], ...[...m].slice(1).map(normGroup)] : [];
-    }
-    if (c.op === "fullmatch") {
-      const m = re.exec(c.s);
-      return m !== null && m[0] === c.s;
-    }
-    const flags = re.flags.includes("g") ? re.flags : `${re.flags}g`;
-    return [...c.s.matchAll(new RegExp(re.source, flags))].map((m) => {
-      const gs = [...m].slice(1).map(normGroup);
-      if (gs.length === 0) return m[0];
-      return gs.length === 1 ? gs[0] : gs;
-    });
-  };
+// Split for the same reason the harvest vectors split: whole, these
+// would sit in this file, hence in the tool's own tokens, and the
+// harvest control's matching vectors would keep by membership instead
+// of exercising their patterns.
+const S_AR3 = "١٢" + "٣";
+const S_HXAB = "abcdefab" + "٣";
+const NAMES_PY = "(?<![^\\W_])(harbor|illegal|straße)(?![^\\W_])";
+
+function parityCases(tmp: string): PatCase[] {
   const P = (
     id: string,
     op: PatCase["op"],
@@ -1655,55 +1518,235 @@ function runPatternParity(st: SelfTest, tmp: string): void {
     ["remNone", null],
   ] as Array<[string, string | null]>)
     cases.push(P("remote", "remote", "", "", mkRemote(name, url)));
-  if (run("sh", ["-c", "command -v python3"]).code !== 0) {
-    st.skip("pattern parity with BASE", "python3 not on PATH: the pattern comparison did not run");
+  return cases;
+}
+
+const PARITY_PROG: string = [
+  "import json, os, re, subprocess, sys",
+  "out = []",
+  "def base_profile(s):",
+  "    starts = [m.end() for m in re.finditer(r'^## Project profile[ \\t]*$', s, re.M)]",
+  "    if not starts: return None",
+  "    body = s[starts[-1]:]",
+  "    end = re.search(r'^## ', body, re.M)",
+  "    m = re.search(r'^repo:[ \\t]*(\\S.*?)(?:[ \\t]{2,}\\S.*)?[ \\t]*$', body[:end.start()] if end else body, re.M)",
+  "    return os.path.abspath(os.path.expanduser(m.group(1).strip())) if m else None",
+  "def base_remote(where):",
+  "    r0 = subprocess.run(['git', '-C', where, 'remote', 'get-url', 'origin'], capture_output=True, text=True)",
+  "    url = r0.stdout.strip() if r0.returncode == 0 else ''",
+  "    if not url: return None",
+  "    m = (re.match(r'^[A-Za-z][A-Za-z0-9+.-]*://(?:[^@/]*@)?([^/:?#]+)(?::\\d+)?/+(.*?)(?:\\.git)?/*$', url) or re.match(r'^(?:[^@/:]+@)?([^/:]+):(?!//)(.*?)(?:\\.git)?/*$', url))",
+  "    return [m.group(1).lower(), m.group(2)] if m and m.group(2) else ['', url.rstrip('/')]",
+  "for c in json.load(sys.stdin):",
+  "    try:",
+  "        fl = 0",
+  "        if 'i' in c['pyFlags']: fl |= re.I",
+  "        if 'm' in c['pyFlags']: fl |= re.M",
+  "        if c['op'] == 'profile': r = base_profile(c['s'])",
+  "        elif c['op'] == 'remote': r = base_remote(c['s'])",
+  "        elif c['op'] == 'search':",
+  "            m = re.search(c['pyPat'], c['s'], fl)",
+  "            r = [m.group(0)] + [g if g is not None else '' for g in m.groups()] if m else []",
+  "        elif c['op'] == 'fullmatch':",
+  "            r = bool(re.fullmatch(c['pyPat'], c['s'], fl))",
+  "        else:",
+  "            f = re.findall(c['pyPat'], c['s'], fl)",
+  "            r = [[g if g is not None else '' for g in t] if isinstance(t, tuple) else t for t in f]",
+  "        out.append({'ok': True, 'r': r})",
+  "    except Exception as e:",
+  "        out.append({'ok': False, 'r': '%s: %s' % (type(e).__name__, e)})",
+  "print(json.dumps(out))",
+].join("\n");
+
+const argv = process.argv.slice(2);
+function usageDie(): never {
+  console.error(usage);
+  process.exit(1);
+  throw new Error("unreachable");
+}
+const usage =
+  "usage: tool-faults.sh harvest <dispatch> | comment <dispatch> <id> [<ticket>] | file <dispatch> <id> | decline <dispatch> <id> <the user's word> | --self-test";
+
+if (argv[0] === "--dump-parity-cases") {
+  // Hidden: fixture regen only, not flow. Prints {cases, prog} for
+  // scripts/fixtures/tool-faults-parity.json (see its _note to regen).
+  // The dir argument is the scratch the remote cases' git repos live in;
+  // regen runs the BASE side there before deleting it.
+  if (argv.length !== 2 || !argv[1]) {
+    console.error("usage: tool-faults.sh --dump-parity-cases <scratch-dir>");
+    process.exit(2);
+  }
+  mkdirSync(argv[1], { recursive: true });
+  console.log(JSON.stringify({ cases: parityCases(argv[1]), prog: PARITY_PROG }));
+  process.exit(0);
+} else if (argv[0] === "--self-test") {
+  // fall through to self-test below
+} else {
+  if (!argv[0]) usageDie();
+  const dispatch = argv[1];
+  if (!dispatch) usageDie();
+  if (!existsSync(dispatch) || !statSync(dispatch).isDirectory()) {
+    dieTF(`no such dispatch directory: ${dispatch}`);
+  }
+  const d = resolve(dispatch);
+  const ongoing = basename(d) === "postmaster";
+
+  if (argv[0] === "harvest") {
+    if (argv.length !== 2) usageDie();
+    harvestCmd(d, ongoing);
+  } else if (argv[0] === "comment") {
+    if (argv.length < 3 || argv.length > 4) usageDie();
+    const fid = argv[2]!;
+    if (!/^tf-[0-9a-f]{8}$/u.test(fid)) dieTF(`not a fault id: ${fid}`);
+    commentCmd(fid, argv[3] || "", d, ongoing);
+  } else if (argv[0] === "file") {
+    if (argv.length !== 3) usageDie();
+    const fid = argv[2]!;
+    if (!/^tf-[0-9a-f]{8}$/u.test(fid)) dieTF(`not a fault id: ${fid}`);
+    fileCmd(fid, d, ongoing);
+  } else if (argv[0] === "decline") {
+    if (argv.length < 4) usageDie();
+    const fid = argv[2]!;
+    if (!/^tf-[0-9a-f]{8}$/u.test(fid)) dieTF(`not a fault id: ${fid}`);
+    declineCmd(fid, argv.slice(3).join(" "), d, ongoing);
   } else {
-    const prog = join(tmp, "pat-parity.py");
-    writeFileSync(
-      prog,
-      [
-        "import json, os, re, subprocess, sys",
-        "out = []",
-        "def base_profile(s):",
-        "    starts = [m.end() for m in re.finditer(r'^## Project profile[ \\t]*$', s, re.M)]",
-        "    if not starts: return None",
-        "    body = s[starts[-1]:]",
-        "    end = re.search(r'^## ', body, re.M)",
-        "    m = re.search(r'^repo:[ \\t]*(\\S.*?)(?:[ \\t]{2,}\\S.*)?[ \\t]*$', body[:end.start()] if end else body, re.M)",
-        "    return os.path.abspath(os.path.expanduser(m.group(1).strip())) if m else None",
-        "def base_remote(where):",
-        "    r0 = subprocess.run(['git', '-C', where, 'remote', 'get-url', 'origin'], capture_output=True, text=True)",
-        "    url = r0.stdout.strip() if r0.returncode == 0 else ''",
-        "    if not url: return None",
-        "    m = (re.match(r'^[A-Za-z][A-Za-z0-9+.-]*://(?:[^@/]*@)?([^/:?#]+)(?::\\d+)?/+(.*?)(?:\\.git)?/*$', url) or re.match(r'^(?:[^@/:]+@)?([^/:]+):(?!//)(.*?)(?:\\.git)?/*$', url))",
-        "    return [m.group(1).lower(), m.group(2)] if m and m.group(2) else ['', url.rstrip('/')]",
-        "for c in json.load(sys.stdin):",
-        "    try:",
-        "        fl = 0",
-        "        if 'i' in c['pyFlags']: fl |= re.I",
-        "        if 'm' in c['pyFlags']: fl |= re.M",
-        "        if c['op'] == 'profile': r = base_profile(c['s'])",
-        "        elif c['op'] == 'remote': r = base_remote(c['s'])",
-        "        elif c['op'] == 'search':",
-        "            m = re.search(c['pyPat'], c['s'], fl)",
-        "            r = [m.group(0)] + [g if g is not None else '' for g in m.groups()] if m else []",
-        "        elif c['op'] == 'fullmatch':",
-        "            r = bool(re.fullmatch(c['pyPat'], c['s'], fl))",
-        "        else:",
-        "            f = re.findall(c['pyPat'], c['s'], fl)",
-        "            r = [[g if g is not None else '' for g in t] if isinstance(t, tuple) else t for t in f]",
-        "        out.append({'ok': True, 'r': r})",
-        "    except Exception as e:",
-        "        out.append({'ok': False, 'r': '%s: %s' % (type(e).__name__, e)})",
-        "print(json.dumps(out))",
-      ].join("\n"),
-    );
-    const r = run("python3", [prog], { input: JSON.stringify(cases) });
-    const mism: string[] = [];
-    if (r.code !== 0) {
-      mism.push(`python3 failed: ${r.err.slice(0, 300)}`);
+    usageDie();
+  }
+  process.exit(0);
+}
+
+// Round-10 pattern parity: every regex above, diffed against BASE's own
+// pattern text (bb782a9 scripts/tool-faults.sh) on the vectors where
+// Unicode meets the pattern. The port side runs the real consts, so a
+// routed pattern that drifts fails here before any harvest runs.
+// Multi-slash remote tails are absent on purpose: BASE's /*$ and the
+// port's /?$ disagree there, and that P3 rides a card, not this suite.
+function runPatternParity(st: SelfTest, tmp: string): void {
+  const FID = "tf-abcdef12";
+  const namesShape = (words: string[]): RegExp =>
+    new RegExp(`${NAME_L}(${words.map((w) => literalI(w)).join("|")})${NAME_R}`, "giu");
+  const NAMES_WORDS = ["harbor", "illegal", "straße"];
+  const normGroup = (v: unknown): unknown => (v === undefined ? "" : v);
+  const runPort = (c: PatCase): unknown => {
+    if (c.op === "profile") return profileRepo(c.s);
+    if (c.op === "remote") return remoteUrl(c.s);
+    let re: RegExp;
+    switch (c.id) {
+      case "done":
+        re = DONE_RE;
+        break;
+      case "url":
+        re = URL_RE;
+        break;
+      case "email":
+        re = EMAIL_RE;
+        break;
+      case "ipv4":
+        re = IPV4_RE;
+        break;
+      case "key":
+        re = KEY_RE;
+        break;
+      case "filelike":
+        re = FILELIKE;
+        break;
+      case "faultid":
+        re = FAULT_ID_RE;
+        break;
+      case "hex":
+        re = HEX_RE;
+        break;
+      case "mark":
+        re = MARK_RE;
+        break;
+      case "word":
+        re = WORD_RE;
+        break;
+      case "wtok":
+        re = WTOK_RE;
+        break;
+      case "ticks":
+        re = TICKS_RE;
+        break;
+      case "token":
+        re = TOKEN;
+        break;
+      case "names":
+        re = namesShape(NAMES_WORDS);
+        break;
+      case "ticket":
+        re = TICKET_RE;
+        break;
+      case "state":
+        re = STATE_RE;
+        break;
+      case "fid":
+        re = fidBoundaryRe(FID);
+        break;
+      case "controls":
+        re = CONTROLS_VALUE_RE;
+        break;
+      case "rurl1":
+        re = RURL_M1;
+        break;
+      case "rurl2":
+        re = RURL_M2;
+        break;
+      case "phead":
+        re = PROFILE_HEAD_RE;
+        break;
+      case "pend":
+        re = PROFILE_END_RE;
+        break;
+      case "prepo":
+        re = PROFILE_REPO_RE;
+        break;
+      default:
+        throw new Error(`unknown pattern ${c.id}`);
+    }
+    re.lastIndex = 0;
+    if (c.op === "search") {
+      const m = re.exec(c.s);
+      return m ? [m[0], ...[...m].slice(1).map(normGroup)] : [];
+    }
+    if (c.op === "fullmatch") {
+      const m = re.exec(c.s);
+      return m !== null && m[0] === c.s;
+    }
+    const flags = re.flags.includes("g") ? re.flags : `${re.flags}g`;
+    // ASCII: flags reuses re.flags of a u-flagged module pattern, plus g.
+    return [...c.s.matchAll(new RegExp(re.source, flags))].map((m) => {
+      const gs = [...m].slice(1).map(normGroup);
+      if (gs.length === 0) return m[0];
+      return gs.length === 1 ? gs[0] : gs;
+    });
+  };
+  // The BASE side is committed, not run: the cases still build live
+  // (fresh git repos under tmp), and the truth comes from the fixture
+  // (regen per its _note). HOME and the git config are pinned while the
+  // port side runs, and the port's expanded home is normalized to the
+  // pinned value before comparing: homedir() reads the user database,
+  // not the environment, so the ~/ppp row would otherwise carry the
+  // test machine's home. The expansion mechanics are still differenced.
+  const saveHome = process.env.HOME;
+  const saveGGlobal = process.env.GIT_CONFIG_GLOBAL;
+  const saveGSystem = process.env.GIT_CONFIG_SYSTEM;
+  process.env.HOME = "/nonexistent-109-home";
+  process.env.GIT_CONFIG_GLOBAL = "/dev/null";
+  process.env.GIT_CONFIG_SYSTEM = "/dev/null";
+  const mism: string[] = [];
+  let cases: PatCase[] = [];
+  try {
+    cases = parityCases(tmp);
+    const fixture = JSON.parse(
+      readFileSync(join(HERE, "fixtures", "tool-faults-parity.json"), "utf-8"),
+    ) as { python: string; truth: Array<{ ok: boolean; r: unknown }> };
+    const truth = fixture.truth;
+    if (truth.length !== cases.length) {
+      mism.push(
+        `fixture has ${truth.length} rows for ${cases.length} cases: regen per scripts/fixtures/tool-faults-parity.json _note`,
+      );
     } else {
-      const truth = JSON.parse(r.out) as Array<{ ok: boolean; r: unknown }>;
       for (let i = 0; i < cases.length; i++) {
         let mine: unknown;
         try {
@@ -1712,6 +1755,8 @@ function runPatternParity(st: SelfTest, tmp: string): void {
           mine = `Error: ${String((e as Error).message ?? e)}`;
         }
         const want = truth[i]!;
+        if (typeof mine === "string" && mine.startsWith(homedir()))
+          mine = "/nonexistent-109-home" + mine.slice(homedir().length);
         if (JSON.stringify(mine) !== JSON.stringify(want.r)) {
           const c = cases[i]!;
           mism.push(
@@ -1763,6 +1808,13 @@ function runPatternParity(st: SelfTest, tmp: string): void {
       mism.length === 0,
       mism.slice(0, 12).join("\n"),
     );
+  } finally {
+    if (saveHome === undefined) delete process.env.HOME;
+    else process.env.HOME = saveHome;
+    if (saveGGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = saveGGlobal;
+    if (saveGSystem === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+    else process.env.GIT_CONFIG_SYSTEM = saveGSystem;
   }
 }
 
@@ -1823,7 +1875,7 @@ if (a[0] === "api" && a[1] === "graphql") {
   }
 } else if (a[0] === "search" && a[1] === "issues") {
   if (existsSync(d + "/no-search")) { console.error("stub gh: search is down"); process.exit(1); }
-  const q = casefold((a[2] ?? "").replace(/^"|"$/g, ""));
+  const q = casefold((a[2] ?? "").replace(/^"|"$/gu, ""));
   const hits = Object.entries(db.issues).filter(([n, i]: [string, any]) =>
     q in {} ? false : casefold(i.title + "\\n" + i.body + "\\n" + i.comments.join("\\n")).includes(q)
   ).map(([n, i]: [string, any]) => ({ number: parseInt(n), title: i.title, state: i.state }));
@@ -1953,7 +2005,7 @@ if (a[0] === "api" && a[1] === "graphql") {
   };
 
   const newrun = (project: string, ticket: string, stage: string): string => {
-    const d = join(RUNS, project, ticket);
+    const d = join(RUNS, project, ".postmaster", "runs", ticket);
     mkdirSync(d, { recursive: true });
     writeFileSync(
       join(d, "brief.md"),
@@ -1980,7 +2032,7 @@ if (a[0] === "api" && a[1] === "graphql") {
   };
 
   const idWhere = (out: string, pattern: string): string => {
-    const re = new RegExp(`^tf-[0-9a-f]{8}  ${pattern}`);
+    const re = new RegExp(`^tf-[0-9a-f]{8}  ${pattern}`, "u");
     const line = out.split("\n").find((l) => re.test(l));
     return line ? line.slice(0, 11) : "";
   };
@@ -2167,7 +2219,7 @@ if (a[0] === "api" && a[1] === "graphql") {
   const C = idWhere(out, String.raw`scripts/wait-for-markers.sh  control \(wait\)  once`);
   const D1 = idWhere(out, String.raw`skills/postmaster/coachman.md  control \(action-log\)`);
   const D2 = idWhere(out, String.raw`skills/postmaster/coachman.md  control \(check\)`);
-  const faultCount = out.split("\n").filter((l) => /^tf-[0-9a-f]{8} {2}/.test(l)).length;
+  const faultCount = out.split("\n").filter((l) => /^tf-[0-9a-f]{8} {2}/u.test(l)).length;
   st.check(
     "seven fault lines are five faults: one seen three ways, and two naming different scripts kept apart",
     rc === 0 &&
@@ -2187,7 +2239,7 @@ if (a[0] === "api" && a[1] === "graphql") {
     out,
   );
   {
-    const rid = out.split(" ")[1]?.replace(/:/, "") || "";
+    const rid = out.split(" ")[1]?.replace(/:/u, "") || "";
     const logContent = readFileSync(join(d, "actions.jsonl"), "utf-8");
     st.check(
       "the harvest logs what it found",
@@ -2235,7 +2287,7 @@ if (a[0] === "api" && a[1] === "graphql") {
         "--body",
         f,
         "--title",
-        readFileSync(f.replace(/\.md$/, ".title"), "utf-8").trim(),
+        readFileSync(f.replace(/\.md$/u, ".title"), "utf-8").trim(),
       ]);
       if (r.code !== 0) shape++;
       if (!readFileSync(f, "utf-8").split("\n").includes("## Turnpikes")) shape++;
@@ -2257,7 +2309,7 @@ if (a[0] === "api" && a[1] === "graphql") {
   }
   {
     const bMd = draftOf(d, B);
-    const bTitle = readFileSync(bMd.replace(/\.md$/, ".title"), "utf-8");
+    const bTitle = readFileSync(bMd.replace(/\.md$/u, ".title"), "utf-8");
     const bBody = readFileSync(bMd, "utf-8");
     const all = bTitle + bBody;
     const marks = [
@@ -2305,10 +2357,10 @@ if (a[0] === "api" && a[1] === "graphql") {
     const bLine = lineOf(out, B);
     st.check(
       "a ticket holding the id in its title or its body is known; one only like it is not; a draft already shown is asked",
-      / known #57 \(open\)$/.test(aLine) &&
-        / asked, like #57 {2}tool-faults\//.test(cLine) &&
-        / known #58 \(open\)$/.test(d1Line) &&
-        / asked {2}tool-faults\//.test(bLine),
+      / known #57 \(open\)$/u.test(aLine) &&
+        / asked, like #57 {2}tool-faults\//u.test(cLine) &&
+        / known #58 \(open\)$/u.test(d1Line) &&
+        / asked {2}tool-faults\//u.test(bLine),
       out,
     );
   }
@@ -2447,7 +2499,7 @@ if (a[0] === "api" && a[1] === "graphql") {
     const cLine = lineOf(out, C);
     st.check(
       "in a later run, a fault a comment names on any ticket is known there",
-      / known #12 \(closed\)$/.test(cLine),
+      / known #12 \(closed\)$/u.test(cLine),
       out,
     );
   }
@@ -2464,7 +2516,7 @@ if (a[0] === "api" && a[1] === "graphql") {
     );
   }
   // postmaster's own faults
-  const pmDir = join(RUNS, NAME, "postmaster");
+  const pmDir = join(RUNS, NAME, ".postmaster", "runs", "postmaster");
   mkdirSync(pmDir, { recursive: true });
   logf(
     pmDir,
@@ -2517,7 +2569,7 @@ if (a[0] === "api" && a[1] === "graphql") {
     const pLine = lineOf(out, P);
     st.check(
       "the postmaster's own faults: a recurrence after its ticket is filed is a new harvest, and known",
-      P2 === P && PR === 2 && /once {2}known #61 \(closed\)$/.test(pLine),
+      P2 === P && PR === 2 && /once {2}known #61 \(closed\)$/u.test(pLine),
       out,
     );
   }
@@ -2630,8 +2682,8 @@ if (a[0] === "api" && a[1] === "graphql") {
   out = outR.out + outR.err;
   st.check(
     "a fault keeps the kind of control its line recorded; with none recorded, the list's",
-    /^tf-[0-9a-f]{8} {2}scripts\/wait-for-markers\.sh {2}control \(gate\) {2}once/m.test(out) &&
-      /^tf-[0-9a-f]{8} {2}scripts\/log-action\.sh {2}control \(action-log\) {2}once/m.test(out),
+    /^tf-[0-9a-f]{8} {2}scripts\/wait-for-markers\.sh {2}control \(gate\) {2}once/mu.test(out) &&
+      /^tf-[0-9a-f]{8} {2}scripts\/log-action\.sh {2}control \(action-log\) {2}once/mu.test(out),
     out,
   );
   // long token
@@ -2709,7 +2761,7 @@ if (a[0] === "api" && a[1] === "graphql") {
     const k1Line = out2.split("\n").find((l) => l.startsWith(`${K1}  `)) || "";
     st.check(
       "a ticket created but not put on the board is still filed, and logged",
-      rc === 0 && out.includes("it is not on the board") && / filed #6[0-9]$/.test(k1Line.trim()),
+      rc === 0 && out.includes("it is not on the board") && / filed #6[0-9]$/u.test(k1Line.trim()),
       `exit ${rc}\n${out}\n${out2}`,
     );
   }

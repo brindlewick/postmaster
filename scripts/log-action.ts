@@ -10,10 +10,13 @@
 //   action   a verb from a fixed set, enforced, so the log is computable:
 //            dispatch resume harvest synthesize review-launch review-harvest finding apply
 //            escalate rule ticket-check ticket-create ticket-edit ticket-state ticket-comment
-//            gate verify merge teardown degrade handoff-accept handoff stage tool-fault note
+//            gate verify merge teardown degrade handoff-accept handoff stage spec-review
+//            tool-fault note
 //   target   what the action was done to: a lane, a ticket id, a branch, a path, a round
 //   detail   free text; everything after the target, joined by spaces. A finding's opens with its
-//            class, gating or style, so the style findings can be told apart
+//            class, gating or style, so the style findings can be told apart. A spec-review's
+//            opens with the decision, approved, changes or dropped, then the spec commit the
+//            user saw, then the user's words where the decision is changes or dropped
 //
 // A tool-fault is postmaster itself misbehaving: a script, a runbook step or a harness adapter.
 // Its target is the postmaster file, relative to the checkout this script is in or absolute,
@@ -27,12 +30,14 @@
 // dropped, bytes that are not UTF-8 are dropped, and a line or paragraph separator is escaped.
 //
 // Writes one JSON line to <dispatch>/actions.jsonl and the same line, with the run named, to
-// <dispatch>/../ledger.jsonl (the project's ledger across runs). Both are append-only. Nothing
-// in the flow reads its own narrative back to learn from it; it reads these lines.
+// <dispatch>/../ledger.jsonl (the project's ledger across runs, under the project's own
+// .postmaster/runs/). Both are append-only. Nothing in the flow reads its own narrative back
+// to learn from it; it reads these lines.
 //
 //   exit 0  written to both files
-//   exit 1  usage, an action outside the set, a finding with no class, a tool-fault missing a
-//           field or naming no postmaster file, or a file could not be appended
+//   exit 1  usage, an action outside the set, a finding with no class, a spec-review with no
+//           decision, a tool-fault missing a field or naming no postmaster file, or a file
+//           could not be appended
 import {
   appendFileSync,
   existsSync,
@@ -48,7 +53,7 @@ import { argvDecoded, decodeDropInvalid, run, withTempDir } from "./lib/proc.ts"
 import { SelfTest } from "./lib/selftest.ts";
 
 const VERBS =
-  " dispatch resume harvest synthesize review-launch review-harvest finding apply escalate rule ticket-check ticket-create ticket-edit ticket-state ticket-comment gate verify merge teardown degrade handoff-accept handoff stage tool-fault note ";
+  " dispatch resume harvest synthesize review-launch review-harvest finding apply escalate rule ticket-check ticket-create ticket-edit ticket-state ticket-comment gate verify merge teardown degrade handoff-accept handoff stage spec-review tool-fault note ";
 const CONTROLS = join(toolRoot(import.meta), "skills/postmaster/controls.md");
 
 // JSON string escaping: drop control chars, escape separators. Bytes that
@@ -65,14 +70,14 @@ function jsonStr(s: string): string {
   }
   // Escape backslash, quote, newline, CR, tab, and Unicode separators
   result = result
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n")
-    .replace(/\r/g, "\\r")
-    .replace(/\t/g, "\\t")
-    .replace(/\u2028/g, "\\u2028")
-    .replace(/\u2029/g, "\\u2029")
-    .replace(/\u0085/g, "\\u0085");
+    .replace(/\\/gu, "\\\\")
+    .replace(/"/gu, '\\"')
+    .replace(/\n/gu, "\\n")
+    .replace(/\r/gu, "\\r")
+    .replace(/\t/gu, "\\t")
+    .replace(/\u2028/gu, "\\u2028")
+    .replace(/\u2029/gu, "\\u2029")
+    .replace(/\u0085/gu, "\\u0085");
   return result;
 }
 
@@ -90,8 +95,8 @@ function kindsOf(text: string): string[] {
   // BASE awk -F'|': /^[[:space:]]*\|[[:space:]]*`/ rows; k = $3 with all [[:space:]] stripped.
   const kinds: string[] = [];
   for (const line of text.split("\n")) {
-    if (!/^[ \t\n\v\f\r]*\|[ \t\n\v\f\r]*`/.test(line)) continue;
-    const k = (line.split("|")[2] ?? "").replace(/[ \t\n\v\f\r]/g, "");
+    if (!/^[ \t\n\v\f\r]*\|[ \t\n\v\f\r]*`/u.test(line)) continue;
+    const k = (line.split("|")[2] ?? "").replace(/[ \t\n\v\f\r]/gu, "");
     if (k !== "") kinds.push(k);
   }
   return [...new Set(kinds)].sort();
@@ -101,9 +106,9 @@ function controlOf(text: string, t: string): string | undefined {
   // BASE awk -F'|': c = $2 edge-trimmed of [[:space:]], compared with backticks; k = $3 stripped.
   for (const line of text.split("\n")) {
     const cells = line.split("|");
-    const c = (cells[1] ?? "").replace(/^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g, "");
+    const c = (cells[1] ?? "").replace(/^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/gu, "");
     if (c === `\`${t}\`` || c === `\`<tool>/${t}\``) {
-      return (cells[2] ?? "").replace(/[ \t\n\v\f\r]/g, "");
+      return (cells[2] ?? "").replace(/[ \t\n\v\f\r]/gu, "");
     }
   }
   return undefined;
@@ -165,7 +170,7 @@ function toolFault(
     ["fix", fix],
   ] as const) {
     // BASE ${var//[[:space:]]/} in the C locale: ASCII space only.
-    if (val.replace(/[ \t\n\v\f\r]/g, "") === "") {
+    if (val.replace(/[ \t\n\v\f\r]/gu, "") === "") {
       return { error: `log-action: a tool-fault needs --${name} (the error may be 'none')` };
     }
   }
@@ -249,6 +254,15 @@ function logAction(
       return 1;
     }
   }
+  if (action === "spec-review") {
+    const firstWord = detail.split(" ")[0] ?? "";
+    if (firstWord !== "approved" && firstWord !== "changes" && firstWord !== "dropped") {
+      console.error(
+        "log-action: a spec-review's detail opens with its decision, approved, changes or dropped",
+      );
+      return 1;
+    }
+  }
 
   let finalTarget = target;
   let finalDetail = detail;
@@ -275,8 +289,16 @@ function logAction(
     return 1;
   }
   const runName = basename(dispatchReal);
-  const project = basename(dirname(dispatchReal));
-  const ts = new Date().toISOString().replace(/\.[0-9]+Z$/, "Z");
+  // The run is the dispatch directory's name. The project is the basename of
+  // the project root: <project>/.postmaster/runs/<TICKET>. An older layout,
+  // runs/<project>/<TICKET>, is still read as that project.
+  const parent = dirname(dispatchReal);
+  const grand = dirname(parent);
+  const project =
+    basename(parent) === "runs" && basename(grand) === ".postmaster"
+      ? basename(dirname(grand))
+      : basename(parent);
+  const ts = new Date().toISOString().replace(/\.[0-9]+Z$/u, "Z");
 
   const line = `{"ts":"${ts}","project":"${jsonStr(project)}","run":"${jsonStr(runName)}","actor":"${jsonStr(actor)}","action":"${jsonStr(action)}","target":"${jsonStr(finalTarget)}","detail":"${jsonStr(finalDetail)}"${faultJson}}`;
 
@@ -318,7 +340,7 @@ if (argv[0] !== "--self-test") {
 // --- self-test ----------------------------------------------------------------------------
 const TOOL = toolRoot(import.meta);
 withTempDir((tmp) => {
-  const d = join(tmp, "project", "RUN-1");
+  const d = join(tmp, "proj", ".postmaster", "runs", "RUN-1");
   mkdirSync(d, { recursive: true });
   const SELF = join(scriptsDir(import.meta), "log-action.sh");
   const st = new SelfTest();
@@ -361,7 +383,7 @@ withTempDir((tmp) => {
     // The detail carries bytes printf makes that are not UTF-8. spawnSync
     // encodes every argument as UTF-8, so a shell builds the bytes.
     const before = lines();
-    const q = (a: string): string => `'${a.replace(/'/g, `'\\''`)}'`;
+    const q = (a: string): string => `'${a.replace(/'/gu, `'\\''`)}'`;
     const r = run("bash", [
       "-c",
       `${q(SELF)} ${q(d)} ${q(actor)} ${q(action)} ${q(target)} "$(printf '${octalDetail}')"`,
@@ -436,7 +458,10 @@ withTempDir((tmp) => {
 
   // Check ledger matches
   const actionsContent = readFileSync(join(d, "actions.jsonl"), "utf8");
-  const ledgerContent = readFileSync(join(tmp, "project", "ledger.jsonl"), "utf8");
+  const ledgerContent = readFileSync(
+    join(tmp, "proj", ".postmaster", "runs", "ledger.jsonl"),
+    "utf8",
+  );
   if (actionsContent === ledgerContent)
     st.ok("as one line in the run's log and the same line in the ledger");
   else st.fail("as one line in the run's log and the same line in the ledger");
@@ -445,7 +470,7 @@ withTempDir((tmp) => {
   if (
     last &&
     last.detail === 'a plain "detail"' &&
-    last.project === "project" &&
+    last.project === "proj" &&
     last.run === "RUN-1" &&
     !last.fault
   ) {
@@ -629,12 +654,85 @@ withTempDir((tmp) => {
     "src/b.ts:40",
     "gating P1 r1 bug luna execution: an off-by-one",
   );
+  wrote(
+    "an approved spec review is written",
+    "postmaster",
+    "spec-review",
+    "luna",
+    "approved abc123",
+  );
+  const lastSr1 = lastLine();
+  if (
+    lastSr1 &&
+    lastSr1.action === "spec-review" &&
+    lastSr1.target === "luna" &&
+    lastSr1.detail === "approved abc123"
+  ) {
+    st.ok("with its decision, then the commit");
+  } else {
+    st.fail("with its decision, then the commit", JSON.stringify(lastSr1));
+  }
+  wrote(
+    "a changes spec review is written",
+    "postmaster",
+    "spec-review",
+    "deepseek",
+    "changes def456 narrow the scope to the two named scripts",
+  );
+  const lastSr2 = lastLine();
+  if (lastSr2 && lastSr2.detail === "changes def456 narrow the scope to the two named scripts") {
+    st.ok("with the user's words after the commit");
+  } else {
+    st.fail("with the user's words after the commit", JSON.stringify(lastSr2));
+  }
+  wrote(
+    "a dropped spec review is written",
+    "postmaster",
+    "spec-review",
+    "luna",
+    "dropped abc123 we only need one lane",
+  );
+  const lastSr3 = lastLine();
+  if (
+    lastSr3 &&
+    lastSr3.action === "spec-review" &&
+    String(lastSr3.detail).split(" ")[0] === "dropped"
+  ) {
+    st.ok("with the drop decision");
+  } else {
+    st.fail("with the drop decision", JSON.stringify(lastSr3));
+  }
   wrote("a detail ending in a newline is written", "postmaster", "note", "RUN-1", "kept whole\n");
   const last10 = lastLine();
   if (last10 && last10.detail === "kept whole\n") {
     st.ok("with its newline");
   } else {
     st.fail("with its newline", JSON.stringify(last10));
+  }
+  // An older runs/<project>/<TICKET> layout is still read as that project
+  // (main checks this with python3; the port parses the JSON itself).
+  const old = join(tmp, "oldlayout", "legacy-proj", "RUN-2");
+  mkdirSync(old, { recursive: true });
+  const oldRun = run("bash", [SELF, old, "postmaster", "note", "RUN-2", "old"]);
+  let oldEntry: Record<string, any> | null = null;
+  try {
+    const rows = readFileSync(join(old, "actions.jsonl"), "utf8").split("\n").filter(Boolean);
+    oldEntry = JSON.parse(rows[rows.length - 1] ?? "null");
+  } catch {
+    oldEntry = null;
+  }
+  if (
+    oldRun.code === 0 &&
+    oldEntry &&
+    oldEntry.project === "legacy-proj" &&
+    oldEntry.run === "RUN-2"
+  ) {
+    st.ok("an older runs/<project>/<TICKET> layout is still read as that project");
+  } else {
+    st.fail(
+      "an older runs/<project>/<TICKET> layout is still read as that project",
+      JSON.stringify(oldEntry),
+    );
   }
 
   wroteRaw(
@@ -668,7 +766,7 @@ withTempDir((tmp) => {
   // the damage is dropped entry by entry, as iconv -c drops it.
   {
     const before = lines();
-    const q = (a: string): string => `'${a.replace(/'/g, `'\\''`)}'`;
+    const q = (a: string): string => `'${a.replace(/'/gu, `'\\''`)}'`;
     const r = run("bash", [
       "-c",
       `${q(SELF)} ${q(d)} ${q("postmaster")} ${q("note")} ${q("RUN-1")} "$(printf 'x\\377y')" ${q("keep \uFFFDhere")}`,
@@ -757,7 +855,7 @@ withTempDir((tmp) => {
       let first = "";
       // The bytes travel in a file: run() sends input as UTF-8, which would
       // re-encode them on the way to iconv's stdin.
-      const q = (p: string): string => `'${p.replace(/'/g, `'\\''`)}'`;
+      const q = (p: string): string => `'${p.replace(/'/gu, `'\\''`)}'`;
       const bin = join(tmp, "fuzz.bin");
       for (const c of cases) {
         writeFileSync(bin, c);
@@ -781,7 +879,7 @@ withTempDir((tmp) => {
     const text = readFileSync(join(d, "actions.jsonl"), "utf8");
     const rows = text.split("\n").filter((l) => l !== "");
     for (const r of rows) JSON.parse(r);
-    const led = readFileSync(join(tmp, "project", "ledger.jsonl"), "utf8");
+    const led = readFileSync(join(tmp, "proj", ".postmaster", "runs", "ledger.jsonl"), "utf8");
     if (text === led) st.ok("every line in both files is UTF-8 JSON, one to a line");
     else st.fail("every line in both files is UTF-8 JSON, one to a line");
   } catch (e) {
@@ -804,6 +902,20 @@ withTempDir((tmp) => {
     "finding",
     "src/c.ts:7",
     "advisory P3 r1 style luna reading",
+  );
+  refused(
+    "a spec-review with no decision",
+    "opens with its decision, approved, changes or dropped",
+    "spec-review",
+    "luna",
+    "abc123 looks fine",
+  );
+  refused(
+    "a spec-review whose decision is another word",
+    "opens with its decision, approved, changes or dropped",
+    "spec-review",
+    "luna",
+    "ok abc123",
   );
   refused(
     "a tool-fault with no fix",
