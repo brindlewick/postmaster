@@ -15,7 +15,9 @@
 #       branch still answers. `unpushed` when --local-ticket names the local branch, it is
 #       at the card's HEAD, and the ticket ref is behind that HEAD: push, re-fetch, and ask
 #       again. `re-verify`, never `landed`, when the ticket ref and the card's HEAD
-#       otherwise differ, or when a reported merge names another head. Otherwise `not-landed`.
+#       otherwise differ, or when a reported merge names another head: a reported
+#       head that does not resolve locally names another head too, since the card's
+#       HEAD resolved. Otherwise `not-landed`.
 #   landing.sh anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha>
 #       whether the branch holds anything to land. `nothing-to-land` when the ticket's diff
 #       against BASE is empty (its HEAD is BASE, whatever the default branch holds), or when
@@ -70,7 +72,10 @@
 #   exit 0  already-landed, anything-to-land, results, card-block, card-open: the answer,
 #           printed; card-results, card-findings: `match`; journey: `clear` or `judge`;
 #           fresh: `fresh`
-#   exit 1  usage; a ref or SHA that does not resolve; a file that cannot be read; checks
+#   exit 1  usage; a resolving input that does not resolve (--default, --base,
+#           --card-head, --local-ticket, --pr-merge, and --ticket without a
+#           report: --pr-head answers `re-verify` instead); a file that cannot
+#           be read; checks
 #           that cannot be recorded-read; `verify.sh results`, `journey-path` or
 #           `ticket-check.sh --has-journey` failing; a checkpoint whose structure cannot
 #           be read (a duplicate id, a finding-shaped line that is not a finding, an
@@ -261,7 +266,10 @@ if mode == "already-landed":
         print("re-verify"); sys.exit(0)
     if pr_merge is not None:  # the provider's report decides, never the local ref
         merge = commit(repo, pr_merge, "--pr-merge")
-        if commit(repo, pr_head, "--pr-head") != card:
+        # AI1: --card-head resolved already, so a reported head that does not resolve
+        # names another head; an ambiguous abbreviation fails closed here too.
+        rc, reported = git(repo, "rev-parse", "--verify", "--quiet", pr_head + "^{commit}")
+        if rc != 0 or not reported or reported != card:
             print("re-verify"); sys.exit(0)
         print("landed" if contains(repo, merge, default) else "not-landed"); sys.exit(0)
     if head is not None and contains(repo, head, default) and head != base:
@@ -502,6 +510,8 @@ expect "AG1: upstream past the card is still re-verify" 0 "re-verify"
 H2=$(git -C "$UC" rev-parse origin/ticket)
 out=$("$SELF" already-landed --repo "$UC" --default origin/main --ticket origin/ticket --base "$UPB" --card-head "$H2" --local-ticket ticket --pr-merge "$UPM" --pr-head "$UCH" 2>&1); rc=$?
 expect "a reported merge at another head answers re-verify" 0 "re-verify"
+out=$("$SELF" already-landed --repo "$R" --default main --ticket ticket --base "$BASE" --card-head "$TIP" --pr-merge "$SQM" --pr-head 1111111111111111111111111111111111111111 2>&1); rc=$?
+expect "AI1: an unknown reported head over a ticket at the card answers re-verify" 0 "re-verify"
 PO=$tmp/po; mkrepo "$PO"; commit "$PO" f A A   # AH1: the branch is gone; the report decides
 git -C "$PO" checkout -qb ticket || exit 1; commit "$PO" f T T
 POB=$(git -C "$PO" rev-parse main); POH=$(git -C "$PO" rev-parse ticket)
@@ -512,6 +522,8 @@ git clone -q -c protocol.file.allow=always "$PO" "$tmp/pc" || exit 1; PC=$tmp/pc
 git -C "$PC" fetch -q --prune origin || exit 1
 out=$("$SELF" already-landed --repo "$PC" --default origin/main --ticket origin/ticket --base "$POB" --card-head "$POH" --pr-merge "$POM" --pr-head "$POH" 2>&1); rc=$?
 expect "a pruned ticket ref with a reported merge answers from the report" 0 "landed"
+out=$("$SELF" already-landed --repo "$PC" --default origin/main --ticket origin/ticket --base "$POB" --card-head "$POH" --pr-merge "$POM" --pr-head 1111111111111111111111111111111111111111 2>&1); rc=$?
+expect "AI1: a pruned ticket ref with an unknown reported head answers re-verify" 0 "re-verify"
 out=$("$SELF" already-landed --repo "$PC" --default origin/main --ticket origin/ticket --base "$POB" --card-head "$POH" 2>&1); rc=$?
 [ "$rc" -eq 1 ] && ok "a pruned ticket ref without a report is still usage" || fail "a pruned ticket ref without a report is still usage" "$out"
 out=$("$SELF" already-landed --repo "$R" --default main --ticket missing --base "$BASE" --card-head "$TIP" 2>&1); rc=$?
