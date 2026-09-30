@@ -16,48 +16,49 @@ if [ "${1:-}" = --self-test ]; then
   ok()   { printf '  ok   %s\n' "$1"; }
   fail() { printf '  FAIL %s: %s\n' "$1" "$2"; fails=$((fails+1)); }
   install_of() { "$self" "$1" 2>/dev/null | grep '^install=' || true; }
+  gate_of() { "$self" "$1" 2>/dev/null | grep '^gate=' || true; }
+  # Each family agrees with itself: install= and the gate runner name the same manager.
+  agree() {  # agree <dir> <family> <install line> <gate line>
+    [ "$(install_of "$1")" = "install=$3" ] && [ "$(gate_of "$1")" = "gate=$4" ] \
+      && ok "$2 names one manager for install and gate" \
+      || fail "$2 names one manager for install and gate" "$(install_of "$1") / $(gate_of "$1")"
+  }
+  pkg() { printf '{"scripts":{"check":"true"}}' > "$1/package.json"; }
 
   npm_lock=$tmp/npm-lock; mkdir "$npm_lock"
-  echo '{}' > "$npm_lock/package.json"; : > "$npm_lock/package-lock.json"
-  [ "$(install_of "$npm_lock")" = "install=npm ci --prefer-offline --no-audit --no-fund" ] \
-    && ok "npm with a lockfile installs with npm ci" \
-    || fail "npm with a lockfile installs with npm ci" "$(install_of "$npm_lock")"
+  pkg "$npm_lock"; : > "$npm_lock/package-lock.json"
+  agree "$npm_lock" "npm with a lockfile" \
+    "npm ci --prefer-offline --no-audit --no-fund" "npm run check"
 
   npm_bare=$tmp/npm-bare; mkdir "$npm_bare"
-  echo '{}' > "$npm_bare/package.json"
-  [ "$(install_of "$npm_bare")" = "install=npm install --prefer-offline --no-audit --no-fund" ] \
-    && ok "npm without a lockfile installs with npm install" \
-    || fail "npm without a lockfile installs with npm install" "$(install_of "$npm_bare")"
+  pkg "$npm_bare"
+  agree "$npm_bare" "npm without a lockfile" \
+    "npm install --prefer-offline --no-audit --no-fund" "npm run check"
 
   pnpm=$tmp/pnpm; mkdir "$pnpm"
-  echo '{}' > "$pnpm/package.json"; : > "$pnpm/pnpm-lock.yaml"
-  [ "$(install_of "$pnpm")" = "install=pnpm install --frozen-lockfile" ] \
-    && ok "pnpm with a lockfile installs frozen" \
-    || fail "pnpm with a lockfile installs frozen" "$(install_of "$pnpm")"
+  pkg "$pnpm"; : > "$pnpm/pnpm-lock.yaml"
+  agree "$pnpm" "pnpm with a lockfile" \
+    "pnpm install --frozen-lockfile" "pnpm run check"
 
   bun=$tmp/bun; mkdir "$bun"
-  echo '{}' > "$bun/package.json"; : > "$bun/bun.lock"
-  [ "$(install_of "$bun")" = "install=bun install --frozen-lockfile" ] \
-    && ok "bun with a lockfile installs frozen" \
-    || fail "bun with a lockfile installs frozen" "$(install_of "$bun")"
+  pkg "$bun"; : > "$bun/bun.lock"
+  agree "$bun" "bun with a lockfile" \
+    "bun install --frozen-lockfile" "bun run check"
 
   bunb=$tmp/bunb; mkdir "$bunb"
-  echo '{}' > "$bunb/package.json"; : > "$bunb/bun.lockb"
-  [ "$(install_of "$bunb")" = "install=bun install --frozen-lockfile" ] \
-    && ok "bun with a binary lockfile installs frozen" \
-    || fail "bun with a binary lockfile installs frozen" "$(install_of "$bunb")"
+  pkg "$bunb"; : > "$bunb/bun.lockb"
+  agree "$bunb" "bun with a binary lockfile" \
+    "bun install --frozen-lockfile" "bun run check"
 
   yarn1=$tmp/yarn1; mkdir "$yarn1"
-  echo '{}' > "$yarn1/package.json"; : > "$yarn1/yarn.lock"
-  [ "$(install_of "$yarn1")" = "install=yarn install --frozen-lockfile" ] \
-    && ok "yarn classic installs frozen" \
-    || fail "yarn classic installs frozen" "$(install_of "$yarn1")"
+  pkg "$yarn1"; : > "$yarn1/yarn.lock"
+  agree "$yarn1" "yarn classic" \
+    "yarn install --frozen-lockfile" "yarn run check"
 
   yarnberry=$tmp/yarnberry; mkdir "$yarnberry"
-  echo '{}' > "$yarnberry/package.json"; : > "$yarnberry/yarn.lock"; : > "$yarnberry/.yarnrc.yml"
-  [ "$(install_of "$yarnberry")" = "install=yarn install --immutable" ] \
-    && ok "yarn berry installs immutable" \
-    || fail "yarn berry installs immutable" "$(install_of "$yarnberry")"
+  pkg "$yarnberry"; : > "$yarnberry/yarn.lock"; : > "$yarnberry/.yarnrc.yml"
+  agree "$yarnberry" "yarn berry" \
+    "yarn install --immutable" "yarn run check"
 
   cargo=$tmp/cargo; mkdir "$cargo"; : > "$cargo/Cargo.toml"
   [ "$(install_of "$cargo")" = "install=" ] \
@@ -81,27 +82,33 @@ T=${1:?usage: discover-project.sh <path>}
 kind=$("$HERE/tracker-kind.sh" "$T" 2>/dev/null) || kind=""
 CDPATH= cd -P -- "$T" 2>/dev/null || { echo "cannot enter $T" >&2; exit 1; }
 
+# One package-manager choice feeds both the gate runner and install= below, in
+# verify.sh's pm() order (pnpm, bun, yarn, npm), so the two can never disagree.
+pm=npm
+if [ -f pnpm-lock.yaml ]; then pm=pnpm
+elif [ -f bun.lock ] || [ -f bun.lockb ]; then pm=bun
+elif [ -f yarn.lock ]; then pm=yarn; fi
+
 gate=""
 [ -f package.json ] && ! command -v jq >/dev/null 2>&1 && echo "warn=jq not installed: package.json scripts were not read" >&2
 if [ -f package.json ] && command -v jq >/dev/null 2>&1; then
   for s in check ci verify test lint; do
     jq -e --arg s "$s" '.scripts[$s]' package.json >/dev/null 2>&1 && { gate="$s"; break; }
   done
-  [ -n "$gate" ] && gate="$( [ -f pnpm-lock.yaml ] && echo pnpm || echo npm ) run $gate"
+  [ -n "$gate" ] && gate="$pm run $gate"
 fi
 [ -z "$gate" ] && [ -f Makefile ] && grep -qE '^(check|test):' Makefile && gate="make check"
 [ -z "$gate" ] && [ -f Cargo.toml ] && gate="cargo test"
 
 # The dependency install a fresh checkout needs before the gate: the clean-checkout callers
 # (the ship leg's post-merge verification, fixture scoring's gate) run it first. Empty where
-# the project's runner fetches on its own (cargo, go) or nothing is known (make). The
-# installer follows verify.sh's pm() order (pnpm, bun, yarn, npm), always lockfile-strict
-# where a lockfile exists, so the gate runs the tree the project pins.
+# the project's runner fetches on its own (cargo, go) or nothing is known (make). Always
+# lockfile-strict where a lockfile exists, so the gate runs the tree the project pins.
 install=""
 if [ -f package.json ]; then
-  if [ -f pnpm-lock.yaml ]; then install="pnpm install --frozen-lockfile"
-  elif [ -f bun.lock ] || [ -f bun.lockb ]; then install="bun install --frozen-lockfile"
-  elif [ -f yarn.lock ]; then
+  if [ "$pm" = pnpm ]; then install="pnpm install --frozen-lockfile"
+  elif [ "$pm" = bun ]; then install="bun install --frozen-lockfile"
+  elif [ "$pm" = yarn ]; then
     if [ -f .yarnrc.yml ]; then install="yarn install --immutable"
     else install="yarn install --frozen-lockfile"; fi
   elif [ -f package-lock.json ]; then install="npm ci --prefer-offline --no-audit --no-fund"
