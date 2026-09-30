@@ -145,7 +145,7 @@ function hiddenTestsLine(scoreOut: string): string {
 }
 
 function laneStatusOn(line: string, lane: string): string {
-  const m = new RegExp(`(?:^|; )${lane}: ([^;]+)`).exec(line);
+  const m = new RegExp(`(?:^|; )${lane.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: ([^;]+)`).exec(line);
   return m ? m[1].trim() : "";
 }
 
@@ -188,6 +188,10 @@ describe("pure core", () => {
     expect(laneNamesFromWorkhorses("## Team\nworkhorses: solo=h/x/\n")).toEqual(["solo"]);
     expect(laneNamesFromWorkhorses("")).toEqual([]);
     expect(laneNamesFromWorkhorses("## Ticket\nA quoted line:\nworkhorses: phantom=h/x\n\n## Notes\n")).toEqual([]);
+    expect(laneNamesFromWorkhorses("## Team\nreviewers: one\nworkhorses: one=h/x, two=m/y\n")).toEqual(["one", "two"]);
+    expect(laneNamesFromWorkhorses("## Team\n\nworkhorses: solo=h/x/\n")).toEqual(["solo"]);
+    expect(laneNamesFromWorkhorses("## Team\r\nworkhorses: solo=h/x/\r\n")).toEqual(["solo"]);
+    expect(laneNamesFromWorkhorses("## Team\nworkhorses: one=h/x\n## Next\nworkhorses: phantom=h/x\n")).toEqual(["one"]);
   });
 
   test("laneNamesFromBranches reads wb/<ticket>-*, with or without refs/heads/", () => {

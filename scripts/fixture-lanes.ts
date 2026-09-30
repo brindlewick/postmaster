@@ -19,7 +19,7 @@
 //
 //   exit 0  printed one line per lane (zero lanes prints nothing)
 //   exit 1  usage, or the inputs are not what they say
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -66,7 +66,12 @@ export function laneNamesFromAuditFiles(names: string[]): string[] {
 
 /** Lane names from the waybill's `workhorses: <lane>=…, <lane>=…` line, read only from its `## Team` section, so a quoted line elsewhere is not a lane. */
 export function laneNamesFromWorkhorses(text: string): string[] {
-  const team = /^##[ \t]+Team[ \t]*\n([\s\S]*?)(?=^##[ \t]|\s*$)/im.exec(text)?.[1] ?? "";
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((l) => /^##[ \t]+Team[ \t]*$/i.test(l));
+  if (start < 0) return [];
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => /^##[ \t]+/i.test(l));
+  const team = (end < 0 ? rest : rest.slice(0, end)).join("\n");
   const line = /^workhorses:[ \t]*(.*)$/im.exec(team)?.[1] ?? "";
   if (!line) return [];
   return line
@@ -206,9 +211,9 @@ function runHidden(fixtureSh: string, ticket: string, tree: string): LaneStatus 
 function scoreLane(fixtureSh: string, repo: string, ticketId_: string, fixtureTicket: string, lane: string, scratch: string): LaneStatus {
   const ref = branchName(ticketId_, lane);
   if (!branchExists(repo, ref)) return { kind: "missing" };
-  const dest = join(scratch, lane.replace(/[^A-Za-z0-9._-]/g, "_"));
+  let dest: string;
   try {
-    mkdirSync(dest, { recursive: true });
+    dest = mkdtempSync(join(scratch, "lane-"));
   } catch {
     return { kind: "failed-to-build" };
   }

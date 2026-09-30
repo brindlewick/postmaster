@@ -173,14 +173,15 @@ def waybill_tickets(dispatch):
             found.append(t.name)
     return found
 
+LANE_LINE = re.compile(r"^(.*): (\d+ pass, \d+ fail|missing|failed to build)$")
+
 def lane_scores(dispatch, repo, ticket):
     """Each lane's hidden status from scripts/fixture-lanes.ts; '' when there are no lanes."""
     code, out = sh(["bun", "--no-env-file", str(SCRIPTS / "fixture-lanes.ts"),
                     str(dispatch), str(repo), ticket])
     if code != 0:
         return "lanes not scored"
-    parts = [l.strip() for l in out.splitlines() if l.strip() and ": " in l]
-    return "; ".join(parts)
+    return "; ".join(l.strip() for l in out.splitlines() if LANE_LINE.match(l.strip()))
 
 def check_hidden(dispatch, repo, app):
     found = waybill_tickets(dispatch)
@@ -615,6 +616,10 @@ expect "a leg's done marker missing: markers alone fails" break-markers markers 
 expect "a hand-off with no sections: handoffs alone fails" break-handoffs handoffs "handoff-2.md"
 expect "no run.json: run.json alone fails" break-runjson run.json "no run.json"
 expect "no ship card: ship-card alone fails" break-card ship-card "no card.md"
+
+echo "lane scoring: the suite beside the new code runs in this self-test"
+out=$(bun --no-env-file test "$HERE/fixture-lanes.test.ts" 2>&1); rc=$?
+[ $rc -eq 0 ] && ok "bun test scripts/fixture-lanes.test.ts" || fail "bun test scripts/fixture-lanes.test.ts (exit $rc)" "$out"
 
 echo "score: input that is not a run is refused, not scored"
 clean=$tmp/clean-$first/repo/.postmaster/runs/7; repo=$tmp/clean-$first/repo
