@@ -631,9 +631,6 @@ PY
 fi
 
 die() { echo "launch: $*" >&2; exit 1; }
-run_postmaster_helper() {
-  ( export PATH="$postmaster_tool_path"; "$@" )
-}
 [ $# -ge 2 ] || die "usage: launch.sh form|launch|review|resume|skill <name> ... | --self-test"
 CMD=$1; NAME=$2; shift 2
 LEG=""; LAST=""; RUN=""; BASE=""; PROJECT=""; PTEXT=""; STDIN_FILE=""; REVIEW_PROMPT=""; args=()
@@ -956,6 +953,9 @@ if [ -n "${ENV_FILE:-}" ]; then
   set -a; . "$ENV_FILE"; set +a
   POSTMASTER_EVENT_STREAM=$saved_event_stream
 fi
+run_postmaster_helper() {
+  ( export PATH="$postmaster_tool_path"; "$@" )
+}
 if [ -n "$postmaster_launch_name" ]; then
   RAINDROP_EVENT_METADATA=$(run_postmaster_helper "$postmaster_raindrop_helper" "$postmaster_launch_name") \
     || die "cannot add the Postmaster launch name to RAINDROP_EVENT_METADATA"
