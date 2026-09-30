@@ -550,6 +550,11 @@ harness = "claude"
 model = "claude-model"
 env_file = "$tmp/raindrop.env"
 
+[lanes.path]
+harness = "claude"
+model = "claude-model"
+env_file = "$tmp/raindrop-path.env"
+
 [lanes.pi]
 harness = "pi"
 model = "pi-model"
@@ -565,10 +570,16 @@ EOF
   for h in claude pi; do
     cat > "$tmp/bin/$h" <<'EOF'
 #!/bin/sh
-printf 'argv=%s\nauth=%s\nextra=%s\ndynamic=%s\nprobe=%s\nrain=%s\n' "$*" "${ANTHROPIC_AUTH_TOKEN:-}" "${EXTRA:-}" "${DYNAMIC:-}" "${PROBE:-}" "${RAINDROP_EVENT_METADATA-<unset>}"
+printf 'argv=%s\nauth=%s\nextra=%s\ndynamic=%s\nprobe=%s\npath=%s\nrain=%s\n' "$*" "${ANTHROPIC_AUTH_TOKEN:-}" "${EXTRA:-}" "${DYNAMIC:-}" "${PROBE:-}" "$PATH" "${RAINDROP_EVENT_METADATA-<unset>}"
 EOF
     chmod +x "$tmp/bin/$h"
   done
+  mkdir "$tmp/payload-bin"
+  cp "$tmp/bin/claude" "$tmp/payload-bin/claude"
+  cat > "$tmp/raindrop-path.env" <<EOF
+PATH="$tmp/payload-bin"
+RAINDROP_EVENT_METADATA='{"userId":"kept-on-payload-path","eventName":"old"}'
+EOF
   launch_name='#123, Universal Raindrop metadata · alpha'
   out=$(env -u RAINDROP_EVENT_METADATA POSTMASTER_LAUNCH_NAME="$launch_name" POSTMASTER_CONFIG="$tmp/raindrop.toml" PATH="$tmp/bin:$PATH" \
     "$self" launch named "$tmp/wt" "$tmp/prompt.txt" 2>"$tmp/err"); rc=$?
@@ -585,6 +596,14 @@ PY
   [ $rc -eq 0 ] && [ $json_ok -eq 0 ] \
     && ok "a non-Pi child keeps shell env-file semantics and receives merged launch metadata" \
     || fail "a non-Pi child keeps shell env-file semantics and receives merged launch metadata"
+  out=$(env -u RAINDROP_EVENT_METADATA POSTMASTER_LAUNCH_NAME="$launch_name" POSTMASTER_CONFIG="$tmp/raindrop.toml" PATH="$tmp/bin:$PATH" \
+    "$self" launch path "$tmp/wt" "$tmp/prompt.txt" 2>"$tmp/err"); rc=$?
+  rain=$(printf '%s\n' "$out" | sed -n 's/^rain=//p')
+  python3 -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if d == {"userId":"kept-on-payload-path","eventName":sys.argv[2]} else 1)' "$rain" "$launch_name"
+  json_ok=$?
+  [ $rc -eq 0 ] && [ $json_ok -eq 0 ] && case $out in *"path=$tmp/payload-bin"*) true ;; *) false ;; esac \
+    && ok "a payload-only PATH starts the harness while control helpers keep their tool PATH" \
+    || fail "a payload-only PATH starts the harness while control helpers keep their tool PATH"
   out=$(env -u RAINDROP_EVENT_METADATA POSTMASTER_LAUNCH_NAME="$launch_name" POSTMASTER_CONFIG="$tmp/raindrop.toml" PATH="$tmp/bin:$PATH" \
     "$self" resume pi "$tmp/wt" thread-1 "$tmp/prompt.txt" 2>"$tmp/err"); rc=$?
   rain=$(printf '%s\n' "$out" | sed -n 's/^rain=//p')
@@ -612,6 +631,9 @@ PY
 fi
 
 die() { echo "launch: $*" >&2; exit 1; }
+run_postmaster_helper() {
+  ( export PATH="$postmaster_tool_path"; "$@" )
+}
 [ $# -ge 2 ] || die "usage: launch.sh form|launch|review|resume|skill <name> ... | --self-test"
 CMD=$1; NAME=$2; shift 2
 LEG=""; LAST=""; RUN=""; BASE=""; PROJECT=""; PTEXT=""; STDIN_FILE=""; REVIEW_PROMPT=""; args=()
@@ -928,13 +950,14 @@ fi
 # stream decides which session the export hook retains; the name becomes the Raindrop event.
 postmaster_launch_name=${POSTMASTER_LAUNCH_NAME:-}
 postmaster_raindrop_helper=$HERE/raindrop-event-name.sh
+postmaster_tool_path=$PATH
 if [ -n "${ENV_FILE:-}" ]; then
   saved_event_stream=${POSTMASTER_EVENT_STREAM:-}
   set -a; . "$ENV_FILE"; set +a
   POSTMASTER_EVENT_STREAM=$saved_event_stream
 fi
 if [ -n "$postmaster_launch_name" ]; then
-  RAINDROP_EVENT_METADATA=$("$postmaster_raindrop_helper" "$postmaster_launch_name") \
+  RAINDROP_EVENT_METADATA=$(run_postmaster_helper "$postmaster_raindrop_helper" "$postmaster_launch_name") \
     || die "cannot add the Postmaster launch name to RAINDROP_EVENT_METADATA"
   export RAINDROP_EVENT_METADATA
 fi
