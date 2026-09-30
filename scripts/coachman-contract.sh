@@ -54,6 +54,10 @@ def read_index(repo, rev):
         raise ContractError("%s at %s must define [[parts]]" % (INDEX, rev))
     if data.get("version") != 1:
         raise ContractError("%s at %s must set version = 1" % (INDEX, rev))
+    detector = data.get("detector")
+    if (not isinstance(detector, str) or not detector or detector.startswith("/")
+            or ".." in pathlib.PurePosixPath(detector).parts):
+        raise ContractError("%s at %s must name its detector file" % (INDEX, rev))
     seen = set()
     for part in parts:
         ident = part.get("id")
@@ -430,6 +434,28 @@ def exercise_self_test(source_root):
                     print("       " + result.stdout.strip().replace("\n", "\n       "))
 
     version_control()
+
+    def detector_control():
+        nonlocal passed, failed
+        label = "an index that names no detector file is an error"
+        with tempfile.TemporaryDirectory(prefix="coachman-contract-", dir=source_root) as scratch:
+            repo = pathlib.Path(scratch) / "repo"
+            base = git_fixture(repo, pathlib.Path(scratch), source_root, manifest_data)
+            replace_once(repo, INDEX, 'detector = "scripts/coachman-contract.sh"\n', "")
+            head = commit_fixture(repo, label)
+            result = subprocess.run([str(repo / "coachman-contract.sh"), base, head], cwd=repo,
+                                    capture_output=True, text=True)
+            ok = result.returncode == 2 and "detector" in result.stderr
+            if control(ok, label, "exit %d" % result.returncode):
+                passed += 1
+            else:
+                failed += 1
+                if result.stderr:
+                    print("       " + result.stderr.strip().replace("\n", "\n       "))
+                if result.stdout:
+                    print("       " + result.stdout.strip().replace("\n", "\n       "))
+
+    detector_control()
 
     def merge_control(contract):
         nonlocal passed, failed

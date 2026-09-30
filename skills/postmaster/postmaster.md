@@ -333,12 +333,15 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    the synthesis HEAD, and the card gives each one that did not pass as it is; the Style
    residue's count is what `<tool>/scripts/style-findings.sh count <dispatch>` prints.
    <!-- coachman-contract:fixture-card:start -->
-   **Classify the final branch.** The detector's file is the one the fixture-policy part
-   maps; read it from the index at the branch tip, and if the tip has no index that is an
-   error to resolve. If dispatch BASE has no such file, the branch introduces the checker:
-   it needs a fixture without classifying. Else run BASE's copy — `tmp=$(mktemp) && git
-   -C <repo> show <BASE>:<detector-file> > "$tmp" && bash "$tmp" <repo> <BASE>
-   <ticket-branch>` — and record its command, result, and checked commit: replace `coachman
+   **Classify the final branch.** The index names the checker in its detector field;
+   read that path from BASE's index, never the branch tip's. Each comparison first checks
+   the index at both revs: neither has one, and there is no contract change, so record
+   `no` (a target that does not carry the contract lands here); only the older has one,
+   and the branch deleted the contract, an error to resolve. The branch tip has one but
+   dispatch BASE lacks the detector file: the branch introduces the checker and needs a
+   fixture without classifying. Else run BASE's copy — `tmp=$(mktemp) && git -C <repo>
+   show <BASE>:<detector-file> > "$tmp" && bash "$tmp" <repo> <BASE> <ticket-branch>` —
+   and record its command, result, and checked commit: replace `coachman
    contract fixture: pending` on the waybill with `yes` or `no`, fill `contract fixture
    check:` with the command, the commit and the score (`-` when no fixture runs), and log
    a `note` with the same. Remove the temp copy. BASE's logic is the last honest one: a
@@ -354,10 +357,10 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    in a `note`. Before granting the merge word, check the final branch again if it moved.
    With no clean fixture score yet, compare dispatch BASE to the final branch; a yes
    requires the first fixture. With a clean score, compare its commit to the final branch,
-   running the scored commit's copy; a yes repeats the fixture from the final branch, made
-   with `<tool>/scripts/fixture.sh new`, while a no lets the recorded clean score stand.
-   This is the check for a merge of main into the ticket branch after the earlier score.
-   A compared older rev without a checker means the fixture runs without classifying.
+   still running the dispatch BASE's copy, never the scored commit's; a yes repeats the
+   fixture from the final branch, made with `<tool>/scripts/fixture.sh new`, while a no
+   lets the recorded clean score stand. This is the check for a merge of main into the
+   ticket branch after the earlier score.
    <!-- coachman-contract:fixture-card:end -->
 2. **Grant or withhold.** Every word is delivered by resuming leg 3 (Stage C, step 5), and
    `.card-ready` is removed before it is; the coachman touches it afresh when the card changes.

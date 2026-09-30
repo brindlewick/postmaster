@@ -1,6 +1,8 @@
-# Structural lines (this version line, part boundaries) report as contract-index,
-# the checker's label for index lines outside any part. version must stay 1.
+# Structural lines (this version line, the detector line, part boundaries) report as
+# contract-index, the checker's label for index lines outside any part. version must
+# stay 1. detector is the checker's repo-relative path, read from BASE's index.
 version = 1
+detector = "scripts/coachman-contract.sh"
 
 [[parts]]
 id = "markers"
@@ -223,20 +225,23 @@ id = "fixture-policy"
 title = "Fixture requirement and repeat rule"
 definition = """
 Dispatch records the fixture requirement as pending because there is no completed branch
-to classify yet. At the final card, the postmaster classifies the dispatch BASE to final
-branch change with BASE's copy of coachman-contract.sh: BASE's logic is the last honest
-one, so a change that weakens the checker is itself a contract change, while the mappings
-always come from the compared revs, so regions the branch adds are still classified. If
-BASE has no checker, the branch introduces it and needs a fixture without classifying.
-Yes requires a clean fixture run on that final branch before the merge word. Record the
+to classify yet. The index names the checker in its detector field; the postmaster reads
+that path from BASE's index, never the branch tip's, and always runs BASE's copy: BASE's
+logic is the last honest one, so a change that weakens the checker is itself a contract
+change, while the mappings always come from the compared revs, so regions the branch adds
+are still classified. Each comparison first checks the index at both revs. Neither rev
+has one: no contract change, since the target does not carry the contract. Only the older
+has one: the branch deleted the contract, an error to resolve. The newer has one but
+dispatch BASE lacks the detector file: the branch introduces the checker and needs a
+fixture without classifying. Else the postmaster runs BASE's copy on the two revs. Yes
+requires a clean fixture run on that final branch before the merge word. Record the
 answer on the waybill's fixture line and the command, the tested commit and, when a
 fixture runs, its score on the waybill's check line and in a note. If the branch moves
 before a clean score exists, compare dispatch BASE with the final branch again. If main
 is merged into a branch after a clean fixture, compare the previously scored commit with
-the final branch, running the scored commit's copy: yes repeats the fixture from the
-final branch; no preserves the clean result. A compared older rev without a checker
-means the fixture runs without classifying. The decision is derived from changed
-contract regions, never from ticket prose or a whole-file list.
+the final branch, still running the dispatch BASE's copy, never the scored commit's: yes
+repeats the fixture from the final branch; no preserves the clean result. The decision is derived from changed contract regions, never from ticket prose
+or a whole-file list.
 """
 
 [[parts.implementation]]
