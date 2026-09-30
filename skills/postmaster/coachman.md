@@ -956,10 +956,22 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    `.card-ready`, and exit; the word arrives as a resume of this leg's thread, and so does a
    withheld grant with its reasons. On a withheld grant, address the reasons, update the card,
    touch `.card-ready` again, and exit again. Only the user abandons a run. On it: check out the project's default branch
-   in the main checkout and `git merge --no-ff <ticket-branch>` (merge, never rebase), move the
-   ticket to done, and set the stage: `<tool>/scripts/stage.sh <dispatch> shipped`. Never escalate a grant the waybill gives the postmaster up to
-   the user.
-6. If the project has an origin, pushing afterwards is the user's call, never part of
+   in the main checkout and `git merge --no-ff <ticket-branch>` (merge, never rebase), then
+   verify it (step 6). Never escalate a grant the waybill gives the postmaster up to the user.
+6. **Verify the merged default branch.** Run the recorded gate from a clean checkout outside
+   the project folder, never from the main checkout where the run's working copies still sit
+   under `.worktrees/`: `bun <tool>/scripts/clean-checkout.ts <repo> <default-branch> "<gate>"`,
+   with the gate as the waybill's project profile names it. Where the profile's build is not
+   none, prepare dependencies in that checkout first with the build command, `<build> &&
+   <gate>`. Log the result (`<tool>/scripts/log-action.sh <dispatch> coachman gate
+   <default-branch> "post-merge, clean checkout, exit <n>"`). A red result is investigated
+   under the red-gate rule below; the merge is already local, so fix forward on the default
+   branch or revert it, never push; do not mark the ticket done or set the stage to `shipped`
+   until it passes.
+   [Why the gate runs from a clean checkout](../../wiki/concepts/clean-checkout-gates.md)
+7. After the gate passes, move the ticket to done and set the stage:
+   `<tool>/scripts/stage.sh <dispatch> shipped`.
+8. If the project has an origin, pushing afterwards is the user's call, never part of
    this flow.
 
 ## Stage 4 (leg 3, after the merge): aftercare and teardown
