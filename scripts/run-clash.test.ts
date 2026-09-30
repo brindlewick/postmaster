@@ -3,7 +3,7 @@
 // repository, so a clean pass and every refusal are shown through the identical command.
 
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -157,6 +157,23 @@ describe("run-clash.ts through its own command line", () => {
     mkdirSync(dirname(dir), { recursive: true });
     writeFileSync(dir, "not a directory\n");
     const { code, out } = runClash(repo, "75");
+    expect(code).toBe(2);
+    expect(out).toContain(`run-clash: run directory already exists: ${dir}`);
+  });
+
+  test("a symlink at the run path is refused, dangling or not", () => {
+    const repo = freshRepo(root, "run-link");
+    const dir = runDirPath(repo, "75");
+    mkdirSync(dirname(dir), { recursive: true });
+    symlinkSync(join(root, "nowhere"), dir);
+    let { code, out } = runClash(repo, "75");
+    expect(code).toBe(2);
+    expect(out).toContain(`run-clash: run directory already exists: ${dir}`);
+    rmSync(dir);
+    const target = join(root, "run-link-target");
+    mkdirSync(target, { recursive: true });
+    symlinkSync(target, dir);
+    ({ code, out } = runClash(repo, "75"));
     expect(code).toBe(2);
     expect(out).toContain(`run-clash: run directory already exists: ${dir}`);
   });

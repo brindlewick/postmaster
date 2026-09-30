@@ -8,7 +8,8 @@
 // it names what already exists and leaves the old run to the user (archive it, rename it, or
 // pick another id). The postmaster renames or removes nothing itself.
 //
-// What is checked, and only this: <repo>/.postmaster/runs/<ticket-id>/ (a directory or a file),
+// What is checked, and only this: <repo>/.postmaster/runs/<ticket-id>/ (a directory, a file,
+// or a symlink, dangling or not),
 // local branch <ticket-id>, and local branches matching wb/<ticket-id>-*. Not a leftover
 // worktree directory, not remote-tracking branches. Near-misses are out: ticket 7 does not
 // refuse 70 or wb/70-lane.
@@ -17,7 +18,7 @@
 //   exit 1  usage, or <repo> is not a git repository
 //   exit 2  one or more clashes; each is named
 
-import { existsSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import { resolve } from "node:path";
 
 export type Clash =
@@ -108,6 +109,15 @@ function runGit(repo: string, args: string[]): GitResult {
   };
 }
 
+function isOccupied(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function refuseId(ticketId: string): number {
   console.error(`run-clash: unusable ticket id: ${JSON.stringify(ticketId)}`);
   console.error(`run-clash: ${USAGE}`);
@@ -152,7 +162,7 @@ function main(argv: string[]): number {
   const dir = runDirPath(repo, ticketId);
   const clashes = collectClashes({
     ticketId,
-    runDirExists: existsSync(dir),
+    runDirExists: isOccupied(dir),
     runDirPath: dir,
     branches: parseBranchNames(listed.stdout),
   });
