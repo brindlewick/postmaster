@@ -31,9 +31,33 @@ if [ "${1:-}" = --self-test ]; then
 
   pnpm=$tmp/pnpm; mkdir "$pnpm"
   echo '{}' > "$pnpm/package.json"; : > "$pnpm/pnpm-lock.yaml"
-  [ "$(install_of "$pnpm")" = "install=pnpm install" ] \
-    && ok "pnpm with a lockfile installs with pnpm install" \
-    || fail "pnpm with a lockfile installs with pnpm install" "$(install_of "$pnpm")"
+  [ "$(install_of "$pnpm")" = "install=pnpm install --frozen-lockfile" ] \
+    && ok "pnpm with a lockfile installs frozen" \
+    || fail "pnpm with a lockfile installs frozen" "$(install_of "$pnpm")"
+
+  bun=$tmp/bun; mkdir "$bun"
+  echo '{}' > "$bun/package.json"; : > "$bun/bun.lock"
+  [ "$(install_of "$bun")" = "install=bun install --frozen-lockfile" ] \
+    && ok "bun with a lockfile installs frozen" \
+    || fail "bun with a lockfile installs frozen" "$(install_of "$bun")"
+
+  bunb=$tmp/bunb; mkdir "$bunb"
+  echo '{}' > "$bunb/package.json"; : > "$bunb/bun.lockb"
+  [ "$(install_of "$bunb")" = "install=bun install --frozen-lockfile" ] \
+    && ok "bun with a binary lockfile installs frozen" \
+    || fail "bun with a binary lockfile installs frozen" "$(install_of "$bunb")"
+
+  yarn1=$tmp/yarn1; mkdir "$yarn1"
+  echo '{}' > "$yarn1/package.json"; : > "$yarn1/yarn.lock"
+  [ "$(install_of "$yarn1")" = "install=yarn install --frozen-lockfile" ] \
+    && ok "yarn classic installs frozen" \
+    || fail "yarn classic installs frozen" "$(install_of "$yarn1")"
+
+  yarnberry=$tmp/yarnberry; mkdir "$yarnberry"
+  echo '{}' > "$yarnberry/package.json"; : > "$yarnberry/yarn.lock"; : > "$yarnberry/.yarnrc.yml"
+  [ "$(install_of "$yarnberry")" = "install=yarn install --immutable" ] \
+    && ok "yarn berry installs immutable" \
+    || fail "yarn berry installs immutable" "$(install_of "$yarnberry")"
 
   cargo=$tmp/cargo; mkdir "$cargo"; : > "$cargo/Cargo.toml"
   [ "$(install_of "$cargo")" = "install=" ] \
@@ -70,10 +94,16 @@ fi
 
 # The dependency install a fresh checkout needs before the gate: the clean-checkout callers
 # (the ship leg's post-merge verification, fixture scoring's gate) run it first. Empty where
-# the project's runner fetches on its own (cargo, go) or nothing is known (make).
+# the project's runner fetches on its own (cargo, go) or nothing is known (make). The
+# installer follows verify.sh's pm() order (pnpm, bun, yarn, npm), always lockfile-strict
+# where a lockfile exists, so the gate runs the tree the project pins.
 install=""
 if [ -f package.json ]; then
-  if [ -f pnpm-lock.yaml ]; then install="pnpm install"
+  if [ -f pnpm-lock.yaml ]; then install="pnpm install --frozen-lockfile"
+  elif [ -f bun.lock ] || [ -f bun.lockb ]; then install="bun install --frozen-lockfile"
+  elif [ -f yarn.lock ]; then
+    if [ -f .yarnrc.yml ]; then install="yarn install --immutable"
+    else install="yarn install --frozen-lockfile"; fi
   elif [ -f package-lock.json ]; then install="npm ci --prefer-offline --no-audit --no-fund"
   else install="npm install --prefer-offline --no-audit --no-fund"; fi
 fi

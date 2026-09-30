@@ -36,7 +36,12 @@ const contains = (parent: string, child: string): boolean => {
 };
 
 const temporaryRoot = (repo: string): string => {
-  const candidates = [...new Set([tmpdir(), dirname(repo)])];
+  // Beside the repository first, whose ancestors belong to the operator, and the shared
+  // temp directory only as a fallback. Build tools read configuration from ancestor
+  // directories, and the shared temp directory's ancestors are writable by every local
+  // account, so a checkout there lets another account influence the gate. Either way the
+  // parent must be outside the project itself.
+  const candidates = [...new Set([dirname(repo), tmpdir()])];
   for (const candidate of candidates) {
     try {
       const parent = realpathSync(candidate);

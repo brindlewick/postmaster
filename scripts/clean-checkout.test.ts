@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import { cleanCheckout } from "./clean-checkout";
 
@@ -137,11 +137,22 @@ describe("cleanCheckout", () => {
 
   test("a refusal leaves no scratch behind", () => {
     withRepo((repo) => {
+      const refused = runHelper([repo, "no-such-branch", "true"]);
+      expect(refused.status).toBe(1);
+      expect(readdirSync(dirname(repo)).filter((n) => n.startsWith("postmaster-clean-checkout-"))).toEqual([]);
+    });
+  });
+
+  test("places the checkout beside the repo rather than under TMPDIR", () => {
+    withRepo((repo) => {
       const priv = mkdtempSync(join(tmpdir(), "clean-checkout-tmpdir-"));
       roots.push(priv);
-      const refused = runHelper([repo, "no-such-branch", "true"], { TMPDIR: priv });
-      expect(refused.status).toBe(1);
-      expect(readdirSync(priv).filter((n) => n.startsWith("postmaster-clean-checkout-"))).toEqual([]);
+      const marker = join(priv, "where");
+      const ran = runHelper([repo, "main", `pwd -P > ${marker}`], { TMPDIR: priv });
+      expect(ran.status).toBe(0);
+      const where = readFileSync(marker, "utf8").trim();
+      expect(inside(realpathSync(dirname(repo)), where)).toBe(true);
+      expect(inside(realpathSync(priv), where)).toBe(false);
     });
   });
 
@@ -186,47 +197,40 @@ describe("cleanCheckout", () => {
 
   test("a checkout that cannot be made exits 1 without running the command and leaves no scratch", () => {
     withRepo((repo) => {
-      const priv = mkdtempSync(join(tmpdir(), "clean-checkout-tmpdir-"));
-      roots.push(priv);
+      const root = dirname(repo);
       const bin = refusingGit([["worktree add", 128]]);
-      const marker = join(priv, "ran");
+      const marker = join(root, "ran");
       const failed = runHelper([repo, "main", `touch ${marker}`], {
-        TMPDIR: priv,
         PATH: `${bin}:${process.env.PATH ?? ""}`,
       });
       expect(failed.status).toBe(1);
       expect(existsSync(marker)).toBe(false);
-      expect(readdirSync(priv).filter((n) => n.startsWith("postmaster-clean-checkout-"))).toEqual([]);
+      expect(readdirSync(root).filter((n) => n.startsWith("postmaster-clean-checkout-"))).toEqual([]);
       expect(worktreeList(repo)).not.toContain("postmaster-clean-checkout-");
     });
   });
 
   test("a removal that needs its fallback still reports the passing command", () => {
     withRepo((repo) => {
-      const priv = mkdtempSync(join(tmpdir(), "clean-checkout-tmpdir-"));
-      roots.push(priv);
+      const root = dirname(repo);
       const bin = refusingGit([["worktree remove", 1]]);
       const removed = runHelper([repo, "main", "true"], {
-        TMPDIR: priv,
         PATH: `${bin}:${process.env.PATH ?? ""}`,
       });
       expect(removed.status).toBe(0);
       expect(removed.out).toContain("could not remove the temporary git worktree");
       expect(worktreeList(repo)).not.toContain("postmaster-clean-checkout-");
-      expect(readdirSync(priv).filter((n) => n.startsWith("postmaster-clean-checkout-"))).toEqual([]);
+      expect(readdirSync(root).filter((n) => n.startsWith("postmaster-clean-checkout-"))).toEqual([]);
     });
   });
 
   test("cleanup residue left behind fails the run", () => {
     withRepo((repo) => {
-      const priv = mkdtempSync(join(tmpdir(), "clean-checkout-tmpdir-"));
-      roots.push(priv);
       const bin = refusingGit([
         ["worktree remove", 1],
         ["worktree prune", 1],
       ]);
       const removed = runHelper([repo, "main", "true"], {
-        TMPDIR: priv,
         PATH: `${bin}:${process.env.PATH ?? ""}`,
       });
       expect(removed.status).toBe(1);
