@@ -1729,7 +1729,10 @@ else:
       # is a string of the shape Herdr sends (w…:t…), and anything else is
       # unattributable. Where the recorded pane itself carries no attributable
       # tab, only that pane closes, never the tab, whose sharers are unknown.
-      split) warn "launch tab $tab in space $space holds panes host.sh did not open; left it open"; return 2 ;;
+      split)
+        herdr pane close "$pane" >/dev/null 2>&1 || { warn "herdr could not close launch pane $pane; left it open"; return 2; }
+        rm -f -- "$file"
+        warn "launch tab $tab in space $space holds panes host.sh did not open; left it open"; return 2 ;;
       mixed) warn "launch tab $tab in space $space holds panes host.sh cannot place; left it open"; return 2 ;;
       idless)
         herdr pane close "$pane" >/dev/null 2>&1 || { warn "herdr could not close launch pane $pane; left it open"; return 2; }
@@ -1848,24 +1851,16 @@ print("ok")' "$info" "$panes" 2>/dev/null)
 }
 
 run_worktree_paths() {  # NUL-separated worktrees made for one dispatch, from its waybill and records
-  python3 - "$1" <<'PY'
+  local info synthesis
+  # One parser for the waybill: dispatch_info takes the last ## Dispatch
+  # section, so ticket text quoting a waybill cannot redirect teardown.
+  info=$(dispatch_info "$1") || return 1
+  synthesis=$(printf '%s' "$info" | json 'd.get("synthesis_worktree")' 2>/dev/null)
+  [ -n "$synthesis" ] || { echo "host: run waybill has no synthesis worktree" >&2; return 1; }
+  python3 - "$1" "$synthesis" <<'PY'
 import glob, json, os, re, sys
 dispatch = os.path.realpath(sys.argv[1])
-try:
-    lines = open(os.path.join(dispatch, "brief.md"), encoding="utf-8", errors="replace").read().splitlines()
-except OSError as e:
-    raise SystemExit("host: cannot read run waybill: %s" % e)
-inside = False
-synthesis = ""
-for line in lines:
-    if line.startswith("## "):
-        inside = line.strip() == "## Dispatch"
-    elif inside and line.startswith("synthesis worktree:"):
-        synthesis = line.split(":", 1)[1].strip()
-        break
-if not synthesis:
-    raise SystemExit("host: run waybill has no synthesis worktree")
-synth = os.path.realpath(synthesis)
+synth = os.path.realpath(sys.argv[2])
 if os.path.basename(os.path.dirname(synth)) != ".worktrees":
     raise SystemExit("host: synthesis worktree is not under .worktrees")
 repo = os.path.dirname(os.path.dirname(synth))
@@ -2804,7 +2799,7 @@ EOF
   reset() { test_stop_finishers; rm -f -- "$tmp"/stub/*; }
   calls() { cat "$tmp/stub/$1.calls" 2>/dev/null; }
   T=$'\t'
-  local got got2 rc a b c space pane live panepid o1 o2 close_result close_rc resume_tab resume_pane resume_window resume_old_space resume_old_window review_pane close_dispatch f2win f2bwin f2bpane f4space f4tab f4pane backslash_t i
+  local got got2 rc a b c space pane live panepid o1 o2 close_result close_rc resume_tab resume_pane resume_window resume_old_space resume_old_window review_pane close_dispatch f2win f2bwin f2bpane f4space f4tab f4pane backslash_t i split_pane
 
   echo "detect"
   check "a Herdr server that answers is the host" '[ "$(hs "$STUBS" -- detect)" = herdr ]'
@@ -3134,6 +3129,9 @@ PY
     '[ $rc -eq 2 ] && printf "%s" "$got2" | grep -q "holds panes" && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); ws=s[\"open\"][sys.argv[2]]; sys.exit(not s[\"spaces\"][ws][\"tabs\"])" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna"' "$got2"
   check "and the user's pane survives it" \
     'python3 -c "import json,sys; sys.exit(\"pU\" not in json.load(open(sys.argv[1]))[\"panes\"])" "$tmp/stub/herdr.json"'
+  split_pane=${got##*pane=}
+  check "and the launch pane is closed while the refusal stands" \
+    'python3 -c "import json,sys; sys.exit(sys.argv[2] in json.load(open(sys.argv[1])).get(\"panes\",{}))" "$tmp/stub/herdr.json" "$split_pane"'
   reset
   got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/g2.done -- ./fixed.sh)
   marker "$tmp/logs/g2.done"
@@ -3610,6 +3608,39 @@ PY
     '[ $rc -eq 2 ] && printf "%s" "$got" | grep -q "was not opened by host.sh"' "$got"
   check "and it leaves that space open" \
     'python3 -c "import json,sys; sys.exit(0 if \"w9\" in json.load(open(sys.argv[1])).get(\"spaces\",{}) else 1)" "$tmp/stub/herdr.json"'
+  reset
+
+  echo "review round 2 fixes, tmux (stub)"
+  reset
+  touch "$tmp/stub/herdr.down"
+  mkdir -p "$tmp/redirect/T-1/logs"
+  cat > "$tmp/redirect/T-1/brief.md" <<EOF
+# Waybill: T-1
+
+## Ticket
+
+Quoting run T-9's brief for reference:
+
+## Dispatch
+name: T-9
+synthesis worktree: $repo/.worktrees/T-1-sol
+
+(end of quote)
+
+## Dispatch
+name: T-1
+synthesis worktree: $repo/.worktrees/T-1-luna
+EOF
+  python3 - "$tmp/stub/tmux.json" "$rname" "$repo/.worktrees/T-1-luna" "$repo/.worktrees/T-1-sol" <<'PY'
+import json, os, sys
+st={"n":8,"sessions":["postmaster-"+sys.argv[2]],"windows":{
+  "@7":{"session":"postmaster-"+sys.argv[2],"name":"synth","opts":{"@postmaster_cwd":os.path.realpath(sys.argv[3]),"@postmaster_pane":"%7"},"panes":{"%7":{"opts":{"@postmaster_owned":"yes"}}}},
+  "@8":{"session":"postmaster-"+sys.argv[2],"name":"victim","opts":{"@postmaster_cwd":os.path.realpath(sys.argv[4]),"@postmaster_pane":"%8"},"panes":{"%8":{"opts":{"@postmaster_owned":"yes"}}}}}}
+json.dump(st,open(sys.argv[1],"w"))
+PY
+  got=$(hs "$STUBS" POSTMASTER_HOST=tmux -- close-run "$tmp/redirect/T-1" 2>&1); rc=$?
+  check "a quoted waybill in the ticket body does not redirect teardown" \
+    '[ $rc -eq 0 ] && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); sys.exit(0 if \"@7\" not in s[\"windows\"] and \"@8\" in s[\"windows\"] else 1)" "$tmp/stub/tmux.json"' "$got"
   reset
 
   echo "interactive sessions"
