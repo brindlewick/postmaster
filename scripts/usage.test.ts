@@ -105,6 +105,59 @@ describe("reading rules", () => {
       rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  test("a resumed claude stream sums result usage and takes cost from the last result", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "usage-"));
+    try {
+      const events = join(tmp, "claude-resumed.jsonl");
+      writeFileSync(events, [
+        JSON.stringify({ type: "result", usage: { input_tokens: 60, output_tokens: 8 }, total_cost_usd: 0.1 }),
+        JSON.stringify({ type: "result", usage: { input_tokens: 40, output_tokens: 2 }, total_cost_usd: 0.16 }),
+        "",
+      ].join("\n"));
+      // Result usage is per-invocation (summed); total_cost_usd is cumulative (last wins).
+      expect(readJson(events, "claude")).toEqual({ input_tokens: 100, output_tokens: 10, cost_usd: 0.16 });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test("a codex stream takes the last terminal that carries figures", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "usage-"));
+    try {
+      const events = join(tmp, "codex-interrupted.jsonl");
+      writeFileSync(events, [
+        JSON.stringify({ type: "turn.completed", usage: { input_tokens: 100, output_tokens: 10 } }),
+        JSON.stringify({ type: "turn.interrupted" }),
+        "",
+      ].join("\n"));
+      expect(readJson(events, "codex")).toEqual({ input_tokens: 100, output_tokens: 10 });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test("grok and agy readers skip a terminal without figures", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "usage-"));
+    try {
+      const grokEvents = join(tmp, "grok-empty-end.jsonl");
+      writeFileSync(grokEvents, [
+        JSON.stringify({ type: "end", usage: { input_tokens: 40, output_tokens: 6 }, total_cost_usd: 0.003 }),
+        JSON.stringify({ type: "end" }),
+        "",
+      ].join("\n"));
+      expect(readJson(grokEvents, "grok")).toEqual({ input_tokens: 40, output_tokens: 6, cost_usd: 0.003 });
+      const agyEvents = join(tmp, "agy-empty-result.jsonl");
+      writeFileSync(agyEvents, [
+        JSON.stringify({ event: "result", result: { usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 14 } } }),
+        JSON.stringify({ event: "result", result: {} }),
+        "",
+      ].join("\n"));
+      expect(readJson(agyEvents, "agy")).toEqual({ input_tokens: 120, output_tokens: 14 });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("record and sum", () => {
@@ -193,7 +246,9 @@ describe("record and sum", () => {
       copyFileSync(join(fixtures, "muse-with-usage.jsonl"), join(tmp, "logs", "coachman-events.jsonl"));
       const result = run("record", join(tmp, "logs", "coachman-events.jsonl"), "muse", "coachman", tmp,
         "--role", "coachman", "--lane", "synthesis");
-      expect(result.status).toBe(1);
+      // Exit 0: the record IS saved; a nonzero exit would tell the launch site it was not recorded.
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain("usage record saved without figures");
       const record = JSON.parse(readFileSync(join(tmp, "logs", "coachman-events-usage.json"), "utf8"));
       expect(record.read_error).toBe("session-record-unavailable");
       expect(record.input_tokens).toBeUndefined();
@@ -241,6 +296,40 @@ describe("record and sum", () => {
       const result = run("sum", tmp);
       expect(result.status).toBe(0);
       expect(result.stdout).toContain("1000 (1 of 2 launches) in");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test("sum prints a reported cost as a decimal, never scientific and never $0", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "usage-"));
+    try {
+      mkdirSync(join(tmp, "logs"), { recursive: true });
+      for (const [name, cost] of [["tiny", 1e-7], ["tinier", 4.9e-10], ["plain", 0.003]] as const) {
+        const events = join(tmp, "logs", `${name}-events.jsonl`);
+        writeFileSync(events, JSON.stringify({
+          type: "end", usage: { input_tokens: 10, output_tokens: 2 }, total_cost_usd: cost,
+        }) + "\n");
+        expect(run("record", events, "grok", name, tmp,
+          "--role", "workhorse", "--lane", name).status).toBe(0);
+      }
+      const result = run("sum", tmp);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("$0.0000001");
+      expect(result.stdout).toContain("$0.0000000005");
+      expect(result.stdout).toContain("$0.003");
+      expect(result.stdout).not.toMatch(/\$[\d.]+e/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test("sum without a logs directory names the logs directory", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "usage-"));
+    try {
+      const result = run("sum", tmp);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`no such logs directory: ${join(tmp, "logs")}`);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

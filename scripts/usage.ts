@@ -92,6 +92,9 @@ const mergeFigures = (all: UsageFigures[]): UsageFigures => {
   };
 };
 
+const hasFigure = (figures: UsageFigures): boolean =>
+  figures.input_tokens !== undefined || figures.output_tokens !== undefined || figures.cost_usd !== undefined;
+
 const jsonRows = (content: string): Row[] => {
   const rows: Row[] = [];
   const stripped = content.replace(/^\s+/, "");
@@ -116,22 +119,34 @@ const jsonRows = (content: string): Row[] => {
   return rows;
 };
 
-// Codex reports cumulative session usage on every terminal turn event: the last one is the
-// run's total, and summing turns counts every token twice. Verified against a rollout whose
-// session total matched its last turn's figures to the unit.
+// Codex reports cumulative session usage on every terminal turn event: the last one carrying
+// figures is the run's total, and summing turns counts every token twice. A terminal without
+// usage is skipped, never read as zero. Verified against a rollout whose session total matched
+// its last turn's figures to the unit.
 const readCodex = (rows: Row[]): UsageFigures => {
   const terminal = rows.filter((row) =>
     row.type === "turn.completed" || row.type === "turn.failed" || row.type === "turn.interrupted");
-  return terminal.length === 0 ? {} : tokenFigures(terminal[terminal.length - 1]?.usage);
+  for (let i = terminal.length - 1; i >= 0; i--) {
+    const figures = tokenFigures(terminal[i]?.usage);
+    if (hasFigure(figures)) return figures;
+  }
+  return {};
 };
 
-// Claude reports the run on its result event: usage there, and total_cost_usd as cost. A
-// stream that ends without one (killed mid-run) is summed from its assistant messages instead.
+// Claude reports each invocation on its own result event: usage there is per-invocation,
+// while total_cost_usd is cumulative across the session. A resumed thread appends a new
+// result to the same stream, so tokens are summed across results and cost is taken from the
+// last one; summing cost would count every invocation twice. Verified against a live resumed
+// thread whose three results read out 5, 4, 5 with costs 0.1048, 0.1940, 0.1995. A stream that
+// ends without a result (killed mid-run) is summed from its assistant messages instead.
 const readClaude = (rows: Row[]): UsageFigures => {
   const results = rows.filter((row) => row.type === "result");
   if (results.length > 0) {
     const last = results[results.length - 1] as Row;
-    return { ...tokenFigures(last.usage), ...costFigures(last.total_cost_usd) };
+    return {
+      ...mergeFigures(results.map((row) => tokenFigures((row as Row).usage))),
+      ...costFigures(last.total_cost_usd),
+    };
   }
   return mergeFigures(rows.flatMap((row) => {
     if (row.type !== "assistant") return [];
@@ -176,23 +191,33 @@ const readPi = (rows: Row[]): UsageFigures =>
   }));
 
 // Grok's terminal end event carries the run's usage; chunk-level usage is ignored so a
-// repeated report is never counted twice.
+// repeated report is never counted twice. The last end carrying a figure wins; an end without
+// one is skipped, never read as zero.
 const readGrok = (rows: Row[]): UsageFigures => {
   const ends = rows.filter((row) => row.type === "end");
-  if (ends.length === 0) return {};
-  const last = ends[ends.length - 1] as Row;
-  return {
-    ...tokenFigures(at(last, "usage") ?? at(last, "token_usage")),
-    ...costFigures(at(last, "total_cost_usd"), at(at(last, "usage"), "cost_usd")),
-  };
+  for (let i = ends.length - 1; i >= 0; i--) {
+    const last = ends[i] as Row;
+    const figures = {
+      ...tokenFigures(at(last, "usage") ?? at(last, "token_usage")),
+      ...costFigures(at(last, "total_cost_usd"), at(at(last, "usage"), "cost_usd")),
+    };
+    if (hasFigure(figures)) return figures;
+  }
+  return {};
 };
 
-// Antigravity reports cumulative session usage on each result event; the last one wins, in
-// usageMetadata or usage shape.
+// Antigravity reports cumulative session usage on each result event; the last one carrying
+// a figure wins, in usageMetadata or usage shape. A result without one is skipped, never zero.
 const readAgy = (rows: Row[]): UsageFigures => {
   const results = rows.filter((row) => row.event === "result" || row.type === "result");
-  if (results.length === 0) return {};
-  const last = results[results.length - 1] as Row;
+  for (let i = results.length - 1; i >= 0; i--) {
+    const figures = agyFigures(results[i] as Row);
+    if (hasFigure(figures)) return figures;
+  }
+  return {};
+};
+
+const agyFigures = (last: Row): UsageFigures => {
   const inner = at(last, "result") ?? last;
   const metadata = at(inner, "usageMetadata");
   if (isObject(metadata)) {
@@ -341,9 +366,18 @@ const validateRecord = (value: unknown): UsageRecord | undefined => {
   };
 };
 
+// Money prints as a plain decimal, never scientific: fixed places with trailing zeros
+// trimmed. A reported nonzero cost must never print as $0, so precision extends past 9
+// places until a digit survives.
 const formatMoney = (value: number): string => {
-  const rounded = Math.round((value + Number.EPSILON) * 1_000_000_000) / 1_000_000_000;
-  return `$${rounded}`;
+  if (value === 0) return "$0";
+  let decimals = 9;
+  let text = "0";
+  while (text === "0" && decimals <= 100) {
+    text = value.toFixed(decimals).replace(/\.?0+$/, "");
+    decimals++;
+  }
+  return `$${text}`;
 };
 
 const formatCoverage = (records: UsageRecord[], key: UsageKey): string => {
@@ -386,7 +420,7 @@ export const sumUsageRecords = (records: UsageRecord[]): string => {
 export const sumDispatch = (dispatch: string): string => {
   if (!regularDir(dispatch)) throw new Error(`no such dispatch directory: ${dispatch}`);
   const logs = join(dispatch, "logs");
-  if (!regularDir(logs)) throw new Error(`no such dispatch directory: ${dispatch}`);
+  if (!regularDir(logs)) throw new Error(`no such logs directory: ${logs}`);
   const unreadable: string[] = [];
   const records = readdirSync(logs).sort().flatMap((file) => {
     if (!file.endsWith("-usage.json")) return [];
@@ -436,7 +470,9 @@ const recordCommand = (args: string[]): void => {
   const [eventsPath, harness, name, dispatch] = rest as [string, string, string, string];
   if (!role || !lane) throw new Error("record needs --role and --lane from the launch site");
   const record = writeUsageRecord({ harness, name, role, lane, eventsPath, dispatch });
-  if (record.read_error) throw new Error("session record is unavailable; usage record saved without figures");
+  // The record is saved, so this is exit 0: a nonzero exit would tell the launch site the
+  // usage was not recorded. The read_error field and the sum's unreadable line carry the state.
+  if (record.read_error) console.error("usage: session record is unavailable; usage record saved without figures");
 };
 
 const main = (args: string[]): void => {
