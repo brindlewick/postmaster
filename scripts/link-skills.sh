@@ -107,19 +107,24 @@ make_links() {  # make_links <root> <dry>
 }
 
 check_links() {  # check_links <root>: report whether every planned link is present; never change anything
-  local root=$1 p line verdict a b c problems=0
+  local root=$1 p line verdict a b c problems=0 planned=0
   p=$(plan "$root") || return 1
   while IFS= read -r line; do
     IFS=$'\t' read -r verdict a b c <<< "$line"
     case $verdict in
-      link)       printf 'MISSING LINK    %s -> %s (%s)\n' "$a" "$b" "$c"; problems=1 ;;
-      in-the-way) printf 'IN THE WAY      %s is %s\n' "$a" "$b"; problems=1 ;;
+      link)       printf 'MISSING LINK    %s -> %s (%s)\n' "$a" "$b" "$c"; problems=1; planned=1 ;;
+      in-the-way) printf 'IN THE WAY      %s is %s\n' "$a" "$b"; problems=1; planned=1 ;;
+      linked|shared) report "$line"; planned=1 ;;
       *)          report "$line" ;;
     esac
   done <<< "$p"
   if [ "$problems" -eq 1 ]; then
     printf 'link-skills: to install missing links after resolving any blockers, run: %q\n' "$HERE/link-skills.sh"
     return 1
+  fi
+  if [ "$planned" -eq 0 ]; then
+    echo 'link-skills: no harness skills folders found; nothing was changed'
+    return 0
   fi
   echo 'link-skills: all skills are linked; nothing was changed'
 }
@@ -178,19 +183,21 @@ echo "--check: the same command reports missing links and passes when complete"
 check_tool=$tmp/check-tool
 check_home=$tmp/check-home
 mkdir -p "$check_tool/scripts" "$check_home" || exit 1
+check_tool=$(cd -P "$check_tool" && pwd); check_home=$(cd -P "$check_home" && pwd)
 cp "$HERE/link-skills.sh" "$check_tool/scripts/link-skills.sh" && cp -R "$TOOL/skills" "$check_tool/skills" \
   && chmod +x "$check_tool/scripts/link-skills.sh" || exit 1
 check_script=$check_tool/scripts/link-skills.sh
+printf -v check_run '%q' "$check_script"
 before=$(state_at "$check_home"); out=$(HOME="$check_home" "$check_script" --check 2>&1); rc=$?
 if [ $rc -eq 1 ] && grep -qF "MISSING LINK    $check_home/.claude/skills/postmaster" <<< "$out" \
-   && grep -qF "run: $check_script" <<< "$out" && [ "$(state_at "$check_home")" = "$before" ]; then
+   && grep -qF "run: $check_run" <<< "$out" && [ "$(state_at "$check_home")" = "$before" ]; then
   ok "a missing link is named, the install command is shown, and --check changes nothing"
 else fail "a missing link is named, the install command is shown, and --check changes nothing (exit $rc)" "$out"; fi
 blocked_path=$check_home/.claude/skills/postmaster
 mkdir -p "$(dirname "$blocked_path")" && printf 'keep this file\n' > "$blocked_path" || exit 1
 before=$(state_at "$check_home"); out=$(HOME="$check_home" "$check_script" --check 2>&1); rc=$?
 if [ $rc -eq 1 ] && grep -qF "IN THE WAY      $blocked_path is a file" <<< "$out" \
-   && grep -qF "run: $check_script" <<< "$out" && [ "$(state_at "$check_home")" = "$before" ]; then
+   && grep -qF "run: $check_run" <<< "$out" && [ "$(state_at "$check_home")" = "$before" ]; then
   ok "a blocked path is named, the install command is shown, and --check changes nothing"
 else fail "a blocked path is named, the install command is shown, and --check changes nothing (exit $rc)" "$out"; fi
 rm -- "$blocked_path" || exit 1
@@ -199,6 +206,16 @@ before=$(state_at "$check_home"); out=$(HOME="$check_home" "$check_script" --che
 if [ $rc -eq 0 ] && grep -qF 'all skills are linked' <<< "$out" && [ "$(state_at "$check_home")" = "$before" ]; then
   ok "a complete set passes through the same --check command without changes"
 else fail "a complete set passes through the same --check command without changes (exit $rc)" "$out"; fi
+none_bin=$tmp/none-bin; none_home=$tmp/none-home
+mkdir -p "$none_bin" "$none_home" || exit 1
+for t in bash env git readlink dirname basename sed; do
+  p=$(type -P "$t") || { echo "self-test: $t is not on PATH" >&2; exit 1; }
+  ln -s "$p" "$none_bin/$t"
+done
+before=$(state_at "$none_home"); out=$(HOME="$none_home" PATH="$none_bin" "$check_script" --check 2>&1); rc=$?
+if [ $rc -eq 0 ] && grep -qF 'no harness skills folders found' <<< "$out" && [ "$(state_at "$none_home")" = "$before" ]; then
+  ok "with no harness installed, --check says so and changes nothing"
+else fail "with no harness installed, --check says so and changes nothing (exit $rc)" "$out"; fi
 
 echo "installing: every skill, for every installed harness with a skills folder"
 out=$(make_links "$TOOL" 0 2>&1); rc=$?
