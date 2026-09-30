@@ -45,20 +45,17 @@ usage() { echo "usage: turnpikes.sh --list | resolve [--project <repo>] [<text>.
 
 # Both bodies are read with `read`, not `$(cat ...)`, so that a shell as old as bash 3.2 parses
 # this file: it reads a here-document inside `$( )` as ordinary text, quotes and backticks included.
-# coachman-contract:turnpike-table:start
 IFS= read -r -d '' TABLE <<'TURNPIKES' || true
 # name     set      leg     what it checks
 style      default  review  idiom, naming, abstraction and consistency with the project's own conventions
 bug        default  review  correctness, logic, and whether the tests are adequate
 security   default  review  exploit paths through the project's risk surfaces
 TURNPIKES
-# coachman-contract:turnpike-table:end
 
 IFS= read -r -d '' CORE <<'PY' || true
 import json, os, re, subprocess, sys, unicodedata
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-# coachman-contract:leg-rules:start
 here, table, cmd, args = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
 LEGS = [(1, "synthesis"), (2, "review"), (3, "ship")]
 ALWAYS = {"synthesis", "ship"}
@@ -157,8 +154,6 @@ def legs(line):
         if leg in ALWAYS or runs:
             print(" ".join([str(n), leg] + runs))
 
-# coachman-contract:leg-rules:end
-
 if cmd == "list":
     for name, d, leg, what in rows:
         print("%-10s %-8s %-9s %s" % (name, "default" if d else "-", leg, what))
@@ -172,7 +167,6 @@ elif cmd == "short":
     for n in defaults:
         if n not in got:
             print(n)
-# coachman-contract:leg-dispatch:start
 elif cmd == "legs" and args[0] == "--line":
     legs(args[1])
 elif cmd == "legs":
@@ -193,7 +187,6 @@ elif cmd == "legs":
         print('the waybill says "%s", and the ticket\'s check printed "%s"' % (found[0].strip(), args[1].strip()))
         sys.exit(2)
     legs(found[0])
-# coachman-contract:leg-dispatch:end
 PY
 core() { python3 -I -c "$CORE" "$HERE" "$@"; }  # core <table> list | resolve [<text>...] | short <line> | legs <waybill> [<expect>] | legs --line <line>
 

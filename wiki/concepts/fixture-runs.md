@@ -101,5 +101,5 @@ trusted parent, and not in the trusted folder itself. A copy is a git repository
 started in one waits for the user to answer the prompt, once per copy. `AGENTS.md` holds a change to the coachman contract back
 from merging until a fixture run dispatched from its branch scores clean. What the contract is
 is defined in `docs/coachman-contract.toml`, and `scripts/coachman-contract.sh` says whether a
-change touches it — so a fixture run is required when the change does, and not for a skill
-change that leaves the contract alone.
+change touches it — so a fixture run is required when the change touches a listed file,
+and not for a change to files the list does not name.

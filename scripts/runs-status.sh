@@ -45,12 +45,9 @@ for run in sorted(os.listdir(root)):
             m = json.load(open(mp)); stage = str(m.get("stage", "?")); leg = str(m.get("leg", "?"))
         except Exception:
             stage = "manifest unreadable"
-# coachman-contract:marker-poll:start
     markers = sorted(os.path.basename(p)
                      for pat in (".*-ready", ".leg-*-done", ".leg-*-exited", ".waiting-on-user")
                      for p in glob.glob(os.path.join(d, pat)))
-# coachman-contract:marker-poll:end
-# coachman-contract:completion-poll:start
     newest = 0
     for dp, dn, fn in os.walk(d):
         for f in fn:
@@ -69,7 +66,6 @@ for run in sorted(os.listdir(root)):
     elif any(mk.startswith(".checkpoint-") for mk in markers): nxt = "READ"
     elif idle_min >= 30: nxt = "INSPECT"
     else: nxt = "WAIT"
-# coachman-contract:completion-poll:end
     rows.append((run, stage, leg, ",".join(markers) or "-", idle_min, nxt))
 print("%-14s %-16s %-4s %-44s %6s  %s" % ("RUN", "STAGE", "LEG", "MARKERS", "IDLE", "NEXT"))
 for r in rows:

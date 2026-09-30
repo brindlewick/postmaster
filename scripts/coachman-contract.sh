@@ -1,25 +1,23 @@
 #!/usr/bin/env bash
-# coachman-contract:fixture-detector:start
-# Decide whether a git change touches the coachman contract defined in
-# docs/coachman-contract.toml. Contract regions are delimited in their source files.
+# Decide whether a git change touches the coachman contract, defined as a list
+# of files in docs/coachman-contract.toml. A change anywhere in a listed file
+# is a contract change.
 #
 #   coachman-contract.sh <base> <head>
 #   coachman-contract.sh [<repo>] <base> <head>   (or --repo <repo> <base> <head>)
 #   coachman-contract.sh --self-test
 #
 #   exit 0  no contract change
-#   exit 1  contract change; print each part and changed file:line
-#          (`contract-index` names index-structural lines outside any part)
-#   exit 2  usage, git or contract-index error
+#   exit 1  contract change; print each listed file the change touched
+#   exit 2  usage, git or contract-list error
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd -P)
 
 python3 - "$HERE" "$@" <<'PY'
-import os, pathlib, re, shutil, subprocess, sys, tempfile, tomllib
+import os, pathlib, shutil, subprocess, sys, tempfile, tomllib
 
 
 INDEX = "docs/coachman-contract.toml"
-HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
 class ContractError(Exception):
@@ -44,222 +42,61 @@ def blob(repo, rev, path):
 def read_index(repo, rev):
     raw = blob(repo, rev, INDEX)
     if raw is None:
-        return None, None
+        return None
     try:
         data = tomllib.loads(raw)
     except tomllib.TOMLDecodeError as e:
         raise ContractError("%s at %s is invalid TOML: %s" % (INDEX, rev, e))
-    parts = data.get("parts")
-    if not isinstance(parts, list) or not parts:
-        raise ContractError("%s at %s must define [[parts]]" % (INDEX, rev))
     if data.get("version") != 1:
         raise ContractError("%s at %s must set version = 1" % (INDEX, rev))
     detector = data.get("detector")
     if (not isinstance(detector, str) or not detector or detector.startswith("/")
             or ".." in pathlib.PurePosixPath(detector).parts):
         raise ContractError("%s at %s must name its detector file" % (INDEX, rev))
+    files = data.get("files")
+    if not isinstance(files, list) or not files:
+        raise ContractError("%s at %s must list its contract files" % (INDEX, rev))
     seen = set()
-    for part in parts:
-        ident = part.get("id")
-        if not isinstance(ident, str) or not re.fullmatch(r"[a-z][a-z0-9-]*", ident):
-            raise ContractError("%s at %s has an invalid part id" % (INDEX, rev))
-        if ident in seen:
-            raise ContractError("%s at %s repeats part %s" % (INDEX, rev, ident))
-        seen.add(ident)
-        if not part.get("title") or not part.get("definition"):
-            raise ContractError("%s at %s has an incomplete part %s" % (INDEX, rev, ident))
-        mappings = part.get("implementation")
-        if not isinstance(mappings, list) or not mappings:
-            raise ContractError("%s at %s has no implementation locations for %s" % (INDEX, rev, ident))
-        for mapping in mappings:
-            path = mapping.get("file")
-            start, end = mapping.get("start"), mapping.get("end")
-            if (not isinstance(path, str) or path.startswith("/") or ".." in pathlib.PurePosixPath(path).parts
-                    or not isinstance(start, str) or not start or not isinstance(end, str) or not end):
-                raise ContractError("%s at %s has an invalid implementation location for %s" % (INDEX, rev, ident))
-    return data, raw
+    for entry in files:
+        path = entry.get("path")
+        holds = entry.get("holds")
+        if (not isinstance(path, str) or not path or path.startswith("/")
+                or ".." in pathlib.PurePosixPath(path).parts or path in seen
+                or not isinstance(holds, str) or not holds.strip()):
+            raise ContractError("%s at %s has a bad contract file entry" % (INDEX, rev))
+        seen.add(path)
+    return data
 
 
-def diff_hunks(repo, base, head, path):
-    p = run(["git", "-C", str(repo), "diff", "--no-ext-diff", "--no-renames", "--no-color",
-             "--text", "--unified=0", base, head, "--", path], text=False)
-    out = p.stdout.decode("latin-1")
-    if "\nBinary files " in "\n" + out:
-        return None
-    hunks = []
-    for line in out.split("\n"):
-        m = HUNK.match(line)
-        if not m:
-            continue
-        old_start, old_count, new_start, new_count = m.groups()
-        old_count = int(old_count or 1)
-        new_count = int(new_count or 1)
-        old_start, new_start = int(old_start), int(new_start)
-        old_lines = set(range(old_start, old_start + old_count)) if old_count else set()
-        new_lines = set(range(new_start, new_start + new_count)) if new_count else set()
-        hunks.append((old_lines, new_lines))
-    return hunks
-
-
-def changed_lines(hunks):
-    old, new = set(), set()
-    for before, after in hunks:
-        old.update(before)
-        new.update(after)
-    return old, new
-
-
-def changed_ranges_for_manifest(lines):
-    """Map each manifest line to its part, including its implementation entries."""
-    owner = {}
-    current = None
-    pending = False
-    for number, line in enumerate(lines, 1):
-        if line.strip() == "[[parts]]":
-            current, pending = None, True
-        elif pending:
-            ident = re.match(r'\s*id\s*=\s*"([a-z][a-z0-9-]*)"', line)
-            if ident:
-                current, pending = ident.group(1), False
-        owner[number] = current or "contract-index"
-    return owner
-
-
-def manifest_changes(repo, base, head):
-    hunks = diff_hunks(repo, base, head, INDEX)
-    if hunks is not None and not hunks:
-        return {}
-    old_raw, new_raw = blob(repo, base, INDEX), blob(repo, head, INDEX)
-    old_lines = old_raw.split("\n") if old_raw is not None else []
-    new_lines = new_raw.split("\n") if new_raw is not None else []
-    old_owner, new_owner = changed_ranges_for_manifest(old_lines), changed_ranges_for_manifest(new_lines)
-    if hunks is None:
-        old_changed = set(range(1, len(old_lines) + 1))
-        new_changed = set(range(1, len(new_lines) + 1))
-    else:
-        old_changed, new_changed = changed_lines(hunks)
-    out = {}
-    for number in sorted(old_changed):
-        part = old_owner.get(number, "contract-index")
-        out.setdefault(part, set()).add((INDEX, number))
-    for number in sorted(new_changed):
-        part = new_owner.get(number, "contract-index")
-        out.setdefault(part, set()).add((INDEX, number))
-    return out
-
-
-def region(lines, start, end):
-    starts = [i + 1 for i, line in enumerate(lines) if line.strip() == start]
-    ends = [i + 1 for i, line in enumerate(lines) if line.strip() == end]
-    if len(starts) != 1 or len(ends) != 1 or starts[0] >= ends[0]:
-        return None
-    return set(range(starts[0], ends[0] + 1))
-
-
-def validate_head_mappings(repo, head, data):
-    if data is None:
-        return
-    for part in data["parts"]:
-        for mapping in part["implementation"]:
-            source = blob(repo, head, mapping["file"])
-            if source is None:
-                raise ContractError("%s at %s maps %s to a missing file" % (INDEX, head, mapping["file"]))
-            if region(source.split("\n"), mapping["start"], mapping["end"]) is None:
-                raise ContractError("%s at %s has missing or duplicate markers for %s in %s" %
-                                    (INDEX, head, part["id"], mapping["file"]))
+def changed_files(repo, base, head):
+    p = run(["git", "-C", str(repo), "diff", "--no-ext-diff", "--no-renames",
+             "--name-only", "-z", base, head, "--"], text=False)
+    return [name for name in p.stdout.decode("latin-1").split("\0") if name]
 
 
 def check_change(repo, base, head):
     repo = pathlib.Path(repo).resolve()
     for rev in (base, head):
         run(["git", "-C", str(repo), "rev-parse", "--verify", "%s^{commit}" % rev])
-    base_index, _ = read_index(repo, base)
-    head_index, _ = read_index(repo, head)
+    base_index = read_index(repo, base)
+    head_index = read_index(repo, head)
     if base_index is None and head_index is None:
-        return {}
-    validate_head_mappings(repo, head, head_index)
-    reports = manifest_changes(repo, base, head)
-    parts_by_id = {}
+        return []
+    listed = set()
     for data in (base_index, head_index):
         if data:
-            for part in data["parts"]:
-                parts_by_id.setdefault(part["id"], []).append(part)
-    for ident, versions in parts_by_id.items():
-        paths = set()
-        for part in versions:
-            for mapping in part["implementation"]:
-                paths.add(mapping["file"])
-        for path in paths:
-            hunks = diff_hunks(repo, base, head, path)
-            if hunks is not None and not hunks:
-                continue
-            old_source, new_source = blob(repo, base, path), blob(repo, head, path)
-            if old_source is None:
-                old_source_lines = []
-            else:
-                old_source_lines = old_source.split("\n")
-            if new_source is None:
-                new_source_lines = []
-            else:
-                new_source_lines = new_source.split("\n")
-            if hunks is None:
-                old_changed = set(range(1, len(old_source_lines) + 1))
-                new_changed = set(range(1, len(new_source_lines) + 1))
-            else:
-                old_changed, new_changed = changed_lines(hunks)
-            mappings = [mapping for part in versions for mapping in part["implementation"]
-                        if mapping["file"] == path]
-            old_regions, new_regions = [], []
-            for mapping in mappings:
-                if old_source is not None:
-                    found = region(old_source_lines, mapping["start"], mapping["end"])
-                    if found is not None:
-                        old_regions.append(found)
-                if new_source is not None:
-                    found = region(new_source_lines, mapping["start"], mapping["end"])
-                    if found is not None:
-                        new_regions.append(found)
-            old_contract = set().union(*old_regions) if old_regions else set()
-            new_contract = set().union(*new_regions) if new_regions else set()
-            refs = {(path, n) for n in new_changed & new_contract}
-            if not refs:
-                refs = {(path, n) for n in old_changed & old_contract}
-            # If a mapped delimiter is itself renamed or removed, preserve the hit through
-            # whichever side still has a parseable contract region.
-            if not refs and bool(old_contract) != bool(new_contract) and (old_changed or new_changed):
-                refs = {(path, n) for n in new_changed} or {(path, n) for n in old_changed}
-            if refs:
-                reports.setdefault(ident, set()).update(refs)
-    return reports
+            for entry in data["files"]:
+                listed.add(entry["path"])
+    return sorted(set(changed_files(repo, base, head)) & listed)
 
 
-def line_ranges(numbers):
-    ordered = sorted(numbers)
-    if not ordered:
-        return []
-    out, first, last = [], ordered[0], ordered[0]
-    for number in ordered[1:]:
-        if number == last + 1:
-            last = number
-            continue
-        out.append((first, last))
-        first = last = number
-    out.append((first, last))
-    return out
-
-
-def print_result(reports, base, head):
-    if not reports:
+def print_result(touched, base, head):
+    if not touched:
         print("no coachman contract change (%s..%s)" % (base, head))
         return 0
-    for ident in sorted(reports):
-        paths = sorted({path for path, _ in reports[ident]})
-        for path in paths:
-            for first, last in line_ranges(line for touched_path, line in reports[ident] if touched_path == path):
-                suffix = ":%d" % first if first == last else ":%d-%d" % (first, last)
-                print("yes %s %s%s" % (ident, path, suffix))
+    for path in touched:
+        print("yes %s" % path)
     return 1
-# coachman-contract:fixture-detector:end
 
 
 def control(ok, name, detail=""):
@@ -270,16 +107,12 @@ def control(ok, name, detail=""):
 def git_fixture(repo, root, source_root, manifest_data):
     repo.mkdir(parents=True)
     shutil.copy2(source_root / "scripts" / "coachman-contract.sh", repo / "coachman-contract.sh")
-    for part in manifest_data["parts"]:
-        for mapping in part["implementation"]:
-            source = source_root / mapping["file"]
-            target = repo / mapping["file"]
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if not target.exists():
-                shutil.copy2(source, target)
-    index = repo / INDEX
-    index.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_root / INDEX, index)
+    for entry in manifest_data["files"]:
+        source = source_root / entry["path"]
+        target = repo / entry["path"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            shutil.copy2(source, target)
     (repo / "skills/postmaster/harnesses.md").parent.mkdir(parents=True, exist_ok=True)
     (repo / "README.md").write_text("fixture\n", encoding="utf-8")
     run(["git", "init", "-q", "-b", "main", str(repo)])
@@ -308,7 +141,7 @@ def exercise_self_test(source_root):
     failed = 0
     print("coachman-contract self-test")
 
-    def run_case(label, edit, expected_part=None, path_hint=None):
+    def run_case(label, edit, expected_file=None):
         nonlocal passed, failed
         with tempfile.TemporaryDirectory(prefix="coachman-contract-", dir=source_root) as scratch:
             repo = pathlib.Path(scratch) / "repo"
@@ -317,13 +150,11 @@ def exercise_self_test(source_root):
             head = commit_fixture(repo, label)
             result = subprocess.run([str(repo / "coachman-contract.sh"), base, head], cwd=repo,
                                     capture_output=True, text=True)
-            expected_code = 1 if expected_part else 0
+            expected_code = 1 if expected_file else 0
             ok = result.returncode == expected_code
             output = result.stdout
-            if expected_part:
-                ok = ok and any(line.startswith("yes %s " % expected_part) for line in output.splitlines())
-                if path_hint:
-                    ok = ok and path_hint in output and re.search(re.escape(path_hint) + r":\d+", output) is not None
+            if expected_file:
+                ok = ok and any(line == "yes %s" % expected_file for line in output.splitlines())
             else:
                 ok = ok and output.startswith("no coachman contract change")
             if control(ok, label, "exit %d" % result.returncode):
@@ -342,67 +173,90 @@ def exercise_self_test(source_root):
             raise ContractError("self-test fixture is missing %r in %s" % (before, path))
         target.write_text(content.replace(before, after, 1), encoding="utf-8")
 
-    run_case("renaming a coachman marker is a markers contract change",
-             lambda repo: replace_once(repo, "skills/postmaster/coachman.md", "`.card-ready`", "`.card-finished`"),
-             "markers", "skills/postmaster/coachman.md")
-    run_case("adding a waybill section is a waybill contract change",
+    run_case("editing the contract list itself answers yes",
+             lambda repo: replace_once(repo, INDEX,
+                                       'holds = "the required handoff sections"',
+                                       'holds = "the required handoff sections, every one of them"'),
+             INDEX)
+    run_case("a wording fix in coachman.md answers yes",
+             lambda repo: replace_once(repo, "skills/postmaster/coachman.md",
+                                       "will be killed and restarted.",
+                                       "will be killed, then restarted."),
+             "skills/postmaster/coachman.md")
+    run_case("a wording fix in postmaster.md answers yes",
+             lambda repo: replace_once(repo, "skills/postmaster/postmaster.md",
+                                       "You run no model lane and edit no source.",
+                                       "You run no model lane and edit no source at all."),
+             "skills/postmaster/postmaster.md")
+    run_case("a wording fix in the waybill template answers yes",
              lambda repo: replace_once(repo, "skills/postmaster/SKILL.md",
-                                       "<!-- coachman-contract:waybill-template:end -->",
-                                       "## Added field\n\n<!-- coachman-contract:waybill-template:end -->"),
-             "waybill", "skills/postmaster/SKILL.md")
-    run_case("changing the turnpike table is a turnpikes contract change",
-             lambda repo: replace_once(repo, "scripts/turnpikes.sh", "style      default  review", "style      default  ship"),
-             "turnpikes", "scripts/turnpikes.sh")
-    run_case("adding a stage is a legs-stages contract change",
-             lambda repo: replace_once(repo, "scripts/stage.sh", "done abandoned", "done abandoned paused"),
-             "legs-stages", "scripts/stage.sh")
-    run_case("changing completion detection is a completion contract change",
-             lambda repo: replace_once(repo, "scripts/runs-status.sh", 'elif done: nxt = "DISPATCH"',
-                                       'elif exited: nxt = "DISPATCH"'),
-             "completion", "scripts/runs-status.sh")
-    run_case("a docs-only change is not a contract change",
-             lambda repo: (repo / "docs/release-notes.md").parent.mkdir(parents=True, exist_ok=True) or
-                          (repo / "docs/release-notes.md").write_text("notes\n", encoding="utf-8"))
-    run_case("runbook wording outside contract regions is not a contract change",
-             lambda repo: (repo / "skills/postmaster/coachman.md").write_text(
-                 (repo / "skills/postmaster/coachman.md").read_text(encoding="utf-8") + "\nEditorial note.\n", encoding="utf-8"))
+                                       "(the postmaster sets yes or no at the final card)",
+                                       "(the postmaster sets yes or no there)"),
+             "skills/postmaster/SKILL.md")
+    run_case("a wording fix in host.sh answers yes",
+             lambda repo: replace_once(repo, "scripts/host.sh",
+                                       "# never an earlier launch's pid",
+                                       "# never an earlier launch's pid here"),
+             "scripts/host.sh")
+    run_case("a change in runs-status.sh answers yes",
+             lambda repo: replace_once(repo, "scripts/runs-status.sh",
+                                       '"IDLE", "NEXT"', '"IDLE", "NEXT!"'),
+             "scripts/runs-status.sh")
+    run_case("a wording fix in turnpikes.sh answers yes",
+             lambda repo: replace_once(repo, "scripts/turnpikes.sh",
+                                       "# name     set      leg     what it checks",
+                                       "# name     set      leg     what each checks"),
+             "scripts/turnpikes.sh")
+    run_case("a wording fix in stage.sh answers yes",
+             lambda repo: replace_once(repo, "scripts/stage.sh",
+                                       "#   exit 4  a terminal stage set by any actor but the postmaster",
+                                       "#   exit 4  a terminal stage set by any actor but the postmaster itself"),
+             "scripts/stage.sh")
+    run_case("a wording fix in handoff-check.sh answers yes",
+             lambda repo: replace_once(repo, "scripts/handoff-check.sh",
+                                       "#   exit 0  every section present and non-empty",
+                                       "#   exit 0  every section present, and none empty"),
+             "scripts/handoff-check.sh")
+    run_case("a wording fix in the detector answers yes",
+             lambda repo: replace_once(repo, "scripts/coachman-contract.sh",
+                                       "#   exit 2  usage, git or contract-list error",
+                                       "#   exit 2  usage, git, or contract-list error"),
+             "scripts/coachman-contract.sh")
+    run_case("a wiki-only change is not a contract change",
+             lambda repo: (repo / "wiki/concepts/probe-note.md").parent.mkdir(parents=True, exist_ok=True) or
+                          (repo / "wiki/concepts/probe-note.md").write_text("notes\n", encoding="utf-8"))
+    run_case("a README-only change is not a contract change",
+             lambda repo: (repo / "README.md").write_text(
+                 (repo / "README.md").read_text(encoding="utf-8") + "More fixture.\n", encoding="utf-8"))
     run_case("adding a harness entry is not a contract change",
              lambda repo: (repo / "skills/postmaster/harnesses.md").write_text("\nNew harness entry.\n", encoding="utf-8"))
     run_case("ticket prose naming the contract is not a contract change",
              lambda repo: (repo / "TICKET.md").write_text(
                  "## Problem\n\nThis changes the coachman contract and the markers.\n", encoding="utf-8"))
 
-    def byte_edit(repo, path, before, after):
-        target = repo / path
-        content = target.read_bytes()
-        if before not in content:
-            raise ContractError("self-test fixture is missing %r in %s" % (before, path))
-        target.write_bytes(content.replace(before, after, 1))
-
-    run_case("a NUL byte does not hide an in-region change",
-             lambda repo: (byte_edit(repo, "scripts/stage.sh", b"dispatched bootstrapped",
-                                            b"dispatched\x00 bootstrapped"),
-                           byte_edit(repo, "scripts/stage.sh", b"shipped done abandoned\"",
-                                            b"shipped done abandoned paused\"")),
-             "legs-stages", "scripts/stage.sh")
-
-    def drift_control():
+    def neutered_control():
         nonlocal passed, failed
-        label = "a CR-shifted delimiter-line change is still caught"
+        label = "neutering the detector entrypoint is a contract change"
         with tempfile.TemporaryDirectory(prefix="coachman-contract-", dir=source_root) as scratch:
             repo = pathlib.Path(scratch) / "repo"
-            git_fixture(repo, pathlib.Path(scratch), source_root, manifest_data)
-            byte_edit(repo, "scripts/stage.sh", b"#   exit 4  a terminal stage",
-                      b"#   exit 4\ra terminal stage")
-            base = commit_fixture(repo, "lone CR above the region")
-            byte_edit(repo, "scripts/stage.sh", b"# coachman-contract:stage-rules:start\n",
-                      b"# coachman-contract:stage-rules:start \n")
+            base = git_fixture(repo, pathlib.Path(scratch), source_root, manifest_data)
+            shown = run(["git", "-C", str(repo), "show",
+                         "%s:scripts/coachman-contract.sh" % base], text=False)
+            honest = pathlib.Path(scratch) / "honest-contract.sh"
+            honest.write_bytes(shown.stdout)
+            os.chmod(honest, 0o755)
+            for path in ("coachman-contract.sh", "scripts/coachman-contract.sh"):
+                replace_once(repo, path,
+                             "    try:\n        return print_result(check_change(repo, base, head), base, head)",
+                             "    try:\n        return 0")
             head = commit_fixture(repo, label)
-            result = subprocess.run([str(repo / "coachman-contract.sh"), base, head], cwd=repo,
+            neutered = subprocess.run([str(repo / "coachman-contract.sh"), base, head], cwd=repo,
+                                      capture_output=True, text=True)
+            result = subprocess.run([str(honest), base, head], cwd=repo,
                                     capture_output=True, text=True)
-            ok = result.returncode == 1 and any(
-                line.startswith("yes legs-stages ") for line in result.stdout.splitlines())
-            if control(ok, label, "exit %d" % result.returncode):
+            ok = (neutered.returncode == 0 and result.returncode == 1 and any(
+                line == "yes scripts/coachman-contract.sh" for line in result.stdout.splitlines()))
+            if control(ok, label, "exits %d/%d" % (neutered.returncode, result.returncode)):
                 passed += 1
             else:
                 failed += 1
@@ -411,7 +265,7 @@ def exercise_self_test(source_root):
                 if result.stdout:
                     print("       " + result.stdout.strip().replace("\n", "\n       "))
 
-    drift_control()
+    neutered_control()
 
     def version_control():
         nonlocal passed, failed
@@ -457,39 +311,6 @@ def exercise_self_test(source_root):
 
     detector_control()
 
-    def neutered_control():
-        nonlocal passed, failed
-        label = "neutering the detector entrypoint is a fixture-policy contract change"
-        with tempfile.TemporaryDirectory(prefix="coachman-contract-", dir=source_root) as scratch:
-            repo = pathlib.Path(scratch) / "repo"
-            base = git_fixture(repo, pathlib.Path(scratch), source_root, manifest_data)
-            shown = run(["git", "-C", str(repo), "show",
-                         "%s:scripts/coachman-contract.sh" % base], text=False)
-            honest = pathlib.Path(scratch) / "honest-contract.sh"
-            honest.write_bytes(shown.stdout)
-            os.chmod(honest, 0o755)
-            for path in ("coachman-contract.sh", "scripts/coachman-contract.sh"):
-                replace_once(repo, path,
-                             "    try:\n        return print_result(check_change(repo, base, head), base, head)",
-                             "    try:\n        return 0")
-            head = commit_fixture(repo, label)
-            neutered = subprocess.run([str(repo / "coachman-contract.sh"), base, head], cwd=repo,
-                                      capture_output=True, text=True)
-            result = subprocess.run([str(honest), base, head], cwd=repo,
-                                    capture_output=True, text=True)
-            ok = (neutered.returncode == 0 and result.returncode == 1 and any(
-                line.startswith("yes fixture-policy ") for line in result.stdout.splitlines()))
-            if control(ok, label, "exits %d/%d" % (neutered.returncode, result.returncode)):
-                passed += 1
-            else:
-                failed += 1
-                if result.stderr:
-                    print("       " + result.stderr.strip().replace("\n", "\n       "))
-                if result.stdout:
-                    print("       " + result.stdout.strip().replace("\n", "\n       "))
-
-    neutered_control()
-
     def merge_control(contract):
         nonlocal passed, failed
         label = "main merge with a contract change repeats the fixture" if contract else "main merge without a contract change keeps the fixture"
@@ -499,12 +320,12 @@ def exercise_self_test(source_root):
             run(["git", "-C", str(repo), "switch", "-q", "-c", "feature"])
             run(["git", "-C", str(repo), "switch", "-q", "main"])
             if contract:
-                replace_once(repo, "scripts/stage.sh", "done abandoned", "done abandoned paused")
-                hint = "scripts/stage.sh"
-                part = "legs-stages"
+                replace_once(repo, "scripts/stage.sh",
+                             "#   exit 4  a terminal stage set by any actor but the postmaster",
+                             "#   exit 4  a terminal stage set by any actor but the postmaster itself")
+                part = "scripts/stage.sh"
             else:
                 (repo / "skills/postmaster/harnesses.md").write_text("new harness\n", encoding="utf-8")
-                hint = None
                 part = None
             commit_fixture(repo, "change on main")
             run(["git", "-C", str(repo), "switch", "-q", "feature"])
@@ -514,8 +335,7 @@ def exercise_self_test(source_root):
                                     capture_output=True, text=True)
             ok = result.returncode == (1 if contract else 0)
             if part:
-                ok = ok and any(line.startswith("yes %s " % part) for line in result.stdout.splitlines())
-                ok = ok and hint in result.stdout and re.search(re.escape(hint) + r":\d+", result.stdout) is not None
+                ok = ok and any(line == "yes %s" % part for line in result.stdout.splitlines())
             else:
                 ok = ok and result.stdout.startswith("no coachman contract change")
             if control(ok, label, "exit %d" % result.returncode):
@@ -536,12 +356,14 @@ def exercise_self_test(source_root):
         with tempfile.TemporaryDirectory(prefix="coachman-contract-", dir=source_root) as scratch:
             repo = pathlib.Path(scratch) / "repo"
             base = git_fixture(repo, pathlib.Path(scratch), source_root, manifest_data)
-            replace_once(repo, "scripts/stage.sh", "done abandoned", "done abandoned paused")
+            replace_once(repo, "scripts/stage.sh",
+                         "#   exit 4  a terminal stage set by any actor but the postmaster",
+                         "#   exit 4  a terminal stage set by any actor but the postmaster itself")
             head = commit_fixture(repo, label)
             result = subprocess.run([str(repo / "coachman-contract.sh"), str(repo), base, head],
                                     cwd=source_root, capture_output=True, text=True)
             ok = result.returncode == 1 and any(
-                line.startswith("yes legs-stages ") for line in result.stdout.splitlines())
+                line == "yes scripts/stage.sh" for line in result.stdout.splitlines())
             if control(ok, label, "exit %d" % result.returncode):
                 passed += 1
             else:
@@ -556,7 +378,6 @@ def exercise_self_test(source_root):
     return 0 if failed == 0 else 1
 
 
-# coachman-contract:fixture-entrypoint:start
 def main():
     args = sys.argv[2:]
     if not args:
@@ -594,5 +415,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-# coachman-contract:fixture-entrypoint:end
 PY

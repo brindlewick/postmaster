@@ -22,7 +22,6 @@
 #   exit 4  a terminal stage set by any actor but the postmaster
 set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
-# coachman-contract:stage-rules:start
 STAGES="dispatched bootstrapped workhorses-running synthesis checkpoint-1 review shipping shipped done abandoned"
 
 set_stage() {  # set_stage <dispatch> <stage> <actor>
@@ -44,7 +43,6 @@ if old == new:
     print("same"); sys.exit(0)
 if old in ("done", "abandoned") and actor != "postmaster":
     print("final\t%s" % old); sys.exit(0)
-# coachman-contract:stage-rules:end
 since = None                                  # when the stage being left was entered
 log = d / "actions.jsonl"
 for line in (log.read_text().splitlines() if log.exists() else []):

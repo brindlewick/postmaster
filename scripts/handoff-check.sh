@@ -13,7 +13,6 @@ F=${1:?usage: handoff-check.sh <handoff-file>}
 [ -f "$F" ] || { echo "handoff-check: no such file: $F" >&2; exit 1; }
 python3 - "$F" <<'PY'
 import sys, re
-# coachman-contract:handoff-completion:start
 required = ["Decisions", "Deferred findings", "Verified by execution", "Unverified",
             "Branches and lanes", "Open questions", "Next leg"]
 text = open(sys.argv[1]).read()
@@ -28,5 +27,4 @@ if bad:
     for s in bad: print("handoff-check: missing or empty section: %s" % s, file=sys.stderr)
     sys.exit(2)
 print("hand-off complete: %d sections" % len(required))
-# coachman-contract:handoff-completion:end
 PY
