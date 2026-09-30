@@ -340,7 +340,8 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
 2. **Tear down** every run-created worktree space from outside them, once the last leg's process
    has exited (`.leg-3-exited`): `<tool>/scripts/host.sh close-run <dispatch>` closes the
    synthesis, workhorse and reviewer scratch spaces, including review clones. On exit 2, a user
-   pane remains open or a launch is still running; stop and report. Then remove the synthesis
+   pane remains open, a launch is still running, or the run's records could not be read; stop
+   and report. Then remove the synthesis
    worktree with `git -C <repo> worktree remove .worktrees/<TICKET>`, never with force unless
    the tree is clean and the card confirmed it, and log `teardown`. The workhorse worktrees are
    the coachman's; if any survive, remove them the same way after preserving any stray file into

@@ -86,8 +86,9 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
 - **Run launches must name their space.** `lane`, `coachman` and `reviewer` launches require
   `--under <dispatch>`. Any launch with `--run <dispatch>` also requires `--under`, so a run
   launch cannot fall back to a top-level space. Project-level launches may omit both.
-- **A finished launch closes its own tab or window** after its marker lands and output rendering
-  ends. Cleanup uses the pane, tab or window IDs `host.sh` recorded when it opened the launch;
+- **A finished launch closes its own tab or window** a short settle delay after its marker
+  lands (`POSTMASTER_HOST_FINISH_DELAY`, 0.2s), not when rendering provably ends. Cleanup uses
+  the pane, tab or window IDs `host.sh` recorded when it opened the launch;
   labels and prompt text never identify ownership. A user pane split into a launch tab or window
   survives: `host.sh` closes only its own pane and leaves the shared tab or window open. The event
   stream and logs stay on disk.
@@ -141,7 +142,8 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   <worktree>` refuses while one runs there, after waiting 15 seconds for one that is just ending.
 - `host.sh stop-run <dispatch>` and `host.sh close-run <dispatch>` cover the synthesis worktree,
   workhorse worktrees in the run config, and reviewer scratches in its round records and action
-  log, including scratch clones that Git does not list as worktrees.
+  log, including scratch clones that Git does not list as worktrees, plus any pane or window
+  still tagged for the run. Either exits 2 when the run's records cannot be read.
 - **It degrades rather than refuses.** If the host cannot place the launch, or its pane has not
   started it within 20 seconds, it runs in the background instead, exactly once, and `host.sh`
   prints `host=none` rather than where it would have been.
@@ -163,7 +165,7 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   launches for that ticket, and each launch's label starts with its role and lane. The synthesis
   worktree space has no spare shell tab: the first launch closes its root tab once its own
   tab exists, and each later tab is opened for a launch. When its marker lands, a launch tab
-  closes after output rendering ends; a user split stays open with the user's pane. The project
+  closes after the settle delay; a user split stays open with the user's pane. The project
   space keeps its shell tab:
   Herdr closes a workspace with its last tab, and refuses the close once a worktree nests under
   it, so host.sh never closes it. The tabs are panes under the run; Herdr 0.9.1 cannot nest one
@@ -227,8 +229,9 @@ with `herdr agent start`. It is a pane whose agent `host.sh` reports. So when it
 - A window's command starts with the tmux server's environment; `host.sh` hands the caller's
   across the same way as for Herdr, and `spawn` passes the caller's `POSTMASTER_*` settings.
 - `host.sh close <worktree>` closes only the recorded pane IDs host.sh opened for that worktree
-  once no launch runs there. A split window stays open with its other panes; an unrecorded pane
-  is never selected by its window name or other text.
+  once no launch runs there. A split window stays open with its other panes and the close
+  reports the refusal (exit 2); an unrecorded pane is never selected by its window name or
+  other text.
 - Sending: `tmux load-buffer` from the file, `tmux paste-buffer -p` so an application that asked
   for bracketed paste gets it, then `tmux send-keys Enter` as a key of its own. Settled means
   the screen has not changed for 10 seconds (`POSTMASTER_HOST_QUIET`).
