@@ -281,6 +281,7 @@ synthesis worktree: <abs path; cut by the postmaster at BASE, the coachman's cwd
 tool: <abs path of the run's pinned postmaster checkout, at the dispatch commit: <tool> in the coachman's runbook>
 postmaster ruling channel: resume the coachman's thread (harnesses.md) with the ruling as the prompt
 coachman contract fixture: pending (the postmaster sets yes or no at the final card)
+contract fixture check: - (the postmaster records the command, commit and score at the final card)
 ```
 <!-- coachman-contract:waybill-template:end -->
 

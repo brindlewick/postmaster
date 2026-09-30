@@ -24,9 +24,9 @@ for line in text.splitlines():
     if m: current = m.group(1); sections.setdefault(current, []); continue
     if current is not None and line.strip(): sections[current].append(line)
 bad = [s for s in required if s not in sections or not sections[s]]
-# coachman-contract:handoff-completion:end
 if bad:
     for s in bad: print("handoff-check: missing or empty section: %s" % s, file=sys.stderr)
     sys.exit(2)
 print("hand-off complete: %d sections" % len(required))
+# coachman-contract:handoff-completion:end
 PY

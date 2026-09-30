@@ -8,6 +8,7 @@
 #
 #   exit 0  no contract change
 #   exit 1  contract change; print each part and changed file:line
+#          (`contract-index` names index-structural lines outside any part)
 #   exit 2  usage, git or contract-index error
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd -P)
@@ -16,6 +17,7 @@ python3 - "$HERE" "$@" <<'PY'
 import os, pathlib, re, shutil, subprocess, sys, tempfile, tomllib
 
 
+# coachman-contract:fixture-detector:start
 INDEX = "docs/coachman-contract.toml"
 HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
@@ -33,10 +35,10 @@ def run(argv, *, cwd=None, check=True, env=None, text=True):
 
 
 def blob(repo, rev, path):
-    p = run(["git", "-C", str(repo), "show", "%s:%s" % (rev, path)], check=False)
+    p = run(["git", "-C", str(repo), "show", "%s:%s" % (rev, path)], check=False, text=False)
     if p.returncode:
         return None
-    return p.stdout
+    return p.stdout.decode("latin-1")
 
 
 def read_index(repo, rev):
@@ -50,6 +52,8 @@ def read_index(repo, rev):
     parts = data.get("parts")
     if not isinstance(parts, list) or not parts:
         raise ContractError("%s at %s must define [[parts]]" % (INDEX, rev))
+    if data.get("version") != 1:
+        raise ContractError("%s at %s must set version = 1" % (INDEX, rev))
     seen = set()
     for part in parts:
         ident = part.get("id")
@@ -74,9 +78,12 @@ def read_index(repo, rev):
 
 def diff_hunks(repo, base, head, path):
     p = run(["git", "-C", str(repo), "diff", "--no-ext-diff", "--no-renames", "--no-color",
-             "--unified=0", base, head, "--", path])
+             "--text", "--unified=0", base, head, "--", path], text=False)
+    out = p.stdout.decode("latin-1")
+    if "\nBinary files " in "\n" + out:
+        return None
     hunks = []
-    for line in p.stdout.splitlines():
+    for line in out.split("\n"):
         m = HUNK.match(line)
         if not m:
             continue
@@ -116,13 +123,17 @@ def changed_ranges_for_manifest(lines):
 
 def manifest_changes(repo, base, head):
     hunks = diff_hunks(repo, base, head, INDEX)
-    if not hunks:
+    if hunks is not None and not hunks:
         return {}
     old_raw, new_raw = blob(repo, base, INDEX), blob(repo, head, INDEX)
-    old_lines = old_raw.splitlines() if old_raw is not None else []
-    new_lines = new_raw.splitlines() if new_raw is not None else []
+    old_lines = old_raw.split("\n") if old_raw is not None else []
+    new_lines = new_raw.split("\n") if new_raw is not None else []
     old_owner, new_owner = changed_ranges_for_manifest(old_lines), changed_ranges_for_manifest(new_lines)
-    old_changed, new_changed = changed_lines(hunks)
+    if hunks is None:
+        old_changed = set(range(1, len(old_lines) + 1))
+        new_changed = set(range(1, len(new_lines) + 1))
+    else:
+        old_changed, new_changed = changed_lines(hunks)
     out = {}
     for number in sorted(old_changed):
         part = old_owner.get(number, "contract-index")
@@ -141,7 +152,6 @@ def region(lines, start, end):
     return set(range(starts[0], ends[0] + 1))
 
 
-# coachman-contract:fixture-detector:start
 def validate_head_mappings(repo, head, data):
     if data is None:
         return
@@ -150,7 +160,7 @@ def validate_head_mappings(repo, head, data):
             source = blob(repo, head, mapping["file"])
             if source is None:
                 raise ContractError("%s at %s maps %s to a missing file" % (INDEX, head, mapping["file"]))
-            if region(source.splitlines(), mapping["start"], mapping["end"]) is None:
+            if region(source.split("\n"), mapping["start"], mapping["end"]) is None:
                 raise ContractError("%s at %s has missing or duplicate markers for %s in %s" %
                                     (INDEX, head, part["id"], mapping["file"]))
 
@@ -177,18 +187,22 @@ def check_change(repo, base, head):
                 paths.add(mapping["file"])
         for path in paths:
             hunks = diff_hunks(repo, base, head, path)
-            if not hunks:
+            if hunks is not None and not hunks:
                 continue
-            old_changed, new_changed = changed_lines(hunks)
             old_source, new_source = blob(repo, base, path), blob(repo, head, path)
             if old_source is None:
                 old_source_lines = []
             else:
-                old_source_lines = old_source.splitlines()
+                old_source_lines = old_source.split("\n")
             if new_source is None:
                 new_source_lines = []
             else:
-                new_source_lines = new_source.splitlines()
+                new_source_lines = new_source.split("\n")
+            if hunks is None:
+                old_changed = set(range(1, len(old_source_lines) + 1))
+                new_changed = set(range(1, len(new_source_lines) + 1))
+            else:
+                old_changed, new_changed = changed_lines(hunks)
             mappings = [mapping for part in versions for mapping in part["implementation"]
                         if mapping["file"] == path]
             old_regions, new_regions = [], []
@@ -353,6 +367,69 @@ def exercise_self_test(source_root):
     run_case("ticket prose naming the contract is not a contract change",
              lambda repo: (repo / "TICKET.md").write_text(
                  "## Problem\n\nThis changes the coachman contract and the markers.\n", encoding="utf-8"))
+
+    def byte_edit(repo, path, before, after):
+        target = repo / path
+        content = target.read_bytes()
+        if before not in content:
+            raise ContractError("self-test fixture is missing %r in %s" % (before, path))
+        target.write_bytes(content.replace(before, after, 1))
+
+    run_case("a NUL byte does not hide an in-region change",
+             lambda repo: (byte_edit(repo, "scripts/stage.sh", b"dispatched bootstrapped",
+                                            b"dispatched\x00 bootstrapped"),
+                           byte_edit(repo, "scripts/stage.sh", b"shipped done abandoned\"",
+                                            b"shipped done abandoned paused\"")),
+             "legs-stages", "scripts/stage.sh")
+
+    def drift_control():
+        nonlocal passed, failed
+        label = "a CR-shifted delimiter-line change is still caught"
+        with tempfile.TemporaryDirectory(prefix="coachman-contract-", dir=source_root) as scratch:
+            repo = pathlib.Path(scratch) / "repo"
+            git_fixture(repo, pathlib.Path(scratch), source_root, manifest_data)
+            byte_edit(repo, "scripts/stage.sh", b"#   exit 4  a terminal stage",
+                      b"#   exit 4\ra terminal stage")
+            base = commit_fixture(repo, "lone CR above the region")
+            byte_edit(repo, "scripts/stage.sh", b"# coachman-contract:stage-rules:start\n",
+                      b"# coachman-contract:stage-rules:start \n")
+            head = commit_fixture(repo, label)
+            result = subprocess.run([str(repo / "coachman-contract.sh"), base, head], cwd=repo,
+                                    capture_output=True, text=True)
+            ok = result.returncode == 1 and any(
+                line.startswith("yes legs-stages ") for line in result.stdout.splitlines())
+            if control(ok, label, "exit %d" % result.returncode):
+                passed += 1
+            else:
+                failed += 1
+                if result.stderr:
+                    print("       " + result.stderr.strip().replace("\n", "\n       "))
+                if result.stdout:
+                    print("       " + result.stdout.strip().replace("\n", "\n       "))
+
+    drift_control()
+
+    def version_control():
+        nonlocal passed, failed
+        label = "an index that does not set version 1 is an error"
+        with tempfile.TemporaryDirectory(prefix="coachman-contract-", dir=source_root) as scratch:
+            repo = pathlib.Path(scratch) / "repo"
+            base = git_fixture(repo, pathlib.Path(scratch), source_root, manifest_data)
+            replace_once(repo, INDEX, "version = 1", "version = 2")
+            head = commit_fixture(repo, label)
+            result = subprocess.run([str(repo / "coachman-contract.sh"), base, head], cwd=repo,
+                                    capture_output=True, text=True)
+            ok = result.returncode == 2 and "version" in result.stderr
+            if control(ok, label, "exit %d" % result.returncode):
+                passed += 1
+            else:
+                failed += 1
+                if result.stderr:
+                    print("       " + result.stderr.strip().replace("\n", "\n       "))
+                if result.stdout:
+                    print("       " + result.stdout.strip().replace("\n", "\n       "))
+
+    version_control()
 
     def merge_control(contract):
         nonlocal passed, failed

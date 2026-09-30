@@ -1182,7 +1182,9 @@ runner() {
   # its caller the moment the pidfile holds a pid: a caller that stops or kills the launch then
   # finds it registered, and its marker still lands.
   trap 'kill -TERM -- "-$cpid" 2>/dev/null || kill -TERM "$cpid" 2>/dev/null' HUP INT TERM
+  # coachman-contract:marker-watcher-call:start
   [ "$mode" != bg ] && [ -n "$marker" ] && watch_exit "$cpid" "$marker"
+  # coachman-contract:marker-watcher-call:end
   if [ "$cap_mode" = systemd ]; then
     watch_cap_events "$systemctl" "$unit" "$event_file" "$cpid" & capwatch=$!
   fi

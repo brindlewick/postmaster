@@ -172,6 +172,7 @@ elif cmd == "short":
     for n in defaults:
         if n not in got:
             print(n)
+# coachman-contract:leg-dispatch:start
 elif cmd == "legs" and args[0] == "--line":
     legs(args[1])
 elif cmd == "legs":
@@ -192,6 +193,7 @@ elif cmd == "legs":
         print('the waybill says "%s", and the ticket\'s check printed "%s"' % (found[0].strip(), args[1].strip()))
         sys.exit(2)
     legs(found[0])
+# coachman-contract:leg-dispatch:end
 PY
 core() { python3 -I -c "$CORE" "$HERE" "$@"; }  # core <table> list | resolve [<text>...] | short <line> | legs <waybill> [<expect>] | legs --line <line>
 

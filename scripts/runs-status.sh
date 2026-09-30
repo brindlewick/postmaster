@@ -50,6 +50,7 @@ for run in sorted(os.listdir(root)):
                      for pat in (".*-ready", ".leg-*-done", ".leg-*-exited", ".waiting-on-user")
                      for p in glob.glob(os.path.join(d, pat)))
 # coachman-contract:marker-poll:end
+# coachman-contract:completion-poll:start
     newest = 0
     for dp, dn, fn in os.walk(d):
         for f in fn:
@@ -57,7 +58,6 @@ for run in sorted(os.listdir(root)):
             try: newest = max(newest, os.path.getmtime(os.path.join(dp, f)))
             except OSError: pass
     idle_min = int((now - newest) / 60) if newest else -1
-# coachman-contract:completion-poll:start
     done = ".leg-%s-done" % leg in markers
     exited = ".leg-%s-exited" % leg in markers
     if stage in ("done", "abandoned"): nxt = "-"

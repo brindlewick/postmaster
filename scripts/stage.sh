@@ -31,7 +31,6 @@ set_stage() {  # set_stage <dispatch> <stage> <actor>
   case $new in
     done|abandoned) [ "$actor" = postmaster ] || { echo "stage: only the postmaster sets $new" >&2; return 4; } ;;
   esac
-# coachman-contract:stage-rules:end
   [ -f "$d/manifest.json" ] || { echo "stage: no manifest at $d/manifest.json" >&2; return 1; }
   local plan
   plan=$(python3 - "$d" "$new" "$actor" <<'PY'
@@ -45,6 +44,7 @@ if old == new:
     print("same"); sys.exit(0)
 if old in ("done", "abandoned") and actor != "postmaster":
     print("final\t%s" % old); sys.exit(0)
+# coachman-contract:stage-rules:end
 since = None                                  # when the stage being left was entered
 log = d / "actions.jsonl"
 for line in (log.read_text().splitlines() if log.exists() else []):

@@ -1,3 +1,5 @@
+# Structural lines (this version line, part boundaries) report as contract-index,
+# the checker's label for index lines outside any part. version must stay 1.
 version = 1
 
 [[parts]]
@@ -73,6 +75,11 @@ start = "# coachman-contract:marker-writer-final:start"
 end = "# coachman-contract:marker-writer-final:end"
 
 [[parts.implementation]]
+file = "scripts/host.sh"
+start = "# coachman-contract:marker-watcher-call:start"
+end = "# coachman-contract:marker-watcher-call:end"
+
+[[parts.implementation]]
 file = "scripts/runs-status.sh"
 start = "# coachman-contract:marker-poll:start"
 end = "# coachman-contract:marker-poll:end"
@@ -103,7 +110,8 @@ checks; `## Team` with workhorses, reviewers, each configured lens reviewer list
 CHECKPOINT_MODE and MERGE_AUTHORITY; and `## Dispatch` with ticket name/title, dispatch
 path, synthesis worktree, pinned tool path and postmaster ruling channel. It records the
 fixture requirement as pending at dispatch because the final branch does not yet exist; the
-postmaster replaces pending with yes or no after checking the final branch. Ticket content
+postmaster replaces pending with yes or no after checking the final branch, and records the
+check's command, tested commit and score on the waybill's check line. Ticket content
 is copied verbatim and is not an input to contract detection.
 """
 
@@ -164,6 +172,11 @@ start = "# coachman-contract:leg-rules:start"
 end = "# coachman-contract:leg-rules:end"
 
 [[parts.implementation]]
+file = "scripts/turnpikes.sh"
+start = "# coachman-contract:leg-dispatch:start"
+end = "# coachman-contract:leg-dispatch:end"
+
+[[parts.implementation]]
 file = "skills/postmaster/coachman.md"
 start = "<!-- coachman-contract:leg-table:start -->"
 end = "<!-- coachman-contract:leg-table:end -->"
@@ -210,14 +223,16 @@ id = "fixture-policy"
 title = "Fixture requirement and repeat rule"
 definition = """
 Dispatch records the fixture requirement as pending because there is no completed branch
-to classify yet. At the final card, the postmaster runs coachman-contract.sh from the run's
-pinned tool against the target repository's dispatch BASE and final branch. Yes requires a
-clean fixture run on that final branch before the merge word. Record the command, the
-answer, the tested commit and, when a fixture runs, its score on the waybill's fixture
-field and in a note. If the branch moves before a clean score exists, compare dispatch BASE
-with the final branch again. If main is merged into a branch after a clean fixture, compare
-the previously scored commit with the final branch: yes repeats the fixture from the final
-branch; no preserves the clean result. The decision is derived from changed contract regions,
+to classify yet. At the final card, the postmaster runs the final branch's own copy of
+coachman-contract.sh against the target repository's dispatch BASE and final branch: a
+change that adds or edits the checker is classified by neither the pinned tool nor the live
+checkout. Yes requires a clean fixture run on that final branch before the merge word.
+Record the answer on the waybill's fixture line and the command, the tested commit and,
+when a fixture runs, its score on the waybill's check line and in a note. If the branch
+moves before a clean score exists, compare dispatch BASE with the final branch again. If
+main is merged into a branch after a clean fixture, compare the previously scored commit
+with the final branch: yes repeats the fixture from the final branch; no preserves the
+clean result. The decision is derived from changed contract regions,
 never from ticket prose or a whole-file list.
 """
 
