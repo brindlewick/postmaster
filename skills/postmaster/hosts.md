@@ -117,9 +117,12 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   after its last `/`, so a provider prefix never pushes the round past the ellipsis. A lane
   or role comes first so it remains visible on a narrow sidebar. `postmaster` is the
   project-level interactive role. `host.sh run --under <dispatch>` puts the ticket on the
-  synthesis worktree space and every launch label on its tab or window, pane title, and
-  harness thread name (`POSTMASTER_LAUNCH_NAME`, `harnesses.md`). A title can contain shell
-  syntax, so take every value from `host.sh name`; never type it into a shell.
+  synthesis worktree space and every launch label on its tab or window, pane title, harness
+  thread name (`POSTMASTER_LAUNCH_NAME`, `harnesses.md`), and Raindrop event name
+  (`RAINDROP_EVENT_METADATA.eventName`). Interactive `spawn` forms receive the same merged
+  metadata directly; a new tmux session drops its copy after the child starts so a later window
+  cannot inherit the wrong launch name. A title can contain shell syntax, so take every value
+  from `host.sh name`; never type it into a shell.
 - **The pane shows the stream, not the JSON**: `<tool>/scripts/view-stream.sh` renders each event
   of interest as wrapped lines — what the agent says and runs, in full — each with its time.
 - **Every launch is registered while it runs**, under `POSTMASTER_HOST_STATE` (default

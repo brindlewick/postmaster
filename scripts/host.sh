@@ -1590,7 +1590,7 @@ tmux_target() {  # tmux_target <handle>: the one window with that name, in any s
 }
 
 spawn_cmd() {
-  local handle=${1:-} cwd=${2:-} label="" v err code placed space tab pane kind cmd a session win
+  local handle=${1:-} cwd=${2:-} label="" v err code placed space tab pane kind cmd a session win metadata
   [ -n "$handle" ] && [ -n "$cwd" ] || die "usage: host.sh spawn <handle> <cwd> [--label <text>] -- <command...>"
   shift 2
   while [ $# -gt 0 ]; do
@@ -1601,9 +1601,15 @@ spawn_cmd() {
   [ -d "$cwd" ] || die "no such directory: $cwd"
   cwd=$(CDPATH= cd -P -- "$cwd" && pwd -P); label=$(clean "${label:-$handle}"); handle=$(handle_of "$handle")
   # The caller's own settings for the flow reach the session, as they reach every launch.
+  # The generated label is also the Raindrop eventName for every interactive harness. Unknown
+  # integrations ignore the variable; integrations that read it get the same launch identity.
+  metadata=$("$HERE/raindrop-event-name.sh" "$label") \
+    || die "cannot add the interactive launch name to RAINDROP_EVENT_METADATA"
   local tmux_env=()
   PLACE_ENV=()
   for v in $(compgen -e | grep '^POSTMASTER_'); do PLACE_ENV+=(--env "$v=${!v}"); tmux_env+=(-e "$v=${!v}"); done
+  PLACE_ENV+=(--env "RAINDROP_EVENT_METADATA=$metadata")
+  tmux_env+=(-e "RAINDROP_EVENT_METADATA=$metadata")
   case $(detect) in
     herdr)
       herdr agent get "$handle" >/dev/null 2>&1 && die "a live Herdr agent is already named $handle; spawn under another handle"
@@ -1633,6 +1639,10 @@ spawn_cmd() {
         win=$(tmux new-window -d -P -F '#{window_id}' -t "=$session:" ${tmux_env[@]+"${tmux_env[@]}"} -n "$handle" -c "$cwd" "$@")
       else
         win=$(tmux new-session -d -P -F '#{window_id}' -s "$session" ${tmux_env[@]+"${tmux_env[@]}"} -n "$handle" -c "$cwd" "$@")
+        # new-session -e writes the session environment. The child already has its copy; drop
+        # the session copy so a later window gets its own launch name instead of inheriting this one.
+        tmux set-environment -u -t "$session" RAINDROP_EVENT_METADATA \
+          || die "cannot keep one launch's Raindrop metadata off the tmux session"
       fi
       [ -n "$win" ] || die "tmux could not start $handle"
       tmux set-option -w -t "$win" automatic-rename off >/dev/null 2>&1
@@ -2880,6 +2890,8 @@ PY
   check "Herdr: spawn starts the agent in a tab of the repository's own space" \
     'grep -qx "tab${T}rename${T}w1:t1${T}postmaster" <<<"$(calls herdr)" && grep -qx "agent${T}start${T}postmaster-repo${T}--kind${T}claude${T}--pane${T}p2${T}--${T}--model${T}m" <<<"$(calls herdr)"' "$(calls herdr)"
   check "with the caller's POSTMASTER_ settings in its pane" 'grep -qF -- "--env${T}POSTMASTER_CONFIG=/elsewhere/config.toml" <<<"$(calls herdr | grep "^workspace${T}create")"'
+  check "Herdr: every interactive harness receives its launch label as Raindrop eventName" \
+    'grep -qF -- "--env${T}RAINDROP_EVENT_METADATA={\"eventName\":\"$POSTMASTER_LABEL\"}" <<<"$(calls herdr)"'
   check "the postmaster takes the project's first tab, leaving no empty shell beside it" \
     'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); w=s[\"open\"][sys.argv[2]]; tabs=s[\"spaces\"][w][\"tabs\"]; sys.exit(0 if len(tabs)==1 and s[\"tabs\"][tabs[0]][\"label\"]==\"postmaster\" else 1)" "$tmp/stub/herdr.json" "$repo"'
   hs "$STUBS" -- spawn postmaster-repo "$repo" -- claude >/dev/null 2>&1; rc=$?
@@ -2909,6 +2921,14 @@ PY
     'grep -qx "agent${T}wait${T}postmaster-repo${T}--timeout${T}5000" <<<"$(calls herdr)" && grep -qx "agent${T}read${T}postmaster-repo${T}--source${T}recent-unwrapped${T}--lines${T}7" <<<"$(calls herdr)"'
   hs "$STUBS" POSTMASTER_HOST=tmux POSTMASTER_CONFIG=/elsewhere/config.toml -- spawn postmaster-repo "$repo" -- claude >/dev/null
   check "tmux: spawn passes the caller's POSTMASTER_ settings to the window" 'grep -qx "POSTMASTER_CONFIG=/elsewhere/config.toml" "$tmp/stub/win-1.env"'
+  check "tmux: every interactive harness receives its launch handle as Raindrop eventName" \
+    'grep -qx "RAINDROP_EVENT_METADATA={\"eventName\":\"postmaster-repo\"}" "$tmp/stub/win-1.env"'
+  check "tmux: a new session does not retain one child's Raindrop metadata" \
+    'grep -q "^set-environment${T}-u${T}-t${T}postmaster-$rname${T}RAINDROP_EVENT_METADATA$" <<<"$(calls tmux)"'
+  hs "$STUBS" POSTMASTER_HOST=tmux 'RAINDROP_EVENT_METADATA={"userId":"kept","properties":{"role":"postmaster"},"eventName":"old"}' -- \
+    spawn postmaster-other "$repo" --label "other · postmaster" -- claude >/dev/null
+  check "tmux: interactive metadata keeps caller fields and replaces eventName" \
+    'grep -qx "RAINDROP_EVENT_METADATA={\"userId\":\"kept\",\"properties\":{\"role\":\"postmaster\"},\"eventName\":\"other · postmaster\"}" "$tmp/stub/win-2.env"'
   hs "$STUBS" POSTMASTER_HOST=tmux -- send postmaster-repo "$tmp/msg.txt" >/dev/null
   a=$(calls tmux | awk -F'\t' '$1 ~ /^(load-buffer|paste-buffer|send-keys)$/ {printf "%s%s ", $1, ($1 == "paste-buffer" && $2 == "-p") ? "(-p)" : ""}')
   check "tmux: send pastes bracketed, then presses Enter as its own key" '[ "$a" = "load-buffer paste-buffer(-p) send-keys " ]' "$a"

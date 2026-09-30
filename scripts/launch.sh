@@ -32,6 +32,9 @@
 # and a relative path is read from the live config's directory, under --run too. It is shell,
 # sourced last, once the command, its directory and its stdin are fixed, so its assignments
 # reach the harness and not this script's choices; it runs as code, and is the user's to write.
+# When the host supplies a launch name, that same name is merged into the child's
+# RAINDROP_EVENT_METADATA as eventName after the env file is sourced. Existing metadata fields
+# survive, the Postmaster name wins, and every harness receives the same launch metadata.
 # The events stream goes to stdout; the caller redirects and backgrounds. `review` invokes a
 # lane's own bug-review form against <base>...HEAD, at the harness's top level. --last names the
 # file a harness writes its final message to, where the harness supports it (codex -o). `skill`
@@ -530,6 +533,79 @@ EOF
     && ok "untracked scratch files do not block a review" \
     || fail "untracked scratch files do not block a review"
 
+  # The executable interface, not the implementation text: a real shell env file is sourced,
+  # then the child reports the environment and argv it actually received.
+  printf 'EXTRA=from-sourced-file\n' > "$tmp/extra.env"
+  cat > "$tmp/raindrop.env" <<EOF
+TOKEN=expanded-secret
+ANTHROPIC_AUTH_TOKEN="\$TOKEN"
+. "$tmp/extra.env"
+DYNAMIC=\$(printf computed)
+PROBE=from-env # a shell comment remains a comment
+RAINDROP_EVENT_METADATA='{"userId":"kept","properties":{"team":"postmaster"},"eventName":"old"}'
+EOF
+  cat > "$tmp/raindrop.toml" <<EOF
+[lanes.named]
+harness = "claude"
+model = "claude-model"
+env_file = "$tmp/raindrop.env"
+
+[lanes.pi]
+harness = "pi"
+model = "pi-model"
+env_file = "$tmp/raindrop.env"
+
+[lanes.plain]
+harness = "claude"
+model = "claude-model"
+
+[team]
+coachman = { harness = "claude", model = "coach-model" }
+EOF
+  for h in claude pi; do
+    cat > "$tmp/bin/$h" <<'EOF'
+#!/bin/sh
+printf 'argv=%s\nauth=%s\nextra=%s\ndynamic=%s\nprobe=%s\nrain=%s\n' "$*" "${ANTHROPIC_AUTH_TOKEN:-}" "${EXTRA:-}" "${DYNAMIC:-}" "${PROBE:-}" "${RAINDROP_EVENT_METADATA-<unset>}"
+EOF
+    chmod +x "$tmp/bin/$h"
+  done
+  launch_name='#123, Universal Raindrop metadata · alpha'
+  out=$(env -u RAINDROP_EVENT_METADATA POSTMASTER_LAUNCH_NAME="$launch_name" POSTMASTER_CONFIG="$tmp/raindrop.toml" PATH="$tmp/bin:$PATH" \
+    "$self" launch named "$tmp/wt" "$tmp/prompt.txt" 2>"$tmp/err"); rc=$?
+  python3 - "$out" "$launch_name" <<'PY'
+import json, sys
+lines = dict(line.split("=", 1) for line in sys.argv[1].splitlines() if "=" in line)
+metadata = json.loads(lines.get("rain", "null"))
+ok = (lines.get("auth") == "expanded-secret" and lines.get("extra") == "from-sourced-file"
+      and lines.get("dynamic") == "computed" and lines.get("probe") == "from-env"
+      and metadata == {"userId": "kept", "properties": {"team": "postmaster"}, "eventName": sys.argv[2]})
+raise SystemExit(0 if ok else 1)
+PY
+  json_ok=$?
+  [ $rc -eq 0 ] && [ $json_ok -eq 0 ] \
+    && ok "a non-Pi child keeps shell env-file semantics and receives merged launch metadata" \
+    || fail "a non-Pi child keeps shell env-file semantics and receives merged launch metadata"
+  out=$(env -u RAINDROP_EVENT_METADATA POSTMASTER_LAUNCH_NAME="$launch_name" POSTMASTER_CONFIG="$tmp/raindrop.toml" PATH="$tmp/bin:$PATH" \
+    "$self" resume pi "$tmp/wt" thread-1 "$tmp/prompt.txt" 2>"$tmp/err"); rc=$?
+  rain=$(printf '%s\n' "$out" | sed -n 's/^rain=//p')
+  python3 -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if d.get("eventName")==sys.argv[2] and d.get("userId")=="kept" else 1)' "$rain" "$launch_name"
+  json_ok=$?
+  [ $rc -eq 0 ] && [ $json_ok -eq 0 ] && case $out in *"--name $launch_name"*) true ;; *) false ;; esac \
+    && ok "a Pi resume receives the same --name and merged launch metadata" \
+    || fail "a Pi resume receives the same --name and merged launch metadata"
+  original=' {"userId":"untouched","eventName":"caller"} '
+  out=$(env -u POSTMASTER_LAUNCH_NAME RAINDROP_EVENT_METADATA="$original" POSTMASTER_CONFIG="$tmp/raindrop.toml" PATH="$tmp/bin:$PATH" \
+    "$self" launch plain "$tmp/wt" "$tmp/prompt.txt" 2>"$tmp/err"); rc=$?
+  rain=$(printf '%s\n' "$out" | sed -n 's/^rain=//p')
+  [ $rc -eq 0 ] && [ "$rain" = "$original" ] \
+    && ok "without a Postmaster name, existing metadata is byte-for-byte unchanged" \
+    || fail "without a Postmaster name, existing metadata is byte-for-byte unchanged"
+  out=$(env RAINDROP_EVENT_METADATA=not-json POSTMASTER_LAUNCH_NAME="$launch_name" POSTMASTER_CONFIG="$tmp/raindrop.toml" PATH="$tmp/bin:$PATH" \
+    "$self" launch plain "$tmp/wt" "$tmp/prompt.txt" 2>"$tmp/err"); rc=$?
+  [ $rc -eq 1 ] && [ -z "$out" ] && grep -q 'not valid JSON' "$tmp/err" \
+    && ok "invalid existing metadata refuses the named launch before the child starts" \
+    || fail "invalid existing metadata refuses the named launch before the child starts"
+
   echo
   [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }
   echo "self-test: $fails control(s) misbehaved"; exit 1
@@ -848,12 +924,19 @@ if [ "$CMD" = review ] && [ "$HARNESS" = codex ] && [ -n "$LAST" ]; then
   rm -f -- "$LAST" || die "cannot clear the codex review output file: $LAST"
 fi
 # The env file reaches the harness's environment only: the command above is already built.
-# The host-provided event-stream path is not the env file's to change: it decides which
-# session the export hook retains, so it is restored after sourcing.
+# The host-provided event-stream path and launch name are not the env file's to change. The
+# stream decides which session the export hook retains; the name becomes the Raindrop event.
+postmaster_launch_name=${POSTMASTER_LAUNCH_NAME:-}
+postmaster_raindrop_helper=$HERE/raindrop-event-name.sh
 if [ -n "${ENV_FILE:-}" ]; then
   saved_event_stream=${POSTMASTER_EVENT_STREAM:-}
   set -a; . "$ENV_FILE"; set +a
   POSTMASTER_EVENT_STREAM=$saved_event_stream
+fi
+if [ -n "$postmaster_launch_name" ]; then
+  RAINDROP_EVENT_METADATA=$("$postmaster_raindrop_helper" "$postmaster_launch_name") \
+    || die "cannot add the Postmaster launch name to RAINDROP_EVENT_METADATA"
+  export RAINDROP_EVENT_METADATA
 fi
 unset POSTMASTER_LAUNCH_NAME   # the thread's own launches are named by their own host.sh call
 "${cmd[@]}"
