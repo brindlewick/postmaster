@@ -3171,6 +3171,7 @@ PY
   pin_here=$(CDPATH= cd -P -- "$(dirname -- "$SELF")/.." && pwd -P)
   mkdir -p "$tmp/pin-d/logs" && cp "$leg_d/run.json" "$tmp/pin-d/run.json"
   printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/pin-d/manifest.json"
+  printf '# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, pin\nsynthesis worktree: %s\n' "$leg_wt" > "$tmp/pin-d/brief.md"
   printf 'pin retry prompt\n' > "$tmp/pin-d/prompt.txt"
   python3 - "$tmp/pin-d/run.json" "$pin_here" <<'PY'
 import json, sys
