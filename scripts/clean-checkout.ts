@@ -13,14 +13,17 @@
 // The checkout holds only that branch's content: no .worktrees/, no uncommitted files. A
 // git worktree, rather than an archive export, so gates that read git metadata keep
 // working. Separate commands, rather than one shell string joined with &&, so a failed
-// preparation can never be hidden by a later statement.
+// preparation can never be hidden by a later statement. Each command runs in a process
+// group of its own with verify.sh's bound (1800s, or CLEAN_CHECKOUT_TIMEOUT for a test);
+// the whole group is killed when the bound is reached, and a timeout fails with 124.
 //
 //   exit 0..255  the failing command's exit, or the last command's when all passed; a
 //                cleanup that needed its fallback but left nothing behind is on stderr
 //                and does not change the exit
 //   exit 1       usage, no such repo or branch, a checkout that could not be made (no
 //                command is run), or cleanup residue left behind after passing commands
-import { spawnSync } from "node:child_process";
+//   exit 124     a command outlived its bound (its whole process group was killed)
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdtempSync, realpathSync, rmSync, rmdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
@@ -74,11 +77,72 @@ const scrubbedEnv = (): Record<string, string | undefined> =>
 const gitOk = (repo: string, args: string[], env: Record<string, string | undefined>): boolean =>
   spawnSync("git", ["-C", repo, ...args], { stdio: "ignore", env }).status === 0;
 
-export const cleanCheckout = (
+// verify.sh's bound, not a new one: each command gets 1800s unless the caller overrides it
+// for a test. A timeout kills the command's whole process group and fails with 124, the
+// timeout(1) convention: a timeout is a failure, never a pass.
+const DEFAULT_TIMEOUT_SECS = 1800;
+const TIMEOUT_EXIT = 124;
+
+const timeoutSecs = (): number => {
+  const raw = process.env.CLEAN_CHECKOUT_TIMEOUT;
+  if (raw === undefined) return DEFAULT_TIMEOUT_SECS;
+  const n = Number(raw);
+  if (Number.isInteger(n) && n > 0) return n;
+  process.stderr.write(`clean-checkout: ignoring invalid CLEAN_CHECKOUT_TIMEOUT ${JSON.stringify(raw)}\n`);
+  return DEFAULT_TIMEOUT_SECS;
+};
+
+const runBounded = (
+  command: string,
+  checkoutPath: string,
+  env: Record<string, string | undefined>,
+  timeout: number,
+): Promise<number> =>
+  new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn("bash", ["-e", "-o", "pipefail", "-c", command], {
+        cwd: checkoutPath,
+        stdio: "inherit",
+        env,
+        detached: true,
+      });
+    } catch (error) {
+      process.stderr.write(`clean-checkout: ${String(error)}\n`);
+      resolve(1);
+      return;
+    }
+    let settled = false;
+    const timer = setTimeout(() => {
+      process.stderr.write(`clean-checkout: timed out after ${timeout}s\n`);
+      finish(TIMEOUT_EXIT);
+    }, timeout * 1000);
+    const finish = (code: number): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // The whole group goes, left-behind children included, as verify.sh does.
+      if (child.pid !== undefined) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch {
+          // Already gone.
+        }
+      }
+      resolve(code);
+    };
+    child.on("error", (error) => {
+      process.stderr.write(`clean-checkout: ${error.message}\n`);
+      finish(1);
+    });
+    child.on("close", (code) => finish(code ?? 1));
+  });
+
+export const cleanCheckout = async (
   repoArg: string,
   branch: string,
   ...commands: string[]
-): CleanCheckoutResult => {
+): Promise<CleanCheckoutResult> => {
   if (!repoArg || !branch || commands.length === 0 || commands.some((c) => !c))
     throw new Error("repo, branch and at least one command are required");
 
@@ -116,14 +180,9 @@ export const cleanCheckout = (
   if (registered) {
     // Each command runs on its own, in turn, so a failed preparation can never be hidden
     // by a later statement the way one shell string with `&&` and `;` would hide it.
+    const timeout = timeoutSecs();
     for (const command of commands) {
-      const run = spawnSync("bash", ["-e", "-o", "pipefail", "-c", command], {
-        cwd: checkoutPath,
-        stdio: "inherit",
-        env,
-      });
-      if (run.error) process.stderr.write(`clean-checkout: ${run.error.message}\n`);
-      exitCode = status(run);
+      exitCode = await runBounded(command, checkoutPath, env, timeout);
       if (exitCode !== 0) break;
     }
   }
@@ -178,7 +237,7 @@ if (import.meta.main) {
     process.exitCode = 1;
   } else {
     try {
-      process.exitCode = cleanCheckout(args[0], args[1], ...args.slice(2)).exitCode;
+      process.exitCode = (await cleanCheckout(args[0], args[1], ...args.slice(2))).exitCode;
     } catch (error) {
       process.stderr.write(`clean-checkout: ${String(error)}\n`);
       process.exitCode = 1;
