@@ -6,6 +6,7 @@
 # script's own tree when that is not a git checkout at all, as with an installed package.
 #
 #   link-skills.sh [--dry-run]   link every skill for every installed harness with a skills folder
+#   link-skills.sh --check       report missing or blocked links without changing anything
 #   link-skills.sh --remove      remove the links to this checkout's skills, and nothing else
 #   link-skills.sh --self-test
 #
@@ -18,8 +19,8 @@
 # link belongs, or a link that points anywhere else, is named, and then nothing at all is
 # changed, so the user can move it and run this again.
 #
-#   exit 0  every link is in place, or would be (--dry-run), or is removed (--remove)
-#   exit 1  usage, no skills in the checkout, a bare main checkout, or something in the way
+#   exit 0  every link is in place, would be (--dry-run), or is removed (--remove); --check is complete
+#   exit 1  usage, no skills in the checkout, a bare main checkout, or something in the way; --check is incomplete
 set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 HARNESSES="claude codex grok agy muse pi mimo"
@@ -105,6 +106,29 @@ make_links() {  # make_links <root> <dry>
   done <<< "$p"
 }
 
+check_links() {  # check_links <root>: report whether every planned link is present; never change anything
+  local root=$1 p line verdict a b c problems=0 planned=0
+  p=$(plan "$root") || return 1
+  while IFS= read -r line; do
+    IFS=$'\t' read -r verdict a b c <<< "$line"
+    case $verdict in
+      link)       printf 'MISSING LINK    %s -> %s (%s)\n' "$a" "$b" "$c"; problems=1; planned=1 ;;
+      in-the-way) printf 'IN THE WAY      %s is %s\n' "$a" "$b"; problems=1; planned=1 ;;
+      linked|shared) report "$line"; planned=1 ;;
+      *)          report "$line" ;;
+    esac
+  done <<< "$p"
+  if [ "$problems" -eq 1 ]; then
+    printf 'link-skills: to install missing links after resolving any blockers, run: %q\n' "$HERE/link-skills.sh"
+    return 1
+  fi
+  if [ "$planned" -eq 0 ]; then
+    echo 'link-skills: no harness skills folders found; nothing was changed'
+    return 0
+  fi
+  echo 'link-skills: all skills are linked; nothing was changed'
+}
+
 remove_links() {  # remove_links <root>: remove the links that point at <root>'s skills; leave everything else
   local root=$1 h folder seen="" skill name path
   for h in $HARNESSES; do
@@ -126,9 +150,10 @@ remove_links() {  # remove_links <root>: remove the links that point at <root>'s
 case ${1:-} in
   "") ROOT=$(checkout_root "$(dirname "$HERE")") || exit 1; make_links "$ROOT" 0; exit $? ;;
   --dry-run) ROOT=$(checkout_root "$(dirname "$HERE")") || exit 1; make_links "$ROOT" 1; exit $? ;;
+  --check) ROOT=$(checkout_root "$(dirname "$HERE")") || exit 1; check_links "$ROOT"; exit $? ;;
   --remove) ROOT=$(checkout_root "$(dirname "$HERE")") || exit 1; remove_links "$ROOT"; exit $? ;;
   --self-test) ;;
-  *) echo "usage: link-skills.sh [--dry-run] | --remove | --self-test" >&2; exit 1 ;;
+  *) echo "usage: link-skills.sh [--dry-run | --check] | --remove | --self-test" >&2; exit 1 ;;
 esac
 
 # --- self-test ----------------------------------------------------------------------------
@@ -151,7 +176,46 @@ fails=0
 ok()   { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/         /'; fails=$((fails+1)); }
 state() { ls -A "$HOME"; for p in "$C"/* "$A"/*; do if [ -e "$p" ] || [ -L "$p" ]; then printf '%s %s\n' "$p" "$(readlink "$p")"; fi; done; }
+state_at() { local home=$1 p; ls -A "$home"; for p in "$home/.claude/skills"/* "$home/.agents/skills"/*; do if [ -e "$p" ] || [ -L "$p" ]; then printf '%s %s\n' "$p" "$(readlink "$p")"; fi; done; }
 links_to() { [ -L "$1" ] && [ "$(readlink "$1")" = "$2" ]; }
+
+echo "--check: the same command reports missing links and passes when complete"
+check_tool=$tmp/check-tool
+check_home=$tmp/check-home
+mkdir -p "$check_tool/scripts" "$check_home" || exit 1
+check_tool=$(cd -P "$check_tool" && pwd); check_home=$(cd -P "$check_home" && pwd)
+cp "$HERE/link-skills.sh" "$check_tool/scripts/link-skills.sh" && cp -R "$TOOL/skills" "$check_tool/skills" \
+  && chmod +x "$check_tool/scripts/link-skills.sh" || exit 1
+check_script=$check_tool/scripts/link-skills.sh
+printf -v check_run '%q' "$check_script"
+before=$(state_at "$check_home"); out=$(HOME="$check_home" "$check_script" --check 2>&1); rc=$?
+if [ $rc -eq 1 ] && grep -qF "MISSING LINK    $check_home/.claude/skills/postmaster" <<< "$out" \
+   && grep -qF "run: $check_run" <<< "$out" && [ "$(state_at "$check_home")" = "$before" ]; then
+  ok "a missing link is named, the install command is shown, and --check changes nothing"
+else fail "a missing link is named, the install command is shown, and --check changes nothing (exit $rc)" "$out"; fi
+blocked_path=$check_home/.claude/skills/postmaster
+mkdir -p "$(dirname "$blocked_path")" && printf 'keep this file\n' > "$blocked_path" || exit 1
+before=$(state_at "$check_home"); out=$(HOME="$check_home" "$check_script" --check 2>&1); rc=$?
+if [ $rc -eq 1 ] && grep -qF "IN THE WAY      $blocked_path is a file" <<< "$out" \
+   && grep -qF "run: $check_run" <<< "$out" && [ "$(state_at "$check_home")" = "$before" ]; then
+  ok "a blocked path is named, the install command is shown, and --check changes nothing"
+else fail "a blocked path is named, the install command is shown, and --check changes nothing (exit $rc)" "$out"; fi
+rm -- "$blocked_path" || exit 1
+HOME="$check_home" "$check_script" >/dev/null 2>&1 || exit 1
+before=$(state_at "$check_home"); out=$(HOME="$check_home" "$check_script" --check 2>&1); rc=$?
+if [ $rc -eq 0 ] && grep -qF 'all skills are linked' <<< "$out" && [ "$(state_at "$check_home")" = "$before" ]; then
+  ok "a complete set passes through the same --check command without changes"
+else fail "a complete set passes through the same --check command without changes (exit $rc)" "$out"; fi
+none_bin=$tmp/none-bin; none_home=$tmp/none-home
+mkdir -p "$none_bin" "$none_home" || exit 1
+for t in bash env git readlink dirname basename sed; do
+  p=$(type -P "$t") || { echo "self-test: $t is not on PATH" >&2; exit 1; }
+  ln -s "$p" "$none_bin/$t"
+done
+before=$(state_at "$none_home"); out=$(HOME="$none_home" PATH="$none_bin" "$check_script" --check 2>&1); rc=$?
+if [ $rc -eq 0 ] && grep -qF 'no harness skills folders found' <<< "$out" && [ "$(state_at "$none_home")" = "$before" ]; then
+  ok "with no harness installed, --check says so and changes nothing"
+else fail "with no harness installed, --check says so and changes nothing (exit $rc)" "$out"; fi
 
 echo "installing: every skill, for every installed harness with a skills folder"
 out=$(make_links "$TOOL" 0 2>&1); rc=$?
@@ -161,14 +225,14 @@ if [ $rc -eq 0 ] && links_to "$C/postmaster" "$TOOL/skills/postmaster" && links_
 else fail "each skill is a link from claude's folder and from ~/.agents/skills to the checkout (exit $rc)" "$out"; fi
 [ "$(ls -A "$HOME" | tr '\n' ' ')" = ".agents .claude " ] \
   && ok "nothing else is made, for a harness not installed or with no skills folder" || fail "nothing else is made" "$(ls -A "$HOME")"
-printf '%s\n' "$out" | grep -qF "shared folder   pi reads $A, linked for another harness" \
+grep -qF "shared folder   pi reads $A, linked for another harness" <<<"$out" \
   && ok "harnesses that read one folder get one link there" || fail "harnesses that read one folder get one link there" "$out"
-printf '%s\n' "$out" | grep -qF "no skills folder agy: its brief names $TOOL/skills/postmaster/SKILL.md by absolute path" \
+grep -qF "no skills folder agy: its brief names $TOOL/skills/postmaster/SKILL.md by absolute path" <<<"$out" \
   && ok "a harness with no skills folder is named with the absolute path its brief gives" || fail "a harness with no skills folder is named" "$out"
 copies=$(for p in "$C"/* "$A"/*; do [ -L "$p" ] || printf '%s\n' "$p"; done)
 [ -z "$copies" ] && ok "nothing in a skills folder is a copy" || fail "nothing in a skills folder is a copy" "$copies"
 before=$(state); out=$(make_links "$TOOL" 0 2>&1); rc=$?
-[ $rc -eq 0 ] && [ "$(state)" = "$before" ] && ! printf '%s\n' "$out" | grep -q '^linked ' \
+[ $rc -eq 0 ] && [ "$(state)" = "$before" ] && ! grep -q '^linked ' <<<"$out" \
   && ok "running it again changes nothing" || fail "running it again changes nothing (exit $rc)" "$out"
 CLAUDE_CONFIG_DIR="$tmp/cfg" make_links "$TOOL" 0 >/dev/null 2>&1
 links_to "$tmp/cfg/skills/postmaster" "$TOOL/skills/postmaster" && ok "claude's folder moves with CLAUDE_CONFIG_DIR" \
@@ -197,7 +261,7 @@ through() {  # through <skill-dir>: what a session runs, from an unrelated direc
 found=$(cd "$tmp/elsewhere" && bash -c "${resolver//<skill>/$C/postmaster}" 2>&1); rc=$?
 [ $rc -eq 0 ] && [ "$found" = "$TOOL" ] && ok "<tool> is the checkout the link leads to" || fail "<tool> is the checkout the link leads to (exit $rc)" "$found"
 out=$(through "$C/postmaster"); rc=$?
-[ $rc -eq 0 ] && printf '%s\n' "$out" | grep -qF 'https://github.com/users/o/projects/1' \
+[ $rc -eq 0 ] && grep -qF 'https://github.com/users/o/projects/1' <<<"$out" \
   && ok "the board command runs through the link" || fail "the board command runs through the link (exit $rc)" "$out"
 found=$(cd "$TOOL" && bash -c "${resolver//<skill>/skills/postmaster}" 2>&1); rc=$?
 [ $rc -eq 0 ] && [ "$found" = "$TOOL" ] && ok "a session in the checkout itself, sent to skills/postmaster, finds that checkout" \
@@ -208,8 +272,8 @@ link=$C/postmaster
 named_failure() {  # named_failure <label>
   local out rc
   out=$(through "$link"); rc=$?
-  if [ $rc -ne 0 ] && printf '%s\n' "$out" | grep -qF "$link" && ! printf '%s\n' "$out" | grep -qi 'no such file' \
-     && ! printf '%s\n' "$out" | grep -qF 'projects/1'; then ok "$1"
+  if [ $rc -ne 0 ] && grep -qF "$link" <<<"$out" && ! grep -qi 'no such file' <<<"$out" \
+     && ! grep -qF 'projects/1' <<<"$out"; then ok "$1"
   else fail "$1 (exit $rc)" "$out"; fi
 }
 rm -- "$link"
@@ -225,7 +289,7 @@ in_the_way() {  # in_the_way <label> <path>: the install refuses, names <path>, 
   local out rc before
   before=$(state)
   out=$(make_links "$TOOL" 0 2>&1); rc=$?
-  if [ $rc -eq 1 ] && printf '%s\n' "$out" | grep -qF "IN THE WAY      $2" && [ "$(state)" = "$before" ]; then ok "$1"
+  if [ $rc -eq 1 ] && grep -qF "IN THE WAY      $2" <<<"$out" && [ "$(state)" = "$before" ]; then ok "$1"
   else fail "$1 (exit $rc)" "$out"; fi
 }
 rm -- "$A/wiki"                          # a link still to make, so a refusal that links anyway shows
@@ -240,7 +304,7 @@ rm -- "$link"; ln -s "$tmp/nowhere" "$link"
 in_the_way "a link that points nowhere is named" "$link"
 rm -- "$link"
 out=$(make_links "$TOOL" 1 2>&1); rc=$?
-[ $rc -eq 0 ] && [ ! -L "$link" ] && [ ! -L "$A/wiki" ] && printf '%s\n' "$out" | grep -qF "to link         $link" \
+[ $rc -eq 0 ] && [ ! -L "$link" ] && [ ! -L "$A/wiki" ] && grep -qF "to link         $link" <<<"$out" \
   && ok "--dry-run names the links it would make, and makes none" || fail "--dry-run names the links it would make, and makes none (exit $rc)" "$out"
 
 echo "a skills folder that is itself a link into a checkout's skills"
@@ -250,7 +314,7 @@ printf -- '---\nname: wiki\n---\n' > "$tmp/fixture/skills/wiki/SKILL.md"
 fixture=$(cd -P "$tmp/fixture" && pwd); before=$(ls -AR "$fixture")
 mkdir -p "$tmp/fhome/.claude" "$tmp/fhome/.agents/skills"; ln -s "$fixture/skills" "$tmp/fhome/.claude/skills"
 out=$(HOME="$tmp/fhome" make_links "$fixture" 0 2>&1); rc=$?
-[ $rc -eq 0 ] && printf '%s\n' "$out" | grep -qF "already linked  $tmp/fhome/.claude/skills/postmaster" && [ "$(ls -AR "$fixture")" = "$before" ] \
+[ $rc -eq 0 ] && grep -qF "already linked  $tmp/fhome/.claude/skills/postmaster" <<<"$out" && [ "$(ls -AR "$fixture")" = "$before" ] \
   && ok "counts as linked, and nothing is written into the checkout" || fail "counts as linked, and nothing is written into the checkout (exit $rc)" "$out"
 out=$(HOME="$tmp/fhome" remove_links "$fixture" 2>&1)
 [ -d "$fixture/skills/postmaster" ] && [ "$(ls -AR "$fixture")" = "$before" ] && [ -L "$tmp/fhome/.claude/skills" ] \

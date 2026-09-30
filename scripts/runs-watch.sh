@@ -147,6 +147,7 @@ for dp, dn, fn in os.walk(sys.argv[1]):
   for spec in \
     "rule review 2 .escalation-ready RULE" \
     "gate shipping 3 .card-ready GATE" \
+    "spec planning 1 .spec-review-ready SPEC" \
     "dispatch review 2 .leg-2-done DISPATCH" \
     "remount review 2 .leg-2-exited RESUME incomplete coachman" \
     "read review 2 .checkpoint-review-ready READ"
