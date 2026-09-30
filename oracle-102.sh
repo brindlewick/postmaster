@@ -43,15 +43,18 @@ fail=0
 pass() { echo "PASS $1: $2"; }
 nope() { echo "FAIL $1: $2"; fail=1; }
 
-# The caller's Claude Code session variables: the four the ticket names, the
-# messaging socket and token it describes, and the rest of the session-identity
-# family observed in a calling session (tool-use id, attended flag, pid).
-# Config and endpoint variables are NOT here: AC3 keeps them.
-CLAUDE_STRIP="CLAUDECODE CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_CODE_TOOL_USE_ID CLAUDE_CODE_SESSION_ATTENDED CLAUDE_PID"
+# The caller's Claude Code session identity, as the approved spec lists it:
+# exact names plus one synthetic probe per identity family (SESSION_*,
+# MESSAGING_*, CHILD_*), so a family the filter misses fails. Config under
+# the same prefix is NOT here: AC3 keeps it, and PASS_NAMES asserts it arrives.
+# (Written blind with a wider set; narrowed to this list by the postmaster's
+# spec ruling, before any implementation was read.)
+CLAUDE_STRIP="CLAUDECODE CLAUDE_PID CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_CODE_SESSION_PROBE_X CLAUDE_CODE_MESSAGING_PROBE_X CLAUDE_CODE_CHILD_PROBE_X"
 HERDR_STRIP="HERDR_SOCKET_PATH HERDR_BIN_PATH HERDR_ENV HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID"
-# Pass-through: a POSTMASTER_ setting, a generic caller variable, and a
-# harness's own configuration (config directory and endpoint).
-PASS_NAMES="POSTMASTER_ORACLE_MARK MARK_CALLER_VAR CLAUDE_CONFIG_DIR ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN"
+# Pass-through: a POSTMASTER_ setting, a generic caller variable, a harness's
+# own configuration (config directory and endpoint), and configuration under
+# the CLAUDE_CODE_ prefix, which the identity strip must not take.
+PASS_NAMES="POSTMASTER_ORACLE_MARK MARK_CALLER_VAR CLAUDE_CONFIG_DIR ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY"
 
 wait_marker() { # <marker> <seconds>
   local i=0
@@ -75,18 +78,20 @@ probe_env() {
     tmux|none) caller_env+=(POSTMASTER_HOST=$host) ;;
     *) nope "$tag" "unknown host $host"; return ;;
   esac
-  caller_env+=(CLAUDECODE=$LEAK-s0 CLAUDE_CODE_SESSION_ID=$LEAK-s1
-    CLAUDE_CODE_CHILD_SESSION=$LEAK-s2 CLAUDE_CODE_ENTRYPOINT=$LEAK-s3
-    CLAUDE_CODE_MESSAGING_SOCKET=$LEAK-s4 CLAUDE_CODE_MESSAGING_TOKEN=$LEAK-s5
-    CLAUDE_CODE_TOOL_USE_ID=$LEAK-s6 CLAUDE_CODE_SESSION_ATTENDED=$LEAK-s7
-    CLAUDE_PID=$LEAK-s8)
+  caller_env+=(CLAUDECODE=$LEAK-s0 CLAUDE_PID=$LEAK-s1
+    CLAUDE_CODE_SESSION_ID=$LEAK-s2 CLAUDE_CODE_CHILD_SESSION=$LEAK-s3
+    CLAUDE_CODE_ENTRYPOINT=$LEAK-s4 CLAUDE_CODE_EXECPATH=$LEAK-s5
+    CLAUDE_CODE_SESSION_ATTENDED=$LEAK-s6 CLAUDE_CODE_MESSAGING_SOCKET=$LEAK-s7
+    CLAUDE_CODE_MESSAGING_TOKEN=$LEAK-s8 CLAUDE_CODE_SESSION_PROBE_X=$LEAK-s9
+    CLAUDE_CODE_MESSAGING_PROBE_X=$LEAK-s10 CLAUDE_CODE_CHILD_PROBE_X=$LEAK-s11)
   case $host in
     tmux|none)
       caller_env+=(HERDR_SOCKET_PATH=$LEAK-h0 HERDR_BIN_PATH=$LEAK-h1 HERDR_ENV=$LEAK-h2
         HERDR_PANE_ID=$LEAK-h3 HERDR_TAB_ID=$LEAK-h4 HERDR_WORKSPACE_ID=$LEAK-h5) ;;
   esac
   caller_env+=(POSTMASTER_ORACLE_MARK=$PASSV MARK_CALLER_VAR=$PASSV
-    CLAUDE_CONFIG_DIR=$PASSV-claude ANTHROPIC_BASE_URL=$PASSV-endpoint ANTHROPIC_AUTH_TOKEN=$PASSV-token)
+    CLAUDE_CONFIG_DIR=$PASSV-claude ANTHROPIC_BASE_URL=$PASSV-endpoint ANTHROPIC_AUTH_TOKEN=$PASSV-token
+    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=$PASSV-ceiling CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=$PASSV-survey)
   runout=$(cd "$HERE" && env "${caller_env[@]}" \
     "$HS" run "oracle-102-$host" "$HERE" --out "$out" --err "$err" --marker "$marker" -- env 2>"$t/run.err");
   local rc=$?
@@ -180,7 +185,7 @@ probe_live() {
     CLAUDECODE=$LEAK-s0 CLAUDE_CODE_SESSION_ID=$LEAK-s1 \
     CLAUDE_CODE_CHILD_SESSION=$LEAK-s2 CLAUDE_CODE_ENTRYPOINT=$LEAK-s3 \
     CLAUDE_CODE_MESSAGING_SOCKET=$LEAK-s4 CLAUDE_CODE_MESSAGING_TOKEN=$LEAK-s5 \
-    CLAUDE_CODE_TOOL_USE_ID=$LEAK-s6 CLAUDE_CODE_SESSION_ATTENDED=$LEAK-s7 \
+    CLAUDE_CODE_EXECPATH=$LEAK-s6 CLAUDE_CODE_SESSION_ATTENDED=$LEAK-s7 \
     CLAUDE_PID=$LEAK-s8 \
     "$HS" run "oracle-102-live" "$HERE" --out "$t/stream1" --err "$t/err1" --marker "$t/done1" \
     -- claude -p "Reply with exactly: ORACLE-LIVE-ONE" --output-format stream-json --verbose --dangerously-skip-permissions \
@@ -196,7 +201,7 @@ probe_live() {
     CLAUDECODE=$LEAK-s0 CLAUDE_CODE_SESSION_ID=$LEAK-s1 \
     CLAUDE_CODE_CHILD_SESSION=$LEAK-s2 CLAUDE_CODE_ENTRYPOINT=$LEAK-s3 \
     CLAUDE_CODE_MESSAGING_SOCKET=$LEAK-s4 CLAUDE_CODE_MESSAGING_TOKEN=$LEAK-s5 \
-    CLAUDE_CODE_TOOL_USE_ID=$LEAK-s6 CLAUDE_CODE_SESSION_ATTENDED=$LEAK-s7 \
+    CLAUDE_CODE_EXECPATH=$LEAK-s6 CLAUDE_CODE_SESSION_ATTENDED=$LEAK-s7 \
     CLAUDE_PID=$LEAK-s8 \
     "$HS" run "oracle-102-resume" "$HERE" --out "$t/stream2" --err "$t/err2" --marker "$t/done2" \
     -- claude -p --resume "$sid" "Reply with exactly: ORACLE-LIVE-TWO" --output-format stream-json --verbose --dangerously-skip-permissions \
