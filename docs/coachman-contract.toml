@@ -223,17 +223,20 @@ id = "fixture-policy"
 title = "Fixture requirement and repeat rule"
 definition = """
 Dispatch records the fixture requirement as pending because there is no completed branch
-to classify yet. At the final card, the postmaster runs the final branch's own copy of
-coachman-contract.sh against the target repository's dispatch BASE and final branch: a
-change that adds or edits the checker is classified by neither the pinned tool nor the live
-checkout. Yes requires a clean fixture run on that final branch before the merge word.
-Record the answer on the waybill's fixture line and the command, the tested commit and,
-when a fixture runs, its score on the waybill's check line and in a note. If the branch
-moves before a clean score exists, compare dispatch BASE with the final branch again. If
-main is merged into a branch after a clean fixture, compare the previously scored commit
-with the final branch: yes repeats the fixture from the final branch; no preserves the
-clean result. The decision is derived from changed contract regions,
-never from ticket prose or a whole-file list.
+to classify yet. At the final card, the postmaster classifies the dispatch BASE to final
+branch change with BASE's copy of coachman-contract.sh: BASE's logic is the last honest
+one, so a change that weakens the checker is itself a contract change, while the mappings
+always come from the compared revs, so regions the branch adds are still classified. If
+BASE has no checker, the branch introduces it and needs a fixture without classifying.
+Yes requires a clean fixture run on that final branch before the merge word. Record the
+answer on the waybill's fixture line and the command, the tested commit and, when a
+fixture runs, its score on the waybill's check line and in a note. If the branch moves
+before a clean score exists, compare dispatch BASE with the final branch again. If main
+is merged into a branch after a clean fixture, compare the previously scored commit with
+the final branch, running the scored commit's copy: yes repeats the fixture from the
+final branch; no preserves the clean result. A compared older rev without a checker
+means the fixture runs without classifying. The decision is derived from changed
+contract regions, never from ticket prose or a whole-file list.
 """
 
 [[parts.implementation]]
