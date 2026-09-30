@@ -7,6 +7,7 @@ import { cleanCheckout } from "./clean-checkout";
 
 const helper = join(import.meta.dir, "clean-checkout.ts");
 const roots: string[] = [];
+const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
 
 const command = (program: string, args: string[], cwd?: string): void => {
   const result = spawnSync(program, args, { cwd, stdio: "ignore" });
@@ -56,6 +57,28 @@ const runHelper = (args: string[], env?: Record<string, string>): { status: numb
     env: env ? { ...process.env, ...env } : process.env,
   });
   return { status: r.status ?? 1, out: (r.stdout || "") + (r.stderr || "") };
+};
+
+// A bin dir holding a git that refuses one "<subcommand> <verb>" pair with the given exit
+// and passes everything else to the real git, for the failure-path tests.
+const refusingGit = (refuse: string, exit: number): string => {
+  const dir = mkdtempSync(join(tmpdir(), "clean-checkout-git-"));
+  roots.push(dir);
+  writeFileSync(
+    join(dir, "git"),
+    [
+      "#!/usr/bin/env bash",
+      'prev=""',
+      'for a in "$@"; do',
+      `  if [ "$prev $a" = "${refuse}" ]; then echo "wrapped git: refusing ${refuse}" >&2; exit ${exit}; fi`,
+      '  prev="$a"',
+      "done",
+      `exec "${realGit}" "$@"`,
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  return dir;
 };
 
 afterEach(() => {
@@ -115,6 +138,78 @@ describe("cleanCheckout", () => {
       roots.push(priv);
       const refused = runHelper([repo, "no-such-branch", "true"], { TMPDIR: priv });
       expect(refused.status).toBe(1);
+      expect(readdirSync(priv).filter((n) => n.startsWith("postmaster-clean-checkout-"))).toEqual([]);
+    });
+  });
+
+  test("runs the command with the check contract's fail-fast flags", () => {
+    withRepo((repo) => {
+      expect(cleanCheckout(repo, "main", "false; echo survived").exitCode).not.toBe(0);
+      expect(cleanCheckout(repo, "main", "false | true").exitCode).not.toBe(0);
+    });
+  });
+
+  test("checks out the named ref's content", () => {
+    withRepo((repo) => {
+      writeFileSync(join(repo, "vers.txt"), "one\n");
+      command("git", ["-C", repo, "add", "vers.txt"]);
+      command("git", ["-C", repo, "commit", "-q", "-m", "one"]);
+      const sha = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+      command("git", ["-C", repo, "tag", "v-one"]);
+      writeFileSync(join(repo, "vers.txt"), "two\n");
+      command("git", ["-C", repo, "commit", "-q", "-am", "two"]);
+      expect(cleanCheckout(repo, sha, 'test "$(cat vers.txt)" = one').exitCode).toBe(0);
+      expect(cleanCheckout(repo, "v-one", 'test "$(cat vers.txt)" = one').exitCode).toBe(0);
+      expect(cleanCheckout(repo, "main", 'test "$(cat vers.txt)" = one').exitCode).not.toBe(0);
+    });
+  });
+
+  test("populates submodules in the checkout", () => {
+    withRepo((repo) => {
+      const lib = mkdtempSync(join(tmpdir(), "clean-checkout-lib-"));
+      roots.push(lib);
+      command("git", ["init", "-q", "-b", "main", lib]);
+      command("git", ["-C", lib, "config", "user.name", "test"]);
+      command("git", ["-C", lib, "config", "user.email", "test@example.invalid"]);
+      writeFileSync(join(lib, "lib.txt"), "lib\n");
+      command("git", ["-C", lib, "add", "lib.txt"]);
+      command("git", ["-C", lib, "commit", "-q", "-m", "lib"]);
+      command("git", ["-C", repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", lib, "vendor"]);
+      command("git", ["-C", repo, "add", ".gitmodules", "vendor"]);
+      command("git", ["-C", repo, "commit", "-q", "-m", "vendor"]);
+      expect(cleanCheckout(repo, "main", "test -f vendor/lib.txt").exitCode).toBe(0);
+    });
+  });
+
+  test("a checkout that cannot be made exits 1 without running the command and leaves no scratch", () => {
+    withRepo((repo) => {
+      const priv = mkdtempSync(join(tmpdir(), "clean-checkout-tmpdir-"));
+      roots.push(priv);
+      const bin = refusingGit("worktree add", 128);
+      const marker = join(priv, "ran");
+      const failed = runHelper([repo, "main", `touch ${marker}`], {
+        TMPDIR: priv,
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+      });
+      expect(failed.status).toBe(1);
+      expect(existsSync(marker)).toBe(false);
+      expect(readdirSync(priv).filter((n) => n.startsWith("postmaster-clean-checkout-"))).toEqual([]);
+      expect(worktreeList(repo)).not.toContain("postmaster-clean-checkout-");
+    });
+  });
+
+  test("a checkout that cannot be removed leaves no registration behind", () => {
+    withRepo((repo) => {
+      const priv = mkdtempSync(join(tmpdir(), "clean-checkout-tmpdir-"));
+      roots.push(priv);
+      const bin = refusingGit("worktree remove", 1);
+      const removed = runHelper([repo, "main", "true"], {
+        TMPDIR: priv,
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+      });
+      expect(removed.status).toBe(1);
+      expect(removed.out).toContain("could not remove the temporary git worktree");
+      expect(worktreeList(repo)).not.toContain("postmaster-clean-checkout-");
       expect(readdirSync(priv).filter((n) => n.startsWith("postmaster-clean-checkout-"))).toEqual([]);
     });
   });

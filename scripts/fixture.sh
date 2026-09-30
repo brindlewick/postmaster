@@ -184,9 +184,9 @@ def check_gate(app, repo, branch):
     gate = next((l[len("gate="):] for l in out.splitlines() if l.startswith("gate=")), "")
     if not gate:
         return False, "scripts/discover-project.sh found no gate", out
-    install = ["npm", "ci"] if (app / "package-lock.json").is_file() else ["npm", "install"]
-    setup = shlex.join(install + ["--prefer-offline", "--no-audit", "--no-fund"])
-    command = setup + " && bash -c " + shlex.quote(gate)
+    install = next((l[len("install="):] for l in out.splitlines() if l.startswith("install=")), "")
+    inner = "bash -e -o pipefail -c " + shlex.quote(gate)
+    command = (install + " && " if install else "") + inner
     code, out = sh(["bun", SCRIPTS / "clean-checkout.ts", repo, branch, command])
     return code == 0, "%s on main from a clean checkout: %s" % (gate, exited(code)), out
 

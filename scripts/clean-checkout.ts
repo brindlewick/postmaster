@@ -6,16 +6,19 @@
 //   bun scripts/clean-checkout.ts <repo> <branch> <command>
 //
 // Makes a detached git worktree of <branch> (a branch, tag, or commit) in a temporary
-// directory outside the project folder, runs <command> there through bash, removes the
-// checkout afterwards even when the command fails, and reports the command's exit. The
-// checkout holds only that branch's content: no .worktrees/, no uncommitted files. A git
-// worktree, rather than an archive export, so gates that read git metadata keep working.
+// directory outside the project folder, populates its submodules where the branch has any,
+// runs <command> there through bash -e -o pipefail (the project check contract's flags),
+// removes the checkout afterwards even when the command fails, and reports the command's
+// exit. The checkout holds only that branch's content: no .worktrees/, no uncommitted
+// files. A git worktree, rather than an archive export, so gates that read git metadata
+// keep working.
 //
-//   exit 0..255  the command's own exit
+//   exit 0..255  the command's own exit, which wins whenever the command ran, even when
+//                the checkout could not be removed afterwards (that failure is on stderr)
 //   exit 1       usage, no such repo or branch, the checkout could not be made (the command
-//                is not run), or the checkout could not be removed afterwards
+//                is not run), or the checkout could not be removed after a passing command
 import { spawnSync } from "node:child_process";
-import { lstatSync, mkdtempSync, realpathSync, rmSync, rmdirSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, realpathSync, rmSync, rmdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -64,9 +67,25 @@ export const cleanCheckout = (repoArg: string, branch: string, command: string):
   if (added.error) process.stderr.write(`clean-checkout: ${added.error.message}\n`);
   let exitCode = status(added);
   let registered = exitCode === 0;
+  if (!registered) exitCode = 1;
+
+  if (registered && existsSync(join(checkoutPath, ".gitmodules"))) {
+    // Local-path submodule URLs need the file transport, which this git blocks by default;
+    // no new trust: the checkout already runs the branch's own gate as this user.
+    const sub = spawnSync(
+      "git",
+      ["-C", checkoutPath, "-c", "protocol.file.allow=always", "submodule", "update", "--init"],
+      { stdio: "inherit" },
+    );
+    if (status(sub) !== 0)
+      process.stderr.write("clean-checkout: could not populate submodules; running on the checkout as made\n");
+  }
 
   if (registered) {
-    const run = spawnSync("bash", ["-c", command], { cwd: checkoutPath, stdio: "inherit" });
+    const run = spawnSync("bash", ["-e", "-o", "pipefail", "-c", command], {
+      cwd: checkoutPath,
+      stdio: "inherit",
+    });
     if (run.error) process.stderr.write(`clean-checkout: ${run.error.message}\n`);
     exitCode = status(run);
   }
@@ -97,6 +116,14 @@ export const cleanCheckout = (repoArg: string, branch: string, command: string):
   } catch (error) {
     process.stderr.write(`clean-checkout: could not remove ${scratch}: ${String(error)}\n`);
     if (exitCode === 0) exitCode = 1;
+  }
+
+  if (registered && !checkoutRemoved && scratchType === "directory") {
+    // The directory is gone; drop the stale registration too. Prune only touches entries
+    // whose directory no longer exists, so live worktrees are unaffected.
+    const pruned = spawnSync("git", ["-C", repo, "worktree", "prune"], { stdio: "ignore" });
+    if (pruned.status !== 0)
+      process.stderr.write("clean-checkout: could not prune the worktree registration\n");
   }
 
   if (registered && !checkoutRemoved && exitCode === 0) exitCode = 1;

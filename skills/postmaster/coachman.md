@@ -958,18 +958,24 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    touch `.card-ready` again, and exit again. Only the user abandons a run. On it: check out the project's default branch
    in the main checkout and `git merge --no-ff <ticket-branch>` (merge, never rebase), then
    verify it (step 6). Never escalate a grant the waybill gives the postmaster up to the user.
-6. **Verify the merged default branch.** Run the recorded gate from a clean checkout outside
-   the project folder, never from the main checkout where the run's working copies still sit
-   under `.worktrees/`: `bun <tool>/scripts/clean-checkout.ts <repo> <default-branch> "<gate>"`,
-   with the gate as the waybill's project profile names it. Where the profile's build is not
-   none, prepare dependencies in that checkout first with the build command, `<build> &&
-   <gate>`. Log the result (`<tool>/scripts/log-action.sh <dispatch> coachman gate
-   <default-branch> "post-merge, clean checkout, exit <n>"`). A red result is investigated
-   under the red-gate rule below; the merge is already local, so fix forward on the default
-   branch or revert it, never push; do not mark the ticket done or set the stage to `shipped`
-   until it passes.
+6. **Verify the merged default branch.** Where the waybill's project profile names a
+   gate, run it from a clean checkout outside the project folder, never from the main
+   checkout where the run's working copies still sit under `.worktrees/`. The checkout holds
+   only the branch's committed content — no untracked files and no installed dependencies —
+   so derive `<install>` from the main checkout with
+   `<tool>/scripts/discover-project.sh <repo>` (the `install=` line; empty where the project
+   needs no install step), and pass `<install> && <build> && <gate>` with the empty parts
+   and a `none` build left out, as ONE argument to
+   `bun <tool>/scripts/clean-checkout.ts <repo> <default-branch> <command>` (one argv
+   element, composed by the caller — never re-wrap it in a second shell, which would expand
+   `$` and consume quotes). `<build>` and `<gate>` are the profile's; where the profile
+   names no gate, there is nothing to verify. Log the result when a gate ran
+   (`<tool>/scripts/log-action.sh <dispatch> coachman gate <default-branch> "post-merge,
+   clean checkout, exit <n>"`). A red result is investigated under the red-gate rule below;
+   the merge is already local, so fix forward on the default branch or revert it, never
+   push; do not mark the ticket done or set the stage to `shipped` until it passes.
    [Why the gate runs from a clean checkout](../../wiki/concepts/clean-checkout-gates.md)
-7. After the gate passes, move the ticket to done and set the stage:
+7. After the gate passes (or where there is none), move the ticket to done and set the stage:
    `<tool>/scripts/stage.sh <dispatch> shipped`.
 8. If the project has an origin, pushing afterwards is the user's call, never part of
    this flow.
@@ -1138,10 +1144,13 @@ ticket that needs another's change waits for it to land.
   among the lanes that ran, so do not read convergence into a round that lost a lane. Restoring
   the lane on the next round is the fix; suppressing the label is never the fix.
 - **A red gate on the default branch after merging is a claim to investigate, not a fact to
-  report.** A concurrent run's untracked file in a sibling worktree can fail the gate from the
-  main checkout while the project's own code is clean. Establish whose file it is before
-  touching shared config, and file the hygiene fix as its own ticket rather than editing lint
-  config on the default branch mid-flight for another live run.
+  report.** The flow's own post-merge gate runs from a clean checkout outside the project
+  folder, so a sibling worktree's files cannot redden it; a red one is a defect in the merge,
+  in the gate itself, or in the checkout's preparation (a missing install step). A gate a
+  person runs by hand in the main checkout still sees the copies under `.worktrees/`, and
+  fails for them while the project's own code is clean. Establish which gate is red and whose
+  file it is before touching shared config, and file the hygiene fix as its own ticket
+  rather than editing lint config on the default branch mid-flight for another live run.
 - **A coachman cannot remove its own worktree.** Tear down the workhorse worktrees at stage 4,
   preserving any stray file first, and hand the synthesis worktree to the postmaster for
   removal from an outside process.
