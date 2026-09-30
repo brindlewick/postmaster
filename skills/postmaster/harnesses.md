@@ -513,6 +513,33 @@ is the only form that blocks the conversation, and only for one interval. Never 
 watcher anywhere but `host.sh run`: no other keeping has a documented lifetime, and on
 2026-09-28 a watcher kept outside it was killed when memory ran short (#121).
 
+## Usage
+
+`bun <tool>/scripts/usage.ts` is this file's executable form for what a launch cost: it reads the
+input and output tokens each harness reports, and the cost where the harness reports one, from
+the launch's own event stream or session record. A figure the harness did not report is omitted
+and never written as zero; a harness that reports nothing is named as reporting nothing. Its
+paired controls (`bun test <tool>/scripts/usage.test.ts`) are one made-up stream per harness
+that reports usage and one that does not, in each harness's exact event shape below.
+
+| harness | where it reports | input / output | cost | shape source |
+|---|---|---|---|---|
+| codex | the last terminal turn event (`turn.completed`, `turn.failed`, `turn.interrupted`) of `codex exec --json`; turns report cumulative session usage | `usage.input_tokens`, `usage.output_tokens` | not reported | [Codex event type](https://github.com/openai/codex/blob/main/sdk/typescript/src/events.ts), recorded turns |
+| grok | the terminal `type: "end"` event; chunk-level usage is ignored | `usage.input_tokens`, `usage.output_tokens` | `total_cost_usd` on that event | [Grok headless event format](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/14-headless-mode.md) |
+| agy | the last `event: "result"` event; results report cumulative session usage | `result.usageMetadata.promptTokenCount`, `.candidatesTokenCount`, or `result.usage.input_tokens`, `.output_tokens` | not reported | Gemini-family usageMetadata, [Antigravity CLI headless mode](https://antigravity.google/docs/cli/headless/) |
+| claude | the `result` events of `--output-format stream-json` (usage summed, cost from the last), else the assistant messages | `usage.input_tokens`, `usage.output_tokens` | `total_cost_usd` | [Claude Code stream-json output](https://code.claude.com/docs/en/agent-sdk/overview), a live resumed thread |
+| pi | assistant `message.usage` on `message_end` | `input` / `input_tokens`, `output` / `output_tokens` | `usage.cost.total` | [Pi RPC event format](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md) |
+| muse | the session record's `model_completed` events (`muse export`), not the event stream | `usage.input_tokens`, `usage.output_tokens` | not reported | a recorded `muse export` |
+| mimo | each `step_finish` part of `mimo run --format json` | `part.tokens.input`, `part.tokens.output` | `part.cost` | [MiMo Code JSON mode](https://github.com/XiaomiMiMo/MiMo-Code) |
+
+Codex and Antigravity figures are cumulative across the stream, so the last report carrying
+a figure wins and summing would count every token twice. Claude's `result` usage is
+per-invocation and is summed across the appended stream, while its `total_cost_usd` is
+cumulative across the session and is taken from the last result; a stream that ends without
+one falls back to summing its assistant messages. Mimo and pi per-step figures are summed.
+Muse Code's `goal_usage_attribution` repeats its `model_completed` values per call, so the
+reader takes `model_completed` alone.
+
 ## The pane view
 
 `<tool>/scripts/view-stream.sh` is the other executable half of this file: it renders an events
