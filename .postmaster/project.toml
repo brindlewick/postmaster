@@ -13,4 +13,4 @@ risk_surfaces = [
 
 [checks.gate]
 command = '''bun run check'''
-shows = "tsc strict, Oxlint, the Biome format check, the Bun tests beside every script (usage and run-clash included), the runbook references and wiki lint pass."
+shows = "tsc strict, Oxlint with the project's rules, the Biome format check, the Bun tests beside every script and lint rule, the runbook references and wiki lint pass."

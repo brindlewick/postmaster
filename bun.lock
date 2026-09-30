@@ -5,7 +5,7 @@
     "": {
       "name": "postmaster",
       "devDependencies": {
-        "@biomejs/biome": "^2.5.14",
+        "@biomejs/biome": "2.5.14",
         "oxlint": "^1.86.0",
         "typescript": "^7.0.2",
       },

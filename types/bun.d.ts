@@ -84,6 +84,7 @@ declare const process: {
   platform: string;
   arch: string;
   version: string;
+  execPath: string;
   stdout: {
     write(data: string | Uint8Array): boolean;
     isTTY: boolean;
@@ -169,6 +170,20 @@ declare const Bun: {
     stdout?: "inherit" | "pipe" | "ignore" | null;
     stderr?: "inherit" | "pipe" | "ignore" | null;
   }): {
+    exitCode: number;
+    stdout: Uint8Array;
+    stderr: Uint8Array;
+  };
+  spawnSync(
+    cmd: string[],
+    options?: {
+      cwd?: string;
+      env?: Record<string, string | undefined>;
+      stdin?: "inherit" | "pipe" | "ignore" | null | Uint8Array | string;
+      stdout?: "inherit" | "pipe" | "ignore" | null;
+      stderr?: "inherit" | "pipe" | "ignore" | null;
+    },
+  ): {
     exitCode: number;
     stdout: Uint8Array;
     stderr: Uint8Array;

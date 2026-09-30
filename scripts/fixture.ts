@@ -358,7 +358,7 @@ export function score(dispatch: string, repo: string): { code: number; out: stri
   }
   const legs = legsOf(dispatch, manifest);
   const results: CheckResult[] = [
-    { name: "hidden-tests", ...checkHidden(dispatch, app) },
+    { name: "hidden-tests", ...checkHidden(dispatch, repo, app) },
     { name: "gate", ...checkGate(app) },
     { name: "stages", ...checkStages(dispatch), out: "" },
     { name: "markers", ...checkMarkers(dispatch, legs), out: "" },
@@ -427,7 +427,26 @@ export function legsOf(dispatch: string, manifest: Record<string, unknown> | nul
   return Array.from({ length: max }, (_, i) => i + 1);
 }
 
-function checkHidden(dispatch: string, app: string): { ok: boolean; detail: string; out: string } {
+// BASE writes \d for the pass/fail counts; the counts are machine-printed ASCII
+// (fixture-lanes.ts prints JS numbers), so [0-9] matches on every reachable line.
+const LANE_LINE = /^(.*): ([0-9]+ pass, [0-9]+ fail|missing|failed to build)$/u;
+
+// Each lane's hidden status from fixture-lanes.ts; "" when there are no lanes.
+export function laneScores(dispatch: string, repo: string, ticket: string): string {
+  const r = sh(["bun", "--no-env-file", join(HERE, "fixture-lanes.ts"), dispatch, repo, ticket]);
+  if (r.code !== 0) return "lanes not scored";
+  return r.out
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => LANE_LINE.test(l))
+    .join("; ");
+}
+
+function checkHidden(
+  dispatch: string,
+  repo: string,
+  app: string,
+): { ok: boolean; detail: string; out: string } {
   const brief = join(dispatch, "brief.md");
   const text = existsSync(brief) ? squash(readFileSync(brief, "utf8")) : "";
   const found: string[] = [];
@@ -448,7 +467,10 @@ function checkHidden(dispatch: string, app: string): { ok: boolean; detail: stri
     };
   }
   const h = hidden(found[0]!, app);
-  return { ok: h.passed, detail: `${found[0]}, from the waybill: ${h.detail} on main`, out: h.out };
+  let detail = `${found[0]}, from the waybill: ${h.detail} on main`;
+  const lanes = laneScores(dispatch, repo, found[0]!);
+  if (lanes) detail = `${detail}; ${lanes}`;
+  return { ok: h.passed, detail, out: h.out };
 }
 
 function checkGate(app: string): { ok: boolean; detail: string; out: string } {

@@ -1,4 +1,5 @@
-// Tests beside scripts/fixture.ts, moved from its --self-test on #109: 63 controls.
+// Tests beside scripts/fixture.ts, moved from its --self-test on #109: 63 controls,
+// plus two lane-score controls for the #159 merge.
 // The run records, scores and hidden suites are built once in beforeAll; each test asserts.
 // CLI-refusal controls spawn the wrapper; internal controls import from "./fixture".
 // HOME-altering controls save and restore it (the self-test left it deleted on exit).
@@ -25,6 +26,7 @@ import {
   appFiles,
   HIDDEN_RE,
   hidden,
+  laneScores,
   legsOf,
   makeAndFile,
   makeBodyFile,
@@ -776,6 +778,19 @@ describe("score: input that is not a run is refused, not scored", () => {
     const r = runScore(cleanDir, join(tmp, "other"));
     expect(r.code).toBe(1);
     expect(r.out.includes("is this the run's repo")).toBe(true);
+  }, 30000);
+});
+
+describe("score: lane scores beside the main counts (#159)", () => {
+  test("no lanes: the hidden-tests detail carries no lane suffix", () => {
+    const empty = join(tmp, "no-lanes");
+    mkdirSync(empty, { recursive: true });
+    expect(laneScores(empty, join(tmp, "nowhere"), "remove")).toBe("");
+  }, 30000);
+  test("an unscorable dispatch reads as lanes not scored", () => {
+    expect(laneScores(join(tmp, "nowhere"), join(tmp, "nowhere"), "remove")).toBe(
+      "lanes not scored",
+    );
   }, 30000);
 });
 

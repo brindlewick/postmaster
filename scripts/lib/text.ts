@@ -585,6 +585,14 @@ export function pyWords(s: string): string[] {
   return t === "" ? [] : t.split(PY_WS_RUN);
 }
 
+/** Words on JavaScript-whitespace runs, ends stripped, empties dropped: the
+ * split main's synthesis-shares uses for overlap runs. Both compared sides
+ * split the same way, so the set is main's (`\s`), not Python's. */
+export function jsWords(s: string): string[] {
+  const t = s.trim();
+  return t === "" ? [] : t.split(/\s+/u);
+}
+
 /** Python `str.splitlines`: line boundaries split, `\r\n` counts once, a
  * boundary at the very end emits no trailing empty, and `""` gives `[]`. */
 export function pySplitLines(s: string): string[] {

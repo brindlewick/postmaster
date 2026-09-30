@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "tsc --noEmit && bunx oxlint && bunx biome format scripts types lint package.json tsconfig.json biome.json .oxlintrc.json && bun test scripts/ && scripts/skill-refs.sh && scripts/wiki-lint.sh"
+    "check": "tsc --noEmit && bunx oxlint && bunx biome format scripts types lint package.json tsconfig.json biome.json .oxlintrc.json && bun test scripts/ lint/ && scripts/skill-refs.sh && scripts/wiki-lint.sh"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.14",
+    "@biomejs/biome": "2.5.14",
     "oxlint": "^1.86.0",
     "typescript": "^7.0.2"
   },
