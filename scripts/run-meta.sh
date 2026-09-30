@@ -765,7 +765,8 @@ printf '{"stage": "done"}\n' > "$kroot/project/RUN-KREL/manifest.json"
 killed=""
 for i in $(seq 1 300); do
   for pid in $(pgrep -f run-meta-scan 2>/dev/null); do
-    if tr '\0' ' ' </proc/$pid/cmdline 2>/dev/null | grep -qF "$tmp"; then
+    cmdline=$(tr '\0' ' ' </proc/$pid/cmdline 2>/dev/null)
+    if grep -qF -- "$tmp" <<<"$cmdline"; then
       kill -9 $pid 2>/dev/null && killed=1
     fi
   done
