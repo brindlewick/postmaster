@@ -46,7 +46,8 @@
 # launches are recorded under POSTMASTER_WATCH_TEST_CALLS instead of started, the stream is
 # faked, and the marker is cleared but never landed, so no agent thread is ever started.
 # POSTMASTER_WATCH_TEST_FAIL=dispatch|resume makes that launch fail; =1 on
-# POSTMASTER_WATCH_TEST_REFUSE lands a launch refusal instead; =1 on
+# POSTMASTER_WATCH_TEST_REFUSE lands a launch refusal instead: =1 a bare refusal,
+# =2 a refusal under an uncapped host notice; =1 on
 # POSTMASTER_WATCH_TEST_NO_THREAD fakes a stream with no thread id.
 #
 #   exit 0  a run needs the postmaster: the table, then one `needs <run> <NEXT>` line each
@@ -334,17 +335,23 @@ watch_host() {  # watch_host <dispatch|resume> <name> <cwd> <dispatch-dir> <out>
       printf '%q ' "$@"; printf '\n'
     } > "$callfile"
     rm -f -- "$marker"
-    # A dispatch truncates .err like host.sh run does; a resume appends to it.
-    # The watcher scopes its refusal check to lines past the pre-launch offset,
-    # so truncating here would make the stale-refusal control vacuous.
-    if [ "$append" = 0 ]; then : > "$err"; fi
+    # host.sh run empties --err at every launch, resume included: --append
+    # keeps only --out ("Its streams are emptied once ... --err holds only
+    # this launch's errors"). The double does the same: .err always holds
+    # one launch, so no stale line can survive into the refusal check.
+    : > "$err"
     if [ "${POSTMASTER_WATCH_TEST_FAIL:-}" = "$kind" ]; then
-      printf 'host: simulated %s failure\n' "$kind" >> "$err"
+      printf 'host: simulated %s failure\n' "$kind" > "$err"
       : > "$marker"
       return 1
     fi
     if [ "${POSTMASTER_WATCH_TEST_REFUSE:-}" = 1 ]; then
-      printf 'launch: simulated refusal\n' >> "$err"
+      printf 'launch: simulated refusal\n' > "$err"
+      : > "$marker"
+      return 0
+    fi
+    if [ "${POSTMASTER_WATCH_TEST_REFUSE:-}" = 2 ]; then
+      printf 'host: launch running uncapped (no supported per-launch limits available)\nlaunch: simulated refusal\n' > "$err"
       : > "$marker"
       return 0
     fi
@@ -376,12 +383,11 @@ stream_lines() {  # stream_lines <events-file>: the stream's line count, countin
   awk 'END{print NR+0}' < "$1"
 }
 
-refusal_since() {  # refusal_since <err-file> <lines-before>: this attempt's launch: refusal line, if it wrote one
-  local file=$1 before=$2 total
-  [ -f "$file" ] || return 1
-  total=$(stream_lines "$file")
-  if [ "$total" -lt "$before" ]; then before=0; fi  # truncated since: everything in it is new
-  sed -n "$((before + 1)),\$ {/^launch:/{p;q;}}" "$file"
+refusal_in() {  # refusal_in <err-file>: the launch: refusal line this launch wrote, if any
+  # host.sh empties --err at every launch, resume included, so the whole file
+  # is this attempt's: no offset, and no stale line can be in it.
+  [ -f "$1" ] || return 1
+  sed -n '/^launch:/{p;q;}' "$1"
 }
 
 harvest_thread_id() {  # harvest_thread_id <events-file> <marker> <limit>: print the thread id once the stream carries it
@@ -529,15 +535,14 @@ PY
   if [ $held_rc -ne 1 ]; then ACTION_ERROR="cannot re-read the held list"; return 2; fi
   local launch_args=("$HERE/launch.sh" resume "$name" "$worktree" "$thread" "$prompt" --run "$d")
   [ "$name" != coachman ] || launch_args+=(--leg "$leg")
-  # The .err lines before this attempt: a refusal is scoped past them, the way
-  # the dispatch path harvests its own thread id. A host that started the
-  # process does not mean the launch took it.
-  local err_lines refusal
-  err_lines=$(stream_lines "$err")
+  # The launch's outcome, the way the dispatch path harvests its own thread
+  # id: a host that started the process does not mean the launch took it.
+  # .err holds only this launch's errors, so the whole file is read.
+  local refusal
   if ! watch_host resume "$host_name" "$worktree" "$d" "$out" "$err" "$d/.leg-$number-exited" 1 "${launch_args[@]}"; then
     ACTION_ERROR="host.sh could not resume leg $number; read $err"; return 2
   fi
-  refusal=$(refusal_since "$err" "$err_lines" 2>/dev/null || true)
+  refusal=$(refusal_in "$err" 2>/dev/null || true)
   if [ -n "$refusal" ]; then
     # A refused resume is a refusal, not a success: the count is restored, no
     # success line is written, the refusal is logged, and the run is named in
@@ -646,6 +651,7 @@ PY
       "resume failure") extra="POSTMASTER_WATCH_TEST_FAIL=resume" ;;
       "dispatch refusal") extra="POSTMASTER_WATCH_TEST_REFUSE=1" ;;
       "resume refusal") extra="POSTMASTER_WATCH_TEST_REFUSE=1" ;;
+      "uncapped resume refusal") extra="POSTMASTER_WATCH_TEST_REFUSE=2" ;;
       "no thread") extra="POSTMASTER_WATCH_TEST_NO_THREAD=1" ;;
     esac
     out=$(env POSTMASTER_WATCH_TEST_MODE=1 POSTMASTER_WATCH_TEST_CALLS="$tmp/calls" $extra "$self" --timeout 0 "$root" 2>&1); rc=$?
@@ -1152,16 +1158,30 @@ PY
     && [ "$refused_count" = 0 ] \
     && ok "a refused resume wakes in the same look with a refusal record, the count unchanged, and no success line" \
     || fail "a refused resume wakes in the same look with a refusal record, the count unchanged, and no success line"
-  root="$tmp/wake-resume-stale"; auto_run "$root" stale-refusal 1 "thread-stale"
-  printf '%s\n' 'model stream idle timeout' 'launch: simulated refusal' 'model stream idle timeout' > "$root/stale-refusal/logs/coachman-leg-1.err"
-  : > "$root/stale-refusal/logs/coachman-leg-1-events.jsonl"; : > "$root/stale-refusal/.leg-1-exited"
-  watch_stub "$root"
-  [ $rc -eq 3 ] && [ "$(action_count "$root/stale-refusal" resume)" -eq 1 ] \
-    && grep -qF 'resume 1 of 3' "$root/stale-refusal/actions.jsonl" \
-    && [ "$(action_count "$root/stale-refusal" refuse)" -eq 0 ] \
-    && grep -qF 'launch: simulated refusal' "$root/stale-refusal/logs/coachman-leg-1.err" \
-    && ok "a resume beside a stale refusal line from an earlier attempt still logs success" \
-    || fail "a resume beside a stale refusal line from an earlier attempt still logs success (exit $rc)"
+  root="$tmp/wake-resume-refusal-uncapped"; auto_run "$root" refusal-uncapped 1 "thread-refusal-uncapped"
+  printf '%s\n' 'host: launch running uncapped (no supported per-launch limits available)' 'model stream idle timeout' > "$root/refusal-uncapped/logs/coachman-leg-1.err"
+  : > "$root/refusal-uncapped/logs/coachman-leg-1-events.jsonl"; : > "$root/refusal-uncapped/.leg-1-exited"
+  watch_stub "$root" "uncapped resume refusal"
+  refused_count=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["resume_attempts"]["1"])' "$root/refusal-uncapped/watcher.json")
+  [ $rc -eq 0 ] && has "needs refusal-uncapped REMOUNT" \
+    && has "launch: simulated refusal" \
+    && [ "$(action_count "$root/refusal-uncapped" refuse)" -eq 1 ] \
+    && [ "$(action_count "$root/refusal-uncapped" resume)" -eq 0 ] \
+    && [ "$refused_count" = 0 ] \
+    && ok "a two-line refusal after a two-line .err is found in the same look" \
+    || fail "a two-line refusal after a two-line .err is found in the same look"
+  root="$tmp/wake-resume-refusal-shrink"; auto_run "$root" refusal-shrink 1 "thread-refusal-shrink"
+  printf '%s\n' 'model stream idle timeout' 'host: launch running uncapped (no supported per-launch limits available)' 'model stream idle timeout' > "$root/refusal-shrink/logs/coachman-leg-1.err"
+  : > "$root/refusal-shrink/logs/coachman-leg-1-events.jsonl"; : > "$root/refusal-shrink/.leg-1-exited"
+  watch_stub "$root" "uncapped resume refusal"
+  refused_count=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["resume_attempts"]["1"])' "$root/refusal-shrink/watcher.json")
+  [ $rc -eq 0 ] && has "needs refusal-shrink REMOUNT" \
+    && has "launch: simulated refusal" \
+    && [ "$(action_count "$root/refusal-shrink" refuse)" -eq 1 ] \
+    && [ "$(action_count "$root/refusal-shrink" resume)" -eq 0 ] \
+    && [ "$refused_count" = 0 ] \
+    && ok "a two-line refusal after a three-line .err is found in the same look" \
+    || fail "a two-line refusal after a three-line .err is found in the same look"
   root="$tmp/wake-resume-refusal-many"; auto_run "$root" refusal-many 1 "thread-refusal-many"
   printf '%s\n' 'model stream idle timeout' > "$root/refusal-many/logs/coachman-leg-1.err"
   : > "$root/refusal-many/logs/coachman-leg-1-events.jsonl"; : > "$root/refusal-many/.leg-1-exited"

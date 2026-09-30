@@ -765,6 +765,10 @@ PY
     "model stream idle timeout" '{"type":"error","code":"WIDGET_7","message":"model stream idle timeout"}'
   check_pair "an unknown status wakes" 1 not-transient \
     "model stream idle timeout" '{"type":"error","status":418,"message":"model stream idle timeout"}'
+  check_pair "a 200 status does not block a transient end" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"progress","status":200}'
+  check_pair "a 301 status does not block a transient end" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"progress","httpStatus":301}'
   check_pair "an unknown error type wakes" 1 not-transient \
     "model stream idle timeout" '{"type":"error","errortype":"SomethingNew","message":"model stream idle timeout"}'
   check_pair "a wall-like code wakes as a wall" 1 provider-wall \
@@ -987,8 +991,9 @@ except OSError as e:
 #
 # Structured values come in three classes, read over every post-skip line. A status
 # code or error type in the known-transient set is a resume signal, on any record. A
-# known-harness-internal value (a completed status, a rate_limit_event slowdown, an
-# exit code, a generic timeout) is ignored. Any other numeric status under a code key
+# known-harness-internal value (a completed status, a rate_limit_event slowdown, a
+# 2xx/3xx status, an exit code, a generic timeout) is ignored. Any other numeric
+# status under a code key
 # wakes wherever it sits; any other string under a code or error-name key wakes on an
 # error record, while on a non-error record it is progress noise: an unknown
 # classification is a wake, never a fall-through. Bare record-shape keys (type, name)
@@ -1024,6 +1029,8 @@ def note_structured(key, value, marked):
                     structured_transient = "gateway failure"
             elif value in WALL_CODES:
                 structured_wall = True
+            elif 200 <= value <= 399:
+                pass  # success and redirect statuses are harness-internal, like completed
             elif 100 <= value <= 999:
                 unknown_structured = True
             # else an exit code, not a status: harness-internal, ignored

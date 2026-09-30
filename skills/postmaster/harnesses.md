@@ -104,8 +104,9 @@ Where a record carries a status code or an error type, values come in three clas
 over every post-skip line: the known-transient set (`502`, `503`, `504`, `529`,
 connection-reset and overloaded types) resumes on any record;
 known-harness-internal values (a `completed` status, a `rate_limit_event` slowdown,
-an exit code, a generic timeout) are ignored; any other numeric status under a code
-key wakes wherever it sits, and any other string under a code or error-name key
+a `2xx`/`3xx` status, an exit code, a generic timeout) are ignored; any other
+numeric status under a code key wakes wherever it sits, and any other string
+under a code or error-name key
 wakes on an error record while on another record it is progress noise. Bare
 record-shape keys (`type`, `name`) are labels, not classifications. Per harness,
 as observed: mimo
