@@ -41,6 +41,7 @@
 #   exit 4  the issue changed since the base was read
 #   exit 5  create made the issue, and printed its number, but could not put it on the board
 set -uo pipefail
+HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 die() { echo "github: $*" >&2; exit 1; }
 if [ "${1:-}" != --self-test ]; then
   REPO=${1:?usage: github.sh <repo> board|create|edit|read|state|comment|list|access ... | --self-test}
@@ -50,7 +51,8 @@ if [ "${1:-}" != --self-test ]; then
   gh auth status >/dev/null 2>&1 || die "gh is not logged in; the user runs: gh auth login"
   REMOTE=$(git -C "$REPO" remote get-url origin 2>/dev/null) || die "$REPO has no origin remote"
 
-  exec python3 - "$REMOTE" "${@:2}" <<'PY'
+  POSTMASTER_PROJECT_SETTINGS="$HERE/project-settings.sh" POSTMASTER_PROJECT="$REPO" \
+    exec python3 - "$REMOTE" "$REPO" "${@:2}" <<'PY'
 import datetime, json, os, re, subprocess, sys
 
 STATES = ["todo", "in-progress", "blocked", "done", "cancelled"]
@@ -65,8 +67,21 @@ if not m:
     die("origin is not a GitHub remote: " + sys.argv[1])
 OWNER, NAME = m.group(1), m.group(2)
 NWO = "%s/%s" % (OWNER, NAME)
-args = sys.argv[2:]
+REPO = sys.argv[2]
+args = sys.argv[3:]
 cmd = args[0]
+
+def tracker_binding():
+    helper = os.environ.get("POSTMASTER_PROJECT_SETTINGS")
+    if not helper:
+        return None
+    r = subprocess.run([helper, "inspect", REPO], capture_output=True, text=True)
+    if r.returncode:
+        die(r.stderr.strip() or "cannot read the project's tracker binding")
+    try:
+        return json.loads(r.stdout).get("tracker", {}).get("binding")
+    except ValueError as e:
+        die("project settings gave no JSON: %s" % e)
 
 def gh(*argv, ok=(0,)):
     r = subprocess.run(["gh", *argv], capture_output=True, text=True)
@@ -95,7 +110,12 @@ def board():
     boards = linked_boards()
     if not boards:
         die("%s has no linked board; run: github.sh <repo> board init" % NWO, 3)
-    named = [b for b in boards if b.get("title") == NAME]
+    binding = tracker_binding()
+    named = [b for b in boards if b.get("title") == (binding or NAME)]
+    if binding and not named:
+        die("the project's tracker binding %r is not a linked GitHub Projects board" % binding)
+    if binding and len(named) > 1:
+        die("the project's tracker binding %r matches more than one linked board" % binding)
     b = named[0] if len(boards) > 1 and named else boards[0]
     b["ownerLogin"] = (b.get("owner") or {}).get("login") or OWNER
     return b
@@ -224,7 +244,7 @@ if cmd == "board":
     if len(args) == 1:
         b = board(); print("#%s\t%s\t%s" % (b["number"], b["title"], b["url"]))
     elif args[1] == "init" and len(args) in (2, 3):
-        board_init(args[2] if len(args) == 3 else NAME)
+        board_init(args[2] if len(args) == 3 else (tracker_binding() or NAME))
     else:
         usage("board [init [title]]")
 
@@ -407,6 +427,26 @@ printf '## Problem / feature\r\nStored with CRLF line endings.\r\n\r\n## Directi
 printf '## Problem / feature\nThe new body.\n\n## Direction\nNone: any approach that meets the criteria.\n' > "$tmp/new.md"
 
 echo "positive controls"
+mkdir -p "$tmp/repo/.postmaster"
+printf '[tracker]\nbinding = "chosen"\n' > "$tmp/repo/.postmaster/project.toml"
+printf '%s\n' '{"data":{"repository":{"projectsV2":{"nodes":[{"id":"PVT_1","number":1,"title":"r","closed":false,"url":"https://github.com/users/o/projects/1","owner":{"login":"o"}},{"id":"PVT_2","number":2,"title":"chosen","closed":false,"url":"https://github.com/users/o/projects/2","owner":{"login":"o"}}]}}}}' > "$S/boards.json"
+out=$(gh_sh board 2>&1); rc=$?
+[ $rc -eq 0 ] && [ "$out" = $'#2\tchosen\thttps://github.com/users/o/projects/2' ] \
+  && ok "the shared tracker binding selects its named linked board" \
+  || fail "the shared tracker binding selects its named linked board (exit $rc)" "$out"
+printf '[tracker]\nbinding = "missing"\n' > "$tmp/repo/.postmaster/project.toml"
+out=$(gh_sh board 2>&1); rc=$?
+[ $rc -eq 1 ] && grep -q "is not a linked GitHub Projects board" <<<"$out" \
+  && ok "a binding naming no linked board is refused" \
+  || fail "a binding naming no linked board is refused (exit $rc)" "$out"
+printf '%s\n' '{"data":{"repository":{"projectsV2":{"nodes":[{"id":"PVT_1","number":1,"title":"dup","closed":false,"url":"https://github.com/users/o/projects/1","owner":{"login":"o"}},{"id":"PVT_2","number":2,"title":"dup","closed":false,"url":"https://github.com/users/o/projects/2","owner":{"login":"o"}}]}}}}' > "$S/boards.json"
+printf '[tracker]\nbinding = "dup"\n' > "$tmp/repo/.postmaster/project.toml"
+out=$(gh_sh board 2>&1); rc=$?
+[ $rc -eq 1 ] && grep -q "matches more than one linked board" <<<"$out" \
+  && ok "a binding matching two linked boards is refused" \
+  || fail "a binding matching two linked boards is refused (exit $rc)" "$out"
+rm -- "$tmp/repo/.postmaster/project.toml"
+printf '%s\n' "$BOARD" > "$S/boards.json"
 stored 7 "$tmp/lf.md"; gh_sh read 7 --body > "$tmp/out" 2>&1; rc=$?
 { cat "$tmp/lf.md"; printf '\n'; } > "$tmp/want"
 [ $rc -eq 0 ] && cmp -s "$tmp/out" "$tmp/want" && ok "read --body prints the stored body byte for byte, then one newline" \
@@ -416,7 +456,7 @@ stored 7 "$tmp/crlf.md"; gh_sh read 7 --body > "$tmp/out" 2>&1; rc=$?
 [ $rc -eq 0 ] && cmp -s "$tmp/out" "$tmp/want" && ok "read --body keeps a CRLF body's line endings" \
   || fail "read --body keeps a CRLF body's line endings (exit $rc)" "$(cat -A "$tmp/out")"
 stored 7 "$tmp/lf.md"; out=$(gh_sh read 7 2>&1); rc=$?
-[ $rc -eq 0 ] && [ "$(printf '%s\n' "$out" | head -1)" = "id: #7" ] && printf '%s\n' "$out" | grep -qxF "title: Check a ticket's shape" \
+[ $rc -eq 0 ] && [ "$(printf '%s\n' "$out" | head -1)" = "id: #7" ] && grep -qxF "title: Check a ticket's shape" <<<"$out" \
   && ok "read without --body still prints the header before the body" || fail "read without --body still prints the header before the body (exit $rc)" "$out"
 gh_sh read 7 --body > "$tmp/base.md" 2>/dev/null; : > "$S/edits.log"
 out=$(gh_sh edit 7 "$tmp/new.md" "$tmp/base.md" 2>&1); rc=$?
@@ -436,7 +476,7 @@ refused() {  # refused <label> <exit> <text the message holds> <edit arguments..
   local label=$1 want=$2 why=$3; shift 3
   : > "$S/edits.log"
   out=$(gh_sh edit "$@" 2>&1); rc=$?
-  if [ $rc -eq "$want" ] && [ "$(edits)" -eq 0 ] && printf '%s\n' "$out" | grep -qF -- "$why"; then ok "$label"
+  if [ $rc -eq "$want" ] && [ "$(edits)" -eq 0 ] && grep -qF -- "$why" <<<"$out"; then ok "$label"
   else fail "$label: wanted exit $want with \"$why\" and no edit, got exit $rc and $(edits) edit(s)" "$out"; fi
 }
 stored 7 "$tmp/lf.md"
@@ -462,7 +502,7 @@ out=$(gh_sh access 2>&1); rc=$?
 [ $rc -eq 0 ] && [ "$out" = READ ] && ok "a repository the user only reads says READ" || fail "a repository the user only reads says READ (exit $rc)" "$out"
 printf '%s\n' '{"data": {"repository": null}}' > "$S/access.json"
 out=$(gh_sh access 2>&1); rc=$?
-[ $rc -eq 1 ] && printf '%s\n' "$out" | grep -qF "no permission on o/r" && ok "a repository gh cannot see exits 1" \
+[ $rc -eq 1 ] && grep -qF "no permission on o/r" <<<"$out" && ok "a repository gh cannot see exits 1" \
   || fail "a repository gh cannot see exits 1 (exit $rc)" "$out"
 
 echo "create and search"
@@ -478,7 +518,7 @@ out=$(gh_sh create "A title" "$tmp/new.md" 2>"$tmp/err"); rc=$?
 mv -- "$S/no-item-add" "$tmp/no-item-add.was"; : > "$S/creates.log"; cp "$S/fields.json" "$tmp/fields.json"
 printf '%s\n' '{"fields": [{"id": "F1", "name": "Status", "options": [{"id": "o1", "name": "Backlog"}, {"id": "o3", "name": "Done"}]}]}' > "$S/fields.json"
 out=$(gh_sh create "A title" "$tmp/new.md" 2>&1); rc=$?
-[ $rc -eq 1 ] && [ "$(creates)" -eq 0 ] && printf '%s\n' "$out" | grep -qF "nothing was created" \
+[ $rc -eq 1 ] && [ "$(creates)" -eq 0 ] && grep -qF "nothing was created" <<<"$out" \
   && ok "a board with no Todo column is refused before anything is created" || fail "a board with no Todo column is refused before anything is created (exit $rc)" "$out"
 cp "$tmp/fields.json" "$S/fields.json"
 printf '%s\n' '[{"number": 9, "title": "Later", "state": "CLOSED"}, {"number": 4, "title": "Earlier", "state": "OPEN"}]' > "$S/search.json"
@@ -486,7 +526,7 @@ out=$(gh_sh search 'tf-0a1b2c3d' 2>&1); rc=$?
 [ $rc -eq 0 ] && [ "$out" = "$(printf '#4\topen\tEarlier\n#9\tclosed\tLater')" ] && grep -qF -- '"tf-0a1b2c3d" --repo o/r' "$S/searches.log" \
   && ok "search asks for the phrase in this repository, and prints number, state and title" || fail "search asks for the phrase in this repository, and prints number, state and title (exit $rc)" "$out"
 gh_sh search 'Tool fault in scripts/x.sh:' >/dev/null 2>&1
-tail -1 "$S/searches.log" | grep -qF -- '"Tool fault in scripts/x.sh" --repo o/r' \
+grep -qF -- '"Tool fault in scripts/x.sh" --repo o/r' <<<"$(tail -1 "$S/searches.log")" \
   && ok "a colon in the text is searched as a space, which GitHub's query accepts" || fail "a colon in the text is searched as a space, which GitHub's query accepts" "$(tail -1 "$S/searches.log")"
 
 echo

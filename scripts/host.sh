@@ -5,13 +5,18 @@
 # form, and the two change together.
 #
 #   host.sh detect                        herdr, tmux or none, on stdout
-#   host.sh name <dispatch> [<role>]      the run's name from its waybill, then " · <role>"
-#   host.sh run <name> <cwd> [--role lane|coachman|reviewer] [--run <dispatch>]
+#   host.sh name <dispatch>               the run's ticket name
+#   host.sh name <dispatch> coachman <leg-name> <leg-number>
+#   host.sh name <dispatch> workhorse <lane>
+#   host.sh name <dispatch> review <lane> <lens> <round>
+#   host.sh name <dispatch> postmaster
+#   host.sh name <dispatch> role <text...>                          any other launch, by its role alone
+#   host.sh run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>]
 #               [--out <file>] [--err <file>] [--append] [--marker <file>]
 #               [--pidfile <file>] -- <command...>
 #   host.sh stop <worktree>               stop every launch still running in a worktree, and
 #                                         everything each one started
-#   host.sh close <worktree>              close its space (Herdr) and its windows (tmux)
+#   host.sh close <worktree>              close its tabs/space (Herdr) and its windows (tmux)
 #   host.sh spawn <handle> <cwd> [--label <text>] -- <command...>   an interactive session;
 #                                         the handle becomes a Herdr agent name
 #   host.sh send <handle> <file> [--wait [<seconds>]]   submit the file's text to that session,
@@ -22,8 +27,9 @@
 #   host.sh --live-test                   the ticket's controls, against the hosts on this machine
 #
 # run: <command> is the same headless command a caller would otherwise background with `&`. It
-# runs from the directory host.sh was called in, with the caller's environment and an empty
-# stdin, in a session of its own with no terminal; its stdout goes to --out, added to with
+# runs from the directory host.sh was called in, with the caller's environment except for
+# Claude Code session identity and caller Herdr variables, and an empty stdin, in a session of
+# its own with no terminal; its stdout goes to --out, added to with
 # --append, and its stderr to --err, which holds only this launch's errors. --marker is removed
 # as it starts and touched when it exits,
 # whatever its exit, and also when host.sh cannot start it, with the reason in --err. --pidfile
@@ -31,14 +37,28 @@
 # directory the launch belongs to, usually its worktree: in Herdr the launch runs in a new tab of
 # that worktree's space, opened with `herdr worktree open` under the repository's space if it is
 # not open yet; in tmux in a window of session postmaster-<repo>; with no host, detached from
-# the caller. A reviewer's scratch clone (cut-scratch.sh --clone) opens as a space of its own in
-# Herdr, and in tmux joins the session of the repository it was cut from. <name> labels the space when host.sh opens it, the tab or window and the pane's
+# the caller. A run launch's <cwd>, including a reviewer's scratch clone, is its tab's working
+# directory inside the run's synthesis-worktree space in Herdr. In tmux a scratch clone joins
+# the session of the repository it was cut from. <name> labels the tab or window and the pane's
 # title, and names the thread where the harness can (POSTMASTER_LAUNCH_NAME, read by launch.sh).
-# Pass it as "$(host.sh name <dispatch> <role>)", so a ticket's title never passes through a
-# shell. A pane shows the stream through view-stream.sh. A launch carries its own pane's
-# identity (HERDR_PANE_ID and the like, or TMUX_PANE), never its caller's. If the host cannot
-# place it, it runs in the background. On Linux with a working systemd user manager, the command
-# and its descendants run in a transient scope with MemoryMax, MemorySwapMax=0 and TasksMax;
+# If --out is set, its absolute path also reaches launch.sh as POSTMASTER_EVENT_STREAM so that a
+# run can retain the harness's durable session beside that event stream. For a run launch,
+# --role reaches a run's launch.sh command as POSTMASTER_LAUNCH_ROLE; it is the explicit role
+# used in its usage record, and is removed before the harness starts.
+# Pass a role-specific `host.sh name` result as the launch name and pass the dispatch separately,
+# so the ticket title labels only the run space and never passes through a shell. A pane shows
+# the stream through view-stream.sh. A launch carries its own pane's identity (Herdr's six
+# HERDR_* pane values, or TMUX_PANE), never its caller's. It drops caller HERDR_* and Claude
+# session identity: CLAUDECODE, CLAUDE_PID, CLAUDE_CODE_SESSION_ID,
+# CLAUDE_CODE_CHILD_SESSION, CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_EXECPATH,
+# CLAUDE_CODE_SESSION_ATTENDED, CLAUDE_CODE_MESSAGING_SOCKET,
+# CLAUDE_CODE_MESSAGING_TOKEN, CLAUDE_CODE_TOOL_USE_ID, and the
+# CLAUDE_CODE_SESSION_*, CLAUDE_CODE_MESSAGING_* and CLAUDE_CODE_CHILD_*
+# families. Add an exact identity name or family
+# to runner()'s filter and its self-test controls; keep unrelated CLAUDE_CODE_* configuration.
+# If the host cannot place it, it runs in the background. On Linux with a working systemd user
+# manager, the command and its descendants run in a transient scope with MemoryMax,
+# MemorySwapMax=0 and TasksMax;
 # otherwise it runs uncapped and records that in --err. While it runs it is registered under
 # POSTMASTER_HOST_STATE (default ~/.postmaster/host), whatever its host, so stop and close see it.
 # The record names its group leader by start time and boot, so a pid another process reuses,
@@ -62,9 +82,9 @@
 #
 #   exit 0  detected, named, started, stopped, closed, sent, settled or read
 #   exit 1  usage, or nothing could be started
-#   exit 2  close refused: a launch still runs in the worktree, or its space holds something
-#           host.sh did not open; or stop left something of a launch running, named, or
-#           refused a set of processes it could not vouch for, saying why
+#   exit 2  close refused: a launch still runs in the worktree, or an affected pane or space
+#           holds something host.sh did not open; or stop left something of a launch running,
+#           named, or refused a set of processes it could not vouch for, saying why
 #   exit 3  spawn, send, wait or read with no host that keeps an interactive session; or a send
 #           or wait that did not settle, stopped at an approval or a question, or showed no turn
 set -uo pipefail
@@ -137,25 +157,289 @@ handle_of() {  # handle_of <text>: a Herdr agent name, [a-z][a-z0-9_-]{0,31}, an
   printf '%s\n' "$h"
 }
 
-name_cmd() {  # name <dispatch> [<role>]: the `name:` of the waybill's Dispatch section, else the run
-  local d=${1:?usage: host.sh name <dispatch> [<role or lane>]} role=${2:-} n
-  n=$(python3 - "$d/brief.md" <<'PY'
-import re, sys
+dispatch_info() {  # dispatch_info <dispatch>: ticket name and synthesis worktree from its waybill
+  python3 - "$1/brief.md" <<'PY'
+import json, re, sys
+name = worktree = ""
 try:
     lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
 except OSError:
-    sys.exit(0)
+    lines = []
 inside = False
 for line in lines:
     if line.startswith("## "):
         inside = line.strip() == "## Dispatch"
     elif inside and line.startswith("name:"):
-        print(re.sub(r"\s{2,}\(.*\)$", "", line[5:]).strip())      # a template's trailing note
-        break
+        name = re.sub(r"\s{2,}\(.*\)$", "", line[5:]).strip()
+    elif inside and line.startswith("synthesis worktree:"):
+        worktree = line.split(":", 1)[1].strip()
+print(json.dumps({"name": name, "synthesis_worktree": worktree}))
 PY
-)
-  [ -n "$n" ] || n=$(basename "$d")
-  clean "$n${role:+ · $role}"; echo
+}
+
+name_cmd() {  # name <dispatch> [coachman|workhorse|review|postmaster|role ...]
+  local d=${1:?usage: host.sh name <dispatch> [coachman <leg-name> <leg-number> | workhorse <lane> | review <lane> <lens> <round> | postmaster | role <text...>]}
+  local result
+  shift
+  result=$(python3 - "$d" "$HERE" "$@" <<'PY'
+import json, os, re, subprocess, sys
+d, tool, *args = sys.argv[1:]
+try:
+    brief = open(os.path.join(d, "brief.md"), encoding="utf-8", errors="replace").read().splitlines()
+except OSError:
+    brief = []
+ticket = ""
+inside = False
+for line in brief:
+    if line.startswith("## "):
+        inside = line.strip() == "## Dispatch"
+    elif inside and line.startswith("name:"):
+        ticket = re.sub(r"\s{2,}\(.*\)$", "", line[5:]).strip()
+        break
+ticket = ticket or os.path.basename(d)
+if not args:
+    print(ticket)
+    raise SystemExit(0)
+def as_dict(value):  # stores are third-party text: anything not a mapping is no store at all
+    return value if isinstance(value, dict) else {}
+try:
+    run = as_dict(json.load(open(os.path.join(d, "run.json"), encoding="utf-8")))
+except (OSError, json.JSONDecodeError):
+    run = {}
+config = as_dict(run.get("config"))
+lanes = as_dict(config.get("lanes"))
+team = as_dict(config.get("team"))
+def shown(model):  # a model id as a label part: the provider prefix never tells launches apart
+    return str(model).rsplit("/", 1)[-1]
+# The strict front end: every argument below passes through exactly one of these,
+# each refusing cleanly, and no branch labels from a value one did not return.
+def need_manifest_leg():
+    try:
+        raw = json.load(open(os.path.join(d, "manifest.json"))).get("leg", 0)
+    except (OSError, AttributeError, ValueError, TypeError, json.JSONDecodeError):
+        raise SystemExit("host: cannot resolve the coachman leg from manifest.json")
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
+        raise SystemExit("host: cannot resolve the coachman leg from manifest.json")
+    return raw
+def need_lane_model(lane, role):
+    spec = lanes.get(lane)
+    if not isinstance(spec, dict) or not spec.get("model"):
+        raise SystemExit("host: no recorded model for %s lane %s" % (role, lane))
+    return spec
+def need_coachman_model(leg_name):
+    spec = as_dict(team.get("coachman_legs")).get(leg_name) or team.get("coachman")
+    if not isinstance(spec, dict) or not spec.get("model"):
+        raise SystemExit("host: no recorded model for coachman leg " + leg_name)
+    return spec
+def need_lens(lens):
+    if lens not in ("style", "bug", "security"):
+        raise SystemExit("host: review lens must be style, bug or security")
+    return lens
+def need_leg_name(name):
+    if not name:
+        raise SystemExit("host: coachman leg name must not be empty")
+    known = set()
+    legs = subprocess.run([os.path.join(tool, "turnpikes.sh"), "legs", d], capture_output=True, text=True)
+    if legs.returncode == 0:
+        for line in legs.stdout.splitlines():
+            fields = line.split()
+            if len(fields) > 1:
+                known.add(fields[1])
+    if name not in known:
+        raise SystemExit("host: unknown coachman leg " + name)
+    return name
+def need_leg_number(text):
+    if not re.fullmatch(r"[0-9]+", text or ""):
+        raise SystemExit("host: coachman leg number must be a whole number")
+    try:
+        n = int(text)
+    except ValueError:
+        raise SystemExit("host: coachman leg number must be a whole number") from None
+    if n < 1:
+        raise SystemExit("host: coachman leg number must be 1 or more")
+    return n
+def need_round(text):
+    if not re.fullmatch(r"[0-9]+", text or ""):
+        raise SystemExit("host: review round must be a whole number")
+    try:
+        n = int(text)
+    except ValueError:
+        raise SystemExit("host: review round must be a whole number") from None
+    if n < 1:
+        raise SystemExit("host: review round must be 1 or more")
+    if not os.path.isfile(os.path.join(d, "logs", "review-r%d.json" % n)):
+        raise SystemExit("host: unknown review round %d" % n)
+    return n
+if len(args) == 1 and args[0] == "coachman":
+    n = need_manifest_leg()
+    legs = subprocess.run([os.path.join(tool, "turnpikes.sh"), "legs", d], capture_output=True, text=True)
+    name = ""
+    if legs.returncode == 0:
+        for line in legs.stdout.splitlines():
+            fields = line.split()
+            if len(fields) > 1 and fields[0] == str(n):
+                name = fields[1]
+                break
+    if not name:
+        raise SystemExit("host: cannot resolve leg %d from the waybill's turnpikes" % n)
+    # Resolved names re-validate below; the second listing is cheap and keeps the invariant total.
+    args = ["coachman", name, str(n)]
+elif len(args) == 1 and args[0] in lanes:
+    lane = args[0]
+    workhorses = team.get("workhorses")
+    if not isinstance(workhorses, list):
+        workhorses = []
+    args = ["workhorse", lane] if lane in workhorses else args
+elif len(args) == 1:
+    legacy = re.fullmatch(r"([^\s]+) (style|bug|security) review", args[0])
+    if legacy:
+        lane, lens = legacy.groups()
+        rounds = []
+        try:
+            for file in os.listdir(os.path.join(d, "logs")):
+                match = re.fullmatch(r"review-r([0-9]+)\.json", file)
+                if match:
+                    rounds.append(int(match.group(1)))
+        except OSError:
+            pass
+        args = ["review", lane, lens, str(max(rounds) if rounds else 1)]
+mode = args[0]
+parts = []
+if mode == "postmaster" and len(args) == 1:
+    parts = ["postmaster"]
+elif mode == "coachman" and len(args) == 3:
+    leg_name = need_leg_name(args[1])
+    leg_int = need_leg_number(args[2])
+    spec = need_coachman_model(leg_name)
+    parts = ["coachman", shown(spec["model"]), "leg " + str(leg_int)]
+elif mode == "workhorse" and len(args) == 2:
+    spec = need_lane_model(args[1], "workhorse")
+    parts = [args[1], "workhorse", shown(spec["model"])]
+elif mode == "review" and len(args) == 4:
+    lane = args[1]
+    spec = need_lane_model(lane, "reviewer")
+    parts = [lane, need_lens(args[2]) + " review", shown(spec["model"]), "r" + str(need_round(args[3]))]
+elif mode == "role" and len(args) >= 2:
+    parts = list(args[1:])
+else:
+    raise SystemExit("host: invalid launch identity; use coachman, workhorse, review, postmaster or role")
+print(" · ".join(parts))
+PY
+) || return 1
+  clean "$result"; echo
+}
+
+# Remember the tabs this host creates inside shared run spaces. A later `close <worktree>` can
+# then close that checkout's tabs without closing the ticket space or a tab opened by the user.
+herdr_record_placement() {  # herdr_record_placement <space> <tab> <pane> <cwd>
+  mkdir -p "$STATE/placements" 2>/dev/null || return 1
+  python3 - "$STATE/placements" "$1" "$2" "$3" "$4" <<'PY'
+import hashlib, json, os, sys, tempfile
+directory, workspace, tab, pane, cwd = sys.argv[1:]
+name = hashlib.sha256(tab.encode("utf-8")).hexdigest() + ".json"
+fd, temporary = tempfile.mkstemp(prefix=".placement-", dir=directory)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        json.dump({"workspace": workspace, "tab": tab, "pane": pane, "cwd": os.path.realpath(cwd)}, stream)
+        stream.write("\n")
+    os.replace(temporary, os.path.join(directory, name))
+except BaseException:
+    try:
+        os.unlink(temporary)
+    except OSError:
+        pass
+    raise
+PY
+}
+
+# A dispatch's synthesis worktree is its Herdr run space. Every launch gets a tab of its
+# own with its own checkout as the working directory, the first one included: the root tab
+# Herdr creates with the run space belongs to the space, not to the launch, so the first
+# launch closes it once its own tab exists. A security-review clone therefore stays under
+# the run, in a tab rooted at the clone.
+# Best-effort rollback for a failed first placement: close the root tab this launch
+# just created, so a failure before the launch lands leaves nothing behind. A racing
+# first launch may own the space by now, but the root tab is still this launch's to
+# close; when it is the sole tab, Herdr destroys the childless space with it
+# (probed 2026-09-29), which is the rollback — sole means no racing launch has
+# placed a tab. Warns instead of failing: the caller is already failing, and Herdr
+# may be too sick to close.
+rollback_root_tab() {  # rollback_root_tab <root-tab-id>
+  herdr tab close "$1" >/dev/null 2>&1 \
+    || warn "could not roll back the run space's root tab $1 after a failed placement; close it by hand"
+}
+# Best-effort rollback for a failure after the launch tab exists: close the tab
+# just created, by its id, which this launch knows is its own even when the
+# tag failed. Unlike close_placements it needs no token: the id is enough, and
+# the untagged tab is exactly what must go. Warns instead of failing.
+rollback_launch_tab() {  # rollback_launch_tab <tab-id>
+  herdr tab close "$1" >/dev/null 2>&1 \
+    || warn "could not roll back launch tab $1 after a failed placement; close it by hand"
+}
+herdr_run_place() {  # herdr_run_place <name> <cwd> <dispatch>: prints "<space> <tab> <pane>"
+  local name=$1 cwd=$2 dispatch=$3 info runname runpath list src root rname runspace="" out tab pane roottab rootpane
+  info=$(dispatch_info "$dispatch") || return 1
+  runname=$(clean "$(printf '%s' "$info" | json 'd.get("name")')")
+  runpath=$(printf '%s' "$info" | json 'd.get("synthesis_worktree")')
+  [ -n "$runname" ] && [ -n "$runpath" ] && [ -d "$runpath" ] || return 1
+  list=$(herdr worktree list --cwd "$runpath" 2>/dev/null) || return 1
+  IFS=$'\t' read -r src root rname runspace < <(printf '%s' "$list" | python3 -c '
+import json, os, sys
+d = json.load(sys.stdin)["result"]
+runpath = os.path.realpath(sys.argv[1])
+w = next((w for w in d.get("worktrees") or [] if os.path.realpath(w["path"]) == runpath), {})
+print("\t".join([d.get("source", {}).get("source_workspace_id") or "-",
+                 d.get("source", {}).get("repo_root") or "-",
+                 d.get("source", {}).get("repo_name") or "-",
+                 w.get("open_workspace_id") or "-" ]))' "$runpath")
+  [ "$src" = - ] && src=""
+  [ "$root" = - ] && root=""
+  [ "$rname" = - ] && rname=""
+  [ "$runspace" = - ] && runspace=""
+  if [ -z "$src" ]; then
+    [ -n "$root" ] && [ -n "$rname" ] || return 1
+    out=$(herdr workspace create --cwd "$root" --label "$rname" --no-focus) || return 1
+    src=$(printf '%s' "$out" | json 'd["result"]["workspace"]["workspace_id"]')
+  fi
+  if [ -z "$runspace" ]; then
+    out=$(herdr worktree open --workspace "$src" --path "$runpath" --label "$runname" --no-focus) || return 1
+    runspace=$(printf '%s' "$out" | json 'd["result"]["workspace"]["workspace_id"]')
+    roottab=$(printf '%s' "$out" | json 'd["result"]["tab"]["tab_id"]')
+    rootpane=$(printf '%s' "$out" | json 'd["result"]["root_pane"]["pane_id"]')
+    [ -n "$runspace" ] && [ -n "$roottab" ] && [ -n "$rootpane" ] || return 1
+    # Mark it at once, then roll back on any failure below: a failed first
+    # placement leaves nothing behind, and when the rollback fails too, what
+    # survives is still a marked space close can shut.
+    herdr workspace report-metadata "$runspace" --source "$META" --token postmaster=opened >/dev/null 2>&1 \
+      || { rollback_root_tab "$roottab"; return 1; }
+    herdr pane report-metadata "$rootpane" --source "$META" --title "$name" --token postmaster=launch >/dev/null 2>&1 \
+      || { rollback_root_tab "$roottab"; return 1; }
+    out=$(herdr tab create --workspace "$runspace" --cwd "$cwd" --label "$name" --no-focus) \
+      || { rollback_root_tab "$roottab"; return 1; }
+    tab=$(printf '%s' "$out" | json 'd["result"]["tab"]["tab_id"]')
+    pane=$(printf '%s' "$out" | json 'd["result"]["root_pane"]["pane_id"]')
+    [ -n "$tab" ] && [ -n "$pane" ] || { rollback_root_tab "$roottab"; return 1; }
+    # Its close is cosmetic: when it fails the launch still runs in the right tab,
+    # and the warning names the tab left behind. Never fail a launch over it.
+    herdr tab close "$roottab" >/dev/null 2>&1 \
+      || warn "could not close the run space's root tab $roottab; leaving it beside the launch tab"
+  else
+    out=$(herdr tab create --workspace "$runspace" --cwd "$cwd" --label "$name" --no-focus) || return 1
+    tab=$(printf '%s' "$out" | json 'd["result"]["tab"]["tab_id"]')
+    pane=$(printf '%s' "$out" | json 'd["result"]["root_pane"]["pane_id"]')
+  fi
+  # An id-less create in a later launch names nothing to roll back: without ids
+  # there is nothing to close, and sweeping untagged panes would risk a racing
+  # launch's. The first launch never reaches this line without ids.
+  [ -n "$runspace" ] && [ -n "$tab" ] && [ -n "$pane" ] || return 1
+  herdr tab rename "$tab" "$name" >/dev/null 2>&1 \
+    || { rollback_launch_tab "$tab"; return 1; }
+  herdr pane report-metadata "$pane" --source "$META" --title "$name" --token postmaster=launch >/dev/null 2>&1 \
+    || { rollback_launch_tab "$tab"; return 1; }
+  # A placement the record refuses still shuts: its tab is tagged, so close
+  # vouches for the space without the record. A control pins it.
+  herdr_record_placement "$runspace" "$tab" "$pane" "$cwd" || return 1
+  printf '%s %s %s\n' "$runspace" "$tab" "$pane"
 }
 
 # --- the registry of running launches ------------------------------------------------------
@@ -385,8 +669,14 @@ print("\t".join([s.get("source_workspace_id") or "-", s.get("repo_root") or "-",
     opened=1
   else
     if [ -z "$src" ]; then   # the repository has no space yet: open it, so the worktree nests
-      out=$(herdr workspace create --cwd "$root" --label "$rname" --no-focus) || return 1
+      out=$(herdr workspace create --cwd "$root" --label "$rname" --no-focus ${PLACE_ENV[@]+"${PLACE_ENV[@]}"}) || return 1
       src=$(printf '%s' "$out" | json 'd["result"]["workspace"]["workspace_id"]')
+      # This is the first pane of the project space. Use it for a project-level launch such as
+      # the postmaster, instead of leaving an empty shell beside the launch tab.
+      if [ "$where" = repo ] || [ "$wkind" = main ]; then
+        tab=$(printf '%s' "$out" | json 'd["result"]["tab"]["tab_id"]')
+        pane=$(printf '%s' "$out" | json 'd["result"]["root_pane"]["pane_id"]')
+      fi
     fi
     if [ "$where" = repo ] || [ "$wkind" = main ]; then space=$src
     elif [ -n "$wopen" ]; then space=$wopen
@@ -407,6 +697,7 @@ print("\t".join([s.get("source_workspace_id") or "-", s.get("repo_root") or "-",
   [ -n "$space" ] && [ -n "$tab" ] && [ -n "$pane" ] || return 1
   # Ownership, so `close` never closes what host.sh did not open.
   [ "$opened" = 1 ] && herdr workspace report-metadata "$space" --source "$META" --token postmaster=opened >/dev/null 2>&1
+  herdr tab rename "$tab" "$name" >/dev/null 2>&1
   herdr pane report-metadata "$pane" --source "$META" --title "$name" --token postmaster=launch >/dev/null 2>&1
   printf '%s %s %s\n' "$space" "$tab" "$pane"
 }
@@ -658,20 +949,30 @@ def tripped():
 # blocks in the kernel instead of waking on a timer: a trip is read within
 # milliseconds however long the launch runs, and a launch that exits right
 # after its trip is still caught while its cgroup outlives it. The first read
-# is the baseline and arms the poll; every wake re-reads, since a wake
-# promises only change, not a trip; the timeout re-reads too, for a trip that
-# lands between the baseline and the registration.
+# is the baseline; every wake re-reads, since a wake promises only change, not
+# a trip; the timeout re-reads too, for a trip that lands between the baseline
+# and the registration.
 kind = tripped()
 po = select.poll()
 try:
     pfd = open(pids_path); mfd = open(mem_path)
+    # An events file stays ready to poll until it is read again through the
+    # same descriptor: read each once to arm it, and again after every wake,
+    # or the poll returns at once forever and the watcher spins.
+    pfd.read(); mfd.read()
     po.register(pfd, select.POLLPRI | select.POLLERR)
     po.register(mfd, select.POLLPRI | select.POLLERR)
+    byfd = {pfd.fileno(): pfd, mfd.fileno(): mfd}
     armed = True
 except OSError:
     armed = False
 while not kind and os.path.isdir(root) and alive(runner):
-    if armed: po.poll(100)
+    if armed:
+        for fd, _ in po.poll(100):
+            try:
+                byfd[fd].seek(0); byfd[fd].read()
+            except OSError:
+                pass
     else: time.sleep(0.1)
     kind = tripped()
 if not kind:
@@ -691,14 +992,15 @@ launch_failed() {  # launch_failed <reason>: what a backgrounded launch left whe
 }
 
 run_cmd() {
-  local name=${1:-} cwd=${2:-} out="" err="" marker="" pidfile="" append=0 bad=""
+  local name=${1:-} cwd=${2:-} under="" out="" err="" marker="" pidfile="" append=0 bad=""
   local role=default dispatch="" memory tasks cap_mode=uncapped systemd_run="" systemctl="" setsid="" unit="" caps="" paths=""
   [ $# -ge 2 ] && shift 2 || set --
   while [ $# -gt 0 ]; do
     case $1 in
-      --role|--run|--out|--err|--marker|--pidfile)
+      --under|--role|--run|--out|--err|--marker|--pidfile)
         [ $# -ge 2 ] || { bad="$1 needs a value"; break; }
         case $1 in
+          --under) under=$2 ;;
           --role) role=$2 ;;
           --run) dispatch=$2 ;;
           --out) out=$2 ;;
@@ -745,10 +1047,15 @@ run_cmd() {
   case $host in
     herdr)
       local placed space tab pane
-      if placed=$(herdr_place "$name" "$cwd"); then
+      if [ -n "$under" ]; then
+        placed=$(herdr_run_place "$name" "$cwd" "$under")
+      else
+        placed=$(herdr_place "$name" "$cwd")
+      fi
+      if [ -n "$placed" ]; then
         read -r space tab pane <<< "$placed"
         mkfifo "$spec/env" && start_env_writer "$spec/env"
-        if herdr pane run "$pane" " $(q "$SELF") _run herdr $(q "$spec")" >/dev/null 2>&1; then
+        if herdr pane run "$pane" " cd -- $(q "$cwd") && $(q "$SELF") _run herdr $(q "$spec")" >/dev/null 2>&1; then
           where="host=herdr space=$space tab=$tab pane=$pane"
         fi
       fi
@@ -836,21 +1143,38 @@ runner() {
   fi
   drop_spec "$spec"
 
-  # The launch's environment is its caller's, except for identity: which pane it is in comes
-  # from where it actually runs, so nothing it reports lands in its caller's pane.
-  local drop="POSTMASTER_LAUNCH_NAME $PANE_IDS" keep=""
+  # Strip caller identity at the one boundary every run launch crosses. The Claude list is
+  # intentionally exact plus session-identity families: other CLAUDE_CODE_* names configure
+  # the harness and must reach it. Add a new identity name or family here and to the controls.
+  # Herdr values are all caller identity; a Herdr pane's own six are re-added below from this
+  # runner's environment, never from the caller FIFO. POSTMASTER_LAUNCH_ROLE is dropped with
+  # them so an inherited role cannot replace the run's explicit host role, re-added below.
+  local claude_identity="CLAUDECODE CLAUDE_PID CLAUDE_CODE_SESSION_ID \
+    CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH \
+    CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN \
+    CLAUDE_CODE_TOOL_USE_ID"
+  local drop="POSTMASTER_LAUNCH_NAME POSTMASTER_LAUNCH_ROLE POSTMASTER_EVENT_STREAM $PANE_IDS" keep=""
   case $mode in
-    herdr) drop="$drop HERDR_ENV HERDR_SOCKET_PATH HERDR_BIN_PATH"; keep="HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID HERDR_ENV HERDR_SOCKET_PATH HERDR_BIN_PATH" ;;
+    herdr) keep="HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID HERDR_ENV HERDR_SOCKET_PATH HERDR_BIN_PATH" ;;
     tmux)  drop="$drop TMUX"; keep="TMUX TMUX_PANE" ;;
   esac
   local childenv=()
   for kv in ${envs[@]+"${envs[@]}"}; do
     k=${kv%%=*}
-    case " $drop " in *" $k "*) continue ;; esac
+    case "$k" in
+      CLAUDE_CODE_SESSION_*|CLAUDE_CODE_MESSAGING_*|CLAUDE_CODE_CHILD_*|HERDR_*) continue ;;
+    esac
+    case " $claude_identity $drop " in *" $k "*) continue ;; esac
     childenv+=("$kv")
   done
   for k in $keep; do [ -n "${!k+x}" ] && childenv+=("$k=${!k}"); done
   childenv+=("POSTMASTER_LAUNCH_NAME=$name")
+  if [ "${argv[0]##*/}" = launch.sh ]; then
+    case $role in
+      lane|coachman|reviewer) childenv+=("POSTMASTER_LAUNCH_ROLE=$role") ;;
+    esac
+  fi
+  [ -z "$out" ] || childenv+=("POSTMASTER_EVENT_STREAM=$out")
 
   # Its streams are emptied once and then only ever appended to, so a second writer on the same
   # file, such as a resume started too soon, cannot overwrite what the first wrote. --append
@@ -1136,7 +1460,7 @@ sys.exit(2 if rest else 0)
 PY
 }
 
-close_cmd() {  # close <worktree>: refuse while a launch runs there; then its windows and its space
+close_cmd() {  # close <worktree>: refuse while a launch runs there; then its tabs, space and windows
   local path live i=0 rc=0 patience
   path=$(worktree_arg "${1:-}" close) || exit 1
   patience=$(count "${POSTMASTER_HOST_CLOSE_WAIT:-15}" POSTMASTER_HOST_CLOSE_WAIT) || exit 1
@@ -1162,8 +1486,91 @@ close_tmux() {
   [ $n -gt 0 ] && echo "host=tmux: closed $n window(s)"
   return 0
 }
+herdr_close_placements() {  # herdr_close_placements <worktree>: close mapped launch tabs for this checkout
+  local target file placement space tab pane panes ownership
+  target=$1
+  [ -d "$STATE/placements" ] || return 0
+  for file in "$STATE"/placements/*.json; do
+    [ -f "$file" ] || continue
+    placement=$(python3 - "$file" "$target" <<'PY'
+import json, os, sys
+try:
+    item = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError):
+    raise SystemExit(0)
+if os.path.realpath(item.get("cwd", "")) == os.path.realpath(sys.argv[2]):
+    print("\t".join((item.get("workspace", ""), item.get("tab", ""), item.get("pane", ""))))
+PY
+)
+    [ -n "$placement" ] || continue
+    IFS=$'\t' read -r space tab pane <<< "$placement"
+    [ -n "$space" ] && [ -n "$tab" ] && [ -n "$pane" ] || { warn "invalid launch placement in $file; left it open"; return 2; }
+    panes=$(herdr pane list --workspace "$space" 2>/dev/null) || { warn "could not inspect launch tab $tab in space $space; left it open"; return 2; }
+    ownership=$(printf '%s' "$panes" | python3 -c '
+import json, os, re, sys
+try:
+    panes = json.load(sys.stdin)["result"]["panes"]
+except (ValueError, KeyError, TypeError):
+    raise SystemExit(2)
+herdr_tab = re.compile(r"w[A-Za-z0-9]+:t[0-9A-Za-z]+")
+def placed(v):
+    return isinstance(v, str) and herdr_tab.fullmatch(v) is not None
+pane = next((p for p in panes if p.get("pane_id") == sys.argv[1]), None)
+if pane is None:
+    print("missing")
+elif (pane.get("tokens") or {}).get("postmaster") != "launch":
+    print("unowned")
+elif not placed(pane.get("tab_id")):
+    print("idless")
+elif any(not placed(p.get("tab_id")) for p in panes):
+    print("mixed")
+elif all((p.get("tokens") or {}).get("postmaster") == "launch"
+         for p in panes if p.get("tab_id") == sys.argv[2]):
+    print("owned")
+else:
+    print("split")' "$pane" "$tab") || { warn "could not verify ownership of launch tab $tab; left it open"; return 2; }
+    case $ownership in
+      missing) rm -f -- "$file"; continue ;;
+      owned) ;;
+      # A tab closes only when every pane in it carries the launch token, as a
+      # space does: a split tab keeps the user's pane. A tab the list cannot
+      # fully place refuses too: a row counts as placed only when its tab_id
+      # is a string of the shape Herdr sends (w…:t…), and anything else is
+      # unattributable. Where the recorded pane itself carries no attributable
+      # tab, only that pane closes, never the tab, whose sharers are unknown.
+      split) warn "launch tab $tab in space $space holds panes host.sh did not open; left it open"; return 2 ;;
+      mixed) warn "launch tab $tab in space $space holds panes host.sh cannot place; left it open"; return 2 ;;
+      idless)
+        herdr pane close "$pane" >/dev/null 2>&1 || { warn "herdr could not close launch pane $pane; left it open"; return 2; }
+        rm -f -- "$file"
+        echo "host=herdr: closed launch pane $pane"
+        continue ;;
+      *) warn "launch tab $tab in space $space is no longer owned by host.sh; left it open"; return 2 ;;
+    esac
+    herdr tab close "$tab" >/dev/null 2>&1 || { warn "herdr could not close launch tab $tab; left it open"; return 2; }
+    rm -f -- "$file"
+    echo "host=herdr: closed launch tab $tab"
+  done
+}
+herdr_forget_space() {  # herdr_forget_space <workspace>: discard placements after closing their space
+  local file workspace
+  [ -d "$STATE/placements" ] || return 0
+  for file in "$STATE"/placements/*.json; do
+    [ -f "$file" ] || continue
+    workspace=$(python3 - "$file" <<'PY'
+import json, sys
+try:
+    print(json.load(open(sys.argv[1], encoding="utf-8")).get("workspace", ""))
+except (OSError, ValueError):
+    pass
+PY
+)
+    [ "$workspace" = "$1" ] && rm -f -- "$file"
+  done
+}
 close_herdr() {
-  local list space kind verdict
+  local list space kind info actual_path verdict
+  herdr_close_placements "$1" || return $?
   list=$(herdr worktree list --cwd "$1" 2>/dev/null) || return 0
   read -r space kind < <(printf '%s' "$list" | python3 -c '
 import json, os, sys
@@ -1174,6 +1581,9 @@ print(w.get("open_workspace_id") or "-", "linked" if w.get("is_linked_worktree")
   [ "$space" = - ] && return 0
   [ "$kind" = main ] && ! clone_origin "$1" >/dev/null \
     && { warn "$1 is a repository's own checkout; its space is never closed"; return 2; }
+  info=$(herdr workspace get "$space" 2>/dev/null) || { warn "could not inspect space $space; left it open"; return 2; }
+  actual_path=$(printf '%s' "$info" | json 'd["result"]["workspace"].get("worktree",{}).get("checkout_path") or d["result"]["workspace"].get("worktree",{}).get("path")')
+  [ -n "$actual_path" ] && [ "$(CDPATH= cd -P -- "$actual_path" 2>/dev/null && pwd -P)" = "$1" ] || return 0
   verdict=$(python3 -c '
 import json, sys
 ws = json.loads(sys.argv[1])["result"]["workspace"]
@@ -1182,9 +1592,10 @@ if (ws.get("tokens") or {}).get("postmaster") != "opened":
 for p in json.loads(sys.argv[2])["result"]["panes"]:
     if (p.get("tokens") or {}).get("postmaster") != "launch":
         print("pane %s in space %s was not opened by host.sh" % (p["pane_id"], ws["workspace_id"])); sys.exit(0)
-print("ok")' "$(herdr workspace get "$space" 2>/dev/null)" "$(herdr pane list --workspace "$space" 2>/dev/null)" 2>/dev/null)
+print("ok")' "$info" "$(herdr pane list --workspace "$space" 2>/dev/null)" 2>/dev/null)
   [ "$verdict" = ok ] || { warn "${verdict:-could not read space $space}; left open"; return 2; }
   herdr workspace close "$space" >/dev/null || die "herdr could not close space $space"
+  herdr_forget_space "$space"
   echo "host=herdr: closed space $space"
 }
 
@@ -1359,8 +1770,8 @@ EOF
 #!/usr/bin/env bash
 printf '{"type":"system","subtype":"init","session_id":"probe-1","model":"m"}\n'
 if (: < /dev/tty) 2>/dev/null; then tty=yes; else tty=no; fi
-printf 'from=%s|name=%s|pane=%s|tmuxpane=%s|var=%s|sid=%s|pid=%s|pgid=%s|tty=%s\n' "$PWD" "${POSTMASTER_LAUNCH_NAME:-}" \
-  "${HERDR_PANE_ID:-unset}" "${TMUX_PANE:-unset}" "${CALLER_VAR:-unset}" "$(python3 -c 'import os; print(os.getsid(0))')" "$$" \
+printf 'from=%s|name=%s|pane=%s|tmuxpane=%s|var=%s|events=%s|sid=%s|pid=%s|pgid=%s|tty=%s\n' "$PWD" "${POSTMASTER_LAUNCH_NAME:-}" \
+  "${HERDR_PANE_ID:-unset}" "${TMUX_PANE:-unset}" "${CALLER_VAR:-unset}" "${POSTMASTER_EVENT_STREAM:-unset}" "$(python3 -c 'import os; print(os.getsid(0))')" "$$" \
   "$(python3 -c 'import os; print(os.getpgid(0))')" "$tty"
 echo x >> "${COUNT:-/dev/null}"
 sleep "${EMIT_SLEEP:-0}"
@@ -1369,6 +1780,7 @@ EOF
   # A waybill whose title is written to break any shell it is typed into.
   cat > "$tmp/run-1/brief.md" <<EOF
 # Waybill: 1
+turnpikes: style, bug, security
 
 ## Ticket
 name: not this one
@@ -1376,8 +1788,58 @@ name: not this one
 ## Dispatch
 name: #1, Stop \`touch $tmp/canary\` \$(touch $tmp/canary) "breaking" a shell
 dispatch: $tmp/run-1
+synthesis worktree: $repo/.worktrees/T-1-luna
 EOF
-  NAME=$("$SELF" name "$tmp/run-1" luna)
+  mkdir -p "$tmp/run-1/logs"
+  printf '{"leg":2}\n' > "$tmp/run-1/manifest.json"
+  printf '{"attempt":"test"}\n' > "$tmp/run-1/logs/review-r2.json"
+  cat > "$tmp/run-1/run.json" <<'EOF'
+{"config":{"lanes":{"luna":{"harness":"codex","model":"gpt-6-luna"},"mimo":{"harness":"mimo","model":"xiaomi-token-plan-sgp/mimo-v2.6-pro"},"opus":{"harness":"claude","model":"claude-opus-5-5"},"bare":{"harness":"codex"}},"team":{"workhorses":["luna"],"coachman":{"harness":"muse","model":"muse-spark-1.3-contributor"},"coachman_legs":{"review":{"harness":"claude","model":"claude-opus-5-5"}}}}}
+EOF
+  # A waybill as resolve never writes one: turnpikes.sh refuses a top line of `default`.
+  mkdir -p "$tmp/run-2/logs"
+  sed -e 's/^turnpikes: .*/turnpikes: default/' -e "s|^dispatch: .*|dispatch: $tmp/run-2|" "$tmp/run-1/brief.md" > "$tmp/run-2/brief.md"
+  cp "$tmp/run-1/manifest.json" "$tmp/run-1/run.json" "$tmp/run-2/"
+  printf '{"attempt":"test"}\n' > "$tmp/run-2/logs/review-r2.json"
+  # A dispatch whose manifest records no leg, and one with no manifest at all.
+  mkdir -p "$tmp/run-3" "$tmp/run-4"
+  sed -e "s|^dispatch: .*|dispatch: $tmp/run-3|" "$tmp/run-1/brief.md" > "$tmp/run-3/brief.md"
+  cp "$tmp/run-1/run.json" "$tmp/run-3/"
+  printf '{"leg":0}\n' > "$tmp/run-3/manifest.json"
+  sed -e "s|^dispatch: .*|dispatch: $tmp/run-4|" "$tmp/run-1/brief.md" > "$tmp/run-4/brief.md"
+  cp "$tmp/run-1/run.json" "$tmp/run-4/"
+  # A store with a wrong-typed lane, workhorse list and coachman models.
+  mkdir -p "$tmp/run-5"
+  sed -e "s|^dispatch: .*|dispatch: $tmp/run-5|" "$tmp/run-1/brief.md" > "$tmp/run-5/brief.md"
+  printf '{"leg":2}\n' > "$tmp/run-5/manifest.json"
+  cat > "$tmp/run-5/run.json" <<'EOF'
+{"config":{"lanes":{"weird":"x"},"team":{"workhorses":7,"coachman":{"harness":"muse"},"coachman_legs":{"review":{"harness":"claude"}}}}}
+EOF
+  # A run file that is valid JSON but no mapping at all.
+  mkdir -p "$tmp/run-6"
+  sed -e "s|^dispatch: .*|dispatch: $tmp/run-6|" "$tmp/run-1/brief.md" > "$tmp/run-6/brief.md"
+  printf '{"leg":2}\n' > "$tmp/run-6/manifest.json"
+  printf '[]\n' > "$tmp/run-6/run.json"
+  # Manifest legs that are not integers, and one that is not JSON.
+  for r in 7 8 9; do
+    mkdir -p "$tmp/run-$r"
+    sed -e "s|^dispatch: .*|dispatch: $tmp/run-$r|" "$tmp/run-1/brief.md" > "$tmp/run-$r/brief.md"
+    cp "$tmp/run-1/run.json" "$tmp/run-$r/"
+  done
+  printf '{"leg": true}\n' > "$tmp/run-7/manifest.json"
+  printf '{"leg": 2.5}\n' > "$tmp/run-8/manifest.json"
+  printf '{"leg": 2,\n' > "$tmp/run-9/manifest.json"
+  RUN_NAME=$("$SELF" name "$tmp/run-1")
+  NAME=$("$SELF" name "$tmp/run-1" workhorse luna)
+  COACHMAN_LABEL=$("$SELF" name "$tmp/run-1" coachman review 2)
+  STYLE_LABEL=$("$SELF" name "$tmp/run-1" review mimo style 2)
+  BUG_LABEL=$("$SELF" name "$tmp/run-1" review mimo bug 2)
+  SECURITY_LABEL=$("$SELF" name "$tmp/run-1" review opus security 2)
+  POSTMASTER_LABEL=$("$SELF" name "$tmp/run-1" postmaster)
+  LEGACY_COACHMAN_LABEL=$("$SELF" name "$tmp/run-1" coachman)
+  LEGACY_WORKHORSE_LABEL=$("$SELF" name "$tmp/run-1" luna)
+  LEGACY_REVIEW_LABEL=$("$SELF" name "$tmp/run-1" "mimo bug review")
+  ROLE_LABEL=$("$SELF" name "$tmp/run-1" role "preview server")
 }
 ok()   { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/         /'; fails=$((fails+1)); }
@@ -1385,7 +1847,17 @@ check() { if eval "$2"; then ok "$1"; else fail "$1" "${3:-}"; fi; }   # check <
 marker() {  # marker <file> [<seconds>]: wait for a marker to land
   local i=0; while [ ! -e "$1" ] && [ $i -lt $(( ${2:-30} * 5 )) ]; do sleep 0.2; i=$((i + 1)); done; [ -e "$1" ]
 }
+wait_file() {  # wait_file <file> [<seconds>]: wait until a file holds something (its pid, say)
+  local i=0; while [ ! -s "$1" ] && [ $i -lt $(( ${2:-60} * 5 )) ]; do sleep 0.2; i=$((i + 1)); done; [ -s "$1" ]
+}
+wait_grep() {  # wait_grep <file> <pattern> [<seconds>]: wait until a file matches
+  local i=0; while [ $i -lt $(( ${3:-60} * 5 )) ]; do
+    [ -f "$1" ] && grep -qE "$2" "$1" 2>/dev/null && return 0
+    sleep 0.2; i=$((i + 1))
+  done; return 1
+}
 field() { tr '|' '\n' < "$1" | sed -n "s/^$2=//p" | head -1; }   # field <probe output> <key>
+title_absent() { [[ "$1" != *"#1"* && "$1" != *"Stop"* && "$1" != *"touch"* && "$1" != *"canary"* && "$1" != *"breaking"* && "$1" != *"shell"* ]]; }
 err_stream_equal() { cmp -s "$1" <(sed -e '/^host: launch running uncapped (no supported per-launch limits available)$/d' "$2"); }
 finish() {
   echo
@@ -1399,6 +1871,69 @@ self_test() {
   # so the environment a launch sees has to have come through host.sh.
   test_setup
   trap 'rm -r -- "$tmp" </dev/null 2>/dev/null' EXIT
+  echo "launch labels and run identity"
+  check "the run level carries the ticket number and title" \
+    '[[ "$RUN_NAME" == "#1, Stop"* && "$RUN_NAME" == *"breaking"* ]]' "$RUN_NAME"
+  check "a coachman label leads with its role, then model and leg" \
+    '[ "$COACHMAN_LABEL" = "coachman · claude-opus-5-5 · leg 2" ] && title_absent "$COACHMAN_LABEL"' "$COACHMAN_LABEL"
+  check "a workhorse label leads with its lane and role, then model" \
+    '[ "$NAME" = "luna · workhorse · gpt-6-luna" ] && title_absent "$NAME"' "$NAME"
+  check "the style reviewer label includes its model and round" \
+    '[ "$STYLE_LABEL" = "mimo · style review · mimo-v2.6-pro · r2" ] && title_absent "$STYLE_LABEL"' "$STYLE_LABEL"
+  check "the bug reviewer label includes its model and round" \
+    '[ "$BUG_LABEL" = "mimo · bug review · mimo-v2.6-pro · r2" ] && title_absent "$BUG_LABEL"' "$BUG_LABEL"
+  check "a provider-prefixed model id shows its basename, so the round survives the ellipsis" \
+    'case "$BUG_LABEL" in *xiaomi*|*/*) false ;; *) true ;; esac' "$BUG_LABEL"
+  check "the security reviewer label includes its model and round" \
+    '[ "$SECURITY_LABEL" = "opus · security review · claude-opus-5-5 · r2" ] && title_absent "$SECURITY_LABEL"' "$SECURITY_LABEL"
+  check "the project-level postmaster label leads with its role and has no ticket" \
+    '[ "$POSTMASTER_LABEL" = postmaster ] && title_absent "$POSTMASTER_LABEL"' "$POSTMASTER_LABEL"
+  check "any other launch is named by its role alone" \
+    '[ "$ROLE_LABEL" = "preview server" ] && title_absent "$ROLE_LABEL"' "$ROLE_LABEL"
+  check "the old coachman name form resolves the same per-leg model as the typed form" \
+    '[ "$LEGACY_COACHMAN_LABEL" = "$COACHMAN_LABEL" ] && title_absent "$LEGACY_COACHMAN_LABEL"' "$LEGACY_COACHMAN_LABEL"
+  check "the old workhorse name form still adds its role and model" \
+    '[ "$LEGACY_WORKHORSE_LABEL" = "luna · workhorse · gpt-6-luna" ] && title_absent "$LEGACY_WORKHORSE_LABEL"' "$LEGACY_WORKHORSE_LABEL"
+  check "the old review name form still adds its model and current round" \
+    '[ "$LEGACY_REVIEW_LABEL" = "mimo · bug review · mimo-v2.6-pro · r2" ] && title_absent "$LEGACY_REVIEW_LABEL"' "$LEGACY_REVIEW_LABEL"
+  check "an unrecorded lane is refused, never labelled bare or empty" \
+    '! "$SELF" name "$tmp/run-1" workhorse nobody >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" workhorse nobody 2>/dev/null)" ]'
+  check "a lane with no recorded model is refused, not labelled without it" \
+    '! "$SELF" name "$tmp/run-1" workhorse bare >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" workhorse bare 2>/dev/null)" ] && ! "$SELF" name "$tmp/run-1" review bare bug 2 >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" review bare bug 2 2>/dev/null)" ]'
+  check "a review round that never ran is refused, never labelled" \
+    '! "$SELF" name "$tmp/run-1" review mimo bug 999 >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" review mimo bug 999 2>/dev/null)" ]'
+  check "round 0 is refused: rounds are 1-based" \
+    '! "$SELF" name "$tmp/run-1" review mimo bug 0 >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" review mimo bug 0 2>/dev/null)" ]'
+  check "a non-ASCII round is refused with a clean error, not a traceback" \
+    '[ "$("$SELF" name "$tmp/run-1" review mimo bug "²" 2>&1 >/dev/null)" = "host: review round must be a whole number" ] && [ -z "$("$SELF" name "$tmp/run-1" review mimo bug "²" 2>/dev/null)" ]'
+  check "a non-ASCII leg number is refused the same way" \
+    '[ "$("$SELF" name "$tmp/run-1" coachman review "²" 2>&1 >/dev/null)" = "host: coachman leg number must be a whole number" ] && [ -z "$("$SELF" name "$tmp/run-1" coachman review "²" 2>/dev/null)" ]'
+  check "the two-argument coachman form is refused, never labelled without its leg" \
+    '! "$SELF" name "$tmp/run-1" coachman review >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" coachman review 2>/dev/null)" ]'
+  check "the old coachman form is refused when the waybill's turnpikes do not resolve" \
+    '! "$SELF" name "$tmp/run-2" coachman >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-2" coachman 2>/dev/null)" ]'
+  check "and when the manifest records no leg, or there is no manifest" \
+    '! "$SELF" name "$tmp/run-3" coachman >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-3" coachman 2>/dev/null)" ] && ! "$SELF" name "$tmp/run-4" coachman >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-4" coachman 2>/dev/null)" ]'
+  check "a round past the integer conversion limit is refused cleanly" \
+    'LONG=$(python3 -c '\''print("9"*5000)'\''); [ "$("$SELF" name "$tmp/run-1" review mimo bug "$LONG" 2>&1 >/dev/null)" = "host: review round must be a whole number" ] && [ -z "$("$SELF" name "$tmp/run-1" review mimo bug "$LONG" 2>/dev/null)" ]'
+  check "a leg past it is refused the same way" \
+    'LONG=$(python3 -c '\''print("9"*5000)'\''); [ "$("$SELF" name "$tmp/run-1" coachman review "$LONG" 2>&1 >/dev/null)" = "host: coachman leg number must be a whole number" ] && [ -z "$("$SELF" name "$tmp/run-1" coachman review "$LONG" 2>/dev/null)" ]'
+  check "an empty or unknown leg name is refused, never silently generic" \
+    '! "$SELF" name "$tmp/run-1" coachman "" 2 >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" coachman "" 2 2>/dev/null)" ] && ! "$SELF" name "$tmp/run-1" coachman nonsense 2 >/dev/null 2>&1 && [ -z "$("$SELF" name "$tmp/run-1" coachman nonsense 2 2>/dev/null)" ]'
+  check "while a known leg without an override still takes the generic coachman model" \
+    '[ "$("$SELF" name "$tmp/run-1" coachman synthesis 1)" = "coachman · muse-spark-1.3-contributor · leg 1" ]'
+  check "an empty leg number is refused, never labelled without its leg" \
+    '[ "$("$SELF" name "$tmp/run-1" coachman review "" 2>&1 >/dev/null)" = "host: coachman leg number must be a whole number" ] && [ -z "$("$SELF" name "$tmp/run-1" coachman review "" 2>/dev/null)" ]'
+  check "leg 0 is refused like round 0" \
+    '[ "$("$SELF" name "$tmp/run-1" coachman synthesis 0 2>&1 >/dev/null)" = "host: coachman leg number must be 1 or more" ] && [ -z "$("$SELF" name "$tmp/run-1" coachman synthesis 0 2>/dev/null)" ]'
+  check "a coachman with no recorded model is refused, override, generic or legacy" \
+    '[ "$("$SELF" name "$tmp/run-5" coachman synthesis 1 2>&1 >/dev/null)" = "host: no recorded model for coachman leg synthesis" ] && [ "$("$SELF" name "$tmp/run-5" coachman review 2 2>&1 >/dev/null)" = "host: no recorded model for coachman leg review" ] && [ "$("$SELF" name "$tmp/run-5" coachman 2>&1 >/dev/null)" = "host: no recorded model for coachman leg review" ]'
+  check "a manifest leg that is not an integer is refused, never coerced" \
+    '[ "$("$SELF" name "$tmp/run-7" coachman 2>&1 >/dev/null)" = "host: cannot resolve the coachman leg from manifest.json" ] && [ "$("$SELF" name "$tmp/run-8" coachman 2>&1 >/dev/null)" = "host: cannot resolve the coachman leg from manifest.json" ]'
+  check "a manifest that is not JSON is refused" \
+    '[ "$("$SELF" name "$tmp/run-9" coachman 2>&1 >/dev/null)" = "host: cannot resolve the coachman leg from manifest.json" ]'
+  check "a malformed store is refused cleanly, never a traceback" \
+    '[ "$("$SELF" name "$tmp/run-5" workhorse weird 2>&1 >/dev/null)" = "host: no recorded model for workhorse lane weird" ] && [ "$("$SELF" name "$tmp/run-5" weird 2>&1 >/dev/null)" = "host: invalid launch identity; use coachman, workhorse, review, postmaster or role" ] && [ "$("$SELF" name "$tmp/run-6" workhorse luna 2>&1 >/dev/null)" = "host: no recorded model for workhorse lane luna" ]'
   mkdir -p "$tmp/bin" "$tmp/sys" "$tmp/stub"
   local t p
   for t in bash sh python3 git env cat mkdir rmdir rm mkfifo mktemp sleep date touch wc tr sed awk \
@@ -1414,9 +1949,16 @@ if os.path.exists(os.path.join(S, "herdr.down")): sys.exit(1)
 if a == ["agent"]: print("herdr agent commands:\n  kinds: pi|claude|codex"); sys.exit(2)
 lock = open(os.path.join(S, "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
 path = os.path.join(S, "herdr.json")
-st = json.load(open(path)) if os.path.exists(path) else {"n": 0, "spaces": {}, "panes": {}, "open": {}, "agents": []}
-def save(): json.dump(st, open(path, "w"))
+st = json.load(open(path)) if os.path.exists(path) else {"n": 0, "spaces": {}, "panes": {}, "tabs": {}, "open": {}, "agents": [], "tab_n": {}}
+# Atomic: readers without the lock never see a torn store.
+def save(): tmp = path + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, path)
 def new(prefix): st["n"] += 1; return "%s%d" % (prefix, st["n"])
+# Live Herdr numbers tabs 1-9,A-Z (observed to tF); past Z this assumes plain base-36.
+def b36(n):
+    s = ""
+    while n: n, r = divmod(n, 36); s = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[r] + s
+    return s
+def newtab(ws): st.setdefault("tab_n", {}); st["tab_n"][ws] = st["tab_n"].get(ws, 0) + 1; return "%s:t%s" % (ws, b36(st["tab_n"][ws]))
 def opt(name): return a[a.index(name) + 1] if name in a else None
 def tokens(): return dict(a[i + 1].split("=", 1) for i in range(len(a) - 1) if a[i] == "--token")
 def out(obj): print(json.dumps({"id": "stub", "result": obj}))
@@ -1426,9 +1968,11 @@ def git(*args): return subprocess.run(["git", *args], capture_output=True, text=
 def main_of(d):
     c = git("-C", d, "rev-parse", "--path-format=absolute", "--git-common-dir")
     return os.path.realpath(os.path.dirname(c)) if c else None
-def space(label):
-    ws, tab, pane = new("w"), new("t"), new("p")
-    st["spaces"][ws] = {"label": label, "tokens": {}, "panes": [pane]}; st["panes"][pane] = {"ws": ws, "tokens": {}}
+def space(label, cwd=None):
+    ws = new("w"); tab, pane = newtab(ws), new("p")
+    st["spaces"][ws] = {"label": label, "tokens": {}, "panes": [pane], "tabs": [tab], "path": os.path.realpath(cwd) if cwd else None}
+    st["panes"][pane] = {"ws": ws, "tab": tab, "cwd": cwd, "tokens": {}}
+    st["tabs"][tab] = {"ws": ws, "pane": pane, "cwd": cwd, "label": label}
     return {"workspace": {"workspace_id": ws}, "tab": {"tab_id": tab}, "root_pane": {"pane_id": pane}}
 cmd = " ".join(a[:2])
 if cmd == "workspace list": out({"workspaces": [{"workspace_id": w} for w in st["spaces"]]})
@@ -1445,30 +1989,96 @@ elif cmd == "worktree list":
     if root in st["open"]: src["source_workspace_id"] = st["open"][root]
     out({"source": src, "worktrees": wts})
 elif cmd == "workspace create":
-    r = space(opt("--label")); cwd = os.path.realpath(opt("--cwd"))
+    r = space(opt("--label"), opt("--cwd")); cwd = os.path.realpath(opt("--cwd"))
     if main_of(cwd) == cwd: st["open"][cwd] = r["workspace"]["workspace_id"]
     save(); out(r)
 elif cmd == "worktree open":
-    r = space(opt("--label")); st["open"][os.path.realpath(opt("--path"))] = r["workspace"]["workspace_id"]
+    r = space(opt("--label"), opt("--path")); st["open"][os.path.realpath(opt("--path"))] = r["workspace"]["workspace_id"]
     save(); out(r)
 elif cmd == "tab create":
-    ws = opt("--workspace"); tab, pane = new("t"), new("p")
-    st["spaces"][ws]["panes"].append(pane); st["panes"][pane] = {"ws": ws, "tokens": {}}
+    if flag("tabcreate.empty"): out({"tab": {"tab_id": None}, "root_pane": {"pane_id": None}}); sys.exit(0)
+    ws = opt("--workspace"); tab, pane = newtab(ws), new("p"); cwd = opt("--cwd"); label = opt("--label")
+    st["spaces"][ws]["panes"].append(pane); st["spaces"][ws]["tabs"].append(tab)
+    st["panes"][pane] = {"ws": ws, "tab": tab, "cwd": cwd, "tokens": {}}
+    st["tabs"][tab] = {"ws": ws, "pane": pane, "cwd": cwd, "label": label}
     save(); out({"tab": {"tab_id": tab}, "root_pane": {"pane_id": pane}})
-elif cmd == "workspace report-metadata": st["spaces"][a[2]]["tokens"] = tokens(); save()
-elif cmd == "pane report-metadata": st["panes"][a[2]]["tokens"] = tokens(); save()
+elif cmd == "tab rename":
+    if flag("tabrename.fail-once"): os.remove(os.path.join(S, "tabrename.fail-once")); sys.exit(1)
+    st["tabs"][a[2]]["label"] = a[3]; save()
+elif cmd == "workspace report-metadata":
+    if flag("wsmeta.fail-once"): os.remove(os.path.join(S, "wsmeta.fail-once")); sys.exit(1)
+    st["spaces"][a[2]]["tokens"] = tokens(); save()
+elif cmd == "pane report-metadata":
+    npath = os.path.join(S, "panemeta.n")
+    n = int(open(npath).read()) if os.path.exists(npath) else 0
+    open(npath, "w").write(str(n + 1))
+    if flag("panemeta.fail-once"): os.remove(os.path.join(S, "panemeta.fail-once")); sys.exit(1)
+    failn = os.path.join(S, "panemeta.fail-nth")
+    if os.path.exists(failn) and n + 1 == int(open(failn).read().strip() or "0"):
+        os.remove(failn); sys.exit(1)
+    st["panes"][a[2]]["tokens"] = tokens(); save()
 elif cmd == "workspace get":
-    out({"workspace": {"workspace_id": a[2], "tokens": st["spaces"][a[2]]["tokens"]}})
+    w = st["spaces"][a[2]]; out({"workspace": {"workspace_id": a[2], "label": w["label"], "tokens": w["tokens"], "worktree": {"path": w.get("path"), "checkout_path": w.get("path")}}})
 elif cmd == "pane list":
-    out({"panes": [{"pane_id": p, "tokens": st["panes"][p]["tokens"]} for p in st["spaces"][opt("--workspace")]["panes"]]})
+    out({"panes": [{"pane_id": p, "tab_id": None if flag("panes.notabids") else st["panes"][p].get("tab"), "tokens": st["panes"][p]["tokens"]} for p in st["spaces"][opt("--workspace")]["panes"]]})
+elif cmd == "tab list":
+    ws = opt("--workspace"); out({"tabs": [{"tab_id": t, "label": st["tabs"][t]["label"], "cwd": st["tabs"][t]["cwd"]} for t in st["spaces"][ws]["tabs"]]})
+elif cmd == "tab close":
+    if flag("tabclose.fail"): sys.exit(1)
+    tab = a[2]; t = st["tabs"].pop(tab, None)
+    if t:
+        ws, pane = t["ws"], t["pane"]
+        st["spaces"][ws]["tabs"].remove(tab); st["spaces"][ws]["panes"].remove(pane); st["panes"].pop(pane, None)
+        if not st["spaces"][ws]["tabs"]:
+            # Closing a sole tab destroys a childless space on live Herdr, plain or
+            # nested (probed 2026-09-29). A space with a worktree nested under it
+            # refuses the close instead (probed 2026-09-28); no control closes a
+            # tab there, so the stub does not model it.
+            w = st["spaces"].pop(ws, None)
+            if w:
+                for pane in w["panes"]: st["panes"].pop(pane, None)
+                for cwd, opened in list(st["open"].items()):
+                    if opened == ws: st["open"].pop(cwd, None)
+        save()
+elif cmd == "pane close":
+    pane = a[2]; p = st["panes"].pop(pane, None)
+    if p:
+        ws = p["ws"]
+        st["spaces"][ws]["panes"].remove(pane)
+        # Closing a sole pane destroys its tab, and a last tab its space, on
+        # live Herdr (probed 2026-09-29), like closing a sole tab.
+        for tab in [t for t in st["spaces"][ws]["tabs"]
+                    if not any((q.get("tab") or t) == t for q in st["panes"].values() if q.get("ws") == ws)]:
+            st["spaces"][ws]["tabs"].remove(tab); st["tabs"].pop(tab, None)
+        if not st["spaces"][ws]["tabs"]:
+            w = st["spaces"].pop(ws, None)
+            if w:
+                for q in w["panes"]: st["panes"].pop(q, None)
+                for cwd, opened in list(st["open"].items()):
+                    if opened == ws: st["open"].pop(cwd, None)
+        save()
+elif cmd == "workspace close":
+    ws = a[2]; w = st["spaces"].pop(ws, None)
+    if w:
+        for tab in w["tabs"]: st["tabs"].pop(tab, None)
+        for pane in w["panes"]: st["panes"].pop(pane, None)
+        for cwd, opened in list(st["open"].items()):
+            if opened == ws: st["open"].pop(cwd, None)
+        save()
 elif cmd == "pane get": out({"pane": {"pane_id": a[2], "agent": None}})
 elif cmd == "pane run":
     pane, text, ws = a[2], a[3], st["panes"][a[2]]["ws"]
+    # A tab keeps the working directory it was created with: running a pane never
+    # retargets it, so the stub must not either. The tab a launch runs in is the
+    # one the create and open calls above named, which is what the controls read.
     fcntl.flock(lock, fcntl.LOCK_UN)
     if flag("pane.dead"): sys.exit(0)                     # accepted, never run
-    late = "sleep 5; " if flag("pane.late") else ""
-    env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/"), "STUB": S, "HERDR_ENV": "1",
-           "HERDR_PANE_ID": pane, "HERDR_TAB_ID": "tab-of-" + pane, "HERDR_WORKSPACE_ID": ws}
+    # The fired file is the event the late-pane control waits for.
+    late = ("sleep 5; touch %s; " % os.path.join(S, "pane.late.fired")) if flag("pane.late") else ""
+    env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/"), "STUB": S,
+           "HERDR_ENV": "pane-env", "HERDR_SOCKET_PATH": "/stub/herdr.sock",
+           "HERDR_BIN_PATH": "/stub/herdr-bin", "HERDR_PANE_ID": pane,
+           "HERDR_TAB_ID": "tab-of-" + pane, "HERDR_WORKSPACE_ID": ws}
     proc = subprocess.Popen(["bash", "-c", late + text], env=env, stdin=subprocess.DEVNULL, start_new_session=True,
                             stdout=open(os.path.join(S, "pane-%s.out" % pane), "ab"), stderr=subprocess.STDOUT)
     open(os.path.join(S, "pane-%s.pid" % pane), "w").write(str(proc.pid))
@@ -1542,6 +2152,16 @@ EOF
   cat > "$tmp/cap-dispatch/run.json" <<'EOF'
 {"config":{"limits":{"memory_max":"8G","tasks_max":512,"lane":{"memory_max":"64M","tasks_max":16},"coachman":{"memory_max":"128M","tasks_max":32},"reviewer":{"tasks_max":24}}}}
 EOF
+  cat > "$tmp/caller/launch.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'role=%s\n' "${POSTMASTER_LAUNCH_ROLE:-unset}"
+EOF
+  chmod +x "$tmp/caller/launch.sh"
+  (cd "$tmp/caller" && hs "$SYS" POSTMASTER_LAUNCH_ROLE=spoof -- run "$NAME" "$repo" \
+    --role reviewer --run "$tmp/cap-dispatch" --out ../logs/role.out --marker ../logs/role.done -- ./launch.sh >/dev/null)
+  marker "$tmp/logs/role.done"
+  check "the run's explicit host role reaches launch.sh and an inherited role cannot replace it" \
+    '[ "$(cat "$tmp/logs/role.out")" = role=reviewer ]' "$(cat "$tmp/logs/role.out")"
   cap_launch() {  # cap_launch <host-impl> <PATH> <prefix> -- <command...>
     local impl=$1 path=$2 prefix=$3; shift 3
     local role_args=()
@@ -1635,12 +2255,77 @@ for line in open("/sys/fs/cgroup" + cg + "/memory.events"):
 if not mx:
     print("brush ran without memory pressure", file=sys.stderr); sys.exit(99)
 EOF
-  chmod +x "$tmp/caller/healthy.sh" "$tmp/caller/fork-cap.py" "$tmp/caller/fork-exit.py" "$tmp/caller/memory-cap.py" "$tmp/caller/brush-cache.py"
+  cat > "$tmp/caller/brush-steady.py" <<'EOF'
+#!/usr/bin/env python3
+import os, sys, time
+# Brushes the memory cap with reclaimable cache for the seconds given: one pass
+# past the cap, then a fresh stretch of the file every 50 ms that the cgroup must
+# reclaim room for, so its memory.events keeps changing and nothing trips.
+fd = os.open(os.environ["BRUSH_FILE"], os.O_RDONLY)
+os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+size, chunk, off = os.fstat(fd).st_size, 1 << 20, 0
+def read(n):
+    global off
+    for _ in range(n):
+        if off >= size: off = 0
+        os.pread(fd, chunk, off); off += chunk
+read(96)
+end = time.monotonic() + float(sys.argv[1])
+while time.monotonic() < end:
+    read(4); time.sleep(0.05)
+EOF
+  cat > "$tmp/caller/watcher-cpu.py" <<'EOF'
+#!/usr/bin/env python3
+# Finds a capped launch's cap watcher by ancestry from the launch's published
+# pid, waits until the launch's cgroup has met its memory cap, then reads the
+# watcher's CPU time and the cgroup's memory.events max count across a window.
+# Prints "<cpu seconds> <max events in the window>", or "none" with no watcher.
+import os, sys, time
+pidfile, window = sys.argv[1], float(sys.argv[2])
+def stat(p): return open("/proc/%s/stat" % p).read().rsplit(")", 1)[1].split()
+def cpu(p): s = stat(p); return (int(s[11]) + int(s[12])) / os.sysconf("SC_CLK_TCK")
+deadline = time.monotonic() + 10
+cpid = ""
+while not cpid and time.monotonic() < deadline:
+    try: cpid = open(pidfile).read().strip()
+    except OSError: time.sleep(0.05)
+launcher = stat(cpid)[1]
+events = "/sys/fs/cgroup" + open("/proc/%s/cgroup" % cpid).read().split(":")[-1].strip() + "/memory.events"
+def maxcount():
+    for line in open(events):
+        k, _, v = line.partition(" ")
+        if k == "max": return int(v)
+    return 0
+watcher = None
+while watcher is None and time.monotonic() < deadline:
+    for p in filter(str.isdigit, os.listdir("/proc")):
+        try:
+            argv = open("/proc/%s/cmdline" % p, "rb").read().split(b"\0")[:-1]
+            if argv[1:2] != [b"-"] or argv[-1] != cpid.encode(): continue
+            q = p
+            for _ in range(3):
+                q = stat(q)[1]
+                if q == launcher: watcher = p; break
+        except (OSError, IndexError):
+            continue
+        if watcher: break
+    else:
+        time.sleep(0.05)
+if watcher is None:
+    print("none"); sys.exit(1)
+while maxcount() == 0 and time.monotonic() < deadline: time.sleep(0.05)
+c0, m0 = cpu(watcher), maxcount()
+time.sleep(window)
+c1, m1 = cpu(watcher), maxcount()
+print("%.2f %d" % (c1 - c0, m1 - m0))
+EOF
+  chmod +x "$tmp/caller/healthy.sh" "$tmp/caller/fork-cap.py" "$tmp/caller/fork-exit.py" "$tmp/caller/memory-cap.py" "$tmp/caller/brush-cache.py" \
+    "$tmp/caller/brush-steady.py" "$tmp/caller/watcher-cpu.py"
   head -c 134217728 /dev/zero > "$tmp/brush-data.bin"
   reset() { rm -f -- "$tmp"/stub/*; }
   calls() { cat "$tmp/stub/$1.calls" 2>/dev/null; }
   T=$'\t'
-  local got got2 rc a b c space pane lunaspace live panepid o1 o2
+  local got got2 rc a b c space pane live panepid o1 o2 close_result close_rc
 
   echo "detect"
   check "a Herdr server that answers is the host" '[ "$(hs "$STUBS" -- detect)" = herdr ]'
@@ -1652,9 +2337,10 @@ EOF
   check "POSTMASTER_HOST=tmux wins over a live Herdr" '[ "$(hs "$STUBS" POSTMASTER_HOST=tmux -- detect)" = tmux ]'
 
   echo "name: from the waybill, so no title is typed into a shell"
-  check "it is the Dispatch section's name, then the role" \
-    '[ "$NAME" = "#1, Stop \`touch $tmp/canary\` \$(touch $tmp/canary) \"breaking\" a shell · luna" ]' "$NAME"
-  check "a waybill without one falls back to the run's directory" '[ "$(hs "$SYS" -- name "$tmp/logs" coachman)" = "logs · coachman" ]'
+  check "a role-first launch name comes from the recorded lane model" \
+    '[ "$NAME" = "luna · workhorse · gpt-6-luna" ] && title_absent "$NAME"' "$NAME"
+  check "a waybill without one falls back to the run's directory" '[ "$(hs "$SYS" -- name "$tmp/logs")" = logs ]'
+  check "and a role name with no waybill is still only its parts" '[ "$(hs "$SYS" -- name "$tmp/logs" role "verify x")" = "verify x" ]'
   printf '## Dispatch\nname: #2, a bell\a and an escape\033]0;x\007 · y\n' > "$tmp/logs/brief.md"
   check "control characters never reach a label" '[ "$(hs "$SYS" -- name "$tmp/logs")" = "#2, a bell and an escape]0;x · y" ]'
   rm -f "$tmp/logs/brief.md"
@@ -1671,12 +2357,14 @@ EOF
   touch "$tmp/logs/n2.done"
   (cd "$tmp/caller" && hs "$SYS" EMIT_SLEEP=2 -- run "$NAME" "$repo" --marker ../logs/n2.done -- ./fixed.sh >/dev/null)
   check "an earlier launch's marker is gone once run returns" '[ ! -e "$tmp/logs/n2.done" ]'
-  check "and it lands again when this one exits, whatever its exit" 'marker "$tmp/logs/n2.done" 20'
-  (cd "$tmp/caller" && hs "$SYS" CALLER_VAR=v HERDR_PANE_ID=caller-pane TMUX_PANE=%9 -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+  check "and it lands again when this one exits, whatever its exit" 'marker "$tmp/logs/n2.done" 60'
+  (cd "$tmp/caller" && hs "$SYS" CALLER_VAR=v POSTMASTER_EVENT_STREAM=caller-events HERDR_PANE_ID=caller-pane TMUX_PANE=%9 -- run "$NAME" "$repo/.worktrees/T-1-luna" \
      --out ../logs/n3.out --marker ../logs/n3.done --pidfile ../logs/n3.pid -- ./probe.sh >/dev/null)
   marker "$tmp/logs/n3.done"
   check "it runs from the caller's directory, with the caller's environment and its name" \
     '[ "$(field "$tmp/logs/n3.out" from)" = "$tmp/caller" ] && [ "$(field "$tmp/logs/n3.out" var)" = v ] && [ "$(field "$tmp/logs/n3.out" name)" = "$NAME" ]' "$(cat "$tmp/logs/n3.out")"
+  check "the exact --out path reaches the launch as POSTMASTER_EVENT_STREAM" \
+    '[ "$(field "$tmp/logs/n3.out" events)" = "$tmp/caller/../logs/n3.out" ]' "$(cat "$tmp/logs/n3.out")"
   check "but never with its caller's pane" '[ "$(field "$tmp/logs/n3.out" pane)" = unset ] && [ "$(field "$tmp/logs/n3.out" tmuxpane)" = unset ]' "$(cat "$tmp/logs/n3.out")"
   check "it is a session of its own: its group is its pid, not the caller's session" \
     '[ "$(field "$tmp/logs/n3.out" pgid)" = "$(field "$tmp/logs/n3.out" pid)" ] && [ "$(field "$tmp/logs/n3.out" sid)" = "$(field "$tmp/logs/n3.out" pid)" ]'
@@ -1696,9 +2384,9 @@ EOF
     '[ $rc -eq 1 ] && [ -e "$tmp/logs/n7.done" ] && grep -q "no such directory" "$tmp/logs/n7.err"'
   got=$(hs "$SYS" POSTMASTER_HOST_CLAIM_WAIT=2.5 -- run "$NAME" "$repo" --marker "$tmp/logs/n8.done" -- ./fixed.sh 2>&1); rc=$?
   check "a count that is not a whole number is refused, and never reaches the tests" \
-    '[ $rc -eq 1 ] && [ -e "$tmp/logs/n8.done" ] && ! printf "%s" "$got" | grep -q "controls"' "$got"
+    '[ $rc -eq 1 ] && [ -e "$tmp/logs/n8.done" ] && ! grep -q "controls" <<<"$got"' "$got"
   got=$(hs "$STUBS" -- wait postmaster-x 10m 2>&1); rc=$?
-  check "the same for wait" '[ $rc -eq 1 ] && ! printf "%s" "$got" | grep -q "controls"' "$got"
+  check "the same for wait" '[ $rc -eq 1 ] && ! grep -q "controls" <<<"$got"' "$got"
 
   echo "stop: everything a launch started, and nothing else"
   mkdir -p "$tmp/tree"
@@ -1722,7 +2410,7 @@ EOF
     '[ $rc -eq 0 ] && [ -s "$tmp/tree/escapee.pid" ] && ! alive "$(cat "$tmp/tree/escapee.pid")"' "$got"
   check "the launch got TERM first, and a child deaf to it is killed after the wait" \
     '[ -s "$tmp/tree/term" ] && [ -s "$tmp/tree/deaf.pid" ] && ! alive "$(cat "$tmp/tree/deaf.pid")"' "$got"
-  check "its marker lands" 'marker "$tmp/logs/k1.done" 10'
+  check "its marker lands" 'marker "$tmp/logs/k1.done" 60'
   check "a process that works in the worktree but that no launch started is left alone" 'alive "$b"'
   kill "$b" 2>/dev/null; wait "$b" 2>/dev/null
 
@@ -1762,7 +2450,7 @@ sleep 60 & echo $! > "$TREE/left.pid"
 EOF
   chmod +x "$tmp/caller/leaves.sh"
   (cd "$tmp/caller" && hs "$SYS" TREE="$tmp/tree" -- run "$NAME" "$sol" --marker ../logs/k2.done -- ./leaves.sh >/dev/null)
-  marker "$tmp/logs/k2.done" 10
+  marker "$tmp/logs/k2.done" 60
   a=0; while ! grep -qs '^member ' "$L"/* && [ $a -lt 30 ]; do sleep 0.1; a=$((a + 1)); done
   lp=$(cat "$tmp/tree/left.pid" 2>/dev/null)
   check "a leader that exits leaving a process behind: its record names that process" \
@@ -1773,9 +2461,10 @@ EOF
   ln -s "$(command -v python3)" "$tmp/sys/moshi-hook"; ln -s "$(command -v python3)" "$tmp/sys/systemd"
   cat > "$tmp/caller/guarded.sh" <<'EOF'
 #!/usr/bin/env bash
-# A launch with a process that looks like one stop must never touch.
-"$LOOKS_LIKE" -c 'import time; time.sleep(60)' $ARGS & echo $! > "$TREE/guarded.pid"
-sleep 60 & wait
+# A launch with a process that looks like one stop must never touch. Both sleep past the
+# 60s marker bound, so a kill the control misses still fails instead of completing in time.
+"$LOOKS_LIKE" -c 'import time; time.sleep(300)' $ARGS & echo $! > "$TREE/guarded.pid"
+sleep 300 & wait
 EOF
   chmod +x "$tmp/caller/guarded.sh"
   local spec look args why
@@ -1788,134 +2477,429 @@ EOF
     got=$(stop_sol); rc=$?
     check "stop refuses a tree holding $why, and leaves it all running" \
       '[ $rc -eq 2 ] && case $got in *"$why"*) true ;; *) false ;; esac && running "$(cat "$tmp/tree/guarded.pid")" && running "$(cat "$tmp/logs/k3.pid")" && [ ! -e "$tmp/logs/k3.done" ]' "$got"
-    kill -- "-$(cat "$tmp/logs/k3.pid")" 2>/dev/null; marker "$tmp/logs/k3.done" 10
+    kill -- "-$(cat "$tmp/logs/k3.pid")" 2>/dev/null; marker "$tmp/logs/k3.done" 60
   done
 
   cat > "$tmp/caller/wide.sh" <<'EOF'
 #!/usr/bin/env bash
-for i in 1 2 3 4; do sleep 60 & done
+# Sleep past the 60s marker bound, so a stop the control misses still fails.
+for i in 1 2 3 4; do sleep 300 & echo $! >> "$TREE/wide.pids"; done
 wait
 EOF
   chmod +x "$tmp/caller/wide.sh"
-  (cd "$tmp/caller" && hs "$SYS" -- run "$NAME" "$sol" --marker ../logs/k4.done --pidfile ../logs/k4.pid -- ./wide.sh >/dev/null)
-  sleep 0.5
+  (cd "$tmp/caller" && hs "$SYS" TREE="$tmp/tree" -- run "$NAME" "$sol" --marker ../logs/k4.done --pidfile ../logs/k4.pid -- ./wide.sh >/dev/null)
+  wait_file "$tmp/logs/k4.pid" 60
+  # stop counts the tree: all four sleepers must exist before it runs, not after a fixed sleep.
+  a=0; while [ "$(wc -l < "$tmp/tree/wide.pids" 2>/dev/null || echo 0)" -lt 4 ] && [ $a -lt 300 ]; do sleep 0.2; a=$((a + 1)); done
   got=$(stop_sol POSTMASTER_HOST_STOP_MAX=3); rc=$?
   check "stop refuses a tree larger than POSTMASTER_HOST_STOP_MAX, and leaves it running" \
     '[ $rc -eq 2 ] && case $got in *"more than POSTMASTER_HOST_STOP_MAX (3)"*) true ;; *) false ;; esac && running "$(cat "$tmp/logs/k4.pid")" && [ ! -e "$tmp/logs/k4.done" ]' "$got"
   got=$(stop_sol); rc=$?
-  check "within the bound, the same tree is stopped" '[ $rc -eq 0 ] && marker "$tmp/logs/k4.done" 10' "$got"
+  check "within the bound, the same tree is stopped" '[ $rc -eq 0 ] && marker "$tmp/logs/k4.done" 60' "$got"
 
   got=$(hs "$SYS" POSTMASTER_HOST_STATE="$tmp.elsewhere" -- stop "$sol" 2>&1); rc=$?
   check "while a self-test runs, a registry outside its fixture is refused" \
     '[ $rc -eq 1 ] && case $got in *"refusing the registry"*) true ;; *) false ;; esac && [ ! -e "$tmp.elsewhere" ]' "$got"
 
   echo "run, Herdr (stub): a pane in the worktree's space, nested under the repository's"
+  echo "run, Herdr (stub): launches under the ticket-labeled run space"
   reset
   got=$(cd "$tmp/caller" && hs "$STUBS" CALLER_VAR=v HERDR_PANE_ID=caller-pane -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+        --under "$tmp/run-1" \
         --out ../logs/h1.out --err ../logs/h1.err --marker ../logs/h1.done -- ./probe.sh)
   check "it says where it ran" 'case $got in "host=herdr space=w"*" pane=p"*) true ;; *) false ;; esac' "$got"
   space=${got#*space=}; space=${space%% *}; pane=${got##*pane=}
   check "a repository with no space gets one first, labelled with its name" \
-    'calls herdr | grep -qxF "workspace${T}create${T}--cwd${T}$repo${T}--label${T}$rname${T}--no-focus"'
-  check "the worktree opens as a space under it, labelled with the launch's name" \
-    'calls herdr | grep -qxF "worktree${T}open${T}--workspace${T}w1${T}--path${T}$repo/.worktrees/T-1-luna${T}--label${T}$NAME${T}--no-focus"'
+    'grep -qxF "workspace${T}create${T}--cwd${T}$repo${T}--label${T}$rname${T}--no-focus" <<<"$(calls herdr)"'
+  check "the run worktree opens as a space under it, labelled with the ticket" \
+    'grep -qxF "worktree${T}open${T}--workspace${T}w1${T}--path${T}$repo/.worktrees/T-1-luna${T}--label${T}$RUN_NAME${T}--no-focus" <<<"$(calls herdr)"'
   check "host.sh marks the space it opened as its own" 'python3 -c "import json,sys; sys.exit(json.load(open(\"$tmp/stub/herdr.json\"))[\"spaces\"][\"$space\"][\"tokens\"] != {\"postmaster\": \"opened\"})"'
+  check "the run space carries the ticket while its first tab carries only the launch label" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); w=s[\"spaces\"][sys.argv[2]]; t=s[\"tabs\"][w[\"tabs\"][0]]; sys.exit(not (w[\"label\"] == sys.argv[3] and t[\"label\"] == sys.argv[4] and t[\"cwd\"] == sys.argv[5]))" "$tmp/stub/herdr.json" "$space" "$RUN_NAME" "$NAME" "$repo/.worktrees/T-1-luna" && title_absent "$NAME" && [ ! -e "$tmp/canary" ]' "$RUN_NAME / $NAME"
+  check "the first launch uses the run space's only tab, with no empty shell beside it" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); tabs=s[\"spaces\"][sys.argv[2]][\"tabs\"]; sys.exit(0 if len(tabs)==1 and s[\"tabs\"][tabs[0]][\"label\"]==sys.argv[3] else 1)" "$tmp/stub/herdr.json" "$space" "$NAME"'
+  check "the first launch's tab is created with its own checkout, not the root tab" \
+    'grep -qxF "tab${T}create${T}--workspace${T}$space${T}--cwd${T}$repo/.worktrees/T-1-luna${T}--label${T}$NAME${T}--no-focus" <<<"$(calls herdr)"'
+  check "and the run space's root tab is closed once that tab exists" \
+    '[ "$(calls herdr | grep -c "^tab${T}close")" -eq 1 ]'
   marker "$tmp/logs/h1.done"
   check "the launch ran in that pane, with that pane's identity" '[ "$(field "$tmp/logs/h1.out" pane)" = "$pane" ]' "$(cat "$tmp/logs/h1.out")"
   check "and with its caller's environment, handed over by host.sh" '[ "$(field "$tmp/logs/h1.out" var)" = v ] && [ "$(field "$tmp/logs/h1.out" from)" = "$tmp/caller" ]'
-  sleep 1
+  # Rendering is async: wait for the session line rather than sleeping a fixed second.
+  wait_grep "$tmp/stub/pane-$pane.out" '^[0-9]{2}:[0-9]{2}:[0-9]{2} session ' 60
   check "the pane shows the name and the rendered stream, not raw JSON" \
     'grep -qF "$NAME" "$tmp/stub/pane-$pane.out" && grep -qE "^[0-9:]{8} session probe-1 · m$" "$tmp/stub/pane-$pane.out" && ! grep -q "{" "$tmp/stub/pane-$pane.out"' "$(cat "$tmp/stub/pane-$pane.out" 2>/dev/null)"
+  # The release lands after the launch ends; wait for the call rather than asserting at once.
+  wait_grep "$tmp/stub/herdr.calls" "release-agent" 60
   check "and reports the launch working, then releases it" \
-    'calls herdr | grep -q "^pane${T}report-agent${T}$pane${T}.*--state${T}working" && calls herdr | grep -q "^pane${T}release-agent${T}$pane${T}"'
-  got2=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --marker ../logs/h2.done -- ./fixed.sh)
-  check "a second launch in the same worktree is a new tab in the same space" \
-    '[ "$(calls herdr | grep -c "^worktree${T}open")" -eq 1 ] && calls herdr | grep -q "^tab${T}create${T}--workspace${T}$space${T}"' "$got2"
+    'grep -q "^pane${T}report-agent${T}$pane${T}.*--state${T}working" <<<"$(calls herdr)" && grep -q "^pane${T}release-agent${T}$pane${T}" <<<"$(calls herdr)"'
+  got2=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/h2.done -- ./fixed.sh)
+  check "a second launch is a tab in the same run space" \
+    '[ "$(calls herdr | grep -c "^worktree${T}open")" -eq 1 ] && grep -q "^tab${T}create${T}--workspace${T}$space${T}" <<<"$(calls herdr)"' "$got2"
   marker "$tmp/logs/h2.done"
   ( cd "$tmp/caller" && ./fixed.sh > "$tmp/direct.out" 2> "$tmp/direct.err" )
   (cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --out ../logs/h3.out --err ../logs/h3.err --marker ../logs/h3.done -- ./fixed.sh >/dev/null)
   marker "$tmp/logs/h3.done"
   check "the command streams and marker are what a background run writes, with any cap notice" 'cmp -s "$tmp/direct.out" "$tmp/logs/h3.out" && err_stream_equal "$tmp/direct.err" "$tmp/logs/h3.err"'
-  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --marker ../logs/h6.done --pidfile ../logs/h6.pid -- sleep 60)
-  panepid=$(cat "$tmp/stub/pane-${got##*pane=}.pid")
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --marker ../logs/h6.done --pidfile ../logs/h6.pid -- sleep 300)
+  # run can return before either pid file lands under load; signalling a missing pid kills
+  # nothing, and the old separate 10s marker window could then expire before the launch ended.
+  # The fixture sleeps 300, past the bound, so a launch the kill misses still fails.
+  wait_file "$tmp/logs/h6.pid" 60 && wait_file "$tmp/stub/pane-${got##*pane=}.pid" 60
+  panepid=$(cat "$tmp/stub/pane-${got##*pane=}.pid" 2>/dev/null)
   kill -HUP -- "-$panepid" 2>/dev/null
   check "a pane closed mid-run: the launch stops, and its marker lands" \
-    'marker "$tmp/logs/h6.done" 10 && ! kill -0 "$(cat "$tmp/logs/h6.pid")" 2>/dev/null'
-  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --marker ../logs/h7.done --pidfile ../logs/h7.pid -- sleep 60)
-  panepid=$(cat "$tmp/stub/pane-${got##*pane=}.pid")
+    'marker "$tmp/logs/h6.done" 60 && ! kill -0 "$(cat "$tmp/logs/h6.pid")" 2>/dev/null'
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --marker ../logs/h7.done --pidfile ../logs/h7.pid -- sleep 300)
+  # As above: both pid files are the event, then 60s for the marker after the kill.
+  wait_file "$tmp/logs/h7.pid" 60 && wait_file "$tmp/stub/pane-${got##*pane=}.pid" 60
+  panepid=$(cat "$tmp/stub/pane-${got##*pane=}.pid" 2>/dev/null)
   kill -KILL -- "-$panepid" 2>/dev/null; kill -KILL -- "-$(cat "$tmp/logs/h7.pid")" 2>/dev/null
-  check "its runner and the launch killed outright: the marker still lands" 'marker "$tmp/logs/h7.done" 10'
+  check "its runner and the launch killed outright: the marker still lands" 'marker "$tmp/logs/h7.done" 60'
   touch "$tmp/stub/pane.dead"
   got=$(cd "$tmp/caller" && hs "$STUBS" COUNT="$tmp/logs/h4.count" -- run "$NAME" "$repo/.worktrees/T-1-sol" --out ../logs/h4.out --marker ../logs/h4.done -- ./probe.sh 2>/dev/null)
   marker "$tmp/logs/h4.done"
   check "a pane that never starts the launch: it runs in the background instead" '[ "$got" = host=none ] && [ "$(wc -l < "$tmp/logs/h4.count")" -eq 1 ]' "$got"
-  rm -f "$tmp/stub/pane.dead"; touch "$tmp/stub/pane.late"
+  rm -f "$tmp/stub/pane.dead"; rm -f "$tmp/stub/pane.late.fired"; touch "$tmp/stub/pane.late"
   got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST_CLAIM_WAIT=1 COUNT="$tmp/logs/h5.count" -- run "$NAME" "$repo/.worktrees/T-1-sol" --marker ../logs/h5.done -- ./probe.sh 2>/dev/null)
-  marker "$tmp/logs/h5.done"; sleep 6
-  check "a pane that starts it late: it still runs exactly once" '[ "$got" = host=none ] && [ "$(wc -l < "$tmp/logs/h5.count")" -eq 1 ]' "$(cat "$tmp/logs/h5.count" 2>/dev/null)"
+  # The late start is the event: asserting the count before it fires passes vacuously under load.
+  # The stub touches the fired file empty, so this waits on existence (marker), not content.
+  marker "$tmp/logs/h5.done"; marker "$tmp/stub/pane.late.fired" 60; fired=$?
+  check "a pane that starts it late: it still runs exactly once" '[ $fired -eq 0 ] && [ "$got" = host=none ] && [ "$(wc -l < "$tmp/logs/h5.count")" -eq 1 ]' "$(cat "$tmp/logs/h5.count" 2>/dev/null)"
   rm -f "$tmp/stub/pane.late"
   check "no launch leaves its hand-over directory behind" '[ -z "$(find "$tmp" -maxdepth 1 -name "postmaster-host.*")" ]'
 
   echo "stop and close, Herdr (stub)"
-  lunaspace=$(python3 -c "import json; print(json.load(open('$tmp/stub/herdr.json'))['open']['$repo/.worktrees/T-1-luna'])")
   check "a space host.sh opened, its launches done, is closed" \
-    'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && calls herdr | grep -qx "workspace${T}close${T}$lunaspace"'
+    'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
   hs "$STUBS" -- close "$repo" >/dev/null 2>&1; rc=$?
   check "the repository's own checkout is refused" '[ $rc -eq 2 ]'
-  python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-rev-luna" <<'PY'
-import json, sys
+python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-rev-luna" <<'PY'
+import fcntl, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
 st = json.load(open(sys.argv[1])); st["n"] += 1; ws, p = "w%d" % st["n"], "p%d" % st["n"]
 # A space the user opened, holding nothing now but a tab host.sh added, its launch done.
-st["spaces"][ws] = {"label": "the user's", "tokens": {}, "panes": [p]}
+st["spaces"][ws] = {"label": "the user's", "tokens": {}, "panes": [p], "tabs": [], "path": os.path.realpath(sys.argv[2])}
 st["panes"][p] = {"ws": ws, "tokens": {"postmaster": "launch", "state": "done"}}
-st["open"][sys.argv[2]] = ws; json.dump(st, open(sys.argv[1], "w"))
+st["open"][sys.argv[2]] = ws; tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
 PY
   hs "$STUBS" -- close "$repo/.worktrees/T-1-rev-luna" >/dev/null 2>&1; rc=$?
-  check "a space host.sh did not open is refused, and left open" '[ $rc -eq 2 ] && ! calls herdr | grep -q "^workspace${T}close${T}w$(python3 -c "import json; print(json.load(open(\"$tmp/stub/herdr.json\"))[\"n\"])")$"'
+  check "a space host.sh did not open is refused, and left open" '[ $rc -eq 2 ] && ! grep -q "^workspace${T}close${T}w$(python3 -c "import json; print(json.load(open(\"$tmp/stub/herdr.json\"))[\"n\"])")$" <<<"$(calls herdr)"'
   touch "$tmp/stub/pane.dead"
-  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-sol" --marker ../logs/s1.done -- sleep 60 2>/dev/null)
+  # sleep 300 outlives the 60s marker bound: a stop that misses still fails.
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-sol" --marker ../logs/s1.done -- sleep 300 2>/dev/null)
   rm -f "$tmp/stub/pane.dead"
   got2=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-sol" 2>&1); rc=$?
   check "a launch that fell back to the background still holds its worktree: close refuses" '[ "$got" = host=none ] && [ $rc -eq 2 ]' "$got / $got2"
   (cd "$repo/.worktrees/T-1-sol" && hs "$STUBS" -- stop "$repo/.worktrees/T-1-sol" >/dev/null 2>&1); rc=$?
   check "stop refuses to run from inside the worktree it would stop" '[ $rc -eq 1 ] && [ ! -e "$tmp/logs/s1.done" ]'
   hs "$STUBS" -- stop "$repo/.worktrees/T-1-sol" >/dev/null
-  check "stop ends it, and its marker lands" 'marker "$tmp/logs/s1.done" 10'
+  check "stop ends it, and its marker lands" 'marker "$tmp/logs/s1.done" 60'
   check "then close closes the space" 'hs "$STUBS" -- close "$repo/.worktrees/T-1-sol" >/dev/null'
 
-  echo "a reviewer's scratch clone, Herdr (stub): a space of its own, which close shuts"
+  echo "a security-review clone, Herdr (stub): a launch tab under its run"
   reset
-  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$clone" --marker ../logs/c1.done -- ./fixed.sh)
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$SECURITY_LABEL" "$clone" --under "$tmp/run-1" --marker ../logs/c1.done -- ./fixed.sh)
   space=${got#*space=}; space=${space%% *}
-  check "it opens as a space of the launch's own, labelled with its name, and no other" \
-    'calls herdr | grep -qxF "workspace${T}create${T}--cwd${T}$clone${T}--label${T}$NAME${T}--no-focus" && [ "$(calls herdr | grep -c "^workspace${T}create")" -eq 1 ]' "$(calls herdr)"
-  check "host.sh marks that space as its own" 'python3 -c "import json,sys; sys.exit(json.load(open(\"$tmp/stub/herdr.json\"))[\"spaces\"][\"$space\"][\"tokens\"] != {\"postmaster\": \"opened\"})"'
+  tab=${got#*tab=}; tab=${tab%% *}
+  runspace=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["open"].get(sys.argv[2], ""))' "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")
+  check "the clone has no workspace of its own; its launch is a tab under the ticket" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); ws=sys.argv[2]; clone=sys.argv[3]; run=sys.argv[4]; label=sys.argv[5]; tabs=s[\"spaces\"][run][\"tabs\"]; found=[t for t in s[\"tabs\"].values() if t[\"ws\"]==run and t[\"cwd\"]==clone]; sys.exit(not (ws==run and clone not in s[\"open\"] and s[\"spaces\"][run][\"label\"]==sys.argv[6] and len(tabs)==1 and len(found)==1 and found[0][\"label\"]==label))" "$tmp/stub/herdr.json" "$space" "$clone" "$runspace" "$SECURITY_LABEL" "$RUN_NAME"' "$(calls herdr)"
+  check "the clone's tab is created with the clone as its directory, not the root tab" \
+    'grep -qxF "tab${T}create${T}--workspace${T}$runspace${T}--cwd${T}$clone${T}--label${T}$SECURITY_LABEL${T}--no-focus" <<<"$(calls herdr)"' "$(calls herdr)"
+  check "and the run space's root tab is closed once that tab exists" \
+    '[ "$(calls herdr | grep -c "^tab${T}close")" -eq 1 ]' "$(calls herdr)"
+  check "the run workspace is the only workspace host.sh creates for the clone launch" \
+    '[ "$(calls herdr | grep -c "^workspace${T}create")" -eq 1 ] && grep -qxF "worktree${T}open${T}--workspace${T}w1${T}--path${T}$repo/.worktrees/T-1-luna${T}--label${T}$RUN_NAME${T}--no-focus" <<<"$(calls herdr)"' "$(calls herdr)"
+  check "the clone run tab has the security lane label, not the ticket name" \
+    'title_absent "$SECURITY_LABEL" && grep -qxF "tab${T}rename${T}$tab${T}$SECURITY_LABEL" <<<"$(calls herdr)"' "$(calls herdr)"
   marker "$tmp/logs/c1.done"
-  got2=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$clone" --marker ../logs/c2.done -- ./fixed.sh)
+  got2=$(cd "$tmp/caller" && hs "$STUBS" -- run "$SECURITY_LABEL" "$clone" --under "$tmp/run-1" --marker ../logs/c2.done -- ./fixed.sh)
   check "a second launch there is a new tab in the same space" \
-    '[ "$(calls herdr | grep -c "^workspace${T}create")" -eq 1 ] && calls herdr | grep -q "^tab${T}create${T}--workspace${T}$space${T}"' "$got2"
+    '[ "$(calls herdr | grep -c "^worktree${T}open")" -eq 1 ] && grep -q "^tab${T}create${T}--workspace${T}$runspace${T}" <<<"$(calls herdr)"' "$got2"
   marker "$tmp/logs/c2.done"
-  check "close shuts it" 'hs "$STUBS" -- close "$clone" >/dev/null && calls herdr | grep -qx "workspace${T}close${T}$space"'
+  closes_before=$(calls herdr | grep -c "^tab${T}close")
+  close_result=$(hs "$STUBS" -- close "$clone" 2>&1); close_rc=$?
+  check "closing a scratch clone succeeds after its launches finish" '[ $close_rc -eq 0 ]' "$close_result"
+  check "closing it removes both owned tabs" \
+    '[ "$(calls herdr | grep -c "^tab${T}close")" -eq $((closes_before + 2)) ] && ! python3 -c "import json,sys; s=json.load(open(sys.argv[1])); sys.exit(not any(t[\"cwd\"]==sys.argv[2] for t in s[\"tabs\"].values()))" "$tmp/stub/herdr.json" "$clone"' \
+    "$(calls herdr) / $(python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print([(t,x.get("cwd")) for t,x in s["tabs"].items()])' "$tmp/stub/herdr.json")"
+  check "closing a scratch clone issues no workspace close for the run space" \
+    '! grep -qx "workspace${T}close${T}$runspace" <<<"$(calls herdr)"' \
+    "$(calls herdr)"
+  check "and the run space is gone with its last tab" \
+    '[ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  check "closing the synthesis worktree after its space is gone succeeds quietly" \
+    'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
   git clone -q "$repo" "$tmp/plain" >/dev/null 2>&1
   got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$tmp/plain" --marker ../logs/c3.done -- ./fixed.sh)
   space=${got#*space=}; space=${space%% *}
   marker "$tmp/logs/c3.done"
   hs "$STUBS" -- close "$tmp/plain" >/dev/null 2>&1; rc=$?
   check "a plain clone is no scratch: it opens as a repository, and close refuses its space" \
-    'calls herdr | grep -qxF "workspace${T}create${T}--cwd${T}$tmp/plain${T}--label${T}plain${T}--no-focus" && [ $rc -eq 2 ] && ! calls herdr | grep -qx "workspace${T}close${T}$space"' "$(calls herdr)"
+    'grep -qxF "workspace${T}create${T}--cwd${T}$tmp/plain${T}--label${T}plain${T}--no-focus" <<<"$(calls herdr)" && [ $rc -eq 2 ] && ! grep -qx "workspace${T}close${T}$space" <<<"$(calls herdr)"' "$(calls herdr)"
+
+  echo "a split launch tab, Herdr (stub)"
+  reset
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/g1.done -- ./fixed.sh)
+  marker "$tmp/logs/g1.done"
+  python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" <<'PY'
+import fcntl, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
+st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
+t1 = st["spaces"][ws]["tabs"][0]
+# The user splits the launch tab: a second, untagged pane in it.
+st["panes"]["pU"] = {"ws": ws, "tab": t1, "cwd": "/home/user", "tokens": {}}
+st["spaces"][ws]["panes"].append("pU")
+tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
+PY
+  got2=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
+  check "a tab the user has split is refused, and the tab stays open" \
+    '[ $rc -eq 2 ] && grep -q "holds panes" <<<"$got2" && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); ws=s[\"open\"][sys.argv[2]]; sys.exit(not s[\"spaces\"][ws][\"tabs\"])" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna"' "$got2"
+  check "and the user's pane survives it" \
+    'python3 -c "import json,sys; sys.exit(\"pU\" not in json.load(open(sys.argv[1]))[\"panes\"])" "$tmp/stub/herdr.json"'
+  reset
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/g2.done -- ./fixed.sh)
+  marker "$tmp/logs/g2.done"
+  python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" <<'PY'
+import fcntl, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
+st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
+t1 = st["spaces"][ws]["tabs"][0]
+# A second pane of the run's own in the launch tab: tagged like the first.
+st["panes"]["pR"] = {"ws": ws, "tab": t1, "cwd": sys.argv[2], "tokens": {"postmaster": "launch"}}
+st["spaces"][ws]["panes"].append("pR")
+tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
+PY
+  check "a tab holding only the run's panes still closes" \
+    'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/g3.done -- ./fixed.sh)
+  marker "$tmp/logs/g3.done"
+  python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" <<'PY'
+import fcntl, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
+st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
+t1 = st["spaces"][ws]["tabs"][0]
+# A sibling row the list cannot place: no tab on its record.
+st["panes"]["pU"] = {"ws": ws, "cwd": "/home/user", "tokens": {}}
+st["spaces"][ws]["panes"].append("pU")
+tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
+PY
+  got2=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
+  check "a tab the list cannot fully place is refused, and the tab stays open" \
+    '[ $rc -eq 2 ] && grep -q "cannot place" <<<"$got2" && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); ws=s[\"open\"][sys.argv[2]]; sys.exit(not s[\"spaces\"][ws][\"tabs\"])" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna"' "$got2"
+  check "and the unplaced pane survives it" \
+    'python3 -c "import json,sys; sys.exit(\"pU\" not in json.load(open(sys.argv[1]))[\"panes\"])" "$tmp/stub/herdr.json"'
+  reset
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/g4.done -- ./fixed.sh)
+  marker "$tmp/logs/g4.done"
+  python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" <<'PY'
+import fcntl, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
+st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
+t1 = st["spaces"][ws]["tabs"][0]
+st["panes"]["pU"] = {"ws": ws, "tab": t1, "cwd": "/home/user", "tokens": {}}
+st["spaces"][ws]["panes"].append("pU")
+tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
+PY
+  touch "$tmp/stub/panes.notabids"
+  got2=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
+  rm -f "$tmp/stub/panes.notabids"
+  check "a split tab in an id-less response loses only the run's pane" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); ws=s[\"open\"][sys.argv[2]]; t1=s[\"spaces\"][ws][\"tabs\"][0]; ps=[p for p,x in s[\"panes\"].items() if x.get(\"tab\")==t1]; sys.exit(set(ps)!=set([\"pU\"]))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna"' "$got2"
+  check "and the space refusal still stands" '[ $rc -eq 2 ]'
+  i=0
+  for spec in 'an empty string|""' 'false|false' 'zero|0' 'a list|["t1"]' 'a malformed string|"t1"' 'a trailing newline|"w1:t1\n"'; do
+    i=$((i + 1)); spelling=${spec%%|*}; literal=${spec#*|}
+    reset
+    got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/h1-$i.done -- ./fixed.sh)
+    marker "$tmp/logs/h1-$i.done"
+    python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" "$literal" <<'PY'
+import fcntl, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
+st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
+# A sibling row the list cannot place: its tab is the spelling under test.
+st["panes"]["pU"] = {"ws": ws, "tab": json.loads(sys.argv[3]), "cwd": "/home/user", "tokens": {}}
+st["spaces"][ws]["panes"].append("pU")
+tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
+PY
+    got2=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
+    check "a tab_id spelled as $spelling refuses the close, leaving tab and pane in place" \
+      '[ $rc -eq 2 ] && grep -q "cannot place" <<<"$got2" && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); ws=s[\"open\"][sys.argv[2]]; sys.exit(not s[\"spaces\"][ws][\"tabs\"])" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" && python3 -c "import json,sys; sys.exit(\"pU\" not in json.load(open(sys.argv[1]))[\"panes\"])" "$tmp/stub/herdr.json"' "$got2"
+  done
+  reset
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/h1-ok.done -- ./fixed.sh)
+  marker "$tmp/logs/h1-ok.done"
+  n0=$(calls herdr | grep -c "^tab${T}close" || true); m0=$(calls herdr | grep -c "^pane${T}close" || true)
+  hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null
+  check "a well-formed id still closes a tab holding only the run's panes" \
+    '[ $(calls herdr | grep -c "^tab${T}close" || true) -eq $((n0 + 1)) ] && [ $(calls herdr | grep -c "^pane${T}close" || true) -eq $m0 ] && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+
+  echo "stub state under concurrent saves, Herdr (stub)"
+  reset
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/q1.done -- ./fixed.sh)
+  marker "$tmp/logs/q1.done"
+  pane=${got##*pane=}
+  # The launch's reporter closes after the marker lands; let its closing report
+  # land before racing the stub, so the burst measures the mechanism, not the tail.
+  a=0
+  while ! python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); sys.exit(s["panes"][sys.argv[2]]["tokens"].get("state") != "done")' "$tmp/stub/herdr.json" "$pane" 2>/dev/null && [ $a -lt 300 ]; do sleep 0.2; a=$((a + 1)); done
+  # A burst of stub saves racing locked fixture edits the way the reporter's
+  # tail does, with reads throughout: every update must land, every read parse.
+  epids=""; spids=""; rpids=""; efail=0; sfail=0; rfail=0
+  for ((i = 1; i <= 30; i++)); do
+    python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" "$i" <<'PY' &
+import fcntl, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
+st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
+t1 = st["spaces"][ws]["tabs"][0]
+st["panes"]["q" + sys.argv[3]] = {"ws": ws, "tab": t1, "cwd": "/home/user", "tokens": {}}
+st["spaces"][ws]["panes"].append("q" + sys.argv[3])
+tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
+PY
+    epids="$epids $!"
+    STUB="$tmp/stub" "$tmp/bin/herdr" pane report-metadata "$pane" --token q="$i" >/dev/null 2>&1 &
+    spids="$spids $!"
+    python3 - "$tmp/stub/herdr.json" <<'PY' &
+import json, sys
+for _ in range(50):
+    json.load(open(sys.argv[1]))
+PY
+    rpids="$rpids $!"
+  done
+  for pid in $epids; do wait "$pid" || efail=1; done
+  for pid in $spids; do wait "$pid" || sfail=1; done
+  for pid in $rpids; do wait "$pid" || rfail=1; done
+  check "a burst of stub saves racing locked fixture edits keeps every update" \
+    '[ $efail -eq 0 ] && [ $sfail -eq 0 ] && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); sys.exit(not all(\"q%d\" % i in s[\"panes\"] for i in range(1, 31)))" "$tmp/stub/herdr.json"'
+  check "and no concurrent read sees a torn store" '[ $rfail -eq 0 ]'
+
+  reset
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/b1.done -- ./fixed.sh)
+  marker "$tmp/logs/b1.done"
+  python3 - "$tmp/stub/herdr.json" "$tmp/state/placements" "$repo/.worktrees/T-1-luna" <<'PY'
+import fcntl, glob, json, os, sys
+# Serialize with the stub: its saves take this lock.
+lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
+st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[3]]
+# Retab the launch as the tenth tab: rename its tab id to the base-36 shape
+# live Herdr issues, in the stub state and the recorded placement alike.
+old = st["spaces"][ws]["tabs"][-1]
+new = "%s:tA" % ws
+st["spaces"][ws]["tabs"] = [new if t == old else t for t in st["spaces"][ws]["tabs"]]
+st["tabs"][new] = st["tabs"].pop(old)
+for r in st["panes"].values():
+    if r.get("tab") == old: r["tab"] = new
+st.setdefault("tab_n", {})[ws] = 10
+for f in glob.glob(os.path.join(sys.argv[2], "*.json")):
+    d = json.load(open(f))
+    if d.get("cwd") == os.path.realpath(sys.argv[3]) and d.get("tab") == old:
+        d["tab"] = new; json.dump(d, open(f, "w"))
+tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
+PY
+  n0=$(calls herdr | grep -c "^tab${T}close" || true); m0=$(calls herdr | grep -c "^pane${T}close" || true)
+  hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null
+  check "a tA tab holding only the run's panes closes" \
+    '[ $(calls herdr | grep -c "^tab${T}close" || true) -eq $((n0 + 1)) ] && [ $(calls herdr | grep -c "^pane${T}close" || true) -eq $m0 ] && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+
+  echo "first-launch failure paths, Herdr (stub)"
+  reset
+  touch "$tmp/stub/tabclose.fail"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --out ../logs/f1.out --err ../logs/f1.err --marker ../logs/f1.done -- ./fixed.sh 2>../logs/f1.hosterr)
+  check "a root-tab close that fails still lands the launch, with a warning" \
+    'marker "$tmp/logs/f1.done" && grep -q "could not close the run space" "$tmp/logs/f1.hosterr"' "$got"
+  rm -f "$tmp/stub/tabclose.fail"
+  check "and close still finishes afterwards: the leftover tab is owned" \
+    'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  touch "$tmp/stub/tabcreate.empty"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f2.done -- ./fixed.sh)
+  rm -f "$tmp/stub/tabcreate.empty"
+  check "a tab create that returns no ids rolls the run space back" \
+    '[ "$got" = host=none ] && [ "$(calls herdr | grep -c "^tab${T}close")" -eq 1 ] && marker "$tmp/logs/f2.done"' "$got"
+  check "and no run space survives the rollback" \
+    '[ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  touch "$tmp/stub/panemeta.fail-once"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f3.done -- ./fixed.sh)
+  check "a root-pane tag that fails rolls the run space back instead of landing" \
+    '[ "$got" = host=none ] && [ "$(calls herdr | grep -c "^tab${T}close")" -eq 1 ] && marker "$tmp/logs/f3.done"' "$got"
+  check "and no run space survives it" \
+    '[ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  touch "$tmp/stub/panemeta.fail-once" "$tmp/stub/tabcreate.empty"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f4.done -- ./fixed.sh)
+  rm -f "$tmp/stub/tabcreate.empty"
+  check "a failed tag plus a failed create still leaves nothing behind" \
+    '[ "$got" = host=none ] && marker "$tmp/logs/f4.done"' "$got"
+  check "and no run space survives the double fault" \
+    '[ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  touch "$tmp/stub/wsmeta.fail-once"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f5.done -- ./fixed.sh)
+  check "a failed mark write rolls the run space back instead of orphaning it" \
+    '[ "$got" = host=none ] && [ "$(calls herdr | grep -c "^tab${T}close")" -eq 1 ] && marker "$tmp/logs/f5.done"' "$got"
+  check "and no run space survives it" \
+    '[ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  touch "$tmp/stub/tabclose.fail" "$tmp/stub/tabcreate.empty"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f6.done -- ./fixed.sh 2>../logs/f6.hosterr)
+  rm -f "$tmp/stub/tabclose.fail" "$tmp/stub/tabcreate.empty"
+  check "a rollback that fails too still warns instead of failing silently" \
+    '[ "$got" = host=none ] && marker "$tmp/logs/f6.done" && grep -q "could not roll back the run space" "$tmp/logs/f6.hosterr"' "$got"
+  check "and close still shuts the marked space it leaves behind" \
+    'hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  touch "$tmp/stub/tabrename.fail-once"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f7.done -- ./fixed.sh)
+  check "a tab rename that fails rolls the launch tab back" \
+    '[ "$got" = host=none ] && [ "$(calls herdr | grep -c "^tab${T}close")" -eq 2 ] && marker "$tmp/logs/f7.done"' "$got"
+  check "and no run space survives it" \
+    '[ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  echo 2 > "$tmp/stub/panemeta.fail-nth"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f8.done -- ./fixed.sh)
+  check "a launch-pane tag that fails rolls the launch tab back" \
+    '[ "$got" = host=none ] && [ "$(calls herdr | grep -c "^tab${T}close")" -eq 2 ] && marker "$tmp/logs/f8.done"' "$got"
+  check "and no run space survives it" \
+    '[ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  mkdir -p "$tmp/poison" && : > "$tmp/poison/placements"
+  got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST_STATE="$tmp/poison" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f9.done -- ./fixed.sh)
+  check "a placement the record refuses falls back with its tab tagged" \
+    '[ "$got" = host=none ] && marker "$tmp/logs/f9.done"' "$got"
+  check "and close still shuts its space without the record" \
+    'hs "$STUBS" POSTMASTER_HOST_STATE="$tmp/poison" -- close "$repo/.worktrees/T-1-luna" >/dev/null && [ -z "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"open\"].get(sys.argv[2], \"\"))" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna")" ]'
+  reset
+  touch "$tmp/stub/tabrename.fail-once" "$tmp/stub/tabclose.fail"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/f10.done -- ./fixed.sh 2>../logs/f10.hosterr)
+  rm -f "$tmp/stub/tabclose.fail"
+  check "a launch-tab rollback that fails too still warns instead of failing silently" \
+    '[ "$got" = host=none ] && marker "$tmp/logs/f10.done" && grep -q "could not roll back launch tab" "$tmp/logs/f10.hosterr"' "$got"
+  hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" >/dev/null 2>&1; rc=$?
+  check "and close correctly refuses the untagged tab it leaves behind" '[ $rc -eq 2 ]'
 
   echo "run, stop and close, tmux (stub)"
   reset
   got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux CALLER_VAR=v -- run "$NAME" "$repo/.worktrees/T-1-sol" --out ../logs/t1.out --marker ../logs/t1.done -- ./probe.sh)
   marker "$tmp/logs/t1.done"
   check "a first launch opens session postmaster-<repo>, a window named for it" \
-    'calls tmux | grep -q "^new-session${T}-d${T}-P${T}-F${T}#{window_id}${T}-s${T}postmaster-$rname${T}-n${T}$NAME${T}"' "$got"
+    'grep -q "^new-session${T}-d${T}-P${T}-F${T}#{window_id}${T}-s${T}postmaster-$rname${T}-n${T}$NAME${T}" <<<"$(calls tmux)"' "$got"
   check "the launch ran with that window's pane and its caller's environment" '[ "$(field "$tmp/logs/t1.out" tmuxpane)" = %1 ] && [ "$(field "$tmp/logs/t1.out" var)" = v ]' "$(cat "$tmp/logs/t1.out")"
-  (cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux -- run "$NAME" "$repo/.worktrees/T-1-sol" --marker ../logs/t2.done -- sleep 60 >/dev/null)
-  check "the next is a window in the same session" 'calls tmux | grep -q "^new-window${T}-d${T}-P${T}-F${T}#{window_id}${T}-t${T}=postmaster-$rname:${T}"'
+  # sleep 300 outlives the 60s marker bound: a stop that misses still fails.
+  (cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux -- run "$NAME" "$repo/.worktrees/T-1-sol" --marker ../logs/t2.done -- sleep 300 >/dev/null)
+  check "the next is a window in the same session" 'grep -q "^new-window${T}-d${T}-P${T}-F${T}#{window_id}${T}-t${T}=postmaster-$rname:${T}" <<<"$(calls tmux)"'
   hs "$STUBS" POSTMASTER_HOST=tmux -- close "$repo/.worktrees/T-1-sol" >/dev/null 2>&1; rc=$?
   check "close refuses while a launch still runs in the worktree" '[ $rc -eq 2 ] && [ "$(calls tmux | grep -c "^kill-window")" -eq 0 ]'
-  hs "$STUBS" POSTMASTER_HOST=tmux -- stop "$repo/.worktrees/T-1-sol" >/dev/null; marker "$tmp/logs/t2.done" 10
+  hs "$STUBS" POSTMASTER_HOST=tmux -- stop "$repo/.worktrees/T-1-sol" >/dev/null; marker "$tmp/logs/t2.done" 60
   check "once it is stopped, close kills that worktree's windows" \
     'hs "$STUBS" POSTMASTER_HOST=tmux -- close "$repo/.worktrees/T-1-sol" >/dev/null && [ "$(calls tmux | grep -c "^kill-window")" -eq 2 ]'
   (cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux -- run "$NAME" "$clone" --marker ../logs/t3.done -- ./fixed.sh >/dev/null)
@@ -1931,10 +2915,12 @@ PY
   hs "$SYS" -- read postmaster-repo >/dev/null 2>&1; c=$?
   check "with no host, spawn, send and read say so, exit 3" '[ $a -eq 3 ] && [ $b -eq 3 ] && [ $c -eq 3 ]'
   reset
-  hs "$STUBS" POSTMASTER_CONFIG=/elsewhere/config.toml -- spawn postmaster-repo "$repo/.worktrees/T-1-luna" --label "repo · postmaster" -- claude --model m >/dev/null
+  hs "$STUBS" POSTMASTER_CONFIG=/elsewhere/config.toml -- spawn postmaster-repo "$repo/.worktrees/T-1-luna" --label "$POSTMASTER_LABEL" -- claude --model m >/dev/null
   check "Herdr: spawn starts the agent in a tab of the repository's own space" \
-    'calls herdr | grep -q "^tab${T}create${T}--workspace${T}w1${T}--cwd${T}$repo/.worktrees/T-1-luna${T}--label${T}repo · postmaster${T}--no-focus" && calls herdr | grep -qx "agent${T}start${T}postmaster-repo${T}--kind${T}claude${T}--pane${T}p5${T}--${T}--model${T}m"' "$(calls herdr)"
-  check "with the caller's POSTMASTER_ settings in its pane" 'calls herdr | grep "^tab${T}create" | grep -qF -- "--env${T}POSTMASTER_CONFIG=/elsewhere/config.toml"'
+    'grep -qx "tab${T}rename${T}w1:t1${T}postmaster" <<<"$(calls herdr)" && grep -qx "agent${T}start${T}postmaster-repo${T}--kind${T}claude${T}--pane${T}p2${T}--${T}--model${T}m" <<<"$(calls herdr)"' "$(calls herdr)"
+  check "with the caller's POSTMASTER_ settings in its pane" 'grep -qF -- "--env${T}POSTMASTER_CONFIG=/elsewhere/config.toml" <<<"$(calls herdr | grep "^workspace${T}create")"'
+  check "the postmaster takes the project's first tab, leaving no empty shell beside it" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); w=s[\"open\"][sys.argv[2]]; tabs=s[\"spaces\"][w][\"tabs\"]; sys.exit(0 if len(tabs)==1 and s[\"tabs\"][tabs[0]][\"label\"]==\"postmaster\" else 1)" "$tmp/stub/herdr.json" "$repo"'
   hs "$STUBS" -- spawn postmaster-repo "$repo" -- claude >/dev/null 2>&1; rc=$?
   check "a handle a live agent already has is refused" '[ $rc -eq 1 ] && [ "$(calls herdr | grep -c "^agent${T}start${T}postmaster-repo")" -eq 1 ]'
   touch "$tmp/stub/agent.notready"
@@ -1942,16 +2928,16 @@ PY
   rm -f "$tmp/stub/agent.notready"
   check "a harness asking something on first start: spawn says so, and does not fail" '[ $rc -eq 0 ]'
   hs "$STUBS" -- spawn "My.Project postmaster" "$repo" -- claude >/dev/null
-  check "a handle becomes a Herdr agent name: lowercase, no dots or spaces" 'calls herdr | grep -q "^agent${T}start${T}my-project-postmaster${T}"'
+  check "a handle becomes a Herdr agent name: lowercase, no dots or spaces" 'grep -q "^agent${T}start${T}my-project-postmaster${T}" <<<"$(calls herdr)"'
   o1=$("$SELF" _handle "postmaster-acme-platform-service-billing"); o2=$("$SELF" _handle "postmaster-acme-platform-service-payments")
   check "two long names that share a start get two handles, each always the same, none over 32" \
     '[ "$o1" != "$o2" ] && [ "$o1" = "$("$SELF" _handle "postmaster-acme-platform-service-billing")" ] && [ ${#o1} -le 32 ] && [ ${#o2} -le 32 ]' "$o1 / $o2"
   printf 'Read the brief.' > "$tmp/msg.txt"
   hs "$STUBS" -- send postmaster-repo "$tmp/msg.txt" >/dev/null
-  check "Herdr: send submits the file's text as the agent's prompt" 'calls herdr | grep -qx "agent${T}prompt${T}postmaster-repo${T}Read the brief."'
+  check "Herdr: send submits the file's text as the agent's prompt" 'grep -qx "agent${T}prompt${T}postmaster-repo${T}Read the brief." <<<"$(calls herdr)"'
   hs "$STUBS" -- send postmaster-repo "$tmp/msg.txt" --wait 30 >/dev/null
   check "Herdr: send --wait sends and waits in one call, never a prompt then a wait" \
-    'calls herdr | grep -qx "agent${T}prompt${T}postmaster-repo${T}Read the brief.${T}--wait${T}--timeout${T}30000" && ! calls herdr | grep -q "^agent${T}wait"'
+    'grep -qx "agent${T}prompt${T}postmaster-repo${T}Read the brief.${T}--wait${T}--timeout${T}30000" <<<"$(calls herdr)" && ! grep -q "^agent${T}wait" <<<"$(calls herdr)"'
   touch "$tmp/stub/agent.blocked"
   hs "$STUBS" -- send postmaster-repo "$tmp/msg.txt" --wait 30 >/dev/null 2>&1; a=$?
   hs "$STUBS" -- wait postmaster-repo 5 >/dev/null 2>&1; b=$?
@@ -1959,7 +2945,7 @@ PY
   check "a turn that stops at an approval or a question is not settled: exit 3" '[ $a -eq 3 ] && [ $b -eq 3 ]'
   hs "$STUBS" -- wait postmaster-repo 5 >/dev/null; hs "$STUBS" -- read postmaster-repo 7 >/dev/null
   check "Herdr: wait and read go to the agent by its handle" \
-    'calls herdr | grep -qx "agent${T}wait${T}postmaster-repo${T}--timeout${T}5000" && calls herdr | grep -qx "agent${T}read${T}postmaster-repo${T}--source${T}recent-unwrapped${T}--lines${T}7"'
+    'grep -qx "agent${T}wait${T}postmaster-repo${T}--timeout${T}5000" <<<"$(calls herdr)" && grep -qx "agent${T}read${T}postmaster-repo${T}--source${T}recent-unwrapped${T}--lines${T}7" <<<"$(calls herdr)"'
   hs "$STUBS" POSTMASTER_HOST=tmux POSTMASTER_CONFIG=/elsewhere/config.toml -- spawn postmaster-repo "$repo" -- claude >/dev/null
   check "tmux: spawn passes the caller's POSTMASTER_ settings to the window" 'grep -qx "POSTMASTER_CONFIG=/elsewhere/config.toml" "$tmp/stub/win-1.env"'
   hs "$STUBS" POSTMASTER_HOST=tmux -- send postmaster-repo "$tmp/msg.txt" >/dev/null
@@ -1968,13 +2954,13 @@ PY
   hs "$STUBS" POSTMASTER_HOST=tmux POSTMASTER_HOST_QUIET=2 -- wait postmaster-repo 20 >/dev/null; a=$?
   hs "$STUBS" POSTMASTER_HOST=tmux -- read postmaster-repo 7 >/dev/null
   check "tmux: wait settles on a quiet screen, and read takes the lines asked for" \
-    '[ $a -eq 0 ] && calls tmux | grep -qx "capture-pane${T}-p${T}-J${T}-S${T}-7${T}-t${T}@1"'
+    '[ $a -eq 0 ] && grep -qx "capture-pane${T}-p${T}-J${T}-S${T}-7${T}-t${T}@1" <<<"$(calls tmux)"'
 
   echo "uncapped fallback: cap mechanism absent from PATH"
   (cd "$tmp/caller" && ./healthy.sh > "$tmp/direct-healthy.out" 2> "$tmp/direct-healthy.err")
   got=$(cap_launch "$SELF" "$SYS" uncapped -- "$tmp/caller/healthy.sh" 2>/dev/null)
   check "without the cap tools, the launch still completes and .err says uncapped" \
-    'marker "$tmp/logs/uncapped.done" 10 && grep -qFx "host: launch running uncapped (no supported per-launch limits available)" "$tmp/logs/uncapped.err" && cmp -s "$tmp/direct-healthy.out" "$tmp/logs/uncapped.out" && err_stream_equal "$tmp/direct-healthy.err" "$tmp/logs/uncapped.err"' "$got"
+    'marker "$tmp/logs/uncapped.done" 60 && grep -qFx "host: launch running uncapped (no supported per-launch limits available)" "$tmp/logs/uncapped.err" && cmp -s "$tmp/direct-healthy.out" "$tmp/logs/uncapped.out" && err_stream_equal "$tmp/direct-healthy.err" "$tmp/logs/uncapped.err"' "$got"
 
   if systemd_capability >/dev/null 2>&1; then
     echo "per-launch caps: systemd user scope controls"
@@ -1983,8 +2969,8 @@ PY
     check "a capped launch publishes its pid while the command is still running" \
       '[ -s "$tmp/logs/fork-other.pid" ] && [ ! -e "$tmp/logs/fork-other.done" ]' "$fork_other"
     fork_got=$(cap_launch "$cap_impl" "$CAPSYS" fork -- timeout --signal=TERM --kill-after=1 2 python3 "$tmp/caller/fork-cap.py" 2>/dev/null)
-    marker "$tmp/logs/fork.done" 10
-    marker "$tmp/logs/fork-other.done" 10
+    marker "$tmp/logs/fork.done" 60
+    marker "$tmp/logs/fork-other.done" 60
     no_live_pids() {
       local pid st
       while IFS= read -r pid; do
@@ -1998,20 +2984,20 @@ PY
     check "the bounded fork fixture leaves no live child processes" \
       'no_live_pids "$tmp/logs/fork.pids"' "$(cat "$tmp/logs/fork.pids" 2>/dev/null)"
     check "a healthy launch completes while the fork cap is reached" \
-      'marker "$tmp/logs/fork-other.done" 1 && cmp -s "$tmp/direct-healthy.out" "$tmp/logs/fork-other.out" && err_stream_equal "$tmp/direct-healthy.err" "$tmp/logs/fork-other.err" && [ "$(cut -d" " -f2 "$tmp/logs/fork-other.group")" = "$(cat "$tmp/logs/fork-other.pid")" ]' "$fork_other"
+      'marker "$tmp/logs/fork-other.done" 60 && cmp -s "$tmp/direct-healthy.out" "$tmp/logs/fork-other.out" && err_stream_equal "$tmp/direct-healthy.err" "$tmp/logs/fork-other.err" && [ "$(cut -d" " -f2 "$tmp/logs/fork-other.group")" = "$(cat "$tmp/logs/fork-other.pid")" ]' "$fork_other"
     exit_got=$(cap_launch "$cap_impl" "$CAPSYS" fork-exit -- timeout --signal=TERM --kill-after=1 4 python3 "$tmp/caller/fork-exit.py" 2>/dev/null)
-    marker "$tmp/logs/fork-exit.done" 10
+    marker "$tmp/logs/fork-exit.done" 60
     check "a launch that exits after tripping the process cap still names the cap" \
       'grep -qFx "host: process cap reached (TasksMax=16)" "$tmp/logs/fork-exit.err" && [ -e "$tmp/logs/fork-exit.done" ]' "$exit_got"
 
     memory_other=$(cap_launch "$cap_impl" "$CAPSYS" memory-other -- "$tmp/caller/healthy.sh" 2>/dev/null)
     memory_got=$(cap_launch "$cap_impl" "$CAPSYS" memory -- timeout --signal=TERM --kill-after=1 2 python3 "$tmp/caller/memory-cap.py" 2>/dev/null)
-    marker "$tmp/logs/memory.done" 10
-    marker "$tmp/logs/memory-other.done" 10
+    marker "$tmp/logs/memory.done" 60
+    marker "$tmp/logs/memory-other.done" 60
     check "an allocation runaway is stopped at MemoryMax and leaves its marker" \
       'grep -qFx "host: memory cap reached (MemoryMax=64M)" "$tmp/logs/memory.err" && [ -e "$tmp/logs/memory.done" ]' "$memory_got"
     check "a healthy launch completes while the memory cap is reached" \
-      'marker "$tmp/logs/memory-other.done" 1 && cmp -s "$tmp/direct-healthy.out" "$tmp/logs/memory-other.out" && err_stream_equal "$tmp/direct-healthy.err" "$tmp/logs/memory-other.err" && [ "$(cut -d" " -f2 "$tmp/logs/memory-other.group")" = "$(cat "$tmp/logs/memory-other.pid")" ]' "$memory_other"
+      'marker "$tmp/logs/memory-other.done" 60 && cmp -s "$tmp/direct-healthy.out" "$tmp/logs/memory-other.out" && err_stream_equal "$tmp/direct-healthy.err" "$tmp/logs/memory-other.err" && [ "$(cut -d" " -f2 "$tmp/logs/memory-other.group")" = "$(cat "$tmp/logs/memory-other.pid")" ]' "$memory_other"
     mkdir -p "$tmp/capshim"
     for t in "$CAPSYS"/*; do
       [ -e "$t" ] || continue
@@ -2036,14 +3022,23 @@ EOF
     chmod +x "$tmp/capshim/systemctl"
     rm -f "$tmp/logs/shim-queries.log"; touch "$tmp/logs/shim-queries.log"
     shim_got=$(cap_launch "$cap_impl" "$tmp/capshim" shim-oom -- timeout --signal=TERM --kill-after=1 6 python3 "$tmp/caller/memory-cap.py" 2>/dev/null)
-    marker "$tmp/logs/shim-oom.done" 15
+    marker "$tmp/logs/shim-oom.done" 60
     check "a transient success verdict does not hide an OOM, and the verdict reads properties by name" \
       'grep -qFx "host: memory cap reached (MemoryMax=64M)" "$tmp/logs/shim-oom.err" && [ "$(wc -l < "$tmp/logs/shim-queries.log")" -eq 2 ]' "$shim_got"
     python3 -c "import os; fd=os.open('$tmp/brush-data.bin',os.O_RDONLY); os.posix_fadvise(fd,0,0,os.POSIX_FADV_DONTNEED); os.close(fd)"
     brush_got=$(cap_launch "$cap_impl" "$CAPSYS" brush -- timeout --signal=TERM --kill-after=1 30 python3 "$tmp/caller/brush-cache.py" 2>/dev/null)
-    marker "$tmp/logs/brush.done" 20
+    marker "$tmp/logs/brush.done" 60
     check "a launch that brushes the memory cap with reclaimable cache completes unnamed" \
       'grep -q "brushed .* pages" "$tmp/logs/brush.out" && [ -e "$tmp/logs/brush.done" ] && [ ! -s "$tmp/logs/brush.err" ]' "$brush_got"
+    spin_got=$(cap_launch "$cap_impl" "$CAPSYS" spin -- timeout --signal=TERM --kill-after=1 30 python3 "$tmp/caller/brush-steady.py" 5 2>/dev/null)
+    spin_cpu=$(python3 "$tmp/caller/watcher-cpu.py" "$tmp/logs/spin.pid" 3 2>&1)
+    spin_s=${spin_cpu%% *}; spin_n=${spin_cpu##* }
+    marker "$tmp/logs/spin.done" 20
+    # A spinning watcher burns most of a core; one that sleeps between changes
+    # wakes at most a hundred times a second, the kernel's notify rate.
+    check "a cap watcher sleeps while its launch's memory.events changes: under a tenth of a core" \
+      '[ "$spin_n" -gt 0 ] 2>/dev/null && python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) < 0.3 else 1)" "$spin_s" && [ -e "$tmp/logs/spin.done" ] && [ ! -s "$tmp/logs/spin.err" ]' \
+      "cpu s, max events in 3 s: $spin_cpu; $spin_got"
     mkdir -p "$tmp/capshim2"
     for t in "$CAPSYS"/*; do
       [ -e "$t" ] || continue
@@ -2068,7 +3063,7 @@ EOF
     rm -f "$tmp/logs/shim2-cg.log" "$tmp/logs/shim2-result.log"
     touch "$tmp/logs/shim2-cg.log" "$tmp/logs/shim2-result.log"
     wmem_got=$(cap_launch "$cap_impl" "$tmp/capshim2" watcher-mem -- timeout --signal=TERM --kill-after=1 6 python3 "$tmp/caller/memory-cap.py" 2>/dev/null)
-    marker "$tmp/logs/watcher-mem.done" 15
+    marker "$tmp/logs/watcher-mem.done" 60
     check "with the fallback blinded, an OOM is still named: the watcher notes it" \
       'grep -qFx "host: memory cap reached (MemoryMax=64M)" "$tmp/logs/watcher-mem.err" && [ "$(wc -l < "$tmp/logs/shim2-cg.log")" -ge 1 ] && [ "$(wc -l < "$tmp/logs/shim2-result.log")" -eq 0 ]' "$wmem_got"
     mkdir -p "$tmp/fakecgroup/fixture"
@@ -2091,18 +3086,18 @@ EOF
     CAPCGROOT=$tmp/fakecgroup
     printf 'low 0\nhigh 0\nmax 0\noom 0\noom_kill 1\noom_group_kill 0\n' > "$tmp/fakecgroup/fixture/memory.events"
     hostshape_got=$(cap_launch "$cap_impl" "$tmp/capshim3" hostshape -- "$tmp/caller/healthy.sh" 2>/dev/null)
-    marker "$tmp/logs/hostshape.done" 10
+    marker "$tmp/logs/hostshape.done" 60
     check "a host-wide OOM shape (oom_kill without oom) is not blamed on MemoryMax" \
       'cmp -s "$tmp/direct-healthy.out" "$tmp/logs/hostshape.out" && cmp -s "$tmp/direct-healthy.err" "$tmp/logs/hostshape.err" && [ -e "$tmp/logs/hostshape.done" ]' "$hostshape_got"
     printf 'low 0\nhigh 0\nmax 18\noom 1\noom_kill 0\noom_group_kill 0\n' > "$tmp/fakecgroup/fixture/memory.events"
     oomshape_got=$(cap_launch "$cap_impl" "$tmp/capshim3" oomshape -- "$tmp/caller/healthy.sh" 2>/dev/null)
-    marker "$tmp/logs/oomshape.done" 10
+    marker "$tmp/logs/oomshape.done" 60
     check "a cgroup OOM shape (oom set) still names the memory cap" \
       'grep -qFx "host: memory cap reached (MemoryMax=64M)" "$tmp/logs/oomshape.err" && [ -e "$tmp/logs/oomshape.done" ]' "$oomshape_got"
     unset CAPCGROOT
     kill_got=$(cap_launch "$cap_impl" "$CAPSYS" kill-healthy -- "$tmp/caller/healthy.sh" 2>/dev/null)
     sleep 0.3; kill -KILL "$(cat "$tmp/logs/kill-healthy.pid")" 2>/dev/null
-    marker "$tmp/logs/kill-healthy.done" 10
+    marker "$tmp/logs/kill-healthy.done" 60
     check "a launch killed mid-sleep is told apart: its streams no longer match a completed run" \
       '[ -e "$tmp/logs/kill-healthy.done" ] && ! cmp -s "$tmp/direct-healthy.out" "$tmp/logs/kill-healthy.out"' "$kill_got"
     check "a capped launch's .err never carries the uncapped notice" \
@@ -2134,6 +3129,269 @@ EOF
   check "every role resolves from the dispatch run, inheriting each value it does not set" \
     '[ "$(launch_limits lane "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "64M\t16")" ] && [ "$(launch_limits coachman "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "128M\t32")" ] && [ "$(launch_limits reviewer "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "8G\t24")" ] && [ "$(launch_limits default "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "8G\t512")" ] && [ "$(launch_limits lane "" "$tmp/live-limits.toml")" = "$(printf "8G\t512")" ]'
 
+  echo "run environment identity, Claude session and lane env file: Herdr, tmux and no host"
+  local -a claude_identity_names=(
+    CLAUDECODE CLAUDE_PID CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION
+    CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ATTENDED
+    CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN
+    CLAUDE_CODE_TOOL_USE_ID
+    CLAUDE_CODE_SESSION_EXTRA CLAUDE_CODE_MESSAGING_EXTRA CLAUDE_CODE_CHILD_EXTRA
+  )
+  local -a herdr_identity_names=(
+    HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID HERDR_ENV HERDR_SOCKET_PATH
+    HERDR_BIN_PATH HERDR_CUSTOM
+  )
+  local -a claude_identity_env=(
+    CLAUDECODE=caller-claudecode CLAUDE_PID=caller-pid
+    CLAUDE_CODE_SESSION_ID=caller-thread CLAUDE_CODE_CHILD_SESSION=caller-child
+    CLAUDE_CODE_ENTRYPOINT=caller-entry CLAUDE_CODE_EXECPATH=caller-exec
+    CLAUDE_CODE_SESSION_ATTENDED=caller-attended
+    CLAUDE_CODE_MESSAGING_SOCKET=caller-socket CLAUDE_CODE_MESSAGING_TOKEN=caller-token
+    CLAUDE_CODE_TOOL_USE_ID=caller-tool-use
+    CLAUDE_CODE_SESSION_EXTRA=caller-session-extra
+    CLAUDE_CODE_MESSAGING_EXTRA=caller-messaging-extra
+    CLAUDE_CODE_CHILD_EXTRA=caller-child-extra
+  )
+  local -a herdr_identity_env=(
+    HERDR_PANE_ID=caller-pane HERDR_TAB_ID=caller-tab
+    HERDR_WORKSPACE_ID=caller-workspace HERDR_ENV=caller-env
+    HERDR_SOCKET_PATH=/caller/herdr.sock HERDR_BIN_PATH=/caller/herdr-bin
+    HERDR_CUSTOM=caller-herdr-extra
+  )
+  local -a caller_config_env=(
+    CALLER_VAR=caller-value POSTMASTER_CUSTOM=caller-postmaster
+    POSTMASTER_CONFIG="$tmp/claude-launch.toml"
+    CLAUDE_CONFIG_DIR="$tmp/claude-config" CLAUDE_EFFORT=high
+    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=123
+    CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1
+    ANTHROPIC_BASE_URL=https://caller.invalid
+    ANTHROPIC_AUTH_TOKEN=fixture-auth-token
+  )
+  cat > "$tmp/caller/env-probe.py" <<'PY'
+#!/usr/bin/env python3
+import os
+
+exact = {
+    "CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_TOOL_USE_ID",
+}
+families = ("CLAUDE_CODE_SESSION_", "CLAUDE_CODE_MESSAGING_", "CLAUDE_CODE_CHILD_")
+claude = sorted(k for k in os.environ if k in exact or k.startswith(families))
+herdr = sorted(k for k in os.environ if k.startswith("HERDR_"))
+names = (
+    ("claude_keys", ",".join(claude)), ("herdr_keys", ",".join(herdr)),
+    ("herdr_pane", os.environ.get("HERDR_PANE_ID", "unset")),
+    ("herdr_tab", os.environ.get("HERDR_TAB_ID", "unset")),
+    ("herdr_workspace", os.environ.get("HERDR_WORKSPACE_ID", "unset")),
+    ("herdr_env", os.environ.get("HERDR_ENV", "unset")),
+    ("herdr_socket", os.environ.get("HERDR_SOCKET_PATH", "unset")),
+    ("herdr_bin", os.environ.get("HERDR_BIN_PATH", "unset")),
+    ("herdr_custom", os.environ.get("HERDR_CUSTOM", "unset")),
+    ("caller", os.environ.get("CALLER_VAR", "unset")),
+    ("postmaster_custom", os.environ.get("POSTMASTER_CUSTOM", "unset")),
+    ("postmaster_config", os.environ.get("POSTMASTER_CONFIG", "unset")),
+    ("claude_config_dir", os.environ.get("CLAUDE_CONFIG_DIR", "unset")),
+    ("claude_effort", os.environ.get("CLAUDE_EFFORT", "unset")),
+    ("claude_bg_wait", os.environ.get("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "unset")),
+    ("claude_feedback", os.environ.get("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "unset")),
+    ("anthropic_base", os.environ.get("ANTHROPIC_BASE_URL", "unset")),
+    ("anthropic_auth", os.environ.get("ANTHROPIC_AUTH_TOKEN", "unset")),
+)
+print("|".join("%s=%s" % item for item in names))
+PY
+  chmod +x "$tmp/caller/env-probe.py"
+  cat > "$tmp/caller/lane.env" <<'EOF'
+LANE_ENV_ONLY=from-lane-env-file
+ANTHROPIC_BASE_URL=https://lane.invalid
+CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=456
+EOF
+  cat > "$tmp/claude-launch.toml" <<EOF
+[lanes.test]
+harness = "claude"
+model = "host-self-test"
+env_file = "$tmp/caller/lane.env"
+EOF
+  printf 'Continue.\n' > "$tmp/caller/prompt.txt"
+  cat > "$tmp/bin/claude" <<'PY'
+#!/usr/bin/env python3
+import json
+import os
+import pathlib
+import sys
+
+exact = {
+    "CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_TOOL_USE_ID",
+}
+families = ("CLAUDE_CODE_SESSION_", "CLAUDE_CODE_MESSAGING_", "CLAUDE_CODE_CHILD_")
+identity = sorted(k for k in os.environ if k in exact or k.startswith(families))
+herdr = {k: v for k, v in os.environ.items() if k.startswith("HERDR_")}
+env_names = (
+    "CALLER_VAR", "POSTMASTER_CUSTOM", "POSTMASTER_CONFIG", "CLAUDE_CONFIG_DIR",
+    "CLAUDE_EFFORT", "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS",
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN",
+    "LANE_ENV_ONLY",
+)
+record = {
+    "identity": identity,
+    "herdr": herdr,
+    "env": {k: os.environ.get(k, "unset") for k in env_names},
+}
+observed = os.environ.get("HOST_TEST_OBSERVED")
+if observed:
+    with open(observed, "a", encoding="utf-8") as stream:
+        json.dump(record, stream, sort_keys=True)
+        stream.write("\n")
+
+args = sys.argv[1:]
+store = pathlib.Path(os.environ["CLAUDE_CONFIG_DIR"]) / "sessions"
+if identity:
+    # Model #67's failure: a nested headless run can finish without owning a record.
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "caller-thread")
+    print(json.dumps({"type": "system", "subtype": "init", "session_id": session_id, "model": "stub"}))
+    print(json.dumps({"type": "result", "subtype": "success", "num_turns": 1}))
+    sys.exit(0)
+
+if "--resume" in args:
+    session_id = args[args.index("--resume") + 1]
+    session_record = store / (session_id + ".jsonl")
+    if not session_record.is_file():
+        print("Session not found", file=sys.stderr)
+        sys.exit(1)
+    with session_record.open("a", encoding="utf-8") as stream:
+        stream.write("resume\n")
+else:
+    session_id = "thread-" + os.environ["HOST_TEST_RUN"]
+    session_record = store / (session_id + ".jsonl")
+    session_record.parent.mkdir(parents=True, exist_ok=True)
+    with session_record.open("w", encoding="utf-8") as stream:
+        stream.write("new\n")
+
+print(json.dumps({"type": "system", "subtype": "init", "session_id": session_id, "model": "stub"}))
+print(json.dumps({"type": "result", "subtype": "success", "num_turns": 1}))
+PY
+  chmod +x "$tmp/bin/claude"
+  contains_all() {
+    local values=$1 name
+    shift
+    for name in "$@"; do case ",$values," in *",$name,"*) ;; *) return 1 ;; esac; done
+  }
+  observe() {
+    python3 - "$1" "$2" <<'PY'
+import json, sys
+d = json.loads(open(sys.argv[1], encoding="utf-8").readlines()[-1])
+key = sys.argv[2]
+if key == "identity_keys": print(",".join(d["identity"]))
+elif key == "herdr_keys": print(",".join(sorted(d["herdr"])))
+elif key.startswith("herdr:"): print(d["herdr"].get(key[6:], "unset"))
+else: print(d["env"].get(key, "unset"))
+PY
+  }
+  stream_sessions() {
+    python3 - "$1" <<'PY'
+import json, sys
+ids = [json.loads(line).get("session_id", "") for line in open(sys.argv[1], encoding="utf-8")
+       if json.loads(line).get("subtype") == "init"]
+print(",".join(ids))
+PY
+  }
+  for mode in herdr tmux none; do
+    local -a under=()
+    [ "$mode" != herdr ] || under=(--under "$tmp/run-1")
+    local input_probe="$tmp/logs/$mode.identity-input" output_probe="$tmp/logs/$mode.identity-output"
+    local run_marker="$tmp/logs/$mode.identity-probe.done" got space pane
+    (cd "$tmp/caller" && env -i HOME="$HOME" PATH="$STUBS" STUB="$tmp/stub" \
+      "${claude_identity_env[@]}" "${herdr_identity_env[@]}" "${caller_config_env[@]}" \
+      ./env-probe.py > "$input_probe")
+    check "AC1 $mode positive control: caller carries every Claude identity name" \
+      'contains_all "$(field "$input_probe" claude_keys)" "${claude_identity_names[@]}"' \
+      "$(cat "$input_probe")"
+    check "AC2 $mode positive control: caller carries every Herdr variable" \
+      'contains_all "$(field "$input_probe" herdr_keys)" "${herdr_identity_names[@]}" && [ "$(field "$input_probe" herdr_custom)" = caller-herdr-extra ]' \
+      "$(cat "$input_probe")"
+    check "AC3 $mode positive control: caller configuration is present before the handoff" \
+      '[ "$(field "$input_probe" caller)" = caller-value ] && [ "$(field "$input_probe" postmaster_custom)" = caller-postmaster ] && [ "$(field "$input_probe" claude_bg_wait)" = 123 ] && [ "$(field "$input_probe" anthropic_base)" = https://caller.invalid ]' \
+      "$(cat "$input_probe")"
+
+    got=$(cd "$tmp/caller" && hs "$STUBS" "${claude_identity_env[@]}" "${herdr_identity_env[@]}" \
+      "${caller_config_env[@]}" "POSTMASTER_HOST=$mode" -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+      "${under[@]}" --out "$output_probe" --marker "$run_marker" -- ./env-probe.py)
+    marker "$run_marker" 60
+    case "$mode:$got" in
+      herdr:host=herdr\ *|tmux:host=tmux\ *|none:host=none) rc=0 ;;
+      *) rc=1 ;;
+    esac
+    check "AC5 $mode positive host control: launch used the requested host" '[ "$rc" -eq 0 ]' "$got"
+    check "AC1 $mode negative control: launch receives no Claude session identity" \
+      '[ -z "$(field "$output_probe" claude_keys)" ]' "$(cat "$output_probe")"
+    if [ "$mode" = herdr ]; then
+      space=${got#*space=}; space=${space%% *}; pane=${got##*pane=}
+      check "AC2 Herdr negative control: launch receives only its pane's six Herdr values" \
+        '[ "$(field "$output_probe" herdr_keys)" = HERDR_BIN_PATH,HERDR_ENV,HERDR_PANE_ID,HERDR_SOCKET_PATH,HERDR_TAB_ID,HERDR_WORKSPACE_ID ] && [ "$(field "$output_probe" herdr_pane)" = "$pane" ] && [ "$(field "$output_probe" herdr_tab)" = "tab-of-$pane" ] && [ "$(field "$output_probe" herdr_workspace)" = "$space" ] && [ "$(field "$output_probe" herdr_env)" = pane-env ] && [ "$(field "$output_probe" herdr_socket)" = /stub/herdr.sock ] && [ "$(field "$output_probe" herdr_bin)" = /stub/herdr-bin ] && [ "$(field "$output_probe" herdr_custom)" = unset ]' \
+        "$(cat "$output_probe")"
+    else
+      check "AC2 $mode negative control: launch receives no Herdr variables" \
+        '[ -z "$(field "$output_probe" herdr_keys)" ] && [ "$(field "$output_probe" herdr_pane)" = unset ] && [ "$(field "$output_probe" herdr_custom)" = unset ]' \
+        "$(cat "$output_probe")"
+    fi
+    check "AC3 $mode negative identity control: other caller configuration still reaches launch" \
+      '[ "$(field "$output_probe" caller)" = caller-value ] && [ "$(field "$output_probe" postmaster_custom)" = caller-postmaster ] && [ "$(field "$output_probe" postmaster_config)" = "$tmp/claude-launch.toml" ] && [ "$(field "$output_probe" claude_config_dir)" = "$tmp/claude-config" ] && [ "$(field "$output_probe" claude_effort)" = high ] && [ "$(field "$output_probe" claude_bg_wait)" = 123 ] && [ "$(field "$output_probe" claude_feedback)" = 1 ] && [ "$(field "$output_probe" anthropic_base)" = https://caller.invalid ] && [ "$(field "$output_probe" anthropic_auth)" = fixture-auth-token ]' \
+      "$(cat "$output_probe")"
+
+    local direct_stream="$tmp/logs/$mode.inherited-identity.events" direct_observed="$tmp/logs/$mode.inherited-identity.jsonl"
+    local launch_events="$tmp/logs/$mode.claude.events" launch_err="$tmp/logs/$mode.claude.err"
+    local launch_marker="$tmp/logs/$mode.claude.done" launch_observed="$tmp/logs/$mode.claude.jsonl"
+    local session_record="$tmp/claude-config/sessions/thread-$mode.jsonl" thread resume_marker claude_space claude_pane
+    (cd "$tmp/caller" && env -i HOME="$HOME" PATH="$STUBS" STUB="$tmp/stub" \
+      "${claude_identity_env[@]}" "${herdr_identity_env[@]}" "${caller_config_env[@]}" \
+      "HOST_TEST_RUN=$mode" "HOST_TEST_OBSERVED=$direct_observed" "$tmp/bin/claude" -p direct \
+      > "$direct_stream")
+    check "AC4 $mode negative control: inherited Claude identity writes no caller-thread record" \
+      '[ "$(stream_sessions "$direct_stream")" = caller-thread ] && [ ! -e "$tmp/claude-config/sessions/caller-thread.jsonl" ] && [ -n "$(observe "$direct_observed" identity_keys)" ]' \
+      "$(cat "$direct_stream")"
+
+    got=$(cd "$tmp/caller" && hs "$STUBS" "${claude_identity_env[@]}" "${herdr_identity_env[@]}" \
+      "${caller_config_env[@]}" "POSTMASTER_HOST=$mode" "HOST_TEST_RUN=$mode" \
+      "HOST_TEST_OBSERVED=$launch_observed" -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+      "${under[@]}" --out "$launch_events" --err "$launch_err" --marker "$launch_marker" -- \
+      "$HERE/launch.sh" launch test "$repo/.worktrees/T-1-luna" "$tmp/caller/prompt.txt")
+    marker "$launch_marker" 60
+    if [ "$mode" = herdr ]; then
+      claude_space=${got#*space=}; claude_space=${claude_space%% *}
+      claude_pane=${got##*pane=}
+    fi
+    thread=$(stream_sessions "$launch_events")
+    check "AC1 $mode Claude control: host launch strips caller identity before the harness" \
+      '[ "$(observe "$launch_observed" identity_keys)" = "" ]' "$(tail -n 1 "$launch_observed")"
+    check "AC2 $mode Claude control: harness sees only the pane's Herdr identity" \
+      'if [ "$mode" = herdr ]; then [ "$(observe "$launch_observed" herdr_keys)" = HERDR_BIN_PATH,HERDR_ENV,HERDR_PANE_ID,HERDR_SOCKET_PATH,HERDR_TAB_ID,HERDR_WORKSPACE_ID ] && [ "$(observe "$launch_observed" herdr:HERDR_PANE_ID)" = "$claude_pane" ] && [ "$(observe "$launch_observed" herdr:HERDR_TAB_ID)" = "tab-of-$claude_pane" ] && [ "$(observe "$launch_observed" herdr:HERDR_WORKSPACE_ID)" = "$claude_space" ] && [ "$(observe "$launch_observed" herdr:HERDR_ENV)" = pane-env ] && [ "$(observe "$launch_observed" herdr:HERDR_SOCKET_PATH)" = /stub/herdr.sock ] && [ "$(observe "$launch_observed" herdr:HERDR_BIN_PATH)" = /stub/herdr-bin ]; else [ "$(observe "$launch_observed" herdr_keys)" = "" ]; fi' \
+      "$(tail -n 1 "$launch_observed")"
+    check "AC3 $mode Claude control: caller and lane env-file settings reach the harness" \
+      '[ "$(observe "$launch_observed" CALLER_VAR)" = caller-value ] && [ "$(observe "$launch_observed" POSTMASTER_CUSTOM)" = caller-postmaster ] && [ "$(observe "$launch_observed" POSTMASTER_CONFIG)" = "$tmp/claude-launch.toml" ] && [ "$(observe "$launch_observed" CLAUDE_CONFIG_DIR)" = "$tmp/claude-config" ] && [ "$(observe "$launch_observed" CLAUDE_EFFORT)" = high ] && [ "$(observe "$launch_observed" CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS)" = 456 ] && [ "$(observe "$launch_observed" CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY)" = 1 ] && [ "$(observe "$launch_observed" ANTHROPIC_BASE_URL)" = https://lane.invalid ] && [ "$(observe "$launch_observed" ANTHROPIC_AUTH_TOKEN)" = fixture-auth-token ] && [ "$(observe "$launch_observed" LANE_ENV_ONLY)" = from-lane-env-file ]' \
+      "$(tail -n 1 "$launch_observed")"
+    check "AC4 $mode positive control: streamed session id owns its record" \
+      '[ "$thread" = "thread-$mode" ] && [ -f "$session_record" ] && grep -qxF new "$session_record"' "$thread"
+
+    resume_marker="$tmp/logs/$mode.resume.done"
+    got=$(cd "$tmp/caller" && hs "$STUBS" "${claude_identity_env[@]}" "${herdr_identity_env[@]}" \
+      "${caller_config_env[@]}" "POSTMASTER_HOST=$mode" "HOST_TEST_RUN=$mode" \
+      "HOST_TEST_OBSERVED=$launch_observed" -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+      "${under[@]}" --append --out "$launch_events" --err "$launch_err" \
+      --marker "$resume_marker" -- "$HERE/launch.sh" resume test "$repo/.worktrees/T-1-luna" \
+      "thread-$mode" "$tmp/caller/prompt.txt")
+    marker "$resume_marker" 60
+    check "AC4 $mode positive resume control: resume continues the streamed thread" \
+      '[ "$(stream_sessions "$launch_events")" = "thread-$mode,thread-$mode" ] && grep -qxF resume "$session_record"' \
+      "$(stream_sessions "$launch_events") / $(cat "$session_record")"
+    check "AC1 and AC3 $mode resume control: identity stays stripped and env file stays present" \
+      '[ "$(observe "$launch_observed" identity_keys)" = "" ] && [ "$(observe "$launch_observed" LANE_ENV_ONLY)" = from-lane-env-file ] && [ "$(observe "$launch_observed" CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS)" = 456 ]' \
+      "$(tail -n 1 "$launch_observed")"
+  done
+
   finish self-test
 }
 
@@ -2146,64 +3404,83 @@ live_test() {
   openspace() { herdr worktree list --cwd "$1" 2>/dev/null | python3 -c 'import json, sys
 d = json.load(sys.stdin)
 print(([w.get("open_workspace_id") for w in d["result"]["worktrees"] if w["path"] == sys.argv[1]] or [None])[0] or "")' "$1" 2>/dev/null; }
-  local got wt rs space pane tab info seen i screen rev rspace cspace before
+  local got wt rs space pane tab tab8 info seen i screen rev rspace cspace before run_tabs label space8 close_result close_rc
   ( cd "$tmp/caller" && ./fixed.sh > "$tmp/direct.out" 2> "$tmp/direct.err" )
   echo "detected here: $(detect)"
 
   if herdr_up; then
     echo "Herdr, the positive control"
-    rs=$(herdr workspace create --cwd "$repo" --label "$rname" --no-focus | json 'd["result"]["workspace"]["workspace_id"]')
+    got=$(cd "$tmp/caller" && "$SELF" run "$POSTMASTER_LABEL" "$repo" --marker ../logs/p0.done -- ./fixed.sh)
+    rs=$(openspace "$repo")
     [ -n "$rs" ] && opened+=("$rs")
+    check "the project space's first tab is the role-labeled postmaster, with no empty shell" \
+      '[ -n "$rs" ] && [ "$(herdr workspace get "$rs" | json "d[\"result\"][\"workspace\"][\"label\"]")" = "$rname" ] && [ "$(herdr tab list --workspace "$rs" | json "len(d[\"result\"][\"tabs\"])" )" = 1 ] && [ "$(herdr tab list --workspace "$rs" | json "d[\"result\"][\"tabs\"][0][\"label\"]")" = "$POSTMASTER_LABEL" ]' "$got"
+    check "the postmaster launch marker lands" 'marker "$tmp/logs/p0.done" 60'
     wt=$repo/.worktrees/T-1-luna
-    got=$(cd "$tmp/caller" && EMIT_SLEEP=8 "$SELF" run "$NAME" "$wt" --out ../logs/l1.out --err ../logs/l1.err --marker ../logs/l1.done -- ./fixed.sh)
+    got=$(cd "$tmp/caller" && EMIT_SLEEP=8 "$SELF" run "$COACHMAN_LABEL" "$wt" --under "$tmp/run-1" --out ../logs/l1.out --err ../logs/l1.err --marker ../logs/l1.done -- ./fixed.sh)
     space=$(printf '%s' "$got" | sed -n 's/.*space=\([^ ]*\).*/\1/p'); pane=${got##*pane=}; tab=$(printf '%s' "$got" | sed -n 's/.*tab=\([^ ]*\).*/\1/p')
     [ -n "$space" ] && opened+=("$space")
     check "the launch runs in Herdr" 'case $got in host=herdr*) true ;; *) false ;; esac' "$got"
-    check "in a pane of its own worktree's space" '[ -n "$space" ] && [ "$(openspace "$wt")" = "$space" ]'
+    check "in the ticket's synthesis-worktree run space" '[ -n "$space" ] && [ "$(openspace "$wt")" = "$space" ]'
     info=$(herdr workspace get "$space" 2>/dev/null)
     check "that space is a linked worktree of the repository, whose own space is its parent" \
       '[ "$(printf "%s" "$info" | json "d[\"result\"][\"workspace\"][\"worktree\"][\"is_linked_worktree\"]")" = True ] && [ "$(printf "%s" "$info" | json "d[\"result\"][\"workspace\"][\"worktree\"][\"repo_root\"]")" = "$repo" ] && [ "$(herdr worktree list --cwd "$wt" | json "d[\"result\"][\"source\"].get(\"source_workspace_id\")")" = "$rs" ]' "$info"
-    check "the space and the tab carry the launch's name, shell syntax and all, as written" \
-      '[ "$(printf "%s" "$info" | json "d[\"result\"][\"workspace\"][\"label\"]")" = "$NAME" ] && [ "$(herdr tab get "$tab" | json "d[\"result\"][\"tab\"][\"label\"]")" = "$NAME" ] && [ ! -e "$tmp/canary" ]'
+    check "the run space carries the ticket and the first tab only the coachman label" \
+      '[ "$(printf "%s" "$info" | json "d[\"result\"][\"workspace\"][\"label\"]")" = "$RUN_NAME" ] && [ "$(herdr tab get "$tab" | json "d[\"result\"][\"tab\"][\"label\"]")" = "$COACHMAN_LABEL" ] && title_absent "$COACHMAN_LABEL" && [ ! -e "$tmp/canary" ]'
+    check "the run space has one launch tab and no starter shell tab" \
+      '[ "$(herdr tab list --workspace "$space" | json "len(d[\"result\"][\"tabs\"])" )" = 1 ] && [ "$(herdr tab list --workspace "$space" | json "d[\"result\"][\"tabs\"][0][\"label\"]")" = "$COACHMAN_LABEL" ]'
     seen="" i=0
     while [ $i -lt 30 ]; do
       seen=$(herdr pane get "$pane" 2>/dev/null | json '"%s|%s" % (d["result"]["pane"].get("agent_status"), d["result"]["pane"].get("terminal_title_stripped"))')
-      [ "$seen" = "working|$NAME" ] && break
+      [ "$seen" = "working|$COACHMAN_LABEL" ] && break
       sleep 0.25; i=$((i + 1))
     done
-    check "while it runs, the pane is working and its terminal title is the name" '[ "$seen" = "working|$NAME" ]' "$seen"
+    check "while it runs, the pane is working and its terminal title is the coachman label" '[ "$seen" = "working|$COACHMAN_LABEL" ]' "$seen"
     check "its marker lands" 'marker "$tmp/logs/l1.done" 60'
     check "its command streams are what a direct run writes" 'cmp -s "$tmp/direct.out" "$tmp/logs/l1.out" && err_stream_equal "$tmp/direct.err" "$tmp/logs/l1.err"'
     sleep 1; screen=$(herdr pane read "$pane" --source recent-unwrapped --lines 40 2>/dev/null)
     check "the pane shows rendered events, not raw JSON" \
-      'printf "%s" "$screen" | grep -q "says: step one" && printf "%s" "$screen" | grep -q "result: success" && ! printf "%s" "$screen" | grep -qF "{\"type\""' "$screen"
+      'grep -q "says: step one" <<<"$screen" && grep -q "result: success" <<<"$screen" && ! grep -qF "{\"type\"" <<<"$screen"' "$screen"
     check "and the launch is released when it ends" \
       '[ "$(herdr pane get "$pane" | json "d[\"result\"][\"pane\"].get(\"agent_status\")")" != working ]'
-    (cd "$tmp/caller" && "$SELF" run "$NAME" "$wt" --out ../logs/l6.out --marker ../logs/l6.done -- ./probe.sh >/dev/null)
+    got=$(cd "$tmp/caller" && "$SELF" run "$NAME" "$repo/.worktrees/T-1-sol" --under "$tmp/run-1" --out ../logs/l8.out --marker ../logs/l8.done -- ./probe.sh)
+    marker "$tmp/logs/l8.done" 60
+    space8=${got#*space=}; space8=${space8%% *}; pane8=${got##*pane=}
+    tab8=${got#*tab=}; tab8=${tab8%% *}
+    check "the workhorse tab is under the same run and its harness name is role-first" \
+      '[ "$space8" = "$space" ] && [ "$(herdr tab get "$tab8" | json "d[\"result\"][\"tab\"][\"label\"]")" = "$NAME" ] && [ "$(field "$tmp/logs/l8.out" name)" = "$NAME" ]' "$(cat "$tmp/logs/l8.out" 2>/dev/null)"
+    (cd "$tmp/caller" && "$SELF" run "$NAME" "$wt" --under "$tmp/run-1" --out ../logs/l6.out --marker ../logs/l6.done -- ./probe.sh >/dev/null)
     check "the launch has no terminal, and a group of its own" \
-      'marker "$tmp/logs/l6.done" 30 && [ "$(field "$tmp/logs/l6.out" tty)" = no ] && [ "$(field "$tmp/logs/l6.out" pgid)" = "$(field "$tmp/logs/l6.out" pid)" ]' "$(cat "$tmp/logs/l6.out" 2>/dev/null)"
-    got=$(cd "$tmp/caller" && "$SELF" run "$NAME" "$wt" --marker ../logs/l5.done --pidfile ../logs/l5.pid -- sleep 120)
+      'marker "$tmp/logs/l6.done" 60 && [ "$(field "$tmp/logs/l6.out" tty)" = no ] && [ "$(field "$tmp/logs/l6.out" pgid)" = "$(field "$tmp/logs/l6.out" pid)" ]' "$(cat "$tmp/logs/l6.out" 2>/dev/null)"
+    got=$(cd "$tmp/caller" && "$SELF" run "$NAME" "$wt" --under "$tmp/run-1" --marker ../logs/l5.done --pidfile ../logs/l5.pid -- sleep 120)
     sleep 2; herdr tab close "$(printf '%s' "$got" | sed -n 's/.*tab=\([^ ]*\).*/\1/p')" >/dev/null 2>&1
     check "closing a launch's pane mid-run stops it, and its marker still lands" \
-      'marker "$tmp/logs/l5.done" 10 && ! kill -0 "$(cat "$tmp/logs/l5.pid")" 2>/dev/null' "$got"
+      'marker "$tmp/logs/l5.done" 60 && ! kill -0 "$(cat "$tmp/logs/l5.pid")" 2>/dev/null' "$got"
     rev=$repo/.worktrees/T-1-rev-luna
-    got=$(cd "$tmp/caller" && "$SELF" run "$NAME review" "$rev" --marker ../logs/l2.done -- ./fixed.sh)
-    rspace=$(printf '%s' "$got" | sed -n 's/.*space=\([^ ]*\).*/\1/p'); [ -n "$rspace" ] && opened+=("$rspace")
-    check "a detached reviewer scratch opens as a space too" '[ -n "$rspace" ] && [ "$(openspace "$rev")" = "$rspace" ] && marker "$tmp/logs/l2.done" 60' "$got"
-    got=$(cd "$tmp/caller" && "$SELF" run "$NAME security review" "$clone" --marker ../logs/l7.done -- ./fixed.sh)
-    cspace=$(printf '%s' "$got" | sed -n 's/.*space=\([^ ]*\).*/\1/p'); [ -n "$cspace" ] && opened+=("$cspace")
-    check "a reviewer's scratch clone opens as a space of its own" \
-      '[ -n "$cspace" ] && [ "$(openspace "$clone")" = "$cspace" ] && [ "$(herdr workspace get "$cspace" | json "d[\"result\"][\"workspace\"][\"label\"]")" = "$NAME security review" ] && marker "$tmp/logs/l7.done" 60' "$got"
-    check "and close shuts it" '"$SELF" close "$clone" >/dev/null && [ -z "$(openspace "$clone")" ]'
+    got=$(cd "$tmp/caller" && "$SELF" run "$STYLE_LABEL" "$rev" --under "$tmp/run-1" --marker ../logs/l2.done -- ./fixed.sh)
+    tab=${got#*tab=}; tab=${tab%% *}
+    check "a style review launches as a tab in the run space" \
+      '[ "$(printf "%s" "$got" | sed -n "s/.*space=\([^ ]*\).*/\1/p")" = "$space" ] && [ -z "$(openspace "$rev")" ] && [ "$(herdr tab get "$tab" | json "d[\"result\"][\"tab\"][\"label\"]")" = "$STYLE_LABEL" ] && marker "$tmp/logs/l2.done" 60' "$got"
+    got=$(cd "$tmp/caller" && "$SELF" run "$BUG_LABEL" "$rev" --under "$tmp/run-1" --marker ../logs/l9.done -- ./fixed.sh)
+    tab=${got#*tab=}; tab=${tab%% *}
+    check "a bug review's round label is visible in the same run space" \
+      '[ "$(printf "%s" "$got" | sed -n "s/.*space=\([^ ]*\).*/\1/p")" = "$space" ] && [ "$(herdr tab get "$tab" | json "d[\"result\"][\"tab\"][\"label\"]")" = "$BUG_LABEL" ] && marker "$tmp/logs/l9.done" 60' "$got"
+    got=$(cd "$tmp/caller" && "$SELF" run "$SECURITY_LABEL" "$clone" --under "$tmp/run-1" --marker ../logs/l7.done -- ./fixed.sh)
+    tab=${got#*tab=}; tab=${tab%% *}
+    check "the security-review clone opens as a tab under its run, with no top-level space" \
+      '[ "$(printf "%s" "$got" | sed -n "s/.*space=\([^ ]*\).*/\1/p")" = "$space" ] && [ -z "$(openspace "$clone")" ] && [ "$(herdr tab get "$tab" | json "d[\"result\"][\"tab\"][\"label\"]")" = "$SECURITY_LABEL" ] && marker "$tmp/logs/l7.done" 60' "$got"
+    close_result=$("$SELF" close "$clone" 2>&1); close_rc=$?
+    check "closing the clone removes its tab but leaves the run space open" \
+      '[ $close_rc -eq 0 ] && [ "$(openspace "$wt")" = "$space" ] && ! herdr tab get "$tab" >/dev/null 2>&1' "$close_result"
     "$SELF" close "$repo" >/dev/null 2>&1; i=$?
     check "close refuses the repository's own space" '[ $i -eq 2 ]'
-    check "close shuts the worktree's space, and only that" '"$SELF" close "$wt" >/dev/null && [ -z "$(openspace "$wt")" ] && [ "$(openspace "$rev")" = "$rspace" ]'
-    check "and the reviewer's" '"$SELF" close "$rev" >/dev/null && [ -z "$(openspace "$rev")" ]'
+    check "close shuts the run's space after its worktree is done" '"$SELF" close "$wt" >/dev/null && [ -z "$(openspace "$wt")" ]'
+    check "closing a review scratch does not close a different run" '"$SELF" close "$rev" >/dev/null'
 
     echo "no host, the negative control"
     wt=$repo/.worktrees/T-1-sol
     before=$(herdr workspace list | json 'len(d["result"]["workspaces"])')
-    got=$(cd "$tmp/caller" && POSTMASTER_HOST=none "$SELF" run "$NAME" "$wt" --out ../logs/l3.out --err ../logs/l3.err --marker ../logs/l3.done -- ./fixed.sh)
+    got=$(cd "$tmp/caller" && POSTMASTER_HOST=none "$SELF" run "$NAME" "$wt" --under "$tmp/run-1" --out ../logs/l3.out --err ../logs/l3.err --marker ../logs/l3.done -- ./fixed.sh)
     check "the same launch runs in the background" '[ "$got" = host=none ]' "$got"
     check "no space opens for it" '[ -z "$(openspace "$wt")" ] && [ "$(herdr workspace list | json "len(d[\"result\"][\"workspaces\"])")" = "$before" ]'
     check "its marker lands" 'marker "$tmp/logs/l3.done" 60'
@@ -2215,13 +3492,13 @@ print(([w.get("open_workspace_id") for w in d["result"]["worktrees"] if w["path"
   if has tmux; then
     echo "tmux"
     wt=$repo/.worktrees/T-1-sol
-    got=$(cd "$tmp/caller" && POSTMASTER_HOST=tmux "$SELF" run "$NAME" "$wt" --out ../logs/l4.out --err ../logs/l4.err --marker ../logs/l4.done -- ./fixed.sh)
+    got=$(cd "$tmp/caller" && POSTMASTER_HOST=tmux "$SELF" run "$NAME" "$wt" --under "$tmp/run-1" --out ../logs/l4.out --err ../logs/l4.err --marker ../logs/l4.done -- ./fixed.sh)
     tsession=$(printf '%s' "$got" | sed -n 's/.*session=\([^ ]*\).*/\1/p')
     check "the launch runs in a window of session postmaster-<repo>, named for it" \
-      '[ "$tsession" = "postmaster-$rname" ] && tmux list-windows -t "=$tsession" -F "#{window_name}" | grep -qxF "$NAME"' "$got"
+      '[ "$tsession" = "postmaster-$rname" ] && grep -qxF "$NAME" <<<"$(tmux list-windows -t "=$tsession" -F "#{window_name}")"' "$got"
     check "its marker lands" 'marker "$tmp/logs/l4.done" 60'
     check "its command streams are the same" 'cmp -s "$tmp/direct.out" "$tmp/logs/l4.out" && err_stream_equal "$tmp/direct.err" "$tmp/logs/l4.err"'
-    check "close kills the worktree's window" 'POSTMASTER_HOST=tmux "$SELF" close "$wt" >/dev/null && ! tmux list-windows -t "=$tsession" -F "#{window_name}" 2>/dev/null | grep -qxF "$NAME"'
+    check "close kills the worktree's window" 'POSTMASTER_HOST=tmux "$SELF" close "$wt" >/dev/null && ! grep -qxF "$NAME" <<<"$(tmux list-windows -t "=$tsession" -F "#{window_name}" 2>/dev/null)"'
   else
     echo "tmux: not on PATH; its controls are skipped"
   fi
@@ -2243,5 +3520,5 @@ case ${1:-} in
   _handle) handle_of "$2" ;;
   --self-test) self_test ;;
   --live-test) live_test ;;
-  *) echo "usage: host.sh detect | name | run [--role lane|coachman|reviewer] [--run <dispatch>] | stop | close | spawn | send | wait | read | --self-test | --live-test (see the header)" >&2; exit 1 ;;
+  *) echo "usage: host.sh detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] | stop | close | spawn | send | wait | read | --self-test | --live-test (see the header)" >&2; exit 1 ;;
 esac

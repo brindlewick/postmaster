@@ -16,8 +16,8 @@
 #   exit 0  config written (or printed), or keys listed
 #   exit 1  a harness was named that is not on PATH, the coachman shares a lane's model, fewer
 #           than two lanes were given, a reviewer is not a lane, an answer was missing, a round
-#           time limit was not a whole number of seconds from 1 to 86400, or an existing config
-#           was not overwritten
+#           time limit was not a whole number of seconds from 1 to 86400, a planning review link
+#           omitted {path}, or an existing config was not overwritten
 #
 # Control: the written file is parsed back as TOML where a parser is available, and its reviewer
 # lanes are resolved through scripts/reviewers.sh, so a config that would fail to load is never
@@ -39,9 +39,12 @@ if [ "${1:-}" = --self-test ]; then
         "postmaster.harness=bash" "postmaster.model=pm"
       [ -n "${2:-}" ] && printf '%s\n' "$2"; } > "$tmp/$1.answers"
   }
-  run() { "$0" --answers "$tmp/$1.answers" --config "$tmp/$1.toml" >"$tmp/$1.out" 2>&1; }
+  mkdir "$tmp/bin"
+  for h in claude codex grok agy muse mimo pi; do printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$h"; chmod +x "$tmp/bin/$h"; done
+  run() { PATH="$tmp/bin:$PATH" "$0" --answers "$tmp/$1.answers" --config "$tmp/$1.toml" >"$tmp/$1.out" 2>&1; }
   team() { python3 -c 'import json, sys, tomllib; print(json.dumps(tomllib.load(open(sys.argv[1], "rb"))["team"].get(sys.argv[2])))' "$tmp/$1.toml" "$2"; }
   limit() { python3 -c 'import sys, tomllib; c=tomllib.load(open(sys.argv[1], "rb")).get("limits", {}); r=c.get(sys.argv[2], {}); print(r.get(sys.argv[3], c.get(sys.argv[3], "")))' "$tmp/$1.toml" "$2" "$3"; }
+  planning_link() { python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb")).get("planning", {}).get("review_link", ""))' "$tmp/$1.toml"; }
 
   echo "positive controls"
   answers lens "reviewers.security=alpha, beta, sentinel"
@@ -49,7 +52,7 @@ if [ "${1:-}" = --self-test ]; then
   [ $rc -eq 0 ] && [ "$(team lens lens_reviewers)" = '{"security": ["alpha", "beta", "sentinel"]}' ] \
     && ok "a lens given its own lanes is written to [team.lens_reviewers]" \
     || fail "a lens given its own lanes is written to [team.lens_reviewers] (exit $rc)" "$(cat "$tmp/lens.out")"
-  [ "$("$HERE/reviewers.sh" lines --config "$tmp/lens.toml")" = "$(printf 'reviewers: alpha, beta\nsecurity reviewers: alpha, beta, sentinel')" ] \
+  [ "$("$HERE/reviewers.sh" lines --config "$tmp/lens.toml")" = "$(printf 'reviewers: alpha, beta\nbug reviewers: \nsecurity reviewers: alpha, beta, sentinel')" ] \
     && ok "the written config resolves: the reviewers default to the workhorses, and security has its own" \
     || fail "the written config resolves" "$("$HERE/reviewers.sh" lines --config "$tmp/lens.toml" 2>&1)"
   answers plain; run plain; rc=$?
@@ -66,6 +69,12 @@ postmaster.env_file=~/.postmaster/lanes/pm.env"; run roles; rc=$?
     || fail "the coachman, the fallback and the postmaster each get their env file (exit $rc)" "$(cat "$tmp/roles.out")"
   [ "$(team plain coachman)" = '{"harness": "bash", "model": "judge"}' ] \
     && ok "a role with no env file answer gets no env_file key" || fail "a role with no env file answer gets no env_file key" "$(team plain coachman)"
+  [ "$(planning_link plain)" = "" ] \
+    && ok "a planning link defaults to empty under [planning]" || fail "a planning link defaults to empty under [planning]" "$(planning_link plain)"
+  answers planlink 'planning.review_link=https://code.example/open?file={path}'; run planlink; rc=$?
+  [ $rc -eq 0 ] && [ "$(planning_link planlink)" = 'https://code.example/open?file={path}' ] \
+    && ok "the planning link template is stored under [planning]" \
+    || fail "the planning link template is stored under [planning] (exit $rc)" "$(cat "$tmp/planlink.out")"
 
   [ "$(limit plain default memory_max)" = 8G ] && [ "$(limit plain default tasks_max)" = 512 ] \
     && ok "launch memory and process caps default to 8G and 512" \
@@ -95,6 +104,20 @@ limits.reviewer.tasks_max=96"; run caps; rc=$?
   [ $rc -eq 0 ] && [ "$(limit limit)" = 86400 ] && ok "an answer sets it, up to 86400" \
     || fail "an answer sets it, up to 86400 (exit $rc)" "$(cat "$tmp/limit.out")"
 
+  answers no-bug "reviewers.bug=alpha, beta"; run no-bug; rc=$?
+  [ $rc -eq 0 ] && grep -q "bug reviewer 'alpha' uses bash, which has no code-review form" "$tmp/no-bug.out" \
+    && grep -q "bug reviewer 'beta' uses bash, which has no code-review form" "$tmp/no-bug.out" \
+    && grep -q "warning: no configured bug reviewer has a code-review form" "$tmp/no-bug.out" \
+    && ok "setup names unsupported bug reviewers and warns when none has a review form" \
+    || fail "setup names unsupported bug reviewers and warns when none has a review form (exit $rc)" "$(cat "$tmp/no-bug.out")"
+  answers mixed-bug "reviewers.bug=alpha, beta"
+  sed -i 's/^lane.alpha.harness=bash$/lane.alpha.harness=claude/; s/^lane.beta.harness=bash$/lane.beta.harness=pi/' "$tmp/mixed-bug.answers"
+  run mixed-bug; rc=$?
+  [ $rc -eq 0 ] && grep -q "bug reviewer 'beta' uses pi, which has no code-review form" "$tmp/mixed-bug.out" \
+    && [ "$("$HERE/reviewers.sh" eligible bug --config "$tmp/mixed-bug.toml")" = alpha ] \
+    && ok "setup warns for the ineligible lane and resolves the eligible bug reviewer" \
+    || fail "setup warns for the ineligible lane and resolves the eligible bug reviewer (exit $rc)" "$(cat "$tmp/mixed-bug.out")"
+
   echo "negative controls"
   n=0
   for v in 0 -60 abc 1.5 0600 "40 minutes" 86401 9999999999999999999; do
@@ -113,6 +136,11 @@ limits.reviewer.tasks_max=96"; run caps; rc=$?
   answers missing; sed -i '/^fallback.model=/d' "$tmp/missing.answers"; run missing; rc=$?
   [ $rc -eq 1 ] && [ ! -e "$tmp/missing.toml" ] && grep -q "no answer for fallback.model" "$tmp/missing.out" \
     && ok "a missing answer is refused, naming it" || fail "a missing answer is refused, naming it (exit $rc)" "$(cat "$tmp/missing.out")"
+  answers badlink 'planning.review_link=https://code.example/open'
+  run badlink; rc=$?
+  [ $rc -eq 1 ] && [ ! -e "$tmp/badlink.toml" ] && grep -q "planning.review_link must contain {path}" "$tmp/badlink.out" \
+    && ok "a non-empty planning link without {path} is refused" \
+    || fail "a non-empty planning link without {path} is refused (exit $rc)" "$(cat "$tmp/badlink.out")"
 
   echo
   [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }
@@ -135,7 +163,7 @@ lane.<name>.effort?        (none)             effort, blank if the harness has n
 lane.<name>.env_file?      (none)             env file for an alternate backend
 workhorses                 <lanes>            workhorse lanes, comma separated
 reviewers                  <workhorses>       reviewer lanes, comma separated
-reviewers.<lens>?          (reviewers)        reviewer lanes for one lens only (reviewers.sh lenses)
+reviewers.<lens>?          (reviewers)        reviewer lanes for one lens only; bug reviewers need a code-review form
 coachman.harness                              never a lane's model
 coachman.model
 coachman.effort?           (none)
@@ -168,6 +196,7 @@ round_timeout_seconds      2400               seconds a review round may run, 1 
 merge_authority            user               user or postmaster
 checkpoint_mode            autonomous         autonomous or consult
 review_link?               (none)             template with {path}
+planning.review_link?      (none)             code-server template with {path} for workhorse specs
 overwrite                  no                 yes replaces an existing config
 EOF
       exit 0 ;;
@@ -219,7 +248,7 @@ ask LANES "Lane names, comma separated" "alpha, beta" "lanes"
 LANE_LIST=$(printf '%s' "$LANES" | tr ',' ' ')
 set -- $LANE_LIST
 [ $# -ge 2 ] || { echo "setup: at least two lanes are needed" >&2; exit 1; }
-LANE_BLOCKS=""; LANE_MODELS=""
+LANE_BLOCKS=""; LANE_MODELS=""; LANE_HARNESSES=""
 for lane in $LANE_LIST; do
   ask h "  $lane: harness (codex, grok, agy, claude, muse, mimo, pi)" "" "lane.$lane.harness"
   need_harness "$h"
@@ -231,6 +260,7 @@ for lane in $LANE_LIST; do
   [ -n "$ef" ] && block="$block"$'\n'"env_file = \"$ef\""
   LANE_BLOCKS="$LANE_BLOCKS"$'\n'"$block"$'\n'
   LANE_MODELS="$LANE_MODELS $m"
+  LANE_HARNESSES="$LANE_HARNESSES $lane=$h"
 done
 
 echo
@@ -246,8 +276,10 @@ for rv in $(printf '%s' "$REVIEWERS" | tr ',' ' '); do
   [ "$ok" -eq 1 ] || { echo "setup: reviewer '$rv' is not one of the lanes ($LANES)" >&2; exit 1; }
 done
 LENS_TABLE=""
+BUG_REVIEWERS=$REVIEWERS
 for lens in $("$HERE/reviewers.sh" lenses); do
   ask LR "  reviewer lanes for the $lens lens alone, comma separated (blank: the reviewer lanes)" "" "reviewers.$lens?"
+  [ "$lens" != bug ] || BUG_REVIEWERS=${LR:-$REVIEWERS}
   [ -n "$LR" ] || continue
   for rv in $(printf '%s' "$LR" | tr ',' ' '); do
     ok=0; for lane in $LANE_LIST; do [ "$lane" = "$rv" ] && ok=1; done
@@ -256,6 +288,24 @@ for lens in $("$HERE/reviewers.sh" lenses); do
   LENS_TABLE="$LENS_TABLE$lens = $(toml_list "$LR")"$'\n'
 done
 [ -z "$LENS_TABLE" ] || LENS_TABLE=$'\n[team.lens_reviewers]\n'"$LENS_TABLE"
+
+echo
+echo "== Bug review capability =="
+BUG_REVIEWABLE=0
+for reviewer in $(printf '%s' "$BUG_REVIEWERS" | tr ',' ' '); do
+  harness=""
+  for lane_harness in $LANE_HARNESSES; do
+    case $lane_harness in "$reviewer="*) harness=${lane_harness#*=}; break ;; esac
+  done
+  if "$HERE/review-forms.sh" has "$harness" >/dev/null 2>&1; then
+    BUG_REVIEWABLE=$((BUG_REVIEWABLE+1))
+  else
+    echo "setup: bug reviewer '$reviewer' uses $harness, which has no code-review form"
+  fi
+done
+if [ "$BUG_REVIEWABLE" -eq 0 ]; then
+  echo "setup: warning: no configured bug reviewer has a code-review form; runs whose turnpikes include bug review will be refused at pre-flight"
+fi
 
 echo
 echo "== The coachman: judges the lanes and runs the review rounds. Never a lane's model. =="
@@ -343,6 +393,8 @@ case $MA in user|postmaster) ;; *) echo "setup: merge authority must be user or 
 ask CPM "Checkpoint mode (autonomous, consult)" "autonomous" "checkpoint_mode"
 case $CPM in autonomous|consult) ;; *) echo "setup: checkpoint mode must be autonomous or consult" >&2; exit 1 ;; esac
 ask RL "Review link template with {path} for the synthesis worktree (blank for none)" "" "review_link?"
+ask PRL "Code-server link template with {path} for a workhorse spec (blank for none)" "" "planning.review_link?"
+case $PRL in ""|*"{path}"*) ;; *) echo "setup: planning.review_link must contain {path}" >&2; exit 1 ;; esac
 
 TRACKER_EXTRA=""
 [ -n "$PWS" ] && TRACKER_EXTRA="url = \"$PURL\""$'\n'"workspace = \"$PWS\""$'\n'"env_file = \"$PENV\""
@@ -382,6 +434,9 @@ postmaster_may_create = $( [ "$PMC" = yes ] && echo true || echo false )
 
 [review]
 round_timeout_seconds = $RT
+
+[planning]
+review_link = "$PRL"
 
 [ship]
 merge_authority = "$MA"
