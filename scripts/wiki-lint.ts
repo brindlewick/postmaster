@@ -24,9 +24,17 @@ import { join, relative, resolve } from "node:path";
 import { toolRoot } from "./lib/paths.ts";
 import { withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import { DOT_ALL, PY_DOT, PY_M_END, PY_M_START, PY_S_CLASS } from "./lib/text.ts";
 
 const STANDINGS = new Set(["claimed", "supported", "mixed", "refuted", "settled"]);
 const OWN_EVIDENCE = ["runs", "trials"]; // what this fleet did; papers and articles are not
+
+const FM_RE = new RegExp(
+  `${PY_M_START}([a-z_]+):[${PY_S_CLASS}]*(${PY_DOT}*)${PY_M_END}`,
+  "g",
+);
+const SOURCES_RE = new RegExp(`([a-z]+)/([^,\\]${PY_S_CLASS}]+)`, "g");
+const CITE_RE = new RegExp(`\\[@([a-z]+)/([^\\]${PY_S_CLASS}]+)`, "g");
 
 function frontMatter(text: string): Record<string, string> | null {
   if (!text.startsWith("---")) return null;
@@ -34,7 +42,7 @@ function frontMatter(text: string): Record<string, string> | null {
   if (end === -1) return null;
   const body = text.slice(3, end);
   const out: Record<string, string> = {};
-  for (const m of body.matchAll(/^([a-z_]+):\s*(.*)$/gm)) {
+  for (const m of body.matchAll(FM_RE)) {
     out[m[1] ?? ""] = m[2] ?? "";
   }
   return out;
@@ -43,7 +51,7 @@ function frontMatter(text: string): Record<string, string> | null {
 function prose(text: string): string {
   // Notation is documented in backticks: `[@papers/<slug>]` is an example of a citation,
   // not one. Fenced blocks and inline code spans are examples, so they are not scanned.
-  return text.replace(/```[\s\S]*?```/g, "").replace(/`[^`]*`/g, "");
+  return text.replace(new RegExp(`\`\`\`${DOT_ALL}*?\`\`\``, "g"), "").replace(/`[^`]*`/g, "");
 }
 
 function dirExists(p: string): boolean {
@@ -120,7 +128,7 @@ function lint(repo: string): number {
       }
       const sources: Array<[string, string]> = [];
       // parse sources like python's re.findall(r"([a-z]+)/([^,\]\s]+)", fm.get("sources",""))
-      for (const m of (fm.sources ?? "").matchAll(/([a-z]+)\/([^,\]\s]+)/g)) {
+      for (const m of (fm.sources ?? "").matchAll(SOURCES_RE)) {
         sources.push([m[1] ?? "", m[2] ?? ""]);
       }
       for (const [kind, ident] of sources) {
@@ -141,7 +149,7 @@ function lint(repo: string): number {
     }
 
     // citations resolve to something under raw/
-    for (const m of text.matchAll(/\[@([a-z]+)\/([^\]\s]+)/g)) {
+    for (const m of text.matchAll(CITE_RE)) {
       const kind = m[1] ?? "";
       const ident = (m[2] ?? "").replace(/[/.,;)]+$/, "");
       if (!existsSync(join(raw, kind, ident))) {
@@ -274,6 +282,27 @@ if (!SELFTEST) {
 
 const st = new SelfTest();
 const REPO_ROOT = REPO;
+{
+  // BASE wiki-lint.sh python (re.M, \s, .): every expectation python3-verified.
+  const fm = [..."title: A\rB\n".matchAll(FM_RE)].map((m) => [m[1], m[2]]);
+  st.check(
+    "front matter keeps a CR in the value",
+    JSON.stringify(fm) === JSON.stringify([["title", "A\rB"]]),
+    JSON.stringify(fm),
+  );
+  const src = [..."papers/a\x1cb".matchAll(SOURCES_RE)].map((m) => [m[1], m[2]]);
+  st.check(
+    "sources stop an ident at U+001C",
+    JSON.stringify(src) === JSON.stringify([["papers", "a"]]),
+    JSON.stringify(src),
+  );
+  const cite = [..."see [@papers/a\x1cb] x".matchAll(CITE_RE)].map((m) => [m[1], m[2]]);
+  st.check(
+    "citations stop an ident at U+001C",
+    JSON.stringify(cite) === JSON.stringify([["papers", "a"]]),
+    JSON.stringify(cite),
+  );
+}
 
 function expect(passOrFail: "pass" | "fail", label: string, wantIn?: string): void {
   // runs lint on $tmp and compares

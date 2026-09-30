@@ -33,11 +33,64 @@ import { basename, dirname, join, posix, resolve, sep } from "node:path";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { mkstempSync, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
-import { casefold, WORD_CHAR_RE, WORD_CLASS, WORD_RUN_RE } from "./lib/text.ts";
+import {
+  casefold,
+  END_OR_BEFORE_NL,
+  isDigit,
+  isDigitChar,
+  literalI,
+  NAME_L,
+  NAME_R,
+  PY_DOT,
+  PY_M_END,
+  PY_M_START,
+  PY_S_CLASS,
+  pyRstrip,
+  pySplitLines,
+  pyTrim,
+  pyWords,
+  WORD_CHAR_RE,
+  WORD_CLASS,
+  WORD_RUN_RE,
+} from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
 const TOOL = toolRoot(import.meta);
-const DONE_RE = /^tool fault (tf-[0-9a-f]{8}) (filed|seen again|declined) in run ([0-9a-f]+)/;
+// text.ts: BOUND_R — BASE's trailing \b after the run id.
+const DONE_RE =
+  /^tool fault (tf-[0-9a-f]{8}) (filed|seen again|declined) in run ([0-9a-f]+)(?![\p{L}\p{N}_])/u;
+
+// text.ts: BOUND_R — harvest-output normalizer for the self-test's
+// BASE-vs-port comparisons (run ids end at a Unicode boundary).
+function normRid(s: string): string {
+  return s
+    .replace(/(run )[0-9a-f]{10}(?![\p{L}\p{N}_])/gu, "$1RID")
+    .replace(/(tool-faults\/)[0-9a-f]{10}/g, "$1RID");
+}
+
+// File-scope so the pattern-parity suite diffs these exact objects.
+const TICKET_RE = /^#?\p{Nd}+$/u; // text.ts: BASE fullmatches #?\d+ in Unicode.
+const STATE_RE = new RegExp(`${PY_M_START}state: ([^${PY_S_CLASS}]+)`, "m");
+const RURL_M1 =
+  /^[A-Za-z][A-Za-z0-9+.-]*:\/\/(?:[^@/]*@)?([^/:?#]+)(?::\p{Nd}+)?\/+([^\n]*?)(?:\.git)?\/?$/u;
+const RURL_M2 = /^(?:[^@/:]+@)?([^/:]+):(?!\/\/)([^\n]*?)(?:\.git)?\/?$/;
+
+function fidBoundaryRe(fid: string): RegExp {
+  // text.ts: BASE's [\w-] lookarounds are Unicode; \w needs the \p spelling.
+  return new RegExp(
+    `(?<![\\p{L}\\p{N}_-])${fid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_-])`,
+    "u",
+  );
+}
+
+// text.ts: BASE's re.M ^/$ split \n only; its \S and dots are Python's.
+const PROFILE_HEAD_RE = new RegExp(`${PY_M_START}## Project profile[ \\t]*${PY_M_END}`, "gm");
+const PROFILE_END_RE = new RegExp(`${PY_M_START}## `, "m");
+const CONTROLS_VALUE_RE = /^[\p{L}\p{N}_-]+$/u; // text.ts: BASE's [\w-] is Unicode.
+const PROFILE_REPO_RE = new RegExp(
+  `${PY_M_START}repo:[ \\t]*([^${PY_S_CLASS}]${PY_DOT}*?)(?:[ \\t]{2,}[^${PY_S_CLASS}]${PY_DOT}*)?[ \\t]*${PY_M_END}`,
+  "m",
+);
 const ASKING = new Set(["new", "asked", "unchecked", "kept"]);
 
 function dieTF(msg: string, code = 1): never {
@@ -53,6 +106,7 @@ function sha256hex(data: string | Buffer): string {
 function newId(): string {
   while (true) {
     const rid = randomBytes(5).toString("hex");
+    // ASCII: rid is machine hex (token_hex), so \d never meets Unicode.
     if (/\d/.test(rid)) return rid;
   }
 }
@@ -63,11 +117,13 @@ function seen(n: number): string {
 
 function gitCmd(where: string, ...args: string[]): string {
   const r = run("git", ["-C", where, ...args]);
-  return r.code === 0 ? r.out.trim() : "";
+  // text.ts: BASE's git() strips Python whitespace.
+  return r.code === 0 ? pyTrim(r.out) : "";
 }
 
 function whyR(r: { code: number; out: string; err: string }): string {
-  const lines = (r.err || r.out).trim().split("\n").filter(Boolean);
+  // text.ts: BASE's why() is strip().splitlines()[-1].
+  const lines = pySplitLines(pyTrim(r.err || r.out));
   return lines.length > 0 ? lines[lines.length - 1]! : `exit ${r.code}`;
 }
 
@@ -86,7 +142,9 @@ function readLog(logPath: string): { entries: Array<Record<string, unknown>>; ba
   const lines = decoded.split("\n");
   for (let n = 0; n < lines.length; n++) {
     const line = lines[n] ?? "";
-    if (!line.trim()) continue;
+    // text.ts: BASE skips lines blank under Python strip (split stays \n:
+    // only a newline ends a line, on both sides).
+    if (!pyTrim(line)) continue;
     try {
       const e = JSON.parse(line);
       if (e && typeof e === "object") entries.push(e as Record<string, unknown>);
@@ -104,7 +162,8 @@ function fields(e: Record<string, unknown>): Record<string, string> {
 }
 
 function tidy(text: string): string {
-  return text.split(/\s+/).join(" ");
+  // text.ts: BASE's " ".join(text.split()) splits Python whitespace.
+  return pyWords(text).join(" ");
 }
 
 function clip(text: string, n: number): string {
@@ -211,11 +270,11 @@ function commonDir(where: string): string {
 function remoteUrl(where: string): [string, string] | null {
   const url = gitCmd(where, "remote", "get-url", "origin");
   if (!url) return null;
-  const m1 = url.match(
-    /^[A-Za-z][A-Za-z0-9+.-]*:\/\/(?:[^@/]*@)?([^/:?#]+)(?::\d+)?\/+(.*?)(?:\.git)?\/?$/,
-  );
-  const m2 = url.match(/^(?:[^@/:]+@)?([^/:]+):(?!\/\/)(.*?)(?:\.git)?\/?$/);
+  // text.ts: BASE's port is \d (Unicode); its dots bar only \n.
+  const m1 = url.match(RURL_M1);
+  const m2 = url.match(RURL_M2);
   const m = m1 || m2;
+  // LOWER: BASE's own .lower() on the host, ported exactly, never folded.
   if (m?.[2]) return [m[1]?.toLowerCase(), m[2]!];
   return ["", url.replace(/\/+$/, "")];
 }
@@ -227,38 +286,45 @@ function sameRepo(repo: string): boolean {
   if (a && a === b) return true;
   const ra = remoteUrl(repo);
   const rb = remoteUrl(TOOL);
-  return !!(ra && rb && ra[0] && ra[0] === rb[0] && ra[1].toLowerCase() === rb[1].toLowerCase());
+  return !!(ra && rb && ra[0] && ra[0] === rb[0] && casefold(ra[1]) === casefold(rb[1]));
 }
 
 function profileRepo(waybill: string): string | null {
   const starts: number[] = [];
-  const re = /^## Project profile[ \t]*$/gm;
+  PROFILE_HEAD_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(waybill)) !== null) starts.push(m.index + m[0].length);
+  while ((m = PROFILE_HEAD_RE.exec(waybill)) !== null) starts.push(m.index + m[0].length);
   if (starts.length === 0) return null;
   const body = waybill.slice(starts[starts.length - 1]!);
-  const endRe = /^## /m;
-  const endM = endRe.exec(body);
+  const endM = PROFILE_END_RE.exec(body);
   const searchIn = endM ? body.slice(0, endM.index) : body;
-  const repoRe = /^repo:[ \t]*(\S.*?)(?:[ \t]{2,}\S.*)?[ \t]*$/m;
-  const rm = repoRe.exec(searchIn);
-  return rm ? resolve(rm[1]?.replace(/^~(?=\/|$)/, homedir())) : null;
+  const rm = PROFILE_REPO_RE.exec(searchIn);
+  // text.ts: BASE strips the group Python-style before expanduser.
+  return rm ? resolve(pyTrim(rm[1]!).replace(/^~(?=\/|$)/, homedir())) : null;
 }
 
 // --- what may be published ----------------------------------------------------------------------
 
 const TOKEN = /[~<>\p{L}\p{N}_.@+/-]+/gu;
-const URL_RE = /\b[A-Za-z][A-Za-z0-9+.-]{0,30}:\/\/[^\s)\]>'"`]+/g;
-const EMAIL_RE = /(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
-const IPV4_RE = /(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])/g;
-const KEY_RE = /(?<![\w-])[A-Z][A-Z0-9]{1,9}-\d+(?![\w-])/g;
-const FILELIKE = /[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*\.[\p{L}][\p{L}\p{N}_]{1,7}/u;
-const FAULT_ID_RE = /\btf-[0-9a-f]{8}\b/g;
-const HEX_RE = /\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/g;
+// text.ts: \w is [\p{L}\p{N}_], \d is \p{Nd}, \b is the lookaround pair, all /u.
+// text.ts: PY_S_CLASS — BASE's tail runs on Python \s, not JS \s.
+const URL_RE = new RegExp(
+  `(?<![\\p{L}\\p{N}_])[A-Za-z][A-Za-z0-9+.-]{0,30}:\\/\\/[^${PY_S_CLASS})\\]>'"\`]+`,
+  "gu",
+);
+const EMAIL_RE = /(?<![\p{L}\p{N}_.+-])[\p{L}\p{N}_.+-]+@[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)+/gu;
+const IPV4_RE = /(?<![\p{L}\p{N}_.])\p{Nd}{1,3}(?:\.\p{Nd}{1,3}){3}(?![\p{L}\p{N}_.])/gu;
+const KEY_RE = /(?<![\p{L}\p{N}_-])[A-Z][A-Z0-9]{1,9}-\p{Nd}+(?![\p{L}\p{N}_-])/gu;
+const FILELIKE = /[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*\.[A-Za-z][\p{L}\p{N}_]{1,7}/u;
+const FAULT_ID_RE = /(?<![\p{L}\p{N}_])tf-[0-9a-f]{8}(?![\p{L}\p{N}_])/gu;
+const HEX_RE = /(?<![\p{L}\p{N}_])(?=[0-9a-f]*\p{Nd})[0-9a-f]{7,40}(?![\p{L}\p{N}_])/gu;
 const MARK_RE = /\[(?:path|project|ticket text|ticket|code|link|address|withheld)\]/g;
 const WORD_RE = new RegExp(`[${WORD_CLASS}]+(?:'[${WORD_CLASS}]+)*`, "gu");
 const WTOK_RE = /[\p{L}\p{N}_]+/gu;
 const TICKS_RE = /`([^`\n]+)`/g;
+// ASCII: publish strips \x01/\x02 from input first, so only our own
+// decimal holds reach this; BASE's twin matches the same ASCII.
+// ASCII: placeholders are machine counters, and publish strips \x01/\x02 first.
 const HELD_RE = /\x01(\d+)\x02/g;
 const N = 4;
 
@@ -341,7 +407,11 @@ class Safe {
       names.add(basename(dirname(d)));
       if (!ongoing) names.add(basename(d));
       if (!ongoing) {
-        const km = basename(d).match(/^([A-Za-z][A-Za-z0-9]*)[-_]\d+$/);
+        // text.ts: \d is \p{Nd}, $ is END_OR_BEFORE_NL (BASE re.match, not fullmatch).
+        const km = basename(d).match(
+          // text.ts: END_OR_BEFORE_NL — BASE's match-anchored $ on the dir name.
+          new RegExp(`^([A-Za-z][A-Za-z0-9]*)[-_]\\p{Nd}+${END_OR_BEFORE_NL}`, "u"),
+        );
         if (km) names.add(km[1]!);
       }
       if (repo) {
@@ -356,14 +426,13 @@ class Safe {
       }
     }
     const sortedNames = [...names]
-      .filter((n) => n.length >= 2 && !/^\d+$/.test(n) && !this.vocab.has(casefold(n)))
+      .filter((n) => [...n].length >= 2 && !isDigit(n) && !this.vocab.has(casefold(n)))
       .sort((a, b) => b.length - a.length);
+    // text.ts: [^\W_] is NAME_L/R (double negation: L+N, never _),
+    // re.I is iu + literalI.
     this.names =
       sortedNames.length > 0
-        ? new RegExp(
-            `(?<![^\\W_])(${sortedNames.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(?![^\\W_])`,
-            "gi",
-          )
+        ? new RegExp(`${NAME_L}(${sortedNames.map((n) => literalI(n)).join("|")})${NAME_R}`, "giu")
         : null;
     const wws = wordsOf(waybill);
     this.waybillWords = new Set(wws.filter((w) => !this.vocab.has(w)));
@@ -446,25 +515,28 @@ class Safe {
       const [a, b] = runs[ri]!;
       t = t.slice(0, spans[a]?.start) + hold("[ticket text]") + t.slice(spans[b]?.end);
     }
+    // text.ts: BASE's isdigit is isDigit/isDigitChar (lengths in code points).
     t = t.replace(TICKS_RE, (_m, inner: string) => {
       const replaced = inner.replace(WTOK_RE, (tok) => {
-        return this.tokens.has(casefold(tok)) || (tok.length < 7 && /^\d+$/.test(tok))
+        return this.tokens.has(casefold(tok)) || ([...tok].length < 7 && isDigit(tok))
           ? tok
           : hold("[code]");
       });
       return `\`${replaced}\``;
     });
     t = t.replace(WTOK_RE, (tok) => {
-      if (this.tokens.has(casefold(tok)) || (tok.length < 7 && /^\d+$/.test(tok))) return tok;
+      if (this.tokens.has(casefold(tok)) || ([...tok].length < 7 && isDigit(tok))) return tok;
       const looks =
-        /^\d+$/.test(tok) || tok.includes("_") || /\d/.test(tok) || /[a-z][A-Z]/.test(tok);
+        isDigit(tok) ||
+        tok.includes("_") ||
+        [...tok].some((ch) => isDigitChar(ch)) ||
+        /[a-z][A-Z]/.test(tok);
       return looks ? hold("[code]") : tok;
     });
     t = t.replace(WORD_RE, (w) => {
       const cf = casefold(w);
       if (this.vocab.has(cf)) return w;
-      // Lower, as BASE's `w != w.lower()`: reached only for ASCII, where
-      // lower and fold agree, so this stays exactly as it is.
+      // LOWER: BASE's own w.lower() on both sides, ported exactly, never folded.
       if (this.waybillWords.has(cf) || !/^[\x00-\x7f]*$/.test(w) || w !== w.toLowerCase()) {
         return hold("[withheld]");
       }
@@ -484,7 +556,7 @@ class Safe {
       t = t.replace(this.names, " project ");
     }
     t = casefold(t).replace(FAULT_ID_RE, " id ").replace(HEX_RE, " id ");
-    t = t.replace(/\d+/g, " n ");
+    t = t.replace(/\p{Nd}+/gu, " n "); // text.ts: BASE re.sub(r"\d+") is Unicode.
     return [...t.matchAll(WORD_RUN_RE)].map((m) => m[0]).join(" ");
   }
 }
@@ -513,15 +585,15 @@ function controlsList(): Record<string, string> {
   } catch {
     return out;
   }
-  for (const line of text.split("\n")) {
-    const cells = line
-      .trim()
+  // text.ts: BASE walks splitlines() and strips Python-style.
+  for (const line of pySplitLines(text)) {
+    const cells = pyTrim(line)
       .replace(/^\||\|$/g, "")
       .split("|")
-      .map((c) => c.trim());
+      .map((c) => pyTrim(c));
     if (cells.length >= 2) {
       const m = cells[0]?.match(/^`(?:<tool>\/)?([^`]+)`$/);
-      if (m && /^[\w-]+$/.test(cells[1]!)) {
+      if (m && CONTROLS_VALUE_RE.test(cells[1]!)) {
         out[m[1]!] = cells[1]!;
       }
     }
@@ -607,8 +679,8 @@ class GitHub {
   search(text: string): Array<[string, string, string]> {
     const r = this.call("search", text);
     if (r.code !== 0) throw new Unreached(`github.sh search: ${whyR(r)}`);
-    return r.out
-      .split("\n")
+    // text.ts: BASE walks stdout.splitlines().
+    return pySplitLines(r.out)
       .filter(Boolean)
       .map((l) => {
         const parts = l.split("\t");
@@ -651,8 +723,7 @@ function lookup(
 ): { known: [string, string] | null; like: string[] } {
   for (const [number, state] of t.search(fid)) {
     const body = t.read(number);
-    const re = new RegExp(`(?<![\\w-])${fid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`);
-    if (re.test(body)) {
+    if (fidBoundaryRe(fid).test(body)) {
       return { known: [number, state], like: [] };
     }
   }
@@ -722,12 +793,13 @@ function digest(titlePath: string, bodyPath: string): string {
 }
 
 function checked(titlePath: string, bodyPath: string, safe: Safe, sha: string): string {
-  const title = readFileSync(titlePath, "utf-8").trim();
+  // text.ts: BASE strips the title and walks the body by splitlines().
+  const title = pyTrim(readFileSync(titlePath, "utf-8"));
   const body = readFileSync(bodyPath, "utf-8");
   if (digest(titlePath, bodyPath) !== sha) {
     const bad: Array<[string, string]> = [];
     if (safe.publish(title) !== title) bad.push(["title", title]);
-    for (const l of body.split("\n")) {
+    for (const l of pySplitLines(body)) {
       if (safe.publish(l) !== l) bad.push(["body", l]);
     }
     if (bad.length > 0) {
@@ -738,9 +810,8 @@ function checked(titlePath: string, bodyPath: string, safe: Safe, sha: string): 
     }
   }
   const r = runCmd([join(HERE, "ticket-check.sh"), "--body", bodyPath, "--title", title]);
-  return r.code === 0
-    ? ""
-    : `the draft fails scripts/ticket-check.sh:\n${(r.out + r.err).replace(/\n+$/, "")}`;
+  // text.ts: BASE rstrips the failure tail Python-style.
+  return r.code === 0 ? "" : `the draft fails scripts/ticket-check.sh:\n${pyRstrip(r.out + r.err)}`;
 }
 
 // --- the commands -------------------------------------------------------------------------------
@@ -774,6 +845,7 @@ function harvestCmd(d: string, ongoing: boolean): void {
       {
         run_id: newId(),
         first: runs.length > 0 ? st.lines || 0 : 0,
+        // ASCII: toISOString is machine ASCII; BASE formats the same stamp.
         harvested: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
       },
     ];
@@ -965,12 +1037,12 @@ function commentCmd(fid: string, ticket: string, d: string, ongoing: boolean): v
   let state: string;
   try {
     if (ticket) {
-      if (!/^#?\d+$/.test(ticket)) {
+      if (!TICKET_RE.test(ticket)) {
         dieTF(`not a ticket number: ${ticket}`);
       }
       number = `#${ticket.replace(/^#/, "")}`;
       const body = t.read(number);
-      const m = body.match(/^state: (\S+)/m);
+      const m = body.match(STATE_RE);
       state = m ? m[1]! : "";
     } else {
       const { known: k } = lookup(t, fid, safe.publish(g?.file));
@@ -1033,8 +1105,9 @@ function fileCmd(fid: string, d: string, ongoing: boolean): void {
   }
   const title = readFileSync(titlePath, "utf-8").trim();
   const r = t.call("create", title, bodyPath);
-  const made = r.out.trim().split("\n").filter(Boolean).pop() || "";
-  if (![0, 5].includes(r.code) || !/^\d+$/.test(made)) {
+  // text.ts: BASE takes strip().splitlines()[-1] and .isdigit()s it.
+  const made = pySplitLines(pyTrim(r.out)).filter(Boolean).pop() || "";
+  if (![0, 5].includes(r.code) || !isDigit(made)) {
     dieTF(`the tracker refused the ticket: ${whyR(r)}`);
   }
   const lr = runCmd([
@@ -1112,6 +1185,585 @@ if (argv[0] === "--self-test") {
     usageDie();
   }
   process.exit(0);
+}
+
+// Round-10 pattern parity: every regex above, diffed against BASE's own
+// pattern text (bb782a9 scripts/tool-faults.sh) on the vectors where
+// Unicode meets the pattern. The port side runs the real consts, so a
+// routed pattern that drifts fails here before any harvest runs.
+// Multi-slash remote tails are absent on purpose: BASE's /*$ and the
+// port's /?$ disagree there, and that P3 rides a card, not this suite.
+function runPatternParity(st: SelfTest, tmp: string): void {
+  interface PatCase {
+    id: string;
+    op: "search" | "fullmatch" | "findall" | "profile" | "remote";
+    pyPat: string;
+    pyFlags: string;
+    s: string;
+  }
+  const FID = "tf-abcdef12";
+  // Split for the same reason the harvest vectors split: whole, these
+  // would sit in this file, hence in the tool's own tokens, and the
+  // harvest control's matching vectors would keep by membership instead
+  // of exercising their patterns.
+  const S_AR3 = "١٢" + "٣";
+  const S_HXAB = "abcdefab" + "٣";
+  const namesShape = (words: string[]): RegExp =>
+    new RegExp(`${NAME_L}(${words.map((w) => literalI(w)).join("|")})${NAME_R}`, "giu");
+  const NAMES_WORDS = ["harbor", "illegal", "straße"];
+  const NAMES_PY = "(?<![^\\W_])(harbor|illegal|straße)(?![^\\W_])";
+  const normGroup = (v: unknown): unknown => (v === undefined ? "" : v);
+  const runPort = (c: PatCase): unknown => {
+    if (c.op === "profile") return profileRepo(c.s);
+    if (c.op === "remote") return remoteUrl(c.s);
+    let re: RegExp;
+    switch (c.id) {
+      case "done":
+        re = DONE_RE;
+        break;
+      case "url":
+        re = URL_RE;
+        break;
+      case "email":
+        re = EMAIL_RE;
+        break;
+      case "ipv4":
+        re = IPV4_RE;
+        break;
+      case "key":
+        re = KEY_RE;
+        break;
+      case "filelike":
+        re = FILELIKE;
+        break;
+      case "faultid":
+        re = FAULT_ID_RE;
+        break;
+      case "hex":
+        re = HEX_RE;
+        break;
+      case "mark":
+        re = MARK_RE;
+        break;
+      case "word":
+        re = WORD_RE;
+        break;
+      case "wtok":
+        re = WTOK_RE;
+        break;
+      case "ticks":
+        re = TICKS_RE;
+        break;
+      case "token":
+        re = TOKEN;
+        break;
+      case "names":
+        re = namesShape(NAMES_WORDS);
+        break;
+      case "ticket":
+        re = TICKET_RE;
+        break;
+      case "state":
+        re = STATE_RE;
+        break;
+      case "fid":
+        re = fidBoundaryRe(FID);
+        break;
+      case "controls":
+        re = CONTROLS_VALUE_RE;
+        break;
+      case "rurl1":
+        re = RURL_M1;
+        break;
+      case "rurl2":
+        re = RURL_M2;
+        break;
+      case "phead":
+        re = PROFILE_HEAD_RE;
+        break;
+      case "pend":
+        re = PROFILE_END_RE;
+        break;
+      case "prepo":
+        re = PROFILE_REPO_RE;
+        break;
+      default:
+        throw new Error(`unknown pattern ${c.id}`);
+    }
+    re.lastIndex = 0;
+    if (c.op === "search") {
+      const m = re.exec(c.s);
+      return m ? [m[0], ...[...m].slice(1).map(normGroup)] : [];
+    }
+    if (c.op === "fullmatch") {
+      const m = re.exec(c.s);
+      return m !== null && m[0] === c.s;
+    }
+    const flags = re.flags.includes("g") ? re.flags : `${re.flags}g`;
+    return [...c.s.matchAll(new RegExp(re.source, flags))].map((m) => {
+      const gs = [...m].slice(1).map(normGroup);
+      if (gs.length === 0) return m[0];
+      return gs.length === 1 ? gs[0] : gs;
+    });
+  };
+  const P = (
+    id: string,
+    op: PatCase["op"],
+    pyPat: string,
+    pyFlags: string,
+    s: string,
+  ): PatCase => ({
+    id,
+    op,
+    pyPat,
+    pyFlags,
+    s,
+  });
+  const cases: PatCase[] = [
+    P(
+      "done",
+      "search",
+      "^tool fault (tf-[0-9a-f]{8}) (filed|seen again|declined) in run ([0-9a-f]+)\\b",
+      "",
+      "tool fault tf-abcdef12 filed in run abc123",
+    ),
+    P(
+      "done",
+      "search",
+      "^tool fault (tf-[0-9a-f]{8}) (filed|seen again|declined) in run ([0-9a-f]+)\\b",
+      "",
+      "tool fault tf-abcdef12 seen again in run 123",
+    ),
+    P(
+      "done",
+      "search",
+      "^tool fault (tf-[0-9a-f]{8}) (filed|seen again|declined) in run ([0-9a-f]+)\\b",
+      "",
+      "tool fault tf-abcdef12 declined in run abc123xyz",
+    ),
+    P(
+      "done",
+      "search",
+      "^tool fault (tf-[0-9a-f]{8}) (filed|seen again|declined) in run ([0-9a-f]+)\\b",
+      "",
+      "tool fault tf-abcdef12 filed in run abc123é",
+    ),
+    P(
+      "done",
+      "search",
+      "^tool fault (tf-[0-9a-f]{8}) (filed|seen again|declined) in run ([0-9a-f]+)\\b",
+      "",
+      "xtool fault tf-abcdef12 filed in run abc",
+    ),
+    P(
+      "url",
+      "search",
+      "\\b[A-Za-z][A-Za-z0-9+.-]{0,30}://[^\\s)\\]>'\"`]+",
+      "",
+      "open https://example.com/x now",
+    ),
+    P(
+      "url",
+      "search",
+      "\\b[A-Za-z][A-Za-z0-9+.-]{0,30}://[^\\s)\\]>'\"`]+",
+      "",
+      "see https://a.com/x\x1cy here",
+    ),
+    P(
+      "url",
+      "search",
+      "\\b[A-Za-z][A-Za-z0-9+.-]{0,30}://[^\\s)\\]>'\"`]+",
+      "",
+      "see https://a.com/x\u0085y here",
+    ),
+    P(
+      "url",
+      "search",
+      "\\b[A-Za-z][A-Za-z0-9+.-]{0,30}://[^\\s)\\]>'\"`]+",
+      "",
+      "see https://a.com/x\ufeffy here",
+    ),
+    P(
+      "url",
+      "search",
+      "\\b[A-Za-z][A-Za-z0-9+.-]{0,30}://[^\\s)\\]>'\"`]+",
+      "",
+      "get ftp://h/x ok",
+    ),
+    P(
+      "url",
+      "search",
+      "\\b[A-Za-z][A-Za-z0-9+.-]{0,30}://[^\\s)\\]>'\"`]+",
+      "",
+      "open ßhttp://x.com/a now",
+    ),
+    P(
+      "email",
+      "search",
+      "(?<![\\w.+-])[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+",
+      "",
+      "mailed to ü@internal.example today",
+    ),
+    P(
+      "email",
+      "search",
+      "(?<![\\w.+-])[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+",
+      "",
+      "ping admin@exämple.com now",
+    ),
+    P(
+      "email",
+      "search",
+      "(?<![\\w.+-])[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+",
+      "",
+      "mail qzxvndr@例え.テスト ok",
+    ),
+    P(
+      "email",
+      "search",
+      "(?<![\\w.+-])[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+",
+      "",
+      "ask josé@acme-corp.com please",
+    ),
+    P(
+      "email",
+      "search",
+      "(?<![\\w.+-])[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+",
+      "",
+      "mail u@example.com ok",
+    ),
+    P("email", "search", "(?<![\\w.+-])[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+", "", "note aü@b.co here"),
+    P("ipv4", "search", "(?<![\\w.])\\d{1,3}(?:\\.\\d{1,3}){3}(?![\\w.])", "", "ping 10.0.0.1 now"),
+    P(
+      "ipv4",
+      "search",
+      "(?<![\\w.])\\d{1,3}(?:\\.\\d{1,3}){3}(?![\\w.])",
+      "",
+      `ping ${S_AR3}.${S_AR3}.${S_AR3}.${S_AR3} now`,
+    ),
+    P(
+      "ipv4",
+      "search",
+      "(?<![\\w.])\\d{1,3}(?:\\.\\d{1,3}){3}(?![\\w.])",
+      "",
+      "ping 1.2.3.9999 now",
+    ),
+    P(
+      "ipv4",
+      "search",
+      "(?<![\\w.])\\d{1,3}(?:\\.\\d{1,3}){3}(?![\\w.])",
+      "",
+      "ping é10.0.0.1 now",
+    ),
+    P(
+      "ipv4",
+      "search",
+      "(?<![\\w.])\\d{1,3}(?:\\.\\d{1,3}){3}(?![\\w.])",
+      "",
+      "ping 10.0.0.1é now",
+    ),
+    P("key", "search", "(?<![\\w-])[A-Z][A-Z0-9]{1,9}-\\d+(?![\\w-])", "", "see PM-12 here"),
+    P(
+      "key",
+      "search",
+      "(?<![\\w-])[A-Z][A-Z0-9]{1,9}-\\d+(?![\\w-])",
+      "",
+      "see ü" + "PM-12 and more",
+    ),
+    P("key", "search", "(?<![\\w-])[A-Z][A-Z0-9]{1,9}-\\d+(?![\\w-])", "", "see PM-١٢ here"),
+    P("key", "search", "(?<![\\w-])[A-Z][A-Z0-9]{1,9}-\\d+(?![\\w-])", "", "see PM-12x here"),
+    P("key", "search", "(?<![\\w-])[A-Z][A-Z0-9]{1,9}-\\d+(?![\\w-])", "", "see P-1 here"),
+    P("filelike", "fullmatch", "[\\w-]+(?:\\.[\\w-]+)*\\.[A-Za-z]\\w{1,7}", "", "data.txt"),
+    P("filelike", "fullmatch", "[\\w-]+(?:\\.[\\w-]+)*\\.[A-Za-z]\\w{1,7}", "", "data." + "ßx"),
+    P("filelike", "fullmatch", "[\\w-]+(?:\\.[\\w-]+)*\\.[A-Za-z]\\w{1,7}", "", "secret." + "éxt"),
+    P("filelike", "fullmatch", "[\\w-]+(?:\\.[\\w-]+)*\\.[A-Za-z]\\w{1,7}", "", "data." + "日本"),
+    P("filelike", "fullmatch", "[\\w-]+(?:\\.[\\w-]+)*\\.[A-Za-z]\\w{1,7}", "", "dx.aé9"),
+    P("filelike", "fullmatch", "[\\w-]+(?:\\.[\\w-]+)*\\.[A-Za-z]\\w{1,7}", "", "a.b_c-d.e2"),
+    P("filelike", "fullmatch", "[\\w-]+(?:\\.[\\w-]+)*\\.[A-Za-z]\\w{1,7}", "", "notafile"),
+    P("faultid", "search", "\\btf-[0-9a-f]{8}\\b", "", "see tf-abcdef12 here"),
+    P("faultid", "search", "\\btf-[0-9a-f]{8}\\b", "", `again étf-${"1234" + "5678"} broke`),
+    P("faultid", "search", "\\btf-[0-9a-f]{8}\\b", "", "see tf-abcdef12é here"),
+    P("faultid", "search", "\\btf-[0-9a-f]{8}\\b", "", "see TF-ABCDEF12 here"),
+    P("faultid", "search", "\\btf-[0-9a-f]{8}\\b", "", "see tf-abcdef1 here"),
+    P("hex", "search", "\\b(?=[0-9a-f]*\\d)[0-9a-f]{7,40}\\b", "", "hash abcdef1 done"),
+    // The lookahead's \d is provably inert (its satisfying digit always
+    // kills the trailing \b), so the \p{Nd} spelling is exactness by
+    // construction; these vectors lock the agreed match-or-nothing.
+    P("hex", "search", "\\b(?=[0-9a-f]*\\d)[0-9a-f]{7,40}\\b", "", `hash ${S_HXAB}! done`),
+    P("hex", "search", "\\b(?=[0-9a-f]*\\d)[0-9a-f]{7,40}\\b", "", "hash abcdefab done"),
+    P("hex", "search", "\\b(?=[0-9a-f]*\\d)[0-9a-f]{7,40}\\b", "", `hash ${"ßabc" + "def1"} done`),
+    P("hex", "search", "\\b(?=[0-9a-f]*\\d)[0-9a-f]{7,40}\\b", "", `id ${"123" + "4567"} ok`),
+    P(
+      "mark",
+      "search",
+      "\\[(?:path|project|ticket text|ticket|code|link|address|withheld)\\]",
+      "",
+      "a [code] b",
+    ),
+    P(
+      "mark",
+      "search",
+      "\\[(?:path|project|ticket text|ticket|code|link|address|withheld)\\]",
+      "",
+      "a [bogus] b",
+    ),
+    P("word", "fullmatch", "[^\\W\\d_]+(?:'[^\\W\\d_]+)*", "", "l'homme"),
+    P("word", "fullmatch", "[^\\W\\d_]+(?:'[^\\W\\d_]+)*", "", "½x"),
+    P("word", "fullmatch", "[^\\W\\d_]+(?:'[^\\W\\d_]+)*", "", "1a"),
+    P("word", "fullmatch", "[^\\W\\d_]+(?:'[^\\W\\d_]+)*", "", "a'b'c"),
+    P("word", "findall", "[^\\W\\d_]+", "", "ab 12 c3 _x Aé㈠"),
+    P("word", "findall", "[^\\W\\d_]+", "", "a1b₂c3"),
+    P("wtok", "findall", "\\w+", "", "a_b ٣ x-y ½"),
+    P("ticks", "findall", "`([^`\\n]+)`", "", "`a`b`c`"),
+    P("ticks", "findall", "`([^`\\n]+)`", "", "``"),
+    P("token", "fullmatch", "[~<>\\w.@+/-]+", "", "a/b.c_d@e~f<g>h+i:j"),
+    P("token", "fullmatch", "[~<>\\w.@+/-]+", "", "a b"),
+    P("token", "fullmatch", "[~<>\\w.@+/-]+", "", "héllo/x"),
+    P("names", "search", NAMES_PY, "i", "see harbor here"),
+    P("names", "search", NAMES_PY, "i", "see _harbor fail"),
+    P("names", "search", NAMES_PY, "i", "see harbor_ fail"),
+    P("names", "search", NAMES_PY, "i", "see éharbor fail"),
+    P("names", "search", NAMES_PY, "i", "see harboré fail"),
+    P("names", "search", NAMES_PY, "i", "see HARBOR here"),
+    P("names", "search", NAMES_PY, "i", "see İllegal here"),
+    P("names", "search", NAMES_PY, "i", "see ıllegal here"),
+    P("names", "search", NAMES_PY, "i", "see straße here"),
+    P("names", "search", NAMES_PY, "i", "see STRAẞE here"),
+    P("names", "search", NAMES_PY, "i", "see 1harbor fail"),
+    P("ticket", "fullmatch", "#?\\d+", "", "12"),
+    P("ticket", "fullmatch", "#?\\d+", "", "#12"),
+    P("ticket", "fullmatch", "#?\\d+", "", S_AR3),
+    P("ticket", "fullmatch", "#?\\d+", "", `#${S_AR3}`),
+    P("ticket", "fullmatch", "#?\\d+", "", "1a"),
+    P("ticket", "fullmatch", "#?\\d+", "", "##12"),
+    P("state", "search", "^state: (\\S+)", "m", "state: OPEN"),
+    P("state", "search", "^state: (\\S+)", "m", "x\nstate: OPEN"),
+    P("state", "search", "^state: (\\S+)", "m", "x\rstate: OPEN"),
+    P("state", "search", "^state: (\\S+)", "m", "state: closed\ufeff"),
+    P("state", "search", "^state: (\\S+)", "m", "state: \u0085x"),
+    P("state", "search", "^state: (\\S+)", "m", "state: "),
+    P("fid", "search", "(?<![\\w-])tf-abcdef12(?![\\w-])", "", "see tf-abcdef12 here"),
+    P("fid", "search", "(?<![\\w-])tf-abcdef12(?![\\w-])", "", "see étf-abcdef12 here"),
+    P("fid", "search", "(?<![\\w-])tf-abcdef12(?![\\w-])", "", "see tf-abcdef12é here"),
+    P("fid", "search", "(?<![\\w-])tf-abcdef12(?![\\w-])", "", "see -tf-abcdef12- here"),
+    P("controls", "fullmatch", "[\\w-]+", "", "kind-name_2"),
+    P("controls", "fullmatch", "[\\w-]+", "", "héllo"),
+    P("controls", "fullmatch", "[\\w-]+", "", "has space"),
+    P(
+      "rurl1",
+      "search",
+      "^[A-Za-z][A-Za-z0-9+.-]*://(?:[^@/]*@)?([^/:?#]+)(?::\\d+)?/+(.*?)(?:\\.git)?/*$",
+      "",
+      `https://host:${S_AR3}/path`,
+    ),
+    P(
+      "rurl1",
+      "search",
+      "^[A-Za-z][A-Za-z0-9+.-]*://(?:[^@/]*@)?([^/:?#]+)(?::\\d+)?/+(.*?)(?:\\.git)?/*$",
+      "",
+      "https://user@host:8080/a/b",
+    ),
+    P(
+      "rurl1",
+      "search",
+      "^[A-Za-z][A-Za-z0-9+.-]*://(?:[^@/]*@)?([^/:?#]+)(?::\\d+)?/+(.*?)(?:\\.git)?/*$",
+      "",
+      "https://host/path/",
+    ),
+    P(
+      "rurl1",
+      "search",
+      "^[A-Za-z][A-Za-z0-9+.-]*://(?:[^@/]*@)?([^/:?#]+)(?::\\d+)?/+(.*?)(?:\\.git)?/*$",
+      "",
+      "https://host/path.git",
+    ),
+    P(
+      "rurl1",
+      "search",
+      "^[A-Za-z][A-Za-z0-9+.-]*://(?:[^@/]*@)?([^/:?#]+)(?::\\d+)?/+(.*?)(?:\\.git)?/*$",
+      "",
+      "https://host:abc/path",
+    ),
+    P(
+      "rurl2",
+      "search",
+      "^(?:[^@/:]+@)?([^/:]+):(?!//)(.*?)(?:\\.git)?/*$",
+      "",
+      "git@host:path/to.git",
+    ),
+    P("rurl2", "search", "^(?:[^@/:]+@)?([^/:]+):(?!//)(.*?)(?:\\.git)?/*$", "", "host:path"),
+    P("rurl2", "search", "^(?:[^@/:]+@)?([^/:]+):(?!//)(.*?)(?:\\.git)?/*$", "", "a:b:c"),
+    P("rurl2", "search", "^(?:[^@/:]+@)?([^/:]+):(?!//)(.*?)(?:\\.git)?/*$", "", "x://y"),
+    P("phead", "findall", "^## Project profile[ \\t]*$", "m", "## Project profile\n"),
+    P("phead", "findall", "^## Project profile[ \\t]*$", "m", "x\n## Project profile  \n"),
+    P("phead", "findall", "^## Project profile[ \\t]*$", "m", "## Project profile\r\n"),
+    P("phead", "findall", "^## Project profile[ \\t]*$", "m", "## Other\n## Project profile\n"),
+    P("pend", "search", "^## ", "m", "x\n## y"),
+    P("pend", "search", "^## ", "m", "x\r## y"),
+    P("pend", "search", "^## ", "m", "## y"),
+    P("prepo", "search", "^repo:[ \\t]*(\\S.*?)(?:[ \\t]{2,}\\S.*)?[ \\t]*$", "m", "repo: ~/x\n"),
+    P(
+      "prepo",
+      "search",
+      "^repo:[ \\t]*(\\S.*?)(?:[ \\t]{2,}\\S.*)?[ \\t]*$",
+      "m",
+      "repo: /a/b  comment here\n",
+    ),
+    P(
+      "prepo",
+      "search",
+      "^repo:[ \\t]*(\\S.*?)(?:[ \\t]{2,}\\S.*)?[ \\t]*$",
+      "m",
+      "repo: \x1cfoo\n",
+    ),
+    P("prepo", "search", "^repo:[ \\t]*(\\S.*?)(?:[ \\t]{2,}\\S.*)?[ \\t]*$", "m", "x\rrepo: /a\n"),
+    P("prepo", "search", "^repo:[ \\t]*(\\S.*?)(?:[ \\t]{2,}\\S.*)?[ \\t]*$", "m", "repo: ~/x\r\n"),
+  ];
+  // profile_repo / remote differentials: BASE's functions inlined in the
+  // program above. Relative results are resolved on the BASE side (the
+  // port absolutizes where BASE keeps Path-relative: a carded P3 outside
+  // this suite, as are ~user tails and multi-slash remote tails).
+  for (const s of [
+    "## Project profile\nrepo: /tmp/ppp\n",
+    "## Project profile\nrepo: ~/ppp\n",
+    "## Project profile\nrepo: /a/b  see ticket\n",
+    "## Project profile\r\nrepo: /a\r\n",
+    "## Project profile\nrepo: \x1cfoo\n",
+    "## Project profile\nx\rrepo: /a\n",
+    "## Project profile\nrepo: /a\u0085\n",
+    "no sections here",
+    "## Project profile\nnothing\n",
+    "## Project profile\nrepo: /first\n## Project profile\nrepo: /second\n",
+    "## Project profile\nrepo: /a\n## Next\nrepo: /b\n",
+  ])
+    cases.push(P("profile", "profile", "", "", s));
+  const mkRemote = (name: string, url: string | null): string => {
+    const d = join(tmp, `pat-${name}`);
+    mkdirSync(d, { recursive: true });
+    run("git", ["-C", d, "init", "-q"]);
+    if (url !== null) run("git", ["-C", d, "remote", "add", "origin", url]);
+    return d;
+  };
+  for (const [name, url] of [
+    ["remArPort", `https://h:${S_AR3}/p`],
+    ["remFoldHost", "https://Straße:8080/p"],
+    ["remStd", "https://User@Host:8080/a/b"],
+    ["remScp", "git@host:path/to.git"],
+    ["remBare", "host:path"],
+    ["remDotGit", "https://host/path.git"],
+    ["remSlash", "https://host/path/"],
+    ["remNone", null],
+  ] as Array<[string, string | null]>)
+    cases.push(P("remote", "remote", "", "", mkRemote(name, url)));
+  if (run("sh", ["-c", "command -v python3"]).code !== 0) {
+    st.skip("pattern parity with BASE", "python3 not on PATH: the pattern comparison did not run");
+  } else {
+    const prog = join(tmp, "pat-parity.py");
+    writeFileSync(
+      prog,
+      [
+        "import json, os, re, subprocess, sys",
+        "out = []",
+        "def base_profile(s):",
+        "    starts = [m.end() for m in re.finditer(r'^## Project profile[ \\t]*$', s, re.M)]",
+        "    if not starts: return None",
+        "    body = s[starts[-1]:]",
+        "    end = re.search(r'^## ', body, re.M)",
+        "    m = re.search(r'^repo:[ \\t]*(\\S.*?)(?:[ \\t]{2,}\\S.*)?[ \\t]*$', body[:end.start()] if end else body, re.M)",
+        "    return os.path.abspath(os.path.expanduser(m.group(1).strip())) if m else None",
+        "def base_remote(where):",
+        "    r0 = subprocess.run(['git', '-C', where, 'remote', 'get-url', 'origin'], capture_output=True, text=True)",
+        "    url = r0.stdout.strip() if r0.returncode == 0 else ''",
+        "    if not url: return None",
+        "    m = (re.match(r'^[A-Za-z][A-Za-z0-9+.-]*://(?:[^@/]*@)?([^/:?#]+)(?::\\d+)?/+(.*?)(?:\\.git)?/*$', url) or re.match(r'^(?:[^@/:]+@)?([^/:]+):(?!//)(.*?)(?:\\.git)?/*$', url))",
+        "    return [m.group(1).lower(), m.group(2)] if m and m.group(2) else ['', url.rstrip('/')]",
+        "for c in json.load(sys.stdin):",
+        "    try:",
+        "        fl = 0",
+        "        if 'i' in c['pyFlags']: fl |= re.I",
+        "        if 'm' in c['pyFlags']: fl |= re.M",
+        "        if c['op'] == 'profile': r = base_profile(c['s'])",
+        "        elif c['op'] == 'remote': r = base_remote(c['s'])",
+        "        elif c['op'] == 'search':",
+        "            m = re.search(c['pyPat'], c['s'], fl)",
+        "            r = [m.group(0)] + [g if g is not None else '' for g in m.groups()] if m else []",
+        "        elif c['op'] == 'fullmatch':",
+        "            r = bool(re.fullmatch(c['pyPat'], c['s'], fl))",
+        "        else:",
+        "            f = re.findall(c['pyPat'], c['s'], fl)",
+        "            r = [[g if g is not None else '' for g in t] if isinstance(t, tuple) else t for t in f]",
+        "        out.append({'ok': True, 'r': r})",
+        "    except Exception as e:",
+        "        out.append({'ok': False, 'r': '%s: %s' % (type(e).__name__, e)})",
+        "print(json.dumps(out))",
+      ].join("\n"),
+    );
+    const r = run("python3", [prog], { input: JSON.stringify(cases) });
+    const mism: string[] = [];
+    if (r.code !== 0) {
+      mism.push(`python3 failed: ${r.err.slice(0, 300)}`);
+    } else {
+      const truth = JSON.parse(r.out) as Array<{ ok: boolean; r: unknown }>;
+      for (let i = 0; i < cases.length; i++) {
+        let mine: unknown;
+        try {
+          mine = runPort(cases[i]!);
+        } catch (e) {
+          mine = `Error: ${String((e as Error).message ?? e)}`;
+        }
+        const want = truth[i]!;
+        if (JSON.stringify(mine) !== JSON.stringify(want.r)) {
+          const c = cases[i]!;
+          mism.push(
+            `${c.id} ${c.op} ${JSON.stringify(c.s.slice(0, 50))}: port ${JSON.stringify(mine)} vs BASE ${JSON.stringify(want.r)}`,
+          );
+        }
+      }
+    }
+    // doneOf wiring: the fixed DONE_RE parses clean details and rejects
+    // run-ons (the regex itself is differenced above; this locks the call).
+    const doneCases: Array<[Record<string, unknown>, string | null]> = [
+      [
+        {
+          detail: "tool fault tf-abcdef12 filed in run abc123",
+          actor: "postmaster",
+          action: "ticket-create",
+          target: "t",
+        },
+        "tf-abcdef12!abc123",
+      ],
+      [
+        {
+          detail: "tool fault tf-abcdef12 seen again in run abc123xyz",
+          actor: "postmaster",
+          action: "ticket-comment",
+          target: "t",
+        },
+        null,
+      ],
+      [
+        {
+          detail: "tool fault tf-abcdef12 declined in run abc123é",
+          actor: "postmaster",
+          action: "note",
+          target: "t",
+        },
+        null,
+      ],
+    ];
+    for (const [entry, want] of doneCases) {
+      const got = [...doneOf([entry]).keys()];
+      const wantKeys = want === null ? [] : [want];
+      if (JSON.stringify(got) !== JSON.stringify(wantKeys)) {
+        mism.push(`doneOf ${JSON.stringify(entry.detail)}: got ${JSON.stringify(got)}`);
+      }
+    }
+    st.check(
+      `pattern parity with BASE (${cases.length} cases)`,
+      mism.length === 0,
+      mism.slice(0, 12).join("\n"),
+    );
+  }
 }
 
 // --- self-test -----------------------------------------------------------------------------------
@@ -1242,6 +1894,8 @@ if (a[0] === "api" && a[1] === "graphql") {
   };
 
   const NAME = `zq${rand(6)}`;
+  // ASCII: NAME is rand() lowercase, uppercased for ticket keys below.
+  const NAME_UP = NAME.toUpperCase();
   const OWNER = `yq${rand(6)}`;
   const WORD = `xq${rand(6)}`;
   const IDENT = `vq${rand(5)}Totals`;
@@ -1259,7 +1913,7 @@ if (a[0] === "api" && a[1] === "graphql") {
   const IP = `10.${rand(2, "123456789")}.${rand(2, "123456789")}.${rand(2, "123456789")}`;
   const NG = ["column", "harness", "before", "board", "lane", "every", "merge"];
   const SENTENCE = `${NG[6]} ${NG[5]} ${NG[4]} ${NG[3]} ${NG[2]} the ${NG[1]} ${NG[0]}`;
-  const TICKET = `${NAME.toUpperCase()}-12`;
+  const TICKET = `${NAME_UP}-12`;
   const REPO = join(tmp, "home", "My Code", NAME);
   mkdirSync(REPO, { recursive: true });
   run("git", ["-C", REPO, "init", "-q"]);
@@ -1762,7 +2416,7 @@ if (a[0] === "api" && a[1] === "graphql") {
     );
   }
   // later run
-  const again = newrun(NAME, `${NAME.toUpperCase()}-16`, "done");
+  const again = newrun(NAME, `${NAME_UP}-16`, "done");
   logf(
     again,
     "coachman",
@@ -1966,7 +2620,7 @@ if (a[0] === "api" && a[1] === "graphql") {
     `exit ${rc}\n${out}`,
   );
   // control kinds
-  const kindsDir = newrun(NAME, `${NAME.toUpperCase()}-19`, "done");
+  const kindsDir = newrun(NAME, `${NAME_UP}-19`, "done");
   writeFileSync(
     join(kindsDir, "actions.jsonl"),
     '{"ts":"2026-01-01T00:00:00Z","project":"p","run":"r","actor":"coachman","action":"tool-fault","target":"scripts/wait-for-markers.sh","detail":"waited on the wrong folder","fault":{"ran":"x","failed":"waited on the wrong folder","error":"none","diagnosis":"x","fix":"y","workaround":"","control":"gate"}}\n' +
@@ -1981,7 +2635,7 @@ if (a[0] === "api" && a[1] === "graphql") {
     out,
   );
   // long token
-  const longDir = newrun(NAME, `${NAME.toUpperCase()}-20`, "done");
+  const longDir = newrun(NAME, `${NAME_UP}-20`, "done");
   logf(
     longDir,
     "coachman",
@@ -2023,7 +2677,7 @@ if (a[0] === "api" && a[1] === "graphql") {
     );
   }
   // board
-  const boardDir = newrun(NAME, `${NAME.toUpperCase()}-17`, "done");
+  const boardDir = newrun(NAME, `${NAME_UP}-17`, "done");
   writeFileSync(join(S, "writes.log"), "");
   logf(
     boardDir,
@@ -2102,7 +2756,7 @@ if (a[0] === "api" && a[1] === "graphql") {
     );
   }
   {
-    const cleanDir = newrun(NAME, `${NAME.toUpperCase()}-13`, "done");
+    const cleanDir = newrun(NAME, `${NAME_UP}-13`, "done");
     logf(cleanDir, "coachman", "note", TICKET, "nothing went wrong");
     outR = tf("harvest", cleanDir);
     out = outR.out + outR.err;
@@ -2118,7 +2772,7 @@ if (a[0] === "api" && a[1] === "graphql") {
     );
   }
   {
-    const openDir = newrun(NAME, `${NAME.toUpperCase()}-14`, "review");
+    const openDir = newrun(NAME, `${NAME_UP}-14`, "review");
     logf(
       openDir,
       "coachman",
@@ -2144,7 +2798,7 @@ if (a[0] === "api" && a[1] === "graphql") {
       `exit ${rc}\n${out}`,
     );
   }
-  const mineDir = newrun(NAME, `${NAME.toUpperCase()}-15`, "abandoned");
+  const mineDir = newrun(NAME, `${NAME_UP}-15`, "abandoned");
   logf(
     mineDir,
     "coachman",
@@ -2200,7 +2854,7 @@ if (a[0] === "api" && a[1] === "graphql") {
   run("cp", ["-R", join(T, "scripts"), join(REPO, "tools/postmaster/")]);
   run("cp", ["-R", join(T, "skills"), join(REPO, "tools/postmaster/")]);
   copyFileSync(join(T, "bunfig.toml"), join(REPO, "tools/postmaster/bunfig.toml"));
-  const vendDir = newrun(NAME, `${NAME.toUpperCase()}-18`, "done");
+  const vendDir = newrun(NAME, `${NAME_UP}-18`, "done");
   logf(
     vendDir,
     "coachman",
@@ -2495,10 +3149,7 @@ if (a[0] === "api" && a[1] === "graphql") {
           TOOL_FAULTS_STUB: S2,
         },
       });
-      const rid = (s: string): string =>
-        s
-          .replace(/(run )[0-9a-f]{10}\b/g, "$1RID")
-          .replace(/(tool-faults\/)[0-9a-f]{10}/g, "$1RID");
+      const rid = normRid;
       if (base.code !== 0 || port.code !== 0) {
         mismatches.push(
           `exits: base ${base.code} port ${port.code}\nbase: ${base.err}\nport: ${port.err}`,
@@ -2534,6 +3185,285 @@ if (a[0] === "api" && a[1] === "graphql") {
       mismatches.length === 0,
       mismatches.join("\n\n").slice(0, 4000),
     );
+    // Round-10 Unicode primitives: every routed pattern, both harvest CLIs
+    // on one synthetic dispatch. Vectors: non-ASCII emails, Arabic-Indic
+    // digits, ſ, ß, dotted İ, plus an ASCII control per pattern. SK and AR7
+    // are joined, never written whole: whole, they would sit in this file,
+    // hence in the tool's vocab/tokens, and neutralize their own vectors.
+    const SK = "s" + "kib" + "idi";
+    const AR7 = "١٢٣٤" + "٥٦٧";
+    const AR3 = "١٢" + "٣";
+    const O3 = "١٢" + "٣";
+    const AB3 = "ab" + "٣";
+    const D7 = "123" + "4567";
+    const D3 = "78" + "9";
+    const ID8 = "1234" + "5678";
+    // Q, D3A and the halves below stay split for the same reason as SK and
+    // AR7: whole, they would sit in this file, hence in the tool's own
+    // vocab/tokens, and neutralize their own vectors. Every break-sensitive
+    // fault below is alone in its key group: the group draft shows only the
+    // first entry, so a sensitive second entry would be shadowed and dead.
+    const Q = "qu" + "ay";
+    const D3A = "٣";
+    const C12 = "abcdef" + "123456";
+    const HXAB = "abcdefab" + "٣";
+    const FS = "\x1c";
+    const primFaults: Array<[string, string]> = [
+      ["scripts/launch.sh", "mailed to ü@internal.example today"],
+      ["scripts/launch.sh", "ping admin@exämple.com now"],
+      ["scripts/launch.sh", "note user@exämple.com here"],
+      ["scripts/launch.sh", "mail qzxvndr@例え.テスト ok"],
+      ["scripts/launch.sh", "ask josé@acme-corp.com please"],
+      ["scripts/launch.sh", "mail u@example.com ok"],
+      ["scripts/launch.sh", `see ${"üP" + "M"}-12 and more`],
+      ["scripts/launch.sh", `see ${"xüP" + "M"}-99 here`],
+      ["scripts/launch.sh", "see PM-12 here"],
+      ["scripts/launch.sh", `again ${"é" + "tf"}-${ID8} broke`],
+      ["scripts/launch.sh", `again ${"ß" + "tf"}-${ID8} broke`],
+      ["scripts/launch.sh", `again ${"İ" + "tf"}-${ID8} broke`],
+      ["scripts/launch.sh", `again tf-${ID8} broke`],
+      ["scripts/launch.sh", `still TF-${ID8} broke`],
+      ["scripts/launch.sh", `open ${"ßht" + "tp"}://x.com/a now`],
+      ["scripts/launch.sh", `open ${"αht" + "tp"}://x.com/a now`],
+      ["scripts/launch.sh", `open ß${"http" + "/x"} now`],
+      ["scripts/launch.sh", `hash ${"ßabc" + "def1"} done`],
+      ["scripts/launch.sh", `hash ${HXAB}! done`],
+      ["scripts/launch.sh", `saw ß${C12} here`],
+      ["scripts/launch.sh", `read data.${"ß" + "x"} now`],
+      ["scripts/launch.sh", `read secret.${"é" + "xt"} now`],
+      ["scripts/launch.sh", `read file.${"日" + "本"} now`],
+      ["scripts/launch.sh", "read data.txt now"],
+      ["scripts/launch.sh", `run \`${AR7}\` now`],
+      ["scripts/launch.sh", `call ${AR7} ok`],
+      ["scripts/launch.sh", `run \`${D7}\` now`],
+      ["scripts/launch.sh", `hail \`${AR3}\` now`],
+      ["scripts/launch.sh", `ring ${AR3} ok`],
+      ["scripts/launch.sh", `call ${AB3} ok`],
+      ["scripts/launch.sh", `see ${D3} here`],
+      ["scripts/launch.sh", `ſ${SK.slice(1)} failed`],
+      ["scripts/launch.sh", `${SK} failed`],
+      ["scripts/launch.sh", `see _${SK} fail`],
+      ["scripts/launch.sh", `see ${D3A}${SK} fail`],
+      ["scripts/launch.sh", `see ${SK}${D3A}x fail`],
+      ["scripts/launch.sh", `see _${Q} fail`],
+      ["scripts/launch.sh", `spot ${Q}_ fail`],
+      ["scripts/launch.sh", `see é${Q} fail`],
+      ["scripts/launch.sh", `see ${Q}é fail`],
+      ["scripts/launch.sh", `note ${Q} fails`],
+      ["scripts/launch.sh", `see a${FS}b here`],
+      ["scripts/launch.sh", `ping ${"ü1" + "0"}.0.0.1 now`],
+      ["scripts/launch.sh", `ping ${O3}.${O3}.${O3}.${O3} now`],
+      ["scripts/launch.sh", "ping 10.0.0.1 yet"],
+    ];
+    const primMismatches: string[] = [];
+    {
+      const S10 = join(tmp, "stub10");
+      const S10B = join(tmp, "stub10B");
+      for (const s of [S10, S10B]) {
+        mkdirSync(s, { recursive: true });
+        writeFileSync(
+          join(s, "db.json"),
+          JSON.stringify({ access: "ADMIN", next: 60, issues: {} }),
+        );
+      }
+      const mkPrim = (sub: string): string => {
+        const d = join(tmp, SK, sub);
+        mkdirSync(d, { recursive: true });
+        writeFileSync(join(d, "manifest.json"), '{"stage": "done", "leg": 3}\n');
+        writeFileSync(
+          join(d, "run.json"),
+          '{"postmaster": {"commit": "abcdef1234567890abcdef1234567890abcdef12"}}\n',
+        );
+        writeFileSync(
+          join(d, "brief.md"),
+          "# Waybill: t\n\nPlain ascii waybill words here.\nQuay work happens here.\n",
+        );
+        writeFileSync(
+          join(d, "actions.jsonl"),
+          `${primFaults
+            .map(([target, failed], i) =>
+              JSON.stringify({
+                ts: `2026-01-01T00:00:${String(i).padStart(2, "0")}Z`,
+                project: "postmaster",
+                run: "t",
+                actor: "coachman",
+                action: "tool-fault",
+                target,
+                detail: "x",
+                fault: { failed, control: "", workaround: "" },
+              }),
+            )
+            .join("\n")}\n`,
+        );
+        return d;
+      };
+      const pB = mkPrim("runsB10");
+      const pP = mkPrim("runsP10");
+      const bOut = run("bash", [baseTf, "harvest", pB], {
+        env: { ...process.env, PATH: `${binB}:${process.env.PATH}`, TOOL_FAULTS_STUB: S10B },
+      });
+      const pOut = run("bash", [join(T2, "scripts", "tool-faults.sh"), "harvest", pP], {
+        env: {
+          ...process.env,
+          PATH: `${join(tmp, "bin")}:${process.env.PATH}`,
+          TOOL_FAULTS_STUB: S10,
+        },
+      });
+      const rid10 = normRid;
+      if (bOut.code !== 0 || pOut.code !== 0) {
+        primMismatches.push(
+          `exits: base ${bOut.code} port ${pOut.code}\nbase: ${bOut.err}\nport: ${pOut.err}`,
+        );
+      } else if (rid10(bOut.out) !== rid10(pOut.out)) {
+        primMismatches.push(
+          `harvest output differs:\n--- base\n${rid10(bOut.out)}\n--- port\n${rid10(pOut.out)}`,
+        );
+      } else {
+        const drafts10 = (d: string): Map<string, string> => {
+          const m = new Map<string, string>();
+          for (const sub of readdirSync(join(d, "tool-faults"))) {
+            for (const f of readdirSync(join(d, "tool-faults", sub))) {
+              if (f === "tool-faults.json") continue;
+              m.set(f, rid10(readFileSync(join(d, "tool-faults", sub, f), "utf-8")));
+            }
+          }
+          return m;
+        };
+        const b = drafts10(pB);
+        const p = drafts10(pP);
+        for (const [f, body] of b) {
+          if (!p.has(f)) primMismatches.push(`draft only on BASE: ${f}`);
+          else if (p.get(f) !== body) primMismatches.push(`draft differs: ${f}`);
+        }
+        for (const f of p.keys()) {
+          if (!b.has(f)) primMismatches.push(`draft only on port: ${f}`);
+        }
+      }
+    }
+    st.check(
+      "unicode primitives: BASE and port harvests agree, email/digits/ſßİ alike",
+      primMismatches.length === 0,
+      primMismatches.join("\n\n").slice(0, 4000),
+    );
+    // Round-10 pattern parity: every regex above, diffed against BASE's own
+    // pattern text (bb782a9 scripts/tool-faults.sh) on the vectors where
+    // Unicode meets the pattern. The port side runs the real consts, so a
+    // routed pattern that drifts fails here before any harvest runs.
+    // Multi-slash remote tails are absent on purpose: BASE's /*$ and the
+    // port's /?$ disagree there, and that P3 rides a card, not this suite.
+    runPatternParity(st, tmp);
+    // sameRepo under casefold: the tool copy's own remote is Straße-form,
+    // the waybill target's STRASSE-form, so BASE takes the own-repo path
+    // (waybill public) and a toLowerCase port takes the foreign one.
+    // A foreign remote pair pins the else branch on both. The load-bearing
+    // word is joined, never written whole: whole, it would sit in this
+    // file, hence in the tool's own vocab, published on both sides.
+    {
+      const word = "zx" + "qv";
+      const T3 = join(tmp, "tool3");
+      run("cp", ["-R", T2, T3]);
+      run("git", ["-C", T3, "remote", "set-url", "origin", "https://github.com/o/Straße-tool.git"]);
+      const mkRepo = (name: string, origin: string): string => {
+        const d = join(tmp, name);
+        mkdirSync(d, { recursive: true });
+        run("git", ["-C", d, "init", "-q"]);
+        run("git", ["-C", d, "remote", "add", "origin", origin]);
+        return d;
+      };
+      const ownR = mkRepo("repo-own", "https://github.com/o/STRASSE-tool.git");
+      const forR = mkRepo("repo-for", "https://github.com/other/thing.git");
+      const S11 = join(tmp, "stub11");
+      const S11B = join(tmp, "stub11B");
+      for (const s of [S11, S11B]) {
+        mkdirSync(s, { recursive: true });
+        writeFileSync(
+          join(s, "db.json"),
+          JSON.stringify({ access: "ADMIN", next: 60, issues: {} }),
+        );
+      }
+      const mkSame = (sub: string, repo: string): string => {
+        const d = join(tmp, sub);
+        mkdirSync(d, { recursive: true });
+        writeFileSync(join(d, "manifest.json"), '{"stage": "done", "leg": 3}\n');
+        writeFileSync(join(d, "run.json"), '{"written": "2026-01-01T00:00:00Z", "run": "t"}\n');
+        writeFileSync(
+          join(d, "brief.md"),
+          `## Project profile\nrepo: ${repo}\n\n${word} is load-bearing.\n`,
+        );
+        writeFileSync(
+          join(d, "actions.jsonl"),
+          `${JSON.stringify({
+            ts: "2026-01-01T00:00:00Z",
+            project: "postmaster",
+            run: "t",
+            actor: "coachman",
+            action: "tool-fault",
+            target: "scripts/launch.sh",
+            detail: "x",
+            fault: { failed: `${word} broke the build`, control: "", workaround: "" },
+          })}\n`,
+        );
+        return d;
+      };
+      const sameMismatches: string[] = [];
+      for (const [label, repo] of [
+        ["own", ownR],
+        ["foreign", forR],
+      ] as Array<[string, string]>) {
+        const dB = mkSame(`sameB-${label}`, repo);
+        const dP = mkSame(`sameP-${label}`, repo);
+        const bOut = run("bash", [join(T3, "scripts", "base-tf.sh"), "harvest", dB], {
+          env: { ...process.env, PATH: `${binB}:${process.env.PATH}`, TOOL_FAULTS_STUB: S11B },
+        });
+        const pOut = run("bash", [join(T3, "scripts", "tool-faults.sh"), "harvest", dP], {
+          env: {
+            ...process.env,
+            PATH: `${join(tmp, "bin")}:${process.env.PATH}`,
+            TOOL_FAULTS_STUB: S11,
+          },
+        });
+        const norm = normRid;
+        if (bOut.code !== 0 || pOut.code !== 0) {
+          sameMismatches.push(
+            `${label}: exits base ${bOut.code} port ${pOut.code}\nbase: ${bOut.err}\nport: ${pOut.err}`,
+          );
+        } else {
+          if (norm(bOut.out) !== norm(pOut.out)) {
+            sameMismatches.push(
+              `${label} output differs:\n--- base\n${norm(bOut.out)}\n--- port\n${norm(pOut.out)}`,
+            );
+          }
+          const drafts11 = (d: string): Map<string, string> => {
+            const m = new Map<string, string>();
+            for (const sub of readdirSync(join(d, "tool-faults"))) {
+              for (const f of readdirSync(join(d, "tool-faults", sub))) {
+                if (f === "tool-faults.json") continue;
+                m.set(f, norm(readFileSync(join(d, "tool-faults", sub, f), "utf-8")));
+              }
+            }
+            return m;
+          };
+          const b = drafts11(dB);
+          const p = drafts11(dP);
+          for (const [f, body] of b) {
+            if (!p.has(f)) sameMismatches.push(`${label} draft only on BASE: ${f}`);
+            else if (p.get(f) !== body) {
+              sameMismatches.push(
+                `${label} draft differs: ${f}\n--- base\n${body}\n--- port\n${p.get(f)}`,
+              );
+            }
+          }
+          for (const f of p.keys()) {
+            if (!b.has(f)) sameMismatches.push(`${label} draft only on port: ${f}`);
+          }
+        }
+      }
+      st.check(
+        "sameRepo folds remotes as BASE: own-repo waybill public, foreign withheld",
+        sameMismatches.length === 0,
+        sameMismatches.join("\n\n").slice(0, 4000),
+      );
+    }
   }
   if (run("sh", ["-c", "command -v python3"]).code !== 0) {
     st.skip(

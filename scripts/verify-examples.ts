@@ -34,9 +34,22 @@ import { basename, delimiter, join, resolve } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
 import { die, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import {
+  digitValue,
+  literalI,
+  PY_DOT,
+  PY_S_CLASS,
+  pyRstrip,
+  pySplitLines,
+  pyTrim,
+} from "./lib/text.ts";
 
-const FENCE = /^(\s*)(`{3,}|~{3,})(.*)$/;
-const EXIT_RE = /\[exit (\d+)\]/;
+const FENCE = new RegExp(`^([${PY_S_CLASS}]*)(\`\`\`|~{3,})(${PY_DOT}*)$`);
+const EXIT_LINE_RE = /^\[exit (\p{Nd}+)\]$/u;
+const TICKET_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Ticket[${PY_S_CLASS}]*$`);
+const PROFILE_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Project profile[${PY_S_CLASS}]*$`);
+const HEAD_BREAK_RE = new RegExp(`^#{1,2}[${PY_S_CLASS}]`);
+const CLOSE_FENCE_RE = new RegExp(`^[${PY_S_CLASS}]*(\`\`\`|~{3,})[${PY_S_CLASS}]*$`);
 const BIN_NAME = /^[A-Za-z0-9@._+-]+$/;
 const TIMEOUT = 60;
 
@@ -47,22 +60,22 @@ function notRun(msg: string): never {
 }
 
 function ticketLines(text: string): string[] {
-  const lines = text.split("\n");
-  const start = lines.findIndex((l) => /^##\s+Ticket\s*$/.test(l));
+  const lines = pySplitLines(text);
+  const start = lines.findIndex((l) => TICKET_LINE_RE.test(l));
   if (start === -1) return lines;
-  const end = lines.findIndex((l, i) => i > start && /^##\s+Project profile\s*$/.test(l));
+  const end = lines.findIndex((l, i) => i > start && PROFILE_LINE_RE.test(l));
   return lines.slice(start + 1, end === -1 ? lines.length : end);
 }
 
 function section(lines: string[], title: string): string[] | null {
-  const re = new RegExp(`^##\\s+${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i");
+  const re = new RegExp(`^##[${PY_S_CLASS}]+${literalI(title)}[${PY_S_CLASS}]*$`, "iu");
   const start = lines.findIndex((l) => re.test(l));
   if (start === -1) return null;
   const out: string[] = [];
   let fence: string | null = null;
   for (const l of lines.slice(start + 1)) {
     const m = FENCE.exec(l);
-    if (fence === null && /^#{1,2}\s/.test(l)) break;
+    if (fence === null && HEAD_BREAK_RE.test(l)) break;
     if (m && fence === null && !(m[2]?.[0] === "`" && m[3]?.includes("`"))) {
       fence = m[2]!;
     } else if (
@@ -90,7 +103,7 @@ function blocks(lines: string[]): string[][] {
       const body: string[] = [];
       i += 1;
       while (i < lines.length) {
-        const c = /^\s*(`{3,}|~{3,})\s*$/.exec(lines[i]!);
+        const c = CLOSE_FENCE_RE.exec(lines[i]!);
         if (c && c[1]?.[0] === fence[0] && c[1]?.length >= fence.length) break;
         body.push(lines[i]?.replace(new RegExp(`^ {0,${indent}}`), ""));
         i += 1;
@@ -103,7 +116,7 @@ function blocks(lines: string[]): string[][] {
 }
 
 function trim(lines: string[]): string[] {
-  const out = lines.map((l) => l.replace(/\s+$/, ""));
+  const out = lines.map(pyRstrip);
   while (out.length > 0 && out[out.length - 1] === "") out.pop();
   return out;
 }
@@ -183,9 +196,10 @@ function transcript(body: string[]): Cmd[] | null {
     let out = trim(c.out);
     let exit = 0;
     if (out.length > 0) {
-      const m = EXIT_RE.exec(out[out.length - 1]?.trim());
-      if (m && out[out.length - 1]?.trim().match(/^\[exit \d+\]$/)) {
-        exit = parseInt(m[1]!, 10);
+      const stripped = pyTrim(out[out.length - 1] ?? "");
+      const m = EXIT_LINE_RE.exec(stripped);
+      if (m) {
+        exit = parseInt(digitValue(m[1]!), 10);
         out = trim(out.slice(0, -1));
       }
     }
@@ -447,6 +461,59 @@ if (argv[0] === "--self-test") {
 withTempDir((tmp) => {
   const SELF = join(scriptsDir(import.meta), "verify-examples.sh");
   const st = new SelfTest();
+  {
+    // Unicode primitives, BASE verify-examples.sh python: every expectation python3-verified.
+    // U+001F is Python space yet survives splitlines (U+001C would not), so it vectors the patterns.
+    st.check("a fence may open after U+001C", FENCE.exec("\x1c```") !== null, "\x1c");
+    const tr = transcript(["$ x", "[exit ٣]"]);
+    st.check(
+      "an exit marker may be Arabic-Indic",
+      JSON.stringify(tr) === JSON.stringify([{ cmd: "x", out: [], exit: 3 }]),
+      JSON.stringify(tr),
+    );
+    const t3 = ticketLines("x\n##\x1fTicket\nbody\n");
+    st.check(
+      "a Ticket heading with U+001F opens the ticket",
+      JSON.stringify(t3) === JSON.stringify(["body"]),
+      JSON.stringify(t3),
+    );
+    const t4 = ticketLines("x\x1c## Ticket\ny");
+    st.check(
+      "a U+001C opens a new line (splitlines)",
+      JSON.stringify(t4) === JSON.stringify(["y"]),
+      JSON.stringify(t4),
+    );
+    const t5 = ticketLines("## Ticket\na\n##\x1fProject profile\nb\n");
+    st.check(
+      "a Project profile heading with U+001F ends the ticket",
+      JSON.stringify(t5) === JSON.stringify(["a"]),
+      JSON.stringify(t5),
+    );
+    const sec = section(["## ticket", "x"], "TİCKET");
+    st.check(
+      "section titles fold dotted-I",
+      JSON.stringify(sec) === JSON.stringify(["x"]),
+      JSON.stringify(sec),
+    );
+    const bl = blocks(["```", "x", "\x1f```", "y"]);
+    st.check(
+      "a fence may close after U+001F",
+      JSON.stringify(bl) === JSON.stringify([["x"]]),
+      JSON.stringify(bl),
+    );
+    const br = section(["## T", "a", "#\x1fb", "c"], "T");
+    st.check(
+      "a heading with U+001F ends the section",
+      JSON.stringify(br) === JSON.stringify(["a"]),
+      JSON.stringify(br),
+    );
+    const tm = trim(["x\uFEFF"]);
+    st.check(
+      "trim keeps a trailing FEFF (not Python space)",
+      JSON.stringify(tm) === JSON.stringify(["x\uFEFF"]),
+      JSON.stringify(tm),
+    );
+  }
 
   function expect(
     label: string,

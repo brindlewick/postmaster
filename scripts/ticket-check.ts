@@ -68,6 +68,18 @@ import { join } from "node:path";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import {
+  BOUND_L,
+  BOUND_R,
+  DOT_ALL,
+  END_OF_STRING,
+  PY_DOT,
+  PY_S_CLASS,
+  pyLower,
+  pyTrim,
+  pyWords,
+  W_CLASS,
+} from "./lib/text.ts";
 
 class DieError extends Error {
   constructor(
@@ -82,16 +94,30 @@ function dieT(msg: string): never {
 }
 
 // --- regex constants ---------------------------------------------------------------------------
-const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/;
-const FENCE = /^\s*(`{3,})[^`]*$|^\s*(~{3,})/;
-const FENCED_ITEM = /^ *(?:[-*+]|\d{1,9}[.)])[ \t]+(?:(`{3,})[^`]*|(~{3,}).*)$/;
+const HEADING = new RegExp(
+  "^ {0,3}(#{1,6})(?:[ \t]+(" + PY_DOT + "*?))?[ \t]*" + END_OF_STRING + "",
+);
+const FENCE = new RegExp(
+  "^[" + PY_S_CLASS + "]*(`{3,})[^`]*" + END_OF_STRING + "|^[" + PY_S_CLASS + "]*(~{3,})",
+);
+const FENCED_ITEM = new RegExp(
+  "^ *(?:[-*+]|\\p{Nd}{1,9}[.)])[ \t]+(?:(`{3,})[^`]*|(~{3,})" + PY_DOT + "*)" + END_OF_STRING + "",
+  "u",
+);
 const TICKS = /`+/g;
 const SPAN = /(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n).)+?)(?<!`)\1(?!`)/gs;
 const QUOTED = /"[^"\n]*"|"[^"\n]*"/g;
-const QUESTION = /[?？][*_)\]]*[.,;:]?(?=\s|$)/;
-const ITEM = /^( *)(\d{1,9})[.)](?:[ \t]+(.*))?$/;
+const QUESTION = new RegExp("[?？][*_)\\]]*[.,;:]?(?=[" + PY_S_CLASS + "]|" + END_OF_STRING + ")");
+const ITEM = new RegExp(
+  "^( *)(\\p{Nd}{1,9})[.)](?:[ \t]+(" + PY_DOT + "*))?" + END_OF_STRING + "",
+  "u",
+);
 const BULLET = /^ {0,3}[-*+](?:[ \t]|$)/;
 const BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+const MARK1 = new RegExp(BOUND_L + "(TBD|TBC)" + BOUND_R + "", "u");
+const MARK2 = new RegExp(BOUND_L + "(TODO)" + BOUND_R + "[" + PY_S_CLASS + "]*:", "u");
+const MARK3 = new RegExp("^[^" + W_CLASS + "]*(TODO)[^" + W_CLASS + "]*" + END_OF_STRING + "", "u");
+const QSPLIT = new RegExp("(?<=[.!?？]+)[" + PY_S_CLASS + "]+|\\n[" + PY_S_CLASS + "]*");
 const PARTS: Array<[string, string]> = [
   ["problem / feature", "Problem / feature"],
   ["acceptance criteria", "Acceptance criteria"],
@@ -203,16 +229,10 @@ function tokenize(text: string): [string[], Array<[string, boolean]>] {
 }
 
 function norm(h: string): string {
-  const s = h
-    .trim()
-    .replace(/[ \t]+#+$/, "")
-    .trim()
-    .replace(/:$/, "");
-  return s
-    .replace(/\s+/g, " ")
-    .replace(/\s*\/\s*/g, " / ")
-    .trim()
-    .toLowerCase();
+  // text.ts: BASE norm strips like Python, spaces slashes, squashes \s-runs, lowers.
+  const s = pyTrim(pyTrim(pyTrim(h).replace(/[ \t]+#+$/, "")).replace(/:$/, ""));
+  const slashed = s.replace(new RegExp("[" + PY_S_CLASS + "]*/[" + PY_S_CLASS + "]*", "g"), " / ");
+  return pyLower(pyTrim(slashed.replace(new RegExp("[" + PY_S_CLASS + "]+", "g"), " ")));
 }
 
 interface Head {
@@ -253,11 +273,11 @@ function prose(lines: Array<[string, boolean]>): string {
 }
 
 function marked(p: string): string | null {
-  const m1 = /\b(TBD|TBC)\b/.exec(p);
+  const m1 = MARK1.exec(p);
   if (m1) return m1[1]!;
-  const m2 = /\b(TODO)\b\s*:/.exec(p);
+  const m2 = MARK2.exec(p);
   if (m2) return m2[1]!;
-  const m3 = /^\W*(TODO)\W*$/.exec(p);
+  const m3 = MARK3.exec(p);
   if (m3) return m3[1]!;
   return null;
 }
@@ -267,12 +287,13 @@ function question(p: string): string | null {
   const q = QUESTION.exec(masked);
   if (!q) return null;
   const before = p.slice(0, q.index + 1);
-  const parts = before.split(/(?<=[.!?？])\s+|\n\s*/);
+  const parts = before.split(QSPLIT);
   return parts[parts.length - 1] ?? null;
 }
 
 function clip(s: string, n = 70): string {
-  const t = s.split(/\s+/).filter(Boolean).join(" ");
+  // text.ts: BASE clip is " ".join(s.split()).
+  const t = pyWords(s).join(" ");
   return t.length <= n ? t : `${t.slice(0, n - 3)}...`;
 }
 
@@ -550,17 +571,23 @@ function selfTest(): void {
     const LIST = listR.out;
     const listLines = LIST.trim().split("\n").filter(Boolean);
     const DEF = listLines
+      // ASCII: turnpikes.sh --list emits ASCII slug-names; fields split on its runs.
       .filter((l) => l.split(/\s+/)[1] === "default")
+      // ASCII: turnpike slugs from --list are ASCII by the TABLE.
       .map((l) => l.split(/\s+/)[0])
       .join(", ");
+    // ASCII: turnpike slugs from --list are ASCII by the TABLE.
     const N1 = listLines[0]?.split(/\s+/)[0] ?? "";
+    // ASCII: turnpike slugs from --list are ASCII by the TABLE.
     const N2 = listLines[1]?.split(/\s+/)[0] ?? "";
+    // LOWER: turnpike slugs from --list are ASCII by the TABLE.
     const N2UP = N2.charAt(0).toUpperCase() + N2.slice(1);
     const NOPE = "zz-not-listed";
     if (!DEF || !N2) {
       console.error("self-test: turnpikes.sh needs a default set and two turnpikes");
       process.exit(1);
     }
+    // ASCII: turnpike slugs from --list are ASCII by the TABLE.
     if (listLines.some((l) => l.split(/\s+/)[0] === NOPE)) {
       console.error(`self-test: ${NOPE} is a turnpike; pick another unused name`);
       process.exit(1);
@@ -644,7 +671,7 @@ function selfTest(): void {
     copyFileSync(join(HERE, "tracker-kind.sh"), join(tmp, "bin", "tracker-kind.sh"));
     copyFileSync(join(HERE, "tracker-kind.ts"), join(tmp, "bin", "tracker-kind.ts"));
     mkdirSync(join(tmp, "bin", "lib"), { recursive: true });
-    for (const f of ["paths.ts", "proc.ts", "data.ts", "selftest.ts"]) {
+    for (const f of ["paths.ts", "proc.ts", "data.ts", "selftest.ts", "text.ts"]) {
       copyFileSync(join(HERE, "lib", f), join(tmp, "bin", "lib", f));
     }
     writeFileSync(join(tmp, "github.toml"), '[tracker]\nkind = "github"\n');
@@ -1121,7 +1148,7 @@ function selfTest(): void {
       copyFileSync(SELF, join(tmp, d, "ticket-check.sh"));
       copyFileSync(join(HERE, "ticket-check.ts"), join(tmp, d, "ticket-check.ts"));
       mkdirSync(join(tmp, d, "lib"), { recursive: true });
-      for (const f of ["paths.ts", "proc.ts", "data.ts", "selftest.ts"]) {
+      for (const f of ["paths.ts", "proc.ts", "data.ts", "selftest.ts", "text.ts"]) {
         copyFileSync(join(HERE, "lib", f), join(tmp, d, "lib", f));
       }
     }
@@ -1132,7 +1159,7 @@ function selfTest(): void {
       chmodSync(join(dir, "turnpikes.sh"), 0o755);
       const src = readFileSync(join(HERE, "turnpikes.ts"), "utf8");
       const out = src.replace(
-        /(const TABLE = `[\s\S]*?)(`;)/,
+        new RegExp("(const TABLE = `" + DOT_ALL + "*?)(`;)"),
         (_m, a: string, b: string) => `${a}\n${row}${b}`,
       );
       writeFileSync(join(dir, "turnpikes.ts"), out);
@@ -1249,7 +1276,7 @@ function selfTest(): void {
     copyFileSync(SELF, join(tmp, "silent", "ticket-check.sh"));
     copyFileSync(join(HERE, "ticket-check.ts"), join(tmp, "silent", "ticket-check.ts"));
     mkdirSync(join(tmp, "silent", "lib"), { recursive: true });
-    for (const f of ["paths.ts", "proc.ts", "data.ts", "selftest.ts"]) {
+    for (const f of ["paths.ts", "proc.ts", "data.ts", "selftest.ts", "text.ts"]) {
       copyFileSync(join(HERE, "lib", f), join(tmp, "silent", "lib", f));
     }
     writeFileSync(join(tmp, "silent", "turnpikes.sh"), "#!/bin/sh\nexit 2\n");
@@ -1446,6 +1473,33 @@ function selfTest(): void {
     );
     localsh(NOSTORE);
 
+    st.check("FENCE takes a U+001C indent like BASE", FENCE.test("\x1c```x"), "no match");
+    st.check(
+      "FENCED_ITEM takes an Arabic-Indic number like BASE",
+      FENCED_ITEM.test("\u0661. ```x"),
+      "no match",
+    );
+    st.check("QUESTION splits after U+001C like BASE", QUESTION.test("q?\x1c next"), "no match");
+    st.check("ITEM takes an Arabic-Indic number like BASE", ITEM.test("\u0661. x"), "no match");
+    st.check("HEADING crosses a CR like BASE", HEADING.test("## a\rb"), "no match");
+    st.check("MARK1 refuses TBD+long-s like BASE", MARK1.exec("x TBD\u017f") === null, "matched");
+    st.check("MARK2 refuses long-s+TODO like BASE", MARK2.exec("\u017fTODO:") === null, "matched");
+    st.check(
+      "MARK3 refuses long-s wrapping like BASE",
+      MARK3.exec("\u017fTODO\u017f") === null,
+      "matched",
+    );
+    st.check("QSPLIT splits at U+001C like BASE", "a.\x1cb".split(QSPLIT).length === 2, "no split");
+    st.check(
+      "norm eats U+001C around a slash like BASE",
+      norm("Problem\x1c/\x1cfeature") === "problem / feature",
+      JSON.stringify(norm("Problem\x1c/\x1cfeature")),
+    );
+    st.check(
+      "clip splits U+001C like BASE",
+      clip("a\x1cb", 70) === "a b",
+      JSON.stringify(clip("a\x1cb", 70)),
+    );
     st.finish();
   });
 }

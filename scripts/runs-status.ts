@@ -36,6 +36,7 @@ import {
 import { basename, join, resolve } from "node:path";
 import { withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import { pyWords } from "./lib/text.ts";
 
 interface RunRow {
   run: string;
@@ -214,7 +215,7 @@ withTempDir((tmp) => {
       console.log = origLog;
     }
     for (const line of out.split("\n")) {
-      const parts = line.split(/\s+/);
+      const parts = pyWords(line);
       if (parts[0] === name) return parts[parts.length - 1] ?? "";
     }
     return "";

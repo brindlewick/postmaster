@@ -22,6 +22,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run } from "./lib/proc.ts";
+import { END_OF_STRING, PY_DOT, PY_S_CLASS, pyTrim } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
 const SELF = join(HERE, "host.ts");
@@ -68,7 +69,7 @@ function clean(value: string): string {
     .join("");
 }
 function count(value: string | undefined, what: string): number {
-  if (value === undefined || !/^\d+$/.test(value))
+  if (value === undefined || !/^[0-9]+$/.test(value))
     die(`${what} must be a whole number, not '${String(value ?? "")}'`);
   const result = Number(value);
   if (!Number.isSafeInteger(result)) die(`${what} must be a whole number, not '${value}'`);
@@ -144,11 +145,15 @@ function handleOf(text: string): string {
   }
   if (!/^[a-z]/.test(handle)) handle = `p${handle}`;
   if (handle.length > 32) {
+    // ASCII: cksum prints CRC and size as ASCII digits; the first field is the checksum.
     const crc = run("cksum", [], { input: text }).out.split(/\s+/, 1)[0] ?? "0";
     handle = `${handle.slice(0, 23)}-${Number(crc).toString(16).padStart(8, "0")}`;
   }
   return handle;
 }
+// text.ts: BASE re.sub(r"\s{2,}\(.*\)$", "", line[5:]).strip() (host.sh:142).
+const NOTE_STRIP = new RegExp("[" + PY_S_CLASS + "]{2,}\\(" + PY_DOT + "*\\)" + END_OF_STRING);
+
 function nameCmd(dispatch: string, role = ""): string {
   if (!dispatch) die("usage: host.sh name <dispatch> [<role or lane>]");
   let name = "";
@@ -158,10 +163,7 @@ function nameCmd(dispatch: string, role = ""): string {
     for (const line of content.split(/\r?\n/)) {
       if (line.startsWith("## ")) inDispatch = line.trim() === "## Dispatch";
       else if (inDispatch && line.startsWith("name:")) {
-        name = line
-          .slice(5)
-          .replace(/\s{2,}\(.*\)$/, "")
-          .trim();
+        name = pyTrim(line.slice(5).replace(NOTE_STRIP, ""));
         break;
       }
     }
@@ -185,6 +187,7 @@ function bootId(): string {
   try {
     return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
   } catch {
+    // ASCII: sysctl kern.boottime is kernel-emitted ASCII on macOS.
     return runBoot("sysctl", "-n", "kern.boottime").split(/\s+/).join(" ");
   }
 }
@@ -192,8 +195,10 @@ function bootTime(): number | null {
   try {
     const text = readFileSync("/proc/stat", "utf8");
     const line = text.split("\n").find((row: string) => row.startsWith("btime "));
+    // ASCII: /proc/stat btime is kernel-emitted ASCII.
     if (line) return Number(line.split(/\s+/)[1]);
   } catch {}
+  // ASCII: sysctl kern.boottime is kernel-emitted ASCII on macOS.
   const words = runBoot("sysctl", "-n", "kern.boottime").replace(/,/g, " ").split(/\s+/);
   const at = words.indexOf("sec");
   return at < 0 ? null : Number(words[at + 1]);
@@ -207,6 +212,7 @@ function procStat(pid: number): { name: string; fields: string[] } | null {
       fields: raw
         .slice(pos + 1)
         .trim()
+        // ASCII: /proc/<pid>/stat past the name is kernel-emitted ASCII numerics.
         .split(/\s+/),
     };
   } catch {
@@ -218,6 +224,7 @@ function startOf(pid: number): string {
   if (p) return p.fields[0] !== "Z" ? (p.fields[19] ?? "") : "";
   const fields = run("ps", ["-o", "stat=,lstart=", "-p", String(pid)])
     .out.trim()
+    // ASCII: ps -o stat/lstart is tool-emitted ASCII; the date holds single spaces.
     .split(/\s+/);
   return fields.length >= 6 && !fields[0]!.startsWith("Z") ? fields.slice(1, 6).join(" ") : "";
 }
@@ -225,7 +232,7 @@ function processes(): Map<number, ProcessInfo> {
   const table = new Map<number, ProcessInfo>();
   try {
     for (const entry of readdirSync("/proc")) {
-      if (!/^\d+$/.test(entry)) continue;
+      if (!/^[0-9]+$/.test(entry)) continue;
       const stat = procStat(Number(entry));
       if (stat && stat.fields[0] !== "Z" && stat.fields[2] && stat.fields[19])
         table.set(Number(entry), { group: Number(stat.fields[2]), start: stat.fields[19]! });
@@ -234,11 +241,12 @@ function processes(): Map<number, ProcessInfo> {
   } catch {}
   const output = run("ps", ["-A", "-o", "pid=,pgid=,stat=,lstart="]).out;
   for (const line of output.split(/\r?\n/)) {
+    // ASCII: ps -A -o pid/pgid/stat/lstart is tool-emitted ASCII.
     const fields = line.trim().split(/\s+/);
     if (
       fields.length >= 8 &&
-      /^\d+$/.test(fields[0]!) &&
-      /^\d+$/.test(fields[1]!) &&
+      /^[0-9]+$/.test(fields[0]!) &&
+      /^[0-9]+$/.test(fields[1]!) &&
       !fields[2]!.startsWith("Z")
     )
       table.set(Number(fields[0]), {
@@ -249,7 +257,7 @@ function processes(): Map<number, ProcessInfo> {
   return table;
 }
 function startedAt(start: string): number | null {
-  if (/^\d+$/.test(start)) {
+  if (/^[0-9]+$/.test(start)) {
     const booted = bootTime();
     const hz = Number(run("getconf", ["CLK_TCK"]).out.trim()) || 100;
     return booted === null ? null : booted + Number(start) / hz;
@@ -282,7 +290,7 @@ function loadRecord(path: string): Registry | null {
       else if (key === "boot") rec.boot = value;
       else if (key === "member") {
         const [pid, start] = value.split(" ", 2);
-        if (/^\d+$/.test(pid ?? "") && start) rec.members.push([Number(pid), start]);
+        if (/^[0-9]+$/.test(pid ?? "") && start) rec.members.push([Number(pid), start]);
       }
     }
     return rec;
@@ -369,7 +377,7 @@ function registryScan(dir: string): Array<{ group: string; name: string; roots: 
   } catch {}
   const found: Array<{ group: string; name: string; roots: string[] }> = [];
   for (const name of names) {
-    if (!/^\d+$/.test(name)) continue;
+    if (!/^[0-9]+$/.test(name)) continue;
     const path = join(registryDir(), name);
     const rec = loadRecord(path);
     if (!rec) continue;
@@ -1082,7 +1090,7 @@ function processTable(): Map<number, ProcRow> {
   const rows = new Map<number, ProcRow>();
   try {
     for (const entry of readdirSync("/proc")) {
-      if (!/^\d+$/.test(entry)) continue;
+      if (!/^[0-9]+$/.test(entry)) continue;
       try {
         const raw = readFileSync(`/proc/${entry}/stat`, "utf8");
         const close = raw.lastIndexOf(")");
@@ -1090,6 +1098,7 @@ function processTable(): Map<number, ProcRow> {
         const fields = raw
           .slice(close + 1)
           .trim()
+          // ASCII: /proc/<pid>/stat past the name is kernel-emitted ASCII numerics.
           .split(/\s+/);
         rows.set(Number(entry), {
           ppid: Number(fields[1]),
@@ -1104,12 +1113,13 @@ function processTable(): Map<number, ProcRow> {
   } catch {}
   const output = run("ps", ["-A", "-o", "pid=,ppid=,pgid=,stat=,lstart=,comm="]).out;
   for (const line of output.split(/\r?\n/)) {
+    // ASCII: ps -A -o ... is tool-emitted ASCII; comm may hold spaces, hence the limit.
     const fields = line.trim().split(/\s+/, 10);
     if (
       fields.length !== 10 ||
-      !/^\d+$/.test(fields[0]!) ||
-      !/^\d+$/.test(fields[1]!) ||
-      !/^\d+$/.test(fields[2]!)
+      !/^[0-9]+$/.test(fields[0]!) ||
+      !/^[0-9]+$/.test(fields[1]!) ||
+      !/^[0-9]+$/.test(fields[2]!)
     )
       continue;
     rows.set(Number(fields[0]), {
@@ -1130,6 +1140,8 @@ function commandLine(pid: number): string {
   }
 }
 function protectedProcess(pid: number, name: string): string {
+  // ASCII: argv words are NUL-separated and the joiner spaces them;
+  // ASCII: non-ASCII bytes glue to their word, never split it.
   const words = commandLine(pid).split(/\s+/);
   const tail = words.slice(1);
   const identity = basename(words[0] ?? name);
@@ -1198,7 +1210,7 @@ async function stopTree(
 ): Promise<{ code: number; text: string }> {
   const parsed: Array<{ kind: string; pid: number; start: string }> = [];
   for (const root of roots) {
-    const match = /^(group|tree)\|(\d+)\|(.+)$/.exec(root);
+    const match = /^(group|tree)\|([0-9]+)\|(.+)$/.exec(root);
     if (match) parsed.push({ kind: match[1]!, pid: Number(match[2]), start: match[3]! });
   }
   let table = processTable();
@@ -1355,6 +1367,7 @@ function isKind(kind: string): boolean {
   const result = herdr(["agent"]);
   return result.err.split(/\r?\n/).some((line) =>
     line
+      // ASCII: herdr agent kinds: is tool-emitted ASCII kind-slugs.
       .replace(/^\s*kinds:\s*/, "")
       .split("|")
       .includes(kind),

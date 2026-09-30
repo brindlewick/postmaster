@@ -576,6 +576,15 @@ async function check(
   if (detail) console.log(`         ${detail.replace(/\n/g, "\n         ")}`);
   return false;
 }
+// text.ts: BASE cuts where-values at the first ASCII space (${v%% *}, host.sh:1111);
+// a tab or exotic space inside a value survives there, so it must survive here.
+export function kvOf(text: string, key: string): string {
+  // [^ \r\n]: BASE reads command-substitution (trailing newlines already
+  // stripped); the port reads .out raw, so the value stops at line breaks itself.
+  return new RegExp("(?:^|[ \t\r\n])" + key + "=([^ \r\n]+)").exec(text)?.[1] ?? "";
+}
+export const TRIPLE_RE = /space=([^ \r\n]+) tab=([^ \r\n]+) pane=([^ \r\n]+)/;
+
 async function runControls(): Promise<void> {
   const root = mkdtempSync(join(HERE, ".host-self-test-"));
   let failures = 0;
@@ -583,6 +592,24 @@ async function runControls(): Promise<void> {
     if (!(await check(label, test, detail))) failures++;
   };
   try {
+    await pass(
+      "where-values keep a tab like BASE ${v%% *}",
+      () => kvOf("host=herdr space=a\tb tab=t", "space") === "a\tb",
+    );
+    await pass(
+      "where-values keep U+001C like BASE ${v%% *}",
+      () => kvOf("space=a\x1cb", "space") === "a\x1cb",
+    );
+    await pass("where-values stop at an ASCII space", () => kvOf("space=a b", "space") === "a");
+    await pass(
+      "the where-triple keeps a tabby value",
+      () => TRIPLE_RE.exec("space=a\tb tab=t pane=p")?.[1] === "a\tb",
+    );
+    await pass("where-values stop at a trailing newline", () => kvOf("space=a\n", "space") === "a");
+    await pass(
+      "the where-triple stops at a trailing newline",
+      () => TRIPLE_RE.exec("space=a tab=t pane=p\n")?.[3] === "p",
+    );
     const paths = await makeHarness(root);
     const f = await setup(root);
     const noHost = paths.sys,
@@ -633,6 +660,11 @@ async function runControls(): Promise<void> {
     await pass(
       "control characters never reach a label",
       () => callText(["name", logs], noHost, root) === "#2, a bell and an escape]0;x · y",
+    );
+    writeFileSync(join(logs, "brief.md"), "## Dispatch\nname: Bell\x1c\x1c(a note)\n");
+    await pass(
+      "a template note after exotic spaces strips like BASE",
+      () => callText(["name", logs], noHost, root) === "Bell",
     );
     rmSync(join(logs, "brief.md"), { force: true });
 
@@ -958,6 +990,7 @@ async function runControls(): Promise<void> {
       readFileSync("/proc/stat", "utf8")
         .split("\n")
         .find((line: string) => line.startsWith("btime ")) ?? "btime 0";
+    // ASCII: /proc/stat is kernel-emitted ASCII; btime's fields split on spaces.
     const bootSeconds = Number(bootLine.split(/\s+/)[1]);
     const ticks = Number(exec("getconf", ["CLK_TCK"]).out.trim()) || 100;
     const procStart = (pid: string): string => {
@@ -966,6 +999,7 @@ async function runControls(): Promise<void> {
         stat
           .slice(stat.lastIndexOf(")") + 1)
           .trim()
+          // ASCII: /proc/<pid>/stat past the name is kernel-emitted ASCII numerics.
           .split(/\s+/)[19] ?? ""
       );
     };
@@ -1254,7 +1288,7 @@ async function runControls(): Promise<void> {
       f.caller,
       { CALLER_VAR: "v", HERDR_PANE_ID: "caller-pane" },
     );
-    const place = /space=(\S+) tab=(\S+) pane=(\S+)/.exec(herdrRun.out);
+    const place = TRIPLE_RE.exec(herdrRun.out);
     await pass(
       "it says where it ran",
       () => herdrRun.code === 0 && !!place,
@@ -1490,7 +1524,7 @@ async function runControls(): Promise<void> {
       stubs,
       f.caller,
     );
-    const cloneSpace = /space=(\S+)/.exec(cloneRun.out)?.[1] ?? "";
+    const cloneSpace = kvOf(cloneRun.out, "space");
     const cloneCalls = calls(root, "herdr");
     await pass(
       "it opens as a space of the launch's own, labelled with its name, and no other",
@@ -1534,7 +1568,7 @@ async function runControls(): Promise<void> {
       f.caller,
     );
     await marker(markerPath("c3"));
-    const plainSpace = /space=(\S+)/.exec(plainRun.out)?.[1] ?? "";
+    const plainSpace = kvOf(plainRun.out, "space");
     const plainClose = execHost(["close", plain], stubs, root);
     await pass(
       "a plain clone is no scratch: it opens as a repository, and close refuses its space",
@@ -1998,9 +2032,9 @@ export async function live(): Promise<void> {
         { EMIT_SLEEP: "8" },
       );
       const launch = got.out.trim();
-      const space = /(?:^|\s)space=([^\s]+)/.exec(launch)?.[1] ?? "";
-      const pane = /(?:^|\s)pane=([^\s]+)/.exec(launch)?.[1] ?? "";
-      const tab = /(?:^|\s)tab=([^\s]+)/.exec(launch)?.[1] ?? "";
+      const space = kvOf(launch, "space");
+      const pane = kvOf(launch, "pane");
+      const tab = kvOf(launch, "tab");
       if (space) opened.push(space);
       await pass(
         "the launch runs in Herdr",
@@ -2119,7 +2153,7 @@ export async function live(): Promise<void> {
         root,
       );
       await sleep(2000);
-      const stoppedTab = /(?:^|\s)tab=([^\s]+)/.exec(stopped.out)?.[1] ?? "";
+      const stoppedTab = kvOf(stopped.out, "tab");
       liveHerdr("tab", "close", stoppedTab);
       const childPid = Number(readFileSync(join(f.logs, "l5.pid"), "utf8").trim());
       await pass(
@@ -2134,7 +2168,7 @@ export async function live(): Promise<void> {
         f.caller,
         root,
       );
-      const reviewSpace = /(?:^|\s)space=([^\s]+)/.exec(reviewer.out)?.[1] ?? "";
+      const reviewSpace = kvOf(reviewer.out, "space");
       if (reviewSpace) opened.push(reviewSpace);
       await pass(
         "a detached reviewer scratch opens as a space too",
@@ -2157,7 +2191,7 @@ export async function live(): Promise<void> {
         f.caller,
         root,
       );
-      const cloneSpace = /(?:^|\s)space=([^\s]+)/.exec(clone.out)?.[1] ?? "";
+      const cloneSpace = kvOf(clone.out, "space");
       if (cloneSpace) opened.push(cloneSpace);
       await pass(
         "a reviewer's scratch clone opens as a space of its own",
@@ -2259,7 +2293,7 @@ export async function live(): Promise<void> {
         { POSTMASTER_HOST: "tmux" },
       );
       const launch = got.out.trim();
-      tmuxSession = /(?:^|\s)session=([^\s]+)/.exec(launch)?.[1] ?? "";
+      tmuxSession = kvOf(launch, "session");
       await pass(
         "the launch runs in a window of session postmaster-<repo>, named for it",
         () =>

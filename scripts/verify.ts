@@ -37,6 +37,7 @@ import { parseTomlText, tryTomlFile } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import { PY_DOT, PY_S_CLASS, pySplitLines } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
 const DECLARATION = ".postmaster/project.toml";
@@ -58,9 +59,13 @@ const WEB = new Set([
   "@solidjs/start",
 ]);
 const SUITE_SCRIPTS = ["e2e", "test:e2e", "test:browser", "playwright", "cypress"];
-const RESULT_RE =
-  /^\s*(?:[-*]\s+)?(`?)([a-z][a-z0-9-]*): (pass|fail|not run), exit (-?\d+|-), (\d+)s: (.*?)\1\s*$/;
-const DETAIL_RE = /^on=(\S+)@([0-9a-f]+) result=(\S+) exit=(\S+)/;
+const RESULT_RE = new RegExp(
+  `^[${PY_S_CLASS}]*(?:[-*][${PY_S_CLASS}]+)?(\`?)([a-z][a-z0-9-]*): (pass|fail|not run), exit (-?\\p{Nd}+|-), (\\p{Nd}+)s: (${PY_DOT}*?)\\1[${PY_S_CLASS}]*$`,
+  "u",
+);
+const DETAIL_RE = new RegExp(
+  `^on=([^${PY_S_CLASS}]+)@([0-9a-f]+) result=([^${PY_S_CLASS}]+) exit=([^${PY_S_CLASS}]+)`,
+);
 const ANSI_RE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])/g;
 const CONTROL_RE = /[\x00-\x08\x0b-\x1f\x7f]/g;
 
@@ -442,13 +447,16 @@ function recordedChecks(dispatch: string): Check[] {
   return (d as any).checks;
 }
 
+const TICKET_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Ticket[${PY_S_CLASS}]*$`);
+const PROFILE_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Project profile[${PY_S_CLASS}]*$`);
+
 function ticketPart(text: string): string {
-  const lines = text.split("\n");
-  const start = lines.findIndex((l) => /^##\s+Ticket\s*$/.test(l));
+  const lines = pySplitLines(text);
+  const start = lines.findIndex((l) => TICKET_LINE_RE.test(l));
   if (start === -1) return text;
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i++) {
-    if (/^##\s+Project profile\s*$/.test(lines[i]!)) {
+    if (PROFILE_LINE_RE.test(lines[i]!)) {
       end = i;
       break;
     }
@@ -924,7 +932,7 @@ if (argv[0] === "--self-test") {
     }
     const { checks, decl } = resolveChecks(repo, gate, true);
     const record = {
-      written: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+      written: new Date().toISOString().replace(/\.[0-9]+Z$/, "Z"),
       repo,
       head: git(repo, "rev-parse", "HEAD"),
       declaration: decl,
@@ -1057,6 +1065,25 @@ if (argv[0] === "--self-test") {
 withTempDir((tmp) => {
   const SELF = join(HERE, "verify.sh");
   const st = new SelfTest();
+  {
+    // Unicode primitives, BASE verify.sh python: every expectation python3-verified.
+    const rr = RESULT_RE.exec("- gate: pass, exit ٠٠, ١٢s: make x");
+    st.check(
+      "result lines may carry Arabic-Indic digits",
+      rr !== null && rr[4] === "٠٠" && rr[5] === "١٢",
+      JSON.stringify(rr?.slice(4, 6) ?? null),
+    );
+    const dd = DETAIL_RE.exec("on=br\x1fx@abc123 result=pass exit=0");
+    st.check(
+      "a branch stops at U+001F (Python space)",
+      dd === null,
+      JSON.stringify(dd?.[1] ?? null),
+    );
+    const tp1 = ticketPart("x\n##\x1fTicket\na\n##\x1fProject profile\nb\n");
+    st.check("ticket part opens and ends on U+001F headings", tp1 === "a\n", JSON.stringify(tp1));
+    const tp2 = ticketPart("x\x1c## Ticket\ny\n");
+    st.check("ticket part splits lines on U+001C (splitlines)", tp2 === "y\n", JSON.stringify(tp2));
+  }
 
   function G(dir: string, ...args: string[]): { code: number; out: string } {
     const r = run("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
@@ -1664,7 +1691,7 @@ use = "cli-examples"
   }
   {
     const other = readFileSync(join(tmp, "summary.md"), "utf-8").replace(
-      /^gate: pass, exit 0, (\d+)s: true/m,
+      /^gate: pass, exit 0, ([0-9]+)s: true/m,
       "gate: pass, exit 0, $1s: make",
     );
     writeFileSync(join(tmp, "other.md"), other);

@@ -28,6 +28,7 @@ import { basename, dirname, join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import { PY_S_CLASS } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
 const DEFAULT_LIMIT = 2400;
@@ -85,6 +86,8 @@ function stateSave(path: string, st: RoundState): void {
   writeFileSync(tmp, `${JSON.stringify(st, null, 2)}\n`);
   renameSync(tmp, path);
 }
+
+const ARG_SPLIT_RE = new RegExp(`[${PY_S_CLASS},]+`);
 
 function stateCmd(
   what: string,
@@ -151,7 +154,7 @@ function stateCmd(
       limit: limit!,
       source: source!,
       deadline: monotonic() + limit!,
-      started: now.toISOString().replace(/\.\d+Z$/, "Z"),
+      started: now.toISOString().replace(/\.[0-9]+Z$/, "Z"),
       reviewers: [],
     });
     out.push(`${limit!}\t${source!}`);
@@ -186,7 +189,7 @@ function stateCmd(
             started: "",
             reviewers: [],
           } as RoundState);
-    const given = args.flatMap((a) => a.split(/[\s,]+/)).filter((x) => x !== "");
+    const given = args.flatMap((a) => a.split(ARG_SPLIT_RE)).filter((x) => x !== "");
     if (given.length > 0) {
       const pairs: Array<[string, string]> = [];
       const bad: string[] = [];
@@ -589,6 +592,14 @@ esac
     if (cond) st.ok(label);
     else st.fail(`${label} (exit ${rc})`, out);
   };
+  {
+    // BASE re.split(r"[\s,]+", a): U+001C splits pairs (python3-verified).
+    const splitPairs = "bug:four\x1cstyle:one".split(ARG_SPLIT_RE).filter((x) => x !== "");
+    check(
+      "reviewer pairs split on U+001C",
+      JSON.stringify(splitPairs) === JSON.stringify(["bug:four", "style:one"]),
+    );
+  }
   const runSelf = (...args: string[]): void => {
     const t0 = Date.now();
     const r = run(self, args);
@@ -833,7 +844,7 @@ esac
     "echo exit:$?",
   ].join("\n");
   const staleR = run("bash", ["-c", staleScript]);
-  const staleExit = (staleR.out.match(/exit:(\d+)/)?.[1] ?? "1").trim();
+  const staleExit = (staleR.out.match(/exit:([0-9]+)/)?.[1] ?? "1").trim();
   let staleStdout = "";
   try {
     staleStdout = readFileSync(staleOut, "utf8");

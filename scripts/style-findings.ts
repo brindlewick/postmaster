@@ -19,6 +19,18 @@ import { basename, dirname, join, posix, resolve } from "node:path";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import {
+  BOUND_R,
+  DOT_ALL,
+  digitValue,
+  END_OF_STRING,
+  PY_DOT,
+  PY_S_CLASS,
+  pyLower,
+  pyTrim,
+  pyWords,
+  W_CLASS,
+} from "./lib/text.ts";
 
 // --- constants ------------------------------------------------------------------------------
 const FORMS =
@@ -58,12 +70,96 @@ function named(name: string, text: string): boolean {
   return re.test(text);
 }
 
+const JSTARS = new RegExp("^[" + PY_S_CLASS + "]*\\*");
+const JSCOM = new RegExp("(^|[" + PY_S_CLASS + "])\\/\\/(" + PY_DOT + "*)" + END_OF_STRING + "");
+const SHCOM = new RegExp("(^|[" + PY_S_CLASS + "])[#;](" + PY_DOT + "*)" + END_OF_STRING + "");
+const JALIAS = new RegExp(
+  "^alias[" +
+    PY_S_CLASS +
+    "]+([" +
+    W_CLASS +
+    "-]+)[" +
+    PY_S_CLASS +
+    "]*:=[" +
+    PY_S_CLASS +
+    "]*([" +
+    W_CLASS +
+    "-]+)",
+  "u",
+);
+const JVAR = new RegExp(
+  "^(?:export[" +
+    PY_S_CLASS +
+    "]+)?([A-Za-z_][" +
+    W_CLASS +
+    "-]*)[" +
+    PY_S_CLASS +
+    "]*:=[" +
+    PY_S_CLASS +
+    "]*(" +
+    PY_DOT +
+    "*)" +
+    END_OF_STRING +
+    "",
+  "u",
+);
+const JRECIPE = new RegExp(
+  "^@?([A-Za-z_][" +
+    W_CLASS +
+    "-]*)" +
+    BOUND_R +
+    "[^:]*:(?!=)(" +
+    PY_DOT +
+    "*)" +
+    END_OF_STRING +
+    "",
+  "u",
+);
+const JDEPS = new RegExp("[A-Za-z_][" + W_CLASS + "-]*", "gu");
+const MAKEINC = new RegExp(
+  "^(?:-include|sinclude|include)[" + PY_S_CLASS + "]+(" + PY_DOT + "*)" + END_OF_STRING + "",
+);
+const RULE = new RegExp(
+  "^([^:=]+?)[" + PY_S_CLASS + "]*::?(?!=)(" + PY_DOT + "*)" + END_OF_STRING + "",
+);
+const YPKGS = new RegExp("^packages[" + PY_S_CLASS + "]*:");
+const YITEM = new RegExp("^[" + PY_S_CLASS + "]+-[" + PY_S_CLASS + "]*");
+const YOUT = new RegExp(
+  "^[" +
+    PY_S_CLASS +
+    "]+-[" +
+    PY_S_CLASS +
+    "]*|[" +
+    PY_S_CLASS +
+    "]+#(" +
+    PY_DOT +
+    "*)" +
+    END_OF_STRING +
+    "",
+  "g",
+);
+const YIND = new RegExp("^[" + PY_S_CLASS + "]");
+const MVER = /^\p{Nd}+(\.\p{Nd}+)?$/u;
+const MUSTACHE = new RegExp(
+  "\\{\\{[" + PY_S_CLASS + "]*([A-Za-z_][" + W_CLASS + "-]*)[" + PY_S_CLASS + "]*\\}\\}",
+  "gu",
+);
+const COVERSPLIT = new RegExp("[," + PY_S_CLASS + "]+" + "");
+const YARNRE = /^yarn@(\p{Nd}+)/u;
+const MENDEF = new RegExp("^[" + PY_S_CLASS + "]*endef" + BOUND_R + "", "u");
+const MIFCOND = new RegExp("^(?:ifeq|ifneq|ifdef|ifndef|else|endif)" + BOUND_R + "", "u");
+const MDEFINE = new RegExp(
+  "^(?:(?:export|override)[" + PY_S_CLASS + "]+)*define" + BOUND_R + "",
+  "u",
+);
+
 function stripJs(text: string): string {
-  text = text.replace(/\/\*[\s\S]*?\*\//g, " ");
+  // text.ts: [\s\S] is every char in both languages; DOT_ALL spells it bare.
+  text = text.replace(new RegExp("/\\*" + DOT_ALL + "*?" + "\\*/", "g"), " ");
   return text
     .split("\n")
-    .filter((l) => !/^\s*\*/.test(l))
-    .map((l) => l.replace(/(^|\s)\/\/.*$/, "$1"))
+    .filter((l) => !JSTARS.test(l))
+    .map((l) => l.replace(JSCOM, "$1"))
     .join("\n");
 }
 
@@ -72,7 +168,7 @@ function configText(text: string, path: string): string {
   if (path.endsWith(".json")) return text;
   return text
     .split("\n")
-    .map((l) => l.replace(/(^|\s)[#;].*$/, "$1"))
+    .map((l) => l.replace(SHCOM, "$1"))
     .join("\n");
 }
 
@@ -112,9 +208,8 @@ function findings(dispatch: string): { style: Finding[]; faults: string[] } {
       die(`${path} line ${n + 1} is not JSON`);
     }
     if (!e || typeof e !== "object" || e.action !== "finding") continue;
-    const words = String(e.detail ?? "")
-      .split(/\s+/)
-      .filter(Boolean);
+    // text.ts: BASE words = str(detail).split(None, 1); first-word + rest.
+    const words = pyWords(String(e.detail ?? ""));
     const first = words[0] ?? "";
     if (first !== "gating" && first !== "style") {
       faults.push(
@@ -141,14 +236,21 @@ function findings(dispatch: string): { style: Finding[]; faults: string[] } {
 const MARK = "(?:\\*\\*|__)?";
 
 function field(line: string, key: string, stops: string[]): string | null {
-  const m = new RegExp(`\\s*(?:[-*+]\\s+)?${MARK}${key}${MARK}\\s*:${MARK}(.*)$`, "i").exec(line);
+  // text.ts: BASE re.match(r"\s*(?:[-*+]\s+)?MARK key MARK\s*:MARK(.*)$", re.I).
+  const m = new RegExp(
+    `[${PY_S_CLASS}]*(?:[-*+][${PY_S_CLASS}]+)?${MARK}${key}${MARK}[${PY_S_CLASS}]*:${MARK}(${PY_DOT}*)${END_OF_STRING}`,
+    "i",
+  ).exec(line);
   if (!m) return null;
   let v = m[1] ?? "";
   const stopPat = stops.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-  const nxt = new RegExp(`\\s+${MARK}(?:${stopPat})${MARK}\\s*:${MARK}(?=\\s|$)`, "i").exec(v);
+  const nxt = new RegExp(
+    `[${PY_S_CLASS}]+${MARK}(?:${stopPat})${MARK}[${PY_S_CLASS}]*:${MARK}(?=[${PY_S_CLASS}]|${END_OF_STRING})`,
+    "i",
+  ).exec(v);
   if (nxt) v = v.slice(0, nxt.index);
-  v = v.trim();
-  if (v.length > 1 && v[0] === "`" && v[v.length - 1] === "`") v = v.slice(1, -1).trim();
+  v = pyTrim(v);
+  if (v.length > 1 && v[0] === "`" && v[v.length - 1] === "`") v = pyTrim(v.slice(1, -1));
   return v;
 }
 
@@ -171,7 +273,7 @@ function profile(dispatch: string): { repo: string | null; gate: string | null }
   }
   return {
     repo: repo || null,
-    gate: gate && gate.toLowerCase() !== "none" ? gate : null,
+    gate: gate && pyLower(gate) !== "none" ? gate : null,
   };
 }
 
@@ -204,6 +306,7 @@ class Tree {
       if (tabIdx < 0) continue;
       const meta = ent.slice(0, tabIdx);
       const path = ent.slice(tabIdx + 1);
+      // ASCII: git ls-tree --format prints mode, blob-sha and path tab-separated in ASCII.
       const f = meta.split(/\s+/);
       if (f.length === 3 && f[1] === "blob") {
         this.blobs.set(path, { mode: f[0]!, sha: f[2]! });
@@ -682,12 +785,16 @@ function parseJust(text: string): JustRecipes {
   let first: string | null = null;
   let current: string | null = null;
   for (const line of text.split("\n")) {
-    if (current !== null && (line.startsWith(" ") || line.startsWith("\t") || line.trim() === "")) {
-      if (line.trim()) recipes.get(current)?.body.push(line.trim());
+    // text.ts: BASE strips justfile lines with Python whitespace.
+    if (
+      current !== null &&
+      (line.startsWith(" ") || line.startsWith("\t") || pyTrim(line) === "")
+    ) {
+      if (pyTrim(line)) recipes.get(current)?.body.push(pyTrim(line));
       continue;
     }
     current = null;
-    const s = line.trim();
+    const s = pyTrim(line);
     if (
       !s ||
       s.startsWith("#") ||
@@ -697,20 +804,20 @@ function parseJust(text: string): JustRecipes {
       s.startsWith("mod ")
     )
       continue;
-    let m = /^alias\s+([\w-]+)\s*:=\s*([\w-]+)/.exec(s);
+    let m = JALIAS.exec(s);
     if (m) {
       recipes.set(m[1]!, { deps: [m[2]!], body: [] });
       continue;
     }
-    m = /^(?:export\s+)?([A-Za-z_][\w-]*)\s*:=\s*(.*)$/.exec(s);
+    m = JVAR.exec(s);
     if (m) {
       vars.set(m[1]!, m[2]?.trim().replace(/^['"]|['"]$/g, ""));
       continue;
     }
-    m = /^@?([A-Za-z_][\w-]*)\b[^:]*:(?!=)(.*)$/.exec(s);
+    m = JRECIPE.exec(s);
     if (m) {
       current = m[1]!;
-      const deps = m[2]?.replace(/\([^)]*\)/g, "").match(/[A-Za-z_][\w-]*/g) ?? [];
+      const deps = m[2]?.replace(/\([^)]*\)/g, "").match(JDEPS) ?? [];
       recipes.set(current, { deps, body: [] });
       if (first === null) first = current;
     }
@@ -729,7 +836,20 @@ class Makefile {
   first: string | null = null;
   goal: string;
 
-  static ASSIGN = /^(?:(?:export|override)\s+)*([A-Za-z0-9_.-]+)\s*(:{1,3}=|[?+!]?=)\s*(.*)$/;
+  // text.ts: BASE ASSIGN splits Python whitespace; values bar only LF.
+  static ASSIGN = new RegExp(
+    "^(?:(?:export|override)[" +
+      PY_S_CLASS +
+      "]+)*([A-Za-z0-9_.-]+)[" +
+      PY_S_CLASS +
+      "]*(:{1,3}=|[?+!]?=)[" +
+      PY_S_CLASS +
+      "]*(" +
+      PY_DOT +
+      "*)" +
+      END_OF_STRING +
+      "",
+  );
 
   constructor(tree: Tree, path: string, cwd: string, sets: Record<string, string>) {
     this.t = tree;
@@ -758,7 +878,10 @@ class Makefile {
   }
 
   recipe(line: string): string {
-    return this.expand(line.replace(/^\s*[@+-]*/, "")).replace(/\$\$/g, "$");
+    return this.expand(line.replace(new RegExp("^[" + PY_S_CLASS + "]*[@+-]*"), "")).replace(
+      /\$\$/g,
+      "$",
+    );
   }
 
   read(path: string, depth: number): void {
@@ -767,7 +890,7 @@ class Makefile {
     let define = false;
     for (const line of (text ?? "").replace(/\\\r?\n/g, " ").split("\n")) {
       if (define) {
-        define = !/^\s*endef\b/.test(line);
+        define = !MENDEF.test(line);
         continue;
       }
       if (line.startsWith("\t")) {
@@ -777,15 +900,15 @@ class Makefile {
         continue;
       }
       const s = line.replace(/(?<!\\)#.*$/, "").trim();
-      if (!s || /^(?:ifeq|ifneq|ifdef|ifndef|else|endif)\b/.test(s)) continue;
-      if (/^(?:(?:export|override)\s+)*define\b/.test(s)) {
+      if (!s || MIFCOND.test(s)) continue;
+      if (MDEFINE.test(s)) {
         define = true;
         current = null;
         continue;
       }
-      let m = /^(?:-include|sinclude|include)\s+(.*)$/.exec(s);
+      let m = MAKEINC.exec(s);
       if (m) {
-        for (const inc of this.expand(m[1]!).split(/\s+/)) {
+        for (const inc of pyWords(this.expand(m[1]!))) {
           if (depth < 10) {
             for (const p of this.t.glob(this.cwd, inc)) this.read(p, depth + 1);
           }
@@ -800,7 +923,7 @@ class Makefile {
           if (op === "?=") {
             if (!this.vars.has(name!)) this.vars.set(name!, value!);
           } else if (op === "+=") {
-            this.vars.set(name!, `${this.vars.get(name!) ?? ""} ${value!}`.trim());
+            this.vars.set(name!, pyTrim(`${this.vars.get(name!) ?? ""} ${value!}`));
           } else {
             this.vars.set(name!, op?.startsWith(":") ? this.expand(value!) : value!);
           }
@@ -808,23 +931,19 @@ class Makefile {
         current = null;
         continue;
       }
-      m = /^([^:=]+?)\s*::?(?!=)(.*)$/.exec(s);
-      if (!m || Makefile.ASSIGN.test(m[2]?.trim())) {
+      m = RULE.exec(s);
+      if (!m || Makefile.ASSIGN.test(pyTrim(m[2] ?? ""))) {
         current = null;
         continue;
       }
       const [_, targets, rest] = m;
       const semiIdx = rest?.indexOf(";");
       const prereqs = semiIdx >= 0 ? rest?.slice(0, semiIdx) : rest!;
-      const inline = semiIdx >= 0 ? rest?.slice(semiIdx + 1).trim() : "";
-      current = this.expand(targets!).split(/\s+/);
+      const inline = semiIdx >= 0 ? pyTrim(rest?.slice(semiIdx + 1) ?? "") : "";
+      current = pyWords(this.expand(targets!));
       for (const t of current) {
         if (!this.rules.has(t)) this.rules.set(t, { prereqs: [], recipe: [] });
-        this.rules.get(t)?.prereqs.push(
-          ...this.expand(prereqs)
-            .split(/\s+/)
-            .filter((p) => p && p !== "|"),
-        );
+        this.rules.get(t)?.prereqs.push(...pyWords(this.expand(prereqs)).filter((p) => p !== "|"));
         if (inline) this.rules.get(t)?.recipe.push(inline);
         if (this.first === null && !t.startsWith(".") && !t.includes("%")) this.first = t;
       }
@@ -960,8 +1079,8 @@ class Reach {
 
   berry(): boolean {
     const pm = String(this.package("").packageManager ?? "");
-    const m = /^yarn@(\d+)/.exec(pm);
-    return (m ? parseInt(m[1]!, 10) >= 2 : false) || this.t.blobs.has(".yarnrc.yml");
+    const m = YARNRE.exec(pm);
+    return (m ? Number(digitValue(m[1]!)) >= 2 : false) || this.t.blobs.has(".yarnrc.yml");
   }
 
   workspaces(): string[] {
@@ -980,15 +1099,15 @@ class Reach {
     if (this.t.blobs.has("pnpm-workspace.yaml")) {
       let inside = false;
       for (const l of (this.t.read("pnpm-workspace.yaml") ?? "").split("\n")) {
-        if (/^packages\s*:/.test(l)) inside = true;
-        else if (inside && /^\s+-\s*/.test(l))
+        if (YPKGS.test(l)) inside = true;
+        else if (inside && YITEM.test(l))
           globs.push(
             l
-              .replace(/^\s+-\s*|\s+#.*$/g, "")
+              .replace(YOUT, "")
               .trim()
               .replace(/^['"]|['"]$/g, ""),
           );
-        else if (inside && l.trim() && !/^\s/.test(l)) inside = false;
+        else if (inside && l.trim() && !YIND.test(l)) inside = false;
       }
     }
     const keep = globs.filter((g) => !g.startsWith("!")).map((g) => g.replace(/\/$/, ""));
@@ -1186,7 +1305,7 @@ class Reach {
       } else if (
         ["-j", "--jobs", "-l", "--load-average", "--max-load"].includes(a) &&
         i + 1 < args.length &&
-        /^\d+(\.\d+)?$/.test(args[i + 1]!)
+        MVER.test(args[i + 1]!)
       ) {
         i += 2;
         continue;
@@ -1292,10 +1411,7 @@ class Reach {
     const { deps, body } = recipes.get(n)!;
     for (const dep of deps) this.recipe(p, dep, d);
     for (let line of body) {
-      line = line.replace(
-        /\{\{\s*([A-Za-z_][\w-]*)\s*\}\}/g,
-        (_, name) => vars.get(name) ?? `{{${name}}}`,
-      );
+      line = line.replace(MUSTACHE, (_, name) => vars.get(name) ?? `{{${name}}}`);
       this.shell(`${p} ${n}`, line.replace(/^[@-]+/, ""), d);
     }
   }
@@ -1401,14 +1517,23 @@ function states(dispatch: string): Record<string, string> {
 }
 
 // --- sort line parsing ---------------------------------------------------------------------------
-const ENTRY = /^(?:[-*+][ \t]+)?(S\d+|N\d+)[ \t]+(.+?):(?:[ \t]+(.*))?$/;
+const ENTRY = new RegExp(
+  "^(?:[-*+][ \t]+)?(S\\p{Nd}+|N\\p{Nd}+)[ \t]+(" +
+    PY_DOT +
+    "+?):(?:[ \t]+(" +
+    PY_DOT +
+    "*))?" +
+    END_OF_STRING +
+    "",
+  "u",
+);
 
 function shape(line: string): { id: string; head: string[]; reason: string } | null {
   const m = ENTRY.exec(line);
   if (!m) return null;
   const i = m[1]!;
-  const head = m[2]?.split(/\s+/);
-  const reason = (m[3] ?? "").trim();
+  const head = pyWords(m[2] ?? "");
+  const reason = pyTrim(m[3] ?? "");
   let ok: boolean;
   if (i[0] === "S") {
     ok =
@@ -1526,7 +1651,7 @@ function core(cmd: string, dispatch: string): number {
         checks.push({ n: n + 1, id: i, kind: "linter", lint, extra: via });
         props.push({
           id: i,
-          key: `linter ${lint.toLowerCase()} ${head[2]} ${plain(head[3]!)}`,
+          key: `linter ${pyLower(lint)} ${head[2]} ${plain(head[3]!)}`,
           via,
           newInfo: null,
         });
@@ -1544,10 +1669,7 @@ function core(cmd: string, dispatch: string): number {
     onN.get(i)?.push(n + 1);
     const rest = head.slice(2);
     const marked = rest[rest.length - 1] === "not-in-gate";
-    const covers = (marked ? rest.slice(0, -1) : rest)
-      .join(" ")
-      .split(/[,\s]+/)
-      .filter(Boolean);
+    const covers = (marked ? rest.slice(0, -1) : rest).join(" ").split(COVERSPLIT).filter(Boolean);
     if (covers.length === 0)
       faults.push(`line ${n + 1}: ${i} names no finding the linter would enforce`);
     for (const c of covers) {
@@ -1555,17 +1677,17 @@ function core(cmd: string, dispatch: string): number {
         faults.push(`line ${n + 1}: ${i} names ${c}, which is not a style finding of this run`);
     }
     const lint = plain(head[1]!);
-    const was = firstNew.get(lint.toLowerCase());
+    const was = firstNew.get(pyLower(lint));
     if (was && (was[0] !== n + 1 || was[1] !== i)) {
       faults.push(
         `line ${n + 1}: ${i} proposes ${lint} again, as ${was[1]} on line ${was[0]} does: propose it once, for every finding it would enforce`,
       );
     }
-    if (!was) firstNew.set(lint.toLowerCase(), [n + 1, i]);
+    if (!was) firstNew.set(pyLower(lint), [n + 1, i]);
     checks.push({ n: n + 1, id: i, kind: "new", lint, extra: marked });
     props.push({
       id: i,
-      key: `new-linter ${lint.toLowerCase()}`,
+      key: `new-linter ${pyLower(lint)}`,
       via: null,
       newInfo: [covers, marked],
     });
@@ -2694,7 +2816,9 @@ withTempDir((tmp) => {
   // Every form coachman.md gives is a sort line
   const coachmanText = readFileSync(join(SKILL, "coachman.md"), "utf8");
   const formBlock = coachmanText.match(
-    /\*\*Sort the style findings\.\*\*[\s\S]*?```\n([\s\S]*?)```/,
+    new RegExp(
+      "\\*\\*Sort the style findings\\.\\*\\*" + DOT_ALL + "*?```\\n(" + DOT_ALL + "*?)```",
+    ),
   );
   if (formBlock) {
     const forms = formBlock[1]
@@ -2725,7 +2849,9 @@ withTempDir((tmp) => {
 
   // The runbooks say certain things
   const says = (file: string, want: string): boolean => {
-    const text = readFileSync(file, "utf8").replace(/\n/g, " ").replace(/\s+/g, " ");
+    const text = readFileSync(file, "utf8")
+      .replace(/\n/g, " ")
+      .replace(new RegExp("[" + PY_S_CLASS + "]+", "g"), " ");
     return text.includes(want);
   };
   for (const want of [
@@ -2748,7 +2874,9 @@ withTempDir((tmp) => {
 
   // Style sort is no escalation
   const pmText = readFileSync(join(SKILL, "postmaster.md"), "utf8");
-  const step5Match = pmText.match(/5\. \*\*Put the style sort to the user[\s\S]*?6\. /);
+  const step5Match = pmText.match(
+    new RegExp("5\\. \\*\\*Put the style sort to the user" + DOT_ALL + "*?6\\. "),
+  );
   if (step5Match) {
     const step5 = step5Match[0];
     if (!step5.includes("ESCALATION.md")) ok("and the style sort is no escalation");
@@ -2774,5 +2902,98 @@ withTempDir((tmp) => {
   ok("at a terminal it removes a file git made read-only, and asks nothing");
   ok("one that reads the terminal would ask instead, and remove nothing");
 
+  st.check("JSTARS takes a U+001C indent like BASE", JSTARS.test("\x1c* x"), "no match");
+  st.check(
+    "JSCOM strips after U+001C like BASE",
+    "a\x1c//c".replace(JSCOM, "$1") === "a\x1c",
+    "no strip",
+  );
+  st.check(
+    "SHCOM strips after U+001C like BASE",
+    "a\x1c#c".replace(SHCOM, "$1") === "a\x1c",
+    "no strip",
+  );
+  mkdirSync(join(tmp, "uv"), { recursive: true });
+  writeFileSync(
+    join(tmp, "uv", "actions.jsonl"),
+    JSON.stringify({ action: "finding", target: "t", detail: "style\x1crest here" }) + "\n",
+  );
+  const uvFind = findings(join(tmp, "uv"));
+  st.check(
+    "findings split U+001C like BASE",
+    uvFind.style.length === 1 && uvFind.faults.length === 0,
+    JSON.stringify(uvFind.faults),
+  );
+  st.check(
+    "fields stop at a U+001C next like BASE",
+    field("Gate: a\x1cNext: b", "gate", ["next"]) === "a",
+    JSON.stringify(field("Gate: a\x1cNext: b", "gate", ["next"])),
+  );
+  st.check(
+    "JALIAS takes a non-ASCII name like BASE",
+    JALIAS.exec("alias \u00e9 := b") !== null,
+    "no match",
+  );
+  st.check("JVAR takes a non-ASCII name like BASE", JVAR.exec("A\u00e9 := v") !== null, "no match");
+  st.check(
+    "JRECIPE keeps a non-ASCII tail in the name like BASE",
+    JRECIPE.exec("A\u00e9: x")?.[1] === "A\u00e9",
+    "misnamed",
+  );
+  st.check(
+    "JDEPS takes non-ASCII deps like BASE",
+    "A\u00e9 B".match(JDEPS)?.join(",") === "A\u00e9,B",
+    "missplit",
+  );
+  st.check(
+    "MAKEINC takes a U+001C gap like BASE",
+    MAKEINC.exec("include\x1cf") !== null,
+    "no match",
+  );
+  st.check("RULE trims a U+001C gap like BASE", RULE.exec("a\x1c: b")?.[1] === "a", "mismatched");
+  st.check(
+    "ASSIGN takes a U+001C gap like BASE",
+    Makefile.ASSIGN.exec("A\x1c=b") !== null,
+    "no match",
+  );
+  st.check("YPKGS takes a NEL gap like BASE", YPKGS.test("packages\u0085:"), "no match");
+  st.check("YITEM takes a U+001C indent like BASE", YITEM.test("\x1c- x"), "no match");
+  st.check(
+    "YOUT strips a U+001C comment like BASE",
+    "  - x\x1c# c".replace(YOUT, "") === "x",
+    "no strip",
+  );
+  st.check("YIND takes U+001C like BASE", YIND.test("\x1c"), "no match");
+  st.check("MVER takes Arabic-Indic digits like BASE", MVER.test("\u0664.\u0665"), "no match");
+  st.check("MUSTACHE takes a non-ASCII name like BASE", MUSTACHE.test("{{A\u00e9}}"), "no match");
+  st.check(
+    "COVERSPLIT splits U+001C like BASE",
+    "S1\x1cS2".split(COVERSPLIT).length === 2,
+    "no split",
+  );
+  st.check(
+    "YARNRE takes Arabic-Indic digits like BASE",
+    YARNRE.exec("yarn@\u0664") !== null,
+    "no match",
+  );
+  st.check("MENDEF takes a U+001C gap like BASE", MENDEF.test("\x1cendef"), "no match");
+  st.check("MIFCOND refuses endif+long-s like BASE", !MIFCOND.test("endif\u017f"), "matched");
+  st.check("MDEFINE takes a U+001C gap like BASE", MDEFINE.test("export\x1cdefine x"), "no match");
+  st.check(
+    "ENTRY takes an Arabic-Indic id like BASE",
+    shape("S\u0661 linter x enable y: r") !== null,
+    "no match",
+  );
+  st.check(
+    "shape splits U+001C heads like BASE",
+    shape("S1 linter\x1cx enable y: r") !== null,
+    "no match",
+  );
+  writeFileSync(join(tmp, "uv", "u.md"), "a\x1cb");
+  st.check(
+    "runbook quotes split U+001C like BASE",
+    says(join(tmp, "uv", "u.md"), "a b"),
+    "no squash",
+  );
   st.finish();
 });

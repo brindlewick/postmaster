@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
 import { die, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import { NAME_CLASS, PY_S_CLASS, pyLower, pyTrim, pyWords } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
 
@@ -48,7 +49,12 @@ const STRERROR: Record<string, string> = {
   ENOENT: "No such file or directory",
   ENOTDIR: "Not a directory",
 };
-const MARKER = /^[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$)/;
+const STRIP3_RE = new RegExp(
+  `^[^${PY_S_CLASS}]+[${PY_S_CLASS}]+[^${PY_S_CLASS}]+[${PY_S_CLASS}]+[^${PY_S_CLASS}]+[${PY_S_CLASS}]+`,
+);
+const WORD_SPLIT_RE = new RegExp(`[${PY_S_CLASS},;]+`);
+const NAME_CHAR_RE = new RegExp(`[${NAME_CLASS}]`, "u");
+const MARKER = /^[ \t]*(?:[-*+]|\p{Nd}{1,9}[.)])(?:[ \t]+|$)/u;
 const LINE = /^[ \t]*turnpikes[ \t]*:/;
 
 type Row = { name: string; d: boolean; leg: string; what: string };
@@ -61,18 +67,15 @@ function parseTable(table: string): { rows: Row[]; faults: string[] } {
     const line = lines[n] ?? "";
     if (!line.trim() || line.trimStart().startsWith("#")) continue;
     // actually need up to 4 fields: name, mark, leg, what (what may have spaces)
-    const parts = line.trim().split(/\s+/);
-    if (parts.length < 4 || !/[^\W_]/.test(parts.slice(3).join(" "))) {
+    const parts = pyWords(line);
+    if (parts.length < 4 || !NAME_CHAR_RE.test(parts.slice(3).join(" "))) {
       faults.push(`line ${n + 1} needs a name, default or -, a leg, and what it checks`);
       continue;
     }
     const name = parts[0] ?? "";
     const mark = parts[1] ?? "";
     const leg = parts[2] ?? "";
-    const what = line
-      .trim()
-      .replace(/^\S+\s+\S+\s+\S+\s+/, "")
-      .trim();
+    const what = pyTrim(pyTrim(line).replace(STRIP3_RE, ""));
     if (!/^[a-z][a-z0-9-]*$/.test(name)) {
       faults.push(`line ${n + 1}: "${name}" is not a lowercase word`);
     } else if (RESERVED.includes(name)) {
@@ -104,16 +107,17 @@ function wordsOf(text: string): string[] {
     if (BREAK.test(line)) continue;
     const m = MARKER.exec(line);
     if (m) line = line.slice(m[0].length);
-    for (const tok of line.split(/[\s,;]+/)) {
+    for (const tok of line.split(WORD_SPLIT_RE)) {
       if (tok) {
         // BASE: tok.strip("`*_").rstrip(".").strip("`*_").lower() or tok
-        const stripped = tok
-          .replace(/^[*_`]+/, "")
-          .replace(/[*_`]+$/, "")
-          .replace(/\.+$/, "")
-          .replace(/^[*_`]+/, "")
-          .replace(/[*_`]+$/, "")
-          .toLowerCase();
+        const stripped = pyLower(
+          tok
+            .replace(/^[*_`]+/, "")
+            .replace(/[*_`]+$/, "")
+            .replace(/\.+$/, "")
+            .replace(/^[*_`]+/, "")
+            .replace(/[*_`]+$/, ""),
+        );
         words.push(stripped || tok);
       }
     }
@@ -292,7 +296,7 @@ if (argv[0] === "--self-test") {
     );
     process.exit(2);
   }
-  if (ok2 && (found[0] ?? "").split(/\s+/).join(" ") !== (argv[3] ?? "").split(/\s+/).join(" ")) {
+  if (ok2 && pyWords(found[0] ?? "").join(" ") !== pyWords(argv[3] ?? "").join(" ")) {
     console.log(
       `the waybill says "${(found[0] ?? "").trim()}", and the ticket's check printed "${(argv[3] ?? "").trim()}"`,
     );
@@ -313,6 +317,39 @@ withTempDir((tmp) => {
   const st = new SelfTest();
   let out = "";
   let rc = 0;
+  {
+    // Unicode primitives, BASE turnpikes.sh python: every expectation python3-verified.
+    const markerAR = MARKER.exec("١. x");
+    st.check(
+      "a list marker may be Arabic-Indic digits",
+      markerAR !== null,
+      JSON.stringify(markerAR?.[0] ?? null),
+    );
+    const nameWant = ["a", "_", "٣", "½", "-"].map((s) => NAME_CHAR_RE.test(s));
+    st.check(
+      "name-char test matches [^W_]",
+      JSON.stringify(nameWant) === JSON.stringify([true, false, true, true, false]),
+      JSON.stringify(nameWant),
+    );
+    const p1 = parseTable("style\x1c-\x1creview\x1cwhat here");
+    st.check(
+      "table fields split on U+001C",
+      p1.faults.length === 0 && p1.rows[0]?.what === "what here",
+      JSON.stringify(p1),
+    );
+    const p2 = parseTable("style - review \uFEFFwhat\uFEFF");
+    st.check(
+      "what keeps FEFF edges (Python strip)",
+      p2.rows[0]?.what === "\uFEFFwhat\uFEFF",
+      JSON.stringify(p2.rows[0]?.what),
+    );
+    const wsGot = "a\x1cb,c".split(WORD_SPLIT_RE);
+    st.check(
+      "waybill words split on U+001C",
+      JSON.stringify(wsGot) === JSON.stringify(["a", "b", "c"]),
+      JSON.stringify(wsGot),
+    );
+  }
 
   function runSelf(...args: string[]): void {
     const r = run("bash", [self, ...args]);
@@ -350,7 +387,7 @@ withTempDir((tmp) => {
   const NOPE = "zz-not-listed";
   {
     const r = run("bash", [self, "--list"]);
-    if (r.out.split("\n").some((l) => l.split(/\s+/)[0] === NOPE)) {
+    if (r.out.split("\n").some((l) => pyWords(l)[0] === NOPE)) {
       console.error(`self-test: ${NOPE} is in the table; pick another unused name`);
       process.exit(1);
     }
@@ -361,15 +398,15 @@ withTempDir((tmp) => {
   runSelf("--list");
   {
     const allPresent = ["style", "bug", "security"].every(
-      (n) => out.split("\n").filter((l) => l.split(/\s+/)[0] === n).length === 1,
+      (n) => out.split("\n").filter((l) => pyWords(l)[0] === n).length === 1,
     );
     st.check("--list names style, bug and security, once each", rc === 0 && allPresent, out);
   }
   {
     const defaults = out
       .split("\n")
-      .filter((l) => l.split(/\s+/)[1] === "default")
-      .map((l) => l.split(/\s+/)[0])
+      .filter((l) => pyWords(l)[1] === "default")
+      .map((l) => pyWords(l)[0])
       .join(" ");
     st.check("the default set is style, bug and security", defaults === "style bug security", out);
   }
@@ -378,8 +415,8 @@ withTempDir((tmp) => {
       ...new Set(
         out
           .split("\n")
-          .filter((l) => /^(style|bug|security)$/.test(l.split(/\s+/)[0] ?? ""))
-          .map((l) => l.split(/\s+/)[2]),
+          .filter((l) => /^(style|bug|security)$/.test(pyWords(l)[0] ?? ""))
+          .map((l) => pyWords(l)[2]),
       ),
     ];
     st.check("the three run in the review leg", legs.length === 1 && legs[0] === "review", out);
@@ -394,8 +431,8 @@ withTempDir((tmp) => {
   {
     const descs = out
       .split("\n")
-      .filter((l) => /^(style|bug|security)$/.test(l.split(/\s+/)[0] ?? ""))
-      .map((l) => l.split(/\s+/).slice(3).join(" "));
+      .filter((l) => /^(style|bug|security)$/.test(pyWords(l)[0] ?? ""))
+      .map((l) => pyWords(l).slice(3).join(" "));
     st.check("each line carries its full description, not its first word", descsFull(descs), out);
   }
   {
@@ -697,24 +734,24 @@ withTempDir((tmp) => {
   function poll(): string {
     const r = run("bash", [join(HERE, "runs-status.sh"), join(tmp, "runs", "proj")]);
     const t9 = r.out.split("\n").find((l) => l.startsWith("T-9"));
-    return t9 ? (t9.split(/\s+/).pop() ?? "") : "";
+    return t9 ? (pyWords(t9).pop() ?? "") : "";
   }
 
   st.check("after synthesis the poll says DISPATCH", poll() === "DISPATCH");
   {
     const r = run("bash", [self, "legs", d]);
     const next = r.out.split("\n").find((l) => {
-      const n = parseInt(l.split(/\s+/)[0] ?? "0", 10);
+      const n = parseInt(pyWords(l)[0] ?? "", 10);
       return n > 1;
     });
-    const nextVal = next ? `${next.split(/\s+/)[0]} ${next.split(/\s+/)[1]}` : "";
+    const nextVal = next ? `${pyWords(next)[0]} ${pyWords(next)[1]}` : "";
     st.check("the leg after synthesis is ship", nextVal === "3 ship", nextVal);
   }
   {
     const r = run("bash", [self, "legs", d]);
     const prevs = r.out
       .split("\n")
-      .map((l) => parseInt(l.split(/\s+/)[0] ?? "0", 10))
+      .map((l) => parseInt(pyWords(l)[0] ?? "", 10))
       .filter((n) => n < 3);
     const prev = prevs[prevs.length - 1] ?? 0;
     const hc = run("bash", [join(HERE, "handoff-check.sh"), join(d, `handoff-${prev}.md`)]);
@@ -736,7 +773,7 @@ withTempDir((tmp) => {
   writeFileSync(join(d, ".leg-3-exited"), "", "utf8");
   {
     const r = run("bash", [self, "legs", d]);
-    const after = r.out.split("\n").filter((l) => parseInt(l.split(/\s+/)[0] ?? "0", 10) > 3);
+    const after = r.out.split("\n").filter((l) => parseInt(pyWords(l)[0] ?? "", 10) > 3);
     st.check(
       "after ship the poll says DISPATCH, and no leg follows: Stage G",
       poll() === "DISPATCH" && after.length === 0,

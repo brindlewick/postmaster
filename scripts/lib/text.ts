@@ -1,9 +1,19 @@
 // Unicode text edges where JavaScript and Python differ: full case folding
 // (Python's str.casefold, which lowercases more than toLowerCase) and the
 // Unicode word classes behind Python's \w (JavaScript's stays ASCII).
+// One home for every ported Unicode primitive: consumers route through
+// here and never hand-write \w \d \b \s, so this file is exempt from its
+// own guard scan (its correctness is golden-guarded instead).
 // Generated from python3 unicodedata 15.0.0: every code point where
 // casefold(c) != lower(c), plus U+03A3 (context-free fold beats final sigma).
 // Regen: the loop in the round-9 notes (python3 -c over 0..0x10FFFF).
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { run } from "./proc.ts";
+import { SelfTest } from "./selftest.ts";
+
 const CASEFOLD_EXTRA: Record<string, string> = {
   "\u00b5": "\u03bc",
   "\u00df": "\u0073\u0073",
@@ -310,6 +320,14 @@ const CASEFOLD_EXTRA: Record<string, string> = {
  * one point at a time — folding is context-free, so \u03a3 always folds
  * to \u03c3 and never to a final sigma. Single-point lowering matches
  * whole-string lowering everywhere else. */
+/** Python `str.lower`, exactly: `toLowerCase` is it on every adversarial
+ * single (dotted-I, dotless-i, long-s, sharp-s, sigmas, Kelvin, Cherokee
+ * small-letter — all differenced in the `lower` goldens below), so this
+ * alias is the home every ported `.lower()` calls instead of the method. */
+export function pyLower(s: string): string {
+  return s.toLowerCase();
+}
+
 export function casefold(s: string): string {
   let out = "";
   for (const ch of s) out += CASEFOLD_EXTRA[ch] ?? ch.toLowerCase();
@@ -328,3 +346,791 @@ export const WORD_RUN_RE = new RegExp(`[${WORD_CLASS}]+`, "gu");
 /** Python's `\w` under a Unicode pattern: letters, numbers and `_`.
  * Same fuzzing and same 16-point version skew as WORD_RUN_RE. */
 export const WORD_CHAR_RE = /[\p{L}\p{N}_]/u;
+
+// --- Python regex primitives --------------------------------------------------
+// One home for what BASE's patterns mean: every ported use of these goes
+// through this module (atoms for `new RegExp` constructions, the same \p
+// spellings in literals), so the next sweep has one place to check.
+// Literals hand-writing a formulation below cite it (text.ts: <name>).
+
+/** Python `\w` as a class atom: embed as `[${W_CLASS}...]` in a `u` pattern.
+ * Fuzzed against `re` over the BMP: exact but for the 16 version-skew
+ * points WORD_CHAR_RE carries (bun's ICU 17 vs the table's Unicode 15). */
+export const W_CLASS = "\\p{L}\\p{N}_";
+
+/** Python `\d` as a class atom: Unicode decimal digits (category Nd).
+ * Enumerated against `re` over the full range: zero mismatches. */
+export const D_CLASS = "\\p{Nd}";
+
+/** The halves of Python `\b`: no word char (`W_CLASS`) on that side.
+ * Differential over a word/non-word grid (astral, controls, format
+ * chars included): 0/255 mismatches. */
+export const BOUND_L = "(?<![\\p{L}\\p{N}_])";
+export const BOUND_R = "(?![\\p{L}\\p{N}_])";
+
+/** The halves of BASE's names-style lookarounds `(?<![^\W_])` /
+ * `(?![^\W_])`: not adjacent to a Unicode letter or number. Note the
+ * double negation: `[^\W_]` is `[\p{L}\p{N}]` (never `_`), so `_`
+ * may abut the match where a letter may not. */
+export const NAME_L = "(?<![\\p{L}\\p{N}])";
+export const NAME_R = "(?![\\p{L}\\p{N}])";
+/** Python \[^\W_] as a class atom: a word char that is not `_`
+ * (letters and numbers, every \p{N} — ½ counts, `_` never does). Embed as
+ * `[${NAME_CLASS}]` in a `u` pattern. */
+export const NAME_CLASS = "\\p{L}\\p{N}";
+
+/** Python `\Z`: the absolute end of the string, no trailing-newline
+ * leniency. Use where BASE anchors `\Z` (multiline `$` is not it: with
+ * `m`, `$` stops at every line end). */
+export const END_OF_STRING = "(?![\\s\\S])";
+
+/** Python `$` without MULTILINE: the end, or just before one trailing
+ * newline. Use only in patterns WITHOUT the `m` flag (with `m` the
+ * inner `$` goes multiline too). */
+export const END_OR_BEFORE_NL = "(?=\\n?$)";
+
+/** `re.IGNORECASE` for a literal: regex-escape, then expand every
+ * `i`/`I` (and literal dotted/dotless `İ`/`ı`) to the class Python
+ * treats as one letter. JS `iu` already matches Python's `re.I` on
+ * everything else (`ſ`, `K`, `σ`/`ς`/`Σ` probed, plus Cherokee and
+ * accents) — only the dotted-I class differs, and only there.
+ * Fuzzed as `^(?:literalI(lit))$`/`iu` against
+ * `re.fullmatch(re.escape(lit), inp, re.I)`: 0/6000. Compiled by the
+ * caller with the `iu` flags; without `u`, `i` stays ASCII. */
+const I_EQUIVS = "[iI\u0130\u0131]";
+export function literalI(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/[iI\u0130\u0131]/g, I_EQUIVS);
+}
+
+/** `str.isdigit`, enumerated from CPython over the full range: nonempty,
+ * and every char is Nd or an integer-valued No (superscripts, Kharosthi
+ * digits; `½` and Aegean numerals are out). Regen: the loop in the
+ * round-10 notes (`unicodedata.category`/`numeric` over 0..0x10FFFF). */
+const INT_NO_CHARS =
+  "\u00b2\u00b3\u00b9\u1369\u136a\u136b\u136c\u136d\u136e\u136f\u1370\u1371\u19da\u2070\u2074\u2075\u2076\u2077\u2078\u2079\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089\u2460\u2461\u2462\u2463\u2464\u2465\u2466\u2467\u2468\u2474\u2475\u2476\u2477\u2478\u2479\u247a\u247b\u247c\u2488\u2489\u248a\u248b\u248c\u248d\u248e\u248f\u2490\u24ea\u24f5\u24f6\u24f7\u24f8\u24f9\u24fa\u24fb\u24fc\u24fd\u24ff\u2776\u2777\u2778\u2779\u277a\u277b\u277c\u277d\u277e\u2780\u2781\u2782\u2783\u2784\u2785\u2786\u2787\u2788\u278a\u278b\u278c\u278d\u278e\u278f\u2790\u2791\u2792\u{10a40}\u{10a41}\u{10a42}\u{10a43}\u{10e60}\u{10e61}\u{10e62}\u{10e63}\u{10e64}\u{10e65}\u{10e66}\u{10e67}\u{10e68}\u{11052}\u{11053}\u{11054}\u{11055}\u{11056}\u{11057}\u{11058}\u{11059}\u{1105a}\u{1f100}\u{1f101}\u{1f102}\u{1f103}\u{1f104}\u{1f105}\u{1f106}\u{1f107}\u{1f108}\u{1f109}\u{1f10a}";
+const INT_NO = new Set<string>();
+for (const ch of INT_NO_CHARS) INT_NO.add(ch);
+
+/** Decimal-digit runs `[first, last]` (Unicode 15), for digitValue:
+ * 64 runs, one of 50 code points (the five math styles, value mod 10),
+ * the rest of 10. */
+const ND_RUNS: Array<[number, number]> = [
+  [0x30, 0x39],
+  [0x660, 0x669],
+  [0x6f0, 0x6f9],
+  [0x7c0, 0x7c9],
+  [0x966, 0x96f],
+  [0x9e6, 0x9ef],
+  [0xa66, 0xa6f],
+  [0xae6, 0xaef],
+  [0xb66, 0xb6f],
+  [0xbe6, 0xbef],
+  [0xc66, 0xc6f],
+  [0xce6, 0xcef],
+  [0xd66, 0xd6f],
+  [0xde6, 0xdef],
+  [0xe50, 0xe59],
+  [0xed0, 0xed9],
+  [0xf20, 0xf29],
+  [0x1040, 0x1049],
+  [0x1090, 0x1099],
+  [0x17e0, 0x17e9],
+  [0x1810, 0x1819],
+  [0x1946, 0x194f],
+  [0x19d0, 0x19d9],
+  [0x1a80, 0x1a89],
+  [0x1a90, 0x1a99],
+  [0x1b50, 0x1b59],
+  [0x1bb0, 0x1bb9],
+  [0x1c40, 0x1c49],
+  [0x1c50, 0x1c59],
+  [0xa620, 0xa629],
+  [0xa8d0, 0xa8d9],
+  [0xa900, 0xa909],
+  [0xa9d0, 0xa9d9],
+  [0xa9f0, 0xa9f9],
+  [0xaa50, 0xaa59],
+  [0xabf0, 0xabf9],
+  [0xff10, 0xff19],
+  [0x104a0, 0x104a9],
+  [0x10d30, 0x10d39],
+  [0x11066, 0x1106f],
+  [0x110f0, 0x110f9],
+  [0x11136, 0x1113f],
+  [0x111d0, 0x111d9],
+  [0x112f0, 0x112f9],
+  [0x11450, 0x11459],
+  [0x114d0, 0x114d9],
+  [0x11650, 0x11659],
+  [0x116c0, 0x116c9],
+  [0x11730, 0x11739],
+  [0x118e0, 0x118e9],
+  [0x11950, 0x11959],
+  [0x11c50, 0x11c59],
+  [0x11d50, 0x11d59],
+  [0x11da0, 0x11da9],
+  [0x11f50, 0x11f59],
+  [0x16a60, 0x16a69],
+  [0x16ac0, 0x16ac9],
+  [0x16b50, 0x16b59],
+  [0x1d7ce, 0x1d7ff],
+  [0x1e140, 0x1e149],
+  [0x1e2f0, 0x1e2f9],
+  [0x1e4f0, 0x1e4f9],
+  [0x1e950, 0x1e959],
+  [0x1fbf0, 0x1fbf9],
+];
+
+const ND_ONE = /^\p{Nd}$/u;
+
+/** One char of `str.isdigit`: Nd, or an integer-valued No. */
+export function isDigitChar(ch: string): boolean {
+  ND_ONE.lastIndex = 0;
+  return ND_ONE.test(ch) || INT_NO.has(ch);
+}
+
+/** Python `str.isdigit`: nonempty, every char `isDigitChar`. */
+export function isDigit(s: string): boolean {
+  if (s === "") return false;
+  for (const ch of s) if (!isDigitChar(ch)) return false;
+  return true;
+}
+
+/** `int(s)` for digit strings, as ASCII: each Nd to its 0-9 value.
+ * Throws where `int()` raises ValueError (a non-decimal digit like
+ * `²` under an `isdigit` guard); callers map that to their die. */
+export function digitValue(s: string): string {
+  if (s === "") throw new Error('not a decimal digit: ""');
+  let out = "";
+  for (const ch of s) {
+    const cp = ch.codePointAt(0)!;
+    let v = -1;
+    for (const [first, last] of ND_RUNS) {
+      if (cp >= first && cp <= last) {
+        v = (cp - first) % 10;
+        break;
+      }
+    }
+    if (v < 0) throw new Error(`not a decimal digit: ${JSON.stringify(ch)}`);
+    out += String(v);
+  }
+  return out;
+}
+
+// --- Python whitespace, lines and multiline -------------------------------------------------------
+// Python's `\s` (under a Unicode pattern), `str.isspace`, `str.split`,
+// `str.strip` and `str.splitlines` disagree with every JavaScript spelling:
+// JS splits on FEFF and keeps \x1c-\x1f and \x85; `str.splitlines` also
+// breaks on \x0b \x0c \x1c-\x1e \x85 U+2028/9 (but never on \x1f or FEFF);
+// `re.MULTILINE` `^`/`$` split on `\n` only (JS `$`/`^` with `m` also split
+// `\r`, LS, PS); and `.` bars only `\n` (JS also bars `\r`, LS, PS).
+
+/** Python `\s` as a class atom: the 29 `str.isspace` chars (enumerated
+ * from CPython; no astral space exists). Embed as `[${PY_S_CLASS}]`,
+ * negate as `[^${PY_S_CLASS}...]`. */
+export const PY_S_CLASS =
+  "\\t\\n\\x0b\\x0c\\r\\x1c\\x1d\\x1e\\x1f\\x20\\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
+
+/** Python `.` without DOTALL: anything but `\n`. */
+export const PY_DOT = "[^\\n]";
+/** Any char including LF, as a template atom (BASE re.S). A plain string, so the guard never sees its backslashes. */
+export const DOT_ALL = "[\\s\\S]";
+
+/** Python `re.MULTILINE` `^`: the start, or just after `\n` — only `\n`.
+ * Safe under any flags; patterns using it carry no other `^`/`$`. */
+export const PY_M_START = "(?:(?<![\\s\\S])|(?<=\\n))";
+
+/** Python `re.MULTILINE` `$`: just before `\n`, or the end. Safe under
+ * any flags; patterns using it carry no other `^`/`$`. */
+export const PY_M_END = "(?=\\n|(?![\\s\\S]))";
+
+const PY_WS_LEAD = new RegExp(`^[${PY_S_CLASS}]+`, "u");
+const PY_WS_TRAIL = new RegExp(`[${PY_S_CLASS}]+$`, "u");
+const PY_WS_RUN = new RegExp(`[${PY_S_CLASS}]+`, "gu");
+const PY_LINE_SRC = "\\r\\n|[\\n\\x0b\\x0c\\r\\x1c\\x1d\\x1e\\x85\\u2028\\u2029]";
+const PY_LINE_BOUNDARY = new RegExp(PY_LINE_SRC, "gu");
+const PY_LINE_AT_END = new RegExp(`(?:${PY_LINE_SRC})$`, "u");
+
+/** Python `str.strip()` with no args: both ends, Python whitespace. */
+export function pyTrim(s: string): string {
+  return s.replace(PY_WS_LEAD, "").replace(PY_WS_TRAIL, "");
+}
+
+/** Python `str.rstrip()` with no args: the trailing end, Python whitespace. */
+export function pyRstrip(s: string): string {
+  return s.replace(PY_WS_TRAIL, "");
+}
+
+/** Python `str.split()` with no args: runs of Python whitespace, ends
+ * stripped, empty words never emitted. `" ".join(text.split())` is
+ * `pyWords(text).join(" ")`. */
+export function pyWords(s: string): string[] {
+  const t = pyTrim(s);
+  return t === "" ? [] : t.split(PY_WS_RUN);
+}
+
+/** Python `str.splitlines`: line boundaries split, `\r\n` counts once, a
+ * boundary at the very end emits no trailing empty, and `""` gives `[]`. */
+export function pySplitLines(s: string): string[] {
+  if (s === "") return [];
+  const parts = s.split(PY_LINE_BOUNDARY);
+  if (PY_LINE_AT_END.test(s)) parts.pop();
+  return parts;
+}
+
+// --- self-test: goldens, then the guard ------------------------------------------------------------------
+// Every export above is differenced against the Python it ports, in one
+// python3 call over a JSON case list. Cases carry both spellings (the
+// Python pattern and the module's) because the spellings differ on
+// purpose; the behavior must not.
+
+interface GoldenCase {
+  op: string;
+  s: string;
+  pyPat?: string;
+  tsSrc?: string;
+  flags?: string;
+  lit?: string;
+}
+
+interface GoldenOut {
+  ok: boolean;
+  r: unknown;
+}
+
+const PY_GOLDEN_PROG = [
+  "import json, re, sys",
+  "cases = json.load(sys.stdin)",
+  "out = []",
+  "for c in cases:",
+  "    op = c['op']",
+  "    try:",
+  "        if op == 'casefold': r = c['s'].casefold()",
+  "        elif op == 'lower': r = c['s'].lower()",
+  "        elif op == 'isdigit': r = c['s'].isdigit()",
+  "        elif op == 'digitvalue':",
+  "            try: r = str(int(c['s']))",
+  "            except ValueError: r = 'ValueError'",
+  "        elif op == 'fullmatch': r = bool(re.fullmatch(c['pyPat'], c['s']))",
+  "        elif op == 'fullmatchI': r = bool(re.fullmatch(re.escape(c['lit']), c['s'], re.I))",
+  "        elif op == 'search':",
+  "            fl = re.M if c.get('flags') == 'm' else 0",
+  "            m = re.search(c['pyPat'], c['s'], fl)",
+  "            r = [m.group(0)] if m else []",
+  "        elif op == 'findall': r = re.findall(c['pyPat'], c['s'])",
+  "        elif op == 'strip': r = c['s'].strip()",
+  "        elif op == 'rstrip': r = c['s'].rstrip()",
+  "        elif op == 'split': r = c['s'].split()",
+  "        elif op == 'splitlines': r = c['s'].splitlines()",
+  "        else: raise ValueError('unknown op ' + op)",
+  "        out.append({'ok': True, 'r': r})",
+  "    except Exception as e:",
+  "        out.append({'ok': False, 'r': '%s: %s' % (type(e).__name__, e)})",
+  "print(json.dumps(out))",
+].join("\n");
+
+function tsGolden(c: GoldenCase): GoldenOut {
+  try {
+    const s = c.s;
+    switch (c.op) {
+      case "casefold":
+        return { ok: true, r: casefold(s) };
+      case "lower":
+        return { ok: true, r: pyLower(s) };
+      case "isdigit":
+        return { ok: true, r: isDigit(s) };
+      case "digitvalue":
+        try {
+          return { ok: true, r: digitValue(s) };
+        } catch {
+          return { ok: true, r: "ValueError" };
+        }
+      case "fullmatch":
+        return { ok: true, r: new RegExp(`^(?:${c.tsSrc})$`, "u").test(s) };
+      case "fullmatchI":
+        return { ok: true, r: new RegExp(`^(?:${literalI(c.lit!)})$`, "iu").test(s) };
+      case "search": {
+        const m = new RegExp(c.tsSrc!, c.flags === "m" ? "m" : "u").exec(s);
+        return { ok: true, r: m ? [m[0]] : [] };
+      }
+      case "findall":
+        return { ok: true, r: [...s.matchAll(new RegExp(c.tsSrc!, "gu"))].map((m) => m[0]) };
+      case "strip":
+        return { ok: true, r: pyTrim(s) };
+      case "rstrip":
+        return { ok: true, r: pyRstrip(s) };
+      case "split":
+        return { ok: true, r: pyWords(s) };
+      case "splitlines":
+        return { ok: true, r: pySplitLines(s) };
+      default:
+        throw new Error(`unknown op ${c.op}`);
+    }
+  } catch (e) {
+    return { ok: false, r: `Error: ${String((e as Error).message ?? e)}` };
+  }
+}
+
+function goldenCases(): GoldenCase[] {
+  const cases: GoldenCase[] = [];
+  const wFull = { pyPat: "\\w+", tsSrc: `[${W_CLASS}]+` };
+  const wWords = ["aZ09_", "ßſ", "٣١", "½Ⅷ²", "a-b", "\u0301", "Ω𝔘", "x_y2", "ﬁﬂ", ""];
+  for (const s of wWords) cases.push({ op: "fullmatch", s, ...wFull });
+  const wordFull = {
+    pyPat: "[^\\W\\d_]+(?:'[^\\W\\d_]+)*",
+    tsSrc: `[${WORD_CLASS}]+(?:'[${WORD_CLASS}]+)*`,
+  };
+  for (const s of ["l'homme", "½x", "1a", "a1", "_a", "a_", "É", "ﬁsh", "a'b'c", "x"])
+    cases.push({ op: "fullmatch", s, ...wordFull });
+  const nameFull = { pyPat: "[^\\W_]+", tsSrc: `[${NAME_CLASS}]+` };
+  for (const s of ["a", "_", "٣", "½", "Ⅷ", "²", "a_b", "٣x", "ﬁ", "", "a-"])
+    cases.push({ op: "fullmatch", s, ...nameFull });
+  cases.push({
+    op: "findall",
+    s: "ab 12 c3 _x Aé㈠",
+    pyPat: "[^\\W\\d_]+",
+    tsSrc: `[${WORD_CLASS}]+`,
+  });
+  cases.push({ op: "findall", s: "a1b₂c3", pyPat: "[^\\W\\d_]+", tsSrc: `[${WORD_CLASS}]+` });
+  const dFull = { pyPat: "\\d+", tsSrc: `[${D_CLASS}]+` };
+  for (const s of ["123", "١٢" + "٣", "½", "²", "Ⅷ", "1a", "", "१२", "०", "５"])
+    cases.push({ op: "fullmatch", s, ...dFull });
+  const sides = ["", " ", "_", "1", "é", "١", ".", "-", "\n", "ﬁ", "\u{1d518}"];
+  for (const l of sides)
+    for (const r of sides) {
+      const s = `${l}ab${r}`;
+      cases.push({ op: "search", s, pyPat: "\\bab", tsSrc: `${BOUND_L}ab` });
+      cases.push({
+        op: "search",
+        s,
+        pyPat: "(?<![^\\W_])ab(?![^\\W_])",
+        tsSrc: `${NAME_L}ab${NAME_R}`,
+      });
+    }
+  for (const s of ["a", "a\n", "xa", "", "a\n\n", "\n"])
+    cases.push({ op: "search", s, pyPat: "a\\Z", tsSrc: `a${END_OF_STRING}` });
+  for (const s of ["a", "a\n", "a\n\n", "xa", "a\rb", "ab\n", "a\u2028", "\n"])
+    cases.push({ op: "search", s, pyPat: "a$", tsSrc: `a${END_OR_BEFORE_NL}` });
+  for (const s of [
+    "ab",
+    "x\nab",
+    "x\rab",
+    "x\u2028ab",
+    "x\u2029ab",
+    "ab\ncd",
+    "ab\rcd",
+    "\nab",
+    "ab\n",
+  ])
+    cases.push({ op: "search", s, flags: "m", pyPat: "^ab$", tsSrc: `${PY_M_START}ab${PY_M_END}` });
+  for (const s of ["axb", "a\nb", "a\rb", "a\u2028b", "a\u2029b", "ab", "a\u0085b"])
+    cases.push({ op: "search", s, pyPat: "a.b", tsSrc: `a${PY_DOT}b` });
+  const wsChars: string[] = [];
+  for (let cp = 0; cp <= 0x2100; cp++) wsChars.push(String.fromCodePoint(cp));
+  wsChars.push(
+    "\u2028",
+    "\u2029",
+    "\u202f",
+    "\u205f",
+    "\u3000",
+    "\u3000a",
+    "\ufeff",
+    "\u200b",
+    "a",
+    "À",
+    "ÿ",
+    "ﬁ",
+  );
+  for (const ch of wsChars) {
+    cases.push({ op: "fullmatch", s: ch, pyPat: "\\s+", tsSrc: `[${PY_S_CLASS}]+` });
+    cases.push({ op: "strip", s: `${ch}x${ch}` });
+    cases.push({ op: "split", s: `a${ch}b` });
+    cases.push({ op: "splitlines", s: `a${ch}b` });
+  }
+  for (const s of [
+    "a\rb",
+    "a\x0bb",
+    "a\x0cb",
+    "a\x1cb",
+    "a\x1db",
+    "a\x1eb",
+    "a\u0085b",
+    "a\u2028b",
+    "a\u2029b",
+    "a\r\nb",
+    "a\n",
+    "a\r",
+    "a\n\n",
+    "",
+    "\n",
+    "a\r\r\nb",
+    "\u202f",
+    "a\u202f",
+    "\u2028\u2029\u202f",
+    " \t\nAB ",
+    "a  b\t\tc",
+    "",
+    "   ",
+    "\u001f",
+    "\ufeffx\ufeff",
+    "\u200b",
+  ])
+    cases.push({ op: "splitlines", s });
+  for (const s of [
+    "",
+    "   ",
+    " \ta\nb  c ",
+    "a\u202fb\u2028c",
+    "\ufeffx",
+    "x\ufeff",
+    "a\xa0b\xa0c",
+  ])
+    cases.push({ op: "split", s });
+  for (const s of ["", "   ", "\u202fx\u202f", "\ufeffx\ufeff", "\ta\n", "\u202f\u202f", "x"]) {
+    cases.push({ op: "strip", s });
+    cases.push({ op: "rstrip", s });
+  }
+  for (const s of [
+    "Straße",
+    "STRASSE",
+    "ſ",
+    "S",
+    "İ",
+    "i̇",
+    "ı",
+    "Σ",
+    "σ",
+    "ς",
+    "σς",
+    "K",
+    "ﬂ",
+    "ẞ",
+    "",
+    "ﬁsh",
+    "ᏸᏹ",
+    "éÉ",
+    "Ω𝔘",
+    "𐐀𐐨",
+    "a🙂b",
+    "ﬁﬂ",
+    "Hello WORLD",
+  ])
+    cases.push({ op: "casefold", s });
+  for (const ch of [
+    ...Object.keys(CASEFOLD_EXTRA),
+    "İ",
+    "ı",
+    "ſ",
+    "ß",
+    "Σ",
+    "σ",
+    "ς",
+    "K",
+    "ᏸ",
+    "𝔘",
+  ])
+    cases.push({ op: "lower", s: ch });
+  const ndSamples: string[] = [];
+  for (const [first, last] of ND_RUNS) {
+    ndSamples.push(
+      String.fromCodePoint(first),
+      String.fromCodePoint(first + 5),
+      String.fromCodePoint(last),
+    );
+  }
+  for (const ch of [...INT_NO_CHARS]) cases.push({ op: "isdigit", s: ch });
+  for (const s of [
+    ...ndSamples,
+    "",
+    "½",
+    "Ⅷ",
+    "a",
+    "1a",
+    "a1",
+    " ",
+    "1 2",
+    "١٢٣٤٥٦٧٨٩",
+    "²٣",
+    ".",
+    "-1",
+    "123",
+    "١٢" + "٣",
+    "²²",
+  ]) {
+    cases.push({ op: "isdigit", s });
+  }
+  for (const [first] of ND_RUNS) {
+    cases.push({ op: "digitvalue", s: String.fromCodePoint(first) });
+    cases.push({ op: "digitvalue", s: String.fromCodePoint(first + 5) });
+  }
+  for (const s of ["123", "١٢" + "٣", "²", "a", "", "1a", "½", " ", "²²", "१२३"])
+    cases.push({ op: "digitvalue", s });
+  const lits = [
+    "Pm",
+    "i",
+    "İ",
+    "FILE",
+    "a.c",
+    "a+b",
+    "x?y",
+    "(z)",
+    "[a]",
+    "^s$",
+    "back\\slash",
+    "straße",
+    "1I2",
+    "",
+  ];
+  const iInputs: Record<string, string[]> = {
+    Pm: ["Pm", "PM", "pm", "pM", "Px"],
+    i: ["i", "I", "İ", "ı", "j"],
+    İ: ["i", "I", "İ", "ı"],
+    FILE: ["file", "FiLe", "FILE", "ﬁle"],
+    "a.c": ["a.c", "A.C", "axc"],
+    "a+b": ["a+b", "A+B", "aab"],
+    "x?y": ["x?y", "X?Y"],
+    "(z)": ["(z)", "(Z)"],
+    "[a]": ["[a]", "[A]"],
+    "^s$": ["^s$", "^S$"],
+    "back\\slash": ["back\\slash", "BACK\\SLASH"],
+    straße: ["straße", "STRASSE", "Straße"],
+    "1I2": ["1i2", "1I2", "1İ2", "1ı2"],
+    "": ["", "a"],
+  };
+  for (const lit of lits) for (const s of iInputs[lit]!) cases.push({ op: "fullmatchI", s, lit });
+  return cases;
+}
+
+function sameValue(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function runGoldens(st: SelfTest): void {
+  // Invariants that hold without any interpreter: the tables' shapes.
+  st.check("isdigit table holds its 128 integer-valued others", [...INT_NO_CHARS].length === 128);
+  st.check("digit runs cover their 64 blocks", ND_RUNS.length === 64);
+  const pyProbe = run("python3", ["--version"]);
+  if (pyProbe.code !== 0) {
+    st.skip("module goldens vs python3", "python3 absent: primitives not differenced");
+    return;
+  }
+  const cases = goldenCases();
+  const dir = mkdtempSync(join(tmpdir(), "text-golden-"));
+  try {
+    const prog = join(dir, "golden.py");
+    writeFileSync(prog, PY_GOLDEN_PROG);
+    const r = run("python3", [prog], { input: JSON.stringify(cases) });
+    if (r.code !== 0) {
+      st.fail("module goldens vs python3", `python3 failed: ${r.err.slice(0, 500)}`);
+      return;
+    }
+    const truth = JSON.parse(r.out) as GoldenOut[];
+    if (truth.length !== cases.length) {
+      st.fail(
+        "module goldens vs python3",
+        `truth has ${truth.length} rows for ${cases.length} cases`,
+      );
+      return;
+    }
+    const bad: string[] = [];
+    for (let i = 0; i < cases.length; i++) {
+      const mine = tsGolden(cases[i]!);
+      const want = truth[i]!;
+      if (mine.ok !== want.ok || !sameValue(mine.r, want.r)) {
+        const c = cases[i]!;
+        bad.push(
+          `${c.op} ${JSON.stringify(c.s.slice(0, 40))}: port ${JSON.stringify(mine.r)} vs py ${JSON.stringify(want.r)}`,
+        );
+      }
+    }
+    st.check(
+      `module goldens vs python3 (${cases.length} cases)`,
+      bad.length === 0,
+      bad.slice(0, 12).join("\n"),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// --- the guard: no hand-written Unicode-meaning escape outside this module ---
+// JavaScript's \w \W \d \D \b \B \s \S stay ASCII (the u flag only enables
+// \p, it never widens them), and toLowerCase/toUpperCase are not casefold.
+// Any of those in a ported pattern or fold is a BASE divergence unless the
+// line carries its marker: `ASCII:` plus the true reason for an escape
+// (the text is machine-made ASCII, or BASE itself is ASCII-explicit
+// there), `ASCII:` or `LOWER:` for a case-op (`LOWER:` where the line
+// ports BASE's own `.lower()` exactly — Unicode lowering, never a fold).
+// The lexer is small on purpose: strings and comments are skipped, template
+// bodies are scanned (their ${} holds code), and a `//` inside a template
+// or regex literal ends the scan for that line. Whatever it misses, the
+// planted failure below would miss too — and fail the run if it did.
+
+export interface GuardHit {
+  file: string;
+  line: number;
+  kind: string;
+  text: string;
+}
+
+export function scanSource(name: string, src: string): GuardHit[] {
+  const lines = src.split("\n");
+  const hits: GuardHit[] = [];
+  let inBlock = false;
+  const marked = (n: number, kind: "esc" | "fold"): boolean => {
+    const re = kind === "esc" ? /\/\/.*ASCII:/ : /\/\/.*(ASCII|LOWER):/;
+    if (re.test(lines[n]!)) return true;
+    // A shielding comment on the line above must LEAD that line: a trailing
+    // comment shields its own line only, never the line below it.
+    const above = kind === "esc" ? /^\s*\/\/.*ASCII:/ : /^\s*\/\/.*(ASCII|LOWER):/;
+    return n > 0 && above.test(lines[n - 1]!);
+    return re.test(lines[n]!) || (n > 0 && re.test(lines[n - 1]!));
+  };
+  for (let n = 0; n < lines.length; n++) {
+    const raw = lines[n]!;
+    let code = "";
+    let i = 0;
+    while (i < raw.length) {
+      if (inBlock) {
+        const end = raw.indexOf("*/", i);
+        if (end < 0) {
+          i = raw.length;
+          break;
+        }
+        inBlock = false;
+        i = end + 2;
+        continue;
+      }
+      const two = raw.slice(i, i + 2);
+      if (two === "//") break;
+      if (two === "/*") {
+        inBlock = true;
+        i += 2;
+        continue;
+      }
+      const ch = raw[i]!;
+      if (ch === "/" && !inBlock) {
+        // A /.../ literal is code even when it holds quotes: swallow it whole
+        // so a quote inside cannot fake string-mode and blind the scan.
+        const tail = code.replace(/\s+$/, "");
+        const prev = tail.length > 0 ? tail[tail.length - 1]! : ";";
+        const kw = /(?:return|typeof|case|in|of|new|delete|void|yield|await|do|else)$/.test(tail);
+        if (kw || "(. ,=:!&|?{};+-*%^~<>".includes(prev)) {
+          let j = i + 1;
+          let inCls = false;
+          while (j < raw.length) {
+            const d = raw[j]!;
+            if (d === "\\") {
+              j += 2;
+              continue;
+            }
+            if (d === "[") inCls = true;
+            else if (d === "]") inCls = false;
+            else if (d === "/" && !inCls) break;
+            j++;
+          }
+          let k = j + 1;
+          while (k < raw.length && /[a-z]/.test(raw[k]!)) k++;
+          code += raw.slice(i, k);
+          i = k;
+          continue;
+        }
+      }
+      if (ch === "'" || ch === '"') {
+        // A RegExp("...") argument is pattern text: scan its inside.
+        const isArg = /RegExp\($/.test(code.replace(/\s+$/, ""));
+        i++;
+        let inner = "";
+        while (i < raw.length && raw[i] !== ch) {
+          if (raw[i] === "\\" && i + 1 < raw.length) {
+            inner += raw.slice(i, i + 2);
+            i += 2;
+          } else {
+            inner += raw[i];
+            i++;
+          }
+        }
+        i++;
+        if (isArg) code += inner;
+        continue;
+      }
+      code += ch;
+      i++;
+    }
+    const esc = code.match(/\\{1,2}[wWdDbBsS]/);
+    if (esc) {
+      if (!marked(n, "esc"))
+        hits.push({ file: name, line: n + 1, kind: esc[0], text: raw.trim().slice(0, 100) });
+      continue;
+    }
+    const fold = code.match(/\.to(Lower|Upper)Case\(/);
+    if (fold && !marked(n, "fold"))
+      hits.push({ file: name, line: n + 1, kind: fold[0], text: raw.trim().slice(0, 100) });
+  }
+  return hits;
+}
+
+const PLANTED = [
+  "const a = /\\w+/;",
+  "const b = /\\d+/g;",
+  "const c = /\\d+/u;",
+  'const d = new RegExp("\\\\w-\\\\d");',
+  "const e = /\\bword\\b/;",
+  "const f = x.toLowerCase();",
+  "const g = /[\\p{L}]+/u;",
+  "const h = /\\d+/; // ASCII: machine hex",
+  'const q = /"v": \\d+/.test(s);',
+];
+
+function runGuard(st: SelfTest): void {
+  const scriptsDir = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const files: string[] = [];
+  const walk = (d: string): void => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile() && e.name.endsWith(".ts")) files.push(p);
+    }
+  };
+  walk(scriptsDir);
+  const mine = fileURLToPath(import.meta.url);
+  const targets = files.filter((f) => f !== mine);
+  const hits: GuardHit[] = [];
+  for (const f of targets) hits.push(...scanSource(f, readFileSync(f, "utf-8")));
+  const rel = (f: string): string =>
+    f.startsWith(scriptsDir) ? f.slice(scriptsDir.length + 1) : f;
+  st.check(
+    `guard: no hand-written \\w \\d \\b \\s or case-op without ASCII: (${targets.length} files)`,
+    hits.length === 0,
+    hits
+      .slice(0, 30)
+      .map((h) => `${rel(h.file)}:${h.line}: ${h.kind} ${h.text}`)
+      .join("\n"),
+  );
+  const got = scanSource("planted.ts", PLANTED.join("\n")).map((h) => h.line);
+  st.check(
+    "guard catches its planted failure",
+    JSON.stringify(got) === JSON.stringify([1, 2, 3, 4, 5, 6, 9]),
+    `got lines ${JSON.stringify(got)}, want [1,2,3,4,5,6,9]`,
+  );
+  st.check(
+    "guard scanned the port's scripts",
+    targets.some((f) => f.endsWith("tool-faults.ts")) && targets.length > 5,
+    `${targets.length} files`,
+  );
+}
+
+// --- entry: this module's --self-test; silent on import ---
+const entryArg = process.argv[1];
+if (typeof entryArg === "string" && resolve(entryArg) === fileURLToPath(import.meta.url)) {
+  const argv = process.argv.slice(2);
+  if (argv.length === 1 && argv[0] === "--self-test") {
+    const st = new SelfTest();
+    runGoldens(st);
+    runGuard(st);
+    st.finish();
+  } else {
+    console.error("usage: text.sh --self-test");
+    process.exit(2);
+  }
+}

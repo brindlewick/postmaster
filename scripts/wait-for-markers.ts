@@ -59,14 +59,14 @@ function wait(dirRaw: string, glob: string, countRaw: string, timeoutRaw: string
       console.error(`wait-for-markers: '${n}' is not a whole number of markers or seconds`);
       return 1;
     }
-    const stripped = n.replace(/^0+(?=\d)/, "");
+    const stripped = n.replace(/^0+(?=[0-9])/, "");
     if (stripped.length > 9) {
       console.error(`wait-for-markers: '${n}' is more than 9 digits`);
       return 1;
     }
   }
-  const COUNT = parseInt(countRaw.replace(/^0+(?=\d)/, ""), 10);
-  const TIMEOUT = parseInt(timeoutRaw.replace(/^0+(?=\d)/, ""), 10);
+  const COUNT = parseInt(countRaw.replace(/^0+(?=[0-9])/, ""), 10);
+  const TIMEOUT = parseInt(timeoutRaw.replace(/^0+(?=[0-9])/, ""), 10);
 
   let DIR: string;
   try {

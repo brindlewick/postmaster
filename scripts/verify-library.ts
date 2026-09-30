@@ -37,13 +37,20 @@ import { readJsonFile, tryJsonFile } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { die, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import { BOUND_L, PY_M_START, PY_S_CLASS, W_CLASS } from "./lib/text.ts";
 
 const CODE = /\.(?:c|m)?(?:j|t)sx?$/;
 const TEST_NAME = /\.(?:test|spec)\.(?:c|m)?(?:j|t)sx?$/;
 const TEST_DIRS = new Set(["test", "tests", "__tests__"]);
 const SUPPORT_DIRS = new Set(["fixtures", "__fixtures__", "helpers", "support", "__mocks__"]);
-const IMPORT = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)(['"])([^'"\n]+)\1/g;
-const TEST_CALL = /^\s*(?:await\s+)?(?:test|it|describe)(?:\.\w+)*\s*\(/gm;
+const IMPORT = new RegExp(
+  `(?:${BOUND_L}from[${PY_S_CLASS}]*|${BOUND_L}import[${PY_S_CLASS}]*\\(?[${PY_S_CLASS}]*|${BOUND_L}require[${PY_S_CLASS}]*\\([${PY_S_CLASS}]*)(['"])([^'"\\n]+)\\1`,
+  "gu",
+);
+const TEST_CALL = new RegExp(
+  `${PY_M_START}[${PY_S_CLASS}]*(?:await[${PY_S_CLASS}]+)?(?:test|it|describe)(?:\\.[${W_CLASS}]+)*[${PY_S_CLASS}]*\\(`,
+  "gu",
+);
 
 function notRun(msg: string): never {
   console.log(`not run: ${msg}`);
@@ -264,6 +271,21 @@ if (argv[0] === "--self-test") {
 withTempDir((tmp) => {
   const SELF = join(scriptsDir(import.meta), "verify-library.sh");
   const st = new SelfTest();
+  {
+    // Unicode primitives, BASE verify-library.sh python: every expectation python3-verified.
+    const im = [...'x = 1\néfrom "m"\n'.matchAll(IMPORT)].map((m) => m[0]);
+    st.check(
+      "an import needs a word boundary (éfrom is none)",
+      im.length === 0,
+      JSON.stringify(im),
+    );
+    TEST_CALL.lastIndex = 0;
+    const tLongS = TEST_CALL.test('test.ſskip("a")');
+    st.check("test-names may hold non-ASCII word chars", tLongS, "ſ");
+    TEST_CALL.lastIndex = 0;
+    const t1f = TEST_CALL.test('\x1f test("a")');
+    st.check("test-calls may indent with U+001F", t1f, "\x1f");
+  }
 
   function expect(label: string, exit: number, project: string, wantIn?: string): void {
     const r = run("bash", [SELF, join(tmp, project)]);

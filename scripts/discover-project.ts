@@ -76,12 +76,14 @@ const dirs = lsNames(["-d", "wiki", "docs", ".github"]);
 // The tracker is visible in how the project already writes commits; nothing to configure.
 const oneline = run("git", ["log", "--oneline", "-200"]).out;
 const counts = new Map<string, number>();
-const ticket = /\b[A-Z][A-Z0-9]{1,9}-[0-9]+\b/g;
-for (const line of oneline.split("\n")) {
-  for (const m of line.match(ticket) ?? []) {
-    const prefix = m.replace(/-[0-9]*$/, "");
-    counts.set(prefix, (counts.get(prefix) ?? 0) + 1);
-  }
+// BASE pipes git log through grep -oE (locale word-boundaries); spawn it exactly.
+const ticketOut = run("grep", ["-oE", "--", "\\b[A-Z][A-Z0-9]{1,9}-[0-9]+\\b"], {
+  input: oneline,
+}).out;
+for (const m of ticketOut.split("\n")) {
+  if (!m) continue;
+  const prefix = m.replace(/-[0-9]*$/, "");
+  counts.set(prefix, (counts.get(prefix) ?? 0) + 1);
 }
 // sort | uniq -c | sort -rn | head -1 | awk '{print $2}': ties break descending, as sort -rn does.
 const ranked = [...counts.entries()].sort(

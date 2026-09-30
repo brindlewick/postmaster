@@ -101,7 +101,7 @@ function meta(d: string, repo: string): number {
   }
 
   const record = {
-    written: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+    written: new Date().toISOString().replace(/\.[0-9]+Z$/, "Z"),
     project: basename(dirname(resolve(d))),
     run: basename(resolve(d)),
     target: {

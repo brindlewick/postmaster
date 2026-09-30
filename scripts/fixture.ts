@@ -32,6 +32,19 @@ import { tryJsonFile } from "./lib/data.ts";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { die, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import {
+  DOT_ALL,
+  digitValue,
+  END_OF_STRING,
+  isDigit,
+  literalI,
+  PY_M_END,
+  PY_M_START,
+  PY_S_CLASS,
+  pyRstrip,
+  pySplitLines,
+  pyWords,
+} from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
 const TOOL = toolRoot(import.meta);
@@ -220,6 +233,7 @@ function makeAndFile(dest: string, ticket: string): number {
   const createR = run("bash", [localSh, dest, "create", title, bodyFile]);
   rmSync(bodyFile, { force: true });
   const number = createR.out.trim().split("\n").pop() ?? "";
+  // ASCII: BASE matches ^[0-9]+$ for the filed number in bash; local create prints one line
   if (createR.code !== 0 || !/^\d+$/.test(number)) {
     unmake();
     console.error(
@@ -277,21 +291,26 @@ function exited(code: number | null): string {
 }
 
 function tail(text: string, n = 20): string {
-  return text.replace(/\s+$/, "").split("\n").slice(-n).join("\n");
+  return pySplitLines(pyRstrip(text)).slice(-n).join("\n");
 }
 
 function squash(text: string): string {
-  return text.split(/\s+/).join(" ");
+  return pyWords(text).join(" ");
 }
 
 function sectionOf(text: string, heading: string): string {
   const re = new RegExp(
-    `^##[ \\t]+${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[ \\t]*\\n([\\s\\S]*?)(?=^##[ \\t]|$)`,
-    "im",
+    `${PY_M_START}##[ \t]+${literalI(heading)}[ \t]*\n(${DOT_ALL}*?)(?=${PY_M_START}##[ \t]|${END_OF_STRING})`,
+    "gisu",
   );
   const m = re.exec(text);
   return m ? m[1]! : "";
 }
+
+const HIDDEN_RE = new RegExp(
+  `${PY_M_START}[${PY_S_CLASS}]*(\\p{Nd}+) (pass|fail)[${PY_S_CLASS}]*${PY_M_END}`,
+  "gu",
+);
 
 function hidden(ticket: string, app: string): { passed: boolean; detail: string; out: string } {
   const r = sh(["bun", "test", "--timeout", "120000", "./"], join(TICKETS, ticket, "hidden"), {
@@ -299,8 +318,8 @@ function hidden(ticket: string, app: string): { passed: boolean; detail: string;
     FIXTURE_APP: app,
   });
   const counts: Record<string, number> = {};
-  for (const m of (r.out ?? "").matchAll(/^\s*(\d+) (pass|fail)\s*$/gm)) {
-    counts[m[2]!] = parseInt(m[1]!, 10);
+  for (const m of (r.out ?? "").matchAll(HIDDEN_RE)) {
+    counts[m[2]!] = parseInt(digitValue(m[1]!), 10);
   }
   const passed = counts.pass ?? 0;
   const failed = counts.fail ?? 0;
@@ -395,27 +414,32 @@ function makeScoreDir(): string {
   return mkdtempSync(join(makeTmpDir(), "fixture-score-"));
 }
 
+const LEG_FILE_RE = new RegExp(
+  `^(?:\\.leg-(\\p{Nd}+)-(?:done|exited)|leg-(\\p{Nd}+)-(?:prompt|takeover)\\.txt|handoff-(\\p{Nd}+)\\.md)${END_OF_STRING}`,
+  "u",
+);
+
 function legsOf(dispatch: string, manifest: Record<string, unknown> | null): number[] {
   const seen = new Set<number>();
   try {
     for (const n of readdirSync(dispatch)) {
-      const m =
-        /\.leg-(\d+)-(?:done|exited)|leg-(\d+)-(?:prompt|takeover)\.txt|handoff-(\d+)\.md/.exec(n);
+      const m = LEG_FILE_RE.exec(n);
       if (m) {
         const g = [m[1], m[2], m[3]].find((x) => x);
-        if (g) seen.add(parseInt(g, 10));
+        if (g) seen.add(parseInt(digitValue(g), 10));
       }
     }
   } catch {
     /* empty */
   }
   if (manifest && typeof manifest === "object") {
-    if (typeof manifest.leg === "number") seen.add(manifest.leg as number);
+    if (typeof manifest.leg === "number" && Number.isInteger(manifest.leg))
+      seen.add(manifest.leg as number);
     const coachman = manifest.coachman as Record<string, unknown> | undefined;
     const legs = coachman?.legs as Record<string, unknown> | undefined;
     if (legs) {
       for (const k of Object.keys(legs)) {
-        if (/^\d+$/.test(k)) seen.add(parseInt(k, 10));
+        if (isDigit(k)) seen.add(parseInt(digitValue(k), 10));
       }
     }
   }
@@ -470,7 +494,7 @@ function checkGate(app: string): { ok: boolean; detail: string; out: string } {
 
 function checkStages(dispatch: string): { ok: boolean; detail: string } {
   const r = sh(["bash", join(HERE, "stage.sh"), "--list"]);
-  const listed = (r.out ?? "").split(/\s+/).filter((x) => x);
+  const listed = pyWords(r.out ?? "");
   if (r.code !== 0 || !listed.includes("done")) {
     return { ok: false, detail: "scripts/stage.sh --list names no done stage" };
   }
@@ -653,6 +677,58 @@ kind = "github"
   process.env.GIT_COMMITTER_EMAIL = "fixture@example.invalid";
 
   const st = new SelfTest();
+  // Unicode primitives: tail/squash/sectionOf/hidden/legsOf match the BASE
+  // fixture.sh python (re.M|S|I, \s, \d, \Z, str.split/splitlines,
+  // int/isdigit), not JS string semantics. Every expected value below was
+  // verified against python3; each check fails on the pre-route spelling.
+  {
+    const u = mkdtempSync(join(tmpdir(), "fixture-uni-"));
+    const u2 = mkdtempSync(join(tmpdir(), "fixture-uni2-"));
+    const u3 = mkdtempSync(join(tmpdir(), "fixture-uni3-"));
+    writeFileSync(join(u, ".leg-١-done"), "");
+    writeFileSync(join(u2, "x.leg-1-done"), "");
+    let supThrew = false;
+    try {
+      legsOf(u3, { coachman: { legs: { "²": 1 } } }); // U+00B2: isdigit true, int() raises
+    } catch {
+      supThrew = true;
+    }
+    const hidAR = [..."٣ pass\n".matchAll(HIDDEN_RE)].map((m) => [m[1], m[2]]);
+    const cases: Array<[string, string, string]> = [
+      ["tail splits on CR and CRLF, not just LF", tail("a\rb\r\nc"), "a\nb\nc"],
+      ["tail keeps a trailing FEFF (not Python space)", tail("x\uFEFF"), "x\uFEFF"],
+      ["tail breaks on U+001C", tail("a\x1cb"), "a\nb"],
+      ["squash splits on U+001C", squash("a\x1cb"), "a b"],
+      ["squash does not split on FEFF", squash("a\uFEFFb"), "a\uFEFFb"],
+      [
+        "sectionOf returns every line to the next heading",
+        sectionOf("## Acceptance criteria\n- a\n- b\n## Direction\nx\n", "Acceptance criteria"),
+        "- a\n- b\n",
+      ],
+      [
+        "sectionOf runs to the absolute end (keeps the final LF)",
+        sectionOf("## A\nbody\n", "A"),
+        "body\n",
+      ],
+      ["sectionOf folds dotted-I headings", sectionOf("## dırectıon\nX\n", "DIRECTION"), "X\n"],
+      [
+        "sectionOf folds ASCII case",
+        sectionOf("## Acceptance Criteria\nQ\n", "acceptance criteria"),
+        "Q\n",
+      ],
+      ["hidden counts Arabic-Indic digits", JSON.stringify(hidAR), JSON.stringify([["٣", "pass"]])],
+      ["legsOf reads an Arabic-Indic leg file", JSON.stringify(legsOf(u, null)), "[1]"],
+      ["legsOf rejects a partial leg-file name", JSON.stringify(legsOf(u2, null)), "[]"],
+      [
+        "legsOf reads Arabic-Indic manifest keys",
+        JSON.stringify(legsOf(u3, { coachman: { legs: { "١٢": 1 } } })),
+        "[1,2,3,4,5,6,7,8,9,10,11,12]",
+      ],
+      ["legsOf throws on an int()-proof key, as int() raises", String(supThrew), "true"],
+      ["legsOf ignores a float leg", JSON.stringify(legsOf(u3, { leg: 1.5 })), "[]"],
+    ];
+    for (const [name, got, want] of cases) st.check(name, got === want, `got=${got} want=${want}`);
+  }
   // Shell lookups take their operand as argv, never pasted into a command
   // string: a name holding $(...) is looked up literally, and runs nothing.
   {
@@ -1209,7 +1285,7 @@ case $2 in store) exec "${join(HERE, "local.sh")}" "$@" ;; *) exit 1 ;; esac
     const failLines = out
       .split("\n")
       .filter((l) => l.startsWith("FAIL"))
-      .map((l) => l.split(/\s+/)[1] ?? "");
+      .map((l) => pyWords(l)[1] ?? "");
     const failingChecks = failLines.join(",") || "none";
     const lines = out.split("\n").filter((l) => l.trim()).length;
     const wantExit = failing === "none" ? 0 : 2;

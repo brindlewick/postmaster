@@ -38,6 +38,7 @@ import { readTomlFile, tryJsonFile } from "./lib/data.ts";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { run, signalExitCode, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import { BOUND_R, DOT_ALL, PY_M_START, PY_S_CLASS, pySplitLines, pyWords } from "./lib/text.ts";
 
 const CONFIG =
   process.env.POSTMASTER_CONFIG ?? join(process.env.HOME ?? "", ".postmaster/config.toml");
@@ -943,26 +944,30 @@ withTempDir((tmp) => {
     }
   };
 
+  const CONT_RE = new RegExp(`\\\\\\n[${PY_S_CLASS}]*`, "g");
+  const FENCE_SPLIT_RE = new RegExp(
+    `(${PY_M_START}[ \t]*\`\`\`${DOT_ALL}*?${PY_M_START}[ \t]*\`\`\`)`,
+  );
   // calls(): scan runbooks for launch/resume invocations.
   const calls = (...paths: string[]): { code: number; out: string } => {
     const results: string[] = [];
-    const CALL = /scripts\/launch\.sh\s+(?:launch|resume)\b/g;
+    const CALL = new RegExp(`scripts/launch\\.sh[${PY_S_CLASS}]+(?:launch|resume)${BOUND_R}`, "gu");
     for (const path of paths) {
       const text = readFileSync(path, "utf8");
       // Split into fenced blocks and prose.
-      const parts = text.split(/^([ \t]*```.*?^[ \t]*```)/ms);
+      const parts = text.split(FENCE_SPLIT_RE);
       for (let i = 0; i < parts.length; i++) {
         const part = parts[i] ?? "";
         if (i % 2) {
           // fenced block
-          const joined = part.replace(/\\\n\s*/g, " ");
-          for (const line of joined.split("\n")) {
+          const joined = part.replace(CONT_RE, " ");
+          for (const line of pySplitLines(joined)) {
             let m: RegExpExecArray | null;
             CALL.lastIndex = 0;
             while ((m = CALL.exec(line)) !== null) {
               const c = line.slice(m.index);
               results.push(
-                `${c.includes("--run <dispatch>") ? "run" : "unrun"} ${path}: ${c.split(/\s+/).join(" ")}`,
+                `${c.includes("--run <dispatch>") ? "run" : "unrun"} ${path}: ${pyWords(c).join(" ")}`,
               );
             }
           }
@@ -975,7 +980,7 @@ withTempDir((tmp) => {
             while ((m = CALL.exec(inner)) !== null) {
               const c = inner.slice(m.index);
               results.push(
-                `${c.includes("--run <dispatch>") ? "run" : "unrun"} ${path}: ${c.split(/\s+/).join(" ")}`,
+                `${c.includes("--run <dispatch>") ? "run" : "unrun"} ${path}: ${pyWords(c).join(" ")}`,
               );
             }
           }
@@ -1068,6 +1073,23 @@ withTempDir((tmp) => {
       "<prompt-file> --run <dispatch>`.",
     ].join("\n"),
   );
+  {
+    // Unicode primitives, BASE launch.sh python: every expectation python3-verified.
+    writeFileSync(join(tmp, "uni.md"), "```sh\nscripts/launch.sh\x1flaunch u1 <wt> <p>\n```\n");
+    const u1 = calls(join(tmp, "uni.md"));
+    st.check("calls finds an invocation spaced with U+001F", u1.out.includes("u1"), u1.out);
+    writeFileSync(join(tmp, "uni2.md"), "```sh\nscripts/launch.sh\rlaunch u2 <wt> <p>\n```\n");
+    const u2 = calls(join(tmp, "uni2.md"));
+    st.check(
+      "calls misses an invocation broken by CR (splitlines)",
+      !u2.out.includes("u2"),
+      u2.out,
+    );
+    const contGot = "a\\\n\x1fb".replace(CONT_RE, " ");
+    st.check("continuations join across U+001F", contGot === "a b", JSON.stringify(contGot));
+    const fenceGot = "a\r```sh\nscripts/launch.sh launch x\n```\nb".split(FENCE_SPLIT_RE);
+    st.check("fences do not open after CR", fenceGot.length === 1, String(fenceGot.length));
+  }
   run("git", ["init", "-q", join(tmp, "repo")]);
   record("run", "legs");
   record("run-then", "then");
@@ -1699,7 +1721,7 @@ withTempDir((tmp) => {
     const normStreams = (s: string): string =>
       s
         .split("\n")
-        .map((l) => l.replace(/^[^:]*: line \d+: /, ""))
+        .map((l) => l.replace(/^[^:]*: line [0-9]+: /, ""))
         .join("\n");
     const handedEnv = (): string[] => {
       let raw: string;

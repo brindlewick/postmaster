@@ -237,7 +237,7 @@ withTempDir((tmp) => {
     const line = log
       .split("\n")
       .find((l) => l.includes("stage bootstrapped, from dispatched after"));
-    if (line !== undefined && /after \d/.test(line))
+    if (line !== undefined && /after [0-9]/.test(line))
       st.ok("run-log.md records the change and how long the last stage took");
     else st.fail("run-log.md records the change and how long the last stage took", line ?? log);
   } catch {

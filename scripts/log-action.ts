@@ -86,6 +86,29 @@ interface Fault {
   control: string;
 }
 
+function kindsOf(text: string): string[] {
+  // BASE awk -F'|': /^[[:space:]]*\|[[:space:]]*`/ rows; k = $3 with all [[:space:]] stripped.
+  const kinds: string[] = [];
+  for (const line of text.split("\n")) {
+    if (!/^[ \t\n\v\f\r]*\|[ \t\n\v\f\r]*`/.test(line)) continue;
+    const k = (line.split("|")[2] ?? "").replace(/[ \t\n\v\f\r]/g, "");
+    if (k !== "") kinds.push(k);
+  }
+  return [...new Set(kinds)].sort();
+}
+
+function controlOf(text: string, t: string): string | undefined {
+  // BASE awk -F'|': c = $2 edge-trimmed of [[:space:]], compared with backticks; k = $3 stripped.
+  for (const line of text.split("\n")) {
+    const cells = line.split("|");
+    const c = (cells[1] ?? "").replace(/^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g, "");
+    if (c === `\`${t}\`` || c === `\`<tool>/${t}\``) {
+      return (cells[2] ?? "").replace(/[ \t\n\v\f\r]/g, "");
+    }
+  }
+  return undefined;
+}
+
 function toolFault(
   given: string,
   args: string[],
@@ -141,7 +164,8 @@ function toolFault(
     ["diagnosis", diagnosis],
     ["fix", fix],
   ] as const) {
-    if (val.replace(/\s/g, "") === "") {
+    // BASE ${var//[[:space:]]/} in the C locale: ASCII space only.
+    if (val.replace(/[ \t\n\v\f\r]/g, "") === "") {
       return { error: `log-action: a tool-fault needs --${name} (the error may be 'none')` };
     }
   }
@@ -170,10 +194,7 @@ function toolFault(
   let kinds: string[] = [];
   try {
     const text = readFileSync(CONTROLS, "utf8");
-    for (const line of text.split("\n")) {
-      const m = /^\s*\|\s*`([^`]*)`\s*\|\s*(\S+)\s*\|/.exec(line);
-      if (m?.[2]) kinds.push(m[2].trim());
-    }
+    kinds.push(...kindsOf(text));
   } catch {
     /* ignore */
   }
@@ -188,16 +209,8 @@ function toolFault(
   // Check if this file is a listed control
   try {
     const text = readFileSync(CONTROLS, "utf8");
-    for (const line of text.split("\n")) {
-      const m = /^\s*\|\s*`([^`]*)`\s*\|\s*(\S+)\s*\|/.exec(line);
-      if (!m) continue;
-      const pathPart = (m[1] ?? "").replace(/`/g, "").trim();
-      const kind = (m[2] ?? "").trim();
-      if (pathPart === t || pathPart === `<tool>/${t}`) {
-        control = kind;
-        break;
-      }
-    }
+    const foundControl = controlOf(text, t);
+    if (foundControl !== undefined) control = foundControl;
   } catch {
     /* ignore */
   }
@@ -230,7 +243,7 @@ function logAction(
     return 1;
   }
   if (action === "finding") {
-    const firstWord = detail.split(/\s+/)[0] ?? "";
+    const firstWord = detail.split(" ")[0] ?? "";
     if (firstWord !== "gating" && firstWord !== "style") {
       console.error("log-action: a finding's detail opens with its class, gating or style");
       return 1;
@@ -263,7 +276,7 @@ function logAction(
   }
   const runName = basename(dispatchReal);
   const project = basename(dirname(dispatchReal));
-  const ts = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+  const ts = new Date().toISOString().replace(/\.[0-9]+Z$/, "Z");
 
   const line = `{"ts":"${ts}","project":"${jsonStr(project)}","run":"${jsonStr(runName)}","actor":"${jsonStr(actor)}","action":"${jsonStr(action)}","target":"${jsonStr(finalTarget)}","detail":"${jsonStr(finalDetail)}"${faultJson}}`;
 
@@ -377,6 +390,43 @@ withTempDir((tmp) => {
     "--fix",
     "count regular files only",
   ];
+
+  {
+    // Unicode primitives, BASE log-action.sh bash/awk: every expectation verified there.
+    const kindsNB = kindsOf("| `a` | k\u00a0ind |\n| `b` | k ind |\n");
+    st.check(
+      "kinds keep NBSP and join inner spaces (awk gsub)",
+      JSON.stringify(kindsNB) === JSON.stringify(["kind", "k\u00a0ind"]),
+      JSON.stringify(kindsNB),
+    );
+    const ctlNB = controlOf("| \u00a0`t`\u00a0 | kind |\n", "t");
+    st.check(
+      "an NBSP-padded path does not match (ASCII trim)",
+      ctlNB === undefined,
+      JSON.stringify(ctlNB),
+    );
+    st.check(
+      "a plain path still matches",
+      controlOf("| `t` | kind |\n", "t") === "kind",
+      "regression",
+    );
+    const fieldsNBSP = [...FIELDS];
+    fieldsNBSP[7] = "\u00a0";
+    wrote(
+      "a diagnosis of only NBSP is non-blank (ASCII space)",
+      "coachman",
+      "tool-fault",
+      "scripts/launch.sh",
+      ...fieldsNBSP,
+    );
+    refused(
+      "a finding whose class is followed by a tab is refused",
+      "opens with its class",
+      "finding",
+      "src/c.ts:7",
+      "gating\tP3 r1 bug luna reading",
+    );
+  }
 
   // Setup symlink and outside file
   run("bash", ["-c", `ln -s "${TOOL}" "${join(tmp, "link")}" && : > "${join(tmp, "outside.sh")}"`]);

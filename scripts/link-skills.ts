@@ -564,7 +564,7 @@ esac
     const ok1 =
       r.code !== 0 &&
       out.includes(link) &&
-      !out.toLowerCase().includes("no such file") &&
+      run("grep", ["-qi", "--", "no such file"], { input: out }).code !== 0 &&
       !out.includes("projects/1");
     st.check(label, ok1, `exit ${r.code}\n${out}`);
   }
@@ -799,11 +799,11 @@ esac
   st.check("harnesses.md has a Skills folders table", table !== "", table);
   for (const h of HARNESSES) {
     const row = table.split("\n").find((l) => {
-      const name = (l.split("|")[1] ?? "").trim();
+      const name = (l.split("|")[1] ?? "").replace(/ /g, "");
       return name === h;
     });
     const cell = row ? (row.split("|")[2] ?? "") : "";
-    const wantMatch = cell.match(/^\s*`([^`]*)`/);
+    const wantMatch = cell.match(/^ *`([^`]*)`/);
     let want = wantMatch ? (wantMatch[1] ?? "") : "";
     if (want.startsWith("~")) want = (process.env.HOME ?? "~") + want.slice(1);
     const scriptSays = skillsFolder(h) ?? "";

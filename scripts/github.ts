@@ -52,6 +52,7 @@ import { join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
 import { run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import { digitValue, END_OF_STRING, pyLower, pyWords, W_CLASS } from "./lib/text.ts";
 
 const STATES = ["todo", "in-progress", "blocked", "done", "cancelled"];
 const COLUMN: Record<string, string> = {
@@ -197,10 +198,10 @@ function statusField(b: Board): [string, Record<string, string>] {
     "json",
   ]);
   for (const f of fields.fields ?? []) {
-    if ((f.name ?? "").toLowerCase() === "status" && f.options != null) {
+    if (pyLower(f.name ?? "") === "status" && f.options != null) {
       const opts: Record<string, string> = {};
       for (const o of f.options) {
-        opts[(o.name as string).replace(/\W/g, "").toLowerCase()] = o.id;
+        opts[pyLower((o.name as string).replace(NONWORD_RE, ""))] = o.id;
       }
       return [f.id, opts];
     }
@@ -349,8 +350,8 @@ function flowState(
   status: string | undefined,
 ): string {
   if (iss.state === "CLOSED") return iss.stateReason === "NOT_PLANNED" ? "cancelled" : "done";
-  if ((iss.labels ?? []).some((l) => (l.name ?? "").toLowerCase() === BLOCKED)) return "blocked";
-  return (status ?? "").replace(/\W/g, "").toLowerCase() === "inprogress" ? "in-progress" : "todo";
+  if ((iss.labels ?? []).some((l) => pyLower(l.name ?? "") === BLOCKED)) return "blocked";
+  return pyLower((status ?? "").replace(NONWORD_RE, "")) === "inprogress" ? "in-progress" : "todo";
 }
 
 function ensureLabel(nwo: string): void {
@@ -364,7 +365,7 @@ function ensureLabel(nwo: string): void {
     "--limit",
     "200",
   ]);
-  const names = new Set(labels.map((l) => l.name.toLowerCase()));
+  const names = new Set(labels.map((l) => pyLower(l.name)));
   if (!names.has(BLOCKED)) {
     gh([
       "label",
@@ -389,10 +390,14 @@ function setLabel(nwo: string, number: number, present: boolean): void {
   }
 }
 
+const NONWORD_RE = new RegExp(`[^${W_CLASS}]`, "gu");
+const NUMBER_RE = new RegExp(`^#?\\p{Nd}+${END_OF_STRING}`, "u");
+const DATE_PREFIX_RE = /^\p{Nd}{4}-\p{Nd}{2}-\p{Nd}{2} /u;
+
 // --- helpers ----------------------------------------------------------------------------------
 function numberArg(s: string): number {
-  if (!/^#?\d+$/.test(s)) dieGh(`not an issue number: ${s}`);
-  return parseInt(s.replace(/^#/, ""), 10);
+  if (!NUMBER_RE.test(s)) dieGh(`not an issue number: ${s}`);
+  return parseInt(digitValue(s.replace(/^#/, "")), 10);
 }
 
 function textOf(path: string, what: string): string {
@@ -537,8 +542,8 @@ function main(): void {
         (a.createdAt ?? "").localeCompare(b.createdAt ?? ""),
       );
       for (const c of sorted) {
-        let text = (c.body ?? "").split(/\s+/).filter(Boolean).join(" ");
-        if (!/^\d{4}-\d{2}-\d{2} /.test(text)) {
+        let text = pyWords(c.body ?? "").join(" ");
+        if (!DATE_PREFIX_RE.test(text)) {
           text = `${String(c.createdAt ?? "").slice(0, 10)} ${c.author?.login ?? "?"}: ${text}`;
         }
         console.log(`- ${text}`);
@@ -553,7 +558,7 @@ function main(): void {
     }
     const b = boardOf(NWO, OWNER, NAME);
     const iss = issueOf(OWNER, NAME, NWO, n);
-    const blockedNow = (iss.labels ?? []).some((l) => (l.name ?? "").toLowerCase() === BLOCKED);
+    const blockedNow = (iss.labels ?? []).some((l) => pyLower(l.name ?? "") === BLOCKED);
     const closed = iss.state === "CLOSED";
     if (newSt === "blocked") {
       if (closed) gh(["issue", "reopen", String(n), "-R", NWO]);
@@ -626,7 +631,7 @@ function main(): void {
       "100",
     ]);
     for (const h of [...hits].sort((a, b) => a.number - b.number)) {
-      console.log(`#${h.number}\t${String(h.state ?? "").toLowerCase()}\t${h.title ?? ""}`);
+      console.log(`#${h.number}\t${pyLower(String(h.state ?? ""))}\t${h.title ?? ""}`);
     }
   } else {
     dieGh("usage: github.sh <repo> board|create|edit|read|state|comment|list|access|search ...");
@@ -755,6 +760,29 @@ esac
     }
 
     const st = new SelfTest();
+    {
+      // Unicode primitives, BASE github.sh python: every expectation python3-verified.
+      const nw1 = pyLower("café-2".replace(NONWORD_RE, ""));
+      st.check("option keys keep non-ASCII word chars", nw1 === "café2", JSON.stringify(nw1));
+      const nw2 = pyLower("a٣b!".replace(NONWORD_RE, ""));
+      st.check("option keys keep decimal digits", nw2 === "a٣b", JSON.stringify(nw2));
+      st.check("issue numbers may be Arabic-Indic", NUMBER_RE.test("١٢"), "١٢");
+      st.check(
+        "issue numbers reject a trailing LF (fullmatch)",
+        NUMBER_RE.test("12\n") === false,
+        "12\n",
+      );
+      st.check(
+        "comment dates may be Arabic-Indic",
+        DATE_PREFIX_RE.test("٠٢٠٦-٠١-٠١ x"),
+        "٠٢٠٦-٠١-٠١",
+      );
+      st.check(
+        "comment dates keep the ASCII shape",
+        DATE_PREFIX_RE.test("2026-01-01 x") && !DATE_PREFIX_RE.test("2026-1-1 x"),
+        "regression",
+      );
+    }
 
     const lfMd =
       '## Problem / feature\nA body with `code`, "quotes" and a trailing space. \n\n## Direction\nNone.';

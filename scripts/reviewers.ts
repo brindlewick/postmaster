@@ -23,6 +23,7 @@ import { readTomlFile } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import { PY_DOT, PY_S_CLASS, pySplitLines, pyTrim } from "./lib/text.ts";
 
 const LENSES = ["style", "bug", "security"] as const;
 type Lens = (typeof LENSES)[number];
@@ -122,6 +123,9 @@ function lines(configPath: string): CmdResult {
   return { code: 0, out: `${out.join("\n")}\n`, err: "" };
 }
 
+const ANY_HEAD_RE = new RegExp(`^##[${PY_S_CLASS}]`);
+const TEAM_HEAD_RE = new RegExp(`^##[${PY_S_CLASS}]+Team[${PY_S_CLASS}]*$`);
+
 /** lanes <waybill> <lens>: the lanes for one lens, one per line, from a waybill. */
 function lanes(waybill: string, lens: string): CmdResult {
   const err: string[] = [];
@@ -141,9 +145,9 @@ function lanes(waybill: string, lens: string): CmdResult {
   }
   const team: string[] = [];
   let inside = false;
-  for (const line of readFileSync(waybill, "utf8").split("\n")) {
-    if (/^##\s/.test(line)) {
-      inside = /^##\s+Team\s*$/.test(line);
+  for (const line of pySplitLines(readFileSync(waybill, "utf8"))) {
+    if (ANY_HEAD_RE.test(line)) {
+      inside = TEAM_HEAD_RE.test(line);
       continue;
     }
     if (inside) team.push(line);
@@ -151,12 +155,12 @@ function lanes(waybill: string, lens: string): CmdResult {
   const listed = (prefix: string): string[] | null => {
     for (const line of team) {
       const m = new RegExp(
-        `^\\s*${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:\\s*(.*?)\\s*$`,
+        `^[${PY_S_CLASS}]*${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[${PY_S_CLASS}]*:[${PY_S_CLASS}]*(${PY_DOT}*?)[${PY_S_CLASS}]*$`,
       ).exec(line);
       if (m) {
         return (m[1] ?? "")
           .split(",")
-          .map((name) => name.trim())
+          .map((name) => pyTrim(name))
           .filter((name) => name !== "");
       }
     }
@@ -245,6 +249,26 @@ model = "m3"`;
       st.fail(`${label}: wanted exit ${wantRc} and "${wantOut}", got exit ${r.code}`, got + r.err);
     }
   };
+  // Unicode primitives, BASE reviewers.sh python: every expectation python3-verified.
+  // U+001F is Python space yet survives splitlines (U+001C would not), so it vectors the patterns.
+  writeFileSync(
+    join(tmp, "uni1.md"),
+    "# Waybill: 7\n\n## Ticket\nx\n\n##\x1fTeam\nsecurity reviewers: luna\n\n## Dispatch\ndispatch: /tmp/x\n",
+  );
+  expect("a Team heading with U+001F opens the section", 0, "luna", () =>
+    lanes(join(tmp, "uni1.md"), "security"),
+  );
+  waybill("uni2", "security reviewers\x1f:\x1fluna");
+  expect("a reviewers line with U+001F parses", 0, "luna", () =>
+    lanes(join(tmp, "uni2.md"), "security"),
+  );
+  writeFileSync(
+    join(tmp, "uni3.md"),
+    "# Waybill: 7\n\n## Ticket\nx\n\n## Team\x1csecurity reviewers: luna\n\n## Dispatch\ndispatch: /tmp/x\n",
+  );
+  expect("a U+001C opens a new line (splitlines)", 0, "luna", () =>
+    lanes(join(tmp, "uni3.md"), "security"),
+  );
 
   console.log("positive controls");
   config(

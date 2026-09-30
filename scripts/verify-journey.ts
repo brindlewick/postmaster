@@ -27,11 +27,87 @@ import { tryJsonFile } from "./lib/data.ts";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { die, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
-import { casefold } from "./lib/text.ts";
+import {
+  BOUND_R,
+  casefold,
+  END_OF_STRING,
+  PY_DOT,
+  PY_S_CLASS,
+  pyLower,
+  pyTrim,
+} from "./lib/text.ts";
 
-const FENCE = /^\s*(`{3,}|~{3,})/;
-const ITEM = /^\s*(?:\d{1,9}[.)]|[-*+])\s+(.*)$/;
-const HEADING = /^##\s+(.*?)\s*#*\s*$/;
+const FENCE = new RegExp("^[" + PY_S_CLASS + "]*(`{3,}|~{3,})");
+const ITEM = new RegExp(
+  "^[" +
+    PY_S_CLASS +
+    "]*(?:\\p{Nd}{1,9}[.)]|[-*+])[" +
+    PY_S_CLASS +
+    "]+(" +
+    PY_DOT +
+    "*)" +
+    END_OF_STRING +
+    "",
+  "u",
+);
+const HEADING = new RegExp(
+  "^##[" +
+    PY_S_CLASS +
+    "]+(" +
+    PY_DOT +
+    "*?)[" +
+    PY_S_CLASS +
+    "]*#*[" +
+    PY_S_CLASS +
+    "]*" +
+    END_OF_STRING +
+    "",
+);
+const TICKET_HEAD = new RegExp(
+  "^##[" + PY_S_CLASS + "]+Ticket[" + PY_S_CLASS + "]*" + END_OF_STRING + "",
+);
+const PROFILE_HEAD = new RegExp(
+  "^##[" + PY_S_CLASS + "]+Project profile[" + PY_S_CLASS + "]*" + END_OF_STRING + "",
+);
+const JOURNEY_HEAD = new RegExp(
+  "^##[" + PY_S_CLASS + "]+User journey[" + PY_S_CLASS + "]*" + END_OF_STRING + "",
+  "i",
+);
+const BREAK_HEAD = new RegExp("^#{1,2}[" + PY_S_CLASS + "]");
+const SENT_SPLIT = new RegExp("[.!?][\"')\\]]*(?=[" + PY_S_CLASS + "]|" + END_OF_STRING + ")", "g");
+const VERDICT_GUARD = new RegExp("^[" + PY_S_CLASS + "]*(did not|did)" + BOUND_R + "", "iu");
+const VERDICT = new RegExp(
+  "^[" +
+    PY_S_CLASS +
+    "]*(did not|did)" +
+    BOUND_R +
+    ":?[" +
+    PY_S_CLASS +
+    "]*(" +
+    PY_DOT +
+    "*)" +
+    END_OF_STRING +
+    "",
+  "iu",
+);
+const SHOT_GUARD = new RegExp(
+  "^[" + PY_S_CLASS + "]*screenshot:[" + PY_S_CLASS + "]*[^" + PY_S_CLASS + "]",
+  "i",
+);
+const SHOT = new RegExp(
+  "^[" +
+    PY_S_CLASS +
+    "]*screenshot:[" +
+    PY_S_CLASS +
+    "]*(" +
+    PY_DOT +
+    "+?)[" +
+    PY_S_CLASS +
+    "]*" +
+    END_OF_STRING +
+    "",
+  "i",
+);
 
 function notRun(msg: string): never {
   console.log(`not run: ${msg}`);
@@ -40,24 +116,26 @@ function notRun(msg: string): never {
 }
 
 function norm(s: string): string {
-  return casefold(s.replace(/\s+/g, " ").trim().replace(/\.+$/, "").trim());
+  // text.ts: BASE norm is re.sub(r"\s+", " ", s).strip().rstrip(".").strip().casefold().
+  const squashed = s.replace(new RegExp("[" + PY_S_CLASS + "]+", "g"), " ");
+  return casefold(pyTrim(pyTrim(squashed).replace(/\.+$/, "")));
 }
 
 function ticketLines(text: string): string[] {
   const lines = text.split("\n");
-  const start = lines.findIndex((l) => /^##\s+Ticket\s*$/.test(l));
+  const start = lines.findIndex((l) => TICKET_HEAD.test(l));
   if (start === -1) return lines;
-  const end = lines.findIndex((l, i) => i > start && /^##\s+Project profile\s*$/.test(l));
+  const end = lines.findIndex((l, i) => i > start && PROFILE_HEAD.test(l));
   return lines.slice(start + 1, end === -1 ? lines.length : end);
 }
 
 function steps(lines: string[]): string[] | null {
-  const start = lines.findIndex((l) => /^##\s+User journey\s*$/i.test(l));
+  const start = lines.findIndex((l) => JOURNEY_HEAD.test(l));
   if (start === -1) return null;
   const body: string[] = [];
   let fence: string | null = null;
   for (const l of lines.slice(start + 1)) {
-    if (fence === null && /^#{1,2}\s/.test(l)) break;
+    if (fence === null && BREAK_HEAD.test(l)) break;
     const m = FENCE.exec(l);
     if (m && fence === null) {
       fence = m[1] ?? "";
@@ -93,7 +171,7 @@ function steps(lines: string[]): string[] | null {
   const masked = text.replace(/`[^`]*`/g, (m) => "x".repeat(m.length));
   const out: string[] = [];
   let last = 0;
-  for (const m of masked.matchAll(/[.!?]["')\]]*(?=\s|$)/g)) {
+  for (const m of masked.matchAll(SENT_SPLIT)) {
     out.push(text.slice(last, m.index! + m[0].length).trim());
     last = m.index! + m[0].length;
   }
@@ -182,15 +260,15 @@ function journey(mode: "path" | "judge", wtArg: string, ...rest: string[]): numb
     }
     at = k + 1;
     const body = sections[k]?.[1];
-    const verdictLine = body.find((l) => /^\s*(did not|did)\b/i.test(l));
-    const verdict = verdictLine ? /^\s*(did not|did)\b:?\s*(.*)$/i.exec(verdictLine) : null;
-    const shotLine = body.find((l) => /^\s*screenshot:\s*\S/i.test(l));
-    const shot = shotLine ? /^\s*screenshot:\s*(.+?)\s*$/i.exec(shotLine)?.[1] : null;
+    const verdictLine = body.find((l) => VERDICT_GUARD.test(l));
+    const verdict = verdictLine ? VERDICT.exec(verdictLine) : null;
+    const shotLine = body.find((l) => SHOT_GUARD.test(l));
+    const shot = shotLine ? SHOT.exec(shotLine)?.[1] : null;
     if (!verdict) {
       missing.push(`step ${n + 1} has no verdict, did or did not: ${step}`);
       continue;
     }
-    if ((verdict[1] ?? "").toLowerCase() === "did not") {
+    if (pyLower(verdict[1] ?? "") === "did not") {
       didNot.push(`step ${n + 1} did not: ${step}${verdict[2] ? ` (${verdict[2]})` : ""}`);
       continue;
     }
@@ -673,5 +751,46 @@ Not a step.
     );
   }
 
+  st.check("ITEM takes a U+001C gap like BASE", ITEM.test("1.\x1citem"), "no match");
+  st.check("ITEM takes an Arabic-Indic number like BASE", ITEM.test("\u0661. item"), "no match");
+  st.check("HEADING takes a NEL gap like BASE", HEADING.test("##\u0085T"), "no match");
+  st.check("FENCE takes a U+001C indent like BASE", FENCE.test("\x1c```"), "no match");
+  st.check(
+    "norm splits U+001C like BASE",
+    norm("a\x1cb") === "a b",
+    JSON.stringify(norm("a\x1cb")),
+  );
+  st.check("TICKET_HEAD takes a NEL gap like BASE", TICKET_HEAD.test("##\u0085Ticket"), "no match");
+  st.check(
+    "JOURNEY_HEAD takes a trailing U+001C like BASE",
+    JOURNEY_HEAD.test("## User journey\x1c"),
+    "no match",
+  );
+  st.check("BREAK_HEAD takes a U+001C gap like BASE", BREAK_HEAD.test("##\x1cx"), "no match");
+  st.check(
+    "sentences split after U+001C like BASE",
+    "x.\x1cy".match(SENT_SPLIT)?.length === 1,
+    "no split",
+  );
+  st.check(
+    "the verdict guard takes a U+001C indent like BASE",
+    VERDICT_GUARD.test("\x1cdid"),
+    "no match",
+  );
+  st.check(
+    "the verdict guard refuses did+long-s like BASE",
+    !VERDICT_GUARD.test("did\u017fx"),
+    "matched",
+  );
+  st.check(
+    "the shot takes a NEL gap like BASE",
+    SHOT.exec("screenshot:\u0085p")?.[1] === "p",
+    "misread",
+  );
+  st.check(
+    "the shot guard refuses a lone U+001C like BASE",
+    !SHOT_GUARD.test("screenshot:\x1c"),
+    "matched",
+  );
   st.finish();
 });

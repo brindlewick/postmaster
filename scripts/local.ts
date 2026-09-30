@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { argvHasUndecodableBytes, run } from "./lib/proc.ts";
+import { digitValue, pyWords } from "./lib/text.ts";
 
 const states = ["todo", "in-progress", "blocked", "done", "cancelled"];
 const args = process.argv.slice(2);
@@ -62,9 +63,18 @@ function titleArg(value: string): string {
   if (title.includes("\n") || title.includes("\r")) die("the title is more than one line");
   return title;
 }
+// text.ts: BASE's local.sh embeds Python; its #?0*[1-9]\d* is Unicode (local.sh:102).
+const NUMBER_RE = /^#?0*[1-9]\p{Nd}*$/u;
+// text.ts: BASE re.fullmatch(r"(\d+)\.json") on listdir names (local.sh:212).
+const STORE_JSON_RE = /^\p{Nd}+\.json$/u;
+// text.ts: BASE re.fullmatch(r"\d+\.(?:json|md)") (local.sh:215,234).
+const STORE_FILE_RE = /^\p{Nd}+\.(?:json|md)$/u;
+// text.ts: BASE re.fullmatch(r"\d+\.(?:json|md)\.\d+\.tmp") (local.sh:237).
+const STORE_TMP_RE = /^\p{Nd}+\.(?:json|md)\.\p{Nd}+\.tmp$/u;
+
 function numberArg(value: string): bigint {
-  if (!/^#?0*[1-9]\d*$/.test(value)) die(`not a ticket number: ${value}`);
-  return BigInt(value.replace(/^#/, ""));
+  if (!NUMBER_RE.test(value)) die(`not a ticket number: ${value}`);
+  return BigInt(digitValue(value.replace(/^#/, "")));
 }
 function stateArg(value: string): string {
   if (!states.includes(value)) die(`invalid state ${value} (one of: ${states.join(", ")})`, 2);
@@ -118,7 +128,8 @@ function ticketPath(store: string, number: bigint, ext: string): string {
   return join(store, `${number}.${ext}`);
 }
 function oneLine(value: string): string {
-  return value.split(/\s+/).filter(Boolean).join(" ");
+  // text.ts: BASE one_line is " ".join(s.split()); PY_WS_RUN is Python-\s.
+  return pyWords(value).join(" ");
 }
 function readBytes(path: string, what: string): Uint8Array {
   try {
@@ -294,14 +305,14 @@ function locked<T>(store: string, action: () => T): T {
 }
 function numbers(store: string): bigint[] {
   return (readdirSync(store) as string[])
-    .filter((name: string) => /^\d+\.json$/.test(name))
-    .map((name: string) => BigInt(name.slice(0, -5)))
+    .filter((name: string) => STORE_JSON_RE.test(name))
+    .map((name: string) => BigInt(digitValue(name.slice(0, -5))))
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 function nextNumber(store: string): bigint {
   const used = (readdirSync(store) as string[])
-    .filter((name: string) => /^\d+\.(?:json|md)$/.test(name))
-    .map((name: string) => BigInt(name.split(".")[0]));
+    .filter((name: string) => STORE_FILE_RE.test(name))
+    .map((name: string) => BigInt(digitValue(name.split(".")[0])));
   return used.reduce((max, current) => (current > max ? current : max), 0n) + 1n;
 }
 function minuteNow(): string {
@@ -344,14 +355,14 @@ function main(args: string[]): number {
       locked(store, () => {
         const names = readdirSync(store) as string[];
         const held = new Set(
-          names.filter((name) => /^\d+\.(?:json|md)$/.test(name)).map((name) => name.split(".")[0]),
+          names.filter((name) => STORE_FILE_RE.test(name)).map((name) => name.split(".")[0]),
         );
         if (held.size)
           die(
             `the store at ${store} holds ${held.size} ticket(s); it is removed only when it holds none`,
           );
         for (const name of names)
-          if (name === ".lock" || /^\d+\.(?:json|md)\.\d+\.tmp$/.test(name))
+          if (name === ".lock" || STORE_TMP_RE.test(name))
             rmSync(join(store, name), { force: true });
       });
       try {
@@ -377,7 +388,7 @@ function main(args: string[]): number {
     const number = locked(store, () => {
       const n = nextNumber(store);
       atomicFile(ticketPath(store, n, "md"), content);
-      const created = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+      const created = new Date().toISOString().replace(/\.[0-9]{3}Z$/, "Z");
       writeMeta(store, n, { title, state: "todo", labels: [], created, log: [] });
       return n;
     });
@@ -796,12 +807,15 @@ async function selfTest(): Promise<number> {
         );
     const comment = lt(join(repo, "sub"), "comment", "1", "coachman", "Harvested both\nlanes.");
     const commentRead = lt(repo, "read", "1");
-    const commentLine = /#1: \d{4}-\d{2}-\d{2} \d{2}:\d{2} coachman: Harvested both lanes\./;
+    const commentLine =
+      /#1: [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} coachman: Harvested both lanes\./;
     commentLine.test(comment.out) &&
     commentRead.out
       .split("\n")
       .some((line) =>
-        /^- \d{4}-\d{2}-\d{2} \d{2}:\d{2} coachman: Harvested both lanes\.$/.test(line),
+        /^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} coachman: Harvested both lanes\.$/.test(
+          line,
+        ),
       )
       ? ok("comment adds one dated line to the log, actor first, on one line")
       : fail(
@@ -1553,7 +1567,10 @@ async function selfTest(): Promise<number> {
     const metaPath = ticketPath(idStoreReal, createdN, "json");
     const metaRaw =
       created.code === 0 && existsSync(metaPath) ? readFileSync(metaPath, "utf8") : "";
-    const createdShape = /"created": "20\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ"/.test(metaRaw);
+    const createdShape =
+      /"created": "20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z"/.test(
+        metaRaw,
+      );
     const metaNorm = metaRaw.replace(/"created": "[^"]*"/, '"created": "CREATED"');
     created.code === 0 && createdShape && metaNorm === wantMeta
       ? ok("a ticket the port writes matches BASE's json byte for byte, non-ASCII whole")
@@ -1601,6 +1618,38 @@ async function selfTest(): Promise<number> {
       else process.env[key] = value;
     }
   }
+  // Unicode-primitive vectors: BASE's local.sh embeds Python (re.fullmatch
+  // \d, int(), " ".join(s.split())); the port must match on non-ASCII input.
+  oneLine("a\x1cb") === "a b"
+    ? ok("oneLine splits U+001C like Python split")
+    : fail("oneLine splits U+001C like Python split", JSON.stringify(oneLine("a\x1cb")));
+  oneLine("a\u0085b") === "a b"
+    ? ok("oneLine splits U+0085 like Python split")
+    : fail("oneLine splits U+0085 like Python split", JSON.stringify(oneLine("a\u0085b")));
+  oneLine("a\ufeffb") === "a\ufeffb"
+    ? ok("oneLine keeps U+FEFF like Python split")
+    : fail("oneLine keeps U+FEFF like Python split", JSON.stringify(oneLine("a\ufeffb")));
+  NUMBER_RE.test("#1\u0662\u0663")
+    ? ok("NUMBER_RE takes an Arabic-Indic tail like BASE")
+    : fail("NUMBER_RE takes an Arabic-Indic tail like BASE", "#1<arabic-indic> rejected");
+  !NUMBER_RE.test("#\u0661\u0662")
+    ? ok("NUMBER_RE still wants an ASCII first digit")
+    : fail("NUMBER_RE still wants an ASCII first digit", "accepted");
+  let ndNum: bigint | null = null;
+  try {
+    ndNum = numberArg("#1\u0662\u0663");
+  } catch {
+    ndNum = null;
+  }
+  ndNum === 123n
+    ? ok("numberArg reads an Arabic-Indic tail like int()")
+    : fail("numberArg reads an Arabic-Indic tail like int()", String(ndNum));
+  STORE_FILE_RE.test("1\u0662\u0663.json")
+    ? ok("STORE_FILE_RE takes an Arabic-Indic name like BASE")
+    : fail("STORE_FILE_RE takes an Arabic-Indic name like BASE", "rejected");
+  STORE_TMP_RE.test("1\u0662\u0663.json.4\u0665.tmp")
+    ? ok("STORE_TMP_RE takes an Arabic-Indic tmp like BASE")
+    : fail("STORE_TMP_RE takes an Arabic-Indic tmp like BASE", "rejected");
   console.log("");
   console.log(
     fails === 0 ? "self-test: all controls behaved" : `self-test: ${fails} control(s) misbehaved`,

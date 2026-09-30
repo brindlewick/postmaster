@@ -209,7 +209,7 @@ function cut(repo: string, src: string, dest: string, snap: string, base = ""): 
     }
   }
   let cloned = 0;
-  for (const d of DEPS.split(/\s+/).filter(Boolean)) {
+  for (const d of DEPS.split(/[ \t\n]+/).filter(Boolean)) {
     if (cloneDir(join(src, d), join(dest, d))) {
       cloned += 1;
       out.push(`cloned ${d}`);
@@ -380,6 +380,21 @@ withTempDir((tmpRaw) => {
       exists(join(tmp, "clone", "node_modules/dep/index.js")),
     out,
   );
+  {
+    // BASE `for d in $DEPS` splits on IFS space/tab/LF only: an NBSP never splits (bash-verified).
+    const nbspDir = "a\u00a0b";
+    mkdirSync(join(synth, nbspDir, "dep"), { recursive: true });
+    writeFileSync(join(synth, nbspDir, "dep/index.js"), "x\n");
+    const r = run(self, [repo, synth, join(tmp, "nbsp"), snap], {
+      env: { ...process.env, DEPS_DIRS: nbspDir },
+    });
+    check(
+      "DEPS_DIRS with an NBSP clones one directory, not two",
+      r.code === 0 && exists(join(tmp, "nbsp", nbspDir, "dep/index.js")),
+      r.out + r.err,
+    );
+  }
+
   const diffR = git("-C", join(tmp, "clone"), "diff", "--name-only", "origin/HEAD...");
   check(
     "in it, the diff against origin/HEAD is exactly the change from the base",

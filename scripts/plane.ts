@@ -42,6 +42,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tryTomlFile } from "./lib/data.ts";
 import { run } from "./lib/proc.ts";
+import {
+  digitValue,
+  END_OF_STRING,
+  PY_DOT,
+  PY_S_CLASS,
+  pyLower,
+  pyTrim,
+  pyWords,
+} from "./lib/text.ts";
 
 // --- die as throw, so we can catch in create's set_column equivalent ---
 class DieError extends Error {
@@ -143,12 +152,7 @@ class Tree {
       if (html.startsWith("</", lt)) {
         const gt = html.indexOf(">", lt);
         if (gt < 0) break;
-        const tag =
-          html
-            .slice(lt + 2, gt)
-            .trim()
-            .toLowerCase()
-            .split(/[\s>]/)[0] ?? "";
+        const tag = endTagOf(html.slice(lt + 2, gt));
         this.handleEndTag(tag);
         i = gt + 1;
         continue;
@@ -164,7 +168,7 @@ class Tree {
         i = gt + 1;
         continue;
       }
-      const tag = (m[1] ?? "").toLowerCase();
+      const tag = pyLower(m[1] ?? "");
       const attrs = parseAttrs(tagText.slice(m[0].length));
       this.tags.add(tag);
       if (selfClose || VOID.has(tag)) {
@@ -214,12 +218,27 @@ class Tree {
   }
 }
 
+function endTagOf(inner: string): string {
+  // text.ts: html.parser strips/lowers/splits end-tag names with Python atoms.
+  return pyLower(pyTrim(inner)).split(new RegExp("[" + PY_S_CLASS + ">]"))[0] ?? "";
+}
+
 function parseAttrs(s: string): Record<string, string> {
   const attrs: Record<string, string> = {};
-  const re = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*(?:=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
+  // text.ts: html.parser attr-scanning splits Python whitespace.
+  const re = new RegExp(
+    "([a-zA-Z_:][-a-zA-Z0-9_:.]*)[" +
+      PY_S_CLASS +
+      "]*(?:=[" +
+      PY_S_CLASS +
+      "]*(?:\"([^\"]*)\"|'([^']*)'|([^" +
+      PY_S_CLASS +
+      "'\">]+)))?",
+    "g",
+  );
   let m: RegExpExecArray | null;
   while ((m = re.exec(s))) {
-    const name = (m[1] ?? "").toLowerCase();
+    const name = pyLower(m[1] ?? "");
     const val = m[2] ?? m[3] ?? m[4] ?? "";
     attrs[name] = unescapeHtml(val);
   }
@@ -326,7 +345,7 @@ function mdStrong(n: Node): string {
 }
 
 function mdCode(n: Node): string {
-  const code = textOf(n).split(/\s+/).filter(Boolean).join(" ");
+  const code = pyWords(textOf(n)).join(" ");
   if (!code) return "";
   const runs = code.match(/`+/g) ?? [];
   const maxRun = runs.reduce((mx, r) => Math.max(mx, r.length), 0);
@@ -336,7 +355,7 @@ function mdCode(n: Node): string {
 }
 
 function mdLink(n: Node): string {
-  const text = mdInline(n.children).split(/\s+/).filter(Boolean).join(" ");
+  const text = pyWords(mdInline(n.children)).join(" ");
   const href = (n.attrs.href ?? "").trim();
   if (!href) return text;
   const escaped = href.replace(/ /g, "%20").replace(/\(/g, "%28").replace(/\)/g, "%29");
@@ -352,22 +371,22 @@ const INLINE: Record<string, (n: Node) => string> = {
 };
 
 function paraLines(nodes: (Node | string)[]): string[] {
-  const raw = mdInline(nodes).replace(/\s+/g, " ");
+  const raw = mdInline(nodes).replace(new RegExp("[" + PY_S_CLASS + "]+", "g"), " ");
   const segs = raw
     .split(BR)
-    .map((s) => s.trim())
+    .map((s) => pyTrim(s))
     .filter(Boolean);
   return segs.map((s, i) => (i < segs.length - 1 ? `${s}\\` : s));
 }
 
 function mdHeading(n: Node): string[] {
-  const text = mdInline(n.children).split(BR).join(" ").split(/\s+/).filter(Boolean).join(" ");
+  const text = pyWords(mdInline(n.children).split(BR).join(" ")).join(" ");
   return ["#".repeat(parseInt(n.tag[1] ?? "1", 10)) + (text ? ` ${text}` : "")];
 }
 
 function codeLang(n: Node): string {
   const code = n.children.find((c): c is Node => typeof c !== "string" && c.tag === "code");
-  const classes = `${code?.attrs.class ?? ""} ${n.attrs.class ?? ""}`.split(/\s+/).filter(Boolean);
+  const classes = pyWords(`${code?.attrs.class ?? ""} ${n.attrs.class ?? ""}`);
   for (const c of classes) {
     if (c.startsWith("language-")) return c.slice(9);
   }
@@ -481,11 +500,20 @@ function htmlToText(h: string): string {
 const ATX = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/;
 const THEMATIC = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 const BULLET = /^( {0,3})([-*+])(?:([ \t]+)(.*))?$/;
-const ORDERED = /^( {0,3})(\d{1,9})([.)])(?:([ \t]+)(.*))?$/;
-const FENCE = /^( *)(`{3,}|~{3,})(.*)$/;
+const ORDERED = new RegExp(
+  "^( {0,3})(\\p{Nd}{1,9})([.)])(?:([ \t]+)(" + PY_DOT + "*))?" + END_OF_STRING + "",
+  "u",
+);
+const FENCE = new RegExp("^( *)(`{3,}|~{3,})(" + PY_DOT + "*)" + END_OF_STRING + "");
 const COMMENT = /^ {0,3}<!--/;
-const LINK_RE = /\[([^\]]+)\]\(((?:[^\s()]|\([^\s()]*\))+)\)/g;
-const BOLD = /\*\*(?=\S)(.+?)(?<=\S)\*\*/g;
+const LINK_RE = new RegExp(
+  "\\[([^\\]]+)\\]\\(((?:[^" + PY_S_CLASS + "()]+|\\([^" + PY_S_CLASS + "()]*\\))+)\\)",
+  "g",
+);
+const BOLD = new RegExp(
+  "\\*\\*(?=[^" + PY_S_CLASS + "])(" + PY_DOT + "+?)(?<=[^" + PY_S_CLASS + "])\\*\\*",
+  "g",
+);
 
 function indentOf(line: string): number {
   return line.length - line.trimStart().length;
@@ -629,7 +657,7 @@ function inlineMd(text: string): string {
   return out
     .join("")
     .replace(
-      /\x02(\d+)\x03/g,
+      /\x02([0-9]+)\x03/g,
       (_f, i: string) => `<code>${esc(spans[parseInt(i, 10)] ?? "")}</code>`,
     );
 }
@@ -718,7 +746,7 @@ function htmlBlocks(lines: string[]): string[] {
         i++;
       }
       i++;
-      const lang = f[2] ? (f[2].split(/\s+/)[0] ?? "") : "";
+      const lang = f[2] ? (pyWords(f[2])[0] ?? "") : "";
       const cls = lang ? ` class="language-${escapeHtml(lang, true)}"` : "";
       out.push(
         `<pre><code${cls}>${escapeHtml(code.map((l) => `${l}\n`).join(""), false)}</code></pre>`,
@@ -783,7 +811,7 @@ function shape(h: string): string[] {
   function inlineToks(nodes: (Node | string)[]): void {
     for (const n of nodes) {
       if (typeof n === "string") {
-        toks.push(...n.split(/\s+/).filter(Boolean));
+        toks.push(...pyWords(n));
       } else if (n.tag === "strong" || n.tag === "b") {
         const mark = toks.length;
         toks.push("<b>");
@@ -794,7 +822,7 @@ function shape(h: string): string[] {
           toks.push("</b>");
         }
       } else if (n.tag === "code") {
-        const words = textOf(n).split(/\s+/).filter(Boolean);
+        const words = pyWords(textOf(n));
         if (words.length > 0) toks.push(`<code ${words.join(" ")}>`);
       } else if (n.tag === "a" && (n.attrs.href ?? "").trim()) {
         toks.push(`<a ${hrefKey(n.attrs.href!)}>`);
@@ -987,7 +1015,7 @@ async function selfTest(): Promise<number> {
       const c = kids[k]!;
       if (
         c.tag === "h2" &&
-        textOf(c).split(/\s+/).filter(Boolean).join(" ") === "Acceptance criteria" &&
+        pyWords(textOf(c)).join(" ") === "Acceptance criteria" &&
         kids[k + 1]?.tag === "ol"
       ) {
         return kids[k + 1]?.children.filter((x) => typeof x !== "string" && x.tag === "li").length;
@@ -1216,6 +1244,79 @@ async function selfTest(): Promise<number> {
     );
   }
 
+  check("ORDERED takes an Arabic-Indic number like BASE", ORDERED.test("\u0661. x"), "no match");
+  check("FENCE info crosses a CR like BASE", FENCE.test("```\rfoo"), "no match");
+  check("LINK_RE refuses a U+001C url like BASE", "[a](b\x1cc)".match(LINK_RE) === null, "matched");
+  check("BOLD refuses a U+001C close like BASE", "**a\x1c**".match(BOLD) === null, "matched");
+  check(
+    "attrs read through U+001C like BASE",
+    parseAttrs('b\x1c="c"').b === "c",
+    JSON.stringify(parseAttrs('b\x1c="c"')),
+  );
+  check(
+    "end tags split at U+001C like BASE",
+    endTagOf("a\x1c") === "a",
+    JSON.stringify(endTagOf("a\x1c")),
+  );
+  check(
+    "end tags keep U+FEFF like BASE",
+    endTagOf("\ufeffa") === "\ufeffa",
+    JSON.stringify(endTagOf("\ufeffa")),
+  );
+  const codeNode = makeNode("code");
+  codeNode.children.push("a\x1cb");
+  check("mdCode splits U+001C like BASE", mdCode(codeNode) === "`a b`", mdCode(codeNode));
+  const linkNode = makeNode("a", { href: "u" });
+  linkNode.children.push("a\x1cb");
+  check("mdLink splits U+001C like BASE", mdLink(linkNode) === "[a b](u)", mdLink(linkNode));
+  check(
+    "paraLines splits U+001C like BASE",
+    paraLines(["a\x1cb"]).join("|") === "a b",
+    paraLines(["a\x1cb"]).join("|"),
+  );
+  const headNode = makeNode("h2");
+  headNode.children.push("a\x1cb");
+  check(
+    "mdHeading splits U+001C like BASE",
+    mdHeading(headNode).join("|") === "## a b",
+    mdHeading(headNode).join("|"),
+  );
+  const preNode = makeNode("pre", { class: "" });
+  preNode.children.push(makeNode("code", { class: "language-p\x1cq" }));
+  check("codeLang splits U+001C like BASE", codeLang(preNode) === "p", codeLang(preNode));
+  check(
+    "fence langs split U+001C like BASE",
+    mdToHtml("```p\x1cq\nx\n```").includes('language-p"'),
+    mdToHtml("```p\x1cq\nx\n```").slice(0, 80),
+  );
+  check(
+    "shape splits U+001C like BASE",
+    shape("<code>a\x1cb</code>").join(" ").includes("<code a b>"),
+    shape("<code>a\x1cb</code>").join(" "),
+  );
+  check(
+    "criteria read through U+001C like BASE",
+    criteria("<h2>Acceptance\x1ccriteria</h2><ol><li>x</li></ol>") === 1,
+    String(criteria("<h2>Acceptance\x1ccriteria</h2><ol><li>x</li></ol>")),
+  );
+  let tidNum: [string, number] | null = null;
+  try {
+    tidNum = parseId("A-\u0661\u0662");
+  } catch {
+    tidNum = null;
+  }
+  check(
+    "parseId reads an Arabic-Indic tail like BASE",
+    tidNum !== null && tidNum[0] === "A" && tidNum[1] === 12,
+    JSON.stringify(tidNum),
+  );
+  check("env lines refuse NBSP like bash", envOf("export\u00a0A=x") === null, "matched");
+  check("env lines refuse a FEFF like bash", envOf("\ufeffexport A=x") === null, "matched");
+  check(
+    "env lines keep matching plain exports",
+    JSON.stringify(envOf("export A=x")) === JSON.stringify(["A", "x"]),
+    JSON.stringify(envOf("export A=x")),
+  );
   console.log("");
   if (fails[0] === 0) {
     console.log("self-test: all controls behaved");
@@ -1262,17 +1363,8 @@ function loadConfig(): PlaneConfig {
   if (!process.env.PLANE_API_KEY && existsSync(envFile)) {
     const text = readFileSync(envFile, "utf8");
     for (const line of text.split("\n")) {
-      const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
-      if (m) {
-        let val = m[2] ?? "";
-        if (
-          (val.startsWith('"') && val.endsWith('"')) ||
-          (val.startsWith("'") && val.endsWith("'"))
-        ) {
-          val = val.slice(1, -1);
-        }
-        process.env[m[1] ?? ""] = val;
-      }
+      const kv = envOf(line);
+      if (kv) process.env[kv[0]] = kv[1];
     }
   }
   const KEY = process.env.PLANE_API_KEY ?? "";
@@ -1345,15 +1437,27 @@ async function* pages(
 }
 
 function parseId(tid: string): [string, number] {
-  const m = /^([A-Za-z][A-Za-z0-9]*)-(\d+)$/.exec(tid);
+  // text.ts: BASE re.fullmatch(r"([A-Za-z][A-Za-z0-9]*)-(\d+)" (plane.sh:698); the upper is regex-gated ASCII.
+  const m = /^([A-Za-z][A-Za-z0-9]*)-(\p{Nd}+)$/u.exec(tid);
   if (!m) dieP(`not a work item id: ${tid} (expected IDENT-n)`);
-  return [(m[1] ?? "").toUpperCase(), parseInt(m[2] ?? "0", 10)];
+  return [(m[1] ?? "").toUpperCase(), Number(digitValue(m[2] ?? "0"))]; // ASCII: group 1 is [A-Za-z0-9]* by the match.
+}
+
+const ENV_LINE = /^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*([^\n]*)$/; // bash-WS-exact.
+function envOf(line: string): [string, string] | null {
+  const m = ENV_LINE.exec(line);
+  if (!m) return null;
+  let val = m[2] ?? "";
+  if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+    val = val.slice(1, -1);
+  }
+  return [m[1] ?? "", val];
 }
 
 async function projectFor(cfg: PlaneConfig, ident: string): Promise<any> {
-  const up = ident.toUpperCase();
+  const up = ident.toUpperCase(); // ASCII: Plane identifiers are API-issued ASCII; anything else dies below.
   for await (const p of pages(cfg, `workspaces/${cfg.WS}/projects/`)) {
-    if (String(p.identifier ?? "").toUpperCase() === up) return p;
+    if (String(p.identifier ?? "").toUpperCase() === up) return p; // ASCII: API identifiers are ASCII.
   }
   dieP(`no project with identifier ${up} in workspace ${cfg.WS}`);
 }
@@ -1390,7 +1494,7 @@ function flowStateOf(item: any, states: any[], labels: any[]): string {
   const labelNames: Record<string, string> = {};
   for (const l of labels) labelNames[l.id] = l.name;
   const itemLabels = item.labels ?? [];
-  if (itemLabels.some((l: unknown) => (labelNames[String(ref(l))] ?? "").toLowerCase() === BLOCKED))
+  if (itemLabels.some((l: unknown) => pyLower(labelNames[String(ref(l))] ?? "") === BLOCKED))
     return "blocked";
   const stateRef = ref(item.state);
   const group = states.find((s) => s.id === stateRef)?.group;
@@ -1508,7 +1612,7 @@ async function runCommands(): Promise<void> {
       for (const c of [...comments].sort((a, b) =>
         String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")),
       )) {
-        console.log(`- ${htmlToText(c.comment_html).split(/\s+/).filter(Boolean).join(" ")}`);
+        console.log(`- ${pyWords(htmlToText(c.comment_html)).join(" ")}`);
       }
     }
   } else if (cmd === "state") {
@@ -1519,9 +1623,7 @@ async function runCommands(): Promise<void> {
     const pid = String(ref(item.project));
     const labels = await labelsOf(cfg, pid);
     const current = (item.labels ?? []).map((l: unknown) => ref(l));
-    const blockedIds = labels
-      .filter((l: any) => l.name.toLowerCase() === BLOCKED)
-      .map((l: any) => l.id);
+    const blockedIds = labels.filter((l: any) => pyLower(l.name) === BLOCKED).map((l: any) => l.id);
     let patch: Record<string, unknown>;
     if (newSt === "blocked") {
       if (blockedIds.length === 0) {

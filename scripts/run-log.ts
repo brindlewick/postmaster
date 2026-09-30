@@ -37,7 +37,8 @@ function closeOpen(log: string, now: string): void {
   const lines = readFileSync(log, "utf8").split("\n");
   // drop a trailing empty line from the final newline
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-  const head = /^## (.+) \((\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) UTC\)$/;
+  const head =
+    /^## (.+) \(([0-9]{4}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]) UTC\)$/;
   const found: Array<{ i: number; m: RegExpMatchArray }> = [];
   lines.forEach((l, i) => {
     const m = head.exec(l);

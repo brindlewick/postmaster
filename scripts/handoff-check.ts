@@ -8,6 +8,7 @@
 //   exit 1  usage or no such file
 //   exit 2  sections missing or empty; each is named on stderr
 import { readFileSync, statSync } from "node:fs";
+import { PY_DOT, PY_S_CLASS, pySplitLines } from "./lib/text.ts";
 
 const REQUIRED = [
   "Decisions",
@@ -39,8 +40,8 @@ if (!isFile) {
 const text = readFileSync(f, "utf8");
 const sections = new Map<string, string[]>();
 let current: string | null = null;
-const heading = /^##\s+(.*?)\s*$/;
-for (const line of text.split(/\r?\n/)) {
+const heading = new RegExp(`^##[${PY_S_CLASS}]+(${PY_DOT}*?)[${PY_S_CLASS}]*$`);
+for (const line of pySplitLines(text)) {
   const m = heading.exec(line);
   if (m) {
     const title = m[1] ?? "";
