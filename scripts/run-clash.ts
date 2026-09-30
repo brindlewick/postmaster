@@ -15,7 +15,7 @@
 // refuse 70 or wb/70-lane.
 //
 //   exit 0  free: nothing names this id
-//   exit 1  usage, or <repo> is not a git repository
+//   exit 1  usage, <repo> is not a git repository, or the run path cannot be checked
 //   exit 2  one or more clashes; each is named
 
 import { lstatSync } from "node:fs";
@@ -135,8 +135,9 @@ function isOccupied(path: string): boolean {
   try {
     lstatSync(path);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as { code?: unknown }).code === "ENOENT") return false;
+    throw error;
   }
 }
 
@@ -182,9 +183,16 @@ function main(argv: string[]): number {
     return 1;
   }
   const dir = runDirPath(repo, ticketId);
+  let occupied: boolean;
+  try {
+    occupied = isOccupied(dir);
+  } catch (error) {
+    console.error(`run-clash: could not check run directory: ${String(error)}`);
+    return 1;
+  }
   const clashes = collectClashes({
     ticketId,
-    runDirExists: isOccupied(dir),
+    runDirExists: occupied,
     runDirPath: dir,
     branches: parseBranchNames(listed.stdout),
   });

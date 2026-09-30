@@ -3,7 +3,7 @@
 // repository, so a clean pass and every refusal are shown through the identical command.
 
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, symlinkSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -190,6 +190,28 @@ describe("run-clash.ts through its own command line", () => {
     ({ code, out } = runClash(repo, "75"));
     expect(code).toBe(2);
     expect(out).toContain(`run-clash: run directory already exists: ${dir}`);
+  });
+
+  test("a run path that cannot be checked is refused, never free", () => {
+    const repo = freshRepo(root, "unreadable-runs");
+    plantRunDir(repo, "75");
+    const runs = dirname(runDirPath(repo, "75"));
+    chmodSync(runs, 0);
+    try {
+      const { code, out } = runClash(repo, "75");
+      expect(code).toBe(1);
+      expect(out).toContain("run-clash: could not check run directory");
+      expect(out).not.toContain("free 75");
+    } finally {
+      chmodSync(runs, 0o755);
+    }
+    const blocked = freshRepo(root, "runs-is-file");
+    const blockedRuns = join(blocked, ".postmaster", "runs");
+    mkdirSync(dirname(blockedRuns), { recursive: true });
+    writeFileSync(blockedRuns, "not a directory\n");
+    const { code, out } = runClash(blocked, "75");
+    expect(code).toBe(1);
+    expect(out).toContain("run-clash: could not check run directory");
   });
 
   test("an existing ticket branch is refused and named", () => {
