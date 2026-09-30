@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,13 +20,13 @@ const write = (path: string, contents = "export {};\n"): void => {
   writeFileSync(path, contents, "utf8");
 };
 
-const runOxlint = (path: string, cwd: string = ROOT): OxlintResult => {
+const runOxlint = (path: string, cwd: string = ROOT, config: string = CONFIG): OxlintResult => {
   const result = Bun.spawnSync([
     process.execPath,
     "x",
     "--bun",
     "oxlint",
-    `--config=${CONFIG}`,
+    `--config=${config}`,
     "--no-ignore",
     "--format=json",
     path,
@@ -139,5 +139,42 @@ test("a test file still fails when the run starts inside its own test folder", (
         ruleId: "postmaster/test-beside-target",
         message: "Test file nested.test.ts is inside the test folder; keep it beside its target.",
       }, testDir)],
+    });
+  }));
+
+test("a test file still fails when the run starts two levels inside its test tree", () =>
+  withDirectory((directory) => {
+    const unitDir = join(directory, "test", "unit");
+    const testFile = join(unitDir, "nested.test.ts");
+    write(join(unitDir, "nested.ts"));
+    write(testFile);
+
+    expect(runOxlint(testFile, unitDir)).toEqual({
+      exitCode: 1,
+      diagnostics: [relativeDiagnostic({
+        filePath: testFile,
+        ruleId: "postmaster/test-beside-target",
+        message: "Test file nested.test.ts is inside the test folder; keep it beside its target.",
+      }, unitDir)],
+    });
+  }));
+
+test("a test beside its target passes in a project whose root is named test", () =>
+  withDirectory((directory) => {
+    const projectRoot = join(directory, "test");
+    const lintDir = join(projectRoot, "lint");
+    const testFile = join(projectRoot, "nearby.test.ts");
+    write(join(lintDir, "plugin.ts"), readFileSync(join(ROOT, "lint", "plugin.ts"), "utf8"));
+    write(join(lintDir, "test-beside-target.ts"), readFileSync(join(ROOT, "lint", "test-beside-target.ts"), "utf8"));
+    write(join(projectRoot, ".oxlintrc.json"), JSON.stringify({
+      jsPlugins: ["./lint/plugin.ts"],
+      rules: { "postmaster/test-beside-target": "error" },
+    }));
+    write(join(projectRoot, "nearby.ts"));
+    write(testFile);
+
+    expect(runOxlint(testFile, projectRoot, join(projectRoot, ".oxlintrc.json"))).toEqual({
+      exitCode: 0,
+      diagnostics: [],
     });
   }));

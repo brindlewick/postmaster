@@ -75,10 +75,17 @@ const commitFiles = (
   return git(directory, ["rev-parse", "HEAD"]);
 };
 
-const renameWithAddedText = (directory: string, parent: string, message: string, phrase: string): string => {
+const renameWithAddedText = (
+  directory: string,
+  parent: string,
+  message: string,
+  phrase: string,
+  from: string = "old.ts",
+  to: string = "renamed.ts",
+): string => {
   git(directory, ["checkout", "--quiet", "--detach", parent]);
-  git(directory, ["mv", "old.ts", "renamed.ts"]);
-  const target = join(directory, "renamed.ts");
+  git(directory, ["mv", from, to]);
+  const target = join(directory, to);
   writeFileSync(target, `${readFileSync(target, "utf8")}${phrase}\n`, "utf8");
   git(directory, ["add", "--all"]);
   git(directory, ["commit", "--quiet", "-m", message]);
@@ -333,6 +340,24 @@ test("a rename contributes only its changed added lines", () =>
     ]);
 
     expect(result.report.kinds.code).toEqual(expectedKind(1, [laneShare("alpha", 1, 1), laneShare("beta", 0, 1)], 0, 0));
+  }));
+
+test("a rename of an oracle-touched file stays excluded", () =>
+  withWorkspace((directory) => {
+    const emptyBase = initializeRepo(directory);
+    const base = commitFiles(directory, emptyBase, "base file", {
+      "lib.ts": "alpha beta gamma delta epsilon zeta eta theta\none two three four five six seven eight\nred green blue yellow purple orange pink gray\n",
+    });
+    const oracle = commitFiles(directory, base, "oracle fixture", {
+      "lib.ts": "alpha beta gamma delta epsilon zeta eta theta\none two three four five six seven eight\nred green blue yellow purple orange pink gray\noracle hidden helper words alpha beta\n",
+    });
+    const synthesis = renameWithAddedText(directory, base, "synthesis rename", "synthesis edit line here today now", "lib.ts", "util.ts");
+    const result = runScenario(directory, base, synthesis, [{ name: "alpha", head: base }], oracle);
+
+    expect(result.report.kinds.code.totalRuns).toBe(0);
+    expect(result.report.exclusions.byRange.synthesis).toEqual([
+      { path: "util.ts", reason: "touched by the oracle commit" },
+    ]);
   }));
 
 test("a merge in the synthesis range is refused", () =>
