@@ -26,6 +26,9 @@ const GENERATED_NAMES = [
 ] as const;
 const GENERATED_ATTRIBUTES = ["generated", "linguist-generated"] as const;
 const NEGATIVE_ATTRIBUTE_VALUES = ["unspecified", "unset", "false"] as const;
+// The audit's excluded-path pattern (measure.py EXCLUDED): lane records and blind-test
+// material, wherever they sit.
+const AUDIT_EXCLUDED = /(WORKHORSE-(SPEC|SUMMARY)\.md|BASE-CONTROLS|oracle|acceptance)/i;
 
 type Kind = "code" | "docs";
 type LaneInput = Readonly<{ name: string; commit: string }>;
@@ -67,7 +70,7 @@ type Report = Readonly<{
     countedUnit: "added-line six-word run occurrence";
   }>;
   exclusions: Readonly<{
-    oracleAddedPaths: readonly string[];
+    oraclePaths: readonly string[];
     byRange: Readonly<{
       synthesis: readonly Exclusion[];
       lanes: readonly Readonly<{ name: string; files: readonly Exclusion[] }>[];
@@ -218,17 +221,13 @@ const changedFiles = (repo: string, base: string, head: string): readonly Change
   return parse(entries);
 };
 
-const addedPaths = (repo: string, base: string, head: string): readonly string[] =>
+const oraclePaths = (repo: string, oracle: string): readonly string[] =>
   gitText(repo, [
-    "diff",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--find-renames",
-    "--diff-filter=A",
+    "show",
     "--name-only",
+    "--format=",
     "-z",
-    base,
-    head,
+    oracle,
   ]).split("\0").filter(Boolean);
 
 const isRootRecord = (path: string): boolean => ROOT_RECORDS.includes(path as (typeof ROOT_RECORDS)[number]);
@@ -266,12 +265,14 @@ const generatedPaths = (
 
 const staticExclusionReason = (path: string, oraclePaths: readonly string[]): string | null =>
   oraclePaths.includes(path)
-    ? "added by the oracle commit"
+    ? "touched by the oracle commit"
     : isRootRecord(path)
       ? "lane record at the worktree root"
       : isKnownGeneratedName(path)
         ? "generated lockfile"
-        : null;
+        : AUDIT_EXCLUDED.test(path)
+          ? "matches the audit's excluded-path pattern"
+          : null;
 
 const exclusionReason = (
   path: string,
@@ -420,12 +421,12 @@ const buildReport = (
     fail(`synthesis range contains merge commit(s): ${merges.split("\n").join(", ")}`);
   }
 
-  const oracleAddedPaths = oracle ? addedPaths(repo, base, oracle) : [];
-  const synthesis = collectRange(repo, base, synthesisHead, oracleAddedPaths);
+  const oracleTouched = oracle ? oraclePaths(repo, oracle) : [];
+  const synthesis = collectRange(repo, base, synthesisHead, oracleTouched);
   const laneFiles = lanes.map(({ name, commit }) => ({
     name,
     head: commit,
-    files: collectRange(repo, base, commit, oracleAddedPaths),
+    files: collectRange(repo, base, commit, oracleTouched),
   }));
   const kinds = {
     code: measureKind(synthesis, laneFiles, "code"),
@@ -444,7 +445,7 @@ const buildReport = (
       countedUnit: "added-line six-word run occurrence",
     },
     exclusions: {
-      oracleAddedPaths,
+      oraclePaths: oracleTouched,
       byRange: rangeExclusions(synthesis, laneFiles),
       binaryPaths: rangeBinaries(synthesis, laneFiles),
     },

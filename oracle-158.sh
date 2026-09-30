@@ -45,9 +45,10 @@ else
   READY=0
 fi
 
-# lint_one <file>: run the project's Oxlint over one fixture file; prints output, exits its exit.
+# lint_one <file>: run the project's Oxlint over one fixture file with the project's
+# config pinned, so a planted config cannot change the verdict; prints output, exits its exit.
 lint_one() {
-  bun x --bun oxlint "$1" 2>&1
+  bun x --bun oxlint --config=.oxlintrc.json "$1" 2>&1
 }
 
 if [ "$READY" -eq 1 ]; then

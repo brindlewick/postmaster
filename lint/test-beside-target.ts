@@ -13,9 +13,7 @@ const TEST_SUFFIX = ".test.ts";
 const DISALLOWED_FOLDERS = ["test", "tests", "__tests__"] as const;
 
 const testFolder = (filename: string, cwd: string): string | undefined =>
-  relative(cwd, dirname(filename))
-    .split(sep)
-    .filter(Boolean)
+  [basename(cwd), ...relative(cwd, dirname(filename)).split(sep).filter(Boolean)]
     .find((folder) => DISALLOWED_FOLDERS.includes(folder as (typeof DISALLOWED_FOLDERS)[number]));
 
 const targetPath = (filename: string): string =>

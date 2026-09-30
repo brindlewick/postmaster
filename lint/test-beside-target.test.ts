@@ -20,7 +20,7 @@ const write = (path: string, contents = "export {};\n"): void => {
   writeFileSync(path, contents, "utf8");
 };
 
-const runOxlint = (path: string): OxlintResult => {
+const runOxlint = (path: string, cwd: string = ROOT): OxlintResult => {
   const result = Bun.spawnSync([
     process.execPath,
     "x",
@@ -30,7 +30,7 @@ const runOxlint = (path: string): OxlintResult => {
     "--no-ignore",
     "--format=json",
     path,
-  ], { cwd: ROOT, stdout: "pipe", stderr: "pipe" });
+  ], { cwd, stdout: "pipe", stderr: "pipe" });
   const stdout = new TextDecoder().decode(result.stdout);
   const stderr = new TextDecoder().decode(result.stderr);
   return result.exitCode === 0 || result.exitCode === 1
@@ -61,11 +61,11 @@ const withDirectory = (run: (directory: string) => void): void => {
   }
 };
 
-const relativeDiagnostic = (diagnostic: Diagnostic): Diagnostic => ({
+const relativeDiagnostic = (diagnostic: Diagnostic, from: string = ROOT): Diagnostic => ({
   ...diagnostic,
-  filePath: relative(ROOT, isAbsolute(diagnostic.filePath)
+  filePath: relative(from, isAbsolute(diagnostic.filePath)
     ? diagnostic.filePath
-    : resolve(ROOT, diagnostic.filePath)),
+    : resolve(from, diagnostic.filePath)),
 });
 
 test("a test file beside its target passes with no problem", () =>
@@ -122,5 +122,22 @@ test("a test file inside a test folder fails with one named problem", () =>
         ruleId: "postmaster/test-beside-target",
         message: "Test file nested.test.ts is inside the test folder; keep it beside its target.",
       })],
+    });
+  }));
+
+test("a test file still fails when the run starts inside its own test folder", () =>
+  withDirectory((directory) => {
+    const testDir = join(directory, "test");
+    const testFile = join(testDir, "nested.test.ts");
+    write(join(testDir, "nested.ts"));
+    write(testFile);
+
+    expect(runOxlint(testFile, testDir)).toEqual({
+      exitCode: 1,
+      diagnostics: [relativeDiagnostic({
+        filePath: testFile,
+        ruleId: "postmaster/test-beside-target",
+        message: "Test file nested.test.ts is inside the test folder; keep it beside its target.",
+      }, testDir)],
     });
   }));
