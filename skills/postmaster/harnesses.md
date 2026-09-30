@@ -96,9 +96,10 @@ other harness's tool-result shape the adapter identifies. A failed tool
 call's text is the tool's, not the provider's: a coachman's failing
 gate prints cap and limit words all the time, and a provider wall still
 ends the turn through the harness's own error record, where the veto
-sees it. The exclusion is narrow on purpose: a `payload_type` of
-`tool.result` (muse `outcome: error` payloads) is an error record, not
-a tool's.
+sees it: tool output contributes no signal anywhere — not a veto, not
+transient prose, and not a structured code, type or unknown. The
+exclusion is narrow on purpose: a `payload_type` of `tool.result`
+(muse `outcome: error` payloads) is an error record, not a tool's.
 
 Where a record carries a status code or an error type, values come in three classes
 over every post-skip line: the known-transient set (`502`, `503`, `504`, `529`,

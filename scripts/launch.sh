@@ -769,6 +769,12 @@ PY
     "model stream idle timeout" '{"type":"progress","status":200}'
   check_pair "a 301 status does not block a transient end" 0 "model stream idle timeout" \
     "model stream idle timeout" '{"type":"progress","httpStatus":301}'
+  check_pair "a 503 in a tool_result wakes and does not remount" 1 not-transient \
+    "the leg ended" '{"type":"user","message":{"content":[{"type":"tool_result","status":503}]}}'
+  check_pair "a 429 in a tool_result does not veto a transient end" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"user","message":{"content":[{"type":"tool_result","status":429}]}}'
+  check_pair "an unknown status in a tool_result does not wake a transient end" 0 "model stream idle timeout" \
+    "model stream idle timeout" '{"type":"user","message":{"content":[{"type":"tool_result","status":418}]}}'
   check_pair "an unknown error type wakes" 1 not-transient \
     "model stream idle timeout" '{"type":"error","errortype":"SomethingNew","message":"model stream idle timeout"}'
   check_pair "a wall-like code wakes as a wall" 1 provider-wall \
@@ -1073,8 +1079,10 @@ def norm_key(key):
 # names them). A failed tool call's text is the tool's, not the provider's — a
 # failing gate prints cap and limit words all day — and a provider wall still
 # ends the turn through the harness's own error record. The exclusion holds at
-# every depth, for marking and for the veto read alike, whatever the subtree
-# nests. It is deliberately narrow: only tool_result and tool_execution_end as
+# every depth, in every read — marking, the veto, transient prose and
+# structured signals alike: a tool's subtree contributes nothing anywhere,
+# whatever it nests. It is deliberately narrow: only tool_result and
+# tool_execution_end as
 # a type, a name, or a key exclude — a payload_type of tool.result (muse
 # outcome:error payloads) is an error record, not a tool's.
 TOOL_RESULT_NAMES = {"toolresult", "toolexecutionend"}
@@ -1137,9 +1145,13 @@ def is_marked(event):
     return found
 def note_record(value, marked):
     if isinstance(value, dict):
+        if is_tool_result(value):
+            return
         for key, child in value.items():
             kl = str(key).lower()
             if kl in PROMPT_KEYS:
+                continue
+            if norm_key(key) in TOOL_RESULT_NAMES and isinstance(child, (dict, list)):
                 continue
             note_structured(str(key), child, marked)
             note_record(child, marked)
