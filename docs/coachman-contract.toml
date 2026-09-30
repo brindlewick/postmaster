@@ -258,3 +258,8 @@ end = "<!-- coachman-contract:fixture-card:end -->"
 file = "scripts/coachman-contract.sh"
 start = "# coachman-contract:fixture-detector:start"
 end = "# coachman-contract:fixture-detector:end"
+
+[[parts.implementation]]
+file = "scripts/coachman-contract.sh"
+start = "# coachman-contract:fixture-entrypoint:start"
+end = "# coachman-contract:fixture-entrypoint:end"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# coachman-contract:fixture-detector:start
 # Decide whether a git change touches the coachman contract defined in
 # docs/coachman-contract.toml. Contract regions are delimited in their source files.
 #
@@ -17,7 +18,6 @@ python3 - "$HERE" "$@" <<'PY'
 import os, pathlib, re, shutil, subprocess, sys, tempfile, tomllib
 
 
-# coachman-contract:fixture-detector:start
 INDEX = "docs/coachman-contract.toml"
 HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
@@ -457,6 +457,39 @@ def exercise_self_test(source_root):
 
     detector_control()
 
+    def neutered_control():
+        nonlocal passed, failed
+        label = "neutering the detector entrypoint is a fixture-policy contract change"
+        with tempfile.TemporaryDirectory(prefix="coachman-contract-", dir=source_root) as scratch:
+            repo = pathlib.Path(scratch) / "repo"
+            base = git_fixture(repo, pathlib.Path(scratch), source_root, manifest_data)
+            shown = run(["git", "-C", str(repo), "show",
+                         "%s:scripts/coachman-contract.sh" % base], text=False)
+            honest = pathlib.Path(scratch) / "honest-contract.sh"
+            honest.write_bytes(shown.stdout)
+            os.chmod(honest, 0o755)
+            for path in ("coachman-contract.sh", "scripts/coachman-contract.sh"):
+                replace_once(repo, path,
+                             "    try:\n        return print_result(check_change(repo, base, head), base, head)",
+                             "    try:\n        return 0")
+            head = commit_fixture(repo, label)
+            neutered = subprocess.run([str(repo / "coachman-contract.sh"), base, head], cwd=repo,
+                                      capture_output=True, text=True)
+            result = subprocess.run([str(honest), base, head], cwd=repo,
+                                    capture_output=True, text=True)
+            ok = (neutered.returncode == 0 and result.returncode == 1 and any(
+                line.startswith("yes fixture-policy ") for line in result.stdout.splitlines()))
+            if control(ok, label, "exits %d/%d" % (neutered.returncode, result.returncode)):
+                passed += 1
+            else:
+                failed += 1
+                if result.stderr:
+                    print("       " + result.stderr.strip().replace("\n", "\n       "))
+                if result.stdout:
+                    print("       " + result.stdout.strip().replace("\n", "\n       "))
+
+    neutered_control()
+
     def merge_control(contract):
         nonlocal passed, failed
         label = "main merge with a contract change repeats the fixture" if contract else "main merge without a contract change keeps the fixture"
@@ -523,6 +556,7 @@ def exercise_self_test(source_root):
     return 0 if failed == 0 else 1
 
 
+# coachman-contract:fixture-entrypoint:start
 def main():
     args = sys.argv[2:]
     if not args:
@@ -560,4 +594,5 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+# coachman-contract:fixture-entrypoint:end
 PY
