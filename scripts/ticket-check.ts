@@ -12,7 +12,6 @@
 //   ticket-check.sh --splice <base-body> <sections>       print <base-body> with each `##` section
 //                                                         of <sections> in place of the one it
 //                                                         names, or added where the shape puts it
-//   ticket-check.sh --self-test
 //
 // What it judges, and nothing more:
 //   - The title has words: the one the adapter read, or the one --title gives.
@@ -55,25 +54,13 @@
 //           could not be run or gave no verdict; or, with --splice, a sections file that is not a
 //           list of `##` sections, or a part it would write named inside a later part of the base
 //   exit 2  malformed; one line per missing or malformed part on stdout, the part named first
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { scriptsDir, toolRoot } from "./lib/paths.ts";
-import { run, withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
+import { scriptsDir } from "./lib/paths.ts";
+import { run } from "./lib/proc.ts";
 import {
   BOUND_L,
   BOUND_R,
-  DOT_ALL,
   END_OF_STRING,
   PY_DOT,
   PY_S_CLASS,
@@ -96,35 +83,41 @@ function dieT(msg: string): never {
 }
 
 // --- regex constants ---------------------------------------------------------------------------
-const HEADING = new RegExp(
+export const HEADING = new RegExp(
   "^ {0,3}(#{1,6})(?:[ \t]+(" + PY_DOT + "*?))?[ \t]*" + END_OF_STRING + "",
   "u",
 );
-const FENCE = new RegExp(
+export const FENCE = new RegExp(
   "^[" + PY_S_CLASS + "]*(`{3,})[^`]*" + END_OF_STRING + "|^[" + PY_S_CLASS + "]*(~{3,})",
   "u",
 );
-const FENCED_ITEM = new RegExp(
+export const FENCED_ITEM = new RegExp(
   "^ *(?:[-*+]|\\p{Nd}{1,9}[.)])[ \t]+(?:(`{3,})[^`]*|(~{3,})" + PY_DOT + "*)" + END_OF_STRING + "",
   "u",
 );
 const TICKS = /`+/gu;
 const SPAN = /(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n).)+?)(?<!`)\1(?!`)/gsu;
 const QUOTED = /"[^"\n]*"|"[^"\n]*"/gu;
-const QUESTION = new RegExp(
+export const QUESTION = new RegExp(
   "[?？][*_)\\]]*[.,;:]?(?=[" + PY_S_CLASS + "]|" + END_OF_STRING + ")",
   "u",
 );
-const ITEM = new RegExp(
+export const ITEM = new RegExp(
   "^( *)(\\p{Nd}{1,9})[.)](?:[ \t]+(" + PY_DOT + "*))?" + END_OF_STRING + "",
   "u",
 );
 const BULLET = /^ {0,3}[-*+](?:[ \t]|$)/u;
 const BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/u;
-const MARK1 = new RegExp(BOUND_L + "(TBD|TBC)" + BOUND_R + "", "u");
-const MARK2 = new RegExp(BOUND_L + "(TODO)" + BOUND_R + "[" + PY_S_CLASS + "]*:", "u");
-const MARK3 = new RegExp("^[^" + W_CLASS + "]*(TODO)[^" + W_CLASS + "]*" + END_OF_STRING + "", "u");
-const QSPLIT = new RegExp("(?<=[.!?？]+)[" + PY_S_CLASS + "]+|\\n[" + PY_S_CLASS + "]*", "u");
+export const MARK1 = new RegExp(BOUND_L + "(TBD|TBC)" + BOUND_R + "", "u");
+export const MARK2 = new RegExp(BOUND_L + "(TODO)" + BOUND_R + "[" + PY_S_CLASS + "]*:", "u");
+export const MARK3 = new RegExp(
+  "^[^" + W_CLASS + "]*(TODO)[^" + W_CLASS + "]*" + END_OF_STRING + "",
+  "u",
+);
+export const QSPLIT = new RegExp(
+  "(?<=[.!?？]+)[" + PY_S_CLASS + "]+|\\n[" + PY_S_CLASS + "]*",
+  "u",
+);
 const PARTS: Array<[string, string]> = [
   ["problem / feature", "Problem / feature"],
   ["acceptance criteria", "Acceptance criteria"],
@@ -238,7 +231,7 @@ function tokenize(text: string): [string[], Array<[string, boolean]>] {
   return [raw, lines];
 }
 
-function norm(h: string): string {
+export function norm(h: string): string {
   // text.ts: BASE norm strips like Python, spaces slashes, squashes \s-runs, lowers.
   const s = pyTrim(pyTrim(pyTrim(h).replace(/[ \t]+#+$/u, "")).replace(/:$/u, ""));
   const slashed = s.replace(new RegExp("[" + PY_S_CLASS + "]*/[" + PY_S_CLASS + "]*", "gu"), " / ");
@@ -301,7 +294,7 @@ function question(p: string): string | null {
   return parts[parts.length - 1] ?? null;
 }
 
-function clip(s: string, n = 70): string {
+export function clip(s: string, n = 70): string {
   // text.ts: BASE clip is " ".join(s.split()).
   const t = pyWords(s).join(" ");
   return t.length <= n ? t : `${t.slice(0, n - 3)}...`;
@@ -561,1029 +554,11 @@ function _checkPrinted(text: string, turnpikesPath: string): number {
   return 0;
 }
 
-// --- self-test ---------------------------------------------------------------------------------
-function selfTest(): void {
-  const HERE = scriptsDir(import.meta);
-  const SELF = join(HERE, "ticket-check.sh");
-  withTempDir((tmp) => {
-    if (run("git", ["init", "-q", tmp]).code !== 0) process.exit(1);
-    const st = new SelfTest();
-
-    // Staged stand-in tools resolve their wrappers' --config beside them.
-    copyFileSync(join(toolRoot(import.meta), "bunfig.toml"), join(tmp, "bunfig.toml"));
-
-    // Get turnpikes list
-    const listR = run(join(HERE, "turnpikes.sh"), ["--list"]);
-    if (listR.code !== 0) {
-      console.error("self-test: turnpikes.sh --list failed");
-      process.exit(1);
-    }
-    const LIST = listR.out;
-    const listLines = LIST.trim().split("\n").filter(Boolean);
-    const DEF = listLines
-      // ASCII: turnpikes.sh --list emits ASCII slug-names; fields split on its runs.
-      .filter((l) => l.split(/\s+/u)[1] === "default")
-      // ASCII: turnpike slugs from --list are ASCII by the TABLE.
-      .map((l) => l.split(/\s+/u)[0])
-      .join(", ");
-    // ASCII: turnpike slugs from --list are ASCII by the TABLE.
-    const N1 = listLines[0]?.split(/\s+/u)[0] ?? "";
-    // ASCII: turnpike slugs from --list are ASCII by the TABLE.
-    const N2 = listLines[1]?.split(/\s+/u)[0] ?? "";
-    // LOWER: turnpike slugs from --list are ASCII by the TABLE.
-    const N2UP = N2.charAt(0).toUpperCase() + N2.slice(1);
-    const NOPE = "zz-not-listed";
-    if (!DEF || !N2) {
-      console.error("self-test: turnpikes.sh needs a default set and two turnpikes");
-      process.exit(1);
-    }
-    // ASCII: turnpike slugs from --list are ASCII by the TABLE.
-    if (listLines.some((l) => l.split(/\s+/u)[0] === NOPE)) {
-      console.error(`self-test: ${NOPE} is a turnpike; pick another unused name`);
-      process.exit(1);
-    }
-
-    // Body parts
-    const P =
-      "## Problem / feature\nA ticket reaches a coachman with no criteria, so it has nothing to judge the lanes against.";
-    const A =
-      "## Acceptance criteria\n1. The check exits 0 on a well-formed ticket and prints how many criteria it has.\n2. It exits 2 and names each missing part:\n   - the title\n   - the direction\n   1. a nested number is part of criterion 2, not a criterion\n\n   ```\n   ## Direction\n   ticket-check.sh --body draft.md   # which draft? TODO\n   ```\n3. A question or a marker in code, `a?` or `TODO`, is not read,\nand a line that runs straight on belongs to the criterion above it.\n\n   So does an indented paragraph after a blank line.";
-    const D =
-      "## Direction\n<!-- a template comment is not read: TBD -->\nNone: any approach that meets the criteria.";
-    const K = "## Turnpikes\n<!-- default, none, or turnpike names -->\n`default`";
-    const N =
-      "## Notes\nA heading inside a fenced block is not a section:\n\n```\n## Direction\n```";
-    const T = "Check a ticket's shape";
-    const NT =
-      "## Notes\nContext.\n\n### Turnpikes\nWhy the default was chosen.\n\n### Out of scope\nNothing else.";
-    const UJ = "## User journey\nThe user opens the board and reads the ticket.";
-
-    function body(...parts: string[]): void {
-      writeFileSync(join(tmp, "body.md"), `${parts.join("\n\n")}\n\n`);
-    }
-    function runCheck(title: string): { code: number; out: string } {
-      const r = run("bash", [SELF, "--body", join(tmp, "body.md"), "--title", title], {
-        env: { ...(process.env as Record<string, string>), TURNPIKES: join(HERE, "turnpikes.sh") },
-      });
-      return { code: r.code, out: r.out + r.err };
-    }
-
-    function expect(
-      label: string,
-      rcWant: number,
-      partsWant: string,
-      why = "",
-      not = "",
-      title: string = T,
-    ): void {
-      const r = runCheck(title);
-      const out = r.out;
-      const rc = r.code;
-      // BASE: only a failing check (exit 2) names parts; a pass prints "well-formed, ...".
-      const partNames =
-        (rc === 2
-          ? out
-              .split("\n")
-              .filter((l) =>
-                /^(title|problem \/ feature|acceptance criteria|direction|turnpikes): /u.test(l),
-              )
-              .map((l) => l.split(":")[0])
-              .filter((v, i, a) => a.indexOf(v) === i)
-              .sort()
-              .join(",")
-          : "") || "none";
-      const good =
-        rc === rcWant &&
-        partNames === partsWant &&
-        (!why || out.includes(why)) &&
-        (!not || !out.includes(not));
-      if (good) st.ok(label);
-      else
-        st.fail(
-          `${label}: wanted exit ${rcWant} naming ${partsWant}${why ? ` with "${why}"` : ""}${not ? ` and without "${not}"` : ""}, got exit ${rc} naming ${partNames}`,
-          out,
-        );
-    }
-
-    function named(label: string, want: string): void {
-      const r = runCheck(T);
-      const secondLine = r.out.split("\n")[1] ?? "";
-      if (r.code === 0 && secondLine === want) st.ok(label);
-      else st.fail(`${label}: wanted exit 0 and "${want}", got exit ${r.code}`, r.out);
-    }
-
-    // Stand-in adapter
-    mkdirSync(join(tmp, "bin"), { recursive: true });
-    copyFileSync(SELF, join(tmp, "bin", "ticket-check.sh"));
-    copyFileSync(join(HERE, "ticket-check.ts"), join(tmp, "bin", "ticket-check.ts"));
-    copyFileSync(join(HERE, "turnpikes.sh"), join(tmp, "bin", "turnpikes.sh"));
-    copyFileSync(join(HERE, "turnpikes.ts"), join(tmp, "bin", "turnpikes.ts"));
-    copyFileSync(join(HERE, "project-settings.sh"), join(tmp, "bin", "project-settings.sh"));
-    copyFileSync(join(HERE, "project-settings.ts"), join(tmp, "bin", "project-settings.ts"));
-    copyFileSync(join(HERE, "tracker-kind.sh"), join(tmp, "bin", "tracker-kind.sh"));
-    copyFileSync(join(HERE, "tracker-kind.ts"), join(tmp, "bin", "tracker-kind.ts"));
-    mkdirSync(join(tmp, "bin", "lib"), { recursive: true });
-    for (const f of ["paths.ts", "proc.ts", "data.ts", "selftest.ts", "text.ts"]) {
-      copyFileSync(join(HERE, "lib", f), join(tmp, "bin", "lib", f));
-    }
-    writeFileSync(join(tmp, "github.toml"), '[tracker]\nkind = "github"\n');
-    function adapter(script: string): void {
-      writeFileSync(join(tmp, "bin", "github.sh"), `#!/usr/bin/env bash\n${script}\n`);
-      chmodSync(join(tmp, "bin", "github.sh"), 0o755);
-    }
-    function through(): { code: number; out: string } {
-      const r = run("bash", [join(tmp, "bin", "ticket-check.sh"), tmp, "7"], {
-        env: {
-          ...(process.env as Record<string, string>),
-          POSTMASTER_CONFIG: join(tmp, "github.toml"),
-        },
-      });
-      return { code: r.code, out: r.out + r.err };
-    }
-    function localsh(script: string): void {
-      writeFileSync(join(tmp, "bin", "local.sh"), `#!/usr/bin/env bash\n${script}\n`);
-      chmodSync(join(tmp, "bin", "local.sh"), 0o755);
-    }
-    const NOSTORE =
-      'case $2 in store) exit 3 ;; *) echo "stand-in local.sh: $*" >&2; exit 1 ;; esac';
-    localsh(NOSTORE);
-
-    console.log("positive controls");
-    body(P, A, D, K, N);
-    let r = runCheck(T);
-    expect("a well-formed ticket passes", 0, "none");
-    st.check(
-      "it counts three criteria, not the nested number or the lines under them, then prints the turnpikes",
-      r.out.trim() === `well-formed, 3 acceptance criteria\nturnpikes: ${DEF}`,
-      r.out,
-    );
-    body(P, A, D, K);
-    expect("Notes and User journey are optional", 0, "none");
-    const noTitle = run("bash", [SELF, "--body", join(tmp, "body.md")], {
-      env: { ...(process.env as Record<string, string>), TURNPIKES: join(HERE, "turnpikes.sh") },
-    });
-    st.check(
-      "without --title only the body is judged",
-      noTitle.code === 0,
-      noTitle.out + noTitle.err,
-    );
-
-    body(
-      "## Problem/Feature\nTickets arrive without criteria.",
-      "## Acceptance Criteria:\n1) The check runs on every ticket.",
-      "## Direction ##\nUse the tracker adapters.",
-      "## turnpikes:\ndefault",
-    );
-    expect("headings match ignoring case, a colon, the slash's spacing and a closing #", 0, "none");
-
-    body(
-      P,
-      "## Acceptance criteria\n1.\nThe check runs, the criterion's text on the line below its number.",
-      D,
-      K,
-    );
-    expect("a criterion's text may start on the line below its number", 0, "none");
-
-    body(
-      P,
-      "## Acceptance criteria\n   1. The check runs.\n   2. It names each part.\n\n---",
-      D,
-      K,
-    );
-    expect("a list indented three spaces, and a thematic break after it", 0, "none");
-
-    body(
-      P,
-      '## Acceptance criteria\n1. Setup asks "Overwrite the config?" before writing, and prints https://example.org/board?view=kanban.\n2. The CLI prompts "Continue? [y/N]" before it deletes an item.',
-      D,
-      K,
-    );
-    expect("a question mark in quotes or inside a word is not a question", 0, "none");
-
-    body(
-      P,
-      "## Acceptance criteria\n1. Setup prints `Overwrite the config?\n   [y/N]` and waits for an answer.",
-      D,
-      K,
-    );
-    expect("a code span that wraps onto the next line is still code", 0, "none");
-
-    body(
-      "## Problem / feature\nThe template parser fails when a body holds `<!--` with no closer.",
-      "## Acceptance criteria\n1. The check runs.\n2. The arrow in `a --> b` is kept.",
-      D,
-      K,
-    );
-    expect("a comment marker inside code hides nothing", 0, "none");
-
-    body("## Problem / feature\nThe parser fails on <!-- when nothing closes it.", A, D, K);
-    expect("a <!-- inside a line that the line does not close is text", 0, "none");
-
-    body(
-      P,
-      "<!-- a comment that never closes",
-      A,
-      "## Direction\nNone: any approach that meets the criteria.",
-      "## Turnpikes\ndefault",
-    );
-    expect("a <!-- at the start of a line that nothing closes is text", 0, "none");
-
-    body(
-      P,
-      "## Acceptance criteria\n1. The check runs. <!-- TBD: more --> It names each part.",
-      D,
-      K,
-    );
-    expect("a comment inside a line is not read", 0, "none");
-
-    body(P, "## Acceptance criteria\n1. ```\n   make check\n   ```\n2. The gate passes.", D, K);
-    expect("a criterion that opens with a fenced block", 0, "none");
-
-    body("## Problem / feature\n```ls``` prints nothing in an empty directory.", A, D, K);
-    expect("a line opening with a three-backtick code span is not a fence", 0, "none");
-
-    body(
-      "## Problem / feature\nThe app has no TODO list.",
-      "## Acceptance criteria\n1. A user can add an item to the TODO list.",
-      "## Direction\nStore TODO items in the existing database.",
-      K,
-    );
-    {
-      const r2 = run("bash", [SELF, "--body", join(tmp, "body.md"), "--title", "Add a TODO list"], {
-        env: { ...(process.env as Record<string, string>), TURNPIKES: join(HERE, "turnpikes.sh") },
-      });
-      st.check("TODO as a word is not a mark", r2.code === 0, r2.out + r2.err);
-    }
-
-    writeFileSync(
-      join(tmp, "body.md"),
-      "## Problem / feature\r\nTickets arrive without criteria.\r\n\r\n## Acceptance criteria\r\n1. The check runs.\r\n\r\n## Direction\r\nNone.\r\n\r\n## Turnpikes\r\ndefault\r\n",
-    );
-    expect("a body with CRLF line endings passes", 0, "none");
-
-    writeFileSync(
-      join(tmp, "body.md"),
-      Buffer.concat([
-        new Uint8Array([0xef, 0xbb, 0xbf]),
-        Buffer.from(`${[P, A, D, K].join("\n\n")}\n\n`),
-      ]),
-    );
-    expect("a byte-order mark hides no heading", 0, "none");
-
-    body(P, A, D, K);
-    {
-      const r2 = run(
-        "bash",
-        ["-c", `bash "${SELF}" --body /dev/stdin --title "${T}" < "${join(tmp, "body.md")}"`],
-        {
-          env: {
-            ...(process.env as Record<string, string>),
-            TURNPIKES: join(HERE, "turnpikes.sh"),
-          },
-        },
-      );
-      st.check("a body read from standard input", r2.code === 0, r2.out + r2.err);
-    }
-
-    const printedContent = `id: #7\ntitle: ${T}\nstate: todo\nlabels: \ncreated: 2026-09-23\n\n${[P, A, D, K].join("\n\n")}\n\n## Log\n- 2026-09-25 10:00 postmaster: does a question here count?\n`;
-    writeFileSync(join(tmp, "printed.txt"), printedContent);
-    adapter(`cat -- '${join(tmp, "printed.txt")}'`);
-    r = through();
-    st.check("a ticket read through the adapter passes, its log included", r.code === 0, r.out);
-
-    console.log("positive controls: the turnpikes, as scripts/turnpikes.sh reads them");
-    const project = join(tmp, "project-profile");
-    mkdirSync(join(project, ".postmaster"), { recursive: true });
-    writeFileSync(
-      join(project, ".postmaster", "project.toml"),
-      '[project]\ndefault_turnpikes = ["bug"]\n',
-    );
-    body(P, A, D, K);
-    {
-      const r = run(
-        "bash",
-        [SELF, "--body", join(tmp, "body.md"), "--title", T, "--project", project],
-        {
-          env: {
-            ...(process.env as Record<string, string>),
-            TURNPIKES: join(HERE, "turnpikes.sh"),
-          },
-        },
-      );
-      const lines = r.out.split("\n");
-      st.check(
-        "default is checked against the target project's declaration",
-        r.code === 0 && lines.includes("turnpikes: bug"),
-        `exit ${r.code}\n${r.out}${r.err}`,
-      );
-    }
-    const emptyProject = join(tmp, "empty-project");
-    mkdirSync(join(emptyProject, ".postmaster"), { recursive: true });
-    writeFileSync(
-      join(emptyProject, ".postmaster", "project.toml"),
-      "[project]\ndefault_turnpikes = []\n",
-    );
-    body(P, A, D, K);
-    {
-      const r = run(
-        "bash",
-        [SELF, "--body", join(tmp, "body.md"), "--title", T, "--project", emptyProject],
-        {
-          env: {
-            ...(process.env as Record<string, string>),
-            TURNPIKES: join(HERE, "turnpikes.sh"),
-          },
-        },
-      );
-      const lines = r.out.split("\n");
-      st.check(
-        "an empty project default does not add a review floor",
-        r.code === 0 && lines.includes("turnpikes: none"),
-        `exit ${r.code}\n${r.out}${r.err}`,
-      );
-    }
-    body(P, A, D, K);
-    {
-      const r = run("bash", [SELF, "--body", join(tmp, "body.md"), "--title", T, "--project", ""], {
-        env: { ...(process.env as Record<string, string>), TURNPIKES: join(HERE, "turnpikes.sh") },
-      });
-      st.check(
-        "an explicitly empty --project is refused, never checked as discovery",
-        r.code === 1 && (r.out + r.err).includes("no such project directory"),
-        `exit ${r.code}\n${r.out}${r.err}`,
-      );
-    }
-    body(P, A, D, K);
-    named(
-      "default, in a code span under a template comment, stands for the default set",
-      `turnpikes: ${DEF}`,
-    );
-    body(P, A, D, "## Turnpikes\nnone");
-    named("none passes, and names no turnpike", "turnpikes: none");
-    body(P, A, D, `## Turnpikes\n- ${N2UP}\n- \`${N1}\``);
-    named("a list passes, as the turnpikes it names", `turnpikes: ${N1}, ${N2}`);
-    body(P, A, D, "## Turnpikes\ndefault\n\n---", N);
-    named("a thematic break in the section is not a turnpike", `turnpikes: ${DEF}`);
-
-    console.log("negative controls: each part is named on its own");
-    body(P, A, D, K, N);
-    {
-      const rr = run("bash", [SELF, "--body", join(tmp, "body.md"), "--title", ""], {
-        env: { ...(process.env as Record<string, string>), TURNPIKES: join(HERE, "turnpikes.sh") },
-      });
-      st.check("no title", rr.code === 2 && rr.out.includes("title: missing"), rr.out + rr.err);
-    }
-    {
-      const ru = run(
-        "bash",
-        [SELF, "--body", join(tmp, "body.md"), "--title", "日本語のタイトル"],
-        {
-          env: {
-            ...(process.env as Record<string, string>),
-            TURNPIKES: join(HERE, "turnpikes.sh"),
-          },
-        },
-      );
-      st.check(
-        "a title in another script has words",
-        ru.code === 0 && !ru.out.includes("title: missing"),
-        ru.out + ru.err,
-      );
-    }
-    // no title in adapter's read
-    writeFileSync(
-      join(tmp, "printed-untitled.txt"),
-      printedContent.replace(/^title: .*/mu, "title: "),
-    );
-    adapter(`cat -- '${join(tmp, "printed-untitled.txt")}'`);
-    r = through();
-    st.check(
-      "no title in the adapter's read",
-      r.code === 2 && r.out.includes("title: missing"),
-      r.out,
-    );
-
-    body(A, D, K, N);
-    expect("no problem or feature", 2, "problem / feature", 'no "## Problem / feature" section');
-    body("## Problem / feature", A, D, K);
-    expect("an empty problem or feature", 2, "problem / feature", "is empty");
-    body(P, A, "## Direction\n日本語の方向。", K, N);
-    {
-      const rj = runCheck(T);
-      st.check(
-        "a section in another script has words",
-        rj.code === 0 && !rj.out.includes("direction:"),
-        rj.out,
-      );
-    }
-    body(P, D, K, N);
-    expect(
-      "no acceptance criteria",
-      2,
-      "acceptance criteria",
-      'no "## Acceptance criteria" section',
-    );
-    body(P, "## Acceptance criteria\n- The check runs.\n- It names each part.", D, K);
-    expect("criteria that are not numbered", 2, "acceptance criteria", "not a numbered list");
-    body(
-      P,
-      "## Acceptance criteria\n1. The check runs.\n1. It names each part.\n1. It exits 2.",
-      D,
-      K,
-    );
-    expect(
-      "criteria numbered out of order",
-      2,
-      "acceptance criteria",
-      "numbered 1, 1, 1; number them 1 to 3 in order",
-    );
-    body(P, "## Acceptance criteria\n1. The check runs.\n2. Should it also run at dispatch?", D, K);
-    expect(
-      "a criterion that asks a question",
-      2,
-      "acceptance criteria",
-      "criterion 2 asks a question",
-    );
-    body(
-      P,
-      "## Acceptance criteria\n1. The check runs.\n2. **Should it also run at dispatch?**",
-      D,
-      K,
-    );
-    expect(
-      "a question closed by emphasis",
-      2,
-      "acceptance criteria",
-      "criterion 2 asks a question",
-    );
-    body(
-      P,
-      "## Acceptance criteria\n1. The check runs.\n2. It retries a few times (how many?).",
-      D,
-      K,
-    );
-    expect(
-      "a question closed by a bracket",
-      2,
-      "acceptance criteria",
-      "criterion 2 asks a question",
-    );
-    body(
-      P,
-      "## Acceptance criteria\n1. The check runs.\n2. Should it also run at dispatch？",
-      D,
-      K,
-    );
-    expect("a full-width question mark", 2, "acceptance criteria", "criterion 2 asks a question");
-    body(
-      P,
-      "## Acceptance criteria\n1. The check runs on every ticket before it is accepted.\n   Should it also run again at dispatch?",
-      D,
-      K,
-    );
-    expect(
-      "the fault quotes the sentence that asks",
-      2,
-      "acceptance criteria",
-      'criterion 1 asks a question: "Should it also run again at dispatch?"',
-    );
-    body(P, "## Acceptance criteria\n1. The check runs.\n2. The retry limit is TBD.", D, K);
-    expect("a criterion marked TBD", 2, "acceptance criteria", "criterion 2 is marked TBD");
-    body(P, "## Acceptance criteria\n1. The check runs.\n2. TODO: decide the retry limit.", D, K);
-    expect("a criterion marked TODO:", 2, "acceptance criteria", "criterion 2 is marked TODO");
-    body(
-      P,
-      "## Acceptance criteria\n1. `<!--` opens a comment.\n2. The retry limit is TBD.\n3. `-->` closes one.",
-      D,
-      K,
-    );
-    expect(
-      "comment markers in code hide no criterion",
-      2,
-      "acceptance criteria",
-      "criterion 2 is marked TBD",
-    );
-    body(P, "## Acceptance criteria\n1. The check runs.\n2.", D, K);
-    expect("an empty criterion", 2, "acceptance criteria", "criterion 2 is empty");
-    body(
-      P,
-      "## Acceptance criteria\n1. The check runs.\n2. It names each part.\n\nAlso, the README names it,\nand the runbook.",
-      D,
-      K,
-    );
-    expect(
-      "a criterion outside the numbered list",
-      2,
-      "acceptance criteria",
-      'not part of a numbered criterion: "Also, the README names it,"',
-    );
-    {
-      const rr = runCheck(T);
-      const countNotPart = rr.out.split("\n").filter((l) => l.includes("not part of")).length;
-      st.check(
-        "a paragraph outside the list is named once, not per line",
-        countNotPart === 1,
-        rr.out,
-      );
-    }
-    body(P, "## Acceptance criteria\n1. The check runs.\n- It names each part.", D, K);
-    expect(
-      "an unnumbered criterion straight after a numbered one",
-      2,
-      "acceptance criteria",
-      'not part of a numbered criterion: "- It names each part."',
-    );
-    body(P, "## Acceptance criteria\n1. The check runs.\n### Details", D, K);
-    expect(
-      "a heading straight after a criterion",
-      2,
-      "acceptance criteria",
-      'not part of a numbered criterion: "### Details"',
-    );
-    body(
-      P,
-      "## Acceptance criteria\n1. The check runs.\n\n```\na stray block\n```\nThe retry limit is TBD.",
-      D,
-      K,
-    );
-    expect(
-      "text after a stray block is not credited to the criterion above",
-      2,
-      "acceptance criteria",
-      'not part of a numbered criterion: "```"',
-      "criterion 1 is marked",
-    );
-    body(P, A, A, D, K);
-    expect("acceptance criteria twice", 2, "acceptance criteria", "appears 2 times");
-    body(P, A, K, N);
-    expect(
-      "no direction, even with one inside a fenced block",
-      2,
-      "direction",
-      'no "## Direction" section; one is needed even if',
-    );
-    body(P, A, "## Direction\nTBD, once the spike is done.", K);
-    expect("a direction marked TBD", 2, "direction", '"## Direction" is marked TBD');
-    body(P, A, "## Direction\nTODO", K);
-    expect("a direction that says only TODO", 2, "direction", '"## Direction" is marked TODO');
-    body(P, A, "## Direction\n<!-- None: any approach that meets the criteria. -->", K);
-    expect(
-      "a direction written only in a comment is empty",
-      2,
-      "direction",
-      '"## Direction" is empty',
-    );
-    body(P, "<!-- a comment that starts a line", A, D, K);
-    expect(
-      "a comment that starts a line hides everything up to the next -->",
-      2,
-      "acceptance criteria,direction",
-    );
-    body(P, A, "### Direction\nNone: any approach that meets the criteria.", K);
-    expect(
-      "a direction at the wrong level",
-      2,
-      "direction",
-      '"### Direction" is there, at the wrong level',
-    );
-    body(P, D, A, K);
-    expect(
-      "a direction before the criteria",
-      2,
-      "direction",
-      '"## Direction" comes before "## Acceptance criteria"',
-    );
-    body(P, A, D, N);
-    expect(
-      "no turnpikes",
-      2,
-      "turnpikes",
-      'no "## Turnpikes" section; one is needed, holding default, none, or turnpike names',
-    );
-    body(P, A, D, NT);
-    expect(
-      "a ### Turnpikes in the notes, with no ## Turnpikes, is named at the wrong level",
-      2,
-      "turnpikes",
-      '"### Turnpikes" is there, at the wrong level',
-    );
-    body(P, A, D, "## Turnpikes\n- ```none\n  style, bug, security\n  ```");
-    expect(
-      "a list item that opens a fence is code, and names no turnpike",
-      2,
-      "turnpikes",
-      "names no turnpike",
-    );
-    body(P, A, D, `## Turnpikes\n${N1}, ${NOPE}`);
-    expect(
-      "a turnpike scripts/turnpikes.sh does not list is named",
-      2,
-      "turnpikes",
-      `"${NOPE}" is not a turnpike`,
-    );
-    body(P, A, D, `## Turnpikes\nnone, ${N1}`);
-    expect("none listed with another turnpike", 2, "turnpikes", "none stands alone");
-    body(P, A, D, "## Turnpikes");
-    expect("an empty turnpikes section", 2, "turnpikes", '"## Turnpikes" is empty');
-    body(P, A, D, "## Turnpikes\nTBD");
-    expect("turnpikes marked TBD", 2, "turnpikes", '"## Turnpikes" is marked TBD');
-    body(P, A, D, "### Turnpikes\ndefault");
-    expect(
-      "turnpikes at the wrong level",
-      2,
-      "turnpikes",
-      '"### Turnpikes" is there, at the wrong level',
-    );
-    body(P, A, K, D);
-    expect(
-      "turnpikes before the direction",
-      2,
-      "turnpikes",
-      '"## Turnpikes" comes before "## Direction"',
-    );
-    body(P, A, D, K, K);
-    expect("turnpikes twice", 2, "turnpikes", '"## Turnpikes" appears 2 times');
-    writeFileSync(join(tmp, "body.md"), "");
-    expect(
-      "an empty ticket names all five parts",
-      2,
-      "acceptance criteria,direction,problem / feature,title,turnpikes",
-      "",
-      "",
-      "",
-    );
-
-    console.log("a turnpike is added in scripts/turnpikes.sh alone");
-    mkdirSync(join(tmp, "added"), { recursive: true });
-    mkdirSync(join(tmp, "broken"), { recursive: true });
-    mkdirSync(join(tmp, "alone"), { recursive: true });
-    for (const d of ["added", "broken", "alone"]) {
-      copyFileSync(SELF, join(tmp, d, "ticket-check.sh"));
-      copyFileSync(join(HERE, "ticket-check.ts"), join(tmp, d, "ticket-check.ts"));
-      mkdirSync(join(tmp, d, "lib"), { recursive: true });
-      for (const f of ["paths.ts", "proc.ts", "data.ts", "selftest.ts", "text.ts"]) {
-        copyFileSync(join(HERE, "lib", f), join(tmp, d, "lib", f));
-      }
-    }
-    function addTurnpike(row: string, dir: string): void {
-      // The port keeps the table in turnpikes.ts behind the turnpikes.sh wrapper: copy both,
-      // and write the row as the table's last row, as BASE's awk did before its TURNPIKES marker.
-      copyFileSync(join(HERE, "turnpikes.sh"), join(dir, "turnpikes.sh"));
-      chmodSync(join(dir, "turnpikes.sh"), 0o755);
-      const src = readFileSync(join(HERE, "turnpikes.ts"), "utf8");
-      const out = src.replace(
-        new RegExp("(const TABLE = `" + DOT_ALL + "*?)(`;)", "u"),
-        (_m, a: string, b: string) => `${a}\n${row}${b}`,
-      );
-      writeFileSync(join(dir, "turnpikes.ts"), out);
-    }
-    addTurnpike(
-      `${NOPE}  -        ship    a check the table does not have yet`,
-      join(tmp, "added"),
-    );
-    addTurnpike("none       -        review  nothing", join(tmp, "broken"));
-    body(P, A, D, `## Turnpikes\ndefault, ${NOPE}`);
-    {
-      const rr = run("bash", [SELF, "--body", join(tmp, "body.md"), "--title", T], {
-        env: { ...(process.env as Record<string, string>), TURNPIKES: join(HERE, "turnpikes.sh") },
-      });
-      st.check(
-        "this check names a turnpike that turnpikes.sh does not list",
-        rr.code === 2 && rr.out.includes(`"${NOPE}" is not a turnpike`),
-        rr.out,
-      );
-    }
-    {
-      const rr = run(
-        "bash",
-        [join(tmp, "added", "ticket-check.sh"), "--body", join(tmp, "body.md"), "--title", T],
-        {
-          env: { ...(process.env as Record<string, string>) },
-        },
-      );
-      const secondLine = rr.out.split("\n")[1] ?? "";
-      st.check(
-        "the same check passes it once turnpikes.sh lists it",
-        rr.code === 0 && secondLine === `turnpikes: ${DEF}, ${NOPE}`,
-        rr.out,
-      );
-    }
-
-    console.log("negative controls: a ticket that cannot be read is not a verdict");
-    {
-      const rr = run("bash", [SELF], { env: process.env as Record<string, string> });
-      st.check("no arguments is a usage error", rr.code === 1, rr.out + rr.err);
-    }
-    {
-      const rr = run("bash", [SELF, "--body", join(tmp, "nowhere.md")], {
-        env: process.env as Record<string, string>,
-      });
-      st.check("a missing body file is refused", rr.code === 1, rr.out + rr.err);
-    }
-    writeFileSync(join(tmp, "other.toml"), '[tracker]\nkind = "other"\nname = "notes"\n');
-    {
-      const rr = run("bash", [SELF, tmp, "7"], {
-        env: {
-          ...(process.env as Record<string, string>),
-          POSTMASTER_CONFIG: join(tmp, "other.toml"),
-        },
-      });
-      st.check(
-        "a tracker kind with no adapter script is refused, not judged",
-        rr.code === 1 && rr.out.trim() === "",
-        rr.out + rr.err,
-      );
-    }
-    writeFileSync(join(tmp, "broken.toml"), "[tracker\nkind = github\n");
-    {
-      const rr = run("bash", [SELF, tmp, "7"], {
-        env: {
-          ...(process.env as Record<string, string>),
-          POSTMASTER_CONFIG: join(tmp, "broken.toml"),
-        },
-      });
-      st.check(
-        "a config that does not parse is named as one",
-        rr.code === 1 && rr.err.includes("does not parse"),
-        rr.out + rr.err,
-      );
-    }
-    adapter('echo "github: no board" >&2; exit 3');
-    r = through();
-    st.check(
-      "an adapter that cannot read the ticket is exit 1, not a shape fault",
-      r.code === 1 &&
-        !/^(title|problem \/ feature|acceptance criteria|direction|turnpikes): /u.test(r.out),
-      r.out,
-    );
-    body(P, A, D, K);
-    {
-      const rr = run(
-        "bash",
-        [join(tmp, "alone", "ticket-check.sh"), "--body", join(tmp, "body.md"), "--title", T],
-        {
-          env: process.env as Record<string, string>,
-        },
-      );
-      st.check(
-        "with no turnpikes.sh beside it, the check gives no verdict",
-        rr.code === 1 && rr.out.trim() === "",
-        rr.out + rr.err,
-      );
-    }
-    {
-      const rr = run(
-        "bash",
-        [join(tmp, "broken", "ticket-check.sh"), "--body", join(tmp, "body.md"), "--title", T],
-        {
-          env: process.env as Record<string, string>,
-        },
-      );
-      st.check(
-        "a turnpikes.sh whose table breaks its rules gives no verdict",
-        rr.code === 1 && rr.out.trim() === "",
-        rr.out + rr.err,
-      );
-    }
-    mkdirSync(join(tmp, "silent"), { recursive: true });
-    copyFileSync(SELF, join(tmp, "silent", "ticket-check.sh"));
-    copyFileSync(join(HERE, "ticket-check.ts"), join(tmp, "silent", "ticket-check.ts"));
-    mkdirSync(join(tmp, "silent", "lib"), { recursive: true });
-    for (const f of ["paths.ts", "proc.ts", "data.ts", "selftest.ts", "text.ts"]) {
-      copyFileSync(join(HERE, "lib", f), join(tmp, "silent", "lib", f));
-    }
-    writeFileSync(join(tmp, "silent", "turnpikes.sh"), "#!/bin/sh\nexit 2\n");
-    chmodSync(join(tmp, "silent", "turnpikes.sh"), 0o755);
-    {
-      const rr = run(
-        "bash",
-        [join(tmp, "silent", "ticket-check.sh"), "--body", join(tmp, "body.md"), "--title", T],
-        {
-          env: process.env as Record<string, string>,
-        },
-      );
-      st.check(
-        "a turnpikes.sh that fails with nothing to say gives no verdict, never a pass",
-        rr.code === 1 && rr.out.trim() === "",
-        rr.out + rr.err,
-      );
-    }
-
-    console.log("positive controls: --splice changes the sections given and nothing else");
-    function spliceRun(): { code: number; out: string } {
-      const r = run("bash", [SELF, "--splice", join(tmp, "base.md"), join(tmp, "sections.md")], {
-        env: process.env as Record<string, string>,
-      });
-      return { code: r.code, out: r.out + r.err };
-    }
-    function sameSplice(label: string): void {
-      const want = readFileSync(join(tmp, "want.md"), "utf8");
-      const r = spliceRun();
-      if (r.code === 0 && r.out === want) st.ok(label);
-      else st.fail(`${label} (exit ${r.code})`, r.out);
-    }
-
-    writeFileSync(join(tmp, "base.md"), `${[P, A, K].join("\n\n")}\n\n${N}\n`);
-    writeFileSync(join(tmp, "sections.md"), `${D}\n`);
-    writeFileSync(join(tmp, "want.md"), `${[P, A, D, K].join("\n\n")}\n\n${N}\n`);
-    sameSplice("a missing direction goes between the criteria and the turnpikes");
-    writeFileSync(join(tmp, "body.md"), spliceRun().out);
-    expect("the spliced body passes the check", 0, "none");
-
-    writeFileSync(join(tmp, "base.md"), `${[P, A, D].join("\n\n")}\n\n${N}\n`);
-    writeFileSync(join(tmp, "sections.md"), `${K}\n`);
-    writeFileSync(join(tmp, "want.md"), `${[P, A, D, K].join("\n\n")}\n\n${N}\n`);
-    sameSplice("a missing turnpikes section goes between the direction and the notes");
-    writeFileSync(join(tmp, "body.md"), spliceRun().out);
-    named("and the spliced body passes, with the default turnpikes", `turnpikes: ${DEF}`);
-
-    writeFileSync(join(tmp, "base.md"), `${[P, A, UJ, D].join("\n\n")}\n\n${N}\n`);
-    writeFileSync(join(tmp, "sections.md"), `${K}\n`);
-    writeFileSync(join(tmp, "want.md"), `${[P, A, UJ, D, K].join("\n\n")}\n\n${N}\n`);
-    sameSplice("turnpikes go after the direction, even when a user journey comes before it");
-    writeFileSync(join(tmp, "body.md"), spliceRun().out);
-    named("and that spliced body passes", `turnpikes: ${DEF}`);
-
-    const C = "## Acceptance criteria\n1. Only this criterion.";
-    writeFileSync(join(tmp, "base.md"), `${[P, A, D].join("\n\n")}\n\n${N}\n`);
-    writeFileSync(join(tmp, "sections.md"), `${C}\n`);
-    writeFileSync(join(tmp, "want.md"), `${[P, C, D].join("\n\n")}\n\n${N}\n`);
-    sameSplice("the criteria are replaced where they stand");
-
-    writeFileSync(join(tmp, "base.md"), `${[P, D, A].join("\n\n")}\n\n${N}\n`);
-    writeFileSync(join(tmp, "sections.md"), `${D}\n`);
-    writeFileSync(join(tmp, "want.md"), `${[P, A, D].join("\n\n")}\n\n${N}\n`);
-    sameSplice("a direction written before the criteria moves after them");
-
-    writeFileSync(
-      join(tmp, "base.md"),
-      `${[P, A, "### Direction\nAn old approach."].join("\n\n")}\n\n${N}\n`,
-    );
-    writeFileSync(join(tmp, "sections.md"), `${D}\n`);
-    writeFileSync(join(tmp, "want.md"), `${[P, A, D].join("\n\n")}\n\n${N}\n`);
-    sameSplice("a direction at the wrong level is replaced");
-
-    const X = "## Context\nSeen twice this week.";
-    writeFileSync(
-      join(tmp, "base.md"),
-      `${["Reported in the forum.", P, X, A].join("\n\n")}\n\n${N}\n`,
-    );
-    writeFileSync(join(tmp, "sections.md"), `${D}\n`);
-    writeFileSync(
-      join(tmp, "want.md"),
-      `${["Reported in the forum.", P, X, A, D].join("\n\n")}\n\n${N}\n`,
-    );
-    sameSplice("text before the first heading and a section outside the shape are kept");
-
-    writeFileSync(
-      join(tmp, "base.md"),
-      `${["Reported in the forum.", P, X, D, K].join("\n\n")}\n\n${N}\n`,
-    );
-    writeFileSync(join(tmp, "sections.md"), `${A}\n`);
-    writeFileSync(
-      join(tmp, "want.md"),
-      `${["Reported in the forum.", P, X, A, D, K].join("\n\n")}\n\n${N}\n`,
-    );
-    sameSplice(
-      "a missing part goes after the part before it and the sections outside the shape that follow it",
-    );
-
-    writeFileSync(join(tmp, "base.md"), `${[P, A, N].join("\n\n")}\n\n\n`);
-    writeFileSync(join(tmp, "sections.md"), `${D}\n`);
-    writeFileSync(join(tmp, "want.md"), `${[P, A, D, N].join("\n\n")}\n\n\n`);
-    {
-      const r = run("bash", [SELF, "--splice", join(tmp, "base.md"), join(tmp, "sections.md")], {
-        env: process.env as Record<string, string>,
-      });
-      const want = readFileSync(join(tmp, "want.md"), "utf8");
-      st.check(
-        "blank lines at the end of the body are kept, byte for byte",
-        r.code === 0 && r.out === want,
-        `exit ${r.code}\n${r.out}`,
-      );
-    }
-
-    console.log("negative controls: --splice refuses sections it cannot place");
-    writeFileSync(join(tmp, "sections.md"), `Use the adapters.\n\n${D}\n`);
-    {
-      const r = spliceRun();
-      st.check("text before the first heading of the sections", r.code === 1, r.out);
-    }
-    writeFileSync(join(tmp, "sections.md"), "### Direction\nUse the adapters.\n");
-    {
-      const r = spliceRun();
-      st.check("a section that is not at level two", r.code === 1, r.out);
-    }
-    writeFileSync(join(tmp, "sections.md"), `${D}\n\n${D}\n`);
-    {
-      const r = spliceRun();
-      st.check("the same section twice", r.code === 1, r.out);
-    }
-    writeFileSync(join(tmp, "base.md"), `${[P, A, D].join("\n\n")}\n\n${NT}\n`);
-    writeFileSync(join(tmp, "sections.md"), `${K}\n`);
-    {
-      const r = spliceRun();
-      st.check(
-        "a ### Turnpikes in the notes is neither deleted nor left beside a new one",
-        r.code === 1 && r.out.includes('"### Turnpikes" stands inside a later part'),
-        r.out,
-      );
-    }
-    writeFileSync(
-      join(tmp, "base.md"),
-      `${[P, A, "## Notes\nContext.\n\n### Direction\nAn old approach."].join("\n\n")}\n`,
-    );
-    writeFileSync(join(tmp, "sections.md"), `${D}\n`);
-    {
-      const r = spliceRun();
-      st.check(
-        "a stale ### Direction in the notes is not left beside the new one",
-        r.code === 1 && r.out.includes('"### Direction" stands inside a later part'),
-        r.out,
-      );
-    }
-
-    console.log(
-      "controls: a repo whose local ticket store exists is read through local.sh, whatever the config names",
-    );
-    localsh(
-      `case $2 in store) exit 0 ;; read) : > '${join(tmp, "local-read")}'; cat -- '${join(tmp, "printed.txt")}' ;; *) exit 1 ;; esac`,
-    );
-    adapter(`: > '${join(tmp, "github-read")}'; exit 1`);
-    rmSync(join(tmp, "local-read"), { force: true });
-    rmSync(join(tmp, "github-read"), { force: true });
-    r = through();
-    st.check(
-      "a repo with a store is read through local.sh, though the config names github",
-      r.code === 0 && existsSync(join(tmp, "local-read")) && !existsSync(join(tmp, "github-read")),
-      r.out,
-    );
-
-    localsh(`case $2 in store) exit 3 ;; *) : > '${join(tmp, "local-read")}'; exit 1 ;; esac`);
-    adapter(`: > '${join(tmp, "github-read")}'; cat -- '${join(tmp, "printed.txt")}'`);
-    rmSync(join(tmp, "local-read"), { force: true });
-    rmSync(join(tmp, "github-read"), { force: true });
-    r = through();
-    st.check(
-      "a repo with no store is read through the kind the config names",
-      r.code === 0 && existsSync(join(tmp, "github-read")) && !existsSync(join(tmp, "local-read")),
-      r.out,
-    );
-
-    localsh(
-      `case $2 in store) echo 'local: not a git repository' >&2; exit 1 ;; *) : > '${join(tmp, "local-read")}'; exit 1 ;; esac`,
-    );
-    rmSync(join(tmp, "local-read"), { force: true });
-    rmSync(join(tmp, "github-read"), { force: true });
-    r = through();
-    st.check(
-      "a store that cannot be looked for stops the check, and no adapter is read",
-      r.code === 1 &&
-        !existsSync(join(tmp, "github-read")) &&
-        !existsSync(join(tmp, "local-read")) &&
-        r.out.includes("cannot look for a local store"),
-      r.out,
-    );
-    localsh(NOSTORE);
-
-    st.check("FENCE takes a U+001C indent like BASE", FENCE.test("\x1c```x"), "no match");
-    st.check(
-      "FENCED_ITEM takes an Arabic-Indic number like BASE",
-      FENCED_ITEM.test("\u0661. ```x"),
-      "no match",
-    );
-    st.check("QUESTION splits after U+001C like BASE", QUESTION.test("q?\x1c next"), "no match");
-    st.check("ITEM takes an Arabic-Indic number like BASE", ITEM.test("\u0661. x"), "no match");
-    st.check("HEADING crosses a CR like BASE", HEADING.test("## a\rb"), "no match");
-    st.check("MARK1 refuses TBD+long-s like BASE", MARK1.exec("x TBD\u017f") === null, "matched");
-    st.check("MARK2 refuses long-s+TODO like BASE", MARK2.exec("\u017fTODO:") === null, "matched");
-    st.check(
-      "MARK3 refuses long-s wrapping like BASE",
-      MARK3.exec("\u017fTODO\u017f") === null,
-      "matched",
-    );
-    st.check("QSPLIT splits at U+001C like BASE", "a.\x1cb".split(QSPLIT).length === 2, "no split");
-    st.check(
-      "norm eats U+001C around a slash like BASE",
-      norm("Problem\x1c/\x1cfeature") === "problem / feature",
-      JSON.stringify(norm("Problem\x1c/\x1cfeature")),
-    );
-    st.check(
-      "clip splits U+001C like BASE",
-      clip("a\x1cb", 70) === "a b",
-      JSON.stringify(clip("a\x1cb", 70)),
-    );
-    st.finish();
-  });
-}
-
 // --- entry -------------------------------------------------------------------------------------
 const TURNPIKES = join(scriptsDir(import.meta), "turnpikes.sh");
-const argv = process.argv.slice(2);
-const mode = argv[0] ?? "";
 
 const USAGE =
-  "usage: ticket-check.sh <repo> <ticket-id> | --body <body-file> [--title <title>] [--project <repo>] | --splice <base-body> <sections> | --self-test";
+  "usage: ticket-check.sh <repo> <ticket-id> | --body <body-file> [--title <title>] [--project <repo>] | --splice <base-body> <sections>";
 
 function usage(): never {
   console.error(USAGE);
@@ -1598,89 +573,90 @@ function isDir(p: string): boolean {
   }
 }
 
-if (mode === "--self-test") {
-  delete process.env.POSTMASTER_PROJECT;
-  selfTest();
-} else if (mode === "--body") {
-  if (argv.length >= 2) {
-    let title: string | null = null;
-    let hasTitle = false;
-    let project = "";
-    let hasProject = false;
-    const rest = argv.slice(2);
-    let ok = true;
-    for (let i = 0; i < rest.length; i += 2) {
-      const flag = rest[i];
-      const val = rest[i + 1];
-      if (val === undefined) {
-        ok = false;
-        break;
+function main(argv: string[]): number {
+  const mode = argv[0] ?? "";
+  if (mode === "--body") {
+    if (argv.length >= 2) {
+      let title: string | null = null;
+      let hasTitle = false;
+      let project = "";
+      let hasProject = false;
+      const rest = argv.slice(2);
+      let ok = true;
+      for (let i = 0; i < rest.length; i += 2) {
+        const flag = rest[i];
+        const val = rest[i + 1];
+        if (val === undefined) {
+          ok = false;
+          break;
+        }
+        if (flag === "--title") {
+          title = val;
+          hasTitle = true;
+        } else if (flag === "--project") {
+          project = val;
+          hasProject = true;
+        } else {
+          ok = false;
+          break;
+        }
       }
-      if (flag === "--title") {
-        title = val;
-        hasTitle = true;
-      } else if (flag === "--project") {
-        project = val;
-        hasProject = true;
-      } else {
-        ok = false;
-        break;
+      if (ok) {
+        if (hasProject) {
+          if (!isDir(project)) {
+            console.error(`ticket-check: no such project directory: ${project}`);
+            return 1;
+          }
+          process.env.POSTMASTER_PROJECT = realpathSync(project);
+        }
+        try {
+          const text = loadText(argv[1]!);
+          const [faults, count, named] = check(hasTitle ? title : null, text, TURNPIKES);
+          if (faults.length > 0) {
+            console.log(faults.join("\n"));
+            return 2;
+          }
+          console.log(`well-formed, ${count} acceptance criteria`);
+          console.log(named);
+          return 0;
+        } catch (e) {
+          if (e instanceof DieError) {
+            process.stderr.write(`ticket-check: ${e.msg}\n`);
+            return e.code;
+          }
+          throw e;
+        }
       }
     }
-    if (ok) {
-      if (hasProject) {
-        if (!isDir(project)) {
-          console.error(`ticket-check: no such project directory: ${project}`);
-          process.exit(1);
-        }
-        process.env.POSTMASTER_PROJECT = realpathSync(project);
-      }
-      try {
-        const text = loadText(argv[1]!);
-        const [faults, count, named] = check(hasTitle ? title : null, text, TURNPIKES);
-        if (faults.length > 0) {
-          console.log(faults.join("\n"));
-          process.exit(2);
-        }
-        console.log(`well-formed, ${count} acceptance criteria`);
-        console.log(named);
-        process.exit(0);
-      } catch (e) {
-        if (e instanceof DieError) {
-          process.stderr.write(`ticket-check: ${e.msg}\n`);
-          process.exit(e.code);
-        }
-        throw e;
-      }
-    }
-  }
-  usage();
-} else if (mode === "--splice") {
-  if (argv.length !== 3) {
     usage();
   }
-  try {
-    const baseText = loadText(argv[1]!);
-    const sectionsText = loadText(argv[2]!);
-    process.stdout.write(splice(baseText, sectionsText, TURNPIKES));
-    process.exit(0);
-  } catch (e) {
-    if (e instanceof DieError) {
-      process.stderr.write(`ticket-check: ${e.msg}\n`);
-      process.exit(e.code);
+  if (mode === "--splice") {
+    if (argv.length !== 3) {
+      usage();
     }
-    throw e;
+    try {
+      const baseText = loadText(argv[1]!);
+      const sectionsText = loadText(argv[2]!);
+      process.stdout.write(splice(baseText, sectionsText, TURNPIKES));
+      return 0;
+    } catch (e) {
+      if (e instanceof DieError) {
+        process.stderr.write(`ticket-check: ${e.msg}\n`);
+        return e.code;
+      }
+      throw e;
+    }
   }
-} else if (mode === "" || mode.startsWith("-")) {
-  usage();
-} else {
+  if (mode === "" || mode.startsWith("-")) {
+    usage();
+  }
   // <repo> <ticket-id> through adapter
   if (argv.length !== 2) {
     usage();
   }
   if (!isDir(mode)) {
     console.error(`ticket-check: no such project directory: ${mode}`);
-    process.exit(1);
+    return 1;
   }
   process.env.POSTMASTER_PROJECT = realpathSync(mode);
   try {
@@ -1689,7 +665,7 @@ if (mode === "--self-test") {
     if (kindR.code !== 0) {
       // BASE left tracker-kind.sh's stderr to flow through; run() captures it, so forward it.
       process.stderr.write(kindR.err);
-      process.exit(1);
+      return 1;
     }
     const kind = kindR.out.trim();
     const id = argv[1]!;
@@ -1711,11 +687,11 @@ if (mode === "--self-test") {
       console.error(
         `ticket-check: tracker kind '${kind}' has no adapter script; read the ticket with its own tooling (trackers.md, other), write its body to a file, and run: ticket-check.sh --body <file> --title <title>`,
       );
-      process.exit(1);
+      return 1;
     }
     if (readCode !== 0) {
       console.error(`ticket-check: the ${kind} adapter could not read ${id} (exit ${readCode})`);
-      process.exit(1);
+      return 1;
     }
     const [faults, count, named] = check(
       (() => {
@@ -1732,16 +708,20 @@ if (mode === "--self-test") {
     );
     if (faults.length > 0) {
       console.log(faults.join("\n"));
-      process.exit(2);
+      return 2;
     }
     console.log(`well-formed, ${count} acceptance criteria`);
     console.log(named);
-    process.exit(0);
+    return 0;
   } catch (e) {
     if (e instanceof DieError) {
       process.stderr.write(`ticket-check: ${e.msg}\n`);
-      process.exit(e.code);
+      return e.code;
     }
     throw e;
   }
+}
+
+if (import.meta.main) {
+  process.exit(main(process.argv.slice(2)));
 }

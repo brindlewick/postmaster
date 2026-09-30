@@ -7,7 +7,6 @@
 //   project-settings.sh ensure <repo>         create .postmaster/.gitignore, no settings
 //   project-settings.sh write <repo> project|local [<toml-file>]
 //                                             validate, then write the agreed settings
-//   project-settings.sh --self-test
 //
 //   exit 0  printed, wrote, or ensured
 //   exit 1  usage; anything invalid, missing, or unreadable
@@ -34,11 +33,10 @@ import {
   writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { parseTomlText } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
-import { mkstempSync, run, withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
+import { mkstempSync, run } from "./lib/proc.ts";
 import {
   BOUND_L,
   BOUND_R,
@@ -52,18 +50,17 @@ import {
 const HERE = scriptsDir(import.meta);
 const USAGE =
   "usage: project-settings.sh inspect|report <repo> | effective <repo> [<machine-config>]" +
-  " | ensure <repo> | write <repo> project|local [<toml-file>] | --self-test";
+  " | ensure <repo> | write <repo> project|local [<toml-file>]";
 
 // --- failure ----------------------------------------------------------------------------
-// Internal failures throw a branded value the entry point (and the self-test's
-// expect-fail controls) catch; anything else propagates as an unexpected crash,
-// the way BASE's uncaught tracebacks did.
+// Internal failures throw a branded value the entry point catches; anything else
+// propagates as an unexpected crash, the way BASE's uncaught tracebacks did.
 interface Die {
   tag: "die";
   message: string;
 }
 
-const isDie = (e: unknown): e is Die =>
+export const isDie = (e: unknown): e is Die =>
   typeof e === "object" && e !== null && (e as { tag?: unknown }).tag === "die";
 
 function fail(message: string): never {
@@ -207,7 +204,7 @@ const RX_CONTROL = /[\x00-\x1f\x7f]/u;
 const RX_GROUP_OPEN = /\((?!\?)/gu;
 
 // --- values ---------------------------------------------------------------------------------
-type Rec = Record<string, unknown>;
+export type Rec = Record<string, unknown>;
 
 // A TOML/JSON table: isinstance dict. Arrays, dates and other exotica are not tables.
 const isRec = (v: unknown): v is Rec => {
@@ -216,13 +213,13 @@ const isRec = (v: unknown): v is Rec => {
   return proto === Object.prototype || proto === null;
 };
 
-const asTable = (value: unknown, where: string): Rec => {
+export const asTable = (value: unknown, where: string): Rec => {
   if (!isRec(value)) fail(`${where} must be a table`);
   return value;
 };
 
 // Python truthiness for JSON values: {} and [] are falsy, NaN stays truthy.
-const pyTruthy = (v: unknown): boolean => {
+export const pyTruthy = (v: unknown): boolean => {
   if (v === null || v === undefined || v === false) return false;
   if (typeof v === "number") return v !== 0;
   if (typeof v === "string") return v !== "";
@@ -330,7 +327,7 @@ const credentialNameIn = (value: string): boolean => {
   return RX_NAMED_CRED.test(pyTrim(value));
 };
 
-const scanMachineData = (value: unknown, location: string, path: string[]): void => {
+export const scanMachineData = (value: unknown, location: string, path: string[]): void => {
   if (Array.isArray(value)) {
     value.forEach((item, i) => {
       scanMachineData(item, `${location}[${i}]`, path);
@@ -447,8 +444,7 @@ const CHECK_USES = ["cli-examples", "browser-suite", "web-journey", "library-tes
 
 const validateCheck = (name: string, specValue: unknown, where: string): void => {
   // Mirrors the declared-check rules in scripts/verify.sh, which stays
-  // authoritative: write must never persist a shape checks would reject, and
-  // the self-test runs both validators on every bad shape below.
+  // authoritative: write must never persist a shape checks would reject.
   if (!RX_CHECK_NAME.test(name)) fail(`${where}: a check's name is a lowercase word`);
   const spec = asTable(specValue, where);
   const extra = Object.keys(spec)
@@ -515,7 +511,7 @@ const validateCheck = (name: string, specValue: unknown, where: string): void =>
   }
 };
 
-const validateCommon = (data: Rec, label: string, local: boolean): Rec => {
+export const validateCommon = (data: Rec, label: string, local: boolean): Rec => {
   const allowed = local
     ? new Set(["project", "tracker", "roles"])
     : new Set(["project", "tracker", "checks"]);
@@ -670,7 +666,7 @@ const mergedProfile = (shared: Rec, local: Rec, hasShared: boolean, hasLocal: bo
   return out;
 };
 
-const loadMachine = (path: string): Rec => {
+export const loadMachine = (path: string): Rec => {
   if (path === "-") {
     try {
       return asTable(JSON.parse(strictStdin()), "machine config");
@@ -688,7 +684,11 @@ const loadMachine = (path: string): Rec => {
   return asTable(parseTomlStrict(raw, `machine config ${path}`), "machine config");
 };
 
-const effectiveConfig = (repo: string, machine: Rec, pair?: { shared: Rec; local: Rec }): Rec => {
+export const effectiveConfig = (
+  repo: string,
+  machine: Rec,
+  pair?: { shared: Rec; local: Rec },
+): Rec => {
   const cfg = asTable(deepCopy(machine), "machine config");
   let shared: Rec;
   let local: Rec;
@@ -743,7 +743,7 @@ const effectiveConfig = (repo: string, machine: Rec, pair?: { shared: Rec; local
 };
 
 // --- commands -------------------------------------------------------------------------------------
-const inspect = (repo: string): Rec => {
+export const inspect = (repo: string): Rec => {
   const { shared, local, hasShared, hasLocal } = loadProfiles(repo);
   const profile = mergedProfile(shared, local, hasShared, hasLocal);
   profile.shared_file = hasShared ? ".postmaster/project.toml" : null;
@@ -772,7 +772,7 @@ const report = (repo: string): void => {
   if (Object.hasOwn(tracker, "binding")) console.log(`tracker_binding=${String(tracker.binding)}`);
 };
 
-const ensureIgnore = (repo: string, quiet = false): void => {
+export const ensureIgnore = (repo: string, quiet = false): void => {
   const d = settingsDir(repo);
   mkdirSync(d, { recursive: true });
   const ignore = join(d, ".gitignore");
@@ -798,7 +798,7 @@ const ensureIgnore = (repo: string, quiet = false): void => {
   if (!quiet) console.log(`project-settings: ensured ${ignore}`);
 };
 
-const writeProfile = (repo: string, layer: string, source: string): void => {
+export const writeProfile = (repo: string, layer: string, source: string): void => {
   if (layer !== "project" && layer !== "local") fail("write layer must be project or local");
   const d = settingsDir(repo);
   const name = layer === "project" ? "project.toml" : "settings.toml";
@@ -857,10 +857,6 @@ const writeProfile = (repo: string, layer: string, source: string): void => {
 // --- entry ----------------------------------------------------------------------------------------
 const main = (): void => {
   const argv = process.argv.slice(2);
-  if (argv.length === 1 && argv[0] === "--self-test") {
-    selfTest();
-    return;
-  }
   if (argv.length === 0) fail(USAGE);
   const cmd = argv[0]!;
   const rest = argv.slice(1);
@@ -884,424 +880,14 @@ const main = (): void => {
   }
 };
 
-// --- self-test --------------------------------------------------------------------------------------
-const SELF = join(HERE, "project-settings.sh");
-const VERIFY = join(HERE, "verify.sh");
-
-const selfTest = (): void => {
-  withTempDir((tmp) => {
-    const st = new SelfTest();
-    const at = (name: string): string => join(tmp, name);
-    const write = (path: string, text: string): void => {
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, text);
-    };
-    const mustDie = (label: string, fn: () => void): void => {
-      try {
-        fn();
-      } catch (e) {
-        if (isDie(e)) {
-          st.ok(label);
-          return;
-        }
-        throw e;
-      }
-      st.fail(label, "accepted but must refuse");
-    };
-    const mustPass = (label: string, fn: () => void): void => {
-      try {
-        fn();
-      } catch (e) {
-        if (isDie(e)) {
-          st.fail(label, e.message);
-          return;
-        }
-        throw e;
-      }
-      st.ok(label);
-    };
-
-    const repo = at("repo");
-    mkdirSync(repo, { recursive: true });
-    const machine = at("config.toml");
-    write(
-      machine,
-      '[lanes.alpha]\nharness="codex"\nmodel="a"\n[lanes.beta]\nharness="claude"\nmodel="b"\n[team]\nworkhorses=["alpha","beta"]\nreviewers=["alpha","beta"]\ncoachman={harness="grok",model="coach"}\ncoachman_fallback={harness="pi",model="backup"}\n',
-    );
-    process.env.POSTMASTER_CONFIG = machine;
-    const missing = inspect(repo);
-    st.check(
-      "missing profiles are normal and retain discovery defaults",
-      missing.shared_present === false &&
-        missing.local_present === false &&
-        (missing.sources as Rec)["project.default_turnpikes"] === "discovery",
-    );
-    const shadow = at("shadow");
-    write(join(shadow, "json", "__init__.py"), 'raise SystemExit("target module imported")\n');
-    const isolated = run("timeout", ["10", SELF, "inspect", shadow], { cwd: shadow });
-    st.check(
-      "project modules cannot shadow the settings reader's standard library imports",
-      isolated.code === 0,
-      `target modules were imported: ${isolated.err}`,
-    );
-    ensureIgnore(repo);
-    st.check(
-      "ensure creates the folder ignore without prompting for settings",
-      readFileSync(join(repo, ".postmaster", ".gitignore"), "utf8").endsWith("*\n") &&
-        !existsSync(join(repo, ".postmaster", "settings.toml")),
-    );
-    write(join(repo, ".postmaster", ".gitignore"), "# existing local rules\n!keep-me\n");
-    ensureIgnore(repo);
-    const kept = readFileSync(join(repo, ".postmaster", ".gitignore"), "utf8");
-    st.check(
-      "ensure completes an existing ignore file without discarding its rules",
-      kept.startsWith("# existing local rules\n") && kept.endsWith("*\n"),
-    );
-    const negated = at("negated");
-    mkdirSync(negated, { recursive: true });
-    ensureIgnore(negated);
-    write(join(negated, ".postmaster", ".gitignore"), "*\n!settings.toml\n");
-    ensureIgnore(negated);
-    const repaired = readFileSync(join(negated, ".postmaster", ".gitignore"), "utf8");
-    const negInit = run("git", ["init", "-q", negated]);
-    const negIgnore1 = run("git", [
-      "-C",
-      negated,
-      "check-ignore",
-      "-q",
-      ".postmaster/settings.toml",
-    ]);
-    const negIgnore2 = run("git", [
-      "-C",
-      negated,
-      "check-ignore",
-      "-q",
-      ".postmaster/runs/T-1/card.md",
-    ]);
-    st.check(
-      "ensure re-ignores a folder a negation had re-included, keeping its rules",
-      repaired.endsWith("*\n") &&
-        repaired.includes("!settings.toml\n") &&
-        negInit.code === 0 &&
-        negIgnore1.code === 0 &&
-        negIgnore2.code === 0,
-    );
-    write(join(negated, ".postmaster", ".gitignore"), "*\n!runs/\n!runs/**\n");
-    ensureIgnore(negated);
-    const negIgnore3 = run("git", [
-      "-C",
-      negated,
-      "check-ignore",
-      "-q",
-      ".postmaster/runs/T-1/card.md",
-    ]);
-    st.check("ensure re-ignores run artifacts a negation had re-included", negIgnore3.code === 0);
-    const before = readFileSync(join(negated, ".postmaster", ".gitignore"), "utf8");
-    ensureIgnore(negated);
-    st.check(
-      "ensure is a no-op once the last rule is the star",
-      readFileSync(join(negated, ".postmaster", ".gitignore"), "utf8") === before,
-    );
-    const candidate = at("shared.toml");
-    write(
-      candidate,
-      '[project]\ndefault_turnpikes=["bug"]\nrisk_surfaces="the API and subprocess boundary"\n[tracker]\nbinding="Team board"\n',
-    );
-    writeProfile(repo, "project", candidate);
-    const shared = inspect(repo);
-    const guarded = run("timeout", ["10", SELF, "inspect", repo], {
-      env: { POSTMASTER_PROJECT: repo },
-    });
-    st.check(
-      "inspect stays bounded when POSTMASTER_PROJECT is inherited",
-      guarded.code === 0,
-      `inspect recursed or failed with POSTMASTER_PROJECT set: ${guarded.err}`,
-    );
-    const repoInit = run("git", ["init", "-q", repo]);
-    const sharedIgnored = run("git", ["-C", repo, "check-ignore", ".postmaster/project.toml"]);
-    const postmaster = join(repo, ".postmaster");
-    write(join(postmaster, "settings.toml"), "[roles]\nworkhorses=['alpha']\n");
-    mkdirSync(join(postmaster, "runs", "T-1"), { recursive: true });
-    write(join(postmaster, "runs", "T-1", "card.md"), "private run text\n");
-    const localIgnored = run("git", ["-C", repo, "check-ignore", ".postmaster/settings.toml"]);
-    const runIgnored = run("git", ["-C", repo, "check-ignore", ".postmaster/runs/T-1/card.md"]);
-    st.check(
-      "the shared file writes, and .postmaster ignores it by default",
-      shared.shared_present === true &&
-        JSON.stringify((shared.project as Rec).default_turnpikes) === '["bug"]' &&
-        (shared.sources as Rec)["project.default_turnpikes"] === "shared" &&
-        readFileSync(join(postmaster, ".gitignore"), "utf8").endsWith("*\n") &&
-        repoInit.code === 0 &&
-        sharedIgnored.code === 0 &&
-        localIgnored.code === 0 &&
-        runIgnored.code === 0,
-    );
-    const emptyRepo = at("empty-default");
-    mkdirSync(emptyRepo, { recursive: true });
-    const emptySettings = at("empty-default.toml");
-    write(emptySettings, "[project]\ndefault_turnpikes = []\n");
-    writeProfile(emptyRepo, "project", emptySettings);
-    st.check(
-      "a project may define an empty default turnpike set",
-      JSON.stringify((inspect(emptyRepo).project as Rec).default_turnpikes) === "[]",
-    );
-    const local = at("local.toml");
-    write(
-      local,
-      '[project]\ndefault_turnpikes=["style"]\n[roles]\nworkhorses=["alpha","beta"]\ncoachman="coachman_fallback"\n',
-    );
-    writeProfile(repo, "local", local);
-    const result = inspect(repo);
-    const effective = effectiveConfig(repo, loadMachine(machine));
-    const team = effective.team as Rec;
-    st.check(
-      "local choices override shared defaults and select machine-defined roles",
-      (result.sources as Rec)["project.default_turnpikes"] === "local" &&
-        (result.sources as Rec).roles === "local" &&
-        ((team.coachman as Rec).model as string) === "backup" &&
-        JSON.stringify(team.workhorses) === '["alpha","beta"]' &&
-        (!Object.hasOwn(team, "postmaster") || pyTruthy(team.postmaster)),
-    );
-    const rejects: Array<[string, string]> = [
-      ["shared roles", '[roles]\nworkhorses=["alpha"]\n'],
-      ["home path in a binding", '[tracker]\nbinding="~/.config/key"\n'],
-      ["absolute path in a binding", '[tracker]\nbinding="/srv/boards/main"\n'],
-      ["credential field", '[tracker]\nenv_file="credential.env"\n'],
-      ["key file field", '[tracker]\nkeyfile="my.key"\n'],
-      ["unknown role", '[roles]\nworkhorses=["ghost"]\n'],
-      ["slash in a binding", '[tracker]\nbinding="user/board"\n'],
-      ["backslash in a binding", "[tracker]\nbinding='C:\\boards\\x'\n"],
-      ["URL in a binding", '[tracker]\nbinding="https://example.com/b"\n'],
-      ["scheme in a binding", '[tracker]\nbinding="file:boards"\n'],
-      ["colon-no-space in a binding", '[tracker]\nbinding="Team:Board"\n'],
-      ["leading tilde in a binding", '[tracker]\nbinding="~other"\n'],
-      ["leading dollar in a binding", '[tracker]\nbinding="$FOO"\n'],
-      ["parent traversal in a binding", '[tracker]\nbinding=".."\n'],
-      ["lowercase credential name", '[tracker]\nbinding="github_token"\n'],
-      ["credential word with a dash", '[tracker]\nbinding="my-secret"\n'],
-      ["keyword-initial credential name", '[tracker]\nbinding="TOKEN"\n'],
-      ["bare credential words", '[tracker]\nbinding="API_KEY"\n'],
-      ["all-caps credential token", '[tracker]\nbinding="MY_TOKEN"\n'],
-      ["lowercase snake key", '[tracker]\nbinding="api_key"\n'],
-      ["lowercase kebab key", '[tracker]\nbinding="api-key"\n'],
-      ["bare lowercase key", '[tracker]\nbinding="apikey"\n'],
-      ["mixed-case snake key", '[tracker]\nbinding="Api_Key"\n'],
-      ["bare auth token", '[tracker]\nbinding="authtoken"\n'],
-      ["bare access token", '[tracker]\nbinding="accesstoken"\n'],
-      ["key file as value", '[tracker]\nbinding="keyfile"\n'],
-      ["snake key file as value", '[tracker]\nbinding="key_file"\n'],
-      ["kebab key file as value", '[tracker]\nbinding="key-file"\n'],
-      ["caps key file as value", '[tracker]\nbinding="KEYFILE"\n'],
-      ["env file as value", '[tracker]\nbinding="env_file"\n'],
-      ["bare env file as value", '[tracker]\nbinding="envfile"\n'],
-      ["kebab env file as value", '[tracker]\nbinding="env-file"\n'],
-      ["bare private key", '[tracker]\nbinding="privatekey"\n'],
-      ["snake private key", '[tracker]\nbinding="private_key"\n'],
-      ["kebab private key", '[tracker]\nbinding="private-key"\n'],
-      ["kebab access key", '[tracker]\nbinding="access-key"\n'],
-      ["snake access key", '[tracker]\nbinding="access_key"\n'],
-      ["bare password", '[tracker]\nbinding="password"\n'],
-      ["bare secret", '[tracker]\nbinding="secret"\n'],
-      ["bare token", '[tracker]\nbinding="token"\n'],
-      ["bare credentials", '[tracker]\nbinding="credentials"\n'],
-      ["bare caps secret", '[tracker]\nbinding="SECRET"\n'],
-      ["single titlecase secret", '[tracker]\nbinding="Secret"\n'],
-      ["camelCase api key", '[tracker]\nbinding="githubApiKey"\n'],
-      ["camelCase token", '[tracker]\nbinding="accessToken"\n'],
-      ["camelCase continuation", '[tracker]\nbinding="secretKey"\n'],
-      ["camelCase sandwich", '[tracker]\nbinding="mySecretKey"\n'],
-      ["credential value word", '[tracker]\nbinding="secretValue"\n'],
-      ["token value word", '[tracker]\nbinding="tokenValue"\n'],
-      ["password hash word", '[tracker]\nbinding="passwordHash"\n'],
-      ["credential name word", '[tracker]\nbinding="credentialName"\n'],
-      ["token value sandwich", '[tracker]\nbinding="authTokenValue"\n'],
-      ["identifier word in phrasing", '[tracker]\nbinding="Migrate api_key usage"\n'],
-      ["caps word in phrasing", '[tracker]\nbinding="The TOKEN is here"\n'],
-      ["padded credential name", '[tracker]\nbinding="  api_key  "\n'],
-      ["credential word in a role name", '[roles]\nworkhorses=["API_KEY"]\n'],
-      ["classic token value", '[tracker]\nbinding="ghp_12345678901234567890"\n'],
-      ["short classic token value", '[tracker]\nbinding="ghp_12345678"\n'],
-      ["fine-grained token value", '[tracker]\nbinding="github_pat_ABCDEFGHIJKL"\n'],
-      ["gitlab token value", '[tracker]\nbinding="glpat-ABCDEFGHIJKL"\n'],
-      ["chat token value", '[tracker]\nbinding="xoxc-123456789012"\n'],
-      ["key-like token value", '[tracker]\nbinding="sk-1234567890123456"\n'],
-      ["credential assignment", '[tracker]\nbinding="X_API_KEY=abc123"\n'],
-      ["lowercase credential assignment", '[tracker]\nbinding="password = hunter2"\n'],
-      ["private key block", '[tracker]\nbinding="-----BEGIN PRIVATE KEY-----"\n'],
-    ];
-    for (const [label, contents] of rejects) {
-      const bad = at("bad.toml");
-      write(bad, contents);
-      mustDie(`rejects ${label}`, () => {
-        if (label === "shared roles") {
-          validateCommon(
-            asTable(parseTomlText(contents), "shared"),
-            "shared project settings",
-            false,
-          );
-        } else if (label !== "unknown role") {
-          const parsed = asTable(parseTomlText(contents), "settings input");
-          scanMachineData(parsed, "settings input", []);
-          validateCommon(
-            asTable(parseTomlText(contents), "settings input"),
-            "settings input",
-            true,
-          );
-        } else {
-          writeProfile(repo, "local", bad);
-          effectiveConfig(repo, loadMachine(machine));
-        }
-      });
+if (import.meta.main) {
+  try {
+    main();
+  } catch (e) {
+    if (isDie(e)) {
+      console.error(`project-settings: ${e.message}`);
+      process.exit(1);
     }
-    const accepts: Array<[string, string, boolean]> = [
-      ["risk prose naming a path", '[project]\nrisk_surfaces="reads /home/alex/secret"\n', true],
-      [
-        "risk prose naming a secret",
-        '[project]\nrisk_surfaces="reads PLANE_API_KEY and lane env files"\n',
-        true,
-      ],
-      [
-        "risk prose naming a machine",
-        '[project]\nrisk_surfaces="runs on build-01 beside //server/share"\n',
-        true,
-      ],
-      [
-        "a check command with paths",
-        '[checks.x]\ncommand="cat /tmp/out $HOME/f"\nshows="y"\n',
-        false,
-      ],
-      ["a check named secret-scan", '[checks.secret-scan]\ncommand="true"\nshows="s"\n', false],
-      ["a plain board name", '[tracker]\nbinding="Team board"\n', true],
-      ["an ampersand board name", '[tracker]\nbinding="Platform & DevEx"\n', true],
-      ["a comma board name", '[tracker]\nbinding="Team, Platform"\n', true],
-      [
-        "the documented example binding",
-        '[tracker]\nbinding="the board, workspace or team name"\n',
-        true,
-      ],
-      [
-        "the documented local binding",
-        '[tracker]\nbinding="the board, workspace or team name for this checkout"\n',
-        true,
-      ],
-      ["a dotted board name", '[tracker]\nbinding="Board_1.v2"\n', true],
-      ["a colon-space board name", '[tracker]\nbinding="Team: Board"\n', true],
-      ["a natural secret word", '[tracker]\nbinding="Secret Santa"\n', true],
-      ["a natural token word", '[tracker]\nbinding="Password reset project"\n', true],
-      ["a glued lowercase word", '[tracker]\nbinding="secretary"\n', true],
-      ["a glued lowercase credential", '[tracker]\nbinding="mysecret"\n', true],
-      ["a keyword-prefixed natural word", '[tracker]\nbinding="Tokenomics review"\n', true],
-      ["a token prefix too short to be a token", '[tracker]\nbinding="ghp_abc"\n', true],
-      ["an assignment without a credential word", '[tracker]\nbinding="a=b"\n', true],
-    ];
-    for (const [label, contents, localSettings] of accepts) {
-      mustPass(`accepts ${label}`, () => {
-        const parsed = asTable(parseTomlText(contents), "settings input");
-        scanMachineData(parsed, "settings input", []);
-        validateCommon(
-          asTable(parseTomlText(contents), "settings input"),
-          "settings input",
-          localSettings,
-        );
-      });
-    }
-    const badShapes: Array<[string, string]> = [
-      ["unknown key", '[checks.x]\ncommand = "true"\nshows = "s"\nunknown = 1\n'],
-      ["command and use", '[checks.x]\ncommand = "true"\nuse = "cli-examples"\nshows = "s"\n'],
-      ["neither command nor use", '[checks.x]\nshows = "s"\n'],
-      ["command without shows", '[checks.x]\ncommand = "true"\n'],
-      ["score without threshold", '[checks.x]\ncommand = "true"\nshows = "s"\nscore = "(x)"\n'],
-      ["threshold without score", '[checks.x]\ncommand = "true"\nshows = "s"\nthreshold = 1\n'],
-      [
-        "score with two groups",
-        '[checks.x]\ncommand = "true"\nshows = "s"\nscore = "(a)(b)"\nthreshold = 1\n',
-      ],
-      [
-        "score that is not a regex",
-        '[checks.x]\ncommand = "true"\nshows = "s"\nscore = "(a"\nthreshold = 1\n',
-      ],
-      [
-        "string threshold",
-        '[checks.x]\ncommand = "true"\nshows = "s"\nscore = "(x)"\nthreshold = "high"\n',
-      ],
-      ["zero timeout", '[checks.x]\ncommand = "true"\nshows = "s"\ntimeout = 0\n'],
-      ["boolean timeout", '[checks.x]\ncommand = "true"\nshows = "s"\ntimeout = true\n'],
-      ["unknown default", '[checks.x]\nuse = "nope"\n'],
-      ["gate with use", '[checks.gate]\nuse = "cli-examples"\n'],
-      ["score with use", '[checks.x]\nuse = "cli-examples"\nscore = "(x)"\nthreshold = 1\n'],
-      ["blank shows", '[checks.x]\ncommand = "true"\nshows = ""\n'],
-      ["blank command", '[checks.x]\ncommand = "  "\nshows = "s"\n'],
-      ["non-lowercase name", '[checks.Bad]\ncommand = "true"\nshows = "s"\n'],
-    ];
-    badShapes.forEach(([label, contents], i) => {
-      const shapeRepo = at(`bad-shape-${i}`);
-      mkdirSync(shapeRepo, { recursive: true });
-      const shapeIn = at(`bad-shape-${i}.toml`);
-      write(shapeIn, contents);
-      let writeRefused = false;
-      try {
-        writeProfile(shapeRepo, "project", shapeIn);
-      } catch (e) {
-        if (isDie(e)) writeRefused = true;
-        else throw e;
-      }
-      const planted = join(shapeRepo, ".postmaster", "project.toml");
-      write(planted, contents);
-      const checked = run("timeout", ["10", VERIFY, "checks", shapeRepo]);
-      st.check(
-        `write and verify.sh agree in refusing ${label}`,
-        writeRefused && checked.code !== 0,
-        `accepted bad check shape: ${label}`,
-      );
-    });
-    const goodShapes: Array<[string, string]> = [
-      [
-        "command with shows and timeout",
-        '[checks.x]\ncommand = "true"\nshows = "s"\ntimeout = 60\n',
-      ],
-      [
-        "scored command",
-        '[checks.x]\ncommand = "true"\nshows = "s"\nscore = "(x)"\nthreshold = 0.5\n',
-      ],
-      ["bare default", '[checks.x]\nuse = "cli-examples"\n'],
-      [
-        "default with shows and timeout",
-        '[checks.x]\nuse = "library-tests"\nshows = "s"\ntimeout = 60\n',
-      ],
-      ["gate command", '[checks.gate]\ncommand = "true"\nshows = "s"\n'],
-    ];
-    goodShapes.forEach(([label, contents], i) => {
-      const shapeRepo = at(`good-shape-${i}`);
-      mkdirSync(shapeRepo, { recursive: true });
-      const shapeIn = at(`good-shape-${i}.toml`);
-      write(shapeIn, contents);
-      let writeError: string | null = null;
-      try {
-        writeProfile(shapeRepo, "project", shapeIn);
-      } catch (e) {
-        if (isDie(e)) writeError = e.message;
-        else throw e;
-      }
-      const checked = run("timeout", ["10", VERIFY, "checks", shapeRepo]);
-      st.check(
-        `write and verify.sh agree in accepting ${label}`,
-        writeError === null && checked.code === 0,
-        writeError ?? `verify.sh refused ${label}: ${checked.err}`,
-      );
-    });
-    mustPass("this repo's own committed profile validates", () => {
-      inspect(join(HERE, ".."));
-    });
-    st.finish();
-  }, "project-settings-test-");
-};
-
-try {
-  main();
-} catch (e) {
-  if (isDie(e)) {
-    console.error(`project-settings: ${e.message}`);
-    process.exit(1);
+    throw e;
   }
-  throw e;
 }

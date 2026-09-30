@@ -8,7 +8,6 @@
 // no block sees another's.
 //
 //   verify-examples.sh [<worktree>] [--ticket <file>]
-//   verify-examples.sh --self-test
 //
 //   exit 0  every command printed what its example says and exited as it says
 //   exit 1  one did not, or the build failed; each difference is shown
@@ -18,7 +17,6 @@ import {
   accessSync,
   chmodSync,
   constants,
-  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -26,14 +24,11 @@ import {
   realpathSync,
   rmSync,
   statSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, delimiter, join, resolve } from "node:path";
-import { scriptsDir } from "./lib/paths.ts";
-import { die, run, withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
+import { die, run } from "./lib/proc.ts";
 import {
   digitValue,
   literalI,
@@ -44,14 +39,14 @@ import {
   pyTrim,
 } from "./lib/text.ts";
 
-const FENCE = new RegExp(`^([${PY_S_CLASS}]*)(\`\`\`|~{3,})(${PY_DOT}*)$`, "u");
+export const FENCE = new RegExp(`^([${PY_S_CLASS}]*)(\`\`\`|~{3,})(${PY_DOT}*)$`, "u");
 const EXIT_LINE_RE = /^\[exit (\p{Nd}+)\]$/u;
 const TICKET_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Ticket[${PY_S_CLASS}]*$`, "u");
 const PROFILE_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Project profile[${PY_S_CLASS}]*$`, "u");
 const HEAD_BREAK_RE = new RegExp(`^#{1,2}[${PY_S_CLASS}]`, "u");
 const CLOSE_FENCE_RE = new RegExp(`^[${PY_S_CLASS}]*(\`\`\`|~{3,})[${PY_S_CLASS}]*$`, "u");
 const BIN_NAME = /^[A-Za-z0-9@._+-]+$/u;
-const TIMEOUT = 60;
+export const TIMEOUT = 60;
 
 function notRun(msg: string): never {
   console.log(`not run: ${msg}`);
@@ -59,7 +54,7 @@ function notRun(msg: string): never {
   throw new Error("unreachable");
 }
 
-function ticketLines(text: string): string[] {
+export function ticketLines(text: string): string[] {
   const lines = pySplitLines(text);
   const start = lines.findIndex((l) => TICKET_LINE_RE.test(l));
   if (start === -1) return lines;
@@ -67,7 +62,7 @@ function ticketLines(text: string): string[] {
   return lines.slice(start + 1, end === -1 ? lines.length : end);
 }
 
-function section(lines: string[], title: string): string[] | null {
+export function section(lines: string[], title: string): string[] | null {
   const re = new RegExp(`^##[${PY_S_CLASS}]+${literalI(title)}[${PY_S_CLASS}]*$`, "iu");
   const start = lines.findIndex((l) => re.test(l));
   if (start === -1) return null;
@@ -92,7 +87,7 @@ function section(lines: string[], title: string): string[] | null {
   return out;
 }
 
-function blocks(lines: string[]): string[][] {
+export function blocks(lines: string[]): string[][] {
   const out: string[][] = [];
   let i = 0;
   while (i < lines.length) {
@@ -115,7 +110,7 @@ function blocks(lines: string[]): string[][] {
   return out;
 }
 
-function trim(lines: string[]): string[] {
+export function trim(lines: string[]): string[] {
   const out = lines.map(pyRstrip);
   while (out.length > 0 && out[out.length - 1] === "") out.pop();
   return out;
@@ -126,7 +121,7 @@ function trim(lines: string[]): string[] {
  * outside quotes (even a newline, which stays literal content); inside double
  * quotes only " and \ unescape, every other backslash stays. Unbalanced
  * quotes and a trailing backslash throw, as BASE's shlex raises. */
-function shlexSplit(s: string): string[] {
+export function shlexSplit(s: string): string[] {
   const out: string[] = [];
   let cur = "";
   let has = false;
@@ -180,7 +175,7 @@ interface Cmd {
   exit: number;
 }
 
-function transcript(body: string[]): Cmd[] | null {
+export function transcript(body: string[]): Cmd[] | null {
   const first = body.find((l) => l.trim());
   if (!first?.startsWith("$ ")) return null;
   const cmds: Array<{ cmd: string; out: string[] }> = [];
@@ -208,7 +203,7 @@ function transcript(body: string[]): Cmd[] | null {
   return result;
 }
 
-function exampleEnv(
+export function exampleEnv(
   home: string,
   shims: string,
   runpath: string,
@@ -224,7 +219,7 @@ function exampleEnv(
     BASH_ENV: undefined,
   };
 }
-function examples(wtArg: string, ticketArg: string, timeout = TIMEOUT): number {
+export function examples(wtArg: string, ticketArg: string, timeout = TIMEOUT): number {
   const wt = resolve(wtArg);
   let ticket = ticketArg;
   if (!ticket) {
@@ -408,7 +403,7 @@ function canExecute(p: string): boolean {
 }
 
 /** shutil.which: a runnable file named prog in one of path's directories. */
-function findInPath(prog: string, path: string): string | null {
+export function findInPath(prog: string, path: string): string | null {
   for (const dir of path.split(delimiter)) {
     if (!dir) continue;
     const f = join(dir, prog);
@@ -430,21 +425,19 @@ function shQuote(s: string): string {
 }
 
 // --- entry -----------------------------------------------------------------------------------
-const argv = process.argv.slice(2);
-if (argv[0] === "--self-test") {
-  // fall through
-} else {
+const USAGE = "usage: verify-examples.sh [<worktree>] [--ticket <file>]";
+
+function main(argv: string[]): number {
   let WT = ".";
   let TICKET = "";
   let i = 0;
   while (i < argv.length) {
     if (argv[i] === "--ticket") {
-      if (argv.length < i + 2)
-        die("usage: verify-examples.sh [<worktree>] [--ticket <file>] | --self-test", 1);
+      if (argv.length < i + 2) die(USAGE, 1);
       TICKET = argv[i + 1] ?? "";
       i += 2;
     } else if (argv[i]?.startsWith("-")) {
-      die("usage: verify-examples.sh [<worktree>] [--ticket <file>] | --self-test", 1);
+      die(USAGE, 1);
     } else {
       WT = argv[i] ?? ".";
       i += 1;
@@ -452,522 +445,11 @@ if (argv[0] === "--self-test") {
   }
   if (!existsSync(WT)) {
     console.error(`verify-examples: no such directory: ${WT}`);
-    process.exit(1);
+    return 1;
   }
-  process.exit(examples(WT, TICKET));
+  return examples(WT, TICKET);
 }
 
-// --- self-test ---------------------------------------------------------------------------------
-withTempDir((tmp) => {
-  const SELF = join(scriptsDir(import.meta), "verify-examples.sh");
-  const st = new SelfTest();
-  {
-    // Unicode primitives, BASE verify-examples.sh python: every expectation python3-verified.
-    // U+001F is Python space yet survives splitlines (U+001C would not), so it vectors the patterns.
-    st.check("a fence may open after U+001C", FENCE.exec("\x1c```") !== null, "\x1c");
-    const tr = transcript(["$ x", "[exit ٣]"]);
-    st.check(
-      "an exit marker may be Arabic-Indic",
-      JSON.stringify(tr) === JSON.stringify([{ cmd: "x", out: [], exit: 3 }]),
-      JSON.stringify(tr),
-    );
-    const t3 = ticketLines("x\n##\x1fTicket\nbody\n");
-    st.check(
-      "a Ticket heading with U+001F opens the ticket",
-      JSON.stringify(t3) === JSON.stringify(["body"]),
-      JSON.stringify(t3),
-    );
-    const t4 = ticketLines("x\x1c## Ticket\ny");
-    st.check(
-      "a U+001C opens a new line (splitlines)",
-      JSON.stringify(t4) === JSON.stringify(["y"]),
-      JSON.stringify(t4),
-    );
-    const t5 = ticketLines("## Ticket\na\n##\x1fProject profile\nb\n");
-    st.check(
-      "a Project profile heading with U+001F ends the ticket",
-      JSON.stringify(t5) === JSON.stringify(["a"]),
-      JSON.stringify(t5),
-    );
-    const sec = section(["## ticket", "x"], "TİCKET");
-    st.check(
-      "section titles fold dotted-I",
-      JSON.stringify(sec) === JSON.stringify(["x"]),
-      JSON.stringify(sec),
-    );
-    const bl = blocks(["```", "x", "\x1f```", "y"]);
-    st.check(
-      "a fence may close after U+001F",
-      JSON.stringify(bl) === JSON.stringify([["x"]]),
-      JSON.stringify(bl),
-    );
-    const br = section(["## T", "a", "#\x1fb", "c"], "T");
-    st.check(
-      "a heading with U+001F ends the section",
-      JSON.stringify(br) === JSON.stringify(["a"]),
-      JSON.stringify(br),
-    );
-    const tm = trim(["x\uFEFF"]);
-    st.check(
-      "trim keeps a trailing FEFF (not Python space)",
-      JSON.stringify(tm) === JSON.stringify(["x\uFEFF"]),
-      JSON.stringify(tm),
-    );
-  }
-
-  function expect(
-    label: string,
-    exit: number,
-    project: string,
-    ticket: string,
-    wantIn?: string,
-  ): void {
-    const r = run("bash", [SELF, join(tmp, project), "--ticket", ticket]);
-    const out = r.out + r.err;
-    if (r.code === exit && (wantIn === undefined || wantIn === "" || out.includes(wantIn))) {
-      st.ok(label);
-    } else {
-      st.fail(`${label} (exit ${r.code})`, out);
-    }
-  }
-
-  // Example shells run with BASH_ENV truly unset even when the ambient
-  // environment sets it, as BASE's `env.pop` unsets it.
-  {
-    const probeEnv = join(tmp, "bash-env-probe.sh");
-    writeFileSync(probeEnv, "echo BASH-ENV-LEAKED\n");
-    const bashAbs = run("bash", ["-c", "command -v bash"]).out.trim() || "/bin/bash";
-    const saved = process.env.BASH_ENV;
-    process.env.BASH_ENV = probeEnv;
-    const r = run(bashAbs, ["-c", 'echo "BASH_ENV=${BASH_ENV-unset}"'], {
-      env: exampleEnv(join(tmp, "envhome"), "/nonexistent-shims", "/nonexistent-run"),
-    });
-    if (saved === undefined) delete process.env.BASH_ENV;
-    else process.env.BASH_ENV = saved;
-    st.check(
-      "example shells run with BASH_ENV truly unset, as BASE unsets it",
-      r.out.includes("BASH_ENV=unset") && !r.out.includes("LEAKED"),
-      r.out,
-    );
-  }
-
-  mkdirSync(join(tmp, "app", "bin"), { recursive: true });
-  writeFileSync(
-    join(tmp, "app", "package.json"),
-    '{"name": "greeter", "bin": {"greet": "bin/greet"}}\n',
-    "utf8",
-  );
-  writeFileSync(
-    join(tmp, "app", "bin", "greet"),
-    `#!/usr/bin/env bash
-case "\${1:-}" in
-  "") echo "usage: greet <name> | greet save <name> | greet saved" >&2; exit 2 ;;
-  save) echo "$2" > saved.txt; echo "saved $2" ;;
-  saved) cat saved.txt 2>/dev/null || { echo "nothing saved" >&2; exit 1; } ;;
-  *) echo "hello $1" ;;
-esac
-`,
-    "utf8",
-  );
-  chmodSync(join(tmp, "app", "bin", "greet"), 0o644);
-  mkdirSync(join(tmp, "nobin"), { recursive: true });
-  mkdirSync(join(tmp, "noshebang", "bin"), { recursive: true });
-  mkdirSync(join(tmp, "built", "bin"), { recursive: true });
-  mkdirSync(join(tmp, "broken"), { recursive: true });
-  writeFileSync(join(tmp, "nobin", "package.json"), '{"name": "plain"}\n', "utf8");
-  writeFileSync(
-    join(tmp, "noshebang", "package.json"),
-    '{"name": "x", "bin": {"x": "bin/x.sh"}}\n',
-    "utf8",
-  );
-  writeFileSync(join(tmp, "noshebang", "bin", "x.sh"), "echo hi\n", "utf8");
-  writeFileSync(
-    join(tmp, "built", "package.json"),
-    '{"name": "built", "bin": "dist/built.js", "scripts": {"build": "mkdir -p dist && cp bin/src.js dist/built.js"}}\n',
-    "utf8",
-  );
-  writeFileSync(
-    join(tmp, "built", "bin", "src.js"),
-    "console.log('built ' + process.argv[2]);\n",
-    "utf8",
-  );
-  writeFileSync(
-    join(tmp, "broken", "package.json"),
-    '{"name": "broken", "bin": "dist/broken.js", "scripts": {"build": "exit 4"}}\n',
-    "utf8",
-  );
-
-  writeFileSync(
-    join(tmp, "pass.md"),
-    `## User journey
-The user greets someone, saves a name and reads it back; a new directory has nothing saved.
-
-\`\`\`
-$ greet world
-hello world
-$ greet
-usage: greet <name> | greet save <name> | greet saved
-[exit 2]
-$ greet save ann
-saved ann
-$ greet saved
-ann
-$ test "$HOME" = "$PWD" && echo home is the block
-home is the block
-\`\`\`
-
-~~~sh
-$ greet saved
-nothing saved
-[exit 1]
-~~~
-`,
-    "utf8",
-  );
-  writeFileSync(
-    join(tmp, "output.md"),
-    `## User journey
-\`\`\`
-$ greet world
-hello there
-\`\`\`
-`,
-    "utf8",
-  );
-  writeFileSync(
-    join(tmp, "exit.md"),
-    `## User journey
-\`\`\`
-$ greet
-usage: greet <name> | greet save <name> | greet saved
-\`\`\`
-`,
-    "utf8",
-  );
-  writeFileSync(
-    join(tmp, "none.md"),
-    `## Problem / feature
-Today \`greet\` with no name greets nobody:
-
-\`\`\`
-$ greet
-hello
-\`\`\`
-
-## User journey
-The user types \`greet world\` and sees \`hello world\`.
-
-\`\`\`json
-{"not": "a transcript"}
-\`\`\`
-`,
-    "utf8",
-  );
-  writeFileSync(join(tmp, "nojourney.md"), "## Problem / feature\nGreet people.\n", "utf8");
-  writeFileSync(
-    join(tmp, "waybill.md"),
-    `# Waybill: T-1
-
-## Ticket
-## Problem / feature
-Greet people.
-
-## User journey
-\`\`\`
-$ greet ann
-hello ann
-\`\`\`
-
-## Project profile
-repo: /somewhere
-
-\`\`\`
-$ greet ann
-this block is not the ticket's, and would fail
-\`\`\`
-`,
-    "utf8",
-  );
-  writeFileSync(
-    join(tmp, "built.md"),
-    `## User journey
-\`\`\`
-$ built ok
-built ok
-\`\`\`
-`,
-    "utf8",
-  );
-
-  console.log("positive controls");
-  expect(
-    "matching transcripts pass, exits and state within a block included",
-    0,
-    "app",
-    join(tmp, "pass.md"),
-    "6 of 6 example commands",
-  );
-  expect("only a waybill's ticket part is read", 0, "app", join(tmp, "waybill.md"), "1 of 1");
-  expect(
-    "a build script runs before the bin is looked for",
-    0,
-    "built",
-    join(tmp, "built.md"),
-    "1 of 1",
-  );
-
-  console.log("negative controls");
-  expect(
-    "a different output fails and shows both",
-    1,
-    "app",
-    join(tmp, "output.md"),
-    "hello there",
-  );
-  expect(
-    "a different exit fails and names both",
-    1,
-    "app",
-    join(tmp, "exit.md"),
-    "exit: expected 0, got 2",
-  );
-  expect("a failed build fails", 1, "broken", join(tmp, "built.md"), "the build failed");
-  expect(
-    "a transcript outside the User journey is no example",
-    3,
-    "app",
-    join(tmp, "none.md"),
-    "User journey has no example transcript",
-  );
-  expect(
-    "a ticket with no User journey is not run",
-    3,
-    "app",
-    join(tmp, "nojourney.md"),
-    "has no User journey",
-  );
-  mkdirSync(join(tmp, "pathbin", "bin"), { recursive: true });
-  writeFileSync(
-    join(tmp, "pathbin", "package.json"),
-    `{"name": "p", "bin": {"${join(tmp, "victim")}": "bin/greet"}}\n`,
-    "utf8",
-  );
-  run("cp", [join(tmp, "app", "bin", "greet"), join(tmp, "pathbin", "bin")]);
-  expect(
-    "a bin named with a path is not run",
-    3,
-    "pathbin",
-    join(tmp, "pass.md"),
-    "not a plain command name",
-  );
-  st.check("and nothing is written where it points", !existsSync(join(tmp, "victim")));
-  mkdirSync(join(tmp, "nointerp", "bin"), { recursive: true });
-  writeFileSync(
-    join(tmp, "nointerp", "package.json"),
-    '{"name": "n", "bin": {"greet": "bin/greet"}}\n',
-    "utf8",
-  );
-  writeFileSync(
-    join(tmp, "nointerp", "bin", "greet"),
-    "#!/usr/bin/env no-such-interpreter-xyz\necho hi\n",
-    "utf8",
-  );
-  expect(
-    "a bin whose interpreter is not installed is not run",
-    3,
-    "nointerp",
-    join(tmp, "pass.md"),
-    "runs through no-such-interpreter-xyz",
-  );
-  mkdirSync(join(tmp, "fewtools"), { recursive: true });
-  for (const t of ["bash", "bun", "dirname"]) {
-    const found = findInPath(t, process.env.PATH || "");
-    if (found) {
-      try {
-        symlinkSync(found, join(tmp, "fewtools", t));
-      } catch {
-        /* exists */
-      }
-    }
-  }
-  {
-    const r = run("bash", [SELF, join(tmp, "built"), "--ticket", join(tmp, "built.md")], {
-      env: { ...process.env, PATH: join(tmp, "fewtools") },
-    });
-    const out = r.out + r.err;
-    st.check(
-      "a build whose package manager is not installed is not run",
-      r.code === 3 && out.includes("run through npm, which is not on PATH"),
-      `exit ${r.code}\n${out}`,
-    );
-  }
-  expect("a project with no bin is not run", 3, "nobin", join(tmp, "pass.md"), "names no bin");
-  expect(
-    "a bin with no #! line is not run",
-    3,
-    "noshebang",
-    join(tmp, "pass.md"),
-    "has no #! line",
-  );
-  expect("a missing ticket is not run", 3, "app", join(tmp, "no-such-ticket.md"), "no ticket at");
-  mkdirSync(join(tmp, "empty"), { recursive: true });
-  expect(
-    "a project with no package.json is not run",
-    3,
-    "empty",
-    join(tmp, "pass.md"),
-    "no package.json",
-  );
-
-  // A checkout under a path with a space: URL.pathname percent-encodes it,
-  // so SELF must come from the decoded path. Recurses once, in a copy.
-  if (!process.env.POSTMASTER_SPACED_DONE) {
-    const spaced = join(tmp, "my dir", "scripts");
-    cpSync(scriptsDir(import.meta), spaced, { recursive: true });
-    cpSync(join(scriptsDir(import.meta), "..", "bunfig.toml"), join(spaced, "..", "bunfig.toml"));
-    const r = run(join(spaced, "verify-examples.sh"), ["--self-test"], {
-      env: { ...process.env, POSTMASTER_SPACED_DONE: "1" },
-    });
-    st.check(
-      "the self-test passes from a path with a space",
-      r.code === 0,
-      `exit ${r.code}\n${r.out}\n${r.err}`,
-    );
-  }
-
-  // BASE gives each example shell 60 seconds, then reports "(timed out after
-  // 60s)" with no exit. A stalled example proves the cutoff and the message.
-  {
-    st.check("examples allow 60 seconds a shell, as BASE does", TIMEOUT === 60, String(TIMEOUT));
-    writeFileSync(
-      join(tmp, "stall.md"),
-      "## User journey\nA stuck shell.\n\n```\n$ sleep 30\nnothing comes\n```\n",
-      "utf8",
-    );
-    const lines: string[] = [];
-    const origLog = console.log;
-    console.log = (...a: unknown[]) => {
-      lines.push(a.map(String).join(" "));
-    };
-    let rc = 0;
-    try {
-      rc = examples(join(tmp, "app"), join(tmp, "stall.md"), 1);
-    } finally {
-      console.log = origLog;
-    }
-    st.check(
-      "a stalled example is cut off with BASE's message and no exit",
-      rc === 1 &&
-        lines.some((l) => l.includes("(timed out after 1s)")) &&
-        lines.some((l) => l.includes("got none, it timed out")),
-      `exit ${rc}\n${lines.join("\n")}`,
-    );
-  }
-
-  // A #! line splits as shlex.split does: quotes group, backslashes quote,
-  // and unbalanced quotes raise. The expectations are goldens captured from
-  // python3's shlex once, on 2026-09-29, over these exact vectors. Regenerate
-  // under python3 with -c, feeding the vectors below as a JSON array on stdin:
-  //   "import json,shlex,sys
-  //   out=[]
-  //   for s in json.load(sys.stdin):
-  //    try: out.append(shlex.split(s))
-  //    except ValueError: out.append('RAISES')
-  //   print(json.dumps(out))"
-  {
-    const vectors = [
-      "",
-      "a b",
-      '"a b" c',
-      "'a b'",
-      'a"b c"d',
-      "x\\ y",
-      '"unclosed',
-      "'unclosed",
-      "trailing\\",
-      "/usr/bin/env python3 -u",
-      '"a""b"',
-      "a#b",
-      '"a\\$b"',
-      '"a\\"b"',
-    ];
-    const wants: Array<string[] | string> = [
-      [],
-      ["a", "b"],
-      ["a b", "c"],
-      ["a b"],
-      ["ab cd"],
-      ["x y"],
-      "RAISES",
-      "RAISES",
-      "RAISES",
-      ["/usr/bin/env", "python3", "-u"],
-      ["ab"],
-      ["a#b"],
-      ["a\\$b"],
-      ['a"b'],
-    ];
-    let splitOk = wants.length === vectors.length;
-    let detail =
-      wants.length === vectors.length
-        ? ""
-        : `goldens cover ${wants.length} of ${vectors.length} vectors\n`;
-    wants.forEach((want, i) => {
-      let got: string[] | string;
-      try {
-        got = shlexSplit(vectors[i] ?? "");
-      } catch {
-        got = "RAISES";
-      }
-      if (JSON.stringify(got) !== JSON.stringify(want)) {
-        splitOk = false;
-        detail += `${JSON.stringify(vectors[i])}: port=${JSON.stringify(got)} base=${JSON.stringify(want)}\n`;
-      }
-    });
-    st.check("a #! line splits as shlex.split does, quotes and errors alike", splitOk, detail);
-  }
-  if (!existsSync("/bin/echo")) {
-    st.fail("a quoted #! program runs", "/bin/echo is not on PATH");
-  } else {
-    mkdirSync(join(tmp, "quoted", "bin"), { recursive: true });
-    writeFileSync(
-      join(tmp, "quoted", "package.json"),
-      '{"name": "quoted", "bin": {"q": "bin/q"}}\n',
-      "utf8",
-    );
-    writeFileSync(join(tmp, "quoted", "bin", "q"), '#!"/bin/echo" tagged\necho never\n', "utf8");
-    const qf = resolve(join(tmp, "quoted", "bin", "q"));
-    writeFileSync(
-      join(tmp, "quoted.md"),
-      `## User journey\nA quoted interpreter.\n\n\`\`\`\n$ q hello\ntagged ${qf} hello\n\`\`\`\n`,
-      "utf8",
-    );
-    expect(
-      "a quoted #! program splits as shlex splits, and runs",
-      0,
-      "quoted",
-      join(tmp, "quoted.md"),
-      "1 of 1",
-    );
-    mkdirSync(join(tmp, "unbalanced", "bin"), { recursive: true });
-    writeFileSync(
-      join(tmp, "unbalanced", "package.json"),
-      '{"name": "unbalanced", "bin": {"u": "bin/u"}}\n',
-      "utf8",
-    );
-    writeFileSync(join(tmp, "unbalanced", "bin", "u"), '#!/bin/echo "oops\necho never\n', "utf8");
-    writeFileSync(
-      join(tmp, "unbalanced.md"),
-      "## User journey\nAn unbalanced quote.\n\n```\n$ u hello\nwhatever\n```\n",
-      "utf8",
-    );
-    expect(
-      "an unbalanced #! quote fails as BASE's shlex raises",
-      1,
-      "unbalanced",
-      join(tmp, "unbalanced.md"),
-    );
-  }
-
-  st.finish();
-});
+if (import.meta.main) {
+  process.exit(main(process.argv.slice(2)));
+}

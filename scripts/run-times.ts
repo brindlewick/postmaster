@@ -4,7 +4,6 @@
 // `dispatch` line.
 //
 //   run-times.sh <dispatch>      the table, from <dispatch>/actions.jsonl
-//   run-times.sh --self-test     known logs give known answers; a log with no stage lines says so
 //
 // Waiting is the part of a stage when no coachman leg was running: from one leg's `handoff`
 // to the next leg's `handoff-accept`. A run whose log has neither shows waiting as "-".
@@ -14,10 +13,8 @@
 //   exit 0  printed
 //   exit 1  usage, or the log is missing or unreadable
 //   exit 3  the log has no stage changes to time
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
 
 interface Event {
   ts: Date;
@@ -45,7 +42,7 @@ function fmt(sec: number): string {
       : `${ss}s`;
 }
 
-function times(dispatch: string): number {
+export function times(dispatch: string): number {
   const log = join(dispatch, "actions.jsonl");
   if (!existsSync(log)) {
     console.error(`run-times: no action log at ${log}`);
@@ -143,135 +140,10 @@ function times(dispatch: string): number {
 
 // --- entry ------------------------------------------------------------------------------
 const argv = process.argv.slice(2);
-if (argv[0] !== "--self-test") {
+if (import.meta.main) {
   if (argv.length !== 1) {
-    console.error("usage: run-times.sh <dispatch> | --self-test");
+    console.error("usage: run-times.sh <dispatch>");
     process.exit(1);
   }
   process.exit(times(argv[0] as string));
 }
-
-// --- self-test ----------------------------------------------------------------------------
-withTempDir((tmp) => {
-  const st = new SelfTest();
-  const line = (ts: string, action: string, target = ""): string =>
-    JSON.stringify({
-      ts: `2026-01-01T${ts}:00Z`,
-      project: "p",
-      run: "r",
-      actor: "coachman",
-      action,
-      target,
-      detail: "",
-    });
-
-  const writeLog = (lines: string[]): void => {
-    writeFileSync(join(tmp, "actions.jsonl"), `${lines.join("\n")}\n`);
-  };
-
-  const check = (label: string, wantExit: number, ...texts: string[]): void => {
-    const origLog = console.log;
-    const origErr = console.error;
-    let out = "";
-    console.log = (s: string) => {
-      out += `${s}\n`;
-    };
-    console.error = (s: string) => {
-      out += `${s}\n`;
-    };
-    let rc: number;
-    try {
-      rc = times(tmp);
-    } finally {
-      console.log = origLog;
-      console.error = origErr;
-    }
-    const missing = texts.filter((text) => !out.includes(text));
-    if (rc === wantExit && missing.length === 0) {
-      st.ok(label);
-    } else {
-      const bad: string[] = [];
-      if (rc !== wantExit) bad.push(`exit ${rc}, wanted ${wantExit}`);
-      for (const m of missing) bad.push(`missing: ${m}`);
-      st.fail(`${label}: ${bad.join("; ")}`, out);
-    }
-  };
-
-  console.log("a full run, two legs, with a wait between them");
-  writeLog([
-    line("12:00", "dispatch", "r"),
-    line("12:01", "handoff-accept", "1"),
-    line("12:02", "stage", "bootstrapped"),
-    line("12:05", "stage", "planning"),
-    line("12:25", "stage", "workhorses-running"),
-    line("12:35", "stage", "synthesis"),
-    line("12:50", "stage", "checkpoint-1"),
-    line("12:52", "handoff", "1"),
-    line("12:55", "handoff-accept", "2"),
-    line("12:56", "stage", "review"),
-    line("13:10", "handoff", "2"),
-    line("13:10", "stage", "done"),
-  ]);
-  check(
-    "the dispatched stage runs from dispatch to bootstrapped",
-    0,
-    "dispatched                 2026-01-01 12:00:00   2m 00s     1m 00s",
-  );
-  check(
-    "the planning stage times the review",
-    0,
-    "planning                   2026-01-01 12:05:00   20m 00s    0s",
-  );
-  check(
-    "a stage inside one leg has no waiting",
-    0,
-    "workhorses-running         2026-01-01 12:25:00   10m 00s    0s",
-  );
-  check(
-    "a stage across the leg boundary counts the gap",
-    0,
-    "checkpoint-1               2026-01-01 12:50:00   6m 00s     3m 00s",
-  );
-  check(
-    "a terminal stage is a moment, not a span",
-    0,
-    "done                       2026-01-01 13:10:00   -          -",
-  );
-  check(
-    "the total adds up",
-    0,
-    "total                                            1h 10m     4m 00s",
-  );
-
-  console.log("a dispatch in the same second as the first stage");
-  writeLog([
-    line("12:00", "dispatch", "r"),
-    line("12:00", "stage", "bootstrapped"),
-    line("12:03", "stage", "done"),
-  ]);
-  check(
-    "the dispatched row is still shown",
-    0,
-    "dispatched                 2026-01-01 12:00:00   0s",
-  );
-
-  console.log("a run still in progress");
-  writeLog([
-    line("12:00", "dispatch", "r"),
-    line("12:02", "stage", "bootstrapped"),
-    line("12:09", "note", "x"),
-  ]);
-  check(
-    "the last non-terminal stage is open, to the last action",
-    0,
-    "bootstrapped (open)        2026-01-01 12:02:00   7m 00s     -",
-  );
-
-  console.log("negative controls");
-  writeLog([line("12:00", "dispatch", "r"), line("12:05", "note", "x")]);
-  check("a log with no stage lines says so, and times nothing", 3, "no stage changes logged");
-  writeFileSync(join(tmp, "actions.jsonl"), "not json\n");
-  check("an unreadable log is refused", 1, "is not a log line");
-
-  st.finish();
-});

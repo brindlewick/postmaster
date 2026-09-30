@@ -12,32 +12,28 @@
 //                                       waybill's title; with --expect, that line must be <line>
 //   turnpikes.sh legs --line <line>     the legs a waybill with that `turnpikes:` line would have
 //   turnpikes.sh short [--project <repo>] <line> the default turnpikes a `turnpikes:` line leaves out
-//   turnpikes.sh --self-test
 //
 //   exit 0  printed
 //   exit 1  usage, no waybill, or a table that breaks its rules
 //   exit 2  resolve: the text is not a turnpikes section; legs and short: the line is missing,
 //           is not names or none, or is not the one --expect gives. One line per fault, on stdout.
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
-import { die, run, withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
+import { die, run } from "./lib/proc.ts";
 import { NAME_CLASS, PY_S_CLASS, pyLower, pyTrim, pyWords } from "./lib/text.ts";
 
-const HERE = scriptsDir(import.meta);
-
-const TABLE = `# name     set      leg     what it checks
+export const TABLE = `# name     set      leg     what it checks
 style      default  review  idiom, naming, abstraction and consistency with the project's own conventions
 bug        default  review  correctness, logic, and whether the tests are adequate
 security   default  review  exploit paths through the project's risk surfaces`;
 
-const LEGS: Array<[number, string]> = [
+export const LEGS: Array<[number, string]> = [
   [1, "synthesis"],
   [2, "review"],
   [3, "ship"],
 ];
-const ALWAYS = new Set(["synthesis", "ship"]);
+export const ALWAYS = new Set(["synthesis", "ship"]);
 const RESERVED = ["default", "none"];
 const BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/u;
 // Python's strerror, for the read errors BASE reports concisely.
@@ -53,14 +49,14 @@ const STRIP3_RE = new RegExp(
   `^[^${PY_S_CLASS}]+[${PY_S_CLASS}]+[^${PY_S_CLASS}]+[${PY_S_CLASS}]+[^${PY_S_CLASS}]+[${PY_S_CLASS}]+`,
   "u",
 );
-const WORD_SPLIT_RE = new RegExp(`[${PY_S_CLASS},;]+`, "u");
-const NAME_CHAR_RE = new RegExp(`[${NAME_CLASS}]`, "u");
-const MARKER = /^[ \t]*(?:[-*+]|\p{Nd}{1,9}[.)])(?:[ \t]+|$)/u;
+export const WORD_SPLIT_RE = new RegExp(`[${PY_S_CLASS},;]+`, "u");
+export const NAME_CHAR_RE = new RegExp(`[${NAME_CLASS}]`, "u");
+export const MARKER = /^[ \t]*(?:[-*+]|\p{Nd}{1,9}[.)])(?:[ \t]+|$)/u;
 const LINE = /^[ \t]*turnpikes[ \t]*:/u;
 
 type Row = { name: string; d: boolean; leg: string; what: string };
 
-function parseTable(table: string): { rows: Row[]; faults: string[] } {
+export function parseTable(table: string): { rows: Row[]; faults: string[] } {
   const rows: Row[] = [];
   const faults: string[] = [];
   const lines = table.split("\n");
@@ -153,7 +149,7 @@ function projectDefaults(): string[] | null {
   return cachedDefaults;
 }
 
-function resolve(table: string, text: string): { names: string[] | null; faults: string[] } {
+export function resolve(table: string, text: string): { names: string[] | null; faults: string[] } {
   const { rows, faults: tableFaults } = parseTable(table);
   if (tableFaults.length > 0) {
     // already handled by caller
@@ -188,7 +184,7 @@ function resolve(table: string, text: string): { names: string[] | null; faults:
   return { names: names.filter((n) => chosen.has(n)), faults: [] };
 }
 
-function named(table: string, line: string): string[] | null {
+export function named(table: string, line: string): string[] | null {
   if (line.includes("\n") || !LINE.test(line)) {
     console.log(`"${line.replace(/\n/gu, "\\n")}" is not a turnpikes: line`);
     process.exit(2);
@@ -224,652 +220,122 @@ function legsOf(table: string, line: string): void {
 }
 
 const USAGE =
-  "usage: turnpikes.sh --list | resolve [--project <repo>] [<text>...] | legs <dispatch> [--expect <line>] | legs --line <line> | short [--project <repo>] <line> | --self-test";
+  "usage: turnpikes.sh --list | resolve [--project <repo>] [<text>...] | legs <dispatch> [--expect <line>] | legs --line <line> | short [--project <repo>] <line>";
 
 // --- entry -----------------------------------------------------------------------------------
-const argv = process.argv.slice(2);
-if (argv[0] === "--self-test") {
-  if (argv.length !== 1) die(USAGE, 1);
-  // fall through
-} else if (argv[0] === "--list") {
-  if (argv.length !== 1) die(USAGE, 1);
-  const { rows, faults } = parseTable(TABLE);
-  if (faults.length > 0) {
-    console.error(faults.map((f) => `turnpikes: the table's ${f}`).join("\n"));
-    process.exit(1);
-  }
-  for (const r of rows) {
-    console.log(
-      `${r.name.padEnd(10)} ${(r.d ? "default" : "-").padEnd(8)} ${r.leg.padEnd(9)} ${r.what}`,
-    );
-  }
-  process.exit(0);
-} else if (argv[0] === "resolve") {
-  let rest = argv.slice(1);
-  if (rest[0] === "--project") {
-    if (rest.length < 2) die(USAGE, 1);
-    if (rest[1] === "") {
-      console.error("turnpikes: no such project directory: ");
-      process.exit(1);
+function main(argv: string[]): number {
+  if (argv[0] === "--list") {
+    if (argv.length !== 1) die(USAGE, 1);
+    const { rows, faults } = parseTable(TABLE);
+    if (faults.length > 0) {
+      console.error(faults.map((f) => `turnpikes: the table's ${f}`).join("\n"));
+      return 1;
     }
-    process.env.POSTMASTER_PROJECT = rest[1];
-    rest = rest.slice(2);
-  }
-  const text = rest.length > 0 ? rest.join(" ") : readFileSync(0, "utf8");
-  // BASE's core refused any command on a table that breaks its rules; resolve must too.
-  const tableCheck = parseTable(TABLE);
-  if (tableCheck.faults.length > 0) {
-    console.error(tableCheck.faults.map((f) => `turnpikes: the table's ${f}`).join("\n"));
-    process.exit(1);
-  }
-  const { names, faults } = resolve(TABLE, text);
-  if (faults.length > 0) {
-    console.log(faults.join("\n"));
-    process.exit(2);
-  }
-  console.log(`turnpikes: ${(names ?? []).join(", ") || "none"}`);
-  process.exit(0);
-} else if (argv[0] === "short") {
-  let rest = argv.slice(1);
-  if (rest[0] === "--project") {
-    if (rest.length !== 3) die(USAGE, 1);
-    if (rest[1] === "") {
-      console.error("turnpikes: no such project directory: ");
-      process.exit(1);
+    for (const r of rows) {
+      console.log(
+        `${r.name.padEnd(10)} ${(r.d ? "default" : "-").padEnd(8)} ${r.leg.padEnd(9)} ${r.what}`,
+      );
     }
-    process.env.POSTMASTER_PROJECT = rest[1];
-    rest = rest.slice(2);
+    return 0;
   }
-  if (rest.length !== 1) die(USAGE, 1);
-  const got = named(TABLE, rest[0] ?? "");
-  const { rows } = parseTable(TABLE);
-  const defaults = projectDefaults() ?? rows.filter((r) => r.d).map((r) => r.name);
-  for (const name of defaults) {
-    if (!(got ?? []).includes(name)) console.log(name);
+  if (argv[0] === "resolve") {
+    let rest = argv.slice(1);
+    if (rest[0] === "--project") {
+      if (rest.length < 2) die(USAGE, 1);
+      if (rest[1] === "") {
+        console.error("turnpikes: no such project directory: ");
+        return 1;
+      }
+      process.env.POSTMASTER_PROJECT = rest[1];
+      rest = rest.slice(2);
+    }
+    const text = rest.length > 0 ? rest.join(" ") : readFileSync(0, "utf8");
+    // BASE's core refused any command on a table that breaks its rules; resolve must too.
+    const tableCheck = parseTable(TABLE);
+    if (tableCheck.faults.length > 0) {
+      console.error(tableCheck.faults.map((f) => `turnpikes: the table's ${f}`).join("\n"));
+      return 1;
+    }
+    const { names, faults } = resolve(TABLE, text);
+    if (faults.length > 0) {
+      console.log(faults.join("\n"));
+      return 2;
+    }
+    console.log(`turnpikes: ${(names ?? []).join(", ") || "none"}`);
+    return 0;
   }
-  process.exit(0);
-} else if (argv[0] === "legs") {
-  if (argv[1] === "--line") {
-    if (argv.length !== 3) die(USAGE, 1);
-    legsOf(TABLE, argv[2] ?? "");
-    process.exit(0);
+  if (argv[0] === "short") {
+    let rest = argv.slice(1);
+    if (rest[0] === "--project") {
+      if (rest.length !== 3) die(USAGE, 1);
+      if (rest[1] === "") {
+        console.error("turnpikes: no such project directory: ");
+        return 1;
+      }
+      process.env.POSTMASTER_PROJECT = rest[1];
+      rest = rest.slice(2);
+    }
+    if (rest.length !== 1) die(USAGE, 1);
+    const got = named(TABLE, rest[0] ?? "");
+    const { rows } = parseTable(TABLE);
+    const defaults = projectDefaults() ?? rows.filter((r) => r.d).map((r) => r.name);
+    for (const name of defaults) {
+      if (!(got ?? []).includes(name)) console.log(name);
+    }
+    return 0;
   }
-  const ok1 = argv.length === 2;
-  const ok2 = argv.length === 4 && argv[2] === "--expect";
-  if (!ok1 && !ok2) die(USAGE, 1);
-  const brief = join(argv[1] ?? "", "brief.md");
-  let regular = false;
-  try {
-    regular = existsSync(brief) && statSync(brief).isFile();
-  } catch {
-    regular = false;
+  if (argv[0] === "legs") {
+    if (argv[1] === "--line") {
+      if (argv.length !== 3) die(USAGE, 1);
+      legsOf(TABLE, argv[2] ?? "");
+      return 0;
+    }
+    const ok1 = argv.length === 2;
+    const ok2 = argv.length === 4 && argv[2] === "--expect";
+    if (!ok1 && !ok2) die(USAGE, 1);
+    const brief = join(argv[1] ?? "", "brief.md");
+    let regular = false;
+    try {
+      regular = existsSync(brief) && statSync(brief).isFile();
+    } catch {
+      regular = false;
+    }
+    if (!regular) {
+      console.error(`turnpikes: no waybill at ${brief}`);
+      return 1;
+    }
+    let lines: string[];
+    try {
+      lines = readFileSync(brief, "utf8").split("\n");
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException)?.code ?? "";
+      console.error(`turnpikes: cannot read ${brief}: ${STRERROR[code] ?? code}`);
+      return 1;
+    }
+    const above: string[] = [];
+    for (const l of lines) {
+      if (l.startsWith("## ")) break;
+      above.push(l.replace(/\r$/u, ""));
+    }
+    const found = above.filter((l) => LINE.test(l));
+    if (found.length !== 1) {
+      console.log(
+        `the waybill has ${found.length === 0 ? "no" : String(found.length)} turnpikes: line${found.length === 1 ? "" : "s"} under its title, above the ticket, and one is needed; none is never assumed`,
+      );
+      return 2;
+    }
+    if (ok2 && pyWords(found[0] ?? "").join(" ") !== pyWords(argv[3] ?? "").join(" ")) {
+      console.log(
+        `the waybill says "${(found[0] ?? "").trim()}", and the ticket's check printed "${(argv[3] ?? "").trim()}"`,
+      );
+      return 2;
+    }
+    legsOf(TABLE, found[0] ?? "");
+    return 0;
   }
-  if (!regular) {
-    console.error(`turnpikes: no waybill at ${brief}`);
-    process.exit(1);
-  }
-  let lines: string[];
-  try {
-    lines = readFileSync(brief, "utf8").split("\n");
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException)?.code ?? "";
-    console.error(`turnpikes: cannot read ${brief}: ${STRERROR[code] ?? code}`);
-    process.exit(1);
-  }
-  const above: string[] = [];
-  for (const l of lines) {
-    if (l.startsWith("## ")) break;
-    above.push(l.replace(/\r$/u, ""));
-  }
-  const found = above.filter((l) => LINE.test(l));
-  if (found.length !== 1) {
-    console.log(
-      `the waybill has ${found.length === 0 ? "no" : String(found.length)} turnpikes: line${found.length === 1 ? "" : "s"} under its title, above the ticket, and one is needed; none is never assumed`,
-    );
-    process.exit(2);
-  }
-  if (ok2 && pyWords(found[0] ?? "").join(" ") !== pyWords(argv[3] ?? "").join(" ")) {
-    console.log(
-      `the waybill says "${(found[0] ?? "").trim()}", and the ticket's check printed "${(argv[3] ?? "").trim()}"`,
-    );
-    process.exit(2);
-  }
-  legsOf(TABLE, found[0] ?? "");
-  process.exit(0);
-} else {
   die(USAGE, 1);
 }
 
-// --- self-test ---------------------------------------------------------------------------------
-withTempDir((tmp) => {
-  delete process.env.POSTMASTER_PROJECT;
-  const self = join(HERE, "turnpikes.sh");
-  const st = new SelfTest();
-  let out = "";
-  let rc = 0;
-  {
-    // Unicode primitives, BASE turnpikes.sh python: every expectation python3-verified.
-    const markerAR = MARKER.exec("١. x");
-    st.check(
-      "a list marker may be Arabic-Indic digits",
-      markerAR !== null,
-      JSON.stringify(markerAR?.[0] ?? null),
-    );
-    const nameWant = ["a", "_", "٣", "½", "-"].map((s) => NAME_CHAR_RE.test(s));
-    st.check(
-      "name-char test matches [^W_]",
-      JSON.stringify(nameWant) === JSON.stringify([true, false, true, true, false]),
-      JSON.stringify(nameWant),
-    );
-    const p1 = parseTable("style\x1c-\x1creview\x1cwhat here");
-    st.check(
-      "table fields split on U+001C",
-      p1.faults.length === 0 && p1.rows[0]?.what === "what here",
-      JSON.stringify(p1),
-    );
-    const p2 = parseTable("style - review \uFEFFwhat\uFEFF");
-    st.check(
-      "what keeps FEFF edges (Python strip)",
-      p2.rows[0]?.what === "\uFEFFwhat\uFEFF",
-      JSON.stringify(p2.rows[0]?.what),
-    );
-    const wsGot = "a\x1cb,c".split(WORD_SPLIT_RE);
-    st.check(
-      "waybill words split on U+001C",
-      JSON.stringify(wsGot) === JSON.stringify(["a", "b", "c"]),
-      JSON.stringify(wsGot),
-    );
-  }
-
-  function runSelf(...args: string[]): void {
-    const r = run("bash", [self, ...args]);
-    // BASE's run() used $(...), which strips trailing newlines.
-    out = (r.out + r.err).replace(/\n+$/u, "");
-    rc = r.code;
-  }
-
-  function is(label: string, exit: number, expected: string): void {
-    if (rc === exit && out === expected) st.ok(label);
-    else st.fail(`${label}: wanted exit ${exit}, got ${rc}`, out);
-  }
-
-  function has(label: string, exit: number, want: string, notWant?: string): void {
-    const ok1 = rc === exit && out.includes(want);
-    const ok2 = notWant === undefined || notWant === "" || !out.includes(notWant);
-    if (ok1 && ok2) st.ok(label);
-    else
-      st.fail(
-        `${label}: wanted exit ${exit} with "${want}"${notWant ? ` and no "${notWant}"` : ""}, got exit ${rc}`,
-        out,
-      );
-  }
-
-  function waybill(dir: string, line: string, notes = ""): void {
-    mkdirSync(dir, { recursive: true });
-    const content = `# Waybill: T-1\n${line}\n\n## Ticket\n## Problem / feature\nA change.\n\n## Turnpikes\ndefault\n\n## Notes\n${notes}\n\n## Project profile\nrepo: /r\n\n## Dispatch\nname: #1, A change\ndispatch: ${dir}\ntool: /t\n`;
-    writeFileSync(join(dir, "brief.md"), content, "utf8");
-  }
-
-  function lines(...args: string[]): string {
-    return args.join("\n");
-  }
-
-  const NOPE = "zz-not-listed";
-  {
-    const r = run("bash", [self, "--list"]);
-    if (r.out.split("\n").some((l) => pyWords(l)[0] === NOPE)) {
-      console.error(`self-test: ${NOPE} is in the table; pick another unused name`);
-      process.exit(1);
-    }
-  }
-  const PLUS = `${TABLE}\n${NOPE}  -        ship    a check the table does not have yet`;
-
-  console.log("positive controls: the list");
-  runSelf("--list");
-  const listOut = rc === 0 ? out : "";
-  {
-    const allPresent = ["style", "bug", "security"].every(
-      (n) => out.split("\n").filter((l) => pyWords(l)[0] === n).length === 1,
-    );
-    st.check("--list names style, bug and security, once each", rc === 0 && allPresent, out);
-  }
-  {
-    const defaults = out
-      .split("\n")
-      .filter((l) => pyWords(l)[1] === "default")
-      .map((l) => pyWords(l)[0])
-      .join(" ");
-    st.check("the default set is style, bug and security", defaults === "style bug security", out);
-  }
-  {
-    const legs = [
-      ...new Set(
-        out
-          .split("\n")
-          .filter((l) => /^(style|bug|security)$/u.test(pyWords(l)[0] ?? ""))
-          .map((l) => pyWords(l)[2]),
-      ),
-    ];
-    st.check("the three run in the review leg", legs.length === 1 && legs[0] === "review", out);
-  }
-  const wantDescs = [
-    "idiom, naming, abstraction and consistency with the project's own conventions",
-    "correctness, logic, and whether the tests are adequate",
-    "exploit paths through the project's risk surfaces",
-  ];
-  const descsFull = (ds: string[]): boolean =>
-    ds.length === 3 && ds.every((d, i) => d === wantDescs[i]);
-  {
-    const descs = out
-      .split("\n")
-      .filter((l) => /^(style|bug|security)$/u.test(pyWords(l)[0] ?? ""))
-      .map((l) => pyWords(l).slice(3).join(" "));
-    st.check("each line carries its full description, not its first word", descsFull(descs), out);
-  }
-  {
-    const short = TABLE.replace(
-      "idiom, naming, abstraction and consistency with the project's own conventions",
-      "idiom, naming, abstraction",
-    );
-    const { rows } = parseTable(short);
-    const got = rows
-      .filter((r) => ["style", "bug", "security"].includes(r.name))
-      .map((r) => r.what);
-    st.check("a truncated description fails the full-description control", !descsFull(got));
-  }
-
-  console.log("positive controls: a ticket's section");
-  const project = join(tmp, "project-profile");
-  mkdirSync(join(project, ".postmaster"), { recursive: true });
-  writeFileSync(
-    join(project, ".postmaster", "project.toml"),
-    '[project]\ndefault_turnpikes = ["bug"]\n',
-  );
-  {
-    const r = run("bash", [self, "--list"], {
-      env: {
-        ...(process.env as Record<string, string>),
-        POSTMASTER_PROJECT: join(tmp, "no-such-project"),
-      },
-    });
-    out = (r.out + r.err).replace(/\n+$/u, "");
-    rc = r.code;
-    is("--list does not read project settings", 0, listOut);
-  }
-  runSelf("resolve", "--project", project, "default");
-  is("default resolves to the target project's declared turnpikes", 0, "turnpikes: bug");
-  const emptyProject = join(tmp, "empty-project");
-  mkdirSync(join(emptyProject, ".postmaster"), { recursive: true });
-  writeFileSync(
-    join(emptyProject, ".postmaster", "project.toml"),
-    "[project]\ndefault_turnpikes = []\n",
-  );
-  runSelf("resolve", "--project", emptyProject, "default");
-  is("a project may define default as no turnpikes", 0, "turnpikes: none");
-  runSelf("short", "--project", project, "turnpikes: none");
-  is("short names the project's defaults omitted by a ticket", 0, "bug");
-  runSelf("resolve", "--project", "", "default");
-  has(
-    "an explicitly empty --project is refused, never resolved as discovery",
-    1,
-    "no such project directory",
-  );
-  runSelf("short", "--project", "", "turnpikes: none");
-  has("short refuses an explicitly empty --project too", 1, "no such project directory");
-  runSelf("resolve", "default");
-  is("default stands for the default set", 0, "turnpikes: style, bug, security");
-  runSelf("resolve", "none");
-  is("none stands for no turnpike", 0, "turnpikes: none");
-  runSelf("resolve", "security, bug");
-  is("a list names its turnpikes, in the table's order", 0, "turnpikes: bug, security");
-  runSelf("resolve", "default, bug");
-  is("in a list, default still stands for the three", 0, "turnpikes: style, bug, security");
-  runSelf("resolve", lines("- Bug", "- `security`."));
-  is(
-    "case, backticks, list markers and a closing full stop are ignored",
-    0,
-    "turnpikes: bug, security",
-  );
-  runSelf("resolve", lines("default", "", "---", "", "***"));
-  is("a thematic break is not a name", 0, "turnpikes: style, bug, security");
-  runSelf("resolve", lines("default", "", "\t---"));
-  is(
-    "a tab-indented rule is a name, not a break, as BASE has it",
-    2,
-    '"---" is not a turnpike; the section holds only default, none, or names from: style, bug, security',
-  );
-  runSelf("resolve", lines("default", "", "   ---"));
-  is("a three-space-indented rule is still a break", 0, "turnpikes: style, bug, security");
-  runSelf("resolve", "bug\\\nsecurity");
-  is("a hard line break is not part of a name", 0, "turnpikes: bug, security");
-  runSelf("resolve", "default\u200B");
-  is("an invisible character is not part of a name", 0, "turnpikes: style, bug, security");
-  runSelf("resolve", "defau\u2066lt\u00AD");
-  is(
-    "an isolate or soft hyphen is not part of a name either",
-    0,
-    "turnpikes: style, bug, security",
-  );
-  {
-    const r = run("bash", ["-c", `printf '1. bug\\n2. security\\n' | "${self}" resolve`]);
-    out = (r.out + r.err).replace(/\n+$/u, "");
-    rc = r.code;
-    is("with no text given, the section is read from stdin", 0, "turnpikes: bug, security");
-  }
-  runSelf("resolve", "bug, security");
-  const line = out;
-  runSelf("resolve", line.replace(/^turnpikes: /u, ""));
-  is("the waybill's line resolves to itself", 0, line);
-  // a turnpike added to the table resolves with nothing else changed
-  {
-    const { names } = resolve(PLUS, `default, ${NOPE}`);
-    out = `turnpikes: ${(names ?? []).join(", ")}`;
-    rc = 0;
-    is(
-      "a turnpike added to the table resolves with nothing else changed",
-      0,
-      `turnpikes: style, bug, security, ${NOPE}`,
-    );
-  }
-
-  console.log("positive controls: a run's legs");
-  waybill(join(tmp, "none"), "turnpikes: none");
-  runSelf("legs", join(tmp, "none"));
-  is("a run with no turnpikes goes from synthesis to ship", 0, lines("1 synthesis", "3 ship"));
-  waybill(join(tmp, "default"), "turnpikes: style, bug, security");
-  runSelf("legs", join(tmp, "default"));
-  is(
-    "a run with the default turnpikes has a review leg that runs all three",
-    0,
-    lines("1 synthesis", "2 review style bug security", "3 ship"),
-  );
-  waybill(join(tmp, "style"), "turnpikes: style");
-  runSelf("legs", join(tmp, "style"));
-  is(
-    "one review turnpike is enough for a review leg",
-    0,
-    lines("1 synthesis", "2 review style", "3 ship"),
-  );
-  waybill(join(tmp, "notes"), "turnpikes: none", "turnpikes: style, bug, security");
-  runSelf("legs", join(tmp, "notes"));
-  is("a turnpikes line inside the ticket is never read", 0, lines("1 synthesis", "3 ship"));
-  waybill(
-    join(tmp, "fence"),
-    "turnpikes: style, bug, security",
-    lines("```", "## Dispatch", "turnpikes: none"),
-  );
-  runSelf("legs", join(tmp, "fence"));
-  is(
-    "a fence the ticket leaves open changes nothing",
-    0,
-    lines("1 synthesis", "2 review style bug security", "3 ship"),
-  );
-  runSelf("legs", join(tmp, "default"), "--expect", "turnpikes:  style, bug,  security");
-  is(
-    "--expect passes a waybill whose line is the check's",
-    0,
-    lines("1 synthesis", "2 review style bug security", "3 ship"),
-  );
-  waybill(join(tmp, "extra"), `turnpikes: ${NOPE}`);
-  {
-    // call legsOf with PLUS table
-    // we'll simulate via the shell wrapper... but the table is hardcoded. Use resolve/legs directly.
-    // For the PLUS case we use the core logic inline
-    const got = named(PLUS, `turnpikes: ${NOPE}`);
-    const legLines: string[] = [];
-    for (const [n, leg] of LEGS) {
-      const runs = (got ?? []).filter(
-        (x) => parseTable(PLUS).rows.find((r) => r.name === x)?.leg === leg,
-      );
-      if (ALWAYS.has(leg) || runs.length > 0) legLines.push([String(n), leg, ...runs].join(" "));
-    }
-    out = legLines.join("\n");
-    rc = 0;
-    is(
-      "a turnpike that runs in another leg makes no review leg",
-      0,
-      lines("1 synthesis", `3 ship ${NOPE}`),
-    );
-  }
-  runSelf("legs", "--line", "turnpikes: none");
-  is("legs --line gives the legs of a line", 0, lines("1 synthesis", "3 ship"));
-  runSelf("legs", "--line", "turnpikes: security");
-  is(
-    "legs --line gives a review leg for a review turnpike",
-    0,
-    lines("1 synthesis", "2 review security", "3 ship"),
-  );
-  runSelf("short", "turnpikes: bug");
-  is("short names the default turnpikes a line leaves out", 0, lines("style", "security"));
-  runSelf("short", "turnpikes: style, bug, security");
-  is("short names nothing for a line that leaves none out", 0, "");
-
-  console.log("negative controls: a ticket's section");
-  runSelf("resolve", NOPE);
-  has("a turnpike the table does not list is named", 2, `"${NOPE}" is not a turnpike`);
-  runSelf("resolve", "none, bug");
-  has("none listed with another turnpike is refused", 2, "none stands alone");
-  runSelf("resolve", "none. A research ticket");
-  has(
-    "a reason is not a turnpike",
-    2,
-    '"a", "research" and "ticket" are not turnpikes; the section holds only',
-  );
-  runSelf("resolve", "default - security");
-  has("a dash between names is not a list marker, and is named", 2, '"-" is not a turnpike');
-  runSelf("resolve", "style, ...");
-  has("a word of dots is still a word, and is named", 2, '"..." is not a turnpike');
-  runSelf("resolve", "");
-  has("an empty section names no turnpike", 2, "names no turnpike");
-
-  console.log("negative controls: a run's legs");
-  waybill(join(tmp, "missing"), "", "turnpikes: style, bug, security");
-  runSelf("legs", join(tmp, "missing"));
-  has(
-    "with no line under the title, one in the ticket is not taken instead",
-    2,
-    "has no turnpikes: line",
-    "ship",
-  );
-  waybill(join(tmp, "unknown"), `turnpikes: bug, ${NOPE}`);
-  runSelf("legs", join(tmp, "unknown"));
-  has(
-    "a waybill naming an unknown turnpike is refused, and no leg is printed",
-    2,
-    `"${NOPE}" is not a turnpike`,
-    "synthesis",
-  );
-  waybill(join(tmp, "twice"), lines("turnpikes: none", "turnpikes: style, bug, security"));
-  runSelf("legs", join(tmp, "twice"));
-  has("two turnpikes lines are refused", 2, "has 2 turnpikes: lines", "synthesis");
-  waybill(join(tmp, "word"), "turnpikes: default");
-  runSelf("legs", join(tmp, "word"));
-  has("a waybill that says default is refused: it carries names", 2, "says default", "synthesis");
-  runSelf("legs", join(tmp, "default"), "--expect", "turnpikes: bug, security");
-  has(
-    "--expect refuses a waybill that dropped a name the check printed",
-    2,
-    `and the ticket's check printed "turnpikes: bug, security"`,
-    "synthesis",
-  );
-  runSelf("legs", "--line", "style, bug");
-  has(
-    "legs --line refuses a line that is not a turnpikes: line",
-    2,
-    "is not a turnpikes: line",
-    "synthesis",
-  );
-  runSelf("legs", "--line", lines("turnpikes: none", "style"));
-  has(
-    "legs --line refuses a line with a newline in it",
-    2,
-    "is not a turnpikes: line",
-    "synthesis",
-  );
-  runSelf("short", "turnpikes: default");
-  has("short refuses default: a line carries names", 2, "says default");
-  runSelf("legs", join(tmp, "nowhere"));
-  has("no waybill is a usage error", 1, "no waybill at");
-  {
-    const d = join(tmp, "briefdir");
-    mkdirSync(join(d, "brief.md"), { recursive: true });
-    runSelf("legs", d);
-    has("a brief.md that is a directory is no waybill", 1, "no waybill at");
-  }
-  {
-    const d = join(tmp, "noperm");
-    waybill(d, "turnpikes: none");
-    chmodSync(join(d, "brief.md"), 0o000);
-    let unreadable = true;
-    try {
-      readFileSync(join(d, "brief.md"));
-      unreadable = false;
-    } catch {
-      unreadable = true;
-    }
-    if (!unreadable) {
-      st.ok("an unreadable brief.md names the read error (skipped: this user reads every file)");
-    } else {
-      runSelf("legs", d);
-      has("an unreadable brief.md names the read error", 1, "cannot read", "Bun v");
-    }
-    chmodSync(join(d, "brief.md"), 0o644);
-  }
-
-  console.log("negative controls: the table");
-  function bad(label: string, extra: string, want: string): void {
-    const { faults } = parseTable(`${TABLE}\n${extra}`);
-    out = faults.map((f) => `turnpikes: the table's ${f}`).join("\n");
-    rc = faults.length > 0 ? 1 : 0;
-    has(label, 1, want, "style");
-  }
-  bad(
-    "a turnpike named none is refused",
-    "none       -        review  nothing",
-    '"none" already means something in a ticket',
-  );
-  bad(
-    "a turnpike named default is refused",
-    "default    -        review  everything",
-    '"default" already means something in a ticket',
-  );
-  bad(
-    "a turnpike listed twice is refused",
-    "bug        -        review  bugs again",
-    '"bug" is listed twice',
-  );
-  bad(
-    "a leg that does not exist is refused",
-    `${NOPE}      -        deploy  a check`,
-    '"deploy" is not a leg',
-  );
-  bad(
-    "a set other than default or - is refused",
-    `${NOPE}    yes      ship    a check`,
-    '"yes" is neither default nor -',
-  );
-  bad(
-    "a name that is not a lowercase word is refused",
-    "Zz-Not  -       ship    a check",
-    '"Zz-Not" is not a lowercase word',
-  );
-  bad(
-    "a line with no description is refused",
-    `${NOPE}      -        ship`,
-    "needs a name, default or -, a leg, and what it checks",
-  );
-
-  console.log(
-    "a run with no turnpikes, walked from synthesis to ship through the poll, the hand-off check and the stages",
-  );
-  const d = join(tmp, "repo", ".postmaster", "runs", "T-9");
-  waybill(d, "turnpikes: none");
-  writeFileSync(join(d, "run-log.md"), "", "utf8");
-  writeFileSync(
-    join(d, "manifest.json"),
-    '{"stage": "checkpoint-1", "leg": 1, "base": "abc123", "lanes": {}, "coachman": {"legs": {}}}\n',
-    "utf8",
-  );
-  run("bash", [join(HERE, "log-action.sh"), d, "postmaster", "dispatch", "T-9", "leg 1"]);
-  writeFileSync(
-    join(d, "handoff-1.md"),
-    "## Decisions\nx\n\n## Deferred findings\nx\n\n## Verified by execution\nx\n\n## Unverified\nx\n\n## Branches and lanes\nx\n\n## Open questions\nx\n\n## Next leg\nx\n",
-    "utf8",
-  );
-  writeFileSync(join(d, ".leg-1-done"), "", "utf8");
-  writeFileSync(join(d, ".leg-1-exited"), "", "utf8");
-
-  function poll(): string {
-    const r = run("bash", [join(HERE, "runs-status.sh"), join(tmp, "repo", ".postmaster", "runs")]);
-    const t9 = r.out.split("\n").find((l) => l.startsWith("T-9"));
-    return t9 ? (pyWords(t9).pop() ?? "") : "";
-  }
-
-  st.check("after synthesis the poll says DISPATCH", poll() === "DISPATCH");
-  {
-    const r = run("bash", [self, "legs", d]);
-    const next = r.out.split("\n").find((l) => {
-      const n = parseInt(pyWords(l)[0] ?? "", 10);
-      return n > 1;
-    });
-    const nextVal = next ? `${pyWords(next)[0]} ${pyWords(next)[1]}` : "";
-    st.check("the leg after synthesis is ship", nextVal === "3 ship", nextVal);
-  }
-  {
-    const r = run("bash", [self, "legs", d]);
-    const prevs = r.out
-      .split("\n")
-      .map((l) => parseInt(pyWords(l)[0] ?? "", 10))
-      .filter((n) => n < 3);
-    const prev = prevs[prevs.length - 1] ?? 0;
-    const hc = run("bash", [join(HERE, "handoff-check.sh"), join(d, `handoff-${prev}.md`)]);
-    st.check(
-      "the ship leg starts from synthesis's hand-off, which passes its check",
-      hc.code === 0 && prev === 1,
-    );
-  }
-  // update manifest leg to 3
-  {
-    const p = join(d, "manifest.json");
-    const m = JSON.parse(readFileSync(p, "utf8"));
-    m.leg = 3;
-    writeFileSync(p, JSON.stringify(m), "utf8");
-  }
-  run("bash", [join(HERE, "stage.sh"), d, "shipping"]);
-  run("bash", [join(HERE, "stage.sh"), d, "shipped"]);
-  writeFileSync(join(d, ".leg-3-done"), "", "utf8");
-  writeFileSync(join(d, ".leg-3-exited"), "", "utf8");
-  {
-    const r = run("bash", [self, "legs", d]);
-    const after = r.out.split("\n").filter((l) => parseInt(pyWords(l)[0] ?? "", 10) > 3);
-    st.check(
-      "after ship the poll says DISPATCH, and no leg follows: Stage G",
-      poll() === "DISPATCH" && after.length === 0,
-      `${poll()} / ${after.join(" ")}`,
-    );
-  }
-  run("bash", [join(HERE, "stage.sh"), d, "done", "postmaster"]);
-  {
-    // parse actions.jsonl
-    let stages = "";
-    try {
-      const text = readFileSync(join(d, "actions.jsonl"), "utf8");
-      const targets = text
-        .split("\n")
-        .filter((l) => l !== "")
-        .map((l) => JSON.parse(l))
-        .filter((o: { action: string }) => o.action === "stage")
-        .map((o: { target: string }) => o.target);
-      stages = targets.join(" ");
-    } catch {
-      stages = "";
-    }
-    st.check(
-      "it closes with no review stage",
-      stages === "shipping shipped done" && poll() === "-",
-      `${stages}`,
-    );
-  }
-
-  st.finish();
-});
+if (import.meta.main) {
+  process.exit(main(process.argv.slice(2)));
+}

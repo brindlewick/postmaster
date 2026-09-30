@@ -2,7 +2,6 @@
 // The runbook calls this rather than counting findings itself.
 //
 //   review-decide.sh <dispatch> <round>
-//   review-decide.sh --self-test
 //
 //   round    the round that just finished, a whole number from 1 to 3
 //
@@ -30,15 +29,10 @@
 //           detail does not open with its class, a finding with no readable severity or round,
 //           two findings sharing one target in one round, or an apply naming no target or a
 //           target with no finding line
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { scriptsDir } from "./lib/paths.ts";
-import { run, withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
+import { readFileSync, statSync } from "node:fs";
 import { D_CLASS, digitValue, END_OF_STRING, pySplitLines, pyTrim, pyWords } from "./lib/text.ts";
 
-const HERE = scriptsDir(import.meta);
-const USAGE = "usage: review-decide.sh <dispatch> <round> | --self-test";
+const USAGE = "usage: review-decide.sh <dispatch> <round>";
 
 function die(msg: string): never {
   console.error(`review-decide: ${msg}`);
@@ -276,288 +270,15 @@ function decide(dispatch: string, roundS: string): void {
 
 const argv = process.argv.slice(2);
 
-if (argv[0] !== "--self-test") {
-  if (argv.length !== 2 || argv[0] === "" || argv[1] === "") {
-    console.error(USAGE);
-    process.exit(1);
-  }
-  let isDir = false;
-  try {
-    isDir = statSync(argv[0]!).isDirectory();
-  } catch {
-    isDir = false;
-  }
-  if (!isDir) die(`no dispatch directory at ${argv[0]}`);
-  decide(argv[0]!, argv[1]!);
-} else {
-  const self = join(HERE, "review-decide.sh");
-  const st = new SelfTest();
-  withTempDir((tmp) => {
-    let out = "";
-    let rc = 0;
-    const runSelf = (...args: string[]): void => {
-      const r = run(self, args);
-      out = r.out + r.err;
-      rc = r.code;
-    };
-    // Command substitution strips trailing newlines before the comparison.
-    const TRAILING_NL_RE = /\n+$/u;
-    const is = (label: string, exit: number, whole: string): void => {
-      st.check(
-        label,
-        rc === exit && out.replace(TRAILING_NL_RE, "") === whole,
-        `wanted exit ${exit} and "${whole}", got exit ${rc}\n${out}`,
-      );
-    };
-    const has = (label: string, exit: number, text: string): void => {
-      st.check(
-        label,
-        rc === exit && out.includes(text),
-        `wanted exit ${exit} with "${text}", got exit ${rc}\n${out}`,
-      );
-    };
-    const logged = (d: string, action: string, target: string, detail: string): void => {
-      writeFileSync(
-        join(d, "actions.jsonl"),
-        '{"ts":"2026-09-27T00:00:00Z","project":"p","run":"r","actor":"coachman",' +
-          `"action":"${action}","target":"${target}","detail":"${detail}"}\n`,
-        { flag: "a" },
-      );
-    };
-    const newRun = (name: string): string => {
-      const d = join(tmp, name);
-      mkdirSync(d, { recursive: true });
-      writeFileSync(join(d, "actions.jsonl"), "");
-      return d;
-    };
-
-    console.log("positive controls: another round runs");
-    let d = newRun("r1-apply");
-    logged(d, "finding", "src/a.ts:1", "gating P2 r1 bug luna reading: a defect");
-    logged(d, "apply", "abc123", "src/a.ts:1");
-    runSelf(d, "1");
-    is("round 1 applied a fix", 0, "RUN 2: round 1 applied a fix");
-
-    d = newRun("r2-p1");
-    logged(d, "finding", "src/b.ts:2", "gating P1 r2 bug luna reading: a serious defect");
-    runSelf(d, "2");
-    is("round 2 logged a P1", 0, "RUN 3: round 2 logged a verified P1 or P2 finding");
-
-    d = newRun("r2-p2");
-    logged(d, "finding", "src/c.ts:3", "gating P2 r2 security sol reading: a security gap");
-    runSelf(d, "2");
-    is("round 2 logged a P2", 0, "RUN 3: round 2 logged a verified P1 or P2 finding");
-
-    console.log("positive controls: the cap is reached");
-    d = newRun("r3-p1");
-    logged(d, "finding", "src/d.ts:4", "gating P1 r3 bug luna reading: still serious");
-    runSelf(d, "3");
-    is(
-      "round 3 logged a P1",
-      0,
-      "CAP 3: round 3 logged a verified P1 or P2 finding; escalate with residue",
-    );
-
-    d = newRun("r3-p2");
-    logged(d, "finding", "src/e.ts:5", "gating P2 r3 security sol reading: still a gap");
-    runSelf(d, "3");
-    is(
-      "round 3 logged a P2",
-      0,
-      "CAP 3: round 3 logged a verified P1 or P2 finding; escalate with residue",
-    );
-
-    console.log("negative controls: no another round");
-    d = newRun("r1-noapply");
-    logged(d, "finding", "src/f.ts:6", "style P3 r1 style luna reading: a style note");
-    runSelf(d, "1");
-    is("round 1 applied no fix", 0, "STOP 1: round 1 applied no fixes");
-
-    d = newRun("r2-p3");
-    logged(d, "finding", "src/g.ts:7", "gating P3 r2 bug luna reading: a minor defect");
-    runSelf(d, "2");
-    is("round 2 logged no P1 or P2", 0, "STOP 2: round 2 logged no P1 or P2 finding");
-
-    d = newRun("r2-none");
-    runSelf(d, "2");
-    is("round 2 logged no finding", 0, "STOP 2: round 2 logged no P1 or P2 finding");
-
-    console.log("negative controls: the cap is not reached");
-    d = newRun("r3-p3");
-    logged(d, "finding", "src/h.ts:7", "gating P3 r3 bug luna reading: only minor defects");
-    runSelf(d, "3");
-    is("round 3 logged no P1 or P2", 0, "STOP 3: round 3 logged no P1 or P2 finding");
-
-    d = newRun("r2-continues");
-    logged(d, "finding", "src/i.ts:9", "gating P1 r2 bug luna reading: continues, not the cap");
-    runSelf(d, "2");
-    is("round 2 with a P1 is not the cap", 0, "RUN 3: round 2 logged a verified P1 or P2 finding");
-
-    console.log("a fix that does not verify closed is the checking round's finding");
-    d = newRun("reclosed");
-    logged(d, "finding", "src/j.ts:10", "gating P1 r1 bug luna execution: an off-by-one");
-    logged(d, "apply", "def456", "src/j.ts:10");
-    logged(d, "finding", "src/j.ts:10", "gating P1 r2 bug luna reading: fix did not verify closed");
-    runSelf(d, "2");
-    is(
-      "a P1 logged again in the round that checked the fix keeps the loop going",
-      0,
-      "RUN 3: round 2 logged a verified P1 or P2 finding",
-    );
-    runSelf(d, "1");
-    is(
-      "round 1 still sees its apply after the fix is logged again",
-      0,
-      "RUN 2: round 1 applied a fix",
-    );
-
-    d = newRun("reclosed-p3");
-    logged(d, "finding", "src/k.ts:11", "gating P3 r1 bug luna reading: minor");
-    logged(d, "apply", "ghi789", "src/k.ts:11");
-    logged(d, "finding", "src/k.ts:11", "gating P3 r2 bug luna reading: fix did not verify closed");
-    runSelf(d, "2");
-    is(
-      "a P3 logged again does not keep the loop going",
-      0,
-      "STOP 2: round 2 logged no P1 or P2 finding",
-    );
-
-    console.log("an apply of one round does not count for another");
-    d = newRun("other-round");
-    logged(d, "finding", "src/l.ts:12", "gating P2 r1 bug luna reading: fixed in round 1");
-    logged(d, "apply", "jkl012", "src/l.ts:12");
-    logged(
-      d,
-      "finding",
-      "src/m.ts:13",
-      "gating P3 r2 bug luna reading: nothing applied in round 2",
-    );
-    runSelf(d, "1");
-    is("round 1 still sees its own apply", 0, "RUN 2: round 1 applied a fix");
-
-    d = newRun("later-apply");
-    logged(d, "finding", "src/n.ts:14", "gating P2 r2 bug luna reading: fixed in round 2");
-    logged(d, "apply", "mno345", "src/n.ts:14");
-    runSelf(d, "1");
-    is("an apply of round 2 does not run round 2", 0, "STOP 1: round 1 applied no fixes");
-
-    console.log("negative controls: style findings never keep the loop going");
-    d = newRun("style-p2");
-    logged(d, "finding", "src/s1.ts:1", "style P2 r2 style luna reading: a style gap");
-    runSelf(d, "2");
-    is("a style P2 in round 2 stops the loop", 0, "STOP 2: round 2 logged no P1 or P2 finding");
-
-    d = newRun("style-p1-cap");
-    logged(d, "finding", "src/s2.ts:2", "style P1 r3 style mimo reading: a serious style gap");
-    runSelf(d, "3");
-    is("a style P1 in round 3 stops, not the cap", 0, "STOP 3: round 3 logged no P1 or P2 finding");
-
-    d = newRun("style-plus-p3");
-    logged(d, "finding", "src/s3.ts:3", "gating P3 r2 bug luna reading: minor");
-    logged(d, "finding", "src/s4.ts:4", "style P1 r2 style mimo reading: a serious style gap");
-    runSelf(d, "2");
-    is(
-      "a gating P3 beside a style P1 stops the loop",
-      0,
-      "STOP 2: round 2 logged no P1 or P2 finding",
-    );
-
-    console.log("controls for the cap bound");
-    d = newRun("past");
-    runSelf(d, "4");
-    has("a round past the cap is refused", 1, "cap of 3");
-    runSelf(d, "0");
-    has("round 0 is refused", 1, "cap of 3");
-
-    console.log("negative controls: malformed lines fail loudly, each fault named");
-    d = newRun("bad-json");
-    writeFileSync(join(d, "actions.jsonl"), "not json\n", { flag: "a" });
-    runSelf(d, "2");
-    has("a line that is not JSON is refused", 1, "line 1 is not JSON");
-
-    d = newRun("bad-scalar");
-    writeFileSync(join(d, "actions.jsonl"), "42\n", { flag: "a" });
-    runSelf(d, "2");
-    has("a line that is not an action object is refused", 1, "line 1 is not an action object");
-
-    d = newRun("no-action");
-    writeFileSync(
-      join(d, "actions.jsonl"),
-      '{"ts":"2026-09-27T00:00:00Z","target":"t","detail":"d"}\n',
-      {
-        flag: "a",
-      },
-    );
-    runSelf(d, "2");
-    has("an action object with no action is refused", 1, "line 1 has no action");
-
-    d = newRun("bad-class");
-    logged(d, "finding", "src/t1.ts:1", "P1 r2 bug luna reading: no class first");
-    runSelf(d, "2");
-    has("a finding with no class is refused", 1, 'opens with "P1", not gating or style');
-
-    d = newRun("bad-severity");
-    logged(d, "finding", "src/t2.ts:2", "gating P9 r2 bug luna reading: no such severity");
-    runSelf(d, "2");
-    has("a finding with a bad severity is refused", 1, "severity P9, not P1, P2 or P3");
-
-    d = newRun("no-severity");
-    logged(d, "finding", "src/t3.ts:3", "gating");
-    runSelf(d, "2");
-    has("a finding with no severity is refused", 1, "severity none, not P1, P2 or P3");
-
-    d = newRun("bad-round");
-    logged(d, "finding", "src/t4.ts:4", "gating P1 round1 bug luna reading: no such round");
-    runSelf(d, "2");
-    has("a finding with a bad round is refused", 1, "round round1, not rN");
-
-    d = newRun("no-round");
-    logged(d, "finding", "src/t5.ts:5", "gating P1");
-    runSelf(d, "2");
-    has("a finding with no round is refused", 1, "round none, not rN");
-
-    d = newRun("dup-target");
-    logged(d, "finding", "src/t6.ts:6", "gating P1 r2 bug luna reading: serious");
-    logged(d, "finding", "src/t6.ts:6", "gating P3 r2 security sol reading: minor, same target");
-    runSelf(d, "2");
-    has(
-      "two findings sharing one target in one round are refused",
-      1,
-      "a second finding for src/t6.ts:6 in round r2",
-    );
-
-    d = newRun("unknown-apply");
-    logged(d, "finding", "src/t7.ts:7", "gating P2 r1 bug luna reading: a defect");
-    logged(d, "apply", "abc123", "src/nowhere.ts:99");
-    runSelf(d, "1");
-    has(
-      "an apply naming an unknown target is refused",
-      1,
-      "an apply naming src/nowhere.ts:99, which has no finding line",
-    );
-
-    d = newRun("empty-apply");
-    logged(d, "finding", "src/t8.ts:8", "gating P2 r1 bug luna reading: a defect");
-    logged(d, "apply", "abc123", "");
-    runSelf(d, "1");
-    has("an apply naming no target is refused", 1, "an apply naming no finding target");
-
-    {
-      const r = run(self, [join(tmp, "nowhere"), "1"]);
-      st.check(
-        "a missing dispatch directory is refused",
-        r.code === 1 && r.err.includes("no dispatch directory"),
-        `(exit ${r.code})\n${r.err}`,
-      );
-    }
-    {
-      const r = run(self, []);
-      st.check(
-        "no arguments is refused",
-        r.code === 1 && r.err.includes("usage:"),
-        `(exit ${r.code})\n${r.err}`,
-      );
-    }
-  });
-  st.finish();
+if (argv.length !== 2 || argv[0] === "" || argv[1] === "") {
+  console.error(USAGE);
+  process.exit(1);
 }
+let isDir = false;
+try {
+  isDir = statSync(argv[0]!).isDirectory();
+} catch {
+  isDir = false;
+}
+if (!isDir) die(`no dispatch directory at ${argv[0]}`);
+decide(argv[0]!, argv[1]!);

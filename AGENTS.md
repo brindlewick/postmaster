@@ -221,8 +221,8 @@ whole system.
 
 The scripts run on Bun 1.4.2 or newer: each `scripts/<name>.sh` is a one-line wrapper that
 hands its arguments to `scripts/<name>.ts`. Runtime imports are Bun's built-ins and Node's
-standard modules only; `typescript` and `@biomejs/biome` are the development dependencies,
-and `bun run check` is the type check, the lint and every script's self-test.
+standard modules only; `typescript`, `@biomejs/biome` and `oxlint` are the development dependencies,
+and `bun run check` is the type check, Oxlint, the Biome format check, and the tests beside every script.
 
 ### Where a setting comes from
 

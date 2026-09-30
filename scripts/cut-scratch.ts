@@ -7,7 +7,6 @@
 //   cut-scratch.sh --check <dest-path> <commit> [--clone <base>]
 //   cut-scratch.sh --kind <dir>
 //   cut-scratch.sh --remove <repo> <dest-path>
-//   cut-scratch.sh --self-test
 //
 // A scratch is a detached worktree of <repo> at <commit>. With --clone it is a shared clone of
 // <repo> instead (`git clone --shared`, which copies no objects), detached at <commit>: its
@@ -45,12 +44,9 @@ import {
   realpathSync,
   rmSync,
   statSync,
-  writeFileSync,
 } from "node:fs";
-import { basename, dirname, join } from "node:path";
-import { scriptsDir } from "./lib/paths.ts";
-import { run, withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
+import { dirname, join } from "node:path";
+import { run } from "./lib/proc.ts";
 
 const DEPS = process.env.DEPS_DIRS ?? "node_modules";
 
@@ -62,7 +58,7 @@ interface CmdResult {
 
 function usage(): never {
   console.error(
-    "usage: cut-scratch.sh <repo> <source-worktree> <dest-path> <commit> [--clone <base>] | --check <dest-path> <commit> [--clone <base>] | --kind <dir> | --remove <repo> <dest-path> | --self-test",
+    "usage: cut-scratch.sh <repo> <source-worktree> <dest-path> <commit> [--clone <base>] | --check <dest-path> <commit> [--clone <base>] | --kind <dir> | --remove <repo> <dest-path>",
   );
   process.exit(1);
 }
@@ -303,8 +299,6 @@ if (argv[0] === "--check") {
 } else if (argv[0] === "--remove") {
   if (argv.length !== 3) usage();
   printResult(remove(argv[1] ?? "", argv[2] ?? ""));
-} else if (argv[0] === "--self-test") {
-  if (argv.length !== 1) usage();
 } else if (argv[0] === undefined || argv[0].startsWith("-")) {
   usage();
 } else {
@@ -314,244 +308,3 @@ if (argv[0] === "--check") {
     printResult(cut(argv[0] ?? "", argv[1] ?? "", argv[2] ?? "", argv[3] ?? "", argv[5]));
   else usage();
 }
-
-// --- self-test ----------------------------------------------------------------------------
-const self = join(scriptsDir(import.meta), "cut-scratch.sh");
-withTempDir((tmpRaw) => {
-  const tmp = phys(tmpRaw) || tmpRaw;
-  process.env.GIT_AUTHOR_NAME = "t";
-  process.env.GIT_AUTHOR_EMAIL = "t@t";
-  process.env.GIT_COMMITTER_NAME = "t";
-  process.env.GIT_COMMITTER_EMAIL = "t@t";
-  const st = new SelfTest();
-
-  const git = (...args: string[]): CmdResult => run("git", args);
-  const commit = (repoDir: string, file: string, content: string): CmdResult => {
-    writeFileSync(join(repoDir, file), `${content}\n`);
-    const a = git("-C", repoDir, "add", file);
-    if (a.code !== 0) return a;
-    return git("-C", repoDir, "commit", "-qm", content);
-  };
-
-  const repo = join(tmp, "repo");
-  const initR = git("init", "-q", "-b", "main", repo);
-  const firstCommit = commit(repo, "a.txt", "base");
-  if (initR.code !== 0 || firstCommit.code !== 0) process.exit(1);
-  const base = git("-C", repo, "rev-parse", "HEAD").out.trim();
-  const synth = join(tmp, "synthesis");
-  const wtR = git("-C", repo, "worktree", "add", "-q", "-b", "synth", synth);
-  writeFileSync(join(synth, "b.txt"), "change\n");
-  const addR = git("-C", synth, "add", "b.txt");
-  const cR = git("-C", synth, "commit", "-qm", "change");
-  if (wtR.code !== 0 || addR.code !== 0 || cR.code !== 0) process.exit(1);
-  const snap = git("-C", synth, "rev-parse", "HEAD").out.trim();
-  mkdirSync(join(synth, "node_modules/dep"), { recursive: true });
-  writeFileSync(join(synth, "node_modules/dep/index.js"), "x\n");
-
-  let out = "";
-  let rc = 0;
-  const tryRun = (...args: string[]): void => {
-    const r = run(self, args);
-    out = r.out + r.err;
-    rc = r.code;
-  };
-  const has = (s: string): boolean => out.includes(s);
-  const check = (label: string, cond: boolean, detail?: string): void => {
-    if (cond) st.ok(label);
-    else st.fail(label, detail ?? out);
-  };
-  const headOf = (dir: string): string => git("-C", dir, "rev-parse", "HEAD").out.trim();
-  const exists = (p: string): boolean => existsSync(p);
-
-  console.log("positive controls");
-  tryRun(repo, synth, join(tmp, "wt"), snap);
-  check(
-    "a worktree scratch is cut at the snapshot, with its dependencies cloned",
-    rc === 0 &&
-      headOf(join(tmp, "wt")) === snap &&
-      exists(join(tmp, "wt", "node_modules/dep/index.js")),
-    out,
-  );
-  tryRun(repo, synth, join(tmp, "clone"), snap, "--clone", base);
-  check(
-    "a clone scratch is cut at the snapshot, with its dependencies cloned",
-    rc === 0 &&
-      headOf(join(tmp, "clone")) === snap &&
-      exists(join(tmp, "clone", "node_modules/dep/index.js")),
-    out,
-  );
-  {
-    // BASE `for d in $DEPS` splits on IFS space/tab/LF only: an NBSP never splits (bash-verified).
-    const nbspDir = "a\u00a0b";
-    mkdirSync(join(synth, nbspDir, "dep"), { recursive: true });
-    writeFileSync(join(synth, nbspDir, "dep/index.js"), "x\n");
-    const r = run(self, [repo, synth, join(tmp, "nbsp"), snap], {
-      env: { ...process.env, DEPS_DIRS: nbspDir },
-    });
-    check(
-      "DEPS_DIRS with an NBSP clones one directory, not two",
-      r.code === 0 && exists(join(tmp, "nbsp", nbspDir, "dep/index.js")),
-      r.out + r.err,
-    );
-  }
-
-  const diffR = git("-C", join(tmp, "clone"), "diff", "--name-only", "origin/HEAD...");
-  check(
-    "in it, the diff against origin/HEAD is exactly the change from the base",
-    diffR.out.trim() === "b.txt",
-    diffR.out,
-  );
-  const altSize = (() => {
-    try {
-      return statSync(join(tmp, "clone/.git/objects/info/alternates")).size;
-    } catch {
-      return 0;
-    }
-  })();
-  const loose = (() => {
-    try {
-      const objs = join(tmp, "clone/.git/objects");
-      return readdirSync(objs).flatMap((d) => {
-        if (d.length !== 2 || d === "info" || d === "pack") return [];
-        try {
-          return readdirSync(join(objs, d)).map((f) => join(d, f));
-        } catch {
-          return [];
-        }
-      });
-    } catch {
-      return ["?"];
-    }
-  })();
-  check(
-    "and it copied no objects",
-    altSize > 0 && loose.length === 0,
-    `loose=${JSON.stringify(loose)}`,
-  );
-  const kwt = run(self, ["--kind", join(tmp, "wt")]);
-  const kcl = run(self, ["--kind", join(tmp, "clone")]);
-  check(
-    "--kind names each scratch and the repository it was cut from",
-    kwt.out.trim() === `worktree ${repo}` && kcl.out.trim() === `clone ${repo}`,
-    kwt.out + kcl.out,
-  );
-  tryRun("--check", join(tmp, "clone"), snap, "--clone", base);
-  check(
-    "--check passes a clone at the snapshot whose origin/HEAD leads back to the base",
-    rc === 0,
-    out,
-  );
-  tryRun("--check", join(tmp, "wt"), snap);
-  check("and a worktree at the snapshot", rc === 0, out);
-  commit(repo, "c.txt", "another run merged");
-  tryRun(repo, synth, join(tmp, "moved"), snap, "--clone", base);
-  const movedDiff = git("-C", join(tmp, "moved"), "diff", "--name-only", "origin/HEAD...");
-  check(
-    "with main moved on by another run's merge, a clone still reviews from the base",
-    rc === 0 && movedDiff.out.trim() === "b.txt",
-    out,
-  );
-  tryRun("--remove", repo, join(tmp, "wt"));
-  const wtList = git("-C", repo, "worktree", "list", "--porcelain");
-  check(
-    "--remove takes a worktree scratch away through git",
-    rc === 0 && !exists(join(tmp, "wt")) && !wtList.out.includes(`worktree ${join(tmp, "wt")}`),
-    out,
-  );
-  tryRun("--remove", repo, join(tmp, "clone"));
-  check("--remove takes a clone scratch away", rc === 0 && !exists(join(tmp, "clone")), out);
-
-  console.log("negative controls");
-  tryRun("--check", join(tmp, "moved"), base, "--clone", base);
-  check("--check refuses a scratch that is not at the snapshot", rc === 1 && has("is not at"), out);
-  tryRun(repo, synth, join(tmp, "wt2"), snap);
-  tryRun("--check", join(tmp, "wt2"), snap, "--clone", base);
-  check("and a worktree where a clone is needed", rc === 1 && has("needs a clone"), out);
-  tryRun("--check", join(tmp, "moved"), snap, "--clone", snap);
-  check(
-    "and a clone whose origin/HEAD does not lead back to the base",
-    rc === 1 && has("does not lead back"),
-    out,
-  );
-  tryRun(repo, synth, join(tmp, "wrong"), snap, "--clone", snap);
-  check(
-    "a clone whose origin/HEAD does not lead back to the base is refused, and removed",
-    rc === 1 && !exists(join(tmp, "wrong")) && has("does not lead back"),
-    out,
-  );
-  git("-C", repo, "switch", "-q", "--orphan", "elsewhere");
-  commit(repo, "d.txt", "unrelated");
-  tryRun(repo, synth, join(tmp, "unrelated"), snap, "--clone", base);
-  check(
-    "so is one cut while the repository has an unrelated branch checked out",
-    rc === 1 && !exists(join(tmp, "unrelated")) && has("merge base none"),
-    out,
-  );
-  git("-C", repo, "switch", "-q", "main");
-  tryRun(repo, synth, join(tmp, "nobase"), snap, "--clone", "no-such-ref");
-  check(
-    "a base the repository does not have is refused, and nothing is cut",
-    rc === 1 && !exists(join(tmp, "nobase")),
-    out,
-  );
-  mkdirSync(join(tmp, "taken"));
-  writeFileSync(join(tmp, "taken/mine.txt"), "keep\n");
-  tryRun(repo, synth, join(tmp, "taken"), snap, "--clone", base);
-  check(
-    "a dest that already exists is refused, and left alone",
-    rc === 1 && readdirSync(join(tmp, "taken")).join() === "mine.txt",
-    out,
-  );
-  tryRun(repo, synth, join(tmp, "taken"), snap);
-  check(
-    "for a worktree scratch too",
-    rc === 1 && readdirSync(join(tmp, "taken")).join() === "mine.txt",
-    out,
-  );
-  run("git", ["clone", "-q", repo, join(tmp, "plain")]);
-  git("init", "-q", "-b", "main", join(tmp, "repo2"));
-  writeFileSync(join(tmp, "repo2/x"), "x\n");
-  git("-C", join(tmp, "repo2"), "add", "x");
-  git("-C", join(tmp, "repo2"), "commit", "-qm", "x");
-  run("git", ["clone", "-q", "--shared", join(tmp, "repo2"), join(tmp, "borrowed")]);
-  git("-C", join(tmp, "borrowed"), "remote", "set-url", "origin", repo);
-  tryRun(repo, synth, join(tmp, "other"), snap, "--clone", base);
-  const victims = [
-    join(tmp, "taken"),
-    repo,
-    synth,
-    join(tmp, "plain"),
-    join(tmp, "borrowed"),
-    join(repo, "nowhere"),
-  ];
-  for (const victim of victims) {
-    tryRun("--kind", victim);
-    check(`--kind: ${basename(victim)} is no scratch`, rc === 1 && out === "", out);
-    tryRun("--remove", repo, victim);
-    const leftAlone =
-      !exists(victim) ||
-      (() => {
-        try {
-          return readdirSync(victim).length > 0;
-        } catch {
-          return true;
-        }
-      })();
-    check("--remove refuses it, and leaves it", rc === 1 && leftAlone, out);
-  }
-  check(
-    "the synthesis worktree is untouched",
-    exists(join(synth, "b.txt")) &&
-      git("-C", repo, "worktree", "list", "--porcelain").out.includes(`worktree ${synth}`),
-  );
-  tryRun("--remove", join(tmp, "repo2"), join(tmp, "other"));
-  check(
-    "--remove refuses a scratch of another repository",
-    rc === 1 && exists(join(tmp, "other/.git")) && has("not of"),
-    out,
-  );
-  tryRun(repo, synth, join(tmp, "x"), snap, "--clone");
-  check("--clone with no base is a usage error", rc === 1 && !exists(join(tmp, "x")), out);
-
-  st.finish();
-});

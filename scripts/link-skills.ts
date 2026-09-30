@@ -7,36 +7,29 @@
 //   link-skills.sh [--dry-run]   link every skill for every installed harness with a skills folder
 //   link-skills.sh --check       report missing or blocked links without changing anything
 //   link-skills.sh --remove      remove the links to this checkout's skills, and nothing else
-//   link-skills.sh --self-test
 //
 //   exit 0  every link is in place, would be (--dry-run), or is removed (--remove); --check is complete
 //   exit 1  usage, no skills in the checkout, a bare main checkout, or something in the way; --check is incomplete
 
-import { spawnSync } from "node:child_process";
 import {
-  chmodSync,
-  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readdirSync,
-  readFileSync,
   readlinkSync,
   realpathSync,
   rmSync,
   statSync,
   symlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
-import { die, run, withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
+import { die, run } from "./lib/proc.ts";
 
 const _HERE = scriptsDir(import.meta);
-const HARNESSES = ["claude", "codex", "grok", "agy", "muse", "pi", "mimo"];
+export const HARNESSES = ["claude", "codex", "grok", "agy", "muse", "pi", "mimo"];
 
-function skillsFolder(h: string): string | null {
+export function skillsFolder(h: string): string | null {
   const home = process.env.HOME ?? "~";
   switch (h) {
     case "claude":
@@ -52,7 +45,7 @@ function skillsFolder(h: string): string | null {
   }
 }
 
-function checkoutRoot(tree: string): string | null {
+export function checkoutRoot(tree: string): string | null {
   const top = run("git", ["-C", tree, "rev-parse", "--show-toplevel"]);
   if (top.code !== 0) return tree;
   const t = resolve(top.out.trim());
@@ -81,7 +74,7 @@ function sameDir(a: string, b: string): boolean {
   }
 }
 
-function isLink(p: string): boolean {
+export function isLink(p: string): boolean {
   try {
     return lstatSync(p).isSymbolicLink();
   } catch {
@@ -89,7 +82,7 @@ function isLink(p: string): boolean {
   }
 }
 
-function harnessInstalled(h: string): boolean {
+export function harnessInstalled(h: string): boolean {
   // `command -v` is a shell builtin, so ask a shell for it, with the name as
   // a positional parameter, never pasted into the command string.
   return run("sh", ["-c", 'command -v "$1"', "_", h]).code === 0;
@@ -167,7 +160,7 @@ function plan(root: string): string[] | null {
   return lines;
 }
 
-function isDirectory(p: string): boolean {
+export function isDirectory(p: string): boolean {
   try {
     return statSync(p).isDirectory();
   } catch {
@@ -200,12 +193,12 @@ function report(line: string): string {
 }
 
 // printf %q for a path: safe characters bare, anything else single-quoted.
-function shellQuote(s: string): string {
+export function shellQuote(s: string): string {
   if (/^[A-Za-z0-9_@%+=:,./-]+$/u.test(s)) return s;
   return `'${s.replace(/'/gu, `'\\''`)}'`;
 }
 
-function checkLinks(root: string): number {
+export function checkLinks(root: string): number {
   const p = plan(root);
   if (p === null) return 1;
   let problems = false;
@@ -243,7 +236,7 @@ function checkLinks(root: string): number {
   return 0;
 }
 
-function makeLinks(root: string, dry: number): number {
+export function makeLinks(root: string, dry: number): number {
   const p = plan(root);
   if (p === null) return 1;
   for (const line of p) console.log(report(line));
@@ -273,7 +266,7 @@ function makeLinks(root: string, dry: number): number {
   return 0;
 }
 
-function removeLinks(root: string): number {
+export function removeLinks(root: string): number {
   let seen = "";
   for (const h of HARNESSES) {
     const folder = skillsFolder(h);
@@ -304,696 +297,24 @@ function removeLinks(root: string): number {
 
 // --- entry -----------------------------------------------------------------------------------
 const argv = process.argv.slice(2);
-if (argv[0] === "--self-test") {
-  // fall through
-} else if (argv[0] === "--dry-run") {
-  const ROOT = checkoutRoot(toolRoot(import.meta));
-  if (ROOT === null) process.exit(1);
-  process.exit(makeLinks(ROOT, 1));
-} else if (argv[0] === "--check") {
-  const ROOT = checkoutRoot(toolRoot(import.meta));
-  if (ROOT === null) process.exit(1);
-  process.exit(checkLinks(ROOT));
-} else if (argv[0] === "--remove") {
-  const ROOT = checkoutRoot(toolRoot(import.meta));
-  if (ROOT === null) process.exit(1);
-  process.exit(removeLinks(ROOT));
-} else if (argv[0] === undefined || argv[0] === "") {
-  const ROOT = checkoutRoot(toolRoot(import.meta));
-  if (ROOT === null) process.exit(1);
-  process.exit(makeLinks(ROOT, 0));
-} else {
-  die("usage: link-skills.sh [--dry-run | --check] | --remove | --self-test", 1);
+if (import.meta.main) {
+  if (argv[0] === "--dry-run") {
+    const ROOT = checkoutRoot(toolRoot(import.meta));
+    if (ROOT === null) process.exit(1);
+    process.exit(makeLinks(ROOT, 1));
+  } else if (argv[0] === "--check") {
+    const ROOT = checkoutRoot(toolRoot(import.meta));
+    if (ROOT === null) process.exit(1);
+    process.exit(checkLinks(ROOT));
+  } else if (argv[0] === "--remove") {
+    const ROOT = checkoutRoot(toolRoot(import.meta));
+    if (ROOT === null) process.exit(1);
+    process.exit(removeLinks(ROOT));
+  } else if (argv[0] === undefined || argv[0] === "") {
+    const ROOT = checkoutRoot(toolRoot(import.meta));
+    if (ROOT === null) process.exit(1);
+    process.exit(makeLinks(ROOT, 0));
+  } else {
+    die("usage: link-skills.sh [--dry-run | --check] | --remove", 1);
+  }
 }
-
-// --- self-test ---------------------------------------------------------------------------------
-withTempDir((tmp) => {
-  const TOOL = toolRoot(import.meta);
-  const st = new SelfTest();
-  // The harness lookup takes its operand as argv, never pasted into a command
-  // string: a name holding $(...) is looked up literally, and runs nothing.
-  {
-    const marker = join(tmp, "harness-marker");
-    const found = harnessInstalled(`zz-nonexistent-$(touch ${marker})`);
-    st.check(
-      "a harness name holding $(...) is looked up literally, and runs nothing",
-      !found && !existsSync(marker),
-      `found=${found} marker=${existsSync(marker)}`,
-    );
-  }
-  const bin = join(tmp, "bin");
-  const home = join(tmp, "home");
-  const elsewhere = join(tmp, "elsewhere");
-  mkdirSync(bin, { recursive: true });
-  mkdirSync(home, { recursive: true });
-  mkdirSync(elsewhere, { recursive: true });
-
-  // stub harnesses
-  for (const h of ["claude", "codex", "pi", "agy"]) {
-    writeFileSync(join(bin, h), "#!/bin/sh\nexit 0\n", "utf8");
-    chmodSync(join(bin, h), 0o755);
-  }
-  // The tools the controls shell out to, so the restricted PATH is self-sufficient and no
-  // control can reach the machine's own harnesses or skills folders.
-  for (const t of [
-    "bash",
-    "sh",
-    "env",
-    "git",
-    "bun",
-    "readlink",
-    "dirname",
-    "basename",
-    "mkdir",
-    "ln",
-    "rm",
-    "sed",
-    "grep",
-    "cat",
-    "mktemp",
-    "cmp",
-    "sort",
-    "awk",
-    "head",
-    "tr",
-    "ls",
-    "cut",
-    "chmod",
-    "cp",
-  ]) {
-    const r = spawnSync("sh", ["-c", `command -v ${t}`], { encoding: "utf8" });
-    const p = r.stdout.trim().split("\n").pop() ?? "";
-    if (!p?.startsWith("/")) {
-      console.error(`self-test: ${t} is not on PATH`);
-      process.exit(1);
-    }
-    if (!existsSync(join(bin, t))) {
-      try {
-        symlinkSync(p, join(bin, t));
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-
-  process.env.PATH = bin;
-  process.env.HOME = home;
-  delete process.env.CLAUDE_CONFIG_DIR;
-
-  const C = join(home, ".claude", "skills");
-  const A = join(home, ".agents", "skills");
-
-  function linksTo(p: string, target: string): boolean {
-    try {
-      return isLink(p) && readlinkSync(p) === target;
-    } catch {
-      return false;
-    }
-  }
-
-  function state(): string {
-    const items: string[] = [];
-    try {
-      items.push(...readdirSync(home).sort().join(" ").split(" "));
-    } catch {
-      /* empty */
-    }
-    for (const dir of [C, A]) {
-      try {
-        for (const n of readdirSync(dir)) {
-          const p = join(dir, n);
-          items.push(`${p} ${isLink(p) ? readlinkSync(p) : ""}`);
-        }
-      } catch {
-        /* empty */
-      }
-    }
-    return items.join("\n");
-  }
-
-  console.log("--check: the same command reports missing links and passes when complete");
-  const checkToolBase = join(tmp, "check-tool");
-  const checkHomeBase = join(tmp, "check-home");
-  mkdirSync(join(checkToolBase, "scripts"), { recursive: true });
-  mkdirSync(checkHomeBase, { recursive: true });
-  const checkTool = realpathSync(checkToolBase);
-  const checkHome = realpathSync(checkHomeBase);
-  cpSync(join(TOOL, "skills"), join(checkTool, "skills"), { recursive: true });
-  // The install command names the script being run: in-process, the real one.
-  const checkRun = shellQuote(join(scriptsDir(import.meta), "link-skills.sh"));
-  function stateAt(h: string): string {
-    const items: string[] = [];
-    try {
-      items.push(...readdirSync(h).sort());
-    } catch {
-      /* empty */
-    }
-    for (const dir of [join(h, ".claude", "skills"), join(h, ".agents", "skills")]) {
-      try {
-        for (const n of readdirSync(dir)) {
-          const p = join(dir, n);
-          items.push(`${p} ${isLink(p) ? readlinkSync(p) : ""}`);
-        }
-      } catch {
-        /* empty */
-      }
-    }
-    return items.join("\n");
-  }
-  function runCheck(root: string, h: string, path?: string): { rc: number; out: string } {
-    const savedHome = process.env.HOME;
-    const savedPath = process.env.PATH;
-    process.env.HOME = h;
-    if (path !== undefined) process.env.PATH = path;
-    let buf = "";
-    const savedLog = console.log;
-    const savedErr = console.error;
-    console.log = (...a: unknown[]) => {
-      buf += `${a.map(String).join(" ")}\n`;
-    };
-    console.error = (...a: unknown[]) => {
-      buf += `${a.map(String).join(" ")}\n`;
-    };
-    const rc = checkLinks(root);
-    console.log = savedLog;
-    console.error = savedErr;
-    process.env.HOME = savedHome;
-    if (path !== undefined) process.env.PATH = savedPath;
-    return { rc, out: buf };
-  }
-  {
-    const before = stateAt(checkHome);
-    const r = runCheck(checkTool, checkHome);
-    st.check(
-      "a missing link is named, the install command is shown, and --check changes nothing",
-      r.rc === 1 &&
-        r.out.includes(`MISSING LINK    ${join(checkHome, ".claude", "skills", "postmaster")}`) &&
-        r.out.includes(`run: ${checkRun}`) &&
-        stateAt(checkHome) === before,
-      `exit ${r.rc}\n${r.out}`,
-    );
-  }
-  const blockedPath = join(checkHome, ".claude", "skills", "postmaster");
-  mkdirSync(dirname(blockedPath), { recursive: true });
-  writeFileSync(blockedPath, "keep this file\n", "utf8");
-  {
-    const before = stateAt(checkHome);
-    const r = runCheck(checkTool, checkHome);
-    st.check(
-      "a blocked path is named, the install command is shown, and --check changes nothing",
-      r.rc === 1 &&
-        r.out.includes(`IN THE WAY      ${blockedPath} is a file`) &&
-        r.out.includes(`run: ${checkRun}`) &&
-        stateAt(checkHome) === before,
-      `exit ${r.rc}\n${r.out}`,
-    );
-  }
-  rmSync(blockedPath);
-  {
-    // Install for real, through the same in-process call the command uses.
-    const savedHome = process.env.HOME;
-    process.env.HOME = checkHome;
-    const savedLog = console.log;
-    const savedErr = console.error;
-    console.log = () => {};
-    console.error = () => {};
-    const irc = makeLinks(checkTool, 0);
-    console.log = savedLog;
-    console.error = savedErr;
-    process.env.HOME = savedHome;
-    if (irc !== 0) {
-      console.error("self-test: install into check-home failed");
-      process.exit(1);
-    }
-    const before = stateAt(checkHome);
-    const r = runCheck(checkTool, checkHome);
-    st.check(
-      "a complete set passes through the same --check command without changes",
-      r.rc === 0 && r.out.includes("all skills are linked") && stateAt(checkHome) === before,
-      `exit ${r.rc}\n${r.out}`,
-    );
-  }
-  {
-    // No harness installed: a PATH holding only plumbing (plus sh, which the
-    // port's harness lookup shells) and an empty HOME.
-    const noneBin = join(tmp, "none-bin");
-    const noneHome = join(tmp, "none-home");
-    mkdirSync(noneBin, { recursive: true });
-    mkdirSync(noneHome, { recursive: true });
-    for (const t of ["sh", "bash", "env", "git", "readlink", "dirname", "basename", "sed"]) {
-      const r = spawnSync("sh", ["-c", `command -v ${t}`], { encoding: "utf8" });
-      const p = r.stdout.trim().split("\n").pop() ?? "";
-      if (!p.startsWith("/")) {
-        console.error(`self-test: ${t} is not on PATH`);
-        process.exit(1);
-      }
-      symlinkSync(p, join(noneBin, t));
-    }
-    const before = stateAt(noneHome);
-    const r = runCheck(checkTool, noneHome, noneBin);
-    st.check(
-      "with no harness installed, --check says so and changes nothing",
-      r.rc === 0 &&
-        r.out.includes("no harness skills folders found") &&
-        stateAt(noneHome) === before,
-      `exit ${r.rc}\n${r.out}`,
-    );
-  }
-
-  console.log("installing: every skill, for every installed harness with a skills folder");
-  // Capture stdout of makeLinks by swapping the console out for the duration of each call.
-  const origLog = console.log;
-  const origErr = console.error;
-  let outBuf = "";
-  console.log = (...args: unknown[]) => {
-    outBuf += `${args.map(String).join(" ")}\n`;
-  };
-  console.error = (...args: unknown[]) => {
-    outBuf += `${args.map(String).join(" ")}\n`;
-  };
-  const rc1 = makeLinks(TOOL, 0);
-  console.log = origLog;
-  console.error = origErr;
-
-  st.check(
-    "each skill is a link from claude's folder and from ~/.agents/skills to the checkout",
-    rc1 === 0 &&
-      linksTo(join(C, "postmaster"), join(TOOL, "skills", "postmaster")) &&
-      linksTo(join(C, "wiki"), join(TOOL, "skills", "wiki")) &&
-      linksTo(join(A, "postmaster"), join(TOOL, "skills", "postmaster")) &&
-      linksTo(join(A, "wiki"), join(TOOL, "skills", "wiki")),
-    outBuf,
-  );
-  {
-    const homeEntries = readdirSync(home).sort().join(" ");
-    st.check(
-      "nothing else is made, for a harness not installed or with no skills folder",
-      homeEntries === ".agents .claude",
-      homeEntries,
-    );
-  }
-  st.check(
-    "harnesses that read one folder get one link there",
-    outBuf.includes(`shared folder   pi reads ${A}, linked for another harness`),
-    outBuf,
-  );
-  st.check(
-    "a harness with no skills folder is named with the absolute path its brief gives",
-    outBuf.includes(
-      `no skills folder agy: its brief names ${join(TOOL, "skills", "postmaster", "SKILL.md")} by absolute path`,
-    ),
-    outBuf,
-  );
-  {
-    let copies = "";
-    for (const dir of [C, A]) {
-      try {
-        for (const n of readdirSync(dir)) {
-          const p = join(dir, n);
-          if (!isLink(p)) copies += `${p}\n`;
-        }
-      } catch {
-        /* empty */
-      }
-    }
-    st.check("nothing in a skills folder is a copy", copies === "", copies);
-  }
-  const before = state();
-  outBuf = "";
-  console.log = (...args: unknown[]) => {
-    outBuf += `${args.map(String).join(" ")}\n`;
-  };
-  console.error = (...args: unknown[]) => {
-    outBuf += `${args.map(String).join(" ")}\n`;
-  };
-  const rc2 = makeLinks(TOOL, 0);
-  console.log = origLog;
-  console.error = origErr;
-  st.check(
-    "running it again changes nothing",
-    rc2 === 0 && state() === before && !outBuf.split("\n").some((l) => l.startsWith("linked ")),
-    outBuf,
-  );
-  process.env.CLAUDE_CONFIG_DIR = join(tmp, "cfg");
-  outBuf = "";
-  console.log = (...args: unknown[]) => {
-    outBuf += `${args.map(String).join(" ")}\n`;
-  };
-  console.error = (...args: unknown[]) => {
-    outBuf += `${args.map(String).join(" ")}\n`;
-  };
-  makeLinks(TOOL, 0);
-  console.log = origLog;
-  console.error = origErr;
-  delete process.env.CLAUDE_CONFIG_DIR;
-  st.check(
-    "claude's folder moves with CLAUDE_CONFIG_DIR",
-    linksTo(join(tmp, "cfg", "skills", "postmaster"), join(TOOL, "skills", "postmaster")),
-  );
-
-  console.log(
-    "positive control: from an unrelated directory, a documented command resolves through the link and runs",
-  );
-  const skillMd = join(TOOL, "skills", "postmaster", "SKILL.md");
-  const trackersMd = join(TOOL, "skills", "postmaster", "trackers.md");
-  let resolver = "";
-  let documented = "";
-  try {
-    resolver =
-      readFileSync(skillMd, "utf8")
-        .split("\n")
-        .find((l) => l.includes('test -f "$t/scripts/link-skills.sh"')) ?? "";
-    documented =
-      readFileSync(trackersMd, "utf8")
-        .split("\n")
-        .find((l) => /^<tool>\/scripts\/github\.sh <repo> board +#/u.test(l))
-        ?.replace(/ *#.*$/u, "") ?? "";
-  } catch {
-    /* files not found */
-  }
-  st.check(
-    "SKILL.md documents how <tool> is found, and trackers.md the board command",
-    resolver !== "" && documented !== "",
-    `found: [${resolver}] [${documented}]`,
-  );
-  // stub gh
-  writeFileSync(
-    join(bin, "gh"),
-    `#!/bin/sh
-case "$1 $2" in
-  "auth status") exit 0 ;;
-  "api graphql") echo '{"data": {"repository": {"projectsV2": {"nodes": [{"id": "PVT_1", "number": 1, "title": "r", "closed": false, "url": "https://github.com/users/o/projects/1", "owner": {"login": "o"}}]}}}}' ;;
-  *) echo "stub gh: unexpected: $*" >&2; exit 1 ;;
-esac
-`,
-    "utf8",
-  );
-  chmodSync(join(bin, "gh"), 0o755);
-  run("git", ["init", "-q", join(tmp, "target")]);
-  run("git", ["-C", join(tmp, "target"), "remote", "add", "origin", "https://github.com/o/r.git"]);
-
-  function through(skillDir: string): { code: number; out: string } {
-    const findTool = resolver.replace(/<skill>/gu, skillDir);
-    const command = documented
-      .replace(/<repo>/gu, join(tmp, "target"))
-      .replace(/<tool>/gu, "$tool");
-    const r = run("bash", ["-c", `tool=$(${findTool}) && ${command}`], {
-      cwd: elsewhere,
-      env: { ...process.env, PATH: bin, HOME: home },
-    });
-    return { code: r.code, out: r.out + r.err };
-  }
-
-  {
-    const r = run("bash", ["-c", resolver.replace(/<skill>/gu, join(C, "postmaster"))], {
-      cwd: elsewhere,
-      env: { ...process.env, PATH: bin, HOME: home },
-    });
-    st.check(
-      "<tool> is the checkout the link leads to",
-      r.code === 0 && r.out.trim() === TOOL,
-      `exit ${r.code}\n${r.out}`,
-    );
-  }
-  {
-    const r = through(join(C, "postmaster"));
-    st.check(
-      "the board command runs through the link",
-      r.code === 0 && r.out.includes("https://github.com/users/o/projects/1"),
-      `exit ${r.code}\n${r.out}`,
-    );
-  }
-  {
-    const r = run("bash", ["-c", resolver.replace(/<skill>/gu, "skills/postmaster")], {
-      cwd: TOOL,
-      env: { ...process.env, PATH: bin, HOME: home },
-    });
-    st.check(
-      "a session in the checkout itself, sent to skills/postmaster, finds that checkout",
-      r.code === 0 && r.out.trim() === TOOL,
-      `exit ${r.code}\n${r.out}`,
-    );
-  }
-
-  console.log(
-    "negative controls: the same command fails, naming the link, never a bare 'no such file'",
-  );
-  const link = join(C, "postmaster");
-  function namedFailure(label: string): void {
-    const r = through(link);
-    const out = r.out;
-    const ok1 =
-      r.code !== 0 &&
-      out.includes(link) &&
-      run("grep", ["-qi", "--", "no such file"], { input: out }).code !== 0 &&
-      !out.includes("projects/1");
-    st.check(label, ok1, `exit ${r.code}\n${out}`);
-  }
-  rmSync(link, { force: true });
-  namedFailure("with the link missing");
-  symlinkSync(elsewhere, link);
-  namedFailure("with the link pointing elsewhere");
-  rmSync(link, { force: true });
-  mkdirSync(join(tmp, "copy"), { recursive: true });
-  run("cp", ["-R", join(TOOL, "skills", "postmaster"), join(tmp, "copy", "postmaster")]);
-  symlinkSync(join(tmp, "copy", "postmaster"), link);
-  namedFailure("with the link pointing at a copy of the skill");
-  rmSync(link, { force: true });
-  symlinkSync(join(TOOL, "skills", "postmaster"), link);
-
-  console.log("negative controls: nothing in the way is replaced, and nothing else changes");
-  function inTheWay(label: string, path: string): void {
-    const before = state();
-    outBuf = "";
-    console.log = (...args: unknown[]) => {
-      outBuf += `${args.map(String).join(" ")}\n`;
-    };
-    console.error = (...args: unknown[]) => {
-      outBuf += `${args.map(String).join(" ")}\n`;
-    };
-    const rc = makeLinks(TOOL, 0);
-    console.log = origLog;
-    console.error = origErr;
-    st.check(
-      label,
-      rc === 1 && outBuf.includes(`IN THE WAY      ${path}`) && state() === before,
-      `exit ${rc}\n${outBuf}`,
-    );
-  }
-  rmSync(join(A, "wiki"), { force: true });
-  rmSync(link, { force: true });
-  mkdirSync(link, { recursive: true });
-  inTheWay("a real folder where a link belongs is named", link);
-  st.check("a refusal makes no other link either", !existsSync(join(A, "wiki")));
-  rmSync(link, { recursive: true, force: true });
-  writeFileSync(link, "x\n", "utf8");
-  inTheWay("a real file where a link belongs is named", link);
-  rmSync(link, { force: true });
-  symlinkSync(elsewhere, link);
-  inTheWay("a link that points elsewhere is named", link);
-  rmSync(link, { force: true });
-  symlinkSync(join(tmp, "nowhere"), link);
-  inTheWay("a link that points nowhere is named", link);
-  rmSync(link, { force: true });
-  outBuf = "";
-  console.log = (...args: unknown[]) => {
-    outBuf += `${args.map(String).join(" ")}\n`;
-  };
-  console.error = (...args: unknown[]) => {
-    outBuf += `${args.map(String).join(" ")}\n`;
-  };
-  const rcDry = makeLinks(TOOL, 1);
-  console.log = origLog;
-  console.error = origErr;
-  st.check(
-    "--dry-run names the links it would make, and makes none",
-    rcDry === 0 &&
-      !isLink(link) &&
-      !isLink(join(A, "wiki")) &&
-      outBuf.includes(`to link         ${link}`),
-    `exit ${rcDry}\n${outBuf}`,
-  );
-
-  // restore links
-  makeLinks(TOOL, 0);
-
-  console.log("a skills folder that is itself a link into a checkout's skills");
-  const fixture = join(tmp, "fixture");
-  mkdirSync(join(fixture, "skills", "postmaster"), { recursive: true });
-  mkdirSync(join(fixture, "skills", "wiki"), { recursive: true });
-  writeFileSync(
-    join(fixture, "skills", "postmaster", "SKILL.md"),
-    "---\nname: postmaster\n---\n",
-    "utf8",
-  );
-  writeFileSync(join(fixture, "skills", "wiki", "SKILL.md"), "---\nname: wiki\n---\n", "utf8");
-  const _fixtureReal = resolve(fixture);
-  const fHome = join(tmp, "fhome");
-  mkdirSync(join(fHome, ".claude"), { recursive: true });
-  mkdirSync(join(fHome, ".agents", "skills"), { recursive: true });
-  symlinkSync(join(fixture, "skills"), join(fHome, ".claude", "skills"));
-  {
-    const origHome = process.env.HOME;
-    process.env.HOME = fHome;
-    outBuf = "";
-    console.log = (...args: unknown[]) => {
-      outBuf += `${args.map(String).join(" ")}\n`;
-    };
-    console.error = (...args: unknown[]) => {
-      outBuf += `${args.map(String).join(" ")}\n`;
-    };
-    const rc = makeLinks(fixture, 0);
-    console.log = origLog;
-    console.error = origErr;
-    process.env.HOME = origHome;
-    st.check(
-      "counts as linked, and nothing is written into the checkout",
-      rc === 0 &&
-        outBuf.includes(`already linked  ${join(fHome, ".claude", "skills", "postmaster")}`),
-      `exit ${rc}\n${outBuf}`,
-    );
-    process.env.HOME = fHome;
-    outBuf = "";
-    console.log = (...args: unknown[]) => {
-      outBuf += `${args.map(String).join(" ")}\n`;
-    };
-    console.error = (...args: unknown[]) => {
-      outBuf += `${args.map(String).join(" ")}\n`;
-    };
-    removeLinks(fixture);
-    console.log = origLog;
-    console.error = origErr;
-    process.env.HOME = origHome;
-    st.check(
-      "--remove leaves it, and the checkout, alone",
-      existsSync(join(fixture, "skills", "postmaster")) && isLink(join(fHome, ".claude", "skills")),
-    );
-  }
-
-  console.log("--remove: only the links to this checkout's skills");
-  makeLinks(TOOL, 0);
-  symlinkSync(elsewhere, join(C, "other"));
-  rmSync(join(A, "wiki"), { force: true });
-  mkdirSync(join(A, "wiki"), { recursive: true });
-  outBuf = "";
-  console.log = (...args: unknown[]) => {
-    outBuf += `${args.map(String).join(" ")}\n`;
-  };
-  console.error = (...args: unknown[]) => {
-    outBuf += `${args.map(String).join(" ")}\n`;
-  };
-  removeLinks(TOOL);
-  console.log = origLog;
-  console.error = origErr;
-  st.check(
-    "its own links go; a link elsewhere and a real folder stay",
-    !isLink(join(C, "postmaster")) &&
-      !isLink(join(C, "wiki")) &&
-      !isLink(join(A, "postmaster")) &&
-      isLink(join(C, "other")) &&
-      isDirectory(join(A, "wiki")),
-    outBuf,
-  );
-
-  console.log("which checkout is linked");
-  const repo = join(tmp, "repo");
-  run("git", ["init", "-q", "-b", "main", repo]);
-  run("git", [
-    "-C",
-    repo,
-    "-c",
-    "user.name=t",
-    "-c",
-    "user.email=t@t",
-    "commit",
-    "-q",
-    "--allow-empty",
-    "-m",
-    "first",
-  ]);
-  run("git", ["-C", repo, "worktree", "add", "-q", join(repo, ".worktrees", "wt"), "-b", "wt"]);
-  const repoReal = resolve(repo);
-  {
-    const cr = checkoutRoot(join(repo, ".worktrees", "wt"));
-    st.check(
-      "from a worktree: the main checkout, never the worktree",
-      cr === repoReal,
-      cr ?? "null",
-    );
-  }
-  {
-    const cr = checkoutRoot(repo);
-    st.check("from the main checkout: itself", cr === repoReal);
-  }
-  const pkg = join(tmp, "pkg");
-  mkdirSync(pkg, { recursive: true });
-  mkdirSync(join(repo, "node_modules", "pkg"), { recursive: true });
-  const pkgReal = resolve(pkg);
-  const nestedReal = resolve(join(repo, "node_modules", "pkg"));
-  {
-    const cr = checkoutRoot(pkg);
-    st.check(
-      "from a tree outside git, such as an installed package: itself",
-      cr === pkgReal,
-      cr ?? "null",
-    );
-  }
-  {
-    const cr = checkoutRoot(nestedReal);
-    st.check(
-      "from a package inside another project's checkout: the package, not the project",
-      cr === nestedReal,
-      cr ?? "null",
-    );
-  }
-  run("git", ["clone", "-q", "--bare", repo, join(tmp, "bare.git")]);
-  run("git", ["-C", join(tmp, "bare.git"), "worktree", "add", "-q", join(tmp, "bare-wt"), "main"]);
-  {
-    const origErr2 = console.error;
-    let errBuf = "";
-    console.error = (...args: unknown[]) => {
-      errBuf += `${args.map(String).join(" ")}\n`;
-    };
-    const cr = checkoutRoot(resolve(join(tmp, "bare-wt")));
-    console.error = origErr2;
-    st.check("a bare main checkout is refused", cr === null, errBuf);
-  }
-
-  console.log("this script and harnesses.md's Skills folders table agree");
-  const harnessesMd = join(TOOL, "skills", "postmaster", "harnesses.md");
-  let table = "";
-  try {
-    const text = readFileSync(harnessesMd, "utf8");
-    const lines = text.split("\n");
-    let on = false;
-    for (const l of lines) {
-      if (/^## Skills folders/u.test(l)) {
-        on = true;
-        continue;
-      }
-      if (on && /^## /u.test(l)) break;
-      if (on && /^\| [a-z]+ \|/u.test(l)) table += `${l}\n`;
-    }
-  } catch {
-    /* no harnesses.md */
-  }
-  st.check("harnesses.md has a Skills folders table", table !== "", table);
-  for (const h of HARNESSES) {
-    const row = table.split("\n").find((l) => {
-      const name = (l.split("|")[1] ?? "").replace(/ /gu, "");
-      return name === h;
-    });
-    const cell = row ? (row.split("|")[2] ?? "") : "";
-    const wantMatch = cell.match(/^ *`([^`]*)`/u);
-    let want = wantMatch ? (wantMatch[1] ?? "") : "";
-    if (want.startsWith("~")) want = (process.env.HOME ?? "~") + want.slice(1);
-    const scriptSays = skillsFolder(h) ?? "";
-    st.check(
-      `${h}: ${want || "no skills folder"}`,
-      cell !== "" && scriptSays === want,
-      `script says '${scriptSays}', harnesses.md says '${cell || "no row"}'`,
-    );
-  }
-
-  st.finish();
-});

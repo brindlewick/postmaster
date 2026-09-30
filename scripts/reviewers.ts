@@ -8,7 +8,6 @@
 //   reviewers.sh eligible <lens> [--config <path>] [--project <repo>]  configured lanes for a lens, checked for eligibility
 //   reviewers.sh lanes <waybill> <lens>    the lanes for one lens, one per line, from a waybill
 //   reviewers.sh lenses                    the lenses, in the order the review stage runs them
-//   reviewers.sh --self-test
 //
 // `lines` prints `reviewers: <lane>, <lane>`, a `bug reviewers:` line containing only eligible
 // lanes, then each other lens the config gives its own lanes. `eligible` resolves a configured
@@ -23,12 +22,11 @@
 //   exit 1  usage, no config or one that does not parse, or no such waybill
 //   exit 2  a lens the review stage does not have, a lane the config does not define, a lens with
 //           no eligible lanes, or a waybill whose Team section has no reviewers line
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readTomlFile } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
-import { run, withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
+import { run } from "./lib/proc.ts";
 import { PY_DOT, PY_S_CLASS, pySplitLines, pyTrim } from "./lib/text.ts";
 
 const LENSES = ["style", "bug", "security"] as const;
@@ -42,7 +40,7 @@ interface CmdResult {
 
 function usage(): never {
   console.error(
-    "usage: reviewers.sh lines [--config <path>] [--project <repo>] | eligible <lens> [--config <path>] [--project <repo>] | lanes <waybill> <lens> | lenses | --self-test",
+    "usage: reviewers.sh lines [--config <path>] [--project <repo>] | eligible <lens> [--config <path>] [--project <repo>] | lanes <waybill> <lens> | lenses",
   );
   process.exit(1);
 }
@@ -177,11 +175,11 @@ function resolved(
   return { code: 0, out: `${names.join("\n")}\n`, err: "" };
 }
 
-function lines(configPath: string, project = ""): CmdResult {
+export function lines(configPath: string, project = ""): CmdResult {
   return resolved("lines", configPath, "", project);
 }
 
-function eligible(configPath: string, lens: string, project = ""): CmdResult {
+export function eligible(configPath: string, lens: string, project = ""): CmdResult {
   return resolved("eligible", configPath, lens, project);
 }
 
@@ -189,7 +187,7 @@ const ANY_HEAD_RE = new RegExp(`^##[${PY_S_CLASS}]`, "u");
 const TEAM_HEAD_RE = new RegExp(`^##[${PY_S_CLASS}]+Team[${PY_S_CLASS}]*$`, "u");
 
 /** lanes <waybill> <lens>: the lanes for one lens, one per line, from a waybill. */
-function lanes(waybill: string, lens: string): CmdResult {
+export function lanes(waybill: string, lens: string): CmdResult {
   const err: string[] = [];
   const fail1 = (msg: string): CmdResult => {
     err.push(msg);
@@ -254,7 +252,6 @@ function printResult(r: CmdResult): never {
 }
 
 // --- entry ------------------------------------------------------------------------------
-const argv = process.argv.slice(2);
 const CONFIG =
   process.env.POSTMASTER_CONFIG ?? join(process.env.HOME ?? "", ".postmaster/config.toml");
 
@@ -283,7 +280,7 @@ function configFlags(args: string[]): [string, string] {
   return [configPath, project];
 }
 
-if (argv[0] !== "--self-test") {
+function main(argv: string[]): void {
   switch (argv[0]) {
     case "lines": {
       const [configPath, project] = configFlags(argv.slice(1));
@@ -310,224 +307,8 @@ if (argv[0] !== "--self-test") {
     default:
       usage();
   }
-  process.exit(0);
 }
 
-// --- self-test ----------------------------------------------------------------------------
-const self = join(scriptsDir(import.meta), "reviewers.sh");
-withTempDir((tmp) => {
-  const st = new SelfTest();
-  const errFile = join(tmp, "err");
-
-  const lanesBlock = `[lanes.luna]
-harness = "codex"
-model = "m1"
-[lanes.mimo]
-harness = "mimo"
-model = "m2"
-[lanes.sentinel]
-harness = "claude"
-model = "m3"
-[lanes.pi]
-harness = "pi"
-model = "m4"`;
-  const config = (name: string, teamBody: string): void => {
-    writeFileSync(join(tmp, `${name}.toml`), `${lanesBlock}\n\n[team]\n${teamBody}\n`);
-  };
-  const waybill = (name: string, reviewerLines: string): void => {
-    writeFileSync(
-      join(tmp, `${name}.md`),
-      `# Waybill: 7\n\n## Ticket\n\nsecurity reviewers: luna\nreviewers: sentinel\n\n` +
-        `## Team\nworkhorses: luna=codex/m1/, mimo=mimo/m2/\n${reviewerLines}\ncoachman: muse/m4/\n\n` +
-        `## Dispatch\ndispatch: /tmp/x\n`,
-    );
-  };
-
-  let lastErr = "";
-  const expect = (label: string, wantRc: number, wantOut: string, call: () => CmdResult): void => {
-    const r = call();
-    lastErr = r.err;
-    writeFileSync(errFile, r.err);
-    const want = wantOut.replace(/\\n/gu, "\n").replace(/\n+$/u, "");
-    const got = r.out.replace(/\n+$/u, "");
-    if (r.code === wantRc && got === want) st.ok(label);
-    else {
-      st.fail(`${label}: wanted exit ${wantRc} and "${wantOut}", got exit ${r.code}`, got + r.err);
-    }
-  };
-  // Unicode primitives, BASE reviewers.sh python: every expectation python3-verified.
-  // U+001F is Python space yet survives splitlines (U+001C would not), so it vectors the patterns.
-  writeFileSync(
-    join(tmp, "uni1.md"),
-    "# Waybill: 7\n\n## Ticket\nx\n\n##\x1fTeam\nsecurity reviewers: luna\n\n## Dispatch\ndispatch: /tmp/x\n",
-  );
-  expect("a Team heading with U+001F opens the section", 0, "luna", () =>
-    lanes(join(tmp, "uni1.md"), "security"),
-  );
-  waybill("uni2", "security reviewers\x1f:\x1fluna");
-  expect("a reviewers line with U+001F parses", 0, "luna", () =>
-    lanes(join(tmp, "uni2.md"), "security"),
-  );
-  writeFileSync(
-    join(tmp, "uni3.md"),
-    "# Waybill: 7\n\n## Ticket\nx\n\n## Team\x1csecurity reviewers: luna\n\n## Dispatch\ndispatch: /tmp/x\n",
-  );
-  expect("a U+001C opens a new line (splitlines)", 0, "luna", () =>
-    lanes(join(tmp, "uni3.md"), "security"),
-  );
-
-  console.log("positive controls");
-  config(
-    "one",
-    `workhorses = ["luna", "mimo"]
-reviewers = ["luna", "mimo"]
-[team.lens_reviewers]
-security = ["luna", "mimo", "sentinel"]`,
-  );
-  expect(
-    "the waybill lines name the reviewers, then each lens with its own lanes",
-    0,
-    "reviewers: luna, mimo\\nbug reviewers: luna, mimo\\nsecurity reviewers: luna, mimo, sentinel",
-    () => lines(join(tmp, "one.toml")),
-  );
-  waybill("one", lines(join(tmp, "one.toml")).out.trimEnd());
-  expect("a lens with its own line gets exactly those lanes", 0, "luna\\nmimo\\nsentinel", () =>
-    lanes(join(tmp, "one.md"), "security"),
-  );
-  expect("the bug lens gets only configured reviewers with a review form", 0, "luna\\nmimo", () =>
-    lanes(join(tmp, "one.md"), "bug"),
-  );
-  expect("the configured bug reviewers resolve to eligible lanes", 0, "luna\\nmimo", () =>
-    eligible(join(tmp, "one.toml"), "bug"),
-  );
-  expect("and so does style", 0, "luna\\nmimo", () => lanes(join(tmp, "one.md"), "style"));
-  config(
-    "two",
-    `workhorses = ["luna", "mimo"]
-reviewers = ["sentinel"]`,
-  );
-  expect(
-    "a config without the table keeps the reviewer line and adds eligible bug reviewers",
-    0,
-    "reviewers: sentinel\\nbug reviewers: sentinel",
-    () => lines(join(tmp, "two.toml")),
-  );
-  config("three", `workhorses = ["luna", "mimo"]`);
-  expect(
-    "reviewers default to the workhorses, and bug reviewers are filtered",
-    0,
-    "reviewers: luna, mimo\\nbug reviewers: luna, mimo",
-    () => lines(join(tmp, "three.toml")),
-  );
-  writeFileSync(
-    join(tmp, "no-review.toml"),
-    '[lanes.pi]\nharness = "pi"\nmodel = "p"\n\n[team]\nworkhorses = ["pi"]\nreviewers = ["pi"]\n',
-  );
-  expect("no eligible bug reviewer is a pre-flight refusal with its reason", 2, "", () =>
-    eligible(join(tmp, "no-review.toml"), "bug"),
-  );
-  if (lastErr.includes("no configured bug reviewer has a code-review form"))
-    st.ok("the refusal explains why the bug lens cannot run");
-  else st.fail("the refusal explains why the bug lens cannot run", lastErr);
-  config(
-    "mixed",
-    `workhorses = ["luna", "pi"]
-reviewers = ["luna", "pi"]`,
-  );
-  expect(
-    "a bug reviewer whose harness has no review form is left off the bug line",
-    0,
-    "reviewers: luna, pi\\nbug reviewers: luna",
-    () => lines(join(tmp, "mixed.toml")),
-  );
-  expect("eligible agrees with review-forms.sh on the same config", 0, "luna", () =>
-    eligible(join(tmp, "mixed.toml"), "bug"),
-  );
-  expect("the lenses are the review stage's, in order", 0, "style\\nbug\\nsecurity", () =>
-    run(self, ["lenses"]),
-  );
-
-  console.log("negative controls");
-  config(
-    "bad-lens",
-    `workhorses = ["luna", "mimo"]
-[team.lens_reviewers]
-secruity = ["sentinel"]`,
-  );
-  expect("a lens the review stage does not have is refused", 2, "", () =>
-    lines(join(tmp, "bad-lens.toml")),
-  );
-  if (lastErr.includes("secruity, which is not a lens")) st.ok("and named");
-  else st.fail("and named", lastErr);
-  config(
-    "bad-lane",
-    `workhorses = ["luna", "mimo"]
-[team.lens_reviewers]
-security = ["luna", "nobody"]`,
-  );
-  expect("a lane the config does not define is refused", 2, "", () =>
-    lines(join(tmp, "bad-lane.toml")),
-  );
-  if (lastErr.includes("nobody, which is not a lane")) st.ok("and named");
-  else st.fail("and named", lastErr);
-  config(
-    "empty",
-    `workhorses = ["luna", "mimo"]
-[team.lens_reviewers]
-security = []`,
-  );
-  expect("a lens with no lanes is refused", 2, "", () => lines(join(tmp, "empty.toml")));
-  config(
-    "bad-default",
-    `workhorses = ["luna", "mimo"]
-reviewers = ["ghost"]`,
-  );
-  expect("a reviewer that is not a lane is refused", 2, "", () =>
-    lines(join(tmp, "bad-default.toml")),
-  );
-  expect("no config is refused", 1, "", () => lines(join(tmp, "missing.toml")));
-  expect("an explicitly empty --project is refused, never read as no project", 1, "", () =>
-    run(self, ["lines", "--config", join(tmp, "one.toml"), "--project", ""]),
-  );
-  if (lastErr.includes("no such project directory")) st.ok("and the refusal names the project");
-  else st.fail("and the refusal names the project", lastErr);
-  expect("an explicitly empty --project is refused for eligible too", 1, "", () =>
-    run(self, ["eligible", "bug", "--config", join(tmp, "one.toml"), "--project", ""]),
-  );
-  if (lastErr.includes("no such project directory"))
-    st.ok("and the eligible refusal names the project");
-  else st.fail("and the eligible refusal names the project", lastErr);
-  expect("a waybill lens that is not a lens is refused", 2, "", () =>
-    lanes(join(tmp, "one.md"), "secruity"),
-  );
-  waybill("no-team", "");
-  expect(
-    "a Team section with no reviewers line is refused, never read as no reviewers",
-    2,
-    "",
-    () => lanes(join(tmp, "no-team.md"), "bug"),
-  );
-  expect("reviewer lines in the ticket's text are not read", 2, "", () =>
-    lanes(join(tmp, "no-team.md"), "security"),
-  );
-  writeFileSync(
-    join(tmp, "empty-bug.md"),
-    "# Waybill: 7\n\n## Team\nreviewers: luna, mimo\nbug reviewers: \n",
-  );
-  expect("an explicit empty bug reviewers line does not fall back to reviewers", 2, "", () =>
-    lanes(join(tmp, "empty-bug.md"), "bug"),
-  );
-  if (lastErr.includes("empty bug reviewers line"))
-    st.ok("the refusal names the empty bug reviewers line");
-  else st.fail("the refusal names the empty bug reviewers line", lastErr);
-  waybill("no-bug-line", "reviewers: luna, pi");
-  expect("a waybill with no bug reviewers line is refused, never fallen back", 2, "", () =>
-    lanes(join(tmp, "no-bug-line.md"), "bug"),
-  );
-  if (lastErr.includes("no bug reviewers line"))
-    st.ok("the refusal names the missing bug reviewers line");
-  else st.fail("the refusal names the missing bug reviewers line", lastErr);
-  expect("no such waybill is refused", 1, "", () => lanes(join(tmp, "none.md"), "bug"));
-
-  st.finish();
-});
+if (import.meta.main) {
+  main(process.argv.slice(2));
+}

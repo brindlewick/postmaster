@@ -3,7 +3,6 @@
 //   spec-decisions.sh <dispatch> fresh
 //   spec-decisions.sh <dispatch> record <lane> <decision> <commit> [<words>...]
 //   spec-decisions.sh <dispatch> count
-//   spec-decisions.sh --self-test
 //
 // fresh starts a new package's <dispatch>/spec-decisions.md, so no stanza survives across
 // packages. record appends one stanza and logs the spec-review line through
@@ -21,11 +20,10 @@
 //   exit 0  done; fresh and record print nothing, count prints the two lines
 //   exit 1  usage, no such dispatch, unreadable manifest, missing decisions file
 //   exit 2  a refusal: a bad decision, commit or words, a duplicate lane, a malformed stanza
-import { appendFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
-import { die, run, withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
+import { die, run } from "./lib/proc.ts";
 import { PY_S_CLASS, pySplitLines, pyTrim, pyWords } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
@@ -198,7 +196,7 @@ function count(d: string): void {
 }
 
 function usage(): never {
-  console.error("usage: spec-decisions.sh <dispatch> fresh|record|count | --self-test");
+  console.error("usage: spec-decisions.sh <dispatch> fresh|record|count");
   console.error(
     "       spec-decisions.sh <dispatch> record <lane> <decision> <commit> [<words>...]",
   );
@@ -208,9 +206,7 @@ function usage(): never {
 
 // --- entry --------------------------------------------------------------------------------------
 const argv = process.argv.slice(2);
-if (argv[0] === "--self-test") {
-  selfTest();
-} else if (argv[0] === undefined || argv[0] === "" || argv[0].startsWith("-")) {
+if (argv[0] === undefined || argv[0] === "" || argv[0].startsWith("-")) {
   usage();
 } else {
   if (argv.length < 2) usage();
@@ -229,244 +225,4 @@ if (argv[0] === "--self-test") {
   } else {
     usage();
   }
-}
-
-// --- self-test ----------------------------------------------------------------------------------
-function selfTest(): void {
-  withTempDir((tmp) => {
-    const d = join(tmp, "project", ".postmaster", "runs", "RUN-1");
-    mkdirSync(d, { recursive: true });
-    const SELF = join(HERE, "spec-decisions.sh");
-    const st = new SelfTest();
-    const decisions = join(d, "spec-decisions.md");
-    const actions = join(d, "actions.jsonl");
-
-    const manifest = (lanesJson: string): void => {
-      writeFileSync(join(d, "manifest.json"), `{"lanes": {${lanesJson}}}\n`);
-    };
-    // The shell's stanzas(): grep -c '^## '.
-    const stanzas = (): number => {
-      try {
-        return readFileSync(decisions, "utf8")
-          .split("\n")
-          .filter((l) => l.startsWith("## ")).length;
-      } catch {
-        return 0;
-      }
-    };
-    // The shell's logged(): tail -1 of the action log.
-    const logged = (): string => {
-      const lines = readFileSync(actions, "utf8")
-        .split("\n")
-        .filter((l) => l !== "");
-      return lines.length > 0 ? lines[lines.length - 1]! : "";
-    };
-    const actionsText = (): string => {
-      try {
-        return readFileSync(actions, "utf8");
-      } catch {
-        return "";
-      }
-    };
-    // The shell's $(...): trailing newlines stripped.
-    const strip = (s: string): string => s.replace(/\n+$/u, "");
-    const approvedLines = (): number =>
-      readFileSync(decisions, "utf8")
-        .split("\n")
-        .filter((l) => l.includes("decision: approved")).length;
-    const go = (...args: string[]) => run("bash", [SELF, ...args]);
-
-    console.log("positive controls");
-    let r = go(d, "fresh");
-    if (r.code === 0 && isFile(decisions) && statSync(decisions).size === 0)
-      st.ok("fresh starts an empty decisions file");
-    else st.fail(`fresh starts an empty decisions file (exit ${r.code})`, r.err);
-
-    manifest('"alpha": {}');
-    r = go(d, "record", "alpha", "approved", "abc123");
-    if (r.code === 0 && stanzas() === 1 && logged().includes('"detail":"approved abc123"'))
-      st.ok("record writes the stanza and logs the spec-review line");
-    else st.fail(`record writes the stanza and logs the spec-review line (exit ${r.code})`, r.err);
-
-    go(d, "fresh");
-    if (statSync(decisions).size === 0) st.ok("fresh truncates a decided file");
-    else st.fail("fresh truncates a decided file");
-
-    manifest('"alpha": {"outcome": "approved"}, "beta": {}');
-    go(d, "fresh");
-    r = go(d, "record", "beta", "approved", "def456");
-    const c4 = go(d, "count");
-    if (
-      r.code === 0 &&
-      c4.code === 0 &&
-      strip(c4.out) === "approved 2\nchanges 0" &&
-      approvedLines() === 1
-    )
-      st.ok(
-        "package 1 approves A and changes B, package 2 approves B: two approvals where the file alone reads one",
-      );
-    else
-      st.fail(
-        `package 1 approves A and changes B, package 2 approves B: two approvals where the file alone reads one (exit ${r.code}/${c4.code})`,
-        `${strip(c4.out)} ${c4.err}`,
-      );
-
-    manifest('"alpha": {"outcome": "approved"}, "beta": {}');
-    go(d, "fresh");
-    r = go(d, "record", "beta", "dropped", "def456", "we only need one lane");
-    const c5 = go(d, "count");
-    if (r.code === 0 && c5.code === 0 && strip(c5.out) === "approved 1\nchanges 0")
-      st.ok("one approval and one drop across two packages reads as the under-two path");
-    else
-      st.fail(
-        `one approval and one drop across two packages reads as the under-two path (exit ${r.code}/${c5.code})`,
-        `${strip(c5.out)} ${c5.err}`,
-      );
-
-    manifest('"alpha": {}, "beta": {}');
-    go(d, "fresh");
-    go(d, "record", "alpha", "approved", "abc123");
-    r = go(d, "record", "beta", "changes", "def456", "narrow", "the", "scope");
-    const c6 = go(d, "count");
-    if (
-      r.code === 0 &&
-      c6.code === 0 &&
-      strip(c6.out) === "approved 1\nchanges 1" &&
-      logged().includes('"detail":"changes def456 narrow the scope"')
-    )
-      st.ok("an approval and a changes read as one approval with one outstanding");
-    else
-      st.fail(
-        `an approval and a changes read as one approval with one outstanding (exit ${r.code}/${c6.code})`,
-        `${strip(c6.out)} ${c6.err}`,
-      );
-
-    manifest('"alpha": {"outcome": "approved"}');
-    go(d, "fresh");
-    go(d, "record", "alpha", "approved", "abc123");
-    const c7 = go(d, "count");
-    if (c7.code === 0 && strip(c7.out) === "approved 1\nchanges 0")
-      st.ok("a lane approved in both places counts once");
-    else
-      st.fail(
-        `a lane approved in both places counts once (exit ${c7.code})`,
-        `${strip(c7.out)} ${c7.err}`,
-      );
-
-    manifest('"alpha": {}, "beta": {}');
-    go(d, "fresh");
-    go(d, "record", "alpha", "approved", "abc123");
-    r = go(d, "record", "beta2", "approved", "def456");
-    const typoErr = r.err;
-    const typoRc = r.code;
-    const c8 = go(d, "count");
-    if (
-      typoRc === 2 &&
-      typoErr.includes("not a lane in the manifest") &&
-      c8.code === 0 &&
-      strip(c8.out) === "approved 1\nchanges 0"
-    )
-      st.ok("a mistyped lane is refused, and the typo scenario reads one approval");
-    else
-      st.fail(
-        `a mistyped lane is refused, and the typo scenario reads one approval (exit ${typoRc}/${c8.code})`,
-        `${strip(c8.out)} ${c8.err}`,
-      );
-
-    manifest('"alpha": {}');
-    writeFileSync(
-      decisions,
-      "## alpha\ndecision: approved\ncommit: abc123\nwords: \n\n## alpha\ndecision: changes\ncommit: def456\nwords: narrower\n\n",
-    );
-    r = go(d, "count");
-    if (r.code === 0 && strip(r.out) === "approved 1\nchanges 1")
-      st.ok("a duplicate stanza for one lane counts once");
-    else
-      st.fail(
-        `a duplicate stanza for one lane counts once (exit ${r.code})`,
-        `${strip(r.out)} ${r.err}`,
-      );
-
-    manifest('"alpha": {}, "beta": {}');
-    writeFileSync(
-      decisions,
-      "## alpha\ndecision: approved\ncommit: \nwords: \n\n## beta\ndecision: approved\ncommit: def456\nwords: \n\n",
-    );
-    r = go(d, "count");
-    if (r.code === 0 && strip(r.out) === "approved 1\nchanges 0")
-      st.ok("an approved stanza with a blank commit contributes nothing");
-    else
-      st.fail(
-        `an approved stanza with a blank commit contributes nothing (exit ${r.code})`,
-        `${strip(r.out)} ${r.err}`,
-      );
-
-    console.log("negative controls");
-    manifest('"beta": {}');
-    go(d, "fresh");
-    const before = stanzas();
-    const linesBefore = actionsText();
-    r = go(d, "record", "alpha", "ok", "abc123");
-    if (
-      r.code === 2 &&
-      stanzas() === before &&
-      actionsText() === linesBefore &&
-      r.err.includes("a decision is approved, changes or dropped")
-    )
-      st.ok("a decision outside the triple is refused, and nothing is written");
-    else
-      st.fail(
-        `a decision outside the triple is refused, and nothing is written (exit ${r.code})`,
-        r.err,
-      );
-
-    r = go(d, "record", "beta", "changes", "def456");
-    if (r.code === 2 && r.err.includes("carries the user's words"))
-      st.ok("a changes with no words is refused");
-    else st.fail(`a changes with no words is refused (exit ${r.code})`, r.err);
-
-    r = go(d, "record", "beta", "approved", "def456", "nice", "work");
-    if (r.code === 2 && r.err.includes("carries no words"))
-      st.ok("an approval with words is refused");
-    else st.fail(`an approval with words is refused (exit ${r.code})`, r.err);
-
-    r = go(d, "record", "beta", "approved");
-    if (r.code === 1 && r.err.includes("usage:")) st.ok("a missing commit is a usage error");
-    else st.fail(`a missing commit is a usage error (exit ${r.code})`, r.err);
-
-    go(d, "record", "beta", "approved", "def456");
-    r = go(d, "record", "beta", "dropped", "def456", "out");
-    if (r.code === 2 && stanzas() === 1 && r.err.includes("already decided"))
-      st.ok("a second stanza for one lane is refused");
-    else st.fail(`a second stanza for one lane is refused (exit ${r.code})`, r.err);
-
-    rmSync(decisions);
-    r = go(d, "record", "beta", "approved", "def456");
-    if (r.code === 1 && r.err.includes("run fresh first"))
-      st.ok("a record with no package file is refused");
-    else st.fail(`a record with no package file is refused (exit ${r.code})`, r.err);
-
-    r = go(d, "count");
-    if (r.code === 1 && r.err.includes("run fresh first"))
-      st.ok("a count with no package file is refused");
-    else st.fail(`a count with no package file is refused (exit ${r.code})`, r.err);
-
-    writeFileSync(decisions, "## beta\ndecision: approved\n");
-    r = go(d, "count");
-    if (r.code === 2 && r.err.includes("incomplete stanza"))
-      st.ok("a hand-mangled stanza is refused, not miscounted");
-    else st.fail(`a hand-mangled stanza is refused, not miscounted (exit ${r.code})`, r.err);
-
-    rmSync(join(d, "manifest.json"));
-    r = go(d, "count");
-    if (r.code === 1 && r.err.includes("cannot read")) st.ok("a count with no manifest is refused");
-    else st.fail(`a count with no manifest is refused (exit ${r.code})`, r.err);
-
-    r = go(join(tmp, "nowhere"), "count");
-    if (r.code === 1 && r.err.includes("no such dir"))
-      st.ok("a dispatch that does not exist is refused");
-    else st.fail(`a dispatch that does not exist is refused (exit ${r.code})`, r.err);
-
-    st.finish();
-  });
 }

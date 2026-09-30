@@ -3,7 +3,6 @@
 //
 //   verify-library.sh [<worktree>]
 //   verify-library.sh --list [<worktree>]   the test files it would run, one per line
-//   verify-library.sh --self-test
 //
 // A test file is a JavaScript or TypeScript file under a test, tests or __tests__ directory, or
 // named *.test.* or *.spec.*, tracked or new, outside node_modules and outside the directories
@@ -20,34 +19,21 @@
 //   exit 1  the build or a test failed
 //   exit 3  not run: no package.json, no name in it, no test that imports it by name, or its
 //           runner, node or its package manager is not installed; the reason is the last line
-import {
-  accessSync,
-  constants,
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { accessSync, constants, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { delimiter, join, posix, resolve } from "node:path";
-import { readJsonFile, tryJsonFile } from "./lib/data.ts";
-import { scriptsDir } from "./lib/paths.ts";
-import { die, run, withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
+import { readJsonFile } from "./lib/data.ts";
+import { die, run } from "./lib/proc.ts";
 import { BOUND_L, PY_M_START, PY_S_CLASS, W_CLASS } from "./lib/text.ts";
 
 const CODE = /\.(?:c|m)?(?:j|t)sx?$/u;
 const TEST_NAME = /\.(?:test|spec)\.(?:c|m)?(?:j|t)sx?$/u;
 const TEST_DIRS = new Set(["test", "tests", "__tests__"]);
 const SUPPORT_DIRS = new Set(["fixtures", "__fixtures__", "helpers", "support", "__mocks__"]);
-const IMPORT = new RegExp(
+export const IMPORT = new RegExp(
   `(?:${BOUND_L}from[${PY_S_CLASS}]*|${BOUND_L}import[${PY_S_CLASS}]*\\(?[${PY_S_CLASS}]*|${BOUND_L}require[${PY_S_CLASS}]*\\([${PY_S_CLASS}]*)(['"])([^'"\\n]+)\\1`,
   "gu",
 );
-const TEST_CALL = new RegExp(
+export const TEST_CALL = new RegExp(
   `${PY_M_START}[${PY_S_CLASS}]*(?:await[${PY_S_CLASS}]+)?(?:test|it|describe)(?:\\.[${W_CLASS}]+)*[${PY_S_CLASS}]*\\(`,
   "gu",
 );
@@ -229,7 +215,7 @@ function listOrRun(mode: "list" | "run", wtArg: string): number {
 }
 
 /** shutil.which: the path of a runnable file named tool on PATH, or null. */
-function findOnPath(tool: string, path: string): string | null {
+export function findOnPath(tool: string, path: string): string | null {
   for (const dir of path.split(delimiter)) {
     if (!dir) continue;
     const f = join(dir, tool);
@@ -250,275 +236,22 @@ function which(tool: string): boolean {
 }
 
 // --- entry -----------------------------------------------------------------------------------
-const argv = process.argv.slice(2);
-if (argv[0] === "--self-test") {
-  // fall through to self-test below
-} else if (argv[0] === "--list") {
-  if (argv.length > 2) die("usage: verify-library.sh [--list] [<worktree>] | --self-test", 1);
-  const WT = argv[1] ?? ".";
-  if (!existsSync(WT)) die(`verify-library: no such directory: ${WT}`, 1);
-  process.exit(listOrRun("list", WT));
-} else if (argv[0]?.startsWith("-")) {
-  die("usage: verify-library.sh [--list] [<worktree>] | --self-test", 1);
-} else {
-  if (argv.length > 1) die("usage: verify-library.sh [--list] [<worktree>] | --self-test", 1);
+function main(argv: string[]): number {
+  if (argv[0] === "--list") {
+    if (argv.length > 2) die("usage: verify-library.sh [--list] [<worktree>]", 1);
+    const WT = argv[1] ?? ".";
+    if (!existsSync(WT)) die(`verify-library: no such directory: ${WT}`, 1);
+    return listOrRun("list", WT);
+  }
+  if (argv[0]?.startsWith("-")) {
+    die("usage: verify-library.sh [--list] [<worktree>]", 1);
+  }
+  if (argv.length > 1) die("usage: verify-library.sh [--list] [<worktree>]", 1);
   const WT = argv[0] ?? ".";
   if (!existsSync(WT)) die(`verify-library: no such directory: ${WT}`, 1);
-  process.exit(listOrRun("run", WT));
+  return listOrRun("run", WT);
 }
 
-// --- self-test ---------------------------------------------------------------------------------
-withTempDir((tmp) => {
-  const SELF = join(scriptsDir(import.meta), "verify-library.sh");
-  const st = new SelfTest();
-  {
-    // Unicode primitives, BASE verify-library.sh python: every expectation python3-verified.
-    const im = [...'x = 1\néfrom "m"\n'.matchAll(IMPORT)].map((m) => m[0]);
-    st.check(
-      "an import needs a word boundary (éfrom is none)",
-      im.length === 0,
-      JSON.stringify(im),
-    );
-    TEST_CALL.lastIndex = 0;
-    const tLongS = TEST_CALL.test('test.ſskip("a")');
-    st.check("test-names may hold non-ASCII word chars", tLongS, "ſ");
-    TEST_CALL.lastIndex = 0;
-    const t1f = TEST_CALL.test('\x1f test("a")');
-    st.check("test-calls may indent with U+001F", t1f, "\x1f");
-  }
-
-  function expect(label: string, exit: number, project: string, wantIn?: string): void {
-    const r = run("bash", [SELF, join(tmp, project)]);
-    const out = r.out + r.err;
-    if (r.code === exit && (wantIn === undefined || wantIn === "" || out.includes(wantIn))) {
-      st.ok(label);
-    } else {
-      st.fail(`${label} (exit ${r.code})`, out);
-    }
-  }
-
-  // A library whose package name resolves to its exports, with tests of every kind the selection
-  // must tell apart.
-  const lib = join(tmp, "lib");
-  mkdirSync(join(lib, "test", "helpers"), { recursive: true });
-  mkdirSync(join(lib, "src"), { recursive: true });
-  writeFileSync(
-    join(lib, "package.json"),
-    '{"name": "sample-lib", "version": "1.0.0", "type": "module", "exports": "./src/index.js"}\n',
-    "utf8",
-  );
-  writeFileSync(join(lib, "src", "index.js"), "export const add = (a, b) => a + b;\n", "utf8");
-  writeFileSync(
-    join(lib, "test", "public.test.js"),
-    `import test from "node:test";
-import assert from "node:assert";
-import { add } from "sample-lib";
-test("add, through the package name", () => assert.equal(add(2, 3), 5));
-`,
-    "utf8",
-  );
-  writeFileSync(join(lib, "test", "helpers", "two.js"), "export const two = 2;\n", "utf8");
-  writeFileSync(
-    join(lib, "test", "helped.test.js"),
-    `import test from "node:test";
-import assert from "node:assert";
-import { add } from "sample-lib";
-import { two } from "./helpers/two.js";
-test("add, with a helper", () => assert.equal(add(two, two), 4));
-`,
-    "utf8",
-  );
-  writeFileSync(
-    join(lib, "test", "internal.test.js"),
-    `import test from "node:test";
-import assert from "node:assert";
-import { add } from "../src/index.js";
-test("add, reached by path", () => assert.equal(add(1, 1), 2));
-`,
-    "utf8",
-  );
-  writeFileSync(
-    join(lib, "test", "mixed.test.js"),
-    `import { add } from "sample-lib";
-import { add as inner } from "../src/index.js";
-`,
-    "utf8",
-  );
-  writeFileSync(
-    join(lib, "test", "helpers", "api.js"),
-    `import * as lib from "sample-lib";
-export const api = lib;
-`,
-    "utf8",
-  );
-  mkdirSync(join(lib, "test", "fixtures", "app"), { recursive: true });
-  writeFileSync(
-    join(lib, "test", "fixtures", "app", "server.js"),
-    `import "sample-lib";
-import http from "node:http";
-http.createServer().listen(0);
-`,
-    "utf8",
-  );
-  writeFileSync(
-    join(lib, "test", "no-tests.js"),
-    `import { add } from "sample-lib";
-export const three = add(1, 2);
-`,
-    "utf8",
-  );
-  mkdirSync(join(lib, "test", "utils"), { recursive: true });
-  mkdirSync(join(lib, "test", "apps"), { recursive: true });
-  writeFileSync(
-    join(lib, "test", "utils", "api.js"),
-    `import { add } from "sample-lib";
-export const digits = (s) => /^[0-9]+$/u.test(s);
-`,
-    "utf8",
-  );
-  writeFileSync(
-    join(lib, "test", "apps", "server.js"),
-    `// run it (as a child) from the tests
-import "sample-lib";
-`,
-    "utf8",
-  );
-  run("git", ["-C", lib, "init", "-q", "-b", "main"]);
-
-  console.log("positive controls");
-  {
-    const r = run("bash", [SELF, "--list", lib]);
-    const list = r.out.trim().split("\n").filter(Boolean).join(" ");
-    st.check(
-      "only the tests that import it by name and open a line with a test are chosen, not helpers, fixtures, method calls or comments",
-      list === "test/helped.test.js test/public.test.js",
-      list,
-    );
-  }
-  expect(
-    "those tests pass through the package's exports",
-    0,
-    "lib",
-    "the tests through sample-lib's public interface passed",
-  );
-  // copy lib to built and add a build script
-  run("cp", ["-r", lib, join(tmp, "built")]);
-  {
-    const p = join(tmp, "built", "package.json");
-    const j = tryJsonFile<Record<string, unknown>>(p);
-    if (j) {
-      j.scripts = { build: "touch built.flag" };
-      writeFileSync(p, JSON.stringify(j), "utf8");
-    }
-  }
-  expect("a build script runs first", 0, "built", "passed");
-  st.check("and it did run", existsSync(join(tmp, "built", "built.flag")));
-
-  console.log("negative controls");
-  run("cp", ["-r", lib, join(tmp, "broken")]);
-  writeFileSync(
-    join(tmp, "broken", "src", "index.js"),
-    "export const add = (a, b) => a - b;\n",
-    "utf8",
-  );
-  expect("a library that breaks its interface fails", 1, "broken", "failed");
-
-  run("cp", ["-r", lib, join(tmp, "badbuild")]);
-  {
-    const p = join(tmp, "badbuild", "package.json");
-    const j = tryJsonFile<Record<string, unknown>>(p);
-    if (j) {
-      j.scripts = { build: "exit 5" };
-      writeFileSync(p, JSON.stringify(j), "utf8");
-    }
-  }
-  expect("a failed build fails", 1, "badbuild", "the build failed");
-
-  mkdirSync(join(tmp, "internal", "test"), { recursive: true });
-  run("cp", [join(lib, "package.json"), join(tmp, "internal")]);
-  run("cp", ["-r", join(lib, "src"), join(tmp, "internal")]);
-  run("cp", [join(lib, "test", "internal.test.js"), join(tmp, "internal", "test")]);
-  expect(
-    "a library tested only by path is not run",
-    3,
-    "internal",
-    "no test imports sample-lib by its name",
-  );
-
-  mkdirSync(join(tmp, "noname"), { recursive: true });
-  writeFileSync(join(tmp, "noname", "package.json"), '{"version": "1.0.0"}\n', "utf8");
-  expect("a package with no name is not run", 3, "noname", "has no name");
-
-  mkdirSync(join(tmp, "nopkg"), { recursive: true });
-  expect("a project with no package.json is not run", 3, "nopkg", "no package.json");
-
-  run("cp", ["-r", lib, join(tmp, "vitest")]);
-  {
-    const p = join(tmp, "vitest", "package.json");
-    const j = tryJsonFile<Record<string, unknown>>(p);
-    if (j) {
-      j.devDependencies = { vitest: "1" };
-      writeFileSync(p, JSON.stringify(j), "utf8");
-    }
-  }
-  expect(
-    "a runner the project names but has not installed is not run",
-    3,
-    "vitest",
-    "which is not installed",
-  );
-
-  mkdirSync(join(tmp, "helperonly", "test", "helpers"), { recursive: true });
-  mkdirSync(join(tmp, "helperonly", "src"), { recursive: true });
-  run("cp", [join(lib, "package.json"), join(tmp, "helperonly")]);
-  run("cp", [join(lib, "src", "index.js"), join(tmp, "helperonly", "src")]);
-  run("cp", [join(lib, "test", "helpers", "api.js"), join(tmp, "helperonly", "test", "helpers")]);
-  run("cp", [join(lib, "test", "internal.test.js"), join(tmp, "helperonly", "test")]);
-  expect(
-    "a library whose only by-name import is in a helper is not run",
-    3,
-    "helperonly",
-    "no test imports sample-lib by its name",
-  );
-
-  mkdirSync(join(tmp, "fewtools"), { recursive: true });
-  for (const t of ["bash", "bun", "dirname", "git"]) {
-    const found = findOnPath(t, process.env.PATH || "");
-    if (found) {
-      try {
-        symlinkSync(found, join(tmp, "fewtools", t));
-      } catch {
-        /* already exists */
-      }
-    }
-  }
-  {
-    const r = run("bash", [SELF, lib], {
-      env: { ...process.env, PATH: join(tmp, "fewtools") },
-    });
-    const out = r.out + r.err;
-    st.check(
-      "tests with no node to run them are not run",
-      r.code === 3 && out.includes("node is not on PATH"),
-      `exit ${r.code}\n${out}`,
-    );
-  }
-
-  // A checkout under a path with a space: URL.pathname percent-encodes it,
-  // so SELF must come from the decoded path. Recurses once, in a copy.
-  if (!process.env.POSTMASTER_SPACED_DONE) {
-    const spaced = join(tmp, "my dir", "scripts");
-    cpSync(scriptsDir(import.meta), spaced, { recursive: true });
-    cpSync(join(scriptsDir(import.meta), "..", "bunfig.toml"), join(spaced, "..", "bunfig.toml"));
-    const r = run(join(spaced, "verify-library.sh"), ["--self-test"], {
-      env: { ...process.env, POSTMASTER_SPACED_DONE: "1" },
-    });
-    st.check(
-      "the self-test passes from a path with a space",
-      r.code === 0,
-      `exit ${r.code}\n${r.out}\n${r.err}`,
-    );
-  }
-
-  st.finish();
-});
+if (import.meta.main) {
+  process.exit(main(process.argv.slice(2)));
+}

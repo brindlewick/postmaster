@@ -4,7 +4,6 @@
 //
 //   stage.sh <dispatch> <stage> [actor]   actor defaults to coachman
 //   stage.sh --list                       the stages, in order
-//   stage.sh --self-test
 //
 // It logs a `stage` action naming the stage left and how long it lasted, changes only the
 // manifest's `stage` field, and appends the same line to run-log.md. Setting the stage a run is
@@ -22,7 +21,6 @@
 import {
   appendFileSync,
   existsSync,
-  mkdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -31,11 +29,10 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
-import { mkstempSync, run, withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
+import { mkstempSync, run } from "./lib/proc.ts";
 import { pyRstrip } from "./lib/text.ts";
 
-const STAGES =
+export const STAGES =
   "dispatched bootstrapped planning workhorses-running synthesis checkpoint-1 review shipping shipped done abandoned";
 const STAGE_LIST = STAGES.split(" ");
 
@@ -110,7 +107,7 @@ function closeUsage(d: string): number {
   return logStatus;
 }
 
-function setStage(d: string, newStage: string, actor: string): number {
+export function setStage(d: string, newStage: string, actor: string): number {
   const HERE = scriptsDir(import.meta);
 
   if (!STAGE_LIST.includes(newStage)) {
@@ -232,224 +229,22 @@ function setStage(d: string, newStage: string, actor: string): number {
 }
 
 // --- entry ------------------------------------------------------------------------------
-const argv = process.argv.slice(2);
-if (argv[0] === "--list") {
-  for (const s of STAGE_LIST) console.log(s);
-  process.exit(0);
-}
-if (argv[0] === "--self-test") {
-  // fall through to self-test below
-} else if (argv[0] === "" || argv[0] === undefined || argv[0].startsWith("-")) {
-  console.error("usage: stage.sh <dispatch> <stage> [actor] | --list | --self-test");
-  process.exit(1);
-} else {
+function main(argv: string[]): number {
+  if (argv[0] === "--list") {
+    for (const s of STAGE_LIST) console.log(s);
+    return 0;
+  }
+  if (argv[0] === "" || argv[0] === undefined || argv[0].startsWith("-")) {
+    console.error("usage: stage.sh <dispatch> <stage> [actor] | --list");
+    return 1;
+  }
   if (argv.length < 2) {
     console.error("usage: stage.sh <dispatch> <stage> [actor]");
-    process.exit(1);
+    return 1;
   }
-  process.exit(setStage(argv[0] as string, argv[1] as string, (argv[2] as string) ?? "coachman"));
+  return setStage(argv[0] as string, argv[1] as string, (argv[2] as string) ?? "coachman");
 }
 
-// --- self-test ----------------------------------------------------------------------------
-withTempDir((tmp) => {
-  const HERE = scriptsDir(import.meta);
-  const d = join(tmp, "project", ".postmaster", "runs", "RUN-1");
-  mkdirSync(d, { recursive: true });
-  const st = new SelfTest();
-
-  const fresh = (): void => {
-    mkdirSync(join(d, "logs"), { recursive: true });
-    writeFileSync(
-      join(d, "manifest.json"),
-      '{"stage": "dispatched", "leg": 1, "base": "abc123", "lanes": {"luna": {"outcome": "running"}}, "coachman": {"legs": {}}}\n',
-    );
-    writeFileSync(join(d, "actions.jsonl"), "");
-    writeFileSync(join(d, "run-log.md"), "");
-    rmSync(join(d, "card.md"), { force: true });
-    rmSync(join(d, "logs", "luna-events-usage.json"), { force: true });
-    run("bash", [join(HERE, "log-action.sh"), d, "postmaster", "dispatch", "RUN-1", "test"]);
-  };
-
-  const count = (): number => {
-    try {
-      return readFileSync(join(d, "actions.jsonl"), "utf8")
-        .split("\n")
-        .filter((l) => l.includes('"action":"stage"')).length;
-    } catch {
-      return 0;
-    }
-  };
-
-  const manifestStage = (): string => {
-    try {
-      return JSON.parse(readFileSync(join(d, "manifest.json"), "utf8")).stage;
-    } catch {
-      return "?";
-    }
-  };
-
-  console.log("positive controls");
-  fresh();
-  let rc = setStage(d, "bootstrapped", "coachman");
-  if (rc === 0 && count() === 1) st.ok("a change logs exactly one stage line");
-  else st.fail(`a change logs exactly one stage line (exit ${rc}, lines ${count()})`);
-
-  try {
-    const m = JSON.parse(readFileSync(join(d, "manifest.json"), "utf8"));
-    const expected = {
-      stage: "bootstrapped",
-      leg: 1,
-      base: "abc123",
-      lanes: { luna: { outcome: "running" } },
-      coachman: { legs: {} },
-    };
-    if (JSON.stringify(m) === JSON.stringify(expected))
-      st.ok("only the manifest's stage field changes");
-    else st.fail("only the manifest's stage field changes");
-  } catch {
-    st.fail("only the manifest's stage field changes");
-  }
-
-  try {
-    const log = readFileSync(join(d, "run-log.md"), "utf8");
-    const line = log
-      .split("\n")
-      .find((l) => l.includes("stage bootstrapped, from dispatched after"));
-    if (line !== undefined && /after [0-9]/u.test(line))
-      st.ok("run-log.md records the change and how long the last stage took");
-    else st.fail("run-log.md records the change and how long the last stage took", line ?? log);
-  } catch {
-    st.fail("run-log.md records the change and how long the last stage took");
-  }
-
-  writeFileSync(
-    join(d, "logs", "luna-events-usage.json"),
-    '{"schema_version":1,"name":"luna","role":"workhorse","lane":"luna","harness":"codex","stream":"logs/luna-events.jsonl","input_tokens":4,"output_tokens":2,"cost_usd":0.25}\n',
-  );
-  writeFileSync(
-    join(d, "card.md"),
-    "# Ship card\n\n## Cost\n\nold estimate\n\n## Checks\n\npassed\n",
-  );
-  setStage(d, "done", "postmaster");
-  try {
-    const log = readFileSync(join(d, "run-log.md"), "utf8");
-    if (log.includes("Stage timings, from actions.jsonl") && log.includes("bootstrapped "))
-      st.ok("the postmaster's terminal stage appends the run's timings");
-    else st.fail("the postmaster's terminal stage appends the run's timings");
-  } catch {
-    st.fail("the postmaster's terminal stage appends the run's timings");
-  }
-  try {
-    const log = readFileSync(join(d, "run-log.md"), "utf8");
-    const card = readFileSync(join(d, "card.md"), "utf8");
-    if (log.includes("4 in") && card.includes("4 in") && !card.includes("old estimate"))
-      st.ok("terminal closure refreshes the final usage sum in the run log and ship card");
-    else
-      st.fail(
-        "terminal closure refreshes the final usage sum in the run log and ship card",
-        `${log}\n--- card ---\n${card}`,
-      );
-  } catch {
-    st.fail("terminal closure refreshes the final usage sum in the run log and ship card");
-  }
-
-  fresh();
-  rc = setStage(d, "abandoned", "postmaster");
-  if (rc === 0 && count() === 1 && manifestStage() === "abandoned")
-    st.ok("the postmaster abandons a run");
-  else st.fail(`the postmaster abandons a run (exit ${rc}, lines ${count()})`);
-
-  fresh();
-  rc = setStage(d, "review", "coachman");
-  if (rc === 0 && count() === 1 && manifestStage() === "review") st.ok("review is one stage");
-  else st.fail(`review is one stage (exit ${rc}, lines ${count()})`);
-
-  fresh();
-  rc = setStage(d, "planning", "coachman");
-  if (rc === 0 && count() === 1 && manifestStage() === "planning") st.ok("planning is one stage");
-  else st.fail(`planning is one stage (exit ${rc}, lines ${count()})`);
-  if (STAGES.includes(" bootstrapped planning workhorses-running "))
-    st.ok("planning sits between bootstrapped and workhorses-running");
-  else st.fail(`planning sits between bootstrapped and workhorses-running (${STAGES})`);
-
-  console.log("negative controls");
-  fresh();
-  setStage(d, "bootstrapped", "coachman");
-  rc = setStage(d, "bootstrapped", "coachman");
-  if (rc === 0 && count() === 1) st.ok("setting the same stage again logs nothing");
-  else st.fail(`setting the same stage again logs nothing (lines ${count()})`);
-
-  fresh();
-  const beforeManifest = readFileSync(join(d, "manifest.json"), "utf8");
-  rc = setStage(d, "reviewing", "coachman");
-  if (
-    rc === 2 &&
-    count() === 0 &&
-    readFileSync(join(d, "manifest.json"), "utf8") === beforeManifest
-  )
-    st.ok("an unknown stage is refused, and nothing changes");
-  else st.fail(`an unknown stage is refused, and nothing changes (exit ${rc})`);
-
-  for (const oldStage of ["review-style", "review-bug", "review-security"]) {
-    fresh();
-    const before = readFileSync(join(d, "manifest.json"), "utf8");
-    rc = setStage(d, oldStage, "coachman");
-    if (rc === 2 && count() === 0 && readFileSync(join(d, "manifest.json"), "utf8") === before)
-      st.ok(`${oldStage} is refused, and nothing changes`);
-    else st.fail(`${oldStage} is refused, and nothing changes (exit ${rc})`);
-  }
-
-  fresh();
-  {
-    const before = readFileSync(join(d, "manifest.json"), "utf8");
-    rc = setStage(d, "planning-review", "coachman");
-    if (rc === 2 && count() === 0 && readFileSync(join(d, "manifest.json"), "utf8") === before)
-      st.ok("an unknown planning stage is refused, and nothing changes");
-    else st.fail(`an unknown planning stage is refused, and nothing changes (exit ${rc})`);
-  }
-
-  for (const t of ["done", "abandoned"]) {
-    fresh();
-    const before = readFileSync(join(d, "manifest.json"), "utf8");
-    rc = setStage(d, t, "coachman");
-    if (rc === 4 && count() === 0 && readFileSync(join(d, "manifest.json"), "utf8") === before)
-      st.ok(`${t} from the coachman is refused, and nothing changes`);
-    else st.fail(`${t} from the coachman is refused, and nothing changes (exit ${rc})`);
-  }
-
-  fresh();
-  setStage(d, "abandoned", "postmaster");
-  const before2 = readFileSync(join(d, "manifest.json"), "utf8");
-  rc = setStage(d, "synthesis", "coachman");
-  if (rc === 3 && count() === 1 && readFileSync(join(d, "manifest.json"), "utf8") === before2)
-    st.ok("the coachman cannot move a run out of abandoned");
-  else st.fail(`the coachman cannot move a run out of abandoned (exit ${rc})`);
-
-  rmSync(join(d, "manifest.json"));
-  rc = setStage(d, "bootstrapped", "coachman");
-  if (rc === 1) st.ok("no manifest is refused");
-  else st.fail(`no manifest is refused (exit ${rc})`);
-
-  // Atomic writes go through mkstemp names, as BASE's do: random, private,
-  // never a predictable pid name. One control for the shared helper every
-  // atomic write uses.
-  {
-    const a = mkstempSync(tmp, "tmp");
-    const b = mkstempSync(tmp, "tmp");
-    writeFileSync(a, "a");
-    writeFileSync(b, "b");
-    const ma = statSync(a).mode & 0o777;
-    const mb = statSync(b).mode & 0o777;
-    st.check(
-      "mkstemp names are unique, mode 0600, and hold their own bytes",
-      a !== b &&
-        ma === 0o600 &&
-        mb === 0o600 &&
-        readFileSync(a, "utf8") === "a" &&
-        readFileSync(b, "utf8") === "b",
-      `${a} ${ma.toString(8)} vs ${b} ${mb.toString(8)}`,
-    );
-  }
-
-  st.finish();
-});
+if (import.meta.main) {
+  process.exit(main(process.argv.slice(2)));
+}

@@ -9,7 +9,6 @@
 //   verify.sh journey-path <worktree> [<dispatch>]
 //   verify.sh results <dispatch> <worktree>
 //   verify.sh summary <summary-file> <dispatch> <worktree>
-//   verify.sh --self-test
 //
 //   exit 0  printed; run, results, summary: every check passed, or the summary holds
 //   exit 1  usage, or input that is not what it says, a declaration included
@@ -23,11 +22,8 @@ import {
   existsSync,
   mkdirSync,
   openSync,
-  readdirSync,
   readFileSync,
-  realpathSync,
   renameSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -35,8 +31,7 @@ import { constants as osConstants } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseTomlText, tryTomlFile } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
-import { mkstempSync, run, withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
+import { mkstempSync, run } from "./lib/proc.ts";
 import { PY_DOT, PY_S_CLASS, pySplitLines } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
@@ -59,11 +54,11 @@ const WEB = new Set([
   "@solidjs/start",
 ]);
 const SUITE_SCRIPTS = ["e2e", "test:e2e", "test:browser", "playwright", "cypress"];
-const RESULT_RE = new RegExp(
+export const RESULT_RE = new RegExp(
   `^[${PY_S_CLASS}]*(?:[-*][${PY_S_CLASS}]+)?(\`?)([a-z][a-z0-9-]*): (pass|fail|not run), exit (-?\\p{Nd}+|-), (\\p{Nd}+)s: (${PY_DOT}*?)\\1[${PY_S_CLASS}]*$`,
   "u",
 );
-const DETAIL_RE = new RegExp(
+export const DETAIL_RE = new RegExp(
   `^on=([^${PY_S_CLASS}]+)@([0-9a-f]+) result=([^${PY_S_CLASS}]+) exit=([^${PY_S_CLASS}]+)`,
   "u",
 );
@@ -241,7 +236,7 @@ function discover(repo: string): { found: string[]; suite: string } {
 /** Python's `shlex.quote`, byte for byte: safe strings pass through
  * bare, anything else is single-quoted with embedded quotes spliced
  * as `'"'"'`. */
-function shlexQuote(s: string): string {
+export function shlexQuote(s: string): string {
   if (s === "") return "''";
   if (/^[a-zA-Z0-9_@%+=:,./-]+$/u.test(s)) return s;
   return `'${s.replace(/'/gu, `'"'"'`)}'`;
@@ -454,7 +449,7 @@ function recordedChecks(dispatch: string): Check[] {
 const TICKET_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Ticket[${PY_S_CLASS}]*$`, "u");
 const PROFILE_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Project profile[${PY_S_CLASS}]*$`, "u");
 
-function ticketPart(text: string): string {
+export function ticketPart(text: string): string {
   const lines = pySplitLines(text);
   const start = lines.findIndex((l) => TICKET_LINE_RE.test(l));
   if (start === -1) return text;
@@ -885,1258 +880,193 @@ function logged(dispatch: string): Array<{ target: string; ts: string; m: RegExp
 }
 
 // --- entry -----------------------------------------------------------------------------------
-const argv = process.argv.slice(2);
 function usageDieV(): never {
   console.error(usage);
   process.exit(1);
   throw new Error("unreachable");
 }
 const usage =
-  "usage: verify.sh checks <repo> [--gate <command>] [--lines | --json] | record <repo> <dispatch> [--gate <command>] | arm <worktree> <dispatch> | run <worktree> [<dispatch>] | journey-path <worktree> [<dispatch>] | results <dispatch> <worktree> | summary <summary-file> <dispatch> <worktree> | --self-test";
+  "usage: verify.sh checks <repo> [--gate <command>] [--lines | --json] | record <repo> <dispatch> [--gate <command>] | arm <worktree> <dispatch> | run <worktree> [<dispatch>] | journey-path <worktree> [<dispatch>] | results <dispatch> <worktree> | summary <summary-file> <dispatch> <worktree>";
 
-if (argv[0] === "--self-test") {
-  // fall through
-} else if (argv[0] === "checks" || argv[0] === "record") {
-  const sub = argv[0]!;
-  let gate = "";
-  let form = "human";
-  const pos: string[] = [];
-  let i = 1;
-  while (i < argv.length) {
-    if (argv[i] === "--gate") {
-      if (argv.length < i + 2) usageDieV();
-      gate = argv[i + 1]!;
-      i += 2;
-    } else if (argv[i] === "--lines") {
-      if (sub !== "checks") usageDieV();
-      form = "lines";
-      i++;
-    } else if (argv[i] === "--json") {
-      if (sub !== "checks") usageDieV();
-      form = "json";
-      i++;
-    } else if (argv[i]?.startsWith("-")) {
-      usageDieV();
+function main(argv: string[]): number {
+  if (argv[0] === "checks" || argv[0] === "record") {
+    const sub = argv[0]!;
+    let gate = "";
+    let form = "human";
+    const pos: string[] = [];
+    let i = 1;
+    while (i < argv.length) {
+      if (argv[i] === "--gate") {
+        if (argv.length < i + 2) usageDieV();
+        gate = argv[i + 1]!;
+        i += 2;
+      } else if (argv[i] === "--lines") {
+        if (sub !== "checks") usageDieV();
+        form = "lines";
+        i++;
+      } else if (argv[i] === "--json") {
+        if (sub !== "checks") usageDieV();
+        form = "json";
+        i++;
+      } else if (argv[i]?.startsWith("-")) {
+        usageDieV();
+      } else {
+        pos.push(argv[i]!);
+        i++;
+      }
+    }
+    if (sub === "checks" ? pos.length !== 1 : pos.length !== 2) usageDieV();
+    const repo = resolve(pos[0]!);
+    if (!existsSync(repo) || !statSync(repo).isDirectory()) {
+      dieV(`no such directory: ${pos[0]}`);
+    }
+    if (sub === "record") {
+      const dispatch = resolve(pos[1]!);
+      if (!existsSync(dispatch) || !statSync(dispatch).isDirectory()) {
+        dieV(`no such dispatch directory: ${pos[1]}`);
+      }
+      const f = join(dispatch, "checks.json");
+      if (existsSync(f)) {
+        console.error(`verify: ${f} already written; left alone`);
+        console.log(human(recordedChecks(dispatch)));
+        return 0;
+      }
+      const { checks, decl } = resolveChecks(repo, gate, true);
+      const record = {
+        written: new Date().toISOString().replace(/\.[0-9]+Z$/u, "Z"),
+        repo,
+        head: git(repo, "rev-parse", "HEAD"),
+        declaration: decl,
+        gate_given: gate || null,
+        checks,
+      };
+      const tmpF = mkstempSync(dispatch, "tmp");
+      writeFileSync(tmpF, `${JSON.stringify(record, null, 2)}\n`);
+      renameSync(tmpF, f);
+      console.log(human(checks));
+      return 0;
+    }
+    const { checks } = resolveChecks(repo, gate, false);
+    if (form === "json") {
+      console.log(JSON.stringify(checks, null, 2));
+    } else if (form === "lines") {
+      const clean = (s: string) => String(s).replace(/[\t\r\n]+/gu, " ");
+      console.log(
+        checks
+          .map((c) => [c.name, c.source, clean(oneline(c.command)), clean(c.shows)].join("\t"))
+          .join("\n"),
+      );
     } else {
-      pos.push(argv[i]!);
-      i++;
+      console.log(human(checks));
     }
+    return 0;
   }
-  if (sub === "checks" ? pos.length !== 1 : pos.length !== 2) usageDieV();
-  const repo = resolve(pos[0]!);
-  if (!existsSync(repo) || !statSync(repo).isDirectory()) {
-    dieV(`no such directory: ${pos[0]}`);
+  if (argv[0] === "arm") {
+    if (argv.length !== 3) usageDieV();
+    const { top, spec, checks } = armWt(argv[1]!, resolve(argv[2]!));
+    console.log(`armed ${top}: ${checks.length} checks in ${spec}`);
+    return 0;
   }
-  if (sub === "record") {
-    const dispatch = resolve(pos[1]!);
-    if (!existsSync(dispatch) || !statSync(dispatch).isDirectory()) {
-      dieV(`no such dispatch directory: ${pos[1]}`);
+  if (argv[0] === "run") {
+    if (argv.length < 2 || argv.length > 3) usageDieV();
+    runChecks(argv[1]!, argv.length > 2 ? resolve(argv[2]!) : null);
+  }
+  if (argv[0] === "results") {
+    if (argv.length !== 3) usageDieV();
+    const dispatch = resolve(argv[1]!);
+    const top = topOf(argv[2]!);
+    const sha = git(top, "rev-parse", "HEAD")?.slice(0, 12);
+    const allLogged = logged(dispatch);
+    const latest = new Map<string, { ts: string; m: RegExpExecArray }>();
+    for (const { target, ts, m } of allLogged) {
+      if (m[2] === sha) latest.set(target, { ts, m });
     }
-    const f = join(dispatch, "checks.json");
-    if (existsSync(f)) {
-      console.error(`verify: ${f} already written; left alone`);
-      console.log(human(recordedChecks(dispatch)));
-      process.exit(0);
+    const states: string[] = [];
+    for (const c of recordedChecks(dispatch)) {
+      const got = latest.get(c.name);
+      if (got) {
+        const result = got.m[3]?.replace(/-/gu, " ");
+        states.push(got.m[3]!);
+        console.log(`${c.name}: ${result}, exit ${got.m[4]}, at ${got.ts}`);
+      } else {
+        states.push("missing");
+        console.log(`${c.name}: no result logged at ${sha}`);
+      }
     }
-    const { checks, decl } = resolveChecks(repo, gate, true);
-    const record = {
-      written: new Date().toISOString().replace(/\.[0-9]+Z$/u, "Z"),
-      repo,
-      head: git(repo, "rev-parse", "HEAD"),
-      declaration: decl,
-      gate_given: gate || null,
-      checks,
-    };
-    const tmpF = mkstempSync(dispatch, "tmp");
-    writeFileSync(tmpF, `${JSON.stringify(record, null, 2)}\n`);
-    renameSync(tmpF, f);
-    console.log(human(checks));
-    process.exit(0);
+    return states.includes("fail") ? 2 : states.every((s) => s === "pass") ? 0 : 3;
   }
-  const { checks } = resolveChecks(repo, gate, false);
-  if (form === "json") {
-    console.log(JSON.stringify(checks, null, 2));
-  } else if (form === "lines") {
-    const clean = (s: string) => String(s).replace(/[\t\r\n]+/gu, " ");
+  if (argv[0] === "summary") {
+    if (argv.length !== 4) usageDieV();
+    const summary = argv[1]!;
+    const dispatch = resolve(argv[2]!);
+    const top = topOf(argv[3]!);
+    let text: string;
+    try {
+      text = readFileSync(summary, "utf-8");
+    } catch {
+      dieV(`cannot read ${summary}`);
+    }
+    const claims = new Map<string, RegExpExecArray>();
+    for (const line of text.split("\n")) {
+      const m = RESULT_RE.exec(line);
+      if (m) claims.set(m[2]!, m);
+    }
+    const sha = git(top, "rev-parse", "HEAD")?.slice(0, 12);
+    const coach = new Map<string, RegExpExecArray>();
+    for (const { target, m } of logged(dispatch)) {
+      if (m[2] === sha) coach.set(target, m);
+    }
+    const problems: string[] = [];
+    for (const c of recordedChecks(dispatch)) {
+      const m = claims.get(c.name);
+      const want = oneline(c.command) || "(no command)";
+      if (!m) {
+        problems.push(`unverified: the summary does not give ${c.name}'s command and exit`);
+        continue;
+      }
+      if (oneline(m[6]!) !== want) {
+        problems.push(
+          `unverified: the summary says ${c.name} ran ${oneline(m[6]!)}; the run's check is ${want}`,
+        );
+        continue;
+      }
+      const k = coach.get(c.name);
+      if (k && k[3] !== m[3]?.replace(/ /gu, "-")) {
+        problems.push(
+          `${c.name}: the summary says ${m[3]}; the coachman's run at ${sha} says ${k[3]?.replace(/-/gu, " ")}`,
+        );
+      }
+    }
+    if (problems.length > 0) console.log(problems.join("\n"));
+    if (coach.size === 0) console.log(`no coachman run at ${sha} to hold the claims against`);
     console.log(
-      checks
-        .map((c) => [c.name, c.source, clean(oneline(c.command)), clean(c.shows)].join("\t"))
-        .join("\n"),
+      `the summary ${
+        problems.length === 0
+          ? `gives every check's command and exit${coach.size > 0 ? ", and agrees with the coachman's run" : ""}`
+          : `is unverified or disagrees: ${problems.length} problem(s)`
+      }`,
     );
-  } else {
-    console.log(human(checks));
+    return problems.length > 0 ? 2 : 0;
   }
-  process.exit(0);
-} else if (argv[0] === "arm") {
-  if (argv.length !== 3) usageDieV();
-  const { top, spec, checks } = armWt(argv[1]!, resolve(argv[2]!));
-  console.log(`armed ${top}: ${checks.length} checks in ${spec}`);
-  process.exit(0);
-} else if (argv[0] === "run") {
-  if (argv.length < 2 || argv.length > 3) usageDieV();
-  runChecks(argv[1]!, argv.length > 2 ? resolve(argv[2]!) : null);
-} else if (argv[0] === "results") {
-  if (argv.length !== 3) usageDieV();
-  const dispatch = resolve(argv[1]!);
-  const top = topOf(argv[2]!);
-  const sha = git(top, "rev-parse", "HEAD")?.slice(0, 12);
-  const allLogged = logged(dispatch);
-  const latest = new Map<string, { ts: string; m: RegExpExecArray }>();
-  for (const { target, ts, m } of allLogged) {
-    if (m[2] === sha) latest.set(target, { ts, m });
-  }
-  const states: string[] = [];
-  for (const c of recordedChecks(dispatch)) {
-    const got = latest.get(c.name);
-    if (got) {
-      const result = got.m[3]?.replace(/-/gu, " ");
-      states.push(got.m[3]!);
-      console.log(`${c.name}: ${result}, exit ${got.m[4]}, at ${got.ts}`);
-    } else {
-      states.push("missing");
-      console.log(`${c.name}: no result logged at ${sha}`);
+  if (argv[0] === "journey-path") {
+    if (argv.length < 2 || argv.length > 3) usageDieV();
+    const args = ["--path", argv[1]!];
+    if (argv.length === 3) {
+      const r = run("bash", ["-c", 'cd "$1" 2>/dev/null && pwd -P', "_", argv[2]]);
+      if (r.code !== 0) {
+        console.error(`verify: no such dispatch directory: ${argv[2]}`);
+        return 1;
+      }
+      args.push("--dir", join(r.out.trim(), "journey"));
     }
+    const r = run("bash", [join(HERE, "verify-journey.sh"), ...args]);
+    process.stdout.write(r.out);
+    process.stderr.write(r.err);
+    return r.code;
   }
-  process.exit(states.includes("fail") ? 2 : states.every((s) => s === "pass") ? 0 : 3);
-} else if (argv[0] === "summary") {
-  if (argv.length !== 4) usageDieV();
-  const summary = argv[1]!;
-  const dispatch = resolve(argv[2]!);
-  const top = topOf(argv[3]!);
-  let text: string;
-  try {
-    text = readFileSync(summary, "utf-8");
-  } catch {
-    dieV(`cannot read ${summary}`);
-  }
-  const claims = new Map<string, RegExpExecArray>();
-  for (const line of text.split("\n")) {
-    const m = RESULT_RE.exec(line);
-    if (m) claims.set(m[2]!, m);
-  }
-  const sha = git(top, "rev-parse", "HEAD")?.slice(0, 12);
-  const coach = new Map<string, RegExpExecArray>();
-  for (const { target, m } of logged(dispatch)) {
-    if (m[2] === sha) coach.set(target, m);
-  }
-  const problems: string[] = [];
-  for (const c of recordedChecks(dispatch)) {
-    const m = claims.get(c.name);
-    const want = oneline(c.command) || "(no command)";
-    if (!m) {
-      problems.push(`unverified: the summary does not give ${c.name}'s command and exit`);
-      continue;
-    }
-    if (oneline(m[6]!) !== want) {
-      problems.push(
-        `unverified: the summary says ${c.name} ran ${oneline(m[6]!)}; the run's check is ${want}`,
-      );
-      continue;
-    }
-    const k = coach.get(c.name);
-    if (k && k[3] !== m[3]?.replace(/ /gu, "-")) {
-      problems.push(
-        `${c.name}: the summary says ${m[3]}; the coachman's run at ${sha} says ${k[3]?.replace(/-/gu, " ")}`,
-      );
-    }
-  }
-  if (problems.length > 0) console.log(problems.join("\n"));
-  if (coach.size === 0) console.log(`no coachman run at ${sha} to hold the claims against`);
-  console.log(
-    `the summary ${
-      problems.length === 0
-        ? `gives every check's command and exit${coach.size > 0 ? ", and agrees with the coachman's run" : ""}`
-        : `is unverified or disagrees: ${problems.length} problem(s)`
-    }`,
-  );
-  process.exit(problems.length > 0 ? 2 : 0);
-} else if (argv[0] === "journey-path") {
-  if (argv.length < 2 || argv.length > 3) usageDieV();
-  const args = ["--path", argv[1]!];
-  if (argv.length === 3) {
-    const r = run("bash", ["-c", 'cd "$1" 2>/dev/null && pwd -P', "_", argv[2]]);
-    if (r.code !== 0) {
-      console.error(`verify: no such dispatch directory: ${argv[2]}`);
-      process.exit(1);
-    }
-    args.push("--dir", join(r.out.trim(), "journey"));
-  }
-  const r = run("bash", [join(HERE, "verify-journey.sh"), ...args]);
-  process.stdout.write(r.out);
-  process.stderr.write(r.err);
-  process.exit(r.code);
-} else {
   usageDieV();
 }
 
-// --- self-test ---------------------------------------------------------------------------------
-withTempDir((tmp) => {
-  const SELF = join(HERE, "verify.sh");
-  const st = new SelfTest();
-  {
-    // Unicode primitives, BASE verify.sh python: every expectation python3-verified.
-    const rr = RESULT_RE.exec("- gate: pass, exit ٠٠, ١٢s: make x");
-    st.check(
-      "result lines may carry Arabic-Indic digits",
-      rr !== null && rr[4] === "٠٠" && rr[5] === "١٢",
-      JSON.stringify(rr?.slice(4, 6) ?? null),
-    );
-    const dd = DETAIL_RE.exec("on=br\x1fx@abc123 result=pass exit=0");
-    st.check(
-      "a branch stops at U+001F (Python space)",
-      dd === null,
-      JSON.stringify(dd?.[1] ?? null),
-    );
-    const tp1 = ticketPart("x\n##\x1fTicket\na\n##\x1fProject profile\nb\n");
-    st.check("ticket part opens and ends on U+001F headings", tp1 === "a\n", JSON.stringify(tp1));
-    const tp2 = ticketPart("x\x1c## Ticket\ny\n");
-    st.check("ticket part splits lines on U+001C (splitlines)", tp2 === "y\n", JSON.stringify(tp2));
-  }
-
-  function G(dir: string, ...args: string[]): { code: number; out: string } {
-    const r = run("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
-    return { code: r.code, out: r.out };
-  }
-
-  function mkRepo(dir: string): void {
-    mkdirSync(dir, { recursive: true });
-    run("bash", [join(HERE, "project-settings.sh"), "ensure", dir]);
-    run("git", ["-C", dir, "init", "-q", "-b", "main"]);
-    G(dir, "add", "-A");
-    if (existsSync(join(dir, ".postmaster", "project.toml"))) {
-      G(dir, "add", "-f", ".postmaster/project.toml");
-    }
-    G(dir, "commit", "-q", "--allow-empty", "-m", "first");
-  }
-
-  function linesOf(project: string, gate = "make check"): string {
-    const r = run("bash", [SELF, "checks", join(tmp, project), "--gate", gate, "--lines"]);
-    return r.out
-      .trim()
-      .split("\n")
-      .map((l) => {
-        const parts = l.split("\t");
-        return `${parts[0]} ${parts[1]}`;
-      })
-      .join(",");
-  }
-
-  function expectLines(label: string, project: string, want: string): void {
-    const got = linesOf(project);
-    st.check(label, got === want, `want: ${want}\ngot:  ${got}`);
-  }
-
-  // Discovery controls
-  console.log("discovery: which defaults a project gets");
-  mkdirSync(join(tmp, "plain"), { recursive: true });
-  writeFileSync(join(tmp, "plain", "Makefile"), "check:\n\ttrue\n");
-  mkdirSync(join(tmp, "cli"), { recursive: true });
-  writeFileSync(join(tmp, "cli", "package.json"), '{"name": "c", "bin": {"c": "c.sh"}}\n');
-  mkdirSync(join(tmp, "web"), { recursive: true });
-  writeFileSync(
-    join(tmp, "web", "package.json"),
-    '{"name": "w", "private": true, "main": "x.js", "scripts": {"e2e": "true"}, "devDependencies": {"next": "1"}}\n',
-  );
-  mkdirSync(join(tmp, "pw"), { recursive: true });
-  writeFileSync(join(tmp, "pw", "package.json"), '{"name": "p"}\n');
-  writeFileSync(join(tmp, "pw", "playwright.config.ts"), "");
-  mkdirSync(join(tmp, "nosuite"), { recursive: true });
-  writeFileSync(
-    join(tmp, "nosuite", "package.json"),
-    '{"name": "n", "dependencies": {"vite": "1"}}\n',
-  );
-  mkdirSync(join(tmp, "lib"), { recursive: true });
-  writeFileSync(join(tmp, "lib", "package.json"), '{"name": "l", "exports": "./i.js"}\n');
-  mkdirSync(join(tmp, "rust", "src"), { recursive: true });
-  writeFileSync(join(tmp, "rust", "Cargo.toml"), '[package]\nname = "r"\n');
-  writeFileSync(join(tmp, "rust", "src", "main.rs"), "");
-  writeFileSync(join(tmp, "rust", "src", "lib.rs"), "");
-  mkdirSync(join(tmp, "py"), { recursive: true });
-  writeFileSync(
-    join(tmp, "py", "pyproject.toml"),
-    '[project]\nname = "p"\n[project.scripts]\np = "p:main"\n',
-  );
-  mkdirSync(join(tmp, "pylib"), { recursive: true });
-  writeFileSync(join(tmp, "pylib", "pyproject.toml"), '[project]\nname = "p"\n');
-  for (const d of ["plain", "cli", "web", "pw", "nosuite", "lib", "rust", "py", "pylib"]) {
-    mkRepo(join(tmp, d));
-  }
-
-  expectLines(
-    "a project discovery knows nothing of gets the gate alone",
-    "plain",
-    "gate default:gate",
-  );
-  expectLines(
-    "a command-line app gets its examples",
-    "cli",
-    "gate default:gate,examples default:cli-examples",
-  );
-  expectLines(
-    "a web app gets its suite and its journey, and a private package with a main is no library",
-    "web",
-    "gate default:gate,browser default:browser-suite,journey default:web-journey",
-  );
-  expectLines(
-    "a playwright config is a browser suite",
-    "pw",
-    "gate default:gate,browser default:browser-suite,journey default:web-journey",
-  );
-  expectLines(
-    "a library gets its tests through its name",
-    "lib",
-    "gate default:gate,library default:library-tests",
-  );
-  expectLines(
-    "a Cargo project with a main and a lib gets both",
-    "rust",
-    "gate default:gate,examples default:cli-examples,library default:library-tests",
-  );
-  expectLines(
-    "a pyproject with scripts is a command-line app",
-    "py",
-    "gate default:gate,examples default:cli-examples",
-  );
-  expectLines(
-    "a pyproject without is a library",
-    "pylib",
-    "gate default:gate,library default:library-tests",
-  );
-  {
-    const r = run("bash", [SELF, "checks", join(tmp, "web"), "--gate", "npm run check", "--lines"]);
-    st.check(
-      "the suite's command is the project's own script",
-      r.out.includes("browser\tdefault:browser-suite\tnpm run e2e\t"),
-      r.out,
-    );
-    st.check(
-      "the gate is the one it was given",
-      r.out.includes("gate\tdefault:gate\tnpm run check\t"),
-      r.out,
-    );
-  }
-  {
-    const r = run("bash", [SELF, "checks", join(tmp, "pw"), "--lines"]);
-    st.check(
-      "and a playwright config's is playwright's",
-      r.out.includes("browser\tdefault:browser-suite\tnpx playwright test\t"),
-      r.out,
-    );
-  }
-  {
-    const r = run("bash", [SELF, "checks", join(tmp, "nosuite"), "--lines"]);
-    st.check(
-      "a web app with no suite has a browser check with no command",
-      r.out.includes("browser\tdefault:browser-suite\t\t"),
-      r.out,
-    );
-  }
-
-  // Declaration controls
-  console.log("declaration");
-  mkdirSync(join(tmp, "decl", ".postmaster"), { recursive: true });
-  writeFileSync(
-    join(tmp, "decl", "package.json"),
-    '{"name": "d", "exports": "./i.js", "bin": {"d": "d.sh"}}\n',
-  );
-  writeFileSync(
-    join(tmp, "decl", ".postmaster", "project.toml"),
-    `[checks.unit]
-command = "npm test"
-shows = "each module does what its tests say"
-
-[checks.gate]
-command = "npm run check"
-shows = "the project's own gate"
-
-[checks.answers]
-command = "python evals/run.py"
-shows = "answer quality holds"
-score = 'score: ([0-9.]+)'
-threshold = 0.85
-
-[checks.try]
-use = "cli-examples"
-timeout = 120
-`,
-  );
-  mkRepo(join(tmp, "decl"));
-  expectLines(
-    "a declaration replaces the defaults, keeps its order, and puts the gate first",
-    "decl",
-    "gate declared,unit declared,answers declared,try declared:cli-examples",
-  );
-  {
-    const r = run("bash", [SELF, "checks", join(tmp, "decl"), "--gate", "make check"]);
-    st.check(
-      "a declared gate wins over the one discovery gave",
-      r.out.includes("gate [declared] npm run check"),
-      r.out,
-    );
-    st.check(
-      "a scored check says what passes",
-      r.out.includes(
-        "passes when it exits 0 and the last number /score: ([0-9.]+)/ captures is 0.85 or more",
-      ),
-      r.out,
-    );
-    st.check(
-      "a check that uses a default runs its script and says what it shows",
-      r.out.includes("verify-examples.sh") &&
-        r.out.includes("shows: the ticket's example transcripts"),
-      r.out,
-    );
-    st.check("a committed declaration raises no warning", !r.out.includes("warn"), r.out);
-  }
-  {
-    const r = run("bash", [SELF, "checks", join(tmp, "decl"), "--json"]);
-    const checks = JSON.parse(r.out);
-    const tryCheck = checks.find((c: any) => c.name === "try");
-    st.check("a check that uses a default keeps its timeout", tryCheck?.timeout === 120, r.out);
-  }
-  {
-    mkdirSync(join(tmp, "decl", ".postmaster", "runs", "T-0"), { recursive: true });
-    writeFileSync(join(tmp, "decl", ".postmaster", "runs", "T-0", "brief.md"), "## Ticket\nx\n");
-    const r = run("bash", [
-      SELF,
-      "record",
-      join(tmp, "decl"),
-      join(tmp, "decl", ".postmaster", "runs", "T-0"),
-      "--gate",
-      "make ci",
-    ]);
-    const stderr = r.err;
-    st.check(
-      "record says when the project's declared gate overrides the one it was given",
-      stderr.includes("declares the gate as npm run check, so make ci is not used"),
-      stderr,
-    );
-  }
-  {
-    const _r = run("bash", [SELF, "checks", join(tmp, "decl"), "--gate", "make check"]);
-    st.check("a check that uses a default keeps its timeout", true, "covered above");
-    st.check("an uncommitted declaration is warned of", true, "covered below");
-  }
-  mkdirSync(join(tmp, "local", ".postmaster"), { recursive: true });
-  writeFileSync(
-    join(tmp, "local", ".postmaster", "project.toml"),
-    '[checks.unit]\ncommand = "true"\nshows = "x"\n',
-  );
-  run("git", ["-C", join(tmp, "local"), "init", "-q", "-b", "main"]);
-  {
-    const r = run("bash", [SELF, "checks", join(tmp, "local")]);
-    st.check("an uncommitted declaration is warned of", r.err.includes("is not committed"), r.err);
-  }
-  mkdirSync(join(tmp, "empty", ".postmaster"), { recursive: true });
-  writeFileSync(join(tmp, "empty", "package.json"), '{"name": "e", "bin": "e.sh"}\n');
-  writeFileSync(join(tmp, "empty", ".postmaster", "project.toml"), "[checks]\n");
-  mkRepo(join(tmp, "empty"));
-  expectLines(
-    "an empty [checks] declares nothing, so the defaults apply",
-    "empty",
-    "gate default:gate,examples default:cli-examples",
-  );
-
-  function bad(label: string, toml: string, mustHold: string): void {
-    mkdirSync(join(tmp, "bad", ".postmaster"), { recursive: true });
-    writeFileSync(join(tmp, "bad", ".postmaster", "project.toml"), `${toml}\n`);
-    const r = run("bash", [SELF, "checks", join(tmp, "bad")]);
-    const out = r.out + r.err;
-    st.check(label, r.code === 1 && out.includes(mustHold), `exit ${r.code}\n${out}`);
-  }
-  bad(
-    "a key that is not one is refused",
-    '[checks.u]\ncommand = "t"\nshows = "x"\ntreshold = 1',
-    "treshold is not a key",
-  );
-  bad(
-    "a check with neither command nor use",
-    '[checks.u]\nshows = "x"',
-    "needs a command or a use",
-  );
-  bad(
-    "a check with both",
-    '[checks.u]\ncommand = "t"\nuse = "cli-examples"',
-    "needs a command or a use",
-  );
-  bad(
-    "a command that does not say what it shows",
-    '[checks.u]\ncommand = "t"',
-    "shows says what the check shows",
-  );
-  bad(
-    "a name that is not a lowercase word",
-    '[checks.Unit]\ncommand = "t"\nshows = "x"',
-    "lowercase word",
-  );
-  bad(
-    "a score without a threshold",
-    '[checks.u]\ncommand = "t"\nshows = "x"\nscore = "s (\\\\d+)"',
-    "score and threshold go together",
-  );
-  bad(
-    "a score with no group",
-    '[checks.u]\ncommand = "t"\nshows = "x"\nscore = "s"\nthreshold = 1',
-    "one group",
-  );
-  bad(
-    "a threshold that is not a number",
-    '[checks.u]\ncommand = "t"\nshows = "x"\nscore = "(1)"\nthreshold = "high"',
-    "threshold is a number",
-  );
-  bad("a use that names no default", '[checks.u]\nuse = "lint"', "use names a default");
-  bad(
-    "a timeout that is not seconds",
-    '[checks.u]\ncommand = "t"\nshows = "x"\ntimeout = 0',
-    "whole number of seconds",
-  );
-  bad("a declaration that does not parse", '[checks.u\ncommand = "t"', "does not parse");
-
-  // Record, arm and run
-  console.log("record, arm and run");
-  const p = join(tmp, "proj");
-  mkdirSync(join(p, ".postmaster"), { recursive: true });
-  writeFileSync(
-    join(p, ".postmaster", "project.toml"),
-    `[checks.gate]
-command = "true"
-shows = "the gate"
-[checks.red]
-command = "echo broke; false"
-shows = "a check that fails"
-[checks.absent]
-command = "no-such-command-xyz"
-shows = "a check that cannot start"
-[checks.good-score]
-command = "echo 'score: 0.7'; echo 'score: 0.91'"
-shows = "a scored check above its threshold"
-score = 'score: ([0-9.]+)'
-threshold = 0.85
-[checks.crash-score]
-command = "echo 'batch 1 score: 1.00'; exit 1"
-shows = "a scored check that prints a score, then fails"
-score = 'score: ([0-9.]+)'
-threshold = 0.85
-[checks.killed-score]
-command = "echo 'score: 0.95'; kill -9 $$"
-shows = "a scored check killed after a score"
-score = 'score: ([0-9.]+)'
-threshold = 0.85
-[checks.masked]
-command = """
-false
-true
-"""
-shows = "a failing line followed by a passing one"
-[checks.piped]
-command = "false | cat"
-shows = "a failure piped into a success"
-[checks.colour]
-command = "printf '\\\\033[31m1 test failed\\\\033[0m\\\\n'; exit 1"
-shows = "a failure that prints in colour"
-[checks.tick]
-command = "echo \`echo tick\`"
-shows = "a command that ends in a backtick"
-[checks.low-score]
-command = "echo 'score: 0.5'"
-shows = "a scored check below its threshold"
-score = 'score: ([0-9.]+)'
-threshold = 0.85
-[checks.no-score]
-command = "echo nothing"
-shows = "a scored check with no score"
-score = 'score: ([0-9.]+)'
-threshold = 0.85
-[checks.slow]
-command = "sleep 30"
-shows = "a check that outlives its timeout"
-timeout = 1
-[checks.try]
-use = "cli-examples"
-`,
-  );
-  mkRepo(p);
-  const d = join(p, ".postmaster", "runs", "T-1");
-  mkdirSync(d, { recursive: true });
-  writeFileSync(
-    join(d, "brief.md"),
-    `# Waybill: T-1\n\n## Ticket\n## Problem / feature\nA thing.\n\n## Project profile\nrepo: ${p}\n`,
-  );
-  let r = run("bash", [SELF, "record", p, d, "--gate", "make check"]);
-  let out = r.out + r.err;
-  st.check(
-    "record writes checks.json and prints the checks",
-    r.code === 0 &&
-      existsSync(join(d, "checks.json")) &&
-      out.includes("red [declared] echo broke; false"),
-    `exit ${r.code}\n${out}`,
-  );
-  const beforeJson = readFileSync(join(d, "checks.json"), "utf-8");
-  run("bash", [SELF, "record", p, d]);
-  st.check(
-    "a second record leaves checks.json alone",
-    readFileSync(join(d, "checks.json"), "utf-8") === beforeJson,
-  );
-
-  G(p, "worktree", "add", "-q", join(p, ".worktrees/T-1-a"), "-b", "wb/T-1-a");
-  const wt = join(p, ".worktrees/T-1-a");
-  r = run("bash", [SELF, "arm", wt, d]);
-  st.check(
-    "arm copies the checks into the worktree",
-    r.code === 0 && existsSync(join(wt, ".postmaster/verify/spec.json")),
-    r.out + r.err,
-  );
-  {
-    const ticket = readFileSync(join(wt, ".postmaster/verify/ticket.md"), "utf-8");
-    st.check(
-      "and the ticket, without the rest of the waybill",
-      ticket.includes("A thing.") && !ticket.includes("Project profile"),
-      ticket,
-    );
-  }
-  {
-    const status = run("git", ["-C", wt, "status", "--porcelain"]).out.trim();
-    st.check("and git does not see what it wrote", status === "", status);
-  }
-  r = run("bash", [SELF, "run", wt]);
-  out = r.out + r.err;
-  st.check("a run with a failed check exits 2", r.code === 2, `exit ${r.code}\n${out}`);
-  const wantIn = (label: string, text: string) => {
-    st.check(label, out.includes(text), out);
-  };
-  wantIn("a passing check passes", "gate: pass, exit 0,");
-  wantIn("a failing check fails, with its last line", "red: fail, exit 1,");
-  wantIn("a command bash cannot start is not run", "absent: not run, exit 127,");
-  wantIn("a score at or above its threshold passes", "good-score: pass, exit 0,");
-  wantIn("and the last score is the one read", "score 0.91, threshold 0.85");
-  wantIn(
-    "a scored check that exits other than 0 fails, whatever it printed",
-    "crash-score: fail, exit 1,",
-  );
-  wantIn("a scored check killed by a signal fails", "killed-score: fail, exit -9,");
-  wantIn("a failing line is not hidden by a passing one after it", "masked: fail, exit 1,");
-  wantIn("a failure is not hidden by a pipe", "piped: fail, exit 1,");
-  wantIn(
-    "a multi-line command prints as one line that runs the same",
-    "masked: fail, exit 1, 0s: bash -eo pipefail -c $'false\\ntrue'",
-  );
-  st.check("colour codes are taken out of the reasons", !out.includes("\x1b"), out.slice(0, 200));
-  wantIn("and the reason is what a reader sees", "  1 test failed");
-  wantIn("a score below it fails", "score 0.5, below the threshold 0.85");
-  wantIn("a scored check with no score fails", "no score in its output");
-  wantIn("a check past its timeout fails", "slow: fail, exit -,");
-  wantIn("a default's not run is not run, with its reason", "try: not run, exit 3,");
-  wantIn("a failed check names its log", `log: ${wt}/.postmaster/verify/logs/red.log`);
-  st.check("a workhorse's run logs nothing to the run", !existsSync(join(d, "actions.jsonl")));
-  const laneOut = out;
-
-  // Coachman's run
-  console.log("the coachman's run");
-  {
-    const specPath = join(wt, ".postmaster/verify/spec.json");
-    const spec = JSON.parse(readFileSync(specPath, "utf-8"));
-    spec.checks = spec.checks.filter((c: any) => c.name !== "red");
-    writeFileSync(specPath, JSON.stringify(spec));
-  }
-  r = run("bash", [SELF, "run", wt, d]);
-  out = r.out + r.err;
-  st.check(
-    "the coachman runs the run's checks, not what the worktree holds",
-    r.code === 2 && out.includes("red: fail, exit 1,"),
-    `exit ${r.code}\n${out}`,
-  );
-  {
-    const logContent = readFileSync(join(d, "actions.jsonl"), "utf-8");
-    const verifyCount = logContent
-      .split("\n")
-      .filter((l) => l.includes('"action":"verify"')).length;
-    st.check("and logs one verify line per check", verifyCount === 14, `${verifyCount} lines`);
-  }
-  {
-    const logContent = readFileSync(join(d, "actions.jsonl"), "utf-8");
-    let allParse = true;
-    for (const line of logContent.split("\n").filter(Boolean)) {
-      try {
-        JSON.parse(line);
-      } catch {
-        allParse = false;
-      }
-    }
-    st.check("every line it logs parses, colour codes and all", allParse);
-  }
-  {
-    const spec = JSON.parse(readFileSync(join(wt, ".postmaster/verify/spec.json"), "utf-8"));
-    st.check(
-      "and leaves the workhorse's own copy as the workhorse left it",
-      spec.journey_dir === join(wt, ".postmaster/verify/journey") &&
-        !spec.checks.some((c: any) => c.name === "red"),
-    );
-  }
-  {
-    const sha = run("git", ["-C", wt, "rev-parse", "HEAD"]).out.trim().slice(0, 12);
-    const logContent = readFileSync(join(d, "actions.jsonl"), "utf-8");
-    st.check(
-      "each naming the branch, the commit and the result",
-      logContent.includes(`"target":"red","detail":"on=wb/T-1-a@${sha} result=fail exit=1`),
-      logContent.slice(-500),
-    );
-  }
-  {
-    const logContent = readFileSync(join(d, "actions.jsonl"), "utf-8");
-    st.check(
-      "a result with a space is logged with dashes, so results can read it",
-      logContent.includes('"target":"absent","detail":"on=wb/T-1-a@') &&
-        logContent.includes("result=not-run exit=127"),
-      logContent.slice(-500),
-    );
-  }
-  {
-    const sha = run("git", ["-C", wt, "rev-parse", "HEAD"]).out.trim().slice(0, 12);
-    st.check("with its output kept in the run", existsSync(join(d, "verify", sha, "red.log")));
-  }
-  {
-    const fullSha = run("git", ["-C", wt, "rev-parse", "HEAD"]).out.trim();
-    const r2 = run("bash", [SELF, "journey-path", wt, d]);
-    st.check(
-      "the coachman's journey report goes in the run",
-      r2.out.trim() === join(d, "journey", `${fullSha}.md`),
-      r2.out,
-    );
-  }
-  {
-    const fullSha = run("git", ["-C", wt, "rev-parse", "HEAD"]).out.trim();
-    // A workhorse's path must come from its own worktree; an inherited POSTMASTER_VERIFY
-    // (as verify.sh run sets for the check) would otherwise point elsewhere.
-    const r2 = run("bash", [SELF, "journey-path", wt], {
-      env: { POSTMASTER_VERIFY: undefined },
-    });
-    st.check(
-      "a workhorse's in its worktree",
-      r2.out.trim() === join(wt, ".postmaster/verify/journey", `${fullSha}.md`),
-      r2.out,
-    );
-  }
-  {
-    // A dispatch path holding $(...) is taken literally, as BASE's `cd "$3"`
-    // takes it: the directory exists under that exact name, so its journey
-    // path prints, and no substitution runs.
-    const marker = join(tmp, "journey-marker");
-    const meta = join(tmp, `dx-$(touch ${marker})`);
-    mkdirSync(meta, { recursive: true });
-    const fullSha = run("git", ["-C", wt, "rev-parse", "HEAD"]).out.trim();
-    const r = run("bash", [SELF, "journey-path", wt, meta]);
-    const phys = realpathSync(meta);
-    st.check(
-      "a dispatch path holding $(...) resolves literally, and runs nothing",
-      r.code === 0 &&
-        r.out.trim() === join(phys, "journey", `${fullSha}.md`) &&
-        !existsSync(marker),
-      `exit ${r.code}\n${r.out}${r.err}marker=${existsSync(marker)}`,
-    );
-  }
-
-  // Results and summaries
-  console.log("results and summaries");
-  r = run("bash", [SELF, "results", d, wt]);
-  out = r.out + r.err;
-  st.check(
-    "results give each check's latest result at HEAD",
-    r.code === 2 && out.includes("red: fail, exit 1, at") && out.includes("gate: pass, exit 0, at"),
-    `exit ${r.code}\n${out}`,
-  );
-  st.check(
-    "results read a not-run result back",
-    out.includes("absent: not run, exit 127, at"),
-    `exit ${r.code}\n${out}`,
-  );
-  {
-    const brokenDir = join(p, ".postmaster", "runs", "T-1-broken");
-    run("cp", ["-r", d, brokenDir]);
-    appendFileSync(
-      join(brokenDir, "actions.jsonl"),
-      '{"action":"verify","target":"red","detail":"on=x\n',
-    );
-    r = run("bash", [SELF, "results", brokenDir, wt]);
-    st.check(
-      "a log line that does not parse stops results rather than being skipped",
-      r.code === 1,
-      `exit ${r.code}`,
-    );
-  }
-  writeFileSync(join(tmp, "summary.md"), `# Summary\n\n## Checks\n${laneOut}\n`);
-  r = run("bash", [SELF, "summary", join(tmp, "summary.md"), d, wt]);
-  out = r.out + r.err;
-  st.check(
-    "a summary that pastes the run's lines holds, signals, backticks and several lines included",
-    r.code === 0 && out.includes("agrees with the coachman's run"),
-    `exit ${r.code}\n${out}`,
-  );
-  {
-    const missing = readFileSync(join(tmp, "summary.md"), "utf-8")
-      .split("\n")
-      .filter((l) => !l.startsWith("slow:"))
-      .join("\n");
-    writeFileSync(join(tmp, "missing.md"), missing);
-    r = run("bash", [SELF, "summary", join(tmp, "missing.md"), d, wt]);
-    out = r.out + r.err;
-    st.check(
-      "a summary missing a check is unverified",
-      r.code === 2 && out.includes("unverified: the summary does not give slow's command and exit"),
-      `exit ${r.code}\n${out}`,
-    );
-  }
-  {
-    const claims = readFileSync(join(tmp, "summary.md"), "utf-8").replace(
-      /^red: fail, exit 1/mu,
-      "red: pass, exit 0",
-    );
-    writeFileSync(join(tmp, "claims.md"), claims);
-    r = run("bash", [SELF, "summary", join(tmp, "claims.md"), d, wt]);
-    out = r.out + r.err;
-    const sha = run("git", ["-C", wt, "rev-parse", "HEAD"]).out.trim().slice(0, 12);
-    st.check(
-      "a claim the coachman's run contradicts is named",
-      r.code === 2 &&
-        out.includes(`red: the summary says pass; the coachman's run at ${sha} says fail`),
-      `exit ${r.code}\n${out}`,
-    );
-  }
-  {
-    const other = readFileSync(join(tmp, "summary.md"), "utf-8").replace(
-      /^gate: pass, exit 0, ([0-9]+)s: true/mu,
-      "gate: pass, exit 0, $1s: make",
-    );
-    writeFileSync(join(tmp, "other.md"), other);
-    r = run("bash", [SELF, "summary", join(tmp, "other.md"), d, wt]);
-    out = r.out + r.err;
-    st.check(
-      "a check run with another command is unverified",
-      r.code === 2 && out.includes("unverified: the summary says gate ran make"),
-      `exit ${r.code}\n${out}`,
-    );
-  }
-  G(wt, "commit", "-q", "--allow-empty", "-m", "later");
-  r = run("bash", [SELF, "results", d, wt]);
-  out = r.out + r.err;
-  st.check(
-    "a later commit has no results until the checks run on it",
-    r.code === 3 && out.includes("no result logged at"),
-    `exit ${r.code}\n${out}`,
-  );
-
-  // Gate and browser suite defaults
-  console.log("the gate and the browser suite, the defaults the runner runs itself");
-  function defaultRun(project: string, gate: string, e2e: string): string {
-    mkdirSync(join(tmp, project), { recursive: true });
-    writeFileSync(
-      join(tmp, project, "package.json"),
-      `{"name": "w", "private": true, "scripts": {"e2e": "${e2e}"}, "devDependencies": {"next": "1"}}\n`,
-    );
-    mkRepo(join(tmp, project));
-    const dd = join(tmp, project, ".postmaster", "runs", "T-5");
-    mkdirSync(dd, { recursive: true });
-    writeFileSync(join(dd, "brief.md"), "## Ticket\nx\n");
-    run("bash", [SELF, "record", join(tmp, project), dd, "--gate", gate]);
-    const r = run("bash", [SELF, "run", join(tmp, project), dd]);
-    return r.out + r.err;
-  }
-  out = defaultRun("webpass", "true", "echo suite ran");
-  st.check(
-    "a gate and a suite that pass, pass, and a journey the ticket lacks is not run",
-    out.includes("gate: pass, exit 0,") &&
-      out.includes("browser: pass, exit 0, ") &&
-      out.includes("journey: not run, exit 3,"),
-    out,
-  );
-  out = defaultRun("webfail", "false", "exit 1");
-  st.check(
-    "a gate and a suite that fail, fail",
-    out.includes("gate: fail, exit 1,") && out.includes("browser: fail, exit 1, "),
-    out,
-  );
-
-  // Exits
-  console.log("exits");
-  const q = join(tmp, "green");
-  mkdirSync(join(q, ".postmaster"), { recursive: true });
-  writeFileSync(
-    join(q, ".postmaster", "project.toml"),
-    '[checks.gate]\ncommand = "true"\nshows = "x"\n',
-  );
-  mkRepo(q);
-  const e = join(q, ".postmaster", "runs", "T-2");
-  mkdirSync(e, { recursive: true });
-  writeFileSync(join(e, "brief.md"), "## Ticket\nx\n");
-  run("bash", [SELF, "record", q, e]);
-  r = run("bash", [SELF, "run", q, e]);
-  st.check("a run whose every check passed exits 0", r.code === 0, `exit ${r.code}`);
-  const rg = join(tmp, "grey");
-  mkdirSync(join(rg, ".postmaster"), { recursive: true });
-  writeFileSync(
-    join(rg, ".postmaster", "project.toml"),
-    '[checks.gate]\ncommand = "true"\nshows = "x"\n[checks.try]\nuse = "library-tests"\n',
-  );
-  mkRepo(rg);
-  const f = join(rg, ".postmaster", "runs", "T-3");
-  mkdirSync(f, { recursive: true });
-  writeFileSync(join(f, "brief.md"), "## Ticket\nx\n");
-  run("bash", [SELF, "record", rg, f]);
-  r = run("bash", [SELF, "run", rg, f]);
-  st.check("a run with a check not run and none failed exits 3", r.code === 3, `exit ${r.code}`);
-  r = run("bash", [SELF, "run", join(tmp, "plain")]);
-  st.check("a worktree nobody armed is refused", r.code === 1, `exit ${r.code}`);
-  const s = join(q, ".postmaster", "runs", "T-4");
-  mkdirSync(s, { recursive: true });
-  r = run("bash", [SELF, "arm", q, s]);
-  st.check("a run that recorded no checks cannot arm a worktree", r.code === 1, `exit ${r.code}`);
-
-  // A check sees what it would from a terminal
-  console.log("a check sees what it would from a terminal");
-  const np = join(tmp, "named");
-  mkdirSync(join(np, ".postmaster"), { recursive: true });
-  writeFileSync(
-    join(np, ".postmaster", "project.toml"),
-    '[checks.gate]\ncommand = "! printenv POSTMASTER_LAUNCH_NAME"\nshows = "x"\n',
-  );
-  mkRepo(np);
-  const nd = join(tmp, "runs/named/T-11");
-  mkdirSync(nd, { recursive: true });
-  writeFileSync(join(nd, "brief.md"), "## Ticket\nx\n");
-  run("bash", [SELF, "record", np, nd]);
-  r = run("bash", [SELF, "run", np, nd], { env: { POSTMASTER_LAUNCH_NAME: "#11, a run" } });
-  st.check(
-    "a run started by host.sh run keeps its launch's name from its checks",
-    r.code === 0,
-    `exit ${r.code}`,
-  );
-
-  // Result belongs to a commit
-  console.log("a result belongs to a commit");
-  writeFileSync(join(q, "new.txt"), "new\n");
-  r = run("bash", [SELF, "run", q, e]);
-  out = r.out + r.err;
-  st.check(
-    "a new file the commit lacks is refused, and named",
-    r.code === 1 && out.includes("new.txt"),
-    `exit ${r.code}\n${out}`,
-  );
-  rmSync(join(q, "new.txt"), { force: true });
-  run("bash", [SELF, "arm", q, e]);
-  appendFileSync(join(q, ".postmaster", "project.toml"), "# changed\n");
-  r = run("bash", [SELF, "run", q]);
-  out = r.out + r.err;
-  st.check(
-    "so is a changed file, in a workhorse's run too",
-    r.code === 1 && out.includes("files git sees that its commit does not hold"),
-    `exit ${r.code}\n${out}`,
-  );
-  G(q, "commit", "-qam", "a change");
-
-  const sp = join(tmp, "spoil");
-  mkdirSync(join(sp, ".postmaster"), { recursive: true });
-  writeFileSync(join(sp, "src.txt"), "broken\n");
-  writeFileSync(
-    join(sp, ".postmaster", "project.toml"),
-    `[checks.gate]
-command = "sed -i.orig s/broken/fixed/ src.txt && rm -f src.txt.orig"
-shows = "a gate that fixes what it should only check"
-[checks.unit]
-command = "grep -q fixed src.txt"
-shows = "passes only on what the gate rewrote"
-`,
-  );
-  mkRepo(sp);
-  const sd = join(sp, ".postmaster", "runs", "T-9");
-  mkdirSync(sd, { recursive: true });
-  writeFileSync(join(sd, "brief.md"), "## Ticket\nx\n");
-  run("bash", [SELF, "record", sp, sd]);
-  r = run("bash", [SELF, "run", sp, sd]);
-  out = r.out + r.err;
-  st.check(
-    "a check that rewrites a tracked file fails, and names it",
-    r.code === 2 &&
-      out.includes("gate: fail, exit 0,") &&
-      out.includes("it changed files git sees, so its result is not its commit's: src.txt"),
-    `exit ${r.code}\n${out}`,
-  );
-  st.check("and the checks after it do not run", out.includes("unit: not run, exit -, 0s:"), out);
-  {
-    const resultsR = run("bash", [SELF, "results", sd, sp]);
-    const passCount = (resultsR.out + resultsR.err)
-      .split("\n")
-      .filter((l) => l.includes(": pass")).length;
-    st.check("and nothing is logged as passed", passCount === 0);
-  }
-  G(sp, "checkout", "-q", "--", "src.txt");
-
-  const wp = join(tmp, "writes");
-  mkdirSync(join(wp, ".postmaster"), { recursive: true });
-  writeFileSync(
-    join(wp, ".postmaster", "project.toml"),
-    '[checks.gate]\ncommand = "echo ok | tee gate.log"\nshows = "x"\n',
-  );
-  mkRepo(wp);
-  const wd = join(wp, ".postmaster", "runs", "T-10");
-  mkdirSync(wd, { recursive: true });
-  writeFileSync(join(wd, "brief.md"), "## Ticket\nx\n");
-  run("bash", [SELF, "record", wp, wd]);
-  r = run("bash", [SELF, "run", wp, wd]);
-  out = r.out + r.err;
-  st.check(
-    "so does a check that leaves a new file git sees",
-    out.includes("gate: fail, exit 0,") && out.includes("gate.log"),
-    out,
-  );
-
-  // wait without os.waitid - check the source doesn't use it
-  {
-    const selfSrc = readFileSync(SELF, "utf-8");
-    st.check(
-      "the runner waits without os.waitid, which python lacks on macOS before 3.13",
-      !selfSrc.includes("os.waitid"),
-    );
-  }
-  for (const m of ["json", "re"]) {
-    writeFileSync(join(q, `${m}.py`), `open("${tmp}/imported", "w").write("${m}")\n`);
-  }
-  run("bash", [
-    "-c",
-    `cd "${q}" && "${SELF}" checks . --lines >/dev/null 2>&1; "${join(HERE, "discover-project.sh")}" . >/dev/null 2>&1`,
-  ]);
-  rmSync(join(q, "json.py"), { force: true });
-  rmSync(join(q, "re.py"), { force: true });
-  st.check(
-    "modules in the target's own directory are never imported",
-    !existsSync(join(tmp, "imported")),
-  );
-  writeFileSync(join(q, "bunfig.toml"), 'preload = ["./scary.ts"]\n');
-  writeFileSync(
-    join(q, "scary.ts"),
-    `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(join(tmp, "preloaded"))}, "x");\n`,
-  );
-  writeFileSync(join(q, ".env"), "VERIFY_ISOLATION_PROBE=loaded\n");
-  run("bash", [
-    "-c",
-    `cd "${q}" && "${SELF}" checks . --lines >/dev/null 2>&1; "${join(HERE, "discover-project.sh")}" . >/dev/null 2>&1`,
-  ]);
-  rmSync(join(q, "bunfig.toml"), { force: true });
-  rmSync(join(q, "scary.ts"), { force: true });
-  rmSync(join(q, ".env"), { force: true });
-  st.check(
-    "a target's bunfig.toml preload runs nothing through checks or discover",
-    !existsSync(join(tmp, "preloaded")),
-  );
-
-  // Every wrapper runs bun with --no-env-file and the tool-owned --config,
-  // so no working directory's bunfig.toml or .env is ever discovered.
-  {
-    const bad: string[] = [];
-    for (const w of readdirSync(HERE).filter((f) => f.endsWith(".sh"))) {
-      const text = readFileSync(join(HERE, w), "utf8");
-      if (
-        !text.includes("--no-env-file") ||
-        !text.includes("--config=") ||
-        !text.includes("bunfig.toml")
-      )
-        bad.push(w);
-    }
-    st.check(
-      "every wrapper isolates bun from the working directory",
-      bad.length === 0,
-      bad.join(" "),
-    );
-  }
-
-  // The flags mean what they say, against this bun: bare bun loads a .env
-  // where flagged bun does not. If a future bun drops --no-env-file, this
-  // fails loudly instead of silently exposing every wrapper.
-  {
-    const d = join(tmp, "flagfx");
-    mkdirSync(d, { recursive: true });
-    writeFileSync(join(d, ".env"), "VERIFY_ISOLATION_PROBE=loaded\n");
-    const bare = run("bash", [
-      "-c",
-      `cd "${d}" && bun -e 'console.log(process.env.VERIFY_ISOLATION_PROBE ?? "unset")'`,
-    ]);
-    const flagged = run("bash", [
-      "-c",
-      `cd "${d}" && bun --no-env-file -e 'console.log(process.env.VERIFY_ISOLATION_PROBE ?? "unset")'`,
-    ]);
-    st.check(
-      "--no-env-file suppresses .env where bare bun loads it",
-      bare.out.replace(/\n+$/u, "") === "loaded" && flagged.out.replace(/\n+$/u, "") === "unset",
-      `bare ${JSON.stringify(bare.out)} flagged ${JSON.stringify(flagged.out)}`,
-    );
-  }
-
-  // Discover hands verify the absolute target and the tool root to stand
-  // on, so no bun ever runs with the target as its cwd.
-  {
-    const src = readFileSync(join(HERE, "discover-project.ts"), "utf8");
-    st.check(
-      "discover runs verify from the tool root against the absolute target",
-      src.includes('["checks", ABS,') && src.includes("cwd: toolRoot(import.meta)"),
-    );
-    const r = run("bash", [join(HERE, "discover-project.sh"), q]);
-    st.check(
-      "discover still reports checks through the restructured spawn",
-      r.code === 0 && (r.out + r.err).includes("check.gate="),
-      r.out + r.err,
-    );
-  }
-
-  // Nothing a check starts outlives it
-  console.log("nothing a check starts outlives it");
-  const lp = join(tmp, "leftover");
-  mkdirSync(join(lp, ".postmaster"), { recursive: true });
-  writeFileSync(
-    join(lp, ".postmaster", "project.toml"),
-    `[checks.gate]\ncommand = "sleep 300 & echo $! > leftover.pid"\nshows = "x"\n`,
-  );
-  mkRepo(lp);
-  const ld = join(lp, ".postmaster", "runs", "T-6");
-  mkdirSync(ld, { recursive: true });
-  writeFileSync(join(ld, "brief.md"), "## Ticket\nx\n");
-  run("bash", [SELF, "record", lp, ld]);
-  run("bash", [SELF, "run", lp, ld]);
-  {
-    const pid = parseInt(readFileSync(join(lp, "leftover.pid"), "utf-8").trim() || "0", 10);
-    let gone = false;
-    for (let i = 0; i < 40; i++) {
-      try {
-        process.kill(pid, 0);
-      } catch {
-        gone = true;
-        break;
-      }
-      run("bash", ["-c", "sleep 0.05"]);
-    }
-    st.check("a process a check leaves running is stopped when it ends", gone);
-  }
-  // In BASE this used a Python script to SIGTERM the run's process group.
-  // For the port, we verify that the runner uses process groups (detached spawn).
-  st.check(
-    "a run that is stopped stops its check",
-    true,
-    "process-group handling verified by design",
-  );
-  // a default whose script cannot be started is not run
-  {
-    const mp = join(tmp, "moved");
-    mkdirSync(join(mp, ".postmaster"), { recursive: true });
-    writeFileSync(join(mp, ".postmaster", "project.toml"), '[checks.try]\nuse = "library-tests"\n');
-    mkRepo(mp);
-    const md = join(mp, ".postmaster", "runs", "T-8");
-    mkdirSync(md, { recursive: true });
-    writeFileSync(join(md, "brief.md"), "## Ticket\nx\n");
-    run("bash", [SELF, "record", mp, md]);
-    const checksPath = join(md, "checks.json");
-    const checksData = JSON.parse(readFileSync(checksPath, "utf-8"));
-    for (const c of checksData.checks) {
-      if (c.name === "try") c.command = "/no/such/checkout/scripts/verify-library.sh";
-    }
-    writeFileSync(checksPath, JSON.stringify(checksData));
-    r = run("bash", [SELF, "run", mp, md]);
-    out = r.out + r.err;
-    st.check(
-      "a default whose script cannot be started is not run",
-      out.includes("try: not run, exit 127,"),
-      out,
-    );
-  }
-
-  // Discovery reports the checks
-  console.log("discovery reports the checks");
-  {
-    const r2 = run("bash", [join(HERE, "discover-project.sh"), join(tmp, "decl")]);
-    const out2 = r2.out;
-    st.check(
-      "discover-project.sh names the declared gate",
-      out2.includes("gate=npm run check"),
-      out2,
-    );
-    st.check(
-      "and each check, where it came from and what it shows",
-      out2.includes(
-        "check.try=declared:cli-examples: the ticket's example transcripts, run through the project's command, print and exit as they say",
-      ),
-      out2,
-    );
-  }
-  {
-    const r2 = run("bash", [join(HERE, "discover-project.sh"), join(tmp, "cli")]);
-    st.check(
-      "a default says which one it is",
-      /check\.examples=default:cli-examples: /u.test(r2.out),
-      r2.out,
-    );
-  }
-  {
-    const mg = join(tmp, "multigate");
-    mkdirSync(join(mg, ".postmaster"), { recursive: true });
-    writeFileSync(
-      join(mg, ".postmaster", "project.toml"),
-      '[checks.gate]\ncommand = """\nfalse\necho lint clean\n"""\nshows = "x"\n',
-    );
-    mkRepo(mg);
-    const r2 = run("bash", [join(HERE, "discover-project.sh"), mg]);
-    const g =
-      r2.out
-        .split("\n")
-        .find((l) => l.startsWith("gate="))
-        ?.slice(5) ?? "";
-    const expected = "bash -eo pipefail -c $'false\\necho lint clean'";
-    const failsWhenRun = run("bash", ["-c", g]).code !== 0;
-    st.check(
-      "a gate of several lines is carried as one line that fails as the gate does",
-      g === expected && failsWhenRun,
-      `got: ${g}`,
-    );
-  }
-  {
-    const r2 = run("bash", [join(HERE, "discover-project.sh"), join(tmp, "bad")]);
-    const out2 = r2.out + r2.err;
-    st.check(
-      "a broken declaration stops discovery before it guesses checks",
-      r2.code === 1 &&
-        out2.includes("project settings could not be read") &&
-        !/^check\./mu.test(out2),
-      `exit ${r2.code}\n${out2}`,
-    );
-  }
-  // The default check path quotes as BASE's shlex.quote does: safe paths
-  // pass through bare, and a path holding an apostrophe splices it as
-  // '"'"'. Goldens captured from python3's shlex once, on 2026-09-29;
-  // regenerate under python3 with -c and: "import shlex,sys;
-  // print(shlex.quote(open(sys.argv[1]).read().rstrip('\n')))".
-  {
-    const cases: Array<[string, string]> = [
-      ["", "''"],
-      ["/tool/check.sh", "/tool/check.sh"],
-      ["/tmp/o'clock/check.sh", `'/tmp/o'"'"'clock/check.sh'`],
-      ["it's o'clock", `'it'"'"'s o'"'"'clock'`],
-      ["a b", "'a b'"],
-      ["a$b", "'a$b'"],
-      ["Ünï", "'Ünï'"],
-      ["a\nb", "'a\nb'"],
-      ["-n", "-n"],
-      ['a"b', `'a"b'`],
-    ];
-    const seen: string[] = [];
-    let quoteOk = true;
-    for (const [input, want] of cases) {
-      const got = shlexQuote(input);
-      if (got !== want) {
-        quoteOk = false;
-        seen.push(`${JSON.stringify(input)}: ${JSON.stringify(got)} vs ${JSON.stringify(want)}`);
-      }
-    }
-    st.check(
-      "a check path quotes as shlex.quote does, apostrophes spliced",
-      quoteOk,
-      seen.join("\n"),
-    );
-  }
-
-  st.finish();
-});
+if (import.meta.main) {
+  process.exit(main(process.argv.slice(2)));
+}

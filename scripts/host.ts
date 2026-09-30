@@ -22,7 +22,6 @@
 //                                         and with --wait block until it settles (default 600)
 //   host.sh wait <handle> [<seconds>]     block until it settles, when nothing was just sent
 //   host.sh read <handle> [<lines>]       print what it shows (default 120 lines)
-//   host.sh --self-test                   stub hosts on PATH; never touches a live server
 //   host.sh --live-test                   the ticket's controls, against the hosts on this machine
 //
 // run: <command> is the same headless command a caller would otherwise background with `&`. It
@@ -54,7 +53,7 @@
 // CLAUDE_CODE_MESSAGING_TOKEN, CLAUDE_CODE_TOOL_USE_ID, and the
 // CLAUDE_CODE_SESSION_*, CLAUDE_CODE_MESSAGING_* and CLAUDE_CODE_CHILD_*
 // families. Add an exact identity name or family
-// to runLaunch's filter and its self-test controls; keep unrelated CLAUDE_CODE_* configuration.
+// to runLaunch's filter and its test controls; keep unrelated CLAUDE_CODE_* configuration.
 // If the host cannot place it, it runs in the background. On Linux with a working systemd user
 // manager, the command and its descendants run in a transient scope with MemoryMax,
 // MemorySwapMax=0 and TasksMax;
@@ -669,8 +668,8 @@ function fixtureGuard(): void {
   const fixture = process.env.POSTMASTER_HOST_FIXTURE;
   if (!fixture) return;
   if (resolve(STATE).startsWith(resolve(fixture) + sep)) return;
-  warn(`refusing the registry at ${STATE}: a self-test uses only its fixture, ${fixture}`);
-  throw hostError("registry is outside the self-test fixture", 1);
+  warn(`refusing the registry at ${STATE}: a test uses only its fixture, ${fixture}`);
+  throw hostError("registry is outside the test fixture", 1);
 }
 function registryAdd(group: number, dir: string, name: string): void {
   fixtureGuard();
@@ -2813,10 +2812,6 @@ function readCmd(args: string[]): void {
   } else noSessionHost();
 }
 
-async function selfTest(): Promise<void> {
-  const result = await import("./host-self-test.ts");
-  await result.runSelfTest();
-}
 async function liveTest(): Promise<void> {
   const result = await import("./host-self-test.ts");
   await result.live();
@@ -2864,15 +2859,12 @@ async function main(): Promise<void> {
     case "_watch":
       await watch(Number(args[0]), args[1] ?? "");
       return;
-    case "--self-test":
-      await selfTest();
-      return;
     case "--live-test":
       await liveTest();
       return;
     default:
       die(
-        "usage: host.sh detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] | stop | close | spawn | send | wait | read | --self-test | --live-test (see the header)",
+        "usage: host.sh detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] | stop | close | spawn | send | wait | read | --live-test (see the header)",
       );
   }
 }

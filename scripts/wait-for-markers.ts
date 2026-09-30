@@ -3,7 +3,6 @@
 // that ends between launching a round and collecting it is a round nobody collects.
 //
 //   wait-for-markers.sh <dir> <glob> <count> <timeout-seconds>
-//   wait-for-markers.sh --self-test
 //
 // It looks every 20 seconds, and once more at the timeout, so the timeout is kept to the second.
 // The timeout counts the seconds it has slept, so time the machine spends asleep is not counted,
@@ -18,20 +17,8 @@
 // count a marker this script plants (positive control) and count zero for a pattern that cannot
 // match (negative control). A poller that can only ever say 0 is indistinguishable from lanes
 // that are still working, so it reads as patience rather than as a broken instrument.
-import { spawn } from "node:child_process";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { scriptsDir } from "./lib/paths.ts";
-import { run, withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
 
 function matchGlob(name: string, pattern: string): boolean {
   const re = new RegExp(
@@ -119,7 +106,7 @@ function wait(dirRaw: string, glob: string, countRaw: string, timeoutRaw: string
  * counts slept seconds through sleep alone and never reads the wall clock,
  * so time asleep is not counted and a clock set forward cannot end the wait
  * early. Naps are 20 seconds but the last, which is the remainder. */
-function countdown(
+export function countdown(
   countFn: () => number,
   count: number,
   timeout: number,
@@ -139,136 +126,9 @@ function countdown(
 
 // --- entry ------------------------------------------------------------------------------
 const argv = process.argv.slice(2);
-if (argv[0] === "--self-test") {
-  const self = join(scriptsDir(import.meta), "wait-for-markers.sh");
-  withTempDir((tmp) => {
-    const d = join(tmp, "logs");
-    mkdirSync(d);
-    const st = new SelfTest();
-    let out = "";
-    let rc = 0;
-    let took = 0;
-
-    const invoke = (...args: string[]): void => {
-      const t0 = Date.now();
-      const r = run("bash", [self, ...args]);
-      out = r.out + r.err;
-      rc = r.code;
-      took = Math.floor((Date.now() - t0) / 1000);
-    };
-    const has = (text: string): boolean => out.includes(text);
-    const ok = (label: string) => st.ok(label);
-    const fail = (label: string) => st.fail(`${label} (exit ${rc}, ${took}s)`, out);
-
-    console.log("positive controls");
-    writeFileSync(join(d, "review-r1-bug-one.done"), "");
-    writeFileSync(join(d, "review-r1-bug-two.done"), "");
-    invoke(d, "review-r1-*.done", "2", "5");
-    if (rc === 0 && out.trim() === "all 2 markers present" && took <= 1)
-      ok("markers already in are collected at once");
-    else fail("markers already in are collected at once");
-
-    // A marker that lands during the wait (background write after 1s). The
-    // writer is detached: a synchronous spawn waits for its background jobs,
-    // and the marker would pre-exist instead of landing mid-wait.
-    const landing = join(d, "review-r2-bug-one.done");
-    const bg = spawn("bash", ["-c", `sleep 1; touch "${landing}"`], {
-      detached: true,
-      stdio: "ignore",
-    });
-    bg.unref();
-    if (existsSync(landing)) {
-      fail("a marker that lands during the wait is collected by the timeout");
-    } else {
-      invoke(d, "review-r2-*.done", "1", "3");
-      if (rc === 0 && out.trim() === "all 1 markers present")
-        ok("a marker that lands during the wait is collected by the timeout");
-      else fail("a marker that lands during the wait is collected by the timeout");
-    }
-
-    for (let i = 1; i <= 9; i++) writeFileSync(join(d, `review-r5-bug-${i}.done`), "");
-    invoke(d, "review-r5-*.done", "010", "1");
-    if (rc === 3 && has("9 of 10 markers"))
-      ok("a count with a leading zero is decimal: 010 is ten, which nine markers do not meet");
-    else fail("a count with a leading zero is decimal: 010 is ten, which nine markers do not meet");
-
-    console.log("negative controls");
-    writeFileSync(join(d, "review-r3-bug-one.done"), "");
-    writeFileSync(join(d, "review-r4-bug-two.done"), "");
-    invoke(d, "review-r3-*.done", "2", "1");
-    if (
-      rc === 3 &&
-      has("WAIT-TIMEOUT after 1s: 1 of 2 markers matching review-r3-*.done") &&
-      has(`present: ${join(d, "review-r3-bug-one.done")}`) &&
-      !has("review-r4")
-    )
-      ok("a missing marker times out, and another round's marker is not counted");
-    else fail("a missing marker times out, and another round's marker is not counted");
-
-    if (rc === 3 && took <= 3) ok("the timeout is kept to the second, not the next 20-second look");
-    else fail("the timeout is kept to the second, not the next 20-second look");
-
-    // The timeout counts slept seconds through the countdown alone: run it with
-    // a fake sleep while a fake wall clock jumps an hour per nap, and the
-    // wait still consumes every second of its timeout in 20-second naps.
-    {
-      let fakeNow = 0;
-      const naps: number[] = [];
-      const verdict = countdown(
-        () => 0,
-        1,
-        35,
-        (ms) => {
-          naps.push(ms);
-          fakeNow += 3600000;
-        },
-      );
-      if (verdict === "timeout" && JSON.stringify(naps) === "[20000,15000]" && fakeNow === 7200000)
-        ok("a clock that jumps ahead does not end the wait early");
-      else fail("a clock that jumps ahead does not end the wait early");
-    }
-
-    invoke(d, "review-r1-*.done", "two", "5");
-    if (rc === 1 && !has("markers present"))
-      ok("a count that is not a number is refused, not read as every marker in");
-    else fail("a count that is not a number is refused, not read as every marker in");
-
-    invoke(d, "review-r1-*.done", "2", "soon");
-    if (rc === 1) ok("a timeout that is not a number is refused");
-    else fail("a timeout that is not a number is refused");
-
-    invoke(d, "review-r1-*.done", "2", "9999999999999999999");
-    if (rc === 1 && has("more than 9 digits"))
-      ok("a timeout past 9 digits is refused, never wrapped round to a past deadline");
-    else fail("a timeout past 9 digits is refused, never wrapped round to a past deadline");
-
-    invoke(join(tmp, "nowhere"), "review-r1-*.done", "2", "1");
-    if (rc === 1 && has("no such dir")) ok("a directory that does not exist is refused");
-    else fail("a directory that does not exist is refused");
-
-    // Permission test (skip if root)
-    if (process.getuid?.() !== 0) {
-      try {
-        chmodSync(d, 0o555);
-        invoke(d, "review-r1-*.done", "2", "1");
-        chmodSync(d, 0o755);
-        if (rc === 1 && has("reader failed its control (positive=0"))
-          ok("a reader that cannot see its own planted marker stops the wait");
-        else fail("a reader that cannot see its own planted marker stops the wait");
-      } catch {
-        st.fail("a reader that cannot see its own planted marker stops the wait");
-      }
-    } else {
-      console.log("  skip a reader that cannot see its own planted marker (root writes anywhere)");
-    }
-
-    st.finish();
-  });
-} else {
+if (import.meta.main) {
   if (argv.length < 4) {
-    console.error(
-      "usage: wait-for-markers.sh <dir> <glob> <count> <timeout-seconds> | --self-test",
-    );
+    console.error("usage: wait-for-markers.sh <dir> <glob> <count> <timeout-seconds>");
     process.exit(1);
   }
   process.exit(wait(argv[0] as string, argv[1] as string, argv[2] as string, argv[3] as string));

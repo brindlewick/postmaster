@@ -5,7 +5,6 @@
 //
 //   runs-watch.sh <project-run-root> [--timeout <seconds>]
 //   runs-watch.sh --help
-//   runs-watch.sh --self-test
 //
 // It looks at once, then every postmaster.poll_seconds (default 120) from the config
 // (POSTMASTER_CONFIG overrides the path). A run needs the postmaster when its NEXT is anything
@@ -28,27 +27,12 @@
 //
 // Controls: every NEXT that must wake the postmaster names its run on exit 0 (positive), and
 // WAIT, USER, -, and a held run leave it waiting until its timeout (negative).
-import { spawn } from "node:child_process";
-import {
-  chmodSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  readlinkSync,
-  renameSync,
-  statSync,
-  symlinkSync,
-  utimesSync,
-  writeFileSync,
-} from "node:fs";
+import { lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { beside, scriptsDir } from "./lib/paths.ts";
-import { die, run, withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
+import { die, run } from "./lib/proc.ts";
 
-const USAGE =
-  "usage: runs-watch.sh <project-run-root> [--timeout <seconds>] | --help | --self-test";
+const USAGE = "usage: runs-watch.sh <project-run-root> [--timeout <seconds>] | --help";
 
 function printHelp(): never {
   const src = readFileSync(join(scriptsDir(import.meta), "runs-watch.ts"), "utf8");
@@ -639,420 +623,46 @@ const argv = rawArgv();
 
 if (argv[0] === "--help" || argv[0] === "-h") printHelp();
 
-if (argv[0] !== "--self-test") {
-  let root = "";
-  let timeoutStr: string | null = null;
-  let i = 0;
-  while (i < argv.length) {
-    const a = argv[i]!;
-    if (a === "--timeout") {
-      if (i + 1 >= argv.length) die(USAGE, 1);
-      const v = argv[i + 1]!;
-      if (v === "") die("runs-watch: '' is not a whole number of seconds", 1);
-      timeoutStr = v;
-      i += 2;
-    } else if (a.startsWith("-")) {
-      die(USAGE, 1);
-    } else {
-      if (root !== "") die(USAGE, 1);
-      root = a;
-      i += 1;
-    }
+let root = "";
+let timeoutStr: string | null = null;
+let i = 0;
+while (i < argv.length) {
+  const a = argv[i]!;
+  if (a === "--timeout") {
+    if (i + 1 >= argv.length) die(USAGE, 1);
+    const v = argv[i + 1]!;
+    if (v === "") die("runs-watch: '' is not a whole number of seconds", 1);
+    timeoutStr = v;
+    i += 2;
+  } else if (a.startsWith("-")) {
+    die(USAGE, 1);
+  } else {
+    if (root !== "") die(USAGE, 1);
+    root = a;
+    i += 1;
   }
-  if (root === "") die(USAGE, 1);
-  let timeout: number | null = null;
-  if (timeoutStr !== null) {
-    if (!/^[0-9]+$/u.test(timeoutStr)) {
-      die(`runs-watch: '${timeoutStr}' is not a whole number of seconds`, 1);
-    }
-    const sig = timeoutStr.replace(/^0+/u, "");
-    if (sig.length > 9) die(`runs-watch: '${timeoutStr}' is more than 9 digits`, 1);
-    timeout = sig === "" ? 0 : parseInt(sig, 10);
-  }
-  try {
-    root = physicalDir(root);
-  } catch {
-    // The shell assigns ROOT from a failing substitution, which empties it,
-    // so the message names no root.
-    die("runs-watch: no such root: ", 1);
-  }
-  const pc = process.env.POSTMASTER_CONFIG;
-  const home = process.env.HOME;
-  const config =
-    pc !== undefined && pc !== ""
-      ? pc
-      : `${home !== undefined && home !== "" ? home : ""}/.postmaster/config.toml`;
-  watch(root, config, timeout);
 }
-
-// --- self-test ----------------------------------------------------------------------------
-const self = join(scriptsDir(import.meta), "runs-watch.sh");
-withTempDir((tmp) => {
-  const st = new SelfTest();
-  writeFileSync(join(tmp, "config.toml"), "[postmaster]\npoll_seconds = 1\n");
-  process.env.POSTMASTER_CONFIG = join(tmp, "config.toml");
-  let rc = 0;
-  let out = "";
-  const ok = (label: string): void => {
-    st.ok(label);
-  };
-  const fail = (label: string): void => {
-    st.fail(`${label} (exit ${rc})`, out);
-  };
-  const has = (s: string): boolean => out.includes(s);
-  const watch = (root: string, timeout = "2", config?: string): void => {
-    const r = run(
-      self,
-      ["--timeout", timeout, root],
-      config === undefined ? {} : { env: { POSTMASTER_CONFIG: config } },
-    );
-    rc = r.code;
-    out = `${r.out}${r.err}`;
-  };
-  const mkrun = (
-    root: string,
-    name: string,
-    stage: string,
-    leg: number,
-    ...markers: string[]
-  ): void => {
-    const d = join(root, name);
-    mkdirSync(join(d, "logs"), { recursive: true });
-    writeFileSync(join(d, "manifest.json"), `{"stage": "${stage}", "leg": ${leg}}\n`);
-    writeFileSync(join(d, "run-log.md"), "");
-    for (const m of markers) writeFileSync(join(d, m), "");
-  };
-  const age = (root: string, name: string): void => {
-    // Nothing in the run has changed for an hour: files only, as os.walk lists them.
-    const t = Date.now() / 1000 - 3600;
-    const walk = (d: string): void => {
-      for (const e of readdirSync(d)) {
-        const p = join(d, e);
-        if (statSync(p).isDirectory()) walk(p);
-        else {
-          try {
-            utimesSync(p, t, t);
-          } catch {
-            /* ignore */
-          }
-        }
-      }
-    };
-    walk(join(root, name));
-  };
-  const later = (file: string): void => {
-    // The shell sleeps in the foreground and watches in the background; here
-    // the marker arrives from a detached sleeper while run() blocks.
-    const child = spawn("sh", ["-c", 'sleep 2; : > "$1"', "sh", file], {
-      detached: true,
-      stdio: "ignore",
-    });
-    child.unref();
-  };
-
-  console.log("positive controls: each NEXT that needs the postmaster names its run");
-  const specs: Array<[string, string, number, string, string]> = [
-    ["rule", "review", 2, ".escalation-ready", "RULE"],
-    ["gate", "shipping", 3, ".card-ready", "GATE"],
-    ["spec", "planning", 1, ".spec-review-ready", "SPEC"],
-    ["dispatch", "review", 2, ".leg-2-done", "DISPATCH"],
-    ["remount", "review", 2, ".leg-2-exited", "REMOUNT"],
-    ["read", "review", 2, ".checkpoint-review-ready", "READ"],
-  ];
-  for (const [name, stage, leg, marker, want] of specs) {
-    const root = join(tmp, `pos-${name}`);
-    mkdirSync(root, { recursive: true });
-    mkrun(root, name, stage, leg, marker);
-    watch(root);
-    if (rc === 0 && has(`needs ${name} ${want}`) && has("NEXT")) ok(`NEXT ${want} names ${name}`);
-    else fail(`NEXT ${want} names ${name}`);
+if (root === "") die(USAGE, 1);
+let timeout: number | null = null;
+if (timeoutStr !== null) {
+  if (!/^[0-9]+$/u.test(timeoutStr)) {
+    die(`runs-watch: '${timeoutStr}' is not a whole number of seconds`, 1);
   }
-  {
-    const root = join(tmp, "pos-inspect");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "inspect", "review", 2);
-    age(root, "inspect");
-    watch(root);
-    if (rc === 0 && has("needs inspect INSPECT")) ok("NEXT INSPECT names inspect");
-    else fail("NEXT INSPECT names inspect");
-  }
-  {
-    const root = join(tmp, "pos-late");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "late", "review", 2);
-    later(join(root, "late", ".escalation-ready"));
-    watch(root, "10");
-    if (rc === 0 && has("needs late RULE") && !has("the poll interval is the default")) {
-      ok("a run that becomes actionable mid-wait is named");
-    } else fail("a run that becomes actionable mid-wait is named");
-  }
-  {
-    const root = join(tmp, "pos-multi");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "first", "review", 2, ".escalation-ready");
-    mkrun(root, "second", "shipping", 3, ".card-ready");
-    watch(root);
-    if (rc === 0 && has("needs first RULE") && has("needs second GATE") && has("NEXT")) {
-      ok("every waking run is named");
-    } else fail("every waking run is named");
-  }
-  {
-    const root = join(tmp, "pos-prompt");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "prompt", "review", 2);
-    const t0 = Math.floor(Date.now() / 1000);
-    later(join(root, "prompt", ".escalation-ready"));
-    watch(root, "30");
-    const took = Math.floor(Date.now() / 1000) - t0;
-    if (rc === 0 && has("needs prompt RULE") && took <= 15) {
-      ok("a usable poll interval wakes promptly");
-    } else fail("a usable poll interval wakes promptly");
-  }
-
-  console.log("negative controls: WAIT, USER, - and a held run leave it waiting");
-  {
-    const root = join(tmp, "neg-wait");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "wait", "review", 2);
-    watch(root);
-    if (rc === 3 && has("NEXT") && has("wait ") && has("WAIT") && !has("needs ")) {
-      ok("a leg at work is left waiting until the timeout");
-    } else fail("a leg at work is left waiting until the timeout");
-  }
-  {
-    const root = join(tmp, "neg-user");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "user", "review", 2, ".waiting-on-user", ".leg-2-exited");
-    watch(root);
-    if (rc === 3 && has("NEXT") && has("user ") && has(".waiting-on-user") && !has("needs ")) {
-      ok("a run put to the user is left waiting until the timeout");
-    } else fail("a run put to the user is left waiting until the timeout");
-  }
-  {
-    const root = join(tmp, "neg-closed");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "closed", "done", 3, ".leg-3-done");
-    watch(root);
-    if (rc === 3 && has("NEXT") && has("closed ") && has(".leg-3-done") && !has("needs ")) {
-      ok("a closed run is left waiting until the timeout");
-    } else fail("a closed run is left waiting until the timeout");
-  }
-  {
-    const root = join(tmp, "neg-held");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "held", "review", 2, ".escalation-ready");
-    mkdirSync(join(root, "postmaster"), { recursive: true });
-    writeFileSync(join(root, "postmaster/held"), "held\n");
-    watch(root);
-    if (
-      rc === 3 &&
-      has("NEXT") &&
-      has("held ") &&
-      has(".escalation-ready") &&
-      !has("needs ") &&
-      !has("matches no run")
-    ) {
-      ok("a run on the held list never needs the postmaster");
-    } else fail("a run on the held list never needs the postmaster");
-  }
-  {
-    const root = join(tmp, "neg-heldhash");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "121", "review", 2, ".escalation-ready");
-    mkdirSync(join(root, "postmaster"), { recursive: true });
-    writeFileSync(join(root, "postmaster/held"), "#121\n");
-    watch(root, "0");
-    if (rc === 0 && has("needs 121 RULE") && has('held "#121" matches no run')) {
-      ok("a #ticket held line warns that it matches no run");
-    } else fail("a #ticket held line warns that it matches no run");
-  }
-  {
-    const root = join(tmp, "neg-heldtypo");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "wait", "review", 2);
-    mkdirSync(join(root, "postmaster"), { recursive: true });
-    writeFileSync(join(root, "postmaster/held"), "999\n");
-    watch(root, "0");
-    if (rc === 3 && has("wait ") && has('held "999" matches no run') && !has("needs ")) {
-      ok("a held line for no run warns");
-    } else fail("a held line for no run warns");
-  }
-  {
-    const root = join(tmp, "neg-mixed");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "free", "review", 2, ".card-ready");
-    mkrun(root, "held", "review", 2, ".escalation-ready");
-    mkdirSync(join(root, "postmaster"), { recursive: true });
-    writeFileSync(join(root, "postmaster/held"), "held\n");
-    watch(root);
-    if (
-      rc === 0 &&
-      has("needs free GATE") &&
-      has("held ") &&
-      has(".escalation-ready") &&
-      !has("needs held")
-    ) {
-      ok("a held run is left out of the names even beside a waking run");
-    } else fail("a held run is left out of the names even beside a waking run");
-  }
-  {
-    const root = join(tmp, "neg-heldlink");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "held", "review", 2, ".escalation-ready");
-    mkdirSync(join(root, "postmaster"), { recursive: true });
-    symlinkSync(join(tmp, "no-such-target"), join(root, "postmaster/held"));
-    watch(root, "0");
-    if (rc === 1 && has("cannot read") && !has("needs ")) {
-      ok("a dangling held link is refused");
-    } else fail("a dangling held link is refused");
-  }
-  {
-    const root = join(tmp, "neg-helddir");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "held", "review", 2, ".escalation-ready");
-    mkdirSync(join(root, "postmaster/held"), { recursive: true });
-    watch(root, "0");
-    if (rc === 1 && has("cannot read") && !has("needs ")) {
-      ok("a held list that is a directory is refused");
-    } else fail("a held list that is a directory is refused");
-  }
-  {
-    const root = join(tmp, "neg-heldperm");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "held", "review", 2, ".escalation-ready");
-    mkdirSync(join(root, "postmaster"), { recursive: true });
-    writeFileSync(join(root, "postmaster/held"), "held\n");
-    chmodSync(join(root, "postmaster/held"), 0);
-    watch(root, "0");
-    chmodSync(join(root, "postmaster/held"), 0o644);
-    if (rc === 1 && has("cannot read") && !has("needs ")) {
-      ok("an unreadable held list is refused");
-    } else fail("an unreadable held list is refused");
-  }
-  {
-    const root = join(tmp, "neg-heldlock");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "held", "review", 2, ".escalation-ready");
-    mkdirSync(join(root, "postmaster"), { recursive: true });
-    writeFileSync(join(root, "postmaster/held"), "held\n");
-    chmodSync(join(root, "postmaster"), 0);
-    watch(root, "0");
-    chmodSync(join(root, "postmaster"), 0o755);
-    if (rc === 1 && has("cannot read") && !has("needs ")) {
-      ok("an unlistable postmaster dir is refused");
-    } else fail("an unlistable postmaster dir is refused");
-  }
-  {
-    const root = join(tmp, "neg-bsroot");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "heldrun", "review", 2, ".escalation-ready");
-    mkdirSync(join(root, "postmaster"), { recursive: true });
-    writeFileSync(join(root, "postmaster/held"), "heldrun\n");
-    const bsroot = join(tmp, "neg-bs\\q");
-    renameSync(root, bsroot);
-    watch(bsroot, "0");
-    if (rc === 3 && has("NEXT") && has("heldrun ") && !has("needs ") && !has("warning")) {
-      ok("a run root with a backslash still holds its held runs");
-    } else fail("a run root with a backslash still holds its held runs");
-  }
-  {
-    const root = join(tmp, "neg-none");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "alone", "done", 1);
-    watch(root, "0");
-    if (rc === 3 && has("NEXT") && has("alone ") && !has("needs ")) {
-      ok("an empty timeout still looks once, prints the table and exits 3");
-    } else fail("an empty timeout still looks once, prints the table and exits 3");
-  }
-
-  console.log("config: a missing or unusable poll interval falls back to the default");
-  {
-    const root = join(tmp, "cfg-missing");
-    mkdirSync(root, { recursive: true });
-    mkrun(root, "wait", "review", 2);
-    watch(root, "2", join(tmp, "nowhere.toml"));
-    if (
-      rc === 3 &&
-      has("NEXT") &&
-      has("wait ") &&
-      !has("needs ") &&
-      has("the poll interval is the default, 120s")
-    ) {
-      ok("a missing config still runs on the default, and says so");
-    } else fail("a missing config still runs on the default, and says so");
-    writeFileSync(join(tmp, "bad.toml"), '[postmaster]\npoll_seconds = "soon"\n');
-    watch(root, "2", join(tmp, "bad.toml"));
-    if (rc === 3 && has("NEXT") && has("wait ") && has("the poll interval is the default, 120s")) {
-      ok("an unusable poll interval falls back to the default, and says so");
-    } else fail("an unusable poll interval falls back to the default, and says so");
-    writeFileSync(join(tmp, "zero.toml"), "[postmaster]\npoll_seconds = 0\n");
-    watch(root, "2", join(tmp, "zero.toml"));
-    if (rc === 3 && has("wait ") && has("the poll interval is the default, 120s")) {
-      ok("a zero poll interval falls back to the default, and says so");
-    } else fail("a zero poll interval falls back to the default, and says so");
-    writeFileSync(
-      join(tmp, "badutf8.toml"),
-      new Uint8Array([0xff, 0xfe, 0x00, 0x62, 0x61, 0x64, 0x80]),
-    );
-    watch(root, "2", join(tmp, "badutf8.toml"));
-    if (
-      rc === 3 &&
-      has("wait ") &&
-      has("the poll interval is the default, 120s") &&
-      !has("Traceback")
-    ) {
-      ok("a config that is not UTF-8 falls back to the default, and says so");
-    } else fail("a config that is not UTF-8 falls back to the default, and says so");
-    writeFileSync(join(tmp, "slow.toml"), "[postmaster]\npoll_seconds = 8\n");
-    const t0 = Math.floor(Date.now() / 1000);
-    watch(root, "2", join(tmp, "slow.toml"));
-    const took = Math.floor(Date.now() / 1000) - t0;
-    if (rc === 3 && has("wait ") && took <= 5) {
-      ok("a timeout shorter than the poll interval still ends on time");
-    } else fail("a timeout shorter than the poll interval still ends on time");
-  }
-
-  console.log("usage");
-  {
-    const r = run(self, []);
-    rc = r.code;
-    out = `${r.out}${r.err}`;
-    if (rc === 1 && has("usage:") && !has("NEXT")) {
-      ok("no run root is refused with the usage");
-    } else fail("no run root is refused with the usage");
-  }
-  {
-    const r = run(self, ["--timeout", "soon", join(tmp, "neg-wait")]);
-    rc = r.code;
-    out = `${r.out}${r.err}`;
-    if (rc === 1 && has("not a whole number")) {
-      ok("a timeout that is not a number is refused");
-    } else fail("a timeout that is not a number is refused");
-  }
-  {
-    const r = run(self, ["--timeout", "", join(tmp, "neg-wait")]);
-    rc = r.code;
-    out = `${r.out}${r.err}`;
-    if (rc === 1 && has("not a whole number")) {
-      ok("an empty timeout is refused");
-    } else fail("an empty timeout is refused");
-  }
-  {
-    const r = run(self, ["--timeout", "2", join(tmp, "nowhere")]);
-    rc = r.code;
-    out = `${r.out}${r.err}`;
-    if (rc === 1 && has("no such root")) {
-      ok("a run root that does not exist is refused");
-    } else fail("a run root that does not exist is refused");
-  }
-  {
-    const r = run(self, ["--help"]);
-    rc = r.code;
-    out = `${r.out}${r.err}`;
-    if (rc === 0 && has("runs-watch.sh") && has("held")) {
-      ok("--help prints the usage");
-    } else fail("--help prints the usage");
-  }
-
-  st.finish();
-});
+  const sig = timeoutStr.replace(/^0+/u, "");
+  if (sig.length > 9) die(`runs-watch: '${timeoutStr}' is more than 9 digits`, 1);
+  timeout = sig === "" ? 0 : parseInt(sig, 10);
+}
+try {
+  root = physicalDir(root);
+} catch {
+  // The shell assigns ROOT from a failing substitution, which empties it,
+  // so the message names no root.
+  die("runs-watch: no such root: ", 1);
+}
+const pc = process.env.POSTMASTER_CONFIG;
+const home = process.env.HOME;
+const config =
+  pc !== undefined && pc !== ""
+    ? pc
+    : `${home !== undefined && home !== "" ? home : ""}/.postmaster/config.toml`;
+watch(root, config, timeout);

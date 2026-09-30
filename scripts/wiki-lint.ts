@@ -2,7 +2,6 @@
 // belong in a script; a check written as prose is re-derived, and mis-derived, on every pass.
 //
 //   wiki-lint.sh [<repo>]      default: the repo this script lives in
-//   wiki-lint.sh --self-test   prove each check fails on its own fault, and a clean tree passes
 //
 // Reports every fault and fixes none: a standing contradicting its own records means either
 // the standing or the reading is wrong, and which is a judgement for a person.
@@ -10,28 +9,20 @@
 //   exit 0  clean
 //   exit 1  faults found, one per line on stdout
 //   exit 2  usage, or no wiki to check
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { toolRoot } from "./lib/paths.ts";
-import { withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
 import { DOT_ALL, PY_DOT, PY_M_END, PY_M_START, PY_S_CLASS } from "./lib/text.ts";
 
 const STANDINGS = new Set(["claimed", "supported", "mixed", "refuted", "settled"]);
 const OWN_EVIDENCE = ["runs", "trials"]; // what this fleet did; papers and articles are not
 
-const FM_RE = new RegExp(`${PY_M_START}([a-z_]+):[${PY_S_CLASS}]*(${PY_DOT}*)${PY_M_END}`, "gu");
-const SOURCES_RE = new RegExp(`([a-z]+)/([^,\\]${PY_S_CLASS}]+)`, "gu");
-const CITE_RE = new RegExp(`\\[@([a-z]+)/([^\\]${PY_S_CLASS}]+)`, "gu");
+export const FM_RE = new RegExp(
+  `${PY_M_START}([a-z_]+):[${PY_S_CLASS}]*(${PY_DOT}*)${PY_M_END}`,
+  "gu",
+);
+export const SOURCES_RE = new RegExp(`([a-z]+)/([^,\\]${PY_S_CLASS}]+)`, "gu");
+export const CITE_RE = new RegExp(`\\[@([a-z]+)/([^\\]${PY_S_CLASS}]+)`, "gu");
 
 function frontMatter(text: string): Record<string, string> | null {
   if (!text.startsWith("---")) return null;
@@ -65,7 +56,7 @@ function relPath(p: string, repo: string): string {
 }
 
 /** lint <repo>; prints faults, returns 1 if any */
-function lint(repo: string): number {
+export function lint(repo: string): number {
   const wiki = join(repo, "wiki");
   const raw = join(repo, "raw");
   if (!dirExists(wiki)) {
@@ -254,221 +245,15 @@ function lint(repo: string): number {
 
 // --- entry -----------------------------------------------------------------------------------
 const argv = process.argv.slice(2);
-let SELFTEST = false;
 let REPO: string;
-if (argv[0] === "--self-test") {
-  SELFTEST = true;
-  REPO = toolRoot(import.meta);
-} else if (argv[0] === undefined || argv[0] === "") {
-  REPO = toolRoot(import.meta);
-} else if (argv[0]?.startsWith("-")) {
-  console.error("usage: wiki-lint.sh [<repo>] | --self-test");
-  process.exit(2);
-} else {
-  REPO = argv[0] as string;
-}
-
-if (!SELFTEST) {
-  process.exit(lint(REPO));
-}
-
-// --- self-test ---------------------------------------------------------------------------------
-// One negative control (the real wiki passes), one control that well-formed additions pass,
-// and one positive control per check, each asserting it failed for its own reason rather
-// than for some other fault the fixture happened to introduce.
-
-const st = new SelfTest();
-const REPO_ROOT = REPO;
-{
-  // BASE wiki-lint.sh python (re.M, \s, .): every expectation python3-verified.
-  const fm = [..."title: A\rB\n".matchAll(FM_RE)].map((m) => [m[1], m[2]]);
-  st.check(
-    "front matter keeps a CR in the value",
-    JSON.stringify(fm) === JSON.stringify([["title", "A\rB"]]),
-    JSON.stringify(fm),
-  );
-  const src = [..."papers/a\x1cb".matchAll(SOURCES_RE)].map((m) => [m[1], m[2]]);
-  st.check(
-    "sources stop an ident at U+001C",
-    JSON.stringify(src) === JSON.stringify([["papers", "a"]]),
-    JSON.stringify(src),
-  );
-  const cite = [..."see [@papers/a\x1cb] x".matchAll(CITE_RE)].map((m) => [m[1], m[2]]);
-  st.check(
-    "citations stop an ident at U+001C",
-    JSON.stringify(cite) === JSON.stringify([["papers", "a"]]),
-    JSON.stringify(cite),
-  );
-}
-
-function expect(passOrFail: "pass" | "fail", label: string, wantIn?: string): void {
-  // runs lint on $tmp and compares
-  const { code, out } = lintCapture();
-  const got = code === 0 ? "pass" : "fail";
-  let why = "";
-  if (got === "fail" && wantIn !== undefined && wantIn !== "" && !out.includes(wantIn)) {
-    why = ", but not for the expected reason";
-  }
-  if (got === passOrFail && why === "") {
-    st.ok(label);
+if (import.meta.main) {
+  if (argv[0] === undefined || argv[0] === "") {
+    REPO = toolRoot(import.meta);
+  } else if (argv[0]?.startsWith("-")) {
+    console.error("usage: wiki-lint.sh [<repo>]");
+    process.exit(2);
   } else {
-    st.fail(`${label}: wanted ${passOrFail}, got ${got}${why}`, out);
+    REPO = argv[0] as string;
   }
-}
-
-const _currentLint: { code: number; out: string } = { code: 0, out: "" };
-function lintCapture(): { code: number; out: string } {
-  // capture console.log output of lint
-  const logs: string[] = [];
-  const origLog = console.log;
-  console.log = (...args: unknown[]) => {
-    logs.push(args.map(String).join(" "));
-  };
-  try {
-    const code = lint(tmpRoot);
-    return { code, out: logs.join("\n") };
-  } finally {
-    console.log = origLog;
-  }
-}
-
-let tmpRoot = "";
-withTempDir((tmp) => {
-  tmpRoot = tmp;
-
-  const fresh = (): void => {
-    try {
-      rmrf(join(tmp, "wiki"));
-      rmrf(join(tmp, "raw"));
-    } catch {
-      /* already gone */
-    }
-    cpSync(join(REPO_ROOT, "wiki"), join(tmp, "wiki"), { recursive: true });
-    if (dirExists(join(REPO_ROOT, "raw"))) {
-      cpSync(join(REPO_ROOT, "raw"), join(tmp, "raw"), { recursive: true });
-    } else {
-      mkdirSync(join(tmp, "raw"));
-    }
-  };
-
-  const page = (name: string, fmLines: string): void => {
-    writeFileSync(
-      join(tmp, "wiki", "concepts", `${name}.md`),
-      `---\n${fmLines}---\n\nBody.\n`,
-      "utf8",
-    );
-    // link from the index
-    const idx = join(tmp, "wiki", "index.md");
-    writeFileSync(idx, `${readFileSync(idx, "utf8")}\n- [${name}](concepts/${name}.md)\n`, "utf8");
-  };
-  const concept = (name: string, standing: string, sources: string): void => {
-    page(
-      name,
-      `title: ${name}\ntype: concept\nstanding: ${standing}\nsources: [${sources}]\nupdated: 2026-01-01\n`,
-    );
-  };
-  const trial = (slug: string): void => {
-    mkdirSync(join(tmp, "raw", "trials", slug), { recursive: true });
-    writeFileSync(join(tmp, "raw", "trials", slug, "method.md"), "Method.\n", "utf8");
-  };
-  const capture = (kind: string, slug: string, fmLines: string): void => {
-    mkdirSync(join(tmp, "raw", kind, slug), { recursive: true });
-    writeFileSync(join(tmp, "raw", kind, slug, "source.md"), `---\n${fmLines}---\n`, "utf8");
-  };
-  const GOOD_SOURCE = "url: https://example.org/paper\nretrieved: 2026-01-01\ntitle: A paper\n";
-
-  console.log("negative controls");
-  fresh();
-  expect("pass", "the unmodified wiki passes");
-  fresh();
-  trial("t1");
-  capture("papers", "p1", GOOD_SOURCE);
-  concept("ok", "settled", "trials/t1, papers/p1");
-  expect("pass", "a settled concept on a trial, with a well-formed capture, passes");
-
-  console.log("positive controls: each check fails on its own fault");
-  fresh();
-  writeFileSync(join(tmp, "wiki", "concepts", "bare.md"), "# no front matter\n", "utf8");
-  {
-    const idx = join(tmp, "wiki", "index.md");
-    writeFileSync(idx, `${readFileSync(idx, "utf8")}\n- [bare](concepts/bare.md)\n`, "utf8");
-  }
-  expect("fail", "a page without front matter", "no front matter");
-
-  fresh();
-  page("nostanding", "title: x\ntype: concept\nupdated: 2026-01-01\n");
-  expect("fail", "a concept with no standing", "concept with no standing");
-
-  fresh();
-  concept("badstanding", "probable", "");
-  expect("fail", "a standing that is not one of the five", "is not one of");
-
-  fresh();
-  concept("badsource", "claimed", "runs/no-such-run");
-  expect("fail", "a front-matter source that does not resolve", "in front matter does not resolve");
-
-  fresh();
-  capture("papers", "p1", GOOD_SOURCE);
-  concept("paperonly", "settled", "papers/p1");
-  expect("fail", "a standing moved by outside work alone", "rests on no run or trial");
-
-  fresh();
-  trial("t1");
-  concept("thin", "supported", "trials/t1");
-  expect("fail", "supported on fewer than three runs or trials", "three are needed");
-
-  fresh();
-  concept("cites", "claimed", "");
-  writeFileSync(
-    join(tmp, "wiki", "concepts", "cites.md"),
-    `${readFileSync(join(tmp, "wiki", "concepts", "cites.md"), "utf8")}See [@runs/no-such-run].\n`,
-    "utf8",
-  );
-  expect("fail", "a citation that does not resolve", "does not resolve under raw/");
-
-  fresh();
-  concept("wl", "claimed", "");
-  writeFileSync(
-    join(tmp, "wiki", "concepts", "wl.md"),
-    `${readFileSync(join(tmp, "wiki", "concepts", "wl.md"), "utf8")}See [[no-such-page]].\n`,
-    "utf8",
-  );
-  expect("fail", "a wikilink with no page", "has no page");
-
-  fresh();
-  {
-    const idx = join(tmp, "wiki", "index.md");
-    writeFileSync(idx, `${readFileSync(idx, "utf8")}\n[a dangling link](nowhere.md)\n`, "utf8");
-  }
-  expect("fail", "a relative link that does not resolve", "link to nowhere.md");
-
-  fresh();
-  writeFileSync(
-    join(tmp, "wiki", "concepts", "orphan.md"),
-    "---\ntitle: o\ntype: concept\nstanding: claimed\nupdated: 2026-01-01\n---\n",
-    "utf8",
-  );
-  expect("fail", "an orphan page", "orphan");
-
-  fresh();
-  mkdirSync(join(tmp, "raw", "trials", "t2"), { recursive: true });
-  expect("fail", "a trial with no method.md", "no method.md");
-
-  fresh();
-  mkdirSync(join(tmp, "raw", "articles", "a1"), { recursive: true });
-  expect("fail", "a capture with no source.md", "has no source.md");
-
-  fresh();
-  capture("papers", "p2", "retrieved: 2026-01-01\n");
-  expect("fail", "a source.md with no url", "has no url");
-
-  fresh();
-  capture("papers", "p3", "url: https://example.org/x\n");
-  expect("fail", "a source.md with no retrieval date", "has no retrieved");
-
-  st.finish();
-});
-
-function rmrf(p: string): void {
-  rmSync(p, { recursive: true, force: true });
+  process.exit(lint(REPO));
 }

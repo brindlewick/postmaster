@@ -5,7 +5,6 @@
 // be waiting on.
 //
 //   runs-status.sh <project-run-root>        e.g. <project>/.postmaster/runs
-//   runs-status.sh --self-test
 //
 //   next   USER      the postmaster has put this run's question to the user and waits for the
 //                    answer (.waiting-on-user)
@@ -27,19 +26,8 @@
 //
 //   exit 0  listed (an empty root lists nothing)
 //   exit 1  usage, or no such root
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-  utimesSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { withTempDir } from "./lib/proc.ts";
-import { SelfTest } from "./lib/selftest.ts";
-import { pyWords } from "./lib/text.ts";
 
 interface RunRow {
   run: string;
@@ -50,7 +38,7 @@ interface RunRow {
   next: string;
 }
 
-function status(root: string): number {
+export function status(root: string): number {
   const now = Date.now() / 1000;
   const pmEsc = join(root, "postmaster", "ESCALATION.md");
   if (existsSync(pmEsc)) {
@@ -144,7 +132,7 @@ function matchMarker(name: string, pat: string): boolean {
   return re.test(name);
 }
 
-function walkFiles(dir: string, fn: (path: string) => void): void {
+export function walkFiles(dir: string, fn: (path: string) => void): void {
   let entries: string[];
   try {
     entries = readdirSync(dir);
@@ -166,9 +154,9 @@ function walkFiles(dir: string, fn: (path: string) => void): void {
 
 // --- entry ------------------------------------------------------------------------------
 const argv = process.argv.slice(2);
-if (argv[0] !== "--self-test") {
+if (import.meta.main) {
   if (argv.length !== 1) {
-    console.error("usage: runs-status.sh <project-run-root> | --self-test");
+    console.error("usage: runs-status.sh <project-run-root>");
     process.exit(1);
   }
   const raw = argv[0] as string;
@@ -182,96 +170,3 @@ if (argv[0] !== "--self-test") {
   }
   process.exit(status(root));
 }
-
-// --- self-test ----------------------------------------------------------------------------
-withTempDir((tmp) => {
-  const st = new SelfTest();
-  const root = join(tmp, "root");
-
-  const mkRun = (name: string, stage: string, leg: number, ...markers: string[]): void => {
-    const d = join(root, name);
-    mkdirSync(join(d, "logs"), { recursive: true });
-    writeFileSync(join(d, "manifest.json"), `{"stage": "${stage}", "leg": ${leg}}\n`);
-    writeFileSync(join(d, "run-log.md"), "");
-    for (const m of markers) writeFileSync(join(d, m), "");
-  };
-
-  const age = (name: string): void => {
-    const t = Date.now() / 1000 - 3600;
-    const dir = join(root, name);
-    walkFiles(dir, (f) => {
-      try {
-        utimesSync(f, t, t);
-      } catch {
-        /* ignore */
-      }
-    });
-  };
-
-  const nextOf = (name: string): string => {
-    const origLog = console.log;
-    let out = "";
-    console.log = (s: string) => {
-      out += `${s}\n`;
-    };
-    try {
-      status(root);
-    } finally {
-      console.log = origLog;
-    }
-    for (const line of out.split("\n")) {
-      const parts = pyWords(line);
-      if (parts[0] === name) return parts[parts.length - 1] ?? "";
-    }
-    return "";
-  };
-
-  const expect = (label: string, name: string, want: string): void => {
-    const got = nextOf(name);
-    if (got === want) st.ok(label);
-    else st.fail(`${label} (got '${got}', wanted '${want}')`);
-  };
-
-  mkRun("rule", "review", 2, ".escalation-ready");
-  mkRun("gate", "shipping", 3, ".card-ready");
-  mkRun("spec", "planning", 1, ".spec-review-ready", ".leg-1-exited");
-  mkRun("dispatch", "review", 2, ".leg-2-done", ".leg-2-exited");
-  mkRun("remount", "review", 2, ".leg-2-exited");
-  mkRun("read", "review", 2, ".checkpoint-review-ready");
-  mkRun("inspect", "review", 2);
-  age("inspect");
-  mkRun("wait", "review", 2);
-  mkRun("user", "review", 2, ".waiting-on-user", ".leg-2-exited");
-  mkRun("closed", "done", 3, ".leg-3-done", ".leg-3-exited");
-  mkRun("earlier", "review", 2, ".leg-1-done");
-  mkRun("usergate", "shipping", 3, ".card-ready", ".waiting-on-user");
-  mkRun("userspec", "planning", 1, ".spec-review-ready", ".waiting-on-user");
-  mkRun("userclosed", "done", 3, ".waiting-on-user");
-  mkRun("stall", "review", 2);
-  age("stall");
-  writeFileSync(join(root, "stall", ".leg-1-done"), "");
-  mkdirSync(join(root, "postmaster"), { recursive: true });
-
-  console.log("positive controls");
-  expect("an escalation waiting is RULE", "rule", "RULE");
-  expect("a complete ship card is GATE", "gate", "GATE");
-  expect("a spec review package waiting is SPEC", "spec", "SPEC");
-  expect("the current leg done is DISPATCH", "dispatch", "DISPATCH");
-  expect("the current leg gone with nothing written is REMOUNT", "remount", "REMOUNT");
-  expect("a checkpoint card waiting is READ", "read", "READ");
-  expect("nothing changed for an hour is INSPECT", "inspect", "INSPECT");
-  expect("a leg at work is WAIT", "wait", "WAIT");
-  expect("a run waiting on the user is USER, whatever else it holds", "user", "USER");
-  expect("a closed run is -", "closed", "-");
-
-  console.log("negative controls");
-  expect("an earlier leg's done marker dispatches nothing", "earlier", "WAIT");
-  expect("a ship card put to the user waits on the user, not the gate", "usergate", "USER");
-  expect("a spec package put to the user waits on the user, not the package", "userspec", "USER");
-  expect("a closed run stays closed with a stale marker", "userclosed", "-");
-  expect("touching a marker does not hide a stall", "stall", "INSPECT");
-  if (nextOf("postmaster") === "") st.ok("the postmaster's own directory is not a run");
-  else st.fail("the postmaster's own directory is not a run");
-
-  st.finish();
-});

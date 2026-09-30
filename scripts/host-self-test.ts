@@ -731,7 +731,7 @@ export function kvOf(text: string, key: string): string {
 }
 export const TRIPLE_RE = /space=([^ \r\n]+) tab=([^ \r\n]+) pane=([^ \r\n]+)/u;
 
-async function runControls(): Promise<void> {
+export async function runControls(): Promise<number> {
   const root = mkdtempSync(join(HERE, ".host-self-test-"));
   let failures = 0;
   const pass = async (label: string, test: () => boolean | Promise<boolean>, detail = "") => {
@@ -2789,14 +2789,11 @@ async function runControls(): Promise<void> {
   if (failures) {
     console.log("");
     console.log(`self-test: ${failures} control(s) misbehaved`);
-    process.exit(1);
+    return failures;
   }
   console.log("");
   console.log("self-test: all controls behaved");
-}
-
-export async function runSelfTest(): Promise<void> {
-  await runControls();
+  return 0;
 }
 
 function available(program: string): boolean {

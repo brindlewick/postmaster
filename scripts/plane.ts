@@ -11,7 +11,6 @@
 //   plane.sh state <IDENT-n> <state>                 todo | in-progress | blocked | done | cancelled
 //   plane.sh comment <IDENT-n> <actor> <text>        one comment, dated to the minute, actor first
 //   plane.sh list <IDENT> [state]                    one line per work item: id, state, title
-//   plane.sh --self-test                             the converters and edit's checks, offline
 //
 // The instance and workspace come from [tracker] in ~/.postmaster/config.toml (url and
 // workspace; POSTMASTER_CONFIG overrides the path). The key is PLANE_API_KEY in the
@@ -36,9 +35,7 @@
 //           project or id, or a body create or edit refuses
 //   exit 2  invalid state
 //   exit 4  the work item changed since the base was read
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tryTomlFile } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
@@ -54,7 +51,7 @@ import {
 } from "./lib/text.ts";
 
 // --- die as throw, so we can catch in create's set_column equivalent ---
-class DieError extends Error {
+export class DieError extends Error {
   constructor(
     public readonly msg: string,
     public readonly code: number = 1,
@@ -109,18 +106,18 @@ const SPACED = new Set([
 const HEADINGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
 const BR = "\x01";
 
-interface Node {
+export interface Node {
   tag: string;
   attrs: Record<string, string>;
   children: (Node | string)[];
 }
 
-function makeNode(tag: string, attrs: Record<string, string> = {}): Node {
+export function makeNode(tag: string, attrs: Record<string, string> = {}): Node {
   return { tag, attrs, children: [] };
 }
 
 // Simple HTML tokenizer building a tree
-class Tree {
+export class Tree {
   root: Node = makeNode("#root");
   stack: Node[] = [this.root];
   tags = new Set<string>();
@@ -219,12 +216,12 @@ class Tree {
   }
 }
 
-function endTagOf(inner: string): string {
+export function endTagOf(inner: string): string {
   // text.ts: html.parser strips/lowers/splits end-tag names with Python atoms.
   return pyLower(pyTrim(inner)).split(new RegExp("[" + PY_S_CLASS + ">]", "u"))[0] ?? "";
 }
 
-function parseAttrs(s: string): Record<string, string> {
+export function parseAttrs(s: string): Record<string, string> {
   const attrs: Record<string, string> = {};
   // text.ts: html.parser attr-scanning splits Python whitespace.
   const re = new RegExp(
@@ -293,7 +290,7 @@ function escapeHtml(s: string, quote = false): string {
   return out;
 }
 
-function textOf(n: Node | string): string {
+export function textOf(n: Node | string): string {
   if (typeof n === "string") return n;
   if (n.tag === "br") return "\n";
   return n.children.map(textOf).join("");
@@ -345,7 +342,7 @@ function mdStrong(n: Node): string {
   );
 }
 
-function mdCode(n: Node): string {
+export function mdCode(n: Node): string {
   const code = pyWords(textOf(n)).join(" ");
   if (!code) return "";
   const runs = code.match(/`+/gu) ?? [];
@@ -355,7 +352,7 @@ function mdCode(n: Node): string {
   return ticks + pad + code + pad + ticks;
 }
 
-function mdLink(n: Node): string {
+export function mdLink(n: Node): string {
   const text = pyWords(mdInline(n.children)).join(" ");
   const href = (n.attrs.href ?? "").trim();
   if (!href) return text;
@@ -371,7 +368,7 @@ const INLINE: Record<string, (n: Node) => string> = {
   br: () => BR,
 };
 
-function paraLines(nodes: (Node | string)[]): string[] {
+export function paraLines(nodes: (Node | string)[]): string[] {
   const raw = mdInline(nodes).replace(new RegExp("[" + PY_S_CLASS + "]+", "gu"), " ");
   const segs = raw
     .split(BR)
@@ -380,12 +377,12 @@ function paraLines(nodes: (Node | string)[]): string[] {
   return segs.map((s, i) => (i < segs.length - 1 ? `${s}\\` : s));
 }
 
-function mdHeading(n: Node): string[] {
+export function mdHeading(n: Node): string[] {
   const text = pyWords(mdInline(n.children).split(BR).join(" ")).join(" ");
   return ["#".repeat(parseInt(n.tag[1] ?? "1", 10)) + (text ? ` ${text}` : "")];
 }
 
-function codeLang(n: Node): string {
+export function codeLang(n: Node): string {
   const code = n.children.find((c): c is Node => typeof c !== "string" && c.tag === "code");
   const classes = pyWords(`${code?.attrs.class ?? ""} ${n.attrs.class ?? ""}`);
   for (const c of classes) {
@@ -491,7 +488,7 @@ function mdBlocks(children: (Node | string)[], inItem = false): string[] {
   return out;
 }
 
-function htmlToText(h: string): string {
+export function htmlToText(h: string): string {
   return mdBlocks(new Tree(h).root.children)
     .join("\n")
     .replace(/^\n+|\n+$/gu, "");
@@ -501,17 +498,17 @@ function htmlToText(h: string): string {
 const ATX = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/u;
 const THEMATIC = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/u;
 const BULLET = /^( {0,3})([-*+])(?:([ \t]+)(.*))?$/u;
-const ORDERED = new RegExp(
+export const ORDERED = new RegExp(
   "^( {0,3})(\\p{Nd}{1,9})([.)])(?:([ \t]+)(" + PY_DOT + "*))?" + END_OF_STRING + "",
   "u",
 );
-const FENCE = new RegExp("^( *)(`{3,}|~{3,})(" + PY_DOT + "*)" + END_OF_STRING + "", "u");
+export const FENCE = new RegExp("^( *)(`{3,}|~{3,})(" + PY_DOT + "*)" + END_OF_STRING + "", "u");
 const COMMENT = /^ {0,3}<!--/u;
-const LINK_RE = new RegExp(
+export const LINK_RE = new RegExp(
   "\\[([^\\]]+)\\]\\(((?:[^" + PY_S_CLASS + "()]+|\\([^" + PY_S_CLASS + "()]*\\))+)\\)",
   "gu",
 );
-const BOLD = new RegExp(
+export const BOLD = new RegExp(
   "\\*\\*(?=[^" + PY_S_CLASS + "])(" + PY_DOT + "+?)(?<=[^" + PY_S_CLASS + "])\\*\\*",
   "gu",
 );
@@ -790,7 +787,7 @@ function htmlBlocks(lines: string[]): string[] {
   return out;
 }
 
-function mdToHtml(md: string): string {
+export function mdToHtml(md: string): string {
   const lines = md
     .replace(/^\ufeff/u, "")
     .replace(/\r\n/gu, "\n")
@@ -805,7 +802,7 @@ function hrefKey(h: string): string {
   return h.trim().replace(/%28/gu, "(").replace(/%29/gu, ")").replace(/%20/gu, " ");
 }
 
-function shape(h: string): string[] {
+export function shape(h: string): string[] {
   const toks: string[] = [];
   const tree = new Tree(h);
 
@@ -931,7 +928,7 @@ function tokenName(toks: string[], n: number): string {
   return end ? `the end of ${name}` : name;
 }
 
-function firstDifference(a: string[], b: string[]): string | null {
+export function firstDifference(a: string[], b: string[]): string | null {
   let n = 0;
   while (n < a.length && n < b.length && a[n] === b[n]) n++;
   if (n === a.length && n === b.length) return null;
@@ -943,7 +940,7 @@ function firstDifference(a: string[], b: string[]): string | null {
   return `${where}, ${tokenName(a, n)} becomes ${tokenName(b, n)}`;
 }
 
-function readback(md: string, read?: (h: string) => string): [string, string | null] {
+export function readback(md: string, read?: (h: string) => string): [string, string | null] {
   const out = mdToHtml(md);
   const text = read ? read(out) : htmlToText(out);
   return [out, firstDifference(shape(out), shape(mdToHtml(text)))];
@@ -960,7 +957,7 @@ function normText(t: string): string {
   return lines.join("\n");
 }
 
-function planEdit(stored: string, base: string, body: string): [number, string] {
+export function planEdit(stored: string, base: string, body: string): [number, string] {
   if (!body.trim()) return [1, "the body file is empty"];
   const tree = new Tree(stored);
   const lost = [...tree.tags]
@@ -987,403 +984,6 @@ function planEdit(stored: string, base: string, body: string): [number, string] 
   const [out, diff2] = readback(body);
   if (diff2) return [1, `the body would not read back as written (${diff2})`];
   return [0, out];
-}
-
-// --- self-test ---------------------------------------------------------------------------------
-async function selfTest(): Promise<number> {
-  const SCRIPT = join(import.meta.dir, "plane.sh");
-  const fails = [0];
-  const check = (label: string, good: boolean, detail: unknown = ""): void => {
-    console.log((good ? "  ok   " : "  FAIL ") + label);
-    if (!good) {
-      const s = String(detail);
-      for (const l of s.split("\n")) console.log(`         ${l}`);
-      fails[0] = (fails[0] ?? 0) + 1;
-    }
-  };
-  const delta = (a: string, b: string): string => {
-    const al = a.split("\n"),
-      bl = b.split("\n");
-    const out: string[] = [];
-    for (let i = 0; i < Math.max(al.length, bl.length); i++) {
-      if (al[i] !== bl[i]) out.push(`-${al[i] ?? ""}\n+${bl[i] ?? ""}`);
-    }
-    return out.join("\n") || "(no difference)";
-  };
-  function criteria(h: string): number {
-    const kids = new Tree(h).root.children.filter((c): c is Node => typeof c !== "string");
-    for (let k = 0; k < kids.length - 1; k++) {
-      const c = kids[k]!;
-      if (
-        c.tag === "h2" &&
-        pyWords(textOf(c)).join(" ") === "Acceptance criteria" &&
-        kids[k + 1]?.tag === "ol"
-      ) {
-        return kids[k + 1]?.children.filter((x) => typeof x !== "string" && x.tag === "li").length;
-      }
-    }
-    return 0;
-  }
-
-  const body = `${[
-    "## Problem / feature\nA ticket reaches a coachman with no criteria, so it has nothing to judge the lanes against.",
-    "## Acceptance criteria\n1. The check exits 0 on a well-formed ticket and prints how many criteria it has.\n2. It exits 2 and names each missing part:\n   - the title\n   - the direction\n   1. a nested number is part of criterion 2, not a criterion\n\n   ```\n   ## Direction\n   ticket-check.sh --body draft.md   # which draft? TODO\n   ```\n3. A question or a marker in code, `a?` or `TODO`, is not read,\nand a line that runs straight on belongs to the criterion above it.\n\n   So does an indented paragraph after a blank line.",
-    "## Direction\n<!-- a template comment is not read: TBD -->\nNone: any approach that meets the criteria.",
-    "## Turnpikes\n<!-- default, none, or turnpike names -->\n`default`",
-    "## Notes\nA heading inside a fenced block is not a section:\n\n```\n## Direction\n```",
-  ].join("\n\n")}\n`;
-
-  const editor =
-    '<h2 class="editor-heading-block">Acceptance criteria</h2>' +
-    '<ol class="list-decimal pl-7 space-y-[--list-spacing-y] tight" data-tight="true">' +
-    '<li class="not-prose space-y-2"><p class="editor-paragraph-block">The check runs.</p></li>' +
-    '<li class="not-prose space-y-2"><p class="editor-paragraph-block">It names each part.</p></li>' +
-    '</ol><p class="editor-paragraph-block"></p>';
-
-  console.log("positive controls");
-  const [outHtml, diff] = readback(body);
-  check(
-    "the ticket-check fixture reads back with the same words and structure",
-    diff === null,
-    diff,
-  );
-  const once = htmlToText(outHtml);
-  check(
-    "it keeps exactly 3 top-level criteria, and one Direction heading",
-    criteria(mdToHtml(once)) === 3 && mdToHtml(once).split("<h2>Direction</h2>").length - 1 === 1,
-    once,
-  );
-  check(
-    "a line running straight on stays in its criterion, and a comment stays hidden",
-    once.includes(
-      "3. A question or a marker in code, `a?` or `TODO`, is not read, and a line that runs straight on",
-    ) && !outHtml.includes("template comment"),
-    once,
-  );
-  let h = mdToHtml("1. Runs:\n   ```\n## not a heading\n\nnot indented\n   ```\n2. Names.");
-  check(
-    "a code block in a criterion keeps its less indented lines",
-    h.split("<ol").length - 1 === 1 &&
-      h.split("<li>").length - 1 === 2 &&
-      h.includes("<li><p>Runs:</p><pre><code>## not a heading\n\nnot indented\n</code></pre></li>"),
-    h,
-  );
-  h = mdToHtml("## Direction ##\n\nuse ``a`b`` and `` `x `` here\\\nnext line");
-  check(
-    "the writer drops a heading's closing #s and a code span's padding, and keeps a hard break",
-    h === "<h2>Direction</h2>\n<p>use <code>a`b</code> and <code>`x</code> here<br>next line</p>",
-    h,
-  );
-  const twice = htmlToText(mdToHtml(once));
-  check("a second cycle gives the same text", twice === once, delta(once, twice));
-  const editorText = htmlToText(editor);
-  check(
-    "Plane editor lists read as one line per item",
-    editorText.includes("1. The check runs.\n2. It names each part."),
-    editorText,
-  );
-  h = mdToHtml("1. A\n\n2. B\n\n3. C");
-  check(
-    "blank lines between items leave one list of three",
-    h.split("<ol").length - 1 === 1 && h.split("<li>").length - 1 === 3,
-    h,
-  );
-  const nested =
-    "<ul><li><p>a</p><ol><li><p>b</p></li><li><p>c</p></li></ol></li><li><p>d</p></li></ul>";
-  const nestedText = htmlToText(nested);
-  check("nested lists read back indented", nestedText === "- a\n  1. b\n  2. c\n- d", nestedText);
-  const nestedDiff = firstDifference(shape(nested), shape(mdToHtml(nestedText)));
-  check("and render to the same structure", nestedDiff === null, nestedDiff);
-  const code = '<pre><code class="language-python">print("x")\n</code></pre>';
-  const codeTextOut = htmlToText(code);
-  check(
-    "a code block keeps its language",
-    codeTextOut === '```python\nprint("x")\n```' &&
-      mdToHtml(codeTextOut).includes('class="language-python"'),
-    codeTextOut,
-  );
-  const links =
-    '<p>See <a href="https://en.wikipedia.org/wiki/Foo_(bar)">Foo</a>, ' +
-    '<a href="mailto:a@example.org">mail</a> and <a href="/docs/x">docs</a>.</p>';
-  const linksText = htmlToText(links);
-  const linksDiff = firstDifference(shape(links), shape(mdToHtml(linksText)));
-  check(
-    "links survive: an href with parentheses, mailto and a relative one",
-    linksDiff === null && linksText.includes("Foo_%28bar%29"),
-    linksText,
-  );
-  const misc =
-    '<p>one<br>two</p><hr><ol start="3"><li><p>c</p></li></ol>' +
-    "<ul><li><p>x</p></li></ul><ul><li><p>y</p></li></ul>";
-  const miscText = htmlToText(misc);
-  const miscDiff = firstDifference(shape(misc), shape(mdToHtml(miscText)));
-  check(
-    "line breaks, rules, a list's start and two lists in a row survive",
-    miscDiff === null &&
-      miscText.includes("one\\\ntwo") &&
-      miscText.includes("---") &&
-      miscText.includes("3. c") &&
-      miscText.includes("- x") &&
-      miscText.includes("* y"),
-    miscText,
-  );
-  const baseText = htmlToText(editor);
-  const [editCode, editOut] = planEdit(
-    editor,
-    `${baseText}\n`,
-    `${baseText}\n\n## Direction\n\nNone: any approach that meets the criteria.\n`,
-  );
-  check(
-    "edit writes stored editor HTML back with the approved part added and the list kept",
-    editCode === 0 &&
-      editOut.includes("<h2>Direction</h2>") &&
-      editOut.split("<li>").length - 1 === 2,
-    [editCode, editOut],
-  );
-
-  console.log("negative controls");
-  const bad = '<p>x <em>y</em></p><table><tr><td>z</td></tr></table><img src="a.png"><!-- c -->';
-  let [code_, why] = planEdit(bad, htmlToText(bad), "## Direction\n\nNone.");
-  check(
-    "edit refuses markup read does not render, and names it",
-    code_ === 1 && ["<em>", "<table>", "<img>", "an HTML comment"].every((s) => why.includes(s)),
-    why,
-  );
-  [code_, why] = planEdit("<p>1. not a list</p>", "1. not a list", "x");
-  check(
-    "edit refuses a description read does not show as stored",
-    code_ === 1 && why.includes("as Plane stores it"),
-    why,
-  );
-  [code_, why] = planEdit(editor, `${baseText}\n\nAn edit made in Plane since.`, "x");
-  check("edit refuses a work item that changed since the base was read", code_ === 4, [code_, why]);
-  [code_, why] = planEdit(editor, baseText, " \n\n");
-  check("edit refuses an empty body", code_ === 1 && why.includes("empty"), [code_, why]);
-  const lost = firstDifference(shape(mdToHtml("1. A\n2. B\n3. C")), shape(mdToHtml("1. A\n2. B")));
-  check("the read-back check reports a lost list item", !!lost?.includes("a list item"), lost);
-  const flat = firstDifference(
-    shape(mdToHtml("1. A\n   - x\n   - y")),
-    shape(mdToHtml("1. A\n- x\n- y")),
-  );
-  check("the read-back check reports a flattened list", !!flat?.includes("a bullet list"), flat);
-  const [, diff3] = readback("1. A\n   - x\n   - y\n", (ht) =>
-    htmlToText(ht).replace(/\n {3}- /gu, "\n- "),
-  );
-  check("a body a reader would flatten is refused", !!diff3?.includes("a bullet list"), diff3);
-
-  // old edit form: invoke the wrapper with a title as body-file (not a file) -> usage error
-  const d = mkdtempSync(join(tmpdir(), "plane-st-"));
-  try {
-    const cfg = join(d, "config.toml");
-    const bf = join(d, "body.md");
-    writeFileSync(cfg, '[tracker]\nkind = "plane"\nurl = "http://127.0.0.1:9"\nworkspace = "ws"\n');
-    writeFileSync(bf, body);
-    const r = run("bash", [SCRIPT, "edit", "PM-1", "A title", bf], {
-      env: { ...process.env, POSTMASTER_CONFIG: cfg, PLANE_API_KEY: "self-test" },
-    });
-    check(
-      "the old edit form, with a title, is a usage error before any request",
-      r.code === 1 && r.err.includes("usage:") && !r.err.includes("GET"),
-      r.err,
-    );
-  } finally {
-    rmSync(d, { recursive: true, force: true });
-  }
-
-  // Project workspace binding: the project's binding must match the machine workspace.
-  {
-    const bd = mkdtempSync(join(tmpdir(), "plane-st-"));
-    try {
-      const cfg = join(bd, "config.toml");
-      writeFileSync(
-        cfg,
-        '[tracker]\nkind = "plane"\nurl = "http://127.0.0.1:9"\nworkspace = "ws"\n',
-      );
-      const proj = join(bd, "proj", ".postmaster");
-      mkdirSync(proj, { recursive: true });
-      writeFileSync(join(proj, "project.toml"), '[tracker]\nbinding = "other-ws"\n');
-      const r = run("bash", [SCRIPT, "read"], {
-        cwd: bd,
-        env: {
-          ...process.env,
-          POSTMASTER_CONFIG: cfg,
-          PLANE_API_KEY: "self-test",
-          POSTMASTER_PROJECT: join(bd, "proj"),
-        },
-      });
-      check(
-        "a project binding that does not match the machine workspace is refused",
-        r.code === 1 && r.err.includes("does not match the machine workspace"),
-        r.err,
-      );
-      writeFileSync(join(proj, "project.toml"), '[tracker]\nbinding = "ws"\n');
-      const r2 = run("bash", [SCRIPT, "read"], {
-        cwd: bd,
-        env: {
-          ...process.env,
-          POSTMASTER_CONFIG: cfg,
-          PLANE_API_KEY: "self-test",
-          POSTMASTER_PROJECT: join(bd, "proj"),
-        },
-      });
-      check(
-        "a matching binding reaches usage, with no request",
-        r2.code === 1 && r2.err.includes("usage:") && !r2.err.includes("does not match"),
-        r2.err,
-      );
-      const scoped: Record<string, string | undefined> = {
-        ...process.env,
-        POSTMASTER_CONFIG: cfg,
-        PLANE_API_KEY: "self-test",
-      };
-      delete scoped.POSTMASTER_PROJECT;
-      scoped.GIT_CEILING_DIRECTORIES = bd;
-      const r3 = run("bash", [SCRIPT, "read"], { cwd: bd, env: scoped });
-      check(
-        "with no project in scope the check is skipped and usage follows",
-        r3.code === 1 && r3.err.includes("usage:") && !r3.err.includes("does not match"),
-        r3.err,
-      );
-    } finally {
-      rmSync(bd, { recursive: true, force: true });
-    }
-  }
-
-  // No arguments dies through the same handler as every other die: BASE's
-  // usage line on stderr, nothing on stdout, before any config is read.
-  {
-    const d2 = mkdtempSync(join(tmpdir(), "plane-st-"));
-    try {
-      const r = run("bash", [SCRIPT], {
-        env: {
-          ...process.env,
-          POSTMASTER_CONFIG: join(d2, "no-config.toml"),
-          PLANE_API_KEY: undefined,
-        },
-      });
-      check(
-        "no arguments prints BASE's usage line without reading any config",
-        r.code === 1 &&
-          r.out === "" &&
-          r.err ===
-            "plane: usage: plane.sh projects|create|edit|read|state|comment|list ... | --self-test\n",
-        `exit ${r.code} out=${JSON.stringify(r.out)} err=${JSON.stringify(r.err)}`,
-      );
-    } finally {
-      rmSync(d2, { recursive: true, force: true });
-    }
-  }
-
-  // BASE's 30-second API cutoff: a stalled server is cut off with BASE's words.
-  {
-    const held: Array<{ destroy: () => void }> = [];
-    const stall = createServer((sock) => {
-      held.push(sock);
-      sock.on("error", () => {});
-    });
-    await new Promise<void>((resolve) => stall.listen(0, "127.0.0.1", () => resolve()));
-    const port = (stall.address() as { port: number }).port;
-    const t0 = Date.now();
-    let msg = "";
-    try {
-      await api(
-        { BASE: `http://127.0.0.1:${port}`, WS: "ws", KEY: "self-test" },
-        "GET",
-        "workspaces/ws/projects",
-      );
-    } catch (e) {
-      msg = e instanceof DieError ? e.msg : String(e);
-    }
-    const secs = (Date.now() - t0) / 1000;
-    for (const sock of held) sock.destroy();
-    await new Promise<void>((resolve) => stall.close(() => resolve()));
-    check(
-      "a stalled API is cut off after 30 seconds with BASE's words",
-      msg === "GET workspaces/ws/projects: timed out" && secs >= 29 && secs < 45,
-      `${msg} after ${secs.toFixed(1)}s`,
-    );
-  }
-
-  check("ORDERED takes an Arabic-Indic number like BASE", ORDERED.test("\u0661. x"), "no match");
-  check("FENCE info crosses a CR like BASE", FENCE.test("```\rfoo"), "no match");
-  check("LINK_RE refuses a U+001C url like BASE", "[a](b\x1cc)".match(LINK_RE) === null, "matched");
-  check("BOLD refuses a U+001C close like BASE", "**a\x1c**".match(BOLD) === null, "matched");
-  check(
-    "attrs read through U+001C like BASE",
-    parseAttrs('b\x1c="c"').b === "c",
-    JSON.stringify(parseAttrs('b\x1c="c"')),
-  );
-  check(
-    "end tags split at U+001C like BASE",
-    endTagOf("a\x1c") === "a",
-    JSON.stringify(endTagOf("a\x1c")),
-  );
-  check(
-    "end tags keep U+FEFF like BASE",
-    endTagOf("\ufeffa") === "\ufeffa",
-    JSON.stringify(endTagOf("\ufeffa")),
-  );
-  const codeNode = makeNode("code");
-  codeNode.children.push("a\x1cb");
-  check("mdCode splits U+001C like BASE", mdCode(codeNode) === "`a b`", mdCode(codeNode));
-  const linkNode = makeNode("a", { href: "u" });
-  linkNode.children.push("a\x1cb");
-  check("mdLink splits U+001C like BASE", mdLink(linkNode) === "[a b](u)", mdLink(linkNode));
-  check(
-    "paraLines splits U+001C like BASE",
-    paraLines(["a\x1cb"]).join("|") === "a b",
-    paraLines(["a\x1cb"]).join("|"),
-  );
-  const headNode = makeNode("h2");
-  headNode.children.push("a\x1cb");
-  check(
-    "mdHeading splits U+001C like BASE",
-    mdHeading(headNode).join("|") === "## a b",
-    mdHeading(headNode).join("|"),
-  );
-  const preNode = makeNode("pre", { class: "" });
-  preNode.children.push(makeNode("code", { class: "language-p\x1cq" }));
-  check("codeLang splits U+001C like BASE", codeLang(preNode) === "p", codeLang(preNode));
-  check(
-    "fence langs split U+001C like BASE",
-    mdToHtml("```p\x1cq\nx\n```").includes('language-p"'),
-    mdToHtml("```p\x1cq\nx\n```").slice(0, 80),
-  );
-  check(
-    "shape splits U+001C like BASE",
-    shape("<code>a\x1cb</code>").join(" ").includes("<code a b>"),
-    shape("<code>a\x1cb</code>").join(" "),
-  );
-  check(
-    "criteria read through U+001C like BASE",
-    criteria("<h2>Acceptance\x1ccriteria</h2><ol><li>x</li></ol>") === 1,
-    String(criteria("<h2>Acceptance\x1ccriteria</h2><ol><li>x</li></ol>")),
-  );
-  let tidNum: [string, number] | null = null;
-  try {
-    tidNum = parseId("A-\u0661\u0662");
-  } catch {
-    tidNum = null;
-  }
-  check(
-    "parseId reads an Arabic-Indic tail like BASE",
-    tidNum !== null && tidNum[0] === "A" && tidNum[1] === 12,
-    JSON.stringify(tidNum),
-  );
-  check("env lines refuse NBSP like bash", envOf("export\u00a0A=x") === null, "matched");
-  check("env lines refuse a FEFF like bash", envOf("\ufeffexport A=x") === null, "matched");
-  check(
-    "env lines keep matching plain exports",
-    JSON.stringify(envOf("export A=x")) === JSON.stringify(["A", "x"]),
-    JSON.stringify(envOf("export A=x")),
-  );
-  console.log("");
-  if (fails[0] === 0) {
-    console.log("self-test: all controls behaved");
-    return 0;
-  }
-  console.log(`self-test: ${fails[0]} control(s) misbehaved`);
-  return 1;
 }
 
 // --- the API -----------------------------------------------------------------------------------
@@ -1464,7 +1064,7 @@ function loadConfig(): PlaneConfig {
   return { BASE, WS, KEY };
 }
 
-async function api(
+export async function api(
   cfg: PlaneConfig,
   method: string,
   path: string,
@@ -1518,7 +1118,7 @@ async function* pages(
   }
 }
 
-function parseId(tid: string): [string, number] {
+export function parseId(tid: string): [string, number] {
   // text.ts: BASE re.fullmatch(r"([A-Za-z][A-Za-z0-9]*)-(\d+)" (plane.sh:698); the upper is regex-gated ASCII.
   const m = /^([A-Za-z][A-Za-z0-9]*)-(\p{Nd}+)$/u.exec(tid);
   if (!m) dieP(`not a work item id: ${tid} (expected IDENT-n)`);
@@ -1526,7 +1126,7 @@ function parseId(tid: string): [string, number] {
 }
 
 const ENV_LINE = /^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*([^\n]*)$/u; // bash-WS-exact.
-function envOf(line: string): [string, string] | null {
+export function envOf(line: string): [string, string] | null {
   const m = ENV_LINE.exec(line);
   if (!m) return null;
   let val = m[2] ?? "";
@@ -1605,17 +1205,6 @@ async function runCommands(): Promise<void> {
   const argv = process.argv.slice(2);
   const cmd = argv[0];
   const args = argv.slice(1);
-
-  if (cmd === "--self-test") {
-    selfTest().then(
-      (code) => process.exit(code),
-      (e) => {
-        console.error(e);
-        process.exit(1);
-      },
-    );
-    return;
-  }
 
   const cfg = loadConfig();
 
@@ -1755,26 +1344,20 @@ async function runCommands(): Promise<void> {
       }
     }
   } else {
-    dieP("usage: plane.sh projects|create|edit|read|state|comment|list ... | --self-test");
+    dieP("usage: plane.sh projects|create|edit|read|state|comment|list ...");
   }
 }
 
 // --- dispatch ---------------------------------------------------------------------------------
 const firstArg = process.argv[2];
-if (firstArg === "--self-test") {
-  selfTest().then(
-    (code) => process.exit(code),
-    (e) => {
-      console.error(e);
-      process.exit(1);
-    },
-  );
-} else if (!firstArg) {
-  try {
-    dieP("usage: plane.sh projects|create|edit|read|state|comment|list ... | --self-test");
-  } catch (e) {
-    fatal(e);
+if (import.meta.main) {
+  if (!firstArg) {
+    try {
+      dieP("usage: plane.sh projects|create|edit|read|state|comment|list ...");
+    } catch (e) {
+      fatal(e);
+    }
+  } else {
+    runCommands().catch(fatal);
   }
-} else {
-  runCommands().catch(fatal);
 }
