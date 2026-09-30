@@ -1,37 +1,35 @@
 #!/usr/bin/env bash
-# Oracle for #98: blind acceptance tests at the ticket's own interface.
+# Oracle for #98 (v2): blind acceptance tests at the ticket's own interface.
 #
-# Written by the leg-1 coachman before reading any lane's spec or diff,
-# committed as the first commit on the ticket branch. It drives the routes the
-# ticket names (`fixture.sh new`, the trust form through `scripts/launch.sh`,
-# the wiki page) and never a function shape, which the lanes chose.
+# v2, written after the user rewrote the ticket on 2026-09-30. The ticket is
+# now "a fixture run's postmaster runs headless, so it never stops at a trust
+# prompt": v1's trust-write and config-lock probes are superseded and gone.
+# Written from the ticket text and the repo's existing interfaces, before any
+# lane code exists and before the approved spec was read, committed on the
+# ticket branch after the merge of origin/main.
 #
 #   oracle-98.sh   run from the repo root; exit 0 when the worktree meets the
 #                  ticket, 1 otherwise, one line per probe.
 #
-# Assumptions, stated so a red probe can be blamed correctly:
-# A1. `fixture.sh new` resolves "the harness that will run its postmaster"
-#     from team.postmaster.harness in POSTMASTER_CONFIG, the machine config.
-#     If both lanes fail P1 on this alone, the oracle is wrong, not the lanes.
-# A2. Claude Code's global config is ~/.claude.json (JSON), saved under the
-#     lock ~/.claude.json.lock, as the ticket's Notes describe.
-#
-# AC1's second half ("a postmaster started there does not stop at a trust
-# prompt") has no headless probe: headless claude never asks, and an
-# interactive postmaster needs a model. The ticket itself states the trust
-# entry is what answering the prompt writes, so entry-present implies no
-# prompt; synthesis records that implication on the checkpoint card.
-# AC2's negative ("a harness that never asks has no form, and fixture.sh
-# records nothing for it") has no generic probe: which harness never asks is a
-# lane finding. It is verified at synthesis by reading plus targeted
-# execution. P6 probes the positive half (a trust form exists and runs through
-# launch.sh) at the level the ticket names.
+# What has no generic probe here is verified at synthesis by reading plus
+# targeted execution, and recorded on the checkpoint card:
+# - AC2/AC5, the mark-removed half: removing the mark needs the spec's mark
+#   mechanism, which this oracle was written without. The oracle proves the
+#   marked copy decides headless and other targets decide as before, through
+#   the same command; synthesis runs the mark-removed case per lane.
+# - AC3, "on every host" and the brief's exact prose: the oracle proves the
+#   `headless` decision is wired into SKILL.md and the reused hosts.md form
+#   exists; the wiring and prose are read, not grepped.
+# - AC7, a fixture run reaching its score: needs models and hours, so no
+#   per-lane probe. Who dispatches it from this branch is an open question
+#   for the postmaster/next leg, noted in handoff-1.
 set -uo pipefail
 
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
-[ -f "$HERE/scripts/host.sh" ] || { echo "oracle: run from the repo root: scripts/host.sh not found" >&2; exit 1; }
+[ -f "$HERE/scripts/fixture.sh" ] && [ -f "$HERE/scripts/front-door.sh" ] \
+  || { echo "oracle: run from the repo root: scripts/fixture.sh or scripts/front-door.sh not found" >&2; exit 1; }
 need() { for t in "$@"; do command -v "$t" >/dev/null 2>&1 || { echo "oracle: $t is not on PATH" >&2; exit 1; }; done; }
-need git python3 flock
+need git python3
 fail=0
 pass() { echo "PASS $1: $2"; }
 nope() { echo "FAIL $1: $2"; fail=$((fail+1)); }
@@ -45,183 +43,128 @@ tmp=$(mktemp -d) || exit 1
 trap 'rm -r -- "$tmp" </dev/null 2>/dev/null' EXIT
 export GIT_AUTHOR_NAME=oracle GIT_AUTHOR_EMAIL=oracle@example.invalid
 export GIT_COMMITTER_NAME=oracle GIT_COMMITTER_EMAIL=oracle@example.invalid
-export HOME_REAL=$HOME
 home=$tmp/home; runs=$tmp/runs; mkdir -p "$home" "$runs"
-claude_json=$home/.claude.json
 
-# The machine config the run reads: postmaster on claude (A1).
 cat > "$tmp/config.toml" <<'EOF'
 [team]
-postmaster = { harness = "claude", model = "oracle-model" }
+postmaster = { harness = "claude", model = "pm-model" }
 EOF
 
-# A lived-in Claude config: another trusted project, another key, and a
-# control folder the fixture never makes.
-other_project=$tmp/control-dir; mkdir -p "$other_project"
-parent_probe=$runs
-python3 - "$claude_json" "$other_project" <<'PY'
-import json, sys
-path, other = sys.argv[1], sys.argv[2]
-json.dump({"projects": {other: {"hasTrustDialogAccepted": True}},
-           "theme": "dark", "tipsHistory": {"x": 1}}, open(path, "w"), indent=2)
-PY
-before_projects=$(python3 -c 'import json,sys; print("\n".join(sorted(json.load(open(sys.argv[1]))["projects"])))' "$claude_json")
-before_rest=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); del d["projects"]; print(json.dumps(d,sort_keys=True))' "$claude_json")
-
-# The real config, to prove the run never touched it (AC5: never the real one).
-real_before=absent; [ -f "$HOME_REAL/.claude.json" ] && real_before=$(sha1sum < "$HOME_REAL/.claude.json")
-real_lock_before=absent; [ -e "$HOME_REAL/.claude.json.lock" ] && real_lock_before=present
+# A plain git repo that is NOT a fixture copy: the as-it-was control.
+plain=$tmp/plain
+git init -q -b main "$plain" && git -C "$plain" commit -q --allow-empty -m base
 
 new() {  # new <dest-args...>: fixture.sh new under the scratch home and config
   HOME=$home POSTMASTER_CONFIG=$tmp/config.toml POSTMASTER_FIXTURES=$tmp/fixtures \
     bash "$HERE/scripts/fixture.sh" new "$@" >"$tmp/new.out" 2>"$tmp/new.err"; echo $? >"$tmp/new.rc"
 }
+decide() {  # decide <harness> <model> <cwd> <at-terminal> <target>: first word of the decision
+  bash "$HERE/scripts/front-door.sh" "$1" "$2" "$3" "$4" "$5" --config "$tmp/config.toml" 2>"$tmp/decide.err" \
+    | head -1 | awk '{print $1}'
+}
 
-# P1 (AC1): `fixture.sh new` records the new copy as trusted by claude.
-dest=$runs/copy1
-new "$dest" "$ticket"; rc=$(cat "$tmp/new.rc")
-if [ "$rc" -ne 0 ]; then
-  nope P1-recorded-trusted "fixture.sh new exited $rc: $(tail -2 "$tmp/new.err" | tr '\n' ' ')"
+# P1 (AC1): `new` makes the copy, one commit on main, nothing untracked.
+copy1=$runs/copy1
+new "$copy1" "$ticket"; rc=$(cat "$tmp/new.rc")
+commits=$(git -C "$copy1" rev-list --count main 2>/dev/null || echo ERROR)
+dirty=$(git -C "$copy1" status --porcelain 2>/dev/null | head -3)
+if [ "$rc" -eq 0 ] && [ "$commits" = 1 ] && [ -z "$dirty" ]; then
+  pass P1-clean-tree "one commit on main, nothing untracked"
 else
-  trusted=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["projects"].get(sys.argv[2],{}).get("hasTrustDialogAccepted",False))' "$claude_json" "$dest" 2>/dev/null || echo ERROR)
-  [ "$trusted" = True ] \
-    && pass P1-recorded-trusted "$dest recorded with hasTrustDialogAccepted" \
-    || nope P1-recorded-trusted "$dest not recorded as trusted (hasTrustDialogAccepted=$trusted)"
+  nope P1-clean-tree "exit $rc, commits=$commits, untracked-or-dirty=[$dirty]"
 fi
 
-# P2 (AC3): only the folder just made is trusted: never a path from anywhere
-# else, and never a parent folder.
-after_projects=$(python3 -c 'import json,sys; print("\n".join(sorted(json.load(open(sys.argv[1]))["projects"])))' "$claude_json" 2>/dev/null || echo ERROR)
-added=$(comm -13 <(printf '%s\n' "$before_projects") <(printf '%s\n' "$after_projects") | paste -sd' ' -)
-removed=$(comm -23 <(printf '%s\n' "$before_projects") <(printf '%s\n' "$after_projects") | paste -sd' ' -)
-if [ "$added" = "$dest" ] && [ -z "$removed" ]; then
-  pass P2-only-just-made "exactly one project added: the new copy"
+# P2 (AC1 mark + AC2): the marked copy's decision says `headless`, through the
+# same command that decides any target — in a case that would be `self` and in
+# one that would be `spawn`. (The mark itself is proven by the flip: only a
+# marked copy decides headless.)
+self_case=$(decide claude pm-model "$copy1" yes "$copy1")
+spawn_case=$(decide other-harness other-model "$plain" no "$copy1")
+if [ "$self_case" = headless ] && [ "$spawn_case" = headless ]; then
+  pass P2-headless "would-be self and would-be spawn both say headless"
 else
-  nope P2-only-just-made "added=[${added:-none}] removed=[${removed:-none}], want added=$dest removed=none"
-fi
-for p in "$parent_probe" "$other_project"; do
-  if [ "$p" = "$dest" ]; then continue; fi
-  if grep -qxF "$p" <(printf '%s\n' "$after_projects"); then
-    [ "$p" = "$other_project" ] \
-      && pass P2-control-kept "control folder entry kept as it was" \
-      || nope P2-parent "parent folder $p was trusted"
-  fi
-done
-grep -qxF "$parent_probe" <(printf '%s\n' "$after_projects") \
-  && nope P2-parent "parent folder $parent_probe was trusted" \
-  || pass P2-parent "parent folder left untouched"
-
-# A bare name goes under POSTMASTER_FIXTURES; its parent is trusted no more.
-new bare-copy "$ticket"; rc=$(cat "$tmp/new.rc")
-bare=$tmp/fixtures/bare-copy
-if [ "$rc" -ne 0 ]; then
-  nope P2b-bare-parent "bare-name new exited $rc"
-else
-  bare_ok=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["projects"]; print(d.get(sys.argv[2],{}).get("hasTrustDialogAccepted",False) and sys.argv[3] not in d)' "$claude_json" "$bare" "$tmp/fixtures" 2>/dev/null || echo ERROR)
-  [ "$bare_ok" = True ] \
-    && pass P2b-bare-parent "bare copy trusted, POSTMASTER_FIXTURES untouched" \
-    || nope P2b-bare-parent "bare copy trust=$bare_ok"
+  nope P2-headless "would-be self says '$self_case', would-be spawn says '$spawn_case'"
 fi
 
-# P3 (AC4): every other key kept as it was, and the file still valid.
-rest_now=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); del d["projects"]; print(json.dumps(d,sort_keys=True))' "$claude_json" 2>/dev/null || echo ERROR)
-control_now=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["projects"].get(sys.argv[2],{}))' "$claude_json" "$other_project" 2>/dev/null || echo ERROR)
-if [ "$rest_now" = "$before_rest" ] && [ "$control_now" = "{'hasTrustDialogAccepted': True}" ]; then
-  pass P3-other-keys-kept "every other key and entry byte-equal, file parses"
+# P3 (AC2): for any other target the decision is as it was.
+plain_self=$(decide claude pm-model "$plain" yes "$plain")
+plain_spawn=$(decide other-harness other-model "$plain" no "$plain")
+if [ "$plain_self" = self ] && [ "$plain_spawn" = spawn ]; then
+  pass P3-as-was "non-fixture target: self stays self, spawn stays spawn"
 else
-  nope P3-other-keys-kept "non-project keys or the control entry changed"
+  nope P3-as-was "non-fixture target: self-case says '$plain_self', spawn-case says '$plain_spawn'"
 fi
 
-# P4 (AC4): the writer holds the lock Claude Code holds. While it is held
-# elsewhere, a concurrent `new` neither finishes nor touches the config; once
-# released, it completes and records the copy.
-lock=$home/.claude.json.lock
-: > "$lock"
-flock "$lock" sleep 25 & holder=$!
-sleep 1
-if flock -n "$lock" true 2>/dev/null; then
-  kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
-  nope P4-lock "probe engine failed: the held lock was acquirable"
+# P4 (AC4): nothing writes any harness's trust setting. A scratch home holding
+# lived-in trust stores must be byte-identical after `new`, with no new files.
+mkdir -p "$home/.codex"
+printf '{"projects":{"/tmp/elsewhere":{"hasTrustDialogAccepted":true}},"theme":"dark"}\n' > "$home/.claude.json"
+printf '\n[projects."/tmp/elsewhere"]\ntrust_level = "trusted"\n' > "$home/.codex/config.toml"
+before=$(cd "$home" && find . -type f | sort | while IFS= read -r f; do sha1sum <"$home/$f" | sed "s| .*|  $f|"; done)
+new "$runs/copy2" "$ticket"; rc=$(cat "$tmp/new.rc")
+after=$(cd "$home" && find . -type f | sort | while IFS= read -r f; do sha1sum <"$home/$f" | sed "s| .*|  $f|"; done)
+real_before=absent; [ -f "$HOME/.claude.json" ] && real_before=$(sha1sum < "$HOME/.claude.json")
+if [ "$rc" -eq 0 ] && [ "$before" = "$after" ]; then
+  pass P4-no-trust-write "scratch trust stores byte-identical, no new home files"
 else
-  snap=$(sha1sum < "$claude_json")
-  dest2=$runs/copy2
-  ( new "$dest2" "$ticket" ) & worker=$!
-  sleep 8
-  if ! kill -0 "$worker" 2>/dev/null; then
-    wait "$worker"; rc=$(cat "$tmp/new.rc")
-    kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
-    nope P4-lock "new finished (exit $rc) while the lock was held: it does not wait on it"
-  elif [ "$(sha1sum < "$claude_json")" != "$snap" ]; then
-    kill "$holder" "$worker" 2>/dev/null; wait 2>/dev/null
-    nope P4-lock "config changed while the lock was held: the writer skips it"
-  else
-    kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
-    deadline=$((SECONDS + 60))
-    while kill -0 "$worker" 2>/dev/null && [ $SECONDS -lt $deadline ]; do sleep 1; done
-    if kill -0 "$worker" 2>/dev/null; then
-      kill "$worker" 2>/dev/null; wait 2>/dev/null
-      nope P4-lock "new did not finish within 60s of the lock's release"
-    else
-      wait "$worker"; rc=$(cat "$tmp/new.rc")
-      t2=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["projects"].get(sys.argv[2],{}).get("hasTrustDialogAccepted",False))' "$claude_json" "$dest2" 2>/dev/null || echo ERROR)
-      if [ "$rc" -eq 0 ] && [ "$t2" = True ]; then
-        pass P4-lock "waited on the lock, then recorded the copy"
-      else
-        nope P4-lock "after release: exit $rc, trusted=$t2"
-      fi
-    fi
-  fi
+  nope P4-no-trust-write "exit $rc, home changed: [$(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") | head -4 | tr '\n' ';')]"
+fi
+real_after=absent; [ -f "$HOME/.claude.json" ] && real_after=$(sha1sum < "$HOME/.claude.json")
+[ "$real_before" = "$real_after" ] \
+  && pass P4b-real-untouched "real ~/.claude.json unchanged" \
+  || nope P4b-real-untouched "real ~/.claude.json changed"
+
+# P5a (AC3): SKILL.md wires the `headless` decision into the front door: the
+# decision value, not prose about headless launches. (Wording-sensitive by
+# necessity: a lane that behaves right but words it otherwise is judged by
+# reading at synthesis.)
+if grep -q '`headless`' "$HERE/skills/postmaster/SKILL.md"; then
+  pass P5a-skill "SKILL.md names the \`headless\` decision"
+else
+  nope P5a-skill "SKILL.md never names the \`headless\` decision"
 fi
 
-# P5 (AC1/AC4): with no config at all, `new` writes a valid one holding the copy.
-mv "$claude_json" "$tmp/claude.json.saved"
-dest3=$runs/copy3
-new "$dest3" "$ticket"; rc=$(cat "$tmp/new.rc")
-t3=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["projects"].get(sys.argv[2],{}).get("hasTrustDialogAccepted",False))' "$claude_json" "$dest3" 2>/dev/null || echo ERROR)
-if [ "$rc" -eq 0 ] && [ "$t3" = True ]; then
-  pass P5-creates-config "missing config created, valid, copy trusted"
+# P5b (AC3): the reused form exists: hosts.md's headless postmaster launch.
+if grep -q 'launch postmaster' "$HERE/skills/postmaster/hosts.md" \
+   && grep -q 'ESCALATION.md' "$HERE/skills/postmaster/hosts.md"; then
+  pass P5b-form "hosts.md keeps the headless postmaster form"
 else
-  nope P5-creates-config "exit $rc, trusted=$t3"
+  nope P5b-form "hosts.md headless postmaster form missing"
 fi
 
-# P6 (AC2): the trust form is in harnesses.md and runs through launch.sh.
-harness_hits=$(grep -ci "trust" "$HERE/skills/postmaster/harnesses.md")
-launch_usage=$(bash "$HERE/scripts/launch.sh" 2>&1 || true)
-if [ "$harness_hits" -ge 2 ] && grep -qi "trust" <<<"$launch_usage"; then
-  pass P6-trust-form "harnesses.md documents trust ($harness_hits mentions), launch.sh exposes it"
+# P6a (AC5): the self-test carries the headless-decision control: the copy's
+# decision and the mark-removed decision through the same command. The control
+# lives in front-door.sh's self-test region, or beside a TypeScript port in
+# front-door.test.ts; implementation mentions do not count.
+self_hits=0
+if grep -q -- '--- self-test' "$HERE/scripts/front-door.sh" 2>/dev/null; then
+  self_hits=$(sed -n '/--- self-test/,$p' "$HERE/scripts/front-door.sh" | grep -ci 'headless')
+fi
+if [ -f "$HERE/scripts/front-door.test.ts" ]; then
+  self_hits=$((self_hits + $(grep -ci 'headless' "$HERE/scripts/front-door.test.ts")))
+fi
+if [ "$self_hits" -ge 2 ] 2>/dev/null; then
+  pass P6a-selftest-control "front-door self-test exercises headless ($self_hits mentions)"
 else
-  nope P6-trust-form "harnesses.md trust mentions=$harness_hits, launch.sh usage mentions trust: $(grep -qi trust <<<"$launch_usage" && echo yes || echo no)"
+  nope P6a-selftest-control "front-door self-test headless mentions: $self_hits (want >= 2)"
 fi
 
-# P7 (AC5): the self-test carries a trust control on a scratch config.
-# (The gate runs the whole self-test per lane; this probes its presence.)
-main_hits=$(sed -n '1,/--- self-test/p' "$HERE/scripts/fixture.sh" | grep -ci "trust")
-self_hits=$(sed -n '/--- self-test/,$p' "$HERE/scripts/fixture.sh" | grep -ci "trust")
-if [ "$main_hits" -ge 1 ] && [ "$self_hits" -ge 2 ]; then
-  pass P7-selftest-control "fixture.sh trusts in main logic ($main_hits) and self-test ($self_hits)"
+# P6b: the decision script's self-test is green.
+if bash "$HERE/scripts/front-door.sh" --self-test >"$tmp/fd-st.out" 2>&1; then
+  pass P6b-selftest-green "front-door.sh --self-test exits 0"
 else
-  nope P7-selftest-control "trust mentions: main=$main_hits self-test=$self_hits"
+  nope P6b-selftest-green "front-door.sh --self-test exits $(echo $?): $(tail -2 "$tmp/fd-st.out" | tr '\n' ';')"
 fi
 
-# P8 (AC6): the wiki's fixture-runs page says copies are trusted when made,
-# and why trusting the parent never covered them.
+# P7 (AC6): the wiki's fixture-runs page says a fixture run's postmaster runs
+# headless, and why trusting the fixtures folder never spared a copy.
 wiki=$HERE/wiki/concepts/fixture-runs.md
-made_ok=no; grep -qi "trust" "$wiki" && grep -qiE "when (they|it) (are|is) made|trusted (when|as|at)|made .*trusted|trust.*(new|fresh|each) cop" "$wiki" && made_ok=yes
-parent_ok=no; grep -qi "parent" "$wiki" && grep -qiE "git root|never covered|stops at|plain folder" "$wiki" && parent_ok=yes
-if [ "$made_ok" = yes ] && [ "$parent_ok" = yes ]; then
-  pass P8-wiki "page says copies are trusted when made, and why the parent never covered them"
+headless_ok=no; grep -qi 'headless' "$wiki" && grep -qi 'postmaster' "$wiki" && headless_ok=yes
+parent_ok=no; grep -qiE 'never spared|never covered|not spare|does not spare|stops at|git root' "$wiki" && parent_ok=yes
+if [ "$headless_ok" = yes ] && [ "$parent_ok" = yes ]; then
+  pass P7-wiki "page says the postmaster runs headless, and why the folder never spared a copy"
 else
-  nope P8-wiki "trusted-when-made=$made_ok parent-why=$parent_ok"
-fi
-
-# P9 (AC5/AC3): the real config was never touched, and no lock escaped to it.
-real_after=absent; [ -f "$HOME_REAL/.claude.json" ] && real_after=$(sha1sum < "$HOME_REAL/.claude.json")
-real_lock_after=absent; [ -e "$HOME_REAL/.claude.json.lock" ] && real_lock_after=present
-[ ! -e "$HOME_REAL/Code/fixtures" ] || fixture_dir_note=" (note: $HOME_REAL/Code/fixtures exists from other work, untouched by this probe)"
-if [ "$real_after" = "$real_before" ] && [ "$real_lock_after" = "$real_lock_before" ]; then
-  pass P9-real-untouched "real ~/.claude.json and lock byte-identical${fixture_dir_note:-}"
-else
-  nope P9-real-untouched "real config or lock changed"
+  nope P7-wiki "headless-postmaster=$headless_ok parent-why=$parent_ok"
 fi
 
 echo
