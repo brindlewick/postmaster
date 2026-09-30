@@ -161,6 +161,18 @@ declare const Bun: {
   };
   sleep(ms: number): Promise<void>;
   hash(data: string | Uint8Array): string;
+  spawnSync(options: {
+    cmd: string[];
+    cwd?: string;
+    env?: Record<string, string | undefined>;
+    stdin?: "inherit" | "pipe" | "ignore" | null | Uint8Array | string;
+    stdout?: "inherit" | "pipe" | "ignore" | null;
+    stderr?: "inherit" | "pipe" | "ignore" | null;
+  }): {
+    exitCode: number;
+    stdout: Uint8Array;
+    stderr: Uint8Array;
+  };
 };
 
 declare module "bun" {
@@ -795,4 +807,8 @@ declare module "bun:test" {
   export function expect(actual: unknown): Matchers;
   export function test(name: string, fn: () => unknown, timeout?: number): void;
   export function describe(name: string, fn: () => void): void;
+  export function beforeAll(fn: () => unknown): void;
+  export function afterAll(fn: () => unknown): void;
+  export function beforeEach(fn: () => unknown): void;
+  export function afterEach(fn: () => unknown): void;
 }

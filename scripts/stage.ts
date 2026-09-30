@@ -33,6 +33,7 @@ import { join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, withTempDir } from "./lib/proc.ts";
 import { SelfTest } from "./lib/selftest.ts";
+import { pyRstrip } from "./lib/text.ts";
 
 const STAGES =
   "dispatched bootstrapped planning workhorses-running synthesis checkpoint-1 review shipping shipped done abandoned";
@@ -87,7 +88,7 @@ function closeUsage(d: string): number {
   const start = lines.findIndex((l) => l.replace(/[\r\n]+$/u, "") === "## Cost");
   let next: string;
   if (start === -1) {
-    next = `${text.replace(/\s+$/u, "")}\n\n${block}`;
+    next = `${pyRstrip(text)}\n\n${block}`;
   } else {
     const tail = lines.slice(start + 1);
     const endAt = tail.findIndex((l) => l.startsWith("## "));
