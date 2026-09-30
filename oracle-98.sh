@@ -4,25 +4,29 @@
 # v2, written after the user rewrote the ticket on 2026-09-30. The ticket is
 # now "a fixture run's postmaster runs headless, so it never stops at a trust
 # prompt": v1's trust-write and config-lock probes are superseded and gone.
-# Written from the ticket text and the repo's existing interfaces, before any
-# lane code exists and before the approved spec was read, committed on the
-# ticket branch after the merge of origin/main.
+# First written from the ticket text alone, before any lane code existed and
+# before the approved spec was read; then corrected to the user-approved
+# spec's output shape (a `headless` line beside `spawn`, `self` stays `self`)
+# and mark mechanism (`postmaster.fixture` git config), still before any lane
+# code exists. Both lanes implement that same spec, so the ranking stays fair.
 #
 #   oracle-98.sh   run from the repo root; exit 0 when the worktree meets the
 #                  ticket, 1 otherwise, one line per probe.
 #
 # What has no generic probe here is verified at synthesis by reading plus
 # targeted execution, and recorded on the checkpoint card:
-# - AC2/AC5, the mark-removed half: removing the mark needs the spec's mark
-#   mechanism, which this oracle was written without. The oracle proves the
-#   marked copy decides headless and other targets decide as before, through
-#   the same command; synthesis runs the mark-removed case per lane.
-# - AC3, "on every host" and the brief's exact prose: the oracle proves the
-#   `headless` decision is wired into SKILL.md and the reused hosts.md form
-#   exists; the wiring and prose are read, not grepped.
-# - AC7, a fixture run reaching its score: needs models and hours, so no
-#   per-lane probe. Who dispatches it from this branch is an open question
-#   for the postmaster/next leg, noted in handoff-1.
+# - AC2/AC5, byte-exactness ("exactly the output it gave before"): the oracle
+#   proves the mark flips the decision both ways through the same command;
+#   byte-equality with the pre-change output is the lanes' own self-test
+#   control, read at synthesis.
+# - AC2/AC3, "whatever/on every host": the oracle runs on this machine's host;
+#   the decision script takes no host input by construction (read), and the
+#   spec puts Herdr/tmux/none coverage in the lanes' own tests.
+# - AC3, the brief's exact prose: the oracle proves the `headless` decision is
+#   wired into SKILL.md and the reused hosts.md form exists; the prose is
+#   read, not grepped.
+# - AC7, a fixture run dispatched from this branch: needs models and hours, so no
+#   per-lane probe. The spec says the postmaster runs it after the card.
 set -uo pipefail
 
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
@@ -62,6 +66,12 @@ decide() {  # decide <harness> <model> <cwd> <at-terminal> <target>: first word 
   bash "$HERE/scripts/front-door.sh" "$1" "$2" "$3" "$4" "$5" --config "$tmp/config.toml" 2>"$tmp/decide.err" \
     | head -1 | awk '{print $1}'
 }
+decide_full() {  # decide_full <same args>: the whole decision output
+  bash "$HERE/scripts/front-door.sh" "$1" "$2" "$3" "$4" "$5" --config "$tmp/config.toml" 2>"$tmp/decide.err"
+}
+headless_lines() {  # headless_lines: count of output lines whose first word is `headless`
+  awk '$1=="headless"{n++} END{print n+0}'
+}
 
 # P1 (AC1): `new` makes the copy, one commit on main, nothing untracked.
 copy1=$runs/copy1
@@ -74,16 +84,42 @@ else
   nope P1-clean-tree "exit $rc, commits=$commits, untracked-or-dirty=[$dirty]"
 fi
 
-# P2 (AC1 mark + AC2): the marked copy's decision says `headless`, through the
-# same command that decides any target — in a case that would be `self` and in
-# one that would be `spawn`. (The mark itself is proven by the flip: only a
-# marked copy decides headless.)
-self_case=$(decide claude pm-model "$copy1" yes "$copy1")
-spawn_case=$(decide other-harness other-model "$plain" no "$copy1")
-if [ "$self_case" = headless ] && [ "$spawn_case" = headless ]; then
-  pass P2-headless "would-be self and would-be spawn both say headless"
+# P1b (AC1): the mark reads back as the fixture ticket's name, and a
+# repository `new` did not make carries no mark.
+mark1=$(git -C "$copy1" config postmaster.fixture 2>/dev/null || echo ABSENT)
+mark_plain=$(git -C "$plain" config postmaster.fixture 2>/dev/null || echo ABSENT)
+if [ "$mark1" = "$ticket" ] && [ "$mark_plain" = ABSENT ]; then
+  pass P1b-mark "mark reads back as '$ticket'; plain repo unmarked"
 else
-  nope P2-headless "would-be self says '$self_case', would-be spawn says '$spawn_case'"
+  nope P1b-mark "copy mark='$mark1' (want '$ticket'), plain mark='$mark_plain' (want ABSENT)"
+fi
+
+# P2 (AC2): when the decision is `spawn` and the target carries the mark, the
+# front door also prints a `headless` line; `self` stays `self` with no
+# `headless` line. Same command both ways; exits as before.
+out_self=$(decide_full claude pm-model "$copy1" yes "$copy1"); rc_self=$?
+out_spawn=$(decide_full other-harness other-model "$plain" no "$copy1"); rc_spawn=$?
+self_word=$(head -1 <<<"$out_self" | awk '{print $1}'); self_word=${self_word:-EMPTY}
+spawn_word=$(head -1 <<<"$out_spawn" | awk '{print $1}'); spawn_word=${spawn_word:-EMPTY}
+self_hl=$(headless_lines <<<"$out_self"); spawn_hl=$(headless_lines <<<"$out_spawn")
+if [ "$self_word" = self ] && [ "$self_hl" = 0 ] && [ "$rc_self" = 0 ] \
+   && [ "$spawn_word" = spawn ] && [ "$spawn_hl" -ge 1 ] && [ "$rc_spawn" = 0 ]; then
+  pass P2-headless "self stays self without headless; spawn gains a headless line"
+else
+  nope P2-headless "self-case: '$self_word' exit $rc_self headless-lines $self_hl; spawn-case: '$spawn_word' exit $rc_spawn headless-lines $spawn_hl"
+fi
+
+# P2b (AC2/AC5): the same copy with its mark removed decides as a copy without
+# one: `spawn`, no `headless` line. The negative half of the P2 pair: it passes
+# pre-change too, and means something only beside P2's flip.
+git -C "$copy1" config --unset postmaster.fixture 2>/dev/null || true
+out_unmarked=$(decide_full other-harness other-model "$plain" no "$copy1"); rc_unmarked=$?
+unmarked_word=$(head -1 <<<"$out_unmarked" | awk '{print $1}'); unmarked_word=${unmarked_word:-EMPTY}
+unmarked_hl=$(headless_lines <<<"$out_unmarked")
+if [ "$unmarked_word" = spawn ] && [ "$unmarked_hl" = 0 ] && [ "$rc_unmarked" = 0 ]; then
+  pass P2b-unmarked "mark removed: spawn, no headless line"
+else
+  nope P2b-unmarked "mark removed: '$unmarked_word' exit $rc_unmarked headless-lines $unmarked_hl"
 fi
 
 # P3 (AC2): for any other target the decision is as it was.
