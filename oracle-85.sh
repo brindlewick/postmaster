@@ -40,7 +40,7 @@ probe_static() {
   local search_rc
   grep -rPn '(?<!\|)\|(?!\|)\s*e?grep\s+(-[A-Za-z]*q[A-Za-z]*|--quiet)([^A-Za-z]|$)' "$HERE/scripts" 2>/dev/null \
     | grep -v -x -F \
-      -e "$HERE/scripts/link-skills.sh:93:  if printf '%s\n' \"\$p\" | grep -q '^in-the-way'; then" \
+      -e "$HERE/scripts/link-skills.sh:94:  if printf '%s\n' \"\$p\" | grep -q '^in-the-way'; then" \
       -e "$HERE/scripts/probe-trackers.sh:18:elif ! gh auth status 2>&1 | grep -qE \"Token scopes:.*'project'\"; then" \
       -e "$HERE/scripts/host.sh:1582:  printf '%s\n' \"\$help\" | sed -n 's/^ *kinds: //p' | tr '|' '\n' | grep -qxF \"\$1\"" \
       -e "$HERE/scripts/log-action.sh:91:  [ -z \"\$control\" ] || printf '%s\n' \"\$kinds\" | grep -qxF -- \"\$control\" \\" \
