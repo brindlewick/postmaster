@@ -59,9 +59,9 @@ const runHelper = (args: string[], env?: Record<string, string>): { status: numb
   return { status: r.status ?? 1, out: (r.stdout || "") + (r.stderr || "") };
 };
 
-// A bin dir holding a git that refuses one "<subcommand> <verb>" pair with the given exit
+// A bin dir holding a git that refuses each "<subcommand> <verb>" pair with its exit
 // and passes everything else to the real git, for the failure-path tests.
-const refusingGit = (refuse: string, exit: number): string => {
+const refusingGit = (refusals: [pair: string, exit: number][]): string => {
   const dir = mkdtempSync(join(tmpdir(), "clean-checkout-git-"));
   roots.push(dir);
   writeFileSync(
@@ -70,7 +70,10 @@ const refusingGit = (refuse: string, exit: number): string => {
       "#!/usr/bin/env bash",
       'prev=""',
       'for a in "$@"; do',
-      `  if [ "$prev $a" = "${refuse}" ]; then echo "wrapped git: refusing ${refuse}" >&2; exit ${exit}; fi`,
+      ...refusals.map(
+        ([pair, exit]) =>
+          `  if [ "$prev $a" = "${pair}" ]; then echo "wrapped git: refusing ${pair}" >&2; exit ${exit}; fi`,
+      ),
       '  prev="$a"',
       "done",
       `exec "${realGit}" "$@"`,
@@ -185,7 +188,7 @@ describe("cleanCheckout", () => {
     withRepo((repo) => {
       const priv = mkdtempSync(join(tmpdir(), "clean-checkout-tmpdir-"));
       roots.push(priv);
-      const bin = refusingGit("worktree add", 128);
+      const bin = refusingGit([["worktree add", 128]]);
       const marker = join(priv, "ran");
       const failed = runHelper([repo, "main", `touch ${marker}`], {
         TMPDIR: priv,
@@ -198,19 +201,83 @@ describe("cleanCheckout", () => {
     });
   });
 
-  test("a checkout that cannot be removed leaves no registration behind", () => {
+  test("a removal that needs its fallback still reports the passing command", () => {
     withRepo((repo) => {
       const priv = mkdtempSync(join(tmpdir(), "clean-checkout-tmpdir-"));
       roots.push(priv);
-      const bin = refusingGit("worktree remove", 1);
+      const bin = refusingGit([["worktree remove", 1]]);
+      const removed = runHelper([repo, "main", "true"], {
+        TMPDIR: priv,
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+      });
+      expect(removed.status).toBe(0);
+      expect(removed.out).toContain("could not remove the temporary git worktree");
+      expect(worktreeList(repo)).not.toContain("postmaster-clean-checkout-");
+      expect(readdirSync(priv).filter((n) => n.startsWith("postmaster-clean-checkout-"))).toEqual([]);
+    });
+  });
+
+  test("cleanup residue left behind fails the run", () => {
+    withRepo((repo) => {
+      const priv = mkdtempSync(join(tmpdir(), "clean-checkout-tmpdir-"));
+      roots.push(priv);
+      const bin = refusingGit([
+        ["worktree remove", 1],
+        ["worktree prune", 1],
+      ]);
       const removed = runHelper([repo, "main", "true"], {
         TMPDIR: priv,
         PATH: `${bin}:${process.env.PATH ?? ""}`,
       });
       expect(removed.status).toBe(1);
-      expect(removed.out).toContain("could not remove the temporary git worktree");
+      expect(removed.out).toContain("could not prune the worktree registration");
+      expect(worktreeList(repo)).toContain("postmaster-clean-checkout-");
+      command("git", ["-C", repo, "worktree", "prune"]);
       expect(worktreeList(repo)).not.toContain("postmaster-clean-checkout-");
-      expect(readdirSync(priv).filter((n) => n.startsWith("postmaster-clean-checkout-"))).toEqual([]);
+    });
+  });
+
+  test("a polluted GIT_* environment still checks out the named repo", () => {
+    withRepo((repo) => {
+      const decoy = mkdtempSync(join(tmpdir(), "clean-checkout-decoy-"));
+      roots.push(decoy);
+      command("git", ["init", "-q", "-b", "main", decoy]);
+      command("git", ["-C", decoy, "config", "user.name", "test"]);
+      command("git", ["-C", decoy, "config", "user.email", "test@example.invalid"]);
+      writeFileSync(join(decoy, "who.txt"), "decoy\n");
+      command("git", ["-C", decoy, "add", "who.txt"]);
+      command("git", ["-C", decoy, "commit", "-q", "-m", "decoy"]);
+      writeFileSync(join(repo, "who.txt"), "real\n");
+      command("git", ["-C", repo, "add", "who.txt"]);
+      command("git", ["-C", repo, "commit", "-q", "-m", "who"]);
+      const polluted = runHelper([repo, "main", 'test "$(cat who.txt)" = real'], {
+        GIT_DIR: join(decoy, ".git"),
+        GIT_WORK_TREE: decoy,
+        GIT_COMMON_DIR: join(decoy, ".git"),
+        GIT_INDEX_FILE: join(decoy, ".git", "index"),
+        GIT_OBJECT_DIRECTORY: join(decoy, ".git", "objects"),
+        GIT_ALTERNATE_OBJECT_DIRECTORIES: join(decoy, ".git", "objects"),
+        GIT_NAMESPACE: "decoy",
+      });
+      expect(polluted.status).toBe(0);
+      expect(worktreeList(decoy)).not.toContain("postmaster-clean-checkout-");
+    });
+  });
+
+  test("runs each command in turn and stops at the first failure", () => {
+    withRepo((repo) => {
+      const dir = mkdtempSync(join(tmpdir(), "clean-checkout-marks-"));
+      roots.push(dir);
+      const first = join(dir, "first");
+      const second = join(dir, "second");
+      const failed = cleanCheckout(repo, "main", `touch ${first} && exit 3`, `touch ${second}`);
+      expect(failed.exitCode).toBe(3);
+      expect(existsSync(first)).toBe(true);
+      expect(existsSync(second)).toBe(false);
+      expect(existsSync(failed.checkoutPath)).toBe(false);
+      const passed = cleanCheckout(repo, "main", "true", `touch ${second}`);
+      expect(passed.exitCode).toBe(0);
+      expect(existsSync(second)).toBe(true);
     });
   });
 });

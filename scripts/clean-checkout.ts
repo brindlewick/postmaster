@@ -1,22 +1,25 @@
 #!/usr/bin/env bun
-// Run a command in a clean checkout of a branch, outside the project folder, so a project
+// Run commands in a clean checkout of a branch, outside the project folder, so a project
 // tool that walks the whole folder never reads the run's working copies under .worktrees/.
 // Why: wiki/concepts/clean-checkout-gates.md.
 //
-//   bun scripts/clean-checkout.ts <repo> <branch> <command>
+//   bun scripts/clean-checkout.ts <repo> <branch> <command> [<command>...]
 //
 // Makes a detached git worktree of <branch> (a branch, tag, or commit) in a temporary
 // directory outside the project folder, populates its submodules where the branch has any,
-// runs <command> there through bash -e -o pipefail (the project check contract's flags),
-// removes the checkout afterwards even when the command fails, and reports the command's
-// exit. The checkout holds only that branch's content: no .worktrees/, no uncommitted
-// files. A git worktree, rather than an archive export, so gates that read git metadata
-// keep working.
+// runs each <command> there in turn through bash -e -o pipefail (the project check
+// contract's flags), stopping at the first failure, removes the checkout afterwards even
+// when a command fails, and reports the failing command's exit, or the last command's.
+// The checkout holds only that branch's content: no .worktrees/, no uncommitted files. A
+// git worktree, rather than an archive export, so gates that read git metadata keep
+// working. Separate commands, rather than one shell string joined with &&, so a failed
+// preparation can never be hidden by a later statement.
 //
-//   exit 0..255  the command's own exit, which wins whenever the command ran, even when
-//                the checkout could not be removed afterwards (that failure is on stderr)
-//   exit 1       usage, no such repo or branch, the checkout could not be made (the command
-//                is not run), or the checkout could not be removed after a passing command
+//   exit 0..255  the failing command's exit, or the last command's when all passed; a
+//                cleanup that needed its fallback but left nothing behind is on stderr
+//                and does not change the exit
+//   exit 1       usage, no such repo or branch, a checkout that could not be made (no
+//                command is run), or cleanup residue left behind after passing commands
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdtempSync, realpathSync, rmSync, rmdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
@@ -47,21 +50,45 @@ const temporaryRoot = (repo: string): string => {
 
 const status = (result: ReturnType<typeof spawnSync>): number => result.status ?? 1;
 
-const gitOk = (repo: string, args: string[]): boolean =>
-  spawnSync("git", ["-C", repo, ...args], { stdio: "ignore" }).status === 0;
+// git -C does not override GIT_* from the environment, so a polluted caller env would point
+// every git call here, and the gate's own git calls, at the wrong repository. Scrub the same
+// list the shell scripts unset, for every spawn below.
+const GIT_ENV_KEYS = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_NAMESPACE",
+];
 
-export const cleanCheckout = (repoArg: string, branch: string, command: string): CleanCheckoutResult => {
-  if (!repoArg || !branch || !command) throw new Error("repo, branch and command are required");
+const scrubbedEnv = (): Record<string, string | undefined> =>
+  Object.fromEntries(Object.entries(process.env).filter(([key]) => !GIT_ENV_KEYS.includes(key)));
 
+const gitOk = (repo: string, args: string[], env: Record<string, string | undefined>): boolean =>
+  spawnSync("git", ["-C", repo, ...args], { stdio: "ignore", env }).status === 0;
+
+export const cleanCheckout = (
+  repoArg: string,
+  branch: string,
+  ...commands: string[]
+): CleanCheckoutResult => {
+  if (!repoArg || !branch || commands.length === 0 || commands.some((c) => !c))
+    throw new Error("repo, branch and at least one command are required");
+
+  const env = scrubbedEnv();
   const repo = realpathSync(repoArg);
-  if (!gitOk(repo, ["rev-parse", "--show-toplevel"])) throw new Error(`${repoArg} is not in a git repository`);
-  if (!gitOk(repo, ["rev-parse", "--verify", "-q", `${branch}^{commit}`]))
+  if (!gitOk(repo, ["rev-parse", "--show-toplevel"], env))
+    throw new Error(`${repoArg} is not in a git repository`);
+  if (!gitOk(repo, ["rev-parse", "--verify", "-q", `${branch}^{commit}`], env))
     throw new Error(`${repo} has no branch or commit ${branch}`);
 
   const scratch = temporaryRoot(repo);
   const checkoutPath = join(scratch, "checkout");
   const added = spawnSync("git", ["-C", repo, "worktree", "add", "--quiet", "--detach", checkoutPath, branch], {
     stdio: "inherit",
+    env,
   });
 
   if (added.error) process.stderr.write(`clean-checkout: ${added.error.message}\n`);
@@ -75,19 +102,25 @@ export const cleanCheckout = (repoArg: string, branch: string, command: string):
     const sub = spawnSync(
       "git",
       ["-C", checkoutPath, "-c", "protocol.file.allow=always", "submodule", "update", "--init"],
-      { stdio: "inherit" },
+      { stdio: "inherit", env },
     );
     if (status(sub) !== 0)
       process.stderr.write("clean-checkout: could not populate submodules; running on the checkout as made\n");
   }
 
   if (registered) {
-    const run = spawnSync("bash", ["-e", "-o", "pipefail", "-c", command], {
-      cwd: checkoutPath,
-      stdio: "inherit",
-    });
-    if (run.error) process.stderr.write(`clean-checkout: ${run.error.message}\n`);
-    exitCode = status(run);
+    // Each command runs on its own, in turn, so a failed preparation can never be hidden
+    // by a later statement the way one shell string with `&&` and `;` would hide it.
+    for (const command of commands) {
+      const run = spawnSync("bash", ["-e", "-o", "pipefail", "-c", command], {
+        cwd: checkoutPath,
+        stdio: "inherit",
+        env,
+      });
+      if (run.error) process.stderr.write(`clean-checkout: ${run.error.message}\n`);
+      exitCode = status(run);
+      if (exitCode !== 0) break;
+    }
   }
 
   const scratchType = (() => {
@@ -101,6 +134,7 @@ export const cleanCheckout = (repoArg: string, branch: string, command: string):
   if (registered && scratchType !== "other") {
     const removed = spawnSync("git", ["-C", repo, "worktree", "remove", "--force", checkoutPath], {
       stdio: "ignore",
+      env,
     });
     checkoutRemoved = removed.status === 0;
     if (!checkoutRemoved) process.stderr.write("clean-checkout: could not remove the temporary git worktree\n");
@@ -118,27 +152,28 @@ export const cleanCheckout = (repoArg: string, branch: string, command: string):
     if (exitCode === 0) exitCode = 1;
   }
 
-  if (registered && !checkoutRemoved && scratchType === "directory") {
-    // The directory is gone; drop the stale registration too. Prune only touches entries
-    // whose directory no longer exists, so live worktrees are unaffected.
-    const pruned = spawnSync("git", ["-C", repo, "worktree", "prune"], { stdio: "ignore" });
-    if (pruned.status !== 0)
+  if (registered && !checkoutRemoved && scratchType !== "other") {
+    // The directory is gone (removed above, or never there); drop the stale registration too.
+    // Prune only touches entries whose directory no longer exists, so live worktrees are
+    // unaffected. A registration left behind is residue, and residue fails the run.
+    const pruned = spawnSync("git", ["-C", repo, "worktree", "prune"], { stdio: "ignore", env });
+    if (pruned.status !== 0) {
       process.stderr.write("clean-checkout: could not prune the worktree registration\n");
+      if (exitCode === 0) exitCode = 1;
+    }
   }
-
-  if (registered && !checkoutRemoved && exitCode === 0) exitCode = 1;
 
   return { exitCode, checkoutPath };
 };
 
 if (import.meta.main) {
   const args = process.argv.slice(2);
-  if (args.length !== 3) {
-    process.stderr.write("usage: clean-checkout.ts <repo> <branch> <command>\n");
+  if (args.length < 3) {
+    process.stderr.write("usage: clean-checkout.ts <repo> <branch> <command> [<command>...]\n");
     process.exitCode = 1;
   } else {
     try {
-      process.exitCode = cleanCheckout(args[0], args[1], args[2]).exitCode;
+      process.exitCode = cleanCheckout(args[0], args[1], ...args.slice(2)).exitCode;
     } catch (error) {
       process.stderr.write(`clean-checkout: ${String(error)}\n`);
       process.exitCode = 1;

@@ -964,12 +964,16 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    only the branch's committed content — no untracked files and no installed dependencies —
    so derive `<install>` from the main checkout with
    `<tool>/scripts/discover-project.sh <repo>` (the `install=` line; empty where the project
-   needs no install step), and pass `<install> && <build> && <gate>` with the empty parts
-   and a `none` build left out, as ONE argument to
-   `bun <tool>/scripts/clean-checkout.ts <repo> <default-branch> <command>` (one argv
-   element, composed by the caller — never re-wrap it in a second shell, which would expand
-   `$` and consume quotes). `<build>` and `<gate>` are the profile's; where the profile
-   names no gate, there is nothing to verify. Log the result when a gate ran
+   needs no install step). Write each non-empty part (`<install>` from discovery, `<build>`
+   and `<gate>` from the profile, a `none` build left out) to its own file under
+   `<dispatch>` with a quoted heredoc, which carries `$`, quotes and newlines literally,
+   and pass them as separate arguments — never joined with `&&` into one shell string, in
+   which a failed preparation would hide behind a later statement:
+   `bun <tool>/scripts/clean-checkout.ts <repo> <default-branch> "$(cat
+   <dispatch>/ship-install.txt)" "$(cat <dispatch>/ship-build.txt)" "$(cat
+   <dispatch>/ship-gate.txt)"`, leaving out the empty parts. The helper runs them in turn
+   and stops at the first failure. Where the profile names no gate, there is nothing to
+   verify. Log the result when a gate ran
    (`<tool>/scripts/log-action.sh <dispatch> coachman gate <default-branch> "post-merge,
    clean checkout, exit <n>"`). A red result is investigated under the red-gate rule below;
    the merge is already local, so fix forward on the default branch or revert it, never
@@ -1146,7 +1150,8 @@ ticket that needs another's change waits for it to land.
 - **A red gate on the default branch after merging is a claim to investigate, not a fact to
   report.** The flow's own post-merge gate runs from a clean checkout outside the project
   folder, so a sibling worktree's files cannot redden it; a red one is a defect in the merge,
-  in the gate itself, or in the checkout's preparation (a missing install step). A gate a
+  in the gate itself, in the checkout's preparation (a missing install step), or residue a
+  failed cleanup left behind. A gate a
   person runs by hand in the main checkout still sees the copies under `.worktrees/`, and
   fails for them while the project's own code is clean. Establish which gate is red and whose
   file it is before touching shared config, and file the hygiene fix as its own ticket

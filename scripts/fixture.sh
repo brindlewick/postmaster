@@ -115,7 +115,7 @@ new_run() {  # new_run <name or dest> <ticket>
 
 py() {  # py score <dispatch> <repo> | py hidden <ticket> <app-dir>
   python3 - "$TOOL" "$@" <<'PY'
-import json, os, pathlib, re, shlex, shutil, subprocess, sys, tempfile
+import json, os, pathlib, re, shutil, subprocess, sys, tempfile
 
 TOOL = pathlib.Path(sys.argv[1])
 SCRIPTS, TICKETS = TOOL / "scripts", TOOL / "fixtures" / "tickets"
@@ -185,9 +185,11 @@ def check_gate(app, repo, branch):
     if not gate:
         return False, "scripts/discover-project.sh found no gate", out
     install = next((l[len("install="):] for l in out.splitlines() if l.startswith("install=")), "")
-    inner = "bash -e -o pipefail -c " + shlex.quote(gate)
-    command = (install + " && " if install else "") + inner
-    code, out = sh(["bun", SCRIPTS / "clean-checkout.ts", repo, branch, command])
+    argv = ["bun", SCRIPTS / "clean-checkout.ts", repo, branch]
+    if install:
+        argv.append(install)
+    argv.append(gate)
+    code, out = sh(argv)
     return code == 0, "%s on main from a clean checkout: %s" % (gate, exited(code)), out
 
 def read_actions(dispatch):
