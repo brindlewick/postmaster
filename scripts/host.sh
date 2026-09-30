@@ -2229,7 +2229,9 @@ for m in sorted((set(intents) | phases) - have):
         later = [v for k, v in intents.items() if k > m and (k in have or not off0(v))]
         if later:
             try: end = str(min(int(v.get("stream_off", 0)) for v in later))
-            except (TypeError, ValueError): end = ""
+            # A corrupt bound fails closed: the earlier slice reads empty rather
+            # than running to the end of the stream through the later bytes.
+            except (TypeError, ValueError): end = str(off)
     print("%d|%d|%s" % (m, off, end))
 PY
 )
@@ -3353,6 +3355,20 @@ PY
     "$SELF" leg backfill "$tmp/slateref-d" synthesis 1 >/dev/null 2>&1; rc=$?
   got=$(python3 -c 'import json,sys; rs=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]; print("%s|%s" % (rs[0]["outcome"], rs[0]["thread_id"]))' "$tmp/slateref-d/logs/coachman-leg-1-attempts.jsonl")
   check "a refused later phase empties the earlier slice too" '[ "$rc" -eq 0 ] && [ "$got" = "pre-thread|" ]' "$got"
+  mkdir -p "$tmp/corruptbound-d/logs" && cp "$leg_d/run.json" "$tmp/corruptbound-d/run.json"
+  printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/corruptbound-d/manifest.json"
+  printf 'slice prompt\n' > "$tmp/corruptbound-d/prompt.txt"
+  printf '{"attempt":1,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":0}' \
+    "$tmp/corruptbound-d/prompt.txt" > "$tmp/corruptbound-d/logs/coachman-leg-1-intent-1.json"
+  printf 'started\n' > "$tmp/corruptbound-d/logs/coachman-leg-1-phase-1"
+  printf '{"attempt":2,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":"garbage"}' \
+    "$tmp/corruptbound-d/prompt.txt" > "$tmp/corruptbound-d/logs/coachman-leg-1-intent-2.json"
+  printf '{"session_id":"T-TWO","type":"assistant"}\n' > "$tmp/corruptbound-d/logs/coachman-leg-1-events.jsonl"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" \
+    "$SELF" leg backfill "$tmp/corruptbound-d" synthesis 1 >/dev/null 2>&1; rc=$?
+  got=$(python3 -c 'import json,sys; rs=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]; print("%s|%s" % (rs[0]["outcome"], rs[0]["thread_id"]))' "$tmp/corruptbound-d/logs/coachman-leg-1-attempts.jsonl")
+  check "a corrupt later bound hands no thread to the earlier slice" '[ "$rc" -eq 0 ] && [ "$got" = "pre-thread|" ]' "$got"
   mkdir -p "$tmp/slaterec-d/logs" && cp "$leg_d/run.json" "$tmp/slaterec-d/run.json"
   printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/slaterec-d/manifest.json"
   printf 'slice prompt\n' > "$tmp/slaterec-d/prompt.txt"

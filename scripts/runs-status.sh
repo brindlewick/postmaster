@@ -133,12 +133,14 @@ for run in sorted(os.listdir(root)):
     elif ".card-ready" in markers: nxt = "GATE"
     elif active: nxt = "WAIT"
     elif gap or corrupt: nxt = "INSPECT"
+    # A waiting spec package beats the whole outcome block: the pause writes an
+    # incomplete record by design, and that record must never beat its own marker.
+    elif ".spec-review-ready" in markers: nxt = "SPEC"
     elif outcome == "finished": nxt = "DISPATCH"
     elif outcome in ("refused", "pre-thread"): nxt = "ASK"
     elif outcome == "walled" and role == "coachman": nxt = "TAKEOVER"
     elif outcome == "walled" and role == "coachman_fallback": nxt = "ASK"
     elif outcome == "incomplete": nxt = "RESUME"
-    elif ".spec-review-ready" in markers: nxt = "SPEC"
     elif done: nxt = "DISPATCH"
     elif exited: nxt = "INSPECT"
     elif any(mk.startswith(".checkpoint-") for mk in markers): nxt = "READ"
@@ -215,6 +217,11 @@ expect() {  # expect <label> <run> <next>
 run rule review 2 .escalation-ready
 run gate shipping 3 .card-ready
 run spec planning 1 .spec-review-ready .leg-1-exited
+run specpause planning 1 .spec-review-ready .leg-1-exited
+# The pause's realistic shape: started, thread id, no hand-off, so incomplete.
+printf '{"attempt":1,"outcome":"incomplete","role":"coachman","thread_id":"T-PLAN"}\n' \
+  > "$tmp/root/specpause/logs/coachman-leg-1-attempts.jsonl"
+printf 'started\n' > "$tmp/root/specpause/logs/coachman-leg-1-phase-1"
 run dispatch review 2 .leg-2-done .leg-2-exited
 record dispatch finished coachman
 run refused review 2 .leg-2-exited; record refused refused coachman
@@ -255,6 +262,7 @@ echo "positive controls"
 expect "an escalation waiting is RULE" rule RULE
 expect "a complete ship card is GATE" gate GATE
 expect "a spec review package waiting is SPEC" spec SPEC
+expect "a spec package with its pause record is SPEC" specpause SPEC
 expect "the current leg done is DISPATCH" dispatch DISPATCH
 expect "a refused launch is ASK" refused ASK
 expect "an exit before a thread id is ASK" prethread ASK

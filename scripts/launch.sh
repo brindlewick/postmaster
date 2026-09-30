@@ -62,14 +62,16 @@ readonly ATTEMPT_PHASE_FILE
 PHASE_TRACKING=0
 attempt_phase() {  # launch and resume only: form, review and skill never touch the phase file
   # A temp file and a rename: readers see the old phase or the new one, never
-  # an empty file from a kill between truncate and write. Failures stay silent,
-  # as before: the phase is evidence, and a missing write reads refused.
+  # an empty file from a kill between truncate and write. A write that cannot
+  # land returns non-zero: the started call site dies on it, so the harness
+  # never starts unwitnessed. Only the write can fail this way; tracking off
+  # or no file configured is not a failure.
   [ "$PHASE_TRACKING" -eq 1 ] || return 0
   [ -z "$ATTEMPT_PHASE_FILE" ] && return 0
   dir=${ATTEMPT_PHASE_FILE%/*}
   [ "$dir" = "$ATTEMPT_PHASE_FILE" ] && dir=.
-  tmp=$(mktemp "$dir/.phase.XXXXXX" 2>/dev/null) || return 0
-  printf '%s\n' "$1" > "$tmp" && mv -f -- "$tmp" "$ATTEMPT_PHASE_FILE" || { rm -f -- "$tmp"; return 0; }
+  tmp=$(mktemp "$dir/.phase.XXXXXX" 2>/dev/null) || return 1
+  printf '%s\n' "$1" > "$tmp" && mv -f -- "$tmp" "$ATTEMPT_PHASE_FILE" || { rm -f -- "$tmp"; return 1; }
 }
 
 if [ "${1:-}" = --self-test ]; then
@@ -232,6 +234,9 @@ if [ "${1:-}" = --self-test ]; then
   out=$(env POSTMASTER_ATTEMPT_PHASE="$phasefile" POSTMASTER_CONFIG="$tmp/phase-start.toml" PATH="$tmp/phasebin:$tmp/bin:$PATH" "$self" launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg synthesis 2>"$tmp/err"); rc=$?
   [ "$rc" -eq 0 ] && [ "$out" = "phase-var=unset" ] && [ "$(cat "$phasefile")" = started ] \
     && ok "the harness does not inherit the attempt phase variable" || fail "the harness does not inherit the attempt phase variable"
+  : > "$tmp/phaseblock"; envx="POSTMASTER_ATTEMPT_PHASE=$tmp/phaseblock/attempt.phase"
+  refused "an unwritable phase stops the launch before the harness starts" phase-start \
+    "cannot record that the harness started" launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg synthesis
   envx=""
   calls() {  # calls <runbook>...: each launch and resume in them, one per line, marked run or unrun
     python3 - "$@" <<'PY'
