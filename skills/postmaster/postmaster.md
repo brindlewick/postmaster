@@ -119,8 +119,9 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    `.postmaster/project.toml` must change, goes to the user the same way.
 3. **Clash check, before anything is written for this run.** `bun
    <tool>/scripts/run-clash.ts <repo> <TICKET>` exits 0. On exit 2 it names the run directory
-   and each branch that already exist; log a `note` naming the refusal, put that to the user
-   and stop. The postmaster renames or removes nothing itself: the user decides what happens
+   and each branch that already exist; put that to the user and stop, writing nothing: there
+   is no run yet to log to, and the old run's records are the user's to dispose of.
+   The postmaster renames or removes nothing itself: the user decides what happens
    to the old run — archive it, rename it, or pick another id — and Stage B starts again on
    their word. On exit 1 the refusal goes to the user the same way.
 4. **Exclude worktrees without a commit,** before any is cut, or the next pre-flight reads
