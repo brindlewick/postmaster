@@ -61,8 +61,15 @@ ATTEMPT_PHASE_FILE=${POSTMASTER_ATTEMPT_PHASE:-}
 readonly ATTEMPT_PHASE_FILE
 PHASE_TRACKING=0
 attempt_phase() {  # launch and resume only: form, review and skill never touch the phase file
+  # A temp file and a rename: readers see the old phase or the new one, never
+  # an empty file from a kill between truncate and write. Failures stay silent,
+  # as before: the phase is evidence, and a missing write reads refused.
   [ "$PHASE_TRACKING" -eq 1 ] || return 0
-  [ -z "$ATTEMPT_PHASE_FILE" ] || printf '%s\n' "$1" > "$ATTEMPT_PHASE_FILE"
+  [ -z "$ATTEMPT_PHASE_FILE" ] && return 0
+  dir=${ATTEMPT_PHASE_FILE%/*}
+  [ "$dir" = "$ATTEMPT_PHASE_FILE" ] && dir=.
+  tmp=$(mktemp "$dir/.phase.XXXXXX" 2>/dev/null) || return 0
+  printf '%s\n' "$1" > "$tmp" && mv -f -- "$tmp" "$ATTEMPT_PHASE_FILE" || { rm -f -- "$tmp"; return 0; }
 }
 
 if [ "${1:-}" = --self-test ]; then
@@ -213,6 +220,12 @@ if [ "${1:-}" = --self-test ]; then
   printf 'started\n' > "$phasefile"; run phase-start form coachman --leg synthesis
   [ "$rc" -eq 0 ] && [ "$(cat "$phasefile")" = started ] \
     && ok "form leaves the attempt phase file untouched" || fail "form leaves the attempt phase file untouched"
+  printf 'MARKER\n' > "$phasefile"; ln "$phasefile" "$tmp/attempt.phase.link"
+  run phase-unset launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg synthesis
+  [ "$rc" -ne 0 ] && [ "$(cat "$phasefile")" = refused ] && [ "$(cat "$tmp/attempt.phase.link")" = MARKER ] \
+    && ok "the phase write replaces the file instead of truncating it" || fail "the phase write replaces the file instead of truncating it"
+  [ -z "$(ls "$tmp"/.phase.* 2>/dev/null)" ] \
+    && ok "phase writes leave no temp files behind" || fail "phase writes leave no temp files behind"
   mkdir "$tmp/phasebin"
   printf '#!/bin/sh\nprintf "phase-var=%%s\\n" "${POSTMASTER_ATTEMPT_PHASE:-unset}"\n' > "$tmp/phasebin/claude" && chmod +x "$tmp/phasebin/claude"
   rm -f "$phasefile"

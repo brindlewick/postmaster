@@ -111,14 +111,22 @@ for run in sorted(os.listdir(root)):
                     corrupt = True
     except OSError:
         pass
-    # Currency: every started attempt ends in a record. A phase file beyond the
-    # last record means an attempt died unrecorded: INSPECT, never the stale
-    # outcome. A running attempt holds the lock, so it reads WAIT above.
+    # Currency: every started attempt ends in a record. A phase or intent file
+    # beyond the last record means an attempt died unrecorded: INSPECT, never
+    # the stale outcome. Intent counts too: the starter writes it before the
+    # phase, so intent-without-phase is the designed crash state, and a
+    # refused resume's carried prompt surfaces through INSPECT instead of
+    # being buried under a stale RESUME. A running attempt holds the lock,
+    # so it reads WAIT above.
     phase_max = -1
     for p in glob.glob(os.path.join(d, "logs", "coachman-leg-%s-phase-*" % leg)):
         tail = os.path.basename(p).rsplit("-", 1)[-1]
         if tail.isdigit(): phase_max = max(phase_max, int(tail))
-    gap = phase_max > last_attempt
+    intent_max = -1
+    for p in glob.glob(os.path.join(d, "logs", "coachman-leg-%s-intent-*.json" % leg)):
+        tail = os.path.basename(p).rsplit("-", 1)[-1].split(".")[0]
+        if tail.isdigit(): intent_max = max(intent_max, int(tail))
+    gap = phase_max > last_attempt or intent_max > last_attempt
     if stage in ("done", "abandoned"): nxt = "-"
     elif ".waiting-on-user" in markers: nxt = "USER"
     elif ".escalation-ready" in markers: nxt = "RULE"
@@ -170,6 +178,10 @@ recordn() {  # recordn <name> <attempt> <outcome> <role>: append one numbered at
 }
 phase() {  # phase <name> <n>: attempt <n> started, as the leg script writes it
   printf 'started\n' > "$tmp/root/$1/logs/coachman-leg-2-phase-$2"
+}
+intent() {  # intent <name> <n> [request]: attempt <n> wrote intent but no phase
+  printf '{"attempt":%s,"request":"%s","role":"coachman","prompt":"%s","thread_id":"T-1","stream_off":0}' \
+    "$2" "${3:-launch}" "$tmp/root/$1/prompt.txt" > "$tmp/root/$1/logs/coachman-leg-2-intent-$2.json"
 }
 liveowner() {  # liveowner <name>: the lock's owner is this self-test, alive throughout it
   python3 - "$$" "$tmp/root/$1/.leg-2-active" <<'PY'
@@ -229,6 +241,9 @@ run ownergone review 2; record ownergone refused coachman; deadowner ownergone
 run noowner review 2; record noowner refused coachman; mkdir "$tmp/root/noowner/.leg-2-active"
 run gap review 2 .leg-2-exited; recordn gap 1 finished coachman; phase gap 1; phase gap 2
 run gapactive review 2; recordn gapactive 1 incomplete coachman; phase gapactive 1; phase gapactive 2; liveowner gapactive
+run gapintent review 2 .leg-2-exited; recordn gapintent 1 finished coachman; intent gapintent 2
+run intentresume review 2 .leg-2-exited; recordn intentresume 1 incomplete coachman; intent intentresume 2 resume
+run intentcovered review 2 .leg-2-exited; recordn intentcovered 1 incomplete coachman; intent intentcovered 1
 run corruptlast review 2 .leg-2-exited; record corruptlast incomplete coachman; printf 'NOT JSON\n' >> "$tmp/root/corruptlast/logs/coachman-leg-2-attempts.jsonl"
 run corruptmid review 2 .leg-2-exited; printf 'NOT JSON\n' > "$tmp/root/corruptmid/logs/coachman-leg-2-attempts.jsonl"; recordn corruptmid 2 incomplete coachman
 run unknown review 2 .leg-2-exited; record unknown mystery coachman
@@ -260,6 +275,9 @@ expect "an active lock that survives its exited marker reads its outcome" stalea
 expect "a lock whose owner is gone reads its outcome, not a wedged WAIT" ownergone ASK
 expect "a lock with no owner file is stale too" noowner ASK
 expect "a phase file beyond the last record is inspected, not the stale outcome" gap INSPECT
+expect "an intent file beyond the last record is inspected too" gapintent INSPECT
+expect "an intent-only resume is inspected, not a stale resume" intentresume INSPECT
+expect "an intent at the last record hides nothing" intentcovered RESUME
 expect "a corrupt middle line does not hide the last good record" corruptmid RESUME
 
 echo "negative controls"

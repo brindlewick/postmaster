@@ -247,7 +247,8 @@ Each `NEXT` names the act:
   `<tool>/scripts/host.sh leg waiting add <runs> <ticket> <dispatch>/.waiting-on-user`, and tell
   the user. When they answer, remove the marker and the run from the list with
   `<tool>/scripts/host.sh leg waiting remove <runs> <ticket>`, then run
-  `<tool>/scripts/host.sh leg retry <dispatch> <repo>/.worktrees/<TICKET> <leg-name> <n>`.
+  `<rt>/scripts/host.sh leg retry <dispatch> <repo>/.worktrees/<TICKET> <leg-name> <n>`
+  (`<rt>` resolves as Stage C says; a run with no pin keeps its waybill's tool).
   The script replays the stored attempt prompt and thread id. In particular, a refused resume
   delivers the prompt it was carrying after the user answers.
 - **RULE:** an escalation is waiting. Stage E.

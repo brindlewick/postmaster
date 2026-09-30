@@ -2215,13 +2215,21 @@ for m in sorted((set(intents) | phases) - have):
     def off0(v):
         try: return int(v.get("stream_off", 0)) == 0
         except (TypeError, ValueError): return False
-    # An unrecorded later launch never ran far enough to bound this slice: it
-    # wrote no byte, and its zero would either empty the slice or mask a
-    # recorded bound. Its end is ignored.
-    later = [v for k, v in intents.items() if k > m and (k in have or not off0(v))]
-    if later:
-        try: end = str(min(int(v.get("stream_off", 0)) for v in later))
-        except (TypeError, ValueError): end = ""
+    # A later zero is ignored only when that attempt never wrote a phase: it
+    # died before it could spawn, so it wrote no byte. A later launch that
+    # reached its phase may have truncated the stream, and there is no
+    # spawn-truth signal to say it did not — refused phases included, since
+    # launch.sh refuses after the runner truncates. The earlier attempt's
+    # bytes may be gone, so its slice reads empty rather than foreign.
+    reset = any(k > m and k in phases and (k not in intents or off0(intents[k]))
+                for k in set(phases) | set(intents))
+    if reset:
+        end = str(off)
+    else:
+        later = [v for k, v in intents.items() if k > m and (k in have or not off0(v))]
+        if later:
+            try: end = str(min(int(v.get("stream_off", 0)) for v in later))
+            except (TypeError, ValueError): end = ""
     print("%d|%d|%s" % (m, off, end))
 PY
 )
@@ -2281,6 +2289,21 @@ leg_start() {  # leg_start <request> <dispatch> <worktree> <leg> <number> <promp
   case $prompt in /*) ;; *) prompt=$PWD/$prompt ;; esac
   [ -f "$prompt" ] && [ -s "$prompt" ] && [ -r "$prompt" ] || die "prompt file missing, unreadable or empty: $prompt"
   [ -f "$d/run.json" ] && [ -f "$d/manifest.json" ] || die "dispatch needs run.json and manifest.json"
+  # A pinned run serves only its own checkout: a start from anywhere else is
+  # refused, so a retry can never run a leg on live scripts. A run with no
+  # checkout recorded keeps its waybill's tool and skips the check, as does
+  # a record that cannot be read.
+  local checkout; checkout=$(python3 -I -c 'import json,sys
+try: co = json.load(open(sys.argv[1])).get("postmaster", {}).get("checkout")
+except Exception: co = None
+print(co if isinstance(co, str) and co else "")' "$d/run.json" 2>/dev/null) || checkout=""
+  if [ -n "$checkout" ]; then
+    local mine pinned
+    mine=$(CDPATH= cd -P -- "$HERE/.." && pwd -P) || die "cannot resolve this checkout"
+    pinned=$(CDPATH= cd -P -- "$checkout" 2>/dev/null && pwd -P) \
+      || die "run's pinned checkout is gone: $checkout"
+    [ "$mine" = "$pinned" ] || die "leg starts for this run serve from $pinned, not $mine"
+  fi
   local logs=$d/logs
   mkdir -p "$logs" || die "cannot create the dispatch log directory"
   stream=$logs/coachman-leg-$n-events.jsonl
@@ -2330,6 +2353,10 @@ leg_start() {  # leg_start <request> <dispatch> <worktree> <leg> <number> <promp
   intent=$logs/coachman-leg-$n-intent-$attempt.json
   stream_off=0
   [ "$request" = resume ] && stream_off=$(python3 -c 'import os,sys; print(os.path.getsize(sys.argv[1]))' "$stream" 2>/dev/null || echo 0)
+  # The previous attempt's markers clear before the intent is written, so a
+  # crash between the writes cannot leave a rejected hand-off's done marker
+  # for backfill to read as finished: every gap state reads without it.
+  rm -f -- "$wall" "$done" "$exited"
   # The intent lands before the phase, and each lands whole: a temp file and a
   # rename, so a kill between or inside the writes leaves intent-without-phase
   # at worst — never phase-without-intent, and never a torn file a reader can
@@ -2365,7 +2392,6 @@ except OSError:
     except OSError: pass
     raise
 PY
-  rm -f -- "$wall" "$done" "$exited"
   if [ "$request" = takeover ]; then
     if [ -f "$stream" ]; then
       local backup=$logs/coachman-leg-$n-walled-events.jsonl
@@ -3107,6 +3133,12 @@ PY
   order=$(awk '/cannot write the attempt inten[t]/{i=NR} /cannot write attempt phas[e]/{p=NR} END{print (i>0 && p>0 && i<p) ? "ok" : "BAD"}' "$SELF")
   check "the intent write precedes the phase write" '[ "$order" = ok ]' "$order"
 
+  # The markers clear before the intent is written, so a crash at any gap
+  # reads without a stale done marker: the gap controls below assert the
+  # resulting refused, never finished.
+  clearorder=$(awk '/rm -f -- "\$wall" "\$done" "\$exited"/{r=NR} /cannot write the attempt inten[t]/{i=NR} END{print (r>0 && i>0 && r<i) ? "ok" : "BAD"}' "$SELF")
+  check "the markers clear before the intent is written" '[ "$clearorder" = ok ]' "$clearorder"
+
   # Gap states: a kill before the intent write leaves nothing to backfill; a
   # kill between the writes leaves intent-without-phase, and a refused resume
   # is backfilled with the prompt and thread it was carrying.
@@ -3132,6 +3164,53 @@ PY
   got=$(python3 -c 'import json,sys; r=json.loads(open(sys.argv[1]).readlines()[-1]); print(r["request"]+"|"+r["thread_id"])' "$tmp/gap-d/logs/coachman-leg-1-attempts.jsonl")
   check "retry after that refusal resumes the carried thread instead of wedging" \
     '[ "$rc" -eq 0 ] && [ "$got" = "resume|T-RESUME" ] && [ "$(wc -l < "$tmp/leg-calls")" = "$((calls_before + 1))" ] && tail -1 "$tmp/leg-calls" | grep -q T-RESUME' "$got: $(tail -1 "$tmp/leg-calls")"
+
+  # A pinned run serves only its own checkout: a retry from the pin
+  # proceeds, while a retry — or any launch — from anywhere else is
+  # refused before anything is written or spawned.
+  pin_here=$(CDPATH= cd -P -- "$repo" && pwd -P)
+  mkdir -p "$tmp/pin-d/logs" && cp "$leg_d/run.json" "$tmp/pin-d/run.json"
+  printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/pin-d/manifest.json"
+  printf 'pin retry prompt\n' > "$tmp/pin-d/prompt.txt"
+  python3 - "$tmp/pin-d/run.json" "$pin_here" <<'PY'
+import json, sys
+p, pin = sys.argv[1], sys.argv[2]
+r = json.load(open(p, encoding="utf-8"))
+r.setdefault("postmaster", {})["checkout"] = pin
+json.dump(r, open(p, "w", encoding="utf-8"))
+PY
+  printf '{"attempt":1,"leg":1,"name":"synthesis","request":"resume","role":"coachman","prompt":"%s","thread_id":"T-PIN","outcome":"refused","on_answer":"retry","backfilled":true,"exit":1}\n' \
+    "$tmp/pin-d/prompt.txt" > "$tmp/pin-d/logs/coachman-leg-1-attempts.jsonl"
+  calls_before=$(wc -l < "$tmp/leg-calls")
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" TEST_DONE="$tmp/pin-d/.leg-1-done" \
+    TEST_OBSERVED="$tmp/pin-d/retry-observed" \
+    "$SELF" leg retry "$tmp/pin-d" "$leg_wt" synthesis 1 >/dev/null 2>&1; rc=$?
+  marker "$tmp/pin-d/.leg-1-exited" 30
+  got=$(python3 -c 'import json,sys; r=json.loads(open(sys.argv[1]).readlines()[-1]); print(r["request"]+"|"+r["thread_id"])' "$tmp/pin-d/logs/coachman-leg-1-attempts.jsonl")
+  check "a retry on a pinned run uses the pin" \
+    '[ "$rc" -eq 0 ] && [ "$got" = "resume|T-PIN" ] && [ "$(wc -l < "$tmp/leg-calls")" = "$((calls_before + 1))" ]' "$got: rc=$rc"
+  mkdir -p "$tmp/pinlive-d/logs" && cp "$leg_d/run.json" "$tmp/pinlive-d/run.json"
+  printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/pinlive-d/manifest.json"
+  printf 'pin retry prompt\n' > "$tmp/pinlive-d/prompt.txt"
+  python3 - "$tmp/pinlive-d/run.json" "$tmp" <<'PY'
+import json, sys
+p, pin = sys.argv[1], sys.argv[2]
+r = json.load(open(p, encoding="utf-8"))
+r.setdefault("postmaster", {})["checkout"] = pin
+json.dump(r, open(p, "w", encoding="utf-8"))
+PY
+  printf '{"attempt":1,"leg":1,"name":"synthesis","request":"resume","role":"coachman","prompt":"%s","thread_id":"T-PIN","outcome":"refused","on_answer":"retry","backfilled":true,"exit":1}\n' \
+    "$tmp/pinlive-d/prompt.txt" > "$tmp/pinlive-d/logs/coachman-leg-1-attempts.jsonl"
+  calls_before=$(wc -l < "$tmp/leg-calls")
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" \
+    "$SELF" leg retry "$tmp/pinlive-d" "$leg_wt" synthesis 1 >"$tmp/pinlive.out" 2>"$tmp/pinlive.err"; rc=$?
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" \
+    "$SELF" leg launch "$tmp/pinlive-d" "$leg_wt" synthesis 1 "$tmp/pinlive-d/prompt.txt" >/dev/null 2>&1; rc2=$?
+  check "a start from outside the pin is refused before anything moves" \
+    '[ "$rc" -ne 0 ] && [ "$rc2" -ne 0 ] && grep -q "serve from" "$tmp/pinlive.err" && [ "$(grep -c . "$tmp/pinlive-d/logs/coachman-leg-1-attempts.jsonl")" = 1 ] && [ "$(wc -l < "$tmp/leg-calls")" = "$calls_before" ] && [ ! -e "$tmp/pinlive-d/.leg-1-exited" ]' "rc=$rc rc2=$rc2"
   mkdir -p "$tmp/gap0-d/logs" && cp "$leg_d/run.json" "$tmp/gap0-d/run.json"
   printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/gap0-d/manifest.json"
   printf '{"session_id":"thread-foreign","type":"assistant"}\n' > "$tmp/gap0-d/logs/coachman-leg-1-events.jsonl"
@@ -3238,6 +3317,58 @@ PY
     "$SELF" leg backfill "$tmp/bound-d" synthesis 1 >/dev/null 2>&1; rc=$?
   got=$(python3 -c 'import json,sys; rs=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]; print("%s|%s" % (rs[-1]["outcome"], rs[-1]["thread_id"]))' "$tmp/bound-d/logs/coachman-leg-1-attempts.jsonl")
   check "a recorded later resume still bounds the slice" '[ "$rc" -eq 0 ] && [ "$got" = "incomplete|T-ONE" ]' "$got"
+
+  # A later launch that started truncated the stream, so the earlier
+  # attempt's slice is empty: no stolen thread, and each record answers
+  # for its own attempt (retry replays record fields, so correct records
+  # are a correct retry).
+  mkdir -p "$tmp/slatestart-d/logs" && cp "$leg_d/run.json" "$tmp/slatestart-d/run.json"
+  printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/slatestart-d/manifest.json"
+  printf 'slice prompt\n' > "$tmp/slatestart-d/prompt.txt"
+  printf '{"attempt":1,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":0}' \
+    "$tmp/slatestart-d/prompt.txt" > "$tmp/slatestart-d/logs/coachman-leg-1-intent-1.json"
+  printf 'started\n' > "$tmp/slatestart-d/logs/coachman-leg-1-phase-1"
+  printf '{"attempt":2,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":0}' \
+    "$tmp/slatestart-d/prompt.txt" > "$tmp/slatestart-d/logs/coachman-leg-1-intent-2.json"
+  printf 'started\n' > "$tmp/slatestart-d/logs/coachman-leg-1-phase-2"
+  printf '{"session_id":"T-TWO","type":"assistant"}\n' > "$tmp/slatestart-d/logs/coachman-leg-1-events.jsonl"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" \
+    "$SELF" leg backfill "$tmp/slatestart-d" synthesis 1 >/dev/null 2>&1; rc=$?
+  got=$(python3 -c 'import json,sys; rs=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]; print("%s|%s|%s|%s|%s|%s" % (rs[0]["outcome"], rs[0]["thread_id"], rs[0]["on_answer"], rs[1]["outcome"], rs[1]["thread_id"], rs[1]["on_answer"]))' "$tmp/slatestart-d/logs/coachman-leg-1-attempts.jsonl")
+  check "a started later launch empties the earlier slice" '[ "$rc" -eq 0 ] && [ "$got" = "pre-thread||retry|incomplete|T-TWO|resume" ]' "$got"
+  mkdir -p "$tmp/slateref-d/logs" && cp "$leg_d/run.json" "$tmp/slateref-d/run.json"
+  printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/slateref-d/manifest.json"
+  printf 'slice prompt\n' > "$tmp/slateref-d/prompt.txt"
+  printf '{"attempt":1,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":0}' \
+    "$tmp/slateref-d/prompt.txt" > "$tmp/slateref-d/logs/coachman-leg-1-intent-1.json"
+  printf 'started\n' > "$tmp/slateref-d/logs/coachman-leg-1-phase-1"
+  printf '{"attempt":2,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":0}' \
+    "$tmp/slateref-d/prompt.txt" > "$tmp/slateref-d/logs/coachman-leg-1-intent-2.json"
+  printf 'refused\n' > "$tmp/slateref-d/logs/coachman-leg-1-phase-2"
+  printf '{"session_id":"T-TWO","type":"assistant"}\n' > "$tmp/slateref-d/logs/coachman-leg-1-events.jsonl"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" \
+    "$SELF" leg backfill "$tmp/slateref-d" synthesis 1 >/dev/null 2>&1; rc=$?
+  got=$(python3 -c 'import json,sys; rs=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]; print("%s|%s" % (rs[0]["outcome"], rs[0]["thread_id"]))' "$tmp/slateref-d/logs/coachman-leg-1-attempts.jsonl")
+  check "a refused later phase empties the earlier slice too" '[ "$rc" -eq 0 ] && [ "$got" = "pre-thread|" ]' "$got"
+  mkdir -p "$tmp/slaterec-d/logs" && cp "$leg_d/run.json" "$tmp/slaterec-d/run.json"
+  printf '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n' > "$tmp/slaterec-d/manifest.json"
+  printf 'slice prompt\n' > "$tmp/slaterec-d/prompt.txt"
+  printf '{"attempt":1,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":0}' \
+    "$tmp/slaterec-d/prompt.txt" > "$tmp/slaterec-d/logs/coachman-leg-1-intent-1.json"
+  printf 'started\n' > "$tmp/slaterec-d/logs/coachman-leg-1-phase-1"
+  printf '{"attempt":2,"request":"launch","role":"coachman","prompt":"%s","thread_id":"","stream_off":0}' \
+    "$tmp/slaterec-d/prompt.txt" > "$tmp/slaterec-d/logs/coachman-leg-1-intent-2.json"
+  printf 'started\n' > "$tmp/slaterec-d/logs/coachman-leg-1-phase-2"
+  printf '{"attempt":2,"leg":1,"name":"synthesis","request":"launch","role":"coachman","prompt":"%s","thread_id":"T-TWO","outcome":"incomplete","on_answer":"resume","backfilled":false,"exit":1}\n' \
+    "$tmp/slaterec-d/prompt.txt" > "$tmp/slaterec-d/logs/coachman-leg-1-attempts.jsonl"
+  printf '{"session_id":"T-TWO","type":"assistant"}\n' > "$tmp/slaterec-d/logs/coachman-leg-1-events.jsonl"
+  POSTMASTER_HOST=none POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$STATE" \
+    POSTMASTER_HOST_FIXTURE="$tmp" PATH="$tmp/bin:$PATH" \
+    "$SELF" leg backfill "$tmp/slaterec-d" synthesis 1 >/dev/null 2>&1; rc=$?
+  got=$(python3 -c 'import json,sys; rs=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]; print("%s|%s" % (rs[-1]["outcome"], rs[-1]["thread_id"]))' "$tmp/slaterec-d/logs/coachman-leg-1-attempts.jsonl")
+  check "a recorded later launch empties the earlier slice" '[ "$rc" -eq 0 ] && [ "$got" = "pre-thread|" ]' "$got"
 
   # Only a started attempt is scanned: a foreign phase blanks the slice (no
   # thread, no wall file), while a started attempt over the same bytes scans.
