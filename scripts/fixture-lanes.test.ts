@@ -157,15 +157,18 @@ function makeRecord(
 }
 
 function hiddenTestsLine(scoreOut: string): string {
-  const line = scoreOut.split(/\r?\n/u).find((l) => /hidden-tests/u.test(l) && /^(ok|FAIL)/u.test(l));
+  const line = scoreOut
+    .split(/\r?\n/u)
+    .find((l) => /hidden-tests/u.test(l) && /^(ok|FAIL)/u.test(l));
   if (!line) throw new Error(`no hidden-tests line in:\n${scoreOut}`);
   return line;
 }
 
 function laneStatusOn(line: string, lane: string): string {
-  const m = new RegExp(`(?:^|; )${lane.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}: ([^;]+)`, "u").exec(
-    line,
-  );
+  const m = new RegExp(
+    `(?:^|; )${lane.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}: ([^;]+)`,
+    "u",
+  ).exec(line);
   return m ? m[1].trim() : "";
 }
 
@@ -330,7 +333,10 @@ describe("score controls", () => {
       (run.stdout ? new TextDecoder().decode(run.stdout) : "") +
       (run.stderr ? new TextDecoder().decode(run.stderr) : "");
     const line = hiddenTestsLine(out);
-    expect(line).toMatch(/^ok\s+hidden-tests\s+remove, from the waybill: \d+ pass, 0 fail on main/u); // ASCII: score lines are machine-printed.
+    expect(line).toMatch(
+      // ASCII: score lines are machine-printed.
+      /^ok\s+hidden-tests\s+remove, from the waybill: \d+ pass, 0 fail on main/u,
+    );
 
     const pass = laneStatusOn(line, "pass");
     expect(pass).toMatch(/^\d+ pass, 0 fail$/u); // ASCII: lane counts are machine-printed.
