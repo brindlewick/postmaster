@@ -93,7 +93,7 @@ SELF="$0"
 fails=0
 ok()   { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/         /'; fails=$((fails+1)); }
-has()  { printf '%s' "$1" | grep -qF -- "$2"; }
+has()  { grep -qF -- "$2" <<<"$1"; }
 
 echo "positive controls"
 printf '{"config":{"planning":{"review_link":"https://code.example/open?file={path}"}}}\n' > "$d/run.json"
