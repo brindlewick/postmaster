@@ -45,6 +45,17 @@ export function isWbBranch(ticketId: string, branch: string): boolean {
   return branch.startsWith(`wb/${ticketId}-`);
 }
 
+const HEADS_PREFIX = "refs/heads/";
+
+export function parseBranchNames(stdout: string): string[] {
+  const names: string[] = [];
+  for (const line of stdout.split("\n")) {
+    if (!line.startsWith(HEADS_PREFIX)) continue;
+    names.push(line.slice(HEADS_PREFIX.length));
+  }
+  return names;
+}
+
 export function collectClashes(opts: {
   ticketId: string;
   runDirExists: boolean;
@@ -128,7 +139,7 @@ function main(argv: string[]): number {
   }
   let listed;
   try {
-    listed = runGit(repo, ["for-each-ref", "--format=%(refname:short)", "refs/heads"]);
+    listed = runGit(repo, ["for-each-ref", "--format=%(refname)", "refs/heads"]);
   } catch (error) {
     console.error(`run-clash: could not list local branches: ${String(error)}`);
     return 1;
@@ -143,7 +154,7 @@ function main(argv: string[]): number {
     ticketId,
     runDirExists: existsSync(dir),
     runDirPath: dir,
-    branches: listed.stdout.split("\n").filter((line) => line.length > 0),
+    branches: parseBranchNames(listed.stdout),
   });
   if (clashes.length === 0) {
     console.log(formatFree(ticketId));

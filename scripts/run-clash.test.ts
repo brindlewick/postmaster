@@ -14,6 +14,7 @@ import {
   isUsableTicketId,
   isWbBranch,
   isTicketBranch,
+  parseBranchNames,
   runDirPath,
   ADVICE,
 } from "./run-clash";
@@ -99,6 +100,15 @@ describe("pure core", () => {
     expect(isWbBranch("75", "wb/75-mimo")).toBe(true);
   });
 
+  test("parseBranchNames strips refs/heads/ and skips anything else", () => {
+    expect(parseBranchNames("refs/heads/75\nrefs/heads/wb/75-a\n")).toEqual([
+      "75",
+      "wb/75-a",
+    ]);
+    expect(parseBranchNames("refs/heads/main\n\nrefs/tags/75\n")).toEqual(["main"]);
+    expect(parseBranchNames("")).toEqual([]);
+  });
+
   test("collectClashes names the run directory and every matching branch, in order", () => {
     const clashes = collectClashes({
       ticketId: "7",
@@ -179,6 +189,18 @@ describe("run-clash.ts through its own command line", () => {
     const { code, out } = runClash(repo, "75");
     expect(code).toBe(2);
     expect(out).toContain(`run-clash: run directory already exists: ${dir}`);
+    expect(out).toContain("run-clash: branch already exists: 75");
+    expect(out).toContain("run-clash: branch already exists: wb/75-mimo");
+  });
+
+  test("colliding tags do not hide branches from the check", () => {
+    const repo = freshRepo(root, "colliding-tags");
+    plantBranch(repo, "75");
+    git(repo, "tag", "75");
+    plantBranch(repo, "wb/75-mimo");
+    git(repo, "tag", "wb/75-mimo");
+    const { code, out } = runClash(repo, "75");
+    expect(code).toBe(2);
     expect(out).toContain("run-clash: branch already exists: 75");
     expect(out).toContain("run-clash: branch already exists: wb/75-mimo");
   });
