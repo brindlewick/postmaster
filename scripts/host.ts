@@ -3629,14 +3629,19 @@ function legLatest(attempts: string): [string, string, string, string, string] |
     return null;
   }
   if (!rows.length) return null;
-  let row: unknown;
-  try {
-    row = JSON.parse(rows[rows.length - 1] ?? "");
-  } catch {
-    return null;
+  // A torn tail is superseded history, not the record: a retry reads past it to
+  // the newest line that parses, so one crashed append never wedges the leg.
+  let rec: Record<string, unknown> | null = null;
+  for (let i = rows.length - 1; i >= 0 && rec === null; i--) {
+    try {
+      const row: unknown = JSON.parse(rows[i] ?? "");
+      if (typeof row === "object" && row !== null && !Array.isArray(row))
+        rec = row as Record<string, unknown>;
+    } catch {
+      // keep walking upward past the torn line
+    }
   }
-  if (typeof row !== "object" || row === null || Array.isArray(row)) return null;
-  const rec = row as Record<string, unknown>;
+  if (rec === null) return null;
   return [
     intentStr(rec.request),
     intentStr(rec.role),
