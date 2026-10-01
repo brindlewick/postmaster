@@ -572,8 +572,8 @@ missed.
 2. **Finish the record.** Final `run-log.md` entry (per-lane win record, findings counts, cost)
    plus a closing dated comment on the ticket, logging `ticket-comment`. Archive finished
    threads where the harness has an archive form (`harnesses.md`).
-3. Once `.leg-<leg>-exited` is present, close the synthesis worktree's host space with
-   `<tool>/scripts/host.sh close <repo>/.worktrees/<TICKET>`; on exit 2, stop and report. Remove
+3. Once `.leg-<leg>-exited` is present, close every run-created worktree's host space with
+   `<tool>/scripts/host.sh close-run <dispatch>`; on exit 2, stop and report. Remove
    the worktree from outside it, never with force unless it is clean and the card confirmed it,
    and log `teardown`. Remove any surviving workhorse worktrees the same way after preserving
    stray files in `<dispatch>/stray/`. Keep the run-created branches as the local archive.
