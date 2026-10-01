@@ -386,6 +386,28 @@ function exerciseSelfTest(sourceRoot: string): number {
       ),
     "scripts/fixture.ts",
   );
+  runCase(
+    "a wording fix in the workhorse spec template answers yes",
+    (repo) =>
+      replaceOnce(
+        repo,
+        "skills/postmaster/workhorse-spec-template.md",
+        "`## Showing each criterion` is how the lanes check their work: for each acceptance criterion,",
+        "`## Showing each criterion` is how the lanes check their work: for every acceptance criterion,",
+      ),
+    "skills/postmaster/workhorse-spec-template.md",
+  );
+  runCase(
+    "a wording fix in summary-evidence.ts answers yes",
+    (repo) =>
+      replaceOnce(
+        repo,
+        "scripts/summary-evidence.ts",
+        "// this file's tests. Expected criteria come from the ticket, never inferred from the summary.",
+        "// this file's tests. Expected criteria come from the ticket, never derived from the summary.",
+      ),
+    "scripts/summary-evidence.ts",
+  );
   runCase("a wiki-only change is not a contract change", (repo) => {
     mkdirSync(join(repo, "wiki", "concepts"), { recursive: true });
     writeFileSync(join(repo, "wiki", "concepts", "probe-note.md"), "notes\n", "utf8");

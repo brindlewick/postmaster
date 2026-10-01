@@ -1,12 +1,13 @@
 // Tests beside scripts/coachman-contract.ts, the #163 detector ported on #109:
 // the CLI contract on a small fixture, plus the script's own self-test suite.
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { scriptsDir } from "./lib/paths.ts";
+import { appendFileSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { run, withTempDir } from "./lib/proc.ts";
 
 const HERE = scriptsDir(import.meta);
+const TOOL = toolRoot(import.meta);
 const SELF = join(HERE, "coachman-contract.sh");
 
 const INDEX = `version = 1
@@ -195,6 +196,49 @@ describe("a broken contract list is an error", () => {
     expect(r.code).toBe(2);
     expect(r.err).toContain("must list its contract files");
   });
+});
+
+describe("the current index recognises its new files", () => {
+  const NEW_FILES = ["skills/postmaster/workhorse-spec-template.md", "scripts/summary-evidence.ts"];
+
+  /** A git repo carrying the real contract index and the two new files. */
+  function realFixture(dir: string): { repo: string; base: string } {
+    const repo = join(dir, "real");
+    mkdirSync(join(repo, "docs"), { recursive: true });
+    copyFileSync(
+      join(TOOL, "docs", "coachman-contract.toml"),
+      join(repo, "docs", "coachman-contract.toml"),
+    );
+    for (const f of NEW_FILES) {
+      const target = join(repo, f);
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(join(TOOL, f), target);
+    }
+    const g = (...args: string[]): string => {
+      const r = run("git", ["-C", repo, ...args]);
+      if (r.code !== 0) throw new Error(`git ${args.join(" ")}: ${r.err.trim()}`);
+      return r.out;
+    };
+    expect(run("git", ["init", "-q", "-b", "main", repo]).code).toBe(0);
+    g("config", "user.name", "brindlewick");
+    g("config", "user.email", "332054101+brindlewick@users.noreply.github.com");
+    g("add", ".");
+    g("commit", "-q", "-m", "baseline");
+    return { repo, base: g("rev-parse", "HEAD").trim() };
+  }
+
+  for (const f of NEW_FILES) {
+    test(`a change in ${f} answers yes`, () => {
+      const r = withTempDir((dir) => {
+        const { repo, base } = realFixture(dir);
+        appendFileSync(join(repo, f), "\n");
+        const head = commitAll(repo, "touch");
+        return run(SELF, [repo, base, head]);
+      });
+      expect(r.code).toBe(1);
+      expect(r.out).toBe(`yes ${f}\n`);
+    });
+  }
 });
 
 describe("the detector's own suite", () => {
