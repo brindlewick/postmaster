@@ -44,7 +44,14 @@ Someone typing `/postmaster` arrives cold. **Assume neither. Check.**
 
 ```sh
 cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
+<tool>/scripts/link-skills.sh --check
 ```
+
+Report the link check with the config status. It names every missing or blocked link and
+prints the install command, `<tool>/scripts/link-skills.sh`; the check never installs or
+changes anything. Keep installation on the user's word. When links are missing and the config
+is present, offer that command; for a missing config, follow the setup section of
+`<tool>/AGENTS.md`.
 
 **No config: stop and set the machine up first**, in conversation, per the setup section of
 `<tool>/AGENTS.md`; each path there is relative to `<tool>`. Do not continue to target
@@ -56,8 +63,9 @@ and without it the launch card cannot be filled. Come back here when it is writt
 
 **Config present, no target yet:** carry on below.
 
-Say which of these you found, in one line, before doing anything else. A session that cannot
-tell whether it is setting up or dispatching is one nobody can follow.
+Say which of these you found, in one line, before doing anything else — including any
+missing skill links.
+A session that cannot tell whether it is setting up or dispatching is one nobody can follow.
 
 ## Choose the target project
 
@@ -77,8 +85,10 @@ off the list without needing to be named. Offer the full list on request.
 into a vendored copy of someone else's project.
 
 **Do NOT filter to projects with a remote.** Plenty of real work is local-only, and
-filtering on a remote silently hides it. Show the remote status as information instead: it
-decides whether push and PR steps apply, and a local-only project is normal, not broken.
+filtering on a remote silently hides it. Show the remote status as information. Determine the
+landing route from the project's instructions: whether it uses pull requests, and which default
+branch they target. If the project does not say, ask the user before dispatch. A remote by
+itself does not decide the route.
 
 Adjust the search roots to the machine. `~/Code` is one convention, not a rule.
 
@@ -118,6 +128,7 @@ config file before it runs on a plain git repo is a tool nobody adopts.
 
 ```sh
 <tool>/scripts/discover-project.sh "$TARGET"   # gate=… docs=… tracker=… tracker_prefix=… ambient_context=… check.<name>=…
+<tool>/scripts/project-settings.sh inspect "$TARGET" # optional project facts and their source
 ```
 
 The target's tracker is the kind `tracker` names: `local` when the target's own ticket store
@@ -135,6 +146,29 @@ you found on the launch card, and ask only about what you could not determine.
 context start blind, and that has silently handicapped a lane before. Ask the user for
 the project's risk surfaces (what it binds, allowlists, spawns and serves) where the docs do
 not say; the security lens reviews against them.
+
+### Optional project settings
+
+`.postmaster/project.toml` is the one shared file a project may choose to commit. It can declare
+what `default` means for its tickets, the tracker binding by name, risk surfaces, and checks. It
+cannot assign roles or name credentials, machine paths or machines. `.postmaster/settings.toml`
+holds this person's choices on this checkout, including which machine-defined lanes fill local
+roles. It cannot set harnesses, models, env files, credentials or paths. Both are optional; a
+missing file is normal and is never a reason to create an empty one or pause discovery.
+
+Follow the resolved values and source labels from `discover-project.sh` and
+`project-settings.sh inspect` when composing the launch card and waybill. Mark each fact as
+discovered, shared or local. A ticket still names its own turnpikes: project settings define only
+the meaning of `default`.
+
+When the conversation settles a project decision that should stay on this checkout, offer
+`.postmaster/settings.toml` and show its contents before writing it. When maintainers should set
+the same requirement for everyone, offer `.postmaster/project.toml` instead and say that is the
+shared file being proposed. Wait for agreement, then write the agreed file with
+`<tool>/scripts/project-settings.sh write "$TARGET" local <file>` or `project <file>`.
+The script validates the file and keeps `.postmaster/` ignored. A shared file is ignored by
+default too; commit only that file deliberately with `git add -f .postmaster/project.toml`.
+Never put paths or credentials in either file.
 
 ## Stage 0: scope, confirm, start
 
@@ -164,20 +198,25 @@ not say; the security lens reviews against them.
 4. **Launch card**: one self-contained confirmation covering whether the postmaster is this
    session or a new one, with every reason the script printed, the postmaster's harness,
    model and effort (`team.postmaster` in the config), the team the config names, who says
-   the merge word (`ship.merge_authority`), the session host the fleet will run on
+   the merge word for local-merge projects (`ship.merge_authority`), the landing route
+   (`pull-request` or `local`), the session host the fleet will run on
    (`<tool>/scripts/host.sh detect`), and the project facts above. Launch nothing before the user
    picks.
-5. **Create the run root** `~/.postmaster/runs/<project>/` (the repo's basename) and keep it
-   in one variable for the steps below:
+5. **Create the project-local run root** and keep it in one variable for the steps below. The
+   project path, not its basename, identifies this run root:
 
    ```sh
-   RUNS=~/.postmaster/runs/"<project>"   # <project> is the repo's basename
+   TARGET_ROOT=$(git -C "$TARGET" rev-parse --show-toplevel)
+   RUNS=$TARGET_ROOT/.postmaster/runs
    mkdir -p "$RUNS/postmaster"
+   <tool>/scripts/project-settings.sh ensure "$TARGET_ROOT"
    ```
 
    `<tool>/scripts/log-action.sh` needs the directory to exist, so the postmaster's own
    actions go under `$RUNS/postmaster/`. Log from your first action there. A postmaster
-   that is this session keeps the same records as one you spawn.
+   that is this session keeps the same records as one you spawn. `ensure` creates the folder's
+   ignore rule only; it never creates settings. A run already in flight under the old
+   `~/.postmaster/runs/<basename>/` layout is not migrated.
 6. **Write the brief** to `$RUNS/postmaster/brief.md`: "You are the postmaster for <project>.
    Read `<tool>/skills/postmaster/postmaster.md` first", then the stream paragraph, the project
    profile, the configured team, who says the merge word, the session host, `<tool>` and the
@@ -196,11 +235,11 @@ not say; the security lens reviews against them.
 8. **`spawn`: start a new postmaster session** on the session host (`hosts.md`). Start a new
    interactive session of the postmaster's harness (`team.postmaster` in the config), rooted
    in the target repo, in the harness's interactive form from `harnesses.md`: its bypass mode,
-   named `<project> · postmaster`. Hand it a one-line prompt file that says to read the brief
+   named `postmaster`. Hand it a one-line prompt file that says to read the brief
    at `$RUNS/postmaster/brief.md` first:
 
    ```sh
-   <tool>/scripts/host.sh spawn postmaster-<project> <repo> --label "<project> · postmaster" -- <interactive form>
+   <tool>/scripts/host.sh spawn postmaster-<project> <repo> --label "postmaster" -- <interactive form>
    <tool>/scripts/host.sh send postmaster-<project> <prompt-file>
    <tool>/scripts/host.sh read postmaster-<project>      # it took the message: a new session can drop one
    ```
@@ -218,7 +257,7 @@ not say; the security lens reviews against them.
 
 ## The waybill
 
-The postmaster writes one per ticket at `~/.postmaster/runs/<project>/<TICKET>/brief.md`.
+The postmaster writes one per ticket at `<repo>/.postmaster/runs/<TICKET>/brief.md`.
 It is the only thing that travels between the postmaster and a coachman, so it carries
 everything the coachman needs and nothing it must go and find:
 
@@ -232,6 +271,7 @@ everything the coachman needs and nothing it must go and find:
 ## Project profile
 repo: <abs path>          default branch: <name>       BASE: <sha>
 gate: <the real command>  build: <the real command>    browser suite: <command or none>
+landing: pull-request | local   (whether the postmaster opens a pull request or merges on the word)
 docs to read first: <files, in order>
 tracker: <kind, and how a ticket is read and written>
 risk surfaces: <what the project binds, allowlists, spawns, serves; from its docs or the user>
@@ -240,17 +280,23 @@ checks: <as `verify.sh record` printed them: each check's name, where it came fr
 ## Team
 workhorses: <lane>=<harness>/<model>/<effort>, <lane>=…
 reviewers: <lane>, <lane>
+bug reviewers: <lane>, <lane>             (always; only the chosen bug reviewers whose harness has a code-review form, which is the bug lens's whole team)
 <lens> reviewers: <lane>, <lane>          (one line for each lens the config gives its own lanes)
 coachman: <harness>/<model>/<effort>      (never a lane's model)
-CHECKPOINT_MODE and MERGE_AUTHORITY come from ship.checkpoint_mode and ship.merge_authority, overridden only where the user says so for this run
+CHECKPOINT_MODE comes from ship.checkpoint_mode; MERGE_AUTHORITY for local merges comes from ship.merge_authority; override either only where the user says so for this run
 
 ## Dispatch
 name: <ticket id>, <ticket title>
 dispatch: <abs path of this directory>
 synthesis worktree: <abs path; cut by the postmaster at BASE, the coachman's cwd for every leg>
-tool: <abs path of the postmaster repo: <tool> in the runbooks>
+tool: <abs path of the run's pinned postmaster checkout, at the dispatch commit: <tool> in the coachman's runbook>
 postmaster ruling channel: resume the coachman's thread (harnesses.md) with the ruling as the prompt
 ```
+
+The postmaster's own session continues to use the main checkout it found from the skill. The
+waybill's `tool:` path is the run's pinned checkout; coachman launches, resumes and takeovers
+use that path for their host, launch and runbook files. An older waybill keeps the tool path it
+already names.
 
 ## Hard rules
 

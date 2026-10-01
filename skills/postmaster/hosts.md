@@ -33,7 +33,7 @@ way on every row, only less visibly on the last.
 
 | form | herdr | tmux | none |
 |---|---|---|---|
-| run a headless launch, visibly | a new tab in the space of the worktree the launch runs in, nested under the repository's space | a window in session `postmaster-<repo>` | a detached background process |
+| run a headless launch, visibly | a new tab under the run's ticket-labeled synthesis-worktree space, nested under the repository's space | a window in session `postmaster-<repo>` | a detached background process |
 | spawn the interactive postmaster | `herdr agent start` in a fresh tab of the repository's space, never a pane an agent ran in before | a window in session `postmaster-<repo>` | not possible: it runs headless, below |
 | send it a message | `herdr agent prompt` | paste the text bracketed, then Enter as a key of its own | resume its thread with the message as the prompt |
 | wait for it to settle | the same call, `herdr agent prompt --wait`: idle, done or blocked | its screen unchanged for 10 seconds | its marker lands |
@@ -42,10 +42,17 @@ way on every row, only less visibly on the last.
 
 ```sh
 <tool>/scripts/host.sh detect
-<tool>/scripts/host.sh name <dispatch> [<role or lane>]
-<tool>/scripts/host.sh run <name> <cwd> [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
+<tool>/scripts/host.sh name <dispatch>
+<tool>/scripts/host.sh name <dispatch> coachman <leg-name> <leg-number>
+<tool>/scripts/host.sh name <dispatch> workhorse <lane>
+<tool>/scripts/host.sh name <dispatch> review <lane> <lens> <round>
+<tool>/scripts/host.sh name <dispatch> postmaster
+<tool>/scripts/host.sh name <dispatch> role <text...>
+<tool>/scripts/host.sh run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
 <tool>/scripts/host.sh stop <worktree>
 <tool>/scripts/host.sh close <worktree>
+<tool>/scripts/host.sh stop-run <dispatch>
+<tool>/scripts/host.sh close-run <dispatch>
 <tool>/scripts/host.sh spawn <handle> <cwd> [--label <name>] -- <interactive form>
 <tool>/scripts/host.sh send <handle> <file> [--wait [<seconds>]]
 <tool>/scripts/host.sh wait <handle> [<seconds>]
@@ -76,10 +83,36 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   ...` as the command: it adds to `--out` instead of emptying it, while `--err` always holds only
   the latest process's errors. A stream is only ever appended to after being emptied once, so a
   second writer on the same file cannot overwrite the first.
+- **Run launches must name their space.** `lane`, `coachman` and `reviewer` launches require
+  `--under <dispatch>`. Any launch with `--run <dispatch>` also requires `--under`, so a run
+  launch cannot fall back to a top-level space. Project-level launches may omit both.
+- **A finished launch closes its own tab or window** a short settle delay after its marker
+  lands (`POSTMASTER_HOST_FINISH_DELAY`, 0.2s), not when rendering provably ends. Cleanup uses
+  the pane, tab or window IDs `host.sh` recorded when it opened the launch;
+  labels and prompt text never identify ownership. A user pane split into a launch tab or window
+  survives: `host.sh` closes only its own pane and leaves the shared tab or window open. The event
+  stream and logs stay on disk.
 - **`--pidfile` gets its pid, which is also its process group:** `kill -- -<pid>` stops all of
   it. `host.sh run` returns as soon as the launch has started. The wait still goes in the same
   command as the launch, as `<tool>/scripts/wait-for-markers.sh`, or for a review round
   `<tool>/scripts/review-round.sh wait`.
+- **`--role` selects per-role limits; `--run` selects the dispatch's recorded config.** Use
+  `lane` for a workhorse, `coachman` for a leg, and `reviewer` for a review launch. Direct host
+  launches use the default limits. With `--run <dispatch>`, the limits come from the config in
+  `<dispatch>/run.json`, so an edit to the live config does not change an in-flight run.
+- **A Linux user scope contains each launch and its descendants.** When systemd can verify a
+  cgroup v2 memory controller, pids controller and the requested scope properties, `host.sh`
+  applies `MemoryMax` (default `8G`), `MemorySwapMax=0` and `TasksMax` (default `512`). Systemd
+  kills the scope on memory exhaustion; when the pids controller records a refused fork,
+  `host.sh` kills that scope. `.err` says `host: memory cap reached (MemoryMax=<value>)` or
+  `host: process cap reached (TasksMax=<value>)`. The notice also appears in the pane's stderr.
+  A machine without a working per-launch cgroup backend still runs the command and records
+  `host: launch running uncapped (no supported per-launch limits available)` in `.err`, with a
+  warning to the caller. The limits live under `[limits]` in `config.toml`; `[limits.lane]`,
+  `[limits.coachman]` and `[limits.reviewer]` can override either setting. The caps bind an
+  accidental runaway, not a deliberate escape: every launch runs as the same user, which can
+  always start work outside the launch's scope, so the caps are resource bounds, not a
+  security boundary.
 - **A launch outlives its caller.** It belongs to the host's server, or with no host to a session
   of its own, so a caller's background-task cap or its exit does not reach it.
 - **A launch carries its own pane's identity, never its caller's**: `HERDR_PANE_ID`, the tab and
@@ -87,15 +120,39 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   harness's own Herdr integration reports to whatever pane those name. Its environment reaches
   the pane through a FIFO and a pipe, never a file on disk or a command line.
   [Why a launch must own its pane](../../wiki/concepts/herdr-headless-launches.md)
-- **`<name>` is the run's name, then the role or lane:** `<ticket>, <ticket title> · <role or
-  lane>`, for example `#36, Run the style, bug and security reviews in parallel · coachman`.
-  Take it from the waybill, `"$(<tool>/scripts/host.sh name <dispatch> <role>)"`, never by typing it:
-  a ticket's title can hold anything a shell would run. It labels the space when `host.sh`
-  opens it, and the tab or window, and is the pane's terminal title while the launch runs, which
-  is what a Herdr client shows for a pane with an agent in it. `POSTMASTER_LAUNCH_NAME` carries
-  it to `launch.sh`, which names the thread where the harness can (`harnesses.md`).
-- **The pane shows the stream, not the JSON**: `<tool>/scripts/view-stream.sh` renders one line per
-  event of interest, each with its time.
+- **A launch never carries its caller's Claude Code session identity or its caller's Herdr
+  identity.** The caller's environment is handed over minus:
+  - `CLAUDECODE`, `CLAUDE_PID`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`,
+    `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_EXECPATH`, `CLAUDE_CODE_SESSION_ATTENDED`,
+    `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`,
+    `CLAUDE_CODE_TOOL_USE_ID`, and the families
+    `CLAUDE_CODE_SESSION_*`, `CLAUDE_CODE_MESSAGING_*`, `CLAUDE_CODE_CHILD_*` — a lane that
+    inherits the calling session's identity can message it or keep no session record of its own.
+  - every `HERDR_*` of the caller's. In a Herdr pane the launch gets only that pane's own six
+    (`HERDR_PANE_ID`, `HERDR_TAB_ID`, `HERDR_WORKSPACE_ID`, `HERDR_ENV`, `HERDR_SOCKET_PATH`,
+    `HERDR_BIN_PATH`); with tmux or no host, none. A lane that inherits the caller's Herdr
+    variables can drive its caller's Herdr session.
+
+  Every other variable of the caller's still reaches the launch, `POSTMASTER_*` settings and a
+  harness's own configuration (such as `CLAUDE_CONFIG_DIR`, `CLAUDE_EFFORT`, `ANTHROPIC_*`, and
+  configuration under the `CLAUDE_CODE_` prefix that is not in the families above) included, and
+  so does the lane's env file once `launch.sh` sources it. The strip is a deny-list in
+  `<tool>/scripts/host.sh`'s runner: to add a name or a family, extend that list and the
+  matching control in `--self-test`. Never widen it to the whole `CLAUDE_CODE_*` prefix and
+  never replace it with an allow-list; both would drop configuration a launch needs.
+- **The ticket belongs to the run's space; a launch label carries only launch identity.**
+  `<tool>/scripts/host.sh name <dispatch>` prints the ticket number and title for the run level.
+  Its launch forms build labels from the run's recorded config: `coachman · <model> · leg <n>`,
+  `<lane> · workhorse · <model>`, or `<lane> · <lens> review · <model> · r<n>`, and
+  `role <text...>` names any other launch by its role alone. A model shows as the basename
+  after its last `/`, so a provider prefix never pushes the round past the ellipsis. A lane
+  or role comes first so it remains visible on a narrow sidebar. `postmaster` is the
+  project-level interactive role. `host.sh run --under <dispatch>` puts the ticket on the
+  synthesis worktree space and every launch label on its tab or window, pane title, and
+  harness thread name (`POSTMASTER_LAUNCH_NAME`, `harnesses.md`). A title can contain shell
+  syntax, so take every value from `host.sh name`; never type it into a shell.
+- **The pane shows the stream, not the JSON**: `<tool>/scripts/view-stream.sh` renders each event
+  of interest as wrapped lines — what the agent says and runs, in full — each with its time.
 - **Every launch is registered while it runs**, under `POSTMASTER_HOST_STATE` (default
   `~/.postmaster/host`), with the worktree it was placed in, whatever host ran it. `host.sh stop
   <worktree>` stops every launch running there and everything each one started, even in a
@@ -103,31 +160,52 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   after 20 seconds (`POSTMASTER_HOST_STOP_WAIT`), and exit 2 naming anything still running. It
   never runs from inside that worktree, which would stop the caller too. `host.sh close
   <worktree>` refuses while one runs there, after waiting 15 seconds for one that is just ending.
+- `host.sh stop-run <dispatch>` and `host.sh close-run <dispatch>` cover the synthesis worktree,
+  workhorse worktrees in the run config, and reviewer scratches in its round records and action
+  log, including scratch clones that Git does not list as worktrees, plus any pane or window
+  still tagged for the run. Either exits 2 when the run's records cannot be read.
 - **It degrades rather than refuses.** If the host cannot place the launch, or its pane has not
   started it within 20 seconds, it runs in the background instead, exactly once, and `host.sh`
   prints `host=none` rather than where it would have been.
 
 ## herdr
 
-- **Placement.** `herdr worktree list --cwd <cwd>` names the repository and the space its own
-  checkout is open in; with none, `host.sh` opens it as `herdr workspace create --cwd <repo>
-  --label <repo name>`, so the tree has a root. A worktree whose space is open gets a new tab
-  there. Otherwise `herdr worktree open --workspace <repository's space> --path <worktree>
-  --label <name>` opens it, which is what nests it under the repository's space. A detached
-  reviewer scratch opens the same way. The repository's own checkout gets a tab in its own space.
-  A reviewer's scratch clone (`cut-scratch.sh --clone`) is a repository of its own to Herdr, so
-  it opens as a space of the launch's own, as a directory outside any repository does;
-  `cut-scratch.sh --kind` is what tells it from a repository the user works in.
-- **The tree today** is one level deep, by worktree: the repository's space holds the
-  postmaster; under it, the synthesis worktree's space holds each coachman leg as a tab, and each
-  workhorse's and each reviewer's worktree has a space of its own. Workhorses sit beside their
-  coachman, not under it: Herdr 0.9.1 cannot nest one agent under another.
+- **Placement.** Every run launch uses `host.sh run --under <dispatch>`, which reads the ticket name and synthesis
+  worktree from the waybill. `herdr worktree open --workspace <repository's space> --path
+  <synthesis worktree> --label <ticket>` opens the run's space. Every launch gets a tab
+  in the same space, with its own checkout as the tab's working directory, the first one
+  included: it closes the run space's root tab once its own tab exists. That includes
+  reviewer worktrees and security-review clones: a clone is never opened as a separate
+  workspace. A failure before the launch lands rolls back instead — the root tab
+  while the launch tab does not exist yet, the launch tab after — so a failed
+  placement leaves nothing a later close could refuse. A run launch without `--under` is refused
+  instead of opening a top-level space.
+- **The tree** is project space → ticket-labeled run space → live launch tabs. The project space holds
+  the postmaster, the synthesis worktree's space holds all coachman legs, workhorses and review
+  launches for that ticket, and each launch's label starts with its role and lane. The synthesis
+  worktree space has no spare shell tab: the first launch closes its root tab once its own
+  tab exists, and each later tab is opened for a launch. When its marker lands, a launch tab
+  closes after the settle delay; a user split stays open with the user's pane. The project
+  space keeps its shell tab:
+  Herdr closes a workspace with its last tab, and refuses the close once a worktree nests under
+  it, so host.sh never closes it. The tabs are panes under the run; Herdr 0.9.1 cannot nest one
+  agent under another.
 - **Ownership.** `host.sh` marks what it opens with Herdr metadata tokens: a space
-  `postmaster=opened`, a pane `postmaster=launch`. `host.sh close` closes a space only when it
-  carries the token and every pane in it does, and nothing registered runs there. It never
-  closes a repository's own space, a scratch clone's aside, never uses `workspace close
-  --group`, and never runs `herdr worktree remove`, which deletes the checkout. Close a space
-  before removing its worktree.
+  `postmaster=opened`, a pane `postmaster=launch`. It remembers each launch tab in the host state.
+  `host.sh close <worktree>` closes tabs it opened for that checkout, then closes a space only
+  when that space belongs to the checkout, carries the ownership token, every pane in it does,
+  and nothing registered runs there. A tab closes only when every pane in it
+  carries the launch token: a split tab keeps the user's pane and stays open,
+  named in the refusal, and so does a tab whose pane list cannot place every
+  row. A row counts as placed only when its tab_id is a string of the shape
+  Herdr sends (`w…:t…`); a missing, null or otherwise malformed tab_id is
+  unattributable, and one unattributable sibling refuses the close. Where the
+  recorded pane itself carries no attributable tab, only that pane closes,
+  never the tab. Closing a reviewer scratch therefore removes its tabs
+  without closing the run space; when they are its last tabs Herdr destroys the tabless space
+  with them. It never closes a repository's own space, a scratch clone's aside, never uses
+  `workspace close --group`, and never runs `herdr worktree remove`, which deletes the checkout.
+  Close a space before removing its worktree.
 - **State.** The pane reports its launch `working` as it starts, under the agent label
   `headless`, and releases it (`pane release-agent`, same label) when the launch exits. Left to
   itself Herdr shows a headless harness as idle. A closing `idle` report does not work: Herdr
@@ -139,7 +217,8 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   running, and its marker still lands, touched by a watcher outside the pane; the flow then finds
   no hand-off or summary and treats the launch as spent.
 - **`spawn`** passes the caller's `POSTMASTER_*` settings to the new pane, so the postmaster
-  runs on the same config and host as the session that started it.
+  runs on the same config and host as the session that started it. Its tab label is `postmaster`;
+  the project's space already names the project.
 - **Never** prompt, close, move or rename a pane, tab, space or agent `host.sh` did not open, and
   never stop or restart the Herdr server.
 
@@ -163,11 +242,16 @@ with `herdr agent start`. It is a pane whose agent `host.sh` reports. So when it
 - One session per repository, `postmaster-<repo>` (the repository's basename, with `.` and `:`
   replaced), created detached on first use; a scratch clone's windows go in the session of the
   repository it was cut from. Each launch is a window named `<name>`, with the window option
-  `@postmaster_cwd` set to its worktree and `@postmaster_state` to `running`, then `done`. After
-  the launch a shell stays in the window.
+  `@postmaster_cwd` set to its worktree and `@postmaster_state` to `running`, then `done`. The
+  launch pane is tagged as host-owned, and its pane ID is recorded in `@postmaster_pane`. After
+  its marker lands, host.sh closes that pane by ID; the window closes with it when it is alone.
+  If the user split a pane into the window, the launch pane closes and the user's pane remains.
 - A window's command starts with the tmux server's environment; `host.sh` hands the caller's
   across the same way as for Herdr, and `spawn` passes the caller's `POSTMASTER_*` settings.
-- `host.sh close <worktree>` kills that worktree's windows once nothing registered runs there.
+- `host.sh close <worktree>` closes only the recorded pane IDs host.sh opened for that worktree
+  once no launch runs there. A split window stays open with its other panes and the close
+  reports the refusal (exit 2); an unrecorded pane is never selected by its window name or
+  other text.
 - Sending: `tmux load-buffer` from the file, `tmux paste-buffer -p` so an application that asked
   for bracketed paste gets it, then `tmux send-keys Enter` as a key of its own. Settled means
   the screen has not changed for 10 seconds (`POSTMASTER_HOST_QUIET`).
@@ -179,7 +263,7 @@ with `herdr agent start`. It is a pane whose agent `host.sh` reports. So when it
   watch but its files: `<tool>/scripts/runs-status.sh`, the events file, and
   `<tool>/scripts/view-stream.sh < <events-file>` for the readable form.
 - **The postmaster runs headless, as a native session**, like every other role:
-  `<tool>/scripts/host.sh run "<project> · postmaster" <repo> --out <runs>/postmaster/events.jsonl
+  `<tool>/scripts/host.sh run "postmaster" <repo> --out <runs>/postmaster/events.jsonl
   --err <runs>/postmaster/postmaster.err --marker <runs>/postmaster/.exited -- <tool>/scripts/launch.sh
   launch postmaster <repo> <brief-file>`. Its brief says it runs headless, so whenever it needs
   the user it writes `<runs>/postmaster/ESCALATION.md` and ends its turn, and
@@ -192,9 +276,15 @@ with `herdr agent start`. It is a pane whose agent `host.sh` reports. So when it
 ## Tests
 
 `<tool>/scripts/host.sh --self-test` runs every form against stub `herdr` and `tmux` on a PATH that
-holds nothing else, and never reaches a live server. `<tool>/scripts/host.sh --live-test` runs the
-ticket's controls against the hosts on this machine, in a scratch repository it creates: a launch
-that lands in its worktree's space, nested under its repository's space, with its marker landing;
-a reviewer's scratch clone opening as a space of its own, which `close` shuts; the same launch
-with no host, backgrounded, with its marker landing; and the same on tmux. It opens only its own
-spaces and tmux session, and closes them.
+holds nothing else, and never reaches a live server. It also checks the labels: each kind of
+launch (a coachman leg, a workhorse, each review lens with its round, the postmaster) leads
+with its role and holds no part of the ticket title, and the run's level carries the ticket.
+Where a working systemd user scope exists, it also checks that a bounded fork and allocation
+launch are stopped at their caps while a healthy launch completes. Without that backend it
+checks the uncapped notice and successful launch.
+`<tool>/scripts/host.sh --live-test` runs the
+ticket's controls against the hosts on this machine, in a scratch repository it creates: a
+postmaster using the project's first tab; a coachman in a ticket-labeled run space with no spare
+shell tab; a workhorse and style, bug, and security launches under that run, including a security
+clone whose tab closes without closing the run space; then the same launch with no host and on
+tmux. It opens only its own spaces and tmux session, and closes them.

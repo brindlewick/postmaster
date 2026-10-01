@@ -1,0 +1,16 @@
+# <project>/.postmaster/project.toml
+# What this project requires of every run against it. Committed with `git add -f`, the one
+# file in .postmaster/ that travels. The shape is project.example.toml.
+
+[project]
+risk_surfaces = [
+  "spawns agent CLIs in their bypass modes, in Herdr over its socket or in tmux",
+  "uses the user's gh login, and reads PLANE_API_KEY and lane env files under ~/.postmaster",
+  "writes ~/.postmaster, skill links into each harness's skills folder, and worktrees, branches, pushes and pull requests in target repos",
+  "merges on the merge word",
+  "binds no port, and serves only the GitHub Pages site",
+]
+
+[checks.gate]
+command = '''bash -c 'for f in scripts/*.sh; do bash -n "$f" || exit 1; done && bun test scripts/usage.test.ts && scripts/skill-refs.sh && scripts/wiki-lint.sh && for n in cut-scratch export-session fixture front-door front-door-acceptance github host landing launch link-skills local log-action parallel-runs-acceptance plane project-settings review-decide review-findings review-forms review-round reviewers run-log run-meta run-times runs-status runs-watch setup skill-refs spec-decisions spec-review-link stage style-findings ticket-check tool-faults turnpikes verify verify-examples verify-journey verify-library view-stream wait-for-markers wiki-lint; do scripts/$n.sh --self-test || exit 1; done && bun test scripts/run-clash.test.ts && bun install --frozen-lockfile && bun test ./scripts ./lint && bun run lint''''
+shows = "Every script parses, the Bun usage tests pass, the runbook references and wiki lint clean, the 41 script self-tests pass, the run-clash tests pass, and `bun test ./scripts ./lint` and `bun run lint` pass."

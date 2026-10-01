@@ -15,6 +15,31 @@ Muse Code 1.4.2's changelog says long reasoning turns are no longer cut off, and
 variable set. The page is retitled to say the claim held before 1.4.2; its standing stays
 `settled` for 1.4.0 and 1.4.1. `harnesses.md` records 1.4.2's separate reasoning limit and retry.
 
+## [2026-09-29] ingest | the planning stage: every spec to the user before code
+
+A decision page, and a capture. Anthropic's AI-native SDLC playbook is captured into
+`raw/articles/ai-native-sdlc-playbook/` for its claim that design review happens before any
+code is generated. A run gains a `planning` stage: each workhorse drafts its own spec and
+stops, the postmaster puts each spec to the user one at a time as a link into the workhorse's
+worktree, and no workhorse writes code until its own spec is approved. Two approved specs are
+needed to go on. This reverses part of #29, where the spec was an audit record nobody
+reviewed during the run; the coachman still does not check code against the spec. The
+workhorse-spec page no longer says nobody reviews it, and #9's own-spec level becomes the
+workhorses' own specs reviewed by the user, with whether review makes the specs converge as a
+measure. Standing `claimed`, since no run bears on it yet.
+
+## [2026-09-29] ingest | what 25 syntheses took from each lane
+
+Issue #157. A trial over the records of every run that reached synthesis by 2026-09-29, 16
+against this repository and 9 fixture runs, recorded in `raw/trials/2026-09-29-synthesis-audit/`
+with its script, its output and one row per run. No run was promoted: the claim rests on the
+SYNTHESIS lines, the cards and a count in git, and the harness logs stay with each run. Every
+SYNTHESIS line names something taken from each lane, as `coachman.md` requires, so the test H1
+gave could not fail. Counted in runs of six words, the second-ranked lane's own share of the
+synthesis was 2% or less in 8 runs and 10% or more in 15. H1 now names four measurements that
+would settle it: #158, #159, #160 and a single-lane baseline. The cost question gains the
+minutes the runs recorded. Standing stays `claimed`.
+
 ## [2026-09-29] ingest | Muse Code's idle timeout, and why long reasoning trips it
 
 Issue #127. A new harness page, settled on a trial: once a call has streamed a reasoning summary,
@@ -27,6 +52,7 @@ launches, and a loopback mock of the API. `harnesses.md` now records the timeout
 and that a response cut off at the output limit ends the run as completed with no text.
 Rechecked on 1.4.1 the same day, after Muse Code updated itself; the coachman and its fallback
 now set the variable to 900 through their `env_file`.
+
 
 ## [2026-09-27] ingest | how the style sort is checked and put to the user
 
