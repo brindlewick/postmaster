@@ -35,7 +35,7 @@ const FIELDS = [
 const FAULT_EVERY = [
   "coachman",
   "tool-fault",
-  "scripts/launch.sh",
+  "scripts/verify.sh",
   ...FIELDS,
   "--workaround",
   "launched in the recorded form by hand",
@@ -227,7 +227,7 @@ describe("positive controls", () => {
     expect(
       last !== null &&
         last.action === "tool-fault" &&
-        last.target === "scripts/launch.sh" &&
+        last.target === "scripts/verify.sh" &&
         last.detail === "returned before every marker was in" &&
         last.fault?.failed === "returned before every marker was in" &&
         last.fault?.error === "exit 0\n\tall 2 markers present, [1mone a directory[0m" &&
@@ -347,7 +347,7 @@ describe("positive controls", () => {
     const r = logAction([
       "coachman",
       "tool-fault",
-      join(tmp, "link/scripts/launch.sh"),
+      join(tmp, "link/scripts/verify.sh"),
       ...FIELDS,
       "--failed",
       "sixth",
@@ -360,7 +360,7 @@ describe("positive controls", () => {
     const r = logAction([
       "coachman",
       "tool-fault",
-      join(tmp, "link/scripts/launch.sh"),
+      join(tmp, "link/scripts/verify.sh"),
       ...FIELDS,
       "--failed",
       "sixth",
@@ -368,7 +368,7 @@ describe("positive controls", () => {
     expect(r.code).toBe(0);
     const last = lastLine();
     expect(
-      last !== null && last.fault?.failed === "sixth" && last.target === "scripts/launch.sh",
+      last !== null && last.fault?.failed === "sixth" && last.target === "scripts/verify.sh",
     ).toBe(true);
   }, 30000);
 

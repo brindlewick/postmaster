@@ -2,7 +2,7 @@
 // the markers present, minutes since anything in it changed, and what the postmaster does
 // next. This is the postmaster's poll; it reads files and nothing else. A pending escalation
 // from the postmaster to the user is printed first, since it is what everything else may
-// be waiting on.
+// be waiting on. The waiting list itself is kept by host.sh leg waiting, never by hand.
 //
 //   runs-status.sh <project-run-root>        e.g. <project>/.postmaster/runs
 //
@@ -14,11 +14,12 @@
 //                    each workhorse's spec to the user, one at a time
 //          DISPATCH  the current leg is done (.leg-<n>-done): the next leg, or after the last,
 //                    the postmaster's close
-//          REMOUNT   the current leg's process exited (.leg-<n>-exited) with no hand-off,
-//                    escalation, card or spec package: resume it, or relaunch it on the fallback
-//                    after a wall
+//          ASK       a recorded refusal, pre-thread exit, or wall on the fallback needs a user
+//          TAKEOVER  a primary coachman hit a recorded wall: start the fallback
+//          RESUME    a leg exited with a thread id and no hand-off: resume it
 //          READ      a checkpoint card is waiting to be read (.checkpoint-*-ready)
-//          INSPECT   no marker, nothing changed for 30 minutes, run not done
+//          INSPECT   an attempt died without its record, the last record is corrupt,
+//                    or no marker and nothing changed for 30 minutes, run not done
 //          WAIT      a leg is running and its files are moving
 //          -         the manifest says done or abandoned
 //
@@ -28,6 +29,8 @@
 //   exit 1  usage, or no such root
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { run } from "./lib/proc.ts";
+import { pyWords } from "./lib/text.ts";
 
 interface RunRow {
   run: string;
@@ -63,6 +66,61 @@ function pyStr(v: unknown, raw: string, key: string): string {
   } catch {
     return "";
   }
+}
+
+// Main's int() on a JSON value: numbers truncate, booleans are 0 and 1,
+// strings take a sign and underscores between digits, anything else fails.
+function pyInt(v: unknown, dflt: number): number {
+  if (typeof v === "boolean") return v ? 1 : 0;
+  if (typeof v === "number") return Number.isFinite(v) ? Math.trunc(v) : dflt;
+  if (typeof v === "string") {
+    const t = v.trim();
+    if (/^[+-]?[0-9]([0-9_]*[0-9])?$/u.test(t)) return Number(t.replace(/_/gu, ""));
+  }
+  return dflt;
+}
+
+// The owner the active file names is still the process it named: same pid,
+// same start, not a zombie. A directory lock is the shape from before the
+// owner file and holds no owner: always stale.
+function ownerAlive(d: string, leg: string): boolean {
+  let p = join(d, `.leg-${leg}-active`);
+  try {
+    if (statSync(p).isDirectory()) p = join(p, "owner");
+  } catch {
+    return false;
+  }
+  let pidS: string;
+  let start: string;
+  try {
+    const text = readFileSync(p, "utf8").trim();
+    const sp = text.indexOf(" ");
+    pidS = sp === -1 ? text : text.slice(0, sp);
+    start = sp === -1 ? "" : text.slice(sp + 1);
+    // Main's int() takes a sign and underscores between digits; a trailing
+    // underscore or anything else is not a pid.
+    if (!/^[+-]?[0-9]([0-9_]*[0-9])?$/u.test(pidS)) return false;
+  } catch {
+    return false;
+  }
+  const pid = Number(pidS.replace(/_/gu, ""));
+  try {
+    if (statSync("/proc/self").isDirectory()) {
+      let rest: string[];
+      try {
+        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+        rest = pyWords(stat.slice(stat.lastIndexOf(")") + 1));
+      } catch {
+        return false;
+      }
+      return rest.length > 0 && rest[0] !== "Z" && rest.length > 19 && rest[19] === start;
+    }
+  } catch {
+    // No /proc/self: fall through to ps.
+  }
+  const r = run("ps", ["-o", "stat=,lstart=", "-p", String(pid)], { env: { LC_ALL: "C" } });
+  const f = pyWords(r.out);
+  return f.length >= 6 && !f[0]!.startsWith("Z") && f.slice(1, 6).join(" ") === start;
 }
 
 export function status(root: string): number {
@@ -124,14 +182,80 @@ export function status(root: string): number {
 
     const done = markers.includes(`.leg-${leg}-done`);
     const exited = markers.includes(`.leg-${leg}-exited`);
+    // A lock is active only while its owner lives: a lock whose owner is gone
+    // is stale, with or without its exited marker, and a legacy directory lock
+    // holds no owner and is stale too.
+    const active = existsSync(join(d, `.leg-${leg}-active`)) && !exited && ownerAlive(d, leg);
+    // Only the last record decides; a corrupt middle line is superseded
+    // history. A last line that is not a record is fail-closed INSPECT.
+    let outcome: unknown = "";
+    let role: unknown = "";
+    let lastAttempt = -1;
+    let corrupt = false;
+    try {
+      const lines = readFileSync(join(d, "logs", `coachman-leg-${leg}-attempts.jsonl`), "utf8")
+        .split("\n")
+        .filter((l) => l.trim() !== "");
+      if (lines.length > 0) {
+        let last: unknown;
+        try {
+          last = JSON.parse(lines[lines.length - 1]!);
+        } catch {
+          corrupt = true;
+        }
+        if (!corrupt) {
+          if (typeof last === "object" && last !== null && !Array.isArray(last)) {
+            const rec = last as Record<string, unknown>;
+            outcome = rec.outcome ?? "";
+            role = rec.role ?? "";
+            lastAttempt = pyInt(rec.attempt, -1);
+          } else {
+            corrupt = true;
+          }
+        }
+      }
+    } catch {
+      // No attempt record yet.
+    }
+    // Currency: every started attempt ends in a record. A phase or intent file
+    // beyond the last record means an attempt died unrecorded: INSPECT, never
+    // the stale outcome. A running attempt holds the lock, so it reads WAIT.
+    const tailMax = (prefix: string, suffix: string): number => {
+      let found = -1;
+      try {
+        for (const f of readdirSync(join(d, "logs"))) {
+          if (!f.startsWith(prefix) || !f.endsWith(suffix)) continue;
+          let tail = f.slice(f.lastIndexOf("-") + 1);
+          if (suffix !== "") tail = tail.split(".")[0]!;
+          // Main's isdigit admits exotic numerals that its int then chokes on;
+          // the port reads ASCII digits, the only shape the leg script writes.
+          if (/^[0-9]+$/u.test(tail)) found = Math.max(found, Number(tail));
+        }
+      } catch {
+        // No logs yet.
+      }
+      return found;
+    };
+    const phaseMax = tailMax(`coachman-leg-${leg}-phase-`, "");
+    const intentMax = tailMax(`coachman-leg-${leg}-intent-`, ".json");
+    const gap = phaseMax > lastAttempt || intentMax > lastAttempt;
     let next: string;
     if (stage === "done" || stage === "abandoned") next = "-";
     else if (markers.includes(".waiting-on-user")) next = "USER";
     else if (markers.includes(".escalation-ready")) next = "RULE";
     else if (markers.includes(".card-ready")) next = "GATE";
+    else if (active) next = "WAIT";
+    else if (gap || corrupt) next = "INSPECT";
+    // A waiting spec package beats the whole outcome block: the pause writes an
+    // incomplete record by design, and that record must never beat its marker.
     else if (markers.includes(".spec-review-ready")) next = "SPEC";
+    else if (outcome === "finished") next = "DISPATCH";
+    else if (outcome === "refused" || outcome === "pre-thread") next = "ASK";
+    else if (outcome === "walled" && role === "coachman") next = "TAKEOVER";
+    else if (outcome === "walled" && role === "coachman_fallback") next = "ASK";
+    else if (outcome === "incomplete") next = "RESUME";
     else if (done) next = "DISPATCH";
-    else if (exited) next = "REMOUNT";
+    else if (exited) next = "INSPECT";
     else if (markers.some((mk) => mk.startsWith(".checkpoint-"))) next = "READ";
     else if (idleMin >= 30) next = "INSPECT";
     else next = "WAIT";

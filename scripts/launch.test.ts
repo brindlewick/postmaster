@@ -221,6 +221,172 @@ beforeAll(() => {
       }
     };
 
+    // Attempt phase controls: launch and resume witness the harness start.
+    const phasefile = join(tmp, "attempt.phase");
+    fixture("phase-start", "synthesis");
+    rmSync(phasefile, { force: true });
+    envx = { POSTMASTER_ATTEMPT_PHASE: phasefile };
+    doRun(
+      "phase-start",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "synthesis",
+    );
+    check(
+      "a harness invocation records started",
+      rc === 0 && readFileSync(phasefile, "utf8") === "started\n",
+    );
+    writeFileSync(join(tmp, "phase-unset.env"), ': "${PHASE_MISSING:?missing}"\n');
+    writeFileSync(
+      join(tmp, "phase-unset.toml"),
+      `[team]\ncoachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "phase-unset.env")}" }\n`,
+    );
+    rmSync(phasefile, { force: true });
+    doRun(
+      "phase-unset",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "synthesis",
+    );
+    check(
+      "an env file that fails under nounset remains refused",
+      rc !== 0 && readFileSync(phasefile, "utf8") === "refused\n",
+    );
+    writeFileSync(join(tmp, "phase-exit.env"), "exit 17\n");
+    writeFileSync(
+      join(tmp, "phase-exit.toml"),
+      `[team]\ncoachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "phase-exit.env")}" }\n`,
+    );
+    rmSync(phasefile, { force: true });
+    doRun(
+      "phase-exit",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "synthesis",
+    );
+    check(
+      "an env file that exits remains refused",
+      rc === 17 && readFileSync(phasefile, "utf8") === "refused\n",
+    );
+    writeFileSync(join(tmp, "phase-path.env"), "PATH=/path/that/has/no/harness\n");
+    writeFileSync(
+      join(tmp, "phase-path.toml"),
+      `[team]\ncoachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "phase-path.env")}" }\n`,
+    );
+    rmSync(phasefile, { force: true });
+    doRun(
+      "phase-path",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "synthesis",
+    );
+    check(
+      "an env file that removes the harness from PATH remains refused",
+      rc === 1 && readFileSync(phasefile, "utf8") === "refused\n",
+    );
+    rmSync(phasefile, { force: true });
+    doRun(
+      "phase-start",
+      "resume",
+      "coachman",
+      join(tmp, "wt"),
+      "thread-already-known",
+      join(tmp, "no-prompt.txt"),
+      "--leg",
+      "synthesis",
+    );
+    check(
+      "a refused resume with an existing thread id remains refused",
+      rc === 1 && readFileSync(phasefile, "utf8") === "refused\n",
+    );
+    writeFileSync(phasefile, "started\n");
+    doRun("phase-start", "skill", "coachman", "security-review", "--leg", "synthesis");
+    check(
+      "skill leaves the attempt phase file untouched",
+      rc === 0 && readFileSync(phasefile, "utf8") === "started\n",
+    );
+    writeFileSync(phasefile, "started\n");
+    doRun("phase-start", "form", "coachman", "--leg", "synthesis");
+    check(
+      "form leaves the attempt phase file untouched",
+      rc === 0 && readFileSync(phasefile, "utf8") === "started\n",
+    );
+    writeFileSync(phasefile, "MARKER\n");
+    spawnSync("ln", [phasefile, join(tmp, "attempt.phase.link")]);
+    doRun(
+      "phase-unset",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "synthesis",
+    );
+    check(
+      "the phase write replaces the file instead of truncating it",
+      rc !== 0 &&
+        readFileSync(phasefile, "utf8") === "refused\n" &&
+        readFileSync(join(tmp, "attempt.phase.link"), "utf8") === "MARKER\n",
+    );
+    check(
+      "phase writes leave no temp files behind",
+      readdirSync(tmp).filter((f) => f.startsWith(".phase.")).length === 0,
+    );
+    mkdirSync(join(tmp, "phasebin"), { recursive: true });
+    writeFileSync(
+      join(tmp, "phasebin/claude"),
+      '#!/bin/sh\nprintf "phase-var=%s\\n" "${POSTMASTER_ATTEMPT_PHASE:-unset}"\n',
+    );
+    chmodSync(join(tmp, "phasebin/claude"), 0o755);
+    rmSync(phasefile, { force: true });
+    {
+      const r = spawnSync(
+        self,
+        ["launch", "coachman", join(tmp, "wt"), join(tmp, "prompt.txt"), "--leg", "synthesis"],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            POSTMASTER_ATTEMPT_PHASE: phasefile,
+            POSTMASTER_CONFIG: join(tmp, "phase-start.toml"),
+            PATH: `${join(tmp, "phasebin")}:${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+      check(
+        "the harness does not inherit the attempt phase variable",
+        r.status === 0 &&
+          (r.stdout ?? "") === "phase-var=unset\n" &&
+          readFileSync(phasefile, "utf8") === "started\n",
+      );
+    }
+    writeFileSync(join(tmp, "phaseblock"), "");
+    envx = { POSTMASTER_ATTEMPT_PHASE: join(tmp, "phaseblock/attempt.phase") };
+    refused(
+      "an unwritable phase stops the launch before the harness starts",
+      "phase-start",
+      "cannot record that the harness started",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "synthesis",
+    );
+    envx = {};
+
     const CONT_RE = new RegExp(`\\\\\\n[${PY_S_CLASS}]*`, "gu");
     const FENCE_SPLIT_RE = new RegExp(
       `(${PY_M_START}[ \t]*\`\`\`${DOT_ALL}*?${PY_M_START}[ \t]*\`\`\`)`,
@@ -230,7 +396,7 @@ beforeAll(() => {
     const calls = (...paths: string[]): { code: number; out: string } => {
       const results: string[] = [];
       const CALL = new RegExp(
-        `scripts/launch\\.sh[${PY_S_CLASS}]+(?:launch|resume)${BOUND_R}`,
+        `scripts/(?:launch\\.sh[${PY_S_CLASS}]+(?:launch|resume)|host\\.sh[${PY_S_CLASS}]+leg[${PY_S_CLASS}]+(?:launch|resume|takeover|retry))${BOUND_R}`,
         "gu",
       );
       for (const path of paths) {
@@ -247,9 +413,9 @@ beforeAll(() => {
               CALL.lastIndex = 0;
               while ((m = CALL.exec(line)) !== null) {
                 const c = line.slice(m.index);
-                results.push(
-                  `${c.includes("--run <dispatch>") ? "run" : "unrun"} ${path}: ${pyWords(c).join(" ")}`,
-                );
+                const recorded =
+                  c.includes("--run <dispatch>") || c.includes("scripts/host.sh leg");
+                results.push(`${recorded ? "run" : "unrun"} ${path}: ${pyWords(c).join(" ")}`);
               }
             }
           } else {
@@ -260,9 +426,9 @@ beforeAll(() => {
               CALL.lastIndex = 0;
               while ((m = CALL.exec(inner)) !== null) {
                 const c = inner.slice(m.index);
-                results.push(
-                  `${c.includes("--run <dispatch>") ? "run" : "unrun"} ${path}: ${pyWords(c).join(" ")}`,
-                );
+                const recorded =
+                  c.includes("--run <dispatch>") || c.includes("scripts/host.sh leg");
+                results.push(`${recorded ? "run" : "unrun"} ${path}: ${pyWords(c).join(" ")}`);
               }
             }
           }
@@ -1335,6 +1501,75 @@ beforeAll(() => {
             `first base-only: ${JSON.stringify(bHanded.filter((e) => !pHanded.includes(e)).slice(0, 3))}`;
         check(`parity: ${label}`, agree && sig, detail);
       };
+      // A divergence BASE predates by construction: #57 refuses the launch (rc 1)
+      // where the ancient source-and-exec BASE still execs into the dark (rc
+      // 127). Both sides stay pinned: the port to main's refusal, BASE to its
+      // exec, so a BASE refresh forces these back into agreement deliberately.
+      const paritySplit = (
+        label: string,
+        fileBody: string,
+        portSig: (rc: number, out: string, err: string, handed: string[]) => boolean,
+        baseSig: (rc: number, out: string, err: string, handed: string[]) => boolean,
+        sigDetail: string,
+      ): void => {
+        writeFileSync(join(tmp, "parity.env"), fileBody);
+        writeFileSync(
+          join(tmp, "parity.toml"),
+          `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "parity.env")}" }\n`,
+        );
+        rmSync(handedPath, { force: true });
+        doRun(
+          "parity",
+          "launch",
+          "coachman",
+          join(tmp, "wt"),
+          join(tmp, "prompt.txt"),
+          "--leg",
+          "review",
+        );
+        const pRc = rc;
+        const pOut = out;
+        const pErr = err;
+        const pHanded = handedEnv();
+        rmSync(handedPath, { force: true });
+        const b = spawnSync(
+          "bash",
+          [
+            baseLaunch,
+            "launch",
+            "coachman",
+            join(tmp, "wt"),
+            join(tmp, "prompt.txt"),
+            "--leg",
+            "review",
+          ],
+          {
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              ...envx,
+              POSTMASTER_CONFIG: join(tmp, "parity.toml"),
+              PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+            },
+          },
+        );
+        const bRc = b.status ?? 1;
+        const bOut = String(b.stdout ?? "");
+        const bErr = String(b.stderr ?? "");
+        const bHanded = handedEnv();
+        const pOk = portSig(pRc, pOut, pErr, pHanded);
+        const bOk = baseSig(bRc, bOut, bErr, bHanded);
+        check(
+          `parity: ${label}`,
+          pOk && bOk,
+          `port ${pOk ? "refused" : `rc=${pRc} err=${JSON.stringify(pErr.slice(0, 80))}`}, ` +
+            `base ${bOk ? "exec'd to 127" : `rc=${bRc}`}: ${sigDetail}`,
+        );
+      };
+      const execDark = (_rc: number, _out: string, err: string, _h: string[]): boolean =>
+        _rc === 127 &&
+        !err.includes("STUB-RAN") &&
+        normStreams(err).includes("No such file or directory");
       const ran = (_rc: number, _out: string, err: string, _h: string[]): boolean =>
         err.includes("STUB-RAN");
       const notRan = (_rc: number, _out: string, err: string, _h: string[]): boolean =>
@@ -1388,14 +1623,17 @@ beforeAll(() => {
           ran(rc, out, err, handed) && err.includes("to-stderr") && handed.includes("GOOD=yes"),
         "to-stderr on stderr, GOOD=yes handed",
       );
-      parity(
+      paritySplit(
         "a file that unsets everything hands on the emptied environment",
         'export PARITY_SENTINEL=gone\nfor v in $(compgen -e); do unset "$v"; done\n',
         (rc, out, err, handed) =>
-          rc === 127 &&
-          notRan(rc, out, err, handed) &&
-          normStreams(err).includes("No such file or directory"),
-        "rc 127 naming the unfindable harness, harness never ran",
+          rc === 1 &&
+          out === "" &&
+          err.includes("is not on PATH after loading env_file") &&
+          handed.length === 0 &&
+          notRan(rc, out, err, handed),
+        execDark,
+        "port refuses rc 1 naming the unfindable harness, harness never ran",
       );
       {
         const lines = ["export PARITY_BIG=yes"];
@@ -1412,23 +1650,29 @@ beforeAll(() => {
           "rc 0 with the first and last variables handed on",
         );
       }
-      parity(
+      paritySplit(
         "a file that unsets PATH applies instead of ignored",
         "unset PATH\nFOO=afterunset\n",
         (rc, out, err, handed) =>
-          rc === 127 &&
-          notRan(rc, out, err, handed) &&
-          normStreams(err).includes("No such file or directory"),
-        "rc 127 naming the unfindable harness",
+          rc === 1 &&
+          out === "" &&
+          err.includes("is not on PATH after loading env_file") &&
+          handed.length === 0 &&
+          notRan(rc, out, err, handed),
+        execDark,
+        "port refuses rc 1 naming the unfindable harness",
       );
-      parity(
+      paritySplit(
         "a file that empties PATH applies instead of ignored",
         "export PATH=\nFOO=emptyok\n",
         (rc, out, err, handed) =>
-          rc === 127 &&
-          notRan(rc, out, err, handed) &&
-          normStreams(err).includes("No such file or directory"),
-        "rc 127 naming the unfindable harness",
+          rc === 1 &&
+          out === "" &&
+          err.includes("is not on PATH after loading env_file") &&
+          handed.length === 0 &&
+          notRan(rc, out, err, handed),
+        execDark,
+        "port refuses rc 1 naming the unfindable harness",
       );
       writeFileSync(claude, savedClaude);
       envx = savedEnvx;
@@ -4015,6 +4259,42 @@ describe("negative controls", () => {
   });
   test("no launch or resume in coachman.md or postmaster.md lacks --run <dispatch>", () => {
     assertControl("no launch or resume in coachman.md or postmaster.md lacks --run <dispatch>");
+  });
+});
+
+describe("attempt phase: launch and resume witness the harness start", () => {
+  test("a harness invocation records started", () => {
+    assertControl("a harness invocation records started");
+  });
+  test("an env file that fails under nounset remains refused", () => {
+    assertControl("an env file that fails under nounset remains refused");
+  });
+  test("an env file that exits remains refused", () => {
+    assertControl("an env file that exits remains refused");
+  });
+  test("an env file that removes the harness from PATH remains refused", () => {
+    assertControl("an env file that removes the harness from PATH remains refused");
+  });
+  test("a refused resume with an existing thread id remains refused", () => {
+    assertControl("a refused resume with an existing thread id remains refused");
+  });
+  test("skill leaves the attempt phase file untouched", () => {
+    assertControl("skill leaves the attempt phase file untouched");
+  });
+  test("form leaves the attempt phase file untouched", () => {
+    assertControl("form leaves the attempt phase file untouched");
+  });
+  test("the phase write replaces the file instead of truncating it", () => {
+    assertControl("the phase write replaces the file instead of truncating it");
+  });
+  test("phase writes leave no temp files behind", () => {
+    assertControl("phase writes leave no temp files behind");
+  });
+  test("the harness does not inherit the attempt phase variable", () => {
+    assertControl("the harness does not inherit the attempt phase variable");
+  });
+  test("an unwritable phase stops the launch before the harness starts", () => {
+    assertControl("an unwritable phase stops the launch before the harness starts");
   });
 });
 

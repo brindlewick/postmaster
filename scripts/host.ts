@@ -10,6 +10,12 @@
 //   host.sh name <dispatch> review <lane> <lens> <round>
 //   host.sh name <dispatch> postmaster
 //   host.sh name <dispatch> role <text...>                          any other launch, by its role alone
+//   host.sh leg launch|takeover <dispatch> <worktree> <leg> <number> <prompt>
+//   host.sh leg resume <dispatch> <worktree> <leg> <number> <thread-id> <prompt>
+//   host.sh leg retry <dispatch> <worktree> <leg> <number>
+//   host.sh leg outcome <dispatch> <number>
+//   host.sh leg backfill <dispatch> <leg> <number>
+//   host.sh leg waiting add|remove|list <runs> <ticket> [<question-file>]
 //   host.sh run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>]
 //               [--out <file>] [--err <file>] [--append] [--marker <file>]
 //               [--pidfile <file>] -- <command...>
@@ -95,6 +101,7 @@ import {
   closeSync,
   constants,
   existsSync,
+  fstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -103,8 +110,10 @@ import {
   readSync,
   realpathSync,
   renameSync,
+  rmdirSync,
   rmSync,
   statSync,
+  unlinkSync,
   utimesSync,
   writeFileSync,
   writeSync,
@@ -3275,6 +3284,1523 @@ function readCmd(args: string[]): void {
   } else noSessionHost();
 }
 
+// --- coachman legs ---------------------------------------------------------------------------
+// One attempt at a time per leg, every attempt recorded: a start validates, takes the leg's
+// lock, backfills whatever died unrecorded, writes its intent and phase, and runs _leg_exec,
+// which owns the lock, runs launch.sh, and classifies the attempt from its stream slice.
+const LEG_WALL_TERMS = [
+  "quota",
+  "usage limit",
+  "rate limit",
+  "payment required",
+  "insufficient_quota",
+  "overloaded",
+  "resource exhausted",
+  "spawn failed",
+  "failed to spawn",
+  "stale session lock",
+  "session lock",
+];
+// Python int(): surrounding whitespace stripped, an optional sign, digits with underscores
+// between them; anything else is not a number.
+const PY_INT = /^[+-]?[0-9]([0-9_]*[0-9])?$/u;
+function pyIntStrict(text: string): number | null {
+  const trimmed = text.trim();
+  if (!PY_INT.test(trimmed)) return null;
+  return Number(trimmed.replace(/_/gu, ""));
+}
+// Python int() over a JSON value: booleans count, floats truncate, strings parse, the rest
+// is not a number. Missing values read as the default first.
+function pyIntJson(value: unknown, dflt: number): number | null {
+  if (value === undefined) value = dflt;
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (typeof value === "number") return Number.isFinite(value) ? Math.trunc(value) : null;
+  if (typeof value === "string") return pyIntStrict(value);
+  return null;
+}
+// Python str(value or ""): a falsy value reads empty, the rest reads as written.
+function intentStr(value: unknown): string {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  if (typeof value === "boolean") return value ? "True" : "False";
+  if (Array.isArray(value)) return value.length ? JSON.stringify(value) : "";
+  if (typeof value === "object") return Object.keys(value).length ? JSON.stringify(value) : "";
+  return "";
+}
+// Python json.dumps with the default ensure_ascii: structure prints as JSON does, every
+// non-ASCII character escapes as \uXXXX, astral ones as a surrogate pair. Only DEL and up
+// needs escaping: JSON.stringify already escapes every C0 control inside strings, so any
+// raw one left in the output is indent structure, which stays literal.
+function dumps(value: unknown, indent?: number): string {
+  return JSON.stringify(value, null, indent ?? 0).replace(/[\x7f-\u{10ffff}]/gu, (ch) => {
+    const cp = ch.codePointAt(0) ?? 0;
+    if (cp > 0xffff) {
+      const hi = Math.floor((cp - 0x10000) / 0x400) + 0xd800;
+      const lo = ((cp - 0x10000) % 0x400) + 0xdc00;
+      return `\\u${hi.toString(16).padStart(4, "0")}\\u${lo.toString(16).padStart(4, "0")}`;
+    }
+    return `\\u${cp.toString(16).padStart(4, "0")}`;
+  });
+}
+function legNumber(text: string): number {
+  const n = count(text, "leg number");
+  if (n <= 0) die("leg number must be positive");
+  return n;
+}
+// A process's start time in the lock's owner format, or null when it has none: /proc's
+// starttime past the command name, else ps lstart, skipping zombies both ways.
+function legStartOf(pid: number): string | null {
+  try {
+    if (statSync("/proc/self").isDirectory()) {
+      let rest: string[];
+      try {
+        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+        rest = pyWords(stat.slice(stat.lastIndexOf(")") + 1));
+      } catch {
+        return null;
+      }
+      return rest[0] !== "Z" && rest.length > 19 ? (rest[19] ?? null) : null;
+    }
+  } catch {
+    // No /proc/self: fall through to ps.
+  }
+  const out = run("ps", ["-o", "stat=,lstart=", "-p", String(pid)], { env: { LC_ALL: "C" } }).out;
+  const fields = pyWords(out);
+  return fields.length >= 6 && !fields[0]!.startsWith("Z") ? fields.slice(1, 6).join(" ") : null;
+}
+// This process's start time, in the lock's owner format.
+function legSelfStart(): string | null {
+  let readable = false;
+  try {
+    accessSync(`/proc/${process.pid}/stat`, constants.R_OK);
+    readable = true;
+  } catch {}
+  if (readable) {
+    try {
+      const stat = readFileSync(`/proc/${process.pid}/stat`, "utf8");
+      const fields = pyWords(stat.slice(stat.lastIndexOf(")") + 1));
+      if (fields.length >= 20 && fields[19]) return fields[19];
+    } catch {}
+    return null;
+  }
+  const start = pyWords(run("ps", ["-o", "lstart=", "-p", String(process.pid)]).out).join(" ");
+  return start === "" ? null : start;
+}
+// End a newline-less tail line, if the file has one: a record write torn by a kill leaves a
+// tail with no line terminator, and the next append would fuse onto it and stay corrupt.
+function legTerminateTail(path: string): void {
+  try {
+    const fd = openSync(path, "r+");
+    try {
+      const size = fstatSync(fd).size;
+      if (size > 0) {
+        const last = Buffer.alloc(1);
+        readSync(fd, last, 0, 1, size - 1);
+        // An explicit position: a positioned read leaves the offset where it was, so a
+        // position-less write would land at the start of the file instead of its end.
+        if (last[0] !== 10) writeSync(fd, "\n", size, "utf8");
+      }
+    } finally {
+      try {
+        closeSync(fd);
+      } catch {}
+    }
+  } catch {}
+}
+// fcntl.flock has no Node spelling, so the leg mutex is a lock file holding the owner's pid,
+// after run-meta.ts: O_EXCL creation is the mutual exclusion, and only a dead owner loses
+// it — kill(pid, 0) refusing ESRCH — or a file empty and older than five seconds, the bash
+// flow's resting state, which carries no owner either way. Anything else waits; a fresh
+// empty file is a creator between its creation and its pid write. The mutex serializes the
+// check-and-write sections only — acquire, claim and release each drop it before returning —
+// so a kill mid-section leaves a dead owner's file the next take steals.
+function legMutexOwnerDead(mutexPath: string): boolean {
+  let text: string;
+  try {
+    text = readFileSync(mutexPath, "utf8");
+  } catch (error) {
+    return (error as NodeJS.ErrnoException)?.code === "ENOENT";
+  }
+  if (text.trim() === "") {
+    try {
+      return Date.now() - statSync(mutexPath).mtimeMs > 5000;
+    } catch {
+      return true;
+    }
+  }
+  const pid = Number(text.trim());
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException)?.code === "ESRCH";
+  }
+}
+type MutexTake = { status: "taken" } | { status: "busy" } | { status: "error"; error: unknown };
+function legMutexTake(mutexPath: string, maxTries: number): MutexTake {
+  for (let i = 0; maxTries < 0 || i < maxTries; i++) {
+    try {
+      const fd = openSync(mutexPath, "wx", 0o644);
+      try {
+        writeSync(fd, `${process.pid}\n`);
+      } catch {}
+      try {
+        closeSync(fd);
+      } catch {}
+      return { status: "taken" };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") return { status: "error", error };
+      if (legMutexOwnerDead(mutexPath)) {
+        try {
+          rmSync(mutexPath, { force: true });
+        } catch {}
+      }
+      sleepSync(10);
+    }
+  }
+  return { status: "busy" };
+}
+function legMutexDrop(mutexPath: string): void {
+  try {
+    rmSync(mutexPath, { force: true });
+  } catch {}
+}
+// Hold the leg's lock, or refuse: the fast path is one atomic create, the slow path decides
+// under the mutex, so two starters never both proceed. A lock is stolen only when its owner
+// is dead; a live owner refuses, however stale the markers look. 0 holds, 1 refuses on a
+// live owner, 2 on another starter, 3 on an internal error taking the lock at all.
+function legAcquire(lock: string, mutexPath: string, selfPid: number): number {
+  const selfStart = legStartOf(selfPid);
+  if (selfStart === null) {
+    console.error("cannot establish attempt ownership: the starter has no readable start time");
+    return 3;
+  }
+  const claim = (): boolean => {
+    try {
+      const fd = openSync(lock, "wx", 0o666);
+      try {
+        writeSync(fd, `${selfPid} ${selfStart}\n`);
+      } catch {}
+      try {
+        closeSync(fd);
+      } catch {}
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (claim()) return 0;
+  const take = legMutexTake(mutexPath, 200);
+  if (take.status === "error") {
+    console.error("cannot open the start mutex");
+    return 3;
+  }
+  if (take.status === "busy") return 2;
+  try {
+    if (claim()) return 0;
+    let owner: number | null = null;
+    let ownerStart: string | null = null;
+    try {
+      const content = readFileSync(lock, "utf8").trim();
+      const at = content.indexOf(" ");
+      owner = pyIntStrict(at === -1 ? content : content.slice(0, at));
+      ownerStart = owner === null ? null : at === -1 ? "" : content.slice(at + 1);
+    } catch {
+      owner = null;
+      ownerStart = null;
+    }
+    if (owner !== null && ownerStart !== null && legStartOf(owner) === ownerStart) {
+      console.error("leg already has an active attempt");
+      return 1;
+    }
+    try {
+      if (statSync(lock).isDirectory()) rmdirSync(lock);
+      else unlinkSync(lock);
+    } catch {
+      console.error("leg already has an active attempt");
+      return 1;
+    }
+    if (!claim()) {
+      console.error("leg already has an active attempt");
+      return 1;
+    }
+    return 0;
+  } finally {
+    legMutexDrop(mutexPath);
+  }
+}
+// Release a lock taken by legAcquire, only if it still names this process. The check and
+// the removal hold the mutex, so a steal decision in another process cannot land between
+// them. A lock naming another owner is kept; a legacy empty dir holds no owner and is always
+// releasable. Best-effort: a mutex that cannot be taken keeps the claim, and the next start
+// steals it once this process is gone.
+function legRelease(lock: string, mutexPath: string): void {
+  const start = legSelfStart() ?? "";
+  if (legMutexTake(mutexPath, -1).status !== "taken") return;
+  try {
+    let content: string | null = null;
+    try {
+      content = readFileSync(lock, "utf8").trim();
+    } catch {}
+    if (content !== null && content !== `${process.pid} ${start}`) return;
+    try {
+      unlinkSync(lock);
+    } catch {}
+    try {
+      rmdirSync(lock);
+    } catch {}
+  } finally {
+    legMutexDrop(mutexPath);
+  }
+}
+// The launch owns the lock: replace the starter's identity with its own, through a
+// temporary file, so a concurrent reader sees the starter or the launch, never an empty
+// lock. Only a lock naming the starter, the launch or nothing readable is replaced; a lock
+// naming anyone else aborts the attempt rather than risk joining it.
+function legClaim(
+  lock: string,
+  mutexPath: string,
+  starterPid: string,
+  starterStart: string,
+): boolean {
+  const start = legSelfStart();
+  if (!start) return false;
+  const mine = `${process.pid} ${start}`;
+  const take = legMutexTake(mutexPath, -1);
+  if (take.status !== "taken") {
+    console.error(
+      `leg: cannot open the start mutex: ${spawnStrerror(take.status === "error" ? take.error : null)}`,
+    );
+    return false;
+  }
+  try {
+    let content = "";
+    try {
+      content = readFileSync(lock, "utf8").trim();
+    } catch {}
+    if (content !== "" && content !== `${starterPid} ${starterStart}` && content !== mine) {
+      console.error("leg: the lock names another attempt; not starting");
+      return false;
+    }
+    let tmp = "";
+    try {
+      tmp = mkstempSync(dirname(lock) || ".", ".owner.");
+      writeFileSync(tmp, `${mine}\n`);
+      renameSync(tmp, lock);
+    } catch (error) {
+      if (tmp) {
+        try {
+          rmSync(tmp, { force: true });
+        } catch {}
+      }
+      console.error(`leg: cannot own the lock: ${spawnStrerror(error)}`);
+      return false;
+    }
+    return true;
+  } finally {
+    legMutexDrop(mutexPath);
+  }
+}
+// The last attempt's retry fields: request, role, prompt, thread id, outcome.
+function legLatest(attempts: string): [string, string, string, string, string] | null {
+  let rows: string[];
+  try {
+    rows = readFileSync(attempts, "utf8")
+      .split("\n")
+      .filter((line) => pyTrim(line) !== "");
+  } catch {
+    return null;
+  }
+  if (!rows.length) return null;
+  let row: unknown;
+  try {
+    row = JSON.parse(rows[rows.length - 1] ?? "");
+  } catch {
+    return null;
+  }
+  if (typeof row !== "object" || row === null || Array.isArray(row)) return null;
+  const rec = row as Record<string, unknown>;
+  return [
+    intentStr(rec.request),
+    intentStr(rec.role),
+    intentStr(rec.prompt),
+    intentStr(rec.thread_id),
+    intentStr(rec.outcome),
+  ];
+}
+// One classifier for a live attempt and a backfilled one: scan this attempt's stream slice
+// for structured wall events, classify from phase, wall, thread and hand-off, append the
+// record, update the manifest. start and end are byte offsets into the stream; an empty end
+// means EOF.
+function legClassify(params: {
+  d: string;
+  wt: string;
+  leg: string;
+  n: string;
+  request: string;
+  role: string;
+  prompt: string;
+  thread: string;
+  stream: string;
+  done: string;
+  attempts: string;
+  attempt: string;
+  phase: string;
+  wall: string;
+  rc: string;
+  start: string;
+  end: string;
+  backfilled: string;
+}): void {
+  const p = params;
+  legTerminateTail(p.attempts);
+  const number = Number(p.n);
+  let raw: Buffer;
+  try {
+    raw = readFileSync(p.stream);
+  } catch {
+    raw = Buffer.alloc(0);
+  }
+  let startOff = Math.max(0, pyIntStrict(p.start) ?? 0);
+  let endOff = p.end === "" ? raw.length : (pyIntStrict(p.end) ?? raw.length);
+  if (startOff > raw.length) startOff = raw.length;
+  if (endOff > raw.length || endOff < startOff) endOff = raw.length;
+  let text = new TextDecoder("utf-8").decode(raw.subarray(startOff, endOff));
+  let phaseValue = "refused";
+  try {
+    phaseValue = pyTrim(readFileSync(p.phase, "utf8"));
+  } catch {}
+  if (phaseValue !== "started") {
+    // Only a started attempt is scanned. Anything else — refused, missing, empty or
+    // foreign — means the harness never ran for this attempt, so no event here is its. The
+    // record keeps the intent's thread only.
+    text = "";
+  }
+  const dictField = (value: unknown): string => {
+    if (value === undefined) return "";
+    if (value === null) return "None";
+    if (typeof value === "string") return value;
+    if (typeof value === "number") return String(value);
+    if (typeof value === "boolean") return value ? "True" : "False";
+    return JSON.stringify(value) ?? "";
+  };
+  const selected = (value: unknown): string => {
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      const rec = value as Record<string, unknown>;
+      return ["code", "status", "message", "type", "subtype", "error"]
+        .map((key) => dictField(rec[key]))
+        .join(" ");
+    }
+    if (!value) return "";
+    if (typeof value === "string") return value;
+    if (typeof value === "number") return String(value);
+    if (typeof value === "boolean") return value ? "True" : "False";
+    return Array.isArray(value) && value.length ? JSON.stringify(value) : "";
+  };
+  const isWall = (value: unknown): boolean => {
+    const s = selected(value).toLowerCase();
+    return /\b(?:402|429)\b/u.test(s) || LEG_WALL_TERMS.some((term) => s.includes(term));
+  };
+  for (const line of pySplitLines(text)) {
+    let event: unknown;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof event !== "object" || event === null || Array.isArray(event)) continue;
+    const ev = event as Record<string, unknown>;
+    if (ev.type === "rate_limit_event") {
+      const info = ev.rate_limit_info;
+      const status =
+        typeof info === "object" && info !== null && !Array.isArray(info)
+          ? (info as Record<string, unknown>).status
+          : undefined;
+      if (status !== undefined && status !== null && status !== "allowed") {
+        writeFileSync(p.wall, "wall\n");
+        break;
+      }
+    }
+    if (
+      ev.type === "error" ||
+      ev.type === "thread.failed" ||
+      ev.type === "response.failed" ||
+      ev.type === "response.error"
+    ) {
+      if (isWall(ev.error) || isWall(ev)) {
+        writeFileSync(p.wall, "wall\n");
+        break;
+      }
+    }
+  }
+  let walled = false;
+  try {
+    walled = statSync(p.wall).isFile();
+  } catch {
+    walled = false;
+  }
+  let handoff = false;
+  try {
+    handoff = statSync(p.done).isFile();
+  } catch {
+    handoff = false;
+  }
+  let runStore: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(join(p.d, "run.json"), "utf8"));
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed))
+      runStore = parsed as Record<string, unknown>;
+  } catch {}
+  const cfg = asRecord(runStore.config);
+  const team = asRecord(cfg.team);
+  let spec: unknown = team[p.role === "coachman_fallback" ? "coachman_fallback" : "coachman"] ?? {};
+  if (
+    p.role === "coachman" &&
+    typeof team.coachman_legs === "object" &&
+    team.coachman_legs !== null &&
+    !Array.isArray(team.coachman_legs)
+  ) {
+    const legSpec = (team.coachman_legs as Record<string, unknown>)[p.leg];
+    if (legSpec !== undefined) spec = legSpec;
+  }
+  const harness =
+    typeof spec === "object" && spec !== null && !Array.isArray(spec)
+      ? String((spec as Record<string, unknown>).harness ?? "")
+      : "";
+  const idKeys: readonly string[] =
+    (
+      {
+        codex: ["thread_id"],
+        grok: ["thread_id", "session_id", "sessionId", "conversationId", "uuid"],
+        agy: ["conversationId", "conversation_id"],
+        claude: ["session_id"],
+        pi: [],
+        muse: [],
+        mimo: ["sessionID", "session_id"],
+      } as Record<string, string[]>
+    )[harness] ?? [];
+  let thread: unknown = p.thread || "";
+  if (!thread) {
+    for (const line of pySplitLines(text)) {
+      let event: unknown;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (typeof event !== "object" || event === null || Array.isArray(event)) continue;
+      const ev = event as Record<string, unknown>;
+      if (
+        harness === "muse" &&
+        typeof ev.stream === "object" &&
+        ev.stream !== null &&
+        !Array.isArray(ev.stream) &&
+        (ev.stream as Record<string, unknown>).kind === "session"
+      ) {
+        const id = (ev.stream as Record<string, unknown>).id;
+        thread = thread || (id === undefined ? "" : id);
+      }
+      if (harness === "pi" && ev.type === "session") {
+        thread = thread || (ev.id === undefined ? "" : ev.id);
+      }
+      for (const key of idKeys) {
+        const value = ev[key];
+        if (typeof value === "string" && value) {
+          thread = thread || value;
+          break;
+        }
+      }
+      if (thread) break;
+    }
+  }
+  let outcome: string;
+  if (handoff) outcome = "finished";
+  else if (phaseValue !== "started") outcome = "refused";
+  else if (walled) outcome = "walled";
+  else if (!thread) outcome = "pre-thread";
+  else outcome = "incomplete";
+  let onAnswer: string;
+  if (
+    outcome === "refused" ||
+    outcome === "pre-thread" ||
+    (outcome === "walled" && p.role === "coachman_fallback")
+  )
+    onAnswer = "retry";
+  else if (outcome === "incomplete") onAnswer = "resume";
+  else onAnswer = "none";
+  const record = {
+    attempt: Number(p.attempt),
+    leg: number,
+    name: p.leg,
+    request: p.request,
+    role: p.role,
+    prompt: p.prompt,
+    thread_id: thread,
+    outcome,
+    on_answer: onAnswer,
+    backfilled: p.backfilled === "1",
+    exit: pyIntStrict(p.rc) ?? -1,
+    ended: new Date().toISOString(),
+  };
+  writeFileSync(p.attempts, `${dumps(record)}\n`, { flag: "a" });
+  try {
+    const manifestPath = join(p.d, "manifest.json");
+    const parsed: unknown = JSON.parse(readFileSync(manifestPath, "utf8"));
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
+    const manifest = parsed as Record<string, unknown>;
+    if (manifest.coachman === undefined) manifest.coachman = {};
+    if (
+      typeof manifest.coachman !== "object" ||
+      manifest.coachman === null ||
+      Array.isArray(manifest.coachman)
+    )
+      return;
+    const coachman = manifest.coachman as Record<string, unknown>;
+    if (coachman.legs === undefined) coachman.legs = {};
+    if (typeof coachman.legs !== "object" || coachman.legs === null || Array.isArray(coachman.legs))
+      return;
+    const legs = coachman.legs as Record<string, unknown>;
+    const key = String(number);
+    if (legs[key] === undefined) legs[key] = {};
+    if (typeof legs[key] !== "object" || legs[key] === null || Array.isArray(legs[key])) return;
+    const item = legs[key] as Record<string, unknown>;
+    item.name = p.role;
+    item.role = p.role;
+    if (thread) item.thread_id = thread;
+    const tmp = mkstempSync(p.d, ".manifest.");
+    try {
+      writeFileSync(tmp, `${dumps(manifest, 2)}\n`);
+      renameSync(tmp, manifestPath);
+    } catch {
+      try {
+        rmSync(tmp, { force: true });
+      } catch {}
+    }
+  } catch {}
+}
+// Classify attempt m, which started but died without its record, from the evidence it left:
+// its intent, phase, wall signal and stream slice.
+function legBackfillOne(
+  d: string,
+  wt: string,
+  leg: string,
+  n: string,
+  m: number,
+  off: number,
+  end: string,
+  stream: string,
+  done: string,
+  attempts: string,
+): void {
+  const logs = join(d, "logs");
+  const phase = join(logs, `coachman-leg-${n}-phase-${m}`);
+  const wall = join(logs, `coachman-leg-${n}-wall-${m}`);
+  const intentF = join(logs, `coachman-leg-${n}-intent-${m}.json`);
+  let request = "";
+  let role = "";
+  let prompt = "";
+  let thread = "";
+  let hasIntent = false;
+  try {
+    hasIntent = statSync(intentF).isFile();
+  } catch {}
+  if (hasIntent) {
+    let parsed: unknown = {};
+    try {
+      parsed = JSON.parse(readFileSync(intentF, "utf8"));
+    } catch {
+      parsed = {};
+    }
+    const rec = asRecord(parsed);
+    request = intentStr(rec.request);
+    role = intentStr(rec.role);
+    prompt = intentStr(rec.prompt);
+    thread = intentStr(rec.thread_id);
+  }
+  if (!request) request = "launch";
+  if (!role) {
+    role = "coachman";
+    try {
+      const manifest: unknown = JSON.parse(readFileSync(join(d, "manifest.json"), "utf8"));
+      if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest))
+        throw new Error("shape");
+      const co = (manifest as Record<string, unknown>).coachman;
+      if (co !== null && co !== undefined && co !== "" && co !== 0 && co !== false) {
+        if (typeof co !== "object" || Array.isArray(co)) throw new Error("shape");
+        const legs = asRecord((co as Record<string, unknown>).legs);
+        const item = legs[n];
+        const name =
+          typeof item === "object" && item !== null && !Array.isArray(item)
+            ? ((item as Record<string, unknown>).name as unknown)
+            : undefined;
+        role = typeof name === "string" ? name : "coachman";
+      }
+    } catch {
+      role = "coachman";
+    }
+    if (role !== "coachman" && role !== "coachman_fallback") role = "coachman";
+  }
+  legClassify({
+    d,
+    wt,
+    leg,
+    n,
+    request,
+    role,
+    prompt,
+    thread,
+    stream,
+    done,
+    attempts,
+    attempt: String(m),
+    phase,
+    wall,
+    rc: "-1",
+    start: String(off),
+    end,
+    backfilled: "1",
+  });
+}
+// Every started attempt ends in a record: classify each attempt below next that has an intent
+// or phase file but no record, oldest first, each over its own stream slice.
+function legBackfill(
+  d: string,
+  wt: string,
+  leg: string,
+  n: string,
+  next: number,
+  stream: string,
+  done: string,
+  attempts: string,
+): void {
+  const logs = join(d, "logs");
+  const have = new Set<number>();
+  try {
+    for (const line of readFileSync(join(logs, `coachman-leg-${n}-attempts.jsonl`), "utf8").split(
+      "\n",
+    )) {
+      if (pyTrim(line) === "") continue;
+      let row: unknown;
+      try {
+        row = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (typeof row !== "object" || row === null || Array.isArray(row)) continue;
+      const a = pyIntJson((row as Record<string, unknown>).attempt, -1);
+      if (a !== null) have.add(a);
+    }
+  } catch {}
+  let names: string[] = [];
+  try {
+    names = readdirSync(logs);
+  } catch {}
+  const intents = new Map<number, Record<string, unknown>>();
+  for (const name of names) {
+    if (!name.startsWith(`coachman-leg-${n}-intent-`) || !name.endsWith(".json")) continue;
+    const tail = name.slice(name.lastIndexOf("-") + 1).split(".")[0] ?? "";
+    if (!/^[0-9]+$/u.test(tail)) continue;
+    try {
+      const loaded: unknown = JSON.parse(readFileSync(join(logs, name), "utf8"));
+      intents.set(Number(tail), asRecord(loaded));
+    } catch {}
+  }
+  const phases = new Set<number>();
+  for (const name of names) {
+    if (!name.startsWith(`coachman-leg-${n}-phase-`)) continue;
+    const tail = name.slice(name.lastIndexOf("-") + 1);
+    if (!/^[0-9]+$/u.test(tail)) continue;
+    phases.add(Number(tail));
+  }
+  const missing = [...new Set([...intents.keys(), ...phases])]
+    .filter((m) => !have.has(m))
+    .sort((a, b) => a - b);
+  for (const m of missing) {
+    if (m < 1 || m >= next) continue;
+    const off = pyIntJson(intents.get(m)?.stream_off, 0) ?? 0;
+    let end = "";
+    const off0 = (v: Record<string, unknown>): boolean => pyIntJson(v.stream_off, 0) === 0;
+    // A later zero is ignored only when that attempt never wrote a phase: it died before it
+    // could spawn, so it wrote no byte. A later launch that reached its phase may have
+    // truncated the stream, and there is no spawn-truth signal to say it did not — refused
+    // phases included, since launch.sh refuses after the runner truncates. The earlier
+    // attempt's bytes may be gone, so its slice reads empty rather than foreign.
+    const reset = [...new Set([...phases, ...intents.keys()])].some(
+      (k) => k > m && phases.has(k) && (!intents.has(k) || off0(intents.get(k)!)),
+    );
+    if (reset) {
+      end = String(off);
+    } else {
+      const later: number[] = [];
+      let corrupt = false;
+      for (const [k, v] of intents) {
+        if (k > m && (have.has(k) || !off0(v))) {
+          const bound = pyIntJson(v.stream_off, 0);
+          if (bound === null) {
+            // A corrupt bound fails closed: the earlier slice reads empty rather than
+            // running to the end of the stream through the later bytes.
+            corrupt = true;
+            break;
+          }
+          later.push(bound);
+        }
+      }
+      if (corrupt) end = String(off);
+      else if (later.length) end = String(Math.min(...later));
+    }
+    legBackfillOne(d, wt, leg, n, m, off, end, stream, done, attempts);
+  }
+}
+// One past the highest attempt seen anywhere: records, phase files and intent files.
+function legNextAttempt(attempts: string, logs: string, n: string): number {
+  let best = 0;
+  try {
+    for (const line of readFileSync(attempts, "utf8").split("\n")) {
+      if (pyTrim(line) === "") continue;
+      let row: unknown;
+      try {
+        row = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (typeof row !== "object" || row === null || Array.isArray(row)) continue;
+      const a = pyIntJson((row as Record<string, unknown>).attempt, 0);
+      if (a !== null && a > best) best = a;
+    }
+  } catch {}
+  let names: string[] = [];
+  try {
+    names = readdirSync(logs);
+  } catch {}
+  for (const name of names) {
+    if (name.startsWith(`coachman-leg-${n}-phase-`)) {
+      const tail = name.slice(name.lastIndexOf("-") + 1).split(".")[0] ?? "";
+      if (/^[0-9]+$/u.test(tail)) best = Math.max(best, Number(tail));
+    } else if (name.startsWith(`coachman-leg-${n}-intent-`) && name.endsWith(".json")) {
+      const tail = name.slice(name.lastIndexOf("-") + 1).split(".")[0] ?? "";
+      if (/^[0-9]+$/u.test(tail)) best = Math.max(best, Number(tail));
+    }
+  }
+  return best + 1;
+}
+// Classify unrecorded attempts, starting nothing.
+function legBackfillOnly(dispatchArg: string, leg: string, numberText: string): void {
+  if (leg !== "synthesis" && leg !== "review" && leg !== "ship")
+    die(`unknown coachman leg: ${leg}`);
+  const n = legNumber(numberText);
+  let d = "";
+  try {
+    const resolved = realpathSync(dispatchArg);
+    if (statSync(resolved).isDirectory()) d = resolved;
+  } catch {}
+  if (!d) die(`no such dispatch: ${dispatchArg}`);
+  const logs = join(d, "logs");
+  const attempts = join(logs, `coachman-leg-${n}-attempts.jsonl`);
+  const stream = join(logs, `coachman-leg-${n}-events.jsonl`);
+  const done = join(d, `.leg-${n}-done`);
+  const active = join(d, `.leg-${n}-active`);
+  const mutex = join(d, `.leg-${n}-mutex`);
+  const acquired = legAcquire(active, mutex, process.pid);
+  if (acquired !== 0) {
+    if (acquired === 2) die(`leg ${n} has another start in progress`);
+    if (acquired === 3) die(`leg ${n} cannot take its lock`);
+    die(`leg ${n} has a live attempt; backfill runs only on INSPECT`);
+  }
+  let next = 0;
+  try {
+    next = legNextAttempt(attempts, logs, String(n));
+  } catch {
+    legRelease(active, mutex);
+    die("cannot count prior attempts");
+  }
+  try {
+    legBackfill(d, "", leg, String(n), next, stream, done, attempts);
+  } catch {
+    legRelease(active, mutex);
+    die("cannot backfill the unrecorded attempt");
+  }
+  legRelease(active, mutex);
+}
+async function legStart(
+  request: string,
+  dArg: string,
+  wtArg: string,
+  leg: string,
+  numberText: string,
+  promptArg: string,
+  threadArg = "",
+  roleArg = "",
+): Promise<void> {
+  let prompt = promptArg;
+  const thread = threadArg;
+  let role = roleArg;
+  if (request !== "launch" && request !== "resume" && request !== "takeover")
+    die(`unknown leg operation: ${request}`);
+  if (leg !== "synthesis" && leg !== "review" && leg !== "ship")
+    die(`unknown coachman leg: ${leg}`);
+  const n = legNumber(numberText);
+  let d = "";
+  try {
+    const resolved = realpathSync(dArg);
+    if (statSync(resolved).isDirectory()) d = resolved;
+  } catch {}
+  if (!d) die(`no such dispatch: ${dArg}`);
+  let wt = "";
+  try {
+    const resolved = realpathSync(wtArg);
+    if (statSync(resolved).isDirectory()) wt = resolved;
+  } catch {}
+  if (!wt) die(`no such worktree: ${wtArg}`);
+  if (!prompt.startsWith("/")) prompt = `${process.env.PWD ?? ""}/${prompt}`;
+  let promptOk = false;
+  try {
+    const st = statSync(prompt);
+    accessSync(prompt, constants.R_OK);
+    promptOk = st.isFile() && st.size > 0;
+  } catch {
+    promptOk = false;
+  }
+  if (!promptOk) die(`prompt file missing, unreadable or empty: ${prompt}`);
+  let briefed = false;
+  try {
+    briefed = statSync(join(d, "run.json")).isFile() && statSync(join(d, "manifest.json")).isFile();
+  } catch {
+    briefed = false;
+  }
+  if (!briefed) die("dispatch needs run.json and manifest.json");
+  // A pinned run serves only its own checkout: a start from anywhere else is refused, so a
+  // retry can never run a leg on live scripts. A run with no checkout recorded keeps its
+  // waybill's tool and skips the check, as does a record that cannot be read.
+  let checkout = "";
+  try {
+    const runStore: unknown = JSON.parse(readFileSync(join(d, "run.json"), "utf8"));
+    if (typeof runStore === "object" && runStore !== null && !Array.isArray(runStore)) {
+      const pm = (runStore as Record<string, unknown>).postmaster ?? {};
+      if (typeof pm === "object" && pm !== null && !Array.isArray(pm)) {
+        const co = (pm as Record<string, unknown>).checkout;
+        if (typeof co === "string" && co !== "") checkout = co;
+      }
+    }
+  } catch {
+    checkout = "";
+  }
+  if (checkout !== "") {
+    let mine = "";
+    try {
+      mine = realpathSync(join(HERE, ".."));
+    } catch {
+      die("cannot resolve this checkout");
+    }
+    let pinned = "";
+    try {
+      const resolved = realpathSync(checkout);
+      if (statSync(resolved).isDirectory()) pinned = resolved;
+    } catch {}
+    if (!pinned) die(`run's pinned checkout is gone: ${checkout}`);
+    if (mine !== pinned) die(`leg starts for this run serve from ${pinned}, not ${mine}`);
+  }
+  const logs = join(d, "logs");
+  try {
+    mkdirSync(logs, { recursive: true });
+  } catch {
+    die("cannot create the dispatch log directory");
+  }
+  const stream = join(logs, `coachman-leg-${n}-events.jsonl`);
+  const err = join(logs, `coachman-leg-${n}.err`);
+  const done = join(d, `.leg-${n}-done`);
+  const exited = join(d, `.leg-${n}-exited`);
+  const attempts = join(logs, `coachman-leg-${n}-attempts.jsonl`);
+  const active = join(d, `.leg-${n}-active`);
+  const mutex = join(d, `.leg-${n}-mutex`);
+  // Everything validatable is validated before the lock is taken: a refusal to this point
+  // leaves markers, stream and records untouched.
+  let append = false;
+  if (request === "launch") {
+    if (!role) role = "coachman";
+  } else if (request === "resume") {
+    if (!role) {
+      let recorded = false;
+      try {
+        recorded = statSync(attempts).size > 0;
+      } catch {}
+      if (!recorded) die(`resume has no recorded attempt for leg ${n}`);
+      const last = legLatest(attempts);
+      if (!last || last.length < 5) die("cannot read the last leg attempt");
+      role = last[1]!;
+      if (role !== "coachman" && role !== "coachman_fallback")
+        die("last attempt has no valid role");
+    }
+    if (!thread) die("resume needs the leg's thread id");
+    append = true;
+  } else {
+    role = "coachman_fallback";
+  }
+  if (role !== "coachman" && role !== "coachman_fallback") die(`unknown coachman role: ${role}`);
+  let label: string;
+  if (role === "coachman") {
+    try {
+      label = nameCmd(d, "coachman", leg, String(n));
+    } catch (error) {
+      if (isHostError(error) && error.message) console.error(`host: ${error.message}`);
+      die("cannot name the coachman");
+    }
+  } else {
+    try {
+      label = nameCmd(d, "role", `coachman_fallback ${leg} leg ${n}`);
+    } catch (error) {
+      if (isHostError(error) && error.message) console.error(`host: ${error.message}`);
+      die("cannot name the fallback");
+    }
+  }
+  // Exactly one starter proceeds; a stale lock is stolen, a live one refuses.
+  const acquired = legAcquire(active, mutex, process.pid);
+  if (acquired !== 0) {
+    if (acquired === 2) die(`leg ${n} has another start in progress`);
+    if (acquired === 3) die(`leg ${n} cannot take its lock`);
+    die(`leg ${n} already has an active attempt`);
+  }
+  let attempt = 0;
+  try {
+    attempt = legNextAttempt(attempts, logs, String(n));
+  } catch {
+    legRelease(active, mutex);
+    die("cannot count prior attempts");
+  }
+  // An attempt that died without its record is classified now, from the evidence it left,
+  // before the new attempt starts.
+  try {
+    legBackfill(d, wt, leg, String(n), attempt, stream, done, attempts);
+  } catch {
+    legRelease(active, mutex);
+    die("cannot backfill the unrecorded attempt");
+  }
+  const phase = join(logs, `coachman-leg-${n}-phase-${attempt}`);
+  const wall = join(logs, `coachman-leg-${n}-wall-${attempt}`);
+  const intent = join(logs, `coachman-leg-${n}-intent-${attempt}.json`);
+  let streamOff = 0;
+  if (request === "resume") {
+    try {
+      streamOff = statSync(stream).size;
+    } catch {
+      streamOff = 0;
+    }
+  }
+  // The previous attempt's markers clear before the intent is written, so a crash between
+  // the writes cannot leave a rejected hand-off's done marker for backfill to read as
+  // finished: every gap state reads without it.
+  markerRemove(wall);
+  markerRemove(done);
+  markerRemove(exited);
+  // The intent lands before the phase, and each lands whole: a temp file and a rename, so a
+  // kill between or inside the writes leaves intent-without-phase at worst — never
+  // phase-without-intent, and never a torn file a reader can half-see.
+  try {
+    const tmp = mkstempSync(logs, ".intent.");
+    try {
+      writeFileSync(
+        tmp,
+        dumps({ attempt, request, role, prompt, thread_id: thread, stream_off: streamOff }),
+      );
+      renameSync(tmp, intent);
+    } catch (error) {
+      try {
+        rmSync(tmp, { force: true });
+      } catch {}
+      throw error;
+    }
+  } catch {
+    legRelease(active, mutex);
+    die("cannot write the attempt intent");
+  }
+  try {
+    const tmp = mkstempSync(logs, ".phase.");
+    try {
+      writeFileSync(tmp, "refused\n");
+      renameSync(tmp, phase);
+    } catch (error) {
+      try {
+        rmSync(tmp, { force: true });
+      } catch {}
+      throw error;
+    }
+  } catch {
+    legRelease(active, mutex);
+    die("cannot write attempt phase");
+  }
+  if (request === "takeover") {
+    let streamIsFile = false;
+    try {
+      streamIsFile = statSync(stream).isFile();
+    } catch {}
+    if (streamIsFile) {
+      let backup = join(logs, `coachman-leg-${n}-walled-events.jsonl`);
+      if (existsSync(backup))
+        backup = join(logs, `coachman-leg-${n}-walled-attempt-${attempt}-events.jsonl`);
+      try {
+        renameSync(stream, backup);
+      } catch {
+        legRelease(active, mutex);
+        die("cannot preserve the walled stream");
+      }
+    }
+    let errIsFile = false;
+    try {
+      errIsFile = statSync(err).isFile();
+    } catch {}
+    if (errIsFile) {
+      let errBackup = join(logs, `coachman-leg-${n}-walled.err`);
+      if (existsSync(errBackup))
+        errBackup = join(logs, `coachman-leg-${n}-walled-attempt-${attempt}.err`);
+      try {
+        renameSync(err, errBackup);
+      } catch {
+        legRelease(active, mutex);
+        die("cannot preserve the walled errors");
+      }
+    }
+  }
+  const starterStart = legSelfStart();
+  if (!starterStart) {
+    legRelease(active, mutex);
+    die("cannot establish attempt ownership: the starter has no readable start time");
+  }
+  const runargs = [
+    label,
+    wt,
+    "--under",
+    d,
+    "--role",
+    "coachman",
+    "--run",
+    d,
+    "--out",
+    stream,
+    "--err",
+    err,
+    "--marker",
+    exited,
+    "--pidfile",
+    join(logs, `coachman-leg-${n}.pid`),
+  ];
+  if (append) runargs.push("--append");
+  runargs.push(
+    "--",
+    "bun",
+    SELF,
+    "_leg_exec",
+    d,
+    wt,
+    leg,
+    String(n),
+    request,
+    role,
+    prompt,
+    thread,
+    stream,
+    err,
+    done,
+    attempts,
+    String(attempt),
+    phase,
+    wall,
+    active,
+    String(process.pid),
+    starterStart,
+  );
+  const savedPhase = process.env.POSTMASTER_ATTEMPT_PHASE;
+  process.env.POSTMASTER_ATTEMPT_PHASE = phase;
+  let rc = 0;
+  try {
+    await runCmd(runargs);
+  } catch (error) {
+    if (isHostError(error)) {
+      rc = hostCode(error);
+      if (error.message) console.error(`host: ${error.message}`);
+    } else {
+      rc = 1;
+      console.error(`host: ${String((error as Error)?.message ?? error)}`);
+    }
+  } finally {
+    if (savedPhase === undefined) delete process.env.POSTMASTER_ATTEMPT_PHASE;
+    else process.env.POSTMASTER_ATTEMPT_PHASE = savedPhase;
+  }
+  if (rc !== 0) {
+    legRelease(active, mutex);
+    legTerminateTail(attempts);
+    let rows: unknown[] = [];
+    try {
+      rows = readFileSync(attempts, "utf8")
+        .split("\n")
+        .filter((line) => pyTrim(line) !== "")
+        .map((line) => JSON.parse(line) as unknown);
+    } catch {
+      rows = [];
+    }
+    let recorded = false;
+    if (rows.length) {
+      const lastRow = rows[rows.length - 1];
+      if (
+        typeof lastRow !== "object" ||
+        lastRow === null ||
+        Array.isArray(lastRow) ||
+        (lastRow as Record<string, unknown>).attempt === attempt
+      )
+        recorded = true;
+    }
+    if (!recorded) {
+      try {
+        const record = {
+          attempt,
+          leg: n,
+          name: leg,
+          request,
+          role,
+          prompt,
+          thread_id: thread,
+          outcome: "refused",
+          on_answer: "retry",
+          backfilled: false,
+          exit: rc,
+          ended: new Date().toISOString(),
+        };
+        writeFileSync(attempts, `${dumps(record)}\n`, { flag: "a" });
+      } catch {}
+    }
+    console.error(`leg: host could not start attempt ${attempt} for leg ${n} (exit ${rc})`);
+    throw hostError("", rc);
+  }
+  // The attempt outlives this process, and names itself in the lock as its first act; the
+  // starter infers nothing from the pidfile.
+}
+// The last attempt record, as JSON.
+function legOutcome(dispatch: string, numberText: string): void {
+  const n = legNumber(numberText);
+  let rows: string[];
+  try {
+    rows = readFileSync(join(dispatch, "logs", `coachman-leg-${n}-attempts.jsonl`), "utf8")
+      .split("\n")
+      .filter((line) => pyTrim(line) !== "");
+  } catch {
+    die("no attempt recorded for that leg");
+  }
+  if (!rows.length) die("no attempt recorded for that leg");
+  process.stdout.write(`${rows[rows.length - 1]}\n`);
+}
+function legWaitingAdd(runs: string, ticket: string, qfile: string): void {
+  let questionIsFile = false;
+  try {
+    questionIsFile = statSync(qfile).isFile();
+  } catch {}
+  if (!questionIsFile) die(`no such question file: ${qfile}`);
+  const f = join(runs, "postmaster", "ESCALATION.md");
+  try {
+    mkdirSync(dirname(f), { recursive: true });
+  } catch {
+    die(`cannot create ${dirname(f)}`);
+  }
+  const question = pyTrim(readFileSync(qfile, "utf8"));
+  // The question is opaque text: a heading inside it is escaped, so it never splits into a
+  // phantom entry and remove takes the whole block. The escape renders identically in markdown.
+  const escaped = pySplitLines(question)
+    .map((line) => (line.startsWith("## ") ? `\\## ${line.slice(3)}` : line))
+    .join("\n");
+  let text = "";
+  let listIsFile = false;
+  try {
+    listIsFile = statSync(f).isFile();
+  } catch {}
+  if (listIsFile) text = readFileSync(f, "utf8");
+  const blocks = text.split(/^## /mu);
+  const head = blocks[0] ?? "";
+  const rest: string[] = [];
+  for (const b of blocks.slice(1)) {
+    if (pyTrim(b) === "") continue;
+    if (pyTrim(pySplitLines(b)[0] ?? "") !== ticket) rest.push(b);
+  }
+  rest.push(`${ticket}\n${escaped}\n`);
+  writeFileSync(f, head + rest.map((b) => `## ${b}`).join(""));
+}
+function legWaitingRemove(runs: string, ticket: string): void {
+  const f = join(runs, "postmaster", "ESCALATION.md");
+  let isFile = false;
+  try {
+    isFile = statSync(f).isFile();
+  } catch {}
+  if (!isFile) return;
+  const text = readFileSync(f, "utf8");
+  const parts = text.split(/^## /mu);
+  const keep: string[] = [parts[0] ?? ""];
+  for (const b of parts.slice(1)) {
+    if (pyTrim(pySplitLines(b)[0] ?? "") !== ticket) keep.push(`## ${b}`);
+  }
+  const out = keep.join("");
+  writeFileSync(f, pyTrim(out) === "" ? "" : out);
+  if (pyTrim(out) === "") rmSync(f);
+}
+function legWaitingList(runs: string): void {
+  const f = join(runs, "postmaster", "ESCALATION.md");
+  let isFile = false;
+  try {
+    isFile = statSync(f).isFile();
+  } catch {}
+  if (isFile) process.stdout.write(readFileSync(f, "utf8"));
+}
+async function legCmd(args: string[]): Promise<void> {
+  const request = args[0] ?? "";
+  if (args.length === 0)
+    die("usage: host.sh leg launch|resume|takeover|retry|outcome|backfill|waiting ...");
+  const rest = args.slice(1);
+  switch (request) {
+    case "launch":
+      if (rest.length !== 5)
+        die("usage: host.sh leg launch <dispatch> <worktree> <leg> <number> <prompt>");
+      await legStart("launch", rest[0]!, rest[1]!, rest[2]!, rest[3]!, rest[4]!);
+      return;
+    case "resume":
+      if (rest.length !== 6)
+        die("usage: host.sh leg resume <dispatch> <worktree> <leg> <number> <thread-id> <prompt>");
+      await legStart("resume", rest[0]!, rest[1]!, rest[2]!, rest[3]!, rest[5]!, rest[4]!);
+      return;
+    case "takeover":
+      if (rest.length !== 5)
+        die("usage: host.sh leg takeover <dispatch> <worktree> <leg> <number> <prompt>");
+      await legStart("takeover", rest[0]!, rest[1]!, rest[2]!, rest[3]!, rest[4]!);
+      return;
+    case "outcome":
+      if (rest.length !== 2) die("usage: host.sh leg outcome <dispatch> <number>");
+      legOutcome(rest[0]!, rest[1]!);
+      return;
+    case "backfill":
+      if (rest.length !== 3) die("usage: host.sh leg backfill <dispatch> <leg> <number>");
+      legBackfillOnly(rest[0]!, rest[1]!, rest[2]!);
+      return;
+    case "waiting": {
+      const sub = rest[0] ?? "";
+      const subRest = rest.slice(1);
+      if (sub === "add") {
+        if (subRest.length !== 3)
+          die("usage: host.sh leg waiting add <runs> <ticket> <question-file>");
+        legWaitingAdd(subRest[0]!, subRest[1]!, subRest[2]!);
+      } else if (sub === "remove") {
+        if (subRest.length !== 2) die("usage: host.sh leg waiting remove <runs> <ticket>");
+        legWaitingRemove(subRest[0]!, subRest[1]!);
+      } else if (sub === "list") {
+        if (subRest.length !== 1) die("usage: host.sh leg waiting list <runs>");
+        legWaitingList(subRest[0]!);
+      } else die("usage: host.sh leg waiting add|remove|list ...");
+      return;
+    }
+    case "retry": {
+      if (rest.length !== 4) die("usage: host.sh leg retry <dispatch> <worktree> <leg> <number>");
+      const d = rest[0]!;
+      const wt = rest[1]!;
+      const leg = rest[2]!;
+      const n = rest[3]!;
+      const attempts = join(d, "logs", `coachman-leg-${n}-attempts.jsonl`);
+      let recorded = false;
+      try {
+        recorded = statSync(attempts).size > 0;
+      } catch {}
+      if (!recorded) die(`leg ${n} has no attempt to retry`);
+      const last = legLatest(attempts);
+      if (!last || last.length < 5) die("cannot read the last leg attempt");
+      const role = last[1]!;
+      const prompt = last[2]!;
+      const thread = last[3]!;
+      const outcome = last[4]!;
+      const retryAs = thread !== "" ? "resume" : "launch";
+      if (outcome !== "refused" && outcome !== "pre-thread" && outcome !== "walled")
+        die(`leg ${n}'s last attempt is ${outcome}, not waiting for a retry`);
+      if (outcome === "walled" && role === "coachman")
+        die(`leg ${n}'s last attempt is a primary wall: take it over, do not retry it`);
+      await legStart(retryAs, d, wt, leg, n, prompt, thread, role);
+      return;
+    }
+    default:
+      die("usage: host.sh leg launch|resume|takeover|retry|outcome|backfill|waiting ...");
+  }
+}
+// The hosted executor; the caller owns paths and clears markers. Ownership is established by
+// the owner, not inferred by the starter: the launch names itself before anything else, and
+// never runs unowned. An abort here leaves no record; the next start backfills this attempt
+// as refused.
+async function legExec(args: string[]): Promise<void> {
+  const at = (i: number): string => args[i] ?? "";
+  const d = at(0);
+  const wt = at(1);
+  const leg = at(2);
+  const n = at(3);
+  const request = at(4);
+  const role = at(5);
+  const prompt = at(6);
+  const thread = at(7);
+  const stream = at(8);
+  const err = at(9);
+  const done = at(10);
+  const attempts = at(11);
+  const attempt = at(12);
+  const phase = at(13);
+  const wall = at(14);
+  const active = at(15);
+  const starterPid = at(16);
+  const starterStart = at(17);
+  const mutex = join(d, `.leg-${n}-mutex`);
+  if (!legClaim(active, mutex, starterPid, starterStart)) throw hostError("", 1);
+  try {
+    // This attempt's events start here: on a resume the stream still holds prior attempts,
+    // whose wall events and thread ids must not classify this one.
+    let startOff = 0;
+    try {
+      startOff = statSync(stream).size;
+    } catch {
+      startOff = 0;
+    }
+    const launchMode = request === "resume" ? "resume" : "launch";
+    // Observe stderr as it arrives, while teeing it to the user-readable .err file. A wall
+    // is an error shaped like one: a line-anchored 402/429, an HTTP status line carrying
+    // one, a bare API term prose never holds, or an error word beside a wall term or code.
+    const markers = ["error", "fail", "exceed", "denied", "exception"];
+    const bare = ["insufficient_quota", "resource exhausted", "payment required"];
+    const anchored = new RegExp(`^[${PY_S_CLASS}]*(?:402|429)\\b`, "u");
+    const httpStatus = new RegExp(`http/[^${PY_S_CLASS}]+[${PY_S_CLASS}]+(?:402|429)\\b`, "u");
+    const anyCode = /\b(?:402|429)\b/u;
+    let wallSeen = false;
+    const scanLine = (line: string): void => {
+      if (wallSeen) return;
+      const s = line.toLowerCase();
+      if (anchored.test(s) || httpStatus.test(s) || bare.some((t) => s.includes(t))) {
+        wallSeen = true;
+      } else if (
+        markers.some((m) => s.includes(m)) &&
+        (anyCode.test(s) || LEG_WALL_TERMS.some((t) => s.includes(t)))
+      ) {
+        wallSeen = true;
+      }
+    };
+    const errFd = openSync(err, "a", 0o666);
+    // The runner injects the host role only when its child is launch.sh itself; the leg's
+    // child is _leg_exec, so the role arrives here unsaid. Say it: every leg attempt runs
+    // with the coachman host role, fallback takeovers included.
+    process.env.POSTMASTER_LAUNCH_ROLE = "coachman";
+    const child = spawn(
+      join(HERE, "launch.sh"),
+      launchMode === "resume"
+        ? ["resume", role, wt, thread, prompt, "--leg", leg, "--run", d]
+        : ["launch", role, wt, prompt, "--leg", leg, "--run", d],
+      {
+        env: process.env,
+        stdio: ["ignore", "inherit", "pipe"],
+      },
+    );
+    // The consumer drains to EOF: breaking early would SIGPIPE the launch and lose the later
+    // stderr the postmaster reads to explain the failure.
+    const drained = (async (): Promise<void> => {
+      const decoder = new TextDecoder("utf-8");
+      // Raw bytes split on line breaks, each line decoded whole: a multibyte character never
+      // holds a break byte, so no character is ever split across a decode.
+      let carry = new Uint8Array(0);
+      try {
+        const stderr = child.stderr as unknown as AsyncIterable<Uint8Array> | null;
+        if (stderr) {
+          for await (const chunk of stderr) {
+            try {
+              writeSync(errFd, chunk);
+            } catch {}
+            const buf = new Uint8Array(carry.length + chunk.length);
+            buf.set(carry, 0);
+            buf.set(chunk, carry.length);
+            let start = 0;
+            for (let i = 0; i < buf.length; i++) {
+              if (buf[i] === 10 || buf[i] === 13) {
+                scanLine(decoder.decode(buf.subarray(start, i)));
+                start = i + 1;
+              }
+            }
+            carry = buf.slice(start);
+          }
+        }
+        if (carry.length) scanLine(decoder.decode(carry));
+      } catch {}
+    })();
+    const exited = new Promise<number>((resolve) => {
+      let settled = false;
+      child.once("error", (error: unknown) => {
+        if (!settled) {
+          settled = true;
+          resolve((error as { code?: string }).code === "EACCES" ? 126 : 127);
+        }
+      });
+      child.once("exit", (code: number | null, signal: string | null) => {
+        if (!settled) {
+          settled = true;
+          resolve(code ?? (signal ? signalExitCode(signal) : 1));
+        }
+      });
+    });
+    const procEvents = process as unknown as {
+      removeListener(signal: string, handler: () => void): void;
+    };
+    const forwarders: Array<{ signal: NodeJS.Signals; handler: () => void }> = [];
+    for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"] as const) {
+      const handler = (): void => {
+        const pid = child.pid ?? 0;
+        if (pid) {
+          try {
+            process.kill(-pid, "SIGTERM");
+          } catch {
+            try {
+              process.kill(pid, "SIGTERM");
+            } catch {}
+          }
+        }
+        procEvents.removeListener(signal, handler);
+        try {
+          process.kill(process.pid, signal);
+        } catch {}
+        setTimeout(() => {
+          process.exit(signalExitCode(signal));
+        }, 100);
+      };
+      process.on(signal, handler);
+      forwarders.push({ signal, handler });
+    }
+    const rc = await exited;
+    await drained;
+    try {
+      closeSync(errFd);
+    } catch {}
+    for (const { signal, handler } of forwarders) procEvents.removeListener(signal, handler);
+    if (wallSeen) {
+      try {
+        writeFileSync(wall, "wall\n");
+      } catch {}
+    }
+    legClassify({
+      d,
+      wt,
+      leg,
+      n,
+      request,
+      role,
+      prompt,
+      thread,
+      stream,
+      done,
+      attempts,
+      attempt,
+      phase,
+      wall,
+      rc: String(rc),
+      start: String(startOff),
+      end: "",
+      backfilled: "0",
+    });
+  } finally {
+    legRelease(active, mutex);
+  }
+}
 async function liveTest(): Promise<void> {
   const result = await import("./host-self-test.ts");
   await result.live();
@@ -3288,6 +4814,9 @@ async function main(): Promise<void> {
       return;
     case "name":
       console.log(nameCmd(args[0] ?? "", ...args.slice(1)));
+      return;
+    case "leg":
+      await legCmd(args);
       return;
     case "run":
       await runCmd(args);
@@ -3315,6 +4844,9 @@ async function main(): Promise<void> {
       return;
     case "read":
       readCmd(args);
+      return;
+    case "_leg_exec":
+      await legExec(args);
       return;
     case "_run":
       await runLaunch(args[1] ?? "", args[0] ?? "");
@@ -3357,7 +4889,7 @@ async function main(): Promise<void> {
       return;
     default:
       die(
-        "usage: host.sh detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] | stop | close | stop-run | close-run | spawn | send | wait | read | --live-test (see the header)",
+        "usage: host.sh leg | detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] | stop | close | stop-run | close-run | spawn | send | wait | read | --live-test (see the header)",
       );
   }
 }

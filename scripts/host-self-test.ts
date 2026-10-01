@@ -3674,6 +3674,1856 @@ export async function runControls(): Promise<number> {
       roleOut,
     );
 
+    console.log("leg attempt controls");
+    const legD = join(root, "leg-dispatch");
+    const legWt = join(f.repo, ".worktrees", "T-1-luna");
+    const legBin = join(root, "bin");
+    const legPath = `${legBin}:${process.env.PATH ?? ""}`;
+    const limitsToml = join(root, "live-limits.toml");
+    const legRunJson =
+      '{"config":{"team":{"coachman":{"harness":"claude","model":"fake-coach"},"coachman_fallback":{"harness":"claude","model":"fake-fallback"}}}}\n';
+    mkdirSync(join(legD, "logs"), { recursive: true });
+    writeFileSync(
+      join(legD, "brief.md"),
+      `# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, leg attempt controls\ndispatch: ${legD}\nsynthesis worktree: ${legWt}\n`,
+    );
+    writeFileSync(join(legD, "manifest.json"), '{"stage":"review","leg":1}\n');
+    writeFileSync(join(legD, "run.json"), legRunJson);
+    writeFileSync(
+      join(legBin, "claude"),
+      [
+        "#!/usr/bin/env bash",
+        'printf \'%s\\n\' "$*" >> "$POSTMASTER_HOST_FIXTURE/leg-calls"',
+        'case "$*" in',
+        "  *wall-before*|*fallback-wall*)",
+        "    printf '429 rate limit exceeded\\n' >&2",
+        "    exit 1 ;;",
+        "  *wall-after*)",
+        '    printf \'{"session_id":"thread-wall-after"}\\n\'',
+        "    printf '429 rate limit exceeded\\n' >&2",
+        "    exit 1 ;;",
+        "  *'finish the leg'*)",
+        '    printf \'{"session_id":"thread-finished"}\\n\'',
+        '    : > "$TEST_DONE"',
+        "    exit 0 ;;",
+        "  *replay-me*)",
+        '    printf \'{"session_id":"thread-replayed"}\\n\'',
+        '    printf \'%s\\n\' "$*" > "$TEST_OBSERVED"',
+        "    exit 1 ;;",
+        "  *quota-in-prose*)",
+        '    printf \'{"session_id":"thread-prose"}\\n\'',
+        '    printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"quota"}]}}\\n\'',
+        "    exit 1 ;;",
+        "  *cap-no-thread*)",
+        "    printf 'host: memory cap reached (MemoryMax=8G)\\n' >&2",
+        "    exit 137 ;;",
+        "  *cap-with-thread*)",
+        '    printf \'{"session_id":"thread-capped"}\\n\'',
+        "    printf 'host: memory cap reached (MemoryMax=8G)\\n' >&2",
+        "    exit 137 ;;",
+        "  *struct-wall*)",
+        '    printf \'{"type":"error","error":{"code":429,"message":"rate limit"}}\\n\'',
+        "    exit 1 ;;",
+        "  *prose-capacity*)",
+        '    printf \'{"session_id":"thread-prose-cap"}\\n\'',
+        "    printf 'the build has spare capacity for more jobs\\n' >&2",
+        "    exit 1 ;;",
+        "  *prose-count*)",
+        '    printf \'{"session_id":"thread-prose-count"}\\n\'',
+        "    printf 'processed 429 items successfully\\n' >&2",
+        "    exit 1 ;;",
+        "  *prose-lock*)",
+        '    printf \'{"session_id":"thread-prose-lock"}\\n\'',
+        "    printf 'waiting for session lock on the database\\n' >&2",
+        "    exit 1 ;;",
+        "  *err-quota*)",
+        '    printf \'{"session_id":"thread-err-quota"}\\n\'',
+        "    printf 'Error: quota exceeded for this request\\n' >&2",
+        "    exit 1 ;;",
+        "  *bare-429*)",
+        '    printf \'{"session_id":"thread-bare-429"}\\n\'',
+        "    printf '429 Too Many Requests\\n' >&2",
+        "    exit 1 ;;",
+        "  *http-wall*)",
+        '    printf \'{"session_id":"thread-http"}\\n\'',
+        "    printf 'HTTP/1.1 429 Too Many Requests\\n' >&2",
+        "    exit 1 ;;",
+        "  *bare-quota*)",
+        '    printf \'{"session_id":"thread-bareq"}\\n\'',
+        "    printf 'insufficient_quota: upgrade your plan\\n' >&2",
+        "    exit 1 ;;",
+        "  *bare-exhausted*)",
+        '    printf \'{"session_id":"thread-barex"}\\n\'',
+        "    printf 'resource exhausted\\n' >&2",
+        "    exit 1 ;;",
+        "  *bare-payment*)",
+        '    printf \'{"session_id":"thread-barep"}\\n\'',
+        "    printf 'payment required for this model\\n' >&2",
+        "    exit 1 ;;",
+        "  *overloaded-fn*)",
+        '    printf \'{"session_id":"thread-overfn"}\\n\'',
+        "    printf 'call to overloaded function is ambiguous\\n' >&2",
+        "    exit 1 ;;",
+        "  *wall-chatter*)",
+        '    printf \'{"session_id":"thread-chatter"}\\n\'',
+        "    printf '429 rate limit exceeded\\n' >&2",
+        "    python3 -c 'import os",
+        'for fd in os.listdir("/proc/self/fd"):',
+        "    try: n = int(fd)",
+        "    except ValueError: continue",
+        "    if n > 2:",
+        "        try: os.close(n)",
+        "        except OSError: pass'",
+        '    i=0; while [ $i -lt 50000 ]; do printf \'detail line %05d %0100d\\n\' "$i" "$i" >&2; i=$((i+1)); done',
+        "    exit 1 ;;",
+        "  *break-runjson-shape*)",
+        '    printf \'{"session_id":"thread-broken-shape"}\\n\'',
+        "    printf '[]' > \"$TEST_RUNJSON\"",
+        "    exit 1 ;;",
+        "  *break-runjson*)",
+        '    printf \'{"session_id":"thread-broken"}\\n\'',
+        "    printf 'this is not json' > \"$TEST_RUNJSON\"",
+        "    exit 1 ;;",
+        "  *rateinfo-shape*)",
+        '    printf \'{"type":"rate_limit_event","rate_limit_info":"limited","session_id":"thread-rl"}\\n\'',
+        "    exit 1 ;;",
+        "  *wall-binary*)",
+        '    printf \'{"session_id":"thread-bin"}\\n\'',
+        "    printf 'Error: quota exceeded\\n' >&2",
+        "    i=0; while [ $i -lt 1000 ]; do printf '\\xff\\xfe binary\\n' >&2; i=$((i+1)); done",
+        "    exit 1 ;;",
+        "  *skill-caller*)",
+        '    "$TEST_LAUNCH" skill coachman security-review --leg synthesis --run "$TEST_DISPATCH" >/dev/null 2>&1',
+        '    printf \'{"session_id":"thread-skilled"}\\n\'',
+        "    exit 1 ;;",
+        "  *pre-thread*) exit 1 ;;",
+        '  *sleepy*) sleep "${TEST_SLEEP:-5}"; printf \'{"session_id":"thread-sleepy"}\\n\'; exit 1 ;;',
+        "  *)",
+        '    printf \'{"session_id":"thread-plain"}\\n\'',
+        "    exit 1 ;;",
+        "esac",
+      ].join("\n") + "\n",
+    );
+    exec("chmod", ["+x", join(legBin, "claude")]);
+    writeFileSync(limitsToml, '[limits]\nmemory_max = "8G"\ntasks_max = 512\n');
+    const attemptsPath = join(legD, "logs", "coachman-leg-1-attempts.jsonl");
+    const streamPath = join(legD, "logs", "coachman-leg-1-events.jsonl");
+    const errPath = join(legD, "logs", "coachman-leg-1.err");
+    const legEnv = (extra: Record<string, string> = {}): Record<string, string> => ({
+      POSTMASTER_HOST: "none",
+      POSTMASTER_CONFIG: limitsToml,
+      PATH: legPath,
+      TEST_DONE: join(legD, ".leg-1-done"),
+      TEST_OBSERVED: join(legD, "retry-observed"),
+      TEST_RUNJSON: join(legD, "run.json"),
+      TEST_LAUNCH: join(HERE, "launch.sh"),
+      TEST_DISPATCH: legD,
+      ...extra,
+    });
+    const legRun = async (args: string[], extra?: Record<string, string>): Promise<Result> => {
+      const r = execHost(["leg", ...args], legPath, f.caller, legEnv(extra));
+      await marker(join(legD, ".leg-1-exited"), 30);
+      return r;
+    };
+    const nonEmptyLines = (path: string): string[] => {
+      try {
+        return readFileSync(path, "utf8")
+          .split("\n")
+          .filter((l) => l !== "");
+      } catch {
+        return [];
+      }
+    };
+    const lastRecord = (path: string): any => {
+      const lines = nonEmptyLines(path);
+      return JSON.parse(lines[lines.length - 1] ?? "");
+    };
+    const safeOutcome = (path: string): string => {
+      try {
+        return String(lastRecord(path).outcome ?? "<none>");
+      } catch {
+        return "<none>";
+      }
+    };
+    const safeField = (path: string, field: string): string => {
+      try {
+        return String(lastRecord(path)[field] ?? "<none>");
+      } catch {
+        return "<none>";
+      }
+    };
+    const legCalls = (): number => nonEmptyLines(join(root, "leg-calls")).length;
+    const lastCall = (): string => {
+      const lines = nonEmptyLines(join(root, "leg-calls"));
+      return lines[lines.length - 1] ?? "";
+    };
+    const isEmpty = (path: string): boolean => {
+      try {
+        return statSync(path).size === 0;
+      } catch {
+        return true;
+      }
+    };
+    let prompt = join(legD, "wall-before.txt");
+    writeFileSync(prompt, "wall-before first event\n");
+    let r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "a wall before the first event is recorded as walled",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "walled" && isEmpty(streamPath),
+      `${safeOutcome(attemptsPath)}; err=${nonEmptyLines(errPath).join("|")}; calls=${nonEmptyLines(join(root, "leg-calls")).join("|")}`,
+    );
+    prompt = join(legD, "wall-after.txt");
+    writeFileSync(prompt, "wall-after first event\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "a wall after the first event is recorded as walled",
+      () =>
+        r.code === 0 &&
+        lastRecord(attemptsPath).outcome === "walled" &&
+        nonEmptyLines(streamPath).some((l) => l.includes("thread-wall-after")),
+      safeOutcome(attemptsPath),
+    );
+    prompt = join(legD, "fallback-wall.txt");
+    writeFileSync(prompt, "fallback-wall before first event\n");
+    r = await legRun(["takeover", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "a pre-event fallback wall is recorded for the user",
+      () =>
+        r.code === 0 &&
+        lastRecord(attemptsPath).outcome === "walled" &&
+        lastRecord(attemptsPath).role === "coachman_fallback" &&
+        nonEmptyLines(join(legD, "logs", "coachman-leg-1-walled-events.jsonl")).some((l) =>
+          l.includes("thread-wall-after"),
+        ) &&
+        nonEmptyLines(join(legD, "logs", "coachman-leg-1-walled.err")).some((l) =>
+          l.includes("429 rate limit"),
+        ) &&
+        isEmpty(streamPath),
+      `${safeOutcome(attemptsPath)} ${safeField(attemptsPath, "role")}`,
+    );
+    prompt = join(legD, "finish.txt");
+    writeFileSync(prompt, "finish the leg\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "a hand-off is recorded as finished",
+      () =>
+        r.code === 0 &&
+        lastRecord(attemptsPath).outcome === "finished" &&
+        existsSync(join(legD, ".leg-1-done")),
+      safeOutcome(attemptsPath),
+    );
+    r = execHost(["leg", "resume", legD, legWt, "synthesis", "1", "", prompt]);
+    await pass(
+      "a refused validation leaves the finished leg's markers alone",
+      () =>
+        r.code !== 0 &&
+        existsSync(join(legD, ".leg-1-done")) &&
+        existsSync(join(legD, ".leg-1-exited")),
+    );
+    prompt = join(legD, "struct-wall.txt");
+    writeFileSync(prompt, "struct-wall event\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "a structured wall event is recorded as walled",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "walled",
+      safeOutcome(attemptsPath),
+    );
+    prompt = join(legD, "clean-resume.txt");
+    writeFileSync(prompt, "clean resume after wall\n");
+    r = await legRun(["resume", legD, legWt, "synthesis", "1", "thread-struct", prompt]);
+    await pass(
+      "a clean resume is not reclassified by the previous attempt's wall event",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "incomplete",
+      safeOutcome(attemptsPath),
+    );
+    prompt = join(legD, "pre-thread.txt");
+    writeFileSync(prompt, "pre-thread no event\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "an exit before a thread id is recorded as pre-thread",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "pre-thread",
+      safeOutcome(attemptsPath),
+    );
+    prompt = join(legD, "replay.txt");
+    writeFileSync(prompt, "replay-me original prompt\n");
+    writeFileSync(join(legD, "refuse.env"), "exit 17\n");
+    {
+      const runStore = JSON.parse(readFileSync(join(legD, "run.json"), "utf8"));
+      runStore.config.team.coachman.env_file = join(legD, "refuse.env");
+      writeFileSync(join(legD, "run.json"), JSON.stringify(runStore));
+    }
+    r = await legRun(["resume", legD, legWt, "synthesis", "1", "thread-finished", prompt]);
+    await pass(
+      "a refused resume retains its existing thread id",
+      () =>
+        r.code === 0 &&
+        lastRecord(attemptsPath).outcome === "refused" &&
+        lastRecord(attemptsPath).thread_id === "thread-finished",
+      `${safeOutcome(attemptsPath)} ${safeField(attemptsPath, "thread_id")}`,
+    );
+    writeFileSync(join(legD, "run.json"), legRunJson);
+    r = await legRun(["retry", legD, legWt, "synthesis", "1"]);
+    await pass(
+      "retry after an answer delivers the refused resume's saved prompt",
+      () =>
+        r.code === 0 &&
+        nonEmptyLines(join(legD, "retry-observed")).some((l) => l.includes("replay-me")),
+    );
+    prompt = join(legD, "quota-prose.txt");
+    writeFileSync(prompt, "quota-in-prose\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "quota in assistant prose does not turn an incomplete thread into a wall",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "incomplete",
+      safeOutcome(attemptsPath),
+    );
+    prompt = join(legD, "cap-none.txt");
+    writeFileSync(prompt, "cap-no-thread kill\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "a host cap kill with no thread id is pre-thread, not a wall",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "pre-thread",
+      safeOutcome(attemptsPath),
+    );
+    prompt = join(legD, "cap-thread.txt");
+    writeFileSync(prompt, "cap-with-thread kill\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "a host cap kill with a thread id is incomplete, not a wall",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "incomplete",
+      safeOutcome(attemptsPath),
+    );
+    const wallProbe = async (
+      file: string,
+      content: string,
+      label: string,
+      want: string,
+    ): Promise<void> => {
+      prompt = join(legD, file);
+      writeFileSync(prompt, `${content}\n`);
+      r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+      await pass(
+        label,
+        () => r.code === 0 && lastRecord(attemptsPath).outcome === want,
+        safeOutcome(attemptsPath),
+      );
+    };
+    await wallProbe(
+      "prose-capacity.txt",
+      "prose-capacity wall wording",
+      "spare capacity in prose is incomplete, not a wall",
+      "incomplete",
+    );
+    await wallProbe(
+      "prose-count.txt",
+      "prose-count wall wording",
+      "a bare 429 count in prose is incomplete, not a wall",
+      "incomplete",
+    );
+    await wallProbe(
+      "prose-lock.txt",
+      "prose-lock wall wording",
+      "a session lock in prose is incomplete, not a wall",
+      "incomplete",
+    );
+    await wallProbe(
+      "err-quota.txt",
+      "err-quota wall wording",
+      "an error-shaped quota line is still a wall",
+      "walled",
+    );
+    await wallProbe(
+      "bare-429.txt",
+      "bare-429 wall wording",
+      "a line-anchored 429 is still a wall",
+      "walled",
+    );
+    await wallProbe(
+      "http-wall.txt",
+      "http-wall wording",
+      "an HTTP status line carrying 429 is a wall",
+      "walled",
+    );
+    await wallProbe(
+      "bare-quota.txt",
+      "bare-quota wording",
+      "a bare insufficient_quota line is a wall",
+      "walled",
+    );
+    await wallProbe(
+      "bare-exhausted.txt",
+      "bare-exhausted wording",
+      "a bare resource-exhausted line is a wall",
+      "walled",
+    );
+    await wallProbe(
+      "bare-payment.txt",
+      "bare-payment wording",
+      "a bare payment-required line is a wall",
+      "walled",
+    );
+    await wallProbe(
+      "overloaded-fn.txt",
+      "overloaded-fn wording",
+      "an overloaded function in prose is incomplete, not a wall",
+      "incomplete",
+    );
+    prompt = join(legD, "rateinfo-shape.txt");
+    writeFileSync(prompt, "rateinfo-shape event\n");
+    let before = nonEmptyLines(attemptsPath).length;
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "a misshapen rate-limit event still gets its record",
+      () =>
+        r.code === 0 &&
+        nonEmptyLines(attemptsPath).length === before + 1 &&
+        lastRecord(attemptsPath).outcome === "incomplete",
+      safeOutcome(attemptsPath),
+    );
+    prompt = join(legD, "wall-chatter.txt");
+    writeFileSync(prompt, "wall-chatter flood\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    const kept = nonEmptyLines(errPath).filter((l) => l.startsWith("detail line")).length;
+    await pass(
+      "stderr after a wall line is preserved whole",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "walled" && kept === 50000,
+      `${safeOutcome(attemptsPath)} kept=${kept}`,
+    );
+    prompt = join(legD, "wall-binary.txt");
+    writeFileSync(prompt, "wall-binary flood\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "non-text stderr keeps its wall signal",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "walled",
+      safeOutcome(attemptsPath),
+    );
+    prompt = join(legD, "break-runjson.txt");
+    writeFileSync(prompt, "break-runjson now\n");
+    before = nonEmptyLines(attemptsPath).length;
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "an unreadable run.json still gets its attempt record",
+      () =>
+        r.code === 0 &&
+        nonEmptyLines(attemptsPath).length === before + 1 &&
+        lastRecord(attemptsPath).outcome === "pre-thread",
+      safeOutcome(attemptsPath),
+    );
+    writeFileSync(join(legD, "run.json"), legRunJson);
+    prompt = join(legD, "break-runjson-shape.txt");
+    writeFileSync(prompt, "break-runjson-shape now\n");
+    before = nonEmptyLines(attemptsPath).length;
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "a run.json that is valid JSON but not an object still gets its record",
+      () =>
+        r.code === 0 &&
+        nonEmptyLines(attemptsPath).length === before + 1 &&
+        lastRecord(attemptsPath).outcome === "pre-thread",
+      safeOutcome(attemptsPath),
+    );
+    writeFileSync(join(legD, "run.json"), legRunJson);
+    prompt = join(legD, "skill-caller.txt");
+    writeFileSync(prompt, "skill-caller mid-leg\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "a launch.sh call mid-leg does not overwrite the attempt's phase",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "incomplete",
+      safeOutcome(attemptsPath),
+    );
+    const outcome = execHost(["leg", "outcome", legD, "1"]);
+    await pass(
+      "leg outcome prints the last attempt record",
+      () => {
+        try {
+          return JSON.parse(outcome.out).outcome === "incomplete";
+        } catch {
+          return false;
+        }
+      },
+      outcome.out,
+    );
+    r = execHost(["leg", "outcome", legD, "9"]);
+    await pass("leg outcome with no attempt recorded refuses", () => r.code !== 0);
+    const waitRuns = join(root, "waitruns");
+    mkdirSync(waitRuns, { recursive: true });
+    writeFileSync(join(root, "wq1.txt"), "What about the merge?\n");
+    writeFileSync(join(root, "wq2.txt"), "Ship or not?\n");
+    execHost(["leg", "waiting", "add", waitRuns, "T-1", join(root, "wq1.txt")]);
+    execHost(["leg", "waiting", "add", waitRuns, "T-2", join(root, "wq2.txt")]);
+    const waitingHeadings = (): number =>
+      execHost(["leg", "waiting", "list", waitRuns])
+        .out.split("\n")
+        .filter((l) => l.startsWith("## ")).length;
+    await pass(
+      "two waiting runs are listed",
+      () => waitingHeadings() === 2,
+      String(waitingHeadings()),
+    );
+    execHost(["leg", "waiting", "add", waitRuns, "T-1", join(root, "wq2.txt")]);
+    await pass(
+      "adding a ticket already waiting replaces its question, and does not duplicate",
+      () => waitingHeadings() === 2,
+      String(waitingHeadings()),
+    );
+    const waitingQuestion = (): string => {
+      const lines = execHost(["leg", "waiting", "list", waitRuns]).out.split("\n");
+      const at = lines.indexOf("## T-1");
+      return at < 0 ? "" : (lines[at + 1] ?? "");
+    };
+    await pass(
+      "the replaced question is the new one",
+      () => waitingQuestion() === "Ship or not?",
+      waitingQuestion(),
+    );
+    execHost(["leg", "waiting", "remove", waitRuns, "T-1"]);
+    await pass(
+      "removing one leaves the other",
+      () => waitingHeadings() === 1,
+      String(waitingHeadings()),
+    );
+    execHost(["leg", "waiting", "remove", waitRuns, "T-2"]);
+    await pass(
+      "removing the last empties the list",
+      () => waitingHeadings() === 0,
+      String(waitingHeadings()),
+    );
+    await pass(
+      "an empty waiting list removes the file",
+      () => !existsSync(join(waitRuns, "postmaster", "ESCALATION.md")),
+    );
+    writeFileSync(join(root, "wq3.txt"), "Should we ship?\n\n## Acceptance\nsome text\n");
+    execHost(["leg", "waiting", "add", waitRuns, "T-3", join(root, "wq3.txt")]);
+    await pass(
+      "a heading inside a question is one entry, not two",
+      () => waitingHeadings() === 1,
+      String(waitingHeadings()),
+    );
+    execHost(["leg", "waiting", "remove", waitRuns, "T-3"]);
+    await pass(
+      "removing it leaves no orphan entry",
+      () => !existsSync(join(waitRuns, "postmaster", "ESCALATION.md")),
+    );
+    before = nonEmptyLines(attemptsPath).length;
+    r = execHost(["leg", "retry", legD, legWt, "synthesis", "1"]);
+    await pass(
+      "retry refuses an attempt that never waited on the user",
+      () => r.code !== 0 && nonEmptyLines(attemptsPath).length === before,
+    );
+    writeFileSync(
+      attemptsPath,
+      `${nonEmptyLines(attemptsPath).join("\n")}\n{"attempt":99,"leg":1,"name":"synthesis","request":"launch","role":"coachman","prompt":${JSON.stringify(prompt)},"thread_id":"","outcome":"walled","exit":1}\n`,
+    );
+    r = execHost(["leg", "retry", legD, legWt, "synthesis", "1"]);
+    await pass(
+      "retry refuses a primary wall: that is the takeover's job",
+      () => r.code !== 0 && nonEmptyLines(attemptsPath).length === before + 1,
+    );
+    writeFileSync(
+      attemptsPath,
+      `${nonEmptyLines(attemptsPath)
+        .filter((l) => !l.includes('"attempt":99'))
+        .join("\n")}\n`,
+    );
+    const activePath = join(legD, ".leg-1-active");
+    mkdirSync(activePath);
+    writeFileSync(join(legD, ".leg-1-exited"), "");
+    prompt = join(legD, "stale.txt");
+    writeFileSync(prompt, "pre-thread stale lock\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "a stale active lock is stolen once its attempt exited",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "pre-thread",
+      safeOutcome(attemptsPath),
+    );
+    rmSync(join(legD, ".leg-1-exited"), { force: true });
+    rmSync(join(legD, ".leg-1-done"), { force: true });
+    rmSync(activePath, { recursive: true, force: true });
+    mkdirSync(activePath);
+    writeFileSync(join(legD, ".leg-1-exited"), "");
+    prompt = join(legD, "race.txt");
+    writeFileSync(prompt, "race for the lock\n");
+    const spawnEnv = (extra: Record<string, string> = {}): Record<string, string | undefined> => ({
+      HOME: process.env.HOME ?? "/",
+      PATH: legPath,
+      STUB: join(root, "stub"),
+      TMPDIR: root,
+      POSTMASTER_HOST_STATE: join(root, "state"),
+      POSTMASTER_HOST_FIXTURE: root,
+      POSTMASTER_HOST_CLAIM_WAIT: "3",
+      POSTMASTER_HOST_CLOSE_WAIT: "3",
+      POSTMASTER_HOST_FINISH_DELAY: finishDelay,
+      ...legEnv(extra),
+    });
+    const spawnLeg = (args: string[], extra?: Record<string, string>) =>
+      spawn(SELF, args, { cwd: f.caller, env: spawnEnv(extra), stdio: "ignore" });
+    // Attached in the same tick as the spawn or the kill check, so the exit event can
+    // never have fired already: a late attach after the event would never resolve.
+    const exited = (child: ReturnType<typeof spawn>): Promise<number | null> =>
+      new Promise((resolve) => {
+        child.once("exit", (code) => resolve(code));
+        child.once("error", () => resolve(null));
+      });
+    const callsBeforeRace = legCalls();
+    const racers = Array.from({ length: 8 }, () =>
+      spawnLeg(["leg", "launch", legD, legWt, "synthesis", "1", prompt]),
+    );
+    await Promise.all(racers.map(exited));
+    await marker(join(legD, ".leg-1-exited"), 30);
+    const callsAfterRace = legCalls();
+    await pass(
+      "concurrent starts run the harness exactly once",
+      () => callsAfterRace - callsBeforeRace === 1,
+      `delta=${callsAfterRace - callsBeforeRace}`,
+    );
+    rmSync(join(legD, ".leg-1-exited"), { force: true });
+    writeFileSync(activePath, "999999999 0\n");
+    prompt = join(legD, "wedge.txt");
+    writeFileSync(prompt, "ownerless lock recovery\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "a lock whose owner is gone is stolen without its exited marker",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "incomplete",
+      safeOutcome(attemptsPath),
+    );
+    rmSync(join(legD, ".leg-1-exited"), { force: true });
+    const selfStat = readFileSync(`/proc/${process.pid}/stat`, "utf8");
+    const selfStart =
+      selfStat
+        .slice(selfStat.lastIndexOf(")") + 1)
+        .trim()
+        .split(/\s+/u)[19] ?? "";
+    writeFileSync(activePath, `${process.pid} ${selfStart}\n`);
+    before = nonEmptyLines(attemptsPath).length;
+    prompt = join(legD, "livetest.txt");
+    writeFileSync(prompt, "live lock refuses\n");
+    r = execHost(
+      ["leg", "launch", legD, legWt, "synthesis", "1", prompt],
+      legPath,
+      f.caller,
+      legEnv(),
+    );
+    await pass(
+      "a lock with a live owner refuses the next start",
+      () => r.code !== 0 && nonEmptyLines(attemptsPath).length === before,
+    );
+    rmSync(activePath, { force: true });
+    rmSync(join(legD, ".leg-1-exited"), { force: true });
+    prompt = join(legD, "owned.txt");
+    writeFileSync(prompt, "sleepy ownership\n");
+    r = execHost(
+      ["leg", "launch", legD, legWt, "synthesis", "1", prompt],
+      legPath,
+      f.caller,
+      legEnv({
+        TEST_SLEEP: "8",
+      }),
+    );
+    const pidfilePath = join(legD, "logs", "coachman-leg-1.pid");
+    let lockpid = "";
+    for (let i = 0; i < 25; i++) {
+      try {
+        lockpid = (readFileSync(activePath, "utf8").split(" ")[0] ?? "").trim();
+      } catch {
+        lockpid = "";
+      }
+      let pidfile = "";
+      try {
+        pidfile = readFileSync(pidfilePath, "utf8").trim();
+      } catch {}
+      if (lockpid !== "" && lockpid === pidfile) break;
+      await sleep(200);
+    }
+    let lockAlive = false;
+    try {
+      if (/^[0-9]+$/u.test(lockpid)) process.kill(Number(lockpid), 0);
+      lockAlive = /^[0-9]+$/u.test(lockpid);
+    } catch {
+      lockAlive = false;
+    }
+    let lockContent = "";
+    try {
+      lockContent = readFileSync(activePath, "utf8").trim();
+    } catch {}
+    await pass(
+      "a live attempt names itself, the pidfile pid, in the lock",
+      () => r.code === 0 && lockpid !== "" && lockAlive,
+      `lock=${lockContent}`,
+    );
+    await marker(join(legD, ".leg-1-exited"), 30);
+    await pass("an exit releases its own lock", () => !existsSync(activePath));
+    rmSync(join(legD, ".leg-1-exited"), { force: true });
+    prompt = join(legD, "foreign.txt");
+    writeFileSync(prompt, "sleepy foreign lock\n");
+    const recsBeforeForeign = nonEmptyLines(attemptsPath).length;
+    const callsBeforeForeign = legCalls();
+    r = execHost(
+      ["leg", "launch", legD, legWt, "synthesis", "1", prompt],
+      legPath,
+      f.caller,
+      legEnv({
+        TEST_SLEEP: "5",
+      }),
+    );
+    for (let i = 0; i < 25; i++) {
+      let lp = "";
+      let pp = "";
+      try {
+        lp = (readFileSync(activePath, "utf8").split(" ")[0] ?? "").trim();
+      } catch {}
+      try {
+        pp = readFileSync(pidfilePath, "utf8").trim();
+      } catch {}
+      if (lp !== "" && lp === pp) break;
+      await sleep(200);
+    }
+    writeFileSync(activePath, `${process.pid} ${selfStart}\n`);
+    const keptForeign = readFileSync(activePath, "utf8");
+    await marker(join(legD, ".leg-1-exited"), 30);
+    let foreignContent = "";
+    try {
+      foreignContent = readFileSync(activePath, "utf8");
+    } catch {}
+    await pass(
+      "an exit keeps another owner's lock",
+      () =>
+        r.code === 0 &&
+        foreignContent === keptForeign &&
+        legCalls() === callsBeforeForeign + 1 &&
+        nonEmptyLines(attemptsPath).length === recsBeforeForeign + 1,
+      foreignContent.trim(),
+    );
+    rmSync(activePath, { force: true });
+    const directD = join(root, "direct-d");
+    mkdirSync(join(directD, "logs"), { recursive: true });
+    writeFileSync(join(directD, "run.json"), readFileSync(join(legD, "run.json"), "utf8"));
+    writeFileSync(
+      join(directD, "manifest.json"),
+      '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n',
+    );
+    writeFileSync(join(directD, "prompt.txt"), "direct claim\n");
+    writeFileSync(
+      join(directD, "brief.md"),
+      `# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, direct\nsynthesis worktree: ${legWt}\n`,
+    );
+    const directArgs = (active: string, starterPid: string, starterStart: string): string[] => [
+      "_leg_exec",
+      directD,
+      legWt,
+      "synthesis",
+      "1",
+      "launch",
+      "coachman",
+      join(directD, "prompt.txt"),
+      "",
+      join(root, "direct-stream.jsonl"),
+      join(root, "direct.err"),
+      join(directD, ".leg-1-done"),
+      join(root, "direct-attempts.jsonl"),
+      "1",
+      join(root, "direct-phase"),
+      join(root, "direct-wall"),
+      active,
+      starterPid,
+      starterStart,
+    ];
+    const directEnv = (): Record<string, string> => ({
+      POSTMASTER_HOST: "none",
+      POSTMASTER_CONFIG: limitsToml,
+      PATH: legPath,
+      TEST_DONE: join(directD, ".leg-1-done"),
+      TEST_OBSERVED: join(directD, "retry-observed"),
+    });
+    const directExec = (active: string, starterPid: string, starterStart: string): Result =>
+      execHost(directArgs(active, starterPid, starterStart), legPath, f.caller, directEnv());
+    mkdirSync(join(root, "rodir"), { recursive: true });
+    exec("chmod", ["555", join(root, "rodir")]);
+    let callsBefore = legCalls();
+    r = directExec(join(root, "rodir", ".leg-1-active"), String(process.pid), "0");
+    await pass(
+      "an attempt that cannot own its lock never starts",
+      () =>
+        r.code !== 0 &&
+        legCalls() === callsBefore &&
+        !existsSync(join(root, "direct-attempts.jsonl")),
+      `rc=${r.code}`,
+    );
+    exec("chmod", ["755", join(root, "rodir")]);
+    writeFileSync(join(root, "third.lock"), `${process.pid} ${selfStart}\n`);
+    callsBefore = legCalls();
+    r = directExec(join(root, "third.lock"), "999999999", "0");
+    await pass(
+      "an attempt never joins a lock that names another attempt",
+      () =>
+        r.code !== 0 &&
+        legCalls() === callsBefore &&
+        !existsSync(join(root, "direct-attempts.jsonl")),
+      `rc=${r.code}`,
+    );
+    writeFileSync(join(root, "starter.lock"), "999999999 0\n");
+    callsBefore = legCalls();
+    r = directExec(join(root, "starter.lock"), "999999999", "0");
+    await pass(
+      "a lock naming the starter is claimed and the attempt runs",
+      () =>
+        r.code === 0 &&
+        legCalls() === callsBefore + 1 &&
+        !existsSync(join(root, "starter.lock")) &&
+        nonEmptyLines(join(root, "direct-attempts.jsonl")).some((l) => l.includes('"attempt":1')),
+      `rc=${r.code}`,
+    );
+    let pairsBad = 0;
+    for (let i = 0; i < 50; i++) {
+      writeFileSync(join(root, "pair.lock"), "999999999 0\n");
+      callsBefore = legCalls();
+      const p1 = spawn(SELF, directArgs(join(root, "pair.lock"), "999999999", "0"), {
+        cwd: f.caller,
+        env: spawnEnv(directEnv()),
+        stdio: "ignore",
+      });
+      const p2 = spawn(SELF, directArgs(join(root, "pair.lock"), "999999999", "0"), {
+        cwd: f.caller,
+        env: spawnEnv(directEnv()),
+        stdio: "ignore",
+      });
+      const [r1, r2] = await Promise.all([exited(p1), exited(p2)]);
+      const live = (r1 === 0 ? 1 : 0) + (r2 === 0 ? 1 : 0);
+      if (live !== 1 || legCalls() !== callsBefore + 1) pairsBad++;
+    }
+    await pass(
+      "fifty paired claims each run exactly one attempt live",
+      () => pairsBad === 0,
+      `bad=${pairsBad}`,
+    );
+    const mutexPath = join(legD, ".leg-1-mutex");
+    const recsBeforeMutex = nonEmptyLines(attemptsPath).length;
+    const callsBeforeMutex = legCalls();
+    // A stealable lock forces the slow path, where the mutex decides.
+    writeFileSync(activePath, "999999999 0\n");
+    writeFileSync(mutexPath, `${process.pid}\n`);
+    const refusedStart = execHost(
+      ["leg", "launch", legD, legWt, "synthesis", "1", prompt],
+      legPath,
+      f.caller,
+      legEnv(),
+    );
+    const refusedRecs = nonEmptyLines(attemptsPath).length;
+    const refusedCalls = legCalls();
+    writeFileSync(mutexPath, "999999999\n");
+    prompt = join(legD, "mutex-steal.txt");
+    writeFileSync(prompt, "mutex steal probe\n");
+    const stolen = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "a mutex naming a live pid refuses the start, and a dead pid is stolen",
+      () =>
+        refusedStart.code !== 0 &&
+        refusedRecs === recsBeforeMutex &&
+        refusedCalls === callsBeforeMutex &&
+        stolen.code === 0 &&
+        lastRecord(attemptsPath).outcome === "incomplete" &&
+        !existsSync(mutexPath),
+      `refused=${refusedStart.code} stolen=${stolen.code} ${safeOutcome(attemptsPath)}`,
+    );
+    const killD = join(root, "kill-d");
+    mkdirSync(join(killD, "logs"), { recursive: true });
+    writeFileSync(join(killD, "run.json"), readFileSync(join(legD, "run.json"), "utf8"));
+    writeFileSync(
+      join(killD, "manifest.json"),
+      '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n',
+    );
+    writeFileSync(
+      join(killD, "brief.md"),
+      `# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, kill\nsynthesis worktree: ${legWt}\n`,
+    );
+    writeFileSync(join(killD, "prompt.txt"), "sleepy kill holder\n");
+    r = execHost(
+      ["leg", "launch", killD, legWt, "synthesis", "1", join(killD, "prompt.txt")],
+      legPath,
+      f.caller,
+      legEnv({
+        TEST_DONE: join(killD, ".leg-1-done"),
+        TEST_OBSERVED: join(killD, "retry-observed"),
+        TEST_SLEEP: "30",
+      }),
+    );
+    const killActive = join(killD, ".leg-1-active");
+    const killPidfile = join(killD, "logs", "coachman-leg-1.pid");
+    let killpid = "";
+    for (let i = 0; i < 50; i++) {
+      try {
+        killpid = (readFileSync(killActive, "utf8").split(" ")[0] ?? "").trim();
+      } catch {
+        killpid = "";
+      }
+      let pp = "";
+      try {
+        pp = readFileSync(killPidfile, "utf8").trim();
+      } catch {}
+      if (killpid !== "" && killpid === pp) break;
+      await sleep(100);
+    }
+    if (/^[0-9]+$/u.test(killpid)) {
+      try {
+        process.kill(Number(killpid), "SIGKILL");
+      } catch {}
+    }
+    await marker(join(killD, ".leg-1-exited"), 30);
+    const callsMidKill = legCalls();
+    writeFileSync(join(killD, "prompt2.txt"), "second start after kill\n");
+    const r2 = execHost(
+      ["leg", "launch", killD, legWt, "synthesis", "1", join(killD, "prompt2.txt")],
+      legPath,
+      f.caller,
+      legEnv({
+        TEST_DONE: join(killD, ".leg-1-done"),
+        TEST_OBSERVED: join(killD, "retry-observed"),
+      }),
+    );
+    await marker(join(killD, ".leg-1-exited"), 30);
+    const killAttempts = join(killD, "logs", "coachman-leg-1-attempts.jsonl");
+    let killGot = "missing";
+    try {
+      const rows = nonEmptyLines(killAttempts).map((l) => JSON.parse(l));
+      killGot =
+        rows.length === 2 && (rows[0].outcome === "refused" || rows[0].outcome === "pre-thread")
+          ? "ok"
+          : `BAD:${rows.length}:${rows[0]?.outcome ?? "?"}`;
+    } catch {
+      killGot = "BAD:unparsable";
+    }
+    await pass(
+      "a killed holder's lock is stolen and the next attempt runs",
+      () =>
+        r.code === 0 &&
+        killpid !== "" &&
+        r2.code === 0 &&
+        legCalls() === callsMidKill + 1 &&
+        killGot === "ok",
+      `rc=${r.code} rc2=${r2.code} got=${killGot}`,
+    );
+    const hostSrc = readFileSync(join(HERE, "host.ts"), "utf8");
+    const legStartSrc = hostSrc.slice(hostSrc.indexOf("async function legStart"));
+    await pass(
+      "the intent write precedes the phase write",
+      () => {
+        const i = legStartSrc.indexOf("cannot write the attempt intent");
+        const p = legStartSrc.indexOf("cannot write attempt phase");
+        return i > 0 && p > 0 && i < p;
+      },
+      "order",
+    );
+    await pass(
+      "the markers clear before the intent is written",
+      () => {
+        const c = legStartSrc.indexOf("markerRemove(exited)");
+        const i = legStartSrc.indexOf("cannot write the attempt intent");
+        return c > 0 && i > 0 && c < i;
+      },
+      "order",
+    );
+    const gapD = join(root, "gap-d");
+    mkdirSync(join(gapD, "logs"), { recursive: true });
+    writeFileSync(join(gapD, "run.json"), readFileSync(join(legD, "run.json"), "utf8"));
+    writeFileSync(
+      join(gapD, "manifest.json"),
+      '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n',
+    );
+    writeFileSync(
+      join(gapD, "brief.md"),
+      `# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, gap\nsynthesis worktree: ${legWt}\n`,
+    );
+    writeFileSync(join(gapD, "prompt.txt"), "gap resume prompt\n");
+    writeFileSync(
+      join(gapD, "logs", "coachman-leg-1-intent-1.json"),
+      `{"attempt":1,"request":"resume","role":"coachman","prompt":${JSON.stringify(join(gapD, "prompt.txt"))},"thread_id":"T-RESUME","stream_off":0}`,
+    );
+    writeFileSync(
+      join(gapD, "logs", "coachman-leg-1-events.jsonl"),
+      '{"session_id":"thread-foreign","type":"assistant"}\n',
+    );
+    const backfillEnv = (): Record<string, string> => ({
+      POSTMASTER_HOST: "none",
+      POSTMASTER_CONFIG: limitsToml,
+      PATH: legPath,
+    });
+    r = execHost(["leg", "backfill", gapD, "synthesis", "1"], legPath, f.caller, backfillEnv());
+    const gapAttempts = join(gapD, "logs", "coachman-leg-1-attempts.jsonl");
+    const gapGot = (() => {
+      try {
+        const rec = lastRecord(gapAttempts);
+        return `${rec.outcome}|${rec.request}|${rec.prompt}|${rec.thread_id}`;
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "intent-without-phase backfills a refused resume with its prompt and thread",
+      () => r.code === 0 && gapGot === `refused|resume|${join(gapD, "prompt.txt")}|T-RESUME`,
+      gapGot,
+    );
+    callsBefore = legCalls();
+    r = execHost(
+      ["leg", "retry", gapD, legWt, "synthesis", "1"],
+      legPath,
+      f.caller,
+      legEnv({
+        TEST_DONE: join(gapD, ".leg-1-done"),
+        TEST_OBSERVED: join(gapD, "retry-observed"),
+      }),
+    );
+    await marker(join(gapD, ".leg-1-exited"), 30);
+    const gapRetryGot = (() => {
+      try {
+        const rec = lastRecord(gapAttempts);
+        return `${rec.request}|${rec.thread_id}`;
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "retry after that refusal resumes the carried thread instead of wedging",
+      () =>
+        r.code === 0 &&
+        gapRetryGot === "resume|T-RESUME" &&
+        legCalls() === callsBefore + 1 &&
+        lastCall().includes("T-RESUME"),
+      `${gapRetryGot}: ${lastCall()}`,
+    );
+    const pinHere = realpathSync(join(HERE, ".."));
+    const pinD = join(root, "pin-d");
+    mkdirSync(join(pinD, "logs"), { recursive: true });
+    {
+      const runStore = JSON.parse(readFileSync(join(legD, "run.json"), "utf8"));
+      runStore.postmaster = { checkout: pinHere };
+      writeFileSync(join(pinD, "run.json"), JSON.stringify(runStore));
+    }
+    writeFileSync(
+      join(pinD, "manifest.json"),
+      '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n',
+    );
+    writeFileSync(
+      join(pinD, "brief.md"),
+      `# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, pin\nsynthesis worktree: ${legWt}\n`,
+    );
+    writeFileSync(join(pinD, "prompt.txt"), "pin retry prompt\n");
+    const pinAttempts = join(pinD, "logs", "coachman-leg-1-attempts.jsonl");
+    writeFileSync(
+      pinAttempts,
+      `{"attempt":1,"leg":1,"name":"synthesis","request":"resume","role":"coachman","prompt":${JSON.stringify(join(pinD, "prompt.txt"))},"thread_id":"T-PIN","outcome":"refused","on_answer":"retry","backfilled":true,"exit":1}\n`,
+    );
+    callsBefore = legCalls();
+    r = execHost(
+      ["leg", "retry", pinD, legWt, "synthesis", "1"],
+      legPath,
+      f.caller,
+      legEnv({
+        TEST_DONE: join(pinD, ".leg-1-done"),
+        TEST_OBSERVED: join(pinD, "retry-observed"),
+      }),
+    );
+    await marker(join(pinD, ".leg-1-exited"), 30);
+    const pinGot = (() => {
+      try {
+        const rec = lastRecord(pinAttempts);
+        return `${rec.request}|${rec.thread_id}`;
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "a retry on a pinned run uses the pin",
+      () =>
+        r.code === 0 &&
+        pinGot === "resume|T-PIN" &&
+        nonEmptyLines(pinAttempts).length === 2 &&
+        legCalls() === callsBefore + 1,
+      `${pinGot}: rc=${r.code}`,
+    );
+    const pinLiveD = join(root, "pinlive-d");
+    mkdirSync(join(pinLiveD, "logs"), { recursive: true });
+    {
+      const runStore = JSON.parse(readFileSync(join(legD, "run.json"), "utf8"));
+      runStore.postmaster = { checkout: root };
+      writeFileSync(join(pinLiveD, "run.json"), JSON.stringify(runStore));
+    }
+    writeFileSync(
+      join(pinLiveD, "manifest.json"),
+      '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n',
+    );
+    writeFileSync(join(pinLiveD, "prompt.txt"), "pin retry prompt\n");
+    const pinLiveAttempts = join(pinLiveD, "logs", "coachman-leg-1-attempts.jsonl");
+    writeFileSync(
+      pinLiveAttempts,
+      `{"attempt":1,"leg":1,"name":"synthesis","request":"resume","role":"coachman","prompt":${JSON.stringify(join(pinLiveD, "prompt.txt"))},"thread_id":"T-PIN","outcome":"refused","on_answer":"retry","backfilled":true,"exit":1}\n`,
+    );
+    callsBefore = legCalls();
+    r = execHost(
+      ["leg", "retry", pinLiveD, legWt, "synthesis", "1"],
+      legPath,
+      f.caller,
+      backfillEnv(),
+    );
+    const rPinLive2 = execHost(
+      ["leg", "launch", pinLiveD, legWt, "synthesis", "1", join(pinLiveD, "prompt.txt")],
+      legPath,
+      f.caller,
+      backfillEnv(),
+    );
+    await pass(
+      "a start from outside the pin is refused before anything moves",
+      () =>
+        r.code !== 0 &&
+        rPinLive2.code !== 0 &&
+        r.err.includes("serve from") &&
+        nonEmptyLines(pinLiveAttempts).length === 1 &&
+        legCalls() === callsBefore &&
+        !existsSync(join(pinLiveD, ".leg-1-exited")),
+      `rc=${r.code} rc2=${rPinLive2.code}`,
+    );
+    const gap0D = join(root, "gap0-d");
+    mkdirSync(join(gap0D, "logs"), { recursive: true });
+    writeFileSync(join(gap0D, "run.json"), readFileSync(join(legD, "run.json"), "utf8"));
+    writeFileSync(
+      join(gap0D, "manifest.json"),
+      '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n',
+    );
+    writeFileSync(
+      join(gap0D, "logs", "coachman-leg-1-events.jsonl"),
+      '{"session_id":"thread-foreign","type":"assistant"}\n',
+    );
+    r = execHost(["leg", "backfill", gap0D, "synthesis", "1"], legPath, f.caller, backfillEnv());
+    await pass(
+      "no intent and no phase backfills nothing",
+      () => r.code === 0 && isEmpty(join(gap0D, "logs", "coachman-leg-1-attempts.jsonl")),
+      `rc=${r.code}`,
+    );
+    const fuzzD = join(root, "fuzz-d");
+    mkdirSync(join(fuzzD, "logs"), { recursive: true });
+    writeFileSync(join(fuzzD, "run.json"), readFileSync(join(legD, "run.json"), "utf8"));
+    writeFileSync(
+      join(fuzzD, "manifest.json"),
+      '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n',
+    );
+    writeFileSync(
+      join(fuzzD, "brief.md"),
+      `# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, fuzz\nsynthesis worktree: ${legWt}\n`,
+    );
+    writeFileSync(join(fuzzD, "prompt.txt"), "fuzz prompt\n");
+    const fuzzIntents = (): number => {
+      try {
+        return readdirSync(join(fuzzD, "logs")).filter(
+          (n) => n.startsWith("coachman-leg-1-intent-") && n.endsWith(".json"),
+        ).length;
+      } catch {
+        return 0;
+      }
+    };
+    const fuzzKillLive = (): void => {
+      let lp = "";
+      let pp = "";
+      try {
+        lp = (readFileSync(join(fuzzD, ".leg-1-active"), "utf8").split(" ")[0] ?? "").trim();
+      } catch {}
+      try {
+        pp = readFileSync(join(fuzzD, "logs", "coachman-leg-1.pid"), "utf8").trim();
+      } catch {}
+      if (lp !== "" && lp === pp && /^[0-9]+$/u.test(lp)) {
+        try {
+          process.kill(Number(lp), 0);
+        } catch {
+          return;
+        }
+        try {
+          process.kill(Number(lp), "SIGKILL");
+        } catch {}
+      }
+    };
+    let fuzzBad = 0;
+    for (let i = 0; i < 10; i++) {
+      const intentsBefore = fuzzIntents();
+      const fuzzArgs =
+        i === 0 || i % 2 === 0
+          ? ["leg", "launch", fuzzD, legWt, "synthesis", "1", join(fuzzD, "prompt.txt")]
+          : [
+              "leg",
+              "resume",
+              fuzzD,
+              legWt,
+              "synthesis",
+              "1",
+              `T-FUZZ-${i}`,
+              join(fuzzD, "prompt.txt"),
+            ];
+      const starter = spawn(SELF, fuzzArgs, {
+        cwd: f.caller,
+        env: spawnEnv({
+          TEST_DONE: join(fuzzD, ".leg-1-done"),
+          TEST_OBSERVED: join(fuzzD, "retry-observed"),
+        }),
+        stdio: "ignore",
+      });
+      let starterGone = false;
+      starter.once("exit", () => {
+        starterGone = true;
+      });
+      for (let j = 0; j < 20; j++) {
+        if (fuzzIntents() !== intentsBefore || starterGone) break;
+        await sleep(50);
+      }
+      try {
+        starter.kill("SIGKILL");
+      } catch {}
+      if (!starterGone) await exited(starter);
+      fuzzKillLive();
+      let j = 0;
+      for (; j < 10; j++) {
+        const back = execHost(
+          ["leg", "backfill", fuzzD, "synthesis", "1"],
+          legPath,
+          f.caller,
+          backfillEnv(),
+        );
+        if (back.code === 0) break;
+        fuzzKillLive();
+        await sleep(500);
+      }
+      if (j >= 10) fuzzBad++;
+    }
+    await pass("ten kill passes all backfill cleanly", () => fuzzBad === 0, `bad=${fuzzBad}`);
+    const fuzzAttempts = join(fuzzD, "logs", "coachman-leg-1-attempts.jsonl");
+    let badResumes = -1;
+    try {
+      badResumes = nonEmptyLines(fuzzAttempts)
+        .map((l) => JSON.parse(l))
+        .filter((rec) => rec.request === "resume" && (!rec.prompt || !rec.thread_id)).length;
+    } catch {
+      badResumes = -1;
+    }
+    await pass(
+      "no killed pass leaves a resume without its prompt and thread",
+      () => badResumes === 0,
+      `bad=${badResumes}`,
+    );
+    const sliceD = join(root, "slice-d");
+    mkdirSync(join(sliceD, "logs"), { recursive: true });
+    writeFileSync(join(sliceD, "run.json"), readFileSync(join(legD, "run.json"), "utf8"));
+    writeFileSync(
+      join(sliceD, "manifest.json"),
+      '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n',
+    );
+    writeFileSync(join(sliceD, "prompt.txt"), "slice prompt\n");
+    writeFileSync(
+      join(sliceD, "logs", "coachman-leg-1-intent-1.json"),
+      `{"attempt":1,"request":"launch","role":"coachman","prompt":${JSON.stringify(join(sliceD, "prompt.txt"))},"thread_id":"","stream_off":0}`,
+    );
+    writeFileSync(join(sliceD, "logs", "coachman-leg-1-phase-1"), "started\n");
+    writeFileSync(
+      join(sliceD, "logs", "coachman-leg-1-intent-2.json"),
+      `{"attempt":2,"request":"launch","role":"coachman","prompt":${JSON.stringify(join(sliceD, "prompt.txt"))},"thread_id":"","stream_off":0}`,
+    );
+    writeFileSync(
+      join(sliceD, "logs", "coachman-leg-1-events.jsonl"),
+      '{"session_id":"T-ONE","type":"assistant"}\n',
+    );
+    r = execHost(["leg", "backfill", sliceD, "synthesis", "1"], legPath, f.caller, backfillEnv());
+    const sliceAttempts = join(sliceD, "logs", "coachman-leg-1-attempts.jsonl");
+    const sliceGot = (() => {
+      try {
+        const rows = nonEmptyLines(sliceAttempts).map((l) => JSON.parse(l));
+        return `${rows[0].outcome}|${rows[0].thread_id}|${rows[1].outcome}`;
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "an unrecorded later zero end is ignored",
+      () => r.code === 0 && sliceGot === "incomplete|T-ONE|refused",
+      sliceGot,
+    );
+    const boundD = join(root, "bound-d");
+    mkdirSync(join(boundD, "logs"), { recursive: true });
+    writeFileSync(join(boundD, "run.json"), readFileSync(join(legD, "run.json"), "utf8"));
+    writeFileSync(
+      join(boundD, "manifest.json"),
+      '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n',
+    );
+    writeFileSync(join(boundD, "prompt.txt"), "bound prompt\n");
+    writeFileSync(
+      join(boundD, "logs", "coachman-leg-1-events.jsonl"),
+      '{"session_id":"T-ONE","type":"assistant"}\n{"session_id":"T-TWO","type":"assistant"}\n',
+    );
+    const offTwo =
+      Buffer.byteLength(
+        nonEmptyLines(join(boundD, "logs", "coachman-leg-1-events.jsonl"))[0] ?? "",
+      ) + 1;
+    writeFileSync(
+      join(boundD, "logs", "coachman-leg-1-intent-1.json"),
+      `{"attempt":1,"request":"launch","role":"coachman","prompt":${JSON.stringify(join(boundD, "prompt.txt"))},"thread_id":"","stream_off":0}`,
+    );
+    writeFileSync(join(boundD, "logs", "coachman-leg-1-phase-1"), "started\n");
+    writeFileSync(
+      join(boundD, "logs", "coachman-leg-1-intent-2.json"),
+      `{"attempt":2,"request":"resume","role":"coachman","prompt":${JSON.stringify(join(boundD, "prompt.txt"))},"thread_id":"T-TWO","stream_off":${offTwo}}`,
+    );
+    writeFileSync(
+      join(boundD, "logs", "coachman-leg-1-attempts.jsonl"),
+      `{"attempt":2,"leg":1,"name":"synthesis","request":"resume","role":"coachman","prompt":${JSON.stringify(join(boundD, "prompt.txt"))},"thread_id":"T-TWO","outcome":"incomplete","on_answer":"resume","backfilled":false,"exit":1}\n`,
+    );
+    r = execHost(["leg", "backfill", boundD, "synthesis", "1"], legPath, f.caller, backfillEnv());
+    const boundAttempts = join(boundD, "logs", "coachman-leg-1-attempts.jsonl");
+    const boundGot = (() => {
+      try {
+        const rec = lastRecord(boundAttempts);
+        return `${rec.outcome}|${rec.thread_id}`;
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "a recorded later resume still bounds the slice",
+      () => r.code === 0 && boundGot === "incomplete|T-ONE",
+      boundGot,
+    );
+    const mkSlicePair = (name: string, phase2: string): string => {
+      const dd = join(root, name);
+      mkdirSync(join(dd, "logs"), { recursive: true });
+      writeFileSync(join(dd, "run.json"), readFileSync(join(legD, "run.json"), "utf8"));
+      writeFileSync(
+        join(dd, "manifest.json"),
+        '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n',
+      );
+      writeFileSync(join(dd, "prompt.txt"), "slice prompt\n");
+      writeFileSync(
+        join(dd, "logs", "coachman-leg-1-intent-1.json"),
+        `{"attempt":1,"request":"launch","role":"coachman","prompt":${JSON.stringify(join(dd, "prompt.txt"))},"thread_id":"","stream_off":0}`,
+      );
+      writeFileSync(join(dd, "logs", "coachman-leg-1-phase-1"), "started\n");
+      writeFileSync(
+        join(dd, "logs", "coachman-leg-1-intent-2.json"),
+        `{"attempt":2,"request":"launch","role":"coachman","prompt":${JSON.stringify(join(dd, "prompt.txt"))},"thread_id":"","stream_off":0}`,
+      );
+      writeFileSync(join(dd, "logs", "coachman-leg-1-phase-2"), `${phase2}\n`);
+      writeFileSync(
+        join(dd, "logs", "coachman-leg-1-events.jsonl"),
+        '{"session_id":"T-TWO","type":"assistant"}\n',
+      );
+      return dd;
+    };
+    const slatestartD = mkSlicePair("slatestart-d", "started");
+    r = execHost(
+      ["leg", "backfill", slatestartD, "synthesis", "1"],
+      legPath,
+      f.caller,
+      backfillEnv(),
+    );
+    const slatestartGot = (() => {
+      try {
+        const rows = nonEmptyLines(join(slatestartD, "logs", "coachman-leg-1-attempts.jsonl")).map(
+          (l) => JSON.parse(l),
+        );
+        return `${rows[0].outcome}|${rows[0].thread_id}|${rows[0].on_answer}|${rows[1].outcome}|${rows[1].thread_id}|${rows[1].on_answer}`;
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "a started later launch empties the earlier slice",
+      () => r.code === 0 && slatestartGot === "pre-thread||retry|incomplete|T-TWO|resume",
+      slatestartGot,
+    );
+    const slaterefD = mkSlicePair("slateref-d", "refused");
+    r = execHost(
+      ["leg", "backfill", slaterefD, "synthesis", "1"],
+      legPath,
+      f.caller,
+      backfillEnv(),
+    );
+    const slaterefGot = (() => {
+      try {
+        const rows = nonEmptyLines(join(slaterefD, "logs", "coachman-leg-1-attempts.jsonl")).map(
+          (l) => JSON.parse(l),
+        );
+        return `${rows[0].outcome}|${rows[0].thread_id}`;
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "a refused later phase empties the earlier slice too",
+      () => r.code === 0 && slaterefGot === "pre-thread|",
+      slaterefGot,
+    );
+    const corruptboundD = join(root, "corruptbound-d");
+    mkdirSync(join(corruptboundD, "logs"), { recursive: true });
+    writeFileSync(join(corruptboundD, "run.json"), readFileSync(join(legD, "run.json"), "utf8"));
+    writeFileSync(
+      join(corruptboundD, "manifest.json"),
+      '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n',
+    );
+    writeFileSync(join(corruptboundD, "prompt.txt"), "slice prompt\n");
+    writeFileSync(
+      join(corruptboundD, "logs", "coachman-leg-1-intent-1.json"),
+      `{"attempt":1,"request":"launch","role":"coachman","prompt":${JSON.stringify(join(corruptboundD, "prompt.txt"))},"thread_id":"","stream_off":0}`,
+    );
+    writeFileSync(join(corruptboundD, "logs", "coachman-leg-1-phase-1"), "started\n");
+    writeFileSync(
+      join(corruptboundD, "logs", "coachman-leg-1-intent-2.json"),
+      `{"attempt":2,"request":"launch","role":"coachman","prompt":${JSON.stringify(join(corruptboundD, "prompt.txt"))},"thread_id":"","stream_off":"garbage"}`,
+    );
+    writeFileSync(
+      join(corruptboundD, "logs", "coachman-leg-1-events.jsonl"),
+      '{"session_id":"T-TWO","type":"assistant"}\n',
+    );
+    r = execHost(
+      ["leg", "backfill", corruptboundD, "synthesis", "1"],
+      legPath,
+      f.caller,
+      backfillEnv(),
+    );
+    const corruptboundGot = (() => {
+      try {
+        const rows = nonEmptyLines(
+          join(corruptboundD, "logs", "coachman-leg-1-attempts.jsonl"),
+        ).map((l) => JSON.parse(l));
+        return `${rows[0].outcome}|${rows[0].thread_id}`;
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "a corrupt later bound hands no thread to the earlier slice",
+      () => r.code === 0 && corruptboundGot === "pre-thread|",
+      corruptboundGot,
+    );
+    const slaterecD = join(root, "slaterec-d");
+    mkdirSync(join(slaterecD, "logs"), { recursive: true });
+    writeFileSync(join(slaterecD, "run.json"), readFileSync(join(legD, "run.json"), "utf8"));
+    writeFileSync(
+      join(slaterecD, "manifest.json"),
+      '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n',
+    );
+    writeFileSync(join(slaterecD, "prompt.txt"), "slice prompt\n");
+    writeFileSync(
+      join(slaterecD, "logs", "coachman-leg-1-intent-1.json"),
+      `{"attempt":1,"request":"launch","role":"coachman","prompt":${JSON.stringify(join(slaterecD, "prompt.txt"))},"thread_id":"","stream_off":0}`,
+    );
+    writeFileSync(join(slaterecD, "logs", "coachman-leg-1-phase-1"), "started\n");
+    writeFileSync(
+      join(slaterecD, "logs", "coachman-leg-1-intent-2.json"),
+      `{"attempt":2,"request":"launch","role":"coachman","prompt":${JSON.stringify(join(slaterecD, "prompt.txt"))},"thread_id":"","stream_off":0}`,
+    );
+    writeFileSync(join(slaterecD, "logs", "coachman-leg-1-phase-2"), "started\n");
+    writeFileSync(
+      join(slaterecD, "logs", "coachman-leg-1-attempts.jsonl"),
+      `{"attempt":2,"leg":1,"name":"synthesis","request":"launch","role":"coachman","prompt":${JSON.stringify(join(slaterecD, "prompt.txt"))},"thread_id":"T-TWO","outcome":"incomplete","on_answer":"resume","backfilled":false,"exit":1}\n`,
+    );
+    writeFileSync(
+      join(slaterecD, "logs", "coachman-leg-1-events.jsonl"),
+      '{"session_id":"T-TWO","type":"assistant"}\n',
+    );
+    r = execHost(
+      ["leg", "backfill", slaterecD, "synthesis", "1"],
+      legPath,
+      f.caller,
+      backfillEnv(),
+    );
+    const slaterecGot = (() => {
+      try {
+        const rec = lastRecord(join(slaterecD, "logs", "coachman-leg-1-attempts.jsonl"));
+        return `${rec.outcome}|${rec.thread_id}`;
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "a recorded later launch empties the earlier slice",
+      () => r.code === 0 && slaterecGot === "pre-thread|",
+      slaterecGot,
+    );
+    const scanD = join(root, "scan-d");
+    mkdirSync(join(scanD, "logs"), { recursive: true });
+    writeFileSync(join(scanD, "run.json"), readFileSync(join(legD, "run.json"), "utf8"));
+    writeFileSync(
+      join(scanD, "manifest.json"),
+      '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n',
+    );
+    writeFileSync(join(scanD, "prompt.txt"), "scan prompt\n");
+    writeFileSync(
+      join(scanD, "logs", "coachman-leg-1-intent-1.json"),
+      `{"attempt":1,"request":"launch","role":"coachman","prompt":${JSON.stringify(join(scanD, "prompt.txt"))},"thread_id":"","stream_off":0}`,
+    );
+    writeFileSync(join(scanD, "logs", "coachman-leg-1-phase-1"), "bogus\n");
+    writeFileSync(
+      join(scanD, "logs", "coachman-leg-1-intent-2.json"),
+      `{"attempt":2,"request":"launch","role":"coachman","prompt":${JSON.stringify(join(scanD, "prompt.txt"))},"thread_id":"","stream_off":0}`,
+    );
+    writeFileSync(join(scanD, "logs", "coachman-leg-1-phase-2"), "started\n");
+    writeFileSync(
+      join(scanD, "logs", "coachman-leg-1-events.jsonl"),
+      '{"session_id":"T-F","type":"assistant"}\n{"type":"error","error":{"code":429,"message":"rate limit"}}\n',
+    );
+    r = execHost(["leg", "backfill", scanD, "synthesis", "1"], legPath, f.caller, backfillEnv());
+    const scanGot = (() => {
+      try {
+        const rows = nonEmptyLines(join(scanD, "logs", "coachman-leg-1-attempts.jsonl")).map((l) =>
+          JSON.parse(l),
+        );
+        return `${rows[0].outcome}|${rows[0].thread_id}|${rows[1].outcome}|${rows[1].thread_id}`;
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "a foreign phase scans nothing while a started attempt scans",
+      () =>
+        r.code === 0 &&
+        scanGot === "refused||walled|T-F" &&
+        !existsSync(join(scanD, "logs", "coachman-leg-1-wall-1")) &&
+        existsSync(join(scanD, "logs", "coachman-leg-1-wall-2")),
+      scanGot,
+    );
+    const gapLogs = join(gapD, "logs");
+    const intentsBeforeDir = readdirSync(gapLogs).filter(
+      (n) => n.startsWith("coachman-leg-1-intent-") && n.endsWith(".json"),
+    ).length;
+    const phasesBeforeDir = readdirSync(gapLogs).filter((n) =>
+      n.startsWith("coachman-leg-1-phase-"),
+    ).length;
+    const recsBeforeDir = nonEmptyLines(gapAttempts).length;
+    r = execHost(
+      ["leg", "launch", gapD, legWt, "synthesis", "1", root],
+      legPath,
+      f.caller,
+      backfillEnv(),
+    );
+    await pass(
+      "a directory prompt is refused before the lock",
+      () =>
+        r.code !== 0 &&
+        readdirSync(gapLogs).filter(
+          (n) => n.startsWith("coachman-leg-1-intent-") && n.endsWith(".json"),
+        ).length === intentsBeforeDir &&
+        readdirSync(gapLogs).filter((n) => n.startsWith("coachman-leg-1-phase-")).length ===
+          phasesBeforeDir &&
+        nonEmptyLines(gapAttempts).length === recsBeforeDir,
+      `rc=${r.code}`,
+    );
+    writeFileSync(
+      join(directD, "logs", "coachman-leg-1-intent-1.json"),
+      `{"attempt":1,"request":"launch","role":"coachman","prompt":${JSON.stringify(join(directD, "prompt.txt"))},"thread_id":"","stream_off":0}`,
+    );
+    writeFileSync(join(directD, "logs", "coachman-leg-1-phase-1"), "refused\n");
+    writeFileSync(
+      join(directD, "logs", "coachman-leg-1-events.jsonl"),
+      '{"session_id":"thread-old","type":"assistant"}\n',
+    );
+    r = execHost(["leg", "backfill", directD, "synthesis", "1"], legPath, f.caller, backfillEnv());
+    const directLogAttempts = join(directD, "logs", "coachman-leg-1-attempts.jsonl");
+    const directGot = (() => {
+      try {
+        const rec = lastRecord(directLogAttempts);
+        return `${rec.outcome}|${rec.thread_id}`;
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "a refused launch takes no thread id from another attempt's stream",
+      () => r.code === 0 && directGot === "refused|",
+      directGot,
+    );
+    callsBefore = legCalls();
+    r = execHost(
+      ["leg", "retry", directD, legWt, "synthesis", "1"],
+      legPath,
+      f.caller,
+      legEnv({
+        TEST_DONE: join(directD, ".leg-1-done"),
+        TEST_OBSERVED: join(directD, "retry-observed"),
+      }),
+    );
+    await marker(join(directD, ".leg-1-exited"), 30);
+    const directRetryGot = (() => {
+      try {
+        return String(lastRecord(directLogAttempts).request);
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "retry after that refusal relaunches instead of resuming the stale thread",
+      () => r.code === 0 && directRetryGot === "launch" && !lastCall().includes("--resume"),
+      `${directRetryGot}: ${lastCall()}`,
+    );
+    const mkfuse = (name: string): string => {
+      const dd = join(root, name);
+      mkdirSync(join(dd, "logs"), { recursive: true });
+      writeFileSync(join(dd, "run.json"), readFileSync(join(legD, "run.json"), "utf8"));
+      writeFileSync(
+        join(dd, "manifest.json"),
+        '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n',
+      );
+      writeFileSync(
+        join(dd, "brief.md"),
+        `# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, fuse\nsynthesis worktree: ${legWt}\n`,
+      );
+      writeFileSync(join(dd, "prompt.txt"), "fuse prompt\n");
+      writeFileSync(
+        join(dd, "logs", "coachman-leg-1-attempts.jsonl"),
+        `{"attempt":1,"leg":1,"name":"synthesis","request":"launch","role":"coachman","prompt":${JSON.stringify(join(dd, "prompt.txt"))},"thread_id":"T1","outcome":"incomplete","on_answer":"resume","backfilled":false,"exit":1}\n{"attempt":2,"leg":1,"name":"synthesis","requ`,
+      );
+      return dd;
+    };
+    const fuseD = mkfuse("fuse-d");
+    writeFileSync(
+      join(fuseD, "logs", "coachman-leg-1-intent-2.json"),
+      `{"attempt":2,"request":"launch","role":"coachman","prompt":${JSON.stringify(join(fuseD, "prompt.txt"))},"thread_id":"","stream_off":0}`,
+    );
+    writeFileSync(join(fuseD, "logs", "coachman-leg-1-phase-2"), "started\n");
+    writeFileSync(join(fuseD, "logs", "coachman-leg-1-events.jsonl"), "");
+    r = execHost(["leg", "backfill", fuseD, "synthesis", "1"], legPath, f.caller, backfillEnv());
+    const fuseAttempts = join(fuseD, "logs", "coachman-leg-1-attempts.jsonl");
+    const fuseGot = (() => {
+      try {
+        const rec = lastRecord(fuseAttempts);
+        return `${rec.attempt}|${rec.outcome}`;
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "backfill terminates a torn tail instead of fusing onto it",
+      () =>
+        r.code === 0 &&
+        fuseGot === "2|pre-thread" &&
+        nonEmptyLines(fuseAttempts).length === 3 &&
+        nonEmptyLines(fuseAttempts).includes('{"attempt":2,"leg":1,"name":"synthesis","requ'),
+      fuseGot,
+    );
+    const fuse2D = mkfuse("fuse2-d");
+    callsBefore = legCalls();
+    r = execHost(
+      ["leg", "launch", fuse2D, legWt, "synthesis", "1", join(fuse2D, "prompt.txt")],
+      legPath,
+      f.caller,
+      {
+        POSTMASTER_HOST: "none",
+        POSTMASTER_CONFIG: limitsToml,
+        PATH: legPath,
+        POSTMASTER_HOST_CLAIM_WAIT: "garbage",
+      },
+    );
+    const fuse2Attempts = join(fuse2D, "logs", "coachman-leg-1-attempts.jsonl");
+    const fuse2Got = (() => {
+      try {
+        const rec = lastRecord(fuse2Attempts);
+        return `${rec.attempt}|${rec.outcome}`;
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "a refused start terminates a torn tail instead of fusing onto it",
+      () =>
+        r.code !== 0 &&
+        fuse2Got === "2|refused" &&
+        legCalls() === callsBefore &&
+        nonEmptyLines(fuse2Attempts).length === 3 &&
+        nonEmptyLines(fuse2Attempts).includes('{"attempt":2,"leg":1,"name":"synthesis","requ'),
+      `rc=${r.code} ${fuse2Got}`,
+    );
+    before = nonEmptyLines(attemptsPath).length;
+    writeFileSync(attemptsPath, `${nonEmptyLines(attemptsPath).join("\n")}\nNOT JSON\n`);
+    r = execHost(["leg", "retry", legD, legWt, "synthesis", "1"]);
+    await pass(
+      "retry on a corrupt last record refuses cleanly",
+      () =>
+        r.code !== 0 &&
+        !r.err.includes("unbound variable") &&
+        nonEmptyLines(attemptsPath).length === before + 1,
+      r.err.trim(),
+    );
+    writeFileSync(
+      attemptsPath,
+      `${nonEmptyLines(attemptsPath)
+        .filter((l) => l.trim() !== "NOT JSON")
+        .join("\n")}\n`,
+    );
+    const kCount = nonEmptyLines(attemptsPath).filter((l) => l.includes('"attempt"')).length;
+    writeFileSync(
+      attemptsPath,
+      `${nonEmptyLines(attemptsPath).join("\n")}\nNOT JSON\n{"attempt":${kCount + 1},"leg":1,"name":"synthesis","request":"launch","role":"coachman","prompt":${JSON.stringify(join(legD, "replay.txt"))},"thread_id":"","outcome":"refused","on_answer":"retry","exit":1}\n`,
+    );
+    writeFileSync(join(legD, "retry-observed"), "");
+    r = execHost(["leg", "retry", legD, legWt, "synthesis", "1"], legPath, f.caller, legEnv());
+    await marker(join(legD, ".leg-1-exited"), 30);
+    await pass(
+      "retry ignores a corrupt middle line and replays the saved prompt",
+      () =>
+        r.code === 0 &&
+        nonEmptyLines(join(legD, "retry-observed")).some((l) => l.includes("replay-me")),
+    );
+    let maxAttempt = 0;
+    for (const line of nonEmptyLines(attemptsPath)) {
+      try {
+        const a = JSON.parse(line).attempt;
+        if (typeof a === "number" && Number.isInteger(a) && a > maxAttempt) maxAttempt = a;
+      } catch {}
+    }
+    const aftermathM = maxAttempt + 1;
+    const aftermathOff = statSync(streamPath).size;
+    writeFileSync(streamPath, '{"session_id":"thread-dead"}\n', { flag: "a" });
+    writeFileSync(join(legD, "logs", `coachman-leg-1-phase-${aftermathM}`), "started\n");
+    writeFileSync(
+      join(legD, "logs", `coachman-leg-1-intent-${aftermathM}.json`),
+      `{"attempt":${aftermathM},"request":"launch","role":"coachman","prompt":${JSON.stringify(join(legD, "replay.txt"))},"thread_id":"","stream_off":${aftermathOff}}`,
+    );
+    prompt = join(legD, "aftermath.txt");
+    writeFileSync(prompt, "after an unrecorded death\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    const aftermathGot = (() => {
+      try {
+        const rec = nonEmptyLines(attemptsPath)
+          .filter((l) => l.trim().startsWith("{"))
+          .map((l) => JSON.parse(l))
+          .find((x) => x.attempt === aftermathM);
+        return rec === undefined
+          ? "<none>"
+          : {
+              outcome: rec.outcome,
+              thread: rec.thread_id,
+              backfilled: rec.backfilled,
+              onAnswer: rec.on_answer,
+            };
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "an unrecorded death is backfilled from its evidence",
+      () =>
+        r.code === 0 &&
+        typeof aftermathGot === "object" &&
+        aftermathGot.outcome === "incomplete" &&
+        aftermathGot.thread === "thread-dead" &&
+        aftermathGot.backfilled === true &&
+        aftermathGot.onAnswer === "resume",
+      JSON.stringify(aftermathGot),
+    );
+    const aftermathLast = (() => {
+      try {
+        return lastRecord(attemptsPath).attempt;
+      } catch {
+        return -1;
+      }
+    })();
+    await pass(
+      "the new attempt numbers past the backfilled one",
+      () => aftermathLast === aftermathM + 1,
+      String(aftermathLast),
+    );
+    const backfillM2 = aftermathM + 2;
+    const backfillOff = statSync(streamPath).size;
+    writeFileSync(
+      streamPath,
+      '{"type":"error","error":{"code":402,"message":"payment required"}}\n',
+      { flag: "a" },
+    );
+    writeFileSync(join(legD, "logs", `coachman-leg-1-phase-${backfillM2}`), "started\n");
+    writeFileSync(
+      join(legD, "logs", `coachman-leg-1-intent-${backfillM2}.json`),
+      `{"attempt":${backfillM2},"request":"resume","role":"coachman","prompt":${JSON.stringify(join(legD, "replay.txt"))},"thread_id":"thread-old","stream_off":${backfillOff}}`,
+    );
+    callsBefore = legCalls();
+    r = execHost(["leg", "backfill", legD, "synthesis", "1"]);
+    const callsNow = legCalls();
+    const backfillGot = (() => {
+      try {
+        const rec = nonEmptyLines(attemptsPath)
+          .filter((l) => l.trim().startsWith("{"))
+          .map((l) => JSON.parse(l))
+          .find((x) => x.attempt === backfillM2);
+        return rec === undefined
+          ? "<none>"
+          : {
+              outcome: rec.outcome,
+              thread: rec.thread_id,
+              backfilled: rec.backfilled,
+              onAnswer: rec.on_answer,
+            };
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "backfill classifies without starting anything",
+      () =>
+        r.code === 0 &&
+        typeof backfillGot === "object" &&
+        backfillGot.outcome === "walled" &&
+        backfillGot.thread === "thread-old" &&
+        backfillGot.backfilled === true &&
+        backfillGot.onAnswer === "none" &&
+        callsNow - callsBefore === 0,
+      JSON.stringify(backfillGot),
+    );
+    const backfillM3 = backfillM2 + 1;
+    const backfillOff3 = statSync(streamPath).size;
+    writeFileSync(
+      join(legD, "logs", `coachman-leg-1-phase-${backfillM3}`),
+      "ÿþ invalid\n",
+      "latin1",
+    );
+    writeFileSync(
+      join(legD, "logs", `coachman-leg-1-intent-${backfillM3}.json`),
+      `{"attempt":${backfillM3},"request":"launch","role":"coachman","prompt":${JSON.stringify(join(legD, "replay.txt"))},"thread_id":"","stream_off":${backfillOff3}}`,
+    );
+    r = execHost(["leg", "backfill", legD, "synthesis", "1"]);
+    const backfillGot3 = (() => {
+      try {
+        const rec = nonEmptyLines(attemptsPath)
+          .filter((l) => l.trim().startsWith("{"))
+          .map((l) => JSON.parse(l))
+          .find((x) => x.attempt === backfillM3);
+        return rec === undefined ? "<none>" : String(rec.outcome);
+      } catch {
+        return "<none>";
+      }
+    })();
+    await pass(
+      "a phase file that is not text backfills as refused",
+      () => r.code === 0 && backfillGot3 === "refused",
+      backfillGot3,
+    );
+    let auditBad: Array<unknown> = [];
+    let auditOk = false;
+    try {
+      const rows: any[] = [];
+      for (const l of nonEmptyLines(attemptsPath)) {
+        try {
+          rows.push(JSON.parse(l));
+        } catch {
+          // A corrupt line is superseded history, not a record to audit.
+        }
+      }
+      for (const rec of rows) {
+        if (typeof rec !== "object" || rec === null || Array.isArray(rec)) continue;
+        let want: string;
+        if (
+          rec.outcome === "refused" ||
+          rec.outcome === "pre-thread" ||
+          (rec.outcome === "walled" && rec.role === "coachman_fallback")
+        )
+          want = "retry";
+        else if (rec.outcome === "incomplete") want = "resume";
+        else want = "none";
+        if (rec.on_answer !== want) auditBad.push([rec.attempt, rec.outcome, rec.on_answer, want]);
+      }
+      auditOk = auditBad.length === 0;
+    } catch {
+      auditOk = false;
+    }
+    await pass("every attempt record states its on-answer action", () => auditOk);
     console.log(
       "run environment identity, Claude session and lane env file: Herdr, tmux and no host",
     );

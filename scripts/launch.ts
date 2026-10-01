@@ -38,6 +38,12 @@
 //           thread-id with no id in the stream, or transient with a record that is not named
 //   exit 3  skill or review: the lane's harness has no such review form recorded
 //   else    the harness's own exit code
+//
+// POSTMASTER_ATTEMPT_PHASE names the file this attempt's phase is written to:
+// `refused` before a launch or resume runs its preflight, `started` once the env
+// file has loaded and the harness is still callable. Only launch and resume ever
+// write it; form, review and skill do not, whatever the environment holds. The harness
+// does not inherit the variable, so nothing the attempt runs can overwrite it.
 
 import { spawnSync } from "node:child_process";
 import {
@@ -48,21 +54,49 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { readTomlFile, tryJsonFile } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
-import { run, signalExitCode } from "./lib/proc.ts";
+import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
 import { BOUND_L, BOUND_R, PY_S_CLASS } from "./lib/text.ts";
 
 const CONFIG =
   process.env.POSTMASTER_CONFIG ?? join(process.env.HOME ?? "", ".postmaster/config.toml");
 const LEGS = ["synthesis", "review", "ship"] as const;
 
+const ATTEMPT_PHASE_FILE = process.env.POSTMASTER_ATTEMPT_PHASE ?? "";
+let PHASE_TRACKING = 0;
+// Launch and resume only: form, review and skill never touch the phase file.
+function attemptPhase(phase: string): boolean {
+  // A temp file and a rename: readers see the old phase or the new one, never
+  // an empty file from a kill between truncate and write. A write that cannot
+  // land returns false: the started call site dies on it, so the harness
+  // never starts unwitnessed. Only the write can fail this way; tracking off
+  // or no file configured is not a failure.
+  if (PHASE_TRACKING !== 1) return true;
+  if (!ATTEMPT_PHASE_FILE) return true;
+  const slash = ATTEMPT_PHASE_FILE.lastIndexOf("/");
+  const dir = slash === -1 ? "." : ATTEMPT_PHASE_FILE.slice(0, slash);
+  let tmp = "";
+  try {
+    tmp = mkstempSync(dir, ".phase.");
+    writeFileSync(tmp, `${phase}\n`);
+    renameSync(tmp, ATTEMPT_PHASE_FILE);
+    return true;
+  } catch {
+    if (tmp) rmSync(tmp, { force: true });
+    return false;
+  }
+}
+
 function die(msg: string): never {
+  attemptPhase("refused");
   console.error(`launch: ${msg}`);
   process.exit(1);
 }
@@ -1013,6 +1047,10 @@ if (import.meta.main) {
     );
   const CMD: string = argv[0] ?? "";
   const NAME = argv[1] ?? "";
+  if (CMD === "launch" || CMD === "resume") {
+    PHASE_TRACKING = 1;
+    attemptPhase("refused");
+  }
   let LEG = "";
   let LAST = "";
   let RUN = "";
@@ -1397,11 +1435,77 @@ if (import.meta.main) {
   } catch {
     /* keep the inherited PWD on any surprise */
   }
+  // With an env file the launch first proves the file loads and the harness survives
+  // it, as main sources it before the exec. A file that fails under nounset or ends
+  // nonzero refuses with the phase still refused; a file that exits carries its own
+  // code out, as sourcing in-process does — the survival marker tells the two apart.
+  // The marker carries a nonce and is searched, never line-matched: file output
+  // without a trailing newline glues onto it, and a fixed string the file itself
+  // could print would spoof a load that never finished. The subshell keeps this
+  // process's environment untouched, as main's save/restore does; on a clean
+  // load its output is discarded so file output appears once, at the exec, as
+  // in main, while on an exit or death mid-source the carry path relays what
+  // the file printed before its end. The harness name stays the spec's: an env
+  // file cannot overwrite a const the way it can main's shell variable, which
+  // is what LAUNCH_HARNESS there is for.
+  if (ENV_FILE) {
+    const nonce = Math.random().toString(36).slice(2) || "0";
+    // A script file, never bash -c: a nounset death exits 1 from a file and
+    // 127 from -c, and the exit-carry below must hand out main's own code.
+    let probe = "";
+    try {
+      probe = mkstempSync(tmpdir(), ".launch-env.");
+      writeFileSync(
+        probe,
+        `set -uo pipefail
+set -a
+. "$1"
+rc=$?
+echo "LOADED:$rc:${nonce}"
+exit "$rc"
+`,
+      );
+    } catch {
+      if (probe) rmSync(probe, { force: true });
+      die(`cannot prove env_file for ${NAME} loads`);
+    }
+    const load = spawnSync("bash", [probe, ENV_FILE], { encoding: "utf8" });
+    rmSync(probe, { force: true });
+    const loaded = new RegExp(`LOADED:([0-9]+):${nonce}`, "u").exec(load.stdout ?? "");
+    if (!loaded) {
+      // The file exited (or died) mid-source: sourcing in-process would take
+      // this process with it, so its end is ours, signal included. What it
+      // printed on the way out is relayed first, as in-process sourcing
+      // would have printed it: file output, then a shell's death message.
+      process.stdout.write(load.stdout ?? "");
+      process.stderr.write(load.stderr ?? "");
+      if (load.signal) {
+        process.kill(process.pid, load.signal);
+        process.exit(signalExitCode(load.signal));
+      }
+      process.exit(load.status ?? 1);
+    }
+    if (loaded[1] !== "0") die(`env_file for ${NAME} failed while loading`);
+    const kept = spawnSync(
+      "bash",
+      [
+        "-c",
+        'set -uo pipefail; set -a; . "$1"; shift; command -v "$1" >/dev/null',
+        "_",
+        ENV_FILE,
+        HARNESS,
+      ],
+      { encoding: "utf8" },
+    );
+    if (kept.status !== 0)
+      die(`harness '${HARNESS}' is not on PATH after loading env_file for ${NAME}`);
+  }
   // The role is read before the spawn: an env file the child sources can
   // neither change nor export it, as main's save/restore and unset do.
   const launchRole = process.env.POSTMASTER_LAUNCH_ROLE ?? "";
   delete process.env.POSTMASTER_LAUNCH_NAME;
   delete process.env.POSTMASTER_LAUNCH_ROLE;
+  delete process.env.POSTMASTER_ATTEMPT_PHASE;
 
   // With an env file a shell sources it and runs the harness as a child, as
   // main does: file output reaches the launch streams, an `exit` in the file
@@ -1430,6 +1534,7 @@ if (import.meta.main) {
     cmdArgs = promptedArgv(PROMPT, forms.promptArg, forms.cmd);
   }
 
+  if (!attemptPhase("started")) die("cannot record that the harness started");
   const child = spawnSync(cmd, cmdArgs, {
     stdio: STDIN_FILE ? ["ignore", "inherit", "inherit"] : ["inherit", "inherit", "inherit"],
     // Raw bytes, as main's `exec < file` hands them: no UTF-8 decode.

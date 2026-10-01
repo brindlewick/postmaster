@@ -7,21 +7,29 @@
 //   runs-watch.sh --help
 //
 // Mechanical steps this script takes itself, logging each through log-action.sh with "the
-// watcher took it" in the detail:
+// watcher took it" in the detail. Every leg start runs from the run's own checkout
+// (`run-meta.sh path`, checked first): a checkout that does not serve its dispatch commit
+// wakes the postmaster instead.
 //
 //   DISPATCH  the leg is done and its hand-off passes handoff-check.sh: dispatch the next leg
-//             turnpikes.sh legs lists (Stage C). A hand-off that fails, a turnpikes.sh legs
-//             that exits non-zero, no next leg after the ship leg, or a launch it cannot
-//             complete are steps it could not complete: they wake the postmaster.
-//   REMOUNT   the leg's process ended on a transient provider error the harness adapter names
-//             (launch.sh transient, reading only the current launch's stream lines past the
-//             skip in <run>/watcher.json): resume it on its own thread with the remount
-//             prompt, at most three times per leg (the count is beside the skip and survives
-//             a restart). A fourth such end, a non-transient end (quota, wall, launch refusal,
-//             no thread id), or a resume it cannot complete wakes the postmaster.
+//             turnpikes.sh legs lists, through `host.sh leg launch` (Stage C). The thread id
+//             lands in the attempt record when the attempt ends, never at dispatch. A hand-off
+//             that fails, a turnpikes.sh legs that exits non-zero, no next leg after the ship
+//             leg, or a launch it cannot complete are steps it could not complete: they wake
+//             the postmaster.
+//   RESUME    the attempt record says incomplete and the end is a transient provider error the
+//             harness adapter names (launch.sh transient, reading only the current launch's
+//             stream lines past the skip in <run>/watcher.json, vetoing on any wall-like
+//             token): resume it on its recorded thread with the remount prompt through
+//             `host.sh leg resume`, at most three times per leg (the count is beside the skip
+//             and survives a restart). A start that fails spends no retry: the count is
+//             restored and the refusal is logged. A fourth such end, a non-transient end, or
+//             a resume it cannot complete wakes the postmaster.
 //
 // Everything that needs judgment still wakes the postmaster: RULE (an escalation), GATE (a
-// ship card), READ (a checkpoint card), INSPECT (a stall), and any step the watcher could not
+// ship card), READ (a checkpoint card), SPEC (a spec package), ASK (a recorded refusal or
+// pre-thread exit, or a wall on the fallback), TAKEOVER (a recorded wall on the primary),
+// INSPECT (a stall, or an attempt without its record), and any step the watcher could not
 // complete. USER (already put to the user), WAIT (a leg at work) and - (closed) never do.
 //
 // It looks at once, then every postmaster.poll_seconds (default 120) from the config
@@ -40,13 +48,12 @@
 // early. A count or a timeout is at most 9 digits. Without --timeout it waits until a run needs
 // the postmaster. Taking a step does not reset the timeout.
 //
-// POSTMASTER_WATCH_TEST_MODE stages the host boundary for the tests: with it set to 1,
-// launches are recorded under POSTMASTER_WATCH_TEST_CALLS instead of started, the stream is
-// faked, and the marker is cleared but never landed, so no agent thread is ever started.
-// POSTMASTER_WATCH_TEST_FAIL=dispatch|resume makes that launch fail; =1 on
-// POSTMASTER_WATCH_TEST_REFUSE lands a launch refusal instead: =1 a bare refusal,
-// =2 a refusal under an uncapped host notice; =1 on
-// POSTMASTER_WATCH_TEST_NO_THREAD fakes a stream with no thread id.
+// POSTMASTER_WATCH_TEST_MODE stages the leg boundary for the tests: with it set to 1,
+// leg starts are recorded under POSTMASTER_WATCH_TEST_CALLS instead of started, the starting
+// attempt's markers are cleared, and no agent thread is ever started.
+// POSTMASTER_WATCH_TEST_FAIL=dispatch|resume makes that start fail after recording a refused
+// attempt, as a host that could not start one; =1 on POSTMASTER_WATCH_TEST_REFUSE refuses
+// that start with no record, as a validation refusal.
 //
 //   exit 0  a run needs the postmaster: the table, then one `needs <run> <NEXT>` line each
 //   exit 3  --timeout passed with nothing to act on: the table
@@ -59,6 +66,8 @@
 // count, no wake.
 import { randomBytes } from "node:crypto";
 import {
+  accessSync,
+  constants,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -72,7 +81,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { tryJsonFile } from "./lib/data.ts";
-import { beside, scriptsDir, toolRoot } from "./lib/paths.ts";
+import { beside, scriptsDir } from "./lib/paths.ts";
 import { die, run } from "./lib/proc.ts";
 import { PY_M_END, PY_M_START } from "./lib/text.ts";
 
@@ -626,10 +635,29 @@ function runRepo(dispatch: string): string | null {
 }
 
 /** The one-line job from coachman.md's legs table. */
-function legJob(number: string): string | null {
+/** The run's checked tool checkout, or the wake reason when it does not serve. */
+function legRt(d: string): { rt: string; error: string } {
+  const p = run(beside(import.meta, "run-meta.sh"), ["path", d]);
+  if (p.code !== 0) {
+    return {
+      rt: "",
+      error: `cannot resolve the run's tool checkout: ${(p.out + p.err).replace(/\n+$/u, "")}`,
+    };
+  }
+  const c = run(beside(import.meta, "run-meta.sh"), ["check", d]);
+  if (c.code !== 0) {
+    return {
+      rt: "",
+      error: `the run's tool checkout does not serve its dispatch commit: ${(c.out + c.err).replace(/\n+$/u, "")}`,
+    };
+  }
+  return { rt: (p.out + p.err).replace(/\n+$/u, ""), error: "" };
+}
+
+function legJob(rt: string, number: string): string | null {
   let text: string;
   try {
-    text = readFileSync(join(toolRoot(import.meta), "skills/postmaster/coachman.md"), "utf8");
+    text = readFileSync(join(rt, "skills/postmaster/coachman.md"), "utf8");
   } catch {
     return null;
   }
@@ -787,163 +815,83 @@ function setResumeCount(
   return true;
 }
 
-// bash's printf %q, as the test double records the launch it would run: bare
-// words stay bare, anything else printable is backslash-escaped, printable
-// non-ASCII passes through raw, and a word holding a control character is
-// ANSI-C quoted whole, short escapes where bash has them, octal elsewhere.
-const Q_SAFE_CH = /[A-Za-z0-9_@%+=:./~-]/u;
-function hasControlChar(s: string): boolean {
-  for (const ch of s) {
-    const code = ch.codePointAt(0)!;
-    if (code < 0x20 || code === 0x7f) return true;
-  }
-  return false;
-}
-function bashQuote(s: string): string {
-  if (s === "") return "''";
-  if (hasControlChar(s)) {
-    let o = "$'";
-    for (const ch of s) {
-      const code = ch.codePointAt(0)!;
-      if (ch === "\\") o += "\\\\";
-      else if (ch === "'") o += "\\'";
-      else if (code === 0x07) o += "\\a";
-      else if (code === 0x08) o += "\\b";
-      else if (code === 0x09) o += "\\t";
-      else if (code === 0x0a) o += "\\n";
-      else if (code === 0x0b) o += "\\v";
-      else if (code === 0x0c) o += "\\f";
-      else if (code === 0x0d) o += "\\r";
-      else if (code === 0x1b) o += "\\E";
-      else if (code < 0x20 || code === 0x7f) o += `\\${code.toString(8).padStart(3, "0")}`;
-      else o += ch;
-    }
-    return `${o}'`;
-  }
-  const body = s.startsWith("~") || s.startsWith("#") ? s.slice(1) : s;
-  let o = body === s ? "" : `\\${s[0]!}`;
-  for (const ch of body) {
-    const code = ch.codePointAt(0)!;
-    o += code > 0x7e || Q_SAFE_CH.test(ch) ? ch : `\\${ch}`;
-  }
-  return o;
-}
-
-/** Run the host boundary, or record the launch the test double would run. */
-function watchHost(
+/** Start a leg through its own checkout: dispatch launches, resume resumes. Returns the
+ * exit code with the combined output, whose first line names a failed start. */
+function watchLeg(
   kind: string,
-  name: string,
-  cwd: string,
-  dispatch: string,
-  out: string,
-  err: string,
-  marker: string,
-  append: boolean,
-  launch: string[],
-): number {
-  // INTENDED divergence from BASE: BASE's watch_host omits --under, and BASE's
-  // host.sh run refuses --run without --under, so every automatic dispatch and
-  // remount dies before the agent starts. The port names the run space; BASE
-  // needs the same line. Round 12 P1, control below in runs-watch.test.ts.
-  const command = ["run", name, cwd, "--role", "coachman", "--run", dispatch, "--under", dispatch];
-  if (append) command.push("--append");
-  command.push("--out", out, "--err", err, "--marker", marker, "--", ...launch);
+  rt: string,
+  d: string,
+  wt: string,
+  leg: string,
+  n: string,
+  thread: string,
+  prompt: string,
+): { code: number; text: string } {
   if (process.env.POSTMASTER_WATCH_TEST_MODE === "1") {
     const calls = process.env.POSTMASTER_WATCH_TEST_CALLS;
-    if (!calls) return 1;
-    const dot = marker.lastIndexOf(".leg-");
-    let legKey = dot >= 0 ? marker.slice(dot + 5) : marker;
-    if (legKey.endsWith("-exited")) legKey = legKey.slice(0, -7);
-    const callfile = join(calls, `${kind}-${basename(dispatch)}-${legKey}`);
+    if (!calls) return { code: 1, text: "" };
+    const callfile = join(calls, `${kind}-${basename(d)}-${n}`);
     try {
       mkdirSync(calls, { recursive: true });
-      mkdirSync(dirname(out), { recursive: true });
-      mkdirSync(dirname(err), { recursive: true });
-    } catch {
-      return 1;
-    }
-    try {
+      mkdirSync(join(d, "logs"), { recursive: true });
       writeFileSync(
         callfile,
-        `kind=${kind}\nname=${name}\ncwd=${cwd}\ndispatch=${dispatch}\nout=${out}\nerr=${err}\nmarker=${marker}\nappend=${append ? 1 : 0}\nhost_command=${command.map((w) => `${bashQuote(w)} `).join("")}\ncommand=${launch.map((w) => `${bashQuote(w)} `).join("")}\n`,
+        `kind=${kind}\nrt=${rt}\ndispatch=${d}\nworktree=${wt}\nleg=${leg}\nnumber=${n}\nthread=${thread}\nprompt=${prompt}\n`,
       );
     } catch {
-      return 1;
+      return { code: 1, text: "" };
     }
-    rmSync(marker, { force: true });
-    // host.sh run empties --err at every launch, resume included: --append
-    // keeps only --out. The double does the same: .err always holds
-    // one launch, so no stale line can survive into the refusal check.
+    // The double checks the script it would execute: a checkout without the leg
+    // script fails the start the way the shell would, before any marker moves.
     try {
-      writeFileSync(err, "");
+      accessSync(join(rt, "scripts", "host.sh"), constants.X_OK);
     } catch {
-      return 1;
+      return { code: 1, text: `leg: ${join(rt, "scripts", "host.sh")} is not executable\n` };
     }
+    // The leg command clears the starting attempt's markers before its intent
+    // lands; the double clears the same markers and writes no intent.
+    try {
+      for (const f of readdirSync(join(d, "logs"))) {
+        if (f.startsWith(`coachman-leg-${n}-wall-`)) rmSync(join(d, "logs", f), { force: true });
+      }
+    } catch {
+      // best effort, as the shell's rm -f is
+    }
+    rmSync(join(d, `.leg-${n}-done`), { force: true });
+    rmSync(join(d, `.leg-${n}-exited`), { force: true });
     if (process.env.POSTMASTER_WATCH_TEST_FAIL === kind) {
+      // A host that could not start the attempt: the leg records the refusal.
+      const request = kind === "dispatch" ? "launch" : "resume";
+      let lines = 0;
       try {
-        writeFileSync(err, `host: simulated ${kind} failure\n`);
-        writeFileSync(marker, "");
+        const prev = readFileSync(join(d, "logs", `coachman-leg-${n}-attempts.jsonl`), "utf8");
+        lines = prev.split("\n").length - 1;
+      } catch {
+        lines = 0;
+      }
+      try {
+        writeFileSync(
+          join(d, "logs", `coachman-leg-${n}-attempts.jsonl`),
+          `{"attempt":${lines + 1},"leg":${n},"name":"${leg}","request":"${request}","role":"coachman","prompt":"${prompt}","thread_id":"","outcome":"refused","on_answer":"retry","backfilled":false}\n`,
+          { flag: "a" },
+        );
       } catch {
         // best effort
       }
-      return 1;
+      return { code: 1, text: `leg: simulated ${kind} failure\n` };
     }
     if (process.env.POSTMASTER_WATCH_TEST_REFUSE === "1") {
-      try {
-        writeFileSync(err, "launch: simulated refusal\n");
-        writeFileSync(marker, "");
-      } catch {
-        // best effort
-      }
-      return 0;
+      // A validation refusal leaves markers, stream and records untouched.
+      return { code: 1, text: "leg: simulated refusal\n" };
     }
-    if (process.env.POSTMASTER_WATCH_TEST_REFUSE === "2") {
-      try {
-        writeFileSync(
-          err,
-          "host: launch running uncapped (no supported per-launch limits available)\nlaunch: simulated refusal\n",
-        );
-        writeFileSync(marker, "");
-      } catch {
-        // best effort
-      }
-      return 0;
-    }
-    try {
-      if (kind === "dispatch") {
-        writeFileSync(
-          out,
-          process.env.POSTMASTER_WATCH_TEST_NO_THREAD === "1"
-            ? '{"type":"result","message":"no session id"}\n'
-            : '{"session_id":"watch-fixture-thread"}\n',
-        );
-      } else {
-        writeFileSync(out, '{"type":"assistant","message":"continued"}\n', { flag: "a" });
-      }
-    } catch {
-      return 1;
-    }
-    return 0;
+    return { code: 0, text: "" };
   }
-  const r = run(beside(import.meta, "host.sh"), command);
-  if (r.out) process.stdout.write(r.out);
-  if (r.err) process.stderr.write(r.err);
-  return r.code;
-}
-
-export function noThreadError(
-  leg: string,
-  marker: string,
-  limit: number,
-  errPath: string,
-  outPath: string,
-  adapterOut: string,
-): string {
-  const extra = adapterOut ? ` (${adapterOut})` : "";
-  if (existsSync(marker)) {
-    return `the launch produced no thread id for leg ${leg}; read ${errPath} and ${outPath}${extra}`;
-  }
-  return `the launch produced no thread id within ${limit}s for leg ${leg} and may still be running; read ${errPath} and ${outPath}${extra}`;
+  const args =
+    kind === "dispatch"
+      ? ["leg", "launch", d, wt, leg, n, prompt]
+      : ["leg", "resume", d, wt, leg, n, thread, prompt];
+  const r = run(join(rt, "scripts", "host.sh"), args);
+  return { code: r.code, text: r.out + r.err };
 }
 
 /** The stream's line count, counting an unterminated last line, which wc -l misses. */
@@ -958,33 +906,6 @@ export function streamLines(path: string): number {
   if (text === "") return 0;
   const parts = text.split("\n");
   return parts.length - (text.endsWith("\n") ? 1 : 0);
-}
-
-/** The launch: refusal line this launch wrote, if any. */
-function refusalIn(path: string): string {
-  let text: string;
-  try {
-    if (!statSync(path).isFile()) return "";
-    text = readFileSync(path, "utf8");
-  } catch {
-    return "";
-  }
-  for (const line of text.split("\n")) {
-    if (line.startsWith("launch:")) return line;
-  }
-  return "";
-}
-
-/** Print the thread id once the stream carries it. */
-export function harvestThreadId(out: string, marker: string, limit: number): string | null {
-  for (let i = 0; i < limit; i++) {
-    const r = run(beside(import.meta, "launch.sh"), ["thread-id", out]);
-    const id = r.out.replace(/\n+$/u, "");
-    if (r.code === 0 && id !== "") return id;
-    if (existsSync(marker)) return null;
-    sleepSync(1000);
-  }
-  return null;
 }
 
 /** A UTC stamp as date -u +%Y%m%dT%H%M%SZ prints it. */
@@ -1071,17 +992,10 @@ function prepareDispatch(d: string, runName: string, current: string, root: stri
   } catch {
     return { rc: 1, error: `the synthesis worktree is missing: ${worktree}` };
   }
-  const job = legJob(number);
+  const rt = legRt(d);
+  if (rt.error) return { rc: 1, error: rt.error };
+  const job = legJob(rt.rt, number);
   if (!job) return { rc: 1, error: `coachman.md has no job for leg ${number}` };
-  // The Stage C name form names the new leg outright; a host.sh without role labels answers ticket and role.
-  const named = run(beside(import.meta, "host.sh"), ["name", d, "coachman", leg, number]);
-  if (named.code !== 0) {
-    return {
-      rc: 1,
-      error: `host.sh name failed: ${(named.out + named.err).replace(/\n+$/u, "")}`,
-    };
-  }
-  const hostName = named.out.replace(/\n+$/u, "");
   const prompt = join(d, `leg-${number}-prompt.txt`);
   const timeFile = `${prompt}.tmp.${process.pid}`;
   let held = isHeldRun(runName, heldDir);
@@ -1090,7 +1004,7 @@ function prepareDispatch(d: string, runName: string, current: string, root: stri
   try {
     writeFileSync(
       timeFile,
-      `You are the coachman for leg ${number} of ${runName}.\nRead ${d}/brief.md, then ${toolRoot(import.meta)}/skills/postmaster/coachman.md, then ${d}/handoff-${current}.md.\n${job}\n`,
+      `You are the coachman for leg ${number} of ${runName}.\nRead ${d}/brief.md, then ${rt.rt}/skills/postmaster/coachman.md, then ${d}/handoff-${current}.md.\n${job}\n`,
     );
   } catch {
     return { rc: 1, error: `cannot write the leg prompt: ${prompt}` };
@@ -1120,40 +1034,21 @@ function prepareDispatch(d: string, runName: string, current: string, root: stri
   if (!manifestLeg(d, number, "")) {
     return { rc: 1, error: `could not record leg ${number} in manifest.json` };
   }
-  const out = join(d, "logs", `coachman-leg-${number}-events.jsonl`);
-  const err = join(d, "logs", `coachman-leg-${number}.err`);
-  const marker = join(d, `.leg-${number}-exited`);
   held = isHeldRun(runName, heldDir);
   if (held === 0) {
     return {
       rc: 1,
-      error: `held mid-step after recording leg ${number} in manifest.json with no launch and no thread`,
+      error: `held mid-step after recording leg ${number} in manifest.json with no launch`,
     };
   }
   if (held !== 1) return { rc: 1, error: "cannot re-read the held list" };
-  const launched = watchHost("dispatch", hostName, worktree, d, out, err, marker, false, [
-    beside(import.meta, "launch.sh"),
-    "launch",
-    "coachman",
-    worktree,
-    prompt,
-    "--leg",
-    leg,
-    "--run",
-    d,
-  ]);
-  if (launched !== 0) {
-    return { rc: 1, error: `host.sh could not start coachman leg ${number}; read ${err}` };
-  }
-  const limit = process.env.POSTMASTER_WATCH_TEST_MODE === "1" ? 1 : 30;
-  const thread = harvestThreadId(out, marker, limit);
-  if (!thread) {
-    const again = run(beside(import.meta, "launch.sh"), ["thread-id", out]);
-    const adapterOut = (again.out + again.err).replace(/\n+$/u, "");
-    return { rc: 1, error: noThreadError(number, marker, limit, err, out, adapterOut) };
-  }
-  if (!manifestLeg(d, number, thread)) {
-    return { rc: 1, error: `could not record thread id for leg ${number}` };
+  // The leg command owns markers, stream and records; the thread id lands in
+  // the attempt record when the attempt ends. A start that fails names why on
+  // stderr, and a host failure records the refusal for the next look's ASK.
+  const started = watchLeg("dispatch", rt.rt, d, worktree, leg, number, "", prompt);
+  if (started.code !== 0) {
+    const first = started.text.split("\n")[0] || "no message";
+    return { rc: 1, error: `could not start coachman leg ${number}: ${first}` };
   }
   if (parseInt(number, 10) > parseInt(current, 10) + 1) {
     const note = run(beside(import.meta, "log-action.sh"), [
@@ -1170,7 +1065,7 @@ function prepareDispatch(d: string, runName: string, current: string, root: stri
     "postmaster",
     "dispatch",
     "coachman",
-    `leg ${number}, thread ${thread}; the watcher took it`,
+    `leg ${number} (${leg}); the watcher took it`,
   ]);
   if (logged.code !== 0) return { rc: 1, error: `could not log dispatch of leg ${number}` };
   return { rc: 0, error: "" };
@@ -1247,14 +1142,8 @@ function resumeTransient(d: string, runName: string, number: string, root: strin
   } catch {
     return { rc: 2, error: `the synthesis worktree is missing: ${worktree}` };
   }
-  const named = run(beside(import.meta, "host.sh"), ["name", d, "coachman", leg, number]);
-  if (named.code !== 0) {
-    return {
-      rc: 2,
-      error: `host.sh name failed: ${(named.out + named.err).replace(/\n+$/u, "")}`,
-    };
-  }
-  const hostName = named.out.replace(/\n+$/u, "");
+  const rt = legRt(d);
+  if (rt.error) return { rc: 2, error: rt.error };
   let prompt = join(d, `leg-${number}-resume-${utcStamp()}.txt`);
   while (existsSync(prompt)) {
     const held = isHeldRun(runName, heldDir);
@@ -1294,37 +1183,14 @@ function resumeTransient(d: string, runName: string, number: string, root: strin
     };
   }
   if (held !== 1) return { rc: 2, error: "cannot re-read the held list" };
-  const launchArgs = [
-    beside(import.meta, "launch.sh"),
-    "resume",
-    name,
-    worktree,
-    thread,
-    prompt,
-    "--run",
-    d,
-  ];
-  if (name === "coachman") launchArgs.push("--leg", leg);
-  // The launch's outcome, the way the dispatch path harvests its own thread
-  // id: a host that started the process does not mean the launch took it.
-  // .err holds only this launch's errors, so the whole file is read.
-  const resumed = watchHost(
-    "resume",
-    hostName,
-    worktree,
-    d,
-    out,
-    err,
-    join(d, `.leg-${number}-exited`),
-    true,
-    launchArgs,
-  );
-  if (resumed !== 0) return { rc: 2, error: `host.sh could not resume leg ${number}; read ${err}` };
-  const refusal = refusalIn(err);
-  if (refusal) {
-    // A refused resume is a refusal, not a success: the count is restored, no
-    // success line is written, the refusal is logged, and the run is named in
-    // this look. A refusal is deterministic, never retried on its own.
+  // The leg command resumes on the recorded thread and owns markers, stream
+  // and records; its exit code is the refusal, never .err text. A start that
+  // fails spends no retry: the count is restored, the refusal is logged, and
+  // the run is named in this look. A host failure records the refusal for the
+  // next look's ASK; a validation refusal leaves the records untouched.
+  const resumed = watchLeg("resume", rt.rt, d, worktree, leg, number, thread, prompt);
+  if (resumed.code !== 0) {
+    const first = resumed.text.split("\n")[0] || "no message";
     if (!setResumeCount(d, number, count, newSkip)) {
       return { rc: 2, error: `cannot restore the remount count for leg ${number}` };
     }
@@ -1333,13 +1199,10 @@ function resumeTransient(d: string, runName: string, number: string, root: strin
       "postmaster",
       "refuse",
       "coachman",
-      `leg ${number}, thread ${thread}, ${refusal}; the attempt was refused`,
+      `leg ${number}, thread ${thread}; the resume did not start (${first})`,
     ]);
     if (logged.code !== 0) return { rc: 2, error: `could not log refusal of leg ${number}` };
-    return {
-      rc: 2,
-      error: `launch.sh refused the resume of leg ${number} (${refusal}); read ${err}`,
-    };
+    return { rc: 2, error: `could not resume leg ${number}: ${first}` };
   }
   const logged = run(beside(import.meta, "log-action.sh"), [
     d,
@@ -1415,11 +1278,11 @@ function processTable(root: string, table: string): TableResult {
     if (next === "DISPATCH") {
       const r = prepareDispatch(join(root, runName), runName, leg, root);
       if (r.rc !== 0 && r.rc !== 3) markNeeds(needs, runName, "DISPATCH", r.error);
-    } else if (next === "REMOUNT") {
+    } else if (next === "RESUME") {
       const r = resumeTransient(join(root, runName), runName, leg, root);
       if (r.rc === 0 || r.rc === 3) {
         // taken, or held before its first mutation
-      } else markNeeds(needs, runName, "REMOUNT", r.error);
+      } else markNeeds(needs, runName, "RESUME", r.error);
     } else if (next === "WAIT" || next === "USER" || next === "-") {
       // a leg at work, already put to the user, or closed: never wakes
     } else {
