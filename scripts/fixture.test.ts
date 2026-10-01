@@ -28,7 +28,7 @@ afterEach(() => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
-function runNew(dest: string, home: string) {
+function runNew(dest: string, home: string, extraEnv: Record<string, string | undefined> = {}) {
   return run("bun", ["--no-env-file", SCRIPT, "new", dest, FIXTURE_TICKET], {
     env: {
       ...gitEnv,
@@ -38,6 +38,7 @@ function runNew(dest: string, home: string) {
       LOCAL_SH: undefined,
       CLAUDE_CONFIG_DIR: join(home, "claude-config"),
       CODEX_HOME: join(home, ".codex"),
+      ...extraEnv,
     },
     input: "",
   });
@@ -138,5 +139,26 @@ describe("fixture copy mark and harness settings", () => {
     writeFileSync(config, '{"projects":{"/control":{"hasTrustDialogAccepted":true}}}\n');
 
     expect(sameConfigs(before, configSnapshot(home))).toBe(false);
+  });
+
+  test("new under a hostile GIT_DIR still marks the copy, not the other repo", () => {
+    const home = join(scratch, "home");
+    const dest = join(scratch, "runs", "fixture");
+    mkdirSync(home, { recursive: true });
+    const other = join(scratch, "other-repo");
+    initRepo(other);
+
+    const made = runNew(dest, home, { GIT_DIR: join(other, ".git") });
+    const mark = run("git", ["-C", dest, "config", "--local", "--get", "postmaster.fixture"]);
+    const leaked = run(
+      "git",
+      ["-C", other, "config", "--local", "--get", "postmaster.fixture"],
+      { env: gitEnv },
+    );
+
+    expect(made.code).toBe(0);
+    expect(mark.code).toBe(0);
+    expect(mark.out.trim()).toBe(FIXTURE_TICKET);
+    expect(leaked.code).not.toBe(0);
   });
 });

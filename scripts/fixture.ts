@@ -49,6 +49,19 @@ import {
   pyWords,
 } from "./lib/text.ts";
 
+// A GIT_DIR from the caller must not steer repo identity to another repository.
+for (const k of [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_NAMESPACE",
+]) {
+  delete process.env[k];
+}
+
 const HERE = scriptsDir(import.meta);
 const TOOL = toolRoot(import.meta);
 const APP = join(TOOL, "fixtures", "app");
