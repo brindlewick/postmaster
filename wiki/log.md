@@ -427,3 +427,10 @@ carries a citation.
 
 The three claims the README makes, entered as hypotheses at standing `claimed`, with four
 open questions and the run-record template.
+
+## [2026-10-01] lint | a fixture run's postmaster runs headless
+
+Fixture copies are marked in their own git config, and a fixture run's
+postmaster runs headless on every host, so a run starts without a trust
+prompt. Trusting the fixtures folder never spared a copy: the trust search
+stops at the top of the repository.
