@@ -30,7 +30,8 @@
 #
 # A form with --project resolves the target's local role choices. <name> is a lane from
 # [lanes.<name>], or `coachman`, `coachman_fallback` or `postmaster`
-# from [team]. <leg> is synthesis, review or ship, and with --leg, [team.coachman_legs.<leg>]
+# from [team]. <leg> is synthesis, review or ship — ship only for a run dispatched before the
+# two-leg change — and with --leg, [team.coachman_legs.<leg>]
 # overrides the coachman for that leg. Launching or resuming `coachman` needs --leg; `form`
 # without it shows team.coachman. The coachman is refused when [team.coachman_legs] names any
 # other leg or holds an entry that is not a table, and the coachman and the fallback are

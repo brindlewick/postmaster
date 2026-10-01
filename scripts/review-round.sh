@@ -302,6 +302,12 @@ trap 'for f in "$tmp"/pids/*; do [ -s "$f" ] && kill -KILL "$(cat "$f")" 2>/dev/
 repo="$tmp/repo" d="$tmp/repo/.postmaster/runs/T-1"
 mkdir -p "$d/logs" "$tmp/bin" "$tmp/host" "$tmp/pids" "$tmp/elsewhere" || exit 1
 git init -q -b main "$repo" && git -C "$repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m first || exit 1
+git -C "$repo" worktree add -q --detach "$repo/.worktrees/T-1-synthesis" HEAD || exit 1
+cat > "$d/brief.md" <<EOF
+## Dispatch
+name: T-1
+synthesis worktree: $repo/.worktrees/T-1-synthesis
+EOF
 for h in herdr tmux; do printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/$h"; chmod +x "$tmp/bin/$h"; done
 export PATH="$tmp/bin:$PATH" POSTMASTER_HOST=none POSTMASTER_HOST_STATE="$tmp/host" POSTMASTER_HOST_STOP_WAIT=2 POSTMASTER_HOST_CLOSE_WAIT=1
 cat > "$tmp/reviewer.sh" <<'SH'
@@ -346,7 +352,7 @@ cut()   { git -C "$repo" worktree add -q --detach "$repo/.worktrees/T-1-rev-$1-$
 launch() {  # launch <round> <lens> <lane> <fast|slow|leaves>: through host.sh, as the round does
   n=$((n + 1))
   ( cd "$tmp" && "$HERE/host.sh" run "T-1 · $3 $2 review" "$repo/.worktrees/T-1-rev-$2-$3" \
-      --role reviewer --run "$d" \
+      --under "$d" --role reviewer --run "$d" \
       --marker "$d/logs/review-r$1-$2-$3.done" --pidfile "$tmp/pids/launch.$n" -- "$tmp/reviewer.sh" "$4" "$tmp/pids/child.$n" ) >/dev/null \
     || { echo "  (could not launch $2 $3)"; return 1; }
   # host.sh run waits 10s for the launch pid itself; this covers a slower
