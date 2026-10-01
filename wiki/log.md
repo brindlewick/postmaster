@@ -21,6 +21,13 @@ three changes the page lists; it needed root to allow Bubblewrap on this Ubuntu 
 worktree's shared store still lets a lane read another lane's commits; a shared clone per lane
 does not. New concept page `lane-confinement`, standing `claimed`.
 
+## [2026-10-01] lint | a fixture run's postmaster runs headless
+
+Fixture copies are marked in their own git config, and a fixture run's
+postmaster runs headless on every host, so a run starts without a trust
+prompt. Trusting the fixtures folder never spared a copy: the trust search
+stops at the top of the repository.
+
 ## [2026-09-30] ingest | a gate on the default branch after a merge runs from a clean checkout
 
 Issue #110. A design decision, with the control that shows it. The fixture app's `npm run
