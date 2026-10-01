@@ -38,6 +38,32 @@ interface RunRow {
   next: string;
 }
 
+// Python's str() for a manifest value, as the table prints it: True, None and
+// [] in Python's spelling, and a float with its point (the raw token says
+// whether the number parsed as one). Non-empty containers serialise as JSON,
+// which differs from str() in quotes; manifests never hold them.
+function pyStr(v: unknown, raw: string, key: string): string {
+  if (typeof v === "string") return v;
+  if (v === null || v === undefined) return "None";
+  if (v === true) return "True";
+  if (v === false) return "False";
+  if (typeof v === "number") {
+    const tok = new RegExp(`"${key}"\\s*:\\s*(-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)`, "u").exec(
+      raw,
+    )?.[1];
+    if (tok !== undefined && (tok.includes(".") || /[eE]/u.test(tok))) {
+      return Number.isInteger(v) ? `${String(v)}.0` : String(v);
+    }
+    return String(v);
+  }
+  if (typeof v === "bigint") return String(v);
+  try {
+    return JSON.stringify(v) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export function status(root: string): number {
   const now = Date.now() / 1000;
   const pmEsc = join(root, "postmaster", "ESCALATION.md");
@@ -61,9 +87,14 @@ export function status(root: string): number {
     const mp = join(d, "manifest.json");
     if (existsSync(mp)) {
       try {
-        const m = JSON.parse(readFileSync(mp, "utf8"));
-        stage = String(m.stage ?? "?");
-        leg = String(m.leg ?? "?");
+        const raw = readFileSync(mp, "utf8");
+        const m: unknown = JSON.parse(raw);
+        if (typeof m !== "object" || m === null || Array.isArray(m)) {
+          throw new Error("not a manifest object");
+        }
+        const rec = m as Record<string, unknown>;
+        stage = "stage" in rec ? pyStr(rec.stage, raw, "stage") : "?";
+        leg = "leg" in rec ? pyStr(rec.leg, raw, "leg") : "?";
       } catch {
         stage = "manifest unreadable";
       }
@@ -112,7 +143,7 @@ export function status(root: string): number {
   console.log(hdr("RUN", "STAGE", "LEG", "MARKERS", "IDLE", "NEXT"));
   for (const r of rows) {
     console.log(
-      `${r.run.padEnd(14)} ${r.stage.padEnd(16)} ${r.leg.padEnd(4)} ${r.markers.join(",").padEnd(44) || "-"} ${String(r.idleMin).padStart(5)}m  ${r.next}`,
+      `${r.run.padEnd(14)} ${r.stage.padEnd(16)} ${r.leg.padEnd(4)} ${(r.markers.join(",") || "-").padEnd(44)} ${String(r.idleMin).padStart(5)}m  ${r.next}`,
     );
   }
   return 0;

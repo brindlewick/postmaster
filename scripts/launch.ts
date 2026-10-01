@@ -8,13 +8,34 @@
 //   launch.sh resume <name> <cwd> <thread-id> <prompt-file> [--leg <leg>] [--last <file>]
 //                    [--run <dispatch>]
 //   launch.sh skill  <name> <skill> [--run <dispatch>]
+//   launch.sh thread-id <events-file>       the thread id a stream records, from its shape
+//   launch.sh transient <err-file> [<stream-file> [<skip-lines>]]
+//                                           exit 0 when a leg's end is a transient provider
+//                                           error this adapter names (harnesses.md)
+//   launch.sh wall-tokens                   the wall token stems transient vetoes on, one per line
+//   launch.sh wall-quotes                   the quote corpus, one wall phrasing per line
 //
-//   exit 0  the forms or the skill's prompt were printed, or the harness exited 0
+// thread-id reads an events stream and prints the first thread id its shape carries (codex
+// thread_id, claude session_id, grok session id, agy conversationId, pi session id, muse
+// stream.id, mimo sessionID); it is how a launch's id is recorded after the stream has
+// started. transient names the provider errors that are worth resuming on rather than
+// escalating: a model stream idle timeout, a gateway failure, a stream drop. The set is here
+// and in harnesses.md, never in the watcher. It is matched against the leg's durable record:
+// its .err file and the error records in its stream tail, never a prompt or a user message.
+// The tail starts after skip-lines, the lines an earlier launch wrote: a resumed stream
+// keeps its history, and an old error must not classify the current end. A launch refusal,
+// and a quota, payment, usage or rate wall, are never transient and take precedence over
+// any transient signature.
+//
+//   exit 0  the forms or the skill's prompt were printed, or the harness exited 0; thread-id
+//           found an id; transient matched a named provider error; wall-tokens or wall-quotes
+//           listed their lines
 //   exit 1  usage, config or run.json missing or unreadable, unknown name, a leg that is not
 //           synthesis, review or ship, the coachman launched or resumed with no --leg, a
 //           coachman or fallback on a lane's model, harness not on PATH, env_file missing, a
 //           form this script does not have (agy resume), a skill that is not security-review,
-//           or a muse or mimo resume of a thread the launch's data directory does not hold
+//           a muse or mimo resume of a thread the launch's data directory does not hold,
+//           thread-id with no id in the stream, or transient with a record that is not named
 //   exit 3  skill or review: the lane's harness has no such review form recorded
 //   else    the harness's own exit code
 
@@ -35,6 +56,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { readTomlFile, tryJsonFile } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { run, signalExitCode } from "./lib/proc.ts";
+import { BOUND_L, BOUND_R } from "./lib/text.ts";
 
 const CONFIG =
   process.env.POSTMASTER_CONFIG ?? join(process.env.HOME ?? "", ".postmaster/config.toml");
@@ -500,6 +522,435 @@ export function makeHeldDir(): string {
   return mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "launch-held-"));
 }
 
+// --- thread-id: the id a stream records, from its own shape -------------------------------
+// Harness-specific event shapes live here and in harnesses.md, not in whoever records the id.
+// Pure: no config, no harness lookup. Events are read top-down and the first id wins; keys
+// are matched anywhere in an event but bare `id` only on a session record, so a tool payload
+// that happens to carry an id never resolves as the thread.
+const THREAD_ID_KEYS = new Set([
+  "thread_id",
+  "session_id",
+  "sessionID",
+  "sessionId",
+  "conversationId",
+  "conversation_id",
+]);
+
+function walkThreadId(obj: unknown): string | null {
+  if (Array.isArray(obj)) {
+    for (const v of obj) {
+      const found = walkThreadId(v);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+  if (typeof obj !== "object" || obj === null) return null;
+  for (const [key, value] of Object.entries(obj)) {
+    if (THREAD_ID_KEYS.has(key) && typeof value === "string" && value.trim() !== "") {
+      return value.trim();
+    }
+    const found = walkThreadId(value);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+function findThreadId(text: string): string | null {
+  for (const raw of text.split("\n")) {
+    if (raw.trim() === "") continue;
+    let e: unknown;
+    try {
+      e = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (typeof e !== "object" || e === null || Array.isArray(e)) continue;
+    const ev = e as Record<string, unknown>;
+    // muse: stream.id on a session record
+    const stream = ev.stream;
+    if (typeof stream === "object" && stream !== null && !Array.isArray(stream)) {
+      const st = stream as Record<string, unknown>;
+      if (st.kind === "session" && typeof st.id === "string" && st.id.trim() !== "") {
+        return st.id.trim();
+      }
+    }
+    // pi and grok: id on a session record
+    if (ev.type === "session" && typeof ev.id === "string" && ev.id.trim() !== "") {
+      return ev.id.trim();
+    }
+    const found = walkThreadId(ev);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+// --- transient: a provider error worth resuming on ------------------------------------------
+// The set is enumerated here and documented in harnesses.md; the watcher only asks. Matched
+// against the leg's .err and the error records in its stream tail, never a prompt or a user
+// message. Prints the canonical class on a match. A launch refusal and a quota, payment,
+// usage or rate wall are checked first and are never transient.
+// The wall phrases live here once: transient builds its matcher from them and the
+// tests build their coverage matrices from them, so a phrase added here is matched
+// and covered with no other edit.
+const WALL_TOKENS = [
+  "quota",
+  "limit",
+  "exhaust",
+  "exceed",
+  "throttl",
+  "bill",
+  "budget",
+  "credit",
+  "payment",
+  "usage",
+  "slow",
+  "quick",
+  "toomany",
+  "429",
+  "402",
+];
+// The stems are deliberately broad and matched as substrings on
+// separator-stripped text, with no span limit and no word boundary: a false veto
+// is a wake, which costs the postmaster one look, while a missed wall is an
+// automatic remount against a wall. The one exclusion is Claude's
+// rate_limit_event slowdown notice, which is stripped before the veto scan.
+
+// The quote corpus: wall phrasings as runs met them, verbatim with provenance.
+// The token matrix covers the veto set by construction; the corpus covers the
+// wild, each quote alone and beside every transient exemplar. When a run meets a
+// wall phrasing, append it here verbatim with where it was found.
+const WALL_QUOTES = [
+  "You exceeded your current quota, please check your plan and billing details.",
+  "quota was exceeded for this key",
+  "Error: insufficient_quota",
+  "You have been throttled. Slow down.",
+  "ratelimited: please back off and retry",
+  "HTTP 429: Too Many Requests",
+  "budget exhausted for this billing period",
+  "quota exceeded: monthly spend budget exhausted",
+  "Error: quota_exhausted",
+  "provider wall: model capacity exhausted",
+  "resource_exhausted: try again later",
+  "You have been rate limited. Slow down.",
+  "usage limits reached for this account",
+  "RateLimitError: slow down",
+  "429 Too Many Requests",
+  "402 Payment Required",
+  "Resource has been exhausted (e.g. check quota)",
+  "Error: rate_limit_exceeded",
+  "Error: usage_limit_reached",
+  "quota for this project was finally exceeded",
+  "budget for the current month has been exhausted",
+  "Please slow down, you're sending requests too quickly.",
+  "You are sending requests too quickly. Slow down.",
+];
+
+const TEXT_STEMS = WALL_TOKENS.filter((t) => !/^[0-9]+$/u.test(t));
+const DIGIT_STEMS = WALL_TOKENS.filter((t) => /^[0-9]+$/u.test(t));
+const CODE_RE =
+  DIGIT_STEMS.length > 0
+    ? new RegExp(`${BOUND_L}(?:${DIGIT_STEMS.join("|")})${BOUND_R}`, "u")
+    : null;
+const SLOWDOWN_NOTICE = "ratelimitevent"; // Claude's slowdown notice: never a veto
+
+function vetoed(text: string): boolean {
+  const norm = text
+    .toLowerCase()
+    .replace(/[^a-z0-9]/gu, "")
+    .split(SLOWDOWN_NOTICE)
+    .join(" ");
+  if (TEXT_STEMS.some((tok) => norm.includes(tok))) return true;
+  if (CODE_RE !== null && CODE_RE.test(text.replace(/[\s_-]+/gu, " "))) return true;
+  return false;
+}
+
+function normKey(key: unknown): string {
+  return String(key)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/gu, "");
+}
+
+// Python's truthiness, which empty objects and arrays fail: only a truthy value
+// under an error key marks a record, and null, false and empty values never do.
+function pyTruthy(v: unknown): boolean {
+  if (v === null || v === undefined || v === false || v === 0 || v === "") return false;
+  if (typeof v === "number" && Number.isNaN(v)) return false;
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === "object") return Object.keys(v).length > 0;
+  return true;
+}
+
+// Python's str() for the kind check: nulls, booleans and numbers in Python's
+// spelling, mappings and lists serialised so a nested wall word still reads.
+function pyStr(v: unknown): string {
+  if (v === null || v === undefined) return "None";
+  if (v === true) return "True";
+  if (v === false) return "False";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "bigint") return String(v);
+  try {
+    return JSON.stringify(v) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+const CODE_KEYS = new Set(["status", "statuscode", "code", "errorcode", "errcode", "httpstatus"]);
+const NAME_KEYS = new Set(["errortype", "errorname"]);
+const SHAPE_KEYS = new Set(["type", "name"]);
+const MESSAGE_KEYS = new Set([
+  "error",
+  "errors",
+  "message",
+  "Detail",
+  "reason",
+  "description",
+  "text",
+]);
+const PROMPT_KEYS = new Set(["user", "prompt", "input", "transcript", "request"]);
+const TRANSIENT_CODES = new Set([502, 503, 504, 529]);
+const WALL_CODES = new Set(DIGIT_STEMS.map((t) => parseInt(t, 10)));
+const TRANSIENT_TYPES = new Set(["econnreset", "econnaborted", "overloaded", "overloadederror"]);
+const INTERNAL = new Set(["completed", "ratelimitevent", "etimedout"]);
+const TOOL_RESULT_NAMES = new Set(["toolresult", "toolexecutionend"]);
+const ERROR_KEYS = new Set(["error", "errors", "iserror", "errormessage"]);
+const KIND_KEYS = ["type", "event", "kind", "payload_type", "subtype", "status"];
+
+interface StructuredState {
+  transient: string | null;
+  wall: boolean;
+  unknown: boolean;
+}
+
+function noteStructured(key: string, value: unknown, marked: boolean, st: StructuredState): void {
+  const nk = normKey(key);
+  if (typeof value === "boolean" || value === null || value === undefined) return;
+  if (typeof value === "number") {
+    if (!Number.isInteger(value)) return;
+    if (CODE_KEYS.has(nk)) {
+      if (TRANSIENT_CODES.has(value)) {
+        if (st.transient === null) st.transient = "gateway failure";
+      } else if (WALL_CODES.has(value)) {
+        st.wall = true;
+      } else if (value >= 200 && value <= 399) {
+        // success and redirect statuses are harness-internal, like completed
+      } else if (value >= 100 && value <= 999) {
+        st.unknown = true;
+      }
+      // else an exit code, not a status: harness-internal, ignored
+    }
+    return;
+  }
+  if (typeof value !== "string") return;
+  const text = value.trim();
+  if (text === "") return;
+  if (CODE_KEYS.has(nk) && /^[0-9]+$/u.test(text)) {
+    noteStructured(key, parseInt(text, 10), marked, st);
+    return;
+  }
+  const nv = normKey(text);
+  if (nv === "") return;
+  if ((CODE_KEYS.has(nk) || NAME_KEYS.has(nk) || SHAPE_KEYS.has(nk)) && TRANSIENT_TYPES.has(nv)) {
+    if (st.transient === null)
+      st.transient = nv.startsWith("econn") ? "stream drop" : "gateway failure";
+    return;
+  }
+  if (marked && (CODE_KEYS.has(nk) || NAME_KEYS.has(nk)) && !INTERNAL.has(nv)) {
+    st.unknown = true;
+  }
+  // A bare type or name outside the transient set is a record label: ignored.
+  // A string on a non-error record is progress noise unless it signals.
+}
+
+// A subtree is a tool's result when its type or name says so, or when it sits
+// under a tool-result key: claude's tool_result, pi's tool_execution_end, and
+// any other harness's tool-result shape the adapter identifies (harnesses.md
+// names them). A failed tool call's text is the tool's, not the provider's — a
+// failing gate prints cap and limit words all day — and a provider wall still
+// ends the turn through the harness's own error record. The exclusion holds at
+// every depth, in every read — marking, the veto, transient prose and
+// structured signals alike: a tool's subtree contributes nothing anywhere,
+// whatever it nests. It is deliberately narrow: only tool_result and
+// tool_execution_end as a type, a name, or a key exclude — a payload_type of
+// tool.result (muse outcome:error payloads) is an error record, not a tool's.
+function isToolResult(node: unknown): boolean {
+  if (typeof node !== "object" || node === null || Array.isArray(node)) return false;
+  for (const [key, child] of Object.entries(node)) {
+    if (
+      (normKey(key) === "type" || normKey(key) === "name") &&
+      TOOL_RESULT_NAMES.has(normKey(child))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function underToolKey(key: unknown, child: unknown): boolean {
+  return TOOL_RESULT_NAMES.has(normKey(key)) && typeof child === "object" && child !== null;
+}
+
+function valuesVetoed(value: unknown): boolean {
+  if (typeof value === "string") return vetoed(value);
+  if (typeof value === "object" && value !== null) {
+    if (!Array.isArray(value) && isToolResult(value)) return false;
+    if (Array.isArray(value)) return value.some((child) => valuesVetoed(child));
+    for (const [key, child] of Object.entries(value)) {
+      if (underToolKey(key, child)) continue;
+      if (valuesVetoed(child)) return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+function isMarked(event: Record<string, unknown>): boolean {
+  let found = false;
+  const visit = (node: unknown): void => {
+    if (found || isToolResult(node)) return;
+    if (typeof node === "object" && node !== null && !Array.isArray(node)) {
+      const rec = node as Record<string, unknown>;
+      const kind = KIND_KEYS.map((k) => pyStr(rec[k] ?? ""))
+        .join(" ")
+        .toLowerCase();
+      if (kind.includes("error") || kind.includes("fail") || kind.includes("exception")) {
+        found = true;
+        return;
+      }
+      for (const [key, child] of Object.entries(rec)) {
+        const nk = normKey(key);
+        if (underToolKey(key, child)) continue;
+        if (ERROR_KEYS.has(nk) && pyTruthy(child)) {
+          found = true;
+          return;
+        }
+        if (nk === "outcome" && pyStr(child).toLowerCase() === "error") {
+          found = true;
+          return;
+        }
+        visit(child);
+      }
+    } else if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+    }
+  };
+  visit(event);
+  return found;
+}
+
+function noteRecord(value: unknown, marked: boolean, st: StructuredState): void {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    if (isToolResult(value)) return;
+    for (const [key, child] of Object.entries(value)) {
+      if (PROMPT_KEYS.has(String(key).toLowerCase())) continue;
+      if (underToolKey(key, child)) continue;
+      noteStructured(String(key), child, marked, st);
+      noteRecord(child, marked, st);
+    }
+  } else if (Array.isArray(value)) {
+    for (const child of value) noteRecord(child, marked, st);
+  }
+}
+
+function collectErrorText(value: unknown, parent: string, into: string[]): void {
+  if (typeof value === "string") {
+    if (MESSAGE_KEYS.has(parent)) into.push(value);
+    return;
+  }
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    if (isToolResult(value)) return;
+    for (const [key, child] of Object.entries(value)) {
+      if (PROMPT_KEYS.has(String(key).toLowerCase())) continue;
+      if (underToolKey(key, child)) continue;
+      collectErrorText(child, String(key).toLowerCase(), into);
+    }
+  } else if (Array.isArray(value)) {
+    for (const child of value) collectErrorText(child, parent, into);
+  }
+}
+
+const SEP = String.raw`[\s_-]+`;
+const IDLE_RE = new RegExp(
+  `${BOUND_L}(?:model${SEP}stream${SEP}idle${SEP}timeout|stream${SEP}idle${SEP}timeout)${BOUND_R}`,
+  "iu",
+);
+const GATEWAY_RE = new RegExp(
+  `${BOUND_L}(?:bad${SEP}gateway|service${SEP}unavailable|gateway${SEP}timeout|overloaded|50[234]|529)${BOUND_R}`,
+  "iu",
+);
+const DROP_RE = new RegExp(
+  `${BOUND_L}(?:stream${SEP}disconnected|sse${SEP}error|connection${SEP}(?:reset|aborted)|broken${SEP}pipe)${BOUND_R}`,
+  "iu",
+);
+
+// The classifier answers one question: may the watcher resume this ending by itself?
+// The answer is positive and narrow. An ending resumes only when it carries a known
+// transient signature and no wall-like token anywhere in what it says; everything
+// else wakes the postmaster.
+function classifyTransient(
+  err: string,
+  streamText: string | null,
+  skip: number,
+): { out: string; code: number } {
+  const st: StructuredState = { transient: null, wall: false, unknown: false };
+  const errorText: string[] = [];
+  let vetoHit = false;
+  if (streamText !== null) {
+    const window: Array<Record<string, unknown>> = [];
+    for (const line of streamText.split("\n").slice(skip)) {
+      let event: unknown;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        if (!vetoHit && vetoed(line)) vetoHit = true;
+        continue;
+      }
+      if (typeof event !== "object" || event === null || Array.isArray(event)) continue;
+      const rec = event as Record<string, unknown>;
+      const marked = isMarked(rec);
+      if (marked && !vetoHit && valuesVetoed(rec)) vetoHit = true;
+      noteRecord(rec, marked, st);
+      window.push(rec);
+      if (window.length > 100) window.shift();
+    }
+    for (const event of window) {
+      if (isMarked(event)) collectErrorText(event, "", errorText);
+    }
+  }
+  const allErrors = `${err}\n${errorText.join("\n")}`;
+  // host.sh's own notices (uncapped, cap reached) precede the child's stderr, so a
+  // refusal is a launch: line past any leading host: lines, not offset 0.
+  if (err.replace(/^(?:host:[^\n]*\n)+/u, "").startsWith("launch:")) {
+    return { out: "launch-refusal", code: 1 };
+  }
+  const errProse = err
+    .split("\n")
+    .filter((line) => !line.startsWith("host:"))
+    .join("\n");
+  if (vetoHit || vetoed(errProse) || st.wall) return { out: "provider-wall", code: 1 };
+  if (st.unknown) return { out: "not-transient", code: 1 };
+  if (st.transient !== null) return { out: st.transient, code: 0 };
+  if (IDLE_RE.test(allErrors)) return { out: "model stream idle timeout", code: 0 };
+  if (GATEWAY_RE.test(allErrors)) return { out: "gateway failure", code: 0 };
+  if (DROP_RE.test(allErrors)) return { out: "stream drop", code: 0 };
+  return { out: "not-transient", code: 1 };
+}
+
+function readRegularFile(path: string, missing: string): string {
+  let st;
+  try {
+    st = statSync(path);
+  } catch {
+    die(missing);
+  }
+  if (!st.isFile()) die(missing);
+  try {
+    return readFileSync(path, "utf8");
+  } catch (e) {
+    die(`cannot read ${path}: ${String(e)}`);
+  }
+}
+
 // --- entry ------------------------------------------------------------------------------
 const argv = process.argv.slice(2);
 
@@ -507,7 +958,52 @@ if (import.meta.main) {
   // This process is main's bash launcher: a fresh bash reports SHLVL one
   // above what it inherited, and everything below inherits that level.
   process.env.SHLVL = nextShlvl(process.env.SHLVL);
-  if (argv.length < 2) die("usage: launch.sh form|launch|review|resume|skill <name> ...");
+  const CMD0: string = argv[0] ?? "";
+  if (CMD0 === "thread-id") {
+    const rest = argv.slice(1);
+    if (rest.length !== 1) die("usage: launch.sh thread-id <events-file>");
+    const id = findThreadId(readRegularFile(rest[0]!, `no such events file: ${rest[0]}`));
+    if (id === null) die(`no thread id in ${rest[0]}`);
+    console.log(id);
+    process.exit(0);
+  }
+  if (CMD0 === "transient") {
+    const rest = argv.slice(1);
+    if (rest.length < 1 || rest.length > 3)
+      die("usage: launch.sh transient <err-file> [<stream-file> [<skip-lines>]]");
+    const err = readRegularFile(rest[0]!, `no such error file: ${rest[0]}`);
+    let streamText: string | null = null;
+    if (rest.length >= 2) {
+      try {
+        streamText = readFileSync(rest[1]!, "utf8");
+      } catch {
+        streamText = null;
+      }
+    }
+    const skipArg = rest.length >= 3 ? rest[2]! : "0";
+    if (!/^\s*[+-]?[0-9]+\s*$/u.test(skipArg)) {
+      die(`skip-lines is a whole number from 0: ${skipArg}`);
+    }
+    const skip = parseInt(skipArg, 10);
+    if (skip < 0) die(`skip-lines is a whole number from 0: ${skipArg}`);
+    const verdict = classifyTransient(err, streamText, skip);
+    console.log(verdict.out);
+    process.exit(verdict.code);
+  }
+  if (CMD0 === "wall-tokens") {
+    if (argv.length !== 1) die("usage: launch.sh wall-tokens");
+    for (const t of WALL_TOKENS) console.log(t);
+    process.exit(0);
+  }
+  if (CMD0 === "wall-quotes") {
+    if (argv.length !== 1) die("usage: launch.sh wall-quotes");
+    for (const q of WALL_QUOTES) console.log(q);
+    process.exit(0);
+  }
+  if (argv.length < 2)
+    die(
+      "usage: launch.sh form|launch|review|resume|skill <name> ... | thread-id <events-file> | transient <err-file> [<stream-file> [<skip-lines>]] | wall-tokens | wall-quotes",
+    );
   const CMD: string = argv[0] ?? "";
   const NAME = argv[1] ?? "";
   let LEG = "";

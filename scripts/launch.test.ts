@@ -1,4 +1,4 @@
-// Tests beside scripts/launch.ts, moved from its --self-test on #109: 150 controls.
+// Tests beside scripts/launch.ts, moved from its --self-test on #109: 226 controls.
 // The sequence runs once in beforeAll with recording check/ok/fail; one test per recorded label.
 // Its local ok/fail forwarders are dropped, so helpers record through the shims directly.
 // The python3 branches use the top-level cond; their in-sequence skip logs are replaced by it.
@@ -2407,6 +2407,864 @@ beforeAll(() => {
     if (rc === 3 && out === "") ok("a muse lane has no security review skill: exit 3");
     else fail("a muse lane has no security review skill: exit 3");
 
+    console.log("thread-id: the id a stream records, from its shape");
+    const doSub = (...args: string[]): void => {
+      // thread-id, transient and the wall lists read no config; the ambient
+      // environment is inherited, as the self-test ran them bare.
+      const r = run(self, args);
+      out = r.out;
+      err = r.err;
+      rc = r.code;
+    };
+    const tid = (label: string, want: string, eventsText: string): void => {
+      writeFileSync(join(tmp, "events.jsonl"), `${eventsText}\n`);
+      doSub("thread-id", join(tmp, "events.jsonl"));
+      if (rc === 0 && bashOut(out) === want) ok(label);
+      else fail(label, `got '${bashOut(out)}', exit ${rc}`);
+    };
+    tid(
+      "codex: thread_id on thread.started",
+      "0199a213-81c0",
+      '{"type":"thread.started","thread_id":"0199a213-81c0"}',
+    );
+    tid(
+      "claude: session_id on system/init",
+      "a99db1c7-9178",
+      '{"type":"system","subtype":"init","session_id":"a99db1c7-9178","model":"claude-haiku-4-5"}',
+    );
+    tid("grok: id on a session record", "fixture-grok", '{"type":"session","id":"fixture-grok"}');
+    tid("agy: conversationId", "fixture-agy", '{"conversationId":"fixture-agy"}');
+    tid("pi: id on session", "sess-pi-1", '{"type":"session","id":"sess-pi-1"}');
+    tid(
+      "muse: stream.id on the first record",
+      "mu-2222",
+      '{"payload_type":"session","stream":{"kind":"session","id":"mu-2222"},"sequence":1}',
+    );
+    tid(
+      "mimo: sessionID on any event",
+      "mi-3333",
+      '{"type":"step_start","sessionID":"mi-3333","part":{"type":"step_start"}}',
+    );
+    tid(
+      "the first id in the stream wins",
+      "first-1",
+      '{"type":"thread.started","thread_id":"first-1"}\n{"type":"thread.started","thread_id":"second-2"}',
+    );
+    writeFileSync(join(tmp, "events.jsonl"), '{"type":"result","subtype":"success"}\n');
+    doSub("thread-id", join(tmp, "events.jsonl"));
+    if (rc === 1 && out === "") ok("a stream with no id is exit 1");
+    else fail("a stream with no id is exit 1", `exit ${rc}`);
+    writeFileSync(
+      join(tmp, "events.jsonl"),
+      '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-9","name":"Bash"}]}}\n',
+    );
+    doSub("thread-id", join(tmp, "events.jsonl"));
+    if (rc === 1 && out === "") ok("a tool payload id is not the thread");
+    else fail("a tool payload id is not the thread", `exit ${rc}`);
+    doSub("thread-id", join(tmp, "no-such-events"));
+    if (rc === 1 && err.includes("no such events file")) ok("a missing events file is refused");
+    else fail("a missing events file is refused", `exit ${rc}`);
+
+    console.log("transient: a provider error worth resuming on");
+    const isTransient = (
+      label: string,
+      want: number,
+      errText: string,
+      streamText?: string,
+    ): void => {
+      writeFileSync(join(tmp, "leg.err"), `${errText}\n`);
+      if (streamText !== undefined) {
+        writeFileSync(join(tmp, "leg-events.jsonl"), `${streamText}\n`);
+        doSub("transient", join(tmp, "leg.err"), join(tmp, "leg-events.jsonl"));
+      } else {
+        doSub("transient", join(tmp, "leg.err"));
+      }
+      if (rc === want) ok(label);
+      else fail(label, `exit ${rc}, wanted ${want}`);
+    };
+    isTransient(
+      "a model stream idle timeout is transient",
+      0,
+      "API Error: model stream idle timeout",
+    );
+    isTransient("a stream idle timeout alone is transient", 0, "stream idle timeout after 300s");
+    isTransient("a bad gateway is transient", 0, "502 Bad Gateway");
+    isTransient("an overloaded response is transient", 0, "529 overloaded");
+    isTransient("a service outage is transient", 0, "503 Service Unavailable");
+    isTransient("a stream disconnect is transient", 0, "stream disconnected");
+    isTransient("a connection reset is transient", 0, "read: connection reset by peer");
+    isTransient("a broken pipe is transient", 0, "write: broken pipe");
+    isTransient(
+      "a transient error in the stream tail counts",
+      0,
+      "the leg ended",
+      '{"type":"error","message":"model stream idle timeout"}',
+    );
+    isTransient(
+      "a harness failure subtype in the stream tail is inspected",
+      0,
+      "the leg ended",
+      '{"type":"result","subtype":"error_during_execution","message":"model stream idle timeout"}',
+    );
+    isTransient(
+      "timeout text in a user prompt is not a provider error",
+      1,
+      "the leg ended",
+      '{"type":"error","message":"provider request failed","prompt":{"text":"model stream idle timeout"}}',
+    );
+    isTransient("a launch refusal is never transient", 1, "launch: resume needs a thread id");
+    isTransient(
+      "a quota wall takes precedence over a transient signature",
+      1,
+      "quota exceeded: model stream idle timeout",
+    );
+    isTransient("a quota wall is not transient", 1, "402 Payment Required: out of credit");
+    isTransient("a usage limit is not transient", 1, "usage limit reached for this month");
+    isTransient("a rate limit is not transient", 1, "rate limit exceeded, retry later");
+    isTransient("a provider wall is not transient", 1, "provider wall: model capacity exhausted");
+    isTransient("a generic timeout is not transient", 1, "request timeout");
+    isTransient("an ordinary model error is not transient", 1, "Error: something went wrong");
+    isTransient("an empty record is not transient", 1, "");
+    isTransient("a bare quota mention wakes", 1, "checking quota status before proceeding");
+    isTransient("a quota remainder wakes", 1, "quota remaining: 0 of 100");
+    isTransient("quota exhausted is a provider wall", 1, "quota exhausted for this key");
+    const staleStream =
+      '{"type":"error","message":"model stream idle timeout"}\n{"type":"assistant","message":"continued"}';
+    writeFileSync(join(tmp, "leg.err"), "AssertionError: something the lane did wrong\n");
+    writeFileSync(join(tmp, "leg-events.jsonl"), `${staleStream}\n`);
+    doSub("transient", join(tmp, "leg.err"), join(tmp, "leg-events.jsonl"), "1");
+    if (rc === 1 && bashOut(out) === "not-transient") {
+      ok("an old transient error before the skip does not classify the current end");
+    } else {
+      fail(
+        "an old transient error before the skip does not classify the current end",
+        `exit ${rc}, ${bashOut(out)}`,
+      );
+    }
+    doSub("transient", join(tmp, "leg.err"), join(tmp, "leg-events.jsonl"), "0");
+    if (rc === 0)
+      ok("a zero skip keeps the whole stream, proving the control above is not vacuous");
+    else {
+      fail(
+        "a zero skip keeps the whole stream, proving the control above is not vacuous",
+        `exit ${rc}`,
+      );
+    }
+    writeFileSync(join(tmp, "leg.err"), "the leg ended\n");
+    writeFileSync(
+      join(tmp, "leg-events.jsonl"),
+      `${staleStream}\n{"type":"error","message":"502 Bad Gateway"}\n`,
+    );
+    doSub("transient", join(tmp, "leg.err"), join(tmp, "leg-events.jsonl"), "2");
+    if (rc === 0 && bashOut(out) === "gateway failure")
+      ok("a transient error after the skip still counts");
+    else fail("a transient error after the skip still counts", `exit ${rc}, ${bashOut(out)}`);
+    doSub("transient", join(tmp, "leg.err"), join(tmp, "leg-events.jsonl"), "99");
+    if (rc === 1 && bashOut(out) === "not-transient")
+      ok("a skip past the end reads the .err alone");
+    else fail("a skip past the end reads the .err alone", `exit ${rc}, ${bashOut(out)}`);
+    doSub("transient", join(tmp, "leg.err"), join(tmp, "leg-events.jsonl"), "soon");
+    if (rc === 1 && err.includes("whole number")) ok("a skip that is not a number is refused");
+    else fail("a skip that is not a number is refused", `exit ${rc}`);
+    isTransient(
+      "an underscore quota wall takes precedence",
+      1,
+      "quota_exhausted: model stream idle timeout",
+    );
+    isTransient(
+      "a bare provider-wall mention without a stem is not a veto",
+      0,
+      "provider_wall: stream disconnected",
+    );
+    isTransient(
+      "an underscore resource wall takes precedence",
+      1,
+      "resource_exhausted: bad gateway",
+    );
+    isTransient(
+      "a hyphen quota wall takes precedence",
+      1,
+      "quota-exceeded: model stream idle timeout",
+    );
+    writeFileSync(
+      join(tmp, "leg.err"),
+      "host: launch running uncapped (no supported per-launch limits available)\nlaunch: no such lane\n",
+    );
+    doSub("transient", join(tmp, "leg.err"));
+    if (rc === 1 && bashOut(out) === "launch-refusal") {
+      ok("a refusal past a host notice is still a refusal");
+    } else fail("a refusal past a host notice is still a refusal", `exit ${rc}, ${bashOut(out)}`);
+    writeFileSync(
+      join(tmp, "leg.err"),
+      "host: memory cap reached (MemoryMax=64M)\nlaunch: resume needs a thread id\n",
+    );
+    doSub("transient", join(tmp, "leg.err"));
+    if (rc === 1 && bashOut(out) === "launch-refusal") {
+      ok("a refusal past a cap notice is still a refusal");
+    } else fail("a refusal past a cap notice is still a refusal", `exit ${rc}, ${bashOut(out)}`);
+    writeFileSync(
+      join(tmp, "leg.err"),
+      "host: launch running uncapped\nlaunch: stream idle timeout on resume\n",
+    );
+    doSub("transient", join(tmp, "leg.err"));
+    if (rc === 1 && bashOut(out) === "launch-refusal") {
+      ok("a refusal wins over transient text on its own line");
+    } else {
+      fail("a refusal wins over transient text on its own line", `exit ${rc}, ${bashOut(out)}`);
+    }
+
+    console.log("vetoes: any wall token anywhere in an ending wakes, beside every transient");
+    let matrixBad: string[] = [];
+    const checkCell = (label: string, wantExit: number, wantOut: string, errText: string): void => {
+      writeFileSync(join(tmp, "cell.err"), `${errText}\n`);
+      doSub("transient", join(tmp, "cell.err"));
+      if (!(rc === wantExit && bashOut(out) === wantOut)) {
+        matrixBad.push(`veto cover [${label}]: got exit ${rc} ${bashOut(out)}`);
+      }
+    };
+    const checkPair = (
+      label: string,
+      wantExit: number,
+      wantOut: string,
+      errText: string,
+      streamText: string,
+    ): void => {
+      writeFileSync(join(tmp, "cell.err"), `${errText}\n`);
+      writeFileSync(join(tmp, "cell-events.jsonl"), `${streamText}\n`);
+      doSub("transient", join(tmp, "cell.err"), join(tmp, "cell-events.jsonl"));
+      if (!(rc === wantExit && bashOut(out) === wantOut)) {
+        matrixBad.push(`veto cover [${label}]: got exit ${rc} ${bashOut(out)}`);
+      }
+    };
+    doSub("wall-tokens");
+    const tokenLines = bashOut(out)
+      .split("\n")
+      .filter((t) => t !== "");
+    if (rc === 0 && tokenLines.length > 0) {
+      writeFileSync(join(tmp, "tokens.txt"), `${bashOut(out)}\n`);
+      ok("wall-tokens lists the adapter's wall token stems");
+    } else fail("wall-tokens lists the adapter's wall token stems", `exit ${rc}`);
+    const transientExemplars = [
+      "model stream idle timeout",
+      "stream idle timeout",
+      "502 Bad Gateway",
+      "503 Service Unavailable",
+      "529 overloaded",
+      "stream disconnected",
+      "SSE error",
+      "connection reset by peer",
+      "connection aborted",
+      "broken pipe",
+    ];
+    const transientVerdict = (exemplar: string): string => {
+      if (exemplar.includes("idle") && exemplar.includes("timeout"))
+        return "model stream idle timeout";
+      if (exemplar.startsWith("502") || exemplar.startsWith("503") || exemplar.startsWith("529")) {
+        return "gateway failure";
+      }
+      return "stream drop";
+    };
+    matrixBad = [];
+    let cells = 0;
+    for (const sig of transientExemplars) {
+      checkCell(`lone [${sig}] resumes`, 0, transientVerdict(sig), sig);
+      for (const tok of tokenLines) {
+        cells += 1;
+        checkCell(`[${tok}] vetoes [${sig}]`, 1, "provider-wall", `${sig} [${tok}]`);
+      }
+    }
+    if (cells > 0 && matrixBad.length === 0) {
+      ok(`every token vetoes every transient (${cells} cells)`);
+    } else {
+      fail(
+        "every token vetoes every transient (150 cells)",
+        matrixBad.join("; ") || "empty matrix",
+      );
+    }
+    matrixBad = [];
+    for (const tok of [
+      "quota",
+      "limit",
+      "exhaust",
+      "exceed",
+      "throttl",
+      "bill",
+      "budget",
+      "credit",
+      "payment",
+      "usage",
+      "slow",
+      "quick",
+      "toomany",
+      "429",
+      "402",
+    ]) {
+      checkCell(`lone stem [${tok}] vetoes`, 1, "provider-wall", `witness ${tok} here`);
+    }
+    if (matrixBad.length === 0) ok("every pinned stem vetoes alone");
+    else fail("every pinned stem vetoes alone", matrixBad.join("; "));
+    if (
+      `${tokenLines.join(" ")} ` ===
+      "quota limit exhaust exceed throttl bill budget credit payment usage slow quick toomany 429 402 "
+    ) {
+      ok("wall-tokens lists exactly the pinned stems");
+    } else fail("wall-tokens lists exactly the pinned stems");
+    const longEvents = ['{"type":"error","message":"quota exceeded for this key"}'];
+    for (let li = 2; li < 101; li++) longEvents.push('{"type":"step","status":"flying"}');
+    longEvents.push('{"type":"error","message":"model stream idle timeout"}');
+    writeFileSync(join(tmp, "long-events.jsonl"), `${longEvents.join("\n")}\n`);
+    writeFileSync(join(tmp, "long.err"), "the leg ended\n");
+    doSub("transient", join(tmp, "long.err"), join(tmp, "long-events.jsonl"));
+    if (rc === 1 && bashOut(out) === "provider-wall") ok("a wall 100 lines back still vetoes");
+    else fail("a wall 100 lines back still vetoes", `exit ${rc}, ${bashOut(out)}`);
+    matrixBad = [];
+    checkCell(
+      "try-again-later beside transient resumes",
+      0,
+      "model stream idle timeout",
+      "try again later: model stream idle timeout",
+    );
+    checkCell(
+      "server-busy beside transient resumes",
+      0,
+      "model stream idle timeout",
+      "the server is busy, please retry: model stream idle timeout",
+    );
+    if (matrixBad.length === 0) ok("soft wall-adjacent prose still resumes");
+    else fail("soft wall-adjacent prose still resumes", matrixBad.join("; "));
+
+    console.log("realistic streams: usage-bearing harness streams resume on a transient end");
+    const codexUsage =
+      '{"type": "turn.completed", "usage": {"input_tokens": 3072288, "cached_input_tokens": 2910208, "cache_write_input_tokens": 0, "output_tokens": 50050, "reasoning_output_tokens": 44266}}';
+    const claudeUsage =
+      '{"type":"system","subtype":"task_progress","task_id":"ac8fe1ebf375eff4d","tool_use_id":"toolu_013hqT2oMy1VXLYEaky3ttuc","description":"Reading scripts/runs-watch.sh","subagent_type":"general-purpose","usage":{"total_tokens":30007,"tool_uses":1,"duration_ms":4119},"last_tool_name":"Read","uuid":"c4295b17-b348-4933-8a1e-7dfe07cfb78e","session_id":"7449d3c5-8a18-45ba-aa72-1f0ae0ea8a30"}';
+    const realisticTail = '{"type":"error","message":"model stream idle timeout"}';
+    const realisticWall = '{"type":"error","message":"quota exceeded for this key"}';
+    writeFileSync(join(tmp, "real.err"), "the leg ended\n");
+    writeFileSync(join(tmp, "real-events.jsonl"), `${codexUsage}\n${realisticTail}\n`);
+    doSub("transient", join(tmp, "real.err"), join(tmp, "real-events.jsonl"));
+    if (rc === 0 && bashOut(out) === "model stream idle timeout") {
+      ok("a codex stream with usage records resumes on a transient end");
+    } else {
+      fail(
+        "a codex stream with usage records resumes on a transient end",
+        `exit ${rc}, ${bashOut(out)}`,
+      );
+    }
+    writeFileSync(
+      join(tmp, "real-events.jsonl"),
+      `${codexUsage}\n${realisticTail}\n${realisticWall}\n`,
+    );
+    doSub("transient", join(tmp, "real.err"), join(tmp, "real-events.jsonl"));
+    if (rc === 1 && bashOut(out) === "provider-wall") {
+      ok("the same codex stream with a wall message wakes");
+    } else {
+      fail("the same codex stream with a wall message wakes", `exit ${rc}, ${bashOut(out)}`);
+    }
+    writeFileSync(join(tmp, "real-events.jsonl"), `${claudeUsage}\n${realisticTail}\n`);
+    doSub("transient", join(tmp, "real.err"), join(tmp, "real-events.jsonl"));
+    if (rc === 0 && bashOut(out) === "model stream idle timeout") {
+      ok("a claude stream with usage records resumes on a transient end");
+    } else {
+      fail(
+        "a claude stream with usage records resumes on a transient end",
+        `exit ${rc}, ${bashOut(out)}`,
+      );
+    }
+    writeFileSync(
+      join(tmp, "real-events.jsonl"),
+      `${claudeUsage}\n${realisticTail}\n${realisticWall}\n`,
+    );
+    doSub("transient", join(tmp, "real.err"), join(tmp, "real-events.jsonl"));
+    if (rc === 1 && bashOut(out) === "provider-wall") {
+      ok("the same claude stream with a wall message wakes");
+    } else {
+      fail("the same claude stream with a wall message wakes", `exit ${rc}, ${bashOut(out)}`);
+    }
+
+    console.log("error records: every value counts inside one, nothing outside one vetoes");
+    matrixBad = [];
+    checkPair(
+      "wall under msg in an error record wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"type":"error","msg":"quota exceeded"}',
+    );
+    checkPair(
+      "wall under chunk in an error record wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"type":"error","chunk":"command failed: quota exceeded"}',
+    );
+    checkPair(
+      "wall under output in an error record wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"type":"error","output":"402 Payment Required"}',
+    );
+    checkPair(
+      "wall under body in an error record wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"type":"error","body":"budget exhausted"}',
+    );
+    checkPair(
+      "wall under error_message in an error record wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"type":"error","error_message":"usage limit reached"}',
+    );
+    checkPair(
+      "a bare prompt string in an error record wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"type":"error","message":"model stream idle timeout","prompt":"check quota"}',
+    );
+    checkPair(
+      "wall words in an ordinary assistant message resume",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"assistant","message":"quota exceeded for this key"}',
+    );
+    checkPair(
+      "wall words in tool output resume",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"assistant","message":{"content":[{"type":"tool_result","text":"quota exceeded"}]}}',
+    );
+    checkCell(
+      "the uncapped notice plus a transient resumes",
+      0,
+      "model stream idle timeout",
+      "host: launch running uncapped (no supported per-launch limits available)\nmodel stream idle timeout",
+    );
+    checkCell(
+      "the uncapped notice plus a wall wakes",
+      1,
+      "provider-wall",
+      "host: launch running uncapped (no supported per-launch limits available)\nquota exceeded for this key",
+    );
+    checkPair(
+      "wall in a claude result.is_error wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"type":"result","is_error":true,"result":"quota exceeded"}',
+    );
+    checkPair(
+      "wall in a codex nested error item wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"type":"item.completed","item":{"type":"error","message":"quota exceeded"}}',
+    );
+    checkPair(
+      "wall in a muse outcome:error payload wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"payload_type":"tool.result","payload":{"outcome":"error","result":"quota exceeded"}}',
+    );
+    checkPair(
+      "wall in a marked mimo part wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"type":"error","id":"prt_x","messageID":"msg_x","sessionID":"ses_x","text":"quota exceeded"}',
+    );
+    checkPair(
+      "wall words in an unmarked mimo text part resume",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"text","id":"prt_x","messageID":"msg_x","sessionID":"ses_x","text":"quota exceeded"}',
+    );
+    checkPair(
+      "wall words in a claude tool_result error resume",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"user","message":{"content":[{"type":"tool_result","is_error":true,"content":"quota exceeded"}]}}',
+    );
+    checkPair(
+      "wall words in a pi tool error resume",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"tool_execution_end","isError":true,"errorMessage":"quota exceeded"}',
+    );
+    if (matrixBad.length === 0) ok("the veto reads error records whole and nothing else");
+    else fail("the veto reads error records whole and nothing else", matrixBad.join("; "));
+
+    console.log("marked at any depth: error keys nest, tool results stay excluded");
+    matrixBad = [];
+    checkPair(
+      "wall in result.error wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"result":{"error":"usage limits reached"}}',
+    );
+    checkPair(
+      "wall in payload.error wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"payload":{"error":{"message":"quota exceeded"}}}',
+    );
+    checkPair(
+      "wall in a twice-nested outcome:error wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"payload":{"inner":{"outcome":"error","detail":"quota exceeded"}}}',
+    );
+    checkPair(
+      "wall in a twice-nested item type:error wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"item":{"nested":{"type":"error","message":"quota exceeded"}}}',
+    );
+    checkPair(
+      "wall under error_message in a nested item wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"type":"item.completed","item":{"type":"other","error_message":"quota exceeded"}}',
+    );
+    checkPair(
+      "wall under an error key at depth five wakes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"a":{"b":{"c":{"d":{"error":"quota exceeded"}}}}}',
+    );
+    checkPair(
+      "wall in result.error nested in a claude tool_result resumes",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"tool_result","result":{"error":"usage limits reached"}}',
+    );
+    checkPair(
+      "wall in payload error nested in a pi tool subtree resumes",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"tool_execution_end","payload":{"error":{"message":"quota exceeded"}}}',
+    );
+    checkPair(
+      "wall in a tool_result nested in message content resumes",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"user","message":{"content":[{"type":"tool_result","result":{"error":"quota exceeded"}}]}}',
+    );
+    checkPair(
+      "null error at depth resumes",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"result":{"error":null},"note":"all good"}',
+    );
+    checkPair(
+      "false error at depth resumes",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"result":{"error":false},"note":"all good"}',
+    );
+    checkPair(
+      "empty error object at depth resumes",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"result":{"error":{}},"note":"all good"}',
+    );
+    if (matrixBad.length === 0) ok("error keys mark at any depth and tool results stay excluded");
+    else fail("error keys mark at any depth and tool results stay excluded", matrixBad.join("; "));
+    matrixBad = [];
+    checkCell(
+      "1429 beside transient resumes",
+      0,
+      "model stream idle timeout",
+      "input_tokens 1429: model stream idle timeout",
+    );
+    checkCell(
+      "4020 beside transient resumes",
+      0,
+      "model stream idle timeout",
+      "took 4020ms: model stream idle timeout",
+    );
+    checkCell(
+      "429ms beside transient resumes",
+      0,
+      "model stream idle timeout",
+      "took 429ms: model stream idle timeout",
+    );
+    checkCell(
+      "a UUID holding 429 beside transient resumes",
+      0,
+      "model stream idle timeout",
+      "id c4295b17-b348-4933: model stream idle timeout",
+    );
+    checkPair(
+      "a 1429 token count in the stream resumes",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"progress","input_tokens":1429}',
+    );
+    if (matrixBad.length === 0) ok("bare digits never veto");
+    else fail("bare digits never veto", matrixBad.join("; "));
+    const farEvents = ['{"type":"error","status":418}'];
+    for (let fi = 2; fi < 101; fi++) farEvents.push('{"type":"step","status":"flying"}');
+    farEvents.push('{"type":"error","message":"stream disconnected"}');
+    writeFileSync(join(tmp, "far-events.jsonl"), `${farEvents.join("\n")}\n`);
+    doSub("transient", join(tmp, "real.err"), join(tmp, "far-events.jsonl"));
+    if (rc === 1 && bashOut(out) === "not-transient") {
+      ok("an unknown status 100 lines back still wakes");
+    } else fail("an unknown status 100 lines back still wakes", `exit ${rc}, ${bashOut(out)}`);
+
+    console.log("structured values: known transients resume, anything else wakes");
+    isTransient("a 429 status code is a wall", 1, "the leg ended", '{"type":"error","status":429}');
+    isTransient("a 402 status code is a wall", 1, "the leg ended", '{"type":"error","code":402}');
+    isTransient(
+      "a string 429 code is a wall",
+      1,
+      "the leg ended",
+      '{"type":"error","status_code":"429"}',
+    );
+    isTransient(
+      "an insufficient_quota error code is a wall",
+      1,
+      "the leg ended",
+      '{"type":"error","error":{"code":"insufficient_quota"}}',
+    );
+    isTransient(
+      "a RateLimitError type is a wall",
+      1,
+      "the leg ended",
+      '{"type":"error","name":"RateLimitError"}',
+    );
+    isTransient(
+      "a 503 status code is transient",
+      0,
+      "the leg ended",
+      '{"type":"error","status":503}',
+    );
+    isTransient(
+      "an ECONNRESET code is transient",
+      0,
+      "the leg ended",
+      '{"type":"error","code":"ECONNRESET"}',
+    );
+    isTransient(
+      "an overloaded_error type is transient",
+      0,
+      "the leg ended",
+      '{"type":"error","error":{"type":"overloaded_error"}}',
+    );
+    isTransient(
+      "a structured wall beats prose transient",
+      1,
+      "model stream idle timeout",
+      '{"type":"error","code":429}',
+    );
+    isTransient(
+      "a prose wall beats a structured transient",
+      1,
+      "quota exceeded, slow down",
+      '{"type":"error","status":503}',
+    );
+    isTransient(
+      "a completed status is not a signal",
+      1,
+      "the leg ended",
+      '{"type":"error","status":"completed"}',
+    );
+    isTransient(
+      "an exit code is not a status code",
+      1,
+      "the leg ended",
+      '{"type":"error","code":1}',
+    );
+    isTransient(
+      "an exit code does not veto a transient end",
+      0,
+      "model stream idle timeout",
+      '{"type":"error","code":1}',
+    );
+    isTransient(
+      "a timeout type is not a transient type",
+      1,
+      "the leg ended",
+      '{"type":"error","code":"ETIMEDOUT"}',
+    );
+    matrixBad = [];
+    checkPair(
+      "a rate_limit_event slowdown does not veto a transient end",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"error","event":"rate_limit_event","message":"model stream idle timeout"}',
+    );
+    checkPair(
+      "a rate_limit_event alone is not a wall",
+      1,
+      "not-transient",
+      "the leg ended",
+      '{"type":"error","event":"rate_limit_event"}',
+    );
+    checkCell(
+      "a rate_limit_event in .err does not veto",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout (rate_limit_event seen earlier)",
+    );
+    checkPair(
+      "an unknown error code wakes",
+      1,
+      "not-transient",
+      "model stream idle timeout",
+      '{"type":"error","code":"WIDGET_7","message":"model stream idle timeout"}',
+    );
+    checkPair(
+      "an unknown status wakes",
+      1,
+      "not-transient",
+      "model stream idle timeout",
+      '{"type":"error","status":418,"message":"model stream idle timeout"}',
+    );
+    checkPair(
+      "a 200 status does not block a transient end",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"progress","status":200}',
+    );
+    checkPair(
+      "a 301 status does not block a transient end",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"progress","httpStatus":301}',
+    );
+    checkPair(
+      "a 503 in a tool_result wakes and does not remount",
+      1,
+      "not-transient",
+      "the leg ended",
+      '{"type":"user","message":{"content":[{"type":"tool_result","status":503}]}}',
+    );
+    checkPair(
+      "a 429 in a tool_result does not veto a transient end",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"user","message":{"content":[{"type":"tool_result","status":429}]}}',
+    );
+    checkPair(
+      "an unknown status in a tool_result does not wake a transient end",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"user","message":{"content":[{"type":"tool_result","status":418}]}}',
+    );
+    checkPair(
+      "an unknown error type wakes",
+      1,
+      "not-transient",
+      "model stream idle timeout",
+      '{"type":"error","errortype":"SomethingNew","message":"model stream idle timeout"}',
+    );
+    checkPair(
+      "a wall-like code wakes as a wall",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"type":"error","code":"too_many_requests","message":"model stream idle timeout"}',
+    );
+    checkPair(
+      "a 429 on a non-error record still vetoes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"type":"response","status":429,"message":"model stream idle timeout"}',
+    );
+    checkPair(
+      "an unknown value on a non-error record is progress noise",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"response","status":"flying"}',
+    );
+    checkPair(
+      "a non-JSON wall line vetoes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      "Error: quota exceeded",
+    );
+    checkPair(
+      "a wall token in a prompt vetoes",
+      1,
+      "provider-wall",
+      "model stream idle timeout",
+      '{"type":"error","message":"model stream idle timeout","prompt":{"text":"check quota"}}',
+    );
+    checkPair(
+      "a bare tool name is a label, not a classification",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"error","name":"Bash","message":"model stream idle timeout"}',
+    );
+    checkPair(
+      "an empty code value is noise",
+      0,
+      "model stream idle timeout",
+      "model stream idle timeout",
+      '{"type":"error","code":"","message":"model stream idle timeout"}',
+    );
+    if (matrixBad.length === 0) ok("structured and veto edge controls all behaved");
+    else fail("structured and veto edge controls all behaved", matrixBad.join("; "));
+
+    console.log("quote corpus: real wall phrasings wake, alone and beside every transient");
+    doSub("wall-quotes");
+    const quoteLines = bashOut(out)
+      .split("\n")
+      .filter((q) => q !== "");
+    let quotes = 0;
+    matrixBad = [];
+    for (const quote of quoteLines) {
+      quotes += 1;
+      checkCell(`corpus [${quote}]`, 1, "provider-wall", quote);
+      for (const sig of transientExemplars) {
+        checkCell(`corpus [${quote}] beside [${sig}]`, 1, "provider-wall", `${quote}: ${sig}`);
+      }
+    }
+    if (quotes > 0 && matrixBad.length === 0) {
+      ok(`quote corpus: ${quotes} phrasings wake alone and beside every transient`);
+    } else {
+      fail(
+        "quote corpus: 23 phrasings wake alone and beside every transient",
+        matrixBad.join("; ") || "empty corpus",
+      );
+    }
+    doSub("transient", join(tmp, "no-such.err"));
+    if (rc === 1 && err.includes("no such error file")) ok("a missing error file is refused");
+    else fail("a missing error file is refused", `exit ${rc}`);
+
     console.log("bug review forms");
     const base = run("git", ["-C", join(tmp, "cx"), "rev-parse", "HEAD"]).out.trim();
     writeFileSync(
@@ -3276,6 +4134,261 @@ describe("skills", () => {
   });
   test("a muse lane has no security review skill: exit 3", () => {
     assertControl("a muse lane has no security review skill: exit 3");
+  });
+});
+
+describe("thread-id: the id a stream records, from its shape", () => {
+  test("codex: thread_id on thread.started", () => {
+    assertControl("codex: thread_id on thread.started");
+  });
+  test("claude: session_id on system/init", () => {
+    assertControl("claude: session_id on system/init");
+  });
+  test("grok: id on a session record", () => {
+    assertControl("grok: id on a session record");
+  });
+  test("agy: conversationId", () => {
+    assertControl("agy: conversationId");
+  });
+  test("pi: id on session", () => {
+    assertControl("pi: id on session");
+  });
+  test("muse: stream.id on the first record", () => {
+    assertControl("muse: stream.id on the first record");
+  });
+  test("mimo: sessionID on any event", () => {
+    assertControl("mimo: sessionID on any event");
+  });
+  test("the first id in the stream wins", () => {
+    assertControl("the first id in the stream wins");
+  });
+  test("a stream with no id is exit 1", () => {
+    assertControl("a stream with no id is exit 1");
+  });
+  test("a tool payload id is not the thread", () => {
+    assertControl("a tool payload id is not the thread");
+  });
+  test("a missing events file is refused", () => {
+    assertControl("a missing events file is refused");
+  });
+});
+
+describe("transient: a provider error worth resuming on", () => {
+  test("a model stream idle timeout is transient", () => {
+    assertControl("a model stream idle timeout is transient");
+  });
+  test("a stream idle timeout alone is transient", () => {
+    assertControl("a stream idle timeout alone is transient");
+  });
+  test("a bad gateway is transient", () => {
+    assertControl("a bad gateway is transient");
+  });
+  test("an overloaded response is transient", () => {
+    assertControl("an overloaded response is transient");
+  });
+  test("a service outage is transient", () => {
+    assertControl("a service outage is transient");
+  });
+  test("a stream disconnect is transient", () => {
+    assertControl("a stream disconnect is transient");
+  });
+  test("a connection reset is transient", () => {
+    assertControl("a connection reset is transient");
+  });
+  test("a broken pipe is transient", () => {
+    assertControl("a broken pipe is transient");
+  });
+  test("a transient error in the stream tail counts", () => {
+    assertControl("a transient error in the stream tail counts");
+  });
+  test("a harness failure subtype in the stream tail is inspected", () => {
+    assertControl("a harness failure subtype in the stream tail is inspected");
+  });
+  test("timeout text in a user prompt is not a provider error", () => {
+    assertControl("timeout text in a user prompt is not a provider error");
+  });
+  test("a launch refusal is never transient", () => {
+    assertControl("a launch refusal is never transient");
+  });
+  test("a quota wall takes precedence over a transient signature", () => {
+    assertControl("a quota wall takes precedence over a transient signature");
+  });
+  test("a quota wall is not transient", () => {
+    assertControl("a quota wall is not transient");
+  });
+  test("a usage limit is not transient", () => {
+    assertControl("a usage limit is not transient");
+  });
+  test("a rate limit is not transient", () => {
+    assertControl("a rate limit is not transient");
+  });
+  test("a provider wall is not transient", () => {
+    assertControl("a provider wall is not transient");
+  });
+  test("a generic timeout is not transient", () => {
+    assertControl("a generic timeout is not transient");
+  });
+  test("an ordinary model error is not transient", () => {
+    assertControl("an ordinary model error is not transient");
+  });
+  test("an empty record is not transient", () => {
+    assertControl("an empty record is not transient");
+  });
+  test("a bare quota mention wakes", () => {
+    assertControl("a bare quota mention wakes");
+  });
+  test("a quota remainder wakes", () => {
+    assertControl("a quota remainder wakes");
+  });
+  test("quota exhausted is a provider wall", () => {
+    assertControl("quota exhausted is a provider wall");
+  });
+  test("an old transient error before the skip does not classify the current end", () => {
+    assertControl("an old transient error before the skip does not classify the current end");
+  });
+  test("a zero skip keeps the whole stream, proving the control above is not vacuous", () => {
+    assertControl("a zero skip keeps the whole stream, proving the control above is not vacuous");
+  });
+  test("a transient error after the skip still counts", () => {
+    assertControl("a transient error after the skip still counts");
+  });
+  test("a skip past the end reads the .err alone", () => {
+    assertControl("a skip past the end reads the .err alone");
+  });
+  test("a skip that is not a number is refused", () => {
+    assertControl("a skip that is not a number is refused");
+  });
+  test("an underscore quota wall takes precedence", () => {
+    assertControl("an underscore quota wall takes precedence");
+  });
+  test("a bare provider-wall mention without a stem is not a veto", () => {
+    assertControl("a bare provider-wall mention without a stem is not a veto");
+  });
+  test("an underscore resource wall takes precedence", () => {
+    assertControl("an underscore resource wall takes precedence");
+  });
+  test("a hyphen quota wall takes precedence", () => {
+    assertControl("a hyphen quota wall takes precedence");
+  });
+  test("a refusal past a host notice is still a refusal", () => {
+    assertControl("a refusal past a host notice is still a refusal");
+  });
+  test("a refusal past a cap notice is still a refusal", () => {
+    assertControl("a refusal past a cap notice is still a refusal");
+  });
+  test("a refusal wins over transient text on its own line", () => {
+    assertControl("a refusal wins over transient text on its own line");
+  });
+});
+
+describe("vetoes: any wall token anywhere in an ending wakes, beside every transient", () => {
+  test("wall-tokens lists the adapter's wall token stems", () => {
+    assertControl("wall-tokens lists the adapter's wall token stems");
+  });
+  test("every token vetoes every transient (150 cells)", () => {
+    assertControl("every token vetoes every transient (150 cells)");
+  });
+  test("every pinned stem vetoes alone", () => {
+    assertControl("every pinned stem vetoes alone");
+  });
+  test("wall-tokens lists exactly the pinned stems", () => {
+    assertControl("wall-tokens lists exactly the pinned stems");
+  });
+  test("a wall 100 lines back still vetoes", () => {
+    assertControl("a wall 100 lines back still vetoes");
+  });
+  test("soft wall-adjacent prose still resumes", () => {
+    assertControl("soft wall-adjacent prose still resumes");
+  });
+});
+
+describe("realistic streams: usage-bearing harness streams resume on a transient end", () => {
+  test("a codex stream with usage records resumes on a transient end", () => {
+    assertControl("a codex stream with usage records resumes on a transient end");
+  });
+  test("the same codex stream with a wall message wakes", () => {
+    assertControl("the same codex stream with a wall message wakes");
+  });
+  test("a claude stream with usage records resumes on a transient end", () => {
+    assertControl("a claude stream with usage records resumes on a transient end");
+  });
+  test("the same claude stream with a wall message wakes", () => {
+    assertControl("the same claude stream with a wall message wakes");
+  });
+});
+
+describe("error records: every value counts inside one, nothing outside one vetoes", () => {
+  test("the veto reads error records whole and nothing else", () => {
+    assertControl("the veto reads error records whole and nothing else");
+  });
+});
+
+describe("marked at any depth: error keys nest, tool results stay excluded", () => {
+  test("error keys mark at any depth and tool results stay excluded", () => {
+    assertControl("error keys mark at any depth and tool results stay excluded");
+  });
+  test("bare digits never veto", () => {
+    assertControl("bare digits never veto");
+  });
+  test("an unknown status 100 lines back still wakes", () => {
+    assertControl("an unknown status 100 lines back still wakes");
+  });
+});
+
+describe("structured values: known transients resume, anything else wakes", () => {
+  test("a 429 status code is a wall", () => {
+    assertControl("a 429 status code is a wall");
+  });
+  test("a 402 status code is a wall", () => {
+    assertControl("a 402 status code is a wall");
+  });
+  test("a string 429 code is a wall", () => {
+    assertControl("a string 429 code is a wall");
+  });
+  test("an insufficient_quota error code is a wall", () => {
+    assertControl("an insufficient_quota error code is a wall");
+  });
+  test("a RateLimitError type is a wall", () => {
+    assertControl("a RateLimitError type is a wall");
+  });
+  test("a 503 status code is transient", () => {
+    assertControl("a 503 status code is transient");
+  });
+  test("an ECONNRESET code is transient", () => {
+    assertControl("an ECONNRESET code is transient");
+  });
+  test("an overloaded_error type is transient", () => {
+    assertControl("an overloaded_error type is transient");
+  });
+  test("a structured wall beats prose transient", () => {
+    assertControl("a structured wall beats prose transient");
+  });
+  test("a prose wall beats a structured transient", () => {
+    assertControl("a prose wall beats a structured transient");
+  });
+  test("a completed status is not a signal", () => {
+    assertControl("a completed status is not a signal");
+  });
+  test("an exit code is not a status code", () => {
+    assertControl("an exit code is not a status code");
+  });
+  test("an exit code does not veto a transient end", () => {
+    assertControl("an exit code does not veto a transient end");
+  });
+  test("a timeout type is not a transient type", () => {
+    assertControl("a timeout type is not a transient type");
+  });
+  test("structured and veto edge controls all behaved", () => {
+    assertControl("structured and veto edge controls all behaved");
+  });
+});
+
+describe("quote corpus: real wall phrasings wake, alone and beside every transient", () => {
+  test("quote corpus: 23 phrasings wake alone and beside every transient", () => {
+    assertControl("quote corpus: 23 phrasings wake alone and beside every transient");
+  });
+  test("a missing error file is refused", () => {
+    assertControl("a missing error file is refused");
   });
 });
 

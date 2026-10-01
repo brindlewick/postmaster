@@ -1,12 +1,14 @@
-// Tests beside scripts/runs-watch.ts, moved from its --self-test on #109: 33 controls.
+// Tests beside scripts/runs-watch.ts, moved from its --self-test on #109: 81 controls.
 // POSTMASTER_CONFIG is pointed at a 1s-poll config for the run and restored in afterAll.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   statSync,
@@ -16,6 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { harvestThreadId, noThreadError, streamLines } from "./runs-watch.ts";
 import { run } from "./lib/proc.ts";
 
 const self = join(import.meta.dir, "runs-watch.sh");
@@ -318,6 +321,865 @@ describe("negative controls: WAIT, USER, - and a held run leave it waiting", () 
     expect(out).toContain("alone ");
     expect(out).not.toContain("needs ");
   }, 30000);
+});
+
+function autoRun(root: string, name: string, leg: number, thread: string): void {
+  // A dispatch-shaped fixture with a recorded claude config.
+  const d = join(root, name);
+  const repo = `${root}-project`;
+  mkdirSync(join(d, "logs"), { recursive: true });
+  mkdirSync(join(d, "audit"), { recursive: true });
+  mkdirSync(join(d, "render"), { recursive: true });
+  mkdirSync(join(root, "postmaster"), { recursive: true });
+  mkdirSync(join(repo, ".worktrees", name), { recursive: true });
+  writeFileSync(join(d, "run-log.md"), "");
+  writeFileSync(join(d, "actions.jsonl"), "");
+  writeFileSync(join(root, "ledger.jsonl"), "");
+  writeFileSync(
+    join(d, "brief.md"),
+    `# Waybill: ${name}\nturnpikes: style, bug, security\n\n## Ticket\n## Project profile\nrepo: ${repo}\n\n## Dispatch\nname: #1, Watcher fixture\n`,
+  );
+  const entry: Record<string, string> = { name: "coachman" };
+  if (thread) entry.thread_id = thread;
+  writeFileSync(
+    join(d, "manifest.json"),
+    `${JSON.stringify({ stage: "review", leg, coachman: { legs: { [String(leg)]: entry } } }, null, 2)}\n`,
+  );
+  writeFileSync(
+    join(d, "run.json"),
+    `${JSON.stringify({ config: { lanes: {}, team: { coachman: { harness: "claude", model: "coach-test" } } } }, null, 2)}\n`,
+  );
+}
+
+function handoff(dispatch: string, leg: string): void {
+  writeFileSync(
+    join(dispatch, `handoff-${leg}.md`),
+    "## Decisions\nsettled\n## Deferred findings\nnone\n## Verified by execution\nnone\n## Unverified\nnone\n## Branches and lanes\nnone\n## Open questions\nnone\n## Next leg\nnone\n",
+  );
+}
+
+function watchStub(root: string, mode = ""): { rc: number; out: string } {
+  // The watcher with only its host boundary replaced: no agent ever starts.
+  mkdirSync(join(tmp, "calls"), { recursive: true });
+  const env: Record<string, string | undefined> = {
+    POSTMASTER_WATCH_TEST_MODE: "1",
+    POSTMASTER_WATCH_TEST_CALLS: join(tmp, "calls"),
+  };
+  if (mode === "dispatch failure") env.POSTMASTER_WATCH_TEST_FAIL = "dispatch";
+  else if (mode === "resume failure") env.POSTMASTER_WATCH_TEST_FAIL = "resume";
+  else if (mode === "dispatch refusal" || mode === "resume refusal") {
+    env.POSTMASTER_WATCH_TEST_REFUSE = "1";
+  } else if (mode === "uncapped resume refusal") env.POSTMASTER_WATCH_TEST_REFUSE = "2";
+  else if (mode === "no thread") env.POSTMASTER_WATCH_TEST_NO_THREAD = "1";
+  const r = run(self, ["--timeout", "0", root], { env });
+  return { rc: r.code, out: `${r.out}${r.err}` };
+}
+
+function watchStubWait(root: string): { rc: number; out: string } {
+  mkdirSync(join(tmp, "calls"), { recursive: true });
+  const r = run(self, ["--timeout", "3", root], {
+    env: {
+      POSTMASTER_WATCH_TEST_MODE: "1",
+      POSTMASTER_WATCH_TEST_CALLS: join(tmp, "calls"),
+      POSTMASTER_WATCH_TEST_REFUSE: "1",
+    },
+  });
+  return { rc: r.code, out: `${r.out}${r.err}` };
+}
+
+function actionCount(dispatch: string, action: string): number {
+  let text: string;
+  try {
+    text = readFileSync(join(dispatch, "actions.jsonl"), "utf8");
+  } catch {
+    return 0;
+  }
+  let n = 0;
+  for (const line of text.split("\n")) {
+    if (line === "") continue;
+    if ((JSON.parse(line) as { action?: string }).action === action) n++;
+  }
+  return n;
+}
+
+function appendLater(file: string, line: string): void {
+  const child = spawn("sh", ["-c", 'sleep 2; printf "%s\\n" "$1" >> "$2"', "sh", line, file], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+}
+
+describe("thread harvest: the wait for a slow stream", () => {
+  test("an id that lands after the launch is harvested, not missed", () => {
+    const stream = join(tmp, "slow.jsonl");
+    writeFileSync(stream, '{"type":"setup"}\n');
+    appendLater(stream, '{"type":"thread.started","thread_id":"slow-thread"}');
+    expect(harvestThreadId(stream, join(tmp, "no-marker"), 10)).toBe("slow-thread");
+  }, 30000);
+
+  test("no id with the marker landed stops the wait", () => {
+    writeFileSync(join(tmp, "never.jsonl"), "");
+    writeFileSync(join(tmp, "dead.marker"), "");
+    expect(harvestThreadId(join(tmp, "never.jsonl"), join(tmp, "dead.marker"), 30)).toBeNull();
+  }, 30000);
+
+  test("a landed marker wakes without a running process", () => {
+    expect(
+      noThreadError("2", join(tmp, "dead.marker"), 30, join(tmp, "e.err"), join(tmp, "e.out"), ""),
+    ).toBe(`the launch produced no thread id for leg 2; read ${tmp}/e.err and ${tmp}/e.out`);
+  }, 30000);
+
+  test("a missing marker wakes saying the launch may still be running", () => {
+    expect(
+      noThreadError("2", join(tmp, "no-marker"), 30, join(tmp, "e.err"), join(tmp, "e.out"), ""),
+    ).toBe(
+      `the launch produced no thread id within 30s for leg 2 and may still be running; read ${tmp}/e.err and ${tmp}/e.out`,
+    );
+  }, 30000);
+
+  test("the skip counts lines, including an unterminated last line", () => {
+    writeFileSync(join(tmp, "unterminated.jsonl"), "a\nb");
+    writeFileSync(join(tmp, "terminated.jsonl"), "a\nb\n");
+    writeFileSync(join(tmp, "empty.jsonl"), "");
+    expect(streamLines(join(tmp, "unterminated.jsonl"))).toBe(2);
+    expect(streamLines(join(tmp, "terminated.jsonl"))).toBe(2);
+    expect(streamLines(join(tmp, "empty.jsonl"))).toBe(0);
+    expect(streamLines(join(tmp, "no-such.jsonl"))).toBe(0);
+  }, 30000);
+});
+
+describe("watcher steps: dispatch and remount controls", () => {
+  test("a checked hand-off dispatches the listed leg, records its thread, and logs watcher ownership without launching an agent in the control", () => {
+    const root = join(tmp, "auto-dispatch");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "dispatch", 1, "");
+    handoff(join(root, "dispatch"), "1");
+    writeFileSync(join(root, "dispatch", ".leg-1-done"), "");
+    writeFileSync(join(root, "dispatch", ".leg-1-exited"), "");
+    const { rc, out } = watchStub(root);
+    expect(rc).toBe(3);
+    expect(out).not.toContain("needs ");
+    const m = JSON.parse(readFileSync(join(root, "dispatch", "manifest.json"), "utf8")) as {
+      leg: number;
+      coachman: { legs: Record<string, unknown> };
+    };
+    expect(m.leg).toBe(2);
+    expect(m.coachman.legs["2"]).toEqual({ name: "coachman", thread_id: "watch-fixture-thread" });
+    expect(actionCount(join(root, "dispatch"), "dispatch")).toBe(1);
+    const actions = readFileSync(join(root, "dispatch", "actions.jsonl"), "utf8");
+    expect(actions).toContain("watcher took it");
+    expect(actions).toContain("watch-fixture-thread");
+    const call = readFileSync(join(tmp, "calls", "dispatch-dispatch-2"), "utf8");
+    expect(call).toContain("--role coachman --run");
+    expect(call).toContain("launch.sh launch coachman");
+    expect(call).toContain("--leg review --run");
+    expect(call).toContain("coachman");
+    expect(call).toContain("name=");
+    expect(readFileSync(join(root, "dispatch", "leg-2-prompt.txt"), "utf8")).toContain(
+      "Your review leg covers stage 2",
+    );
+  }, 60000);
+
+  test("the watcher follows a legs list without review and records the omission", () => {
+    const root = join(tmp, "auto-skip-review");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "skip-review", 1, "");
+    handoff(join(root, "skip-review"), "1");
+    const brief = join(root, "skip-review", "brief.md");
+    writeFileSync(brief, readFileSync(brief, "utf8").replace(/^turnpikes:.*$/m, "turnpikes: none"));
+    writeFileSync(join(root, "skip-review", ".leg-1-done"), "");
+    writeFileSync(join(root, "skip-review", ".leg-1-exited"), "");
+    const { rc } = watchStub(root);
+    expect(rc).toBe(3);
+    const m = JSON.parse(readFileSync(join(root, "skip-review", "manifest.json"), "utf8")) as {
+      leg: number;
+      coachman: { legs: Record<string, { thread_id?: string }> };
+    };
+    expect(m.leg).toBe(3);
+    expect(m.coachman.legs["3"]?.thread_id).toBe("watch-fixture-thread");
+    expect(actionCount(join(root, "skip-review"), "note")).toBe(1);
+    expect(readFileSync(join(root, "skip-review", "actions.jsonl"), "utf8")).toContain(
+      "omit the review leg",
+    );
+    expect(actionCount(join(root, "skip-review"), "dispatch")).toBe(1);
+    expect(readFileSync(join(tmp, "calls", "dispatch-skip-review-3"), "utf8")).toContain(
+      "--leg ship --run",
+    );
+  }, 60000);
+
+  test("a waybill with no repo path dispatches from the recorded checks", () => {
+    const root = join(tmp, "auto-repo-fallback");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "repo-fallback", 1, "");
+    handoff(join(root, "repo-fallback"), "1");
+    const brief = join(root, "repo-fallback", "brief.md");
+    writeFileSync(brief, readFileSync(brief, "utf8").replace(/^repo: .*\n/m, ""));
+    writeFileSync(
+      join(root, "repo-fallback", "checks.json"),
+      JSON.stringify({ repo: `${root}-project`, head: "fixture", checks: [] }),
+    );
+    writeFileSync(join(root, "repo-fallback", ".leg-1-done"), "");
+    writeFileSync(join(root, "repo-fallback", ".leg-1-exited"), "");
+    const { rc } = watchStub(root);
+    expect(rc).toBe(3);
+    expect(existsSync(join(tmp, "calls", "dispatch-repo-fallback-2"))).toBe(true);
+    expect(actionCount(join(root, "repo-fallback"), "dispatch")).toBe(1);
+  }, 60000);
+
+  test("a run with no repo anywhere wakes and launches nothing", () => {
+    const root = join(tmp, "auto-no-repo");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "no-repo", 1, "");
+    handoff(join(root, "no-repo"), "1");
+    const brief = join(root, "no-repo", "brief.md");
+    writeFileSync(brief, readFileSync(brief, "utf8").replace(/^repo: .*\n/m, ""));
+    writeFileSync(join(root, "no-repo", ".leg-1-done"), "");
+    writeFileSync(join(root, "no-repo", ".leg-1-exited"), "");
+    const { rc, out } = watchStub(root);
+    expect(rc).toBe(0);
+    expect(out).toContain("needs no-repo DISPATCH");
+    expect(existsSync(join(tmp, "calls", "dispatch-no-repo-2"))).toBe(false);
+  }, 60000);
+
+  test("a one-line profile dispatches from the repo field alone", () => {
+    const root = join(tmp, "auto-one-line");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "one-line", 1, "");
+    handoff(join(root, "one-line"), "1");
+    const brief = join(root, "one-line", "brief.md");
+    writeFileSync(
+      brief,
+      readFileSync(brief, "utf8").replace(
+        /^repo: (.*)$/m,
+        "repo: $1          default branch: main       BASE: fixture",
+      ),
+    );
+    writeFileSync(join(root, "one-line", ".leg-1-done"), "");
+    writeFileSync(join(root, "one-line", ".leg-1-exited"), "");
+    const { rc } = watchStub(root);
+    expect(rc).toBe(3);
+    expect(existsSync(join(tmp, "calls", "dispatch-one-line-2"))).toBe(true);
+    expect(actionCount(join(root, "one-line"), "dispatch")).toBe(1);
+  }, 60000);
+
+  test("a ticket-text profile does not shadow the waybill's own", () => {
+    const root = join(tmp, "auto-early-profile");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "early-profile", 1, "");
+    handoff(join(root, "early-profile"), "1");
+    const brief = join(root, "early-profile", "brief.md");
+    writeFileSync(
+      brief,
+      readFileSync(brief, "utf8").replace(
+        "## Ticket\n",
+        "## Ticket\n## Problem\nx\n## Project profile\nrepo: /tmp/nowhere-shadow\n\n",
+      ),
+    );
+    writeFileSync(join(root, "early-profile", ".leg-1-done"), "");
+    writeFileSync(join(root, "early-profile", ".leg-1-exited"), "");
+    const { rc } = watchStub(root);
+    expect(rc).toBe(3);
+    expect(existsSync(join(tmp, "calls", "dispatch-early-profile-2"))).toBe(true);
+  }, 60000);
+});
+
+describe("corrupt manifests: reported once, never dispatched from, never fatal", () => {
+  for (const bad of ["0", "true", "null", "2.0", "[]"]) {
+    test(`corrupt manifest leg ${bad} is reported, never dispatched, never fatal`, () => {
+      const root = join(tmp, `auto-corrupt-${bad}`);
+      mkdirSync(root, { recursive: true });
+      autoRun(root, "bad", 1, "");
+      const spell = bad === "true" ? "True" : bad === "null" ? "None" : bad;
+      handoff(join(root, "bad"), spell);
+      const manifest = join(root, "bad", "manifest.json");
+      writeFileSync(manifest, readFileSync(manifest, "utf8").replace(/"leg": 1/, `"leg": ${bad}`));
+      writeFileSync(join(root, "bad", `.leg-${spell}-done`), "");
+      writeFileSync(join(root, "bad", `.leg-${spell}-exited`), "");
+      mkrun(root, "good", "review", 2, ".escalation-ready");
+      const { rc, out } = watchStub(root);
+      const still = /"leg": ([^,\n}]+)/.exec(readFileSync(manifest, "utf8"))?.[1];
+      expect(rc).toBe(0);
+      expect(out).toContain("needs bad DISPATCH");
+      expect(out).toContain("manifest leg");
+      expect(out).toContain("needs good RULE");
+      expect(still).toBe(bad);
+      expect(existsSync(join(tmp, "calls", "dispatch-bad-2"))).toBe(false);
+    }, 60000);
+  }
+
+  for (const bad of ["02", "08"]) {
+    test(`leading-zero leg ${bad} is reported corrupt, never dispatched, never fatal`, () => {
+      const root = join(tmp, `auto-corrupt-${bad}`);
+      mkdirSync(root, { recursive: true });
+      autoRun(root, "badleg", 1, "");
+      handoff(join(root, "badleg"), bad);
+      const manifest = join(root, "badleg", "manifest.json");
+      writeFileSync(
+        manifest,
+        readFileSync(manifest, "utf8").replace(/"leg": 1/, `"leg": "${bad}"`),
+      );
+      writeFileSync(join(root, "badleg", `.leg-${bad}-done`), "");
+      writeFileSync(join(root, "badleg", `.leg-${bad}-exited`), "");
+      mkrun(root, "good", "review", 2, ".escalation-ready");
+      const { rc, out } = watchStub(root);
+      const still = JSON.stringify(
+        (JSON.parse(readFileSync(manifest, "utf8")) as { leg: unknown }).leg,
+      );
+      expect(rc).toBe(0);
+      expect(out).toContain("needs badleg DISPATCH");
+      expect(out).toContain("not a canonical integer");
+      expect(out).toContain("needs good RULE");
+      expect(still).toBe(`"${bad}"`);
+      expect(existsSync(join(tmp, "calls", "dispatch-badleg-2"))).toBe(false);
+    }, 60000);
+  }
+
+  for (const bad of ["02", "08"]) {
+    test(`leading-zero leg ${bad} on a remount is reported corrupt, never resumed, never fatal`, () => {
+      const root = join(tmp, `auto-corrupt-remount-${bad}`);
+      mkdirSync(root, { recursive: true });
+      autoRun(root, "badremount", 1, "thread-badremount");
+      const manifest = join(root, "badremount", "manifest.json");
+      writeFileSync(
+        manifest,
+        readFileSync(manifest, "utf8").replace(/"leg": 1/, `"leg": "${bad}"`),
+      );
+      writeFileSync(
+        join(root, "badremount", "logs", `coachman-leg-${bad}.err`),
+        "model stream idle timeout\n",
+      );
+      writeFileSync(join(root, "badremount", "logs", `coachman-leg-${bad}-events.jsonl`), "");
+      writeFileSync(join(root, "badremount", `.leg-${bad}-exited`), "");
+      mkrun(root, "good", "review", 2, ".escalation-ready");
+      const { rc, out } = watchStub(root);
+      expect(rc).toBe(0);
+      expect(out).toContain("needs badremount REMOUNT");
+      expect(out).toContain("not a canonical integer");
+      expect(out).toContain("needs good RULE");
+      expect(existsSync(join(tmp, "calls", `resume-badremount-${bad}`))).toBe(false);
+      expect(existsSync(join(root, "badremount", "watcher.json"))).toBe(false);
+    }, 60000);
+  }
+});
+
+describe("watcher steps: remount controls", () => {
+  function seedResume(root: string, name: string, errText: string): void {
+    writeFileSync(join(root, name, "logs", "coachman-leg-1.err"), `${errText}\n`);
+    writeFileSync(join(root, name, ".leg-1-exited"), "");
+  }
+
+  function resumeCountOf(root: string, name: string): number {
+    return (
+      JSON.parse(readFileSync(join(root, name, "watcher.json"), "utf8")) as {
+        resume_attempts: Record<string, number>;
+      }
+    ).resume_attempts["1"]!;
+  }
+
+  test("a named transient end resumes the recorded thread with the remount prompt and logs it without launching an agent in the control", () => {
+    const root = join(tmp, "auto-resume");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "resume", 1, "prior-thread");
+    writeFileSync(
+      join(root, "resume", "logs", "coachman-leg-1.err"),
+      "Model stream idle timeout\n",
+    );
+    writeFileSync(join(root, "resume", "logs", "coachman-leg-1-events.jsonl"), "");
+    writeFileSync(join(root, "resume", ".leg-1-exited"), "");
+    const { rc, out } = watchStub(root);
+    expect(rc).toBe(3);
+    expect(out).toContain("resume ");
+    expect(actionCount(join(root, "resume"), "resume")).toBe(1);
+    const actions = readFileSync(join(root, "resume", "actions.jsonl"), "utf8");
+    expect(actions).toContain("watcher took it");
+    expect(actions).toContain("resume 1 of 3");
+    const prompts = readdirSync(join(root, "resume")).filter((f) => f.startsWith("leg-1-resume-"));
+    expect(prompts.length).toBe(1);
+    expect(readFileSync(join(root, "resume", prompts[0]!), "utf8")).toContain(
+      "Continue leg 1; your last written state is in the dispatch directory and the worktree.",
+    );
+    const call = readFileSync(join(tmp, "calls", "resume-resume-1"), "utf8");
+    expect(call).toContain("--role coachman --run");
+    expect(call).toContain("--append");
+    expect(call).toContain("launch.sh resume coachman");
+    expect(call).toContain("prior-thread");
+    expect(existsSync(join(root, "resume", ".leg-1-exited"))).toBe(false);
+  }, 60000);
+
+  for (const attempt of [2, 3]) {
+    test(`transient end ${attempt} is resumed and its per-leg count persists`, () => {
+      const root = join(tmp, `auto-resume-${attempt}`);
+      mkdirSync(root, { recursive: true });
+      autoRun(root, "resume", 1, "prior-thread");
+      writeFileSync(
+        join(root, "resume", "logs", "coachman-leg-1.err"),
+        "Model stream idle timeout\n",
+      );
+      writeFileSync(join(root, "resume", "logs", "coachman-leg-1-events.jsonl"), "");
+      for (let a = 1; a <= attempt; a++) {
+        if (a > 1) seedResume(root, "resume", "model_stream_idle_timeout");
+        else writeFileSync(join(root, "resume", ".leg-1-exited"), "");
+        const { rc } = watchStub(root);
+        expect(rc).toBe(3);
+      }
+      expect(resumeCountOf(root, "resume")).toBe(attempt);
+      expect(actionCount(join(root, "resume"), "resume")).toBe(attempt);
+    }, 120000);
+  }
+
+  test("the fourth transient end wakes the postmaster without incrementing or resuming", () => {
+    const root = join(tmp, "auto-resume-4");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "resume", 1, "prior-thread");
+    writeFileSync(
+      join(root, "resume", "logs", "coachman-leg-1.err"),
+      "Model stream idle timeout\n",
+    );
+    writeFileSync(join(root, "resume", "logs", "coachman-leg-1-events.jsonl"), "");
+    for (let a = 1; a <= 3; a++) {
+      if (a > 1) seedResume(root, "resume", "model_stream_idle_timeout");
+      else writeFileSync(join(root, "resume", ".leg-1-exited"), "");
+      const { rc } = watchStub(root);
+      expect(rc).toBe(3);
+    }
+    seedResume(root, "resume", "model stream idle timeout");
+    const { rc, out } = watchStub(root);
+    expect(rc).toBe(0);
+    expect(out).toContain("needs resume REMOUNT");
+    expect(resumeCountOf(root, "resume")).toBe(3);
+    expect(actionCount(join(root, "resume"), "resume")).toBe(3);
+  }, 120000);
+
+  test("an old transient error in the stream does not resume a later unrelated failure", () => {
+    const root = join(tmp, "auto-stale");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "stale", 1, "thread-stale");
+    writeFileSync(join(root, "stale", "logs", "coachman-leg-1.err"), "model stream idle timeout\n");
+    writeFileSync(
+      join(root, "stale", "logs", "coachman-leg-1-events.jsonl"),
+      '{"type":"error","message":"model stream idle timeout"}\n',
+    );
+    writeFileSync(join(root, "stale", ".leg-1-exited"), "");
+    const first = watchStub(root);
+    expect(first.rc).toBe(3);
+    expect(actionCount(join(root, "stale"), "resume")).toBe(1);
+    writeFileSync(
+      join(root, "stale", "logs", "coachman-leg-1.err"),
+      "AssertionError: something the lane did wrong\n",
+    );
+    writeFileSync(join(root, "stale", ".leg-1-exited"), "");
+    const { rc, out } = watchStub(root);
+    expect(rc).toBe(0);
+    expect(out).toContain("needs stale REMOUNT");
+    expect(resumeCountOf(root, "stale")).toBe(1);
+    expect(actionCount(join(root, "stale"), "resume")).toBe(1);
+  }, 60000);
+
+  test("an unterminated old error stays out of the new classification", () => {
+    const root = join(tmp, "auto-unterm");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "unterm", 1, "thread-unterm");
+    writeFileSync(
+      join(root, "unterm", "logs", "coachman-leg-1.err"),
+      "model stream idle timeout\n",
+    );
+    writeFileSync(
+      join(root, "unterm", "logs", "coachman-leg-1-events.jsonl"),
+      '{"type":"assistant","message":"hi"}\n{"type":"error","message":"model stream idle timeout"}',
+    );
+    writeFileSync(join(root, "unterm", ".leg-1-exited"), "");
+    const first = watchStub(root);
+    expect(first.rc).toBe(3);
+    expect(actionCount(join(root, "unterm"), "resume")).toBe(1);
+    // The stub always appends; a resumed launch that dies silent appends nothing. Restore the
+    // lane's exact shape to model it: the old error last and unterminated, nothing after.
+    writeFileSync(
+      join(root, "unterm", "logs", "coachman-leg-1-events.jsonl"),
+      '{"type":"assistant","message":"hi"}\n{"type":"error","message":"model stream idle timeout"}',
+    );
+    writeFileSync(
+      join(root, "unterm", "logs", "coachman-leg-1.err"),
+      "AssertionError: something the lane did wrong\n",
+    );
+    writeFileSync(join(root, "unterm", ".leg-1-exited"), "");
+    const { rc, out } = watchStub(root);
+    const watcher = JSON.parse(readFileSync(join(root, "unterm", "watcher.json"), "utf8")) as {
+      resume_attempts: Record<string, number>;
+      stream_skip: Record<string, number>;
+    };
+    expect(rc).toBe(0);
+    expect(out).toContain("needs unterm REMOUNT");
+    expect(`${watcher.resume_attempts["1"]}/${watcher.stream_skip["1"]}`).toBe("1/2");
+    expect(actionCount(join(root, "unterm"), "resume")).toBe(1);
+  }, 60000);
+
+  for (const [name, message] of [
+    ["gateway", "529 overloaded"],
+    ["drop", "read: connection reset by peer"],
+  ]) {
+    test(`a ${name} failure is resumed as a named transient end`, () => {
+      const root = join(tmp, `auto-${name}`);
+      mkdirSync(root, { recursive: true });
+      autoRun(root, name, 1, `thread-${name}`);
+      writeFileSync(join(root, name, "logs", "coachman-leg-1.err"), `${message}\n`);
+      writeFileSync(join(root, name, "logs", "coachman-leg-1-events.jsonl"), "");
+      writeFileSync(join(root, name, ".leg-1-exited"), "");
+      const { rc } = watchStub(root);
+      expect(rc).toBe(3);
+      expect(actionCount(join(root, name), "resume")).toBe(1);
+      expect(existsSync(join(tmp, "calls", `resume-${name}-1`))).toBe(true);
+    }, 60000);
+  }
+});
+
+describe("postmaster wake controls: provider walls and launch refusals", () => {
+  for (const [name, message] of [
+    ["wall", "quota exceeded: provider capacity reached"],
+    ["provider", "provider wall: model capacity exhausted"],
+    ["refusal", "launch: resume needs a thread id"],
+  ]) {
+    test(`${name} remains with the postmaster and is not retried`, () => {
+      const root = join(tmp, `wake-${name}`);
+      mkdirSync(root, { recursive: true });
+      autoRun(root, name, 1, `thread-${name}`);
+      writeFileSync(join(root, name, "logs", "coachman-leg-1.err"), `${message}\n`);
+      writeFileSync(join(root, name, "logs", "coachman-leg-1-events.jsonl"), "");
+      writeFileSync(join(root, name, ".leg-1-exited"), "");
+      const { rc, out } = watchStub(root);
+      expect(rc).toBe(0);
+      expect(out).toContain(`needs ${name} REMOUNT`);
+      expect(existsSync(join(root, name, "watcher.json"))).toBe(false);
+      expect(existsSync(join(tmp, "calls", `resume-${name}-1`))).toBe(false);
+    }, 60000);
+  }
+
+  test("an unlisted provider error stays with the postmaster", () => {
+    const root = join(tmp, "wake-other-error");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "other-error", 1, "thread-other");
+    writeFileSync(
+      join(root, "other-error", "logs", "coachman-leg-1.err"),
+      "AssertionError: something the lane did wrong\n",
+    );
+    writeFileSync(join(root, "other-error", "logs", "coachman-leg-1-events.jsonl"), "");
+    writeFileSync(join(root, "other-error", ".leg-1-exited"), "");
+    const { rc, out } = watchStub(root);
+    expect(rc).toBe(0);
+    expect(out).toContain("needs other-error REMOUNT");
+    expect(existsSync(join(root, "other-error", "watcher.json"))).toBe(false);
+    expect(existsSync(join(tmp, "calls", "resume-other-error-1"))).toBe(false);
+  }, 60000);
+
+  test("a transient end with no recorded thread id stays with the postmaster", () => {
+    const root = join(tmp, "wake-no-thread-remount");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "no-thread-remount", 1, "");
+    writeFileSync(
+      join(root, "no-thread-remount", "logs", "coachman-leg-1.err"),
+      "model stream idle timeout\n",
+    );
+    writeFileSync(join(root, "no-thread-remount", "logs", "coachman-leg-1-events.jsonl"), "");
+    writeFileSync(join(root, "no-thread-remount", ".leg-1-exited"), "");
+    const { rc, out } = watchStub(root);
+    expect(rc).toBe(0);
+    expect(out).toContain("needs no-thread-remount REMOUNT");
+    expect(existsSync(join(root, "no-thread-remount", "watcher.json"))).toBe(false);
+    expect(existsSync(join(tmp, "calls", "resume-no-thread-remount-1"))).toBe(false);
+  }, 60000);
+});
+
+describe("postmaster wake controls: incomplete watcher steps", () => {
+  test("a failed hand-off check wakes the postmaster and launches nothing", () => {
+    const root = join(tmp, "wake-handoff");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "handoff", 1, "");
+    writeFileSync(join(root, "handoff", ".leg-1-done"), "");
+    writeFileSync(join(root, "handoff", ".leg-1-exited"), "");
+    writeFileSync(
+      join(root, "handoff", "handoff-1.md"),
+      "## Decisions\nmissing the other required sections\n",
+    );
+    const { rc, out } = watchStub(root);
+    expect(rc).toBe(0);
+    expect(out).toContain("needs handoff DISPATCH");
+    expect(existsSync(join(tmp, "calls", "dispatch-handoff-2"))).toBe(false);
+  }, 60000);
+
+  test("a failed turnpikes lookup wakes the postmaster and launches nothing", () => {
+    const root = join(tmp, "wake-legs");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "legs", 1, "");
+    writeFileSync(join(root, "legs", ".leg-1-done"), "");
+    writeFileSync(join(root, "legs", ".leg-1-exited"), "");
+    const brief = join(root, "legs", "brief.md");
+    writeFileSync(
+      brief,
+      readFileSync(brief, "utf8").replace(/^turnpikes:.*$/m, "not a turnpikes line"),
+    );
+    handoff(join(root, "legs"), "1");
+    const { rc, out } = watchStub(root);
+    expect(rc).toBe(0);
+    expect(out).toContain("needs legs DISPATCH");
+    expect(existsSync(join(tmp, "calls", "dispatch-legs-2"))).toBe(false);
+  }, 60000);
+
+  test("a done ship leg with nothing after it wakes for the close", () => {
+    const root = join(tmp, "wake-close");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "close", 3, "thread-close");
+    handoff(join(root, "close"), "3");
+    const brief = join(root, "close", "brief.md");
+    writeFileSync(brief, readFileSync(brief, "utf8").replace(/^turnpikes:.*$/m, "turnpikes: none"));
+    writeFileSync(join(root, "close", ".leg-3-done"), "");
+    writeFileSync(join(root, "close", ".leg-3-exited"), "");
+    const { rc, out } = watchStub(root);
+    expect(rc).toBe(0);
+    expect(out).toContain("needs close DISPATCH");
+    expect(existsSync(join(tmp, "calls", "dispatch-close-4"))).toBe(false);
+  }, 60000);
+
+  test("a refused host dispatch wakes the postmaster", () => {
+    const root = join(tmp, "wake-dispatch");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "dispatch-failure", 1, "");
+    handoff(join(root, "dispatch-failure"), "1");
+    writeFileSync(join(root, "dispatch-failure", ".leg-1-done"), "");
+    writeFileSync(join(root, "dispatch-failure", ".leg-1-exited"), "");
+    const { rc, out } = watchStub(root, "dispatch failure");
+    expect(rc).toBe(0);
+    expect(out).toContain("needs dispatch-failure DISPATCH");
+    expect(existsSync(join(root, "dispatch-failure", ".leg-2-exited"))).toBe(true);
+  }, 60000);
+
+  test("a launch.sh refusal wakes the postmaster", () => {
+    const root = join(tmp, "wake-launch-refusal");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "launch-refusal", 1, "");
+    handoff(join(root, "launch-refusal"), "1");
+    writeFileSync(join(root, "launch-refusal", ".leg-1-done"), "");
+    writeFileSync(join(root, "launch-refusal", ".leg-1-exited"), "");
+    const { rc, out } = watchStub(root, "dispatch refusal");
+    expect(rc).toBe(0);
+    expect(out).toContain("needs launch-refusal DISPATCH");
+    expect(existsSync(join(root, "launch-refusal", ".leg-2-exited"))).toBe(true);
+    expect(existsSync(join(root, "launch-refusal", "watcher.json"))).toBe(false);
+  }, 60000);
+
+  test("a launch with no readable thread id wakes with the launch already started and unrecorded", () => {
+    const root = join(tmp, "wake-no-thread");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "no-thread", 1, "");
+    handoff(join(root, "no-thread"), "1");
+    writeFileSync(join(root, "no-thread", ".leg-1-done"), "");
+    writeFileSync(join(root, "no-thread", ".leg-1-exited"), "");
+    const { rc, out } = watchStub(root, "no thread");
+    const m = JSON.parse(readFileSync(join(root, "no-thread", "manifest.json"), "utf8")) as {
+      leg: number;
+      coachman: { legs: Record<string, Record<string, string>> };
+    };
+    expect(rc).toBe(0);
+    expect(m.leg).toBe(2);
+    expect("thread_id" in (m.coachman.legs["2"] ?? {})).toBe(false);
+    expect(actionCount(join(root, "no-thread"), "dispatch")).toBe(0);
+    expect(out).toContain("needs no-thread DISPATCH");
+    expect(out).toContain("may still be running");
+    expect(existsSync(join(tmp, "calls", "dispatch-no-thread-2"))).toBe(true);
+  }, 60000);
+
+  test("a refused remount wakes the postmaster", () => {
+    const root = join(tmp, "wake-resume");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "resume-failure", 1, "thread-resume");
+    writeFileSync(
+      join(root, "resume-failure", "logs", "coachman-leg-1.err"),
+      "model stream idle timeout\n",
+    );
+    writeFileSync(join(root, "resume-failure", "logs", "coachman-leg-1-events.jsonl"), "");
+    writeFileSync(join(root, "resume-failure", ".leg-1-exited"), "");
+    const { rc, out } = watchStub(root, "resume failure");
+    expect(rc).toBe(0);
+    expect(out).toContain("needs resume-failure REMOUNT");
+    expect(actionCount(join(root, "resume-failure"), "resume")).toBe(0);
+  }, 60000);
+
+  test("a refused resume wakes in the same look with a refusal record, the count unchanged, and no success line", () => {
+    const root = join(tmp, "wake-resume-refusal");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "resume-refusal", 1, "thread-resume-refusal");
+    writeFileSync(
+      join(root, "resume-refusal", "logs", "coachman-leg-1.err"),
+      "model stream idle timeout\n",
+    );
+    writeFileSync(join(root, "resume-refusal", "logs", "coachman-leg-1-events.jsonl"), "");
+    writeFileSync(join(root, "resume-refusal", ".leg-1-exited"), "");
+    const { rc, out } = watchStub(root, "resume refusal");
+    const watcher = JSON.parse(
+      readFileSync(join(root, "resume-refusal", "watcher.json"), "utf8"),
+    ) as {
+      resume_attempts: Record<string, number>;
+    };
+    expect(rc).toBe(0);
+    expect(out).toContain("needs resume-refusal REMOUNT");
+    expect(out).toContain("launch: simulated refusal");
+    expect(actionCount(join(root, "resume-refusal"), "refuse")).toBe(1);
+    expect(actionCount(join(root, "resume-refusal"), "resume")).toBe(0);
+    expect(readFileSync(join(root, "resume-refusal", "actions.jsonl"), "utf8")).not.toContain(
+      "watcher took it",
+    );
+    expect(watcher.resume_attempts["1"]).toBe(0);
+  }, 60000);
+
+  test("a two-line refusal after a two-line .err is found in the same look", () => {
+    const root = join(tmp, "wake-resume-refusal-uncapped");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "refusal-uncapped", 1, "thread-refusal-uncapped");
+    writeFileSync(
+      join(root, "refusal-uncapped", "logs", "coachman-leg-1.err"),
+      "host: launch running uncapped (no supported per-launch limits available)\nmodel stream idle timeout\n",
+    );
+    writeFileSync(join(root, "refusal-uncapped", "logs", "coachman-leg-1-events.jsonl"), "");
+    writeFileSync(join(root, "refusal-uncapped", ".leg-1-exited"), "");
+    const { rc, out } = watchStub(root, "uncapped resume refusal");
+    const watcher = JSON.parse(
+      readFileSync(join(root, "refusal-uncapped", "watcher.json"), "utf8"),
+    ) as { resume_attempts: Record<string, number> };
+    expect(rc).toBe(0);
+    expect(out).toContain("needs refusal-uncapped REMOUNT");
+    expect(out).toContain("launch: simulated refusal");
+    expect(actionCount(join(root, "refusal-uncapped"), "refuse")).toBe(1);
+    expect(actionCount(join(root, "refusal-uncapped"), "resume")).toBe(0);
+    expect(watcher.resume_attempts["1"]).toBe(0);
+  }, 60000);
+
+  test("a two-line refusal after a three-line .err is found in the same look", () => {
+    const root = join(tmp, "wake-resume-refusal-shrink");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "refusal-shrink", 1, "thread-refusal-shrink");
+    writeFileSync(
+      join(root, "refusal-shrink", "logs", "coachman-leg-1.err"),
+      "model stream idle timeout\nhost: launch running uncapped (no supported per-launch limits available)\nmodel stream idle timeout\n",
+    );
+    writeFileSync(join(root, "refusal-shrink", "logs", "coachman-leg-1-events.jsonl"), "");
+    writeFileSync(join(root, "refusal-shrink", ".leg-1-exited"), "");
+    const { rc, out } = watchStub(root, "uncapped resume refusal");
+    const watcher = JSON.parse(
+      readFileSync(join(root, "refusal-shrink", "watcher.json"), "utf8"),
+    ) as {
+      resume_attempts: Record<string, number>;
+    };
+    expect(rc).toBe(0);
+    expect(out).toContain("needs refusal-shrink REMOUNT");
+    expect(out).toContain("launch: simulated refusal");
+    expect(actionCount(join(root, "refusal-shrink"), "refuse")).toBe(1);
+    expect(actionCount(join(root, "refusal-shrink"), "resume")).toBe(0);
+    expect(watcher.resume_attempts["1"]).toBe(0);
+  }, 60000);
+
+  test("a standing refusal is named every look without spending a remount", () => {
+    const root = join(tmp, "wake-resume-refusal-many");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "refusal-many", 1, "thread-refusal-many");
+    writeFileSync(
+      join(root, "refusal-many", "logs", "coachman-leg-1.err"),
+      "model stream idle timeout\n",
+    );
+    writeFileSync(join(root, "refusal-many", "logs", "coachman-leg-1-events.jsonl"), "");
+    writeFileSync(join(root, "refusal-many", ".leg-1-exited"), "");
+    const { rc, out } = watchStubWait(root);
+    const watcher = JSON.parse(
+      readFileSync(join(root, "refusal-many", "watcher.json"), "utf8"),
+    ) as {
+      resume_attempts: Record<string, number>;
+    };
+    expect(rc).toBe(0);
+    expect(out).toContain("needs refusal-many REMOUNT");
+    expect(actionCount(join(root, "refusal-many"), "refuse") >= 1).toBe(true);
+    expect(actionCount(join(root, "refusal-many"), "resume")).toBe(0);
+    expect(watcher.resume_attempts["1"]).toBe(0);
+  }, 60000);
+
+  test("a dispatch whose action cannot be logged wakes the postmaster", () => {
+    const root = join(tmp, "wake-log");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "log-failure", 1, "");
+    handoff(join(root, "log-failure"), "1");
+    writeFileSync(join(root, "log-failure", ".leg-1-done"), "");
+    writeFileSync(join(root, "log-failure", ".leg-1-exited"), "");
+    rmSync(join(root, "log-failure", "actions.jsonl"));
+    mkdirSync(join(root, "log-failure", "actions.jsonl"));
+    const { rc, out } = watchStub(root);
+    expect(rc).toBe(0);
+    expect(out).toContain("needs log-failure DISPATCH");
+    expect(existsSync(join(tmp, "calls", "dispatch-log-failure-2"))).toBe(true);
+  }, 60000);
+
+  test("a resume whose action cannot be logged wakes the postmaster", () => {
+    const root = join(tmp, "wake-resume-log");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "resume-log", 1, "thread-resume-log");
+    writeFileSync(
+      join(root, "resume-log", "logs", "coachman-leg-1.err"),
+      "model stream idle timeout\n",
+    );
+    writeFileSync(join(root, "resume-log", "logs", "coachman-leg-1-events.jsonl"), "");
+    writeFileSync(join(root, "resume-log", ".leg-1-exited"), "");
+    rmSync(join(root, "resume-log", "actions.jsonl"));
+    mkdirSync(join(root, "resume-log", "actions.jsonl"));
+    const { rc, out } = watchStub(root);
+    const watcher = JSON.parse(readFileSync(join(root, "resume-log", "watcher.json"), "utf8")) as {
+      resume_attempts: Record<string, number>;
+    };
+    expect(rc).toBe(0);
+    expect(out).toContain("needs resume-log REMOUNT");
+    expect(existsSync(join(tmp, "calls", "resume-resume-log-1"))).toBe(true);
+    expect(watcher.resume_attempts["1"]).toBe(1);
+  }, 60000);
+});
+
+describe("negative controls: held runs are left untouched", () => {
+  test("a held dispatch run keeps its manifest, markers, log, and files unchanged", () => {
+    const root = join(tmp, "held-dispatch");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "held-dispatch", 1, "");
+    handoff(join(root, "held-dispatch"), "1");
+    writeFileSync(join(root, "held-dispatch", ".leg-1-done"), "");
+    writeFileSync(join(root, "held-dispatch", ".leg-1-exited"), "");
+    writeFileSync(join(root, "postmaster", "held"), "held-dispatch\n");
+    const { rc, out } = watchStub(root);
+    const m = JSON.parse(readFileSync(join(root, "held-dispatch", "manifest.json"), "utf8")) as {
+      leg: number;
+    };
+    expect(rc).toBe(3);
+    expect(out).not.toContain("needs ");
+    expect(existsSync(join(tmp, "calls", "dispatch-held-dispatch-2"))).toBe(false);
+    expect(existsSync(join(root, "held-dispatch", "leg-2-prompt.txt"))).toBe(false);
+    expect(existsSync(join(root, "held-dispatch", "watcher.json"))).toBe(false);
+    expect(existsSync(join(root, "held-dispatch", ".leg-1-done"))).toBe(true);
+    expect(existsSync(join(root, "held-dispatch", ".leg-1-exited"))).toBe(true);
+    expect(actionCount(join(root, "held-dispatch"), "dispatch")).toBe(0);
+    expect(m.leg).toBe(1);
+  }, 60000);
+
+  test("a held remount run keeps its count, marker, and log unchanged", () => {
+    const root = join(tmp, "held-resume");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "held-resume", 1, "thread-held");
+    writeFileSync(
+      join(root, "held-resume", "logs", "coachman-leg-1.err"),
+      "model stream idle timeout\n",
+    );
+    writeFileSync(join(root, "held-resume", "logs", "coachman-leg-1-events.jsonl"), "");
+    writeFileSync(join(root, "held-resume", ".leg-1-exited"), "");
+    writeFileSync(join(root, "postmaster", "held"), "held-resume\n");
+    const { rc, out } = watchStub(root);
+    expect(rc).toBe(3);
+    expect(out).not.toContain("needs ");
+    expect(existsSync(join(tmp, "calls", "resume-held-resume-1"))).toBe(false);
+    expect(existsSync(join(root, "held-resume", "watcher.json"))).toBe(false);
+    expect(existsSync(join(root, "held-resume", ".leg-1-exited"))).toBe(true);
+    expect(actionCount(join(root, "held-resume"), "resume")).toBe(0);
+  }, 60000);
 });
 
 describe("config: a missing or unusable poll interval falls back to the default", () => {

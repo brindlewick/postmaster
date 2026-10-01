@@ -1,4 +1,4 @@
-// Tests beside scripts/runs-status.ts, moved from its --self-test on #109: 16 controls.
+// Tests beside scripts/runs-status.ts, moved from its --self-test on #109: 19 controls.
 // Fifteen fixture runs plus the postmaster directory are planted once in beforeAll;
 // status() only reads, so every test is independent.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -15,6 +15,14 @@ function mkRun(name: string, stage: string, leg: number, ...markers: string[]): 
   const d = join(root, name);
   mkdirSync(join(d, "logs"), { recursive: true });
   writeFileSync(join(d, "manifest.json"), `{"stage": "${stage}", "leg": ${leg}}\n`);
+  writeFileSync(join(d, "run-log.md"), "");
+  for (const m of markers) writeFileSync(join(d, m), "");
+}
+
+function mkOdd(name: string, legLiteral: string, ...markers: string[]): void {
+  const d = join(root, name);
+  mkdirSync(join(d, "logs"), { recursive: true });
+  writeFileSync(join(d, "manifest.json"), `{"stage": "review", "leg": ${legLiteral}}\n`);
   writeFileSync(join(d, "run-log.md"), "");
   for (const m of markers) writeFileSync(join(d, m), "");
 }
@@ -49,6 +57,23 @@ function nextOf(name: string): string {
   return "";
 }
 
+function rowOf(name: string): string {
+  const origLog = console.log;
+  let out = "";
+  console.log = (s: string) => {
+    out += `${s}\n`;
+  };
+  try {
+    status(root);
+  } finally {
+    console.log = origLog;
+  }
+  for (const line of out.split("\n")) {
+    if (pyWords(line)[0] === name) return line;
+  }
+  return "";
+}
+
 beforeAll(() => {
   tmp = mkdtempSync(join(tmpdir(), "runs-status-"));
   root = join(tmp, "root");
@@ -70,6 +95,8 @@ beforeAll(() => {
   mkRun("stall", "review", 2);
   age("stall");
   writeFileSync(join(root, "stall", ".leg-1-done"), "");
+  mkOdd("boolleg", "true", ".leg-True-done", ".leg-True-exited");
+  mkOdd("nullleg", "null", ".leg-None-done", ".leg-None-exited");
   mkdirSync(join(root, "postmaster"), { recursive: true });
 });
 
@@ -142,5 +169,19 @@ describe("negative controls", () => {
 
   test("the postmaster's own directory is not a run", () => {
     expect(nextOf("postmaster")).toBe("");
+  }, 10000);
+});
+
+describe("non-string legs print in Python's spelling", () => {
+  test("a boolean leg matches its Python-spelled markers", () => {
+    expect(nextOf("boolleg")).toBe("DISPATCH");
+  }, 10000);
+
+  test("a null leg matches its Python-spelled markers", () => {
+    expect(nextOf("nullleg")).toBe("DISPATCH");
+  }, 10000);
+
+  test("a run with no markers shows a dash, not blanks", () => {
+    expect(pyWords(rowOf("wait"))[3]).toBe("-");
   }, 10000);
 });
