@@ -173,15 +173,24 @@ function version(harness: string): string {
 // flock(2) has no Node spelling, so the pin lock is a lock file holding the owner's PID:
 // O_EXCL creation is the mutual exclusion, and only a dead owner loses it. Never by age: a
 // dispatch legitimately holds the lock across 15-second harness probes, so an old lock is
-// still live. An empty file older than five seconds reads as unlocked and is stolen: it is
-// the bash flow's resting state (flock on the fd, truncated on every open, never removed),
-// which carries no owner either way, so waiting on it would fail every dispatch on a
-// machine the bash flow has touched. A fresh empty file is still waited on: creation and
-// the pid write are two calls, and a creator is briefly between them. Exclusion between
-// the two flows is therefore best-effort — a steal can land while bash holds its flock —
-// and exact within this one; the overlap lasts only the transition, and concurrent pins of
-// one commit converge on identical content. An unreadable file is still waited on, never
-// stolen; past two minutes the wait fails as "could not lock", the way flock failing does.
+// still live. An empty file older than five seconds is the bash flow's shape (flock on the
+// fd, truncated on every open, never removed), which carries no owner either way — but it
+// reads as unlocked only when no flock holder is live on it: the bash flow holds that
+// flock across its whole critical section, so stealing past a live holder would admit a
+// second dispatcher beside it. A non-blocking flock probe tells the resting state, which
+// is stolen, from a held one, which is waited on. A fresh empty file is still waited on:
+// creation and the pid write are two calls, and a creator is briefly between them. The
+// probe and the steal are two calls too, so a bash open landing exactly between them can
+// still slip past; that window is one unlink wide, against the whole critical section
+// before. Where flock(1) is missing no legacy holder can exist — the bash flow needs the
+// same binary — so the old empty file is stolen as before. An unreadable file is still
+// waited on, never stolen; past two minutes the wait fails as "could not lock", the way
+// flock failing does.
+function flockHeld(lockPath: string): boolean {
+  // No flock binary, no legacy holder: the bash flow's `flock 9` needs it too.
+  if (Bun.which("flock") === null) return false;
+  return run("flock", ["-n", lockPath, "true"]).code !== 0;
+}
 function lockOwnerDead(lockPath: string): boolean {
   let text: string;
   try {
@@ -191,12 +200,17 @@ function lockOwnerDead(lockPath: string): boolean {
     return (e as NodeJS.ErrnoException)?.code === "ENOENT";
   }
   if (text.trim() === "") {
+    let old: boolean;
     try {
-      return Date.now() - statSync(lockPath).mtimeMs > 5000;
+      old = Date.now() - statSync(lockPath).mtimeMs > 5000;
     } catch {
       // Gone while reading: nobody holds it.
       return true;
     }
+    // Old and empty is the bash flow's resting state — unless its flock is
+    // still held, in which case the holder is mid-critical-section and the
+    // steal waits for it.
+    return old && !flockHeld(lockPath);
   }
   const pid = Number(text.trim());
   if (!Number.isInteger(pid) || pid <= 0) return false;
