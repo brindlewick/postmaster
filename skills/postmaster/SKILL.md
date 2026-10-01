@@ -189,10 +189,10 @@ Never put paths or credentials in either file.
    with the user at the terminal: the postmaster is this session, and no second one is
    started. `spawn` means a separate postmaster session is needed, and the reasons say
    which conditions failed: the harness or the model differs from `team.postmaster`, the
-   target is another repo, or nobody is at the terminal. When the target is a fixture copy
-   (`fixture.sh new` marked it), it also prints `headless`: that postmaster starts headless
-   on every host, in the form `hosts.md` gives under none, so it never meets a trust
-   prompt. `self` stays `self` in a fixture copy. If it exits non-zero instead,
+   target is another repo, or nobody is at the terminal. When the decision is `spawn` and the
+   target is a fixture copy (`fixture.sh new` marked it), it also prints `headless`: that
+   postmaster starts headless on every host, in the form `hosts.md` gives under none, so it
+   never meets a trust prompt. `self` stays `self` in a fixture copy. If it exits non-zero instead,
    stop and tell the user what it said: the config is missing, does not parse, or has no
    `team.postmaster`, or the report was malformed. Settle that first; there is no route
    to put on the launch card until the script answers.
