@@ -2761,7 +2761,7 @@ printf 'role=%s\n' "${POSTMASTER_LAUNCH_ROLE:-unset}"
 EOF
   chmod +x "$tmp/caller/launch.sh"
   (cd "$tmp/caller" && hs "$SYS" POSTMASTER_LAUNCH_ROLE=spoof -- run "$NAME" "$repo" \
-    --role reviewer --run "$tmp/cap-dispatch" --out ../logs/role.out --marker ../logs/role.done -- ./launch.sh >/dev/null)
+    --under "$tmp/cap-dispatch" --role reviewer --run "$tmp/cap-dispatch" --out ../logs/role.out --marker ../logs/role.done -- ./launch.sh >/dev/null)
   marker "$tmp/logs/role.done"
   check "the run's explicit host role reaches launch.sh and an inherited role cannot replace it" \
     '[ "$(cat "$tmp/logs/role.out")" = role=reviewer ]' "$(cat "$tmp/logs/role.out")"
