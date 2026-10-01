@@ -4527,6 +4527,13 @@ function legWaitingAdd(runs: string, ticket: string, qfile: string): void {
   const escaped = pySplitLines(question)
     .map((line) => (line.startsWith("## ") ? `\\## ${line.slice(3)}` : line))
     .join("\n");
+  // Two postmasters adding together read one list and the last write wins, dropping an
+  // entry: add and remove hold the waiting-list mutex across the read and the write.
+  const take = legMutexTake(join(runs, "postmaster", ".waiting.lock"), -1);
+  if (take.status !== "taken")
+    die(
+      `leg: cannot take the waiting-list mutex: ${spawnStrerror(take.status === "error" ? take.error : null)}`,
+    );
   let text = "";
   let listIsFile = false;
   try {
@@ -4541,7 +4548,11 @@ function legWaitingAdd(runs: string, ticket: string, qfile: string): void {
     if (pyTrim(pySplitLines(b)[0] ?? "") !== ticket) rest.push(b);
   }
   rest.push(`${ticket}\n${escaped}\n`);
-  writeFileSync(f, head + rest.map((b) => `## ${b}`).join(""));
+  try {
+    writeFileSync(f, head + rest.map((b) => `## ${b}`).join(""));
+  } finally {
+    legMutexDrop(join(runs, "postmaster", ".waiting.lock"));
+  }
 }
 function legWaitingRemove(runs: string, ticket: string): void {
   const f = join(runs, "postmaster", "ESCALATION.md");
@@ -4550,6 +4561,11 @@ function legWaitingRemove(runs: string, ticket: string): void {
     isFile = statSync(f).isFile();
   } catch {}
   if (!isFile) return;
+  const take = legMutexTake(join(runs, "postmaster", ".waiting.lock"), -1);
+  if (take.status !== "taken")
+    die(
+      `leg: cannot take the waiting-list mutex: ${spawnStrerror(take.status === "error" ? take.error : null)}`,
+    );
   const text = readFileSync(f, "utf8");
   const parts = text.split(/^## /mu);
   const keep: string[] = [parts[0] ?? ""];
@@ -4557,8 +4573,12 @@ function legWaitingRemove(runs: string, ticket: string): void {
     if (pyTrim(pySplitLines(b)[0] ?? "") !== ticket) keep.push(`## ${b}`);
   }
   const out = keep.join("");
-  writeFileSync(f, pyTrim(out) === "" ? "" : out);
-  if (pyTrim(out) === "") rmSync(f);
+  try {
+    writeFileSync(f, pyTrim(out) === "" ? "" : out);
+    if (pyTrim(out) === "") rmSync(f);
+  } finally {
+    legMutexDrop(join(runs, "postmaster", ".waiting.lock"));
+  }
 }
 function legWaitingList(runs: string): void {
   const f = join(runs, "postmaster", "ESCALATION.md");

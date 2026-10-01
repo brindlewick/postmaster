@@ -3,7 +3,7 @@
 // this file drives it once in beforeAll, splits its printed lines on the section headers,
 // and asserts each section's control count with no FAIL. No fixture state is restructured.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runControls } from "./host-self-test.ts";
@@ -133,4 +133,53 @@ describe("stub state lock", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   }, 60000);
+});
+
+describe("waiting list lock", () => {
+  test("concurrent waiting adds lose no entry", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "host-waiting-"));
+    try {
+      const runs = join(dir, "runs");
+      const qfile = join(dir, "q.md");
+      writeFileSync(qfile, "why is the run waiting?\n");
+      mkdirSync(join(runs, "postmaster"), { recursive: true });
+      writeFileSync(
+        join(runs, "postmaster", "ESCALATION.md"),
+        Array.from({ length: 500 }, (_, i) => `## FILL-${i}\nfill ${i}\n`).join(""),
+      );
+      const wrapper = join(import.meta.dir, "host.sh");
+      const worker = [
+        `import { spawnSync } from "node:child_process";`,
+        `const [wrapper, runs, qfile, idx] = process.argv.slice(process.argv.length - 4);`,
+        `for (let j = 0; j < 8; j++) {`,
+        `  const r = spawnSync(wrapper, ["leg", "waiting", "add", runs, "T" + idx + "-" + j, qfile], { encoding: "utf8" });`,
+        `  if (r.status !== 0) { process.stderr.write(String(r.stderr)); process.exit(1); }`,
+        `}`,
+      ].join("\n");
+      const procs = Array.from({ length: 16 }, (_, i) =>
+        Bun.spawn([process.execPath, "-e", worker, wrapper, runs, qfile, String(i)], {
+          stdout: "pipe",
+          stderr: "pipe",
+        }),
+      );
+      const codes = await Promise.all(procs.map((p) => p.exited));
+      const errors = (await Promise.all(procs.map(async (p) => new Response(p.stderr).text())))
+        .map((text) => text.trim())
+        .filter(Boolean)
+        .join("\n");
+      expect(`${errors}codes=${codes.join(",")}`).toBe(`codes=${Array(16).fill(0).join(",")}`);
+      const text = readFileSync(join(runs, "postmaster", "ESCALATION.md"), "utf8");
+      const tickets = new Set(
+        text
+          .split("\n")
+          .filter((l) => l.startsWith("## "))
+          .map((l) => l.slice(3).trim()),
+      );
+      expect(tickets.size).toBe(500 + 128);
+      for (let i = 0; i < 16; i++)
+        for (let j = 0; j < 8; j++) expect(tickets.has(`T${i}-${j}`)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120000);
 });
