@@ -489,7 +489,9 @@ from it.
   summary unverified, and each claim your run contradicts; both go on the checkpoint 1 card.
   Hold its evidence the same way, beside that verdict:
   `bun --no-env-file --config=/dev/null <tool>/scripts/summary-evidence.ts
-  <workhorse-wt>/WORKHORSE-SUMMARY.md <workhorse-wt>`. Exit 2 names each criterion missing
+  <workhorse-wt>/WORKHORSE-SUMMARY.md <workhorse-wt> --ticket <dispatch>/brief.md`.
+  The criteria come from the run's waybill, never the lane's armed ticket copy,
+  which the lane can edit. Exit 2 names each criterion missing
   evidence, citing evidence that does not exist or lies outside `.postmaster/verify/`, or
   claimed shown with no evidence; those names go on the checkpoint 1 card beside the
   `verify.sh summary` verdict, and a criterion claimed as shown without evidence counts against

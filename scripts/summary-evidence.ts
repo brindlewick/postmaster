@@ -3,8 +3,8 @@
 // per acceptance criterion the ticket numbers, each citing one or more worktree-relative paths
 // under .postmaster/verify/ that exist once `..` and symlinks are resolved, or the line
 // `not shown: <reason>`. Criteria are read the way scripts/ticket-check.sh reads the list, and
-// matched by number, so wording drift does not matter. Expected criteria come from the ticket,
-// never inferred from the summary.
+// matched by number, so wording drift does not matter. Comments and fenced blocks are not read,
+// as in ticket-check.sh. Expected criteria come from the ticket, never inferred from the summary.
 //
 //   bun scripts/summary-evidence.ts <summary.md> <worktree> [--ticket <file>]
 //
@@ -29,6 +29,8 @@ export type EvidenceEntry = { criterion: number; lines: string[] };
 type CriterionParse = { criteria: number[]; problem?: string };
 export type Problem = { criterion: number; reason: string };
 type PathProbe = { path: string; status: "ok" } | { path: string; status: "missing" | "outside" | "not-file" };
+type Fence = { char: string; length: number };
+type ReadableLine = { text: string; code: boolean };
 
 const headingPattern = /^ {0,3}(#{1,6})[ \t]+(.*?)[ \t]*#*[ \t]*$/;
 const numberedItemPattern = /^( *)(\d{1,9})[.)](?:[ \t]+|$)/;
@@ -45,15 +47,28 @@ function normalizedHeading(text: string): string {
     .toLowerCase();
 }
 
-function headings(lines: string[]): Heading[] {
-  const found: Heading[] = [];
-  let fence: { char: string; length: number } | undefined;
+function closesFence(fence: Fence, line: string): boolean {
+  const close = line.trim();
+  return close.length >= fence.length && [...close].every((char) => char === fence.char);
+}
+
+function readableLines(lines: string[]): ReadableLine[] {
+  // Each line as read: HTML comments stripped (a comment runs to its closer,
+  // on this line or a later one), fenced lines marked code. Comments and
+  // fences are never read for headings, criteria or entries, as in
+  // ticket-check.sh: hidden content can neither add a criterion nor satisfy
+  // the evidence check.
+  const read: ReadableLine[] = [];
+  let fence: Fence | undefined;
   let inComment = false;
-  for (const [index, line] of lines.entries()) {
+  for (const line of lines) {
     let visible = line;
     if (inComment) {
       const close = visible.indexOf("-->");
-      if (close < 0) continue;
+      if (close < 0) {
+        read.push({ text: "", code: false });
+        continue;
+      }
       visible = visible.slice(close + 3);
       inComment = false;
     }
@@ -68,18 +83,26 @@ function headings(lines: string[]): Heading[] {
       }
     }
     if (fence) {
-      const close = visible.trim();
-      if (close.length >= fence.length && [...close].every((char) => char === fence?.char)) {
-        fence = undefined;
-      }
+      if (closesFence(fence, visible)) fence = undefined;
+      read.push({ text: "", code: true });
       continue;
     }
     const fenceMatch = codeFencePattern.exec(visible);
     if (fenceMatch) {
       fence = { char: fenceMatch[1][0], length: fenceMatch[1].length };
+      read.push({ text: "", code: true });
       continue;
     }
-    const match = headingPattern.exec(visible);
+    read.push({ text: visible, code: false });
+  }
+  return read;
+}
+
+function headings(lines: string[]): Heading[] {
+  const found: Heading[] = [];
+  for (const [index, line] of readableLines(lines).entries()) {
+    if (line.code) continue;
+    const match = headingPattern.exec(line.text);
     if (match) found.push({ level: match[1].length, text: normalizedHeading(match[2]), index });
   }
   return found;
@@ -103,31 +126,19 @@ export function parseTicketCriteria(text: string): CriterionParse {
   const end = found.find((heading) => heading.level <= 2 && heading.index > section.index)?.index ?? lines.length;
   const numbers: number[] = [];
   let baseIndent: number | undefined;
-  let fence: { char: string; length: number } | undefined;
 
-  for (const line of lines.slice(section.index + 1, end)) {
-    if (fence) {
-      const close = line.trim();
-      if (close.startsWith(fence.char.repeat(fence.length)) && [...close].every((char) => char === fence?.char)) {
-        fence = undefined;
-      }
-      continue;
-    }
-    const fenceMatch = codeFencePattern.exec(line);
-    if (fenceMatch) {
-      fence = { char: fenceMatch[1][0], length: fenceMatch[1].length };
-      continue;
-    }
-    const item = numberedItemPattern.exec(line);
+  for (const { text, code } of readableLines(lines.slice(section.index + 1, end))) {
+    if (code) continue;
+    const item = numberedItemPattern.exec(text);
     if (!item) continue;
     const indent = item[1].length;
     if (baseIndent === undefined) {
       if (indent > 3) continue;
       baseIndent = indent;
     }
-    // ticket-check.sh permits a criterion list indented by up to three spaces. Nested numbered
-    // items are indented beyond the list's base and remain part of their parent criterion.
-    if (indent === baseIndent) numbers.push(Number(item[2]));
+    // ticket-check.sh counts an item as a new criterion at indent up to two past
+    // the list's base; deeper numbered items remain part of their parent criterion.
+    if (indent <= baseIndent + 2) numbers.push(Number(item[2]));
   }
 
   if (numbers.length === 0) return { criteria: [], problem: "ticket acceptance criteria are not a numbered list" };
@@ -141,14 +152,19 @@ export function parseEvidenceEntries(text: string): EvidenceEntry[] {
   if (!section) return [];
   const end = found.find((heading) => heading.level <= 2 && heading.index > section.index)?.index ?? lines.length;
   const entries: EvidenceEntry[] = [];
-  for (const line of lines.slice(section.index + 1, end)) {
-    const match = numberedItemPattern.exec(line);
-    if (match && match[1].length <= 3) {
-      entries.push({ criterion: Number(match[2]), lines: [line.slice(match[0].length).trim()] });
+  let baseIndent: number | undefined;
+  for (const { text, code } of readableLines(lines.slice(section.index + 1, end))) {
+    if (code) continue;
+    const match = numberedItemPattern.exec(text);
+    const startsEntry = match && (baseIndent === undefined ? match[1].length <= 3 : match[1].length <= baseIndent);
+    if (startsEntry && match) {
+      if (baseIndent === undefined) baseIndent = match[1].length;
+      entries.push({ criterion: Number(match[2]), lines: [text.slice(match[0].length).trim()] });
     } else if (entries.length > 0) {
-      entries[entries.length - 1]?.lines.push(line.trim());
+      entries[entries.length - 1]?.lines.push(text.trim());
     }
-    // Lines before the first numbered entry, such as an intro sentence, are ignored.
+    // Lines before the first numbered entry, such as an intro sentence, are ignored,
+    // and a numbered line indented past the entries' base continues its entry.
   }
   return entries;
 }
@@ -197,7 +213,10 @@ export function evidencePaths(lines: string[]): string[] {
     const bare = line.replace(/^[-*+]\s+/, "");
     for (const token of bare.split(/[,\s]+/)) {
       const cleaned = token.replace(/^`+|`+$/g, "").replace(/[.,;:!?]+$/, "").trim();
-      if (cleaned.includes("/")) paths.push(cleaned);
+      // Bare prose carries slashes (and/or, CLI/iOS) that are not paths, so a
+      // bare token counts only when it names the verify directory; code spans
+      // above stay explicit citations, escapes included.
+      if (cleaned.includes(".postmaster/verify/")) paths.push(cleaned);
     }
   }
   return paths;

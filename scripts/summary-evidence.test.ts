@@ -126,6 +126,36 @@ describe("pure core", () => {
     expect(parseTicketCriteria(NESTED_TICKET)).toEqual({ criteria: [1, 2] });
   });
 
+  test("criteria indented up to two past the base count, as in ticket-check.sh", () => {
+    const ticket = "## Acceptance criteria\n1. One.\n 2. Two, one space in.\n  3. Three, two spaces in.\n";
+    expect(parseTicketCriteria(ticket)).toEqual({ criteria: [1, 2, 3] });
+    const deep = "## Acceptance criteria\n1. One.\n    2. Two, four spaces in.\n";
+    expect(parseTicketCriteria(deep)).toEqual({ criteria: [1] });
+  });
+
+  test("numbered lines inside comments or fences are not criteria", () => {
+    const ticket = "## Acceptance criteria\n1. One.\n<!--\n2. Dropped long ago.\n-->\n```\n3. An example.\n```\n";
+    expect(parseTicketCriteria(ticket)).toEqual({ criteria: [1] });
+  });
+
+  test("commented and fenced lines are not read for entries", () => {
+    const entries = parseEvidenceEntries(
+      "## Evidence\n<!--\n1. `.postmaster/verify/a.md`\n-->\nExample only:\n```markdown\n2. `.postmaster/verify/a.md`\n```\n3. `.postmaster/verify/a.md`\n",
+    );
+    expect(entries.map((e) => e.criterion)).toEqual([3]);
+  });
+
+  test("a numbered line indented past the entries' base continues its entry", () => {
+    const entries = parseEvidenceEntries("## Evidence\n1. `.postmaster/verify/a.md`\n   1. a nested restatement\n");
+    expect(entries.map((e) => e.criterion)).toEqual([1]);
+  });
+
+  test("bare slash prose is not a path", () => {
+    expect(evidencePaths(["Shown and/or verified"])).toEqual([]);
+    expect(evidencePaths(["no browser or CLI/iOS backend"])).toEqual([]);
+    expect(evidencePaths(["- .postmaster/verify/a.md"])).toEqual([".postmaster/verify/a.md"]);
+  });
+
   test("evidence paths come from code spans or bare tokens, comma-separated or bulleted", () => {
     expect(evidencePaths(["`.postmaster/verify/a.md`, `.postmaster/verify/b.md`"])).toEqual([
       ".postmaster/verify/a.md",
@@ -291,6 +321,59 @@ describe("the script", () => {
     const r2 = runCheck(mixed, wt);
     expect(r2.code).toBe(2);
     expect(r2.out).toContain("criterion 2 mixes not shown with evidence paths");
+  });
+
+  test("a not shown reason may contain slashes", () => {
+    const wt = freshWorktree("slash-reason");
+    const summary = writeSummary(
+      wt,
+      `# Summary\n\n## Evidence\n1. \`.postmaster/verify/ok.md\`\n2. not shown: no browser or CLI/iOS backend\n3. \`.postmaster/verify/ok.md\`\n`,
+    );
+    const { code, out } = runCheck(summary, wt);
+    expect(code).toBe(0);
+    expect(out).toContain("evidence shape holds for 3 criteria (1 not shown)");
+  });
+
+  test("bare slash prose beside a bare path invents no path", () => {
+    const wt = freshWorktree("slash-prose");
+    const summary = writeSummary(
+      wt,
+      `# Summary\n\n## Evidence\n1. \`.postmaster/verify/ok.md\`\n2. Shown and/or verified via .postmaster/verify/ok.md\n3. \`.postmaster/verify/ok.md\`\n`,
+    );
+    const { code, out } = runCheck(summary, wt);
+    expect(code).toBe(0);
+    expect(out).toContain("evidence shape holds for 3 criteria");
+  });
+
+  test("hidden evidence satisfies nothing", () => {
+    const wt = freshWorktree("hidden");
+    const fenced = writeSummary(
+      wt,
+      `# Summary\n\n## Evidence\nExample only:\n\`\`\`markdown\n1. \`.postmaster/verify/ok.md\`\n\`\`\`\n2. \`.postmaster/verify/ok.md\`\n3. \`.postmaster/verify/ok.md\`\n`,
+      "fenced.md",
+    );
+    const r1 = runCheck(fenced, wt);
+    expect(r1.code).toBe(2);
+    expect(r1.out).toContain("criterion 1 is missing from the evidence section");
+    const commented = writeSummary(
+      wt,
+      `# Summary\n\n## Evidence\n<!--\n1. \`.postmaster/verify/ok.md\`\n-->\n2. \`.postmaster/verify/ok.md\`\n3. \`.postmaster/verify/ok.md\`\n`,
+      "commented.md",
+    );
+    const r2 = runCheck(commented, wt);
+    expect(r2.code).toBe(2);
+    expect(r2.out).toContain("criterion 1 is missing from the evidence section");
+  });
+
+  test("--ticket holds the summary to the run's criteria, not the armed copy", () => {
+    const wt = freshWorktree("ticket-flag", ticketWith(1));
+    const ticket = join(wt, "ticket-two.md");
+    writeFileSync(ticket, ticketWith(2));
+    const summary = writeSummary(wt, evidenceAll(1));
+    expect(runCheck(summary, wt).code).toBe(0);
+    const held = runCheck(summary, wt, ["--ticket", ticket]);
+    expect(held.code).toBe(2);
+    expect(held.out).toContain("criterion 2 is missing from the evidence section");
   });
 
   test("--ticket reads a waybill's ticket part", () => {
