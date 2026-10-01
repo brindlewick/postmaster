@@ -311,11 +311,15 @@ other line of this section holds.
    runbook, `<tool>/skills/postmaster/spec-session.md`. Start the session with
    `<tool>/scripts/host.sh spawn`, rooted in the project so it opens in the project's space,
    in the interactive form `harnesses.md` gives for the harness, model and effort the run
-   recorded for `team.postmaster`, named and labelled `<ticket name> · spec` with the ticket
-   name from `<tool>/scripts/host.sh name <dispatch>`:
+   recorded for `team.postmaster`, labelled `<ticket name> · spec` with the ticket
+   name from `<tool>/scripts/host.sh name <dispatch>`. The handle carries the package's
+   spec commit, short, so a revised package spawns a new session instead of colliding
+   with the earlier one, which stays open until the user closes it: `spawn` refuses a
+   handle a live session already has.
 
    ```sh
-   <tool>/scripts/host.sh spawn "spec-$(<tool>/scripts/host.sh name <dispatch>)" <repo> \
+   SHA=$(git -C <repo> rev-parse --short <the spec commit from spec-review.md>)
+   <tool>/scripts/host.sh spawn "spec-$(<tool>/scripts/host.sh name <dispatch>)-$SHA" <repo> \
        --label "$(<tool>/scripts/host.sh name <dispatch>) · spec" -- <interactive form>
    ```
 
