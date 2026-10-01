@@ -156,6 +156,27 @@ describe("pure core", () => {
     expect(evidencePaths(["- .postmaster/verify/a.md"])).toEqual([".postmaster/verify/a.md"]);
   });
 
+  test("a comment opener in a code span is text", () => {
+    expect(parseTicketCriteria("## Acceptance criteria\n1. Handles `<!--` markers.\n2. Second.\n")).toEqual({
+      criteria: [1, 2],
+    });
+  });
+
+  test("a comment marker inside a fence opens nothing", () => {
+    const ticket = "## Acceptance criteria\n1. One.\n```\n<!-- open in the example\n2. Two.\n```\n3. Three.\n";
+    expect(parseTicketCriteria(ticket)).toEqual({ criteria: [1, 3] });
+  });
+
+  test("a code span is prose until it names the verify directory", () => {
+    expect(evidencePaths(["no `CLI/iOS` backend"])).toEqual([]);
+    expect(evidencePaths(["`.postmaster/verify/a.md` from `scripts/x.ts`"])).toEqual([".postmaster/verify/a.md"]);
+  });
+
+  test("a section ends at a part-naming subheading, as in ticket-check.sh", () => {
+    const ticket = "## Acceptance criteria\n1. One.\n2. Two.\n3. Three.\n### Direction\n9. Stray.\n";
+    expect(parseTicketCriteria(ticket)).toEqual({ criteria: [1, 2, 3] });
+  });
+
   test("evidence paths come from code spans or bare tokens, comma-separated or bulleted", () => {
     expect(evidencePaths(["`.postmaster/verify/a.md`, `.postmaster/verify/b.md`"])).toEqual([
       ".postmaster/verify/a.md",
@@ -363,6 +384,67 @@ describe("the script", () => {
     const r2 = runCheck(commented, wt);
     expect(r2.code).toBe(2);
     expect(r2.out).toContain("criterion 1 is missing from the evidence section");
+  });
+
+  test("a code-formatted term with a slash is prose, in a reason or beside a path", () => {
+    const wt = freshWorktree("codespan-prose");
+    const reason = writeSummary(
+      wt,
+      `# Summary\n\n## Evidence\n1. \`.postmaster/verify/ok.md\`\n2. not shown: no \`CLI/iOS\` backend\n3. \`.postmaster/verify/ok.md\`\n`,
+      "reason.md",
+    );
+    const r1 = runCheck(reason, wt);
+    expect(r1.code).toBe(0);
+    expect(r1.out).toContain("evidence shape holds for 3 criteria (1 not shown)");
+    const beside = writeSummary(
+      wt,
+      `# Summary\n\n## Evidence\n1. \`.postmaster/verify/ok.md\` from \`scripts/summary-evidence.ts\`\n2. \`.postmaster/verify/ok.md\`\n3. \`.postmaster/verify/ok.md\`\n`,
+      "beside.md",
+    );
+    const r2 = runCheck(beside, wt);
+    expect(r2.code).toBe(0);
+    expect(r2.out).toContain("evidence shape holds for 3 criteria");
+  });
+
+  test("a not shown on a continuation line is prose, neither a pass nor a mix", () => {
+    const wt = freshWorktree("continuation");
+    const shown = writeSummary(
+      wt,
+      `# Summary\n\n## Evidence\n1. \`.postmaster/verify/ok.md\`\n   not shown: also checked by hand\n2. \`.postmaster/verify/ok.md\`\n3. \`.postmaster/verify/ok.md\`\n`,
+      "shown.md",
+    );
+    const r1 = runCheck(shown, wt);
+    expect(r1.code).toBe(0);
+    expect(r1.out).toContain("evidence shape holds for 3 criteria");
+    expect(r1.out).not.toContain("not shown)");
+    const pathless = writeSummary(
+      wt,
+      `# Summary\n\n## Evidence\n1. Shown working\n   not shown: n/a\n2. \`.postmaster/verify/ok.md\`\n3. \`.postmaster/verify/ok.md\`\n`,
+      "pathless.md",
+    );
+    const r2 = runCheck(pathless, wt);
+    expect(r2.code).toBe(2);
+    expect(r2.out).toContain("criterion 1 has no evidence path or not shown reason");
+  });
+
+  test("a stray numbered line past a part-naming subheading is not a criterion", () => {
+    const ticket = `# A thing
+
+## Acceptance criteria
+1. The first thing happens.
+2. The second thing happens.
+3. The third thing happens.
+### Direction
+9. Stray numbered line.
+
+## Direction
+None.
+`;
+    const wt = freshWorktree("subheading", ticket);
+    const summary = writeSummary(wt, evidenceAll(3));
+    const { code, out } = runCheck(summary, wt);
+    expect(code).toBe(0);
+    expect(out).toContain("evidence shape holds for 3 criteria");
   });
 
   test("--ticket holds the summary to the run's criteria, not the armed copy", () => {

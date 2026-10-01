@@ -32,6 +32,24 @@ type PathProbe = { path: string; status: "ok" } | { path: string; status: "missi
 type Fence = { char: string; length: number };
 type ReadableLine = { text: string; code: boolean };
 
+// The ticket parts, normalized as headings() writes them. A section ends at a
+// heading naming one, at any level, as in ticket-check.sh.
+const TICKET_PARTS = new Set([
+  "problem / feature",
+  "acceptance criteria",
+  "direction",
+  "turnpikes",
+  "notes",
+  "user journey",
+]);
+
+function sectionEnd(found: Heading[], section: Heading, lineCount: number): number {
+  return (
+    found.find((heading) => heading.index > section.index && (heading.level <= 2 || TICKET_PARTS.has(heading.text)))?.index ??
+    lineCount
+  );
+}
+
 const headingPattern = /^ {0,3}(#{1,6})[ \t]+(.*?)[ \t]*#*[ \t]*$/;
 const numberedItemPattern = /^( *)(\d{1,9})[.)](?:[ \t]+|$)/;
 const codeFencePattern = /^\s*(`{3,}|~{3,})/;
@@ -52,16 +70,47 @@ function closesFence(fence: Fence, line: string): boolean {
   return close.length >= fence.length && [...close].every((char) => char === fence.char);
 }
 
+function openerOutsideSpans(line: string): number {
+  // The index of a <!-- outside inline code spans, or -1. A literal marker in
+  // a span is text, as in ticket-check.sh, so it never opens a comment.
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === "`") {
+      let j = i;
+      while (j < line.length && line[j] === "`") j += 1;
+      const run = line.slice(i, j);
+      const close = line.indexOf(run, j);
+      if (close < 0) return -1;
+      i = close + run.length;
+      continue;
+    }
+    if (line.startsWith("<!--", i)) return i;
+    i += 1;
+  }
+  return -1;
+}
+
 function readableLines(lines: string[]): ReadableLine[] {
-  // Each line as read: HTML comments stripped (a comment runs to its closer,
-  // on this line or a later one), fenced lines marked code. Comments and
-  // fences are never read for headings, criteria or entries, as in
-  // ticket-check.sh: hidden content can neither add a criterion nor satisfy
-  // the evidence check.
+  // Each line as read: fenced lines marked code, then HTML comments stripped
+  // on the rest (a comment runs to its closer, on this line or a later one).
+  // Comments and fences are never read for headings, criteria or entries, as
+  // in ticket-check.sh: hidden content can neither add a criterion nor
+  // satisfy the evidence check, and a marker inside a fence opens nothing.
   const read: ReadableLine[] = [];
   let fence: Fence | undefined;
   let inComment = false;
   for (const line of lines) {
+    if (fence) {
+      if (closesFence(fence, line)) fence = undefined;
+      read.push({ text: "", code: true });
+      continue;
+    }
+    const fenceMatch = inComment ? null : codeFencePattern.exec(line);
+    if (fenceMatch) {
+      fence = { char: fenceMatch[1][0], length: fenceMatch[1].length };
+      read.push({ text: "", code: true });
+      continue;
+    }
     let visible = line;
     if (inComment) {
       const close = visible.indexOf("-->");
@@ -72,7 +121,7 @@ function readableLines(lines: string[]): ReadableLine[] {
       visible = visible.slice(close + 3);
       inComment = false;
     }
-    const comment = visible.indexOf("<!--");
+    const comment = openerOutsideSpans(visible);
     if (comment >= 0) {
       const close = visible.indexOf("-->", comment + 4);
       if (close < 0) {
@@ -81,17 +130,6 @@ function readableLines(lines: string[]): ReadableLine[] {
       } else {
         visible = visible.slice(0, comment) + visible.slice(close + 3);
       }
-    }
-    if (fence) {
-      if (closesFence(fence, visible)) fence = undefined;
-      read.push({ text: "", code: true });
-      continue;
-    }
-    const fenceMatch = codeFencePattern.exec(visible);
-    if (fenceMatch) {
-      fence = { char: fenceMatch[1][0], length: fenceMatch[1].length };
-      read.push({ text: "", code: true });
-      continue;
     }
     read.push({ text: visible, code: false });
   }
@@ -123,7 +161,7 @@ export function parseTicketCriteria(text: string): CriterionParse {
   const section = found.find((heading) => heading.level === 2 && heading.text === "acceptance criteria");
   if (!section) return { criteria: [], problem: 'ticket has no "## Acceptance criteria" section' };
 
-  const end = found.find((heading) => heading.level <= 2 && heading.index > section.index)?.index ?? lines.length;
+  const end = sectionEnd(found, section, lines.length);
   const numbers: number[] = [];
   let baseIndent: number | undefined;
 
@@ -150,7 +188,7 @@ export function parseEvidenceEntries(text: string): EvidenceEntry[] {
   const found = headings(lines);
   const section = found.find((heading) => heading.level === 2 && heading.text === "evidence");
   if (!section) return [];
-  const end = found.find((heading) => heading.level <= 2 && heading.index > section.index)?.index ?? lines.length;
+  const end = sectionEnd(found, section, lines.length);
   const entries: EvidenceEntry[] = [];
   let baseIndent: number | undefined;
   for (const { text, code } of readableLines(lines.slice(section.index + 1, end))) {
@@ -205,7 +243,9 @@ export function evidencePaths(lines: string[]): string[] {
   for (const line of lines) {
     const codePaths = [...line.matchAll(/`([^`]+)`/g)]
       .map((match) => match[1].trim())
-      .filter((value) => value.includes("/"));
+      // A code span is prose until it names the verify directory: terms like
+      // `CLI/iOS` and incidental paths are not evidence citations.
+      .filter((value) => value.includes(".postmaster/verify/"));
     if (codePaths.length > 0) {
       paths.push(...codePaths);
       continue;
@@ -245,8 +285,9 @@ export function validateEvidence(criteria: number[], entries: EvidenceEntry[], w
     }
 
     const lines = matched[0]?.lines ?? [];
-    const content = lines.join("\n").trim();
-    const notShown = /^not shown:\s*(.*)$/im.exec(content);
+    // The contract form is `1. not shown: <reason>` on the entry's own line;
+    // a `not shown:` on a continuation line is prose, neither a pass nor a mix.
+    const notShown = /^not shown:\s*(.*)$/i.exec((lines[0] ?? "").trim());
     const paths = evidencePaths(lines);
     if (notShown) {
       if (!notShown[1]?.trim()) {
@@ -324,7 +365,7 @@ export function main(args: string[]): number {
     console.error(`summary-evidence: ${problems.length} evidence problem(s)`);
     return 2;
   }
-  const notShown = entries.filter((entry) => /^not shown:/im.test(entry.lines.join("\n"))).length;
+  const notShown = entries.filter((entry) => /^not shown:/i.test((entry.lines[0] ?? "").trim())).length;
   console.log(`summary-evidence: evidence shape holds for ${parsedCriteria.criteria.length} criteria${notShown ? ` (${notShown} not shown)` : ""}`);
   return 0;
 }
