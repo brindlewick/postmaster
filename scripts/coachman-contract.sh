@@ -267,6 +267,11 @@ def exercise_self_test(source_root):
                                        "// Own the planning stage's spec decisions: one file per package, one stanza for the run's",
                                        "// Own the planning stage's spec decisions: one file per package, and one stanza for the run's"),
              "scripts/spec-decisions.ts")
+    run_case("a wording fix in launch.sh answers yes",
+             lambda repo: replace_once(repo, "scripts/launch.sh",
+                                       "# POSTMASTER_ATTEMPT_PHASE names the file this attempt's phase is written to:",
+                                       "# POSTMASTER_ATTEMPT_PHASE names the file this attempt's phase is recorded in:"),
+             "scripts/launch.sh")
     run_case("a wiki-only change is not a contract change",
              lambda repo: (repo / "wiki/concepts/probe-note.md").parent.mkdir(parents=True, exist_ok=True) or
                           (repo / "wiki/concepts/probe-note.md").write_text("notes\n", encoding="utf-8"))

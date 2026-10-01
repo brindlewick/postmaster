@@ -79,3 +79,7 @@ holds = "the spec decisions entrypoint the runbooks invoke"
 [[files]]
 path = "scripts/spec-decisions.ts"
 holds = "the approval stanza shape and the count vocabulary Spec review branches on"
+
+[[files]]
+path = "scripts/launch.sh"
+holds = "the attempt phase: refused before preflight, started once the harness is callable"
