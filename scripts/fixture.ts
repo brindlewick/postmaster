@@ -6,6 +6,7 @@
 //   fixture.sh hidden <ticket> <app-dir>
 //   fixture.sh --self-test
 //
+// `new` marks its copy with `postmaster.fixture` in that repository's local git config.
 // `score` reports the merged result's hidden-test counts, then the harvested lane branches'
 // counts from `scripts/fixture-lanes.ts`; only the merged result decides the verdict.
 //   exit 0  new: made and filed; score, hidden: every check passed
@@ -220,6 +221,12 @@ function makeAndFile(dest: string, ticket: string): number {
     console.error(
       `fixture: filing the ticket in ${dest}'s own store failed (exit ${createR.code})`,
     );
+    return 1;
+  }
+  const mark = run("git", ["-C", dest, "config", "--local", "postmaster.fixture", ticket]);
+  if (mark.code !== 0) {
+    unmake();
+    console.error(`fixture: could not mark ${dest} as a fixture copy`);
     return 1;
   }
   const headShort = run("git", ["-C", TOOL, "rev-parse", "--short", "HEAD"]).out.trim();
@@ -1521,6 +1528,13 @@ case $2 in store) exec "${join(HERE, "local.sh")}" "$@" ;; *) exit 1 ;; esac
       `made=${ok} linked=${linked}`,
     );
   }
+
+  const fixtureTest = run("bun", ["--no-env-file", "test", join(HERE, "fixture.test.ts")]);
+  st.check(
+    "bun test scripts/fixture.test.ts",
+    fixtureTest.code === 0,
+    fixtureTest.out + fixtureTest.err,
+  );
 
   st.finish();
 });
