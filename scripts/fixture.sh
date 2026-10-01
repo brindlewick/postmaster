@@ -23,7 +23,9 @@
 #         files the ticket there and prints its number to dispatch against <dest>; a run reads
 #         it through the local tracker whatever the config names (scripts/tracker-kind.sh).
 # score   scores a finished run from its records, never its report: the ticket its waybill
-#         carries verbatim, whose hidden tests run against main; the app's gate as
+#         carries verbatim, whose hidden tests run against main and, beside those counts, against
+#         each lane's harvested wb/<TICKET>-<lane> branch (scripts/fixture-lanes.ts); the app's
+#         gate as
 #         scripts/discover-project.sh finds it, on main; the stages scripts/stage.sh --list names,
 #         up to done, each entered in order by a logged change; each leg's done and exited
 #         markers, for every leg the run recorded; each leg's hand-off, through
@@ -171,13 +173,27 @@ def waybill_tickets(dispatch):
             found.append(t.name)
     return found
 
-def check_hidden(dispatch, app):
+LANE_LINE = re.compile(r"^(.*): (\d+ pass, \d+ fail|missing|failed to build)$")
+
+def lane_scores(dispatch, repo, ticket):
+    """Each lane's hidden status from scripts/fixture-lanes.ts; '' when there are no lanes."""
+    code, out = sh(["bun", "--no-env-file", str(SCRIPTS / "fixture-lanes.ts"),
+                    str(dispatch), str(repo), ticket])
+    if code != 0:
+        return "lanes not scored"
+    return "; ".join(l.strip() for l in out.splitlines() if LANE_LINE.match(l.strip()))
+
+def check_hidden(dispatch, repo, app):
     found = waybill_tickets(dispatch)
     if len(found) != 1:
         return False, ("brief.md carries no fixture ticket's criteria verbatim" if not found
                        else "brief.md carries more than one fixture ticket: %s" % ", ".join(found)), ""
     ok, detail, out = hidden(found[0], app)
-    return ok, "%s, from the waybill: %s on main" % (found[0], detail), out
+    text = "%s, from the waybill: %s on main" % (found[0], detail)
+    lanes = lane_scores(dispatch, repo, found[0])
+    if lanes:
+        text = "%s; %s" % (text, lanes)
+    return ok, text, out
 
 def check_gate(app):
     code, out = sh([SCRIPTS / "discover-project.sh", app])
@@ -314,7 +330,7 @@ def score(dispatch, repo):
         if code != 0:
             print("fixture: could not export main from %s: %s" % (repo, tail(out, 3)), file=sys.stderr); sys.exit(1)
         legs = legs_of(dispatch, manifest)
-        results = [("hidden-tests",) + check_hidden(dispatch, app),
+        results = [("hidden-tests",) + check_hidden(dispatch, repo, app),
                    ("gate",) + check_gate(app),
                    ("stages",) + check_stages(dispatch) + ("",),
                    ("markers",) + check_markers(dispatch, legs) + ("",),
@@ -514,7 +530,7 @@ fresh_new() {  # fresh_new <dest> <ticket>: make_and_file with a home of the tes
 }
 dest=$tmp/runs/fixture-$first
 out=$(fresh_new "$dest" "$first"); rc=$?
-[ $rc -eq 0 ] && printf '%s\n' "$out" | grep -q "own ticket store as #1:" && ok "new makes the repo and prints the ticket's number" || fail "new makes the repo and prints the ticket's number (exit $rc)" "$out"
+[ $rc -eq 0 ] && grep -q "own ticket store as #1:" <<<"$out" && ok "new makes the repo and prints the ticket's number" || fail "new makes the repo and prints the ticket's number (exit $rc)" "$out"
 [ "$(git -C "$dest" rev-list --count main 2>/dev/null)" = 1 ] && [ -z "$(git -C "$dest" status --porcelain 2>/dev/null)" ] \
   && ok "one commit on main, and a clean tree" || fail "one commit on main, and a clean tree"
 same=$(git -C "$APP" ls-files --cached --others --exclude-standard | sort | while IFS= read -r f; do
@@ -558,7 +574,7 @@ mkdir -p "$same_a/.postmaster/runs/T-1" "$same_b/.postmaster/runs/T-1"
 out=$(fresh_new "$tmp/runs/nosuch" no-such-ticket); rc=$?
 [ $rc -eq 1 ] && [ ! -e "$tmp/runs/nosuch" ] && ok "an unknown ticket is refused" || fail "an unknown ticket is refused (exit $rc)" "$out"
 out=$(LOCAL_SH=$tmp/failing-local.sh fresh_new "$tmp/runs/unfiled" "$first"); rc=$?
-[ $rc -eq 1 ] && [ ! -e "$tmp/runs/unfiled" ] && printf '%s\n' "$out" | grep -q "filing the ticket" \
+[ $rc -eq 1 ] && [ ! -e "$tmp/runs/unfiled" ] && grep -q "filing the ticket" <<<"$out" \
   && ok "a ticket that cannot be filed: refused, and the repo it made is gone" \
   || fail "a ticket that cannot be filed: refused, and the repo it made is gone (exit $rc)" "$out"
 out=$(cd "$tmp/runs" && POSTMASTER_FIXTURES='' fresh_new bare-name "$first"); rc=$?
@@ -573,7 +589,7 @@ out=$(POSTMASTER_FIXTURES=$tmp/elsewhere fresh_new other-name "$first"); rc=$?
 wait
 
 echo "score: a recorded run that meets every check scores clean"
-[ -n "$sections" ] && [ -n "$stages" ] && printf '%s\n' "$listed" | grep -qx done \
+[ -n "$sections" ] && [ -n "$stages" ] && grep -qx done <<<"$listed" \
   && ok "the hand-off sections and the stages are read from the scripts that define them" \
   || fail "the hand-off sections and the stages are read from the scripts that define them"
 expect() {  # expect <label> <name> <the check that fails, or none> [<text its FAIL line carries>]
@@ -583,7 +599,7 @@ expect() {  # expect <label> <name> <the check that fails, or none> [<text its F
   lines=$(printf '%s\n' "$out" | grep -c .)
   want=$([ "$3" = none ] && echo 0 || echo 2)
   if [ "$rc" = "$want" ] && [ "$failing" = "$3" ] && [ "$lines" -eq 7 ] \
-     && { [ -z "${4:-}" ] || printf '%s\n' "$out" | grep '^FAIL' | grep -qF -- "$4"; }; then
+     && { [ -z "${4:-}" ] || grep -qF -- "$4" <<<"$(grep '^FAIL' <<<"$out")"; }; then
     ok "$1"
   else
     fail "$1: wanted exit $want with $3 failing${4:+ (\"$4\")}, got exit $rc with $failing failing" "$out"
@@ -601,6 +617,10 @@ expect "a hand-off with no sections: handoffs alone fails" break-handoffs handof
 expect "no run.json: run.json alone fails" break-runjson run.json "no run.json"
 expect "no ship card: ship-card alone fails" break-card ship-card "no card.md"
 
+echo "lane scoring: the suite beside the new code runs in this self-test"
+out=$(bun --no-env-file test "$HERE/fixture-lanes.test.ts" 2>&1); rc=$?
+[ $rc -eq 0 ] && ok "bun test scripts/fixture-lanes.test.ts" || fail "bun test scripts/fixture-lanes.test.ts (exit $rc)" "$out"
+
 echo "score: input that is not a run is refused, not scored"
 clean=$tmp/clean-$first/repo/.postmaster/runs/7; repo=$tmp/clean-$first/repo
 score_run "$tmp/nowhere" "$repo" >/dev/null 2>&1; rc=$?
@@ -609,7 +629,7 @@ mkdir -p "$tmp/not-a-repo"; score_run "$clean" "$tmp/not-a-repo" >/dev/null 2>&1
 [ $rc -eq 1 ] && ok "a repo that is not a git repo" || fail "a repo that is not a git repo (exit $rc)"
 git init -q -b main "$tmp/other" && git -C "$tmp/other" commit -q --allow-empty -m "Another history"
 out=$(score_run "$clean" "$tmp/other" 2>&1); rc=$?
-[ $rc -eq 1 ] && printf '%s\n' "$out" | grep -q "is this the run's repo" && ok "a repo whose main does not hold the run's base" \
+[ $rc -eq 1 ] && grep -q "is this the run's repo" <<<"$out" && ok "a repo whose main does not hold the run's base" \
   || fail "a repo whose main does not hold the run's base (exit $rc)" "$out"
 
 echo
