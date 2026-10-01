@@ -263,7 +263,8 @@ the brief.
   final `<tool>/scripts/verify.sh run .` passes, write the root summary and run
   `bun --no-env-file --config=/dev/null <tool>/scripts/summary-evidence.ts WORKHORSE-SUMMARY.md .`
   once more, keep that command with its output and exit under `.postmaster/verify/`, and cite
-  the transcript in `## Evidence`. Written last, committed, and the process then exits.
+  the transcript in `## Evidence` when at least one criterion cites a path. Written last,
+  committed, and the process then exits.
 - `WORKHORSE-BLOCKED.md`: written instead when a check the spec gives cannot pass as written
   or contradicts the ticket — changing an approved check is not the lane's to make — or when
   the workhorse cannot proceed without a ruling that is genuinely destructive or
