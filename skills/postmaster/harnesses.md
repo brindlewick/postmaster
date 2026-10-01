@@ -10,6 +10,13 @@ runbooks do not. `<tool>` is the postmaster repo, as the runbook that sent you h
 watch it, and lands its marker on exit (`hosts.md`); that is what makes one wrapper in the
 runbooks correct for every harness and every host.
 
+Coachman legs use `<tool>/scripts/host.sh leg`, which owns the stream path, marker lifecycle and
+attempt record. It calls the form below through `launch.sh`; a resume appends to its launch's
+stream and a takeover begins a new stream after preserving the old one. `launch.sh` marks an
+attempt `refused` before its preflight and marks it `started` only after the env file loads and
+the harness is still callable. The leg command records the final outcome before the host lands
+the exited marker.
+
 **`<tool>/scripts/launch.sh` is the executable form of this file.** `launch.sh form <name>` prints the
 exact launch and resume commands for a configured lane or role; `launch` and `resume` run them;
 `review` runs a lane's bug-review form at the harness's top level on the named base-to-HEAD
@@ -23,6 +30,110 @@ session under `<dispatch>/sessions/<lane>/<thread-id>`. Codex, Claude Code and p
 copied from their durable stores; grok, Muse Code and MiMo Code use their export command;
 Antigravity has no export command, so its complete event stream is kept as the session transcript.
 The export and event stream are separate files in the project-local run record.
+
+`thread-id <events-file>` prints the thread id a stream records, from its shape; `transient
+<err-file> [<stream-file>]` exits 0 when a leg's end is a transient provider error this file
+names (below).
+
+| harness | thread id in its stream |
+|---|---|
+| codex | `thread_id` |
+| claude | `session_id` |
+| grok | `id` on a session record, else `session_id`, `sessionId`, `conversation_id` or `conversationId` |
+| agy | `conversationId` |
+| pi | `id` on the `session` record |
+| muse | `stream.id` on a `session` record |
+| mimo | `sessionID` |
+
+## Transient provider errors, any harness
+
+Some ends are the provider's, not the leg's: the model stream dropped, a gateway failed, the
+connection reset. Those are worth resuming on rather than escalating. The set is enumerated in
+`<tool>/scripts/launch.sh` (`transient`), which matches it against the leg's durable record:
+its `.err` file and the error records in its stream tail, never a prompt or a user message.
+This file names the same set:
+
+| name | what it looks like |
+|---|---|
+| model stream idle timeout | `model stream idle timeout`, `stream idle timeout` |
+| gateway failure | `bad gateway`, `service unavailable`, `gateway timeout`, `overloaded`, `502`, `503`, `504`, `529` |
+| stream drop | `stream disconnected`, `SSE error`, `connection reset`, `connection aborted`, `broken pipe` |
+
+The adapter answers one question: may the watcher resume this ending by itself? The
+answer is positive and narrow. An ending resumes only when it carries one of the
+signatures above and no wall-like token anywhere in it; everything else wakes the
+postmaster. A wall is **never** transient: any token stem of quota, limit, exhaust,
+exceed, throttle, billing, budget, credit, payment, usage, slow, quick or too many
+vetoes the resume wherever it appears in what the ending says, in any spelling and at
+any distance — there is no span limit and no word boundary to hide behind. What the
+ending says is its message text: the `.err` lines, non-JSON stream lines, and every
+string value of its error records, under any key. `host:` notice lines in
+`.err` are the host's words, not the child's, and the veto reads past
+them, as the refusal check does. JSON keys,
+field names and numeric payloads are structure, not text, and never count: a `usage`
+key, a `rate_limit` key, a token count of 1429 and a UUID holding 429 are not walls.
+The codes `429` and `402` count only status-shaped, as whole numbers in text or as the
+value of a status or code field. The one exclusion is Claude's `rate_limit_event`
+slowdown notice, which is not an ending and never vetoes. A false veto is a wake,
+which costs one look; a missed wall would be an automatic remount against a wall. The
+fifteen stems live once in `launch.sh` (`wall_tokens`, printed by `launch.sh
+wall-tokens`); the veto matrix is built from that list, a quote corpus beside it
+covers real provider messages verbatim, and each stem is pinned alone, so a stem that
+stops vetoing fails loudly. Usage-bearing codex and claude streams from real runs
+stand beside the corpus as fixtures that must resume. `try again later` and `server
+is busy` carry no stem on purpose: that is transient-overload language, and resuming
+on it is right.
+
+An error record is one the adapter marks: an error-indicating key at any
+depth — `error`, `fail` or `exception` in a type, event, kind, payload
+type, subtype or status value, a truthy `error`, `errors`, `is_error`
+or `error_message` field, or an `outcome` of `error` — wherever in the
+record it sits. Only a truthy value marks: null, false and empty values
+never do. The `.err` lines and non-JSON stream lines are stderr chunks
+and always count. Per harness, as observed:
+
+- codex: the generic rule, with nested `item.type: error` attested in
+  `raw/trials/codex-resume-forms/`. Usage-bearing `turn.completed`
+  records are not error records.
+- claude: the generic rule plus `is_error` on `result` records.
+  Usage-bearing assistant messages are not error records.
+- mimo: the generic rule only; no mimo-specific error shape is attested.
+  Unmarked text parts are ordinary messages, so those streams classify
+  from the `.err` text.
+- muse: the generic rule plus `outcome: error` payloads, and
+  `run.terminal.failed` with its `reason` under the generic rule.
+- pi: the generic rule only (see the exclusion below).
+- grok, agy: the generic rule; unobserved.
+
+Deliberately excluded, at every depth: tool-result subtrees — a record
+or subtree whose type or name is `tool_result` or `tool_execution_end`,
+or that sits under one of those keys. That covers claude's nested
+`tool_result` records and pi's `tool_execution_end` records, and any
+other harness's tool-result shape the adapter identifies. A failed tool
+call's text is the tool's, not the provider's: a coachman's failing
+gate prints cap and limit words all the time, and a provider wall still
+ends the turn through the harness's own error record, where the veto
+sees it: tool output contributes no signal anywhere — not a veto, not
+transient prose, and not a structured code, type or unknown. The
+exclusion is narrow on purpose: a `payload_type` of `tool.result`
+(muse `outcome: error` payloads) is an error record, not a tool's.
+
+Where a record carries a status code or an error type, values come in three classes
+over every post-skip line: the known-transient set (`502`, `503`, `504`, `529`,
+connection-reset and overloaded types) resumes on any record;
+known-harness-internal values (a `completed` status, a `rate_limit_event` slowdown,
+a `2xx`/`3xx` status, an exit code, a generic timeout) are ignored; any other
+numeric status under a code key wakes wherever it sits, and any other string
+under a code or error-name key
+wakes on an error record while on another record it is progress noise. Bare
+record-shape keys (`type`, `name`) are labels, not classifications. Per harness,
+as observed: mimo
+reports errors as prose in text parts, and muse reports prose in the `reason` of
+`run.terminal.failed`. Codex error items and grok, pi and agy error shapes are
+unobserved, so those read prose. Claude additionally emits `rate_limit_event`, which is
+a slowdown notice, not a wall — it appears in successful legs. No harness has yet been
+observed emitting numeric codes or error-type fields; when one does, the structured
+layer reads them.
 
 Every lane runs unrestricted. Its containment is its worktree (`coachman.md`, Lane capability),
 so the bypass form below is passed on every launch AND every resume. The interactive postmaster
@@ -42,8 +153,9 @@ one session messaging another; the postmaster polls files.
 | mimo | `mimo run` | `--format json` | `AGENTS.md`, a `CLAUDE.md` beside a short one, and Claude Code's user rules | yes, on stdin |
 
 A harness that reads no ambient context file must be handed the project's docs by name in its
-prompt, and must have the `WORKHORSE-SPEC.md` / `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract spelled
-out in full. The
+prompt, and must have the `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract spelled
+out in full, together with the line that the run's one approved spec is already at
+`WORKHORSE-SPEC.md` in its worktree. The
 others pick both up from the brief and the docs. A harness that reads a context file under a
 different name needs that file present: a `CLAUDE.md` that is a symlink to `AGENTS.md` serves
 both.
@@ -149,7 +261,7 @@ cd <wt> && agy -p "$(cat <dispatch>/<lane>-prompt.txt)" \
 - `--sandbox` is opt-IN restriction. Never pass it to a lane.
 - Reads NO ambient context file: not `AGENTS.md`, `GEMINI.md`, `AGENT.md`, `.agy/` or
   `.antigravity/`. The prompt must open by naming the project's docs and must spell out the
-  `WORKHORSE-SPEC.md` / `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract.
+  `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract and the approved-spec line.
 - Thread id: `conversationId` in the stream.
 - Final message: the last result line of the events stream.
 - Resume: relaunch against its `conversationId`; `agy --help` for the flag. Not recorded here,
@@ -437,10 +549,11 @@ provide custom review instructions` (trial).
 Given no target it reviewed uncommitted changes, found none in a clean scratch, and exited 0
 (trial). Named `<BASE>...HEAD` it reviewed the range and reported the planted bug at its line.
 
-## Interactive form: the postmaster
+## Interactive form: the postmaster and a spec session
 
-The postmaster is the one interactive session (`SKILL.md` spawns it through `host.sh spawn`).
-It runs in its harness's bypass mode, like every launch, named for its project:
+The postmaster is an interactive session (`SKILL.md` spawns it through `host.sh spawn`), and a
+spec session is another (`postmaster.md`, Spec review): both run in their harness's bypass
+mode, like every launch, named for their project or their ticket. The same table serves both.
 
 | harness | interactive form | checked here |
 |---|---|---|

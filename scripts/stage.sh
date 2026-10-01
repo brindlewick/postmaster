@@ -13,14 +13,18 @@
 # terminal stage (done, abandoned) appends timings and refreshes the final usage sum after every
 # launch has exited.
 # Only the postmaster sets a terminal stage, or moves a run out of one: it closes a run after
-# the last leg, and abandons one on the user's word. The actor is the caller's own word, so this
-# holds a coachman to its runbook; it cannot stop a process that names itself the postmaster.
+# the last leg, and abandons one on the user's word. A run is at most two legs: the last one
+# carries it to `shipping` with the ship card, and the postmaster sets `shipped` after the
+# merge and `done` when it closes. `review` is entered only by a run with a review leg. A
+# run dispatched before this change keeps its three legs and the stages they enter. The actor
+# is the caller's own word, so this holds a coachman to its runbook; it cannot stop a process
+# that names itself the postmaster.
 #
 #   exit 0  the stage was set, or already was
 #   exit 1  usage, no manifest, an unreadable manifest, or the log could not be written
 #   exit 2  not one of the stages
 #   exit 3  the run is done or abandoned, and only the postmaster moves it on
-#   exit 4  a terminal stage set by any actor but the postmaster
+#   exit 4  a terminal stage, or shipped on a contract 2 run, set by any actor but the postmaster
 set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 STAGES="dispatched bootstrapped planning workhorses-running synthesis checkpoint-1 review shipping shipped done abandoned"
@@ -66,11 +70,27 @@ PY
   return "$log_status"
 }
 
+is_current() {  # is_current <dispatch>: its run.json records coachman contract 2, exactly
+  # Only an exact 2 counts: anything missing, unreadable or otherwise gets the old behavior,
+  # and scripts/turnpikes.sh is the contract's gate, not this check.
+  python3 - "$1/run.json" <<'PY' 2>/dev/null
+import json, sys
+try:
+    contract = json.load(open(sys.argv[1])).get("coachman_contract")
+except Exception:
+    sys.exit(1)
+sys.exit(0 if type(contract) is int and contract == 2 else 1)
+PY
+}
+
 set_stage() {  # set_stage <dispatch> <stage> <actor>
   local d=$1 new=$2 actor=$3
   case " $STAGES " in *" $new "*) ;; *) echo "stage: '$new' is not a stage; one of: $STAGES" >&2; return 2 ;; esac
   case $new in
     done|abandoned) [ "$actor" = postmaster ] || { echo "stage: only the postmaster sets $new" >&2; return 4; } ;;
+    shipped) if [ "$actor" != postmaster ] && is_current "$d"; then
+      echo "stage: only the postmaster sets shipped on a contract 2 run" >&2; return 4
+    fi ;;
   esac
   [ -f "$d/manifest.json" ] || { echo "stage: no manifest at $d/manifest.json" >&2; return 1; }
   local plan
@@ -206,12 +226,60 @@ for t in done abandoned; do
   [ $rc -eq 4 ] && [ "$(count)" -eq 0 ] && cmp -s "$d/manifest.json" "$tmp/before.json" \
     && ok "$t from the coachman is refused, and nothing changes" || fail "$t from the coachman is refused, and nothing changes (exit $rc)"
 done
+fresh; printf '{"coachman_contract": 2}\n' > "$d/run.json"; cp "$d/manifest.json" "$tmp/before.json"
+set_stage "$d" shipped coachman >/dev/null 2>&1; rc=$?
+[ $rc -eq 4 ] && [ "$(count)" -eq 0 ] && cmp -s "$d/manifest.json" "$tmp/before.json" \
+  && ok "shipped from the coachman is refused on a contract 2 run, and nothing changes" \
+  || fail "shipped from the coachman is refused on a contract 2 run, and nothing changes (exit $rc)"
+set_stage "$d" shipped postmaster >/dev/null; rc=$?
+[ $rc -eq 0 ] && [ "$(count)" -eq 1 ] && grep -q '"stage": "shipped"' "$d/manifest.json" \
+  && ok "shipped from the postmaster is allowed on a contract 2 run" || fail "shipped from the postmaster is allowed on a contract 2 run (exit $rc)"
+for contract in 1 '"2"' 'true' 'null'; do
+  fresh; printf '{"coachman_contract": %s}\n' "$contract" > "$d/run.json"; set_stage "$d" shipped coachman >/dev/null 2>&1; rc=$?
+  [ $rc -eq 0 ] && ok "shipped from the coachman is allowed with contract $contract" \
+    || fail "shipped from the coachman is allowed with contract $contract (exit $rc)"
+done
+fresh; rm -f "$d/run.json"; set_stage "$d" shipped coachman >/dev/null 2>&1; rc=$?
+[ $rc -eq 0 ] && ok "shipped from the coachman is allowed with no run.json" || fail "shipped from the coachman is allowed with no run.json (exit $rc)"
+fresh; printf 'not json\n' > "$d/run.json"; set_stage "$d" shipped coachman >/dev/null 2>&1; rc=$?
+[ $rc -eq 0 ] && ok "shipped from the coachman is allowed with an unreadable run.json" \
+  || fail "shipped from the coachman is allowed with an unreadable run.json (exit $rc)"
+rm -f "$d/run.json"
 fresh; set_stage "$d" abandoned postmaster >/dev/null; cp "$d/manifest.json" "$tmp/before.json"
 set_stage "$d" synthesis coachman >/dev/null 2>&1; rc=$?
 [ $rc -eq 3 ] && [ "$(count)" -eq 1 ] && cmp -s "$d/manifest.json" "$tmp/before.json" \
   && ok "the coachman cannot move a run out of abandoned" || fail "the coachman cannot move a run out of abandoned (exit $rc)"
 rm -- "$d/manifest.json"; set_stage "$d" bootstrapped coachman >/dev/null 2>&1; rc=$?
 [ $rc -eq 1 ] && ok "no manifest is refused" || fail "no manifest is refused (exit $rc)"
+
+echo "the stages a leg count walks"
+# Two legs: synthesis through review to shipping, then the postmaster's shipped and done.
+fresh
+set_stage "$d" bootstrapped coachman >/dev/null && set_stage "$d" workhorses-running coachman >/dev/null \
+  && set_stage "$d" synthesis coachman >/dev/null && set_stage "$d" checkpoint-1 coachman >/dev/null \
+  && set_stage "$d" review coachman >/dev/null && set_stage "$d" shipping coachman >/dev/null \
+  && set_stage "$d" shipped postmaster >/dev/null && set_stage "$d" done postmaster >/dev/null
+stages=$(grep '"action":"stage"' "$d/actions.jsonl" | python3 -c 'import json,sys; print(" ".join(json.loads(l)["target"] for l in sys.stdin))')
+[ "$stages" = "bootstrapped workhorses-running synthesis checkpoint-1 review shipping shipped done" ] \
+  && ok "a two-leg run walks every stage to done" || fail "a two-leg run walks every stage to done" "$stages"
+# One leg: no review; the synthesis leg carries the card, the postmaster closes.
+fresh
+set_stage "$d" bootstrapped coachman >/dev/null && set_stage "$d" workhorses-running coachman >/dev/null \
+  && set_stage "$d" synthesis coachman >/dev/null && set_stage "$d" checkpoint-1 coachman >/dev/null \
+  && set_stage "$d" shipping coachman >/dev/null && set_stage "$d" shipped postmaster >/dev/null \
+  && set_stage "$d" done postmaster >/dev/null
+stages=$(grep '"action":"stage"' "$d/actions.jsonl" | python3 -c 'import json,sys; print(" ".join(json.loads(l)["target"] for l in sys.stdin))')
+[ "$stages" = "bootstrapped workhorses-running synthesis checkpoint-1 shipping shipped done" ] \
+  && ok "a one-leg run skips review and still reaches done" || fail "a one-leg run skips review and still reaches done" "$stages"
+# Three legs, dispatched before this change: the same stages, entered as before.
+fresh
+set_stage "$d" bootstrapped coachman >/dev/null && set_stage "$d" workhorses-running coachman >/dev/null \
+  && set_stage "$d" synthesis coachman >/dev/null && set_stage "$d" checkpoint-1 coachman >/dev/null \
+  && set_stage "$d" review coachman >/dev/null && set_stage "$d" shipping coachman >/dev/null \
+  && set_stage "$d" shipped coachman >/dev/null && set_stage "$d" done postmaster >/dev/null
+stages=$(grep '"action":"stage"' "$d/actions.jsonl" | python3 -c 'import json,sys; print(" ".join(json.loads(l)["target"] for l in sys.stdin))')
+[ "$stages" = "bootstrapped workhorses-running synthesis checkpoint-1 review shipping shipped done" ] \
+  && ok "a three-leg run keeps the stages it always walked" || fail "a three-leg run keeps the stages it always walked" "$stages"
 
 echo
 [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }

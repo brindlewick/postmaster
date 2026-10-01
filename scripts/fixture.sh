@@ -195,17 +195,18 @@ def check_hidden(dispatch, repo, app):
         text = "%s; %s" % (text, lanes)
     return ok, text, out
 
-def check_gate(app):
+def check_gate(app, repo, branch):
     code, out = sh([SCRIPTS / "discover-project.sh", app])
     gate = next((l[len("gate="):] for l in out.splitlines() if l.startswith("gate=")), "")
     if not gate:
         return False, "scripts/discover-project.sh found no gate", out
-    install = ["npm", "ci"] if (app / "package-lock.json").is_file() else ["npm", "install"]
-    code, out = sh(install + ["--prefer-offline", "--no-audit", "--no-fund"], cwd=app)
-    if code != 0:
-        return False, "%s on main: %s" % (" ".join(install), exited(code)), out
-    code, out = sh(["bash", "-c", gate], cwd=app)
-    return code == 0, "%s on main: %s" % (gate, exited(code)), out
+    install = next((l[len("install="):] for l in out.splitlines() if l.startswith("install=")), "")
+    argv = ["bun", SCRIPTS / "clean-checkout.ts", repo, branch]
+    if install:
+        argv.append(install)
+    argv.append(gate)
+    code, out = sh(argv)
+    return code == 0, "%s on main from a clean checkout: %s" % (gate, exited(code)), out
 
 def read_actions(dispatch):
     path = dispatch / "actions.jsonl"
@@ -226,6 +227,11 @@ def check_stages(dispatch):
     if "done" not in listed:
         return False, "scripts/stage.sh --list names no done stage"
     expected = listed[:listed.index("done") + 1]
+    code, leg_out = sh([SCRIPTS / "turnpikes.sh", "legs", dispatch])
+    if code != 0:
+        return False, "scripts/turnpikes.sh legs: %s" % tail(leg_out)
+    has_review = any(len(line.split()) > 1 and line.split()[1] == "review" for line in leg_out.splitlines())
+    expected = [s for s in expected if (s != "review") or has_review]
     events, why = read_actions(dispatch)
     if events is None:
         return False, why
@@ -331,7 +337,7 @@ def score(dispatch, repo):
             print("fixture: could not export main from %s: %s" % (repo, tail(out, 3)), file=sys.stderr); sys.exit(1)
         legs = legs_of(dispatch, manifest)
         results = [("hidden-tests",) + check_hidden(dispatch, repo, app),
-                   ("gate",) + check_gate(app),
+                   ("gate",) + check_gate(app, str(repo), main),
                    ("stages",) + check_stages(dispatch) + ("",),
                    ("markers",) + check_markers(dispatch, legs) + ("",),
                    ("handoffs",) + check_handoffs(dispatch, legs) + ("",),
@@ -408,15 +414,19 @@ rc_of() { cat "$tmp/$1.rc" 2>/dev/null || echo none; }
 
 # The records of finished runs are built with the scripts a run uses, so they follow the
 # contract as those scripts define it today: the stages from stage.sh --list, and the hand-off
-# sections from what handoff-check.sh says an empty hand-off lacks. As the runbooks have it, the
-# legs enter every stage after the first and before done, and the postmaster closes the run. The
-# score counts legs from the run itself, so the number of legs here is arbitrary.
+# sections from what handoff-check.sh says an empty hand-off lacks. As the runbooks have it, leg
+# 1 enters every stage through checkpoint-1, each later leg its own slice of the rest (review,
+# then shipping), and the postmaster closes the run: shipped and done on a current run, done
+# only before it, where the ship leg sets shipped. The score counts legs from the run itself, so
+# records are built for a two-leg run, a one-leg run and a three-leg run dispatched before this
+# change, whose run.json carries no coachman contract.
 : > "$tmp/empty.md"
 sections=$("$HERE/handoff-check.sh" "$tmp/empty.md" 2>&1 >/dev/null | sed -n 's/^handoff-check: missing or empty section: //p')
 listed=$("$HERE/stage.sh" --list)
 stages=$(printf '%s\n' "$listed" | sed '/^done$/q' | sed '1d;$d')
-record() {  # record <name> <ticket> <shipped: reference, app or broken>: a finished run
-  local name=$1 t=$2 shipped=$3 legs=3 n s section done_stages=0 count
+record() {  # record <name> <ticket> <shipped: reference, app or broken> [<legs>: 1, 2 or 3, default 2]
+  local name=$1 t=$2 shipped=$3 legs=${4:-2} n s section walked turnpikes through1 rest slice
+  local leg_stages_1="" leg_stages_2="" leg_stages_3="" post_stages=""
   local repo=$tmp/$name/repo d=$tmp/$name/repo/.postmaster/runs/7 base
   mkdir -p "$tmp/$name" && make_repo "$repo" >/dev/null || return 1
   mkdir -p "$d/logs" "$d/audit" "$d/render" || return 1
@@ -430,20 +440,39 @@ record() {  # record <name> <ticket> <shipped: reference, app or broken>: a fini
   git -C "$repo" add -A && git -C "$repo" commit -q --allow-empty -m "Implement the ticket" \
     && git -C "$repo" checkout -q main && git -C "$repo" merge -q --no-ff -m "Merge branch 7" 7 || return 1
   printf '{"stage": "dispatched", "leg": 1, "base": "%s", "lanes": {}, "coachman": {"legs": {}}}\n' "$base" > "$d/manifest.json"
-  { printf '# Waybill: 7\n\n## Ticket\n\n'; ticket_body "$t"; printf '\n## Project profile\nrepo: %s\n' "$repo"; } > "$d/brief.md"
+  if [ "$legs" -eq 1 ]; then turnpikes="turnpikes: none"; else turnpikes="turnpikes: style, bug, security"; fi
+  { printf '# Waybill: 7\n%s\n\n## Ticket\n\n' "$turnpikes"; ticket_body "$t"; printf '\n## Project profile\nrepo: %s\n' "$repo"; } > "$d/brief.md"
   "$HERE/run-meta.sh" "$d" "$repo" >/dev/null || return 1
-  count=$(printf '%s\n' "$stages" | wc -l)
+  if [ "$legs" -eq 3 ]; then python3 - "$d/run.json" <<'PY' || return 1
+import json, sys
+p = sys.argv[1]; r = json.load(open(p)); r.pop("coachman_contract", None); json.dump(r, open(p, "w"), indent=2)
+PY
+  fi
+  walked=$stages
+  [ "$legs" -eq 1 ] && walked=$(printf '%s\n' "$stages" | grep -vx review)
+  # Leg 1 enters every stage through checkpoint-1; each later leg its own slice of the rest;
+  # the postmaster closes. A current run's shipped is the postmaster's; a pre-change ship leg
+  # sets its own, as the runbooks have it.
+  through1=$(printf '%s\n' "$walked" | sed '/^checkpoint-1$/q')
+  rest=$(printf '%s\n' "$walked" | sed '1,/^checkpoint-1$/d')
+  case $legs in
+    1) leg_stages_1="$through1 $(printf '%s\n' "$rest" | grep -vx shipped)"; post_stages="shipped done" ;;
+    2) leg_stages_1="$through1"; leg_stages_2="$(printf '%s\n' "$rest" | grep -vx shipped)"; post_stages="shipped done" ;;
+    3) leg_stages_1="$through1"; leg_stages_2="$(printf '%s\n' "$rest" | sed -n 1p)"; leg_stages_3="$(printf '%s\n' "$rest" | sed '1d')"; post_stages="done" ;;
+  esac
   for n in $(seq 1 "$legs"); do
     printf 'You are the coachman for leg %s of 7.\n' "$n" > "$d/leg-$n-prompt.txt"
     "$HERE/log-action.sh" "$d" postmaster dispatch 7 "leg $n" && "$HERE/log-action.sh" "$d" coachman handoff-accept "leg-$n" || return 1
-    for s in $(printf '%s\n' "$stages" | sed -n "$((done_stages + 1)),$((count * n / legs))p"); do
+    case $n in 1) slice=$leg_stages_1 ;; 2) slice=$leg_stages_2 ;; 3) slice=$leg_stages_3 ;; esac
+    for s in $slice; do
       "$HERE/stage.sh" "$d" "$s" >/dev/null || return 1
     done
-    done_stages=$((count * n / legs))
     while IFS= read -r section; do printf '## %s\nLeg %s, recorded.\n\n' "$section" "$n"; done <<< "$sections" > "$d/handoff-$n.md"
     "$HERE/log-action.sh" "$d" coachman handoff "leg-$n" && touch "$d/.leg-$n-done" "$d/.leg-$n-exited" || return 1
   done
-  "$HERE/stage.sh" "$d" done postmaster >/dev/null || return 1
+  for s in $post_stages; do
+    "$HERE/stage.sh" "$d" "$s" postmaster >/dev/null || return 1
+  done
   printf '# Ship card: 7\n\nBranch 7 is merged into main.\n' > "$d/card.md"
   python3 - "$d/manifest.json" "$legs" <<'PY'
 import json, sys
@@ -475,14 +504,15 @@ PY
   d=$(broken break-handoffs "$clean") && : > "$d/handoff-2.md"
   d=$(broken break-runjson "$clean") && rm -- "$d/run.json"
   d=$(broken break-card "$clean") && rm -- "$d/card.md"
-  d=$(broken break-waybill "$clean") && printf '# Waybill: 7\n\n## Ticket\n\nSee the tracker.\n' > "$d/brief.md"
-  for b in stages markers handoffs runjson card waybill; do
+  d=$(broken break-waybill "$clean") && printf '# Waybill: 7\nturnpikes: style, bug, security\n\n## Ticket\n\nSee the tracker.\n' > "$d/brief.md"
+  d=$(broken break-legs "$clean") && sed -i '/^turnpikes: /d' "$d/brief.md"
+  for b in stages markers handoffs runjson card waybill legs; do
     background "break-$b" score_run "$tmp/break-$b/repo/.postmaster/runs/7" "$repo"
   done
   wait
 }
-recorded() {  # recorded <name> <ticket> <shipped>: build the record, score it, and break the first clean one
-  record "$1" "$2" "$3" > "$tmp/built-$1.out" 2>&1 \
+recorded() {  # recorded <name> <ticket> <shipped> [<legs>]: build the record, score it, and break the first clean one
+  record "$1" "$2" "$3" "${4:-2}" > "$tmp/built-$1.out" 2>&1 \
     || { echo "the record could not be built: $(tail -3 "$tmp/built-$1.out")"; return 1; }
   [ "$1" = "clean-$first" ] && breaks "$tmp/$1/repo/.postmaster/runs/7" "$tmp/$1/repo" &
   score_run "$tmp/$1/repo/.postmaster/runs/7" "$tmp/$1/repo"; local rc=$?
@@ -493,6 +523,8 @@ recorded() {  # recorded <name> <ticket> <shipped>: build the record, score it, 
 # Everything slow runs in the background at once: each record is built and scored, and each
 # ticket's hidden suite runs against the app and against its reference.
 for t in $(tickets); do background "clean-$t" recorded "clean-$t" "$t" reference; done
+background clean-one recorded clean-one "$first" reference 1
+background clean-three recorded clean-three "$first" reference 3
 background break-hidden recorded break-hidden "$first" app
 background break-gate recorded break-gate "$first" broken
 hidden=()
@@ -606,16 +638,32 @@ expect() {  # expect <label> <name> <the check that fails, or none> [<text its F
   fi
 }
 for t in $(tickets); do expect "a clean run on $t: every check passes" "clean-$t" none; done
+expect "a one-leg run scores clean" clean-one none
+expect "a three-leg run dispatched before this change scores clean" clean-three none
 
 echo "score: negative controls, the same record with one check broken at a time"
 expect "the app shipped as committed: hidden-tests alone fails, and the app's own gate passes" break-hidden hidden-tests "fail on main"
 expect "the waybill does not carry the ticket: hidden-tests alone fails" break-waybill hidden-tests "carries no fixture ticket"
-expect "a type error shipped: gate alone fails" break-gate gate "npm run check on main: exit"
+expect "a type error shipped: gate alone fails" break-gate gate "npm run check on main from a clean checkout: exit"
 expect "a stage change never logged: stages alone fails" break-stages stages ", not "
 expect "a leg's done marker missing: markers alone fails" break-markers markers ".leg-2-done"
 expect "a hand-off with no sections: handoffs alone fails" break-handoffs handoffs "handoff-2.md"
 expect "no run.json: run.json alone fails" break-runjson run.json "no run.json"
 expect "no ship card: ship-card alone fails" break-card ship-card "no card.md"
+expect "a waybill with no turnpikes line: stages alone fails" break-legs stages "turnpikes.sh legs"
+
+echo "score: a record's stages are entered by the legs the contract names"
+one=$tmp/clean-one/repo/.postmaster/runs/7; two=$tmp/clean-$first/repo/.postmaster/runs/7; three=$tmp/clean-three/repo/.postmaster/runs/7
+grep -q '"actor":"postmaster","action":"stage","target":"shipped"' "$one/actions.jsonl" \
+  && ok "a one-leg record's shipped is the postmaster's" || fail "a one-leg record's shipped is the postmaster's"
+grep -q '"actor":"postmaster","action":"stage","target":"shipped"' "$two/actions.jsonl" \
+  && ok "a two-leg record's shipped is the postmaster's" || fail "a two-leg record's shipped is the postmaster's"
+grep -q '"actor":"coachman","action":"stage","target":"shipped"' "$three/actions.jsonl" \
+  && ok "a pre-change record's shipped is its ship leg's" || fail "a pre-change record's shipped is its ship leg's"
+c1=$(grep -n '"action":"stage","target":"checkpoint-1"' "$two/actions.jsonl" | cut -d: -f1)
+d2=$(grep -n '"action":"dispatch","target":"7","detail":"leg 2"' "$two/actions.jsonl" | cut -d: -f1)
+[ -n "$c1" ] && [ -n "$d2" ] && [ "$c1" -lt "$d2" ] \
+  && ok "checkpoint-1 lands before leg 2 starts" || fail "checkpoint-1 lands before leg 2 starts ($c1 vs $d2)"
 
 echo "lane scoring: the suite beside the new code runs in this self-test"
 out=$(bun --no-env-file test "$HERE/fixture-lanes.test.ts" 2>&1); rc=$?
