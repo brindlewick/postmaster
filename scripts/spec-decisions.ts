@@ -16,8 +16,10 @@
 //   changes 0|1    1 when it is a changes
 // When the file holds no `## spec` stanza and is in the per-lane shape, count instead
 // prints the pre-change numbers: manifest lanes approved in the manifest or this package,
-// each lane once, and manifest lanes with a changes stanza in this package. A file that
-// mixes a `## spec` stanza with others is refused rather than miscounted. count never
+// each lane once, and manifest lanes with a changes stanza in this package. So does a
+// file that mixes a `## spec` stanza with others when the manifest names a lane `spec`:
+// that is a pre-change file for that lane. Any other mix is refused rather than
+// miscounted. count never
 // over-counts: an approval with a blank commit, or a stanza for a lane the manifest does
 // not name, contributes nothing.
 // The stanza is written before the log line, so a failed log never loses a decision, and a
@@ -187,9 +189,7 @@ function count(d: string): void {
   if (!isFile(f)) die("spec-decisions: no decisions file: run fresh first", 1);
   const entries = parseDecisions(f);
   const one = entries.find((e) => e.lane === "spec");
-  if (one !== undefined) {
-    if (entries.length !== 1)
-      die("spec-decisions: a run-level decision file has more than one stanza", 2);
+  if (one !== undefined && entries.length === 1) {
     const approved = one.decision === "approved" && one.commit !== "" ? 1 : 0;
     const changed = one.decision === "changes" ? 1 : 0;
     console.log(`approved ${approved}`);
@@ -197,7 +197,11 @@ function count(d: string): void {
     return;
   }
   // A run from before the one-spec change: one stanza per lane, counted as before.
+  // A `## spec` stanza beside others is that shape, not a mix, when the manifest
+  // names a lane `spec`; any other mix is refused rather than miscounted.
   const lanes = readManifest(d);
+  if (one !== undefined && !hasOwn(lanes, "spec"))
+    die("spec-decisions: a run-level decision file has more than one stanza", 2);
   const approved = new Set<string>();
   for (const [lane, info] of Object.entries(lanes))
     if (isDict(info) && info.outcome === "approved") approved.add(lane);

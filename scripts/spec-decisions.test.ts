@@ -1,7 +1,7 @@
 // Controls for the one-spec shape of spec-decisions, beside the script: a one-spec
 // package, a changes round, an approval, a stop, a decisions file from before the
-// one-spec change, and a mixed file refused. The controls the script carries inside it
-// still cover its other refusals.
+// one-spec change, a legacy lane literally named spec, and a mixed file refused.
+// The controls the script carries inside it still cover its other refusals.
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -139,6 +139,20 @@ describe("a decisions file from before the change", () => {
       expect(c.status).toBe(0);
       expect(c.approved).toBe(2);
       expect(c.changes).toBe(0);
+    });
+  });
+
+  test("a lane literally named spec still counts as a lane, not the run-level stanza", () => {
+    withRun((d) => {
+      writeFileSync(join(d, "manifest.json"), '{"lanes": {"spec": {}, "alpha": {}}}\n');
+      writeFileSync(
+        join(d, "spec-decisions.md"),
+        "## spec\ndecision: changes\ncommit: abc123\nwords: tighter\n\n## alpha\ndecision: approved\ncommit: def456\nwords: \n\n",
+      );
+      const c = count(d);
+      expect(c.status).toBe(0);
+      expect(c.approved).toBe(1);
+      expect(c.changes).toBe(1);
     });
   });
 });
