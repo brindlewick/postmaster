@@ -42,6 +42,13 @@ Disagreement is also diagnostic. When two lanes build the same mechanism and nam
 differently, the project's own conventions did not decide it, and the coachman records the
 gap as a proposed rule rather than flipping a coin the next run will flip again.
 
+Running several models is also a way to take full advantage of the competition between
+providers. There are many strong models now, from many providers, and they compete hard.
+postmaster runs several side by side, so it is not locked into anyone's ecosystem. A lane is
+a harness plus a model, each harness sits behind an adapter, and nothing in the flow depends
+on one provider's tools. The config says which harness and model fills each role, so moving
+a role to a different model is an edit to the config.
+
 ## Logging, auditing and tracing
 
 These are first-class concerns in postmaster, designed in from the start rather than added
@@ -111,8 +118,9 @@ scripts/review-round.sh start|wait|teardown <dispatch> <round> … # a review ro
 scripts/log-action.sh <dispatch> <actor> <action> <target> …     # one JSON line per action
 scripts/tool-faults.sh harvest|comment|file|decline <dispatch> …  # a closed run's tool faults, as tickets
 scripts/stage.sh <dispatch> <stage>                               # the one way a run changes stage
-scripts/spec-review-link.sh <dispatch> <workhorse-worktree>        # resolve a reviewed spec's code-server link
-scripts/spec-decisions.sh <dispatch> fresh|record|count           # record spec decisions, count approvals run-wide
+scripts/spec-review-link.sh <dispatch> <spec-folder>              # resolve a reviewed spec's code-server link
+scripts/spec-decisions.sh <dispatch> fresh|record|count           # record the spec decision, count the package
+scripts/spec-session.sh brief|approve <dispatch>                  # the spec session's brief; approve commits and records
 scripts/run-times.sh <dispatch>                                   # how long each stage took, from the log
 scripts/run-log.sh <dispatch> <text> | --section <title> | --close # the narrative, timestamped
 scripts/run-meta.sh <dispatch> <repo> | path|check|release <dispatch> # run.json and the pinned tool a run started from
@@ -166,7 +174,8 @@ At least two agent CLIs that can run headless. Any git repository as a target. A
 to watch the fleet in: [Herdr](https://herdr.dev) by default wherever it is running, where each
 launch appears in its worktree's space under the project's, or tmux. With neither, launches run
 in the background and the flow still works (`skills/postmaster/hosts.md`). Python 3.11 or newer, which
-the scripts use to read the config, and jq for discovering a JavaScript project's gate.
+the scripts use to read the config, jq for discovering a JavaScript project's gate, and Bun,
+which runs the TypeScript scripts.
 
 ## Installing the skills
 
