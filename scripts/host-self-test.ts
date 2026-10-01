@@ -4328,6 +4328,71 @@ export async function runControls(): Promise<number> {
       "a lock with a live owner refuses the next start",
       () => r.code !== 0 && nonEmptyLines(attemptsPath).length === before,
     );
+    writeFileSync(activePath, "");
+    before = nonEmptyLines(attemptsPath).length;
+    prompt = join(legD, "freshempty.txt");
+    writeFileSync(prompt, "fresh empty lock\n");
+    r = execHost(
+      ["leg", "launch", legD, legWt, "synthesis", "1", prompt],
+      legPath,
+      f.caller,
+      legEnv(),
+    );
+    await pass(
+      "a fresh empty lock reads as another start in progress, never a steal",
+      () =>
+        r.code !== 0 &&
+        r.err.includes("another start in progress") &&
+        nonEmptyLines(attemptsPath).length === before,
+      r.err,
+    );
+    const past = new Date(Date.now() - 6000);
+    writeFileSync(activePath, "");
+    utimesSync(activePath, past, past);
+    prompt = join(legD, "agedempty.txt");
+    writeFileSync(prompt, "aged empty lock\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "an empty lock with no live creator mid-write is stolen",
+      () => r.code === 0 && nonEmptyLines(attemptsPath).length === before + 1,
+      safeOutcome(attemptsPath),
+    );
+    rmSync(join(legD, ".leg-1-exited"), { force: true });
+    writeFileSync(activePath, "not a pid at all\n");
+    before = nonEmptyLines(attemptsPath).length;
+    prompt = join(legD, "freshjunk.txt");
+    writeFileSync(prompt, "fresh junk lock\n");
+    r = execHost(
+      ["leg", "launch", legD, legWt, "synthesis", "1", prompt],
+      legPath,
+      f.caller,
+      legEnv(),
+    );
+    await pass(
+      "a fresh lock that names no owner reads as another start in progress",
+      () =>
+        r.code !== 0 &&
+        r.err.includes("another start in progress") &&
+        nonEmptyLines(attemptsPath).length === before,
+      r.err,
+    );
+    writeFileSync(activePath, `${process.pid}\n`);
+    prompt = join(legD, "halfowner.txt");
+    writeFileSync(prompt, "half owner lock\n");
+    r = execHost(
+      ["leg", "launch", legD, legWt, "synthesis", "1", prompt],
+      legPath,
+      f.caller,
+      legEnv(),
+    );
+    await pass(
+      "a fresh lock with a live pid but no start is not stolen",
+      () =>
+        r.code !== 0 &&
+        r.err.includes("another start in progress") &&
+        nonEmptyLines(attemptsPath).length === before,
+      r.err,
+    );
     rmSync(activePath, { force: true });
     rmSync(join(legD, ".leg-1-exited"), { force: true });
     prompt = join(legD, "owned.txt");

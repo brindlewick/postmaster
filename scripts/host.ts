@@ -3516,6 +3516,20 @@ function legAcquire(lock: string, mutexPath: string, selfPid: number): number {
       console.error("leg already has an active attempt");
       return 1;
     }
+    // A present lock with no readable owner is a creator mid-write (create and
+    // the pid write are two calls) or a dead creator's remnant. Main steals it
+    // at once, racing the creator; the port refuses a fresh one as another
+    // start in progress and steals only once no live creator can be mid-write.
+    if (owner === null || ownerStart === null || ownerStart === "") {
+      let fresh = true;
+      try {
+        const st = statSync(lock);
+        fresh = !st.isDirectory() && Date.now() - st.mtimeMs <= 5000;
+      } catch {
+        fresh = false;
+      }
+      if (fresh) return 2;
+    }
     try {
       if (statSync(lock).isDirectory()) rmdirSync(lock);
       else unlinkSync(lock);
