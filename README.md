@@ -18,6 +18,19 @@ the merge authority in the config.
 | **coachman** | drives one leg of a ticket; at most two legs, synthesis and review, each a fresh coachman, carry it from waybill to ship card with a written hand-off between them; the last leg ends the run ready for merge | take a second leg, merge |
 | **the team** | several lanes implementing the same ticket in blinkers | see each other's work |
 
+## Lean on the harnesses
+
+postmaster leans on the agent harnesses as much as it can. Planning, coding, reviewing and
+fixing are the harnesses' work, through their own skills wherever a harness has one: a bug
+review is the harness's own code-review skill, and a security review its own security-review
+skill. postmaster itself is mostly plumbing between the stages. It starts each agent with the
+right brief, carries the hand-off from one leg to the next, and records what happened.
+
+That is why it has so many scripts. A check written once as a script runs the same way every
+time, instead of being worked out again by a model on every run, which saves tokens. The
+scripts are well tested, and when one does fail, the model running it can usually read the
+error and carry on. The run records the fault, so the script gets fixed.
+
 ## Why several models rather than one good one
 
 Because they disagree usefully. Across a sample of runs, the synthesis took contributions
@@ -115,7 +128,7 @@ scripts/launch.sh form|launch|review|resume|skill <lane-or-role> … # any lane 
 scripts/reviewers.sh lines|eligible <lens>|lanes <waybill> <lens>|lenses # which lanes review under each lens
 scripts/review-forms.sh has <harness>                            # whether the harness has a code-review form
 scripts/review-findings.sh normalize|harvest …                   # native bug-review output into the finding contract
-scripts/host.sh detect|name|run|stop|close|spawn|send|wait|read … # where a launch runs, and where you watch it
+scripts/host.sh detect|name|run|stop|close|stop-run|close-run|spawn|send|wait|read … # launch placement and teardown
 scripts/view-stream.sh < <events-file>                            # a harness's events, wrapped: what it says and runs, in full
 scripts/runs-status.sh <run-root>                                  # the postmaster's poll
 scripts/coachman-contract.sh <base> <head>                         # whether a change touches the contract, by file
