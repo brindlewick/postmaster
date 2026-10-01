@@ -5,7 +5,8 @@
 // text that commits nothing and records the existing commit; an approval of changed
 // text that makes one commit holding exactly the copy; an approval refused while the
 // synthesis worktree holds another change; an approval refused over a stray spec edit
-// or a missing spec; and an approval refused when no spec is committed there.
+// or a missing spec; and an approval refused when no spec is committed there. A
+// ticket holding waybill-like headers keeps every line in the brief.
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -213,6 +214,50 @@ describe("a brief", () => {
       const r = go(s.cfgDir, "brief", s.d);
       expect(r.status).not.toBe(0);
       expect(r.stderr).toContain("cannot build the editor link");
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  test("keeps ticket headers that resemble waybill sections", () => {
+    const s = scratch();
+    try {
+      writeFileSync(
+        join(s.d, "brief.md"),
+        [
+          "# Waybill: 7",
+          "turnpikes: none",
+          "",
+          "## Ticket",
+          "Do the thing.",
+          "",
+          "## Dispatch",
+          "A section of the ticket's own.",
+          "",
+          "```",
+          "## Project profile",
+          "repo: /example",
+          "```",
+          "",
+          "The last acceptance criterion lives here.",
+          "",
+          "## Project profile",
+          `repo: ${s.root}          default branch: main       BASE: abc`,
+          "",
+          "## Dispatch",
+          "name: 7, Do the thing",
+          `dispatch: ${s.d}`,
+          `synthesis worktree: ${s.synth}`,
+          "tool: /nowhere",
+          "",
+        ].join("\n"),
+      );
+      const r = go(s.cfgDir, "brief", s.d);
+      expect(r.status).toBe(0);
+      const body = readFileSync(join(s.d, "spec-session-brief.md"), "utf8");
+      expect(body).toContain("## Dispatch\nA section of the ticket's own.");
+      expect(body).toContain("## Project profile\nrepo: /example");
+      expect(body).toContain("The last acceptance criterion lives here.");
     } finally {
       s.cleanup();
     }

@@ -78,17 +78,30 @@ function readWaybill(dispatch: string): Waybill {
     die(`spec-session: cannot read ${path} (${errMsg(e)})`, 1);
   }
   const w: Waybill = { ticket: "", repo: "", name: "", synthesis: "" };
+  const lines = text.split("\n");
   let section = "";
   let ticketLines: string[] = [];
   let inTicket = false;
-  // The ticket body is verbatim and may hold `##` headers of its own; only these
-  // top-level sections end it.
+  // The ticket body is verbatim and may hold `##` headers of its own, even a fenced
+  // example of this very template; only these top-level sections end it. The real
+  // Project profile is the last one in the file: nothing after the real sections is
+  // verbatim, so no fake header can follow it. Keys stay last-wins below, so a fake
+  // header inside the ticket never survives the real section.
   const after = new Set(["Project profile", "Team", "Dispatch"]);
-  for (const line of text.split("\n")) {
+  let ticketEnd = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const probe = lines[i]!;
+    if (probe.startsWith("## ") && probe.slice(3).trim() === "Project profile") {
+      ticketEnd = i;
+      break;
+    }
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
     if (line.startsWith("## ")) {
       const next = line.slice(3).trim();
       if (inTicket) {
-        if (after.has(next)) {
+        if (ticketEnd >= 0 ? i === ticketEnd : after.has(next)) {
           inTicket = false;
           section = next;
         } else {
