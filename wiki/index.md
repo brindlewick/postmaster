@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-29
+updated: 2026-10-01
 ---
 
 # postmaster wiki
@@ -36,6 +36,11 @@ How each agent CLI really behaves, as distinct from what its documentation says.
 - [A resume's exit status does not say it continued its thread](concepts/resume-exit-status.md):
   **settled**, for pi, Muse Code and MiMo Code. Resuming a thread it cannot find, a harness can
   exit 0 having done nothing, or having started a new thread.
+- [A lane stays inside its worktree only when a sandbox wraps its harness](concepts/lane-confinement.md):
+  **claimed**. In bypass mode every harness wrote into the main checkout and read another lane's
+  worktree; their own guards switch off or check only what a tool call names. sandbox-runtime
+  around the harness stopped every reach on all five, and every lane still passed the gate.
+  A worktree still shares its repository's store; a shared clone per lane does not.
 
 ## Trackers and tooling
 
