@@ -246,9 +246,12 @@ Never put paths or credentials in either file.
    ```
 
    That form needs a harness with a resume form (`hosts.md`, none), so the user can answer an
-   escalation by resuming it. Otherwise, start an interactive session of the postmaster's
-   harness (`team.postmaster` in the config), rooted in the target repo, in the harness's
-   interactive form from `harnesses.md`: its bypass mode, named `postmaster`. Hand it a
+   escalation by resuming it. When the route has a `headless` line and `team.postmaster` names
+   a harness with none, run the postmaster on another harness that has one, as `hosts.md` says,
+   and never fall back to interactive for a marked fixture. Without a `headless` line, start an
+   interactive session of the postmaster's harness (`team.postmaster` in the config), rooted in
+   the target repo, in the harness's interactive form from `harnesses.md`: its bypass mode, named
+   `postmaster`. Hand it a
    one-line prompt file that says to read the brief at `$RUNS/postmaster/brief.md` first:
 
    ```sh
