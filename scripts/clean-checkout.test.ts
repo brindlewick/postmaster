@@ -336,31 +336,27 @@ describe("cleanCheckout", () => {
     });
   });
 
-  test(
-    "a command that outlives its bound fails as a timeout and leaves no process behind",
-    async () => {
-      await withRepo(async (repo) => {
-        const dir = mkdtempSync(join(tmpdir(), "clean-checkout-marks-"));
-        roots.push(dir);
-        const control = join(dir, "control");
-        const survivor = join(dir, "survivor");
-        // Positive control: the marker construct works when nothing is killed.
-        const quick = runHelper([repo, "main", `(sleep 1 && touch ${control}) & sleep 2`], {
-          CLEAN_CHECKOUT_TIMEOUT: "30",
-        });
-        expect(quick.status).toBe(0);
-        expect(existsSync(control)).toBe(true);
-        // The bound kills the whole group: the 5s marker never lands.
-        const timed = runHelper([repo, "main", `(sleep 5 && touch ${survivor}) & sleep 30`], {
-          CLEAN_CHECKOUT_TIMEOUT: "2",
-        });
-        expect(timed.status).toBe(124);
-        expect(timed.out).toContain("timed out after 2s");
-        expect(existsSync(survivor)).toBe(false);
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-        expect(existsSync(survivor)).toBe(false);
+  test("a command that outlives its bound fails as a timeout and leaves no process behind", async () => {
+    await withRepo(async (repo) => {
+      const dir = mkdtempSync(join(tmpdir(), "clean-checkout-marks-"));
+      roots.push(dir);
+      const control = join(dir, "control");
+      const survivor = join(dir, "survivor");
+      // Positive control: the marker construct works when nothing is killed.
+      const quick = runHelper([repo, "main", `(sleep 1 && touch ${control}) & sleep 2`], {
+        CLEAN_CHECKOUT_TIMEOUT: "30",
       });
-    },
-    30000,
-  );
+      expect(quick.status).toBe(0);
+      expect(existsSync(control)).toBe(true);
+      // The bound kills the whole group: the 5s marker never lands.
+      const timed = runHelper([repo, "main", `(sleep 5 && touch ${survivor}) & sleep 30`], {
+        CLEAN_CHECKOUT_TIMEOUT: "2",
+      });
+      expect(timed.status).toBe(124);
+      expect(timed.out).toContain("timed out after 2s");
+      expect(existsSync(survivor)).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      expect(existsSync(survivor)).toBe(false);
+    });
+  }, 30000);
 });
