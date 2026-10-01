@@ -46,9 +46,12 @@
 //           commit, or git could not make or remove it
 //
 // Port notes (main scripts/run-meta.sh): the flock(2) pin lock is an O_EXCL lock file holding
-// the owner's PID, stolen only from a dead owner and never by age, since a dispatch
+// the owner's PID, stolen from a dead owner or an empty file, never by age, since a dispatch
 // legitimately holds it across 15-second harness probes; the lock file is removed on release
-// rather than left empty. The pin scan keeps its subprocess shape (a hidden `run-meta-scan`
+// rather than left behind. An empty file is the bash flow's resting state (it opens with >
+// and flocks the fd, never removing it), so it reads as unlocked: exclusion between the two
+// flows is best-effort during the transition, exact within this one. The pin scan keeps its
+// subprocess shape (a hidden `run-meta-scan`
 // mode of this same script, exit 42 the reserved drop signal) so a killed scan is still
 // observed and kept; the child is spawned with PATH alone, the tool bunfig.toml anchoring
 // config discovery the way the wrapper does. POSTMASTER_SCAN_HOLD_MS is test-only: the
@@ -169,8 +172,14 @@ function version(harness: string): string {
 // flock(2) has no Node spelling, so the pin lock is a lock file holding the owner's PID:
 // O_EXCL creation is the mutual exclusion, and only a dead owner loses it. Never by age: a
 // dispatch legitimately holds the lock across 15-second harness probes, so an old lock is
-// still live. An empty or unreadable lock file is waited on, never stolen; past two minutes
-// the wait fails as "could not lock", the way flock failing does.
+// still live. An empty file reads as unlocked and is stolen at once: it is the bash flow's
+// resting state (flock on the fd, truncated on every open, never removed), which carries no
+// owner either way, so waiting on it would fail every dispatch on a machine the bash flow
+// has touched. Exclusion between the two flows is therefore best-effort — a steal can land
+// while bash holds its flock — and exact within this one; the overlap lasts only the
+// transition, and concurrent pins of one commit converge on identical content. An unreadable
+// file is still waited on, never stolen; past two minutes the wait fails as "could not
+// lock", the way flock failing does.
 function lockOwnerDead(lockPath: string): boolean {
   let text: string;
   try {
@@ -179,6 +188,7 @@ function lockOwnerDead(lockPath: string): boolean {
     // Gone between the failed creation and this read: nobody holds it.
     return (e as NodeJS.ErrnoException)?.code === "ENOENT";
   }
+  if (text.trim() === "") return true;
   const pid = Number(text.trim());
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {

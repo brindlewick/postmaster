@@ -1,4 +1,4 @@
-// Tests beside scripts/local.ts, moved from its --self-test on #109: 100 controls,
+// Tests beside scripts/local.ts, moved from its --self-test on #109: 101 controls,
 // plus one regression control for Bun's fetch-proxy snapshot (restoreEnv).
 // Order-dependent: the tests replay the self-test's sequence in file order against shared
 // fixtures (ticket numbers accumulate), except the final unicode vectors, which are pure.
@@ -1178,4 +1178,15 @@ describe("fetch-proxy snapshot regression", () => {
     },
     30000,
   );
+});
+
+describe("store lock beside the bash flow", () => {
+  test("an empty .lock left by the bash flow does not stall a write", () => {
+    // The bash flow's resting state: flock on the fd, never written, never removed.
+    writeFileSync(join(store, ".lock"), "");
+    const t0 = Date.now();
+    const r = lt(repo, "comment", "1", "coachman", "lock probe");
+    expect(Date.now() - t0).toBeLessThan(30000);
+    check(r, 0, "#1:");
+  }, 120000);
 });

@@ -269,7 +269,14 @@ function locked<T>(store: string, action: () => T): T {
       try {
         const contents = readFileSync(lock, "utf8").trim();
         const pid = Number(contents);
-        if (contents && Number.isInteger(pid) && pid > 0) {
+        if (contents === "") {
+          // The bash flow's resting state (flock on the fd, never written,
+          // never removed) carries no owner either way, so it is stolen at
+          // once rather than waited out: waiting would stall every write on
+          // a store the bash flow touched. Exclusion between the two flows
+          // is best-effort during the transition, and exact within this one.
+          rmSync(lock, { force: true });
+        } else if (Number.isInteger(pid) && pid > 0) {
           // A live owner keeps its lock whatever its age, as under flock;
           // only a confirmed dead owner is reaped.
           if (!alive(pid)) rmSync(lock, { force: true });

@@ -1,4 +1,4 @@
-// Tests beside scripts/run-meta.ts, moved from its --self-test on #109: 97 controls.
+// Tests beside scripts/run-meta.ts, moved from its --self-test on #109: 98 controls.
 // The sequence runs once in beforeAll with recording check/ok/fail; one test per recorded label.
 // Its local check(label, fn) is checkJson here, so the recording check keeps its name.
 // Env pins set by the sequence are restored in afterAll.
@@ -1739,4 +1739,38 @@ describe("claims across projects and layouts", () => {
   test("a failed dispatch drops the claim it just made", () => {
     assertControl("a failed dispatch drops the claim it just made");
   });
+});
+
+describe("pin lock beside the bash flow", () => {
+  test("an empty .pin.lock left by the bash flow does not block a pin", () => {
+    withTempDir((raw: string) => {
+      const tmp = realpathSync(raw);
+      const tools = join(tmp, "tools");
+      mkdirSync(tools, { recursive: true });
+      // The bash flow's resting state: flock(2) on the fd, never removed,
+      // truncated to empty on every open. It must read as unlocked.
+      writeFileSync(join(tools, ".pin.lock"), "");
+      const repo = join(tmp, "repo");
+      mkdirSync(repo, { recursive: true });
+      run("git", ["-C", repo, "init", "-q", "-b", "main"]);
+      run("git", [
+        "-C",
+        repo,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "first",
+      ]);
+      const commit = run("git", ["-C", repo, "rev-parse", "HEAD"]).out.trim();
+      const t0 = Date.now();
+      const r = pin(repo, commit, tools);
+      expect(Date.now() - t0).toBeLessThan(30000);
+      expect(r.code).toBe(0);
+    });
+  }, 180000);
 });
