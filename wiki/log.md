@@ -21,6 +21,18 @@ three changes the page lists; it needed root to allow Bubblewrap on this Ubuntu 
 worktree's shared store still lets a lane read another lane's commits; a shared clone per lane
 does not. New concept page `lane-confinement`, standing `claimed`.
 
+## [2026-09-30] ingest | a gate on the default branch after a merge runs from a clean checkout
+
+Issue #110. A design decision, with the control that shows it. The fixture app's `npm run
+check` failed on main right after a merge in fixture runs 4 and 5 (2026-09-28), because Biome
+walked into the run's own worktrees under `.worktrees/`, and passed once they were removed.
+The copies stay where the machine's convention puts them; the flow's two post-merge gates (the
+ship leg's verification of the merged default branch, and fixture scoring's gate) now run from
+a clean checkout of the branch outside the project folder, through `scripts/clean-checkout.ts`.
+Hand-run tools in the main checkout still see the copies; the page says so. Standing `claimed`:
+those fixture runs are not in `raw/`, so the page marks the observation unverified. The
+colocated tests hold the positive and negative control.
+
 ## [2026-09-29] ingest | the planning stage: every spec to the user before code
 
 A decision page, and a capture. Anthropic's AI-native SDLC playbook is captured into
