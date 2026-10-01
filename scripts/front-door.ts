@@ -3,7 +3,10 @@
 // terminal; the target and the config are given. It is `self` when that session is already on
 // team.postmaster's harness and model, in the target repo, with the user at the terminal. It is
 // `spawn` with every condition that failed, in ticket order: the harness differs, the model
-// differs, the target is another repo, or nobody is at the terminal.
+// differs, the target is another repo, or nobody is at the terminal. When the decision is
+// `spawn` and the target is a fixture copy (postmaster.fixture in its own git config, set by
+// fixture.sh new), it also prints a `headless` line: that postmaster starts headless on every
+// host, in the form hosts.md gives under none, so it never meets a trust prompt.
 //
 //   front-door.sh <harness> <model> <cwd> <at-terminal> <target> [--config <path>]
 //
@@ -11,7 +14,7 @@
 //
 // POSTMASTER_CONFIG overrides the config path (~/.postmaster/config.toml).
 //
-//   exit 0  printed `self` or `spawn` with its reasons
+//   exit 0  printed `self` or `spawn` with its reasons, and `headless` for a fixture copy
 //   exit 1  no config or one that does not parse, team.postmaster missing, or a bad value
 //   exit 2  usage
 import { existsSync } from "node:fs";
@@ -50,10 +53,58 @@ function repoOf(path: string): string {
   return r.code === 0 ? r.out.trim() : "";
 }
 
+/** Whether fixture.sh marked the target repository in its own git config. */
+function isFixtureCopy(path: string): boolean {
+  if (!path) return false;
+  const r = run("git", ["-C", path, "config", "--local", "--get", "postmaster.fixture"]);
+  return r.code === 0 && r.out.trim().length > 0;
+}
+
 interface DecideResult {
   code: number;
   out: string;
   err: string;
+}
+
+/** Pure route decision from the session report, configured role, repository identities and mark. */
+function route(
+  h: string,
+  m: string,
+  cwd: string,
+  term: string,
+  target: string,
+  teamHarness: string,
+  teamModel: string,
+  cwdRepo: string,
+  targetRepo: string,
+  fixtureCopy: boolean,
+): string {
+  const reasons: string[] = [];
+  if (h !== teamHarness) {
+    reasons.push(
+      `harness differs: this session runs on ${h}, team.postmaster names ${teamHarness}`,
+    );
+  }
+  if (m !== teamModel) {
+    reasons.push(`model differs: this session runs on ${m}, team.postmaster names ${teamModel}`);
+  }
+  if (!cwdRepo || !targetRepo) {
+    reasons.push(`not in a git repository: the session runs in ${cwd}, the target is ${target}`);
+  } else if (cwdRepo !== targetRepo) {
+    reasons.push(`target is another repo: the session runs in ${cwd}, the target is ${target}`);
+  }
+  if (term !== "yes") reasons.push("nobody at the terminal");
+
+  const spawn =
+    reasons.length > 0
+      ? `spawn ${reasons.join("; ")}\n`
+      : [
+          "self team.postmaster harness and model, the target is this repo, ",
+          "and the user is at the terminal\n",
+        ].join("");
+  return reasons.length > 0 && fixtureCopy
+    ? `${spawn}headless the target is a fixture copy made by fixture.sh new\n`
+    : spawn;
 }
 
 function decide(
@@ -111,32 +162,18 @@ function decide(
       `front-door: ${cfgPath} team.postmaster harness and model must not contain control characters`,
     );
   }
-  const th = harness;
-  const tm = model;
-  const reasons: string[] = [];
-  const addReason = (text: string): void => {
-    reasons.push(text);
-  };
-  if (h !== th) {
-    addReason(`harness differs: this session runs on ${h}, team.postmaster names ${th}`);
-  }
-  if (m !== tm) {
-    addReason(`model differs: this session runs on ${m}, team.postmaster names ${tm}`);
-  }
-  const tc = repoOf(cwd);
-  const tt = repoOf(target);
-  if (!tc || !tt) {
-    addReason(`not in a git repository: the session runs in ${cwd}, the target is ${target}`);
-  } else if (tc !== tt) {
-    addReason(`target is another repo: the session runs in ${cwd}, the target is ${target}`);
-  }
-  if (term !== "yes") {
-    addReason("nobody at the terminal");
-  }
-  const out =
-    reasons.length > 0
-      ? `spawn ${reasons.join("; ")}\n`
-      : "self team.postmaster harness and model, the target is this repo, and the user is at the terminal\n";
+  const out = route(
+    h,
+    m,
+    cwd,
+    term,
+    target,
+    harness,
+    model,
+    repoOf(cwd),
+    repoOf(target),
+    isFixtureCopy(target),
+  );
   return { code: 0, out, err: "" };
 }
 

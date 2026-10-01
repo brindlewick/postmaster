@@ -5,6 +5,12 @@
 //   fixture.sh score <dispatch> <repo>
 //   fixture.sh hidden <ticket> <app-dir>
 //
+// `new` marks its copy with `postmaster.fixture` in that repository's local git config.
+// `score` reports the merged result's hidden-test counts, then the harvested lane branches'
+// counts from `scripts/fixture-lanes.ts`; only the merged result decides the verdict.
+// Its gate runs from a clean checkout of main, outside the project folder, through
+// `scripts/clean-checkout.ts`, so a tool that walks the folder never reads the run's
+// own working copies.
 //   exit 0  new: made and filed; score, hidden: every check passed
 //   exit 1  usage, a tool not on PATH, a refusal from new, or input that is not what it says
 //   exit 2  score, hidden: a check failed
@@ -42,6 +48,19 @@ import {
   pySplitLines,
   pyWords,
 } from "./lib/text.ts";
+
+// A GIT_DIR from the caller must not steer repo identity to another repository.
+for (const k of [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_NAMESPACE",
+]) {
+  delete process.env[k];
+}
 
 const HERE = scriptsDir(import.meta);
 const TOOL = toolRoot(import.meta);
@@ -217,6 +236,12 @@ export function makeAndFile(dest: string, ticket: string): number {
     );
     return 1;
   }
+  const mark = run("git", ["-C", dest, "config", "--local", "postmaster.fixture", ticket]);
+  if (mark.code !== 0) {
+    unmake();
+    console.error(`fixture: could not mark ${dest} as a fixture copy`);
+    return 1;
+  }
   const headShort = run("git", ["-C", TOOL, "rev-parse", "--short", "HEAD"]).out.trim();
   const destHead = run("git", ["-C", dest, "rev-parse", "--short", "HEAD"]).out.trim();
   console.log(`fixture: made ${dest} from fixtures/app at ${headShort}; main is at ${destHead}`);
@@ -307,6 +332,29 @@ export function hidden(
       ? `${passed} pass, ${failed} fail`
       : `bun test ${exited(r.code)}`;
   return { passed: r.code === 0 && passed > 0 && failed === 0, detail, out: r.out ?? "" };
+}
+
+// BASE writes \d for the pass/fail counts; the counts are machine-printed ASCII
+// (fixture-lanes.ts prints JS numbers), so [0-9] matches on every reachable line.
+const LANE_LINE = /^(.*): ([0-9]+ pass, [0-9]+ fail|missing|failed to build)$/u;
+
+// Each lane's hidden status from fixture-lanes.ts; "" when there are no lanes.
+export function laneScores(dispatch: string, repo: string, ticket: string): string {
+  const r = sh([
+    "bun",
+    "--no-env-file",
+    `--config=${join(TOOL, "bunfig.toml")}`,
+    join(HERE, "fixture-lanes.ts"),
+    dispatch,
+    repo,
+    ticket,
+  ]);
+  if (r.code !== 0) return "lanes not scored";
+  return r.out
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => LANE_LINE.test(line))
+    .join("; ");
 }
 
 export function score(dispatch: string, repo: string): { code: number; out: string } {
@@ -427,21 +475,6 @@ export function legsOf(dispatch: string, manifest: Record<string, unknown> | nul
   return Array.from({ length: max }, (_, i) => i + 1);
 }
 
-// BASE writes \d for the pass/fail counts; the counts are machine-printed ASCII
-// (fixture-lanes.ts prints JS numbers), so [0-9] matches on every reachable line.
-const LANE_LINE = /^(.*): ([0-9]+ pass, [0-9]+ fail|missing|failed to build)$/u;
-
-// Each lane's hidden status from fixture-lanes.ts; "" when there are no lanes.
-export function laneScores(dispatch: string, repo: string, ticket: string): string {
-  const r = sh(["bun", "--no-env-file", join(HERE, "fixture-lanes.ts"), dispatch, repo, ticket]);
-  if (r.code !== 0) return "lanes not scored";
-  return r.out
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => LANE_LINE.test(l))
-    .join("; ");
-}
-
 function checkHidden(
   dispatch: string,
   repo: string,
@@ -467,10 +500,13 @@ function checkHidden(
     };
   }
   const h = hidden(found[0]!, app);
-  let detail = `${found[0]}, from the waybill: ${h.detail} on main`;
+  const mainDetail = `${found[0]}, from the waybill: ${h.detail} on main`;
   const lanes = laneScores(dispatch, repo, found[0]!);
-  if (lanes) detail = `${detail}; ${lanes}`;
-  return { ok: h.passed, detail, out: h.out };
+  return {
+    ok: h.passed,
+    detail: lanes ? `${mainDetail}; ${lanes}` : mainDetail,
+    out: h.out,
+  };
 }
 
 function checkGate(
@@ -485,12 +521,18 @@ function checkGate(
     ?.slice(5);
   if (!gate)
     return { ok: false, detail: "scripts/discover-project.sh found no gate", out: r.out ?? "" };
-  const install =
-    (r.out ?? "")
-      .split("\n")
-      .find((l) => l.startsWith("install="))
-      ?.slice(8) ?? "";
-  const argv = ["bun", join(HERE, "clean-checkout.ts"), repo, branch];
+  const install = (r.out ?? "")
+    .split("\n")
+    .find((l) => l.startsWith("install="))
+    ?.slice(8);
+  const argv = [
+    "bun",
+    "--no-env-file",
+    `--config=${join(TOOL, "bunfig.toml")}`,
+    join(HERE, "clean-checkout.ts"),
+    repo,
+    branch,
+  ];
   if (install) argv.push(install);
   argv.push(gate);
   const g = sh(argv);
@@ -508,15 +550,14 @@ function checkStages(dispatch: string): { ok: boolean; detail: string } {
     return { ok: false, detail: "scripts/stage.sh --list names no done stage" };
   }
   let expected = listed.slice(0, listed.indexOf("done") + 1);
-  const legR = sh(["bash", join(HERE, "turnpikes.sh"), "legs", dispatch]);
-  if (legR.code !== 0) {
-    return { ok: false, detail: `scripts/turnpikes.sh legs: ${tail(legR.out)}` };
-  }
-  const hasReview = pySplitLines(legR.out).some((line) => {
-    const parts = pyWords(line);
-    return parts.length > 1 && parts[1] === "review";
+  const legsR = sh(["bash", join(HERE, "turnpikes.sh"), "legs", dispatch]);
+  if (legsR.code !== 0)
+    return { ok: false, detail: `scripts/turnpikes.sh legs: ${tail(legsR.out ?? "")}` };
+  const hasReview = pySplitLines(legsR.out ?? "").some((line) => {
+    const words = pyWords(line);
+    return words.length > 1 && words[1] === "review";
   });
-  if (!hasReview) expected = expected.filter((s) => s !== "review");
+  expected = expected.filter((s) => s !== "review" || hasReview);
   const events = readActions(dispatch);
   if (events === null) return { ok: false, detail: "no actions.jsonl" };
   const entered = events.filter((e) => e.action === "stage").map((e) => e.target);

@@ -64,6 +64,17 @@ if (skipPython) {
   );
 }
 
+// #163 deliberately reworded the draft's Notes on main; the pinned BASE still carries
+// the old sentence, so parity remaps BASE's drafts to the new wording before comparing.
+// The port's own wording is asserted directly by the contract-checker control, so the
+// remap never runs on the port side.
+function note163(body: string): string {
+  return body.replace(
+    "proposed fix. If the fix changes the coachman contract (markers, the waybill shape, completion detection), a fixture run confirms it before it merges.",
+    "proposed fix. The postmaster's contract checker decides from the final branch whether a fixture run is required; this ticket's wording does not decide it.",
+  );
+}
+
 function normRid(s: string): string {
   return s
     .replace(/(run )[0-9a-f]{10}(?![\p{L}\p{N}_])/gu, "$1RID")
@@ -1103,6 +1114,13 @@ if (a[0] === "api" && a[1] === "graphql") {
         rc === 0 && writes("create") === 1 && n1Body.split("\n").includes("## Notes"),
         `exit ${rc}\n${out}`,
       );
+      check(
+        "a draft's Notes leave the fixture decision to the contract checker, not the wording",
+        n1Body.includes(
+          "The postmaster's contract checker decides from the final branch whether a fixture run is required",
+        ) && !n1Body.includes("a fixture run confirms it before it merges"),
+        n1Body,
+      );
     }
     appendFileSync(draftOf(notesDir, N2), "It was seen on a quiet day.\n");
     outR = tf("file", notesDir, N2);
@@ -1702,6 +1720,7 @@ if (a[0] === "api" && a[1] === "graphql") {
           };
           const b = drafts(dB);
           const p = drafts(dP);
+          for (const [f, body] of b) b.set(f, note163(body));
           for (const [f, body] of b) {
             if (!p.has(f)) mismatches.push(`draft only on BASE: ${f}`);
             else if (p.get(f) !== body) mismatches.push(`draft differs: ${f}`);
@@ -1862,6 +1881,7 @@ if (a[0] === "api" && a[1] === "graphql") {
           };
           const b = drafts10(pB);
           const p = drafts10(pP);
+          for (const [f, body] of b) b.set(f, note163(body));
           for (const [f, body] of b) {
             if (!p.has(f)) primMismatches.push(`draft only on BASE: ${f}`);
             else if (p.get(f) !== body) primMismatches.push(`draft differs: ${f}`);
@@ -1983,6 +2003,7 @@ if (a[0] === "api" && a[1] === "graphql") {
             };
             const b = drafts11(dB);
             const p = drafts11(dP);
+            for (const [f, body] of b) b.set(f, note163(body));
             for (const [f, body] of b) {
               if (!p.has(f)) sameMismatches.push(`${label} draft only on BASE: ${f}`);
               else if (p.get(f) !== body) {
@@ -2195,6 +2216,11 @@ describe("positive controls", () => {
   test("a draft as the harvest wrote it is filed as written, though a check of the whole would withhold a phrase", () => {
     assertControl(
       "a draft as the harvest wrote it is filed as written, though a check of the whole would withhold a phrase",
+    );
+  });
+  test("a draft's Notes leave the fixture decision to the contract checker, not the wording", () => {
+    assertControl(
+      "a draft's Notes leave the fixture decision to the contract checker, not the wording",
     );
   });
   test("a changed draft is filed when it is still safe, in a project named with words postmaster uses", () => {
