@@ -1,4 +1,4 @@
-// Tests beside scripts/run-meta.ts, moved from its --self-test on #109: 96 controls.
+// Tests beside scripts/run-meta.ts, moved from its --self-test on #109: 97 controls.
 // The sequence runs once in beforeAll with recording check/ok/fail; one test per recorded label.
 // Its local check(label, fn) is checkJson here, so the recording check keeps its name.
 // Env pins set by the sequence are restored in afterAll.
@@ -145,6 +145,7 @@ beforeAll(async () => {
     if (meta(d, repo).code === 0) ok("run.json is written");
     else fail("run.json is written");
     checkJson("it names the postmaster commit", (r) => r.postmaster.commit === headOf(TOOL));
+    checkJson("it records the current coachman contract", (r) => r.coachman_contract === 2);
     checkJson(
       "it names the target's HEAD and branch",
       (r) =>
@@ -1446,6 +1447,9 @@ describe("positive controls", () => {
   });
   test("it names the postmaster commit", () => {
     assertControl("it names the postmaster commit");
+  });
+  test("it records the current coachman contract", () => {
+    assertControl("it records the current coachman contract");
   });
   test("it names the target's HEAD and branch", () => {
     assertControl("it names the target's HEAD and branch");

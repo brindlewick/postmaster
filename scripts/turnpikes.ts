@@ -10,13 +10,19 @@
 //   turnpikes.sh legs <dispatch> [--expect <line>]
 //                                       a run's legs, from the `turnpikes:` line under its
 //                                       waybill's title; with --expect, that line must be <line>
-//   turnpikes.sh legs --line <line>     the legs a waybill with that `turnpikes:` line would have
+//   turnpikes.sh legs --line <line>     the current schedule for preflight: the legs a waybill
+//                                       with that `turnpikes:` line would have on a current run
 //   turnpikes.sh short [--project <repo>] <line> the default turnpikes a `turnpikes:` line leaves out
+//
+// New runs always have synthesis (1); review (2) runs only when the waybill names a review
+// turnpike. Older run.json files without a coachman_contract version keep synthesis (1),
+// optional review (2), and ship (3).
 //
 //   exit 0  printed
 //   exit 1  usage, no waybill, or a table that breaks its rules
 //   exit 2  resolve: the text is not a turnpikes section; legs and short: the line is missing,
-//           is not names or none, or is not the one --expect gives. One line per fault, on stdout.
+//           is not names or none, or is not the one --expect gives; legs on a current run: a
+//           turnpike homed on a leg it has none of. One line per fault, on stdout.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
@@ -28,12 +34,16 @@ style      default  review  idiom, naming, abstraction and consistency with the 
 bug        default  review  correctness, logic, and whether the tests are adequate
 security   default  review  exploit paths through the project's risk surfaces`;
 
-export const LEGS: Array<[number, string]> = [
+export const CURRENT_LEGS: Array<[number, string]> = [
+  [1, "synthesis"],
+  [2, "review"],
+];
+export const LEGACY_LEGS: Array<[number, string]> = [
   [1, "synthesis"],
   [2, "review"],
   [3, "ship"],
 ];
-export const ALWAYS = new Set(["synthesis", "ship"]);
+export const ALWAYS = new Set(["synthesis"]);
 const RESERVED = ["default", "none"];
 const BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/u;
 // Python's strerror, for the read errors BASE reports concisely.
@@ -85,9 +95,9 @@ export function parseTable(table: string): { rows: Row[]; faults: string[] } {
     if (mark !== "default" && mark !== "-") {
       faults.push(`line ${n + 1}: "${mark}" is neither default nor -`);
     }
-    if (!LEGS.some(([, l]) => l === leg)) {
+    if (!LEGACY_LEGS.some(([, l]) => l === leg)) {
       faults.push(
-        `line ${n + 1}: "${leg}" is not a leg; the legs are ${LEGS.map(([, l]) => l).join(", ")}`,
+        `line ${n + 1}: "${leg}" is not a leg; the legs are ${LEGACY_LEGS.map(([, l]) => l).join(", ")}`,
       );
     }
     rows.push({ name, d: mark === "default", leg, what });
@@ -206,17 +216,102 @@ export function named(table: string, line: string): string[] | null {
   return names ?? [];
 }
 
-function legsOf(table: string, line: string): void {
-  const got = named(table, line);
-  for (const [n, leg] of LEGS) {
-    const runs = (got ?? []).filter((x) => {
-      const { rows } = parseTable(table);
-      return rows.find((r) => r.name === x)?.leg === leg;
-    });
-    if (ALWAYS.has(leg) || runs.length > 0) {
-      console.log([String(n), leg, ...runs].join(" "));
+/** A run.json without contract metadata belongs to a run dispatched by the old flow. */
+export function legacyDispatch(dispatchDir: string): boolean | string {
+  const path = join(dispatchDir, "run.json");
+  let isFile = false;
+  try {
+    isFile = statSync(path).isFile();
+  } catch {
+    isFile = false;
+  }
+  if (!isFile) return true;
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code ?? "";
+    return `turnpikes: cannot read ${path}: ${STRERROR[code] ?? code}`;
+  }
+  let record: unknown;
+  try {
+    record = JSON.parse(raw);
+  } catch (e) {
+    return `turnpikes: cannot read ${path}: ${(e as Error)?.message ?? e}`;
+  }
+  if (typeof record !== "object" || record === null || Array.isArray(record)) {
+    return `turnpikes: ${path} is not a JSON object`;
+  }
+  const rec = record as Record<string, unknown>;
+  if (!("coachman_contract" in rec)) return true;
+  const contract = rec.coachman_contract;
+  // An exact int only: 1.0 and 2.0 parse to ints but are not ones.
+  if (typeof contract === "number" && Number.isInteger(contract)) {
+    const tok = new RegExp(
+      `"coachman_contract"[ \\t\\n\\r]*:[ \\t\\n\\r]*${contract}(?![0-9.eE])`,
+      "u",
+    );
+    if (tok.test(raw)) {
+      if (contract === 2) return false;
+      if (contract === 1) return true;
     }
   }
+  return `turnpikes: unsupported coachman contract ${pyRepr(contract, raw)} in ${path}`;
+}
+
+/** Python's %r for a contract value, as the refusal prints it. */
+function pyRepr(v: unknown, raw: string): string {
+  if (v === null || v === undefined) return "None";
+  if (v === true) return "True";
+  if (v === false) return "False";
+  if (typeof v === "string") return `'${v}'`;
+  if (typeof v === "number") {
+    const tok =
+      /"coachman_contract"[ \t\n\r]*:[ \t\n\r]*(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/u.exec(
+        raw,
+      )?.[1];
+    if (tok !== undefined && (tok.includes(".") || /[eE]/u.test(tok))) {
+      return Number.isInteger(v) ? `${String(v)}.0` : String(v);
+    }
+    return String(v);
+  }
+  try {
+    return JSON.stringify(v) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function computeLegs(
+  table: string,
+  got: string[],
+  legacy: boolean,
+): { code: number; out: string[] } {
+  const { rows } = parseTable(table);
+  const legOf = (x: string): string => rows.find((r) => r.name === x)?.leg ?? "";
+  if (!legacy) {
+    for (const x of got) {
+      const home = legOf(x);
+      if (!CURRENT_LEGS.some(([, l]) => l === home)) {
+        return { code: 2, out: [`"${x}" runs in ${home}, and a current run has no ${home} leg`] };
+      }
+    }
+  }
+  const lines: string[] = [];
+  for (const [n, leg] of legacy ? LEGACY_LEGS : CURRENT_LEGS) {
+    const runs = got.filter((x) => legOf(x) === leg);
+    if (ALWAYS.has(leg) || (legacy && leg === "ship") || runs.length > 0) {
+      lines.push([String(n), leg, ...runs].join(" "));
+    }
+  }
+  return { code: 0, out: lines };
+}
+
+function legsOf(table: string, line: string, legacy: boolean): number {
+  const got = named(table, line) ?? [];
+  const r = computeLegs(table, got, legacy);
+  for (const l of r.out) console.log(l);
+  return r.code;
 }
 
 const USAGE =
@@ -287,8 +382,7 @@ function main(argv: string[]): number {
   if (argv[0] === "legs") {
     if (argv[1] === "--line") {
       if (argv.length !== 3) die(USAGE, 1);
-      legsOf(TABLE, argv[2] ?? "");
-      return 0;
+      return legsOf(TABLE, argv[2] ?? "", false);
     }
     const ok1 = argv.length === 2;
     const ok2 = argv.length === 4 && argv[2] === "--expect";
@@ -330,8 +424,13 @@ function main(argv: string[]): number {
       );
       return 2;
     }
-    legsOf(TABLE, found[0] ?? "");
-    return 0;
+    const dispatchDir = argv[1] ?? "";
+    const ld = legacyDispatch(dispatchDir);
+    if (typeof ld === "string") {
+      console.log(ld);
+      return 1;
+    }
+    return legsOf(TABLE, found[0] ?? "", ld);
   }
   die(USAGE, 1);
 }

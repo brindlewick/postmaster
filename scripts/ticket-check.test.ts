@@ -1,4 +1,4 @@
-// Tests beside scripts/ticket-check.ts, moved from its --self-test on #109: 110 controls.
+// Tests beside scripts/ticket-check.ts, moved from its --self-test on #109: 154 controls.
 // The self-test built later fixtures between controls and re-read shared files; fixtures are
 // built here in beforeAll and each test writes its own body first, so every test passes alone
 // as well as in file order. The TICKET helper is named expectCheck: expect is bun:test's.
@@ -1095,8 +1095,9 @@ describe("controls: a repo whose local ticket store exists is read through local
 });
 
 describe("unicode primitives", () => {
-  test("FENCE takes a U+001C indent like BASE", () => {
-    expect(FENCE.test("\x1c```x")).toBe(true);
+  test("FENCE refuses a U+001C indent like BASE", () => {
+    // BASE's fence indent narrowed from \s* to three spaces on #124: only spaces count.
+    expect(FENCE.test("\x1c```x")).toBe(false);
   });
 
   test("FENCED_ITEM takes an Arabic-Indic number like BASE", () => {
@@ -1137,5 +1138,241 @@ describe("unicode primitives", () => {
 
   test("clip splits U+001C like BASE", () => {
     expect(clip("a\x1cb", 70)).toBe("a b");
+  });
+});
+
+describe("--has-journey answers whether the ticket has a User journey", () => {
+  const jbody = (...parts: string[]): { code: number; out: string } => {
+    writeFileSync(join(tmp, "j.md"), `${parts.join("\n\n")}\n\n`);
+    const r = run("bash", [SELF, "--has-journey", join(tmp, "j.md")], {
+      env: { ...(process.env as Record<string, string>) },
+    });
+    return { code: r.code, out: `${r.out}${r.err}`.replace(/\n+$/u, "") };
+  };
+
+  const jexpect = (label: string, parts: string[], want: string): void => {
+    test(label, () => {
+      const r = jbody(...parts);
+      expect(r.code).toBe(0);
+      expect(r.out).toBe(want);
+    });
+  };
+
+  jexpect("a ticket with a User journey has one", [P, A, D, K, UJ], "journey");
+  jexpect("a ticket without one has none", [P, A, D, K], "no journey");
+  jexpect(
+    "a comment inside the heading leaves it a heading",
+    [P, A, D, K, "## User journey <!-- draft -->", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "a comment between the hashes and the words leaves it a heading",
+    [P, A, D, K, "# <!-- -->User journey", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "a comment opener inside a fence does not eat the journey",
+    [P, A, D, K, "```", "Write <!-- to open", "```", "## User journey", "1. x", "<!-- done -->"],
+    "journey",
+  );
+  jexpect(
+    "fail-closed: a same-line remainder still answers yes",
+    [P, A, D, K, "<!-- note --> ## User journey", "1. x"],
+    "journey",
+  );
+  jexpect(
+    "fail-closed: a commented-out journey still answers yes",
+    [P, A, D, K, "<!--", "## User journey", "1. Open it.", "-->"],
+    "journey",
+  );
+  jexpect(
+    "fail-closed: a fenced journey still answers yes",
+    [P, A, D, K, "```", "## User journey", "1. Open it.", "```"],
+    "journey",
+  );
+  jexpect(
+    "a setext subject line reads as a journey line",
+    [P, A, D, K, "User journey", "============", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "a setext dashed subject line reads as a journey line",
+    [P, A, D, K, "User journey", "------------", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "an indented journey still names the section",
+    [P, A, D, K, "   ## User journey", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "closing hashes still name the section",
+    [P, A, D, K, "## User journey ##", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "a trailing colon still names the section",
+    [P, A, D, K, "## User journey:", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "a trailing full stop still names the section",
+    [P, A, D, K, "## User journey.", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "journey-phrase: extra heading words still hold the phrase",
+    [P, A, D, K, "## User journey log", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "a level-one journey still names the section",
+    [P, A, D, K, "# User journey", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "indented code does not open a fence around the journey",
+    [P, A, D, K, "    ```", "    literal indented text", "## User journey", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "a deeply indented item fence does not hide the journey",
+    [P, A, D, K, "     1. ```", "     not code", "## User journey", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "a trailing colon and full stop still name the section",
+    [P, A, D, K, "## User journey:.", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "a trailing colon and semicolon still name the section",
+    [P, A, D, K, "## User journey:;", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "journey-phrase: a doubled space still reads",
+    [P, A, D, K, "## User  journey", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "journey-phrase: a tab still reads",
+    [P, A, D, K, "## User\tjourney", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "journey-phrase: a closer on the heading line still reads",
+    [P, A, D, K, "## User journey -->", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "journey-phrase: a heading after a closer still reads",
+    [P, A, D, K, "--> ## User journey", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "journey-phrase: a trailing comma still reads",
+    [P, A, D, K, "## User journey,", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "journey-phrase: a mention in passing still blocks landing visibly",
+    [P, A, D, K, "## Notes", "This changes the user journey for checkout."],
+    "journey",
+  );
+  jexpect(
+    "journey-phrase: emphasis still reads",
+    [P, A, D, K, "## *User journey*", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "journey-phrase: all caps still reads",
+    [P, A, D, K, "## USER JOURNEY", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "journey-phrase: a quoted heading still reads",
+    [P, A, D, K, "> ## User journey", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "journey-phrase: backticks still read",
+    [P, A, D, K, "## `User journey`", "1. Open it."],
+    "journey",
+  );
+  jexpect(
+    "journey-phrase: the phrase as a substring still reads",
+    [P, A, D, K, "## Notes", "The user journeys through checkout."],
+    "journey",
+  );
+  jexpect(
+    "journey-phrase: the word journey alone is not the phrase",
+    [P, A, D, K, "## Notes", "The journey is long and winding."],
+    "no journey",
+  );
+  jexpect(
+    "AE4: the ASCII possessive still reads",
+    [P, A, D, K, "## Notes", "Improve the user's journey at checkout."],
+    "journey",
+  );
+  jexpect(
+    "AE4: the curly possessive still reads",
+    [P, A, D, K, "## Notes", "Improve the user\u2019s journey at checkout."],
+    "journey",
+  );
+  jexpect(
+    "AE4: a zero-width space still reads",
+    [P, A, D, K, "## Notes", "Improve the user\u200bjourney."],
+    "journey",
+  );
+  jexpect(
+    "AE4: a word joiner still reads",
+    [P, A, D, K, "## Notes", "Improve the user\u2060journey."],
+    "journey",
+  );
+  jexpect(
+    "AE4: a soft hyphen still reads",
+    [P, A, D, K, "## Notes", "Improve the user\u00adjourney."],
+    "journey",
+  );
+  jexpect(
+    "AE4: an entity is not decoded",
+    [P, A, D, K, "## Notes", "Improve the user&#32;journey."],
+    "no journey",
+  );
+  jexpect(
+    "AF3: a hyphen joins the phrase",
+    [P, A, D, K, "## Notes", "Improve the user-journey at checkout."],
+    "journey",
+  );
+  jexpect(
+    "AF3: an en dash joins the phrase",
+    [P, A, D, K, "## Notes", "Improve the user\u2013journey at checkout."],
+    "journey",
+  );
+  jexpect(
+    "AF3: an em dash joins the phrase",
+    [P, A, D, K, "## Notes", "Improve the user\u2014journey at checkout."],
+    "journey",
+  );
+  jexpect(
+    "AG4: U+2010 joins the phrase",
+    [P, A, D, K, "## Notes", "Improve the user\u2010journey at checkout."],
+    "journey",
+  );
+  jexpect(
+    "AG4: U+2011 joins the phrase",
+    [P, A, D, K, "## Notes", "Improve the user\u2011journey at checkout."],
+    "journey",
+  );
+
+  test("a same-line remainder does not satisfy a required part", () => {
+    body(
+      "<!-- x --> ## Problem / feature\nA ticket reaches a coachman with words under it.",
+      A,
+      D,
+      K,
+    );
+    expectCheck(2, "problem / feature");
   });
 });

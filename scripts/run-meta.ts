@@ -10,11 +10,11 @@
 //
 // Records when it was written; the run and project; the target repo's HEAD and branch; the
 // postmaster commit that dispatched it, and whether that checkout had uncommitted changes,
-// since a run keeps the runbooks it started with; the pinned checkout of that commit, which
-// every leg launch, resume and takeover runs from (the waybill's `tool:`); the machine config
-// with local role choices resolved; the project settings and their sources; and the version
-// each harness reports. Env files are named by the machine config, never read. A run.json that
-// already exists is left alone.
+// since a run keeps the runbooks it started with; the coachman contract version; the pinned
+// checkout of that commit, which every leg launch, resume and takeover runs from (the
+// waybill's `tool:`); the machine config with local role choices resolved; the project
+// settings and their sources; and the version each harness reports. Env files are named by
+// the machine config, never read. A run.json that already exists is left alone.
 //
 // The pin is a detached worktree of the postmaster repo at the dispatch commit, under
 // $POSTMASTER_TOOL_PINS (default ~/.postmaster/tool-pins), one directory per commit so every
@@ -707,6 +707,7 @@ function buildRecord(
     ok: true,
     record: {
       written: utcStamp(new Date()),
+      coachman_contract: 2,
       project: projectName(d),
       run: basename(realpathSync(d)),
       project_settings: settings.value,

@@ -12,6 +12,16 @@
 //   ticket-check.sh --splice <base-body> <sections>       print <base-body> with each `##` section
 //                                                         of <sections> in place of the one it
 //                                                         names, or added where the shape puts it
+//   ticket-check.sh --has-journey <file>                  print `journey` or `no journey`: whether
+//                                                         the phrase "user journey" occurs anywhere in
+//                                                         the text, case-insensitively, with whitespace
+//                                                         runs (and zero-width joiners) collapsed, the
+//                                                         possessive `'s`/`’s` dropped, and markup (`#`,
+//                                                         `>`, `*`, `_`, backticks, apostrophes, hyphens,
+//                                                         comment openers and closers) read as spaces. No headings
+//                                                         are read. Fail-closed: a mention in passing
+//                                                         blocks landing visibly until the journey runs
+//                                                         or the user rules.
 //
 // What it judges, and nothing more:
 //   - The title has words: the one the adapter read, or the one --title gives.
@@ -30,7 +40,9 @@
 //     reads them for the target project, and every word that is not a turnpike is named. The names come from that
 //     script alone, so a turnpike added there needs no change here.
 // Code spans, fenced blocks and HTML comments are not read for questions, marks or headings,
-// and quoted text is not read for questions. A <!-- that nothing closes is text. Turnpikes are
+// and quoted text is not read for questions. A <!-- that nothing closes is text. A heading's
+// hashes must stand at the line's start as written: what follows a comment on its line is
+// text, not a heading. Turnpikes are
 // read from code spans too, and not from fenced blocks or HTML comments.
 //
 // What it does not judge: whether the description says why the change matters; whether a
@@ -87,14 +99,16 @@ export const HEADING = new RegExp(
   "^ {0,3}(#{1,6})(?:[ \t]+(" + PY_DOT + "*?))?[ \t]*" + END_OF_STRING + "",
   "u",
 );
-export const FENCE = new RegExp(
-  "^[" + PY_S_CLASS + "]*(`{3,})[^`]*" + END_OF_STRING + "|^[" + PY_S_CLASS + "]*(~{3,})",
-  "u",
-);
+export const FENCE = new RegExp("^ {0,3}(`{3,})[^`]*" + END_OF_STRING + "|^ {0,3}(~{3,})", "u");
 export const FENCED_ITEM = new RegExp(
-  "^ *(?:[-*+]|\\p{Nd}{1,9}[.)])[ \t]+(?:(`{3,})[^`]*|(~{3,})" + PY_DOT + "*)" + END_OF_STRING + "",
+  "^ {0,3}(?:[-*+]|\\p{Nd}{1,9}[.)])[ \t]+(?:(`{3,})[^`]*|(~{3,})" +
+    PY_DOT +
+    "*)" +
+    END_OF_STRING +
+    "",
   "u",
 );
+const HASH_AT_START = /^ {0,3}#+/u;
 const TICKS = /`+/gu;
 const SPAN = /(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n).)+?)(?<!`)\1(?!`)/gsu;
 const QUOTED = /"[^"\n]*"|"[^"\n]*"/gu;
@@ -245,12 +259,14 @@ interface Head {
   raw: string;
 }
 
-function headsOf(lines: Array<[string, boolean]>): Head[] {
+function headsOf(raw: string[], lines: Array<[string, boolean]>): Head[] {
   const heads: Head[] = [];
   for (let i = 0; i < lines.length; i++) {
     const [t, code] = lines[i]!;
     const m = code ? null : HEADING.exec(t);
-    if (m) {
+    // The hashes must stand at the line's start as written: a same-line remainder after
+    // a comment is text, not a heading, even once the comment is gone.
+    if (m && HASH_AT_START.test(raw[i] ?? "")) {
       heads.push({ i, level: (m[1] ?? "").length, norm: norm(m[2] ?? ""), raw: t.trim() });
     }
   }
@@ -407,8 +423,8 @@ function check(
   text: string,
   turnpikesPath: string,
 ): [string[], number, string] {
-  const [, lines] = tokenize(text);
-  const heads = headsOf(lines);
+  const [raw, lines] = tokenize(text);
+  const heads = headsOf(raw, lines);
   const bounds = boundsOf(heads);
   const faults: string[] = [];
   const fault = (part: string, msg: string) => faults.push(`${part}: ${msg}`);
@@ -473,7 +489,7 @@ function chunks(text: string): [string[], Array<[Head, string[]]>] {
     raw = raw.slice(0, -1);
     lines = lines.slice(0, -1);
   }
-  const bounds = boundsOf(headsOf(lines));
+  const bounds = boundsOf(headsOf(raw, lines));
   const starts = bounds.map((b) => b.i).concat([raw.length]);
   const secs = bounds.map((b, k) => [b, raw.slice(b.i, starts[k + 1])] as [Head, string[]]);
   return [raw.slice(0, starts[0] ?? 0), secs];
@@ -537,6 +553,19 @@ function splice(baseText: string, sectionsText: string, _turnpikesPath: string):
   return `${linesOut.join("\n")}\n`;
 }
 
+export const JOURNEY_MARKUP = new RegExp(
+  "<!--|-->|[#> *_`'\u2019\u2013\u2014\u2010\u2011-]+",
+  "gu",
+);
+export const JOURNEY_SPACE = new RegExp("[" + PY_S_CLASS + "\u200b\u2060\u00ad]+", "gu");
+
+export function hasJourney(text: string): boolean {
+  // Fail-closed: the phrase anywhere counts, whatever shapes it.
+  const bare = text.replace(new RegExp("['\u2019][sS]" + BOUND_R, "gu"), ""); // the possessive reads as the bare phrase
+  const flat = bare.replace(JOURNEY_MARKUP, " ").replace(JOURNEY_SPACE, " ");
+  return pyLower(flat).includes("user journey");
+}
+
 // --- printed mode ------------------------------------------------------------------------------
 function _checkPrinted(text: string, turnpikesPath: string): number {
   const sep = text.indexOf("\n\n");
@@ -558,7 +587,7 @@ function _checkPrinted(text: string, turnpikesPath: string): number {
 const TURNPIKES = join(scriptsDir(import.meta), "turnpikes.sh");
 
 const USAGE =
-  "usage: ticket-check.sh <repo> <ticket-id> | --body <body-file> [--title <title>] [--project <repo>] | --splice <base-body> <sections>";
+  "usage: ticket-check.sh <repo> <ticket-id> | --body <body-file> [--title <title>] [--project <repo>] | --splice <base-body> <sections> | --has-journey <file>";
 
 function usage(): never {
   console.error(USAGE);
@@ -638,6 +667,22 @@ function main(argv: string[]): number {
       const baseText = loadText(argv[1]!);
       const sectionsText = loadText(argv[2]!);
       process.stdout.write(splice(baseText, sectionsText, TURNPIKES));
+      return 0;
+    } catch (e) {
+      if (e instanceof DieError) {
+        process.stderr.write(`ticket-check: ${e.msg}\n`);
+        return e.code;
+      }
+      throw e;
+    }
+  }
+  if (mode === "--has-journey") {
+    if (argv.length !== 2) {
+      usage();
+    }
+    try {
+      const text = loadText(argv[1]!);
+      console.log(hasJourney(text) ? "journey" : "no journey");
       return 0;
     } catch (e) {
       if (e instanceof DieError) {

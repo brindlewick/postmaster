@@ -1,4 +1,4 @@
-// Tests beside scripts/runs-status.ts, moved from its --self-test on #109: 19 controls.
+// Tests beside scripts/runs-status.ts, moved from its --self-test on #109: 25 controls.
 // Fifteen fixture runs plus the postmaster directory are planted once in beforeAll;
 // status() only reads, so every test is independent.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -25,6 +25,12 @@ function mkOdd(name: string, legLiteral: string, ...markers: string[]): void {
   writeFileSync(join(d, "manifest.json"), `{"stage": "review", "leg": ${legLiteral}}\n`);
   writeFileSync(join(d, "run-log.md"), "");
   for (const m of markers) writeFileSync(join(d, m), "");
+}
+
+function mkCurrent(name: string, stage: string, leg: number, ...markers: string[]): void {
+  // A contract 2 dispatch; runs-status never reads run.json, the marker is realism.
+  mkRun(name, stage, leg, ...markers);
+  writeFileSync(join(root, name, "run.json"), '{"coachman_contract": 2}\n');
 }
 
 function age(name: string): void {
@@ -97,6 +103,12 @@ beforeAll(() => {
   writeFileSync(join(root, "stall", ".leg-1-done"), "");
   mkOdd("boolleg", "true", ".leg-True-done", ".leg-True-exited");
   mkOdd("nullleg", "null", ".leg-None-done", ".leg-None-exited");
+  mkCurrent("one-final", "checkpoint-1", 1, ".card-ready", ".leg-1-done", ".leg-1-exited");
+  mkCurrent("two-final", "review", 2, ".card-ready", ".leg-2-done", ".leg-2-exited");
+  mkCurrent("two-dispatch", "review", 2, ".leg-2-done", ".leg-2-exited");
+  mkRun("legacy-gate", "shipping", 3, ".card-ready");
+  mkRun("legacy-dispatch", "review", 2, ".leg-2-done", ".leg-2-exited");
+  mkRun("legacy-last", "shipped", 3, ".leg-3-done", ".leg-3-exited");
   mkdirSync(join(root, "postmaster"), { recursive: true });
 });
 
@@ -183,5 +195,31 @@ describe("non-string legs print in Python's spelling", () => {
 
   test("a run with no markers shows a dash, not blanks", () => {
     expect(pyWords(rowOf("wait"))[3]).toBe("-");
+  }, 10000);
+});
+
+describe("two-leg and legacy runs", () => {
+  test("a one-leg synthesis card is GATE", () => {
+    expect(nextOf("one-final")).toBe("GATE");
+  }, 10000);
+
+  test("a two-leg review card is GATE", () => {
+    expect(nextOf("two-final")).toBe("GATE");
+  }, 10000);
+
+  test("a current two-leg review completion is DISPATCH", () => {
+    expect(nextOf("two-dispatch")).toBe("DISPATCH");
+  }, 10000);
+
+  test("a pre-change ship card remains GATE", () => {
+    expect(nextOf("legacy-gate")).toBe("GATE");
+  }, 10000);
+
+  test("a pre-change review completion still dispatches ship", () => {
+    expect(nextOf("legacy-dispatch")).toBe("DISPATCH");
+  }, 10000);
+
+  test("a pre-change ship completion is DISPATCH", () => {
+    expect(nextOf("legacy-last")).toBe("DISPATCH");
   }, 10000);
 });

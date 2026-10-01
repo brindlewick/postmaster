@@ -1175,7 +1175,10 @@ function readEvents(path: string): unknown[] {
   } catch (e) {
     fail(`cannot read ${path}: ${errMsg(e)}`);
   }
-  const lines = pySplitLines(decodeUtf8(buf));
+  // A stream of JSON lines splits on the newline character alone. Splitting
+  // lines also breaks inside JSON strings on U+2028, U+2029, CR, VT and FF,
+  // which refuses a valid stream; the report-text readers below keep it.
+  const lines = decodeUtf8(buf).split("\n");
   const events: unknown[] = [];
   lines.forEach((line, n) => {
     if (pyTrim(line) === "") return;

@@ -1,4 +1,4 @@
-// Tests beside scripts/stage.ts, moved from its --self-test on #109: 20 controls.
+// Tests beside scripts/stage.ts, moved from its --self-test on #109: 31 controls.
 // The self-test ran its controls in one shared temp run with fresh() resets; each test below
 // repeats its own setup so it passes alone as well as in file order.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -45,6 +45,20 @@ const count = (): number => {
       .filter((l) => l.includes('"action":"stage"')).length;
   } catch {
     return 0;
+  }
+};
+
+const stageTargets = (): string => {
+  try {
+    return readFileSync(join(d, "actions.jsonl"), "utf8")
+      .split("\n")
+      .filter((l) => l !== "")
+      .map((l) => JSON.parse(l) as { action?: string; target?: string })
+      .filter((e) => e.action === "stage")
+      .map((e) => e.target ?? "")
+      .join(" ");
+  } catch {
+    return "?";
   }
 };
 
@@ -196,6 +210,50 @@ describe("negative controls", () => {
     });
   }
 
+  test("shipped from the coachman is refused on a contract 2 run, and nothing changes", () => {
+    fresh();
+    writeFileSync(join(d, "run.json"), '{"coachman_contract": 2}\n');
+    const before = readFileSync(join(d, "manifest.json"), "utf8");
+    const rc = setStage(d, "shipped", "coachman");
+    expect(rc).toBe(4);
+    expect(count()).toBe(0);
+    expect(readFileSync(join(d, "manifest.json"), "utf8")).toBe(before);
+    rmSync(join(d, "run.json"), { force: true });
+  });
+
+  test("shipped from the postmaster is allowed on a contract 2 run", () => {
+    fresh();
+    writeFileSync(join(d, "run.json"), '{"coachman_contract": 2}\n');
+    const rc = setStage(d, "shipped", "postmaster");
+    expect(rc).toBe(0);
+    expect(count()).toBe(1);
+    expect(readFileSync(join(d, "manifest.json"), "utf8")).toContain('"stage": "shipped"');
+    rmSync(join(d, "run.json"), { force: true });
+  });
+
+  for (const contract of ["1", '"2"', "true", "null"]) {
+    test(`shipped from the coachman is allowed with contract ${contract}`, () => {
+      fresh();
+      writeFileSync(join(d, "run.json"), `{"coachman_contract": ${contract}}\n`);
+      const rc = setStage(d, "shipped", "coachman");
+      expect(rc).toBe(0);
+      rmSync(join(d, "run.json"), { force: true });
+    });
+  }
+
+  test("shipped from the coachman is allowed with no run.json", () => {
+    fresh();
+    rmSync(join(d, "run.json"), { force: true });
+    expect(setStage(d, "shipped", "coachman")).toBe(0);
+  });
+
+  test("shipped from the coachman is allowed with an unreadable run.json", () => {
+    fresh();
+    writeFileSync(join(d, "run.json"), "not json\n");
+    expect(setStage(d, "shipped", "coachman")).toBe(0);
+    rmSync(join(d, "run.json"), { force: true });
+  });
+
   test("the coachman cannot move a run out of abandoned", () => {
     fresh();
     setStage(d, "abandoned", "postmaster");
@@ -210,6 +268,60 @@ describe("negative controls", () => {
     fresh();
     rmSync(join(d, "manifest.json"));
     expect(setStage(d, "bootstrapped", "coachman")).toBe(1);
+  });
+
+  test("a two-leg run walks every stage to done", () => {
+    fresh();
+    const walked: Array<[string, string]> = [
+      ["bootstrapped", "coachman"],
+      ["workhorses-running", "coachman"],
+      ["synthesis", "coachman"],
+      ["checkpoint-1", "coachman"],
+      ["review", "coachman"],
+      ["shipping", "coachman"],
+      ["shipped", "postmaster"],
+      ["done", "postmaster"],
+    ];
+    for (const [s, actor] of walked) expect(setStage(d, s, actor)).toBe(0);
+    expect(stageTargets()).toBe(
+      "bootstrapped workhorses-running synthesis checkpoint-1 review shipping shipped done",
+    );
+  });
+
+  test("a one-leg run skips review and still reaches done", () => {
+    fresh();
+    const walked: Array<[string, string]> = [
+      ["bootstrapped", "coachman"],
+      ["workhorses-running", "coachman"],
+      ["synthesis", "coachman"],
+      ["checkpoint-1", "coachman"],
+      ["shipping", "coachman"],
+      ["shipped", "postmaster"],
+      ["done", "postmaster"],
+    ];
+    for (const [s, actor] of walked) expect(setStage(d, s, actor)).toBe(0);
+    expect(stageTargets()).toBe(
+      "bootstrapped workhorses-running synthesis checkpoint-1 shipping shipped done",
+    );
+  });
+
+  test("a three-leg run keeps the stages it always walked", () => {
+    fresh();
+    rmSync(join(d, "run.json"), { force: true });
+    const walked: Array<[string, string]> = [
+      ["bootstrapped", "coachman"],
+      ["workhorses-running", "coachman"],
+      ["synthesis", "coachman"],
+      ["checkpoint-1", "coachman"],
+      ["review", "coachman"],
+      ["shipping", "coachman"],
+      ["shipped", "coachman"],
+      ["done", "postmaster"],
+    ];
+    for (const [s, actor] of walked) expect(setStage(d, s, actor)).toBe(0);
+    expect(stageTargets()).toBe(
+      "bootstrapped workhorses-running synthesis checkpoint-1 review shipping shipped done",
+    );
   });
 
   test("mkstemp names are unique, mode 0600, and hold their own bytes", () => {

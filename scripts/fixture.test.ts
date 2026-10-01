@@ -1,4 +1,4 @@
-// Tests beside scripts/fixture.ts, moved from its --self-test on #109: 63 controls,
+// Tests beside scripts/fixture.ts, moved from its --self-test on #109: 70 controls,
 // plus two lane-score controls for the #159 merge.
 // The run records, scores and hidden suites are built once in beforeAll; each test asserts.
 // CLI-refusal controls spawn the wrapper; internal controls import from "./fixture".
@@ -76,8 +76,12 @@ function rcOf(name: string): number | "none" {
   return bgResults.has(name) ? (bgResults.get(name)?.code ?? 0) : "none";
 }
 
-function record(name: string, t: string, shipped: "reference" | "app" | "broken"): number {
-  const legs = 3;
+function record(
+  name: string,
+  t: string,
+  shipped: "reference" | "app" | "broken",
+  legs = 2,
+): number {
   const repo = join(tmp, name, "repo");
   const d = join(tmp, name, "repo", ".postmaster", "runs", "7");
   mkdirSync(join(tmp, name), { recursive: true });
@@ -111,25 +115,45 @@ function record(name: string, t: string, shipped: "reference" | "app" | "broken"
     join(d, "manifest.json"),
     JSON.stringify({ stage: "dispatched", leg: 1, base, lanes: {}, coachman: { legs: {} } }) + "\n",
   );
+  const turnpikes = legs === 1 ? "turnpikes: none" : "turnpikes: style, bug, security";
   writeFileSync(
     join(d, "brief.md"),
-    `# Waybill: 7\n\n## Ticket\n\n${ticketBody(t)}\n## Project profile\nrepo: ${repo}\n`,
+    `# Waybill: 7\n${turnpikes}\n\n## Ticket\n\n${ticketBody(t)}\n## Project profile\nrepo: ${repo}\n`,
   );
   run("bash", [join(HERE, "run-meta.sh"), d, repo]);
+  if (legs === 3) {
+    const runJson = JSON.parse(readFileSync(join(d, "run.json"), "utf-8"));
+    delete runJson.coachman_contract;
+    writeFileSync(join(d, "run.json"), JSON.stringify(runJson, null, 2));
+  }
 
   const stageList = stages.split("\n").filter(Boolean);
-  const count = stageList.length;
-  let doneStages = 0;
+  // Leg 1 enters every stage through checkpoint-1; each later leg its own slice of the rest;
+  // the postmaster closes. A current run's shipped is the postmaster's; a pre-change ship leg
+  // sets its own, as the runbooks have it.
+  const walked = legs === 1 ? stageList.filter((s) => s !== "review") : stageList;
+  const cpIdx = walked.indexOf("checkpoint-1");
+  const through1 = cpIdx < 0 ? [...walked] : walked.slice(0, cpIdx + 1);
+  const rest = cpIdx < 0 ? [] : walked.slice(cpIdx + 1);
+  let slices: string[][];
+  let postStages: string[];
+  if (legs === 1) {
+    slices = [[...through1, ...rest.filter((s) => s !== "shipped")]];
+    postStages = ["shipped", "done"];
+  } else if (legs === 2) {
+    slices = [through1, rest.filter((s) => s !== "shipped")];
+    postStages = ["shipped", "done"];
+  } else {
+    slices = [through1, rest.slice(0, 1), rest.slice(1)];
+    postStages = ["done"];
+  }
   for (let n = 1; n <= legs; n++) {
     writeFileSync(join(d, `leg-${n}-prompt.txt`), `You are the coachman for leg ${n} of 7.\n`);
     run("bash", [join(HERE, "log-action.sh"), d, "postmaster", "dispatch", "7", `leg ${n}`]);
     run("bash", [join(HERE, "log-action.sh"), d, "coachman", "handoff-accept", `leg-${n}`]);
-    const upto = Math.floor((count * n) / legs);
-    for (let si = doneStages; si < upto; si++) {
-      const s = stageList[si];
-      if (s) run("bash", [join(HERE, "stage.sh"), d, s]);
+    for (const s of slices[n - 1] ?? []) {
+      run("bash", [join(HERE, "stage.sh"), d, s]);
     }
-    doneStages = upto;
     const handoffSections = sections.split("\n").filter(Boolean);
     writeFileSync(
       join(d, `handoff-${n}.md`),
@@ -139,7 +163,9 @@ function record(name: string, t: string, shipped: "reference" | "app" | "broken"
     writeFileSync(join(d, `.leg-${n}-done`), "");
     writeFileSync(join(d, `.leg-${n}-exited`), "");
   }
-  run("bash", [join(HERE, "stage.sh"), d, "done", "postmaster"]);
+  for (const s of postStages) {
+    run("bash", [join(HERE, "stage.sh"), d, s, "postmaster"]);
+  }
   writeFileSync(join(d, "card.md"), "# Ship card: 7\n\nBranch 7 is merged into main.\n");
   const manifest = JSON.parse(readFileSync(join(d, "manifest.json"), "utf-8"));
   manifest.leg = legs;
@@ -190,9 +216,21 @@ function breaks(cleanDir: string, repo: string): void {
   rmSync(join(d, "card.md"), { force: true });
 
   d = brokenCopy("break-waybill", cleanDir);
-  writeFileSync(join(d, "brief.md"), "# Waybill: 7\n\n## Ticket\n\nSee the tracker.\n");
+  writeFileSync(
+    join(d, "brief.md"),
+    "# Waybill: 7\nturnpikes: style, bug, security\n\n## Ticket\n\nSee the tracker.\n",
+  );
 
-  for (const b of ["stages", "markers", "handoffs", "runjson", "card", "waybill"]) {
+  d = brokenCopy("break-legs", cleanDir);
+  writeFileSync(
+    join(d, "brief.md"),
+    readFileSync(join(d, "brief.md"), "utf-8")
+      .split("\n")
+      .filter((l) => !l.startsWith("turnpikes: "))
+      .join("\n"),
+  );
+
+  for (const b of ["stages", "markers", "handoffs", "runjson", "card", "waybill", "legs"]) {
     background(`break-${b}`, () =>
       score(join(tmp, `break-${b}`, "repo", ".postmaster", "runs", "7"), repo),
     );
@@ -203,8 +241,9 @@ function recorded(
   name: string,
   t: string,
   shipped: "reference" | "app" | "broken",
+  legs = 2,
 ): number | { code: number; out: string } {
-  const rc = record(name, t, shipped);
+  const rc = record(name, t, shipped, legs);
   if (rc !== 0) {
     console.log(`the record could not be built for ${name}`);
     return 1;
@@ -342,6 +381,8 @@ beforeAll(() => {
   for (const t of tickets()) {
     background(`clean-${t}`, () => recorded(`clean-${t}`, t, "reference"));
   }
+  background("clean-one", () => recorded("clean-one", first, "reference", 1));
+  background("clean-three", () => recorded("clean-three", first, "reference", 3));
   background("break-hidden", () => recorded("break-hidden", first, "app"));
   background("break-gate", () => recorded("break-gate", first, "broken"));
 
@@ -721,6 +762,43 @@ describe("score: a recorded run that meets every check scores clean", () => {
       expectScore(`clean-${t}`, "none");
     }, 30000);
   }
+  test("a one-leg run scores clean", () => {
+    expectScore("clean-one", "none");
+  }, 30000);
+  test("a three-leg run dispatched before this change scores clean", () => {
+    expectScore("clean-three", "none");
+  }, 30000);
+});
+
+describe("score: a record's stages are entered by the legs the contract names", () => {
+  const actionsOf = (name: string): string =>
+    readFileSync(join(tmp, name, "repo", ".postmaster", "runs", "7", "actions.jsonl"), "utf-8");
+
+  test("a one-leg record's shipped is the postmaster's", () => {
+    expect(
+      actionsOf("clean-one").includes('"actor":"postmaster","action":"stage","target":"shipped"'),
+    ).toBe(true);
+  }, 30000);
+  test("a two-leg record's shipped is the postmaster's", () => {
+    expect(
+      actionsOf(`clean-${first}`).includes(
+        '"actor":"postmaster","action":"stage","target":"shipped"',
+      ),
+    ).toBe(true);
+  }, 30000);
+  test("a pre-change record's shipped is its ship leg's", () => {
+    expect(
+      actionsOf("clean-three").includes('"actor":"coachman","action":"stage","target":"shipped"'),
+    ).toBe(true);
+  }, 30000);
+  test("checkpoint-1 lands before leg 2 starts", () => {
+    const lines = actionsOf(`clean-${first}`).split("\n");
+    const c1 = lines.findIndex((l) => l.includes('"action":"stage","target":"checkpoint-1"'));
+    const d2 = lines.findIndex((l) =>
+      l.includes('"action":"dispatch","target":"7","detail":"leg 2"'),
+    );
+    expect(c1 >= 0 && d2 >= 0 && c1 < d2).toBe(true);
+  }, 30000);
 });
 
 const APP_SHIPPED =
@@ -750,6 +828,9 @@ describe("score: negative controls, the same record with one check broken at a t
   }, 30000);
   test("no ship card: ship-card alone fails", () => {
     expectScore("break-card", "ship-card", "no card.md");
+  }, 30000);
+  test("a waybill with no turnpikes line: stages alone fails", () => {
+    expectScore("break-legs", "stages", "turnpikes.sh legs");
   }, 30000);
 });
 

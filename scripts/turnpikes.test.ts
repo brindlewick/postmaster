@@ -1,4 +1,4 @@
-// Tests beside scripts/turnpikes.ts, moved from its --self-test on #109: 70 controls.
+// Tests beside scripts/turnpikes.ts, moved from its --self-test on #109: 90 controls.
 // The self-test staged shared waybills and run state between controls; each test below builds
 // its own fixtures so it passes alone as well as in file order. The root-conditional control
 // is gated by test.skipIf with a top notice.
@@ -9,8 +9,8 @@ import { join } from "node:path";
 import { run } from "./lib/proc.ts";
 import { pyWords } from "./lib/text.ts";
 import {
-  ALWAYS,
-  LEGS,
+  computeLegs,
+  legacyDispatch,
   MARKER,
   named,
   NAME_CHAR_RE,
@@ -102,6 +102,7 @@ const checkHas = (
 
 const waybill = (dir: string, line: string, notes = ""): void => {
   mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "run.json"), '{"coachman_contract": 2}\n');
   const content = `# Waybill: T-1\n${line}\n\n## Ticket\n## Problem / feature\nA change.\n\n## Turnpikes\ndefault\n\n## Notes\n${notes}\n\n## Project profile\nrepo: /r\n\n## Dispatch\nname: #1, A change\ndispatch: ${dir}\ntool: /t\n`;
   writeFileSync(join(dir, "brief.md"), content, "utf8");
 };
@@ -125,31 +126,87 @@ const bad = (extra: string, want: string): void => {
   checkHas(r, 1, want, "style");
 };
 
-const poll = (runsDir: string): string => {
+const poll = (runsDir: string, name: string): string => {
   const r = run("bash", [join(HERE, "runs-status.sh"), runsDir]);
-  const t9 = r.out.split("\n").find((l) => l.startsWith("T-9"));
-  return t9 ? (pyWords(t9).pop() ?? "") : "";
+  const row = r.out.split("\n").find((l) => l.startsWith(name));
+  return row ? (pyWords(row).pop() ?? "") : "";
 };
 
-const setupWalk = (tag: string): { repo: string; d: string } => {
+const HANDOFF_SECTIONS =
+  "## Decisions\nx\n\n## Deferred findings\nx\n\n## Verified by execution\nx\n\n## Unverified\nx\n\n## Branches and lanes\nx\n\n## Open questions\nx\n\n## Next leg\nx\n";
+
+const setupWalk = (
+  tag: string,
+  name: string,
+  turnpikes: string,
+  stage: string,
+  leg: number,
+  markers: string[],
+  handoffs: number[],
+): { repo: string; d: string } => {
   const repo = join(tmp, `repo-${tag}`);
-  const d = join(repo, ".postmaster", "runs", "T-9");
-  waybill(d, "turnpikes: none");
+  const d = join(repo, ".postmaster", "runs", name);
+  waybill(d, turnpikes);
   writeFileSync(join(d, "run-log.md"), "", "utf8");
   writeFileSync(
     join(d, "manifest.json"),
-    '{"stage": "checkpoint-1", "leg": 1, "base": "abc123", "lanes": {}, "coachman": {"legs": {}}}\n',
+    `{"stage": "${stage}", "leg": ${leg}, "base": "abc123", "lanes": {}, "coachman": {"legs": {}}}\n`,
     "utf8",
   );
-  run("bash", [join(HERE, "log-action.sh"), d, "postmaster", "dispatch", "T-9", "leg 1"]);
-  writeFileSync(
-    join(d, "handoff-1.md"),
-    "## Decisions\nx\n\n## Deferred findings\nx\n\n## Verified by execution\nx\n\n## Unverified\nx\n\n## Branches and lanes\nx\n\n## Open questions\nx\n\n## Next leg\nx\n",
-    "utf8",
-  );
-  writeFileSync(join(d, ".leg-1-done"), "", "utf8");
-  writeFileSync(join(d, ".leg-1-exited"), "", "utf8");
+  run("bash", [join(HERE, "log-action.sh"), d, "postmaster", "dispatch", name, `leg ${leg}`]);
+  for (const n of handoffs) writeFileSync(join(d, `handoff-${n}.md`), HANDOFF_SECTIONS, "utf8");
+  for (const m of markers) writeFileSync(join(d, m), "", "utf8");
   return { repo, d };
+};
+
+const setupOne = (tag: string): { repo: string; d: string } =>
+  setupWalk(
+    tag,
+    "one",
+    "turnpikes: none",
+    "shipping",
+    1,
+    [".leg-1-done", ".leg-1-exited", ".card-ready"],
+    [1],
+  );
+
+const setupTwo = (tag: string): { repo: string; d: string } =>
+  setupWalk(
+    tag,
+    "two",
+    "turnpikes: style, bug, security",
+    "checkpoint-1",
+    1,
+    [".leg-1-done", ".leg-1-exited"],
+    [1],
+  );
+
+const setupOld = (tag: string): { repo: string; d: string } => {
+  const { repo, d } = setupWalk(
+    tag,
+    "old",
+    "turnpikes: style",
+    "review",
+    2,
+    [".leg-2-done", ".leg-2-exited"],
+    [2],
+  );
+  rmSync(join(d, "run.json"));
+  return { repo, d };
+};
+
+const stageTargetsOf = (d: string): string => {
+  try {
+    return readFileSync(join(d, "actions.jsonl"), "utf8")
+      .split("\n")
+      .filter((l) => l !== "")
+      .map((l) => JSON.parse(l) as { action?: string; target?: string })
+      .filter((e) => e.action === "stage")
+      .map((e) => e.target ?? "")
+      .join(" ");
+  } catch {
+    return "";
+  }
 };
 
 const advanceWalk = (d: string, leg: number): void => {
@@ -370,32 +427,28 @@ describe("positive controls: a ticket's section", () => {
 });
 
 describe("positive controls: a run's legs", () => {
-  test("a run with no turnpikes goes from synthesis to ship", () => {
+  test("a new run with no review turnpike has one synthesis leg", () => {
     waybill(join(tmp, "none"), "turnpikes: none");
-    checkIs(runSelf("legs", join(tmp, "none")), 0, lines("1 synthesis", "3 ship"));
+    checkIs(runSelf("legs", join(tmp, "none")), 0, lines("1 synthesis"));
   });
 
-  test("a run with the default turnpikes has a review leg that runs all three", () => {
+  test("a new run with default turnpikes has two legs and review runs all three", () => {
     waybill(join(tmp, "default"), "turnpikes: style, bug, security");
     checkIs(
       runSelf("legs", join(tmp, "default")),
       0,
-      lines("1 synthesis", "2 review style bug security", "3 ship"),
+      lines("1 synthesis", "2 review style bug security"),
     );
   });
 
-  test("one review turnpike is enough for a review leg", () => {
+  test("one review turnpike is enough for a two-leg run", () => {
     waybill(join(tmp, "style"), "turnpikes: style");
-    checkIs(
-      runSelf("legs", join(tmp, "style")),
-      0,
-      lines("1 synthesis", "2 review style", "3 ship"),
-    );
+    checkIs(runSelf("legs", join(tmp, "style")), 0, lines("1 synthesis", "2 review style"));
   });
 
   test("a turnpikes line inside the ticket is never read", () => {
     waybill(join(tmp, "notes"), "turnpikes: none", "turnpikes: style, bug, security");
-    checkIs(runSelf("legs", join(tmp, "notes")), 0, lines("1 synthesis", "3 ship"));
+    checkIs(runSelf("legs", join(tmp, "notes")), 0, lines("1 synthesis"));
   });
 
   test("a fence the ticket leaves open changes nothing", () => {
@@ -407,7 +460,7 @@ describe("positive controls: a run's legs", () => {
     checkIs(
       runSelf("legs", join(tmp, "fence")),
       0,
-      lines("1 synthesis", "2 review style bug security", "3 ship"),
+      lines("1 synthesis", "2 review style bug security"),
     );
   });
 
@@ -416,32 +469,41 @@ describe("positive controls: a run's legs", () => {
     checkIs(
       runSelf("legs", join(tmp, "default"), "--expect", "turnpikes:  style, bug,  security"),
       0,
-      lines("1 synthesis", "2 review style bug security", "3 ship"),
+      lines("1 synthesis", "2 review style bug security"),
     );
   });
 
-  test("a turnpike that runs in another leg makes no review leg", () => {
+  test("a legacy turnpike that runs in another leg is kept after synthesis", () => {
     waybill(join(tmp, "extra"), `turnpikes: ${NOPE}`);
-    const got = named(PLUS, `turnpikes: ${NOPE}`);
-    const legLines: string[] = [];
-    for (const [n, leg] of LEGS) {
-      const runs = (got ?? []).filter(
-        (x) => parseTable(PLUS).rows.find((r) => r.name === x)?.leg === leg,
-      );
-      if (ALWAYS.has(leg) || runs.length > 0) legLines.push([String(n), leg, ...runs].join(" "));
-    }
-    checkIs({ code: 0, out: legLines.join("\n") }, 0, lines("1 synthesis", `3 ship ${NOPE}`));
+    rmSync(join(tmp, "extra", "run.json"));
+    expect(legacyDispatch(join(tmp, "extra"))).toBe(true);
+    const got = named(PLUS, `turnpikes: ${NOPE}`) ?? [];
+    const r = computeLegs(PLUS, got, true);
+    checkIs({ code: r.code, out: r.out.join("\n") }, 0, lines("1 synthesis", `3 ship ${NOPE}`));
   });
 
-  test("legs --line gives the legs of a line", () => {
-    checkIs(runSelf("legs", "--line", "turnpikes: none"), 0, lines("1 synthesis", "3 ship"));
+  test("a current run naming a ship-homed turnpike is refused, never silently dropped", () => {
+    waybill(join(tmp, "shiphome"), `turnpikes: ${NOPE}`);
+    expect(legacyDispatch(join(tmp, "shiphome"))).toBe(false);
+    const got = named(PLUS, `turnpikes: ${NOPE}`) ?? [];
+    const r = computeLegs(PLUS, got, false);
+    checkHas(
+      { code: r.code, out: r.out.join("\n") },
+      2,
+      "runs in ship, and a current run has no ship leg",
+      "synthesis",
+    );
   });
 
-  test("legs --line gives a review leg for a review turnpike", () => {
+  test("legs --line gives the one-leg current schedule", () => {
+    checkIs(runSelf("legs", "--line", "turnpikes: none"), 0, lines("1 synthesis"));
+  });
+
+  test("legs --line gives a two-leg current schedule", () => {
     checkIs(
       runSelf("legs", "--line", "turnpikes: security"),
       0,
-      lines("1 synthesis", "2 review security", "3 ship"),
+      lines("1 synthesis", "2 review security"),
     );
   });
 
@@ -536,6 +598,45 @@ describe("negative controls: a run's legs", () => {
     checkHas(runSelf("legs", join(tmp, "nowhere")), 1, "no waybill at");
   });
 
+  test("a run dispatched before the contract marker keeps synthesis and ship", () => {
+    waybill(join(tmp, "old-three"), "turnpikes: none");
+    rmSync(join(tmp, "old-three", "run.json"));
+    checkIs(runSelf("legs", join(tmp, "old-three")), 0, lines("1 synthesis", "3 ship"));
+  });
+
+  test("a pre-change run with review keeps all three legs", () => {
+    waybill(join(tmp, "old-review"), "turnpikes: style");
+    rmSync(join(tmp, "old-review", "run.json"));
+    checkIs(
+      runSelf("legs", join(tmp, "old-review")),
+      0,
+      lines("1 synthesis", "2 review style", "3 ship"),
+    );
+  });
+
+  test("an explicit contract 1 keeps all three legs", () => {
+    waybill(join(tmp, "contract-one"), "turnpikes: style, bug, security");
+    writeFileSync(join(tmp, "contract-one", "run.json"), '{"coachman_contract": 1}\n');
+    checkIs(
+      runSelf("legs", join(tmp, "contract-one")),
+      0,
+      lines("1 synthesis", "2 review style bug security", "3 ship"),
+    );
+  });
+
+  for (const bad of ["null", "true", "false", "2.0", "1.0", '"2"']) {
+    test(`a marker of ${bad} is refused, never read as a schedule`, () => {
+      waybill(join(tmp, "contract-bad"), "turnpikes: style, bug, security");
+      writeFileSync(join(tmp, "contract-bad", "run.json"), `{"coachman_contract": ${bad}}\n`);
+      checkHas(
+        runSelf("legs", join(tmp, "contract-bad")),
+        1,
+        "unsupported coachman contract",
+        "synthesis",
+      );
+    });
+  }
+
   test("a brief.md that is a directory is no waybill", () => {
     const d = join(tmp, "briefdir");
     mkdirSync(join(d, "brief.md"), { recursive: true });
@@ -584,71 +685,151 @@ describe("negative controls: the table", () => {
   });
 });
 
-describe("a run with no turnpikes, walked from synthesis to ship through the poll, the hand-off check and the stages", () => {
-  test("after synthesis the poll says DISPATCH", () => {
-    const { repo } = setupWalk("poll");
-    expect(poll(join(repo, ".postmaster", "runs"))).toBe("DISPATCH");
+describe("controls: a one-leg run, walked from synthesis to the card through the poll, the hand-off check and the stages", () => {
+  test("the final synthesis hand-off passes its check", () => {
+    const { d } = setupOne("one-handoff");
+    const hc = run("bash", [join(HERE, "handoff-check.sh"), join(d, "handoff-1.md")]);
+    expect(hc.code).toBe(0);
   }, 30000);
 
-  test("the leg after synthesis is ship", () => {
-    const { d } = setupWalk("leg-after");
+  test("a one-leg run's card is GATE", () => {
+    const { repo } = setupOne("one-gate");
+    expect(poll(join(repo, ".postmaster", "runs"), "one")).toBe("GATE");
+  }, 30000);
+
+  test("a one-leg run has no second leg", () => {
+    const { d } = setupOne("one-legs");
+    const r = run("bash", [SELF, "legs", d]);
+    expect(r.out.replace(/\n+$/u, "")).toBe("1 synthesis");
+  }, 30000);
+
+  test("a one-leg run closes at done", () => {
+    const { repo, d } = setupOne("one-close");
+    run("bash", [join(HERE, "stage.sh"), d, "shipped", "postmaster"]);
+    run("bash", [join(HERE, "stage.sh"), d, "done", "postmaster"]);
+    expect(poll(join(repo, ".postmaster", "runs"), "one")).toBe("-");
+  }, 30000);
+
+  test("a one-leg run's stages after the card are the postmaster's", () => {
+    const { d } = setupOne("one-stages");
+    run("bash", [join(HERE, "stage.sh"), d, "shipped", "postmaster"]);
+    run("bash", [join(HERE, "stage.sh"), d, "done", "postmaster"]);
+    expect(stageTargetsOf(d)).toBe("shipped done");
+  }, 30000);
+});
+
+describe("controls: a two-leg run, walked from synthesis through review to the card", () => {
+  test("after synthesis the poll says DISPATCH", () => {
+    const { repo } = setupTwo("two-poll");
+    expect(poll(join(repo, ".postmaster", "runs"), "two")).toBe("DISPATCH");
+  }, 30000);
+
+  test("the leg after synthesis is review", () => {
+    const { d } = setupTwo("two-next");
     const r = run("bash", [SELF, "legs", d]);
     const next = r.out.split("\n").find((l) => {
       const n = parseInt(pyWords(l)[0] ?? "", 10);
       return n > 1;
     });
     const nextVal = next ? `${pyWords(next)[0]} ${pyWords(next)[1]}` : "";
-    expect(nextVal).toBe("3 ship");
+    expect(nextVal).toBe("2 review");
   }, 30000);
 
-  test("the ship leg starts from synthesis's hand-off, which passes its check", () => {
-    const { d } = setupWalk("handoff");
+  test("the review leg starts from synthesis's hand-off, which passes its check", () => {
+    const { d } = setupTwo("two-handoff");
     const r = run("bash", [SELF, "legs", d]);
     const prevs = r.out
       .split("\n")
       .map((l) => parseInt(pyWords(l)[0] ?? "", 10))
-      .filter((n) => n < 3);
+      .filter((n) => n < 2);
     const prev = prevs[prevs.length - 1] ?? 0;
     const hc = run("bash", [join(HERE, "handoff-check.sh"), join(d, `handoff-${prev}.md`)]);
     expect(hc.code).toBe(0);
     expect(prev).toBe(1);
   }, 30000);
 
-  test("after ship the poll says DISPATCH, and no leg follows: Stage G", () => {
-    const { repo, d } = setupWalk("after-ship");
-    advanceWalk(d, 3);
+  test("the review leg ends with the card, and no leg follows", () => {
+    const { repo, d } = setupTwo("two-card");
+    advanceWalk(d, 2);
+    run("bash", [join(HERE, "stage.sh"), d, "review"]);
     run("bash", [join(HERE, "stage.sh"), d, "shipping"]);
-    run("bash", [join(HERE, "stage.sh"), d, "shipped"]);
-    writeFileSync(join(d, ".leg-3-done"), "", "utf8");
-    writeFileSync(join(d, ".leg-3-exited"), "", "utf8");
+    writeFileSync(join(d, "handoff-2.md"), HANDOFF_SECTIONS, "utf8");
+    writeFileSync(join(d, ".leg-2-done"), "", "utf8");
+    writeFileSync(join(d, ".leg-2-exited"), "", "utf8");
+    writeFileSync(join(d, ".card-ready"), "", "utf8");
     const r = run("bash", [SELF, "legs", d]);
-    const after = r.out.split("\n").filter((l) => parseInt(pyWords(l)[0] ?? "", 10) > 3);
-    expect(poll(join(repo, ".postmaster", "runs"))).toBe("DISPATCH");
+    const after = r.out.split("\n").filter((l) => parseInt(pyWords(l)[0] ?? "", 10) > 2);
+    expect(poll(join(repo, ".postmaster", "runs"), "two")).toBe("GATE");
     expect(after).toEqual([]);
   }, 30000);
 
-  test("it closes with no review stage", () => {
-    const { repo, d } = setupWalk("closes");
+  test("it closes through the postmaster's stages", () => {
+    const { repo, d } = setupTwo("two-close");
+    advanceWalk(d, 2);
+    run("bash", [join(HERE, "stage.sh"), d, "review"]);
+    run("bash", [join(HERE, "stage.sh"), d, "shipping"]);
+    writeFileSync(join(d, "handoff-2.md"), HANDOFF_SECTIONS, "utf8");
+    writeFileSync(join(d, ".leg-2-done"), "", "utf8");
+    writeFileSync(join(d, ".leg-2-exited"), "", "utf8");
+    writeFileSync(join(d, ".card-ready"), "", "utf8");
+    run("bash", [join(HERE, "stage.sh"), d, "shipped", "postmaster"]);
+    run("bash", [join(HERE, "stage.sh"), d, "done", "postmaster"]);
+    expect(stageTargetsOf(d)).toBe("review shipping shipped done");
+    expect(poll(join(repo, ".postmaster", "runs"), "two")).toBe("-");
+  }, 30000);
+});
+
+describe("controls: a three-leg run dispatched before this change, walked from review to ship", () => {
+  test("a pre-change review leg still dispatches ship", () => {
+    const { repo, d } = setupOld("old-poll");
+    const r = run("bash", [SELF, "legs", d]);
+    const last = r.out.replace(/\n+$/u, "").split("\n").pop() ?? "";
+    expect(poll(join(repo, ".postmaster", "runs"), "old")).toBe("DISPATCH");
+    expect(last).toBe("3 ship");
+  }, 30000);
+
+  test("the leg after review is ship", () => {
+    const { d } = setupOld("old-next");
+    const r = run("bash", [SELF, "legs", d]);
+    const next = r.out.split("\n").find((l) => {
+      const n = parseInt(pyWords(l)[0] ?? "", 10);
+      return n > 2;
+    });
+    const nextVal = next ? `${pyWords(next)[0]} ${pyWords(next)[1]}` : "";
+    expect(nextVal).toBe("3 ship");
+  }, 30000);
+
+  test("the legacy ship hand-off still passes its check", () => {
+    const { d } = setupOld("old-handoff");
+    const hc = run("bash", [join(HERE, "handoff-check.sh"), join(d, "handoff-2.md")]);
+    expect(hc.code).toBe(0);
+  }, 30000);
+
+  test("after ship the card is GATE, and no leg follows", () => {
+    const { repo, d } = setupOld("old-card");
     advanceWalk(d, 3);
     run("bash", [join(HERE, "stage.sh"), d, "shipping"]);
-    run("bash", [join(HERE, "stage.sh"), d, "shipped"]);
+    writeFileSync(join(d, "handoff-3.md"), HANDOFF_SECTIONS, "utf8");
     writeFileSync(join(d, ".leg-3-done"), "", "utf8");
     writeFileSync(join(d, ".leg-3-exited"), "", "utf8");
+    writeFileSync(join(d, ".card-ready"), "", "utf8");
+    const r = run("bash", [SELF, "legs", d]);
+    const after = r.out.split("\n").filter((l) => parseInt(pyWords(l)[0] ?? "", 10) > 3);
+    expect(poll(join(repo, ".postmaster", "runs"), "old")).toBe("GATE");
+    expect(after).toEqual([]);
+  }, 30000);
+
+  test("a three-leg run keeps its stages", () => {
+    const { repo, d } = setupOld("old-close");
+    advanceWalk(d, 3);
+    run("bash", [join(HERE, "stage.sh"), d, "shipping"]);
+    writeFileSync(join(d, "handoff-3.md"), HANDOFF_SECTIONS, "utf8");
+    writeFileSync(join(d, ".leg-3-done"), "", "utf8");
+    writeFileSync(join(d, ".leg-3-exited"), "", "utf8");
+    writeFileSync(join(d, ".card-ready"), "", "utf8");
+    run("bash", [join(HERE, "stage.sh"), d, "shipped"]);
     run("bash", [join(HERE, "stage.sh"), d, "done", "postmaster"]);
-    let stages = "";
-    try {
-      const text = readFileSync(join(d, "actions.jsonl"), "utf8");
-      const targets = text
-        .split("\n")
-        .filter((l) => l !== "")
-        .map((l) => JSON.parse(l))
-        .filter((o: { action: string }) => o.action === "stage")
-        .map((o: { target: string }) => o.target);
-      stages = targets.join(" ");
-    } catch {
-      stages = "";
-    }
-    expect(stages).toBe("shipping shipped done");
-    expect(poll(join(repo, ".postmaster", "runs"))).toBe("-");
+    expect(stageTargetsOf(d)).toBe("shipping shipped done");
+    expect(poll(join(repo, ".postmaster", "runs"), "old")).toBe("-");
   }, 30000);
 });

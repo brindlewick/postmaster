@@ -499,7 +499,16 @@ function checkStages(dispatch: string): { ok: boolean; detail: string } {
   if (r.code !== 0 || !listed.includes("done")) {
     return { ok: false, detail: "scripts/stage.sh --list names no done stage" };
   }
-  const expected = listed.slice(0, listed.indexOf("done") + 1);
+  let expected = listed.slice(0, listed.indexOf("done") + 1);
+  const legR = sh(["bash", join(HERE, "turnpikes.sh"), "legs", dispatch]);
+  if (legR.code !== 0) {
+    return { ok: false, detail: `scripts/turnpikes.sh legs: ${tail(legR.out)}` };
+  }
+  const hasReview = pySplitLines(legR.out).some((line) => {
+    const parts = pyWords(line);
+    return parts.length > 1 && parts[1] === "review";
+  });
+  if (!hasReview) expected = expected.filter((s) => s !== "review");
   const events = readActions(dispatch);
   if (events === null) return { ok: false, detail: "no actions.jsonl" };
   const entered = events.filter((e) => e.action === "stage").map((e) => e.target);

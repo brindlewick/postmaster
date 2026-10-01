@@ -1,4 +1,4 @@
-// Tests beside scripts/review-findings.ts, moved from its --self-test on #109: 91 controls.
+// Tests beside scripts/review-findings.ts, moved from its --self-test on #109: 94 controls.
 // The self-test ran its controls in one shared temp tree; fixtures are built here in beforeAll
 // and each test uses its own fixture names, so every test passes alone as well as in file
 // order. Loop labels repeat across iterations, as the ok lines did.
@@ -158,6 +158,61 @@ describe("recorded reports", () => {
       expect(pyTrim(r.out)).toBe("[]");
     });
   }
+});
+
+describe("separator characters inside JSON strings", () => {
+  // A stream of JSON lines splits on the newline character alone: U+2028,
+  // U+2029, CR, VT and FF inside a JSON string are content, not breaks.
+  const lsep = String.fromCharCode(0x2028);
+  const psep = String.fromCharCode(0x2029);
+  const separatorsFile = (): string => {
+    const noise = `noise${lsep}${psep}\r\v\fend`;
+    const evt = {
+      type: "text",
+      sessionID: "ses_1",
+      part: {
+        type: "text",
+        text: `${noise}\n### Bug — \`src/page.js:8\`: Page includes one extra item\n\nThe exclusive end repeats the boundary record.\n`,
+      },
+    };
+    // JSON.stringify writes the two separators raw, as the reference file holds them.
+    const line = JSON.stringify(evt);
+    const separators = join(root, "mimo-separators.events");
+    writeFileSync(separators, `${line}\n`);
+    return separators;
+  };
+
+  test("a stream holding U+2028, U+2029, CR, VT and FF inside a JSON string harvests as valid", () => {
+    const harvested = cli("harvest", separatorsFile(), logs, "--prefix", "separators");
+    expect(harvested.code).toBe(0);
+  });
+
+  test("and it normalizes to its finding", () => {
+    const r = cli(
+      "normalize",
+      "one",
+      scratch,
+      separatorsFile(),
+      "--run",
+      runConfig("separators", "mimo"),
+    );
+    const found = parsed(r);
+    expect(r.code).toBe(0);
+    expect(found.length).toBe(1);
+    expect(found[0]!["file"]).toBe("src/page.js");
+    expect(found[0]!["line"]).toBe(8);
+  });
+
+  test("a stream with a genuinely broken line is still refused", () => {
+    const broken = join(root, "broken.events");
+    writeFileSync(
+      broken,
+      `${JSON.stringify({ type: "text", part: { type: "text", text: "No findings." } })}\n{"type": "text", "part": "broken\n`,
+    );
+    const refused = cli("harvest", broken, logs, "--prefix", "broken");
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("is not JSON");
+  });
 });
 
 describe("fences", () => {
@@ -594,7 +649,7 @@ describe("degrade", () => {
     const ran = run("bash", [join(root, "sample.sh")]);
     const logged: unknown[] = [];
     if (existsSync(join(sampleDispatch, "actions.jsonl"))) {
-      for (const raw of pySplitLines(readFileSync(join(sampleDispatch, "actions.jsonl"), "utf8"))) {
+      for (const raw of readFileSync(join(sampleDispatch, "actions.jsonl"), "utf8").split("\n")) {
         try {
           logged.push(JSON.parse(raw) as unknown);
         } catch {

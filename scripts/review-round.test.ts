@@ -93,6 +93,20 @@ beforeAll(() => {
       "-m",
       "first",
     ]);
+    run("git", [
+      "-C",
+      repo,
+      "worktree",
+      "add",
+      "-q",
+      "--detach",
+      join(repo, ".worktrees", "T-1-synthesis"),
+      "HEAD",
+    ]);
+    writeFileSync(
+      join(d, "brief.md"),
+      `## Dispatch\nname: T-1\nsynthesis worktree: ${join(repo, ".worktrees", "T-1-synthesis")}\n`,
+    );
     for (const h of ["herdr", "tmux"]) {
       writeFileSync(join(tmp, "bin", h), "#!/bin/sh\nexit 1\n");
       run("chmod", ["+x", join(tmp, "bin", h)]);
@@ -219,6 +233,8 @@ esac
           "run",
           `T-1 · ${lane} ${lens} review`,
           join(repo, ".worktrees", `T-1-rev-${lens}-${lane}`),
+          "--under",
+          d,
           "--role",
           "reviewer",
           "--run",

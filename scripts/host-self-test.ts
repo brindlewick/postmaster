@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   accessSync,
   closeSync,
@@ -9,6 +10,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -239,6 +241,9 @@ async function herdrStub(args: string[]): Promise<void> {
     return;
   }
   if (command === "workspace get") {
+    if (flag(join(stateDir, "wsget.succeed-once")))
+      rmSync(join(stateDir, "wsget.succeed-once"), { force: true });
+    else if (flag(join(stateDir, "wsget.fail"))) process.exit(1);
     const w = st.spaces[args[2]!] ?? {};
     out({
       workspace: {
@@ -256,6 +261,7 @@ async function herdrStub(args: string[]): Promise<void> {
     return;
   }
   if (command === "pane list") {
+    if (flag(join(stateDir, "panelist.fail"))) process.exit(1);
     const ws = opt(args, "--workspace") ?? "";
     out({
       panes: (st.spaces[ws]?.panes ?? []).map((pane_id: string) => ({
@@ -341,13 +347,14 @@ function tmuxStub(args: string[]): void {
   const st = json(path, { n: 0, sessions: [], windows: {} });
   const fmt = opt(args, "-F") ?? "";
   const flag = (name: string) => args.includes(name);
+  const stateFlag = (name: string): boolean => existsSync(join(stateDir, name));
   const launch = (session: string): void => {
     st.n++;
     const win = `@${st.n}`;
-    st.windows[win] = { session, name: opt(args, "-n"), opts: {} };
+    const pane = `%${st.n}`;
+    st.windows[win] = { session, name: opt(args, "-n"), opts: {}, panes: { [pane]: { opts: {} } } };
     if (!st.sessions.includes(session)) st.sessions.push(session);
     save(path, st);
-    const pane = `%${st.n}`;
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? "",
       HOME: process.env.HOME ?? "/",
@@ -398,23 +405,83 @@ function tmuxStub(args: string[]): void {
   }
   if (command === "set-option") {
     const target = opt(args, "-t") ?? "";
-    const win = target in st.windows ? target : `@${target.replace(/^%/u, "")}`;
-    if (st.windows[win]) {
-      st.windows[win].opts[args[args.length - 2]!] = args[args.length - 1];
+    if (flag("-p")) {
+      for (const value of Object.values(st.windows) as Array<any>) {
+        if (value.panes?.[target]) {
+          value.panes[target].opts[args[args.length - 2]!] = args[args.length - 1];
+          save(path, st);
+          break;
+        }
+      }
+    } else {
+      const win = target in st.windows ? target : `@${target.replace(/^%/u, "")}`;
+      if (st.windows[win]) {
+        st.windows[win].opts[args[args.length - 2]!] = args[args.length - 1];
+        save(path, st);
+      }
+    }
+    return;
+  }
+  if (command === "display-message") {
+    const target = opt(args, "-t") ?? "";
+    const panes = st.windows[target]?.panes ?? {};
+    if (Object.keys(panes).length) console.log(Object.keys(panes)[0]);
+    return;
+  }
+  if (command === "ls") {
+    process.exit(stateFlag("tmux.dead") ? 1 : 0);
+  }
+  if (command === "list-panes") {
+    if (stateFlag("panes.fail")) process.exit(1);
+    const target = opt(args, "-t") ?? "";
+    if (!st.windows[target]) process.exit(1);
+    for (const [pane, value] of Object.entries(st.windows[target].panes ?? {}) as Array<
+      [string, any]
+    >)
+      console.log(`${pane}\t${value.opts["@postmaster_owned"] ?? ""}`);
+    return;
+  }
+  if (command === "kill-pane") {
+    const target = opt(args, "-t") ?? "";
+    for (const [win, value] of Object.entries(st.windows) as Array<[string, any]>) {
+      delete value.panes?.[target];
+      if (!Object.keys(value.panes ?? {}).length) {
+        delete st.windows[win];
+        if (!Object.values(st.windows).some((entry: any) => entry.session === value.session))
+          st.sessions = st.sessions.filter((session: string) => session !== value.session);
+      }
       save(path, st);
     }
     return;
   }
   if (command === "kill-window") {
+    const gone = st.windows[opt(args, "-t") ?? ""];
     delete st.windows[opt(args, "-t") ?? ""];
+    if (gone && !Object.values(st.windows).some((entry: any) => entry.session === gone.session))
+      st.sessions = st.sessions.filter((session: string) => session !== gone.session);
     save(path, st);
     return;
   }
   if (command === "list-windows") {
+    if (stateFlag("tmux.dead") || stateFlag("windows.fail")) process.exit(1);
     for (const [win, value] of Object.entries(st.windows) as Array<[string, any]>) {
-      if (flag("-a")) console.log(fmt.includes("window_id") ? `${win}\t${value.name}` : value.name);
-      else if (value.session === (opt(args, "-t") ?? "").replace(/^=/u, ""))
-        console.log(`${win}\t${value.opts["@postmaster_cwd"] ?? ""}`);
+      if (flag("-a")) {
+        if (fmt.includes("#{@postmaster_run}"))
+          console.log(
+            `${win}\t${value.opts["@postmaster_cwd"] ?? ""}\t${value.opts["@postmaster_run"] ?? ""}\t${value.opts["@postmaster_pane"] ?? ""}`,
+          );
+        else console.log(fmt.includes("window_id") ? `${win}\t${value.name}` : value.name);
+      } else if (value.session === (opt(args, "-t") ?? "").replace(/^=/u, "")) {
+        if (fmt.includes("#{@postmaster_run}"))
+          console.log(
+            `${win}\t${value.opts["@postmaster_cwd"] ?? ""}\t${value.opts["@postmaster_run"] ?? ""}\t${value.opts["@postmaster_pane"] ?? ""}`,
+          );
+        else if (fmt.includes("#{@postmaster_pane}"))
+          console.log(
+            `${win}\t${value.opts["@postmaster_cwd"] ?? ""}\t${value.opts["@postmaster_pane"] ?? ""}`,
+          );
+        else console.log(`${win}\t${value.opts["@postmaster_cwd"] ?? ""}`);
+      }
     }
     return;
   }
@@ -435,6 +502,7 @@ function symlinkCommand(name: string, bin: string): void {
     }
   }
 }
+let finishDelay = "3600";
 function host(
   args: string[],
   path: string,
@@ -450,10 +518,33 @@ function host(
     POSTMASTER_HOST_STATE: join(root, "state"),
     POSTMASTER_HOST_FIXTURE: root,
     POSTMASTER_HOST_CLAIM_WAIT: "3",
-    POSTMASTER_HOST_CLOSE_WAIT: "1",
+    POSTMASTER_HOST_CLOSE_WAIT: "3",
+    POSTMASTER_HOST_FINISH_DELAY: finishDelay,
     ...env,
   };
   return exec(SELF, [...args], { cwd, env: environment });
+}
+function testStopFinishers(root: string): void {
+  const path = join(root, "finishers");
+  if (!existsSync(path)) return;
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    const tab = line.indexOf("\t");
+    const pidText = tab < 0 ? line : line.slice(0, tab);
+    const marker = tab < 0 ? "" : line.slice(tab + 1);
+    if (!/^[0-9]+$/u.test(pidText) || !marker) continue;
+    let command = "";
+    try {
+      command = readFileSync(`/proc/${pidText}/cmdline`, "utf8").replace(/\0/gu, " ");
+    } catch {
+      continue;
+    }
+    if (command.includes(marker)) {
+      try {
+        process.kill(Number(pidText));
+      } catch {}
+    }
+  }
+  rmSync(path, { force: true });
 }
 function callText(
   args: string[],
@@ -694,8 +785,39 @@ async function makeHarness(root: string): Promise<{ sys: string; stubs: string }
   return { sys, stubs: `${bin}:${sys}` };
 }
 function resetHarness(root: string): void {
+  testStopFinishers(root);
   const dir = join(root, "stub");
   for (const name of readdirSync(dir)) rmSync(join(dir, name), { recursive: true, force: true });
+}
+async function waitHerdrPaneGone(root: string, pane: string): Promise<boolean> {
+  for (let i = 0; i < 50; i++) {
+    try {
+      const st = JSON.parse(readFileSync(join(root, "stub", "herdr.json"), "utf8"));
+      if (!(pane in (st.panes ?? {}))) return true;
+    } catch {}
+    await sleep(100);
+  }
+  return false;
+}
+async function waitTmuxPaneGone(root: string, pane: string): Promise<boolean> {
+  for (let i = 0; i < 50; i++) {
+    try {
+      const st = JSON.parse(readFileSync(join(root, "stub", "tmux.json"), "utf8"));
+      const windows = st.windows ?? {};
+      let present = false;
+      for (const value of Object.values(windows)) {
+        if (value === null || typeof value !== "object" || Array.isArray(value))
+          throw new Error("bad windows");
+        if (pane in ((value as any).panes ?? {})) {
+          present = true;
+          break;
+        }
+      }
+      if (!present) return true;
+    } catch {}
+    await sleep(100);
+  }
+  return false;
 }
 function readdir(path: string): string[] {
   try {
@@ -1229,6 +1351,34 @@ export async function runControls(): Promise<number> {
     await pass(
       "the same for wait",
       () => invalidWait.code === 1 && !invalidWait.out.includes("controls"),
+    );
+
+    console.log("a run launch without a named run space is refused");
+    resetHarness(root);
+    const noSpace = execHost(
+      [
+        "run",
+        SECURITY_LABEL,
+        f.clone,
+        "--role",
+        "reviewer",
+        "--run",
+        run1,
+        "--marker",
+        markerPath("no-space"),
+        "--",
+        "./fixed.sh",
+      ],
+      stubs,
+    );
+    await pass(
+      "reviewer launch without --under is refused before placement, and its marker lands",
+      () =>
+        noSpace.code === 1 &&
+        existsSync(markerPath("no-space")) &&
+        `${noSpace.out}${noSpace.err}`.includes("needs --under") &&
+        !calls(root, "herdr").some((line) => line.includes("workspace\tcreate")),
+      `${noSpace.out}${noSpace.err}`,
     );
 
     console.log("stop: owned process trees and refusal controls");
@@ -1936,15 +2086,36 @@ export async function runControls(): Promise<number> {
       stubs,
       f.caller,
     );
-    await marker(markerPath("c3"));
     const plainSpace = kvOf(plainRun.out, "space");
+    const plainTab = `${plainSpace}:t2`;
+    {
+      const st = json(join(stub, "herdr.json"), { spaces: {}, panes: {}, tabs: {} });
+      st.spaces[plainSpace].tabs.push(plainTab);
+      st.spaces[plainSpace].panes.push("pU");
+      st.tabs[plainTab] = { ws: plainSpace, pane: "pU", cwd: "/home/user", label: "user" };
+      st.panes.pU = { ws: plainSpace, tab: plainTab, cwd: "/home/user", tokens: {} };
+      save(join(stub, "herdr.json"), st);
+    }
+    await marker(markerPath("c3"));
     const plainClose = execHost(["close", plain], stubs, root);
     await pass(
-      "a plain clone is no scratch: it opens as a repository, and close refuses its space",
-      () =>
-        calls(root, "herdr").some((line) => line.includes(`--cwd\t${plain}\t--label\tplain`)) &&
-        plainClose.code === 2 &&
-        !calls(root, "herdr").includes(`workspace\tclose\t${plainSpace}`),
+      "a plain clone is no scratch: close removes its finished launch and preserves the user's tab",
+      () => {
+        const st = json(join(stub, "herdr.json"), { spaces: {}, panes: {}, tabs: {} });
+        const tabs = st.spaces[plainSpace]?.tabs ?? [];
+        return (
+          calls(root, "herdr").some(
+            (line) => line === `workspace\tcreate\t--cwd\t${plain}\t--label\tplain\t--no-focus`,
+          ) &&
+          plainClose.code === 2 &&
+          !calls(root, "herdr").includes(`workspace\tclose\t${plainSpace}`) &&
+          tabs.length === 1 &&
+          tabs[0] === plainTab &&
+          "pU" in (st.panes ?? {}) &&
+          tabs.every((tab: string) => st.tabs[tab]?.label === "user")
+        );
+      },
+      `${readCalls("herdr")} / ${plainClose.out}${plainClose.err}`,
     );
 
     console.log("run, stop and close, tmux (stub)");
@@ -2070,6 +2241,1139 @@ export async function runControls(): Promise<number> {
       dottedRun.out,
     );
     execHost(["close", dotted], stubs, root, { POSTMASTER_HOST: "tmux" });
+
+    {
+      // Completion, review-round and run-wide teardown controls, Herdr then tmux.
+      const luna = join(f.repo, ".worktrees", "T-1-luna");
+      const revBugLuna = join(f.repo, ".worktrees", "T-1-rev-bug-luna");
+      const lunaReal = realpathSync(luna);
+      const solReal = realpathSync(sol);
+      const herdrState = () =>
+        json(join(stub, "herdr.json"), { spaces: {}, panes: {}, tabs: {}, open: {} });
+      const tmuxState = () => json(join(stub, "tmux.json"), { sessions: [], windows: {} });
+      const resumeScript = join(f.caller, "resume.sh");
+
+      console.log("completion cleanup controls, Herdr (stub)");
+      resetHarness(root);
+      finishDelay = "3600";
+      writeFileSync(
+        resumeScript,
+        [
+          "#!/usr/bin/env bash",
+          'printf \'{"type":"system","subtype":"init","session_id":"resume","model":"m"}\\n\'',
+          "sleep 0.4",
+          'printf \'{"type":"result","subtype":"success","num_turns":1}\\n\'',
+          "",
+        ].join("\n"),
+      );
+      exec("chmod", ["+x", resumeScript]);
+      const resumeArgs = (extraEnv: Record<string, string>, outArgs: string[]) => ({
+        argv: [
+          "run",
+          COACHMAN_LABEL,
+          luna,
+          "--under",
+          run1,
+          "--role",
+          "coachman",
+          "--run",
+          run1,
+          "--out",
+          "../logs/resume.events",
+          ...outArgs,
+          "--marker",
+          "../logs/resume.done",
+          "--",
+          "./resume.sh",
+        ],
+        env: extraEnv,
+      });
+      const firstLeg = resumeArgs({}, []);
+      const firstRun = execHost(firstLeg.argv, stubs, f.caller, firstLeg.env);
+      const firstSpace = kvOf(firstRun.out, "space");
+      const firstTab = kvOf(firstRun.out, "tab");
+      await pass(
+        "the live synthesis launch owns one tab in its ticket space",
+        () => (herdrState().spaces[firstSpace]?.tabs ?? []).join(",") === firstTab,
+      );
+      await marker(markerPath("resume"));
+      const secondLeg = resumeArgs({ POSTMASTER_HOST_FINISH_DELAY: "0.1" }, ["--append"]);
+      const secondRun = execHost(secondLeg.argv, stubs, f.caller, secondLeg.env);
+      const secondSpace = kvOf(secondRun.out, "space");
+      const secondTab = kvOf(secondRun.out, "tab");
+      const secondPane = kvOf(secondRun.out, "pane");
+      await pass("a resumed leg has one live tab, with the previous tab gone", () => {
+        const st = herdrState();
+        const tabs = st.spaces[secondSpace]?.tabs ?? [];
+        return (
+          tabs.length === 1 &&
+          tabs[0] === secondTab &&
+          (st.open ?? {})[lunaReal] === secondSpace &&
+          !(firstSpace in (st.spaces ?? {}))
+        );
+      });
+      await marker(markerPath("resume"));
+      await waitHerdrPaneGone(root, secondPane);
+      await pass("the resumed leg leaves no history tab and preserves both event records", () => {
+        const st = herdrState();
+        const data = readFileSync(join(logs, "resume.events"), "utf8");
+        return (
+          !Object.values(st.spaces ?? {}).some((w: any) => w.label === RUN_NAME) &&
+          data.split("resume").length - 1 === 2 &&
+          data.split("success").length - 1 === 2
+        );
+      });
+
+      console.log("finished review round cleanup, Herdr (stub)");
+      resetHarness(root);
+      finishDelay = "0.1";
+      const styleRun = execHost(
+        [
+          "run",
+          STYLE_LABEL,
+          revLuna,
+          "--under",
+          run1,
+          "--role",
+          "reviewer",
+          "--run",
+          run1,
+          "--marker",
+          "../logs/review-style.done",
+          "--",
+          "./fixed.sh",
+        ],
+        stubs,
+      );
+      await marker(join(logs, "review-style.done"));
+      await waitHerdrPaneGone(root, kvOf(styleRun.out, "pane"));
+      const secRun = execHost(
+        [
+          "run",
+          SECURITY_LABEL,
+          f.clone,
+          "--under",
+          run1,
+          "--role",
+          "reviewer",
+          "--run",
+          run1,
+          "--marker",
+          "../logs/review-security.done",
+          "--",
+          "./fixed.sh",
+        ],
+        stubs,
+      );
+      await marker(join(logs, "review-security.done"));
+      await waitHerdrPaneGone(root, kvOf(secRun.out, "pane"));
+      await pass(
+        "a finished review round leaves no reviewer panes or tabs",
+        () => !Object.values(herdrState().spaces ?? {}).some((w: any) => w.label === RUN_NAME),
+      );
+
+      console.log("run-wide teardown, Herdr (stub)");
+      resetHarness(root);
+      const closeDispatch = join(f.repo, ".postmaster", "runs", "T-1");
+      mkdirSync(join(closeDispatch, "logs"), { recursive: true });
+      writeFileSync(
+        join(closeDispatch, "brief.md"),
+        `## Dispatch\nname: T-1\nsynthesis worktree: ${luna}\n`,
+      );
+      writeFileSync(
+        join(closeDispatch, "run.json"),
+        '{"config":{"team":{"workhorses":["luna","sol"]}}}\n',
+      );
+      writeFileSync(join(closeDispatch, "manifest.json"), '{"lanes":{"luna":{},"sol":{}}}\n');
+      writeFileSync(
+        join(closeDispatch, "logs", "review-r3.json"),
+        '{"reviewers":[["bug","luna"]]}\n',
+      );
+      writeFileSync(
+        join(closeDispatch, "actions.jsonl"),
+        '{"action":"review-launch","target":"opus","detail":"security r3"}\n',
+      );
+      if (
+        exec("git", ["-C", f.repo, "worktree", "add", "-q", "--detach", revBugLuna, "HEAD"])
+          .code !== 0
+      )
+        throw new Error("could not cut the reviewer worktree");
+      await pass(
+        "the security scratch clone is absent from git worktree list",
+        () => !exec("git", ["-C", f.repo, "worktree", "list", "--porcelain"]).out.includes(f.clone),
+      );
+      {
+        const st: any = {
+          n: 4,
+          spaces: {},
+          panes: {},
+          tabs: {},
+          open: {},
+          agents: [],
+          tab_n: {},
+        };
+        [luna, sol, revBugLuna, f.clone].forEach((cwd, i) => {
+          const ws = `w${i + 1}`;
+          const tab = `w${i + 1}:t1`;
+          const pane = `p${i + 1}`;
+          const real = realpathSync(cwd);
+          st.spaces[ws] = {
+            label: "T-1",
+            tokens: { postmaster: "opened" },
+            panes: [pane],
+            tabs: [tab],
+            path: real,
+          };
+          st.panes[pane] = { ws, tab, cwd, tokens: { postmaster: "launch", state: "done" } };
+          st.tabs[tab] = { ws, pane, cwd, label: "finished" };
+          st.open[real] = ws;
+        });
+        save(join(stub, "herdr.json"), st);
+      }
+      const teardownHerdr = execHost(["close-run", closeDispatch], stubs, root, {
+        POSTMASTER_HOST: "herdr",
+      });
+      await pass(
+        "teardown closes synthesis, workhorse, reviewer, and unlisted clone spaces",
+        () => {
+          const st = herdrState();
+          return (
+            teardownHerdr.code === 0 &&
+            calls(root, "herdr").filter((line) => line.startsWith("workspace\tclose")).length ===
+              4 &&
+            Object.keys(st.open ?? {}).length === 0 &&
+            Object.keys(st.spaces ?? {}).length === 0
+          );
+        },
+        `${teardownHerdr.out}${teardownHerdr.err}`,
+      );
+
+      console.log("user split survives completion, Herdr (stub)");
+      resetHarness(root);
+      const splitHerdr = execHost(
+        [
+          "run",
+          NAME,
+          luna,
+          "--under",
+          run1,
+          "--marker",
+          "../logs/split-herdr.done",
+          "--",
+          "./resume.sh",
+        ],
+        stubs,
+        f.caller,
+        { POSTMASTER_HOST_FINISH_DELAY: "0.1" },
+      );
+      const splitSpace = kvOf(splitHerdr.out, "space");
+      const splitTab = kvOf(splitHerdr.out, "tab");
+      const splitPane = kvOf(splitHerdr.out, "pane");
+      {
+        const st = herdrState();
+        st.spaces[splitSpace].panes.push("pUser");
+        st.panes.pUser = { ws: splitSpace, tab: splitTab, cwd: "/home/user", tokens: {} };
+        save(join(stub, "herdr.json"), st);
+      }
+      await marker(join(logs, "split-herdr.done"));
+      await waitHerdrPaneGone(root, splitPane);
+      await pass("the host pane closes while the user's split pane and tab survive", () => {
+        const st = herdrState();
+        const tabs = st.spaces[splitSpace]?.tabs ?? [];
+        return "pUser" in (st.panes ?? {}) && tabs.includes(splitTab);
+      });
+      console.log("completion cleanup controls, tmux (stub)");
+      resetHarness(root);
+      finishDelay = "3600";
+      const tmuxEnv = { POSTMASTER_HOST: "tmux" };
+      const tmuxFirst = execHost(
+        [
+          "run",
+          COACHMAN_LABEL,
+          luna,
+          "--under",
+          run1,
+          "--role",
+          "coachman",
+          "--run",
+          run1,
+          "--out",
+          "../logs/tmux-resume.events",
+          "--marker",
+          "../logs/tmux-resume.done",
+          "--",
+          "./resume.sh",
+        ],
+        stubs,
+        f.caller,
+        tmuxEnv,
+      );
+      const tmuxFirstWin = kvOf(tmuxFirst.out, "window");
+      const tmuxFirstPane = Object.keys(tmuxState().windows[tmuxFirstWin]?.panes ?? {})[0] ?? "";
+      await pass("tmux has one live launch window for the first leg", () => {
+        const st = tmuxState();
+        const wins = Object.keys(st.windows ?? {});
+        return (
+          wins.length === 1 &&
+          Object.keys(st.windows[tmuxFirstWin]?.panes ?? {}).join(",") === tmuxFirstPane
+        );
+      });
+      await marker(join(logs, "tmux-resume.done"));
+      const tmuxSecond = execHost(
+        [
+          "run",
+          COACHMAN_LABEL,
+          luna,
+          "--under",
+          run1,
+          "--role",
+          "coachman",
+          "--run",
+          run1,
+          "--out",
+          "../logs/tmux-resume.events",
+          "--append",
+          "--marker",
+          "../logs/tmux-resume.done",
+          "--",
+          "./resume.sh",
+        ],
+        stubs,
+        f.caller,
+        { POSTMASTER_HOST: "tmux", POSTMASTER_HOST_FINISH_DELAY: "0.1" },
+      );
+      const tmuxSecondWin = kvOf(tmuxSecond.out, "window");
+      const tmuxSecondPane = Object.keys(tmuxState().windows[tmuxSecondWin]?.panes ?? {})[0] ?? "";
+      await pass(
+        "a resumed tmux leg has one current window, with no finished window retained",
+        () => {
+          const st = tmuxState();
+          const wins = Object.keys(st.windows ?? {});
+          return (
+            wins.length === 1 &&
+            Object.keys(st.windows[tmuxSecondWin]?.panes ?? {}).join(",") === tmuxSecondPane &&
+            !(tmuxFirstWin in (st.windows ?? {}))
+          );
+        },
+      );
+      await marker(join(logs, "tmux-resume.done"));
+      await waitTmuxPaneGone(root, tmuxSecondPane);
+      await pass(
+        "the resumed tmux leg leaves no history window and keeps both event records",
+        () => {
+          const st = tmuxState();
+          const data = readFileSync(join(logs, "tmux-resume.events"), "utf8");
+          return (
+            Object.keys(st.windows ?? {}).length === 0 &&
+            data.split("resume").length - 1 === 2 &&
+            data.split("success").length - 1 === 2
+          );
+        },
+      );
+
+      console.log("finished review round cleanup, tmux (stub)");
+      resetHarness(root);
+      finishDelay = "0.1";
+      const tmuxStyle = execHost(
+        [
+          "run",
+          STYLE_LABEL,
+          revLuna,
+          "--under",
+          run1,
+          "--role",
+          "reviewer",
+          "--run",
+          run1,
+          "--marker",
+          "../logs/tmux-review-style.done",
+          "--",
+          "./fixed.sh",
+        ],
+        stubs,
+        f.caller,
+        tmuxEnv,
+      );
+      const tmuxStyleWin = kvOf(tmuxStyle.out, "window");
+      await marker(join(logs, "tmux-review-style.done"));
+      await waitTmuxPaneGone(
+        root,
+        Object.keys(tmuxState().windows[tmuxStyleWin]?.panes ?? {})[0] ?? "",
+      );
+      const tmuxSec = execHost(
+        [
+          "run",
+          SECURITY_LABEL,
+          f.clone,
+          "--under",
+          run1,
+          "--role",
+          "reviewer",
+          "--run",
+          run1,
+          "--marker",
+          "../logs/tmux-review-security.done",
+          "--",
+          "./fixed.sh",
+        ],
+        stubs,
+        f.caller,
+        tmuxEnv,
+      );
+      const tmuxSecWin = kvOf(tmuxSec.out, "window");
+      await marker(join(logs, "tmux-review-security.done"));
+      await waitTmuxPaneGone(
+        root,
+        Object.keys(tmuxState().windows[tmuxSecWin]?.panes ?? {})[0] ?? "",
+      );
+      await pass(
+        "a finished tmux review round leaves no reviewer windows",
+        () => Object.keys(tmuxState().windows ?? {}).length === 0,
+      );
+
+      console.log("run-wide teardown, tmux (stub)");
+      resetHarness(root);
+      {
+        const session = `postmaster-${basename(f.repo)}`;
+        const st: any = { n: 4, sessions: [session], windows: {} };
+        [luna, sol, revBugLuna, f.clone].forEach((cwd, i) => {
+          const win = `@${i + 1}`;
+          const pane = `%${i + 1}`;
+          st.windows[win] = {
+            session,
+            name: "finished",
+            opts: {
+              "@postmaster_cwd": realpathSync(cwd),
+              "@postmaster_run": realpathSync(closeDispatch),
+              "@postmaster_pane": pane,
+            },
+            panes: { [pane]: { opts: { "@postmaster_owned": "yes" } } },
+          };
+        });
+        save(join(stub, "tmux.json"), st);
+      }
+      writeFileSync(join(stub, "herdr.down"), "");
+      const teardownTmux = execHost(["close-run", closeDispatch], stubs, root, tmuxEnv);
+      await pass(
+        "tmux teardown closes each run window, including the unlisted clone",
+        () => {
+          const st = tmuxState();
+          return (
+            teardownTmux.code === 0 &&
+            calls(root, "tmux").filter((line) => line.startsWith("kill-window")).length === 4 &&
+            Object.keys(st.windows ?? {}).length === 0 &&
+            (st.sessions ?? []).length === 0
+          );
+        },
+        `${teardownTmux.out}${teardownTmux.err}`,
+      );
+
+      console.log("user split survives completion, tmux (stub)");
+      resetHarness(root);
+      finishDelay = "0.1";
+      const splitTmux = execHost(
+        [
+          "run",
+          NAME,
+          luna,
+          "--under",
+          run1,
+          "--marker",
+          "../logs/split-tmux.done",
+          "--",
+          "./resume.sh",
+        ],
+        stubs,
+        f.caller,
+        tmuxEnv,
+      );
+      const splitWin = kvOf(splitTmux.out, "window");
+      const splitTpane = Object.keys(tmuxState().windows[splitWin]?.panes ?? {})[0] ?? "";
+      {
+        const st = tmuxState();
+        st.windows[splitWin].panes["%user"] = { opts: {} };
+        save(join(stub, "tmux.json"), st);
+      }
+      await marker(join(logs, "split-tmux.done"));
+      await waitTmuxPaneGone(root, splitTpane);
+      await pass(
+        "the host pane closes while the user's tmux pane and window survive",
+        () => Object.keys(tmuxState().windows[splitWin]?.panes ?? {}).join(",") === "%user",
+      );
+      finishDelay = "3600";
+      resetHarness(root);
+      console.log("review round 1 fixes, tmux (stub)");
+      // BASE greps its own list formats for a literal backslash-t. The port's
+      // formats spell a tab as the two characters backslash-t, so the ported
+      // guard looks for the three-character escape that would carry a literal
+      // backslash-t at runtime instead.
+      const hostSrc = readFileSync(join(HERE, "host.ts"), "utf8").split("\n");
+      const listLines = hostSrc.filter(
+        (line) =>
+          (line.includes("list-windows") || line.includes("list-panes")) &&
+          !line.includes("awk -F"),
+      );
+      await pass(
+        "no tmux list format carries a literal backslash-t",
+        () => !listLines.some((line) => line.includes("\\\\t")),
+      );
+      writeFileSync(
+        join(root, "fixture-f1.txt"),
+        '  rows=$(tmux list-panes -t "$w" -F #{x}\\\\t#{y})\n',
+      );
+      await pass("the separator guard catches a backslash-t fixture", () =>
+        readFileSync(join(root, "fixture-f1.txt"), "utf8")
+          .split("\n")
+          .filter((line) => line.includes("tmux list") && !line.includes("awk -F"))
+          .some((line) => line.includes("\\\\t")),
+      );
+      writeFileSync(join(stub, "herdr.down"), "");
+      const f2run = execHost(
+        ["run", NAME, luna, "--under", run1, "--marker", "../logs/f2.done", "--", "./fixed.sh"],
+        stubs,
+        f.caller,
+        tmuxEnv,
+      );
+      const f2win = kvOf(f2run.out, "window");
+      await marker(join(logs, "f2.done"));
+      {
+        const st = tmuxState();
+        st.windows[f2win].panes["%user"] = { opts: {} };
+        save(join(stub, "tmux.json"), st);
+      }
+      const f2close = execHost(["close", luna], stubs, root, tmuxEnv);
+      await pass(
+        "close refuses (exit 2) when a user pane shares the window",
+        () => f2close.code === 2,
+      );
+      await pass(
+        "the host pane is gone but the user's pane and window survive the refusal",
+        () => Object.keys(tmuxState().windows[f2win]?.panes ?? {}).join(",") === "%user",
+      );
+      resetHarness(root);
+      finishDelay = "0.1";
+      writeFileSync(join(stub, "herdr.down"), "");
+      const f2brun = execHost(
+        ["run", NAME, luna, "--under", run1, "--marker", "../logs/f2b.done", "--", "./resume.sh"],
+        stubs,
+        f.caller,
+        tmuxEnv,
+      );
+      const f2bwin = kvOf(f2brun.out, "window");
+      const f2bpane = Object.keys(tmuxState().windows[f2bwin]?.panes ?? {})[0] ?? "";
+      {
+        const st = tmuxState();
+        st.windows[f2bwin].panes["%user"] = { opts: {} };
+        save(join(stub, "tmux.json"), st);
+      }
+      await marker(join(logs, "f2b.done"));
+      await waitTmuxPaneGone(root, f2bpane);
+      const f2bclose = execHost(["close", luna], stubs, root, tmuxEnv);
+      await pass(
+        "close refuses when only unowned panes remain after completion",
+        () => f2bclose.code === 2,
+      );
+      await pass(
+        "the user's pane and window still survive",
+        () => Object.keys(tmuxState().windows[f2bwin]?.panes ?? {}).join(",") === "%user",
+      );
+      finishDelay = "3600";
+      resetHarness(root);
+      writeFileSync(join(stub, "herdr.down"), "");
+      {
+        const session = `postmaster-${basename(f.repo)}`;
+        save(join(stub, "tmux.json"), {
+          n: 2,
+          sessions: [session],
+          windows: {
+            "@1": {
+              session,
+              name: "legacy",
+              opts: { "@postmaster_cwd": solReal },
+              panes: { "%1": { opts: {} } },
+            },
+            "@2": {
+              session,
+              name: "legacy-split",
+              opts: { "@postmaster_cwd": lunaReal },
+              panes: { "%2": { opts: {} }, "%user": { opts: {} } },
+            },
+          },
+        });
+      }
+      const legacyClose = execHost(["close", sol], stubs, root, tmuxEnv);
+      await pass(
+        "a lone pane in a pre-change window closes",
+        () => legacyClose.code === 0 && !("@1" in (tmuxState().windows ?? {})),
+      );
+      const legacySplitClose = execHost(["close", luna], stubs, root, tmuxEnv);
+      await pass(
+        "a pre-change window with other panes stays open, exit 2",
+        () =>
+          legacySplitClose.code === 2 &&
+          Object.keys(tmuxState().windows["@2"]?.panes ?? {})
+            .sort()
+            .join(",") === "%2,%user",
+      );
+      resetHarness(root);
+      writeFileSync(join(stub, "herdr.down"), "");
+      const noman = join(root, "noman", "T-1");
+      mkdirSync(join(noman, "logs"), { recursive: true });
+      writeFileSync(
+        join(noman, "brief.md"),
+        `## Dispatch\nname: T-1\nsynthesis worktree: ${luna}\n`,
+      );
+      writeFileSync(join(noman, "run.json"), '{"config":{"team":{"workhorses":["sol"]}}}\n');
+      {
+        const session = `postmaster-${basename(f.repo)}`;
+        save(join(stub, "tmux.json"), {
+          n: 5,
+          sessions: [session],
+          windows: {
+            "@5": {
+              session,
+              name: "lane",
+              opts: { "@postmaster_cwd": solReal, "@postmaster_pane": "%5" },
+              panes: { "%5": { opts: { "@postmaster_owned": "yes" } } },
+            },
+          },
+        });
+      }
+      const nomanClose = execHost(["close-run", noman], stubs, root, tmuxEnv);
+      await pass(
+        "a missing manifest does not drop the run.json workhorses from teardown",
+        () => nomanClose.code === 0 && Object.keys(tmuxState().windows ?? {}).length === 0,
+        `${nomanClose.out}${nomanClose.err}`,
+      );
+      resetHarness(root);
+      writeFileSync(join(stub, "herdr.down"), "");
+      {
+        const session = `postmaster-${basename(f.repo)}`;
+        save(join(stub, "tmux.json"), {
+          n: 9,
+          sessions: [session],
+          windows: {
+            "@9": {
+              session,
+              name: "ghost",
+              opts: {
+                "@postmaster_cwd": realpathSync(revLuna),
+                "@postmaster_run": realpathSync(closeDispatch),
+                "@postmaster_pane": "%9",
+              },
+              panes: { "%9": { opts: { "@postmaster_owned": "yes" } } },
+            },
+          },
+        });
+      }
+      const ghostClose = execHost(["close-run", closeDispatch], stubs, root, tmuxEnv);
+      await pass(
+        "close-run sweeps a run-tagged window off the discovered paths",
+        () => ghostClose.code === 0 && Object.keys(tmuxState().windows ?? {}).length === 0,
+        `${ghostClose.out}${ghostClose.err}`,
+      );
+      resetHarness(root);
+
+      console.log("review round 1 fixes, Herdr (stub)");
+      finishDelay = "0.1";
+      const f4run = execHost(
+        ["run", NAME, f.repo, "--marker", "../logs/f4.done", "--", "./fixed.sh"],
+        stubs,
+      );
+      const f4space = kvOf(f4run.out, "space");
+      const f4tab = kvOf(f4run.out, "tab");
+      const f4pane = kvOf(f4run.out, "pane");
+      await marker(join(logs, "f4.done"));
+      for (let i = 0; i < 50; i++) {
+        if (calls(root, "herdr").some((line) => line.startsWith("workspace\tget"))) break;
+        await sleep(200);
+      }
+      await pass("the finish path consults the space before closing a legacy tab", () =>
+        calls(root, "herdr").some((line) => line.startsWith("workspace\tget")),
+      );
+      await pass("a legacy launch in the project space keeps its tab, pane and space", () => {
+        const st = herdrState();
+        const tabs = st.spaces[f4space]?.tabs ?? [];
+        return tabs.includes(f4tab) && f4pane in (st.panes ?? {});
+      });
+      await pass(
+        "no tab close was issued for it",
+        () => !calls(root, "herdr").some((line) => line.startsWith(`tab\tclose\t${f4tab}`)),
+      );
+      finishDelay = "3600";
+      resetHarness(root);
+      const emptyDispatch = join(root, "empty-dispatch");
+      mkdirSync(emptyDispatch, { recursive: true });
+      const emptyStop = execHost(["stop-run", emptyDispatch], stubs, root);
+      const emptyClose = execHost(["close-run", emptyDispatch], stubs, root);
+      await pass(
+        "stop-run and close-run refuse (exit 2) when the waybill cannot be read",
+        () => emptyStop.code === 2 && emptyClose.code === 2,
+      );
+      for (const name of readdir(join(root, "state", "placements"))) {
+        rmSync(join(root, "state", "placements", name), { force: true });
+      }
+      {
+        const st: any = {
+          n: 9,
+          spaces: {
+            w9: { label: "T-1", tokens: {}, panes: ["p9"], tabs: ["w9:t1"], path: solReal },
+          },
+          panes: {
+            p9: {
+              ws: "w9",
+              tab: "w9:t1",
+              cwd: solReal,
+              tokens: { postmaster: "launch", state: "done" },
+            },
+          },
+          tabs: {
+            "w9:t1": { ws: "w9", pane: "p9", cwd: solReal, label: "finished" },
+          },
+          open: { [solReal]: "w9" },
+          agents: [],
+          tab_n: {},
+        };
+        save(join(stub, "herdr.json"), st);
+      }
+      const unopenedClose = execHost(["close", sol], stubs, root);
+      await pass(
+        "close names a space host.sh did not open instead of failing to read it",
+        () =>
+          unopenedClose.code === 2 &&
+          `${unopenedClose.out}${unopenedClose.err}`.includes("was not opened by host.sh"),
+        `${unopenedClose.out}${unopenedClose.err}`,
+      );
+      await pass("and it leaves that space open", () => "w9" in (herdrState().spaces ?? {}));
+      resetHarness(root);
+
+      console.log("review round 2 fixes, tmux (stub)");
+      resetHarness(root);
+      writeFileSync(join(stub, "herdr.down"), "");
+      const redirect = join(root, "redirect", "T-1");
+      mkdirSync(join(redirect, "logs"), { recursive: true });
+      writeFileSync(
+        join(redirect, "brief.md"),
+        [
+          "# Waybill: T-1",
+          "",
+          "## Ticket",
+          "",
+          "Quoting run T-9's brief for reference:",
+          "",
+          "## Dispatch",
+          "name: T-9",
+          `synthesis worktree: ${sol}`,
+          "",
+          "(end of quote)",
+          "",
+          "## Dispatch",
+          "name: T-1",
+          `synthesis worktree: ${luna}`,
+          "",
+        ].join("\n"),
+      );
+      {
+        const session = `postmaster-${basename(f.repo)}`;
+        save(join(stub, "tmux.json"), {
+          n: 8,
+          sessions: [session],
+          windows: {
+            "@7": {
+              session,
+              name: "synth",
+              opts: { "@postmaster_cwd": lunaReal, "@postmaster_pane": "%7" },
+              panes: { "%7": { opts: { "@postmaster_owned": "yes" } } },
+            },
+            "@8": {
+              session,
+              name: "victim",
+              opts: { "@postmaster_cwd": solReal, "@postmaster_pane": "%8" },
+              panes: { "%8": { opts: { "@postmaster_owned": "yes" } } },
+            },
+          },
+        });
+      }
+      const redirectClose = execHost(["close-run", redirect], stubs, root, tmuxEnv);
+      await pass(
+        "a quoted waybill in the ticket body does not redirect teardown",
+        () => {
+          const wins = tmuxState().windows ?? {};
+          return redirectClose.code === 0 && !("@7" in wins) && "@8" in wins;
+        },
+        `${redirectClose.out}${redirectClose.err}`,
+      );
+      resetHarness(root);
+
+      console.log("review round 4 fixes, Herdr (stub)");
+      resetHarness(root);
+      const nolanes = join(root, "nolanes", "T-1");
+      mkdirSync(join(nolanes, "logs"), { recursive: true });
+      writeFileSync(
+        join(nolanes, "brief.md"),
+        `## Dispatch\nname: T-1\nsynthesis worktree: ${luna}\n`,
+      );
+      writeFileSync(join(nolanes, "run.json"), "{broken\n");
+      writeFileSync(join(nolanes, "manifest.json"), "{broken\n");
+      const nolanesClose = execHost(["close-run", nolanes], stubs, root);
+      const nolanesStop = execHost(["stop-run", nolanes], stubs, root);
+      await pass(
+        "close-run refuses when no lane record parses",
+        () =>
+          nolanesClose.code === 2 &&
+          `${nolanesClose.out}${nolanesClose.err}`.includes("lane records unreadable"),
+      );
+      await pass(
+        "stop-run refuses when no lane record parses",
+        () =>
+          nolanesStop.code === 2 &&
+          `${nolanesStop.out}${nolanesStop.err}`.includes("lane records unreadable"),
+      );
+      resetHarness(root);
+      finishDelay = "3600";
+      writeFileSync(join(f.caller, "sleeper.sh"), "#!/bin/sh\nsleep 30\n");
+      exec("chmod", ["+x", join(f.caller, "sleeper.sh")]);
+      execHost(["run", NAME, sol, "--", "./sleeper.sh"], stubs);
+      {
+        const st = herdrState();
+        st.spaces.w9 = {
+          label: "T-1",
+          tokens: { postmaster: "opened" },
+          panes: ["p9a", "p9b"],
+          tabs: ["w9:t1"],
+          path: lunaReal,
+        };
+        st.panes.p9a = {
+          ws: "w9",
+          tab: "w9:t1",
+          cwd: lunaReal,
+          tokens: { postmaster: "launch", state: "done" },
+        };
+        st.panes.p9b = {
+          ws: "w9",
+          tab: "w9:t1",
+          cwd: solReal,
+          tokens: { postmaster: "launch", state: "working" },
+        };
+        st.tabs["w9:t1"] = { ws: "w9", pane: "p9a", cwd: lunaReal, label: "finished" };
+        st.open[lunaReal] = "w9";
+        save(join(stub, "herdr.json"), st);
+        save(join(root, "state", "placements", "hc1.json"), {
+          workspace: "w9",
+          tab: "w9:t1",
+          pane: "p9b",
+          cwd: solReal,
+          run: "",
+        });
+      }
+      writeFileSync(join(stub, "wsget.succeed-once"), "");
+      writeFileSync(join(stub, "wsget.fail"), "");
+      const hcClose = execHost(["close", luna], stubs, root);
+      await pass(
+        "a failed inspect mid-wait exits 2",
+        () =>
+          hcClose.code === 2 &&
+          `${hcClose.out}${hcClose.err}`.includes("could not inspect space w9"),
+      );
+      await pass("with the space and both panes intact", () => {
+        const st = herdrState();
+        return "w9" in (st.spaces ?? {}) && "p9a" in (st.panes ?? {}) && "p9b" in (st.panes ?? {});
+      });
+      const hcStop = execHost(["stop", sol], stubs, root);
+      await pass("the sleeper stopped", () => `${hcStop.out}${hcStop.err}`.includes("stopped"));
+      resetHarness(root);
+      finishDelay = "3600";
+      const hc3before = readdir(join(root, "state", "placements"));
+      const hc3first = execHost(
+        ["run", NAME, luna, "--under", run1, "--marker", "../logs/hc3.done", "--", "./fixed.sh"],
+        stubs,
+      );
+      const hc3space = kvOf(hc3first.out, "space");
+      await marker(join(logs, "hc3.done"));
+      const hc3file = readdir(join(root, "state", "placements")).filter(
+        (name) => !hc3before.includes(name),
+      );
+      await pass(
+        "the launch placed its tab",
+        () =>
+          hc3file.length === 1 && existsSync(join(root, "state", "placements", hc3file[0] ?? "")),
+      );
+      {
+        const st = herdrState();
+        const gone = st.spaces[hc3space] ?? {};
+        delete st.spaces[hc3space];
+        for (const pane of gone.panes ?? []) delete st.panes[pane];
+        for (const tab of gone.tabs ?? []) delete st.tabs[tab];
+        for (const [cwd, opened] of Object.entries(st.open ?? {})) {
+          if (opened === hc3space) delete (st.open as Record<string, string>)[cwd];
+        }
+        save(join(stub, "herdr.json"), st);
+      }
+      const hc3second = execHost(
+        ["run", NAME, luna, "--under", run1, "--marker", "../logs/hc3.done", "--", "./fixed.sh"],
+        stubs,
+      );
+      await pass(
+        "a resume settles a space the server says is gone",
+        () => hc3second.code === 0,
+        `${hc3second.out}${hc3second.err}`,
+      );
+      await pass(
+        "and unlinks its placement",
+        () => !existsSync(join(root, "state", "placements", hc3file[0] ?? "")),
+      );
+      resetHarness(root);
+      save(join(root, "state", "placements", "hc4.json"), {
+        workspace: "wgone",
+        tab: "wgone:t1",
+        pane: "pgone",
+        cwd: lunaReal,
+        run: "",
+      });
+      const hc4close = execHost(["close", luna], stubs, root);
+      await pass("close settles a record whose space is gone", () => hc4close.code === 0);
+      await pass(
+        "and unlinks it",
+        () => !existsSync(join(root, "state", "placements", "hc4.json")),
+      );
+      resetHarness(root);
+      {
+        const st: any = {
+          n: 9,
+          spaces: {
+            w9: {
+              label: "T-1",
+              tokens: { postmaster: "opened" },
+              panes: ["p9"],
+              tabs: ["w9:t1"],
+              path: lunaReal,
+            },
+          },
+          panes: {
+            p9: {
+              ws: "w9",
+              tab: "w9:t1",
+              cwd: lunaReal,
+              tokens: { postmaster: "launch", state: "done" },
+            },
+          },
+          tabs: { "w9:t1": { ws: "w9", pane: "p9", cwd: lunaReal, label: "finished" } },
+          open: { [lunaReal]: "w9" },
+          agents: [],
+          tab_n: {},
+        };
+        save(join(stub, "herdr.json"), st);
+        save(join(root, "state", "placements", "hc5.json"), {
+          workspace: "w9",
+          tab: "w9:t1",
+          pane: "p9",
+          cwd: lunaReal,
+          run: "",
+        });
+      }
+      writeFileSync(join(stub, "panelist.fail"), "");
+      const hc5close = execHost(["close", luna], stubs, root);
+      await pass("an unprovable space refuses the close", () => hc5close.code === 2);
+      await pass("and keeps the placement record", () =>
+        existsSync(join(root, "state", "placements", "hc5.json")),
+      );
+      resetHarness(root);
+      const h6file = join(
+        root,
+        "state",
+        "placements",
+        `${createHash("sha256").update("w9:t1").digest("hex")}.json`,
+      );
+      {
+        save(join(stub, "herdr.json"), {
+          n: 9,
+          spaces: {},
+          panes: {},
+          tabs: {},
+          open: {},
+          agents: [],
+          tab_n: {},
+        });
+        save(h6file, { workspace: "w9", tab: "w9:t1", pane: "p9", cwd: lunaReal, run: "" });
+      }
+      const h6finish = execHost(["_finish", "herdr", "w9", "w9:t1", "p9"], stubs, root);
+      await pass("finish settles a gone space quietly", () => h6finish.code === 0);
+      await pass("and unlinks it", () => !existsSync(h6file));
+      resetHarness(root);
+      const h7file = join(
+        root,
+        "state",
+        "placements",
+        `${createHash("sha256").update("w9:t2").digest("hex")}.json`,
+      );
+      {
+        const st: any = {
+          n: 9,
+          spaces: {
+            w9: {
+              label: "T-1",
+              tokens: { postmaster: "opened" },
+              panes: ["p9"],
+              tabs: ["w9:t2"],
+              path: lunaReal,
+            },
+          },
+          panes: {
+            p9: {
+              ws: "w9",
+              tab: "w9:t2",
+              cwd: lunaReal,
+              tokens: { postmaster: "launch", state: "done" },
+            },
+          },
+          tabs: { "w9:t2": { ws: "w9", pane: "p9", cwd: lunaReal, label: "finished" } },
+          open: { [lunaReal]: "w9" },
+          agents: [],
+          tab_n: {},
+        };
+        save(join(stub, "herdr.json"), st);
+        save(h7file, { workspace: "w9", tab: "w9:t2", pane: "p9", cwd: lunaReal, run: "" });
+      }
+      writeFileSync(join(stub, "panelist.fail"), "");
+      const h7finish = execHost(["_finish", "herdr", "w9", "w9:t2", "p9"], stubs, root);
+      await pass("finish refuses a space it cannot inspect", () => h7finish.code === 2);
+      await pass("and keeps the placement record", () => existsSync(h7file));
+      rmSync(h7file, { force: true });
+      resetHarness(root);
+
+      console.log("review round 4 fixes, tmux (stub)");
+      resetHarness(root);
+      finishDelay = "3600";
+      writeFileSync(join(stub, "herdr.down"), "");
+      const stubTmux = (args: string[]): void => {
+        exec(join(root, "bin", "tmux"), args, {
+          env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "/", STUB: stub },
+        });
+      };
+      const tc1run = execHost(
+        ["run", NAME, luna, "--under", run1, "--marker", "../logs/tc1.done", "--", "./fixed.sh"],
+        stubs,
+        f.caller,
+        tmuxEnv,
+      );
+      const tc1win = kvOf(tc1run.out, "window");
+      const tc1pane = Object.keys(tmuxState().windows[tc1win]?.panes ?? {})[0] ?? "";
+      await marker(join(logs, "tc1.done"));
+      stubTmux(["kill-window", "-t", tc1win]);
+      const tc1finish = execHost(
+        ["_finish", "tmux", "unused", tc1win, tc1pane],
+        stubs,
+        root,
+        tmuxEnv,
+      );
+      await pass("finish on a hand-closed window settles quietly", () => tc1finish.code === 0);
+      resetHarness(root);
+      finishDelay = "3600";
+      writeFileSync(join(stub, "herdr.down"), "");
+      const tc2run = execHost(
+        ["run", NAME, luna, "--under", run1, "--marker", "../logs/tc2.done", "--", "./fixed.sh"],
+        stubs,
+        f.caller,
+        tmuxEnv,
+      );
+      const tc2win = kvOf(tc2run.out, "window");
+      const tc2pane = Object.keys(tmuxState().windows[tc2win]?.panes ?? {})[0] ?? "";
+      await marker(join(logs, "tc2.done"));
+      writeFileSync(join(stub, "panes.fail"), "");
+      const tc2finish = execHost(
+        ["_finish", "tmux", "unused", tc2win, tc2pane],
+        stubs,
+        root,
+        tmuxEnv,
+      );
+      await pass(
+        "finish refuses when inspect fails on a present window",
+        () => tc2finish.code === 2,
+      );
+      await pass("and the window survives", () => tc2win in (tmuxState().windows ?? {}));
+      resetHarness(root);
+      finishDelay = "3600";
+      writeFileSync(join(stub, "herdr.down"), "");
+      const tc4run = execHost(
+        ["run", NAME, luna, "--under", run1, "--marker", "../logs/tc4.done", "--", "./fixed.sh"],
+        stubs,
+        f.caller,
+        tmuxEnv,
+      );
+      const tc4win = kvOf(tc4run.out, "window");
+      const tc4pane = Object.keys(tmuxState().windows[tc4win]?.panes ?? {})[0] ?? "";
+      await marker(join(logs, "tc4.done"));
+      writeFileSync(join(stub, "panes.fail"), "");
+      writeFileSync(join(stub, "windows.fail"), "");
+      const tc4finish = execHost(
+        ["_finish", "tmux", "unused", tc4win, tc4pane],
+        stubs,
+        root,
+        tmuxEnv,
+      );
+      await pass(
+        "finish refuses when every inspect fails on a live server",
+        () => tc4finish.code === 2,
+      );
+      await pass("and the window survives", () => tc4win in (tmuxState().windows ?? {}));
+      rmSync(join(stub, "windows.fail"), { force: true });
+      writeFileSync(join(stub, "tmux.dead"), "");
+      const tcDeadFinish = execHost(
+        ["_finish", "tmux", "unused", tc4win, tc4pane],
+        stubs,
+        root,
+        tmuxEnv,
+      );
+      await pass("finish settles when no server answers", () => tcDeadFinish.code === 0);
+      resetHarness(root);
+      finishDelay = "3600";
+      writeFileSync(join(stub, "herdr.down"), "");
+      const tc3run = execHost(
+        ["run", NAME, luna, "--under", run1, "--marker", "../logs/tc3.done", "--", "./fixed.sh"],
+        stubs,
+        f.caller,
+        tmuxEnv,
+      );
+      const tc3win = kvOf(tc3run.out, "window");
+      await marker(join(logs, "tc3.done"));
+      writeFileSync(join(stub, "windows.fail"), "");
+      const tc3close = execHost(["close", luna], stubs, root, tmuxEnv);
+      await pass("close refuses when the session list fails", () => tc3close.code === 2);
+      await pass("and the window survives", () => tc3win in (tmuxState().windows ?? {}));
+      resetHarness(root);
+      writeFileSync(join(stub, "herdr.down"), "");
+      {
+        const session = "postmaster-zzz";
+        save(join(stub, "tmux.json"), {
+          n: 9,
+          sessions: [session],
+          windows: {
+            "@9": {
+              session,
+              name: "ghost",
+              opts: {
+                "@postmaster_cwd": lunaReal,
+                "@postmaster_run": realpathSync(closeDispatch),
+                "@postmaster_pane": "%9",
+              },
+              panes: { "%9": { opts: { "@postmaster_owned": "yes" } } },
+            },
+          },
+        });
+      }
+      writeFileSync(join(stub, "windows.fail"), "");
+      const sweepRefuse = execHost(["close-run", closeDispatch], stubs, root, tmuxEnv);
+      await pass(
+        "the sweep refuses when its list fails with sessions alive",
+        () => sweepRefuse.code === 2,
+      );
+      rmSync(join(stub, "windows.fail"), { force: true });
+      writeFileSync(join(stub, "tmux.dead"), "");
+      const sweepSettle = execHost(["close-run", closeDispatch], stubs, root, tmuxEnv);
+      await pass("the sweep settles when no server answers", () => sweepSettle.code === 0);
+      await pass("and the window survives either way", () => "@9" in (tmuxState().windows ?? {}));
+      resetHarness(root);
+    }
 
     console.log("interactive sessions");
     const noSpawn = execHost(["spawn", "postmaster-repo", f.repo, "--", "claude"]);
@@ -2254,6 +3558,10 @@ export async function runControls(): Promise<number> {
     const capDispatch = join(root, "cap-dispatch");
     mkdirSync(join(capDispatch, "logs"), { recursive: true });
     writeFileSync(
+      join(capDispatch, "brief.md"),
+      `## Dispatch\nname: T-1\nsynthesis worktree: ${join(f.repo, ".worktrees", "T-1-luna")}\n`,
+    );
+    writeFileSync(
       join(capDispatch, "run.json"),
       '{"config":{"limits":{"memory_max":"8G","tasks_max":512,"lane":{"memory_max":"64M","tasks_max":16},"coachman":{"memory_max":"128M","tasks_max":32},"reviewer":{"tasks_max":24}}}}\n',
     );
@@ -2269,6 +3577,8 @@ export async function runControls(): Promise<number> {
         "run",
         NAME,
         f.repo,
+        "--under",
+        capDispatch,
         "--role",
         "reviewer",
         "--run",
@@ -2766,6 +4076,7 @@ export async function runControls(): Promise<number> {
     failures++;
     console.error(`host self-test setup failed: ${String((error as Error).message ?? error)}`);
   } finally {
+    testStopFinishers(root);
     for (const directory of [join(root, "logs"), join(root, "tree"), join(root, "stub")]) {
       for (const name of readdir(directory)) {
         if (!name.endsWith(".pid")) continue;
@@ -3211,6 +4522,7 @@ export async function live(): Promise<void> {
     failures++;
     console.error(`host live-test setup failed: ${String((error as Error).message ?? error)}`);
   } finally {
+    testStopFinishers(root);
     for (const workspace of opened.reverse()) liveHerdr("workspace", "close", workspace);
     if (tmuxSession) exec("tmux", ["kill-session", "-t", `=${tmuxSession}`]);
     try {

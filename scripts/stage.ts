@@ -10,14 +10,18 @@
 // already in does nothing, so a resumed or remounted leg can set it again safely. Setting a
 // terminal stage (done, abandoned) also appends the run's full stage timings to run-log.md.
 // Only the postmaster sets a terminal stage, or moves a run out of one: it closes a run after
-// the last leg, and abandons one on the user's word. The actor is the caller's own word, so this
-// holds a coachman to its runbook; it cannot stop a process that names itself the postmaster.
+// the last leg, and abandons one on the user's word. A run is at most two legs: the last one
+// carries it to `shipping` with the ship card, and the postmaster sets `shipped` after the
+// merge and `done` when it closes. `review` is entered only by a run with a review leg. A
+// run dispatched before this change keeps its three legs and the stages they enter. The actor
+// is the caller's own word, so this holds a coachman to its runbook; it cannot stop a process
+// that names itself the postmaster.
 //
 //   exit 0  the stage was set, or already was
 //   exit 1  usage, no manifest, an unreadable manifest, or the log could not be written
 //   exit 2  not one of the stages
 //   exit 3  the run is done or abandoned, and only the postmaster moves it on
-//   exit 4  a terminal stage set by any actor but the postmaster
+//   exit 4  a terminal stage, or shipped on a contract 2 run, set by any actor but the postmaster
 import {
   appendFileSync,
   existsSync,
@@ -107,6 +111,29 @@ function closeUsage(d: string): number {
   return logStatus;
 }
 
+/** Its run.json records coachman contract 2, exactly: anything missing, unreadable or
+ * otherwise gets the old behavior. An exact int only — 2.0 parses to 2 but is not one. */
+export function isCurrent(d: string): boolean {
+  let raw: string;
+  try {
+    raw = readFileSync(join(d, "run.json"), "utf8");
+  } catch {
+    return false;
+  }
+  let record: unknown;
+  try {
+    record = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  if (typeof record !== "object" || record === null || Array.isArray(record)) return false;
+  const contract = (record as Record<string, unknown>).coachman_contract;
+  if (typeof contract !== "number" || !Number.isInteger(contract) || contract !== 2) {
+    return false;
+  }
+  return /"coachman_contract"[ \t\n\r]*:[ \t\n\r]*2(?![0-9.eE])/u.test(raw);
+}
+
 export function setStage(d: string, newStage: string, actor: string): number {
   const HERE = scriptsDir(import.meta);
 
@@ -119,6 +146,10 @@ export function setStage(d: string, newStage: string, actor: string): number {
       console.error(`stage: only the postmaster sets ${newStage}`);
       return 4;
     }
+  }
+  if (newStage === "shipped" && actor !== "postmaster" && isCurrent(d)) {
+    console.error("stage: only the postmaster sets shipped on a contract 2 run");
+    return 4;
   }
   const manifestPath = join(d, "manifest.json");
   if (!existsSync(manifestPath)) {

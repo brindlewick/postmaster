@@ -16,6 +16,8 @@
 //   host.sh stop <worktree>               stop every launch still running in a worktree, and
 //                                         everything each one started
 //   host.sh close <worktree>              close its tabs/space (Herdr) and its windows (tmux)
+//   host.sh stop-run <dispatch>           stop launches in every worktree the run created
+//   host.sh close-run <dispatch>          close spaces/windows for every worktree the run created
 //   host.sh spawn <handle> <cwd> [--label <text>] -- <command...>   an interactive session;
 //                                         the handle becomes a Herdr agent name
 //   host.sh send <handle> <file> [--wait [<seconds>]]   submit the file's text to that session,
@@ -75,6 +77,7 @@
 // POSTMASTER_HOST=herdr|tmux|none overrides detection; nothing needs setting to get the default.
 // POSTMASTER_HOST_CLAIM_WAIT (20) is how long a new pane has to start its launch,
 // POSTMASTER_HOST_CLOSE_WAIT (15) how long close waits for a launch that is just ending, and
+// POSTMASTER_HOST_FINISH_DELAY (0.2) lets the pane finish rendering after its marker lands,
 // POSTMASTER_HOST_STOP_WAIT (20) how long stop waits after TERM before it sends KILL, and
 // POSTMASTER_HOST_STOP_MAX (512) the most processes one stop may signal.
 //
@@ -111,7 +114,17 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { parseTomlText } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
-import { END_OF_STRING, PY_DOT, PY_S_CLASS, pySplitLines, pyTrim, pyWords } from "./lib/text.ts";
+import {
+  BOUND_L,
+  BOUND_R,
+  DOT_ALL,
+  END_OF_STRING,
+  PY_DOT,
+  PY_S_CLASS,
+  pySplitLines,
+  pyTrim,
+  pyWords,
+} from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
 const SELF = join(HERE, "host.ts");
@@ -306,6 +319,19 @@ const LEGACY_REVIEW = new RegExp(
 );
 const REVIEW_ROUND_FILE = new RegExp("^review-r([0-9]+)\\.json" + END_OF_STRING, "u");
 const HERDR_TAB_ID = new RegExp("^w[A-Za-z0-9]+:t[0-9A-Za-z]+" + END_OF_STRING, "u");
+const PATH_COMPONENT = new RegExp("^[A-Za-z0-9._-]+$", "u");
+const REVIEW_STATE_GLOB = new RegExp("^review-r[0-9]" + DOT_ALL + "*\\.json$", "u");
+const LENS_WORD = new RegExp(BOUND_L + "(style|bug|security)" + BOUND_R, "u");
+
+function isPathComponent(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    value !== "" &&
+    value !== "." &&
+    value !== ".." &&
+    PATH_COMPONENT.test(value)
+  );
+}
 
 // Stores are third-party text: anything not a mapping is no store at all.
 function asRecord(value: unknown): Record<string, any> {
@@ -719,6 +745,7 @@ function herdrPlace(
   name: string,
   cwd: string,
   where = "worktree",
+  dispatch = "",
 ): { space: string; tab: string; pane: string } | null {
   const rootResult = run("git", ["-C", cwd, "rev-parse", "--show-toplevel"]);
   const top = rootResult.code === 0 ? resolve(rootResult.out.trim()) : "";
@@ -888,6 +915,22 @@ function herdrPlace(
     "--token",
     "postmaster=launch",
   ]);
+  if (!herdrRecordPlacement(space, tab, pane, cwd, dispatch)) {
+    // The pane was tagged but never ran the launch. Keep the ownership token
+    // alongside its settled state so a later close can safely remove it.
+    herdr([
+      "pane",
+      "report-metadata",
+      pane,
+      "--source",
+      META,
+      "--token",
+      "postmaster=launch",
+      "--token",
+      "state=done",
+    ]);
+    return null;
+  }
   return { space, tab, pane };
 }
 
@@ -901,7 +944,13 @@ function realpathLoose(path: string): string {
 
 // Remember the tabs this host creates inside shared run spaces. A later `close <worktree>` can
 // then close that checkout's tabs without closing the ticket space or a tab opened by the user.
-function herdrRecordPlacement(space: string, tab: string, pane: string, cwd: string): boolean {
+function herdrRecordPlacement(
+  space: string,
+  tab: string,
+  pane: string,
+  cwd: string,
+  dispatch: string,
+): boolean {
   const directory = join(STATE, "placements");
   try {
     mkdirSync(directory, { recursive: true });
@@ -913,7 +962,7 @@ function herdrRecordPlacement(space: string, tab: string, pane: string, cwd: str
     temporary = mkstempSync(directory, ".placement-");
     writeFileSync(
       temporary,
-      `${JSON.stringify({ workspace: space, tab, pane, cwd: realpathLoose(cwd) })}\n`,
+      `${JSON.stringify({ workspace: space, tab, pane, cwd: realpathLoose(cwd), run: dispatch ? realpathLoose(dispatch) : "" })}\n`,
     );
     renameSync(
       temporary,
@@ -942,6 +991,326 @@ function undash(value: unknown): string {
   if (!value) return "";
   const text = jsonValue(value);
   return text === "-" ? "" : text;
+}
+
+function herdrSpaceOpened(space: string): boolean {
+  const info = herdr(["workspace", "get", space]);
+  if (info.code !== 0) return false;
+  return _jsonStdout(info.out, (d) => d?.result?.workspace?.tokens?.postmaster) === "opened";
+}
+
+function herdrSpaceGone(space: string): boolean {
+  const list = herdr(["workspace", "list"]);
+  if (list.code !== 0) return false;
+  const data = parseJson(list.out);
+  if (data === null || typeof data !== "object" || Array.isArray(data)) return false;
+  const result = data.result;
+  if (result === null || typeof result !== "object" || Array.isArray(result)) return false;
+  const workspaces = result.workspaces ?? [];
+  if (!Array.isArray(workspaces)) return false;
+  // BASE builds the id list first: any entry without .get fails the whole
+  // check, so a non-mapping entry refuses rather than counting as absent.
+  for (const entry of workspaces) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return false;
+    if (entry.workspace_id === space) return false;
+  }
+  return true;
+}
+
+function tmuxWindowGone(window: string): boolean {
+  const rows = run("tmux", ["list-windows", "-a", "-F", "#{window_id}\t#{window_name}"]);
+  if (rows.code !== 0) {
+    // A server that answers nothing holds no windows: tmux windows die with
+    // their server, so this is proven, not assumed. A server that answers but
+    // cannot list is unprovable, and the record stays for a retry.
+    return run("tmux", ["ls"]).code !== 0;
+  }
+  for (const line of pySplitLines(rows.out)) {
+    const tab = line.indexOf("\t");
+    if ((tab < 0 ? line : line.slice(0, tab)) === window) return false;
+  }
+  return true;
+}
+
+function finishOwnership(panesText: string, target: string, tab: string): string {
+  const rows = parseJson(panesText)?.result?.panes;
+  if (!Array.isArray(rows)) throw new Error("bad panes");
+  for (const row of rows) {
+    if (row === null || typeof row !== "object" || Array.isArray(row)) throw new Error("bad panes");
+  }
+  const pane = rows.find((row: any) => row.pane_id === target) ?? null;
+  if (pane === null) return "missing";
+  if (tokensOf(pane).postmaster !== "launch") return "unowned";
+  if (!HERDR_TAB_ID.test(pane.tab_id ?? "") || pane.tab_id !== tab) return "pane";
+  if (rows.some((row: any) => row.pane_id !== target && !HERDR_TAB_ID.test(row.tab_id ?? "")))
+    return "pane";
+  if (rows.some((row: any) => row.pane_id !== target && row.tab_id === tab)) return "pane";
+  return "tab";
+}
+
+function herdrFinishPlacement(space: string, tab: string, pane: string): number {
+  const file = join(STATE, "placements", `${createHash("sha256").update(tab).digest("hex")}.json`);
+  const panes = herdr(["pane", "list", "--workspace", space]);
+  if (panes.code !== 0) {
+    // A space the server says is gone was settled concurrently; anything
+    // else is a dead server, and the record stays for a retry.
+    if (herdrSpaceGone(space)) {
+      markerRemove(file);
+      return 0;
+    }
+    warn(`could not inspect completed launch pane ${pane} in space ${space}; left it open`);
+    return 2;
+  }
+  let ownership = "";
+  try {
+    ownership = finishOwnership(panes.out, pane, tab);
+  } catch {
+    warn(`could not verify completed launch pane ${pane} in space ${space}; left it open`);
+    return 2;
+  }
+  switch (ownership) {
+    case "missing":
+      break;
+    case "unowned":
+      warn(`completed launch pane ${pane} is no longer owned by host.sh; left it open`);
+      return 2;
+    case "pane":
+      if (herdr(["pane", "close", pane]).code !== 0) {
+        warn(`herdr could not close completed launch pane ${pane}; left it open`);
+        return 2;
+      }
+      break;
+    case "tab":
+      // A tab in a space host.sh did not open keeps the project space's shell:
+      // closing its last tab would destroy the space, which host.sh never does.
+      if (!herdrSpaceOpened(space)) {
+        warn(
+          `completed launch tab ${tab} is in space ${space}, which host.sh did not open; left it open`,
+        );
+        return 2;
+      }
+      if (herdr(["tab", "close", tab]).code !== 0) {
+        warn(`herdr could not close completed launch tab ${tab}; left it open`);
+        return 2;
+      }
+      break;
+    default:
+      warn(`could not verify completed launch pane ${pane} in space ${space}; left it open`);
+      return 2;
+  }
+  markerRemove(file);
+  return 0;
+}
+
+function tmuxFinishPlacement(window: string, pane: string): number {
+  const listed = run("tmux", [
+    "list-panes",
+    "-t",
+    window,
+    "-F",
+    "#{pane_id}\t#{@postmaster_owned}",
+  ]);
+  if (listed.code !== 0) {
+    // A window the server no longer lists was settled concurrently; anything
+    // else is unprovable, and the window stays for a retry.
+    if (tmuxWindowGone(window)) return 0;
+    warn(`could not inspect completed tmux pane ${pane}; left it open`);
+    return 2;
+  }
+  let total = 0;
+  let present = false;
+  let found = false;
+  for (const line of pySplitLines(listed.out)) {
+    const tab = line.indexOf("\t");
+    const id = tab < 0 ? line : line.slice(0, tab);
+    const owned = tab < 0 ? "" : line.slice(tab + 1);
+    if (!id) continue;
+    total++;
+    if (id === pane) {
+      present = true;
+      if (owned === "yes") found = true;
+    }
+  }
+  // The recorded pane is gone but the window stands: only panes host.sh did not
+  // open remain, so this refuses like a split rather than reporting success.
+  if (!present) {
+    warn(`tmux window ${window} holds only panes host.sh did not open; left them open`);
+    return 2;
+  }
+  if (!found) {
+    warn(`completed tmux pane ${pane} is no longer owned by host.sh; left it open`);
+    return 2;
+  }
+  if (total === 1) {
+    if (run("tmux", ["kill-window", "-t", window]).code !== 0) {
+      warn(`tmux could not close completed window ${window}; left it open`);
+      return 2;
+    }
+  } else {
+    if (run("tmux", ["kill-pane", "-t", pane]).code !== 0) {
+      warn(`tmux could not close completed pane ${pane}; left it open`);
+      return 2;
+    }
+    warn(`tmux window ${window} holds panes host.sh did not open; left them open`);
+    return 2;
+  }
+  return 0;
+}
+
+function finishPriorHerdr(cwd: string, runPath: string): void {
+  try {
+    if (!statSync(join(STATE, "placements")).isDirectory()) return;
+  } catch {
+    return;
+  }
+  const patience = count(
+    process.env.POSTMASTER_HOST_CLOSE_WAIT ?? "15",
+    "POSTMASTER_HOST_CLOSE_WAIT",
+  );
+  for (let i = 0; ; i++) {
+    const live = registryScan(cwd);
+    if (!live.length) break;
+    if (i >= patience) {
+      warn(`a launch is still running in ${cwd}: ${live.map((item) => item.name).join(";")}`);
+      throw hostError("", 2);
+    }
+    sleepSync(1000);
+  }
+  const runReal = realpathLoose(runPath);
+  for (const file of placementFiles()) {
+    let fields: string[] | null = null;
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) continue;
+      const item = parsed as Record<string, unknown>;
+      if (typeof item.cwd !== "string") continue;
+      if (realpathLoose(item.cwd) !== realpathLoose(cwd) || item.run !== runReal) continue;
+      fields = ["workspace", "tab", "pane"].map((key) => jsonValue(item[key]));
+    } catch {
+      continue;
+    }
+    if (!fields) continue;
+    const [space, tab, pane] = fields as [string, string, string];
+    if (!space || !tab || !pane) {
+      warn(`invalid prior launch placement in ${file}; left it open`);
+      throw hostError("", 2);
+    }
+    if (herdrFinishPlacement(space, tab, pane) !== 0) {
+      const panes = herdr(["pane", "list", "--workspace", space]);
+      if (panes.code === 0) {
+        let present = false;
+        try {
+          const rows = parseJson(panes.out)?.result?.panes;
+          present = Array.isArray(rows) && rows.some((row: any) => row?.pane_id === pane);
+        } catch {
+          present = false;
+        }
+        if (present) throw hostError("", 2);
+        markerRemove(file);
+      } else if (herdrSpaceGone(space)) {
+        markerRemove(file);
+      } else {
+        throw hostError("", 2);
+      }
+    }
+  }
+}
+
+function finishPriorTmux(cwd: string, runPath: string): void {
+  const session = tmuxSession(cwd);
+  if (run("tmux", ["has-session", "-t", `=${session}`]).code !== 0) return;
+  const patience = count(
+    process.env.POSTMASTER_HOST_CLOSE_WAIT ?? "15",
+    "POSTMASTER_HOST_CLOSE_WAIT",
+  );
+  for (let i = 0; ; i++) {
+    const live = registryScan(cwd);
+    if (!live.length) break;
+    if (i >= patience) {
+      warn(`a launch is still running in ${cwd}: ${live.map((item) => item.name).join(";")}`);
+      throw hostError("", 2);
+    }
+    sleepSync(1000);
+  }
+  const rows = run("tmux", [
+    "list-windows",
+    "-t",
+    `=${session}`,
+    "-F",
+    "#{window_id}\t#{@postmaster_cwd}\t#{@postmaster_run}\t#{@postmaster_pane}",
+  ]);
+  if (rows.code !== 0) throw hostError("", 2);
+  for (const line of pySplitLines(rows.out)) {
+    const [window, oldcwd, oldrun, ...paneRest] = line.split("\t");
+    const pane = paneRest.join("\t");
+    if (oldcwd !== cwd || oldrun !== runPath) continue;
+    if (!pane) {
+      warn(`prior tmux window ${window} has no recorded launch pane; left it open`);
+      throw hostError("", 2);
+    }
+    if (tmuxFinishPlacement(window, pane) !== 0) {
+      const listed = run("tmux", ["list-panes", "-t", window, "-F", "#{pane_id}"]);
+      if (listed.code === 0) {
+        if (pySplitLines(listed.out).includes(pane)) throw hostError("", 2);
+      } else if (!tmuxWindowGone(window)) {
+        throw hostError("", 2);
+      }
+    }
+  }
+}
+
+function finishPriorLaunch(host: string, cwd: string, runPath: string): void {
+  if (host === "herdr") finishPriorHerdr(cwd, runPath);
+  else if (host === "tmux") finishPriorTmux(cwd, runPath);
+}
+
+async function finishWait(
+  host: string,
+  space: string,
+  tab: string,
+  pane: string,
+  _cwd: string,
+  marker: string,
+  delay: string,
+): Promise<number> {
+  while (!existsSync(marker)) await Bun.sleep(100);
+  const parsed = Number(delay);
+  const seconds = delay.trim() === "" || !Number.isFinite(parsed) ? 0.2 : Math.max(0, parsed);
+  await Bun.sleep(seconds * 1000);
+  if (host === "herdr") return herdrFinishPlacement(space, tab, pane);
+  if (host === "tmux") return tmuxFinishPlacement(tab, pane);
+  return 1;
+}
+
+function startFinishWatcher(
+  host: string,
+  space: string,
+  tab: string,
+  pane: string,
+  cwd: string,
+  marker: string,
+): void {
+  if (!marker) return;
+  // BASE double-forks a python watcher that waits for the marker, sleeps the
+  // finish delay, then execs back into _finish. The port's watcher is a
+  // detached _finish-wait re-entry: the same wait, delay and finish, with its
+  // pid beside the marker in the fixture's finishers file.
+  const pid = startDetached([
+    "_finish-wait",
+    host,
+    space,
+    tab,
+    pane,
+    cwd,
+    marker,
+    process.env.POSTMASTER_HOST_FINISH_DELAY || "0.2",
+  ]);
+  const fixture = process.env.POSTMASTER_HOST_FIXTURE ?? "";
+  if (fixture) {
+    try {
+      writeFileSync(join(fixture, "finishers"), `${pid}\t${marker}\n`, { flag: "a" });
+    } catch {}
+  }
 }
 
 function herdrRunPlace(
@@ -1051,7 +1420,9 @@ function herdrRunPlace(
         "--title",
         name,
         "--token",
-        "postmaster=launch",
+        "postmaster=root",
+        "--token",
+        "state=done",
       ]).code !== 0
     ) {
       rollbackRootTab(rootTab);
@@ -1126,7 +1497,22 @@ function herdrRunPlace(
   }
   // A placement the record refuses still shuts: its tab is tagged, so close
   // vouches for the space without the record. A control pins it.
-  if (!herdrRecordPlacement(runSpace, tab, pane, cwd)) return null;
+  if (!herdrRecordPlacement(runSpace, tab, pane, cwd, dispatch)) {
+    // Placement will fall back to the background; this host-owned tab never
+    // ran the launch, so label it settled for a later safe close.
+    herdr([
+      "pane",
+      "report-metadata",
+      pane,
+      "--source",
+      META,
+      "--token",
+      "postmaster=launch",
+      "--token",
+      "state=done",
+    ]);
+    return null;
+  }
   return { space: runSpace, tab, pane };
 }
 type Spec = {
@@ -2008,6 +2394,7 @@ async function runCmd(args: string[]): Promise<void> {
   marker = absolute(marker);
   pidfile = absolute(pidfile);
   dispatch = absolute(dispatch);
+  under = absolute(under);
   if (bad) appendFailure(err, marker, bad);
   if (!name || !givenCwd)
     appendFailure(err, marker, "usage: host.sh run <name> <cwd> [options] -- <command...>");
@@ -2015,8 +2402,57 @@ async function runCmd(args: string[]): Promise<void> {
   if (!argv.length) appendFailure(err, marker, "run needs a command after --");
   if (!existsSync(givenCwd) || !statSync(givenCwd).isDirectory())
     appendFailure(err, marker, `no such directory: ${givenCwd}`);
+  let cwd = "";
+  try {
+    cwd = realpathSync(givenCwd);
+  } catch {
+    appendFailure(err, marker, "cannot resolve launch directory");
+  }
+  const launchName = clean(name);
   if (role !== "default" && role !== "lane" && role !== "coachman" && role !== "reviewer")
     appendFailure(err, marker, `unknown launch role: ${role}`);
+  if ((role === "lane" || role === "coachman" || role === "reviewer") && !under)
+    appendFailure(err, marker, `a ${role} launch needs --under <dispatch> to name its run space`);
+  if (dispatch && !under)
+    appendFailure(err, marker, "--run needs --under <dispatch> to name its run space");
+  if (under) {
+    let underIsDir = false;
+    try {
+      underIsDir = statSync(under).isDirectory();
+    } catch {}
+    if (!underIsDir) appendFailure(err, marker, `no run space directory: ${under}`);
+    try {
+      under = realpathSync(under);
+    } catch {
+      appendFailure(err, marker, "cannot resolve run space directory");
+    }
+    // BASE's dispatch_info fails only when python itself breaks, which the port
+    // has no equivalent of; an unreadable waybill reads as no worktree below.
+    const underPath = dispatchInfo(under).worktree;
+    let underPathIsDir = false;
+    try {
+      underPathIsDir = !!underPath && statSync(underPath).isDirectory();
+    } catch {}
+    if (!underPathIsDir)
+      appendFailure(
+        err,
+        marker,
+        `the run at ${under} has no existing synthesis worktree to name its space`,
+      );
+  }
+  if (dispatch) {
+    let dispatchIsDir = false;
+    try {
+      dispatchIsDir = statSync(dispatch).isDirectory();
+    } catch {}
+    if (dispatchIsDir) {
+      try {
+        dispatch = realpathSync(dispatch);
+      } catch {
+        dispatch = "";
+      }
+    }
+  }
   let memory = "";
   let tasks = "";
   try {
@@ -2055,8 +2491,21 @@ async function runCmd(args: string[]): Promise<void> {
     warn(String((error as Error).message));
     appendFailure(err, marker, "no launch: POSTMASTER_HOST_CLAIM_WAIT");
   }
-  const cwd = realpathSync(givenCwd);
-  const launchName = clean(name);
+  const host = detect();
+  if (marker && existsSync(marker) && under) {
+    try {
+      finishPriorLaunch(host, cwd, under);
+    } catch (error) {
+      // The settle warns its own reason; a die inside (a bad count) keeps its.
+      if (isHostError(error) && !error.message)
+        appendFailure(
+          err,
+          marker,
+          "could not settle the previous launch before reusing its marker",
+        );
+      throw error;
+    }
+  }
   if (pidfile) markerRemove(pidfile);
   if (marker) markerRemove(marker);
   const specDir = mkdtempSync(join(tmpdir(), "postmaster-host."));
@@ -2080,11 +2529,13 @@ async function runCmd(args: string[]): Promise<void> {
     unit,
     argv,
   });
-  const host = detect();
   let where = "";
   if (host === "herdr") {
-    const placed = under ? herdrRunPlace(launchName, cwd, under) : herdrPlace(launchName, cwd);
+    const placed = under
+      ? herdrRunPlace(launchName, cwd, under)
+      : herdrPlace(launchName, cwd, "worktree", dispatch);
     if (placed) {
+      startFinishWatcher("herdr", placed.space, placed.tab, placed.pane, cwd, marker);
       run("mkfifo", [join(specDir, "env")]);
       startDetached(["_env-write", join(specDir, "env")]);
       const line = ` cd -- ${quote(cwd)} && bun ${quote(SELF)} _run herdr ${quote(specDir)}`;
@@ -2138,7 +2589,19 @@ async function runCmd(args: string[]): Promise<void> {
     const window = result.out.trim();
     if (window) {
       run("tmux", ["set-option", "-w", "-t", window, "@postmaster_cwd", cwd]);
+      if (under) run("tmux", ["set-option", "-w", "-t", window, "@postmaster_run", under]);
       run("tmux", ["set-option", "-w", "-t", window, "automatic-rename", "off"]);
+      const pane = run("tmux", ["display-message", "-p", "-t", window, "#{pane_id}"]).out.trim();
+      if (
+        pane &&
+        run("tmux", ["set-option", "-p", "-t", pane, "@postmaster_owned", "yes"]).code === 0
+      ) {
+        if (run("tmux", ["set-option", "-w", "-t", window, "@postmaster_pane", pane]).code !== 0)
+          warn(
+            `could not record tmux pane ${pane} in window ${window}; close it manually if needed`,
+          );
+        startFinishWatcher("tmux", "", window, pane, cwd, marker);
+      }
       where = `host=tmux session=${session} window=${window}`;
     } else warn(`tmux could not open a window for '${launchName}'; running it in the background`);
   }
@@ -2835,6 +3298,12 @@ async function main(): Promise<void> {
     case "close":
       await closeCmd(args);
       return;
+    case "stop-run":
+      await stopRunCmd(args);
+      return;
+    case "close-run":
+      await closeRunCmd(args);
+      return;
     case "spawn":
       spawnCmd(args);
       return;
@@ -2850,6 +3319,30 @@ async function main(): Promise<void> {
     case "_run":
       await runLaunch(args[1] ?? "", args[0] ?? "");
       return;
+    case "_finish": {
+      const kind = args[0] ?? "";
+      if (kind === "herdr") {
+        const code = herdrFinishPlacement(args[1] ?? "", args[2] ?? "", args[3] ?? "");
+        if (code !== 0) throw hostError("", code);
+      } else if (kind === "tmux") {
+        const code = tmuxFinishPlacement(args[2] ?? "", args[3] ?? "");
+        if (code !== 0) throw hostError("", code);
+      } else throw hostError("", 1);
+      return;
+    }
+    case "_finish-wait": {
+      const code = await finishWait(
+        args[0] ?? "",
+        args[1] ?? "",
+        args[2] ?? "",
+        args[3] ?? "",
+        args[4] ?? "",
+        args[5] ?? "",
+        args[6] ?? "0.2",
+      );
+      if (code !== 0) throw hostError("", code);
+      return;
+    }
     case "_handle":
       console.log(handleOf(args[0] ?? ""));
       return;
@@ -2864,7 +3357,7 @@ async function main(): Promise<void> {
       return;
     default:
       die(
-        "usage: host.sh detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] | stop | close | spawn | send | wait | read | --live-test (see the header)",
+        "usage: host.sh detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] | stop | close | stop-run | close-run | spawn | send | wait | read | --live-test (see the header)",
       );
   }
 }
@@ -2876,24 +3369,56 @@ main().catch((error: unknown) => {
   console.error(`host: ${String((error as Error)?.message ?? error)}`);
   process.exit(1);
 });
+function tmuxCloseWindow(window: string, pane: string): number {
+  if (pane) return tmuxFinishPlacement(window, pane);
+  // A window from before panes were recorded: a lone pane is the host's own
+  // shell, while more panes may hold the user's and stay open.
+  const panes = run("tmux", ["list-panes", "-t", window, "-F", "#{pane_id}"]);
+  if (panes.code !== 0) {
+    if (tmuxWindowGone(window)) return 0;
+    warn(`could not inspect tmux window ${window}; left it open`);
+    return 2;
+  }
+  const n = pySplitLines(panes.out).filter((line) => line !== "").length;
+  if (n === 1) {
+    if (run("tmux", ["kill-window", "-t", window]).code !== 0) {
+      warn(`tmux could not close legacy window ${window}; left it open`);
+      return 2;
+    }
+  } else {
+    warn(`tmux window ${window} has no recorded launch pane and holds ${n} panes; left it open`);
+    return 2;
+  }
+  return 0;
+}
+
 function closeTmux(path: string): number {
   const session = tmuxSession(path);
   if (run("tmux", ["has-session", "-t", `=${session}`]).code !== 0) return 0;
-  const list = run("tmux", [
+  // A list that fails after its session answered is a genuine failure, never
+  // an empty session: fail closed, and a concurrent settle heals on retry.
+  const rows = run("tmux", [
     "list-windows",
     "-t",
     `=${session}`,
     "-F",
-    "#{window_id}\t#{@postmaster_cwd}",
+    "#{window_id}\t#{@postmaster_cwd}\t#{@postmaster_pane}",
   ]);
-  let countClosed = 0;
-  for (const line of list.out.split(/\r?\n/u)) {
-    const [window, cwd] = line.split("\t");
-    if (window && cwd === path && run("tmux", ["kill-window", "-t", window]).code === 0)
-      countClosed++;
+  if (rows.code !== 0) {
+    warn(`could not inspect tmux session ${session}; left it open`);
+    return 2;
   }
-  if (countClosed) console.log(`host=tmux: closed ${countClosed} window(s)`);
-  return 0;
+  let countClosed = 0;
+  let rc = 0;
+  for (const line of pySplitLines(rows.out)) {
+    const [window, cwd, ...paneRest] = line.split("\t");
+    if (!window || cwd !== path) continue;
+    const code = tmuxCloseWindow(window, paneRest.join("\t"));
+    if (code === 0) countClosed++;
+    else rc = code;
+  }
+  if (countClosed > 0) console.log(`host=tmux: closed ${countClosed} recorded launch pane(s)`);
+  return rc;
 }
 function placementFiles(): string[] {
   const directory = join(STATE, "placements");
@@ -2973,6 +3498,10 @@ function herdrClosePlacements(worktree: string): number {
     }
     const panesResult = herdr(["pane", "list", "--workspace", space]);
     if (panesResult.code !== 0) {
+      if (herdrSpaceGone(space)) {
+        markerRemove(file);
+        continue;
+      }
       warn(`could not inspect launch tab ${tab} in space ${space}; left it open`);
       return 2;
     }
@@ -2994,6 +3523,11 @@ function herdrClosePlacements(worktree: string): number {
     // unattributable. Where the recorded pane itself carries no attributable
     // tab, only that pane closes, never the tab, whose sharers are unknown.
     if (ownership === "split") {
+      if (herdr(["pane", "close", pane]).code !== 0) {
+        warn(`herdr could not close launch pane ${pane}; left it open`);
+        return 2;
+      }
+      markerRemove(file);
       warn(`launch tab ${tab} in space ${space} holds panes host.sh did not open; left it open`);
       return 2;
     }
@@ -3047,62 +3581,137 @@ function spaceVerdict(infoText: string, panesText: string): string {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("bad panes");
   if (tokensOf(ws).postmaster !== "opened") {
     if (ws.workspace_id === undefined || ws.workspace_id === null) throw new Error("bad space");
-    return `space ${jsonValue(ws.workspace_id)} was not opened by host.sh`;
+    return `refuse\tspace ${jsonValue(ws.workspace_id)} was not opened by host.sh`;
   }
   for (const entry of panes) {
-    if (tokensOf(entry).postmaster !== "launch") {
-      if (
-        entry.pane_id === undefined ||
-        entry.pane_id === null ||
-        ws.workspace_id === undefined ||
-        ws.workspace_id === null
-      )
-        throw new Error("bad panes");
-      return `pane ${jsonValue(entry.pane_id)} in space ${jsonValue(ws.workspace_id)} was not opened by host.sh`;
+    const tokens = tokensOf(entry);
+    if (tokens.postmaster === "root" && tokens.state === "done") continue;
+    if (tokens.postmaster === "launch") {
+      if (tokens.state === "done") continue;
+      return `check\t${jsonValue(entry.pane_id)}`;
     }
+    if (
+      entry.pane_id === undefined ||
+      entry.pane_id === null ||
+      ws.workspace_id === undefined ||
+      ws.workspace_id === null
+    )
+      throw new Error("bad panes");
+    return `refuse\tpane ${jsonValue(entry.pane_id)} in space ${jsonValue(ws.workspace_id)} was not opened by host.sh`;
   }
   return "ok";
+}
+
+function herdrPlacementCwd(workspace: string, pane: string): string {
+  for (const file of placementFiles()) {
+    let item: any = null;
+    try {
+      item = JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      continue;
+    }
+    // BASE's scan aborts the whole lookup on a file without .get: a non-mapping
+    // entry refuses rather than letting a later file answer.
+    if (item === null || typeof item !== "object" || Array.isArray(item)) return "";
+    if ((hasOwn(item, "host") ? item.host : "herdr") !== "herdr") continue;
+    if (item.workspace !== workspace || item.pane !== pane) continue;
+    return hasOwn(item, "cwd") ? jsonValue(item.cwd) : "";
+  }
+  return "";
 }
 
 function closeHerdr(path: string): number {
   const placed = herdrClosePlacements(path);
   if (placed !== 0) return placed;
   const listed = herdr(["worktree", "list", "--cwd", path]);
-  if (listed.code !== 0) return 0;
   let space = "";
   let kind = "";
-  try {
-    const data = (parseJson(listed.out) as any)?.result;
-    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("bad list");
-    const rows = data.worktrees ?? [];
-    if (!Array.isArray(rows)) throw new Error("bad list");
-    const here = realpathLoose(path);
-    let match: any = null;
-    for (const entry of rows) {
-      if (!entry || typeof entry !== "object" || typeof entry.path !== "string")
-        throw new Error("bad list");
-      if (realpathLoose(entry.path) === here) {
-        match = entry;
-        break;
+  // BASE's $(...) strips trailing newlines before the emptiness check.
+  const listText = listed.out.replace(/\n+$/u, "");
+  if (listed.code !== 0 || listText === "") {
+    space = "-";
+    kind = "main";
+  } else {
+    try {
+      const data = (parseJson(listText) as any)?.result;
+      if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("bad list");
+      const rows = data.worktrees ?? [];
+      if (!Array.isArray(rows)) throw new Error("bad list");
+      const here = realpathLoose(path);
+      let match: any = null;
+      for (const entry of rows) {
+        if (!entry || typeof entry !== "object" || typeof entry.path !== "string")
+          throw new Error("bad list");
+        if (realpathLoose(entry.path) === here) {
+          match = entry;
+          break;
+        }
+      }
+      space = match?.open_workspace_id ? jsonValue(match.open_workspace_id) : "-";
+      kind = match?.is_linked_worktree ? "linked" : "main";
+    } catch {
+      space = "";
+      kind = "";
+    }
+  }
+  let infoText = "";
+  if (space === "-") {
+    const workspaces = herdr(["workspace", "list"]);
+    let candidates: string[] = [];
+    if (workspaces.code === 0) {
+      try {
+        const data = parseJson(workspaces.out);
+        const result = data?.result;
+        if (result === null || typeof result !== "object" || Array.isArray(result))
+          throw new Error("bad spaces");
+        const all = result.workspaces ?? [];
+        if (!Array.isArray(all)) throw new Error("bad spaces");
+        // BASE prints ids until a row without .get aborts it: entries before
+        // the bad one stay, and rows without a string id never print.
+        for (const entry of all) {
+          if (entry === null || typeof entry !== "object" || Array.isArray(entry)) break;
+          if (typeof entry.workspace_id === "string") candidates.push(entry.workspace_id);
+        }
+      } catch {
+        candidates = [];
       }
     }
-    space = match?.open_workspace_id ? jsonValue(match.open_workspace_id) : "-";
-    kind = match?.is_linked_worktree ? "linked" : "main";
-  } catch {
-    space = "";
-    kind = "";
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const got = herdr(["workspace", "get", candidate]);
+      if (got.code !== 0) {
+        if (herdrSpaceGone(candidate)) continue;
+        warn(`could not inspect space ${candidate}; left it open`);
+        return 2;
+      }
+      const tree = asRecord(parseJson(got.out)?.result?.workspace?.worktree);
+      const actualPath = jsonValue(tree.checkout_path || tree.path);
+      let resolved = "";
+      try {
+        resolved = actualPath ? realpathSync(actualPath) : "";
+      } catch {
+        resolved = "";
+      }
+      if (!actualPath || resolved !== path) continue;
+      space = candidate;
+      infoText = got.out;
+      break;
+    }
   }
   if (space === "-") return 0;
   if (kind === "main" && !cloneOrigin(path)) {
     warn(`${path} is a repository's own checkout; its space is never closed`);
     return 2;
   }
-  const infoResult = herdr(["workspace", "get", space]);
-  if (infoResult.code !== 0) {
-    warn(`could not inspect space ${space}; left it open`);
-    return 2;
+  if (!infoText) {
+    const infoResult = herdr(["workspace", "get", space]);
+    if (infoResult.code !== 0) {
+      warn(`could not inspect space ${space}; left it open`);
+      return 2;
+    }
+    infoText = infoResult.out;
   }
-  const tree = asRecord((parseJson(infoResult.out) as any)?.result?.workspace?.worktree);
+  const tree = asRecord((parseJson(infoText) as any)?.result?.workspace?.worktree);
   const actualPath = jsonValue(tree.checkout_path || tree.path);
   if (!actualPath) return 0;
   try {
@@ -3110,23 +3719,450 @@ function closeHerdr(path: string): number {
   } catch {
     return 0;
   }
-  const panesOut = herdr(["pane", "list", "--workspace", space]).out;
-  let verdict = "";
-  try {
-    verdict = spaceVerdict(infoResult.out, panesOut);
-  } catch {
-    verdict = "";
+  const patience = count(
+    process.env.POSTMASTER_HOST_CLOSE_WAIT ?? "15",
+    "POSTMASTER_HOST_CLOSE_WAIT",
+  );
+  let waited = 0;
+  for (;;) {
+    const panesResult = herdr(["pane", "list", "--workspace", space]);
+    if (panesResult.code !== 0) {
+      warn(`could not inspect panes in space ${space}; left it open`);
+      return 2;
+    }
+    let verdict = "";
+    try {
+      verdict = spaceVerdict(infoText, panesResult.out);
+    } catch {
+      verdict = "";
+    }
+    const tabAt = verdict.indexOf("\t");
+    const action = tabAt < 0 ? verdict : verdict.slice(0, tabAt);
+    const pane = tabAt < 0 ? "" : verdict.slice(tabAt + 1);
+    if (action === "ok") break;
+    if (action === "check") {
+      const panePath = herdrPlacementCwd(space, pane);
+      if (!panePath) {
+        warn(`launch pane ${pane} in space ${space} has no placement record; left it open`);
+        return 2;
+      }
+      // BASE also refuses when its registry scan fails, which the port's scan
+      // never does: every unreadable record reads as no launch there.
+      const live = registryScan(panePath);
+      if (live.length) {
+        if (waited >= patience) {
+          warn(`launch pane ${pane} in space ${space} is still running; left it open`);
+          return 2;
+        }
+        sleepSync(1000);
+        waited++;
+        const again = herdr(["workspace", "get", space]);
+        if (again.code !== 0) {
+          warn(`could not inspect space ${space}; left it open`);
+          return 2;
+        }
+        infoText = again.out;
+      } else {
+        if (
+          herdr([
+            "pane",
+            "report-metadata",
+            pane,
+            "--source",
+            META,
+            "--token",
+            "postmaster=launch",
+            "--token",
+            "state=done",
+          ]).code !== 0
+        ) {
+          warn(`could not settle completed launch pane ${pane} in space ${space}; left it open`);
+          return 2;
+        }
+      }
+    } else if (action === "refuse") {
+      warn(`${pane}; left space ${space} open`);
+      return 2;
+    } else {
+      warn(`could not read space ${space}; left it open`);
+      return 2;
+    }
   }
-  if (verdict !== "ok") {
-    warn(`${verdict || `could not read space ${space}`}; left open`);
+  if (herdr(["workspace", "close", space]).code !== 0) {
+    warn(`herdr could not close space ${space}; left it open`);
     return 2;
-  }
-  const closed = herdr(["workspace", "close", space]);
-  if (closed.code !== 0) {
-    if (closed.err) process.stderr.write(closed.err);
-    die(`herdr could not close space ${space}`);
   }
   herdrForgetSpace(space);
   console.log(`host=herdr: closed space ${space}`);
   return 0;
+}
+
+function pyStrScalar(value: unknown): string {
+  if (value === null || value === undefined) return "None";
+  if (value === true) return "True";
+  if (value === false) return "False";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "bigint") return String(value);
+  try {
+    return JSON.stringify(value) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+// NUL-separated worktrees made for one dispatch, from its waybill and records.
+function runWorktreePaths(givenDispatch: string): string[] {
+  // One parser for the waybill: dispatch_info takes the last ## Dispatch
+  // section, so ticket text quoting a waybill cannot redirect teardown.
+  const dispatch = realpathLoose(givenDispatch);
+  const synthesis = dispatchInfo(dispatch).worktree;
+  if (!synthesis) throw hostError("run waybill has no synthesis worktree", 2);
+  const synth = realpathLoose(synthesis);
+  if (basename(dirname(synth)) !== ".worktrees")
+    throw hostError("synthesis worktree is not under .worktrees", 2);
+  const repo = dirname(dirname(synth));
+  const worktreesDir = join(repo, ".worktrees");
+  let ticket = basename(dispatch);
+  const synthBase = basename(synth);
+  if (!isPathComponent(ticket) || !(synthBase === ticket || synthBase.startsWith(`${ticket}-`)))
+    ticket = synthBase;
+  const paths: string[] = [];
+  const add = (name: string): void => {
+    if (!isPathComponent(name)) return;
+    const p = realpathLoose(join(repo, ".worktrees", name));
+    if (dirname(p) === worktreesDir && !paths.includes(p)) paths.push(p);
+  };
+  const names = new Set<string>();
+  let laneFiles = 0;
+  let laneParsed = 0;
+  // A missing lane file is a life stage (nothing launched yet); a present one
+  // that does not parse is corruption. When files exist but none parses,
+  // the lane set is unknown, and silently treating it as empty would skip
+  // workhorse worktrees, so this fails instead.
+  if (existsSync(join(dispatch, "run.json"))) {
+    laneFiles++;
+    try {
+      const run = JSON.parse(readFileSync(join(dispatch, "run.json"), "utf8"));
+      const config = asRecord(typeof run === "object" && run !== null ? run.config : undefined);
+      const team = asRecord(config.team);
+      const workhorses = Array.isArray(team.workhorses) ? team.workhorses : [];
+      for (const entry of workhorses) if (isPathComponent(entry)) names.add(entry);
+      laneParsed++;
+    } catch {
+      // a present file that does not parse is corruption, counted below
+    }
+  }
+  if (existsSync(join(dispatch, "manifest.json"))) {
+    laneFiles++;
+    try {
+      const manifest = JSON.parse(readFileSync(join(dispatch, "manifest.json"), "utf8"));
+      const lanes = asRecord(
+        typeof manifest === "object" && manifest !== null ? manifest.lanes : undefined,
+      );
+      for (const key of Object.keys(lanes)) if (isPathComponent(key)) names.add(key);
+      laneParsed++;
+    } catch {
+      // a present file that does not parse is corruption, counted below
+    }
+  }
+  if (laneFiles && !laneParsed) throw hostError("run lane records unreadable", 2);
+  for (const lane of [...names].sort()) add(`${ticket}-${lane}`);
+  const reviewers = new Set<string>();
+  let reviewFiles: string[] = [];
+  try {
+    reviewFiles = readdirSync(join(dispatch, "logs"));
+  } catch {
+    reviewFiles = [];
+  }
+  for (const entry of reviewFiles) {
+    if (!REVIEW_STATE_GLOB.test(entry)) continue;
+    // BASE lets a non-mapping state abort the whole lookup with a traceback;
+    // the port refuses the same teardown, quietly, with the same exit.
+    let state: any = null;
+    try {
+      state = JSON.parse(readFileSync(join(dispatch, "logs", entry), "utf8"));
+    } catch {
+      continue;
+    }
+    if (state === null || typeof state !== "object" || Array.isArray(state)) throw hostError("", 2);
+    // BASE iterates whatever .get returns: a non-list either raises
+    // TypeError (None, a number), which the file skips, or yields items the
+    // shape check below rejects (a string, a mapping). Only a list can add.
+    const raw = state.reviewers === undefined ? [] : state.reviewers;
+    if (!Array.isArray(raw)) continue;
+    for (const pair of raw) {
+      if (
+        Array.isArray(pair) &&
+        pair.length === 2 &&
+        (pair[0] === "style" || pair[0] === "bug" || pair[0] === "security") &&
+        isPathComponent(pair[1])
+      )
+        reviewers.add(`${pair[0]}\t${pair[1]}`);
+    }
+  }
+  try {
+    for (const line of pySplitLines(readFileSync(join(dispatch, "actions.jsonl"), "utf8"))) {
+      let action: any = null;
+      try {
+        action = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      // As above: a non-mapping action line aborts the lookup, quietly.
+      if (action === null || typeof action !== "object" || Array.isArray(action))
+        throw hostError("", 2);
+      if (action.action !== "review-launch") continue;
+      const detail = hasOwn(action, "detail") ? pyStrScalar(action.detail) : "";
+      const lens = LENS_WORD.exec(detail);
+      if (isPathComponent(action.target) && lens) reviewers.add(`${lens[1]}\t${action.target}`);
+    }
+  } catch (error) {
+    if (isHostError(error)) throw error;
+    // a missing actions file is a life stage, not corruption
+  }
+  const ordered = [...reviewers].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  for (const key of ordered) {
+    const [lens, lane] = key.split("\t");
+    add(`${ticket}-rev-${lens}-${lane}`);
+  }
+  if (!paths.includes(synth)) paths.push(synth);
+  return paths;
+}
+
+async function stopRunCmd(args: string[]): Promise<void> {
+  const given = args[0] ?? "";
+  let givenIsDir = false;
+  try {
+    givenIsDir = !!given && statSync(given).isDirectory();
+  } catch {}
+  if (!givenIsDir) die("usage: host.sh stop-run <dispatch>");
+  let dispatch = "";
+  try {
+    dispatch = realpathSync(given);
+  } catch {
+    dispatch = "";
+  }
+  let paths: string[];
+  try {
+    paths = runWorktreePaths(dispatch);
+  } catch (error) {
+    if (isHostError(error)) {
+      if (error.message) console.error(`host: ${error.message}`);
+      throw hostError("", hostCode(error));
+    }
+    throw error;
+  }
+  let rc = 0;
+  for (const path of paths) {
+    let isDir = false;
+    try {
+      isDir = statSync(path).isDirectory();
+    } catch {}
+    if (!isDir) continue;
+    try {
+      await stopCmd([path]);
+    } catch (error) {
+      if (isHostError(error)) {
+        if (error.message) console.error(`host: ${error.message}`);
+        rc = hostCode(error);
+      } else throw error;
+    }
+  }
+  if (rc !== 0) throw hostError("", rc);
+}
+
+function runSpaceVerdict(infoText: string, panesText: string): string {
+  const ws = parseJson(infoText)?.result?.workspace;
+  if (ws === null || typeof ws !== "object" || Array.isArray(ws)) throw new Error("bad space");
+  const panes = parseJson(panesText)?.result?.panes;
+  if (!Array.isArray(panes)) throw new Error("bad panes");
+  for (const entry of panes) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry))
+      throw new Error("bad panes");
+  }
+  if (tokensOf(ws).postmaster !== "opened") return "space was not opened by host.sh";
+  for (const entry of panes) {
+    const tokens = tokensOf(entry);
+    if (tokens.postmaster !== "launch" && tokens.postmaster !== "root")
+      return `pane ${pyStrScalar(entry.pane_id)} was not opened by host.sh`;
+    if (tokens.postmaster === "launch" && tokens.state !== "done")
+      return `launch pane ${pyStrScalar(entry.pane_id)} is still running`;
+  }
+  return "ok";
+}
+
+function herdrCloseRunPlacements(givenDispatch: string): number {
+  const dispatch = realpathLoose(givenDispatch);
+  try {
+    if (!statSync(join(STATE, "placements")).isDirectory()) return 0;
+  } catch {
+    return 0;
+  }
+  // BASE collects, then joins: one non-mapping file, or one non-string
+  // workspace id, aborts the print, so no space closes from this list.
+  const found = new Set<string>();
+  let collectOk = true;
+  for (const file of placementFiles()) {
+    let item: any = null;
+    try {
+      item = JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      continue;
+    }
+    if (item === null || typeof item !== "object" || Array.isArray(item)) {
+      collectOk = false;
+      break;
+    }
+    if (item.run === dispatch && item.workspace) {
+      if (typeof item.workspace !== "string") {
+        collectOk = false;
+        break;
+      }
+      found.add(item.workspace);
+    }
+  }
+  if (!collectOk) found.clear();
+  let rc = 0;
+  for (const file of placementFiles()) {
+    try {
+      if (!statSync(file).isFile()) continue;
+    } catch {
+      continue;
+    }
+    let fields: string[] | null = null;
+    try {
+      const item: any = JSON.parse(readFileSync(file, "utf8"));
+      if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
+      if (item.run !== dispatch) continue;
+      fields = ["workspace", "tab", "pane", "cwd"].map((key) => jsonValue(item[key]));
+    } catch {
+      continue;
+    }
+    if (!fields) continue;
+    const [space, tab, pane, cwd] = fields as [string, string, string, string];
+    const live = registryScan(cwd);
+    if (live.length) {
+      warn(`a launch is still running in ${cwd}: ${live.map((item) => item.name).join(";")}`);
+      rc = 2;
+      continue;
+    }
+    if (herdrFinishPlacement(space, tab, pane) !== 0) {
+      if (herdrSpaceGone(space)) markerRemove(file);
+      else rc = 2;
+    }
+  }
+  for (const ws of [...found].sort()) {
+    if (!ws) continue;
+    const info = herdr(["workspace", "get", ws]);
+    if (info.code !== 0) {
+      if (herdrSpaceGone(ws)) continue;
+      warn(`could not inspect run space ${ws}; left it open`);
+      rc = 2;
+      continue;
+    }
+    const panes = herdr(["pane", "list", "--workspace", ws]);
+    if (panes.code !== 0) {
+      rc = 2;
+      continue;
+    }
+    let verdict = "";
+    try {
+      verdict = runSpaceVerdict(info.out, panes.out);
+    } catch {
+      verdict = "";
+    }
+    if (verdict === "ok") {
+      if (herdr(["workspace", "close", ws]).code !== 0) {
+        warn(`herdr could not close run space ${ws}`);
+        rc = 2;
+        continue;
+      }
+      herdrForgetSpace(ws);
+    } else {
+      warn(`${verdict}; left run space ${ws} open`);
+      rc = 2;
+    }
+  }
+  return rc;
+}
+
+function tmuxCloseRunWindows(givenDispatch: string): number {
+  const dispatch = realpathLoose(givenDispatch);
+  const rows = run("tmux", [
+    "list-windows",
+    "-a",
+    "-F",
+    "#{window_id}\t#{@postmaster_cwd}\t#{@postmaster_run}\t#{@postmaster_pane}",
+  ]);
+  if (rows.code !== 0) {
+    if (run("tmux", ["ls"]).code !== 0) return 0; // no server: nothing to sweep
+    warn(`could not sweep tmux windows for run ${dispatch}; left them open`);
+    return 2;
+  }
+  let rc = 0;
+  for (const line of pySplitLines(rows.out)) {
+    const [w, cwd, runTag, ...paneRest] = line.split("\t");
+    if (!w || runTag !== dispatch) continue;
+    if (!cwd) {
+      warn(`run window ${w} has no recorded directory; left it open`);
+      rc = 2;
+      continue;
+    }
+    const live = registryScan(cwd);
+    if (live.length) {
+      warn(`a launch is still running in ${cwd}; left run window ${w} open`);
+      rc = 2;
+      continue;
+    }
+    if (tmuxCloseWindow(w, paneRest.join("\t")) !== 0) rc = 2;
+  }
+  return rc;
+}
+
+async function closeRunCmd(args: string[]): Promise<void> {
+  const given = args[0] ?? "";
+  let givenIsDir = false;
+  try {
+    givenIsDir = !!given && statSync(given).isDirectory();
+  } catch {}
+  if (!givenIsDir) die("usage: host.sh close-run <dispatch>");
+  let dispatch = "";
+  try {
+    dispatch = realpathSync(given);
+  } catch {
+    dispatch = "";
+  }
+  let paths: string[];
+  try {
+    paths = runWorktreePaths(dispatch);
+  } catch (error) {
+    if (isHostError(error)) {
+      if (error.message) console.error(`host: ${error.message}`);
+      throw hostError("", hostCode(error));
+    }
+    throw error;
+  }
+  let rc = 0;
+  for (const path of paths) {
+    let isDir = false;
+    try {
+      isDir = statSync(path).isDirectory();
+    } catch {}
+    if (!isDir) continue;
+    try {
+      await closeCmd([path]);
+    } catch (error) {
+      if (isHostError(error)) {
+        if (error.message) console.error(`host: ${error.message}`);
+        rc = hostCode(error);
+      } else throw error;
+    }
+  }
+  if (herdrUp()) {
+    if (herdrCloseRunPlacements(dispatch) !== 0) rc = 2;
+  }
+  if (has("tmux")) {
+    if (tmuxCloseRunWindows(dispatch) !== 0) rc = 2;
+  }
+  if (rc !== 0) throw hostError("", rc);
 }
