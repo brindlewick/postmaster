@@ -74,6 +74,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { tryJsonFile } from "./lib/data.ts";
 import { beside, scriptsDir, toolRoot } from "./lib/paths.ts";
 import { die, run } from "./lib/proc.ts";
+import { PY_M_END, PY_M_START } from "./lib/text.ts";
 
 const USAGE = "usage: runs-watch.sh <project-run-root> [--timeout <seconds>] | --help";
 
@@ -594,14 +595,17 @@ function repoFromBrief(dispatch: string): string {
     return "";
   }
   const starts: number[] = [];
-  const re = /^## Project profile[ \t]*$/gmu;
+  const re = new RegExp(`${PY_M_START}## Project profile[ \t]*${PY_M_END}`, "gu");
   let m: RegExpExecArray | null;
   while ((m = re.exec(waybill)) !== null) starts.push(m.index + m[0].length);
   if (starts.length === 0) return "";
   const body = waybill.slice(starts[starts.length - 1]!);
-  const end = /^## /mu.exec(body);
+  const end = new RegExp(`${PY_M_START}## `, "u").exec(body);
   const scope = end ? body.slice(0, end.index) : body;
-  const rm = /^repo:[ \t]*([^ \t].*?)(?:[ \t]{2,}[^ \t].*)?[ \t]*$/mu.exec(scope);
+  const rm = new RegExp(
+    `${PY_M_START}repo:[ \t]*([^ \t].*?)(?:[ \t]{2,}[^ \t].*)?[ \t]*${PY_M_END}`,
+    "u",
+  ).exec(scope);
   return rm ? (rm[1] ?? "").trim() : "";
 }
 
@@ -837,7 +841,11 @@ function watchHost(
   append: boolean,
   launch: string[],
 ): number {
-  const command = ["run", name, cwd, "--role", "coachman", "--run", dispatch];
+  // INTENDED divergence from BASE: BASE's watch_host omits --under, and BASE's
+  // host.sh run refuses --run without --under, so every automatic dispatch and
+  // remount dies before the agent starts. The port names the run space; BASE
+  // needs the same line. Round 12 P1, control below in runs-watch.test.ts.
+  const command = ["run", name, cwd, "--role", "coachman", "--run", dispatch, "--under", dispatch];
   if (append) command.push("--append");
   command.push("--out", out, "--err", err, "--marker", marker, "--", ...launch);
   if (process.env.POSTMASTER_WATCH_TEST_MODE === "1") {

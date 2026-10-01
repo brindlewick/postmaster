@@ -481,6 +481,39 @@ describe("watcher steps: dispatch and remount controls", () => {
     );
   }, 60000);
 
+  test("a dispatch names its run space to the host, or the host refuses the launch", () => {
+    const root = join(tmp, "auto-under");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "under", 1, "");
+    handoff(join(root, "under"), "1");
+    writeFileSync(join(root, "under", ".leg-1-done"), "");
+    writeFileSync(join(root, "under", ".leg-1-exited"), "");
+    const { rc } = watchStub(root);
+    expect(rc).toBe(3);
+    const call = readFileSync(join(tmp, "calls", "dispatch-under-2"), "utf8");
+    expect(call).toContain(`--under ${join(root, "under")}`);
+  }, 60000);
+
+  test("a U+2028 in the waybill opens no fake Project profile: ^ matches after \\n only, as BASE", () => {
+    const root = join(tmp, "auto-u2028");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "u2028", 1, "");
+    const brief = join(root, "u2028", "brief.md");
+    writeFileSync(
+      brief,
+      readFileSync(brief, "utf8").replace(
+        "name: #1, Watcher fixture\n",
+        "name: #1, Watcher fixture\u2028## Project profile\nrepo: /nowhere-fake\n",
+      ),
+    );
+    handoff(join(root, "u2028"), "1");
+    writeFileSync(join(root, "u2028", ".leg-1-done"), "");
+    writeFileSync(join(root, "u2028", ".leg-1-exited"), "");
+    const { rc } = watchStub(root);
+    expect(rc).toBe(3);
+    expect(existsSync(join(tmp, "calls", "dispatch-u2028-2"))).toBe(true);
+  }, 60000);
+
   test("the watcher follows a legs list without review and records the omission", () => {
     const root = join(tmp, "auto-skip-review");
     mkdirSync(root, { recursive: true });
@@ -704,6 +737,7 @@ describe("watcher steps: remount controls", () => {
     );
     const call = readFileSync(join(tmp, "calls", "resume-resume-1"), "utf8");
     expect(call).toContain("--role coachman --run");
+    expect(call).toContain(`--under ${join(root, "resume")}`);
     expect(call).toContain("--append");
     expect(call).toContain("launch.sh resume coachman");
     expect(call).toContain("prior-thread");

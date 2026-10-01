@@ -1,4 +1,4 @@
-// Tests beside scripts/verify-examples.ts, moved from its --self-test on #109: 32 controls.
+// Tests beside scripts/verify-examples.ts, moved from its --self-test on #109: 35 controls.
 // The self-test built later fixtures between controls; they are built here in beforeAll
 // instead, so each test passes alone as well as in file order. The spaced-path control
 // re-runs this file with bun test instead of --self-test. Conditional controls are gated
@@ -323,6 +323,23 @@ describe("unicode primitives", () => {
 
   test("trim keeps a trailing FEFF (not Python space)", () => {
     expect(trim(["x\uFEFF"])).toEqual(["x\uFEFF"]);
+  });
+});
+
+describe("fence runs longer than three", () => {
+  test("a four-backtick fence opens and closes, as BASE opens `{3,}`", () => {
+    expect(blocks(["````", "$ hi", "````", "after"])).toEqual([["$ hi"]]);
+  });
+  test("four backticks close a three-backtick block, as BASE closes longer runs", () => {
+    expect(blocks(["```", "$ hi", "````", "after"])).toEqual([["$ hi"]]);
+  });
+  test("a heading inside a four-backtick fence does not end the section", () => {
+    expect(section(["## T", "````", "## U", "````", "b"], "T")).toEqual([
+      "````",
+      "## U",
+      "````",
+      "b",
+    ]);
   });
 });
 

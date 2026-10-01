@@ -39,12 +39,12 @@ import {
   pyTrim,
 } from "./lib/text.ts";
 
-export const FENCE = new RegExp(`^([${PY_S_CLASS}]*)(\`\`\`|~{3,})(${PY_DOT}*)$`, "u");
+export const FENCE = new RegExp(`^([${PY_S_CLASS}]*)(\`{3,}|~{3,})(${PY_DOT}*)$`, "u");
 const EXIT_LINE_RE = /^\[exit (\p{Nd}+)\]$/u;
 const TICKET_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Ticket[${PY_S_CLASS}]*$`, "u");
 const PROFILE_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Project profile[${PY_S_CLASS}]*$`, "u");
 const HEAD_BREAK_RE = new RegExp(`^#{1,2}[${PY_S_CLASS}]`, "u");
-const CLOSE_FENCE_RE = new RegExp(`^[${PY_S_CLASS}]*(\`\`\`|~{3,})[${PY_S_CLASS}]*$`, "u");
+const CLOSE_FENCE_RE = new RegExp(`^[${PY_S_CLASS}]*(\`{3,}|~{3,})[${PY_S_CLASS}]*$`, "u");
 const BIN_NAME = /^[A-Za-z0-9@._+-]+$/u;
 export const TIMEOUT = 60;
 

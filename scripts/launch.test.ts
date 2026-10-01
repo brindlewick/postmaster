@@ -3075,6 +3075,18 @@ beforeAll(() => {
       '{"type":"error","error":{"type":"overloaded_error"}}',
     );
     isTransient(
+      "transient prose under a detail key resumes",
+      0,
+      "the leg ended",
+      '{"type":"error","detail":"model stream idle timeout"}',
+    );
+    isTransient(
+      "transient prose under a capital Detail key resumes",
+      0,
+      "the leg ended",
+      '{"type":"error","Detail":"model stream idle timeout"}',
+    );
+    isTransient(
       "a structured wall beats prose transient",
       1,
       "model stream idle timeout",
@@ -4359,6 +4371,12 @@ describe("structured values: known transients resume, anything else wakes", () =
   });
   test("an overloaded_error type is transient", () => {
     assertControl("an overloaded_error type is transient");
+  });
+  test("transient prose under a detail key resumes", () => {
+    assertControl("transient prose under a detail key resumes");
+  });
+  test("transient prose under a capital Detail key resumes", () => {
+    assertControl("transient prose under a capital Detail key resumes");
   });
   test("a structured wall beats prose transient", () => {
     assertControl("a structured wall beats prose transient");

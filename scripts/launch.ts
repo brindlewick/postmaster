@@ -705,7 +705,7 @@ const MESSAGE_KEYS = new Set([
   "error",
   "errors",
   "message",
-  "Detail",
+  "detail",
   "reason",
   "description",
   "text",
