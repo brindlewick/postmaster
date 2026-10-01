@@ -3,6 +3,9 @@
 // this file drives it once in beforeAll, splits its printed lines on the section headers,
 // and asserts each section's control count with no FAIL. No fixture state is restructured.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runControls } from "./host-self-test.ts";
 
 const SECTIONS: Array<{ name: string; count: number }> = [
@@ -93,4 +96,40 @@ describe("host self-test sections", () => {
   test("self-test reports zero failures", () => {
     expect(failures).toBe(0);
   });
+});
+
+describe("stub state lock", () => {
+  test("concurrent locked increments lose no update", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "host-lock-"));
+    try {
+      writeFileSync(join(dir, "counter"), "0");
+      const worker = [
+        `import { withStubLock } from ${JSON.stringify(join(import.meta.dir, "host-self-test.ts"))};`,
+        `import { readFileSync, writeFileSync } from "node:fs";`,
+        `const dir = process.argv[process.argv.length - 1];`,
+        `for (let i = 0; i < 10; i++) {`,
+        `  withStubLock(dir, () => {`,
+        `    const n = Number(readFileSync(dir + "/counter", "utf8"));`,
+        `    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);`,
+        `    writeFileSync(dir + "/counter", String(n + 1));`,
+        `  });`,
+        `}`,
+      ].join("\n");
+      const procs = Array.from({ length: 8 }, () =>
+        Bun.spawn([process.execPath, "-e", worker, dir], {
+          stdout: "pipe",
+          stderr: "pipe",
+        }),
+      );
+      const codes = await Promise.all(procs.map((p) => p.exited));
+      const errors = (await Promise.all(procs.map(async (p) => new Response(p.stderr).text())))
+        .map((text) => text.trim())
+        .filter(Boolean)
+        .join("\n");
+      expect(`${errors}codes=${codes.join(",")}`).toBe("codes=0,0,0,0,0,0,0,0");
+      expect(readFileSync(join(dir, "counter"), "utf8")).toBe("80");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
 });

@@ -12,6 +12,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -66,9 +67,49 @@ function next(st: any, prefix: string): string {
 function out(value: unknown): void {
   console.log(JSON.stringify({ id: "stub", result: value }));
 }
+class StubFail extends Error {
+  constructor(public readonly code: number) {
+    super(`stub exit ${code}`);
+  }
+}
 function fail(code: string): never {
   console.error(JSON.stringify({ error: { code, message: code } }));
-  process.exit(1);
+  throw new StubFail(1);
+}
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+// Stub state is read-modify-written by concurrent processes: runCmd's synchronous
+// calls, the async runner's state updates, finish watchers, and this test's own
+// edits. A mkdir lock serializes them; without it a stale read silently drops a
+// field another writer just set (the owned flag vanishing under gate load). The lock
+// is stale-stolen after 10 seconds: a holder this slow already failed its control,
+// and no holder outlives its stub call. It throws rather than hanging forever.
+const STUB_LOCK_STALE_MS = 10000;
+const STUB_LOCK_TIMEOUT_MS = 30000;
+export function withStubLock<T>(stateDir: string, fn: () => T): T {
+  const lock = join(stateDir, ".lock");
+  const deadline = Date.now() + STUB_LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      mkdirSync(lock);
+      break;
+    } catch {
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > STUB_LOCK_STALE_MS) {
+          rmSync(lock, { recursive: true, force: true });
+          continue;
+        }
+      } catch {}
+      if (Date.now() > deadline) throw new Error(`stub lock timeout: ${lock}`);
+      sleepSync(10);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    rmSync(lock, { recursive: true, force: true });
+  }
 }
 function git(...args: string[]): string {
   return exec("git", args).out.trim();
@@ -119,12 +160,20 @@ function tokens(args: string[]): Record<string, string> {
 }
 async function herdrStub(args: string[]): Promise<void> {
   const stateDir = process.env.STUB ?? ".";
+  try {
+    withStubLock(stateDir, () => herdrStubInner(args, stateDir));
+  } catch (error) {
+    if (error instanceof StubFail) process.exit(error.code);
+    throw error;
+  }
+}
+function herdrStubInner(args: string[], stateDir: string): void {
   const callPath = join(stateDir, "herdr.calls");
   writeFileSync(callPath, `${args.join("\t")}\n`, { flag: "a" });
-  if (flag(join(stateDir, "herdr.down"))) process.exit(1);
+  if (flag(join(stateDir, "herdr.down"))) throw new StubFail(1);
   if (args.length === 1 && args[0] === "agent") {
     console.error("herdr agent commands:\n  kinds: pi|claude|codex");
-    process.exit(2);
+    throw new StubFail(2);
   }
   const path = join(stateDir, "herdr.json");
   const st = json(path, {
@@ -145,7 +194,7 @@ async function herdrStub(args: string[]): Promise<void> {
   if (command === "worktree list") {
     const cwd = opt(args, "--cwd") ?? "";
     const root = mainRepo(cwd);
-    if (!root) process.exit(1);
+    if (!root) throw new StubFail(1);
     const output = git("-C", cwd, "worktree", "list", "--porcelain");
     const worktrees = output
       .split("\n\n")
@@ -243,7 +292,7 @@ async function herdrStub(args: string[]): Promise<void> {
   if (command === "workspace get") {
     if (flag(join(stateDir, "wsget.succeed-once")))
       rmSync(join(stateDir, "wsget.succeed-once"), { force: true });
-    else if (flag(join(stateDir, "wsget.fail"))) process.exit(1);
+    else if (flag(join(stateDir, "wsget.fail"))) throw new StubFail(1);
     const w = st.spaces[args[2]!] ?? {};
     out({
       workspace: {
@@ -261,7 +310,7 @@ async function herdrStub(args: string[]): Promise<void> {
     return;
   }
   if (command === "pane list") {
-    if (flag(join(stateDir, "panelist.fail"))) process.exit(1);
+    if (flag(join(stateDir, "panelist.fail"))) throw new StubFail(1);
     const ws = opt(args, "--workspace") ?? "";
     out({
       panes: (st.spaces[ws]?.panes ?? []).map((pane_id: string) => ({
@@ -342,6 +391,14 @@ async function herdrStub(args: string[]): Promise<void> {
 }
 function tmuxStub(args: string[]): void {
   const stateDir = process.env.STUB ?? ".";
+  try {
+    withStubLock(stateDir, () => tmuxStubInner(args, stateDir));
+  } catch (error) {
+    if (error instanceof StubFail) process.exit(error.code);
+    throw error;
+  }
+}
+function tmuxStubInner(args: string[], stateDir: string): void {
   writeFileSync(join(stateDir, "tmux.calls"), `${args.join("\t")}\n`, { flag: "a" });
   const path = join(stateDir, "tmux.json");
   const st = json(path, { n: 0, sessions: [], windows: {} });
@@ -393,7 +450,8 @@ function tmuxStub(args: string[]): void {
   };
   const command = args[0] ?? "";
   if (command === "has-session") {
-    process.exit(st.sessions.includes((opt(args, "-t") ?? "").replace(/^=/u, "")) ? 0 : 1);
+    if (!st.sessions.includes((opt(args, "-t") ?? "").replace(/^=/u, ""))) throw new StubFail(1);
+    return;
   }
   if (command === "new-session") {
     launch(opt(args, "-s") ?? "");
@@ -429,12 +487,13 @@ function tmuxStub(args: string[]): void {
     return;
   }
   if (command === "ls") {
-    process.exit(stateFlag("tmux.dead") ? 1 : 0);
+    if (stateFlag("tmux.dead")) throw new StubFail(1);
+    return;
   }
   if (command === "list-panes") {
-    if (stateFlag("panes.fail")) process.exit(1);
+    if (stateFlag("panes.fail")) throw new StubFail(1);
     const target = opt(args, "-t") ?? "";
-    if (!st.windows[target]) process.exit(1);
+    if (!st.windows[target]) throw new StubFail(1);
     for (const [pane, value] of Object.entries(st.windows[target].panes ?? {}) as Array<
       [string, any]
     >)
@@ -463,7 +522,7 @@ function tmuxStub(args: string[]): void {
     return;
   }
   if (command === "list-windows") {
-    if (stateFlag("tmux.dead") || stateFlag("windows.fail")) process.exit(1);
+    if (stateFlag("tmux.dead") || stateFlag("windows.fail")) throw new StubFail(1);
     for (const [win, value] of Object.entries(st.windows) as Array<[string, any]>) {
       if (flag("-a")) {
         if (fmt.includes("#{@postmaster_run}"))
@@ -787,7 +846,32 @@ async function makeHarness(root: string): Promise<{ sys: string; stubs: string }
 function resetHarness(root: string): void {
   testStopFinishers(root);
   const dir = join(root, "stub");
-  for (const name of readdirSync(dir)) rmSync(join(dir, name), { recursive: true, force: true });
+  // Drain an in-flight stub call before clearing beneath it.
+  withStubLock(dir, () => {
+    for (const name of readdirSync(dir)) {
+      if (name === ".lock") continue;
+      rmSync(join(dir, name), { recursive: true, force: true });
+    }
+  });
+}
+// A test-side read-modify-write of stub state, under the same lock the stubs
+// take: without it an async runner or watcher write lands between the read and
+// the save and one of the two updates is lost.
+function updateHerdrJson(root: string, fn: (st: any) => void): void {
+  withStubLock(join(root, "stub"), () => {
+    const path = join(root, "stub", "herdr.json");
+    const st = json(path, { spaces: {}, panes: {}, tabs: {}, open: {} });
+    fn(st);
+    save(path, st);
+  });
+}
+function updateTmuxJson(root: string, fn: (st: any) => void): void {
+  withStubLock(join(root, "stub"), () => {
+    const path = join(root, "stub", "tmux.json");
+    const st = json(path, { sessions: [], windows: {} });
+    fn(st);
+    save(path, st);
+  });
 }
 async function waitHerdrPaneGone(root: string, pane: string): Promise<boolean> {
   for (let i = 0; i < 50; i++) {
@@ -2088,14 +2172,12 @@ export async function runControls(): Promise<number> {
     );
     const plainSpace = kvOf(plainRun.out, "space");
     const plainTab = `${plainSpace}:t2`;
-    {
-      const st = json(join(stub, "herdr.json"), { spaces: {}, panes: {}, tabs: {} });
+    updateHerdrJson(root, (st) => {
       st.spaces[plainSpace].tabs.push(plainTab);
       st.spaces[plainSpace].panes.push("pU");
       st.tabs[plainTab] = { ws: plainSpace, pane: "pU", cwd: "/home/user", label: "user" };
       st.panes.pU = { ws: plainSpace, tab: plainTab, cwd: "/home/user", tokens: {} };
-      save(join(stub, "herdr.json"), st);
-    }
+    });
     await marker(markerPath("c3"));
     const plainClose = execHost(["close", plain], stubs, root);
     await pass(
@@ -2469,12 +2551,10 @@ export async function runControls(): Promise<number> {
       const splitSpace = kvOf(splitHerdr.out, "space");
       const splitTab = kvOf(splitHerdr.out, "tab");
       const splitPane = kvOf(splitHerdr.out, "pane");
-      {
-        const st = herdrState();
+      updateHerdrJson(root, (st) => {
         st.spaces[splitSpace].panes.push("pUser");
         st.panes.pUser = { ws: splitSpace, tab: splitTab, cwd: "/home/user", tokens: {} };
-        save(join(stub, "herdr.json"), st);
-      }
+      });
       await marker(join(logs, "split-herdr.done"));
       await waitHerdrPaneGone(root, splitPane);
       await pass("the host pane closes while the user's split pane and tab survive", () => {
@@ -2689,11 +2769,9 @@ export async function runControls(): Promise<number> {
       );
       const splitWin = kvOf(splitTmux.out, "window");
       const splitTpane = Object.keys(tmuxState().windows[splitWin]?.panes ?? {})[0] ?? "";
-      {
-        const st = tmuxState();
+      updateTmuxJson(root, (st) => {
         st.windows[splitWin].panes["%user"] = { opts: {} };
-        save(join(stub, "tmux.json"), st);
-      }
+      });
       await marker(join(logs, "split-tmux.done"));
       await waitTmuxPaneGone(root, splitTpane);
       await pass(
@@ -2736,11 +2814,9 @@ export async function runControls(): Promise<number> {
       );
       const f2win = kvOf(f2run.out, "window");
       await marker(join(logs, "f2.done"));
-      {
-        const st = tmuxState();
+      updateTmuxJson(root, (st) => {
         st.windows[f2win].panes["%user"] = { opts: {} };
-        save(join(stub, "tmux.json"), st);
-      }
+      });
       const f2close = execHost(["close", luna], stubs, root, tmuxEnv);
       await pass(
         "close refuses (exit 2) when a user pane shares the window",
@@ -2761,11 +2837,9 @@ export async function runControls(): Promise<number> {
       );
       const f2bwin = kvOf(f2brun.out, "window");
       const f2bpane = Object.keys(tmuxState().windows[f2bwin]?.panes ?? {})[0] ?? "";
-      {
-        const st = tmuxState();
+      updateTmuxJson(root, (st) => {
         st.windows[f2bwin].panes["%user"] = { opts: {} };
-        save(join(stub, "tmux.json"), st);
-      }
+      });
       await marker(join(logs, "f2b.done"));
       await waitTmuxPaneGone(root, f2bpane);
       const f2bclose = execHost(["close", luna], stubs, root, tmuxEnv);
@@ -3034,8 +3108,7 @@ export async function runControls(): Promise<number> {
       writeFileSync(join(f.caller, "sleeper.sh"), "#!/bin/sh\nsleep 30\n");
       exec("chmod", ["+x", join(f.caller, "sleeper.sh")]);
       execHost(["run", NAME, sol, "--", "./sleeper.sh"], stubs);
-      {
-        const st = herdrState();
+      updateHerdrJson(root, (st) => {
         st.spaces.w9 = {
           label: "T-1",
           tokens: { postmaster: "opened" },
@@ -3057,7 +3130,8 @@ export async function runControls(): Promise<number> {
         };
         st.tabs["w9:t1"] = { ws: "w9", pane: "p9a", cwd: lunaReal, label: "finished" };
         st.open[lunaReal] = "w9";
-        save(join(stub, "herdr.json"), st);
+      });
+      {
         save(join(root, "state", "placements", "hc1.json"), {
           workspace: "w9",
           tab: "w9:t1",
@@ -3098,8 +3172,7 @@ export async function runControls(): Promise<number> {
         () =>
           hc3file.length === 1 && existsSync(join(root, "state", "placements", hc3file[0] ?? "")),
       );
-      {
-        const st = herdrState();
+      updateHerdrJson(root, (st) => {
         const gone = st.spaces[hc3space] ?? {};
         delete st.spaces[hc3space];
         for (const pane of gone.panes ?? []) delete st.panes[pane];
@@ -3107,8 +3180,7 @@ export async function runControls(): Promise<number> {
         for (const [cwd, opened] of Object.entries(st.open ?? {})) {
           if (opened === hc3space) delete (st.open as Record<string, string>)[cwd];
         }
-        save(join(stub, "herdr.json"), st);
-      }
+      });
       const hc3second = execHost(
         ["run", NAME, luna, "--under", run1, "--marker", "../logs/hc3.done", "--", "./fixed.sh"],
         stubs,
