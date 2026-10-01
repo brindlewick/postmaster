@@ -16,9 +16,9 @@
 // When the file holds no `## spec` stanza and is in the per-lane shape, count instead
 // prints the pre-change numbers: manifest lanes approved in the manifest or this package,
 // each lane once, and manifest lanes with a changes stanza in this package. So does a
-// file that mixes a `## spec` stanza with others when the manifest names a lane `spec`:
-// that is a pre-change file for that lane. Any other mix is refused rather than
-// miscounted. count never
+// file that holds a `## spec` stanza, alone or beside others, when the manifest names
+// a lane `spec`: that is a pre-change file for that lane. Any other mix is refused
+// rather than miscounted. count never
 // over-counts: an approval with a blank commit, or a stanza for a lane the manifest does
 // not name, contributes nothing.
 // The stanza is written before the log line, so a failed log never loses a decision, and a
@@ -125,6 +125,21 @@ function parseDecisions(path: string): Stanza[] {
   });
 }
 
+// The shortcut's disambiguator: true only when the manifest parses to lanes
+// naming a lane `spec`. A missing or unreadable manifest is not a legacy
+// lane manifest, so the shortcut stands without one.
+function manifestNamesSpecLane(d: string): boolean {
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(readStrict(join(d, "manifest.json")));
+  } catch {
+    return false;
+  }
+  if (!isDict(manifest)) return false;
+  const lanes: unknown = hasOwn(manifest, "lanes") ? manifest.lanes : {};
+  return isDict(lanes) && hasOwn(lanes, "spec");
+}
+
 function readManifest(d: string): Record<string, unknown> {
   const path = join(d, "manifest.json");
   let manifest: unknown;
@@ -187,7 +202,10 @@ function count(d: string): void {
   if (!isFile(f)) die("spec-decisions: no decisions file: run fresh first", 1);
   const entries = parseDecisions(f);
   const one = entries.find((e) => e.lane === "spec");
-  if (one !== undefined && entries.length === 1) {
+  // A singleton `## spec` stanza is run-level only when the manifest names no
+  // lane `spec`: a legacy lane of that name counts the legacy way, beside the
+  // manifest's own outcomes, or approvals already recorded go uncounted.
+  if (one !== undefined && entries.length === 1 && !manifestNamesSpecLane(d)) {
     const approved = one.decision === "approved" && one.commit !== "" ? 1 : 0;
     const changed = one.decision === "changes" ? 1 : 0;
     console.log(`approved ${approved}`);

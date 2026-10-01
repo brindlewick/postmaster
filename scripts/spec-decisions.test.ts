@@ -136,6 +136,14 @@ describe("positive controls", () => {
     expect(strip(c.out)).toBe("approved 1\nchanges 0");
   }, 10000);
 
+  test("a singleton spec stanza for a lane named spec reads the legacy count, not the shortcut", () => {
+    manifest('"spec": {}, "alpha": {"outcome": "approved"}');
+    writeFileSync(decisions, "## spec\ndecision: approved\ncommit: abc123\nwords: \n\n");
+    const c = go(d, "count");
+    expect(c.code).toBe(0);
+    expect(strip(c.out)).toBe("approved 2\nchanges 0");
+  }, 10000);
+
   test("a duplicate stanza for one lane counts once", () => {
     manifest('"alpha": {}');
     writeFileSync(
