@@ -13,6 +13,7 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { delimiter, join } from "node:path";
@@ -1748,8 +1749,11 @@ describe("pin lock beside the bash flow", () => {
       const tools = join(tmp, "tools");
       mkdirSync(tools, { recursive: true });
       // The bash flow's resting state: flock(2) on the fd, never removed,
-      // truncated to empty on every open. It must read as unlocked.
+      // truncated to empty on every open. Old, as the real one always is;
+      // it must read as unlocked.
       writeFileSync(join(tools, ".pin.lock"), "");
+      const past = new Date(Date.now() - 60000);
+      utimesSync(join(tools, ".pin.lock"), past, past);
       const repo = join(tmp, "repo");
       mkdirSync(repo, { recursive: true });
       run("git", ["-C", repo, "init", "-q", "-b", "main"]);
