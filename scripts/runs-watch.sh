@@ -338,6 +338,12 @@ watch_leg() {  # watch_leg <dispatch|resume> <rt> <dispatch> <worktree> <leg> <n
     mkdir -p "${POSTMASTER_WATCH_TEST_CALLS:-}" "$d/logs" || return 1
     printf 'kind=%s\nrt=%s\ndispatch=%s\nworktree=%s\nleg=%s\nnumber=%s\nthread=%s\nprompt=%s\n' \
       "$kind" "$rt" "$d" "$wt" "$leg" "$n" "$thread" "$prompt" > "$callfile"
+    # The double checks the script it would execute: a checkout without the leg
+    # script fails the start the way the shell would, before any marker moves.
+    if [ ! -x "$rt/scripts/host.sh" ]; then
+      echo "leg: $rt/scripts/host.sh is not executable" >&2
+      return 1
+    fi
     # The leg command clears the starting attempt's markers before its intent
     # lands; the double clears the same markers and writes no intent.
     rm -f -- "$d"/logs/coachman-leg-"$n"-wall-* "$d/.leg-$n-done" "$d/.leg-$n-exited"
@@ -358,9 +364,9 @@ watch_leg() {  # watch_leg <dispatch|resume> <rt> <dispatch> <worktree> <leg> <n
     return 0
   fi
   if [ "$kind" = dispatch ]; then
-    "$rt/host.sh" leg launch "$d" "$wt" "$leg" "$n" "$prompt"
+    "$rt/scripts/host.sh" leg launch "$d" "$wt" "$leg" "$n" "$prompt"
   else
-    "$rt/host.sh" leg resume "$d" "$wt" "$leg" "$n" "$thread" "$prompt"
+    "$rt/scripts/host.sh" leg resume "$d" "$wt" "$leg" "$n" "$thread" "$prompt"
   fi
 }
 
@@ -759,8 +765,9 @@ PY
   echo "watcher steps: dispatch and resume controls"
   pin="$tmp/pin"
   git init -q -b main "$pin" || { echo "self-test: cannot make the pin fixture"; exit 1; }
-  mkdir -p "$pin/skills/postmaster"
+  mkdir -p "$pin/skills/postmaster" "$pin/scripts"
   cp "$HERE/../skills/postmaster/coachman.md" "$pin/skills/postmaster/coachman.md" || exit 1
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$pin/scripts/host.sh" && chmod +x "$pin/scripts/host.sh" || exit 1
   git -C "$pin" -c user.name=t -c user.email=t@example.invalid add . \
     && git -C "$pin" -c user.name=t -c user.email=t@example.invalid commit -qm pin || exit 1
   pin_commit=$(git -C "$pin" rev-parse HEAD) || exit 1
@@ -833,6 +840,30 @@ PY
     && [ ! -e "$tmp/calls/dispatch-stale-pin-2" ] \
     && ok "a checkout that moved past its dispatch commit wakes and launches nothing" \
     || fail "a checkout that moved past its dispatch commit wakes and launches nothing"
+  root="$tmp/auto-no-leg"; auto_run "$root" no-leg 1 ""; handoff "$root/no-leg" 1
+  pin2="$tmp/pin-noleg"
+  git init -q -b main "$pin2" || { echo "self-test: cannot make the no-leg pin"; exit 1; }
+  mkdir -p "$pin2/skills/postmaster"
+  cp "$HERE/../skills/postmaster/coachman.md" "$pin2/skills/postmaster/coachman.md" || exit 1
+  git -C "$pin2" -c user.name=t -c user.email=t@example.invalid add . \
+    && git -C "$pin2" -c user.name=t -c user.email=t@example.invalid commit -qm pin || exit 1
+  pin2_commit=$(git -C "$pin2" rev-parse HEAD) || exit 1
+  pin2=$(CDPATH= cd -P -- "$pin2" && pwd -P) || exit 1
+  python3 - "$root/no-leg/run.json" "$pin2_commit" "$pin2" <<'PY'
+import json, sys
+p = sys.argv[1]
+r = json.load(open(p)); r["postmaster"] = {"commit": sys.argv[2], "checkout": sys.argv[3]}
+json.dump(r, open(p, "w"), indent=2)
+PY
+  : > "$root/no-leg/.leg-1-done"; : > "$root/no-leg/.leg-1-exited"
+  watch_stub "$root"
+  [ $rc -eq 0 ] && has "needs no-leg DISPATCH" && has "not executable" \
+    && [ -f "$tmp/calls/dispatch-no-leg-2" ] \
+    && [ ! -e "$root/no-leg/logs/coachman-leg-2-attempts.jsonl" ] \
+    && [ ! -e "$root/no-leg/.leg-2-exited" ] \
+    && [ -f "$root/no-leg/leg-2-prompt.txt" ] \
+    && ok "a checkout without the leg script wakes with nothing started" \
+    || fail "a checkout without the leg script wakes with nothing started"
   root="$tmp/auto-repo-fallback"; auto_run "$root" repo-fallback 1 ""; handoff "$root/repo-fallback" 1
   sed -i '/^repo: /d' "$root/repo-fallback/brief.md"
   python3 - "$root" "$root/repo-fallback/checks.json" <<'PY'
