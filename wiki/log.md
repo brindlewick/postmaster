@@ -1,12 +1,73 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-27
+updated: 2026-09-29
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-09-29] ingest | the planning stage: every spec to the user before code
+
+A decision page, and a capture. Anthropic's AI-native SDLC playbook is captured into
+`raw/articles/ai-native-sdlc-playbook/` for its claim that design review happens before any
+code is generated. A run gains a `planning` stage: each workhorse drafts its own spec and
+stops, the postmaster puts each spec to the user one at a time as a link into the workhorse's
+worktree, and no workhorse writes code until its own spec is approved. Two approved specs are
+needed to go on. This reverses part of #29, where the spec was an audit record nobody
+reviewed during the run; the coachman still does not check code against the spec. The
+workhorse-spec page no longer says nobody reviews it, and #9's own-spec level becomes the
+workhorses' own specs reviewed by the user, with whether review makes the specs converge as a
+measure. Standing `claimed`, since no run bears on it yet.
+
+## [2026-09-29] ingest | what 25 syntheses took from each lane
+
+Issue #157. A trial over the records of every run that reached synthesis by 2026-09-29, 16
+against this repository and 9 fixture runs, recorded in `raw/trials/2026-09-29-synthesis-audit/`
+with its script, its output and one row per run. No run was promoted: the claim rests on the
+SYNTHESIS lines, the cards and a count in git, and the harness logs stay with each run. Every
+SYNTHESIS line names something taken from each lane, as `coachman.md` requires, so the test H1
+gave could not fail. Counted in runs of six words, the second-ranked lane's own share of the
+synthesis was 2% or less in 8 runs and 10% or more in 15. H1 now names four measurements that
+would settle it: #158, #159, #160 and a single-lane baseline. The cost question gains the
+minutes the runs recorded. Standing stays `claimed`.
+
+## [2026-09-27] ingest | how the style sort is checked and put to the user
+
+After the review of #55's pull request, the review-loop page records why the style check reads
+the gate as the run's branch has it and never runs it, why a sort may name the file that runs a
+linter, and why a linter the project already has is not proposed as new unless the sort says the
+gate does not run it. It also records that the postmaster puts the sort to the user once, as a
+run's aftercare ends, and that a finding's latest line gives its class. Standing stays
+`claimed`.
+
+## [2026-09-27] ingest | style gates nothing, and feeds the project's linter
+
+The user's direction in issue #55: try style not gating a run, for now. The style lens applies
+nothing, the ship card counts its findings, and after the merge each is sorted into a rule for
+a linter the project's gate runs, a convention for the project's docs, or neither, which the
+postmaster puts to the user. The review-loop page records the decision, its reasons, its costs
+and what would settle it; the turnpikes page says a turnpike need not gate. The decision earlier
+the same day that style blocks a ship was reverted on #40's pull request before it merged. Both
+pages stay `claimed`.
+
+## [2026-09-27] ingest | a review round's time limit
+
+The review loop page now says what happens to a reviewer still running when its round reaches
+the time limit: it is stopped and recorded DEGRADED, with timeout as its cause. The limit moves
+from the runbook into the config as `review.round_timeout_seconds`, and keeps its default of
+2400 seconds, the limit a round had when it ran one lens. The `degrade` lines will show whether
+round 1, which runs every lens at once, needs more. The standing stays `claimed`.
+
+## [2026-09-27] ingest | each project defines how a change to it is verified
+
+A page in the Decisions area. A project declares its checks in `.postmaster/project.toml`, or
+gets defaults found by discovery: the gate always, then a command-line app's ticket examples, a
+web app's browser suite and User journey, or a library's tests through its package name. A run
+records its checks at dispatch; workhorses run them before they report, and the coachman runs
+them on each branch and on the synthesis. The page says what the defaults cover and what they do
+not. Standing `claimed`, since no run bears on it yet.
 
 ## [2026-09-27] lint | fixture copies go under ~/Code/fixtures
 

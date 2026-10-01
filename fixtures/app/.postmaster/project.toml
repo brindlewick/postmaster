@@ -1,0 +1,14 @@
+# What every run against this app is held to: the checks a change is verified by. Postmaster
+# reads them with scripts/verify.sh; project.example.toml at postmaster's root is the shape.
+
+[checks.gate]
+command = "npm run check"
+shows = "the app type-checks, passes lint and the format check, and passes its unit tests"
+
+[checks.examples]
+use = "cli-examples"
+shows = "the transcripts in the ticket's User journey, run through todo, print and exit as they say"
+
+[checks.cli]
+command = "f=$(mktemp -u) && trap 'rm -f \"$f\"' EXIT && export TODO_FILE=\"$f\" && bun src/cli.ts add check the app && test \"$(bun src/cli.ts list)\" = '1 [ ] check the app'"
+shows = "todo, run as a user runs it on a new list, adds a task and lists it"
