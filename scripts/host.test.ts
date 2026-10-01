@@ -3,7 +3,7 @@
 // this file drives it once in beforeAll, splits its printed lines on the section headers,
 // and asserts each section's control count with no FAIL. No fixture state is restructured.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runControls } from "./host-self-test.ts";
@@ -178,6 +178,49 @@ describe("waiting list lock", () => {
       expect(tickets.size).toBe(500 + 128);
       for (let i = 0; i < 16; i++)
         for (let j = 0; j < 8; j++) expect(tickets.has(`T${i}-${j}`)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120000);
+  test("without flock the pid fallback still adds", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "host-waiting-nf-"));
+    try {
+      const runs = join(dir, "runs");
+      const qfile = join(dir, "q.md");
+      writeFileSync(qfile, "why is the run waiting?\n");
+      const wrapper = join(import.meta.dir, "host.sh");
+      // A PATH with no flock: bash for the wrapper's shebang, bun and dirname
+      // for its exec.
+      const bin = join(dir, "bin");
+      mkdirSync(bin, { recursive: true });
+      symlinkSync(Bun.which("bash") ?? "/bin/bash", join(bin, "bash"));
+      symlinkSync(process.execPath, join(bin, "bun"));
+      symlinkSync(Bun.which("dirname") ?? "/usr/bin/dirname", join(bin, "dirname"));
+      const worker = [
+        `import { spawnSync } from "node:child_process";`,
+        `const [wrapper, runs, qfile, idx] = process.argv.slice(process.argv.length - 4);`,
+        `for (let j = 0; j < 2; j++) {`,
+        `  const r = spawnSync(wrapper, ["leg", "waiting", "add", runs, "T" + idx + "-" + j, qfile], { encoding: "utf8" });`,
+        `  if (r.status !== 0) { process.stderr.write(String(r.stderr)); process.exit(1); }`,
+        `}`,
+      ].join("\n");
+      const env = { ...process.env, PATH: bin };
+      const procs = [0, 1].map((i) =>
+        Bun.spawn([process.execPath, "-e", worker, wrapper, runs, qfile, String(i)], {
+          stdout: "pipe",
+          stderr: "pipe",
+          env,
+        }),
+      );
+      const codes = await Promise.all(procs.map((p) => p.exited));
+      const errors = (await Promise.all(procs.map(async (p) => new Response(p.stderr).text())))
+        .map((text) => text.trim())
+        .filter(Boolean)
+        .join("\n");
+      expect(`${errors}codes=${codes.join(",")}`).toBe("codes=0,0");
+      const text = readFileSync(join(runs, "postmaster", "ESCALATION.md"), "utf8");
+      for (const t of ["T0-0", "T0-1", "T1-0", "T1-1"])
+        expect(text.includes(`## ${t}\n`)).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

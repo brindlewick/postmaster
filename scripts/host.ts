@@ -94,7 +94,7 @@
 //           named, or refused a set of processes it could not vouch for, saying why
 //   exit 3  spawn, send, wait or read with no host that keeps an interactive session; or a send
 //           or wait that did not settle, stopped at an approval or a question, or showed no turn
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   accessSync,
@@ -120,6 +120,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseTomlText } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
@@ -3440,6 +3441,11 @@ function legMutexOwnerDead(mutexPath: string): boolean {
   }
 }
 type MutexTake = { status: "taken" } | { status: "busy" } | { status: "error"; error: unknown };
+// The steal races a fresh holder: the liveness verdict names a pid, but the
+// unlink acts on a path, and a new holder can create between the two, losing
+// its file to the unlink and holding the mutex beside the stealer. The window
+// is one read-to-unlink wide; callers whose write must survive verify it
+// after the write and redo, rather than trusting the hold alone.
 function legMutexTake(mutexPath: string, maxTries: number): MutexTake {
   for (let i = 0; maxTries < 0 || i < maxTries; i++) {
     try {
@@ -4509,31 +4515,31 @@ function legOutcome(dispatch: string, numberText: string): void {
   if (!rows.length) die("no attempt recorded for that leg");
   process.stdout.write(`${rows[rows.length - 1]}\n`);
 }
-function legWaitingAdd(runs: string, ticket: string, qfile: string): void {
-  let questionIsFile = false;
+// The waiting list is always replaced whole, never rewritten in place: a reader beside
+// a writer sees the old list or the new one, never a torn half, so a reread that
+// misses an entry proves a clobber and never a partial read. Same directory, so the
+// rename is one atomic step; a stale temp from a crashed writer is replaced, not read.
+function legWaitingStore(f: string, content: string): void {
+  const tmp = `${f}.tmp.${process.pid}`;
   try {
-    questionIsFile = statSync(qfile).isFile();
+    rmSync(tmp, { force: true });
   } catch {}
-  if (!questionIsFile) die(`no such question file: ${qfile}`);
-  const f = join(runs, "postmaster", "ESCALATION.md");
-  try {
-    mkdirSync(dirname(f), { recursive: true });
-  } catch {
-    die(`cannot create ${dirname(f)}`);
+  writeFileSync(tmp, content);
+  renameSync(tmp, f);
+}
+function legWaitingHas(text: string, ticket: string): boolean {
+  for (const b of text.split(/^## /mu).slice(1)) {
+    if (pyTrim(b) === "") continue;
+    if (pyTrim(pySplitLines(b)[0] ?? "") === ticket) return true;
   }
-  const question = pyTrim(readFileSync(qfile, "utf8"));
-  // The question is opaque text: a heading inside it is escaped, so it never splits into a
-  // phantom entry and remove takes the whole block. The escape renders identically in markdown.
-  const escaped = pySplitLines(question)
+  return false;
+}
+function legWaitingEscape(question: string): string {
+  return pySplitLines(question)
     .map((line) => (line.startsWith("## ") ? `\\## ${line.slice(3)}` : line))
     .join("\n");
-  // Two postmasters adding together read one list and the last write wins, dropping an
-  // entry: add and remove hold the waiting-list mutex across the read and the write.
-  const take = legMutexTake(join(runs, "postmaster", ".waiting.lock"), -1);
-  if (take.status !== "taken")
-    die(
-      `leg: cannot take the waiting-list mutex: ${spawnStrerror(take.status === "error" ? take.error : null)}`,
-    );
+}
+function legWaitingAddInner(f: string, ticket: string, escaped: string): void {
   let text = "";
   let listIsFile = false;
   try {
@@ -4548,11 +4554,74 @@ function legWaitingAdd(runs: string, ticket: string, qfile: string): void {
     if (pyTrim(pySplitLines(b)[0] ?? "") !== ticket) rest.push(b);
   }
   rest.push(`${ticket}\n${escaped}\n`);
-  try {
-    writeFileSync(f, head + rest.map((b) => `## ${b}`).join(""));
-  } finally {
-    legMutexDrop(join(runs, "postmaster", ".waiting.lock"));
+  legWaitingStore(f, head + rest.map((b) => `## ${b}`).join(""));
+}
+function legWaitingRemoveInner(f: string, ticket: string): void {
+  const text = readFileSync(f, "utf8");
+  const parts = text.split(/^## /mu);
+  const keep: string[] = [parts[0] ?? ""];
+  for (const b of parts.slice(1)) {
+    if (pyTrim(pySplitLines(b)[0] ?? "") !== ticket) keep.push(`## ${b}`);
   }
+  const out = keep.join("");
+  legWaitingStore(f, pyTrim(out) === "" ? "" : out);
+  if (pyTrim(out) === "") rmSync(f);
+}
+// Run the inner waiting update with the kernel holding the list: flock runs us
+// again as its child, so the read and the write are exclusive by construction —
+// no steal, no race, and a crashed holder releases by dying. False when flock(1)
+// is missing and the caller falls back to the pid mutex; a failed inner already
+// printed, so the outer only carries its code out.
+function legWaitingUnderFlock(lockPath: string, inner: string[]): boolean {
+  if (Bun.which("flock") === null) return false;
+  const self = fileURLToPath(import.meta.url);
+  const r = spawnSync("flock", ["--exclusive", lockPath, process.execPath, self, ...inner], {
+    stdio: "inherit",
+  });
+  if (r.error) return false;
+  if (r.status !== 0) process.exit(r.status ?? 1);
+  return true;
+}
+function legWaitingAdd(runs: string, ticket: string, qfile: string): void {
+  let questionIsFile = false;
+  try {
+    questionIsFile = statSync(qfile).isFile();
+  } catch {}
+  if (!questionIsFile) die(`no such question file: ${qfile}`);
+  const f = join(runs, "postmaster", "ESCALATION.md");
+  try {
+    mkdirSync(dirname(f), { recursive: true });
+  } catch {
+    die(`cannot create ${dirname(f)}`);
+  }
+  // The question is opaque text: a heading inside it is escaped, so it never splits into a
+  // phantom entry and remove takes the whole block. The escape renders identically in markdown.
+  const escaped = legWaitingEscape(pyTrim(readFileSync(qfile, "utf8")));
+  // Two postmasters adding together read one list and the last write wins, dropping an
+  // entry, and no pid file can close that race: the liveness verdict names a pid while
+  // the steal unlinks a path, so the kernel holds the list instead. Without flock(1)
+  // the pid mutex with verify-and-redo is the fallback — bash's class, a plain RMW
+  // there, which can still drop an entry under contention.
+  const lock = join(runs, "postmaster", ".waiting.lock");
+  if (legWaitingUnderFlock(lock, ["_waiting_add", runs, ticket, qfile])) return;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const take = legMutexTake(lock, -1);
+    if (take.status !== "taken")
+      die(
+        `leg: cannot take the waiting-list mutex: ${spawnStrerror(take.status === "error" ? take.error : null)}`,
+      );
+    try {
+      legWaitingAddInner(f, ticket, escaped);
+      let back = "";
+      try {
+        back = readFileSync(f, "utf8");
+      } catch {}
+      if (legWaitingHas(back, ticket)) return;
+    } finally {
+      legMutexDrop(lock);
+    }
+  }
+  die("leg: cannot add to the waiting list: contested");
 }
 function legWaitingRemove(runs: string, ticket: string): void {
   const f = join(runs, "postmaster", "ESCALATION.md");
@@ -4561,24 +4630,28 @@ function legWaitingRemove(runs: string, ticket: string): void {
     isFile = statSync(f).isFile();
   } catch {}
   if (!isFile) return;
-  const take = legMutexTake(join(runs, "postmaster", ".waiting.lock"), -1);
-  if (take.status !== "taken")
-    die(
-      `leg: cannot take the waiting-list mutex: ${spawnStrerror(take.status === "error" ? take.error : null)}`,
-    );
-  const text = readFileSync(f, "utf8");
-  const parts = text.split(/^## /mu);
-  const keep: string[] = [parts[0] ?? ""];
-  for (const b of parts.slice(1)) {
-    if (pyTrim(pySplitLines(b)[0] ?? "") !== ticket) keep.push(`## ${b}`);
+  const lock = join(runs, "postmaster", ".waiting.lock");
+  if (legWaitingUnderFlock(lock, ["_waiting_remove", runs, ticket])) return;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const take = legMutexTake(lock, -1);
+    if (take.status !== "taken")
+      die(
+        `leg: cannot take the waiting-list mutex: ${spawnStrerror(take.status === "error" ? take.error : null)}`,
+      );
+    try {
+      legWaitingRemoveInner(f, ticket);
+      let back: string | null = null;
+      try {
+        back = readFileSync(f, "utf8");
+      } catch {}
+      // A file gone under us is a removal some parallel remove finished: the
+      // ticket is absent either way, which is what this call promised.
+      if (back === null || !legWaitingHas(back, ticket)) return;
+    } finally {
+      legMutexDrop(lock);
+    }
   }
-  const out = keep.join("");
-  try {
-    writeFileSync(f, pyTrim(out) === "" ? "" : out);
-    if (pyTrim(out) === "") rmSync(f);
-  } finally {
-    legMutexDrop(join(runs, "postmaster", ".waiting.lock"));
-  }
+  die("leg: cannot remove from the waiting list: contested");
 }
 function legWaitingList(runs: string): void {
   const f = join(runs, "postmaster", "ESCALATION.md");
@@ -4892,6 +4965,23 @@ async function main(): Promise<void> {
     case "_leg_exec":
       await legExec(args);
       return;
+    case "_waiting_add": {
+      if (args.length !== 3) die("usage: host.sh _waiting_add <runs> <ticket> <question-file>");
+      const runs = args[0]!;
+      const f = join(runs, "postmaster", "ESCALATION.md");
+      try {
+        mkdirSync(dirname(f), { recursive: true });
+      } catch {
+        die(`cannot create ${dirname(f)}`);
+      }
+      legWaitingAddInner(f, args[1]!, legWaitingEscape(pyTrim(readFileSync(args[2]!, "utf8"))));
+      return;
+    }
+    case "_waiting_remove": {
+      if (args.length !== 2) die("usage: host.sh _waiting_remove <runs> <ticket>");
+      legWaitingRemoveInner(join(args[0]!, "postmaster", "ESCALATION.md"), args[1]!);
+      return;
+    }
     case "_run":
       await runLaunch(args[1] ?? "", args[0] ?? "");
       return;
