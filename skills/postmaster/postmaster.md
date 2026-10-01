@@ -180,6 +180,8 @@ or resumed, `<tool>/scripts/run-meta.sh check <dispatch>` exits 0; on a refusal,
 take its message to the user (Stage E step 3), because the checkout no longer serves the
 versions the run was dispatched from. Expand `<rt>` to its absolute path in every prompt
 file; the postmaster keeps using its main `<tool>` for every other supervision script.
+The watcher takes a dispatch whose hand-off checks out on its own (Stage D); you take the
+ones it names.
 [Why a run keeps the config it started with](../../wiki/concepts/run-config.md)
 
 1. **Write the leg prompt** to `<runs>/<TICKET>/leg-<n>-prompt.txt`: "You are the coachman
@@ -225,29 +227,48 @@ file; the postmaster keeps using its main `<tool>` for every other supervision s
 
 Keep `<tool>/scripts/runs-watch.sh <runs>` running in the background, one per project
 (`harnesses.md`, Keeping the watcher running). It looks every `postmaster.poll_seconds`
-(default 120) until a run needs you, then prints `<tool>/scripts/runs-status.sh`'s table, names
-each run that needs you with its `NEXT`, and exits 0. Wait for its return as harnesses.md
-says, then act on what it names, run by run, and log every action; then start it again at
-once. If it names nothing it failed: the reason is in `<runs>/postmaster/watch.err` — fix
-the cause (harnesses.md, Keeping the watcher running) before starting it again. A watcher
-that is not running is a run nobody notices.
+(default 120), **takes the steps that need no judgment itself**, and only then wakes you.
+It prints `<tool>/scripts/runs-status.sh`'s table, names each run that still needs you with
+its `NEXT`, and exits 0. Wait for its return as harnesses.md says, then act on what it names,
+run by run, and log every action; then start it again at once. If it names nothing it failed:
+the reason is in `<runs>/postmaster/watch.err` — fix the cause (harnesses.md, Keeping the
+watcher running) before starting it again. A watcher that is not running is a run nobody
+notices.
+
+The watcher takes two mechanical steps on its own, logging each through `<tool>/scripts/log-action.sh`
+with `the watcher took it` in the detail:
+
+- **A dispatch whose hand-off checks out.** When `.leg-<n>-done` is present and
+  `<tool>/scripts/handoff-check.sh <dispatch>/handoff-<n>.md` exits 0, it dispatches the next
+  leg `<tool>/scripts/turnpikes.sh legs <dispatch>` lists, exactly as Stage C says. A hand-off
+  that fails, a `turnpikes.sh legs` that exits non-zero, no next leg after the ship leg, or a
+  launch it cannot complete are steps it could not complete: it names the run and you act.
+- **A resume on a transient provider error.** When a leg's process ended with no hand-off,
+  escalation or card and its end is a positively known transient — a signature the harness
+  adapter names, with no wall-like token anywhere in it (`<tool>/scripts/launch.sh transient`,
+  `harnesses.md`) — it resumes the leg on its own thread with the remount prompt, at most
+  three times per leg (the count is in `<dispatch>/watcher.json` and survives a restart).
+  A fourth such end, a non-transient end, or a resume it cannot complete is named to you.
 
 The list of runs waiting on the user is `<runs>/postmaster/ESCALATION.md`, kept by
 `<tool>/scripts/host.sh leg waiting`, never by hand. Read it with
 `<tool>/scripts/host.sh leg waiting list <runs>` when the user asks which runs are waiting.
 
 **Hold a run** by writing its ticket to `<runs>/postmaster/held`, one ticket per line,
-exactly as the RUN column shows it: a held run never needs you. **Release it** by removing
-its line, and remove the line when the run closes. Hold a run only while you mean to leave
-it alone — a question already put to the user, a deliberate pause — never to stop a wake
-you have not acted on.
+exactly as the RUN column shows it: a held run never needs you and the watcher never touches
+it — unless the hold lands mid-step, when the watcher aborts and names the partial state.
+**Release it** by removing its line, and remove the line when the run closes. Hold a run
+only while you mean to leave it alone — a question already put to the user, a deliberate
+pause — never to stop a wake you have not acted on.
 
-Each `NEXT` names the act:
+Each `NEXT` names the act. The watcher has already taken the mechanical ones; what it names
+is what needs judgment or what it could not complete:
 
 - **USER:** the run waits on the user, and its `.waiting-on-user` holds the question (Stage E
   step 3, Stage F step 2, Spec review). Put the question to the user again if you have not in this session;
   otherwise nothing to do until they answer. When they answer, remove the marker and follow the
-  action for the recorded outcome (or the spec-review step, for a package).
+  action for the recorded outcome (or the spec-review step, for a package). The watcher never
+  wakes you on USER.
 - **ASK:** a recorded `refused`, `pre-thread` or fallback `walled` attempt needs the user.
   Read the attempt record and `.err` only to explain what happened; outcome classification comes
   from the record. Put the question in `.waiting-on-user`, add the run to the waiting list with
@@ -261,18 +282,31 @@ Each `NEXT` names the act:
 - **RULE:** an escalation is waiting. Stage E.
 - **GATE:** the ship card is complete. Stage F.
 - **SPEC:** a spec review package is waiting (`.spec-review-ready`). Spec review, below.
-- **DISPATCH:** the leg's `.leg-<n>-done` marker is present. Stage C for the leg after `n` in
-  `<tool>/scripts/turnpikes.sh legs <dispatch>`, logging a `note` that names any leg the list leaves
-  out; after the ship leg, Stage G. If the script exits other than 0, nothing is dispatched:
-  its message goes to the user as Stage E step 3 says.
+- **DISPATCH:** the watcher could not take the dispatch. If the hand-off check fails, leg `n`
+  is not finished: remove its `.leg-<n>-done` marker and resume leg `n` (Stage C step 5, with
+  `n` in place of the next leg), the prompt naming the missing sections and saying "Complete
+  the hand-off and end the leg as `coachman.md` says." If `turnpikes.sh legs` exits other than
+  0, nothing is dispatched: its message goes to the user as Stage E step 3 says. If the new
+  leg's attempt record says `refused`, its launch was refused: handle it as ASK. After the ship
+  leg, Stage G. Otherwise Stage C for the leg after `n`, call it `m`, logging a `note`
+  that names any leg the list leaves out — but if
+  `.leg-<m>-exited` is absent, the watcher's launch may have succeeded or still be running:
+  a launch whose thread id has not landed in its record yet is live, so inspect (the attempt
+  record, `.err`, stream tail) and launch again only if the previous attempt clearly ended,
+  never a second leg onto a running one. A wake that says the run was held mid-step names its
+  partial state: complete or unwind that state (finish the remaining part, or restore
+  `manifest.json`'s leg) rather than taking the step fresh.
 - **TAKEOVER:** the attempt record says `walled` on the primary coachman. Log `degrade`, write
   the takeover prompt below, then run `<rt>/scripts/host.sh leg takeover <dispatch>
   <repo>/.worktrees/<TICKET> <leg-name> <n> <dispatch>/leg-<n>-takeover.txt`. The script
   preserves the old stream, starts a fresh fallback stream and records its outcome and thread id.
 - **RESUME:** the attempt record says `incomplete`: the harness started, produced a thread id,
-  and exited without the hand-off. Write `<dispatch>/leg-<n>-resume-<time>.txt` with
+  and exited without the hand-off. The watcher resumes a transient end itself, so a RESUME
+  wake is one it could not take: a non-transient end, a fourth transient end, or a resume that
+  failed, which the wake names. Write `<dispatch>/leg-<n>-resume-<time>.txt` with
   "Continue leg <n>; your last written state is in the dispatch directory and the worktree",
-  then use Stage C step 5.
+  then use Stage C step 5. A fourth transient end is judgment: resume again, take the leg over
+  on the fallback, or wait out the provider — say which and why.
 - **READ:** a checkpoint card is waiting. Read it, log `note` with its one-line summary, and
   remove its `.checkpoint-*-ready` marker. In consult mode the card comes with an escalation,
   which RULE handles.
@@ -285,7 +319,7 @@ Each `NEXT` names the act:
   its record, then act on the backfilled outcome as its NEXT names. If backfill appends no
   record, the evidence is gone and only the user can decide: escalate with the files that
   remain. Never infer an action from `.err` text and never kill a running leg for being slow.
-- **WAIT:** nothing to do.
+- **WAIT:** nothing to do. The watcher never wakes you on WAIT.
 
 **The takeover prompt** for a fallback coachman, written to `<dispatch>/leg-<n>-takeover.txt`:
 "You take over leg <n> of <TICKET> mid-way. Read `<dispatch>/brief.md`,
