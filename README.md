@@ -118,8 +118,9 @@ scripts/review-round.sh start|wait|teardown <dispatch> <round> … # a review ro
 scripts/log-action.sh <dispatch> <actor> <action> <target> …     # one JSON line per action
 scripts/tool-faults.sh harvest|comment|file|decline <dispatch> …  # a closed run's tool faults, as tickets
 scripts/stage.sh <dispatch> <stage>                               # the one way a run changes stage
-scripts/spec-review-link.sh <dispatch> <workhorse-worktree>        # resolve a reviewed spec's code-server link
-scripts/spec-decisions.sh <dispatch> fresh|record|count           # record spec decisions, count approvals run-wide
+scripts/spec-review-link.sh <dispatch> <spec-folder>              # resolve a reviewed spec's code-server link
+scripts/spec-decisions.sh <dispatch> fresh|record|count           # record the spec decision, count the package
+scripts/spec-session.sh brief|approve <dispatch>                  # the spec session's brief; approve commits and records
 scripts/run-times.sh <dispatch>                                   # how long each stage took, from the log
 scripts/run-log.sh <dispatch> <text> | --section <title> | --close # the narrative, timestamped
 scripts/run-meta.sh <dispatch> <repo> | path|check|release <dispatch> # run.json and the pinned tool a run started from
@@ -173,6 +174,8 @@ to watch the fleet in: [Herdr](https://herdr.dev) by default wherever it is runn
 launch appears in its worktree's space under the project's, or tmux. With neither, launches run
 in the background and the flow still works (`skills/postmaster/hosts.md`). Bun 1.4.2 or newer, which
 runs the TypeScript scripts and reads the config, and jq, which the fixture flow requires.
+Python 3.11 or newer, which the bash scripts use to read the config, and for discovering a
+JavaScript project's gate.
 
 ## Installing the skills
 

@@ -1,10 +1,12 @@
-// Resolve the user's workhorse-spec link from the config captured at dispatch.
+// Resolve the user's spec-review link from the config captured at dispatch.
 //
-//   spec-review-link.sh <dispatch> <workhorse-worktree>
+//   spec-review-link.sh <dispatch> <spec-folder>
 //   spec-review-link.sh --validate <dispatch>
 //
 // The optional config.planning.review_link template in run.json has {path} replaced by the
-// absolute path to WORKHORSE-SPEC.md. An empty or missing template prints the path itself.
+// absolute path of the folder that holds WORKHORSE-SPEC.md under review — code-server opens
+// folders, not files, as {path} in ship.review_link is a folder. An empty or missing
+// template prints the spec file's own path.
 //
 //   exit 0  link or path printed
 //   exit 1  usage, unreadable run.json or missing spec
@@ -13,8 +15,7 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { die } from "./lib/proc.ts";
 
-const FULL_USAGE =
-  "usage: spec-review-link.sh <dispatch> <workhorse-worktree> | --validate <dispatch>";
+const FULL_USAGE = "usage: spec-review-link.sh <dispatch> <spec-folder> | --validate <dispatch>";
 
 // --- helpers --------------------------------------------------------------------------------
 function errMsg(e: unknown): string {
@@ -35,7 +36,7 @@ function readStrict(path: string): string {
 }
 
 // --- verbs --------------------------------------------------------------------------------------
-function render(dispatch: string, worktree: string): void {
+function render(dispatch: string, specFolder: string): void {
   const runJson = join(dispatch, "run.json");
   let text: string;
   try {
@@ -62,9 +63,9 @@ function render(dispatch: string, worktree: string): void {
     die("spec-review-link: config.planning.review_link must be a string", 2);
   let path: string;
   try {
-    path = realpathSync(join(worktree, "WORKHORSE-SPEC.md"));
+    path = realpathSync(join(specFolder, "WORKHORSE-SPEC.md"));
   } catch (e: unknown) {
-    die(`spec-review-link: no WORKHORSE-SPEC.md in ${worktree} (${errMsg(e)})`, 1);
+    die(`spec-review-link: no WORKHORSE-SPEC.md in ${specFolder} (${errMsg(e)})`, 1);
   }
   let found = false;
   try {
@@ -72,14 +73,15 @@ function render(dispatch: string, worktree: string): void {
   } catch {
     found = false;
   }
-  if (!found) die(`spec-review-link: no WORKHORSE-SPEC.md in ${worktree}`, 1);
+  if (!found) die(`spec-review-link: no WORKHORSE-SPEC.md in ${specFolder}`, 1);
   if (template === "") {
     console.log(path);
   } else if (!template.includes("{path}")) {
     die("spec-review-link: config.planning.review_link must contain {path}", 2);
   } else {
-    // Python's str.replace replaces every occurrence.
-    console.log(template.split("{path}").join(path));
+    // {path} is the folder that holds the spec, as ship.review_link fills a folder.
+    const folder = realpathSync(specFolder);
+    console.log(template.split("{path}").join(folder));
   }
 }
 

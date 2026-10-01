@@ -1,25 +1,32 @@
-// Own the planning stage's spec decisions: one file per package, one stanza per lane.
+// Own the planning stage's spec decisions: one file per package, one stanza for the run's
+// one spec. A decisions file in the per-lane shape a run from before the one-spec change
+// left behind is still counted, so an older run's file is never misread.
 //
 //   spec-decisions.sh <dispatch> fresh
-//   spec-decisions.sh <dispatch> record <lane> <decision> <commit> [<words>...]
+//   spec-decisions.sh <dispatch> record <decision> <commit> [<words>...]
 //   spec-decisions.sh <dispatch> count
 //
 // fresh starts a new package's <dispatch>/spec-decisions.md, so no stanza survives across
-// packages. record appends one stanza and logs the spec-review line through
-// scripts/log-action.sh as it happens; it refuses a lane the manifest does not name, a
-// second stanza for one lane, a decision outside approved|changes|dropped, a missing
-// commit, words on an approval, and a changes or dropped with no words. count prints the
-// run-wide numbers Spec review step 3 branches on:
-//   approved <n>   manifest lanes approved in the manifest or this package, each lane once
-//   changes <m>    manifest lanes with a changes stanza in this package
-// count never over-counts: a stanza for an unnamed lane, or an approval with a blank
-// commit, contributes nothing.
+// packages. record appends one `## spec` stanza and logs the spec-review line through
+// scripts/log-action.sh as it happens, with the target `spec`; it refuses a second stanza,
+// a decision outside approved|changes|dropped, a missing commit, words on an approval, and
+// a changes or dropped with no words. count prints the numbers Spec review branches on:
+//   approved 0|1   1 when this package's `## spec` stanza is an approval with a commit
+//   changes 0|1    1 when it is a changes
+// When the file holds no `## spec` stanza and is in the per-lane shape, count instead
+// prints the pre-change numbers: manifest lanes approved in the manifest or this package,
+// each lane once, and manifest lanes with a changes stanza in this package. So does a
+// file that mixes a `## spec` stanza with others when the manifest names a lane `spec`:
+// that is a pre-change file for that lane. Any other mix is refused rather than
+// miscounted. count never
+// over-counts: an approval with a blank commit, or a stanza for a lane the manifest does
+// not name, contributes nothing.
 // The stanza is written before the log line, so a failed log never loses a decision, and a
 // decisions file this script did not shape is refused rather than miscounted.
 //
 //   exit 0  done; fresh and record print nothing, count prints the two lines
 //   exit 1  usage, no such dispatch, unreadable manifest, missing decisions file
-//   exit 2  a refusal: a bad decision, commit or words, a duplicate lane, a malformed stanza
+//   exit 2  a refusal: a bad decision, commit or words, a duplicate stanza, a malformed stanza
 import { appendFileSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
@@ -145,11 +152,10 @@ function fresh(d: string): void {
   }
 }
 
-function record(d: string, lane: string, decision: string, commit: string, rest: string[]): void {
+function record(d: string, decision: string, commit: string, rest: string[]): void {
   // The shell joins the words argv with spaces, then splits and rejoins: one space apart.
   const words = pyWords(rest.join(" ")).join(" ");
   if (!isDir(d)) die(`spec-decisions: no such dir: ${d}`, 1);
-  if (!isOneWord(lane)) die("spec-decisions: a lane is one word", 2);
   if (decision !== "approved" && decision !== "changes" && decision !== "dropped")
     die("spec-decisions: a decision is approved, changes or dropped", 2);
   if (!isOneWord(commit)) die("spec-decisions: a commit is one word", 2);
@@ -163,30 +169,42 @@ function record(d: string, lane: string, decision: string, commit: string, rest:
   }
   const f = join(d, "spec-decisions.md");
   if (!isFile(f)) die("spec-decisions: no decisions file: run fresh first", 1);
-  const lanes = readManifest(d);
-  if (!hasOwn(lanes, lane)) die(`spec-decisions: ${lane} is not a lane in the manifest`, 2);
-  if (parseDecisions(f).some((e) => e.lane === lane))
-    die(`spec-decisions: ${lane} is already decided in this package`, 2);
+  if (parseDecisions(f).length > 0)
+    die("spec-decisions: a decision is already recorded in this package", 2);
   try {
-    appendFileSync(f, `## ${lane}\ndecision: ${decision}\ncommit: ${commit}\nwords: ${words}\n\n`);
+    appendFileSync(f, `## spec\ndecision: ${decision}\ncommit: ${commit}\nwords: ${words}\n\n`);
   } catch (e: unknown) {
     die(`spec-decisions: cannot write ${f} (${errMsg(e)})`, 1);
   }
-  const logged = run(join(HERE, "log-action.sh"), [d, "postmaster", "spec-review", lane, detail]);
+  const logged = run(join(HERE, "log-action.sh"), [d, "postmaster", "spec-review", "spec", detail]);
   if (logged.code !== 0)
     die("spec-decisions: stanza kept but the log line failed; log it by hand", 1);
 }
 
 function count(d: string): void {
   if (!isDir(d)) die(`spec-decisions: no such dir: ${d}`, 1);
+  const f = join(d, "spec-decisions.md");
+  if (!isFile(f)) die("spec-decisions: no decisions file: run fresh first", 1);
+  const entries = parseDecisions(f);
+  const one = entries.find((e) => e.lane === "spec");
+  if (one !== undefined && entries.length === 1) {
+    const approved = one.decision === "approved" && one.commit !== "" ? 1 : 0;
+    const changed = one.decision === "changes" ? 1 : 0;
+    console.log(`approved ${approved}`);
+    console.log(`changes ${changed}`);
+    return;
+  }
+  // A run from before the one-spec change: one stanza per lane, counted as before.
+  // A `## spec` stanza beside others is that shape, not a mix, when the manifest
+  // names a lane `spec`; any other mix is refused rather than miscounted.
   const lanes = readManifest(d);
+  if (one !== undefined && !hasOwn(lanes, "spec"))
+    die("spec-decisions: a run-level decision file has more than one stanza", 2);
   const approved = new Set<string>();
   for (const [lane, info] of Object.entries(lanes))
     if (isDict(info) && info.outcome === "approved") approved.add(lane);
-  const f = join(d, "spec-decisions.md");
-  if (!isFile(f)) die("spec-decisions: no decisions file: run fresh first", 1);
   const changed = new Set<string>();
-  for (const e of parseDecisions(f)) {
+  for (const e of entries) {
     if (!hasOwn(lanes, e.lane)) continue;
     if (e.decision === "approved" && e.commit !== "") approved.add(e.lane);
     if (e.decision === "changes") changed.add(e.lane);
@@ -197,9 +215,7 @@ function count(d: string): void {
 
 function usage(): never {
   console.error("usage: spec-decisions.sh <dispatch> fresh|record|count");
-  console.error(
-    "       spec-decisions.sh <dispatch> record <lane> <decision> <commit> [<words>...]",
-  );
+  console.error("       spec-decisions.sh <dispatch> record <decision> <commit> [<words>...]");
   process.exit(1);
   throw new Error("unreachable");
 }
@@ -217,8 +233,8 @@ if (argv[0] === undefined || argv[0] === "" || argv[0].startsWith("-")) {
     if (rest.length !== 0) usage();
     fresh(d);
   } else if (verb === "record") {
-    if (rest.length < 3) usage();
-    record(d, rest[0]!, rest[1]!, rest[2]!, rest.slice(3));
+    if (rest.length < 2) usage();
+    record(d, rest[0]!, rest[1]!, rest.slice(2));
   } else if (verb === "count") {
     if (rest.length !== 0) usage();
     count(d);
