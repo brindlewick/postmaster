@@ -2,9 +2,11 @@
 // Hold a workhorse's WORKHORSE-SUMMARY.md to the evidence shape: under `## Evidence`, one entry
 // per acceptance criterion the ticket numbers, each citing one or more worktree-relative paths
 // under .postmaster/verify/ that exist once `..` and symlinks are resolved, or the line
-// `not shown: <reason>`. Criteria are read the way scripts/ticket-check.sh reads the list, and
-// matched by number, so wording drift does not matter. Comments and fenced blocks are not read,
-// as in ticket-check.sh. Expected criteria come from the ticket, never inferred from the summary.
+// `not shown: <reason>`. The tokenizer is a faithful port of scripts/ticket-check.sh's
+// (tokenize, uncomment, the criterion list rule, fenced items), checked by differential
+// tests over shared fixtures; validation faults stay in ticket-check.sh, which sees
+// tickets first. Criteria match by number, so wording drift does not matter. Expected
+// criteria come from the ticket, never inferred from the summary.
 //
 //   bun scripts/summary-evidence.ts <summary.md> <worktree> [--ticket <file>]
 //
@@ -52,7 +54,11 @@ function sectionEnd(found: Heading[], section: Heading, lineCount: number): numb
 
 const headingPattern = /^ {0,3}(#{1,6})[ \t]+(.*?)[ \t]*#*[ \t]*$/;
 const numberedItemPattern = /^( *)(\d{1,9})[.)](?:[ \t]+|$)/;
-const codeFencePattern = /^\s*(`{3,}|~{3,})/;
+// ticket-check.sh's fence rules, verbatim: a backtick fence carries no backtick
+// in its info string, and a list item that opens a fence is read while the
+// body it opens is code.
+const fencePattern = /^\s*(`{3,})[^`]*$|^\s*(~{3,})/;
+const fencedItemPattern = /^ *(?:[-*+]|\d{1,9}[.)])[ \t]+(?:(`{3,})[^`]*|(~{3,}).*)$/;
 
 function normalizedHeading(text: string): string {
   return text
@@ -70,75 +76,104 @@ function closesFence(fence: Fence, line: string): boolean {
   return close.length >= fence.length && [...close].every((char) => char === fence.char);
 }
 
-function openerOutsideSpans(line: string): number {
-  // The index of a <!-- outside inline code spans, or -1. A literal marker in
-  // a span is text, as in ticket-check.sh, so it never opens a comment.
-  let i = 0;
-  while (i < line.length) {
-    if (line[i] === "`") {
-      let j = i;
-      while (j < line.length && line[j] === "`") j += 1;
-      const run = line.slice(i, j);
-      const close = line.indexOf(run, j);
-      if (close < 0) return -1;
-      i = close + run.length;
-      continue;
+function lastCloser(lines: string[]): { line: number; index: number } {
+  // Where the body's last --> starts, or (-1, -1): ticket-check.sh's `last`.
+  // A line-leading <!-- opens a comment only when a closer comes after it.
+  let best = { line: -1, index: -1 };
+  for (const [k, t] of lines.entries()) {
+    if (t.includes("-->")) {
+      const index = t.lastIndexOf("-->");
+      if (k > best.line || (k === best.line && index > best.index)) best = { line: k, index };
     }
-    if (line.startsWith("<!--", i)) return i;
-    i += 1;
   }
-  return -1;
+  return best;
 }
 
-function readableLines(lines: string[]): ReadableLine[] {
-  // Each line as read: fenced lines marked code, then HTML comments stripped
-  // on the rest (a comment runs to its closer, on this line or a later one).
-  // Comments and fences are never read for headings, criteria or entries, as
-  // in ticket-check.sh: hidden content can neither add a criterion nor
-  // satisfy the evidence check, and a marker inside a fence opens nothing.
+function uncommentLine(
+  t: string,
+  inside: boolean,
+  k: number,
+  last: { line: number; index: number },
+): { text: string; inside: boolean } {
+  // One line without its HTML comments, code spans left alone: a faithful
+  // port of ticket-check.sh's uncomment. A comment that starts a line runs to
+  // the next --> on a later line; one inside a line must close on that line;
+  // a <!-- that nothing closes is text.
+  const out: string[] = [];
+  let i = 0;
+  let hidden = inside;
+  for (;;) {
+    if (hidden) {
+      const j = t.indexOf("-->", i);
+      if (j < 0) return { text: out.join(""), inside: true };
+      i = j + 3;
+      hidden = false;
+      continue;
+    }
+    const c = t.indexOf("<!--", i);
+    const tick = /`+/.exec(t.slice(i));
+    if (tick && (c < 0 || tick.index + i < c)) {
+      const run = tick[0];
+      const closer = new RegExp(`(?<!\`)${run}(?!\`)`, "g");
+      closer.lastIndex = tick.index + i + run.length;
+      const found = closer.exec(t);
+      const end = found ? found.index + run.length : tick.index + i + run.length;
+      out.push(t.slice(i, end));
+      i = end;
+    } else if (c < 0) {
+      out.push(t.slice(i));
+      return { text: out.join(""), inside: false };
+    } else if (!t.slice(0, c).trim() && (k < last.line || (k === last.line && c + 4 <= last.index))) {
+      out.push(t.slice(i, c));
+      i = c + 4;
+      hidden = true;
+    } else if (t.indexOf("-->", c + 4) >= 0) {
+      out.push(t.slice(i, c));
+      i = t.indexOf("-->", c + 4) + 3;
+    } else {
+      out.push(t.slice(i, c + 4));
+      i = c + 4;
+    }
+  }
+}
+
+function tokenize(lines: string[]): ReadableLine[] {
+  // The lines as written, and as read: ticket-check.sh's tokenize. Fenced
+  // lines are code, except a list item that opens a fence, which is read
+  // while its body is code; every other line is uncommented. One entry per
+  // input line, so indices still address the input.
+  const last = lastCloser(lines);
   const read: ReadableLine[] = [];
   let fence: Fence | undefined;
-  let inComment = false;
-  for (const line of lines) {
+  let inside = false;
+  for (const [k, t] of lines.entries()) {
     if (fence) {
-      if (closesFence(fence, line)) fence = undefined;
+      if (closesFence(fence, t)) fence = undefined;
       read.push({ text: "", code: true });
       continue;
     }
-    const fenceMatch = inComment ? null : codeFencePattern.exec(line);
-    if (fenceMatch) {
-      fence = { char: fenceMatch[1][0], length: fenceMatch[1].length };
+    const m = inside ? null : fencePattern.exec(t);
+    const item = inside || m ? null : fencedItemPattern.exec(t);
+    if (m) {
+      const run = m[1] ?? m[2];
+      fence = { char: run[0], length: run.length };
       read.push({ text: "", code: true });
-      continue;
+    } else if (item) {
+      const run = item[1] ?? item[2];
+      fence = { char: run[0], length: run.length };
+      read.push({ text: t, code: false });
+    } else {
+      const uncommented = uncommentLine(t, inside, k, last);
+      inside = uncommented.inside;
+      read.push({ text: uncommented.text, code: false });
     }
-    let visible = line;
-    if (inComment) {
-      const close = visible.indexOf("-->");
-      if (close < 0) {
-        read.push({ text: "", code: false });
-        continue;
-      }
-      visible = visible.slice(close + 3);
-      inComment = false;
-    }
-    const comment = openerOutsideSpans(visible);
-    if (comment >= 0) {
-      const close = visible.indexOf("-->", comment + 4);
-      if (close < 0) {
-        visible = visible.slice(0, comment);
-        inComment = true;
-      } else {
-        visible = visible.slice(0, comment) + visible.slice(close + 3);
-      }
-    }
-    read.push({ text: visible, code: false });
   }
   return read;
 }
 
 function headings(lines: string[]): Heading[] {
   const found: Heading[] = [];
-  for (const [index, line] of readableLines(lines).entries()) {
+  for (const [index, line] of tokenize(lines).entries()) {
     if (line.code) continue;
     const match = headingPattern.exec(line.text);
     if (match) found.push({ level: match[1].length, text: normalizedHeading(match[2]), index });
@@ -165,7 +200,9 @@ export function parseTicketCriteria(text: string): CriterionParse {
   const numbers: number[] = [];
   let baseIndent: number | undefined;
 
-  for (const { text, code } of readableLines(lines.slice(section.index + 1, end))) {
+  // The whole body is tokenized first, as in ticket-check.sh, so a comment's
+  // closer may come from outside this section.
+  for (const { text, code } of tokenize(lines).slice(section.index + 1, end)) {
     if (code) continue;
     const item = numberedItemPattern.exec(text);
     if (!item) continue;
@@ -191,18 +228,19 @@ export function parseEvidenceEntries(text: string): EvidenceEntry[] {
   const end = sectionEnd(found, section, lines.length);
   const entries: EvidenceEntry[] = [];
   let baseIndent: number | undefined;
-  for (const { text, code } of readableLines(lines.slice(section.index + 1, end))) {
+  for (const { text, code } of tokenize(lines).slice(section.index + 1, end)) {
     if (code) continue;
     const match = numberedItemPattern.exec(text);
-    const startsEntry = match && (baseIndent === undefined ? match[1].length <= 3 : match[1].length <= baseIndent);
+    const startsEntry = match && (baseIndent === undefined ? match[1].length <= 3 : match[1].length <= baseIndent + 2);
     if (startsEntry && match) {
       if (baseIndent === undefined) baseIndent = match[1].length;
       entries.push({ criterion: Number(match[2]), lines: [text.slice(match[0].length).trim()] });
     } else if (entries.length > 0) {
       entries[entries.length - 1]?.lines.push(text.trim());
     }
-    // Lines before the first numbered entry, such as an intro sentence, are ignored,
-    // and a numbered line indented past the entries' base continues its entry.
+    // Lines before the first numbered entry, such as an intro sentence, are ignored.
+    // Entries follow the same indent rule as criteria: a numbered line indented more
+    // than two past the entries' base continues its entry.
   }
   return entries;
 }
@@ -246,16 +284,14 @@ export function evidencePaths(lines: string[]): string[] {
       // A code span is prose until it names the verify directory: terms like
       // `CLI/iOS` and incidental paths are not evidence citations.
       .filter((value) => value.includes(".postmaster/verify/"));
-    if (codePaths.length > 0) {
-      paths.push(...codePaths);
-      continue;
-    }
-    const bare = line.replace(/^[-*+]\s+/, "");
+    paths.push(...codePaths);
+    // Bare citations share the line with code spans, so the rest of the line
+    // is still read, with the spans blanked to avoid counting them twice.
+    const bare = line.replace(/`[^`]*`/g, " ").replace(/^[-*+]\s+/, "");
     for (const token of bare.split(/[,\s]+/)) {
       const cleaned = token.replace(/^`+|`+$/g, "").replace(/[.,;:!?]+$/, "").trim();
       // Bare prose carries slashes (and/or, CLI/iOS) that are not paths, so a
-      // bare token counts only when it names the verify directory; code spans
-      // above stay explicit citations, escapes included.
+      // bare token counts only when it names the verify directory.
       if (cleaned.includes(".postmaster/verify/")) paths.push(cleaned);
     }
   }

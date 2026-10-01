@@ -111,6 +111,32 @@ function runCheck(summary: string, worktree: string, extra: string[] = []) {
   return { code: r.status ?? -1, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
 
+const ticketCheck = join(import.meta.dir, "ticket-check.sh");
+
+function ticketText(problem: string, criteria: string): string {
+  return `# A thing\n\n## Problem / feature\n${problem}## Acceptance criteria\n${criteria}## Direction\nNone.\n## Turnpikes\ndefault\n`;
+}
+
+function oracleCount(ticket: string): number {
+  const dir = mkdtempSync(join(tmpdir(), "oracle-"));
+  try {
+    const file = join(dir, "ticket.md");
+    writeFileSync(file, ticket);
+    const r = spawnSync("bash", [ticketCheck, "--body", file, "--title", "T", "--project", dir], { encoding: "utf8" });
+    const m = /well-formed, (\d+) acceptance criteria/.exec(r.stdout ?? "");
+    if (r.status !== 0 || !m) throw new Error(`oracle rejected the fixture:\n${r.stdout ?? ""}${r.stderr ?? ""}`);
+    return Number(m[1]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function scriptCount(ticket: string): number {
+  const parsed = parseTicketCriteria(ticket);
+  if (parsed.problem) throw new Error(`script rejected the fixture: ${parsed.problem}`);
+  return parsed.criteria.length;
+}
+
 describe("pure core", () => {
   test("a waybill is read from ## Ticket to ## Project profile", () => {
     const body = extractTicketBody(`# brief\n\n## Ticket\n${TICKET}\n## Project profile\nrepo: x\n`);
@@ -175,6 +201,17 @@ describe("pure core", () => {
   test("a section ends at a part-naming subheading, as in ticket-check.sh", () => {
     const ticket = "## Acceptance criteria\n1. One.\n2. Two.\n3. Three.\n### Direction\n9. Stray.\n";
     expect(parseTicketCriteria(ticket)).toEqual({ criteria: [1, 2, 3] });
+  });
+
+  test("an opener with no closer anywhere is text", () => {
+    expect(parseTicketCriteria("## Acceptance criteria\n<!-- a note never closed\n1. One.\n2. Two.\n")).toEqual({
+      criteria: [1, 2],
+    });
+  });
+
+  test("adjacent comments on one line are all stripped", () => {
+    const entries = parseEvidenceEntries("## Evidence <!-- a --><!-- b -->\n1. `.postmaster/verify/a.md`\n");
+    expect(entries.map((e) => e.criterion)).toEqual([1]);
   });
 
   test("evidence paths come from code spans or bare tokens, comma-separated or bulleted", () => {
@@ -472,4 +509,90 @@ None.
     expect(runCheck(join(wt, "nope.md"), wt).code).toBe(1);
     expect(runCheck(join(wt, "nope.md"), wt, ["--ticket"]).code).toBe(1);
   });
+
+  test("a bare path beside a code citation is checked too", () => {
+    const wt = freshWorktree("second-citation");
+    const missing = writeSummary(
+      wt,
+      `# Summary\n\n## Evidence\n1. \`.postmaster/verify/ok.md\` .postmaster/verify/ghost.md\n2. \`.postmaster/verify/ok.md\`\n3. \`.postmaster/verify/ok.md\`\n`,
+      "missing.md",
+    );
+    const r1 = runCheck(missing, wt);
+    expect(r1.code).toBe(2);
+    expect(r1.out).toContain("criterion 1 evidence does not exist: .postmaster/verify/ghost.md");
+    const escaping = writeSummary(
+      wt,
+      `# Summary\n\n## Evidence\n1. \`.postmaster/verify/ok.md\` .postmaster/verify/../outside.md\n2. \`.postmaster/verify/ok.md\`\n3. \`.postmaster/verify/ok.md\`\n`,
+      "escaping.md",
+    );
+    const r2 = runCheck(escaping, wt);
+    expect(r2.code).toBe(2);
+    expect(r2.out).toContain("criterion 1 evidence is outside .postmaster/verify/: .postmaster/verify/../outside.md");
+  });
+
+  test("an entry indented up to two past the base starts, as for criteria", () => {
+    const wt = freshWorktree("indented-entry");
+    const summary = writeSummary(
+      wt,
+      `# Summary\n\n## Evidence\n1. \`.postmaster/verify/ok.md\`\n  2. \`.postmaster/verify/ok.md\`\n3. \`.postmaster/verify/ok.md\`\n`,
+    );
+    const { code, out } = runCheck(summary, wt);
+    expect(code).toBe(0);
+    expect(out).toContain("evidence shape holds for 3 criteria");
+  });
+
+  test("a fence body opened by an entry line holds no evidence", () => {
+    const wt = freshWorktree("fenced-item");
+    const summary = writeSummary(wt, "# Summary\n\n## Evidence\n1. ```\n.postmaster/verify/ok.md\n```\n");
+    const { code, out } = runCheck(summary, wt);
+    expect(code).toBe(2);
+    expect(out).toContain("criterion 1 has no evidence path or not shown reason");
+  });
+});
+
+describe("ticket-check parity", () => {
+  const problem = "Things need doing.\n";
+  const fixtures: { name: string; ticket: string }[] = [
+    { name: "a plain list", ticket: ticketText(problem, "1. One.\n2. Two.\n3. Three.\n") },
+    { name: "items indented past the base", ticket: ticketText(problem, "1. One.\n 2. Two.\n  3. Three.\n") },
+    { name: "a comment block hiding a numbered line", ticket: ticketText(problem, "1. One.\n<!--\n2. Dropped.\n-->\n") },
+    {
+      name: "an unclosed mid-line opener",
+      ticket: ticketText(problem, "1. The parser fails on <!-- when nothing closes it.\n2. Two.\n"),
+    },
+    {
+      name: "an opener in a code span",
+      ticket: ticketText(problem, "1. Handles `<!--` markers.\n2. Two.\n"),
+    },
+    {
+      name: "numbered lines inside a fence",
+      ticket: ticketText(problem, "1. One.\n```\n9. Hidden.\n```\n2. Two.\n"),
+    },
+    {
+      name: "numbered lines inside a tilde fence with info",
+      ticket: ticketText(problem, "1. One.\n~~~js\n9. Hidden.\n~~~\n2. Two.\n"),
+    },
+    {
+      name: "a list item opening a fence",
+      ticket: ticketText(problem, "1. ```\n   make check\n   ```\n2. The gate passes.\n"),
+    },
+    {
+      name: "a fence opener with a backtick in its info",
+      ticket: ticketText(problem, "1. One.\n```x`y\n2. Two.\n"),
+    },
+    {
+      name: "a stray line past a part-naming subheading",
+      ticket: ticketText(problem, "1. One.\n2. Two.\n3. Three.\n### Direction\n9. Stray.\n"),
+    },
+    {
+      name: "an unclosed opener in an earlier section",
+      ticket: ticketText("The parser fails on <!-- when nothing closes it.\n", "1. One.\n2. Two.\n"),
+    },
+  ];
+
+  for (const { name, ticket } of fixtures) {
+    test(`both parsers agree: ${name}`, () => {
+      expect(scriptCount(ticket)).toBe(oracleCount(ticket));
+    });
+  }
 });
