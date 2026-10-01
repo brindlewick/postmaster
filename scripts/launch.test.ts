@@ -296,6 +296,40 @@ beforeAll(() => {
       "an env file that removes the harness from PATH remains refused",
       rc === 1 && readFileSync(phasefile, "utf8") === "refused\n",
     );
+    writeFileSync(
+      join(tmp, "phase-count.env"),
+      `echo sourced >> "${join(tmp, "sources.log")}"\n`,
+    );
+    writeFileSync(
+      join(tmp, "phase-count.toml"),
+      `[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n\n[team]\n` +
+        `coachman = { harness = "claude", model = "coach-model" }\n` +
+        `coachman_fallback = { harness = "claude", model = "fallback-model" }\n\n[team.coachman_legs]\n` +
+        `synthesis = { harness = "claude", model = "synthesis-model", env_file = "${join(tmp, "phase-count.env")}" }\n`,
+    );
+    rmSync(join(tmp, "sources.log"), { force: true });
+    doRun(
+      "phase-count",
+      "launch",
+      "coachman",
+      join(tmp, "wt"),
+      join(tmp, "prompt.txt"),
+      "--leg",
+      "synthesis",
+    );
+    let sources = -1;
+    try {
+      sources = readFileSync(join(tmp, "sources.log"), "utf8")
+        .split("\n")
+        .filter((l) => l !== "").length;
+    } catch {
+      sources = -1;
+    }
+    check(
+      "an env file is sourced once to validate and once to launch, never replayed between",
+      rc === 0 && sources === 2,
+      `rc=${rc} sources=${sources} err=${err}`,
+    );
     rmSync(phasefile, { force: true });
     doRun(
       "phase-start",
@@ -4274,6 +4308,9 @@ describe("attempt phase: launch and resume witness the harness start", () => {
   });
   test("an env file that removes the harness from PATH remains refused", () => {
     assertControl("an env file that removes the harness from PATH remains refused");
+  });
+  test("an env file is sourced once to validate and once to launch, never replayed between", () => {
+    assertControl("an env file is sourced once to validate and once to launch, never replayed between");
   });
   test("a refused resume with an existing thread id remains refused", () => {
     assertControl("a refused resume with an existing thread id remains refused");

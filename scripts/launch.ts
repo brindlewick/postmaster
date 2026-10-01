@@ -1436,15 +1436,17 @@ if (import.meta.main) {
     /* keep the inherited PWD on any surprise */
   }
   // With an env file the launch first proves the file loads and the harness survives
-  // it, as main sources it before the exec. A file that fails under nounset or ends
-  // nonzero refuses with the phase still refused; a file that exits carries its own
-  // code out, as sourcing in-process does — the survival marker tells the two apart.
-  // The marker carries a nonce and is searched, never line-matched: file output
-  // without a trailing newline glues onto it, and a fixed string the file itself
-  // could print would spoof a load that never finished. The subshell keeps this
-  // process's environment untouched, as main's save/restore does; on a clean
-  // load its output is discarded so file output appears once, at the exec, as
-  // in main, while on an exit or death mid-source the carry path relays what
+  // it, as main sources it before the exec — both in one sourcing, never replayed: a
+  // file with side effects runs once here and once at the exec, and a second
+  // validation source would run a token refresh or one-shot setup a third time. A file
+  // that fails under nounset or ends nonzero refuses with the phase still refused; a
+  // file that exits carries its own code out, as sourcing in-process does — the
+  // survival marker tells the two apart. The marker carries a nonce and is searched,
+  // never line-matched: file output without a trailing newline glues onto it, and a
+  // fixed string the file itself could print would spoof a load that never finished.
+  // The subshell keeps this process's environment untouched, as main's save/restore
+  // does; on a clean load its output is discarded so file output appears once, at the
+  // exec, as in main, while on an exit or death mid-source the carry path relays what
   // the file printed before its end. The harness name stays the spec's: an env
   // file cannot overwrite a const the way it can main's shell variable, which
   // is what LAUNCH_HARNESS there is for.
@@ -1461,7 +1463,9 @@ if (import.meta.main) {
 set -a
 . "$1"
 rc=$?
-echo "LOADED:$rc:${nonce}"
+command -v "$2" >/dev/null 2>&1
+pathrc=$?
+echo "LOADED:$rc:$pathrc:${nonce}"
 exit "$rc"
 `,
       );
@@ -1469,9 +1473,11 @@ exit "$rc"
       if (probe) rmSync(probe, { force: true });
       die(`cannot prove env_file for ${NAME} loads`);
     }
-    const load = spawnSync("bash", [probe, ENV_FILE], { encoding: "utf8" });
+    const load = spawnSync("bash", [probe, ENV_FILE, HARNESS], { encoding: "utf8" });
     rmSync(probe, { force: true });
-    const loaded = new RegExp(`LOADED:([0-9]+):${nonce}`, "u").exec(load.stdout ?? "");
+    const loaded = new RegExp(`LOADED:([0-9]+):([0-9]+):${nonce}`, "u").exec(
+      load.stdout ?? "",
+    );
     if (!loaded) {
       // The file exited (or died) mid-source: sourcing in-process would take
       // this process with it, so its end is ours, signal included. What it
@@ -1486,18 +1492,7 @@ exit "$rc"
       process.exit(load.status ?? 1);
     }
     if (loaded[1] !== "0") die(`env_file for ${NAME} failed while loading`);
-    const kept = spawnSync(
-      "bash",
-      [
-        "-c",
-        'set -uo pipefail; set -a; . "$1"; shift; command -v "$1" >/dev/null',
-        "_",
-        ENV_FILE,
-        HARNESS,
-      ],
-      { encoding: "utf8" },
-    );
-    if (kept.status !== 0)
+    if (loaded[2] !== "0")
       die(`harness '${HARNESS}' is not on PATH after loading env_file for ${NAME}`);
   }
   // The role is read before the spawn: an env file the child sources can
