@@ -91,3 +91,11 @@ holds = "the fixture entrypoint the flow invokes"
 [[files]]
 path = "scripts/fixture.ts"
 holds = "the fixture-copy mark new writes, and scoring a run from its records"
+
+[[files]]
+path = "skills/postmaster/workhorse-spec-template.md"
+holds = "the workhorse spec shape, including the per-criterion checks section the brief's loop rests on"
+
+[[files]]
+path = "scripts/summary-evidence.ts"
+holds = "the evidence-shape enforcement the runbook invokes at harvest"
