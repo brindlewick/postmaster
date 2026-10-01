@@ -29,7 +29,7 @@ Asking each project to ignore `.worktrees/` does not scale and is not the flow's
 copies stay where the machine's convention puts them; the gate moves. `scripts/clean-checkout.ts`
 makes a clean checkout of the branch in a temporary directory outside the project folder, runs
 the command there, removes the checkout even when the command fails, and reports the command's
-exit. Two callers use it: the ship leg, immediately after the local merge, and fixture scoring's
+exit. Two callers use it: the legacy ship leg, immediately after the local merge, and fixture scoring's
 gate check.
 
 Gating after teardown is not enough: the coachman still sits in the synthesis worktree through
@@ -61,7 +61,7 @@ configuration.
 
 ## What changed because of it
 
-`scripts/clean-checkout.ts` and its colocated tests; a new Stage 3 step in `coachman.md` that
+`scripts/clean-checkout.ts` and its colocated tests; a new step in `coachman.md`'s Legacy Stage 3 that
 gates the merged default branch through the helper; `fixture.sh` scoring's gate runs the same
 way. Related: issue #107 may still confine each lane to its own worktree or clone; that would
 narrow what a hand-run gate sees, but the clean checkout keeps its purpose either way.
