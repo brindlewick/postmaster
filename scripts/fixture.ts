@@ -334,7 +334,15 @@ function hidden(ticket: string, app: string): { passed: boolean; detail: string;
 const LANE_LINE = /^(.*): (?:\d+ pass, \d+ fail|missing|failed to build)$/u;
 
 function laneScores(dispatch: string, repo: string, ticket: string): string {
-  const r = sh(["bun", "--no-env-file", join(HERE, "fixture-lanes.ts"), dispatch, repo, ticket]);
+  const r = sh([
+    "bun",
+    "--no-env-file",
+    `--config=${join(TOOL, "bunfig.toml")}`,
+    join(HERE, "fixture-lanes.ts"),
+    dispatch,
+    repo,
+    ticket,
+  ]);
   if (r.code !== 0) return "lanes not scored";
   return (r.out ?? "")
     .split(/\r?\n/u)
@@ -1391,7 +1399,12 @@ case $2 in store) exec "${join(HERE, "local.sh")}" "$@" ;; *) exit 1 ;; esac
   expectScore("no ship card: ship-card alone fails", "break-card", "ship-card", "no card.md");
 
   console.log("lane scoring: the suite beside the new code runs in this self-test");
-  const laneTest = run("bun", ["--no-env-file", "test", join(HERE, "fixture-lanes.test.ts")]);
+  const laneTest = run("bun", [
+    "--no-env-file",
+    `--config=${join(TOOL, "bunfig.toml")}`,
+    "test",
+    join(HERE, "fixture-lanes.test.ts"),
+  ]);
   st.check(
     "bun test scripts/fixture-lanes.test.ts",
     laneTest.code === 0,
@@ -1542,7 +1555,12 @@ case $2 in store) exec "${join(HERE, "local.sh")}" "$@" ;; *) exit 1 ;; esac
     );
   }
 
-  const fixtureTest = run("bun", ["--no-env-file", "test", join(HERE, "fixture.test.ts")]);
+  const fixtureTest = run("bun", [
+    "--no-env-file",
+    `--config=${join(TOOL, "bunfig.toml")}`,
+    "test",
+    join(HERE, "fixture.test.ts"),
+  ]);
   st.check(
     "bun test scripts/fixture.test.ts",
     fixtureTest.code === 0,

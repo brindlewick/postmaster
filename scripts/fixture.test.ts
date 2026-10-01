@@ -29,7 +29,8 @@ afterEach(() => {
 });
 
 function runNew(dest: string, home: string, extraEnv: Record<string, string | undefined> = {}) {
-  return run("bun", ["--no-env-file", SCRIPT, "new", dest, FIXTURE_TICKET], {
+  const config = join(import.meta.dir, "..", "bunfig.toml");
+  return run("bun", ["--no-env-file", `--config=${config}`, SCRIPT, "new", dest, FIXTURE_TICKET], {
     env: {
       ...gitEnv,
       HOME: home,

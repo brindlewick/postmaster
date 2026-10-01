@@ -647,6 +647,7 @@ withTempDir((tmp) => {
 
   const routeTest = run("bun", [
     "--no-env-file",
+    `--config=${join(scriptsDir(import.meta), "..", "bunfig.toml")}`,
     "test",
     join(scriptsDir(import.meta), "front-door.test.ts"),
   ]);
