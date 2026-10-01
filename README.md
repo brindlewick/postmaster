@@ -31,6 +31,13 @@ time, instead of being worked out again by a model on every run, which saves tok
 scripts are well tested, and when one does fail, the model running it can usually read the
 error and carry on. The run records the fault, so the script gets fixed.
 
+It also keeps postmaster open to every provider. There are many strong models now, from many
+providers, and they compete hard. postmaster is a way to take full advantage of that, without
+being locked into any one provider's ecosystem. A lane is a harness plus a model, each harness
+sits behind an adapter, and nothing in the flow depends on one provider's tools. The config
+says which harness and model fills each role, so moving a role to a different model is an
+edit to the config.
+
 ## Why several models rather than one good one
 
 Because they disagree usefully. Across a sample of runs, the synthesis took contributions
