@@ -1,9 +1,11 @@
 // Controls for spec-session, beside the script: a brief with and without a preferences
 // file, and with and without lane drafts; a brief that fails when the editor link
-// cannot be built; an approval of unchanged text that commits nothing and records the
-// existing commit; an approval of changed text that makes one commit holding exactly
-// the copy; an approval refused while the synthesis worktree holds another change; and
-// an approval refused when no spec is committed there.
+// cannot be built; a brief that finds drafts under a repo path with spaces; an
+// approval through a synthesis path with a colon and a space; an approval of unchanged
+// text that commits nothing and records the existing commit; an approval of changed
+// text that makes one commit holding exactly the copy; an approval refused while the
+// synthesis worktree holds another change; an approval refused over a stray spec edit
+// or a missing spec; and an approval refused when no spec is committed there.
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -116,6 +118,36 @@ function head(synth: string): string {
   return (r.stdout ?? "").trim();
 }
 
+function initRepo(path: string): void {
+  mkdirSync(path, { recursive: true });
+  const g = (...args: string[]) => {
+    const r = spawnSync("git", ["-C", path, ...args], { encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  };
+  g("init", "-q", "-b", "main");
+  g("config", "user.email", "t@example.com");
+  g("config", "user.name", "t");
+}
+
+function commitFile(path: string, name: string, text: string, message: string): void {
+  writeFileSync(join(path, name), text);
+  const g = (...args: string[]) => {
+    const r = spawnSync("git", ["-C", path, ...args], { encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  };
+  g("add", name);
+  g("commit", "-q", "-m", message);
+}
+
+function rewriteWaybillLine(d: string, prefix: string, value: string): void {
+  const briefPath = join(d, "brief.md");
+  const lines = readFileSync(briefPath, "utf8").split("\n");
+  const i = lines.findIndex((l) => l.startsWith(prefix));
+  if (i < 0) throw new Error(`no ${prefix} line in the waybill`);
+  lines[i] = value;
+  writeFileSync(briefPath, lines.join("\n"));
+}
+
 describe("a brief", () => {
   test("holds the ticket, the link, the copy's path, no drafts, no preferences, and the runbook", () => {
     const s = scratch();
@@ -185,6 +217,24 @@ describe("a brief", () => {
       s.cleanup();
     }
   });
+
+  test("finds lane drafts when the repo path holds spaces", () => {
+    const s = scratch();
+    try {
+      const repoDir = join(s.root, "My Projects", "app");
+      const wt = join(repoDir, ".worktrees", "RUN-1-alpha");
+      initRepo(wt);
+      commitFile(wt, "WORKHORSE-SPEC.md", "spaced draft\n", "draft");
+      rewriteWaybillLine(s.d, "repo:", `repo: ${repoDir}          default branch: main       BASE: abc`);
+      const r = go(s.cfgDir, "brief", s.d);
+      expect(r.status).toBe(0);
+      const body = readFileSync(join(s.d, "spec-session-brief.md"), "utf8");
+      expect(body).toContain("spaced draft");
+      expect(body).not.toContain("There are no lane drafts.");
+    } finally {
+      s.cleanup();
+    }
+  });
 });
 
 describe("an approval", () => {
@@ -236,6 +286,76 @@ describe("an approval", () => {
       const r = go(s.cfgDir, "approve", s.d);
       expect(r.status).toBe(2);
       expect(r.stderr).toContain("another change");
+      expect(readFileSync(join(s.d, "spec-decisions.md"), "utf8")).toBe("");
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  test("runs when the synthesis worktree path holds a colon and a space", () => {
+    const s = scratch();
+    try {
+      const synth = join(s.root, "my:project", "My Work", "wt");
+      initRepo(synth);
+      const copy = readFileSync(join(s.d, "spec-review", "WORKHORSE-SPEC.md"), "utf8");
+      commitFile(synth, "WORKHORSE-SPEC.md", copy, "workhorse spec");
+      rewriteWaybillLine(s.d, "synthesis worktree:", `synthesis worktree: ${synth}`);
+      writeFileSync(join(s.d, "spec-decisions.md"), "");
+      const r = go(s.cfgDir, "approve", s.d);
+      expect(r.status).toBe(0);
+      expect(r.stdout.trim()).toBe(head(synth));
+      expect(readFileSync(join(s.d, "spec-decisions.md"), "utf8")).toContain("decision: approved");
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  test("is refused over a worktree spec edit matching neither the committed spec nor the copy", () => {
+    const s = scratch();
+    try {
+      writeFileSync(join(s.d, "spec-decisions.md"), "");
+      writeFileSync(join(s.synth, "WORKHORSE-SPEC.md"), "# Workhorse spec: scratch\n\nA stray edit.\n");
+      const before = head(s.synth);
+      const r = go(s.cfgDir, "approve", s.d);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("uncommitted edit");
+      expect(head(s.synth)).toBe(before);
+      expect(readFileSync(join(s.d, "spec-decisions.md"), "utf8")).toBe("");
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  test("is refused over a worktree spec edit beside a changed copy", () => {
+    const s = scratch();
+    try {
+      writeFileSync(join(s.d, "spec-decisions.md"), "");
+      writeFileSync(join(s.synth, "WORKHORSE-SPEC.md"), "# Workhorse spec: scratch\n\nA stray edit.\n");
+      writeFileSync(
+        join(s.d, "spec-review", "WORKHORSE-SPEC.md"),
+        "# Workhorse spec: scratch\n\nBuild the thing.\n\nA new line the user added.\n",
+      );
+      const before = head(s.synth);
+      const r = go(s.cfgDir, "approve", s.d);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("uncommitted edit");
+      expect(head(s.synth)).toBe(before);
+      expect(readFileSync(join(s.d, "spec-decisions.md"), "utf8")).toBe("");
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  test("is refused when the worktree spec is missing and the copy matches", () => {
+    const s = scratch();
+    try {
+      writeFileSync(join(s.d, "spec-decisions.md"), "");
+      rmSync(join(s.synth, "WORKHORSE-SPEC.md"));
+      const before = head(s.synth);
+      const r = go(s.cfgDir, "approve", s.d);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("missing from the synthesis worktree");
+      expect(head(s.synth)).toBe(before);
       expect(readFileSync(join(s.d, "spec-decisions.md"), "utf8")).toBe("");
     } finally {
       s.cleanup();

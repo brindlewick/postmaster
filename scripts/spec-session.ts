@@ -14,17 +14,20 @@
 //
 // approve reads the copy and commits it as WORKHORSE-SPEC.md in the synthesis worktree when
 // it differs from what is committed there, and commits nothing when it does not. It refuses
-// when the synthesis worktree holds any change other than the spec itself. It then records
+// when the synthesis worktree holds any change other than the spec itself, and when the
+// spec it holds matches neither the committed spec nor the copy. It then records
 // approved at the resulting commit through spec-decisions and prints that commit.
 //
 //   exit 0  done; brief and approve print a path or a commit
 //   exit 1  usage, no such dispatch, a missing waybill or copy, or a commit that failed
-//   exit 2  a refusal: the synthesis worktree holds another change, or the copy is missing
+//   exit 2  a refusal: the synthesis worktree holds another change or a stray spec edit,
+//           or the copy is missing
 import { spawnSync } from "node:child_process";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { die } from "./lib/proc.ts";
+import { pyTrim } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
 const TOOL = toolRoot(import.meta);
@@ -103,11 +106,15 @@ function readWaybill(dispatch: string): Waybill {
       continue;
     }
     if (section === "Project profile" && line.startsWith("repo:")) {
-      w.repo = line.slice(5).trim().split(/\s+/)[0] ?? "";
+      // The path runs to the first run of two or more spaces, as tool-faults.sh
+      // reads it, so a path holding single spaces survives.
+      const rest = pyTrim(line.slice(5));
+      const m = rest.match(/^([^ \t].*?)(?:[ \t]{2,}.*)?$/u);
+      w.repo = m ? pyTrim(m[1]!) : "";
     } else if (section === "Dispatch") {
       if (line.startsWith("name:")) w.name = line.slice(5).trim();
       else if (line.startsWith("synthesis worktree:"))
-        w.synthesis = line.split(":", 2).slice(1).join(":").trim();
+        w.synthesis = pyTrim(line.slice(line.indexOf(":") + 1));
     }
   }
   w.ticket = ticketLines.join("\n").replace(/^\n+|\n+$/g, "");
@@ -255,6 +262,26 @@ function approve(dispatch: string): void {
   if (head.code !== 0)
     die(`spec-session: no committed WORKHORSE-SPEC.md in ${synth} (${head.err.trim()})`, 1);
   const committed: string = head.out;
+
+  // The runbook never leaves the tree dirty at the pause. A worktree spec that
+  // matches neither the committed spec nor the copy is refused rather than
+  // recorded past (when the copy matches) or overwritten blind (when it does
+  // not); so is a worktree with no spec at all when the copy matches, since
+  // there is nothing to place as approved. A missing spec with a changed copy
+  // is restored by writing the copy below.
+  let wtText: string | null = null;
+  try {
+    wtText = readStrict(join(synth, "WORKHORSE-SPEC.md"));
+  } catch {
+    wtText = null;
+  }
+  if (wtText === null && copyText === committed)
+    die("spec-session: WORKHORSE-SPEC.md is missing from the synthesis worktree", 2);
+  if (wtText !== null && wtText !== committed && wtText !== copyText)
+    die(
+      "spec-session: the synthesis worktree holds an uncommitted edit to WORKHORSE-SPEC.md that matches neither the committed spec nor the copy",
+      2,
+    );
 
   let commit: string;
   if (committed === copyText) {
