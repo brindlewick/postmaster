@@ -381,16 +381,19 @@ other line of this section holds.
        --label "$(<tool>/scripts/host.sh name <dispatch>) · spec" -- <interactive form>
    ```
 
-   Send it a one-line prompt to read `<dispatch>/spec-session-brief.md` and work on the copy
-   with the user, and log `dispatch` with the target `spec-session`. Write `.waiting-on-user`
-   naming the session and the link: while it is set the poll reports USER, not SPEC, so the
-   package is never taken twice. With no session host (`spawn` exits 3), there is no session
+   Write a one-line prompt file telling it to read `<dispatch>/spec-session-brief.md` and work
+   on the copy with the user, send it with `<tool>/scripts/host.sh send <handle> <prompt-file>`
+   on the session's handle (`hosts.md`), and log `dispatch` with the target `spec-session`.
+   Write `.waiting-on-user` naming the session and the link, and add the run to the waiting
+   list with `<tool>/scripts/host.sh leg waiting add <runs> <ticket>
+   <dispatch>/.waiting-on-user`: while the marker is set the poll reports USER, not SPEC, so
+   the package is never taken twice. With no session host (`spawn` exits 3), there is no session
    to send to: do not send a prompt and do not log a `dispatch` line. Put the spec to the
    user in this conversation instead, showing the link and the commit, and ask for a
    decision: approved; changes requested in their words; or stop the run. Write
-   `.waiting-on-user` with the link and the commit in this path too, so the poll reports
-   USER while the user decides. Never show any of it to a workhorse. A fixture run gets
-   no session.
+   `.waiting-on-user` with the link and the commit in this path too, and add the run to the
+   waiting list the same way, so the poll reports USER while the user decides. Never show
+   any of it to a workhorse. A fixture run gets no session.
 2. **On the user's word, record the decision** with `<tool>/scripts/spec-session.sh approve
    <dispatch>` when they approve the copy the session worked on: it commits the copy as
    `WORKHORSE-SPEC.md` in the synthesis worktree when it differs from what is committed
@@ -404,10 +407,12 @@ other line of this section holds.
    a second stanza, a `changes` with no words, and a decision with no commit. The file holds
    this package's decision only.
 3. **When the package is decided, send it back.** Remove `.waiting-on-user` and
-   `.spec-review-ready`, then resume the current leg (Stage C step 5) with the decisions file
-   as what it must read. The marker is consumed here, on every path, before the resume, as
-   `.card-ready` is before a word is delivered: a fresh package touches it afresh, so SPEC
-   always means a package nobody has taken yet. Read the numbers first:
+   `.spec-review-ready`, remove the run from the waiting list with
+   `<tool>/scripts/host.sh leg waiting remove <runs> <ticket>`, then resume the current leg
+   (Stage C step 5) with the decisions file as what it must read. The marker is consumed
+   here, on every path, before the resume, as `.card-ready` is before a word is delivered:
+   a fresh package touches it afresh, so SPEC always means a package nobody has taken yet.
+   Read the numbers first:
    `<tool>/scripts/spec-decisions.sh <dispatch> count` prints `approved 0|1` and
    `changes 0|1`. Branch on the numbers, never by reading the files:
    - **`changes` above zero:** the coachman revises the spec from the user's words and pauses
