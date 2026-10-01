@@ -812,7 +812,7 @@ describe("score: negative controls, the same record with one check broken at a t
     expectScore("break-waybill", "hidden-tests", "carries no fixture ticket");
   }, 30000);
   test("a type error shipped: gate alone fails", () => {
-    expectScore("break-gate", "gate", "npm run check on main: exit");
+    expectScore("break-gate", "gate", "npm run check on main from a clean checkout: exit");
   }, 30000);
   test("a stage change never logged: stages alone fails", () => {
     expectScore("break-stages", "stages", ", not ");

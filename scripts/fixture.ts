@@ -359,7 +359,7 @@ export function score(dispatch: string, repo: string): { code: number; out: stri
   const legs = legsOf(dispatch, manifest);
   const results: CheckResult[] = [
     { name: "hidden-tests", ...checkHidden(dispatch, repo, app) },
-    { name: "gate", ...checkGate(app) },
+    { name: "gate", ...checkGate(app, repo, main) },
     { name: "stages", ...checkStages(dispatch), out: "" },
     { name: "markers", ...checkMarkers(dispatch, legs), out: "" },
     { name: "handoffs", ...checkHandoffs(dispatch, legs), out: "" },
@@ -473,7 +473,11 @@ function checkHidden(
   return { ok: h.passed, detail, out: h.out };
 }
 
-function checkGate(app: string): { ok: boolean; detail: string; out: string } {
+function checkGate(
+  app: string,
+  repo: string,
+  branch: string,
+): { ok: boolean; detail: string; out: string } {
   const r = sh(["bash", join(HERE, "discover-project.sh"), app]);
   const gate = (r.out ?? "")
     .split("\n")
@@ -481,16 +485,20 @@ function checkGate(app: string): { ok: boolean; detail: string; out: string } {
     ?.slice(5);
   if (!gate)
     return { ok: false, detail: "scripts/discover-project.sh found no gate", out: r.out ?? "" };
-  const install = existsSync(join(app, "package-lock.json")) ? ["npm", "ci"] : ["npm", "install"];
-  const inst = sh([...install, "--prefer-offline", "--no-audit", "--no-fund"], app);
-  if (inst.code !== 0)
-    return {
-      ok: false,
-      detail: `${install.join(" ")} on main: ${exited(inst.code)}`,
-      out: inst.out ?? "",
-    };
-  const g = sh(["bash", "-c", gate], app);
-  return { ok: g.code === 0, detail: `${gate} on main: ${exited(g.code)}`, out: g.out ?? "" };
+  const install =
+    (r.out ?? "")
+      .split("\n")
+      .find((l) => l.startsWith("install="))
+      ?.slice(8) ?? "";
+  const argv = ["bun", join(HERE, "clean-checkout.ts"), repo, branch];
+  if (install) argv.push(install);
+  argv.push(gate);
+  const g = sh(argv);
+  return {
+    ok: g.code === 0,
+    detail: `${gate} on main from a clean checkout: ${exited(g.code)}`,
+    out: g.out ?? "",
+  };
 }
 
 function checkStages(dispatch: string): { ok: boolean; detail: string } {

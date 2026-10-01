@@ -42,6 +42,13 @@ Disagreement is also diagnostic. When two lanes build the same mechanism and nam
 differently, the project's own conventions did not decide it, and the coachman records the
 gap as a proposed rule rather than flipping a coin the next run will flip again.
 
+Running several models is also a way to take full advantage of the competition between
+providers. There are many strong models now, from many providers, and they compete hard.
+postmaster runs several side by side, so it is not locked into anyone's ecosystem. A lane is
+a harness plus a model, each harness sits behind an adapter, and nothing in the flow depends
+on one provider's tools. The config says which harness and model fills each role, so moving
+a role to a different model is an edit to the config.
+
 ## Logging, auditing and tracing
 
 These are first-class concerns in postmaster, designed in from the start rather than added

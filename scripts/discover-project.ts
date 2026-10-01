@@ -40,6 +40,13 @@ try {
   process.exit(1);
 }
 
+// One package-manager choice feeds both the gate runner and install= below, in
+// verify.sh's pm() order (pnpm, bun, yarn, npm), so the two can never disagree.
+let pm = "npm";
+if (existsSync("pnpm-lock.yaml")) pm = "pnpm";
+else if (existsSync("bun.lock") || existsSync("bun.lockb")) pm = "bun";
+else if (existsSync("yarn.lock")) pm = "yarn";
+
 let gate = "";
 if (existsSync("package.json")) {
   // BASE shells to jq here and reads nothing without it; the port parses natively, so the
@@ -56,13 +63,30 @@ if (existsSync("package.json")) {
     }
   }
   if (gate !== "") {
-    gate = `${existsSync("pnpm-lock.yaml") ? "pnpm" : "npm"} run ${gate}`;
+    gate = `${pm} run ${gate}`;
   }
 }
 if (gate === "" && existsSync("Makefile")) {
   if (/^(check|test):/mu.test(readFileSync("Makefile", "utf8"))) gate = "make check";
 }
 if (gate === "" && existsSync("Cargo.toml")) gate = "cargo test";
+
+// The dependency install a fresh checkout needs before the gate: the clean-checkout callers
+// (the ship leg's post-merge verification, fixture scoring's gate) run it first. Empty where
+// the project's runner fetches on its own (cargo, go) or nothing is known (make). Always
+// lockfile-strict where a lockfile exists, so the gate runs the tree the project pins.
+let install = "";
+if (existsSync("package.json")) {
+  if (pm === "pnpm") install = "pnpm install --frozen-lockfile";
+  else if (pm === "bun") install = "bun install --frozen-lockfile";
+  else if (pm === "yarn") {
+    install = existsSync(".yarnrc.yml")
+      ? "yarn install --immutable"
+      : "yarn install --frozen-lockfile";
+  } else if (existsSync("package-lock.json"))
+    install = "npm ci --prefer-offline --no-audit --no-fund";
+  else install = "npm install --prefer-offline --no-audit --no-fund";
+}
 
 // ls prints the names that exist, sorted; tr turns each newline into a space.
 const lsNames = (argv: string[]): string => {
@@ -132,6 +156,7 @@ if (verified.code === 0) {
 }
 
 console.log(`gate=${gate}`);
+console.log(`install=${install}`);
 console.log(`docs=${(docs + dirs).replace(/ *$/u, "")}`);
 console.log(`tracker=${kind}`);
 console.log(`tracker_prefix=${trackerPrefix}`);
