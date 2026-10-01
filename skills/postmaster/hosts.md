@@ -48,6 +48,7 @@ way on every row, only less visibly on the last.
 <tool>/scripts/host.sh name <dispatch> review <lane> <lens> <round>
 <tool>/scripts/host.sh name <dispatch> postmaster
 <tool>/scripts/host.sh name <dispatch> role <text...>
+<tool>/scripts/host.sh leg launch|resume|takeover|retry|outcome|backfill|waiting ...
 <tool>/scripts/host.sh run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
 <tool>/scripts/host.sh stop <worktree>
 <tool>/scripts/host.sh close <worktree>
@@ -71,6 +72,30 @@ pane. A spec session is spawned the same way (`postmaster.md`, Spec review).
 `spawn`, `send`, `wait` and `read` exit 3 on `none`.
 
 ## Run, on every host
+
+**Coachman legs use `host.sh leg`**, which is the only runbook interface for launching,
+resuming or taking over a leg. It derives the marker, event, error and attempt-record paths.
+`launch` starts a new stream, `resume` appends to that stream and reuses the role recorded for
+the previous attempt, `takeover` preserves the old stream and starts a fresh fallback stream,
+and `retry` repeats the last refused, pre-thread or user-routed wall attempt with its saved prompt.
+The leg command records one of `refused`, `pre-thread`, `walled`, `incomplete` or `finished`
+before `--marker` lands. A refusal to load the env file remains `refused`; no runbook reads
+`.err` text to classify the result. One starter holds the leg's lock at a time: a lock whose
+owner is dead is stolen, a live one refuses. The launch names itself in the lock as its
+first act, through a temporary file, and never runs unowned; a release removes only a lock
+that still names the releaser. `leg outcome` prints the last attempt record;
+`leg waiting` keeps the waiting list.
+
+Each attempt record keeps `attempt`, `leg`, `name`, `request`, `role`, `prompt`, `thread_id`,
+`outcome`, `on_answer`, `backfilled`, `exit` and `ended`. `on_answer` is `retry` for `refused`,
+`pre-thread` and fallback `walled`, `resume` for `incomplete`, and `none` otherwise; it is the
+action for when the user answers. `backfilled` is true when the attempt died without its record
+and was classified later from its evidence: every start writes an intent file first (attempt,
+request, role, prompt, thread id and stream offset), and the next start — or `leg backfill`
+on its own — classifies each attempt that has an intent or phase file but no record, over its
+own stream slice. A phase file beyond the last record therefore reads INSPECT, never the stale
+outcome. Every append terminates a torn tail line first, so a recovery record never fuses
+onto the fragment it supersedes.
 
 - **The command is the one a caller would have backgrounded with `&`.** It runs from the
   directory `host.sh` was called in, with the caller's environment and an empty stdin, its

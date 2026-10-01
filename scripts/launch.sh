@@ -72,9 +72,31 @@
 #           thread-id with no id in the stream, or transient with a record that is not named
 #   exit 3  skill or review: the lane's harness has no such review form recorded
 #   else    the harness's own exit code
+#
+# POSTMASTER_ATTEMPT_PHASE names the file this attempt's phase is written to:
+# `refused` before a launch or resume runs its preflight, `started` once the env
+# file has loaded and the harness is still callable. Only launch and resume ever
+# write it; form, review and skill do not, whatever the environment holds. The harness
+# does not inherit the variable, so nothing the attempt runs can overwrite it.
 set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 CONFIG=${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}
+ATTEMPT_PHASE_FILE=${POSTMASTER_ATTEMPT_PHASE:-}
+readonly ATTEMPT_PHASE_FILE
+PHASE_TRACKING=0
+attempt_phase() {  # launch and resume only: form, review and skill never touch the phase file
+  # A temp file and a rename: readers see the old phase or the new one, never
+  # an empty file from a kill between truncate and write. A write that cannot
+  # land returns non-zero: the started call site dies on it, so the harness
+  # never starts unwitnessed. Only the write can fail this way; tracking off
+  # or no file configured is not a failure.
+  [ "$PHASE_TRACKING" -eq 1 ] || return 0
+  [ -z "$ATTEMPT_PHASE_FILE" ] && return 0
+  dir=${ATTEMPT_PHASE_FILE%/*}
+  [ "$dir" = "$ATTEMPT_PHASE_FILE" ] && dir=.
+  tmp=$(mktemp "$dir/.phase.XXXXXX" 2>/dev/null) || return 1
+  printf '%s\n' "$1" > "$tmp" && mv -f -- "$tmp" "$ATTEMPT_PHASE_FILE" || { rm -f -- "$tmp"; return 1; }
+}
 LAUNCH_ROLE=${POSTMASTER_LAUNCH_ROLE:-}
 
 if [ "${1:-}" = --self-test ]; then
@@ -195,10 +217,57 @@ if [ "${1:-}" = --self-test ]; then
       "$here/run-meta.sh" "$tmp/repo/.postmaster/runs/$1" "$tmp/repo" >/dev/null \
       || { printf '  FAIL run-meta.sh records %s as run %s\n' "$2" "$1"; fails=$((fails+1)); }
   }
+  echo "attempt phase controls"
+  phasefile=$tmp/attempt.phase
+  fixture phase-start synthesis
+  rm -f "$phasefile"; envx="POSTMASTER_ATTEMPT_PHASE=$phasefile"
+  run phase-start launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg synthesis
+  [ "$rc" -eq 0 ] && [ "$(cat "$phasefile")" = started ] \
+    && ok "a harness invocation records started" || fail "a harness invocation records started"
+  printf ': "${PHASE_MISSING:?missing}"\n' > "$tmp/phase-unset.env"
+  printf '[team]\ncoachman = { harness = "claude", model = "coach-model", env_file = "%s" }\n' "$tmp/phase-unset.env" > "$tmp/phase-unset.toml"
+  rm -f "$phasefile"; run phase-unset launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg synthesis
+  [ "$rc" -ne 0 ] && [ "$(cat "$phasefile")" = refused ] \
+    && ok "an env file that fails under nounset remains refused" || fail "an env file that fails under nounset remains refused"
+  printf 'exit 17\n' > "$tmp/phase-exit.env"
+  printf '[team]\ncoachman = { harness = "claude", model = "coach-model", env_file = "%s" }\n' "$tmp/phase-exit.env" > "$tmp/phase-exit.toml"
+  rm -f "$phasefile"; run phase-exit launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg synthesis
+  [ "$rc" -eq 17 ] && [ "$(cat "$phasefile")" = refused ] \
+    && ok "an env file that exits remains refused" || fail "an env file that exits remains refused"
+  printf 'PATH=/path/that/has/no/harness\n' > "$tmp/phase-path.env"
+  printf '[team]\ncoachman = { harness = "claude", model = "coach-model", env_file = "%s" }\n' "$tmp/phase-path.env" > "$tmp/phase-path.toml"
+  rm -f "$phasefile"; run phase-path launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg synthesis
+  [ "$rc" -eq 1 ] && [ "$(cat "$phasefile")" = refused ] \
+    && ok "an env file that removes the harness from PATH remains refused" || fail "an env file that removes the harness from PATH remains refused"
+  rm -f "$phasefile"; run phase-start resume coachman "$tmp/wt" thread-already-known "$tmp/no-prompt.txt" --leg synthesis
+  [ "$rc" -eq 1 ] && [ "$(cat "$phasefile")" = refused ] \
+    && ok "a refused resume with an existing thread id remains refused" || fail "a refused resume with an existing thread id remains refused"
+  printf 'started\n' > "$phasefile"; run phase-start skill coachman security-review --leg synthesis
+  [ "$rc" -eq 0 ] && [ "$(cat "$phasefile")" = started ] \
+    && ok "skill leaves the attempt phase file untouched" || fail "skill leaves the attempt phase file untouched"
+  printf 'started\n' > "$phasefile"; run phase-start form coachman --leg synthesis
+  [ "$rc" -eq 0 ] && [ "$(cat "$phasefile")" = started ] \
+    && ok "form leaves the attempt phase file untouched" || fail "form leaves the attempt phase file untouched"
+  printf 'MARKER\n' > "$phasefile"; ln "$phasefile" "$tmp/attempt.phase.link"
+  run phase-unset launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg synthesis
+  [ "$rc" -ne 0 ] && [ "$(cat "$phasefile")" = refused ] && [ "$(cat "$tmp/attempt.phase.link")" = MARKER ] \
+    && ok "the phase write replaces the file instead of truncating it" || fail "the phase write replaces the file instead of truncating it"
+  [ -z "$(ls "$tmp"/.phase.* 2>/dev/null)" ] \
+    && ok "phase writes leave no temp files behind" || fail "phase writes leave no temp files behind"
+  mkdir "$tmp/phasebin"
+  printf '#!/bin/sh\nprintf "phase-var=%%s\\n" "${POSTMASTER_ATTEMPT_PHASE:-unset}"\n' > "$tmp/phasebin/claude" && chmod +x "$tmp/phasebin/claude"
+  rm -f "$phasefile"
+  out=$(env POSTMASTER_ATTEMPT_PHASE="$phasefile" POSTMASTER_CONFIG="$tmp/phase-start.toml" PATH="$tmp/phasebin:$tmp/bin:$PATH" "$self" launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg synthesis 2>"$tmp/err"); rc=$?
+  [ "$rc" -eq 0 ] && [ "$out" = "phase-var=unset" ] && [ "$(cat "$phasefile")" = started ] \
+    && ok "the harness does not inherit the attempt phase variable" || fail "the harness does not inherit the attempt phase variable"
+  : > "$tmp/phaseblock"; envx="POSTMASTER_ATTEMPT_PHASE=$tmp/phaseblock/attempt.phase"
+  refused "an unwritable phase stops the launch before the harness starts" phase-start \
+    "cannot record that the harness started" launch coachman "$tmp/wt" "$tmp/prompt.txt" --leg synthesis
+  envx=""
   calls() {  # calls <runbook>...: each launch and resume in them, one per line, marked run or unrun
     python3 - "$@" <<'PY'
 import re, sys
-CALL = re.compile(r"scripts/launch\.sh\s+(?:launch|resume)\b")
+CALL = re.compile(r"scripts/(?:launch\.sh\s+(?:launch|resume)|host\.sh\s+leg\s+(?:launch|resume|takeover|retry))\b")
 FENCE = re.compile(r"^([ \t]*```.*?^[ \t]*```)", re.S | re.M)
 for path in sys.argv[1:]:
     cmds = []
@@ -210,7 +279,8 @@ for path in sys.argv[1:]:
             cmds += [span[m.start():] for span in re.findall(r"`([^`]+)`", part)
                      for m in CALL.finditer(span)]
     for c in cmds:
-        print("%s %s: %s" % ("run" if "--run <dispatch>" in c else "unrun", path, " ".join(c.split())))
+        recorded = "--run <dispatch>" in c or "scripts/host.sh leg" in c
+        print("%s %s: %s" % ("run" if recorded else "unrun", path, " ".join(c.split())))
 PY
   }
   printf '%s\n' 'Fenced, with no --run:' '' '```sh' '( scripts/launch.sh launch a <wt> <prompt-file> \' \
@@ -992,7 +1062,7 @@ PY
   echo "self-test: $fails control(s) misbehaved"; exit 1
 fi
 
-die() { echo "launch: $*" >&2; exit 1; }
+die() { attempt_phase refused; echo "launch: $*" >&2; exit 1; }
 # --- thread-id: the id a stream records, from its own shape ---------------------------------
 # Harness-specific event shapes live here and in harnesses.md, not in whoever records the id.
 # Pure: no config, no harness lookup. Events are read top-down and the first id wins; keys
@@ -1426,6 +1496,7 @@ esac
 
 [ $# -ge 2 ] || die "usage: launch.sh form|launch|review|resume|skill <name> ... | thread-id <events-file> | transient <err-file> [<stream-file> [<skip-lines>]] | wall-tokens | wall-quotes | --self-test"
 CMD=$1; NAME=$2; shift 2
+case $CMD in launch|resume) PHASE_TRACKING=1; attempt_phase refused ;; esac
 LEG=""; LAST=""; RUN=""; BASE=""; PROJECT=""; PTEXT=""; STDIN_FILE=""; REVIEW_PROMPT=""; args=()
 while [ $# -gt 0 ]; do
   case $1 in
@@ -1684,6 +1755,8 @@ esac
 }
 forms
 
+LAUNCH_HARNESS=$HARNESS
+readonly LAUNCH_HARNESS
 [ -n "$DATA" ] && [ "$CMD" != form ] && { mkdir -p "$DATA" || die "cannot create $DATA"; }
 if [ "$CMD" = form ]; then
   show() { case $1 in '<'*'>'|*'=<'*'>'|'$(cat <prompt-file>)') printf '%s ' "$1" ;; *) printf '%q ' "$1" ;; esac; }
@@ -1741,12 +1814,19 @@ fi
 if [ -n "${ENV_FILE:-}" ]; then
   saved_event_stream=${POSTMASTER_EVENT_STREAM:-}
   saved_launch_role=$LAUNCH_ROLE
-  set -a; . "$ENV_FILE"; set +a
+  set -a
+  . "$ENV_FILE"
+  env_rc=$?
+  set +a
+  [ "$env_rc" -eq 0 ] || die "env_file for $NAME failed while loading"
   POSTMASTER_EVENT_STREAM=$saved_event_stream
   LAUNCH_ROLE=$saved_launch_role
   export -n LAUNCH_ROLE
 fi
+command -v "$LAUNCH_HARNESS" >/dev/null 2>&1 || die "harness '$LAUNCH_HARNESS' is not on PATH after loading env_file for $NAME"
 unset POSTMASTER_LAUNCH_NAME POSTMASTER_LAUNCH_ROLE   # launch identity stays with postmaster, never the model
+unset POSTMASTER_ATTEMPT_PHASE # the phase file is this attempt's: the harness must not inherit it
+attempt_phase started || die "cannot record that the harness started"
 "${cmd[@]}"
 rc=$?
 # The session export is attempted on every run launch with a stream, including an
