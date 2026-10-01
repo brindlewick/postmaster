@@ -44,7 +44,14 @@ Someone typing `/postmaster` arrives cold. **Assume neither. Check.**
 
 ```sh
 cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
+<tool>/scripts/link-skills.sh --check
 ```
+
+Report the link check with the config status. It names every missing or blocked link and
+prints the install command, `<tool>/scripts/link-skills.sh`; the check never installs or
+changes anything. Keep installation on the user's word. When links are missing and the config
+is present, offer that command; for a missing config, follow the setup section of
+`<tool>/AGENTS.md`.
 
 **No config: stop and set the machine up first**, in conversation, per the setup section of
 `<tool>/AGENTS.md`; each path there is relative to `<tool>`. Do not continue to target
@@ -56,8 +63,9 @@ and without it the launch card cannot be filled. Come back here when it is writt
 
 **Config present, no target yet:** carry on below.
 
-Say which of these you found, in one line, before doing anything else. A session that cannot
-tell whether it is setting up or dispatching is one nobody can follow.
+Say which of these you found, in one line, before doing anything else — including any
+missing skill links.
+A session that cannot tell whether it is setting up or dispatching is one nobody can follow.
 
 ## Choose the target project
 
@@ -77,8 +85,10 @@ off the list without needing to be named. Offer the full list on request.
 into a vendored copy of someone else's project.
 
 **Do NOT filter to projects with a remote.** Plenty of real work is local-only, and
-filtering on a remote silently hides it. Show the remote status as information instead: it
-decides whether push and PR steps apply, and a local-only project is normal, not broken.
+filtering on a remote silently hides it. Show the remote status as information. Determine the
+landing route from the project's instructions: whether it uses pull requests, and which default
+branch they target. If the project does not say, ask the user before dispatch. A remote by
+itself does not decide the route.
 
 Adjust the search roots to the machine. `~/Code` is one convention, not a rule.
 
@@ -188,7 +198,8 @@ Never put paths or credentials in either file.
 4. **Launch card**: one self-contained confirmation covering whether the postmaster is this
    session or a new one, with every reason the script printed, the postmaster's harness,
    model and effort (`team.postmaster` in the config), the team the config names, who says
-   the merge word (`ship.merge_authority`), the session host the fleet will run on
+   the merge word for local-merge projects (`ship.merge_authority`), the landing route
+   (`pull-request` or `local`), the session host the fleet will run on
    (`<tool>/scripts/host.sh detect`), and the project facts above. Launch nothing before the user
    picks.
 5. **Create the project-local run root** and keep it in one variable for the steps below. The
@@ -260,6 +271,7 @@ everything the coachman needs and nothing it must go and find:
 ## Project profile
 repo: <abs path>          default branch: <name>       BASE: <sha>
 gate: <the real command>  build: <the real command>    browser suite: <command or none>
+landing: pull-request | local   (whether the postmaster opens a pull request or merges on the word)
 docs to read first: <files, in order>
 tracker: <kind, and how a ticket is read and written>
 risk surfaces: <what the project binds, allowlists, spawns, serves; from its docs or the user>
@@ -271,7 +283,7 @@ reviewers: <lane>, <lane>
 bug reviewers: <lane>, <lane>             (always; only the chosen bug reviewers whose harness has a code-review form, which is the bug lens's whole team)
 <lens> reviewers: <lane>, <lane>          (one line for each lens the config gives its own lanes)
 coachman: <harness>/<model>/<effort>      (never a lane's model)
-CHECKPOINT_MODE and MERGE_AUTHORITY come from ship.checkpoint_mode and ship.merge_authority, overridden only where the user says so for this run
+CHECKPOINT_MODE comes from ship.checkpoint_mode; MERGE_AUTHORITY for local merges comes from ship.merge_authority; override either only where the user says so for this run
 
 ## Dispatch
 name: <ticket id>, <ticket title>

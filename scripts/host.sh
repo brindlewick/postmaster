@@ -17,6 +17,8 @@
 #   host.sh stop <worktree>               stop every launch still running in a worktree, and
 #                                         everything each one started
 #   host.sh close <worktree>              close its tabs/space (Herdr) and its windows (tmux)
+#   host.sh stop-run <dispatch>           stop launches in every worktree the run created
+#   host.sh close-run <dispatch>          close spaces/windows for every worktree the run created
 #   host.sh spawn <handle> <cwd> [--label <text>] -- <command...>   an interactive session;
 #                                         the handle becomes a Herdr agent name
 #   host.sh send <handle> <file> [--wait [<seconds>]]   submit the file's text to that session,
@@ -27,8 +29,9 @@
 #   host.sh --live-test                   the ticket's controls, against the hosts on this machine
 #
 # run: <command> is the same headless command a caller would otherwise background with `&`. It
-# runs from the directory host.sh was called in, with the caller's environment and an empty
-# stdin, in a session of its own with no terminal; its stdout goes to --out, added to with
+# runs from the directory host.sh was called in, with the caller's environment except for
+# Claude Code session identity and caller Herdr variables, and an empty stdin, in a session of
+# its own with no terminal; its stdout goes to --out, added to with
 # --append, and its stderr to --err, which holds only this launch's errors. --marker is removed
 # as it starts and touched when it exits,
 # whatever its exit, and also when host.sh cannot start it, with the reason in --err. --pidfile
@@ -41,13 +44,23 @@
 # the session of the repository it was cut from. <name> labels the tab or window and the pane's
 # title, and names the thread where the harness can (POSTMASTER_LAUNCH_NAME, read by launch.sh).
 # If --out is set, its absolute path also reaches launch.sh as POSTMASTER_EVENT_STREAM so that a
-# run can retain the harness's durable session beside that event stream.
+# run can retain the harness's durable session beside that event stream. For a run launch,
+# --role reaches a run's launch.sh command as POSTMASTER_LAUNCH_ROLE; it is the explicit role
+# used in its usage record, and is removed before the harness starts.
 # Pass a role-specific `host.sh name` result as the launch name and pass the dispatch separately,
 # so the ticket title labels only the run space and never passes through a shell. A pane shows
-# the stream through view-stream.sh. A launch carries its own pane's
-# identity (HERDR_PANE_ID and the like, or TMUX_PANE), never its caller's. If the host cannot
-# place it, it runs in the background. On Linux with a working systemd user manager, the command
-# and its descendants run in a transient scope with MemoryMax, MemorySwapMax=0 and TasksMax;
+# the stream through view-stream.sh. A launch carries its own pane's identity (Herdr's six
+# HERDR_* pane values, or TMUX_PANE), never its caller's. It drops caller HERDR_* and Claude
+# session identity: CLAUDECODE, CLAUDE_PID, CLAUDE_CODE_SESSION_ID,
+# CLAUDE_CODE_CHILD_SESSION, CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_EXECPATH,
+# CLAUDE_CODE_SESSION_ATTENDED, CLAUDE_CODE_MESSAGING_SOCKET,
+# CLAUDE_CODE_MESSAGING_TOKEN, CLAUDE_CODE_TOOL_USE_ID, and the
+# CLAUDE_CODE_SESSION_*, CLAUDE_CODE_MESSAGING_* and CLAUDE_CODE_CHILD_*
+# families. Add an exact identity name or family
+# to runner()'s filter and its self-test controls; keep unrelated CLAUDE_CODE_* configuration.
+# If the host cannot place it, it runs in the background. On Linux with a working systemd user
+# manager, the command and its descendants run in a transient scope with MemoryMax,
+# MemorySwapMax=0 and TasksMax;
 # otherwise it runs uncapped and records that in --err. While it runs it is registered under
 # POSTMASTER_HOST_STATE (default ~/.postmaster/host), whatever its host, so stop and close see it.
 # The record names its group leader by start time and boot, so a pid another process reuses,
@@ -66,6 +79,7 @@
 # POSTMASTER_HOST=herdr|tmux|none overrides detection; nothing needs setting to get the default.
 # POSTMASTER_HOST_CLAIM_WAIT (20) is how long a new pane has to start its launch,
 # POSTMASTER_HOST_CLOSE_WAIT (15) how long close waits for a launch that is just ending, and
+# POSTMASTER_HOST_FINISH_DELAY (0.2) lets the pane finish rendering after its marker lands,
 # POSTMASTER_HOST_STOP_WAIT (20) how long stop waits after TERM before it sends KILL, and
 # POSTMASTER_HOST_STOP_MAX (512) the most processes one stop may signal.
 #
@@ -320,16 +334,17 @@ PY
 
 # Remember the tabs this host creates inside shared run spaces. A later `close <worktree>` can
 # then close that checkout's tabs without closing the ticket space or a tab opened by the user.
-herdr_record_placement() {  # herdr_record_placement <space> <tab> <pane> <cwd>
+herdr_record_placement() {  # herdr_record_placement <space> <tab> <pane> <cwd> <dispatch>
   mkdir -p "$STATE/placements" 2>/dev/null || return 1
-  python3 - "$STATE/placements" "$1" "$2" "$3" "$4" <<'PY'
+  python3 - "$STATE/placements" "$1" "$2" "$3" "$4" "$5" <<'PY'
 import hashlib, json, os, sys, tempfile
-directory, workspace, tab, pane, cwd = sys.argv[1:]
+directory, workspace, tab, pane, cwd, dispatch = sys.argv[1:]
 name = hashlib.sha256(tab.encode("utf-8")).hexdigest() + ".json"
 fd, temporary = tempfile.mkstemp(prefix=".placement-", dir=directory)
 try:
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
-        json.dump({"workspace": workspace, "tab": tab, "pane": pane, "cwd": os.path.realpath(cwd)}, stream)
+        json.dump({"workspace": workspace, "tab": tab, "pane": pane, "cwd": os.path.realpath(cwd),
+                   "run": os.path.realpath(dispatch) if dispatch else ""}, stream)
         stream.write("\n")
     os.replace(temporary, os.path.join(directory, name))
 except BaseException:
@@ -338,6 +353,200 @@ except BaseException:
     except OSError:
         pass
     raise
+PY
+}
+
+herdr_space_opened() {  # herdr_space_opened <space>: 0 when host.sh opened this space
+  local info opened
+  info=$(herdr workspace get "$1" 2>/dev/null) || return 1
+  opened=$(printf '%s' "$info" | json 'd["result"]["workspace"].get("tokens",{}).get("postmaster")' 2>/dev/null) || return 1
+  [ "$opened" = opened ]
+}
+herdr_space_gone() {  # herdr_space_gone <space>: 0 when the server answers and the space is absent
+  local list
+  list=$(herdr workspace list 2>/dev/null) || return 1
+  printf '%s' "$list" | python3 -c 'import json,sys; sys.exit(0 if sys.argv[1] not in [w.get("workspace_id") for w in json.load(sys.stdin)["result"].get("workspaces", [])] else 1)' "$1" 2>/dev/null
+}
+tmux_window_gone() {  # tmux_window_gone <window>: 0 when the server answers without it, or no server answers
+  local rows w
+  if ! rows=$(tmux list-windows -a -F '#{window_id}	#{window_name}' 2>/dev/null); then
+    # A server that answers nothing holds no windows: tmux windows die with
+    # their server, so this is proven, not assumed. A server that answers but
+    # cannot list is unprovable, and the record stays for a retry.
+    tmux ls >/dev/null 2>&1 || return 0
+    return 1
+  fi
+  while IFS=$'\t' read -r w _; do [ "$w" = "$1" ] && return 1; done <<< "$rows"
+  return 0
+}
+herdr_finish_placement() {  # close only the recorded launch pane, or its tab when it has no siblings
+  local space=$1 tab=$2 pane=$3 panes ownership file
+  file=$(python3 - "$STATE/placements" "$tab" <<'PY'
+import hashlib, os, sys
+print(os.path.join(sys.argv[1], hashlib.sha256(sys.argv[2].encode()).hexdigest() + ".json"))
+PY
+)
+  panes=$(herdr pane list --workspace "$space" 2>/dev/null) || {
+    # A space the server says is gone was settled concurrently; anything
+    # else is a dead server, and the record stays for a retry.
+    if herdr_space_gone "$space" 2>/dev/null; then rm -f -- "$file"; return 0; fi
+    warn "could not inspect completed launch pane $pane in space $space; left it open"; return 2
+  }
+  ownership=$(printf '%s' "$panes" | python3 -c '
+import json, re, sys
+try:
+    rows = json.load(sys.stdin)["result"]["panes"]
+except (ValueError, KeyError, TypeError):
+    raise SystemExit(2)
+target, tab = sys.argv[1:]
+def placed(v):
+    return isinstance(v, str) and re.fullmatch(r"w[A-Za-z0-9]+:t[0-9A-Za-z]+", v) is not None
+p = next((p for p in rows if p.get("pane_id") == target), None)
+if p is None:
+    print("missing")
+elif (p.get("tokens") or {}).get("postmaster") != "launch":
+    print("unowned")
+elif not placed(p.get("tab_id")) or p.get("tab_id") != tab:
+    print("pane")
+elif any(not placed(q.get("tab_id")) for q in rows if q.get("pane_id") != target):
+    print("pane")
+elif any(q.get("tab_id") == tab for q in rows if q.get("pane_id") != target):
+    print("pane")
+else:
+    print("tab")' "$pane" "$tab" 2>/dev/null) || {
+      warn "could not verify completed launch pane $pane in space $space; left it open"; return 2;
+    }
+  case $ownership in
+    missing) ;;
+    unowned) warn "completed launch pane $pane is no longer owned by host.sh; left it open"; return 2 ;;
+    pane) herdr pane close "$pane" >/dev/null 2>&1 || { warn "herdr could not close completed launch pane $pane; left it open"; return 2; } ;;
+    tab)
+      # A tab in a space host.sh did not open keeps the project space's shell:
+      # closing its last tab would destroy the space, which host.sh never does.
+      herdr_space_opened "$space" 2>/dev/null || { warn "completed launch tab $tab is in space $space, which host.sh did not open; left it open"; return 2; }
+      herdr tab close "$tab" >/dev/null 2>&1 || { warn "herdr could not close completed launch tab $tab; left it open"; return 2; } ;;
+    *) warn "could not verify completed launch pane $pane in space $space; left it open"; return 2 ;;
+  esac
+  rm -f -- "$file"
+}
+
+tmux_finish_placement() {  # close only the pane host.sh opened, or its window when it has no siblings
+  local window=$1 pane=$2 rows found=0 present=0 total=0 id owned
+  rows=$(tmux list-panes -t "$window" -F '#{pane_id}	#{@postmaster_owned}' 2>/dev/null) || {
+    # A window the server no longer lists was settled concurrently; anything
+    # else is unprovable, and the window stays for a retry.
+    if tmux_window_gone "$window" 2>/dev/null; then return 0; fi
+    warn "could not inspect completed tmux pane $pane; left it open"; return 2
+  }
+  while IFS=$'\t' read -r id owned; do
+    [ -n "$id" ] || continue
+    total=$((total + 1))
+    if [ "$id" = "$pane" ]; then present=1; [ "$owned" = yes ] && found=1; fi
+  done <<< "$rows"
+  # The recorded pane is gone but the window stands: only panes host.sh did not
+  # open remain, so this refuses like a split rather than reporting success.
+  [ "$present" -eq 1 ] || { warn "tmux window $window holds only panes host.sh did not open; left them open"; return 2; }
+  [ "$found" -eq 1 ] || { warn "completed tmux pane $pane is no longer owned by host.sh; left it open"; return 2; }
+  if [ "$total" -eq 1 ]; then
+    tmux kill-window -t "$window" >/dev/null 2>&1 || { warn "tmux could not close completed window $window; left it open"; return 2; }
+  else
+    tmux kill-pane -t "$pane" >/dev/null 2>&1 || { warn "tmux could not close completed pane $pane; left it open"; return 2; }
+    warn "tmux window $window holds panes host.sh did not open; left them open"
+    return 2
+  fi
+}
+
+finish_prior_herdr() {  # finish_prior_herdr <cwd> <run>: clear the prior run's exact placement before a resume
+  local cwd=$1 run=$2 file fields space tab pane panes i=0 patience live
+  [ -d "$STATE/placements" ] || return 0
+  patience=$(count "${POSTMASTER_HOST_CLOSE_WAIT:-15}" POSTMASTER_HOST_CLOSE_WAIT) || return 1
+  while live=$(reg_live "$cwd") || return 1; [ -n "$live" ]; do
+    if [ "$i" -ge "$patience" ]; then warn "a launch is still running in $cwd: $(printf '%s\n' "$live" | cut -f2 | tr '\n' ';' | sed 's/;$//')"; return 2; fi
+    sleep 1; i=$((i + 1))
+  done
+  for file in "$STATE"/placements/*.json; do
+    [ -f "$file" ] || continue
+    fields=$(python3 - "$file" "$cwd" "$run" <<'PY'
+import json, os, sys
+try: item = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError): raise SystemExit(0)
+if os.path.realpath(item.get("cwd", "")) == os.path.realpath(sys.argv[2]) and item.get("run") == os.path.realpath(sys.argv[3]):
+    print("\t".join(str(item.get(k, "")) for k in ("workspace", "tab", "pane")))
+PY
+)
+    [ -n "$fields" ] || continue
+    IFS=$'\t' read -r space tab pane <<< "$fields"
+    [ -n "$space" ] && [ -n "$tab" ] && [ -n "$pane" ] || { warn "invalid prior launch placement in $file; left it open"; return 2; }
+    if ! herdr_finish_placement "$space" "$tab" "$pane"; then
+      if panes=$(herdr pane list --workspace "$space" 2>/dev/null); then
+        if printf '%s' "$panes" | python3 -c 'import json,sys; sys.exit(0 if any(p.get("pane_id")==sys.argv[1] for p in json.load(sys.stdin)["result"]["panes"]) else 1)' "$pane" 2>/dev/null; then
+          return 2
+        fi
+        rm -f -- "$file"
+      elif herdr_space_gone "$space" 2>/dev/null; then
+        rm -f -- "$file"
+      else
+        return 2
+      fi
+    fi
+  done
+}
+
+finish_prior_tmux() {  # finish_prior_tmux <cwd> <run>: clear prior exact windows before a resume
+  local cwd=$1 run=$2 session rows window oldcwd oldrun pane live i=0 patience
+  session=$(tmux_session "$cwd")
+  tmux has-session -t "=$session" 2>/dev/null || return 0
+  patience=$(count "${POSTMASTER_HOST_CLOSE_WAIT:-15}" POSTMASTER_HOST_CLOSE_WAIT) || return 1
+  while live=$(reg_live "$cwd") || return 1; [ -n "$live" ]; do
+    if [ "$i" -ge "$patience" ]; then warn "a launch is still running in $cwd: $(printf '%s\n' "$live" | cut -f2 | tr '\n' ';' | sed 's/;$//')"; return 2; fi
+    sleep 1; i=$((i + 1))
+  done
+  rows=$(tmux list-windows -t "=$session" -F '#{window_id}	#{@postmaster_cwd}	#{@postmaster_run}	#{@postmaster_pane}' 2>/dev/null) || return 2
+  while IFS=$'\t' read -r window oldcwd oldrun pane; do
+    [ "$oldcwd" = "$cwd" ] && [ "$oldrun" = "$run" ] || continue
+    [ -n "$pane" ] || { warn "prior tmux window $window has no recorded launch pane; left it open"; return 2; }
+    if ! tmux_finish_placement "$window" "$pane"; then
+      if rows=$(tmux list-panes -t "$window" -F '#{pane_id}' 2>/dev/null); then
+        case $'\n'"$rows"$'\n' in *$'\n'"$pane"$'\n'*) return 2 ;; esac
+      elif ! tmux_window_gone "$window" 2>/dev/null; then
+        return 2
+      fi
+    fi
+  done <<< "$rows"
+}
+
+finish_prior_launch() {  # finish_prior_launch <host> <cwd> <run>: settle an old marker before it is cleared
+  case $1 in
+    herdr) finish_prior_herdr "$2" "$3" ;;
+    tmux) finish_prior_tmux "$2" "$3" ;;
+    *) return 0 ;;
+  esac
+}
+
+start_finish_watcher() {  # start_finish_watcher <host> <space> <tab/window> <pane> <cwd> <marker>
+  [ -n "$6" ] || return 0
+  python3 - "$1" "$2" "$3" "$4" "$5" "$6" "$SELF" "${POSTMASTER_HOST_FINISH_DELAY:-0.2}" "${POSTMASTER_HOST_FIXTURE:-}" <<'PY' >/dev/null 2>&1 &
+import os, sys, time
+pid = os.fork()
+if pid:
+    fixture = sys.argv[9]
+    if fixture:
+        try:
+            with open(os.path.join(fixture, "finishers"), "a", encoding="utf-8") as f:
+                f.write("%s\t%s\n" % (pid, sys.argv[6]))
+        except OSError:
+            pass
+    os._exit(0)
+os.setsid()
+fd = os.open(os.devnull, os.O_RDWR)
+for n in (0, 1, 2): os.dup2(fd, n)
+host, space, tab, pane, cwd, marker, script, delay, fixture = sys.argv[1:]
+while not os.path.exists(marker): time.sleep(0.1)
+try:
+    time.sleep(max(0.0, float(delay)))
+except ValueError:
+    time.sleep(0.2)
+os.execv(script, [script, "_finish", host, space, tab, pane, cwd, marker])
 PY
 }
 
@@ -401,7 +610,7 @@ print("\t".join([d.get("source", {}).get("source_workspace_id") or "-",
     # survives is still a marked space close can shut.
     herdr workspace report-metadata "$runspace" --source "$META" --token postmaster=opened >/dev/null 2>&1 \
       || { rollback_root_tab "$roottab"; return 1; }
-    herdr pane report-metadata "$rootpane" --source "$META" --title "$name" --token postmaster=launch >/dev/null 2>&1 \
+    herdr pane report-metadata "$rootpane" --source "$META" --title "$name" --token postmaster=root --token state=done >/dev/null 2>&1 \
       || { rollback_root_tab "$roottab"; return 1; }
     out=$(herdr tab create --workspace "$runspace" --cwd "$cwd" --label "$name" --no-focus) \
       || { rollback_root_tab "$roottab"; return 1; }
@@ -427,7 +636,12 @@ print("\t".join([d.get("source", {}).get("source_workspace_id") or "-",
     || { rollback_launch_tab "$tab"; return 1; }
   # A placement the record refuses still shuts: its tab is tagged, so close
   # vouches for the space without the record. A control pins it.
-  herdr_record_placement "$runspace" "$tab" "$pane" "$cwd" || return 1
+  herdr_record_placement "$runspace" "$tab" "$pane" "$cwd" "$dispatch" || {
+    # Placement will fall back to the background; this host-owned tab never
+    # ran the launch, so label it settled for a later safe close.
+    herdr pane report-metadata "$pane" --source "$META" --token postmaster=launch --token state=done >/dev/null 2>&1 || :
+    return 1
+  }
   printf '%s %s %s\n' "$runspace" "$tab" "$pane"
 }
 
@@ -634,7 +848,7 @@ reg_live() {  # reg_live <dir>: "<group>\t<name>" per launch still running that 
 # `repo`, the pane goes in the repository's own space whatever worktree <cwd> is. Prints
 # "<space> <tab> <pane>".
 herdr_place() {
-  local name=$1 cwd=$2 where=${3:-worktree} top list src="" root="" rname wpath wkind wopen out space tab pane="" opened=0
+  local name=$1 cwd=$2 where=${3:-worktree} dispatch=${4:-} top list src="" root="" rname wpath wkind wopen out space tab pane="" opened=0
   top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || top=""
   if [ -n "$top" ] && list=$(herdr worktree list --cwd "$cwd" 2>/dev/null); then
     IFS=$'\t' read -r src root rname wpath wkind wopen < <(printf '%s' "$list" | python3 -c '
@@ -688,6 +902,12 @@ print("\t".join([s.get("source_workspace_id") or "-", s.get("repo_root") or "-",
   [ "$opened" = 1 ] && herdr workspace report-metadata "$space" --source "$META" --token postmaster=opened >/dev/null 2>&1
   herdr tab rename "$tab" "$name" >/dev/null 2>&1
   herdr pane report-metadata "$pane" --source "$META" --title "$name" --token postmaster=launch >/dev/null 2>&1
+  herdr_record_placement "$space" "$tab" "$pane" "$cwd" "$dispatch" || {
+    # The pane was tagged but never ran the launch. Keep the ownership token
+    # alongside its settled state so a later close can safely remove it.
+    herdr pane report-metadata "$pane" --source "$META" --token postmaster=launch --token state=done >/dev/null 2>&1 || :
+    return 1
+  }
   printf '%s %s %s\n' "$space" "$tab" "$pane"
 }
 
@@ -982,7 +1202,7 @@ launch_failed() {  # launch_failed <reason>: what a backgrounded launch left whe
 
 run_cmd() {
   local name=${1:-} cwd=${2:-} under="" out="" err="" marker="" pidfile="" append=0 bad=""
-  local role=default dispatch="" memory tasks cap_mode=uncapped systemd_run="" systemctl="" setsid="" unit="" caps="" paths=""
+  local role=default dispatch="" memory tasks cap_mode=uncapped systemd_run="" systemctl="" setsid="" unit="" caps="" paths="" host
   [ $# -ge 2 ] && shift 2 || set --
   while [ $# -gt 0 ]; do
     case $1 in
@@ -1005,13 +1225,28 @@ run_cmd() {
     shift
   done
   abs() { case $1 in ""|/*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac; }
-  out=$(abs "$out"); err=$(abs "$err"); marker=$(abs "$marker"); pidfile=$(abs "$pidfile"); dispatch=$(abs "$dispatch")
+  out=$(abs "$out"); err=$(abs "$err"); marker=$(abs "$marker"); pidfile=$(abs "$pidfile"); dispatch=$(abs "$dispatch"); under=$(abs "$under")
   FAIL_ERR=$err FAIL_MARKER=$marker
   [ -z "$bad" ] || launch_failed "$bad"
   [ -n "$name" ] && [ -n "$cwd" ] || launch_failed "usage: host.sh run <name> <cwd> [options] -- <command...>"
   [ $# -gt 0 ] || launch_failed "run needs a command after --"
   [ -d "$cwd" ] || launch_failed "no such directory: $cwd"
+  cwd=$(CDPATH= cd -P -- "$cwd" && pwd -P) || launch_failed "cannot resolve launch directory"
+  name=$(clean "$name")
   case $role in default|lane|coachman|reviewer) ;; *) launch_failed "unknown launch role: $role" ;; esac
+  case $role in lane|coachman|reviewer)
+    [ -n "$under" ] || launch_failed "a $role launch needs --under <dispatch> to name its run space" ;;
+  esac
+  [ -z "$dispatch" ] || [ -n "$under" ] || launch_failed "--run needs --under <dispatch> to name its run space"
+  if [ -n "$under" ]; then
+    [ -d "$under" ] || launch_failed "no run space directory: $under"
+    under=$(CDPATH= cd -P -- "$under" && pwd -P) || launch_failed "cannot resolve run space directory"
+    local under_info under_path
+    under_info=$(dispatch_info "$under") || launch_failed "cannot read the run space from $under/brief.md"
+    under_path=$(printf '%s' "$under_info" | json 'd.get("synthesis_worktree")')
+    [ -n "$under_path" ] && [ -d "$under_path" ] || launch_failed "the run at $under has no existing synthesis worktree to name its space"
+  fi
+  [ -z "$dispatch" ] || [ ! -d "$dispatch" ] || dispatch=$(CDPATH= cd -P -- "$dispatch" && pwd -P)
   caps=$(launch_limits "$role" "$dispatch" "${POSTMASTER_CONFIG:-$HOME/.postmaster/config.toml}" 2>&1) \
     || launch_failed "could not resolve launch limits: ${caps#host: }"
   IFS=$'\t' read -r memory tasks <<< "$caps"
@@ -1024,25 +1259,29 @@ run_cmd() {
   [ "$cap_mode" != systemd ] || unit="postmaster-host-$$-$RANDOM-$RANDOM.scope"
   local claim_wait
   claim_wait=$(count "${POSTMASTER_HOST_CLAIM_WAIT:-20}" POSTMASTER_HOST_CLAIM_WAIT) || launch_failed "no launch: POSTMASTER_HOST_CLAIM_WAIT"
-  cwd=$(CDPATH= cd -P -- "$cwd" && pwd -P); name=$(clean "$name")
+  host=$(detect)
+  if [ -n "$marker" ] && [ -e "$marker" ] && [ -n "$under" ]; then
+    finish_prior_launch "$host" "$cwd" "$under" \
+      || launch_failed "could not settle the previous launch before reusing its marker"
+  fi
   [ -n "$pidfile" ] && rm -f -- "$pidfile"          # never an earlier launch's pid
   [ -n "$marker" ] && rm -f -- "$marker"            # or its marker
 
-  local spec host where="" rpid=""
+  local spec where="" rpid=""
   spec=$(mktemp -d "${TMPDIR:-/tmp}/postmaster-host.XXXXXX") || launch_failed "cannot make a spec directory"
   write_spec "$spec" "$name" "$cwd" "$out" "$err" "$marker" "$pidfile" "$append" \
     "$role" "$memory" "$tasks" "$cap_mode" "$systemd_run" "$systemctl" "$setsid" "$unit" "$@"
-  host=$(detect)
   case $host in
     herdr)
       local placed space tab pane
       if [ -n "$under" ]; then
         placed=$(herdr_run_place "$name" "$cwd" "$under")
       else
-        placed=$(herdr_place "$name" "$cwd")
+        placed=$(herdr_place "$name" "$cwd" worktree "$dispatch")
       fi
       if [ -n "$placed" ]; then
         read -r space tab pane <<< "$placed"
+        start_finish_watcher herdr "$space" "$tab" "$pane" "$cwd" "$marker"
         mkfifo "$spec/env" && start_env_writer "$spec/env"
         if herdr pane run "$pane" " cd -- $(q "$cwd") && $(q "$SELF") _run herdr $(q "$spec")" >/dev/null 2>&1; then
           where="host=herdr space=$space tab=$tab pane=$pane"
@@ -1050,7 +1289,7 @@ run_cmd() {
       fi
       [ -n "$where" ] || warn "Herdr could not place '$name'; running it in the background" ;;
     tmux)
-      local session win
+      local session win pane
       session=$(tmux_session "$cwd")
       mkfifo "$spec/env" && start_env_writer "$spec/env"
       if tmux has-session -t "=$session" 2>/dev/null; then
@@ -1062,7 +1301,16 @@ run_cmd() {
       fi
       if [ -n "$win" ]; then
         tmux set-option -w -t "$win" @postmaster_cwd "$cwd" >/dev/null 2>&1
+        [ -z "$under" ] || tmux set-option -w -t "$win" @postmaster_run "$under" >/dev/null 2>&1
         tmux set-option -w -t "$win" automatic-rename off >/dev/null 2>&1
+        pane=$(tmux display-message -p -t "$win" '#{pane_id}' 2>/dev/null)
+        if [ -n "$pane" ] && tmux set-option -p -t "$pane" @postmaster_owned yes >/dev/null 2>&1; then
+          tmux set-option -w -t "$win" @postmaster_pane "$pane" >/dev/null 2>&1 \
+            || warn "could not record tmux pane $pane in window $win; close it manually if needed"
+          start_finish_watcher tmux "" "$win" "$pane" "$cwd" "$marker"
+        else
+          pane=""
+        fi
         where="host=tmux session=$session window=$win"
       else
         warn "tmux could not open a window for '$name'; running it in the background"
@@ -1132,21 +1380,37 @@ runner() {
   fi
   drop_spec "$spec"
 
-  # The launch's environment is its caller's, except for identity: which pane it is in comes
-  # from where it actually runs, so nothing it reports lands in its caller's pane.
-  local drop="POSTMASTER_LAUNCH_NAME POSTMASTER_EVENT_STREAM $PANE_IDS" keep=""
+  # Strip caller identity at the one boundary every run launch crosses. The Claude list is
+  # intentionally exact plus session-identity families: other CLAUDE_CODE_* names configure
+  # the harness and must reach it. Add a new identity name or family here and to the controls.
+  # Herdr values are all caller identity; a Herdr pane's own six are re-added below from this
+  # runner's environment, never from the caller FIFO. POSTMASTER_LAUNCH_ROLE is dropped with
+  # them so an inherited role cannot replace the run's explicit host role, re-added below.
+  local claude_identity="CLAUDECODE CLAUDE_PID CLAUDE_CODE_SESSION_ID \
+    CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH \
+    CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN \
+    CLAUDE_CODE_TOOL_USE_ID"
+  local drop="POSTMASTER_LAUNCH_NAME POSTMASTER_LAUNCH_ROLE POSTMASTER_EVENT_STREAM $PANE_IDS" keep=""
   case $mode in
-    herdr) drop="$drop HERDR_ENV HERDR_SOCKET_PATH HERDR_BIN_PATH"; keep="HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID HERDR_ENV HERDR_SOCKET_PATH HERDR_BIN_PATH" ;;
+    herdr) keep="HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID HERDR_ENV HERDR_SOCKET_PATH HERDR_BIN_PATH" ;;
     tmux)  drop="$drop TMUX"; keep="TMUX TMUX_PANE" ;;
   esac
   local childenv=()
   for kv in ${envs[@]+"${envs[@]}"}; do
     k=${kv%%=*}
-    case " $drop " in *" $k "*) continue ;; esac
+    case "$k" in
+      CLAUDE_CODE_SESSION_*|CLAUDE_CODE_MESSAGING_*|CLAUDE_CODE_CHILD_*|HERDR_*) continue ;;
+    esac
+    case " $claude_identity $drop " in *" $k "*) continue ;; esac
     childenv+=("$kv")
   done
   for k in $keep; do [ -n "${!k+x}" ] && childenv+=("$k=${!k}"); done
   childenv+=("POSTMASTER_LAUNCH_NAME=$name")
+  if [ "${argv[0]##*/}" = launch.sh ]; then
+    case $role in
+      lane|coachman|reviewer) childenv+=("POSTMASTER_LAUNCH_ROLE=$role") ;;
+    esac
+  fi
   [ -z "$out" ] || childenv+=("POSTMASTER_EVENT_STREAM=$out")
 
   # Its streams are emptied once and then only ever appended to, so a second writer on the same
@@ -1449,15 +1713,36 @@ close_cmd() {  # close <worktree>: refuse while a launch runs there; then its ta
   [ $rc -eq 0 ] && echo "closed what host.sh opened for $path"
   return $rc
 }
+tmux_close_window() {  # tmux_close_window <window> <recorded-pane>: close a host window, legacy-safe
+  local w=$1 pane=$2 panes n
+  if [ -n "$pane" ]; then tmux_finish_placement "$w" "$pane"; return $?; fi
+  # A window from before panes were recorded: a lone pane is the host's own
+  # shell, while more panes may hold the user's and stay open.
+  panes=$(tmux list-panes -t "$w" -F '#{pane_id}' 2>/dev/null) || {
+    if tmux_window_gone "$w" 2>/dev/null; then return 0; fi
+    warn "could not inspect tmux window $w; left it open"; return 2
+  }
+  n=$(printf '%s\n' "$panes" | grep -c .)
+  if [ "$n" -eq 1 ]; then
+    tmux kill-window -t "$w" 2>/dev/null || { warn "tmux could not close legacy window $w; left it open"; return 2; }
+  else
+    warn "tmux window $w has no recorded launch pane and holds $n panes; left it open"; return 2
+  fi
+}
 close_tmux() {
-  local session w cwd n=0
+  local session w cwd pane n=0 rc=0 rows
   session=$(tmux_session "$1")
   tmux has-session -t "=$session" 2>/dev/null || return 0
-  while IFS=$'\t' read -r w cwd; do
-    [ -n "$w" ] && [ "$cwd" = "$1" ] && tmux kill-window -t "$w" 2>/dev/null && n=$((n + 1))
-  done < <(tmux list-windows -t "=$session" -F '#{window_id}	#{@postmaster_cwd}' 2>/dev/null)
-  [ $n -gt 0 ] && echo "host=tmux: closed $n window(s)"
-  return 0
+  # A list that fails after its session answered is a genuine failure, never
+  # an empty session: fail closed, and a concurrent settle heals on retry.
+  rows=$(tmux list-windows -t "=$session" -F '#{window_id}	#{@postmaster_cwd}	#{@postmaster_pane}' 2>/dev/null) \
+    || { warn "could not inspect tmux session $session; left it open"; return 2; }
+  while IFS=$'\t' read -r w cwd pane; do
+    [ -n "$w" ] && [ "$cwd" = "$1" ] || continue
+    if tmux_close_window "$w" "$pane"; then n=$((n + 1)); else rc=$?; fi
+  done <<< "$rows"
+  [ $n -gt 0 ] && echo "host=tmux: closed $n recorded launch pane(s)"
+  return $rc
 }
 herdr_close_placements() {  # herdr_close_placements <worktree>: close mapped launch tabs for this checkout
   local target file placement space tab pane panes ownership
@@ -1478,7 +1763,10 @@ PY
     [ -n "$placement" ] || continue
     IFS=$'\t' read -r space tab pane <<< "$placement"
     [ -n "$space" ] && [ -n "$tab" ] && [ -n "$pane" ] || { warn "invalid launch placement in $file; left it open"; return 2; }
-    panes=$(herdr pane list --workspace "$space" 2>/dev/null) || { warn "could not inspect launch tab $tab in space $space; left it open"; return 2; }
+    panes=$(herdr pane list --workspace "$space" 2>/dev/null) || {
+      if herdr_space_gone "$space" 2>/dev/null; then rm -f -- "$file"; continue; fi
+      warn "could not inspect launch tab $tab in space $space; left it open"; return 2
+    }
     ownership=$(printf '%s' "$panes" | python3 -c '
 import json, os, re, sys
 try:
@@ -1511,7 +1799,10 @@ else:
       # is a string of the shape Herdr sends (w…:t…), and anything else is
       # unattributable. Where the recorded pane itself carries no attributable
       # tab, only that pane closes, never the tab, whose sharers are unknown.
-      split) warn "launch tab $tab in space $space holds panes host.sh did not open; left it open"; return 2 ;;
+      split)
+        herdr pane close "$pane" >/dev/null 2>&1 || { warn "herdr could not close launch pane $pane; left it open"; return 2; }
+        rm -f -- "$file"
+        warn "launch tab $tab in space $space holds panes host.sh did not open; left it open"; return 2 ;;
       mixed) warn "launch tab $tab in space $space holds panes host.sh cannot place; left it open"; return 2 ;;
       idless)
         herdr pane close "$pane" >/dev/null 2>&1 || { warn "herdr could not close launch pane $pane; left it open"; return 2; }
@@ -1541,35 +1832,295 @@ PY
     [ "$workspace" = "$1" ] && rm -f -- "$file"
   done
 }
+herdr_placement_cwd() {  # herdr_placement_cwd <workspace> <pane>: exact checkout recorded for one launch pane
+  python3 - "$STATE/placements" "$1" "$2" <<'PY'
+import glob, json, os, sys
+for path in glob.glob(os.path.join(sys.argv[1], "*.json")):
+    try: item = json.load(open(path, encoding="utf-8"))
+    except (OSError, ValueError): continue
+    if item.get("host", "herdr") == "herdr" and item.get("workspace") == sys.argv[2] and item.get("pane") == sys.argv[3]:
+        print(item.get("cwd", "")); break
+PY
+}
 close_herdr() {
-  local list space kind info actual_path verdict
+  local list space kind info actual_path verdict candidate candidates panes action pane pane_path live i=0 patience
   herdr_close_placements "$1" || return $?
-  list=$(herdr worktree list --cwd "$1" 2>/dev/null) || return 0
-  read -r space kind < <(printf '%s' "$list" | python3 -c '
+  list=$(herdr worktree list --cwd "$1" 2>/dev/null) || list=""
+  if [ -n "$list" ]; then
+    read -r space kind < <(printf '%s' "$list" | python3 -c '
 import json, os, sys
 d = json.load(sys.stdin)["result"]
 p = os.path.realpath(sys.argv[1])
 w = next((w for w in d.get("worktrees") or [] if os.path.realpath(w["path"]) == p), {})
 print(w.get("open_workspace_id") or "-", "linked" if w.get("is_linked_worktree") else "main")' "$1")
+  else
+    space=- kind=main
+  fi
+  if [ "$space" = - ]; then
+    candidates=$(herdr workspace list 2>/dev/null | python3 -c '
+import json, sys
+try:
+    for w in json.load(sys.stdin)["result"].get("workspaces", []):
+        if isinstance(w.get("workspace_id"), str): print(w["workspace_id"])
+except (ValueError, KeyError, TypeError):
+    pass')
+    while IFS= read -r candidate; do
+      [ -n "$candidate" ] || continue
+      info=$(herdr workspace get "$candidate" 2>/dev/null) || {
+        herdr_space_gone "$candidate" 2>/dev/null && continue
+        warn "could not inspect space $candidate; left it open"; return 2
+      }
+      actual_path=$(printf '%s' "$info" | json 'd["result"]["workspace"].get("worktree",{}).get("checkout_path") or d["result"]["workspace"].get("worktree",{}).get("path")' 2>/dev/null)
+      [ -n "$actual_path" ] && [ "$(CDPATH= cd -P -- "$actual_path" 2>/dev/null && pwd -P)" = "$1" ] || continue
+      space=$candidate
+      break
+    done <<< "$candidates"
+  fi
   [ "$space" = - ] && return 0
   [ "$kind" = main ] && ! clone_origin "$1" >/dev/null \
     && { warn "$1 is a repository's own checkout; its space is never closed"; return 2; }
-  info=$(herdr workspace get "$space" 2>/dev/null) || { warn "could not inspect space $space; left it open"; return 2; }
+  [ -n "${info:-}" ] || info=$(herdr workspace get "$space" 2>/dev/null) || { warn "could not inspect space $space; left it open"; return 2; }
   actual_path=$(printf '%s' "$info" | json 'd["result"]["workspace"].get("worktree",{}).get("checkout_path") or d["result"]["workspace"].get("worktree",{}).get("path")')
   [ -n "$actual_path" ] && [ "$(CDPATH= cd -P -- "$actual_path" 2>/dev/null && pwd -P)" = "$1" ] || return 0
-  verdict=$(python3 -c '
+  patience=$(count "${POSTMASTER_HOST_CLOSE_WAIT:-15}" POSTMASTER_HOST_CLOSE_WAIT) || return 1
+  while :; do
+    panes=$(herdr pane list --workspace "$space" 2>/dev/null) || { warn "could not inspect panes in space $space; left it open"; return 2; }
+    verdict=$(python3 -c '
 import json, sys
 ws = json.loads(sys.argv[1])["result"]["workspace"]
 if (ws.get("tokens") or {}).get("postmaster") != "opened":
-    print("space %s was not opened by host.sh" % ws["workspace_id"]); sys.exit(0)
+    print("refuse\tspace %s was not opened by host.sh" % ws["workspace_id"]); sys.exit(0)
 for p in json.loads(sys.argv[2])["result"]["panes"]:
-    if (p.get("tokens") or {}).get("postmaster") != "launch":
-        print("pane %s in space %s was not opened by host.sh" % (p["pane_id"], ws["workspace_id"])); sys.exit(0)
-print("ok")' "$info" "$(herdr pane list --workspace "$space" 2>/dev/null)" 2>/dev/null)
-  [ "$verdict" = ok ] || { warn "${verdict:-could not read space $space}; left open"; return 2; }
-  herdr workspace close "$space" >/dev/null || die "herdr could not close space $space"
+    tokens = p.get("tokens") or {}
+    if tokens.get("postmaster") == "root" and tokens.get("state") == "done": continue
+    if tokens.get("postmaster") == "launch":
+        if tokens.get("state") == "done": continue
+        print("check\t" + str(p.get("pane_id", ""))); sys.exit(0)
+    print("refuse\tpane %s in space %s was not opened by host.sh" % (p.get("pane_id"), ws["workspace_id"])); sys.exit(0)
+print("ok")' "$info" "$panes" 2>/dev/null)
+    IFS=$'\t' read -r action pane <<< "$verdict"
+    case $action in
+      ok) break ;;
+      check)
+        pane_path=$(herdr_placement_cwd "$space" "$pane")
+        [ -n "$pane_path" ] || { warn "launch pane $pane in space $space has no placement record; left it open"; return 2; }
+        live=$(reg_live "$pane_path") || { warn "could not inspect launches in $pane_path; left space $space open"; return 2; }
+        if [ -n "$live" ]; then
+          if [ "$i" -ge "$patience" ]; then warn "launch pane $pane in space $space is still running; left it open"; return 2; fi
+          sleep 1; i=$((i + 1))
+          info=$(herdr workspace get "$space" 2>/dev/null) || { warn "could not inspect space $space; left it open"; return 2; }
+        else
+          herdr pane report-metadata "$pane" --source "$META" --token postmaster=launch --token state=done >/dev/null 2>&1 \
+            || { warn "could not settle completed launch pane $pane in space $space; left it open"; return 2; }
+        fi
+        ;;
+      refuse) warn "${verdict#*$'\t'}; left space $space open"; return 2 ;;
+      *) warn "could not read space $space; left it open"; return 2 ;;
+    esac
+  done
+  herdr workspace close "$space" >/dev/null || { warn "herdr could not close space $space; left it open"; return 2; }
   herdr_forget_space "$space"
   echo "host=herdr: closed space $space"
+}
+
+run_worktree_paths() {  # NUL-separated worktrees made for one dispatch, from its waybill and records
+  local info synthesis
+  # One parser for the waybill: dispatch_info takes the last ## Dispatch
+  # section, so ticket text quoting a waybill cannot redirect teardown.
+  info=$(dispatch_info "$1") || return 1
+  synthesis=$(printf '%s' "$info" | json 'd.get("synthesis_worktree")' 2>/dev/null)
+  [ -n "$synthesis" ] || { echo "host: run waybill has no synthesis worktree" >&2; return 1; }
+  python3 - "$1" "$synthesis" <<'PY'
+import glob, json, os, re, sys
+dispatch = os.path.realpath(sys.argv[1])
+synth = os.path.realpath(sys.argv[2])
+if os.path.basename(os.path.dirname(synth)) != ".worktrees":
+    raise SystemExit("host: synthesis worktree is not under .worktrees")
+repo = os.path.dirname(os.path.dirname(synth))
+def component(value):
+    return isinstance(value, str) and value not in ("", ".", "..") and re.fullmatch(r"[A-Za-z0-9._-]+", value) is not None
+ticket = os.path.basename(dispatch)
+if not component(ticket) or not (os.path.basename(synth) == ticket or os.path.basename(synth).startswith(ticket + "-")):
+    ticket = os.path.basename(synth)
+paths = []
+def add(name):
+    if component(name):
+        p = os.path.realpath(os.path.join(repo, ".worktrees", name))
+        if os.path.dirname(p) == os.path.join(repo, ".worktrees") and p not in paths:
+            paths.append(p)
+names = set()
+lane_files = 0
+lane_parsed = 0
+# A missing lane file is a life stage (nothing launched yet); a present one
+# that does not parse is corruption. When files exist but none parses,
+# the lane set is unknown, and silently treating it as empty would skip
+# workhorse worktrees, so this fails instead.
+if os.path.exists(os.path.join(dispatch, "run.json")):
+    lane_files += 1
+    try:
+        run = json.load(open(os.path.join(dispatch, "run.json"), encoding="utf-8"))
+        config = run.get("config") if isinstance(run, dict) else {}
+        if not isinstance(config, dict): config = {}
+        team = config.get("team") if isinstance(config.get("team"), dict) else {}
+        workhorses = team.get("workhorses", [])
+        if isinstance(workhorses, list): names.update(x for x in workhorses if component(x))
+        lane_parsed += 1
+    except (OSError, ValueError, TypeError):
+        pass
+if os.path.exists(os.path.join(dispatch, "manifest.json")):
+    lane_files += 1
+    try:
+        manifest = json.load(open(os.path.join(dispatch, "manifest.json"), encoding="utf-8"))
+        lanes = manifest.get("lanes") if isinstance(manifest, dict) else {}
+        if not isinstance(lanes, dict): lanes = {}
+        names.update(k for k in lanes if component(k))
+        lane_parsed += 1
+    except (OSError, ValueError, TypeError):
+        pass
+if lane_files and not lane_parsed:
+    raise SystemExit("host: run lane records unreadable")
+for lane in sorted(names): add(ticket + "-" + lane)
+reviewers = set()
+for path in glob.glob(os.path.join(dispatch, "logs", "review-r[0-9]*.json")):
+    try:
+        state = json.load(open(path, encoding="utf-8"))
+        for pair in state.get("reviewers", []):
+            if isinstance(pair, list) and len(pair) == 2 and pair[0] in ("style", "bug", "security") and component(pair[1]):
+                reviewers.add((pair[0], pair[1]))
+    except (OSError, ValueError, TypeError):
+        pass
+try:
+    for line in open(os.path.join(dispatch, "actions.jsonl"), encoding="utf-8"):
+        try: action = json.loads(line)
+        except ValueError: continue
+        if action.get("action") != "review-launch": continue
+        target = action.get("target")
+        detail = str(action.get("detail", ""))
+        lens = re.search(r"\b(style|bug|security)\b", detail)
+        if component(target) and lens: reviewers.add((lens.group(1), target))
+except OSError:
+    pass
+for lens, lane in sorted(reviewers): add(ticket + "-rev-" + lens + "-" + lane)
+if synth not in paths: paths.append(synth)
+for path in paths: sys.stdout.buffer.write(os.fsencode(path) + b"\0")
+PY
+}
+
+run_worktree_paths_file() {  # run_worktree_paths_file <dispatch> <file>: paths, or nothing on failure
+  run_worktree_paths "$1" >"$2" || { rm -f -- "$2"; return 2; }
+}
+stop_run_cmd() {  # stop-run <dispatch>: stop only launches recorded in this run's worktrees
+  local dispatch path rc=0 paths
+  [ -n "${1:-}" ] && [ -d "$1" ] || die "usage: host.sh stop-run <dispatch>"
+  dispatch=$(CDPATH= cd -P -- "$1" && pwd -P)
+  paths=$(mktemp "${TMPDIR:-/tmp}/postmaster-host-paths.XXXXXX") || die "cannot make a paths file"
+  run_worktree_paths_file "$dispatch" "$paths" || { rm -f -- "$paths"; return 2; }
+  while IFS= read -r -d '' path; do
+    [ -d "$path" ] || continue
+    stop_cmd "$path" || rc=$?
+  done <"$paths"
+  rm -f -- "$paths"
+  return $rc
+}
+
+herdr_close_run_placements() {  # close only this run's recorded panes and opened spaces
+  local dispatch file fields space tab pane cwd live rc=0 workspaces ws info panes verdict
+  dispatch=$(CDPATH= cd -P -- "$1" && pwd -P)
+  [ -d "$STATE/placements" ] || return 0
+  workspaces=$(python3 - "$STATE/placements" "$dispatch" <<'PY'
+import glob, json, os, sys
+found = set()
+for path in glob.glob(os.path.join(sys.argv[1], "*.json")):
+    try: item = json.load(open(path, encoding="utf-8"))
+    except (OSError, ValueError): continue
+    if item.get("run") == os.path.realpath(sys.argv[2]) and item.get("workspace"):
+        found.add(item["workspace"])
+print("\n".join(sorted(found)))
+PY
+)
+  for file in "$STATE"/placements/*.json; do
+    [ -f "$file" ] || continue
+    fields=$(python3 - "$file" "$dispatch" <<'PY'
+import json, os, sys
+try: item = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError): raise SystemExit(0)
+if item.get("run") == os.path.realpath(sys.argv[2]):
+    print("\t".join(str(item.get(k, "")) for k in ("workspace", "tab", "pane", "cwd")))
+PY
+)
+    [ -n "$fields" ] || continue
+    IFS=$'\t' read -r space tab pane cwd <<< "$fields"
+    live=$(reg_live "$cwd") || { rc=2; continue; }
+    if [ -n "$live" ]; then
+      warn "a launch is still running in $cwd: $(printf '%s\n' "$live" | cut -f2 | tr '\n' ';' | sed 's/;$//')"
+      rc=2
+      continue
+    fi
+    if ! herdr_finish_placement "$space" "$tab" "$pane"; then
+      if herdr_space_gone "$space" 2>/dev/null; then rm -f -- "$file"; else rc=2; fi
+    fi
+  done
+  while IFS= read -r ws; do
+    [ -n "$ws" ] || continue
+    info=$(herdr workspace get "$ws" 2>/dev/null) || {
+      herdr_space_gone "$ws" 2>/dev/null && continue
+      warn "could not inspect run space $ws; left it open"; rc=2; continue
+    }
+    panes=$(herdr pane list --workspace "$ws" 2>/dev/null) || { rc=2; continue; }
+    verdict=$(python3 -c '
+import json, sys
+ws = json.loads(sys.argv[1])["result"]["workspace"]
+if (ws.get("tokens") or {}).get("postmaster") != "opened":
+    print("space was not opened by host.sh")
+    raise SystemExit(0)
+for p in json.loads(sys.argv[2])["result"]["panes"]:
+    t = p.get("tokens") or {}
+    if t.get("postmaster") not in ("launch", "root"):
+        print("pane %s was not opened by host.sh" % p.get("pane_id")); raise SystemExit(0)
+    if t.get("postmaster") == "launch" and t.get("state") != "done":
+        print("launch pane %s is still running" % p.get("pane_id")); raise SystemExit(0)
+print("ok")' "$info" "$panes" 2>/dev/null)
+    if [ "$verdict" = ok ]; then
+      herdr workspace close "$ws" >/dev/null 2>&1 || { warn "herdr could not close run space $ws"; rc=2; continue; }
+      herdr_forget_space "$ws"
+    else
+      warn "$verdict; left run space $ws open"
+      rc=2
+    fi
+  done <<< "$workspaces"
+  return $rc
+}
+
+tmux_close_run_windows() {  # tmux_close_run_windows <dispatch>: this run's windows, wherever they are
+  local dispatch=$1 w cwd run pane live rc=0 rows
+  dispatch=$(CDPATH= cd -P -- "$dispatch" && pwd -P)
+  if ! rows=$(tmux list-windows -a -F '#{window_id}	#{@postmaster_cwd}	#{@postmaster_run}	#{@postmaster_pane}' 2>/dev/null); then
+    tmux ls >/dev/null 2>&1 || return 0   # no server: nothing to sweep
+    warn "could not sweep tmux windows for run $dispatch; left them open"; return 2
+  fi
+  while IFS=$'\t' read -r w cwd run pane; do
+    [ -n "$w" ] && [ "$run" = "$dispatch" ] || continue
+    [ -n "$cwd" ] || { warn "run window $w has no recorded directory; left it open"; rc=2; continue; }
+    live=$(reg_live "$cwd") || { warn "could not inspect launches in $cwd; left run window $w open"; rc=2; continue; }
+    if [ -n "$live" ]; then warn "a launch is still running in $cwd; left run window $w open"; rc=2; continue; fi
+    tmux_close_window "$w" "$pane" || rc=$?
+  done <<< "$rows"
+  return $rc
+}
+close_run_cmd() {  # close-run <dispatch>: close every worktree space created by this run
+  local dispatch path rc=0 paths
+  [ -n "${1:-}" ] && [ -d "$1" ] || die "usage: host.sh close-run <dispatch>"
+  dispatch=$(CDPATH= cd -P -- "$1" && pwd -P)
+  paths=$(mktemp "${TMPDIR:-/tmp}/postmaster-host-paths.XXXXXX") || die "cannot make a paths file"
+  run_worktree_paths_file "$dispatch" "$paths" || { rm -f -- "$paths"; return 2; }
+  while IFS= read -r -d '' path; do
+    [ -d "$path" ] || continue
+    close_cmd "$path" || rc=$?
+  done <"$paths"
+  rm -f -- "$paths"
+  if herdr_up; then herdr_close_run_placements "$dispatch" || rc=2; fi
+  if has tmux; then tmux_close_run_windows "$dispatch" || rc=2; fi
+  return $rc
 }
 
 # --- interactive sessions -----------------------------------------------------------------
@@ -1820,6 +2371,33 @@ check() { if eval "$2"; then ok "$1"; else fail "$1" "${3:-}"; fi; }   # check <
 marker() {  # marker <file> [<seconds>]: wait for a marker to land
   local i=0; while [ ! -e "$1" ] && [ $i -lt $(( ${2:-30} * 5 )) ]; do sleep 0.2; i=$((i + 1)); done; [ -e "$1" ]
 }
+test_stop_finishers() {  # stop only completion watchers this self-test started
+  [ -f "${tmp:-}/finishers" ] || return 0
+  local pid marker command
+  while IFS=$'\t' read -r pid marker; do
+    case $pid in ''|*[!0-9]*) continue ;; esac
+    [ -n "$marker" ] || continue
+    command=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\000' ' ') || continue
+    case $command in *"$marker"*) kill "$pid" 2>/dev/null || : ;; esac
+  done < "$tmp/finishers"
+  rm -f -- "$tmp/finishers"
+}
+wait_herdr_pane_gone() {
+  local pane=$1 i=0
+  while [ $i -lt 50 ]; do
+    if python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); sys.exit(0 if sys.argv[2] not in s.get("panes", {}) else 1)' "$tmp/stub/herdr.json" "$pane" 2>/dev/null; then return 0; fi
+    sleep 0.1; i=$((i + 1))
+  done
+  return 1
+}
+wait_tmux_pane_gone() {
+  local pane=$1 i=0
+  while [ $i -lt 50 ]; do
+    if python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); sys.exit(0 if not any(sys.argv[2] in w.get("panes", {}) for w in s.get("windows", {}).values()) else 1)' "$tmp/stub/tmux.json" "$pane" 2>/dev/null; then return 0; fi
+    sleep 0.1; i=$((i + 1))
+  done
+  return 1
+}
 wait_file() {  # wait_file <file> [<seconds>]: wait until a file holds something (its pid, say)
   local i=0; while [ ! -s "$1" ] && [ $i -lt $(( ${2:-60} * 5 )) ]; do sleep 0.2; i=$((i + 1)); done; [ -s "$1" ]
 }
@@ -1843,7 +2421,8 @@ self_test() {
   # pane or window runs what it is given with only a server's environment, never the caller's,
   # so the environment a launch sees has to have come through host.sh.
   test_setup
-  trap 'rm -r -- "$tmp" </dev/null 2>/dev/null' EXIT
+  finish_delay=3600
+  trap 'test_stop_finishers; rm -r -- "$tmp" </dev/null 2>/dev/null' EXIT
   echo "launch labels and run identity"
   check "the run level carries the ticket number and title" \
     '[[ "$RUN_NAME" == "#1, Stop"* && "$RUN_NAME" == *"breaking"* ]]' "$RUN_NAME"
@@ -1991,8 +2570,11 @@ elif cmd == "pane report-metadata":
         os.remove(failn); sys.exit(1)
     st["panes"][a[2]]["tokens"] = tokens(); save()
 elif cmd == "workspace get":
+    if flag("wsget.succeed-once"): os.remove(os.path.join(S, "wsget.succeed-once"))
+    elif flag("wsget.fail"): sys.exit(1)
     w = st["spaces"][a[2]]; out({"workspace": {"workspace_id": a[2], "label": w["label"], "tokens": w["tokens"], "worktree": {"path": w.get("path"), "checkout_path": w.get("path")}}})
 elif cmd == "pane list":
+    if flag("panelist.fail"): sys.exit(1)
     out({"panes": [{"pane_id": p, "tab_id": None if flag("panes.notabids") else st["panes"][p].get("tab"), "tokens": st["panes"][p]["tokens"]} for p in st["spaces"][opt("--workspace")]["panes"]]})
 elif cmd == "tab list":
     ws = opt("--workspace"); out({"tabs": [{"tab_id": t, "label": st["tabs"][t]["label"], "cwd": st["tabs"][t]["cwd"]} for t in st["spaces"][ws]["tabs"]]})
@@ -2048,8 +2630,10 @@ elif cmd == "pane run":
     if flag("pane.dead"): sys.exit(0)                     # accepted, never run
     # The fired file is the event the late-pane control waits for.
     late = ("sleep 5; touch %s; " % os.path.join(S, "pane.late.fired")) if flag("pane.late") else ""
-    env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/"), "STUB": S, "HERDR_ENV": "1",
-           "HERDR_PANE_ID": pane, "HERDR_TAB_ID": "tab-of-" + pane, "HERDR_WORKSPACE_ID": ws}
+    env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/"), "STUB": S,
+           "HERDR_ENV": "pane-env", "HERDR_SOCKET_PATH": "/stub/herdr.sock",
+           "HERDR_BIN_PATH": "/stub/herdr-bin", "HERDR_PANE_ID": pane,
+           "HERDR_TAB_ID": "tab-of-" + pane, "HERDR_WORKSPACE_ID": ws}
     proc = subprocess.Popen(["bash", "-c", late + text], env=env, stdin=subprocess.DEVNULL, start_new_session=True,
                             stdout=open(os.path.join(S, "pane-%s.out" % pane), "ab"), stderr=subprocess.STDOUT)
     open(os.path.join(S, "pane-%s.pid" % pane), "w").write(str(proc.pid))
@@ -2062,7 +2646,7 @@ elif cmd == "agent start":
     if flag("agent.notready"): error("agent_not_ready")
 elif cmd == "agent read": print("stub screen of " + a[2])
 EOF
-  cat > "$tmp/bin/tmux" <<'EOF'
+cat > "$tmp/bin/tmux" <<'EOF'
 #!/usr/bin/env python3
 import fcntl, json, os, subprocess, sys
 S = os.environ["STUB"]; a = sys.argv[1:]
@@ -2071,13 +2655,15 @@ lock = open(os.path.join(S, "tmux.lock"), "w"); fcntl.flock(lock, fcntl.LOCK_EX)
 path = os.path.join(S, "tmux.json")
 st = json.load(open(path)) if os.path.exists(path) else {"n": 0, "sessions": [], "windows": {}}
 def save(): json.dump(st, open(path, "w"))
+def flag(name): return os.path.exists(os.path.join(S, name))
 def opt(name): return a[a.index(name) + 1] if name in a else None
 def launch(session):
     st["n"] += 1; win = "@%d" % st["n"]
-    st["windows"][win] = {"session": session, "name": opt("-n"), "opts": {}}
+    pane = "%%%d" % st["n"]
+    st["windows"][win] = {"session": session, "name": opt("-n"), "opts": {}, "panes": {pane: {"opts": {}}}}
     save(); fcntl.flock(lock, fcntl.LOCK_UN)
     env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/"), "STUB": S,
-           "TMUX": "/stub/tmux,1,0", "TMUX_PANE": "%%%d" % st["n"]}
+           "TMUX": "/stub/tmux,1,0", "TMUX_PANE": pane}
     env.update(a[i + 1].split("=", 1) for i in range(len(a) - 1) if a[i] == "-e")
     open(os.path.join(S, "win-%d.env" % st["n"]), "w").write("\n".join("%s=%s" % kv for kv in sorted(env.items())))
     try:
@@ -2091,12 +2677,52 @@ if a[0] == "has-session": sys.exit(0 if opt("-t").lstrip("=") in st["sessions"] 
 elif a[0] == "new-session": st["sessions"].append(opt("-s")); launch(opt("-s"))
 elif a[0] == "new-window": launch(opt("-t").lstrip("=").rstrip(":"))
 elif a[0] == "set-option":
-    t = opt("-t"); w = t if t in st["windows"] else "@" + t.lstrip("%")
-    if w in st["windows"]: st["windows"][w]["opts"][a[-2]] = a[-1]; save()
+    t = opt("-t")
+    if "-p" in a:
+        for w in st["windows"].values():
+            if t in w["panes"]: w["panes"][t]["opts"][a[-2]] = a[-1]; save(); break
+    else:
+        w = t if t in st["windows"] else "@" + t.lstrip("%")
+        if w in st["windows"]: st["windows"][w]["opts"][a[-2]] = a[-1]; save()
+elif a[0] == "display-message":
+    t = opt("-t"); w = st["windows"].get(t, {})
+    if w.get("panes"): print(next(iter(w["panes"])))
+elif a[0] == "ls":
+    sys.exit(1 if flag("tmux.dead") else 0)
+elif a[0] == "list-panes":
+    if flag("panes.fail"): sys.exit(1)
+    t = opt("-t")
+    if t not in st["windows"]: sys.exit(1)
+    w = st["windows"][t]
+    for pane, v in w.get("panes", {}).items():
+        print("%s\t%s" % (pane, v["opts"].get("@postmaster_owned", "")))
 elif a[0] == "list-windows":
+    if flag("tmux.dead") or flag("windows.fail"): sys.exit(1)
     for w, v in st["windows"].items():
-        if "-a" in a: print("%s\t%s" % (w, v["name"]) if "#{window_id}" in fmt else v["name"])
-        elif v["session"] == opt("-t").lstrip("="): print("%s\t%s" % (w, v["opts"].get("@postmaster_cwd", "")))
+        if "-a" in a:
+            if "#{@postmaster_run}" in fmt:
+                print("%s\t%s\t%s\t%s" % (w, v["opts"].get("@postmaster_cwd", ""), v["opts"].get("@postmaster_run", ""), v["opts"].get("@postmaster_pane", "")))
+            else: print("%s\t%s" % (w, v["name"]) if "#{window_id}" in fmt else v["name"])
+        elif v["session"] == opt("-t").lstrip("="):
+            if "#{@postmaster_run}" in fmt:
+                print("%s\t%s\t%s\t%s" % (w, v["opts"].get("@postmaster_cwd", ""), v["opts"].get("@postmaster_run", ""), v["opts"].get("@postmaster_pane", "")))
+            elif "#{@postmaster_pane}" in fmt:
+                print("%s\t%s\t%s" % (w, v["opts"].get("@postmaster_cwd", ""), v["opts"].get("@postmaster_pane", "")))
+            else: print("%s\t%s" % (w, v["opts"].get("@postmaster_cwd", "")))
+elif a[0] == "kill-pane":
+    target = opt("-t")
+    for w, v in list(st["windows"].items()):
+        v["panes"].pop(target, None)
+        if not v["panes"]:
+            del st["windows"][w]
+            if not any(x["session"] == v["session"] for x in st["windows"].values()):
+                st["sessions"] = [s for s in st["sessions"] if s != v["session"]]
+        save()
+elif a[0] == "kill-window":
+    target = opt("-t"); v = st["windows"].pop(target, None)
+    if v and not any(x["session"] == v["session"] for x in st["windows"].values()):
+        st["sessions"] = [s for s in st["sessions"] if s != v["session"]]
+    save()
 elif a[0] == "capture-pane": print("stub screen")
 EOF
   chmod +x "$tmp/bin/herdr" "$tmp/bin/tmux"
@@ -2111,7 +2737,8 @@ EOF
     local p=$1 vars=(); shift
     while [ "$1" != -- ]; do vars+=("$1"); shift; done; shift
     env -i HOME="$HOME" PATH="$p" STUB="$tmp/stub" TMPDIR="$tmp" POSTMASTER_CONFIG="$tmp/live-limits.toml" POSTMASTER_HOST_STATE="$tmp/state" \
-      POSTMASTER_HOST_FIXTURE="$tmp" POSTMASTER_HOST_CLAIM_WAIT=3 POSTMASTER_HOST_CLOSE_WAIT=1 \
+      POSTMASTER_HOST_FIXTURE="$tmp" POSTMASTER_HOST_CLAIM_WAIT=3 POSTMASTER_HOST_CLOSE_WAIT=3 \
+      POSTMASTER_HOST_FINISH_DELAY="${finish_delay:-3600}" \
       ${vars[@]+"${vars[@]}"} "$SELF" "$@"
   }
   cat > "$tmp/live-limits.toml" <<'EOF'
@@ -2120,9 +2747,24 @@ memory_max = "8G"
 tasks_max = 512
 EOF
   mkdir -p "$tmp/cap-dispatch"
+  cat > "$tmp/cap-dispatch/brief.md" <<EOF
+## Dispatch
+name: T-1
+synthesis worktree: $repo/.worktrees/T-1-luna
+EOF
   cat > "$tmp/cap-dispatch/run.json" <<'EOF'
 {"config":{"limits":{"memory_max":"8G","tasks_max":512,"lane":{"memory_max":"64M","tasks_max":16},"coachman":{"memory_max":"128M","tasks_max":32},"reviewer":{"tasks_max":24}}}}
 EOF
+  cat > "$tmp/caller/launch.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'role=%s\n' "${POSTMASTER_LAUNCH_ROLE:-unset}"
+EOF
+  chmod +x "$tmp/caller/launch.sh"
+  (cd "$tmp/caller" && hs "$SYS" POSTMASTER_LAUNCH_ROLE=spoof -- run "$NAME" "$repo" \
+    --under "$tmp/cap-dispatch" --role reviewer --run "$tmp/cap-dispatch" --out ../logs/role.out --marker ../logs/role.done -- ./launch.sh >/dev/null)
+  marker "$tmp/logs/role.done"
+  check "the run's explicit host role reaches launch.sh and an inherited role cannot replace it" \
+    '[ "$(cat "$tmp/logs/role.out")" = role=reviewer ]' "$(cat "$tmp/logs/role.out")"
   cap_launch() {  # cap_launch <host-impl> <PATH> <prefix> -- <command...>
     local impl=$1 path=$2 prefix=$3; shift 3
     local role_args=()
@@ -2136,7 +2778,7 @@ EOF
       BRUSH_FILE="$tmp/brush-data.bin" POSTMASTER_CGROUP_ROOT="${CAPCGROOT:-}" \
       "$impl" run "$NAME" "$repo/.worktrees/T-1-luna" \
       --out "$tmp/logs/$prefix.out" --err "$tmp/logs/$prefix.err" --marker "$tmp/logs/$prefix.done" \
-      --pidfile "$tmp/logs/$prefix.pid" "${role_args[@]}" -- "$@"
+      --pidfile "$tmp/logs/$prefix.pid" --under "$tmp/cap-dispatch" "${role_args[@]}" -- "$@"
   }
   cat > "$tmp/caller/healthy.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -2283,10 +2925,10 @@ EOF
   chmod +x "$tmp/caller/healthy.sh" "$tmp/caller/fork-cap.py" "$tmp/caller/fork-exit.py" "$tmp/caller/memory-cap.py" "$tmp/caller/brush-cache.py" \
     "$tmp/caller/brush-steady.py" "$tmp/caller/watcher-cpu.py"
   head -c 134217728 /dev/zero > "$tmp/brush-data.bin"
-  reset() { rm -f -- "$tmp"/stub/*; }
+  reset() { test_stop_finishers; rm -f -- "$tmp"/stub/*; }
   calls() { cat "$tmp/stub/$1.calls" 2>/dev/null; }
   T=$'\t'
-  local got got2 rc a b c space pane live panepid o1 o2 close_result close_rc
+  local got got2 rc a b c space pane live panepid o1 o2 close_result close_rc resume_tab resume_pane resume_window resume_old_space resume_old_window review_pane close_dispatch f2win f2bwin f2bpane f4space f4tab f4pane backslash_t i split_pane g_tab g_win h6file h7file hc3before hc3file
 
   echo "detect"
   check "a Herdr server that answers is the host" '[ "$(hs "$STUBS" -- detect)" = herdr ]'
@@ -2348,6 +2990,13 @@ EOF
     '[ $rc -eq 1 ] && [ -e "$tmp/logs/n8.done" ] && ! grep -q "controls" <<<"$got"' "$got"
   got=$(hs "$STUBS" -- wait postmaster-x 10m 2>&1); rc=$?
   check "the same for wait" '[ $rc -eq 1 ] && ! grep -q "controls" <<<"$got"' "$got"
+
+  echo "a run launch without a named run space is refused"
+  reset
+  got=$(hs "$STUBS" -- run "$SECURITY_LABEL" "$clone" --role reviewer --run "$tmp/run-1" \
+        --marker "$tmp/logs/no-space.done" -- ./fixed.sh 2>&1); rc=$?
+  check "reviewer launch without --under is refused before placement, and its marker lands" \
+    '[ $rc -eq 1 ] && [ -e "$tmp/logs/no-space.done" ] && case "$got" in *"needs --under"*) true ;; *) false ;; esac && ! calls herdr | grep -q "workspace${T}create"' "$got"
 
   echo "stop: everything a launch started, and nothing else"
   mkdir -p "$tmp/tree"
@@ -2596,10 +3245,18 @@ PY
   git clone -q "$repo" "$tmp/plain" >/dev/null 2>&1
   got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$tmp/plain" --marker ../logs/c3.done -- ./fixed.sh)
   space=${got#*space=}; space=${space%% *}
+  python3 - "$tmp/stub/herdr.json" "$space" <<'PY'
+import json, sys
+st=json.load(open(sys.argv[1])); ws=sys.argv[2]; tab=ws+":t2"; pane="pU"
+st["spaces"][ws]["tabs"].append(tab); st["spaces"][ws]["panes"].append(pane)
+st["tabs"][tab]={"ws":ws,"pane":pane,"cwd":"/home/user","label":"user"}
+st["panes"][pane]={"ws":ws,"tab":tab,"cwd":"/home/user","tokens":{}}
+json.dump(st,open(sys.argv[1],"w"))
+PY
   marker "$tmp/logs/c3.done"
-  hs "$STUBS" -- close "$tmp/plain" >/dev/null 2>&1; rc=$?
-  check "a plain clone is no scratch: it opens as a repository, and close refuses its space" \
-    'grep -qxF "workspace${T}create${T}--cwd${T}$tmp/plain${T}--label${T}plain${T}--no-focus" <<<"$(calls herdr)" && [ $rc -eq 2 ] && ! grep -qx "workspace${T}close${T}$space" <<<"$(calls herdr)"' "$(calls herdr)"
+  close_result=$(hs "$STUBS" -- close "$tmp/plain" 2>&1); rc=$?
+  check "a plain clone is no scratch: close removes its finished launch and preserves the user's tab" \
+    'grep -qxF "workspace${T}create${T}--cwd${T}$tmp/plain${T}--label${T}plain${T}--no-focus" <<<"$(calls herdr)" && [ $rc -eq 2 ] && ! grep -qx "workspace${T}close${T}$space" <<<"$(calls herdr)" && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); w=s[\"spaces\"][sys.argv[2]]; sys.exit(0 if w[\"tabs\"]==[sys.argv[3]] and \"pU\" in s[\"panes\"] and all(s[\"tabs\"][t][\"label\"]==\"user\" for t in w[\"tabs\"]) else 1)" "$tmp/stub/herdr.json" "$space" "$space:t2"' "$(calls herdr) / $close_result"
 
   echo "a split launch tab, Herdr (stub)"
   reset
@@ -2621,6 +3278,9 @@ PY
     '[ $rc -eq 2 ] && grep -q "holds panes" <<<"$got2" && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); ws=s[\"open\"][sys.argv[2]]; sys.exit(not s[\"spaces\"][ws][\"tabs\"])" "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna"' "$got2"
   check "and the user's pane survives it" \
     'python3 -c "import json,sys; sys.exit(\"pU\" not in json.load(open(sys.argv[1]))[\"panes\"])" "$tmp/stub/herdr.json"'
+  split_pane=${got##*pane=}
+  check "and the launch pane is closed while the refusal stands" \
+    'python3 -c "import json,sys; sys.exit(sys.argv[2] in json.load(open(sys.argv[1])).get(\"panes\",{}))" "$tmp/stub/herdr.json" "$split_pane"'
   reset
   got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" --under "$tmp/run-1" --marker ../logs/g2.done -- ./fixed.sh)
   marker "$tmp/logs/g2.done"
@@ -2631,7 +3291,7 @@ lock = open(os.path.join(os.path.dirname(sys.argv[1]), "herdr.lock"), "w"); fcnt
 st = json.load(open(sys.argv[1])); ws = st["open"][sys.argv[2]]
 t1 = st["spaces"][ws]["tabs"][0]
 # A second pane of the run's own in the launch tab: tagged like the first.
-st["panes"]["pR"] = {"ws": ws, "tab": t1, "cwd": sys.argv[2], "tokens": {"postmaster": "launch"}}
+st["panes"]["pR"] = {"ws": ws, "tab": t1, "cwd": sys.argv[2], "tokens": {"postmaster": "launch", "state": "done"}}
 st["spaces"][ws]["panes"].append("pR")
 tmp = sys.argv[1] + ".tmp"; json.dump(st, open(tmp, "w")); os.replace(tmp, sys.argv[1])
 PY
@@ -2870,6 +3530,499 @@ PY
   check "and close kills it" \
     'hs "$STUBS" POSTMASTER_HOST=tmux -- close "$clone" >/dev/null && [ "$(calls tmux | grep -c "^kill-window")" -eq 3 ]'
 
+  echo "completion cleanup controls, Herdr (stub)"
+  reset
+  finish_delay=3600
+  cat > "$tmp/caller/resume.sh" <<'EOF'
+#!/usr/bin/env bash
+printf '{"type":"system","subtype":"init","session_id":"resume","model":"m"}\n'
+sleep 0.4
+printf '{"type":"result","subtype":"success","num_turns":1}\n'
+EOF
+  chmod +x "$tmp/caller/resume.sh"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$COACHMAN_LABEL" "$repo/.worktrees/T-1-luna" \
+    --under "$tmp/run-1" --role coachman --run "$tmp/run-1" --out ../logs/resume.events --marker ../logs/resume.done -- ./resume.sh)
+  space=${got#*space=}; space=${space%% *}; resume_tab=${got#*tab=}; resume_tab=${resume_tab%% *}; resume_pane=${got##*pane=}
+  resume_old_space=$space
+  check "the live synthesis launch owns one tab in its ticket space" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); w=s[\"spaces\"][sys.argv[2]]; sys.exit(0 if w[\"tabs\"]==[sys.argv[3]] else 1)" "$tmp/stub/herdr.json" "$space" "$resume_tab"'
+  marker "$tmp/logs/resume.done"
+  got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST_FINISH_DELAY=0.1 -- run "$COACHMAN_LABEL" "$repo/.worktrees/T-1-luna" \
+    --under "$tmp/run-1" --role coachman --run "$tmp/run-1" --out ../logs/resume.events --append --marker ../logs/resume.done -- ./resume.sh)
+  space=${got#*space=}; space=${space%% *}; resume_tab=${got#*tab=}; resume_tab=${resume_tab%% *}; resume_pane=${got##*pane=}
+  check "a resumed leg has one live tab, with the previous tab gone" \
+    'python3 -c "import json,sys,os; s=json.load(open(sys.argv[1])); w=s[\"spaces\"][sys.argv[2]]; p=os.path.realpath(sys.argv[3]); sys.exit(0 if w[\"tabs\"]==[sys.argv[4]] and s[\"open\"].get(p)==sys.argv[2] and sys.argv[5] not in s[\"spaces\"] else 1)" "$tmp/stub/herdr.json" "$space" "$repo/.worktrees/T-1-luna" "$resume_tab" "$resume_old_space"'
+  marker "$tmp/logs/resume.done"
+  wait_herdr_pane_gone "$resume_pane"
+  check "the resumed leg leaves no history tab and preserves both event records" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); data=open(sys.argv[2]).read(); sys.exit(0 if not any(w[\"label\"]==sys.argv[3] for w in s.get(\"spaces\",{}).values()) and data.count(\"resume\")==2 and data.count(\"success\")==2 else 1)" "$tmp/stub/herdr.json" "$tmp/logs/resume.events" "$RUN_NAME"'
+
+  echo "finished review round cleanup, Herdr (stub)"
+  reset
+  finish_delay=0.1
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$STYLE_LABEL" "$repo/.worktrees/T-1-rev-luna" \
+    --under "$tmp/run-1" --role reviewer --run "$tmp/run-1" --marker ../logs/review-style.done -- ./fixed.sh)
+  review_pane=${got##*pane=}; marker "$tmp/logs/review-style.done"; wait_herdr_pane_gone "$review_pane"
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$SECURITY_LABEL" "$clone" \
+    --under "$tmp/run-1" --role reviewer --run "$tmp/run-1" --marker ../logs/review-security.done -- ./fixed.sh)
+  review_pane=${got##*pane=}; marker "$tmp/logs/review-security.done"; wait_herdr_pane_gone "$review_pane"
+  check "a finished review round leaves no reviewer panes or tabs" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); sys.exit(0 if not any(w[\"label\"]==sys.argv[2] for w in s.get(\"spaces\",{}).values()) else 1)" "$tmp/stub/herdr.json" "$RUN_NAME"'
+
+  echo "run-wide teardown, Herdr (stub)"
+  reset
+  close_dispatch=$repo/.postmaster/runs/T-1
+  mkdir -p "$close_dispatch/logs"
+  cat > "$close_dispatch/brief.md" <<EOF
+## Dispatch
+name: T-1
+synthesis worktree: $repo/.worktrees/T-1-luna
+EOF
+  cat > "$close_dispatch/run.json" <<'EOF'
+{"config":{"team":{"workhorses":["luna","sol"]}}}
+EOF
+  cat > "$close_dispatch/manifest.json" <<'EOF'
+{"lanes":{"luna":{},"sol":{}}}
+EOF
+  cat > "$close_dispatch/logs/review-r3.json" <<'EOF'
+{"reviewers":[["bug","luna"]]}
+EOF
+  printf '{"action":"review-launch","target":"opus","detail":"security r3"}\n' > "$close_dispatch/actions.jsonl"
+  git -C "$repo" worktree add -q --detach "$repo/.worktrees/T-1-rev-bug-luna" HEAD || return 1
+  check "the security scratch clone is absent from git worktree list" \
+    '! git -C "$repo" worktree list --porcelain | grep -F "$clone"'
+  python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-luna" "$repo/.worktrees/T-1-sol" \
+    "$repo/.worktrees/T-1-rev-bug-luna" "$clone" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+st = {"n": 4, "spaces": {}, "panes": {}, "tabs": {}, "open": {}, "agents": [], "tab_n": {}}
+for i, cwd in enumerate(sys.argv[2:], 1):
+    ws, tab, pane = "w%d" % i, "w%d:t1" % i, "p%d" % i
+    st["spaces"][ws] = {"label": "T-1", "tokens": {"postmaster": "opened"}, "panes": [pane], "tabs": [tab], "path": os.path.realpath(cwd)}
+    st["panes"][pane] = {"ws": ws, "tab": tab, "cwd": cwd, "tokens": {"postmaster": "launch", "state": "done"}}
+    st["tabs"][tab] = {"ws": ws, "pane": pane, "cwd": cwd, "label": "finished"}
+    st["open"][os.path.realpath(cwd)] = ws
+json.dump(st, open(path, "w"))
+PY
+  got=$(hs "$STUBS" POSTMASTER_HOST=herdr -- close-run "$close_dispatch" 2>&1); rc=$?
+  check "teardown closes synthesis, workhorse, reviewer, and unlisted clone spaces" \
+    '[ $rc -eq 0 ] && [ "$(calls herdr | grep -c "^workspace${T}close")" -eq 4 ] && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); sys.exit(0 if not s[\"open\"] and not s[\"spaces\"] else 1)" "$tmp/stub/herdr.json"' "$got"
+
+  echo "user split survives completion, Herdr (stub)"
+  reset
+  got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST_FINISH_DELAY=0.1 -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+    --under "$tmp/run-1" --marker ../logs/split-herdr.done -- ./resume.sh)
+  space=${got#*space=}; space=${space%% *}; resume_tab=${got#*tab=}; resume_tab=${resume_tab%% *}; resume_pane=${got##*pane=}
+  python3 - "$tmp/stub/herdr.json" "$space" "$resume_tab" <<'PY'
+import json, sys
+st=json.load(open(sys.argv[1])); st["spaces"][sys.argv[2]]["panes"].append("pUser")
+st["panes"]["pUser"]={"ws":sys.argv[2],"tab":sys.argv[3],"cwd":"/home/user","tokens":{}}
+json.dump(st,open(sys.argv[1],"w"))
+PY
+  marker "$tmp/logs/split-herdr.done"; wait_herdr_pane_gone "$resume_pane"
+  check "the host pane closes while the user's split pane and tab survive" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); w=s[\"spaces\"].get(sys.argv[2],{}); sys.exit(0 if \"pUser\" in s[\"panes\"] and sys.argv[3] in w.get(\"tabs\",[]) else 1)" "$tmp/stub/herdr.json" "$space" "$resume_tab"'
+
+  echo "completion cleanup controls, tmux (stub)"
+  reset
+  finish_delay=3600
+  got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux -- run "$COACHMAN_LABEL" "$repo/.worktrees/T-1-luna" \
+    --under "$tmp/run-1" --role coachman --run "$tmp/run-1" --out ../logs/tmux-resume.events --marker ../logs/tmux-resume.done -- ./resume.sh)
+  resume_window=${got##*window=}
+  resume_old_window=$resume_window
+  resume_pane=$(python3 -c 'import json,sys; print(next(iter(json.load(open(sys.argv[1]))["windows"][sys.argv[2]]["panes"])))' "$tmp/stub/tmux.json" "$resume_window")
+  check "tmux has one live launch window for the first leg" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); w=s[\"windows\"][sys.argv[2]]; sys.exit(0 if len(s[\"windows\"])==1 and list(w[\"panes\"])==[sys.argv[3]] else 1)" "$tmp/stub/tmux.json" "$resume_window" "$resume_pane"'
+  marker "$tmp/logs/tmux-resume.done"
+  got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux POSTMASTER_HOST_FINISH_DELAY=0.1 -- run "$COACHMAN_LABEL" "$repo/.worktrees/T-1-luna" \
+    --under "$tmp/run-1" --role coachman --run "$tmp/run-1" --out ../logs/tmux-resume.events --append --marker ../logs/tmux-resume.done -- ./resume.sh)
+  resume_window=${got##*window=}
+  resume_pane=$(python3 -c 'import json,sys; print(next(iter(json.load(open(sys.argv[1]))["windows"][sys.argv[2]]["panes"])))' "$tmp/stub/tmux.json" "$resume_window")
+  check "a resumed tmux leg has one current window, with no finished window retained" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); w=s[\"windows\"][sys.argv[2]]; sys.exit(0 if len(s[\"windows\"])==1 and list(w[\"panes\"])==[sys.argv[3]] and sys.argv[4] not in s[\"windows\"] else 1)" "$tmp/stub/tmux.json" "$resume_window" "$resume_pane" "$resume_old_window"'
+  marker "$tmp/logs/tmux-resume.done"; wait_tmux_pane_gone "$resume_pane"
+  check "the resumed tmux leg leaves no history window and keeps both event records" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); data=open(sys.argv[2]).read(); sys.exit(0 if not s.get(\"windows\") and data.count(\"resume\")==2 and data.count(\"success\")==2 else 1)" "$tmp/stub/tmux.json" "$tmp/logs/tmux-resume.events"'
+
+  echo "finished review round cleanup, tmux (stub)"
+  reset
+  finish_delay=0.1
+  got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux -- run "$STYLE_LABEL" "$repo/.worktrees/T-1-rev-luna" \
+    --under "$tmp/run-1" --role reviewer --run "$tmp/run-1" --marker ../logs/tmux-review-style.done -- ./fixed.sh)
+  resume_window=${got##*window=}; resume_pane=$(python3 -c 'import json,sys; print(next(iter(json.load(open(sys.argv[1]))["windows"][sys.argv[2]]["panes"])))' "$tmp/stub/tmux.json" "$resume_window")
+  marker "$tmp/logs/tmux-review-style.done"; wait_tmux_pane_gone "$resume_pane"
+  got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux -- run "$SECURITY_LABEL" "$clone" \
+    --under "$tmp/run-1" --role reviewer --run "$tmp/run-1" --marker ../logs/tmux-review-security.done -- ./fixed.sh)
+  resume_window=${got##*window=}; resume_pane=$(python3 -c 'import json,sys; print(next(iter(json.load(open(sys.argv[1]))["windows"][sys.argv[2]]["panes"])))' "$tmp/stub/tmux.json" "$resume_window")
+  marker "$tmp/logs/tmux-review-security.done"; wait_tmux_pane_gone "$resume_pane"
+  check "a finished tmux review round leaves no reviewer windows" \
+    'python3 -c "import json,sys; sys.exit(0 if not json.load(open(sys.argv[1])).get(\"windows\") else 1)" "$tmp/stub/tmux.json"'
+
+  echo "run-wide teardown, tmux (stub)"
+  reset
+  python3 - "$tmp/stub/tmux.json" "$close_dispatch" "$rname" "$repo/.worktrees/T-1-luna" \
+    "$repo/.worktrees/T-1-sol" "$repo/.worktrees/T-1-rev-bug-luna" "$clone" <<'PY'
+import json, os, sys
+dispatch, repo = os.path.realpath(sys.argv[2]), sys.argv[3]
+st={"n":4,"sessions":["postmaster-"+repo],"windows":{}}
+for i,cwd in enumerate(sys.argv[4:],1):
+    win,pane="@%d"%i,"%%%d"%i
+    st["windows"][win]={"session":"postmaster-"+repo,"name":"finished","opts":{"@postmaster_cwd":os.path.realpath(cwd),"@postmaster_run":dispatch,"@postmaster_pane":pane},"panes":{pane:{"opts":{"@postmaster_owned":"yes"}}}}
+json.dump(st,open(sys.argv[1],"w"))
+PY
+  touch "$tmp/stub/herdr.down"
+  got=$(hs "$STUBS" POSTMASTER_HOST=tmux -- close-run "$close_dispatch" 2>&1); rc=$?
+  check "tmux teardown closes each run window, including the unlisted clone" \
+    '[ $rc -eq 0 ] && [ "$(calls tmux | grep -c "^kill-window")" -eq 4 ] && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); sys.exit(0 if not s[\"windows\"] and not s[\"sessions\"] else 1)" "$tmp/stub/tmux.json"' "$got"
+
+  echo "user split survives completion, tmux (stub)"
+  reset
+  finish_delay=0.1
+  got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+    --under "$tmp/run-1" --marker ../logs/split-tmux.done -- ./resume.sh)
+  resume_window=${got##*window=}; resume_pane=$(python3 -c 'import json,sys; print(next(iter(json.load(open(sys.argv[1]))["windows"][sys.argv[2]]["panes"])))' "$tmp/stub/tmux.json" "$resume_window")
+  python3 - "$tmp/stub/tmux.json" "$resume_window" <<'PY'
+import json,sys
+st=json.load(open(sys.argv[1])); st["windows"][sys.argv[2]]["panes"]["%user"]={"opts":{}}
+json.dump(st,open(sys.argv[1],"w"))
+PY
+  marker "$tmp/logs/split-tmux.done"; wait_tmux_pane_gone "$resume_pane"
+  check "the host pane closes while the user's tmux pane and window survive" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); w=s[\"windows\"].get(sys.argv[2],{}); sys.exit(0 if list(w.get(\"panes\",{}))==[\"%user\"] else 1)" "$tmp/stub/tmux.json" "$resume_window"'
+  finish_delay=3600
+  reset
+
+  echo "review round 1 fixes, tmux (stub)"
+  backslash_t='\t'
+  check "no tmux list format carries a literal backslash-t" \
+    '! grep -n "tmux list" "$SELF" | grep -v "awk -F" | grep -qF "$backslash_t"'
+  printf '%s\n' '  rows=$(tmux list-panes -t "$w" -F #{x}'"$backslash_t"'#{y})' > "$tmp/fixture-f1.txt"
+  check "the separator guard catches a backslash-t fixture" \
+    'grep -n "tmux list" "$tmp/fixture-f1.txt" | grep -v "awk -F" | grep -qF "$backslash_t"'
+  touch "$tmp/stub/herdr.down"
+  got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+    --under "$tmp/run-1" --marker ../logs/f2.done -- ./fixed.sh)
+  f2win=${got##*window=}
+  marker "$tmp/logs/f2.done"
+  python3 - "$tmp/stub/tmux.json" "$f2win" <<'PY'
+import json,sys
+st=json.load(open(sys.argv[1])); st["windows"][sys.argv[2]]["panes"]["%user"]={"opts":{}}
+json.dump(st,open(sys.argv[1],"w"))
+PY
+  hs "$STUBS" POSTMASTER_HOST=tmux -- close "$repo/.worktrees/T-1-luna" >/dev/null 2>&1; rc=$?
+  check "close refuses (exit 2) when a user pane shares the window" '[ $rc -eq 2 ]'
+  check "the host pane is gone but the user's pane and window survive the refusal" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); w=s[\"windows\"].get(sys.argv[2],{}); sys.exit(0 if list(w.get(\"panes\",{}))==[\"%user\"] else 1)" "$tmp/stub/tmux.json" "$f2win"'
+  reset
+  finish_delay=0.1
+  touch "$tmp/stub/herdr.down"
+  got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+    --under "$tmp/run-1" --marker ../logs/f2b.done -- ./resume.sh)
+  f2bwin=${got##*window=}
+  f2bpane=$(python3 -c 'import json,sys; print(next(iter(json.load(open(sys.argv[1]))["windows"][sys.argv[2]]["panes"])))' "$tmp/stub/tmux.json" "$f2bwin")
+  python3 - "$tmp/stub/tmux.json" "$f2bwin" <<'PY'
+import json,sys
+st=json.load(open(sys.argv[1])); st["windows"][sys.argv[2]]["panes"]["%user"]={"opts":{}}
+json.dump(st,open(sys.argv[1],"w"))
+PY
+  marker "$tmp/logs/f2b.done"; wait_tmux_pane_gone "$f2bpane"
+  hs "$STUBS" POSTMASTER_HOST=tmux -- close "$repo/.worktrees/T-1-luna" >/dev/null 2>&1; rc=$?
+  check "close refuses when only unowned panes remain after completion" '[ $rc -eq 2 ]'
+  check "the user's pane and window still survive" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); w=s[\"windows\"].get(sys.argv[2],{}); sys.exit(0 if list(w.get(\"panes\",{}))==[\"%user\"] else 1)" "$tmp/stub/tmux.json" "$f2bwin"'
+  finish_delay=3600
+  reset
+  touch "$tmp/stub/herdr.down"
+  python3 - "$tmp/stub/tmux.json" "$rname" "$repo/.worktrees/T-1-sol" "$repo/.worktrees/T-1-luna" <<'PY'
+import json, os, sys
+st={"n":2,"sessions":["postmaster-"+sys.argv[2]],"windows":{
+  "@1":{"session":"postmaster-"+sys.argv[2],"name":"legacy","opts":{"@postmaster_cwd":os.path.realpath(sys.argv[3])},"panes":{"%1":{"opts":{}}}},
+  "@2":{"session":"postmaster-"+sys.argv[2],"name":"legacy-split","opts":{"@postmaster_cwd":os.path.realpath(sys.argv[4])},"panes":{"%2":{"opts":{}},"%user":{"opts":{}}}}}}
+json.dump(st,open(sys.argv[1],"w"))
+PY
+  hs "$STUBS" POSTMASTER_HOST=tmux -- close "$repo/.worktrees/T-1-sol" >/dev/null 2>&1; rc=$?
+  check "a lone pane in a pre-change window closes" \
+    '[ $rc -eq 0 ] && python3 -c "import json,sys; sys.exit(0 if \"@1\" not in json.load(open(sys.argv[1]))[\"windows\"] else 1)" "$tmp/stub/tmux.json"'
+  hs "$STUBS" POSTMASTER_HOST=tmux -- close "$repo/.worktrees/T-1-luna" >/dev/null 2>&1; rc=$?
+  check "a pre-change window with other panes stays open, exit 2" \
+    '[ $rc -eq 2 ] && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); sys.exit(0 if sorted(s[\"windows\"][\"@2\"][\"panes\"])==[\"%2\",\"%user\"] else 1)" "$tmp/stub/tmux.json"'
+  reset
+  touch "$tmp/stub/herdr.down"
+  mkdir -p "$tmp/noman/T-1/logs"
+  cat > "$tmp/noman/T-1/brief.md" <<EOF
+## Dispatch
+name: T-1
+synthesis worktree: $repo/.worktrees/T-1-luna
+EOF
+  cat > "$tmp/noman/T-1/run.json" <<'EOF'
+{"config":{"team":{"workhorses":["sol"]}}}
+EOF
+  python3 - "$tmp/stub/tmux.json" "$rname" "$repo/.worktrees/T-1-sol" <<'PY'
+import json, os, sys
+st={"n":5,"sessions":["postmaster-"+sys.argv[2]],"windows":{
+  "@5":{"session":"postmaster-"+sys.argv[2],"name":"lane","opts":{"@postmaster_cwd":os.path.realpath(sys.argv[3]),"@postmaster_pane":"%5"},"panes":{"%5":{"opts":{"@postmaster_owned":"yes"}}}}}}
+json.dump(st,open(sys.argv[1],"w"))
+PY
+  got=$(hs "$STUBS" POSTMASTER_HOST=tmux -- close-run "$tmp/noman/T-1" 2>&1); rc=$?
+  check "a missing manifest does not drop the run.json workhorses from teardown" \
+    '[ $rc -eq 0 ] && python3 -c "import json,sys; sys.exit(0 if not json.load(open(sys.argv[1])).get(\"windows\") else 1)" "$tmp/stub/tmux.json"' "$got"
+  reset
+  touch "$tmp/stub/herdr.down"
+  python3 - "$tmp/stub/tmux.json" "$rname" "$close_dispatch" "$repo/.worktrees/T-1-rev-luna" <<'PY'
+import json, os, sys
+dispatch = os.path.realpath(sys.argv[3])
+st={"n":9,"sessions":["postmaster-"+sys.argv[2]],"windows":{
+  "@9":{"session":"postmaster-"+sys.argv[2],"name":"ghost","opts":{"@postmaster_cwd":os.path.realpath(sys.argv[4]),"@postmaster_run":dispatch,"@postmaster_pane":"%9"},"panes":{"%9":{"opts":{"@postmaster_owned":"yes"}}}}}}
+json.dump(st,open(sys.argv[1],"w"))
+PY
+  got=$(hs "$STUBS" POSTMASTER_HOST=tmux -- close-run "$close_dispatch" 2>&1); rc=$?
+  check "close-run sweeps a run-tagged window off the discovered paths" \
+    '[ $rc -eq 0 ] && python3 -c "import json,sys; sys.exit(0 if not json.load(open(sys.argv[1])).get(\"windows\") else 1)" "$tmp/stub/tmux.json"' "$got"
+  reset
+
+  echo "review round 1 fixes, Herdr (stub)"
+  finish_delay=0.1
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo" --marker ../logs/f4.done -- ./fixed.sh)
+  f4space=${got#*space=}; f4space=${f4space%% *}; f4tab=${got#*tab=}; f4tab=${f4tab%% *}; f4pane=${got##*pane=}
+  marker "$tmp/logs/f4.done"
+  i=0; while ! calls herdr | grep -q "^workspace${T}get"; do sleep 0.2; i=$((i + 1)); [ $i -lt 50 ] || break; done
+  check "the finish path consults the space before closing a legacy tab" 'calls herdr | grep -q "^workspace${T}get"'
+  check "a legacy launch in the project space keeps its tab, pane and space" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); w=s[\"spaces\"].get(sys.argv[2],{}); sys.exit(0 if sys.argv[3] in w.get(\"tabs\",[]) and sys.argv[4] in s.get(\"panes\",{}) else 1)" "$tmp/stub/herdr.json" "$f4space" "$f4tab" "$f4pane"'
+  check "no tab close was issued for it" '! calls herdr | grep -q "^tab${T}close${T}$f4tab"'
+  finish_delay=3600
+  reset
+  mkdir -p "$tmp/empty-dispatch"
+  hs "$STUBS" -- stop-run "$tmp/empty-dispatch" >/dev/null 2>&1; a=$?
+  hs "$STUBS" -- close-run "$tmp/empty-dispatch" >/dev/null 2>&1; b=$?
+  check "stop-run and close-run refuse (exit 2) when the waybill cannot be read" '[ $a -eq 2 ] && [ $b -eq 2 ]'
+  rm -f -- "$tmp/state/placements"/*.json
+  python3 - "$tmp/stub/herdr.json" "$repo/.worktrees/T-1-sol" <<'PY'
+import json, os, sys
+cwd = os.path.realpath(sys.argv[2])
+st={"n":9,"spaces":{"w9":{"label":"T-1","tokens":{},"panes":["p9"],"tabs":["w9:t1"],"path":cwd}},"panes":{"p9":{"ws":"w9","tab":"w9:t1","cwd":cwd,"tokens":{"postmaster":"launch","state":"done"}}},"tabs":{"w9:t1":{"ws":"w9","pane":"p9","cwd":cwd,"label":"finished"}},"open":{cwd:"w9"},"agents":[],"tab_n":{}}
+json.dump(st,open(sys.argv[1],"w"))
+PY
+  got=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-sol" 2>&1); rc=$?
+  check "close names a space host.sh did not open instead of failing to read it" \
+    '[ $rc -eq 2 ] && printf "%s" "$got" | grep -q "was not opened by host.sh"' "$got"
+  check "and it leaves that space open" \
+    'python3 -c "import json,sys; sys.exit(0 if \"w9\" in json.load(open(sys.argv[1])).get(\"spaces\",{}) else 1)" "$tmp/stub/herdr.json"'
+  reset
+
+  echo "review round 2 fixes, tmux (stub)"
+  reset
+  touch "$tmp/stub/herdr.down"
+  mkdir -p "$tmp/redirect/T-1/logs"
+  cat > "$tmp/redirect/T-1/brief.md" <<EOF
+# Waybill: T-1
+
+## Ticket
+
+Quoting run T-9's brief for reference:
+
+## Dispatch
+name: T-9
+synthesis worktree: $repo/.worktrees/T-1-sol
+
+(end of quote)
+
+## Dispatch
+name: T-1
+synthesis worktree: $repo/.worktrees/T-1-luna
+EOF
+  python3 - "$tmp/stub/tmux.json" "$rname" "$repo/.worktrees/T-1-luna" "$repo/.worktrees/T-1-sol" <<'PY'
+import json, os, sys
+st={"n":8,"sessions":["postmaster-"+sys.argv[2]],"windows":{
+  "@7":{"session":"postmaster-"+sys.argv[2],"name":"synth","opts":{"@postmaster_cwd":os.path.realpath(sys.argv[3]),"@postmaster_pane":"%7"},"panes":{"%7":{"opts":{"@postmaster_owned":"yes"}}}},
+  "@8":{"session":"postmaster-"+sys.argv[2],"name":"victim","opts":{"@postmaster_cwd":os.path.realpath(sys.argv[4]),"@postmaster_pane":"%8"},"panes":{"%8":{"opts":{"@postmaster_owned":"yes"}}}}}}
+json.dump(st,open(sys.argv[1],"w"))
+PY
+  got=$(hs "$STUBS" POSTMASTER_HOST=tmux -- close-run "$tmp/redirect/T-1" 2>&1); rc=$?
+  check "a quoted waybill in the ticket body does not redirect teardown" \
+    '[ $rc -eq 0 ] && python3 -c "import json,sys; s=json.load(open(sys.argv[1])); sys.exit(0 if \"@7\" not in s[\"windows\"] and \"@8\" in s[\"windows\"] else 1)" "$tmp/stub/tmux.json"' "$got"
+  reset
+
+  echo "review round 4 fixes, Herdr (stub)"
+  reset
+  mkdir -p "$tmp/nolanes/T-1/logs"
+  cat > "$tmp/nolanes/T-1/brief.md" <<EOF
+## Dispatch
+name: T-1
+synthesis worktree: $repo/.worktrees/T-1-luna
+EOF
+  printf '%s\n' '{broken' > "$tmp/nolanes/T-1/run.json"
+  printf '%s\n' '{broken' > "$tmp/nolanes/T-1/manifest.json"
+  got=$(hs "$STUBS" -- close-run "$tmp/nolanes/T-1" 2>&1); a=$?
+  got2=$(hs "$STUBS" -- stop-run "$tmp/nolanes/T-1" 2>&1); b=$?
+  check "close-run refuses when no lane record parses" '[ $a -eq 2 ] && printf "%s" "$got" | grep -q "lane records unreadable"'
+  check "stop-run refuses when no lane record parses" '[ $b -eq 2 ] && printf "%s" "$got2" | grep -q "lane records unreadable"'
+  reset
+  finish_delay=3600
+  printf '#!/bin/sh\nsleep 30\n' > "$tmp/caller/sleeper.sh"; chmod +x "$tmp/caller/sleeper.sh"
+  ( cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-sol" -- ./sleeper.sh >/dev/null 2>&1 )
+  python3 - "$tmp/stub/herdr.json" "$tmp/state/placements/hc1.json" "$repo/.worktrees/T-1-luna" "$repo/.worktrees/T-1-sol" <<'PY'
+import json, os, sys
+cwd_luna, cwd_sol = os.path.realpath(sys.argv[3]), os.path.realpath(sys.argv[4])
+st = json.load(open(sys.argv[1]))
+st["spaces"]["w9"] = {"label": "T-1", "tokens": {"postmaster": "opened"}, "panes": ["p9a", "p9b"], "tabs": ["w9:t1"], "path": cwd_luna}
+st["panes"]["p9a"] = {"ws": "w9", "tab": "w9:t1", "cwd": cwd_luna, "tokens": {"postmaster": "launch", "state": "done"}}
+st["panes"]["p9b"] = {"ws": "w9", "tab": "w9:t1", "cwd": cwd_sol, "tokens": {"postmaster": "launch", "state": "working"}}
+st["tabs"]["w9:t1"] = {"ws": "w9", "pane": "p9a", "cwd": cwd_luna, "label": "finished"}
+st["open"][cwd_luna] = "w9"
+json.dump(st, open(sys.argv[1], "w"))
+json.dump({"workspace": "w9", "tab": "w9:t1", "pane": "p9b", "cwd": cwd_sol, "run": ""}, open(sys.argv[2], "w"))
+PY
+  touch "$tmp/stub/wsget.succeed-once" "$tmp/stub/wsget.fail"
+  got=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
+  check "a failed inspect mid-wait exits 2" '[ $rc -eq 2 ] && printf "%s" "$got" | grep -q "could not inspect space w9"'
+  check "with the space and both panes intact" \
+    'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); sys.exit(0 if \"w9\" in s[\"spaces\"] and \"p9a\" in s[\"panes\"] and \"p9b\" in s[\"panes\"] else 1)" "$tmp/stub/herdr.json"'
+  got=$(hs "$STUBS" -- stop "$repo/.worktrees/T-1-sol" 2>&1)
+  check "the sleeper stopped" 'printf "%s" "$got" | grep -q "stopped"'
+  reset
+  finish_delay=3600
+  hc3before=$(ls "$tmp/state/placements")
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+    --under "$tmp/run-1" --marker ../logs/hc3.done -- ./fixed.sh)
+  space=${got#*space=}; space=${space%% *}
+  marker "$tmp/logs/hc3.done"
+  hc3file=$(comm -13 <(printf '%s\n' "$hc3before") <(ls "$tmp/state/placements"))
+  check "the launch placed its tab" '[ -n "$hc3file" ] && [ -e "$tmp/state/placements/$hc3file" ]'
+  python3 - "$tmp/stub/herdr.json" "$space" <<'PY'
+import json, sys
+st = json.load(open(sys.argv[1])); dead = sys.argv[2]
+w = st["spaces"].pop(dead, {})
+for pane in w.get("panes", []): st["panes"].pop(pane, None)
+for tab in w.get("tabs", []): st["tabs"].pop(tab, None)
+for cwd, opened in list(st["open"].items()):
+    if opened == dead: st["open"].pop(cwd, None)
+json.dump(st, open(sys.argv[1], "w"))
+PY
+  got=$(cd "$tmp/caller" && hs "$STUBS" -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+    --under "$tmp/run-1" --marker ../logs/hc3.done -- ./fixed.sh 2>&1); rc=$?
+  check "a resume settles a space the server says is gone" '[ $rc -eq 0 ]'
+  check "and unlinks its placement" '[ ! -e "$tmp/state/placements/$hc3file" ]'
+  reset
+  python3 - "$tmp/state/placements/hc4.json" "$repo/.worktrees/T-1-luna" <<'PY'
+import json, os, sys
+json.dump({"workspace": "wgone", "tab": "wgone:t1", "pane": "pgone", "cwd": os.path.realpath(sys.argv[2]), "run": ""}, open(sys.argv[1], "w"))
+PY
+  got=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
+  check "close settles a record whose space is gone" '[ $rc -eq 0 ]'
+  check "and unlinks it" '[ ! -e "$tmp/state/placements/hc4.json" ]'
+  reset
+  python3 - "$tmp/stub/herdr.json" "$tmp/state/placements/hc5.json" "$repo/.worktrees/T-1-luna" <<'PY'
+import json, os, sys
+cwd = os.path.realpath(sys.argv[3])
+st = {"n": 9, "spaces": {"w9": {"label": "T-1", "tokens": {"postmaster": "opened"}, "panes": ["p9"], "tabs": ["w9:t1"], "path": cwd}}, "panes": {"p9": {"ws": "w9", "tab": "w9:t1", "cwd": cwd, "tokens": {"postmaster": "launch", "state": "done"}}}, "tabs": {"w9:t1": {"ws": "w9", "pane": "p9", "cwd": cwd, "label": "finished"}}, "open": {cwd: "w9"}, "agents": [], "tab_n": {}}
+json.dump(st, open(sys.argv[1], "w"))
+json.dump({"workspace": "w9", "tab": "w9:t1", "pane": "p9", "cwd": cwd, "run": ""}, open(sys.argv[2], "w"))
+PY
+  touch "$tmp/stub/panelist.fail"
+  got=$(hs "$STUBS" -- close "$repo/.worktrees/T-1-luna" 2>&1); rc=$?
+  check "an unprovable space refuses the close" '[ $rc -eq 2 ]'
+  check "and keeps the placement record" '[ -e "$tmp/state/placements/hc5.json" ]'
+  reset
+  h6file="$tmp/state/placements/$(python3 -c 'import hashlib; print(hashlib.sha256(b"w9:t1").hexdigest())').json"
+  python3 - "$tmp/stub/herdr.json" "$h6file" "$repo/.worktrees/T-1-luna" <<'PY'
+import json, os, sys
+cwd = os.path.realpath(sys.argv[3])
+st = {"n": 9, "spaces": {}, "panes": {}, "tabs": {}, "open": {}, "agents": [], "tab_n": {}}
+json.dump(st, open(sys.argv[1], "w"))
+json.dump({"workspace": "w9", "tab": "w9:t1", "pane": "p9", "cwd": cwd, "run": ""}, open(sys.argv[2], "w"))
+PY
+  hs "$STUBS" -- _finish herdr w9 w9:t1 p9 >/dev/null 2>&1; rc=$?
+  check "finish settles a gone space quietly" '[ $rc -eq 0 ]'
+  check "and unlinks it" '[ ! -e "$h6file" ]'
+  reset
+  h7file="$tmp/state/placements/$(python3 -c 'import hashlib; print(hashlib.sha256(b"w9:t2").hexdigest())').json"
+  python3 - "$tmp/stub/herdr.json" "$h7file" "$repo/.worktrees/T-1-luna" <<'PY'
+import json, os, sys
+cwd = os.path.realpath(sys.argv[3])
+st = {"n": 9, "spaces": {"w9": {"label": "T-1", "tokens": {"postmaster": "opened"}, "panes": ["p9"], "tabs": ["w9:t2"], "path": cwd}}, "panes": {"p9": {"ws": "w9", "tab": "w9:t2", "cwd": cwd, "tokens": {"postmaster": "launch", "state": "done"}}}, "tabs": {"w9:t2": {"ws": "w9", "pane": "p9", "cwd": cwd, "label": "finished"}}, "open": {cwd: "w9"}, "agents": [], "tab_n": {}}
+json.dump(st, open(sys.argv[1], "w"))
+json.dump({"workspace": "w9", "tab": "w9:t2", "pane": "p9", "cwd": cwd, "run": ""}, open(sys.argv[2], "w"))
+PY
+  touch "$tmp/stub/panelist.fail"
+  hs "$STUBS" -- _finish herdr w9 w9:t2 p9 >/dev/null 2>&1; rc=$?
+  check "finish refuses a space it cannot inspect" '[ $rc -eq 2 ]'
+  check "and keeps the placement record" '[ -e "$h7file" ]'
+  rm -f -- "$h7file"
+  reset
+
+  echo "review round 4 fixes, tmux (stub)"
+  reset
+  finish_delay=3600
+  touch "$tmp/stub/herdr.down"
+  got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+    --under "$tmp/run-1" --marker ../logs/tc1.done -- ./fixed.sh)
+  g_win=${got##*window=}
+  g_tab=$(python3 -c 'import json,sys; print(next(iter(json.load(open(sys.argv[1]))["windows"][sys.argv[2]]["panes"])))' "$tmp/stub/tmux.json" "$g_win")
+  marker "$tmp/logs/tc1.done"
+  STUB=$tmp/stub "$tmp/bin/tmux" kill-window -t "$g_win"
+  hs "$STUBS" POSTMASTER_HOST=tmux -- _finish tmux unused "$g_win" "$g_tab" >/dev/null 2>&1; rc=$?
+  check "finish on a hand-closed window settles quietly" '[ $rc -eq 0 ]'
+  reset
+  finish_delay=3600
+  touch "$tmp/stub/herdr.down"
+  got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+    --under "$tmp/run-1" --marker ../logs/tc2.done -- ./fixed.sh)
+  g_win=${got##*window=}
+  g_tab=$(python3 -c 'import json,sys; print(next(iter(json.load(open(sys.argv[1]))["windows"][sys.argv[2]]["panes"])))' "$tmp/stub/tmux.json" "$g_win")
+  marker "$tmp/logs/tc2.done"
+  touch "$tmp/stub/panes.fail"
+  hs "$STUBS" POSTMASTER_HOST=tmux -- _finish tmux unused "$g_win" "$g_tab" >/dev/null 2>&1; rc=$?
+  check "finish refuses when inspect fails on a present window" '[ $rc -eq 2 ]'
+  check "and the window survives" \
+    'python3 -c "import json,sys; sys.exit(0 if sys.argv[2] in json.load(open(sys.argv[1])).get(\"windows\",{}) else 1)" "$tmp/stub/tmux.json" "$g_win"'
+  reset
+  finish_delay=3600
+  touch "$tmp/stub/herdr.down"
+  got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+    --under "$tmp/run-1" --marker ../logs/tc4.done -- ./fixed.sh)
+  g_win=${got##*window=}
+  g_tab=$(python3 -c 'import json,sys; print(next(iter(json.load(open(sys.argv[1]))["windows"][sys.argv[2]]["panes"])))' "$tmp/stub/tmux.json" "$g_win")
+  marker "$tmp/logs/tc4.done"
+  touch "$tmp/stub/panes.fail" "$tmp/stub/windows.fail"
+  hs "$STUBS" POSTMASTER_HOST=tmux -- _finish tmux unused "$g_win" "$g_tab" >/dev/null 2>&1; rc=$?
+  check "finish refuses when every inspect fails on a live server" '[ $rc -eq 2 ]'
+  check "and the window survives" \
+    'python3 -c "import json,sys; sys.exit(0 if sys.argv[2] in json.load(open(sys.argv[1])).get(\"windows\",{}) else 1)" "$tmp/stub/tmux.json" "$g_win"'
+  rm -f "$tmp/stub/windows.fail"; touch "$tmp/stub/tmux.dead"
+  hs "$STUBS" POSTMASTER_HOST=tmux -- _finish tmux unused "$g_win" "$g_tab" >/dev/null 2>&1; rc=$?
+  check "finish settles when no server answers" '[ $rc -eq 0 ]'
+  reset
+  finish_delay=3600
+  touch "$tmp/stub/herdr.down"
+  got=$(cd "$tmp/caller" && hs "$STUBS" POSTMASTER_HOST=tmux -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+    --under "$tmp/run-1" --marker ../logs/tc3.done -- ./fixed.sh)
+  g_win=${got##*window=}
+  marker "$tmp/logs/tc3.done"
+  touch "$tmp/stub/windows.fail"
+  hs "$STUBS" POSTMASTER_HOST=tmux -- close "$repo/.worktrees/T-1-luna" >/dev/null 2>&1; rc=$?
+  check "close refuses when the session list fails" '[ $rc -eq 2 ]'
+  check "and the window survives" \
+    'python3 -c "import json,sys; sys.exit(0 if sys.argv[2] in json.load(open(sys.argv[1])).get(\"windows\",{}) else 1)" "$tmp/stub/tmux.json" "$g_win"'
+  reset
+  touch "$tmp/stub/herdr.down"
+  python3 - "$tmp/stub/tmux.json" "$rname" "$close_dispatch" "$repo/.worktrees/T-1-luna" <<'PY'
+import json, os, sys
+dispatch = os.path.realpath(sys.argv[3])
+st = {"n": 9, "sessions": ["postmaster-zzz"], "windows": {
+  "@9": {"session": "postmaster-zzz", "name": "ghost", "opts": {"@postmaster_cwd": os.path.realpath(sys.argv[4]), "@postmaster_run": dispatch, "@postmaster_pane": "%9"}, "panes": {"%9": {"opts": {"@postmaster_owned": "yes"}}}}}}
+json.dump(st, open(sys.argv[1], "w"))
+PY
+  touch "$tmp/stub/windows.fail"
+  got=$(hs "$STUBS" POSTMASTER_HOST=tmux -- close-run "$close_dispatch" 2>&1); rc=$?
+  check "the sweep refuses when its list fails with sessions alive" '[ $rc -eq 2 ]'
+  rm -f "$tmp/stub/windows.fail"; touch "$tmp/stub/tmux.dead"
+  got=$(hs "$STUBS" POSTMASTER_HOST=tmux -- close-run "$close_dispatch" 2>&1); rc=$?
+  check "the sweep settles when no server answers" '[ $rc -eq 0 ]'
+  check "and the window survives either way" \
+    'python3 -c "import json,sys; sys.exit(0 if \"@9\" in json.load(open(sys.argv[1])).get(\"windows\",{}) else 1)" "$tmp/stub/tmux.json"'
+  reset
+
   echo "interactive sessions"
   hs "$SYS" -- spawn postmaster-repo "$repo" -- claude >/dev/null 2>&1; a=$?
   hs "$SYS" -- send postmaster-repo "$tmp/caller/fixed.sh" >/dev/null 2>&1; b=$?
@@ -3073,13 +4226,13 @@ EOF
     '[ $rc -eq 1 ] && [ -e "$tmp/logs/badlim.done" ] && grep -q "tasks_max must be" "$tmp/logs/badlim.err"' "$got"
   mkdir -p "$tmp/bad-dispatch"
   printf '{"config": [1, 2, 3]}' > "$tmp/bad-dispatch/run.json"
-  got=$(cd "$tmp/caller" && hs "$SYS" -- run "$NAME" "$repo" --role lane --run "$tmp/bad-dispatch" \
+  got=$(cd "$tmp/caller" && hs "$SYS" -- run "$NAME" "$repo" --under "$tmp/cap-dispatch" --role lane --run "$tmp/bad-dispatch" \
     --err ../logs/badcfg.err --marker ../logs/badcfg.done -- ./fixed.sh 2>&1); rc=$?
   check "a dispatch whose config is no table refuses the launch cleanly, with no traceback" \
     '[ $rc -eq 1 ] && [ -e "$tmp/logs/badcfg.done" ] && grep -q "config must be a table" "$tmp/logs/badcfg.err" && ! grep -qi "traceback" "$tmp/logs/badcfg.err"' "$got"
   mkdir -p "$tmp/bad-top"
   printf '[1, 2, 3]' > "$tmp/bad-top/run.json"
-  got=$(cd "$tmp/caller" && hs "$SYS" -- run "$NAME" "$repo" --role lane --run "$tmp/bad-top" \
+  got=$(cd "$tmp/caller" && hs "$SYS" -- run "$NAME" "$repo" --under "$tmp/cap-dispatch" --role lane --run "$tmp/bad-top" \
     --err ../logs/badtop.err --marker ../logs/badtop.done -- ./fixed.sh 2>&1); rc=$?
   check "a dispatch whose run.json holds no object refuses the launch cleanly, with no traceback" \
     '[ $rc -eq 1 ] && [ -e "$tmp/logs/badtop.done" ] && grep -q "run.json must hold an object" "$tmp/logs/badtop.err" && ! grep -qi "traceback" "$tmp/logs/badtop.err"' "$got"
@@ -3090,13 +4243,277 @@ EOF
   check "every role resolves from the dispatch run, inheriting each value it does not set" \
     '[ "$(launch_limits lane "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "64M\t16")" ] && [ "$(launch_limits coachman "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "128M\t32")" ] && [ "$(launch_limits reviewer "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "8G\t24")" ] && [ "$(launch_limits default "$tmp/cap-dispatch" "$tmp/live-limits.toml")" = "$(printf "8G\t512")" ] && [ "$(launch_limits lane "" "$tmp/live-limits.toml")" = "$(printf "8G\t512")" ]'
 
+  echo "run environment identity, Claude session and lane env file: Herdr, tmux and no host"
+  local -a claude_identity_names=(
+    CLAUDECODE CLAUDE_PID CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION
+    CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ATTENDED
+    CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN
+    CLAUDE_CODE_TOOL_USE_ID
+    CLAUDE_CODE_SESSION_EXTRA CLAUDE_CODE_MESSAGING_EXTRA CLAUDE_CODE_CHILD_EXTRA
+  )
+  local -a herdr_identity_names=(
+    HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID HERDR_ENV HERDR_SOCKET_PATH
+    HERDR_BIN_PATH HERDR_CUSTOM
+  )
+  local -a claude_identity_env=(
+    CLAUDECODE=caller-claudecode CLAUDE_PID=caller-pid
+    CLAUDE_CODE_SESSION_ID=caller-thread CLAUDE_CODE_CHILD_SESSION=caller-child
+    CLAUDE_CODE_ENTRYPOINT=caller-entry CLAUDE_CODE_EXECPATH=caller-exec
+    CLAUDE_CODE_SESSION_ATTENDED=caller-attended
+    CLAUDE_CODE_MESSAGING_SOCKET=caller-socket CLAUDE_CODE_MESSAGING_TOKEN=caller-token
+    CLAUDE_CODE_TOOL_USE_ID=caller-tool-use
+    CLAUDE_CODE_SESSION_EXTRA=caller-session-extra
+    CLAUDE_CODE_MESSAGING_EXTRA=caller-messaging-extra
+    CLAUDE_CODE_CHILD_EXTRA=caller-child-extra
+  )
+  local -a herdr_identity_env=(
+    HERDR_PANE_ID=caller-pane HERDR_TAB_ID=caller-tab
+    HERDR_WORKSPACE_ID=caller-workspace HERDR_ENV=caller-env
+    HERDR_SOCKET_PATH=/caller/herdr.sock HERDR_BIN_PATH=/caller/herdr-bin
+    HERDR_CUSTOM=caller-herdr-extra
+  )
+  local -a caller_config_env=(
+    CALLER_VAR=caller-value POSTMASTER_CUSTOM=caller-postmaster
+    POSTMASTER_CONFIG="$tmp/claude-launch.toml"
+    CLAUDE_CONFIG_DIR="$tmp/claude-config" CLAUDE_EFFORT=high
+    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=123
+    CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1
+    ANTHROPIC_BASE_URL=https://caller.invalid
+    ANTHROPIC_AUTH_TOKEN=fixture-auth-token
+  )
+  cat > "$tmp/caller/env-probe.py" <<'PY'
+#!/usr/bin/env python3
+import os
+
+exact = {
+    "CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_TOOL_USE_ID",
+}
+families = ("CLAUDE_CODE_SESSION_", "CLAUDE_CODE_MESSAGING_", "CLAUDE_CODE_CHILD_")
+claude = sorted(k for k in os.environ if k in exact or k.startswith(families))
+herdr = sorted(k for k in os.environ if k.startswith("HERDR_"))
+names = (
+    ("claude_keys", ",".join(claude)), ("herdr_keys", ",".join(herdr)),
+    ("herdr_pane", os.environ.get("HERDR_PANE_ID", "unset")),
+    ("herdr_tab", os.environ.get("HERDR_TAB_ID", "unset")),
+    ("herdr_workspace", os.environ.get("HERDR_WORKSPACE_ID", "unset")),
+    ("herdr_env", os.environ.get("HERDR_ENV", "unset")),
+    ("herdr_socket", os.environ.get("HERDR_SOCKET_PATH", "unset")),
+    ("herdr_bin", os.environ.get("HERDR_BIN_PATH", "unset")),
+    ("herdr_custom", os.environ.get("HERDR_CUSTOM", "unset")),
+    ("caller", os.environ.get("CALLER_VAR", "unset")),
+    ("postmaster_custom", os.environ.get("POSTMASTER_CUSTOM", "unset")),
+    ("postmaster_config", os.environ.get("POSTMASTER_CONFIG", "unset")),
+    ("claude_config_dir", os.environ.get("CLAUDE_CONFIG_DIR", "unset")),
+    ("claude_effort", os.environ.get("CLAUDE_EFFORT", "unset")),
+    ("claude_bg_wait", os.environ.get("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "unset")),
+    ("claude_feedback", os.environ.get("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "unset")),
+    ("anthropic_base", os.environ.get("ANTHROPIC_BASE_URL", "unset")),
+    ("anthropic_auth", os.environ.get("ANTHROPIC_AUTH_TOKEN", "unset")),
+)
+print("|".join("%s=%s" % item for item in names))
+PY
+  chmod +x "$tmp/caller/env-probe.py"
+  cat > "$tmp/caller/lane.env" <<'EOF'
+LANE_ENV_ONLY=from-lane-env-file
+ANTHROPIC_BASE_URL=https://lane.invalid
+CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=456
+EOF
+  cat > "$tmp/claude-launch.toml" <<EOF
+[lanes.test]
+harness = "claude"
+model = "host-self-test"
+env_file = "$tmp/caller/lane.env"
+EOF
+  printf 'Continue.\n' > "$tmp/caller/prompt.txt"
+  cat > "$tmp/bin/claude" <<'PY'
+#!/usr/bin/env python3
+import json
+import os
+import pathlib
+import sys
+
+exact = {
+    "CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_TOOL_USE_ID",
+}
+families = ("CLAUDE_CODE_SESSION_", "CLAUDE_CODE_MESSAGING_", "CLAUDE_CODE_CHILD_")
+identity = sorted(k for k in os.environ if k in exact or k.startswith(families))
+herdr = {k: v for k, v in os.environ.items() if k.startswith("HERDR_")}
+env_names = (
+    "CALLER_VAR", "POSTMASTER_CUSTOM", "POSTMASTER_CONFIG", "CLAUDE_CONFIG_DIR",
+    "CLAUDE_EFFORT", "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS",
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN",
+    "LANE_ENV_ONLY",
+)
+record = {
+    "identity": identity,
+    "herdr": herdr,
+    "env": {k: os.environ.get(k, "unset") for k in env_names},
+}
+observed = os.environ.get("HOST_TEST_OBSERVED")
+if observed:
+    with open(observed, "a", encoding="utf-8") as stream:
+        json.dump(record, stream, sort_keys=True)
+        stream.write("\n")
+
+args = sys.argv[1:]
+store = pathlib.Path(os.environ["CLAUDE_CONFIG_DIR"]) / "sessions"
+if identity:
+    # Model #67's failure: a nested headless run can finish without owning a record.
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "caller-thread")
+    print(json.dumps({"type": "system", "subtype": "init", "session_id": session_id, "model": "stub"}))
+    print(json.dumps({"type": "result", "subtype": "success", "num_turns": 1}))
+    sys.exit(0)
+
+if "--resume" in args:
+    session_id = args[args.index("--resume") + 1]
+    session_record = store / (session_id + ".jsonl")
+    if not session_record.is_file():
+        print("Session not found", file=sys.stderr)
+        sys.exit(1)
+    with session_record.open("a", encoding="utf-8") as stream:
+        stream.write("resume\n")
+else:
+    session_id = "thread-" + os.environ["HOST_TEST_RUN"]
+    session_record = store / (session_id + ".jsonl")
+    session_record.parent.mkdir(parents=True, exist_ok=True)
+    with session_record.open("w", encoding="utf-8") as stream:
+        stream.write("new\n")
+
+print(json.dumps({"type": "system", "subtype": "init", "session_id": session_id, "model": "stub"}))
+print(json.dumps({"type": "result", "subtype": "success", "num_turns": 1}))
+PY
+  chmod +x "$tmp/bin/claude"
+  contains_all() {
+    local values=$1 name
+    shift
+    for name in "$@"; do case ",$values," in *",$name,"*) ;; *) return 1 ;; esac; done
+  }
+  observe() {
+    python3 - "$1" "$2" <<'PY'
+import json, sys
+d = json.loads(open(sys.argv[1], encoding="utf-8").readlines()[-1])
+key = sys.argv[2]
+if key == "identity_keys": print(",".join(d["identity"]))
+elif key == "herdr_keys": print(",".join(sorted(d["herdr"])))
+elif key.startswith("herdr:"): print(d["herdr"].get(key[6:], "unset"))
+else: print(d["env"].get(key, "unset"))
+PY
+  }
+  stream_sessions() {
+    python3 - "$1" <<'PY'
+import json, sys
+ids = [json.loads(line).get("session_id", "") for line in open(sys.argv[1], encoding="utf-8")
+       if json.loads(line).get("subtype") == "init"]
+print(",".join(ids))
+PY
+  }
+  for mode in herdr tmux none; do
+    local -a under=()
+    [ "$mode" != herdr ] || under=(--under "$tmp/run-1")
+    local input_probe="$tmp/logs/$mode.identity-input" output_probe="$tmp/logs/$mode.identity-output"
+    local run_marker="$tmp/logs/$mode.identity-probe.done" got space pane
+    (cd "$tmp/caller" && env -i HOME="$HOME" PATH="$STUBS" STUB="$tmp/stub" \
+      "${claude_identity_env[@]}" "${herdr_identity_env[@]}" "${caller_config_env[@]}" \
+      ./env-probe.py > "$input_probe")
+    check "AC1 $mode positive control: caller carries every Claude identity name" \
+      'contains_all "$(field "$input_probe" claude_keys)" "${claude_identity_names[@]}"' \
+      "$(cat "$input_probe")"
+    check "AC2 $mode positive control: caller carries every Herdr variable" \
+      'contains_all "$(field "$input_probe" herdr_keys)" "${herdr_identity_names[@]}" && [ "$(field "$input_probe" herdr_custom)" = caller-herdr-extra ]' \
+      "$(cat "$input_probe")"
+    check "AC3 $mode positive control: caller configuration is present before the handoff" \
+      '[ "$(field "$input_probe" caller)" = caller-value ] && [ "$(field "$input_probe" postmaster_custom)" = caller-postmaster ] && [ "$(field "$input_probe" claude_bg_wait)" = 123 ] && [ "$(field "$input_probe" anthropic_base)" = https://caller.invalid ]' \
+      "$(cat "$input_probe")"
+
+    got=$(cd "$tmp/caller" && hs "$STUBS" "${claude_identity_env[@]}" "${herdr_identity_env[@]}" \
+      "${caller_config_env[@]}" "POSTMASTER_HOST=$mode" -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+      "${under[@]}" --out "$output_probe" --marker "$run_marker" -- ./env-probe.py)
+    marker "$run_marker" 60
+    case "$mode:$got" in
+      herdr:host=herdr\ *|tmux:host=tmux\ *|none:host=none) rc=0 ;;
+      *) rc=1 ;;
+    esac
+    check "AC5 $mode positive host control: launch used the requested host" '[ "$rc" -eq 0 ]' "$got"
+    check "AC1 $mode negative control: launch receives no Claude session identity" \
+      '[ -z "$(field "$output_probe" claude_keys)" ]' "$(cat "$output_probe")"
+    if [ "$mode" = herdr ]; then
+      space=${got#*space=}; space=${space%% *}; pane=${got##*pane=}
+      check "AC2 Herdr negative control: launch receives only its pane's six Herdr values" \
+        '[ "$(field "$output_probe" herdr_keys)" = HERDR_BIN_PATH,HERDR_ENV,HERDR_PANE_ID,HERDR_SOCKET_PATH,HERDR_TAB_ID,HERDR_WORKSPACE_ID ] && [ "$(field "$output_probe" herdr_pane)" = "$pane" ] && [ "$(field "$output_probe" herdr_tab)" = "tab-of-$pane" ] && [ "$(field "$output_probe" herdr_workspace)" = "$space" ] && [ "$(field "$output_probe" herdr_env)" = pane-env ] && [ "$(field "$output_probe" herdr_socket)" = /stub/herdr.sock ] && [ "$(field "$output_probe" herdr_bin)" = /stub/herdr-bin ] && [ "$(field "$output_probe" herdr_custom)" = unset ]' \
+        "$(cat "$output_probe")"
+    else
+      check "AC2 $mode negative control: launch receives no Herdr variables" \
+        '[ -z "$(field "$output_probe" herdr_keys)" ] && [ "$(field "$output_probe" herdr_pane)" = unset ] && [ "$(field "$output_probe" herdr_custom)" = unset ]' \
+        "$(cat "$output_probe")"
+    fi
+    check "AC3 $mode negative identity control: other caller configuration still reaches launch" \
+      '[ "$(field "$output_probe" caller)" = caller-value ] && [ "$(field "$output_probe" postmaster_custom)" = caller-postmaster ] && [ "$(field "$output_probe" postmaster_config)" = "$tmp/claude-launch.toml" ] && [ "$(field "$output_probe" claude_config_dir)" = "$tmp/claude-config" ] && [ "$(field "$output_probe" claude_effort)" = high ] && [ "$(field "$output_probe" claude_bg_wait)" = 123 ] && [ "$(field "$output_probe" claude_feedback)" = 1 ] && [ "$(field "$output_probe" anthropic_base)" = https://caller.invalid ] && [ "$(field "$output_probe" anthropic_auth)" = fixture-auth-token ]' \
+      "$(cat "$output_probe")"
+
+    local direct_stream="$tmp/logs/$mode.inherited-identity.events" direct_observed="$tmp/logs/$mode.inherited-identity.jsonl"
+    local launch_events="$tmp/logs/$mode.claude.events" launch_err="$tmp/logs/$mode.claude.err"
+    local launch_marker="$tmp/logs/$mode.claude.done" launch_observed="$tmp/logs/$mode.claude.jsonl"
+    local session_record="$tmp/claude-config/sessions/thread-$mode.jsonl" thread resume_marker claude_space claude_pane
+    (cd "$tmp/caller" && env -i HOME="$HOME" PATH="$STUBS" STUB="$tmp/stub" \
+      "${claude_identity_env[@]}" "${herdr_identity_env[@]}" "${caller_config_env[@]}" \
+      "HOST_TEST_RUN=$mode" "HOST_TEST_OBSERVED=$direct_observed" "$tmp/bin/claude" -p direct \
+      > "$direct_stream")
+    check "AC4 $mode negative control: inherited Claude identity writes no caller-thread record" \
+      '[ "$(stream_sessions "$direct_stream")" = caller-thread ] && [ ! -e "$tmp/claude-config/sessions/caller-thread.jsonl" ] && [ -n "$(observe "$direct_observed" identity_keys)" ]' \
+      "$(cat "$direct_stream")"
+
+    got=$(cd "$tmp/caller" && hs "$STUBS" "${claude_identity_env[@]}" "${herdr_identity_env[@]}" \
+      "${caller_config_env[@]}" "POSTMASTER_HOST=$mode" "HOST_TEST_RUN=$mode" \
+      "HOST_TEST_OBSERVED=$launch_observed" -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+      "${under[@]}" --out "$launch_events" --err "$launch_err" --marker "$launch_marker" -- \
+      "$HERE/launch.sh" launch test "$repo/.worktrees/T-1-luna" "$tmp/caller/prompt.txt")
+    marker "$launch_marker" 60
+    if [ "$mode" = herdr ]; then
+      claude_space=${got#*space=}; claude_space=${claude_space%% *}
+      claude_pane=${got##*pane=}
+    fi
+    thread=$(stream_sessions "$launch_events")
+    check "AC1 $mode Claude control: host launch strips caller identity before the harness" \
+      '[ "$(observe "$launch_observed" identity_keys)" = "" ]' "$(tail -n 1 "$launch_observed")"
+    check "AC2 $mode Claude control: harness sees only the pane's Herdr identity" \
+      'if [ "$mode" = herdr ]; then [ "$(observe "$launch_observed" herdr_keys)" = HERDR_BIN_PATH,HERDR_ENV,HERDR_PANE_ID,HERDR_SOCKET_PATH,HERDR_TAB_ID,HERDR_WORKSPACE_ID ] && [ "$(observe "$launch_observed" herdr:HERDR_PANE_ID)" = "$claude_pane" ] && [ "$(observe "$launch_observed" herdr:HERDR_TAB_ID)" = "tab-of-$claude_pane" ] && [ "$(observe "$launch_observed" herdr:HERDR_WORKSPACE_ID)" = "$claude_space" ] && [ "$(observe "$launch_observed" herdr:HERDR_ENV)" = pane-env ] && [ "$(observe "$launch_observed" herdr:HERDR_SOCKET_PATH)" = /stub/herdr.sock ] && [ "$(observe "$launch_observed" herdr:HERDR_BIN_PATH)" = /stub/herdr-bin ]; else [ "$(observe "$launch_observed" herdr_keys)" = "" ]; fi' \
+      "$(tail -n 1 "$launch_observed")"
+    check "AC3 $mode Claude control: caller and lane env-file settings reach the harness" \
+      '[ "$(observe "$launch_observed" CALLER_VAR)" = caller-value ] && [ "$(observe "$launch_observed" POSTMASTER_CUSTOM)" = caller-postmaster ] && [ "$(observe "$launch_observed" POSTMASTER_CONFIG)" = "$tmp/claude-launch.toml" ] && [ "$(observe "$launch_observed" CLAUDE_CONFIG_DIR)" = "$tmp/claude-config" ] && [ "$(observe "$launch_observed" CLAUDE_EFFORT)" = high ] && [ "$(observe "$launch_observed" CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS)" = 456 ] && [ "$(observe "$launch_observed" CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY)" = 1 ] && [ "$(observe "$launch_observed" ANTHROPIC_BASE_URL)" = https://lane.invalid ] && [ "$(observe "$launch_observed" ANTHROPIC_AUTH_TOKEN)" = fixture-auth-token ] && [ "$(observe "$launch_observed" LANE_ENV_ONLY)" = from-lane-env-file ]' \
+      "$(tail -n 1 "$launch_observed")"
+    check "AC4 $mode positive control: streamed session id owns its record" \
+      '[ "$thread" = "thread-$mode" ] && [ -f "$session_record" ] && grep -qxF new "$session_record"' "$thread"
+
+    resume_marker="$tmp/logs/$mode.resume.done"
+    got=$(cd "$tmp/caller" && hs "$STUBS" "${claude_identity_env[@]}" "${herdr_identity_env[@]}" \
+      "${caller_config_env[@]}" "POSTMASTER_HOST=$mode" "HOST_TEST_RUN=$mode" \
+      "HOST_TEST_OBSERVED=$launch_observed" -- run "$NAME" "$repo/.worktrees/T-1-luna" \
+      "${under[@]}" --append --out "$launch_events" --err "$launch_err" \
+      --marker "$resume_marker" -- "$HERE/launch.sh" resume test "$repo/.worktrees/T-1-luna" \
+      "thread-$mode" "$tmp/caller/prompt.txt")
+    marker "$resume_marker" 60
+    check "AC4 $mode positive resume control: resume continues the streamed thread" \
+      '[ "$(stream_sessions "$launch_events")" = "thread-$mode,thread-$mode" ] && grep -qxF resume "$session_record"' \
+      "$(stream_sessions "$launch_events") / $(cat "$session_record")"
+    check "AC1 and AC3 $mode resume control: identity stays stripped and env file stays present" \
+      '[ "$(observe "$launch_observed" identity_keys)" = "" ] && [ "$(observe "$launch_observed" LANE_ENV_ONLY)" = from-lane-env-file ] && [ "$(observe "$launch_observed" CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS)" = 456 ]' \
+      "$(tail -n 1 "$launch_observed")"
+  done
+
   finish self-test
 }
 
 live_test() {
   test_setup                                          # its registry is the fixture's too
   opened=() tsession=""
-  trap 'for (( i=${#opened[@]}-1; i>=0; i-- )); do herdr workspace close "${opened[i]}" >/dev/null 2>&1; done
+  trap 'test_stop_finishers
+        for (( i=${#opened[@]}-1; i>=0; i-- )); do herdr workspace close "${opened[i]}" >/dev/null 2>&1; done
         [ -n "$tsession" ] && tmux kill-session -t "=$tsession" >/dev/null 2>&1
         rm -r -- "$tmp" </dev/null 2>/dev/null' EXIT
   openspace() { herdr worktree list --cwd "$1" 2>/dev/null | python3 -c 'import json, sys
@@ -3210,13 +4627,21 @@ case ${1:-} in
   run) shift; run_cmd "$@" ;;
   stop) shift; stop_cmd "$@" ;;
   close) shift; close_cmd "$@" ;;
+  stop-run) shift; stop_run_cmd "$@" ;;
+  close-run) shift; close_run_cmd "$@" ;;
   spawn) shift; spawn_cmd "$@" ;;
   send) shift; send_cmd "$@" ;;
   wait) shift; wait_cmd "$@" ;;
   read) shift; read_cmd "$@" ;;
   _run) runner "$2" "$3" ;;
+  _finish)
+    case ${2:-} in
+      herdr) herdr_finish_placement "${3:-}" "${4:-}" "${5:-}" ;;
+      tmux) tmux_finish_placement "${4:-}" "${5:-}" ;;
+      *) exit 1 ;;
+    esac ;;
   _handle) handle_of "$2" ;;
   --self-test) self_test ;;
   --live-test) live_test ;;
-  *) echo "usage: host.sh detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] | stop | close | spawn | send | wait | read | --self-test | --live-test (see the header)" >&2; exit 1 ;;
+  *) echo "usage: host.sh detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] | stop | close | stop-run | close-run | spawn | send | wait | read | --self-test | --live-test (see the header)" >&2; exit 1 ;;
 esac

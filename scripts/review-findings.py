@@ -18,8 +18,11 @@ class ReportError(Exception):
 
 
 def read_events(path):
+    # A stream of JSON lines splits on the newline character alone. splitlines()
+    # also breaks inside JSON strings on U+2028, U+2029, CR, VT and FF, which
+    # refuses a valid stream; the report-text readers below keep splitlines().
     try:
-        lines = Path(path).read_text(encoding="utf-8").splitlines()
+        lines = Path(path).read_text(encoding="utf-8").split("\n")
     except OSError as exc:
         raise ReportError("cannot read %s: %s" % (path, exc)) from exc
     events = []
@@ -725,6 +728,24 @@ def self_test():
             result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(event_file), "--run", str(folder)] + (["--last", str(last)] if last else []), capture_output=True, text=True)
             check(harness + " recorded empty report yields no findings", result.returncode == 0 and result.stdout.strip() == "[]", result.stderr or result.stdout)
 
+        # A stream of JSON lines splits on the newline character alone: U+2028,
+        # U+2029, CR, VT and FF inside a JSON string are content, not breaks.
+        noise = "noise" + chr(0x2028) + chr(0x2029) + chr(0x0d) + chr(0x0b) + chr(0x0c) + "end"
+        separators = root / "mimo-separators.events"
+        separators.write_text(json.dumps({"type": "text", "sessionID": "ses_1", "part": {"type": "text", "text": noise + "\n### Bug — `src/page.js:8`: Page includes one extra item\n\nThe exclusive end repeats the boundary record.\n"}}, ensure_ascii=False) + "\n", encoding="utf-8")
+        harvested = subprocess.run([sys.executable, __file__, "harvest", str(separators), str(logs), "--prefix", "separators"], capture_output=True, text=True)
+        check("a stream holding U+2028, U+2029, CR, VT and FF inside a JSON string harvests as valid", harvested.returncode == 0, harvested.stderr or harvested.stdout)
+        result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(separators), "--run", str(run_config("separators", "mimo"))], capture_output=True, text=True)
+        try:
+            parsed = json.loads(result.stdout)
+            check("and it normalizes to its finding", result.returncode == 0 and len(parsed) == 1 and parsed[0]["file"] == "src/page.js" and parsed[0]["line"] == 8, result.stderr or result.stdout)
+        except ValueError:
+            check("and it normalizes to its finding", False, result.stderr or result.stdout)
+        broken = root / "broken.events"
+        broken.write_text(json.dumps({"type": "text", "part": {"type": "text", "text": "No findings."}}) + "\n" + '{"type": "text", "part": "broken' + "\n", encoding="utf-8")
+        refused = subprocess.run([sys.executable, __file__, "harvest", str(broken), str(logs), "--prefix", "broken"], capture_output=True, text=True)
+        check("a stream with a genuinely broken line is still refused", refused.returncode == 1 and "is not JSON" in refused.stderr, refused.stderr or refused.stdout)
+
         fenced = root / "claude-fenced.events"
         fenced.write_text(json.dumps({"type": "result", "subtype": "success", "result": "Nine findings remain.\n\n```json\n[{\"file\": \"src/page.js\", \"line\": 8, \"summary\": \"Off-by-one in slice\"}]\n```\n"}) + "\n", encoding="utf-8")
         result = subprocess.run([sys.executable, __file__, "normalize", "one", str(scratch), str(fenced), "--run", str(run_config("fenced", "claude"))], capture_output=True, text=True)
@@ -906,7 +927,7 @@ def self_test():
             ran = subprocess.run(["bash", str(root / "sample.sh")], capture_output=True, text=True)
             logged = []
             if (sample_dispatch / "actions.jsonl").exists():
-                for raw in (sample_dispatch / "actions.jsonl").read_text(encoding="utf-8").splitlines():
+                for raw in (sample_dispatch / "actions.jsonl").read_text(encoding="utf-8").split("\n"):
                     try:
                         logged.append(json.loads(raw))
                     except ValueError:
