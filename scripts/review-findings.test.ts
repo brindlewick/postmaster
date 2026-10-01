@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { toolRoot } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
-import { pySplitLines, pyTrim } from "./lib/text.ts";
+import { pyTrim } from "./lib/text.ts";
 import {
   errMsg,
   FOR_LOOP,
