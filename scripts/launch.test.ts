@@ -1,4 +1,4 @@
-// Tests beside scripts/launch.ts, moved from its --self-test on #109: 226 controls.
+// Tests beside scripts/launch.ts, moved from its --self-test on #109: 227 controls.
 // The sequence runs once in beforeAll with recording check/ok/fail; one test per recorded label.
 // Its local ok/fail forwarders are dropped, so helpers record through the shims directly.
 // The python3 branches use the top-level cond; their in-sequence skip logs are replaced by it.
