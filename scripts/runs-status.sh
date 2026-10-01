@@ -201,6 +201,10 @@ PY
 deadowner() {  # deadowner <name>: the lock's owner is gone (no pid starts at 0)
   printf '999999999 0\n' > "$tmp/root/$1/.leg-2-active"
 }
+current_run() {  # current_run <name> <stage> <leg> [marker...]: a contract 2 dispatch
+  local name=$1; run "$@"
+  printf '{"coachman_contract": 2}\n' > "$tmp/root/$name/run.json"
+}
 age() {  # age <name>: nothing in the run has changed for an hour
   python3 -c 'import os, sys, time
 t = time.time() - 3600
@@ -215,6 +219,12 @@ expect() {  # expect <label> <run> <next>
 }
 
 run rule review 2 .escalation-ready
+current_run one-final checkpoint-1 1 .card-ready .leg-1-done .leg-1-exited
+current_run two-final review 2 .card-ready .leg-2-done .leg-2-exited
+current_run two-dispatch review 2 .leg-2-done .leg-2-exited
+run legacy-gate shipping 3 .card-ready
+run legacy-dispatch review 2 .leg-2-done .leg-2-exited
+run legacy-last shipped 3 .leg-3-done .leg-3-exited
 run gate shipping 3 .card-ready
 run spec planning 1 .spec-review-ready .leg-1-exited
 run specpause planning 1 .spec-review-ready .leg-1-exited
@@ -260,6 +270,12 @@ mkdir -p "$tmp/root/postmaster"
 
 echo "positive controls"
 expect "an escalation waiting is RULE" rule RULE
+expect "a one-leg synthesis card is GATE" one-final GATE
+expect "a two-leg review card is GATE" two-final GATE
+expect "a current two-leg review completion is DISPATCH" two-dispatch DISPATCH
+expect "a pre-change ship card remains GATE" legacy-gate GATE
+expect "a pre-change review completion still dispatches ship" legacy-dispatch DISPATCH
+expect "a pre-change ship completion is DISPATCH" legacy-last DISPATCH
 expect "a complete ship card is GATE" gate GATE
 expect "a spec review package waiting is SPEC" spec SPEC
 expect "a spec package with its pause record is SPEC" specpause SPEC
