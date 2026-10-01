@@ -10,11 +10,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
+  criteriaFromCheckOutput,
   evidencePaths,
   extractTicketBody,
   formatProblem,
   parseEvidenceEntries,
-  parseTicketCriteria,
   probeEvidencePath,
   validateEvidence,
 } from "./summary-evidence";
@@ -36,17 +36,6 @@ Things need doing.
 None.
 ## Turnpikes
 default
-`;
-
-const NESTED_TICKET = `# A thing
-
-## Acceptance criteria
-1. First criterion works with realistic input.
-2. Second criterion handles its edge case:
-    1. This nested item is not a criterion.
-
-## Direction
-Keep the change small.
 `;
 
 function ticketWith(count: number): string {
@@ -113,55 +102,11 @@ function runCheck(summary: string, worktree: string, extra: string[] = []) {
 
 const ticketCheck = join(import.meta.dir, "ticket-check.sh");
 
-function ticketText(problem: string, criteria: string): string {
-  return `# A thing\n\n## Problem / feature\n${problem}## Acceptance criteria\n${criteria}## Direction\nNone.\n## Turnpikes\ndefault\n`;
-}
-
-function oracleCount(ticket: string): number {
-  const dir = mkdtempSync(join(tmpdir(), "oracle-"));
-  try {
-    const file = join(dir, "ticket.md");
-    writeFileSync(file, ticket);
-    const r = spawnSync("bash", [ticketCheck, "--body", file, "--title", "T", "--project", dir], { encoding: "utf8" });
-    const m = /well-formed, (\d+) acceptance criteria/.exec(r.stdout ?? "");
-    if (r.status !== 0 || !m) throw new Error(`oracle rejected the fixture:\n${r.stdout ?? ""}${r.stderr ?? ""}`);
-    return Number(m[1]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-function scriptCount(ticket: string): number {
-  const parsed = parseTicketCriteria(ticket);
-  if (parsed.problem) throw new Error(`script rejected the fixture: ${parsed.problem}`);
-  return parsed.criteria.length;
-}
-
 describe("pure core", () => {
   test("a waybill is read from ## Ticket to ## Project profile", () => {
     const body = extractTicketBody(`# brief\n\n## Ticket\n${TICKET}\n## Project profile\nrepo: x\n`);
     expect(body).toContain("## Acceptance criteria");
     expect(body).not.toContain("Project profile");
-  });
-
-  test("criteria are numbered 1 to n, and continuation lines belong to the item above", () => {
-    expect(parseTicketCriteria(TICKET)).toEqual({ criteria: [1, 2, 3] });
-  });
-
-  test("nested numbered items are not criteria", () => {
-    expect(parseTicketCriteria(NESTED_TICKET)).toEqual({ criteria: [1, 2] });
-  });
-
-  test("criteria indented up to two past the base count, as in ticket-check.sh", () => {
-    const ticket = "## Acceptance criteria\n1. One.\n 2. Two, one space in.\n  3. Three, two spaces in.\n";
-    expect(parseTicketCriteria(ticket)).toEqual({ criteria: [1, 2, 3] });
-    const deep = "## Acceptance criteria\n1. One.\n    2. Two, four spaces in.\n";
-    expect(parseTicketCriteria(deep)).toEqual({ criteria: [1] });
-  });
-
-  test("numbered lines inside comments or fences are not criteria", () => {
-    const ticket = "## Acceptance criteria\n1. One.\n<!--\n2. Dropped long ago.\n-->\n```\n3. An example.\n```\n";
-    expect(parseTicketCriteria(ticket)).toEqual({ criteria: [1] });
   });
 
   test("commented and fenced lines are not read for entries", () => {
@@ -182,31 +127,9 @@ describe("pure core", () => {
     expect(evidencePaths(["- .postmaster/verify/a.md"])).toEqual([".postmaster/verify/a.md"]);
   });
 
-  test("a comment opener in a code span is text", () => {
-    expect(parseTicketCriteria("## Acceptance criteria\n1. Handles `<!--` markers.\n2. Second.\n")).toEqual({
-      criteria: [1, 2],
-    });
-  });
-
-  test("a comment marker inside a fence opens nothing", () => {
-    const ticket = "## Acceptance criteria\n1. One.\n```\n<!-- open in the example\n2. Two.\n```\n3. Three.\n";
-    expect(parseTicketCriteria(ticket)).toEqual({ criteria: [1, 3] });
-  });
-
   test("a code span is prose until it names the verify directory", () => {
     expect(evidencePaths(["no `CLI/iOS` backend"])).toEqual([]);
     expect(evidencePaths(["`.postmaster/verify/a.md` from `scripts/x.ts`"])).toEqual([".postmaster/verify/a.md"]);
-  });
-
-  test("a section ends at a part-naming subheading, as in ticket-check.sh", () => {
-    const ticket = "## Acceptance criteria\n1. One.\n2. Two.\n3. Three.\n### Direction\n9. Stray.\n";
-    expect(parseTicketCriteria(ticket)).toEqual({ criteria: [1, 2, 3] });
-  });
-
-  test("an opener with no closer anywhere is text", () => {
-    expect(parseTicketCriteria("## Acceptance criteria\n<!-- a note never closed\n1. One.\n2. Two.\n")).toEqual({
-      criteria: [1, 2],
-    });
   });
 
   test("adjacent comments on one line are all stripped", () => {
@@ -467,6 +390,9 @@ describe("the script", () => {
   test("a stray numbered line past a part-naming subheading is not a criterion", () => {
     const ticket = `# A thing
 
+## Problem / feature
+Things need doing.
+
 ## Acceptance criteria
 1. The first thing happens.
 2. The second thing happens.
@@ -476,6 +402,8 @@ describe("the script", () => {
 
 ## Direction
 None.
+## Turnpikes
+default
 `;
     const wt = freshWorktree("subheading", ticket);
     const summary = writeSummary(wt, evidenceAll(3));
@@ -550,49 +478,113 @@ None.
   });
 });
 
-describe("ticket-check parity", () => {
-  const problem = "Things need doing.\n";
-  const fixtures: { name: string; ticket: string }[] = [
-    { name: "a plain list", ticket: ticketText(problem, "1. One.\n2. Two.\n3. Three.\n") },
-    { name: "items indented past the base", ticket: ticketText(problem, "1. One.\n 2. Two.\n  3. Three.\n") },
-    { name: "a comment block hiding a numbered line", ticket: ticketText(problem, "1. One.\n<!--\n2. Dropped.\n-->\n") },
+describe("criteria from ticket-check.sh", () => {
+  test("pins the well-formed line the checker reads", () => {
+    // If ticket-check.sh changes this line, this test fails here, not in a lane's run.
+    const dir = mkdtempSync(join(tmpdir(), "pin-"));
+    try {
+      const file = join(dir, "ticket.md");
+      writeFileSync(file, ticketWith(3));
+      const r = spawnSync("bash", [ticketCheck, "--body", file, "--project", dir], { encoding: "utf8" });
+      expect(r.status).toBe(0);
+      expect((r.stdout ?? "").split("\n")[0] ?? "").toBe("well-formed, 3 acceptance criteria");
+      expect(criteriaFromCheckOutput(r.stdout ?? "")).toEqual([1, 2, 3]);
+      expect(criteriaFromCheckOutput("acceptance criteria: numbered 1, 3; number them 1 to 2 in order\n")).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a ticket the reader refuses is reported with its message and exits 2", () => {
+    const ticket = `# A thing
+
+## Problem / feature
+Things need doing.
+
+## Acceptance criteria
+1. The first thing happens.
+3. The third thing happens.
+
+## Direction
+None.
+## Turnpikes
+default
+`;
+    const wt = freshWorktree("refused", ticket);
+    const summary = writeSummary(wt, evidenceAll(3));
+    const { code, out } = runCheck(summary, wt);
+    expect(code).toBe(2);
+    expect(out).toContain("acceptance criteria: numbered 1, 3; number them 1 to 2 in order");
+  });
+
+  test("a missing ticket file exits 1", () => {
+    const wt = freshWorktree("no-ticket");
+    rmSync(join(wt, ".postmaster", "verify", "ticket.md"));
+    const summary = writeSummary(wt, evidenceAll(3));
+    const { code, out } = runCheck(summary, wt);
+    expect(code).toBe(1);
+    expect(out).toContain("cannot read ticket");
+  });
+
+  const readerShapes: { name: string; criteria: string; count: number }[] = [
     {
-      name: "an unclosed mid-line opener",
-      ticket: ticketText(problem, "1. The parser fails on <!-- when nothing closes it.\n2. Two.\n"),
+      name: "a bare ## heading ends the criteria",
+      criteria: "1. The first thing happens.\n##\n2. The second thing happens.\n",
+      count: 1,
     },
     {
-      name: "an opener in a code span",
-      ticket: ticketText(problem, "1. Handles `<!--` markers.\n2. Two.\n"),
-    },
-    {
-      name: "numbered lines inside a fence",
-      ticket: ticketText(problem, "1. One.\n```\n9. Hidden.\n```\n2. Two.\n"),
-    },
-    {
-      name: "numbered lines inside a tilde fence with info",
-      ticket: ticketText(problem, "1. One.\n~~~js\n9. Hidden.\n~~~\n2. Two.\n"),
+      name: "an unclosed comment opener is text",
+      criteria: "1. The parser fails on <!-- when nothing closes it.\n2. The second thing happens.\n",
+      count: 2,
     },
     {
       name: "a list item opening a fence",
-      ticket: ticketText(problem, "1. ```\n   make check\n   ```\n2. The gate passes.\n"),
+      criteria: "1. ```\n   make check\n   ```\n2. The gate passes.\n",
+      count: 2,
     },
     {
-      name: "a fence opener with a backtick in its info",
-      ticket: ticketText(problem, "1. One.\n```x`y\n2. Two.\n"),
+      name: "items indented past the base",
+      criteria: "1. The first thing happens.\n 2. The second thing happens.\n  3. The third thing happens.\n",
+      count: 3,
     },
     {
-      name: "a stray line past a part-naming subheading",
-      ticket: ticketText(problem, "1. One.\n2. Two.\n3. Three.\n### Direction\n9. Stray.\n"),
-    },
-    {
-      name: "an unclosed opener in an earlier section",
-      ticket: ticketText("The parser fails on <!-- when nothing closes it.\n", "1. One.\n2. Two.\n"),
+      name: "an opener in a code span",
+      criteria: "1. Handles `<!--` markers here.\n2. The second thing happens.\n",
+      count: 2,
     },
   ];
 
-  for (const { name, ticket } of fixtures) {
-    test(`both parsers agree: ${name}`, () => {
-      expect(scriptCount(ticket)).toBe(oracleCount(ticket));
+  for (const { name, criteria, count } of readerShapes) {
+    test(`the reader's count holds through the checker: ${name}`, () => {
+      const ticket = `# A thing
+
+## Problem / feature
+Things need doing.
+
+## Acceptance criteria
+${criteria}
+## Direction
+None.
+## Turnpikes
+default
+`;
+      const wt = freshWorktree(`reader-${count}-${name.length}`, ticket);
+      const summary = writeSummary(wt, evidenceAll(count));
+      const { code, out } = runCheck(summary, wt);
+      expect(code).toBe(0);
+      expect(out).toContain(`evidence shape holds for ${count} criteria`);
     });
   }
+
+  test("an all-not-shown summary with its transcript kept holds green", () => {
+    const wt = freshWorktree("all-not-shown", ticketWith(2));
+    writeFileSync(join(wt, ".postmaster", "verify", "check.md"), "summary-evidence transcript\n");
+    const summary = writeSummary(
+      wt,
+      "# Summary\n\n## Evidence\n1. not shown: the harness has no browser backend\n2. not shown: the harness has no browser backend\n",
+    );
+    const { code, out } = runCheck(summary, wt);
+    expect(code).toBe(0);
+    expect(out).toContain("evidence shape holds for 2 criteria (2 not shown)");
+  });
 });
