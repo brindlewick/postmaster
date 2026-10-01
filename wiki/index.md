@@ -34,10 +34,10 @@ How each agent CLI really behaves, as distinct from what its documentation says.
 - [A resume's exit status does not say it continued its thread](concepts/resume-exit-status.md):
   **settled**, for pi, Muse Code and MiMo Code. Resuming a thread it cannot find, a harness can
   exit 0 having done nothing, or having started a new thread.
-- [Muse Code ends a model call that streams nothing for 180 seconds](concepts/muse-stream-timeouts.md):
+- [Before 1.4.2, Muse Code ended a model call that streamed nothing for 180 seconds](concepts/muse-stream-timeouts.md):
   **settled**, for Muse Code 1.4.0 and 1.4.1. The Meta API streams at most ten reasoning summaries per
-  response, so a long reasoning call goes quiet and fails, unretried, at any effort. An
-  undocumented variable sets the limit.
+  response, so a long reasoning call went quiet and failed, unretried, at any effort. An
+  undocumented variable set the limit. 1.4.2 fixes it.
 
 ## Trackers and tooling
 

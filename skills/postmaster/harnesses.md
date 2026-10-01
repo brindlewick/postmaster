@@ -266,8 +266,9 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json \
   `muse login` fails to save its credential to the keychain.
 - It updates itself in the background unless `MUSE_NO_AUTO_UPDATE=1` is set. A run records the
   version it was dispatched with, and a later leg may run a newer one.
-- **A call that streams nothing for 180 seconds ends the run.** Once a model call has streamed a
-  reasoning summary or output, Muse Code ends it after 180 seconds with no SSE event, with
+- **Before 1.4.2, a call that streamed nothing for 180 seconds ended the run.** Once a model
+  call had streamed a reasoning summary or output, Muse Code 1.4.0 and 1.4.1 ended it after 180
+  seconds with no SSE event, with
   `run.terminal.failed` and "model stream idle timeout after 180000ms", exit 1, and does not
   retry it. The Meta API streams at most ten reasoning summaries per response, so a model that
   reasons past them goes quiet until it answers. `TBH_STREAM_IDLE_TIMEOUT_SECS` sets the limit;
@@ -275,6 +276,9 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json \
   `TBH_STREAM_FIRST_EVENT_TIMEOUT_SECS` applies instead, default 180, and that timeout is retried.
   Neither is documented. A lane's or a role's `env_file` sets them.
   [Why](../../wiki/concepts/muse-stream-timeouts.md)
+- **From 1.4.2, a reasoning call has its own limit, and a stall is retried.** A call still
+  reasoning is governed by `TBH_STREAM_REASONING_IDLE_TIMEOUT_SECS`, whose default is over 225 s,
+  and a call that hits it is retried with backoff rather than ending the run.
 - It retries a server error, a dropped connection and a first-event timeout, with backoff, until
   12 minutes after the first failed attempt; then the run fails.
 - The `recorded_at` of a `--json` record is a counter, not a time. Task, call and command ids are
@@ -282,7 +286,7 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/muse/<key> muse exec --json \
   holds a trace log with UTC times for every model attempt.
 - Source: trials of Muse Code 1.4.0 (R4302.1), `raw/trials/muse-headless-forms/`, for the
   prompt and resumes, `raw/trials/muse-mimo-controls/`, and for timeouts and retries,
-  `raw/trials/muse-stream-timeouts/`, rechecked on 1.4.1 (R4380.1).
+  `raw/trials/muse-stream-timeouts/`, rechecked on 1.4.1 (R4380.1) and 1.4.2 (R4684.1).
 
 ## mimo (MiMo Code)
 

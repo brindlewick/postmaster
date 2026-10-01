@@ -116,6 +116,12 @@ installed, #135's synthesis leg ended on the idle timeout twice. At 05:49 UTC th
 1.4.0-R4302.1 back. Two more runs of `p-sudoku2.txt` on it, at `max` and `xhigh` with the default
 limit, failed on the idle timeout again after 7 and 9 summaries.
 
+**Recheck on 1.4.2** (`recheck-1.4.2.txt`). Muse Code 1.4.2 reached the stable channel on 2026-10-01,
+and its changelog says long reasoning turns are no longer cut off. With no variable set, the fresh
+sudoku at `max` went quiet for 225 s after its tenth summary and answered right, and the mock's
+210 s silence completed. A new variable, `TBH_STREAM_REASONING_IDLE_TIMEOUT_SECS`, set to 5, ended
+each attempt after 5 s, and each was retried with backoff.
+
 # What it settles
 
 Facts about Muse Code 1.4.0-R4302.1, rechecked on 1.4.1-R4380.1, with the Meta API on `muse-spark-1.3-contributor`. Once a
@@ -126,7 +132,8 @@ that reasons on after them trips the limit. The three coachman legs failed that 
 the machine's load. Lowering the effort did not avoid it on a problem that needs long
 reasoning, and raising the limit let the same call finish with the right answer. At a lower
 effort the call was slower, or ran out of output tokens before it answered. A response cut
-off at the output limit ends the run as completed with no text, exit 0.
+off at the output limit ends the run as completed with no text, exit 0. Muse Code 1.4.2 no longer
+fails this way: a reasoning call has its own limit, and a stall is retried.
 
 It does not settle why the API stops at ten, or what drops a connection that has been silent for
 minutes, the provider or something between. Two connections were dropped, after 352 s and 762 s

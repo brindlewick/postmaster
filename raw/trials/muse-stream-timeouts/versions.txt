@@ -5,3 +5,4 @@ model: muse-spark-1.3-contributor, provider meta
 trials run: 2026-09-29, 01:25 to 02:07 UTC, on a machine with 18 cores at a load of about 27
 recheck: Muse Code 1.4.1 (1.4.1-R4380.1), installed by its own updater at 03:42 UTC on 2026-09-29
 rollback: Muse Code 1.4.0 (1.4.0-R4302.1) again from 05:49 UTC on 2026-09-29, put back by its own updater
+fixed: Muse Code 1.4.2 (1.4.2-R4684.1) from 00:00 UTC on 2026-10-01, installed by its updater; checked 07:29 to 07:37 UTC

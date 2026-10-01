@@ -1,0 +1,35 @@
+Muse Code 1.4.2 (1.4.2-R4684.1) reached the muse-stable channel and was installed by its updater at
+00:00 UTC on 2026-10-01. Checked the same morning, 07:29 to 07:37 UTC.
+
+From the changelog in Meta's public SDK repository, meta-models/muse-code-sdk, CHANGELOG.md at
+commit cd4134968 (2026-09-30, "Re-mirror the SDK closure at tbh@fda770f (1.4.2 lockstep)"), section 1.4.2:
+  - Retry stalled model responses through the remaining attempt budget
+  - Long reasoning turns are no longer cut off by the stream idle timeout while the model is still thinking
+
+In the 1.4.2 binary: TBH_STREAM_IDLE_TIMEOUT_SECS and TBH_STREAM_FIRST_EVENT_TIMEOUT_SECS, as before, and a new
+TBH_STREAM_REASONING_IDLE_TIMEOUT_SECS beside them ("model stream reasoning idle timeout must be greater than zero").
+
+The mock needs the catalog cache in schema 2 on 1.4.2 (apparatus/model-catalog-v2.json, a copy of the cache
+1.4.2 wrote when it fetched the catalog for the real run below); with schema 1 it fails to start.
+
+=== w7: mock: summaries at 10 s and 20 s, then silent to 230 s; env none
+exit 0 after 231.4 s
+  muse run.terminal: completed, reason None, text 'OK'
+  muse attempt 1: terminal completed none, after 230.068 s; next attempt 0 after 0 ms
+
+=== w8: mock: summaries at 10 s and 20 s, then silent to 60 s; env TBH_STREAM_REASONING_IDLE_TIMEOUT_SECS=5
+exit 143 after 157.3 s (stopped by hand after its retries were seen)
+  muse attempt 1: retry scheduled retryable_failure, after 15.061 s; next attempt 2 after 1000 ms
+  muse attempt 2: retry scheduled retryable_failure, after 15.093 s; next attempt 3 after 2000 ms
+  muse attempt 3: retry scheduled retryable_failure, after 15.046 s; next attempt 4 after 4000 ms
+  muse attempt 4: retry scheduled retryable_failure, after 15.087 s; next attempt 5 after 8000 ms
+  muse attempt 5: retry scheduled retryable_failure, after 15.075 s; next attempt 6 after 10000 ms
+  muse attempt 6: retry scheduled retryable_failure, after 15.096 s; next attempt 7 after 10000 ms
+  muse attempt 7: retry scheduled retryable_failure, after 15.071 s; next attempt 8 after 10000 ms
+  muse attempt 8: terminal cancelled cancelled, after 5.313 s; next attempt 0 after 0 ms
+
+=== e4-max: real API, p-sudoku2.txt at max, default limits (no variable set), MUSE_TRANSPORT_TRACE=1
+exit 0 after 335.1 s
+  wire resp_6abe0bca57e9b69aecbc49e9 start +    3.4s dur   319.6s events  64 summaries 10 last-summary-at +  94.8s max-gap  224.6s after response.reasoning_summary_part.done at +94.8s -> response.output_item.done
+  wire resp_6abe0d0ba8ed5e938a35448a start +  324.3s dur     8.6s events  21 summaries  2 last-summary-at +   5.2s max-gap    3.6s after response.output_item.added at +0.1s -> response.reasoning_summary_part.added
+  muse run.terminal: completed; answer matches the solution

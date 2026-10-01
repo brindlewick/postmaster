@@ -8,6 +8,13 @@ updated: 2026-09-29
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-10-01] ingest | Muse Code 1.4.2 fixes the idle timeout
+
+Muse Code 1.4.2's changelog says long reasoning turns are no longer cut off, and a recheck on
+`raw/trials/muse-stream-timeouts/` confirms it: the sudoku that failed on 1.4.0 answered with no
+variable set. The page is retitled to say the claim held before 1.4.2; its standing stays
+`settled` for 1.4.0 and 1.4.1. `harnesses.md` records 1.4.2's separate reasoning limit and retry.
+
 ## [2026-09-29] ingest | Muse Code's idle timeout, and why long reasoning trips it
 
 Issue #127. A new harness page, settled on a trial: once a call has streamed a reasoning summary,
