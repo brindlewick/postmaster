@@ -980,6 +980,21 @@ PY
     && [ "$(action_count "$root/resume" resume)" -eq 3 ] \
     && ok "the fourth transient end wakes the postmaster without incrementing or resuming" \
     || fail "the fourth transient end wakes the postmaster without incrementing or resuming"
+  root="$tmp/auto-resume-fallback"; auto_run "$root" resume-fallback 1 "thread-fb"
+  python3 - "$root/resume-fallback/manifest.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+m = json.load(open(p)); m["coachman"]["legs"]["1"]["name"] = "coachman_fallback"
+json.dump(m, open(p, "w"), indent=2)
+PY
+  record_attempt "$root/resume-fallback" 1 incomplete coachman_fallback thread-fb
+  printf '%s\n' 'model stream idle timeout' > "$root/resume-fallback/logs/coachman-leg-1.err"
+  : > "$root/resume-fallback/logs/coachman-leg-1-events.jsonl"; : > "$root/resume-fallback/.leg-1-exited"
+  watch_stub "$root"
+  [ $rc -eq 3 ] && [ "$(action_count "$root/resume-fallback" resume)" -eq 1 ] \
+    && grep -qxF 'thread=thread-fb' "$tmp/calls/resume-resume-fallback-1" \
+    && ok "a transient end on a fallback leg resumes on its recorded thread" \
+    || fail "a transient end on a fallback leg resumes on its recorded thread"
   root="$tmp/auto-stale"; auto_run "$root" stale 1 "thread-stale"
   record_attempt "$root/stale" 1 incomplete coachman thread-stale
   printf '%s\n' 'model stream idle timeout' > "$root/stale/logs/coachman-leg-1.err"
@@ -1038,7 +1053,7 @@ PY
   done
 
   echo "postmaster wake controls: recorded walls and refusals"
-  for spec in "wall TAKEOVER walled coachman quota exceeded: provider capacity reached" "provider TAKEOVER walled coachman provider wall: model capacity exhausted" "refusal ASK refused coachman launch: resume needs a thread id"; do
+  for spec in "wall TAKEOVER walled coachman quota exceeded: provider capacity reached" "provider TAKEOVER walled coachman provider wall: model capacity exhausted" "fallbackwall ASK walled coachman_fallback quota exceeded on the fallback leg" "refusal ASK refused coachman launch: resume needs a thread id"; do
     set -- $spec; name=$1 want=$2 outcome=$3 role=$4; shift 4; message=$*
     root="$tmp/wake-$name"; auto_run "$root" "$name" 1 "thread-$name"
     record_attempt "$root/$name" 1 "$outcome" "$role" "thread-$name"
