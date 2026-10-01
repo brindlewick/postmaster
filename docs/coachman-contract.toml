@@ -83,3 +83,11 @@ holds = "the approval stanza shape and the count vocabulary Spec review branches
 [[files]]
 path = "scripts/launch.sh"
 holds = "the attempt phase: refused before preflight, started once the harness is callable"
+
+[[files]]
+path = "scripts/fixture.sh"
+holds = "the fixture entrypoint the flow invokes"
+
+[[files]]
+path = "scripts/fixture.ts"
+holds = "the fixture-copy mark new writes, and scoring a run from its records"

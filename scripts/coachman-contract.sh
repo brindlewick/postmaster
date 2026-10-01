@@ -272,6 +272,16 @@ def exercise_self_test(source_root):
                                        "# POSTMASTER_ATTEMPT_PHASE names the file this attempt's phase is written to:",
                                        "# POSTMASTER_ATTEMPT_PHASE names the file this attempt's phase is recorded in:"),
              "scripts/launch.sh")
+    run_case("a wording fix in fixture.sh answers yes",
+             lambda repo: replace_once(repo, "scripts/fixture.sh",
+                                       "#!/usr/bin/env bash\nexec bun",
+                                       "#!/usr/bin/env bash\n# fixture copies and scores\nexec bun"),
+             "scripts/fixture.sh")
+    run_case("a wording fix in fixture.ts answers yes",
+             lambda repo: replace_once(repo, "scripts/fixture.ts",
+                                       "// `new` marks its copy with `postmaster.fixture` in that repository's local git config.",
+                                       "// `new` marks its copy with `postmaster.fixture` in that copy's local git config."),
+             "scripts/fixture.ts")
     run_case("a wiki-only change is not a contract change",
              lambda repo: (repo / "wiki/concepts/probe-note.md").parent.mkdir(parents=True, exist_ok=True) or
                           (repo / "wiki/concepts/probe-note.md").write_text("notes\n", encoding="utf-8"))
