@@ -242,6 +242,31 @@ def exercise_self_test(source_root):
                                        "# What it judges, and nothing more:",
                                        "# What it judges, and nothing else:"),
              "scripts/ticket-check.sh")
+    run_case("a wording fix in the spec session runbook answers yes",
+             lambda repo: replace_once(repo, "skills/postmaster/spec-session.md",
+                                       "**You edit only the copy** named in the brief,",
+                                       "**You edit only that copy** named in the brief,"),
+             "skills/postmaster/spec-session.md")
+    run_case("a wording fix in spec-session.sh answers yes",
+             lambda repo: replace_once(repo, "scripts/spec-session.sh",
+                                       "#!/usr/bin/env bash\nexec bun",
+                                       "#!/usr/bin/env bash\n# the spec session's verbs\nexec bun"),
+             "scripts/spec-session.sh")
+    run_case("a wording fix in spec-session.ts answers yes",
+             lambda repo: replace_once(repo, "scripts/spec-session.ts",
+                                       "// The spec session's two verbs: brief writes the interactive session's brief, and approve",
+                                       "// The spec session's two verbs: brief writes the session's brief, and approve"),
+             "scripts/spec-session.ts")
+    run_case("a wording fix in spec-decisions.sh answers yes",
+             lambda repo: replace_once(repo, "scripts/spec-decisions.sh",
+                                       "#!/usr/bin/env bash\nexec bun",
+                                       "#!/usr/bin/env bash\n# the approval record's verbs\nexec bun"),
+             "scripts/spec-decisions.sh")
+    run_case("a wording fix in spec-decisions.ts answers yes",
+             lambda repo: replace_once(repo, "scripts/spec-decisions.ts",
+                                       "// Own the planning stage's spec decisions: one file per package, one stanza for the run's",
+                                       "// Own the planning stage's spec decisions: one file per package, and one stanza for the run's"),
+             "scripts/spec-decisions.ts")
     run_case("a wiki-only change is not a contract change",
              lambda repo: (repo / "wiki/concepts/probe-note.md").parent.mkdir(parents=True, exist_ok=True) or
                           (repo / "wiki/concepts/probe-note.md").write_text("notes\n", encoding="utf-8"))
