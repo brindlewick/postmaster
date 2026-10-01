@@ -296,10 +296,7 @@ beforeAll(() => {
       "an env file that removes the harness from PATH remains refused",
       rc === 1 && readFileSync(phasefile, "utf8") === "refused\n",
     );
-    writeFileSync(
-      join(tmp, "phase-count.env"),
-      `echo sourced >> "${join(tmp, "sources.log")}"\n`,
-    );
+    writeFileSync(join(tmp, "phase-count.env"), `echo sourced >> "${join(tmp, "sources.log")}"\n`);
     writeFileSync(
       join(tmp, "phase-count.toml"),
       `[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n\n[team]\n` +
@@ -4310,7 +4307,9 @@ describe("attempt phase: launch and resume witness the harness start", () => {
     assertControl("an env file that removes the harness from PATH remains refused");
   });
   test("an env file is sourced once to validate and once to launch, never replayed between", () => {
-    assertControl("an env file is sourced once to validate and once to launch, never replayed between");
+    assertControl(
+      "an env file is sourced once to validate and once to launch, never replayed between",
+    );
   });
   test("a refused resume with an existing thread id remains refused", () => {
     assertControl("a refused resume with an existing thread id remains refused");

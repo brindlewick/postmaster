@@ -5612,7 +5612,10 @@ export async function runControls(): Promise<number> {
     const tornD = join(root, "torn-d");
     mkdirSync(join(tornD, "logs"), { recursive: true });
     writeFileSync(join(tornD, "run.json"), readFileSync(join(legD, "run.json"), "utf8"));
-    writeFileSync(join(tornD, "manifest.json"), '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n');
+    writeFileSync(
+      join(tornD, "manifest.json"),
+      '{"stage":"review","leg":1,"coachman":{"legs":{}}}\n',
+    );
     writeFileSync(
       join(tornD, "brief.md"),
       `# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, torn\nsynthesis worktree: ${legWt}\n`,
@@ -5620,19 +5623,16 @@ export async function runControls(): Promise<number> {
     writeFileSync(join(tornD, "prompt.txt"), "torn prompt\n");
     writeFileSync(
       join(tornD, "logs", "coachman-leg-1-attempts.jsonl"),
-      `{"attempt":1,"leg":1,"name":"synthesis","request":"launch","role":"coachman","prompt":${JSON.stringify(join(tornD, "prompt.txt"))},"thread_id":"","outcome":"refused","on_answer":"retry","backfilled":false}`
-        + '\n{"attempt":2,"leg":1',
+      `{"attempt":1,"leg":1,"name":"synthesis","request":"launch","role":"coachman","prompt":${JSON.stringify(join(tornD, "prompt.txt"))},"thread_id":"","outcome":"refused","on_answer":"retry","backfilled":false}` +
+        '\n{"attempt":2,"leg":1',
     );
-    r = execHost(
-      ["leg", "retry", tornD, legWt, "synthesis", "1"],
-      legPath,
-      f.caller,
-      legEnv(),
-    );
+    r = execHost(["leg", "retry", tornD, legWt, "synthesis", "1"], legPath, f.caller, legEnv());
     await marker(join(tornD, ".leg-1-exited"), 30);
     await pass(
       "a torn tail does not wedge a retry past its last good record",
-      () => r.code === 0 && nonEmptyLines(join(tornD, "logs", "coachman-leg-1-attempts.jsonl")).length === 3,
+      () =>
+        r.code === 0 &&
+        nonEmptyLines(join(tornD, "logs", "coachman-leg-1-attempts.jsonl")).length === 3,
       r.err,
     );
     await pass("every attempt record states its on-answer action", () => auditOk);

@@ -1475,9 +1475,7 @@ exit "$rc"
     }
     const load = spawnSync("bash", [probe, ENV_FILE, HARNESS], { encoding: "utf8" });
     rmSync(probe, { force: true });
-    const loaded = new RegExp(`LOADED:([0-9]+):([0-9]+):${nonce}`, "u").exec(
-      load.stdout ?? "",
-    );
+    const loaded = new RegExp(`LOADED:([0-9]+):([0-9]+):${nonce}`, "u").exec(load.stdout ?? "");
     if (!loaded) {
       // The file exited (or died) mid-source: sourcing in-process would take
       // this process with it, so its end is ours, signal included. What it
