@@ -141,6 +141,26 @@ the stream tail, then remount it: resume the thread.
 **The postmaster polls; the coachman never pushes.** Cross-session messaging is
 harness-specific and the flow does not rely on it.
 
+### Marker ownership
+
+| Marker or artifact | Writer | Meaning / reader |
+|---|---|---|
+| `logs/<lane>.done` | `host.sh` | A workhorse process exited; the coachman collects its result. |
+| `logs/review-r<round>-$LENS-<lane>.done` | `host.sh` | A reviewer process exited; the coachman collects that round. |
+| `.leg-<n>-exited` | `host.sh` | The launch ended: its process exited or startup failed after recording the reason. Cleared before a relaunch or resume. |
+| `.leg-<n>-done` | Coachman, after `handoff-check.sh` exits 0 | The hand-off is complete; the postmaster may dispatch the next leg. |
+| `.checkpoint-<n>-ready` | Coachman | `checkpoint-<n>.md` is ready for the postmaster to read. |
+| `.checkpoint-review-ready` | Coachman | `checkpoint-review.md` is ready for the postmaster to read. |
+| `.escalation-ready` | Coachman | `ESCALATION.md` asks for a ruling; the postmaster resumes the same leg. |
+| `.card-ready` | Coachman | `card.md` and the leg's hand-off are ready for the postmaster's gate. |
+| `.waiting-on-user` | Postmaster | A question is waiting; the postmaster removes it when the answer arrives. |
+
+Markers report the state of their paired artifact or process. They never replace it.
+
+The coachman supplies `.leg-<n>-exited` to `host.sh` for its own process. Its lane and
+reviewer launches give `host.sh` the corresponding `logs/*.done` path; the host owns marker
+clearing and writing after exit.
+
 ## Legs and hand-offs
 
 Read `run.json.coachman_contract` before acting. Contract `2` is the current flow: a run has
@@ -190,6 +210,11 @@ One paragraph: where the next leg starts, and what it must do first. On the last
 Then close the open section with `<tool>/scripts/run-log.sh <dispatch> --close`, log `handoff`, touch
 `.leg-<n>-done`, and exit. The postmaster launches the next leg;
 you never do. A leg that exits without its hand-off is spent, and the postmaster remounts it.
+
+**Leg completion condition.** A leg ends only after writing all required, nonempty sections
+to `handoff-<n>.md`, passing `<tool>/scripts/handoff-check.sh`, closing its open run-log
+section, logging `handoff`, and touching `.leg-<n>-done`. A process exit marker alone never
+finishes a leg. If the process exited and there is no done marker, the postmaster remounts it.
 
 **Escalations stay inside the leg.** An escalation writes `ESCALATION.md`, touches
 `.escalation-ready` and exits; the ruling arrives as a resume of the same thread, and the

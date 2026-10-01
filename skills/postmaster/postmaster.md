@@ -162,6 +162,8 @@ For the next ticket in order, when the run ceiling (`team.max_runs`) has room:
    config here is the one in `run.json`. Then
    `<tool>/scripts/turnpikes.sh legs <dispatch> --expect '<that turnpikes: line>'` exits 0 and
    prints the legs step 2 checked, before anything is launched.
+   Record `coachman contract fixture: pending` and `contract fixture check: -`; no
+   implementation branch exists yet to classify.
 8. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. Under
    contract 2 the coachman never touches the ticket's state and the postmaster marks it done
    after the merge; under the legacy contract the coachman touches it only at stage 3's merge.
@@ -488,9 +490,9 @@ missed.
    rebasing, run its gates again and raise the card again, and wait for the corrected card.
    For a change to the coachman contract, that merge means a new fixture run from the final
    branch only when what the merge brought in changes the coachman contract; otherwise the
-   earlier fixture result stands. Until #163 (a script that decides whether a change touches
-   the contract) lands, that is the postmaster's judgement from the tickets the default
-   branch merged. Then
+   earlier fixture result stands. That is what the contract checker says: run the dispatch
+   BASE's copy on what the merge brought in, as the classify step below does; a yes repeats
+   the fixture from the final branch, a no lets the recorded clean score stand. Then
    `<tool>/scripts/landing.sh card-results <dispatch> <synthesis-wt> <the leg's
    checkpoint> <dispatch>/card.md`
    must print `match`: the card holds the rendered block exactly once (the leg's
@@ -501,8 +503,40 @@ missed.
    waybill mentions a user journey, holds landing until the journey runs or the user
    rules. The postmaster judges
    every other non-pass with its evidence, as before: on `judge`, and on any other check
-   but the gate that is not pass, weigh the result and put it to the user. Verify that every
-   branch the card
+   but the gate that is not pass, weigh the result and put it to the user.
+   **Classify the final branch.** The index is a list of files; any change to a
+   listed file is a contract change, and the checker names each listed file the
+   change touched. The index names the checker in its detector field; read that
+   path from BASE's index, never the branch tip's. Each comparison first checks
+   the index at both revs: neither has one, and there is no contract change, so
+   record `no` (a target that does not carry the contract lands here); only the
+   older has one, and the branch deleted the contract, an error to resolve. If
+   dispatch BASE lacks the detector file, the branch introduces the checker:
+   every comparison, the first and every repeat, ends in a fixture run without
+   classifying. Else run BASE's copy — `tmp=$(mktemp) && git -C <repo>
+   show <BASE>:<detector-file> > "$tmp" && bash "$tmp" <repo> <BASE> <ticket-branch>` —
+   and record its command, result, and checked commit: replace `coachman
+   contract fixture: pending` on the waybill with `yes` or `no`, fill `contract fixture
+   check:` with the command, the commit and the score (`-` when no fixture runs), and log
+   a `note` with the same. Remove the temp copy. BASE's logic is the last honest one: a
+   change that weakens the checker is itself caught as a contract change, since the
+   detector file is covered whole, while the file list compared comes from both revs.
+   Exit 1 means yes: make a fresh fixture repo with `<tool>/scripts/fixture.sh new
+   <fixture-name> <fixture-ticket>`, dispatch its ticket with the postmaster tool checked
+   out at the final branch, and withhold landing until `<tool>/scripts/fixture.sh score
+   <fixture-dispatch> <fixture-repo>` exits 0. Exit 0 from the contract checker means no;
+   any other exit is an error to resolve before landing.
+
+   Record the commit that the clean fixture score covered, on the waybill's check line and
+   in a `note`. Before landing, check the final branch again if it moved. With no clean
+   fixture score yet, compare dispatch BASE to the final branch; a yes requires the first
+   fixture. With a clean score, compare its commit to the final branch, still running the
+   dispatch BASE's copy, never the scored commit's; a yes repeats the fixture from the
+   final branch, made with `<tool>/scripts/fixture.sh new`, while a no lets the recorded
+   clean score stand. This is the check for a merge of main into the ticket branch after
+   the earlier score. Where dispatch BASE has no copy to run, the no-copy rule above ends
+   the comparison in a fixture without classifying.
+   Verify that every branch the card
    lists exists and has the stated state; `run-log.md`'s
    SYNTHESIS line accounts for each lane; every DEGRADED lane matches `degrade` actions; the
    turnpikes match the waybill, `actions.jsonl` has `review-launch` lines under each review lens

@@ -139,6 +139,7 @@ scripts/review-findings.sh normalize|harvest …                   # native bug-
 scripts/host.sh leg launch|resume|takeover|retry|outcome|backfill|waiting … | detect|name|run|stop|close|stop-run|close-run|spawn|send|wait|read … # leg lifecycle, launch placement and teardown
 scripts/view-stream.sh < <events-file>                            # a harness's events, wrapped: what it says and runs, in full
 scripts/runs-status.sh <run-root>                                  # the postmaster's poll
+scripts/coachman-contract.sh <base> <head>                         # whether a change touches the contract, by file
 scripts/runs-watch.sh <run-root> [--timeout <seconds>]              # wait until a run needs the postmaster
 scripts/handoff-check.sh <handoff-file>                            # a leg may end only on exit 0
 scripts/wiki-lint.sh [--self-test]                                 # the wiki's rules, run not remembered
