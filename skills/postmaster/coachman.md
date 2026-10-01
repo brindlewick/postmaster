@@ -24,9 +24,10 @@ half, how a run is prepared and what the waybill carries, is `SKILL.md`. You do 
 |---|---|
 | `<dispatch>` = `<repo>/.postmaster/runs/<TICKET>/` | this run's directory; nothing else writes to it |
 | `<dispatch>/brief.md` | the waybill |
-| `<dispatch>/manifest.json` | `stage`, `leg`, `base`, `lanes.<lane>.{thread_id, outcome}`, `coachman.legs.<n>.{thread_id, name}`; the postmaster creates it and owns `leg`, `base`, `coachman` and the terminal stages, you own `lanes` and every stage before those; change `stage` only with `<tool>/scripts/stage.sh`, update the rest in place, never rewrite the file |
+| `<dispatch>/manifest.json` | `stage`, `leg`, `base`, `lanes.<lane>.{thread_id, outcome, spec_commit}`, `coachman.legs.<n>.{thread_id, name}`; the postmaster creates it and owns `leg`, `base`, `coachman` and the terminal stages, you own `lanes` and every stage before those; change `stage` only with `<tool>/scripts/stage.sh`, update the rest in place, never rewrite the file |
 | `<dispatch>/run-log.md` | running narrative, written only through `<tool>/scripts/run-log.sh`, which puts the time on every entry and times every section |
-| `<dispatch>/run.json` | the run's fixed facts: postmaster commit and its pinned checkout (`tool` in the waybill), config, harness versions; written once at dispatch by the postmaster, never edited; every launch and resume in the run takes its config from here (`--run <dispatch>`) and its scripts from that checkout |
+| `<dispatch>/run.json` | the run's fixed facts: postmaster commit and its pinned checkout (`tool` in the waybill), coachman contract version, config, harness versions; written once at dispatch by the postmaster, never edited; every launch and resume in the run takes its config from here (`--run <dispatch>`) and its scripts from that checkout |
+| `<dispatch>/shares.json` | the synthesis text-share measurement: base, synthesis, lane and oracle commits, exclusions, and exact counts and shares by file kind; written once by `<tool>/scripts/synthesis-shares.ts` |
 | `<dispatch>/checks.json` | the checks the run is held to, recorded once at dispatch by `<tool>/scripts/verify.sh record`; never edited |
 | `<dispatch>/journey/` | your journey reports, one per commit walked, at the path `<tool>/scripts/verify.sh journey-path` gives |
 | `<worktree>/.postmaster/verify/` | a worktree's copy of the run's checks and ticket, written by `<tool>/scripts/verify.sh arm`; git ignores it |
@@ -39,6 +40,8 @@ half, how a run is prepared and what the waybill carries, is `SKILL.md`. You do 
 | `<repo>/.worktrees/<TICKET>` | synthesis worktree, branch `<TICKET>` |
 | `<repo>/.worktrees/<TICKET>-<lane>` | workhorse worktree, branch `wb/<TICKET>-<lane>` (`wb` for workhorse branch) |
 | `<dispatch>/checkpoint-<n>.md` | checkpoint cards: `1` and `review` |
+| `<dispatch>/spec-review.md` | the planning stage's review package: one entry per workhorse, its spec's commit and the link the postmaster puts to the user; written before `.spec-review-ready` |
+| `<dispatch>/spec-decisions.md` | the postmaster's record, for the current package, of the user's word on each spec: approved, changes in the user's words, or dropped; written only through `<tool>/scripts/spec-decisions.sh`, which also counts approvals run-wide; what you read on resume from the planning pause |
 | `<repo>/.worktrees/<TICKET>-rev-<lens>-<lane>` | reviewer scratch, one per lens per lane, detached at the synthesis HEAD, fresh every round: a clone under the security lens, a worktree under the others |
 | `<dispatch>/style-sort.md` | aftercare's sort of the run's style findings, which the postmaster puts to the user |
 
@@ -71,9 +74,12 @@ with its exit; `verify` per check per commit it runs on, written by `<tool>/scri
 and never by hand; `ticket-state` and `ticket-comment` per tracker write; `merge` on the merge;
 `teardown` per worktree removed; `handoff-accept` as a leg's first action and `handoff` as its
 last; `stage` whenever the run enters a stage, written by `<tool>/scripts/stage.sh` and never by hand;
-`tool-fault` as soon as postmaster itself misbehaves (Tool faults, below); `note` for anything
-else worth a line. A lone dissenter, a convergent fix, a wall: each is one line here, computable
-later, rather than a sentence in prose that cannot be counted.
+`spec-review` per user decision on a workhorse's spec, written by the postmaster from the
+interactive session and never by you (target the lane, detail `approved|changes|dropped` then
+the spec commit then the user's words); `tool-fault` as soon as postmaster itself misbehaves
+(Tool faults, below); `note` for anything else worth a line. A lone dissenter, a convergent fix,
+a wall: each is one line here, computable later, rather than a sentence in prose that cannot be
+counted.
 
 ## Tool faults: when postmaster itself misbehaves
 
@@ -113,6 +119,7 @@ by files in its own dispatch directory.
 | `run-log.md` | running narrative |
 | `card.md` + `.card-ready` | the ship card is complete; the postmaster may gate |
 | `ESCALATION.md` + `.escalation-ready` | it needs a ruling and has stopped |
+| `spec-review.md` + `.spec-review-ready` | the planning stage paused for the user's spec review |
 | `logs/coachman-leg-<n>-events.jsonl` | its own stream for leg `n`; errors in `logs/coachman-leg-<n>.err` |
 | `checkpoint-<n>.md` + `.checkpoint-<n>-ready` | a checkpoint card is complete; informational in autonomous mode, a stop in consult mode |
 | `handoff-<n>.md` + `.leg-<n>-done` | the leg is finished and the next may start |
@@ -143,7 +150,7 @@ harness-specific and the flow does not rely on it.
 | `.checkpoint-<n>-ready` | Coachman | `checkpoint-<n>.md` is ready for the postmaster to read. |
 | `.checkpoint-review-ready` | Coachman | `checkpoint-review.md` is ready for the postmaster to read. |
 | `.escalation-ready` | Coachman | `ESCALATION.md` asks for a ruling; the postmaster resumes the same leg. |
-| `.card-ready` | Coachman | `card.md` and `handoff-3.md` are ready for the postmaster's gate. |
+| `.card-ready` | Coachman | `card.md` and the leg's hand-off are ready for the postmaster's gate. |
 | `.waiting-on-user` | Postmaster | A question is waiting; the postmaster removes it when the answer arrives. |
 
 Markers report the state of their paired artifact or process. They never replace it.
@@ -154,18 +161,21 @@ clearing and writing after exit.
 
 ## Legs and hand-offs
 
-A run is up to three legs, `synthesis`, `review` and `ship`, each a fresh coachman thread
-launched by the postmaster, so no context outlives a leg and nothing a leg knew survives except
-what it wrote down. The boundaries are the run's own gates:
+Read `run.json.coachman_contract` before acting. Contract `2` is the current flow: a run has
+one or two legs, synthesis and optional review. A missing value or `1` is a run dispatched
+before the change: use the legacy ship leg and its merge behavior below. Never change a run's
+contract. Each leg is a fresh coachman thread, so no context outlives a leg and nothing a leg
+knew survives except what it wrote down. The boundaries are the run's own gates:
 
 | leg | name | covers | ends with |
 |---|---|---|---|
-| 1 | `synthesis` | stage 0, stage 1, checkpoint 1 | `handoff-1.md` |
-| 2 | `review` | stage 2: the waybill's review turnpikes as lenses in one loop, every round to clean | `handoff-2.md` |
-| 3 | `ship` | stage 3 and stage 4: gates, preview, QA, the card, the merge on the word, the style sort, teardown | `handoff-3.md` |
+| 1 | `synthesis` | stage 0, the planning stage, stage 1, checkpoint 1; the ship card (stage 3) when no review leg runs | `handoff-1.md` |
+| 2 | `review` | stage 2: the waybill's review turnpikes as lenses in one loop, every round to clean; then the ship card (stage 3) | `handoff-2.md` |
+| 3 | `ship` | legacy contract only, stage 3 and stage 4: gates, preview, QA, the card, the merge on the word, the style sort, teardown | `handoff-3.md` |
 
-The review leg runs only when the waybill names a turnpike that runs in it; without one, ship
-follows synthesis and starts from `handoff-1.md`. `<tool>/scripts/turnpikes.sh legs <dispatch>` prints
+The review leg runs only when the waybill names a turnpike that runs in it. Under contract 2,
+without one synthesis writes the ship card and no next leg starts. Under the legacy contract,
+ship follows synthesis when review is absent. `<tool>/scripts/turnpikes.sh legs <dispatch>` prints
 the run's legs and the turnpikes each one runs. A leg runs each turnpike listed for it from that
 turnpike's step in this runbook; a listed turnpike with no step here cannot run: escalate.
 
@@ -182,7 +192,7 @@ must exit 0 before the marker is touched:
 ## Decisions
 Every decision this leg took, one per line, with its reason, marked do-not-reopen where it is settled; every do-not-reopen decision from earlier hand-offs carried forward verbatim; and always the oracle decision, blind acceptance tests written as the first commit or not written and why.
 ## Deferred findings
-Every finding not applied, with its lens and originating round where known, its disposition and reason (the review leg restates these to its reviewers; the ship leg carries them to the ship card, the style ones to its Style residue and the rest to its open findings).
+Every finding not applied, with its lens and originating round where known, its disposition and reason (the review leg restates these to its reviewers; the last leg carries them to the ship card, the style ones to its Style residue and the rest to its open findings).
 ## Verified by execution
 What was verified by running something, with the command and its exit.
 ## Unverified
@@ -192,7 +202,7 @@ Every branch this run has created and its state; every lane and whether it is RE
 ## Open questions
 Anything the next leg must decide or the postmaster must rule on.
 ## Next leg
-One paragraph: where the next leg starts, and what it must do first.
+One paragraph: where the next leg starts, and what it must do first. On the last leg of a run this is for the postmaster: what Stage F must verify, and what aftercare it picks up.
 ```
 
 Then close the open section with `<tool>/scripts/run-log.sh <dispatch> --close`, log `handoff`, touch
@@ -241,10 +251,12 @@ the brief.
 - `WORKHORSE-SPEC.md`, the **workhorse spec**: written from `workhorse-spec-template.md`
   beside this file and committed first, on its own, before any code: its approach, technical
   context, how it meets the ticket's direction, the files it will touch, the decisions it
-  made, and its tasks, each tagged with the acceptance criterion it serves. It is not reviewed
-  during the run and no stage waits on it; the coachman copies it into the run's audit. The
-  brief carries this instruction without the link that follows.
+  made, and its tasks, each tagged with the acceptance criterion it serves. The planning
+  stage puts it to the user before any code is written; a workhorse whose spec is not
+  approved writes no code. You copy it into the run's audit as its first commit added it and
+  as it stood when approved. The brief carries this instruction without the link that follows.
   [Why each workhorse drafts its own spec](../../wiki/concepts/workhorse-spec.md)
+  [Why the user reviews it before code](../../wiki/concepts/planning-stage.md)
 - `WORKHORSE-SUMMARY.md`: what it built, as a list of the commits on its branch; how it verified
   it: under `## Checks`, what `<tool>/scripts/verify.sh run .` printed when run just before the
   summary was written, one line per check the brief names with its command and exit, then any
@@ -281,14 +293,20 @@ A workhorse commits incrementally as it goes, never pushes, never reads other br
    <dispatch> bootstrapped`, and add one `lanes` entry per lane, in place, never rewriting the
    file (the postmaster owns `leg`, `base` and `coachman`). Keep thread ids and outcomes current
    at every transition. The stage changes only through `<tool>/scripts/stage.sh`, in this order:
-   `bootstrapped`, `workhorses-running`, `synthesis`, `checkpoint-1`, `review` (in a run with a
-   review leg), `shipping`, `shipped`; the postmaster sets `done` when it closes the run. Each
+   `bootstrapped`, `planning`, `workhorses-running`, `synthesis`, `checkpoint-1`, `review` (in a
+   run with a review leg), `shipping`, `shipped`; the last leg carries the run to `shipping` with the ship
+   card, and the postmaster sets `shipped` after the merge and `done` when it closes the run. Each
    change is logged, and the run's timings are computed from those lines by
-   `<tool>/scripts/run-times.sh <dispatch>`. Never delete the manifest. It is the run's history, and
+   `<tool>/scripts/run-times.sh <dispatch>`, so the `planning` row is how long the planning
+   stage took, drafting through the last decision, with the user's review inside it.
+   Never delete the manifest. It is the run's history, and
    the postmaster's poll reads it.
 6. **Write each workhorse's brief** to `<dispatch>/<lane>-prompt.txt`: the ticket verbatim, the
    project profile, the docs to read first named explicitly, the `WORKHORSE-SPEC.md` /
-   `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract with `workhorse-spec-template.md` in full, the autonomous-defaults rule (decide within-brief questions
+   `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract with `workhorse-spec-template.md` in full, the planning stop (write and commit the spec, then stop before any code; the user
+   reviews it and only an approved spec may be implemented; on a resume carrying the user's
+   words, revise the spec and commit the revision and stop again; on a resume carrying an
+   approval, implement from the approved spec and finish with the summary), the autonomous-defaults rule (decide within-brief questions
    yourself and record the decision in `WORKHORSE-SUMMARY.md`), the capability statement above, the
    instruction to commit incrementally, and the line that the workhorse must not read other branches
    or `.worktrees/`. It names the run's checks as the waybill lists them and says to run them all
@@ -299,11 +317,68 @@ A workhorse commits incrementally as it goes, never pushes, never reads other br
    `<tool>/scripts/verify.sh journey-path .`. Where the workhorse's harness reads no ambient context
    file, the brief opens by naming the project's context file and index.
 
+## The planning stage (leg 1): every spec to the user before any code
+
+A run plans before it implements. Each workhorse drafts its own spec, blind to the others, and
+stops. The postmaster puts each spec to the user in its interactive session; no workhorse
+writes code until its own spec is approved. Review is for scope and correctness, never for
+making the specs alike: one workhorse's spec is never shown to another, and feedback goes to
+one workhorse at a time. In a fixture run the postmaster signs each spec off itself and the
+user is not asked; the pause, the package and the decisions file work the same.
+[Why design review happens before code](../../wiki/concepts/planning-stage.md)
+
+1. **Set the stage:** `<tool>/scripts/stage.sh <dispatch> planning`. Launch every workhorse as
+   a headless resumable thread, exactly as Stage 1 does and from the run's pin — `<tool>` is the
+   pinned checkout, and every launch passes `--run <dispatch>` — but its work is the spec alone:
+   write `WORKHORSE-SPEC.md` from the template, commit it on its own, and stop. No code, no
+   summary. Record every thread id as at a normal launch. While they draft, write the blind
+   acceptance tests as Stage 1 says — before you read any spec's content or any lane's diff.
+2. **Harvest the specs.** A workhorse that committed `WORKHORSE-SPEC.md` and exited is
+   `planned`. `WORKHORSE-BLOCKED.md` is `blocked`, answered as Stage 1 says. Neither is died
+   mid-flight: remount or re-dispatch. Log `harvest` per workhorse with its exit shape.
+3. **Build the review package, without reading the specs.** For each planned workhorse take
+   the commit that added or last changed its spec (`git -C <worktree> log -1 --format=%H --
+   WORKHORSE-SPEC.md`) and the link from `<tool>/scripts/spec-review-link.sh <dispatch>
+   <workhorse-wt>`, which fills the run's recorded `planning.review_link` template with
+   `{path}` or prints the path where no template is set. Write `<dispatch>/spec-review.md`,
+   one entry per workhorse: its lane, the commit, the link and the path. The package is for
+   the postmaster; it never goes to a lane, and no entry carries another workhorse's spec.
+   Touch `.spec-review-ready` and exit. The postmaster puts the specs to the user, one at a
+   time, and records each decision.
+4. **On resume, read this package's `<dispatch>/spec-decisions.md`** and act on each entry,
+   one workhorse at a time. The file holds this package's decisions only; earlier packages
+   stay in the `spec-review` log lines. The user's words are the only feedback a workhorse
+   gets, and only its own:
+   - **changes:** resume that workhorse alone, its own thread, through Stage 1's resume
+     form from the run's pin (`--run <dispatch>`), with the user's words as the
+     prompt. It revises `WORKHORSE-SPEC.md` from those words, commits the revision (a new
+     commit; the first spec commit is never rewritten), and stops again. Never put another
+     workhorse's spec, decision or feedback in this prompt. When every revision is in, harvest
+     it as step 2 does, build a fresh package for the revised specs — a new link entry at the
+     new commit — and pause as step 3 does. The revised spec comes back for review like the
+     first.
+   - **dropped:** manifest `outcome: dropped`. The workhorse is out of the run: it is never
+     resumed to implement, and its worktree is torn down at aftercare with the others.
+   - **approved:** record the commit the user approved in the manifest as
+     `lanes.<lane>.spec_commit`, with `outcome: approved`. That commit is the run's record of
+     which spec was agreed; the `spec-review` line in the log carries it too.
+5. **Implementation needs two approved specs.** When no revision is outstanding: if at least
+   two workhorses are approved, go on to Stage 1 and resume each approved workhorse to
+   implement from its approved spec, through the pinned resume form as step 4 does.
+   Otherwise the run stops and says why — fewer than two
+   approved specs — in `run-log.md` and in an escalation carrying the count, and the user
+   alone abandons it. Never implement from a spec the user has not approved, and never drop
+   the bar to keep going.
+
 ## Stage 1 (leg 1): implement, then synthesize
 
-**Launch every workhorse as a headless resumable thread**, each in its own worktree, all in the
-same breath, through the host script and the launch script so no form is ever copied by hand.
-`host.sh` runs each where the user can watch it (`hosts.md`) and returns at once:
+**Every approved workhorse was launched in the planning stage and carries its spec on its own
+thread.** Resume each approved one to implement from the spec the user approved, in the same
+breath, through the host script and the launch script so no form is ever copied by hand. The
+resume carries the approval as its prompt: the lane's approved spec commit
+(`lanes.<lane>.spec_commit`) and the instruction to implement from that spec and finish with
+`WORKHORSE-SUMMARY.md`. The first launch of a workhorse is the planning stage's; the form is
+the same:
 
 ```sh
 <tool>/scripts/host.sh run "$(<tool>/scripts/host.sh name <dispatch> workhorse <lane>)" <workhorse-wt> \
@@ -327,14 +402,16 @@ from it.
   (`harnesses.md` says where each harness prints it). The postmaster moved the ticket to in-progress at
   dispatch; you do not touch its state before stage 3. An unrecorded
   thread is a needle in a haystack: the ids are the handles for answers, fix loops, follow-ups
-  and debugging. Set the stage: `<tool>/scripts/stage.sh <dispatch> workhorses-running`.
+  and debugging. Set the stage: `<tool>/scripts/stage.sh <dispatch> workhorses-running` when
+  implementation begins, after the planning stage has its two approved specs.
 - **While the workhorses run, write the acceptance tests, blind.** Before you read any lane's diff
   or log beyond its thread id, turn the ticket's acceptance criteria and `User journey` into
   tests at the ticket's own interface: the route, flag, file, or visible behaviour the ticket
   names, never a function shape, which is what the lanes were dispatched to choose. Commit
   them as the FIRST commit on the ticket branch, before any synthesis. They are the run's only
-  oracle no lane wrote, and they stay that only if they are finished before you open a diff.
-  At harvest, cherry-pick that commit onto a scratch of each lane and run it: the result ranks
+  oracle no lane wrote, and they stay that only if they are finished before you open a diff
+  and before you read any spec's content (the planning stage has you build the review package
+  from each spec's path and commit alone). At harvest, cherry-pick that commit onto a scratch of each lane and run it: the result ranks
   the lanes on the ticket's criteria before you have read a line of either. Where the ticket's
   design question IS the interface, do not write them, say so on the checkpoint 1 card, and
   compose on reading alone. Your reading of the ticket is a single reading: in a run with a
@@ -345,8 +422,9 @@ from it.
   `<dispatch>/sessions/` beside its event stream. For every workhorse, `WORKHORSE-SUMMARY.md` at
   the worktree root is the authoritative final act.
 - **Monitor: three exit shapes.** Each workhorse's final act is writing `WORKHORSE-SUMMARY.md` at its
-  worktree root. `WORKHORSE-SPEC.md` is not an exit shape: a workhorse that exits with a spec and no
-  summary has not finished. On exit, read the lane's harvest plus its worktree root:
+  worktree root. `WORKHORSE-SPEC.md` is not an exit shape here: a workhorse that exits with a spec and no
+  summary has not finished implementing. (In the planning stage the spec alone is the finished
+  state; the planning harvest is above.) On exit, read the lane's harvest plus its worktree root:
   (a) **Summary present.** Mark the workhorse harvested; manifest `outcome: harvested`.
   (b) **Blocked.** `WORKHORSE-BLOCKED.md` present, or the last message ends in a question. Bypass
   flags do not stop a model pausing to ask mid-run; headless, the run EXITS there with the
@@ -387,6 +465,7 @@ from it.
   branch, key actions digested from the logs and transcript, final message, `WORKHORSE-SUMMARY.md`
   verdict. Copy each workhorse's `WORKHORSE-SPEC.md` as its first commit added it to
   `<dispatch>/audit/<lane>-spec.md`, and its final version to `<lane>-spec-final.md`. Record
+  the commit the user approved (`lanes.<lane>.spec_commit`, or none for a dropped workhorse),
   whether that first commit comes before the workhorse's first code commit, and any acceptance
   criterion with no task. Copy its `.postmaster/verify/`, its journey reports included, to
   `<dispatch>/audit/<lane>-verify/`. Attach every audit to the checkpoint 1 card. Do the same for
@@ -435,6 +514,27 @@ from it.
   Then build the synthesis commit by commit with a reason for each choice. Amend commit
   messages to review grade; run the project's FULL gate with its real command.
 
+  **Measure the committed synthesis before recording the SYNTHESIS line.** From the synthesis
+  worktree, run the pinned script with explicit commit IDs: the base from the manifest, the
+  final synthesis HEAD, and every lane's harvested head, including lanes that stayed at BASE.
+  Pass one `--lane <name>=<commit>` per lane, and `--oracle <commit>` when the run has an
+  oracle commit. Run Bun with target-repository env loading disabled and no config file;
+  the script disables external diff drivers and textconv when it reads Git:
+
+  ```sh
+  SYNTHESIS_HEAD=$(git rev-parse HEAD)
+  SHARES_LINE=$(bun --no-env-file --config=/dev/null <tool>/scripts/synthesis-shares.ts \
+    --base <base> --synthesis "$SYNTHESIS_HEAD" \
+    --lane <lane>=<harvested-head> [--lane <lane>=<harvested-head> ...] \
+    [--oracle <oracle-commit>] --record <dispatch>)
+  <tool>/scripts/run-log.sh <dispatch> "$SHARES_LINE"
+  ```
+
+  The command writes `<dispatch>/shares.json` once and prints the greppable `SHARES:` line.
+  Keep that line beside the SYNTHESIS line in `run-log.md` and on checkpoint 1. Use the
+  measurement as evidence when ranking; it does not set the ranking, and it does not
+  replace `took=`: the counts see text, not ideas the coachman rewrote in its own words.
+
   **Record it in one greppable line in `run-log.md`:**
 
   ```
@@ -460,18 +560,20 @@ from it.
   failed workhorse leaves its branch at BASE and has contributed nothing to read. Record that lane
   DEGRADED rather than absent, say so on the card, and compose from the lanes that produced
   work.
-- **Checkpoint 1 card, then the hand-off:** per-workhorse outcome (or stall); **the SYNTHESIS line, the ranking, what
+- **Checkpoint 1 card, then the hand-off:** per-workhorse outcome (or stall); **the SYNTHESIS and SHARES lines, the ranking, what
   was taken from each lane, what was rejected and why**; the code-verified evidence behind each
-  choice; the convention gaps found; what was dropped; gate status; the checks, as `verify.sh run`
-  printed them on each workhorse's branch and then on the committed synthesis
-  (`<tool>/scripts/verify.sh run <synthesis-wt> <dispatch>`, the journey walked first where there
-  is one), with each workhorse's `verify.sh summary` verdict. A card that presents a
+  choice; the convention gaps found; what was dropped; gate status; the checks, as
+  `<tool>/scripts/landing.sh results <dispatch> <wt>` prints them for each workhorse's branch
+  (`<wt>` the workhorse worktree) and then for the committed synthesis, the journey walked
+  first where there is one, with each workhorse's `verify.sh summary` verdict. A card that presents a
   finished diff without saying which lane each part came from is the defaulting failure
   wearing a verdict. Set the stage, `<tool>/scripts/stage.sh <dispatch> checkpoint-1`, then write it to
-  `<dispatch>/checkpoint-1.md` with the audit bundle beside it and touch `.checkpoint-1-ready`. Autonomous mode: write `handoff-1.md` and end the leg. Consult mode:
-  also write `ESCALATION.md` naming the card, touch `.escalation-ready`, and exit; the ruling
-  arrives as a resume, and the leg then ends with its hand-off. In a run with no review leg,
-  this card doubles as the ship approval, said on the card.
+  `<dispatch>/checkpoint-1.md` with the audit bundle beside it and touch `.checkpoint-1-ready`.
+  In autonomous mode, if review runs, write `handoff-1.md` and end the leg; in a contract 2 run
+  with no review leg, continue to stage 3 below in this same leg. In consult
+  mode, also write `ESCALATION.md` naming the card, touch `.escalation-ready`, and exit; after
+  the ruling arrives as a resume, follow the same branch. The checkpoint card is informational
+  and never replaces the ship card.
 
 ## Stage 2 (leg 2): review, every lens in one loop
 
@@ -797,7 +899,8 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    A loop with no gating lens is round 1 alone, and applies nothing: a verified gating
    finding in it, a bug or security defect the style lens reported, is escalated with the card
    instead of fixed, which stops the leg in either `CHECKPOINT_MODE`, and a ruling that asks for
-   the fix has it applied and the gate re-run, with the card saying no lens re-reviewed it. The
+   the fix has it applied, the checkpoint rewritten with its state `applied on user word, not
+   re-reviewed`, and the gate re-run, with the card listing it under `## Not re-reviewed`. The
    cap of 3 rounds for the whole loop, round 1 included, stays as a backstop: when round 3 logs
    a verified P1 or P2 finding, the loop stops and escalates with the residue, including any
    fixes that have not been re-reviewed, and your read on why it is not converging; this and the
@@ -814,24 +917,90 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    the capability that lets a caller get it wrong, not to patch the fourth site. Name the class
    in the escalation and say which sites each round closed.
 6. **One review checkpoint card.** Per lens: the findings and their overlap, across lanes and
-   with the other lenses, verified versus dismissed, applied, and the rounds it ran; for style,
-   how many findings go to the ship card's Style residue, as `<tool>/scripts/style-findings.sh
-   count <dispatch>` prints it. The card says which round ended the loop and why, as
-   `<tool>/scripts/review-decide.sh` printed it, and lists the P3 findings the loop carried to
-   the ship card's open findings, with each one's lens and the round that found it. Then the
-   gate status and the checks from the final round's
+   with the other lenses, verified versus dismissed, applied, and the rounds it ran, with each
+   finding as one bullet `- [<severity>] <id>: <state>`, the id `<lens>-<n>` numbered in the
+   order verified, the state one of `open`, `closed round <r>`, `dismissed: <reason>`, or
+   `applied on user word, not re-reviewed`, and no HTML comment anywhere in the file;
+   a finding-shaped line in any other shape — numbered, bare, or a `+` bullet — is
+   refused, to be rewritten as a `-` bullet;
+   for style, how many findings go to the ship card's Style residue, as
+   `<tool>/scripts/style-findings.sh count <dispatch>` prints it. The card says which round
+   ended the loop and why, as `<tool>/scripts/review-decide.sh` printed it, and lists the P3
+   findings the loop carried to the ship card's open findings, with each one's lens and the
+   round that found it. Then the gate status and the checks from the final round's
    `<dispatch>/logs/review-r<round>-checks.txt`, run once on that round's snapshot (the
    journey walked first where the checks name one, per step 2). Written to
-   `<dispatch>/checkpoint-review.md` with its `.checkpoint-review-ready` marker. Autonomous
-   mode: write the leg's hand-off and end it; the ship approval is stage 3's stop. Consult mode:
-   escalate on the card and wait for the resume.
+   `<dispatch>/checkpoint-review.md` with its `.checkpoint-review-ready` marker. Rewrite the
+   checkpoint after any applied fix, even with no gating lens, before the card or hand-off.
+   Autonomous mode: for contract 2 continue to stage 3 below in this leg; for a legacy run
+   write the leg's hand-off and end it. Consult mode: escalate on the card and wait for the resume.
    A ruling that asks for a change is applied; in a loop with a gating lens it is followed by
    another round, counted toward the cap, and the card is written and escalated again, and a
    round past the cap runs only when the ruling says so. Any other ruling, or a change applied in
-   a loop with no gating lens, ends the leg with its hand-off. The card doubles as the ship
-   approval, said on the card.
+   a loop with no gating lens, ends the legacy leg with its hand-off or continues contract 2 to
+   stage 3 below.
 
-## Stage 3 (leg 3): ship (review link, then a gated local merge)
+## Stage 3 (last leg of contract 2): the ship card, then the hand-off
+
+This section runs at the end of synthesis when there is no review leg, or at the end of review
+after the loop has no P1 or P2 finding left and the gates pass. The postmaster owns the landing
+route and any merge. You do not push, open a pull request, wait for a merge word, or merge.
+
+Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
+
+1. **Verify the final HEAD.** Run `<tool>/scripts/verify.sh run <synthesis-wt> <dispatch>` after
+   the last code change; the gate must
+   pass before the card is ready. No P1 or P2 finding may remain open.
+   If a new P1 or P2 issue appears during final QA, fix it and pass the gate again; when the
+   review loop has a gating lens, run another review round and rewrite `checkpoint-review.md`
+   with the loop's rounds and outcome before writing the card.
+2. **Browser suite and QA when the project has a UI.** Run its browser suite blocking and
+   unpiped. Serve the production build with a throwaway database seeded from project fixtures,
+   on loopback at a throwaway port, through `<tool>/scripts/host.sh run` with
+   `--pidfile <dispatch>/render/preview.pid`. The postmaster stops its whole process group
+   during post-merge teardown. Walk the ticket's `User journey` verbatim first when it has one, at phone width;
+   then exercise any other changed surface that needs coverage. Record what worked, what did
+   not, what suite assertions need changing because behavior deliberately changed, and what new
+   surface needs coverage. A red run is a finding, not a flake. Do not update an assertion unless
+   you can name the deliberate behavior change that made it obsolete. Where a check's source
+   names `web-journey`, the walk is the journey report: write it to the path
+   `<tool>/scripts/verify.sh journey-path <synthesis-wt> <dispatch>` prints. Put the preview link and
+   QA results on the card. If the project has no UI or browser suite, say `none`.
+3. **Review link.** Put the absolute path of the synthesis worktree on the card and, when
+   `run.json` config has `ship.review_link`, its value with the path filled in. Reuse a review
+   surface already running; never start a duplicate. Verify the link from the user's device or
+   mark it unverified.
+4. **Write `card.md`.** Include the branch, final HEAD, diff stat and commit list; the output
+   of `<tool>/scripts/landing.sh card-block <dispatch> <synthesis-wt> <the leg's
+   checkpoint>` pasted verbatim as the card's `## Checks`,
+   `## Open findings` and `## Not re-reviewed` sections, appearing exactly once —
+   never retyped or indented, never repeated even inside a fence — and no HTML comment
+   anywhere in the card; a card quoting `<!--`, in a commit subject or finding title,
+   escapes it, for example as `&lt;!--` (the leg's checkpoint is
+   `<dispatch>/checkpoint-review.md` after a review leg, `<dispatch>/checkpoint-1.md`
+   when this leg is synthesis); browser suite and QA when
+   present; the journey report path where a
+   check's source names `web-journey`; every ticket turnpike with its
+   rounds and result from its checkpoint record, or `none`; the Style residue
+   count as
+   `<tool>/scripts/style-findings.sh count <dispatch>` prints it, then every Style residue from
+   `<tool>/scripts/style-findings.sh list <dispatch>`; every branch created by the run and its
+   state; lane outcomes; and the review link. Finding titles and notes, where the reader
+   wants them, go in prose outside the pasted block, which carries only ids and severities.
+   The card's branch state is before merge: the
+   ticket branch is ready, and every other branch is either retained or abandoned. The gate is
+   listed as the gate, never as a turnpike.
+5. **Write the final hand-off.** Write
+   `<dispatch>/handoff-<n>.md` with the verified results, all decisions and open findings, and
+   state that no coachman leg follows and the postmaster must verify the card and handle
+   landing. `<tool>/scripts/handoff-check.sh` must exit 0. Close the open run-log section, log
+   `handoff`, then touch `.card-ready` and `.leg-<n>-done` and exit. The host writes
+   `.leg-<n>-exited` when the process exits. Do not change code after recording final-HEAD
+   results without repeating the checks.
+
+## Legacy Stage 3 (leg 3): ship (review link, then a gated local merge)
+
+Use this section only when `run.json` has no `coachman_contract` or records version `1`.
 
 Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
 
@@ -892,6 +1061,10 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
    it. **It also lists every bug or security finding left open,** with its lens and
    disposition, one line each. Every P3 deferred after round 1 includes its originating round.
 
+   **The ship card carries the cost under `## Cost`,** as `bun <tool>/scripts/usage.ts sum <dispatch>` prints it: the
+   run's tokens and cost per role and lane, and any harness that reported nothing. Quoted, never
+   hand-recomputed, and a figure no harness reported is never written as zero.
+
    **The ship card lists the turnpikes the run passed through,** exactly the waybill's, each
    with the rounds it ran and its result as the step that ran it records them
    (`checkpoint-review.md`, for a review turnpike), or `none` when
@@ -913,7 +1086,7 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
 6. If the project has an origin, pushing afterwards is the user's call, never part of
    this flow.
 
-## Stage 4 (leg 3, after the merge): aftercare and teardown
+## Legacy Stage 4 (leg 3, after the merge): aftercare and teardown
 
 **Sort the style findings.** For each one `<tool>/scripts/style-findings.sh list <dispatch>`
 prints, write one line to `<dispatch>/style-sort.md`, with a one-line reason: a rule the
@@ -942,9 +1115,14 @@ when the run has no style findings. Log a `note` with its last line, and name th
 change there is a ticket, filed after the merge on the user's word.
 [Why style findings feed the project's linter](../../wiki/concepts/review-loop.md)
 
-Final `run-log.md` entry (per-lane win record, findings counts, cost) plus a closing dated
-comment on the ticket. Leave the stage at `shipped`: the postmaster sets `done` when it closes
-the run, and that appends the run's stage timings to `run-log.md`. Never write timings by hand.
+Run `bun <tool>/scripts/usage.ts sum <dispatch>` and put its output verbatim under `## Cost` on the
+ship card and in the final `run-log.md` entry with the per-lane win record and findings counts.
+Do not hand-recompute a figure or write a missing figure as zero. If the sum command fails, put
+the error on the card and in the log as unreadable. When the postmaster sets `done` after this
+leg exits, `stage.sh` refreshes both records from all launch usage records, including this leg's
+final resume. Leave the stage at `shipped` until then; the postmaster's terminal stage appends
+the run's stage timings to `run-log.md`. Never write timings by hand. A closing dated comment
+on the ticket carries the run summary.
 Never delete the dispatch directory or the manifest, they are the run's history. Archive
 finished threads where the harness has an archive form (`harnesses.md`). After the merge, tear
 down the workhorse worktrees, preserving any stray file first (a workhorse killed mid-run leaves
@@ -979,8 +1157,12 @@ ticket that needs another's change waits for it to land.
   through a run. A lane that changes identity mid-run is not the lane that was gated.
 - Base pre-flight before cutting worktrees: a dirty main checkout means the workhorses build on stale
   committed history and drop uncommitted work. Verify clean, or escalate, first.
-- Workhorses never push; only stage 3's gated local merge touches the default branch. No push, no PR,
-  no outward message of any kind from this flow; the ticket comments are the outward record.
+- Workhorses never push. A contract 2 coachman leaves the default branch untouched; the postmaster
+  follows the landing route in the waybill after verifying the card. A legacy ship leg follows its
+  Stage 3 instructions. No workhorse sends an outward message; ticket comments are the outward record.
+- **No workhorse writes code before its own spec is approved, and no workhorse sees another's
+  spec or feedback.** The planning stage's pause is the only gate on that; a resume carrying the
+  user's words goes to one workhorse alone. Implementation needs two approved specs.
 - Launch nothing before the waybill's launch card is confirmed: every lane's model and effort,
   the coachman, the reviewer lineup, the gate selection, on one card.
 - **The coachman is never a model that ran as a lane in the same run.** Its reading is the only
@@ -988,7 +1170,8 @@ ticket that needs another's change waits for it to land.
   of the answers it is judging. A different vendor is necessary, not sufficient: the popularity
   trap is measured across families, so the rule about agreement still binds.
 - Coachmen and workhorses are headless and have no composer. Verify workhorse claims against code before
-  trusting them. Merge, never rebase.
+  trusting them. Local merges use merge, never rebase; a pull-request merge follows the project's
+  configured review surface.
 - There is no synthesis base: compose the result from all lanes with a recorded reason per
   choice, and never fast-forward the ticket branch onto a lane's branch. Compare each lane's
   diff in writing before concluding anything, and record the SYNTHESIS line in `run-log.md`.
@@ -1014,9 +1197,12 @@ ticket that needs another's change waits for it to land.
   concurrent lanes in a normal run are safe, since no lane has commits until it finishes.
 - Review is a goal-loop, not a single shot: a loop whose fixes were never re-reviewed is
   not done, save a fix the user orders in a loop with no gating lens (Stage 2, step 5), which
-  the card marks as not re-reviewed.
-- A check that did not run is written as not run on every card and hand-off, never as passed
-  and never left out.
+  the checkpoint marks `applied on user word, not re-reviewed` and the card lists under
+  `## Not re-reviewed`.
+- On a contract-2 run, check results on the ship card and the review checkpoint are what
+  `<tool>/scripts/landing.sh results` prints for them, never reworded and never left out; a
+  check that did not run is `not run`, never passed. An exit 1 from the call is a fault in
+  its inputs: fix them and re-run; never proceed past it.
 - Never gate-then-commit through a masking pipe: `<gate> 2>&1 | tail && git commit` reports the
   tail's exit, not the suite's, and will commit a RED tree. Check `${pipestatus[1]}` (zsh) or
   `${PIPESTATUS[0]}` (bash), or run the gate unpiped and commit only on its own exit 0.

@@ -12,11 +12,11 @@
 #
 # Records when it was written; the run and project; the target repo's HEAD and branch; the
 # postmaster commit that dispatched it, and whether that checkout had uncommitted changes,
-# since a run keeps the runbooks it started with; the pinned checkout of that commit, which
-# every leg launch, resume and takeover runs from (the waybill's `tool:`); the machine config
-# with local role choices resolved; the project settings and their sources; and the version
-# each harness reports. Env files are named by the machine config, never read. A run.json that
-# already exists is left alone.
+# since a run keeps the runbooks it started with; the coachman contract version; the pinned
+# checkout of that commit, which every leg launch, resume and takeover runs from (the
+# waybill's `tool:`); the machine config with local role choices resolved; the project
+# settings and their sources; and the version each harness reports. Env files are named by
+# the machine config, never read. A run.json that already exists is left alone.
 #
 # The pin is a detached worktree of the postmaster repo at the dispatch commit, under
 # $POSTMASTER_TOOL_PINS (default ~/.postmaster/tool-pins), one directory per commit so every
@@ -424,6 +424,7 @@ for leg in (team.get("coachman_legs") or {}).values():
 
 record = {
     "written": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "coachman_contract": 2,
     "project": project_name(d),
     "run": d.resolve().name,
     "project_settings": project_settings,
@@ -482,6 +483,7 @@ try() { out=$("$0" "$@" 2>&1); rc=$?; }
 echo "positive controls"
 meta "$d" "$repo" >/dev/null && ok "run.json is written" || fail "run.json is written"
 check "it names the postmaster commit"            "r['postmaster']['commit'] == '$(git -C "$TOOL" rev-parse HEAD)'"
+check "it records the current coachman contract"  "r['coachman_contract'] == 2"
 check "it names the target's HEAD and branch"     "r['target'] == {'head': '$(git -C "$repo" rev-parse HEAD)', 'branch': 'main'}"
 check "it keeps the resolved config as it was"     "r['config']['lanes']['one']['model'] == 'm1' and r['config']['team']['workhorses'] == ['one','two']"
 check "it names an old-layout run from its parent"     "r['project'] == 'project' and r['run'] == 'RUN-1'"
@@ -763,7 +765,8 @@ printf '{"stage": "done"}\n' > "$kroot/project/RUN-KREL/manifest.json"
 killed=""
 for i in $(seq 1 300); do
   for pid in $(pgrep -f run-meta-scan 2>/dev/null); do
-    if tr '\0' ' ' </proc/$pid/cmdline 2>/dev/null | grep -qF "$tmp"; then
+    cmdline=$(tr '\0' ' ' </proc/$pid/cmdline 2>/dev/null)
+    if grep -qF -- "$tmp" <<<"$cmdline"; then
       kill -9 $pid 2>/dev/null && killed=1
     fi
   done

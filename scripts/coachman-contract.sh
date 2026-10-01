@@ -209,8 +209,8 @@ def exercise_self_test(source_root):
              "scripts/turnpikes.sh")
     run_case("a wording fix in stage.sh answers yes",
              lambda repo: replace_once(repo, "scripts/stage.sh",
-                                       "#   exit 4  a terminal stage set by any actor but the postmaster",
-                                       "#   exit 4  a terminal stage set by any actor but the postmaster itself"),
+                                       "#   exit 4  a terminal stage, or shipped on a contract 2 run, set by any actor but the postmaster",
+                                       "#   exit 4  a terminal stage, or shipped on a contract-2 run, set by any actor but the postmaster"),
              "scripts/stage.sh")
     run_case("a wording fix in handoff-check.sh answers yes",
              lambda repo: replace_once(repo, "scripts/handoff-check.sh",
@@ -321,8 +321,8 @@ def exercise_self_test(source_root):
             run(["git", "-C", str(repo), "switch", "-q", "main"])
             if contract:
                 replace_once(repo, "scripts/stage.sh",
-                             "#   exit 4  a terminal stage set by any actor but the postmaster",
-                             "#   exit 4  a terminal stage set by any actor but the postmaster itself")
+                             "#   exit 4  a terminal stage, or shipped on a contract 2 run, set by any actor but the postmaster",
+                             "#   exit 4  a terminal stage, or shipped on a contract-2 run, set by any actor but the postmaster")
                 part = "scripts/stage.sh"
             else:
                 (repo / "skills/postmaster/harnesses.md").write_text("new harness\n", encoding="utf-8")
@@ -357,8 +357,8 @@ def exercise_self_test(source_root):
             repo = pathlib.Path(scratch) / "repo"
             base = git_fixture(repo, pathlib.Path(scratch), source_root, manifest_data)
             replace_once(repo, "scripts/stage.sh",
-                         "#   exit 4  a terminal stage set by any actor but the postmaster",
-                         "#   exit 4  a terminal stage set by any actor but the postmaster itself")
+                         "#   exit 4  a terminal stage, or shipped on a contract 2 run, set by any actor but the postmaster",
+                         "#   exit 4  a terminal stage, or shipped on a contract-2 run, set by any actor but the postmaster")
             head = commit_fixture(repo, label)
             result = subprocess.run([str(repo / "coachman-contract.sh"), str(repo), base, head],
                                     cwd=source_root, capture_output=True, text=True)

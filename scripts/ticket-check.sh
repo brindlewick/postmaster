@@ -13,6 +13,16 @@
 #   ticket-check.sh --splice <base-body> <sections>       print <base-body> with each `##` section
 #                                                         of <sections> in place of the one it
 #                                                         names, or added where the shape puts it
+#   ticket-check.sh --has-journey <file>                  print `journey` or `no journey`: whether
+#                                                         the phrase "user journey" occurs anywhere in
+#                                                         the text, case-insensitively, with whitespace
+#                                                         runs (and zero-width joiners) collapsed, the
+#                                                         possessive `'s`/`’s` dropped, and markup (`#`,
+#                                                         `>`, `*`, `_`, backticks, apostrophes, hyphens,
+#                                                         comment openers and closers) read as spaces. No headings
+#                                                         are read. Fail-closed: a mention in passing
+#                                                         blocks landing visibly until the journey runs
+#                                                         or the user rules.
 #   ticket-check.sh --self-test
 #
 # What it judges, and nothing more:
@@ -32,7 +42,9 @@
 #     reads them for the target project, and every word that is not a turnpike is named. The names come from that
 #     script alone, so a turnpike added there needs no change here.
 # Code spans, fenced blocks and HTML comments are not read for questions, marks or headings,
-# and quoted text is not read for questions. A <!-- that nothing closes is text. Turnpikes are
+# and quoted text is not read for questions. A <!-- that nothing closes is text. A heading's
+# hashes must stand at the line's start as written: what follows a comment on its line is
+# text, not a heading. Turnpikes are
 # read from code spans too, and not from fenced blocks or HTML comments.
 #
 # What it does not judge: whether the description says why the change matters; whether a
@@ -58,15 +70,15 @@
 #   exit 2  malformed; one line per missing or malformed part on stdout, the part named first
 set -uo pipefail
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
-usage() { echo "usage: ticket-check.sh <repo> <ticket-id> | --body <body-file> [--title <title>] [--project <repo>] | --splice <base-body> <sections> | --self-test" >&2; exit 1; }
+usage() { echo "usage: ticket-check.sh <repo> <ticket-id> | --body <body-file> [--title <title>] [--project <repo>] | --splice <base-body> <sections> | --has-journey <file> | --self-test" >&2; exit 1; }
 
 run_py() {  # run_py body <file> <title> | printed <adapter-read-output> | splice <base> <sections>
   TURNPIKES="$HERE/turnpikes.sh" python3 - "$@" <<'PY'
 import os, re, subprocess, sys
 
 HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
-FENCE = re.compile(r"^\s*(`{3,})[^`]*$|^\s*(~{3,})")
-FENCED_ITEM = re.compile(r"^ *(?:[-*+]|\d{1,9}[.)])[ \t]+(?:(`{3,})[^`]*|(~{3,}).*)$")  # 1. ``` opens a fence
+FENCE = re.compile(r"^ {0,3}(`{3,})[^`]*$|^ {0,3}(~{3,})")
+FENCED_ITEM = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+(?:(`{3,})[^`]*|(~{3,}).*)$")  # 1. ``` opens a fence
 TICKS = re.compile(r"`+")
 SPAN = re.compile(r"(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n).)+?)(?<!`)\1(?!`)", re.S)
 QUOTED = re.compile(r'"[^"\n]*"|“[^”\n]*”')
@@ -141,11 +153,13 @@ def norm(h):
     h = re.sub(r"[ \t]+#+$", "", h.strip()).strip().rstrip(":")
     return re.sub(r"\s+", " ", re.sub(r"\s*/\s*", " / ", h)).strip().lower()
 
-def heads_of(lines):  # (line, level, normalised text, as written)
+def heads_of(raw, lines):  # (line, level, normalised text, as written)
     heads = []
     for i, (t, code) in enumerate(lines):
         m = None if code else HEADING.match(t)
-        if m:
+        # The hashes must stand at the line's start as written: a same-line remainder after
+        # a comment is text, not a heading, even once the comment is gone.
+        if m and re.match(r"^ {0,3}#+", raw[i]):
             heads.append((i, len(m.group(1)), norm(m.group(2) or ""), t.strip()))
     return heads
 
@@ -245,7 +259,7 @@ def turnpikes(fault, part, body):  # the section's turnpikes, read by scripts/tu
 
 def check(title, text):
     raw, lines = tokenize(text)
-    heads = heads_of(lines)
+    heads = heads_of(raw, lines)
     bounds = bounds_of(heads)
     faults = []
     def fault(part, msg):
@@ -288,7 +302,7 @@ def chunks(text):  # the lines before the first section, and each section's line
     raw, lines = tokenize(text)
     if raw and raw[-1] == "":
         raw, lines = raw[:-1], lines[:-1]
-    bounds = bounds_of(heads_of(lines))
+    bounds = bounds_of(heads_of(raw, lines))
     starts = [b[0] for b in bounds] + [len(raw)]
     return raw[:starts[0]], [(b, raw[b[0]:starts[k + 1]]) for k, b in enumerate(bounds)]
 
@@ -341,9 +355,20 @@ def splice(base_text, sections_text):
             lines.append("")
     return "\n".join(lines) + "\n"
 
+JOURNEY_MARKUP = re.compile(r"<!--|-->|[#> *_`'\u2019\u2013\u2014\u2010\u2011-]+")
+JOURNEY_SPACE = re.compile(r"[\s\u200b\u2060\u00ad]+")
+
+def has_journey(text):  # fail-closed: the phrase anywhere counts, whatever shapes it
+    text = re.sub(r"['\u2019][sS]\b", "", text)  # the possessive reads as the bare phrase
+    flat = JOURNEY_SPACE.sub(" ", JOURNEY_MARKUP.sub(" ", text))
+    return "user journey" in flat.lower()
+
 mode = sys.argv[1]
 if mode == "splice":
     sys.stdout.write(splice(load(sys.argv[2]), load(sys.argv[3])))
+    sys.exit(0)
+if mode == "has-journey":
+    print("journey" if has_journey(load(sys.argv[2])) else "no journey")
     sys.exit(0)
 text = load(sys.argv[2])
 title = sys.argv[3] if len(sys.argv) > 3 else None
@@ -404,6 +429,10 @@ case ${1:-} in
     [ $# -eq 3 ] || usage
     workdir; copy_in "$2" base.md; copy_in "$3" sections.md
     run_py splice "$WORK/base.md" "$WORK/sections.md"; exit $? ;;
+  --has-journey)
+    [ $# -eq 2 ] || usage
+    workdir; copy_in "$2" body.md
+    run_py has-journey "$WORK/body.md"; exit $? ;;
   ""|-*) usage ;;
   *) [ $# -eq 2 ] || usage
      [ -d "$1" ] || { echo "ticket-check: no such project directory: $1" >&2; exit 1; }
@@ -429,7 +458,7 @@ N1=$(printf '%s\n' "$LIST" | awk 'NR == 1 {print $1}'); N2=$(printf '%s\n' "$LIS
 N2UP=$(printf '%s' "$N2" | awk '{print toupper(substr($0, 1, 1)) substr($0, 2)}')
 [ -n "$DEF" ] && [ -n "$N2" ] || { echo "self-test: turnpikes.sh needs a default set and two turnpikes" >&2; exit 1; }
 NOPE=zz-not-listed
-printf '%s\n' "$LIST" | awk '{print $1}' | grep -qx "$NOPE" && { echo "self-test: $NOPE is a turnpike; pick another unused name" >&2; exit 1; }
+grep -qx "$NOPE" <<<"$(printf '%s\n' "$LIST" | awk '{print $1}')" && { echo "self-test: $NOPE is a turnpike; pick another unused name" >&2; exit 1; }
 
 # The parts of a well-formed body. Each negative control leaves one out or breaks one.
 P='## Problem / feature
@@ -480,8 +509,8 @@ expect() {  # expect <label> <exit> <parts named, comma-separated, or none> [<te
   [ "$rc" -eq 2 ] && parts=$(printf '%s\n' "$out" | grep -E '^(title|problem / feature|acceptance criteria|direction|turnpikes): ' | sed 's/: .*//' | LC_ALL=C sort -u | paste -sd, -)
   [ -n "$parts" ] || parts=none
   if [ "$rc" -eq "$rc_want" ] && [ "$parts" = "$parts_want" ] \
-     && { [ -z "$why" ] || printf '%s\n' "$out" | grep -qF -- "$why"; } \
-     && { [ -z "$not" ] || ! printf '%s\n' "$out" | grep -qF -- "$not"; }; then
+     && { [ -z "$why" ] || grep -qF -- "$why" <<<"$out"; } \
+     && { [ -z "$not" ] || ! grep -qF -- "$not" <<<"$out"; }; then
     ok "$label"
   else
     fail "$label: wanted exit $rc_want naming $parts_want${why:+ with \"$why\"}${not:+ and without \"$not\"}, got exit $rc naming $parts" "$out"
@@ -581,17 +610,17 @@ echo "positive controls: the turnpikes, as scripts/turnpikes.sh reads them"
 project="$tmp/project-profile"; mkdir -p "$project/.postmaster"
 printf '[project]\ndefault_turnpikes = ["bug"]\n' > "$project/.postmaster/project.toml"
 body "$P" "$A" "$D" "$K"; out=$("$SELF" --body "$tmp/body.md" --title "$T" --project "$project" 2>&1); rc=$?
-[ $rc -eq 0 ] && printf '%s\n' "$out" | grep -qFx 'turnpikes: bug' \
+[ $rc -eq 0 ] && grep -qFx 'turnpikes: bug' <<<"$out" \
   && ok "default is checked against the target project's declaration" \
   || fail "default is checked against the target project's declaration (exit $rc)" "$out"
 empty_project="$tmp/empty-project"; mkdir -p "$empty_project/.postmaster"
 printf '[project]\ndefault_turnpikes = []\n' > "$empty_project/.postmaster/project.toml"
 body "$P" "$A" "$D" "$K"; out=$("$SELF" --body "$tmp/body.md" --title "$T" --project "$empty_project" 2>&1); rc=$?
-[ $rc -eq 0 ] && printf '%s\n' "$out" | grep -qFx 'turnpikes: none' \
+[ $rc -eq 0 ] && grep -qFx 'turnpikes: none' <<<"$out" \
   && ok "an empty project default does not add a review floor" \
   || fail "an empty project default does not add a review floor (exit $rc)" "$out"
 body "$P" "$A" "$D" "$K"; out=$("$SELF" --body "$tmp/body.md" --title "$T" --project "" 2>&1); rc=$?
-[ $rc -eq 1 ] && printf '%s\n' "$out" | grep -q "no such project directory" \
+[ $rc -eq 1 ] && grep -q "no such project directory" <<<"$out" \
   && ok "an explicitly empty --project is refused, never checked as discovery" \
   || fail "an explicitly empty --project is refused, never checked as discovery (exit $rc)" "$out"
 body "$P" "$A" "$D" "$K"; run "$T"
@@ -768,10 +797,10 @@ out=$(POSTMASTER_CONFIG="$tmp/other.toml" "$SELF" "$tmp" 7 2>/dev/null); rc=$?
   || fail "a tracker kind with no adapter script is refused, not judged (exit $rc)" "$out"
 printf '[tracker\nkind = github\n' > "$tmp/broken.toml"
 out=$(POSTMASTER_CONFIG="$tmp/broken.toml" "$SELF" "$tmp" 7 2>&1); rc=$?
-[ $rc -eq 1 ] && printf '%s\n' "$out" | grep -q 'does not parse' && ok "a config that does not parse is named as one" \
+[ $rc -eq 1 ] && grep -q 'does not parse' <<<"$out" && ok "a config that does not parse is named as one" \
   || fail "a config that does not parse is named as one (exit $rc)" "$out"
 adapter 'echo "github: no board" >&2; exit 3'; through
-[ $rc -eq 1 ] && ! printf '%s\n' "$out" | grep -qE '^(title|problem / feature|acceptance criteria|direction|turnpikes): ' \
+[ $rc -eq 1 ] && ! grep -qE '^(title|problem / feature|acceptance criteria|direction|turnpikes): ' <<<"$out" \
   && ok "an adapter that cannot read the ticket is exit 1, not a shape fault" \
   || fail "an adapter that cannot read the ticket is exit 1, not a shape fault (exit $rc)" "$out"
 body "$P" "$A" "$D" "$K"
@@ -841,7 +870,7 @@ printf '### Direction\nUse the adapters.\n' > "$tmp/sections.md"; splice
 printf '%s\n\n%s\n' "$D" "$D" > "$tmp/sections.md"; splice
 [ $rc -eq 1 ] && ok "the same section twice" || fail "the same section twice (exit $rc)" "$out"
 { printf '%s\n\n' "$P" "$A" "$D"; printf '%s\n' "$NT"; } > "$tmp/base.md"; printf '%s\n' "$K" > "$tmp/sections.md"; splice
-[ $rc -eq 1 ] && printf '%s\n' "$out" | grep -qF '"### Turnpikes" stands inside a later part' \
+[ $rc -eq 1 ] && grep -qF '"### Turnpikes" stands inside a later part' <<<"$out" \
   && ok "a ### Turnpikes in the notes is neither deleted nor left beside a new one" \
   || fail "a ### Turnpikes in the notes is neither deleted nor left beside a new one (exit $rc)" "$out"
 { printf '%s\n\n' "$P" "$A" "## Notes
@@ -849,7 +878,7 @@ Context.
 
 ### Direction
 An old approach." ; } > "$tmp/base.md"; printf '%s\n' "$D" > "$tmp/sections.md"; splice
-[ $rc -eq 1 ] && printf '%s\n' "$out" | grep -qF '"### Direction" stands inside a later part' \
+[ $rc -eq 1 ] && grep -qF '"### Direction" stands inside a later part' <<<"$out" \
   && ok "a stale ### Direction in the notes is not left beside the new one" \
   || fail "a stale ### Direction in the notes is not left beside the new one (exit $rc)" "$out"
 
@@ -866,10 +895,105 @@ adapter ": > '$tmp/github-read'; cat -- '$tmp/printed.txt'"; rm -f "$tmp/local-r
   || fail "a repo with no store is read through the kind the config names (exit $rc)" "$out"
 localsh "case \$2 in store) echo 'local: not a git repository' >&2; exit 1 ;; *) : > '$tmp/local-read'; exit 1 ;; esac"
 rm -f "$tmp/local-read" "$tmp/github-read"; through
-[ $rc -eq 1 ] && [ ! -e "$tmp/github-read" ] && [ ! -e "$tmp/local-read" ] && printf '%s\n' "$out" | grep -qF "cannot look for a local store" \
+[ $rc -eq 1 ] && [ ! -e "$tmp/github-read" ] && [ ! -e "$tmp/local-read" ] && grep -qF "cannot look for a local store" <<<"$out" \
   && ok "a store that cannot be looked for stops the check, and no adapter is read" \
   || fail "a store that cannot be looked for stops the check, and no adapter is read (exit $rc)" "$out"
 localsh "$NOSTORE"
+
+echo "positive controls: --has-journey answers whether the ticket has a User journey"
+jbody() { printf '%s\n\n' "$@" > "$tmp/j.md"; out=$("$SELF" --has-journey "$tmp/j.md" 2>&1); rc=$?; }
+jexpect() {  # jexpect <label> <journey|no journey>
+  if [ "$rc" -eq 0 ] && [ "$out" = "$2" ]; then ok "$1"; else fail "$1: wanted [$2], got exit $rc" "$out"; fi
+}
+jbody "$P" "$A" "$D" "$K" "$UJ"
+jexpect "a ticket with a User journey has one" "journey"
+jbody "$P" "$A" "$D" "$K"
+jexpect "a ticket without one has none" "no journey"
+jbody "$P" "$A" "$D" "$K" "## User journey <!-- draft -->" "1. Open it."
+jexpect "a comment inside the heading leaves it a heading" "journey"
+jbody "$P" "$A" "$D" "$K" "# <!-- -->User journey" "1. Open it."
+jexpect "a comment between the hashes and the words leaves it a heading" "journey"
+jbody "$P" "$A" "$D" "$K" '```' "Write <!-- to open" '```' "## User journey" "1. x" "<!-- done -->"
+jexpect "a comment opener inside a fence does not eat the journey" "journey"
+jbody "$P" "$A" "$D" "$K" "<!-- note --> ## User journey" "1. x"
+jexpect "fail-closed: a same-line remainder still answers yes" "journey"
+jbody "$P" "$A" "$D" "$K" "<!--" "## User journey" "1. Open it." "-->"
+jexpect "fail-closed: a commented-out journey still answers yes" "journey"
+jbody "$P" "$A" "$D" "$K" '```' "## User journey" "1. Open it." '```'
+jexpect "fail-closed: a fenced journey still answers yes" "journey"
+jbody "$P" "$A" "$D" "$K" "User journey" "============" "1. Open it."
+jexpect "a setext subject line reads as a journey line" "journey"
+jbody "$P" "$A" "$D" "$K" "User journey" "------------" "1. Open it."
+jexpect "a setext dashed subject line reads as a journey line" "journey"
+jbody "$P" "$A" "$D" "$K" "   ## User journey" "1. Open it."
+jexpect "an indented journey still names the section" "journey"
+jbody "$P" "$A" "$D" "$K" "## User journey ##" "1. Open it."
+jexpect "closing hashes still name the section" "journey"
+jbody "$P" "$A" "$D" "$K" "## User journey:" "1. Open it."
+jexpect "a trailing colon still names the section" "journey"
+jbody "$P" "$A" "$D" "$K" "## User journey." "1. Open it."
+jexpect "a trailing full stop still names the section" "journey"
+jbody "$P" "$A" "$D" "$K" "## User journey log" "1. Open it."
+jexpect "journey-phrase: extra heading words still hold the phrase" "journey"
+jbody "$P" "$A" "$D" "$K" "# User journey" "1. Open it."
+jexpect "a level-one journey still names the section" "journey"
+jbody "$P" "$A" "$D" "$K" "    \`\`\`" "    literal indented text" "## User journey" "1. Open it."
+jexpect "indented code does not open a fence around the journey" "journey"
+jbody "$P" "$A" "$D" "$K" "     1. \`\`\`" "     not code" "## User journey" "1. Open it."
+jexpect "a deeply indented item fence does not hide the journey" "journey"
+jbody "$P" "$A" "$D" "$K" "## User journey:." "1. Open it."
+jexpect "a trailing colon and full stop still name the section" "journey"
+jbody "$P" "$A" "$D" "$K" "## User journey:;" "1. Open it."
+jexpect "a trailing colon and semicolon still name the section" "journey"
+jbody "$P" "$A" "$D" "$K" "## User  journey" "1. Open it."
+jexpect "journey-phrase: a doubled space still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## User	journey" "1. Open it."
+jexpect "journey-phrase: a tab still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## User journey -->" "1. Open it."
+jexpect "journey-phrase: a closer on the heading line still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "--> ## User journey" "1. Open it."
+jexpect "journey-phrase: a heading after a closer still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## User journey," "1. Open it."
+jexpect "journey-phrase: a trailing comma still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "This changes the user journey for checkout."
+jexpect "journey-phrase: a mention in passing still blocks landing visibly" "journey"
+jbody "$P" "$A" "$D" "$K" "## *User journey*" "1. Open it."
+jexpect "journey-phrase: emphasis still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## USER JOURNEY" "1. Open it."
+jexpect "journey-phrase: all caps still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "> ## User journey" "1. Open it."
+jexpect "journey-phrase: a quoted heading still reads" "journey"
+jbody "$P" "$A" "$D" "$K" '## `User journey`' "1. Open it."
+jexpect "journey-phrase: backticks still read" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "The user journeys through checkout."
+jexpect "journey-phrase: the phrase as a substring still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "The journey is long and winding."
+jexpect "journey-phrase: the word journey alone is not the phrase" "no journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "Improve the user's journey at checkout."
+jexpect "AE4: the ASCII possessive still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "Improve the user’s journey at checkout."
+jexpect "AE4: the curly possessive still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" $'Improve the user\xe2\x80\x8bjourney.'
+jexpect "AE4: a zero-width space still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" $'Improve the user\xe2\x81\xa0journey.'
+jexpect "AE4: a word joiner still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" $'Improve the user\xc2\xadjourney.'
+jexpect "AE4: a soft hyphen still reads" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "Improve the user&#32;journey."
+jexpect "AE4: an entity is not decoded" "no journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "Improve the user-journey at checkout."
+jexpect "AF3: a hyphen joins the phrase" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "Improve the user–journey at checkout."
+jexpect "AF3: an en dash joins the phrase" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "Improve the user—journey at checkout."
+jexpect "AF3: an em dash joins the phrase" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "Improve the user‐journey at checkout."
+jexpect "AG4: U+2010 joins the phrase" "journey"
+jbody "$P" "$A" "$D" "$K" "## Notes" "Improve the user‑journey at checkout."
+jexpect "AG4: U+2011 joins the phrase" "journey"
+body "<!-- x --> ## Problem / feature
+A ticket reaches a coachman with words under it." "$A" "$D" "$K"; run "$T"
+expect "a same-line remainder does not satisfy a required part" 2 "problem / feature"
 
 echo
 [ "$fails" -eq 0 ] && { echo "self-test: all controls behaved"; exit 0; }
