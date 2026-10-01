@@ -222,6 +222,26 @@ def exercise_self_test(source_root):
                                        "#   exit 2  usage, git or contract-list error",
                                        "#   exit 2  usage, git, or contract-list error"),
              "scripts/coachman-contract.sh")
+    run_case("a wording fix in landing.sh answers yes",
+             lambda repo: replace_once(repo, "scripts/landing.sh",
+                                       "# The landing's deterministic checks. The runbooks call this script instead of restating its",
+                                       "# The landing's deterministic checks. The runbooks call this script instead of restating its own"),
+             "scripts/landing.sh")
+    run_case("a wording fix in runs-watch.sh answers yes",
+             lambda repo: replace_once(repo, "scripts/runs-watch.sh",
+                                       "# Take the steps that need no judgment, and wait until a run under a project's run root needs",
+                                       "# Take the steps that need no judgment, and wait until a run under a project's own run root needs"),
+             "scripts/runs-watch.sh")
+    run_case("a wording fix in run-meta.sh answers yes",
+             lambda repo: replace_once(repo, "scripts/run-meta.sh",
+                                       "# since a run keeps the runbooks it started with; the coachman contract version; the pinned",
+                                       "# since a run keeps the runbooks it started with; the coachman contract version; its pinned"),
+             "scripts/run-meta.sh")
+    run_case("a wording fix in ticket-check.sh answers yes",
+             lambda repo: replace_once(repo, "scripts/ticket-check.sh",
+                                       "# What it judges, and nothing more:",
+                                       "# What it judges, and nothing else:"),
+             "scripts/ticket-check.sh")
     run_case("a wiki-only change is not a contract change",
              lambda repo: (repo / "wiki/concepts/probe-note.md").parent.mkdir(parents=True, exist_ok=True) or
                           (repo / "wiki/concepts/probe-note.md").write_text("notes\n", encoding="utf-8"))

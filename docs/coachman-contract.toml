@@ -43,3 +43,19 @@ holds = "the required handoff sections"
 [[files]]
 path = "scripts/coachman-contract.sh"
 holds = "the detector itself, whole: classification, entrypoint and controls"
+
+[[files]]
+path = "scripts/landing.sh"
+holds = "the landing's deterministic checks: landed state, freshness, card rendering and matching, journey gating"
+
+[[files]]
+path = "scripts/runs-watch.sh"
+holds = "the mechanical leg steps, next-leg dispatch and transient remounts, and what wakes the postmaster"
+
+[[files]]
+path = "scripts/run-meta.sh"
+holds = "the coachman contract version recorded in run.json"
+
+[[files]]
+path = "scripts/ticket-check.sh"
+holds = "the flow's one reading of whether a ticket mentions a user journey"
