@@ -2670,6 +2670,13 @@ for line in sys.stdin:
 if seen:
     with open(p, "w", encoding="utf-8") as f: f.write("wall\n")' "$wall")
   wallpid=$!
+  # The runner injects the host role only when its child is launch.sh itself;
+  # the leg's child is _leg_exec, so the role arrives here unsaid and launch.sh
+  # would warn its usage unrecorded into .err, where the transient veto reads
+  # it as a wall. Say it: every leg attempt runs with the coachman host role,
+  # fallback takeovers included (launch.sh tells those by name, not role).
+  POSTMASTER_LAUNCH_ROLE=coachman
+  export POSTMASTER_LAUNCH_ROLE
   if [ "$launch_mode" = resume ]; then
     "$HERE/launch.sh" resume "$role" "$wt" "$thread" "$prompt" --leg "$leg" --run "$d" 2>&"$errfd"
   else
