@@ -487,7 +487,10 @@ describe("watcher steps: dispatch and remount controls", () => {
     autoRun(root, "skip-review", 1, "");
     handoff(join(root, "skip-review"), "1");
     const brief = join(root, "skip-review", "brief.md");
-    writeFileSync(brief, readFileSync(brief, "utf8").replace(/^turnpikes:.*$/m, "turnpikes: none"));
+    writeFileSync(
+      brief,
+      readFileSync(brief, "utf8").replace(/^turnpikes:.*$/mu, "turnpikes: none"),
+    );
     writeFileSync(join(root, "skip-review", ".leg-1-done"), "");
     writeFileSync(join(root, "skip-review", ".leg-1-exited"), "");
     const { rc } = watchStub(root);
@@ -514,7 +517,7 @@ describe("watcher steps: dispatch and remount controls", () => {
     autoRun(root, "repo-fallback", 1, "");
     handoff(join(root, "repo-fallback"), "1");
     const brief = join(root, "repo-fallback", "brief.md");
-    writeFileSync(brief, readFileSync(brief, "utf8").replace(/^repo: .*\n/m, ""));
+    writeFileSync(brief, readFileSync(brief, "utf8").replace(/^repo: .*\n/mu, ""));
     writeFileSync(
       join(root, "repo-fallback", "checks.json"),
       JSON.stringify({ repo: `${root}-project`, head: "fixture", checks: [] }),
@@ -533,7 +536,7 @@ describe("watcher steps: dispatch and remount controls", () => {
     autoRun(root, "no-repo", 1, "");
     handoff(join(root, "no-repo"), "1");
     const brief = join(root, "no-repo", "brief.md");
-    writeFileSync(brief, readFileSync(brief, "utf8").replace(/^repo: .*\n/m, ""));
+    writeFileSync(brief, readFileSync(brief, "utf8").replace(/^repo: .*\n/mu, ""));
     writeFileSync(join(root, "no-repo", ".leg-1-done"), "");
     writeFileSync(join(root, "no-repo", ".leg-1-exited"), "");
     const { rc, out } = watchStub(root);
@@ -551,7 +554,7 @@ describe("watcher steps: dispatch and remount controls", () => {
     writeFileSync(
       brief,
       readFileSync(brief, "utf8").replace(
-        /^repo: (.*)$/m,
+        /^repo: (.*)$/mu,
         "repo: $1          default branch: main       BASE: fixture",
       ),
     );
@@ -593,12 +596,12 @@ describe("corrupt manifests: reported once, never dispatched from, never fatal",
       const spell = bad === "true" ? "True" : bad === "null" ? "None" : bad;
       handoff(join(root, "bad"), spell);
       const manifest = join(root, "bad", "manifest.json");
-      writeFileSync(manifest, readFileSync(manifest, "utf8").replace(/"leg": 1/, `"leg": ${bad}`));
+      writeFileSync(manifest, readFileSync(manifest, "utf8").replace(/"leg": 1/u, `"leg": ${bad}`));
       writeFileSync(join(root, "bad", `.leg-${spell}-done`), "");
       writeFileSync(join(root, "bad", `.leg-${spell}-exited`), "");
       mkrun(root, "good", "review", 2, ".escalation-ready");
       const { rc, out } = watchStub(root);
-      const still = /"leg": ([^,\n}]+)/.exec(readFileSync(manifest, "utf8"))?.[1];
+      const still = /"leg": ([^,\n}]+)/u.exec(readFileSync(manifest, "utf8"))?.[1];
       expect(rc).toBe(0);
       expect(out).toContain("needs bad DISPATCH");
       expect(out).toContain("manifest leg");
@@ -617,7 +620,7 @@ describe("corrupt manifests: reported once, never dispatched from, never fatal",
       const manifest = join(root, "badleg", "manifest.json");
       writeFileSync(
         manifest,
-        readFileSync(manifest, "utf8").replace(/"leg": 1/, `"leg": "${bad}"`),
+        readFileSync(manifest, "utf8").replace(/"leg": 1/u, `"leg": "${bad}"`),
       );
       writeFileSync(join(root, "badleg", `.leg-${bad}-done`), "");
       writeFileSync(join(root, "badleg", `.leg-${bad}-exited`), "");
@@ -643,7 +646,7 @@ describe("corrupt manifests: reported once, never dispatched from, never fatal",
       const manifest = join(root, "badremount", "manifest.json");
       writeFileSync(
         manifest,
-        readFileSync(manifest, "utf8").replace(/"leg": 1/, `"leg": "${bad}"`),
+        readFileSync(manifest, "utf8").replace(/"leg": 1/u, `"leg": "${bad}"`),
       );
       writeFileSync(
         join(root, "badremount", "logs", `coachman-leg-${bad}.err`),
@@ -915,7 +918,7 @@ describe("postmaster wake controls: incomplete watcher steps", () => {
     const brief = join(root, "legs", "brief.md");
     writeFileSync(
       brief,
-      readFileSync(brief, "utf8").replace(/^turnpikes:.*$/m, "not a turnpikes line"),
+      readFileSync(brief, "utf8").replace(/^turnpikes:.*$/mu, "not a turnpikes line"),
     );
     handoff(join(root, "legs"), "1");
     const { rc, out } = watchStub(root);
@@ -930,7 +933,10 @@ describe("postmaster wake controls: incomplete watcher steps", () => {
     autoRun(root, "close", 3, "thread-close");
     handoff(join(root, "close"), "3");
     const brief = join(root, "close", "brief.md");
-    writeFileSync(brief, readFileSync(brief, "utf8").replace(/^turnpikes:.*$/m, "turnpikes: none"));
+    writeFileSync(
+      brief,
+      readFileSync(brief, "utf8").replace(/^turnpikes:.*$/mu, "turnpikes: none"),
+    );
     writeFileSync(join(root, "close", ".leg-3-done"), "");
     writeFileSync(join(root, "close", ".leg-3-exited"), "");
     const { rc, out } = watchStub(root);

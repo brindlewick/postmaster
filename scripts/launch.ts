@@ -56,7 +56,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { readTomlFile, tryJsonFile } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { run, signalExitCode } from "./lib/proc.ts";
-import { BOUND_L, BOUND_R } from "./lib/text.ts";
+import { BOUND_L, BOUND_R, PY_S_CLASS } from "./lib/text.ts";
 
 const CONFIG =
   process.env.POSTMASTER_CONFIG ?? join(process.env.HOME ?? "", ".postmaster/config.toml");
@@ -653,20 +653,23 @@ const CODE_RE =
     : null;
 const SLOWDOWN_NOTICE = "ratelimitevent"; // Claude's slowdown notice: never a veto
 
+// Python's [\s_-]+ as a class string, as BASE matches it.
+const CODE_SEP_RE = new RegExp(`[${PY_S_CLASS}_-]+`, "gu");
+
 function vetoed(text: string): boolean {
   const norm = text
-    .toLowerCase()
+    .toLowerCase() // LOWER: BASE's own t.lower() here, ported exactly, never folded.
     .replace(/[^a-z0-9]/gu, "")
     .split(SLOWDOWN_NOTICE)
     .join(" ");
   if (TEXT_STEMS.some((tok) => norm.includes(tok))) return true;
-  if (CODE_RE !== null && CODE_RE.test(text.replace(/[\s_-]+/gu, " "))) return true;
+  if (CODE_RE !== null && CODE_RE.test(text.replace(CODE_SEP_RE, " "))) return true;
   return false;
 }
 
 function normKey(key: unknown): string {
   return String(key)
-    .toLowerCase()
+    .toLowerCase() // LOWER: BASE's own str(key).lower() here, ported exactly, never folded.
     .replace(/[^a-z0-9]/gu, "");
 }
 
@@ -812,7 +815,7 @@ function isMarked(event: Record<string, unknown>): boolean {
       const rec = node as Record<string, unknown>;
       const kind = KIND_KEYS.map((k) => pyStr(rec[k] ?? ""))
         .join(" ")
-        .toLowerCase();
+        .toLowerCase(); // LOWER: BASE's own kind .lower() here, ported exactly, never folded.
       if (kind.includes("error") || kind.includes("fail") || kind.includes("exception")) {
         found = true;
         return;
@@ -824,6 +827,7 @@ function isMarked(event: Record<string, unknown>): boolean {
           found = true;
           return;
         }
+        // LOWER: BASE's own str(child).lower() here, ported exactly, never folded.
         if (nk === "outcome" && pyStr(child).toLowerCase() === "error") {
           found = true;
           return;
@@ -842,6 +846,7 @@ function noteRecord(value: unknown, marked: boolean, st: StructuredState): void 
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     if (isToolResult(value)) return;
     for (const [key, child] of Object.entries(value)) {
+      // LOWER: BASE's own str(key).lower() here, ported exactly, never folded.
       if (PROMPT_KEYS.has(String(key).toLowerCase())) continue;
       if (underToolKey(key, child)) continue;
       noteStructured(String(key), child, marked, st);
@@ -860,8 +865,10 @@ function collectErrorText(value: unknown, parent: string, into: string[]): void 
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     if (isToolResult(value)) return;
     for (const [key, child] of Object.entries(value)) {
+      // LOWER: BASE's own str(key).lower() here, ported exactly, never folded.
       if (PROMPT_KEYS.has(String(key).toLowerCase())) continue;
       if (underToolKey(key, child)) continue;
+      // LOWER: BASE's own str(key).lower() here, ported exactly, never folded.
       collectErrorText(child, String(key).toLowerCase(), into);
     }
   } else if (Array.isArray(value)) {
@@ -869,7 +876,7 @@ function collectErrorText(value: unknown, parent: string, into: string[]): void 
   }
 }
 
-const SEP = String.raw`[\s_-]+`;
+const SEP = `[${PY_S_CLASS}_-]+`;
 const IDLE_RE = new RegExp(
   `${BOUND_L}(?:model${SEP}stream${SEP}idle${SEP}timeout|stream${SEP}idle${SEP}timeout)${BOUND_R}`,
   "iu",
@@ -981,7 +988,7 @@ if (import.meta.main) {
       }
     }
     const skipArg = rest.length >= 3 ? rest[2]! : "0";
-    if (!/^\s*[+-]?[0-9]+\s*$/u.test(skipArg)) {
+    if (!new RegExp(`^[${PY_S_CLASS}]*[+-]?[0-9]+[${PY_S_CLASS}]*$`, "u").test(skipArg)) {
       die(`skip-lines is a whole number from 0: ${skipArg}`);
     }
     const skip = parseInt(skipArg, 10);

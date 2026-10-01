@@ -601,7 +601,7 @@ function repoFromBrief(dispatch: string): string {
   const body = waybill.slice(starts[starts.length - 1]!);
   const end = /^## /mu.exec(body);
   const scope = end ? body.slice(0, end.index) : body;
-  const rm = /^repo:[ \t]*(\S.*?)(?:[ \t]{2,}\S.*)?[ \t]*$/mu.exec(scope);
+  const rm = /^repo:[ \t]*([^ \t].*?)(?:[ \t]{2,}[^ \t].*)?[ \t]*$/mu.exec(scope);
   return rm ? (rm[1] ?? "").trim() : "";
 }
 
@@ -1369,7 +1369,9 @@ function manifestLegValue(manifestPath: string): string {
     if (typeof leg === "string") return leg;
     if (typeof leg === "number") {
       // A float prints with its point; the raw token says whether it parsed as one.
-      const tok = /"leg"\s*:\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/u.exec(raw)?.[1];
+      const tok = /"leg"[ \t\n\r]*:[ \t\n\r]*(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/u.exec(
+        raw,
+      )?.[1];
       if (tok !== undefined && (tok.includes(".") || /[eE]/u.test(tok))) {
         return Number.isInteger(leg) ? `${String(leg)}.0` : String(leg);
       }

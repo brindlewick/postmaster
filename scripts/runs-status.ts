@@ -48,9 +48,10 @@ function pyStr(v: unknown, raw: string, key: string): string {
   if (v === true) return "True";
   if (v === false) return "False";
   if (typeof v === "number") {
-    const tok = new RegExp(`"${key}"\\s*:\\s*(-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)`, "u").exec(
-      raw,
-    )?.[1];
+    const tok = new RegExp(
+      `"${key}"[ \\t\\n\\r]*:[ \\t\\n\\r]*(-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)`,
+      "u",
+    ).exec(raw)?.[1];
     if (tok !== undefined && (tok.includes(".") || /[eE]/u.test(tok))) {
       return Number.isInteger(v) ? `${String(v)}.0` : String(v);
     }
