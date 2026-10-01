@@ -19,6 +19,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
+import { pyWords } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
 const SELF = join(HERE, "host.sh");
@@ -3792,6 +3793,14 @@ export async function runControls(): Promise<number> {
         "    printf 'Error: quota exceeded\\n' >&2",
         "    i=0; while [ $i -lt 1000 ]; do printf '\\xff\\xfe binary\\n' >&2; i=$((i+1)); done",
         "    exit 1 ;;",
+        "  *fold-quota*)",
+        '    printf \'{"session_id":"thread-foldq"}\\n\'',
+        "    printf 'inſufficient_quota: upgrade your plan\\n' >&2",
+        "    exit 1 ;;",
+        "  *bound-code*)",
+        '    printf \'{"session_id":"thread-bound"}\\n\'',
+        "    printf 'error é429 settled\\n' >&2",
+        "    exit 1 ;;",
         "  *skill-caller*)",
         '    "$TEST_LAUNCH" skill coachman security-review --leg synthesis --run "$TEST_DISPATCH" >/dev/null 2>&1',
         '    printf \'{"session_id":"thread-skilled"}\\n\'',
@@ -4097,6 +4106,22 @@ export async function runControls(): Promise<number> {
       () => r.code === 0 && lastRecord(attemptsPath).outcome === "walled",
       safeOutcome(attemptsPath),
     );
+    prompt = join(legD, "fold-quota.txt");
+    writeFileSync(prompt, "fold-quota now\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "wall terms fold the Unicode way (long s is an s)",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "walled",
+      safeOutcome(attemptsPath),
+    );
+    prompt = join(legD, "bound-code.txt");
+    writeFileSync(prompt, "bound-code now\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "wall codes bound the Unicode way (no boundary inside é429)",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "incomplete",
+      safeOutcome(attemptsPath),
+    );
     prompt = join(legD, "break-runjson.txt");
     writeFileSync(prompt, "break-runjson now\n");
     before = nonEmptyLines(attemptsPath).length;
@@ -4288,11 +4313,7 @@ export async function runControls(): Promise<number> {
     );
     rmSync(join(legD, ".leg-1-exited"), { force: true });
     const selfStat = readFileSync(`/proc/${process.pid}/stat`, "utf8");
-    const selfStart =
-      selfStat
-        .slice(selfStat.lastIndexOf(")") + 1)
-        .trim()
-        .split(/\s+/u)[19] ?? "";
+    const selfStart = pyWords(selfStat.slice(selfStat.lastIndexOf(")") + 1))[19] ?? "";
     writeFileSync(activePath, `${process.pid} ${selfStart}\n`);
     before = nonEmptyLines(attemptsPath).length;
     prompt = join(legD, "livetest.txt");

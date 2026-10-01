@@ -130,6 +130,7 @@ import {
   END_OF_STRING,
   PY_DOT,
   PY_S_CLASS,
+  casefold,
   pySplitLines,
   pyTrim,
   pyWords,
@@ -3700,8 +3701,9 @@ function legClassify(params: {
     return Array.isArray(value) && value.length ? JSON.stringify(value) : "";
   };
   const isWall = (value: unknown): boolean => {
-    const s = selected(value).toLowerCase();
-    return /\b(?:402|429)\b/u.test(s) || LEG_WALL_TERMS.some((term) => s.includes(term));
+    const s = casefold(selected(value));
+    const code = new RegExp(`${BOUND_L}(?:402|429)${BOUND_R}`, "u");
+    return code.test(s) || LEG_WALL_TERMS.some((term) => s.includes(term));
   };
   for (const line of pySplitLines(text)) {
     let event: unknown;
@@ -4663,13 +4665,16 @@ async function legExec(args: string[]): Promise<void> {
     // one, a bare API term prose never holds, or an error word beside a wall term or code.
     const markers = ["error", "fail", "exceed", "denied", "exception"];
     const bare = ["insufficient_quota", "resource exhausted", "payment required"];
-    const anchored = new RegExp(`^[${PY_S_CLASS}]*(?:402|429)\\b`, "u");
-    const httpStatus = new RegExp(`http/[^${PY_S_CLASS}]+[${PY_S_CLASS}]+(?:402|429)\\b`, "u");
-    const anyCode = /\b(?:402|429)\b/u;
+    const anchored = new RegExp(`^[${PY_S_CLASS}]*(?:402|429)${BOUND_R}`, "u");
+    const httpStatus = new RegExp(
+      `http/[^${PY_S_CLASS}]+[${PY_S_CLASS}]+(?:402|429)${BOUND_R}`,
+      "u",
+    );
+    const anyCode = new RegExp(`${BOUND_L}(?:402|429)${BOUND_R}`, "u");
     let wallSeen = false;
     const scanLine = (line: string): void => {
       if (wallSeen) return;
-      const s = line.toLowerCase();
+      const s = casefold(line);
       if (anchored.test(s) || httpStatus.test(s) || bare.some((t) => s.includes(t))) {
         wallSeen = true;
       } else if (
