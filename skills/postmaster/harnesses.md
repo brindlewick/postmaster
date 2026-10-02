@@ -169,7 +169,7 @@ in a prompt: match on pid or working directory.
 A skill is installed as a link from a harness's user-level skills folder to that skill in the
 postmaster repo's main checkout, never as a copy, and a session finds `<tool>`, the postmaster
 repo, from the link (`SKILL.md`, first section). `<tool>/scripts/link-skills.sh` makes the links
-and is this table's executable form; its self-test fails when the two disagree. Harnesses that
+and is this table's executable form; its tests beside it fail when the two disagree. Harnesses that
 read one folder share one link there.
 
 | harness | linked into | it also reads | only inside a project | follows a link | source |

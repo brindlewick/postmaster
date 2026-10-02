@@ -222,6 +222,11 @@ whole system.
    `scripts/log-action.sh`, per run and per project. The narrative is for reading; the log
    is what a run is audited from and what the flow is improved from.
 
+The scripts run on Bun 1.4.2 or newer: each `scripts/<name>.sh` is a one-line wrapper that
+hands its arguments to `scripts/<name>.ts`. Runtime imports are Bun's built-ins and Node's
+standard modules only; `typescript`, `@biomejs/biome` and `oxlint` are the development dependencies,
+and `bun run check` is the type check, Oxlint, the Biome format check, and the tests beside every script.
+
 ### Where a setting comes from
 
 Precedence, stated once and followed everywhere: **discovery** supplies defaults; the
