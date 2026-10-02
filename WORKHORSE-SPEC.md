@@ -96,7 +96,7 @@ same way across the runbooks, docs, config examples, tests and fixtures.
   Bun's own exit propagates, as with the wrappers.
 - `scripts/run` is executable and invoked directly, never through a `bash` prefix in
   committed commands (tests exec the path).
-- All 58 runnable scripts go through the entry; the bare-bun invocations used today
+- All 57 runnable scripts go through the entry (51 wrapped, 6 un-wrapped); the bare-bun invocations used today
   (some with isolation flags, `usage.ts` and `run-clash.ts` without) all become
   `scripts/run <name>`. Import-only modules (`host-self-test.ts`, `lib/*.ts`) need
   no entry path.
