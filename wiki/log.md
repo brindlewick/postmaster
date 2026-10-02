@@ -1,12 +1,44 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-29
+updated: 2026-10-01
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-01] ingest | what keeps a lane inside its worktree
+
+Issue #107. A trial recorded in `raw/trials/confine-lanes/`: ten model runs on codex, Claude Code,
+Muse Code and MiMo Code, pi and MiMo Code's shell on a stand-in provider, and plain-shell probes,
+at four levels: as launched today, with each harness's own guard, inside sandbox-runtime, and
+inside a Landlock ruleset. Unconfined, every harness wrote into the main checkout and read the
+other lane's worktree and a file elsewhere in the home directory. Claude Code's and MiMo Code's
+own rules refused reads and let a shell write through; codex's and Muse Code's sandboxes switch off
+in bypass mode. sandbox-runtime stopped every reach and every lane still passed the gate, after
+three changes the page lists; it needed root to allow Bubblewrap on this Ubuntu machine. A
+worktree's shared store still lets a lane read another lane's commits; a shared clone per lane
+does not. New concept page `lane-confinement`, standing `claimed`.
+
+## [2026-10-01] lint | a fixture run's postmaster runs headless
+
+Fixture copies are marked in their own git config, and a fixture run's
+postmaster runs headless on every host, so a run starts without a trust
+prompt. Trusting the fixtures folder never spared a copy: the trust search
+stops at the top of the repository.
+
+## [2026-09-30] ingest | a gate on the default branch after a merge runs from a clean checkout
+
+Issue #110. A design decision, with the control that shows it. The fixture app's `npm run
+check` failed on main right after a merge in fixture runs 4 and 5 (2026-09-28), because Biome
+walked into the run's own worktrees under `.worktrees/`, and passed once they were removed.
+The copies stay where the machine's convention puts them; the flow's two post-merge gates (the
+ship leg's verification of the merged default branch, and fixture scoring's gate) now run from
+a clean checkout of the branch outside the project folder, through `scripts/clean-checkout.ts`.
+Hand-run tools in the main checkout still see the copies; the page says so. Standing `claimed`:
+those fixture runs are not in `raw/`, so the page marks the observation unverified. The
+colocated tests hold the positive and negative control.
 
 ## [2026-09-29] ingest | a read-only dashboard, reached through Tailscale's proxy
 
@@ -20,6 +52,31 @@ machine's name. It answers only the owner's login at the machine's own name. New
 standing `claimed`; whether the identity header reaches a plain-HTTP service is left for the
 first ticket's live control. Tickets #146 to #150 build it, the first a dashboard the user can use
 on its own.
+
+## [2026-09-29] ingest | the planning stage: every spec to the user before code
+
+A decision page, and a capture. Anthropic's AI-native SDLC playbook is captured into
+`raw/articles/ai-native-sdlc-playbook/` for its claim that design review happens before any
+code is generated. A run gains a `planning` stage: each workhorse drafts its own spec and
+stops, the postmaster puts each spec to the user one at a time as a link into the workhorse's
+worktree, and no workhorse writes code until its own spec is approved. Two approved specs are
+needed to go on. This reverses part of #29, where the spec was an audit record nobody
+reviewed during the run; the coachman still does not check code against the spec. The
+workhorse-spec page no longer says nobody reviews it, and #9's own-spec level becomes the
+workhorses' own specs reviewed by the user, with whether review makes the specs converge as a
+measure. Standing `claimed`, since no run bears on it yet.
+
+## [2026-09-29] ingest | what 25 syntheses took from each lane
+
+Issue #157. A trial over the records of every run that reached synthesis by 2026-09-29, 16
+against this repository and 9 fixture runs, recorded in `raw/trials/2026-09-29-synthesis-audit/`
+with its script, its output and one row per run. No run was promoted: the claim rests on the
+SYNTHESIS lines, the cards and a count in git, and the harness logs stay with each run. Every
+SYNTHESIS line names something taken from each lane, as `coachman.md` requires, so the test H1
+gave could not fail. Counted in runs of six words, the second-ranked lane's own share of the
+synthesis was 2% or less in 8 runs and 10% or more in 15. H1 now names four measurements that
+would settle it: #158, #159, #160 and a single-lane baseline. The cost question gains the
+minutes the runs recorded. Standing stays `claimed`.
 
 ## [2026-09-27] ingest | how the style sort is checked and put to the user
 

@@ -17,10 +17,13 @@ target the user wants before assuming either way.
 
 ### What is different when the target IS this repo
 
-**A run in flight does not see your edits.** A coachman loaded its runbook when it started;
-changing `coachman.md` mid-run changes nothing for it. That is a safety property, not a
-limitation: a broken edit cannot break a fleet that is already moving. It also means a fix
-you just merged is not in effect until the next dispatch.
+**A run runs on the version it was dispatched from.** At dispatch the run is pinned to the
+postmaster commit it started on: a checkout of that commit, which the waybill names as its
+tool and `run.json` records. Every coachman leg reads its runbooks and runs its scripts from
+that checkout — later legs, resumes and takeovers included — whatever `main` has done since.
+The supervising postmaster stays on the main checkout. A change can merge with runs in
+flight; each of them finishes on the version it started with. A fix you just merged reaches
+the next dispatch, not one already running.
 
 **The supervising session is in the same position.** Whatever is supervising loaded its
 context at startup. After merging a change to the flow, restart it or accept that it is
@@ -29,31 +32,29 @@ running the previous version.
 **Everything else is ordinary.** Worktrees under `.worktrees/` are gitignored, the gate runs
 the same way, and merges are merges. There is no special mode.
 
-### The one thing that genuinely bites
-
-**Do not let a run rewrite the file that a live run is mid-way through executing and then
-expect either to be coherent.** If a ticket changes the coachman contract (markers, the
-waybill shape, the turnpike table, completion detection), land it while the fleet is idle, or the next dispatch
-will read a new contract while an older run is still writing to the old one.
-
-Contract changes are the only category that needs the fleet quiet. Ordinary changes to
-scripts, docs and prose do not.
-
 **A change to the coachman contract merges only after a fixture run scores clean**: a run
 dispatched from the change's branch against a repository made by `scripts/fixture.sh new`, and
-scored by `scripts/fixture.sh score` on the same branch. [Why](wiki/concepts/fixture-runs.md).
+scored by `scripts/fixture.sh score` on the same branch. What the contract is is defined in one
+place, [its file list](docs/coachman-contract.toml);
+`scripts/coachman-contract.sh` says whether a change touches it. That rule is about the change's
+quality, not about the runs in flight. [Why](wiki/concepts/fixture-runs.md).
 
 ## When a session opens in this repo, do this
 
-No slash command, and no wizard for the user to run. They open their agent in this
-folder and this file takes it from there: set the machine up if it is not, choose a target,
-launch the postmaster. Work out where the user is and pick up from there.
+No slash command, and no wizard for the user to run. The user opens their agent in this
+folder and says hi. Any first message starts the flow: set the machine up if it is not,
+choose a target, launch the postmaster. Work out where the user is and pick up from there.
 
 **1. Is this machine set up?**
 
 ```sh
 cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
+scripts/link-skills.sh --check  # names missing or blocked links; read its exit status
 ```
+
+Include both results when you say whether the machine is set up. The link check is read-only.
+If the config is present but the check names missing or blocked links, report them and offer
+the install step below on the user's word.
 
 If it is missing, set it up now, in conversation, before anything else. You conduct it:
 probe first, ask one thing at a time, verify each answer, then have the script write the
@@ -95,14 +96,15 @@ scripts/setup.sh --answers <file> --dry-run   # the config it would write
 scripts/setup.sh --answers <file>             # write ~/.postmaster/config.toml
 ```
 
-Then link the skills, so the postmaster skill works from any project in every installed
-harness with a skills folder. Show the user the dry run first. The links go to this repo's
-main checkout, never a worktree, and nothing is ever copied; a path in the way is the user's
-to move, and the script changes nothing until it is gone.
+When the check names missing or blocked links, show the user the dry run output below and ask
+whether they want the links installed. Run the installer only after they agree. If they
+decline, report that setup remains without the links. The links go to this repo's main checkout,
+never a worktree, and nothing is ever copied or replaced. A path in the way is the user's to
+move before installation.
 
 ```sh
 scripts/link-skills.sh --dry-run   # the links it would make, and anything in the way
-scripts/link-skills.sh             # make them; running it again changes nothing
+scripts/link-skills.sh             # only after the user agrees; makes links, replaces nothing
 ```
 
 **2. Which project are we dispatching against?**
@@ -144,7 +146,7 @@ A three-role flow for getting one ticket implemented well by several models at o
 | role | what it does | where it is defined |
 |---|---|---|
 | **postmaster** | decomposes a stream into tickets, dispatches one coachman per ticket leg by leg, supervises, answers escalations, grants merges | `skills/postmaster/postmaster.md` (the front door session, or one it spawned) |
-| **coachman** | drives one leg of one ticket; up to three legs, `synthesis`, `review` and `ship`, each a fresh coachman with a written hand-off between them, carry a ticket from waybill to ship card: harnessing the team, judging their work, running the turnpikes its ticket names, clearing the gate | `skills/postmaster/coachman.md` |
+| **coachman** | drives one leg of one ticket; at most two legs, `synthesis` and `review`, each a fresh coachman with a written hand-off between them, carry a ticket from waybill to ship card: harnessing the team, judging their work, running the turnpikes its ticket names, clearing the gate | `skills/postmaster/coachman.md` |
 | **the team** | several model lanes implementing the same ticket independently, in **blinkers**: separate worktrees, unable to see each other's work | `coachman.md`, lane table |
 
 The postmaster runs no model lanes and edits no source. A coachman never takes a second
@@ -157,10 +159,11 @@ host at all, and `scripts/host.sh` runs every launch through them. `SKILL.md` is
 reached from this file or by typing `/postmaster`, it gets the machine ready if it is not and
 starts the postmaster, in this conversation when the session is already the one
 `team.postmaster` names in the target repo with the user at the terminal, and as a session it
-spawns otherwise; `postmaster.md` is what the postmaster then does. A run is up to three
-coachman legs, `synthesis`, `review` and `ship`, each a fresh thread, so no context outlives a
+spawns otherwise; `postmaster.md` is what the postmaster then does. A run is at most two
+coachman legs, `synthesis` and `review`, each a fresh thread, so no context outlives a
 leg and a leg's hand-off document is the whole of what the next leg knows. The review leg runs
-only when the ticket names a turnpike that runs in it.
+only when the ticket names a turnpike that runs in it, and the last leg ends the run ready for
+the user's merge with the ship card. A run dispatched before this change keeps its third `ship` leg.
 
 ## What the project has learned lives in the wiki
 
@@ -219,6 +222,11 @@ whole system.
    `scripts/log-action.sh`, per run and per project. The narrative is for reading; the log
    is what a run is audited from and what the flow is improved from.
 
+The scripts run on Bun 1.4.2 or newer: each `scripts/<name>.sh` is a one-line wrapper that
+hands its arguments to `scripts/<name>.ts`. Runtime imports are Bun's built-ins and Node's
+standard modules only; `typescript`, `@biomejs/biome` and `oxlint` are the development dependencies,
+and `bun run check` is the type check, Oxlint, the Biome format check, and the tests beside every script.
+
 ### Where a setting comes from
 
 Precedence, stated once and followed everywhere: **discovery** supplies defaults; the
@@ -239,8 +247,8 @@ check, a stale sentence, an instruction with no mechanism behind it, a rule writ
 that belongs in a script. That does not widen the pull request. Finishing what it introduced
 is part of the same change.
 
-A ticket is for work the pull request never set out to do: it touches another contract, needs
-the fleet quiet, or depends on something that does not exist yet.
+A ticket is for work the pull request never set out to do: it touches another contract, or
+depends on something that does not exist yet.
 
 The test is whether the fix completes what the pull request claims. "Is this a separate
 concern?" is the wrong test, because nearly anything can be described as one. Before filing a
@@ -248,5 +256,6 @@ ticket, run `gh pr list` and check whether the work belongs in one of them.
 
 **A script path in `skills/postmaster/` goes through `<tool>`**, the repo the skill finds from
 its link: `<tool>/scripts/stage.sh`, never `scripts/stage.sh`, which resolves only from this
-repo's root. `scripts/skill-refs.sh` names every path that does not, and `--fix` rewrites the
-bare ones; run both after writing a runbook and after a rebase.
+repo's root. The run's own pinned tool goes through `<rt>`, resolved per run by
+`run-meta.sh path`. `scripts/skill-refs.sh` names every other path that does not go through
+`<tool>`, and `--fix` rewrites the bare ones; run both after writing a runbook and after a rebase.

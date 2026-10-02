@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-09-29
+updated: 2026-10-01
 ---
 
 # postmaster wiki
@@ -22,7 +22,9 @@ Does implementing one ticket with several models, each unable to see the others'
 produce better software than one good model? If so, how?
 
 - [Combining models](concepts/combining-models.md): three hypotheses and five open questions,
-  all **claimed**, since no runs have been recorded yet.
+  all **claimed**, since no dispatched run has been promoted yet. An audit of 25 syntheses bears
+  on H1: the coachman's record of what it took from each lane cannot fail, and the second lane's
+  share, counted in git, ranges from nothing to most of the code.
 
 ## Harnesses
 
@@ -34,6 +36,11 @@ How each agent CLI really behaves, as distinct from what its documentation says.
 - [A resume's exit status does not say it continued its thread](concepts/resume-exit-status.md):
   **settled**, for pi, Muse Code and MiMo Code. Resuming a thread it cannot find, a harness can
   exit 0 having done nothing, or having started a new thread.
+- [A lane stays inside its worktree only when a sandbox wraps its harness](concepts/lane-confinement.md):
+  **claimed**. In bypass mode every harness wrote into the main checkout and read another lane's
+  worktree; their own guards switch off or check only what a tool call names. sandbox-runtime
+  around the harness stopped every reach on all five, and every lane still passed the gate.
+  A worktree still shares its repository's store; a shared clone per lane does not.
 
 ## Trackers and tooling
 
@@ -58,9 +65,12 @@ How the flow is checked, and what each check can and cannot see.
 
 Why the design is shaped as it is.
 
-- [The workhorse spec](concepts/workhorse-spec.md): **claimed**. Each workhorse drafts its
-  own, which keeps the workhorses independent of each other and of the coachman, and makes
-  each run auditable.
+- [The workhorse spec](concepts/workhorse-spec.md): **claimed**. One spec per run, written by
+  the coachman at the template's level and passed down, so the user reviews it once and the
+  lanes still choose their own implementations.
+- [The planning stage](concepts/planning-stage.md): **claimed**. The run's one spec passes
+  the user's review in a spec session before any code, from Anthropic's AI-native SDLC playbook: a fault is
+  cheapest to fix at the planning stage, and weaker models gain the most from a reviewed plan.
 - [Faults a run finds in postmaster become tickets](concepts/tool-faults.md): **claimed**. A
   run records each fault in postmaster as it happens and never fixes the tool; a fault in a
   control stops the leg. When the run closes, its faults become tickets on postmaster's own
@@ -86,7 +96,8 @@ Why the design is shaped as it is.
 - [A lane may review through its harness's own skill](concepts/own-review-skills.md):
   **claimed**. A security lane runs its harness's own security review skill where it has one,
   and the brief where it has none; Claude Code's needs a clone whose `origin/HEAD` leads back to
-  the base.
+  the base. A bug lane runs its harness's code-review skill where it has one, names the change
+  from BASE, and does not review at all where it has none.
 - [The local tracker](concepts/local-tracker.md): **claimed**. With no service and no login,
   a repository's tickets live in its own git directory, and a repository whose store exists
   uses it whatever the config names.
@@ -102,6 +113,9 @@ Why the design is shaped as it is.
 - [A project's .postmaster/ holds its settings and every run's record](concepts/project-settings.md):
   **claimed**. Optional, gitignored whole, shared through one narrow file; run artifacts live
   with the project so two checkouts with the same basename no longer share a ledger.
+- [A gate on the default branch after a merge runs from a clean checkout](concepts/clean-checkout-gates.md):
+  **claimed**. The run's working copies stay under `.worktrees/`; the flow's post-merge gate
+  runs from a clean checkout of the branch outside the project folder, so it never reads them.
 - [The dashboard shows the fleet and can do nothing to it](concepts/dashboard.md): **claimed**.
   A read-only web page for phone, iPad and desktop. It takes every figure from the scripts that
   already compute it, listens on a Unix socket, and is reached only by the machine's owner
@@ -110,5 +124,5 @@ Why the design is shaped as it is.
 
 ## Sources
 
-[Recorded runs and captured reading](sources/index.md): one run, the review rounds of #36, and
-fourteen papers on review, fixes and severity.
+[Recorded runs and captured reading](sources/index.md): one run, the review rounds of #36,
+fourteen papers on review, fixes and severity, and an article on review before implementation.
