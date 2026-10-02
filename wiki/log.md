@@ -1,12 +1,32 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-30
+updated: 2026-10-01
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-01] ingest | what keeps a lane inside its worktree
+
+Issue #107. A trial recorded in `raw/trials/confine-lanes/`: ten model runs on codex, Claude Code,
+Muse Code and MiMo Code, pi and MiMo Code's shell on a stand-in provider, and plain-shell probes,
+at four levels: as launched today, with each harness's own guard, inside sandbox-runtime, and
+inside a Landlock ruleset. Unconfined, every harness wrote into the main checkout and read the
+other lane's worktree and a file elsewhere in the home directory. Claude Code's and MiMo Code's
+own rules refused reads and let a shell write through; codex's and Muse Code's sandboxes switch off
+in bypass mode. sandbox-runtime stopped every reach and every lane still passed the gate, after
+three changes the page lists; it needed root to allow Bubblewrap on this Ubuntu machine. A
+worktree's shared store still lets a lane read another lane's commits; a shared clone per lane
+does not. New concept page `lane-confinement`, standing `claimed`.
+
+## [2026-10-01] lint | a fixture run's postmaster runs headless
+
+Fixture copies are marked in their own git config, and a fixture run's
+postmaster runs headless on every host, so a run starts without a trust
+prompt. Trusting the fixtures folder never spared a copy: the trust search
+stops at the top of the repository.
 
 ## [2026-09-30] ingest | a gate on the default branch after a merge runs from a clean checkout
 

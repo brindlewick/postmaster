@@ -131,12 +131,6 @@ function hasKey(file: string, key: string): boolean {
 
 // --- entry -----------------------------------------------------------------------------------
 const argv = process.argv.slice(2);
-if (argv.length === 1 && argv[0] === "--self-test") {
-  const tested = run(process.execPath, ["test", join(HERE, "setup.test.ts")]);
-  process.stdout.write(tested.out);
-  process.stderr.write(tested.err);
-  process.exit(tested.code);
-}
 let DRY = 0;
 let ANSWERS = "";
 let CONFIG = join(process.env.HOME ?? "~", ".postmaster", "config.toml");

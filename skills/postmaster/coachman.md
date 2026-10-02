@@ -40,8 +40,10 @@ half, how a run is prepared and what the waybill carries, is `SKILL.md`. You do 
 | `<repo>/.worktrees/<TICKET>` | synthesis worktree, branch `<TICKET>` |
 | `<repo>/.worktrees/<TICKET>-<lane>` | workhorse worktree, branch `wb/<TICKET>-<lane>` (`wb` for workhorse branch) |
 | `<dispatch>/checkpoint-<n>.md` | checkpoint cards: `1` and `review` |
-| `<dispatch>/spec-review.md` | the planning stage's review package: one entry per workhorse, its spec's commit and the link the postmaster puts to the user; written before `.spec-review-ready` |
-| `<dispatch>/spec-decisions.md` | the postmaster's record, for the current package, of the user's word on each spec: approved, changes in the user's words, or dropped; written only through `<tool>/scripts/spec-decisions.sh`, which also counts approvals run-wide; what you read on resume from the planning pause |
+| `<dispatch>/spec-review.md` | the planning stage's review package: one entry for the run's spec, its commit and the link the postmaster puts to the user; written before `.spec-review-ready` |
+| `<dispatch>/spec-review/WORKHORSE-SPEC.md` | the review copy of the run's one spec; the spec session edits this copy, never the committed spec |
+| `<dispatch>/spec-session-brief.md` | the ticket, the spec link and copy path, lane drafts, standing preferences, and the spec-session runbook path; written by `<tool>/scripts/spec-session.sh brief`, never committed |
+| `<dispatch>/spec-decisions.md` | the postmaster's record, for the current package, of the user's word on the run's one spec: approved, changes in the user's words, or dropped (the run stops); written only through `<tool>/scripts/spec-decisions.sh`, which also counts the approval; what you read on resume from the planning pause |
 | `<repo>/.worktrees/<TICKET>-rev-<lens>-<lane>` | reviewer scratch, one per lens per lane, detached at the synthesis HEAD, fresh every round: a clone under the security lens, a worktree under the others |
 | `<dispatch>/style-sort.md` | aftercare's sort of the run's style findings, which the postmaster puts to the user |
 
@@ -74,8 +76,8 @@ with its exit; `verify` per check per commit it runs on, written by `<tool>/scri
 and never by hand; `ticket-state` and `ticket-comment` per tracker write; `merge` on the merge;
 `teardown` per worktree removed; `handoff-accept` as a leg's first action and `handoff` as its
 last; `stage` whenever the run enters a stage, written by `<tool>/scripts/stage.sh` and never by hand;
-`spec-review` per user decision on a workhorse's spec, written by the postmaster from the
-interactive session and never by you (target the lane, detail `approved|changes|dropped` then
+`spec-review` per user decision on the run's one spec, written by the postmaster from the
+interactive session and never by you (target `spec`, detail `approved|changes|dropped` then
 the spec commit then the user's words); `tool-fault` as soon as postmaster itself misbehaves
 (Tool faults, below); `note` for anything else worth a line. A lone dissenter, a convergent fix,
 a wall: each is one line here, computable later, rather than a sentence in prose that cannot be
@@ -139,6 +141,26 @@ the stream tail, then remount it: resume the thread.
 **The postmaster polls; the coachman never pushes.** Cross-session messaging is
 harness-specific and the flow does not rely on it.
 
+### Marker ownership
+
+| Marker or artifact | Writer | Meaning / reader |
+|---|---|---|
+| `logs/<lane>.done` | `host.sh` | A workhorse process exited; the coachman collects its result. |
+| `logs/review-r<round>-$LENS-<lane>.done` | `host.sh` | A reviewer process exited; the coachman collects that round. |
+| `.leg-<n>-exited` | `host.sh` | The launch ended: its process exited or startup failed after recording the reason. Cleared before a relaunch or resume. |
+| `.leg-<n>-done` | Coachman, after `handoff-check.sh` exits 0 | The hand-off is complete; the postmaster may dispatch the next leg. |
+| `.checkpoint-<n>-ready` | Coachman | `checkpoint-<n>.md` is ready for the postmaster to read. |
+| `.checkpoint-review-ready` | Coachman | `checkpoint-review.md` is ready for the postmaster to read. |
+| `.escalation-ready` | Coachman | `ESCALATION.md` asks for a ruling; the postmaster resumes the same leg. |
+| `.card-ready` | Coachman | `card.md` and the leg's hand-off are ready for the postmaster's gate. |
+| `.waiting-on-user` | Postmaster | A question is waiting; the postmaster removes it when the answer arrives. |
+
+Markers report the state of their paired artifact or process. They never replace it.
+
+The coachman supplies `.leg-<n>-exited` to `host.sh` for its own process. Its lane and
+reviewer launches give `host.sh` the corresponding `logs/*.done` path; the host owns marker
+clearing and writing after exit.
+
 ## Legs and hand-offs
 
 Read `run.json.coachman_contract` before acting. Contract `2` is the current flow: a run has
@@ -189,6 +211,11 @@ Then close the open section with `<tool>/scripts/run-log.sh <dispatch> --close`,
 `.leg-<n>-done`, and exit. The postmaster launches the next leg;
 you never do. A leg that exits without its hand-off is spent, and the postmaster remounts it.
 
+**Leg completion condition.** A leg ends only after writing all required, nonempty sections
+to `handoff-<n>.md`, passing `<tool>/scripts/handoff-check.sh`, closing its open run-log
+section, logging `handoff`, and touching `.leg-<n>-done`. A process exit marker alone never
+finishes a leg. If the process exited and there is no done marker, the postmaster remounts it.
+
 **Escalations stay inside the leg.** An escalation writes `ESCALATION.md`, touches
 `.escalation-ready` and exits; the ruling arrives as a resume of the same thread, and the
 leg continues.
@@ -205,6 +232,17 @@ and never return, with no timeout. If the browser is genuinely unavailable, reco
 DEGRADED on the card, name what was not walked, and finish the run. A run that has passed every
 gate is never blocked by a browser.
 
+For every acceptance criterion that touches a user surface, the workhorse checks it in a real
+browser through the project's own library, from a shell command in its worktree, whether or not
+the ticket has a `User journey`, and takes a screenshot per step. When the ticket has no
+journey, the spec's steps are the journey. A workhorse whose harness has no browser backend
+marks the browser evidence `not shown` with that reason in its summary; the coachman's render
+gate covers the surface, as today.
+
+For a command-line tool or scripts, each criterion is checked by running the new or changed
+commands the way they will be run, on realistic input. Keep a transcript with the command, its
+output and its exit.
+
 **No lane runs restricted.** Each harness's permission-bypass form is in `harnesses.md`; it goes
 on every launch and every resume.
 
@@ -219,30 +257,61 @@ leaves the project-wide checks to the coachman.
 
 ## The workhorse contract
 
-A workhorse writes one file at its worktree root before anything else, and one of two files as
-its final act. The brief spells all three out in full, since some harnesses read nothing but
-the brief.
+A workhorse writes one of two files as its final act, and reads the run's one approved
+spec that you place in its worktree before it starts. The brief spells the contract out in
+full, since some harnesses read nothing but the brief.
 
-- `WORKHORSE-SPEC.md`, the **workhorse spec**: written from `workhorse-spec-template.md`
-  beside this file and committed first, on its own, before any code: its approach, technical
-  context, how it meets the ticket's direction, the files it will touch, the decisions it
-  made, and its tasks, each tagged with the acceptance criterion it serves. The planning
-  stage puts it to the user before any code is written; a workhorse whose spec is not
-  approved writes no code. You copy it into the run's audit as its first commit added it and
-  as it stood when approved. The brief carries this instruction without the link that follows.
-  [Why each workhorse drafts its own spec](../../wiki/concepts/workhorse-spec.md)
+- The run's **workhorse spec** is `WORKHORSE-SPEC.md`, written by you from
+  `workhorse-spec-template.md` and committed in the synthesis worktree before any code.
+  On approval you commit that same file at each workhorse worktree root; a workhorse
+  implements from it and never rewrites it. It is what to build, the decisions that matter
+  and the tests, not the code, so each lane still chooses its own implementation. Its
+  `## Showing each criterion` has one row per acceptance criterion: the criterion's full
+  ticket wording and the check that shows it working as it will really be used. The user
+  reviews these checks with the rest of the spec. A workhorse may add checks of its own,
+  never drop or weaken one the spec gives.
+  [Why the coachman writes one spec](../../wiki/concepts/workhorse-spec.md)
   [Why the user reviews it before code](../../wiki/concepts/planning-stage.md)
 - `WORKHORSE-SUMMARY.md`: what it built, as a list of the commits on its branch; how it verified
   it: under `## Checks`, what `<tool>/scripts/verify.sh run .` printed when run just before the
   summary was written, one line per check the brief names with its command and exit, then any
-  other command it ran with its exit code; every within-brief question it decided
+  other command it ran with its exit code; under `## Evidence`, one entry per acceptance
+  criterion, numbered as the ticket numbers them, each one or more worktree-relative paths
+  under `.postmaster/verify/` — the transcripts, or the journey report and its screenshots —
+  or the line `not shown: <reason>`; every within-brief question it decided
   for itself, with the decision; what it did not do and why; and its own verdict on whether
-  the ticket's acceptance criteria are met, one line per criterion. Written last, committed,
-  and the process then exits.
-- `WORKHORSE-BLOCKED.md`: written instead when the workhorse cannot proceed without a ruling that is
-  genuinely destructive or scope-changing. The question, the options it sees, its
-  recommendation, and the state of its branch. The process then exits; the coachman resumes
-  it with the ruling.
+  the ticket's acceptance criteria are met, one line per criterion. Use numbered entries in
+  ticket order in this form: `1. <path>` or `1. not shown: <reason>`; cite paths under
+  `.postmaster/verify/` in inline code, and add further paths for one criterion as indented
+  bullets. The transcripts, journey report and screenshots stay under `.postmaster/verify/`,
+  so the coachman can read them; a transcript holds the command, its output and its exit, and
+  a journey report records each step with its screenshot. Evidence cited for a shown criterion
+  comes from the loop's last pass, on the final code. Draft the summary under
+  `.postmaster/verify/` while looping and run the applicable checks on that draft; after the
+  final `<tool>/scripts/verify.sh run .` passes, write the root summary and run
+  `bun --no-env-file --config=/dev/null <tool>/scripts/summary-evidence.ts WORKHORSE-SUMMARY.md .`
+  once more, keep that command with its output and exit under `.postmaster/verify/`, and cite
+  the transcript in `## Evidence` when at least one criterion cites a path. Written last,
+  committed, and the process then exits.
+- `WORKHORSE-BLOCKED.md`: written instead when a check the spec gives cannot pass as written
+  or contradicts the ticket — changing an approved check is not the lane's to make — or when
+  the workhorse cannot proceed without a ruling that is genuinely destructive or
+  scope-changing. It names the check or the question, what it shows, the change it proposes,
+  and the state of its branch. The process then exits; the coachman resumes it with the
+  ruling. Anything else the workhorse cannot get working does not block: it finishes, with
+  the failing transcript as that criterion's evidence, what blocks it under what it did not
+  do, and that criterion's verdict as not met.
+
+**The implementation is a loop.** Build, run each criterion's check as `## Showing each criterion`
+specifies it, fix what fails, and run it again, until every criterion's check shows it working
+and the run's checks pass. A lane may add checks of its own, never drop or weaken one the spec
+specifies. The evidence cited comes from the loop's last pass, on the final code: a transcript
+or walk taken before a later code change is taken again. If an approved check cannot pass as
+written or contradicts the ticket, stop with `WORKHORSE-BLOCKED.md` as above. Otherwise, if the
+workhorse is genuinely stuck on a check, it stops retrying it and finishes with the failing
+transcript as that criterion's evidence, what blocks it under what it did not do, and that
+criterion's verdict as not met. Running every check with `<tool>/scripts/verify.sh run .` just
+before writing the summary stays the last step.
 
 A workhorse commits incrementally as it goes, never pushes, never reads other branches or
 `.worktrees/`, and never edits files outside its worktree.
@@ -277,83 +346,85 @@ A workhorse commits incrementally as it goes, never pushes, never reads other br
    Never delete the manifest. It is the run's history, and
    the postmaster's poll reads it.
 6. **Write each workhorse's brief** to `<dispatch>/<lane>-prompt.txt`: the ticket verbatim, the
-   project profile, the docs to read first named explicitly, the `WORKHORSE-SPEC.md` /
-   `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract with `workhorse-spec-template.md` in full, the planning stop (write and commit the spec, then stop before any code; the user
-   reviews it and only an approved spec may be implemented; on a resume carrying the user's
-   words, revise the spec and commit the revision and stop again; on a resume carrying an
-   approval, implement from the approved spec and finish with the summary), the autonomous-defaults rule (decide within-brief questions
+   project profile, the docs to read first named explicitly, the `WORKHORSE-SUMMARY.md` /
+   `WORKHORSE-BLOCKED.md` contract, the line that the run's one approved spec is already at
+   `WORKHORSE-SPEC.md` in its worktree and is what it implements from and never rewrites,
+   the autonomous-defaults rule (decide within-brief questions
    yourself and record the decision in `WORKHORSE-SUMMARY.md`), the capability statement above, the
    instruction to commit incrementally, and the line that the workhorse must not read other branches
-   or `.worktrees/`. It names the run's checks as the waybill lists them and says to run them all
+   or `.worktrees/`. It names the run's checks as the waybill lists them and the loop: build,
+   run each criterion's check as the approved spec's `## Showing each criterion` specifies it,
+   fix what fails, and run it again, until every criterion's check shows it working and the
+   run's checks pass; the lane may add checks of its own, never drop or weaken one the spec
+   specifies; the evidence the summary cites comes from the loop's last pass, on the final
+   code. It says to run them all
    with `<tool>/scripts/verify.sh run .` just before writing the summary, in the background with a
-   wait where the checks together can outlast the longest command its harness allows. Where a
+   wait where the checks together can outlast the longest command its harness allows. Where the
+   project has a user surface it says that every criterion touching it is checked in a real
+   browser through the project's own library from a shell command in the worktree, screenshot
+   per step, whether or not the ticket has a `User journey`, and that where the ticket has none
+   the spec's steps are the journey. Where the work is a command-line tool or scripts it says
+   each new or changed command is run the way it will be run, on realistic input, and the
+   transcript kept: the command, its output and its exit. Where the workhorse's harness has no
+   browser backend, say so in the brief — naming no harness, only the fact — so the workhorse
+   marks the browser evidence `not shown` with that reason. Where a
    check's source names `web-journey`, it also carries what
    `<tool>/scripts/verify-journey.sh --format` prints and the command that names the report's path,
    `<tool>/scripts/verify.sh journey-path .`. Where the workhorse's harness reads no ambient context
    file, the brief opens by naming the project's context file and index.
 
-## The planning stage (leg 1): every spec to the user before any code
+## The planning stage (leg 1): one spec for the run, to the user before any code
 
-A run plans before it implements. Each workhorse drafts its own spec, blind to the others, and
-stops. The postmaster puts each spec to the user in its interactive session; no workhorse
-writes code until its own spec is approved. Review is for scope and correctness, never for
-making the specs alike: one workhorse's spec is never shown to another, and feedback goes to
-one workhorse at a time. In a fixture run the postmaster signs each spec off itself and the
-user is not asked; the pause, the package and the decisions file work the same.
+A run plans before it implements. You write one spec for the ticket, in the workhorse-spec
+template, and commit it. The postmaster puts that one spec to the user; no workhorse writes
+code until it is approved. The workhorses write no specs and are not launched in this stage.
+The spec stays at the level of the template — what to build, the decisions that matter and
+the tests, not the code — so the lanes still make their own implementation choices. In a
+fixture run the postmaster signs the one spec off itself and the user is not asked; the
+pause, the package and the decisions file work the same.
 [Why design review happens before code](../../wiki/concepts/planning-stage.md)
 
-1. **Set the stage:** `<tool>/scripts/stage.sh <dispatch> planning`. Launch every workhorse as
-   a headless resumable thread, exactly as Stage 1 does and from the run's pin — `<tool>` is the
-   pinned checkout, and every launch passes `--run <dispatch>` — but its work is the spec alone:
-   write `WORKHORSE-SPEC.md` from the template, commit it on its own, and stop. No code, no
-   summary. Record every thread id as at a normal launch. While they draft, write the blind
-   acceptance tests as Stage 1 says — before you read any spec's content or any lane's diff.
-2. **Harvest the specs.** A workhorse that committed `WORKHORSE-SPEC.md` and exited is
-   `planned`. `WORKHORSE-BLOCKED.md` is `blocked`, answered as Stage 1 says. Neither is died
-   mid-flight: remount or re-dispatch. Log `harvest` per workhorse with its exit shape.
-3. **Build the review package, without reading the specs.** For each planned workhorse take
-   the commit that added or last changed its spec (`git -C <worktree> log -1 --format=%H --
-   WORKHORSE-SPEC.md`) and the link from `<tool>/scripts/spec-review-link.sh <dispatch>
-   <workhorse-wt>`, which fills the run's recorded `planning.review_link` template with
-   `{path}` or prints the path where no template is set. Write `<dispatch>/spec-review.md`,
-   one entry per workhorse: its lane, the commit, the link and the path. The package is for
-   the postmaster; it never goes to a lane, and no entry carries another workhorse's spec.
-   Touch `.spec-review-ready` and exit. The postmaster puts the specs to the user, one at a
-   time, and records each decision.
-4. **On resume, read this package's `<dispatch>/spec-decisions.md`** and act on each entry,
-   one workhorse at a time. The file holds this package's decisions only; earlier packages
-   stay in the `spec-review` log lines. The user's words are the only feedback a workhorse
-   gets, and only its own:
-   - **changes:** resume that workhorse alone, its own thread, through Stage 1's resume
-     form from the run's pin (`--run <dispatch>`), with the user's words as the
-     prompt. It revises `WORKHORSE-SPEC.md` from those words, commits the revision (a new
-     commit; the first spec commit is never rewritten), and stops again. Never put another
-     workhorse's spec, decision or feedback in this prompt. When every revision is in, harvest
-     it as step 2 does, build a fresh package for the revised specs — a new link entry at the
-     new commit — and pause as step 3 does. The revised spec comes back for review like the
-     first.
-   - **dropped:** manifest `outcome: dropped`. The workhorse is out of the run: it is never
-     resumed to implement, and its worktree is torn down at aftercare with the others.
-   - **approved:** record the commit the user approved in the manifest as
-     `lanes.<lane>.spec_commit`, with `outcome: approved`. That commit is the run's record of
-     which spec was agreed; the `spec-review` line in the log carries it too.
-5. **Implementation needs two approved specs.** When no revision is outstanding: if at least
-   two workhorses are approved, go on to Stage 1 and resume each approved workhorse to
-   implement from its approved spec, through the pinned resume form as step 4 does.
-   Otherwise the run stops and says why — fewer than two
-   approved specs — in `run-log.md` and in an escalation carrying the count, and the user
-   alone abandons it. Never implement from a spec the user has not approved, and never drop
-   the bar to keep going.
+1. **Set the stage and write the spec.** `<tool>/scripts/stage.sh <dispatch> planning`. Write
+   `WORKHORSE-SPEC.md` at the synthesis worktree root from `workhorse-spec-template.md`, at
+   the template's level, and commit it on the ticket branch as the run's record of intent.
+   That first commit is never rewritten. Launch no workhorse and ask none for a spec. While
+   you draft, write the blind acceptance tests as Stage 1 says — before any lane's diff.
+2. **Copy the spec for review and build the package.** Copy `WORKHORSE-SPEC.md` to
+   `<dispatch>/spec-review/WORKHORSE-SPEC.md`, a folder that holds nothing else, so an
+   editor opened on the folder shows only the spec. Confirm the copy is byte-identical.
+   Take the commit of the spec
+   (`git -C <synthesis-wt> log -1 --format=%H -- WORKHORSE-SPEC.md`) and the link from
+   `<tool>/scripts/spec-review-link.sh <dispatch> <dispatch>/spec-review`, which fills the
+   run's recorded `planning.review_link` template with `{path}` set to that folder, or
+   prints the file's path where no template is set. Write `<dispatch>/spec-review.md` with
+   one entry: the commit, the link and the path of the copy. Touch `.spec-review-ready` and
+   exit. The postmaster puts the spec to the user and records the decision.
+3. **On resume, read `<dispatch>/spec-decisions.md`.** It holds this package's one decision
+   (`## spec`); earlier packages stay in the `spec-review` log lines. The user's words are
+   the only feedback:
+   - **changes:** revise `WORKHORSE-SPEC.md` from those words in the synthesis worktree,
+     commit the revision (a new commit; the first spec commit is never rewritten), refresh
+     the copy in `<dispatch>/spec-review/`, build a fresh package at the new commit, and
+     pause as step 2 does. The revised spec comes back for review like the first.
+   - **dropped:** the run stops. Log why in `run-log.md`, carry the user's words in the
+     escalation, and the user alone abandons it. Never implement from a spec the user has
+     not approved, and never drop the bar to keep going.
+   - **approved:** the approval is already recorded; read its commit from the decisions
+     file. Set `lanes.<lane>.spec_commit` to that commit on every lane, with
+     `outcome: approved`, and go on to Stage 1.
+4. **Implementation needs one approved spec.** When no revision is outstanding and the spec
+   is approved, commit that approved `WORKHORSE-SPEC.md` at every workhorse worktree root,
+   confirming each is byte-identical to the approved text, and launch each workhorse to
+   implement from it, in blinkers. Each sees its own copy and never another lane's work.
 
 ## Stage 1 (leg 1): implement, then synthesize
 
-**Every approved workhorse was launched in the planning stage and carries its spec on its own
-thread.** Resume each approved one to implement from the spec the user approved, in the same
-breath, through the host script and the launch script so no form is ever copied by hand. The
-resume carries the approval as its prompt: the lane's approved spec commit
-(`lanes.<lane>.spec_commit`) and the instruction to implement from that spec and finish with
-`WORKHORSE-SUMMARY.md`. The first launch of a workhorse is the planning stage's; the form is
-the same:
+**Every workhorse is first launched after the planning stage has its one approved spec, and
+carries that spec in its own worktree.** Launch each workhorse to implement from the spec
+the user approved, in blinkers, through the host script and the launch script so no form is
+ever copied by hand. The launch carries the instruction to implement from the approved spec
+at `WORKHORSE-SPEC.md` in its worktree and finish with `WORKHORSE-SUMMARY.md`. The form is
+the same as it always was:
 
 ```sh
 <tool>/scripts/host.sh run "$(<tool>/scripts/host.sh name <dispatch> workhorse <lane>)" <workhorse-wt> \
@@ -378,15 +449,14 @@ from it.
   dispatch; you do not touch its state before stage 3. An unrecorded
   thread is a needle in a haystack: the ids are the handles for answers, fix loops, follow-ups
   and debugging. Set the stage: `<tool>/scripts/stage.sh <dispatch> workhorses-running` when
-  implementation begins, after the planning stage has its two approved specs.
+  implementation begins, after the planning stage has its one approved spec.
 - **While the workhorses run, write the acceptance tests, blind.** Before you read any lane's diff
   or log beyond its thread id, turn the ticket's acceptance criteria and `User journey` into
   tests at the ticket's own interface: the route, flag, file, or visible behaviour the ticket
   names, never a function shape, which is what the lanes were dispatched to choose. Commit
-  them as the FIRST commit on the ticket branch, before any synthesis. They are the run's only
-  oracle no lane wrote, and they stay that only if they are finished before you open a diff
-  and before you read any spec's content (the planning stage has you build the review package
-  from each spec's path and commit alone). At harvest, cherry-pick that commit onto a scratch of each lane and run it: the result ranks
+  them on the ticket branch before any synthesis code; the spec commits are already there
+  ahead of them. They are the run's only oracle no lane wrote, and they stay that only if
+  they are finished before you open a diff. At harvest, cherry-pick that commit onto a scratch of each lane and run it: the result ranks
   the lanes on the ticket's criteria before you have read a line of either. Where the ticket's
   design question IS the interface, do not write them, say so on the checkpoint 1 card, and
   compose on reading alone. Your reading of the ticket is a single reading: in a run with a
@@ -397,9 +467,9 @@ from it.
   `<dispatch>/sessions/` beside its event stream. For every workhorse, `WORKHORSE-SUMMARY.md` at
   the worktree root is the authoritative final act.
 - **Monitor: three exit shapes.** Each workhorse's final act is writing `WORKHORSE-SUMMARY.md` at its
-  worktree root. `WORKHORSE-SPEC.md` is not an exit shape here: a workhorse that exits with a spec and no
-  summary has not finished implementing. (In the planning stage the spec alone is the finished
-  state; the planning harvest is above.) On exit, read the lane's harvest plus its worktree root:
+  worktree root. `WORKHORSE-SPEC.md` is a coachman-authored input committed before launch,
+  not an exit shape: a workhorse that exits with the spec and no summary has not finished
+  implementing. On exit, read the lane's harvest plus its worktree root:
   (a) **Summary present.** Mark the workhorse harvested; manifest `outcome: harvested`.
   (b) **Blocked.** `WORKHORSE-BLOCKED.md` present, or the last message ends in a question. Bypass
   flags do not stop a model pausing to ask mid-run; headless, the run EXITS there with the
@@ -417,8 +487,9 @@ from it.
   never by interrogating a workhorse. Keep threads UNARCHIVED while the run lives; that preserves
   follow-up questions via the resume forms and the interactive scrollback each harness offers
   on a finished thread.
-- **Verify before trusting.** Read each summary, then check every load-bearing claim against
-  the workhorse's actual diff and the repo code. Workhorses ship false absolutes in docs and commit
+- **Verify before trusting.** Read each summary and its `## Evidence`, then check every load-bearing claim against
+  the workhorse's actual diff and the repo code. A criterion claimed as shown without evidence
+  counts against that lane. Workhorses ship false absolutes in docs and commit
   messages.
 - **Run the checks on each workhorse's branch** once its thread has exited, in its worktree:
   `<tool>/scripts/verify.sh run <workhorse-wt> <dispatch>`, which runs the run's checks whatever the
@@ -434,15 +505,24 @@ from it.
   summary to your run: `<tool>/scripts/verify.sh summary <workhorse-wt>/WORKHORSE-SUMMARY.md
   <dispatch> <workhorse-wt>`. Exit 2 names each check the summary does not give, which makes the
   summary unverified, and each claim your run contradicts; both go on the checkpoint 1 card.
+  Hold its evidence the same way, beside that verdict:
+  `bun --no-env-file --config=/dev/null <tool>/scripts/summary-evidence.ts
+  <workhorse-wt>/WORKHORSE-SUMMARY.md <workhorse-wt> --ticket <dispatch>/brief.md`.
+  The criteria come from the run's waybill, never the lane's armed ticket copy,
+  which the lane can edit. Exit 2 names each criterion missing
+  evidence, citing evidence that does not exist or lies outside `.postmaster/verify/`, or
+  claimed shown with no evidence; those names go on the checkpoint 1 card beside the
+  `verify.sh summary` verdict, and a criterion claimed as shown without evidence counts against
+  that lane.
   [Why a project defines its own checks](../../wiki/concepts/verification.md)
 - **Run audit, automatic.** Once the workhorses are harvested (at the stall cutoff, whatever
   exists), write `<dispatch>/audit/<lane>.md` per workhorse from its durable record: thread id,
   branch, key actions digested from the logs and transcript, final message, `WORKHORSE-SUMMARY.md`
-  verdict. Copy each workhorse's `WORKHORSE-SPEC.md` as its first commit added it to
-  `<dispatch>/audit/<lane>-spec.md`, and its final version to `<lane>-spec-final.md`. Record
-  the commit the user approved (`lanes.<lane>.spec_commit`, or none for a dropped workhorse),
-  whether that first commit comes before the workhorse's first code commit, and any acceptance
-  criterion with no task. Copy its `.postmaster/verify/`, its journey reports included, to
+  verdict. Copy the run's one `WORKHORSE-SPEC.md` to `<dispatch>/audit/spec.md` as the synthesis
+  commit added it and as the user approved it, to `<dispatch>/audit/spec-final.md`. Record
+  the commit the user approved (`lanes.<lane>.spec_commit`, which is the same on every
+  implementing lane), and any acceptance criterion with no task. Copy its `.postmaster/verify/`,
+  its journey reports included, to
   `<dispatch>/audit/<lane>-verify/`. Attach every audit to the checkpoint 1 card. Do the same for
   any later fix thread a checkpoint relies on.
 - **THERE IS NO SYNTHESIS BASE. You are the synthesizer: judge, then compose.** Set the stage
@@ -540,7 +620,8 @@ from it.
   choice; the convention gaps found; what was dropped; gate status; the checks, as
   `<tool>/scripts/landing.sh results <dispatch> <wt>` prints them for each workhorse's branch
   (`<wt>` the workhorse worktree) and then for the committed synthesis, the journey walked
-  first where there is one, with each workhorse's `verify.sh summary` verdict. A card that presents a
+  first where there is one, with each workhorse's `verify.sh summary` verdict and its `summary-evidence.ts`
+  result. A card that presents a
   finished diff without saying which lane each part came from is the defaulting failure
   wearing a verdict. Set the stage, `<tool>/scripts/stage.sh <dispatch> checkpoint-1`, then write it to
   `<dispatch>/checkpoint-1.md` with the audit bundle beside it and touch `.checkpoint-1-ready`.
@@ -1157,9 +1238,9 @@ ticket that needs another's change waits for it to land.
 - Workhorses never push. A contract 2 coachman leaves the default branch untouched; the postmaster
   follows the landing route in the waybill after verifying the card. A legacy ship leg follows its
   Stage 3 instructions. No workhorse sends an outward message; ticket comments are the outward record.
-- **No workhorse writes code before its own spec is approved, and no workhorse sees another's
-  spec or feedback.** The planning stage's pause is the only gate on that; a resume carrying the
-  user's words goes to one workhorse alone. Implementation needs two approved specs.
+- **No workhorse writes code before the run's one spec is approved, and no workhorse sees
+  another lane's work.** The planning stage's pause is the only gate on that. Implementation
+  needs one approved spec.
 - Launch nothing before the waybill's launch card is confirmed: every lane's model and effort,
   the coachman, the reviewer lineup, the gate selection, on one card.
 - **The coachman is never a model that ran as a lane in the same run.** Its reading is the only
