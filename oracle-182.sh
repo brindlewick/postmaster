@@ -295,9 +295,10 @@ scripts/fixture.sh score "$S/score-badteam" "$S/scorerepo" >"$S/score-badteam.ou
 OK_N=$(grep -c '^ok  ' "$S/score-ok.out" 2>/dev/null || true)
 BADLINE_N=$(grep -c '^ok  ' "$S/score-badline.out" 2>/dev/null || true)
 BADTEAM_N=$(grep -c '^ok  ' "$S/score-badteam.out" 2>/dev/null || true)
-TOTAL_OK=$(grep -cE '^(ok|FAIL)  ' "$S/score-ok.out" 2>/dev/null || true)
-TOTAL_BADLINE=$(grep -cE '^(ok|FAIL)  ' "$S/score-badline.out" 2>/dev/null || true)
-TOTAL_BADTEAM=$(grep -cE '^(ok|FAIL)  ' "$S/score-badteam.out" 2>/dev/null || true)
+# Report lines are "ok   <name>" (three spaces) or "FAIL <name>" (one space).
+TOTAL_OK=$(grep -cE '^(ok  |FAIL )' "$S/score-ok.out" 2>/dev/null || true)
+TOTAL_BADLINE=$(grep -cE '^(ok  |FAIL )' "$S/score-badline.out" 2>/dev/null || true)
+TOTAL_BADTEAM=$(grep -cE '^(ok  |FAIL )' "$S/score-badteam.out" 2>/dev/null || true)
 [ "$TOTAL_OK" = "$TOTAL_BADLINE" ] && [ "$TOTAL_OK" = "$TOTAL_BADTEAM" ] && [ "$TOTAL_OK" -gt 0 ] \
   && pass "ac4-score-same-checks" || nope "ac4-score-same-checks"
 [ "$BADLINE_N" -eq "$((OK_N - 1))" ] \
