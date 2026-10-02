@@ -690,30 +690,34 @@ export function checkWaybillEfforts(dispatch: string): { ok: boolean; detail: st
     };
   }
   // Each Team entry's effort, its last `/` field because a model may itself hold a slash,
-  // against the recorded one. A bare name carries no effort, and an entry for a name with
-  // no recorded effort has nothing to check against; both are skipped.
+  // against the recorded one. Fewer than three fields carry no effort slot and are skipped,
+  // so both honest effortless renderings pass; a carried effort for an unrecorded name fails.
   const lanes = (config.lanes ?? {}) as Record<string, Record<string, unknown>>;
   const team = (config.team ?? {}) as Record<string, unknown>;
-  const recorded = (name: string): string | undefined => {
+  const recorded = (name: string): string => {
     const e =
       name === "coachman"
         ? (team.coachman as Record<string, unknown> | undefined)?.effort
         : lanes[name]?.effort;
-    return typeof e === "string" && e ? e : undefined;
+    return typeof e === "string" ? e : "";
   };
   for (const line of lines) {
     const m = /^(workhorses|coachman):[ \t]*(.+)$/u.exec(line);
     if (!m) continue;
     for (const entry of m[2]!.split(",").map((s) => s.trim())) {
       const eq = entry.indexOf("=");
-      const name = eq < 0 ? m[1]! : entry.slice(0, eq).trim();
+      if (m[1] === "workhorses" && eq < 0) continue; // a bare name carries nothing
+      const name = eq < 0 ? "coachman" : entry.slice(0, eq).trim();
       const rest = eq < 0 ? entry : entry.slice(eq + 1);
-      const slash = rest.lastIndexOf("/");
-      if (slash < 0) continue;
-      const effort = rest.slice(slash + 1).trim();
+      const fields = rest.split("/");
+      if (fields.length < 3) continue;
+      const effort = fields[fields.length - 1]!.trim();
       const want = recorded(name);
-      if (want !== undefined && effort !== want) {
-        return { ok: false, detail: `Team ${name} effort ${effort}, expected ${want}` };
+      if (effort !== want) {
+        return {
+          ok: false,
+          detail: `Team ${name} effort ${effort || "missing"}, expected ${want || "missing"}`,
+        };
       }
     }
   }
