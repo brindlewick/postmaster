@@ -8,6 +8,12 @@
 # CAN run here and the probe must say `ready`. Branches this machine cannot reach
 # (restricted namespaces, missing packages, macOS, unavailable) are SKIPs: the probe's
 # own stubbed controls (AC7) cover them, and the synthesis checks them by running those.
+#
+# Fixed at synthesis (all three failures below were the oracle's, failing both lanes
+# identically): the verdict is read from the `lane confinement:` footer line, since the
+# approved spec requires the footer to explain all three words; the checked-tools grep
+# accepts `bubblewrap`; and the stub set matches the setup self-test's (no `bash` stub,
+# which silenced the wrapper through its shebang).
 set -uo pipefail
 fails=0
 ok()   { printf '  ok   %s\n' "$1"; }
@@ -19,12 +25,12 @@ skip() { printf '  SKIP %s (%s)\n' "$1" "$2"; }
 # AC1: the probe exits 0 and prints ready (this machine's truth), not partial/unavailable.
 out=$(scripts/probe-confine.sh 2>&1); rc=$?
 [ "$rc" -eq 0 ] && ok "AC1: probe exits 0" || fail "AC1: probe exits 0 (got $rc): $out"
-echo "$out" | grep -qw "ready" && ok "AC1: probe says ready on this machine" \
+echo "$out" | grep -q "^  lane confinement: ready$" && ok "AC1: probe says ready on this machine" \
   || fail "AC1: probe says ready on this machine; got: $out"
-echo "$out" | grep -qwE "partial|unavailable" \
+echo "$out" | grep -qE "^  lane confinement: (partial|unavailable)$" \
   && fail "AC1: probe names no other verdict on this machine; got: $out" \
   || ok "AC1: probe names no other verdict on this machine"
-echo "$out" | grep -qi "bwrap" && ok "AC1: probe output names what it checked (bwrap)" \
+echo "$out" | grep -qiE "bwrap|bubblewrap" && ok "AC1: probe output names what it checked" \
   || fail "AC1: probe output names what it checked"
 
 # AC2/AC3: unreachable branches on this machine (namespaces work, nothing missing).
@@ -52,7 +58,7 @@ scripts/setup.sh --keys 2>/dev/null | grep -q "^confine" \
 tmp=$(mktemp -d) || exit 1
 trap 'rm -rf -- "$tmp"' EXIT
 mkdir "$tmp/bin"
-for h in claude codex grok agy muse mimo pi bash; do printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$h"; chmod +x "$tmp/bin/$h"; done
+for h in claude codex grok agy muse mimo pi; do printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$h"; chmod +x "$tmp/bin/$h"; done
 mkanswers() {  # mkanswers <name> <confine value>: full answer set, bash standing in for every harness
   { printf '%s\n' "lanes=alpha, beta" "lane.alpha.harness=bash" "lane.alpha.model=m1" \
       "lane.beta.harness=bash" "lane.beta.model=m2" "workhorses=alpha, beta" \
