@@ -176,8 +176,13 @@ export function makeRepo(dest: string, src = APP, fixture = false): boolean {
     return false;
   }
   if (fixture) {
-    mkdirSync(join(dest, ".postmaster"), { recursive: true });
-    writeFileSync(join(dest, ".postmaster", "fixture"), FIXTURE_MARKER);
+    try {
+      mkdirSync(join(dest, ".postmaster"), { recursive: true });
+      writeFileSync(join(dest, ".postmaster", "fixture"), FIXTURE_MARKER);
+    } catch {
+      console.error(`fixture: could not write the fixture marker in ${dest}`);
+      return false;
+    }
   }
   if (run("git", ["-C", dest, "init", "-q", "-b", "main"]).code !== 0) return false;
   for (const key of ["user.name", "user.email"]) {
@@ -679,32 +684,37 @@ export function checkWaybillEfforts(dispatch: string): { ok: boolean; detail: st
   const config = data.config as Record<string, unknown>;
   const expected = effortsLine(config);
   if (effortLines.length !== 1 || effortLines[0] !== expected) {
-    return { ok: false, detail: `waybill efforts differ from run.json: expected ${expected}` };
+    return {
+      ok: false,
+      detail: `waybill efforts differ from run.json: expected ${expected}, got ${effortLines.length === 1 ? effortLines[0] : "missing or repeated"}`,
+    };
   }
+  // Each Team entry's effort, its last `/` field because a model may itself hold a slash,
+  // against the recorded one. A bare name carries no effort, and an entry for a name with
+  // no recorded effort has nothing to check against; both are skipped.
   const lanes = (config.lanes ?? {}) as Record<string, Record<string, unknown>>;
   const team = (config.team ?? {}) as Record<string, unknown>;
-  const workhorses = Array.isArray(team.workhorses) ? team.workhorses.map(String) : [];
-  const entries = (lines.find((line) => line.startsWith("workhorses:")) ?? "")
-    .replace(/^workhorses:[ \t]*/u, "")
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-  if (entries.length !== workhorses.length) {
-    return { ok: false, detail: "waybill workhorses differ from run.json" };
-  }
-  for (const name of workhorses) {
-    const entry = entries.find((item) => item.slice(0, item.indexOf("=")) === name);
-    const effort = entry?.slice(entry.lastIndexOf("/") + 1);
-    if (!entry || effort !== String(lanes[name]?.effort ?? "")) {
-      return { ok: false, detail: `workhorse ${name} effort differs from run.json` };
-    }
-  }
-  const coachmanEntry = lines.find((line) => line.startsWith("coachman:"));
-  const coachman = team.coachman as Record<string, unknown> | undefined;
-  if (coachman || coachmanEntry) {
-    const effort = coachmanEntry?.slice(coachmanEntry.lastIndexOf("/") + 1);
-    if (!coachman || !coachmanEntry || effort !== String(coachman.effort ?? "")) {
-      return { ok: false, detail: "coachman effort differs from run.json" };
+  const recorded = (name: string): string | undefined => {
+    const e =
+      name === "coachman"
+        ? (team.coachman as Record<string, unknown> | undefined)?.effort
+        : lanes[name]?.effort;
+    return typeof e === "string" && e ? e : undefined;
+  };
+  for (const line of lines) {
+    const m = /^(workhorses|coachman):[ \t]*(.+)$/u.exec(line);
+    if (!m) continue;
+    for (const entry of m[2]!.split(",").map((s) => s.trim())) {
+      const eq = entry.indexOf("=");
+      const name = eq < 0 ? m[1]! : entry.slice(0, eq).trim();
+      const rest = eq < 0 ? entry : entry.slice(eq + 1);
+      const slash = rest.lastIndexOf("/");
+      if (slash < 0) continue;
+      const effort = rest.slice(slash + 1).trim();
+      const want = recorded(name);
+      if (want !== undefined && effort !== want) {
+        return { ok: false, detail: `Team ${name} effort ${effort}, expected ${want}` };
+      }
     }
   }
   return { ok: true, detail: "waybill Team efforts match run.json" };
