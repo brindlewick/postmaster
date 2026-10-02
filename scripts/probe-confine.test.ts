@@ -197,12 +197,14 @@ describe("the probe says ready, partial or unavailable", () => {
     expect(readRestrictedUsernsFile(join(tmp, "userns-missing"))).toBeNull();
   });
 
-  test("a profile path with whitespace, quotes or backslashes is refused", () => {
+  test("only a conservative ASCII path goes in the profile", () => {
     expect(isSafeProfilePath("/usr/bin/bwrap")).toBe(true);
     expect(isSafeProfilePath("/opt/custom/bin/bwrap")).toBe(true);
     expect(isSafeProfilePath("/opt/my tools/bwrap")).toBe(false);
     expect(isSafeProfilePath('/tmp/x"bwrap')).toBe(false);
     expect(isSafeProfilePath("/tmp/x'bwrap")).toBe(false);
     expect(isSafeProfilePath("")).toBe(false);
+    expect(isSafeProfilePath("/opt/we$ird/bwrap")).toBe(false);
+    expect(isSafeProfilePath("/home/josé/bin/bwrap")).toBe(false);
   });
 });

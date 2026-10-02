@@ -68,9 +68,13 @@ EOF
 sudo apparmor_parser -r ${APPARMOR_PROFILE_PATH}`;
 }
 
-/** True when the path can go in the profile line without breaking its syntax. */
+/**
+ * True when the path can go in the profile line without breaking its syntax.
+ * Deliberately a conservative ASCII set: anything else declines the automated
+ * remedy and the probe says to write the profile by hand.
+ */
 export function isSafeProfilePath(path: string): boolean {
-  return path.length > 0 && !/[\s"'\\]/u.test(path);
+  return /^[A-Za-z0-9_@%+=:,.\/-]+$/u.test(path);
 }
 
 const FOOTER_HELP = [
