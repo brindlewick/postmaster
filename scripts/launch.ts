@@ -70,6 +70,15 @@ const CONFIG =
   process.env.POSTMASTER_CONFIG ?? join(process.env.HOME ?? "", ".postmaster/config.toml");
 const LEGS = ["synthesis", "review", "ship"] as const;
 
+// The harness top review level, named when the lane's config names no effort. Without a named
+// level claude's `/code-review` reuses whatever level an interactive session last used, which
+// is nondeterministic; and an effortless lane's review must stay as today.
+const TOP_REVIEW_EFFORT: Record<string, string> = {
+  codex: "max",
+  claude: "max",
+  mimo: "high",
+};
+
 const ATTEMPT_PHASE_FILE = process.env.POSTMASTER_ATTEMPT_PHASE ?? "";
 let PHASE_TRACKING = 0;
 // Launch and resume only: form, review and skill never touch the phase file.
@@ -282,7 +291,8 @@ function buildForms(
   const cmd: string[] = [];
   const isResume = cmdMode === "resume" || cmdMode === "form-resume";
   const isReview = cmdMode === "review";
-  const reviewEffort = effort || (harness === "mimo" ? "high" : "max");
+  // Review takes the lane's recorded effort; when the lane names none, the harness top level.
+  const reviewEffort = effort || TOP_REVIEW_EFFORT[harness] || "";
   switch (harness) {
     case "codex": {
       if (isReview) cmd.push("codex", "exec", "review", "--base", base, "--json");
