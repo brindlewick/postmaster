@@ -1,12 +1,32 @@
 ---
 title: Log
 type: schema
-updated: 2026-09-29
+updated: 2026-10-01
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-01] ingest | what keeps a lane inside its worktree
+
+Issue #107. A trial recorded in `raw/trials/confine-lanes/`: ten model runs on codex, Claude Code,
+Muse Code and MiMo Code, pi and MiMo Code's shell on a stand-in provider, and plain-shell probes,
+at four levels: as launched today, with each harness's own guard, inside sandbox-runtime, and
+inside a Landlock ruleset. Unconfined, every harness wrote into the main checkout and read the
+other lane's worktree and a file elsewhere in the home directory. Claude Code's and MiMo Code's
+own rules refused reads and let a shell write through; codex's and Muse Code's sandboxes switch off
+in bypass mode. sandbox-runtime stopped every reach and every lane still passed the gate, after
+three changes the page lists; it needed root to allow Bubblewrap on this Ubuntu machine. A
+worktree's shared store still lets a lane read another lane's commits; a shared clone per lane
+does not. New concept page `lane-confinement`, standing `claimed`.
+
+## [2026-10-01] lint | a fixture run's postmaster runs headless
+
+Fixture copies are marked in their own git config, and a fixture run's
+postmaster runs headless on every host, so a run starts without a trust
+prompt. Trusting the fixtures folder never spared a copy: the trust search
+stops at the top of the repository.
 
 ## [2026-10-01] ingest | Muse Code 1.4.2 fixes the idle timeout
 
@@ -14,6 +34,31 @@ Muse Code 1.4.2's changelog says long reasoning turns are no longer cut off, and
 `raw/trials/muse-stream-timeouts/` confirms it: the sudoku that failed on 1.4.0 answered with no
 variable set. The page is retitled to say the claim held before 1.4.2; its standing stays
 `settled` for 1.4.0 and 1.4.1. `harnesses.md` records 1.4.2's separate reasoning limit and retry.
+
+## [2026-09-30] ingest | a gate on the default branch after a merge runs from a clean checkout
+
+Issue #110. A design decision, with the control that shows it. The fixture app's `npm run
+check` failed on main right after a merge in fixture runs 4 and 5 (2026-09-28), because Biome
+walked into the run's own worktrees under `.worktrees/`, and passed once they were removed.
+The copies stay where the machine's convention puts them; the flow's two post-merge gates (the
+ship leg's verification of the merged default branch, and fixture scoring's gate) now run from
+a clean checkout of the branch outside the project folder, through `scripts/clean-checkout.ts`.
+Hand-run tools in the main checkout still see the copies; the page says so. Standing `claimed`:
+those fixture runs are not in `raw/`, so the page marks the observation unverified. The
+colocated tests hold the positive and negative control.
+
+## [2026-09-29] ingest | a read-only dashboard, reached through Tailscale's proxy
+
+The design agreed with the user in issue #126. The dashboard shows every run by who acts next,
+each run's cards, timings, review rounds, gate results and live output, and the machine's load.
+Its layout follows the window's width, for a phone, an iPad or a desktop. It only shows,
+because an action it could take is one an agent running as the user could take too. It takes
+every figure from the scripts that already compute it, and listens on a Unix socket that
+`tailscale serve` publishes on the tailnet over plain HTTP, so no certificate publishes the
+machine's name. It answers only the owner's login at the machine's own name. New page at
+standing `claimed`; whether the identity header reaches a plain-HTTP service is left for the
+first ticket's live control. Tickets #146 to #150 build it, the first a dashboard the user can use
+on its own.
 
 ## [2026-09-29] ingest | the planning stage: every spec to the user before code
 
@@ -52,7 +97,6 @@ launches, and a loopback mock of the API. `harnesses.md` now records the timeout
 and that a response cut off at the output limit ends the run as completed with no text.
 Rechecked on 1.4.1 the same day, after Muse Code updated itself; the coachman and its fallback
 now set the variable to 900 through their `env_file`.
-
 
 ## [2026-09-27] ingest | how the style sort is checked and put to the user
 

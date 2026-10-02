@@ -34,7 +34,7 @@ way on every row, only less visibly on the last.
 | form | herdr | tmux | none |
 |---|---|---|---|
 | run a headless launch, visibly | a new tab under the run's ticket-labeled synthesis-worktree space, nested under the repository's space | a window in session `postmaster-<repo>` | a detached background process |
-| spawn the interactive postmaster | `herdr agent start` in a fresh tab of the repository's space, never a pane an agent ran in before | a window in session `postmaster-<repo>` | not possible: it runs headless, below |
+| spawn the interactive postmaster or a spec session | `herdr agent start` in a fresh tab of the repository's space, never a pane an agent ran in before | a window in session `postmaster-<repo>` | not possible: it runs headless, below |
 | send it a message | `herdr agent prompt` | paste the text bracketed, then Enter as a key of its own | resume its thread with the message as the prompt |
 | wait for it to settle | the same call, `herdr agent prompt --wait`: idle, done or blocked | its screen unchanged for 10 seconds | its marker lands |
 | read what it said | `herdr agent read --source recent-unwrapped` | `tmux capture-pane -p -J` | its final message (`harnesses.md`) |
@@ -48,6 +48,7 @@ way on every row, only less visibly on the last.
 <tool>/scripts/host.sh name <dispatch> review <lane> <lens> <round>
 <tool>/scripts/host.sh name <dispatch> postmaster
 <tool>/scripts/host.sh name <dispatch> role <text...>
+<tool>/scripts/host.sh leg launch|resume|takeover|retry|outcome|backfill|waiting ...
 <tool>/scripts/host.sh run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
 <tool>/scripts/host.sh stop <worktree>
 <tool>/scripts/host.sh close <worktree>
@@ -67,9 +68,34 @@ report that last for a turn that did run, and a harness just started can look re
 takes input and drop what it is sent, so read the session before sending the message again.
 `spawn` refuses a handle a live session already has, and says so when the harness stops on its
 first start to ask something, such as whether to trust the folder: the user answers it in the
-pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
+pane. A spec session is spawned the same way (`postmaster.md`, Spec review).
+`spawn`, `send`, `wait` and `read` exit 3 on `none`.
 
 ## Run, on every host
+
+**Coachman legs use `host.sh leg`**, which is the only runbook interface for launching,
+resuming or taking over a leg. It derives the marker, event, error and attempt-record paths.
+`launch` starts a new stream, `resume` appends to that stream and reuses the role recorded for
+the previous attempt, `takeover` preserves the old stream and starts a fresh fallback stream,
+and `retry` repeats the last refused, pre-thread or user-routed wall attempt with its saved prompt.
+The leg command records one of `refused`, `pre-thread`, `walled`, `incomplete` or `finished`
+before `--marker` lands. A refusal to load the env file remains `refused`; no runbook reads
+`.err` text to classify the result. One starter holds the leg's lock at a time: a lock whose
+owner is dead is stolen, a live one refuses. The launch names itself in the lock as its
+first act, through a temporary file, and never runs unowned; a release removes only a lock
+that still names the releaser. `leg outcome` prints the last attempt record;
+`leg waiting` keeps the waiting list.
+
+Each attempt record keeps `attempt`, `leg`, `name`, `request`, `role`, `prompt`, `thread_id`,
+`outcome`, `on_answer`, `backfilled`, `exit` and `ended`. `on_answer` is `retry` for `refused`,
+`pre-thread` and fallback `walled`, `resume` for `incomplete`, and `none` otherwise; it is the
+action for when the user answers. `backfilled` is true when the attempt died without its record
+and was classified later from its evidence: every start writes an intent file first (attempt,
+request, role, prompt, thread id and stream offset), and the next start — or `leg backfill`
+on its own — classifies each attempt that has an intent or phase file but no record, over its
+own stream slice. A phase file beyond the last record therefore reads INSPECT, never the stale
+outcome. Every append terminates a torn tail line first, so a recovery record never fuses
+onto the fragment it supersedes.
 
 - **The command is the one a caller would have backgrounded with `&`.** It runs from the
   directory `host.sh` was called in, with the caller's environment and an empty stdin, its
@@ -138,7 +164,7 @@ pane. `spawn`, `send`, `wait` and `read` exit 3 on `none`.
   configuration under the `CLAUDE_CODE_` prefix that is not in the families above) included, and
   so does the lane's env file once `launch.sh` sources it. The strip is a deny-list in
   `<tool>/scripts/host.sh`'s runner: to add a name or a family, extend that list and the
-  matching control in `--self-test`. Never widen it to the whole `CLAUDE_CODE_*` prefix and
+  matching test beside the script. Never widen it to the whole `CLAUDE_CODE_*` prefix and
   never replace it with an allow-list; both would drop configuration a launch needs.
 - **The ticket belongs to the run's space; a launch label carries only launch identity.**
   `<tool>/scripts/host.sh name <dispatch>` prints the ticket number and title for the run level.
@@ -270,12 +296,15 @@ with `herdr agent start`. It is a pane whose agent `host.sh` reports. So when it
   `<tool>/scripts/runs-status.sh` shows the escalation pending. The user answers by resuming its thread,
   through `host.sh run --append` with `<tool>/scripts/launch.sh resume postmaster <repo> <thread-id>
   <message-file>`, or by opening the thread in the harness's own interactive resume.
+  A fixture copy's postmaster uses this headless form on every host, whatever `host.sh detect`
+  says: `front-door.sh` prints `headless` for it (`SKILL.md` step 3), so it never meets a trust
+  prompt.
 - **This needs a harness with a resume form.** `launch.sh` refuses to resume agy, so with no
   host the postmaster runs on another harness.
 
 ## Tests
 
-`<tool>/scripts/host.sh --self-test` runs every form against stub `herdr` and `tmux` on a PATH that
+The tests beside `<tool>/scripts/host.sh` run every form against stub `herdr` and `tmux` on a PATH that
 holds nothing else, and never reaches a live server. It also checks the labels: each kind of
 launch (a coachman leg, a workhorse, each review lens with its round, the postmaster) leads
 with its role and holds no part of the ticket title, and the run's level carries the ticket.

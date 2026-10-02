@@ -34,7 +34,9 @@ the same way, and merges are merges. There is no special mode.
 
 **A change to the coachman contract merges only after a fixture run scores clean**: a run
 dispatched from the change's branch against a repository made by `scripts/fixture.sh new`, and
-scored by `scripts/fixture.sh score` on the same branch. That rule is about the change's
+scored by `scripts/fixture.sh score` on the same branch. What the contract is is defined in one
+place, [its file list](docs/coachman-contract.toml);
+`scripts/coachman-contract.sh` says whether a change touches it. That rule is about the change's
 quality, not about the runs in flight. [Why](wiki/concepts/fixture-runs.md).
 
 ## When a session opens in this repo, do this
@@ -219,6 +221,11 @@ whole system.
 6. **Every action on a project is logged as it happens**, one JSON line per action through
    `scripts/log-action.sh`, per run and per project. The narrative is for reading; the log
    is what a run is audited from and what the flow is improved from.
+
+The scripts run on Bun 1.4.2 or newer: each `scripts/<name>.sh` is a one-line wrapper that
+hands its arguments to `scripts/<name>.ts`. Runtime imports are Bun's built-ins and Node's
+standard modules only; `typescript`, `@biomejs/biome` and `oxlint` are the development dependencies,
+and `bun run check` is the type check, Oxlint, the Biome format check, and the tests beside every script.
 
 ### Where a setting comes from
 
