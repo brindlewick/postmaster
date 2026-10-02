@@ -448,7 +448,8 @@ if (TK === "plane") {
 console.log("");
 console.log("== Lane confinement: sandbox-runtime wraps each lane's harness. ==");
 const confineProbe = run("bash", [join(HERE, "probe-confine.sh")]);
-if (confineProbe.code !== 0) die("setup: probe-confine.sh failed; fix it before choosing confinement", 1);
+if (confineProbe.code !== 0)
+  die("setup: probe-confine.sh failed; fix it before choosing confinement", 1);
 process.stdout.write(confineProbe.out);
 process.stderr.write(confineProbe.err);
 const CONFINE = ask("Run lanes confined (on/off)", "off", "confine", opts);

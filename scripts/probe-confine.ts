@@ -95,19 +95,34 @@ function toolRow(need: string, path: string | null): Row {
 export function decide(observed: Observation): Result {
   if (observed.platform === "linux") {
     const names: Array<"bwrap" | "socat" | "rg"> = ["bwrap", "socat", "rg"];
-    const labels: Record<(typeof names)[number], string> = { bwrap: "bubblewrap", socat: "socat", rg: "ripgrep" };
+    const labels: Record<(typeof names)[number], string> = {
+      bwrap: "bubblewrap",
+      socat: "socat",
+      rg: "ripgrep",
+    };
     const rows = names.map((tool) => toolRow(labels[tool], observed.tools[tool]));
     const missing = names.filter((tool) => observed.tools[tool] === null);
     if (missing.length > 0) {
-      rows.push({ need: "user namespaces", status: "pending", detail: "check after packages are installed" });
+      rows.push({
+        need: "user namespaces",
+        status: "pending",
+        detail: "check after packages are installed",
+      });
       if (observed.packageManager === null) {
-        return { verdict: "unavailable", rows, detail: "No known package manager can install the missing tools." };
+        return {
+          verdict: "unavailable",
+          rows,
+          detail: "No known package manager can install the missing tools.",
+        };
       }
       return {
         verdict: "partial",
         rows,
         detail: "Install the missing tools, then run this probe again.",
-        action: installCommand(observed.packageManager, missing.map((tool) => packageNames[tool])),
+        action: installCommand(
+          observed.packageManager,
+          missing.map((tool) => packageNames[tool]),
+        ),
       };
     }
     if (observed.bwrapStarts) {
@@ -115,7 +130,11 @@ export function decide(observed: Observation): Result {
       return { verdict: "ready", rows, detail: "Linux lane confinement can run." };
     }
     if (ubuntuAtLeast2404(observed.ubuntuRelease) && observed.restrictedUserns) {
-      rows.push({ need: "user namespaces", status: "partial", detail: "Ubuntu restricts unprivileged user namespaces" });
+      rows.push({
+        need: "user namespaces",
+        status: "partial",
+        detail: "Ubuntu restricts unprivileged user namespaces",
+      });
       return {
         verdict: "partial",
         rows,
@@ -135,7 +154,10 @@ export function decide(observed: Observation): Result {
   }
 
   if (observed.platform === "darwin") {
-    const rows = [toolRow("sandbox-exec", observed.tools["sandbox-exec"]), toolRow("ripgrep", observed.tools.rg)];
+    const rows = [
+      toolRow("sandbox-exec", observed.tools["sandbox-exec"]),
+      toolRow("ripgrep", observed.tools.rg),
+    ];
     if (observed.tools["sandbox-exec"] === null) {
       return {
         verdict: "unavailable",
@@ -161,12 +183,23 @@ export function decide(observed: Observation): Result {
         macUntested: true,
       };
     }
-    return { verdict: "ready", rows, detail: "macOS lane confinement has the listed tools.", macUntested: true };
+    return {
+      verdict: "ready",
+      rows,
+      detail: "macOS lane confinement has the listed tools.",
+      macUntested: true,
+    };
   }
 
   return {
     verdict: "unavailable",
-    rows: [{ need: "lane confinement", status: "unavailable", detail: `unsupported platform: ${observed.platform}` }],
+    rows: [
+      {
+        need: "lane confinement",
+        status: "unavailable",
+        detail: `unsupported platform: ${observed.platform}`,
+      },
+    ],
     detail: `This probe knows no confinement recipe for ${observed.platform}.`,
   };
 }
@@ -206,7 +239,9 @@ function restrictedUserns(): boolean {
 
 function restrictedUsernsSysctl(): boolean {
   if (Bun.which("sysctl") === null) return false;
-  const result = run("sysctl", ["-n", "kernel.apparmor_restrict_unprivileged_userns"], { timeout: 5000 });
+  const result = run("sysctl", ["-n", "kernel.apparmor_restrict_unprivileged_userns"], {
+    timeout: 5000,
+  });
   return result.code === 0 && parseRestrictedUserns(result.out);
 }
 
@@ -221,13 +256,17 @@ export function collect(): Observation {
   };
   const packageManager: PackageManager | null =
     platform === "darwin"
-      ? (Bun.which("brew") !== null ? "brew" : null)
+      ? Bun.which("brew") !== null
+        ? "brew"
+        : null
       : (managers.find((manager) => Bun.which(manager) !== null) ?? null);
   let bwrapStarts = false;
   let launchErr = "";
   if (platform === "linux" && tools.bwrap !== null && tools.socat !== null && tools.rg !== null) {
     // A minimal Bubblewrap user-namespace launch: the same capability sandbox-runtime needs.
-    const launched = run("bwrap", ["--ro-bind", "/", "/", "--unshare-user", "true"], { timeout: 5000 });
+    const launched = run("bwrap", ["--ro-bind", "/", "/", "--unshare-user", "true"], {
+      timeout: 5000,
+    });
     bwrapStarts = launched.code === 0;
     launchErr = launched.err;
   }
