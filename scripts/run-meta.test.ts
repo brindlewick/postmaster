@@ -1467,7 +1467,8 @@ describe("fixture effort records", () => {
           'coachman = { harness = "claude", model = "c", effort = "max" }\n' +
           'coachman_fallback = { harness = "muse", model = "m", effort = "high" }\n' +
           'postmaster = { harness = "codex", model = "c", effort = "max" }\n' +
-          '[team.coachman_legs]\nsynthesis = { harness = "mimo", model = "p/m", effort = "high" }\n',
+          '[team.coachman_legs]\nsynthesis = { harness = "mimo", model = "p/m", effort = "high" }\n' +
+          'review = { harness = "codex", model = "c", effort = "max" }\n',
       );
       const before = readFileSync(config);
       const env = {
@@ -1503,11 +1504,13 @@ describe("fixture effort records", () => {
       expect(cfg.team.coachman_fallback.effort).toBe("minimal");
       expect(cfg.team.postmaster.effort).toBe("none");
       expect(cfg.team.coachman_legs.synthesis.effort).toBe("low");
+      expect(cfg.team.coachman_legs.review.effort).toBe("none");
       expect(readFileSync(config).equals(before)).toBe(true);
       const line = run(join(import.meta.dir, "run-meta.sh"), ["efforts", dispatch], { env });
       expect(line.code).toBe(0);
       expect(line.out.trim()).toContain("codex_lane=none");
       expect(line.out.trim()).toContain("coachman.synthesis=low");
+      expect(line.out.trim()).toContain("coachman.review=none");
       expect(line.out.trim()).not.toContain("postmaster=");
       expect(line.out.trim()).not.toContain("no_effort=");
 
@@ -1541,6 +1544,12 @@ describe("fixture effort records", () => {
       expect(ticketCfg.team.coachman_legs.synthesis.effort).toBe("high");
       expect(ticketRecord.err).toBe("");
       expect(readFileSync(config).equals(before)).toBe(true);
+      const ticketLine = run(join(import.meta.dir, "run-meta.sh"), ["efforts", ticketDispatch], {
+        env,
+      });
+      expect(ticketLine.code).toBe(0);
+      expect(ticketLine.out.trim()).toContain("codex_lane=max");
+      expect(ticketLine.out.trim()).toContain("coachman.review=max");
     });
   }, 60000);
 });
