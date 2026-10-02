@@ -5,10 +5,10 @@ import re, sys
 SUBS = [
     (re.compile(r'/tmp/claude-\d+/[^/\s"]+/[0-9a-f-]{36}/scratchpad/trials'), '<trial>'),
     (re.compile(r'/tmp/claude-\d+/[^/\s"]+/[0-9a-f-]{36}/scratchpad'), '<scratch>'),
-    (re.compile(r'/home/brindlewick/\.postmaster/harness-data'), '<harness-data>'),
-    (re.compile(r'/home/brindlewick/\.postmaster/runs/postmaster'), '<runs>'),
-    (re.compile(r'/home/brindlewick/postmaster'), '<repo>'),
-    (re.compile(r'/home/brindlewick'), '~'),
+    (re.compile(r'/home/[^/\s]+/\.postmaster/harness-data'), '<harness-data>'),
+    (re.compile(r'/home/[^/\s]+/\.postmaster/runs/postmaster'), '<runs>'),
+    (re.compile(r'/home/[^/\s]+/postmaster'), '<repo>'),
+    (re.compile(r'/home/[^/\s]+'), '~'),
     (re.compile(r'fbcode/musecode/build/src/crates/'), ''),
 ]
 for line in sys.stdin:
