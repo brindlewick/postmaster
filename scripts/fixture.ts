@@ -698,9 +698,7 @@ export function checkWaybillEfforts(dispatch: string): { ok: boolean; detail: st
   const team = (config.team ?? {}) as Record<string, unknown>;
   const recordedSpec = (name: string): { effort: string; prefix: string } => {
     const spec =
-      name === "coachman"
-        ? (team.coachman as Record<string, unknown> | undefined)
-        : lanes[name];
+      name === "coachman" ? (team.coachman as Record<string, unknown> | undefined) : lanes[name];
     const str = (v: unknown): string => (typeof v === "string" ? v : "");
     const harness = str(spec?.harness);
     const model = str(spec?.model);
