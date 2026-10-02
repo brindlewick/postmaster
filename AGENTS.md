@@ -264,3 +264,18 @@ its link: `<tool>/scripts/stage.sh`, never `scripts/stage.sh`, which resolves on
 repo's root. The run's own pinned tool goes through `<rt>`, resolved per run by
 `run-meta.sh path`. `scripts/skill-refs.sh` names every other path that does not go through
 `<tool>`, and `--fix` rewrites the bare ones; run both after writing a runbook and after a rebase.
+
+**Link what you mention.** Whenever you name something that has an address, in conversation, a pull request, a
+ticket or a comment, write it as a clickable link, so that nobody has to look it up. That covers:
+
+- A ticket: its page in the tracker, with the ticket's title the first time you name it in a message,
+  `[#200, Run every lane in its own process space, so it cannot kill processes it did not start](https://github.com/<owner>/<repo>/issues/200)`,
+  and `[#200](https://github.com/<owner>/<repo>/issues/200)` after that. For a tracker other than GitHub Issues, link the
+  address its adapter gives (`skills/postmaster/trackers.md`).
+- A file or folder in a repository on GitHub: its page at the commit or branch you mean,
+  `[scripts/launch.ts](https://github.com/<owner>/<repo>/blob/<commit>/scripts/launch.ts)`, with `#L<a>-L<b>` when you name lines.
+- A project's homepage, a published documentation or wiki page, an artifact or a document: its address (for an
+  artifact, `https://claude.ai/code/artifact/<uuid>`).
+
+A path that exists only on the machine, such as a run's record or a file a lane has not committed, stays plain
+text, since no link can reach it.
