@@ -122,7 +122,7 @@ beforeAll(() => {
     codexfix("codex", 'model = "lane-model"\neffort = "high"');
     codexfix("codex-noeffort", 'model = "lane-model"');
     codexfix("codex-nomodel", 'effort = "high"');
-    codexfix("review-codex", 'model = "lane-model"\neffort = "max"');
+    codexfix("review-codex", 'model = "lane-model"\neffort = "low"');
     writeFileSync(join(tmp, "ruling.txt"), "- Keep going, then stop.\n");
     writeFileSync(join(tmp, "brief.txt"), "Keep going, then stop.\n");
     run("git", ["init", "-q", "-b", "main", join(tmp, "cx")]);
@@ -3556,27 +3556,27 @@ beforeAll(() => {
     const base = run("git", ["-C", join(tmp, "cx"), "rev-parse", "HEAD"]).out.trim();
     writeFileSync(
       join(tmp, "review-claude.toml"),
-      '[lanes.one]\nharness = "claude"\nmodel = "claude-model"\neffort = "max"\n\n[team]\ncoachman = { harness = "claude", model = "coach-model" }\n',
+      '[lanes.one]\nharness = "claude"\nmodel = "claude-model"\neffort = "low"\n\n[team]\ncoachman = { harness = "claude", model = "coach-model" }\n',
     );
     writeFileSync(
       join(tmp, "review-mimo.toml"),
-      '[lanes.one]\nharness = "mimo"\nmodel = "prov/mimo-model"\neffort = "high"\n\n[team]\ncoachman = { harness = "mimo", model = "coach-model" }\n',
+      '[lanes.one]\nharness = "mimo"\nmodel = "prov/mimo-model"\neffort = "low"\n\n[team]\ncoachman = { harness = "mimo", model = "coach-model" }\n',
     );
     writeFileSync(
       join(tmp, "review-pi.toml"),
       '[lanes.one]\nharness = "pi"\nmodel = "pi-model"\n\n[team]\ncoachman = { harness = "pi", model = "coach-model" }\n',
     );
     runsAs(
-      "claude review names the range and runs /code-review at max",
+      "claude review names the range and runs /code-review at the lane's effort",
       "review-claude",
-      `-p /code-review max ${base}...HEAD --model claude-model --effort max --output-format stream-json --verbose --dangerously-skip-permissions probe=`,
+      `-p /code-review low ${base}...HEAD --model claude-model --effort low --output-format stream-json --verbose --dangerously-skip-permissions probe=`,
       "review",
       "one",
       join(tmp, "cx-detached"),
       base,
     );
     runsAs(
-      "codex review uses --base, --last, max effort and the lane model",
+      "codex review uses --base, --last, the lane's effort and the lane model",
       "review-codex",
       lines(
         join(tmp, "cx-detached"),
@@ -3590,7 +3590,7 @@ beforeAll(() => {
         "-m",
         "lane-model",
         "-c",
-        'model_reasoning_effort="max"',
+        'model_reasoning_effort="low"',
         CODEX_BYPASS,
         "--skip-git-repo-check",
       ),
@@ -3618,7 +3618,7 @@ beforeAll(() => {
     }
     record("review-run", "review-codex");
     runsAs(
-      "codex review in a run uses the recorded config and the same top level",
+      "codex review in a run uses the recorded config and the recorded effort",
       "review-codex",
       lines(
         join(tmp, "cx-detached"),
@@ -3630,7 +3630,7 @@ beforeAll(() => {
         "-m",
         "lane-model",
         "-c",
-        'model_reasoning_effort="max"',
+        'model_reasoning_effort="low"',
         CODEX_BYPASS,
         "--skip-git-repo-check",
       ),
@@ -3645,12 +3645,12 @@ beforeAll(() => {
     if (
       rc === 0 &&
       out.includes("--command review") &&
-      out.includes("--variant high") &&
+      out.includes("--variant low") &&
       out.includes(`stdin=${base}...HEAD`)
     ) {
-      ok("mimo review uses --command review, the prompt file range and high variant");
+      ok("mimo review uses --command review, the prompt file range and the lane's variant");
     } else {
-      fail("mimo review uses --command review, the prompt file range and high variant");
+      fail("mimo review uses --command review, the prompt file range and the lane's variant");
     }
     const noPromptLeft = (): boolean =>
       !readdirSync(join(tmp, "cx-detached")).some((f) => f.startsWith(".postmaster-review-"));
@@ -3937,6 +3937,8 @@ describe("run-recorded effort controls", () => {
           '[lanes.claude_lane]\nharness = "claude"\nmodel = "c"\neffort = "max"\n' +
           '[lanes.mimo_lane]\nharness = "mimo"\nmodel = "p/m"\neffort = "high"\n' +
           '[lanes.effortless]\nharness = "codex"\nmodel = "c"\n' +
+          '[lanes.claude_effortless]\nharness = "claude"\nmodel = "c"\n' +
+          '[lanes.mimo_effortless]\nharness = "mimo"\nmodel = "p/m"\n' +
           '[team]\nworkhorses = ["codex_lane"]\n' +
           'coachman = { harness = "claude", model = "coach-model", effort = "max" }\n' +
           '[team.coachman_legs]\nsynthesis = { harness = "claude", model = "coach-model", effort = "max" }\n',
@@ -4047,6 +4049,21 @@ describe("run-recorded effort controls", () => {
         );
         launched(`${kind} effortless review`, effortlessReview);
         expect(effortlessReview.out).toContain('model_reasoning_effort="max"');
+        const claudeEffortless = run(
+          self,
+          ["review", "claude_effortless", reviewRepo, base, "--run", dispatch],
+          { env },
+        );
+        launched(`${kind} claude effortless review`, claudeEffortless);
+        expect(claudeEffortless.out).toContain(`/code-review max ${base}...HEAD`);
+        expect(claudeEffortless.out).toContain("--effort max");
+        const mimoEffortless = run(
+          self,
+          ["review", "mimo_effortless", reviewRepo, base, "--run", dispatch],
+          { env },
+        );
+        launched(`${kind} mimo effortless review`, mimoEffortless);
+        expect(mimoEffortless.out).toContain("--variant high");
       }
     });
   }, 60000);
@@ -4858,20 +4875,22 @@ describe("quote corpus: real wall phrasings wake, alone and beside every transie
 });
 
 describe("bug review forms", () => {
-  test("claude review names the range and runs /code-review at max", () => {
-    assertControl("claude review names the range and runs /code-review at max");
+  test("claude review names the range and runs /code-review at the lane's effort", () => {
+    assertControl("claude review names the range and runs /code-review at the lane's effort");
   });
-  test("codex review uses --base, --last, max effort and the lane model", () => {
-    assertControl("codex review uses --base, --last, max effort and the lane model");
+  test("codex review uses --base, --last, the lane's effort and the lane model", () => {
+    assertControl("codex review uses --base, --last, the lane's effort and the lane model");
   });
   test("a review launch removes a stale --last file before the harness runs", () => {
     assertControl("a review launch removes a stale --last file before the harness runs");
   });
-  test("codex review in a run uses the recorded config and the same top level", () => {
-    assertControl("codex review in a run uses the recorded config and the same top level");
+  test("codex review in a run uses the recorded config and the recorded effort", () => {
+    assertControl("codex review in a run uses the recorded config and the recorded effort");
   });
-  test("mimo review uses --command review, the prompt file range and high variant", () => {
-    assertControl("mimo review uses --command review, the prompt file range and high variant");
+  test("mimo review uses --command review, the prompt file range and the lane's variant", () => {
+    assertControl(
+      "mimo review uses --command review, the prompt file range and the lane's variant",
+    );
   });
   test("mimo's temporary range prompt is removed after launch", () => {
     assertControl("mimo's temporary range prompt is removed after launch");
