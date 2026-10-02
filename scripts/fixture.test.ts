@@ -934,6 +934,130 @@ describe("score: waybill effort controls", () => {
     );
     expect(checkWaybillEfforts(dispatch).ok).toBe(true);
   });
+
+  test("a slash model with no effort slot and no recorded effort passes", () => {
+    const dispatch = join(scratch, "dispatch-slash-effortless");
+    mkdirSync(dispatch, { recursive: true });
+    writeFileSync(
+      join(dispatch, "run.json"),
+      JSON.stringify({
+        config: {
+          lanes: { one: { harness: "mimo", model: "p/m" } },
+          team: { workhorses: ["one"], coachman: { harness: "muse", model: "m" } },
+        },
+      }),
+    );
+    writeFileSync(
+      join(dispatch, "brief.md"),
+      "## Team\nworkhorses: one=mimo/p/m\ncoachman: muse/m\nefforts:\n",
+    );
+    expect(checkWaybillEfforts(dispatch).ok).toBe(true);
+  });
+
+  test("a Team entry omitting the slot for a recorded effort fails", () => {
+    const dispatch = join(scratch, "dispatch-omitted-effort");
+    mkdirSync(dispatch, { recursive: true });
+    writeFileSync(
+      join(dispatch, "run.json"),
+      JSON.stringify({
+        config: {
+          lanes: { two: { harness: "codex", model: "c", effort: "max" } },
+          team: { workhorses: ["two"], coachman: { harness: "muse", model: "m", effort: "max" } },
+        },
+      }),
+    );
+    writeFileSync(
+      join(dispatch, "brief.md"),
+      "## Team\nworkhorses: two=codex/c\ncoachman: muse/m/max\nefforts: two=max, coachman=max\n",
+    );
+    const result = checkWaybillEfforts(dispatch);
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("Team two effort missing, expected max");
+  });
+
+  test("a fabricated effort on a slash model fails", () => {
+    const dispatch = join(scratch, "dispatch-slash-fabricated");
+    mkdirSync(dispatch, { recursive: true });
+    writeFileSync(
+      join(dispatch, "run.json"),
+      JSON.stringify({
+        config: {
+          lanes: { one: { harness: "mimo", model: "p/m", effort: "low" } },
+          team: { workhorses: ["one"], coachman: { harness: "muse", model: "m", effort: "low" } },
+        },
+      }),
+    );
+    writeFileSync(
+      join(dispatch, "brief.md"),
+      "## Team\nworkhorses: one=mimo/p/m/high\ncoachman: muse/m/low\nefforts: one=low, coachman=low\n",
+    );
+    const result = checkWaybillEfforts(dispatch);
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("Team one effort high, expected low");
+  });
+
+  test("a Team entry naming another harness or model than recorded fails", () => {
+    const dispatch = join(scratch, "dispatch-wrong-model");
+    mkdirSync(dispatch, { recursive: true });
+    writeFileSync(
+      join(dispatch, "run.json"),
+      JSON.stringify({
+        config: {
+          lanes: { one: { harness: "mimo", model: "p/m", effort: "low" } },
+          team: { workhorses: ["one"], coachman: { harness: "muse", model: "m", effort: "low" } },
+        },
+      }),
+    );
+    writeFileSync(
+      join(dispatch, "brief.md"),
+      "## Team\nworkhorses: one=codex/other/low\ncoachman: muse/m/low\nefforts: one=low, coachman=low\n",
+    );
+    const result = checkWaybillEfforts(dispatch);
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("Team one names codex/other/low, recorded mimo/p/m");
+  });
+
+  test("a carried effort for an unrecorded name fails", () => {
+    const dispatch = join(scratch, "dispatch-unrecorded-name");
+    mkdirSync(dispatch, { recursive: true });
+    writeFileSync(
+      join(dispatch, "run.json"),
+      JSON.stringify({
+        config: {
+          lanes: { one: { harness: "codex", model: "c", effort: "none" } },
+          team: { workhorses: ["one"], coachman: { effort: "none" } },
+        },
+      }),
+    );
+    writeFileSync(
+      join(dispatch, "brief.md"),
+      "## Team\nworkhorses: one=codex/c/none, zzz=h/m/e\ncoachman: muse/m/none\nefforts: one=none, coachman=none\n",
+    );
+    const result = checkWaybillEfforts(dispatch);
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("Team zzz effort e, expected missing");
+  });
+
+  test("a Team section with no workhorses or coachman line fails", () => {
+    const dispatch = join(scratch, "dispatch-no-team-lines");
+    mkdirSync(dispatch, { recursive: true });
+    writeFileSync(
+      join(dispatch, "run.json"),
+      JSON.stringify({
+        config: {
+          lanes: { two: { harness: "codex", model: "c", effort: "max" } },
+          team: { workhorses: ["two"], coachman: { harness: "muse", model: "m", effort: "max" } },
+        },
+      }),
+    );
+    writeFileSync(
+      join(dispatch, "brief.md"),
+      "## Team\nreviewers: two\nefforts: two=max, coachman=max\n",
+    );
+    const result = checkWaybillEfforts(dispatch);
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("no Team workhorses or coachman entries");
+  });
 });
 
 describe("score: input that is not a run is refused, not scored", () => {

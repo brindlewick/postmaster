@@ -689,38 +689,64 @@ export function checkWaybillEfforts(dispatch: string): { ok: boolean; detail: st
       detail: `waybill efforts differ from run.json: expected ${expected}, got ${effortLines.length === 1 ? effortLines[0] : "missing or repeated"}`,
     };
   }
-  // Each Team entry's effort, its last `/` field because a model may itself hold a slash,
-  // against the recorded one. Fewer than three fields carry no effort slot and are skipped,
-  // so both honest effortless renderings pass; a carried effort for an unrecorded name fails.
+  // Each Team entry's effort, the slot after the recorded `harness/model` because a
+  // model may itself hold a slash, against the recorded effort. An entry ending at the
+  // recorded prefix carries no effort, so both honest effortless renderings pass; an
+  // omitted slot for a recorded effort fails, as does a carried effort for an
+  // unrecorded name. A Team section with no workhorses or coachman line fails outright.
   const lanes = (config.lanes ?? {}) as Record<string, Record<string, unknown>>;
   const team = (config.team ?? {}) as Record<string, unknown>;
-  const recorded = (name: string): string => {
-    const e =
+  const recordedSpec = (name: string): { effort: string; prefix: string } => {
+    const spec =
       name === "coachman"
-        ? (team.coachman as Record<string, unknown> | undefined)?.effort
-        : lanes[name]?.effort;
-    return typeof e === "string" ? e : "";
+        ? (team.coachman as Record<string, unknown> | undefined)
+        : lanes[name];
+    const str = (v: unknown): string => (typeof v === "string" ? v : "");
+    const harness = str(spec?.harness);
+    const model = str(spec?.model);
+    return { effort: str(spec?.effort), prefix: harness && model ? `${harness}/${model}` : "" };
   };
+  let seen = false;
   for (const line of lines) {
     const m = /^(workhorses|coachman):[ \t]*(.+)$/u.exec(line);
     if (!m) continue;
+    seen = true;
     for (const entry of m[2]!.split(",").map((s) => s.trim())) {
       const eq = entry.indexOf("=");
       if (m[1] === "workhorses" && eq < 0) continue; // a bare name carries nothing
       const name = eq < 0 ? "coachman" : entry.slice(0, eq).trim();
       const rest = eq < 0 ? entry : entry.slice(eq + 1);
+      const want = recordedSpec(name);
+      if (want.prefix) {
+        if (rest !== want.prefix && !rest.startsWith(`${want.prefix}/`)) {
+          return {
+            ok: false,
+            detail: `Team ${name} names ${rest}, recorded ${want.prefix}`,
+          };
+        }
+        const effort = rest.slice(want.prefix.length).replace(/^\//u, "").trim();
+        if (effort !== want.effort) {
+          return {
+            ok: false,
+            detail: `Team ${name} effort ${effort || "missing"}, expected ${want.effort || "missing"}`,
+          };
+        }
+        continue;
+      }
+      // No recorded harness and model to bound the effort slot: the entry's last `/`
+      // field, as before. A carried effort for an unrecorded name fails here.
       const fields = rest.split("/");
       if (fields.length < 3) continue;
       const effort = fields[fields.length - 1]!.trim();
-      const want = recorded(name);
-      if (effort !== want) {
+      if (effort !== want.effort) {
         return {
           ok: false,
-          detail: `Team ${name} effort ${effort || "missing"}, expected ${want || "missing"}`,
+          detail: `Team ${name} effort ${effort || "missing"}, expected ${want.effort || "missing"}`,
         };
       }
     }
   }
+  if (!seen) return { ok: false, detail: "no Team workhorses or coachman entries" };
   return { ok: true, detail: "waybill Team efforts match run.json" };
 }
 
