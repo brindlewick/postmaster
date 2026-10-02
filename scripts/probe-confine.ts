@@ -7,7 +7,7 @@
 //
 //   exit 0 always; the table is the result. Every action in the output is advice for the
 //   user; this probe never installs a package or changes a system rule.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { run } from "./lib/proc.ts";
 
 export type Verdict = "ready" | "partial" | "unavailable";
@@ -22,6 +22,8 @@ export interface Observation {
   /** Ubuntu VERSION_ID, or null when not Ubuntu. */
   ubuntuRelease: string | null;
   restrictedUserns: boolean;
+  /** True when the AppArmor profile for bwrap is already in place. */
+  apparmorProfile: boolean;
   bwrapStarts: boolean;
   launchErr: string;
 }
@@ -50,17 +52,26 @@ const packageNames: Record<"bwrap" | "socat" | "rg", string> = {
 };
 
 const SYSCTL_PATH = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns";
+const APPARMOR_PROFILE_PATH = "/etc/apparmor.d/bwrap";
 
-const appArmorAction = `sudo tee /etc/apparmor.d/bwrap > /dev/null <<'EOF'
+/** The root remedy for the bwrap binary the probe actually found. Unindented: pasted. */
+function appArmorAction(bwrapPath: string): string {
+  return `sudo tee ${APPARMOR_PROFILE_PATH} > /dev/null <<'EOF'
 abi <abi/4.0>,
 include <tunables/global>
 
-profile bwrap /usr/bin/bwrap flags=(unconfined) {
+profile bwrap ${bwrapPath} flags=(unconfined) {
   userns,
   include if exists <local/bwrap>
 }
 EOF
-sudo apparmor_parser -r /etc/apparmor.d/bwrap`;
+sudo apparmor_parser -r ${APPARMOR_PROFILE_PATH}`;
+}
+
+/** True when the path can go in the profile line without breaking its syntax. */
+export function isSafeProfilePath(path: string): boolean {
+  return path.length > 0 && !/[\s"'\\]/u.test(path);
+}
 
 const FOOTER_HELP = [
   '  "ready" means sandbox-runtime can confine a lane on this machine now.',
@@ -130,17 +141,44 @@ export function decide(observed: Observation): Result {
       return { verdict: "ready", rows, detail: "Linux lane confinement can run." };
     }
     if (ubuntuAtLeast2404(observed.ubuntuRelease) && observed.restrictedUserns) {
-      rows.push({
-        need: "user namespaces",
-        status: "partial",
-        detail: "Ubuntu restricts unprivileged user namespaces",
-      });
+      const bwrap = observed.tools.bwrap;
+      if (!observed.apparmorProfile && bwrap !== null && isSafeProfilePath(bwrap)) {
+        rows.push({
+          need: "user namespaces",
+          status: "partial",
+          detail: "Ubuntu restricts unprivileged user namespaces",
+        });
+        return {
+          verdict: "partial",
+          rows,
+          detail: `Allow only ${bwrap} to create user namespaces. The user runs this rule and activation as root, then runs the probe again:`,
+          action: appArmorAction(bwrap),
+        };
+      }
+      rows.push({ need: "user namespaces", status: "no", detail: "Bubblewrap launch failed" });
+      const restrictedCause = observed.launchErr.trim().split("\n")[0];
+      if (observed.apparmorProfile) {
+        return {
+          verdict: "unavailable",
+          rows,
+          detail:
+            "An AppArmor profile for bwrap is already in place, but the launch still fails; the rule is not the finish.",
+          ...(restrictedCause ? { cause: restrictedCause } : {}),
+        };
+      }
+      if (bwrap !== null && !isSafeProfilePath(bwrap)) {
+        return {
+          verdict: "unavailable",
+          rows,
+          detail: `bwrap is at ${bwrap}, which cannot go in the AppArmor rule; write the profile for that path by hand.`,
+          ...(restrictedCause ? { cause: restrictedCause } : {}),
+        };
+      }
       return {
-        verdict: "partial",
+        verdict: "unavailable",
         rows,
-        detail:
-          "Allow only /usr/bin/bwrap to create user namespaces. The user runs this rule and activation as root, then runs the probe again:",
-        action: appArmorAction,
+        detail: "Bubblewrap cannot start; no known remedy for this system.",
+        ...(restrictedCause ? { cause: restrictedCause } : {}),
       };
     }
     rows.push({ need: "user namespaces", status: "no", detail: "Bubblewrap launch failed" });
@@ -245,6 +283,13 @@ function restrictedUsernsSysctl(): boolean {
   return result.code === 0 && parseRestrictedUserns(result.out);
 }
 
+/** True when the AppArmor profile for bwrap is already in place. */
+function apparmorProfileExists(): boolean {
+  const override = process.env.POSTMASTER_PROBE_APPARMOR_PROFILE;
+  if (override !== undefined && override !== "") return override.trim() === "1";
+  return existsSync(APPARMOR_PROFILE_PATH);
+}
+
 /** Collect what the machine says. The only place that touches PATH, sysctl and bwrap. */
 export function collect(): Observation {
   const platform = process.env.POSTMASTER_PROBE_PLATFORM || process.platform;
@@ -263,10 +308,14 @@ export function collect(): Observation {
   let bwrapStarts = false;
   let launchErr = "";
   if (platform === "linux" && tools.bwrap !== null && tools.socat !== null && tools.rg !== null) {
-    // A minimal Bubblewrap user-namespace launch: the same capability sandbox-runtime needs.
-    const launched = run("bwrap", ["--ro-bind", "/", "/", "--unshare-user", "true"], {
-      timeout: 5000,
-    });
+    // A minimal Bubblewrap user- and PID-namespace launch: the namespaces sandbox-runtime needs.
+    const launched = run(
+      "bwrap",
+      ["--ro-bind", "/", "/", "--unshare-user", "--unshare-pid", "true"],
+      {
+        timeout: 5000,
+      },
+    );
     bwrapStarts = launched.code === 0;
     launchErr = launched.err;
   }
@@ -276,6 +325,7 @@ export function collect(): Observation {
     packageManager,
     ubuntuRelease: platform === "linux" ? osRelease() : null,
     restrictedUserns: platform === "linux" ? restrictedUserns() : false,
+    apparmorProfile: platform === "linux" ? apparmorProfileExists() : false,
     bwrapStarts,
     launchErr,
   };

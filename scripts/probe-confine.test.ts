@@ -6,7 +6,11 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./lib/proc.ts";
-import { parseRestrictedUserns, readRestrictedUsernsFile } from "./probe-confine.ts";
+import {
+  isSafeProfilePath,
+  parseRestrictedUserns,
+  readRestrictedUsernsFile,
+} from "./probe-confine.ts";
 
 const SELF = join(import.meta.dir, "probe-confine.sh");
 const UBUNTU_2404 = 'ID=ubuntu\nVERSION_ID="24.04"\n';
@@ -50,6 +54,7 @@ function probe(
   args: string[] = [],
   sysctl = "0",
   release: string = UBUNTU_2404,
+  apparmor = "0",
 ): { code: number; out: string } {
   const r = run("/bin/bash", [SELF, ...args], {
     env: {
@@ -57,6 +62,7 @@ function probe(
       POSTMASTER_PROBE_PLATFORM: platform,
       POSTMASTER_PROBE_SYSCTL: sysctl,
       POSTMASTER_PROBE_OS_RELEASE: release,
+      POSTMASTER_PROBE_APPARMOR_PROFILE: apparmor,
     },
   });
   return { code: r.code, out: r.out + r.err };
@@ -100,10 +106,31 @@ describe("the probe says ready, partial or unavailable", () => {
     const t = probe(bin, "linux", [], "1");
     expect(t.code).toBe(0);
     expect(t.out).toContain("lane confinement: partial");
-    expect(t.out).toContain("profile bwrap /usr/bin/bwrap flags=(unconfined)");
+    expect(t.out).toContain(`profile bwrap ${join(bin, "bwrap")} flags=(unconfined)`);
     expect(t.out).toContain("  userns,");
     expect(t.out).toContain("sudo apparmor_parser -r /etc/apparmor.d/bwrap");
     expect(t.out).toContain("The user runs");
+  });
+
+  test("a failed launch with the profile already in place is unavailable", () => {
+    const bin = stubBin("ubuntu-profile-present", { bwrap: 1, socat: 0, rg: 0 });
+    const t = probe(bin, "linux", [], "1", UBUNTU_2404, "1");
+    expect(t.code).toBe(0);
+    expect(t.out).toContain("lane confinement: unavailable");
+    expect(t.out).toContain("already in place");
+    expect(t.out).toContain("No permissions to create new namespace");
+    expect(t.out).not.toContain("sudo tee /etc/apparmor.d/bwrap");
+    const v = probe(bin, "linux", ["--verdict"], "1", UBUNTU_2404, "1");
+    expect(v.out).toBe("unavailable\n");
+  });
+
+  test("a bwrap path that cannot go in a profile is unavailable", () => {
+    const bin = stubBin("ubuntu spaced path", { bwrap: 1, socat: 0, rg: 0 });
+    const t = probe(bin, "linux", [], "1");
+    expect(t.code).toBe(0);
+    expect(t.out).toContain("lane confinement: unavailable");
+    expect(t.out).toContain("cannot go in the AppArmor rule");
+    expect(t.out).not.toContain("sudo tee /etc/apparmor.d/bwrap");
   });
 
   test("the rule block pastes: its heredoc terminator starts the line", () => {
@@ -168,5 +195,14 @@ describe("the probe says ready, partial or unavailable", () => {
     expect(readRestrictedUsernsFile(one)).toBe(true);
     expect(readRestrictedUsernsFile(zero)).toBe(false);
     expect(readRestrictedUsernsFile(join(tmp, "userns-missing"))).toBeNull();
+  });
+
+  test("a profile path with whitespace, quotes or backslashes is refused", () => {
+    expect(isSafeProfilePath("/usr/bin/bwrap")).toBe(true);
+    expect(isSafeProfilePath("/opt/custom/bin/bwrap")).toBe(true);
+    expect(isSafeProfilePath("/opt/my tools/bwrap")).toBe(false);
+    expect(isSafeProfilePath('/tmp/x"bwrap')).toBe(false);
+    expect(isSafeProfilePath("/tmp/x'bwrap")).toBe(false);
+    expect(isSafeProfilePath("")).toBe(false);
   });
 });

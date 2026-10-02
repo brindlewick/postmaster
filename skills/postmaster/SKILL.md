@@ -202,7 +202,8 @@ Never put paths or credentials in either file.
    session or a new one, whether it runs headless (the script's `headless` line), with every
    reason the script printed, the postmaster's harness,
    model and effort (`team.postmaster` in the config), the team the config names, whether
-   lanes will run confined (top-level `confine` in the config; a missing key means `off`), who says
+   lanes will run confined (top-level `confine` in the config; a missing key means `off`;
+   recorded but not yet enforced, until launch reads the key in #200), who says
    the merge word for local-merge projects (`ship.merge_authority`), the landing route
    (`pull-request` or `local`), the session host the fleet will run on
    (`<tool>/scripts/host.sh detect`), and the project facts above. Launch nothing before the user
