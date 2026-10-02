@@ -239,7 +239,8 @@ EFFORTS_FIX_RC=$?
 [ "$(printf '%s\n' "$EFFORTS_FIX" | wc -l)" = "1" ] \
   && pass "ac4-efforts-one-line" || nope "ac4-efforts-one-line"
 case "$EFFORTS_FIX" in efforts:\ *) pass "ac4-efforts-prefix" ;; *) nope "ac4-efforts-prefix" ;; esac
-printf '%s\n' "$EFFORTS_FIX" | sed 's/^efforts: *//' | tr ' ' '\n' | grep -v '^$' | sort > "$S/eff-got.txt"
+# The spec pins the pair set, not the separator, so split on commas and spaces alike.
+printf '%s\n' "$EFFORTS_FIX" | sed 's/^efforts: *//' | tr ', ' '\n' | grep -v '^$' | sort > "$S/eff-got.txt"
 printf '%s\n' \
   "claudelane=low" "coachman=minimal" "coachman.synthesis=minimal" "coachman_fallback=low" \
   "mimolane=low" "muselane=minimal" "sollane=none" "weirdlane=max" \
@@ -253,7 +254,7 @@ else pass "ac4-efforts-leaves-postmaster-out"; fi
 EFFORTS_TICK=$(scripts/run-meta.sh efforts "$S/disp-ticket" 2>/dev/null)
 EFFORTS_TICK_RC=$?
 [ "$EFFORTS_TICK_RC" -eq 0 ] && pass "ac4-efforts-ticket-exit" || nope "ac4-efforts-ticket-exit"
-printf '%s\n' "$EFFORTS_TICK" | sed 's/^efforts: *//' | tr ' ' '\n' | grep -v '^$' | sort > "$S/efft-got.txt"
+printf '%s\n' "$EFFORTS_TICK" | sed 's/^efforts: *//' | tr ', ' '\n' | grep -v '^$' | sort > "$S/efft-got.txt"
 printf '%s\n' \
   "claudelane=max" "coachman=max" "coachman.synthesis=max" "coachman_fallback=max" \
   "mimolane=high" "muselane=max" "sollane=max" "weirdlane=max" \
