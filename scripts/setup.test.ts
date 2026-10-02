@@ -86,6 +86,7 @@ function confineEnv(bwrapExit: number): Record<string, string> {
     POSTMASTER_PROBE_SYSCTL: bwrapExit === 0 ? "0" : "1",
     POSTMASTER_PROBE_OS_RELEASE: 'ID=ubuntu\nVERSION_ID="24.04"\n',
     POSTMASTER_PROBE_APPARMOR_PROFILE: "0",
+    POSTMASTER_PROBE_BWRAP_SECURE: "1",
   };
 }
 

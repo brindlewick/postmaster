@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { run } from "./lib/proc.ts";
 import {
   isSafeProfilePath,
+  isSecureBwrapPath,
   parseRestrictedUserns,
   readRestrictedUsernsFile,
 } from "./probe-confine.ts";
@@ -55,6 +56,7 @@ function probe(
   sysctl = "0",
   release: string = UBUNTU_2404,
   apparmor = "0",
+  secure = "1",
 ): { code: number; out: string } {
   const r = run("/bin/bash", [SELF, ...args], {
     env: {
@@ -63,6 +65,7 @@ function probe(
       POSTMASTER_PROBE_SYSCTL: sysctl,
       POSTMASTER_PROBE_OS_RELEASE: release,
       POSTMASTER_PROBE_APPARMOR_PROFILE: apparmor,
+      POSTMASTER_PROBE_BWRAP_SECURE: secure,
     },
   });
   return { code: r.code, out: r.out + r.err };
@@ -131,6 +134,17 @@ describe("the probe says ready, partial or unavailable", () => {
     expect(t.out).toContain("lane confinement: unavailable");
     expect(t.out).toContain("cannot go in the AppArmor rule");
     expect(t.out).not.toContain("sudo tee /etc/apparmor.d/bwrap");
+  });
+
+  test("a replaceable bwrap declines the root rule", () => {
+    const bin = stubBin("ubuntu-writable", { bwrap: 1, socat: 0, rg: 0 });
+    const t = probe(bin, "linux", [], "1", UBUNTU_2404, "0", "0");
+    expect(t.code).toBe(0);
+    expect(t.out).toContain("lane confinement: unavailable");
+    expect(t.out).toContain("can be replaced after the rule is written");
+    expect(t.out).not.toContain("sudo tee /etc/apparmor.d/bwrap");
+    const v = probe(bin, "linux", ["--verdict"], "1", UBUNTU_2404, "0", "0");
+    expect(v.out).toBe("unavailable\n");
   });
 
   test("the rule block pastes: its heredoc terminator starts the line", () => {
@@ -206,5 +220,10 @@ describe("the probe says ready, partial or unavailable", () => {
     expect(isSafeProfilePath("")).toBe(false);
     expect(isSafeProfilePath("/opt/we$ird/bwrap")).toBe(false);
     expect(isSafeProfilePath("/home/josé/bin/bwrap")).toBe(false);
+  });
+
+  test("a bwrap is vetted only on a root-owned chain", () => {
+    expect(isSecureBwrapPath("/bin/sh")).toBe(true);
+    expect(isSecureBwrapPath(join(tmp, "missing-bwrap"))).toBe(false);
   });
 });

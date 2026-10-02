@@ -7,7 +7,8 @@
 //
 //   exit 0 always; the table is the result. Every action in the output is advice for the
 //   user; this probe never installs a package or changes a system rule.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { dirname } from "node:path";
 import { run } from "./lib/proc.ts";
 
 export type Verdict = "ready" | "partial" | "unavailable";
@@ -24,6 +25,8 @@ export interface Observation {
   restrictedUserns: boolean;
   /** True when the AppArmor profile for bwrap is already in place. */
   apparmorProfile: boolean;
+  /** True when the found bwrap is pinned to a root-owned path. */
+  secureBwrapPath: boolean;
   bwrapStarts: boolean;
   launchErr: string;
 }
@@ -146,7 +149,12 @@ export function decide(observed: Observation): Result {
     }
     if (ubuntuAtLeast2404(observed.ubuntuRelease) && observed.restrictedUserns) {
       const bwrap = observed.tools.bwrap;
-      if (!observed.apparmorProfile && bwrap !== null && isSafeProfilePath(bwrap)) {
+      if (
+        !observed.apparmorProfile &&
+        bwrap !== null &&
+        isSafeProfilePath(bwrap) &&
+        observed.secureBwrapPath
+      ) {
         rows.push({
           need: "user namespaces",
           status: "partial",
@@ -175,6 +183,14 @@ export function decide(observed: Observation): Result {
           verdict: "unavailable",
           rows,
           detail: `bwrap is at ${bwrap}, which cannot go in the AppArmor rule; write the profile for that path by hand.`,
+          ...(restrictedCause ? { cause: restrictedCause } : {}),
+        };
+      }
+      if (bwrap !== null && !observed.secureBwrapPath) {
+        return {
+          verdict: "unavailable",
+          rows,
+          detail: `bwrap is at ${bwrap}, where it can be replaced after the rule is written; install the bubblewrap package, or write the profile for that path by hand.`,
           ...(restrictedCause ? { cause: restrictedCause } : {}),
         };
       }
@@ -294,6 +310,40 @@ function apparmorProfileExists(): boolean {
   return existsSync(APPARMOR_PROFILE_PATH);
 }
 
+/** True when every component of the path down to the root is owned by root. */
+function chainRootOwned(path: string): boolean {
+  let current = path;
+  for (;;) {
+    let uid: number;
+    try {
+      uid = statSync(current).uid;
+    } catch {
+      return false;
+    }
+    if (uid !== 0) return false;
+    const parent = dirname(current);
+    if (parent === current) return true;
+    current = parent;
+  }
+}
+
+/**
+ * True when the found bwrap is pinned to a root-owned path: the resolved binary
+ * and the link's own directory. A rule for a replaceable binary would not stay
+ * limited to Bubblewrap, so an unvetted path declines the automated remedy.
+ */
+export function isSecureBwrapPath(discovered: string): boolean {
+  const override = process.env.POSTMASTER_PROBE_BWRAP_SECURE;
+  if (override !== undefined && override !== "") return override.trim() === "1";
+  let resolved: string;
+  try {
+    resolved = realpathSync(discovered);
+  } catch {
+    return false;
+  }
+  return chainRootOwned(dirname(discovered)) && chainRootOwned(resolved);
+}
+
 /** Collect what the machine says. The only place that touches PATH, sysctl and bwrap. */
 export function collect(): Observation {
   const platform = process.env.POSTMASTER_PROBE_PLATFORM || process.platform;
@@ -330,6 +380,8 @@ export function collect(): Observation {
     ubuntuRelease: platform === "linux" ? osRelease() : null,
     restrictedUserns: platform === "linux" ? restrictedUserns() : false,
     apparmorProfile: platform === "linux" ? apparmorProfileExists() : false,
+    secureBwrapPath:
+      platform === "linux" && tools.bwrap !== null ? isSecureBwrapPath(tools.bwrap) : false,
     bwrapStarts,
     launchErr,
   };
