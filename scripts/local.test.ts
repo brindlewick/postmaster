@@ -1,4 +1,4 @@
-// Tests beside scripts/local.ts, moved from its --self-test on #109: 101 controls,
+// Tests beside scripts/local.ts, moved from its --self-test on #109: 106 controls,
 // plus one regression control for Bun's fetch-proxy snapshot (restoreEnv).
 // Order-dependent: the tests replay the self-test's sequence in file order against shared
 // fixtures (ticket numbers accumulate), except the final unicode vectors, which are pure.
@@ -648,6 +648,53 @@ describe("positive controls", () => {
     rmSync(liveLock, { force: true });
     expect(kept).toBe(true);
     expect(status).toBe("waiting");
+  }, 30000);
+});
+
+describe("controls: labels on a ticket", () => {
+  test("label add writes the label and read shows it", () => {
+    const created = lt(repo, "create", "Labelled work", bodyPath);
+    expect(created.code).toBe(0);
+    const n = created.out.trim();
+    check(lt(repo, "label", n, "add", "ready"), 0, `label added ready`);
+    expect(lt(repo, "read", n).out).toContain("labels: ready");
+  }, 30000);
+
+  test("label add is idempotent and matches case-insensitively", () => {
+    const created = lt(repo, "create", "More labels", bodyPath);
+    const n = created.out.trim();
+    check(lt(repo, "label", n, "add", "Ready"), 0, "label added Ready");
+    check(lt(repo, "label", n, "add", "ready"), 0, "label added ready");
+    expect(lt(repo, "read", n).out).toContain("labels: Ready");
+    check(lt(repo, "label", n, "remove", "READY"), 0, "label removed READY");
+    expect(lt(repo, "read", n).out).toContain("labels: \n");
+  }, 30000);
+
+  test("label remove drops only the named label", () => {
+    const created = lt(repo, "create", "Two labels", bodyPath);
+    const n = created.out.trim();
+    check(lt(repo, "label", n, "add", "ready"), 0, "label added ready");
+    check(lt(repo, "label", n, "add", "blocked"), 0, "label added blocked");
+    check(lt(repo, "label", n, "remove", "ready"), 0, "label removed ready");
+    expect(lt(repo, "read", n).out).toContain("labels: blocked");
+    check(lt(repo, "label", n, "remove", "ready"), 0, "label removed ready");
+  }, 30000);
+
+  test("an empty label and a bad verb are refused, nothing written", () => {
+    const created = lt(repo, "create", "Unlabelled", bodyPath);
+    const n = created.out.trim();
+    refused(1, "the label is empty", repo, "label", n, "add", "  ");
+    refused(1, "label <n> add|remove <label>", repo, "label", n, "toggle", "ready");
+  }, 30000);
+
+  test("list shows labels after the title, and a state change leaves them alone", () => {
+    const created = lt(repo, "create", "Listed labels", bodyPath);
+    const n = created.out.trim();
+    check(lt(repo, "label", n, "add", "ready"), 0, "label added ready");
+    const listed = lt(repo, "list").out;
+    expect(listed).toContain(`#${n}\ttodo\tListed labels\tready`);
+    check(lt(repo, "state", n, "blocked"), 0, "blocked");
+    expect(lt(repo, "read", n).out).toContain("labels: ready");
   }, 30000);
 });
 

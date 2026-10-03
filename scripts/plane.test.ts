@@ -1,4 +1,4 @@
-// Tests beside scripts/plane.ts, moved from its --self-test on #109: 46 controls.
+// Tests beside scripts/plane.ts, moved from its --self-test on #109: 52 controls.
 // criteria() is a local rework of the self-test's inline helper; failure detail comes from expect.
 // The stalled-API control carries a 60000ms timeout: its cutoff fires at 30s.
 // The no-arguments control expects the usage line without the removed " | --self-test" suffix.
@@ -47,6 +47,27 @@ function cli(
 ): { code: number; out: string; err: string } {
   const r = spawnSync("bash", [wrapper, ...args], { encoding: "utf8", env, cwd });
   return { code: r.status ?? -1, out: r.stdout ?? "", err: r.stderr ?? "" };
+}
+
+async function clix(
+  args: string[],
+  env?: Record<string, string | undefined>,
+  cwd?: string,
+): Promise<{ code: number; out: string; err: string }> {
+  // Async spawn: the in-process stub API can only answer while this loop runs,
+  // and spawnSync would block it for the child's whole life.
+  const p = Bun.spawn(["bash", wrapper, ...args], {
+    env: env as Record<string, string>,
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [out, err, code] = await Promise.all([
+    new Response(p.stdout).text(),
+    new Response(p.stderr).text(),
+    p.exited,
+  ]);
+  return { code, out, err };
 }
 
 const body = `${[
@@ -331,7 +352,7 @@ describe("CLI and API behavior", () => {
     const r = cli([], env);
     expect(r.code).toBe(1);
     expect(r.out).toBe("");
-    expect(r.err).toBe("plane: usage: plane.sh projects|create|edit|read|state|comment|list ...\n");
+    expect(r.err).toBe("plane: usage: plane.sh projects|create|edit|title|read|state|label|comment|list ...\n");
   }, 30000);
 
   test("a stalled API is cut off after 30 seconds with BASE's words", async () => {
@@ -446,5 +467,219 @@ describe("BASE parity", () => {
 
   test("env lines keep matching plain exports", () => {
     expect(envOf("export A=x")).toEqual(["A", "x"]);
+  }, 30000);
+});
+
+type StubItem = {
+  id: string;
+  sequence_id: number;
+  name: string;
+  description_html: string;
+  project: string;
+  state: string;
+  labels: string[];
+  created_at: string;
+};
+
+function stubItem(n: number): StubItem {
+  return {
+    id: `item-${n}`,
+    sequence_id: n,
+    name: `Ticket ${n}`,
+    description_html: "<p>Hi</p>",
+    project: "p1",
+    state: "s-todo",
+    labels: [],
+    created_at: "2026-10-03T00:00:00Z",
+  };
+}
+
+function startStub(items: Record<string, StubItem>, seedLabels: Array<{ id: string; name: string }>) {
+  const labels = [...seedLabels];
+  const requests: Array<{ method: string; path: string; body: string }> = [];
+  const server = Bun.serve({
+    port: 0,
+    async fetch(req) {
+      const u = new URL(req.url);
+      const body = req.method === "GET" || req.method === "HEAD" ? "" : await req.text();
+      requests.push({ method: req.method, path: u.pathname, body });
+      const j = (v: unknown) => Response.json(v);
+      const p = u.pathname;
+      if (req.method === "GET" && p === "/api/v1/workspaces/ws/projects/")
+        return j({ results: [{ id: "p1", identifier: "PM" }], next_page_results: false });
+      if (req.method === "GET" && p === "/api/v1/workspaces/ws/projects/p1/states/")
+        return j({
+          results: [
+            { id: "s-todo", group: "unstarted", sequence: 1 },
+            { id: "s-prog", group: "started", sequence: 1 },
+            { id: "s-done", group: "completed", sequence: 1 },
+            { id: "s-cancel", group: "cancelled", sequence: 1 },
+          ],
+          next_page_results: false,
+        });
+      if (req.method === "GET" && p === "/api/v1/workspaces/ws/projects/p1/labels/")
+        return j({ results: labels, next_page_results: false });
+      if (req.method === "POST" && p === "/api/v1/workspaces/ws/projects/p1/labels/") {
+        const name = (JSON.parse(body) as { name: string }).name;
+        const created = { id: `l-${labels.length + 1}`, name };
+        labels.push(created);
+        return j(created);
+      }
+      const mItem = /^\/api\/v1\/workspaces\/ws\/work-items\/([A-Z]+-\d+)\/$/.exec(p);
+      if (req.method === "GET" && mItem) {
+        const it = items[mItem[1]!];
+        if (!it) return new Response("no such item", { status: 404 });
+        return j(it);
+      }
+      const mPatch = /^\/api\/v1\/workspaces\/ws\/projects\/p1\/work-items\/([^/]+)\/$/.exec(p);
+      if (req.method === "PATCH" && mPatch) {
+        const patch = JSON.parse(body) as Record<string, unknown>;
+        for (const it of Object.values(items)) {
+          if (it.id !== mPatch[1]) continue;
+          if (typeof patch.name === "string") it.name = patch.name;
+          if (Array.isArray(patch.labels)) it.labels = patch.labels as string[];
+          if (typeof patch.state === "string") it.state = patch.state;
+        }
+        return j({});
+      }
+      const mComments = /^\/api\/v1\/workspaces\/ws\/projects\/p1\/work-items\/([^/]+)\/comments\/$/.exec(p);
+      if (req.method === "GET" && mComments) return j({ results: [], next_page_results: false });
+      return new Response(`stub plane: unexpected ${req.method} ${p}`, { status: 500 });
+    },
+  });
+  return { server, requests, url: `http://127.0.0.1:${server.port}` };
+}
+
+function penv(cfg: string, dir: string): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    POSTMASTER_CONFIG: cfg,
+    PLANE_API_KEY: "self-test",
+  };
+  delete env.POSTMASTER_PROJECT;
+  env.GIT_CEILING_DIRECTORIES = dir;
+  return env;
+}
+
+describe("labels and titles through a stub API", () => {
+  test("label add creates the missing label, then sets it", async () => {
+    const { server, requests, url } = startStub({ "PM-1": stubItem(1) }, []);
+    try {
+      const dir = join(root, "plane-label-add");
+      mkdirSync(dir, { recursive: true });
+      const cfg = join(dir, "config.toml");
+      writeFileSync(cfg, `[tracker]\nkind = "plane"\nurl = "${url}"\nworkspace = "ws"\n`);
+      const env = penv(cfg, dir);
+      const r = await clix(["label", "PM-1", "add", "ready"], env, dir);
+      expect(r.code).toBe(0);
+      expect(r.out.trim()).toBe("PM-1: label added ready");
+      const post = requests.find((q) => q.method === "POST");
+      expect(post?.path).toBe("/api/v1/workspaces/ws/projects/p1/labels/");
+      expect(JSON.parse(post?.body ?? "{}").name).toBe("ready");
+      const patch = requests.find((q) => q.method === "PATCH");
+      expect(JSON.parse(patch?.body ?? "{}")).toEqual({ labels: ["l-1"] });
+    } finally {
+      server.stop(true);
+    }
+  }, 30000);
+
+  test("label add uses the label when it exists, creating nothing", async () => {
+    const { server, requests, url } = startStub({ "PM-1": stubItem(1) }, [{ id: "l-9", name: "ready" }]);
+    try {
+      const dir = join(root, "plane-label-kept");
+      mkdirSync(dir, { recursive: true });
+      const cfg = join(dir, "config.toml");
+      writeFileSync(cfg, `[tracker]\nkind = "plane"\nurl = "${url}"\nworkspace = "ws"\n`);
+      const env = penv(cfg, dir);
+      const r = await clix(["label", "PM-1", "add", "ready"], env, dir);
+      expect(r.code).toBe(0);
+      expect(requests.some((q) => q.method === "POST")).toBe(false);
+      const patch = requests.find((q) => q.method === "PATCH");
+      expect(JSON.parse(patch?.body ?? "{}")).toEqual({ labels: ["l-9"] });
+    } finally {
+      server.stop(true);
+    }
+  }, 30000);
+
+  test("label remove clears the label", async () => {
+    const item = stubItem(1);
+    item.labels = ["l-9"];
+    const { server, requests, url } = startStub({ "PM-1": item }, [{ id: "l-9", name: "ready" }]);
+    try {
+      const dir = join(root, "plane-label-drop");
+      mkdirSync(dir, { recursive: true });
+      const cfg = join(dir, "config.toml");
+      writeFileSync(cfg, `[tracker]\nkind = "plane"\nurl = "${url}"\nworkspace = "ws"\n`);
+      const env = penv(cfg, dir);
+      const r = await clix(["label", "PM-1", "remove", "ready"], env, dir);
+      expect(r.code).toBe(0);
+      expect(r.out.trim()).toBe("PM-1: label removed ready");
+      const patch = requests.find((q) => q.method === "PATCH");
+      expect(JSON.parse(patch?.body ?? "{}")).toEqual({ labels: [] });
+    } finally {
+      server.stop(true);
+    }
+  }, 30000);
+
+  test("read shows the work item's labels", async () => {
+    const item = stubItem(1);
+    item.labels = ["l-9"];
+    const { server, url } = startStub({ "PM-1": item }, [{ id: "l-9", name: "ready" }]);
+    try {
+      const dir = join(root, "plane-label-read");
+      mkdirSync(dir, { recursive: true });
+      const cfg = join(dir, "config.toml");
+      writeFileSync(cfg, `[tracker]\nkind = "plane"\nurl = "${url}"\nworkspace = "ws"\n`);
+      const env = penv(cfg, dir);
+      const r = await clix(["read", "PM-1"], env, dir);
+      expect(r.code).toBe(0);
+      expect(r.out.split("\n")).toContain("labels: ready");
+    } finally {
+      server.stop(true);
+    }
+  }, 30000);
+
+  test("title retitles the work item", async () => {
+    const { server, requests, url } = startStub({ "PM-1": stubItem(1) }, []);
+    try {
+      const dir = join(root, "plane-title");
+      mkdirSync(dir, { recursive: true });
+      const cfg = join(dir, "config.toml");
+      writeFileSync(cfg, `[tracker]\nkind = "plane"\nurl = "${url}"\nworkspace = "ws"\n`);
+      const env = penv(cfg, dir);
+      const r = await clix(["title", "PM-1", "A new title"], env, dir);
+      expect(r.code).toBe(0);
+      expect(r.out.trim()).toBe("PM-1: title changed");
+      const patch = requests.find((q) => q.method === "PATCH");
+      expect(JSON.parse(patch?.body ?? "{}")).toEqual({ name: "A new title" });
+    } finally {
+      server.stop(true);
+    }
+  }, 30000);
+
+  test("a state change leaves the ready label alone", async () => {
+    const item = stubItem(1);
+    item.labels = ["l-1"];
+    const { server, requests, url } = startStub({ "PM-1": item }, [{ id: "l-1", name: "ready" }]);
+    try {
+      const dir = join(root, "plane-state-labels");
+      mkdirSync(dir, { recursive: true });
+      const cfg = join(dir, "config.toml");
+      writeFileSync(cfg, `[tracker]\nkind = "plane"\nurl = "${url}"\nworkspace = "ws"\n`);
+      const env = { ...process.env, POSTMASTER_CONFIG: cfg, PLANE_API_KEY: "self-test" };
+      const blocked = await clix(["state", "PM-1", "blocked"], env, dir);
+      expect(blocked.code).toBe(0);
+      const patches = requests.filter((q) => q.method === "PATCH");
+      expect(patches.length).toBe(1);
+      expect(JSON.parse(patches[0]?.body ?? "{}")).toEqual({ labels: ["l-1", "l-2"] });
+      requests.length = 0;
+      const todo = await clix(["state", "PM-1", "todo"], env, dir);
+      expect(todo.code).toBe(0);
+      const back = requests.filter((q) => q.method === "PATCH");
+      expect(back.length).toBe(1);
+      expect(JSON.parse(back[0]?.body ?? "{}")).toEqual({ state: "s-todo", labels: ["l-1"] });
+    } finally {
+      server.stop(true);
+    }
   }, 30000);
 });
