@@ -269,6 +269,14 @@ describe("positive controls", () => {
     );
   }, 30000);
 
+  test("the entry itself is a control that stops the leg", () => {
+    const r = logAction(["coachman", "tool-fault", "scripts/run", ...FIELDS]);
+    expect(r.code).toBe(0);
+    const last = lastLine();
+    expect(last !== null && last.fault?.control === "check").toBe(true);
+    expect(r.err.includes("scripts/run is a control (check): stop the leg")).toBe(true);
+  }, 30000);
+
   test("a listed script with another --control is written", () => {
     const before = lines();
     const r = logAction(FAULT_OTHER);

@@ -300,7 +300,7 @@ function handleOf(text: string): string {
   }
   return handle;
 }
-// text.ts: BASE re.sub(r"\s{2,}\(.*\)$", "", line[5:]).strip() (run host:142).
+// text.ts: BASE re.sub(r"\s{2,}\(.*\)$", "", line[5:]).strip() (host.sh:142).
 const NOTE_STRIP = new RegExp("[" + PY_S_CLASS + "]{2,}\\(" + PY_DOT + "*\\)" + END_OF_STRING, "u");
 
 function dispatchInfo(dispatch: string): { name: string; worktree: string } {

@@ -139,7 +139,12 @@ function checkChange(repo: string, base: string, head: string): string[] {
 // Run the checker named by BASE's index using BASE's own script tree. A branch cannot
 // weaken its checker and then classify itself with that weakened version.
 function checkAtBase(repo: string, base: string, head: string): number {
-  const abs = realpathSync(resolve(repo));
+  let abs: string;
+  try {
+    abs = realpathSync(resolve(repo));
+  } catch {
+    throw new ContractError(`cannot resolve repository: ${repo}`);
+  }
   gitOrDie(["rev-parse", "--verify", `${base}^{commit}`], abs);
   gitOrDie(["rev-parse", "--verify", `${head}^{commit}`], abs);
   const index = readIndex(abs, base);
@@ -417,6 +422,15 @@ function exerciseSelfTest(sourceRoot: string): number {
     "fixture copies and scores",
   );
   runCase(
+    "a change in scripts/run answers yes",
+    (repo) => {
+      // Appended, not prepended: the shebang stays on the first line.
+      const path = join(repo, "scripts", "run");
+      writeFileSync(path, `${readFileSync(path, "utf8")}# the entry\n`);
+    },
+    "scripts/run",
+  );
+  runCase(
     "a wording fix in fixture.ts answers yes",
     (repo) =>
       replaceOnce(
@@ -636,6 +650,25 @@ function exerciseSelfTest(sourceRoot: string): number {
     }
   };
   repoFormControl();
+
+  {
+    const label = "--at-base on a missing repository exits 2";
+    const missing = join(sourceRoot, "coachman-contract-no-such-repo");
+    const result = run(join(sourceRoot, "scripts", "run"), [
+      "coachman-contract",
+      "--at-base",
+      missing,
+      "deadbee",
+      "deadbee",
+    ]);
+    const ok = result.code === 2 && result.err.includes("cannot resolve repository");
+    if (control(ok, label, `exit ${result.code}`)) passed += 1;
+    else {
+      failed += 1;
+      if (result.err) console.log(`       ${result.err.trim().replace(/\n/g, "\n       ")}`);
+      if (result.out) console.log(`       ${result.out.trim().replace(/\n/g, "\n       ")}`);
+    }
+  }
 
   console.log(`coachman-contract self-test: ${passed} passed, ${failed} failed`);
   return failed === 0 ? 0 : 1;

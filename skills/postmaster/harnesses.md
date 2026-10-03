@@ -584,7 +584,7 @@ session of its own: a host's pane where there is one, a detached process where t
 <tool>/scripts/run host run "watch · <project>" "<repo>" \
     --out "<runs>/postmaster/watch.out" --err "<runs>/postmaster/watch.err" \
     --marker "<runs>/postmaster/.watch-exited" \
-    -- "<tool>/scripts/run runs-watch" "<runs>"
+    -- "<tool>/scripts/run" runs-watch "<runs>"
 ```
 
 Wait for its return in the conversation with `<tool>/scripts/run wait-for-markers`:

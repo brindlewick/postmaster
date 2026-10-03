@@ -930,7 +930,7 @@ async function check(
   if (detail) console.log(`         ${detail.replace(/\n/gu, "\n         ")}`);
   return false;
 }
-// text.ts: BASE cuts where-values at the first ASCII space (${v%% *}, run host:1111);
+// text.ts: BASE cuts where-values at the first ASCII space (${v%% *}, host.sh:1111);
 // a tab or exotic space inside a value survives there, so it must survive here.
 export function kvOf(text: string, key: string): string {
   // [^ \r\n]: BASE reads command-substitution (trailing newlines already

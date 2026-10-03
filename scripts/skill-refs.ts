@@ -14,7 +14,9 @@
 // or when it goes through <tool> to a script the repo does not have. A path under
 // another placeholder or variable, such as <repo>/scripts/, is that directory's and not the tool's.
 // --fix also upgrades old .sh names resolved by scripts/run, so a rebase adding a script
-// converts that reference without a fixed name list. A second run changes nothing.
+// converts that reference without a fixed name list. Old names under <rt>/ are left alone:
+// a pinned checkout can predate the entry, so those convert through run-meta run-pinned.
+// A second run changes nothing.
 // the second time; the check that follows it names whatever it could not fix.
 //
 //   exit 0  every reference resolves
@@ -27,7 +29,7 @@ import { toolRoot } from "./lib/paths.ts";
 const REF = /scripts\/[A-Za-z0-9._-]*/gu;
 const BARE = /(?<![A-Za-z0-9_./-])scripts\//gu;
 const OTHER = /(<[A-Za-z0-9_-]+>|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)\/$/u;
-const OLD = /scripts\/([A-Za-z0-9_-]+)\.sh(?=$|[^A-Za-z0-9_])/gu;
+const OLD = /scripts\/([A-Za-z0-9_-]+)\.sh(?=$|[^A-Za-z0-9_.-]|[.-](?![A-Za-z0-9_-]))/gu;
 const DIRECT_BUN =
   /(?<![A-Za-z0-9_])bun[ \t]+[^\n]*?scripts\/[A-Za-z0-9_-]+\.ts(?=$|[^A-Za-z0-9_])/gu;
 
@@ -59,19 +61,24 @@ export function refs(
       return { faults, code: 2, fixMessages };
     }
     if (mode === "fix") {
+      // One bare reference counts once, however many passes rewrite it, and
+      // a <tool>-prefixed old name counts once more for its entry upgrade.
+      let count = 0;
+      for (const _m of text.matchAll(BARE)) count += 1;
       let new_ = text.replace(OLD, (old, name: string, offset: number) => {
         const before = text.slice(0, offset);
-        if (OTHER.test(before) && !before.endsWith("<tool>/") && !before.endsWith("<rt>/"))
-          return old;
-        return scriptExists(root, name) ? `scripts/run ${name}` : old;
+        // A pinned checkout can predate the entry, so an old-form reference
+        // under <rt>/ is left for conversion through run-meta run-pinned.
+        if (before.endsWith("<rt>/")) return old;
+        if (OTHER.test(before) && !before.endsWith("<tool>/")) return old;
+        if (!scriptExists(root, name)) return old;
+        if (before.endsWith("<tool>/")) count += 1;
+        return `scripts/run ${name}`;
       });
       new_ = new_.replace(BARE, "<tool>/scripts/");
-      let count = 0;
-      for (const _m of text.matchAll(OLD)) count += 1;
-      for (const _m of text.matchAll(BARE)) count += 1;
       if (count > 0) {
         writeFileSync(f, new_, "utf8");
-        fixMessages.push(`${f}: ${count} reference(s) now go through <tool>`);
+        fixMessages.push(`${f}: ${count} reference(s) updated`);
       }
       text = new_;
     }
@@ -95,15 +102,20 @@ export function refs(
         const name = ref.slice("scripts/".length);
         if (before.endsWith("<tool>/") || before.endsWith("<rt>/")) {
           const which = before.endsWith("<tool>/") ? "<tool>/" : "<rt>/";
-          if (name !== "" && !isFile(join(root, "scripts", name))) {
+          const after = line.slice((m.index ?? 0) + (m[0] ?? "").length);
+          if (name === "lib" && libScript(after, root)) {
+            // A lib script the entry resolves: <tool>/scripts/lib/<name>.ts.
+          } else if (name !== "" && !isFile(join(root, "scripts", name))) {
+            const pinned = which === "<rt>/" && name.endsWith(".sh");
             faults.push({
               file: f,
               line: i + 1,
-              why: "no such script in the postmaster repo",
+              why: pinned
+                ? "pinned references convert through run-meta run-pinned"
+                : "no such script in the postmaster repo",
               ref: `${which}${ref}`,
             });
           } else if (name === "run") {
-            const after = line.slice((m.index ?? 0) + (m[0] ?? "").length);
             const next = /^[ \t]+([A-Za-z0-9_-]+)/u.exec(after)?.[1];
             if (next && !scriptExists(root, next))
               faults.push({
@@ -141,6 +153,11 @@ function isFile(p: string): boolean {
   } catch {
     return false;
   }
+}
+
+function libScript(after: string, root: string): boolean {
+  const rest = /^\/([A-Za-z0-9_-]+)\.ts(?=$|[^A-Za-z0-9_])/u.exec(after);
+  return !!rest && scriptExists(root, rest[1] as string);
 }
 
 function scriptExists(root: string, name: string): boolean {

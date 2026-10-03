@@ -25,7 +25,10 @@
 # fixtures, the entry's .sh-name refusal, fake old-form pinned copies), coachman-contract.ts
 # may plant old-form names in its BASE-mode self-test fixtures, and the new pinned-copy
 # runner module holds the old-form branch; the gate proves the live test argv works, and
-# the AC3 probes prove fix behavior. What this file cannot see mechanically it does not
+# the AC3 probes prove fix behavior. BASE citations (a `BASE ... name.sh:line` comment
+# naming the pre-port source a port mirrors) are evidence about the past, not live
+# references, and G2 skips them; added in review, when round 1 found the mechanical
+# rename had falsified them. What this file cannot see mechanically it does not
 # guess at: the runner's cross-form behavior, the supervising command's shape, and the
 # launch-role negative control are verified by the coachman reading each lane's diff and
 # running that lane's own tests and commands.
@@ -93,7 +96,7 @@ G1="((<tool>/|<rt>/)?scripts/)($WRAPPERS)\.sh([^A-Za-z0-9_-]|\$)"
 hits=$(grep -rnE -m5 "${EXCLUDES[@]}" -e "$G1" "${SURFACES[@]}" 2>/dev/null); rc=$?
 if [ "$rc" -eq 2 ]; then bad "AC1: reference pattern G1 is invalid"; elif [ -z "$hits" ]; then ok "no path-shaped old reference on the named surfaces"; else bad "old path-shaped references:"; echo "$hits" | sed 's/^/         /'; fi
 G2="(^|[^A-Za-z0-9_-])($WRAPPERS)\.sh([^A-Za-z0-9_-]|\$)"
-hits=$(grep -rnE -m20 "${EXCLUDES[@]}" -e "$G2" "${SURFACES[@]}" 2>/dev/null | grep -vE -e "$G1" | head -5)
+hits=$(grep -rnE -m20 "${EXCLUDES[@]}" -e "$G2" "${SURFACES[@]}" 2>/dev/null | grep -vE -e "$G1" | grep -vE 'BASE.*\.sh:[0-9]+' | head -5)
 if [ -z "$hits" ]; then ok "no other old-form wrapper token on the named surfaces"; else bad "old-form wrapper tokens:"; echo "$hits" | sed 's/^/         /'; fi
 G3="bun.*scripts/[A-Za-z0-9_-]+\.ts"
 hits=$(grep -rnE -m5 "${EXCLUDES[@]}" -e "$G3" AGENTS.md README.md skills scripts fixtures 2>/dev/null); rc=$?

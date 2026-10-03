@@ -564,7 +564,7 @@ beforeAll(() => {
       ].join("\n"),
     );
     {
-      // Unicode primitives, BASE run launch python: every expectation python3-verified.
+      // Unicode primitives, BASE launch.sh python: every expectation python3-verified.
       writeFileSync(
         join(tmp, "uni.md"),
         "```sh\nscripts/run\x1flaunch\x1flaunch u1 <wt> <p>\n```\n",
@@ -3838,7 +3838,7 @@ beforeAll(() => {
       if (shown.status !== 0) {
         fail(
           "a resume's check and harness match main's PWD, OLDPWD and SHLVL",
-          `git show main run launch: ${shown.stderr ?? ""}`,
+          `git show main launch.sh: ${shown.stderr ?? ""}`,
         );
       } else {
         writeFileSync(baseLaunch, shown.stdout ?? "");

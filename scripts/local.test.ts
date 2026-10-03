@@ -1096,7 +1096,7 @@ describe("identifiers both sides compute and read", () => {
   }, 30000);
 });
 
-// Unicode-primitive vectors: BASE's run local embeds Python (re.fullmatch \d, int(),
+// Unicode-primitive vectors: BASE's local.sh embeds Python (re.fullmatch \d, int(),
 // " ".join(s.split())); the port must match on non-ASCII input.
 describe("unicode-primitive vectors", () => {
   test("oneLine splits U+001C like Python split", () => {

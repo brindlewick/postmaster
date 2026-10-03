@@ -1123,7 +1123,7 @@ async function* pages(
 }
 
 export function parseId(tid: string): [string, number] {
-  // text.ts: BASE re.fullmatch(r"([A-Za-z][A-Za-z0-9]*)-(\d+)" (run plane:698); the upper is regex-gated ASCII.
+  // text.ts: BASE re.fullmatch(r"([A-Za-z][A-Za-z0-9]*)-(\d+)" (plane.sh:698); the upper is regex-gated ASCII.
   const m = /^([A-Za-z][A-Za-z0-9]*)-(\p{Nd}+)$/u.exec(tid);
   if (!m) dieP(`not a work item id: ${tid} (expected IDENT-n)`);
   return [(m[1] ?? "").toUpperCase(), Number(digitValue(m[2] ?? "0"))]; // ASCII: group 1 is [A-Za-z0-9]* by the match.

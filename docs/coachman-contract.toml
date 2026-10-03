@@ -21,6 +21,10 @@ path = "skills/postmaster/SKILL.md"
 holds = "the waybill template, including the fixture requirement lines"
 
 [[files]]
+path = "scripts/run"
+holds = "the entry every tool script runs through: name validation, resolution and the isolation flags"
+
+[[files]]
 path = "scripts/host.ts"
 holds = "marker writing and clearing, the exit watcher and its call"
 

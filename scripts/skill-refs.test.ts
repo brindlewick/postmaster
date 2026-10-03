@@ -74,6 +74,22 @@ describe("checking script references", () => {
   test("an unreadable file exits 2", () => {
     expect(refs(root, "check", [join(tmp, "nowhere.md")]).code).toBe(2);
   });
+
+  test("a lib script path resolves like the entry resolves it", () => {
+    const file = put("lib.md", "See `<tool>/scripts/lib/text.ts` for splits.\n");
+    expect(refs(root, "check", [file]).code).toBe(0);
+    const missing = put("lib-missing.md", "See `<tool>/scripts/lib/absent.ts`.\n");
+    const result = refs(root, "check", [missing]);
+    expect(result.code).toBe(1);
+    expect(result.faults.some((f) => f.why.includes("no such script"))).toBe(true);
+  });
+
+  test("an old pinned name faults toward run-pinned", () => {
+    const file = put("rt.md", "See `<rt>/scripts/stage.sh` for stages.\n");
+    const result = refs(root, "check", [file]);
+    expect(result.code).toBe(1);
+    expect(result.faults.some((f) => f.why.includes("run-pinned"))).toBe(true);
+  });
 });
 
 describe("fixing script references", () => {
@@ -97,5 +113,33 @@ describe("fixing script references", () => {
     const result = refs(root, "fix", [file]);
     expect(result.code).toBe(1);
     expect(readFileSync(file, "utf8")).toBe("<tool>/scripts/no-such.sh\n");
+  });
+
+  test("an old pinned name is left for run-pinned conversion", () => {
+    const file = put("rt-fix.md", "See `<rt>/scripts/stage.sh` for stages.\n");
+    const result = refs(root, "fix", [file]);
+    expect(result.code).toBe(1);
+    expect(readFileSync(file, "utf8")).toBe("See `<rt>/scripts/stage.sh` for stages.\n");
+    expect(result.faults.some((f) => f.why.includes("run-pinned"))).toBe(true);
+  });
+
+  test("suffixed old names are prefixed, never rewritten to the entry", () => {
+    const file = put("edge.md", "Run scripts/stage.sh.bak and scripts/stage.sh-old.\n");
+    const result = refs(root, "fix", [file]);
+    expect(readFileSync(file, "utf8")).toBe(
+      "Run <tool>/scripts/stage.sh.bak and <tool>/scripts/stage.sh-old.\n",
+    );
+    expect(result.code).toBe(1);
+  });
+
+  test("the fix message counts references updated", () => {
+    const file = put("count.md", "Run scripts/stage.sh today.\n");
+    const result = refs(root, "fix", [file]);
+    expect(result.code).toBe(0);
+    expect(result.fixMessages).toEqual([`${file}: 1 reference(s) updated`]);
+    expect(readFileSync(file, "utf8")).toBe("Run <tool>/scripts/run stage today.\n");
+    const prefixed = put("count-prefixed.md", "See <tool>/scripts/usage.sh now.\n");
+    const second = refs(root, "fix", [prefixed]);
+    expect(second.fixMessages).toEqual([`${prefixed}: 1 reference(s) updated`]);
   });
 });
