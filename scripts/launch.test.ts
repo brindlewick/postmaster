@@ -4116,7 +4116,8 @@ s.close()
           "sleep 30 & CHILD=$!; kill -TERM $CHILD 2>/dev/null; wait $CHILD; echo rc=$?",
         ]);
         const r = w ? run(w[0]!, w.slice(1), { timeout: 30000 }) : { out: "", code: -1 };
-        const selfOk = r.out.includes("rc=143") || r.out.includes("rc=0");
+        // wait reports 143 when the TERM lands; a 0 would mean the signal never did.
+        const selfOk = r.out.includes("rc=143");
         check(`signalling a process the lane started: confined: ${selfOk ? "ok" : "fail"}`, selfOk);
         itemsRun++;
       } else {
@@ -4129,6 +4130,112 @@ s.close()
         `confinement battery: ${itemsRun} run, ${itemsSkipped} skipped`,
         true,
         `${itemsRun} run, ${itemsSkipped} skipped`,
+      );
+    }
+
+    // --- confinement wiring: form shows the wrap, fallback warns and logs ---
+    {
+      const confLane = (name: string, confineLine: string): void => {
+        writeFileSync(
+          join(tmp, `${name}.toml`),
+          `${confineLine}[lanes.one]\nharness = "codex"\nmodel = "lane-model"\neffort = "high"\n\n[team]\ncoachman = { harness = "codex", model = "coach-model" }\n`,
+        );
+      };
+      confLane("conf-on", 'confine = "on"\n');
+      confLane("conf-off", 'confine = "off"\n');
+      confLane("conf-absent", "");
+      const mech =
+        process.platform === "linux"
+          ? "bwrap"
+          : process.platform === "darwin"
+            ? "sandbox-exec"
+            : "";
+      const launchLine = (form: string): string =>
+        form
+          .split("\n")
+          .find((l) => l.startsWith("launch:")) ?? "";
+      const resumeLine = (form: string): string =>
+        form
+          .split("\n")
+          .find((l) => l.startsWith("resume:")) ?? "";
+      doRun("conf-off", "form", "one");
+      const offForm = out;
+      const offRc = rc;
+      doRun("conf-absent", "form", "one");
+      check(
+        "form with confine off runs as absent",
+        offRc === 0 && rc === 0 && offForm === out,
+        `off=${offRc} absent=${rc}`,
+      );
+      doRun("conf-on", "form", "one");
+      const onForm = out;
+      const onRc = rc;
+      if (mech === "") {
+        check(
+          "form with confine on stays bare on a system with no row",
+          onRc === 0 && onForm === offForm,
+        );
+      } else {
+        check("form with confine on wraps the launch line", onRc === 0 && launchLine(onForm).includes(mech), onForm);
+        check("form with confine on wraps the resume line", onRc === 0 && resumeLine(onForm).includes(mech), onForm);
+        const launchAt = launchLine(offForm).indexOf("codex exec");
+        const resumeAt = resumeLine(offForm).indexOf("codex exec");
+        const bareLaunch = launchAt === -1 ? "" : launchLine(offForm).slice(launchAt);
+        const bareResume = resumeAt === -1 ? "" : resumeLine(offForm).slice(resumeAt);
+        check(
+          "the wrapped launch line carries the bare harness argv",
+          bareLaunch !== "" && launchLine(onForm).includes(bareLaunch),
+          onForm,
+        );
+        check(
+          "the wrapped resume line carries the bare harness argv",
+          bareResume !== "" && resumeLine(onForm).includes(bareResume),
+          onForm,
+        );
+      }
+      doRun("conf-on", "form", "coachman");
+      check(
+        "form for the coachman stays bare with confine on",
+        rc === 0 && (mech === "" || !out.includes(mech)),
+        out,
+      );
+      // The fallback: a refusing mechanism runs the lane unconfined, warns
+      // naming the cause, and logs the fallback as an action inside a run.
+      if (mech !== "") {
+        writeFileSync(join(tmp, "bin", mech), "#!/bin/sh\necho shadow-refused >&2\nexit 1\n");
+        chmodSync(join(tmp, "bin", mech), 0o755);
+      }
+      doRun("conf-on", "launch", "one", join(tmp, "wt"), join(tmp, "prompt.txt"));
+      check(
+        "a lane whose confinement cannot start still runs",
+        rc === 0 && out.includes("--dangerously-bypass-approvals-and-sandbox"),
+        `rc=${rc} out=${out} err=${err}`,
+      );
+      check(
+        "a lane whose confinement cannot start warns naming the cause",
+        err.includes("confinement cannot start"),
+        err,
+      );
+      doRun("conf-off", "launch", "one", join(tmp, "wt"), join(tmp, "prompt.txt"));
+      check(
+        "confine off runs with no warning past the refusing mechanism",
+        rc === 0 && !err.includes("confinement cannot start"),
+        `rc=${rc} err=${err}`,
+      );
+      record("confrun", "conf-on");
+      doRun("conf-on", "launch", "one", join(tmp, "wt"), join(tmp, "prompt.txt"), "--run", runDir("confrun"));
+      let fallbackLogged = false;
+      try {
+        const lines = readFileSync(join(runDir("confrun"), "actions.jsonl"), "utf8").split("\n");
+        const line = lines.find((l) => l.includes("confinement fallback"));
+        fallbackLogged = line !== undefined && line.includes('"action":"note"');
+      } catch {
+        fallbackLogged = false;
+      }
+      check(
+        "the fallback is logged as an action inside a run",
+        rc === 0 && fallbackLogged,
+        `rc=${rc} err=${err}`,
       );
     }
   });
@@ -5068,5 +5175,51 @@ describe("confinement battery: every AC2 and AC3 item unconfined and confined", 
     expect(r).toBeDefined();
     expect(r?.ok).toBe(true);
     expect(r?.detail).toMatch(/^\p{Nd}+ run, \p{Nd}+ skipped$/u);
+  });
+});
+
+describe("confinement wiring: form shows the wrap, fallback warns and logs", () => {
+  test("form with confine off runs as absent", () => {
+    assertControl("form with confine off runs as absent");
+  });
+  test("form with confine on wraps the launch line", () => {
+    const r = records.find((x) => x.label === "form with confine on wraps the launch line");
+    if (r === undefined) return; // no row on this system: the bare-form record holds instead
+    assertControl("form with confine on wraps the launch line");
+  });
+  test("form with confine on wraps the resume line", () => {
+    const r = records.find((x) => x.label === "form with confine on wraps the resume line");
+    if (r === undefined) return; // no row on this system: the bare-form record holds instead
+    assertControl("form with confine on wraps the resume line");
+  });
+  test("form with confine on stays bare on a system with no row", () => {
+    const r = records.find((x) => x.label === "form with confine on stays bare on a system with no row");
+    if (r === undefined) return; // this system has a row: the wrap records hold instead
+    assertControl("form with confine on stays bare on a system with no row");
+  });
+  test("the wrapped launch line carries the bare harness argv", () => {
+    const r = records.find((x) => x.label === "the wrapped launch line carries the bare harness argv");
+    if (r === undefined) return; // no row on this system
+    assertControl("the wrapped launch line carries the bare harness argv");
+  });
+  test("the wrapped resume line carries the bare harness argv", () => {
+    const r = records.find((x) => x.label === "the wrapped resume line carries the bare harness argv");
+    if (r === undefined) return; // no row on this system
+    assertControl("the wrapped resume line carries the bare harness argv");
+  });
+  test("form for the coachman stays bare with confine on", () => {
+    assertControl("form for the coachman stays bare with confine on");
+  });
+  test("a lane whose confinement cannot start still runs", () => {
+    assertControl("a lane whose confinement cannot start still runs");
+  });
+  test("a lane whose confinement cannot start warns naming the cause", () => {
+    assertControl("a lane whose confinement cannot start warns naming the cause");
+  });
+  test("confine off runs with no warning past the refusing mechanism", () => {
+    assertControl("confine off runs with no warning past the refusing mechanism");
+  });
+  test("the fallback is logged as an action inside a run", () => {
+    assertControl("the fallback is logged as an action inside a run");
   });
 });

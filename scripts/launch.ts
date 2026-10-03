@@ -1113,9 +1113,13 @@ if (import.meta.main) {
   if (!MODEL) die(`${NAME} has no model in ${source}`);
   // A lane in the effective [lanes] table runs in a process space of its own
   // when confine is on. Coachman, fallback and postmaster are not confined.
+  // form shows the wrapped command whenever one applies; it runs no start
+  // check. launch, resume and review start the confinement with a no-op, and
+  // run the lane unconfined with a warning when it cannot start.
   const isLane = NAME !== "coachman" && NAME !== "coachman_fallback" && NAME !== "postmaster";
+  const showWrap = spec.confine && isLane;
   let confineWrap = false;
-  if (spec.confine && isLane && CMD !== "skill") {
+  if (spec.confine && isLane && CMD !== "skill" && CMD !== "form") {
     const check = startCheck();
     if (check.ok) {
       confineWrap = true;
@@ -1127,7 +1131,7 @@ if (import.meta.main) {
         run(join(scriptsDir(import.meta), "log-action.sh"), [
           RUN,
           `lane:${NAME}`,
-          "degrade",
+          "note",
           NAME,
           `confinement fallback: ${check.cause}`,
         ]);
@@ -1301,7 +1305,7 @@ if (import.meta.main) {
   if (CMD === "form") {
     const show = (a: string): string => showArg(a);
     const maybeWrap = (cmd: string[]): string[] => {
-      if (!confineWrap) return cmd;
+      if (!showWrap) return cmd;
       const w = wrapCommand(cmd);
       return w ?? cmd;
     };
