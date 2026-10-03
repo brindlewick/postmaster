@@ -39,7 +39,7 @@ includes #109.
   fixture fact is present, so every `--run` launch, resume and review
   follows it.
 - Lowest levels tried 2026-09-30: exactly the one table [`run-meta.ts`](https://github.com/brindlewick/postmaster/blob/0620bfc90eb32a35124279d9780df42174e6ccd9/scripts/run-meta.ts)
-  records from: codex `none`, claude `low`, muse `minimal`, MiMo `low`.
+  records from: codex `low`, claude `low`, muse `minimal`, MiMo `low`.
 - Only fixture runs change; ticket runs keep their top level: the ticket
   path records the effective machine config unchanged, and review reads the
   lane's recorded effort, which on a ticket run is the configured level
@@ -92,7 +92,7 @@ will really be used: the command, the input and what it should print.
   dispatch against it: `run.json` still records the lowest efforts. A
   plain repo with "fixture" in its name records the configured efforts.
 - **AC2.** `scripts/run-meta.sh <dispatch> <fixture-copy>` writes
-  `run.json` with codex `none`, claude `low`, muse `minimal`, MiMo `low`
+  `run.json` with codex `low`, claude `low`, muse `minimal`, MiMo `low`
   on every lane and role whose config names an effort; a lane that names
   none still names none; a lane on an unmapped harness keeps its
   configured effort and the command names it on stderr; `sha256sum` of
@@ -100,7 +100,7 @@ will really be used: the command, the input and what it should print.
   the same command records the effective config unchanged.
 - **AC3.** With stub harnesses on PATH,
   `scripts/launch.sh review <lane> <scratch> <base> --run <fixture-dispatch>`
-  runs codex with `model_reasoning_effort="none"`, claude with
+  runs codex with `model_reasoning_effort="low"`, claude with
   `/code-review low <range>` and `--effort low`, mimo with
   `--variant low`. The identical commands with `--run <ticket-dispatch>`
   name `max`, `max`, `high`, as today.
@@ -138,7 +138,7 @@ will really be used: the command, the input and what it should print.
   missing file means a ticket run, and an unreadable-but-present file
   still counts as fixture. Never the repository's name or path.
 - **One lowest table, in [`run-meta.ts`](https://github.com/brindlewick/postmaster/blob/0620bfc90eb32a35124279d9780df42174e6ccd9/scripts/run-meta.ts).** The table
-  (codex `none`, claude `low`, muse `minimal`, MiMo `low`) lives once in
+  (codex `low`, claude `low`, muse `minimal`, MiMo `low`) lives once in
   [`run-meta.ts`](https://github.com/brindlewick/postmaster/blob/0620bfc90eb32a35124279d9780df42174e6ccd9/scripts/run-meta.ts), its only consumer; no shared module, no second table.
   It applies to every lane and every team role (coachman,
   coachman_fallback, postmaster, coachman_legs entries) whose effective
