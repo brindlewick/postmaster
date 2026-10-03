@@ -223,7 +223,10 @@ describe("positive controls", () => {
     mkdirSync(project, { recursive: true });
     const r = projectAction(project, ["postmaster", "dispatch", "clerk", "ticket=2"]);
     expect(r.code).toBe(0);
-    const log = readFileSync(join(project, ".postmaster", "runs", "postmaster", "actions.jsonl"), "utf8");
+    const log = readFileSync(
+      join(project, ".postmaster", "runs", "postmaster", "actions.jsonl"),
+      "utf8",
+    );
     const ledger = readFileSync(join(project, ".postmaster", "runs", "ledger.jsonl"), "utf8");
     const entry = JSON.parse(log.trim());
     expect(log).toBe(ledger);
@@ -245,7 +248,9 @@ describe("positive controls", () => {
     expect(entry.action).toBe("note");
     expect(entry.target).toBe("2");
     expect(entry.detail).toBe("turnpikes: style, bug, security");
-    expect(existsSync(join(project, ".postmaster", "runs", "postmaster", "actions.jsonl"))).toBe(false);
+    expect(existsSync(join(project, ".postmaster", "runs", "postmaster", "actions.jsonl"))).toBe(
+      false,
+    );
   }, 30000);
 
   test("a tool-fault with every field is written", () => {

@@ -189,10 +189,15 @@ function labelViaAdapter(
 ): void {
   const base = kind === "plane" ? [] : [repo];
   const r = runScript(`${kind}.sh`, [...base, "label", id, verb, name]);
-  if (r.code !== 0) die(`the ${kind} adapter could not ${verb} the label (${(r.out + r.err).trim()})`);
+  if (r.code !== 0)
+    die(`the ${kind} adapter could not ${verb} the label (${(r.out + r.err).trim()})`);
 }
 
-function readViaAdapter(repo: string, id: string, kind: string): { title: string; labels: string[]; body: string } {
+function readViaAdapter(
+  repo: string,
+  id: string,
+  kind: string,
+): { title: string; labels: string[]; body: string } {
   const base = kind === "plane" ? [] : [repo];
   const r = runScript(`${kind}.sh`, [...base, "read", id]);
   if (r.code !== 0) die(`the ${kind} adapter could not read ${id} (${(r.out + r.err).trim()})`, 1);
@@ -201,9 +206,12 @@ function readViaAdapter(repo: string, id: string, kind: string): { title: string
 
 function removeClerkRecord(repo: string, id: string): void {
   // The clerk's session ends with the marking; a missing record is fine.
-  rmSync(join(repo, ".postmaster", "runs", "postmaster", "clerks", `${encodeURIComponent(id)}.json`), {
-    force: true,
-  });
+  rmSync(
+    join(repo, ".postmaster", "runs", "postmaster", "clerks", `${encodeURIComponent(id)}.json`),
+    {
+      force: true,
+    },
+  );
 }
 
 function logLedgerNote(repo: string, id: string, turnpikes: string): void {
@@ -238,14 +246,16 @@ function markAdapterTicket(
       writeFileSync(baseFile, live.body);
       writeFileSync(newFile, body);
       const r = runScript(`${kind}.sh`, [...base, "edit", id, newFile, baseFile]);
-      if (r.code !== 0) die(`the ${kind} adapter could not write the body (${(r.out + r.err).trim()})`);
+      if (r.code !== 0)
+        die(`the ${kind} adapter could not write the body (${(r.out + r.err).trim()})`);
     } finally {
       rmSync(work, { recursive: true, force: true });
     }
   }
   if (draftTitle && title !== live.title) {
     const r = runScript(`${kind}.sh`, [...base, "title", id, title]);
-    if (r.code !== 0) die(`the ${kind} adapter could not write the title (${(r.out + r.err).trim()})`);
+    if (r.code !== 0)
+      die(`the ${kind} adapter could not write the title (${(r.out + r.err).trim()})`);
   }
   labelViaAdapter(repo, id, kind, "add");
   logLedgerNote(repo, id, turnpikes);
@@ -321,7 +331,13 @@ function main(argv: string[]): number {
     console.log(`ticket-ready: ${id} marked ready and queued`);
     return 0;
   }
-  if (verb === "mark" || verb === "unmark" || verb === "consume" || verb === "pending" || verb === "queue") {
+  if (
+    verb === "mark" ||
+    verb === "unmark" ||
+    verb === "consume" ||
+    verb === "pending" ||
+    verb === "queue"
+  ) {
     const repo = argv[1] ?? die(`usage: ${usage()}`);
     process.env.POSTMASTER_PROJECT = resolve(repo);
     if (verb === "pending") {

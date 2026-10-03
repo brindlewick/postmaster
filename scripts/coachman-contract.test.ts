@@ -199,7 +199,12 @@ describe("a broken contract list is an error", () => {
 });
 
 describe("the current index recognises its new files", () => {
-  const NEW_FILES = ["scripts/premises.sh", "scripts/premises.ts", "scripts/ticket-ready.sh", "scripts/ticket-ready.ts"];
+  const NEW_FILES = [
+    "scripts/premises.sh",
+    "scripts/premises.ts",
+    "scripts/ticket-ready.sh",
+    "scripts/ticket-ready.ts",
+  ];
 
   /** A git repo carrying the real contract index and the two new files. */
   function realFixture(dir: string): { repo: string; base: string } {

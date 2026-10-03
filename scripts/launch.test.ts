@@ -2665,7 +2665,15 @@ beforeAll(() => {
       "launch: cd <cwd> && claude -p ",
       "--model clerk-model",
     );
-    doRun("phase-start", "interactive", "clerk", "--project", join(tmp, "repo"), "--name", "#2, Fix the list");
+    doRun(
+      "phase-start",
+      "interactive",
+      "clerk",
+      "--project",
+      join(tmp, "repo"),
+      "--name",
+      "#2, Fix the list",
+    );
     printed(
       "the clerk interactive form is named for its ticket",
       `launch: cd ${join(tmp, "repo")} && claude --model clerk-model --name \\#2\\,\\ Fix\\ the\\ list --dangerously-skip-permissions`,

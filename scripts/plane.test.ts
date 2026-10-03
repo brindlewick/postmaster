@@ -352,7 +352,9 @@ describe("CLI and API behavior", () => {
     const r = cli([], env);
     expect(r.code).toBe(1);
     expect(r.out).toBe("");
-    expect(r.err).toBe("plane: usage: plane.sh projects|create|edit|title|read|state|label|comment|list ...\n");
+    expect(r.err).toBe(
+      "plane: usage: plane.sh projects|create|edit|title|read|state|label|comment|list ...\n",
+    );
   }, 30000);
 
   test("a stalled API is cut off after 30 seconds with BASE's words", async () => {
@@ -494,7 +496,10 @@ function stubItem(n: number): StubItem {
   };
 }
 
-function startStub(items: Record<string, StubItem>, seedLabels: Array<{ id: string; name: string }>) {
+function startStub(
+  items: Record<string, StubItem>,
+  seedLabels: Array<{ id: string; name: string }>,
+) {
   const labels = [...seedLabels];
   const requests: Array<{ method: string; path: string; body: string }> = [];
   const server = Bun.serve({
@@ -542,7 +547,8 @@ function startStub(items: Record<string, StubItem>, seedLabels: Array<{ id: stri
         }
         return j({});
       }
-      const mComments = /^\/api\/v1\/workspaces\/ws\/projects\/p1\/work-items\/([^/]+)\/comments\/$/.exec(p);
+      const mComments =
+        /^\/api\/v1\/workspaces\/ws\/projects\/p1\/work-items\/([^/]+)\/comments\/$/.exec(p);
       if (req.method === "GET" && mComments) return j({ results: [], next_page_results: false });
       return new Response(`stub plane: unexpected ${req.method} ${p}`, { status: 500 });
     },
@@ -584,7 +590,9 @@ describe("labels and titles through a stub API", () => {
   }, 30000);
 
   test("label add uses the label when it exists, creating nothing", async () => {
-    const { server, requests, url } = startStub({ "PM-1": stubItem(1) }, [{ id: "l-9", name: "ready" }]);
+    const { server, requests, url } = startStub({ "PM-1": stubItem(1) }, [
+      { id: "l-9", name: "ready" },
+    ]);
     try {
       const dir = join(root, "plane-label-kept");
       mkdirSync(dir, { recursive: true });

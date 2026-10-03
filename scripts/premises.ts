@@ -136,13 +136,17 @@ export function compareCitation(
   verifiedText: string | null,
   baseText: string | null,
 ): PremiseEntry | null {
-  const span = citation.start === undefined ? citation.path : `${citation.path}#L${citation.start}-L${citation.end ?? citation.start}`;
+  const span =
+    citation.start === undefined
+      ? citation.path
+      : `${citation.path}#L${citation.start}-L${citation.end ?? citation.start}`;
   const entry = (state: PremiseState, note: string): PremiseEntry => ({ citation, state, note });
   if (verifiedText === null && baseText === null) {
     if (citation.source === "span") return null;
     return entry("unknown", `${span} resolves nowhere`);
   }
-  if (verifiedText === null) return entry("unknown", `${span} is newer than the Verified at commit`);
+  if (verifiedText === null)
+    return entry("unknown", `${span} is newer than the Verified at commit`);
   if (baseText === null) return entry("missing", `${span} is gone at the base`);
   if (citation.start === undefined) {
     return normalize(verifiedText) === normalize(baseText)
@@ -165,12 +169,21 @@ export function compareCitation(
     }
   }
   if (found > 0) {
-    return entry("moved", `${span} is at L${found}-L${found + (end === undefined ? 0 : end - start)} at the base`);
+    return entry(
+      "moved",
+      `${span} is at L${found}-L${found + (end === undefined ? 0 : end - start)} at the base`,
+    );
   }
   return entry("changed", `${span} changed`);
 }
 
-const RANK: Record<PremiseState, number> = { same: 0, moved: 1, unknown: 2, changed: 3, missing: 3 };
+const RANK: Record<PremiseState, number> = {
+  same: 0,
+  moved: 1,
+  unknown: 2,
+  changed: 3,
+  missing: 3,
+};
 
 export function checkPremises(repo: string, ticketFile: string, base: string): PremisesReport {
   let body = "";
@@ -183,7 +196,8 @@ export function checkPremises(repo: string, ticketFile: string, base: string): P
   const verified = match ? match[1]! : "unknown";
   const cites = citationsFromText(body);
   const known =
-    verified !== "unknown" && run("git", ["-C", repo, "rev-parse", "--verify", `${verified}^{commit}`]).code === 0;
+    verified !== "unknown" &&
+    run("git", ["-C", repo, "rev-parse", "--verify", `${verified}^{commit}`]).code === 0;
   if (!known) {
     return {
       verified,

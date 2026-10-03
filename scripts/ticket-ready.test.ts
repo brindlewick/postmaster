@@ -221,7 +221,16 @@ describe("the marking and queue verbs", () => {
 describe("a tracker of kind other", () => {
   test("a body file and label list read ready and unready", () => {
     const a = join(tmp, "a.md");
-    const good = ready(["--body", a, "--labels", "ready", "--title", "Sorted list", "--project", repo]);
+    const good = ready([
+      "--body",
+      a,
+      "--labels",
+      "ready",
+      "--title",
+      "Sorted list",
+      "--project",
+      repo,
+    ]);
     expect(good.code).toBe(0);
     const bad = ready(["--body", a, "--labels", "", "--title", "Sorted list", "--project", repo]);
     expect(bad.code).toBe(2);
@@ -308,7 +317,9 @@ describe("the matrix through the github double", () => {
     writeFileSync(join(bin, "gh"), STUB_GH);
     chmodSync(join(bin, "gh"), 0o755);
     if (run("git", ["init", "-q", repoGh]).code !== 0) throw new Error("git init failed");
-    if (run("git", ["-C", repoGh, "remote", "add", "origin", "https://github.com/o/r.git"]).code !== 0)
+    if (
+      run("git", ["-C", repoGh, "remote", "add", "origin", "https://github.com/o/r.git"]).code !== 0
+    )
       throw new Error("git remote add failed");
     const cfg = join(dir, "config.toml");
     writeFileSync(cfg, '[tracker]\nkind = "github"\n');
@@ -380,7 +391,8 @@ function startPlaneStub(items: Record<string, StubItem>) {
         if (!it) return new Response("no such item", { status: 404 });
         return j(it);
       }
-      const mComments = /^\/api\/v1\/workspaces\/ws\/projects\/p1\/work-items\/([^/]+)\/comments\/$/.exec(p);
+      const mComments =
+        /^\/api\/v1\/workspaces\/ws\/projects\/p1\/work-items\/([^/]+)\/comments\/$/.exec(p);
       if (req.method === "GET" && mComments) return j({ results: [], next_page_results: false });
       return new Response(`stub plane: unexpected ${req.method} ${p}`, { status: 500 });
     },

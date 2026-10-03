@@ -1178,7 +1178,11 @@ if (import.meta.main) {
   // form shows the wrapped command whenever one applies; it runs no start
   // check. launch, resume and review start the confinement with a no-op, and
   // run the lane unconfined with a warning when it cannot start.
-  const isLane = NAME !== "coachman" && NAME !== "coachman_fallback" && NAME !== "postmaster" && NAME !== "clerk";
+  const isLane =
+    NAME !== "coachman" &&
+    NAME !== "coachman_fallback" &&
+    NAME !== "postmaster" &&
+    NAME !== "clerk";
   const showWrap = spec.confine && isLane;
   let confineWrap = false;
   if (spec.confine && isLane && CMD !== "skill" && CMD !== "form") {
