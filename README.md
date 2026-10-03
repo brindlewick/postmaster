@@ -10,11 +10,12 @@ the adversarial review rounds its ticket names, then leaves a ship card for the
 project's landing route. Pull-request projects are merged by the user; local-merge projects use
 the merge authority in the config.
 
-## The three roles
+## The four roles
 
 | role | does | never does |
 |---|---|---|
 | **postmaster** | splits a stream into tickets, dispatches one coachman per ticket, supervises, answers escalations, grants merges | run a model lane, edit source |
+| **booking clerk** | prepares one ticket with the user, checks its plain part with a fresh reader on another model, and marks it ready after sign-off | dispatch, edit the target repository |
 | **coachman** | drives one leg of a ticket; at most two legs, synthesis and review, each a fresh coachman, carry it from waybill to ship card with a written hand-off between them; the last leg ends the run ready for merge | take a second leg, merge |
 | **the team** | several lanes implementing the same ticket in blinkers | see each other's work |
 
@@ -119,9 +120,9 @@ scripts/review-round.sh start|wait|teardown <dispatch> <round> … # a review ro
 scripts/log-action.sh <dispatch> <actor> <action> <target> …     # one JSON line per action
 scripts/tool-faults.sh harvest|comment|file|decline <dispatch> …  # a closed run's tool faults, as tickets
 scripts/stage.sh <dispatch> <stage>                               # the one way a run changes stage
-scripts/spec-review-link.sh <dispatch> <spec-folder>              # resolve a reviewed spec's code-server link
-scripts/spec-decisions.sh <dispatch> fresh|record|count           # record the spec decision, count the package
-scripts/spec-session.sh brief|approve <dispatch>                  # the spec session's brief; approve commits and records
+scripts/clerk.sh brief|start|reader …                             # prepare a ticket and test its plain part
+scripts/ticket-ready.sh <repo> <id> | mark|queue|pending …        # check, sign off, and queue tickets
+scripts/premises.sh <repo> <waybill> <base>                       # compare ticket premises with the run base
 scripts/run-times.sh <dispatch>                                   # how long each stage took, from the log
 scripts/run-log.sh <dispatch> <text> | --section <title> | --close # the narrative, timestamped
 scripts/run-meta.sh <dispatch> <repo> | path|check|release <dispatch> # run.json and the pinned tool a run started from

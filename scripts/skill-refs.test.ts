@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { refs } from "./skill-refs";
+import { defaultFiles, refs } from "./skill-refs";
 
 let tmp = "";
 let root = "";
@@ -129,5 +129,17 @@ describe("--fix: bare references go through <tool>, and a second run changes not
     writeFileSync(goodCopy, readFileSync(good, "utf8"), "utf8");
     refs(root, "fix", [goodCopy]);
     expect(readFileSync(goodCopy, "utf8")).toBe(readFileSync(good, "utf8"));
+  }, 10000);
+
+  test("the bare check covers the postmaster skill and the clerk skill", () => {
+    const covered = join(tmp, "covered");
+    for (const skill of ["postmaster", "clerk"]) {
+      mkdirSync(join(covered, "skills", skill), { recursive: true });
+      writeFileSync(join(covered, "skills", skill, "runbook.md"), "run\n");
+    }
+    writeFileSync(join(covered, "skills", "postmaster", "notes.txt"), "not a runbook\n");
+    expect(defaultFiles(covered).toSorted()).toEqual(
+      [join(covered, "skills", "postmaster", "runbook.md"), join(covered, "skills", "clerk", "runbook.md")].toSorted(),
+    );
   }, 10000);
 });

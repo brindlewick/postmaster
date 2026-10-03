@@ -68,8 +68,8 @@ scripts/probe-confine.sh       # whether lane confinement can run, and what woul
 
 What to settle, in this order, and why none of it is guessed:
 
-- **Which harness and model fills each role:** the horses, the reviewers, the coachman and
-  its fallback, the postmaster. Offer only what the probe found, and do not assume: a
+- **Which harness, model and effort fills each role:** the horses, the reviewers, the coachman and
+  its fallback, the booking clerk and the postmaster. Offer only what the probe found, and do not assume: a
   harness on PATH can still be walled, out of credit, or reading no ambient context. The
   shape of the answer is `config.example.toml` at the repo root.
 - **How tickets are created.** GitHub Issues on a GitHub Projects board is the default: a
@@ -146,11 +146,12 @@ costs tokens, and is how the wrong answer gets produced confidently.
 
 ## What it is
 
-A three-role flow for getting one ticket implemented well by several models at once.
+A four-role flow for getting one ticket implemented well by several models at once.
 
 | role | what it does | where it is defined |
 |---|---|---|
 | **postmaster** | decomposes a stream into tickets, dispatches one coachman per ticket leg by leg, supervises, answers escalations, grants merges | `skills/postmaster/postmaster.md` (the front door session, or one it spawned) |
+| **booking clerk** | prepares a ticket with the user, tests its plain part with a fresh reader, and marks it ready after sign-off | `skills/clerk/clerk.md` |
 | **coachman** | drives one leg of one ticket; at most two legs, `synthesis` and `review`, each a fresh coachman with a written hand-off between them, carry a ticket from waybill to ship card: harnessing the team, judging their work, running the turnpikes its ticket names, clearing the gate | `skills/postmaster/coachman.md` |
 | **the team** | several model lanes implementing the same ticket independently, in **blinkers**: separate worktrees, unable to see each other's work | `coachman.md`, lane table |
 
@@ -193,8 +194,7 @@ metaphor expresses them.
 
 **waybill** the brief that travels with a load · **harness** the CLI wrapping a model ·
 **blinkers** worktree isolation between lanes · **workhorse** a lane that implements the ticket,
-as against a reviewer · **workhorse spec** a workhorse's own plan for the ticket, committed before
-its code (`WORKHORSE-SPEC.md`) · **lead horse / wheeler** the ranked lanes ·
+as against a reviewer · **lead horse / wheeler** the ranked lanes ·
 **turnpike** a check a run must pass through before it ships, named by its ticket: `default` is
 the style, bug and security reviews, and the project's gate always runs besides them ·
 **remount** resuming a stalled run ·
@@ -280,9 +280,9 @@ ticket or a comment, write it as a clickable link, so that nobody has to look it
 A path that exists only on the machine, such as a run's record or a file a lane has not committed, stays plain
 text, since no link can reach it.
 
-**A ticket is brought to ready before it runs.** When the user wants to work on a ticket, a ticket session
-(`skills/postmaster/ticket-session.md`) rewrites it, with the user, into one document that is both the ticket and the
-spec (`skills/postmaster/ticket-template.md`). Its plain part is what the user signs off: the problem, the acceptance
+**A ticket is brought to ready before it runs.** When the user asks the postmaster to implement a ticket that is not
+ready, it starts the booking clerk (`skills/clerk/clerk.md`) to prepare it with the user in one document that is both the
+ticket and the spec (`skills/clerk/ticket-template.md`). Its plain part is what the user signs off: the problem, the acceptance
 criteria, the decisions made and who made them, and the direction, with no file, function or command in it. Under
 `## For the agents` it carries what the lanes need, derived from the plain part: the checks, the technical notes and the
 premises verified at a base commit. The user reviews the plain part once. The coachman writes no spec of its own, and
@@ -291,7 +291,7 @@ the workhorses decide the files and the tasks.
 **Comment auto-replies stay off.** Publishing or watching an artifact turns on automatic replies to comments sent to Claude,
 and a reply can land in a thread the conversation never sees. Right after each publish or watch, stop the session's watch on
 that artifact. The user says when they have left comments; then read each thread, answer it there, and make the change it asks for.
-**Show a change or a spec's code on a page made for the phone.** When the user reviews a change with automatic merging off,
-or opens the files a spec links to, publish it with the `review-pages` skill (`skills/review-pages/SKILL.md`): a review page
-with the ticket, the spec, the summary, the diff and the files as they stand, or a code viewer at the lines the spec cites.
+**Show a change or ticket-linked code on a page made for the phone.** When the user reviews a change with automatic merging off,
+or opens files named in the ticket's technical notes, publish it with the `review-pages` skill (`skills/review-pages/SKILL.md`): a review page
+with the ticket, the summary, the diff and the files as they stand, or a code viewer at the cited lines.
 The user comments on the page and gives the verdict in the chat. Claude Code only, until the dashboard shows changes.

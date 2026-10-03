@@ -326,7 +326,8 @@ skip "AC5/AC6/AC7 clerk sessions, headless refusal and pickup: needs a postmaste
 grep -rn 'host\.sh spawn' skills/ | grep -q '\-\-label' \
   && pass "AC8 control: host.sh spawn takes --label" \
   || fail "AC8 control: no spawn --label form in the skills"
-[ -d skills/clerk ] && grep -rqi 'spawn' skills/clerk/ && grep -rq '\-\-label' skills/clerk/ \
+# The launch is a script (ticket L99), not runbook prose: it spawns through host.sh.
+grep -q 'host.sh", \["spawn"' scripts/clerk.ts && grep -q '"--label"' scripts/clerk.ts \
   && pass "AC8 the clerk's launch spawns with a label" \
   || fail "AC8 the clerk's launch names no spawn with a label"
 skip "AC8 the live tab labelled '#2, Fix the list': needs Herdr and a model"
@@ -336,9 +337,17 @@ skip "AC8 the live tab labelled '#2, Fix the list': needs Herdr and a model"
 [ -d skills/clerk ] && [ "$(ls skills/clerk/*.md 2>/dev/null | wc -l)" -ge 3 ] \
   && pass "AC9 the runbook and the template moved into the clerk's folder" \
   || fail "AC9 the clerk's folder lacks the runbook or the template"
-timeout 60 scripts/link-skills.sh --dry-run </dev/null 2>&1 | grep -qi clerk \
-  && pass "AC9 link-skills finds the clerk skill" \
-  || fail "AC9 link-skills finds no clerk skill"
+# link-skills resolves a worktree to the main checkout by design (checkoutRoot), so the
+# branch's own skill is found through a plain clone, which resolves to itself.
+# A clone carries committed state only, so a dirty tree skips this check.
+if git status --porcelain -- skills scripts/link-skills.ts | grep -q .; then
+  skip "AC9 link-skills through a clone: the tree is dirty, run on committed state"
+else
+  CLONE=$(mktemp -d) && git clone -q . "$CLONE" 2>/dev/null \
+    && ( cd "$CLONE" && timeout 60 scripts/link-skills.sh --dry-run </dev/null 2>&1 | grep -qi clerk ) \
+    && pass "AC9 link-skills finds the clerk skill" \
+    || fail "AC9 link-skills finds no clerk skill"; rm -rf "$CLONE"
+fi
 grep -qF 'skills/clerk/SKILL.md' $PM \
   && pass "AC9 the postmaster's start prompt names the skill's file by path" \
   || fail "AC9 the postmaster names no clerk skill path"

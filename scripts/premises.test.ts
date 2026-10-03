@@ -105,8 +105,8 @@ describe("cite extraction", () => {
     );
     const cites = citationsFromText(text);
     expect(cites.map((c) => c.path)).toEqual(["docs/a.md", "docs/b.md", "docs/c.md"]);
-    expect(cites[1]).toMatchObject({ start: 1 });
-    expect(cites[2]).toMatchObject({ start: 2 });
+    expect(cites[1]?.start).toBe(1);
+    expect(cites[2]?.start).toBe(2);
   });
 
   test("parseRange reads every range form", () => {

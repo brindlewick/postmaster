@@ -326,48 +326,37 @@ function exerciseSelfTest(sourceRoot: string): number {
     "scripts/ticket-check.sh",
     "the journey reading",
   );
+  wrapperCase(
+    "a wording fix in premises.sh answers yes",
+    "scripts/premises.sh",
+    "the premise comparison",
+  );
   runCase(
-    "a wording fix in the spec session runbook answers yes",
+    "a wording fix in premises.ts answers yes",
     (repo) =>
       replaceOnce(
         repo,
-        "skills/postmaster/spec-session.md",
-        "**You edit only the copy** named in the brief,",
-        "**You edit only that copy** named in the brief,",
+        "scripts/premises.ts",
+        "// Check the ticket's premises still hold at the run's base.",
+        "// Check that the ticket's premises still hold at the run's base.",
       ),
-    "skills/postmaster/spec-session.md",
+    "scripts/premises.ts",
   );
   wrapperCase(
-    "a wording fix in spec-session.sh answers yes",
-    "scripts/spec-session.sh",
-    "the spec session's verbs",
+    "a wording fix in ticket-ready.sh answers yes",
+    "scripts/ticket-ready.sh",
+    "the readiness check",
   );
   runCase(
-    "a wording fix in spec-session.ts answers yes",
+    "a wording fix in ticket-ready.ts answers yes",
     (repo) =>
       replaceOnce(
         repo,
-        "scripts/spec-session.ts",
-        "// The spec session's two verbs: brief writes the interactive session's brief, and approve",
-        "// The spec session's two verbs: brief writes the session's brief, and approve",
+        "scripts/ticket-ready.ts",
+        "// Say whether a ticket is ready to run, and mark it when the user says it is.",
+        "// Say whether a ticket is ready to run, and mark it when the user says so.",
       ),
-    "scripts/spec-session.ts",
-  );
-  wrapperCase(
-    "a wording fix in spec-decisions.sh answers yes",
-    "scripts/spec-decisions.sh",
-    "the approval record's verbs",
-  );
-  runCase(
-    "a wording fix in spec-decisions.ts answers yes",
-    (repo) =>
-      replaceOnce(
-        repo,
-        "scripts/spec-decisions.ts",
-        "// Own the planning stage's spec decisions: one file per package, one stanza for the run's",
-        "// Own the planning stage's spec decisions: one file per package, and one stanza for the run's",
-      ),
-    "scripts/spec-decisions.ts",
+    "scripts/ticket-ready.ts",
   );
   wrapperCase("a wording fix in launch.sh answers yes", "scripts/launch.sh", "the attempt phase");
   wrapperCase(
@@ -385,17 +374,6 @@ function exerciseSelfTest(sourceRoot: string): number {
         'export const FIXTURE_MARKER = "postmaster fixture v2\\n";',
       ),
     "scripts/fixture.ts",
-  );
-  runCase(
-    "a wording fix in the workhorse spec template answers yes",
-    (repo) =>
-      replaceOnce(
-        repo,
-        "skills/postmaster/workhorse-spec-template.md",
-        "`## Showing each criterion` is how the lanes check their work: for each acceptance criterion,",
-        "`## Showing each criterion` is how the lanes check their work: for every acceptance criterion,",
-      ),
-    "skills/postmaster/workhorse-spec-template.md",
   );
   runCase(
     "a wording fix in summary-evidence.ts answers yes",

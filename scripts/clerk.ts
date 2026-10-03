@@ -1,13 +1,16 @@
 // The booking clerk's launch: write the brief, start the session, test a draft
 // on a fresh reader.
 //
-//   clerk.sh brief <repo> <id>                  write the draft and the brief, record the session
+//   clerk.sh brief <repo> <id>                  write the draft and the brief
 //   clerk.sh start <repo> <id>                  write the brief and open the clerk in a new tab
 //   clerk.sh reader <clerk-model> <plain-file> <worktree>
 //
 // brief unmarks a marked ticket first, so the postmaster cannot dispatch it
 // while the clerk works; start refuses a ticket whose session the host still
 // shows, and tells the user to open the clerk by hand when no host answers.
+// The session is named for the ticket's number and title, as the adapter
+// reads them. The postmaster logs the dispatch; this script records only the
+// open session.
 // reader runs the first workhorse lane on another model, headless, over the
 // plain part and the runbook's two questions, and prints what it answers.
 //
@@ -173,9 +176,8 @@ function defaultBase(repo: string): string {
 
 function editorLink(template: string, draft: string): string {
   // The review link template addresses {path} as a folder (code-server opens
-  // folders); a template naming {file} gets the draft itself.
+  // folders): the folder holding the draft.
   if (!template) return draft;
-  if (template.includes("{file}")) return template.split("{file}").join(draft);
   return template.split("{path}").join(dirname(draft));
 }
 
@@ -190,6 +192,7 @@ function sessionDir(repo: string): string {
 type Brief = {
   id: string;
   name: string;
+  session: string;
   ticket: string;
   repo: string;
   tool: string;
@@ -206,6 +209,7 @@ function writeBrief(repo: string, id: string): Brief {
   const kind = trackerKind(repo);
   const ticket = readTicket(repo, id, kind) ?? { title: "", labels: [] };
   const name = displayId(kind, id);
+  const session = ticket.title ? `${name}, ${ticket.title}` : name;
   if (ticket.labels.some((l) => l.toLowerCase() === "ready")) {
     requireScript(
       "ticket-ready.sh",
@@ -226,7 +230,7 @@ function writeBrief(repo: string, id: string): Brief {
   const runbook = join(TOOL, "skills", "clerk", "clerk.md");
   const briefPath = join(dir, `${id}.brief.md`);
   const lines = [
-    `# Brief: booking clerk for ${name}`,
+    `# Brief: booking clerk for ${session}`,
     "",
     `Ticket: ${name} on ${kind}`,
     `Repository: ${repo}`,
@@ -254,7 +258,7 @@ function writeBrief(repo: string, id: string): Brief {
       [`DRAFT: ${name} is being prepared and is not ready to run`, "", "## Problem / feature", "", ""].join("\n"),
     );
   }
-  return { id, name, ticket: name, repo, tool: TOOL, base, draft, link, preferences, skill, runbook, title: ticket.title };
+  return { id, name, session, ticket: name, repo, tool: TOOL, base, draft, link, preferences, skill, runbook, title: ticket.title };
 }
 
 function sessionPath(repo: string, id: string): string {
@@ -353,35 +357,34 @@ function cmdStart(repo: string, id: string): number {
   const briefPath = join(clerkDir(repo), `${id}.brief.md`);
   const startCmd = requireScript(
     "launch.sh",
-    ["interactive", "clerk", "--project", repo, "--name", brief.name],
+    ["interactive", "clerk", "--project", repo, "--name", brief.session],
     "launch.sh printed no interactive command for the clerk",
   ).trim();
   if (!startCmd) die("launch.sh printed no interactive command for the clerk");
-  const host = requireScript("host.sh", ["detect"], "host.sh detect failed").trim();
-  if (!host || host === "none") {
-    console.error(`clerk: no session host answers; open ${brief.name} by hand:`);
+  const form = splitCommand(startCmd);
+  if (form.length === 0) die("launch.sh printed no interactive command for the clerk");
+  // The handle is the ticket's id; the tab carries the session's number and title.
+  const handle = brief.name;
+  const started = runScript("host.sh", ["spawn", handle, repo, "--label", brief.session, "--", ...form]);
+  if (started.code === 3) {
+    console.error(`clerk: no session host answers; open ${brief.session} by hand:`);
     console.error(startCmd.replace(/^launch:\s*/u, ""));
     console.error(`then read the brief at ${briefPath}.`);
     return 3;
   }
-  const form = splitCommand(startCmd);
-  if (form.length === 0) die("launch.sh printed no interactive command for the clerk");
-  const started = runScript("host.sh", ["spawn", brief.name, repo, "--label", brief.name, "--", ...form]);
   if (started.code !== 0) die(`the clerk session could not start (${(started.out + started.err).trim()})`);
-  // The handle is the one passed to spawn; the host echoes it back.
-  const handle = started.out.includes(`handle=${brief.name}`) ? brief.name : "";
-  if (!handle) die(`the clerk session started but the host did not confirm its handle (${started.out.trim()})`);
-  const logR = runScript("log-action.sh", ["--project", repo, "postmaster", "dispatch", "clerk", `ticket=${brief.name}`]);
-  if (logR.code !== 0) die(`the clerk session started but its dispatch could not be logged (${(logR.out + logR.err).trim()})`);
-  recordOpen(repo, id, brief.name, briefPath, handle);
+  if (!started.out.includes("handle=")) {
+    die(`the clerk session started but the host did not confirm its handle (${started.out.trim()})`);
+  }
+  recordOpen(repo, id, brief.session, briefPath, handle);
   const promptFile = join(clerkDir(repo), `${id}.prompt.md`);
   writeFileSync(
     promptFile,
-    `You are the booking clerk for ${brief.name}. Read the skill at ${brief.skill}, then the runbook, then the brief at ${briefPath}. The draft is at ${brief.draft}; greet the user from there.\n`,
+    `You are the booking clerk for ${brief.session}. Read the skill at ${brief.skill}, then the runbook, then the brief at ${briefPath}. The draft is at ${brief.draft}; greet the user from there.\n`,
   );
   const sent = runScript("host.sh", ["send", handle, promptFile]);
   if (sent.code !== 0) die(`the clerk session started but the brief could not be sent (${(sent.out + sent.err).trim()})`);
-  console.log(`clerk: ${brief.name} opened on ${host} (session ${handle})`);
+  console.log(`clerk: ${brief.session} opened (session ${handle})`);
   return 0;
 }
 

@@ -105,6 +105,7 @@ describe("brief", () => {
     const draft = readFileSync(join(repo, ".postmaster", "clerk", `${id}.md`), "utf8");
     expect(draft).toContain(`DRAFT: #${id} is being prepared`);
     const brief = readFileSync(join(repo, ".postmaster", "clerk", `${id}.brief.md`), "utf8");
+    expect(brief).toContain(`# Brief: booking clerk for #${id}, Fix the list`);
     expect(brief).toContain(`Ticket: #${id} on local`);
     expect(brief).toContain(`Repository: ${repo}`);
     expect(brief).toContain("Base: ");
@@ -148,8 +149,10 @@ describe("start", () => {
       PATH: `${bin}:${process.env.PATH ?? ""}`,
     });
     expect(r.code).toBe(3);
-    expect(r.err).toContain(`open #${id} by hand:`);
-    expect(r.err).toContain(`cd ${repo} && claude --model clerk-model --name \\#${id} --dangerously-skip-permissions`);
+    expect(r.err).toContain(`open #${id}, Fix the list by hand:`);
+    expect(r.err).toContain(
+      `cd ${repo} && claude --model clerk-model --name \\#${id}\\,\\ Fix\\ the\\ list --dangerously-skip-permissions`,
+    );
     expect(r.err).toContain(`${id}.brief.md`);
   });
 });

@@ -162,6 +162,13 @@ declare const Bun: {
   };
   sleep(ms: number): Promise<void>;
   hash(data: string | Uint8Array): string;
+  serve(options: {
+    port: number;
+    fetch(req: ServeRequest): Response | Promise<Response>;
+  }): {
+    port: number;
+    stop(force?: boolean): void;
+  };
   spawnSync(options: {
     cmd: string[];
     cwd?: string;
@@ -766,7 +773,16 @@ interface WritableStream<W = unknown> {
   readonly locked: boolean;
 }
 declare class Response {
-  constructor(body?: ReadableStream<Uint8Array> | Uint8Array | string | null);
+  constructor(
+    body?: ReadableStream<Uint8Array> | Uint8Array | string | null,
+    init?: { status?: number; headers?: Record<string, string> },
+  );
+  text(): Promise<string>;
+  static json(data: unknown, init?: { status?: number }): Response;
+}
+interface ServeRequest {
+  readonly method: string;
+  readonly url: string;
   text(): Promise<string>;
 }
 declare const crypto: {

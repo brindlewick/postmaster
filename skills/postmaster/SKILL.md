@@ -15,8 +15,10 @@ exactly one leg of one load and hands off to the next leg in writing; its runboo
 `coachman.md`. Harness-specific invocations are in `harnesses.md`, tracker mechanics in
 `trackers.md`, where a launch runs and how the user watches it in `hosts.md`, and the machine's choices — which harnesses, which lanes, which tracker — in
 `~/.postmaster/config.toml`, whose shape is `<tool>/config.example.toml`. There is
-no separate per-ticket skill: dispatching a coachman is something the postmaster does, not
-something a person invokes.
+no separate per-ticket skill for the coachman: dispatching a coachman is something the postmaster does, not
+something a person invokes. The booking clerk has its own skill at `skills/clerk/SKILL.md`;
+the postmaster starts it only when the user asks to implement a ticket that is not ready.
+The user can also start it by typing `/clerk <ticket-id>`.
 
 ## First: find the postmaster repo
 

@@ -1,11 +1,13 @@
-// Find every script reference in the postmaster skill that would not resolve from an installed
-// skill. An installed skill is a link from a harness's skills folder into the postmaster repo,
-// and a session reaches the repo only as <tool>, the path SKILL.md finds from that link once.
-// A reference resolves from any working directory only when it goes through <tool> and names
-// a script the repo has. The run's pinned checkout goes through <rt> instead, resolved per run
-// by run-meta.sh path; it is a checkout of the same repo, so the same existence check applies.
+// Find every script reference in the postmaster and clerk skills that would not resolve from
+// an installed skill. An installed skill is a link from a harness's skills folder into the
+// postmaster repo, and a session reaches the repo only as <tool>, the path SKILL.md finds from
+// that link once. A reference resolves from any working directory only when it goes through
+// <tool> and names a script the repo has. The run's pinned checkout goes through <rt> instead,
+// resolved per run by run-meta.sh path; it is a checkout of the same repo, so the same existence
+// check applies.
 //
-//   skill-refs.sh [<file>...]          default: skills/postmaster/*.md beside this script's repo
+//   skill-refs.sh [<file>...]          default: skills/postmaster/*.md and skills/clerk/*.md
+//                                      beside this script's repo
 //   skill-refs.sh --fix [<file>...]    put <tool>/ before every bare scripts/ path, in place
 //
 // A reference is any scripts/ path. It is a fault when it is bare (scripts/x.sh, which resolves
@@ -108,6 +110,16 @@ function isFile(p: string): boolean {
   }
 }
 
+/** The runbook pages the bare check covers: the postmaster skill and the clerk skill. */
+export function defaultFiles(root: string): string[] {
+  const out: string[] = [];
+  for (const skill of ["postmaster", "clerk"]) {
+    const dir = join(root, "skills", skill);
+    for (const n of readdirSync(dir).filter((name) => name.endsWith(".md"))) out.push(join(dir, n));
+  }
+  return out;
+}
+
 function printFaults(faults: Fault[]): void {
   for (const f of faults) {
     console.log(`${f.file}:${f.line}: ${f.why}: ${f.ref}`);
@@ -130,16 +142,14 @@ if (import.meta.main) {
 
   let files = argv;
   if (files.length === 0) {
-    const dir = join(ROOT, "skills", "postmaster");
     try {
-      const entries = readdirSync(dir).filter((n) => n.endsWith(".md"));
-      files = entries.map((n) => join(dir, n));
+      files = defaultFiles(ROOT);
       if (files.length === 0) {
-        console.error(`skill-refs: no skills/postmaster/*.md in ${ROOT}`);
+        console.error(`skill-refs: no skills/postmaster/*.md or skills/clerk/*.md in ${ROOT}`);
         process.exit(2);
       }
     } catch {
-      console.error(`skill-refs: no skills/postmaster/*.md in ${ROOT}`);
+      console.error(`skill-refs: no skills/postmaster/*.md or skills/clerk/*.md in ${ROOT}`);
       process.exit(2);
     }
   }

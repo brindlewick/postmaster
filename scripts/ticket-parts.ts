@@ -1,4 +1,4 @@
-// Check a ticket in the two-part shape (skills/postmaster/ticket-template.md): the plain part, which the
+// Check a ticket in the two-part shape (skills/clerk/ticket-template.md): the plain part, which the
 // user signs off, is plain, and the part for the agents follows from it.
 //
 //   ticket-parts.sh <body-file> [--final]
