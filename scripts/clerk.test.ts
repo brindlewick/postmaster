@@ -172,6 +172,30 @@ describe("brief", () => {
     expect(brief).toContain("None are set.");
   });
 
+  test("brief on a tracker without an adapter warns about its labels", () => {
+    const otherRepo = mkdtempSync(join(tmpdir(), "clerk-other-"));
+    sh("git", ["init", "-q", otherRepo]);
+    sh("git", [
+      "-C",
+      otherRepo,
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "base",
+    ]);
+    const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
+    const cfg = join(cfgDir, "config.toml");
+    writeFileSync(cfg, '[tracker]\nkind = "other"\n');
+    const r = sh(SELF, ["brief", otherRepo, "EXT-1"], { POSTMASTER_CONFIG: cfg });
+    expect(r.code).toBe(0);
+    expect(r.err).toContain("has no adapter script");
+  });
+
   test("brief keeps a slashed id inside the clerk directory", () => {
     const repo = localRepo();
     const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));

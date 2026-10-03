@@ -179,7 +179,13 @@ type Brief = {
 
 function writeBrief(repo: string, id: string): Brief {
   const kind = trackerKind(repo);
-  const ticket = readTicket(repo, id, kind) ?? { title: "", labels: [] };
+  const read = readTicket(repo, id, kind);
+  if (read === null && kind !== "github" && kind !== "local" && kind !== "plane") {
+    console.error(
+      `clerk: tracker kind '${kind}' has no adapter script; the brief cannot see the ticket's labels, so remove the ready label through the tracker's own tooling if the ticket carries one`,
+    );
+  }
+  const ticket = read ?? { title: "", labels: [] };
   const name = displayId(kind, id);
   const session = ticket.title ? `${name}, ${ticket.title}` : name;
   // ASCII: folds label names for the ASCII literal "ready"; only ASCII-equal names match.

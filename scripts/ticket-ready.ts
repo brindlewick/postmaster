@@ -50,6 +50,19 @@ function trackerKind(repo: string): string {
   return r.out.trim();
 }
 
+function hasAdapter(kind: string): boolean {
+  return kind === "github" || kind === "local" || kind === "plane";
+}
+
+// A tracker of kind other has no adapter script: refuse the adapter verbs
+// with the body-and-labels form that serves them, as ticket-check does.
+function needAdapter(kind: string, instead: string): void {
+  if (hasAdapter(kind)) return;
+  die(
+    `tracker kind '${kind}' has no adapter script; read the ticket with its own tooling (trackers.md, other) and run: ticket-ready.sh ${instead}`,
+  );
+}
+
 // The read every adapter prints: header fields, a blank line, then the body.
 // ticket-parts tolerates the ## Log trailer the adapters append, so the body
 // is checked as read, exactly as ticket-check reads it.
@@ -271,7 +284,9 @@ function markAdapterTicket(
 function takeFlag(argv: string[], name: string): string {
   const i = argv.indexOf(name);
   if (i < 0 || i + 1 >= argv.length) die(`usage: ${usage()}`);
-  return argv[i + 1]!;
+  const value = argv[i + 1]!;
+  if (value.startsWith("--")) die(`${name} needs a value; got ${value}`);
+  return value;
 }
 
 function usage(): string {
@@ -351,7 +366,13 @@ function main(argv: string[]): number {
     const id = argv[2] ?? die(`usage: ${usage()}`);
     if (verb === "unmark") {
       if (argv.length !== 3) die(`usage: ${usage()}`);
-      labelViaAdapter(repo, id, trackerKind(repo), "remove");
+      const kind = trackerKind(repo);
+      if (!hasAdapter(kind)) {
+        die(
+          `tracker kind '${kind}' has no adapter script; remove the ready label through the tracker's own tooling (trackers.md, other), then run: ticket-ready.sh consume ${repo} ${id}`,
+        );
+      }
+      labelViaAdapter(repo, id, kind, "remove");
       removeQueue(repo, id);
       console.log(`ticket-ready: ${id} ready mark removed`);
       return 0;
@@ -365,6 +386,7 @@ function main(argv: string[]): number {
     if (verb === "queue") {
       if (argv.length !== 3) die(`usage: ${usage()}`);
       const kind = trackerKind(repo);
+      needAdapter(kind, "mark --body <file> --labels <list> --repo <repo> --id <id>");
       const ticket = readViaAdapter(repo, id, kind);
       const rc = reportCheck(repo, id, ticket.title, ticket.labels, ticket.body);
       if (rc !== 0) return rc;
@@ -377,17 +399,25 @@ function main(argv: string[]): number {
     let draftFile = "";
     let draftTitle = "";
     for (let i = 0; i < rest.length; i++) {
-      if (rest[i] === "--body" && i + 1 < rest.length) draftFile = rest[++i]!;
-      else if (rest[i] === "--title" && i + 1 < rest.length) draftTitle = rest[++i]!;
-      else die(`usage: ${usage()}`);
+      const flag = rest[i]!;
+      if ((flag === "--body" || flag === "--title") && i + 1 < rest.length) {
+        const value = rest[i + 1]!;
+        if (value.startsWith("--")) die(`${flag} needs a value; got ${value}`);
+        if (flag === "--body") draftFile = value;
+        else draftTitle = value;
+        i++;
+      } else die(`usage: ${usage()}`);
     }
-    return markAdapterTicket(repo, id, trackerKind(repo), draftFile, draftTitle);
+    const kind = trackerKind(repo);
+    needAdapter(kind, "mark --body <file> --labels <list> --repo <repo> --id <id>");
+    return markAdapterTicket(repo, id, kind, draftFile, draftTitle);
   }
   if (argv.length !== 2) die(`usage: ${usage()}`);
   const repo = argv[0]!;
   const id = argv[1]!;
   process.env.POSTMASTER_PROJECT = resolve(repo);
   const kind = trackerKind(repo);
+  needAdapter(kind, "--body <file> --labels <list> [--title <title>] [--project <repo>]");
   const ticket = readViaAdapter(repo, id, kind);
   return reportCheck(repo, id, ticket.title, ticket.labels, ticket.body);
 }

@@ -246,6 +246,32 @@ describe("a tracker of kind other", () => {
     expect(r.code).toBe(0);
     expect(ready(["pending", repo]).out).toContain("EXT-1");
   }, 30000);
+
+  test("the adapter verbs refuse with the body-and-labels form", () => {
+    const otherRepo = join(tmp, "other-repo");
+    mkdirSync(otherRepo, { recursive: true });
+    if (run("git", ["init", "-q", otherRepo]).code !== 0) throw new Error("git init failed");
+    const cfg = join(tmp, "other-config.toml");
+    writeFileSync(cfg, '[tracker]\nkind = "other"\n');
+    const env = { ...process.env, POSTMASTER_CONFIG: cfg };
+    for (const args of [
+      [otherRepo, "EXT-1"],
+      ["mark", otherRepo, "EXT-1"],
+      ["queue", otherRepo, "EXT-1"],
+      ["unmark", otherRepo, "EXT-1"],
+    ]) {
+      const r = ready(args, env);
+      expect(r.code).toBe(1);
+      expect(r.out).toContain("has no adapter script");
+    }
+    expect(ready([otherRepo, "EXT-1"], env).out).toContain("ticket-ready.sh --body <file>");
+    expect(ready(["mark", otherRepo, "EXT-1"], env).out).toContain(
+      "ticket-ready.sh mark --body <file>",
+    );
+    expect(ready(["unmark", otherRepo, "EXT-1"], env).out).toContain(
+      "ticket-ready.sh consume ",
+    );
+  }, 60000);
 });
 
 describe("usage", () => {
@@ -253,6 +279,16 @@ describe("usage", () => {
     expect(ready([]).code).toBe(1);
     expect(ready(["mark", repo]).code).toBe(1);
     expect(ready([repo]).code).toBe(1);
+  }, 30000);
+
+  test("a flag in a value's place is refused", () => {
+    const a = join(tmp, "a.md");
+    const r = ready(["--body", a, "--labels", "ready", "--title", "--project", repo]);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("--title needs a value; got --project");
+    const m = ready(["mark", repo, "1", "--title", "--body", a]);
+    expect(m.code).toBe(1);
+    expect(m.out).toContain("--title needs a value; got --body");
   }, 30000);
 });
 
