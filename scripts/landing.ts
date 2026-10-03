@@ -428,7 +428,7 @@ function reachBlock(dispatch: string): string {
             : "read";
       const place = event.place ? ` (${event.place})` : "";
       const path = reachPath(dispatch, event.path);
-      const reason = event.reason ? ` — ${event.reason}` : "";
+      const reason = event.reason ? ` — ${escapeCardPath(event.reason)}` : "";
       lines.push(`  - ${event.kind}: ${lane}${access} \`${path}\`${place}${reason}`);
     }
   }

@@ -1383,6 +1383,185 @@ describe("R1: review round 1 fixes", () => {
     expect(card.out).not.toContain("`tick");
   });
 
+  test("R2 quoted substitutions expand, single-quoted ones do not", () => {
+    const layout = makeLayout();
+    const target = join(layout.home, "outside2.txt");
+    const quoted = join(layout.dispatch, "logs", "quoted-subst.jsonl");
+    writeEvents(quoted, [codex(`echo "$(touch ${target})"`)]);
+    const result = stream(layout, "codex", quoted, layout.codex);
+    expect(result.code).toBe(2);
+    expect(result.out).toContain(`finding write ${target} (elsewhere)`);
+
+    // Single quotes cannot survive the codex -lc wrapper, so this half speaks mimo.
+    const singleLayout = makeLayout();
+    const singleTarget = join(singleLayout.home, "outside2.txt");
+    const single = join(singleLayout.dispatch, "logs", "single-subst.jsonl");
+    writeEvents(single, [mimo("bash", { command: `echo '$(touch ${singleTarget})'` })]);
+    expect(stream(singleLayout, "mimo", single, singleLayout.mimo).code).toBe(0);
+
+    const plain = join(layout.dispatch, "logs", "quoted-plain.jsonl");
+    writeEvents(plain, [codex(`echo "$(echo hi)"`)]);
+    expect(stream(layout, "codex", plain, layout.codex).code).toBe(0);
+  });
+
+  test("R2 append-both redirects are writes, and 1> already is", () => {
+    const layout = makeLayout();
+    for (const [name, op] of [
+      ["err-append", "&>>"],
+      ["fd-append", "2>>"],
+      ["noclobber", ">|"],
+    ]) {
+      const target = join(layout.home, `${name}.txt`);
+      const path = join(layout.dispatch, "logs", `${name}.jsonl`);
+      writeEvents(path, [codex(`echo x ${op}${target}`)]);
+      const result = stream(layout, "codex", path, layout.codex);
+      expect(result.code).toBe(2);
+      expect(result.out).toContain(`finding write ${target} (elsewhere)`);
+    }
+
+    const one = join(layout.dispatch, "logs", "fd-one.jsonl");
+    writeEvents(one, [codex(`echo x 1>${join(layout.home, "o1.txt")}`)]);
+    expect(stream(layout, "codex", one, layout.codex).code).toBe(2);
+  });
+
+  test("R2 git reads and restores ignore inherited directory overrides", () => {
+    const layout = makeLayout();
+    const other = join(layout.root, "other");
+    git(layout.repo, "init", "--bare", "-q", `${other}.git`);
+    mkdirSync(other, { recursive: true });
+    const polluted = { HOME: layout.home, GIT_DIR: `${other}.git`, GIT_WORK_TREE: other };
+    writeReviewer(layout, "codex", [codex(`touch ${layout.reviewers.codex}/probe.txt`)]);
+    writeReviewer(layout, "mimo", [mimo("bash", { command: "true" })]);
+    const runPolluted = (args: string[]): { code: number; out: string } => {
+      const result = run("bun", ["--no-env-file", "--config=/dev/null", SCRIPT, ...args], {
+        env: polluted,
+      });
+      return { code: result.code, out: `${result.out}${result.err}` };
+    };
+    expect(runPolluted(["before", layout.dispatch, "1"]).code).toBe(0);
+    expect(runPolluted(["check", layout.dispatch, "r1"]).code).toBe(0);
+
+    const moved = makeLayout();
+    const another = join(moved.root, "other");
+    git(moved.repo, "init", "--bare", "-q", `${another}.git`);
+    mkdirSync(another, { recursive: true });
+    before(moved);
+    addCommit(moved.repo, moved.synth, "synth-work.txt");
+    const restorePolluted = run(
+      "bun",
+      ["--no-env-file", "--config=/dev/null", SCRIPT, "restore", moved.dispatch, "r1"],
+      { env: { HOME: moved.home, GIT_DIR: `${another}.git`, GIT_WORK_TREE: another } },
+    );
+    expect(restorePolluted.code).toBe(0);
+    expect(git(moved.repo, "rev-parse", "refs/heads/T")).toBe(moved.base);
+  });
+
+  test("R2 check-target reach ignores inherited directory overrides", () => {
+    const layout = makeLayout();
+    const other = join(layout.root, "other");
+    git(layout.repo, "init", "--bare", "-q", `${other}.git`);
+    mkdirSync(other, { recursive: true });
+    const polluted = run(
+      "bun",
+      ["--no-env-file", "--config=/dev/null", CHECK_TARGET, "reach", layout.repo, "main"],
+      {
+        env: { GIT_DIR: `${other}.git`, GIT_WORK_TREE: other },
+      },
+    );
+    expect(polluted.code).toBe(0);
+    expect(polluted.out).toContain(`root ${layout.repo}`);
+  });
+
+  test("R2 a rider owns only what its move produced, and a lone merge still voids one", () => {
+    const layout = makeLayout();
+    before(layout);
+    const commit = addCommit(layout.repo, layout.reviewers.mimo, "reviewed.txt");
+    git(layout.repo, "-C", layout.synth, "merge", "--ff-only", commit);
+    writeReviewer(layout, "mimo", [
+      mimo("bash", { command: `git -C ${layout.synth} merge --ff-only ${commit}` }),
+    ]);
+    writeFileSync(join(layout.synth, "README.md"), "edited by nobody's record\n");
+    check(layout, "r1");
+    expect(
+      actionLines(layout)
+        .filter((line) => line.action === "degrade")
+        .map((line) => line.target)
+        .sort(),
+    ).toEqual(["codex", "mimo"]);
+
+    const lone = makeLayout();
+    before(lone);
+    const single = addCommit(lone.repo, lone.reviewers.mimo, "reviewed.txt");
+    git(lone.repo, "-C", lone.synth, "merge", "--ff-only", single);
+    writeReviewer(lone, "mimo", [
+      mimo("bash", { command: `git -C ${lone.synth} merge --ff-only ${single}` }),
+    ]);
+    check(lone, "r1");
+    expect(
+      actionLines(lone)
+        .filter((line) => line.action === "degrade")
+        .map((line) => line.target),
+    ).toEqual(["mimo"]);
+  });
+
+  test("R2 an untracked file beside a merge is a note, and a moved side branch claims no files", () => {
+    const layout = makeLayout();
+    before(layout);
+    const commit = addCommit(layout.repo, layout.reviewers.mimo, "reviewed.txt");
+    git(layout.repo, "-C", layout.synth, "merge", "--ff-only", commit);
+    writeReviewer(layout, "mimo", [
+      mimo("bash", { command: `git -C ${layout.synth} merge --ff-only ${commit}` }),
+    ]);
+    writeFileSync(join(layout.synth, "u.txt"), "new\n");
+    const result = check(layout, "r1");
+    const stray = result.out.split("\n").filter((line) => line.includes("u.txt"));
+    expect(stray.length).toBeGreaterThan(0);
+    expect(stray.every((line) => line.startsWith("note"))).toBe(true);
+
+    const side = makeLayout();
+    before(side);
+    const next = addCommit(side.repo, side.reviewers.mimo, "reviewed.txt");
+    git(side.repo, "update-ref", "refs/heads/wb/T-codex", next);
+    writeReviewer(side, "mimo", [
+      mimo("bash", { command: `git update-ref refs/heads/wb/T-codex` }),
+    ]);
+    writeFileSync(join(side.synth, "README.md"), "edited by nobody's record\n");
+    check(side, "r1");
+    expect(
+      actionLines(side)
+        .filter((line) => line.action === "degrade")
+        .map((line) => line.target)
+        .sort(),
+    ).toEqual(["codex", "mimo"]);
+  });
+
+  test("R2 the card escapes the reason as well as the path", () => {
+    const layout = makeLayout();
+    writeFileSync(join(layout.synth, "weird<!--x.txt"), "v1\n");
+    git(layout.repo, "-C", layout.synth, "add", ".");
+    git(layout.repo, "-C", layout.synth, "commit", "-qm", "hostile");
+    before(layout);
+    writeReviewer(layout, "codex", [codex(`touch ${layout.reviewers.codex}/probe.txt`)]);
+    writeFileSync(join(layout.synth, "weird<!--x.txt"), "v2 ownerless\n");
+    check(layout, "r1");
+    check(layout, "card");
+    writeFileSync(
+      join(layout.dispatch, "checks.json"),
+      JSON.stringify({
+        checks: [{ name: "gate", source: "default:gate", command: "true", shows: "gate" }],
+      }),
+    );
+    const sha = git(layout.synth, "rev-parse", "HEAD").slice(0, 12);
+    writeAction(layout, "coachman", "verify", "gate", `on=${sha}@${sha} result=pass exit=0 secs=1`);
+    const checkpoint = join(layout.dispatch, "checkpoint.md");
+    writeFileSync(checkpoint, "## Findings (bug)\n\nnone\n");
+    const card = run("bash", [LANDING, "card-block", layout.dispatch, layout.synth, checkpoint]);
+    expect(card.code).toBe(0);
+    expect(card.out).toContain("unexplained");
+    expect(card.out).toContain("weird&lt;!--x.txt");
+    expect(card.out).not.toContain("<!--");
+  });
+
   test("R1 the card reads project paths relative through a symlinked dispatch", () => {
     const layout = makeLayout();
     writeWorkhorse(layout, "codex", [

@@ -4,6 +4,22 @@
 //   exit 2  git repository, but the tree is dirty: ask, do not proceed silently
 import { run } from "./lib/proc.ts";
 
+// Inherited directory overrides make git honor them over -C, so every git
+// subprocess here runs without them.
+const UNSET_GIT = {
+  GIT_DIR: undefined,
+  GIT_WORK_TREE: undefined,
+  GIT_COMMON_DIR: undefined,
+  GIT_INDEX_FILE: undefined,
+  GIT_OBJECT_DIRECTORY: undefined,
+  GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined,
+  GIT_NAMESPACE: undefined,
+};
+
+function runGit(dir: string, args: string[]) {
+  return run("git", ["-C", dir, ...args], { env: UNSET_GIT });
+}
+
 export interface TargetReach {
   code: number;
   out: string;
@@ -33,7 +49,7 @@ function pathsFromStatus(output: string): string[] {
 
 /** Read every changed path in a checkout without fetching or folding new directories. */
 export function reachTarget(target: string, defaultBranch: string): TargetReach {
-  const rootResult = run("git", ["-C", target, "rev-parse", "--show-toplevel"]);
+  const rootResult = runGit(target, ["rev-parse", "--show-toplevel"]);
   if (rootResult.code !== 0) {
     return {
       code: 1,
@@ -47,7 +63,7 @@ export function reachTarget(target: string, defaultBranch: string): TargetReach 
     };
   }
   const root = rootResult.out.trimEnd();
-  const headResult = run("git", ["-C", root, "rev-parse", "--verify", "--short", "HEAD"]);
+  const headResult = runGit(root, ["rev-parse", "--verify", "--short", "HEAD"]);
   if (headResult.code !== 0) {
     return {
       code: 1,
@@ -60,16 +76,9 @@ export function reachTarget(target: string, defaultBranch: string): TargetReach 
       offDefault: false,
     };
   }
-  const branchResult = run("git", ["-C", root, "symbolic-ref", "--short", "-q", "HEAD"]);
+  const branchResult = runGit(root, ["symbolic-ref", "--short", "-q", "HEAD"]);
   const branch = branchResult.code === 0 ? branchResult.out.trimEnd() : "(detached HEAD)";
-  const status = run("git", [
-    "-C",
-    root,
-    "status",
-    "--porcelain=v1",
-    "-z",
-    "--untracked-files=all",
-  ]);
+  const status = runGit(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
   if (status.code !== 0) {
     return {
       code: 1,
@@ -106,22 +115,22 @@ export function reachTarget(target: string, defaultBranch: string): TargetReach 
 }
 
 function standardCheck(target: string): number {
-  const root = run("git", ["-C", target, "rev-parse", "--show-toplevel"]);
+  const root = runGit(target, ["rev-parse", "--show-toplevel"]);
   if (root.code !== 0) {
     console.error(`not a git repository: ${target}`);
     return 1;
   }
   console.log(`root   ${root.out.trimEnd()}`);
 
-  const head = run("git", ["-C", target, "rev-parse", "--short", "HEAD"]);
+  const head = runGit(target, ["rev-parse", "--short", "HEAD"]);
   console.log(`head   ${head.code === 0 ? head.out.trimEnd() : "(no commits)"}`);
 
-  const branch = run("git", ["-C", target, "rev-parse", "--abbrev-ref", "HEAD"]);
+  const branch = runGit(target, ["rev-parse", "--abbrev-ref", "HEAD"]);
   console.log(`branch ${branch.out.trimEnd()}`);
 
-  run("git", ["-C", target, "fetch", "--quiet"]);
+  runGit(target, ["fetch", "--quiet"]);
 
-  const status = run("git", ["-C", target, "status", "--porcelain"]);
+  const status = runGit(target, ["status", "--porcelain"]);
   const lines = status.out.split("\n").filter((l) => l !== "");
   const dirty = lines.length;
   if (dirty !== 0) {

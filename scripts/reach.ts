@@ -239,8 +239,20 @@ function pathFromBrief(
   return { repo: namedRepo, branch: defaultBranch };
 }
 
+// Inherited directory overrides make git honor them over -C, so every git
+// subprocess in this control runs without them.
+const UNSET_GIT = {
+  GIT_DIR: undefined,
+  GIT_WORK_TREE: undefined,
+  GIT_COMMON_DIR: undefined,
+  GIT_INDEX_FILE: undefined,
+  GIT_OBJECT_DIRECTORY: undefined,
+  GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined,
+  GIT_NAMESPACE: undefined,
+};
+
 function runGit(repo: string, args: string[], cwd?: string) {
-  return run("git", ["-C", repo, ...args], cwd ? { cwd } : {});
+  return run("git", ["-C", repo, ...args], { env: UNSET_GIT, ...(cwd ? { cwd } : {}) });
 }
 
 function loadRun(dispatchArg: string): RunInfo {
@@ -418,6 +430,23 @@ function outerWrites(part: string): boolean {
   return false;
 }
 
+/** The inside of a `$(...)` starting at `at`, and the index past its close. */
+function substInner(source: string, at: number): { inner: string; end: number } {
+  let depth = 1;
+  let inner = "";
+  let i = at + 2;
+  for (; i < source.length && depth > 0; i++) {
+    const c = source[i] ?? "";
+    if (c === "(") depth++;
+    else if (c === ")") {
+      depth--;
+      if (depth === 0) break;
+    }
+    if (depth > 0) inner += c;
+  }
+  return { inner, end: i };
+}
+
 function splitShell(source: string, outerWrite = false): ShellGroup[] {
   const out: ShellGroup[] = [];
   const push = (text: string, write: boolean): void => {
@@ -437,7 +466,8 @@ function splitShell(source: string, outerWrite = false): ShellGroup[] {
       part += ch;
       continue;
     }
-    if (quote === '"' && ch !== '"') {
+    // The shell expands substitutions inside double quotes, never single ones.
+    if (quote === '"' && ch !== '"' && !(ch === "$" && source.startsWith("$(", i))) {
       if (ch === "\\" && i + 1 < source.length && '\\"$`'.includes(source[i + 1] ?? "")) {
         part += ch;
         escaped = true;
@@ -455,29 +485,21 @@ function splitShell(source: string, outerWrite = false): ShellGroup[] {
       else quote = "";
       continue;
     }
-    if (quote === "" && source.startsWith("$(", i)) {
+    if ((quote === "" || quote === '"') && source.startsWith("$(", i)) {
       push(part, outerWrite);
       const write = outerWrites(part);
       part = "";
-      let depth = 1;
-      let inner = "";
-      i += 2;
-      for (; i < source.length && depth > 0; i++) {
-        const c = source[i] ?? "";
-        if (c === "(") depth++;
-        else if (c === ")") {
-          depth--;
-          if (depth === 0) break;
-        }
-        if (depth > 0) inner += c;
-      }
-      if (inner.trim()) out.push(...splitShell(inner, write));
-      i--;
+      const found = substInner(source, i);
+      if (found.inner.trim()) out.push(...splitShell(found.inner, write));
+      i = found.end;
       continue;
     }
     if (
       quote === "" &&
-      (ch === ";" || ch === "\n" || ch === "|" || (ch === "&" && source[i + 1] === "&"))
+      (ch === ";" ||
+        ch === "\n" ||
+        (ch === "|" && !part.endsWith(">")) ||
+        (ch === "&" && source[i + 1] === "&"))
     ) {
       push(part, outerWrite);
       part = "";
@@ -529,10 +551,18 @@ function shellWords(segment: string): string[] {
       push();
       continue;
     }
-    if (quote === "" && [">>", "2>", "<", ">", "&>"].some((op) => segment.startsWith(op, i))) {
+    // Longest operators first: &>> and 2>> before &>, 2> and >.
+    if (
+      quote === "" &&
+      ["&>>", "2>>", "2>|", ">>", "2>", ">|", "<", ">", "&>"].some((op) =>
+        segment.startsWith(op, i),
+      )
+    ) {
       push();
       const op =
-        [">>", "2>", "&>", "<", ">"].find((candidate) => segment.startsWith(candidate, i)) ?? ch;
+        ["&>>", "2>>", "2>|", ">>", "2>", ">|", "<", ">", "&>"].find((candidate) =>
+          segment.startsWith(candidate, i),
+        ) ?? ch;
       words.push(op);
       i += op.length - 1;
       continue;
@@ -562,7 +592,16 @@ function redirectTargets(words: string[]): { out: string[]; inp: string[] } {
     if (word === "<") {
       if (words[i + 1]) inp.push(words[i + 1]!);
       i++;
-    } else if (word === ">" || word === ">>" || word === "2>" || word === "&>") {
+    } else if (
+      word === ">" ||
+      word === ">>" ||
+      word === "2>" ||
+      word === "&>" ||
+      word === "2>>" ||
+      word === "&>>" ||
+      word === ">|" ||
+      word === "2>|"
+    ) {
       if (words[i + 1]) out.push(words[i + 1]!);
       i++;
     }
@@ -629,7 +668,9 @@ function workTreeForGitDir(gitDir: string): string {
   } catch {
     // A bare repository has no linked-worktree pointer.
   }
-  const top = run("git", [`--git-dir=${gitDir}`, "rev-parse", "--show-toplevel"]);
+  const top = run("git", [`--git-dir=${gitDir}`, "rev-parse", "--show-toplevel"], {
+    env: UNSET_GIT,
+  });
   return top.code === 0 ? physical(top.out.trim()) : gitDir;
 }
 
@@ -991,7 +1032,7 @@ function commandTouches(
     const redirects = redirectTargets(words);
     const args = words
       .slice(first + 1)
-      .filter((word) => ![">", ">>", "2>", "&>", "<"].includes(word));
+      .filter((word) => ![">", ">>", "2>", "&>", "2>>", "&>>", ">|", "2>|", "<"].includes(word));
     if (WRITE_COMMANDS.has(baseCommand)) {
       if (baseCommand === "cp" || baseCommand === "mv") {
         const paths = args.filter((arg) => isPathToken(arg, cwd));
@@ -1208,19 +1249,12 @@ function currentHead(repo: string, where = repo): string {
 }
 
 function branchName(repo: string, where = repo): string {
-  const branch = run("git", ["-C", where, "symbolic-ref", "--short", "-q", "HEAD"]);
+  const branch = runGit(where, ["symbolic-ref", "--short", "-q", "HEAD"]);
   return branch.code === 0 ? branch.out.trim() : "(detached HEAD)";
 }
 
 function statusMap(repo: string, where: string): Record<string, string> {
-  const result = run("git", [
-    "-C",
-    where,
-    "status",
-    "--porcelain=v1",
-    "-z",
-    "--untracked-files=all",
-  ]);
+  const result = runGit(where, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
   if (result.code !== 0) throw new Error(`cannot read status in ${where}: ${result.err.trim()}`);
   const fields = result.out.split("\0").filter(Boolean);
   const status: Record<string, string> = {};
@@ -1234,13 +1268,7 @@ function statusMap(repo: string, where: string): Record<string, string> {
 }
 
 function runRefs(repo: string, ticket: string): Record<string, string> {
-  const result = run("git", [
-    "-C",
-    repo,
-    "for-each-ref",
-    "--format=%(refname) %(objectname)",
-    "refs/heads",
-  ]);
+  const result = runGit(repo, ["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads"]);
   if (result.code !== 0)
     throw new Error(`cannot read run branches in ${repo}: ${result.err.trim()}`);
   const refs: Record<string, string> = {};
@@ -1267,7 +1295,7 @@ function synthesisPath(info: RunInfo): string {
  */
 function assertSynth(info: RunInfo, needBranch: boolean): void {
   const synth = synthesisPath(info);
-  const top = run("git", ["-C", synth, "rev-parse", "--show-toplevel"]);
+  const top = runGit(synth, ["rev-parse", "--show-toplevel"]);
   if (top.code !== 0 || physical(top.out.trim()) !== physical(synth)) {
     throw new Error(`synthesis worktree is not a worktree: ${synth}`);
   }
@@ -1481,13 +1509,16 @@ function roundChanges(
     }
     return "";
   };
-  // A file change rides with a ref or head move through a lane that owns the
-  // move; a touch that moved nothing never claims unrelated dirt.
-  const riders = new Set<LaneRead>();
+  // A file change rides with the ticket-branch move only through a lane that
+  // owns the move, and only when the move produced it: the file differs
+  // between the two commits, and the disk matches one side or the other. A
+  // disk edit no record names stays unexplained even beside a merge.
+  const ticketRiders = new Set<LaneRead>();
   for (const change of changes) {
     const refName = change.path.startsWith("refs/heads/") ? change.path : "";
     const isHead = change.path === ticketWorktree;
-    if (!refName && !isHead) continue;
+    const isTicket = refName === ticketRef || isHead;
+    if (!isTicket) continue;
     const checkedOut = refName ? worktreeOf(refName) : "";
     for (const read of checked) {
       if (
@@ -1495,9 +1526,43 @@ function roundChanges(
         (checkedOut && wrote(read, checkedOut)) ||
         (isHead && wrote(read, ticketWorktree))
       )
-        riders.add(read);
+        ticketRiders.add(read);
     }
   }
+  const ticketMove =
+    changes.find((change) => change.path === ticketRef) ??
+    changes.find((change) => change.path === ticketWorktree);
+  const movedPair =
+    ticketMove && ticketMove.before !== "(absent)" && ticketMove.after !== "(absent)"
+      ? { before: ticketMove.before, after: ticketMove.after }
+      : null;
+  const movedFiles = new Set<string>();
+  const diskDiffers = new Set<string>();
+  if (movedPair && ticketRiders.size > 0) {
+    const moved = runGit(info.repo, [
+      "diff",
+      "--no-renames",
+      "--name-only",
+      movedPair.before,
+      movedPair.after,
+    ]);
+    if (moved.code !== 0) throw new Error(`cannot diff the ticket move: ${moved.err.trim()}`);
+    for (const name of moved.out.split("\n").filter(Boolean)) movedFiles.add(name);
+    for (const side of [movedPair.before, movedPair.after]) {
+      const disk = runGit(ticketWorktree, ["diff", "--no-renames", "--name-only", side]);
+      if (disk.code !== 0) throw new Error(`cannot diff the worktree: ${disk.err.trim()}`);
+      for (const name of disk.out.split("\n").filter(Boolean)) diskDiffers.add(`${side}:${name}`);
+    }
+  }
+  const moveProduced = (name: string): boolean => {
+    if (!movedPair) return true;
+    if (!movedFiles.has(name)) return false;
+    // The disk matches one side: a merge updates it, an update-ref leaves it.
+    return (
+      !diskDiffers.has(`${movedPair.after}:${name}`) ||
+      !diskDiffers.has(`${movedPair.before}:${name}`)
+    );
+  };
   const ticketRefOwner = checked.find((read) => wrote(read, ticketRef));
   for (const change of changes) {
     const refName = change.path.startsWith("refs/heads/") ? change.path : "";
@@ -1510,11 +1575,12 @@ function roundChanges(
         return false;
       }
       if (wrote(read, exactPath)) return true;
-      return riders.has(read);
+      if (!ticketRiders.has(read)) return false;
+      return moveProduced(relative(ticketWorktree, exactPath));
     });
     const owner =
       owners[0] ??
-      (exactPath === ticketWorktree && ticketRefOwner && riders.has(ticketRefOwner)
+      (exactPath === ticketWorktree && ticketRefOwner && ticketRiders.has(ticketRefOwner)
         ? ticketRefOwner
         : undefined);
     if (owner) {
@@ -1789,7 +1855,7 @@ function restoreRound(info: RunInfo, round: number): number {
     const safe = ref.replace(/[^A-Za-z0-9._-]/gu, "_");
     const patch =
       before && after
-        ? run("git", ["-C", info.repo, "diff", "--binary", before, after])
+        ? runGit(info.repo, ["diff", "--binary", before, after])
         : { code: 0, out: "" };
     if (patch.code !== 0) throw new Error(`cannot save branch diff for ${ref}`);
     savePatch(join(saved, "branches", `${safe}.patch`), patch.out);
@@ -1801,13 +1867,13 @@ function restoreRound(info: RunInfo, round: number): number {
 
   const synth = synthesisPath(info);
   const currentHead = currentHeadForRestore(info.repo, synth);
-  const tracked = run("git", ["-C", synth, "diff", "--binary", "HEAD"]);
+  const tracked = runGit(synth, ["diff", "--binary", "HEAD"]);
   if (tracked.code !== 0)
     throw new Error(`cannot save synthesis worktree diff: ${tracked.err.trim()}`);
   const commitPatch =
     snapshot.synthesisHead === currentHead
       ? ""
-      : run("git", ["-C", info.repo, "diff", "--binary", snapshot.synthesisHead, currentHead]).out;
+      : runGit(info.repo, ["diff", "--binary", snapshot.synthesisHead, currentHead]).out;
   savePatch(join(saved, "synthesis.patch"), `${commitPatch}${tracked.out}`);
   savePatch(
     join(saved, "synthesis.json"),
@@ -1816,9 +1882,7 @@ function restoreRound(info: RunInfo, round: number): number {
 
   // Restore the checked-out ticket branch through its worktree first, then restore the other
   // run branches by ref. Reviewers can move a branch with update-ref from any scratch.
-  const reset = run("git", [
-    "-C",
-    synth,
+  const reset = runGit(synth, [
     "reset",
     "--hard",
     snapshot.refs[`refs/heads/${info.ticket}`] ?? snapshot.synthesisHead,
@@ -1835,16 +1899,16 @@ function restoreRound(info: RunInfo, round: number): number {
     const worktree = lane ? join(info.repo, ".worktrees", `${info.ticket}-${lane}`) : "";
     if (before && worktree && existsSync(worktree) && branchName(info.repo, worktree) === branch) {
       const safe = ref.replace(/[^A-Za-z0-9._-]/gu, "_");
-      const dirt = run("git", ["-C", worktree, "diff", "HEAD"]);
+      const dirt = runGit(worktree, ["diff", "HEAD"]);
       if (dirt.code !== 0) throw new Error(`cannot save ${ref} worktree diff: ${dirt.err.trim()}`);
       if (dirt.out) savePatch(join(saved, "branches", `${safe}.worktree.patch`), dirt.out);
-      const move = run("git", ["-C", worktree, "reset", "--hard", before]);
+      const move = runGit(worktree, ["reset", "--hard", before]);
       if (move.code !== 0) throw new Error(`cannot restore ${ref}: ${move.err.trim()}`);
     } else if (before) {
-      const update = run("git", ["-C", info.repo, "update-ref", ref, before]);
+      const update = runGit(info.repo, ["update-ref", ref, before]);
       if (update.code !== 0) throw new Error(`cannot restore ${ref}: ${update.err.trim()}`);
     } else {
-      const remove = run("git", ["-C", info.repo, "update-ref", "-d", ref]);
+      const remove = runGit(info.repo, ["update-ref", "-d", ref]);
       if (remove.code !== 0)
         throw new Error(`cannot remove new run branch ${ref}: ${remove.err.trim()}`);
     }
