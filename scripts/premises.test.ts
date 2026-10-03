@@ -128,6 +128,39 @@ describe("cite extraction", () => {
     ].join("\n");
     expect(citationsFromText(text)).toHaveLength(0);
   });
+
+  test("the agents' part ends at the next level-two heading", () => {
+    const text = [
+      "## For the agents",
+      "",
+      "- See `docs/a.md`.",
+      "",
+      "### Verified at abc1234",
+      "",
+      "## Project profile",
+      "docs to read first: `docs/b.md`",
+      "",
+      "## Team",
+      "workhorses: `docs/c.md`",
+      "",
+    ].join("\n");
+    const cites = citationsFromText(text);
+    expect(cites.map((c) => c.path)).toEqual(["docs/a.md"]);
+  });
+
+  test("a cite before trailing punctuation keeps its path and range", () => {
+    const text = [
+      "## For the agents",
+      "",
+      "- See [a](https://github.com/a/b/blob/abc1234/docs/a.md#L2-L3), [b](https://github.com/a/b/blob/abc1234/docs/b.md.) and `docs/c.md`.",
+      "",
+    ].join("\n");
+    const cites = citationsFromText(text);
+    expect(cites.map((c) => c.path)).toEqual(["docs/a.md", "docs/b.md", "docs/c.md"]);
+    expect(cites[0]?.start).toBe(2);
+    expect(cites[0]?.end).toBe(3);
+    expect(cites[1]?.source).toBe("link");
+  });
 });
 
 describe("the verdicts", () => {
@@ -193,6 +226,22 @@ describe("the verdicts", () => {
     const r = cli([repo, body, verified]);
     expect(r.code).toBe(0);
     expect(r.out).toContain("unknown");
+  });
+
+  test("unknown: a base commit the repository lacks, exit 0", () => {
+    const body = ticketBody(verified, `- Renders per ${LINK(verified, "docs/a.md", "L5-L5")}.`);
+    const r = cli([repo, body, "nosuchrev"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("unknown");
+    expect(r.out).toContain("the base commit is unknown to the repository");
+    expect(r.out).toContain("result=unknown");
+  });
+
+  test("an empty base is refused, exit 1", () => {
+    const body = ticketBody(verified, `- Renders per ${LINK(verified, "docs/a.md", "L5-L5")}.`);
+    const r = cli([repo, body, ""]);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("the base commit is empty");
   });
 
   test("prose in code spans is skipped, not failed", () => {

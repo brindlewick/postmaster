@@ -66,8 +66,11 @@ function safePath(path: string): boolean {
 }
 
 const LINK_RE =
-  // ASCII: \s stops the URL at any space in ticket prose; the sha and path it captures are ASCII-narrowed.
-  /https?:\/\/[^\s)]+\/blob\/([0-9a-f]{7,40})\/([^)\s#]+?)(#L[0-9]+(?:-L?[0-9]+)?)?(?=[)\s]|$)/giu;
+  // ASCII: the URL ends at whitespace, a closer, or a prose separator; the sha and path it captures are ASCII-narrowed. No dot here: the path capture is non-greedy and would stop at the first one mid-path. Trailing dots strip after the match.
+  /https?:\/\/[^\s)]+\/blob\/([0-9a-f]{7,40})\/([^)\s#]+?)(#L[0-9]+(?:-L?[0-9]+)?)?(?=[)\s,;:>\]]|$)/giu;
+// Trailing punctuation a cite picked up from prose: stripped from the path,
+// never from inside it.
+const TRAILING_PUNCT_RE = /[.,;:!?'"\]]+$/u;
 const PATH_RE =
   /((?:[\p{L}\p{N}_.-]+\/)*[\p{L}\p{N}_.-]+\.[\p{L}\p{N}_.-]+)(#L[0-9]+(?:-L?[0-9]+)?|(?<![A-Za-z0-9_])L[0-9]+(?:-L?[0-9]+)?)?/gu;
 
@@ -75,7 +78,18 @@ export function agentsPart(body: string): string {
   const lines = body.split("\n");
   const start = lines.findIndex((line) => /^## For the agents[ \t]*$/u.test(line.trim()));
   if (start < 0) return "";
-  return lines.slice(start + 1).join("\n");
+  // The caller passes the waybill, whose project profile, team and dispatch
+  // sections follow the ticket: the part ends at the next level-two heading.
+  // A fenced ## line inside the part would end it early; tickets keep ## for
+  // sections and ### below them, so none occurs.
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^##(\s|$)/u.test((lines[i] ?? "").trim())) {
+      end = i;
+      break;
+    }
+  }
+  return lines.slice(start + 1, end).join("\n");
 }
 
 export function citationsFromText(body: string): Citation[] {
@@ -94,7 +108,7 @@ export function citationsFromText(body: string): Citation[] {
     if (!match) break;
     let path = "";
     try {
-      path = decodeURIComponent(match[2] ?? "");
+      path = decodeURIComponent(match[2] ?? "").replace(TRAILING_PUNCT_RE, "");
     } catch {
       continue;
     }
@@ -107,7 +121,7 @@ export function citationsFromText(body: string): Citation[] {
       PATH_RE.lastIndex = 0;
       const match = PATH_RE.exec(span.slice(1, -1).trim());
       if (!match) continue;
-      const path = match[1] ?? "";
+      const path = (match[1] ?? "").replace(TRAILING_PUNCT_RE, "");
       if (!safePath(path)) continue;
       push({ path, ...parseRange(match[2] ?? ""), source: "span" });
     }
@@ -188,6 +202,7 @@ const RANK: Record<PremiseState, number> = {
 };
 
 export function checkPremises(repo: string, ticketFile: string, base: string): PremisesReport {
+  if (!base.trim()) die("the base commit is empty");
   let body = "";
   try {
     body = readFileSync(ticketFile, "utf8");
@@ -209,6 +224,23 @@ export function checkPremises(repo: string, ticketFile: string, base: string): P
         citation,
         state: "unknown" as PremiseState,
         note: "the Verified at commit is unknown to the repository",
+      })),
+    };
+  }
+  // An unresolvable base is unknown, never missing: git show fails the same
+  // way for a bad revision as for a deleted file, and an empty base would
+  // silently read the git index.
+  const baseKnown =
+    run("git", ["-C", repo, "rev-parse", "--verify", `${base}^{commit}`]).code === 0;
+  if (!baseKnown) {
+    return {
+      verified,
+      base,
+      result: cites.length > 0 ? "unknown" : "same",
+      entries: cites.map((citation) => ({
+        citation,
+        state: "unknown" as PremiseState,
+        note: "the base commit is unknown to the repository",
       })),
     };
   }
