@@ -4172,8 +4172,16 @@ s.close()
           onRc === 0 && onForm === offForm,
         );
       } else {
-        check("form with confine on wraps the launch line", onRc === 0 && launchLine(onForm).includes(mech), onForm);
-        check("form with confine on wraps the resume line", onRc === 0 && resumeLine(onForm).includes(mech), onForm);
+        check(
+          "form with confine on wraps the launch line",
+          onRc === 0 && launchLine(onForm).includes(mech),
+          onForm,
+        );
+        check(
+          "form with confine on wraps the resume line",
+          onRc === 0 && resumeLine(onForm).includes(mech),
+          onForm,
+        );
         const launchAt = launchLine(offForm).indexOf("codex exec");
         const resumeAt = resumeLine(offForm).indexOf("codex exec");
         const bareLaunch = launchAt === -1 ? "" : launchLine(offForm).slice(launchAt);
@@ -4219,7 +4227,15 @@ s.close()
         `rc=${rc} err=${err}`,
       );
       record("confrun", "conf-on");
-      doRun("conf-on", "launch", "one", join(tmp, "wt"), join(tmp, "prompt.txt"), "--run", runDir("confrun"));
+      doRun(
+        "conf-on",
+        "launch",
+        "one",
+        join(tmp, "wt"),
+        join(tmp, "prompt.txt"),
+        "--run",
+        runDir("confrun"),
+      );
       let fallbackLogged = false;
       try {
         const lines = readFileSync(join(runDir("confrun"), "actions.jsonl"), "utf8").split("\n");
@@ -5189,17 +5205,23 @@ describe("confinement wiring: form shows the wrap, fallback warns and logs", () 
     assertControl("form with confine on wraps the resume line");
   });
   test("form with confine on stays bare on a system with no row", () => {
-    const r = records.find((x) => x.label === "form with confine on stays bare on a system with no row");
+    const r = records.find(
+      (x) => x.label === "form with confine on stays bare on a system with no row",
+    );
     if (r === undefined) return; // this system has a row: the wrap records hold instead
     assertControl("form with confine on stays bare on a system with no row");
   });
   test("the wrapped launch line carries the bare harness argv", () => {
-    const r = records.find((x) => x.label === "the wrapped launch line carries the bare harness argv");
+    const r = records.find(
+      (x) => x.label === "the wrapped launch line carries the bare harness argv",
+    );
     if (r === undefined) return; // no row on this system
     assertControl("the wrapped launch line carries the bare harness argv");
   });
   test("the wrapped resume line carries the bare harness argv", () => {
-    const r = records.find((x) => x.label === "the wrapped resume line carries the bare harness argv");
+    const r = records.find(
+      (x) => x.label === "the wrapped resume line carries the bare harness argv",
+    );
     if (r === undefined) return; // no row on this system
     assertControl("the wrapped resume line carries the bare harness argv");
   });
