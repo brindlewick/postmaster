@@ -4,17 +4,60 @@
     "kind": "kill",
     "when": "2026-10-01T02:39Z",
     "what": "A review lane's script signalled every process of the user session (the cause ticket #200 gives). Every agent in eight runs stopped, and each leg was remounted about two and a half hours later.",
-    "runs": ["57", "98", "109", "135", "170", "179", "fixture-17", "fixture-18"],
-    "lanes": ["review lane"],
+    "runs": [
+      "57",
+      "98",
+      "109",
+      "135",
+      "170",
+      "179",
+      "fixture-17",
+      "fixture-18"
+    ],
+    "lanes": [
+      "review lane"
+    ],
     "evidence": [
-      { "run": "57", "ts": "2026-10-01T05:02:13Z", "action": "note" },
-      { "run": "98", "ts": "2026-10-01T05:02:45Z", "action": "note" },
-      { "run": "170", "ts": "2026-10-01T05:03:18Z", "action": "note" },
-      { "run": "179", "ts": "2026-10-01T05:03:50Z", "action": "note" },
-      { "run": "135", "ts": "2026-10-01T05:04:23Z", "action": "note" },
-      { "run": "109", "ts": "2026-10-01T05:04:55Z", "action": "note" },
-      { "run": "fixture-17", "ts": "2026-10-01T05:05:27Z", "action": "note" },
-      { "run": "fixture-18", "ts": "2026-10-01T05:05:59Z", "action": "note" }
+      {
+        "run": "57",
+        "ts": "2026-10-01T05:02:13Z",
+        "action": "note"
+      },
+      {
+        "run": "98",
+        "ts": "2026-10-01T05:02:45Z",
+        "action": "note"
+      },
+      {
+        "run": "170",
+        "ts": "2026-10-01T05:03:18Z",
+        "action": "note"
+      },
+      {
+        "run": "179",
+        "ts": "2026-10-01T05:03:50Z",
+        "action": "note"
+      },
+      {
+        "run": "135",
+        "ts": "2026-10-01T05:04:23Z",
+        "action": "note"
+      },
+      {
+        "run": "109",
+        "ts": "2026-10-01T05:04:55Z",
+        "action": "note"
+      },
+      {
+        "run": "fixture-17",
+        "ts": "2026-10-01T05:05:27Z",
+        "action": "note"
+      },
+      {
+        "run": "fixture-18",
+        "ts": "2026-10-01T05:05:59Z",
+        "action": "note"
+      }
     ]
   },
   {
@@ -22,12 +65,30 @@
     "kind": "kill",
     "when": "2026-10-01T05:30Z to 06:30Z",
     "what": "The machine reset again after the remount. Reviewers in the round under way died mid-review in three runs: four of five in #98, all three in #170, the mimo reviewers in fixture-17. Each round was relaunched or run again whole.",
-    "runs": ["98", "170", "fixture-17"],
-    "lanes": ["reviewers"],
+    "runs": [
+      "98",
+      "170",
+      "fixture-17"
+    ],
+    "lanes": [
+      "reviewers"
+    ],
     "evidence": [
-      { "run": "170", "ts": "2026-10-01T07:34:40Z", "action": "note" },
-      { "run": "98", "ts": "2026-10-01T07:34:43Z", "action": "note" },
-      { "run": "fixture-17", "ts": "2026-10-01T07:37:02Z", "action": "note" }
+      {
+        "run": "170",
+        "ts": "2026-10-01T07:34:40Z",
+        "action": "note"
+      },
+      {
+        "run": "98",
+        "ts": "2026-10-01T07:34:43Z",
+        "action": "note"
+      },
+      {
+        "run": "fixture-17",
+        "ts": "2026-10-01T07:37:02Z",
+        "action": "note"
+      }
     ]
   },
   {
@@ -35,10 +96,18 @@
     "kind": "kill",
     "when": "2026-10-01T13:58Z",
     "what": "The mimo bug reviewer of #135's round 5 was killed by its 8G memory cap before it gave a verdict, and the round went on without it.",
-    "runs": ["135"],
-    "lanes": ["mimo"],
+    "runs": [
+      "135"
+    ],
+    "lanes": [
+      "mimo"
+    ],
     "evidence": [
-      { "run": "135", "ts": "2026-10-01T13:58:31Z", "action": "degrade" }
+      {
+        "run": "135",
+        "ts": "2026-10-01T13:58:31Z",
+        "action": "degrade"
+      }
     ]
   },
   {
@@ -46,10 +115,18 @@
     "kind": "session-lost",
     "when": "2026-10-01T22:58Z",
     "what": "The first coachman of #135's review leg could not be resumed: its 41 MB session could not be replayed. The leg went to the fallback coachman on a fresh stream.",
-    "runs": ["135"],
-    "lanes": ["coachman"],
+    "runs": [
+      "135"
+    ],
+    "lanes": [
+      "coachman"
+    ],
     "evidence": [
-      { "run": "135", "ts": "2026-10-01T23:12:15Z", "action": "degrade" }
+      {
+        "run": "135",
+        "ts": "2026-10-01T23:12:15Z",
+        "action": "degrade"
+      }
     ]
   },
   {
@@ -57,10 +134,18 @@
     "kind": "degraded",
     "when": "2026-09-30T03:57Z, logged 2026-10-02T02:44Z",
     "what": "The opus security reviewer of #135's round 3 was killed by the 600-second sub-agent ceiling before its verdict. The record was written late, at the card's check; the event itself falls before the window.",
-    "runs": ["135"],
-    "lanes": ["opus"],
+    "runs": [
+      "135"
+    ],
+    "lanes": [
+      "opus"
+    ],
     "evidence": [
-      { "run": "135", "ts": "2026-10-02T02:44:10Z", "action": "degrade" }
+      {
+        "run": "135",
+        "ts": "2026-10-02T02:44:10Z",
+        "action": "degrade"
+      }
     ]
   },
   {
@@ -68,12 +153,29 @@
     "kind": "wall",
     "when": "2026-10-03T00:40Z, reset 02:29Z",
     "what": "The astra lane reached its codex usage limit. It left #200's workhorse branch with a spec and a blocked report and no implementation, and it failed two of fixture-37's review rounds.",
-    "runs": ["200", "fixture-37"],
-    "lanes": ["astra"],
+    "runs": [
+      "200",
+      "fixture-37"
+    ],
+    "lanes": [
+      "astra"
+    ],
     "evidence": [
-      { "run": "200", "ts": "2026-10-03T01:02:11Z", "action": "harvest" },
-      { "run": "fixture-37", "ts": "2026-10-03T01:07:54Z", "action": "degrade" },
-      { "run": "fixture-37", "ts": "2026-10-03T01:31:25Z", "action": "degrade" }
+      {
+        "run": "200",
+        "ts": "2026-10-03T01:02:11Z",
+        "action": "harvest"
+      },
+      {
+        "run": "fixture-37",
+        "ts": "2026-10-03T01:07:54Z",
+        "action": "degrade"
+      },
+      {
+        "run": "fixture-37",
+        "ts": "2026-10-03T01:31:25Z",
+        "action": "degrade"
+      }
     ]
   },
   {
@@ -81,10 +183,18 @@
     "kind": "wall",
     "when": "2026-10-03T08:43Z, reset 11:14Z",
     "what": "The sol lane reached its codex usage limit during #218's workhorse stage and left no summary. It was resumed on its own thread at 14:12Z.",
-    "runs": ["218"],
-    "lanes": ["sol"],
+    "runs": [
+      "218"
+    ],
+    "lanes": [
+      "sol"
+    ],
     "evidence": [
-      { "run": "218", "ts": "2026-10-03T08:43:51Z", "action": "note" }
+      {
+        "run": "218",
+        "ts": "2026-10-03T08:43:51Z",
+        "action": "note"
+      }
     ]
   },
   {
@@ -92,11 +202,23 @@
     "kind": "overload",
     "when": "2026-09-30T17:09Z",
     "what": "The opus security review of #57's round 5 got a 529 overloaded response and did nothing. The second attempt reviewed.",
-    "runs": ["57"],
-    "lanes": ["opus"],
+    "runs": [
+      "57"
+    ],
+    "lanes": [
+      "opus"
+    ],
     "evidence": [
-      { "run": "57", "ts": "2026-09-30T17:09:36Z", "action": "degrade" },
-      { "run": "57", "ts": "2026-09-30T17:24:00Z", "action": "review-harvest" }
+      {
+        "run": "57",
+        "ts": "2026-09-30T17:09:36Z",
+        "action": "degrade"
+      },
+      {
+        "run": "57",
+        "ts": "2026-09-30T17:24:00Z",
+        "action": "review-harvest"
+      }
     ]
   },
   {
@@ -104,10 +226,18 @@
     "kind": "duplicate-launch",
     "when": "2026-10-03T08:43Z",
     "what": "#218's mimo lane was launched twice. The coachman ended the duplicate and one lane carried on.",
-    "runs": ["218"],
-    "lanes": ["mimo"],
+    "runs": [
+      "218"
+    ],
+    "lanes": [
+      "mimo"
+    ],
     "evidence": [
-      { "run": "218", "ts": "2026-10-03T08:43:51Z", "action": "note" }
+      {
+        "run": "218",
+        "ts": "2026-10-03T08:43:51Z",
+        "action": "note"
+      }
     ]
   },
   {
@@ -115,12 +245,29 @@
     "kind": "kill",
     "when": "2026-10-03T12:03Z",
     "what": "The host's 8G memory cap killed #218's coachman and its mimo lane. The run waited for the user's word, which came at about 14:00Z with the cap raised to 16G, and both resumed with nothing discarded.",
-    "runs": ["218"],
-    "lanes": ["coachman", "mimo"],
+    "runs": [
+      "218"
+    ],
+    "lanes": [
+      "coachman",
+      "mimo"
+    ],
     "evidence": [
-      { "run": "218", "ts": "2026-10-03T13:56:47Z", "action": "note" },
-      { "run": "218", "ts": "2026-10-03T13:59:58Z", "action": "note" },
-      { "run": "218", "ts": "2026-10-03T14:12:02Z", "action": "note" }
+      {
+        "run": "218",
+        "ts": "2026-10-03T13:56:47Z",
+        "action": "note"
+      },
+      {
+        "run": "218",
+        "ts": "2026-10-03T13:59:58Z",
+        "action": "note"
+      },
+      {
+        "run": "218",
+        "ts": "2026-10-03T14:12:02Z",
+        "action": "note"
+      }
     ]
   },
   {
@@ -128,11 +275,24 @@
     "kind": "degraded",
     "when": "2026-10-03T03:06Z and 05:42Z",
     "what": "In #200's review, the mimo bug reviewer ended round 1 with no verdict after handing its work to a background helper. In round 3 it changed the code under review and merged into the synthesis worktree, so its verdict was void, and the astra reviewer's turn failed with no verdict.",
-    "runs": ["200"],
-    "lanes": ["mimo", "astra"],
+    "runs": [
+      "200"
+    ],
+    "lanes": [
+      "mimo",
+      "astra"
+    ],
     "evidence": [
-      { "run": "200", "ts": "2026-10-03T03:06:12Z", "action": "degrade" },
-      { "run": "200", "ts": "2026-10-03T05:42:26Z", "action": "degrade" }
+      {
+        "run": "200",
+        "ts": "2026-10-03T03:06:12Z",
+        "action": "degrade"
+      },
+      {
+        "run": "200",
+        "ts": "2026-10-03T05:42:26Z",
+        "action": "degrade"
+      }
     ]
   },
   {
@@ -140,11 +300,24 @@
     "kind": "degraded",
     "when": "2026-09-30T18:10Z and 22:39Z",
     "what": "A luna bug review's findings file did not parse as JSON, in #158's round 2 and #110's round 5, and the lane's round was counted degraded.",
-    "runs": ["158", "110"],
-    "lanes": ["luna"],
+    "runs": [
+      "158",
+      "110"
+    ],
+    "lanes": [
+      "luna"
+    ],
     "evidence": [
-      { "run": "158", "ts": "2026-09-30T18:10:40Z", "action": "degrade" },
-      { "run": "110", "ts": "2026-09-30T22:39:13Z", "action": "degrade" }
+      {
+        "run": "158",
+        "ts": "2026-09-30T18:10:40Z",
+        "action": "degrade"
+      },
+      {
+        "run": "110",
+        "ts": "2026-09-30T22:39:13Z",
+        "action": "degrade"
+      }
     ]
   },
   {
@@ -152,11 +325,63 @@
     "kind": "degraded",
     "when": "2026-10-01T09:50Z and 12:36Z",
     "what": "In two fixture runs a reviewer's round was counted degraded: the opus security review made no tool call and its CLEAN was not counted, and a mimo bug report did not normalize and was read by hand.",
-    "runs": ["fixture-19", "fixture-23"],
-    "lanes": ["opus", "mimo"],
+    "runs": [
+      "fixture-19",
+      "fixture-23"
+    ],
+    "lanes": [
+      "opus",
+      "mimo"
+    ],
     "evidence": [
-      { "run": "fixture-19", "ts": "2026-10-01T09:50:18Z", "action": "degrade" },
-      { "run": "fixture-23", "ts": "2026-10-01T12:36:13Z", "action": "degrade" }
+      {
+        "run": "fixture-19",
+        "ts": "2026-10-01T09:50:18Z",
+        "action": "degrade"
+      },
+      {
+        "run": "fixture-23",
+        "ts": "2026-10-01T12:36:13Z",
+        "action": "degrade"
+      }
+    ]
+  },
+  {
+    "id": "I14",
+    "kind": "auth",
+    "when": "2026-09-30T14:04Z, before the window opened",
+    "what": "The codex login was revoked (a 401, token revoked) during #110's round 2, so luna's bug review never ran. It falls before the window, in a run that reaches into it.",
+    "runs": [
+      "110"
+    ],
+    "lanes": [
+      "luna"
+    ],
+    "evidence": [
+      {
+        "run": "110",
+        "ts": "2026-09-30T14:04:52Z",
+        "action": "degrade"
+      }
+    ]
+  },
+  {
+    "id": "I15",
+    "kind": "degraded",
+    "when": "2026-09-30T00:59Z, before the window opened",
+    "what": "The mimo bug review of #124's round 19 gave no verdict, because its final message was withheld by the provider's content filter. luna closed the round alone. It falls before the window, in a run that reaches into it.",
+    "runs": [
+      "124"
+    ],
+    "lanes": [
+      "mimo"
+    ],
+    "evidence": [
+      {
+        "run": "124",
+        "ts": "2026-09-30T00:59:43Z",
+        "action": "degrade"
+      }
     ]
   }
 ]

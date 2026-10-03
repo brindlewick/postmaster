@@ -399,3 +399,18 @@ export function runTokens(run: RunRecord): {
     coachman: sum(run.coachman),
   };
 }
+
+/** Seconds the reviewers ran: each round's launch to its last exit, summed; null for a run with no timed round. */
+export function reviewerRunning(run: RunRecord): number | null {
+  const rounds = roundTimes(run);
+  return rounds.length === 0 ? null : rounds.reduce((sum, r) => sum + r.length, 0);
+}
+
+/** The reviewers' running time as a fraction of the run's review stage; null where either is missing. */
+export function reviewerShare(run: RunRecord): number | null {
+  const running = reviewerRunning(run);
+  const stage = run.stages
+    .filter((s) => s.stage === "review" && s.seconds !== null)
+    .reduce((sum, s) => sum + (s.seconds ?? 0), 0);
+  return running === null || stage <= 0 ? null : running / stage;
+}

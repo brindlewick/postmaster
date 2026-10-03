@@ -1,26 +1,26 @@
 ---
-title: A second reviewer earns its keep; a second workhorse is cheap and not shown to
+title: A second reviewer earns its keep, and a second workhorse has not been shown to
 type: concept
 standing: claimed
 sources: [trials/2026-10-03-lane-audit, trials/2026-09-29-synthesis-audit]
 updated: 2026-10-03
 ---
 
-# A second reviewer earns its keep; a second workhorse is cheap and not shown to
+# A second reviewer earns its keep, and a second workhorse has not been shown to
 
-**Claim.** Several lanes cost tokens, time and incidents. Over three days of runs, one reviewer
-lane alone found about half of the severe defects the coachman verified and the pair found over nine
-tenths, at a bounded cost, so a second reviewer earns its keep. A second workhorse supplied a fix
-or a missing part in most of this repository's runs, by the coachman's own cards. It changed a
-measured result in one run of the six that had blind tests, and in none of the 22 fixture runs that
-could be scored, and it costs little. The large costs are elsewhere: the coachman's tokens, the
-review loop's hours, and one security review's money.
+**Claim.** Several lanes cost tokens, time and incidents. Over three days of runs, one reviewer lane
+alone found about half of the severe defects the coachman verified, and two found over nine tenths.
+So a second reviewer earns its keep. A second workhorse supplied a fix or a missing part in most of
+this repository's runs, by the coachman's own cards. Where a test measured the difference, one lane
+alone passed in five of the six runs that had blind tests and in all 22 fixture runs that could be
+scored. The largest costs are elsewhere: the coachman's tokens, the review stage's hours, and one
+security review's money.
 
 **Standing: claimed.** Like [the earlier audit](combining-models.md), this reads the runs' own
 records and promotes no run, so by [the schema](../schema.md) it moves no standing. A reader who
-took the records as runs would call the reviewers' case the better supported: it rests on counts of
-the coachman's verified findings, while the workhorses' case rests on a reading of its cards.
-[@trials/2026-10-03-lane-audit/method.md]
+took the records as runs would call the reviewers' case the better supported. It rests on the
+coachman's record of who named each verified finding, and the workhorses' case rests on a reading
+of the coachman's cards. [@trials/2026-10-03-lane-audit/method.md]
 
 The audit is [#257, Research: audit the last three days of runs, to see whether several lanes still
 earn their keep](https://github.com/brindlewick/postmaster/issues/257). Its definitions, its limits
@@ -33,23 +33,26 @@ Every figure quoted below is in one list [@trials/2026-10-03-lane-audit/results/
 **Reviewers: yes.** The coachman verified 264 severe findings, P1 or P2, in this repository's 18
 runs that reached synthesis. A codex lane named 138 of them and mimo 154, and the two named the same
 finding only 51 times. Between them they found 241, and with opus's security review 259. A review
-by one lane alone would have missed 42% to 48% of what the coachman verified. The second reviewer
-stretches a round by a median 11 minutes, from the first reviewer's finish to the last's, in a round
-of 25. All reviewers together wrote a median quarter of a run's output tokens.
+by one lane alone would have missed 42% to 48% of what the coachman verified. A round lasts a median
+25 minutes, and its last reviewer finishes a median 11 minutes after its first. All reviewers
+together wrote a median quarter of a run's output tokens.
 
 **Second workhorse: not shown, and cheap.** In 12 of the 18 real runs the second-ranked lane's part
-was a defect fix or a part the first lane lacked, by the coachman's cards; in 4 it was small items
-and in 2 nothing. On the fixture ticket every lane branch that could be scored passed every hidden
-test alone, 44 of 44, so there the second lane changed nothing a test sees. No run was made with one
-workhorse, so the records cannot say whether the fixes would have shipped anyway. The second
-workhorse costs a median 18 minutes of waiting and a gate run on its branch. It hedged one wall:
-when astra hit a usage limit in [#200, Run every lane in its own process space, so it cannot kill processes it did not start](https://github.com/brindlewick/postmaster/issues/200), the run went on with mimo's work.
+was a defect fix or a part the first lane lacked, by the coachman's cards. In 4 it was small items
+and in 2 nothing. Of the 6 runs with blind tests, one lane alone passed in 5, counting [#201](https://github.com/brindlewick/postmaster/issues/201) against
+the oracle as the coachman corrected it. In [#57](https://github.com/brindlewick/postmaster/issues/57) neither lane passed, and the coachman adjudicated
+the synthesis at 20 of 20 after a raw 13. On the fixture ticket every lane branch that could be
+scored passed every hidden test alone, 44 of 44. No run was made with one workhorse, so the records
+cannot say whether the fixes would have shipped anyway. The second workhorse costs a median 18
+minutes of waiting and a gate run on its branch. It hedged one wall: when astra hit a usage limit
+in [#200, Run every lane in its own process space, so it cannot kill processes it did not start](https://github.com/brindlewick/postmaster/issues/200), the run went on with mimo's work.
 
-**What costs most is neither.** The coachman writes a median three fifths of a run's output tokens
-and reads far more. The review stage takes a median 8 hours 47 minutes against 1 hour 35 minutes
-for the workhorses and 31 minutes for the synthesis. The one money figure the records hold is
-opus's: $644.17 over 71 security launches in this repository's runs, for 29 of the 264 severe
-findings, 18 of them named by opus alone, and none of the 37 on the fixture ticket.
+**What costs most is neither.** The coachman writes a median 58% of a run's output tokens and reads
+far more. The review stage takes a median 8 hours 47 minutes, against 1 hour 35 minutes for the
+workhorses and 31 minutes for the synthesis. The reviewers themselves run 1 hour 30 minutes of that
+review stage. The one money figure the records hold is opus's: $644.17 over 71 security launches in
+this repository's runs, for 29 of the 264 severe findings, 18 of them named by opus alone. On the
+fixture ticket opus named none.
 
 ## What was covered
 
@@ -61,12 +64,12 @@ runs apart. A run is read whole if one action falls in the window.
 | this repository's tickets | 31 | 6 | 18 | 8 | 23 | 8 |
 | fixture runs | 25 | 0 | 24 | 21 | 25 | 0 |
 
-Real runs had luna on codex in 24 runs, sol in 6 and astra in 1, always with mimo; opus reviewed
+Real runs had luna on codex in 24 runs, sol in 6 and astra in 1, always with mimo. opus reviewed
 security. Fixture runs ran at the lowest effort of each harness.
 [@trials/2026-10-03-lane-audit/results/inventory.md]
 
 **Changes from the earlier audit's definitions.** The earlier audit counted six-word runs in git
-with its own script; the run's own SHARES line now does it, by the same method, and only for runs
+with its own script. The run's own SHARES line now does it, by the same method, and only for runs
 after [#158, Measure each lane's share of the shipped synthesis from git, beside the coachman's own
 account](https://github.com/brindlewick/postmaster/issues/158). The second lane's part is now A, B
 or C, which replaces core, small and trivial. A lane's time is its process's exit, not the
@@ -111,21 +114,21 @@ same total on both readers' counts, A 9, B 3 and C 2.
   of the 18 are A [@trials/2026-10-03-lane-audit/results/numbers.md].
 - A fix is not proof of need. The review rounds that follow also find defects in a synthesis, and
   nothing here says they would have missed what the second lane fixed.
-- The classes follow whether a blind test existed. The 8 tickets with none, because the design
-  question was the interface, are A in 7. The 6 with blind tests are A in 2. With a blind oracle the
-  second lane's fixes were rarer; the sample is small.
+- The 8 tickets with no blind tests, because the design question was the interface, are A in 7.
+  The 6 with blind tests are A in 2. The records do not explain the difference, and it comes from
+  14 runs.
 - Six of the 14 runs had blind tests. A lane alone passed them in [#98](https://github.com/brindlewick/postmaster/issues/98), [#158](https://github.com/brindlewick/postmaster/issues/158) and [#182](https://github.com/brindlewick/postmaster/issues/182), in [#200](https://github.com/brindlewick/postmaster/issues/200) with
-  one wording miss, and in [#201](https://github.com/brindlewick/postmaster/issues/201) only after the card corrected the oracle's own faults. Neither lane
-  passed in [#57](https://github.com/brindlewick/postmaster/issues/57), where each lane's version had a miss the card calls substantive and the synthesis
-  took the other's part.
-- A *fail* in the blind-tests column is the SYNTHESIS line's own word. In [#201](https://github.com/brindlewick/postmaster/issues/201) the card traced every
-  failure to the oracle, and in [#109](https://github.com/brindlewick/postmaster/issues/109), [#124](https://github.com/brindlewick/postmaster/issues/124) and [#135](https://github.com/brindlewick/postmaster/issues/135) the earlier audit read the misses as the
+  one wording miss, and in [#201](https://github.com/brindlewick/postmaster/issues/201) after the coachman corrected the oracle's own faults. [#182](https://github.com/brindlewick/postmaster/issues/182) also
+  needed two corrections to its oracle before both lanes passed. Neither lane passed in [#57](https://github.com/brindlewick/postmaster/issues/57). The
+  card calls the misses on both sides substantive, and the synthesis took parts of both.
+- A *fail* in the blind-tests column is the SYNTHESIS line's own word. In [#201](https://github.com/brindlewick/postmaster/issues/201) the card traced
+  every failure to the oracle. In [#109](https://github.com/brindlewick/postmaster/issues/109), [#124](https://github.com/brindlewick/postmaster/issues/124) and [#135](https://github.com/brindlewick/postmaster/issues/135) the earlier audit read the misses as the
   oracle's false positives.
 - The second lane's own share of the synthesis's code was 0.5%, 25%, 14.6%, 0% and 4.8% in the five
   real runs that have shares. Where a lane wrote nothing, as astra in [#200](https://github.com/brindlewick/postmaster/issues/200), its share reads 0%, the
   negative control.
-- Both lanes stalled in [#165](https://github.com/brindlewick/postmaster/issues/165) and the synthesis rests on one lane's uncommitted work; the second lane
-  gave a cross-check and no code.
+- Both lanes stalled in [#165](https://github.com/brindlewick/postmaster/issues/165) and the synthesis rests on one lane's uncommitted work. The second
+  lane gave a cross-check and no code.
 
 ### On the fixture ticket
 
@@ -142,7 +145,7 @@ that for every run in the window, which the earlier audit could not
 - The second-ranked lane wrote 1.5% of the synthesis's code at the median, 15.9% at the 90th
   percentile. It was 2% or less in 14 of 24 runs and 10% or more in 6.
 - mimo ranked first in 19 of 24 runs. Every lane passed every test, so on this ticket the rank
-  cannot follow correctness.
+  cannot follow what the hidden tests measure.
 - The ticket is one small ticket at the lowest effort. It cannot show what a second workhorse adds
   on a hard one.
 
@@ -154,22 +157,28 @@ that for every run in the window, which the earlier audit could not
 | workhorses running | 1h 35m | 13m |
 | synthesis | 31m | 2m |
 | review | 8h 47m | 53m |
+| of which the reviewers running, each round from launch to last exit | 1h 30m | 38m |
 | slower workhorse's extra wait, median (90th percentile) | 18 min (55) | 6 min (11) |
 | one review round, launch to last reviewer, median (90th percentile) | 25 min (56) | 15 min (28) |
 | gap between the first and last reviewer of a round, median (90th percentile) | 11 min (33) | 16 min (23) |
 | review rounds per run, median (most) | 3.5 (20) | 2 (4) |
 
 - The slower workhorse made the run wait a median 18 minutes, 55 at the 90th percentile, over 16
-  real runs, and a median 6 minutes over 18 fixture runs. Lanes restarted after a kill inflate the
+  real runs, and a median 6 minutes over 18 fixture runs. Lanes restarted after a kill lengthen the
   longest waits.
+- Of the review stage's median 8 hours 47 minutes, the reviewers themselves run 1 hour 30 minutes,
+  25% of the stage at the median. The rest is the coachman's triage, fixes and gate runs, and a wait
+  for the user's ruling at each round past the third. 9 of the 18 runs went past three rounds
+  [@trials/2026-10-03-lane-audit/results/numbers.md].
 - The coachman ran the gate on lane branches 36 times, 6.5 hours, in the real runs, and on the
-  synthesis 260 times, 43.5 hours. The second lane's own gate run is about half of the first
-  figure, about 11 minutes a run.
-- The older flow had each lane write its own spec for the user to review. Two runs set aside when
-  the flow changed to one spec per run had spent 1.0M and 2.4M workhorse input tokens and 11M and
-  7.7M coachman input tokens before they were set aside, for
-  [#170, The coachman writes one spec that every workhorse implements, and the user reviews it
-  once](https://github.com/brindlewick/postmaster/issues/170)
+  synthesis 260 times, 43.5 hours. The lane branches' share is about 22 minutes a run for the two
+  lanes, so about 11 for the second.
+- Two runs were set aside after each lane had written its own spec: [#182](https://github.com/brindlewick/postmaster/issues/182), which had to wait for the
+  TypeScript port, and [#200](https://github.com/brindlewick/postmaster/issues/200), whose scope the user changed. Their spec rounds had used 1.0M and 2.4M
+  workhorse input tokens and 11M and 7.7M coachman input tokens by then. The coachman now writes
+  one spec for every lane
+  ([#170, The coachman writes one spec that every workhorse implements, and the user reviews it
+  once](https://github.com/brindlewick/postmaster/issues/170))
   [@trials/2026-10-03-lane-audit/results/numbers.md].
 - Workhorse output tokens: the second-ranked lane wrote a median 38k against the first's 111k in
   the real runs, and 7k against 11k on the fixture ticket
@@ -199,35 +208,39 @@ record, read by a script and checked by hand on 45 lines, all of which match
 | all three, as run | 259 of 264, 98% | 41 of 41, 100% | 34 of 34, 100% |
 
 - The two workhorse lanes' reviews overlap on 51 findings of the 241 they found. By capture-recapture,
-  an overlap that small points to many findings still unfound: Chapman's estimate for two such
+  an overlap that small points to many findings still unfound. Chapman's estimate for two such
   reviewers is 413. With two reviewers the method is ambiguous and tends to read low
   ([source](../sources/petersson-2004-capture-recapture.md)), so this is a reason to expect a
   third reviewer to add more, not a count. It fits
   [the review-convergence page](review-convergence.md): model reviewers do not run out of findings.
-- Where the coachman listed each finding, 13 of 78 severe findings in the four real runs whose cards
-  list them ([#135](https://github.com/brindlewick/postmaster/issues/135), [#182](https://github.com/brindlewick/postmaster/issues/182), [#200](https://github.com/brindlewick/postmaster/issues/200), [#201](https://github.com/brindlewick/postmaster/issues/201)) and 4 of 37 on the fixture ticket were dismissed, not fixed:
-  false alarms, or out of scope. Older cards say so in prose only
+- Where the coachman listed every finding it judged, 13 of the 78 P1 and P2 entries in the four real
+  runs whose cards list them ([#135](https://github.com/brindlewick/postmaster/issues/135), [#182](https://github.com/brindlewick/postmaster/issues/182), [#200](https://github.com/brindlewick/postmaster/issues/200), [#201](https://github.com/brindlewick/postmaster/issues/201)) were dismissed rather than fixed, and 4 of
+  37 on the fixture ticket. The same defect can be listed under two lenses. The dismissals carry
+  no lane, so false alarms cannot be counted by lane. The reasons are mostly that the report was no
+  defect, was out of scope, or was by design
   [@trials/2026-10-03-lane-audit/results/numbers.md].
-- opus found 18 of the severe findings alone in the real runs and none of 37 on the fixture ticket.
-  Its security review is the dearest line in the records: $644.17 over 71 launches, about $9 a
-  launch, $22 for each finding it named and $36 for each it alone found.
+- opus found 18 of the severe findings alone in the real runs and none on the fixture ticket. Its
+  security review is the dearest line in the records: $644.17 over 71 launches, about $9 a launch,
+  $22 for each finding it named and $36 for each it alone found.
 - mimo alone would have found 58% and a codex lane alone 52%. The recorded tokens put a codex lane's
-  reviews at 119 launches, 240M in and 2.9M out, and mimo's at 118 launches, 17M in and 1.0M out;
+  reviews at 119 launches, 240M in and 2.9M out, and mimo's at 118 launches, 17M in and 1.0M out.
   mimo's plan reports a zero price.
 - A round lasts a median 25 minutes, 56 at the 90th percentile, and the first and last reviewer
   finish a median 11 minutes apart, 33 at the 90th.
-- 9 of 298 reviewer launches in the real runs ended degraded, with no verdict the coachman could
-  use. The causes are in the incidents below. One was a reviewer that changed the code it was
-  reviewing: in [#200](https://github.com/brindlewick/postmaster/issues/200)'s third round the mimo reviewer committed a change and merged it into the
-  synthesis worktree, and the coachman voided its verdict and recovered the branch.
+- 9 of 298 reviewer launches in these real runs were harvested as degraded: three luna reviews (a
+  revoked login, and two findings files that did not parse), four mimo (no verdict after handing the
+  work to a helper, a change to the code under review, a memory-cap kill, and a verdict withheld by
+  the provider's content filter), one astra (a turn that failed) and one opus (a 529 overload). The
+  incidents below say more. In [#200](https://github.com/brindlewick/postmaster/issues/200)'s third round the mimo reviewer committed a change and merged it
+  into the synthesis worktree, and the coachman voided its verdict and recovered the branch.
 
 ## What the lanes cost in tokens
 
 Read from each launch's own events stream, and each coachman thread's session record, with the
 tool's own reader. They agree with the usage files in 312 of 315 launch groups. The coachman's usage
 file undercounts a leg resumed after it was written, as in [#200](https://github.com/brindlewick/postmaster/issues/200)'s review leg, 36.2M recorded against
-58.3M in its session. Claude Code's input leaves out cache reads, so its figure reads as nothing.
-Only Claude Code's price is recorded, so no total in money can be given.
+58.3M in its session. Claude Code's input figure leaves out cache reads, so it reads as nearly
+nothing. Only Claude Code's price is recorded, so no total in money can be given.
 [@trials/2026-10-03-lane-audit/results/tokens.md]
 
 | Role and lane | this repository's runs | fixture runs |
@@ -247,7 +260,7 @@ Only Claude Code's price is recorded, so no total in money can be given.
 
 ## Incidents
 
-The 13 entries below were found by searching every action in the window for walls, kills,
+The 15 entries below were found by searching every action in the window for walls, kills,
 overloads, duplicates and degraded lanes, reading each hit, and keeping what the words show. Each
 cites an action that exists, and a clean run reads none
 [@trials/2026-10-03-lane-audit/results/incidents.md].
@@ -267,13 +280,16 @@ cites an action that exists, and a clean run reads none
 | I11 | degraded | 2026-10-03T03:06Z and 05:42Z | In [#200](https://github.com/brindlewick/postmaster/issues/200)'s review, the mimo bug reviewer ended round 1 with no verdict after handing its work to a background helper. In round 3 it changed the code under review and merged into the synthesis worktree, so its verdict was void, and the astra reviewer's turn failed with no verdict. | [#200](https://github.com/brindlewick/postmaster/issues/200) |
 | I12 | degraded | 2026-09-30T18:10Z and 22:39Z | A luna bug review's findings file did not parse as JSON, in [#158](https://github.com/brindlewick/postmaster/issues/158)'s round 2 and [#110](https://github.com/brindlewick/postmaster/issues/110)'s round 5, and the lane's round was counted degraded. | [#158](https://github.com/brindlewick/postmaster/issues/158), [#110](https://github.com/brindlewick/postmaster/issues/110) |
 | I13 | degraded | 2026-10-01T09:50Z and 12:36Z | In two fixture runs a reviewer's round was counted degraded: the opus security review made no tool call and its CLEAN was not counted, and a mimo bug report did not normalize and was read by hand. | fixture-19, fixture-23 |
+| I14 | auth | 2026-09-30T14:04Z, before the window opened | The codex login was revoked (a 401, token revoked) during [#110](https://github.com/brindlewick/postmaster/issues/110)'s round 2, so luna's bug review never ran. It falls before the window, in a run that reaches into it. | [#110](https://github.com/brindlewick/postmaster/issues/110) |
+| I15 | degraded | 2026-09-30T00:59Z, before the window opened | The mimo bug review of [#124](https://github.com/brindlewick/postmaster/issues/124)'s round 19 gave no verdict, because its final message was withheld by the provider's content filter. luna closed the round alone. It falls before the window, in a run that reaches into it. | [#124](https://github.com/brindlewick/postmaster/issues/124) |
 
 Which of these do several lanes cause? The session kill was one review lane's script, the fault
 [#200, Run every lane in its own process space, so it cannot kill processes it did not
 start](https://github.com/brindlewick/postmaster/issues/200) closes. A wall hits every codex lane at
-once, since they share one limit, so a second provider's lane hedges it and a second codex lane does
-not. In [#218](https://github.com/brindlewick/postmaster/issues/218), sol's wall left the run waiting for the limit to reset. Two kills were the host's
-memory cap, and the resets and the session loss are not about lanes at all.
+once, since they share one limit. A second provider's lane hedges it and a second codex lane does
+not. In [#218](https://github.com/brindlewick/postmaster/issues/218), sol's wall at 08:43Z left no summary, and the lane resumed at 14:12Z. Two kills were
+the host's memory cap, and the resets, the revoked login and the session loss are not about lanes
+at all.
 
 ## What the records cannot say
 
@@ -281,6 +297,8 @@ memory cap, and the resets and the session loss are not about lanes at all.
 - Whether the reviewers would have caught what the second workhorse fixed.
 - How many severe defects no lane found. The recall figures judge a smaller set only against what
   the larger set made.
+- Whether a finding two lanes named holds up better than a lone one. Every finding logged was
+  verified, and the dismissed ones carry no lane.
 - What the codex lanes and the coachman cost in money. They report none.
 - Whether any of this holds for a hard ticket. The only ticket with hidden tests is small.
 - Whether the A, B and C classes would hold for a reader who did not read the coachman's account.
@@ -296,6 +314,9 @@ memory cap, and the resets and the session loss are not about lanes at all.
 - **Findings recorded one by one** with lane, severity, verdict and how each was verified. If
   findings that one lane alone named are dismissed or reopened more often than shared ones, the lone
   findings are worth less than counted here.
+- **Planted bugs**, as [#104, Research: test each leg on its own, starting with planted bugs for the
+  review leg](https://github.com/brindlewick/postmaster/issues/104) proposes. They would show how
+  many defects every reviewer misses, which this audit cannot.
 - **A price for the codex lanes and the coachman**, from the plan. Then the cost of a second
   workhorse and of each extra reviewer can be set against what each added.
 - **Defects that reach main** after review, traced to a finding no lane made.
@@ -307,35 +328,43 @@ memory cap, and the resets and the session loss are not about lanes at all.
 - **One workhorse, all reviewers.** Saves the second lane's tokens, a median 18 minutes of waiting
   and about 11 minutes of gate time a run. Loses the hedge against a wall, and the fixes in the 12 A
   runs unless the reviewers catch them, which the records cannot say.
-- **Two workhorses only for tickets with no blind tests, or that change the coachman contract.**
-  The first is where the A fixes are: 7 of the 8 tickets without blind tests, 2 of the 6 with
-  them, a sample of 14. The records do not separate the second.
+- **Two workhorses only for tickets that change the coachman contract.** By the contract's file list
+  this keeps two workhorses almost everywhere: 17 of the 18 runs changed at least one listed file.
+  The checker itself decides by part of a file, and was in use for three runs. It said yes for [#182](https://github.com/brindlewick/postmaster/issues/182)
+  and [#200](https://github.com/brindlewick/postmaster/issues/200) and no for [#201](https://github.com/brindlewick/postmaster/issues/201). The rule would save little.
+- **Two workhorses only for tickets with no blind tests.** That is where the A fixes are: 7 of the 8
+  such tickets, against 2 of the 6 with blind tests, in 14 runs.
 - **One reviewer per lens.** mimo alone would have found 58% of the severe findings, in 17M input
-  tokens against a codex lane's 240M; the pair found 91%. This gives up the findings a second lane
-  would have made.
-- **Drop opus's security review, or run it only where a change touches a risk surface.** Saves
-  most of the recorded money. Gives up the 18 severe findings opus alone named, 7%, and whatever a
-  security lens finds that a bug lens does not, which the records do not separate.
+  tokens against a codex lane's 240M, and the pair found 91%. This gives up the findings a second
+  lane would have made. [#137, Research: does a fix one review lane found need every lane to review
+  again?](https://github.com/brindlewick/postmaster/issues/137) asks a related question about
+  rounds after the first.
+- **Drop opus's security review, or run it only where a change touches a risk surface.** Saves most
+  of the recorded money. Gives up the 18 severe findings opus alone named, 7%, and whatever a
+  security lens finds that a bug lens does not, which the records do not separate. [#90, Explore
+  OpenAI's Codex Security CLI as another security reviewer](https://github.com/brindlewick/postmaster/issues/90)
+  is open.
 
 ## Candidate tickets, ranked
 
-None is filed.
+None is filed. Three open tickets already cover work this audit points to:
+[#255, Bug reviewers are told to change nothing](https://github.com/brindlewick/postmaster/issues/255)
+for the reviewer that changed the code under review in [#200](https://github.com/brindlewick/postmaster/issues/200),
+[#221, Run every lane with only the files, hosts and sockets it needs, on Linux and macOS](https://github.com/brindlewick/postmaster/issues/221) for what a lane may write, and [#104](https://github.com/brindlewick/postmaster/issues/104) for planted bugs.
 
 1. Run a single-workhorse baseline: for the next tickets that have blind tests, score a run with one
    workhorse and a run with two against the same tests, to settle whether a second workhorse changes
    a result.
 2. Have the coachman write each review finding to a record as it triages, with its lane, lens,
    severity, verdict and how it was verified, so that who found what and what was dismissed are
-   counted from data, not read from prose.
-3. Write blind tests for every ticket whose criteria can be checked at an interface; 8 of the 14
-   tickets judged here had none, and their runs are where the second lane's fixes were reported.
-4. Write each launch's usage when its leg ends as well as when it exits, and record the synthesis
-   leg's coachman; a resumed leg's file is out of date, and several runs have no usage for it.
-5. Decide whether opus's security review runs every round or only on a change that touches a risk
-   surface, since it is the largest recorded cost and found nothing on the fixture ticket.
-6. Make a review scratch read-only to its reviewer, so that no reviewer can change the code it
-   reviews, as the mimo reviewer did in [#200](https://github.com/brindlewick/postmaster/issues/200)'s third round.
-7. Add a hard fixture ticket, one a single lane at full effort fails, so that the fixtures can show a
+   counted from data and not read from prose.
+3. Write blind tests for every ticket whose criteria can be checked at an interface, as the
+   coachman did for 6 of the 14 runs judged here, so that each lane is measured alone.
+4. Decide whether opus's security review runs every round or only on a change that touches a risk
+   surface, since it is the largest recorded cost and named no finding on the fixture ticket.
+5. Have a coachman leg's usage record read the leg's session record, so that a resumed leg, or one
+   that exited without a record, still has its tokens counted.
+6. Add a hard fixture ticket, one a single lane at full effort fails, so that the fixtures can show a
    second workhorse's worth.
 
 ## Evidence

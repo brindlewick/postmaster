@@ -1,12 +1,15 @@
 {
   "57": "A leg's launch, resume and takeover are run by a script that records how each ended",
   "75": "Dispatch refuses a run directory or branch that already exists",
+  "90": "Explore OpenAI's Codex Security CLI as another security reviewer",
   "98": "A fixture run's postmaster runs headless, so it never stops at a trust prompt",
+  "104": "Research: test each leg on its own, starting with planted bugs for the review leg",
   "109": "Rewrite the scripts in TypeScript, run by Bun",
   "110": "A project's gate never sees the run's own working copies",
   "122": "The watcher takes the mechanical steps itself, and wakes the postmaster only for decisions",
   "124": "The review leg ends with the run ready for the user's merge, with no separate ship leg",
   "135": "A gate check refuses any change that carries personal data or a secret",
+  "137": "Research: does a fix one review lane found need every lane to review again?",
   "158": "Measure each lane's share of the shipped synthesis from git, beside the coachman's own account",
   "159": "A fixture run scores each lane's own branch against the hidden tests",
   "160": "Record each launch's tokens and cost where its harness reports them",
@@ -21,8 +24,10 @@
   "216": "The private-data check is TypeScript run by Bun, and flags little of the project's own code",
   "217": "Postmaster runs on macOS, shown by a macOS job in CI and a fixture run on a Mac",
   "218": "Every script runs as its TypeScript file, with no .sh wrapper left",
+  "221": "Run every lane with only the files, hosts and sockets it needs, on Linux and macOS",
   "227": "Teardown closes a run's spaces when its logs hold review findings lists",
   "237": "A lane that hits a provider limit pauses its run and tells the user at once",
   "251": "A booking clerk prepares every ticket that is not ready to run",
+  "255": "Bug reviewers are told to change nothing",
   "fixture": "Remove tasks by id"
 }

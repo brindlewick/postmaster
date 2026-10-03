@@ -12,7 +12,7 @@ Each count is run through the same code on a run where it must read non-zero (th
 | ok | a coachman leg's session record never holds fewer tokens than its usage file | 4 legs hold more (resumed after the file was written), for example #200's review leg | 0 legs hold fewer; 49 equal |
 | ok | a run's total time equals the total scripts/run-times.ts prints | 48 runs compared, 48 within a minute | no run differs |
 | ok | incident candidates are found where an incident happened and not in a clean run | #218 has 5 candidates | fixture-39 has 0, fixture-26 has 0 |
-| ok | every curated incident cites an action that exists | 30 cited actions, 0 missing | a made-up citation is reported missing: true |
+| ok | every curated incident cites an action that exists | 32 cited actions, 0 missing | a made-up citation is reported missing: true |
 | ok | a lane's share of the synthesis reads zero for the lane that wrote nothing | #200 mimo (the producing lane): 63.9% of code runs only it wrote | #200 astra (walled, no implementation): 0% |
 | ok | a lane's exit time is not after the coachman's harvest of it | 82 lanes have both times | 0 exit after the harvest |
 | ok | a lane's own gate result is read from its branch's gate runs only | #200 mimo reads pass | #200 astra, which never ran the gate, reads none |

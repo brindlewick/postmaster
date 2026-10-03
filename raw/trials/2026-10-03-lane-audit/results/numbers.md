@@ -63,5 +63,7 @@ Each is computed from the tables' data by render.ts.
 - fixture runs whose review checkpoint lists each finding: 23
 - fixture runs, listed findings, all severities: 199: closed 48, open 130, dismissed 21
 - fixture runs, listed P1 and P2 findings: 37: closed 33, open 0, dismissed 4
-- incidents by kind: kill 4, session-lost 1, degraded 4, wall 2, overload 1, duplicate-launch 1
-- incidents, runs touched: 15
+- real runs, reviewers' running time as a share of the review stage, median: 25% over 18 runs
+- real runs with more than three review rounds, each past the third needing a ruling: 9 of 18
+- incidents by kind: kill 4, session-lost 1, degraded 5, wall 2, overload 1, duplicate-launch 1, auth 1
+- incidents, runs touched: 16

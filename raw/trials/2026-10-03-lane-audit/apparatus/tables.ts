@@ -9,6 +9,8 @@ import {
   median,
   percentile,
   recallOf,
+  reviewerRunning,
+  reviewerShare,
   reviews,
   roundTimes,
   runTokens,
@@ -441,6 +443,16 @@ export function timeTable(
     ["synthesis", ...sets.map((s) => hm(stageMedian(s.runs, "synthesis")))],
     ["review", ...sets.map((s) => hm(stageMedian(s.runs, "review")))],
     [
+      "of which the reviewers running, each round from launch to last exit",
+      ...sets.map((s) => {
+        const v = s.runs.flatMap((r) => {
+          const x = reviewerRunning(r);
+          return x === null ? [] : [x];
+        });
+        return v.length === 0 ? "–" : hm(median(v));
+      }),
+    ],
+    [
       "slower workhorse's extra wait, median (90th percentile)",
       ...sets.map((s) => {
         const v = extraWait(s.runs);
@@ -773,6 +785,20 @@ export function figures(d: Data): Array<[string, string]> {
     add(`${kind} runs, listed findings, all severities`, `${entries.length}: ${by(entries)}`);
     add(`${kind} runs, listed P1 and P2 findings`, `${severeEntries.length}: ${by(severeEntries)}`);
   }
+
+  const shares = real.flatMap((r) => {
+    const x = reviewerShare(r);
+    return x === null ? [] : [x];
+  });
+  add(
+    "real runs, reviewers' running time as a share of the review stage, median",
+    `${Math.round(100 * (median(shares) ?? 0))}% over ${shares.length} runs`,
+  );
+  const long = real.filter((r) => reviews(r).rounds > 3);
+  add(
+    "real runs with more than three review rounds, each past the third needing a ruling",
+    `${long.length} of ${real.length}`,
+  );
 
   const kinds = new Map<string, number>();
   for (const i of d.incidents) kinds.set(i.kind, (kinds.get(i.kind) ?? 0) + 1);

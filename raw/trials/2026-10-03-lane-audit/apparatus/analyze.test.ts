@@ -8,6 +8,8 @@ import {
   median,
   percentile,
   recallOf,
+  reviewerRunning,
+  reviewerShare,
   reviews,
   roundTimes,
   runTokens,
@@ -555,5 +557,33 @@ describe("roundTimes", () => {
 
   test("a round with no launch line is left out", () => {
     expect(roundTimes(r).some((x) => x.round === 3)).toBe(false);
+  });
+});
+
+describe("reviewerRunning and reviewerShare", () => {
+  const timed = run({
+    stages: [
+      { stage: "review", at: "2026-10-03T00:00:00Z", seconds: 7200 },
+      { stage: "done", at: "2026-10-03T02:00:00Z", seconds: null },
+    ],
+    reviewLaunches: [
+      { ts: "2026-10-03T00:00:00Z", lane: "sol", lens: "bug", round: 1 },
+      { ts: "2026-10-03T01:00:00Z", lane: "sol", lens: "bug", round: 2 },
+    ],
+    reviewDone: [
+      { round: 1, lens: "bug", lane: "sol", done: "2026-10-03T00:30:00Z" },
+      { round: 2, lens: "bug", lane: "sol", done: "2026-10-03T01:15:00Z" },
+    ],
+  });
+
+  test("the reviewers' time is the rounds summed, and its share of the review stage", () => {
+    expect(reviewerRunning(timed)).toBe(2700);
+    expect(reviewerShare(timed)).toBeCloseTo(0.375, 5);
+  });
+
+  test("a run with no timed round, or no review stage, has neither", () => {
+    expect(reviewerRunning(run())).toBeNull();
+    expect(reviewerShare(run())).toBeNull();
+    expect(reviewerShare({ ...timed, stages: [] })).toBeNull();
   });
 });
