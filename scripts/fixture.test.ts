@@ -659,7 +659,7 @@ describe("new: a fresh repo outside every other, with its ticket in its own stor
     const listR = run("bash", [localSh, dest, "list"]);
     const readR = run("bash", [localSh, dest, "read", "1", "--body"]);
     const base = run("git", ["-C", dest, "rev-parse", "HEAD"]).out.trim();
-    expect(listR.out.trim()).toBe(`#1\ttodo\t${ticketTitle(first)}`);
+    expect(listR.out.trim()).toBe(`#1\ttodo\t${ticketTitle(first)}\tready`);
     expect(readR.out).toBe(ticketBody(first).replaceAll("FIXTURE_BASE", base));
   }, 30000);
   test("a run against it reads the local tracker, though the config names github", () => {
