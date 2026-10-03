@@ -279,3 +279,7 @@ ticket or a comment, write it as a clickable link, so that nobody has to look it
 
 A path that exists only on the machine, such as a run's record or a file a lane has not committed, stays plain
 text, since no link can reach it.
+
+**Comment auto-replies stay off.** Publishing or watching an artifact turns on automatic replies to comments sent to Claude,
+and a reply can land in a thread the conversation never sees. Right after each publish or watch, stop the session's watch on
+that artifact. The user says when they have left comments; then read each thread, answer it there, and make the change it asks for.
