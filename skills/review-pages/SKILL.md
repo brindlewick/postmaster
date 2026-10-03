@@ -19,7 +19,8 @@ repository the change belongs to.
      spec is the `WORKHORSE-SPEC.md` the head commits, where a run committed one.
    - a run's branch before its pull request: `bun <tool>/scripts/review-page.ts change <dir>
      --base <base> --head <branch> --ticket <n> --summary <file> --spec <file>`, the summary
-     being what the card says the change does and the spec the run's approved one.
+     being what the card says the change does and the spec the run's approved one, which its
+     record keeps as `audit/spec-final.md`.
    It prints one line with the files, lines and chunks, and how many email addresses it removed.
 2. Before the first publish, read `review.json` and search the chunks for home paths, host
    names, private addresses and anything private. The builder removes email addresses and
