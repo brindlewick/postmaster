@@ -204,9 +204,7 @@ describe("brief", () => {
     expect(r.code).toBe(0);
     expect(existsSync(join(repo, "x.brief.md"))).toBe(false);
     expect(existsSync(join(repo, "x.md"))).toBe(false);
-    expect(
-      existsSync(join(repo, ".postmaster", "clerk", "..%2F..%2Fx.brief.md")),
-    ).toBe(true);
+    expect(existsSync(join(repo, ".postmaster", "clerk", "..%2F..%2Fx.brief.md"))).toBe(true);
   });
 });
 

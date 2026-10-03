@@ -268,9 +268,7 @@ describe("a tracker of kind other", () => {
     expect(ready(["mark", otherRepo, "EXT-1"], env).out).toContain(
       "ticket-ready.sh mark --body <file>",
     );
-    expect(ready(["unmark", otherRepo, "EXT-1"], env).out).toContain(
-      "ticket-ready.sh consume ",
-    );
+    expect(ready(["unmark", otherRepo, "EXT-1"], env).out).toContain("ticket-ready.sh consume ");
   }, 60000);
 });
 
