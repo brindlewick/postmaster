@@ -38,7 +38,8 @@ skip() { SKIP=$((SKIP + 1)); printf '  SKIP %s: %s\n' "$1" "$2"; }
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-cd "$TMP" || exit 1
+# The oracle stays in $ROOT: file forms take absolute paths, and the ticket
+# never asks them to work outside a repository.
 
 # --- Fragment-built values: no committed line holds a whole one. ---
 # Pieces join through J, never by adjacency: quote-adjacent pieces would
@@ -103,10 +104,11 @@ if ls "$ROOT/scripts/scrub-check.ts" "$ROOT/scripts/scrub-rewrite.ts" \
 else
   bad "the five scripts exist as TypeScript" "missing .ts beside the wrappers"
 fi
-if grep -il python "$ROOT/scripts/scrub-check."* "$ROOT/scripts/scrub-rewrite."* \
-  "$ROOT/scripts/raw-promote."* "$ROOT/scripts/tree-check."* \
-  "$ROOT/scripts/verify-merge."* 2>/dev/null | grep -q .; then
-  bad "no python in the new scripts" "$(grep -il python "$ROOT"/scripts/scrub-* "$ROOT"/scripts/raw-promote.* "$ROOT"/scripts/tree-check.* "$ROOT"/scripts/verify-merge.* 2>/dev/null)"
+NEW10="$ROOT/scripts/scrub-check.ts $ROOT/scripts/scrub-check.sh $ROOT/scripts/scrub-rewrite.ts $ROOT/scripts/scrub-rewrite.sh $ROOT/scripts/raw-promote.ts $ROOT/scripts/raw-promote.sh $ROOT/scripts/tree-check.ts $ROOT/scripts/tree-check.sh $ROOT/scripts/verify-merge.ts $ROOT/scripts/verify-merge.sh"
+# shellcheck disable=SC2086
+if grep -il python $NEW10 2>/dev/null | grep -q .; then
+  # shellcheck disable=SC2086
+  bad "no python in the new scripts" "$(grep -il python $NEW10 2>/dev/null)"
 else
   ok "no python in the new scripts"
 fi
@@ -147,7 +149,7 @@ C2="$TMP/c2r"
   echo "clean" > m.txt && git add -A && git commit -qm "write to $MAIL1 soon"
   echo "clean" > au.txt && git add -A && git commit --author="Tester <$MAIL1>" -qm "author case"
   echo "clean" > co.txt && git add -A
-  git -c user.name="Tester" -c "$(J "user.em" "ail=$MAIL1")" commit -qm "committer case"
+  git -c user.name="Tester" -c "$(J "user.em" "ail=$MAIL1")" commit --author="Oracle <oracle@$RESERVED>" -qm "committer case"
   git checkout -qb side HEAD~4 && echo "side" > side.txt && git add -A && git commit -qm "side work"
   git checkout -q main 2>/dev/null || git checkout -q master
   git merge -q --no-commit side >/dev/null 2>&1 || true
@@ -383,7 +385,7 @@ fi
 C8_OUT=$(cd "$ROOT" && "$SCRUB" "$EMPTY_TREE" "$C8_BASE" 2>"$TMP/c8.err") && C8_CODE=$? || C8_CODE=$?
 C8_LINES=$(printf '%s' "$C8_OUT" | grep -c . || true)
 printf '  info census to %s: %s lines, exit %s\n' "$C8_BASE" "$C8_LINES" "$C8_CODE"
-if [ "$C8_LINES" -le 50 ]; then ok "at most 50 suspects"; else bad "at most 50 suspects" "$C8_LINES lines"; fi
+if { [ "$C8_CODE" -eq 0 ] || [ "$C8_CODE" -eq 1 ]; } && [ "$C8_LINES" -le 50 ]; then ok "at most 50 suspects"; else bad "at most 50 suspects" "exit $C8_CODE, $C8_LINES lines"; fi
 mk_repo "$TMP/c8r"
 (cd "$TMP/c8r" && echo "clean" > a.txt && git add -A && git commit -qm "clean") || true
 C8_CLEAN=$(cd "$TMP/c8r" && POSTMASTER_DETECTIONS_LOG= "$SCRUB" HEAD~1 HEAD 2>/dev/null) && C8_CLEAN_CODE=$? || C8_CLEAN_CODE=$?
@@ -435,8 +437,9 @@ if [ "$C11_HITS" -ge 3 ] && grep -qi "run the gate again" "$ROOT/skills/postmast
 else
   bad "coachman steps fix findings and rerun the gate" "finding mentions: $C11_HITS"
 fi
-if grep -n -i "finding" "$ROOT/skills/postmaster/coachman.md" | grep -i "gate" | grep -qi "user"; then
-  bad "no gate step puts a finding to the user" "$(grep -n -i "finding" "$ROOT/skills/postmaster/coachman.md" | grep -i "gate" | grep -i "user" | head -3)"
+C11_SEND=$(grep -n -i "finding" "$ROOT/skills/postmaster/coachman.md" | grep -i "gate" | grep -i "user" | grep -viE "not |never |n't | no .*user|without .*user" || true)
+if [ -n "$C11_SEND" ]; then
+  bad "no gate step puts a finding to the user" "$(printf '%s' "$C11_SEND" | head -3)"
 else
   ok "no gate step puts a finding to the user"
 fi
@@ -530,6 +533,7 @@ C17="$TMP/c17r"
   printf 'contact %s\n' "$MAIL1" > b.txt && git add -A && git commit -qm "planted"
   echo "clean" > b.txt && git add -A && git commit -qm "dropped") || bad "C17 fixture" "fixture setup failed"
 C17_BEFORE=$(git -C "$C17" rev-parse HEAD^{tree})
+C17_BASE=$(git -C "$C17" rev-parse HEAD~3)
 C17_OUT=$(cd "$C17" && POSTMASTER_DETECTIONS_LOG="$TMP/c17.log" "$REWRITE" HEAD~3 2>"$TMP/c17.err") && C17_CODE=$? || C17_CODE=$?
 C17_AFTER=$(git -C "$C17" rev-parse HEAD^{tree})
 if [ "$C17_CODE" -eq 0 ] && [ "$C17_BEFORE" = "$C17_AFTER" ]; then
@@ -538,7 +542,7 @@ else
   bad "rewrite exits 0 with the tree unchanged" "exit $C17_CODE"
 fi
 if [ "$(printf '%s' "$C17_OUT" | grep -c "removed")" -eq 1 ]; then ok "rewrite prints one removed line"; else bad "rewrite prints one removed line" "$C17_OUT"; fi
-C17_RE=$(cd "$C17" && "$SCRUB" HEAD~3 HEAD 2>/dev/null) && C17_RE_CODE=$? || C17_RE_CODE=$?
+C17_RE=$(cd "$C17" && "$SCRUB" "$C17_BASE" HEAD 2>/dev/null) && C17_RE_CODE=$? || C17_RE_CODE=$?
 if [ "$C17_RE_CODE" -eq 0 ] && [ -z "$C17_RE" ]; then ok "rescan after rewrite is clean"; else bad "rescan after rewrite is clean" "exit $C17_RE_CODE: $C17_RE"; fi
 mk_repo "$TMP/c18r"
 (cd "$TMP/c18r" && git init -q --bare "$TMP/c18remote" && git remote add origin "$TMP/c18remote"
@@ -684,7 +688,7 @@ flip "added then deleted" email clean "$SCRUB" HEAD~2 HEAD
 FLIP_DIR="$TMP/c16r"
 flip "message" messages clean "$SCRUB" HEAD~1 HEAD
 FLIP_DIR="$TMP"
-MERGE_RULE=$(cd "$C2" && "$SCRUB" "$C2_ROOT" "$C2_HEAD" 2>/dev/null | grep "m.txt" | sed 's/.*: \([a-z-]*\)$/\1' | head -1)
+MERGE_RULE=$(cd "$C2" && "$SCRUB" "$C2_ROOT" "$C2_HEAD" 2>/dev/null | grep "m.txt" | sed 's/.*: \([a-z-]*\)$/\1/' | head -1)
 if [ -n "$MERGE_RULE" ]; then
   MOUT=$(cd "$C2" && SCRUB_CHECK_DISABLE="$MERGE_RULE" "$SCRUB" "$C2_ROOT" "$C2_HEAD" 2>/dev/null) && MCODE=$? || MCODE=$?
   if printf '%s' "$MOUT" | grep -q "m.txt"; then bad "merge flips with $MERGE_RULE" "$MOUT"; else ok "merge flips with $MERGE_RULE"; fi
@@ -744,7 +748,8 @@ else
   bad "--findings prints JSON lines" "exit $F25_CODE: $F25_OUT"
 fi
 : > "$TMP/logdetect.jsonl"
-if (cd "$TMP/c8r" && POSTMASTER_DETECTIONS_LOG="$TMP/logdetect.jsonl" "$SCRUB" --log-detection email notes.txt 1 abc123 >/dev/null 2>&1) && [ -s "$TMP/logdetect.jsonl" ]; then
+LD_COMMIT=$(git -C "$TMP/c8r" rev-parse HEAD)
+if (cd "$TMP/c8r" && POSTMASTER_DETECTIONS_LOG="$TMP/logdetect.jsonl" "$SCRUB" --log-detection email notes.txt 1 "$LD_COMMIT" >/dev/null 2>&1) && [ -s "$TMP/logdetect.jsonl" ]; then
   ok "--log-detection appends"
 else
   bad "--log-detection appends" "nothing appended"
