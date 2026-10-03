@@ -282,9 +282,11 @@ text, since no link can reach it.
 
 **A ticket is brought to ready before it runs.** When the user wants to work on a ticket, a ticket session
 (`skills/postmaster/ticket-session.md`) rewrites it, with the user, into one document that is both the ticket and the
-spec (`skills/postmaster/ticket-template.md`): the acceptance criteria each with their check, the decisions made and
-who made them, the direction, and the premises verified at a base commit. The user reviews that once; the coachman
-writes no spec of its own, and the workhorses decide the files and the tasks.
+spec (`skills/postmaster/ticket-template.md`). Its plain part is what the user signs off: the problem, the acceptance
+criteria, the decisions made and who made them, and the direction, with no file, function or command in it. Under
+`## For the agents` it carries what the lanes need, derived from the plain part: the checks, the technical notes and the
+premises verified at a base commit. The user reviews the plain part once. The coachman writes no spec of its own, and
+the workhorses decide the files and the tasks.
 
 **Comment auto-replies stay off.** Publishing or watching an artifact turns on automatic replies to comments sent to Claude,
 and a reply can land in a thread the conversation never sees. Right after each publish or watch, stop the session's watch on

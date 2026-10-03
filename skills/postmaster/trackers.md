@@ -43,6 +43,10 @@ in its User journey: a fenced block whose `$ ` lines are commands, each followed
 other than 0, a line `[exit N]`.
 ```
 
+A ticket brought to ready in a ticket session has two parts: a plain part the user signs off, which holds the headings
+above, and a `## For the agents` section after them. [ticket-template.md](ticket-template.md) is its shape. The four
+required headings stay required, in the order above.
+
 [Why a ticket carries a direction, and is checked before it is accepted](../../wiki/concepts/ticket-shape.md)
 
 [Why a ticket names its turnpikes](../../wiki/concepts/turnpikes.md)
