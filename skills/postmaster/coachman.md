@@ -540,7 +540,8 @@ from it.
   Exit 1 is a fault in the `reach.ts` control: follow Tool faults and stop the leg. Exit 0 or 3
   continues; 3 means notes or a lane record the script could not read, and that lane is never
   called clean. On exit 2, do not stage synthesis. Write `ESCALATION.md` with the reach lines,
-  the affected workhorse, and your advice on whether its work is safe to use, log `escalate`,
+  the affected workhorse where a lane's record explains the reach, and your advice on whether
+  its work is safe to use, log `escalate`,
   touch `.escalation-ready`, and exit. The postmaster sends every reach to the user, who decides
   whether synthesis may proceed. Do not decide it on the user's behalf.
 - **THERE IS NO SYNTHESIS BASE. You are the synthesizer: judge, then compose.** Set the stage
@@ -948,8 +949,9 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    if another round runs. An unexplained change to a run branch or tracked synthesis file voids
    every reviewer and requires another round, counting toward the three-round cap. Restore saves
    the undone diff under `<dispatch>/reach/` and moves new synthesis files there before resetting
-   the branch and worktree. The check's `user: true` finding means a reviewer wrote outside this
-   run's branches and worktree folders: after restore, write `ESCALATION.md` with the finding and
+   the branch and worktree. An `escalate:` line in the check's output means a reviewer wrote
+   outside this run's branches and worktree folders: after restore, write `ESCALATION.md` with
+   the finding and
    your advice, log `escalate`, touch `.escalation-ready`, and exit before applying a fix or
    launching another review round. The postmaster sends it to the user and waits for their answer.
    Other findings and notes are recorded for the card and do not stop the run. Then tear the round
@@ -1072,7 +1074,7 @@ Set the stage first: `<tool>/scripts/stage.sh <dispatch> shipping`.
 5. **Write `card.md`.** Include the branch, final HEAD, diff stat and commit list; the output
    of `<tool>/scripts/landing.sh card-block <dispatch> <synthesis-wt> <the leg's
    checkpoint>` pasted verbatim as the card's `## Checks`,
-   `## Open findings` and `## Not re-reviewed` sections, appearing exactly once —
+   `## Open findings`, `## Not re-reviewed` and `## Reach` sections, appearing exactly once —
    never retyped or indented, never repeated even inside a fence — and no HTML comment
    anywhere in the card; a card quoting `<!--`, in a commit subject or finding title,
    escapes it, for example as `&lt;!--` (the leg's checkpoint is

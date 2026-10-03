@@ -24,6 +24,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { reachTarget } from "./check-target.ts";
+import { harnessData } from "./launch.ts";
 import { toolRoot } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
 
@@ -243,25 +244,19 @@ function withinAny(path: string, roots: string[]): boolean {
   return roots.some((root) => root !== "" && inside(path, root));
 }
 
-function laneDataHome(
-  info: RunInfo,
-  lane: string,
-  harness: Harness,
-  ownFolder: string,
-  lens?: string,
-): string {
+function laneDataHome(info: RunInfo, lane: string, harness: Harness, ownFolder: string): string {
   if (harness !== "muse" && harness !== "mimo") return "";
-  const configured = text(rec(info.config).harness_data);
-  const root =
-    configured ||
-    process.env.POSTMASTER_HARNESS_DATA ||
-    join(info.home, ".postmaster", "harness-data");
-  const leg = lens ? "review" : "synthesis";
-  const key = `${info.dispatch}|${physical(ownFolder)}|${lane}|${leg}`;
-  const sum = run("cksum", [], { input: key });
-  if (sum.code !== 0) return "";
-  const suffix = sum.out.trim().replace(/ /gu, "-");
-  return physical(join(root, harness, suffix));
+  // Lanes launch with no --leg, so ask launch.sh's own function with an empty leg
+  // rather than repeating its key. HOME is the lane's home on this machine. The
+  // exemption holds by construction: a first write there creates the folder.
+  const savedHome = process.env.HOME;
+  process.env.HOME = info.home;
+  try {
+    return harnessData(harness, "launch", ownFolder, lane, "", info.dispatch);
+  } finally {
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
+  }
 }
 
 function normalPath(info: RunInfo, path: string, access: Access, ownDataHome: string): boolean {
@@ -1035,7 +1030,7 @@ function readLane(
     return laneRecord;
   }
   laneRecord.status = "checked";
-  const dataHome = laneDataHome(info, lane, harness, laneRecord.ownFolder, lens);
+  const dataHome = laneDataHome(info, lane, harness, laneRecord.ownFolder);
   laneRecord.touches = mergeTouches(
     directCallTouches(laneRecord.calls, info, lane, laneRecord.ownFolder, dataHome, lens),
   );
@@ -1536,6 +1531,11 @@ function checkRound(info: RunInfo, round: number): number {
     writeAction(info, `lane:${lane}`, "reach", `r${round}`, JSON.stringify(event));
     console.log(`voided verdict ${lens} ${lane} r${round}: ${reason}`);
   }
+  for (const touch of touches) {
+    if (touch.kind !== "finding") continue;
+    touch.user = !runOwnedWrite(info, touch.path);
+    if (touch.user && touch.lane) console.log(`escalate: ${touch.lane} ${touch.path}`);
+  }
   const logged = logPoint(info, `r${round}`, reads, touches, result);
   return logged.code;
 }
@@ -1552,64 +1552,10 @@ function runOwnedWrite(info: RunInfo, path: string): boolean {
   return name === info.ticket || name.startsWith(`${info.ticket}-`);
 }
 
-function readAllRecords(info: RunInfo): LaneRead[] {
-  const reads = expectedWorkhorseNames(info).map((lane) =>
-    readLane(
-      info,
-      lane,
-      workhorseEvents(info, lane),
-      join(info.repo, ".worktrees", `${info.ticket}-${lane}`),
-    ),
-  );
-  const logs = join(info.dispatch, "logs");
-  // Review rounds are enumerated from their authoritative review-round records.
-  const rounds = new Set<number>();
-  try {
-    for (const entry of readFileNames(logs)) {
-      const match = /^review-r([1-9][0-9]*)\.json$/u.exec(entry);
-      if (match) rounds.add(Number(match[1]));
-    }
-  } catch {
-    throw new Error(`cannot list review records in ${logs}`);
-  }
-  for (const round of [...rounds].sort((a, b) => a - b)) {
-    for (const [lens, lane] of reviewersFor(info, round)) {
-      reads.push(
-        readLane(
-          info,
-          lane,
-          reviewerEvents(info, round, lens, lane),
-          roundOwnFolder(info, lens, lane),
-          lens,
-        ),
-      );
-    }
-  }
-  return reads;
-}
-
-function readFileNames(path: string): string[] {
-  return readdirSync(path);
-}
-
 function checkCard(info: RunInfo): number {
-  const reads = readAllRecords(info);
-  const touches = aggregateLaneReads(reads);
-  const synth = synthesisPath(info);
-  for (const [path, status] of Object.entries(statusMap(info.repo, synth))) {
-    const absolute = resolve(synth, path);
-    touches.push({
-      path: absolute,
-      access: "write",
-      place: "synthesis worktree",
-      kind: "note",
-      lane: "",
-      source: "round",
-      detail: `synthesis worktree changed at card (${status})`,
-    });
-  }
+  const touches: Touch[] = [];
   const { result } = addMainChanges(info, "card", touches, false);
-  const outcome = logPoint(info, "card", reads, touches, result);
+  const outcome = logPoint(info, "card", [], touches, result);
   return outcome.code;
 }
 

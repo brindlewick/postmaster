@@ -45,7 +45,6 @@ step in `--ran`, and the kind in `--control`.
 | `coachman.md`: the blind acceptance tests, and running them on each lane | check |
 | `coachman.md`: verifying a workhorse's claims, and a reviewer's findings, against the code | check |
 | `coachman.md`: the scratch assert, and the integrity check after each round | check |
-| `coachman.md`: checking lane reach and restoring a review round | check |
 | `coachman.md`: classifying a lane REVIEWED or DEGRADED | check |
 | `coachman.md`: running the project's gate, unpiped | gate |
 | `postmaster.md`: Stage F, verifying the card against the code | gate |

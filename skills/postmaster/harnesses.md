@@ -461,9 +461,10 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/mimo/<key> MIMOCODE_DISABLE_CLAUDE_I
 
 ## Reach records
 
-`<tool>/scripts/reach.ts` reads the lane's recorded tool calls. It does not use a lane's final
-message to decide which files it touched. A lane with no reader, an unreadable stream or no
-recognized tool call is `not checked`; it never reads as clean.
+`<tool>/scripts/reach.ts` is this section's executable form: it reads the lane's recorded tool
+calls. It does not use a lane's final message to decide which files it touched. A lane with no
+reader, an unreadable stream or no recognized tool call is `not checked`; it never reads as
+clean. Pi's shape is not yet checked against a recorded stream.
 
 | harness | call record read by `reach.ts` | result used to identify refusal | normal settings and data folders |
 |---|---|---|---|

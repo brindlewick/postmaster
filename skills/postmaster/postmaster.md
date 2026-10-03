@@ -433,20 +433,16 @@ other line of this section holds.
 
 1. **Read `<dispatch>/ESCALATION.md`.** It carries the question, the options the coachman
    sees, its recommendation, and the state of the branches.
-2. **A reach always goes to the user.** When `ESCALATION.md` names a reach finding, do not
-   decide whether the lane's work is safe to use. For an ordinary run, write the question to
-   `<dispatch>/.waiting-on-user`, add the run and question to the waiting list in step 4, tell
-   the user, and wait for their answer. On the answer, resume the same leg and follow it before
-   synthesis or review fixes continue. A fixture run has no user to wait for: when the project
-   carries `.postmaster/fixture`, rule on the reach from the ticket's criteria, log the ruling,
-   and let `fixture.sh score` fail the run.
-3. **Decide within the user's standing instructions** when the question is about the
+2. **Decide within the user's standing instructions** when the question is about the
    work: a within-brief ambiguity, a scope call the ticket's own criteria answer, a lane to
-   drop as DEGRADED, a round to stop at the cap. Log `escalate` with your ruling. A reach
-   finding is never decided here except for the fixture case in step 2.
-4. **Send it up** when it is a reach, genuinely destructive, changes the ticket's scope, touches
+   drop as DEGRADED, a round to stop at the cap. A reach is never decided here. Log `escalate`
+   with your ruling.
+3. **Send it up** when it is genuinely destructive, changes the ticket's scope, touches
    anything outside the repo, is a fault in a control (Tool faults), asks whether to fix a
-   gating finding in a loop with no gating lens (`coachman.md`, Stage 2 step 5), or the user
+   gating finding in a loop with no gating lens (`coachman.md`, Stage 2 step 5), is a reach
+   (`coachman.md`, the reach check: a workhorse's finding, a main checkout change no lane's
+   record explains at `workhorses`, or a reviewer's write outside this run's own branches and
+   folders), or the user
    asked to see it: write the question to the run's `.waiting-on-user`, add the run and the
    question to the waiting list (`<runs>/postmaster/ESCALATION.md`, owned by
    `<tool>/scripts/host.sh leg waiting add <runs> <ticket> <question-file>`), tell the user in
@@ -455,8 +451,10 @@ other line of this section holds.
    pass a postmaster grant up as if it needed the user's word, and never take the user's word
    for something the config gives you. On the user's answer, remove `.waiting-on-user`, remove
    the run from the list with `<tool>/scripts/host.sh leg waiting remove <runs> <ticket>`, and
-   act on the answer as the record named.
-5. **Deliver the ruling:** remove `.escalation-ready`, then resume the current leg (Stage C,
+   act on the answer as the record named. In a fixture run there is no user to ask: when the
+   project carries `.postmaster/fixture`, rule on a reach yourself, as for the spec review,
+   and let the fixture score fail.
+4. **Deliver the ruling:** remove `.escalation-ready`, then resume the current leg (Stage C,
    step 5) with the ruling as the prompt. The ruling is a prompt to a resumed thread, never
    text typed into anything.
 

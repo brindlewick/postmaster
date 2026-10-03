@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./lib/proc.ts";
 import { toolRoot } from "./lib/paths.ts";
+import { harnessData } from "./launch.ts";
 
 const TOOL = toolRoot(import.meta);
 const SCRIPT = join(import.meta.dir, "reach.ts");
@@ -338,9 +339,9 @@ describe("C1-C2: point checks and audit records", () => {
 
   test("C2 each point is logged, including clean points and findings", () => {
     const layout = makeLayout();
+    writeWorkhorse(layout, "codex", [codexFile(join(layout.repo, "out.txt"))]);
     check(layout, "workhorses");
     before(layout);
-    writeWorkhorse(layout, "codex", [codexFile(join(layout.repo, "out.txt"))]);
     check(layout, "r1");
     check(layout, "card");
     const events = reachEvents(layout);
@@ -610,22 +611,22 @@ describe("C5-C7: stream readers and access classification", () => {
     expect(gitDirResult.code).toBe(3);
     expect(gitDirResult.out).toContain(`note read ${layout.repo} (main checkout)`);
 
-    const checksum = run("cksum", [], {
-      input: `${layout.dispatch}|${layout.mimo}|mimo|synthesis`,
-    });
-    expect(checksum.code).toBe(0);
-    const dataKey = checksum.out.trim().replace(/ /gu, "-");
-    const dataFile = join(
-      layout.home,
-      ".postmaster",
-      "harness-data",
-      "mimo",
-      dataKey,
-      "session.json",
-    );
-    const dataWrite = join(layout.dispatch, "logs", "mimo-data.jsonl");
-    writeEvents(dataWrite, [mimo("write_file", { path: dataFile })]);
-    expect(stream(layout, "mimo", dataWrite, layout.mimo).code).toBe(0);
+    const savedHome = process.env.HOME;
+    const savedData = process.env.POSTMASTER_HARNESS_DATA;
+    process.env.HOME = layout.home;
+    delete process.env.POSTMASTER_HARNESS_DATA;
+    try {
+      const dataDir = harnessData("mimo", "launch", layout.mimo, "mimo", "", layout.dispatch);
+      const dataFile = join(dataDir, "session.json");
+      const dataWrite = join(layout.dispatch, "logs", "mimo-data.jsonl");
+      writeEvents(dataWrite, [mimo("write_file", { path: dataFile })]);
+      expect(stream(layout, "mimo", dataWrite, layout.mimo).code).toBe(0);
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHome;
+      if (savedData === undefined) delete process.env.POSTMASTER_HARNESS_DATA;
+      else process.env.POSTMASTER_HARNESS_DATA = savedData;
+    }
 
     const outsideHome = join(layout.home, "other.txt");
     const outsideWrite = join(layout.dispatch, "logs", "outside-home.jsonl");
@@ -676,6 +677,7 @@ describe("C8-C9: escalation boundary", () => {
     const round = check(layout, "r1");
     expect(round.code).toBe(2);
     expect(round.out).toContain("r1: finding");
+    expect(round.out).toContain(`escalate: mimo ${join(layout.home, "outside.txt")}`);
     writeFileSync(join(layout.dispatch, ".escalation-ready"), "");
     const result = run("bash", [RUNS_STATUS, join(layout.repo, ".postmaster", "runs")]);
     expect(result.code).toBe(0);
@@ -687,8 +689,9 @@ describe("C8-C9: escalation boundary", () => {
     ).toBe(false);
     const coachman = readFileSync(join(TOOL, "skills/postmaster/coachman.md"), "utf8");
     const roundCheck = coachman.indexOf("reach.ts check <dispatch> r<round>");
-    const userFinding = coachman.indexOf("user: true", roundCheck);
+    const userFinding = coachman.indexOf("escalate:", roundCheck);
     expect(roundCheck).toBeGreaterThanOrEqual(0);
+    expect(userFinding).toBeGreaterThanOrEqual(0);
     expect(coachman.slice(userFinding)).toContain("exit before applying a fix or");
     expect(coachman.slice(userFinding)).toContain("launching another review round");
   });
@@ -803,12 +806,14 @@ describe("C13-C15: card, contract and balanced controls", () => {
     const round = check(layout, "r1");
     expect(round.code).toBe(2);
     expect(round.out).toContain("r1: note");
+    expect(round.out).toContain("README.md");
+    expect(round.out).toContain("untracked-synthesis.txt");
     expect(actionLines(layout).some((line) => line.action === "degrade")).toBe(false);
     const card = check(layout, "card");
     expect(card.out).toContain("card: note");
-    expect(card.out).toContain("README.md");
-    expect(card.out).toContain("untracked-synthesis.txt");
     expect(card.out).toContain("untracked-main.txt");
+    expect(card.out).not.toContain("README.md");
+    expect(card.out).not.toContain("untracked-synthesis.txt");
     expect(actionLines(layout).some((line) => line.action === "degrade")).toBe(false);
   });
 
