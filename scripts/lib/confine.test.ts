@@ -30,6 +30,27 @@ describe("confinement table", () => {
     expect(sep).toBeGreaterThan(0); // at least one wrap argument before --
   });
 
+  test("the linux wrap binds the root before mounting the fresh /proc", () => {
+    if (process.platform !== "linux") return;
+    const wrapped = wrapCommand(["true"]);
+    expect(wrapped).not.toBeNull();
+    // Bubblewrap applies mounts in order: a later --bind / / would cover an
+    // earlier --proc with the host's /proc, and PIDs would mismatch inside.
+    const bindAt = wrapped!.indexOf("--bind");
+    const procAt = wrapped!.indexOf("--proc");
+    expect(bindAt).toBeGreaterThanOrEqual(0);
+    expect(procAt).toBeGreaterThan(bindAt);
+  });
+
+  test("the linux wrap starts a new session", () => {
+    if (process.platform !== "linux") return;
+    const wrapped = wrapCommand(["true"]);
+    expect(wrapped).not.toBeNull();
+    // Without --new-session the lane shares the launcher's process group and
+    // kill 0 from inside reaches the launcher, which it did not start.
+    expect(wrapped!.includes("--new-session")).toBe(true);
+  });
+
   test("startCheck agrees with a real no-op through the wrap", () => {
     if (!avail.ok) return;
     const wrapped = wrapCommand(["true"]);

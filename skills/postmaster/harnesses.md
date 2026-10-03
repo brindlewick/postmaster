@@ -149,7 +149,7 @@ whose confinement cannot start runs unconfined, with a warning naming the cause.
 
 | system | mechanism | what it does |
 |---|---|---|
-| Linux | Bubblewrap, new PID namespace, fresh /proc | A lane cannot signal a process it did not start. |
+| Linux | Bubblewrap: new PID namespace, fresh /proc, new session | A lane cannot signal a process it did not start. |
 | macOS | `sandbox-exec`, Seatbelt profile denying signals to external processes | Same, via Seatbelt. Untested here; #205 checks it. |
 | other | none | The lane runs unconfined, with the warning. |
 

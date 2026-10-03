@@ -443,8 +443,9 @@ function checkConfinement(runJson: string): Outcome {
   return ok();
 }
 
-// check_pin <dispatch>: the run's checkout still serves its dispatch commit. Silent on success.
-function checkPin(d: string): Outcome {
+// check_pin <dispatch>: the run's checkout still serves its dispatch commit,
+// and its recorded confinement mode agrees with its config. Silent on success.
+function checkPinAndConfinement(d: string): Outcome {
   const runJson = join(d, "run.json");
   const at = pathOf(d);
   if (at.code !== 0) return at;
@@ -458,7 +459,7 @@ function checkPin(d: string): Outcome {
     if (git(checkout, "rev-parse", "--git-dir") === null) {
       return fail(`run-meta: ${checkout} is not a git checkout\n`);
     }
-    return ok();
+    return checkConfinement(runJson);
   }
   const commit = fieldCommit(runJson);
   if (commit === "") return fail(`run-meta: ${d}/run.json records no postmaster commit\n`);
@@ -1035,7 +1036,8 @@ if (import.meta.main) {
     if (cmd === "pin" && argv.length === 3)
       outcome = pin(argv[1] as string, argv[2] as string, readTools());
     else if (cmd === "path" && argv.length === 2) outcome = pathOf(argv[1] as string);
-    else if (cmd === "check" && argv.length === 2) outcome = checkPin(argv[1] as string);
+    else if (cmd === "check" && argv.length === 2)
+      outcome = checkPinAndConfinement(argv[1] as string);
     else if (cmd === "release" && argv.length === 2) outcome = releasePin(argv[1] as string);
     else if (cmd !== undefined && !verbs.includes(cmd) && argv.length === 2) {
       outcome = meta(argv[0] as string, argv[1] as string);

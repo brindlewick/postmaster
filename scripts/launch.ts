@@ -1124,8 +1124,10 @@ if (import.meta.main) {
     if (check.ok) {
       confineWrap = true;
     } else {
+      // A nonfatal warning, so without the launch: prefix: that prefix is
+      // the classifier's mark of a launch refusal, and the lane still runs.
       console.error(
-        `launch: confinement cannot start (${check.cause}); running ${NAME} unconfined`,
+        `warning: confinement cannot start (${check.cause}); running ${NAME} unconfined`,
       );
       if (RUN) {
         run(join(scriptsDir(import.meta), "log-action.sh"), [

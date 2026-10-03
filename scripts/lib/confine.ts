@@ -9,8 +9,9 @@
 // The wrap is an argv prefix placed around the harness command from the
 // outside, at the point launch.sh runs it. The harness argv inside is
 // byte-identical to the off run, bypass flag included. Exit codes pass
-// through, and a lane stopped with SIGTERM or SIGINT ends the launch by
-// that signal, as it does unconfined.
+// through: a harness dead by SIGTERM or SIGINT reads as exit 143 or 130,
+// the same code the unconfined launch reports, since the wrapper cannot
+// tell signal death from that exit.
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -48,42 +49,40 @@ function seatbeltProfile(): string {
   }
 }
 
+// The per-system argv builders. Each row's start check builds its no-op
+// from the same builder as its wrap, so the two can never drift. On Linux
+// --bind covers / first and --proc mounts the fresh /proc over it: order
+// matters, since Bubblewrap applies mounts in the order given. --new-session
+// keeps group signals (kill 0) inside the lane, off the launcher's group.
+const linuxArgs = (cmd: string[]): string[] => [
+  "bwrap",
+  "--unshare-pid",
+  "--bind",
+  "/",
+  "/",
+  "--proc",
+  "/proc",
+  "--dev",
+  "/dev",
+  "--die-with-parent",
+  "--new-session",
+  "--",
+  ...cmd,
+];
+
+const darwinArgs = (cmd: string[]): string[] => {
+  const profile = seatbeltProfile();
+  return ["sandbox-exec", "-f", profile, "--", ...cmd];
+};
+
 // The table: one row per system. The lookup is by the kernel's own name;
 // launch.ts never names a system. No sandbox-runtime, no pinned version.
 const TABLE: Record<string, Row> = {
   linux: {
-    wrap: (cmd) => [
-      "bwrap",
-      "--unshare-pid",
-      "--proc",
-      "/proc",
-      "--bind",
-      "/",
-      "/",
-      "--dev",
-      "/dev",
-      "--die-with-parent",
-      "--",
-      ...cmd,
-    ],
+    wrap: linuxArgs,
     startCheck: () => {
-      const r = spawnSync(
-        "bwrap",
-        [
-          "--unshare-pid",
-          "--proc",
-          "/proc",
-          "--bind",
-          "/",
-          "/",
-          "--dev",
-          "/dev",
-          "--die-with-parent",
-          "--",
-          "true",
-        ],
-        { encoding: "utf8", timeout: 10000 },
-      );
+      const argv = linuxArgs(["true"]);
+      const r = spawnSync(argv[0]!, argv.slice(1), { encoding: "utf8", timeout: 10000 });
       if (r.error) {
         const err = r.error as NodeJS.ErrnoException;
         if (err.code === "ENOENT") return { ok: false, cause: "bubblewrap is not installed" };
@@ -100,14 +99,12 @@ const TABLE: Record<string, Row> = {
     },
   },
   darwin: {
-    wrap: (cmd) => {
-      const profile = seatbeltProfile();
-      return ["sandbox-exec", "-f", profile, "--", ...cmd];
-    },
+    wrap: darwinArgs,
     startCheck: () => {
       const profile = seatbeltProfile();
       if (profile === "") return { ok: false, cause: "cannot write the sandbox profile" };
-      const r = spawnSync("sandbox-exec", ["-f", profile, "--", "true"], {
+      const argv = darwinArgs(["true"]);
+      const r = spawnSync(argv[0]!, argv.slice(1), {
         encoding: "utf8",
         timeout: 10000,
       });

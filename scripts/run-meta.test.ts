@@ -1500,6 +1500,42 @@ beforeAll(async () => {
         t.out,
       );
     }
+    // An old unpinned waybill holds its mode to its config too. The edited
+    // copies drop the checkout (kind "no") and name it from a waybill, so the
+    // pin check passes on the waybill path and the mode check decides.
+    const unpinRun = (src: string, tag: string, edit: (r: Record<string, any>) => void): string => {
+      const dir = join(tmp, `confrun-${tag}`);
+      mkdirSync(dir, { recursive: true });
+      const r = JSON.parse(readFileSync(join(src, "run.json"), "utf8")) as Record<string, any>;
+      const checkout = (r.postmaster as Record<string, any>).checkout as string;
+      delete (r.postmaster as Record<string, any>).checkout;
+      edit(r);
+      writeFileSync(join(dir, "run.json"), JSON.stringify(r));
+      writeFileSync(join(dir, "brief.md"), `## Dispatch\ntool: ${checkout}\n`);
+      return dir;
+    };
+    {
+      const dNoPinOn = unpinRun(dOn, "no-pin-on", (r) => {
+        delete r.confinement;
+      });
+      const t = cli(["check", dNoPinOn]);
+      check(
+        "check fails an unpinned run without the object when its config has confine on",
+        t.code === 1,
+        t.out,
+      );
+    }
+    {
+      const dNoPinOff = unpinRun(dOff, "no-pin-off", (r) => {
+        delete r.confinement;
+      });
+      const t = cli(["check", dNoPinOff]);
+      check(
+        "check passes an unpinned run without the object when its config resolves to off",
+        t.code === 0,
+        t.out,
+      );
+    }
   });
 }, 300000);
 
@@ -1919,5 +1955,13 @@ describe("confinement mode recording", () => {
   });
   test("check fails a run without the object when its config has confine on", () => {
     assertControl("check fails a run without the object when its config has confine on");
+  });
+  test("check fails an unpinned run without the object when its config has confine on", () => {
+    assertControl("check fails an unpinned run without the object when its config has confine on");
+  });
+  test("check passes an unpinned run without the object when its config resolves to off", () => {
+    assertControl(
+      "check passes an unpinned run without the object when its config resolves to off",
+    );
   });
 });
