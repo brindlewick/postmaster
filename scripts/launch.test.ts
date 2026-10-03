@@ -4151,13 +4151,9 @@ s.close()
             ? "sandbox-exec"
             : "";
       const launchLine = (form: string): string =>
-        form
-          .split("\n")
-          .find((l) => l.startsWith("launch:")) ?? "";
+        form.split("\n").find((l) => l.startsWith("launch:")) ?? "";
       const resumeLine = (form: string): string =>
-        form
-          .split("\n")
-          .find((l) => l.startsWith("resume:")) ?? "";
+        form.split("\n").find((l) => l.startsWith("resume:")) ?? "";
       doRun("conf-off", "form", "one");
       const offForm = out;
       const offRc = rc;
