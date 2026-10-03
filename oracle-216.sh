@@ -184,7 +184,7 @@ mkdir -p "$C3D"
   printf '{"a": "{\\"b\\": "{\\"c\\": "{\\"d\\": \\"%s\\"}"}"}"}\n' "$LVL3"
   printf '{"a": "{\\"b\\": "%s' "$MAIL1"
 } > "$C3D/session.jsonl"
-bun -e 'const fs=require("fs");const t="contact "+"process.argv[1]";fs.writeFileSync(process.argv[2],"\ufeff"+t,"utf16le")' "$MAIL2" "$C3D/uni.txt"
+bun -e 'const fs=require("fs");const t="contact "+process.argv[1];fs.writeFileSync(process.argv[2],"\ufeff"+t,"utf16le")' "$MAIL2" "$C3D/uni.txt"
 C3_OUT=$("$SCRUB" --files "$C3D/session.jsonl" "$C3D/uni.txt" 2>"$TMP/c3.err") && C3_CODE=$? || C3_CODE=$?
 C3_LINES=$(printf '%s' "$C3_OUT" | grep -c . || true)
 if [ "$C3_CODE" -eq 1 ] && [ "$C3_LINES" -eq 7 ]; then
