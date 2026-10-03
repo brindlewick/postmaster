@@ -414,7 +414,7 @@ function outerWrites(part: string): boolean {
   if (WRITE_COMMANDS.has(base)) return true;
   if (base === "sed" && words.some((word) => word === "-i" || word.startsWith("-i"))) return true;
   // A write redirect whose target is computed runs the outer write on it.
-  if (/(?:^|\s)(?:>>|>|2>|&>)\s*$/u.test(part)) return true;
+  if (/(?:^|[ \t])(?:>>|>|2>|&>)[ \t]*$/u.test(part)) return true;
   return false;
 }
 
