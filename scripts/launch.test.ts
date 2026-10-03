@@ -33,7 +33,7 @@ const here = import.meta.dir;
 const skipPython = run("sh", ["-c", "command -v python3"]).code !== 0;
 if (skipPython) {
   console.log(
-    "skip parity: and handed-environment comparisons (16) and the resume PWD/OLDPWD/SHLVL match: python3 not on PATH",
+    "skip parity: and handed-environment comparisons (16) and the resume PWD/OLDPWD/SHLVL match and the battery socket checks (4): python3 not on PATH",
   );
 }
 
@@ -42,11 +42,11 @@ if (skipPython) {
 const confinementAvail = startCheck();
 const skipConfined = !confinementAvail.ok;
 if (skipConfined) {
-  console.log(`skip confinement battery confined checks (10): ${confinementAvail.cause}`);
+  console.log(`skip confinement battery confined checks (11): ${confinementAvail.cause}`);
 }
 const skipLinuxOnly = process.platform !== "linux";
 if (skipLinuxOnly) {
-  console.log("skip Linux-only confinement battery checks (4): not Linux");
+  console.log("skip Linux-only confinement battery checks (6): not Linux");
 }
 
 interface ControlRecord {
@@ -4011,15 +4011,18 @@ beforeAll(() => {
         "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); s.listen(1); " +
         "p=s.getsockname()[1]; c=socket.socket(); c.settimeout(5); " +
         "c.connect(('127.0.0.1',p)); c.close(); s.close()";
-      items.push({
-        name: "a network reach",
-        bare: () => run("python3", ["-c", loopbackReach]).code === 0,
-        wrapped: () => {
-          const w = wrapCommand(["python3", "-c", loopbackReach]);
-          if (!w) return false;
-          return run(w[0]!, w.slice(1), { timeout: 30000 }).code === 0;
-        },
-      });
+      // Both socket probes need python3; without it they skip loudly.
+      if (!skipPython) {
+        items.push({
+          name: "a network reach",
+          bare: () => run("python3", ["-c", loopbackReach]).code === 0,
+          wrapped: () => {
+            const w = wrapCommand(["python3", "-c", loopbackReach]);
+            if (!w) return false;
+            return run(w[0]!, w.slice(1), { timeout: 30000 }).code === 0;
+          },
+        });
+      }
 
       // AC2 item: a Unix socket connection
       const unixSocketTest = `
@@ -4034,15 +4037,17 @@ c.connect(p)
 c.close()
 s.close()
 `;
-      items.push({
-        name: "a Unix socket connection",
-        bare: () => run("python3", ["-c", unixSocketTest]).code === 0,
-        wrapped: () => {
-          const w = wrapCommand(["python3", "-c", unixSocketTest]);
-          if (!w) return false;
-          return run(w[0]!, w.slice(1), { timeout: 30000 }).code === 0;
-        },
-      });
+      if (!skipPython) {
+        items.push({
+          name: "a Unix socket connection",
+          bare: () => run("python3", ["-c", unixSocketTest]).code === 0,
+          wrapped: () => {
+            const w = wrapCommand(["python3", "-c", unixSocketTest]);
+            if (!w) return false;
+            return run(w[0]!, w.slice(1), { timeout: 30000 }).code === 0;
+          },
+        });
+      }
 
       // AC2 item: a consistent /proc (Linux: the lane's PIDs match what its
       // /proc shows, so ps and friends see the lane, not the host's table)
@@ -4058,6 +4063,32 @@ s.close()
             if (!w) return false;
             return run(w[0]!, w.slice(1), { timeout: 30000 }).code === 0;
           },
+        });
+      }
+
+      // AC2 item: a host device node (Linux: a shared-memory object made
+      // outside stays visible inside, so the lane keeps the host's /dev)
+      if (process.platform === "linux") {
+        const devNode = (tag: string, probe: (node: string) => boolean): boolean => {
+          const node = `/dev/shm/battery-dev-${tag}-${Math.random().toString(36).slice(2)}`;
+          try {
+            writeFileSync(node, "x\n");
+          } catch {
+            return false;
+          }
+          const seen = probe(node);
+          rmSync(node, { force: true });
+          return seen;
+        };
+        items.push({
+          name: "a host device node",
+          bare: () => devNode("bare", (node) => run("sh", ["-c", `test -e "${node}"`]).code === 0),
+          wrapped: () =>
+            devNode("conf", (node) => {
+              const w = wrapCommand(["sh", "-c", `test -e "${node}"`]);
+              if (!w) return false;
+              return run(w[0]!, w.slice(1), { timeout: 30000 }).code === 0;
+            }),
         });
       }
 
@@ -4319,6 +4350,24 @@ s.close()
       check(
         "the fallback is logged as an action inside a run",
         rc === 0 && fallbackLogged,
+        `rc=${rc} err=${err}`,
+      );
+      // A fallback the log cannot record refuses to run: an unconfined lane
+      // with no fallback action would read as a confined one.
+      record("confnolog", "conf-on");
+      mkdirSync(join(runDir("confnolog"), "actions.jsonl"), { recursive: true });
+      doRun(
+        "conf-on",
+        "launch",
+        "one",
+        join(tmp, "wt"),
+        join(tmp, "prompt.txt"),
+        "--run",
+        runDir("confnolog"),
+      );
+      check(
+        "a fallback that cannot be logged refuses to run",
+        rc !== 0 && err.includes("refusing to run it unconfined"),
         `rc=${rc} err=${err}`,
       );
     }
@@ -5216,18 +5265,18 @@ describe("confinement battery: every AC2 and AC3 item unconfined and confined", 
     expect(r).toBeDefined();
     if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
   });
-  test("a network reach: unconfined", () => {
+  test.skipIf(skipPython)("a network reach: unconfined", () => {
     assertControl("a network reach: unconfined: ok");
   });
-  test.skipIf(skipConfined)("a network reach: confined", () => {
+  test.skipIf(skipPython || skipConfined)("a network reach: confined", () => {
     const r = records.find((x) => x.label.startsWith("a network reach: confined:"));
     expect(r).toBeDefined();
     if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
   });
-  test("a Unix socket connection: unconfined", () => {
+  test.skipIf(skipPython)("a Unix socket connection: unconfined", () => {
     assertControl("a Unix socket connection: unconfined: ok");
   });
-  test.skipIf(skipConfined)("a Unix socket connection: confined", () => {
+  test.skipIf(skipPython || skipConfined)("a Unix socket connection: confined", () => {
     const r = records.find((x) => x.label.startsWith("a Unix socket connection: confined:"));
     expect(r).toBeDefined();
     if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
@@ -5237,6 +5286,14 @@ describe("confinement battery: every AC2 and AC3 item unconfined and confined", 
   });
   test.skipIf(skipLinuxOnly || skipConfined)("a consistent /proc: confined", () => {
     const r = records.find((x) => x.label.startsWith("a consistent /proc: confined:"));
+    expect(r).toBeDefined();
+    if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
+  });
+  test.skipIf(skipLinuxOnly)("a host device node: unconfined", () => {
+    assertControl("a host device node: unconfined: ok");
+  });
+  test.skipIf(skipLinuxOnly || skipConfined)("a host device node: confined", () => {
+    const r = records.find((x) => x.label.startsWith("a host device node: confined:"));
     expect(r).toBeDefined();
     if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
   });
@@ -5333,5 +5390,8 @@ describe("confinement wiring: form shows the wrap, fallback warns and logs", () 
   });
   test("the fallback is logged as an action inside a run", () => {
     assertControl("the fallback is logged as an action inside a run");
+  });
+  test("a fallback that cannot be logged refuses to run", () => {
+    assertControl("a fallback that cannot be logged refuses to run");
   });
 });

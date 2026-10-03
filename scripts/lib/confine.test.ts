@@ -42,6 +42,16 @@ describe("confinement table", () => {
     expect(procAt).toBeGreaterThan(bindAt);
   });
 
+  test("the linux wrap keeps the host device tree", () => {
+    if (process.platform !== "linux") return;
+    const wrapped = wrapCommand(["true"]);
+    expect(wrapped).not.toBeNull();
+    // --dev would replace /dev with a minimal tree, hiding host shared-memory
+    // objects and device nodes the lane had; the wrap binds the host's over.
+    expect(wrapped!.includes("--dev-bind")).toBe(true);
+    expect(wrapped!.includes("--dev")).toBe(false);
+  });
+
   test("the linux wrap starts a new session", () => {
     if (process.platform !== "linux") return;
     const wrapped = wrapCommand(["true"]);

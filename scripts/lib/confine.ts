@@ -52,8 +52,10 @@ function seatbeltProfile(): string {
 // The per-system argv builders. Each row's start check builds its no-op
 // from the same builder as its wrap, so the two can never drift. On Linux
 // --bind covers / first and --proc mounts the fresh /proc over it: order
-// matters, since Bubblewrap applies mounts in the order given. --new-session
-// keeps group signals (kill 0) inside the lane, off the launcher's group.
+// matters, since Bubblewrap applies mounts in the order given. --dev-bind
+// keeps the host's /dev, shared-memory objects included, where a plain --dev
+// would hide its nodes. --new-session keeps group signals (kill 0) inside
+// the lane, off the launcher's group.
 const linuxArgs = (cmd: string[]): string[] => [
   "bwrap",
   "--unshare-pid",
@@ -62,7 +64,8 @@ const linuxArgs = (cmd: string[]): string[] => [
   "/",
   "--proc",
   "/proc",
-  "--dev",
+  "--dev-bind",
+  "/dev",
   "/dev",
   "--die-with-parent",
   "--new-session",

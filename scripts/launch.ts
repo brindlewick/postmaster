@@ -1130,13 +1130,22 @@ if (import.meta.main) {
         `warning: confinement cannot start (${check.cause}); running ${NAME} unconfined`,
       );
       if (RUN) {
-        run(join(scriptsDir(import.meta), "log-action.sh"), [
+        const logged = run(join(scriptsDir(import.meta), "log-action.sh"), [
           RUN,
           `lane:${NAME}`,
           "note",
           NAME,
           `confinement fallback: ${check.cause}`,
         ]);
+        if (logged.code !== 0) {
+          // Fail closed: without the fallback action an unconfined lane
+          // would read as a confined one. The harness never starts, so this
+          // is a launch refusal, correctly classified.
+          const why = logged.err.trim().split("\n")[0] ?? "";
+          die(
+            `cannot log the confinement fallback for ${NAME}; refusing to run it unconfined${why ? `: ${why}` : ""}`,
+          );
+        }
       }
     }
   }
