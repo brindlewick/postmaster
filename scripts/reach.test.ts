@@ -912,3 +912,503 @@ describe("C13-C15: card, contract and balanced controls", () => {
     expect(dirty.out).toContain("changed dirty.txt");
   });
 });
+
+describe("R1: review round 1 fixes", () => {
+  test("R1 a write after a newline is a finding, and a multiline read stays a note", () => {
+    const layout = makeLayout();
+    const target = join(layout.home, "target.txt");
+    const multi = join(layout.dispatch, "logs", "multiline.jsonl");
+    writeEvents(multi, [codex(`echo hi\nrm ${target}`)]);
+    const result = stream(layout, "codex", multi, layout.codex);
+    expect(result.code).toBe(2);
+    expect(result.out).toContain(`finding write ${target} (elsewhere)`);
+
+    const readOnly = join(layout.dispatch, "logs", "multiline-read.jsonl");
+    writeEvents(readOnly, [codex(`echo hi\ncat ${join(layout.home, "n.txt")}`)]);
+    const read = stream(layout, "codex", readOnly, layout.codex);
+    expect(read.code).toBe(3);
+    expect(read.out).toContain("note read");
+  });
+
+  test("R1 |& separates commands like a pipe, and a plain pipe still splits", () => {
+    const layout = makeLayout();
+    const piped = join(layout.home, "piped.txt");
+    const errPipe = join(layout.dispatch, "logs", "pipeamp.jsonl");
+    writeEvents(errPipe, [codex(`echo hi |& tee ${piped}`)]);
+    const result = stream(layout, "codex", errPipe, layout.codex);
+    expect(result.code).toBe(2);
+    expect(result.out).toContain(`finding write ${piped} (elsewhere)`);
+
+    const plain = join(layout.dispatch, "logs", "plain-pipe.jsonl");
+    writeEvents(plain, [codex(`echo hi | cat ${join(layout.home, "n.txt")}`)]);
+    const split = stream(layout, "codex", plain, layout.codex);
+    expect(split.code).toBe(3);
+    expect(split.out).toContain("note read");
+  });
+
+  test("R1 quoted redirect text is not a write, while a real redirect is", () => {
+    const layout = makeLayout();
+    const quoted = join(layout.dispatch, "logs", "quoted.jsonl");
+    writeEvents(quoted, [codex(`echo "> ${join(layout.repo, "README.md")}"`)]);
+    const result = stream(layout, "codex", quoted, layout.codex);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("clean");
+
+    const singleQuoted = join(layout.dispatch, "logs", "quoted-semi.jsonl");
+    writeEvents(singleQuoted, [codex(`echo 'a;b'`)]);
+    expect(stream(layout, "codex", singleQuoted, layout.codex).code).toBe(0);
+
+    const real = join(layout.dispatch, "logs", "real-redirect.jsonl");
+    writeEvents(real, [codex(`echo x > ${join(layout.repo, "r.txt")}`)]);
+    const finding = stream(layout, "codex", real, layout.codex);
+    expect(finding.code).toBe(2);
+    expect(finding.out).toContain("finding write");
+  });
+
+  test("R1 bare cd and cd $HOME move the workdir, and an unknown variable fails closed", () => {
+    const layout = makeLayout();
+    const bare = join(layout.dispatch, "logs", "bare-cd.jsonl");
+    writeEvents(bare, [codex(`cd && echo x > leaked.txt`)]);
+    const bareResult = stream(layout, "codex", bare, layout.codex);
+    expect(bareResult.code).toBe(2);
+    expect(bareResult.out).toContain(`finding write ${join(layout.home, "leaked.txt")}`);
+
+    const home = join(layout.dispatch, "logs", "cd-home.jsonl");
+    writeEvents(home, [codex(`cd $HOME && echo x > leaked3.txt`)]);
+    const homeResult = stream(layout, "codex", home, layout.codex);
+    expect(homeResult.code).toBe(2);
+    expect(homeResult.out).toContain(`finding write ${join(layout.home, "leaked3.txt")}`);
+
+    const tilde = join(layout.dispatch, "logs", "cd-tilde.jsonl");
+    writeEvents(tilde, [codex(`cd ~ && echo x > leaked2.txt`)]);
+    expect(stream(layout, "codex", tilde, layout.codex).code).toBe(2);
+
+    const unknown = join(layout.dispatch, "logs", "cd-unknown.jsonl");
+    writeEvents(unknown, [codex(`cd $NOPE_VAR_X && echo x > rel.txt`)]);
+    const closed = stream(layout, "codex", unknown, layout.codex);
+    expect(closed.code).toBe(0);
+    expect(closed.out).toContain("expected write");
+  });
+
+  test("R1 a path inside a substitution counts for an outer write command", () => {
+    const layout = makeLayout();
+    const target = join(layout.home, "del.txt");
+    const subst = join(layout.dispatch, "logs", "subst.jsonl");
+    writeEvents(subst, [codex(`rm -rf $(echo ${target})`)]);
+    const result = stream(layout, "codex", subst, layout.codex);
+    expect(result.code).toBe(2);
+    expect(result.out).toContain(`finding write ${target} (elsewhere)`);
+
+    const plain = join(layout.dispatch, "logs", "subst-plain.jsonl");
+    writeEvents(plain, [codex(`echo $(echo hi)`)]);
+    expect(stream(layout, "codex", plain, layout.codex).code).toBe(0);
+  });
+
+  test("R1 a refusal demotes only the path it names, and two bare writes fail closed", () => {
+    const layout = makeLayout();
+    const evil = join(layout.home, "evil.txt");
+    const locked = join(layout.home, "locked.txt");
+    const mixed = join(layout.dispatch, "logs", "mixed-refusal.jsonl");
+    writeEvents(mixed, [
+      codex(`echo pwned > ${evil}; cat ${locked}`, `cat: ${locked}: Permission denied`, 1),
+    ]);
+    const result = stream(layout, "codex", mixed, layout.codex);
+    expect(result.code).toBe(2);
+    expect(result.out).toContain(`finding write ${evil} (elsewhere)`);
+    expect(result.out).toContain(`note refused ${locked} (elsewhere)`);
+
+    const single = join(layout.dispatch, "logs", "single-refusal.jsonl");
+    writeEvents(single, [codex(`cat ${locked}`, "Permission denied", 1)]);
+    const named = stream(layout, "codex", single, layout.codex);
+    expect(named.code).toBe(3);
+    expect(named.out).toContain("note refused");
+
+    const bare = join(layout.dispatch, "logs", "bare-multi-refusal.jsonl");
+    const first = join(layout.home, "first.txt");
+    const second = join(layout.home, "second.txt");
+    writeEvents(bare, [codex(`echo x > ${first}; echo y > ${second}`, "Permission denied", 1)]);
+    const closed = stream(layout, "codex", bare, layout.codex);
+    expect(closed.code).toBe(2);
+    expect(closed.out).toContain(`finding write ${first} (elsewhere)`);
+    expect(closed.out).toContain(`finding write ${second} (elsewhere)`);
+
+    const exemptSibling = join(layout.dispatch, "logs", "exempt-sibling-refusal.jsonl");
+    writeEvents(exemptSibling, [
+      codex(`echo pwned > ${evil}; cat /etc/shadow`, "cat: /etc/shadow: Permission denied", 1),
+    ]);
+    const sibling = stream(layout, "codex", exemptSibling, layout.codex);
+    expect(sibling.code).toBe(2);
+    expect(sibling.out).toContain(`finding write ${evil} (elsewhere)`);
+  });
+
+  test("R1 a denied read inside the folder stays expected, outside it is refused", () => {
+    const layout = makeLayout();
+    writeFileSync(join(layout.codex, "in.txt"), "x\n");
+    const inside = join(layout.dispatch, "logs", "inside-denied.jsonl");
+    writeEvents(inside, [codex(`cat ${join(layout.codex, "in.txt")}`, "permission denied", 1)]);
+    const clean = stream(layout, "codex", inside, layout.codex);
+    expect(clean.code).toBe(0);
+    expect(clean.out).toContain("expected");
+
+    const outside = join(layout.dispatch, "logs", "outside-denied.jsonl");
+    writeEvents(outside, [codex(`cat ${join(layout.home, "o.txt")}`, "permission denied", 1)]);
+    const refused = stream(layout, "codex", outside, layout.codex);
+    expect(refused.code).toBe(3);
+    expect(refused.out).toContain("note refused");
+  });
+
+  test("R1 git -c values are skipped, in both directions", () => {
+    const layout = makeLayout();
+    const hidden = join(layout.dispatch, "logs", "git-c-hidden.jsonl");
+    writeEvents(hidden, [codex(`git -c x=y -C ${layout.repo} commit`)]);
+    const write = stream(layout, "codex", hidden, layout.codex);
+    expect(write.code).toBe(2);
+    expect(write.out).toContain(`finding write ${layout.repo} (main checkout)`);
+
+    const misjudged = join(layout.dispatch, "logs", "git-c-read.jsonl");
+    writeEvents(misjudged, [codex(`git -C ${layout.repo} -c core.pager=cat log`)]);
+    const read = stream(layout, "codex", misjudged, layout.codex);
+    expect(read.code).toBe(3);
+    expect(read.out).toContain("note read");
+    expect(read.out).not.toContain("finding");
+
+    const own = join(layout.dispatch, "logs", "git-c-own.jsonl");
+    writeEvents(own, [codex(`git -c x=y status`)]);
+    expect(stream(layout, "codex", own, layout.codex).code).toBe(0);
+  });
+
+  test("R1 creating a branch or tag is a ref write, and listing stays a read", () => {
+    const layout = makeLayout();
+    const branch = join(layout.dispatch, "logs", "git-branch.jsonl");
+    writeEvents(branch, [codex(`git branch sneaky`)]);
+    const created = stream(layout, "codex", branch, layout.codex);
+    expect(created.code).toBe(2);
+    expect(created.out).toContain("finding write refs/heads/sneaky");
+
+    const tag = join(layout.dispatch, "logs", "git-tag.jsonl");
+    writeEvents(tag, [codex(`git tag v9`)]);
+    const tagged = stream(layout, "codex", tag, layout.codex);
+    expect(tagged.code).toBe(2);
+    expect(tagged.out).toContain("finding write refs/tags/v9");
+
+    const forced = join(layout.dispatch, "logs", "git-branch-f.jsonl");
+    writeEvents(forced, [codex(`git branch -f moved main`)]);
+    const moved = stream(layout, "codex", forced, layout.codex);
+    expect(moved.code).toBe(2);
+    expect(moved.out).toContain("finding write refs/heads/moved");
+
+    const deleted = join(layout.dispatch, "logs", "git-tag-d.jsonl");
+    writeEvents(deleted, [codex(`git tag -d v1`)]);
+    const gone = stream(layout, "codex", deleted, layout.codex);
+    expect(gone.code).toBe(2);
+    expect(gone.out).toContain("finding write refs/tags/v1");
+
+    const bare = join(layout.dispatch, "logs", "git-branch-bare.jsonl");
+    writeEvents(bare, [codex(`git branch`)]);
+    expect(stream(layout, "codex", bare, layout.codex).code).toBe(0);
+
+    const list = join(layout.dispatch, "logs", "git-branch-list.jsonl");
+    writeEvents(list, [codex(`git branch -a`)]);
+    expect(stream(layout, "codex", list, layout.codex).code).toBe(0);
+  });
+
+  test("R1 git path operands and redirects are judged, and a push is clean", () => {
+    const layout = makeLayout();
+    const wt = join(layout.dispatch, "logs", "git-worktree.jsonl");
+    writeEvents(wt, [codex(`git worktree add ${join(layout.home, "wt-evil")}`)]);
+    const added = stream(layout, "codex", wt, layout.codex);
+    expect(added.code).toBe(2);
+    expect(added.out).toContain(`finding write ${join(layout.home, "wt-evil")} (elsewhere)`);
+
+    const branched = join(layout.dispatch, "logs", "git-worktree-b.jsonl");
+    writeEvents(branched, [codex(`git worktree add -b nbr ${join(layout.home, "w")}`)]);
+    const made = stream(layout, "codex", branched, layout.codex);
+    expect(made.code).toBe(2);
+    expect(made.out).toContain("finding write refs/heads/nbr");
+
+    const clone = join(layout.dispatch, "logs", "git-clone.jsonl");
+    writeEvents(clone, [codex(`git clone . ${join(layout.home, "clone-evil")}`)]);
+    const cloned = stream(layout, "codex", clone, layout.codex);
+    expect(cloned.code).toBe(2);
+    expect(cloned.out).toContain(`finding write ${join(layout.home, "clone-evil")} (elsewhere)`);
+
+    const redirect = join(layout.dispatch, "logs", "git-redirect.jsonl");
+    writeEvents(redirect, [codex(`git show HEAD:README.md > ${join(layout.home, "g.txt")}`)]);
+    const shown = stream(layout, "codex", redirect, layout.codex);
+    expect(shown.code).toBe(2);
+    expect(shown.out).toContain(`finding write ${join(layout.home, "g.txt")} (elsewhere)`);
+
+    const push = join(layout.dispatch, "logs", "git-push.jsonl");
+    writeEvents(push, [codex(`git push origin x:y`)]);
+    expect(stream(layout, "codex", push, layout.codex).code).toBe(0);
+  });
+
+  test("R1 a ref named by a git read is not a finding, and update-ref still is", () => {
+    const layout = makeLayout();
+    const logged = join(layout.dispatch, "logs", "git-log-ref.jsonl");
+    writeEvents(logged, [codex(`git log refs/heads/main`)]);
+    const read = stream(layout, "codex", logged, layout.codex);
+    expect(read.code).toBe(0);
+    expect(read.out).toContain("clean");
+
+    const moved = join(layout.dispatch, "logs", "git-update-ref.jsonl");
+    writeEvents(moved, [codex(`git update-ref refs/heads/side ${layout.base}`)]);
+    const written = stream(layout, "codex", moved, layout.codex);
+    expect(written.code).toBe(2);
+    expect(written.out).toContain("finding write refs/heads/side");
+  });
+
+  test("R1 reads outside the home and project are routine, writes are not", () => {
+    const layout = makeLayout();
+    const readPath = join(layout.dispatch, "logs", "outside-read.jsonl");
+    writeEvents(readPath, [codex(`cat /var/tmp/r1-outside.txt`)]);
+    const read = stream(layout, "codex", readPath, layout.codex);
+    expect(read.code).toBe(0);
+    expect(read.out).toContain("clean");
+
+    const writePath = join(layout.dispatch, "logs", "outside-write.jsonl");
+    writeEvents(writePath, [codex(`echo x > /var/tmp/r1-outside.txt`)]);
+    const written = stream(layout, "codex", writePath, layout.codex);
+    expect(written.code).toBe(2);
+    expect(written.out).toContain("finding write /var/tmp/r1-outside.txt (elsewhere)");
+  });
+
+  test("R1 tool-checkout and lane-brief reads are routine, other dispatch reads are not", () => {
+    const layout = makeLayout();
+    const tool = join(layout.home, "tool");
+    mkdirSync(join(tool, "scripts"), { recursive: true });
+    writeFileSync(join(tool, "scripts", "x.ts"), "x\n");
+    const runJson = JSON.parse(readFileSync(join(layout.dispatch, "run.json"), "utf8"));
+    runJson.postmaster.checkout = tool;
+    writeFileSync(join(layout.dispatch, "run.json"), JSON.stringify(runJson));
+    const toolPath = join(layout.dispatch, "logs", "tool-read.jsonl");
+    writeEvents(toolPath, [codex(`cat ${join(tool, "scripts", "x.ts")}`)]);
+    const toolRead = stream(layout, "codex", toolPath, layout.codex);
+    expect(toolRead.code).toBe(0);
+    expect(toolRead.out).toContain("clean");
+
+    const briefPath = join(layout.dispatch, "logs", "brief-read.jsonl");
+    writeEvents(briefPath, [codex(`cat ${join(layout.dispatch, "brief.md")}`)]);
+    const briefRead = stream(layout, "codex", briefPath, layout.codex);
+    expect(briefRead.code).toBe(0);
+    expect(briefRead.out).toContain("clean");
+
+    const otherPath = join(layout.dispatch, "logs", "dispatch-read.jsonl");
+    writeEvents(otherPath, [codex(`cat ${join(layout.dispatch, "run.json")}`)]);
+    const other = stream(layout, "codex", otherPath, layout.codex);
+    expect(other.code).toBe(3);
+    expect(other.out).toContain("note read");
+  });
+
+  test("R1 a hyphenated lane restores its own worktree", () => {
+    const layout = makeLayout();
+    const lane = "my-lane";
+    const wt = join(layout.repo, ".worktrees", `T-${lane}`);
+    git(layout.repo, "worktree", "add", "-q", "-b", `wb/T-${lane}`, wt, "main");
+    const runJson = JSON.parse(readFileSync(join(layout.dispatch, "run.json"), "utf8"));
+    runJson.config.lanes[lane] = { harness: "codex" };
+    writeFileSync(join(layout.dispatch, "run.json"), JSON.stringify(runJson));
+    const manifest = JSON.parse(readFileSync(join(layout.dispatch, "manifest.json"), "utf8"));
+    manifest.lanes[lane] = {};
+    writeFileSync(join(layout.dispatch, "manifest.json"), JSON.stringify(manifest));
+    before(layout);
+    addCommit(layout.repo, wt, "lane-work.txt");
+    expect(call(layout, ["restore", layout.dispatch, "r1"]).code).toBe(0);
+    expect(git(layout.repo, "rev-parse", `refs/heads/wb/T-${lane}`)).toBe(layout.base);
+    expect(git(layout.repo, "-C", wt, "status", "--porcelain")).toBe("");
+  });
+
+  test("R1 an ownerless tracked change voids every reviewer, and a merge voids only its lane", () => {
+    const layout = makeLayout();
+    writeReviewer(layout, "codex", [codex(`git -C ${layout.synth} gc`)]);
+    before(layout);
+    writeFileSync(join(layout.synth, "README.md"), "changed by nobody's record\n");
+    const result = check(layout, "r1");
+    expect(
+      actionLines(layout)
+        .filter((line) => line.action === "degrade")
+        .map((line) => line.target)
+        .sort(),
+    ).toEqual(["codex", "mimo"]);
+    expect(result.out).toContain("unexplained");
+
+    const owned = makeLayout();
+    before(owned);
+    const commit = addCommit(owned.repo, owned.reviewers.mimo, "reviewed.txt");
+    git(owned.repo, "-C", owned.synth, "merge", "--ff-only", commit);
+    writeReviewer(owned, "mimo", [
+      mimo("bash", { command: `git -C ${owned.synth} merge --ff-only ${commit}` }),
+    ]);
+    check(owned, "r1");
+    expect(
+      actionLines(owned)
+        .filter((line) => line.action === "degrade")
+        .map((line) => line.target),
+    ).toEqual(["mimo"]);
+  });
+
+  test("R1 a round-change finding names the synthesis worktree, never inside", () => {
+    const layout = makeLayout();
+    before(layout);
+    const commit = addCommit(layout.repo, layout.reviewers.mimo, "reviewed.txt");
+    git(layout.repo, "-C", layout.synth, "merge", "--ff-only", commit);
+    writeReviewer(layout, "mimo", [
+      mimo("bash", { command: `git -C ${layout.synth} merge --ff-only ${commit}` }),
+    ]);
+    // The coachman runs the check from the synthesis worktree; the label must
+    // not depend on the working directory.
+    const cwd = process.cwd();
+    process.chdir(layout.synth);
+    try {
+      const result = check(layout, "r1");
+      expect(result.out).toContain("(synthesis worktree)");
+      expect(result.out).not.toContain("(inside)");
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  test("R1 restore leaves uncommitted work on unmoved branches alone", () => {
+    const layout = makeLayout();
+    before(layout);
+    writeFileSync(join(layout.codex, "precious.txt"), "uncommitted work\n");
+    git(layout.repo, "-C", layout.codex, "add", "precious.txt");
+    writeFileSync(join(layout.codex, "README.md"), "uncommitted edit\n");
+    expect(call(layout, ["restore", layout.dispatch, "r1"]).code).toBe(0);
+    expect(readFileSync(join(layout.codex, "precious.txt"), "utf8")).toBe("uncommitted work\n");
+    expect(readFileSync(join(layout.codex, "README.md"), "utf8")).toBe("uncommitted edit\n");
+    const status = git(layout.repo, "-C", layout.codex, "status", "--porcelain");
+    expect(status).toContain("precious.txt");
+    expect(status).toContain("README.md");
+  });
+
+  test("R1 restore of a moved branch saves its uncommitted edit, and a clean move saves none", () => {
+    const layout = makeLayout();
+    before(layout);
+    addCommit(layout.repo, layout.codex, "lane-work.txt");
+    writeFileSync(join(layout.codex, "README.md"), "uncommitted edit\n");
+    expect(call(layout, ["restore", layout.dispatch, "r1"]).code).toBe(0);
+    expect(git(layout.repo, "rev-parse", "refs/heads/wb/T-codex")).toBe(layout.base);
+    const saved = join(
+      layout.dispatch,
+      "reach",
+      "r1",
+      "branches",
+      "refs_heads_wb_T-codex.worktree.patch",
+    );
+    expect(readFileSync(saved, "utf8")).toContain("uncommitted edit");
+
+    const clean = makeLayout();
+    before(clean);
+    addCommit(clean.repo, clean.codex, "lane-work.txt");
+    expect(call(clean, ["restore", clean.dispatch, "r1"]).code).toBe(0);
+    expect(
+      existsSync(
+        join(clean.dispatch, "reach", "r1", "branches", "refs_heads_wb_T-codex.worktree.patch"),
+      ),
+    ).toBe(false);
+  });
+
+  test("R1 restore faults when the synthesis worktree cannot be verified", () => {
+    const layout = makeLayout();
+    before(layout);
+    addCommit(layout.repo, layout.synth, "synth-work.txt");
+    const ticket = git(layout.repo, "rev-parse", "refs/heads/T");
+    expect(ticket).not.toBe(layout.base);
+    rmSync(join(layout.synth, ".git"), { force: true });
+    expect(call(layout, ["restore", layout.dispatch, "r1"]).code).toBe(1);
+    expect(git(layout.repo, "rev-parse", "refs/heads/main")).toBe(layout.base);
+
+    const detached = makeLayout();
+    before(detached);
+    git(detached.repo, "-C", detached.synth, "checkout", "-q", detached.base);
+    expect(call(detached, ["restore", detached.dispatch, "r1"]).code).toBe(1);
+  });
+
+  test("R1 a second restore keeps the first saved copy", () => {
+    const layout = makeLayout();
+    before(layout);
+    const commit = addCommit(layout.repo, layout.reviewers.mimo, "reviewed.txt");
+    git(layout.repo, "-C", layout.synth, "merge", "--ff-only", commit);
+    expect(call(layout, ["restore", layout.dispatch, "r1"]).code).toBe(0);
+    const patch = join(layout.dispatch, "reach", "r1", "synthesis.patch");
+    expect(readFileSync(patch, "utf8").length).toBeGreaterThan(0);
+    expect(call(layout, ["restore", layout.dispatch, "r1"]).code).toBe(0);
+    expect(readFileSync(patch, "utf8").length).toBeGreaterThan(0);
+    expect(existsSync(join(layout.dispatch, "reach", "r1-2", "synthesis.patch"))).toBe(true);
+  });
+
+  test("R1 repo and tool come from their own brief sections, or the whole brief", () => {
+    const layout = makeLayout();
+    writeFileSync(
+      join(layout.dispatch, "brief.md"),
+      `# Waybill: T\nturnpikes: bug\n\n## Ticket\n\nA ticket quoting the template:\nrepo: /nowhere/at/all\ntool: /evil/tool\n\n## Project profile\nrepo: ${layout.repo} default branch: main BASE: ${layout.base}\n\n## Dispatch\ntool: ${TOOL}\n`,
+    );
+    expect(check(layout, "workhorses").code).toBe(0);
+
+    const toolRead = join(layout.dispatch, "logs", "tool-read.jsonl");
+    writeEvents(toolRead, [codex(`cat ${join(TOOL, "scripts", "launch.ts")}`)]);
+    expect(stream(layout, "codex", toolRead, layout.codex).code).toBe(0);
+
+    const old = makeLayout();
+    writeFileSync(join(old.dispatch, "brief.md"), `repo: ${old.repo}\n`);
+    expect(check(old, "workhorses").code).toBe(0);
+  });
+
+  test("R1 the card escapes hostile filenames", () => {
+    const layout = makeLayout();
+    check(layout, "workhorses");
+    before(layout);
+    check(layout, "r1");
+    writeFileSync(join(layout.repo, "weird<!--x.txt"), "x\n");
+    writeFileSync(join(layout.repo, "back`tick.txt"), "x\n");
+    writeFileSync(join(layout.repo, "new\nline.txt"), "x\n");
+    check(layout, "card");
+    writeFileSync(
+      join(layout.dispatch, "checks.json"),
+      JSON.stringify({
+        checks: [{ name: "gate", source: "default:gate", command: "true", shows: "gate" }],
+      }),
+    );
+    const sha = git(layout.synth, "rev-parse", "HEAD").slice(0, 12);
+    writeAction(layout, "coachman", "verify", "gate", `on=${sha}@${sha} result=pass exit=0 secs=1`);
+    const checkpoint = join(layout.dispatch, "checkpoint.md");
+    writeFileSync(checkpoint, "## Findings (bug)\n\nnone\n");
+    const card = run("bash", [LANDING, "card-block", layout.dispatch, layout.synth, checkpoint]);
+    expect(card.code).toBe(0);
+    expect(card.out).toContain("weird&lt;!--x.txt");
+    expect(card.out).toContain("back'tick.txt");
+    expect(card.out).toContain("new\\nline.txt");
+    expect(card.out).not.toContain("<!--");
+    expect(card.out).not.toContain("`tick");
+  });
+
+  test("R1 the card reads project paths relative through a symlinked dispatch", () => {
+    const layout = makeLayout();
+    writeWorkhorse(layout, "codex", [
+      codexFile(join(layout.repo, "out.txt")),
+      codexFile(join(layout.home, "other", "x")),
+    ]);
+    mkdirSync(join(layout.home, "other"), { recursive: true });
+    check(layout, "workhorses");
+    check(layout, "card");
+    writeFileSync(
+      join(layout.dispatch, "checks.json"),
+      JSON.stringify({
+        checks: [{ name: "gate", source: "default:gate", command: "true", shows: "gate" }],
+      }),
+    );
+    const sha = git(layout.synth, "rev-parse", "HEAD").slice(0, 12);
+    writeAction(layout, "coachman", "verify", "gate", `on=${sha}@${sha} result=pass exit=0 secs=1`);
+    const checkpoint = join(layout.dispatch, "checkpoint.md");
+    writeFileSync(checkpoint, "## Findings (bug)\n\nnone\n");
+    const link = join(tmpdir(), `reach-link-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    symlinkSync(layout.root, link);
+    CREATED.push(link);
+    const viaLink = join(link, "repo", ".postmaster", "runs", "T");
+    const card = run("bash", [LANDING, "card-block", viaLink, layout.synth, checkpoint]);
+    expect(card.code).toBe(0);
+    expect(card.out).toContain("`out.txt`");
+    expect(card.out).toContain("outside the project");
+  });
+});

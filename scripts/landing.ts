@@ -84,7 +84,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
-import { reachActions } from "./reach.ts";
+import { physical, reachActions } from "./reach.ts";
 import {
   D_CLASS,
   END_OF_STRING,
@@ -342,15 +342,25 @@ function checkpointStates(path: string): CheckpointFinding[] {
   return out;
 }
 
+/** Card-safe path text: no comment opener, no code-span break, one line. */
+function escapeCardPath(shown: string): string {
+  return shown
+    .replace(/<!--/gu, "&lt;!--")
+    .replace(/`/gu, "'")
+    .replace(/\r\n|\r|\n/gu, "\\n");
+}
+
 function reachPath(dispatch: string, path: unknown): string {
   if (typeof path !== "string" || path === "") return "unknown path";
-  if (path.startsWith("refs/")) return path;
-  if (!isAbsolute(path)) return path;
-  const repo = join(dispatch, "..", "..", "..");
+  if (path.startsWith("refs/")) return escapeCardPath(path);
+  if (!isAbsolute(path)) return escapeCardPath(path);
+  const repo = physical(join(dispatch, "..", "..", ".."));
   const rel = relative(repo, path);
-  return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)
-    ? "outside the project"
-    : rel.split(sep).join("/");
+  const shown =
+    rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)
+      ? "outside the project"
+      : rel.split(sep).join("/");
+  return escapeCardPath(shown);
 }
 
 function reachBlock(dispatch: string): string {
