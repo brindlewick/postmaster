@@ -530,13 +530,13 @@ function startStub(
         labels.push(created);
         return j(created);
       }
-      const mItem = /^\/api\/v1\/workspaces\/ws\/work-items\/([A-Z]+-\d+)\/$/.exec(p);
+      const mItem = /^\/api\/v1\/workspaces\/ws\/work-items\/([A-Z]+-[0-9]+)\/$/u.exec(p);
       if (req.method === "GET" && mItem) {
         const it = items[mItem[1]!];
         if (!it) return new Response("no such item", { status: 404 });
         return j(it);
       }
-      const mPatch = /^\/api\/v1\/workspaces\/ws\/projects\/p1\/work-items\/([^/]+)\/$/.exec(p);
+      const mPatch = /^\/api\/v1\/workspaces\/ws\/projects\/p1\/work-items\/([^/]+)\/$/u.exec(p);
       if (req.method === "PATCH" && mPatch) {
         const patch = JSON.parse(body) as Record<string, unknown>;
         for (const it of Object.values(items)) {
@@ -548,7 +548,7 @@ function startStub(
         return j({});
       }
       const mComments =
-        /^\/api\/v1\/workspaces\/ws\/projects\/p1\/work-items\/([^/]+)\/comments\/$/.exec(p);
+        /^\/api\/v1\/workspaces\/ws\/projects\/p1\/work-items\/([^/]+)\/comments\/$/u.exec(p);
       if (req.method === "GET" && mComments) return j({ results: [], next_page_results: false });
       return new Response(`stub plane: unexpected ${req.method} ${p}`, { status: 500 });
     },

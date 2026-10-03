@@ -124,7 +124,7 @@ function workhorseLanes(doc: Record<string, unknown>): Lane[] {
 export function baseModelName(model: string): string {
   return model
     .trim()
-    .replace(/\[.*\]$/, "")
+    .replace(/\[.*\]$/u, "")
     .split("/")
     .at(-1)!
     .trim();
@@ -138,12 +138,14 @@ function parseTicketRead(out: string): { title: string; labels: string[] } {
   let title = "";
   let labels: string[] = [];
   for (const raw of out.split("\n")) {
-    const line = raw.replace(/\r$/, "");
+    const line = raw.replace(/\r$/u, "");
     if (line === "") break;
-    const m = /^([A-Za-z-]+):\s*(.*)$/.exec(line);
+    const m = /^([A-Za-z-]+):[ \t]*(.*)$/u.exec(line);
     if (!m) continue;
-    if (m[1]!.toLowerCase() === "title") title = m[2]!;
-    if (m[1]!.toLowerCase() === "labels")
+    // ASCII: adapter header names are machine-written; folded once against ASCII literals.
+    const key = m[1]!.toLowerCase();
+    if (key === "title") title = m[2]!;
+    if (key === "labels")
       labels = m[2]!
         .split(",")
         .map((s) => s.trim())
@@ -219,6 +221,7 @@ function writeBrief(repo: string, id: string): Brief {
   const ticket = readTicket(repo, id, kind) ?? { title: "", labels: [] };
   const name = displayId(kind, id);
   const session = ticket.title ? `${name}, ${ticket.title}` : name;
+  // ASCII: folds label names for the ASCII literal "ready"; only ASCII-equal names match.
   if (ticket.labels.some((l) => l.toLowerCase() === "ready")) {
     requireScript(
       "ticket-ready.sh",
@@ -230,7 +233,7 @@ function writeBrief(repo: string, id: string): Brief {
   const template = findString(doc, ["planning", "review_link"]);
   const prefsPath = join(dirname(cfgPath), "preferences.md");
   const preferences = isFile(prefsPath)
-    ? readStrict(prefsPath).replace(/\n+$/, "")
+    ? readStrict(prefsPath).replace(/\n+$/u, "")
     : "None are set.";
   const base = defaultBase(repo);
   const dir = clerkDir(repo);
@@ -325,7 +328,7 @@ function sessionAlive(handle: string): boolean {
 // `launch: ` prefix and a leading `cd <dir> &&` are dropped: the caller
 // passes its own cwd to the host.
 export function splitCommand(line: string): string[] {
-  const rest = line.replace(/^launch:\s*/u, "");
+  const rest = line.replace(/^launch:[ \t]*/u, "");
   const words: string[] = [];
   let word = "";
   let quote = "";
@@ -407,7 +410,7 @@ function cmdStart(repo: string, id: string): number {
   ]);
   if (started.code === 3) {
     console.error(`clerk: no session host answers; open ${brief.session} by hand:`);
-    console.error(startCmd.replace(/^launch:\s*/u, ""));
+    console.error(startCmd.replace(/^launch:[ \t]*/u, ""));
     console.error(`then read the brief at ${briefPath}.`);
     return 3;
   }
@@ -438,7 +441,7 @@ function cmdReader(model: string, plainFile: string, worktree: string): number {
   if (!isFile(plainFile)) die(`cannot read the plain part ${plainFile}`);
   const plain = readStrict(plainFile);
   if (!plain.trim()) die(`the plain part ${plainFile} is empty`);
-  if (/^## For the agents\s*$/m.test(plain))
+  if (/^## For the agents[ \t]*$/mu.test(plain))
     die(`${plainFile} is not a plain part; pass the plain part only`);
   if (!isDir(worktree)) die(`${worktree} is not a directory`);
   const { doc } = readConfig();
@@ -465,7 +468,7 @@ function cmdReader(model: string, plainFile: string, worktree: string): number {
       "",
       "## The plain part",
       "",
-      plain.replace(/\n+$/, ""),
+      plain.replace(/\n+$/u, ""),
       "",
       "## The base worktree",
       "",

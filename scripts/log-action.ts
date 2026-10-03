@@ -255,7 +255,12 @@ function logAction(
     const result = /(?:^|[ \t])result=(same|moved|unknown|changed|missing)(?:[ \t]|$)/u.test(
       detail,
     );
-    if (actor !== "coachman" || !target.trim() || !/(?:^|[ \t])base=\S+/u.test(detail) || !result) {
+    if (
+      actor !== "coachman" ||
+      !target.trim() ||
+      !/(?:^|[ \t])base=[^ \t\r\n]+/u.test(detail) ||
+      !result
+    ) {
       console.error(
         "log-action: premises needs the coachman, a verified commit, base=<commit> and result=<state>",
       );

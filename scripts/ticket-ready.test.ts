@@ -141,7 +141,7 @@ describe("the readiness matrix on a local store", () => {
   test("a draft ticket names the draft line once", () => {
     const r = ready([repo, "4"]);
     expect(r.code).toBe(2);
-    const drafts = r.out.split("\n").filter((l) => /draft/i.test(l));
+    const drafts = r.out.split("\n").filter((l) => /draft/iu.test(l));
     expect(drafts.length).toBe(1);
   }, 30000);
 
@@ -151,9 +151,9 @@ describe("the readiness matrix on a local store", () => {
     const n = local(["create", "Bad all ways", e]);
     const r = ready([repo, n]);
     expect(r.code).toBe(2);
-    expect(/draft/i.test(r.out)).toBe(true);
-    expect(/parts|for the agents/i.test(r.out)).toBe(true);
-    expect(/ready label is missing/i.test(r.out)).toBe(true);
+    expect(/draft/iu.test(r.out)).toBe(true);
+    expect(/parts|for the agents/iu.test(r.out)).toBe(true);
+    expect(/ready label is missing/iu.test(r.out)).toBe(true);
   }, 30000);
 
   test("an unknown id exits 1", () => {
@@ -347,7 +347,7 @@ describe("the matrix through the github double", () => {
     expect(onePart.out).toContain("ticket-parts:");
     const draft = ready([repoGh, "4"], env);
     expect(draft.code).toBe(2);
-    expect(/draft/i.test(draft.out)).toBe(true);
+    expect(/draft/iu.test(draft.out)).toBe(true);
     expect(ready([repoGh, "9999"], env).code).toBe(1);
   }, 60000);
 });
@@ -385,14 +385,14 @@ function startPlaneStub(items: Record<string, StubItem>) {
         });
       if (req.method === "GET" && p === "/api/v1/workspaces/ws/projects/p1/labels/")
         return j({ results: labels, next_page_results: false });
-      const mItem = /^\/api\/v1\/workspaces\/ws\/work-items\/([A-Z]+-\d+)\/$/.exec(p);
+      const mItem = /^\/api\/v1\/workspaces\/ws\/work-items\/([A-Z]+-[0-9]+)\/$/u.exec(p);
       if (req.method === "GET" && mItem) {
         const it = items[mItem[1]!];
         if (!it) return new Response("no such item", { status: 404 });
         return j(it);
       }
       const mComments =
-        /^\/api\/v1\/workspaces\/ws\/projects\/p1\/work-items\/([^/]+)\/comments\/$/.exec(p);
+        /^\/api\/v1\/workspaces\/ws\/projects\/p1\/work-items\/([^/]+)\/comments\/$/u.exec(p);
       if (req.method === "GET" && mComments) return j({ results: [], next_page_results: false });
       return new Response(`stub plane: unexpected ${req.method} ${p}`, { status: 500 });
     },
@@ -446,7 +446,7 @@ describe("the matrix through the plane double", () => {
       expect(onePart.out).toContain("ticket-parts:");
       const draft = await readyAsync([repoPl, "PM-4"], env);
       expect(draft.code).toBe(2);
-      expect(/draft/i.test(draft.out)).toBe(true);
+      expect(/draft/iu.test(draft.out)).toBe(true);
       expect((await readyAsync([repoPl, "PM-9999"], env)).code).toBe(1);
     } finally {
       server.stop(true);

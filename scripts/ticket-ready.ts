@@ -59,12 +59,14 @@ function parseTicketRead(out: string): { title: string; labels: string[]; body: 
   let labels: string[] = [];
   let i = 0;
   for (; i < lines.length; i++) {
-    const line = (lines[i] ?? "").replace(/\r$/, "");
+    const line = (lines[i] ?? "").replace(/\r$/u, "");
     if (line === "") break;
-    const m = /^([A-Za-z-]+):\s*(.*)$/.exec(line);
+    const m = /^([A-Za-z-]+):[ \t]*(.*)$/u.exec(line);
     if (!m) continue;
-    if (m[1]!.toLowerCase() === "title") title = m[2]!;
-    if (m[1]!.toLowerCase() === "labels")
+    // ASCII: adapter header names are machine-written; folded once against ASCII literals.
+    const key = m[1]!.toLowerCase();
+    if (key === "title") title = m[2]!;
+    if (key === "labels")
       labels = m[2]!
         .split(",")
         .map((s) => s.trim())
@@ -74,6 +76,7 @@ function parseTicketRead(out: string): { title: string; labels: string[]; body: 
 }
 
 function hasReadyMark(labels: string[]): boolean {
+  // ASCII: folds label names for the ASCII literal "ready"; only ASCII-equal names match.
   return labels.some((l) => l.toLowerCase() === "ready");
 }
 
@@ -111,7 +114,7 @@ function runChecks(input: CheckInput): { reasons: string[]; turnpikes: string } 
     // ticket-parts stops at a structural failure, so on a ticket failing
     // several ways its draft finding never prints; name the draft line then.
     const first = input.body.split("\n").find((l) => l.trim() !== "") ?? "";
-    if (first.startsWith("DRAFT:") && !/draft/i.test(partsText)) {
+    if (first.startsWith("DRAFT:") && !/draft/iu.test(partsText)) {
       reasons.unshift("the first line is a DRAFT line");
     }
     return { reasons, turnpikes };

@@ -51,7 +51,8 @@ function die(message: string, code = 1): never {
 
 export function parseRange(spec: string): { start?: number; end?: number } {
   const text = spec.startsWith("#") ? spec.slice(1) : spec;
-  const match = /^L(\d+)(?:-L?(\d+)?)?$/i.exec(text) ?? /^(\d+)(?:-(\d+)?)?$/.exec(text);
+  const match =
+    /^L([0-9]+)(?:-L?([0-9]+)?)?$/iu.exec(text) ?? /^([0-9]+)(?:-([0-9]+)?)?$/u.exec(text);
   if (!match) return {};
   const start = Math.max(Number(match[1]), 1);
   const end = match[2] === undefined || match[2] === "" ? undefined : Math.max(Number(match[2]), 1);
@@ -65,13 +66,14 @@ function safePath(path: string): boolean {
 }
 
 const LINK_RE =
-  /https?:\/\/[^\s)]+\/blob\/([0-9a-f]{7,40})\/([^)\s#]+?)(#L\d+(?:-L?\d+)?)?(?=[)\s]|$)/gi;
+  // ASCII: \s stops the URL at any space in ticket prose; the sha and path it captures are ASCII-narrowed.
+  /https?:\/\/[^\s)]+\/blob\/([0-9a-f]{7,40})\/([^)\s#]+?)(#L[0-9]+(?:-L?[0-9]+)?)?(?=[)\s]|$)/giu;
 const PATH_RE =
-  /((?:[\p{L}\p{N}_.-]+\/)*[\p{L}\p{N}_.-]+\.[\p{L}\p{N}_.-]+)(#L\d+(?:-L?\d+)?|\bL\d+(?:-L?\d+)?)?/gu;
+  /((?:[\p{L}\p{N}_.-]+\/)*[\p{L}\p{N}_.-]+\.[\p{L}\p{N}_.-]+)(#L[0-9]+(?:-L?[0-9]+)?|(?<![A-Za-z0-9_])L[0-9]+(?:-L?[0-9]+)?)?/gu;
 
 export function agentsPart(body: string): string {
   const lines = body.split("\n");
-  const start = lines.findIndex((line) => /^## For the agents\s*$/.test(line.trim()));
+  const start = lines.findIndex((line) => /^## For the agents[ \t]*$/u.test(line.trim()));
   if (start < 0) return "";
   return lines.slice(start + 1).join("\n");
 }
@@ -100,7 +102,7 @@ export function citationsFromText(body: string): Citation[] {
     push({ path, ...parseRange(match[3] ?? ""), source: "link" });
   }
   for (const line of text.split("\n")) {
-    const spans = line.match(/`[^`\n]+`/g) ?? [];
+    const spans = line.match(/`[^`\n]+`/gu) ?? [];
     for (const span of spans) {
       PATH_RE.lastIndex = 0;
       const match = PATH_RE.exec(span.slice(1, -1).trim());
@@ -119,14 +121,14 @@ function gitText(repo: string, rev: string, path: string): string | null {
 }
 
 function excerptOf(text: string, start: number, end?: number): string {
-  const lines = text.split("\n").map((line) => line.replace(/\r$/, ""));
+  const lines = text.split("\n").map((line) => line.replace(/\r$/u, ""));
   const last = end ?? start;
   if (start > lines.length) return "";
   return lines.slice(start - 1, Math.min(last, lines.length)).join("\n");
 }
 
 function normalize(text: string): string {
-  return text.replace(/\r\n/g, "\n");
+  return text.replace(/\r\n/gu, "\n");
 }
 
 // Compare one cite. Returns null for a code span that resolves to no file at
@@ -192,7 +194,7 @@ export function checkPremises(repo: string, ticketFile: string, base: string): P
   } catch {
     die(`cannot read the ticket file ${ticketFile}`);
   }
-  const match = /^### Verified at ([0-9a-f]{7,40})\s*$/m.exec(body);
+  const match = /^### Verified at ([0-9a-f]{7,40})[ \t]*$/mu.exec(body);
   const verified = match ? match[1]! : "unknown";
   const cites = citationsFromText(body);
   const known =
