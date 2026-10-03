@@ -488,8 +488,27 @@ function shellQuote(s: string): string {
   return s.replace(/[ !"#$&'()*,;:<>?[\\\]^`{|}~]/gu, "\\$&");
 }
 
+// Words the form printer leaves unquoted: exactly the placeholders it
+// composes, never a value that merely looks like one. A hostile value such
+// as a ticket title must always pass through shellQuote, or the clerk's
+// print-and-reparse would split it into extra argv words.
+const FORM_PLACEHOLDERS = [
+  "<cwd>",
+  "<prompt-file>",
+  "<thread-id>",
+  "<review-prompt-file>",
+  "<harness-data>",
+  "<key>",
+];
+
 function showArg(a: string): string {
-  if (/^<.*>$/u.test(a) || /=<.*>$/u.test(a) || a === "$(cat <prompt-file>)") return `${a} `;
+  if (a === "$(cat <prompt-file>)") return `${a} `;
+  let glue = a;
+  for (const p of FORM_PLACEHOLDERS) glue = glue.split(p).join("");
+  // A bare placeholder, or placeholders joined by shell-inert glue such as
+  // XDG_DATA_HOME=<harness-data>/muse/<key>, prints as is. Anything else,
+  // with placeholders embedded or not, is quoted: the glue decides.
+  if (glue !== a && /^[A-Za-z0-9_@%+=:,./-]*$/u.test(glue)) return `${a} `;
   return `${shellQuote(a)} `;
 }
 

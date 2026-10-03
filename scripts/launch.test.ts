@@ -2678,6 +2678,19 @@ beforeAll(() => {
       "the clerk interactive form is named for its ticket",
       `launch: cd ${join(tmp, "repo")} && claude --model clerk-model --name \\#2\\,\\ Fix\\ the\\ list --dangerously-skip-permissions`,
     );
+    doRun(
+      "phase-start",
+      "interactive",
+      "clerk",
+      "--project",
+      join(tmp, "repo"),
+      "--name",
+      "#1, =< --tools x>",
+    );
+    printed(
+      "a hostile session name prints quoted, never as extra words",
+      `launch: cd ${join(tmp, "repo")} && claude --model clerk-model --name \\#1\\,\\ =\\<\\ --tools\\ x\\> --dangerously-skip-permissions`,
+    );
     writeFileSync(join(tmp, "agy.toml"), '[lanes.g]\nharness = "agy"\nmodel = "agy-model"\n');
     writeFileSync(join(tmp, "bin/agy"), "#!/bin/sh\n");
     chmodSync(join(tmp, "bin/agy"), 0o755);
@@ -4645,6 +4658,9 @@ describe("positive controls", () => {
   });
   test("form with no --leg shows team.coachman", () => {
     assertControl("form with no --leg shows team.coachman");
+  });
+  test("a hostile session name prints quoted, never as extra words", () => {
+    assertControl("a hostile session name prints quoted, never as extra words");
   });
   test("a lane's env file reaches the harness's environment", () => {
     assertControl("a lane's env file reaches the harness's environment");

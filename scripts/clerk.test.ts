@@ -104,6 +104,21 @@ describe("splitCommand", () => {
   test("a form without a cd prefix splits as printed", () => {
     expect(splitCommand("launch: claude -p hello")).toEqual(["claude", "-p", "hello"]);
   });
+
+  test("a quoted hostile session name stays one argv word", () => {
+    expect(
+      splitCommand(
+        "launch: cd /tmp/lit && claude --model cm --name \\#1\\,\\ =\\<\\ --tools\\ x\\> --dangerously-skip-permissions",
+      ),
+    ).toEqual([
+      "claude",
+      "--model",
+      "cm",
+      "--name",
+      "#1, =< --tools x>",
+      "--dangerously-skip-permissions",
+    ]);
+  });
 });
 
 describe("brief", () => {
