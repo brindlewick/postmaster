@@ -17,9 +17,8 @@ It has two parts.
   plain part does not state. When the agents' part needs one, the plain part changes first, with
   the user.
 
-The plain part is enough when someone who has only it, and the code, can write the agents' part
-without guessing anything a user would notice. The ticket session tests that with a fresh reader
-([ticket-session.md](ticket-session.md)).
+Small gaps are for the lanes to fill, and that is what having different models is for. The plain part
+still states every choice that changes what a person sees or what the flow does.
 
 Keep the headings and their order. `<tool>/scripts/ticket-check.sh` requires `## Problem / feature`,
 `## Acceptance criteria`, `## Direction` and `## Turnpikes`. `<tool>/scripts/ticket-parts.sh` checks
