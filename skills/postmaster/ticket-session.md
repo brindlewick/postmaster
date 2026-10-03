@@ -43,37 +43,17 @@ read the code to judge the ticket is reviewing your work twice.
    flag or code in the plain part, and on a check, note or decision that does not line up with the
    rest. Its notes about a long criterion or decision are advice: split an item that holds two ideas.
    Do this before you show the draft.
-3. **Test the plain part with a fresh reader.** The plain part is enough when someone who has only
-   it, and the code, can write the agents' part without guessing anything a user would notice. Test
-   that before you show the draft. Start a new agent on a different model from yours (the Agent
-   tool, `model: sonnet`), with no earlier context. Give it the plain part, pasted, and the path of
-   your base worktree to read, and nothing else: not the agents' part, the draft file, the brief,
-   an earlier spec or any other ticket. Ask it, in this order, (a) to write the check for each
-   criterion: the command and input, or the steps, and the expected output and exit status; and
-   (b) to list each point where it had to guess something the ticket does not say, one line each,
-   marked `visible` if the answer changes what a person sees or what the flow does, and `build` if
-   it only changes how it is built. It writes nothing in the repository.
-
-   Then compare. Each `visible` guess is a gap in the plain part: add the missing sentence,
-   criterion or decision, in plain words, carry it into the agents' part, and test again with a new
-   agent. Each criterion where the reader's check accepts or rejects something yours does not is the
-   same kind of gap, or a detail your check added that the plain part does not state: fix whichever
-   is wrong. A `build` guess is for the lanes: leave it, or answer it in the technical notes if you
-   know the answer. Stop when a round has no `visible` guess and no disagreement. If three rounds do
-   not get there, the ticket is too big or too vague: say so to the user and propose a split. Keep
-   the counts for each round (guesses by kind, disagreements) and what you added. They are the
-   measure of whether the plain part is enough.
-4. **Open the conversation.** Say in two or three plain sentences what the ticket asks for. Then
+3. **Open the conversation.** Say in two or three plain sentences what the ticket asks for. Then
    list the decisions you made, numbered, each with the alternative you rejected and why. This list
-   is what the user reviews. Give them the counts from the fresh reader (step 3). Tell them the
+   is what the user reviews. Tell them the
    plain part is the one to read, and that the part for the agents follows from it. Then publish the
    draft as an editable document and give the user its link, and stop this session's watch on the
    document right after you publish it (comment auto-replies stay off). The user says when they
    have left comments.
-5. **Iterate.** Change the ticket for a defect or for a decision the user makes. Leave polish alone.
+4. **Iterate.** Change the ticket for a defect or for a decision the user makes. Leave polish alone.
    A change to the plain part is carried into the agents' part in the same edit. Keep it short. A
    ticket that is long is a ticket that is not reviewed.
-6. **Ready.** When the user says it is ready: remove the `DRAFT` line from the document and the
+5. **Ready.** When the user says it is ready: remove the `DRAFT` line from the document and the
    file, save the final text as the ticket file the brief names, run
    `<tool>/scripts/ticket-check.sh --body <file>` and `<tool>/scripts/ticket-parts.sh --final <file>`
    until both exit 0, and update the GitHub ticket (body and title) through
