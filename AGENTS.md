@@ -280,6 +280,12 @@ ticket or a comment, write it as a clickable link, so that nobody has to look it
 A path that exists only on the machine, such as a run's record or a file a lane has not committed, stays plain
 text, since no link can reach it.
 
+**A ticket is brought to ready before it runs.** When the user wants to work on a ticket, a ticket session
+(`skills/postmaster/ticket-session.md`) rewrites it, with the user, into one document that is both the ticket and the
+spec (`skills/postmaster/ticket-template.md`): the acceptance criteria each with their check, the decisions made and
+who made them, the direction, and the premises verified at a base commit. The user reviews that once; the coachman
+writes no spec of its own, and the workhorses decide the files and the tasks.
+
 **Comment auto-replies stay off.** Publishing or watching an artifact turns on automatic replies to comments sent to Claude,
 and a reply can land in a thread the conversation never sees. Right after each publish or watch, stop the session's watch on
 that artifact. The user says when they have left comments; then read each thread, answer it there, and make the change it asks for.
