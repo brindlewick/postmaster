@@ -2099,8 +2099,7 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
     if (!isCallerIdentity(key) && !drop.has(key) && value !== undefined) env[key] = value;
   for (const key of keep) if (process.env[key] !== undefined) env[key] = process.env[key]!;
   env.POSTMASTER_LAUNCH_NAME = spec.name;
-  const isLaunch =
-    basename(spec.argv[0] ?? "") === "run" && (spec.argv[1] ?? "") === "launch";
+  const isLaunch = basename(spec.argv[0] ?? "") === "run" && (spec.argv[1] ?? "") === "launch";
   if (isLaunch && (spec.role === "lane" || spec.role === "coachman" || spec.role === "reviewer"))
     env.POSTMASTER_LAUNCH_ROLE = spec.role;
   if (spec.out) env.POSTMASTER_EVENT_STREAM = spec.out;
