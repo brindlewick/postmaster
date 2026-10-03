@@ -151,6 +151,12 @@ function clerkDir(repo: string): string {
   return join(repo, ".postmaster", "clerk");
 }
 
+// A ticket id can hold slashes on some trackers; encode it so the clerk's
+// files always stay inside the clerk directory.
+function clerkFile(repo: string, id: string, suffix: string): string {
+  return join(clerkDir(repo), `${encodeURIComponent(id)}${suffix}`);
+}
+
 function sessionDir(repo: string): string {
   return join(repo, ".postmaster", "runs", "postmaster", "clerks");
 }
@@ -193,11 +199,11 @@ function writeBrief(repo: string, id: string): Brief {
   const base = defaultBase(repo);
   const dir = clerkDir(repo);
   mkdirSync(dir, { recursive: true });
-  const draft = join(dir, `${id}.md`);
+  const draft = clerkFile(repo, id, ".md");
   const link = editorLink(template, draft);
   const skill = join(TOOL, "skills", "clerk", "SKILL.md");
   const runbook = join(TOOL, "skills", "clerk", "clerk.md");
-  const briefPath = join(dir, `${id}.brief.md`);
+  const briefPath = clerkFile(repo, id, ".brief.md");
   const lines = [
     `# Brief: booking clerk for ${session}`,
     "",
@@ -324,7 +330,7 @@ function usage(): string {
 
 function cmdBrief(repo: string, id: string): number {
   const brief = writeBrief(repo, id);
-  console.log(`clerk: brief for ${brief.name} at ${join(clerkDir(repo), `${id}.brief.md`)}`);
+  console.log(`clerk: brief for ${brief.name} at ${clerkFile(repo, id, ".brief.md")}`);
   return 0;
 }
 
@@ -334,7 +340,7 @@ function cmdStart(repo: string, id: string): number {
     die(`one booking clerk session is open for ${id} already; continue it or finish it first`);
   }
   const brief = writeBrief(repo, id);
-  const briefPath = join(clerkDir(repo), `${id}.brief.md`);
+  const briefPath = clerkFile(repo, id, ".brief.md");
   const startCmd = requireScript(
     "launch.sh",
     ["interactive", "clerk", "--project", repo, "--name", brief.session],
@@ -368,7 +374,7 @@ function cmdStart(repo: string, id: string): number {
     );
   }
   recordOpen(repo, id, brief.session, briefPath, handle);
-  const promptFile = join(clerkDir(repo), `${id}.prompt.md`);
+  const promptFile = clerkFile(repo, id, ".prompt.md");
   writeFileSync(
     promptFile,
     `You are the booking clerk for ${brief.session}. Read the skill at ${brief.skill}, then the runbook, then the brief at ${briefPath}. The draft is at ${brief.draft}; greet the user from there.\n`,

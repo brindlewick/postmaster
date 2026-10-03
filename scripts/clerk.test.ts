@@ -3,7 +3,14 @@
 // a model and a session host, so the checks that need them stay code-reviewed.
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { splitCommand } from "./clerk.ts";
@@ -163,6 +170,19 @@ describe("brief", () => {
     const brief = readFileSync(join(repo, ".postmaster", "clerk", "9.brief.md"), "utf8");
     expect(brief).not.toContain("## The ticket as read");
     expect(brief).toContain("None are set.");
+  });
+
+  test("brief keeps a slashed id inside the clerk directory", () => {
+    const repo = localRepo();
+    const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
+    const cfg = stubConfig(cfgDir);
+    const r = sh(SELF, ["brief", repo, "../../x"], { POSTMASTER_CONFIG: cfg });
+    expect(r.code).toBe(0);
+    expect(existsSync(join(repo, "x.brief.md"))).toBe(false);
+    expect(existsSync(join(repo, "x.md"))).toBe(false);
+    expect(
+      existsSync(join(repo, ".postmaster", "clerk", "..%2F..%2Fx.brief.md")),
+    ).toBe(true);
   });
 });
 
