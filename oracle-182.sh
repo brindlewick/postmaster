@@ -121,8 +121,8 @@ if scripts/run-meta.sh "$S/disp-fixture" "$S/neutral-name" >"$S/meta.out" 2>"$S/
   pass "ac2-record-fixture"
 else nope "ac2-record-fixture"; fi
 FR="$S/disp-fixture/run.json"
-[ "$(jq -r '.config.lanes.sollane.effort // "MISSING"' "$FR" 2>/dev/null)" = "none" ] \
-  && pass "ac2-fixture-codex-none" || nope "ac2-fixture-codex-none"
+[ "$(jq -r '.config.lanes.sollane.effort // "MISSING"' "$FR" 2>/dev/null)" = "low" ] \
+  && pass "ac2-fixture-codex-low" || nope "ac2-fixture-codex-low"
 [ "$(jq -r '.config.lanes.claudelane.effort // "MISSING"' "$FR" 2>/dev/null)" = "low" ] \
   && pass "ac2-fixture-claude-low" || nope "ac2-fixture-claude-low"
 [ "$(jq -r '.config.lanes.mimolane.effort // "MISSING"' "$FR" 2>/dev/null)" = "low" ] \
@@ -138,8 +138,8 @@ else nope "ac2-fixture-effortless-stays-effortless"; fi
   && pass "ac2-fixture-coachman-minimal" || nope "ac2-fixture-coachman-minimal"
 [ "$(jq -r '.config.team.coachman_fallback.effort // "MISSING"' "$FR" 2>/dev/null)" = "low" ] \
   && pass "ac2-fixture-fallback-low" || nope "ac2-fixture-fallback-low"
-[ "$(jq -r '.config.team.postmaster.effort // "MISSING"' "$FR" 2>/dev/null)" = "none" ] \
-  && pass "ac2-fixture-postmaster-none" || nope "ac2-fixture-postmaster-none"
+[ "$(jq -r '.config.team.postmaster.effort // "MISSING"' "$FR" 2>/dev/null)" = "low" ] \
+  && pass "ac2-fixture-postmaster-low" || nope "ac2-fixture-postmaster-low"
 [ "$(jq -r '.config.team.coachman_legs.synthesis.effort // "MISSING"' "$FR" 2>/dev/null)" = "minimal" ] \
   && pass "ac2-fixture-leg-minimal" || nope "ac2-fixture-leg-minimal"
 mkdir -p "$S/disp-warn"
@@ -191,9 +191,9 @@ run_review() { # <lane> <dispatch>: stubbed review; prints base; sets REVIEW_RC.
   REVIEW_BASE="$base"
 }
 run_review sollane "$S/disp-fixture"
-if [ "$REVIEW_RC" -eq 0 ] && grep -qF 'model_reasoning_effort="none"' "$ORACLE_STUB_LOG"; then
-  pass "ac3-codex-fixture-none"
-else nope "ac3-codex-fixture-none"; fi
+if [ "$REVIEW_RC" -eq 0 ] && grep -qF 'model_reasoning_effort="low"' "$ORACLE_STUB_LOG"; then
+  pass "ac3-codex-fixture-low"
+else nope "ac3-codex-fixture-low"; fi
 run_review sollane "$S/disp-ticket"
 if [ "$REVIEW_RC" -eq 0 ] && grep -qF 'model_reasoning_effort="max"' "$ORACLE_STUB_LOG" \
   && ! grep -qF 'model_reasoning_effort="none"' "$ORACLE_STUB_LOG"; then
@@ -243,7 +243,7 @@ case "$EFFORTS_FIX" in efforts:\ *) pass "ac4-efforts-prefix" ;; *) nope "ac4-ef
 printf '%s\n' "$EFFORTS_FIX" | sed 's/^efforts: *//' | tr ', ' '\n' | grep -v '^$' | sort > "$S/eff-got.txt"
 printf '%s\n' \
   "claudelane=low" "coachman=minimal" "coachman.synthesis=minimal" "coachman_fallback=low" \
-  "mimolane=low" "muselane=minimal" "sollane=none" "weirdlane=max" \
+  "mimolane=low" "muselane=minimal" "sollane=low" "weirdlane=max" \
   | sort > "$S/eff-want.txt"
 if diff -q "$S/eff-want.txt" "$S/eff-got.txt" >/dev/null 2>&1; then
   pass "ac4-efforts-fixture-pairs"
@@ -284,8 +284,8 @@ EOF
   echo "oracle card" > "$1/card.md"
 }
 for d in score-ok score-badline score-badteam; do mkdir -p "$S/$d"; done
-write_brief "$S/score-ok" "$EFFORTS_FIX" "none"
-write_brief "$S/score-badline" "$(printf '%s\n' "$EFFORTS_FIX" | sed 's/sollane=none/sollane=max/')" "none"
+write_brief "$S/score-ok" "$EFFORTS_FIX" "low"
+write_brief "$S/score-badline" "$(printf '%s\n' "$EFFORTS_FIX" | sed 's/sollane=low/sollane=max/')" "low"
 write_brief "$S/score-badteam" "$EFFORTS_FIX" "max"
 mkdir -p "$S/scorerepo" && git -C "$S/scorerepo" init -q -b main \
   && git -C "$S/scorerepo" commit -q --allow-empty -m first
@@ -309,8 +309,8 @@ TOTAL_BADTEAM=$(grep -cE '^(ok  |FAIL )' "$S/score-badteam.out" 2>/dev/null || t
 # --- AC5: identical commands, both records ----------------------------------------
 say "AC5: launch.sh form names the recorded effort"
 scripts/launch.sh form sollane --run "$S/disp-fixture" >"$S/form-sol-fix.out" 2>&1
-[ "$(grep -cF 'model_reasoning_effort=\"none\"' "$S/form-sol-fix.out")" = "2" ] \
-  && pass "ac5-form-sol-fixture-none" || nope "ac5-form-sol-fixture-none"
+[ "$(grep -cF 'model_reasoning_effort=\"low\"' "$S/form-sol-fix.out")" = "2" ] \
+  && pass "ac5-form-sol-fixture-low" || nope "ac5-form-sol-fixture-low"
 scripts/launch.sh form sollane --run "$S/disp-ticket" >"$S/form-sol-tick.out" 2>&1
 if [ "$(grep -cF 'model_reasoning_effort=\"max\"' "$S/form-sol-tick.out")" = "2" ] \
   && ! grep -qF 'model_reasoning_effort=\"none\"' "$S/form-sol-tick.out"; then

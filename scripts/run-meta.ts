@@ -696,7 +696,7 @@ function collectHarnesses(cfg: Record<string, unknown>): string[] {
 }
 
 const LOWEST_EFFORT: Readonly<Record<string, string>> = {
-  codex: "none",
+  codex: "low",
   claude: "low",
   muse: "minimal",
   mimo: "low",

@@ -1494,7 +1494,7 @@ describe("fixture effort records", () => {
       expect(fixtureRecord.err).toContain("no lowest effort for unknown on agy; keeping high");
       const recorded = JSON.parse(readFileSync(join(dispatch, "run.json"), "utf8"));
       const cfg = recorded.config;
-      expect(cfg.lanes.codex_lane.effort).toBe("none");
+      expect(cfg.lanes.codex_lane.effort).toBe("low");
       expect(cfg.lanes.claude_lane.effort).toBe("low");
       expect(cfg.lanes.muse_lane.effort).toBe("minimal");
       expect(cfg.lanes.mimo_lane.effort).toBe("low");
@@ -1502,15 +1502,15 @@ describe("fixture effort records", () => {
       expect(cfg.lanes.unknown.effort).toBe("high");
       expect(cfg.team.coachman.effort).toBe("low");
       expect(cfg.team.coachman_fallback.effort).toBe("minimal");
-      expect(cfg.team.postmaster.effort).toBe("none");
+      expect(cfg.team.postmaster.effort).toBe("low");
       expect(cfg.team.coachman_legs.synthesis.effort).toBe("low");
-      expect(cfg.team.coachman_legs.review.effort).toBe("none");
+      expect(cfg.team.coachman_legs.review.effort).toBe("low");
       expect(readFileSync(config).equals(before)).toBe(true);
       const line = run(join(import.meta.dir, "run-meta.sh"), ["efforts", dispatch], { env });
       expect(line.code).toBe(0);
-      expect(line.out.trim()).toContain("codex_lane=none");
+      expect(line.out.trim()).toContain("codex_lane=low");
       expect(line.out.trim()).toContain("coachman.synthesis=low");
-      expect(line.out.trim()).toContain("coachman.review=none");
+      expect(line.out.trim()).toContain("coachman.review=low");
       expect(line.out.trim()).not.toContain("postmaster=");
       expect(line.out.trim()).not.toContain("no_effort=");
 

@@ -4001,7 +4001,7 @@ describe("run-recorded effort controls", () => {
           throw new Error(`${label}: exit ${result.code}: ${result.err}${result.out}`);
       };
       for (const [kind, want] of [
-        ["fixture", { codex: "none", claude: "low", mimo: "low" }],
+        ["fixture", { codex: "low", claude: "low", mimo: "low" }],
         ["ticket", { codex: "max", claude: "max", mimo: "high" }],
       ] as const) {
         const dispatch = dispatches[kind]!;
