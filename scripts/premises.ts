@@ -84,7 +84,7 @@ export function agentsPart(body: string): string {
   // sections and ### below them, so none occurs.
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i++) {
-    if (/^##(\s|$)/u.test((lines[i] ?? "").trim())) {
+    if (/^##([ \t]|$)/u.test((lines[i] ?? "").trim())) {
       end = i;
       break;
     }
