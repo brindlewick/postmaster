@@ -283,3 +283,7 @@ text, since no link can reach it.
 **Comment auto-replies stay off.** Publishing or watching an artifact turns on automatic replies to comments sent to Claude,
 and a reply can land in a thread the conversation never sees. Right after each publish or watch, stop the session's watch on
 that artifact. The user says when they have left comments; then read each thread, answer it there, and make the change it asks for.
+**Show a change or a spec's code on a page made for the phone.** When the user reviews a change with automatic merging off,
+or opens the files a spec links to, publish it with the `review-pages` skill (`skills/review-pages/SKILL.md`): a review page
+with the ticket, the spec, the summary, the diff and the files as they stand, or a code viewer at the lines the spec cites.
+The user comments on the page and gives the verdict in the chat. Claude Code only, until the dashboard shows changes.
