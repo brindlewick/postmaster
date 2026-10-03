@@ -27,10 +27,11 @@ ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
 cd "$ROOT" || exit 1
 BASE=ede70e22b13ea48da0d574c214f72229b71dadf3 # this run's base == the ticket's Verified-at commit
 
-PASS=0; FAIL=0; SKIP=0
+PASS=0; FAIL=0; SKIP=0; WITHDRAWN=0
 pass() { PASS=$((PASS + 1)); echo "PASS: $1"; }
 fail() { FAIL=$((FAIL + 1)); echo "FAIL: $1"; }
 skip() { SKIP=$((SKIP + 1)); echo "SKIP: $1"; }
+withdrawn() { WITHDRAWN=$((WITHDRAWN + 1)); echo "WITHDRAWN: $1"; }
 
 SCR=$(mktemp -d /tmp/oracle-251.XXXXXXXX)
 cleanup() { rm -rf "$SCR"; }
@@ -363,21 +364,16 @@ grep -qi clerk skills/postmaster/SKILL.md \
   || fail "AC9 SKILL.md still says there is no per-ticket skill"
 skip "AC9 the user's own start writing the same brief: needs a clerk session"
 
-# --- AC10: the clerk tests each draft on a fresh reader ---
-if [ -d skills/clerk ]; then
-  if grep -rqiE 'agent tool|model: sonnet' skills/clerk/; then
-    fail "AC10 the clerk runbook still names a harness's own tool"
-  else
-    pass "AC10 the clerk runbook names no harness's own tool"
-  fi
-  # C10 asks two things of the runbook: no harness tool (above), and the clerk
-  # telling the user when the draft went untested. Headless host.sh run is the
-  # script's mechanism, tested beside it, not runbook prose.
-  grep -rqiE 'not tested with a fresh reader|was not tested' skills/clerk/ \
-    && pass "AC10 the runbook has the clerk say when the draft was not tested" \
-    || fail "AC10 the clerk runbook names no untested-draft telling"
+# --- AC10: WITHDRAWN by the user (brief.md, Postmaster update 15:00Z) ---
+# Criterion 10, decision D12, check C10 and the reader's verb are not
+# implemented. What remains is the absence: no fresh-reader text anywhere in
+# the clerk's skill or script.
+withdrawn "AC10 the fresh-reader test: withdrawn by the user"
+if grep -rqiE 'fresh.reader' skills/clerk/ scripts/clerk.ts scripts/clerk.test.ts 2>/dev/null; then
+  fail "AC10 fresh-reader text remains after the withdrawal"
+else
+  pass "AC10 no fresh-reader text remains in the clerk's skill or script"
 fi
-skip "AC10 the reader's checks and guesses: needs a model on another lane"
 
 # --- AC11/AC12: no coachman spec, no spec-review pause ---
 CM=skills/postmaster/coachman.md
@@ -608,5 +604,5 @@ else
   skip "AC18 bun is not on PATH"
 fi
 
-echo "oracle-251: $PASS pass / $FAIL fail / $SKIP skip"
+echo "oracle-251: $PASS pass / $FAIL fail / $SKIP skip / $WITHDRAWN withdrawn"
 [ "$FAIL" -eq 0 ]

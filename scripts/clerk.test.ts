@@ -1,13 +1,12 @@
-// Tests beside scripts/clerk.ts: the form splitter, the model comparison, the
-// brief writer, the headless start, and the reader's guards. The reader's
-// lane, and a start against a live host, need a model and a session host,
-// so the checks that need them stay code-reviewed.
+// Tests beside scripts/clerk.ts: the form splitter, the brief writer, the
+// headless start, and the two-verb usage. A start against a live host needs
+// a model and a session host, so the checks that need them stay code-reviewed.
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { baseModelName, splitCommand } from "./clerk.ts";
+import { splitCommand } from "./clerk.ts";
 
 const SELF = join(import.meta.dir, "clerk.sh");
 
@@ -107,14 +106,6 @@ describe("splitCommand", () => {
   });
 });
 
-describe("baseModelName", () => {
-  test("the provider prefix and the window suffix are not the model", () => {
-    expect(baseModelName("acme/big-one[200k]")).toBe("big-one");
-    expect(baseModelName("big-one")).toBe("big-one");
-    expect(baseModelName("a/b/c")).toBe("c");
-  });
-});
-
 describe("brief", () => {
   test("brief writes the draft and the brief, and unmarks a ready ticket", () => {
     const repo = localRepo();
@@ -181,35 +172,12 @@ describe("start", () => {
   });
 });
 
-describe("reader", () => {
-  test("the reader's guards refuse without a model", () => {
-    const dir = mkdtempSync(join(tmpdir(), "clerk-reader-"));
-    const plain = join(dir, "plain.md");
-    writeFileSync(plain, "# A ticket\n\n## Problem\n\nIt breaks.\n");
-    const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
-    const cfg = stubConfig(cfgDir);
-    const env = { POSTMASTER_CONFIG: cfg };
-    expect(sh(SELF, ["reader", "", plain, dir], env).code).toBe(1);
-    expect(sh(SELF, ["reader", "m", join(dir, "missing.md"), dir], env).code).toBe(1);
-    expect(sh(SELF, ["reader", "m", plain, join(dir, "missing")], env).code).toBe(1);
-    const agents = join(dir, "agents.md");
-    writeFileSync(
-      agents,
-      "# A ticket\n\n## Problem\n\nIt breaks.\n\n## For the agents\n\nChecks.\n",
-    );
-    const r = sh(SELF, ["reader", "m", agents, dir], env);
+describe("usage", () => {
+  test("an unknown verb prints the two verbs and exits 1", () => {
+    const r = sh(SELF, ["reader", "m", "plain.md", "wt"]);
     expect(r.code).toBe(1);
-    expect(r.err).toContain("the plain part only");
-  });
-
-  test("a draft is not tested when every lane is the clerk's model", () => {
-    const dir = mkdtempSync(join(tmpdir(), "clerk-reader-"));
-    const plain = join(dir, "plain.md");
-    writeFileSync(plain, "# A ticket\n\n## Problem\n\nIt breaks.\n");
-    const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
-    const cfg = stubConfig(cfgDir);
-    const r = sh(SELF, ["reader", "other/lane-model[1m]", plain, dir], { POSTMASTER_CONFIG: cfg });
-    expect(r.code).toBe(2);
-    expect(r.err).toContain("the draft was not tested");
+    expect(r.err).toContain("clerk.sh brief <repo> <id>");
+    expect(r.err).toContain("clerk.sh start <repo> <id>");
+    expect(r.err).not.toContain("reader");
   });
 });

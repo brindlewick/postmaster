@@ -63,37 +63,10 @@ the stated behavior, or a check cannot tell the fix from a workaround, change th
 the user what changed and why. The user reviews the plain part once; do not ask them to review the
 code details separately.
 
-### Test the draft with a fresh reader
-
-Before showing a draft, run the booking clerk's reader command with your own model name, the draft,
-and the base worktree from the brief:
-
-```sh
-<tool>/scripts/clerk.sh reader <your-model> <draft> <base-worktree>
-```
-
-The reader is a new session on a configured workhorse lane whose model differs from yours. It gets
-only the plain part, the base worktree path, and two questions: for each criterion the check that
-would show it working, and every guess about how the project builds, runs or is tested with where
-it looked. It writes nothing.
-
-Compare its checks and guesses with yours. Each guess about something a user would notice is a gap
-in the plain part: add the missing sentence, criterion or decision, in plain words, carry it into
-the agents' part, and test again with a new reader. Each criterion where the reader's check accepts
-or rejects something yours does not is the same kind of gap, or a detail your check added that the
-plain part does not state: fix whichever is wrong. A guess about a choice only the lanes care about
-is for the lanes: leave it, or answer it in the technical notes if you know the answer. Keep the
-counts for each round (guesses by kind, disagreements) and what you added. Stop when a round has no
-user-visible guess and no disagreement. If three rounds do not get there, the ticket is too big or
-too vague: say so to the user and propose a split. If no configured lane uses a different model, or
-the reader fails, say the draft was not tested with a fresh reader and why. The user may still sign
-it off.
-
 ### Show the draft and work through the user's feedback
 
 Tell the user in two or three plain sentences what the ticket asks for. List each decision you
-made, numbered, with the alternative you rejected and why. Say whether a fresh reader tested it,
-give the counts from its rounds, and name any guesses or disagreements. Show the plain part as the
+made, numbered, with the alternative you rejected and why. Show the plain part as the
 part they sign off; the technical part follows from it.
 
 Publish the draft as an editable document when your harness can publish one. Otherwise give the

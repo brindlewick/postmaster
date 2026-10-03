@@ -1,9 +1,7 @@
-// The booking clerk's launch: write the brief, start the session, test a draft
-// on a fresh reader.
+// The booking clerk's launch: write the brief and start the session.
 //
 //   clerk.sh brief <repo> <id>                  write the draft and the brief
 //   clerk.sh start <repo> <id>                  write the brief and open the clerk in a new tab
-//   clerk.sh reader <clerk-model> <plain-file> <worktree>
 //
 // brief unmarks a marked ticket first, so the postmaster cannot dispatch it
 // while the clerk works; start refuses a ticket whose session the host still
@@ -11,13 +9,9 @@
 // The session is named for the ticket's number and title, as the adapter
 // reads them. The postmaster logs the dispatch; this script records only the
 // open session.
-// reader runs the first workhorse lane on another model, headless, over the
-// plain part and the runbook's two questions, and prints what it answers.
 //
-// Exit 0 done; 2 the draft was not tested (no lane on another model, or the
-// reader lane failed); 3 no session host; 1 anything else.
+// Exit 0 done; 3 no session host; 1 anything else.
 
-import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -36,14 +30,6 @@ function die(message: string, code = 1): never {
 function isFile(path: string): boolean {
   try {
     return statSync(path).isFile();
-  } catch {
-    return false;
-  }
-}
-
-function isDir(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
   } catch {
     return false;
   }
@@ -97,37 +83,6 @@ function requireScript(name: string, args: string[], what: string): string {
   const r = runScript(name, args);
   if (r.code !== 0) die(`${what} (${(r.out + r.err).trim() || `exit ${r.code}`})`);
   return r.out;
-}
-
-type Lane = { name: string; model: string };
-
-function workhorseLanes(doc: Record<string, unknown>): Lane[] {
-  const lanes = findSection(doc, ["lanes"]) ?? {};
-  const all = Object.keys(lanes);
-  const team = findSection(doc, ["team"]) ?? {};
-  const listed = team["workhorses"];
-  const names =
-    Array.isArray(listed) && listed.length > 0
-      ? listed.filter((n): n is string => typeof n === "string")
-      : all;
-  const out: Lane[] = [];
-  for (const name of names) {
-    const entry = findSection(doc, ["lanes", name]) ?? {};
-    const model = entry["model"];
-    out.push({ name, model: typeof model === "string" ? model : "" });
-  }
-  return out;
-}
-
-// The models match when their base names match: the provider prefix and the
-// [window] suffix are the config's, not the model's.
-export function baseModelName(model: string): string {
-  return model
-    .trim()
-    .replace(/\[.*\]$/u, "")
-    .split("/")
-    .at(-1)!
-    .trim();
 }
 
 function trackerKind(repo: string): string {
@@ -363,17 +318,8 @@ export function splitCommand(line: string): string[] {
   return words;
 }
 
-const READER_QUESTIONS = [
-  "For each acceptance criterion in the plain part, write the check that would show it working: the command and input (or the route, screen and widget), the expected output and exit status, and any seed or cleanup. Where the plain part does not give you that, say what you guessed.",
-  "List every guess you made about how the project builds, runs or is tested, each with where you looked.",
-];
-
 function usage(): string {
-  return [
-    "clerk.sh brief <repo> <id>",
-    "clerk.sh start <repo> <id>",
-    "clerk.sh reader <clerk-model> <plain-file> <worktree>",
-  ].join(" | ");
+  return ["clerk.sh brief <repo> <id>", "clerk.sh start <repo> <id>"].join(" | ");
 }
 
 function cmdBrief(repo: string, id: string): number {
@@ -436,90 +382,12 @@ function cmdStart(repo: string, id: string): number {
   return 0;
 }
 
-function cmdReader(model: string, plainFile: string, worktree: string): number {
-  if (!model.trim()) die("usage: clerk.sh reader <clerk-model> <plain-file> <worktree>");
-  if (!isFile(plainFile)) die(`cannot read the plain part ${plainFile}`);
-  const plain = readStrict(plainFile);
-  if (!plain.trim()) die(`the plain part ${plainFile} is empty`);
-  if (/^## For the agents[ \t]*$/mu.test(plain))
-    die(`${plainFile} is not a plain part; pass the plain part only`);
-  if (!isDir(worktree)) die(`${worktree} is not a directory`);
-  const { doc } = readConfig();
-  const lanes = workhorseLanes(doc);
-  const mine = baseModelName(model);
-  const lane = lanes.find((l) => l.model.trim() && baseModelName(l.model) !== mine);
-  if (!lane) {
-    console.error(
-      `clerk: ${model} is the only model on the workhorse lanes; the draft was not tested`,
-    );
-    return 2;
-  }
-  const dir = join(worktree, ".postmaster", "clerk", "reader", randomUUID());
-  mkdirSync(dir, { recursive: true });
-  const promptFile = join(dir, "prompt.md");
-  const events = join(dir, "reader-events.jsonl");
-  const err = join(dir, "reader.err");
-  const marker = join(dir, "reader.done");
-  const last = join(dir, "reader-last.md");
-  writeFileSync(
-    promptFile,
-    [
-      "You are a fresh reader: a workhorse lane with no earlier context, reading one ticket's plain part once.",
-      "",
-      "## The plain part",
-      "",
-      plain.replace(/\n+$/u, ""),
-      "",
-      "## The base worktree",
-      "",
-      worktree,
-      "",
-      "## Answer these two questions and nothing else",
-      "",
-      `(a) ${READER_QUESTIONS[0]}`,
-      `(b) ${READER_QUESTIONS[1]}`,
-      "",
-    ].join("\n"),
-  );
-  const name = `fresh-reader-${randomUUID().slice(0, 8)}`;
-  const started = runScript("host.sh", [
-    "run",
-    name,
-    worktree,
-    "--out",
-    events,
-    "--err",
-    err,
-    "--marker",
-    marker,
-    "--",
-    join(HERE, "launch.sh"),
-    "launch",
-    lane.name,
-    worktree,
-    promptFile,
-    "--last",
-    last,
-  ]);
-  if (started.code !== 0)
-    die(`the reader lane could not start (${(started.out + started.err).trim()})`, 2);
-  const waited = runScript("wait-for-markers.sh", [dir, "reader.done", "1", "3600"]);
-  if (waited.code !== 0)
-    die(`the reader lane ${lane.name} failed (${(waited.out + waited.err).trim()})`, 2);
-  if (!isFile(last)) die(`the reader lane ${lane.name} left no answer`, 2);
-  const answer = readStrict(last).trim();
-  if (!answer) die(`the reader lane ${lane.name} left no answer`, 2);
-  console.log(answer);
-  return 0;
-}
-
 function main(argv: string[]): number {
   const verb = argv[0] ?? "";
   if ((verb === "brief" || verb === "start") && argv.length === 3) {
     process.env.POSTMASTER_PROJECT = resolve(argv[1]!);
     return verb === "brief" ? cmdBrief(argv[1]!, argv[2]!) : cmdStart(argv[1]!, argv[2]!);
   }
-  if (verb === "reader" && argv.length === 4) return cmdReader(argv[1]!, argv[2]!, argv[3]!);
   console.error(`usage: ${usage()}`);
   return 1;
 }

@@ -151,7 +151,7 @@ A four-role flow for getting one ticket implemented well by several models at on
 | role | what it does | where it is defined |
 |---|---|---|
 | **postmaster** | decomposes a stream into tickets, dispatches one coachman per ticket leg by leg, supervises, answers escalations, grants merges | `skills/postmaster/postmaster.md` (the front door session, or one it spawned) |
-| **booking clerk** | prepares a ticket with the user, tests its plain part with a fresh reader, and marks it ready after sign-off | `skills/clerk/clerk.md` |
+| **booking clerk** | prepares a ticket with the user and marks it ready after sign-off | `skills/clerk/clerk.md` |
 | **coachman** | drives one leg of one ticket; at most two legs, `synthesis` and `review`, each a fresh coachman with a written hand-off between them, carry a ticket from waybill to ship card: harnessing the team, judging their work, running the turnpikes its ticket names, clearing the gate | `skills/postmaster/coachman.md` |
 | **the team** | several model lanes implementing the same ticket independently, in **blinkers**: separate worktrees, unable to see each other's work | `coachman.md`, lane table |
 
