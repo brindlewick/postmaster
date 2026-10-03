@@ -15,7 +15,8 @@ repository the change belongs to.
 
 1. Build its data into a folder of your scratchpad:
    - a pull request: `bun <tool>/scripts/review-page.ts change <dir> --pr <number>`. The title,
-     its text as the summary, and the ticket it names (`#<n>, <title>`) come from GitHub.
+     its text as the summary, and the ticket it names (`#<n>, <title>`) come from GitHub, and the
+     spec is the `WORKHORSE-SPEC.md` the head commits, where a run committed one.
    - a run's branch before its pull request: `bun <tool>/scripts/review-page.ts change <dir>
      --base <base> --head <branch> --ticket <n> --summary <file> --spec <file>`, the summary
      being what the card says the change does and the spec the run's approved one.

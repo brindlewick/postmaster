@@ -12,8 +12,9 @@
 // With --pr, the title, the summary (the pull request's text), the base and the head come from
 // `gh api` on the repository's origin. With --ticket, or a pull request titled "#<n>, <title>",
 // the ticket's text comes from that issue. --summary and --spec are Markdown files: the change's
-// summary and the run's approved spec. Files are grouped by their first folder, top-level files
-// first, and the page loads a file's diff and text only when it is opened.
+// summary and the run's approved spec; without --spec, a WORKHORSE-SPEC.md the head commits at
+// its root is the spec. Files are grouped by their first folder, top-level files first, and the
+// page loads a file's diff and text only when it is opened.
 //
 // files: writes the code viewer, files.json and files/<k>.txt, one per path as it stands at <ref>.
 //
@@ -179,6 +180,12 @@ function gh(path: string): Record<string, unknown> {
   return JSON.parse(r.out) as Record<string, unknown>;
 }
 
+/** The run's spec as the head commits it at its root, where a run puts it; null without one. */
+function committedSpec(head: string): string | null {
+  const r = run("git", ["show", `${head}:WORKHORSE-SPEC.md`]);
+  return r.code === 0 ? r.out : null;
+}
+
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
@@ -216,10 +223,9 @@ function buildChange(out: string, args: string[]): string {
   }
   const summaryFile = flag(args, "--summary");
   if (summaryFile) body = readFileSync(summaryFile, "utf8");
-  const specFile = flag(args, "--spec");
-  const spec = specFile ? readFileSync(specFile, "utf8") : null;
-
   const mb = git(["merge-base", base, head]).trim();
+  const specFile = flag(args, "--spec");
+  const spec = specFile ? readFileSync(specFile, "utf8") : committedSpec(head);
   const changes = parseChanges(
     git(["diff", "--numstat", "-M", mb, head]),
     git(["diff", "--name-status", "-M", mb, head]),
