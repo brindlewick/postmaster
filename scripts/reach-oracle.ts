@@ -129,7 +129,8 @@ export interface Layout {
 
 const TICKET = "T";
 
-const GATE_CHECKS = '{"checks": [{"name": "gate", "source": "default:gate", "command": "true", "shows": "x"}]}\n';
+const GATE_CHECKS =
+  '{"checks": [{"name": "gate", "source": "default:gate", "command": "true", "shows": "x"}]}\n';
 
 export function makeLayout(toolRoot: string): Layout {
   const tmp = realpathSync(mkdtempSync(join(tmpdir(), "reach-oracle-")));

@@ -52,7 +52,9 @@ function oracle(name: string, fn: (lay: Layout) => void, timeout = 120000): void
 
 function expectExit(r: Run, want: number): void {
   if (r.code !== want) {
-    throw new Error(`want exit ${want}, got ${r.code}\n--- out ---\n${r.out}\n--- err ---\n${r.err}`);
+    throw new Error(
+      `want exit ${want}, got ${r.code}\n--- out ---\n${r.out}\n--- err ---\n${r.err}`,
+    );
   }
 }
 
@@ -354,7 +356,8 @@ oracle("C6: tags, remote refs and a moved-forward main are not named", (lay) => 
   expectExit(reach(REPO, lay.home, "check", lay.dispatch, "r1"), 0);
 });
 
-const GATE_CHECKS = '{"checks": [{"name": "gate", "source": "default:gate", "command": "true", "shows": "x"}]}\n';
+const GATE_CHECKS =
+  '{"checks": [{"name": "gate", "source": "default:gate", "command": "true", "shows": "x"}]}\n';
 const QUIET_CHECKPOINT = "## Findings (bug)\n\n- [P2] b1: closed round 1\n";
 
 oracle("C14: card-block appends the ## Reach section from the run log", (lay) => {
