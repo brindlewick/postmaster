@@ -120,7 +120,7 @@ scripts/review-round.sh start|wait|teardown <dispatch> <round> … # a review ro
 scripts/log-action.sh <dispatch> <actor> <action> <target> …     # one JSON line per action
 scripts/tool-faults.sh harvest|comment|file|decline <dispatch> …  # a closed run's tool faults, as tickets
 scripts/stage.sh <dispatch> <stage>                               # the one way a run changes stage
-scripts/clerk.sh brief|start|reader …                             # prepare a ticket and test its plain part
+scripts/clerk.sh brief|start …                                    # prepare a ticket with the user
 scripts/ticket-ready.sh <repo> <id> | mark|queue|pending …        # check, sign off, and queue tickets
 scripts/premises.sh <repo> <waybill> <base>                       # compare ticket premises with the run base
 scripts/run-times.sh <dispatch>                                   # how long each stage took, from the log

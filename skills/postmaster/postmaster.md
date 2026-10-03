@@ -74,7 +74,11 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    Do not create a run directory, branch or worktree for this
    ticket. Continue with other tickets the
    user asked you to implement. If a clerk is already open, tell the user and do not start a
-   second one. If there is no session host (`clerk.sh start` exits 3), put the ticket id and a
+   second one. If the config has no clerk role (`<tool>/scripts/launch.sh form clerk` exits 1),
+   ask the user which harness, model and effort the clerk runs on, the strongest model they can
+   afford, write the answers as `clerk.*` keys to an answers file, and run
+   `<tool>/scripts/setup.sh --add-clerk --answers <file>`; start no clerk until they answer.
+   If there is no session host (`clerk.sh start` exits 3), put the ticket id and a
    request to start `/clerk <id>` in `ESCALATION.md` and ask the user to do so. Do not start a
    clerk for a ticket the user did not ask you to implement.
    A `ready` label on its own is insufficient: every dispatch, including one from the ready
@@ -343,7 +347,8 @@ user, never the record.
 
 A run dispatched before the booking clerk change pauses for a spec review. Handle it from that
 run's own copy of the tool: its pinned checkout at `<rt>`, resolved per run by
-`<rt>/scripts/run-meta.sh path`. The Spec review section of `<rt>/skills/postmaster/postmaster.md`
+`<tool>/scripts/run-meta.sh path <dispatch>`. The Spec review section of
+`<rt>/skills/postmaster/postmaster.md`
 carries the steps; run them with `<rt>`'s scripts. A run dispatched from this version writes no
 spec and pauses for no spec review.
 
@@ -642,13 +647,14 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    `<tool>/scripts/style-findings.sh check <dispatch>` prints each proposal: the text after its
    findings' colon, up to any bracket, which holds what the ledger records of it from any run.
    For each proposal other than `neither` that the ledger does not mark filed, declined or asked,
-   draft the ticket it would become in `<dispatch>/style-drafts/`, in the ticket shape (Stage A,
-   step 2), with the direction the proposal gives for the user to approve or change and
+   draft the ticket it would become in `<dispatch>/style-drafts/`, in the ticket shape
+   (`skills/clerk/ticket-template.md`), with the direction the proposal gives for the user to
+   approve or change and
    `default` as its turnpikes; check each draft with `<tool>/scripts/ticket-check.sh --body
    <draft> --title "<title>" --project <repo>`, and log `ticket-check`. Show the user every line of
    `<dispatch>/style-sort.md` with its reason, the drafts, and the proposals the ledger already
    marks; log a `note` with `style proposal asked: <proposal>` for each draft shown; and carry on
-   with the stream. On the user's word for a proposal, create its ticket as Stage A, step 5
+   with the stream. On the user's word for a proposal, create its ticket as Stage A, step 4
    does, with `style proposal: <proposal>` as the detail of its `ticket-create` line; on their
    no, log a `note` with `style proposal declined: <proposal>: <their word>`. Nothing is filed
    without the user's word, whatever `tracker.postmaster_may_create` says.

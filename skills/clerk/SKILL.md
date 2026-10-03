@@ -1,6 +1,6 @@
 ---
 name: clerk
-description: 'Prepare one ticket with the user before it runs: the booking clerk. It rewrites the ticket into one document that is both the ticket and the run's spec, and marks the ticket ready when the user signs it off. Started by the postmaster when the user asks to implement a ticket that is not ready, or by the user typing /clerk with a ticket number. The clerk writes no code and dispatches nothing.'
+description: 'Prepare one ticket with the user before it runs: the booking clerk. It rewrites the ticket into one document that is both the ticket and the run spec, and marks the ticket ready when the user signs it off. Started by the postmaster when the user asks to implement a ticket that is not ready, or by the user typing /clerk with a ticket number. The clerk writes no code and dispatches nothing.'
 ---
 
 # /clerk: the booking clerk
