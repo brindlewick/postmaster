@@ -17,6 +17,7 @@ A fault in one of these is a fault in a control, whatever the step that ran it.
 | part | kind | what it decides |
 |---|---|---|
 | `<tool>/scripts/ticket-check.sh` | check | a ticket has its shape before it is accepted or dispatched |
+| `<tool>/scripts/ticket-parts.sh` | check | a two-part ticket is fit to be signed off: its plain part is plain, and its checks, notes and decisions line up |
 | `<tool>/scripts/check-target.sh` | check | the target is a clean git repository before anything is cut from it |
 | `<tool>/scripts/handoff-check.sh` | check | a leg ends only on a complete hand-off |
 | `<tool>/scripts/wiki-lint.sh` | check | the wiki's citations, links and standings hold |

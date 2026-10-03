@@ -22,7 +22,9 @@ without guessing anything a user would notice. The ticket session tests that wit
 ([ticket-session.md](ticket-session.md)).
 
 Keep the headings and their order. `<tool>/scripts/ticket-check.sh` requires `## Problem / feature`,
-`## Acceptance criteria`, `## Direction` and `## Turnpikes`. A ticket session requires the rest.
+`## Acceptance criteria`, `## Direction` and `## Turnpikes`. `<tool>/scripts/ticket-parts.sh` checks
+the rest of the shape: that the plain part is plain, and that the checks, the notes and the
+decisions line up.
 
 ```markdown
 ## Problem / feature
@@ -32,13 +34,11 @@ the ticket from this section alone. No design here.>
 
 ## Acceptance criteria
 
-1. <One thing that is true when the work is done, in plain words: what a person or the flow can do
-   or see, not how it is built. A sentence or two.>
+1. <One thing that is true when the work is done, in plain words. A sentence or two.>
 
 ## Decisions
 
-- **D1 (proposed | given by the user)** <The choice, in plain words.>
-  Why: <the reason.> Instead of: <the alternative, and why not.>
+- **D1 (proposed)** <The choice, in plain words.> Why: <the reason.> Instead of: <what it beat.>
 
 ## Out of scope
 
@@ -60,8 +60,8 @@ default
 
 ### Checks
 
-1. <Criterion 1's check: the command and input, or the steps through the user surface> →
-   <the expected output and exit status>. **At the base:** <what it shows today.>
+- **C1** <The check for criterion 1: the command and input, or the steps through the user surface>
+  → <the expected output and exit status>. **At the base:** <what it shows today.>
 
 ### Technical notes
 
@@ -76,23 +76,31 @@ default
 
 ## What each part is for
 
-- **Acceptance criteria** are the contract, in words a person can check the result against. The
-  checks under the agents' heading are numbered the same, one for each criterion. The lanes
-  organise their work and their evidence around them, and the lane summary check requires one piece
-  of evidence per criterion. A check shows the criterion working the way it will really be used.
-  **At the base** exposes a check that passes before any work is done, or that would also pass for
-  a workaround.
-- **Decisions** are the choices the ticket makes so that the run need not ask. The user reviews
-  each one marked proposed, which are the writer's choices. A decision they gave themselves is
-  marked as theirs. The mark never names a model, because the ticket is public. A decision is
+- **Acceptance criteria** are the contract, in words a person can check the result against. Each is
+  one idea: one thing that is true when the work is done, in a sentence or two. An "and" that adds a
+  second behaviour makes two criteria.
+- **Checks** are labelled with the id of the criterion they show: `C1` for the first criterion,
+  `C2` for the second, in order, one for each. The lanes organise their work and their evidence
+  around them, and the lane summary check requires one piece of evidence per criterion. A check
+  shows the criterion working the way it will really be used. **At the base** exposes a check that
+  passes before any work is done, or that would also pass for a workaround.
+- **Decisions** are the choices the ticket makes so that the run need not ask. Each is one idea: one
+  choice, the reason, and what it beat, a sentence each. The user reviews each one marked
+  `(proposed)`, which are the writer's choices. A decision they gave themselves is marked
+  `(given by the user)`. The mark never names a model, because the ticket is public. A decision is
   stated by what it changes for the flow or its user, not by where it is made in the code. A choice
   only the lanes care about, such as a name, a file or an order, is not a decision. Leave it to them.
+- **Detail** that only the implementation needs (exact cases, formats, tool names, counts, edge
+  conditions, test inputs) goes under `## For the agents`, in the checks or the technical notes.
+  Never drop a choice that changes what a person sees or what the flow does. Simplify the words and
+  move the detail down.
+- **Technical notes** each carry, in a tag group such as `(C2, D1)`, the criteria and decisions they
+  follow from, where `C2` is the second criterion and `D1` the first decision. A note that follows
+  from none is either a detail the lanes decide, and does not belong, or a decision the plain part
+  is missing, and goes there first, with the user. Every decision is cited by at least one check or
+  note.
 - **Direction** says only what binds the work. The platforms and the fixture run belong here, in
   plain words. The technical detail behind them goes in the technical notes.
-- **Technical notes** each end with the criteria and decisions they follow from, such as (C2, D1),
-  where C2 is the second criterion. A note that follows from none is either a detail the lanes
-  decide, and does not belong, or a decision the plain part is missing, and goes there first, with
-  the user. Every decision is cited by at least one check or note.
 - **Out of scope** keeps the lanes from drifting.
 - **Verified at** is the base commit the ticket was checked against. Every file, function, flag,
   line range and number the technical notes rely on exists there and says what they say, and each
