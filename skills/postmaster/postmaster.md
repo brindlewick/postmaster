@@ -240,11 +240,11 @@ with `the watcher took it` in the detail:
   A fourth such end, a non-transient end, or a resume it cannot complete is named to you.
 
 When `READY <id>` is named, repeat the readiness check and dispatch through Stage B without
-asking the user again. Consume its queue marker with
+asking the user again. Consume its ready marker with
 `<tool>/scripts/ticket-ready.sh consume <repo> <id>` after the run is dispatched. If the ticket
 no longer passes readiness, remove its mark and tell the user; never dispatch it from the old
 queue entry. The watcher keeps waiting when the run ceiling is full, then wakes you as soon as a
-run closes and frees a slot. A clerk started in the user's own session writes the same queue
+run closes and frees a slot. A clerk started in the user's own session writes the same ready
 marker and follows this path.
 
 The list of runs waiting on the user is `<runs>/postmaster/ESCALATION.md`, kept by
