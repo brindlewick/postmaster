@@ -260,10 +260,11 @@ for k in person email phone postal-address other-personal; do
   fi
 done
 printf 'Signed-off-by: %s\n' "$AC1" > "$C5D/accent.txt"
-if "$SCRUB" --files "$C5D/accent.txt" 2>/dev/null | grep -q "accent.txt:1: "; then
+AC_OUT=$("$SCRUB" --files "$C5D/accent.txt" 2>/dev/null) && AC_CODE=$? || AC_CODE=$?
+if [ "$AC_CODE" -eq 1 ] && printf '%s' "$AC_OUT" | grep -q "accent.txt:1: "; then
   ok "accented names found"
 else
-  bad "accented names found" "no finding on an accented sign-off"
+  bad "accented names found" "exit $AC_CODE: $AC_OUT"
 fi
 if grep -rniE "fetch[[:space:]]*\(|node:https?|chat/completions|openrouter|api\.anthropic|generativelanguage|WebSocket" \
   "$ROOT/scripts/scrub-check.ts" "$ROOT/scripts/scrub-rewrite.ts" "$ROOT/scripts/raw-promote.ts" \
@@ -825,7 +826,7 @@ fi
 echo "C28: long lines"
 bun -e '
 const fs = require("fs");
-const cap = Array.from({ length: 160000 }, (_, i) => ["Alder", "Birch", "Cedar", "Elm", "Frost", "Grove"][i % 6]).join(" ");
+const cap = Array.from({ length: 190000 }, (_, i) => ["Alder", "Birch", "Cedar", "Elm", "Frost", "Grove"][i % 6]).join(" ");
 const hy = Array.from({ length: 90000 }, (_, i) => ["well-known", "up-to-date", "state-of-the-art"][i % 3]).join(" ");
 const qu = Array.from({ length: 150000 }, (_, i) => "\"lorem\"").join(" ");
 const es = Array.from({ length: 90000 }, () => "\u001b[31mred\u001b[0m").join(" ");
@@ -842,10 +843,11 @@ for f in cap hy qu es; do
   if [ "$LCODE" -eq 0 ] && [ "$MS" -lt 1000 ]; then ok "$f line within a second"; else bad "$f line within a second" "${MS}ms exit $LCODE"; fi
 done
 printf '%s contact %s\n' "$(head -c 1048000 < "$TMP/cap.txt" | tr -d '\n')" "$MAIL1" > "$TMP/planted.txt"
-if "$SCRUB" --files "$TMP/planted.txt" 2>/dev/null | grep -q "planted.txt:1: email"; then
+PL_OUT=$("$SCRUB" --files "$TMP/planted.txt" 2>/dev/null) && PL_CODE=$? || PL_CODE=$?
+if [ "$PL_CODE" -eq 1 ] && printf '%s' "$PL_OUT" | grep -q "planted.txt:1: email"; then
   ok "planted value at a long line end found"
 else
-  bad "planted value at a long line end found" "missed"
+  bad "planted value at a long line end found" "exit $PL_CODE: $(printf '%s' "$PL_OUT" | head -c 200)"
 fi
 
 # --- C29: posted text scanned. ---
