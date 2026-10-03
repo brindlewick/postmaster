@@ -19,8 +19,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { activeRunCount, pendingReadyTickets, runCapacity, streamLines } from "./runs-watch.ts";
 import { run } from "./lib/proc.ts";
+import { activeRunCount, pendingReadyTickets, runCapacity, streamLines } from "./runs-watch.ts";
 
 const self = join(import.meta.dir, "runs-watch.sh");
 const savedConfig = process.env.POSTMASTER_CONFIG;
@@ -1359,10 +1359,14 @@ describe("ready tickets wait for a run slot", () => {
     mkrun(root, "flight", "review", 2);
     queued(root, "2");
     const manifest = join(root, "flight", "manifest.json");
-    const child = spawn("sh", ["-c", 'sleep 2; printf \'{"stage":"done","leg":2}\\n\' > "$1"', "sh", manifest], {
-      detached: true,
-      stdio: "ignore",
-    });
+    const child = spawn(
+      "sh",
+      ["-c", 'sleep 2; printf \'{"stage":"done","leg":2}\\n\' > "$1"', "sh", manifest],
+      {
+        detached: true,
+        stdio: "ignore",
+      },
+    );
     child.unref();
     expect(activeRunCount(root)).toBe(1);
     const { rc, out } = watch(root, "8", config);

@@ -139,7 +139,10 @@ describe("--fix: bare references go through <tool>, and a second run changes not
     }
     writeFileSync(join(covered, "skills", "postmaster", "notes.txt"), "not a runbook\n");
     expect(defaultFiles(covered).toSorted()).toEqual(
-      [join(covered, "skills", "postmaster", "runbook.md"), join(covered, "skills", "clerk", "runbook.md")].toSorted(),
+      [
+        join(covered, "skills", "postmaster", "runbook.md"),
+        join(covered, "skills", "clerk", "runbook.md"),
+      ].toSorted(),
     );
   }, 10000);
 });

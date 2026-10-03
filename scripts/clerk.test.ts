@@ -3,16 +3,19 @@
 // lane, and a start against a live host, need a model and a session host,
 // so the checks that need them stay code-reviewed.
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
-import { chmodSync } from "node:fs";
 import { baseModelName, splitCommand } from "./clerk.ts";
 
 const SELF = join(import.meta.dir, "clerk.sh");
 
-function sh(cmd: string, args: string[], env?: Record<string, string | undefined>): { code: number; out: string; err: string } {
+function sh(
+  cmd: string,
+  args: string[],
+  env?: Record<string, string | undefined>,
+): { code: number; out: string; err: string } {
   const r = spawnSync(cmd, args, { encoding: "utf8", env: { ...process.env, ...env } });
   return { code: r.status ?? 1, out: String(r.stdout ?? ""), err: String(r.stderr ?? "") };
 }
@@ -46,7 +49,19 @@ function stubConfig(dir: string, extra = ""): string {
 function localRepo(): string {
   const repo = mkdtempSync(join(tmpdir(), "clerk-repo-"));
   sh("git", ["init", "-q", repo]);
-  sh("git", ["-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base"]);
+  sh("git", [
+    "-C",
+    repo,
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "user.name=t",
+    "commit",
+    "-q",
+    "--allow-empty",
+    "-m",
+    "base",
+  ]);
   const here = join(import.meta.dir, "local.sh");
   const init = sh(here, [repo, "store", "init"]);
   if (init.code !== 0) throw new Error(`store init failed: ${init.err}`);
@@ -64,12 +79,21 @@ function localTicket(repo: string, title: string): string {
 describe("splitCommand", () => {
   test("a printed interactive form splits back into argv", () => {
     expect(
-      splitCommand("launch: cd /tmp/lit && claude --model cm --name \\#2\\,\\ Fix\\ the\\ list --dangerously-skip-permissions"),
-    ).toEqual(["claude", "--model", "cm", "--name", "#2, Fix the list", "--dangerously-skip-permissions"]);
+      splitCommand(
+        "launch: cd /tmp/lit && claude --model cm --name \\#2\\,\\ Fix\\ the\\ list --dangerously-skip-permissions",
+      ),
+    ).toEqual([
+      "claude",
+      "--model",
+      "cm",
+      "--name",
+      "#2, Fix the list",
+      "--dangerously-skip-permissions",
+    ]);
   });
 
   test("quotes group, an escaped space stays one word, and '' is an empty word", () => {
-    expect(splitCommand('launch: cd /x && foo "a b" \'c d\' plain\\ x \'\'')).toEqual([
+    expect(splitCommand("launch: cd /x && foo \"a b\" 'c d' plain\\ x ''")).toEqual([
       "foo",
       "a b",
       "c d",
@@ -169,7 +193,10 @@ describe("reader", () => {
     expect(sh(SELF, ["reader", "m", join(dir, "missing.md"), dir], env).code).toBe(1);
     expect(sh(SELF, ["reader", "m", plain, join(dir, "missing")], env).code).toBe(1);
     const agents = join(dir, "agents.md");
-    writeFileSync(agents, "# A ticket\n\n## Problem\n\nIt breaks.\n\n## For the agents\n\nChecks.\n");
+    writeFileSync(
+      agents,
+      "# A ticket\n\n## Problem\n\nIt breaks.\n\n## For the agents\n\nChecks.\n",
+    );
     const r = sh(SELF, ["reader", "m", agents, dir], env);
     expect(r.code).toBe(1);
     expect(r.err).toContain("the plain part only");

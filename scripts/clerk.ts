@@ -16,13 +16,14 @@
 //
 // Exit 0 done; 2 the draft was not tested (no lane on another model, or the
 // reader lane failed); 3 no session host; 1 anything else.
+
+import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
+import { tryTomlFile } from "./lib/data.ts";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
-import { tryTomlFile } from "./lib/data.ts";
 
 const HERE = scriptsDir(import.meta);
 const TOOL = toolRoot(import.meta);
@@ -59,7 +60,8 @@ function readStrict(path: string): string {
 function findSection(doc: Record<string, unknown>, path: string[]): Record<string, unknown> | null {
   let node: unknown = doc;
   for (const key of path) {
-    if (typeof node !== "object" || node === null || !(key in (node as Record<string, unknown>))) return null;
+    if (typeof node !== "object" || node === null || !(key in (node as Record<string, unknown>)))
+      return null;
     node = (node as Record<string, unknown>)[key];
   }
   return typeof node === "object" && node !== null ? (node as Record<string, unknown>) : null;
@@ -104,7 +106,10 @@ function workhorseLanes(doc: Record<string, unknown>): Lane[] {
   const all = Object.keys(lanes);
   const team = findSection(doc, ["team"]) ?? {};
   const listed = team["workhorses"];
-  const names = Array.isArray(listed) && listed.length > 0 ? listed.filter((n): n is string => typeof n === "string") : all;
+  const names =
+    Array.isArray(listed) && listed.length > 0
+      ? listed.filter((n): n is string => typeof n === "string")
+      : all;
   const out: Lane[] = [];
   for (const name of names) {
     const entry = findSection(doc, ["lanes", name]) ?? {};
@@ -147,7 +152,11 @@ function parseTicketRead(out: string): { title: string; labels: string[] } {
   return { title, labels };
 }
 
-function readTicket(repo: string, id: string, kind: string): { title: string; labels: string[] } | null {
+function readTicket(
+  repo: string,
+  id: string,
+  kind: string,
+): { title: string; labels: string[] } | null {
   const base = kind === "plane" ? [] : [repo];
   const r = runScript(`${kind}.sh`, [...base, "read", id]);
   if (r.code !== 0) return null;
@@ -220,7 +229,9 @@ function writeBrief(repo: string, id: string): Brief {
   const { path: cfgPath, doc } = readConfig();
   const template = findString(doc, ["planning", "review_link"]);
   const prefsPath = join(dirname(cfgPath), "preferences.md");
-  const preferences = isFile(prefsPath) ? readStrict(prefsPath).replace(/\n+$/, "") : "None are set.";
+  const preferences = isFile(prefsPath)
+    ? readStrict(prefsPath).replace(/\n+$/, "")
+    : "None are set.";
   const base = defaultBase(repo);
   const dir = clerkDir(repo);
   mkdirSync(dir, { recursive: true });
@@ -255,10 +266,30 @@ function writeBrief(repo: string, id: string): Brief {
   if (!isFile(draft)) {
     writeFileSync(
       draft,
-      [`DRAFT: ${name} is being prepared and is not ready to run`, "", "## Problem / feature", "", ""].join("\n"),
+      [
+        `DRAFT: ${name} is being prepared and is not ready to run`,
+        "",
+        "## Problem / feature",
+        "",
+        "",
+      ].join("\n"),
     );
   }
-  return { id, name, session, ticket: name, repo, tool: TOOL, base, draft, link, preferences, skill, runbook, title: ticket.title };
+  return {
+    id,
+    name,
+    session,
+    ticket: name,
+    repo,
+    tool: TOOL,
+    base,
+    draft,
+    link,
+    preferences,
+    skill,
+    runbook,
+    title: ticket.title,
+  };
 }
 
 function sessionPath(repo: string, id: string): string {
@@ -365,16 +396,27 @@ function cmdStart(repo: string, id: string): number {
   if (form.length === 0) die("launch.sh printed no interactive command for the clerk");
   // The handle is the ticket's id; the tab carries the session's number and title.
   const handle = brief.name;
-  const started = runScript("host.sh", ["spawn", handle, repo, "--label", brief.session, "--", ...form]);
+  const started = runScript("host.sh", [
+    "spawn",
+    handle,
+    repo,
+    "--label",
+    brief.session,
+    "--",
+    ...form,
+  ]);
   if (started.code === 3) {
     console.error(`clerk: no session host answers; open ${brief.session} by hand:`);
     console.error(startCmd.replace(/^launch:\s*/u, ""));
     console.error(`then read the brief at ${briefPath}.`);
     return 3;
   }
-  if (started.code !== 0) die(`the clerk session could not start (${(started.out + started.err).trim()})`);
+  if (started.code !== 0)
+    die(`the clerk session could not start (${(started.out + started.err).trim()})`);
   if (!started.out.includes("handle=")) {
-    die(`the clerk session started but the host did not confirm its handle (${started.out.trim()})`);
+    die(
+      `the clerk session started but the host did not confirm its handle (${started.out.trim()})`,
+    );
   }
   recordOpen(repo, id, brief.session, briefPath, handle);
   const promptFile = join(clerkDir(repo), `${id}.prompt.md`);
@@ -383,7 +425,10 @@ function cmdStart(repo: string, id: string): number {
     `You are the booking clerk for ${brief.session}. Read the skill at ${brief.skill}, then the runbook, then the brief at ${briefPath}. The draft is at ${brief.draft}; greet the user from there.\n`,
   );
   const sent = runScript("host.sh", ["send", handle, promptFile]);
-  if (sent.code !== 0) die(`the clerk session started but the brief could not be sent (${(sent.out + sent.err).trim()})`);
+  if (sent.code !== 0)
+    die(
+      `the clerk session started but the brief could not be sent (${(sent.out + sent.err).trim()})`,
+    );
   console.log(`clerk: ${brief.session} opened (session ${handle})`);
   return 0;
 }
@@ -393,14 +438,17 @@ function cmdReader(model: string, plainFile: string, worktree: string): number {
   if (!isFile(plainFile)) die(`cannot read the plain part ${plainFile}`);
   const plain = readStrict(plainFile);
   if (!plain.trim()) die(`the plain part ${plainFile} is empty`);
-  if (/^## For the agents\s*$/m.test(plain)) die(`${plainFile} is not a plain part; pass the plain part only`);
+  if (/^## For the agents\s*$/m.test(plain))
+    die(`${plainFile} is not a plain part; pass the plain part only`);
   if (!isDir(worktree)) die(`${worktree} is not a directory`);
   const { doc } = readConfig();
   const lanes = workhorseLanes(doc);
   const mine = baseModelName(model);
   const lane = lanes.find((l) => l.model.trim() && baseModelName(l.model) !== mine);
   if (!lane) {
-    console.error(`clerk: ${model} is the only model on the workhorse lanes; the draft was not tested`);
+    console.error(
+      `clerk: ${model} is the only model on the workhorse lanes; the draft was not tested`,
+    );
     return 2;
   }
   const dir = join(worktree, ".postmaster", "clerk", "reader", randomUUID());
@@ -450,9 +498,11 @@ function cmdReader(model: string, plainFile: string, worktree: string): number {
     "--last",
     last,
   ]);
-  if (started.code !== 0) die(`the reader lane could not start (${(started.out + started.err).trim()})`, 2);
+  if (started.code !== 0)
+    die(`the reader lane could not start (${(started.out + started.err).trim()})`, 2);
   const waited = runScript("wait-for-markers.sh", [dir, "reader.done", "1", "3600"]);
-  if (waited.code !== 0) die(`the reader lane ${lane.name} failed (${(waited.out + waited.err).trim()})`, 2);
+  if (waited.code !== 0)
+    die(`the reader lane ${lane.name} failed (${(waited.out + waited.err).trim()})`, 2);
   if (!isFile(last)) die(`the reader lane ${lane.name} left no answer`, 2);
   const answer = readStrict(last).trim();
   if (!answer) die(`the reader lane ${lane.name} left no answer`, 2);

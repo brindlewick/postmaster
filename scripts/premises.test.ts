@@ -100,9 +100,12 @@ describe("cite extraction", () => {
   });
 
   test("reads a bare path and the other range forms", () => {
-    const text = ["## For the agents", "", "- See `docs/a.md`, `docs/b.md#L1` and `docs/c.md#L2-`.", ""].join(
-      "\n",
-    );
+    const text = [
+      "## For the agents",
+      "",
+      "- See `docs/a.md`, `docs/b.md#L1` and `docs/c.md#L2-`.",
+      "",
+    ].join("\n");
     const cites = citationsFromText(text);
     expect(cites.map((c) => c.path)).toEqual(["docs/a.md", "docs/b.md", "docs/c.md"]);
     expect(cites[1]?.start).toBe(1);
@@ -139,7 +142,11 @@ describe("the verdicts", () => {
   test("moved: the cited text ten lines down, exit 0", () => {
     const lines = Array.from({ length: 30 }, (_, i) => `filler line ${i + 1}`);
     lines[4] = "THE CITED MARKER LINE";
-    const moved = commitFile("docs/a.md", `${Array(10).fill("inserted").join("\n")}\n${lines.join("\n")}\n`, "move");
+    const moved = commitFile(
+      "docs/a.md",
+      `${Array(10).fill("inserted").join("\n")}\n${lines.join("\n")}\n`,
+      "move",
+    );
     const body = ticketBody(verified, `- Renders per ${LINK(verified, "docs/a.md", "L5-L5")}.`);
     const r = cli([repo, body, moved]);
     expect(r.code).toBe(0);
@@ -171,7 +178,10 @@ describe("the verdicts", () => {
   });
 
   test("unknown: a Verified at commit the repository lacks, exit 0", () => {
-    const body = ticketBody("0000000000000000000000000000000000000000", `- Renders per ${LINK(verified, "docs/a.md", "L5-L5")}.`);
+    const body = ticketBody(
+      "0000000000000000000000000000000000000000",
+      `- Renders per ${LINK(verified, "docs/a.md", "L5-L5")}.`,
+    );
     const r = cli([repo, body, verified]);
     expect(r.code).toBe(0);
     expect(r.out).toContain("unknown");
