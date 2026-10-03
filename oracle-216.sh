@@ -92,7 +92,7 @@ mk_repo() { # mk_repo <dir>: a scratch repo with user set and one clean commit
   git config user.name "Oracle"
   git config user.email "oracle@$RESERVED"
   git commit -q --allow-empty -m "root"
-  cd "$TMP" || return 1
+  cd "$ROOT" || return 1
 }
 
 # --- C1: TypeScript run by Bun, no Python. ---
