@@ -1,0 +1,67 @@
+# The figures the report quotes
+
+Each is computed from the tables' data by render.ts.
+
+- real runs with activity in the window: 31
+- real runs set aside: 6
+- real runs that reached synthesis: 18
+- real runs that reached synthesis in the window: 8
+- real runs finished: 23
+- real runs not finished: 8
+- fixture runs with activity in the window: 25
+- fixture runs that reached synthesis: 24
+- second lane's part, runs judged in this audit: 14: A 9, B 3, C 2
+- second lane's part, of those, synthesis in the window: 8: A 4, B 3, C 1
+- second lane's part, of those, synthesis before the window: 6: A 5, B 0, C 1
+- second lane's part, earlier audit's reading of the four runs also in this window: 4: A 3, B 1, C 0
+- first lane's version had a defect the card names: 10 of 14
+- second reader, same class as the first: 12 of 14
+- second reader, differs on: #98 B against A, #160 A against B
+- second reader, same view of the first lane's defect: 14 of 14
+- second reader, totals: A 9, B 3, C 2
+- real runs with blind tests (this audit's runs): 6 of 14
+- fixture runs whose lane branches could be scored: 22
+- fixture lane branches passing every hidden test: 44 of 44
+- fixture merged results passing every hidden test: 23 of 23
+- fixture runs whose lane branches could not be scored: fixture-29, fixture-37
+- fixture second lane's own share of the synthesis's code, median (90th percentile): 1.5% (15.9%)
+- fixture runs with that share 2% or less: 14 of 24
+- fixture runs with that share 10% or more: 6 of 24
+- fixture runs ranked mimo first: 19 of 24
+- real runs with shares recorded, second lane's own share: 158 0.5%, 179 25%, 182 14.6%, 200 0%, 201 4.8%
+- real runs, slower workhorse's extra wait, median (90th percentile), runs: 18 min (55), 16
+- fixture runs, slower workhorse's extra wait, median (90th percentile), runs: 6 min (11), 18
+- real runs, verified P1 and P2 findings: 264
+- real runs, findings only one lane named, by lane: luna 78, mimo 99, opus 18, coachman 5, astra 3, sol 2
+- real runs, findings two or more lanes named: 59
+- real runs, findings naming no lane: 0
+- fixture runs, verified P1 and P2 findings: 37
+- fixture runs, findings only one lane named, by lane: luna 3, sol 8, mimo 7
+- real runs, found by a codex lane and by mimo, both: 51
+- real runs, Chapman estimate of what two such reviewers could find: 413
+- real runs, found by either of them: 241 of 264
+- real runs, opus reviews recorded cost: $644.17 over 71 launches
+- real runs, coachman tokens: 1,478M in, 5,253k out
+- real runs, workhorse tokens: 446M in, 3,796k out
+- real runs, reviewer tokens: 257M in, 7,049k out
+- real runs, share of a run's output tokens, median: workhorses 20%, reviewers 25%, coachman 58%, over 14 runs
+- fixture runs, share of a run's output tokens, median: workhorses 19%, reviewers 17%, coachman 62%, over 24 runs
+- reviewer launches that ended degraded, real runs: 9
+- reviewer launches that ended degraded, fixture runs: 1
+- reviewer launches, real runs: 298
+- real runs, workhorse output tokens, median: 111k for the first-ranked lane, 38k for the second, over 17 runs
+- fixture runs, workhorse output tokens, median: 11k for the first-ranked lane, 7k for the second, over 24 runs
+- set-aside runs that launched workhorses, input tokens: 182-parked-20261001: workhorses 1.0M, coachman 11M; 200-parked-20261002: workhorses 2.4M, coachman 7.7M
+- real runs, gate runs on lane branches: 36, 6.5 hours
+- real runs, gate runs on the synthesis branch: 260, 43.5 hours
+- real runs, review round length, median (90th percentile), rounds: 25 min (56), 82
+- real runs, gap between first and last reviewer of a round, median (90th percentile): 11 min (33)
+- real runs, median time in workhorses-running, synthesis, review: 1h 35m, 31m, 8h 47m
+- real runs whose review checkpoint lists each finding: 4
+- real runs, listed findings, all severities: 168: closed 82, open 45, dismissed 41
+- real runs, listed P1 and P2 findings: 78: closed 65, open 0, dismissed 13
+- fixture runs whose review checkpoint lists each finding: 23
+- fixture runs, listed findings, all severities: 199: closed 48, open 130, dismissed 21
+- fixture runs, listed P1 and P2 findings: 37: closed 33, open 0, dismissed 4
+- incidents by kind: kill 4, session-lost 1, degraded 4, wall 2, overload 1, duplicate-launch 1
+- incidents, runs touched: 15
