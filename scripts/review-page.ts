@@ -58,7 +58,7 @@ export function langOf(path: string): string {
   return dot > 0 ? (LANG[name.slice(dot)] ?? "plaintext") : "plaintext";
 }
 
-const EMAIL = /[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.[A-Za-z]{2,6}\b/gu;
+const EMAIL = /[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.[A-Za-z]{2,6}(?![A-Za-z])/gu;
 const KEEP = /(^|\.)example\.(com|org|net)$|\.(invalid|test|example)$/iu;
 
 /** Replace every email address outside the reserved example domains; line numbers stay. */
@@ -208,7 +208,7 @@ function buildChange(out: string, args: string[]): string {
     body = String(p.body ?? "");
     mergedAt = (p.merged_at as string | null) ?? null;
     title = String(p.title ?? "");
-    const m = /^#(\d+), (.*)$/u.exec(title);
+    const m = /^#([0-9]+), (.*)$/u.exec(title);
     if (m && !ticket) {
       ticket = m[1];
       title = m[2] ?? title;
