@@ -220,6 +220,9 @@ function resolveSpec(
   } else if (name === "postmaster") {
     const team = (cfg.team as Record<string, unknown>) ?? {};
     spec = team.postmaster;
+  } else if (name === "clerk") {
+    const team = (cfg.team as Record<string, unknown>) ?? {};
+    spec = team.clerk;
   } else {
     spec = lanes[name];
   }
@@ -288,6 +291,48 @@ function buildForms(
   runDir: string,
   base: string,
 ): FormsResult {
+  if (cmdMode === "interactive") {
+    const cmd: string[] = [];
+    const launchName = process.env.POSTMASTER_LAUNCH_NAME ?? "";
+    switch (harness) {
+      case "codex":
+        cmd.push("codex", "-m", model);
+        if (effort) cmd.push("-c", `model_reasoning_effort="${effort}"`);
+        cmd.push("--dangerously-bypass-approvals-and-sandbox");
+        break;
+      case "grok":
+        cmd.push("grok", "-m", model);
+        if (effort) cmd.push("--reasoning-effort", effort);
+        cmd.push("--always-approve");
+        break;
+      case "agy":
+        cmd.push("agy", "--model", model, "--dangerously-skip-permissions");
+        break;
+      case "claude":
+        cmd.push("claude", "--model", model);
+        if (effort) cmd.push("--effort", effort);
+        if (launchName) cmd.push("--name", launchName);
+        cmd.push("--dangerously-skip-permissions");
+        break;
+      case "pi":
+        cmd.push("pi", "--model", model);
+        if (effort) cmd.push("--thinking", effort);
+        if (launchName) cmd.push("--name", launchName);
+        cmd.push("--approve");
+        break;
+      case "muse":
+        cmd.push("muse", "--model", model);
+        if (effort) cmd.push("--reasoning-effort", effort);
+        cmd.push("--yolo");
+        break;
+      case "mimo":
+        cmd.push("mimo", "-m", model, "--dangerously-skip-permissions");
+        break;
+      default:
+        die(`no form for harness '${harness}'`);
+    }
+    return { cmd, data: "", stdinFile: "", promptArg: -1 };
+  }
   let data = "";
   let stdinFile = "";
   let promptArg = -1;
@@ -1057,7 +1102,7 @@ if (import.meta.main) {
   }
   if (argv.length < 2)
     die(
-      "usage: launch.sh form|launch|review|resume|skill <name> ... | thread-id <events-file> | transient <err-file> [<stream-file> [<skip-lines>]] | wall-tokens | wall-quotes",
+      "usage: launch.sh form|interactive|launch|review|resume|skill <name> ... | thread-id <events-file> | transient <err-file> [<stream-file> [<skip-lines>]] | wall-tokens | wall-quotes",
     );
   const CMD: string = argv[0] ?? "";
   const NAME = argv[1] ?? "";
@@ -1069,6 +1114,7 @@ if (import.meta.main) {
   let LAST = "";
   let RUN = "";
   let PROJECT = "";
+  let SESSION_NAME = "";
   const args: string[] = [];
   let i = 2;
   while (i < argv.length) {
@@ -1089,6 +1135,10 @@ if (import.meta.main) {
       if (i + 1 >= argv.length || !argv[i + 1]) die("--project needs a project directory");
       PROJECT = argv[i + 1] ?? "";
       i += 2;
+    } else if (a === "--name") {
+      if (i + 1 >= argv.length || !argv[i + 1]) die("--name needs a value");
+      SESSION_NAME = argv[i + 1] ?? "";
+      i += 2;
     } else {
       args.push(a ?? "");
       i += 1;
@@ -1097,6 +1147,7 @@ if (import.meta.main) {
   if (NAME === "coachman" && CMD !== "form" && !LEG) {
     die(`coachman needs --leg synthesis, review or ship to ${CMD}`);
   }
+  if (SESSION_NAME) process.env.POSTMASTER_LAUNCH_NAME = SESSION_NAME;
 
   let source: string;
   let recorded = false;
@@ -1127,7 +1178,7 @@ if (import.meta.main) {
   // form shows the wrapped command whenever one applies; it runs no start
   // check. launch, resume and review start the confinement with a no-op, and
   // run the lane unconfined with a warning when it cannot start.
-  const isLane = NAME !== "coachman" && NAME !== "coachman_fallback" && NAME !== "postmaster";
+  const isLane = NAME !== "coachman" && NAME !== "coachman_fallback" && NAME !== "postmaster" && NAME !== "clerk";
   const showWrap = spec.confine && isLane;
   let confineWrap = false;
   if (spec.confine && isLane && CMD !== "skill" && CMD !== "form") {
@@ -1233,6 +1284,12 @@ if (import.meta.main) {
     PROMPT = "<prompt-file>";
     THREAD = "<thread-id>";
     PTEXT = "$(cat <prompt-file>)";
+  } else if (CMD === "interactive") {
+    if (args.length !== 0) die("interactive takes no argument but --project and --name");
+    CWD = PROJECT || process.cwd();
+    PROMPT = "";
+    THREAD = "";
+    PTEXT = "";
   } else if (CMD === "launch") {
     if (args.length !== 2) die("launch needs <cwd> <prompt-file>");
     CWD = args[0] ?? "";
@@ -1324,7 +1381,7 @@ if (import.meta.main) {
       BASE,
     );
 
-  if (CMD === "form") {
+  if (CMD === "form" || CMD === "interactive") {
     const show = (a: string): string => showArg(a);
     const maybeWrap = (cmd: string[]): string[] => {
       if (!showWrap) return cmd;
@@ -1337,6 +1394,15 @@ if (import.meta.main) {
       if (stdinFile) s += `< ${show(stdinFile)}`;
       return s;
     };
+    if (CMD === "interactive") {
+      if (RUN) die("interactive form does not take --run");
+      const interactive = mkForms("interactive");
+      let cmd = interactive.cmd;
+      if (ENV_FILE) cmd = ["bash", ...sourcedLaunch(ENV_FILE, cmd, "1")];
+      const shown = [`cd ${show(CWD)}&& `, ...cmd.map(show)].join("");
+      process.stdout.write(`launch: ${shown.trimEnd()}\n`);
+      process.exit(0);
+    }
     const launchForms = mkForms("form");
     process.stdout.write(
       `launch: ${put(CWD, maybeWrap(launchForms.cmd), launchForms.stdinFile)}\n`,
