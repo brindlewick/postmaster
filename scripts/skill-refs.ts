@@ -14,7 +14,8 @@
 // or when it goes through <tool> to a script the repo does not have. A path under
 // another placeholder or variable, such as <repo>/scripts/, is that directory's and not the tool's.
 // --fix also upgrades old .sh names resolved by scripts/run, so a rebase adding a script
-// converts that reference without a fixed name list. Old names under <rt>/ are left alone:
+// converts that reference without a fixed name list (a file:line citation keeps its line
+// on the .ts path). Old names under <rt>/ are left alone:
 // a pinned checkout can predate the entry, so those convert through run-meta run-pinned.
 // A second run changes nothing.
 // the second time; the check that follows it names whatever it could not fix.
@@ -73,6 +74,10 @@ export function refs(
         if (OTHER.test(before) && !before.endsWith("<tool>/")) return old;
         if (!scriptExists(root, name)) return old;
         if (before.endsWith("<tool>/")) count += 1;
+        // A file:line citation names the file, not an invocation: the file's
+        // new name keeps the line.
+        const rest = text.slice(offset + old.length);
+        if (rest.startsWith(":")) return `scripts/${name}.ts`;
         return `scripts/run ${name}`;
       });
       new_ = new_.replace(BARE, "<tool>/scripts/");
@@ -116,13 +121,17 @@ export function refs(
               ref: `${which}${ref}`,
             });
           } else if (name === "run") {
-            const next = /^[ \t]+([A-Za-z0-9_-]+)/u.exec(after)?.[1];
-            if (next && !scriptExists(root, next))
+            const token = /^[ \t]+([^ \t]+)/u.exec(after)?.[1] ?? "";
+            const invoked = token
+              .replace(/[^A-Za-z0-9_-]+$/u, "")
+              .replace(/['"]s$/u, "")
+              .replace(/[^A-Za-z0-9_-]+$/u, "");
+            if (invoked !== "" && !scriptExists(root, invoked))
               faults.push({
                 file: f,
                 line: i + 1,
                 why: "no such script through scripts/run",
-                ref: `${which}${ref} ${next}`,
+                ref: `${which}${ref} ${invoked}`,
               });
           }
         } else if (OTHER.test(before)) {
@@ -156,8 +165,8 @@ function isFile(p: string): boolean {
 }
 
 function libScript(after: string, root: string): boolean {
-  const rest = /^\/([A-Za-z0-9_-]+)\.ts(?=$|[^A-Za-z0-9_])/u.exec(after);
-  return !!rest && scriptExists(root, rest[1] as string);
+  const rest = /^\/([A-Za-z0-9_-]+)\.ts(?=$|[^A-Za-z0-9_.-]|[.-](?![A-Za-z0-9_-]))/u.exec(after);
+  return !!rest && isFile(join(root, "scripts", "lib", `${rest[1]}.ts`));
 }
 
 function scriptExists(root: string, name: string): boolean {

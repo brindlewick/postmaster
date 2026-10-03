@@ -90,6 +90,26 @@ describe("checking script references", () => {
     expect(result.code).toBe(1);
     expect(result.faults.some((f) => f.why.includes("run-pinned"))).toBe(true);
   });
+
+  test("an entry call validates the whole invoked name", () => {
+    const file = put(
+      "run-name.md",
+      "Run `<tool>/scripts/run stage.sh` now.\nRun `<tool>/scripts/run launch:42` now.\nRun `<tool>/scripts/run stage` today.\nSee `<tool>/scripts/run stage`'s output.\n",
+    );
+    const result = refs(root, "check", [file]);
+    expect(result.code).toBe(1);
+    expect(result.faults.map((f) => f.line)).toEqual([1, 2]);
+  });
+
+  test("a lib path must exist under lib/", () => {
+    const file = put(
+      "lib-strict.md",
+      "See `<tool>/scripts/lib/launch.ts`.\nSee `<tool>/scripts/lib/text.ts.bak`.\n",
+    );
+    const result = refs(root, "check", [file]);
+    expect(result.code).toBe(1);
+    expect(result.faults.map((f) => f.line)).toEqual([1, 2]);
+  });
 });
 
 describe("fixing script references", () => {
@@ -130,6 +150,14 @@ describe("fixing script references", () => {
       "Run <tool>/scripts/stage.sh.bak and <tool>/scripts/stage.sh-old.\n",
     );
     expect(result.code).toBe(1);
+  });
+
+  test("a file:line citation keeps its line on the new path", () => {
+    const file = put("cite.md", "See scripts/launch.sh:42 for context.\n");
+    const result = refs(root, "fix", [file]);
+    expect(result.code).toBe(0);
+    expect(readFileSync(file, "utf8")).toBe("See <tool>/scripts/launch.ts:42 for context.\n");
+    expect(result.fixMessages).toEqual([`${file}: 1 reference(s) updated`]);
   });
 
   test("the fix message counts references updated", () => {
