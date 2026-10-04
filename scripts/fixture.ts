@@ -653,9 +653,12 @@ export function checkPremisesOrder(dispatch: string): { ok: boolean; detail: str
       lanes.has(event.target),
   );
   if (premiseIndex < 0) return { ok: false, detail: "no coachman premises action" };
-  if (dispatchIndex < 0) return { ok: false, detail: "no workhorse dispatch action" };
-  if (premiseIndex >= dispatchIndex)
+  if (dispatchIndex >= 0 && premiseIndex >= dispatchIndex)
     return { ok: false, detail: "the first workhorse dispatch precedes the premises action" };
+  // A run that recorded its premises and stopped before any lane (a premise
+  // escalation) holds the order: only dispatch-before-premises fails it.
+  if (dispatchIndex < 0)
+    return { ok: true, detail: "premises action recorded and no workhorse dispatched" };
   return { ok: true, detail: "premises action precedes the first workhorse dispatch" };
 }
 

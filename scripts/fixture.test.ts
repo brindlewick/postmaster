@@ -864,6 +864,12 @@ describe("score: premises are checked before workhorse dispatch", () => {
     expect(result.ok).toBe(false);
     expect(result.detail).toContain("no coachman premises action");
   });
+
+  test("premises with no workhorse dispatch passes", () => {
+    const result = checkPremisesOrder(recordOrder("stopped", [premise]));
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("no workhorse dispatched");
+  });
 });
 
 describe("score: a record's stages are entered by the legs the contract names", () => {
