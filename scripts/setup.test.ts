@@ -139,6 +139,7 @@ describe("positive controls", () => {
       "bash",
       [
         SELF,
+        "setup",
         "--add-clerk",
         "--answers",
         join(tmp, "legacy.answers"),
@@ -167,6 +168,7 @@ describe("positive controls", () => {
       "bash",
       [
         SELF,
+        "setup",
         "--add-clerk",
         "--answers",
         join(tmp, "missing-harness.answers"),
@@ -184,6 +186,7 @@ describe("positive controls", () => {
       "bash",
       [
         SELF,
+        "setup",
         "--add-clerk",
         "--answers",
         join(tmp, "missing-model.answers"),

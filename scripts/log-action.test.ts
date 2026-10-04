@@ -94,7 +94,9 @@ function logAction(args: string[]): { code: number; out: string; err: string } {
 }
 
 function projectAction(repo: string, args: string[]): { code: number; out: string; err: string } {
-  const r = spawnSync("bash", [SELF, "--project", repo, ...args], { encoding: "utf8" });
+  const r = spawnSync("bash", [SELF, "log-action", "--project", repo, ...args], {
+    encoding: "utf8",
+  });
   return { code: r.status ?? -1, out: r.stdout ?? "", err: r.stderr ?? "" };
 }
 
