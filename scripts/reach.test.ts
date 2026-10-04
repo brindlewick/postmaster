@@ -1425,3 +1425,52 @@ describe("R8: rescoped check", () => {
     expect(glob.out).not.toContain("finding");
   });
 });
+
+describe("R9: ruled round fixes", () => {
+  function cardFor(layout: Layout, commandText: string): string {
+    writeWorkhorse(layout, "codex", [codex(commandText)]);
+    check(layout, "workhorses");
+    check(layout, "card");
+    writeFileSync(
+      join(layout.dispatch, "checks.json"),
+      JSON.stringify({
+        checks: [{ name: "gate", source: "default:gate", command: "true", shows: "gate" }],
+      }),
+    );
+    const sha = git(layout.synth, "rev-parse", "HEAD").slice(0, 12);
+    writeAction(layout, "coachman", "verify", "gate", `on=${sha}@${sha} result=pass exit=0 secs=1`);
+    const checkpoint = join(layout.dispatch, "checkpoint.md");
+    writeFileSync(checkpoint, "## Findings (bug)\n\nnone\n");
+    const card = run("bash", [LANDING, "card-block", layout.dispatch, layout.synth, checkpoint]);
+    expect(card.code).toBe(0);
+    return card.out;
+  }
+
+  test("R9 an unresolved ~/ path stays off the card", () => {
+    const card = cardFor(makeLayout(), "cat ~/Code/secret-proj/*.toml");
+    expect(card).not.toContain("secret-proj");
+    expect(card).not.toContain("~/Code/secret-proj/*.toml");
+    expect(card).toContain("outside the project");
+  });
+
+  test("R9 an unresolved ~user path stays off the card", () => {
+    const card = cardFor(makeLayout(), "cat ~otheruser/docs/*.md");
+    expect(card).not.toContain("otheruser");
+    expect(card).not.toContain("~otheruser/docs/*.md");
+    expect(card).toContain("outside the project");
+  });
+
+  test("R9 an unresolved $HOME path stays off the card", () => {
+    const card = cardFor(makeLayout(), "cat $HOME/*.log $HOME/$DIR/f");
+    expect(card).not.toContain("$HOME");
+    expect(card).not.toContain("$DIR");
+    expect(card).toContain("outside the project");
+  });
+
+  test("R9 an unresolved ../ path stays off the card", () => {
+    const card = cardFor(makeLayout(), "cat ../sibling/*.log");
+    expect(card).not.toContain("sibling");
+    expect(card).not.toContain("../sibling/*.log");
+    expect(card).toContain("outside the project");
+  });
+});

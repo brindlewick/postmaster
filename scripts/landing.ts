@@ -353,7 +353,9 @@ function escapeCardPath(shown: string): string {
 function reachPath(dispatch: string, path: unknown): string {
   if (typeof path !== "string" || path === "") return "unknown path";
   if (path.startsWith("refs/")) return escapeCardPath(path);
-  if (!isAbsolute(path)) return escapeCardPath(path);
+  // Only an unresolved token reaches the card non-absolute; its raw text can
+  // name a home folder or another project, so it never prints (D18, C14).
+  if (!isAbsolute(path)) return "outside the project";
   const repo = physical(join(dispatch, "..", "..", ".."));
   const rel = relative(repo, path);
   const shown =
