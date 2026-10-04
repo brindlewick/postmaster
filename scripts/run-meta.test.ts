@@ -60,7 +60,7 @@ const savedEnv: Record<string, string | undefined> = {
 // bun:test's types omit the hook timeout, though the runtime honors it.
 
 beforeAll(async () => {
-  const wrapper = join(import.meta.dir, "run-meta.sh");
+  const wrapper = join(import.meta.dir, "run");
   await withTempDir(async (raw: string): Promise<void> => {
     const tmp = realpathSync(raw);
     const tools = join(tmp, "tools");
@@ -97,7 +97,10 @@ beforeAll(async () => {
       args: string[],
       env?: Record<string, string | undefined>,
     ): { code: number; out: string } => {
-      const r = env === undefined ? run(wrapper, args) : run(wrapper, args, { env });
+      const r =
+        env === undefined
+          ? run(wrapper, ["run-meta", ...args])
+          : run(wrapper, ["run-meta", ...args], { env });
       return { code: r.code, out: r.out + r.err };
     };
     const spawnCli = (
@@ -106,7 +109,7 @@ beforeAll(async () => {
     ): Promise<{ code: number; out: string }> => {
       // Bun.spawn without env does not inherit this process's environment, so the
       // current environment always crosses explicitly.
-      const child: any = Bun.spawn([wrapper, ...args], {
+      const child: any = Bun.spawn([wrapper, "run-meta", ...args], {
         stdout: "pipe",
         stderr: "pipe",
         env: { ...process.env, ...(env ?? {}) },
@@ -190,7 +193,7 @@ beforeAll(async () => {
       const slowD = join(tmp, "slowrun");
       mkdirSync(slowD, { recursive: true });
       const t0 = Date.now();
-      const r = run(wrapper, [slowD, repo], {
+      const r = run(wrapper, ["run-meta", slowD, repo], {
         env: {
           ...process.env,
           PATH: `${bindir}${delimiter}${process.env.PATH ?? ""}`,
@@ -729,7 +732,7 @@ beforeAll(async () => {
     );
     writeFileSync(join(krel, "manifest.json"), '{"stage": "done"}\n');
     {
-      const relChild: any = Bun.spawn([wrapper, "release", krel], {
+      const relChild: any = Bun.spawn([wrapper, "run-meta", "release", krel], {
         stdout: "pipe",
         stderr: "pipe",
         env: { ...process.env, POSTMASTER_SCAN_HOLD_MS: "20000" },
@@ -1582,7 +1585,7 @@ describe("fixture effort records", () => {
         PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
       };
       const original = join(tmp, "original");
-      const created = run(join(import.meta.dir, "fixture.sh"), ["new", original, "remove"], {
+      const created = run(join(import.meta.dir, "run"), ["fixture", "new", original, "remove"], {
         env,
       });
       expect(created.code).toBe(0);
@@ -1593,7 +1596,9 @@ describe("fixture effort records", () => {
       );
       const dispatch = join(moved, ".postmaster", "runs", "7");
       mkdirSync(dispatch, { recursive: true });
-      const fixtureRecord = run(join(import.meta.dir, "run-meta.sh"), [dispatch, moved], { env });
+      const fixtureRecord = run(join(import.meta.dir, "run"), ["run-meta", dispatch, moved], {
+        env,
+      });
       expect(fixtureRecord.code).toBe(0);
       expect(fixtureRecord.err).toContain("no lowest effort for unknown on agy; keeping high");
       const recorded = JSON.parse(readFileSync(join(dispatch, "run.json"), "utf8"));
@@ -1610,7 +1615,7 @@ describe("fixture effort records", () => {
       expect(cfg.team.coachman_legs.synthesis.effort).toBe("low");
       expect(cfg.team.coachman_legs.review.effort).toBe("low");
       expect(readFileSync(config).equals(before)).toBe(true);
-      const line = run(join(import.meta.dir, "run-meta.sh"), ["efforts", dispatch], { env });
+      const line = run(join(import.meta.dir, "run"), ["run-meta", "efforts", dispatch], { env });
       expect(line.code).toBe(0);
       expect(line.out.trim()).toContain("codex_lane=low");
       expect(line.out.trim()).toContain("coachman.synthesis=low");
@@ -1638,9 +1643,13 @@ describe("fixture effort records", () => {
       ).toBe(0);
       const ticketDispatch = join(ticketRepo, ".postmaster", "runs", "8");
       mkdirSync(ticketDispatch, { recursive: true });
-      const ticketRecord = run(join(import.meta.dir, "run-meta.sh"), [ticketDispatch, ticketRepo], {
-        env,
-      });
+      const ticketRecord = run(
+        join(import.meta.dir, "run"),
+        ["run-meta", ticketDispatch, ticketRepo],
+        {
+          env,
+        },
+      );
       expect(ticketRecord.code).toBe(0);
       const ticketCfg = JSON.parse(readFileSync(join(ticketDispatch, "run.json"), "utf8")).config;
       expect(ticketCfg.lanes.codex_lane.effort).toBe("max");
@@ -1648,9 +1657,13 @@ describe("fixture effort records", () => {
       expect(ticketCfg.team.coachman_legs.synthesis.effort).toBe("high");
       expect(ticketRecord.err).toBe("");
       expect(readFileSync(config).equals(before)).toBe(true);
-      const ticketLine = run(join(import.meta.dir, "run-meta.sh"), ["efforts", ticketDispatch], {
-        env,
-      });
+      const ticketLine = run(
+        join(import.meta.dir, "run"),
+        ["run-meta", "efforts", ticketDispatch],
+        {
+          env,
+        },
+      );
       expect(ticketLine.code).toBe(0);
       expect(ticketLine.out.trim()).toContain("codex_lane=max");
       expect(ticketLine.out.trim()).toContain("coachman.review=max");

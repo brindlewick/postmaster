@@ -40,7 +40,7 @@ function die(message: string, code = 1): never {
   throw new LocalFailure(message, code);
 }
 function usage(text: string): never {
-  return die(`usage: local.sh <repo> ${text}`);
+  return die(`usage: run local <repo> ${text}`);
 }
 function utf8(value: string, what: string): string {
   // A U+FFFD in a decoded argument is undecodable input only when the raw
@@ -114,7 +114,7 @@ type Meta = {
 };
 function needStore(store: string): void {
   if (!existsSync(store) || !statSync(store).isDirectory())
-    die(`no ticket store at ${store}; with the user's word, run: local.sh <repo> store init`, 3);
+    die(`no ticket store at ${store}; with the user's word, run: run local <repo> store init`, 3);
 }
 export function ticketPath(store: string, number: bigint, ext: string): string {
   return join(store, `${number}.${ext}`);

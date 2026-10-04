@@ -36,7 +36,7 @@ import {
   YPKGS,
 } from "./style-findings.ts";
 
-const SELF = join(import.meta.dir, "style-findings.sh");
+const SELF = join(import.meta.dir, "run");
 const SKILL = join(toolRoot(import.meta), "skills/postmaster");
 
 interface ControlRecord {
@@ -74,7 +74,7 @@ beforeAll(() => {
     let rc = 0;
 
     const invoke = (...args: string[]): void => {
-      const r = run("bash", [SELF, ...args]);
+      const r = run(SELF, ["style-findings", ...args]);
       // BASE's run() used $(...), which strips trailing newlines.
       out = (r.out + r.err).replace(/\n+$/u, "");
       rc = r.code;
@@ -158,7 +158,7 @@ beforeAll(() => {
     };
 
     const logged = (dispatch: string, ...args: string[]): void => {
-      run("bash", [join(import.meta.dir, "log-action.sh"), dispatch, "coachman", ...args]);
+      run(join(import.meta.dir, "run"), ["log-action", dispatch, "coachman", ...args]);
     };
 
     const logFindings = (dispatch: string, count: number): void => {
@@ -359,8 +359,8 @@ beforeAll(() => {
         return 0;
       }
     })();
-    const refuseR = run("bash", [
-      join(import.meta.dir, "log-action.sh"),
+    const refuseR = run(join(import.meta.dir, "run"), [
+      "log-action",
       d,
       "coachman",
       "finding",
@@ -1046,7 +1046,7 @@ beforeAll(() => {
     const subs = new Set<string>();
     for (const f of skillFiles) {
       const text = readFileSync(join(SKILL, f), "utf8");
-      for (const m of text.matchAll(/style-findings\.sh ([a-z-]*)/gu)) {
+      for (const m of text.matchAll(/scripts\/run style-findings ([a-z-]*)/gu)) {
         if (m[1]) subs.add(m[1]);
       }
     }
@@ -1057,9 +1057,9 @@ beforeAll(() => {
 
     // A subcommand the script lacks would be caught
     const planted = join(tmp, "planted.md");
-    writeFileSync(planted, "run `<tool>/scripts/style-findings.sh sort <dispatch>`\n");
+    writeFileSync(planted, "run `<tool>/scripts/run style-findings sort <dispatch>`\n");
     const plantedSubs = [
-      ...readFileSync(planted, "utf8").matchAll(/style-findings\.sh ([a-z-]*)/gu),
+      ...readFileSync(planted, "utf8").matchAll(/scripts\/run style-findings ([a-z-]*)/gu),
     ]
       .map((m) => m[1])
       .join(" ");
