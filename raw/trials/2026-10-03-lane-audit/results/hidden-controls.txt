@@ -1,0 +1,8 @@
+bun apparatus/hidden.ts --tool <repo> --controls
+
+{"reference":"20 pass, 0 fail","base":"7 pass, 13 fail"}
+
+The fixture ticket's hidden suite run on two trees whose answer is known: the fixture app with the
+ticket's reference patch applied passes every test, and the app as it was before the ticket passes 7
+of 20. Run on 2026-10-03 from the tool at commit 40d50ce; apparatus/hidden.test.ts runs the same
+controls.

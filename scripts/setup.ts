@@ -138,10 +138,13 @@ const onLinux = run("uname", ["-s"]).out.replace(/\n+$/u, "") === "Linux";
 let DRY = 0;
 let ANSWERS = "";
 let CONFIG = join(process.env.HOME ?? "~", ".postmaster", "config.toml");
+let ADD_CLERK = false;
 let i = 0;
 while (i < argv.length) {
   const a = argv[i];
-  if (a === "--dry-run") {
+  if (a === "--add-clerk") {
+    ADD_CLERK = true;
+  } else if (a === "--dry-run") {
     DRY = 1;
   } else if (a === "--config") {
     const v = argv[++i];
@@ -175,6 +178,10 @@ postmaster.harness
 postmaster.model
 postmaster.effort?         (none)
 postmaster.env_file?       (none)
+clerk.harness
+clerk.model
+clerk.effort?              (none)
+clerk.env_file?            (none)             env file for its key or backend
 max_runs                   2                  concurrent runs per project
 poll_seconds               120                postmaster poll interval${
       onLinux
@@ -200,17 +207,71 @@ round_timeout_seconds      2400               seconds a review round may run, 1 
 merge_authority            user               user or postmaster
 checkpoint_mode            autonomous         autonomous or consult
 review_link?               (none)             template with {path}
-planning.review_link?      (none)             code-server template with {path} for workhorse specs
+planning.review_link?      (none)             code-server template with {path} for ticket drafts
 overwrite                  no                 yes replaces an existing config`);
     process.exit(0);
   } else {
-    console.error("usage: run setup [--answers <file>] [--dry-run] [--config <path>] | --keys");
+    console.error(
+      "usage: run setup [--answers <file>] [--dry-run] [--config <path>] | --add-clerk [options] | --keys",
+    );
     process.exit(1);
   }
   i++;
 }
 
 const opts: AskOpts = { answers: ANSWERS };
+
+if (ADD_CLERK) {
+  if (!existsSync(CONFIG)) die(`setup: no config at ${CONFIG}; run normal setup first`, 1);
+  let original = "";
+  let parsed: Record<string, any>;
+  try {
+    original = readFileSync(CONFIG, "utf8");
+    parsed = readTomlFile(CONFIG) as Record<string, any>;
+  } catch {
+    die(`setup: ${CONFIG} does not parse`, 1);
+  }
+  const team = parsed!.team;
+  if (!team || typeof team !== "object" || Array.isArray(team))
+    die(`setup: [team] is missing in ${CONFIG}`, 1);
+  if (team.clerk !== undefined) die(`setup: ${CONFIG} already has team.clerk`, 1);
+  console.log("== The booking clerk: prepares a ticket with the user. ==");
+  const harness = ask("  clerk: harness", "", "clerk.harness", opts);
+  needHarness(harness);
+  const model = ask("  clerk: model id", "", "clerk.model", opts);
+  const effort = ask("  clerk: effort (blank if none)", "", "clerk.effort?", opts);
+  const envFile = ask(
+    "  clerk: env file for its key or backend (blank if none)",
+    "",
+    "clerk.env_file?",
+    opts,
+  );
+  const entry = `clerk = { harness = "${harness}", model = "${model}"${roleExtra(effort, envFile)} }`;
+  const header = /^\[team\][ \t]*(?:#.*)?(?:\r?\n|$)/mu.exec(original);
+  if (!header) die(`setup: ${CONFIG} has no [team] table`, 1);
+  const start = header.index + header[0].length;
+  const next = /^\[[^\n]+\][^\n]*(?:\r?\n|$)/mu.exec(original.slice(start));
+  const end = next ? start + next.index : original.length;
+  let before = original.slice(0, end);
+  if (before && !before.endsWith("\n")) before += "\n";
+  const changed = `${before}${entry}\n${original.slice(end)}`;
+  if (DRY) {
+    console.log(changed.replace(/\n+$/u, ""));
+    process.exit(0);
+  }
+  writeFileSync(CONFIG, changed, "utf8");
+  try {
+    const reread = readTomlFile(CONFIG) as Record<string, any>;
+    if (reread.team?.clerk?.harness !== harness || reread.team?.clerk?.model !== model)
+      throw new Error("mismatch");
+  } catch {
+    writeFileSync(CONFIG, original, "utf8");
+    die(`setup: ${CONFIG} did not parse after adding team.clerk; restored the original`, 1);
+  }
+  console.log(`updated ${CONFIG}; every previous line is preserved`);
+  process.exit(0);
+}
+
 console.log("== Installed agent CLIs ==");
 const probe = run(join(HERE, "run"), ["probe-harnesses"]);
 process.stdout.write(probe.out);
@@ -375,6 +436,18 @@ const PEF = ask(
   "postmaster.env_file?",
   opts,
 );
+console.log("");
+console.log("== The booking clerk: prepares tickets with the user. ==");
+const CLH = ask("  clerk: harness", "", "clerk.harness", opts);
+needHarness(CLH);
+const CLM = ask("  clerk: model id", "", "clerk.model", opts);
+const CLE = ask("  clerk: effort (blank if none)", "", "clerk.effort?", opts);
+const CLEF = ask(
+  "  clerk: env file for its key or backend (blank if none)",
+  "",
+  "clerk.env_file?",
+  opts,
+);
 const MR = ask("  concurrent runs per project", "2", "max_runs", opts);
 const PS = ask("  postmaster poll interval, seconds", "120", "poll_seconds", opts);
 
@@ -513,7 +586,7 @@ const RL = ask(
   opts,
 );
 const PRL = ask(
-  "Code-server link template with {path} for a workhorse spec (blank for none)",
+  "Code-server link template with {path} for a ticket draft (blank for none)",
   "",
   "planning.review_link?",
   opts,
@@ -541,6 +614,7 @@ reviewers = ${tomlList(REVIEWERS)}
 coachman = { harness = "${CH}", model = "${CM}"${roleExtra(CE, CEF)} }
 coachman_fallback = { harness = "${FH}", model = "${FM}"${roleExtra(FE, FEF)} }
 postmaster = { harness = "${PH}", model = "${PM}"${roleExtra(PE, PEF)} }
+clerk = { harness = "${CLH}", model = "${CLM}"${roleExtra(CLE, CLEF)} }
 max_runs = ${MR}
 ${LENS_TABLE}
 

@@ -129,8 +129,8 @@ beforeAll(() => {
   root = join(tmp, "root");
   mkRun("rule", "review", 2, ".escalation-ready");
   mkRun("gate", "shipping", 3, ".card-ready");
-  mkRun("spec", "planning", 1, ".spec-review-ready", ".leg-1-exited");
-  mkRun("specpause", "planning", 1, ".spec-review-ready", ".leg-1-exited");
+  mkRun("spec", "planning", 1, ".spec-" + "review-ready", ".leg-1-exited");
+  mkRun("specpause", "planning", 1, ".spec-" + "review-ready", ".leg-1-exited");
   // The pause's realistic shape: started, thread id, no hand-off, so incomplete.
   writeFileSync(
     join(root, "specpause", "logs", "coachman-leg-1-attempts.jsonl"),
@@ -157,7 +157,7 @@ beforeAll(() => {
   mkRun("closed", "done", 3, ".leg-3-done", ".leg-3-exited");
   mkRun("earlier", "review", 2, ".leg-1-done");
   mkRun("usergate", "shipping", 3, ".card-ready", ".waiting-on-user");
-  mkRun("userspec", "planning", 1, ".spec-review-ready", ".waiting-on-user");
+  mkRun("userspec", "planning", 1, ".spec-" + "review-ready", ".waiting-on-user");
   mkRun("userclosed", "done", 3, ".waiting-on-user");
   mkRun("refusedanswer", "review", 2, ".waiting-on-user", ".leg-2-exited");
   record("refusedanswer", "refused", "coachman");
@@ -422,5 +422,84 @@ describe("two-leg and legacy runs", () => {
 
   test("a pre-change ship completion is DISPATCH", () => {
     expect(nextOf("legacy-last")).toBe("DISPATCH");
+  }, 10000);
+});
+
+describe("provider walls: WALL before everything but a closed run", () => {
+  const wallTs = new Date(Date.now() - 60000).toISOString();
+  const wallLine = (lane = "stub"): string =>
+    `${JSON.stringify({
+      ts: wallTs,
+      project: "p",
+      run: "T",
+      actor: `lane:${lane}`,
+      action: "wall",
+      target: lane,
+      detail: "workhorse - - none stuck on the limit",
+    })}\n`;
+
+  beforeAll(() => {
+    // An untold wall on a busy run: the lock is held, files are moving, WALL still wins.
+    mkRun("wallbusy", "review", 2);
+    writeFileSync(join(root, "wallbusy", "actions.jsonl"), wallLine());
+    liveowner("wallbusy");
+    // An untold wall with `.waiting-on-user` older than it: not told yet, so WALL.
+    mkRun("walloldq", "review", 2, ".waiting-on-user");
+    writeFileSync(join(root, "walloldq", "actions.jsonl"), wallLine());
+    const older = (Date.now() - 120000) / 1000;
+    utimesSync(join(root, "walloldq", ".waiting-on-user"), older, older);
+    // An untold wall with `.waiting-on-user` newer than it: the user has this run's question.
+    mkRun("wallnewq", "review", 2, ".waiting-on-user");
+    writeFileSync(join(root, "wallnewq", "actions.jsonl"), wallLine());
+    // Told, unruled, nothing else: paused on the ruling, not stalled (C10).
+    mkRun("wallpause", "review", 2);
+    writeFileSync(
+      join(root, "wallpause", "actions.jsonl"),
+      wallLine() +
+        `${JSON.stringify({
+          ts: new Date().toISOString(),
+          actor: "postmaster",
+          action: "told",
+          target: "stub",
+          detail: "workhorse - -",
+        })}\n`,
+    );
+    age("wallpause");
+    // Told and ruled: the pause is over; idle reads INSPECT as it does without walls.
+    mkRun("wallruled", "review", 2);
+    writeFileSync(
+      join(root, "wallruled", "actions.jsonl"),
+      wallLine() +
+        `${JSON.stringify({ ts: new Date().toISOString(), actor: "postmaster", action: "told", target: "stub", detail: "workhorse - -" })}\n` +
+        `${JSON.stringify({ ts: new Date().toISOString(), actor: "postmaster", action: "rule", target: "stub", detail: "wall go-on" })}\n`,
+    );
+    age("wallruled");
+    // A closed run's wall never wakes: the manifest's dash wins.
+    mkRun("wallclosed", "done", 2, ".leg-2-done");
+    writeFileSync(join(root, "wallclosed", "actions.jsonl"), wallLine());
+  });
+
+  test("an untold wall on a busy run is WALL, not WAIT (C8)", () => {
+    expect(nextOf("wallbusy")).toBe("WALL");
+  }, 10000);
+
+  test("a waiting question older than the untold wall does not hide it (C8)", () => {
+    expect(nextOf("walloldq")).toBe("WALL");
+  }, 10000);
+
+  test("a waiting question newer than the untold wall reads USER (C8)", () => {
+    expect(nextOf("wallnewq")).toBe("USER");
+  }, 10000);
+
+  test("a run paused for walls, idle an hour, is USER and never INSPECT (C10)", () => {
+    expect(nextOf("wallpause")).toBe("USER");
+  }, 10000);
+
+  test("with every wall ruled the idle run inspects as it did before", () => {
+    expect(nextOf("wallruled")).toBe("INSPECT");
+  }, 10000);
+
+  test("a closed run with a wall stays closed", () => {
+    expect(nextOf("wallclosed")).toBe("-");
   }, 10000);
 });

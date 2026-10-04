@@ -1,0 +1,185 @@
+{
+  "reader": "the first reader, from each run's synthesis card (checkpoint-1.md), against the rubric in method.md fixed before any run was classified; the second reader was given the rubric and the cards only, and wrote its classes before seeing the first reader's",
+  "rubric": {
+    "A": "the second-ranked lane supplied something the card says the first lane's version got wrong or lacked, shown by a probe or a failing criterion: a defect fix or a part of the feature",
+    "B": "real but optional items: wording, a test, a guard, a structure, a convention",
+    "C": "nothing usable, the same items, or no code"
+  },
+  "firstLaneDefect": "whether the card names a defect or a deviation from the approved spec in the first-ranked lane's version that the second lane's version did not have",
+  "runs": [
+    {
+      "run": "57",
+      "part": "A",
+      "firstLaneDefect": true,
+      "evidence": "mimo supplied the script-owned waiting list; luna's parallel index left the list hand-edited, which AC6 forbids",
+      "note": "neither lane passed the blind tests raw (luna 12/20, mimo 17/20); the card reads most misses as the oracle's wording and one substantive miss each side",
+      "secondReader": {
+        "part": "A",
+        "firstLaneDefect": true,
+        "evidence": "Mimo's script-owned waiting list; Rejected-from-luna says luna's parallel index leaves the list hand-edited, against AC6. Finished-before-wall order also taken from mimo."
+      }
+    },
+    {
+      "run": "75",
+      "part": "A",
+      "firstLaneDefect": true,
+      "evidence": "luna's rejection of dot ids and git-invalid ids and its clean handling of a git failure fixed three defects in mimo's script, each shown by execution",
+      "note": "no blind tests: the ticket's design question was the interface",
+      "secondReader": {
+        "part": "A",
+        "firstLaneDefect": true,
+        "evidence": "Luna's dot and git-invalid id rejection and clean git-failure handling; Code-verified evidence shows mimo misnamed dirs, called a..b free, threw a stack trace."
+      }
+    },
+    {
+      "run": "98",
+      "part": "B",
+      "firstLaneDefect": true,
+      "evidence": "mimo's reason text and runbook prose matched the approved spec where luna's shortened the text",
+      "note": "both lanes passed the blind tests 12/12 and the gate",
+      "secondReader": {
+        "part": "A",
+        "firstLaneDefect": true,
+        "evidence": "Mimo's spec-exact headless reason text; Rejected-from-luna says the spec states mimo's text and a cross-run classed luna's as defect-in-lane. Also harness-agnostic note."
+      }
+    },
+    {
+      "run": "110",
+      "part": "A",
+      "firstLaneDefect": true,
+      "evidence": "luna's worktree checkout replaced mimo's archive export, which the card says breaks git-aware gates",
+      "note": "no blind tests; both lane branches passed the gate",
+      "secondReader": {
+        "part": "A",
+        "firstLaneDefect": true,
+        "evidence": "Luna's worktree checkout; Rejected section says mimo's archive export breaks git-aware gates and caps at a 256MB buffer."
+      }
+    },
+    {
+      "run": "158",
+      "part": "B",
+      "firstLaneDefect": false,
+      "evidence": "mimo supplied a merge-refusal control luna never tested, lockfile names, a linguist attribute check and a sentence; its code share was 1%",
+      "note": "both lanes passed the blind tests 4/4, which cover criterion 5 only",
+      "secondReader": {
+        "part": "B",
+        "firstLaneDefect": false,
+        "evidence": "Mimo's minimal package manifest, merge-refusal control luna never tested, lockfile names, linguist-generated coverage; no luna defect named. Borderline A on linguist-generated, chose lower."
+      }
+    },
+    {
+      "run": "159",
+      "part": "A",
+      "firstLaneDefect": true,
+      "evidence": "luna's Team-section scoping and strict counts parsing fixed two defects in mimo's version, each probed",
+      "note": "no blind tests: the output contract was the open design question",
+      "secondReader": {
+        "part": "A",
+        "firstLaneDefect": true,
+        "evidence": "Luna's Team-section scoping and strict counts parsing; taken-from-luna probes show mimo's parser scores a phantom lane and reads noise as counts."
+      }
+    },
+    {
+      "run": "160",
+      "part": "A",
+      "firstLaneDefect": true,
+      "evidence": "mimo's claude reading with fallback was exact where luna's was approximate, and its per-file tolerant sum kept an unreadable record from failing the close",
+      "note": "no blind tests; the card also names a codex sum both lanes got wrong",
+      "secondReader": {
+        "part": "B",
+        "firstLaneDefect": true,
+        "evidence": "Mimo's spec-literal argv and sidecar name, exact claude reading where luna's is approximate, tolerant sum; none called a defect. Borderline A, chose lower."
+      }
+    },
+    {
+      "run": "163",
+      "part": "A",
+      "firstLaneDefect": true,
+      "evidence": "mimo's gate listing replaced luna's second mechanism, its AGENTS.md shape kept the merge rule luna dropped, and its prose control had no counterpart in luna's",
+      "note": "no blind tests",
+      "secondReader": {
+        "part": "A",
+        "firstLaneDefect": true,
+        "evidence": "Mimo's AGENTS shape keeps the merge rule; the card says luna's replacement dropped it, losing information. Also mimo's AC2 ticket-prose control luna lacked."
+      }
+    },
+    {
+      "run": "165",
+      "part": "C",
+      "firstLaneDefect": false,
+      "evidence": "both lanes stalled and were stopped at the cutoff; the synthesis is luna's uncommitted implementation, with mimo's spec as a cross-check and no code",
+      "note": "neither lane ran the gate",
+      "secondReader": {
+        "part": "C",
+        "firstLaneDefect": false,
+        "evidence": "Mimo stalled after its spec and wrote no code; SYNTHESIS line takes only its spec decisions as an independent cross-check."
+      }
+    },
+    {
+      "run": "170",
+      "part": "A",
+      "firstLaneDefect": true,
+      "evidence": "luna's strictness fixes, byte-identical confirms and link-failure handling closed defects in mimo's version, each with a control",
+      "note": "no blind tests",
+      "secondReader": {
+        "part": "A",
+        "firstLaneDefect": true,
+        "evidence": "SYNTHESIS line takes luna's oracle FIRST-commit fix and exit-shape fix; prose says luna's drafts carried with text make the provision functional."
+      }
+    },
+    {
+      "run": "179",
+      "part": "A",
+      "firstLaneDefect": true,
+      "evidence": "mimo's test suite, exit-2 classification, stage-0 wiring and harvest trio were taken where luna's were thinner; its code share was 25%",
+      "note": "no blind tests",
+      "secondReader": {
+        "part": "A",
+        "firstLaneDefect": true,
+        "evidence": "Mimo's intro-prose tolerance; taken section says luna's exit 1 fails reasonable summaries the spec allows, verified with an intro fixture."
+      }
+    },
+    {
+      "run": "182",
+      "part": "A",
+      "firstLaneDefect": true,
+      "evidence": "mimo's lenient Team check, guarded marker write and tests at the recorded effort fixed three defects in sol's version",
+      "note": "both lanes passed the blind tests 54/54 after two corrections to the oracle",
+      "secondReader": {
+        "part": "A",
+        "firstLaneDefect": true,
+        "evidence": "Mimo's lenient Team check; taken-from-mimo says sol's strict count fails an effortless lane's honest renderings. Also guarded marker write."
+      }
+    },
+    {
+      "run": "200",
+      "part": "C",
+      "firstLaneDefect": false,
+      "evidence": "astra hit a usage limit with no implementation on its branch",
+      "note": "mimo's branch scored 20/21 on the blind tests; the card reads the one miss as wording",
+      "secondReader": {
+        "part": "C",
+        "firstLaneDefect": false,
+        "evidence": "Astra walled before implementing; SYNTHESIS line says took astra:nothing, branch identical to BASE on the oracle. No astra version to compare."
+      }
+    },
+    {
+      "run": "201",
+      "part": "B",
+      "firstLaneDefect": false,
+      "evidence": "mimo supplied the probe's structure, tool paths, footer text, a cause line, a simpler launch command and a config comment",
+      "note": "both lanes failed the blind tests as committed, every failure the oracle's; both pass the fixed oracle",
+      "secondReader": {
+        "part": "B",
+        "firstLaneDefect": false,
+        "evidence": "Mimo's probe skeleton, resolved tool paths, clearer footer, cause line, simpler launch command, config comment; no sol defect named that mimo fixed."
+      }
+    }
+  ],
+  "earlierAudit": {
+    "109": "A",
+    "122": "A",
+    "124": "A",
+    "135": "B"
+  }
+}
