@@ -190,4 +190,31 @@ describe("portable process state", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test("the ps table keeps a multi-word command name whole", () => {
+    const root = mkdtempSync(join(tmpdir(), "process-comm-"));
+    const ps = join(root, "ps");
+    writeFileSync(
+      ps,
+      [
+        "#!/bin/sh",
+        'printf "  12 34 56 78 S Tue Oct  4 12:34:56 2026 Google Chrome Helper\\n"',
+        "",
+      ].join("\n"),
+    );
+    chmodSync(ps, 0o755);
+    const previousPath = process.env.PATH;
+    const previousRoot = process.env.POSTMASTER_PROC_ROOT;
+    process.env.PATH = `${root}:${previousPath ?? ""}`;
+    process.env.POSTMASTER_PROC_ROOT = join(root, "missing-proc");
+    try {
+      expect(processTable().get(12)?.name).toBe("Google Chrome Helper");
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousRoot === undefined) delete process.env.POSTMASTER_PROC_ROOT;
+      else process.env.POSTMASTER_PROC_ROOT = previousRoot;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

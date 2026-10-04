@@ -147,8 +147,9 @@ export function processTable(): Map<number, ProcessInfo> {
     env: { LC_ALL: "C" },
   });
   for (const line of result.out.split(/\r?\n/u)) {
-    const fields = line.trim().split(/[ \t]+/u, 11);
-    if (fields.length !== 11 || !fields.slice(0, 4).every((field) => /^[0-9]+$/u.test(field)))
+    // No split limit: JS drops everything past it, and comm may hold spaces.
+    const fields = line.trim().split(/[ \t]+/u);
+    if (fields.length < 11 || !fields.slice(0, 4).every((field) => /^[0-9]+$/u.test(field)))
       continue;
     table.set(Number(fields[0]), {
       pid: Number(fields[0]),
@@ -157,7 +158,7 @@ export function processTable(): Map<number, ProcessInfo> {
       session: Number(fields[3]),
       state: fields[4]!.startsWith("Z") ? "zombie" : "live",
       start: fields.slice(5, 10).join(" "),
-      name: fields[10]!,
+      name: fields.slice(10).join(" "),
     });
   }
   return table;
