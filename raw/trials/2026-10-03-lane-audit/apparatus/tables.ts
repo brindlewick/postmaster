@@ -641,6 +641,19 @@ export function figures(d: Data): Array<[string, string]> {
   );
   add("real runs, lane ranked first", rankedFirst(real));
   add("fixture runs, lane ranked first", rankedFirst(fixtures));
+  const partFor = (r: RunRecord): "A" | "B" | "C" | undefined =>
+    parts.get(r.id) ?? d.judgements.earlierAudit[r.id];
+  const bySecond = (group: string): string => {
+    const classes = real.flatMap((r) => {
+      const second = r.synthesis?.ranked[1];
+      const part = partFor(r);
+      return second !== undefined && family(second) === group && part !== undefined ? [part] : [];
+    });
+    const count = (c: "A" | "B" | "C"): string => `${c} ${classes.filter((x) => x === c).length}`;
+    return `${classes.length} runs: ${count("A")}, ${count("B")}, ${count("C")}`;
+  };
+  add("real runs, second lane's part when mimo was ranked second", bySecond("mimo"));
+  add("real runs, second lane's part when a codex lane was ranked second", bySecond("codex"));
 
   const waits = (runs: readonly RunRecord[]): number[] =>
     runs.flatMap((r) => {

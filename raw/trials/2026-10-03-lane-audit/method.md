@@ -99,7 +99,7 @@ it. They show the
 code applies a rule the same way on a run where it must read non-zero and one where it must read
 zero. They cannot show that the rule is the right one. Who named a finding was read by hand on a
 sample of 45 lines drawn with a fixed generator, and all 45 match. The scripts in
-[apparatus/](apparatus/) have tests beside them, 152 in all, and the hidden-test run has its own
+[apparatus/](apparatus/) have tests beside them, 154 in all, and the hidden-test run has its own
 controls: the suite passes the fixture ticket's reference patch and fails the app before it.
 
 **Judgements, and who made them.** The second lane's part was classed by one reader from the

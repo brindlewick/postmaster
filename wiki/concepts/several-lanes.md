@@ -94,9 +94,16 @@ and it is not blind: the coachman knows which lane is which. Three things follow
   first wrote 13% to 91% of the code and the second 0% to 25%. In the earlier audit's runs the
   second-ranked lane wrote most of the synthesis in [#109, Rewrite the scripts in TypeScript, run by Bun](https://github.com/brindlewick/postmaster/issues/109) (73%) and [#114, A run uses the postmaster version it was dispatched from, so changes can merge with runs in flight](https://github.com/brindlewick/postmaster/issues/114) (65%), and most of the code
   in [#38, Run the bug review through each harness's own code-review skill](https://github.com/brindlewick/postmaster/issues/38) (77%) [@trials/2026-09-29-synthesis-audit/share.md].
-- It varies by ticket and is not tied to test results. A codex lane was ranked first in 13 of the
-  18 real runs and mimo in 5. On the fixture ticket mimo was first in 19 of 24 runs, where every
-  lane passed every hidden test, so there the ranking cannot follow what the tests measure
+- It varies by ticket and is not set by the tests. A codex lane was ranked first in 13 of the 18
+  real runs and mimo in 5, and the earlier audit's 25 runs split 12 to 13 between luna and mimo
+  [@trials/2026-09-29-synthesis-audit/share.md]. On the fixture ticket mimo was first in 19 of 24
+  runs, where every lane passed every hidden test, so there the ranking cannot follow what the
+  tests measure. In [#57](https://github.com/brindlewick/postmaster/issues/57) mimo scored 17 of 20 on the blind tests to luna's 12, and the coachman
+  ranked luna first on its reading of the code against the ticket's wording
+  [@trials/2026-10-03-lane-audit/results/numbers.md].
+- Which lane is second does not change the second lane's part. When mimo was ranked second, in 13
+  runs, its part was A in 8, B in 4 and C in 1. When a codex lane was ranked second, in 5 runs, its
+  part was A in 4 and C in 1, the run where astra hit a usage limit
   [@trials/2026-10-03-lane-audit/results/numbers.md].
 - The line has to name something taken from each lane, so it always reads as if both helped. This
   page does not use it to judge the second lane. It uses the defects the cards name, the code

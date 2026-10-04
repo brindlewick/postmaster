@@ -31,6 +31,8 @@ Each is computed from the tables' data by render.ts.
 - real runs with shares recorded, each lane's own share of the code, first-ranked and second-ranked: 158 first 91%, second 0.5%; 179 first 40.9%, second 25%; 182 first 62.8%, second 14.6%; 200 first 63.9%, second 0%; 201 first 13%, second 4.8%
 - real runs, lane ranked first: luna 11, mimo 5, sol 2
 - fixture runs, lane ranked first: mimo 19, sol 4, astra 1
+- real runs, second lane's part when mimo was ranked second: 13 runs: A 8, B 4, C 1
+- real runs, second lane's part when a codex lane was ranked second: 5 runs: A 4, B 0, C 1
 - real runs, slower workhorse's extra wait, median (90th percentile), runs: 18 min (55), 16
 - fixture runs, slower workhorse's extra wait, median (90th percentile), runs: 6 min (11), 18
 - real runs, verified P1 and P2 findings: 264

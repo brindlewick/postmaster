@@ -6,6 +6,7 @@ import {
   coverageTable,
   type Data,
   fixtureSummary,
+  figures,
   fixtureWorkhorses,
   hm,
   incidentTable,
@@ -388,5 +389,57 @@ describe("rankedFirst", () => {
   test("a run with no synthesis is not counted, and no runs give nothing", () => {
     expect(rankedFirst([run(), ranked("mimo", "luna")])).toBe("mimo 1");
     expect(rankedFirst([])).toBe("");
+  });
+});
+
+describe("figures", () => {
+  const mk = (id: string, ranked: string[]) =>
+    run({ id, ticket: id, synthesis: synthesis(ranked, "none") });
+  const judged = (id: string, part: "A" | "B" | "C") => ({
+    run: id,
+    part,
+    firstLaneDefect: false,
+    evidence: "",
+    note: "",
+  });
+
+  test("the second lane's part is counted by which lane was ranked second", () => {
+    const d = data(
+      [
+        mk("1", ["luna", "mimo"]),
+        mk("2", ["luna", "mimo"]),
+        mk("3", ["mimo", "luna"]),
+        mk("4", ["mimo", "astra"]),
+        mk("109", ["luna", "mimo"]),
+      ],
+      {
+        judgements: {
+          runs: [judged("1", "A"), judged("2", "B"), judged("3", "A"), judged("4", "C")],
+          earlierAudit: { "109": "A" },
+        },
+      },
+    );
+    const f = new Map(figures(d));
+    expect(f.get("real runs, second lane's part when mimo was ranked second")).toBe(
+      "3 runs: A 2, B 1, C 0",
+    );
+    expect(f.get("real runs, second lane's part when a codex lane was ranked second")).toBe(
+      "2 runs: A 1, B 0, C 1",
+    );
+    expect(f.get("real runs, lane ranked first")).toBe("luna 3, mimo 2");
+  });
+
+  test("a fixture run, and a run with no class, are not counted", () => {
+    const fixture = { ...mk("9", ["mimo", "sol"]), kind: "fixture" as const };
+    const d = data([fixture, mk("8", ["luna", "mimo"])], {
+      judgements: { runs: [judged("9", "A")], earlierAudit: {} },
+    });
+    const f = new Map(figures(d));
+    expect(f.get("real runs, second lane's part when mimo was ranked second")).toBe(
+      "0 runs: A 0, B 0, C 0",
+    );
+    expect(f.get("real runs, second lane's part when a codex lane was ranked second")).toBe(
+      "0 runs: A 0, B 0, C 0",
+    );
   });
 });
