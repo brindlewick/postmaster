@@ -236,6 +236,41 @@ describe("positive controls", () => {
     expect(entry.detail).toBe("ticket=2");
   }, 30000);
 
+  test("a project clerk ticket-edit is written to the ledger only", () => {
+    const project = join(tmp, "project-edit");
+    mkdirSync(project, { recursive: true });
+    const r = projectAction(project, ["clerk", "ticket-edit", "2", "body updated"]);
+    expect(r.code).toBe(0);
+    const ledger = readFileSync(join(project, ".postmaster", "runs", "ledger.jsonl"), "utf8");
+    const entry = JSON.parse(ledger.trim());
+    expect(entry.run).toBe("booking-clerk");
+    expect(entry.actor).toBe("clerk");
+    expect(entry.action).toBe("ticket-edit");
+    expect(entry.target).toBe("2");
+    expect(entry.detail).toBe("body updated");
+    expect(existsSync(join(project, ".postmaster", "runs", "postmaster", "actions.jsonl"))).toBe(
+      false,
+    );
+  }, 30000);
+
+  test("a project postmaster ticket-check is written to the postmaster log and ledger", () => {
+    const project = join(tmp, "project-check");
+    mkdirSync(project, { recursive: true });
+    const r = projectAction(project, ["postmaster", "ticket-check", "2", "ready"]);
+    expect(r.code).toBe(0);
+    const log = readFileSync(
+      join(project, ".postmaster", "runs", "postmaster", "actions.jsonl"),
+      "utf8",
+    );
+    const ledger = readFileSync(join(project, ".postmaster", "runs", "ledger.jsonl"), "utf8");
+    const entry = JSON.parse(log.trim());
+    expect(log).toBe(ledger);
+    expect(entry.actor).toBe("postmaster");
+    expect(entry.action).toBe("ticket-check");
+    expect(entry.target).toBe("2");
+    expect(entry.detail).toBe("ready");
+  }, 30000);
+
   test("a project clerk note is written to the ledger only", () => {
     const project = join(tmp, "project-note");
     mkdirSync(project, { recursive: true });

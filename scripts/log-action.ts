@@ -2,7 +2,9 @@
 //
 //   log-action.sh <dispatch-dir> <actor> <action> <target> [detail...]
 //   log-action.sh --project <repo> clerk note <target> [detail...]
+//   log-action.sh --project <repo> clerk ticket-edit <target> [detail...]
 //   log-action.sh --project <repo> postmaster dispatch clerk [detail...]
+//   log-action.sh --project <repo> postmaster ticket-check <target> [detail...]
 //   log-action.sh <dispatch-dir> <actor> tool-fault <postmaster-file> --ran <what ran>
 //                 --failed <what failed> --error <the error, or none> --diagnosis <why>
 //                 --fix <the fix proposed> [--workaround <what was done instead>] [--control <kind>]
@@ -329,10 +331,12 @@ function logProjectEvent(
   detailParts: string[],
 ): number {
   const note = actor === "clerk" && action === "note" && target !== "";
+  const edit = actor === "clerk" && action === "ticket-edit" && target !== "";
   const dispatch = actor === "postmaster" && action === "dispatch" && target === "clerk";
-  if (!note && !dispatch) {
+  const check = actor === "postmaster" && action === "ticket-check" && target !== "";
+  if (!note && !edit && !dispatch && !check) {
     console.error(
-      "usage: log-action.sh --project <repo> clerk note <target> | postmaster dispatch clerk [detail...]",
+      "usage: log-action.sh --project <repo> clerk note <target> | clerk ticket-edit <target> [detail...] | postmaster dispatch clerk [detail...] | postmaster ticket-check <target> [detail...]",
     );
     return 1;
   }
@@ -345,9 +349,9 @@ function logProjectEvent(
     mkdirSync(runs, { recursive: true });
     const ledger = join(runs, "ledger.jsonl");
     const ts = new Date().toISOString().replace(/\.[0-9]+Z$/u, "Z");
-    const runName = note ? "booking-clerk" : "postmaster";
+    const runName = actor === "postmaster" ? "postmaster" : "booking-clerk";
     const line = `{"ts":"${ts}","project":"${jsonStr(project)}","run":"${runName}","actor":"${actor}","action":"${action}","target":"${jsonStr(target)}","detail":"${jsonStr(detailParts.join(" "))}"}`;
-    if (dispatch) {
+    if (actor === "postmaster") {
       const logDir = join(runs, "postmaster");
       mkdirSync(logDir, { recursive: true });
       appendFileSync(join(logDir, "actions.jsonl"), `${line}\n`);
@@ -366,11 +370,11 @@ if (import.meta.main) {
   if (argv[0] === "--project") {
     if (argv.length < 5) {
       console.error(
-        "usage: log-action.sh --project <repo> clerk note <target> | postmaster dispatch clerk [detail...]",
+        "usage: log-action.sh --project <repo> clerk note <target> | clerk ticket-edit <target> [detail...] | postmaster dispatch clerk [detail...] | postmaster ticket-check <target> [detail...]",
       );
       process.exit(1);
     }
-    if (argv[2] === "clerk" && argv[3] === "note") {
+    if (argv[2] === "clerk" && (argv[3] === "note" || argv[3] === "ticket-edit")) {
       process.exit(
         logProjectEvent(
           argv[1] as string,
@@ -381,7 +385,10 @@ if (import.meta.main) {
         ),
       );
     }
-    if (argv[2] === "postmaster" && argv[3] === "dispatch" && argv[4] === "clerk") {
+    if (
+      argv[2] === "postmaster" &&
+      ((argv[3] === "dispatch" && argv[4] === "clerk") || argv[3] === "ticket-check")
+    ) {
       process.exit(
         logProjectEvent(
           argv[1] as string,
@@ -393,7 +400,7 @@ if (import.meta.main) {
       );
     }
     console.error(
-      "usage: log-action.sh --project <repo> clerk note <target> | postmaster dispatch clerk [detail...]",
+      "usage: log-action.sh --project <repo> clerk note <target> | clerk ticket-edit <target> [detail...] | postmaster dispatch clerk [detail...] | postmaster ticket-check <target> [detail...]",
     );
     process.exit(1);
   }

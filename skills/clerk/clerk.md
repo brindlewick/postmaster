@@ -97,8 +97,8 @@ Both must exit 0. Then update the ticket and mark it ready through its adapter:
 ```
 
 The command checks both parts before writing, updates the body and title, adds the `ready` label,
-records the user's signed-off turnpikes in the project ledger, and queues the ticket for the
-postmaster. If it exits 2, show every reason, fix the draft, and retry. If it exits 1, do not claim
+logs each tracker write in the project ledger, records the user's signed-off turnpikes there, and
+queues the ticket for the postmaster. If it exits 2, show every reason, fix the draft, and retry. If it exits 1, do not claim
 the ticket was updated; report the adapter error. For a tracker of kind `other`, follow its
 configured instructions in `~/.postmaster/trackers/` to apply the same final text and ready label,
 then list the ticket's labels through the tracker's tooling and run

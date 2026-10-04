@@ -182,6 +182,8 @@ describe("the marking and queue verbs", () => {
     const ledger = readFileSync(join(repo, ".postmaster", "runs", "ledger.jsonl"), "utf8");
     expect(ledger).toContain('"action":"note"');
     expect(ledger).toContain("turnpikes: style, bug, security");
+    expect(ledger).toContain('"action":"ticket-edit"');
+    expect(ledger).toContain("label add ready");
     expect(ready([repo, "2"]).code).toBe(0);
     expect(ready(["pending", repo]).out).toContain("2");
   }, 30000);
@@ -196,12 +198,18 @@ describe("the marking and queue verbs", () => {
     expect(read).toContain("title: New title");
     expect(read).toContain("labels: ready");
     expect(read).toContain("## For the agents");
+    const ledger = readFileSync(join(repo, ".postmaster", "runs", "ledger.jsonl"), "utf8");
+    expect(ledger).toContain("body updated");
+    expect(ledger).toContain("title updated");
+    expect(ledger).toContain("label add ready");
   }, 30000);
 
   test("unmark drops the label and the marker, consume drops only the marker", () => {
     const r = ready(["unmark", repo, "2"]);
     expect(r.code).toBe(0);
     expect(run(localSh, [repo, "read", "2"]).out).toContain("labels: \n");
+    const ledger = readFileSync(join(repo, ".postmaster", "runs", "ledger.jsonl"), "utf8");
+    expect(ledger).toContain("label remove ready");
     expect(ready(["pending", repo]).out.includes("2")).toBe(false);
     expect(ready([repo, "2"]).code).toBe(2);
     expect(ready(["mark", repo, "2"]).code).toBe(0);

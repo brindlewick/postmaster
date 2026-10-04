@@ -235,6 +235,13 @@ function logLedgerNote(repo: string, id: string, turnpikes: string): void {
   if (r.code !== 0) die(`the ledger note could not be written (${(r.out + r.err).trim()})`);
 }
 
+// Every tracker write the marking makes is also a ticket-edit line, as
+// trackers.md demands of every adapter write.
+function logTicketEdit(repo: string, id: string, what: string): void {
+  const r = runScript("log-action.sh", ["--project", repo, "clerk", "ticket-edit", id, what]);
+  if (r.code !== 0) die(`the ticket-edit line could not be written (${(r.out + r.err).trim()})`);
+}
+
 function markAdapterTicket(
   repo: string,
   id: string,
@@ -264,6 +271,7 @@ function markAdapterTicket(
       const r = runScript(`${kind}.sh`, [...base, "edit", id, newFile, baseFile]);
       if (r.code !== 0)
         die(`the ${kind} adapter could not write the body (${(r.out + r.err).trim()})`);
+      logTicketEdit(repo, id, "body updated");
     } finally {
       rmSync(work, { recursive: true, force: true });
     }
@@ -272,8 +280,10 @@ function markAdapterTicket(
     const r = runScript(`${kind}.sh`, [...base, "title", id, title]);
     if (r.code !== 0)
       die(`the ${kind} adapter could not write the title (${(r.out + r.err).trim()})`);
+    logTicketEdit(repo, id, "title updated");
   }
   labelViaAdapter(repo, id, kind, "add");
+  logTicketEdit(repo, id, "label add ready");
   logLedgerNote(repo, id, turnpikes);
   removeClerkRecord(repo, id);
   writeQueue(repo, id);
@@ -373,6 +383,7 @@ function main(argv: string[]): number {
         );
       }
       labelViaAdapter(repo, id, kind, "remove");
+      logTicketEdit(repo, id, "label remove ready");
       removeQueue(repo, id);
       console.log(`ticket-ready: ${id} ready mark removed`);
       return 0;

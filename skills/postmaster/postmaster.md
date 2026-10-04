@@ -67,8 +67,15 @@ full. Start a booking clerk for an unready ticket without consuming a run slot. 
 waits in the ready queue until the watcher sees room under `team.max_runs`.
 
 1. **Check readiness:** `<tool>/scripts/ticket-ready.sh <repo> <id>` exits 0 only when the
-   ticket passes both ticket checks and has the `ready` label. Log the result as `ticket-check`.
-   On exit 1, report the adapter error. On exit 2, start a booking clerk with
+   ticket passes both ticket checks and has the `ready` label. Log the result as `ticket-check`
+   through `<tool>/scripts/log-action.sh --project <repo> postmaster ticket-check <id>
+   <ready|not-ready|unreadable>`, with the check's first reason (or its turnpikes line when
+   ready) as the detail.
+   On exit 1, report the adapter error. When the refusal says the tracker kind has no adapter
+   script, read the ticket's body, title and labels through the tracker's own tooling
+   (`trackers.md`, other), save the body to a temp file outside the repo, and run the check as
+   `<tool>/scripts/ticket-ready.sh --body <file> --labels <list> --title "<title>" --project <repo>`;
+   its exits mean the same as the `<repo> <id>` form. On exit 2, start a booking clerk with
    `<tool>/scripts/clerk.sh start <repo> <id>`, then log the dispatch yourself with
    `<tool>/scripts/log-action.sh --project <repo> postmaster dispatch clerk ticket=<id>`.
    Do not create a run directory, branch or worktree for this
