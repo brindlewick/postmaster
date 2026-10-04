@@ -419,17 +419,18 @@ at all.
 
 ## Candidate tickets, ranked
 
-None is filed. Items 1 and 2 are drafted. Three open tickets already cover work this audit points to:
+Item 1 is filed and item 2 is drafted; the others are not filed. Three open tickets already cover work this audit points to:
 [#255, Bug reviewers are told to change nothing](https://github.com/brindlewick/postmaster/issues/255)
 for the reviewer that changed the code under review in [#200](https://github.com/brindlewick/postmaster/issues/200),
 [#221, Run every lane with only the files, hosts and sockets it needs, on Linux and macOS](https://github.com/brindlewick/postmaster/issues/221) for what a lane may write, and [#104](https://github.com/brindlewick/postmaster/issues/104) for planted bugs.
 
 1. Give the flow a single-thread mode, in which the coachman writes the change itself and no
-   workhorse lane runs. The postmaster chooses the mode when it dispatches a run, and synthesis stays
-   the default. It changes the coachman's steps, so it needs a fixture run in each mode.
-2. Run the next 16 real tickets with the mode alternating from ticket to ticket, eight in each, and
-   judge the modes by review rounds, with the severe findings of round 1, the time and the tokens
-   beside. It waits for item 1 and for this audit to merge.
+   workhorse lane runs, chosen by the postmaster at dispatch with synthesis the default and needing
+   a fixture run in each mode, filed as
+   [#270, A run can be single-thread: the coachman writes the change itself and no workhorse lane runs](https://github.com/brindlewick/postmaster/issues/270).
+2. Run the next 16 real tickets with the mode alternating from ticket to ticket, eight in each,
+   judging the modes by review rounds with the severe findings of round 1, the time and the tokens
+   beside, once item 1 has landed and this audit has merged.
 3. Have the coachman write each review finding to a record as it triages, with its lane, lens,
    severity, verdict and how it was verified, so that who found what and what was dismissed are
    counted from data and not read from prose.
