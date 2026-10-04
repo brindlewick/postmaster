@@ -3,7 +3,7 @@ title: Each project defines how a change to it is verified
 type: concept
 standing: claimed
 sources: []
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 # Each project defines how a change to it is verified
@@ -98,7 +98,9 @@ is never anything but not run is one the defaults should not offer.
 
 Outside work bears on it too. [pstack](../sources/pstack.md) keeps a standing driver and a feature
 map for each project, which this concept has no counterpart for, and its candidate 7 is a trial of
-that. It does not move the standing.
+that. A first look at the skill that makes them [@trials/pstack-verification-skill] and a count of
+the evidence entries that lanes leave `not shown` [@trials/not-shown-evidence] are recorded as
+trials for that candidate. They do not move the standing.
 
 ## What changed because of it
 

@@ -1,0 +1,71 @@
+## control: a wrong expectation must be reported as FAIL
+control ok: FAIL  control, wrong exit code
+## add
+    expected line not found: list after: { "tasks": [ { "id": 1, "text": "buy milk", "done": false } ] }
+FAIL  add: one task
+PASS  add: words are joined
+PASS  add: the joined text is stored
+PASS  add: file ends in a newline
+PASS  add: file is indented by two spaces
+PASS  add: text is trimmed, id follows the highest
+PASS  add: trimmed text stored
+PASS  add: proof file holds a block per command
+## list
+PASS  list: lines
+PASS  list: read-only
+PASS  list: done marker
+PASS  list: empty
+    expected line not found: stderr: "usage: todo add <text> | todo list | todo done <id>\n"
+FAIL  list: an argument is a usage error
+    expected line not found: stderr: "usage: todo add <text> | todo list | todo done <id>\n"
+FAIL  list: --json is a usage error
+## done
+    expected line not found: list after: { "tasks": [ { "id": 1, "text": "buy milk", "done": true } ] }
+FAIL  done: mark
+PASS  done: again
+PASS  done: missing id
+PASS  done: missing id leaves the list as it was
+    expected line not found: stderr: "usage: todo add <text> | todo list | todo done <id>\n"
+FAIL  done: id form 01
+    expected line not found: stderr: "usage: todo add <text> | todo list | todo done <id>\n"
+FAIL  done: id form 1.5
+    expected line not found: stderr: "usage: todo add <text> | todo list | todo done <id>\n"
+FAIL  done: id form -1
+    expected line not found: stderr: "usage: todo add <text> | todo list | todo done <id>\n"
+FAIL  done: id form 1e3
+    expected line not found: stderr: "usage: todo add <text> | todo list | todo done <id>\n"
+FAIL  done: id form one
+    expected line not found: stderr: "usage: todo add <text> | todo list | todo done <id>\n"
+FAIL  done: two ids
+## usage
+    expected line not found: stderr: "usage: todo add <text> | todo list | todo done <id>\n"
+FAIL  usage: no arguments
+    expected line not found: stderr: "usage: todo add <text> | todo list | todo done <id>\n"
+FAIL  usage: help
+    expected line not found: stderr: "usage: todo add <text> | todo list | todo done <id>\n"
+FAIL  usage: blank add
+    expected line not found: stderr: "usage: todo add <text> | todo list | todo done <id>\n"
+FAIL  usage: --help
+    expected line not found: stderr: "usage: todo add <text> | todo list | todo done <id>\n"
+FAIL  usage: --version
+## store
+PASS  store: the file TODO_FILE names holds the task
+PASS  store: not JSON
+PASS  store: not JSON, file left as it was
+PASS  store: JSON that is not a list
+PASS  store: no leftover tmp file
+PASS  store: default is todo.json in the working directory
+PASS  store: an empty TODO_FILE also means todo.json
+PASS  store: todo.json is git-ignored
+
+claims checked: 37, held: 22, failed: 15
+
+## race: 30 parallel adds on one list file, three rounds (the map says a task can be lost)
+round 1: 30 adds ran, 12 tasks stored, 0 repeated ids
+round 2: 30 adds ran, 12 tasks stored, 0 repeated ids
+round 3: 30 adds ran, 10 tasks stored, 0 repeated ids
+
+## cleanup, then confirm the proof survives
+removed 7 list file(s); proof kept in <scratch>/todo-verify-proof
+lists folder: gone
+proof files: add1.txt ctl.txt done1.txt list1.txt list2.txt store1.txt u1.txt 

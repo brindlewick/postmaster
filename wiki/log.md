@@ -1,12 +1,38 @@
 ---
 title: Log
 type: schema
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-04] ingest | how often a lane's evidence is `not shown`, and whether the check bounds it
+
+Recorded `raw/trials/not-shown-evidence/`. A read-only count of the Evidence entries in lane
+summaries, in this repository's runs and in the fixture repositories: 249 entries in this
+repository's 21 summaries with the section, 35 of them `not shown` and 29 of those in one summary,
+and 152 of 152 shown in the fixture repositories. Four made-up summaries for one ticket run through
+`summary-evidence`: it passes eight `not shown` entries and refuses a missing entry and a missing
+file. Cited from [pstack](sources/pstack.md), where it is the baseline for candidate 7. No
+standing changed.
+
+## [2026-10-04] ingest | a first look at pstack's verification skill
+
+Recorded `raw/trials/pstack-verification-skill/`. The skill followed by hand, once, on a scratch
+copy of the `todo` fixture app. The 37-claim walk of the feature map it made held all 37, and after
+the reference solution of the fixture ticket `remove` it held 22. The first walk's output, the
+files as first generated and the failing gate run were not kept, and the record says so. Cited from
+[pstack](sources/pstack.md). No standing changed.
+
+## [2026-10-04] lint | the pstack page follows main
+
+[pstack](sources/pstack.md) was written against `40d50ce`. Main has since ended the `.sh` wrappers
+(#218), so script names are now in the `scripts/run <name>` form and link to the `.ts` files. Read
+as a diff with the script names made alike, the rules and sections the page cites did not change.
+Candidate 2's search was repeated on main with the same result. The autonomous-run row and
+candidate 5 now cite #264 and #265.
 
 ## [2026-10-03] ingest | audit of three days of runs, for what several lanes earn
 

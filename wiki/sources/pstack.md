@@ -1,7 +1,7 @@
 ---
 title: "pstack (poteto, 2026): skills and principles for verified agent work"
 type: source
-sources: [articles/pstack-plugin, articles/pstack-guide-part-1]
+sources: [articles/pstack-plugin, articles/pstack-guide-part-1, trials/pstack-verification-skill, trials/not-shown-evidence]
 updated: 2026-10-04
 ---
 
@@ -24,7 +24,9 @@ adopting and 10 are not a fit. Nine changes are worth making. They are small, an
 nine belong in tickets that are already open. One of them is not about verification. Pstack's
 habit of treating text from outside as data, not instructions, turned up a gap here. Part 1's
 largest idea, a standing driver and feature map for each target with a daily upkeep pass, has
-no counterpart here. It fits as an input to the QA turnpike, after a trial.
+no counterpart here. It fits as an input to the QA turnpike, after a trial. A first look at the
+skill on a small command-line app found that its record mostly restates what the app already
+declares, so the trial belongs on a project with a user interface.
 
 ## What pstack claims
 
@@ -44,8 +46,8 @@ no counterpart here. It fits as an input to the QA turnpike, after a trial.
 
 An account of one person's practice and a plugin, not a study. Part 1 gives its figures without a
 method, and none of the guide's chapters gives one. The plugin is MIT licensed, and its two
-bundled programs have tests. No pstack skill was run for this page. Every verdict below sets
-text beside text.
+bundled programs have tests. One pstack skill was run, once, by hand, on a small app, and the
+first look below bears on candidate 7. Every verdict sets text beside text.
 
 ## Verdicts
 
@@ -76,7 +78,7 @@ in Sources. The quotes the verdicts lean on are in
 | [/typescript-best-practices][s-typescript-best-practices], type rules loaded when a TypeScript file is touched | Not a fit | Not a flow rule, and enforced by structure here. The gate type-checks and lints, and [#171][i171], [#232][i232] and [#233][i233] move more rules into the linter. |
 | [/figure-it-out][s-figure-it-out], designs a one-off playbook when none fits | Not a fit | A run follows one fixed contract that fixture runs test. A leg that finds no step for a turnpike escalates ([coachman][coachman], Legs and hand-offs). |
 | [/show-me-your-work][s-show-me-your-work], an append-only decision log, audited against the transcript and reviewed by another family | Already done, more strictly | Every action is one line through [`scripts/run log-action`][log-action], with a closed set of verbs, per run and per project (design rule 6). The run audit digests each lane's durable record ([coachman][coachman], Stage 1). [#19][i19] makes the line's shape validated. |
-| [/create-verification-skill][s-create-verification-skill], interviews the repository, writes a project-local driver and a feature map, and runs it once | Worth adopting | Postmaster declares or discovers a project's checks and holds a journey report to the ticket ([verification][verification]). It keeps no standing driver or map. Candidate 7, as a trial. |
+| [/create-verification-skill][s-create-verification-skill], interviews the repository, writes a project-local driver and a feature map, and runs it once | Worth adopting | Postmaster declares or discovers a project's checks and holds a journey report to the ticket ([verification][verification]). It keeps no standing driver or map. Candidate 7, as a trial on a project with a user interface. A first look at the skill is below. |
 | [/maintain-verification-skill][s-maintain-verification-skill], the upkeep pass, a read-only reader per feature and one live pass | Worth adopting, elsewhere | The same pass fits what the flow depends on, the harness versions its settled facts name. Candidate 3. |
 | [/unslop][s-unslop], a catalogue of writing patterns to cut | Not a fit | The project has no rule against any of those patterns, so there is nothing to check. Pstack's plan checker enforces three of them by script, which is the model if the user wants such a rule. |
 | [/bro][s-bro], restate the last message plainly | Not a fit | A one-line prompt. |
@@ -138,7 +140,7 @@ a clean fixture run before it merges.
 | 4 | Every control a change adds is shown to fail when every function it imports is replaced by one that returns nothing, and the five test shapes that cannot fail are the checklist. | [#133][i133], as the first step of its criterion 3 | none for the stub in the gate. Its criterion 2 touches the coachman's review steps, and must not tune what a reviewer looks for | small | The stub run over the existing tests, with a known vacuous test as the positive control and a real one as the negative. |
 | 5 | Score one fixture ticket five times from one commit, to see how much the score and the path of a run vary, before asking for more than one clean fixture run per contract change. | a new research ticket, recorded as a trial | none | five fixture runs, which [#265][i265] puts at about 2 hours 10 minutes each today | The spread. If all five agree, one run stands. If not, it names the number to require. |
 | 6 | Name the flow's failure scenarios (a lane wall, a coachman killed mid-leg, the review cap, a takeover, a confinement fallback) and run each with stub lanes in seconds. | [#104][i104], as an option in its research | none to test | medium | #104's trial, plus a count of past contract breaks the scenarios catch that the gate does not. |
-| 7 | A model that follows pstack's interview of the repository writes, once per target, how to launch, check, drive and clean up the project and a short map of its user-facing features, and a trial on a project with a user interface, an end user's or this one's once the dashboard ([#146][i146]) exists, shows whether lanes given it end with fewer `not shown` evidence entries. | [#97][i97], the QA turnpike, as its input | none for the trial. Adopting touches `coachman.md` and the waybill in `SKILL.md` | medium, a session per target and two tickets compared | Evidence quality with and without the record on the same two tickets of that project. |
+| 7 | A model that follows pstack's interview of the repository writes, once per target, how to launch, check, drive and clean up the project and a short map of its user-facing features, and a trial on a project with a user interface, an end user's or this one's once the dashboard ([#146][i146]) exists, shows whether lanes given it end with fewer `not shown` evidence entries. | [#97][i97], the QA turnpike, as its input | none for the trial. Adopting touches `coachman.md` and the waybill in `SKILL.md` | medium, a session per target and two tickets compared | Evidence quality with and without the record on the same two tickets of that project, against the baseline count below. |
 | 8 | A decision goes to the user in a spec review only if running something cannot settle it, and the spec shows the result of what could. | [#219][i219], as one more option | `spec-session.md`, if adopted | low | A mock review sheet built both ways from two real specs, counting the decisions removed and any removed that was the user's call. |
 | 9 | Every script that removes or rewrites something offers a dry run that changes nothing, and a test fails one that does not. | a new ticket, after #252 | yes, `scripts/host.ts`, `scripts/landing.ts` and `scripts/stage.ts` are listed, so a fixture run | medium | The count of state-changing scripts with a dry run, with a script that lacks one as the negative control. |
 
@@ -159,6 +161,94 @@ what a lane can reach. Neither looks at the author. Pstack's benny pack does loo
 reproduce automation trusts a triage verdict only from one configured account
 [@articles/pstack-plugin/passages.md]. This has not been tried against a hostile ticket.
 
+## Two trials that bear on candidate 7
+
+Both are small. Each settles only what it was built for, and each is recorded as a trial.
+
+### First look at the verification skill
+
+On 2026-10-04 an agent session followed [/create-verification-skill][s-create-verification-skill]
+by hand, once, on a scratch copy of the `todo` fixture app [@trials/pstack-verification-skill/method.md].
+The app has three commands and a stored list. The look took 8 minutes and about 80,000 tokens
+(unverified: the session's own counters, not kept).
+
+- **What it made.** Eight files and 400 lines [@trials/pstack-verification-skill/skill/SKILL.md]: the
+  skill (57 lines), a helper that runs each command against a list file of its own and keeps proof
+  (144), and a feature map of an index (44) and five features (30 to 32 lines each). The skill's own
+  proof passed the first time: a health check, one feature driven, and the proof still there after
+  cleanup (unverified: that output was not kept).
+- **How accurate the map is.** It makes 37 claims, and a walk through every recipe held all 37
+  [@trials/pstack-verification-skill/walk.out]. A wrong expectation run first was reported as a
+  failure, which is the control. The first walk held 36 (unverified: its output was not kept). The
+  miss was the walk's own check, which counted proof blocks. A proof file grows across runs, and a
+  sentence saying so was added to the skill.
+- **What it added.** The app already declares three checks: its gate, the transcripts of a ticket
+  and one process-level add and list ([the declared checks][app-checks]). The skill added
+  process-level checks of `done`, a missing id and a bad list file, a health check, saved proof and
+  one finding. Thirty parallel `add` commands on one list file stored between 6 and 12 tasks in each
+  of six rounds, and no id repeated [@trials/pstack-verification-skill/walk.out]
+  [@trials/pstack-verification-skill/walk-after-remove.out]. The look itself saw 9 to 14 in six
+  rounds (unverified, not kept). Each process reads and rewrites the whole file with no lock
+  ([the app's store][app-store]). The skill's question whether two instances can run side by side
+  led to the test, and the unit tests run one command at a time and could not show it. The app is a
+  single-user tool, so this is a limit and not a defect.
+- **What went wrong.** The look found the app's gate red once the skill's files were in place. Biome
+  checks `.cursor/`, the helper was not formatted to the project's rules, and `npm run check` stopped
+  before the tests ran (unverified: the failing run was not kept). A search of the skill's file for
+  `lint`, `format`, `gate`, `npm run` and `biome` finds none, with `feature map` found as the control,
+  so the skill never tells the agent to hold its output to the project's own gate. One run of the
+  project's formatter fixed it. Its recipe for command-line apps, an isolated terminal session, is
+  meant for interactive programs, and a plain process with its own list file was enough here. It
+  writes into `.cursor/skills/`, a folder Cursor reads, and whether other tools read it was not
+  tested.
+- **Upkeep.** The reference solution of the fixture ticket `remove` was applied to a copy, and the
+  same walk run on it. 22 of the 37 claims held and 15 had gone stale
+  [@trials/pstack-verification-skill/walk-after-remove.out]. 13 failed because the usage line gained
+  a command, and 2 because the stored list gained a field. The map has no recipe for the new command.
+  This is the work the upkeep pass of [/maintain-verification-skill][s-maintain-verification-skill]
+  exists for.
+
+The record was cheap to make, and its claims held. On a three-command command-line app it mostly
+restates what the app already declares, and the first ticket makes it stale. It also needs the
+project's formatter run over it. Whether lanes do better with it is untested, and that is the
+two-ticket comparison of candidate 7, which belongs on a project with a user interface.
+
+### How often a lane says `not shown`
+
+Each workhorse's summary has an Evidence section with one entry per acceptance criterion. An entry
+names a file under `.postmaster/verify/`, or says `not shown: <reason>` ([coachman][coachman]).
+Candidate 7's trial counts the second kind, so this count is its baseline. It reads the summary at
+the tip of each lane branch, in this repository's runs and in the fixture repositories, as they stood
+on 2026-10-04 [@trials/not-shown-evidence/counts.out].
+
+- **This repository's runs.** 21 summaries have an Evidence section, dated 2026-10-01 to 2026-10-04,
+  and 57 others have none. The 21 hold 249 entries, 214 shown and 35 not shown. 16 of them have no
+  `not shown`. One has all 29 of its entries, one has 3 of 10, and three have 1 each
+  [@trials/not-shown-evidence/per-summary.out].
+- **The fixture repositories.** 19 summaries and 152 entries, all shown.
+- **The control.** Every entry was one kind or the other, with none left over. A made-up summary of two
+  shown entries and one not shown counted 2 and 1, and a text with no Evidence section read as having
+  none.
+- **The reasons.** None of the 35 is about a browser or a user interface. Three say the user dropped or
+  moved the criterion. Three name a check that could only run elsewhere: a Mac score, twice, and a
+  fixture run at landing. The other 29 are one summary's, and they mix "not implemented" and "not run"
+  with "tested" and no evidence file kept [@trials/not-shown-evidence/reasons.out]. Classified by
+  reading, not by a script.
+
+The check does not bound the number. On the fixture ticket `remove`, which numbers eight criteria,
+[`scripts/run summary-evidence`][summary-evidence] exits 0 on a summary of eight `not shown` entries and
+prints `(8 not shown)`. It exits 2 on a summary with one entry missing and on one that cites a file
+that does not exist, which are the controls [@trials/not-shown-evidence/summary-evidence-controls.out].
+A summary like the one with 29 of 29 therefore passes the shape check, and whether that is acceptable
+rests on whoever reads the line it prints.
+
+For candidate 7: where the evidence is checked, `not shown` is rare. 16 of 21 summaries and every
+fixture summary have none, and 29 of the 35 sit in one summary. The tickets behind these summaries
+change scripts and runbooks, which have no user interface to show, so no reason is about showing one.
+A fall in `not shown` can be measured only where criteria need a user interface, which is why
+candidate 7's trial is set on such a project. Not counted: the runs of other projects, and whether
+any `not shown` was right.
+
 ## What was measured
 
 - The README's counts match the folder, which is the control that the whole set was listed. It
@@ -175,10 +265,12 @@ reproduce automation trusts a triage verdict only from one configured account
 
 ## What this page does not show
 
-No pstack skill was run, and no candidate has been tried. "Already done" means the idea is in this
-repository at the commit below, not that it works well. Only the review rounds of #36 are promoted
-as a run record, so no standing here rests on a run about these ideas. The version count is a
-single reading by hand.
+One pstack skill was run once, by hand, on one small command-line app, and no candidate has been
+tried. "Already done" means the idea is in this repository at the commit below, not that it works
+well. Only the review rounds of #36 are promoted as a run record, so no standing here rests on a run
+about these ideas. The version count is a single reading by hand. The first look is one run on one
+app, and its first walk was not kept. The count of `not shown` entries reads branches as they stood
+on one day, and its reasons were sorted by reading.
 
 ## Sources
 
@@ -210,6 +302,9 @@ single reading by hand.
   changes a rule or a section this page cites, read as a diff with the script names made alike.
   The contract list still names the files the ranked table says it does. Each ticket linked here
   was read again, and all are open except #218.
+- Two trials of this repository's own, recorded for this page: [@trials/pstack-verification-skill],
+  a first look at the verification skill, and [@trials/not-shown-evidence], a count of `not shown`
+  evidence entries and a check of whether the evidence check bounds them.
 
 Bears on [each project defines how a change to it is verified][verification] and on
 [a fixture run tests the flow end to end][fixture-runs]. Outside work does not move a standing,
@@ -249,6 +344,8 @@ so neither changes.
 [s-bro]: https://github.com/cursor/plugins/blob/23e4138daa01c42d4969f7a5465f82704e64f798/pstack/skills/bro/SKILL.md
 [s-technical-writing]: https://github.com/cursor/plugins/blob/23e4138daa01c42d4969f7a5465f82704e64f798/pstack/skills/technical-writing/SKILL.md
 [agents]: ../../AGENTS.md
+[app-checks]: ../../fixtures/app/.postmaster/project.toml
+[app-store]: ../../fixtures/app/src/store.ts
 [contract]: ../../docs/coachman-contract.toml
 [coachman]: ../../skills/postmaster/coachman.md
 [postmaster]: ../../skills/postmaster/postmaster.md
