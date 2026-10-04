@@ -80,9 +80,11 @@ coachman's harvest line. Hidden tests per lane, review findings, tokens and inci
 
 ### In this repository's runs
 
-**How to read "ranked".** The coachman does not pick a lead lane and then top it up from the other
-one. It reads both diffs, writes the synthesis from the base part by part, takes each part from
-whichever lane did it better, and writes the ranking last, on the SYNTHESIS line, lead lane first
+**How to read "ranked".** The base is the code as it stood when the run began. Each workhorse
+changes its own copy of it, and neither sees the other's. The coachman does not take one lane's
+finished copy and top it up from the other. It starts a fresh copy of the base and adds the answer
+one part at a time, each part from whichever lane did it better or written by the coachman itself,
+with a reason recorded for each. It writes the ranking last, on the SYNTHESIS line, lead lane first
 ([the runbook](https://github.com/brindlewick/postmaster/blob/40d50ce/skills/postmaster/coachman.md)).
 Nothing in the config picks a lead lane. The runbook says "primary" only orders the launches. So
 the lead lane is on record for every run, but it is the coachman's own label, given after the fact,

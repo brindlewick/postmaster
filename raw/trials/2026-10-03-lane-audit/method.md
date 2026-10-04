@@ -51,8 +51,8 @@ names whichever codex model the config gave that lane at the time. Most runs dis
 **Definitions.** Each is the earlier audit's unless it says it changed.
 
 - *Ranked*, *took*, *rejected*, *blind tests*: the fields of the SYNTHESIS line, as before. The
-  coachman writes the ranking last, after it has composed the synthesis from the base part by part,
-  and it knows which lane is which. Nothing in the config sets a lead lane. *The second lane* in
+  coachman writes the ranking last, after it has built the synthesis part by part on a fresh copy of
+  the base, the code as it stood when the run began, and it knows which lane is which. Nothing in the config sets a lead lane. *The second lane* in
   every table is the lane ranked second.
 - *The second lane's part*: read from the card, against a rubric fixed before any run was
   classified. **A**: the second-ranked lane supplied something the card says the first lane's
