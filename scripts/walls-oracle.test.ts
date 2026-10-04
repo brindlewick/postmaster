@@ -134,7 +134,7 @@ function roundOk(body: string, n: string): boolean {
 
 function startRound(lay: Layout, dispatch: string, n: string): void {
   need(
-    sh(join(SCRIPTS, "review-round.sh"), ["start", dispatch, n], lay.env, lay.tmp),
+    sh(join(SCRIPTS, "run"), ["review-round", "start", dispatch, n], lay.env, lay.tmp),
     `start ${n}`,
   );
 }
@@ -472,8 +472,8 @@ oracle(
     writeFileSync(errFile, "");
     for (const stream of ["stub-events.jsonl", "mimo-events.jsonl"]) {
       const r = sh(
-        join(SCRIPTS, "launch.sh"),
-        ["transient", errFile, join(lay.dispatch, "logs", stream)],
+        join(SCRIPTS, "run"),
+        ["launch", "transient", errFile, join(lay.dispatch, "logs", stream)],
         lay.env,
         lay.tmp,
       );
@@ -513,8 +513,9 @@ oracle("C3: a lane stopped mid-run records no wall", (lay) => {
   const errPath = `${streamPath}.err`;
   need(
     sh(
-      join(SCRIPTS, "host.sh"),
+      join(SCRIPTS, "run"),
       [
+        "host",
         "run",
         "oracle-stop",
         wt,
@@ -531,7 +532,8 @@ oracle("C3: a lane stopped mid-run records no wall", (lay) => {
         "--marker",
         join(d, "logs", "stop.done"),
         "--",
-        join(SCRIPTS, "launch.sh"),
+        join(SCRIPTS, "run"),
+        "launch",
         "launch",
         "stub",
         wt,
@@ -559,7 +561,7 @@ oracle("C3: a lane stopped mid-run records no wall", (lay) => {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
   }
   if (!seen) throw new Error("the stop lane never started");
-  need(sh(join(SCRIPTS, "host.sh"), ["stop", wt], lay.env, lay.tmp), "host stop");
+  need(sh(join(SCRIPTS, "run"), ["host", "stop", wt], lay.env, lay.tmp), "host stop");
   waitMarker(join(d, "logs", "stop.done"), `${streamPath}.err`, 30);
   expect(wallLines(d).length).toBe(0);
 });
@@ -713,10 +715,20 @@ oracle("C9: a wall's question stands beside the earlier one in the waiting list"
   const qfile = join(lay.tmp, "questions.txt");
   writeFileSync(qfile, "pick a color\nwall: stub walled, rule go on\n");
   need(
-    sh(join(SCRIPTS, "host.sh"), ["leg", "waiting", "add", lay.root, "T", qfile], lay.env, lay.tmp),
+    sh(
+      join(SCRIPTS, "run"),
+      ["host", "leg", "waiting", "add", lay.root, "T", qfile],
+      lay.env,
+      lay.tmp,
+    ),
     "waiting add",
   );
-  const list = sh(join(SCRIPTS, "host.sh"), ["leg", "waiting", "list", lay.root], lay.env, lay.tmp);
+  const list = sh(
+    join(SCRIPTS, "run"),
+    ["host", "leg", "waiting", "list", lay.root],
+    lay.env,
+    lay.tmp,
+  );
   need(list, "waiting list");
   expect(list.out).toContain("pick a color");
   expect(list.out).toContain("wall: stub walled, rule go on");
@@ -752,8 +764,8 @@ oracle("C11: the round closes with each walled reviewer DEGRADED, no escalation"
     cwd: sec.wt,
   });
   const w = sh(
-    join(SCRIPTS, "review-round.sh"),
-    ["wait", lay.dispatch, "1", lay.repo, "bug:stub", "security:sec"],
+    join(SCRIPTS, "run"),
+    ["review-round", "wait", lay.dispatch, "1", lay.repo, "bug:stub", "security:sec"],
     lay.env,
     lay.tmp,
   );
@@ -1071,8 +1083,8 @@ oracle("C21: a second wall needs a new ruling before landing", (lay) => {
 });
 
 oracle("C22 scripts: skill refs hold, the walls join the quote corpus and the contract", (lay) => {
-  expectExit(sh(join(SCRIPTS, "skill-refs.sh"), [], lay.env, lay.tmp), 0);
-  const quotes = sh(join(SCRIPTS, "launch.sh"), ["wall-quotes"], lay.env, lay.tmp);
+  expectExit(sh(join(SCRIPTS, "run"), ["skill-refs"], lay.env, lay.tmp), 0);
+  const quotes = sh(join(SCRIPTS, "run"), ["launch", "wall-quotes"], lay.env, lay.tmp);
   need(quotes, "wall-quotes");
   expect(quotes.out).toContain(CODEX_WALL_MESSAGE);
   expect(quotes.out).toContain(CLAUDE_WALL_MESSAGE);

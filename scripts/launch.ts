@@ -2,18 +2,18 @@
 // records for its harness. One command for every harness, so no form is ever copied by hand;
 // this script and harnesses.md must agree, and a change to one is a change to both.
 //
-//   launch.sh form   <name> [--leg <leg>] [--run <dispatch>] [--project <repo>]
-//   launch.sh launch <name> <cwd> <prompt-file> [--leg <leg>] [--last <file>] [--run <dispatch>]
-//   launch.sh review <name> <cwd> <base> [--last <file>] [--run <dispatch>]
-//   launch.sh resume <name> <cwd> <thread-id> <prompt-file> [--leg <leg>] [--last <file>]
+//   run launch form   <name> [--leg <leg>] [--run <dispatch>] [--project <repo>]
+//   run launch launch <name> <cwd> <prompt-file> [--leg <leg>] [--last <file>] [--run <dispatch>]
+//   run launch review <name> <cwd> <base> [--last <file>] [--run <dispatch>]
+//   run launch resume <name> <cwd> <thread-id> <prompt-file> [--leg <leg>] [--last <file>]
 //                    [--run <dispatch>]
-//   launch.sh skill  <name> <skill> [--run <dispatch>]
-//   launch.sh thread-id <events-file>       the thread id a stream records, from its shape
-//   launch.sh transient <err-file> [<stream-file> [<skip-lines>]]
+//   run launch skill  <name> <skill> [--run <dispatch>]
+//   run launch thread-id <events-file>       the thread id a stream records, from its shape
+//   run launch transient <err-file> [<stream-file> [<skip-lines>]]
 //                                           exit 0 when a leg's end is a transient provider
 //                                           error this adapter names (harnesses.md)
-//   launch.sh wall-tokens                   the wall token stems transient vetoes on, one per line
-//   launch.sh wall-quotes                   the quote corpus, one wall phrasing per line
+//   run launch wall-tokens                   the wall token stems transient vetoes on, one per line
+//   run launch wall-quotes                   the quote corpus, one wall phrasing per line
 //
 // thread-id reads an events stream and prints the first thread id its shape carries (codex
 // thread_id, claude session_id, grok session id, agy conversationId, pi session id, muse
@@ -147,7 +147,8 @@ function resolveSpec(
     } catch (e) {
       die(`cannot read ${sourcePath}: ${String(e)}`);
     }
-    const r = run(join(scriptsDir(import.meta), "project-settings.sh"), [
+    const r = run(join(scriptsDir(import.meta), "run"), [
+      "project-settings",
       "effective",
       project,
       sourcePath,
@@ -222,6 +223,9 @@ function resolveSpec(
   } else if (name === "postmaster") {
     const team = (cfg.team as Record<string, unknown>) ?? {};
     spec = team.postmaster;
+  } else if (name === "clerk") {
+    const team = (cfg.team as Record<string, unknown>) ?? {};
+    spec = team.clerk;
   } else {
     spec = lanes[name];
   }
@@ -290,6 +294,48 @@ function buildForms(
   runDir: string,
   base: string,
 ): FormsResult {
+  if (cmdMode === "interactive") {
+    const cmd: string[] = [];
+    const launchName = process.env.POSTMASTER_LAUNCH_NAME ?? "";
+    switch (harness) {
+      case "codex":
+        cmd.push("codex", "-m", model);
+        if (effort) cmd.push("-c", `model_reasoning_effort="${effort}"`);
+        cmd.push("--dangerously-bypass-approvals-and-sandbox");
+        break;
+      case "grok":
+        cmd.push("grok", "-m", model);
+        if (effort) cmd.push("--reasoning-effort", effort);
+        cmd.push("--always-approve");
+        break;
+      case "agy":
+        cmd.push("agy", "--model", model, "--dangerously-skip-permissions");
+        break;
+      case "claude":
+        cmd.push("claude", "--model", model);
+        if (effort) cmd.push("--effort", effort);
+        if (launchName) cmd.push("--name", launchName);
+        cmd.push("--dangerously-skip-permissions");
+        break;
+      case "pi":
+        cmd.push("pi", "--model", model);
+        if (effort) cmd.push("--thinking", effort);
+        if (launchName) cmd.push("--name", launchName);
+        cmd.push("--approve");
+        break;
+      case "muse":
+        cmd.push("muse", "--model", model);
+        if (effort) cmd.push("--reasoning-effort", effort);
+        cmd.push("--yolo");
+        break;
+      case "mimo":
+        cmd.push("mimo", "-m", model, "--dangerously-skip-permissions");
+        break;
+      default:
+        die(`no form for harness '${harness}'`);
+    }
+    return { cmd, data: "", stdinFile: "", promptArg: -1 };
+  }
   let data = "";
   let stdinFile = "";
   let promptArg = -1;
@@ -445,8 +491,27 @@ function shellQuote(s: string): string {
   return s.replace(/[ !"#$&'()*,;:<>?[\\\]^`{|}~]/gu, "\\$&");
 }
 
+// Words the form printer leaves unquoted: exactly the placeholders it
+// composes, never a value that merely looks like one. A hostile value such
+// as a ticket title must always pass through shellQuote, or the clerk's
+// print-and-reparse would split it into extra argv words.
+const FORM_PLACEHOLDERS = [
+  "<cwd>",
+  "<prompt-file>",
+  "<thread-id>",
+  "<review-prompt-file>",
+  "<harness-data>",
+  "<key>",
+];
+
 function showArg(a: string): string {
-  if (/^<.*>$/u.test(a) || /=<.*>$/u.test(a) || a === "$(cat <prompt-file>)") return `${a} `;
+  if (a === "$(cat <prompt-file>)") return `${a} `;
+  let glue = a;
+  for (const p of FORM_PLACEHOLDERS) glue = glue.split(p).join("");
+  // A bare placeholder, or placeholders joined by shell-inert glue such as
+  // XDG_DATA_HOME=<harness-data>/muse/<key>, prints as is. Anything else,
+  // with placeholders embedded or not, is quoted: the glue decides.
+  if (glue !== a && /^[A-Za-z0-9_@%+=:,./-]*$/u.test(glue)) return `${a} `;
   return `${shellQuote(a)} `;
 }
 
@@ -977,7 +1042,7 @@ function classifyTransient(
     }
   }
   const allErrors = `${err}\n${errorText.join("\n")}`;
-  // host.sh's own notices (uncapped, cap reached) precede the child's stderr, so a
+  // run host's own notices (uncapped, cap reached) precede the child's stderr, so a
   // refusal is a launch: line past any leading host: lines, not offset 0.
   if (err.replace(/^(?:host:[^\n]*\n)+/u, "").startsWith("launch:")) {
     return { out: "launch-refusal", code: 1 };
@@ -1001,7 +1066,7 @@ function classifyTransient(
 // and a tool's error are not the provider ending the turn, and grok, agy and pi have no
 // recorded shape and are not read (D2). The first line of that record's message is tested
 // with the one token list transient vetoes on, so the flow keeps one list of limit words
-// (D3). The line is written as the launch ends, before host.sh lands its marker.
+// (D3). The line is written as the launch ends, before run host lands its marker.
 export function isWallMessage(firstLine: string): boolean {
   return vetoed(firstLine);
 }
@@ -1142,7 +1207,8 @@ function recordWallIfAny(o: {
   let recorded = false;
   let problem = "";
   try {
-    const r = run(join(scriptsDir(import.meta), "log-action.sh"), [
+    const r = run(join(scriptsDir(import.meta), "run"), [
+      "log-action",
       o.dispatch,
       `lane:${o.lane}`,
       "wall",
@@ -1192,7 +1258,7 @@ if (import.meta.main) {
   const CMD0: string = argv[0] ?? "";
   if (CMD0 === "thread-id") {
     const rest = argv.slice(1);
-    if (rest.length !== 1) die("usage: launch.sh thread-id <events-file>");
+    if (rest.length !== 1) die("usage: run launch thread-id <events-file>");
     const id = findThreadId(readRegularFile(rest[0]!, `no such events file: ${rest[0]}`));
     if (id === null) die(`no thread id in ${rest[0]}`);
     console.log(id);
@@ -1201,7 +1267,7 @@ if (import.meta.main) {
   if (CMD0 === "transient") {
     const rest = argv.slice(1);
     if (rest.length < 1 || rest.length > 3)
-      die("usage: launch.sh transient <err-file> [<stream-file> [<skip-lines>]]");
+      die("usage: run launch transient <err-file> [<stream-file> [<skip-lines>]]");
     const err = readRegularFile(rest[0]!, `no such error file: ${rest[0]}`);
     let streamText: string | null = null;
     if (rest.length >= 2) {
@@ -1222,18 +1288,18 @@ if (import.meta.main) {
     process.exit(verdict.code);
   }
   if (CMD0 === "wall-tokens") {
-    if (argv.length !== 1) die("usage: launch.sh wall-tokens");
+    if (argv.length !== 1) die("usage: run launch wall-tokens");
     for (const t of WALL_TOKENS) console.log(t);
     process.exit(0);
   }
   if (CMD0 === "wall-quotes") {
-    if (argv.length !== 1) die("usage: launch.sh wall-quotes");
+    if (argv.length !== 1) die("usage: run launch wall-quotes");
     for (const q of WALL_QUOTES) console.log(q);
     process.exit(0);
   }
   if (argv.length < 2)
     die(
-      "usage: launch.sh form|launch|review|resume|skill <name> ... | thread-id <events-file> | transient <err-file> [<stream-file> [<skip-lines>]] | wall-tokens | wall-quotes",
+      "usage: run launch form|interactive|launch|review|resume|skill <name> ... | thread-id <events-file> | transient <err-file> [<stream-file> [<skip-lines>]] | wall-tokens | wall-quotes",
     );
   const CMD: string = argv[0] ?? "";
   const NAME = argv[1] ?? "";
@@ -1245,6 +1311,7 @@ if (import.meta.main) {
   let LAST = "";
   let RUN = "";
   let PROJECT = "";
+  let SESSION_NAME = "";
   const args: string[] = [];
   let i = 2;
   while (i < argv.length) {
@@ -1265,6 +1332,10 @@ if (import.meta.main) {
       if (i + 1 >= argv.length || !argv[i + 1]) die("--project needs a project directory");
       PROJECT = argv[i + 1] ?? "";
       i += 2;
+    } else if (a === "--name") {
+      if (i + 1 >= argv.length || !argv[i + 1]) die("--name needs a value");
+      SESSION_NAME = argv[i + 1] ?? "";
+      i += 2;
     } else {
       args.push(a ?? "");
       i += 1;
@@ -1273,6 +1344,7 @@ if (import.meta.main) {
   if (NAME === "coachman" && CMD !== "form" && !LEG) {
     die(`coachman needs --leg synthesis, review or ship to ${CMD}`);
   }
+  if (SESSION_NAME) process.env.POSTMASTER_LAUNCH_NAME = SESSION_NAME;
 
   let source: string;
   let recorded = false;
@@ -1303,7 +1375,11 @@ if (import.meta.main) {
   // form shows the wrapped command whenever one applies; it runs no start
   // check. launch, resume and review start the confinement with a no-op, and
   // run the lane unconfined with a warning when it cannot start.
-  const isLane = NAME !== "coachman" && NAME !== "coachman_fallback" && NAME !== "postmaster";
+  const isLane =
+    NAME !== "coachman" &&
+    NAME !== "coachman_fallback" &&
+    NAME !== "postmaster" &&
+    NAME !== "clerk";
   const showWrap = spec.confine && isLane;
   let confineWrap = false;
   if (spec.confine && isLane && CMD !== "skill" && CMD !== "form") {
@@ -1317,7 +1393,8 @@ if (import.meta.main) {
         `warning: confinement cannot start (${check.cause}); running ${NAME} unconfined`,
       );
       if (RUN) {
-        const logged = run(join(scriptsDir(import.meta), "log-action.sh"), [
+        const logged = run(join(scriptsDir(import.meta), "run"), [
+          "log-action",
           RUN,
           `lane:${NAME}`,
           "note",
@@ -1337,7 +1414,7 @@ if (import.meta.main) {
     }
   }
   if (CMD === "review") {
-    const forms = run(join(scriptsDir(import.meta), "review-forms.sh"), ["has", HARNESS]);
+    const forms = run(join(scriptsDir(import.meta), "run"), ["review-forms", "has", HARNESS]);
     if (forms.code !== 0) {
       console.error(
         `launch: ${NAME} runs on ${HARNESS}, which has no bug code-review form recorded in harnesses.md`,
@@ -1409,6 +1486,12 @@ if (import.meta.main) {
     PROMPT = "<prompt-file>";
     THREAD = "<thread-id>";
     PTEXT = "$(cat <prompt-file>)";
+  } else if (CMD === "interactive") {
+    if (args.length !== 0) die("interactive takes no argument but --project and --name");
+    CWD = PROJECT || process.cwd();
+    PROMPT = "";
+    THREAD = "";
+    PTEXT = "";
   } else if (CMD === "launch") {
     if (args.length !== 2) die("launch needs <cwd> <prompt-file>");
     CWD = args[0] ?? "";
@@ -1500,7 +1583,7 @@ if (import.meta.main) {
       BASE,
     );
 
-  if (CMD === "form") {
+  if (CMD === "form" || CMD === "interactive") {
     const show = (a: string): string => showArg(a);
     const maybeWrap = (cmd: string[]): string[] => {
       if (!showWrap) return cmd;
@@ -1513,6 +1596,15 @@ if (import.meta.main) {
       if (stdinFile) s += `< ${show(stdinFile)}`;
       return s;
     };
+    if (CMD === "interactive") {
+      if (RUN) die("interactive form does not take --run");
+      const interactive = mkForms("interactive");
+      let cmd = interactive.cmd;
+      if (ENV_FILE) cmd = ["bash", ...sourcedLaunch(ENV_FILE, cmd, "1")];
+      const shown = [`cd ${show(CWD)}&& `, ...cmd.map(show)].join("");
+      process.stdout.write(`launch: ${shown.trimEnd()}\n`);
+      process.exit(0);
+    }
     const launchForms = mkForms("form");
     process.stdout.write(
       `launch: ${put(CWD, maybeWrap(launchForms.cmd), launchForms.stdinFile)}\n`,
@@ -1801,7 +1893,7 @@ exit "$rc"
         : 1;
   const stream = process.env.POSTMASTER_EVENT_STREAM ?? "";
   if (RUN && stream) {
-    // Before anything else the wall is read and recorded: host.sh lands the marker when
+    // Before anything else the wall is read and recorded: run host lands the marker when
     // this process exits, so the line has to be in actions.jsonl by then.
     let wallLost = false;
     if (launchRole === "lane" || launchRole === "reviewer") {
@@ -1819,7 +1911,8 @@ exit "$rc"
     }
     // A detected wall that could not be recorded must not read as a clean end.
     if (wallLost && rc === 0) rc = 1;
-    const r = run(join(scriptsDir(import.meta), "export-session.sh"), [
+    const r = run(join(scriptsDir(import.meta), "run"), [
+      "export-session",
       RUN,
       NAME,
       HARNESS,
@@ -1844,7 +1937,7 @@ exit "$rc"
       if (!recordLane && NAME !== "coachman_fallback") recordLane = NAME;
     }
     if (recordRole && recordLane) {
-      const u = run("bun", [
+      const u = run(process.execPath, [
         join(scriptsDir(import.meta), "usage.ts"),
         "record",
         stream,

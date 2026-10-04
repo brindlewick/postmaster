@@ -19,10 +19,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { streamLines } from "./runs-watch.ts";
 import { run } from "./lib/proc.ts";
+import { activeRunCount, pendingReadyTickets, runCapacity, streamLines } from "./runs-watch.ts";
 
-const self = join(import.meta.dir, "runs-watch.sh");
+const self = join(import.meta.dir, "run");
 const savedConfig = process.env.POSTMASTER_CONFIG;
 
 let tmp = "";
@@ -82,7 +82,7 @@ afterAll(() => {
 function watch(root: string, timeout = "2", config?: string): { rc: number; out: string } {
   const r = run(
     self,
-    ["--timeout", timeout, root],
+    ["runs-watch", "--timeout", timeout, root],
     config === undefined ? {} : { env: { POSTMASTER_CONFIG: config } },
   );
   return { rc: r.code, out: `${r.out}${r.err}` };
@@ -129,7 +129,7 @@ describe("positive controls: each NEXT that needs the postmaster names its run",
   const specs: Array<[string, string, number, string, string, string?, string?]> = [
     ["rule", "review", 2, ".escalation-ready", "RULE"],
     ["gate", "shipping", 3, ".card-ready", "GATE"],
-    ["spec", "planning", 1, ".spec-review-ready", "SPEC"],
+    ["spec", "planning", 1, ".spec-" + "review-ready", "SPEC"],
     ["dispatch", "review", 2, ".leg-2-done", "DISPATCH"],
     ["resume", "review", 2, ".leg-2-exited", "RESUME", "incomplete", "coachman"],
     ["read", "review", 2, ".checkpoint-review-ready", "READ"],
@@ -431,13 +431,13 @@ function watchStub(root: string, mode = ""): { rc: number; out: string } {
   else if (mode === "dispatch refusal" || mode === "resume refusal") {
     env.POSTMASTER_WATCH_TEST_REFUSE = "1";
   }
-  const r = run(self, ["--timeout", "0", root], { env });
+  const r = run(self, ["runs-watch", "--timeout", "0", root], { env });
   return { rc: r.code, out: `${r.out}${r.err}` };
 }
 
 function watchStubWait(root: string): { rc: number; out: string } {
   mkdirSync(join(tmp, "calls"), { recursive: true });
-  const r = run(self, ["--timeout", "3", root], {
+  const r = run(self, ["runs-watch", "--timeout", "3", root], {
     env: {
       POSTMASTER_WATCH_TEST_MODE: "1",
       POSTMASTER_WATCH_TEST_CALLS: join(tmp, "calls"),
@@ -613,7 +613,7 @@ describe("watcher steps: dispatch and resume controls", () => {
     const { rc, out } = watchStub(root);
     expect(rc).toBe(0);
     expect(out).toContain("needs no-leg DISPATCH");
-    expect(out).toContain("not executable");
+    expect(out).toContain("cannot run host");
     expect(existsSync(join(tmp, "calls", "dispatch-no-leg-2"))).toBe(true);
     expect(existsSync(join(root, "no-leg", "logs", "coachman-leg-2-attempts.jsonl"))).toBe(false);
     expect(existsSync(join(root, "no-leg", ".leg-2-exited"))).toBe(false);
@@ -1330,6 +1330,90 @@ describe("negative controls: held runs are left untouched", () => {
   }, 60000);
 });
 
+describe("ready tickets wait for a run slot", () => {
+  function queued(root: string, id: string): void {
+    const dir = join(root, "postmaster", "ready");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${encodeURIComponent(id)}.ready`), `${id}\n`);
+  }
+
+  test("a queued ticket wakes the postmaster when a slot is free", () => {
+    const root = join(tmp, "ready-free");
+    const config = join(tmp, "ready-free.toml");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(config, "[postmaster]\npoll_seconds = 1\n[team]\nmax_runs = 2\n");
+    queued(root, "#2");
+    expect(pendingReadyTickets(root)).toEqual(["#2"]);
+    expect(activeRunCount(root)).toBe(0);
+    expect(runCapacity(config)).toBe(2);
+    const { rc, out } = watch(root, "0", config);
+    expect(rc).toBe(0);
+    expect(out).toContain("needs READY #2");
+  }, 30000);
+
+  test("the queue matches the marker's first line, with or without a digest", () => {
+    const root = join(tmp, "ready-first-line");
+    const dir = join(root, "postmaster", "ready");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "2.ready"), `2\n${"a".repeat(64)}\n`);
+    writeFileSync(join(dir, "3.ready"), "3\n");
+    writeFileSync(join(dir, "bogus.ready"), "nope\n");
+    expect(pendingReadyTickets(root)).toEqual(["2", "3"]);
+  }, 30000);
+
+  test("a wake names no more tickets than free slots", () => {
+    const root = join(tmp, "ready-cap");
+    const config = join(tmp, "ready-cap.toml");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(config, "[postmaster]\npoll_seconds = 1\n[team]\nmax_runs = 2\n");
+    mkrun(root, "flight", "review", 2);
+    queued(root, "2");
+    queued(root, "3");
+    queued(root, "4");
+    expect(activeRunCount(root)).toBe(1);
+    const { rc, out } = watch(root, "0", config);
+    expect(rc).toBe(0);
+    expect(out.match(/needs READY/gu)?.length ?? 0).toBe(1);
+    expect(out).toContain("needs READY 2");
+  }, 30000);
+
+  test("a queued ticket waits until an in-flight run frees its slot", () => {
+    const root = join(tmp, "ready-wait-slot");
+    const config = join(tmp, "ready-one-slot.toml");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(config, "[postmaster]\npoll_seconds = 1\n[team]\nmax_runs = 1\n");
+    mkrun(root, "flight", "review", 2);
+    queued(root, "2");
+    const manifest = join(root, "flight", "manifest.json");
+    const child = spawn(
+      "sh",
+      ["-c", 'sleep 2; printf \'{"stage":"done","leg":2}\\n\' > "$1"', "sh", manifest],
+      {
+        detached: true,
+        stdio: "ignore",
+      },
+    );
+    child.unref();
+    expect(activeRunCount(root)).toBe(1);
+    const { rc, out } = watch(root, "8", config);
+    expect(rc).toBe(0);
+    expect(out).toContain("needs READY 2");
+    expect(activeRunCount(root)).toBe(0);
+  }, 30000);
+
+  test("a pending ticket does not wake a full run ceiling", () => {
+    const root = join(tmp, "ready-full");
+    const config = join(tmp, "ready-full.toml");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(config, "[postmaster]\npoll_seconds = 1\n[team]\nmax_runs = 1\n");
+    mkrun(root, "flight", "review", 2);
+    queued(root, "2");
+    const { rc, out } = watch(root, "0", config);
+    expect(rc).toBe(3);
+    expect(out).not.toContain("needs READY");
+  }, 30000);
+});
+
 describe("config: a missing or unusable poll interval falls back to the default", () => {
   let root = "";
 
@@ -1390,7 +1474,7 @@ describe("config: a missing or unusable poll interval falls back to the default"
 
 describe("usage", () => {
   test("no run root is refused with the usage", () => {
-    const r = run(self, []);
+    const r = run(self, ["runs-watch"]);
     const out = `${r.out}${r.err}`;
     expect(r.code).toBe(1);
     expect(out).toContain("usage:");
@@ -1398,37 +1482,37 @@ describe("usage", () => {
   }, 30000);
 
   test("a timeout that is not a number is refused", () => {
-    const r = run(self, ["--timeout", "soon", join(tmp, "neg-wait")]);
+    const r = run(self, ["runs-watch", "--timeout", "soon", join(tmp, "neg-wait")]);
     const out = `${r.out}${r.err}`;
     expect(r.code).toBe(1);
     expect(out).toContain("not a whole number");
   }, 30000);
 
   test("an empty timeout is refused", () => {
-    const r = run(self, ["--timeout", "", join(tmp, "neg-wait")]);
+    const r = run(self, ["runs-watch", "--timeout", "", join(tmp, "neg-wait")]);
     const out = `${r.out}${r.err}`;
     expect(r.code).toBe(1);
     expect(out).toContain("not a whole number");
   }, 30000);
 
   test("a run root that does not exist is refused", () => {
-    const r = run(self, ["--timeout", "2", join(tmp, "nowhere")]);
+    const r = run(self, ["runs-watch", "--timeout", "2", join(tmp, "nowhere")]);
     const out = `${r.out}${r.err}`;
     expect(r.code).toBe(1);
     expect(out).toContain("no such root");
   }, 30000);
 
   test("--help prints the usage", () => {
-    const r = run(self, ["--help"]);
+    const r = run(self, ["runs-watch", "--help"]);
     const out = `${r.out}${r.err}`;
     expect(r.code).toBe(0);
-    expect(out).toContain("runs-watch.sh");
+    expect(out).toContain("run runs-watch");
     expect(out).toContain("held");
   }, 30000);
 });
 
 describe("provider walls: the watcher wakes, gates dispatch, delivers the pause", () => {
-  const wallsSh = join(import.meta.dir, "walls.sh");
+  const wallsSh = join(import.meta.dir, "run");
   const wallLine = (lane = "stub"): string =>
     `${JSON.stringify({
       ts: new Date(Date.now() - 30000).toISOString(),
@@ -1451,8 +1535,8 @@ describe("provider walls: the watcher wakes, gates dispatch, delivers the pause"
     expect(first.rc).toBe(0);
     expect(first.out).toContain("needs T1 WALL");
     expect(first.out).toContain("needs T2 WALL");
-    expect(run(wallsSh, ["told", join(root, "T1"), "stub"]).code).toBe(0);
-    expect(run(wallsSh, ["told", join(root, "T2"), "stub"]).code).toBe(0);
+    expect(run(wallsSh, ["walls", "told", join(root, "T1"), "stub"]).code).toBe(0);
+    expect(run(wallsSh, ["walls", "told", join(root, "T2"), "stub"]).code).toBe(0);
     const second = watch(root, "5");
     expect(second.rc).toBe(3);
     expect(second.out).not.toContain("needs ");
@@ -1495,7 +1579,7 @@ describe("provider walls: the watcher wakes, gates dispatch, delivers the pause"
     expect(existsSync(join(tmp, "calls", "dispatch-wallgate-2"))).toBe(false);
     expect(actionCount(d, "dispatch")).toBe(0);
     // Rule it, and the watcher takes the dispatch itself.
-    expect(run(wallsSh, ["rule", d, "sec", "go-on"]).code).toBe(0);
+    expect(run(wallsSh, ["walls", "rule", d, "sec", "go-on"]).code).toBe(0);
     const ruled = watchStub(root);
     expect(ruled.rc).toBe(3);
     expect(existsSync(join(tmp, "calls", "dispatch-wallgate-2"))).toBe(true);
@@ -1514,8 +1598,8 @@ describe("provider walls: the watcher wakes, gates dispatch, delivers the pause"
       wallLine("sec") +
         `${JSON.stringify({ ts: new Date().toISOString(), actor: "postmaster", action: "told", target: "sec", detail: "reviewer - -" })}\n`,
     );
-    expect(run(wallsSh, ["escalate", d]).code).toBe(0);
-    expect(run(wallsSh, ["rule", d, "sec", "go-on"]).code).toBe(0);
+    expect(run(wallsSh, ["walls", "escalate", d]).code).toBe(0);
+    expect(run(wallsSh, ["walls", "rule", d, "sec", "go-on"]).code).toBe(0);
     const { rc, out } = watchStub(root);
     expect(rc).toBe(3); // taken, nothing left to wake on
     expect(out).not.toContain("needs ");
@@ -1539,7 +1623,7 @@ describe("provider walls: the watcher wakes, gates dispatch, delivers the pause"
     autoRun(root, "walledopen", 1, "thread-wall-2");
     const d = join(root, "walledopen");
     writeFileSync(join(d, "actions.jsonl"), wallLine("sec"));
-    expect(run(wallsSh, ["told", d, "sec"]).code).toBe(0);
+    expect(run(wallsSh, ["walls", "told", d, "sec"]).code).toBe(0);
     writeFileSync(join(d, ".escalation-ready"), "");
     writeFileSync(join(d, ".wall-pause"), "");
     const { rc, out } = watchStub(root);
@@ -1560,7 +1644,7 @@ describe("provider walls: the watcher wakes, gates dispatch, delivers the pause"
       wallLine("sec") +
         `${JSON.stringify({ ts: new Date().toISOString(), actor: "postmaster", action: "told", target: "sec", detail: "reviewer - -" })}\n`,
     );
-    expect(run(wallsSh, ["rule", d, "sec", "go-on"]).code).toBe(0);
+    expect(run(wallsSh, ["walls", "rule", d, "sec", "go-on"]).code).toBe(0);
     writeFileSync(join(d, "ESCALATION.md"), "# Escalation: a later question\n\nNot a wall.\n");
     writeFileSync(join(d, ".escalation-ready"), "");
     writeFileSync(join(d, ".wall-pause"), "");

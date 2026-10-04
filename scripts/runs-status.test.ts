@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run } from "./lib/proc";
+import { processStart } from "./lib/processes";
 import { pyWords } from "./lib/text";
 import { status, walkFiles } from "./runs-status";
 
@@ -68,14 +68,8 @@ function intent(name: string, n: number, request = "launch"): void {
 
 function liveowner(name: string): void {
   // The lock's owner is this test run, alive throughout it.
-  let start: string;
-  try {
-    const stat = readFileSync(`/proc/${process.pid}/stat`, "utf8");
-    start = pyWords(stat.slice(stat.lastIndexOf(")") + 1))[19]!;
-  } catch {
-    const r = run("ps", ["-o", "lstart=", "-p", String(process.pid)], {});
-    start = pyWords(r.out).slice(0, 5).join(" ");
-  }
+  const start = processStart(process.pid);
+  if (!start) throw new Error("could not read this process's start time");
   writeFileSync(join(root, name, ".leg-2-active"), `${process.pid} ${start}\n`);
 }
 
@@ -135,8 +129,8 @@ beforeAll(() => {
   root = join(tmp, "root");
   mkRun("rule", "review", 2, ".escalation-ready");
   mkRun("gate", "shipping", 3, ".card-ready");
-  mkRun("spec", "planning", 1, ".spec-review-ready", ".leg-1-exited");
-  mkRun("specpause", "planning", 1, ".spec-review-ready", ".leg-1-exited");
+  mkRun("spec", "planning", 1, ".spec-" + "review-ready", ".leg-1-exited");
+  mkRun("specpause", "planning", 1, ".spec-" + "review-ready", ".leg-1-exited");
   // The pause's realistic shape: started, thread id, no hand-off, so incomplete.
   writeFileSync(
     join(root, "specpause", "logs", "coachman-leg-1-attempts.jsonl"),
@@ -163,7 +157,7 @@ beforeAll(() => {
   mkRun("closed", "done", 3, ".leg-3-done", ".leg-3-exited");
   mkRun("earlier", "review", 2, ".leg-1-done");
   mkRun("usergate", "shipping", 3, ".card-ready", ".waiting-on-user");
-  mkRun("userspec", "planning", 1, ".spec-review-ready", ".waiting-on-user");
+  mkRun("userspec", "planning", 1, ".spec-" + "review-ready", ".waiting-on-user");
   mkRun("userclosed", "done", 3, ".waiting-on-user");
   mkRun("refusedanswer", "review", 2, ".waiting-on-user", ".leg-2-exited");
   record("refusedanswer", "refused", "coachman");

@@ -2,9 +2,9 @@
 // the markers present, minutes since anything in it changed, and what the postmaster does
 // next. This is the postmaster's poll; it reads files and nothing else. A pending escalation
 // from the postmaster to the user is printed first, since it is what everything else may
-// be waiting on. The waiting list itself is kept by host.sh leg waiting, never by hand.
+// be waiting on. The waiting list itself is kept by run host leg waiting, never by hand.
 //
-//   runs-status.sh <project-run-root>        e.g. <project>/.postmaster/runs
+//   run runs-status <project-run-root>        e.g. <project>/.postmaster/runs
 //
 //   next   WALL      a lane stopped on its provider's usage limit and the user has not been
 //                    told yet (a `wall` line with no later `told` line): after `-` and before
@@ -36,7 +36,7 @@
 //   exit 1  usage, or no such root
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { run } from "./lib/proc.ts";
+import { processStart } from "./lib/processes.ts";
 import { pyWords } from "./lib/text.ts";
 import { readWalls } from "./walls.ts";
 
@@ -112,23 +112,7 @@ function ownerAlive(d: string, leg: string): boolean {
     return false;
   }
   const pid = Number(pidS.replace(/_/gu, ""));
-  try {
-    if (statSync("/proc/self").isDirectory()) {
-      let rest: string[];
-      try {
-        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-        rest = pyWords(stat.slice(stat.lastIndexOf(")") + 1));
-      } catch {
-        return false;
-      }
-      return rest.length > 0 && rest[0] !== "Z" && rest.length > 19 && rest[19] === start;
-    }
-  } catch {
-    // No /proc/self: fall through to ps.
-  }
-  const r = run("ps", ["-o", "stat=,lstart=", "-p", String(pid)], { env: { LC_ALL: "C" } });
-  const f = pyWords(r.out);
-  return f.length >= 6 && !f[0]!.startsWith("Z") && f.slice(1, 6).join(" ") === start;
+  return processStart(pid) === start;
 }
 
 export function status(root: string): number {
@@ -340,7 +324,7 @@ export function walkFiles(dir: string, fn: (path: string) => void): void {
 const argv = process.argv.slice(2);
 if (import.meta.main) {
   if (argv.length !== 1) {
-    console.error("usage: runs-status.sh <project-run-root>");
+    console.error("usage: run runs-status <project-run-root>");
     process.exit(1);
   }
   const raw = argv[0] as string;

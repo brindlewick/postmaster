@@ -1,12 +1,12 @@
 // A provider wall: the lane that stopped on its provider's usage limit, its record, and the
 // one command surface the flow tells, rules and carries a wall through.
 //
-//   walls.sh show <dispatch>                  one line per wall: run, lane, role, message, reset
-//   walls.sh open <dispatch>                  list the walls with no ruling; exit 1 while any
-//   walls.sh told <dispatch> <lane>           mark every untold wall of that lane as told
-//   walls.sh rule <dispatch> <lane> go-on     record the one ruling this ticket adds
-//   walls.sh escalate <dispatch>              write ESCALATION.md and pause the leg on it
-//   walls.sh carry <dispatch> <lane>          record the go-on the harvest carries out
+//   run walls show <dispatch>                  one line per wall: run, lane, role, message, reset
+//   run walls open <dispatch>                  list the walls with no ruling; exit 1 while any
+//   run walls told <dispatch> <lane>           mark every untold wall of that lane as told
+//   run walls rule <dispatch> <lane> go-on     record the one ruling this ticket adds
+//   run walls escalate <dispatch>              write ESCALATION.md and pause the leg on it
+//   run walls carry <dispatch> <lane>          record the go-on the harvest carries out
 //
 //   exit 0  done (open: no wall is waiting on a ruling)
 //   exit 1  usage, an unreadable dispatch, an unreadable action log, no wall where one
@@ -28,7 +28,7 @@
 // command but open, which reads it as no walls so the watcher's pinned
 // act-and-wake on unloggable actions still holds.
 //
-// The reset arrives on the `wall` line: launch.sh parses it from the message the provider
+// The reset arrives on the `wall` line: run launch parses it from the message the provider
 // ended the turn with (lib/wall.ts, D4 and D5), and show prints it in the machine's zone.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -37,7 +37,7 @@ import { run } from "./lib/proc.ts";
 
 const HERE = scriptsDir(import.meta);
 const USAGE =
-  "walls.sh show|open <dispatch> | told|carry <dispatch> <lane> | rule <dispatch> <lane> go-on | escalate <dispatch>";
+  "run walls show|open <dispatch> | told|carry <dispatch> <lane> | rule <dispatch> <lane> go-on | escalate <dispatch>";
 
 export interface Wall {
   /** 0-based line number in actions.jsonl, the order the run did things in. */
@@ -203,7 +203,7 @@ function logAction(
   target: string,
   detail: string,
 ): number {
-  return run(join(HERE, "log-action.sh"), [dispatch, actor, action, target, detail]).code;
+  return run(join(HERE, "run"), ["log-action", dispatch, actor, action, target, detail]).code;
 }
 
 /** The run's workhorses, from the config it recorded at dispatch. */
@@ -352,7 +352,7 @@ export function wallsCommand(argv: string[]): number {
         lines.push(`Unrecorded wall: ${detail}`);
       }
       lines.push(
-        `Repair: restore ${join(dispatch, "actions.jsonl")}, re-record each wall with \`<tool>/scripts/log-action.sh ${dispatch} lane:${l.lane} wall ${l.lane} "<detail>"\`, then remove \`logs/${l.lane}.wall-lost\`.`,
+        `Repair: restore ${join(dispatch, "actions.jsonl")}, re-record each wall with \`<tool>/scripts/run log-action ${dispatch} lane:${l.lane} wall ${l.lane} "<detail>"\`, then remove \`logs/${l.lane}.wall-lost\`.`,
       );
       lines.push("");
     }

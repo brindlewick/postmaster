@@ -1,7 +1,7 @@
 ---
 title: Sources
 type: source
-updated: 2026-09-29
+updated: 2026-10-03
 ---
 
 # Sources
@@ -12,6 +12,8 @@ captured into `raw/`, saying what it claims and what it would mean here if true.
 
 ## Articles
 
+- [pstack](pstack.md) (2026): a plugin of skills and principles for verified agent work, and
+  Part 1 of its guide. Postmaster already holds most of it, and nine changes are worth making.
 - [The AI-native SDLC playbook](ai-native-sdlc-playbook.md) (2026): design review happens
   before any code is generated, and nothing is implemented without an accepted plan.
 

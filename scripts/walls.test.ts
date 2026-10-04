@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { run } from "./lib/proc.ts";
 import { readWalls } from "./walls.ts";
 
-const self = join(import.meta.dir, "walls.sh");
+const self = join(import.meta.dir, "run");
 const HERE = import.meta.dir;
 
 let tmp = "";
@@ -222,7 +222,7 @@ describe("the wall lines, read back in file order", () => {
   });
 });
 
-describe("walls.sh show: the line the cards print", () => {
+describe("run walls show: the line the cards print", () => {
   let d = "";
   beforeAll(() => {
     d = join(tmp, "show-run");
@@ -253,7 +253,7 @@ describe("walls.sh show: the line the cards print", () => {
   });
 
   test("the run, the lane, the role, the message and the reset with its date", () => {
-    const r = run(self, ["show", d], { env: { ...process.env, TZ: "UTC" } });
+    const r = run(self, ["walls", "show", d], { env: { ...process.env, TZ: "UTC" } });
     expect(r.code).toBe(0);
     const lines = r.out.trim().split("\n");
     expect(lines[0]).toContain(`show-run stub: DEGRADED, provider wall: "${CODEX_MSG}"`);
@@ -265,8 +265,8 @@ describe("walls.sh show: the line the cards print", () => {
   });
 
   test("with TZ set to two zones, each shows its own local date (C6)", () => {
-    const utc = run(self, ["show", d], { env: { ...process.env, TZ: "UTC" } });
-    const ny = run(self, ["show", d], { env: { ...process.env, TZ: "America/New_York" } });
+    const utc = run(self, ["walls", "show", d], { env: { ...process.env, TZ: "UTC" } });
+    const ny = run(self, ["walls", "show", d], { env: { ...process.env, TZ: "America/New_York" } });
     expect(utc.out).toContain("2026-10-05T02:29:00+00:00");
     expect(ny.out).toContain("2026-10-04T22:29:00-04:00");
     expect(ny.out).not.toContain("2026-10-05T02:29:00-04:00");
@@ -276,7 +276,7 @@ describe("walls.sh show: the line the cards print", () => {
     mkdirSync(join(d, "logs"), { recursive: true });
     writeFileSync(join(d, "logs", "mimo.wall-lost"), "workhorse - - none stuck\n");
     try {
-      const r = run(self, ["show", d]);
+      const r = run(self, ["walls", "show", d]);
       expect(r.code).toBe(0);
       expect(r.out).toContain(
         'show-run mimo: wall detected but not recorded: "workhorse - - none stuck"',
@@ -287,7 +287,7 @@ describe("walls.sh show: the line the cards print", () => {
   });
 });
 
-describe("walls.sh open: the pause gate", () => {
+describe("run walls open: the pause gate", () => {
   let d = "";
   const write = (body: string): void => writeFileSync(join(d, "actions.jsonl"), body);
   const wall = (lane: string): string =>
@@ -300,21 +300,21 @@ describe("walls.sh open: the pause gate", () => {
 
   test("no walls: exit 0", () => {
     write("");
-    const r = run(self, ["open", d]);
+    const r = run(self, ["walls", "open", d]);
     expect(r.code).toBe(0);
     expect(r.out).toBe("");
   });
 
   test("a wall with no ruling: exit 1, listed, naming the lane and the message", () => {
     write(wall("stub"));
-    const r = run(self, ["open", d]);
+    const r = run(self, ["walls", "open", d]);
     expect(r.code).toBe(1);
     expect(r.out).toContain('stub: no ruling: "stuck"');
   });
 
   test("every wall ruled: exit 0 (C14)", () => {
     write(wall("stub") + line2("rule", "stub", "wall go-on"));
-    const r = run(self, ["open", d]);
+    const r = run(self, ["walls", "open", d]);
     expect(r.code).toBe(0);
   });
 
@@ -323,7 +323,7 @@ describe("walls.sh open: the pause gate", () => {
     mkdirSync(join(d, "logs"), { recursive: true });
     writeFileSync(join(d, "logs", "stub.wall-lost"), "workhorse - - none stuck\n");
     try {
-      const r = run(self, ["open", d]);
+      const r = run(self, ["walls", "open", d]);
       expect(r.code).toBe(1);
       expect(r.out).toContain("stub: wall detected but not recorded");
     } finally {
@@ -337,12 +337,12 @@ describe("walls.sh open: the pause gate", () => {
     write(wall("stub"));
     chmodSync(join(d, "actions.jsonl"), 0o000);
     try {
-      expect(run(self, ["open", d]).code).toBe(0);
+      expect(run(self, ["walls", "open", d]).code).toBe(0);
     } finally {
       chmodSync(join(d, "actions.jsonl"), 0o644);
     }
     rmSync(join(d, "actions.jsonl"));
-    expect(run(self, ["open", d]).code).toBe(0);
+    expect(run(self, ["walls", "open", d]).code).toBe(0);
   });
 
   test("an unreadable log refuses show, escalate, told, rule and carry with its reason", () => {
@@ -356,7 +356,7 @@ describe("walls.sh open: the pause gate", () => {
         ["rule", d, "stub", "go-on"],
         ["carry", d, "stub"],
       ]) {
-        const r = run(self, args);
+        const r = run(self, ["walls", ...args]);
         expect(r.code).toBe(1);
         expect(r.err).toContain("cannot read");
       }
@@ -370,7 +370,7 @@ describe("walls.sh open: the pause gate", () => {
   }
 });
 
-describe("walls.sh rule: the one ruling, and what it refuses", () => {
+describe("run walls rule: the one ruling, and what it refuses", () => {
   let d = "";
   const wallLine = (lane: string): string =>
     `${JSON.stringify({ ts: "2026-10-05T00:00:00Z", actor: `lane:${lane}`, action: "wall", target: lane, detail: "workhorse - - none stuck" })}\n`;
@@ -399,7 +399,7 @@ describe("walls.sh rule: the one ruling, and what it refuses", () => {
   test("go-on on a reviewer wall is accepted and recorded (C15)", () => {
     fresh("rule-reviewer", ["stub", "mimo"]);
     writeFileSync(join(d, "actions.jsonl"), wallLine("sec"));
-    const r = run(self, ["rule", d, "sec", "go-on"]);
+    const r = run(self, ["walls", "rule", d, "sec", "go-on"]);
     expect(r.code).toBe(0);
     expect(ruleLines().length).toBe(1);
     expect(ruleLines()[0]).toContain('"target":"sec"');
@@ -411,7 +411,7 @@ describe("walls.sh rule: the one ruling, and what it refuses", () => {
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub"));
     for (const ruling of ["rest", "reset-now", "substitute"]) {
       const before = actions();
-      const r = run(self, ["rule", d, "stub", ruling]);
+      const r = run(self, ["walls", "rule", d, "stub", ruling]);
       expect(r.code).toBe(2);
       expect(r.err).toContain("separate ticket");
       expect(actions()).toBe(before);
@@ -422,11 +422,11 @@ describe("walls.sh rule: the one ruling, and what it refuses", () => {
   test("go-on on a workhorse while another is walled open is accepted; the last one is refused (C19)", () => {
     fresh("rule-last", ["stub", "mimo"]);
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub") + wallLine("mimo"));
-    const first = run(self, ["rule", d, "stub", "go-on"]);
+    const first = run(self, ["walls", "rule", d, "stub", "go-on"]);
     expect(first.code).toBe(0);
     expect(ruleLines().length).toBe(1);
     const before = actions();
-    const second = run(self, ["rule", d, "mimo", "go-on"]);
+    const second = run(self, ["walls", "rule", d, "mimo", "go-on"]);
     expect(second.code).toBe(2);
     expect(second.err).toContain(
       "no other workhorse is running, has a summary, or is walled with no ruling",
@@ -438,7 +438,7 @@ describe("walls.sh rule: the one ruling, and what it refuses", () => {
     fresh("rule-running", ["stub", "mimo"]);
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub"));
     writeFileSync(join(d, "logs", "mimo-events.jsonl"), ""); // launched, marker not landed
-    const r = run(self, ["rule", d, "stub", "go-on"]);
+    const r = run(self, ["walls", "rule", d, "stub", "go-on"]);
     expect(r.code).toBe(0);
   });
 
@@ -448,17 +448,17 @@ describe("walls.sh rule: the one ruling, and what it refuses", () => {
     const wt = join(tmp, "proj", ".worktrees", "rule-summary-mimo");
     mkdirSync(wt, { recursive: true });
     writeFileSync(join(wt, "WORKHORSE-SUMMARY.md"), "done\n");
-    const r = run(self, ["rule", d, "stub", "go-on"]);
+    const r = run(self, ["walls", "rule", d, "stub", "go-on"]);
     expect(r.code).toBe(0);
   });
 
   test("a ruling after the carry-out is refused (C20)", () => {
     fresh("rule-after-carry", ["stub", "mimo"]);
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub") + wallLine("mimo"));
-    expect(run(self, ["rule", d, "stub", "go-on"]).code).toBe(0);
-    expect(run(self, ["carry", d, "stub"]).code).toBe(0);
+    expect(run(self, ["walls", "rule", d, "stub", "go-on"]).code).toBe(0);
+    expect(run(self, ["walls", "carry", d, "stub"]).code).toBe(0);
     const before = actions();
-    const r = run(self, ["rule", d, "stub", "go-on"]);
+    const r = run(self, ["walls", "rule", d, "stub", "go-on"]);
     expect(r.code).toBe(2);
     expect(r.err).toContain("carried out");
     expect(actions()).toBe(before);
@@ -469,12 +469,12 @@ describe("walls.sh rule: the one ruling, and what it refuses", () => {
     const reviewerWall = (lane: string): string =>
       `${JSON.stringify({ ts: "2026-10-05T00:00:01Z", actor: `lane:${lane}`, action: "wall", target: lane, detail: "reviewer bug 2 none stuck in review" })}\n`;
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub") + wallLine("mimo"));
-    expect(run(self, ["rule", d, "stub", "go-on"]).code).toBe(0);
-    expect(run(self, ["carry", d, "stub"]).code).toBe(0);
+    expect(run(self, ["walls", "rule", d, "stub", "go-on"]).code).toBe(0);
+    expect(run(self, ["walls", "carry", d, "stub"]).code).toBe(0);
     writeFileSync(join(d, "actions.jsonl"), actions() + reviewerWall("stub"));
-    const r = run(self, ["rule", d, "stub", "go-on"]);
+    const r = run(self, ["walls", "rule", d, "stub", "go-on"]);
     expect(r.code).toBe(0);
-    expect(run(self, ["open", d]).code).toBe(1); // mimo's workhorse wall is still open
+    expect(run(self, ["walls", "open", d]).code).toBe(1); // mimo's workhorse wall is still open
   });
 
   test("go-on for a reviewer wall is never refused as a last workhorse", () => {
@@ -486,14 +486,14 @@ describe("walls.sh rule: the one ruling, and what it refuses", () => {
       join(d, "actions.jsonl"),
       `${JSON.stringify({ ts: "2026-10-05T00:00:00Z", actor: "lane:stub", action: "wall", target: "stub", detail: "reviewer bug 1 none stuck in review" })}\n`,
     );
-    const r = run(self, ["rule", d, "stub", "go-on"]);
+    const r = run(self, ["walls", "rule", d, "stub", "go-on"]);
     expect(r.code).toBe(0);
   });
 
   test("go-on for a lone workhorse wall is still refused (C19 control)", () => {
     fresh("rule-lone-horse", ["stub"]);
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub"));
-    const r = run(self, ["rule", d, "stub", "go-on"]);
+    const r = run(self, ["walls", "rule", d, "stub", "go-on"]);
     expect(r.code).toBe(2);
     expect(r.err).toContain("no other workhorse");
   });
@@ -506,7 +506,7 @@ describe("walls.sh rule: the one ruling, and what it refuses", () => {
     writeFileSync(join(wt, "WORKHORSE-SUMMARY.md"), "done\n");
     writeFileSync(join(d, "checks.json"), `${JSON.stringify({ repo: spaced })}\n`);
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub"));
-    expect(run(self, ["rule", d, "stub", "go-on"]).code).toBe(0);
+    expect(run(self, ["walls", "rule", d, "stub", "go-on"]).code).toBe(0);
   });
 
   test("a repo: line in the ticket text never wins over the profile", () => {
@@ -520,7 +520,7 @@ describe("walls.sh rule: the one ruling, and what it refuses", () => {
         `repo: ${join(tmp, "proj")}\n`,
     );
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub"));
-    expect(run(self, ["rule", d, "stub", "go-on"]).code).toBe(0);
+    expect(run(self, ["walls", "rule", d, "stub", "go-on"]).code).toBe(0);
   });
 
   test("a spaced profile path without checks still resolves", () => {
@@ -531,14 +531,14 @@ describe("walls.sh rule: the one ruling, and what it refuses", () => {
     writeFileSync(join(wt, "WORKHORSE-SUMMARY.md"), "done\n");
     writeFileSync(join(d, "brief.md"), `# Waybill: T\n\n## Project profile\nrepo: ${spaced}\n`);
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub"));
-    expect(run(self, ["rule", d, "stub", "go-on"]).code).toBe(0);
+    expect(run(self, ["walls", "rule", d, "stub", "go-on"]).code).toBe(0);
   });
 
   test("a lane with only a lost marker has no wall to rule", () => {
     fresh("rule-lost-only", ["stub", "mimo"]);
     mkdirSync(join(d, "logs"), { recursive: true });
     writeFileSync(join(d, "logs", "stub.wall-lost"), "workhorse - - none stuck\n");
-    const r = run(self, ["rule", d, "stub", "go-on"]);
+    const r = run(self, ["walls", "rule", d, "stub", "go-on"]);
     expect(r.code).toBe(1);
     expect(r.err).toContain("no wall");
   });
@@ -546,12 +546,12 @@ describe("walls.sh rule: the one ruling, and what it refuses", () => {
   test("a ruling for a lane with no wall is usage (exit 1), and an unknown ruling too", () => {
     fresh("rule-usage", ["stub"]);
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub"));
-    expect(run(self, ["rule", d, "other", "go-on"]).code).toBe(1);
-    expect(run(self, ["rule", d, "stub", "carry-on"]).code).toBe(1);
+    expect(run(self, ["walls", "rule", d, "other", "go-on"]).code).toBe(1);
+    expect(run(self, ["walls", "rule", d, "stub", "carry-on"]).code).toBe(1);
   });
 });
 
-describe("walls.sh told, escalate and carry", () => {
+describe("run walls told, escalate and carry", () => {
   let d = "";
   const wallLine = (lane: string, reset = "none", msg = "stuck"): string =>
     `${JSON.stringify({ ts: "2026-10-05T00:00:00Z", actor: `lane:${lane}`, action: "wall", target: lane, detail: `workhorse - - ${reset} ${msg}` })}\n`;
@@ -575,18 +575,18 @@ describe("walls.sh told, escalate and carry", () => {
 
   test("told marks every untold wall of the lane once, and again for a new wall (C5, C21)", () => {
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub") + wallLine("mimo"));
-    expect(run(self, ["told", d, "stub"]).code).toBe(0);
+    expect(run(self, ["walls", "told", d, "stub"]).code).toBe(0);
     expect(count("told")).toBe(1);
-    expect(run(self, ["told", d, "stub"]).code).toBe(0);
+    expect(run(self, ["walls", "told", d, "stub"]).code).toBe(0);
     expect(count("told")).toBe(1); // never told twice
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub") + wallLine("mimo") + wallLine("stub"));
-    expect(run(self, ["told", d, "stub"]).code).toBe(0);
+    expect(run(self, ["walls", "told", d, "stub"]).code).toBe(0);
     expect(count("told")).toBe(2); // the new wall is told
   });
 
   test("escalate writes the escalation, its markers and the line (C13)", () => {
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub", "2026-10-05T02:29:00Z", CODEX_MSG));
-    const r = run(self, ["escalate", d]);
+    const r = run(self, ["walls", "escalate", d]);
     expect(r.code).toBe(0);
     const esc = readFileSync(join(d, "ESCALATION.md"), "utf8");
     expect(esc).toContain("## stub (workhorse)");
@@ -604,37 +604,37 @@ describe("walls.sh told, escalate and carry", () => {
       wallLine("stub") +
         `${JSON.stringify({ ts: "2026-10-05T00:00:01Z", actor: "postmaster", action: "rule", target: "stub", detail: "wall go-on" })}\n`,
     );
-    const r = run(self, ["escalate", d]);
+    const r = run(self, ["walls", "escalate", d]);
     expect(r.code).toBe(1);
   });
 
   test("escalate's escalation says no reset time when the message gives none", () => {
     writeFileSync(join(d, "actions.jsonl"), wallLine("mimo", "none", "no time at all"));
-    expect(run(self, ["escalate", d]).code).toBe(0);
+    expect(run(self, ["walls", "escalate", d]).code).toBe(0);
     const esc = readFileSync(join(d, "ESCALATION.md"), "utf8");
     expect(esc).toContain("Reset: no reset time");
   });
 
   test("carry records each go-on once, and refuses one that is unruled (C16, C20)", () => {
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub"));
-    expect(run(self, ["carry", d, "stub"]).code).toBe(2); // no ruling to carry
+    expect(run(self, ["walls", "carry", d, "stub"]).code).toBe(2); // no ruling to carry
     writeFileSync(
       join(d, "actions.jsonl"),
       wallLine("stub") +
         `${JSON.stringify({ ts: "2026-10-05T00:00:01Z", actor: "postmaster", action: "rule", target: "stub", detail: "wall go-on" })}\n`,
     );
-    expect(run(self, ["carry", d, "stub"]).code).toBe(0);
+    expect(run(self, ["walls", "carry", d, "stub"]).code).toBe(0);
     expect(count("carry")).toBe(1);
-    expect(run(self, ["carry", d, "stub"]).code).toBe(0);
+    expect(run(self, ["walls", "carry", d, "stub"]).code).toBe(0);
     expect(count("carry")).toBe(1);
-    expect(run(self, ["carry", d, "nobody"]).code).toBe(1);
+    expect(run(self, ["walls", "carry", d, "nobody"]).code).toBe(1);
   });
 
   test("escalate names a lost wall with its repair", () => {
     writeFileSync(join(d, "actions.jsonl"), "");
     writeFileSync(join(d, "logs", "stub.wall-lost"), "workhorse - - none stuck\n");
     try {
-      const r = run(self, ["escalate", d]);
+      const r = run(self, ["walls", "escalate", d]);
       expect(r.code).toBe(0);
       const esc = readFileSync(join(d, "ESCALATION.md"), "utf8");
       expect(esc).toContain("## stub (wall detected but not recorded)");
@@ -652,21 +652,21 @@ describe("walls.sh told, escalate and carry", () => {
     const ruled = (ts: string): string =>
       `${JSON.stringify({ ts, actor: "postmaster", action: "rule", target: "stub", detail: "wall go-on" })}\n`;
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub") + ruled("2026-10-05T00:00:01Z"));
-    expect(run(self, ["carry", d, "stub"]).code).toBe(0);
+    expect(run(self, ["walls", "carry", d, "stub"]).code).toBe(0);
     expect(count("carry")).toBe(1);
     appendFileSync(join(d, "actions.jsonl"), wallLine("stub") + ruled("2026-10-05T00:00:03Z"));
-    expect(run(self, ["carry", d, "stub"]).code).toBe(0);
+    expect(run(self, ["walls", "carry", d, "stub"]).code).toBe(0);
     expect(count("carry")).toBe(2);
   });
 });
 
 describe("usage", () => {
   test("every command checks its shape", () => {
-    expect(run(self, []).code).toBe(1);
-    expect(run(self, ["show"]).code).toBe(1);
-    expect(run(self, ["show", join(tmp, "no-such-dispatch")]).code).toBe(1);
-    expect(run(self, ["carry", join(tmp)]).code).toBe(1);
-    expect(run(self, ["rule", join(tmp), "lane"]).code).toBe(1);
-    expect(run(self, ["nonsense", join(tmp)]).code).toBe(1);
+    expect(run(self, ["walls"]).code).toBe(1);
+    expect(run(self, ["walls", "show"]).code).toBe(1);
+    expect(run(self, ["walls", "show", join(tmp, "no-such-dispatch")]).code).toBe(1);
+    expect(run(self, ["walls", "carry", join(tmp)]).code).toBe(1);
+    expect(run(self, ["walls", "rule", join(tmp), "lane"]).code).toBe(1);
+    expect(run(self, ["walls", "nonsense", join(tmp)]).code).toBe(1);
   });
 });

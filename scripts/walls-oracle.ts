@@ -1,7 +1,7 @@
 // Blind acceptance oracle for #237: the run layout the ticket's checks judge, with the
 // runners and readers the cases need. The cases in walls-oracle.test.ts run the ticket's
-// own interface (the coachman's launch step through host.sh with stub harnesses first on
-// PATH, walls.sh, runs-status.sh, runs-watch.sh, review-round.sh wait) and match only what
+// own interface (the coachman's launch step through run host with stub harnesses first on
+// PATH, run walls, run runs-status, run runs-watch, run review-round wait) and match only what
 // the ticket pins: exits, the wall line's contents, the reset moment, the quoted wordings,
 // the needs and NEXT names. Lanes never see these files; at harvest they are
 // cherry-picked onto a scratch of each lane and run.
@@ -388,8 +388,9 @@ export function launchStep(repoRoot: string, lay: Layout, o: LaunchOpts): void {
       ? ["launch", o.lane, o.cwd, lay.prompt]
       : ["review", o.lane, o.cwd, o.base ?? ""];
   const r = sh(
-    join(scripts, "host.sh"),
+    join(scripts, "run"),
     [
+      "host",
       "run",
       `oracle-${o.lane}-${o.role}`,
       o.cwd,
@@ -406,7 +407,8 @@ export function launchStep(repoRoot: string, lay: Layout, o: LaunchOpts): void {
       "--marker",
       join(d, "logs", o.marker),
       "--",
-      join(scripts, "launch.sh"),
+      join(scripts, "run"),
+      "launch",
       ...inner,
       "--last",
       lastPath,
@@ -416,12 +418,12 @@ export function launchStep(repoRoot: string, lay: Layout, o: LaunchOpts): void {
     lay.env,
     lay.tmp,
   );
-  if (r.code !== 0) throw new Error(`host.sh run failed with exit ${r.code}: ${both(r)}`);
+  if (r.code !== 0) throw new Error(`run host run failed with exit ${r.code}: ${both(r)}`);
   waitMarker(join(d, "logs", o.marker), errPath, 30);
 }
 
 export function waitMarker(markerPath: string, errPath: string, timeoutSec: number): void {
-  // A tight poll: wait-for-markers.sh naps 20s between looks, which would put
+  // A tight poll: run wait-for-markers naps 20s between looks, which would put
   // a blind oracle with dozens of launches to sleep.
   const shared = new Int32Array(new SharedArrayBuffer(4));
   for (let i = 0; i < timeoutSec * 10; i++) {
@@ -514,8 +516,8 @@ export function expectedDaily(hour: number, minute: number, wallTs: string): num
 }
 
 export function nextOf(repoRoot: string, lay: Layout, run: string): string {
-  const r = sh(join(repoRoot, "scripts", "runs-status.sh"), [lay.root], lay.env, lay.tmp);
-  need(r, "runs-status.sh");
+  const r = sh(join(repoRoot, "scripts", "run"), ["runs-status", lay.root], lay.env, lay.tmp);
+  need(r, "runs-status");
   for (const line of r.out.split("\n")) {
     const cells = line.trim().split(/[ \t\n]+/u);
     if (cells[0] === run) return cells[cells.length - 1] ?? "";
@@ -579,8 +581,8 @@ export function watch(
   extraEnv?: Record<string, string>,
 ): Run {
   return sh(
-    join(repoRoot, "scripts", "runs-watch.sh"),
-    [lay.root, "--timeout", timeout],
+    join(repoRoot, "scripts", "run"),
+    ["runs-watch", lay.root, "--timeout", timeout],
     { ...lay.env, ...extraEnv },
     lay.tmp,
   );
@@ -589,15 +591,15 @@ export function watch(
 export function watchTest(repoRoot: string, lay: Layout, callsDir: string): Run {
   mkdirSync(callsDir, { recursive: true });
   return sh(
-    join(repoRoot, "scripts", "runs-watch.sh"),
-    [lay.root, "--timeout", "0"],
+    join(repoRoot, "scripts", "run"),
+    ["runs-watch", lay.root, "--timeout", "0"],
     { ...lay.env, POSTMASTER_WATCH_TEST_MODE: "1", POSTMASTER_WATCH_TEST_CALLS: callsDir },
     lay.tmp,
   );
 }
 
 export function walls(repoRoot: string, lay: Layout, ...args: string[]): Run {
-  return sh(join(repoRoot, "scripts", "walls.sh"), args, lay.env, lay.tmp);
+  return sh(join(repoRoot, "scripts", "run"), ["walls", ...args], lay.env, lay.tmp);
 }
 
 export function wallsEnv(
@@ -606,5 +608,10 @@ export function wallsEnv(
   extraEnv: Record<string, string>,
   ...args: string[]
 ): Run {
-  return sh(join(repoRoot, "scripts", "walls.sh"), args, { ...lay.env, ...extraEnv }, lay.tmp);
+  return sh(
+    join(repoRoot, "scripts", "run"),
+    ["walls", ...args],
+    { ...lay.env, ...extraEnv },
+    lay.tmp,
+  );
 }

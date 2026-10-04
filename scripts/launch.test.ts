@@ -30,8 +30,12 @@ import { toolRoot } from "./lib/paths.ts";
 import { run, withTempDir } from "./lib/proc.ts";
 import { BOUND_R, DOT_ALL, PY_M_START, PY_S_CLASS, pySplitLines, pyWords } from "./lib/text.ts";
 
-const self = join(import.meta.dir, "launch.sh");
+const self = join(import.meta.dir, "run");
 const here = import.meta.dir;
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/gu, "'\\''")}'`;
+}
 
 const skipPython = run("sh", ["-c", "command -v python3"]).code !== 0;
 if (skipPython) {
@@ -116,6 +120,7 @@ beforeAll(() => {
 
     const fixture = (name: string, ...keys: string[]): void => {
       let body = `[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n\n[team]\n`;
+      body += `clerk = { harness = "claude", model = "clerk-model" }\n`;
       body += `coachman = { harness = "claude", model = "coach-model" }\n`;
       body += `coachman_fallback = { harness = "claude", model = "fallback-model" }\n\n[team.coachman_legs]\n`;
       for (const k of keys) body += `${k} = { harness = "claude", model = "${k}-model" }\n`;
@@ -178,7 +183,7 @@ beforeAll(() => {
         POSTMASTER_CONFIG: join(tmp, `${f}.toml`),
         PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
       };
-      const r = spawnSync(self, rest, { encoding: "utf8", env });
+      const r = spawnSync(self, ["launch", ...rest], { encoding: "utf8", env });
       out = r.stdout ?? "";
       err = r.stderr ?? "";
       rc = r.status ?? 1;
@@ -223,7 +228,7 @@ beforeAll(() => {
     const runDir = (runName: string): string => join(tmp, "repo", ".postmaster", "runs", runName);
     const record = (runName: string, f: string): void => {
       mkdirSync(runDir(runName), { recursive: true });
-      const r = spawnSync(join(here, "run-meta.sh"), [runDir(runName), join(tmp, "repo")], {
+      const r = spawnSync(join(here, "run"), ["run-meta", runDir(runName), join(tmp, "repo")], {
         encoding: "utf8",
         env: {
           ...process.env,
@@ -233,7 +238,7 @@ beforeAll(() => {
         },
       });
       if (r.status !== 0) {
-        fail(`run-meta.sh records ${f} as run ${runName}`);
+        fail(`run run-meta records ${f} as run ${runName}`);
       }
     };
 
@@ -401,7 +406,15 @@ beforeAll(() => {
     {
       const r = spawnSync(
         self,
-        ["launch", "coachman", join(tmp, "wt"), join(tmp, "prompt.txt"), "--leg", "synthesis"],
+        [
+          "launch",
+          "launch",
+          "coachman",
+          join(tmp, "wt"),
+          join(tmp, "prompt.txt"),
+          "--leg",
+          "synthesis",
+        ],
         {
           encoding: "utf8",
           env: {
@@ -443,7 +456,7 @@ beforeAll(() => {
     const calls = (...paths: string[]): { code: number; out: string } => {
       const results: string[] = [];
       const CALL = new RegExp(
-        `scripts/(?:launch\\.sh[${PY_S_CLASS}]+(?:launch|resume)|host\\.sh[${PY_S_CLASS}]+leg[${PY_S_CLASS}]+(?:launch|resume|takeover|retry))${BOUND_R}`,
+        `scripts/run[${PY_S_CLASS}]+(?:launch[${PY_S_CLASS}]+(?:launch|resume)|(?:run-meta[${PY_S_CLASS}]+run-pinned[^\\n]*?|host)[${PY_S_CLASS}]+leg[${PY_S_CLASS}]+(?:launch|resume|takeover|retry))${BOUND_R}`,
         "gu",
       );
       for (const path of paths) {
@@ -461,7 +474,9 @@ beforeAll(() => {
               while ((m = CALL.exec(line)) !== null) {
                 const c = line.slice(m.index);
                 const recorded =
-                  c.includes("--run <dispatch>") || c.includes("scripts/host.sh leg");
+                  c.includes("--run <dispatch>") ||
+                  c.includes("scripts/run host leg") ||
+                  c.includes("scripts/run run-meta run-pinned");
                 results.push(`${recorded ? "run" : "unrun"} ${path}: ${pyWords(c).join(" ")}`);
               }
             }
@@ -474,7 +489,9 @@ beforeAll(() => {
               while ((m = CALL.exec(inner)) !== null) {
                 const c = inner.slice(m.index);
                 const recorded =
-                  c.includes("--run <dispatch>") || c.includes("scripts/host.sh leg");
+                  c.includes("--run <dispatch>") ||
+                  c.includes("scripts/run host leg") ||
+                  c.includes("scripts/run run-meta run-pinned");
                 results.push(`${recorded ? "run" : "unrun"} ${path}: ${pyWords(c).join(" ")}`);
               }
             }
@@ -551,33 +568,36 @@ beforeAll(() => {
         "Fenced, with no --run:",
         "",
         "```sh",
-        "( scripts/launch.sh launch a <wt> <prompt-file> \\",
+        "( scripts/run launch launch a <wt> <prompt-file> \\",
         "    > <dispatch>/logs/a-events.jsonl ) &",
         "```",
         "",
         "Fenced and indented, with it:",
         "",
         "   ```sh",
-        "   ( scripts/launch.sh launch b <wt> <prompt-file> \\",
+        "   ( scripts/run launch launch b <wt> <prompt-file> \\",
         "       --run <dispatch> > <dispatch>/logs/b-events.jsonl ) &",
         "   ```",
         "",
-        "Inline, with no --run: `scripts/launch.sh resume c <wt> <thread-id> <prompt-file>`. Inline and",
-        "across a line break, with it: `<tool>/scripts/launch.sh resume d <wt> <thread-id>",
+        "Inline, with no --run: `scripts/run launch resume c <wt> <thread-id> <prompt-file>`. Inline and",
+        "across a line break, with it: `<tool>/scripts/run launch resume d <wt> <thread-id>",
         "<prompt-file> --run <dispatch>`.",
       ].join("\n"),
     );
     {
       // Unicode primitives, BASE launch.sh python: every expectation python3-verified.
-      writeFileSync(join(tmp, "uni.md"), "```sh\nscripts/launch.sh\x1flaunch u1 <wt> <p>\n```\n");
+      writeFileSync(
+        join(tmp, "uni.md"),
+        "```sh\nscripts/run\x1flaunch\x1flaunch u1 <wt> <p>\n```\n",
+      );
       const u1 = calls(join(tmp, "uni.md"));
       check("calls finds an invocation spaced with U+001F", u1.out.includes("u1"), u1.out);
-      writeFileSync(join(tmp, "uni2.md"), "```sh\nscripts/launch.sh\rlaunch u2 <wt> <p>\n```\n");
+      writeFileSync(join(tmp, "uni2.md"), "```sh\nscripts/run\rlaunch r u2 <wt> <p>\n```\n");
       const u2 = calls(join(tmp, "uni2.md"));
       check("calls misses an invocation broken by CR (splitlines)", !u2.out.includes("u2"), u2.out);
       const contGot = "a\\\n\x1fb".replace(CONT_RE, " ");
       check("continuations join across U+001F", contGot === "a b", JSON.stringify(contGot));
-      const fenceGot = "a\r```sh\nscripts/launch.sh launch x\n```\nb".split(FENCE_SPLIT_RE);
+      const fenceGot = "a\r```sh\nscripts/run launch launch x\n```\nb".split(FENCE_SPLIT_RE);
       check("fences do not open after CR", fenceGot.length === 1, String(fenceGot.length));
     }
     run("git", ["init", "-q", join(tmp, "repo")]);
@@ -598,7 +618,7 @@ beforeAll(() => {
     ): { rc: number; err: string } => {
       mkdirSync(dirname(streamFile), { recursive: true });
       const fd = openSync(streamFile, "w");
-      const r = spawnSync(self, args, {
+      const r = spawnSync(self, ["launch", ...args], {
         encoding: "utf8",
         stdio: ["inherit", fd, "pipe"],
         env: {
@@ -1102,7 +1122,7 @@ beforeAll(() => {
       const got = `${out
         .replace(/\n+$/u, "")
         .split("\n")
-        .map((l) => l.replace(/^([a-z]+) .*launch\.sh (launch|resume) ([a-z]) .*/u, "$1 $3"))
+        .map((l) => l.replace(/^([a-z]+) .*run launch (launch|resume) ([a-z]) .*/u, "$1 $3"))
         .join(",")},`;
       if (got === "unrun a,run b,unrun c,run d,") {
         ok("a runbook launch or resume with no --run is found, fenced or inline");
@@ -1132,14 +1152,18 @@ beforeAll(() => {
       const claude = join(tmp, "bin", "claude");
       const saved = readFileSync(claude, "utf8");
       writeFileSync(claude, "#!/bin/sh\nkill -TERM $$\n");
-      const r = spawnSync(self, ["launch", "one", join(tmp, "wt"), join(tmp, "prompt.txt")], {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          POSTMASTER_CONFIG: join(tmp, "legs.toml"),
-          PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+      const r = spawnSync(
+        self,
+        ["launch", "launch", "one", join(tmp, "wt"), join(tmp, "prompt.txt")],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            POSTMASTER_CONFIG: join(tmp, "legs.toml"),
+            PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+          },
         },
-      });
+      );
       writeFileSync(claude, saved);
       check(
         "a SIGTERM harness kills the launch by SIGTERM",
@@ -1405,7 +1429,7 @@ beforeAll(() => {
     );
     // Env-file parity: the port and BASE run the same file, and the harness's
     // received environment, the exit status and both launch streams agree.
-    // BASE is the newest scripts/launch.sh in history that is a real script
+    // BASE is the newest scripts/run launch in history that is a real script
     // rather than the port's one-line wrapper; it must still carry the
     // source-and-exec tail, or the extraction failed loudly and every parity
     // control with it.
@@ -2050,7 +2074,7 @@ beforeAll(() => {
       join(tmp, "prompt.txt"),
     );
     refused(
-      "an argument launch.sh does not know is refused",
+      "an argument run launch does not know is refused",
       "legs",
       "launch needs <cwd> <prompt-file>",
       "launch",
@@ -2244,7 +2268,7 @@ beforeAll(() => {
         POSTMASTER_CONFIG: join(tmp, `${f}.toml`),
         PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
       };
-      const r = spawnSync(self, rest, { encoding: "utf8", env, input: "leak\n" });
+      const r = spawnSync(self, ["launch", ...rest], { encoding: "utf8", env, input: "leak\n" });
       out = r.stdout ?? "";
       err = r.stderr ?? "";
       rc = r.status ?? 1;
@@ -2336,7 +2360,7 @@ beforeAll(() => {
         POSTMASTER_CONFIG: join(tmp, "muse-bare.toml"),
         PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
       };
-      const r = spawnSync(self, ["launch", "m", join(tmp, "elsewhere"), "sub/p.txt"], {
+      const r = spawnSync(self, ["launch", "launch", "m", join(tmp, "elsewhere"), "sub/p.txt"], {
         encoding: "utf8",
         env,
         stdio: ["ignore", "pipe", "pipe"],
@@ -2526,7 +2550,7 @@ beforeAll(() => {
         POSTMASTER_CONFIG: join(tmp, "mimo-bare.toml"),
         PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
       };
-      const r = spawnSync(self, ["launch", "x", join(tmp, "elsewhere"), "sub/p.txt"], {
+      const r = spawnSync(self, ["launch", "launch", "x", join(tmp, "elsewhere"), "sub/p.txt"], {
         encoding: "utf8",
         env,
         stdio: ["ignore", "pipe", "pipe"],
@@ -2613,14 +2637,18 @@ beforeAll(() => {
     symlinkSync(join(here, "lib"), join(tmp, "lib"));
 
     const bypassed = (script: string, flag: string, ...formArgs: string[]): boolean => {
-      const r = spawnSync(script, ["form", ...formArgs], {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          POSTMASTER_CONFIG: join(tmp, "team.toml"),
-          PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+      const r = spawnSync(
+        script,
+        script === self ? ["launch", "form", ...formArgs] : ["form", ...formArgs],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            POSTMASTER_CONFIG: join(tmp, "team.toml"),
+            PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+          },
         },
-      });
+      );
       out = r.stdout ?? "";
       rc = r.status ?? 1;
       let n = 0;
@@ -2660,6 +2688,38 @@ beforeAll(() => {
       "a claude lane's form shows a resume form too",
       "launch: cd <cwd> && claude -p ",
       "resume: cd <cwd> && claude -p --resume <thread-id> ",
+    );
+    doRun("phase-start", "form", "clerk");
+    printed(
+      "the clerk role resolves from team.clerk",
+      "launch: cd <cwd> && claude -p ",
+      "--model clerk-model",
+    );
+    doRun(
+      "phase-start",
+      "interactive",
+      "clerk",
+      "--project",
+      join(tmp, "repo"),
+      "--name",
+      "#2, Fix the list",
+    );
+    printed(
+      "the clerk interactive form is named for its ticket",
+      `launch: cd ${join(tmp, "repo")} && claude --model clerk-model --name \\#2\\,\\ Fix\\ the\\ list --dangerously-skip-permissions`,
+    );
+    doRun(
+      "phase-start",
+      "interactive",
+      "clerk",
+      "--project",
+      join(tmp, "repo"),
+      "--name",
+      "#1, =< --tools x>",
+    );
+    printed(
+      "a hostile session name prints quoted, never as extra words",
+      `launch: cd ${join(tmp, "repo")} && claude --model clerk-model --name \\#1\\,\\ =\\<\\ --tools\\ x\\> --dangerously-skip-permissions`,
     );
     writeFileSync(join(tmp, "agy.toml"), '[lanes.g]\nharness = "agy"\nmodel = "agy-model"\n');
     writeFileSync(join(tmp, "bin/agy"), "#!/bin/sh\n");
@@ -2702,7 +2762,7 @@ beforeAll(() => {
     const doSub = (...args: string[]): void => {
       // thread-id, transient and the wall lists read no config; the ambient
       // environment is inherited, as the self-test ran them bare.
-      const r = run(self, args);
+      const r = run(self, ["launch", ...args]);
       out = r.out;
       err = r.err;
       rc = r.code;
@@ -3028,7 +3088,7 @@ beforeAll(() => {
     const codexUsage =
       '{"type": "turn.completed", "usage": {"input_tokens": 3072288, "cached_input_tokens": 2910208, "cache_write_input_tokens": 0, "output_tokens": 50050, "reasoning_output_tokens": 44266}}';
     const claudeUsage =
-      '{"type":"system","subtype":"task_progress","task_id":"ac8fe1ebf375eff4d","tool_use_id":"toolu_013hqT2oMy1VXLYEaky3ttuc","description":"Reading scripts/runs-watch.sh","subagent_type":"general-purpose","usage":{"total_tokens":30007,"tool_uses":1,"duration_ms":4119},"last_tool_name":"Read","uuid":"c4295b17-b348-4933-8a1e-7dfe07cfb78e","session_id":"7449d3c5-8a18-45ba-aa72-1f0ae0ea8a30"}';
+      '{"type":"system","subtype":"task_progress","task_id":"ac8fe1ebf375eff4d","tool_use_id":"toolu_013hqT2oMy1VXLYEaky3ttuc","description":"Reading scripts/run runs-watch","subagent_type":"general-purpose","usage":{"total_tokens":30007,"tool_uses":1,"duration_ms":4119},"last_tool_name":"Read","uuid":"c4295b17-b348-4933-8a1e-7dfe07cfb78e","session_id":"7449d3c5-8a18-45ba-aa72-1f0ae0ea8a30"}';
     const realisticTail = '{"type":"error","message":"model stream idle timeout"}';
     const realisticWall = '{"type":"error","message":"quota exceeded for this key"}';
     writeFileSync(join(tmp, "real.err"), "the leg ended\n");
@@ -3889,7 +3949,7 @@ beforeAll(() => {
           const codes: Record<string, number> = {};
           for (const [side, bin, argv] of [
             ["base", "bash", [baseLaunch, ...args]],
-            ["port", self, args],
+            ["port", self, ["launch", ...args]],
           ] as Array<[string, string, string[]]>) {
             rmSync(recOf(harness), { force: true });
             const r = spawnSync(bin, argv, { cwd: startlink, encoding: "utf8", env });
@@ -4055,9 +4115,9 @@ s.close()
       // AC2 item: a consistent /proc (Linux: the lane's PIDs match what its
       // /proc shows, so ps and friends see the lane, not the host's table)
       if (process.platform === "linux") {
-        // Fork-free: read runs in this shell, so /proc/self is the shell
-        // itself, not a subshell a $() would fork.
-        const selfProbe = 'read pid rest < /proc/self/stat; test "$pid" = "$$"';
+        const processModule = join(here, "lib", "processes.ts");
+        const probeSource = `import { processInfo } from ${JSON.stringify(processModule)}; const info = processInfo(process.pid); process.exit(info?.pid === process.pid ? 0 : 1);`;
+        const selfProbe = `${shellQuote(process.execPath)} -e ${shellQuote(probeSource)}`;
         items.push({
           name: "a consistent /proc",
           bare: () => run("sh", ["-c", selfProbe]).code === 0,
@@ -4439,7 +4499,7 @@ describe("run-recorded effort controls", () => {
         ).toBe(0);
         const dispatch = join(repo, ".postmaster", "runs", "7");
         mkdirSync(dispatch, { recursive: true });
-        expect(run(join(here, "run-meta.sh"), [dispatch, repo], { env }).code).toBe(0);
+        expect(run(join(here, "run"), ["run-meta", dispatch, repo], { env }).code).toBe(0);
         dispatches[kind] = dispatch;
       }
       const reviewRepo = join(tmp, "review");
@@ -4468,7 +4528,7 @@ describe("run-recorded effort controls", () => {
         ["ticket", { codex: "max", claude: "max", mimo: "high" }],
       ] as const) {
         const dispatch = dispatches[kind]!;
-        const form = run(self, ["form", "codex_lane", "--run", dispatch], { env });
+        const form = run(self, ["launch", "form", "codex_lane", "--run", dispatch], { env });
         launched(`${kind} form`, form);
         const formEfforts = [...form.out.matchAll(/model_reasoning_effort=[^ \t\r\n]+/gu)].map(
           (match) => match[0],
@@ -4476,9 +4536,13 @@ describe("run-recorded effort controls", () => {
         expect(formEfforts).toHaveLength(2);
         expect(formEfforts.every((entry) => entry.includes(want.codex))).toBe(true);
         expect(form.out).toContain("resume:");
-        const coach = run(self, ["form", "coachman", "--leg", "synthesis", "--run", dispatch], {
-          env,
-        });
+        const coach = run(
+          self,
+          ["launch", "form", "coachman", "--leg", "synthesis", "--run", dispatch],
+          {
+            env,
+          },
+        );
         launched(`${kind} coach form`, coach);
         const coachForms = coach.out
           .split("\n")
@@ -4487,34 +4551,38 @@ describe("run-recorded effort controls", () => {
         expect(coachForms.every((line) => line.includes(`--effort ${want.claude}`))).toBe(true);
         const codexReview = run(
           self,
-          ["review", "codex_lane", reviewRepo, base, "--run", dispatch],
+          ["launch", "review", "codex_lane", reviewRepo, base, "--run", dispatch],
           { env },
         );
         launched(`${kind} codex review`, codexReview);
         expect(codexReview.out).toContain(`model_reasoning_effort="${want.codex}"`);
         const claudeReview = run(
           self,
-          ["review", "claude_lane", reviewRepo, base, "--run", dispatch],
+          ["launch", "review", "claude_lane", reviewRepo, base, "--run", dispatch],
           { env },
         );
         launched(`${kind} claude review`, claudeReview);
         expect(claudeReview.out).toContain(`/code-review ${want.claude} ${base}...HEAD`);
         expect(claudeReview.out).toContain(`--effort ${want.claude}`);
-        const mimoReview = run(self, ["review", "mimo_lane", reviewRepo, base, "--run", dispatch], {
-          env,
-        });
+        const mimoReview = run(
+          self,
+          ["launch", "review", "mimo_lane", reviewRepo, base, "--run", dispatch],
+          {
+            env,
+          },
+        );
         launched(`${kind} mimo review`, mimoReview);
         expect(mimoReview.out).toContain(`--variant ${want.mimo}`);
         const effortlessReview = run(
           self,
-          ["review", "effortless", reviewRepo, base, "--run", dispatch],
+          ["launch", "review", "effortless", reviewRepo, base, "--run", dispatch],
           { env },
         );
         launched(`${kind} effortless review`, effortlessReview);
         expect(effortlessReview.out).toContain('model_reasoning_effort="max"');
         const claudeEffortless = run(
           self,
-          ["review", "claude_effortless", reviewRepo, base, "--run", dispatch],
+          ["launch", "review", "claude_effortless", reviewRepo, base, "--run", dispatch],
           { env },
         );
         launched(`${kind} claude effortless review`, claudeEffortless);
@@ -4522,7 +4590,7 @@ describe("run-recorded effort controls", () => {
         expect(claudeEffortless.out).toContain("--effort max");
         const mimoEffortless = run(
           self,
-          ["review", "mimo_effortless", reviewRepo, base, "--run", dispatch],
+          ["launch", "review", "mimo_effortless", reviewRepo, base, "--run", dispatch],
           { env },
         );
         launched(`${kind} mimo effortless review`, mimoEffortless);
@@ -4628,6 +4696,9 @@ describe("positive controls", () => {
   });
   test("form with no --leg shows team.coachman", () => {
     assertControl("form with no --leg shows team.coachman");
+  });
+  test("a hostile session name prints quoted, never as extra words", () => {
+    assertControl("a hostile session name prints quoted, never as extra words");
   });
   test("a lane's env file reaches the harness's environment", () => {
     assertControl("a lane's env file reaches the harness's environment");
@@ -4853,8 +4924,8 @@ describe("negative controls", () => {
   test("a resume with no thread id is refused, and nothing runs", () => {
     assertControl("a resume with no thread id is refused, and nothing runs");
   });
-  test("an argument launch.sh does not know is refused", () => {
-    assertControl("an argument launch.sh does not know is refused");
+  test("an argument run launch does not know is refused", () => {
+    assertControl("an argument run launch does not know is refused");
   });
   test("--leg style is refused", () => {
     assertControl("--leg style is refused");
@@ -5550,10 +5621,10 @@ describe("confinement wiring: form shows the wrap, fallback warns and logs", () 
 });
 
 // --- the provider wall record: what a launch writes as it ends (C1, C3, C4) ---------------------
-// Tests beside this file for the wall record launch.sh writes through host.sh's own step.
+// Tests beside this file for the wall record run launch writes through run host's own step.
 
-const host = join(import.meta.dir, "host.sh");
-const waitMarkers = join(import.meta.dir, "wait-for-markers.sh");
+const host = join(import.meta.dir, "run");
+const waitMarkers = join(import.meta.dir, "run");
 
 let tmp = "";
 let bin = "";
@@ -5657,6 +5728,7 @@ function launchStep(
   const marker = join(c.d, "logs", `${out}.done`);
   const argv = [
     host,
+    "host",
     "run",
     `${kind} · ${lane}`,
     c.wt,
@@ -5673,7 +5745,8 @@ function launchStep(
     "--marker",
     marker,
     "--",
-    join(import.meta.dir, "launch.sh"),
+    join(import.meta.dir, "run"),
+    "launch",
     kind === "reviewer" && extra.includes("review") ? "review" : "launch",
     ...(kind === "reviewer" && extra.includes("review")
       ? [lane, c.wt, "HEAD"]
@@ -5684,10 +5757,14 @@ function launchStep(
   ];
   const r = spawnSync("bash", [argv[0]!, ...argv.slice(1)], { encoding: "utf8", env: baseEnv() });
   const rc = r.status ?? 1;
-  const waited = spawnSync("bash", [waitMarkers, join(c.d, "logs"), `${out}.done`, "1", "60"], {
-    encoding: "utf8",
-    env: baseEnv(),
-  });
+  const waited = spawnSync(
+    "bash",
+    [waitMarkers, "wait-for-markers", join(c.d, "logs"), `${out}.done`, "1", "60"],
+    {
+      encoding: "utf8",
+      env: baseEnv(),
+    },
+  );
   return { rc: waited.status ?? 1, marker, actions: join(c.d, "actions.jsonl") };
 }
 
@@ -5772,7 +5849,7 @@ describe("C1: a launch that ends on its provider's limit records one wall", () =
     expect(rec.detail).toContain("workhorse - - none You have hit your usage limit.");
   }, 60000);
 
-  /** launch.sh straight, reading its own exit: stdout is the stream, as host.sh arranges. */
+  /** run launch straight, reading its own exit: stdout is the stream, as run host arranges. */
   const directStep = (
     c: Dispatch,
     lane: string,
@@ -5782,8 +5859,8 @@ describe("C1: a launch that ends on its provider's limit records one wall", () =
     mkdirSync(join(c.d, "logs"), { recursive: true });
     const fd = openSync(streamFile, "w");
     const r = spawnSync(
-      join(import.meta.dir, "launch.sh"),
-      ["launch", lane, c.wt, join(tmp, "prompt.txt"), "--run", c.d],
+      join(import.meta.dir, "run"),
+      ["launch", "launch", lane, c.wt, join(tmp, "prompt.txt"), "--run", c.d],
       {
         encoding: "utf8",
         stdio: ["inherit", fd, "pipe"],
@@ -5907,7 +5984,7 @@ describe("C3: an ending that is not the provider's limit records no wall", () =>
   );
 });
 
-test("C3: a lane stopped mid-run with host.sh stop records no wall", () => {
+test("C3: a lane stopped mid-run with run host stop records no wall", () => {
   const c = dispatch("c3-stop");
   stub("codex", `echo started; sleep 300\n`);
   const marker = join(c.d, "logs", "stub-stop.done");
@@ -5915,6 +5992,7 @@ test("C3: a lane stopped mid-run with host.sh stop records no wall", () => {
     "bash",
     [
       host,
+      "host",
       "run",
       "lane · stub",
       c.wt,
@@ -5931,7 +6009,8 @@ test("C3: a lane stopped mid-run with host.sh stop records no wall", () => {
       "--marker",
       marker,
       "--",
-      join(import.meta.dir, "launch.sh"),
+      join(import.meta.dir, "run"),
+      "launch",
       "launch",
       "stub",
       c.wt,
@@ -5944,12 +6023,19 @@ test("C3: a lane stopped mid-run with host.sh stop records no wall", () => {
   expect(child.status ?? 1).toBe(0);
   // Give the launch its moment, then stop it in its own worktree, as review-round does.
   spawnSync("sleep", ["1"]);
-  const stopped = spawnSync("bash", [host, "stop", c.wt], { encoding: "utf8", env: baseEnv() });
-  expect(stopped.status ?? 1).toBe(0);
-  spawnSync("bash", [waitMarkers, join(c.d, "logs"), "stub-stop.done", "1", "60"], {
+  const stopped = spawnSync("bash", [host, "host", "stop", c.wt], {
     encoding: "utf8",
     env: baseEnv(),
   });
+  expect(stopped.status ?? 1).toBe(0);
+  spawnSync(
+    "bash",
+    [waitMarkers, "wait-for-markers", join(c.d, "logs"), "stub-stop.done", "1", "60"],
+    {
+      encoding: "utf8",
+      env: baseEnv(),
+    },
+  );
   expect(wallsIn(join(c.d, "actions.jsonl")).length).toBe(0);
 }, 90000);
 

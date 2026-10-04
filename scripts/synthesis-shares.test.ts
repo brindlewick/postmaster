@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -110,6 +110,7 @@ const runScript = (
   synthesis: string,
   lanes: readonly Lane[],
   oracle: string | null = null,
+  env: Record<string, string | undefined> = process.env,
 ): Output => {
   const dispatch = join(directory, ".postmaster", "runs", "fixture");
   mkdirSync(dispatch, { recursive: true });
@@ -127,7 +128,7 @@ const runScript = (
     "--record",
     dispatch,
   ];
-  const result = Bun.spawnSync(args, { cwd: directory, stdout: "pipe", stderr: "pipe" });
+  const result = Bun.spawnSync(args, { cwd: directory, env, stdout: "pipe", stderr: "pipe" });
   return {
     stdout: new TextDecoder().decode(result.stdout),
     stderr: new TextDecoder().decode(result.stderr),
@@ -295,10 +296,9 @@ test("oracle, lane records, lockfiles, and generated paths are excluded exactly"
       "kept.ts": "bright copper river sleeps beyond quiet\n",
       "lib.ts": "first base line content here\nlane appended feature line here\n",
       "oracle-answer.ts": "orchid comet valley bronze window spring\n",
-      "WORKHORSE-SPEC.md": "purple meadow silver candle green ocean\n",
       "WORKHORSE-SUMMARY.md": "amber forest quiet river candle comet\n",
       "WORKHORSE-BLOCKED.md": "silver meadow winter planet harbor velvet\n",
-      "nested/WORKHORSE-SPEC.md": "nested spec words count here today\n",
+      "nested/WORKHORSE-SUMMARY.md": "nested spec words count here today\n",
       "acceptance-probe.ts": "acceptance probe words count here today\n",
       "bun.lock": "lockfile orchid comet valley bronze window\n",
       "uv.lock": "uv lock orchid comet valley bronze\n",
@@ -328,17 +328,52 @@ test("oracle, lane records, lockfiles, and generated paths are excluded exactly"
     ]);
     expect(result.report.exclusions.byRange.synthesis.map(({ path }) => path).toSorted()).toEqual([
       "WORKHORSE-BLOCKED.md",
-      "WORKHORSE-SPEC.md",
       "WORKHORSE-SUMMARY.md",
       "acceptance-probe.ts",
       "bun.lock",
       "generated.ts",
       "lib.ts",
       "linguist.ts",
-      "nested/WORKHORSE-SPEC.md",
+      "nested/WORKHORSE-SUMMARY.md",
       "oracle-answer.ts",
       "uv.lock",
     ]);
+  }));
+
+test("generated attributes use the index with git that has no --source option", () =>
+  withWorkspace((directory) => {
+    const base = initializeRepo(directory);
+    const synthesis = commitFiles(directory, base, "synthesis", {
+      ".gitattributes": "marked.ts linguist-generated\n",
+      "kept.ts": "bright copper river sleeps beyond quiet mountains\n",
+      "marked.ts": "velvet lantern dances under midnight winter\n",
+    });
+    const lanes = [{ name: "alpha", head: synthesis }];
+    const expected = runScenario(directory, base, synthesis, lanes);
+    rmSync(expected.recordPath);
+
+    const bin = join(directory, "old-git-bin");
+    mkdirSync(bin);
+    const actualGit = Bun.which("git");
+    if (!actualGit) throw new Error("git is not on PATH");
+    const fakeGit = join(bin, "git");
+    writeFileSync(
+      fakeGit,
+      `#!/bin/sh\ncase "$*" in *"check-attr --source"*) echo "unknown option 'source'" >&2; exit 129 ;; esac\nexec "${actualGit}" "$@"\n`,
+    );
+    chmodSync(fakeGit, 0o755);
+    const output = runScript(directory, base, synthesis, lanes, null, {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+    });
+    const recordPath = join(directory, ".postmaster", "runs", "fixture", "shares.json");
+    const report = JSON.parse(readFileSync(recordPath, "utf8")) as Report;
+    expect(output.code).toBe(0);
+    expect(output.stderr).toBe("");
+    expect(output.stdout.trim()).toBe(expected.line);
+    expect(report).toEqual(expected.report);
+    expect(report.exclusions.byRange.synthesis.map(({ path }) => path)).toContain("marked.ts");
+    expect(report.exclusions.byRange.synthesis.map(({ path }) => path)).not.toContain("kept.ts");
   }));
 
 test("three lanes are counted by name, with any overlap grouped as shared", () =>
