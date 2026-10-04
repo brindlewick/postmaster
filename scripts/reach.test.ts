@@ -783,7 +783,14 @@ describe("C13-C15: card, contract and balanced controls", () => {
     writeAction(layout, "coachman", "verify", "gate", `on=${sha}@${sha} result=pass exit=0 secs=1`);
     const checkpoint = join(layout.dispatch, "checkpoint.md");
     writeFileSync(checkpoint, "## Findings (bug)\n\nnone\n");
-    const card = run("bash", [RUN, "landing", "card-block", layout.dispatch, layout.synth, checkpoint]);
+    const card = run("bash", [
+      RUN,
+      "landing",
+      "card-block",
+      layout.dispatch,
+      layout.synth,
+      checkpoint,
+    ]);
     expect(card.code).toBe(0);
     expect(card.out).toContain("## Reach");
     expect(card.out).toContain("out.txt");
@@ -820,7 +827,14 @@ describe("C13-C15: card, contract and balanced controls", () => {
       `on=${git(noCard.synth, "rev-parse", "HEAD").slice(0, 12)}@${git(noCard.synth, "rev-parse", "HEAD").slice(0, 12)} result=pass exit=0 secs=1`,
     );
     writeFileSync(checkpoint, "## Findings (bug)\n\nnone\n");
-    const missing = run("bash", [RUN, "landing", "card-block", noCard.dispatch, noCard.synth, checkpoint]);
+    const missing = run("bash", [
+      RUN,
+      "landing",
+      "card-block",
+      noCard.dispatch,
+      noCard.synth,
+      checkpoint,
+    ]);
     expect(missing.code).toBe(0);
     expect(missing.out).toContain("- card: not checked");
   });
@@ -1017,7 +1031,14 @@ describe("R1: review round 1 fixes", () => {
     writeAction(layout, "coachman", "verify", "gate", `on=${sha}@${sha} result=pass exit=0 secs=1`);
     const checkpoint = join(layout.dispatch, "checkpoint.md");
     writeFileSync(checkpoint, "## Findings (bug)\n\nnone\n");
-    const card = run("bash", [RUN, "landing", "card-block", layout.dispatch, layout.synth, checkpoint]);
+    const card = run("bash", [
+      RUN,
+      "landing",
+      "card-block",
+      layout.dispatch,
+      layout.synth,
+      checkpoint,
+    ]);
     expect(card.code).toBe(0);
     expect(card.out).toContain("weird&lt;!--x.txt");
     expect(card.out).toContain("back'tick.txt");
@@ -1049,11 +1070,9 @@ describe("R1: review round 1 fixes", () => {
     mkdirSync(another, { recursive: true });
     before(moved);
     addCommit(moved.repo, moved.synth, "synth-work.txt");
-    const restorePolluted = run(
-      "bash",
-      [RUN, "reach", "restore", moved.dispatch, "r1"],
-      { env: { HOME: moved.home, GIT_DIR: `${another}.git`, GIT_WORK_TREE: another } },
-    );
+    const restorePolluted = run("bash", [RUN, "reach", "restore", moved.dispatch, "r1"], {
+      env: { HOME: moved.home, GIT_DIR: `${another}.git`, GIT_WORK_TREE: another },
+    });
     expect(restorePolluted.code).toBe(0);
     expect(git(moved.repo, "rev-parse", "refs/heads/T")).toBe(moved.base);
   });
@@ -1063,13 +1082,9 @@ describe("R1: review round 1 fixes", () => {
     const other = join(layout.root, "other");
     git(layout.repo, "init", "--bare", "-q", `${other}.git`);
     mkdirSync(other, { recursive: true });
-    const polluted = run(
-      "bash",
-      [RUN, "check-target", "reach", layout.repo, "main"],
-      {
-        env: { GIT_DIR: `${other}.git`, GIT_WORK_TREE: other },
-      },
-    );
+    const polluted = run("bash", [RUN, "check-target", "reach", layout.repo, "main"], {
+      env: { GIT_DIR: `${other}.git`, GIT_WORK_TREE: other },
+    });
     expect(polluted.code).toBe(0);
     expect(polluted.out).toContain(`root ${layout.repo}`);
   });
@@ -1157,7 +1172,14 @@ describe("R1: review round 1 fixes", () => {
     writeAction(layout, "coachman", "verify", "gate", `on=${sha}@${sha} result=pass exit=0 secs=1`);
     const checkpoint = join(layout.dispatch, "checkpoint.md");
     writeFileSync(checkpoint, "## Findings (bug)\n\nnone\n");
-    const card = run("bash", [RUN, "landing", "card-block", layout.dispatch, layout.synth, checkpoint]);
+    const card = run("bash", [
+      RUN,
+      "landing",
+      "card-block",
+      layout.dispatch,
+      layout.synth,
+      checkpoint,
+    ]);
     expect(card.code).toBe(0);
     expect(card.out).toContain("unexplained");
     expect(card.out).toContain("weird&lt;!--x.txt");
@@ -1286,7 +1308,14 @@ describe("R6: ruled round fixes", () => {
     writeAction(layout, "coachman", "verify", "gate", `on=${sha}@${sha} result=pass exit=0 secs=1`);
     const checkpoint = join(layout.dispatch, "checkpoint.md");
     writeFileSync(checkpoint, "## Findings (bug)\n\nnone\n");
-    const card = run("bash", [RUN, "landing", "card-block", layout.dispatch, layout.synth, checkpoint]);
+    const card = run("bash", [
+      RUN,
+      "landing",
+      "card-block",
+      layout.dispatch,
+      layout.synth,
+      checkpoint,
+    ]);
     expect(card.code).toBe(0);
     expect(card.out).not.toContain("someone-else");
     expect(card.out).not.toContain(privateGlob);
@@ -1358,11 +1387,9 @@ describe("R8: rescoped check", () => {
       join(dispatch, "brief.md"),
       `## Project profile\n\nrepo: ${repo} default branch: main\n`,
     );
-    const result = run(
-      "bash",
-      [RUN, "reach", "check", dispatch, "workhorses"],
-      { env: { HOME: layout.home } },
-    );
+    const result = run("bash", [RUN, "reach", "check", dispatch, "workhorses"], {
+      env: { HOME: layout.home },
+    });
     expect(result.code).toBe(0);
   });
 
@@ -1414,7 +1441,14 @@ function cardFor(layout: Layout, commandText: string): string {
   writeAction(layout, "coachman", "verify", "gate", `on=${sha}@${sha} result=pass exit=0 secs=1`);
   const checkpoint = join(layout.dispatch, "checkpoint.md");
   writeFileSync(checkpoint, "## Findings (bug)\n\nnone\n");
-  const card = run("bash", [RUN, "landing", "card-block", layout.dispatch, layout.synth, checkpoint]);
+  const card = run("bash", [
+    RUN,
+    "landing",
+    "card-block",
+    layout.dispatch,
+    layout.synth,
+    checkpoint,
+  ]);
   expect(card.code).toBe(0);
   return card.out;
 }
