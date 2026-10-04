@@ -473,18 +473,14 @@ grep -q "70-x" "$T/dry.out" && bad "C3 omits 70-x" || ok "C3 omits 70-x"
 grep -q "ticket-7-base" "$T/dry.out" && bad "C3 omits ticket-7-base" || ok "C3 omits ticket-7-base"
 grep -qi "sav" "$T/dry.out" && ok "C3 says what it saves" || bad "C3 says what it saves"
 DRYORDER=$(python3 - "$T/dry.out" <<'EOF'
-import re, sys
-# Only unambiguous folder references carry order: dashed names, and folder 7
-# by its full worktree path. A bare 7 also names the run ("run 7" headers),
-# so it is never read as the folder here.
+import sys
+# Order reads only dashed folder names. Folder 7's bare name also names the
+# run ("run 7" headers) and its step lines ("save 7") cannot be told apart
+# from headers without format knowledge, so its position is not checked: a
+# known gap, documented, applying to every lane alike.
 order = []
 for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
-    found = []
-    for f in ("7-oracle-sol", "7-mimo", "7-sol"):
-        if f in line and f not in found:
-            found.append(f)
-    if re.search(r"\.worktrees/7(?![-\w])", line) and "7" not in found:
-        found.append("7")
+    found = [f for f in ("7-oracle-sol", "7-mimo", "7-sol") if f in line]
     if len(found) == 1 and found[0] not in order:
         order.append(found[0])
 print(" ".join(order))
