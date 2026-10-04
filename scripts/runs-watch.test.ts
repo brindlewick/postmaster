@@ -1363,7 +1363,7 @@ describe("ready tickets wait for a run slot", () => {
     expect(activeRunCount(root)).toBe(1);
     const { rc, out } = watch(root, "0", config);
     expect(rc).toBe(0);
-    expect(out.match(/needs READY/g)?.length ?? 0).toBe(1);
+    expect(out.match(/needs READY/gu)?.length ?? 0).toBe(1);
     expect(out).toContain("needs READY 2");
   }, 30000);
 
