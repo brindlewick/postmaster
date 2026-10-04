@@ -882,7 +882,7 @@ describe("score: a recorded run that meets every check scores clean", () => {
     const clean = runScore(dispatch, repo, { ...process.env, PATH: path });
     expect(clean.code).toBe(0);
     const lines = clean.out.trim().split("\n");
-    expect(lines).toHaveLength(9);
+    expect(lines).toHaveLength(10);
     expect(lines.slice(1).every((line) => line.startsWith("ok  "))).toBe(true);
     console.log(`score without jq:\n${clean.out.trimEnd()}`);
 
@@ -914,7 +914,7 @@ describe("score: a recorded run that meets every check scores clean", () => {
     const out = bgResults.get("break-gate")?.out ?? "";
     const cleanOut = bgResults.get(`clean-${first}`)?.out ?? "";
     expect(out.split("\n", 1)[0]).toBe(cleanOut.split("\n", 1)[0]);
-    expect(out.split("\n")).toHaveLength(10);
+    expect(out.split("\n")).toHaveLength(11);
     console.log(`failing score:\n${out.trimEnd()}`);
   });
 
