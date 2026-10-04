@@ -769,10 +769,10 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
        fi
        # The security lens reviews from clones, whose origin/HEAD leads back to BASE, which a
        # harness's own security review skill needs (harnesses.md, Own review skills).
-       CLONE=""; [ "$LENS" = security ] && CLONE="--clone <BASE>"
+       CLONE=(); [ "$LENS" = security ] && CLONE=(--clone <BASE>)
        # ASSERT the scratch is cut at SNAP before launching a lane into it. The coachman runs
        # the project's recorded checks once on the snapshot; reviewers do not build or run them.
-       <tool>/scripts/run cut-scratch <repo> <synthesis-wt> "$DEST" "$SNAP" $CLONE \
+       <tool>/scripts/run cut-scratch <repo> <synthesis-wt> "$DEST" "$SNAP" "${CLONE[@]}" \
          || echo "SCRATCH BROKEN: $DEST is not cut at $SNAP; fix before launching $L under $LENS"
      done
    done
@@ -798,14 +798,14 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    SNAP=$(git -C <synthesis-wt> rev-parse HEAD)
    for LENS in <open lenses>; do
      <tool>/scripts/run reviewers lanes <dispatch>/brief.md "$LENS" >/dev/null || exit 1
-     CLONE=""; [ "$LENS" = security ] && CLONE="--clone <BASE>"
+     CLONE=(); [ "$LENS" = security ] && CLONE=(--clone <BASE>)
      for L in $(<tool>/scripts/run reviewers lanes <dispatch>/brief.md "$LENS"); do
-       <tool>/scripts/run cut-scratch --check <repo>/.worktrees/<TICKET>-rev-$LENS-$L "$SNAP" $CLONE \
+       <tool>/scripts/run cut-scratch --check <repo>/.worktrees/<TICKET>-rev-$LENS-$L "$SNAP" "${CLONE[@]}" \
          || { echo "SCRATCH NOT READY: <TICKET>-rev-$LENS-$L; nothing launched"; exit 1; }
      done
    done
    <tool>/scripts/run review-round start <dispatch> <round> || exit 1
-   REVIEWERS=""
+   REVIEWERS=()
    for LENS in <open lenses>; do
      for L in $(<tool>/scripts/run reviewers lanes <dispatch>/brief.md "$LENS"); do
        DEST=<repo>/.worktrees/<TICKET>-rev-$LENS-$L
@@ -819,10 +819,10 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
            --out <dispatch>/logs/review-r<round>-$LENS-$L.jsonl --err <dispatch>/logs/review-r<round>-$LENS-$L.err \
            --marker <dispatch>/logs/review-r<round>-$LENS-$L.done \
            -- "${LAUNCH[@]}"
-       REVIEWERS="$REVIEWERS $LENS:$L"
+       REVIEWERS+=("$LENS:$L")
      done
    done
-   <tool>/scripts/run review-round wait <dispatch> <round> <repo> $REVIEWERS
+   <tool>/scripts/run review-round wait <dispatch> <round> <repo> "${REVIEWERS[@]}"
    ```
 
    **Normalize the bug reports before triage.** For each lane under the bug lens, copy any
@@ -838,16 +838,16 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    the hand-written one where normalization failed.
 
    ```sh
-   NORMALIZE_FAILED=""
+   NORMALIZE_FAILED=()
    for L in $(<tool>/scripts/run reviewers lanes <dispatch>/brief.md bug); do
      DEST=<repo>/.worktrees/<TICKET>-rev-bug-$L
      EVENTS=<dispatch>/logs/review-r<round>-bug-$L.jsonl
      HARVEST_ERR=$(<tool>/scripts/run review-findings harvest "$EVENTS" <dispatch>/logs --prefix review-r<round>-bug-$L 2>&1) \
        || { <tool>/scripts/run log-action <dispatch> coachman degrade "$L" "bug round <round>: $HARVEST_ERR"; <tool>/scripts/run run-log <dispatch> "$L bug: DEGRADED, $HARVEST_ERR"; continue; }
      <tool>/scripts/run review-findings normalize "$L" "$DEST" "$EVENTS" --last <dispatch>/logs/review-r<round>-bug-$L-last.md --run <dispatch> \
-       > <dispatch>/logs/review-r<round>-bug-$L-findings.json || { NORMALIZE_FAILED="$NORMALIZE_FAILED $L"; rm -f <dispatch>/logs/review-r<round>-bug-$L-findings.json; }
+       > <dispatch>/logs/review-r<round>-bug-$L-findings.json || { NORMALIZE_FAILED+=("$L"); rm -f <dispatch>/logs/review-r<round>-bug-$L-findings.json; }
    done
-   for L in $NORMALIZE_FAILED; do   # a report the normalizer cannot read is read by hand, with its path; never dropped, never clean
+   for L in "${NORMALIZE_FAILED[@]}"; do   # a report the normalizer cannot read is read by hand, with its path; never dropped, never clean
      <tool>/scripts/run run-log <dispatch> "review round <round> $L: normalize failed; reading the raw report by hand"
    done
    ```

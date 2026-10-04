@@ -84,9 +84,11 @@ import { tryJsonFile, tryTomlFile } from "./lib/data.ts";
 import { runPinned } from "./lib/pinned.ts";
 import { toolRoot } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
+import { processState } from "./lib/processes.ts";
 import { pySplitLines, pyTrim } from "./lib/text.ts";
 
 const TOOL = toolRoot(import.meta);
+const SCRIPT = import.meta.path;
 
 const USAGE =
   "usage: run run-meta <dispatch> <repo> | pin <repo> <commit> | path <dispatch> | run-pinned <dispatch> <name> [args...] | check <dispatch> | release <dispatch> | efforts <dispatch>";
@@ -216,12 +218,7 @@ function lockOwnerDead(lockPath: string): boolean {
   }
   const pid = Number(text.trim());
   if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException)?.code === "ESRCH";
-  }
+  return processState(pid) !== "live";
 }
 
 function withPinLock<T>(
@@ -570,15 +567,20 @@ function scanHoldMs(): number {
 }
 
 function runScanChild(root: string, checkout: string): { code: number; out: string; err: string } {
-  const bun = Bun.which("bun");
-  if (bun === null) return { code: 127, out: "", err: "" };
-  const args = ["run-meta", "run-meta-scan", root, checkout];
+  const args = [
+    "--no-env-file",
+    `--config=${join(TOOL, "bunfig.toml")}`,
+    SCRIPT,
+    "run-meta-scan",
+    root,
+    checkout,
+  ];
   const hold = scanHoldMs();
   if (hold > 0) args.push(String(hold));
   // The scan runs where the caller's environment cannot reach it: PATH alone crosses over,
   // and the tool bunfig.toml anchors config discovery, so no HOME, no startup file and no
   // working-directory config reaches the scan.
-  const r = spawnSync(join(TOOL, "scripts", "run"), args, {
+  const r = spawnSync(process.execPath, args, {
     encoding: "utf8",
     env: { PATH: process.env.PATH ?? "" },
   });

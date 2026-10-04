@@ -31,7 +31,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir, machine, release, tmpdir, type as osType } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { tryJsonFile } from "./lib/data.ts";
 import { effortsLine } from "./run-meta.ts";
@@ -340,10 +340,14 @@ export function hidden(
   ticket: string,
   app: string,
 ): { passed: boolean; detail: string; out: string } {
-  const r = sh(["bun", "test", "--timeout", "120000", "./"], join(TICKETS, ticket, "hidden"), {
-    ...(process.env as Record<string, string>),
-    FIXTURE_APP: app,
-  });
+  const r = sh(
+    [process.execPath, "test", "--timeout", "120000", "./"],
+    join(TICKETS, ticket, "hidden"),
+    {
+      ...(process.env as Record<string, string>),
+      FIXTURE_APP: app,
+    },
+  );
   const counts: Record<string, number> = {};
   for (const m of (r.out ?? "").matchAll(HIDDEN_RE)) {
     counts[m[2]!] = parseInt(digitValue(m[1]!), 10);
@@ -363,7 +367,15 @@ const LANE_LINE = /^(.*): ([0-9]+ pass, [0-9]+ fail|missing|failed to build)$/u;
 
 // Each lane's hidden status from fixture-lanes.ts; "" when there are no lanes.
 export function laneScores(dispatch: string, repo: string, ticket: string): string {
-  const r = sh([join(HERE, "run"), "fixture-lanes", dispatch, repo, ticket]);
+  const r = sh([
+    process.execPath,
+    "--no-env-file",
+    `--config=${join(TOOL, "bunfig.toml")}`,
+    join(HERE, "fixture-lanes.ts"),
+    dispatch,
+    repo,
+    ticket,
+  ]);
   if (r.code !== 0) return "lanes not scored";
   return r.out
     .split(/\r?\n/u)
@@ -431,7 +443,18 @@ export function score(dispatch: string, repo: string): { code: number; out: stri
     { name: "ship-card", ...checkCard(dispatch), out: "" },
   ];
   rmSync(scratch, { recursive: true, force: true });
-  return report(results);
+  const scored = report(results);
+  return { code: scored.code, out: `${platformLine()}\n${scored.out}` };
+}
+
+export function gitVersionNumber(output: string): string {
+  // ASCII: the version digits are tool-printed ASCII; a vendor suffix is not the number.
+  return /\b([0-9]+(?:\.[0-9]+)+)/u.exec(output.trim())?.[1] ?? output.trim();
+}
+
+function platformLine(): string {
+  const git = run("git", ["--version"]);
+  return `platform: ${osType()} ${release()} ${machine()}, bun ${Bun.version}, git ${gitVersionNumber(git.out)}`;
 }
 
 function makeTmpDir(): string {
@@ -541,7 +564,14 @@ function checkGate(
     .split("\n")
     .find((l) => l.startsWith("install="))
     ?.slice(8);
-  const argv = [join(HERE, "run"), "clean-checkout", repo, branch];
+  const argv = [
+    process.execPath,
+    "--no-env-file",
+    `--config=${join(TOOL, "bunfig.toml")}`,
+    join(HERE, "clean-checkout.ts"),
+    repo,
+    branch,
+  ];
   if (install) argv.push(install);
   argv.push(gate);
   const g = sh(argv);
@@ -766,7 +796,7 @@ if (import.meta.main) {
     process.exit(newRun(argv[1]!, argv[2]!));
   } else if (argv[0] === "score") {
     if (argv.length !== 3) usage();
-    need("git", "bun", "npm", "jq");
+    need("git", "bun", "node", "npm");
     const dispatch = argv[1]!;
     const repo = argv[2]!;
     if (!existsSync(dispatch) || !statSync(dispatch).isDirectory()) {
