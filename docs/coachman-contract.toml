@@ -57,6 +57,14 @@ path = "scripts/runs-watch.ts"
 holds = "the mechanical leg steps, next-leg dispatch and transient remounts, and what wakes the postmaster"
 
 [[files]]
+path = "scripts/walls.ts"
+holds = "the wall record's shape, the ruling refusals, and the escalation a pause writes; the wall's entrypoint: show, open, told, rule, escalate, carry"
+
+[[files]]
+path = "scripts/lib/wall.ts"
+holds = "the reset forms a wall message gives (D4, D5)"
+
+[[files]]
 path = "scripts/run-meta.ts"
 holds = "the coachman contract version recorded in run.json"
 
