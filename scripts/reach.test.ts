@@ -1691,3 +1691,96 @@ describe("R4: ruled round fixes", () => {
     expect(read.out).toContain("finding write");
   });
 });
+
+describe("R5: fail-closed shell input", () => {
+  test("R5 a write redirect onto a substitution is a finding under every operator", () => {
+    const layout = makeLayout();
+    const target = join(layout.home, "subst6.txt");
+    for (const [name, op] of [
+      ["out", ">"],
+      ["append", ">>"],
+      ["fd", "2>"],
+      ["both", "&>"],
+      ["fd-append", "2>>"],
+      ["both-append", "&>>"],
+      ["noclobber", ">|"],
+      ["fd-noclobber", "2>|"],
+      ["fd-one", "1>"],
+      ["fd-one-append", "1>>"],
+    ]) {
+      const path = join(layout.dispatch, "logs", `r5-${name}.jsonl`);
+      writeEvents(path, [codex(`echo x ${op} $(echo ${target})`)]);
+      const result = stream(layout, "codex", path, layout.codex);
+      expect(result.code).toBe(2);
+      expect(result.out).toContain(`finding write ${target} (elsewhere)`);
+    }
+  });
+
+  test("R5 a delete with a glob or unset variable is never clean", () => {
+    const layout = makeLayout();
+    const glob = join(layout.dispatch, "logs", "r5-glob.jsonl");
+    writeEvents(glob, [codex(`rm -rf $HOME/*.log`)]);
+    const globbed = stream(layout, "codex", glob, layout.codex);
+    expect(globbed.code).toBe(3);
+    expect(globbed.out).toContain("not checked");
+
+    const unset = join(layout.dispatch, "logs", "r5-unset.jsonl");
+    writeEvents(unset, [codex(`rm -rf $HOME/$R5_NOPE_X`)]);
+    const unsets = stream(layout, "codex", unset, layout.codex);
+    expect(unsets.code).toBe(3);
+    expect(unsets.out).toContain("not checked");
+
+    const bare = join(layout.dispatch, "logs", "r5-bare-unset.jsonl");
+    writeEvents(bare, [codex(`rm -rf $R5_NOPE_X`)]);
+    const bares = stream(layout, "codex", bare, layout.codex);
+    expect(bares.code).toBe(3);
+    expect(bares.out).toContain("not checked");
+  });
+
+  test("R5 a redirect onto a substitution that names no path is not checked", () => {
+    const layout = makeLayout();
+    const written = join(layout.dispatch, "logs", "r5-subst-write.jsonl");
+    writeEvents(written, [codex(`echo x > $(true)`)]);
+    const writes = stream(layout, "codex", written, layout.codex);
+    expect(writes.code).toBe(3);
+    expect(writes.out).toContain("not checked");
+
+    const read = join(layout.dispatch, "logs", "r5-subst-read.jsonl");
+    writeEvents(read, [codex(`cat < $(true)`)]);
+    const reads = stream(layout, "codex", read, layout.codex);
+    expect(reads.code).toBe(3);
+    expect(reads.out).toContain("not checked");
+  });
+
+  test("R5 literal redirect forms keep the findings they give today", () => {
+    const layout = makeLayout();
+    for (const [name, op] of [
+      ["out", ">"],
+      ["append", ">>"],
+      ["fd", "2>"],
+      ["both", "&>"],
+      ["fd-append", "2>>"],
+      ["both-append", "&>>"],
+      ["noclobber", ">|"],
+      ["fd-noclobber", "2>|"],
+      ["fd-one", "1>"],
+      ["fd-one-append", "1>>"],
+    ]) {
+      const target = join(layout.home, `r5-${name}.txt`);
+      const path = join(layout.dispatch, "logs", `r5-lit-${name}.jsonl`);
+      writeEvents(path, [codex(`echo x ${op}${target}`)]);
+      const result = stream(layout, "codex", path, layout.codex);
+      expect(result.code).toBe(2);
+      expect(result.out).toContain(`finding write ${target} (elsewhere)`);
+    }
+  });
+
+  test("R5 a plainly clean command still reads clean", () => {
+    const layout = makeLayout();
+    const path = join(layout.dispatch, "logs", "r5-clean.jsonl");
+    writeEvents(path, [codex(`touch ${join(layout.codex, "in.txt")} && echo done`)]);
+    const result = stream(layout, "codex", path, layout.codex);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("clean");
+  });
+});

@@ -408,10 +408,20 @@ function isPathToken(token: string, cwd: string): boolean {
   }
 }
 
+/**
+ * A token in a write operand position: path-shaped, or carrying a variable
+ * or glob the reader cannot resolve. Flags are never operands.
+ */
+function maybeWritePath(token: string, cwd: string): boolean {
+  return isPathToken(token, cwd) || (!token.startsWith("-") && /[$*?\[\]]/u.test(token));
+}
+
 interface ShellGroup {
   text: string;
   /** A path inside this substitution is consumed as an operand of an outer write command. */
   outerWrite: boolean;
+  /** This substitution is the target of an outer read redirect. */
+  outerRead: boolean;
 }
 
 /** The head command of a segment prefix, skipping leading assignments. */
@@ -427,8 +437,13 @@ function outerWrites(part: string): boolean {
   if (WRITE_COMMANDS.has(base)) return true;
   if (base === "sed" && words.some((word) => word === "-i" || word.startsWith("-i"))) return true;
   // A write redirect whose target is computed runs the outer write on it.
-  if (/(?:^|[ \t])(?:>>|>|2>|&>)[ \t]*$/u.test(part)) return true;
-  return false;
+  return isWriteRedirect(words[words.length - 1] ?? "");
+}
+
+/** A read redirect whose target is computed: the inner paths stay reads. */
+function outerReads(part: string): boolean {
+  const { words } = segmentHead(part);
+  return isReadRedirect(words[words.length - 1] ?? "");
 }
 
 /** The inside of a `$(...)` starting at `at`, and the index past its close. */
@@ -448,10 +463,10 @@ function substInner(source: string, at: number): { inner: string; end: number } 
   return { inner, end: i };
 }
 
-function splitShell(source: string, outerWrite = false): ShellGroup[] {
+function splitShell(source: string, outerWrite = false, outerRead = false): ShellGroup[] {
   const out: ShellGroup[] = [];
-  const push = (text: string, write: boolean): void => {
-    if (text.trim()) out.push({ text, outerWrite: write });
+  const push = (text: string, write: boolean, read: boolean): void => {
+    if (text.trim()) out.push({ text, outerWrite: write, outerRead: read });
   };
   let part = "";
   let quote = "";
@@ -487,11 +502,12 @@ function splitShell(source: string, outerWrite = false): ShellGroup[] {
       continue;
     }
     if ((quote === "" || quote === '"') && source.startsWith("$(", i)) {
-      push(part, outerWrite);
+      push(part, outerWrite, outerRead);
       const write = outerWrites(part);
+      const read = outerReads(part);
       part = "";
       const found = substInner(source, i);
-      if (found.inner.trim()) out.push(...splitShell(found.inner, write));
+      if (found.inner.trim()) out.push(...splitShell(found.inner, write, read));
       i = found.end;
       continue;
     }
@@ -502,7 +518,7 @@ function splitShell(source: string, outerWrite = false): ShellGroup[] {
         (ch === "|" && !part.endsWith(">")) ||
         (ch === "&" && source[i + 1] === "&"))
     ) {
-      push(part, outerWrite);
+      push(part, outerWrite, outerRead);
       part = "";
       if (ch === "&") i++;
       else if (ch === "|" && source[i + 1] === "&") i++;
@@ -510,8 +526,18 @@ function splitShell(source: string, outerWrite = false): ShellGroup[] {
     }
     part += ch;
   }
-  push(part, outerWrite);
+  push(part, outerWrite, outerRead);
   return out;
+}
+
+/** A write redirect operator: an optional descriptor number or &, then >, >> or >|. */
+function isWriteRedirect(word: string): boolean {
+  return /^(?:[0-9]+|&)?(?:>>|>\||>)$/u.test(word);
+}
+
+/** A read redirect operator: an optional descriptor number, then <. */
+function isReadRedirect(word: string): boolean {
+  return /^(?:[0-9]+)?<$/u.test(word);
 }
 
 function shellWords(segment: string): string[] {
@@ -552,21 +578,16 @@ function shellWords(segment: string): string[] {
       push();
       continue;
     }
-    // Longest operators first: &>> and 2>> before &>, 2> and >.
-    if (
-      quote === "" &&
-      ["&>>", "2>>", "2>|", ">>", "2>", ">|", "<", ">", "&>"].some((op) =>
-        segment.startsWith(op, i),
-      )
-    ) {
-      push();
-      const op =
-        ["&>>", "2>>", "2>|", ">>", "2>", ">|", "<", ">", "&>"].find((candidate) =>
-          segment.startsWith(candidate, i),
-        ) ?? ch;
-      words.push(op);
-      i += op.length - 1;
-      continue;
+    // The redirect family, longest first: a descriptor number before >, >>, >|
+    // or <, or & before >, >> or >| (&< is a background & beside an input).
+    if (quote === "") {
+      const found = /^(?:[0-9]+(?:>>|>\||>|<)|&(?:>>|>\||>)|>>|>\||>|<)/u.exec(segment.slice(i));
+      if (found) {
+        push();
+        words.push(found[0]);
+        i += found[0].length - 1;
+        continue;
+      }
     }
     word += ch;
   }
@@ -597,20 +618,11 @@ function redirectTargets(words: string[]): { out: string[]; inp: string[] } {
   const inp: string[] = [];
   for (let i = 0; i < words.length; i++) {
     const word = words[i] ?? "";
-    if (word === "<") {
+    if (isReadRedirect(word)) {
       const target = words[i + 1];
       if (target && !isFdOperand(word, target)) inp.push(target);
       i++;
-    } else if (
-      word === ">" ||
-      word === ">>" ||
-      word === "2>" ||
-      word === "&>" ||
-      word === "2>>" ||
-      word === "&>>" ||
-      word === ">|" ||
-      word === "2>|"
-    ) {
+    } else if (isWriteRedirect(word)) {
       const target = words[i + 1];
       if (target && !isFdOperand(word, target)) out.push(target);
       i++;
@@ -830,8 +842,9 @@ function commandTouches(
   ownFolder: string,
   ownDataHome: string,
   lens?: string,
-): Touch[] {
+): { touches: Touch[]; unresolved: string[] } {
   const touches: Touch[] = [];
+  const unresolved: string[] = [];
   const rawOf = new Map<Touch, string>();
   const seenPaths = new Set<string>();
   let cwd = ownFolder;
@@ -845,7 +858,17 @@ function commandTouches(
     base: string = cwd,
   ): void => {
     const path = expandPath(rawPath, base);
-    if (!path) return;
+    if (!path) {
+      // A surviving $( was single-quoted or escaped, so the shell never
+      // expands it: literal text, not a path. Anything else unresolvable
+      // fails closed instead of dropping silently, and counts toward
+      // refusal attribution like any other path.
+      if (rawPath && !rawPath.includes("$(")) {
+        unresolved.push(`unresolved ${access} target: ${rawPath}`);
+        seenPaths.add(rawPath);
+      }
+      return;
+    }
     // Every resolved path counts toward refusal attribution, including routine
     // and inside ones: a denial beside two paths must not demote either blindly.
     seenPaths.add(path);
@@ -879,7 +902,9 @@ function commandTouches(
     rawOf.set(touch, rawPath);
   };
 
+  const groupStarts: number[] = [];
   for (const group of shellGroups) {
+    groupStarts.push(touches.length);
     const words = shellWords(group.text);
     if (words.length === 0) continue;
     let first = 0;
@@ -1040,17 +1065,17 @@ function commandTouches(
     const redirects = redirectTargets(words);
     const args = words
       .slice(first + 1)
-      .filter((word) => ![">", ">>", "2>", "&>", "2>>", "&>>", ">|", "2>|", "<"].includes(word));
+      .filter((word) => !isWriteRedirect(word) && !isReadRedirect(word));
     if (WRITE_COMMANDS.has(baseCommand)) {
       if (baseCommand === "cp" || baseCommand === "mv") {
-        const paths = args.filter((arg) => isPathToken(arg, cwd));
+        const paths = args.filter((arg) => maybeWritePath(arg, cwd));
         paths.slice(0, -1).forEach((path) => add(path, baseCommand === "mv" ? "write" : "read"));
         if (paths.length) add(paths[paths.length - 1]!, "write");
       } else {
-        args.filter((arg) => isPathToken(arg, cwd)).forEach((path) => add(path, "write"));
+        args.filter((arg) => maybeWritePath(arg, cwd)).forEach((path) => add(path, "write"));
       }
     } else if (inPlace) {
-      args.filter((arg) => isPathToken(arg, cwd)).forEach((path) => add(path, "write"));
+      args.filter((arg) => maybeWritePath(arg, cwd)).forEach((path) => add(path, "write"));
     }
     for (const path of redirects.out) add(path, "write");
     for (const path of redirects.inp) add(path, "read");
@@ -1061,10 +1086,28 @@ function commandTouches(
     // inner command only reads is still written by the outer one.
     if (group.outerWrite) {
       for (const word of words.slice(first + 1)) {
-        if (isPathToken(word, cwd)) add(word, "write");
+        if (maybeWritePath(word, cwd)) add(word, "write");
       }
     }
   }
+  // A redirect whose target the reader cannot see fails closed: a
+  // substitution that names no path, or no target at all. A substitution
+  // that names a path resolves through the touches above instead.
+  shellGroups.forEach((group, gi) => {
+    const words = shellWords(group.text);
+    const last = words[words.length - 1] ?? "";
+    const next = shellGroups[gi + 1];
+    const shown = group.text.trim().slice(0, 120);
+    if (isWriteRedirect(last) && !next?.outerWrite)
+      unresolved.push(`a write redirect names no target: ${shown}`);
+    else if (isReadRedirect(last) && !next?.outerRead)
+      unresolved.push(`a read redirect names no target: ${shown}`);
+    const end = gi + 1 < groupStarts.length ? groupStarts[gi + 1]! : touches.length;
+    if (end === groupStarts[gi] && group.outerWrite)
+      unresolved.push(`a computed write target names no path: ${shown}`);
+    else if (end === groupStarts[gi] && group.outerRead)
+      unresolved.push(`a computed read target names no path: ${shown}`);
+  });
   // A refusal demotes a path only when the result names it, or when the call
   // touched a single path: a bare denial beside two writes fails closed.
   if (REFUSAL.test(result) || MISSING.test(result)) {
@@ -1082,7 +1125,7 @@ function commandTouches(
       }
     }
   }
-  return touches;
+  return { touches, unresolved };
 }
 
 function directCallTouches(
@@ -1092,24 +1135,25 @@ function directCallTouches(
   ownFolder: string,
   ownDataHome: string,
   lens?: string,
-): Touch[] {
+): { touches: Touch[]; unresolved: string[] } {
   const touches: Touch[] = [];
+  const unresolved: string[] = [];
   for (const call of calls) {
     const name = call.name.toLowerCase(); // LOWER: harness tool names are ASCII identifiers
     const command = text(call.input.command ?? call.input.cmd);
     if (command) {
-      touches.push(
-        ...commandTouches(
-          command,
-          call.output,
-          call.exitCode,
-          info,
-          lane,
-          ownFolder,
-          ownDataHome,
-          lens,
-        ),
+      const judged = commandTouches(
+        command,
+        call.output,
+        call.exitCode,
+        info,
+        lane,
+        ownFolder,
+        ownDataHome,
+        lens,
       );
+      touches.push(...judged.touches);
+      unresolved.push(...judged.unresolved);
       continue;
     }
     const direct = [...call.direct];
@@ -1153,7 +1197,7 @@ function directCallTouches(
       });
     }
   }
-  return touches;
+  return { touches, unresolved };
 }
 
 function mergeTouches(touches: Touch[]): Touch[] {
@@ -1225,9 +1269,22 @@ function readLane(
   }
   laneRecord.status = "checked";
   const dataHome = laneDataHome(info, lane, harness, laneRecord.ownFolder);
-  laneRecord.touches = mergeTouches(
-    directCallTouches(laneRecord.calls, info, lane, laneRecord.ownFolder, dataHome, lens),
+  const judged = directCallTouches(
+    laneRecord.calls,
+    info,
+    lane,
+    laneRecord.ownFolder,
+    dataHome,
+    lens,
   );
+  laneRecord.touches = mergeTouches(judged.touches);
+  // Unresolved shell input fails closed without discarding what resolved.
+  const reasons = [...new Set(judged.unresolved)];
+  if (reasons.length > 0) {
+    laneRecord.status = "not checked";
+    const shown = reasons.slice(0, 3).join("; ");
+    laneRecord.reason = `unresolved shell input: ${shown}${reasons.length > 3 ? ` (and ${reasons.length - 3} more)` : ""}`;
+  }
   return laneRecord;
 }
 
@@ -1238,13 +1295,11 @@ function noShellDisplay(touch: Touch): string {
 
 function readStreamMode(info: RunInfo, lane: string, stream: string, ownFolder: string): number {
   const result = readLane(info, lane, stream, ownFolder);
-  if (result.status === "not checked") {
-    console.log(`not checked: ${result.reason}`);
-    return 3;
-  }
   for (const touch of result.touches) console.log(noShellDisplay(touch));
+  if (result.status === "not checked") console.log(`not checked: ${result.reason}`);
   if (result.touches.some((touch) => touch.kind === "finding")) return 2;
-  if (result.touches.some((touch) => touch.kind === "note")) return 3;
+  if (result.status === "not checked" || result.touches.some((touch) => touch.kind === "note"))
+    return 3;
   console.log("clean");
   return 0;
 }
