@@ -5368,7 +5368,10 @@ export async function runControls(): Promise<number> {
         lp = (readFileSync(join(fuzzD, ".leg-1-active"), "utf8").split(" ")[0] ?? "").trim();
       } catch {}
       try {
-        pp = readFileSync(join(fuzzD, "logs", "coachman-leg-1.pid"), "utf8").trim().split("\n")[0] ?? "";
+        pp =
+          readFileSync(join(fuzzD, "logs", "coachman-leg-1.pid"), "utf8")
+            .trim()
+            .split("\n")[0] ?? "";
       } catch {}
       if (lp !== "" && lp === pp && /^[0-9]+$/u.test(lp)) {
         if (processState(Number(lp)) !== "live") return;
