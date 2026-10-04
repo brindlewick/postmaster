@@ -416,6 +416,17 @@ function maybeWritePath(token: string, cwd: string): boolean {
   return isPathToken(token, cwd) || (!token.startsWith("-") && /[$*?\[\]]/u.test(token));
 }
 
+/**
+ * Only a rooted operand can fail closed: starting at /, ~ or $, or
+ * climbing with a .. segment. A sed script and the pattern operands of
+ * find, grep and the like are never paths, so they never enter the
+ * fail-closed rule; rooted globs and variables still do.
+ */
+function canFailClosed(token: string): boolean {
+  if (token.startsWith("/") || token.startsWith("~") || token.startsWith("$")) return true;
+  return token.split("/").includes("..");
+}
+
 interface ShellGroup {
   text: string;
   /** A path inside this substitution is consumed as an operand of an outer write command. */
@@ -860,10 +871,10 @@ function commandTouches(
     const path = expandPath(rawPath, base);
     if (!path) {
       // A surviving $( was single-quoted or escaped, so the shell never
-      // expands it: literal text, not a path. Anything else unresolvable
-      // fails closed instead of dropping silently, and counts toward
-      // refusal attribution like any other path.
-      if (rawPath && !rawPath.includes("$(")) {
+      // expands it: literal text, not a path. A rooted operand the reader
+      // cannot resolve fails closed instead of dropping silently, and
+      // counts toward refusal attribution like any other path.
+      if (rawPath && !rawPath.includes("$(") && canFailClosed(rawPath)) {
         unresolved.push(`unresolved ${access} target: ${rawPath}`);
         seenPaths.add(rawPath);
       }

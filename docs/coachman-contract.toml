@@ -97,6 +97,18 @@ path = "scripts/reach.ts"
 holds = "lane record reading, reach classification, round snapshots and restoration"
 
 [[files]]
+path = "scripts/check-target.ts"
+holds = "the main-checkout reach reading the reach check compares against"
+
+[[files]]
+path = "scripts/landing.ts"
+holds = "the ship card's reach section rendering"
+
+[[files]]
+path = "scripts/log-action.ts"
+holds = "the reach action the reach check records"
+
+[[files]]
 path = "skills/postmaster/workhorse-spec-template.md"
 holds = "the workhorse spec shape, including the per-criterion checks section the brief's loop rests on"
 

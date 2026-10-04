@@ -1891,3 +1891,37 @@ describe("R6: ruled round fixes", () => {
     expect(control.code).toBe(0);
   });
 });
+
+describe("R7: ruled round fixes", () => {
+  test("R7 pattern operands read clean and rooted unresolvable targets do not", () => {
+    const layout = makeLayout();
+    for (const [name, cmd] of [
+      ["find-name", `find . -name "*.ts"`],
+      ["ls-glob", `ls src/*.ts`],
+      ["sed-regex", `sed -i "s/foo$/bar/" in.txt`],
+      ["grep-include", `grep -rn foo --include="*.ts" .`],
+    ]) {
+      const path = join(layout.dispatch, "logs", `r7-${name}.jsonl`);
+      writeEvents(path, [codex(cmd)]);
+      const result = stream(layout, "codex", path, layout.codex);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain("clean");
+    }
+    for (const [name, cmd] of [
+      ["home-glob", `rm -rf $HOME/x*`],
+      ["climb-glob", `rm -rf ../*.log`],
+    ]) {
+      const path = join(layout.dispatch, "logs", `r7-${name}.jsonl`);
+      writeEvents(path, [codex(cmd)]);
+      const result = stream(layout, "codex", path, layout.codex);
+      expect(result.code).toBe(3);
+      expect(result.out).toContain("not checked");
+    }
+    const target = join(layout.home, "r7-plain.txt");
+    const plain = join(layout.dispatch, "logs", "r7-plain.jsonl");
+    writeEvents(plain, [codex(`echo x > ${target}`)]);
+    const finding = stream(layout, "codex", plain, layout.codex);
+    expect(finding.code).toBe(2);
+    expect(finding.out).toContain(`finding write ${target} (elsewhere)`);
+  });
+});
