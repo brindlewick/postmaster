@@ -172,8 +172,7 @@ postmaster are never confined.
 
 A harness that reads no ambient context file must be handed the project's docs by name in its
 prompt, and must have the `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract spelled
-out in full, together with the line that the run's one approved spec is already at
-`WORKHORSE-SPEC.md` in its worktree. The
+out in full, together with the line that the ready ticket is the run's contract. The
 others pick both up from the brief and the docs. A harness that reads a context file under a
 different name needs that file present: a `CLAUDE.md` that is a symlink to `AGENTS.md` serves
 both.
@@ -568,11 +567,11 @@ provide custom review instructions` (trial).
 Given no target it reviewed uncommitted changes, found none in a clean scratch, and exited 0
 (trial). Named `<BASE>...HEAD` it reviewed the range and reported the planted bug at its line.
 
-## Interactive form: the postmaster and a spec session
+## Interactive form: the postmaster and booking clerk
 
-The postmaster is an interactive session (`SKILL.md` spawns it through `run host spawn`), and a
-spec session is another (`postmaster.md`, Spec review): both run in their harness's bypass
-mode, like every launch, named for their project or their ticket. The same table serves both.
+The postmaster is an interactive session (`SKILL.md` spawns it through `run host spawn`), and the
+booking clerk is another (`../clerk/clerk.md`): both run in their harness's bypass mode, like every
+launch, named for their project or their ticket. The same table serves both.
 
 | harness | interactive form | checked here |
 |---|---|---|

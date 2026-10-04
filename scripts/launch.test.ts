@@ -117,6 +117,7 @@ beforeAll(() => {
 
     const fixture = (name: string, ...keys: string[]): void => {
       let body = `[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n\n[team]\n`;
+      body += `clerk = { harness = "claude", model = "clerk-model" }\n`;
       body += `coachman = { harness = "claude", model = "coach-model" }\n`;
       body += `coachman_fallback = { harness = "claude", model = "fallback-model" }\n\n[team.coachman_legs]\n`;
       for (const k of keys) body += `${k} = { harness = "claude", model = "${k}-model" }\n`;
@@ -2685,6 +2686,38 @@ beforeAll(() => {
       "launch: cd <cwd> && claude -p ",
       "resume: cd <cwd> && claude -p --resume <thread-id> ",
     );
+    doRun("phase-start", "form", "clerk");
+    printed(
+      "the clerk role resolves from team.clerk",
+      "launch: cd <cwd> && claude -p ",
+      "--model clerk-model",
+    );
+    doRun(
+      "phase-start",
+      "interactive",
+      "clerk",
+      "--project",
+      join(tmp, "repo"),
+      "--name",
+      "#2, Fix the list",
+    );
+    printed(
+      "the clerk interactive form is named for its ticket",
+      `launch: cd ${join(tmp, "repo")} && claude --model clerk-model --name \\#2\\,\\ Fix\\ the\\ list --dangerously-skip-permissions`,
+    );
+    doRun(
+      "phase-start",
+      "interactive",
+      "clerk",
+      "--project",
+      join(tmp, "repo"),
+      "--name",
+      "#1, =< --tools x>",
+    );
+    printed(
+      "a hostile session name prints quoted, never as extra words",
+      `launch: cd ${join(tmp, "repo")} && claude --model clerk-model --name \\#1\\,\\ =\\<\\ --tools\\ x\\> --dangerously-skip-permissions`,
+    );
     writeFileSync(join(tmp, "agy.toml"), '[lanes.g]\nharness = "agy"\nmodel = "agy-model"\n');
     writeFileSync(join(tmp, "bin/agy"), "#!/bin/sh\n");
     chmodSync(join(tmp, "bin/agy"), 0o755);
@@ -4660,6 +4693,9 @@ describe("positive controls", () => {
   });
   test("form with no --leg shows team.coachman", () => {
     assertControl("form with no --leg shows team.coachman");
+  });
+  test("a hostile session name prints quoted, never as extra words", () => {
+    assertControl("a hostile session name prints quoted, never as extra words");
   });
   test("a lane's env file reaches the harness's environment", () => {
     assertControl("a lane's env file reaches the harness's environment");

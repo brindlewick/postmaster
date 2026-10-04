@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { refs } from "./skill-refs";
+import { defaultFiles, refs } from "./skill-refs";
 
 let tmp = "";
 let root = "";
@@ -113,6 +113,21 @@ describe("checking script references", () => {
     expect(result.code).toBe(1);
     expect(result.faults.map((f) => f.line)).toEqual([1, 2]);
   });
+
+  test("the bare check covers the postmaster skill and the clerk skill", () => {
+    const covered = join(tmp, "covered");
+    for (const skill of ["postmaster", "clerk"]) {
+      mkdirSync(join(covered, "skills", skill), { recursive: true });
+      writeFileSync(join(covered, "skills", skill, "runbook.md"), "run\n");
+    }
+    writeFileSync(join(covered, "skills", "postmaster", "notes.txt"), "not a runbook\n");
+    expect(defaultFiles(covered).toSorted()).toEqual(
+      [
+        join(covered, "skills", "postmaster", "runbook.md"),
+        join(covered, "skills", "clerk", "runbook.md"),
+      ].toSorted(),
+    );
+  }, 10000);
 });
 
 describe("fixing script references", () => {
@@ -173,6 +188,14 @@ describe("fixing script references", () => {
     const second = refs(root, "fix", [prefixed]);
     expect(second.fixMessages).toEqual([`${prefixed}: 1 reference(s) updated`]);
   });
+
+  test("--fix leaves a file with no bare reference alone", () => {
+    const file = put("good-copy.md", "Use `<tool>/scripts/run stage <dispatch> synthesis`.\n");
+    refs(root, "fix", [file]);
+    expect(readFileSync(file, "utf8")).toBe(
+      "Use `<tool>/scripts/run stage <dispatch> synthesis`.\n",
+    );
+  }, 10000);
 });
 type RunResult = Readonly<{ code: number; calls: string[][] }>;
 
