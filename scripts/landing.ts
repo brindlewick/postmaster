@@ -29,6 +29,11 @@
 //       results` shows the gate passing at that head. Otherwise one fault line each for the
 //       head the worktree is not at, the default branch the ticket lacks, and the gate
 //       that is not passing.
+//   run landing pull-request-checks --repo <repo> --pr <pull-request> --card-head <sha>
+//       whether GitHub's current pull-request head matches the card and every reported check
+//       passes. Prints `pass`, `pending: ...`, `fail: ... <link>`, or `none` when no checks
+//       exist. A head mismatch is a failure, never a pass. A skipped check counts as
+//       passed, as it does for GitHub's own merge readiness.
 //   run landing results <dispatch> <synthesis-wt>
 //       every recorded check's result at the worktree's HEAD, one `name: result` line each,
 //       as the cards carry them. This is the one place the vocabulary mapping lives:
@@ -66,31 +71,20 @@
 //       evidence, not a result to weigh. `judge` when the waybill mentions none, or the
 //       journey check failed with its report written: the postmaster weighs it like any
 //       other non-pass.
-//   run landing pr-checks --repo <repo> --head <sha> [--pr <n>]
-//       the pull request's own checks at the card's HEAD, asked before the merge word.
-//       `pass` when every check passed (a skipped check counts as passed), `pending`
-//       when one is still running, `fail: <name> <link>` naming the first failed job,
-//       and `none` when --pr names no pull request (the `landing: local` route opens
-//       none) or the pull request has no checks. Checks reported for another head
-//       never answer `pass`: the report vouches for that head, not the card's, so the
-//       answer stays `pending`. --repo is where gh reads the remote; --pr is the pull
-//       request's number; --head is the card's HEAD. gh failing to answer, or an
-//       answer that cannot be read, is an exit 1 fault in its inputs.
 //
-//   exit 0  already-landed, anything-to-land, results, card-block, card-open: the answer,
+//   exit 0  already-landed, anything-to-land, pull-request-checks, results, card-block, card-open: the answer,
 //           printed; card-results, card-findings: `match`; journey: `clear` or `judge`;
-//           fresh: `fresh`; pr-checks: `pass`, `pending` or `none`
+//           fresh: `fresh`
 //   exit 1  usage; a resolving input that does not resolve (--default, --base,
-//           --card-head, --head, --local-ticket, --pr-merge, and --ticket without a
+//           --card-head, --local-ticket, --pr-merge, and --ticket without a
 //           report: --pr-head answers `re-verify` instead); a file that cannot
 //           be read; checks
 //           that cannot be recorded-read; `run verify results`, `journey-path` or
 //           `run ticket-check --has-journey` failing; a checkpoint whose structure cannot
 //           be read (a duplicate id, a finding-shaped line that is not a finding, an
 //           unreadable state, a fence marker line, or a quoted line); a card holding an
-//           HTML comment or not holding the rendered block exactly once; gh giving no
-//           readable answer to pr-checks
-//   exit 2  fresh: the faults, one line each; journey: `blocked`; pr-checks: `fail`
+//           HTML comment or not holding the rendered block exactly once
+//   exit 2  fresh: the faults, one line each; journey: `blocked`
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
@@ -386,11 +380,11 @@ const TOP_USAGE =
   "usage: run landing already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> " +
   "--card-head <sha> [--local-ticket <branch>] [--pr-merge <sha> --pr-head <sha>] | anything-to-land " +
   "--repo <repo> --default <branch> --ticket <ref> --base <sha> | fresh --repo <repo> --default <branch> " +
-  "--ticket <ref> --dispatch <dispatch> --wt <synthesis-wt> | results <dispatch> <synthesis-wt> | " +
+  "--ticket <ref> --dispatch <dispatch> --wt <synthesis-wt> | pull-request-checks --repo <repo> " +
+  "--pr <pull-request> --card-head <sha> | results <dispatch> <synthesis-wt> | " +
   "card-block <dispatch> <synthesis-wt> <checkpoint> | card-results <dispatch> <synthesis-wt> " +
   "<checkpoint> <card> | card-findings <dispatch> <synthesis-wt> <checkpoint> <card> | " +
-  "card-open <checkpoint> | journey <dispatch> <synthesis-wt> <waybill> | pr-checks --repo <repo> " +
-  "--head <sha> [--pr <n>]";
+  "card-open <checkpoint> | journey <dispatch> <synthesis-wt> <waybill>";
 const ALREADY_USAGE =
   "usage: run landing already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> " +
   "--card-head <sha> [--local-ticket <branch>] [--pr-merge <sha> --pr-head <sha>]";
@@ -407,7 +401,110 @@ const CFINDINGS_USAGE =
   "usage: run landing card-findings <dispatch> <synthesis-wt> <checkpoint> <card>";
 const OPEN_USAGE = "usage: run landing card-open <checkpoint>";
 const JOURNEY_USAGE = "usage: run landing journey <dispatch> <synthesis-wt> <waybill>";
-const PRCHECKS_USAGE = "usage: run landing pr-checks --repo <repo> --head <sha> [--pr <n>]";
+const PR_CHECKS_USAGE =
+  "usage: run landing pull-request-checks --repo <repo> --pr <pull-request> --card-head <sha>";
+
+type PullRequestCheck = {
+  name?: unknown;
+  state?: unknown;
+  bucket?: unknown;
+  link?: unknown;
+};
+
+function pullRequestChecks(o: string[]): number {
+  if (
+    o.length !== 6 ||
+    o[0] !== "--repo" ||
+    o[2] !== "--pr" ||
+    o[4] !== "--card-head" ||
+    o[1] === "" ||
+    o[3] === "" ||
+    o[5] === ""
+  ) {
+    usage(PR_CHECKS_USAGE);
+  }
+  const repo = o[1]!;
+  const pr = o[3]!;
+  const cardHead = commitOf(repo, o[5]!, "--card-head");
+  const readPullRequestHead = (): string => {
+    const view = run("gh", ["pr", "view", pr, "--json", "headRefOid"], { cwd: repo });
+    if (view.code !== 0) die(`cannot read pull request head: ${pyTrim(view.err || view.out)}`);
+    try {
+      const head = (JSON.parse(view.out) as { headRefOid?: unknown }).headRefOid;
+      if (typeof head === "string" && head !== "") return head;
+    } catch {
+      // Use the same closed failure below for an absent or malformed head.
+    }
+    die("GitHub did not report a pull request head");
+  };
+  const printHeadMismatch = (head: string): void => {
+    console.log(`fail: pull request head ${head} does not match card ${cardHead} ${pr}`);
+  };
+  const initialHead = readPullRequestHead();
+  if (initialHead !== cardHead) {
+    printHeadMismatch(initialHead);
+    return 0;
+  }
+
+  const result = run("gh", ["pr", "checks", pr, "--json", "name,state,bucket,link"], {
+    cwd: repo,
+  });
+  if (![0, 1, 8].includes(result.code) || (result.code !== 0 && result.out.trim() === "")) {
+    die(`cannot read pull request checks: ${pyTrim(result.err || result.out)}`);
+  }
+  let checks: PullRequestCheck[];
+  try {
+    const parsed: unknown = result.out.trim() === "" ? [] : JSON.parse(result.out);
+    if (!Array.isArray(parsed)) throw new Error("not an array");
+    checks = parsed as PullRequestCheck[];
+  } catch {
+    die(
+      `cannot read pull request checks: ${pyTrim(result.err || "GitHub returned malformed JSON")}`,
+    );
+  }
+  const finalHead = readPullRequestHead();
+  if (finalHead !== cardHead) {
+    printHeadMismatch(finalHead);
+    return 0;
+  }
+  if (checks.length === 0) {
+    console.log("none");
+    return 0;
+  }
+
+  const bucketOf = (check: PullRequestCheck): "pass" | "pending" | "fail" => {
+    if (check.bucket === "pass") return "pass";
+    if (check.bucket === "pending") return "pending";
+    if (check.bucket === "fail") return "fail";
+    // A skipped check satisfies the merge the way it satisfies GitHub: it is not
+    // a failure and there is nothing to wait for.
+    if (check.bucket === "skipping") return "pass";
+    if (check.state === "SUCCESS") return "pass";
+    if (check.state === "SKIPPED" || check.state === "NEUTRAL") return "pass";
+    if (["PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"].includes(String(check.state)))
+      return "pending";
+    return "fail";
+  };
+  const failing = checks.find((check) => bucketOf(check) === "fail");
+  if (failing !== undefined) {
+    const name =
+      typeof failing.name === "string" && failing.name !== "" ? failing.name : "unnamed check";
+    const state = String(failing.state ?? failing.bucket ?? "did not pass");
+    const link = typeof failing.link === "string" && failing.link !== "" ? failing.link : pr;
+    console.log(`fail: ${name} (${state}) ${link}`);
+    return 0;
+  }
+  const pending = checks.filter((check) => bucketOf(check) === "pending");
+  if (pending.length > 0) {
+    const names = pending.map((check) =>
+      typeof check.name === "string" && check.name !== "" ? check.name : "unnamed check",
+    );
+    console.log(`pending: ${names.join(", ")}`);
+    return 0;
+  }
+  console.log("pass");
+  return 0;
+}
 
 function alreadyLanded(o: string[]): number {
   if (
@@ -632,98 +729,13 @@ function journey(dispatch: string, wt: string, waybill: string): number {
   return 0;
 }
 
-/** The pull request's checks at the card's HEAD. Without --pr there is no pull
- * request to ask (`none`): the local route opens none. gh's own exit is read aside
- * from its stdout: a failing check can make `gh pr checks` exit non-zero while its
- * JSON still answers. */
-function prChecks(o: string[]): number {
-  const len = o.length;
-  if (
-    (len !== 4 && len !== 6) ||
-    o[0] !== "--repo" ||
-    o[2] !== "--head" ||
-    (len === 6 && o[4] !== "--pr")
-  ) {
-    usage(PRCHECKS_USAGE);
-  }
-  const repo = o[1]!;
-  const head = o[3]!;
-  const pr = len === 6 ? o[5]! : null;
-  if (pr !== null && !/^[0-9]+$/u.test(pr)) usage(PRCHECKS_USAGE);
-  if (pr === null) {
-    console.log("none");
-    return 0;
-  }
-  const want = commitOf(repo, head, "--head");
-  const view = run("gh", ["pr", "view", pr, "--json", "headRefOid"], {
-    env: UNSET_GIT,
-    cwd: repo,
-  });
-  let reported: string | null = null;
-  try {
-    const parsed = JSON.parse(view.out) as { headRefOid?: unknown };
-    if (typeof parsed?.headRefOid === "string" && parsed.headRefOid !== "") {
-      reported = parsed.headRefOid;
-    }
-  } catch {
-    /* unreadable: reported stays null */
-  }
-  if (reported === null) {
-    die(`gh pr view ${pr} gave no head: ${pyTrim(view.err) || pyTrim(view.out) || "no output"}`);
-  }
-  // Checks reported for another head never vouch for the card's head.
-  const rev = revOf(repo, reported);
-  if (rev.code !== 0 || rev.out === "" || rev.out !== want) {
-    console.log("pending");
-    return 0;
-  }
-  const checks = run("gh", ["pr", "checks", pr, "--json", "name,state,bucket,link"], {
-    env: UNSET_GIT,
-    cwd: repo,
-  });
-  let list: unknown;
-  try {
-    list = JSON.parse(checks.out);
-  } catch {
-    list = null;
-  }
-  if (!Array.isArray(list)) {
-    die(
-      `gh pr checks ${pr} gave no list: ${pyTrim(checks.err) || pyTrim(checks.out) || "no output"}`,
-    );
-  }
-  const rows = list as Array<Record<string, unknown>>;
-  if (rows.length === 0) {
-    console.log("none");
-    return 0;
-  }
-  const bucket = (r: Record<string, unknown>): string => String(r["bucket"] ?? "");
-  for (const r of rows) {
-    const b = bucket(r);
-    if (b === "fail" || b === "cancel") {
-      const name = String(r["name"] ?? "");
-      const link = String(r["link"] ?? "");
-      console.log(link === "" ? `fail: ${name}` : `fail: ${name} ${link}`);
-      return 2;
-    }
-    if (b !== "pass" && b !== "pending" && b !== "skipping") {
-      die(`gh pr checks ${pr} gave an unknown bucket: ${pyRepr(b)}`);
-    }
-  }
-  if (rows.some((r) => bucket(r) === "pending")) {
-    console.log("pending");
-    return 0;
-  }
-  console.log("pass");
-  return 0;
-}
-
 function main(argv: string[]): number {
   try {
     const mode = argv[0];
     if (mode === "already-landed") return alreadyLanded(argv.slice(1));
     if (mode === "anything-to-land") return anythingToLand(argv.slice(1));
     if (mode === "fresh") return fresh(argv.slice(1));
+    if (mode === "pull-request-checks") return pullRequestChecks(argv.slice(1));
     if (mode === "results") {
       if (argv.length !== 3) usage(RESULTS_USAGE);
       for (const [name, result] of recordedResults(argv[1]!, argv[2]!)) {
@@ -751,9 +763,6 @@ function main(argv: string[]): number {
     if (mode === "journey") {
       if (argv.length !== 4) usage(JOURNEY_USAGE);
       return journey(argv[1]!, argv[2]!, argv[3]!);
-    }
-    if (mode === "pr-checks") {
-      return prChecks(argv.slice(1));
     }
     usage(TOP_USAGE);
   } catch (e) {

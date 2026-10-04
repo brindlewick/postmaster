@@ -23,10 +23,7 @@ import { findingState, isFindingShaped, pyRepr } from "./landing.ts";
 
 const SELF = join(import.meta.dir, "run");
 const HERE = import.meta.dir;
-
-// APFS refuses a file name that is not valid UTF-8, so the raw-byte fixture
-// cannot be made on a Mac; skips.toml carries the reason.
-const skipRawName = process.platform === "darwin";
+const skipNonUtf8Filename = process.platform === "darwin";
 
 delete process.env.GIT_DIR;
 delete process.env.GIT_WORK_TREE;
@@ -1006,7 +1003,7 @@ describe("anything-to-land", () => {
     );
   });
 
-  test.skipIf(skipRawName)("AH4: a raw-byte path answers without a traceback", () => {
+  test.skipIf(skipNonUtf8Filename)("AH4: a raw-byte path answers without a traceback", () => {
     S.bp = join(tmp, "bp");
     mkrepo(S.bp);
     git(S.bp, "config", "core.quotePath", "false");
@@ -2084,103 +2081,138 @@ describe("pure pins", () => {
   });
 });
 
-describe("pr-checks at the card's head", () => {
-  const restoreEnv = (key: string, value: string | undefined): void => {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  };
+describe("pull-request checks", () => {
+  const pr = "https://github.com/example/postmaster/pull/1";
 
-  // A stand-in gh, first on PATH: it answers what the scenario sets, so every
-  // branch of the question is checked without a live pull request.
-  const standInGh = (dir: string): void => {
-    mkdirSync(dir, { recursive: true });
-    const gh = join(dir, "gh");
+  function askChecks(
+    label: string,
+    remoteHead: string | null,
+    checks: unknown[],
+    checksExit = 0,
+    headAfter: string | null = null,
+  ): { output: string; head: string } {
+    const repo = join(tmp, `pr-checks-${label}`);
+    mkrepo(repo);
+    commitFile(repo, "tracked.txt", "card", "card");
+    const head = sha(repo);
+    const bin = join(tmp, `pr-checks-bin-${label}`);
+    mkdirSync(bin, { recursive: true });
+    const gh = join(bin, "gh");
     writeFileSync(
       gh,
       [
         "#!/bin/sh",
-        'case "$1 $2" in',
-        '  "pr view") printf \'{"headRefOid":"%s"}\\n\' "$FAKE_PR_HEAD" ;;',
-        '  "pr checks") printf \'%s\\n\' "$FAKE_PR_CHECKS" ;;',
-        '  *) echo "stand-in gh: unexpected: $*" >&2; exit 1 ;;',
+        'case "$2" in',
+        '  view) if [ -f "$GH_VIEW_MARK" ]; then printf \'{"headRefOid":"%s"}\\n\' "$GH_HEAD_AFTER"; else : > "$GH_VIEW_MARK"; printf \'{"headRefOid":"%s"}\\n\' "$GH_HEAD"; fi ;;',
+        '  checks) cat "$GH_CHECKS_FILE"; exit "$GH_CHECKS_EXIT" ;;',
+        '  *) echo "unexpected gh call: $*" >&2; exit 2 ;;',
         "esac",
         "",
       ].join("\n"),
     );
     chmodSync(gh, 0o755);
-  };
+    const checksPath = join(tmp, `pr-checks-${label}.json`);
+    writeFileSync(checksPath, `${JSON.stringify(checks)}\n`);
+    const r = run(
+      join(HERE, "run"),
+      ["landing", "pull-request-checks", "--repo", repo, "--pr", pr, "--card-head", head],
+      {
+        env: {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH ?? ""}`,
+          GH_HEAD: remoteHead ?? head,
+          GH_HEAD_AFTER: headAfter ?? remoteHead ?? head,
+          GH_VIEW_MARK: join(tmp, `pr-checks-${label}.viewed`),
+          GH_CHECKS_FILE: checksPath,
+          GH_CHECKS_EXIT: String(checksExit),
+        },
+      },
+    );
+    expect(r.code).toBe(0);
+    return { output: r.out.trim(), head };
+  }
 
-  test("all passed is pass, one running is pending, one failed is fail with its name and link, no checks is none", () => {
-    const repo = join(tmp, "prgh-repo");
-    mkrepo(repo);
-    commitFile(repo, "a", "one", "A");
-    const head = sha(repo);
-    const bin = join(tmp, "prgh-bin");
-    standInGh(bin);
-    const savedPath = process.env.PATH;
-    const savedHead = process.env.FAKE_PR_HEAD;
-    const savedChecks = process.env.FAKE_PR_CHECKS;
-    process.env.PATH = `${bin}:${savedPath ?? ""}`;
-    process.env.FAKE_PR_HEAD = head;
-    try {
-      const args = ["pr-checks", "--repo", repo, "--head", head, "--pr", "7"];
-      process.env.FAKE_PR_CHECKS = JSON.stringify([
-        { name: "linux", state: "SUCCESS", bucket: "pass", link: "https://ci/1" },
-        { name: "macos", state: "SUCCESS", bucket: "pass", link: "https://ci/2" },
-      ]);
-      check(args, 0, "pass");
+  test("all checks passed on the card head", () => {
+    expect(
+      askChecks("pass", null, [
+        { name: "linux", state: "SUCCESS", bucket: "pass", link: "https://example.test/linux" },
+        { name: "macos", state: "SUCCESS", bucket: "pass", link: "https://example.test/macos" },
+      ]).output,
+    ).toBe("pass");
+  });
 
-      process.env.FAKE_PR_CHECKS = JSON.stringify([
-        { name: "linux", state: "SUCCESS", bucket: "pass", link: "https://ci/1" },
-        { name: "macos", state: "IN_PROGRESS", bucket: "pending", link: "https://ci/2" },
-      ]);
-      check(args, 0, "pending");
+  test("a skipped check counts as passed", () => {
+    expect(
+      askChecks("skipped", null, [
+        { name: "linux", state: "SUCCESS", bucket: "pass", link: "https://example.test/linux" },
+        { name: "docs", state: "SKIPPED", bucket: "skipping", link: "https://example.test/docs" },
+      ]).output,
+    ).toBe("pass");
+  });
 
-      process.env.FAKE_PR_CHECKS = JSON.stringify([
-        { name: "linux", state: "FAILURE", bucket: "fail", link: "https://ci/1" },
-        { name: "macos", state: "SUCCESS", bucket: "pass", link: "https://ci/2" },
-      ]);
-      check(args, 2, "fail: linux https://ci/1");
+  test("a cancelled check fails with its name and link", () => {
+    expect(
+      askChecks("cancelled", null, [
+        {
+          name: "macos",
+          state: "CANCELLED",
+          bucket: "cancel",
+          link: "https://example.test/macos",
+        },
+      ]).output,
+    ).toBe("fail: macos (CANCELLED) https://example.test/macos");
+  });
 
-      process.env.FAKE_PR_CHECKS = "[]";
-      check(args, 0, "none");
-    } finally {
-      restoreEnv("PATH", savedPath);
-      restoreEnv("FAKE_PR_HEAD", savedHead);
-      restoreEnv("FAKE_PR_CHECKS", savedChecks);
-    }
-  }, 30000);
+  test("a running check remains pending", () => {
+    expect(
+      askChecks(
+        "pending",
+        null,
+        [
+          {
+            name: "macos",
+            state: "IN_PROGRESS",
+            bucket: "pending",
+            link: "https://example.test/macos",
+          },
+        ],
+        8,
+      ).output,
+    ).toBe("pending: macos");
+  });
 
-  test("checks reported for another head never say pass", () => {
-    const repo = join(tmp, "prgh-other");
-    mkrepo(repo);
-    commitFile(repo, "a", "one", "A");
-    const cardHead = sha(repo);
-    commitFile(repo, "b", "two", "B");
-    const movedHead = sha(repo);
-    const bin = join(tmp, "prgh-bin2");
-    standInGh(bin);
-    const savedPath = process.env.PATH;
-    const savedHead = process.env.FAKE_PR_HEAD;
-    const savedChecks = process.env.FAKE_PR_CHECKS;
-    process.env.PATH = `${bin}:${savedPath ?? ""}`;
-    process.env.FAKE_PR_HEAD = movedHead;
-    process.env.FAKE_PR_CHECKS = JSON.stringify([
-      { name: "linux", state: "SUCCESS", bucket: "pass", link: "https://ci/1" },
-    ]);
-    try {
-      check(["pr-checks", "--repo", repo, "--head", cardHead, "--pr", "7"], 0, "pending");
-    } finally {
-      restoreEnv("PATH", savedPath);
-      restoreEnv("FAKE_PR_HEAD", savedHead);
-      restoreEnv("FAKE_PR_CHECKS", savedChecks);
-    }
-  }, 30000);
+  test("a failed check names its job and link", () => {
+    expect(
+      askChecks(
+        "fail",
+        null,
+        [{ name: "macos", state: "FAILURE", bucket: "fail", link: "https://example.test/macos" }],
+        1,
+      ).output,
+    ).toBe("fail: macos (FAILURE) https://example.test/macos");
+  });
 
-  test("with no pull request to ask it says none, as the local route reads", () => {
-    const repo = join(tmp, "prgh-none");
-    mkrepo(repo);
-    commitFile(repo, "a", "one", "A");
-    check(["pr-checks", "--repo", repo, "--head", sha(repo)], 0, "none");
-  }, 30000);
+  test("no reported checks answers none", () => {
+    expect(askChecks("none", null, [], 1).output).toBe("none");
+  });
+
+  test("checks for a different head never pass", () => {
+    const result = askChecks("head", "another-head", []);
+    expect(result.output).toBe(
+      `fail: pull request head another-head does not match card ${result.head} ${pr}`,
+    );
+  });
+
+  test("checks are refused when the pull request moves while they are read", () => {
+    const result = askChecks(
+      "head-race",
+      null,
+      [{ name: "linux", state: "SUCCESS", bucket: "pass", link: "https://example.test/linux" }],
+      0,
+      "another-head",
+    );
+    expect(result.output).toBe(
+      `fail: pull request head another-head does not match card ${result.head} ${pr}`,
+    );
+  });
 });
