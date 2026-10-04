@@ -83,6 +83,7 @@ interface Snapshot {
   round: number;
   refs: Record<string, string>;
   synthesisHead: string;
+  synthesisBranch: string;
   synthesisStatus: Record<string, string>;
   mainHead: string;
   mainBranch: string;
@@ -583,6 +584,13 @@ function unwrapShell(command: string): ShellGroup[] {
   return splitShell(command);
 }
 
+/** A redirect operand that names a descriptor, not a file. */
+function isFdOperand(op: string, target: string): boolean {
+  if (target === "-" || target.startsWith("&")) return true;
+  if ((op === "&>" || op === "&>>") && /^[0-9]+$/u.test(target)) return true;
+  return false;
+}
+
 /** Redirect targets in a word list: write targets and read targets. */
 function redirectTargets(words: string[]): { out: string[]; inp: string[] } {
   const out: string[] = [];
@@ -590,7 +598,8 @@ function redirectTargets(words: string[]): { out: string[]; inp: string[] } {
   for (let i = 0; i < words.length; i++) {
     const word = words[i] ?? "";
     if (word === "<") {
-      if (words[i + 1]) inp.push(words[i + 1]!);
+      const target = words[i + 1];
+      if (target && !isFdOperand(word, target)) inp.push(target);
       i++;
     } else if (
       word === ">" ||
@@ -602,7 +611,8 @@ function redirectTargets(words: string[]): { out: string[]; inp: string[] } {
       word === ">|" ||
       word === "2>|"
     ) {
-      if (words[i + 1]) out.push(words[i + 1]!);
+      const target = words[i + 1];
+      if (target && !isFdOperand(word, target)) out.push(target);
       i++;
     }
   }
@@ -799,10 +809,8 @@ function parseEventFile(path: string): unknown[] | null {
   return events;
 }
 
-function parseTaskFile(path: string): unknown[] {
-  const events = parseEventFile(path);
-  if (events === null) return [];
-  return events;
+function parseTaskFile(path: string): unknown[] | null {
+  return parseEventFile(path);
 }
 
 function inputPath(input: RecordOf): string | null {
@@ -1199,6 +1207,10 @@ function readLane(
       for (const name of readdirSync(logs)) {
         if (name.startsWith(taskName)) {
           const task = parseTaskFile(join(logs, name));
+          if (task === null) {
+            laneRecord.reason = `the task transcript cannot be read: ${name}`;
+            return laneRecord;
+          }
           allEvents.push(...task);
         }
       }
@@ -1331,6 +1343,7 @@ function saveSnapshot(info: RunInfo, round: number): number {
     round,
     refs: runRefs(info.repo, info.ticket),
     synthesisHead: currentHead(info.repo, synth),
+    synthesisBranch: branchName(info.repo, synth),
     synthesisStatus: statusMap(info.repo, synth),
     mainHead: currentHead(info.repo, info.repo),
     mainBranch: branchName(info.repo, info.repo),
@@ -1842,7 +1855,9 @@ function pathExists(path: string): boolean {
 }
 
 function restoreRound(info: RunInfo, round: number): number {
-  assertSynth(info, true);
+  // The worktree must be verifiable, but it may be detached or switched: the
+  // reattach below puts the recorded branch back.
+  assertSynth(info, false);
   const snapshot = loadSnapshot(info, round);
   const saved = saveDir(info, round);
   mkdirSync(saved, { recursive: true });
@@ -1880,14 +1895,35 @@ function restoreRound(info: RunInfo, round: number): number {
     `${JSON.stringify({ before: snapshot.synthesisHead, after: currentHead }, null, 2)}\n`,
   );
 
+  // Move new synthesis files into the run before the reattach, so nothing
+  // already saved can block it.
+  const beforeFiles = new Set(Object.keys(snapshot.synthesisStatus));
+  const afterFiles = statusMap(info.repo, synth);
+  for (const path of Object.keys(afterFiles)) {
+    if (beforeFiles.has(path) || afterFiles[path] !== "??") continue;
+    const source = join(synth, path);
+    const destination = join(saved, path);
+    ensureInside(synth, source);
+    ensureInside(saved, destination);
+    if (pathExists(destination))
+      throw new Error(`reach restore copy already exists: ${destination}`);
+    mkdirSync(dirname(destination), { recursive: true });
+    renameSync(source, destination);
+  }
+
   // Restore the checked-out ticket branch through its worktree first, then restore the other
-  // run branches by ref. Reviewers can move a branch with update-ref from any scratch.
-  const reset = runGit(synth, [
-    "reset",
-    "--hard",
+  // run branches by ref. Reviewers can move a branch with update-ref from any scratch, and can
+  // detach or switch the worktree: the checkout reattaches the recorded branch either way.
+  const recorded = snapshot.synthesisBranch ?? info.ticket;
+  const reattach = runGit(synth, [
+    "checkout",
+    "-f",
+    "-B",
+    recorded,
     snapshot.refs[`refs/heads/${info.ticket}`] ?? snapshot.synthesisHead,
   ]);
-  if (reset.code !== 0) throw new Error(`cannot restore synthesis branch: ${reset.err.trim()}`);
+  if (reattach.code !== 0)
+    throw new Error(`cannot restore synthesis branch: ${reattach.err.trim()}`);
   for (const ref of [...changedRefs].sort()) {
     if (ref === `refs/heads/${info.ticket}`) continue;
     const before = snapshot.refs[ref] ?? "";
@@ -1914,19 +1950,6 @@ function restoreRound(info: RunInfo, round: number): number {
     }
   }
 
-  const beforeFiles = new Set(Object.keys(snapshot.synthesisStatus));
-  const afterFiles = statusMap(info.repo, synth);
-  for (const path of Object.keys(afterFiles)) {
-    if (beforeFiles.has(path) || afterFiles[path] !== "??") continue;
-    const source = join(synth, path);
-    const destination = join(saved, path);
-    ensureInside(synth, source);
-    ensureInside(saved, destination);
-    if (pathExists(destination))
-      throw new Error(`reach restore copy already exists: ${destination}`);
-    mkdirSync(dirname(destination), { recursive: true });
-    renameSync(source, destination);
-  }
   console.log(`restored r${round}; saved changes under ${saved}`);
   return 0;
 }

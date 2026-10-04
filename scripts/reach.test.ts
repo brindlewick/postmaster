@@ -1319,10 +1319,13 @@ describe("R1: review round 1 fixes", () => {
     expect(call(layout, ["restore", layout.dispatch, "r1"]).code).toBe(1);
     expect(git(layout.repo, "rev-parse", "refs/heads/main")).toBe(layout.base);
 
-    const detached = makeLayout();
-    before(detached);
-    git(detached.repo, "-C", detached.synth, "checkout", "-q", detached.base);
-    expect(call(detached, ["restore", detached.dispatch, "r1"]).code).toBe(1);
+    // A detached or switched worktree no longer faults: the ruled round
+    // reattaches the recorded branch instead (see the R4 reattach test).
+    const replaced = makeLayout();
+    before(replaced);
+    rmSync(join(replaced.synth, ".git"), { force: true });
+    writeFileSync(join(replaced.synth, ".git"), "not a repository\n");
+    expect(call(replaced, ["restore", replaced.dispatch, "r1"]).code).toBe(1);
   });
 
   test("R1 a second restore keeps the first saved copy", () => {
@@ -1589,5 +1592,102 @@ describe("R1: review round 1 fixes", () => {
     expect(card.code).toBe(0);
     expect(card.out).toContain("`out.txt`");
     expect(card.out).toContain("outside the project");
+  });
+});
+
+describe("R4: ruled round fixes", () => {
+  test("R4 descriptor redirections are descriptor operations, and 2>file is a write", () => {
+    const layout = makeLayout();
+    for (const [name, cmd] of [
+      ["dup-out", `cd ${layout.repo} && echo hi 2>&1`],
+      ["dup-both", `cd ${layout.repo} && echo hi >&2`],
+      ["dup-close", `cd ${layout.home} && echo hi 2>&-`],
+      ["dup-in", `cd ${layout.repo} && cat <&0`],
+    ]) {
+      const path = join(layout.dispatch, "logs", `${name}.jsonl`);
+      writeEvents(path, [codex(cmd)]);
+      const result = stream(layout, "codex", path, layout.codex);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain("clean");
+    }
+
+    const file = join(layout.dispatch, "logs", "fd-file.jsonl");
+    writeEvents(file, [codex(`cd ${layout.repo} && echo hi 2>${join(layout.repo, "real.txt")}`)]);
+    const written = stream(layout, "codex", file, layout.codex);
+    expect(written.code).toBe(2);
+    expect(written.out).toContain("finding write");
+  });
+
+  test("R4 restore reattaches the recorded branch, keeping an earlier commit", () => {
+    const layout = makeLayout();
+    const kept = addCommit(layout.repo, layout.synth, "kept.txt");
+    before(layout);
+    git(layout.repo, "-C", layout.synth, "checkout", "-q", "--detach", "HEAD");
+    expect(call(layout, ["restore", layout.dispatch, "r1"]).code).toBe(0);
+    expect(git(layout.repo, "rev-parse", "refs/heads/T")).toBe(kept);
+    expect(git(layout.repo, "-C", layout.synth, "symbolic-ref", "--short", "HEAD")).toBe("T");
+    expect(readFileSync(join(layout.synth, "kept.txt"), "utf8")).toBe("review change\n");
+
+    const moved = makeLayout();
+    before(moved);
+    addCommit(moved.repo, moved.synth, "round-work.txt");
+    git(moved.repo, "-C", moved.synth, "checkout", "-q", "--detach", "HEAD");
+    expect(call(moved, ["restore", moved.dispatch, "r1"]).code).toBe(0);
+    expect(git(moved.repo, "rev-parse", "refs/heads/T")).toBe(moved.base);
+    expect(git(moved.repo, "-C", moved.synth, "symbolic-ref", "--short", "HEAD")).toBe("T");
+    expect(git(moved.repo, "-C", moved.synth, "status", "--porcelain")).toBe("");
+  });
+
+  test("R4 an unreadable task transcript leaves the lane not checked", () => {
+    const layout = makeLayout();
+    const runJson = JSON.parse(readFileSync(join(layout.dispatch, "run.json"), "utf8"));
+    runJson.config.lanes.opus = { harness: "claude" };
+    writeFileSync(join(layout.dispatch, "run.json"), JSON.stringify(runJson));
+    const own = join(layout.repo, ".worktrees", "T-opus");
+    git(layout.repo, "worktree", "add", "-q", "-b", "wb/T-opus", own, "main");
+    const streamPath = join(layout.dispatch, "logs", "opus-events.jsonl");
+    writeEvents(streamPath, [
+      {
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", id: "aaa", name: "Task", input: { prompt: "y" } }],
+        },
+      },
+      {
+        type: "user",
+        message: { content: [{ type: "tool_result", tool_use_id: "aaa", content: "done" }] },
+      },
+    ]);
+    writeFileSync(join(layout.dispatch, "logs", "opus-claude-task-aaa.jsonl"), "{not valid json\n");
+    const broken = stream(layout, "opus", streamPath, own);
+    expect(broken.code).toBe(3);
+    expect(broken.out).toContain("not checked");
+
+    const fixed = makeLayout();
+    const fixedJson = JSON.parse(readFileSync(join(fixed.dispatch, "run.json"), "utf8"));
+    fixedJson.config.lanes.opus = { harness: "claude" };
+    writeFileSync(join(fixed.dispatch, "run.json"), JSON.stringify(fixedJson));
+    const fixedOwn = join(fixed.repo, ".worktrees", "T-opus");
+    git(fixed.repo, "worktree", "add", "-q", "-b", "wb/T-opus", fixedOwn, "main");
+    const fixedStream = join(fixed.dispatch, "logs", "opus-events.jsonl");
+    writeEvents(fixedStream, [
+      {
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", id: "aaa", name: "Task", input: { prompt: "y" } }],
+        },
+      },
+      {
+        type: "user",
+        message: { content: [{ type: "tool_result", tool_use_id: "aaa", content: "done" }] },
+      },
+    ]);
+    writeEvents(
+      join(fixed.dispatch, "logs", "opus-claude-task-aaa.jsonl"),
+      claude("Write", { file_path: join(fixed.repo, "forked.txt") }),
+    );
+    const read = stream(fixed, "opus", fixedStream, fixedOwn);
+    expect(read.code).toBe(2);
+    expect(read.out).toContain("finding write");
   });
 });
