@@ -250,6 +250,26 @@ describe("the marking and queue verbs", () => {
     expect(again.out).toContain("turnpikes: none");
   }, 60000);
 
+  test("a malformed marker fails closed instead of reading unbound", () => {
+    const n = local(["create", "Ragged marker", join(tmp, "a.md")]);
+    expect(ready(["mark", repo, n]).code).toBe(0);
+    const marker = join(repo, ".postmaster", "runs", "postmaster", "ready", `${n}.ready`);
+    writeFileSync(marker, `${n}\nNOT-A-DIGEST\n`);
+    const bad = ready([repo, n]);
+    expect(bad.code).toBe(2);
+    expect(bad.out).toContain("marker for");
+    expect(bad.out).toContain("is malformed");
+    expect(ready(["queue", repo, n]).code).toBe(2);
+    writeFileSync(marker, `${n}\n`);
+    const short = ready([repo, n]);
+    expect(short.code).toBe(2);
+    expect(short.out).toContain("is malformed");
+    // The named recovery works: unmark, then sign off again.
+    expect(ready(["unmark", repo, n]).code).toBe(0);
+    expect(ready(["mark", repo, n]).code).toBe(0);
+    expect(ready([repo, n]).code).toBe(0);
+  }, 60000);
+
   test("a post-sign-off title edit refuses as well", () => {
     const n = local(["create", "Bound title", join(tmp, "a.md")]);
     expect(ready(["mark", repo, n]).code).toBe(0);
@@ -376,6 +396,42 @@ describe("a tracker of kind other", () => {
     const again = ready(checkArgs(f));
     expect(again.code).toBe(0);
     expect(again.out).toContain("turnpikes: none");
+  }, 60000);
+
+  test("a malformed marker on the body form names the external recovery", () => {
+    const a = join(tmp, "a.md");
+    const markArgs = [
+      "mark",
+      "--body",
+      a,
+      "--labels",
+      "ready",
+      "--repo",
+      repo,
+      "--id",
+      "EXT-6",
+      "--title",
+      "Sorted list",
+    ];
+    expect(ready(markArgs).code).toBe(0);
+    const marker = join(repo, ".postmaster", "runs", "postmaster", "ready", "EXT-6.ready");
+    writeFileSync(marker, "EXT-6\nbogus\n");
+    const checkArgs = [
+      "--body",
+      a,
+      "--labels",
+      "ready",
+      "--title",
+      "Sorted list",
+      "--project",
+      repo,
+      "--id",
+      "EXT-6",
+    ];
+    const bad = ready(checkArgs);
+    expect(bad.code).toBe(2);
+    expect(bad.out).toContain("is malformed");
+    expect(bad.out).toContain("through the tracker's own tooling");
   }, 60000);
 
   test("the check without a project or id is refused", () => {

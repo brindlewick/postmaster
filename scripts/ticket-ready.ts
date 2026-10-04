@@ -146,8 +146,12 @@ function reportCheck(
 ): number {
   const reasons: string[] = [];
   if (!ready) reasons.push("ready label is missing");
-  const queued = queuedDigest(repo, id);
-  if (queued !== null && queued !== digestOf(title, body))
+  const queued = queuedMark(repo, id);
+  if (!queued.bound && queued.malformed)
+    reasons.push(
+      `the ready marker for ${id} is malformed; run ticket-ready.sh unmark ${repo} ${id} and sign the ticket off again`,
+    );
+  else if (queued.bound && queued.digest !== digestOf(title, body))
     reasons.push(
       "the ticket changed since it was signed off; open the clerk again to sign off the new text",
     );
@@ -186,16 +190,22 @@ function writeQueue(repo: string, id: string, title: string, body: string): void
   writeFileSync(markerPath(repo, id), `${id}\n${digestOf(title, body)}\n`);
 }
 
-function queuedDigest(repo: string, id: string): string | null {
+type QueuedMark = { bound: true; digest: string } | { bound: false; malformed: boolean };
+
+// A missing marker means unbound; a present but malformed one fails closed,
+// never silently unbound: the check refuses it until the ticket is signed
+// off again.
+function queuedMark(repo: string, id: string): QueuedMark {
   let text = "";
   try {
     text = readFileSync(markerPath(repo, id), "utf8");
   } catch {
-    return null;
+    return { bound: false, malformed: false };
   }
   const [first, second] = text.split("\n");
-  if (first !== id || !/^[0-9a-f]{64}$/u.test(second ?? "")) return null;
-  return second as string;
+  if (first !== id || !/^[0-9a-f]{64}$/u.test(second ?? ""))
+    return { bound: false, malformed: true };
+  return { bound: true, digest: second as string };
 }
 
 function removeQueue(repo: string, id: string): void {
@@ -385,8 +395,12 @@ function main(argv: string[]): number {
     process.env.POSTMASTER_PROJECT = resolve(project);
     const reasons: string[] = [];
     if (!hasReadyMark(labels)) reasons.push("ready label is missing");
-    const queued = queuedDigest(project, id);
-    if (queued !== null && queued !== digestOf(title, body))
+    const queued = queuedMark(project, id);
+    if (!queued.bound && queued.malformed)
+      reasons.push(
+        `the ready marker for ${id} is malformed; remove the ready label through the tracker's own tooling, run ticket-ready.sh consume ${project} ${id}, and mark again`,
+      );
+    else if (queued.bound && queued.digest !== digestOf(title, body))
       reasons.push(
         "the ticket changed since it was signed off; open the clerk again to sign off the new text",
       );
