@@ -243,8 +243,9 @@ fi
 
 # --- C7: harnesses.md keeps no launch or resume command line; launch form prints both. ---
 HARN="$ROOT/skills/postmaster/harnesses.md"
-for gone in 'codex exec -C' 'codex exec resume' 'grok --prompt-file' 'grok --resume' \
-    'agy -p' 'claude -p' 'pi --mode json' 'muse exec --json' 'mimo run --format json'; do
+for gone in 'codex exec -C' 'codex exec resume' 'grok --prompt-file <' 'grok --resume <' \
+    'agy -p "' 'claude -p "' 'claude -p --resume' 'pi --mode json --approve' \
+    'muse exec --json' 'mimo run --format json -m' 'cd <wt> &&'; do
   if grep -q -F "$gone" "$HARN"; then
     note_fail "C7 harnesses.md still holds a launch or resume command line: $gone"
   else
