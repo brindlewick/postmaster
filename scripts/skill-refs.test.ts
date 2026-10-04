@@ -189,6 +189,8 @@ describe("fixing script references", () => {
   test("--fix leaves a file with no bare reference alone", () => {
     const file = put("good-copy.md", "Use `<tool>/scripts/run stage <dispatch> synthesis`.\n");
     refs(root, "fix", [file]);
-    expect(readFileSync(file, "utf8")).toBe("Use `<tool>/scripts/run stage <dispatch> synthesis`.\n");
+    expect(readFileSync(file, "utf8")).toBe(
+      "Use `<tool>/scripts/run stage <dispatch> synthesis`.\n",
+    );
   }, 10000);
 });

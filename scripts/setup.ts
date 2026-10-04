@@ -203,7 +203,9 @@ planning.review_link?      (none)             code-server template with {path} f
 overwrite                  no                 yes replaces an existing config`);
     process.exit(0);
   } else {
-    console.error("usage: run setup [--answers <file>] [--dry-run] [--config <path>] | --add-clerk [options] | --keys");
+    console.error(
+      "usage: run setup [--answers <file>] [--dry-run] [--config <path>] | --add-clerk [options] | --keys",
+    );
     process.exit(1);
   }
   i++;

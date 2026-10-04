@@ -97,7 +97,8 @@ beforeAll(() => {
   repo = join(tmp, "repo");
   mkdirSync(repo, { recursive: true });
   if (run("git", ["init", "-q", repo]).code !== 0) throw new Error("git init failed");
-  if (run(localSh, ["local", repo, "store", "init"]).code !== 0) throw new Error("store init failed");
+  if (run(localSh, ["local", repo, "store", "init"]).code !== 0)
+    throw new Error("store init failed");
   const a = join(tmp, "a.md");
   const c = join(tmp, "c.md");
   const d = join(tmp, "d.md");
@@ -217,7 +218,9 @@ describe("the marking and queue verbs", () => {
 
   test("marking a commented ticket writes the draft against the stored body", () => {
     const n = local(["create", "Old title", join(tmp, "c.md")]);
-    expect(run(localSh, ["local", repo, "comment", n, "coachman", "prior discussion"]).code).toBe(0);
+    expect(run(localSh, ["local", repo, "comment", n, "coachman", "prior discussion"]).code).toBe(
+      0,
+    );
     const f = join(tmp, "final-commented.md");
     writeFileSync(f, TWO_PART);
     const r = ready(["mark", repo, n, "--body", f, "--title", "New title"]);

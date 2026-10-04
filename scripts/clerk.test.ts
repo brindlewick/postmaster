@@ -166,14 +166,7 @@ describe("brief", () => {
   test("brief leaves one label holding a comma alone: it is not the ready mark", () => {
     const repo = localRepo();
     const id = localTicket(repo, "Fix the list");
-    const labels = sh(LOCAL, [
-      "local",
-      repo,
-      "label",
-      id,
-      "add",
-      "blocked, ready",
-    ]);
+    const labels = sh(LOCAL, ["local", repo, "label", id, "add", "blocked, ready"]);
     expect(labels.code).toBe(0);
     const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
     const cfg = stubConfig(cfgDir);

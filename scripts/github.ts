@@ -442,10 +442,14 @@ function main(): void {
   const argvAll = process.argv.slice(2);
   const REPO = argvAll[0];
   if (!REPO) {
-    dieGh("usage: run github <repo> board|create|edit|title|read|state|label|comment|list|access ...");
+    dieGh(
+      "usage: run github <repo> board|create|edit|title|read|state|label|comment|list|access ...",
+    );
   }
   if (argvAll.length < 2) {
-    dieGh("usage: run github <repo> board|create|edit|title|read|state|label|comment|list|access ...");
+    dieGh(
+      "usage: run github <repo> board|create|edit|title|read|state|label|comment|list|access ...",
+    );
   }
   if (!existsSync(REPO) || !statSync(REPO).isDirectory()) dieGh(`no such directory: ${REPO}`);
   REPO_DIR = REPO;
@@ -667,7 +671,9 @@ function main(): void {
       console.log(`#${h.number}\t${pyLower(String(h.state ?? ""))}\t${h.title ?? ""}`);
     }
   } else {
-    dieGh("usage: run github <repo> board|create|edit|title|read|state|label|comment|list|access|search ...");
+    dieGh(
+      "usage: run github <repo> board|create|edit|title|read|state|label|comment|list|access|search ...",
+    );
   }
 }
 
