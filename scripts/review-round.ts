@@ -2,9 +2,9 @@
 // reviewers that do not finish in time, and tearing its scratches down with nothing of the
 // round still running in them.
 //
-//   review-round.sh start    <dispatch> <round>
-//   review-round.sh wait     <dispatch> <round> <repo> [<lens>:<lane>...]
-//   review-round.sh teardown <dispatch> <round> <repo> [<lens>:<lane>...]
+//   run review-round start    <dispatch> <round>
+//   run review-round wait     <dispatch> <round> <repo> [<lens>:<lane>...]
+//   run review-round teardown <dispatch> <round> <repo> [<lens>:<lane>...]
 //
 //   exit 0  wait: every marker is in · start and teardown: done
 //   exit 3  wait: the deadline passed; each reviewer with no marker is recorded and stopped
@@ -25,12 +25,13 @@ import { basename, dirname, join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run } from "./lib/proc.ts";
 import { PY_S_CLASS } from "./lib/text.ts";
+import { wallFor } from "./walls.ts";
 
 const HERE = scriptsDir(import.meta);
 const DEFAULT_LIMIT = 2400;
 const MAX_LIMIT = 86400;
 const USAGE =
-  "usage: review-round.sh start <dispatch> <round> | wait|teardown <dispatch> <round> <repo> [<lens>:<lane>...]";
+  "usage: run review-round start <dispatch> <round> | wait|teardown <dispatch> <round> <repo> [<lens>:<lane>...]";
 
 function die(msg: string): never {
   console.error(`review-round: ${msg}`);
@@ -219,7 +220,7 @@ function scratch(repo: string, ticket: string, lens: string, lane: string): stri
 }
 
 function unswitch(s: string, ticket: string): string {
-  const k = run(join(HERE, "cut-scratch.sh"), ["--kind", s]);
+  const k = run(join(HERE, "run"), ["cut-scratch", "--kind", s]);
   if (k.code === 0) return "";
   const ref = run("git", ["-C", s, "symbolic-ref", "-q", "--short", "HEAD"]);
   if (ref.code !== 0) return "";
@@ -281,12 +282,12 @@ if (import.meta.main) {
 
   const record = (text: string, ...logArgs: string[]): void => {
     console.log(text);
-    const rl = run(join(HERE, "run-log.sh"), [D, text]);
+    const rl = run(join(HERE, "run"), ["run-log", D, text]);
     if (rl.code !== 0) {
       console.log(`NOT RECORDED in run-log.md: ${text}`);
       (globalThis as Record<string, unknown>).UNRECORDED = 1;
     }
-    const la = run(join(HERE, "log-action.sh"), [D, "coachman", ...logArgs]);
+    const la = run(join(HERE, "run"), ["log-action", D, "coachman", ...logArgs]);
     if (la.code !== 0) {
       console.log(`NOT RECORDED in actions.jsonl: ${logArgs.join(" ")}`);
       (globalThis as Record<string, unknown>).UNRECORDED = 1;
@@ -326,7 +327,8 @@ if (import.meta.main) {
     console.log(
       `review-round: round ${R}, ${n} reviewers, ${leftStr}s left of its ${lim}s limit (${src})`,
     );
-    const wf = run(join(HERE, "wait-for-markers.sh"), [
+    const wf = run(join(HERE, "run"), [
+      "wait-for-markers",
       LOGS,
       `review-r${R}-*.done`,
       String(n),
@@ -341,12 +343,33 @@ if (import.meta.main) {
       expected += ` ${f} `;
       if (!existsSync(join(LOGS, f))) missing.push(i);
     }
+    // A reviewer whose launch ended on a provider wall is recorded as DEGRADED with the
+    // provider's message, as a timeout is: the round closes without waiting for it (C11).
+    // A walled reviewer takes part in the next round as any DEGRADED lane does (C12).
+    (globalThis as Record<string, unknown>).UNRECORDED = 0;
+    const wallLines: Array<[string, string, string]> = [];
+    for (let i = 0; i < n; i++) {
+      if (missing.includes(i)) continue;
+      const [lens, lane] = reviewers[i]!;
+      const w = wallFor(D, lane, lens, R);
+      if (w !== null) wallLines.push([lane, lens, w.message]);
+    }
     if (missing.length === 0) {
       if (rc === 3) {
         console.log(
           "review-round: every marker was in by the time the reviewers were named; none timed out",
         );
       }
+      for (const [lane, lens, message] of wallLines) {
+        console.log(`WALL ${lens} ${lane}: DEGRADED, provider wall: "${message}"`);
+        record(
+          `${lane} ${lens}: DEGRADED, provider wall: "${message}"`,
+          "degrade",
+          lane,
+          `${lens} r${R}: provider wall: "${message}"`,
+        );
+      }
+      if ((globalThis as Record<string, unknown>).UNRECORDED) process.exit(4);
       process.exit(0);
     }
     if (rc === 0) {
@@ -367,7 +390,6 @@ if (import.meta.main) {
       );
     }
 
-    (globalThis as Record<string, unknown>).UNRECORDED = 0;
     const reported = n - missing.length;
     record(
       `round ${R}: WAIT-TIMEOUT after ${lim}s; ${reported} of ${n} reviewers reported`,
@@ -380,12 +402,21 @@ if (import.meta.main) {
       console.log(`TIMEOUT ${lens} ${lane}: DEGRADED, timeout`);
       record(`${lane} ${lens}: DEGRADED, timeout`, "degrade", lane, `${lens} r${R}: timeout`);
     }
+    for (const [lane, lens, message] of wallLines) {
+      console.log(`WALL ${lens} ${lane}: DEGRADED, provider wall: "${message}"`);
+      record(
+        `${lane} ${lens}: DEGRADED, provider wall: "${message}"`,
+        "degrade",
+        lane,
+        `${lens} r${R}: provider wall: "${message}"`,
+      );
+    }
     const stopPids: Array<number | null> = [];
     for (const i of missing) {
       const s = scratch(REPO, TICKET, reviewers[i]?.[0], reviewers[i]?.[1]);
       if (existsSync(s)) {
         const stopOut = join(LOGS, `.stop-r${R}-${i}`);
-        const child = run(join(HERE, "host.sh"), ["stop", s]);
+        const child = run(join(HERE, "run"), ["host", "stop", s]);
         writeFileSync(stopOut, child.out + child.err);
         stopPids.push(child.code);
       } else {
@@ -451,7 +482,7 @@ if (import.meta.main) {
       why = "the shell that ran this works in it; run teardown from outside it";
     }
     if (!why) {
-      const stopR = run(join(HERE, "host.sh"), ["stop", s]);
+      const stopR = run(join(HERE, "run"), ["host", "stop", s]);
       if (stopR.code !== 0) {
         why = `it could not be stopped: ${stopR.out + stopR.err}`;
       } else {
@@ -463,7 +494,7 @@ if (import.meta.main) {
           console.log(`${s}: ${out}`);
           record(`${lane} ${lens}: at teardown, ${out}`, "note", s, `r${R}: at teardown, ${out}`);
         }
-        const closeR = run(join(HERE, "host.sh"), ["close", s]);
+        const closeR = run(join(HERE, "run"), ["host", "close", s]);
         if (closeR.code !== 0) {
           why = `its space was not closed: ${closeR.out + closeR.err}`;
         } else {
@@ -472,7 +503,7 @@ if (import.meta.main) {
             console.log(`${s}: ${un}`);
             record(`${basename(s)}: ${un}`, "note", s, `r${R}: ${un}`);
           }
-          const rmR = run(join(HERE, "cut-scratch.sh"), ["--remove", REPO, s]);
+          const rmR = run(join(HERE, "run"), ["cut-scratch", "--remove", REPO, s]);
           if (rmR.code !== 0) {
             why = `it was not removed: ${rmR.out + rmR.err}`;
           }
@@ -482,7 +513,8 @@ if (import.meta.main) {
     if (!why) {
       console.log(`removed ${s}`);
       removed += 1;
-      const la = run(join(HERE, "log-action.sh"), [
+      const la = run(join(HERE, "run"), [
+        "log-action",
         D,
         "coachman",
         "teardown",
@@ -507,7 +539,7 @@ if (import.meta.main) {
   const summary = `round ${R}: removed ${removed} of ${reviewers.length} scratches${
     gone === 0 ? "" : `, ${gone} already gone`
   }${kept === 0 ? "" : `, ${kept} left in place`}`;
-  const rl = run(join(HERE, "run-log.sh"), [D, summary]);
+  const rl = run(join(HERE, "run"), ["run-log", D, summary]);
   if (rl.code !== 0) console.log(`NOT RECORDED in run-log.md: round ${R} teardown`);
   process.exit(kept === 0 ? 0 : 1);
 }

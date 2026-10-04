@@ -1,4 +1,4 @@
-// Tests beside scripts/github.ts, moved from its --self-test on #109: 29 controls.
+// Tests beside scripts/github.ts, moved from its --self-test on #109: 35 controls.
 // Each CLI test rewrites the stub state it needs, so it passes alone as well as in file order.
 // Failure-only byte dumps (catA) are dropped: expect() shows the mismatch itself.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { pyLower } from "./lib/text.ts";
 import { DATE_PREFIX_RE, NONWORD_RE, NUMBER_RE } from "./github";
 
-const SELF = join(import.meta.dir, "github.sh");
+const SELF = join(import.meta.dir, "run");
 const BOARD =
   '{"data": {"repository": {"projectsV2": {"nodes": [{"id": "PVT_1", "number": 1, ' +
   '"title": "r", "closed": false, "url": "https://github.com/users/o/projects/1", ' +
@@ -78,10 +78,14 @@ case "$1 $2" in
   "issue create") printf 'create\\n' >> "$d/creates.log"; echo "https://github.com/o/r/issues/60";;
   "search issues") printf '%s\\n' "$*" >> "$d/searches.log"; cat "$d/search.json" ;;
   "issue edit")
-    f="" prev=""
-    for a in "$@"; do [ "$prev" = --body-file ] && f=$a; prev=$a; done
+    f="" prev="" body=0
+    for a in "$@"; do [ "$prev" = --body-file ] && { f=$a; body=1; }; prev=$a; done
     printf 'call:%s\\n' "$(printf ' [%s]' "$@")" >> "$d/edits.log"
-    cp -- "$f" "$d/edited-body" ;;
+    if [ $body = 1 ]; then cp -- "$f" "$d/edited-body"; fi ;;
+  "label list")
+    if [ -f "$d/repo-labels.json" ]; then cat "$d/repo-labels.json"; else echo '[]'; fi ;;
+  "label create")
+    printf 'create:%s\\n' "$*" >> "$d/labels.log"; echo '{}' ;;
   *) echo "stub gh: unexpected: $*" >&2; exit 1 ;;
 esac
 `;
@@ -92,7 +96,7 @@ let bin = "";
 let repo = "";
 
 function ghSh(args: string[]): { code: number; out: string; err: string } {
-  const r = spawnSync("bash", [SELF, repo, ...args], {
+  const r = spawnSync(SELF, ["github", repo, ...args], {
     encoding: "utf8",
     env: {
       ...process.env,
@@ -103,7 +107,7 @@ function ghSh(args: string[]): { code: number; out: string; err: string } {
   return { code: r.status ?? -1, out: r.stdout ?? "", err: r.stderr ?? "" };
 }
 
-function stored(n: number, file: string): void {
+function stored(n: number, file: string, labels: string[] = []): void {
   const body = readFileSync(file, "utf8");
   const obj = {
     data: {
@@ -116,13 +120,21 @@ function stored(n: number, file: string): void {
           stateReason: null,
           url: `https://github.com/o/r/issues/${n}`,
           createdAt: "2026-09-23T00:00:00Z",
-          labels: { nodes: [] },
+          labels: { nodes: labels.map((name) => ({ name })) },
           comments: { nodes: [] },
         },
       },
     },
   };
   writeFileSync(join(S, `issue-${n}.json`), `${JSON.stringify(obj)}\n`);
+}
+
+function labelsLog(): string {
+  try {
+    return readFileSync(join(S, "labels.log"), "utf8");
+  } catch {
+    return "";
+  }
 }
 
 function editsCount(): number {
@@ -488,5 +500,105 @@ describe("create and search", () => {
     }
     const lastSearch = searchesLog.trimEnd().split("\n").pop() ?? "";
     expect(lastSearch.includes('"Tool fault in scripts/x.sh" --repo o/r')).toBe(true);
+  }, 30000);
+});
+
+describe("labels and titles", () => {
+  test("label add creates the missing repo label, then adds it", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"));
+    rmSync(join(S, "labels.log"), { force: true });
+    rmSync(join(S, "repo-labels.json"), { force: true });
+    writeFileSync(join(S, "edits.log"), "");
+    const r = ghSh(["label", "7", "add", "ready"]);
+    expect(r.code).toBe(0);
+    expect(r.out.trim()).toBe("#7: label added ready");
+    const created = labelsLog();
+    expect(created.includes("create:")).toBe(true);
+    expect(created.includes("label create ready")).toBe(true);
+    const log = readFileSync(join(S, "edits.log"), "utf8");
+    expect(log.includes("[--add-label] [ready]")).toBe(true);
+  }, 30000);
+
+  test("label add uses the repo label when it exists, creating nothing", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"));
+    writeFileSync(join(S, "repo-labels.json"), '[{"name": "ready"}]\n');
+    rmSync(join(S, "labels.log"), { force: true });
+    writeFileSync(join(S, "edits.log"), "");
+    try {
+      const r = ghSh(["label", "7", "add", "ready"]);
+      expect(r.code).toBe(0);
+      expect(labelsLog()).toBe("");
+      const log = readFileSync(join(S, "edits.log"), "utf8");
+      expect(log.includes("[--add-label] [ready]")).toBe(true);
+    } finally {
+      rmSync(join(S, "repo-labels.json"), { force: true });
+    }
+  }, 30000);
+
+  test("label remove drops the label without creating anything", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"), ["ready"]);
+    rmSync(join(S, "labels.log"), { force: true });
+    writeFileSync(join(S, "edits.log"), "");
+    const r = ghSh(["label", "7", "remove", "ready"]);
+    expect(r.code).toBe(0);
+    expect(r.out.trim()).toBe("#7: label removed ready");
+    expect(labelsLog()).toBe("");
+    const log = readFileSync(join(S, "edits.log"), "utf8");
+    expect(log.includes("[--remove-label] [ready]")).toBe(true);
+  }, 30000);
+
+  test("read shows the issue's labels", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"), ["ready", "blocked"]);
+    const r = ghSh(["read", "7"]);
+    expect(r.code).toBe(0);
+    expect(r.out.split("\n")).toContain("labels: ready, blocked");
+  }, 30000);
+
+  test("has-label answers exact membership, and a comma in a name is one label", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"), ["blocked, ready"]);
+    const absent = ghSh(["has-label", "7", "ready"]);
+    expect(absent.code).toBe(0);
+    expect(absent.out.trim()).toBe("absent");
+    const folded = ghSh(["has-label", "7", "BLOCKED, READY"]);
+    expect(folded.code).toBe(0);
+    expect(folded.out.trim()).toBe("present");
+    const present = ghSh(["has-label", "7", "blocked, ready"]);
+    expect(present.code).toBe(0);
+    expect(present.out.trim()).toBe("present");
+  }, 30000);
+
+  test("title retitles the issue", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"));
+    writeFileSync(join(S, "edits.log"), "");
+    const r = ghSh(["title", "7", "A new title"]);
+    expect(r.code).toBe(0);
+    expect(r.out.trim()).toBe("#7: title changed");
+    const log = readFileSync(join(S, "edits.log"), "utf8");
+    expect(log.includes("[--title] [A new title]")).toBe(true);
+    expect(log.includes("[--body-file]")).toBe(false);
+  }, 30000);
+
+  test("a state change leaves the ready label alone", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"), ["ready"]);
+    writeFileSync(join(S, "edits.log"), "");
+    const blocked = ghSh(["state", "7", "blocked"]);
+    expect(blocked.code).toBe(0);
+    let log = readFileSync(join(S, "edits.log"), "utf8");
+    expect(log.includes("[--add-label] [blocked]")).toBe(true);
+    expect(log.includes("--remove-label")).toBe(false);
+    stored(7, join(tmp, "lf.md"), ["ready", "blocked"]);
+    writeFileSync(join(S, "edits.log"), "");
+    const todo = ghSh(["state", "7", "todo"]);
+    expect(todo.code).toBe(0);
+    log = readFileSync(join(S, "edits.log"), "utf8");
+    expect(log.includes("[--remove-label] [blocked]")).toBe(true);
+    expect(log.includes("[ready]")).toBe(false);
   }, 30000);
 });

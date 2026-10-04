@@ -2,11 +2,15 @@
 // the markers present, minutes since anything in it changed, and what the postmaster does
 // next. This is the postmaster's poll; it reads files and nothing else. A pending escalation
 // from the postmaster to the user is printed first, since it is what everything else may
-// be waiting on. The waiting list itself is kept by host.sh leg waiting, never by hand.
+// be waiting on. The waiting list itself is kept by run host leg waiting, never by hand.
 //
-//   runs-status.sh <project-run-root>        e.g. <project>/.postmaster/runs
+//   run runs-status <project-run-root>        e.g. <project>/.postmaster/runs
 //
-//   next   USER      the postmaster has put this run's question to the user and waits for the
+//   next   WALL      a lane stopped on its provider's usage limit and the user has not been
+//                    told yet (a `wall` line with no later `told` line): after `-` and before
+//                    everything else, except USER when `.waiting-on-user` is newer than the
+//                    newest untold wall
+//          USER      the postmaster has put this run's question to the user and waits for the
 //                    answer (.waiting-on-user)
 //          RULE      an escalation is waiting (.escalation-ready)
 //          GATE      the ship card is complete (.card-ready)
@@ -23,14 +27,18 @@
 //          WAIT      a leg is running and its files are moving
 //          -         the manifest says done or abandoned
 //
+// A run paused for a wall — every wall told, none ruled — sits above the idle INSPECT rule:
+// it reads USER, never stalled, for as long as the pause lasts.
+//
 // Idle time ignores the marker files themselves, so touching a marker never hides a stall.
 //
 //   exit 0  listed (an empty root lists nothing)
 //   exit 1  usage, or no such root
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { run } from "./lib/proc.ts";
+import { processStart } from "./lib/processes.ts";
 import { pyWords } from "./lib/text.ts";
+import { readWalls } from "./walls.ts";
 
 interface RunRow {
   run: string;
@@ -104,23 +112,7 @@ function ownerAlive(d: string, leg: string): boolean {
     return false;
   }
   const pid = Number(pidS.replace(/_/gu, ""));
-  try {
-    if (statSync("/proc/self").isDirectory()) {
-      let rest: string[];
-      try {
-        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-        rest = pyWords(stat.slice(stat.lastIndexOf(")") + 1));
-      } catch {
-        return false;
-      }
-      return rest.length > 0 && rest[0] !== "Z" && rest.length > 19 && rest[19] === start;
-    }
-  } catch {
-    // No /proc/self: fall through to ps.
-  }
-  const r = run("ps", ["-o", "stat=,lstart=", "-p", String(pid)], { env: { LC_ALL: "C" } });
-  const f = pyWords(r.out);
-  return f.length >= 6 && !f[0]!.startsWith("Z") && f.slice(1, 6).join(" ") === start;
+  return processStart(pid) === start;
 }
 
 export function status(root: string): number {
@@ -239,8 +231,25 @@ export function status(root: string): number {
     const phaseMax = tailMax(`coachman-leg-${leg}-phase-`, "");
     const intentMax = tailMax(`coachman-leg-${leg}-intent-`, ".json");
     const gap = phaseMax > lastAttempt || intentMax > lastAttempt;
+    // The walls: an untold wall is the loudest thing a run can hold, after a closed run,
+    // and wins over a busy leg and over a question put to the user before it (criterion 8).
+    // `.waiting-on-user` newer than the newest untold wall means the user already has this
+    // run's question in hand, so it reads USER instead.
+    const walls = readWalls(d);
+    const untold = walls.filter((w) => !w.told);
+    const newestUntold = untold.reduce((best, w) => Math.max(best, Date.parse(w.ts) || 0), 0);
+    let waitingMtime = 0;
+    if (markers.includes(".waiting-on-user")) {
+      try {
+        waitingMtime = statSync(join(d, ".waiting-on-user")).mtimeMs;
+      } catch {
+        /* the marker went away between listing and stat: reads as older */
+      }
+    }
     let next: string;
     if (stage === "done" || stage === "abandoned") next = "-";
+    else if (untold.length > 0)
+      next = markers.includes(".waiting-on-user") && waitingMtime > newestUntold ? "USER" : "WALL";
     else if (markers.includes(".waiting-on-user")) next = "USER";
     else if (markers.includes(".escalation-ready")) next = "RULE";
     else if (markers.includes(".card-ready")) next = "GATE";
@@ -257,6 +266,9 @@ export function status(root: string): number {
     else if (done) next = "DISPATCH";
     else if (exited) next = "INSPECT";
     else if (markers.some((mk) => mk.startsWith(".checkpoint-"))) next = "READ";
+    // A run paused for a wall — every wall told, none ruled — is waiting on the user's
+    // ruling, not stalled: it sits above the idle INSPECT rule (criterion 10).
+    else if (walls.some((w) => !w.ruled)) next = "USER";
     else if (idleMin >= 30) next = "INSPECT";
     else next = "WAIT";
 
@@ -312,7 +324,7 @@ export function walkFiles(dir: string, fn: (path: string) => void): void {
 const argv = process.argv.slice(2);
 if (import.meta.main) {
   if (argv.length !== 1) {
-    console.error("usage: runs-status.sh <project-run-root>");
+    console.error("usage: run runs-status <project-run-root>");
     process.exit(1);
   }
   const raw = argv[0] as string;

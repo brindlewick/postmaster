@@ -1,9 +1,9 @@
 // Check observed changes against the paths lane records name, by lane.
 //
-//   reach.ts stream <dispatch> <lane> <events> <own-folder>
-//   reach.ts before <dispatch> <round>
-//   reach.ts check <dispatch> workhorses|r<round>|card
-//   reach.ts restore <dispatch> r<round>
+//   run reach stream <dispatch> <lane> <events> <own-folder>
+//   run reach before <dispatch> <round>
+//   run reach check <dispatch> workhorses|r<round>|card
+//   run reach restore <dispatch> r<round>
 //
 //   exit 0  checked, no findings or notes
 //   exit 1  the check could not run
@@ -115,8 +115,7 @@ interface ReachEvent {
 
 const HERE = import.meta.dir;
 const TOOL = toolRoot(import.meta);
-const LOG_ACTION = join(TOOL, "scripts", "log-action.ts");
-const RUN_LOG = join(TOOL, "scripts", "run-log.ts");
+const RUN = join(TOOL, "scripts", "run");
 
 const DATA_RE = /^[ \t\r\n]*\{[^]*\}[ \t\r\n]*$/u;
 
@@ -1093,28 +1092,13 @@ function writeAction(
   target: string,
   detail: string,
 ): void {
-  const result = run(Bun.which("bun") ?? "bun", [
-    "--no-env-file",
-    "--config=/dev/null",
-    LOG_ACTION,
-    info.dispatch,
-    actor,
-    action,
-    target,
-    detail,
-  ]);
+  const result = run(RUN, ["log-action", info.dispatch, actor, action, target, detail]);
   if (result.code !== 0)
     throw new Error(`log-action failed: ${result.err.trim() || result.out.trim()}`);
 }
 
 function writeRunLog(info: RunInfo, value: string): void {
-  const result = run(Bun.which("bun") ?? "bun", [
-    "--no-env-file",
-    "--config=/dev/null",
-    RUN_LOG,
-    info.dispatch,
-    value,
-  ]);
+  const result = run(RUN, ["run-log", info.dispatch, value]);
   if (result.code !== 0)
     throw new Error(`run-log failed: ${result.err.trim() || result.out.trim()}`);
 }

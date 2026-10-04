@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { toolRoot } from "./lib/paths.ts";
 import { accept } from "./parallel-runs-acceptance";
 
-const wrapper = join(import.meta.dir, "parallel-runs-acceptance.sh");
+const wrapper = join(import.meta.dir, "run");
 const ROOT = toolRoot(import.meta);
 const POST = "skills/postmaster/postmaster.md";
 const COACH = "skills/postmaster/coachman.md";
@@ -27,11 +27,11 @@ const TWO_TICKETS =
   "Two tickets touching the same route table, " +
   "transport interface or shared module do not run at the same time.";
 const ORDER_LINE =
-  "6. **Order them.** Dependencies first: a ticket that needs another's change waits " +
+  "5. **Order them.** Dependencies first: a ticket that needs another's change waits " +
   "for it to land. Record the order and the reason in `<runs>/postmaster/plan.md`, " +
   "current state only.";
 const ORDER_SHORT =
-  "6. **Order them.** Dependencies first: a ticket that needs another's change waits " +
+  "5. **Order them.** Dependencies first: a ticket that needs another's change waits " +
   "for it to land.";
 
 let tmp = "";
@@ -84,7 +84,7 @@ function plantStale(dir: string): void {
   cpSync(clean, dir, { recursive: true });
   writeFileSync(
     join(dir, POST),
-    "6. **Order them.** Dependencies first; then the file surfaces. " +
+    "5. **Order them.** Dependencies first; then the file surfaces. " +
       `${TWO_TICKETS}\n` +
       "- Never launch more runs than `team.max_runs`, " +
       "and never two runs on overlapping file surfaces.\n",
@@ -166,7 +166,7 @@ function has(output: string, line: string): void {
 }
 
 function runCli(...args: string[]): { code: number; out: string } {
-  const r = spawnSync(wrapper, args, { encoding: "utf8" });
+  const r = spawnSync(wrapper, ["parallel-runs-acceptance", ...args], { encoding: "utf8" });
   return { code: r.status ?? -1, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
 
@@ -178,11 +178,11 @@ function freshCopy(name: string): string {
 }
 
 describe("each check fires on its own fault alone", () => {
-  test("step 6 file surfaces", () => {
+  test("order-them file surfaces", () => {
     checkAlone(
       POST,
-      `${POST}: still says step 6 orders by file surfaces`,
-      "6. **Order them.** Dependencies first; then the file surfaces.",
+      `${POST}: still says the Order-them step orders by file surfaces`,
+      "5. **Order them.** Dependencies first; then the file surfaces.",
     );
   }, 30000);
   test("two tickets one module", () => {
@@ -233,7 +233,7 @@ describe("each check fires on its own fault alone", () => {
       "The old overlapping file surfaces rule is gone.",
     );
   }, 30000);
-  test("step 6 kept", () => {
+  test("order-them kept", () => {
     checkWithout(
       POST,
       `${POST}: no longer orders tickets in an Order-them step`,
@@ -247,10 +247,10 @@ describe("each check fires on its own fault alone", () => {
       dropLines("team.max_runs"),
     );
   }, 30000);
-  test("step 6 dependencies", () => {
+  test("order-them dependencies", () => {
     checkWithout(
       POST,
-      `${POST}: no longer orders step 6 by dependencies`,
+      `${POST}: no longer orders by dependencies in the Order-them step`,
       sub("Dependencies first:", "Order kept:"),
     );
   }, 30000);
@@ -261,18 +261,18 @@ describe("each check fires on its own fault alone", () => {
       dropLines("Concurrency note"),
     );
   }, 30000);
-  test("step 6 independence", () => {
+  test("order-them independence", () => {
     checkWithout(
       POST,
-      `${POST}: no longer orders step 6 by dependencies`,
+      `${POST}: no longer orders by dependencies in the Order-them step`,
       sub("Dependencies first:", "Order kept for independence of lanes:"),
     );
   }, 30000);
-  test("step 6 unrelated text", () => {
+  test("order-them unrelated text", () => {
     checkWithout(
       POST,
       `${POST}: no longer orders tickets in an Order-them step`,
-      sub("6. **Order them.** Dependencies first:", "Order them whenever. Dependencies are fine:"),
+      sub("5. **Order them.** Dependencies first:", "Order them whenever. Dependencies are fine:"),
     );
   }, 30000);
   test("max_runs relocated", () => {
@@ -382,8 +382,8 @@ describe("all faults together", () => {
   test("stale tree lists 11 faults", () => {
     expect(staleOut.replace(/\n+$/u, "").split("\n").length).toBe(11);
   }, 30000);
-  test("stale step 6 surfaces", () => {
-    has(staleOut, `${POST}: still says step 6 orders by file surfaces`);
+  test("stale order-them surfaces", () => {
+    has(staleOut, `${POST}: still says the Order-them step orders by file surfaces`);
   }, 30000);
   test("stale two tickets", () => {
     has(staleOut, `${POST}: still says two tickets on one module do not run together`);
@@ -466,12 +466,12 @@ describe("edges: encodings, permissions, reflows and links", () => {
       chmodSync(join(dir, "skills/hidden"), 0o755);
     }
   }, 30000);
-  test("a reflowed step 6 still passes, silently", () => {
+  test("a reflowed Order-them step still passes, silently", () => {
     const dir = freshCopy("reflow");
     writeFileSync(
       join(dir, POST),
       "## Stage A: the stream becomes tickets\n" +
-        "6. **Order them.**\n" +
+        "5. **Order them.**\n" +
         "   Read the stream.\n" +
         "   Count the tickets.\n" +
         "   Name the owners.\n" +
@@ -490,7 +490,7 @@ describe("edges: encodings, permissions, reflows and links", () => {
     writeFileSync(
       join(dir, POST),
       "## Stage A: the stream becomes tickets\n" +
-        "6. **Order\n" +
+        "5. **Order\n" +
         "them.** Dependencies first: a ticket that needs another's change waits " +
         "for it to land.\n" +
         "## Hard rules\n" +

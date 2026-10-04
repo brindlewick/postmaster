@@ -1,18 +1,23 @@
-// Find every script reference in the postmaster skill that would not resolve from an installed
-// skill. An installed skill is a link from a harness's skills folder into the postmaster repo,
-// and a session reaches the repo only as <tool>, the path SKILL.md finds from that link once.
-// A reference resolves from any working directory only when it goes through <tool> and names
-// a script the repo has. The run's pinned checkout goes through <rt> instead, resolved per run
-// by run-meta.sh path; it is a checkout of the same repo, so the same existence check applies.
+// Find every script reference in the postmaster and clerk skills that would not resolve from
+// an installed skill. An installed skill is a link from a harness's skills folder into the
+// postmaster repo, and a session reaches the repo only as <tool>, the path SKILL.md finds from
+// that link once. A reference resolves from any working directory only when it goes through
+// <tool> and names a script the repo has. The run's pinned checkout goes through <rt> instead,
+// resolved per run by run-meta path. A pinned checkout can use an older entry form, so runbooks
+// invoke it through run-meta run-pinned rather than naming a script under <rt> themselves.
 //
-//   skill-refs.sh [<file>...]          default: skills/postmaster/*.md beside this script's repo
-//   skill-refs.sh --fix [<file>...]    put <tool>/ before every bare scripts/ path, in place
+//   scripts/run skill-refs [<file>...]          default: skills/postmaster/*.md and skills/clerk/*.md
+//   scripts/run skill-refs --fix [<file>...]    upgrade old paths and prefix bare tool paths
 //
-// A reference is any scripts/ path. It is a fault when it is bare (scripts/x.sh, which resolves
+// A reference is any scripts/ path. It is a fault when it is bare (scripts/run x, which resolves
 // only from the repo's own root), when it reaches scripts/ some other way (../../scripts/x.sh),
-// or when it goes through <tool> or <rt> to a script the repo does not have. A path under
+// or when it goes through <tool> to a script the repo does not have. A path under
 // another placeholder or variable, such as <repo>/scripts/, is that directory's and not the tool's.
-// --fix rewrites the bare form only, so it can be run again after a rebase and changes nothing
+// --fix also upgrades old .sh names resolved by scripts/run, so a rebase adding a script
+// converts that reference without a fixed name list (a file:line citation keeps its line
+// on the .ts path). Old names under <rt>/ are left alone:
+// a pinned checkout can predate the entry, so those convert through run-meta run-pinned.
+// A second run changes nothing.
 // the second time; the check that follows it names whatever it could not fix.
 //
 //   exit 0  every reference resolves
@@ -25,6 +30,9 @@ import { toolRoot } from "./lib/paths.ts";
 const REF = /scripts\/[A-Za-z0-9._-]*/gu;
 const BARE = /(?<![A-Za-z0-9_./-])scripts\//gu;
 const OTHER = /(<[A-Za-z0-9_-]+>|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)\/$/u;
+const OLD = /scripts\/([A-Za-z0-9_-]+)\.sh(?=$|[^A-Za-z0-9_.-]|[.-](?![A-Za-z0-9_-]))/gu;
+const DIRECT_BUN =
+  /(?<![A-Za-z0-9_])bun[ \t]+[^\n]*?scripts\/[A-Za-z0-9_-]+\.ts(?=$|[^A-Za-z0-9_])/gu;
 
 type Fault = { file: string; line: number; why: string; ref: string };
 
@@ -36,6 +44,14 @@ export function refs(
 ): { faults: Fault[]; code: number; fixMessages: string[] } {
   const faults: Fault[] = [];
   const fixMessages: string[] = [];
+  try {
+    for (const name of readdirSync(join(root, "scripts"))) {
+      if (name.endsWith(".sh") && isFile(join(root, "scripts", name)))
+        faults.push({ file: `scripts/${name}`, line: 0, why: "wrapper remains", ref: name });
+    }
+  } catch {
+    faults.push({ file: join(root, "scripts"), line: 0, why: "no scripts directory", ref: "" });
+  }
   for (const f of files) {
     let text: string;
     try {
@@ -46,20 +62,41 @@ export function refs(
       return { faults, code: 2, fixMessages };
     }
     if (mode === "fix") {
-      const new_ = text.replace(BARE, "<tool>/scripts/");
-      const _n = text.split(BARE).length - 1;
-      // count matches of BARE
+      // One bare reference counts once, however many passes rewrite it, and
+      // a <tool>-prefixed old name counts once more for its entry upgrade.
       let count = 0;
       for (const _m of text.matchAll(BARE)) count += 1;
+      let new_ = text.replace(OLD, (old, name: string, offset: number) => {
+        const before = text.slice(0, offset);
+        // A pinned checkout can predate the entry, so an old-form reference
+        // under <rt>/ is left for conversion through run-meta run-pinned.
+        if (before.endsWith("<rt>/")) return old;
+        if (OTHER.test(before) && !before.endsWith("<tool>/")) return old;
+        if (!scriptExists(root, name)) return old;
+        if (before.endsWith("<tool>/")) count += 1;
+        // A file:line citation names the file, not an invocation: the file's
+        // new name keeps the line.
+        const rest = text.slice(offset + old.length);
+        if (rest.startsWith(":")) return `scripts/${name}.ts`;
+        return `scripts/run ${name}`;
+      });
+      new_ = new_.replace(BARE, "<tool>/scripts/");
       if (count > 0) {
         writeFileSync(f, new_, "utf8");
-        fixMessages.push(`${f}: ${count} reference(s) now go through <tool>`);
+        fixMessages.push(`${f}: ${count} reference(s) updated`);
       }
       text = new_;
     }
     const lines = text.split("\n");
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i] ?? "";
+      for (const match of line.matchAll(DIRECT_BUN))
+        faults.push({
+          file: f,
+          line: i + 1,
+          why: "direct bun script invocation bypasses scripts/run",
+          ref: match[0],
+        });
       REF.lastIndex = 0;
       for (const m of line.matchAll(REF)) {
         const before = line.slice(0, m.index ?? 0);
@@ -70,13 +107,32 @@ export function refs(
         const name = ref.slice("scripts/".length);
         if (before.endsWith("<tool>/") || before.endsWith("<rt>/")) {
           const which = before.endsWith("<tool>/") ? "<tool>/" : "<rt>/";
-          if (name !== "" && !isFile(join(root, "scripts", name))) {
+          const after = line.slice((m.index ?? 0) + (m[0] ?? "").length);
+          if (name === "lib" && libScript(after, root)) {
+            // A lib script the entry resolves: <tool>/scripts/lib/<name>.ts.
+          } else if (name !== "" && !isFile(join(root, "scripts", name))) {
+            const pinned = which === "<rt>/" && name.endsWith(".sh");
             faults.push({
               file: f,
               line: i + 1,
-              why: "no such script in the postmaster repo",
+              why: pinned
+                ? "pinned references convert through run-meta run-pinned"
+                : "no such script in the postmaster repo",
               ref: `${which}${ref}`,
             });
+          } else if (name === "run") {
+            const token = /^[ \t]+([^ \t]+)/u.exec(after)?.[1] ?? "";
+            const invoked = token
+              .replace(/[^A-Za-z0-9_-]+$/u, "")
+              .replace(/['"]s$/u, "")
+              .replace(/[^A-Za-z0-9_-]+$/u, "");
+            if (invoked !== "" && !scriptExists(root, invoked))
+              faults.push({
+                file: f,
+                line: i + 1,
+                why: "no such script through scripts/run",
+                ref: `${which}${ref} ${invoked}`,
+              });
           }
         } else if (OTHER.test(before)) {
         } else if (before.endsWith("/")) {
@@ -108,6 +164,29 @@ function isFile(p: string): boolean {
   }
 }
 
+/** The runbook pages the bare check covers: the postmaster skill and the clerk skill. */
+export function defaultFiles(root: string): string[] {
+  const out: string[] = [];
+  for (const skill of ["postmaster", "clerk"]) {
+    const dir = join(root, "skills", skill);
+    for (const n of readdirSync(dir).filter((name) => name.endsWith(".md"))) out.push(join(dir, n));
+  }
+  return out;
+}
+
+function libScript(after: string, root: string): boolean {
+  const rest = /^\/([A-Za-z0-9_-]+)\.ts(?=$|[^A-Za-z0-9_.-]|[.-](?![A-Za-z0-9_-]))/u.exec(after);
+  return !!rest && isFile(join(root, "scripts", "lib", `${rest[1]}.ts`));
+}
+
+function scriptExists(root: string, name: string): boolean {
+  return (
+    /^[A-Za-z0-9_-]+$/u.test(name) &&
+    (isFile(join(root, "scripts", `${name}.ts`)) ||
+      isFile(join(root, "scripts", "lib", `${name}.ts`)))
+  );
+}
+
 function printFaults(faults: Fault[]): void {
   for (const f of faults) {
     console.log(`${f.file}:${f.line}: ${f.why}: ${f.ref}`);
@@ -121,29 +200,27 @@ if (import.meta.main) {
   if (argv[0] === "--fix") {
     mode = "fix";
     argv.shift();
-  } else if (argv[0]?.startsWith("-")) {
-    console.error("usage: skill-refs.sh [--fix] [<file>...]");
+  }
+  const root = toolRoot(import.meta);
+  if (argv[0]?.startsWith("-")) {
+    console.error("usage: scripts/run skill-refs [--fix] [<file>...]");
     process.exit(2);
   }
 
-  const ROOT = toolRoot(import.meta);
-
   let files = argv;
   if (files.length === 0) {
-    const dir = join(ROOT, "skills", "postmaster");
     try {
-      const entries = readdirSync(dir).filter((n) => n.endsWith(".md"));
-      files = entries.map((n) => join(dir, n));
+      files = defaultFiles(root);
       if (files.length === 0) {
-        console.error(`skill-refs: no skills/postmaster/*.md in ${ROOT}`);
+        console.error(`skill-refs: no skills/postmaster/*.md or skills/clerk/*.md in ${root}`);
         process.exit(2);
       }
     } catch {
-      console.error(`skill-refs: no skills/postmaster/*.md in ${ROOT}`);
+      console.error(`skill-refs: no skills/postmaster/*.md or skills/clerk/*.md in ${root}`);
       process.exit(2);
     }
   }
-  const { faults, code, fixMessages } = refs(ROOT, mode, files);
+  const { faults, code, fixMessages } = refs(root, mode, files);
   for (const m of fixMessages) process.stderr.write(`${m}\n`);
   printFaults(faults);
   process.exit(code);

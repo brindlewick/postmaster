@@ -20,6 +20,12 @@ function runGit(dir: string, args: string[]) {
   return run("git", ["-C", dir, ...args], { env: UNSET_GIT });
 }
 
+const T = process.argv[2];
+if (T === undefined) {
+  console.error("usage: run check-target <path>");
+  process.exit(1);
+}
+
 export interface TargetReach {
   code: number;
   out: string;

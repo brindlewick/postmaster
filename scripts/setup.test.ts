@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { tryTomlFile } from "./lib/data.ts";
 import { run } from "./lib/proc.ts";
 
-const SELF = join(import.meta.dir, "setup.sh");
+const SELF = join(import.meta.dir, "run");
 
 let tmp = "";
 let plainRc = -1;
@@ -51,6 +51,8 @@ function answers(name: string, extra?: string): void {
     "fallback.model=spare",
     "postmaster.harness=bash",
     "postmaster.model=pm",
+    "clerk.harness=claude",
+    "clerk.model=clerk-model",
   ];
   if (extra) lines.push(extra);
   writeFileSync(join(tmp, `${name}.answers`), `${lines.join("\n")}\n`, "utf8");
@@ -58,8 +60,8 @@ function answers(name: string, extra?: string): void {
 
 function runSetup(name: string, extraEnv: Record<string, string> = {}): number {
   const r = run(
-    "bash",
-    [SELF, "--answers", join(tmp, `${name}.answers`), "--config", join(tmp, `${name}.toml`)],
+    SELF,
+    ["setup", "--answers", join(tmp, `${name}.answers`), "--config", join(tmp, `${name}.toml`)],
     {
       env: {
         ...(process.env as Record<string, string>),
@@ -114,15 +116,89 @@ function planningLink(name: string): string {
 
 describe("positive controls", () => {
   test("setup lists confine, asks once after the probe, and defaults it to off", () => {
-    const keys = run("bash", [SELF, "--keys"]);
+    const keys = run(SELF, ["setup", "--keys"]);
     const out = readFileSync(join(tmp, "plain.out"), "utf8");
     const cfg = tryTomlFile(join(tmp, "plain.toml"));
     expect(keys.code).toBe(0);
     expect(keys.out).toContain("confine                    off");
+    expect(keys.out).toContain("clerk.harness");
+    expect(keys.out).toContain("clerk.model");
+    expect(keys.out).toContain("clerk.effort?");
+    expect(keys.out).toContain("clerk.env_file?");
     expect(plainRc).toBe(0);
     expect(cfg?.confine).toBe("off");
     expect(out).toContain("lane confinement:");
     expect(out.match(/Run lanes confined \(on\/off\)/gu)?.length).toBe(1);
+  }, 30000);
+
+  test("the adding verb inserts clerk in [team] and preserves the other config lines", () => {
+    const before = `[team]\nworkhorses = ["alpha", "beta"]\npostmaster = { harness = "claude", model = "pm" }\n\n[postmaster]\npoll_seconds = 9\n`;
+    writeFileSync(join(tmp, "legacy.toml"), before);
+    answers("legacy", "clerk.harness=claude");
+    const r = run(
+      "bash",
+      [
+        SELF,
+        "setup",
+        "--add-clerk",
+        "--answers",
+        join(tmp, "legacy.answers"),
+        "--config",
+        join(tmp, "legacy.toml"),
+      ],
+      {
+        env: { ...process.env, PATH: `${join(tmp, "bin")}:${process.env.PATH}` },
+      },
+    );
+    expect(r.code).toBe(0);
+    const after = readFileSync(join(tmp, "legacy.toml"), "utf8");
+    expect(after.replace('clerk = { harness = "claude", model = "clerk-model" }\n', "")).toBe(
+      before,
+    );
+    const team = tryTomlFile(join(tmp, "legacy.toml"))?.team as Record<string, unknown>;
+    expect(team.clerk).toBeDefined();
+    expect((team.clerk as Record<string, unknown>).harness).toBe("claude");
+    expect((team.clerk as Record<string, unknown>).model).toBe("clerk-model");
+  }, 30000);
+
+  test("the adding verb names a missing clerk harness or model", () => {
+    writeFileSync(join(tmp, "missing-clerk.toml"), `[team]\nworkhorses = ["alpha", "beta"]\n`);
+    writeFileSync(join(tmp, "missing-harness.answers"), "clerk.model=clerk-model\n");
+    const noHarness = run(
+      "bash",
+      [
+        SELF,
+        "setup",
+        "--add-clerk",
+        "--answers",
+        join(tmp, "missing-harness.answers"),
+        "--config",
+        join(tmp, "missing-clerk.toml"),
+      ],
+      {
+        env: { ...process.env, PATH: `${join(tmp, "bin")}:${process.env.PATH}` },
+      },
+    );
+    expect(noHarness.code).toBe(1);
+    expect(noHarness.err).toContain("clerk.harness");
+    writeFileSync(join(tmp, "missing-model.answers"), "clerk.harness=claude\n");
+    const noModel = run(
+      "bash",
+      [
+        SELF,
+        "setup",
+        "--add-clerk",
+        "--answers",
+        join(tmp, "missing-model.answers"),
+        "--config",
+        join(tmp, "missing-clerk.toml"),
+      ],
+      {
+        env: { ...process.env, PATH: `${join(tmp, "bin")}:${process.env.PATH}` },
+      },
+    );
+    expect(noModel.code).toBe(1);
+    expect(noModel.err).toContain("clerk.model");
   }, 30000);
 
   test("confine=on is written when Bubblewrap starts", () => {
@@ -163,8 +239,8 @@ describe("positive controls", () => {
   }, 30000);
 
   test("the written config resolves: the reviewers default to the workhorses, and security has its own", () => {
-    const r = run("bash", [
-      join(import.meta.dir, "reviewers.sh"),
+    const r = run(join(import.meta.dir, "run"), [
+      "reviewers",
       "lines",
       "--config",
       join(tmp, "lens.toml"),
@@ -290,8 +366,8 @@ describe("positive controls", () => {
     writeFileSync(ap, swapped, "utf8");
     const mixedBugRc = runSetup("mixed-bug");
     const out = readFileSync(join(tmp, "mixed-bug.out"), "utf8");
-    const er = run("bash", [
-      join(import.meta.dir, "reviewers.sh"),
+    const er = run(join(import.meta.dir, "run"), [
+      "reviewers",
       "eligible",
       "bug",
       "--config",

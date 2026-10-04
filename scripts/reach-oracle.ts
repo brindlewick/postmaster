@@ -1,6 +1,6 @@
 // Blind acceptance oracle for #202: the run layout the ticket's checks judge, with the
 // runners and readers the cases need. The cases in reach-oracle.test.ts run the ticket's
-// own interface (`scripts/reach.ts`, exit codes, the run log, `landing.sh card-block`,
+// own interface (`run reach`, exit codes, the run log, `run landing card-block`,
 // the change's own test files) and match only what the ticket pins. Lanes never see
 // these files; at harvest they are cherry-picked onto a scratch of each lane and run.
 // Covered: C1-C8, C10-C15, C17. Not covered: C9 and the C8/C12 escalation itself
@@ -50,16 +50,15 @@ export function need(r: Run, what: string): void {
 }
 
 export function reach(repoRoot: string, home: string, ...args: string[]): Run {
-  const r = spawnSync(
-    "bun",
-    ["--no-env-file", "--config=/dev/null", join(repoRoot, "scripts", "reach.ts"), ...args],
-    { encoding: "utf8", env: { ...process.env, HOME: home } },
-  );
+  const r = spawnSync(join(repoRoot, "scripts", "run"), ["reach", ...args], {
+    encoding: "utf8",
+    env: { ...process.env, HOME: home },
+  });
   return { code: r.status ?? -1, out: r.stdout ?? "", err: r.stderr ?? "" };
 }
 
 export function landing(repoRoot: string, home: string, ...args: string[]): Run {
-  const r = spawnSync(join(repoRoot, "scripts", "landing.sh"), args, {
+  const r = spawnSync(join(repoRoot, "scripts", "run"), ["landing", ...args], {
     encoding: "utf8",
     env: { ...process.env, HOME: home },
   });

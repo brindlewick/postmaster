@@ -1,0 +1,5 @@
+criteria the ticket numbers: 8
+all-not-shown          exit 0   summary-evidence: evidence shape holds for 8 criteria (8 not shown)
+one-missing            exit 2   summary-evidence: criterion 8 is missing from the evidence section
+cites-a-missing-file   exit 2   summary-evidence: criterion 1 evidence does not exist: .postmaster/verify/nope.txt
+one-shown              exit 0   summary-evidence: evidence shape holds for 8 criteria (7 not shown)

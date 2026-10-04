@@ -1,33 +1,44 @@
 // Take the steps that need no judgment, and wait until a run under a project's run root needs
-// the postmaster. Then print runs-status.sh's table, name each run that needs it with its NEXT,
+// the postmaster. Then print run runs-status's table, name each run that needs it with its NEXT,
 // and exit. This is the loop Stage D keeps in the background. A session that improvises this
 // look loses it on a restart and fires on runs it must leave alone.
 //
-//   runs-watch.sh <project-run-root> [--timeout <seconds>]
-//   runs-watch.sh --help
+//   run runs-watch <project-run-root> [--timeout <seconds>]
+//   run runs-watch --help
 //
-// Mechanical steps this script takes itself, logging each through log-action.sh with "the
+// Mechanical steps this script takes itself, logging each through run log-action with "the
 // watcher took it" in the detail. Every leg start runs from the run's own checkout
-// (`run-meta.sh path`, checked first): a checkout that does not serve its dispatch commit
+// (`run run-meta path`, checked first): a checkout that does not serve its dispatch commit
 // wakes the postmaster instead.
 //
-//   DISPATCH  the leg is done and its hand-off passes handoff-check.sh: dispatch the next leg
-//             turnpikes.sh legs lists, through `host.sh leg launch` (Stage C). The thread id
+//   DISPATCH  the leg is done and its hand-off passes run handoff-check: dispatch the next leg
+//             run turnpikes legs lists, through `run host leg launch` (Stage C) — but never
+//             while `run walls open <dispatch>` exits 1: an unruled provider wall stops the
+//             next leg, and the run is named with the open walls as the reason instead (D8).
+//             The thread id
 //             lands in the attempt record when the attempt ends, never at dispatch. A hand-off
-//             that fails, a turnpikes.sh legs that exits non-zero, no next leg after the ship
+//             that fails, a run turnpikes legs that exits non-zero, no next leg after the ship
 //             leg, or a launch it cannot complete are steps it could not complete: they wake
 //             the postmaster.
 //   RESUME    the attempt record says incomplete and the end is a transient provider error the
-//             harness adapter names (launch.sh transient, reading only the current launch's
+//             harness adapter names (run launch transient, reading only the current launch's
 //             stream lines past the skip in <run>/watcher.json, vetoing on any wall-like
 //             token): resume it on its recorded thread with the remount prompt through
-//             `host.sh leg resume`, at most three times per leg (the count is beside the skip
+//             `run host leg resume`, at most three times per leg (the count is beside the skip
 //             and survives a restart). A start that fails spends no retry: the count is
 //             restored and the refusal is logged. A fourth such end, a non-transient end, or
 //             a resume it cannot complete wakes the postmaster.
+//   RULE      when `.wall-pause` marks the escalation as a pause for a provider wall and
+//             `run walls open` exits 0 — every wall ruled — the pause is delivered here:
+//             `.wall-pause` and `.escalation-ready` come off and the leg resumes through
+//             `run host leg resume` with a prompt naming every wall's ruling, logged with
+//             "the watcher took it". A pause still open, or a delivery it cannot make, wakes
+//             the postmaster.
 //
-// Everything that needs judgment still wakes the postmaster: RULE (an escalation), GATE (a
-// ship card), READ (a checkpoint card), SPEC (a spec package), ASK (a recorded refusal or
+// Everything that needs judgment still wakes the postmaster: WALL (an untold provider wall),
+// RULE (an escalation), GATE (a
+// ship card), READ (a checkpoint card), SPEC (a spec package), READY (a signed-off ticket and
+// a free run slot), ASK (a recorded refusal or
 // pre-thread exit, or a wall on the fallback), TAKEOVER (a recorded wall on the primary),
 // INSPECT (a stall, or an attempt without its record), and any step the watcher could not
 // complete. USER (already put to the user), WAIT (a leg at work) and - (closed) never do.
@@ -55,7 +66,8 @@
 // attempt, as a host that could not start one; =1 on POSTMASTER_WATCH_TEST_REFUSE refuses
 // that start with no record, as a validation refusal.
 //
-//   exit 0  a run needs the postmaster: the table, then one `needs <run> <NEXT>` line each
+//   exit 0  a run or ready ticket needs the postmaster: the table, then `needs <run> <NEXT>` or
+//           `needs READY <ticket>` lines
 //   exit 3  --timeout passed with nothing to act on: the table
 //   exit 1  usage, no such root, the held list cannot be read, or a timeout
 //           that is not a whole number
@@ -66,8 +78,6 @@
 // count, no wake.
 import { randomBytes } from "node:crypto";
 import {
-  accessSync,
-  constants,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -80,12 +90,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { tryJsonFile } from "./lib/data.ts";
+import { tryJsonFile, tryTomlFile } from "./lib/data.ts";
 import { beside, scriptsDir } from "./lib/paths.ts";
+import { pinnedCommand, runPinned } from "./lib/pinned.ts";
 import { die, run } from "./lib/proc.ts";
 import { PY_M_END, PY_M_START } from "./lib/text.ts";
 
-const USAGE = "usage: runs-watch.sh <project-run-root> [--timeout <seconds>] | --help";
+const USAGE = "usage: run runs-watch <project-run-root> [--timeout <seconds>] | --help";
 
 function printHelp(): never {
   const src = readFileSync(join(scriptsDir(import.meta), "runs-watch.ts"), "utf8");
@@ -637,14 +648,14 @@ function runRepo(dispatch: string): string | null {
 /** The one-line job from coachman.md's legs table. */
 /** The run's checked tool checkout, or the wake reason when it does not serve. */
 function legRt(d: string): { rt: string; error: string } {
-  const p = run(beside(import.meta, "run-meta.sh"), ["path", d]);
+  const p = run(beside(import.meta, "run"), ["run-meta", "path", d]);
   if (p.code !== 0) {
     return {
       rt: "",
       error: `cannot resolve the run's tool checkout: ${(p.out + p.err).replace(/\n+$/u, "")}`,
     };
   }
-  const c = run(beside(import.meta, "run-meta.sh"), ["check", d]);
+  const c = run(beside(import.meta, "run"), ["run-meta", "check", d]);
   if (c.code !== 0) {
     return {
       rt: "",
@@ -843,11 +854,7 @@ function watchLeg(
     }
     // The double checks the script it would execute: a checkout without the leg
     // script fails the start the way the shell would, before any marker moves.
-    try {
-      accessSync(join(rt, "scripts", "host.sh"), constants.X_OK);
-    } catch {
-      return { code: 1, text: `leg: ${join(rt, "scripts", "host.sh")} is not executable\n` };
-    }
+    if (!pinnedCommand(rt, "host", [])) return { code: 1, text: `leg: ${rt} cannot run host\n` };
     // The leg command clears the starting attempt's markers before its intent
     // lands; the double clears the same markers and writes no intent.
     try {
@@ -890,7 +897,7 @@ function watchLeg(
     kind === "dispatch"
       ? ["leg", "launch", d, wt, leg, n, prompt]
       : ["leg", "resume", d, wt, leg, n, thread, prompt];
-  const r = run(join(rt, "scripts", "host.sh"), args);
+  const r = runPinned(rt, "host", args);
   return { code: r.code, text: r.out + r.err };
 }
 
@@ -946,11 +953,21 @@ function nextLeg(list: string, current: string): [string, string] | null {
 /** Dispatch the next leg, or report why it could not. 0 took the step, 1 wakes, 3 held. */
 function prepareDispatch(d: string, runName: string, current: string, root: string): StepResult {
   const heldDir = join(root, "postmaster");
-  const legs = run(beside(import.meta, "turnpikes.sh"), ["legs", d]);
+  // No next leg starts while a wall has no ruling (D8): the run is named instead, with
+  // the open walls as the reason, and nothing is dispatched until they are ruled.
+  const open = run(beside(import.meta, "run"), ["walls", "open", d]);
+  if (open.code === 1) {
+    const listed = (open.out + open.err).trim().replace(/\n+/gu, "; ");
+    return { rc: 1, error: `provider walls have no ruling: ${listed}` };
+  }
+  if (open.code !== 0) {
+    return { rc: 1, error: `run walls open could not read the run's walls (exit ${open.code})` };
+  }
+  const legs = run(beside(import.meta, "run"), ["turnpikes", "legs", d]);
   if (legs.code !== 0) {
     return {
       rc: 1,
-      error: `turnpikes.sh legs failed: ${(legs.out + legs.err).replace(/\n+$/u, "")}`,
+      error: `run turnpikes legs failed: ${(legs.out + legs.err).replace(/\n+$/u, "")}`,
     };
   }
   // The manifest leg is validated before anything uses it: it must be a canonical
@@ -972,7 +989,7 @@ function prepareDispatch(d: string, runName: string, current: string, root: stri
   }
   const [number, leg] = next;
   const handoff = join(d, `handoff-${current}.md`);
-  const check = run(beside(import.meta, "handoff-check.sh"), [handoff]);
+  const check = run(beside(import.meta, "run"), ["handoff-check", handoff]);
   if (check.code !== 0) {
     return {
       rc: 1,
@@ -1051,7 +1068,8 @@ function prepareDispatch(d: string, runName: string, current: string, root: stri
     return { rc: 1, error: `could not start coachman leg ${number}: ${first}` };
   }
   if (parseInt(number, 10) > parseInt(current, 10) + 1) {
-    const note = run(beside(import.meta, "log-action.sh"), [
+    const note = run(beside(import.meta, "run"), [
+      "log-action",
       d,
       "postmaster",
       "note",
@@ -1060,7 +1078,8 @@ function prepareDispatch(d: string, runName: string, current: string, root: stri
     ]);
     if (note.code !== 0) return { rc: 1, error: "could not log the omitted review leg" };
   }
-  const logged = run(beside(import.meta, "log-action.sh"), [
+  const logged = run(beside(import.meta, "run"), [
+    "log-action",
     d,
     "postmaster",
     "dispatch",
@@ -1076,11 +1095,11 @@ function resumeTransient(d: string, runName: string, number: string, root: strin
   const heldDir = join(root, "postmaster");
   const err = join(d, "logs", `coachman-leg-${number}.err`);
   const out = join(d, "logs", `coachman-leg-${number}-events.jsonl`);
-  const legs = run(beside(import.meta, "turnpikes.sh"), ["legs", d]);
+  const legs = run(beside(import.meta, "run"), ["turnpikes", "legs", d]);
   if (legs.code !== 0) {
     return {
       rc: 2,
-      error: `turnpikes.sh legs failed: ${(legs.out + legs.err).replace(/\n+$/u, "")}`,
+      error: `run turnpikes legs failed: ${(legs.out + legs.err).replace(/\n+$/u, "")}`,
     };
   }
   if (!isCanonicalLeg(number)) {
@@ -1090,7 +1109,7 @@ function resumeTransient(d: string, runName: string, number: string, root: strin
     };
   }
   const leg = listedLeg(legs.out, number);
-  if (!leg) return { rc: 2, error: `turnpikes.sh legs has no entry for current leg ${number}` };
+  if (!leg) return { rc: 2, error: `run turnpikes legs has no entry for current leg ${number}` };
   let name = "";
   let thread = "";
   try {
@@ -1113,7 +1132,7 @@ function resumeTransient(d: string, runName: string, number: string, root: strin
   if (!thread) return { rc: 2, error: `leg ${number} has no recorded thread id` };
   const skip = watcherValue(d, "stream_skip", number);
   if (skip === null) return { rc: 2, error: `the stream skip for leg ${number} is unreadable` };
-  const judged = run(beside(import.meta, "launch.sh"), ["transient", err, out, String(skip)]);
+  const judged = run(beside(import.meta, "run"), ["launch", "transient", err, out, String(skip)]);
   const classifier = (judged.out + judged.err).replace(/\n+$/u, "") || `exit ${judged.code}`;
   if (judged.code !== 0) {
     return {
@@ -1194,7 +1213,8 @@ function resumeTransient(d: string, runName: string, number: string, root: strin
     if (!setResumeCount(d, number, count, newSkip)) {
       return { rc: 2, error: `cannot restore the remount count for leg ${number}` };
     }
-    const logged = run(beside(import.meta, "log-action.sh"), [
+    const logged = run(beside(import.meta, "run"), [
+      "log-action",
       d,
       "postmaster",
       "refuse",
@@ -1204,7 +1224,8 @@ function resumeTransient(d: string, runName: string, number: string, root: strin
     if (logged.code !== 0) return { rc: 2, error: `could not log refusal of leg ${number}` };
     return { rc: 2, error: `could not resume leg ${number}: ${first}` };
   }
-  const logged = run(beside(import.meta, "log-action.sh"), [
+  const logged = run(beside(import.meta, "run"), [
+    "log-action",
     d,
     "postmaster",
     "resume",
@@ -1212,6 +1233,121 @@ function resumeTransient(d: string, runName: string, number: string, root: strin
     `leg ${number}, thread ${thread}, ${classifier}, resume ${count + 1} of 3; the watcher took it`,
   ]);
   if (logged.code !== 0) return { rc: 2, error: `could not log resume of leg ${number}` };
+  return { rc: 0, error: "" };
+}
+
+/** Deliver a wall pause whose walls are all ruled: remove the pause's markers and resume
+ * the leg with the rulings named in the prompt, as Stage E step 5 does. 0 took the step,
+ * 1 wakes, 3 held. */
+function deliverWallPause(d: string, runName: string, root: string): StepResult {
+  const heldDir = join(root, "postmaster");
+  // The pause being delivered must still be the wall pause: a stale .wall-pause
+  // beside a later escalation never triggers a wall resume.
+  let first = "";
+  try {
+    first = (readFileSync(join(d, "ESCALATION.md"), "utf8").split("\n")[0] ?? "").trim();
+  } catch {
+    first = "";
+  }
+  if (first !== "# Escalation: provider walls") {
+    return {
+      rc: 1,
+      error: "the wall-pause marker is stale: the current escalation is not a provider-wall pause",
+    };
+  }
+  let number = "";
+  let thread = "";
+  try {
+    const m: unknown = JSON.parse(readFileSync(join(d, "manifest.json"), "utf8"));
+    if (!isRecord(m)) throw new Error("no manifest");
+    number = manifestLegValue(join(d, "manifest.json"));
+    const coachman = m.coachman;
+    if (isRecord(coachman) && isRecord(coachman.legs)) {
+      const entry = coachman.legs[number];
+      if (isRecord(entry) && typeof entry.thread_id === "string") thread = entry.thread_id;
+    }
+  } catch {
+    return { rc: 1, error: "cannot read the manifest for the wall pause" };
+  }
+  if (!/^[1-9][0-9]*$/u.test(number)) {
+    return { rc: 1, error: "the manifest's leg is unreadable, so the wall pause is not delivered" };
+  }
+  if (thread === "") {
+    return { rc: 1, error: `leg ${number} has no recorded thread id for the wall pause` };
+  }
+  const legs = run(beside(import.meta, "run"), ["turnpikes", "legs", d]);
+  if (legs.code !== 0) {
+    return {
+      rc: 1,
+      error: `run turnpikes legs failed: ${(legs.out + legs.err).replace(/\n+$/u, "")}`,
+    };
+  }
+  const leg = listedLeg(legs.out, number);
+  if (!leg) return { rc: 1, error: `run turnpikes legs has no entry for leg ${number}` };
+  const repo = runRepo(d);
+  if (!repo) {
+    return {
+      rc: 1,
+      error: "neither the waybill nor the recorded checks name an absolute repo path",
+    };
+  }
+  const worktree = join(repo, ".worktrees", runName);
+  try {
+    if (!statSync(worktree).isDirectory()) throw new Error("missing");
+  } catch {
+    return { rc: 1, error: `the synthesis worktree is missing: ${worktree}` };
+  }
+  const rt = legRt(d);
+  if (rt.error) return { rc: 1, error: rt.error };
+  // The prompt names every wall's ruling, so the coachman knows exactly what it carries on with.
+  const shown = run(beside(import.meta, "run"), ["walls", "show", d]);
+  if (shown.code !== 0) {
+    return { rc: 1, error: `run walls show failed (exit ${shown.code})` };
+  }
+  const rulings = shown.out.trim().replace(/\n/gu, "\n  ");
+  let held = isHeldRun(runName, heldDir);
+  if (held === 0) return { rc: 3, error: "" };
+  if (held !== 1) return { rc: 1, error: "cannot re-read the held list" };
+  let prompt = join(d, `leg-${number}-resume-${utcStamp()}.txt`);
+  if (existsSync(prompt)) prompt = join(d, `leg-${number}-resume-${utcStamp()}-${process.pid}.txt`);
+  try {
+    writeFileSync(
+      prompt,
+      `Continue leg ${number}; every provider wall in this run has been ruled go on:\n  ${rulings}\nThe run goes on without each walled lane, DEGRADED with the provider's message.\n`,
+    );
+  } catch {
+    return { rc: 1, error: `cannot write the wall-pause resume prompt: ${prompt}` };
+  }
+  held = isHeldRun(runName, heldDir);
+  if (held === 0) return { rc: 3, error: "" };
+  if (held !== 1) return { rc: 1, error: "cannot re-read the held list" };
+  // The pause's markers go before the resume, as Stage E step 5 does, so the run never
+  // reads RULE twice; a resume that fails is named to the postmaster below.
+  rmSync(join(d, ".escalation-ready"), { force: true });
+  rmSync(join(d, ".wall-pause"), { force: true });
+  const resumed = watchLeg("resume", rt.rt, d, worktree, leg, number, thread, prompt);
+  if (resumed.code !== 0) {
+    const first = resumed.text.split("\n")[0] || "no message";
+    const logged = run(beside(import.meta, "run"), [
+      "log-action",
+      d,
+      "postmaster",
+      "refuse",
+      "coachman",
+      `leg ${number}, thread ${thread}; the wall-pause resume did not start (${first})`,
+    ]);
+    if (logged.code !== 0) return { rc: 1, error: `could not log the refused wall-pause resume` };
+    return { rc: 1, error: `could not resume leg ${number} after the wall ruling: ${first}` };
+  }
+  const logged = run(beside(import.meta, "run"), [
+    "log-action",
+    d,
+    "postmaster",
+    "resume",
+    "coachman",
+    `leg ${number}, thread ${thread}, wall pause lifted, every wall ruled go-on; the watcher took it`,
+  ]);
+  if (logged.code !== 0) return { rc: 1, error: `could not log the resume of leg ${number}` };
   return { rc: 0, error: "" };
 }
 
@@ -1283,6 +1419,26 @@ function processTable(root: string, table: string): TableResult {
       if (r.rc === 0 || r.rc === 3) {
         // taken, or held before its first mutation
       } else markNeeds(needs, runName, "RESUME", r.error);
+    } else if (next === "RULE" && existsSync(join(root, runName, ".wall-pause"))) {
+      // A pause for a wall the user has now ruled: the watcher delivers it itself, with
+      // the rulings named in the resume prompt, and wakes the postmaster only when it
+      // cannot (D8, criterion 20).
+      const d = join(root, runName);
+      const open = run(beside(import.meta, "run"), ["walls", "open", d]);
+      if (open.code === 0) {
+        const r = deliverWallPause(d, runName, root);
+        if (r.rc !== 0 && r.rc !== 3) markNeeds(needs, runName, "RULE", r.error);
+      } else if (open.code === 1) {
+        const listed = (open.out + open.err).trim().replace(/\n+/gu, "; ");
+        markNeeds(
+          needs,
+          runName,
+          "RULE",
+          `the pause is for provider walls that still have no ruling: ${listed}`,
+        );
+      } else {
+        markNeeds(needs, runName, "RULE", `run walls open failed (exit ${open.code})`);
+      }
     } else if (next === "WAIT" || next === "USER" || next === "-") {
       // a leg at work, already put to the user, or closed: never wakes
     } else {
@@ -1345,31 +1501,94 @@ function physicalDir(path: string): string {
   return resolved;
 }
 
+/** Ready tickets wait under the project's postmaster run root until dispatched. */
+export function pendingReadyTickets(root: string): string[] {
+  const dir = join(root, "postmaster", "ready");
+  try {
+    return readdirSync(dir)
+      .filter((name) => name.endsWith(".ready"))
+      .sort()
+      .flatMap((name) => {
+        let id = "";
+        try {
+          id = decodeURIComponent(name.slice(0, -6));
+          // The marker's first line is the id; the second binds the sign-off
+          // to the signed-off text, and only the check reads it.
+          if ((readFileSync(join(dir, name), "utf8").split("\n")[0] ?? "") !== id) return [];
+        } catch {
+          return [];
+        }
+        return [id];
+      });
+  } catch {
+    return [];
+  }
+}
+
+/** An unreadable run counts against the cap; only done and abandoned are closed. */
+export function activeRunCount(root: string): number {
+  let count = 0;
+  for (const name of readdirSync(root)) {
+    if (name === "postmaster") continue;
+    const dir = join(root, name);
+    try {
+      if (!statSync(dir).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    let stage = "unknown";
+    try {
+      const manifest: unknown = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
+      if (typeof manifest === "object" && manifest !== null && !Array.isArray(manifest)) {
+        const raw = (manifest as Record<string, unknown>).stage;
+        if (typeof raw === "string") stage = raw;
+      }
+    } catch {
+      // A run directory without a readable manifest still holds a slot.
+    }
+    if (stage !== "done" && stage !== "abandoned") count += 1;
+  }
+  return count;
+}
+
+export function runCapacity(configPath: string): number {
+  const config = tryTomlFile(configPath);
+  const team = config?.team;
+  const value =
+    team && typeof team === "object" ? Number((team as Record<string, unknown>).max_runs) : NaN;
+  return Number.isSafeInteger(value) && value > 0 ? value : 2;
+}
+
 function watch(root: string, config: string, timeout: number | null): never {
   const pm = join(root, "postmaster");
-  const statusSh = beside(import.meta, "runs-status.sh");
+  const statusSh = beside(import.meta, "run");
   let left = timeout ?? 0;
   for (;;) {
     const poll = pollSeconds(config);
     const held = readHeld(pm);
-    let r = run(statusSh, [root]);
+    let r = run(statusSh, ["runs-status", root]);
     if (r.code !== 0) {
       if (r.err) process.stderr.write(r.err);
-      die(`runs-watch: runs-status.sh failed on ${root}`, 1);
+      die(`runs-watch: run runs-status failed on ${root}`, 1);
     }
     const first = r.out.replace(/\n+$/u, "");
     // The waking read fires only for its held warnings; the steps below fill NEEDS.
     for (const w of wakingRuns(first, held).warnings) console.error(w);
     const steps = processTable(root, first);
     if (steps.heldUnreadable) die("runs-watch: could not read the held list", 1);
-    r = run(statusSh, [root]);
+    r = run(statusSh, ["runs-status", root]);
     if (r.code !== 0) {
       if (r.err) process.stderr.write(r.err);
-      die(`runs-watch: runs-status.sh failed on ${root}`, 1);
+      die(`runs-watch: run runs-status failed on ${root}`, 1);
     }
     const table = r.out.replace(/\n+$/u, "");
-    if (steps.needs.length > 0) {
-      process.stdout.write(`${table}\n${steps.needs.join("\n")}\n`);
+    const ready = pendingReadyTickets(root);
+    // Name no more tickets than free slots: the postmaster dispatches each
+    // name it wakes to, and the ceiling is checked here, not there.
+    const room = Math.max(runCapacity(config) - activeRunCount(root), 0);
+    const readyNeeds = ready.slice(0, room).map((id) => `needs READY ${id}`);
+    if (steps.needs.length > 0 || readyNeeds.length > 0) {
+      process.stdout.write(`${table}\n${[...steps.needs, ...readyNeeds].join("\n")}\n`);
       process.exit(0);
     }
     if (timeout !== null && left <= 0) {
