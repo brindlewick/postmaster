@@ -157,17 +157,33 @@ function breakLen(text: string, i: number): number {
  * JSX text or invalid code, never a string, so the rest of its line is
  * rescanned as code and swallows no directive on it or a later line. */
 export function scanComments(text: string): SwitchComment[] {
+  return scanAll(text).comments;
+}
+
+interface ScanAll {
+  comments: SwitchComment[];
+  depths: number[];
+}
+
+/** The comments and, for the identity window, the brace depth at the start of
+ * every line: braces inside strings, comments, regexes and template text
+ * never reach the depth counter, since the scanner consumes those spans
+ * whole. */
+function scanAll(text: string): ScanAll {
   const out: SwitchComment[] = [];
   const n = text.length;
   let i = 0;
   let line = 1;
   let last = "";
   let noRegex = false;
+  let depth = 0;
+  const depths = [0];
   const parens: boolean[] = [];
   const frames: { tpl: boolean; interp: boolean; brace: number }[] = [
     { tpl: false, interp: false, brace: 0 },
   ];
   while (i < n) {
+    while (depths.length < line) depths.push(depth);
     const f = frames[frames.length - 1]!;
     const ch = text[i]!;
     if (f.tpl) {
@@ -189,6 +205,7 @@ export function scanComments(text: string): SwitchComment[] {
       }
       if (ch === "$" && text[i + 1] === "{") {
         frames.push({ tpl: false, interp: true, brace: 0 });
+        depth++;
         i += 2;
         continue;
       }
@@ -350,11 +367,13 @@ export function scanComments(text: string): SwitchComment[] {
     }
     if (ch === "{") {
       if (f.interp) f.brace++;
+      depth++;
       last = "{";
       i++;
       continue;
     }
     if (ch === "}") {
+      depth = Math.max(0, depth - 1);
       if (f.interp && f.brace === 0) {
         frames.pop();
         last = "value";
@@ -385,7 +404,7 @@ export function scanComments(text: string): SwitchComment[] {
     last = ch;
     i++;
   }
-  return out;
+  return { comments: out, depths };
 }
 
 /** What a comment switches off, and how far. `line` covers its own line, `next`
@@ -564,15 +583,23 @@ function parseAllDirectives(raw: string): SwitchDirective[] {
 
 interface PlacedDirective extends SwitchDirective {
   line: number;
+  end: number;
   raw: string;
 }
 
 function placeDirectives(text: string): PlacedDirective[] {
   const out: PlacedDirective[] = [];
+  const starts = lineStarts(text);
+  let end = 1;
+  let s = 0;
   for (const c of scanComments(text)) {
+    while (s + 1 < starts.length && starts[s + 1]! <= c.end - 1) {
+      s++;
+      end++;
+    }
     const found = parseAllDirectives(c.raw);
     if (found.length > 0) {
-      for (const off of found) out.push({ ...off, line: c.line, raw: c.raw });
+      for (const off of found) out.push({ ...off, line: c.line, end, raw: c.raw });
       continue;
     }
     // A // opener inside JSX text starts a comment the tools never see, and
@@ -585,7 +612,7 @@ function placeDirectives(text: string): PlacedDirective[] {
     let k = c.raw.indexOf("//", 2);
     while (k >= 0) {
       const sub = c.raw.slice(k);
-      for (const off of parseAllDirectives(sub)) out.push({ ...off, line: c.line, raw: sub });
+      for (const off of parseAllDirectives(sub)) out.push({ ...off, line: c.line, end, raw: sub });
       k = c.raw.indexOf("//", k + 2);
     }
   }
@@ -618,36 +645,34 @@ function lineStarts(text: string): number[] {
   return starts;
 }
 
-/** The code a TypeScript next-line suppression covers: the first line past
- * blanks and //-only lines, since tsc skips those when choosing. A line
- * holding a block comment stops the skip, tsc applying there instead; the
- * /* test consults the line-comment spans, so a /* inside a //-comment
- * does not stop it. Decorators stop it, as probed. */
-function tsCovered(
-  code: string[],
-  rawLines: string[],
-  starts: number[],
-  comments: SwitchComment[],
-  from: number,
-): string[] {
-  for (let k = from; k < code.length; k++) {
-    if (code[k] !== "") return [code[k]!];
-    const cut = (rawLines[k] ?? "").indexOf("/*");
-    if (cut < 0) continue;
-    const abs = (starts[k] ?? 0) + cut;
-    const inside = comments.some((c) => c.raw.startsWith("//") && c.start <= abs && abs < c.end);
-    if (inside) continue;
-    return [""];
+/** The conservative window a line or next-line identity holds: the masked code
+ * from the given 1-based line to the end of the enclosing block, or to the
+ * end of the file where no block closes around it (top level, unbalanced
+ * braces). Blank lines stay in: the tools treat a blank between the
+ * directive and its code differently, so a blank-line edit asks again. The
+ * window errs wide on purpose: no tool's coverage rule is predicted, and a
+ * window wider than the coverage is correct by design. */
+function blockWindow(code: string[], depths: number[], from: number): string[] {
+  const start = from - 1;
+  if (start >= code.length) return [];
+  const d0 = depths[from] ?? depths[from - 1] ?? 0;
+  let stop = start;
+  for (let k = start + 1; k < code.length; k++) {
+    if ((depths[k] ?? d0) < d0) break;
+    stop = k;
   }
-  return [""];
+  return code.slice(start, stop + 1);
 }
 
-/** The identity of an added switch-off: its file, its comment text and, for a
- * line or next-line form, the trimmed code of the line it covers; for a block
- * or file form, the code it covers and the close that ends it. The line number
- * is for the listing only: an approval holds wherever the comment moves, while
- * a changed comment or covered line needs a new word. Settings use the file's
- * content object id at the head instead. */
+/** The approval identity of a switch-off: its file, its comment text and, for a
+ * line or next-line form, the conservative window after it (masked code to
+ * the end of its enclosing block, to the end of the file where no block
+ * closes); for a block or file form, the code it covers and the close that
+ * ends it. Whether the run added it is judged separately, by file, text and
+ * place among identical comments, so a merge that moves lines asks nothing
+ * new. A window wider than the tool's coverage is correct by design: any
+ * later edit in it asks again. Settings use the file's content object id at
+ * the head instead. */
 function switchOffId(kind: "comment" | "settings", parts: string[]): string {
   const hex = createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16);
   return `${kind}:${hex}`;
@@ -660,6 +685,8 @@ interface SwitchEntry {
   rules: string;
   reason: string | null;
   id: string;
+  raw: string;
+  span: string;
 }
 
 const LISTED_SCOPES = new Set<SwitchDirective["scope"]>(["line", "next", "open", "file"]);
@@ -681,33 +708,6 @@ interface BlockEnd {
   end?: { raw: string; line: number };
 }
 
-/** The code a `biome-ignore` covers: the next node, approximated as the next
- * non-empty line plus its bracket continuation. Biome suppresses the whole
- * node, so hashing one line would let an edit to a later line of the node
- * keep an old approval. Single-quote spans are stripped before counting,
- * and a line holding a backtick never ends the run, since a template can
- * span lines. Residual: a bracket inside a multiline string can end the run
- * early; that errs toward the old one-line shape, never toward missing the
- * directive. */
-function biomeCovered(code: string[], from: number): string[] {
-  let start = from;
-  while (start < code.length && code[start] === "") start++;
-  if (start >= code.length) return [];
-  let depth = 0;
-  let end = start;
-  for (let k = start; k < code.length; k++) {
-    end = k;
-    const stripped = code[k]!.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/gu, "");
-    if (stripped.includes("`")) continue;
-    for (const ch of stripped) {
-      if (ch === "(" || ch === "[" || ch === "{") depth++;
-      else if (ch === ")" || ch === "]" || ch === "}") depth--;
-    }
-    if (depth <= 0) break;
-  }
-  return code.slice(start, end + 1).filter((entry) => entry !== "");
-}
-
 /** Every listed switch-off in one file's text, each with its identity. The
  * linter's opens match closes by rule set, on one machine for both
  * spellings, since probes show Oxlint 1.86 honors either spelling against
@@ -719,10 +719,8 @@ function biomeCovered(code: string[], from: number): string[] {
  * narrows an open joins its identity, so removing one counts the open as
  * added. */
 function fileSwitches(file: string, text: string): SwitchEntry[] {
-  const comments = scanComments(text);
+  const { comments, depths } = scanAll(text);
   const code = maskedLines(text, comments);
-  const rawLines = splitJsLines(text);
-  const starts = lineStarts(text);
   const placed = placeDirectives(text);
   const ends = new Map<number, BlockEnd>();
   const endOf = (index: number): BlockEnd => {
@@ -780,14 +778,9 @@ function fileSwitches(file: string, text: string): SwitchEntry[] {
     let covered: string[];
     let tail = [""];
     if (d.scope === "line") {
-      covered = [code[d.line - 1] ?? ""];
+      covered = blockWindow(code, depths, d.line);
     } else if (d.scope === "next") {
-      covered =
-        d.form === "biome-ignore"
-          ? biomeCovered(code, d.line)
-          : d.tool === "ts"
-            ? tsCovered(code, rawLines, starts, comments, d.line)
-            : [code[d.line] ?? ""];
+      covered = blockWindow(code, depths, d.end);
     } else if (d.scope === "file") {
       covered = code.filter((entry) => entry !== "");
     } else {
@@ -807,6 +800,8 @@ function fileSwitches(file: string, text: string): SwitchEntry[] {
       rules: d.rules,
       reason: d.reason,
       id: switchOffId("comment", [file, d.raw, ...covered, ...tail]),
+      raw: d.raw,
+      span: [...covered, ...tail].join("\n"),
     });
   });
   return out;
@@ -852,13 +847,17 @@ function blobShaAt(repo: string, rev: string, path: string): string | null {
   return pySplitLines(r.out)[0] ?? null;
 }
 
-/** The switch-offs the head adds over the base, file by file: the head holds
- * more of an identity than the base does. */
+/** The switch-offs the head adds over the base, file by file. A comment is the
+ * run's addition when the head holds more of it than the base does, judged
+ * by file, comment text and place among identical comments, or when the
+ * code in its span changed under a comment the base already had: a run that
+ * edits inside a main switch-off's window is asked, while one that edits
+ * past its block is not. */
 function addedSwitches(repo: string, base: string, head: string): SwitchEntry[] {
   const before = new Set(treePaths(repo, base));
   const after = new Set(treePaths(repo, head));
   const paths = changedPaths(repo, base, head).filter(isSource);
-  const oldCounts = new Map<string, number>();
+  const oldSpans = new Map<string, string[]>();
   for (const path of paths) {
     if (!before.has(path)) continue;
     const source = blobAt(repo, base, path);
@@ -867,7 +866,10 @@ function addedSwitches(repo: string, base: string, head: string): SwitchEntry[] 
         `cannot read ${path} at ${base}: refusing to report clear over unreadable input`,
       );
     for (const entry of fileSwitches(path, source)) {
-      oldCounts.set(entry.id, (oldCounts.get(entry.id) ?? 0) + 1);
+      const key = `${entry.file}\0${entry.raw}`;
+      const spans = oldSpans.get(key) ?? [];
+      spans.push(entry.span);
+      oldSpans.set(key, spans);
     }
   }
 
@@ -881,10 +883,11 @@ function addedSwitches(repo: string, base: string, head: string): SwitchEntry[] 
         `cannot read ${path} at ${head}: refusing to report clear over unreadable input`,
       );
     for (const entry of fileSwitches(path, source)) {
-      const index = seen.get(entry.id) ?? 0;
-      seen.set(entry.id, index + 1);
-      if (index < (oldCounts.get(entry.id) ?? 0)) continue;
-      found.push(entry);
+      const key = `${entry.file}\0${entry.raw}`;
+      const index = seen.get(key) ?? 0;
+      seen.set(key, index + 1);
+      const old = (oldSpans.get(key) ?? [])[index];
+      if (old === undefined || old !== entry.span) found.push(entry);
     }
   }
   return found;

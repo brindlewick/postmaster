@@ -328,10 +328,13 @@ describe("switch-off detection", () => {
     expect(result.out).not.toContain("scripts/main-switch.ts");
   });
 
-  test("touching a base file without touching its comment still lists nothing", () => {
+  test("touching a base file past its comment's block still lists nothing", () => {
     freshRepo("touch-base");
     git(repo, "checkout", "-q", "main");
-    write("scripts/so-base.ts", "// oxlint-disable-line no-debugger -- from main\n;");
+    write(
+      "scripts/so-base.ts",
+      "export function f(): void {\n  // oxlint-disable-line no-debugger -- from main\n  debugger;\n}\n",
+    );
     commit("base comment on main");
     git(repo, "checkout", "-q", "-B", "ticket", "main");
     write("scripts/plain.ts", "export const x = 1;\n");
@@ -341,12 +344,28 @@ describe("switch-off detection", () => {
     expect(first.out).toBe("clear\n## Switch-offs\n\nnone");
     write(
       "scripts/so-base.ts",
-      "// oxlint-disable-line no-debugger -- from main\n;\nexport const more = 2;\n",
+      "export function f(): void {\n  // oxlint-disable-line no-debugger -- from main\n  debugger;\n}\n\nexport const more = 2;\n",
     );
-    commit("touch the base file");
+    commit("touch the base file past the block");
     const second = check();
     expect(second.code).toBe(0);
     expect(second.out).toBe("clear\n## Switch-offs\n\nnone");
+  });
+
+  test("touching a base file inside a top-level window lists the comment", () => {
+    freshRepo("touch-window");
+    git(repo, "checkout", "-q", "main");
+    write("scripts/so-base.ts", "// oxlint-disable-line no-debugger -- from main\n;");
+    commit("base comment on main");
+    git(repo, "checkout", "-q", "-B", "ticket", "main");
+    write(
+      "scripts/so-base.ts",
+      "// oxlint-disable-line no-debugger -- from main\n;\nexport const more = 2;\n",
+    );
+    commit("touch inside the window");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/so-base.ts:1 oxlint-disable-line no-debugger");
   });
 
   test("matches approval records from both the run log and project ledger", () => {
@@ -581,7 +600,7 @@ describe("switch-off detection", () => {
     expect(clear.code).toBe(0);
   });
 
-  test("a biome-ignore covers its whole node, not just its next line", () => {
+  test("a biome-ignore window covers its node and the rest of its block", () => {
     freshRepo("biome-node");
     const node = (a: string, after: string): string =>
       [
@@ -607,7 +626,7 @@ describe("switch-off detection", () => {
     expect(edited).not.toBe(id);
     write("scripts/node.ts", node("2", "3"));
     commit("edit past the node");
-    expect(idOf(check().out)).toBe(edited);
+    expect(idOf(check().out)).not.toBe(edited);
   });
 
   test("a partial enable narrows a block instead of ending it", () => {
@@ -821,7 +840,7 @@ describe("switch-off detection", () => {
     expect(result.out).not.toContain("scripts/star.ts");
   });
 
-  test("TypeScript skips blanks and line comments when choosing its line", () => {
+  test("a TS window holds every line below, skipped or not", () => {
     freshRepo("ts-skip");
     const idFor = (out: string, name: string): string | undefined =>
       new RegExp(`scripts/${name}:[0-9]+ [^(]*\\(id (comment:[0-9a-f]{16})\\)`, "u").exec(out)?.[1];
@@ -848,7 +867,7 @@ describe("switch-off detection", () => {
     const second = check().out;
     expect(idFor(second, "blank.ts")).not.toBe(blank);
     expect(idFor(second, "remark.ts")).not.toBe(remark);
-    expect(idFor(second, "block.ts")).toBe(blocked);
+    expect(idFor(second, "block.ts")).not.toBe(blocked);
     expect(idFor(second, "mixed.ts")).not.toBe(mixed);
   });
 
@@ -941,6 +960,124 @@ describe("switch-off detection", () => {
     const result = check();
     expect(result.code).toBe(2);
     expect(result.out).toContain("scripts/us.tsx:1 eslint-disable-line no-debugger");
+  });
+
+  test("a Biome window reaches past the node into its block", () => {
+    freshRepo("biome-window");
+    const idOf = (out: string): string | undefined =>
+      /\(id (comment:[0-9a-f]{16})\)/u.exec(out)?.[1];
+    write(
+      "scripts/w.ts",
+      "// biome-ignore lint/suspicious/noExplicitAny: window reason\nconst x: any = make(1);\nconst later = 1;\n",
+    );
+    commit("add biome window case");
+    const before = idOf(check().out);
+    expect(before).toBeDefined();
+    write(
+      "scripts/w.ts",
+      "// biome-ignore lint/suspicious/noExplicitAny: window reason\nconst x: any = make(1);\nconst later = 2;\n",
+    );
+    commit("edit later in the block");
+    expect(idOf(check().out)).not.toBe(before);
+  });
+
+  test("a TS window reaches past the covered line into its block", () => {
+    freshRepo("ts-window");
+    const idOf = (out: string): string | undefined =>
+      /\(id (comment:[0-9a-f]{16})\)/u.exec(out)?.[1];
+    write("scripts/w.ts", "// @ts-ignore window reason\nconst x: string = 1;\nconst later = 1;\n");
+    commit("add ts window case");
+    const before = idOf(check().out);
+    expect(before).toBeDefined();
+    write("scripts/w.ts", "// @ts-ignore window reason\nconst x: string = 1;\nconst later = 2;\n");
+    commit("edit later in the block");
+    expect(idOf(check().out)).not.toBe(before);
+  });
+
+  test("a Biome window covers an implicit continuation", () => {
+    freshRepo("biome-continuation");
+    const idOf = (out: string): string | undefined =>
+      /\(id (comment:[0-9a-f]{16})\)/u.exec(out)?.[1];
+    write(
+      "scripts/w.ts",
+      "// biome-ignore lint/suspicious/noExplicitAny: window reason\nconst x: any = foo +\n  bar;\n",
+    );
+    commit("add biome continuation case");
+    const before = idOf(check().out);
+    expect(before).toBeDefined();
+    write(
+      "scripts/w.ts",
+      "// biome-ignore lint/suspicious/noExplicitAny: window reason\nconst x: any = foo +\n  baz;\n",
+    );
+    commit("edit the continuation");
+    expect(idOf(check().out)).not.toBe(before);
+  });
+
+  test("a block-comment next-line window covers the code after the comment", () => {
+    freshRepo("block-next-window");
+    const idOf = (out: string): string | undefined =>
+      /\(id (comment:[0-9a-f]{16})\)/u.exec(out)?.[1];
+    write("scripts/w.js", "/*\neslint-disable-next-line no-debugger -- r\n*/\ndebugger;\n");
+    commit("add block next-line case");
+    const before = idOf(check().out);
+    expect(before).toBeDefined();
+    write(
+      "scripts/w.js",
+      '/*\neslint-disable-next-line no-debugger -- r\n*/\nconsole.log("changed");\n',
+    );
+    commit("edit the covered code");
+    expect(idOf(check().out)).not.toBe(before);
+  });
+
+  test("a window ends at its block, not the file", () => {
+    freshRepo("window-block");
+    const idOf = (out: string): string | undefined =>
+      /\(id (comment:[0-9a-f]{16})\)/u.exec(out)?.[1];
+    write(
+      "scripts/w.ts",
+      "export function a(): void {\n  // @ts-ignore window reason\n  const x: string = 1;\n}\n\nexport function b(): void {}\n",
+    );
+    commit("add window block case");
+    const before = idOf(check().out);
+    expect(before).toBeDefined();
+    write(
+      "scripts/w.ts",
+      "export function a(): void {\n  // @ts-ignore window reason\n  const x: string = 1;\n}\n\nexport function b(): number {\n  return 2;\n}\n",
+    );
+    commit("edit past the block");
+    expect(idOf(check().out)).toBe(before);
+  });
+
+  test("main's launch comments stay silent when a run edits below their blocks", () => {
+    freshRepo("launch-control");
+    const launch = (tail: string): string =>
+      `export function shellQuote(s: string): string {\n  if (s === "") return "''";\n  // eslint-disable-next-line no-control-regex\n  if (/[\\x00-\\x1f]/u.test(s)) return "bad";\n  // eslint-disable-next-line no-control-regex\n  return s.replace(/[\\x00-\\x1f]/gu, "?");\n}\n${tail}`;
+    write("scripts/q.ts", launch(""));
+    commit("base with main's comments");
+    git(repo, "checkout", "-qb", "ticket2");
+    write("scripts/q.ts", `${launch("")}\nexport function helper(): number {\n  return 1;\n}\n`);
+    commit("edit below the blocks");
+    const result = call("--repo", repo, "--default", "ticket", "--ticket", "ticket2");
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("clear");
+  });
+
+  test("main's launch comments are listed when a run edits inside their window", () => {
+    freshRepo("launch-window");
+    write(
+      "scripts/q.ts",
+      'export function shellQuote(s: string): string {\n  if (s === "") return "\'\'";\n  // eslint-disable-next-line no-control-regex\n  if (/[\\x00-\\x1f]/u.test(s)) return "bad";\n  return s;\n}\n',
+    );
+    commit("base with main's comment");
+    git(repo, "checkout", "-qb", "ticket2");
+    write(
+      "scripts/q.ts",
+      'export function shellQuote(s: string): string {\n  if (s === "") return "\'\'";\n  // eslint-disable-next-line no-control-regex\n  if (/[\\x20-\\x7e]/u.test(s)) return "bad";\n  return s;\n}\n',
+    );
+    commit("edit inside the window");
+    const result = call("--repo", repo, "--default", "ticket", "--ticket", "ticket2");
+    expect(result.code).toBe(3);
+    expect(result.out).toContain("no-control-regex");
   });
 
   test("a regex after a condition hides no trailing directive", () => {
