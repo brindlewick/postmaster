@@ -113,3 +113,53 @@ Two, both before the second reader began, and both visible in the history of thi
 3. **Both readers are language models and both know the defect**, so neither is free of hindsight.
    The rubric makes the reader write the property without mentioning the defect, and that sentence is
    what a person can check.
+
+## Results
+
+All counts are in [results/numbers.md](results/numbers.md), made by `python3 apparatus/tally.py
+data/findings.tsv first-reading.tsv second-reader.tsv anchors.tsv` from this folder. The first reading
+is [first-reading.tsv](first-reading.tsv): one row per finding with its label, cost, confidence, the
+property or the function to extract, and the reason. The second reader's rows are
+[second-reader.tsv](second-reader.tsv), with the items it was given in
+[second-reader-items.tsv](second-reader-items.tsv) and its brief in
+[second-reader-brief.md](second-reader-brief.md).
+
+- **The first reading, of all 84:** a cheap property 37, a heavy property 18, a property and a pure core
+  (`both`) 24, a pure core alone 0, neither 5. A property or model would have caught 79 (94%); a pure
+  core would have made the check possible in 24 (29%), and in all 24 a property was stated too.
+- **The second reader, on 26 findings (20 drawn at random, 6 anchors):** the same four-way label on
+  21 (81%, kappa 0.61); on the 20 drawn at random on 16 (80%, kappa 0.50, Wilson 95% interval 58% to
+  92%). The same answer to the property question on 25 of 26 (on 19 of the 20, interval 76% to 99%),
+  and to the pure-core question on 22 of 26. Where both said a property alone, they agreed on cheap or
+  heavy for 8 of 15, and on `clear` or `arguable` for 14 of 26 findings. The second reader marked a
+  different structure as removing the defect for 9 findings, the first for 3; they agree on 16 of 26.
+- **The anchors:** the second reader gave the expected label on 5 of the 6. It read `252/bug-22`,
+  git calls that honour an inherited `GIT_DIR`, as `prop`, heavy, where `both` was expected, saying a
+  shared git runner would have made the defect impossible.
+- **Controls for the statistic:** a classification against itself reads 100% and kappa 1.00; against a
+  seeded shuffle of itself, 40 of 84 and kappa -0.08.
+
+## How sure
+
+- **Firm:** what the findings were, which code each sat in, and that two readers reading separately
+  agree on whether a stated property could have caught a finding (25 of 26).
+- **Soft:** the split between a cheap and a heavy check (agreement 8 of 15), the `clear` and `arguable`
+  marks (14 of 26), and the by-construction field (16 of 26). They are reported in the page as a
+  range, not as findings.
+- **Not measured:** whether an author, working from the ticket and not from the review, would have
+  written the property and its generator. Both readers know every defect and both are language models.
+  The count says a check could have caught a finding, not that it would have been written. The
+  [proposed trials](../../../wiki/concepts/functional-core-and-verification.md) include one that
+  measures it.
+- **Few runs, clustered findings:** four runs, two of them in review; 20 of the 84 sit in one family,
+  the shell-command classifier of #202.
+
+## Deviations
+
+- The second reader reported that it opened code at a later snapshot than the one an item names on
+  three occasions, in the course of items 10, 16 and 23 (their own snapshots are later than those of
+  items 1, 9, 18, 24 and 25, which it had written or was about to write). It reports that it built
+  its answers for those items from the code at their own snapshots. No answer is known to have
+  changed, and the agreement is reported as it came out.
+- The second reader saw other files' names in directory listings and reports that it opened none of
+  them.
