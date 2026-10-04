@@ -40,11 +40,13 @@ function timeSection(stdout: string): string[] {
 }
 
 function fails(stdout: string): string[] {
-  return stdout
-    .split("\n")
-    .filter((line) => line.startsWith("FAIL"))
-    // ASCII: score lines are machine-printed.
-    .map((line) => line.split(/\s+/u)[1] ?? "");
+  return (
+    stdout
+      .split("\n")
+      .filter((line) => line.startsWith("FAIL"))
+      // ASCII: score lines are machine-printed.
+      .map((line) => line.split(/\s+/u)[1] ?? "")
+  );
 }
 
 // ASCII: duration figures are machine-printed.
