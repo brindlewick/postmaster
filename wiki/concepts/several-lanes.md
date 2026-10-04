@@ -419,7 +419,7 @@ at all.
 
 ## Candidate tickets, ranked
 
-Item 1 is filed and item 2 is drafted; the others are not filed. Three open tickets already cover work this audit points to:
+Items 1 and 2 are filed; the others are not. Three open tickets already cover work this audit points to:
 [#255, Bug reviewers are told to change nothing](https://github.com/brindlewick/postmaster/issues/255)
 for the reviewer that changed the code under review in [#200](https://github.com/brindlewick/postmaster/issues/200),
 [#221, Run every lane with only the files, hosts and sockets it needs, on Linux and macOS](https://github.com/brindlewick/postmaster/issues/221) for what a lane may write, and [#104](https://github.com/brindlewick/postmaster/issues/104) for planted bugs.
@@ -430,7 +430,8 @@ for the reviewer that changed the code under review in [#200](https://github.com
    [#270, A run can be single-thread: the coachman writes the change itself and no workhorse lane runs](https://github.com/brindlewick/postmaster/issues/270).
 2. Run the next 16 real tickets with the mode alternating from ticket to ticket, eight in each,
    judging the modes by review rounds with the severe findings of round 1, the time and the tokens
-   beside, once item 1 has landed and this audit has merged.
+   beside, once item 1 has landed and this audit has merged, filed as
+   [#271, Run the next 16 tickets in alternating modes, and judge single-thread against synthesis by review rounds](https://github.com/brindlewick/postmaster/issues/271).
 3. Have the coachman write each review finding to a record as it triages, with its lane, lens,
    severity, verdict and how it was verified, so that who found what and what was dismissed are
    counted from data and not read from prose.
