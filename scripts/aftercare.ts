@@ -665,13 +665,22 @@ function flaggedFiles(repo: string, folder: string): string[] {
       );
     return r.out;
   };
+  // -z throughout: NUL-separated header/path pairs, paths never quoted, so a non-ASCII
+  // name arrives spellable and hashable. (--no-renames keeps one path per entry.)
+  const readRawEntries = (output: string): { meta: string[]; path: string }[] => {
+    const chunks = output.split("\0");
+    const entries: { meta: string[]; path: string }[] = [];
+    for (let i = 0; i + 1 < chunks.length; i += 2) {
+      const header = chunks[i] ?? "";
+      const path = chunks[i + 1] ?? "";
+      if (!header.startsWith(":") || path === "") continue;
+      entries.push({ meta: header.split(" "), path });
+    }
+    return entries;
+  };
   const readRawWorktree = (output: string): void => {
-    for (const line of output.split("\n")) {
-      if (!line.startsWith(":")) continue;
-      const tab = line.indexOf("\t");
-      const meta = (tab === -1 ? line : line.slice(0, tab)).split(" ");
-      const path = tab === -1 ? "" : line.slice(tab + 1);
-      if (meta.length < 5 || !path) continue;
+    for (const { meta, path } of readRawEntries(output)) {
+      if (meta.length < 5) continue;
       const oldBlob = meta[2] ?? "";
       if (unmerged.has(path)) continue;
       const hashed = gitIn(folder, ["hash-object", "--", path]);
@@ -682,12 +691,8 @@ function flaggedFiles(repo: string, folder: string): string[] {
     }
   };
   const readRaw = (output: string): void => {
-    for (const line of output.split("\n")) {
-      if (!line.startsWith(":")) continue;
-      const tab = line.indexOf("\t");
-      const meta = (tab === -1 ? line : line.slice(0, tab)).split(" ");
-      const path = tab === -1 ? "" : line.slice(tab + 1);
-      if (meta.length < 5 || !path) continue;
+    for (const { meta, path } of readRawEntries(output)) {
+      if (meta.length < 5) continue;
       const oldBlob = meta[2] ?? "";
       const newBlob = meta[3] ?? "";
       if (oldBlob === newBlob) continue; // a mode change alone never flags
@@ -695,11 +700,11 @@ function flaggedFiles(repo: string, folder: string): string[] {
       candidate(newBlob, path);
     }
   };
-  readRaw(rawDiff(["diff", "--cached", "--raw", "--no-renames", "HEAD"]));
+  readRaw(rawDiff(["diff", "--cached", "--raw", "--no-renames", "-z", "HEAD"]));
   // The worktree side of `git diff --raw` is all zeros: git does not hash the file on disk
   // into the output, so each modified path is hashed here, and a deletion or a mode change
   // alone never flags.
-  readRawWorktree(rawDiff(["diff", "--raw", "--no-renames"]));
+  readRawWorktree(rawDiff(["diff", "--raw", "--no-renames", "-z"]));
   const commits = gitText(folder, ["rev-list", "HEAD", "--not", "--branches"], folder)
     .split("\n")
     .filter((line) => line !== "");
@@ -710,6 +715,7 @@ function flaggedFiles(repo: string, folder: string): string[] {
       "--root",
       "--no-commit-id",
       "--no-renames",
+      "-z",
       commit,
     ]);
     if (r.code !== 0)
@@ -824,6 +830,22 @@ function unbranchedMerges(folder: string): { ok: boolean; merges: string[]; why:
     merges: found.out.split("\n").filter((line) => line !== ""),
     why: "",
   };
+}
+
+/** Whether run-meta release would take the pin: a locked pin, or a pin that is not a git
+ * checkout, stops the real run, so the dry run predicts the stop. Mirrors run-meta's own
+ * locked check (its common dir plus `worktrees/<name>/locked`). */
+function pinReleasable(pin: string): string {
+  const common = gitIn(pin, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  if (common.code !== 0) return `${pin} is not a git checkout`;
+  const locked = join(common.out.trim(), "worktrees", basename(pin), "locked");
+  let reason: string;
+  try {
+    reason = readFileSync(locked, "utf8").trim();
+  } catch {
+    return "";
+  }
+  return reason === "" ? `${pin} is locked` : `${pin} is locked: ${reason}`;
 }
 
 /** A worktree git would refuse to remove: `remove --force` still bows to a lock. The dry
@@ -1068,12 +1090,20 @@ function runLogDone(
     .some((entry) => /^- [0-9]{2}:[0-9]{2}:[0-9]{2}Z (.*)$/u.exec(entry)?.[1] === line);
 }
 
+/** How this command invokes a tracker adapter: plane.sh takes no repo argument, its
+ * command is argv[0] (ticket-check.ts invokes it the same way). */
+export function trackerArgv(adapter: string, repo: string, cmd: string, ticket: string): string[] {
+  const script = beside(import.meta, adapter);
+  if (adapter === "plane.sh") return [script, cmd, ticket];
+  return [script, repo, cmd, ticket];
+}
+
 function ticketState(
   adapter: string,
   repo: string,
   ticket: string,
 ): { state: string; read: string } {
-  const read = run("bash", [beside(import.meta, adapter), repo, "read", ticket]);
+  const read = run("bash", trackerArgv(adapter, repo, "read", ticket));
   if (read.code !== 0) {
     throw new Fault(
       3,
@@ -1611,13 +1641,7 @@ function mainFlow(args: Args): Result {
         });
       } else {
         runClosing(() => {
-          const set_ = run("bash", [
-            beside(import.meta, adapter),
-            set.repo,
-            "state",
-            ticket,
-            "done",
-          ]);
+          const set_ = run("bash", [...trackerArgv(adapter, set.repo, "state", ticket), "done"]);
           if (set_.code !== 0)
             throw new Fault(
               3,
@@ -1672,10 +1696,7 @@ function mainFlow(args: Args): Result {
       } else {
         runClosing(() => {
           const posted = run("bash", [
-            beside(import.meta, adapter),
-            set.repo,
-            "comment",
-            ticket,
+            ...trackerArgv(adapter, set.repo, "comment", ticket),
             "postmaster",
             args.comment ?? "",
           ]);
@@ -1750,6 +1771,20 @@ function mainFlow(args: Args): Result {
       } catch {
         keeps = true;
       }
+      if (!keeps) {
+        const blocked = pinReleasable(pinPath);
+        if (blocked !== "") {
+          steps.push({ name: "release", status: "failed", detail: blocked });
+          stops.push({
+            step: "release",
+            reason: blocked,
+            next: blocked.includes("is locked")
+              ? `unlock the pin, then run again`
+              : `fix the pin, then run again`,
+          });
+          return finish(3, steps, folders, stops);
+        }
+      }
       steps.push({
         name: "release",
         status: "would",
@@ -1758,13 +1793,18 @@ function mainFlow(args: Args): Result {
     } else {
       runClosing(() => {
         const released = run("bash", [beside(import.meta, "run-meta.sh"), "release", dispatch]);
-        if (released.code !== 0)
+        if (released.code !== 0) {
+          const message = tail(released);
+          const locked = message.includes("is locked");
           throw new Fault(
             3,
             "release",
-            `run-meta release could not release the pin: ${tail(released)}`,
-            `fix run-meta release's message (the pin stays), then run again`,
+            `run-meta release could not release the pin: ${message}`,
+            locked
+              ? `unlock the pin, then run again`
+              : `fix run-meta release's message (the pin stays), then run again`,
           );
+        }
         const out = full(released);
         const removed = /^run-meta: removed (.+)$/mu.exec(out);
         if (removed) {
@@ -1886,6 +1926,11 @@ function printStops(result: Result): void {
 // --- entry --------------------------------------------------------------------------------------
 
 function main(argv: string[]): number {
+  // Ambient git location overrides redirect every `git -C` below at the wrong checkout,
+  // so a save would capture another folder's state before this one goes. This command
+  // names every checkout explicitly and inherits none of these.
+  for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"])
+    delete process.env[name];
   const args = parseArgs(argv);
   if (args.usage !== null) {
     console.error(`aftercare: stop at arguments: ${args.usage}`);

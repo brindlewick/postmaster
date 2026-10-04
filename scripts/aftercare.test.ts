@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { trackerArgv } from "./aftercare.ts";
 import { bootId, processes } from "./host.ts";
 import { run } from "./lib/proc.ts";
 import { scriptsDir } from "./lib/paths.ts";
@@ -852,6 +853,79 @@ describe("aftercare on a landed run record", () => {
       hostSh(r2, ["stop", join(r2.repo, ".worktrees/7")]);
     }
   }, 180_000);
+
+  test("inherited git location overrides never redirect a scan: the dirty folder is saved", () => {
+    const r = makeR();
+    const seven = join(r.repo, ".worktrees/7");
+    const gitdir = sh("git", ["-C", seven, "rev-parse", "--absolute-git-dir"], r.T);
+    writeFileSync(join(r.repo, ".worktrees/7-mimo/src/a.ts"), "export const a = 9;\n");
+    const result = aftercare(r, WORDS, { GIT_DIR: gitdir, GIT_WORK_TREE: seven });
+    expect(result.code).toBe(0);
+    // the save holds 7-mimo's own uncommitted work, not the clean checkout's nothing
+    const diff = readFileSync(join(r.D, "stray/7-mimo.diff"), "utf8");
+    expect(diff).toContain("export const a = 9;");
+    expect(existsSync(join(r.repo, ".worktrees/7-mimo"))).toBe(false);
+    // control: the same run without overrides saves the same part
+    const r2 = makeR();
+    writeFileSync(join(r2.repo, ".worktrees/7-mimo/src/a.ts"), "export const a = 9;\n");
+    expect(aftercare(r2, WORDS).code).toBe(0);
+    expect(readFileSync(join(r2.D, "stray/7-mimo.diff"), "utf8")).toContain("export const a = 9;");
+  }, 120_000);
+
+  test("a locked pin: the dry run predicts the stop, the real run meets it, unlocked it releases", () => {
+    const r = makeR();
+    const record = JSON.parse(readFileSync(join(r.D, "run.json"), "utf8"));
+    const pin = record.postmaster.checkout as string;
+    sh("git", ["worktree", "lock", pin], join(r.T, "pinrepo"));
+    const dry = aftercare(r, ["--dry-run", ...WORDS]);
+    expect(dry.code).toBe(3);
+    expect(dry.out).toContain("step release: failed");
+    expect(dry.out).toContain("is locked");
+    const real = aftercare(r, WORDS);
+    expect(real.code).toBe(3);
+    expect(real.out).toContain("stop at release");
+    expect(real.out).toContain("unlock the pin, then run again");
+    expect(existsSync(pin)).toBe(true);
+    // control: unlocked, the rerun releases the pin and closes
+    sh("git", ["worktree", "unlock", pin], join(r.T, "pinrepo"));
+    expect(aftercare(r, WORDS).code).toBe(0);
+    expect(existsSync(pin)).toBe(false);
+  }, 180_000);
+
+  test("an unlanded edit under a non-ASCII name flags with its true spelling", () => {
+    const r = makeR();
+    const mimo = join(r.repo, ".worktrees/7-mimo");
+    const name = "café.txt";
+    writeFileSync(join(mimo, name), "export const a = 2;\n");
+    sh("git", ["add", name], mimo);
+    sh("git", ["commit", "-qm", "note with a name"], mimo);
+    writeFileSync(join(mimo, name), "export const a = 9;\n");
+    const result = aftercare(r, WORDS);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain(`flagged: ${name}`);
+    // control: the quoted octal spelling never appears as a path
+    expect(result.out).not.toContain("\\303\\251");
+  }, 120_000);
+
+  test("tracker invocations: plane takes no repo, local and github keep it", () => {
+    expect(trackerArgv("plane.sh", "/repo", "read", "PROJ-1")).toEqual([
+      join(HERE, "plane.sh"),
+      "read",
+      "PROJ-1",
+    ]);
+    expect(trackerArgv("local.sh", "/repo", "read", "7")).toEqual([
+      join(HERE, "local.sh"),
+      "/repo",
+      "read",
+      "7",
+    ]);
+    expect(trackerArgv("github.sh", "/repo", "comment", "7")).toEqual([
+      join(HERE, "github.sh"),
+      "/repo",
+      "comment",
+      "7",
+    ]);
+  });
 
   test("a ticket-dash symlink is left in place with a note naming why", () => {
     const r = makeR();
