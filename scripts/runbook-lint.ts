@@ -340,11 +340,9 @@ export function codeFaults(file: string, text: string): Fault[] {
         } else {
           const tail = doubleDashTail(step.text);
           // A quoted program quotes a path holding spaces; the call is the same.
-          const unquoted =
-            tail === null ? null : tail.replace(/^"([^"]+)"(?=$|[ \t])/u, "$1");
+          const unquoted = tail === null ? null : tail.replace(/^"([^"]+)"(?=$|[ \t])/u, "$1");
           const tailProgram = unquoted === null ? "ok" : callProgram(unquoted, agents);
-          const tailOk =
-            unquoted === null || tailProgram === "ok" || /^<[^<>]+>$/u.test(unquoted);
+          const tailOk = unquoted === null || tailProgram === "ok" || /^<[^<>]+>$/u.test(unquoted);
           if (!tailOk) {
             let what = "not a scripts/run call after --";
             if (unquoted === "") what = "double dash without a command";
