@@ -792,6 +792,187 @@ describe("switch-off detection", () => {
     expect(result.code).toBe(1);
     expect(result.out).toContain("cannot read scripts/ghost.ts");
   });
+
+  test("triple-slash TypeScript suppressions are listed", () => {
+    freshRepo("triple-slash");
+    write("scripts/triple.ts", "/// @ts-ignore triple reason\nconst a: number = 1;\n");
+    write("scripts/nocheck.ts", "/// @ts-nocheck triple file\nconst b: number = 2;\n");
+    commit("add triple-slash suppressions");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/triple.ts:1 ts-ignore");
+    expect(result.out).toContain("scripts/nocheck.ts:1 ts-nocheck");
+  });
+
+  test("TypeScript reads block directives on the last line only", () => {
+    freshRepo("ts-block-line");
+    write("scripts/last.ts", "/*\n@ts-ignore last reason */\nconst a: number = 1;\n");
+    write("scripts/first.ts", "/* @ts-ignore first reason\nmore text */\nconst b: number = 2;\n");
+    write("scripts/star.ts", "// * @ts-ignore star reason\nconst c: number = 3;\n");
+    commit("add block placements");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/last.ts:1 ts-ignore");
+    expect(result.out).not.toContain("scripts/first.ts");
+    expect(result.out).not.toContain("scripts/star.ts");
+  });
+
+  test("TypeScript skips blanks and line comments when choosing its line", () => {
+    freshRepo("ts-skip");
+    const idFor = (out: string, name: string): string | undefined =>
+      new RegExp(`scripts/${name}:[0-9]+ [^(]*\\(id (comment:[0-9a-f]{16})\\)`, "u").exec(out)?.[1];
+    write("scripts/blank.ts", "// @ts-ignore blank reason\n\nconst a = 1;\n");
+    write("scripts/remark.ts", "// @ts-ignore remark reason\n// a remark\nconst b = 2;\n");
+    write("scripts/block.ts", "// @ts-ignore block reason\n/* middle */\nconst c = 3;\n");
+    write("scripts/mixed.ts", "// @ts-ignore mixed reason\n// remark /* x */\nconst d = 4;\n");
+    commit("add skipped lines");
+    const first = check();
+    expect(first.code).toBe(2);
+    const blank = idFor(first.out, "blank.ts");
+    const remark = idFor(first.out, "remark.ts");
+    const blocked = idFor(first.out, "block.ts");
+    const mixed = idFor(first.out, "mixed.ts");
+    expect(blank).toBeDefined();
+    expect(remark).toBeDefined();
+    expect(blocked).toBeDefined();
+    expect(mixed).toBeDefined();
+    write("scripts/blank.ts", "// @ts-ignore blank reason\n\nconst a = 10;\n");
+    write("scripts/remark.ts", "// @ts-ignore remark reason\n// a remark\nconst b = 20;\n");
+    write("scripts/block.ts", "// @ts-ignore block reason\n/* middle */\nconst c = 30;\n");
+    write("scripts/mixed.ts", "// @ts-ignore mixed reason\n// remark /* x */\nconst d = 40;\n");
+    commit("edit the code below each skip");
+    const second = check().out;
+    expect(idFor(second, "blank.ts")).not.toBe(blank);
+    expect(idFor(second, "remark.ts")).not.toBe(remark);
+    expect(idFor(second, "block.ts")).toBe(blocked);
+    expect(idFor(second, "mixed.ts")).not.toBe(mixed);
+  });
+
+  test("linter block rules run across the block's lines", () => {
+    freshRepo("lint-multiline");
+    write(
+      "scripts/multi.ts",
+      "/* eslint-disable\nno-debugger -- split rules */\ndebugger;\nvar q = 1;\n",
+    );
+    commit("add split rules");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("multi.ts:1 eslint-disable no-debugger -- reason: split rules");
+  });
+
+  test("linter closes match rules across the block's lines", () => {
+    freshRepo("lint-close-lines");
+    const idOf = (out: string): string | undefined =>
+      /\(id (comment:[0-9a-f]{16})\)/u.exec(out)?.[1];
+    write(
+      "scripts/closed.ts",
+      "/* eslint-disable rule-a -- solo */\nconst a = 1;\n/* eslint-enable\nrule-a */\nconst b = 2;\n",
+    );
+    commit("add cross-line close");
+    const id = idOf(check().out);
+    expect(id).toBeDefined();
+    write(
+      "scripts/closed.ts",
+      "/* eslint-disable rule-a -- solo */\nconst a = 1;\n/* eslint-enable\nrule-a */\nconst b = 2;\nconst c = 3;\n",
+    );
+    commit("append past the close");
+    expect(idOf(check().out)).toBe(id);
+  });
+
+  test("Biome matches a block directive on any line", () => {
+    freshRepo("biome-block-line");
+    write(
+      "scripts/mid.ts",
+      "/* suppress the table\nbiome-ignore format: mid reason\ntrailing note */\nconst   x    =    1;\n",
+    );
+    commit("add mid-block biome directive");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/mid.ts:1 biome-ignore format -- reason: mid reason");
+  });
+
+  test("a directive trailing JSX text is listed", () => {
+    freshRepo("jsx-trail");
+    write(
+      "scripts/el.tsx",
+      "const el = <div>see https://docs.example</div>; debugger; // eslint-disable-line no-debugger -- jsx trail\n",
+    );
+    commit("add jsx trailing directive");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/el.tsx:1 eslint-disable-line no-debugger");
+  });
+
+  test("a quote in JSX text hides no trailing directive", () => {
+    freshRepo("jsx-quote");
+    write(
+      "scripts/q.tsx",
+      "const el = <div>don't panic</div>; debugger; // eslint-disable-line no-debugger -- jsx quote\n",
+    );
+    commit("add jsx quote case");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/q.tsx:1 eslint-disable-line no-debugger");
+  });
+
+  test("a regex after a condition hides no trailing directive", () => {
+    freshRepo("regex-paren");
+    write(
+      "scripts/rx.ts",
+      'const ok = true;\nconst s = "x";\nif (ok) /\\//.test(s); // @ts-ignore regex paren\nconst x: number = 1;\n',
+    );
+    commit("add regex paren case");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/rx.ts:3 ts-ignore");
+  });
+
+  test("a divide after plus-plus hides no trailing directive", () => {
+    freshRepo("plus-div");
+    write("scripts/pd.ts", "let n = 1;\nn++ / 2; // @ts-ignore plus div\nconst y: number = 2;\n");
+    commit("add plus div case");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/pd.ts:2 ts-ignore");
+  });
+
+  test("U+2028 inside a string hides no later directive", () => {
+    freshRepo("u2028-string");
+    write("scripts/u.ts", 'const s = "a\u2028b"; // @ts-ignore u-str\nconst x: number = 1;\n');
+    commit("add separator string case");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/u.ts:2 ts-ignore");
+  });
+
+  test("a control separator misaligns no covered line", () => {
+    freshRepo("separator");
+    const idOf = (out: string): string | undefined =>
+      /\(id (comment:[0-9a-f]{16})\)/u.exec(out)?.[1];
+    write("scripts/sep.ts", "const z = 0;\x0b// @ts-ignore sep reason\nconst a: number = 1;\n");
+    commit("add separator case");
+    const id = idOf(check().out);
+    expect(id).toBeDefined();
+    write("scripts/sep.ts", "const z = 0;\x0b// @ts-ignore sep reason\nconst a: number = 2;\n");
+    commit("edit the covered line");
+    expect(idOf(check().out)).not.toBe(id);
+  });
+
+  test("a backtick in JSX text is a known blind spot", () => {
+    // Deferred as r2bug-12: a tagged template follows a word, so the quote
+    // rule cannot exclude backticks, and telling JSX text from a template
+    // needs a real parser. This test pins the miss so a future fix updates
+    // it deliberately.
+    freshRepo("jsx-tick");
+    write(
+      "scripts/t.tsx",
+      "const el = <div>tick ` backtick</div>; debugger; // eslint-disable-line no-debugger -- jsx tick\n",
+    );
+    commit("add backtick jsx case");
+    const result = check();
+    expect(result.code).toBe(0);
+    expect(result.out).not.toContain("scripts/t.tsx");
+  });
 });
 
 describe("switch-off units", () => {
@@ -833,6 +1014,30 @@ describe("switch-off units", () => {
     const block = scanComments("/* one\r two */\n// @ts-ignore block reason\ncode;\n");
     expect(block.length).toBe(2);
     expect(block[1]!.line).toBe(3);
+  });
+
+  test("the scanner tells JSX text and operands from strings", () => {
+    const jsx = scanComments("const el = <div>don't</div>; // @ts-ignore r\ncode;\n");
+    expect(jsx.length).toBe(1);
+    expect(jsx[0]!.line).toBe(1);
+    const paren = scanComments("if (a) /\\//.test(b); // c\ncode;\n");
+    expect(paren.length).toBe(1);
+    expect(paren[0]!.raw).toBe("// c");
+    const plus = scanComments("n++ / 2; // c\ncode;\n");
+    expect(plus.length).toBe(1);
+    const prop = scanComments("x.if(y) / 2; // c\ncode;\n");
+    expect(prop.length).toBe(1);
+    const prologue = scanComments("if (a) 'b'; // c\ncode;\n");
+    expect(prologue.length).toBe(1);
+  });
+
+  test("the scanner keeps U+2028 inside strings and regexes", () => {
+    const ustr = scanComments('const s = "a\u2028b"; // c\ncode;\n');
+    expect(ustr.length).toBe(1);
+    expect(ustr[0]!.line).toBe(2);
+    const ure = scanComments("const r = /a\u2028b\\/\\//; // d\ncode;\n");
+    expect(ure.length).toBe(1);
+    expect(ure[0]!.line).toBe(2);
   });
 
   test("parseSwitchOff reads each form and its reason", () => {
@@ -904,6 +1109,60 @@ describe("switch-off units", () => {
       rules: "no-debugger",
       reason: "r",
     });
+  });
+
+  test("parseSwitchOff reads each tool's line", () => {
+    expect(parseSwitchOff("/// @ts-ignore r")).toEqual({
+      form: "ts-ignore",
+      scope: "next",
+      tool: "ts",
+      rules: "every rule",
+      reason: "r",
+    });
+    expect(parseSwitchOff("//// @ts-expect-error r")).toEqual({
+      form: "ts-expect-error",
+      scope: "next",
+      tool: "ts",
+      rules: "every rule",
+      reason: "r",
+    });
+    expect(parseSwitchOff("// // @ts-ignore r")).toBeNull();
+    expect(parseSwitchOff("/// eslint-disable-next-line a -- r")).toBeNull();
+    expect(parseSwitchOff("/// biome-ignore format: r")).toBeNull();
+    expect(parseSwitchOff("// * @ts-ignore r")).toBeNull();
+    expect(parseSwitchOff("/*\n@ts-ignore r */")).toEqual({
+      form: "ts-ignore",
+      scope: "next",
+      tool: "ts",
+      rules: "every rule",
+      reason: "r",
+    });
+    expect(parseSwitchOff("/* @ts-ignore r\nmore */")).toBeNull();
+    expect(parseSwitchOff("/*\n * @ts-ignore r */")).toEqual({
+      form: "ts-ignore",
+      scope: "next",
+      tool: "ts",
+      rules: "every rule",
+      reason: "r",
+    });
+    expect(parseSwitchOff("/* // @ts-ignore r */")).toBeNull();
+    expect(parseSwitchOff("/* eslint-disable\nno-debugger -- r */")).toEqual({
+      form: "eslint-disable",
+      scope: "open",
+      tool: "linter",
+      rules: "no-debugger",
+      reason: "r",
+    });
+    expect(parseSwitchOff("/* header\neslint-disable a -- r */")).toBeNull();
+    expect(parseSwitchOff("/*\nbiome-ignore format: r\n*/")).toEqual({
+      form: "biome-ignore",
+      scope: "next",
+      tool: "biome",
+      rules: "format",
+      reason: "r",
+    });
+    expect(parseSwitchOff("/* biome-ignore\nformat: r */")).toBeNull();
+    expect(parseSwitchOff("// * biome-ignore format: r")).toBeNull();
   });
 
   test("package.json differs only on scripts or a tool's settings block", () => {

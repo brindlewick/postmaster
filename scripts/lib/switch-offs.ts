@@ -3,9 +3,13 @@
 // and its merge base with the default branch. Only real comments count, so this
 // uses a small scanner instead of a parser dependency: strings, template text and
 // regex literals are skipped, while comments inside template substitutions stay
-// comments. A directive counts only where it starts the comment: probes against
-// Oxlint, tsc and Biome show a prefixed, prose-led or star-led directive switches
-// nothing off, while a bare block's directive counts wherever its line starts.
+// comments. Each tool reads its own line: TypeScript the last line of a block
+// comment, the linter the first non-empty one, Biome any line carrying the
+// whole directive. Probed against Oxlint 1.86, tsc 7 and Biome 2.5 wherever
+// the ticket's first-line note would miss what a tool honors. Blind spots a
+// small scanner cannot close: a backtick in JSX text (a tagged template
+// follows a word, so the quote rule cannot exclude it) and a /* opener in
+// JSX text; both need a real parser to tell from live code.
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -82,6 +86,7 @@ const REGEX_AFTER = new Set([
   "~",
   "<",
   ">",
+  ")stmt",
   "return",
   "typeof",
   "instanceof",
@@ -98,6 +103,42 @@ const REGEX_AFTER = new Set([
   "throw",
 ]);
 
+/** Keywords whose parenthesized condition ends in statement position, where a
+ * `/` opens a regex: `if (a) /re/` divides nowhere. Any other `)` keeps the
+ * divide reading. */
+const CONDITION_KEYWORDS = new Set(["if", "while", "for", "with", "switch", "catch"]);
+
+/** Whether the `(` at this offset opens one of the condition keywords: the
+ * keyword must be the last token, and not a property (`x.if (` calls). */
+function isConditionParen(text: string, i: number, last: string): boolean {
+  if (!CONDITION_KEYWORDS.has(last)) return false;
+  let j = i - 1;
+  while (j >= 0 && (text[j] === " " || text[j] === "\t" || text[j] === "\n" || text[j] === "\r"))
+    j--;
+  j -= last.length;
+  while (j >= 0 && (text[j] === " " || text[j] === "\t" || text[j] === "\n" || text[j] === "\r"))
+    j--;
+  return j < 0 || text[j] !== ".";
+}
+
+/** Keywords after which a quote opens a string, past the regex set's: module
+ * and type positions take string operands but never regexes. */
+const QUOTE_EXTRA = new Set(["import", "from", "as", "satisfies", "is"]);
+
+/** Whether a quote opens a string here: quotes open in operand positions
+ * only, a twin of the regex rule. After a word, a value or `]` a quote can
+ * only be JSX text or invalid code, and invalid code fails the gate loudly.
+ * After `)` the paren stack decides: a condition ends in statement position
+ * and a prologue string may follow, while an expression cannot be followed
+ * by one. Backticks always open: a tagged template follows a word, so a
+ * backtick in JSX text stays a known blind spot, documented with the tests. */
+function quoteOpens(last: string): boolean {
+  if (last === ")stmt" || QUOTE_EXTRA.has(last)) return true;
+  if (last === "value" || last === ")") return false;
+  if (last.length === 1) return !/[A-Za-z0-9_$\]]/u.test(last);
+  return REGEX_AFTER.has(last);
+}
+
 /** The length of the JS line break at this offset: CRLF counts once, and a lone
  * CR, U+2028 or U+2029 breaks like LF does. tsc honors them as breaks, so a
  * scanner that counts LF alone attributes the wrong line and the wrong
@@ -111,14 +152,16 @@ function breakLen(text: string, i: number): number {
 }
 
 /** The comments in source text, told apart from strings, template literals (with
- * `${}` scanned as code) and regex literals. A string ends at its line break:
- * an unterminated string must not swallow the real comments on later lines. */
+ * `${}` scanned as code) and regex literals. A string ends at LF or CR, never
+ * at U+2028 or U+2029, which ES2019 allows inside; an unterminated string
+ * must not swallow the real comments on later lines. */
 export function scanComments(text: string): SwitchComment[] {
   const out: SwitchComment[] = [];
   const n = text.length;
   let i = 0;
   let line = 1;
   let last = "";
+  const parens: boolean[] = [];
   const frames: { tpl: boolean; interp: boolean; brace: number }[] = [
     { tpl: false, interp: false, brace: 0 },
   ];
@@ -192,9 +235,19 @@ export function scanComments(text: string): SwitchComment[] {
       continue;
     }
     if (ch === "'" || ch === '"') {
+      if (!quoteOpens(last)) {
+        i++;
+        continue;
+      }
       i++;
       while (i < n && text[i] !== ch) {
-        if (breakLen(text, i) > 0) break;
+        if (text[i] === "\n" || text[i] === "\r") break;
+        const sb = breakLen(text, i);
+        if (sb > 0) {
+          line++;
+          i += sb;
+          continue;
+        }
         if (text[i] === "\\") {
           i++;
           const b = breakLen(text, i);
@@ -218,11 +271,31 @@ export function scanComments(text: string): SwitchComment[] {
       continue;
     }
     if (ch === "/") {
+      // A tag-shaped close (`</div>`) is JSX text, not a regex: skipping to
+      // its `>` keeps the divide-and-regex reading for real code, where a
+      // `<` directly before a `/` never shapes a tag. Residual: a directive
+      // comment between the slashes of a compared regex.
+      if (
+        last === "<" &&
+        text[i - 1] === "<" &&
+        /^<\/[A-Za-z][A-Za-z0-9._-]*[ \t]*>/u.test(text.slice(i - 1))
+      ) {
+        i = text.indexOf(">", i) + 1;
+        last = "value";
+        continue;
+      }
       if (REGEX_AFTER.has(last)) {
         i++;
         let cls = false;
         let closed = false;
-        while (i < n && breakLen(text, i) === 0) {
+        while (i < n) {
+          if (text[i] === "\n" || text[i] === "\r") break;
+          const rb = breakLen(text, i);
+          if (rb > 0) {
+            line++;
+            i += rb;
+            continue;
+          }
           const r = text[i]!;
           if (r === "\\") {
             i += 2;
@@ -242,6 +315,17 @@ export function scanComments(text: string): SwitchComment[] {
         continue;
       }
       last = "/";
+      i++;
+      continue;
+    }
+    if (ch === "(") {
+      parens.push(isConditionParen(text, i, last));
+      last = "(";
+      i++;
+      continue;
+    }
+    if (ch === ")") {
+      last = (parens.pop() ?? false) ? ")stmt" : ")";
       i++;
       continue;
     }
@@ -274,6 +358,11 @@ export function scanComments(text: string): SwitchComment[] {
       last = "value";
       continue;
     }
+    if ((ch === "+" || ch === "-") && text[i + 1] === ch) {
+      last = "value";
+      i += 2;
+      continue;
+    }
     last = ch;
     i++;
   }
@@ -297,97 +386,161 @@ const LINTER_RE =
 const BIOME_RE =
   /^(biome-ignore-all|biome-ignore-start|biome-ignore-end|biome-ignore)(?![A-Za-z0-9_-])/u;
 
-/** Parse one comment as a switch-off directive, or null when it is not one. The
- * directive must start the comment's first line: the tools honor nothing
- * prefixed, prose-led or star-led. TypeScript alone also honors a doc opener,
- * so its match drops one leading star run first. A reason is the text after
- * ` -- ` in a linter comment (or after a leading `--`), any text after a
- * TypeScript directive (a leading `--` or `:` dropped), and the text after the
- * colon in Biome's; for Biome a missing category or reason is null, which
- * switches nothing off. Empty or blank text is no reason. */
-export function parseSwitchOff(raw: string): SwitchDirective | null {
-  let body: string;
-  if (raw.startsWith("//")) {
-    body = raw.slice(2);
-  } else if (raw.startsWith("/*")) {
-    body = raw.endsWith("*/") ? raw.slice(2, -2) : raw.slice(2);
-  } else {
-    return null;
-  }
-  const trimmed = pyTrim(body);
-  if (trimmed === "") return null;
-  const line = pyTrim(pySplitLines(trimmed)[0] ?? "");
-  const docLine = pyTrim(line.replace(/^\*+[ \t]*/u, ""));
+/** Split source text on JS line breaks only: LF, CRLF (once), CR, U+2028 and
+ * U+2029. Python's wider set would split where the scanner counts no break
+ * (VT, FF and the separators are whitespace or invalid there) and misalign
+ * every covered line below one. */
+function splitJsLines(text: string): string[] {
+  const parts = text.split(/\r\n|[\n\r\u2028\u2029]/u);
+  if (
+    parts.length > 0 &&
+    parts[parts.length - 1] === "" &&
+    /(?:\r\n|[\n\r\u2028\u2029])$/u.test(text)
+  )
+    parts.pop();
+  return parts;
+}
 
-  const ts = TS_RE.exec(docLine);
-  if (ts !== null) {
-    const rest = pyTrim(docLine.slice(ts[0].length));
-    const reason = pyTrim(rest.replace(/^(?:--|:)[ \t]*/u, ""));
-    return {
-      form: ts[1]!,
-      scope: ts[1] === "ts-nocheck" ? "file" : "next",
-      tool: "ts",
-      rules: "every rule",
-      reason: reason === "" ? null : reason,
-    };
-  }
-  const lint = LINTER_RE.exec(line);
-  if (lint !== null) {
-    const what = lint[2]!;
-    const scope: SwitchDirective["scope"] =
-      what === "disable"
-        ? "open"
-        : what === "enable"
-          ? "close"
-          : what === "disable-line"
-            ? "line"
-            : "next";
-    let rest = pyTrim(line.slice(lint[0].length));
-    let reason: string | null = null;
-    if (rest.startsWith("-- ")) {
-      reason = pyTrim(rest.slice(3));
-      rest = "";
-    } else {
-      const k = rest.indexOf(" -- ");
-      if (k >= 0) {
-        reason = pyTrim(rest.slice(k + 4));
-        rest = pyTrim(rest.slice(0, k));
-      }
+function tsDirective(match: RegExpExecArray, line: string): SwitchDirective {
+  const rest = pyTrim(line.slice(match[0].length));
+  const reason = pyTrim(rest.replace(/^(?:--|:)[ \t]*/u, ""));
+  return {
+    form: match[1]!,
+    scope: match[1] === "ts-nocheck" ? "file" : "next",
+    tool: "ts",
+    rules: "every rule",
+    reason: reason === "" ? null : reason,
+  };
+}
+
+function linterDirective(match: RegExpExecArray, rest: string): SwitchDirective {
+  const what = match[2]!;
+  const scope: SwitchDirective["scope"] =
+    what === "disable"
+      ? "open"
+      : what === "enable"
+        ? "close"
+        : what === "disable-line"
+          ? "line"
+          : "next";
+  let reason: string | null = null;
+  if (rest.startsWith("-- ")) {
+    reason = pyTrim(rest.slice(3));
+    rest = "";
+  } else {
+    const k = rest.indexOf(" -- ");
+    if (k >= 0) {
+      reason = pyTrim(rest.slice(k + 4));
+      rest = pyTrim(rest.slice(0, k));
     }
-    if (reason === "") reason = null;
-    return {
-      form: `${lint[1]}-${what}`,
-      scope,
-      tool: "linter",
-      rules: rest === "" ? "every rule" : pyWords(rest.replace(/,/gu, " ")).join(", "),
-      reason,
-    };
   }
+  if (reason === "") reason = null;
+  return {
+    form: `${match[1]}-${what}`,
+    scope,
+    tool: "linter",
+    rules: rest === "" ? "every rule" : pyWords(rest.replace(/,/gu, " ")).join(", "),
+    reason,
+  };
+}
+
+function biomeDirective(match: RegExpExecArray, line: string): SwitchDirective | null {
+  const rest = pyTrim(line.slice(match[0].length));
+  const colon = rest.indexOf(":");
+  if (colon < 0) return null;
+  const rules = pyTrim(rest.slice(0, colon));
+  const reason = pyTrim(rest.slice(colon + 1));
+  if (rules === "" || reason === "") return null;
+  const what = match[1]!;
+  return {
+    form: what,
+    scope:
+      what === "biome-ignore"
+        ? "next"
+        : what === "biome-ignore-all"
+          ? "file"
+          : what === "biome-ignore-start"
+            ? "open"
+            : "close",
+    tool: "biome",
+    rules,
+    reason,
+  };
+}
+
+const noStars = (entry: string): string => pyTrim(entry.replace(/^\*+[ \t]*/u, ""));
+
+/** The directives in a `//` comment: at most one, since one line leads with
+ * one directive. TypeScript honors extra slashes after the opener (`///`
+ * and more); the linter and Biome do not, and neither honors a star run
+ * here. Whether ESLint honors `///` is unprobed; the strip stays
+ * TypeScript-only until a probe says otherwise. */
+function parseLineComment(body: string): SwitchDirective[] {
+  const line = pyTrim(body);
+  if (line === "") return [];
+  const tsLine = pyTrim(body.replace(/^\/+/u, ""));
+  const ts = TS_RE.exec(tsLine);
+  if (ts !== null) return [tsDirective(ts, tsLine)];
+  const lint = LINTER_RE.exec(line);
+  if (lint !== null) return [linterDirective(lint, pyTrim(line.slice(lint[0].length)))];
   const biome = BIOME_RE.exec(line);
   if (biome !== null) {
-    const rest = pyTrim(line.slice(biome[0].length));
-    const colon = rest.indexOf(":");
-    if (colon < 0) return null;
-    const rules = pyTrim(rest.slice(0, colon));
-    const reason = pyTrim(rest.slice(colon + 1));
-    if (rules === "" || reason === "") return null;
-    const what = biome[1]!;
-    return {
-      form: what,
-      scope:
-        what === "biome-ignore"
-          ? "next"
-          : what === "biome-ignore-all"
-            ? "file"
-            : what === "biome-ignore-start"
-              ? "open"
-              : "close",
-      tool: "biome",
-      rules,
-      reason,
-    };
+    const off = biomeDirective(biome, line);
+    if (off !== null) return [off];
   }
-  return null;
+  return [];
+}
+
+/** The directives in a block comment: up to one per tool, since each tool
+ * reads its own line. TypeScript reads the last line, stars dropped; the
+ * linter's directive starts the first non-empty line, with rules and reason
+ * running across the block's lines; Biome matches any line carrying
+ * directive, category and reason together, stars dropped. All three rules
+ * are probed against tsc, Oxlint 1.86 and Biome 2.5, and each differs from
+ * the ticket's first-line note where the tool honors what that note would
+ * miss. */
+function parseBlockComment(body: string): SwitchDirective[] {
+  const out: SwitchDirective[] = [];
+  const lines = splitJsLines(body).map((entry) => pyTrim(entry));
+  if (lines.every((entry) => entry === "")) return out;
+  const tsLine = noStars(lines[lines.length - 1]!);
+  const ts = TS_RE.exec(tsLine);
+  if (ts !== null) out.push(tsDirective(ts, tsLine));
+  const fi = lines.findIndex((entry) => entry !== "");
+  const first = fi < 0 ? "" : lines[fi]!;
+  const lint = first === "" ? null : LINTER_RE.exec(first);
+  if (lint !== null) {
+    const rest = pyTrim(`${first.slice(lint[0].length)} ${lines.slice(fi + 1).join(" ")}`);
+    out.push(linterDirective(lint, rest));
+  }
+  for (const entry of lines) {
+    const cand = noStars(entry);
+    const biome = BIOME_RE.exec(cand);
+    if (biome === null) continue;
+    const off = biomeDirective(biome, cand);
+    if (off !== null) out.push(off);
+  }
+  return out;
+}
+
+/** Parse one comment as a switch-off directive, or null when it is not one.
+ * A reason is the text after ` -- ` in a linter comment (or after a leading
+ * `--`), any text after a TypeScript directive (a leading `--` or `:`
+ * dropped), and the text after the colon in Biome's; for Biome a missing
+ * category or reason is null, which switches nothing off. Empty or blank
+ * text is no reason. */
+export function parseSwitchOff(raw: string): SwitchDirective | null {
+  return parseAllDirectives(raw)[0] ?? null;
+}
+
+/** Every directive a comment carries, one per tool at most (Biome lines each
+ * at most one). A block comment can honestly hold two tools' directives on
+ * two lines, and both suppress; the single-shot parse above is its first. */
+function parseAllDirectives(raw: string): SwitchDirective[] {
+  if (raw.startsWith("//")) return parseLineComment(raw.slice(2));
+  if (!raw.startsWith("/*")) return [];
+  const body = raw.endsWith("*/") ? raw.slice(2, -2) : raw.slice(2);
+  return parseBlockComment(body);
 }
 
 interface PlacedDirective extends SwitchDirective {
@@ -398,9 +551,24 @@ interface PlacedDirective extends SwitchDirective {
 function placeDirectives(text: string): PlacedDirective[] {
   const out: PlacedDirective[] = [];
   for (const c of scanComments(text)) {
-    const off = parseSwitchOff(c.raw);
-    if (off === null) continue;
-    out.push({ ...off, line: c.line, raw: c.raw });
+    const found = parseAllDirectives(c.raw);
+    if (found.length > 0) {
+      for (const off of found) out.push({ ...off, line: c.line, raw: c.raw });
+      continue;
+    }
+    // A // opener inside JSX text starts a comment the tools never see, and
+    // a real directive trailing on the same line still suppresses. Reparse
+    // after each later // on the line and list what parses there, under its
+    // own text, so edits to the leading prose never invalidate it. The cost
+    // is a spurious listing where prose itself quotes a directive; that errs
+    // toward asking, never toward missing.
+    if (!c.raw.startsWith("//")) continue;
+    let k = c.raw.indexOf("//", 2);
+    while (k >= 0) {
+      const sub = c.raw.slice(k);
+      for (const off of parseAllDirectives(sub)) out.push({ ...off, line: c.line, raw: sub });
+      k = c.raw.indexOf("//", k + 2);
+    }
   }
   return out;
 }
@@ -408,10 +576,51 @@ function placeDirectives(text: string): PlacedDirective[] {
 function maskedLines(text: string, comments: SwitchComment[]): string[] {
   const masked = text.split("");
   for (const c of comments) {
-    for (let i = c.start; i < c.end; i++)
-      if (masked[i] !== "\n" && masked[i] !== "\r") masked[i] = " ";
+    for (let i = c.start; i < c.end; i++) {
+      const ch = masked[i];
+      if (ch !== "\n" && ch !== "\r" && ch !== "\u2028" && ch !== "\u2029") masked[i] = " ";
+    }
   }
-  return pySplitLines(masked.join("")).map((line) => pyTrim(line));
+  return splitJsLines(masked.join("")).map((line) => pyTrim(line));
+}
+
+/** The offset where each 0-based line starts, on the scanner's breaks. */
+function lineStarts(text: string): number[] {
+  const starts = [0];
+  for (let i = 0; i < text.length; ) {
+    const b = breakLen(text, i);
+    if (b > 0) {
+      starts.push(i + b);
+      i += b;
+    } else {
+      i++;
+    }
+  }
+  return starts;
+}
+
+/** The code a TypeScript next-line suppression covers: the first line past
+ * blanks and //-only lines, since tsc skips those when choosing. A line
+ * holding a block comment stops the skip, tsc applying there instead; the
+ * /* test consults the line-comment spans, so a /* inside a //-comment
+ * does not stop it. Decorators stop it, as probed. */
+function tsCovered(
+  code: string[],
+  rawLines: string[],
+  starts: number[],
+  comments: SwitchComment[],
+  from: number,
+): string[] {
+  for (let k = from; k < code.length; k++) {
+    if (code[k] !== "") return [code[k]!];
+    const cut = (rawLines[k] ?? "").indexOf("/*");
+    if (cut < 0) continue;
+    const abs = (starts[k] ?? 0) + cut;
+    const inside = comments.some((c) => c.raw.startsWith("//") && c.start <= abs && abs < c.end);
+    if (inside) continue;
+    return [""];
+  }
+  return [""];
 }
 
 /** The identity of an added switch-off: its file, its comment text and, for a
@@ -493,6 +702,8 @@ function biomeCovered(code: string[], from: number): string[] {
 function fileSwitches(file: string, text: string): SwitchEntry[] {
   const comments = scanComments(text);
   const code = maskedLines(text, comments);
+  const rawLines = splitJsLines(text);
+  const starts = lineStarts(text);
   const placed = placeDirectives(text);
   const ends = new Map<number, BlockEnd>();
   const endOf = (index: number): BlockEnd => {
@@ -552,7 +763,12 @@ function fileSwitches(file: string, text: string): SwitchEntry[] {
     if (d.scope === "line") {
       covered = [code[d.line - 1] ?? ""];
     } else if (d.scope === "next") {
-      covered = d.form === "biome-ignore" ? biomeCovered(code, d.line) : [code[d.line] ?? ""];
+      covered =
+        d.form === "biome-ignore"
+          ? biomeCovered(code, d.line)
+          : d.tool === "ts"
+            ? tsCovered(code, rawLines, starts, comments, d.line)
+            : [code[d.line] ?? ""];
     } else if (d.scope === "file") {
       covered = code.filter((entry) => entry !== "");
     } else {
