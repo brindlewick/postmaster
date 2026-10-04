@@ -5,6 +5,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
   appendFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -131,6 +132,14 @@ describe("the reset, in the shapes providers have used", () => {
 
   test("an out-of-range wait is no reset time, never a crash", () => {
     expect(parseIn("usage limit in 9999999999 hours", NOW)).toBe("none");
+  });
+
+  test("a date or time outside the calendar is no reset time, never normalized", () => {
+    expect(parseIn("try again Oct 35, 2026 2:29 AM.", NOW)).toBe("none");
+    expect(parseIn("try again Feb 30, 2026 2:29 AM.", NOW)).toBe("none");
+    expect(parseIn("try again at 25:00.", NOW)).toBe("none");
+    expect(parseIn("try again at 2:99.", NOW)).toBe("none");
+    expect(parseIn("try again Feb 29, 2024 2:29 AM.", NOW)).toBe("2024-02-29T02:29:00Z");
   });
 });
 
@@ -262,6 +271,20 @@ describe("walls.sh show: the line the cards print", () => {
     expect(ny.out).toContain("2026-10-04T22:29:00-04:00");
     expect(ny.out).not.toContain("2026-10-05T02:29:00-04:00");
   });
+
+  test("a lost-wall marker is shown with its detail", () => {
+    mkdirSync(join(d, "logs"), { recursive: true });
+    writeFileSync(join(d, "logs", "mimo.wall-lost"), "workhorse - - none stuck\n");
+    try {
+      const r = run(self, ["show", d]);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain(
+        'show-run mimo: wall detected but not recorded: "workhorse - - none stuck"',
+      );
+    } finally {
+      rmSync(join(d, "logs", "mimo.wall-lost"));
+    }
+  });
 });
 
 describe("walls.sh open: the pause gate", () => {
@@ -291,6 +314,34 @@ describe("walls.sh open: the pause gate", () => {
 
   test("every wall ruled: exit 0 (C14)", () => {
     write(wall("stub") + line2("rule", "stub", "wall go-on"));
+    const r = run(self, ["open", d]);
+    expect(r.code).toBe(0);
+  });
+
+  test("a lost-wall marker keeps open refusing, naming the lane", () => {
+    write("");
+    mkdirSync(join(d, "logs"), { recursive: true });
+    writeFileSync(join(d, "logs", "stub.wall-lost"), "workhorse - - none stuck\n");
+    try {
+      const r = run(self, ["open", d]);
+      expect(r.code).toBe(1);
+      expect(r.out).toContain("stub: wall detected but not recorded");
+    } finally {
+      rmSync(join(d, "logs", "stub.wall-lost"));
+    }
+  });
+
+  test("an unreadable log refuses open; a missing log reads as no walls", () => {
+    write(wall("stub"));
+    chmodSync(join(d, "actions.jsonl"), 0o000);
+    try {
+      const r = run(self, ["open", d]);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("cannot read");
+    } finally {
+      chmodSync(join(d, "actions.jsonl"), 0o644);
+    }
+    rmSync(join(d, "actions.jsonl"));
     const r = run(self, ["open", d]);
     expect(r.code).toBe(0);
   });
@@ -428,6 +479,51 @@ describe("walls.sh rule: the one ruling, and what it refuses", () => {
     expect(r.err).toContain("no other workhorse");
   });
 
+  test("a spaced repo in the recorded checks keeps the summary visible", () => {
+    fresh("rule-spaced-repo", ["stub", "mimo"]);
+    const spaced = join(tmp, "sp ace");
+    const wt = join(spaced, ".worktrees", "rule-spaced-repo-mimo");
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(join(wt, "WORKHORSE-SUMMARY.md"), "done\n");
+    writeFileSync(join(d, "checks.json"), `${JSON.stringify({ repo: spaced })}\n`);
+    writeFileSync(join(d, "actions.jsonl"), wallLine("stub"));
+    expect(run(self, ["rule", d, "stub", "go-on"]).code).toBe(0);
+  });
+
+  test("a repo: line in the ticket text never wins over the profile", () => {
+    fresh("rule-ticket-repo", ["stub", "mimo"]);
+    const wt = join(tmp, "proj", ".worktrees", "rule-ticket-repo-mimo");
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(join(wt, "WORKHORSE-SUMMARY.md"), "done\n");
+    writeFileSync(
+      join(d, "brief.md"),
+      "# Waybill: T\n\n## Ticket\nquoting\nrepo: /wrong/path/here\ntext.\n\n## Project profile\n" +
+        `repo: ${join(tmp, "proj")}\n`,
+    );
+    writeFileSync(join(d, "actions.jsonl"), wallLine("stub"));
+    expect(run(self, ["rule", d, "stub", "go-on"]).code).toBe(0);
+  });
+
+  test("a spaced profile path without checks still resolves", () => {
+    fresh("rule-spaced-brief", ["stub", "mimo"]);
+    const spaced = join(tmp, "sp ace2");
+    const wt = join(spaced, ".worktrees", "rule-spaced-brief-mimo");
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(join(wt, "WORKHORSE-SUMMARY.md"), "done\n");
+    writeFileSync(join(d, "brief.md"), `# Waybill: T\n\n## Project profile\nrepo: ${spaced}\n`);
+    writeFileSync(join(d, "actions.jsonl"), wallLine("stub"));
+    expect(run(self, ["rule", d, "stub", "go-on"]).code).toBe(0);
+  });
+
+  test("a lane with only a lost marker has no wall to rule", () => {
+    fresh("rule-lost-only", ["stub", "mimo"]);
+    mkdirSync(join(d, "logs"), { recursive: true });
+    writeFileSync(join(d, "logs", "stub.wall-lost"), "workhorse - - none stuck\n");
+    const r = run(self, ["rule", d, "stub", "go-on"]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("no wall");
+  });
+
   test("a ruling for a lane with no wall is usage (exit 1), and an unknown ruling too", () => {
     fresh("rule-usage", ["stub"]);
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub"));
@@ -513,6 +609,24 @@ describe("walls.sh told, escalate and carry", () => {
     expect(run(self, ["carry", d, "stub"]).code).toBe(0);
     expect(count("carry")).toBe(1);
     expect(run(self, ["carry", d, "nobody"]).code).toBe(1);
+  });
+
+  test("escalate names a lost wall with its repair", () => {
+    writeFileSync(join(d, "actions.jsonl"), "");
+    writeFileSync(join(d, "logs", "stub.wall-lost"), "workhorse - - none stuck\n");
+    try {
+      const r = run(self, ["escalate", d]);
+      expect(r.code).toBe(0);
+      const esc = readFileSync(join(d, "ESCALATION.md"), "utf8");
+      expect(esc).toContain("## stub (wall detected but not recorded)");
+      expect(esc).toContain("Unrecorded wall: workhorse - - none stuck");
+      expect(esc).toContain("Repair:");
+      expect(esc).toContain("logs/stub.wall-lost");
+      expect(existsSync(join(d, ".escalation-ready"))).toBe(true);
+      expect(existsSync(join(d, ".wall-pause"))).toBe(true);
+    } finally {
+      rmSync(join(d, "logs", "stub.wall-lost"));
+    }
   });
 
   test("a go-on ruled after a carry-out gets its own carry line (C21)", () => {

@@ -9,8 +9,8 @@
 //   walls.sh carry <dispatch> <lane>          record the go-on the harvest carries out
 //
 //   exit 0  done (open: no wall is waiting on a ruling)
-//   exit 1  usage, an unreadable dispatch, no wall where one was named, or open: walls with
-//           no ruling, each listed on its own line
+//   exit 1  usage, an unreadable dispatch, an unreadable action log, no wall where one
+//           was named, or open: walls with no ruling, each listed on its own line
 //   exit 2  a ruling refused, the reason on stderr: rest, reset-now and substitute are the
 //           separate ticket's; go-on for a workhorse wall is refused for the last workhorse
 //           that could still produce work, and every ruling once every wall of the lane
@@ -21,11 +21,14 @@
 // detail; a `told` line marks the walls of its lane before it as told, a `rule` line whose
 // detail opens `wall go-on` marks them ruled, and a `carry` line records the carry-out.
 // Lines are read in file order, so a lane that walls again has a new wall that the earlier
-// told and ruling never cover.
+// told and ruling never cover. A wall the launch detected but could not record leaves
+// `logs/<lane>.wall-lost` instead: `open` refuses while one exists, `show` and
+// `escalate` name it with its repair, and it is removed by hand once the wall is
+// re-recorded. A missing log reads as no walls; an unreadable one refuses every command.
 //
 // The reset arrives on the `wall` line: launch.sh parses it from the message the provider
 // ended the turn with (lib/wall.ts, D4 and D5), and show prints it in the machine's zone.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
@@ -115,6 +118,41 @@ export function readWalls(dispatch: string): Wall[] {
   });
 }
 
+/** actions.jsonl exists but cannot be read: a missing log reads as no walls, an unreadable one never does. */
+export function logUnreadable(dispatch: string): boolean {
+  const p = join(dispatch, "actions.jsonl");
+  if (!existsSync(p)) return false;
+  try {
+    readFileSync(p, "utf8");
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/** Walls the launches detected but could not record, one entry per lane marker file. */
+export function lostWalls(dispatch: string): Array<{ lane: string; details: string[] }> {
+  let files: string[];
+  try {
+    files = readdirSync(join(dispatch, "logs"));
+  } catch {
+    return [];
+  }
+  const out: Array<{ lane: string; details: string[] }> = [];
+  for (const f of files.sort()) {
+    if (!f.endsWith(".wall-lost")) continue;
+    let lines: string[];
+    try {
+      lines = readFileSync(join(dispatch, "logs", f), "utf8").split("\n").filter((l) => l !== "");
+    } catch {
+      continue;
+    }
+    if (lines.length === 0) continue;
+    out.push({ lane: f.slice(0, -".wall-lost".length), details: lines });
+  }
+  return out;
+}
+
 /** The run's wall for a reviewer under a lens in a round, or null. */
 export function wallFor(dispatch: string, lane: string, lens: string, round: string): Wall | null {
   for (const w of readWalls(dispatch)) {
@@ -181,20 +219,26 @@ function workhorses(dispatch: string): string[] {
   }
 }
 
-/** The repo the run works in, from the waybill or the recorded checks. */
+/** The repo the run works in, from the recorded checks or the waybill's profile. */
 function runRepo(dispatch: string): string {
-  try {
-    const text = readFileSync(join(dispatch, "brief.md"), "utf8");
-    const m = /^repo:[ \t]*(\/[^ \t\n]+)/mu.exec(text);
-    if (m && m[1]) return m[1];
-  } catch {
-    /* no waybill */
-  }
   try {
     const j: unknown = JSON.parse(readFileSync(join(dispatch, "checks.json"), "utf8"));
     if (isRecord(j) && typeof j.repo === "string" && j.repo.startsWith("/")) return j.repo;
   } catch {
     /* no checks */
+  }
+  try {
+    const text = readFileSync(join(dispatch, "brief.md"), "utf8");
+    const profile = text.split("## Project profile")[1] ?? "";
+    const m = /^repo:[ \t]*([^\n]+)/mu.exec(profile);
+    if (m && m[1]) {
+      // The profile line carries more fields after the path (`default branch:`,
+      // `BASE:`), so the path ends where they begin; fixtures name it alone.
+      const v = m[1].split(/[ \t]+default branch:/u)[0]!.trim();
+      if (v.startsWith("/")) return v;
+    }
+  } catch {
+    /* no waybill */
   }
   return "";
 }
@@ -244,9 +288,18 @@ export function wallsCommand(argv: string[]): number {
   const dispatch = resolveDispatch(argv[1]);
   const runName = basename(dispatch);
   const walls = readWalls(dispatch);
+  if (logUnreadable(dispatch)) {
+    console.error(`walls: cannot read ${join(dispatch, "actions.jsonl")}`);
+    return 1;
+  }
 
   if (cmd === "show") {
     for (const w of walls) console.log(showLine(runName, w));
+    for (const lost of lostWalls(dispatch)) {
+      for (const detail of lost.details) {
+        console.log(`${runName} ${lost.lane}: wall detected but not recorded: "${detail}"`);
+      }
+    }
     return 0;
   }
 
@@ -256,12 +309,17 @@ export function wallsCommand(argv: string[]): number {
       const lens = w.role === "reviewer" && w.lens !== "-" ? ` ${w.lens}` : "";
       console.log(`${w.lane}${lens}: no ruling: "${w.message}"`);
     }
-    return open.length > 0 ? 1 : 0;
+    const lost = lostWalls(dispatch);
+    for (const l of lost) {
+      console.log(`${l.lane}: wall detected but not recorded`);
+    }
+    return open.length > 0 || lost.length > 0 ? 1 : 0;
   }
 
   if (cmd === "escalate") {
     const open = walls.filter((w) => !w.ruled);
-    if (open.length === 0) {
+    const lost = lostWalls(dispatch);
+    if (open.length === 0 && lost.length === 0) {
       console.error("walls: no wall is waiting on a ruling");
       return 1;
     }
@@ -279,6 +337,17 @@ export function wallsCommand(argv: string[]): number {
       lines.push(`Reset: ${w.reset === "none" ? "no reset time" : w.reset}`);
       lines.push("");
     }
+    for (const l of lost) {
+      lines.push(`## ${l.lane} (wall detected but not recorded)`);
+      lines.push("");
+      for (const detail of l.details) {
+        lines.push(`Unrecorded wall: ${detail}`);
+      }
+      lines.push(
+        `Repair: restore ${join(dispatch, "actions.jsonl")}, re-record each wall with \`<tool>/scripts/log-action.sh ${dispatch} lane:${l.lane} wall ${l.lane} "<detail>"\`, then remove \`logs/${l.lane}.wall-lost\`.`,
+      );
+      lines.push("");
+    }
     lines.push("## The ruling");
     lines.push("");
     lines.push(
@@ -293,7 +362,10 @@ export function wallsCommand(argv: string[]): number {
       console.error(`walls: cannot write the escalation: ${String(e)}`);
       return 1;
     }
-    const listed = open.map((w) => `${w.lane} (${rolePart(w)})`).join(", ");
+    const listed = [
+      ...open.map((w) => `${w.lane} (${rolePart(w)})`),
+      ...lost.map((l) => `${l.lane} (unrecorded)`),
+    ].join(", ");
     if (
       logAction(dispatch, "coachman", "escalate", "ESCALATION.md", `provider walls: ${listed}`) !==
       0

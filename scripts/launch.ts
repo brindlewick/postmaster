@@ -48,6 +48,7 @@
 import { spawnSync } from "node:child_process";
 import {
   accessSync,
+  appendFileSync,
   existsSync,
   constants as fsConstants,
   mkdirSync,
@@ -1138,17 +1139,29 @@ function recordWallIfAny(o: {
   const roleWord = o.role === "lane" ? "workhorse" : "reviewer";
   const reset = parseWallReset(message, wallClockNow()) ?? "none";
   const detail = `${roleWord} ${lens} ${round} ${reset} ${first}`;
-  const r = run(join(scriptsDir(import.meta), "log-action.sh"), [
-    o.dispatch,
-    `lane:${o.lane}`,
-    "wall",
-    o.lane,
-    detail,
-  ]);
-  if (r.code !== 0) {
-    console.error(
-      `launch: the provider wall on ${o.lane} was not recorded: ${(r.err || r.out).trim()}`,
-    );
+  let recorded = false;
+  let problem = "";
+  try {
+    const r = run(join(scriptsDir(import.meta), "log-action.sh"), [
+      o.dispatch,
+      `lane:${o.lane}`,
+      "wall",
+      o.lane,
+      detail,
+    ]);
+    recorded = r.code === 0;
+    if (!recorded) problem = (r.err || r.out).trim();
+  } catch (e) {
+    problem = String(e).split("\n")[0] ?? "could not run";
+  }
+  if (!recorded) {
+    console.error(`launch: the provider wall on ${o.lane} was not recorded: ${problem}`);
+    // The gates refuse on this marker until the wall is repaired and re-recorded.
+    try {
+      appendFileSync(join(o.dispatch, "logs", `${o.lane}.wall-lost`), `${detail}\n`);
+    } catch {
+      /* nothing further can be recorded */
+    }
     return true;
   }
   return false;

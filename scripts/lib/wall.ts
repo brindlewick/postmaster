@@ -111,6 +111,17 @@ function hour12(h: number, ap: string | undefined): number {
   return h;
 }
 
+/** A parsed calendar day stands only inside its month (D5: no fabricated resets). */
+function validDay(year: number, month: number, day: number): boolean {
+  if (day < 1) return false;
+  return day <= new Date(year, month + 1, 0).getDate();
+}
+
+/** A parsed clock time stands only on the clock (D5). */
+function validTime(hour: number, minute: number): boolean {
+  return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59;
+}
+
 /** A time alone means its first occurrence no earlier than five minutes before `now`. */
 function firstOccurrence(nowMs: number, make: (dayOffset: number) => number | null): number | null {
   const today = make(0);
@@ -166,6 +177,9 @@ export function parseWallReset(message: string, nowMs: number): string | null {
       const month = MONTHS[mon.slice(0, 3).toLowerCase()] ?? 0; // ASCII: month names are ASCII
       const hour = hour12(Number(h), ap);
       const minute = Number(mi ?? "0");
+      if (!validDay(Number(year), month, Number(day)) || !validTime(hour, minute)) {
+        return blank(m);
+      }
       const instant =
         tz === ""
           ? new Date(Number(year), month, Number(day), hour, minute).getTime()
@@ -184,6 +198,7 @@ export function parseWallReset(message: string, nowMs: number): string | null {
       if (tz === null) return blank(m); // an abbreviation: the time is unreadable
       const hour = hour12(Number(h), ap);
       const minute = Number(mi ?? "0");
+      if (!validTime(hour, minute)) return blank(m);
       const instant = firstOccurrence(nowMs, (dayOffset) => {
         const [y, mo, day] = zonedYMD(nowMs, tz);
         return zonedInstant(y, mo, day + dayOffset, hour, minute, tz);
@@ -208,6 +223,7 @@ export function parseWallReset(message: string, nowMs: number): string | null {
       if (h === undefined) return blank(m);
       const minute = Number(mi1 ?? "0");
       const hour = hour12(Number(h), ap1 ?? ap2);
+      if (!validTime(hour, minute)) return blank(m);
       const instant = firstOccurrence(nowMs, (dayOffset) => {
         const n = new Date(nowMs);
         return new Date(

@@ -5772,47 +5772,67 @@ describe("C1: a launch that ends on its provider's limit records one wall", () =
     expect(rec.detail).toContain("workhorse - - none You have hit your usage limit.");
   }, 60000);
 
+  /** launch.sh straight, reading its own exit: stdout is the stream, as host.sh arranges. */
+  const directStep = (
+    c: Dispatch,
+    lane: string,
+    out: string,
+  ): { rc: number; err: string; actions: string } => {
+    const streamFile = join(c.d, "logs", `${out}.jsonl`);
+    mkdirSync(join(c.d, "logs"), { recursive: true });
+    const fd = openSync(streamFile, "w");
+    const r = spawnSync(
+      join(import.meta.dir, "launch.sh"),
+      ["launch", lane, c.wt, join(tmp, "prompt.txt"), "--run", c.d],
+      {
+        encoding: "utf8",
+        stdio: ["inherit", fd, "pipe"],
+        env: { ...baseEnv(), POSTMASTER_EVENT_STREAM: streamFile, POSTMASTER_LAUNCH_ROLE: "lane" },
+      },
+    );
+    closeSync(fd);
+    return { rc: r.status ?? 1, err: String(r.stderr ?? ""), actions: join(c.d, "actions.jsonl") };
+  };
+
   test("a detected wall the log cannot record fails the launch closed", () => {
     const c = dispatch("c1-lost-wall");
     stub(
       "mimo",
       `cat >/dev/null\nrm -rf ${c.d}/actions.jsonl; mkdir ${c.d}/actions.jsonl\ncat <<'EOF'\n${MIMO_WALL}\nEOF\nexit 0\n`,
     );
-    const streamFile = join(c.d, "logs", "mimo-lost.jsonl");
-    mkdirSync(join(c.d, "logs"), { recursive: true });
-    const fd = openSync(streamFile, "w");
-    const r = spawnSync(
-      join(import.meta.dir, "launch.sh"),
-      ["launch", "mimo", c.wt, join(tmp, "prompt.txt"), "--run", c.d],
-      {
-        encoding: "utf8",
-        stdio: ["inherit", fd, "pipe"],
-        env: { ...baseEnv(), POSTMASTER_EVENT_STREAM: streamFile, POSTMASTER_LAUNCH_ROLE: "lane" },
-      },
+    const step = directStep(c, "mimo", "mimo-lost");
+    expect(step.rc).toBe(1);
+    expect(step.err).toContain("was not recorded");
+    expect(readFileSync(join(c.d, "logs", "mimo.wall-lost"), "utf8")).toContain(
+      "workhorse - - none You have hit your usage limit.",
     );
-    closeSync(fd);
-    expect(r.status ?? 1).toBe(1);
-    expect(String(r.stderr ?? "")).toContain("was not recorded");
   }, 60000);
 
   test("a recorded mimo wall keeps the harness exit 0 (fail-closed control)", () => {
     const c = dispatch("c1-kept-wall");
     stub("mimo", `cat >/dev/null\ncat <<'EOF'\n${MIMO_WALL}\nEOF\nexit 0\n`);
-    const streamFile = join(c.d, "logs", "mimo-kept.jsonl");
-    mkdirSync(join(c.d, "logs"), { recursive: true });
-    const fd = openSync(streamFile, "w");
-    const r = spawnSync(
-      join(import.meta.dir, "launch.sh"),
-      ["launch", "mimo", c.wt, join(tmp, "prompt.txt"), "--run", c.d],
-      {
-        encoding: "utf8",
-        stdio: ["inherit", fd, "pipe"],
-        env: { ...baseEnv(), POSTMASTER_EVENT_STREAM: streamFile, POSTMASTER_LAUNCH_ROLE: "lane" },
+    const step = directStep(c, "mimo", "mimo-kept");
+    expect(step.rc).toBe(0);
+    expect(wallsIn(step.actions).length).toBe(1);
+    expect(existsSync(join(c.d, "logs", "mimo.wall-lost"))).toBe(false);
+  }, 60000);
+
+  test("a NUL in the wall message is contained as a lost wall, not a crash", () => {
+    const c = dispatch("c1-nul-wall");
+    const nul = JSON.stringify({
+      sessionID: "s-nul",
+      type: "error",
+      error: {
+        name: "UsageLimitError",
+        data: { message: "You have hit your usage limit.\u0000junk" },
       },
-    );
-    closeSync(fd);
-    expect(r.status ?? 1).toBe(0);
-    expect(wallsIn(join(c.d, "actions.jsonl")).length).toBe(1);
+    });
+    stub("mimo", `cat >/dev/null\ncat <<'EOF'\n${nul}\nEOF\nexit 0\n`);
+    const step = directStep(c, "mimo", "mimo-nul");
+    expect(step.rc).toBe(1);
+    expect(step.err).toContain("was not recorded");
+    expect(existsSync(join(c.d, "logs", "mimo.wall-lost"))).toBe(true);
+    expect(wallsIn(step.actions).length).toBe(0);
   }, 60000);
 });
 
