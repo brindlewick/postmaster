@@ -21,6 +21,16 @@ Added [A second reviewer earns its keep; a second workhorse is cheap and not sho
 **claimed**, and linked it from [Combining models](concepts/combining-models.md), whose standings do
 not move: the trial promotes no run.
 
+## [2026-10-03] ingest | pstack, a plugin and guide of skills for verified agent work
+
+Captured the plugin at commit 23e4138 and Part 1 of its guide into `raw/articles/`, as passages
+only, and wrote [pstack](sources/pstack.md). It sets each of the plugin's 52 skills, 23 playbooks
+and 24 principles beside what postmaster holds, gives each a verdict, and ranks nine candidate
+changes. None is filed. Linked from
+[each project defines how a change to it is verified](concepts/verification.md) and from
+[a fixture run tests the flow end to end](concepts/fixture-runs.md), under what would change or
+settle them. No standing changed, since outside work does not move one.
+
 ## [2026-10-03] query | should #216 build the check as a library module
 
 The user's word: no; whether it becomes a library is a later concern, so #216 builds the check

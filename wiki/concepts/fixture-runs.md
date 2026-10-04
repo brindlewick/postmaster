@@ -3,7 +3,7 @@ title: A fixture run tests the flow end to end, which the gate cannot
 type: concept
 standing: claimed
 sources: []
-updated: 2026-10-01
+updated: 2026-10-03
 ---
 
 # Fixture runs
@@ -88,6 +88,10 @@ Supported, when recorded fixture runs show the score doing what is claimed: at l
 failing a check because of a contract change that the gate passed, and clean runs scoring clean.
 Refuted, when fixture runs miss contract changes that later break real runs, or when a run that
 scores clean is found to have shipped something its ticket did not ask for.
+
+How much one fixture score varies between runs of the same commit is not recorded.
+[pstack](../sources/pstack.md) argues for a swarm of runs to get a big enough sample, and its
+candidate 5 is a trial of that. It does not move the standing.
 
 ## What changed because of it
 
