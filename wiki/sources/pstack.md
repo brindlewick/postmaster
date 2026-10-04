@@ -26,7 +26,8 @@ habit of treating text from outside as data, not instructions, turned up a gap h
 largest idea, a standing driver and feature map for each target with a daily upkeep pass, has
 no counterpart here. It fits as an input to the QA turnpike, after a trial. A first look at the
 skill on a small command-line app found that its record mostly restates what the app already
-declares, so the trial belongs on a project with a user interface.
+declares, so the trial belongs on a project with a user interface. The user has since asked for
+the record as part of setup on a new project, and that is filed as [#273][i273].
 
 ## What pstack claims
 
@@ -128,8 +129,8 @@ The [23 playbooks][playbooks] are grouped by what they do.
 ## The changes worth making, ranked
 
 Ranked by what the repository already shows, cheapest and best evidenced first, with the one
-safety gap placed second. None is filed. A row that names an open ticket would be a comment on
-that ticket. Contract files are those in [the contract list][contract], and a change to one needs
+safety gap placed second. One is filed, candidate 7 as [#273][i273] on the user's word, and the
+rest are not. A row that names an open ticket would be a comment on that ticket. Contract files are those in [the contract list][contract], and a change to one needs
 a clean fixture run before it merges.
 
 | # | candidate, in one sentence | belongs in | contract files | cost | what would settle it |
@@ -140,7 +141,7 @@ a clean fixture run before it merges.
 | 4 | Every control a change adds is shown to fail when every function it imports is replaced by one that returns nothing, and the five test shapes that cannot fail are the checklist. | [#133][i133], as the first step of its criterion 3 | none for the stub in the gate. Its criterion 2 touches the coachman's review steps, and must not tune what a reviewer looks for | small | The stub run over the existing tests, with a known vacuous test as the positive control and a real one as the negative. |
 | 5 | Score one fixture ticket five times from one commit, to see how much the score and the path of a run vary, before asking for more than one clean fixture run per contract change. | a new research ticket, recorded as a trial | none | five fixture runs, which [#265][i265] puts at about 2 hours 10 minutes each today | The spread. If all five agree, one run stands. If not, it names the number to require. |
 | 6 | Name the flow's failure scenarios (a lane wall, a coachman killed mid-leg, the review cap, a takeover, a confinement fallback) and run each with stub lanes in seconds. | [#104][i104], as an option in its research | none to test | medium | #104's trial, plus a count of past contract breaks the scenarios catch that the gate does not. |
-| 7 | A model that follows pstack's interview of the repository writes, once per target, how to launch, check, drive and clean up the project and a short map of its user-facing features, and a trial on a project with a user interface, an end user's or this one's once the dashboard ([#146][i146]) exists, shows whether lanes given it end with fewer `not shown` evidence entries. | [#97][i97], the QA turnpike, as its input | none for the trial. Adopting touches `coachman.md` and the waybill in `SKILL.md` | medium, a session per target and two tickets compared | Evidence quality with and without the record on the same two tickets of that project, against the baseline count below. |
+| 7 | A model that follows pstack's interview of the repository writes, once per target, how to launch, check, drive and clean up the project and a short map of its user-facing features, and a trial on a project with a user interface, an end user's or this one's once the dashboard ([#146][i146]) exists, shows whether lanes given it end with fewer `not shown` evidence entries. | [#273][i273], filed on the user's word, as part of setup. [#97][i97], the QA turnpike, takes its record as input | none for the trial. Adopting touches `coachman.md` and the waybill in `SKILL.md` | medium, a session per target and two tickets compared | Evidence quality with and without the record on the same two tickets of that project, against the baseline count below. |
 | 8 | A decision goes to the user in a spec review only if running something cannot settle it, and the spec shows the result of what could. | [#219][i219], as one more option | `spec-session.md`, if adopted | low | A mock review sheet built both ways from two real specs, counting the decisions removed and any removed that was the user's call. |
 | 9 | Every script that removes or rewrites something offers a dry run that changes nothing, and a test fails one that does not. | a new ticket, after #252 | yes, `scripts/host.ts`, `scripts/landing.ts` and `scripts/stage.ts` are listed, so a fixture run | medium | The count of state-changing scripts with a dry run, with a script that lacks one as the negative control. |
 
@@ -402,6 +403,7 @@ so neither changes.
 [i257]: https://github.com/brindlewick/postmaster/issues/257
 [i264]: https://github.com/brindlewick/postmaster/issues/264
 [i265]: https://github.com/brindlewick/postmaster/issues/265
+[i273]: https://github.com/brindlewick/postmaster/issues/273
 [p249]: https://github.com/brindlewick/postmaster/pull/249
 [p250]: https://github.com/brindlewick/postmaster/pull/250
 [p254]: https://github.com/brindlewick/postmaster/pull/254

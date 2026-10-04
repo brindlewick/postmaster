@@ -8,6 +8,15 @@ updated: 2026-10-04
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-10-04] query | should setup create a project's verifiers with pstack's skill
+
+The user's word: yes, as part of setup on a new project, using pstack's `/create-verification-skill`.
+Filed as #273, on the board in Todo, for a ticket session to settle where setup runs it, what it
+produces and where that lives, and what counts as done. Candidate 7 in
+[pstack](sources/pstack.md) now belongs in #273, with the QA turnpike (#97) taking the record as
+input. The trial of whether lanes do better with the record stays the way to measure it, on a
+project with a user interface. No standing changed.
+
 ## [2026-10-04] ingest | how often a lane's evidence is `not shown`, and whether the check bounds it
 
 Recorded `raw/trials/not-shown-evidence/`. A read-only count of the Evidence entries in lane
