@@ -10,7 +10,7 @@ Append-only. Newest first. One entry per operation, prefixed so it can be parsed
 
 ## [2026-10-04] ingest | what exists for coding with several models, whether mixing models is proven, and what postmaster adds
 
-Issue #277. Captured 107 papers and 128 pages into `raw/papers/` and `raw/articles/`, each with its
+Issue #277. Captured 107 papers and 139 pages into `raw/papers/` and `raw/articles/`, each with its
 address, the day it was read and the passages relied on, and recorded the search in
 `raw/trials/2026-10-04-landscape-search/`: every query, the rule for choosing in each group, the controls,
 what was not read, and the marks of the count that ranks the closest tools. Added

@@ -2,7 +2,7 @@
 title: Mixing models for coding, what exists, what is shown, and what postmaster adds
 type: concept
 standing: claimed
-sources: [trials/2026-10-03-lane-audit, trials/2026-09-29-synthesis-audit, trials/2026-10-04-landscape-search, papers/agarwal-2026-specmine, papers/alenezi-2026-sdd-enterprise, papers/almeida-2026-llm-diversity, papers/anand-2026-aeval, papers/antoniades-2024-swesearch, papers/ashiga-2025-moacodeopt, papers/barkhordar-2026-code-attribution, papers/brilliant-1990-faults, papers/brown-2024-largemonkeys, papers/cemri-2025-mast, papers/chen-2022-codet, papers/chen-2023-reconcile, papers/chen-2023-usc, papers/chen-2024-llmcalls, papers/chen-2025-perforch, papers/chen-2026-cofailure, papers/cho-2026-agentroom, papers/choi-2025-debate-or-vote, papers/costanza-2026-argus, papers/dhanorkar-2026-human-oversight, papers/diaz-2026-sdd-human-agent-teamwork, papers/du-2023-debate, papers/eckhardt-1985-coincident-errors, papers/eckhardt-1991-redundancy, papers/edwards-2026-ask-or-assume, papers/ehrlich-2025-codemonkeys, papers/fadnavis-2026-trace-synthesis, papers/fu-2026-benchagent, papers/gao-2025-trae-agent, papers/geng-2026-caid, papers/goel-2025-great-models, papers/huang-2023-agentcoder, papers/huang-2026-deepswe, papers/inoue-2025-abmcts, papers/islam-2024-mapcoder, papers/jain-2025-r2egym, papers/jiang-2023-llmblender, papers/jimenez-2023-swe-bench, papers/kapoor-2025-hal, papers/kemerer-paulk-2009-review-rate, papers/khairi-2025-fusion-of-n, papers/khatua-2026-cooperbench, papers/kim-2025-correlated-errors, papers/kim-2025-scaling-agents, papers/knight-1986-independence, papers/kohli-2026-nine-judges, papers/kumar-2026-bigger-isnt-better, papers/kwok-2026-llmverifier, papers/lange-2025-shinkaevolve, papers/li-2022-alphacode, papers/li-2024-moreagents, papers/li-2025-selfmoa, papers/liang-2025-swebenchillusion, papers/littlewood-1989-forced-diversity, papers/littlewood-2001-diversity-review, papers/liu-2026-converged, papers/macedo-2026-prompt-to-process, papers/mahmud-2025-enslm, papers/marri-2026-constitutional-sdd, papers/martinez-2025-swebench-leaderboards, papers/merrill-2026-terminal-bench, papers/miller-2026-review-beats-planning, papers/nogueira-2026-failure-independence, papers/novikov-2025-alphaevolve, papers/pabba-2025-refine, papers/panickssery-2024-self-preference, papers/petersson-2004-capture-recapture, papers/ping-2025-verimoa, papers/piskala-2026-code-to-contract, papers/porter-1995-requirements-inspection-replication, papers/porter-1997-code-inspections-cost-benefits, papers/qiu-2026-adversarial-review, papers/rajan-2026-multiver, papers/richards-2026-agentlogs, papers/ron-2026-nvp-coding-agents, papers/saad-falcon-2024-archon, papers/schoenegger-2024-silicon-crowd, papers/shi-2022-mbrexec, papers/smit-2024-mad, papers/stone-2026-single-llm-incomplete-reviewer, papers/sunkaraneni-2026-boosting, papers/taghavi-2026-spec-kit-agents, papers/tran-2026-single-agent-budget, papers/tufano-2026-spec-driven-test-generation, papers/vallecillosruiz-2025-ensembles, papers/vargas-2025-slean, papers/verga-2024-poll, papers/vilasboas-2026-one-person-squad, papers/votta-1993-inspection-meeting, papers/wang-2022-selfconsistency, papers/wang-2024-moa, papers/wang-2024-plansearch, papers/wu-2024-inference-scaling, papers/wynn-2025-talk-not-cheap, papers/xia-2024-agentless, papers/xiang-2026-cross-model-review, papers/yang-2026-patchfusion, papers/yin-2025-agent-frameworks, papers/zeng-2025-e2edevbench, papers/zeng-2025-swr-bench, papers/zhang-2022-coderreviewer, papers/zhang-2024-dei, papers/zhang-2024-osca, papers/zhang-2025-stop-overvaluing-mad, papers/zhang-2026-aacr-bench, papers/zhang-2026-right-to-history, papers/zhao-2025-agglm, papers/zheng-2025-agentsight, papers/zhu-2025-multiagentbench, papers/zibaeirad-2025-dvdr-llm, articles/aclanthology-multiagentbench-2025, articles/addyosmani-adverse, articles/addyosmani-code-agent-orchestra, articles/agentops-ai-agentops, articles/aider-ai-aider, articles/aider-architect, articles/aider-r1-sonnet, articles/alecnielsen-adversarial-review, articles/anthropic-building-c-compiler, articles/anthropic-claude-code-agent-teams, articles/anthropic-claude-code-hooks, articles/anthropic-claude-code-monitoring, articles/anthropic-claude-code-plan-mode-docs, articles/anthropic-claude-code-review-blog, articles/anthropic-claude-code-review-docs, articles/anthropic-claude-sonnet-4-5-post, articles/anthropic-harness-design, articles/anthropic-infrastructure-noise, articles/anthropic-multi-agent-research-system, articles/anthropics-claude-code-code-review-plugin, articles/antonbabenko-deliberation, articles/aporter-inspection-structure, articles/augmentcode-augment-swebench-agent, articles/augmentcode-blog-claude-o1, articles/augmentcode-open-source-agent-orchestrators, articles/autopus-ai-autopus-adk, articles/autopus-ai-harness-assessment, articles/beehiveinnovations-pal-mcp-server, articles/berkayturanci-ai-jury, articles/berkayturanci-ai-jury-benchmark-results, articles/bloopai-vibe-kanban, articles/bmad-code-org-bmad-method, articles/boshu2-agentops, articles/bytedance-trae-agent, articles/bytedance-trae-swebench-verified-blog, articles/ccusage-ccusage, articles/cline-plan-and-act, articles/coderabbit-docs-architecture, articles/cognition-devin-ask-devin, articles/cognition-devin-managed-devins, articles/cognition-dont-build-multi-agents, articles/cognition-multi-agents-working, articles/conductor-home, articles/cursor-agent-trace, articles/cursor-building-bugbot, articles/cursor-changelog-2-0, articles/cursor-changelog-2-2, articles/cursor-docs-worktrees, articles/cursor-forum-best-of-n-models-bug, articles/cursor-plan-mode, articles/cursor-scaling-agents, articles/dagger-container-use, articles/datacurve-deepswe-blog, articles/entireio-cli, articles/entireio-cli-architecture, articles/firecrawl-codex-multi-agent-orchestration, articles/fission-ai-openspec, articles/gastownhall-gastown, articles/gemini-cli-extensions-conductor, articles/generalaction-emdash, articles/git-ai-project-git-ai, articles/github-blog-pick-your-agent, articles/github-blog-welcome-home-agents, articles/github-copilot-60-million-reviews, articles/github-docs-copilot-agent-sessions, articles/github-spec-kit, articles/google-antigravity-implementation-plan, articles/gotalab-cc-sdd, articles/graphite-effectiveness-guide, articles/greptile-homepage, articles/greptile-model-inversion, articles/gsd-build-get-shit-done, articles/helixml-helix, articles/ietf-draft-sharif-agent-audit-trail, articles/infoq-garg-spec-driven-pays-off, articles/karpathy-llm-council, articles/kilo-agent-manager-blog, articles/kiro-dev-docs, articles/langchain-langsmith-claude-code, articles/langfuse-coding-agent-tracing, articles/liliu-z-magpie, articles/linux-kernel-coding-assistants, articles/looptroop-ai-looptroop, articles/martinfowler-bockeler-sdd-three-tools, articles/mco-org-mco, articles/microsoft-vscode-copilot-plan-agent, articles/milvus-magpie-debate-benchmark, articles/mozilla-ai-star-chamber, articles/ng-adversarial-review, articles/obra-superpowers, articles/omnigent-ai-omnigent, articles/open-gsd-gsd-core, articles/openai-codex-best-of-n-announcement, articles/openai-codex-cloud-tasks-cli, articles/openai-codex-github-docs, articles/openai-codex-plugin-cc, articles/openai-codex-rollout-trace, articles/openai-symphony, articles/openhands-blog-inference-time-scaling, articles/opentelemetry-semantic-conventions-genai, articles/papercomputeco-tapes, articles/postmaster-repository, articles/qodo-introducing-qodo-2-0, articles/ruvnet-ruflo, articles/sakana-ab-mcts, articles/sakanaai-treequest, articles/simple10-agents-observe, articles/smtg-ai-claude-squad, articles/specstoryai-getspecstory, articles/spillwavesolutions-parallel-worktrees, articles/stablyai-orca, articles/superset-sh-superset, articles/sweagent-mini-swe-agent, articles/tbench-terminal-bench-2-1, articles/tessl-spec-driven-tile, articles/the-pr-agent-pr-agent, articles/thoughtworks-agent-trace, articles/togethercomputer-moa, articles/traycer-traycer, articles/untrivial-ai-agent-orchestrator, articles/vibekanban-goodbye-bloop, articles/voratiq-how-it-works, articles/voratiq-voratiq, articles/warp-run-multiple-agents, articles/windsurf-arena-mode, articles/wolfiesch-omp-best-of, articles/yeachan-heo-oh-my-claudecode, articles/zackproser-codex-reviews-claude]
+sources: [trials/2026-10-03-lane-audit, trials/2026-09-29-synthesis-audit, trials/2026-10-04-landscape-search, papers/agarwal-2026-specmine, papers/alenezi-2026-sdd-enterprise, papers/almeida-2026-llm-diversity, papers/anand-2026-aeval, papers/antoniades-2024-swesearch, papers/ashiga-2025-moacodeopt, papers/barkhordar-2026-code-attribution, papers/brilliant-1990-faults, papers/brown-2024-largemonkeys, papers/cemri-2025-mast, papers/chen-2022-codet, papers/chen-2023-reconcile, papers/chen-2023-usc, papers/chen-2024-llmcalls, papers/chen-2025-perforch, papers/chen-2026-cofailure, papers/cho-2026-agentroom, papers/choi-2025-debate-or-vote, papers/costanza-2026-argus, papers/dhanorkar-2026-human-oversight, papers/diaz-2026-sdd-human-agent-teamwork, papers/du-2023-debate, papers/eckhardt-1985-coincident-errors, papers/eckhardt-1991-redundancy, papers/edwards-2026-ask-or-assume, papers/ehrlich-2025-codemonkeys, papers/fadnavis-2026-trace-synthesis, papers/fu-2026-benchagent, papers/gao-2025-trae-agent, papers/geng-2026-caid, papers/goel-2025-great-models, papers/huang-2023-agentcoder, papers/huang-2026-deepswe, papers/inoue-2025-abmcts, papers/islam-2024-mapcoder, papers/jain-2025-r2egym, papers/jiang-2023-llmblender, papers/jimenez-2023-swe-bench, papers/kapoor-2025-hal, papers/kemerer-paulk-2009-review-rate, papers/khairi-2025-fusion-of-n, papers/khatua-2026-cooperbench, papers/kim-2025-correlated-errors, papers/kim-2025-scaling-agents, papers/knight-1986-independence, papers/kohli-2026-nine-judges, papers/kumar-2026-bigger-isnt-better, papers/kwok-2026-llmverifier, papers/lange-2025-shinkaevolve, papers/li-2022-alphacode, papers/li-2024-moreagents, papers/li-2025-selfmoa, papers/liang-2025-swebenchillusion, papers/littlewood-1989-forced-diversity, papers/littlewood-2001-diversity-review, papers/liu-2026-converged, papers/macedo-2026-prompt-to-process, papers/mahmud-2025-enslm, papers/marri-2026-constitutional-sdd, papers/martinez-2025-swebench-leaderboards, papers/merrill-2026-terminal-bench, papers/miller-2026-review-beats-planning, papers/nogueira-2026-failure-independence, papers/novikov-2025-alphaevolve, papers/pabba-2025-refine, papers/panickssery-2024-self-preference, papers/petersson-2004-capture-recapture, papers/ping-2025-verimoa, papers/piskala-2026-code-to-contract, papers/porter-1995-requirements-inspection-replication, papers/porter-1997-code-inspections-cost-benefits, papers/qiu-2026-adversarial-review, papers/rajan-2026-multiver, papers/richards-2026-agentlogs, papers/ron-2026-nvp-coding-agents, papers/saad-falcon-2024-archon, papers/schoenegger-2024-silicon-crowd, papers/shi-2022-mbrexec, papers/smit-2024-mad, papers/stone-2026-single-llm-incomplete-reviewer, papers/sunkaraneni-2026-boosting, papers/taghavi-2026-spec-kit-agents, papers/tran-2026-single-agent-budget, papers/tufano-2026-spec-driven-test-generation, papers/vallecillosruiz-2025-ensembles, papers/vargas-2025-slean, papers/verga-2024-poll, papers/vilasboas-2026-one-person-squad, papers/votta-1993-inspection-meeting, papers/wang-2022-selfconsistency, papers/wang-2024-moa, papers/wang-2024-plansearch, papers/wu-2024-inference-scaling, papers/wynn-2025-talk-not-cheap, papers/xia-2024-agentless, papers/xiang-2026-cross-model-review, papers/yang-2026-patchfusion, papers/yin-2025-agent-frameworks, papers/zeng-2025-e2edevbench, papers/zeng-2025-swr-bench, papers/zhang-2022-coderreviewer, papers/zhang-2024-dei, papers/zhang-2024-osca, papers/zhang-2025-stop-overvaluing-mad, papers/zhang-2026-aacr-bench, papers/zhang-2026-right-to-history, papers/zhao-2025-agglm, papers/zheng-2025-agentsight, papers/zhu-2025-multiagentbench, papers/zibaeirad-2025-dvdr-llm, articles/aclanthology-multiagentbench-2025, articles/addyosmani-adverse, articles/addyosmani-code-agent-orchestra, articles/agentops-ai-agentops, articles/aider-ai-aider, articles/aider-architect, articles/aider-r1-sonnet, articles/alecnielsen-adversarial-review, articles/anthropic-building-c-compiler, articles/anthropic-claude-code-agent-teams, articles/anthropic-claude-code-hooks, articles/anthropic-claude-code-monitoring, articles/anthropic-claude-code-plan-mode-docs, articles/anthropic-claude-code-review-blog, articles/anthropic-claude-code-review-docs, articles/anthropic-claude-sonnet-4-5-post, articles/anthropic-harness-design, articles/anthropic-infrastructure-noise, articles/anthropic-multi-agent-research-system, articles/anthropics-claude-code-code-review-plugin, articles/antonbabenko-deliberation, articles/aporter-inspection-structure, articles/augmentcode-augment-swebench-agent, articles/augmentcode-blog-claude-o1, articles/augmentcode-open-source-agent-orchestrators, articles/autopus-ai-autopus-adk, articles/autopus-ai-harness-assessment, articles/beehiveinnovations-pal-consensus, articles/beehiveinnovations-pal-mcp-server, articles/berkayturanci-ai-jury, articles/berkayturanci-ai-jury-benchmark-results, articles/bloopai-vibe-kanban, articles/bmad-code-org-bmad-method, articles/boshu2-agentops, articles/bytedance-trae-agent, articles/bytedance-trae-swebench-verified-blog, articles/ccusage-ccusage, articles/cline-plan-and-act, articles/coderabbit-blog-multi-model, articles/coderabbit-docs-architecture, articles/cognition-devin-ask-devin, articles/cognition-devin-dynamic-workflows, articles/cognition-devin-managed-devins, articles/cognition-dont-build-multi-agents, articles/cognition-multi-agents-working, articles/conductor-home, articles/cursor-agent-trace, articles/cursor-building-bugbot, articles/cursor-changelog-2-0, articles/cursor-changelog-2-2, articles/cursor-docs-worktrees, articles/cursor-forum-best-of-n-models-bug, articles/cursor-plan-mode, articles/cursor-scaling-agents, articles/dagger-container-use, articles/datacurve-deepswe-blog, articles/entireio-cli, articles/entireio-cli-architecture, articles/firecrawl-codex-multi-agent-orchestration, articles/fission-ai-openspec, articles/gastownhall-gastown, articles/gemini-cli-extensions-conductor, articles/generalaction-emdash, articles/git-ai-project-git-ai, articles/github-agent-hq, articles/github-blog-pick-your-agent, articles/github-blog-welcome-home-agents, articles/github-copilot-60-million-reviews, articles/github-copilot-code-review-changelog, articles/github-docs-copilot-agent-sessions, articles/github-docs-third-party-agents, articles/github-spec-kit, articles/google-antigravity-implementation-plan, articles/gotalab-cc-sdd, articles/graphite-effectiveness-guide, articles/greptile-homepage, articles/greptile-model-inversion, articles/gsd-build-get-shit-done, articles/helixml-helix, articles/ietf-draft-sharif-agent-audit-trail, articles/infoq-garg-spec-driven-pays-off, articles/karpathy-llm-council, articles/kilo-agent-manager-blog, articles/kilo-org-kilocode, articles/kiro-dev-docs, articles/langchain-langsmith-claude-code, articles/langfuse-coding-agent-tracing, articles/liliu-z-magpie, articles/linux-kernel-coding-assistants, articles/looptroop-ai-looptroop, articles/martinfowler-bockeler-sdd-three-tools, articles/mco-org-mco, articles/microsoft-vscode-copilot-plan-agent, articles/milvus-magpie-debate-benchmark, articles/mozilla-ai-star-chamber, articles/ng-adversarial-review, articles/obra-superpowers, articles/omnigent-ai-omnigent, articles/open-gsd-gsd-core, articles/openai-codex-best-of-n-announcement, articles/openai-codex-cloud-tasks-cli, articles/openai-codex-github-docs, articles/openai-codex-plugin-cc, articles/openai-codex-rollout-source, articles/openai-codex-rollout-trace, articles/openai-codex-subagents, articles/openai-codex-worktrees, articles/openai-symphony, articles/openhands-blog-inference-time-scaling, articles/opentelemetry-semantic-conventions-genai, articles/papercomputeco-tapes, articles/postmaster-repository, articles/qodo-introducing-qodo-2-0, articles/ruvnet-ruflo, articles/sakana-ab-mcts, articles/sakanaai-treequest, articles/simple10-agents-observe, articles/smtg-ai-claude-squad, articles/specstoryai-getspecstory, articles/spillwavesolutions-parallel-worktrees, articles/stablyai-orca, articles/superset-sh-superset, articles/swe-bench-experiments-trae-20250612, articles/sweagent-mini-swe-agent, articles/tbench-terminal-bench-2-1, articles/tessl-spec-driven-tile, articles/the-pr-agent-pr-agent, articles/thoughtworks-agent-trace, articles/togethercomputer-moa, articles/traycer-traycer, articles/untrivial-ai-agent-orchestrator, articles/vibekanban-goodbye-bloop, articles/voratiq-how-it-works, articles/voratiq-voratiq, articles/warp-run-multiple-agents, articles/windsurf-arena-mode, articles/wolfiesch-omp-best-of, articles/yeachan-heo-oh-my-claudecode, articles/zackproser-codex-reviews-claude]
 updated: 2026-10-04
 ---
 
@@ -10,23 +10,25 @@ updated: 2026-10-04
 
 **Claim.** Each part of postmaster's flow exists elsewhere, most of it in tools that are used far more
 widely. Mixing models for coding is neither proven nor disproven. What postmaster adds, as far as
-238 sources and a limited search show, is the whole combination run as one audited process, and
+249 sources and a limited search show, is the whole combination run as one audited process, and
 an audit of its own flow. That audit points to reviewers, not to a second implementer, as the part that
-earns its keep. The README says the opposite of the audit on the second implementer, and the evidence
-supports the audit.
+earns its keep. The README says the synthesis took contributions from both lanes every time, and the
+audit contradicts that. On the second implementer the audit's reading, "not shown, and cheap", is better
+supported than the README's.
 
 **Standing: claimed.** Outside work cannot move a standing here ([the schema](../schema.md)). The page
-cites 110 papers and 128 project pages, vendor posts and repositories, read on 2026-10-04 except three
+cites 110 papers and 139 project pages, vendor posts and repositories, read on 2026-10-04 except three
 papers this wiki already held, and checks the README against [the lane audit](several-lanes.md), which promotes no run. It was raised as
 [#277, Research: what exists for coding with several models, whether mixing models is proven, and what postmaster adds](https://github.com/brindlewick/postmaster/issues/277).
 
 ## The answer
 
 **What exists.** Running several coding agents on one repository, each in its own worktree, is
-routine: Orca has 84,682 stars, and Cursor, GitHub, Windsurf, Warp and Codex ship it. Giving one task to
+routine: Orca has 84,682 stars, Cursor, Windsurf, Warp and Codex document worktrees for it, and GitHub
+Agent HQ lets one task go to several agents. Giving one task to
 several models and letting a person pick is a shipped feature in Cursor (`/best-of-n`), Windsurf
-(Arena Mode), Kilo Code and GitHub Agent HQ. Several agents reviewing a change, in some tools on different vendors' models, is offered
-by Claude Code Review, Qodo and CodeRabbit and by about ten open-source tools. A person's sign-off on a spec before code is
+(Arena Mode), Kilo Code and GitHub Agent HQ. Several agents reviewing a change is offered by Claude Code Review, Qodo and CodeRabbit, and
+review by other vendors' models by about ten open-source tools and plugins. A person's sign-off on a spec before code is
 mainstream: Spec Kit has 140,068 stars and Superpowers 295,092. Agents' records are kept by Entire,
 git-ai and Agent Trace. Strength: shown by the tools' own pages. Almost none of them offers evidence that
 the feature helps. [The map](#the-map) lists them in six groups.
@@ -35,21 +37,22 @@ the feature helps. [The map](#the-map) lists them in six groups.
 
 | Claim | Answer | Strength |
 | --- | --- | --- |
-| Several models beat the best single model | **Not settled.** Reported gains over the best member are small point estimates at unmatched cost, such as +1.4 points for three vendors and an outside verifier on SWE-bench Verified. In the one controlled table from a team that shipped a three-vendor ensemble, the mixture scored 65.67% and Claude alone 66.40% | one report |
+| Several models beat the best single model | **Not settled.** Reported gains over the best member are point estimates at unmatched cost, from +1.4 points for three vendors and an outside verifier on SWE-bench Verified to +7.0 for four open agents on SWE-bench Lite. In the one controlled table from a team that shipped a three-vendor ensemble, the mixture scored 65.67% and Claude alone 66.40% | one report |
 | Different models beat the same model run several times | **Not settled.** The two cleanest tests, on general tasks, find one strong model sampled repeatedly at least as good as a mix (65.7 against 59.1 at equal calls). No code study compares them at equal cost on realistic software | controlled studies, preprints, conflicting |
 | A model that reads several candidates and writes one beats picking the best | **Not shown for code.** The one controlled comparison has a model asked to write the final patch solving 317 of 500 SWE-bench Verified issues where the same model choosing solved 396. Shown for open-ended general tasks | one controlled comparison for code |
-| Independent reviewers find defects a single reviewer misses | **Shown that several reviewers or runs find more than one, with more false alarms.** One run finds about half of what several find together in the studies that report it. Not shown for different vendors against repeated runs of one model at equal cost | several small studies |
+| Independent reviewers find defects a single reviewer misses | **Mostly shown that several reviewers or runs find more than one.** One study finds about 47% with one reviewer and about 72% with a second, and two find no gain. Where false alarms are reported they hold or rise. Not shown for different vendors against repeated runs of one model at equal cost | several small studies |
 
 Under all four sits the older question. **Independently written versions do not fail independently.**
 Knight and Leveson (1986) had 27 versions run on a million inputs and rejected independence. Replications
 in 2026 with coding agents from five vendors found 3.7 times more shared failures than independence
 predicts, and mixing models decorrelated failures only partly. A lane that cannot see another lane's work is
-isolated, not independent in the sense that matters. Strength: controlled studies.
+isolated. By these studies it should not be assumed independent in the sense that matters, and this wiki
+has not measured that for its own lanes. Strength: controlled studies, of other versions.
 
 **What postmaster adds.** Three things were not found elsewhere. (1) The whole combination: a person's
 signed-off spec, several vendors' implementers in separate worktrees, a synthesis composed by an agent that
 is not one of the lanes, and capped review rounds by several models under several lenses. The closest of 28
-tools scored 7 of 10 on a count of five elements, and each lacked at least one. (2) A measured account of
+tools scored 7 of 10 on a count of five elements, and each lacked at least one in full. (2) A measured account of
 its own flow. The lane audit covers 18 real runs and 264 verified serious findings, and no other project
 read publishes one. (3) Fixture runs that score the flow against hidden tests kept out of the lanes' worktrees.
 Nothing like it was found. The search was limited, and a "not found" describes the search. Strength:
@@ -57,14 +60,14 @@ not found, for all three.
 
 **What it claims that the evidence does not support.** The README says the synthesis "took
 contributions from both lanes every time". The coachman's record cannot fail that test, because the
-runbook requires it to name something from every lane, and in git the second lane wrote 0% to 25% of the
+runbook requires it to name a contribution from every lane that produced work, and in git the second lane wrote 0% to 25% of the
 code in the five real runs with counts. The README says a second lane's agreement is corroboration "you
 can act on", and that is unmeasured. Lanes "unable to see each other's work" holds by layout and instruction,
 and by a sandbox only when confinement is on. A script saving tokens is not measured. The audit's own
 reading is that a second reviewer earns its keep and a second implementer is not shown to be needed.
 
 **What can be said in public.** That postmaster combines these parts as one process and publishes the
-records of its own audits; that more reviewers find more defects; and that the question of mixing models is
+method and derived data of its own audits; that several small studies find more defects with more reviewers; and that the question of mixing models is
 open. Not that it is first or unique, that mixing models gives better code, that the synthesis takes the best
 of both lanes, that agreement between lanes is corroboration, or that it is open source, since the
 repository has no licence file. [The full list](#what-can-and-cannot-be-said-in-public) gives the strength
@@ -75,7 +78,7 @@ of each.
 Each source was read on 2026-10-04, through a web search and a page fetch, except three papers this wiki
 already held, which are cited from their earlier captures. Repository figures,
 such as stars and the date of the last push, come from the GitHub API on the same day, by plain
-read requests. Nothing was installed, cloned, run or posted. The page cites 110 papers and 128
+read requests. Nothing was installed, cloned, run or posted. The page cites 110 papers and 139
 pages, each captured under `raw/` with its address, the day it was read and the passages relied on.
 
 **Strength.** Each answer says how strong its evidence is, in four grades.
@@ -128,26 +131,26 @@ harnesses may have been missed
 
 | Entry | Read | What it does | Use |
 | --- | --- | --- | --- |
-| [Cursor](https://cursor.com/docs/configuration/worktrees) | 2026-10-04 | `/best-of-n` runs the same task on several models, each in its own worktree, and an automatic judge recommends one run for a person to pick [@articles/cursor-changelog-2-2/passages.md]. | closed product, no figures |
-| [OpenAI Codex](https://github.com/openai/codex/blob/afb436df8b70bb5bc57b86d9a3e829968988cd21/codex-rs/cloud-tasks/src/cli.rs) | 2026-10-04 | A cloud task can run one to four times, and subagent workflows run specialised agents in parallel [@articles/openai-codex-best-of-n-announcement/passages.md]. | closed product, no figures |
-| [GitHub Agent HQ](https://github.blog/news-insights/company-news/pick-your-agent-use-claude-and-codex-on-agent-hq/) | 2026-10-04 | A person can assign one task to several of Copilot, Claude and Codex and compare the draft pull requests they open. | closed product; third-party agents are a public preview |
+| [Cursor](https://cursor.com/docs/configuration/worktrees) | 2026-10-04 | `/best-of-n` runs the same task on several models, each in its own worktree, and up to eight agents can run on one prompt [@articles/cursor-changelog-2-0/passages.md]. When agents run in parallel, an automatic judge recommends one run and a person picks [@articles/cursor-changelog-2-2/passages.md]. | closed product, no figures |
+| [OpenAI Codex](https://github.com/openai/codex/blob/afb436df8b70bb5bc57b86d9a3e829968988cd21/codex-rs/cloud-tasks/src/cli.rs) | 2026-10-04 | A cloud task can run one to four times (best-of-N) so a person can pick the best, subagent workflows run specialised agents in parallel, and the app uses worktrees so several chats can work in one project [@articles/openai-codex-best-of-n-announcement/passages.md] [@articles/openai-codex-cloud-tasks-cli/passages.md] [@articles/openai-codex-subagents/passages.md] [@articles/openai-codex-worktrees/passages.md]. | closed product, no figures |
+| [GitHub Agent HQ](https://github.blog/news-insights/company-news/pick-your-agent-use-claude-and-codex-on-agent-hq/) | 2026-10-04 | A person can assign one task to several of Copilot, Claude and Codex and compare the draft pull requests they open. | closed product; the docs call third-party agents a public preview [@articles/github-docs-third-party-agents/passages.md] |
 | [Windsurf Arena Mode](https://docs.devin.ai/desktop/cascade/arena.md) | 2026-10-04 | Runs one prompt on several models, each in its own worktree, with the model names hidden until a person picks one. | closed product, no figures |
 | [Claude Code agent teams](https://code.claude.com/docs/en/agent-teams) | 2026-10-04 | Experimental teams of Claude Code sessions with a lead, a shared task list and messages between teammates. | closed; the page calls it experimental and off by default |
 | [Warp](https://docs.warp.dev/guides/agent-workflows/how-to-run-multiple-ai-coding-agents) | 2026-10-04 | A guide to running several coding agents in tabs, worktrees and the cloud, including one task on different agents and a way to merge the results. | closed product, no figures |
-| [Conductor](https://www.conductor.build) | 2026-10-04 | A Mac app that runs Claude Code, Codex and Cursor agents in isolated workspaces, with a diff view, for a person to review and merge. | closed product, no figures |
-| [Devin managed sessions](https://docs.devin.ai/work-with-devin/advanced-capabilities.md) | 2026-10-04 | A coordinator session hands parts of a large task to child sessions, each in its own virtual machine, and a workflow script can fan work out and record every call. | closed product, no figures |
+| [Conductor](https://www.conductor.build) | 2026-10-04 | Runs parallel Claude Code, Codex and Cursor agents in isolated workspaces, shows what each is working on, and helps a person review the diff, open a pull request and merge. | closed product, no figures |
+| [Devin managed sessions](https://docs.devin.ai/work-with-devin/advanced-capabilities.md) | 2026-10-04 | A coordinator session scopes a large task, monitors progress and compiles results from the sessions it manages, and a dynamic workflow is a deterministic script that orchestrates a team of Devin agents [@articles/cognition-devin-dynamic-workflows/passages.md]. | closed product, no figures |
 | [Orca](https://github.com/stablyai/orca/blob/87bc51d3710332ea8b0f7f0e5610a31413a79582/README.md) | 2026-10-04 | A desktop app that runs coding agents side by side, each in its own worktree, where one prompt can go to several agents and a person picks. | 84,682 stars |
-| [ruflo](https://github.com/ruvnet/ruflo/blob/caf5078be6627c6496fa2497a63b72e80a0bcf14/README.md) | 2026-10-04 | Runs swarms of agents with assigned roles and says its agents reach consensus. | 73,831 stars |
+| [ruflo](https://github.com/ruvnet/ruflo/blob/caf5078be6627c6496fa2497a63b72e80a0bcf14/README.md) | 2026-10-04 | An agent meta-harness for Claude Code and Codex that adds swarms with shared memory and consensus, and task routing [@articles/ruvnet-ruflo/passages.md]. | 73,831 stars |
 | [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode/blob/13543f9d6fc1a13a15b68fe5c97baeb3268569e2/README.md) | 2026-10-04 | A Claude Code plugin that runs staged team pipelines and can start Codex, Gemini, Antigravity, Grok or Cursor workers in tmux panes. | 39,572 stars |
 | [Vibe Kanban](https://github.com/BloopAI/vibe-kanban/blob/d5cbb5380fa0b32e98ef9b8d987f63decce4be3a/README.md) | 2026-10-04 | A kanban board that starts one coding agent per task in a workspace with its own branch. | 28,259 stars; its company announced on 2026-04-10 that it is shutting down and the project goes on community-maintained [@articles/vibekanban-goodbye-bloop/passages.md] |
 | [Symphony](https://github.com/openai/symphony/tree/be10a1b79df723d6d7612b5651c8522704dafb2e) | 2026-10-04 | A specification and reference service that reads tickets from a tracker, makes an isolated workspace for each, runs a coding agent in it and ends at a handoff to a person. | 27,526 stars |
-| [Kilo Code Agent Manager](https://blog.kilo.ai/p/agent-manager-run-multiple-agents) | 2026-10-04 | Runs agents in parallel worktrees, and its multi-version mode runs the same prompt in up to four versions, on different models if chosen, for a person to pick from. | 27,488 stars for the whole product |
-| [Gas Town](https://github.com/gastownhall/gastown/blob/649b832b7672bc7a2dbef26f5983aba6198b819b/README.md) | 2026-10-04 | A workspace manager with a coordinator agent, worker agents with persistent identity, and a merge queue. | 18,248 stars |
+| [Kilo Code Agent Manager](https://blog.kilo.ai/p/agent-manager-run-multiple-agents) | 2026-10-04 | Runs agents in parallel worktrees, and its multi-version mode runs the same prompt in up to four versions, on different models if chosen, for a person to pick from [@articles/kilo-org-kilocode/passages.md]. | 27,488 stars for the whole product |
+| [Gas Town](https://github.com/gastownhall/gastown/blob/649b832b7672bc7a2dbef26f5983aba6198b819b/README.md) | 2026-10-04 | A workspace manager that coordinates several coding agents (Claude Code, Copilot, Codex, Gemini and others) on different tasks, with a merge queue that runs verification gates before merging to main. | 18,248 stars |
 | [Superset](https://github.com/superset-sh/superset/blob/84fa11a1f45a2ac9d06d528a2711dc71056f9fac/README.md) | 2026-10-04 | A desktop app where each task gets a worktree and a command-line agent, and one task can be raced across workspaces for a person to keep one. | 14,864 stars |
 | [Agent Orchestrator](https://github.com/Untrivial-ai/agent-orchestrator/blob/fb55fdc159106c2d1f7dc2bba2afab87e1a71c87/README.md) | 2026-10-04 | A workspace with one worker agent per task, a project-level orchestrator that plans and starts workers, and a board built from session, pull request, CI and review state. | 12,718 stars |
 | [Omnigent](https://github.com/omnigent-ai/omnigent/tree/ee3ca7cca758015de6a4de68615657486d9d1f81) | 2026-10-04 | An alpha meta-harness whose example orchestrator sends independent tasks to coding agents of different vendors in worktrees, has a different vendor review each diff, and leaves the merge to a person. | 10,482 stars |
 | [Claude Squad](https://github.com/smtg-ai/claude-squad/blob/ce1ffb4392b01f38e2c4599c7c84d2a93973b138/README.md) | 2026-10-04 | A terminal app that runs several agents in tmux sessions, one git worktree per task. | 8,567 stars |
-| [Emdash](https://github.com/generalaction/emdash/blob/a39d9c8339ebf2d96c287fa78bf28b7b5e41d2ba/README.md) | 2026-10-04 | A desktop app that runs coding agents in parallel, one worktree per task, locally or over SSH. | 5,905 stars |
+| [Emdash](https://github.com/generalaction/emdash/blob/a39d9c8339ebf2d96c287fa78bf28b7b5e41d2ba/README.md) | 2026-10-04 | A desktop app that runs coding agents in parallel, one worktree per task, with diffs to review and merge. | 5,905 stars |
 | [container-use](https://github.com/dagger/container-use/blob/2e43e625e95216b719ec9338f4034fd3a0be2734/README.md) | 2026-10-04 | An MCP server that gives each coding agent its own container and git branch. | 4,055 stars |
 | [MCO](https://github.com/mco-org/mco/blob/d7fef6c96dca10a3ed0fd7c5ecd505e665ca455e/README.md) | 2026-10-04 | Runs one task on several vendors' coding agents and leaves the raw answers for a person to compare, with no consensus step. | 531 stars |
 | [Voratiq](https://github.com/voratiq/voratiq) | 2026-10-04 | Has Claude, Codex or Gemini agents draft specs and implement one spec several times, ranks the outputs with blinded verifier agents, and applies one. | 74 stars, last push 2026-05-05 |
@@ -161,10 +164,11 @@ Three roundups were mined for names and not used as evidence:
 
 What the group shows. Running several agents at once, each in its own worktree, is routine.
 Running the same task on several models and leaving the choice to a person is a shipped feature in
-Cursor, Windsurf, Kilo Code, GitHub Agent HQ, Codex and several open-source tools. A person picks
-in nearly all of them. Cursor adds a judge's recommendation, and omp-best-of and Voratiq have
-verifier agents rank the candidates. No tool in the group is described as writing one change from
-several. Voratiq's `reduce` writes one summary from several artifacts
+Cursor, Windsurf, Kilo Code, GitHub Agent HQ and several open-source tools, and Codex runs several
+attempts of one task. A person picks in nearly all of them. Cursor adds a judge's recommendation, and
+omp-best-of and Voratiq have verifier agents rank the candidates. No tool in the group is described
+as writing one change from several attempts at the same task. Some have a lead agent compile
+results, and Voratiq's `reduce` writes one summary from several artifacts
 [@articles/voratiq-how-it-works/passages.md]. None compares different models with one model repeated. Almost none
 offers evidence that the feature helps. omp-best-of reports small runs of its own and says it
 withdrew its earlier headline figures [@articles/wolfiesch-omp-best-of/passages.md]. Model diversity can also fail
@@ -187,7 +191,7 @@ means the paper's arXiv record names no venue, and it may have been published el
 
 | Entry | Read | What it does | Year and venue, or use |
 | --- | --- | --- | --- |
-| [Diversity Empowers Intelligence (DEI)](https://arxiv.org/abs/2408.07060) | 2026-10-04 | A model scores the patches that several existing SWE-bench agents produced and returns the best-scored one. | arXiv 2024 |
+| [Diversity Empowers Intelligence (DEI)](https://arxiv.org/abs/2408.07060) | 2026-10-04 | A model scores the patches that several existing SWE-bench agents produced and returns the best-scored one. | arXiv 2024; listed at ICLR 2025 per a search result |
 | [CodeMonkeys](https://arxiv.org/abs/2501.14723) | 2026-10-04 | Samples ten edit-and-test trajectories per issue from one model and picks one by voting and a selection trajectory, and also runs the selector over four existing leaderboard systems. | arXiv 2025 |
 | [Trae Agent](https://arxiv.org/abs/2507.23370) | 2026-10-04 | A coder agent writes candidate patches, regression tests prune them, and a selector agent picks one by repeated selection and majority vote, with one setting that takes candidates from three vendors' models. | arXiv 2025; repository [bytedance/trae-agent](https://github.com/bytedance/trae-agent) 12,126 stars |
 | [PatchFusion](https://arxiv.org/abs/2607.01597) | 2026-10-04 | Builds one patch from a pool of candidate patches, with no tests and no model, by keeping the edits that several candidates share. | arXiv 2026 |
@@ -196,7 +200,7 @@ means the paper's arXiv record names no venue, and it may have been published el
 | [EnsLLM](https://arxiv.org/abs/2503.15838) | 2026-10-04 | Takes one program from each of 14 models and returns the one most similar to the others. | arXiv 2025 |
 | [Wisdom and Delusion of LLM Ensembles](https://arxiv.org/abs/2510.21513) | 2026-10-04 | Gives ten small open models ten outputs each and tests five ways of choosing which candidates to validate. | arXiv 2025 |
 | [PerfOrch](https://arxiv.org/abs/2510.01379) | 2026-10-04 | Gives generation, debugging and refinement of each problem to the model ranked best for that language and category, and tries up to five models in turn. | arXiv 2025 |
-| [Mixture-of-agents for code optimisation](https://arxiv.org/abs/2508.03329) | 2026-10-04 | Agents on different models propose optimised versions of a snippet and an aggregator model writes one. | arXiv 2025; authors include staff of the company whose baseline it beats |
+| [Mixture-of-agents for code optimisation](https://arxiv.org/abs/2508.03329) | 2026-10-04 | Agents on different models propose optimised versions of a snippet and an aggregator model writes one. | arXiv 2025; submitted to the ASE 2025 Industry Showcase; authors include staff of the company whose baseline it beats |
 | [VeriMoA](https://arxiv.org/abs/2510.27617) | 2026-10-04 | Layers of agents on one model propose hardware designs in Verilog and an aggregator writes the final one. | arXiv 2025 |
 | [AB-MCTS](https://arxiv.org/html/2503.04412v5) | 2026-10-04 | A tree search that decides at each step whether to widen or refine an answer, and in its multi-model form which model to call; see also [the developer's post](https://sakana.ai/ab-mcts/). | NeurIPS 2025 spotlight per its abstract page; [TreeQuest](https://github.com/SakanaAI/treequest) 567 stars |
 | [AlphaEvolve](https://arxiv.org/abs/2506.13131) | 2026-10-04 | Evolutionary program search that mixes a cheap model for many candidates with a stronger one for occasional better ones. | arXiv 2025 |
@@ -227,23 +231,23 @@ means the paper's arXiv record names no venue, and it may have been published el
 | [Rethinking Mixture-of-Agents (Self-MoA)](https://arxiv.org/html/2502.00674) | 2026-10-04 | Compares mixing different models with aggregating samples of the single best model, at the same number of calls. | arXiv 2025 |
 | [Beyond Consensus](https://arxiv.org/html/2605.29116v1) | 2026-10-04 | An aggregator reads complete reasoning traces, and one model with perturbed inputs is set against pools of different models. | arXiv 2026 |
 | [When Does Combining Language Models Help?](https://arxiv.org/html/2606.27288) | 2026-10-04 | Shows that routing, voting and mixture-of-agents accuracy is capped by the share of queries on which every model is wrong. | arXiv 2026 |
-| [LLM-Blender](https://ar5iv.labs.arxiv.org/html/2306.02561) | 2026-10-04 | Ranks several models' answers pairwise and fuses the top ones with a trained model. | arXiv 2023 |
+| [LLM-Blender](https://ar5iv.labs.arxiv.org/html/2306.02561) | 2026-10-04 | Ranks several models' answers pairwise and fuses the top ones with a trained model. | ACL 2023 per its arXiv comment |
 | [Making, not Taking, the Best of N](https://arxiv.org/html/2510.00931v1) | 2026-10-04 | A model fuses N candidate answers into one instead of picking the best. | arXiv 2025 |
-| [Archon](https://arxiv.org/html/2409.15254v6) | 2026-10-04 | Searches over inference-time architectures that combine ensembling, fusion, ranking and verification of several models. | arXiv 2024 |
+| [Archon](https://arxiv.org/html/2409.15254v6) | 2026-10-04 | Searches over inference-time architectures that combine ensembling, fusion, ranking and verification of several models. | ICML 2025 per its arXiv comment |
 | [Optimized sample compute allocation](https://arxiv.org/html/2410.22480) | 2026-10-04 | Learns how to spend a fixed inference budget across models and sampling settings. | arXiv 2024 |
-| [ReConcile](https://arxiv.org/html/2309.13007v3) | 2026-10-04 | Different models discuss over rounds and a confidence-weighted vote decides. | arXiv 2023 |
+| [ReConcile](https://arxiv.org/html/2309.13007v3) | 2026-10-04 | Different models discuss over rounds and a confidence-weighted vote decides. | ACL 2024 camera-ready per its arXiv record |
 | [Multiagent debate](https://ar5iv.labs.arxiv.org/html/2305.14325) | 2026-10-04 | Several instances of one model debate and revise their answers over rounds. | arXiv 2023 |
 | [Wisdom of the silicon crowd](https://arxiv.org/html/2402.19379v6) | 2026-10-04 | Takes the median forecast of twelve models and compares it with a human crowd. | arXiv 2024 |
 | [Replacing Judges with Juries](https://arxiv.org/html/2404.18796) | 2026-10-04 | A panel of three smaller judges from three model families replaces one large judge. | arXiv 2024 |
 | [Universal Self-Consistency](https://arxiv.org/html/2311.17311) | 2026-10-04 | A model reads several samples and picks the most consistent one. | arXiv 2023 |
 | [AggLM](https://arxiv.org/html/2509.06870) | 2026-10-04 | A trained aggregator reads several solutions and writes a final one. | arXiv 2025 |
-| [Self-consistency](https://ar5iv.labs.arxiv.org/html/2203.11171) | 2026-10-04 | Samples several reasoning paths from one model and takes the majority answer. | arXiv 2022 |
+| [Self-consistency](https://ar5iv.labs.arxiv.org/html/2203.11171) | 2026-10-04 | Samples several reasoning paths from one model and takes the majority answer. | ICLR 2023 camera-ready |
 | [Are More LLM Calls All You Need?](https://arxiv.org/html/2403.02419) | 2026-10-04 | Studies how the accuracy of voting systems scales with the number of calls. | arXiv 2024 |
 | [Inference scaling laws](https://arxiv.org/html/2408.00724v3) | 2026-10-04 | Measures how problem-solving performance scales with the inference compute spent. | arXiv 2024 |
 | [Should we be going MAD?](https://arxiv.org/html/2311.17371v3) | 2026-10-04 | Compares multi-agent debate strategies for language models. | arXiv 2024 |
-| [Debate or Vote](https://arxiv.org/html/2508.17536v2) | 2026-10-04 | Compares debate with voting among agents. | arXiv 2025 |
+| [Debate or Vote](https://arxiv.org/html/2508.17536v2) | 2026-10-04 | Compares debate with voting among agents. | NeurIPS 2025 spotlight per its arXiv comment |
 | [Stop Overvaluing Multi-Agent Debate](https://arxiv.org/html/2502.08788v3) | 2026-10-04 | Tests five debate methods against chain-of-thought and self-consistency on nine benchmarks, then mixes two models in debate. | arXiv 2025 |
-| [Talk Isn't Always Cheap](https://arxiv.org/html/2509.05396v1) | 2026-10-04 | Studies how debate among agents can fail, including with a weak model in the group. | arXiv 2025 |
+| [Talk Isn't Always Cheap](https://arxiv.org/html/2509.05396v1) | 2026-10-04 | Studies how debate among agents can fail, including with a weak model in the group. | ICML 2025 MAS workshop per its arXiv comment |
 
 What the group shows. Every way of making one result from several has been tried. The papers repeat
 one point: a pool of candidates is easy to get, and a good choice from it is hard. In the code papers
@@ -261,12 +265,12 @@ are read here. One search did not find `alecnielsen/adversarial-review`, and the
 
 | Entry | Read | What it does | Venue or use |
 | --- | --- | --- | --- |
-| [Claude Code Review](https://code.claude.com/docs/en/code-review) | 2026-10-04 | On a pull request, several agents run in parallel, each on a different class of issue, followed by a verification step, deduplication and severity ranking, with inline comments posted; see also [the vendor's post](https://claude.com/blog/code-review). | closed research preview for Team and Enterprise plans |
+| [Claude Code Review](https://code.claude.com/docs/en/code-review) | 2026-10-04 | On a pull request, several agents run in parallel, each on a different class of issue, followed by a verification step, deduplication and severity ranking, with inline comments posted; see also [the vendor's post](https://claude.com/blog/code-review). | closed research preview |
 | [Claude Code `code-review` plugin](https://raw.githubusercontent.com/anthropics/claude-code/main/plugins/code-review/README.md) | 2026-10-04 | One command launches four agents in parallel, a separate scorer rates each issue from 0 to 100, and only issues rated 80 or above are posted. | a folder in a repository with 149,351 stars |
 | [Cursor Bugbot](https://cursor.com/blog/building-bugbot) | 2026-10-04 | Reviews pull requests; the early design ran eight passes with a different diff order each and kept the bugs most passes found, and the vendor later moved to an agentic design. | vendor says more than two million pull requests a month |
-| [GitHub Copilot code review](https://github.blog/ai-and-ml/github-copilot/60-million-copilot-code-reviews-and-counting/) | 2026-10-04 | Reviews pull requests with an agent that reads repository context through tool calls. | vendor says 60 million reviews and more than one in five reviews on GitHub |
+| [GitHub Copilot code review](https://github.blog/ai-and-ml/github-copilot/60-million-copilot-code-reviews-and-counting/) | 2026-10-04 | Reviews pull requests with an agentic, tool-calling architecture [@articles/github-copilot-code-review-changelog/passages.md]. | vendor says 60 million reviews and more than one in five reviews on GitHub |
 | [OpenAI Codex review](https://learn.chatgpt.com/docs/third-party/github) | 2026-10-04 | Reviews a pull request when someone comments `@codex review`, or automatically if turned on. | not stated |
-| [CodeRabbit](https://docs.coderabbit.ai/overview/architecture) | 2026-10-04 | Reviews pull requests with several named agents and, the vendor says, a different model for each stage. | not stated on the pages read |
+| [CodeRabbit](https://docs.coderabbit.ai/overview/architecture) | 2026-10-04 | Reviews pull requests with several named agents and, the vendor says, a different model for each stage [@articles/coderabbit-blog-multi-model/passages.md]. | not stated on the pages read |
 | [Greptile](https://www.greptile.com/) | 2026-10-04 | Reviews pull requests, and its home page says parallel agents review changes and assess impact beyond the diff. | vendor says over 22,000 teams |
 | [Qodo 2.0](https://www.qodo.ai/blog/introducing-qodo-2-0/) | 2026-10-04 | Reviews with several specialised agents, each with its own context, and a judge agent that merges and filters their findings. | not stated |
 | [PR-Agent](https://raw.githubusercontent.com/The-PR-Agent/pr-agent/main/README.md) | 2026-10-04 | Runs `/review`, `/improve`, `/ask` and similar commands on a pull request, each with one model call. | 13,258 stars |
@@ -291,14 +295,14 @@ are read here. One search did not find `alecnielsen/adversarial-review`, and the
 | [AACR-Bench](https://arxiv.org/html/2601.19494) | 2026-10-04 | A set of 1,505 verified review comments, counted by how many models find each. | arXiv 2026 |
 | [SLEAN](https://arxiv.org/abs/2510.10010) | 2026-10-04 | Several providers' models analyse bugs independently, critique each other, and an arbiter accepts or rejects fix proposals. | arXiv 2025, abstract only |
 | [DVDR-LLM](https://arxiv.org/html/2512.12536v1) | 2026-10-04 | Several open-weight models vote on whether Linux-kernel code is vulnerable. | arXiv 2025 |
-| [Argus](https://www.redesignhealth.com/content/agentic-code-review-harness) | 2026-10-04 | A company paper on an internal review harness that fans out many reviewer agents on each pull request. | arXiv 2026 |
+| [Argus](https://www.redesignhealth.com/content/agentic-code-review-harness) | 2026-10-04 | A company paper on an internal review harness that fans out many reviewer agents on each pull request. | company technical paper, July 2026 |
 
 What the group shows. Reviewing a change with several agents is common. Several of the commercial
 tools do it with separate agents for separate classes of issue, then a verifier or judge that
 filters. Cross-vendor review is offered as plugins and skills, and the most starred of them, the
 Codex plugin for Claude Code, offers no figure on whether the second review finds more. The two
 repositories the ticket named take different positions with no measurement: `adverse` runs three
-personas on one model and says two different models work but cost more, and
+personas on one model and names two different models as the next step up, and
 `alecnielsen/adversarial-review` says different models catch different problems. Where a vendor
 gives a figure it uses its own metric, and none counts defects that one agent missed and another
 found. Anthropic reports that 54% of pull requests now get substantive comments, up from 16%, with
@@ -361,7 +365,7 @@ sign-off against none. The best numbers test a spec step done by agents with no 
 judged quality was 3.46 with no spec step, 3.51 with it and 3.66 with grounding hooks
 [@papers/taghavi-2026-spec-kit-agents/passages.md]. The one small controlled pilot found that five reviewers
 given an approved spec on two services found the same amount of drift as reviewers given only the
-code, 0.525 against 0.518 [@articles/infoq-garg-spec-driven-pays-off/passages.md]. A widely quoted 73% fall in security defects is 3 violations
+code, 0.525 against 0.518 [@articles/infoq-garg-spec-driven-pays-off/passages.md]. A 73% fall in security defects, repeated in a later preprint, is 3 violations
 against 11 in one project built twice by one developer [@papers/marri-2026-constitutional-sdd/passages.md]. No
 entry has a person approve a spec that several independent implementers then build. The nearest
 pieces are separate: Spec Kit states a principle of several implementations from one spec, Cursor
@@ -391,7 +395,7 @@ agents (in-toto, SLSA) found explainers and no standard.
 | [AgentOps](https://github.com/AgentOps-AI/agentops/blob/f8e907b92dabe47232978023fdcb01e2a7d4b752/README.md) | 2026-10-04 | A Python SDK and dashboard that records the runs of agents built with frameworks. | 5,880 stars |
 | [Agent Audit Trail](https://www.ietf.org/archive/id/draft-sharif-agent-audit-trail-06.txt) | 2026-10-04 | An Internet-Draft that specifies a JSON record of one agent action, chained by a hash of the previous record, with an optional signature. | one author's individual draft, revision 06 |
 | [PunkGo](https://arxiv.org/abs/2602.20214) | 2026-10-04 | A Rust kernel that writes every agent action into a Merkle-tree log, with capability checks and human approval. | arXiv 2026; 4 stars |
-| [AgentSight](https://arxiv.org/abs/2508.02736) | 2026-10-04 | Watches coding agents from outside by intercepting their encrypted model traffic and kernel events. | arXiv 2025; 721 stars |
+| [AgentSight](https://arxiv.org/abs/2508.02736) | 2026-10-04 | Watches coding agents from outside by intercepting their encrypted model traffic and kernel events. | workshop paper, PACMI 2025 per its arXiv page; 721 stars |
 | [Aider](https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/docs/git.md) | 2026-10-04 | A terminal coding agent that commits every edit and marks its commits in standard git fields. | 49,369 stars; no push since 2026-05-22 |
 | [Linux kernel guidance](https://docs.kernel.org/process/coding-assistants.html) | 2026-10-04 | Asks contributors to mark AI-assisted commits with an `Assisted-by` trailer and says the human submitter signs off and is responsible. | policy text |
 | [Copilot cloud agent sessions](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/track-copilot-sessions) | 2026-10-04 | GitHub's cloud agent keeps a session log and links it from the commits it makes. | closed |
@@ -410,7 +414,7 @@ kernel, Copilot), a git note (git-ai), and a record that names a revision (Agent
 evidence is rare and always qualified. Only the IETF draft and PunkGo are built for it, and both say
 what stays unprotected. Langfuse's own page says to treat hook-based tracing as telemetry, not
 enforcement [@articles/langfuse-coding-agent-tracing/passages.md]. An agent's own logs can be counted, since Claude
-Code lists named events and Codex has twelve rollout item types, but they are opt-in or short-lived.
+Code lists named events and Codex has twelve rollout item types [@articles/openai-codex-rollout-source/passages.md], but they are opt-in or short-lived.
 Entire's known-limitations file advises separate git worktrees for concurrent sessions, the
 isolation postmaster uses. No entry reports whether mixing models works. Strength: shown by the
 tools' own pages; none was found that audits a multi-agent flow as postmaster's audits do.
@@ -441,7 +445,7 @@ repositories, hidden tests or regression runs of the flow, and nothing of that k
 | [E2EDevBench](https://arxiv.org/abs/2511.04064v1) | 2026-10-04 | Fifty PyPI projects scored by migrated tests and requirement checks, with single-agent and multi-agent variants on one framework. | arXiv 2025 |
 | [BenchAgent](https://arxiv.org/abs/2606.05670v1) | 2026-10-04 | One framework that runs a single-agent anchor and six multi-agent workflows with one model on ten benchmarks. | arXiv 2026 |
 | [Single-agent LLMs outperform multi-agent systems under equal thinking-token budgets](https://arxiv.org/abs/2604.02460v2) | 2026-10-04 | Compares one agent with five multi-agent designs at equal thinking tokens on multi-hop question answering. | arXiv 2026, general |
-| [Why Do Multi-Agent LLM Systems Fail?](https://arxiv.org/abs/2503.13657v3) | 2026-10-04 | A taxonomy of 14 failure modes built from expert annotation of traces from seven multi-agent frameworks. | arXiv 2025 |
+| [Why Do Multi-Agent LLM Systems Fail?](https://arxiv.org/abs/2503.13657v3) | 2026-10-04 | A taxonomy of 14 failure modes built from expert annotation of traces from seven multi-agent frameworks. | arXiv 2025; NeurIPS 2025 per a listing |
 | [MultiAgentBench](https://arxiv.org/abs/2503.01935v1) | 2026-10-04 | A benchmark across six scenarios, coding among them, with milestone-based scores and coordination protocols. | ACL 2025 [@articles/aclanthology-multiagentbench-2025/passages.md] |
 | [Anthropic's multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system) | 2026-10-04 | A lead agent plans and subagents search in parallel, for a research product. | vendor report, 2025-06-13 |
 | [Anthropic's harness design for long-running apps](https://www.anthropic.com/engineering/harness-design-long-running-apps) | 2026-10-04 | A planner, a generator and an evaluator agent that build web apps over hours. | vendor report, 2026-03-24 |
@@ -454,8 +458,8 @@ repositories, hidden tests or regression runs of the flow, and nothing of that k
 
 What the group shows. Testing the scaffold is a live field, and the benchmarks that do it are widely
 used. On Terminal-Bench the same model scores very differently under different harnesses, and the
-direction is not fixed. A second finding matters for any test of a flow: the benchmark's version and
-the evaluation environment move scores as much as the harness does, so a test has to pin both
+direction is not fixed. A second finding matters for any test of a flow: a new benchmark version moved scores by up to 12.1 points
+and the evaluation environment alone by about 6, so a test has to pin both
 [@articles/tbench-terminal-bench-2-1/passages.md] [@articles/anthropic-infrastructure-noise/passages.md]. On coding, the controlled
 comparisons that match iterations or budget mostly find several agents no better than one, and
 sometimes worse, while reports that find gains rarely match cost. The public argument and the
@@ -477,8 +481,8 @@ asked first: do independently produced versions fail independently?
 **No, in every controlled study read, and the language-model studies agree with the old ones.**
 Strength: controlled studies, human and model, all with limits.
 
-*Human programmers, 1985 to 2001.* Knight and Leveson had 27 students at two universities write one
-program from one specification and ran all versions on a million random inputs. Six versions never
+*Human programmers, 1985 to 2001.* Knight and Leveson had students at two universities write 27
+programs from one specification and ran all versions on a million random inputs. Six versions never
 failed and the rest passed more than 99% of tests. On 1,255 inputs more than one version failed. Their
 test statistic was 100.51 against 2.33 at the 99% level, so independence was rejected, and about half
 of the 45 faults involved two or more programs [@papers/knight-1986-independence/passages.md]. Among their
@@ -490,13 +494,13 @@ independently, and failures are independent only if difficulty is constant
 about 921,000 cases, found coincident failures that "greatly exceed" what independence predicts, and
 a three-version system failed only about four times less often than one version. Its authors note
 that no single version was built at the same cost [@papers/eckhardt-1991-redundancy/passages.md]. A later review
-puts both sides: all controlled experiments found multiple-version systems more reliable on average
+puts both sides: all controlled experiments the authors knew of found multiple-version systems more reliable on average
 than single versions, "and sometimes much more so", and independence has been "shown not to be
 tenable" [@papers/littlewood-2001-diversity-review/passages.md]. Forced diversity can in theory give failures that are
 better than independent, but whether that has practical use "remains moot"
 [@papers/littlewood-2001-diversity-review/passages.md] [@papers/littlewood-1989-forced-diversity/passages.md].
 Brilliant, Knight and Leveson found that minor differences in development environment would not
-reduce correlated faults (abstract only) [@papers/brilliant-1990-faults/passages.md].
+have major impact in reducing the faults that cause correlated failures (abstract only) [@papers/brilliant-1990-faults/passages.md].
 
 *Coding agents and language models, 2025 and 2026.* Ron and others repeated the design with coding
 agents from five vendors, many models and three languages on Knight and Leveson's own specification.
@@ -512,7 +516,7 @@ pairs of solutions deviated from independence, and three- and five-version major
 same-model ensembles 0.27 and 0.24, but the same-model ensembles had the higher absolute reliability,
 0.92 and 0.94 against 0.90 and 0.91, which the paper attributes to a filtering step (one read)
 [@papers/nogueira-2026-failure-independence/passages.md]. On three problems, LLM-written programs failed together
-less than human-written ones did, and in one pool a human-written and an LLM-written pair showed
+less than human-written ones did, and in certain pools of one specification a human-written and an LLM-written pair showed
 negative failure correlation [@papers/almeida-2026-llm-diversity/passages.md].
 
 *Across general tasks.* On the HELM leaderboard data, two models that are both wrong give the same
@@ -525,16 +529,17 @@ votes, and same-family pairs were only slightly more correlated than cross-famil
 separate more from other models [@papers/nogueira-2026-failure-independence/passages.md]. The measures and tasks
 differ, so the two may not conflict, but they point opposite ways.
 
-*On leaderboards.* Successes on SWE-bench Verified are nested. The top two systems each solve 396 of
-500, their union is 414, and the union of the top ten is 449 [@papers/liu-2026-converged/passages.md]. A paper that
-asks models to name the buggy file from the issue text alone gets 76% on SWE-bench and 53% on
+*On leaderboards.* Successes on SWE-bench Verified are nested. The best single system solves 396 of
+500, the union of the top two is 414, and the union of the top ten is 449 [@papers/liu-2026-converged/passages.md]. A paper that
+asks models to name the buggy file from the issue text alone gets up to 76% on SWE-bench and up to 53% on
 repositories outside it, which points to memorisation (abstract only)
 [@papers/liang-2025-swebenchillusion/passages.md]. Every SWE-bench number below carries that doubt.
 
-**What it means for lanes.** Worktrees isolate lanes. They do not make them independent in the sense
-that matters here. Different vendors help only partly, and agreement between lanes is weak evidence,
-which is what the coachman's runbook already says. No study measured this for a flow in which an
-agent writes the synthesis.
+**What it means for lanes.** Worktrees isolate lanes. By these studies that does not make them
+independent in the sense that matters here, and different vendors help only partly. The coachman's
+runbook already says that agreement between lanes is not evidence. This wiki has not measured the
+overlap of its own lanes' failures: the one fixture ticket passes every lane, so there are no failures to
+count. No study measured this for a flow in which an agent writes the synthesis.
 
 ### Claim 1: several models together beat the best single model
 
@@ -555,10 +560,11 @@ three-vendor ensemble goes the other way.
 | [AlphaCode](https://arxiv.org/abs/2203.07814) | 41B plus 9B models | slightly worse than the 41B model alone [@papers/li-2022-alphacode/passages.md] | two sizes of one architecture |
 | [Leaderboard overlap](https://arxiv.org/abs/2609.17394) | top two systems on Verified | union 414 against 396 (+18) [@papers/liu-2026-converged/passages.md] | observational; one run per submission |
 
-The ceilings are real. A pool of different systems solves far more than any one of them, and the
-selector gets part of it: CodeMonkeys 57.4% against an oracle of 69.8% [@papers/ehrlich-2025-codemonkeys/passages.md], Agentless 96 of 126
-reachable issues [@papers/xia-2024-agentless/passages.md], Trae 65.67% against 73.40% [@papers/gao-2025-trae-agent/passages.md]. The gain is bounded by where
-the models fail together.
+The ceilings are real, and a selector gets only part of them. From one model's samples, CodeMonkeys
+gets 57.4% against an oracle of 69.8% [@papers/ehrlich-2025-codemonkeys/passages.md] and Agentless 96 of 126 reachable
+issues [@papers/xia-2024-agentless/passages.md]. From different systems, CodeMonkeys' selector gets 66.2% against a
+pool reach of 80.8%, and Trae's mixture 65.67% against 73.40% [@papers/gao-2025-trae-agent/passages.md]. The gain is
+bounded by where the models fail together.
 
 **General: mixed. Strength: controlled studies pointing both ways.** The Mixture-of-Agents paper
 reported 65.1 on AlpacaEval 2.0 against 51.3 for its best member and 57.5 for GPT-4 Omni, judged by
@@ -569,7 +575,7 @@ rarely beats the single best model without a strong query-level routing signal",
 across models of unequal quality hurts [@papers/chen-2026-cofailure/passages.md]. Forecasts from twelve models had a
 worse score than the best member, 0.20 against 0.15 on the Brier scale where lower is better
 [@papers/schoenegger-2024-silicon-crowd/passages.md]. ReConcile reports gains of 5.3 to 8.0 points over the best single
-model on sets of 100 questions [@papers/chen-2023-reconcile/passages.md]. Most of the favourable results were
+model on sets of 100 questions, from table cells that were mostly read once [@papers/chen-2023-reconcile/passages.md]. Most of the favourable results were
 reported by the authors of the method, and the papers that qualify them came from other authors.
 
 **Not covered.** Realistic multi-file work, frontier models at equal cost, and any test where the
@@ -595,9 +601,10 @@ point both ways.
   repository's tests [@papers/brown-2024-largemonkeys/passages.md]. Drawing plans before code lifted pass@200 on
   LiveCodeBench for Claude 3.5 Sonnet from 55.6% to 77.0%, in one read of the table
   [@papers/wang-2024-plansearch/passages.md].
-- In Aider's tables a same-model pair beat a cross-vendor pair for non-reasoning models, Sonnet with
-  itself 80.5% against Sonnet with DeepSeek 78.9%. A cross-vendor pair did best when the architect was
-  a reasoning model [@articles/aider-architect/passages.md].
+- In Aider's 2024 tables a same-model pair beat a cross-vendor pair for a non-reasoning model, Sonnet
+  with itself 80.5% against Sonnet with DeepSeek 78.9%, and for o1-preview two editors tied at 85.0%,
+  o1-mini and DeepSeek [@articles/aider-architect/passages.md]. In the 2025 post a cross-vendor pair, R1 with Sonnet, beat
+  both models alone [@articles/aider-r1-sonnet/passages.md].
 - A choice across ten small open models by diversity realised up to 95% of the theoretical reach. The
   baseline there was one model's beam-search outputs, which are less varied than samples, so it is a
   weak test [@papers/vallecillosruiz-2025-ensembles/passages.md].
@@ -638,10 +645,11 @@ issues. The same model choosing among the same patches solved 396. The authors' 
 "Once correct patches already populate the pool, handing the decision to a strong generator is
 therefore worse than a deterministic selector: generation adds format errors, hallucinated edits, and
 the risk of overwriting an available fix." A rule that keeps the edits several candidates share, with
-no model, added 5, 6 and 9 solved over choosing its own representative on Verified, Multilingual and
-Defects4J [@papers/yang-2026-patchfusion/passages.md]. REFINE, the code-optimisation mixture of agents and VeriMoA
-report gains from systems that write a result from several candidates, and none has a choose-one
-baseline on the same candidates [@papers/pabba-2025-refine/passages.md] [@papers/ashiga-2025-moacodeopt/passages.md]
+no model, solved 5, 6 and 9 more on Verified, Multilingual and Defects4J in the paper's ablation of that
+step, 426, 236 and 87 against 421, 230 and 78 without it [@papers/yang-2026-patchfusion/passages.md]. REFINE and the code-optimisation mixture of agents
+report gains from systems that write a result from several candidates, and neither has a choose-one
+baseline on the same candidates [@papers/pabba-2025-refine/passages.md] [@papers/ashiga-2025-moacodeopt/passages.md]. VeriMoA's
+aggregator writes from ranked candidates, and the text read reports no choose-one comparison
 [@papers/ping-2025-verimoa/passages.md]. Choosing recovers only part of what a pool holds, which is the room that
 writing would have to use: CodeMonkeys 57.4% against an oracle of 69.8% [@papers/ehrlich-2025-codemonkeys/passages.md],
 and an outside verifier 78.2% against 84.4% [@papers/kwok-2026-llmverifier/passages.md]. Vendors report gains from
@@ -658,15 +666,17 @@ points on four general sets, by its table [@papers/fadnavis-2026-trace-synthesis
 aggregator fell below voting on AIME [@papers/zhao-2025-agglm/passages.md]. A model that only picks matched voting
 [@papers/chen-2023-usc/passages.md]. Debate, which reads and revises, was no better than voting in comparisons by
 other authors [@papers/smit-2024-mad/passages.md] [@papers/choi-2025-debate-or-vote/passages.md]. A selector has a provable ceiling,
-the share of queries on which every model is wrong. A writer of a new answer has none, and two papers
-show a fused answer scoring above the best candidate [@papers/chen-2026-cofailure/passages.md]. So this claim differs
+the share of queries on which every model is wrong [@papers/chen-2026-cofailure/passages.md]. A writer of a new
+answer has none. LLM-Blender's fuser scored above its oracle row on one metric
+[@papers/jiang-2023-llmblender/passages.md], and Fusion-of-N beat the oracle selection in three translation pairs
+[@papers/khairi-2025-fusion-of-n/passages.md]. So this claim differs
 in kind from claims 1 and 2 and should not be argued from voting results.
 
 ### Claim 4: independent reviewers find defects that a single reviewer misses
 
-**Shown that several reviewers or runs find more than one, at a cost in false alarms. Not shown that
-different vendors beat repeated runs of one model at equal cost. Strength: several small studies,
-mostly preprints.**
+**Mostly shown that several reviewers or runs find more than one. Two studies find no gain, and where
+false alarms are reported they hold or rise. Not shown that different vendors beat repeated runs of
+one model at equal cost. Strength: several small studies, mostly preprints.**
 
 | Source | Task | One reviewer or run | More than one | False alarms | Same or different |
 | --- | --- | --- | --- | --- | --- |
@@ -693,8 +703,9 @@ defects". The two could not be reconciled [@papers/porter-1997-code-inspections-
 gain in detection, or were not as beneficial as people think
 [@papers/porter-1995-requirements-inspection-replication/passages.md] [@papers/votta-1993-inspection-meeting/passages.md].
 This wiki already holds the overlap method for estimating what reviewers leave
-([@papers/petersson-2004-capture-recapture/passages.md]) and the finding that one careful review finds about half the
-defects ([@papers/kemerer-paulk-2009-review-rate/passages.md]). The full texts of Fagan, Eick, Rigby and the later
+([@papers/petersson-2004-capture-recapture/passages.md]) and the finding that one careful review by a person finds
+nearly two-thirds of design defects and more than half of code defects
+([@papers/kemerer-paulk-2009-review-rate/passages.md]). The full texts of Fagan, Eick, Rigby and the later
 Porter reports could not be read.
 
 For judges, a panel of three smaller models from three families beat one large judge on question
@@ -712,7 +723,7 @@ Most defect keys here come from the models' own findings, so the union can flatt
 | 1. Several models beat the best single model | not settled: small gains in point estimates, one controlled table the other way | mixed, mostly against when members differ in quality | one report; controlled studies pointing both ways |
 | 2. Different models beat the same model repeated | not settled: indirect tests only | not settled: the two cleanest tests are against mixing | controlled studies, preprints, conflicting |
 | 3. Writing one from several beats picking | not shown: the one controlled comparison is against | shown for open-ended tasks, mixed elsewhere | one controlled comparison for code; controlled studies for general work |
-| 4. Independent reviewers find what one misses | shown that more reviewers or runs find more, with more false alarms; not shown for different vendors against repeated runs | a panel of different families judged better than one large judge | several small studies |
+| 4. Independent reviewers find what one misses | mostly shown that more reviewers or runs find more, with two studies finding no gain and false alarms holding or rising where reported; not shown for different vendors against repeated runs | a panel of different families judged better than one large judge | several small studies |
 
 ## The closest tools, compared with postmaster
 
@@ -735,36 +746,37 @@ and nothing was installed or run.
 | --- | --- | --- | --- | --- | --- |
 | **postmaster** | Yes. Two or more workhorse lanes build the same ticket from one approved spec, each in its own worktree. Isolation is by worktree and instruction, and a sandbox enforces it only when confinement is on, which is off by default ([lane confinement](lane-confinement.md)) | One agent that is not a lane, a different model from every lane, composes the synthesis from the base commit part by part with a reason for each part. Agreement between lanes is treated as no evidence | Set by config for each role. In the audited runs, OpenAI and Xiaomi models as workhorses, an Anthropic model for security review, and a Meta model as coachman | Style, bug and security lenses, the first two by the workhorse lanes of two vendors and the security lens by a third vendor's model, in rounds capped at three before the user decides. The coachman verifies each finding | Yes. The user signs off the ticket and then the run's one spec before any code |
 | [Voratiq](https://github.com/voratiq/voratiq) | Yes. Several implementations of one spec. Whether an agent sees another's work is not stated | Blinded verifier agents rank the outputs and one is applied. A `reduce` step writes one summary from several artifacts | Claude, Codex or Gemini command-line agents, each chosen per agent | Verifier agents, with tests, type checks, lint and build | None found in the pages read |
-| [LoopTroop](https://github.com/looptroop-ai/LoopTroop) | Drafts of plans and specs are independent. The code is written by one implementer | A rubric vote picks a draft, and the winner refines it with ideas from the losers. This is for plans, not code | Two to ten configurable council models, with an implementer run through OpenCode | Council members score each other's drafts, then a final review and tests | Yes. The person signs off planning specs, blueprints and final pull requests, and the README says the gates will become optional |
+| [LoopTroop](https://github.com/looptroop-ai/LoopTroop) | Drafts of plans and specs are independent. The code is written by one implementer | A rubric vote picks a draft, and the winner refines it with ideas from the losers. This is for plans, not code | Two to ten distinct models in a council, including the main implementer | Council members score each other's drafts, and the winner verifies coverage before execution | Yes. The person signs off planning specs, blueprints and final pull requests, and the README says the gates will become optional |
 | [Autopus-ADK](https://github.com/autopus-ai/autopus-adk) | Partly. Three vendors analyse independently, for ideas and plans | Strategies of consensus, debate with a judge, pipeline and fastest. One writer produces the spec after three advisers | Claude, Codex and Gemini in its multi mode | Independent review of plans and a multi-model code review | Not stated |
-| [Trae Agent](https://arxiv.org/abs/2507.23370) | Yes. Candidates are generated in parallel. One setting takes them from three vendors' models | Regression tests prune, then a selector agent picks by repeated selection and majority vote | Gemini 2.5 Pro, Claude 3.7 Sonnet and GPT-4.1 in the paper. The leaderboard entry lists four models | A tester agent and a selector. No multi-model review | None |
+| [Trae Agent](https://arxiv.org/abs/2507.23370) | Yes. Candidates are generated in parallel. One setting takes them from three vendors' models | Regression tests prune, then a selector agent picks by repeated selection and majority vote | Gemini 2.5 Pro, Claude 3.7 Sonnet and GPT-4.1 in the paper. The leaderboard entry lists four models [@articles/swe-bench-experiments-trae-20250612/passages.md] | A tester agent and a selector. No multi-model review | None |
 | [ai-jury](https://github.com/berkayturanci/ai-jury) | No. It reviews code and writes none. Round 1 is parallel and independent | A chair's synthesis or a panel vote | Claude Code, Codex, Antigravity, hosted APIs and local models | It is the purpose of the tool | None |
-| [Cursor](https://cursor.com/docs/configuration/worktrees) | Yes. `/best-of-n` runs one task on several models in isolated worktrees | An automatic judge recommends a run and a person picks. Nothing is merged | Several models of Cursor's own agent | A separate product, Bugbot, reviews pull requests [@articles/cursor-building-bugbot/passages.md] | Plan Mode has the person click to build a plan, and the pages do not tie it to `/best-of-n` [@articles/cursor-plan-mode/passages.md] |
+| [Cursor](https://cursor.com/docs/configuration/worktrees) | Yes. `/best-of-n` runs one task on several models in isolated worktrees | When agents run in parallel, an automatic judge recommends a run and a person picks. `/best-of-n` compares runs only and merges nothing | Several models of Cursor's own agent | A separate product, Bugbot, reviews pull requests [@articles/cursor-building-bugbot/passages.md] | Plan Mode has the person click to build a plan, and the pages do not tie it to `/best-of-n` [@articles/cursor-plan-mode/passages.md] |
 | [GitHub Agent HQ](https://github.blog/news-insights/company-news/pick-your-agent-use-claude-and-codex-on-agent-hq/) | Several agents can be assigned one task. Whether they are kept apart is not stated | A person compares the draft pull requests | Copilot, Claude and Codex | Copilot gives a first-line review, and another agent can be used to hunt for edge cases | Yes in the VS Code flow. The person approves a plan before implementation [@articles/github-blog-welcome-home-agents/passages.md] |
-| [PAL MCP](https://github.com/BeehiveInnovations/pal-mcp-server) | No. It consults other models in one conversation, and consensus is sequential | The host agent combines the perspectives | Gemini, OpenAI, Anthropic, Grok, Ollama, OpenRouter and others | Code review and pre-commit checks with several models | None |
+| [PAL MCP](https://github.com/BeehiveInnovations/pal-mcp-server) | No. It consults other models in one conversation, and consensus runs as sequential processing [@articles/beehiveinnovations-pal-consensus/passages.md] | The host agent combines the perspectives | Gemini, OpenAI, Anthropic, Grok, Ollama, OpenRouter and others | Code review and pre-commit checks with several models | None |
 
 **What stands behind it**
 
 | | Audit trail | Test of the flow itself | Agents it works with | Evidence offered | How widely used |
 | --- | --- | --- | --- | --- | --- |
 | **postmaster** | One JSON line per action from a fixed set, per run and per project. Each lane's event stream and harness session are kept, and each run is pinned to the tool version it started on | Fixture runs on a small app with hidden tests, scored from the run's own records. A change to the coachman contract merges only after one scores clean | codex, claude, grok, agy, pi, muse and mimo through adapters | An audit of 18 real runs and fixture runs, in this wiki with standings that are mostly claimed. No head-to-head with another tool | Repository created 2026-09-21. 0 stars, 1 fork, no licence file, no releases [@articles/postmaster-repository/passages.md] |
-| Voratiq | Per-agent diffs, logs and chat records under one folder | None described | Claude, Codex and Gemini command-line agents | One worked example. No measurement | 74 stars. Last push 2026-05-05 |
-| LoopTroop | State in a database, JSON logs and ticket artifacts | None described | Through OpenCode. Anthropic, OpenAI and NVIDIA named | None on the council page | 156 stars. Its README says early alpha |
+| Voratiq | Recorded run history, which its docs call usable as an audit trail [@articles/voratiq-how-it-works/passages.md] | None described | Claude, Codex and Gemini command-line agents | No measurement found in the pages read | 74 stars. Last push 2026-05-05 |
+| LoopTroop | State in a database, JSON logs and ticket artifacts | None described | Providers named: Anthropic, OpenAI and NVIDIA NIM | None on the council page | 156 stars. Its README says early alpha |
 | Autopus-ADK | Telemetry and evaluation code, though its own assessment says synthetic results are not measured savings | Its assessment says it is "not a head-to-head performance trial" [@articles/autopus-ai-harness-assessment/passages.md] | Claude Code, Codex, Antigravity, OpenCode and Oh My Pi | The README says research shows debate beats any single model, with no source | 111 stars |
 | Trae Agent | Recorded trajectories of agent actions | A published comparison with baselines on SWE-bench Verified, and no standing test | Its own agent, with several model providers | Table 1: the three-vendor mixture 65.67% against Claude alone 66.40%, and a headline of 75.20% whose configuration is not stated | 12,126 stars. Last push 2026-02-05 |
 | ai-jury | Transcripts of reviews and debate | Golden-file tests, a 98% coverage floor, opt-in live smoke tests of the real agents, and a benchmark with answer keys | Claude Code, Codex, Antigravity, hosted APIs, local models | Its own benchmark, run once: 3 of 3 seeded bugs found by the panel against 2 of 3 by the best single reviewer, at precision 0.75 against 1.00 | 8 stars |
-| Cursor | Not stated on the pages read | None found | Cursor's own agent | None for `/best-of-n`. The 2.0 post says several models on one problem "significantly improves the final output" [@articles/cursor-changelog-2-0/passages.md] | Closed. The vendor says Bugbot reviews more than two million pull requests a month |
-| GitHub Agent HQ | Not stated | Not stated | Copilot, Claude and Codex, in public preview | None | Closed. GitHub says 180 million developers, about Copilot overall |
+| Cursor | Not stated on the pages read | None found | Cursor's own agent | None for `/best-of-n`. The 2.0 post says several models on one problem "significantly improves the final output" [@articles/cursor-plan-mode/passages.md] | Closed. The vendor says Bugbot reviews more than two million pull requests a month |
+| GitHub Agent HQ | Not stated | Not stated | Copilot, Claude and Codex, in public preview [@articles/github-docs-third-party-agents/passages.md] | None | Closed. GitHub says it has 180 million developers and that 80% of new developers use Copilot in their first week [@articles/github-agent-hq/passages.md] |
 | PAL MCP | An activity log of tool calls | Unit tests and simulator tests that replicate Claude CLI interactions end to end | Claude Code, Gemini CLI, Codex CLI, Qwen Code CLI and Cursor as hosts | None found in its README | 11,767 stars. No push since 2025-12-15 |
 
-**Reading the tables.** No tool has all five elements. The best two have 7 of 10. Voratiq has several
+**Reading the tables.** No tool has all five elements in full. The best two have 7 of 10. Voratiq has several
 vendors implementing one spec, blinded verification and an applied result, with no sign-off in the
 pages read. LoopTroop has the sign-off and a multi-model vote over drafts, but one implementer writes
 the code. The most used items have the least evidence: the Codex plugin for Claude Code has 33,828
 stars and no measurement [@articles/openai-codex-plugin-cc/passages.md], Karpathy's LLM Council has 25,141 stars and
 its README says it will not be supported in any way [@articles/karpathy-llm-council/passages.md], and PAL MCP has 11,767
-stars and has not been pushed to since 2025-12-15 [@articles/beehiveinnovations-pal-mcp-server/passages.md]. The projects that publish numbers are small,
-ai-jury at 8 stars and Magpie at 175 [@articles/liliu-z-magpie/passages.md]. Strength: shown by the tools'
+stars and has not been pushed to since 2025-12-15 [@articles/beehiveinnovations-pal-mcp-server/passages.md]. Of the closest tools, only Trae
+Agent, with 12,126 stars, ai-jury, with 8, and Magpie, with 175, publish numbers of their own
+[@articles/liliu-z-magpie/passages.md]. Strength: shown by the tools'
 own pages, with a search that was limited by a shared budget.
 
 ## What postmaster shares, what it adds, and what it claims without support
@@ -778,11 +790,11 @@ and the runbooks at commit `8ea503d` [@articles/postmaster-repository/passages.m
 | --- | --- | --- |
 | Runs several coding agents on one repository, each in its own worktree | Cursor, Orca, Claude Squad, Superset, Conductor, Kilo Code and others in [group 1](#1-parallel-and-best-of-n-coding-agents) | shown by their pages |
 | Gives one task to several models and keeps the attempts apart | Cursor `/best-of-n`, Windsurf Arena Mode, Kilo Code, Voratiq, Trae Agent's candidates | shown by their pages |
-| Has an agent combine the candidates | Trae Agent's selector, Voratiq's verifiers and `reduce`, Augment's ensembler, PatchFusion, Mixture-of-Agents | shown by their pages and papers |
-| Reviews a change with several models and lenses, and filters findings | Claude Code Review, Qodo, CodeRabbit, ai-jury, Magpie, the Codex plugin for Claude Code | shown by their pages |
+| Combines the candidates, by a model or by a rule | Trae Agent's selector, Augment's ensembler, Voratiq's verifiers, PatchFusion's rule, Mixture-of-Agents' aggregator | shown by their pages and papers |
+| Reviews a change with several agents, and in places several vendors' models, and filters findings | Claude Code Review, Qodo and CodeRabbit use several agents. ai-jury, Magpie, PAL MCP and the Codex plugin for Claude Code bring in other vendors' models | shown by their pages |
 | Has a person sign off a spec before code | Spec Kit, Kiro, OpenSpec, Claude Code plan mode, GitHub Agent HQ, LoopTroop | shown by their pages |
 | Records what each agent did, per run | Entire, git-ai, Agent Trace, the agents' own logs | shown by their pages |
-| Treats agreement between lanes as weak evidence | The work on correlated failures supports it, and Trae Agent and Agentless choose by majority vote, which treats agreement as evidence | controlled studies, see [above](#do-independently-produced-versions-fail-independently) |
+| Treats agreement between lanes as no evidence in itself | The work on correlated failures supports it, and Trae Agent and Agentless choose by majority vote, which treats agreement as evidence | controlled studies, see [above](#do-independently-produced-versions-fail-independently) |
 
 ### What it adds
 
@@ -794,7 +806,7 @@ it in separate worktrees. One agent that is a different model from every lane co
 base commit part by part, with a reason recorded for each part and a record of what came from which lane.
 Several models review it under several lenses in a loop that is capped at three rounds, after which the
 user decides. A ship card ends the run [@articles/postmaster-repository/passages.md]. Scored on five elements, the closest of 28
-tools and six write-ups was 7 of 10 (Voratiq, LoopTroop), and none had all five. Voratiq has no sign-off
+tools and six write-ups was 7 of 10 (Voratiq, LoopTroop), and none had all five in full. Voratiq has no sign-off
 in the pages read, and LoopTroop has one implementer. The web search budget of 200 calls was spent
 across all groups. The closest-tools group alone took 34 web searches, 16 GitHub searches and about
 100 page and file reads. The search could not look inside closed products, and it did not search
@@ -802,9 +814,12 @@ Reddit, X, Discord or video.
 OpenAI, Perplexity and the original Ars Technica article refused or blocked the fetch tool. A tool
 that combines these may exist unseen. Strength: not found.
 
-**2. A synthesis written by an agent that is not a lane.** No tool read does this for code. Voratiq's
-`reduce` writes a summary from several artifacts. LoopTroop's winning draft refines itself with ideas from the
-losing drafts, for plans. Trae Agent, Augment and OpenHands pick. This is also the part the evidence
+**2. A synthesis written by an agent that is not a lane.** No tool read does exactly this for code.
+Papers come near it: REFINE and a mixture-of-agents paper for code optimisation have a model write
+one patch from several drafts, and PatchFusion builds one patch from a pool by rule. Some tools have a
+lead agent compile results, such as Claude Code agent teams and Devin, and Voratiq's `reduce` writes a
+summary from several artifacts. LoopTroop's winning draft refines itself with ideas from the losing
+drafts, for plans. Trae Agent, Augment and OpenHands pick. This is also the part the evidence
 warns about. The one controlled comparison found a model asked to write the final patch from a pool
 solving 317 of 500 issues where the same model choosing solved 396 [@papers/yang-2026-patchfusion/passages.md]. The
 coachman composes from the base commit, with reasons, and runs the gate and the reviews afterwards, which
@@ -831,13 +846,13 @@ this wiki's audit. Line numbers are those of `README.md` at commit `8ea503d`.
 
 | The README says | The evidence | Verdict |
 | --- | --- | --- |
-| "the synthesis took contributions from **both** lanes every time" (lines 36 to 38) | The runbook requires the record to name something taken from every lane, so the record cannot fail: all 25 syntheses in the first audit name both [@trials/2026-09-29-synthesis-audit/method.md]. Counted in git, the second lane's text was 2% or less of the synthesis in 8 of those 25, and in the five later real runs that have counts it wrote 0.5%, 25%, 14.6%, 0% and 4.8% of the code [@trials/2026-10-03-lane-audit/results/numbers.md] | Not supported as stated. True of the record by construction, not of the code |
+| "the synthesis took contributions from **both** lanes every time" (lines 36 to 38) | The runbook requires the record to name a contribution from every lane that produced work, or to say why a lane contributed nothing, so the record cannot fail: all 25 syntheses in the first audit name both [@trials/2026-09-29-synthesis-audit/method.md]. Counted in git, the second lane's text was 2% or less of the synthesis in 8 of those 25 [@trials/2026-09-29-synthesis-audit/share.md], and in the five later real runs that have counts it wrote 0.5%, 25%, 14.6%, 0% and 4.8% of the code [@trials/2026-10-03-lane-audit/results/numbers.md] | Not supported as stated. True of the record by construction, not of the code |
 | "not 'pick the winner', but one lane's mechanism plus the other's test, wiring or edge case" (line 37) | By the coachman's own cards the second lane's part was a fix or a missing part in 12 of 18 real runs, small items in 4 and nothing in 2. Each lane alone passed every hidden test in all 22 fixture runs that could be scored. No run had one workhorse | Supported in part, by the coachman's account. Not tested against a one-lane run |
 | "a second lane finding the same defect independently is corroboration you can act on" (lines 38 and 39) | Only 59 of 264 verified serious findings were named by two or more lanes. Whether those held up better is not measured, since every logged finding was verified and the dismissed ones carry no lane. In the review of #36, 4 of 48 findings were made by both reviewers and all held up, and so did 42 of the other 44 [@runs/2026-09-26-postmaster-36/reports]. Outside work finds that models' errors are correlated, so agreement is weak evidence | Not supported. The audit shows a second reviewer adds coverage, which is a different claim |
 | "Disagreement is also diagnostic ... the coachman records the gap as a proposed rule" (lines 41 to 43) | No measurement that a recorded rule stopped the same fork recurring ([combining models](combining-models.md), H3) | Not supported yet |
 | lanes "unable to see each other's work" (lines 7 and 19) | Lanes have a worktree each. In a trial, every harness in bypass mode read another lane's worktree when asked, a worktree shares its repository's store, and the flow does not record whether any lane looked. A sandbox stops it, and confinement is off by default ([lane confinement](lane-confinement.md)) | Holds by instruction and layout, enforced only with confinement on |
-| "Because they disagree usefully", as the reason for several models rather than one (line 36) | The audit's measured case is the reviewers: one lane alone would have missed 42% to 48% of the serious findings. A second implementer is "not shown to be needed" ([several lanes](several-lanes.md)) | The evidence supports the audit's reading, not the README's |
-| a script "saves tokens" (lines 29 and 30) | Not measured. The coachman writes a median 58% of a run's output tokens and read 1,478M input tokens over the 18 real runs | Argued, not measured |
+| "Because they disagree usefully", as the reason for several models rather than one (line 36) | The audit's measured case is the reviewers: one lane alone would have missed 42% to 48% of the serious findings. A second workhorse is "not shown, and cheap" ([several lanes](several-lanes.md)) | The evidence supports the audit's reading, not the README's |
+| a script "saves tokens" (lines 29 and 30) | Not measured. The coachman writes a median 58% of a run's output tokens, over 14 runs, and read 1,478M input tokens over the 18 real runs | Argued, not measured |
 | resume cost "prompt caching mostly absorbs" (lines 239 and 240) | Not measured. The audit's token reader leaves out cache reads for Claude Code | Argued, not measured |
 | "Nothing is reconstructed afterwards ... Audits ... work from the log" (lines 65 and 66) | The audit counted findings, launches and times from the action log. It read the second lane's part from the coachman's prose cards, by two readers, and counted six-word runs in git | Overstated. Part of the audit reads prose |
 | "nothing in the flow depends on one provider's tools" (lines 47 to 49) | Adapters cover seven harnesses. Bug and security review use each harness's own review skill where there is one ([own review skills](own-review-skills.md)). A usage wall hit every codex lane at once and the run went on with the other vendor's lane, once | Supported in design, with one hedge observed |
@@ -847,9 +862,9 @@ this wiki's audit. Line numbers are those of `README.md` at commit `8ea503d`.
 earn their keep and a second implementer has not been shown to be needed. The README says several
 models help because the implementers disagree usefully. The record behind that is the coachman's, and
 it cannot fail. The README states the claim from an unrecorded sample, as
-[combining models](combining-models.md) says, and the audits that followed do not bear it out. The
-experiment that would settle it is under way, a single-thread mode beside synthesis mode, alternating
-over the next 16 tickets
+[combining models](combining-models.md) says, and the audits that followed contradict "every time" and do not show a second implementer to be needed. The
+experiment that would settle it is planned and filed, a single-thread mode beside synthesis mode, then
+alternating over the next 16 tickets once the mode has landed
 ([#270, A run can be single-thread: the coachman writes the change itself and no workhorse lane runs](https://github.com/brindlewick/postmaster/issues/270),
 [#271, Run the next 16 tickets in alternating modes, and judge single-thread against synthesis by review rounds](https://github.com/brindlewick/postmaster/issues/271)).
 
@@ -864,9 +879,9 @@ to make, and this page only says what the records support.
 | --- | --- | --- |
 | Postmaster has several models implement one ticket independently in separate worktrees, builds one synthesis from their work, and reviews it with several models under several lenses. | shown | The README and runbooks at the commit named above, which anyone can read [@articles/postmaster-repository/passages.md] |
 | In 18 real runs, two reviewer lanes together found 91% of the serious findings the coachman verified, and one lane alone found 52% or 58%. | one report | [The lane audit](several-lanes.md): one repository, 264 findings, the coachman's verification as the key, and no outside ground truth. Every count has a control [@trials/2026-10-03-lane-audit/results/controls.md] |
-| More reviewers, or more runs of one model, find more defects than one does, at the cost of more false alarms. | several small studies | [Claim 4 above](#claim-4-independent-reviewers-find-defects-that-a-single-reviewer-misses). Not shown for different vendors against repeated runs at equal cost |
-| Postmaster publishes an audit of its own flow, with the records and a control for each count, so a reader can count again. | shown | The trial folders under `raw/` hold the method and the derived tables [@trials/2026-10-03-lane-audit/method.md] |
-| Independent lanes do not give independent failures, and the runbook treats agreement between lanes as no evidence. | controlled studies | [The independence section above](#do-independently-produced-versions-fail-independently) |
+| Several small studies find that more reviewers, or more runs of one model, find more defects than one does. Two find no gain, and where false alarms are reported they hold or rise. | several small studies | [Claim 4 above](#claim-4-independent-reviewers-find-defects-that-a-single-reviewer-misses). Not shown for different vendors against repeated runs at equal cost |
+| Postmaster publishes the method, the controls and the derived tables of its audits of its own flow. | shown | The trial folders under `raw/` [@trials/2026-10-03-lane-audit/method.md]. The run folders are not promoted, so the tables can be re-rendered and the counts repeated only where the runs' records are |
+| Independently built versions, human or model, fail together far more than independence predicts, and the runbook treats agreement between lanes as no evidence. Whether postmaster's own lanes do is not measured. | controlled studies, of other versions | [The independence section above](#do-independently-produced-versions-fail-independently) |
 | Whether mixing models beats one model is not settled in the literature, and this project's own audit does not show a second implementer to be needed. | this page's reading | [The four answers](#the-four-answers-together) and [several lanes](several-lanes.md) |
 | As far as was found on 2026-10-04, no tool read combines these elements, and the closest scored 7 of 10 on a count of five. | not found | A limited search. It describes the search and not the world |
 | Fixture runs score a run against hidden tests that are kept out of the lanes' worktrees. | shown, as a description | [Fixture runs](fixture-runs.md). It is not a wall, and nothing records whether a lane looked. That the runs catch a broken contract is **claimed** |
@@ -1126,6 +1141,7 @@ three trials under `raw/trials/`: [the lane audit](several-lanes.md)
 | [unknown (the fetch tool returned no title; the url slug is open-source-agent-orchestrators)](https://www.augmentcode.com/tools/open-source-agent-orchestrators) | 2026-10-04 | [@articles/augmentcode-open-source-agent-orchestrators] |
 | [Autopus-ADK (README)](https://github.com/autopus-ai/autopus-adk) | 2026-10-04 | [@articles/autopus-ai-autopus-adk] |
 | [Autopus-ADK: harness value and comparison](https://github.com/autopus-ai/autopus-adk/blob/main/docs/harness-assessment.md) | 2026-10-04 | [@articles/autopus-ai-harness-assessment] |
+| [Consensus Tool - Multi-Model Perspective Gathering (PAL MCP documentation)](https://github.com/BeehiveInnovations/pal-mcp-server/blob/7afc7c1cc96e/docs/tools/consensus.md) | 2026-10-04 | [@articles/beehiveinnovations-pal-consensus] |
 | [PAL MCP: Many Workflows. One Context. (README)](https://github.com/BeehiveInnovations/pal-mcp-server) | 2026-10-04 | [@articles/beehiveinnovations-pal-mcp-server] |
 | [ai-jury (README)](https://github.com/berkayturanci/ai-jury) | 2026-10-04 | [@articles/berkayturanci-ai-jury] |
 | [Benchmark: does the panel actually help? — v1.1.0 · 2026-06-05](https://github.com/berkayturanci/ai-jury/blob/main/docs/benchmark-results.md) | 2026-10-04 | [@articles/berkayturanci-ai-jury-benchmark-results] |
@@ -1136,8 +1152,10 @@ three trials under `raw/trials/`: [the lane audit](several-lanes.md)
 | [Blog post of 2025-05-19 on Trae's 70.6% SWE-bench Verified result (the page title was not returned by the fetch tool; the address ends in "71")](https://se-research.bytedance.com/blogs/trae-on-swe-bench-verified-71) | 2026-10-04 | [@articles/bytedance-trae-swebench-verified-blog] |
 | [ccusage (README of the ccusage app)](https://github.com/ccusage/ccusage/blob/b4a72f6d54974381289dc3660eeebf066bbc6535/apps/ccusage/README.md) | 2026-10-04 | [@articles/ccusage-ccusage] |
 | [Plan and Act modes (Cline documentation)](https://docs.cline.bot/features/plan-and-act) | 2026-10-04 | [@articles/cline-plan-and-act] |
+| [Why users shouldn't choose their own LLM models: choice is not always good (the fetch gave the post date as January 09, 2026)](https://coderabbit.ai/blog/why-users-shouldnt-choose-their-own-llm-models-choice-is-not-always-good) | 2026-10-04 | [@articles/coderabbit-blog-multi-model] |
 | [The System Behind Every Review Comment](https://docs.coderabbit.ai/overview/architecture) | 2026-10-04 | [@articles/coderabbit-docs-architecture] |
 | [Ask Devin (Devin documentation)](https://docs.devin.ai/work-with-devin/ask-devin.md) | 2026-10-04 | [@articles/cognition-devin-ask-devin] |
+| [Devin Dynamic Workflows (Devin documentation)](https://docs.devin.ai/work-with-devin/dynamic-workflows.md) | 2026-10-04 | [@articles/cognition-devin-dynamic-workflows] |
 | [Advanced Capabilities, section Managed Devins (Devin documentation)](https://docs.devin.ai/work-with-devin/advanced-capabilities.md) | 2026-10-04 | [@articles/cognition-devin-managed-devins] |
 | [Don't Build Multi-Agents](https://cognition.com/blog/dont-build-multi-agents) | 2026-10-04 | [@articles/cognition-dont-build-multi-agents] |
 | [Multi-Agents: What's Actually Working (the title as given in the fetch output)](https://cognition.com/blog/multi-agents-working) | 2026-10-04 | [@articles/cognition-multi-agents-working] |
@@ -1160,10 +1178,13 @@ three trials under `raw/trials/`: [the lane audit](several-lanes.md)
 | [Conductor Plugin (spec-driven development for AI coding agents)](https://github.com/gemini-cli-extensions/conductor/tree/6e8f9a860bcdd6a2c423473c12e745200688c633) | 2026-10-04 | [@articles/gemini-cli-extensions-conductor] |
 | [Emdash (README, and release notes of the release tagged v0)](https://github.com/generalaction/emdash/blob/a39d9c8339ebf2d96c287fa78bf28b7b5e41d2ba/README.md) | 2026-10-04 | [@articles/generalaction-emdash] |
 | [git-ai (repository README)](https://github.com/git-ai-project/git-ai/blob/0670e7ef27590af0e8ff5409267f3f4b09b8fcb4/README.md) | 2026-10-04 | [@articles/git-ai-project-git-ai] |
+| [Introducing Agent HQ: Any agent, any way you work](https://github.blog/news-insights/company-news/welcome-home-agents/) | 2026-10-04 | [@articles/github-agent-hq] |
 | [Pick your agent: Use Claude and Codex on Agent HQ (blog post dated 2026-02-04)](https://github.blog/news-insights/company-news/pick-your-agent-use-claude-and-codex-on-agent-hq/) | 2026-10-04 | [@articles/github-blog-pick-your-agent] |
 | [Welcome home, agents (title taken from the URL; the fetch tool did not return a title)](https://github.blog/news-insights/company-news/welcome-home-agents/) | 2026-10-04 | [@articles/github-blog-welcome-home-agents] |
 | [60 million Copilot code reviews and counting (title as given in the URL; the fetch gave the post date as March 5, 2026)](https://github.blog/ai-and-ml/github-copilot/60-million-copilot-code-reviews-and-counting/) | 2026-10-04 | [@articles/github-copilot-60-million-reviews] |
+| [Copilot code review now runs on an agentic architecture (title as listed in a search result; the date is in the URL)](https://github.blog/changelog/2026-03-05-copilot-code-review-now-runs-on-an-agentic-architecture/) | 2026-10-04 | [@articles/github-copilot-code-review-changelog] |
 | [Managing agent sessions (GitHub Docs; the title as one fetch returned it; the other fetch headed its answer "Tracking and Auditing Copilot Agent Activities")](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/track-copilot-sessions) | 2026-10-04 | [@articles/github-docs-copilot-agent-sessions] |
+| [About third-party coding agents - GitHub Docs](https://docs.github.com/en/copilot/concepts/agents/about-third-party-coding-agents) | 2026-10-04 | [@articles/github-docs-third-party-agents] |
 | [Spec Kit (README)](https://github.com/github/spec-kit) | 2026-10-04 | [@articles/github-spec-kit] |
 | [Implementation plan (Antigravity documentation)](https://antigravity.google/docs/implementation-plan) | 2026-10-04 | [@articles/google-antigravity-implementation-plan] |
 | [cc-sdd: Turn approved specs into long-running autonomous implementation](https://github.com/gotalab/cc-sdd/tree/e2a0c671aef37a482404905b409ab5c27092b25b) | 2026-10-04 | [@articles/gotalab-cc-sdd] |
@@ -1176,6 +1197,7 @@ three trials under `raw/trials/`: [the lane audit](several-lanes.md)
 | [When Spec-Driven Development Pays off](https://www.infoq.com/articles/when-spec-driven-development-pays-off/) | 2026-10-04 | [@articles/infoq-garg-spec-driven-pays-off] |
 | [LLM Council (README)](https://github.com/karpathy/llm-council) | 2026-10-04 | [@articles/karpathy-llm-council] |
 | [Agent Manager: Run Multiple Agents Without the Chaos (title taken from a search listing)](https://blog.kilo.ai/p/agent-manager-run-multiple-agents) | 2026-10-04 | [@articles/kilo-agent-manager-blog] |
+| [Agent Manager and Agent Manager Workflows (Kilo Code documentation, in the repository)](https://github.com/Kilo-Org/kilocode/blob/76bcfd40be616a72f4697b3041565f322245b462/packages/kilo-docs/pages/automate/agent-manager.md) | 2026-10-04 | [@articles/kilo-org-kilocode] |
 | [Kiro documentation, blog posts and home page (specs, plan mode, Quick Spec, crew task runner, workflows)](https://kiro.dev/docs/specs/) | 2026-10-04 | [@articles/kiro-dev-docs] |
 | [Trace Claude Code applications (LangSmith documentation)](https://docs.langchain.com/langsmith/trace-claude-code) | 2026-10-04 | [@articles/langchain-langsmith-claude-code] |
 | [Tracing coding agents: Claude Code, Codex, Copilot & more](https://langfuse.com/resources/engineering/coding-agent-tracing) | 2026-10-04 | [@articles/langfuse-coding-agent-tracing] |
@@ -1195,7 +1217,10 @@ three trials under `raw/trials/`: [the lane audit](several-lanes.md)
 | [codex-rs/cloud-tasks/src/cli.rs (command-line definitions for Codex cloud tasks, in the open-source Codex CLI repository)](https://github.com/openai/codex/blob/afb436df8b70bb5bc57b86d9a3e829968988cd21/codex-rs/cloud-tasks/src/cli.rs) | 2026-10-04 | [@articles/openai-codex-cloud-tasks-cli] |
 | [not returned by the fetch (OpenAI documentation page on Codex code review in GitHub)](https://learn.chatgpt.com/docs/third-party/github) | 2026-10-04 | [@articles/openai-codex-github-docs] |
 | [Codex plugin for Claude Code (README)](https://github.com/openai/codex-plugin-cc) | 2026-10-04 | [@articles/openai-codex-plugin-cc] |
+| [Codex source: the rollout recorder, the RolloutItem type and the session metadata type](https://github.com/openai/codex/tree/afb436df8b70bb5bc57b86d9a3e829968988cd21) | 2026-10-04 | [@articles/openai-codex-rollout-source] |
 | [Rollout Trace (README of the codex-rs/rollout-trace crate)](https://github.com/openai/codex/blob/afb436df8b70bb5bc57b86d9a3e829968988cd21/codex-rs/rollout-trace/README.md) | 2026-10-04 | [@articles/openai-codex-rollout-trace] |
+| [Subagents (Codex documentation)](https://learn.chatgpt.com/docs/agent-configuration/subagents) | 2026-10-04 | [@articles/openai-codex-subagents] |
+| [Worktrees (Codex documentation)](https://learn.chatgpt.com/docs/environments/git-worktrees.md) | 2026-10-04 | [@articles/openai-codex-worktrees] |
 | [Symphony (README and SPEC.md)](https://github.com/openai/symphony/tree/be10a1b79df723d6d7612b5651c8522704dafb2e) | 2026-10-04 | [@articles/openai-symphony] |
 | [SOTA on SWE-Bench Verified with Inference-Time Scaling and Critic Model (title as shown in a search listing)](https://openhands.dev/blog/sota-on-swe-bench-verified-with-inference-time-scaling-and-critic-model) | 2026-10-04 | [@articles/openhands-blog-inference-time-scaling] |
 | [Semantic Conventions for GenAI agent and framework spans](https://github.com/open-telemetry/semantic-conventions-genai/blob/e07f4ebacb08f56db8c4c882d117720333fbca04/docs/gen-ai/gen-ai-agent-spans.md) | 2026-10-04 | [@articles/opentelemetry-semantic-conventions-genai] |
@@ -1211,6 +1236,7 @@ three trials under `raw/trials/`: [the lane audit](several-lanes.md)
 | [Parallel Worktrees Skill for Claude Code (README)](https://github.com/SpillwaveSolutions/parallel-worktrees/blob/89eae06db5df402fe223f83258cc5c85095db10d/README.md) | 2026-10-04 | [@articles/spillwavesolutions-parallel-worktrees] |
 | [Orca (README)](https://github.com/stablyai/orca/blob/87bc51d3710332ea8b0f7f0e5610a31413a79582/README.md) | 2026-10-04 | [@articles/stablyai-orca] |
 | [Superset (README)](https://github.com/superset-sh/superset/blob/84fa11a1f45a2ac9d06d528a2711dc71056f9fac/README.md) | 2026-10-04 | [@articles/superset-sh-superset] |
+| [SWE-bench experiments, Verified split, submission 20250612_trae ("TRAE + Claude Sonnet 4 + Opus 4 + Sonnet 3.7 + Gemini 2.5 Pro")](https://github.com/SWE-bench/experiments/tree/40f164d5b8f1/evaluation/verified/20250612_trae) | 2026-10-04 | [@articles/swe-bench-experiments-trae-20250612] |
 | [mini-swe-agent (repository README): The minimal AI software engineering agent](https://raw.githubusercontent.com/SWE-agent/mini-swe-agent/main/README.md) | 2026-10-04 | [@articles/sweagent-mini-swe-agent] |
 | [Terminal-Bench 2.1](https://www.tbench.ai/news/terminal-bench-2-1) | 2026-10-04 | [@articles/tbench-terminal-bench-2-1] |
 | [Spec-driven development (tile, version 2.0.1 by tessl-labs); Tessl launches spec-driven framework and registry](https://tessl.io/registry/tessl-labs/spec-driven-development) | 2026-10-04 | [@articles/tessl-spec-driven-tile] |
