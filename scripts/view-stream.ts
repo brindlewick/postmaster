@@ -22,7 +22,7 @@
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
-import { processIsLive } from "./lib/process-state.ts";
+import { processIsLive } from "./lib/processes.ts";
 import { digitValue, PY_S_CLASS, pySplitLines, pyTrim } from "./lib/text.ts";
 
 // --- the renderer (ported from the embedded Python) ---------------------------------------

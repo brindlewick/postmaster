@@ -19,7 +19,7 @@ import {
 } from "node:fs";
 import { delimiter, join } from "node:path";
 import { toolRoot } from "./lib/paths.ts";
-import { processCommandLine } from "./lib/process-state.ts";
+import { processCommandLine } from "./lib/processes.ts";
 import { run, withTempDir } from "./lib/proc.ts";
 import { isDir, meta, pin, TRAIL_NL_RE } from "./run-meta.ts";
 

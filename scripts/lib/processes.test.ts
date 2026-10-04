@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { processInfo, processStart, processState, processTable } from "./process-state.ts";
+import { processInfo, processStart, processState, processTable } from "./processes.ts";
 
 const SCRIPTS = join(import.meta.dir, "..");
 
@@ -22,7 +22,7 @@ function scriptFiles(directory: string): string[] {
     if (info.isDirectory()) files.push(...scriptFiles(path));
     else if (
       /\.(?:js|mjs|py|sh|ts)$/u.test(name) &&
-      path !== join(SCRIPTS, "lib", "process-state.test.ts")
+      path !== join(SCRIPTS, "lib", "processes.test.ts")
     )
       files.push(path);
   }
@@ -146,7 +146,7 @@ describe("portable process state", () => {
 
   test("process probes live in this shared module", () => {
     const sources = scriptFiles(SCRIPTS).filter(
-      (path) => path !== join(SCRIPTS, "lib/process-state.ts"),
+      (path) => path !== join(SCRIPTS, "lib/processes.ts"),
     );
     const paths = sources.map((path) => path.slice(SCRIPTS.length + 1));
     expect(paths).toContain("host-self-test.ts");

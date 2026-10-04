@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { processStart } from "./lib/process-state";
+import { processStart } from "./lib/processes";
 import { pyWords } from "./lib/text";
 import { status, walkFiles } from "./runs-status";
 

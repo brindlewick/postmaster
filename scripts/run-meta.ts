@@ -82,7 +82,7 @@ import { basename, dirname, join } from "node:path";
 import { tryJsonFile, tryTomlFile } from "./lib/data.ts";
 import { toolRoot } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
-import { processState } from "./lib/process-state.ts";
+import { processState } from "./lib/processes.ts";
 import { pySplitLines, pyTrim } from "./lib/text.ts";
 
 const TOOL = toolRoot(import.meta);

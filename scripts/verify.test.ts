@@ -19,7 +19,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./lib/proc.ts";
-import { processState } from "./lib/process-state.ts";
+import { processState } from "./lib/processes.ts";
 import { DETAIL_RE, RESULT_RE, shlexQuote, ticketPart } from "./verify.ts";
 
 const SELF = join(import.meta.dir, "verify.sh");

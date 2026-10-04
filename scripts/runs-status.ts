@@ -29,7 +29,7 @@
 //   exit 1  usage, or no such root
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { processStart } from "./lib/process-state.ts";
+import { processStart } from "./lib/processes.ts";
 import { pyWords } from "./lib/text.ts";
 
 interface RunRow {

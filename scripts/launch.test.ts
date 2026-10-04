@@ -4056,7 +4056,7 @@ s.close()
       // AC2 item: a consistent /proc (Linux: the lane's PIDs match what its
       // /proc shows, so ps and friends see the lane, not the host's table)
       if (process.platform === "linux") {
-        const processModule = join(here, "lib", "process-state.ts");
+        const processModule = join(here, "lib", "processes.ts");
         const probeSource = `import { processInfo } from ${JSON.stringify(processModule)}; const info = processInfo(process.pid); process.exit(info?.pid === process.pid ? 0 : 1);`;
         const selfProbe = `${shellQuote(process.execPath)} -e ${shellQuote(probeSource)}`;
         items.push({

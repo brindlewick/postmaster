@@ -129,7 +129,7 @@ import {
   processStart,
   processState,
   processTable as sharedProcessTable,
-} from "./lib/process-state.ts";
+} from "./lib/processes.ts";
 import {
   BOUND_L,
   BOUND_R,

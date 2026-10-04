@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { argvHasUndecodableBytes, run } from "./lib/proc.ts";
-import { processState } from "./lib/process-state.ts";
+import { processState } from "./lib/processes.ts";
 import { digitValue, pyWords } from "./lib/text.ts";
 
 const states = ["todo", "in-progress", "blocked", "done", "cancelled"];

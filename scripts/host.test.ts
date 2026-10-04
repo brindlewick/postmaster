@@ -19,7 +19,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runControls } from "./host-self-test.ts";
-import { processState } from "./lib/process-state.ts";
+import { processState } from "./lib/processes.ts";
 
 const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "preamble", count: 6 },

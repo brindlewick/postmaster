@@ -24,7 +24,7 @@ import {
   processInfo,
   processStart,
   processState,
-} from "./lib/process-state.ts";
+} from "./lib/processes.ts";
 import { pyWords } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
