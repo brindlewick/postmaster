@@ -1426,26 +1426,26 @@ describe("R8: rescoped check", () => {
   });
 });
 
-describe("R9: ruled round fixes", () => {
-  function cardFor(layout: Layout, commandText: string): string {
-    writeWorkhorse(layout, "codex", [codex(commandText)]);
-    check(layout, "workhorses");
-    check(layout, "card");
-    writeFileSync(
-      join(layout.dispatch, "checks.json"),
-      JSON.stringify({
-        checks: [{ name: "gate", source: "default:gate", command: "true", shows: "gate" }],
-      }),
-    );
-    const sha = git(layout.synth, "rev-parse", "HEAD").slice(0, 12);
-    writeAction(layout, "coachman", "verify", "gate", `on=${sha}@${sha} result=pass exit=0 secs=1`);
-    const checkpoint = join(layout.dispatch, "checkpoint.md");
-    writeFileSync(checkpoint, "## Findings (bug)\n\nnone\n");
-    const card = run("bash", [LANDING, "card-block", layout.dispatch, layout.synth, checkpoint]);
-    expect(card.code).toBe(0);
-    return card.out;
-  }
+function cardFor(layout: Layout, commandText: string): string {
+  writeWorkhorse(layout, "codex", [codex(commandText)]);
+  check(layout, "workhorses");
+  check(layout, "card");
+  writeFileSync(
+    join(layout.dispatch, "checks.json"),
+    JSON.stringify({
+      checks: [{ name: "gate", source: "default:gate", command: "true", shows: "gate" }],
+    }),
+  );
+  const sha = git(layout.synth, "rev-parse", "HEAD").slice(0, 12);
+  writeAction(layout, "coachman", "verify", "gate", `on=${sha}@${sha} result=pass exit=0 secs=1`);
+  const checkpoint = join(layout.dispatch, "checkpoint.md");
+  writeFileSync(checkpoint, "## Findings (bug)\n\nnone\n");
+  const card = run("bash", [LANDING, "card-block", layout.dispatch, layout.synth, checkpoint]);
+  expect(card.code).toBe(0);
+  return card.out;
+}
 
+describe("R9: ruled round fixes", () => {
   test("R9 an unresolved ~/ path stays off the card", () => {
     const card = cardFor(makeLayout(), "cat ~/Code/secret-proj/*.toml");
     expect(card).not.toContain("secret-proj");
@@ -1518,5 +1518,12 @@ describe("Post-9: ruled fixes without a review round", () => {
       .map((line) => line.target)
       .sort();
     expect(mainDegraded).toEqual(["codex", "mimo"]);
+  });
+
+  test("bug-64 a refs-shaped unresolved token stays off the card", () => {
+    const card = cardFor(makeLayout(), "cat refs/../../home/u/Code/proj/*");
+    expect(card).not.toContain("Code/proj");
+    expect(card).not.toContain("refs/../../home/u/Code/proj/*");
+    expect(card).toContain("outside the project");
   });
 });
