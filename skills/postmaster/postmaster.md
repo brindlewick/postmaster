@@ -75,9 +75,9 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    script, read the ticket's body, title and labels through the tracker's own tooling
    (`trackers.md`, other), save the body to a temp file outside the repo, and run the check as
    `<tool>/scripts/ticket-ready.sh --body <file> --labels <list> --title "<title>" --project <repo> --id <id>`;
-   its exits mean the same as the `<repo> <id>` form. Pass `--labels` once per label when a
-   label name holds a comma; one `--labels` takes a comma-joined list. On exit 2, start a
-   booking clerk with
+   its exits mean the same as the `<repo> <id>` form. Pass `--labels` once per label,
+   each flag one whole name; a lone flag with a comma is refused as ambiguous.
+   On exit 2, start a booking clerk with
    `<tool>/scripts/clerk.sh start <repo> <id>`, then log the dispatch yourself with
    `<tool>/scripts/log-action.sh --project <repo> postmaster dispatch clerk ticket=<id>`.
    Do not create a run directory, branch or worktree for this

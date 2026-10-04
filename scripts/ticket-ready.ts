@@ -18,8 +18,8 @@
 // The --body forms check a tracker of kind other from a body file and a label
 // list, as ticket-check --body does; the mark --body form records the marking
 // after the label is applied through the tracker's own tooling. Pass --labels
-// once per label when a label name holds a comma; one --labels takes a
-// comma-joined list. mark writes the ledger note with the ticket's turnpikes
+// once per label, each flag one whole name; a lone flag with a comma is
+// refused as ambiguous. mark writes the ledger note with the ticket's turnpikes
 // line as the user's word, and every marking queues a ready marker under the
 // project's run root; the marker binds the sign-off to the signed-off title
 // and body, and a check against a changed ticket refuses until the user signs
@@ -393,15 +393,16 @@ function takeFlags(argv: string[], name: string): string[] {
 }
 
 // A caller naming the ticket's labels by hand (kind other) passes --labels
-// once per label when a name holds a comma; a single --labels keeps the old
-// comma-joined form.
+// once per label, each flag one whole name. A lone flag with a comma is
+// ambiguous — one name or several — and guessing wrong reads ready, so it is
+// refused instead of split.
 function labelsFromFlags(argv: string[]): string[] {
   const values = takeFlags(argv, "--labels");
   if (values.length > 1) return values.map((v) => v.trim()).filter(Boolean);
-  return values[0]!
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const single = values[0]!;
+  if (single.includes(","))
+    die("one --labels flag with a comma is ambiguous; pass --labels once per label");
+  return [single.trim()].filter(Boolean);
 }
 
 function usage(): string {

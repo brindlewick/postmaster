@@ -105,7 +105,7 @@ configured instructions in `~/.postmaster/trackers/` to apply the same final tex
 then list the ticket's labels through the tracker's tooling and run
 `<tool>/scripts/ticket-ready.sh mark --body <draft> --labels <list> --repo <repo> --id <ticket-id> --title "<title>"`,
 which records the sign-off and queues the ticket the same way. Pass `--labels` once per
-label when a label name holds a comma; one `--labels` takes a comma-joined list.
+label, each flag one whole name; a lone flag with a comma is refused as ambiguous.
 
 Tell the user the ticket is ready and the postmaster will pick it up when a run slot is free. They
 do not need to ask the postmaster again.

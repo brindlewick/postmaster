@@ -384,16 +384,19 @@ describe("a tracker of kind other", () => {
     expect(bad.out).toContain("ready label is missing");
   }, 30000);
 
-  test("repeated --labels flags name one label each", () => {
+  test("each --labels flag names one label, and a lone comma flag is refused", () => {
     const a = join(tmp, "a.md");
     const base = ["--body", a, "--title", "Sorted list", "--project", repo, "--id", "EXT-8"];
-    const split = ready([...base, "--labels", "blocked, ready"]);
-    expect(split.code).toBe(0);
+    const lone = ready([...base, "--labels", "blocked, ready"]);
+    expect(lone.code).toBe(1);
+    expect(lone.out).toContain("is ambiguous; pass --labels once per label");
     const exact = ready([...base, "--labels", "blocked, ready", "--labels", "other"]);
     expect(exact.code).toBe(2);
     expect(exact.out).toContain("ready label is missing");
     const marked = ready([...base, "--labels", "blocked, ready", "--labels", "ready"]);
     expect(marked.code).toBe(0);
+    const plain = ready([...base, "--labels", "ready"]);
+    expect(plain.code).toBe(0);
   }, 30000);
 
   test("mark records the marking once the label is applied outside", () => {
