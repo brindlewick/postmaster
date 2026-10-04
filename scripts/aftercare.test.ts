@@ -441,11 +441,7 @@ describe("aftercare on a landed run record", () => {
       .split("\n")
       .map((line) => (line ? JSON.parse(line) : null))
       .some(
-        (e) =>
-          e &&
-          e.action === "note" &&
-          e.target === link &&
-          e.detail.includes("symbolic link"),
+        (e) => e && e.action === "note" && e.target === link && e.detail.includes("symbolic link"),
       );
     expect(noted).toBe(true);
     expect(existsSync(link)).toBe(true);
