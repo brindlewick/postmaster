@@ -557,4 +557,36 @@ describe("run-root and exclude-worktrees", () => {
     mkdirSync(join(linked, ".worktrees", "x"), { recursive: true });
     expect(gitIn(linked, "check-ignore", "-q", ".worktrees/x")).toBe(0);
   }, 30000);
+
+  test("exclude-worktrees ignores a GIT_DIR that points at another repository", () => {
+    const target = at("exclude-gitdir-target");
+    const decoy = at("exclude-gitdir-decoy");
+    mkdirSync(target, { recursive: true });
+    mkdirSync(decoy, { recursive: true });
+    expect(gitIn(target, "init", "-q")).toBe(0);
+    expect(gitIn(decoy, "init", "-q")).toBe(0);
+    const r = runCli(SELF, ["project-settings", "exclude-worktrees", target], {
+      env: { GIT_DIR: join(decoy, ".git") },
+    });
+    expect(r.code).toBe(0);
+    expect(readFileSync(join(target, ".git", "info", "exclude"), "utf8")).toContain(".worktrees/");
+    expect(readFileSync(join(decoy, ".git", "info", "exclude"), "utf8")).not.toContain(
+      ".worktrees/",
+    );
+  }, 30000);
+
+  test("run-root ignores a GIT_WORK_TREE that points at another repository", () => {
+    const target = at("run-root-worktree-target");
+    const decoy = at("run-root-worktree-decoy");
+    mkdirSync(target, { recursive: true });
+    mkdirSync(decoy, { recursive: true });
+    expect(gitIn(target, "init", "-q")).toBe(0);
+    expect(gitIn(decoy, "init", "-q")).toBe(0);
+    const r = runCli(SELF, ["project-settings", "run-root", target], {
+      env: { GIT_WORK_TREE: decoy },
+    });
+    expect(r.code).toBe(0);
+    expect(r.out.trim()).toBe(join(target, ".postmaster", "runs"));
+    expect(existsSync(join(decoy, ".postmaster"))).toBe(false);
+  }, 30000);
 });

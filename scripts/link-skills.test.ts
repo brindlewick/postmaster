@@ -397,8 +397,8 @@ describe("positive control: from an unrelated directory, a documented command re
       resolver =
         readFileSync(skillMd, "utf8")
           .split("\n")
-          .find((l) => l.includes("realpath <skill>/../.."))
-          ?.match(/`(realpath <skill>\/\.\.\/\.\.)/u)?.[1] ?? "";
+          .find((l) => l.includes('realpath "<skill>/../.."'))
+          ?.match(/`(realpath "<skill>\/\.\.\/\.\.")/u)?.[1] ?? "";
       documented =
         readFileSync(trackersMd, "utf8")
           .split("\n")
@@ -458,6 +458,18 @@ esac
   test("a session in the checkout itself, sent to skills/postmaster, finds that checkout", () => {
     const r = run("bash", ["-c", resolver.replace(/<skill>/gu, "skills/postmaster")], {
       cwd: TOOL,
+      env: { ...process.env, PATH: bin, HOME: home },
+    });
+    expect(r.code).toBe(0);
+    expect(r.out.trim()).toBe(TOOL);
+  }, 30000);
+
+  test("a skill path with spaces still resolves, through the documented quotes", () => {
+    const spaced = join(tmp, "with space");
+    mkdirSync(spaced, { recursive: true });
+    symlinkSync(join(TOOL, "skills", "postmaster"), join(spaced, "postmaster"));
+    const r = run("bash", ["-c", resolver.replace(/<skill>/gu, join(spaced, "postmaster"))], {
+      cwd: elsewhere,
       env: { ...process.env, PATH: bin, HOME: home },
     });
     expect(r.code).toBe(0);

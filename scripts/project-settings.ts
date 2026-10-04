@@ -780,9 +780,19 @@ const report = (repo: string): void => {
 };
 
 /** The project's git toplevel: the run root lives at its <root>/.postmaster/runs. */
+// Git's location variables override -C, so every git child runs without them.
+const unsetGit = {
+  GIT_DIR: undefined,
+  GIT_WORK_TREE: undefined,
+  GIT_COMMON_DIR: undefined,
+  GIT_INDEX_FILE: undefined,
+  GIT_OBJECT_DIRECTORY: undefined,
+  GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined,
+  GIT_NAMESPACE: undefined,
+};
 const gitToplevel = (raw: string): string => {
   const target = projectRoot(raw);
-  const g = run("git", ["-C", target, "rev-parse", "--show-toplevel"]);
+  const g = run("git", ["-C", target, "rev-parse", "--show-toplevel"], { env: unsetGit });
   if (g.code !== 0) fail(`not a git repository: ${raw}`);
   return g.out.trim();
 };
@@ -814,7 +824,9 @@ export const ensureWorktreesExcluded = (raw: string): string => {
   const repo = projectRoot(raw);
   // --git-path, not --absolute-git-dir: in a linked worktree the latter is the
   // worktree's private dir, while git reads info/exclude from the common one.
-  const g = run("git", ["-C", repo, "rev-parse", "--git-path", "info/exclude"]);
+  const g = run("git", ["-C", repo, "rev-parse", "--git-path", "info/exclude"], {
+    env: unsetGit,
+  });
   if (g.code !== 0) fail(`not a git repository: ${raw}`);
   const file = resolve(repo, g.out.trim());
   const existing = existsSync(file) ? strictRead(file) : "";

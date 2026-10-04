@@ -84,6 +84,14 @@ describe("step lines in a code block", () => {
     expect(faults[0]?.what).toBe("bare scripts/run");
   });
 
+  test("a nested AGENTS.md is a skill document, not the root file", () => {
+    const faults = faultsIn(
+      block("scripts/run link-skills --check"),
+      "skills/postmaster/AGENTS.md",
+    );
+    expect(faults[0]?.what).toBe("bare scripts/run");
+  });
+
   test("a block in another language is read like the text", () => {
     const text = "```markdown\nrun `git log | head` here\n```\n";
     const faults = faultsIn(text);
@@ -295,5 +303,20 @@ describe("the files it reads", () => {
 
   test("an unreadable file exits 2", () => {
     expect(runbookLint(tmp, [join(tmp, "nowhere.md")]).code).toBe(2);
+  });
+
+  test("explicit files keep the root exception by path, not by basename", () => {
+    const root = join(tmp, "root-explicit");
+    mkdirSync(join(root, "skills", "postmaster"), { recursive: true });
+    writeFileSync(join(root, "AGENTS.md"), block("scripts/run link-skills --check"));
+    writeFileSync(
+      join(root, "skills", "postmaster", "AGENTS.md"),
+      block("scripts/run link-skills --check"),
+    );
+    expect(runbookLint(root, [join(root, "AGENTS.md")]).code).toBe(0);
+    const nested = runbookLint(root, [join(root, "skills", "postmaster", "AGENTS.md")]);
+    expect(nested.code).toBe(1);
+    expect(nested.faults[0]?.what).toBe("bare scripts/run");
+    expect(nested.faults[0]?.file).toBe(join(root, "skills", "postmaster", "AGENTS.md"));
   });
 });

@@ -26,7 +26,7 @@
 //   exit 1  faults, one per line on stdout: <file>:<line>: <what was found>: <the command>
 //   exit 2  usage, or a file that cannot be read
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { toolRoot } from "./lib/paths.ts";
 
 const STEP_LANGS = new Set(["sh", "bash", "zsh", "shell", "console"]);
@@ -315,7 +315,9 @@ function doubleDashTail(line: string): string | null {
 /** codeFaults <file> <text> — every fault the check finds in one document. */
 export function codeFaults(file: string, text: string): Fault[] {
   const faults: Fault[] = [];
-  const agents = basename(file) === "AGENTS.md";
+  // The bare-call exception is the root file only: a nested AGENTS.md is a
+  // skill document, and skill paths go through <tool>/.
+  const agents = file === "AGENTS.md";
   const ref = (s: string): string => collapse(s);
   for (const seg of segments(text)) {
     if (seg.kind === "step") {
@@ -372,10 +374,11 @@ export function codeFaults(file: string, text: string): Fault[] {
 
 /** runbookLint <root> [<file>...] — faults over the runbooks, or the files given. */
 export function runbookLint(root: string, files?: string[]): { faults: Fault[]; code: number } {
-  const names = files && files.length > 0 ? files : runbookFiles(root);
+  const explicit = files && files.length > 0;
+  const names = explicit ? files : runbookFiles(root);
   const faults: Fault[] = [];
   for (const name of names) {
-    const path = files && files.length > 0 ? name : join(root, name);
+    const path = explicit ? name : join(root, name);
     let text: string;
     try {
       text = readFileSync(path, "utf8");
@@ -384,7 +387,8 @@ export function runbookLint(root: string, files?: string[]): { faults: Fault[]; 
       process.stderr.write(`runbook-lint: cannot read ${path}: ${msg}\n`);
       return { faults, code: 2 };
     }
-    faults.push(...codeFaults(name, text));
+    const logic = explicit && isAbsolute(path) ? relative(root, resolve(path)) : name;
+    faults.push(...codeFaults(logic, text).map((f) => ({ ...f, file: name })));
   }
   return { faults, code: faults.length > 0 ? 1 : 0 };
 }

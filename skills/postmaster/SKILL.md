@@ -25,7 +25,7 @@ a link into it, never as a copy. Find it once, from `<skill>`: the absolute path
 your harness loaded this file from, or `skills/postmaster` when `AGENTS.md` sent a session in
 the repo here.
 
-Resolve it with `realpath <skill>/../..`, and check that the result holds an executable
+Resolve it with `realpath "<skill>/../.."`, and check that the result holds an executable
 `<tool>/scripts/run`. It prints `<tool>`. Write that absolute path wherever these runbooks say
 `<tool>`, and give it to every session you brief. If there is no such `<tool>/scripts/run`, stop and
 tell the user: the skill was copied, or its link points somewhere else.
