@@ -59,6 +59,11 @@ simplify the words and move the detail down. Keep every decision that changes wh
 or what the flow does in the plain part. The technical part follows from it and adds no behavior.
 Tag each technical note with the criteria and decisions it follows from, such as (C2, D1).
 
+Check each criterion against the four shapes that cannot be finished, which
+[the template](ticket-template.md) lists under "A criterion must be finishable", and rewrite it in
+its bounded form before the user sees the draft. If the whole point of a ticket is one of those
+shapes, say so to the user in plain words and propose the bounded form.
+
 Verify every premise in the notes at the stated base, and name that base under **Verified at** in
 the agents' part: each file, function, flag, line range and count exists and says what the notes
 say. Write one check for each criterion in the agents' part, labelled `- **C1**` to `- **CN**` in
