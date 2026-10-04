@@ -17,16 +17,16 @@ describe("confinement table", () => {
 
   test("the wrap preserves the command byte-identically after the separator", () => {
     const wrapped = wrapCommand(["echo", "--dangerously-bypass", "hello"]);
-    if (wrapped === null) return;
-    const sep = wrapped.indexOf("--");
+    expect(wrapped).not.toBeNull();
+    const sep = wrapped!.indexOf("--");
     expect(sep).toBeGreaterThanOrEqual(0);
-    expect(wrapped.slice(sep + 1)).toEqual(["echo", "--dangerously-bypass", "hello"]);
+    expect(wrapped!.slice(sep + 1)).toEqual(["echo", "--dangerously-bypass", "hello"]);
   });
 
   test("the wrap places its own argv before the command", () => {
     const wrapped = wrapCommand(["true"]);
-    if (wrapped === null) return;
-    const sep = wrapped.indexOf("--");
+    expect(wrapped).not.toBeNull();
+    const sep = wrapped!.indexOf("--");
     expect(sep).toBeGreaterThan(0); // at least one wrap argument before --
   });
 

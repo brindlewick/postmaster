@@ -2,9 +2,17 @@
 // each forced through stubbed tools on PATH and the probe's test seams. The same lookups
 // every time; a control that could have come out the other way.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { run } from "./lib/proc.ts";
 import {
   isSafeProfilePath,
@@ -223,11 +231,24 @@ describe("the probe says ready, partial or unavailable", () => {
     expect(isSafeProfilePath("/home/josé/bin/bwrap")).toBe(false);
   });
 
-  // The vetting wants a root-owned chain: in a container whose system directories
-  // belong to the user the premise cannot hold, so this skips there; skips.toml
-  // carries the reason.
-  test.skipIf(!isSecureBwrapPath("/bin/sh"))("a bwrap is vetted only on a root-owned chain", () => {
-    expect(isSecureBwrapPath("/bin/sh")).toBe(true);
+  test("a bwrap is vetted only on a root-owned chain", () => {
+    const rootOwned = (path: string): boolean => {
+      let current = path;
+      for (;;) {
+        try {
+          if (statSync(current).uid !== 0) return false;
+        } catch {
+          return false;
+        }
+        const parent = dirname(current);
+        if (parent === current) return true;
+        current = parent;
+      }
+    };
+    const discovered = "/bin/sh";
+    const resolved = realpathSync(discovered);
+    const expected = rootOwned(dirname(discovered)) && rootOwned(resolved);
+    expect(isSecureBwrapPath(discovered)).toBe(expected);
     expect(isSecureBwrapPath(join(tmp, "missing-bwrap"))).toBe(false);
   });
 });
