@@ -61,7 +61,8 @@ export function processState(pid: number): ProcessState {
   if (!validPid(pid) || !canSignal(pid)) return "absent";
   const stat = readProcStat(pid);
   if (stat) return stat.fields[0] === "Z" ? "zombie" : "live";
-  return psState(pid) ?? "live";
+  // The signal won a race with the exit: ps finds nothing, so it has ended.
+  return psState(pid) ?? "absent";
 }
 
 export function processIsLive(pid: number): boolean {
