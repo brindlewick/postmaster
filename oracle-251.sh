@@ -446,11 +446,15 @@ git -C "$PREM" rm -q docs/a.md && git -C "$PREM" commit -qm missing
 MISSING=$(git -C "$PREM" rev-parse HEAD)
 PREMCMD=""
 if [ -f docs/coachman-contract.toml ]; then
-  PREMCMD=$(awk '/^path = /{p=$0} /holds = / && tolower($0) ~ /premis/{print p}' docs/coachman-contract.toml \
+  PREMPATH=$(awk '/^path = /{p=$0} /holds = / && tolower($0) ~ /premis/{print p}' docs/coachman-contract.toml \
     | grep -oE '"[^"]+"' | tr -d '"' | head -1)
+  case "$PREMPATH" in
+    scripts/*.ts) PREMCMD=$(basename "$PREMPATH" .ts) ;;
+    scripts/*.sh) PREMCMD=$(basename "$PREMPATH" .sh) ;;
+  esac
 fi
-if [ -n "$PREMCMD" ] && [ -x "$PREMCMD" ]; then
-  pass "AC13 the contract registers a premises script: $PREMCMD"
+if [ -n "$PREMCMD" ] && [ -f "scripts/$PREMCMD.ts" ]; then
+  pass "AC13 the contract registers a premises script: scripts/$PREMCMD.ts"
 else
   PREMCMD=""
   fail "AC13 docs/coachman-contract.toml registers no premises script"
@@ -467,11 +471,11 @@ if [ -n "$PREMCMD" ]; then
     timeout 60 "$@" </dev/null >"$SCR/prem-try.out" 2>&1
     [ $? -eq 0 ] && grep -qiE '\bsame\b' "$SCR/prem-try.out" && PREMRUN="$*"
   }
-  [ -z "$PREMRUN" ] && try_prem "$V" "$PREMCMD" "$PREM" "$SCR/prem-body-ok.md" "$V"
-  [ -z "$PREMRUN" ] && try_prem "$V" "$PREMCMD" --repo "$PREM" --body "$SCR/prem-body-ok.md" --base "$V"
-  [ -z "$PREMRUN" ] && try_prem "$V" "$PREMCMD" "$SCR/prem-body-ok.md" "$PREM" "$V"
-  [ -z "$PREMRUN" ] && try_prem "$V" "$PREMCMD" --body "$SCR/prem-body-ok.md" --repo "$PREM" --base "$V"
-  [ -z "$PREMRUN" ] && try_prem "$V" "$PREMCMD" "$SCR/fd"
+  [ -z "$PREMRUN" ] && try_prem "$V" scripts/run "$PREMCMD" "$PREM" "$SCR/prem-body-ok.md" "$V"
+  [ -z "$PREMRUN" ] && try_prem "$V" scripts/run "$PREMCMD" --repo "$PREM" --body "$SCR/prem-body-ok.md" --base "$V"
+  [ -z "$PREMRUN" ] && try_prem "$V" scripts/run "$PREMCMD" "$SCR/prem-body-ok.md" "$PREM" "$V"
+  [ -z "$PREMRUN" ] && try_prem "$V" scripts/run "$PREMCMD" --body "$SCR/prem-body-ok.md" --repo "$PREM" --base "$V"
+  [ -z "$PREMRUN" ] && try_prem "$V" scripts/run "$PREMCMD" "$SCR/fd"
 fi
 run_prem() { # $1 = base, $2 = body, $3 = out ; runs the locked invocation with base/body swapped in
   local b=$1 body=$2 out=$3
@@ -479,10 +483,10 @@ run_prem() { # $1 = base, $2 = body, $3 = out ; runs the locked invocation with 
   cp "$body" "$SCR/fd/brief.md"
   # shellcheck disable=SC2086
   case "$PREMRUN" in
-    *--repo*) timeout 60 $PREMCMD --repo "$PREM" --body "$body" --base "$b" </dev/null >"$out" 2>&1 ;;
-    *"$SCR/fd"*) timeout 60 $PREMCMD "$SCR/fd" </dev/null >"$out" 2>&1 ;;
-    "$PREMCMD $PREM"*) timeout 60 $PREMCMD "$PREM" "$body" "$b" </dev/null >"$out" 2>&1 ;;
-    *) timeout 60 $PREMCMD "$body" "$PREM" "$b" </dev/null >"$out" 2>&1 ;;
+    *--repo*) timeout 60 scripts/run "$PREMCMD" --repo "$PREM" --body "$body" --base "$b" </dev/null >"$out" 2>&1 ;;
+    *"$SCR/fd"*) timeout 60 scripts/run "$PREMCMD" "$SCR/fd" </dev/null >"$out" 2>&1 ;;
+    "scripts/run $PREMCMD $PREM"*) timeout 60 scripts/run "$PREMCMD" "$PREM" "$body" "$b" </dev/null >"$out" 2>&1 ;;
+    *) timeout 60 scripts/run "$PREMCMD" "$body" "$PREM" "$b" </dev/null >"$out" 2>&1 ;;
   esac
   return $?
 }
