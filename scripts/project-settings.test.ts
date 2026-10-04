@@ -546,9 +546,9 @@ describe("run-root and exclude-worktrees", () => {
     mkdirSync(main, { recursive: true });
     expect(gitIn(main, "init", "-q")).toBe(0);
     expect(gitIn(main, "config", "user.name", "brindlewick")).toBe(0);
-    expect(gitIn(main, "config", "user.email", "332054101+brindlewick@users.noreply.github.com")).toBe(
-      0,
-    );
+    expect(
+      gitIn(main, "config", "user.email", "332054101+brindlewick@users.noreply.github.com"),
+    ).toBe(0);
     expect(gitIn(main, "commit", "-q", "--allow-empty", "-m", "init")).toBe(0);
     const linked = at("exclude-linked-wt");
     expect(gitIn(main, "worktree", "add", "--detach", linked, "HEAD")).toBe(0);
