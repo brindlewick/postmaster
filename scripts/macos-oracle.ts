@@ -598,7 +598,7 @@ async function sharesOldGit(): Promise<void> {
 // --- C11: scoring needs git, bun and npm, but not jq ---
 function toolBin(hide: string): string {
   const dir = tmp("oracle-toolbin-");
-  for (const tool of ["git", "bun", "npm", "env", "bash", "sh", "jq", "dirname"]) {
+  for (const tool of ["git", "bun", "npm", "node", "env", "bash", "sh", "jq", "dirname"]) {
     if (tool === hide) continue;
     const found = tool === "bun" ? process.execPath : Bun.which(tool);
     if (!found) fail(`${tool} not on PATH, cannot build the tool bin`);
@@ -630,14 +630,17 @@ async function scoreWithout(hide: "jq" | "npm"): Promise<void> {
 // --- C12: the score's first line names system, Bun and git from live readings ---
 async function platformLineApis(): Promise<void> {
   const src = readFileSync(join(repoRoot, "scripts", "fixture.ts"), "utf8");
-  for (const api of [
-    "platform:",
-    "os.type()",
-    "os.release()",
-    "os.machine()",
-    "Bun.version",
-    "--version",
-  ]) {
+  if (!src.includes("platform:")) fail("fixture.ts has no platform: line");
+  const osImport = [...src.matchAll(/import \{[^}]*\} from "node:os"/gu)]
+    .map((m) => m[0])
+    .join("\n");
+  const namesOsType = src.includes("os.type()") || /type as [A-Za-z]+/u.test(osImport);
+  const namesRelease = src.includes("os.release()") || osImport.includes("release");
+  const namesMachine = src.includes("os.machine()") || osImport.includes("machine");
+  if (!namesOsType || !namesRelease || !namesMachine) {
+    fail("fixture.ts names no live os type/release/machine reading");
+  }
+  for (const api of ["Bun.version", "--version"]) {
     if (!src.includes(api)) fail(`fixture.ts has no ${api}`);
   }
 }
