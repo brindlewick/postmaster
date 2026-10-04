@@ -3,7 +3,7 @@ title: Each project defines how a change to it is verified
 type: concept
 standing: claimed
 sources: []
-updated: 2026-09-27
+updated: 2026-10-04
 ---
 
 # Each project defines how a change to it is verified
@@ -96,12 +96,18 @@ lines in each run's log count how often a check fails on a workhorse's branch, h
 summary's claim disagrees with the coachman's run, and how often a check is not run. A check that
 is never anything but not run is one the defaults should not offer.
 
+Outside work bears on it too. [pstack](../sources/pstack.md) keeps a standing driver and a feature
+map for each project, which this concept has no counterpart for, and its candidate 7 is a trial of
+that. A first look at the skill that makes them [@trials/pstack-verification-skill] and a count of
+the evidence entries that lanes leave `not shown` [@trials/not-shown-evidence] are recorded as
+trials for that candidate. They do not move the standing.
+
 ## What changed because of it
 
-`scripts/verify.sh` reads a project's declaration or finds its defaults, records the run's checks
+`scripts/run verify` reads a project's declaration or finds its defaults, records the run's checks
 at dispatch, copies them into worktrees, runs them and logs each result as a `verify` action.
-Each default is its own script with a self-test: `scripts/verify-examples.sh`,
-`scripts/verify-journey.sh` and `scripts/verify-library.sh`. `scripts/discover-project.sh`
+Each default is its own script with a self-test: `scripts/run verify-examples`,
+`scripts/run verify-journey` and `scripts/run verify-library`. `scripts/run discover-project`
 reports each check and where it came from, the waybill carries them, a workhorse's brief names
 them and its summary gives each one's command and exit. The coachman runs them at harvest and
 before each card, and the postmaster checks that the final commit has a result for each before

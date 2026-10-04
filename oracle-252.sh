@@ -9,7 +9,7 @@
 # which is what the lanes were dispatched to choose.
 #
 # Casing note: the action-log fixtures below use the key "detail" (byte 0x64),
-# exactly as the ticket writes it and as log-action.sh writes it at this base.
+# exactly as the ticket writes it and as run log-action writes it at this base.
 # Verified byte by byte against the ticket text, the writer's output and the
 # base readers (style-findings, host, review-decide) before any lane started,
 # not against any lane's work; the C2 style case re-checks the byte.
@@ -75,7 +75,7 @@ cleanup() {
       for wt in "$t"/repo/.worktrees/*; do
         [ -e "$wt" ] || continue
         PATH="$t/bin:$PATH" POSTMASTER_HOST_STATE="$t/state" POSTMASTER_HOST_FIXTURE="$t" \
-          POSTMASTER_HOST_CLOSE_WAIT=1 ./scripts/host.sh stop "$wt" >/dev/null 2>&1
+          POSTMASTER_HOST_CLOSE_WAIT=1 ./scripts/run host stop "$wt" >/dev/null 2>&1
       done
     fi
   done
@@ -111,12 +111,12 @@ mkR() {
   $GID -C "$T/repo" add -A || exit 2
   $GID -C "$T/repo" commit -qm base || exit 2
   BASE=$($GID -C "$T/repo" rev-parse HEAD) || exit 2
-  ./scripts/local.sh "$T/repo" store init >/dev/null || exit 2
+  ./scripts/run local "$T/repo" store init >/dev/null || exit 2
   printf 'body\n' >"$T/body.txt"
   for i in 1 2 3 4 5 6 7; do
-    ./scripts/local.sh "$T/repo" create "t$i" "$T/body.txt" >/dev/null || exit 2
+    ./scripts/run local "$T/repo" create "t$i" "$T/body.txt" >/dev/null || exit 2
   done
-  ./scripts/local.sh "$T/repo" state 7 done >/dev/null || exit 2
+  ./scripts/run local "$T/repo" state 7 done >/dev/null || exit 2
   $GID -C "$T/repo" checkout -qb 7 || exit 2
   mkdir -p "$T/repo/test"
   printf 'oracle v1\n' >"$T/repo/test/oracle-7.test.ts"
@@ -184,7 +184,7 @@ runA() {
   local errf="$T/after.err"
   OUT=$(PATH="$T/bin:$PATH" POSTMASTER_HOST_STATE="$T/state" POSTMASTER_HOST_FIXTURE="$T" \
     POSTMASTER_HOST_CLOSE_WAIT=1 POSTMASTER_TOOL_PINS="$T/pins" \
-    bun --no-env-file --config=/dev/null scripts/aftercare.ts "$D" "$@" 2>"$errf")
+    ./scripts/run aftercare "$D" "$@" 2>"$errf")
   CODE=$?
   ERR=$(cat "$errf")
   printf '%s' "$OUT" >"$T/after.out"
@@ -372,7 +372,7 @@ else
 fi
 [ "$(python3 -c "import json;print(json.load(open('$D/manifest.json'))['stage'])")" = "done" ] \
   && ok "C1 stage done" || bad "C1 stage done"
-./scripts/local.sh "$T/repo" read 7 2>/dev/null | grep -q "^state: done$" \
+./scripts/run local "$T/repo" read 7 2>/dev/null | grep -q "^state: done$" \
   && ok "C1 ticket done" || bad "C1 ticket done"
 [ ! -e "$T/pins/$C" ] && [ ! -e "$T/pins/$C.claims" ] \
   && ok "C1 pin released" || bad "C1 pin released"
@@ -385,11 +385,11 @@ fi
 ORDER1=$(addedLines "$BEFORE1" >"$T/added1.txt"; teardownOrder "$T/added1.txt")
 # C1 in-progress variant: same, ticket ends done, one ticket-state line.
 mkR
-./scripts/local.sh "$T/repo" state 7 in-progress >/dev/null || exit 2
+./scripts/run local "$T/repo" state 7 in-progress >/dev/null || exit 2
 BEFOREIP=$(wc -l <"$D/actions.jsonl")
 runA --comment "closing words" --run-log "closing line"
 [ "$CODE" = 0 ] && ok "C1-ip exit 0" || bad "C1-ip exit 0 (got $CODE: $OUT $ERR)"
-./scripts/local.sh "$T/repo" read 7 2>/dev/null | grep -q "^state: done$" \
+./scripts/run local "$T/repo" read 7 2>/dev/null | grep -q "^state: done$" \
   && ok "C1-ip ticket done" || bad "C1-ip ticket done"
 foldersGone "C1-ip"
 [ "$(addedLines "$BEFOREIP" | python3 -c "
@@ -403,11 +403,11 @@ TIP=$T
 DIP=$D
 # C1 cancelled variant: stays cancelled, no ticket-state line, summary says so.
 mkR
-./scripts/local.sh "$T/repo" state 7 cancelled >/dev/null || exit 2
+./scripts/run local "$T/repo" state 7 cancelled >/dev/null || exit 2
 BEFORECX=$(wc -l <"$D/actions.jsonl")
 runA --comment "closing words" --run-log "closing line"
 [ "$CODE" = 0 ] && ok "C1-cx exit 0" || bad "C1-cx exit 0 (got $CODE: $OUT $ERR)"
-./scripts/local.sh "$T/repo" read 7 2>/dev/null | grep -q "^state: cancelled$" \
+./scripts/run local "$T/repo" read 7 2>/dev/null | grep -q "^state: cancelled$" \
   && ok "C1-cx stays cancelled" || bad "C1-cx stays cancelled"
 [ "$(addedLines "$BEFORECX" | python3 -c "
 import json,sys
@@ -524,7 +524,7 @@ twoLines "C3-nowords"
 
 # --- C4: every working folder the run made, blind-test scratch included ---
 mkR
-./scripts/cut-scratch.sh "$T/repo" "$T/repo/.worktrees/7" "$T/repo/.worktrees/7-rev-security-sol" "$WB_SOL" --clone "$BASE" >/dev/null || exit 2
+./scripts/run cut-scratch "$T/repo" "$T/repo/.worktrees/7" "$T/repo/.worktrees/7-rev-security-sol" "$WB_SOL" --clone "$BASE" >/dev/null || exit 2
 BEFORE4=$(wc -l <"$D/actions.jsonl")
 runA --comment "closing words" --run-log "closing line"
 [ "$CODE" = 0 ] && ok "C4 exit 0" || bad "C4 exit 0 (got $CODE: $OUT $ERR)"
@@ -688,7 +688,7 @@ printf '%s' "$OUT" >"$T/j6c.json"
 mkR
 T7=$T
 D7=$D
-hostEnv ./scripts/host.sh run probe "$T/repo/.worktrees/7-sol" --out "$T/o" --err "$T/e" -- sleep 300 >/dev/null || exit 2
+hostEnv ./scripts/run host run probe "$T/repo/.worktrees/7-sol" --out "$T/o" --err "$T/e" -- sleep 300 >/dev/null || exit 2
 BEFORE7=$(wc -l <"$D/actions.jsonl")
 runA --comment "closing words" --run-log "closing line"
 [ "$CODE" = 3 ] && ok "C7 exit 3" || bad "C7 exit 3 (got $CODE: $OUT $ERR)"
@@ -703,7 +703,7 @@ for f in 7 7-mimo 7-oracle-sol; do
   [ -e "$T/repo/.worktrees/$f" ] && bad "C7 $f gone" || ok "C7 $f gone"
 done
 othersRemain "C7"
-hostEnv ./scripts/host.sh stop "$T/repo/.worktrees/7-sol" >/dev/null || exit 2
+hostEnv ./scripts/run host stop "$T/repo/.worktrees/7-sol" >/dev/null || exit 2
 runA --comment "closing words" --run-log "closing line"
 [ "$CODE" = 0 ] && ok "C7-again exit 0" || bad "C7-again exit 0 (got $CODE: $OUT $ERR)"
 [ -e "$T/repo/.worktrees/7-sol" ] && bad "C7-again 7-sol gone" || ok "C7-again 7-sol gone"
@@ -711,7 +711,7 @@ runA --comment "closing words" --run-log "closing line"
 # --- C8: the preview server is stopped ---
 mkR
 mkdir -p "$D/render"
-hostEnv ./scripts/host.sh run "preview server" "$T/repo/.worktrees/7" --under "$D" --role coachman --run "$D" --pidfile "$D/render/preview.pid" --out "$T/p" --err "$T/pe" -- sleep 300 >/dev/null || exit 2
+hostEnv ./scripts/run host run "preview server" "$T/repo/.worktrees/7" --under "$D" --role coachman --run "$D" --pidfile "$D/render/preview.pid" --out "$T/p" --err "$T/pe" -- sleep 300 >/dev/null || exit 2
 PREV_PID=$(cat "$D/render/preview.pid")
 PREV_PGID=$(python3 -c "import os,sys;print(os.getpgid(int(sys.argv[1])))" "$PREV_PID" 2>/dev/null)
 runA --comment "closing words" --run-log "closing line"
@@ -797,13 +797,13 @@ else
 fi
 # After C7's stop on an in-progress ticket: nothing closing happened.
 mkR
-./scripts/local.sh "$T/repo" state 7 in-progress >/dev/null || exit 2
-hostEnv ./scripts/host.sh run probe "$T/repo/.worktrees/7-sol" --out "$T/o" --err "$T/e" -- sleep 300 >/dev/null || exit 2
+./scripts/run local "$T/repo" state 7 in-progress >/dev/null || exit 2
+hostEnv ./scripts/run host run probe "$T/repo/.worktrees/7-sol" --out "$T/o" --err "$T/e" -- sleep 300 >/dev/null || exit 2
 runA --comment "closing words" --run-log "closing line"
 [ "$CODE" = 3 ] && ok "C10-stop exit 3" || bad "C10-stop exit 3 (got $CODE)"
 [ "$(python3 -c "import json;print(json.load(open('$D/manifest.json'))['stage'])")" = "shipped" ] \
   && ok "C10-stop stage shipped" || bad "C10-stop stage shipped"
-./scripts/local.sh "$T/repo" read 7 2>/dev/null | grep -q "^state: in-progress$" \
+./scripts/run local "$T/repo" read 7 2>/dev/null | grep -q "^state: in-progress$" \
   && ok "C10-stop ticket in-progress" || bad "C10-stop ticket in-progress"
 storeOf
 grep -q "closing words" "$STORE/7.json" && bad "C10-stop no comment" || ok "C10-stop no comment"
@@ -1092,7 +1092,7 @@ sys.exit(0 if hit and 'src/a.ts' in json.dumps(hit[0]) else 1)" \
   && ok "C15-flagged others false" || bad "C15-flagged others false"
 # C7 with --json: outcome names the stop, next says what to do.
 mkR
-hostEnv ./scripts/host.sh run probe "$T/repo/.worktrees/7-sol" --out "$T/o" --err "$T/e" -- sleep 300 >/dev/null || exit 2
+hostEnv ./scripts/run host run probe "$T/repo/.worktrees/7-sol" --out "$T/o" --err "$T/e" -- sleep 300 >/dev/null || exit 2
 runA --json --comment "closing words" --run-log "closing line"
 [ "$CODE" = 3 ] && ok "C15-stop exit 3" || bad "C15-stop exit 3 (got $CODE)"
 printf '%s' "$OUT" >"$T/j15s.json"
@@ -1103,7 +1103,7 @@ out = json.dumps(o.get('outcome')).lower()
 nxt = o.get('next')
 sys.exit(0 if 'done' not in out and isinstance(nxt, str) and nxt.strip() else 1)" \
   && ok "C15-stop outcome and next" || bad "C15-stop outcome and next"
-hostEnv ./scripts/host.sh stop "$T/repo/.worktrees/7-sol" >/dev/null || true
+hostEnv ./scripts/run host stop "$T/repo/.worktrees/7-sol" >/dev/null || true
 
 # --- C16: the after-merge instructions call the command ---
 python3 - skills/postmaster/postmaster.md <<'EOF' >"$T/stageg.txt"
@@ -1123,9 +1123,9 @@ else
 fi
 grep -qi "flag" "$T/stageg.txt" && ok "C16 flagged folders" || bad "C16 flagged folders"
 grep -qi "fault" "$T/stageg.txt" && ok "C16 fault to user" || bad "C16 fault to user"
-grep -q "host.sh close-run" "$T/stageg.txt" && bad "C16 no close-run step" || ok "C16 no close-run step"
+grep -q "close-run" "$T/stageg.txt" && bad "C16 no close-run step" || ok "C16 no close-run step"
 grep -q "worktree remove" "$T/stageg.txt" && bad "C16 no remove step" || ok "C16 no remove step"
-grep -q "stage.sh <dispatch> done" "$T/stageg.txt" && bad "C16 no stage-done step" || ok "C16 no stage-done step"
+grep -qE "run stage <dispatch> done|stage\.sh <dispatch> done" "$T/stageg.txt" && bad "C16 no stage-done step" || ok "C16 no stage-done step"
 grep -qi "tool fault" "$T/stageg.txt" && ok "C16 tool faults kept" || bad "C16 tool faults kept"
 grep -qi "proposal" "$T/stageg.txt" && ok "C16 proposals kept" || bad "C16 proposals kept"
 grep -qi "archiv" "$T/stageg.txt" && ok "C16 archiving kept" || bad "C16 archiving kept"
@@ -1133,9 +1133,9 @@ grep -q "aftercare" docs/coachman-contract.toml \
   && ok "C16 contract lists command" || bad "C16 contract lists command"
 grep -q "aftercare" skills/postmaster/controls.md \
   && ok "C16 controls lists command" || bad "C16 controls lists command"
-./scripts/skill-refs.sh >/dev/null 2>&1 \
+./scripts/run skill-refs >/dev/null 2>&1 \
   && ok "C16 skill-refs clean" || bad "C16 skill-refs clean"
-./scripts/coachman-contract.sh . 40d50ce HEAD >/dev/null 2>&1
+./scripts/run coachman-contract . 40d50ce HEAD >/dev/null 2>&1
 [ "$?" = 1 ] && ok "C16 contract change" || bad "C16 contract change"
 
 echo "---"

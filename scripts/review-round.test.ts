@@ -4,6 +4,7 @@
 // The process-exit cleanup is an afterAll; withTempDir still owns the temp dir.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -14,9 +15,10 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { run, withTempDir } from "./lib/proc.ts";
+import { processState } from "./lib/processes.ts";
 import { ARG_SPLIT_RE, monotonic } from "./review-round.ts";
 
-const self = join(import.meta.dir, "review-round.sh");
+const self = join(import.meta.dir, "run");
 
 const skipBootId = !existsSync("/proc/sys/kernel/random/boot_id");
 if (skipBootId) {
@@ -148,7 +150,7 @@ esac
     }
     const runSelf = (...args: string[]): void => {
       const t0 = Date.now();
-      const r = run(self, args);
+      const r = run(self, ["review-round", ...args]);
       out = r.out + r.err;
       rc = r.code;
       took = Math.round((Date.now() - t0) / 1000);
@@ -163,13 +165,7 @@ esac
       }
     };
     const alive = (pid: number): boolean => {
-      try {
-        const r = run("ps", ["-o", "stat=", "-p", String(pid)]);
-        const s = r.out.trim();
-        return s !== "" && !s.startsWith("Z");
-      } catch {
-        return false;
-      }
+      return processState(pid) === "live";
     };
     // dead <pid> [<seconds>]: wait until a process is gone (or a zombie).
     // An empty pid is a failed fixture, never a dead process: fail, do not pass.
@@ -228,8 +224,9 @@ esac
     const launch = (round: number, lens: string, lane: string, kind: string): void => {
       n += 1;
       const r = run(
-        join(import.meta.dir, "host.sh"),
+        join(import.meta.dir, "run"),
         [
+          "host",
           "run",
           `T-1 · ${lane} ${lens} review`,
           join(repo, ".worktrees", `T-1-rev-${lens}-${lane}`),
@@ -254,7 +251,7 @@ esac
         console.log(`  (could not launch ${lens} ${lane})`);
         return;
       }
-      // host.sh run waits 10s for the launch pid itself; this covers a slower
+      // run host run waits 10s for the launch pid itself; this covers a slower
       // runner, so an empty pid below means the launch failed, never that it lags.
       const launchPidFile = join(tmp, "pids", `launch.${n}`);
       let i = 0;
@@ -406,7 +403,7 @@ esac
     const first = Bun.spawn([
       "bash",
       "-c",
-      `exec "${self}" wait "${d}" 2 "${repo}" bug:three > "${firstOut}" 2>&1`,
+      `exec "${self}" review-round wait "${d}" 2 "${repo}" bug:three > "${firstOut}" 2>&1`,
     ]);
     const firstRc = waitLine(firstOut, "round 2,", 60);
     // Let some deadline age while the first wait runs, so a reset (left back to the limit) stands out.
@@ -467,6 +464,41 @@ esac
         run("git", ["-C", repo, "rev-parse", "-q", "--verify", "refs/heads/probe"]).code === 0,
     );
 
+    // A wall: both reviewers' launches end on their provider's usage limit, which the
+    // launches recorded as `wall` lines before their markers landed (C11). The round
+    // closes without them, each DEGRADED with the provider's message, and nothing escalates.
+    limit("60");
+    cutScratch("bug", "stub");
+    cutScratch("security", "sec");
+    runSelf("start", d, "5");
+    launch(5, "bug", "stub", "fast");
+    launch(5, "security", "sec", "fast");
+    const codexWall = "You’ve hit your usage limit. try again at 2:29 AM.";
+    const claudeWall = "You've hit your weekly limit · resets 3am (UTC)";
+    appendFileSync(
+      join(d, "actions.jsonl"),
+      `${JSON.stringify({ ts: new Date().toISOString(), project: "p", run: "T-1", actor: "lane:stub", action: "wall", target: "stub", detail: `reviewer bug 5 none ${codexWall}` })}\n` +
+        `${JSON.stringify({ ts: new Date().toISOString(), project: "p", run: "T-1", actor: "lane:sec", action: "wall", target: "sec", detail: `reviewer security 5 none ${claudeWall}` })}\n`,
+    );
+    runSelf("wait", d, "5", repo, "bug:stub security:sec");
+    let wallRunLog = "";
+    try {
+      wallRunLog = readFileSync(join(d, "run-log.md"), "utf8");
+    } catch {
+      wallRunLog = "";
+    }
+    check(
+      "a walled reviewer is DEGRADED with the provider's message and the round closes (C11)",
+      rc === 0 &&
+        wallRunLog.includes(`stub bug: DEGRADED, provider wall: "${codexWall}"`) &&
+        wallRunLog.includes(`sec security: DEGRADED, provider wall: "${claudeWall}"`) &&
+        has(`WALL bug stub: DEGRADED, provider wall: "${codexWall}"`) &&
+        actionsLines('"action":"degrade"') === 4 &&
+        actionsLines('"target":"stub","detail":"bug r5: provider wall:') === 1 &&
+        actionsLines('"target":"sec","detail":"security r5: provider wall:') === 1 &&
+        !existsSync(join(d, ".escalation-ready")),
+    );
+
     console.log("negative controls");
     out = waitOut;
     rc = waitRc;
@@ -491,7 +523,7 @@ esac
     const stale = Bun.spawn([
       "bash",
       "-c",
-      `"${self}" wait "${d}" 4 "${repo}" bug:four > "${staleOut}" 2>&1; echo $? > "${staleRcFile}"`,
+      `"${self}" review-round wait "${d}" 4 "${repo}" bug:four > "${staleOut}" 2>&1; echo $? > "${staleRcFile}"`,
     ]);
     // The wait must have read this start's attempt before the next start replaces it.
     const staleRc = waitLine(staleOut, "round 4,", 60);
@@ -522,7 +554,7 @@ esac
     const _insideOut = join(tmp, "inside.out");
     const insideR = run("bash", [
       "-c",
-      `cd "$1" && "${self}" teardown "${d}" 4 "${repo}" bug:four`,
+      `cd "$1" && "${self}" review-round teardown "${d}" 4 "${repo}" bug:four`,
       "_",
       join(repo, ".worktrees/T-1-rev-bug-four"),
     ]);
@@ -709,6 +741,7 @@ describe("positive controls", () => {
     "when every marker is in, wait exits 0 and records nothing",
     "teardown stops what a finished reviewer's launch left running, and says so",
     "a scratch a reviewer switched onto a branch is still removed, and the branch kept",
+    "a walled reviewer is DEGRADED with the provider's message and the round closes (C11)",
   ];
   for (const label of labels) {
     test(label, () => {

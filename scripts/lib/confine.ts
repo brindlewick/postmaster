@@ -7,7 +7,7 @@
 // the lane unconfined and names the cause.
 //
 // The wrap is an argv prefix placed around the harness command from the
-// outside, at the point launch.sh runs it. The harness argv inside is
+// outside, at the point scripts/run launch runs it. The harness argv inside is
 // byte-identical to the off run, bypass flag included. Exit codes pass
 // through: a harness dead by SIGTERM or SIGINT reads as exit 143 or 130,
 // the same code the unconfined launch reports, since the wrapper cannot

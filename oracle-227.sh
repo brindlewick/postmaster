@@ -3,12 +3,12 @@
 #
 # Written by the leg-1 coachman from the ticket's acceptance criteria BEFORE reading any
 # lane's diff or log, and committed on the ticket branch after the spec. Tests at the
-# ticket's own interface: scripts/host.sh stop-run and close-run on run records built
+# ticket's own interface: scripts/run host stop-run and close-run on run records built
 # fresh in temporary folders, plus the host suite's green run. Never a function shape,
 # which is what the lanes were dispatched to choose.
 #
 # Casing note: the action-log fixtures below use the key "detail" (byte 100),
-# exactly as the ticket writes it and as log-action.sh writes it. The first
+# exactly as the ticket writes it and as scripts/run log-action writes it. The first
 # committed revision of this file used "Detail" (byte 68) in its fixtures by
 # mistake, and its R+opus checks failed on correct implementations. The
 # fixtures were corrected to the ticket's spelling (verified byte by byte
@@ -24,7 +24,7 @@ bad=0
 ok() { ok=$((ok + 1)); echo "ok $1"; }
 bad() { bad=$((bad + 1)); echo "BAD $1"; }
 
-[ -f package.json ] && [ -d scripts ] && [ -x scripts/host.sh ] || {
+[ -f package.json ] && [ -d scripts ] && [ -x scripts/run ] || {
   echo "oracle: run from the repo root" >&2
   exit 2
 }
@@ -72,7 +72,7 @@ ERR=""
 CODE=0
 exechost() { # $1 = stop-run|close-run, $2 = dispatch
   local errf="$T/host.stderr"
-  OUT=$(PATH="$T/bin:$PATH" POSTMASTER_HOST_STATE="$T/state" POSTMASTER_HOST_FIXTURE="$T" ./scripts/host.sh "$1" "$2" 2>"$errf")
+  OUT=$(PATH="$T/bin:$PATH" POSTMASTER_HOST_STATE="$T/state" POSTMASTER_HOST_FIXTURE="$T" ./scripts/run host "$1" "$2" 2>"$errf")
   CODE=$?
   ERR=$(cat "$errf")
 }
@@ -81,7 +81,7 @@ want() { # $1 = stop-run|close-run, rest = worktree names in order
   local cmd=$1
   shift
   local prefix
-  if [ "$cmd" = "stop-run" ]; then prefix="no launch is running in "; else prefix="closed what host.sh opened for "; fi
+  if [ "$cmd" = "stop-run" ]; then prefix="no launch is running in "; else prefix="closed what run host opened for "; fi
   local e=""
   for n in "$@"; do
     if [ -z "$e" ]; then e="$prefix$T/repo/.worktrees/$n"; else e="$e

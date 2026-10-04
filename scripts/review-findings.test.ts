@@ -28,7 +28,7 @@ import {
   SUPPORTED,
 } from "./review-findings.ts";
 
-const SELF = join(import.meta.dir, "review-findings.sh");
+const SELF = join(import.meta.dir, "run");
 const TOOL = toolRoot(import.meta);
 
 let root = "";
@@ -67,7 +67,8 @@ const runConfig = (name: string, harness: string): string => {
   return folder;
 };
 
-const cli = (...args: string[]): { code: number; out: string; err: string } => run(SELF, args);
+const cli = (...args: string[]): { code: number; out: string; err: string } =>
+  run(SELF, ["review-findings", ...args]);
 
 const writeEvents = (name: string, events: unknown[]): string => {
   const eventFile = join(root, name);
@@ -624,7 +625,7 @@ describe("degrade", () => {
     const coachman = readFileSync(join(TOOL, "skills", "postmaster", "coachman.md"), "utf8");
     const blocks = [...coachman.matchAll(SH_BLOCKS)].map((m) => m[1]!);
     const samples = blocks.filter(
-      (block) => block.includes('NORMALIZE_FAILED=""') && block.includes("HARVEST_ERR"),
+      (block) => block.includes("NORMALIZE_FAILED=()") && block.includes("HARVEST_ERR"),
     );
     expect(samples.length).toBe(1);
     const sampleDispatch = join(root, "sample-dispatch");

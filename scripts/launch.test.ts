@@ -12,14 +12,17 @@ import {
   existsSync,
   constants as fsConstants,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readdirSync,
   readFileSync,
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { harnessData, makeHeldDir } from "./launch.ts";
 import { startCheck, wrapCommand } from "./lib/confine.ts";
@@ -27,8 +30,12 @@ import { toolRoot } from "./lib/paths.ts";
 import { run, withTempDir } from "./lib/proc.ts";
 import { BOUND_R, DOT_ALL, PY_M_START, PY_S_CLASS, pySplitLines, pyWords } from "./lib/text.ts";
 
-const self = join(import.meta.dir, "launch.sh");
+const self = join(import.meta.dir, "run");
 const here = import.meta.dir;
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/gu, "'\\''")}'`;
+}
 
 const skipPython = run("sh", ["-c", "command -v python3"]).code !== 0;
 if (skipPython) {
@@ -113,6 +120,7 @@ beforeAll(() => {
 
     const fixture = (name: string, ...keys: string[]): void => {
       let body = `[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n\n[team]\n`;
+      body += `clerk = { harness = "claude", model = "clerk-model" }\n`;
       body += `coachman = { harness = "claude", model = "coach-model" }\n`;
       body += `coachman_fallback = { harness = "claude", model = "fallback-model" }\n\n[team.coachman_legs]\n`;
       for (const k of keys) body += `${k} = { harness = "claude", model = "${k}-model" }\n`;
@@ -175,7 +183,7 @@ beforeAll(() => {
         POSTMASTER_CONFIG: join(tmp, `${f}.toml`),
         PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
       };
-      const r = spawnSync(self, rest, { encoding: "utf8", env });
+      const r = spawnSync(self, ["launch", ...rest], { encoding: "utf8", env });
       out = r.stdout ?? "";
       err = r.stderr ?? "";
       rc = r.status ?? 1;
@@ -220,7 +228,7 @@ beforeAll(() => {
     const runDir = (runName: string): string => join(tmp, "repo", ".postmaster", "runs", runName);
     const record = (runName: string, f: string): void => {
       mkdirSync(runDir(runName), { recursive: true });
-      const r = spawnSync(join(here, "run-meta.sh"), [runDir(runName), join(tmp, "repo")], {
+      const r = spawnSync(join(here, "run"), ["run-meta", runDir(runName), join(tmp, "repo")], {
         encoding: "utf8",
         env: {
           ...process.env,
@@ -230,7 +238,7 @@ beforeAll(() => {
         },
       });
       if (r.status !== 0) {
-        fail(`run-meta.sh records ${f} as run ${runName}`);
+        fail(`run run-meta records ${f} as run ${runName}`);
       }
     };
 
@@ -398,7 +406,15 @@ beforeAll(() => {
     {
       const r = spawnSync(
         self,
-        ["launch", "coachman", join(tmp, "wt"), join(tmp, "prompt.txt"), "--leg", "synthesis"],
+        [
+          "launch",
+          "launch",
+          "coachman",
+          join(tmp, "wt"),
+          join(tmp, "prompt.txt"),
+          "--leg",
+          "synthesis",
+        ],
         {
           encoding: "utf8",
           env: {
@@ -440,7 +456,7 @@ beforeAll(() => {
     const calls = (...paths: string[]): { code: number; out: string } => {
       const results: string[] = [];
       const CALL = new RegExp(
-        `scripts/(?:launch\\.sh[${PY_S_CLASS}]+(?:launch|resume)|host\\.sh[${PY_S_CLASS}]+leg[${PY_S_CLASS}]+(?:launch|resume|takeover|retry))${BOUND_R}`,
+        `scripts/run[${PY_S_CLASS}]+(?:launch[${PY_S_CLASS}]+(?:launch|resume)|(?:run-meta[${PY_S_CLASS}]+run-pinned[^\\n]*?|host)[${PY_S_CLASS}]+leg[${PY_S_CLASS}]+(?:launch|resume|takeover|retry))${BOUND_R}`,
         "gu",
       );
       for (const path of paths) {
@@ -458,7 +474,9 @@ beforeAll(() => {
               while ((m = CALL.exec(line)) !== null) {
                 const c = line.slice(m.index);
                 const recorded =
-                  c.includes("--run <dispatch>") || c.includes("scripts/host.sh leg");
+                  c.includes("--run <dispatch>") ||
+                  c.includes("scripts/run host leg") ||
+                  c.includes("scripts/run run-meta run-pinned");
                 results.push(`${recorded ? "run" : "unrun"} ${path}: ${pyWords(c).join(" ")}`);
               }
             }
@@ -471,7 +489,9 @@ beforeAll(() => {
               while ((m = CALL.exec(inner)) !== null) {
                 const c = inner.slice(m.index);
                 const recorded =
-                  c.includes("--run <dispatch>") || c.includes("scripts/host.sh leg");
+                  c.includes("--run <dispatch>") ||
+                  c.includes("scripts/run host leg") ||
+                  c.includes("scripts/run run-meta run-pinned");
                 results.push(`${recorded ? "run" : "unrun"} ${path}: ${pyWords(c).join(" ")}`);
               }
             }
@@ -548,33 +568,36 @@ beforeAll(() => {
         "Fenced, with no --run:",
         "",
         "```sh",
-        "( scripts/launch.sh launch a <wt> <prompt-file> \\",
+        "( scripts/run launch launch a <wt> <prompt-file> \\",
         "    > <dispatch>/logs/a-events.jsonl ) &",
         "```",
         "",
         "Fenced and indented, with it:",
         "",
         "   ```sh",
-        "   ( scripts/launch.sh launch b <wt> <prompt-file> \\",
+        "   ( scripts/run launch launch b <wt> <prompt-file> \\",
         "       --run <dispatch> > <dispatch>/logs/b-events.jsonl ) &",
         "   ```",
         "",
-        "Inline, with no --run: `scripts/launch.sh resume c <wt> <thread-id> <prompt-file>`. Inline and",
-        "across a line break, with it: `<tool>/scripts/launch.sh resume d <wt> <thread-id>",
+        "Inline, with no --run: `scripts/run launch resume c <wt> <thread-id> <prompt-file>`. Inline and",
+        "across a line break, with it: `<tool>/scripts/run launch resume d <wt> <thread-id>",
         "<prompt-file> --run <dispatch>`.",
       ].join("\n"),
     );
     {
       // Unicode primitives, BASE launch.sh python: every expectation python3-verified.
-      writeFileSync(join(tmp, "uni.md"), "```sh\nscripts/launch.sh\x1flaunch u1 <wt> <p>\n```\n");
+      writeFileSync(
+        join(tmp, "uni.md"),
+        "```sh\nscripts/run\x1flaunch\x1flaunch u1 <wt> <p>\n```\n",
+      );
       const u1 = calls(join(tmp, "uni.md"));
       check("calls finds an invocation spaced with U+001F", u1.out.includes("u1"), u1.out);
-      writeFileSync(join(tmp, "uni2.md"), "```sh\nscripts/launch.sh\rlaunch u2 <wt> <p>\n```\n");
+      writeFileSync(join(tmp, "uni2.md"), "```sh\nscripts/run\rlaunch r u2 <wt> <p>\n```\n");
       const u2 = calls(join(tmp, "uni2.md"));
       check("calls misses an invocation broken by CR (splitlines)", !u2.out.includes("u2"), u2.out);
       const contGot = "a\\\n\x1fb".replace(CONT_RE, " ");
       check("continuations join across U+001F", contGot === "a b", JSON.stringify(contGot));
-      const fenceGot = "a\r```sh\nscripts/launch.sh launch x\n```\nb".split(FENCE_SPLIT_RE);
+      const fenceGot = "a\r```sh\nscripts/run launch launch x\n```\nb".split(FENCE_SPLIT_RE);
       check("fences do not open after CR", fenceGot.length === 1, String(fenceGot.length));
     }
     run("git", ["init", "-q", join(tmp, "repo")]);
@@ -595,7 +618,7 @@ beforeAll(() => {
     ): { rc: number; err: string } => {
       mkdirSync(dirname(streamFile), { recursive: true });
       const fd = openSync(streamFile, "w");
-      const r = spawnSync(self, args, {
+      const r = spawnSync(self, ["launch", ...args], {
         encoding: "utf8",
         stdio: ["inherit", fd, "pipe"],
         env: {
@@ -1099,7 +1122,7 @@ beforeAll(() => {
       const got = `${out
         .replace(/\n+$/u, "")
         .split("\n")
-        .map((l) => l.replace(/^([a-z]+) .*launch\.sh (launch|resume) ([a-z]) .*/u, "$1 $3"))
+        .map((l) => l.replace(/^([a-z]+) .*run launch (launch|resume) ([a-z]) .*/u, "$1 $3"))
         .join(",")},`;
       if (got === "unrun a,run b,unrun c,run d,") {
         ok("a runbook launch or resume with no --run is found, fenced or inline");
@@ -1129,14 +1152,18 @@ beforeAll(() => {
       const claude = join(tmp, "bin", "claude");
       const saved = readFileSync(claude, "utf8");
       writeFileSync(claude, "#!/bin/sh\nkill -TERM $$\n");
-      const r = spawnSync(self, ["launch", "one", join(tmp, "wt"), join(tmp, "prompt.txt")], {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          POSTMASTER_CONFIG: join(tmp, "legs.toml"),
-          PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+      const r = spawnSync(
+        self,
+        ["launch", "launch", "one", join(tmp, "wt"), join(tmp, "prompt.txt")],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            POSTMASTER_CONFIG: join(tmp, "legs.toml"),
+            PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+          },
         },
-      });
+      );
       writeFileSync(claude, saved);
       check(
         "a SIGTERM harness kills the launch by SIGTERM",
@@ -1402,7 +1429,7 @@ beforeAll(() => {
     );
     // Env-file parity: the port and BASE run the same file, and the harness's
     // received environment, the exit status and both launch streams agree.
-    // BASE is the newest scripts/launch.sh in history that is a real script
+    // BASE is the newest scripts/run launch in history that is a real script
     // rather than the port's one-line wrapper; it must still carry the
     // source-and-exec tail, or the extraction failed loudly and every parity
     // control with it.
@@ -2047,7 +2074,7 @@ beforeAll(() => {
       join(tmp, "prompt.txt"),
     );
     refused(
-      "an argument launch.sh does not know is refused",
+      "an argument run launch does not know is refused",
       "legs",
       "launch needs <cwd> <prompt-file>",
       "launch",
@@ -2241,7 +2268,7 @@ beforeAll(() => {
         POSTMASTER_CONFIG: join(tmp, `${f}.toml`),
         PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
       };
-      const r = spawnSync(self, rest, { encoding: "utf8", env, input: "leak\n" });
+      const r = spawnSync(self, ["launch", ...rest], { encoding: "utf8", env, input: "leak\n" });
       out = r.stdout ?? "";
       err = r.stderr ?? "";
       rc = r.status ?? 1;
@@ -2333,7 +2360,7 @@ beforeAll(() => {
         POSTMASTER_CONFIG: join(tmp, "muse-bare.toml"),
         PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
       };
-      const r = spawnSync(self, ["launch", "m", join(tmp, "elsewhere"), "sub/p.txt"], {
+      const r = spawnSync(self, ["launch", "launch", "m", join(tmp, "elsewhere"), "sub/p.txt"], {
         encoding: "utf8",
         env,
         stdio: ["ignore", "pipe", "pipe"],
@@ -2523,7 +2550,7 @@ beforeAll(() => {
         POSTMASTER_CONFIG: join(tmp, "mimo-bare.toml"),
         PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
       };
-      const r = spawnSync(self, ["launch", "x", join(tmp, "elsewhere"), "sub/p.txt"], {
+      const r = spawnSync(self, ["launch", "launch", "x", join(tmp, "elsewhere"), "sub/p.txt"], {
         encoding: "utf8",
         env,
         stdio: ["ignore", "pipe", "pipe"],
@@ -2610,14 +2637,18 @@ beforeAll(() => {
     symlinkSync(join(here, "lib"), join(tmp, "lib"));
 
     const bypassed = (script: string, flag: string, ...formArgs: string[]): boolean => {
-      const r = spawnSync(script, ["form", ...formArgs], {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          POSTMASTER_CONFIG: join(tmp, "team.toml"),
-          PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+      const r = spawnSync(
+        script,
+        script === self ? ["launch", "form", ...formArgs] : ["form", ...formArgs],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            POSTMASTER_CONFIG: join(tmp, "team.toml"),
+            PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+          },
         },
-      });
+      );
       out = r.stdout ?? "";
       rc = r.status ?? 1;
       let n = 0;
@@ -2657,6 +2688,38 @@ beforeAll(() => {
       "a claude lane's form shows a resume form too",
       "launch: cd <cwd> && claude -p ",
       "resume: cd <cwd> && claude -p --resume <thread-id> ",
+    );
+    doRun("phase-start", "form", "clerk");
+    printed(
+      "the clerk role resolves from team.clerk",
+      "launch: cd <cwd> && claude -p ",
+      "--model clerk-model",
+    );
+    doRun(
+      "phase-start",
+      "interactive",
+      "clerk",
+      "--project",
+      join(tmp, "repo"),
+      "--name",
+      "#2, Fix the list",
+    );
+    printed(
+      "the clerk interactive form is named for its ticket",
+      `launch: cd ${join(tmp, "repo")} && claude --model clerk-model --name \\#2\\,\\ Fix\\ the\\ list --dangerously-skip-permissions`,
+    );
+    doRun(
+      "phase-start",
+      "interactive",
+      "clerk",
+      "--project",
+      join(tmp, "repo"),
+      "--name",
+      "#1, =< --tools x>",
+    );
+    printed(
+      "a hostile session name prints quoted, never as extra words",
+      `launch: cd ${join(tmp, "repo")} && claude --model clerk-model --name \\#1\\,\\ =\\<\\ --tools\\ x\\> --dangerously-skip-permissions`,
     );
     writeFileSync(join(tmp, "agy.toml"), '[lanes.g]\nharness = "agy"\nmodel = "agy-model"\n');
     writeFileSync(join(tmp, "bin/agy"), "#!/bin/sh\n");
@@ -2699,7 +2762,7 @@ beforeAll(() => {
     const doSub = (...args: string[]): void => {
       // thread-id, transient and the wall lists read no config; the ambient
       // environment is inherited, as the self-test ran them bare.
-      const r = run(self, args);
+      const r = run(self, ["launch", ...args]);
       out = r.out;
       err = r.err;
       rc = r.code;
@@ -3025,7 +3088,7 @@ beforeAll(() => {
     const codexUsage =
       '{"type": "turn.completed", "usage": {"input_tokens": 3072288, "cached_input_tokens": 2910208, "cache_write_input_tokens": 0, "output_tokens": 50050, "reasoning_output_tokens": 44266}}';
     const claudeUsage =
-      '{"type":"system","subtype":"task_progress","task_id":"ac8fe1ebf375eff4d","tool_use_id":"toolu_013hqT2oMy1VXLYEaky3ttuc","description":"Reading scripts/runs-watch.sh","subagent_type":"general-purpose","usage":{"total_tokens":30007,"tool_uses":1,"duration_ms":4119},"last_tool_name":"Read","uuid":"c4295b17-b348-4933-8a1e-7dfe07cfb78e","session_id":"7449d3c5-8a18-45ba-aa72-1f0ae0ea8a30"}';
+      '{"type":"system","subtype":"task_progress","task_id":"ac8fe1ebf375eff4d","tool_use_id":"toolu_013hqT2oMy1VXLYEaky3ttuc","description":"Reading scripts/run runs-watch","subagent_type":"general-purpose","usage":{"total_tokens":30007,"tool_uses":1,"duration_ms":4119},"last_tool_name":"Read","uuid":"c4295b17-b348-4933-8a1e-7dfe07cfb78e","session_id":"7449d3c5-8a18-45ba-aa72-1f0ae0ea8a30"}';
     const realisticTail = '{"type":"error","message":"model stream idle timeout"}';
     const realisticWall = '{"type":"error","message":"quota exceeded for this key"}';
     writeFileSync(join(tmp, "real.err"), "the leg ended\n");
@@ -3557,7 +3620,7 @@ beforeAll(() => {
       ok(`quote corpus: ${quotes} phrasings wake alone and beside every transient`);
     } else {
       fail(
-        "quote corpus: 23 phrasings wake alone and beside every transient",
+        "quote corpus: 25 phrasings wake alone and beside every transient",
         matrixBad.join("; ") || "empty corpus",
       );
     }
@@ -3886,7 +3949,7 @@ beforeAll(() => {
           const codes: Record<string, number> = {};
           for (const [side, bin, argv] of [
             ["base", "bash", [baseLaunch, ...args]],
-            ["port", self, args],
+            ["port", self, ["launch", ...args]],
           ] as Array<[string, string, string[]]>) {
             rmSync(recOf(harness), { force: true });
             const r = spawnSync(bin, argv, { cwd: startlink, encoding: "utf8", env });
@@ -4052,9 +4115,9 @@ s.close()
       // AC2 item: a consistent /proc (Linux: the lane's PIDs match what its
       // /proc shows, so ps and friends see the lane, not the host's table)
       if (process.platform === "linux") {
-        // Fork-free: read runs in this shell, so /proc/self is the shell
-        // itself, not a subshell a $() would fork.
-        const selfProbe = 'read pid rest < /proc/self/stat; test "$pid" = "$$"';
+        const processModule = join(here, "lib", "processes.ts");
+        const probeSource = `import { processInfo } from ${JSON.stringify(processModule)}; const info = processInfo(process.pid); process.exit(info?.pid === process.pid ? 0 : 1);`;
+        const selfProbe = `${shellQuote(process.execPath)} -e ${shellQuote(probeSource)}`;
         items.push({
           name: "a consistent /proc",
           bare: () => run("sh", ["-c", selfProbe]).code === 0,
@@ -4436,7 +4499,7 @@ describe("run-recorded effort controls", () => {
         ).toBe(0);
         const dispatch = join(repo, ".postmaster", "runs", "7");
         mkdirSync(dispatch, { recursive: true });
-        expect(run(join(here, "run-meta.sh"), [dispatch, repo], { env }).code).toBe(0);
+        expect(run(join(here, "run"), ["run-meta", dispatch, repo], { env }).code).toBe(0);
         dispatches[kind] = dispatch;
       }
       const reviewRepo = join(tmp, "review");
@@ -4465,7 +4528,7 @@ describe("run-recorded effort controls", () => {
         ["ticket", { codex: "max", claude: "max", mimo: "high" }],
       ] as const) {
         const dispatch = dispatches[kind]!;
-        const form = run(self, ["form", "codex_lane", "--run", dispatch], { env });
+        const form = run(self, ["launch", "form", "codex_lane", "--run", dispatch], { env });
         launched(`${kind} form`, form);
         const formEfforts = [...form.out.matchAll(/model_reasoning_effort=[^ \t\r\n]+/gu)].map(
           (match) => match[0],
@@ -4473,9 +4536,13 @@ describe("run-recorded effort controls", () => {
         expect(formEfforts).toHaveLength(2);
         expect(formEfforts.every((entry) => entry.includes(want.codex))).toBe(true);
         expect(form.out).toContain("resume:");
-        const coach = run(self, ["form", "coachman", "--leg", "synthesis", "--run", dispatch], {
-          env,
-        });
+        const coach = run(
+          self,
+          ["launch", "form", "coachman", "--leg", "synthesis", "--run", dispatch],
+          {
+            env,
+          },
+        );
         launched(`${kind} coach form`, coach);
         const coachForms = coach.out
           .split("\n")
@@ -4484,34 +4551,38 @@ describe("run-recorded effort controls", () => {
         expect(coachForms.every((line) => line.includes(`--effort ${want.claude}`))).toBe(true);
         const codexReview = run(
           self,
-          ["review", "codex_lane", reviewRepo, base, "--run", dispatch],
+          ["launch", "review", "codex_lane", reviewRepo, base, "--run", dispatch],
           { env },
         );
         launched(`${kind} codex review`, codexReview);
         expect(codexReview.out).toContain(`model_reasoning_effort="${want.codex}"`);
         const claudeReview = run(
           self,
-          ["review", "claude_lane", reviewRepo, base, "--run", dispatch],
+          ["launch", "review", "claude_lane", reviewRepo, base, "--run", dispatch],
           { env },
         );
         launched(`${kind} claude review`, claudeReview);
         expect(claudeReview.out).toContain(`/code-review ${want.claude} ${base}...HEAD`);
         expect(claudeReview.out).toContain(`--effort ${want.claude}`);
-        const mimoReview = run(self, ["review", "mimo_lane", reviewRepo, base, "--run", dispatch], {
-          env,
-        });
+        const mimoReview = run(
+          self,
+          ["launch", "review", "mimo_lane", reviewRepo, base, "--run", dispatch],
+          {
+            env,
+          },
+        );
         launched(`${kind} mimo review`, mimoReview);
         expect(mimoReview.out).toContain(`--variant ${want.mimo}`);
         const effortlessReview = run(
           self,
-          ["review", "effortless", reviewRepo, base, "--run", dispatch],
+          ["launch", "review", "effortless", reviewRepo, base, "--run", dispatch],
           { env },
         );
         launched(`${kind} effortless review`, effortlessReview);
         expect(effortlessReview.out).toContain('model_reasoning_effort="max"');
         const claudeEffortless = run(
           self,
-          ["review", "claude_effortless", reviewRepo, base, "--run", dispatch],
+          ["launch", "review", "claude_effortless", reviewRepo, base, "--run", dispatch],
           { env },
         );
         launched(`${kind} claude effortless review`, claudeEffortless);
@@ -4519,7 +4590,7 @@ describe("run-recorded effort controls", () => {
         expect(claudeEffortless.out).toContain("--effort max");
         const mimoEffortless = run(
           self,
-          ["review", "mimo_effortless", reviewRepo, base, "--run", dispatch],
+          ["launch", "review", "mimo_effortless", reviewRepo, base, "--run", dispatch],
           { env },
         );
         launched(`${kind} mimo effortless review`, mimoEffortless);
@@ -4625,6 +4696,9 @@ describe("positive controls", () => {
   });
   test("form with no --leg shows team.coachman", () => {
     assertControl("form with no --leg shows team.coachman");
+  });
+  test("a hostile session name prints quoted, never as extra words", () => {
+    assertControl("a hostile session name prints quoted, never as extra words");
   });
   test("a lane's env file reaches the harness's environment", () => {
     assertControl("a lane's env file reaches the harness's environment");
@@ -4850,8 +4924,8 @@ describe("negative controls", () => {
   test("a resume with no thread id is refused, and nothing runs", () => {
     assertControl("a resume with no thread id is refused, and nothing runs");
   });
-  test("an argument launch.sh does not know is refused", () => {
-    assertControl("an argument launch.sh does not know is refused");
+  test("an argument run launch does not know is refused", () => {
+    assertControl("an argument run launch does not know is refused");
   });
   test("--leg style is refused", () => {
     assertControl("--leg style is refused");
@@ -5326,8 +5400,8 @@ describe("structured values: known transients resume, anything else wakes", () =
 });
 
 describe("quote corpus: real wall phrasings wake, alone and beside every transient", () => {
-  test("quote corpus: 23 phrasings wake alone and beside every transient", () => {
-    assertControl("quote corpus: 23 phrasings wake alone and beside every transient");
+  test("quote corpus: 25 phrasings wake alone and beside every transient", () => {
+    assertControl("quote corpus: 25 phrasings wake alone and beside every transient");
   });
   test("a missing error file is refused", () => {
     assertControl("a missing error file is refused");
@@ -5544,4 +5618,472 @@ describe("confinement wiring: form shows the wrap, fallback warns and logs", () 
   test("a fallback that cannot be logged refuses to run", () => {
     assertControl("a fallback that cannot be logged refuses to run");
   });
+});
+
+// --- the provider wall record: what a launch writes as it ends (C1, C3, C4) ---------------------
+// Tests beside this file for the wall record run launch writes through run host's own step.
+
+const host = join(import.meta.dir, "run");
+const waitMarkers = join(import.meta.dir, "run");
+
+let tmp = "";
+let bin = "";
+const CLOCK = "1790000000000"; // 2026-09-21T08:53:20Z, pinned in every launch
+
+const CODEX_WALL = JSON.stringify({
+  type: "turn.failed",
+  error: {
+    message:
+      "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 2:29 AM.",
+  },
+});
+const CLAUDE_WALL = JSON.stringify({
+  type: "result",
+  subtype: "success",
+  is_error: true,
+  result: "You've hit your weekly limit · resets 3am (UTC)",
+  api_error_status: 429,
+});
+const MIMO_WALL = JSON.stringify({
+  sessionID: "s-wall",
+  type: "error",
+  error: { name: "UsageLimitError", data: { message: "You have hit your usage limit." } },
+});
+
+interface Dispatch {
+  d: string;
+  wt: string;
+}
+
+function dispatch(name: string): Dispatch {
+  const d = join(tmp, "runs", name);
+  const wt = join(tmp, "wt", name);
+  mkdirSync(join(d, "logs"), { recursive: true });
+  mkdirSync(wt, { recursive: true });
+  // The review form needs a real repo with a HEAD; every worktree has one.
+  spawnSync("git", ["init", "-q", "-b", "main", wt]);
+  spawnSync("git", [
+    "-C",
+    wt,
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@example.invalid",
+    "commit",
+    "-q",
+    "--allow-empty",
+    "-m",
+    "init",
+  ]);
+  writeFileSync(
+    join(d, "run.json"),
+    `${JSON.stringify({
+      config: {
+        lanes: {
+          stub: { harness: "codex", model: "test-model" },
+          mimo: { harness: "mimo", model: "prov/mimo" },
+          sec: { harness: "claude", model: "test-claude" },
+          gr: { harness: "grok", model: "test-grok" },
+        },
+        team: { workhorses: ["stub", "mimo"] },
+      },
+    })}\n`,
+  );
+  writeFileSync(
+    join(d, "brief.md"),
+    `# Waybill: ${name}\nturnpikes: default\n\n## Project profile\nrepo: ${tmp}\n\n## Dispatch\nname: #1, ${name}\ndispatch: ${d}\nsynthesis worktree: ${wt}\ntool: ${join(import.meta.dir, "..")}\n`,
+  );
+  writeFileSync(join(tmp, "prompt.txt"), "Do the work.\n");
+  return { d, wt };
+}
+
+/** Write the stub harness: its stdout is the stream, its exit the launch's. */
+function stub(name: string, script: string): void {
+  writeFileSync(join(bin, name), `#!/bin/sh\n${script}`);
+  chmodSync(join(bin, name), 0o755);
+}
+
+function baseEnv(): Record<string, string | undefined> {
+  return {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH ?? ""}`,
+    POSTMASTER_HOST: "none",
+    POSTMASTER_HOST_STATE: join(tmp, "hoststate"),
+    POSTMASTER_CLOCK: CLOCK,
+    TZ: "UTC",
+  };
+}
+
+/** The coachman's own launch step; returns once the marker has landed. */
+function launchStep(
+  c: Dispatch,
+  lane: string,
+  kind: "lane" | "reviewer",
+  harnessScript: string,
+  harness: string,
+  out: string,
+  extra: string[] = [],
+): { rc: number; marker: string; actions: string } {
+  stub(harness, harnessScript);
+  const marker = join(c.d, "logs", `${out}.done`);
+  const argv = [
+    host,
+    "host",
+    "run",
+    `${kind} · ${lane}`,
+    c.wt,
+    "--under",
+    c.d,
+    "--role",
+    kind,
+    "--run",
+    c.d,
+    "--out",
+    join(c.d, "logs", `${out}.jsonl`),
+    "--err",
+    join(c.d, "logs", `${out}.err`),
+    "--marker",
+    marker,
+    "--",
+    join(import.meta.dir, "run"),
+    "launch",
+    kind === "reviewer" && extra.includes("review") ? "review" : "launch",
+    ...(kind === "reviewer" && extra.includes("review")
+      ? [lane, c.wt, "HEAD"]
+      : [lane, c.wt, join(tmp, "prompt.txt")]),
+    ...(kind === "reviewer" && extra.includes("review") ? [] : []),
+    "--run",
+    c.d,
+  ];
+  const r = spawnSync("bash", [argv[0]!, ...argv.slice(1)], { encoding: "utf8", env: baseEnv() });
+  const rc = r.status ?? 1;
+  const waited = spawnSync(
+    "bash",
+    [waitMarkers, "wait-for-markers", join(c.d, "logs"), `${out}.done`, "1", "60"],
+    {
+      encoding: "utf8",
+      env: baseEnv(),
+    },
+  );
+  return { rc: waited.status ?? 1, marker, actions: join(c.d, "actions.jsonl") };
+}
+
+function wallsIn(actions: string): string[] {
+  let text = "";
+  try {
+    text = readFileSync(actions, "utf8");
+  } catch {
+    return [];
+  }
+  return text.split("\n").filter((l) => l.includes('"action":"wall"'));
+}
+
+beforeAll(() => {
+  tmp = mkdtempSync(join(tmpdir(), "launch-walls-"));
+  bin = join(tmp, "bin");
+  mkdirSync(bin, { recursive: true });
+});
+
+afterAll(() => {
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+describe("C1: a launch that ends on its provider's limit records one wall", () => {
+  test("a codex workhorse wall: one line, its role, the first line byte for byte, the reset", () => {
+    const c = dispatch("c1-codex");
+    const step = launchStep(
+      c,
+      "stub",
+      "lane",
+      `cat <<'EOF'\n${CODEX_WALL}\nEOF\nexit 1\n`,
+      "codex",
+      "stub",
+    );
+    expect(step.rc).toBe(0);
+    const lines = wallsIn(step.actions);
+    expect(lines.length).toBe(1);
+    const rec = JSON.parse(lines[0]!) as { target: string; detail: string; actor: string };
+    expect(rec.target).toBe("stub");
+    expect(rec.actor).toBe("lane:stub");
+    expect(rec.detail).toContain("workhorse - - 2026-09-22T02:29:00Z ");
+    expect(rec.detail).toContain("You’ve hit your usage limit.");
+    // The line was written as the launch ended: no later than the marker.
+    expect(statSync(step.marker).mtimeMs).toBeGreaterThanOrEqual(statSync(step.actions).mtimeMs);
+  }, 60000);
+
+  test("a claude bug-reviewer wall: the role carries its lens and round, and the reset is UTC", () => {
+    const c = dispatch("c1-claude");
+    const step = launchStep(
+      c,
+      "sec",
+      "reviewer",
+      `cat <<'EOF'\n${CLAUDE_WALL}\nEOF\nexit 1\n`,
+      "claude",
+      "review-r1-bug-sec",
+      ["review"],
+    );
+    expect(step.rc).toBe(0);
+    const lines = wallsIn(step.actions);
+    expect(lines.length).toBe(1);
+    const rec = JSON.parse(lines[0]!) as { target: string; detail: string };
+    expect(rec.target).toBe("sec");
+    expect(rec.detail).toContain("reviewer bug 1 2026-09-22T03:00:00Z ");
+    expect(rec.detail).toContain("You've hit your weekly limit · resets 3am (UTC)");
+  }, 60000);
+
+  test("a mimo workhorse limit error event with exit 0 still records a wall", () => {
+    const c = dispatch("c1-mimo");
+    const step = launchStep(
+      c,
+      "mimo",
+      "lane",
+      `cat >/dev/null\ncat <<'EOF'\n${MIMO_WALL}\nEOF\nexit 0\n`,
+      "mimo",
+      "mimo",
+    );
+    expect(step.rc).toBe(0);
+    const lines = wallsIn(step.actions);
+    expect(lines.length).toBe(1);
+    const rec = JSON.parse(lines[0]!) as { target: string; detail: string };
+    expect(rec.target).toBe("mimo");
+    expect(rec.detail).toContain("workhorse - - none You have hit your usage limit.");
+  }, 60000);
+
+  /** run launch straight, reading its own exit: stdout is the stream, as run host arranges. */
+  const directStep = (
+    c: Dispatch,
+    lane: string,
+    out: string,
+  ): { rc: number; err: string; actions: string } => {
+    const streamFile = join(c.d, "logs", `${out}.jsonl`);
+    mkdirSync(join(c.d, "logs"), { recursive: true });
+    const fd = openSync(streamFile, "w");
+    const r = spawnSync(
+      join(import.meta.dir, "run"),
+      ["launch", "launch", lane, c.wt, join(tmp, "prompt.txt"), "--run", c.d],
+      {
+        encoding: "utf8",
+        stdio: ["inherit", fd, "pipe"],
+        env: { ...baseEnv(), POSTMASTER_EVENT_STREAM: streamFile, POSTMASTER_LAUNCH_ROLE: "lane" },
+      },
+    );
+    closeSync(fd);
+    return { rc: r.status ?? 1, err: String(r.stderr ?? ""), actions: join(c.d, "actions.jsonl") };
+  };
+
+  test("a detected wall the log cannot record fails the launch closed", () => {
+    const c = dispatch("c1-lost-wall");
+    stub(
+      "mimo",
+      `cat >/dev/null\nrm -rf ${c.d}/actions.jsonl; mkdir ${c.d}/actions.jsonl\ncat <<'EOF'\n${MIMO_WALL}\nEOF\nexit 0\n`,
+    );
+    const step = directStep(c, "mimo", "mimo-lost");
+    expect(step.rc).toBe(1);
+    expect(step.err).toContain("was not recorded");
+    expect(readFileSync(join(c.d, "logs", "mimo.wall-lost"), "utf8")).toContain(
+      "workhorse - - none You have hit your usage limit.",
+    );
+  }, 60000);
+
+  test("a recorded mimo wall keeps the harness exit 0 (fail-closed control)", () => {
+    const c = dispatch("c1-kept-wall");
+    stub("mimo", `cat >/dev/null\ncat <<'EOF'\n${MIMO_WALL}\nEOF\nexit 0\n`);
+    const step = directStep(c, "mimo", "mimo-kept");
+    expect(step.rc).toBe(0);
+    expect(wallsIn(step.actions).length).toBe(1);
+    expect(existsSync(join(c.d, "logs", "mimo.wall-lost"))).toBe(false);
+  }, 60000);
+
+  test("a NUL in the wall message is contained as a lost wall, not a crash", () => {
+    const c = dispatch("c1-nul-wall");
+    const nul = JSON.stringify({
+      sessionID: "s-nul",
+      type: "error",
+      error: {
+        name: "UsageLimitError",
+        data: { message: "You have hit your usage limit.\u0000junk" },
+      },
+    });
+    stub("mimo", `cat >/dev/null\ncat <<'EOF'\n${nul}\nEOF\nexit 0\n`);
+    const step = directStep(c, "mimo", "mimo-nul");
+    expect(step.rc).toBe(1);
+    expect(step.err).toContain("was not recorded");
+    expect(existsSync(join(c.d, "logs", "mimo.wall-lost"))).toBe(true);
+    expect(wallsIn(step.actions).length).toBe(0);
+  }, 60000);
+});
+
+describe("C3: an ending that is not the provider's limit records no wall", () => {
+  const noWall = (
+    label: string,
+    lane: string,
+    kind: "lane" | "reviewer",
+    script: string,
+    harness: string,
+    out: string,
+    extra: string[] = [],
+  ): void => {
+    test(label, () => {
+      const c = dispatch(`c3-${label.replace(/[^a-z0-9]+/gu, "-").slice(0, 40)}`);
+      const step = launchStep(c, lane, kind, script, harness, out, extra);
+      expect(step.rc).toBe(0);
+      expect(existsSync(step.marker)).toBe(true);
+      expect(wallsIn(step.actions).length).toBe(0);
+    }, 60000);
+  };
+
+  noWall(
+    "a 504 Gateway Timeout ending records no wall",
+    "stub",
+    "lane",
+    `cat <<'EOF'\n{"type":"turn.failed","error":{"message":"504 Gateway Timeout"}}\nEOF\nexit 1\n`,
+    "codex",
+    "stub-504",
+  );
+  noWall(
+    "a 401 ending records no wall",
+    "sec",
+    "reviewer",
+    `cat <<'EOF'\n{"type":"result","subtype":"error","is_error":true,"result":"401 Unauthorized","api_error_status":401}\nEOF\nexit 1\n`,
+    "claude",
+    "review-r1-bug-sec",
+    ["review"],
+  );
+  noWall(
+    "a failed command whose output says usage and limit records no wall (codex)",
+    "stub",
+    "lane",
+    `cat <<'EOF'\n{"type":"item.completed","item":{"type":"command_execution","status":"failed","command":"npm run check","output":"usage limit reached in usage"}}\n{"type":"turn.completed","usage":{"input_tokens":1}}\nEOF\nexit 0\n`,
+    "codex",
+    "stub-cmd",
+  );
+  noWall(
+    "a failed tool part whose output says usage and limit records no wall (mimo)",
+    "mimo",
+    "lane",
+    `cat >/dev/null\ncat <<'EOF'\n{"sessionID":"s","type":"tool_use","part":{"tool":"bash","state":{"status":"error","output":"usage and limit"}}}\n{"sessionID":"s","type":"step_finish","part":{"reason":"stop"}}\nEOF\nexit 0\n`,
+    "mimo",
+    "mimo-tool",
+  );
+  noWall(
+    "a final message in prose that mentions a usage limit records no wall",
+    "sec",
+    "reviewer",
+    `cat <<'EOF'\n{"type":"result","subtype":"success","is_error":false,"result":"The usage limit should be documented for users."}\nEOF\nexit 0\n`,
+    "claude",
+    "review-r1-style-sec",
+    ["review"],
+  );
+  noWall(
+    "a workhorse that committed WORKHORSE-SUMMARY.md first records no wall",
+    "stub",
+    "lane",
+    `: > WORKHORSE-SUMMARY.md\ncat <<'EOF'\n${CODEX_WALL}\nEOF\nexit 1\n`,
+    "codex",
+    "stub-summary",
+  );
+});
+
+test("C3: a lane stopped mid-run with run host stop records no wall", () => {
+  const c = dispatch("c3-stop");
+  stub("codex", `echo started; sleep 300\n`);
+  const marker = join(c.d, "logs", "stub-stop.done");
+  const child = spawnSync(
+    "bash",
+    [
+      host,
+      "host",
+      "run",
+      "lane · stub",
+      c.wt,
+      "--under",
+      c.d,
+      "--role",
+      "lane",
+      "--run",
+      c.d,
+      "--out",
+      join(c.d, "logs", "stub-stop.jsonl"),
+      "--err",
+      join(c.d, "logs", "stub-stop.err"),
+      "--marker",
+      marker,
+      "--",
+      join(import.meta.dir, "run"),
+      "launch",
+      "launch",
+      "stub",
+      c.wt,
+      join(tmp, "prompt.txt"),
+      "--run",
+      c.d,
+    ],
+    { encoding: "utf8", env: baseEnv() },
+  );
+  expect(child.status ?? 1).toBe(0);
+  // Give the launch its moment, then stop it in its own worktree, as review-round does.
+  spawnSync("sleep", ["1"]);
+  const stopped = spawnSync("bash", [host, "host", "stop", c.wt], {
+    encoding: "utf8",
+    env: baseEnv(),
+  });
+  expect(stopped.status ?? 1).toBe(0);
+  spawnSync(
+    "bash",
+    [waitMarkers, "wait-for-markers", join(c.d, "logs"), "stub-stop.done", "1", "60"],
+    {
+      encoding: "utf8",
+      env: baseEnv(),
+    },
+  );
+  expect(wallsIn(join(c.d, "actions.jsonl")).length).toBe(0);
+}, 90000);
+
+test("C3: a workhorse that committed WORKHORSE-BLOCKED.md first records no wall", () => {
+  const c = dispatch("c3-blocked");
+  const step = launchStep(
+    c,
+    "stub",
+    "lane",
+    `: > WORKHORSE-BLOCKED.md\ncat <<'EOF'\n${CODEX_WALL}\nEOF\nexit 1\n`,
+    "codex",
+    "stub-blocked",
+  );
+  expect(step.rc).toBe(0);
+  expect(existsSync(join(c.wt, "WORKHORSE-BLOCKED.md"))).toBe(true);
+  expect(wallsIn(step.actions).length).toBe(0);
+}, 60000);
+
+test("C3: a summary older than the launch does not excuse the wall", () => {
+  const c = dispatch("c3-old-summary");
+  const summary = join(c.wt, "WORKHORSE-SUMMARY.md");
+  writeFileSync(summary, "# delivered long ago\n");
+  utimesSync(summary, 946684800, 946684800);
+  const step = launchStep(
+    c,
+    "stub",
+    "lane",
+    `cat <<'EOF'\n${CODEX_WALL}\nEOF\nexit 1\n`,
+    "codex",
+    "stub-old-summary",
+  );
+  expect(step.rc).toBe(0);
+  expect(wallsIn(step.actions).length).toBe(1);
+}, 60000);
+
+describe("C4: a grok lane ending on a limit message is handled as today", () => {
+  test("no wall line, and the lane ends on its own exit", () => {
+    const c = dispatch("c4-grok");
+    const step = launchStep(
+      c,
+      "gr",
+      "lane",
+      `cat <<'EOF'\n{"type":"error","message":"You have hit your usage limit"}\nEOF\nexit 1\n`,
+      "grok",
+      "gr",
+    );
+    expect(step.rc).toBe(0);
+    expect(existsSync(step.marker)).toBe(true);
+    expect(wallsIn(step.actions).length).toBe(0);
+  }, 60000);
 });

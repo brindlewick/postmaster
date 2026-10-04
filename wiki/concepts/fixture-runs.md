@@ -3,7 +3,7 @@ title: A fixture run tests the flow end to end, which the gate cannot
 type: concept
 standing: claimed
 sources: []
-updated: 2026-10-01
+updated: 2026-10-03
 ---
 
 # Fixture runs
@@ -62,7 +62,7 @@ passed the hidden tests, not whether it saw them.
 The card, the hand-offs and the narrative are what a run says about itself, and a broken run can
 say it succeeded. The score reads what the run could not dress up: the hidden tests and the gate,
 run fresh on the merged result; the stage changes in `actions.jsonl`, logged as they happened;
-the marker files; each hand-off through `scripts/handoff-check.sh`; `run.json`; the card. The
+the marker files; each hand-off through `scripts/run handoff-check`; `run.json`; the card. The
 stages and the hand-off rules come from the scripts that define them, and the number of legs
 from the run itself, so the score keeps working when the contract changes.
 
@@ -78,7 +78,7 @@ The flow reads tickets through a tracker, and a fresh repository has none. Three
 - **The tracker that needs no service and no login**
   ([issue #11](https://github.com/brindlewick/postmaster/issues/11)). Chosen once it landed. The
   fresh repository gets its own ticket store, and the ticket is filed there through
-  `scripts/local.sh`. A repository whose store exists uses that tracker whatever the config names,
+  `scripts/run local`. A repository whose store exists uses that tracker whatever the config names,
   so the postmaster finds and checks the ticket like any other, offline, and nothing leaves the
   machine.
 
@@ -89,9 +89,13 @@ failing a check because of a contract change that the gate passed, and clean run
 Refuted, when fixture runs miss contract changes that later break real runs, or when a run that
 scores clean is found to have shipped something its ticket did not ask for.
 
+How much one fixture score varies between runs of the same commit is not recorded.
+[pstack](../sources/pstack.md) argues for a swarm of runs to get a big enough sample, and its
+candidate 5 is a trial of that. It does not move the standing.
+
 ## What changed because of it
 
-`scripts/fixture.sh` makes a run's repository and files its ticket (`new`), scores a finished
+`scripts/run fixture` makes a run's repository and files its ticket (`new`), scores a finished
 run (`score`), and runs a ticket's hidden tests against any copy of the app (`hidden`). The app
 and its tickets are in `fixtures/`. `new` puts a copy under `~/Code/fixtures` unless it is given a
 path, so every copy is in one place, and marks the copy as a fixture in its own git config. A
@@ -103,6 +107,6 @@ covers plain folders only; every copy is its own repository, and the search neve
 parent. In the observed controls, Claude Code asked for a new repository inside a trusted folder,
 and did not ask for the trusted folder itself. `AGENTS.md` holds a change to the coachman contract back
 from merging until a fixture run dispatched from its branch scores clean. What the contract is
-is defined in `docs/coachman-contract.toml`, and `scripts/coachman-contract.sh` says whether a
+is defined in `docs/coachman-contract.toml`, and `scripts/run coachman-contract` says whether a
 change touches it — so a fixture run is required when the change touches a listed file,
 and not for a change to files the list does not name.

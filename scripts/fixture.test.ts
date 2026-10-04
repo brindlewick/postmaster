@@ -18,15 +18,18 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { machine, release, tmpdir, type as osType } from "node:os";
 import { dirname, join } from "node:path";
 import {
   appFiles,
   checkWaybillEfforts,
+  checkPremisesOrder,
   FIXTURE_MARKER,
   HIDDEN_RE,
+  gitVersionNumber,
   hidden,
   laneScores,
   legsOf,
@@ -44,6 +47,7 @@ import {
   ticketBody,
   tickets,
   ticketTitle,
+  timeReport,
 } from "./fixture";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
@@ -53,7 +57,7 @@ const TOOL = toolRoot(import.meta);
 const HERE = scriptsDir(import.meta);
 const APP = join(TOOL, "fixtures", "app");
 const TICKETS = join(TOOL, "fixtures", "tickets");
-const wrapper = join(import.meta.dir, "fixture.sh");
+const wrapper = join(import.meta.dir, "run");
 const first = tickets()[0] ?? "";
 
 let tmp = "";
@@ -67,6 +71,135 @@ let dest = "";
 const savedEnv: Record<string, string | undefined> = {};
 const bgResults = new Map<string, { code: number; out: string }>();
 const hiddenResults: Record<string, number> = {};
+
+function timestamp(seconds: number): string {
+  return new Date(Date.UTC(2026, 0, 1, 0, 0, seconds)).toISOString().replace(/\.000Z$/u, "Z");
+}
+
+function writeMarker(path: string, seconds: number): void {
+  writeFileSync(path, "");
+  const date = new Date(Date.UTC(2026, 0, 1, 0, 0, seconds));
+  utimesSync(path, date, date);
+}
+
+function timedCopy(name: string, kind: "floor" | "short" | "long-wait" | "no-stages"): void {
+  const source = join(tmp, `clean-${first}`, "repo");
+  const repo = join(tmp, name, "repo");
+  mkdirSync(dirname(repo), { recursive: true });
+  cpSync(source, repo, { recursive: true, preserveTimestamps: true });
+  const dispatch = join(repo, ".postmaster", "runs", "7");
+  const actionsPath = join(dispatch, "actions.jsonl");
+  const events = readFileSync(actionsPath, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const stageSeconds =
+    kind === "short"
+      ? {
+          bootstrapped: 120,
+          "workhorses-running": 600,
+          synthesis: 1320,
+          "checkpoint-1": 2040,
+          review: 2400,
+          shipping: 2880,
+          shipped: 3300,
+          done: 3441,
+        }
+      : kind === "long-wait"
+        ? {
+            bootstrapped: 120,
+            "workhorses-running": 720,
+            synthesis: 1560,
+            "checkpoint-1": 2520,
+            review: 3872,
+            shipping: 4200,
+            shipped: 4986,
+            done: 5580,
+          }
+        : {
+            bootstrapped: 120,
+            "workhorses-running": 720,
+            synthesis: 1560,
+            "checkpoint-1": 2520,
+            review: 2880,
+            shipping: 3600,
+            shipped: 3900,
+            done: 3960,
+          };
+  const legOneHandoff = kind === "short" ? 2220 : 2700;
+  const legTwoAccept = kind === "long-wait" ? 3871 : kind === "short" ? 2340 : 2820;
+  const legTwoHandoff = kind === "long-wait" ? 4201 : kind === "short" ? 3120 : 3720;
+  for (const event of events) {
+    let seconds = 0;
+    if (event.action === "stage" && typeof event.target === "string") {
+      seconds = stageSeconds[event.target as keyof typeof stageSeconds] ?? 0;
+    } else if (event.action === "handoff-accept") {
+      seconds = event.target === "leg-1" ? 60 : legTwoAccept;
+    } else if (event.action === "handoff") {
+      seconds = event.target === "leg-1" ? legOneHandoff : legTwoHandoff;
+    } else if (event.action === "dispatch" && event.actor === "postmaster") {
+      seconds = event.detail === "leg 2" ? legOneHandoff + 60 : 0;
+    } else if (event.action === "dispatch" && event.actor === "coachman") {
+      seconds = event.target === "two" ? 1 : 0;
+    }
+    event.ts = timestamp(seconds);
+  }
+  if (kind === "no-stages") {
+    writeFileSync(
+      actionsPath,
+      `${events
+        .filter((event) => event.action !== "stage")
+        .map((event) => JSON.stringify(event))
+        .join("\n")}\n`,
+    );
+    return;
+  }
+
+  const logs = join(dispatch, "logs");
+  mkdirSync(logs, { recursive: true });
+  writeMarker(join(logs, "one.done"), 600);
+  writeMarker(join(logs, "two.done"), 241);
+  const reviewStart = stageSeconds.review + 1;
+  for (const [lens, lane, elapsed] of [
+    ["bug", "mimo", 900],
+    ["bug", "codex", 180],
+  ] as const) {
+    events.push({
+      ts: timestamp(reviewStart),
+      project: "repo",
+      run: "7",
+      actor: "coachman",
+      action: "review-launch",
+      target: lane,
+      detail: `${lens} round 1`,
+    });
+    const doneSeconds =
+      kind === "long-wait"
+        ? Math.min(stageSeconds.done - 1, reviewStart + elapsed)
+        : reviewStart + elapsed;
+    writeMarker(join(logs, `review-r1-${lens}-${lane}.done`), doneSeconds);
+  }
+  writeFileSync(
+    join(logs, "review-r1.json"),
+    JSON.stringify({
+      started: timestamp(reviewStart),
+      reviewers: [
+        ["bug", "mimo"],
+        ["bug", "codex"],
+      ],
+    }),
+  );
+  writeFileSync(actionsPath, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
+  if (kind === "long-wait") {
+    writeFileSync(
+      join(dispatch, "brief.md"),
+      readFileSync(join(dispatch, "brief.md"), "utf8").replace(
+        /^efforts:.*$/mu,
+        "efforts: one=wrong",
+      ),
+    );
+  }
+}
 
 function background(name: string, fn: () => number | { code: number; out: string }): void {
   const r = fn();
@@ -122,7 +255,7 @@ function record(
     join(d, "brief.md"),
     `# Waybill: 7\n${turnpikes}\n\n## Ticket\n\n${ticketBody(t)}\n## Project profile\nrepo: ${repo}\n`,
   );
-  run("bash", [join(HERE, "run-meta.sh"), d, repo]);
+  run(join(HERE, "run"), ["run-meta", d, repo]);
   const recordedConfig = JSON.parse(readFileSync(join(d, "run.json"), "utf8")).config;
   const workhorses = (recordedConfig.team.workhorses ?? [])
     .map((name: string) => {
@@ -131,7 +264,7 @@ function record(
     })
     .join(", ");
   const coachman = recordedConfig.team.coachman;
-  const efforts = run("bash", [join(HERE, "run-meta.sh"), "efforts", d]).out.trim();
+  const efforts = run(join(HERE, "run"), ["run-meta", "efforts", d]).out.trim();
   writeFileSync(
     join(d, "brief.md"),
     `${readFileSync(join(d, "brief.md"), "utf8")}\n## Team\nworkhorses: ${workhorses}\ncoachman: ${coachman.harness}/${coachman.model}/${coachman.effort ?? ""}\n${efforts}\n`,
@@ -140,6 +273,26 @@ function record(
     const runJson = JSON.parse(readFileSync(join(d, "run.json"), "utf-8"));
     delete runJson.coachman_contract;
     writeFileSync(join(d, "run.json"), JSON.stringify(runJson, null, 2));
+  }
+  if (
+    run("bash", [
+      join(HERE, "run"),
+      "log-action",
+      d,
+      "coachman",
+      "premises",
+      base,
+      `base=${base}`,
+      "result=same",
+    ]).code !== 0
+  )
+    return 1;
+  for (const lane of recordedConfig.team.workhorses as string[]) {
+    if (
+      run("bash", [join(HERE, "run"), "log-action", d, "coachman", "dispatch", lane, "workhorse"])
+        .code !== 0
+    )
+      return 1;
   }
 
   const stageList = stages.split("\n").filter(Boolean);
@@ -164,22 +317,22 @@ function record(
   }
   for (let n = 1; n <= legs; n++) {
     writeFileSync(join(d, `leg-${n}-prompt.txt`), `You are the coachman for leg ${n} of 7.\n`);
-    run("bash", [join(HERE, "log-action.sh"), d, "postmaster", "dispatch", "7", `leg ${n}`]);
-    run("bash", [join(HERE, "log-action.sh"), d, "coachman", "handoff-accept", `leg-${n}`]);
+    run(join(HERE, "run"), ["log-action", d, "postmaster", "dispatch", "7", `leg ${n}`]);
+    run(join(HERE, "run"), ["log-action", d, "coachman", "handoff-accept", `leg-${n}`]);
     for (const s of slices[n - 1] ?? []) {
-      run("bash", [join(HERE, "stage.sh"), d, s]);
+      run(join(HERE, "run"), ["stage", d, s]);
     }
     const handoffSections = sections.split("\n").filter(Boolean);
     writeFileSync(
       join(d, `handoff-${n}.md`),
       handoffSections.map((sec) => `## ${sec}\nLeg ${n}, recorded.\n\n`).join(""),
     );
-    run("bash", [join(HERE, "log-action.sh"), d, "coachman", "handoff", `leg-${n}`]);
+    run(join(HERE, "run"), ["log-action", d, "coachman", "handoff", `leg-${n}`]);
     writeFileSync(join(d, `.leg-${n}-done`), "");
     writeFileSync(join(d, `.leg-${n}-exited`), "");
   }
   for (const s of postStages) {
-    run("bash", [join(HERE, "stage.sh"), d, s, "postmaster"]);
+    run(join(HERE, "run"), ["stage", d, s, "postmaster"]);
   }
   writeFileSync(join(d, "card.md"), "# Ship card: 7\n\nBranch 7 is merged into main.\n");
   const manifest = JSON.parse(readFileSync(join(d, "manifest.json"), "utf-8"));
@@ -217,6 +370,22 @@ function breaks(cleanDir: string, repo: string): void {
     kept.push(line);
   }
   writeFileSync(actionsPath, `${kept.join("\n")}\n`);
+
+  d = brokenCopy("break-notime", cleanDir);
+  writeFileSync(
+    join(d, "actions.jsonl"),
+    `${readFileSync(join(cleanDir, "actions.jsonl"), "utf-8")
+      .split("\n")
+      .filter((line) => {
+        if (!line.trim()) return false;
+        try {
+          return JSON.parse(line).action !== "stage";
+        } catch {
+          return true;
+        }
+      })
+      .join("\n")}\n`,
+  );
 
   d = brokenCopy("break-markers", cleanDir);
   rmSync(join(d, ".leg-2-done"), { force: true });
@@ -256,6 +425,7 @@ function breaks(cleanDir: string, repo: string): void {
 
   for (const b of [
     "stages",
+    "notime",
     "markers",
     "handoffs",
     "runjson",
@@ -327,10 +497,20 @@ function expectScore(key: string, failing: string, failText?: string): void {
     .filter((l) => l.startsWith("FAIL"))
     .map((l) => pyWords(l)[1] ?? "");
   const failingChecks = failLines.join(",") || "none";
-  const lines = out.split("\n").filter((l) => l.trim()).length;
+  const lines = out.split("\n").filter((l) => l.trim());
   expect(rc).toBe(failing === "none" ? 0 : 2);
   expect(failingChecks).toBe(failing);
-  expect(lines).toBe(8);
+  // platform + nine check lines, then the score's time section (#265)
+  expect(lines.filter((l) => l.startsWith("ok  ") || l.startsWith("FAIL"))).toHaveLength(9);
+  expect(lines.length).toBeGreaterThanOrEqual(11);
+  expect(
+    lines[0]?.startsWith(
+      `platform: ${osType()} ${release()} ${machine()}, bun ${Bun.version}, git `,
+    ),
+  ).toBe(true);
+  expect(
+    lines.slice(10).some((l) => l.startsWith("stage ") || l.includes("could not be timed")),
+  ).toBe(true);
   if (failText !== undefined) {
     expect(
       out
@@ -341,8 +521,50 @@ function expectScore(key: string, failing: string, failText?: string): void {
   }
 }
 
-function runScore(dispatch: string, repo: string): { code: number; out: string } {
-  const r = spawnSync(wrapper, ["score", dispatch, repo], { encoding: "utf8" });
+function scorePath(without: readonly string[] = []): string {
+  const bin = join(scratch, `path-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(bin);
+  const names = [
+    "awk",
+    "bash",
+    "bun",
+    "cat",
+    "cp",
+    "date",
+    "dirname",
+    "env",
+    "find",
+    "git",
+    "grep",
+    "head",
+    "mkdir",
+    "mktemp",
+    "node",
+    "npm",
+    "rm",
+    "sed",
+    "sh",
+    "sort",
+    "tar",
+    "tail",
+    "tr",
+    "xargs",
+    "jq",
+  ];
+  for (const name of names) {
+    if (without.includes(name)) continue;
+    const target = Bun.which(name);
+    if (target) symlinkSync(target, join(bin, name));
+  }
+  return bin;
+}
+
+function runScore(
+  dispatch: string,
+  repo: string,
+  env: Record<string, string | undefined> = process.env,
+): { code: number; out: string } {
+  const r = spawnSync(wrapper, ["fixture", "score", dispatch, repo], { encoding: "utf8", env });
   return { code: r.status ?? -1, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
 
@@ -399,13 +621,13 @@ beforeAll(() => {
 
   const emptyMd = join(tmp, "empty.md");
   writeFileSync(emptyMd, "");
-  const sectionsR = run("bash", [join(HERE, "handoff-check.sh"), emptyMd]);
+  const sectionsR = run(join(HERE, "run"), ["handoff-check", emptyMd]);
   sections = sectionsR.err
     .split("\n")
     .filter((l) => l.startsWith("handoff-check: missing or empty section: "))
     .map((l) => l.replace("handoff-check: missing or empty section: ", ""))
     .join("\n");
-  const listedR = run("bash", [join(HERE, "stage.sh"), "--list"]);
+  const listedR = run(join(HERE, "run"), ["stage", "--list"]);
   listed = listedR.out.trim();
   const stageLines = listed.split("\n");
   const doneIdx = stageLines.indexOf("done");
@@ -416,6 +638,28 @@ beforeAll(() => {
   }
   background("clean-one", () => recorded("clean-one", first, "reference", 1));
   background("clean-three", () => recorded("clean-three", first, "reference", 3));
+  for (const kind of ["floor", "short", "long-wait", "no-stages"] as const) {
+    const name = `timing-${kind}`;
+    timedCopy(name, kind);
+    const repo = join(tmp, name, "repo");
+    background(name, () => runScore(join(repo, ".postmaster", "runs", "7"), repo));
+  }
+  const cardRepo = join(tmp, "timing-card", "repo");
+  cpSync(join(tmp, "timing-floor", "repo"), cardRepo, {
+    recursive: true,
+    preserveTimestamps: true,
+  });
+  const cardDispatch = join(cardRepo, ".postmaster", "runs", "7");
+  rmSync(join(cardDispatch, "card.md"), { force: true });
+  background("timing-card", () => runScore(cardDispatch, cardRepo));
+  const missingMarkerRepo = join(tmp, "timing-missing-marker", "repo");
+  cpSync(join(tmp, "timing-floor", "repo"), missingMarkerRepo, {
+    recursive: true,
+    preserveTimestamps: true,
+  });
+  const missingMarkerDispatch = join(missingMarkerRepo, ".postmaster", "runs", "7");
+  rmSync(join(missingMarkerDispatch, "logs", "one.done"), { force: true });
+  background("timing-missing-marker", () => runScore(missingMarkerDispatch, missingMarkerRepo));
   background("break-hidden", () => recorded("break-hidden", first, "app"));
   background("break-gate", () => recorded("break-gate", first, "broken"));
 
@@ -553,11 +797,11 @@ describe(TICKETS_HEAD, () => {
     expect(tickets().length >= 2).toBe(true);
   }, 30000);
   for (const t of tickets()) {
-    test(`${t}: in the ticket shape, by scripts/ticket-check.sh`, () => {
+    test(`${t}: in the ticket shape, by run ticket-check`, () => {
       const body = ticketBody(t);
       writeFileSync(join(tmp, `body-${t}.md`), body);
-      const checkR = run("bash", [
-        join(HERE, "ticket-check.sh"),
+      const checkR = run(join(HERE, "run"), [
+        "ticket-check",
         "--body",
         join(tmp, `body-${t}.md`),
         "--title",
@@ -635,14 +879,15 @@ describe("new: a fresh repo outside every other, with its ticket in its own stor
     expect(run("git", ["-C", dest, "remote"]).out.trim()).toBe("");
   }, 30000);
   test("its own store holds the fixture ticket, title and body verbatim, in todo", () => {
-    const localSh = join(HERE, "local.sh");
-    const listR = run("bash", [localSh, dest, "list"]);
-    const readR = run("bash", [localSh, dest, "read", "1", "--body"]);
-    expect(listR.out.trim()).toBe(`#1\ttodo\t${ticketTitle(first)}`);
-    expect(readR.out).toBe(ticketBody(first));
+    const localSh = join(HERE, "run");
+    const listR = run(localSh, ["local", dest, "list"]);
+    const readR = run(localSh, ["local", dest, "read", "1", "--body"]);
+    const base = run("git", ["-C", dest, "rev-parse", "HEAD"]).out.trim();
+    expect(listR.out.trim()).toBe(`#1\ttodo\t${ticketTitle(first)}\tready`);
+    expect(readR.out).toBe(ticketBody(first).replaceAll("FIXTURE_BASE", base));
   }, 30000);
   test("a run against it reads the local tracker, though the config names github", () => {
-    const trackerKind = run("bash", [join(HERE, "tracker-kind.sh"), dest]);
+    const trackerKind = run(join(HERE, "run"), ["tracker-kind", dest]);
     expect(trackerKind.out.trim()).toBe("local");
   }, 30000);
   test("no hidden test and no reference solution reached it", () => {
@@ -690,16 +935,16 @@ describe("new: a fresh repo outside every other, with its ticket in its own stor
     const sameB = join(tmp, "two", "widgets");
     mkdirSync(join(sameA, ".postmaster", "runs", "T-1"), { recursive: true });
     mkdirSync(join(sameB, ".postmaster", "runs", "T-1"), { recursive: true });
-    const aRc = run("bash", [
-      join(HERE, "log-action.sh"),
+    const aRc = run(join(HERE, "run"), [
+      "log-action",
       join(sameA, ".postmaster", "runs", "T-1"),
       "postmaster",
       "note",
       "same-a",
       "one",
     ]).code;
-    const bRc = run("bash", [
-      join(HERE, "log-action.sh"),
+    const bRc = run(join(HERE, "run"), [
+      "log-action",
       join(sameB, ".postmaster", "runs", "T-1"),
       "postmaster",
       "note",
@@ -732,7 +977,7 @@ describe("new: a fresh repo outside every other, with its ticket in its own stor
       failingLocal,
       "#!/usr/bin/env bash\n" +
         "# Stands in for scripts/local.sh: makes the store, and fails to file the ticket.\n" +
-        `case $2 in store) exec "${join(HERE, "local.sh")}" "$@" ;; *) exit 1 ;; esac\n`,
+        `case $2 in store) exec "${join(HERE, "run")}" local "$@" ;; *) exit 1 ;; esac\n`,
     );
     run("chmod", ["+x", failingLocal]);
     const origLocal = process.env.LOCAL_SH;
@@ -803,6 +1048,203 @@ describe("score: a recorded run that meets every check scores clean", () => {
   test("a three-leg run dispatched before this change scores clean", () => {
     expectScore("clean-three", "none");
   }, 30000);
+
+  test("fixture score passes without jq on PATH and still requires npm", () => {
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const dispatch = join(repo, ".postmaster", "runs", "7");
+    const path = scorePath(["jq"]);
+    expect(run("bash", ["-c", "command -v jq"], { env: { PATH: path } }).code).toBe(1);
+    const clean = runScore(dispatch, repo, { ...process.env, PATH: path });
+    expect(clean.code).toBe(0);
+    const lines = clean.out.trim().split("\n");
+    expect(lines.slice(1, 10).every((line) => line.startsWith("ok  "))).toBe(true);
+    expect(lines[10]?.startsWith("stage ")).toBe(true);
+    expect(lines.length).toBeGreaterThan(10);
+    console.log(`score without jq:\n${clean.out.trimEnd()}`);
+
+    const withoutNpm = scorePath(["jq", "npm"]);
+    const missing = runScore(dispatch, repo, { ...process.env, PATH: withoutNpm });
+    expect(missing.code).toBe(1);
+    expect(missing.out).toContain("fixture: npm is not on PATH");
+
+    const withoutNode = scorePath(["jq", "node"]);
+    const missingNode = runScore(dispatch, repo, { ...process.env, PATH: withoutNode });
+    expect(missingNode.code).toBe(1);
+    expect(missingNode.out).toContain("fixture: node is not on PATH");
+  }, 120000);
+
+  test("score's platform line names the OS, release, architecture and tool versions", () => {
+    const result = bgResults.get(`clean-${first}`);
+    const git = gitVersionNumber(run("git", ["--version"]).out);
+    expect(result?.out.split("\n", 1)[0]).toBe(
+      `platform: ${osType()} ${release()} ${machine()}, bun ${Bun.version}, git ${git}`,
+    );
+  });
+
+  test("the platform line's git number drops a vendor suffix", () => {
+    expect(gitVersionNumber("git version 2.43.0")).toBe("2.43.0");
+    expect(gitVersionNumber("git version 2.40.1 (Apple Git-123)")).toBe("2.40.1");
+  });
+
+  test("a failing record keeps the platform line first", () => {
+    const out = bgResults.get("break-gate")?.out ?? "";
+    const cleanOut = bgResults.get(`clean-${first}`)?.out ?? "";
+    expect(out.split("\n", 1)[0]).toBe(cleanOut.split("\n", 1)[0]);
+    expect(
+      out.split("\n").filter((l) => l.startsWith("ok  ") || l.startsWith("FAIL")),
+    ).toHaveLength(9);
+    console.log(`failing score:\n${out.trimEnd()}`);
+  });
+
+  test("score's platform line excludes home, user and host environment values", () => {
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const dispatch = join(repo, ".postmaster", "runs", "7");
+    const home = join(scratch, "probe-home");
+    mkdirSync(home);
+    const probes = [
+      home,
+      "postmaster-probe-user-0620",
+      "postmaster-probe-logname-0620",
+      "postmaster-probe-host-0620",
+    ];
+    const result = runScore(dispatch, repo, {
+      ...process.env,
+      HOME: home,
+      USER: probes[1],
+      LOGNAME: probes[2],
+      HOSTNAME: probes[3],
+    });
+    expect(result.code).toBe(0);
+    for (const probe of probes) expect(result.out).not.toContain(probe);
+    expect(result.out.split("\n", 1)[0]).toBe(
+      bgResults.get(`clean-${first}`)?.out.split("\n", 1)[0],
+    );
+  }, 120000);
+});
+
+describe("score: timing on whole copied runs with ticket-figure timelines (#265)", () => {
+  const result = (name: string): { code: number; out: string } => bgResults.get(name)!;
+  const dispatchFor = (name: string): string => join(tmp, name, "repo", ".postmaster", "runs", "7");
+
+  test("the over-hour clean copy prints the run-times table, lane times and round times", () => {
+    const scored = result("timing-floor");
+    const dispatch = dispatchFor("timing-floor");
+    const repo = join(tmp, "timing-floor", "repo");
+    const direct = run(join(HERE, "run"), ["run-times", dispatch]);
+    expect(scored.code).toBe(0);
+    expect(scored.out).toContain(direct.out.trimEnd());
+    expect(scored.out).toContain("total                                            1h 06m");
+    expect(scored.out).toContain("workhorses: one 10m 00s, two 4m 00s");
+    expect(scored.out).toContain("review round 1: mimo bug 15m 00s, codex bug 3m 00s");
+    expect(scored.out).toContain("the run took longer than an hour: 1h 06m");
+    expect(scored.out).not.toContain("long wait:");
+    console.log(
+      `$ scripts/run fixture score ${dispatch} ${repo}\n${scored.out.trimEnd()}\nexit: ${scored.code}`,
+    );
+    console.log(
+      `$ scripts/run run-times ${dispatch}\n${direct.out.trimEnd()}\nexit: ${direct.code}`,
+    );
+  }, 30000);
+
+  test("the short copy has no over-hour line", () => {
+    const scored = result("timing-short");
+    expect(scored.code).toBe(0);
+    expect(scored.out).toContain("total                                            57m 21s");
+    expect(scored.out).not.toContain("longer than an hour");
+    console.log(
+      `$ scripts/run fixture score ${dispatchFor("timing-short")} ${join(tmp, "timing-short", "repo")}\n${scored.out.trimEnd()}\nexit: ${scored.code}`,
+    );
+  }, 30000);
+
+  test("long waits are named and an efforts failure stays the only failure", () => {
+    const scored = result("timing-long-wait");
+    const failures = scored.out.split("\n").filter((line) => line.startsWith("FAIL"));
+    expect(scored.code).toBe(2);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain("efforts");
+    expect(scored.out).toContain("checkpoint-1 19m 31s, shipping 13m 05s");
+    console.log(
+      `$ scripts/run fixture score ${dispatchFor("timing-long-wait")} ${join(tmp, "timing-long-wait", "repo")}\n${scored.out.trimEnd()}\nexit: ${scored.code}`,
+    );
+  }, 30000);
+
+  test("a missing card still fails while the over-hour line remains", () => {
+    const scored = result("timing-card");
+    expect(scored.code).toBe(2);
+    expect(scored.out).toContain("FAIL ship-card");
+    expect(scored.out).toContain("the run took longer than an hour: 1h 06m");
+    console.log(
+      `$ scripts/run fixture score ${dispatchFor("timing-card")} ${join(tmp, "timing-card", "repo")}\n${scored.out.trimEnd()}\nexit: ${scored.code}`,
+    );
+  }, 30000);
+
+  test("without stage lines the score says it could not time the run and keeps its check verdict", () => {
+    const scored = result("timing-no-stages");
+    expect(scored.code).toBe(2);
+    expect(scored.out).toContain("the run could not be timed");
+    expect(scored.out).toContain("FAIL stages");
+    expect(scored.out).not.toContain("longer than an hour");
+    console.log(
+      `$ scripts/run fixture score ${dispatchFor("timing-no-stages")} ${join(tmp, "timing-no-stages", "repo")}\n${scored.out.trimEnd()}\nexit: ${scored.code}`,
+    );
+  }, 30000);
+
+  test("a workhorse with no marker is named and receives no inferred duration", () => {
+    const scored = result("timing-missing-marker");
+    expect(scored.code).toBe(0);
+    expect(scored.out).toContain("workhorses: two 4m 00s, one no marker");
+  }, 30000);
+
+  test("a one-leg run has no review-round timing line", () => {
+    const scored = bgResults.get("clean-one")!;
+    expect(scored.out).not.toContain("review round");
+  }, 30000);
+});
+
+describe("score: premises are checked before workhorse dispatch", () => {
+  function recordOrder(name: string, rows: Array<Record<string, string>>): string {
+    const dispatch = join(tmp, `premises-${name}`);
+    mkdirSync(dispatch, { recursive: true });
+    writeFileSync(
+      join(dispatch, "run.json"),
+      JSON.stringify({ config: { team: { workhorses: ["one", "two"] } } }),
+    );
+    writeFileSync(
+      join(dispatch, "actions.jsonl"),
+      `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
+    );
+    return dispatch;
+  }
+
+  const premise = { actor: "coachman", action: "premises", target: "base", detail: "result=same" };
+  const laneDispatch = {
+    actor: "coachman",
+    action: "dispatch",
+    target: "one",
+    detail: "workhorse",
+  };
+
+  test("a premises action before the first workhorse dispatch passes", () => {
+    expect(checkPremisesOrder(recordOrder("before", [premise, laneDispatch])).ok).toBe(true);
+  });
+
+  test("a workhorse dispatch before the premises action fails", () => {
+    const result = checkPremisesOrder(recordOrder("after", [laneDispatch, premise]));
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("precedes");
+  });
+
+  test("a missing premises action fails", () => {
+    const result = checkPremisesOrder(recordOrder("missing", [laneDispatch]));
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("no coachman premises action");
+  });
+
+  test("premises with no workhorse dispatch passes", () => {
+    const result = checkPremisesOrder(recordOrder("stopped", [premise]));
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("no workhorse dispatched");
+  });
 });
 
 describe("score: a record's stages are entered by the legs the contract names", () => {
@@ -852,6 +1294,10 @@ describe("score: negative controls, the same record with one check broken at a t
   test("a stage change never logged: stages alone fails", () => {
     expectScore("break-stages", "stages", ", not ");
   }, 30000);
+  test("no stage lines at all: stages alone fails, and the score could not time the run", () => {
+    expectScore("break-notime", "stages");
+    expect(bgResults.get("break-notime")?.out ?? "").toContain("could not be timed");
+  }, 30000);
   test("a leg's done marker missing: markers alone fails", () => {
     expectScore("break-markers", "markers", ".leg-2-done");
   }, 30000);
@@ -865,10 +1311,182 @@ describe("score: negative controls, the same record with one check broken at a t
     expectScore("break-card", "ship-card", "no card.md");
   }, 30000);
   test("a waybill with no turnpikes line: stages alone fails", () => {
-    expectScore("break-legs", "stages", "turnpikes.sh legs");
+    expectScore("break-legs", "stages", "run turnpikes legs");
   }, 30000);
   test("a waybill with mismatched efforts: efforts alone fails", () => {
     expectScore("break-efforts", "efforts", "efforts:");
+  }, 30000);
+});
+
+describe("score: the time lines after the checks (#265)", () => {
+  const T0 = Date.UTC(2026, 0, 5, 10, 0, 0);
+  const at = (sec: number): string => `${new Date(T0 + sec * 1000).toISOString().slice(0, 19)}Z`;
+
+  const act = (
+    sec: number,
+    actor: string,
+    action: string,
+    target: string,
+    detail = "",
+  ): Record<string, unknown> => ({ ts: at(sec), actor, action, target, detail });
+
+  function plant(
+    name: string,
+    events: Array<Record<string, unknown>>,
+    markers: Array<[string, number]> = [],
+    files: Record<string, string> = {},
+  ): string {
+    const d = join(scratch, `time-${name}`);
+    mkdirSync(join(d, "logs"), { recursive: true });
+    writeFileSync(
+      join(d, "actions.jsonl"),
+      `${events.map((e) => JSON.stringify({ project: "p", run: "1", ...e })).join("\n")}\n`,
+    );
+    for (const [rel, content] of Object.entries(files)) {
+      writeFileSync(join(d, rel), content);
+    }
+    for (const [rel, sec] of markers) {
+      const p = join(d, rel);
+      writeFileSync(p, "");
+      const when = new Date(T0 + sec * 1000);
+      utimesSync(p, when, when);
+    }
+    return d;
+  }
+
+  /** 12m 20s total; checkpoint-1 waits 11m 00s across a leg gap. */
+  function waitRun(): string {
+    return plant(
+      "wait",
+      [
+        act(0, "postmaster", "dispatch", "7"),
+        act(1, "coachman", "dispatch", "slow", "thread-slow"),
+        act(2, "coachman", "dispatch", "fast", "thread-fast"),
+        act(3, "coachman", "dispatch", "ghost", "thread-ghost"),
+        act(5, "coachman", "handoff-accept", "leg-1"),
+        act(10, "coachman", "stage", "bootstrapped"),
+        act(20, "coachman", "stage", "checkpoint-1"),
+        act(30, "coachman", "handoff", "leg-1"),
+        act(70, "coachman", "review-launch", "fast", "bug round 1"),
+        act(72, "coachman", "review-launch", "slow", "bug round 1"),
+        act(690, "coachman", "handoff-accept", "leg-2"),
+        act(700, "coachman", "stage", "review"),
+        act(710, "coachman", "handoff", "leg-2"),
+        act(720, "coachman", "stage", "shipping"),
+        act(730, "coachman", "stage", "shipped"),
+        act(740, "coachman", "stage", "done"),
+      ],
+      [
+        ["logs/slow.done", 60],
+        ["logs/fast.done", 15],
+        ["logs/review-r1-bug-fast.done", 170],
+        ["logs/review-r1-bug-slow.done", 102],
+      ],
+      {
+        "logs/review-r1.json": `${JSON.stringify({
+          started: at(66),
+          reviewers: [
+            ["bug", "fast"],
+            ["bug", "slow"],
+          ],
+        })}\n`,
+      },
+    );
+  }
+
+  /** 1h 00m total; no wait over a minute; no review leg, no markers. */
+  function hourRun(): string {
+    return plant("hour", [
+      act(0, "postmaster", "dispatch", "7"),
+      act(5, "coachman", "handoff-accept", "leg-1"),
+      act(10, "coachman", "stage", "bootstrapped"),
+      act(20, "coachman", "stage", "workhorses-running"),
+      act(30, "coachman", "handoff", "leg-1"),
+      act(40, "coachman", "handoff-accept", "leg-2"),
+      act(50, "coachman", "stage", "synthesis"),
+      act(60, "coachman", "stage", "review"),
+      act(3600, "coachman", "handoff", "leg-2"),
+      act(3610, "coachman", "stage", "shipping"),
+      act(3620, "coachman", "stage", "shipped"),
+      act(3630, "coachman", "stage", "done"),
+    ]);
+  }
+
+  test("the stage table follows the checks with each stage's waiting and the total", () => {
+    const out = timeReport(waitRun());
+    // ASCII: time lines are machine-printed.
+    expect(out).toMatch(/^stage\s+started \(UTC\)/mu);
+    expect(out).toContain("11m 20s");
+    // ASCII: time lines are machine-printed.
+    expect(out).toMatch(/^total\s+12m 20s/mu);
+  }, 30000);
+
+  test("a wait over ten minutes names the stage, and no hour is claimed", () => {
+    const out = timeReport(waitRun());
+    expect(out).toContain("long wait: checkpoint-1 11m 00s");
+    expect(out).not.toContain("longer than an hour");
+  }, 30000);
+
+  test("a total over an hour is named, and no short wait is", () => {
+    const out = timeReport(hourRun());
+    expect(out).toContain("the run took longer than an hour: 1h 00m");
+    expect(out).not.toContain("long wait:");
+  }, 30000);
+
+  test("workhorses read slowest first, and the lane with no marker is named as such", () => {
+    expect(timeReport(waitRun())).toContain("workhorses: slow 59s, fast 13s, ghost no marker");
+  }, 30000);
+
+  test("a reviewer is named with its lens, slowest first", () => {
+    expect(timeReport(waitRun())).toContain("review round 1: fast bug 1m 40s, slow bug 30s");
+  }, 30000);
+
+  test("a run with no review round files says nothing about rounds", () => {
+    expect(timeReport(hourRun())).not.toContain("review round");
+  }, 30000);
+
+  test("a log with no stage lines could not be timed, and prints no table", () => {
+    const d = plant("notiming", [
+      act(0, "postmaster", "dispatch", "7"),
+      act(5, "coachman", "dispatch", "slow", "thread-slow"),
+      act(10, "coachman", "note", "x"),
+    ]);
+    const out = timeReport(d);
+    expect(out).toContain("the run could not be timed");
+    expect(out).not.toContain("started (UTC)");
+    expect(out).toContain("workhorses: slow no marker");
+  }, 30000);
+
+  test("a wait of exactly ten minutes stays silent while 601 seconds is named", () => {
+    const d = plant("boundary-wait", [
+      act(0, "postmaster", "dispatch", "7"),
+      act(5, "coachman", "handoff-accept", "leg-1"),
+      act(10, "coachman", "stage", "bootstrapped"),
+      act(20, "coachman", "stage", "checkpoint-1"),
+      act(30, "coachman", "handoff", "leg-1"),
+      act(630, "coachman", "handoff-accept", "leg-2"),
+      act(640, "coachman", "stage", "shipping"),
+      act(650, "coachman", "handoff", "leg-2"),
+      act(1251, "coachman", "stage", "shipped"),
+      act(1261, "coachman", "stage", "done"),
+    ]);
+    const out = timeReport(d);
+    const lines = out.split("\n").filter((l) => l.startsWith("long wait:"));
+    expect(lines).toEqual(["long wait: shipping 10m 01s"]);
+  }, 30000);
+
+  test("a total of exactly an hour stays silent", () => {
+    const d = plant("boundary-hour", [
+      act(0, "postmaster", "dispatch", "7"),
+      act(5, "coachman", "handoff-accept", "leg-1"),
+      act(10, "coachman", "stage", "bootstrapped"),
+      act(20, "coachman", "stage", "shipping"),
+      act(30, "coachman", "stage", "shipped"),
+      act(3600, "coachman", "stage", "done"),
+    ]);
+    const out = timeReport(d);
+    expect(out).toContain("1h 00m");
+    expect(out).not.toContain("longer than an hour");
   }, 30000);
 });
 
@@ -1183,7 +1801,7 @@ describe("a dangling symlink is listed and copied, never skipped", () => {
 // Main's #98 headless-fixture controls, unioned at the merge: the beside suite
 // above is this branch's; what follows is main's, verbatim but for imports.
 
-const SCRIPT = join(import.meta.dir, "fixture.ts");
+const SCRIPT = join(import.meta.dir, "run");
 const FIXTURE_TICKET = "remove";
 const gitEnv = {
   GIT_AUTHOR_NAME: "fixture",
@@ -1207,8 +1825,7 @@ afterEach(() => {
 });
 
 function runNew(dest: string, home: string, extraEnv: Record<string, string | undefined> = {}) {
-  const config = join(import.meta.dir, "..", "bunfig.toml");
-  return run("bun", ["--no-env-file", `--config=${config}`, SCRIPT, "new", dest, FIXTURE_TICKET], {
+  return run(SCRIPT, ["fixture", "new", dest, FIXTURE_TICKET], {
     env: {
       ...gitEnv,
       HOME: home,
@@ -1251,6 +1868,7 @@ describe("fixture copy mark and harness settings", () => {
     mkdirSync(home, { recursive: true });
 
     const made = runNew(dest, home);
+    if (made.code !== 0) throw new Error(made.out + made.err);
     const mark = run("git", ["-C", dest, "config", "--local", "--get", "postmaster.fixture"]);
     const commits = run("git", ["-C", dest, "rev-list", "--count", "main"]);
     const status = run("git", ["-C", dest, "status", "--porcelain", "--untracked-files=all"]);

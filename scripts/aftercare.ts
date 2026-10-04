@@ -4,7 +4,7 @@
 // run done and release its pinned tool. It runs from the live checkout of the tool, never the
 // run's pin, and logs every action it takes as it happens.
 //
-//   bun --no-env-file --config=/dev/null <tool>/scripts/aftercare.ts <dispatch>
+//   <tool>/scripts/run aftercare <dispatch>
 //        [--dry-run] [--json] [--comment <text>] [--run-log <text>]
 //
 // Ready means the manifest's stage is shipped (or done on a rerun), the last leg has exited
@@ -754,7 +754,7 @@ interface Kind {
 /** A detached worktree or a shared clone of the repository (cut-scratch --kind), a worktree
  * of it on a branch, or neither — which is left in place and named. */
 function classify(repo: string, path: string): Kind {
-  const kind = run("bash", [beside(import.meta, "cut-scratch.sh"), "--kind", path]);
+  const kind = run(beside(import.meta, "run"), ["cut-scratch", "--kind", path]);
   if (kind.code === 0) {
     const out = kind.out.trim();
     const at = out.indexOf(" ");
@@ -876,7 +876,7 @@ function closeFolder(
       return { ok: false, why: `a launch is still running in ${path}: ${live.join(";")}` };
     return { ok: true, why: "" };
   }
-  const closed = run("bash", [beside(import.meta, "host.sh"), "close", path]);
+  const closed = run(beside(import.meta, "run"), ["host", "close", path]);
   if (closed.code !== 0) return { ok: false, why: tail(closed) };
   return { ok: true, why: "" };
 }
@@ -893,7 +893,7 @@ function removeFolder(
 } {
   const removed =
     mode === "scratch"
-      ? run("bash", [beside(import.meta, "cut-scratch.sh"), "--remove", repo, path])
+      ? run(beside(import.meta, "run"), ["cut-scratch", "--remove", repo, path])
       : gitIn(repo, ["worktree", "remove", "--force", path]);
   if (removed.code !== 0) return { ok: false, why: tail(removed) };
   return { ok: true, why: "" };
@@ -907,8 +907,8 @@ function logAction(
   detail: string,
   step: string,
 ): void {
-  const logged = run("bash", [
-    beside(import.meta, "log-action.sh"),
+  const logged = run(beside(import.meta, "run"), [
+    "log-action",
     dispatch,
     "postmaster",
     action,
@@ -1063,7 +1063,7 @@ function stopPreview(dispatch: string, dryRun: boolean, synthesis: string): Prev
 // --- records a rerun reads ---------------------------------------------------------------------
 
 /** Whether this run's closing line is already in run-log.md: this command's own note, or
- * a line carrying exactly the text (run-log.sh writes `- HH:MM:SSZ <text>`). A substring
+ * a line carrying exactly the text (run-log writes `- HH:MM:SSZ <text>`). A substring
  * anywhere in the file is not enough: the rerun must write the line it was given. */
 function runLogDone(
   dispatch: string,
@@ -1084,18 +1084,18 @@ function runLogDone(
   } catch {
     return false;
   }
-  // ASCII: run-log.sh timestamps are tool-emitted HH:MM:SS digits.
+  // ASCII: run-log timestamps are tool-emitted HH:MM:SS digits.
   return raw
     .split("\n")
     .some((entry) => /^- [0-9]{2}:[0-9]{2}:[0-9]{2}Z (.*)$/u.exec(entry)?.[1] === line);
 }
 
-/** How this command invokes a tracker adapter: plane.sh takes no repo argument, its
- * command is argv[0] (ticket-check.ts invokes it the same way). */
+/** How this command invokes a tracker adapter through the run dispatcher: plane takes
+ * no repo argument, its command is argv[0] (ticket-check.ts invokes it the same way). */
 export function trackerArgv(adapter: string, repo: string, cmd: string, ticket: string): string[] {
-  const script = beside(import.meta, adapter);
-  if (adapter === "plane.sh") return [script, cmd, ticket];
-  return [script, repo, cmd, ticket];
+  const rung = beside(import.meta, "run");
+  if (adapter === "plane") return [rung, "plane", cmd, ticket];
+  return [rung, adapter, repo, cmd, ticket];
 }
 
 function ticketState(
@@ -1103,7 +1103,8 @@ function ticketState(
   repo: string,
   ticket: string,
 ): { state: string; read: string } {
-  const read = run("bash", trackerArgv(adapter, repo, "read", ticket));
+  const argv = trackerArgv(adapter, repo, "read", ticket);
+  const read = run(argv[0]!, argv.slice(1));
   if (read.code !== 0) {
     throw new Fault(
       3,
@@ -1244,7 +1245,7 @@ function mainFlow(args: Args): Result {
         `the last leg has not exited: ${exited} is missing`,
         `wait for leg ${String(leg)} to exit; if its process is gone, remount it (Stage D), then run again`,
       );
-    const style = run("bash", [beside(import.meta, "style-findings.sh"), "check", dispatch]);
+    const style = run(beside(import.meta, "run"), ["style-findings", "check", dispatch]);
     if (style.code === 2)
       throw new Fault(
         2,
@@ -1517,14 +1518,14 @@ function mainFlow(args: Args): Result {
     if (dryRun) {
       steps.push({ name: "close-run", status: "would", detail: "would close the run's spaces" });
     } else {
-      const windows = run("bash", [beside(import.meta, "host.sh"), "close-run", dispatch]);
+      const windows = run(beside(import.meta, "run"), ["host", "close-run", dispatch]);
       if (windows.code !== 0) {
         steps.push({ name: "close-run", status: "failed", detail: tail(windows) });
         pendingClosing(0);
         stops.push({
           step: "close-run",
           reason: `the run's windows would not close: ${tail(windows)}`,
-          next: `clear the run's windows (host.sh close-run ${dispatch} reports why), then run again`,
+          next: `clear the run's windows (run host close-run ${dispatch} reports why), then run again`,
         });
         return finish(3, steps, folders, stops);
       }
@@ -1566,12 +1567,12 @@ function mainFlow(args: Args): Result {
       steps.push({ name: "run-log", status: "would", detail: `would write: ${runLogText}` });
     } else {
       runClosing(() => {
-        const written = run("bash", [beside(import.meta, "run-log.sh"), dispatch, runLogText]);
+        const written = run(beside(import.meta, "run"), ["run-log", dispatch, runLogText]);
         if (written.code !== 0)
           throw new Fault(
             1,
             "run-log",
-            `run-log.sh could not write: ${tail(written)}`,
+            `run run-log could not write: ${tail(written)}`,
             `make ${join(dispatch, "run-log.md")} writable, then run again`,
           );
         logAction(dispatch, "note", "run-log", `closing line written: ${runLogText}`, "run-log");
@@ -1580,15 +1581,15 @@ function mainFlow(args: Args): Result {
     }
 
     // 2 and 3. the ticket's state and its closing comment
-    const kindResult = run("bash", [beside(import.meta, "tracker-kind.sh"), set.repo]);
+    const kindResult = run(beside(import.meta, "run"), ["tracker-kind", set.repo]);
     const kind = kindResult.code === 0 ? kindResult.out.trim() : "";
     const adapter =
       kind === "local"
-        ? "local.sh"
+        ? "local"
         : kind === "github"
-          ? "github.sh"
+          ? "github"
           : kind === "plane"
-            ? "plane.sh"
+            ? "plane"
             : null;
     const ticket = basename(dispatch);
     if (adapter === null) {
@@ -1641,7 +1642,8 @@ function mainFlow(args: Args): Result {
         });
       } else {
         runClosing(() => {
-          const set_ = run("bash", [...trackerArgv(adapter, set.repo, "state", ticket), "done"]);
+          const argv = [...trackerArgv(adapter, set.repo, "state", ticket), "done"];
+          const set_ = run(argv[0]!, argv.slice(1));
           if (set_.code !== 0)
             throw new Fault(
               3,
@@ -1695,11 +1697,12 @@ function mainFlow(args: Args): Result {
         });
       } else {
         runClosing(() => {
-          const posted = run("bash", [
+          const argv = [
             ...trackerArgv(adapter, set.repo, "comment", ticket),
             "postmaster",
             args.comment ?? "",
-          ]);
+          ];
+          const posted = run(argv[0]!, argv.slice(1));
           if (posted.code !== 0)
             throw new Fault(
               3,
@@ -1731,18 +1734,13 @@ function mainFlow(args: Args): Result {
       steps.push({ name: "stage", status: "would", detail: "would set the stage to done" });
     } else {
       runClosing(() => {
-        const marked = run("bash", [
-          beside(import.meta, "stage.sh"),
-          dispatch,
-          "done",
-          "postmaster",
-        ]);
+        const marked = run(beside(import.meta, "run"), ["stage", dispatch, "done", "postmaster"]);
         if (marked.code !== 0)
           throw new Fault(
             3,
             "stage",
-            `stage.sh could not mark the run done: ${tail(marked)}`,
-            `fix stage.sh's message, then run again`,
+            `run stage could not mark the run done: ${tail(marked)}`,
+            `fix run stage's message, then run again`,
           );
       });
       steps.push({ name: "stage", status: "done", detail: `${stage} -> done` });
@@ -1792,7 +1790,7 @@ function mainFlow(args: Args): Result {
       });
     } else {
       runClosing(() => {
-        const released = run("bash", [beside(import.meta, "run-meta.sh"), "release", dispatch]);
+        const released = run(beside(import.meta, "run"), ["run-meta", "release", dispatch]);
         if (released.code !== 0) {
           const message = tail(released);
           const locked = message.includes("is locked");

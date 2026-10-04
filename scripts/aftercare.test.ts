@@ -58,15 +58,15 @@ function makeR(): Fixture {
   sh("git", ["commit", "-qm", "BASE"], repo);
   const BASE = sh("git", ["rev-parse", "HEAD"], repo).trim();
 
-  const local = join(HERE, "local.sh");
-  sh("bash", [local, repo, "store", "init"], T);
+  const rung = join(HERE, "run");
+  sh(rung, ["local", repo, "store", "init"], T);
   for (let n = 1; n <= 7; n++) {
     const body = join(T, "body.md");
     writeFileSync(body, `body of ticket ${n}\n`);
-    const got = sh("bash", [local, repo, "create", `ticket ${n}`, body], T).trim();
+    const got = sh(rung, ["local", repo, "create", `ticket ${n}`, body], T).trim();
     if (got !== String(n)) throw new Error(`ticket number ${got}, wanted ${n}`);
   }
-  sh("bash", [local, repo, "state", "7", "done"], T);
+  sh(rung, ["local", repo, "state", "7", "done"], T);
 
   sh("git", ["checkout", "-q", "-b", "7"], repo);
   mkdirSync(join(repo, "test"));
@@ -215,9 +215,9 @@ function aftercare(
   return { code: result.code, out: `${result.out}${result.err}` };
 }
 
-/** host.sh under the same fixture env, for starting a launch the command must stop. */
+/** run host under the same fixture env, for starting a launch the command must stop. */
 function hostSh(r: Fixture, args: string[]): { code: number; out: string } {
-  const result = run("bash", [join(HERE, "host.sh"), ...args], { env: fixtureEnv(r) });
+  const result = run(join(HERE, "run"), ["host", ...args], { env: fixtureEnv(r) });
   return { code: result.code, out: `${result.out}${result.err}` };
 }
 
@@ -792,8 +792,8 @@ describe("aftercare on a landed run record", () => {
   test("a longer comment on the ticket never reconciles a shorter closing comment", () => {
     const r = makeR();
     sh(
-      "bash",
-      [join(HERE, "local.sh"), r.repo, "comment", "7", "postmaster", "closing words extended"],
+      join(HERE, "run"),
+      ["local", r.repo, "comment", "7", "postmaster", "closing words extended"],
       r.T,
     );
     const result = aftercare(r, WORDS);
@@ -920,19 +920,22 @@ describe("aftercare on a landed run record", () => {
   }, 120_000);
 
   test("tracker invocations: plane takes no repo, local and github keep it", () => {
-    expect(trackerArgv("plane.sh", "/repo", "read", "PROJ-1")).toEqual([
-      join(HERE, "plane.sh"),
+    expect(trackerArgv("plane", "/repo", "read", "PROJ-1")).toEqual([
+      join(HERE, "run"),
+      "plane",
       "read",
       "PROJ-1",
     ]);
-    expect(trackerArgv("local.sh", "/repo", "read", "7")).toEqual([
-      join(HERE, "local.sh"),
+    expect(trackerArgv("local", "/repo", "read", "7")).toEqual([
+      join(HERE, "run"),
+      "local",
       "/repo",
       "read",
       "7",
     ]);
-    expect(trackerArgv("github.sh", "/repo", "comment", "7")).toEqual([
-      join(HERE, "github.sh"),
+    expect(trackerArgv("github", "/repo", "comment", "7")).toEqual([
+      join(HERE, "run"),
+      "github",
       "/repo",
       "comment",
       "7",
