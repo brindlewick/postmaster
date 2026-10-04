@@ -390,6 +390,9 @@ spec and pauses for no spec review.
    `<tool>/scripts/stage.sh <dispatch> abandoned postmaster`, remove the ready mark with
    `<tool>/scripts/ticket-ready.sh unmark <repo> <TICKET>`, log the ruling, and start a clerk
    with `<tool>/scripts/clerk.sh start <repo> <TICKET>`, logging its dispatch as step 1 says.
+   When the tracker has no adapter script, `unmark` refuses: remove the ready label
+   through the tracker's own tooling (`trackers.md`, other), drop the marker with
+   `<tool>/scripts/ticket-ready.sh consume <repo> <TICKET>`, then start the clerk.
    The coachman already stopped before
    any workhorse branch or worktree existed; do not resume it.
 5. **Deliver the ruling:** remove `.escalation-ready`. On `go on`, resume the current leg
