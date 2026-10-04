@@ -37,7 +37,15 @@ the ticket from this section alone. No design here.>
 
 ## Decisions
 
-- **D1 (proposed)** <The choice, in plain words.> Why: <the reason.> Instead of: <what it beat.>
+### Not covered by the acceptance criteria
+
+- **D1 (proposed)** <A choice whose effect no criterion states, in plain words.> Why: <the reason.> Instead of: <what it beat.>
+
+### Covered by the acceptance criteria
+
+Each of these is stated by a criterion above; it is here for its reason and the alternative it beat.
+
+- **D2 (proposed)** <A choice that a criterion states, in plain words.> Why: <the reason.> Instead of: <what it beat.>
 
 ## Out of scope
 
@@ -66,7 +74,7 @@ default
 
 - <The files, functions, flags, event shapes and line ranges the lanes need, linked at the base
   commit, and any hint on where to start. Evidence and links the plain part has no room for.>
-  (C1, D1)
+  (C1, D1, D2)
 
 ### Verified at <base sha>
 
@@ -89,6 +97,11 @@ default
   `(given by the user)`. The mark never names a model, because the ticket is public. A decision is
   stated by what it changes for the flow or its user, not by where it is made in the code. A choice
   only the lanes care about, such as a name, a file or an order, is not a decision. Leave it to them.
+  The decisions come in two parts. `### Not covered by the acceptance criteria` comes first and
+  holds only the decisions whose effect no criterion states: these are the ones the user has to
+  read. `### Covered by the acceptance criteria` follows and holds the rest, under one line saying
+  each is stated by a criterion above and is there for its reason and the alternative it beat. A
+  decision keeps its number whichever part it is in, and a part with no decisions is left out.
 - **Detail** that only the implementation needs (exact cases, formats, tool names, counts, edge
   conditions, test inputs) goes under `## For the agents`, in the checks or the technical notes.
   Never drop a choice that changes what a person sees or what the flow does. Simplify the words and
