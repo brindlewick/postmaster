@@ -178,11 +178,28 @@ function markerPath(repo: string, id: string): string {
 }
 
 // The marker binds the sign-off to the signed-off text: the ticket id, then
-// the sha256 of the title and body as the check reads them. A post-sign-off
-// tracker edit changes the digest, and the next check refuses until the user
-// signs the new text off again.
+// the sha256 of the title and body as the check reads them, minus the `##
+// Log` comment trailer the adapters append. A post-sign-off tracker edit
+// changes the digest, and the next check refuses until the user signs the
+// new text off again; a comment does not.
+// The signed text: the body without the `## Log` comment trailer the
+// adapters append to the display read. Comments are not sign-off text: a
+// comment after sign-off must not read as a changed ticket. Only a trailer
+// cuts: a `## Log` line whose following lines are all comments or blank.
+function unsignedBody(body: string): string {
+  const lines = body.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i] !== "## Log") continue;
+    const tail = lines.slice(i + 1);
+    if (tail.every((l) => l === "" || l.startsWith("- "))) return lines.slice(0, i).join("\n");
+  }
+  return body;
+}
+
 function digestOf(title: string, body: string): string {
-  return createHash("sha256").update(`${title}\n${body}`).digest("hex");
+  return createHash("sha256")
+    .update(`${title}\n${unsignedBody(body)}`)
+    .digest("hex");
 }
 
 function writeQueue(repo: string, id: string, title: string, body: string): void {

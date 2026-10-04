@@ -270,6 +270,26 @@ describe("the marking and queue verbs", () => {
     expect(ready([repo, n]).code).toBe(0);
   }, 60000);
 
+  test("a comment after sign-off stays ready, and an edit under it still refuses", () => {
+    const n = local(["create", "Commented text", join(tmp, "a.md")]);
+    expect(ready(["mark", repo, n]).code).toBe(0);
+    expect(run(localSh, [repo, "comment", n, "coachman", "noting progress"]).code).toBe(0);
+    expect(ready([repo, n]).code).toBe(0);
+    expect(ready(["queue", repo, n]).code).toBe(0);
+    const live = run(localSh, [repo, "read", n, "--body"]);
+    const baseFile = join(tmp, "comment-base.md");
+    const newFile = join(tmp, "comment-new.md");
+    writeFileSync(baseFile, live.out ?? "");
+    writeFileSync(
+      newFile,
+      (live.out ?? "").replace("## Turnpikes\n\ndefault", "## Turnpikes\n\nnone"),
+    );
+    expect(run(localSh, [repo, "edit", n, newFile, baseFile]).code).toBe(0);
+    const changed = ready([repo, n]);
+    expect(changed.code).toBe(2);
+    expect(changed.out).toContain("changed since it was signed off");
+  }, 60000);
+
   test("a post-sign-off title edit refuses as well", () => {
     const n = local(["create", "Bound title", join(tmp, "a.md")]);
     expect(ready(["mark", repo, n]).code).toBe(0);
