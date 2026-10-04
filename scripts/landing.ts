@@ -457,7 +457,7 @@ function pullRequestChecks(o: string[]): number {
   // other empty report is a failure, never none: an unknown pull request and
   // a refused login fail the same way, with their own message.
   const empty = result.out.trim() === "";
-  if (empty && !/no checks reported/.test(result.err ?? "")) {
+  if (empty && !/no checks reported/u.test(result.err ?? "")) {
     die(`cannot read pull request checks: ${pyTrim(result.err || result.out)}`);
   }
   let checks: PullRequestCheck[];
