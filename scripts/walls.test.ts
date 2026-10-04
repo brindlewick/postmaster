@@ -331,19 +331,38 @@ describe("walls.sh open: the pause gate", () => {
     }
   });
 
-  test("an unreadable log refuses open; a missing log reads as no walls", () => {
+  test("an unreadable log reads as no walls for open, like a missing one", () => {
+    // Open's callers proceed and wake: the watcher dispatches past an unloggable
+    // action by pinned contract, so blocking here would contradict it.
     write(wall("stub"));
     chmodSync(join(d, "actions.jsonl"), 0o000);
     try {
-      const r = run(self, ["open", d]);
-      expect(r.code).toBe(1);
-      expect(r.err).toContain("cannot read");
+      expect(run(self, ["open", d]).code).toBe(0);
     } finally {
       chmodSync(join(d, "actions.jsonl"), 0o644);
     }
     rmSync(join(d, "actions.jsonl"));
-    const r = run(self, ["open", d]);
-    expect(r.code).toBe(0);
+    expect(run(self, ["open", d]).code).toBe(0);
+  });
+
+  test("an unreadable log refuses show, escalate, told, rule and carry with its reason", () => {
+    write(wall("stub"));
+    chmodSync(join(d, "actions.jsonl"), 0o000);
+    try {
+      for (const args of [
+        ["show", d],
+        ["escalate", d],
+        ["told", d, "stub"],
+        ["rule", d, "stub", "go-on"],
+        ["carry", d, "stub"],
+      ]) {
+        const r = run(self, args);
+        expect(r.code).toBe(1);
+        expect(r.err).toContain("cannot read");
+      }
+    } finally {
+      chmodSync(join(d, "actions.jsonl"), 0o644);
+    }
   });
 
   function line2(action: string, target: string, detail: string, actor = "postmaster"): string {

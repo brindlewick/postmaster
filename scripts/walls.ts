@@ -24,7 +24,9 @@
 // told and ruling never cover. A wall the launch detected but could not record leaves
 // `logs/<lane>.wall-lost` instead: `open` refuses while one exists, `show` and
 // `escalate` name it with its repair, and it is removed by hand once the wall is
-// re-recorded. A missing log reads as no walls; an unreadable one refuses every command.
+// re-recorded. A missing log reads as no walls; an unreadable one refuses every
+// command but open, which reads it as no walls so the watcher's pinned
+// act-and-wake on unloggable actions still holds.
 //
 // The reset arrives on the `wall` line: launch.sh parses it from the message the provider
 // ended the turn with (lib/wall.ts, D4 and D5), and show prints it in the machine's zone.
@@ -290,7 +292,11 @@ export function wallsCommand(argv: string[]): number {
   const dispatch = resolveDispatch(argv[1]);
   const runName = basename(dispatch);
   const walls = readWalls(dispatch);
-  if (logUnreadable(dispatch)) {
+  // Every command refuses an unreadable log — except open, whose callers proceed
+  // and wake: the watcher dispatches past an unloggable action by pinned contract
+  // (runs-watch.test.ts, "a dispatch whose action cannot be logged"), so open reads
+  // an unreadable log as no walls and the failing writes downstream do the waking.
+  if (cmd !== "open" && logUnreadable(dispatch)) {
     console.error(`walls: cannot read ${join(dispatch, "actions.jsonl")}`);
     return 1;
   }
