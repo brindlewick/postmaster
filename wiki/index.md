@@ -25,6 +25,11 @@ produce better software than one good model? If so, how?
   all **claimed**, since no dispatched run has been promoted yet. An audit of 25 syntheses bears
   on H1: the coachman's record of what it took from each lane cannot fail, and the second lane's
   share, counted in git, ranges from nothing to most of the code.
+- [A second reviewer earns its keep; a second workhorse is cheap and not shown to](concepts/several-lanes.md):
+  **claimed**. An audit of three days of runs: one reviewer lane alone found about half of the severe
+  findings the coachman verified and two found over nine tenths. A second workhorse supplied a fix or
+  a missing part in 12 of 18 real runs by the coachman's cards, and in 22 fixture runs each lane
+  alone passed every hidden test. The coachman, the review loop and one security review cost most.
 
 ## Harnesses
 

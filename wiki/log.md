@@ -8,6 +8,19 @@ updated: 2026-10-03
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-10-03] ingest | audit of three days of runs, for what several lanes earn
+
+Issue #257. A trial recorded in `raw/trials/2026-10-03-lane-audit/` over 31 of this repository's
+runs and 25 fixture runs with activity from 2026-09-30 15:40 to 2026-10-03 15:40 UTC. It reads
+the runs' own action logs, cards, usage files and event streams, and scores each fixture lane's
+branch on the hidden tests, which the earlier audit could not. Across 18 real runs that reached
+synthesis, a codex lane or mimo alone would have found 52% or 58% of 264 verified severe findings
+and the two together 91%. The second workhorse's part was a fix or a missing part in 12 of 18 by the
+coachman's cards, and each lane alone passed every hidden test in all 22 scorable fixture runs.
+Added [A second reviewer earns its keep; a second workhorse is cheap and not shown to](concepts/several-lanes.md),
+**claimed**, and linked it from [Combining models](concepts/combining-models.md), whose standings do
+not move: the trial promotes no run.
+
 ## [2026-10-03] query | should #216 build the check as a library module
 
 The user's word: no; whether it becomes a library is a later concern, so #216 builds the check
