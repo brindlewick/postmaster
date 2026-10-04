@@ -5771,6 +5771,49 @@ describe("C1: a launch that ends on its provider's limit records one wall", () =
     expect(rec.target).toBe("mimo");
     expect(rec.detail).toContain("workhorse - - none You have hit your usage limit.");
   }, 60000);
+
+  test("a detected wall the log cannot record fails the launch closed", () => {
+    const c = dispatch("c1-lost-wall");
+    stub(
+      "mimo",
+      `cat >/dev/null\nrm -rf ${c.d}/actions.jsonl; mkdir ${c.d}/actions.jsonl\ncat <<'EOF'\n${MIMO_WALL}\nEOF\nexit 0\n`,
+    );
+    const streamFile = join(c.d, "logs", "mimo-lost.jsonl");
+    mkdirSync(join(c.d, "logs"), { recursive: true });
+    const fd = openSync(streamFile, "w");
+    const r = spawnSync(
+      join(import.meta.dir, "launch.sh"),
+      ["launch", "mimo", c.wt, join(tmp, "prompt.txt"), "--run", c.d],
+      {
+        encoding: "utf8",
+        stdio: ["inherit", fd, "pipe"],
+        env: { ...baseEnv(), POSTMASTER_EVENT_STREAM: streamFile, POSTMASTER_LAUNCH_ROLE: "lane" },
+      },
+    );
+    closeSync(fd);
+    expect(r.status ?? 1).toBe(1);
+    expect(String(r.stderr ?? "")).toContain("was not recorded");
+  }, 60000);
+
+  test("a recorded mimo wall keeps the harness exit 0 (fail-closed control)", () => {
+    const c = dispatch("c1-kept-wall");
+    stub("mimo", `cat >/dev/null\ncat <<'EOF'\n${MIMO_WALL}\nEOF\nexit 0\n`);
+    const streamFile = join(c.d, "logs", "mimo-kept.jsonl");
+    mkdirSync(join(c.d, "logs"), { recursive: true });
+    const fd = openSync(streamFile, "w");
+    const r = spawnSync(
+      join(import.meta.dir, "launch.sh"),
+      ["launch", "mimo", c.wt, join(tmp, "prompt.txt"), "--run", c.d],
+      {
+        encoding: "utf8",
+        stdio: ["inherit", fd, "pipe"],
+        env: { ...baseEnv(), POSTMASTER_EVENT_STREAM: streamFile, POSTMASTER_LAUNCH_ROLE: "lane" },
+      },
+    );
+    closeSync(fd);
+    expect(r.status ?? 1).toBe(0);
+    expect(wallsIn(join(c.d, "actions.jsonl")).length).toBe(1);
+  }, 60000);
 });
 
 describe("C3: an ending that is not the provider's limit records no wall", () => {

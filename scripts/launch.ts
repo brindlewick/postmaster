@@ -1098,7 +1098,11 @@ function deliveredDuringLaunch(cwd: string, launchedAt: number): boolean {
   return false;
 }
 
-/** Record the provider wall this launch ended on, if it ended on one. */
+/**
+ * Record the provider wall this launch ended on, if it ended on one. True when a
+ * detected wall could not be recorded: the launch fails closed on that, so the run
+ * investigates instead of proceeding without the user's ruling.
+ */
 function recordWallIfAny(o: {
   dispatch: string;
   streamPath: string;
@@ -1109,16 +1113,16 @@ function recordWallIfAny(o: {
   cwd: string;
   stopped: boolean;
   launchedAt: number;
-}): void {
-  if (o.stopped) return; // stopped mid-run is not a wall (criterion 3)
+}): boolean {
+  if (o.stopped) return false; // stopped mid-run is not a wall (criterion 3)
   const text = readStreamTail(o.streamPath, o.offset);
-  if (text === "") return;
+  if (text === "") return false;
   const message = endingWallMessage(text, o.harness);
-  if (message === null) return;
+  if (message === null) return false;
   const first = message.split("\n")[0] ?? "";
-  if (!isWallMessage(first)) return;
+  if (!isWallMessage(first)) return false;
   if (o.role === "lane" && deliveredDuringLaunch(o.cwd, o.launchedAt)) {
-    return; // it had delivered its result first
+    return false; // it had delivered its result first
   }
   let lens = "-";
   let round = "-";
@@ -1145,7 +1149,9 @@ function recordWallIfAny(o: {
     console.error(
       `launch: the provider wall on ${o.lane} was not recorded: ${(r.err || r.out).trim()}`,
     );
+    return true;
   }
+  return false;
 }
 
 function readRegularFile(path: string, missing: string): string {
@@ -1774,7 +1780,7 @@ exit "$rc"
     // A sourcing shell starts with SHLVL unset and takes the level as $1.
     ...(freshShell ? { env: { ...process.env, SHLVL: undefined } } : {}),
   });
-  const rc =
+  let rc =
     child.status !== null && child.status !== undefined
       ? child.status
       : child.signal
@@ -1784,8 +1790,9 @@ exit "$rc"
   if (RUN && stream) {
     // Before anything else the wall is read and recorded: host.sh lands the marker when
     // this process exits, so the line has to be in actions.jsonl by then.
+    let wallLost = false;
     if (launchRole === "lane" || launchRole === "reviewer") {
-      recordWallIfAny({
+      wallLost = recordWallIfAny({
         dispatch: RUN,
         streamPath: stream,
         offset: streamStart,
@@ -1797,6 +1804,8 @@ exit "$rc"
         launchedAt,
       });
     }
+    // A detected wall that could not be recorded must not read as a clean end.
+    if (wallLost && rc === 0) rc = 1;
     const r = run(join(scriptsDir(import.meta), "export-session.sh"), [
       RUN,
       NAME,
