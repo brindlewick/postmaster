@@ -775,11 +775,81 @@ function classify(repo: string, path: string): Kind {
   return { mode: "worktree", detail: "a worktree on a branch" };
 }
 
+/** Submodules with local changes the save cannot capture: the superproject's status and
+ * file list do not descend into them, so their contents would go with the folder. Failing
+ * to look leaves the folder too: an unreadable submodule state is not a clean one. */
+function dirtySubmodules(folder: string): { ok: boolean; dirty: string[]; why: string } {
+  const seen = gitIn(folder, [
+    "submodule",
+    "foreach",
+    "--recursive",
+    "git",
+    "status",
+    "--porcelain",
+  ]);
+  if (seen.code !== 0)
+    return { ok: false, dirty: [], why: `its submodules cannot be read: ${tail(seen)}` };
+  const dirty: string[] = [];
+  let current = "";
+  let currentDirty = false;
+  let stray = false;
+  const flush = (): void => {
+    if (current !== "" && currentDirty) dirty.push(current);
+    current = "";
+    currentDirty = false;
+  };
+  for (const line of seen.out.split("\n")) {
+    const entering = /^Entering '(.+)'$/u.exec(line);
+    if (entering) {
+      flush();
+      current = entering[1] ?? "";
+    } else if (line !== "") {
+      if (current === "") stray = true;
+      else currentDirty = true;
+    }
+  }
+  flush();
+  if (dirty.length === 0 && stray) dirty.push("a submodule");
+  return { ok: true, dirty, why: "" };
+}
+
+/** Unbranched merge commits: format-patch omits merges even in range, so their resolutions
+ * would go with the folder unsaved. */
+function unbranchedMerges(folder: string): { ok: boolean; merges: string[]; why: string } {
+  const found = gitIn(folder, ["rev-list", "--merges", "HEAD", "--not", "--branches"]);
+  if (found.code !== 0)
+    return { ok: false, merges: [], why: `its unbranched merges cannot be listed: ${tail(found)}` };
+  return {
+    ok: true,
+    merges: found.out.split("\n").filter((line) => line !== ""),
+    why: "",
+  };
+}
+
+/** A worktree git would refuse to remove: `remove --force` still bows to a lock. The dry
+ * run predicts the refusal; the real run meets it at removal. */
+function worktreeLocked(folder: string): string | null {
+  const gitDir = gitIn(folder, ["rev-parse", "--path-format=absolute", "--git-dir"]);
+  if (gitDir.code !== 0) return null;
+  let reason: string;
+  try {
+    reason = readFileSync(join(gitDir.out.trim(), "locked"), "utf8").trim();
+  } catch {
+    return null;
+  }
+  return reason === "" ? "locked" : `locked: ${reason}`;
+}
+
 /** Close the folder's windows before it is removed; the dry run reads the launch registry
- * instead, so it closes nothing. */
-function closeFolder(path: string, dryRun: boolean): { ok: boolean; why: string } {
+ * instead, so it closes nothing. In a dry run that would stop the preview, its group is
+ * already spoken for and does not hold the folder. */
+function closeFolder(
+  path: string,
+  dryRun: boolean,
+  exceptGroup?: number,
+): { ok: boolean; why: string } {
   if (dryRun) {
-    const live = liveLaunchNames(path);
+    const live = liveLaunchNames(path, exceptGroup);
     if (live.length)
       return { ok: false, why: `a launch is still running in ${path}: ${live.join(";")}` };
     return { ok: true, why: "" };
@@ -839,6 +909,8 @@ interface Preview {
   detail: string;
   path: string | null;
   next: string;
+  /** The preview's process group, where a stop is planned or done. */
+  group?: number;
 }
 
 function groupAlive(pid: number, members: Array<[number, string]>): boolean {
@@ -929,6 +1001,7 @@ function stopPreview(dispatch: string, dryRun: boolean, synthesis: string): Prev
       detail: `would stop the preview process group ${pid}`,
       path,
       next: "",
+      group: pid,
     };
   const signal = (name: string): void => {
     try {
@@ -1032,7 +1105,7 @@ function ticketHasComment(read: string, comment: string | null): boolean {
   let inLog = false;
   for (const line of read.split("\n")) {
     if (line === "## Log") inLog = true;
-    else if (inLog && line.startsWith("- ") && line.includes(want)) return true;
+    else if (inLog && line.startsWith("- ") && line.endsWith(want)) return true;
   }
   return false;
 }
@@ -1319,7 +1392,30 @@ function mainFlow(args: Args): Result {
           logAction(dispatch, "note", path, `left in place: ${entry.why}`, `folder ${path}`);
         continue;
       }
-      const closed = closeFolder(path, dryRun);
+      const merges = unbranchedMerges(path);
+      if (!merges.ok || merges.merges.length) {
+        const shown = merges.merges.slice(0, 3).join(" ");
+        const rest = merges.merges.length > 3 ? ` and ${merges.merges.length - 3} more` : "";
+        entry.result = "left";
+        entry.why = merges.ok
+          ? `unbranched merge ${shown}${rest}, whose resolutions no patch can carry; left in place`
+          : `${merges.why}; left in place`;
+        if (!dryRun)
+          logAction(dispatch, "note", path, `left in place: ${entry.why}`, `folder ${path}`);
+        continue;
+      }
+      const submodules = dirtySubmodules(path);
+      if (!submodules.ok || submodules.dirty.length) {
+        entry.result = "left";
+        entry.why = submodules.ok
+          ? `submodule ${submodules.dirty.join(" ")} has local changes the save cannot capture; left in place`
+          : `${submodules.why}; left in place`;
+        if (!dryRun)
+          logAction(dispatch, "note", path, `left in place: ${entry.why}`, `folder ${path}`);
+        continue;
+      }
+      const except = preview.status === "would" ? preview.group : undefined;
+      const closed = closeFolder(path, dryRun, except);
       if (!closed.ok) {
         entry.result = "left";
         entry.why = `${closed.why}; left in place`;
@@ -1334,6 +1430,12 @@ function mainFlow(args: Args): Result {
       const flagged = flaggedFiles(set.repo, path);
       entry.flagged = flagged.length > 0;
       if (dryRun) {
+        const locked = worktreeLocked(path);
+        if (locked !== null) {
+          entry.result = "left";
+          entry.why = `${locked}; the real run would leave it in place`;
+          continue;
+        }
         entry.result = "would remove";
         if (entry.flagged) entry.why = `flagged: ${flagged.join(" ")}`;
         continue;

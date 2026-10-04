@@ -5483,8 +5483,9 @@ export function launchRecord(group: number): Registry | null {
 }
 
 /** Live launches registered for one directory, read-only: their names, as close's scan
- * finds them, with nothing removed. aftercare.ts's dry run reads this. */
-export function liveLaunchNames(dir: string): string[] {
+ * finds them, with nothing removed. aftercare.ts's dry run reads this, skipping the preview
+ * group it plans to stop. */
+export function liveLaunchNames(dir: string, exceptGroup?: number): string[] {
   const procs = processes();
   const boot = bootId();
   let names: string[] = [];
@@ -5499,6 +5500,7 @@ export function liveLaunchNames(dir: string): string[] {
     const rec = loadRecord(join(registryDir(), name));
     if (!rec || rec.dir !== dir) continue;
     const group = Number(name);
+    if (exceptGroup !== undefined && group === exceptGroup) continue;
     const live =
       (rec.start !== "" && procs.get(group)?.start === rec.start) ||
       rec.members.some(([pid, start]) => procs.get(pid)?.start === start) ||

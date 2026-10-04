@@ -691,6 +691,168 @@ describe("aftercare on a landed run record", () => {
     expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
   }, 120_000);
 
+  test("a folder with dirty submodule contents is left and named; a clean one goes", () => {
+    const sub = (r: Fixture): string => {
+      const mimo = join(r.repo, ".worktrees/7-mimo");
+      const src = join(r.T, "subsrc");
+      mkdirSync(src);
+      sh("git", ["init", "-q", "-b", "main", src]);
+      sh("git", ["config", "user.name", "aftercare-test"], src);
+      sh("git", ["config", "user.email", "test@example.invalid"], src);
+      writeFileSync(join(src, "s.txt"), "s\n");
+      sh("git", ["add", "s.txt"], src);
+      sh("git", ["commit", "-qm", "sub"], src);
+      sh("git", ["-c", "protocol.file.allow=always", "submodule", "add", src, "sm"], mimo);
+      sh("git", ["commit", "-qm", "add submodule"], mimo);
+      return mimo;
+    };
+    const r = makeR();
+    const mimo = sub(r);
+    writeFileSync(join(mimo, "sm/untracked.txt"), "dirty\n");
+    const result = aftercare(r, WORDS);
+    expect(result.code).toBe(3);
+    expect(result.out).toContain(".worktrees/7-mimo: left");
+    expect(result.out).toContain("submodule sm has local changes");
+    expect(existsSync(join(mimo, "sm/untracked.txt"))).toBe(true);
+    // control: the run's other folders still went
+    expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
+    // control: a clean submodule never holds its folder
+    const r2 = makeR();
+    sub(r2);
+    const clean = aftercare(r2, WORDS);
+    expect(clean.code).toBe(0);
+    expect(existsSync(join(r2.repo, ".worktrees/7-mimo"))).toBe(false);
+  }, 180_000);
+
+  test("a folder with an unbranched merge is left and named; a linear commit is saved", () => {
+    const r = makeR();
+    const scratch = join(r.repo, ".worktrees/7-mergetest");
+    sh("git", ["worktree", "add", "-q", "--detach", scratch, r.BASE], r.repo);
+    sh("git", ["checkout", "-q", "-b", "mg1"], scratch);
+    writeFileSync(join(scratch, "mg1.txt"), "a\n");
+    sh("git", ["add", "mg1.txt"], scratch);
+    sh("git", ["commit", "-qm", "mg1"], scratch);
+    sh("git", ["checkout", "-q", "-b", "mg2", r.BASE], scratch);
+    writeFileSync(join(scratch, "mg2.txt"), "b\n");
+    sh("git", ["add", "mg2.txt"], scratch);
+    sh("git", ["commit", "-qm", "mg2"], scratch);
+    sh("git", ["checkout", "-q", "--detach", r.BASE], scratch);
+    sh("git", ["merge", "-q", "--no-ff", "mg1", "mg2", "-m", "octomerge"], scratch);
+    const result = aftercare(r, WORDS);
+    expect(result.code).toBe(3);
+    expect(result.out).toContain(".worktrees/7-mergetest: left");
+    expect(result.out).toContain("unbranched merge");
+    expect(existsSync(scratch)).toBe(true);
+    // control: the run's other folders still went
+    expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
+    // control: a linear unbranched commit is saved as a patch and the folder goes
+    const r2 = makeR();
+    const scratch2 = join(r2.repo, ".worktrees/7-lineartest");
+    sh("git", ["worktree", "add", "-q", "--detach", scratch2, r2.BASE], r2.repo);
+    writeFileSync(join(scratch2, "note.txt"), "note\n");
+    sh("git", ["add", "note.txt"], scratch2);
+    sh("git", ["commit", "-qm", "linear"], scratch2);
+    const linear = aftercare(r2, WORDS);
+    expect(linear.code).toBe(0);
+    expect(existsSync(join(r2.D, "stray/7-lineartest.commits.patch"))).toBe(true);
+    expect(existsSync(scratch2)).toBe(false);
+  }, 180_000);
+
+  test("a locked worktree: the dry run predicts the refusal, the real run meets it, unlocked it goes", () => {
+    const r = makeR();
+    const mimo = join(r.repo, ".worktrees/7-mimo");
+    sh("git", ["-C", r.repo, "worktree", "lock", "--reason", "held for inspection", mimo]);
+    const dry = aftercare(r, ["--dry-run", ...WORDS]);
+    expect(dry.code).toBe(3);
+    expect(dry.out).toContain(".worktrees/7-mimo: left");
+    expect(dry.out).toContain("locked: held for inspection");
+    const real = aftercare(r, WORDS);
+    expect(real.code).toBe(3);
+    expect(real.out).toContain(".worktrees/7-mimo: left");
+    expect(existsSync(mimo)).toBe(true);
+    // control: unlocked, the rerun carries on and closes
+    sh("git", ["-C", r.repo, "worktree", "unlock", mimo]);
+    expect(aftercare(r, WORDS).code).toBe(0);
+    expect(existsSync(mimo)).toBe(false);
+  }, 180_000);
+
+  test("a longer comment on the ticket never reconciles a shorter closing comment", () => {
+    const r = makeR();
+    sh(
+      "bash",
+      [join(HERE, "local.sh"), r.repo, "comment", "7", "postmaster", "closing words extended"],
+      r.T,
+    );
+    const result = aftercare(r, WORDS);
+    expect(result.code).toBe(0);
+    expect(result.out).not.toContain("reconciled");
+    const meta = JSON.parse(readFileSync(join(r.repo, ".git/postmaster/tickets/7.json"), "utf8"));
+    expect(meta.log.some((e: string) => e.endsWith("postmaster: closing words extended"))).toBe(
+      true,
+    );
+    expect(meta.log.filter((e: string) => e.endsWith("postmaster: closing words")).length).toBe(1);
+    // control: an exact duplicate still reconciles (the posted-comment test above)
+  }, 120_000);
+
+  test("a live preview never holds the dry run; another live launch still does", () => {
+    const r = makeR();
+    const started = hostSh(r, [
+      "run",
+      "preview server",
+      join(r.repo, ".worktrees/7"),
+      "--under",
+      r.D,
+      "--role",
+      "coachman",
+      "--run",
+      r.D,
+      "--pidfile",
+      join(r.D, "render/preview.pid"),
+      "--out",
+      join(r.T, "p.out"),
+      "--err",
+      join(r.T, "p.err"),
+      "--",
+      "sleep",
+      "300",
+    ]);
+    expect(started.code).toBe(0);
+    const pid = Number(readFileSync(join(r.D, "render/preview.pid"), "utf8").trim());
+    try {
+      const dry = aftercare(r, ["--dry-run", ...WORDS]);
+      expect(dry.code).toBe(0);
+      expect(dry.out).toContain("would stop the preview process group");
+      expect(dry.out).toContain(".worktrees/7: would remove");
+      // control: the real run then stops it and closes, as the stop test shows
+      expect(aftercare(r, WORDS).code).toBe(0);
+    } finally {
+      killQuiet(pid);
+    }
+    // control: a live launch that is not the preview still holds its folder in a dry run
+    const r2 = makeR();
+    const other = hostSh(r2, [
+      "run",
+      "probe",
+      join(r2.repo, ".worktrees/7"),
+      "--out",
+      join(r2.T, "o.out"),
+      "--err",
+      join(r2.T, "o.err"),
+      "--",
+      "sleep",
+      "300",
+    ]);
+    expect(other.code).toBe(0);
+    try {
+      const dry = aftercare(r2, ["--dry-run", ...WORDS]);
+      expect(dry.code).toBe(3);
+      expect(dry.out).toContain(".worktrees/7: left");
+      expect(dry.out).toContain("probe");
+    } finally {
+      hostSh(r2, ["stop", join(r2.repo, ".worktrees/7")]);
+    }
+  }, 180_000);
+
   test("a ticket-dash symlink is left in place with a note naming why", () => {
     const r = makeR();
     const link = join(r.repo, ".worktrees/7-link");
