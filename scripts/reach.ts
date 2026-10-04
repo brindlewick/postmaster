@@ -512,10 +512,10 @@ function commandMentions(
     unwrapped = unwrapped.slice("/bin/bash -lc '".length);
     if (unwrapped.endsWith("'")) unwrapped = unwrapped.slice(0, -1);
   }
-  for (const raw of unwrapped.split(/[\s;&|()<>]+/u)) {
+  for (const raw of unwrapped.split(/[ \t\r\n;&|()<>]+/u)) {
     const token = stripToken(raw);
     if (!token) continue;
-    if (/^refs\/(?:heads|tags)\/\S+$/u.test(token)) {
+    if (/^refs\/(?:heads|tags)\/[^ \t\r\n]+$/u.test(token)) {
       refs.push(token);
       continue;
     }
