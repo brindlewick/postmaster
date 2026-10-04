@@ -400,8 +400,6 @@ export function cutRound(a: StepArgs, deps: StepDeps): StepResult {
     return res;
   }
   const checks = join(a.dispatch, "logs", `review-r${a.round}-checks.txt`);
-  let verifyCode = 1;
-  let verifyOut = "";
   try {
     // The shell's redirection opens the file before the command runs.
     writeFileSync(checks, "");
@@ -409,21 +407,23 @@ export function cutRound(a: StepArgs, deps: StepDeps): StepResult {
     res.err.push(
       `review-round: ${checks} cannot be written (${e instanceof Error ? e.message : String(e)})`,
     );
+    res.code = 1;
+    return res;
   }
-  if (res.err.length === 0) {
-    const v = deps.tool("verify", ["run", a.synthesis, a.dispatch]);
-    verifyCode = v.code;
-    verifyOut = v.out;
-    passErr(res, v);
-    try {
-      writeFileSync(checks, verifyOut);
-    } catch (e) {
-      res.err.push(
-        `review-round: ${checks} cannot be written (${e instanceof Error ? e.message : String(e)})`,
-      );
-    }
-    res.out.push(...lineList(verifyOut));
+  const v = deps.tool("verify", ["run", a.synthesis, a.dispatch]);
+  const verifyCode = v.code;
+  const verifyOut = v.out;
+  passErr(res, v);
+  let wroteChecks = true;
+  try {
+    writeFileSync(checks, verifyOut);
+  } catch (e) {
+    res.err.push(
+      `review-round: ${checks} cannot be written (${e instanceof Error ? e.message : String(e)})`,
+    );
+    wroteChecks = false;
   }
+  res.out.push(...lineList(verifyOut));
   recordStep(res, deps, "log-action", [
     a.dispatch,
     "coachman",
@@ -431,7 +431,7 @@ export function cutRound(a: StepArgs, deps: StepDeps): StepResult {
     snap,
     `review round ${a.round}, run verify exit ${verifyCode}`,
   ]);
-  if (verifyCode !== 0 && verifyCode !== 3) {
+  if (!wroteChecks || (verifyCode !== 0 && verifyCode !== 3)) {
     res.code = 1;
     return res;
   }

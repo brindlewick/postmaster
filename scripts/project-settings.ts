@@ -37,7 +37,7 @@ import {
   writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parseTomlText } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run } from "./lib/proc.ts";
@@ -793,6 +793,13 @@ const gitToplevel = (raw: string): string => {
  */
 export const runRootPath = (raw: string): string => {
   const root = gitToplevel(raw);
+  for (const part of [
+    join(root, ".postmaster"),
+    join(root, ".postmaster", "runs"),
+    join(root, ".postmaster", "runs", "postmaster"),
+  ]) {
+    if (isSymlink(part)) fail(`${part} must be a directory inside the project, not a symlink`);
+  }
   mkdirSync(join(root, ".postmaster", "runs", "postmaster"), { recursive: true });
   ensureIgnore(root, true);
   return join(root, ".postmaster", "runs");
@@ -805,15 +812,17 @@ export const runRootPath = (raw: string): string => {
  */
 export const ensureWorktreesExcluded = (raw: string): string => {
   const repo = projectRoot(raw);
-  const g = run("git", ["-C", repo, "rev-parse", "--absolute-git-dir"]);
+  // --git-path, not --absolute-git-dir: in a linked worktree the latter is the
+  // worktree's private dir, while git reads info/exclude from the common one.
+  const g = run("git", ["-C", repo, "rev-parse", "--git-path", "info/exclude"]);
   if (g.code !== 0) fail(`not a git repository: ${raw}`);
-  const file = join(g.out.trim(), "info", "exclude");
+  const file = resolve(repo, g.out.trim());
   const existing = existsSync(file) ? strictRead(file) : "";
   if (!pySplitLines(existing).includes(".worktrees/")) {
     let text = existing;
     if (text !== "" && !text.endsWith("\n")) text += "\n";
     text += ".worktrees/\n";
-    mkdirSync(join(g.out.trim(), "info"), { recursive: true });
+    mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, text);
   }
   return file;

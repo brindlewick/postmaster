@@ -2179,7 +2179,11 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
     } catch {}
     if (spec.pidfile) {
       try {
-        writeFileSync(spec.pidfile, `${String(pid)}\n`);
+        // The start and boot identity travels with the pid, so stop-pidfile
+        // refuses a number the OS has since reused for another process.
+        const start = startOf(pid);
+        const boot = bootId();
+        writeFileSync(spec.pidfile, start && boot ? `${pid}\n${start}\n${boot}\n` : `${pid}\n`);
       } catch {}
     }
   }
@@ -2811,7 +2815,7 @@ async function stopTree(
 /** One workhorse, named and placed as the runbook's block did: the host owns the composition. */
 async function workhorseCmd(args: string[]): Promise<void> {
   const [dispatch, lane, worktree] = args;
-  if (!dispatch || !lane || !worktree)
+  if (args.length !== 3 || !dispatch || !lane || !worktree)
     die("usage: run host workhorse <dispatch> <lane> <worktree>");
   const d = absolute(dispatch);
   const name = nameCmd(d, "workhorse", lane);
@@ -2844,7 +2848,12 @@ async function workhorseCmd(args: string[]): Promise<void> {
   ]);
 }
 
-/** The process group a pidfile names, stopped as `stop` stops a worktree's launches. */
+/**
+ * The process group a pidfile names, stopped as `stop` stops a worktree's launches.
+ * A pidfile in the form `run` writes (pid, start, boot) stops only the launch it
+ * recorded: a reused number whose start or boot differs is already gone. A bare pid
+ * stops whatever holds the number now.
+ */
 async function stopPidfileCmd(args: string[]): Promise<void> {
   const file = args[0] ?? "";
   if (!file) die("usage: run host stop-pidfile <pidfile>");
@@ -2854,11 +2863,18 @@ async function stopPidfileCmd(args: string[]): Promise<void> {
   } catch {
     die(`no such pidfile: ${file}`);
   }
-  const pid = Number.parseInt(text.trim(), 10);
-  if (!Number.isInteger(pid) || pid <= 0) die(`${file} does not hold a pid: ${text.trim()}`);
+  const parts = text.trim().split("\n");
+  const pidText = parts.length === 1 || parts.length === 3 ? (parts[0] ?? "") : "";
+  if (!/^[0-9]+$/u.test(pidText)) die(`${file} does not hold a pid: ${text.trim()}`);
+  const pid = Number(pidText);
+  if (pid <= 0) die(`${file} does not hold a pid: ${text.trim()}`);
   const table = processTable();
   const row = table.get(pid);
   if (row === undefined || row.zombie) {
+    console.log(`no process group of ${pid} is running`);
+    return;
+  }
+  if (parts.length === 3 && (row.start !== parts[1] || bootId() !== parts[2])) {
     console.log(`no process group of ${pid} is running`);
     return;
   }

@@ -552,4 +552,132 @@ describe("workhorse and stop-pidfile", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   }, 40000);
+
+  test("host workhorse refuses anything but its three arguments", () => {
+    for (const args of [[], ["a"], ["a", "b"], ["a", "b", "c", "--append"]]) {
+      const r = spawnSync(join(import.meta.dir, "run"), ["host", "workhorse", ...args], {
+        encoding: "utf8",
+        timeout: 10000,
+      });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("usage: run host workhorse <dispatch> <lane> <worktree>");
+    }
+  }, 40000);
+
+  test("host stop-pidfile refuses a pid with trailing junk, and leaves the group alone", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "host-pidfile-junk-"));
+    try {
+      const child = spawn("sleep", ["300"], { stdio: "ignore", detached: true });
+      const pid = child.pid!;
+      const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      const pidfile = join(dir, "preview.pid");
+      writeFileSync(pidfile, `${pid}junk\n`);
+      const r = spawnSync(join(import.meta.dir, "run"), ["host", "stop-pidfile", pidfile], {
+        encoding: "utf8",
+        timeout: 10000,
+      });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("does not hold a pid");
+      expect(processState(pid)).toBe("live");
+      child.kill("SIGKILL");
+      await Promise.race([exited, Bun.sleep(15000)]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 40000);
+
+  test("host stop-pidfile refuses a recorded number the OS has reused", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "host-pidfile-reuse-"));
+    try {
+      const child = spawn("sleep", ["300"], { stdio: "ignore", detached: true });
+      const pid = child.pid!;
+      const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      const pidfile = join(dir, "preview.pid");
+      // A stale start for a live number: the recorded launch is gone.
+      writeFileSync(pidfile, `${pid}\nno-such-start\nno-such-boot\n`);
+      const stale = spawnSync(join(import.meta.dir, "run"), ["host", "stop-pidfile", pidfile], {
+        encoding: "utf8",
+        timeout: 10000,
+      });
+      expect(stale.status).toBe(0);
+      expect(stale.stdout).toContain("no process group");
+      expect(processState(pid)).toBe("live");
+      // The live start with a foreign boot: still not the recorded launch.
+      writeFileSync(pidfile, `${pid}\n${processStart(pid)}\nno-such-boot\n`);
+      const boot = spawnSync(join(import.meta.dir, "run"), ["host", "stop-pidfile", pidfile], {
+        encoding: "utf8",
+        timeout: 10000,
+      });
+      expect(boot.status).toBe(0);
+      expect(boot.stdout).toContain("no process group");
+      expect(processState(pid)).toBe("live");
+      child.kill("SIGKILL");
+      await Promise.race([exited, Bun.sleep(15000)]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 40000);
+
+  test("a pidfile a launch wrote stops that launch", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "host-pidfile-roundtrip-"));
+    try {
+      const repo = join(dir, "repo");
+      const dispatch = join(repo, ".postmaster", "runs", "T-1");
+      const wt = join(repo, ".worktrees", "T-1");
+      mkdirSync(join(dispatch, "logs"), { recursive: true });
+      mkdirSync(wt, { recursive: true });
+      writeFileSync(
+        join(dispatch, "run.json"),
+        `${JSON.stringify({ config: { lanes: {}, team: { workhorses: [] } } })}\n`,
+      );
+      writeFileSync(
+        join(dispatch, "brief.md"),
+        `# Waybill: T-1\n\n## Dispatch\nname: T-1, test ticket\nsynthesis worktree: ${wt}\n`,
+      );
+      const env = {
+        ...process.env,
+        POSTMASTER_HOST: "none",
+        POSTMASTER_HOST_STATE: join(dir, "state"),
+        POSTMASTER_CONFIG: join(dir, "missing-config.toml"),
+      };
+      const launched = spawnSync(
+        join(import.meta.dir, "run"),
+        [
+          "host",
+          "run",
+          "pidfile-roundtrip",
+          wt,
+          "--under",
+          dispatch,
+          "--role",
+          "coachman",
+          "--run",
+          dispatch,
+          "--out",
+          join(dispatch, "logs", "s.jsonl"),
+          "--err",
+          join(dispatch, "logs", "s.err"),
+          "--marker",
+          join(dispatch, "logs", "s.done"),
+          "--pidfile",
+          join(dispatch, "s.pid"),
+          "--",
+          "sleep",
+          "300",
+        ],
+        { encoding: "utf8", env, timeout: 30000 },
+      );
+      expect(launched.status).toBe(0);
+      const pidfile = join(dispatch, "s.pid");
+      expect(readFileSync(pidfile, "utf8").trim().split("\n").length).toBe(3);
+      const r = spawnSync(join(import.meta.dir, "run"), ["host", "stop-pidfile", pidfile], {
+        encoding: "utf8",
+        timeout: 30000,
+      });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain("stopped the process group of");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
 });

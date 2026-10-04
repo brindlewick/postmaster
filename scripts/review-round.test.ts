@@ -942,6 +942,54 @@ describe("the round's three steps", () => {
       }, "review-round-cut2-");
     });
 
+    test("an unwritable checks file stops it before verify runs, with no gate record", () => {
+      withTempDir((root) => {
+        const p = paths(root);
+        const checks = join(p.dispatch, "logs", "review-r1-checks.txt");
+        mkdirSync(checks);
+        let verified = false;
+        const { calls, deps } = stand((name, args) => {
+          if (name === "verify") verified = true;
+          return green(name, args);
+        });
+        const res = cutRound(
+          { dispatch: p.dispatch, round: "1", repo: p.repo, synthesis: p.synthesis },
+          deps,
+        );
+        expect(res.code).toBe(1);
+        expect(verified).toBe(false);
+        expect(of(calls, "log-action").length).toBe(0);
+        expect(res.err.join("\n")).toContain(`${checks} cannot be written`);
+        expect(of(calls, "git").some((c) => c.args.includes("prune"))).toBe(false);
+      }, "review-round-cutwrite-");
+    });
+
+    test("a checks file lost after a green verify still stops it, on a true gate record", () => {
+      withTempDir((root) => {
+        const p = paths(root);
+        const checks = join(p.dispatch, "logs", "review-r1-checks.txt");
+        const { calls, deps } = stand((name, args) => {
+          if (name === "verify") {
+            chmodSync(checks, 0o444);
+            return { code: 0, out: "gate: pass\n", err: "" };
+          }
+          return green(name, args);
+        });
+        const res = cutRound(
+          { dispatch: p.dispatch, round: "1", repo: p.repo, synthesis: p.synthesis },
+          deps,
+        );
+        chmodSync(checks, 0o644);
+        expect(res.code).toBe(1);
+        expect(one(calls, "log-action", (c) => c.args[2] === "gate")?.args[4]).toBe(
+          "review round 1, run verify exit 0",
+        );
+        expect(res.err.join("\n")).toContain(`${checks} cannot be written`);
+        expect(of(calls, "git").some((c) => c.args.includes("prune"))).toBe(false);
+        expect(of(calls, "cut-scratch").length).toBe(0);
+      }, "review-round-cutwrite2-");
+    });
+
     test("a lens whose lanes do not resolve stops it after the prune", () => {
       withTempDir((root) => {
         const p = paths(root);
@@ -1046,11 +1094,14 @@ describe("the round's three steps", () => {
         expect(checks.every((c) => calls.indexOf(c) < startAt)).toBe(true);
         const runs = of(calls, "host").filter((c) => c.args[0] === "run");
         expect(runs.length).toBe(3);
-        const style = runs.find((c) => c.args.join(" ").includes("-rev-style-"));
+        const styleScratch = join(p.repo, ".worktrees", "T-1-rev-style-luna");
+        // An exact scratch argument, never a substring: the entry path carries the
+        // checkout's own directory, which may itself hold a -rev-<lens>- segment.
+        const style = runs.find((c) => c.args.includes(styleScratch));
         expect(style?.args).toEqual([
           "run",
           "style-name",
-          join(p.repo, ".worktrees", "T-1-rev-style-luna"),
+          styleScratch,
           "--under",
           p.dispatch,
           "--role",
@@ -1068,12 +1119,13 @@ describe("the round's three steps", () => {
           "launch",
           "launch",
           "luna",
-          join(p.repo, ".worktrees", "T-1-rev-style-luna"),
+          styleScratch,
           join(p.dispatch, "review-r1-style-prompt.txt"),
           "--run",
           p.dispatch,
         ]);
-        const bug = runs.find((c) => c.args.join(" ").includes("-rev-bug-"));
+        const bugScratch = join(p.repo, ".worktrees", "T-1-rev-bug-luna");
+        const bug = runs.find((c) => c.args.includes(bugScratch));
         expect(bug?.args.join(" ")).toContain(`${entry} launch review luna`);
         expect(bug?.args.join(" ")).toContain("BASESHA");
         expect(bug?.args.join(" ")).toContain(

@@ -435,9 +435,9 @@ the same as it always was:
 lane its events, error and marker paths under `<dispatch>/logs/`, and runs the launch with the
 prompt at `<dispatch>/<lane>-prompt.txt`, its `--last` file and `--run <dispatch>`; the
 dispatch makes its synthesis worktree space carry the ticket name.
-A resume runs the same way with `--append`, and the command
-`<tool>/scripts/run launch resume <lane> <workhorse-wt> <thread-id> <prompt-file>
---last <dispatch>/logs/<lane>-last.md --run <dispatch>`;
+A resume is the launch's `host run` composition with `--append` and the resume child:
+`<tool>/scripts/run host run <name> <workhorse-wt> --under <dispatch> --role lane --run <dispatch> --out <dispatch>/logs/<lane>-events.jsonl --err <dispatch>/logs/<lane>.err --append --marker <dispatch>/logs/<lane>.done -- <tool>/scripts/run launch resume <lane> <workhorse-wt> <thread-id> <prompt-file> --last <dispatch>/logs/<lane>-last.md --run <dispatch>`,
+with `<name>` as `host name <dispatch> workhorse <lane>` prints it;
 `run host` clears the old marker itself. Resume a lane only once its marker has landed: until
 then it is still running. No composer, no interactive session, no registration.
 The streaming output format is load-bearing: the thread id and the final message are harvested

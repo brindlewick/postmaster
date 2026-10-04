@@ -5,7 +5,16 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseTomlText } from "./lib/data";
@@ -504,5 +513,48 @@ describe("run-root and exclude-worktrees", () => {
     const r = runCli(SELF, ["project-settings", "exclude-worktrees", plain]);
     expect(r.code).toBe(1);
     expect(r.err).toContain("not a git repository");
+  }, 30000);
+
+  test("run-root refuses a symlinked .postmaster before creating anything outside", () => {
+    const target = at("run-root-symlink");
+    mkdirSync(target, { recursive: true });
+    expect(gitIn(target, "init", "-q")).toBe(0);
+    const outside = at("run-root-symlink-outside");
+    mkdirSync(outside, { recursive: true });
+    symlinkSync(outside, join(target, ".postmaster"));
+    const r = runCli(SELF, ["project-settings", "run-root", target]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("not a symlink");
+    expect(readdirSync(outside).length).toBe(0);
+  }, 30000);
+
+  test("run-root refuses a symlinked runs folder instead of printing a root through it", () => {
+    const target = at("run-root-runs-symlink");
+    mkdirSync(join(target, ".postmaster"), { recursive: true });
+    expect(gitIn(target, "init", "-q")).toBe(0);
+    const outside = at("run-root-runs-symlink-outside");
+    mkdirSync(outside, { recursive: true });
+    symlinkSync(outside, join(target, ".postmaster", "runs"));
+    const r = runCli(SELF, ["project-settings", "run-root", target]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("not a symlink");
+    expect(readdirSync(outside).length).toBe(0);
+  }, 30000);
+
+  test("exclude-worktrees lands where git reads it in a linked worktree", () => {
+    const main = at("exclude-linked-main");
+    mkdirSync(main, { recursive: true });
+    expect(gitIn(main, "init", "-q")).toBe(0);
+    expect(gitIn(main, "config", "user.name", "brindlewick")).toBe(0);
+    expect(gitIn(main, "config", "user.email", "332054101+brindlewick@users.noreply.github.com")).toBe(
+      0,
+    );
+    expect(gitIn(main, "commit", "-q", "--allow-empty", "-m", "init")).toBe(0);
+    const linked = at("exclude-linked-wt");
+    expect(gitIn(main, "worktree", "add", "--detach", linked, "HEAD")).toBe(0);
+    const r = runCli(SELF, ["project-settings", "exclude-worktrees", linked]);
+    expect(r.code).toBe(0);
+    mkdirSync(join(linked, ".worktrees", "x"), { recursive: true });
+    expect(gitIn(linked, "check-ignore", "-q", ".worktrees/x")).toBe(0);
   }, 30000);
 });
