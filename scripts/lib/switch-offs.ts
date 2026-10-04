@@ -659,7 +659,10 @@ interface LoggedApproval {
  * word for this run, and open with approved or refused plus the user's words.
  * Anything else is ignored with a warning, never silently obeyed and never
  * fatal to the listing. */
-function approvals(dispatch: string, warn: (message: string) => void): Map<string, "approved" | "refused"> {
+function approvals(
+  dispatch: string,
+  warn: (message: string) => void,
+): Map<string, "approved" | "refused"> {
   const root = resolve(dispatch);
   const runId = basename(root);
   const actionPath = join(root, "actions.jsonl");
@@ -751,7 +754,8 @@ export function inspectSwitchOffs(options: {
   } catch {
     throw new Error(`no merge base of ${options.defaultRef} and ${options.ticketRef}`);
   }
-  if (base === "") throw new Error(`no merge base of ${options.defaultRef} and ${options.ticketRef}`);
+  if (base === "")
+    throw new Error(`no merge base of ${options.defaultRef} and ${options.ticketRef}`);
   const comments = addedSwitches(repo, base, ticketHead);
   const settings = settingsChanges(repo, base, ticketHead);
   const warnings: string[] = [];

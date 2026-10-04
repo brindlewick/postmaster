@@ -657,7 +657,13 @@ function switchOffs(o: string[]): number {
       ...(o.length === 8 ? { dispatch: o[7]! } : {}),
     });
     process.stdout.write(`${report.status}\n${report.output}`);
-    return report.status === "clear" ? 0 : report.status === "held" ? 2 : report.status === "no reason" ? 3 : 4;
+    return report.status === "clear"
+      ? 0
+      : report.status === "held"
+        ? 2
+        : report.status === "no reason"
+          ? 3
+          : 4;
   } catch (e) {
     throw new LandingFailure(`switch-offs: ${e instanceof Error ? e.message : String(e)}`, 1);
   }

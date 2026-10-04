@@ -331,10 +331,7 @@ describe("switch-off detection", () => {
   test("touching a base file without touching its comment still lists nothing", () => {
     freshRepo("touch-base");
     git(repo, "checkout", "-q", "main");
-    write(
-      "scripts/so-base.ts",
-      "// oxlint-disable-line no-debugger -- from main\n;",
-    );
+    write("scripts/so-base.ts", "// oxlint-disable-line no-debugger -- from main\n;");
     commit("base comment on main");
     git(repo, "checkout", "-q", "-B", "ticket", "main");
     write("scripts/plain.ts", "export const x = 1;\n");
@@ -342,7 +339,10 @@ describe("switch-off detection", () => {
     const first = check();
     expect(first.code).toBe(0);
     expect(first.out).toBe("clear\n## Switch-offs\n\nnone");
-    write("scripts/so-base.ts", "// oxlint-disable-line no-debugger -- from main\n;\nexport const more = 2;\n");
+    write(
+      "scripts/so-base.ts",
+      "// oxlint-disable-line no-debugger -- from main\n;\nexport const more = 2;\n",
+    );
     commit("touch the base file");
     const second = check();
     expect(second.code).toBe(0);
