@@ -214,7 +214,7 @@ function record(
 
   const point = (name: string, lanes: Array<Record<string, string>>): void => {
     const detail = JSON.stringify({ kind: "point", point: name, result: "clean", lanes });
-    const logged = run("bash", [join(HERE, "log-action.sh"), d, "coachman", "reach", name, detail]);
+    const logged = run(join(HERE, "run"), ["log-action", d, "coachman", "reach", name, detail]);
     if (logged.code !== 0) throw new Error(`could not make fixture reach record: ${logged.err}`);
   };
   const laneRecords = (names: string[]) =>
@@ -377,7 +377,7 @@ function expectScore(key: string, failing: string, failText?: string): void {
   const lines = out.split("\n").filter((l) => l.trim()).length;
   expect(rc).toBe(failing === "none" ? 0 : 2);
   expect(failingChecks).toBe(failing);
-  expect(lines).toBe(failing === "run.json" ? 9 : 10);
+  expect(lines).toBe(failing === "run.json" ? 10 : 11);
   expect(
     out
       .split("\n", 1)[0]
@@ -447,7 +447,7 @@ describe("ticket #202 fixture reach score", () => {
     const result = runScore(dispatch, repo);
     expect(result.code).toBe(0);
     expect(result.out).toContain("ok   reach");
-    expect(result.out.split("\n").filter(Boolean)).toHaveLength(9);
+    expect(result.out.split("\n").filter(Boolean)).toHaveLength(11);
   }, 120000);
 
   test("C17 findings, missing points and supported-reader gaps fail fixture score", () => {
@@ -996,7 +996,7 @@ describe("score: a recorded run that meets every check scores clean", () => {
     const clean = runScore(dispatch, repo, { ...process.env, PATH: path });
     expect(clean.code).toBe(0);
     const lines = clean.out.trim().split("\n");
-    expect(lines).toHaveLength(10);
+    expect(lines).toHaveLength(11);
     expect(lines.slice(1).every((line) => line.startsWith("ok  "))).toBe(true);
     console.log(`score without jq:\n${clean.out.trimEnd()}`);
 
@@ -1028,7 +1028,7 @@ describe("score: a recorded run that meets every check scores clean", () => {
     const out = bgResults.get("break-gate")?.out ?? "";
     const cleanOut = bgResults.get(`clean-${first}`)?.out ?? "";
     expect(out.split("\n", 1)[0]).toBe(cleanOut.split("\n", 1)[0]);
-    expect(out.split("\n")).toHaveLength(11);
+    expect(out.split("\n")).toHaveLength(12);
     console.log(`failing score:\n${out.trimEnd()}`);
   });
 
