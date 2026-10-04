@@ -342,7 +342,7 @@ oracle("C2: of two reset times the later counts", (lay) => {
   const line = workhorseWall(
     lay,
     "c2two",
-    "Weekly window resets Oct 5, 2026 2:29 AM; hourly window resets Oct 6, 2026 2:29 AM.",
+    "You’ve hit your usage limit. Weekly window resets Oct 5, 2026 2:29 AM; hourly window resets Oct 6, 2026 2:29 AM.",
   );
   expectReset(lineBody(line), Date.UTC(2026, 9, 6, 2, 29, 0, 0), 1000);
 });
