@@ -1420,7 +1420,7 @@ beforeAll(() => {
       rc === 1 && out === "",
       `rc ${rc} out ${JSON.stringify(out)}`,
     );
-    writeFileSync(join(tmp, "dumpexec.env"), "exec /bin/false\n");
+    writeFileSync(join(tmp, "dumpexec.env"), "exec /usr/bin/false\n");
     writeFileSync(
       join(tmp, "dumpexec.toml"),
       `${head}coachman = { harness = "claude", model = "coach-model", env_file = "${join(tmp, "dumpexec.env")}" }\n`,
@@ -1686,8 +1686,8 @@ beforeAll(() => {
         "rc 0, silent streams, harness never ran",
       );
       parity(
-        "exec /bin/true in the file exits 0 without launching",
-        "export FOO=bar\nexec /bin/true\n",
+        "exec /usr/bin/true in the file exits 0 without launching",
+        "export FOO=bar\nexec /usr/bin/true\n",
         (rc, out, err, handed) =>
           rc === 0 &&
           out === "" &&
@@ -1716,19 +1716,19 @@ beforeAll(() => {
         "port refuses rc 1 naming the unfindable harness, harness never ran",
       );
       {
-        // 4,000 exports ≈ 840 KB: a big environment, and under the 1 MiB argument
-        // limit macOS puts on exec, so the control runs on both systems.
+        // 1,800 exports of ~200 bytes ≈ 400 KB: a big environment under the Mac's
+        // 1 MiB argument limit, and past nothing Linux enforces.
         const lines = ["export PARITY_BIG=yes"];
-        for (let i = 0; i < 4000; i++)
+        for (let i = 0; i < 1800; i++)
           lines.push(`export PAD${String(i).padStart(4, "0")}=${"x".repeat(200)}`);
         parity(
-          "a roughly 840 KB environment launches whole",
+          "a roughly 400 KB environment launches whole",
           `${lines.join("\n")}\n`,
           (rc, out, err, handed) =>
             rc === 0 &&
             ran(rc, out, err, handed) &&
             handed.includes("PARITY_BIG=yes") &&
-            handed.includes(`PAD3999=${"x".repeat(200)}`),
+            handed.includes(`PAD1799=${"x".repeat(200)}`),
           "rc 0 with the first and last variables handed on",
         );
       }
@@ -4823,8 +4823,8 @@ describe("negative controls", () => {
   test.skipIf(skipToml)("parity: exit 0 in the file exits 0 without launching", () => {
     assertControl("parity: exit 0 in the file exits 0 without launching");
   });
-  test.skipIf(skipToml)("parity: exec /bin/true in the file exits 0 without launching", () => {
-    assertControl("parity: exec /bin/true in the file exits 0 without launching");
+  test.skipIf(skipToml)("parity: exec /usr/bin/true in the file exits 0 without launching", () => {
+    assertControl("parity: exec /usr/bin/true in the file exits 0 without launching");
   });
   test.skipIf(skipToml)("parity: file output on stderr reaches the launch's stderr", () => {
     assertControl("parity: file output on stderr reaches the launch's stderr");
@@ -4835,8 +4835,8 @@ describe("negative controls", () => {
       assertControl("parity: a file that unsets everything hands on the emptied environment");
     },
   );
-  test.skipIf(skipToml)("parity: a roughly 840 KB environment launches whole", () => {
-    assertControl("parity: a roughly 840 KB environment launches whole");
+  test.skipIf(skipToml)("parity: a roughly 400 KB environment launches whole", () => {
+    assertControl("parity: a roughly 400 KB environment launches whole");
   });
   test.skipIf(skipToml)("parity: a file that unsets PATH applies instead of ignored", () => {
     assertControl("parity: a file that unsets PATH applies instead of ignored");

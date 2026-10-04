@@ -78,7 +78,9 @@ let baseLocal = "";
     }
   }
 }
-const hasPy3 = run("python3", ["-c", "pass"]).code === 0;
+const hasPy3 =
+  run("python3", ["-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"])
+    .code === 0;
 const noBaseReplay = baseLocal === "" || !hasPy3;
 // Without /proc/self/cmdline the raw non-UTF-8 argv tests cannot tell raw bytes
 // from U+FFFD, so they skip on macOS; skips.toml carries the reason.

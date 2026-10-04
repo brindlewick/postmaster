@@ -26,7 +26,9 @@ import {
 const SELF = join(import.meta.dir, "run");
 const BASE_BLOB = "bb782a973e69427c820ce16a676718e87f51995b:scripts/verify-journey.sh";
 
-const hasPy = run("python3", ["-c", "pass"]).code === 0;
+const hasPy =
+  run("python3", ["-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"])
+    .code === 0;
 const baseShown = run("git", ["-C", toolRoot(import.meta), "show", BASE_BLOB]);
 const foldSkip = !hasPy || baseShown.code !== 0;
 const spacedDone = process.env.POSTMASTER_SPACED_DONE === "1";
