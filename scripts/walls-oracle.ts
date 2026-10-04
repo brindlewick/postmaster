@@ -25,6 +25,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { processStart } from "./lib/processes.ts";
 
 export interface Run {
   code: number;
@@ -531,21 +532,8 @@ export function touchEpoch(path: string, epochSec: number): void {
 
 export function liveLock(dispatch: string, leg: string): void {
   // The lock's owner is this test run, alive throughout it.
-  let start: string;
-  try {
-    const stat = readFileSync(`/proc/${process.pid}/stat`, "utf8");
-    start = stat
-      .slice(stat.lastIndexOf(")") + 1)
-      .trim()
-      .split(/[ \t\n]+/u)[19]!;
-  } catch {
-    const r = sh("ps", ["-o", "lstart=", "-p", String(process.pid)], { ...process.env });
-    start = r.out
-      .trim()
-      .split(/[ \t\n]+/u)
-      .slice(0, 5)
-      .join(" ");
-  }
+  const start = processStart(process.pid);
+  if (start === null) throw new Error("the oracle's own start time is unreadable");
   writeFileSync(join(dispatch, `.leg-${leg}-active`), `${process.pid} ${start}\n`);
 }
 
