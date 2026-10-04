@@ -394,8 +394,8 @@ function exerciseSelfTest(sourceRoot: string): number {
       replaceOnce(
         repo,
         "scripts/spec-session.ts",
+        "// The spec session's verbs: brief writes the interactive session's brief, approve commits",
         "// The spec session's two verbs: brief writes the interactive session's brief, and approve",
-        "// The spec session's two verbs: brief writes the session's brief, and approve",
       ),
     "scripts/spec-session.ts",
   );
@@ -416,6 +416,21 @@ function exerciseSelfTest(sourceRoot: string): number {
     "scripts/spec-decisions.ts",
   );
   scriptCase("a wording fix in launch.ts answers yes", "scripts/launch.ts", "the attempt phase");
+  scriptCase(
+    "a wording fix in review-round.ts answers yes",
+    "scripts/review-round.ts",
+    "the round's cut, launch and harvest",
+  );
+  scriptCase(
+    "a wording fix in synthesis-shares.ts answers yes",
+    "scripts/synthesis-shares.ts",
+    "the shares record",
+  );
+  scriptCase(
+    "a wording fix in project-settings.ts answers yes",
+    "scripts/project-settings.ts",
+    "the run root",
+  );
   scriptCase(
     "a wording fix in fixture.ts answers yes",
     "scripts/fixture.ts",
