@@ -48,12 +48,12 @@ command -v git >/dev/null && command -v bun >/dev/null || {
   exit 2
 }
 
-# The 51 wrappers on main at BASE, longest first so front-door-acceptance matches whole.
-WRAPPERS='front-door-acceptance|parallel-runs-acceptance|verify-examples|verify-library|review-decide|review-findings|spec-review-link|coachman-contract|discover-project|handoff-check|project-settings|spec-decisions|style-findings|wait-for-markers|check-target|cut-scratch|export-session|find-projects|front-door|probe-harnesses|probe-trackers|review-forms|review-round|runs-status|ticket-check|tool-faults|tracker-kind|turnpikes|verify-journey|view-stream|fixture|github|landing|launch|link-skills|local|log-action|plane|reviewers|run-log|run-meta|run-times|runs-watch|setup|skill-refs|spec-session|stage|text|host|verify|wiki-lint'
-# The 6 runnable .ts files that never had a wrapper (host-self-test.ts is import-only).
-NAMES='check-target coachman-contract cut-scratch discover-project export-session find-projects fixture front-door front-door-acceptance github handoff-check host landing launch link-skills local log-action parallel-runs-acceptance plane probe-harnesses probe-trackers project-settings review-decide review-findings review-forms review-round reviewers run-log run-meta run-times runs-status runs-watch setup skill-refs spec-decisions spec-review-link spec-session stage style-findings text ticket-check tool-faults tracker-kind turnpikes verify verify-examples verify-journey verify-library view-stream wait-for-markers wiki-lint clean-checkout fixture-lanes run-clash summary-evidence synthesis-shares usage'
+# The 51 wrappers on main at BASE, plus the 2 main added after BASE, longest first so front-door-acceptance matches whole.
+WRAPPERS='front-door-acceptance|parallel-runs-acceptance|verify-examples|verify-library|review-decide|review-findings|spec-review-link|coachman-contract|discover-project|handoff-check|project-settings|spec-decisions|style-findings|wait-for-markers|probe-confine|ticket-parts|check-target|cut-scratch|export-session|find-projects|front-door|probe-harnesses|probe-trackers|review-forms|review-round|runs-status|ticket-check|tool-faults|tracker-kind|turnpikes|verify-journey|view-stream|fixture|github|landing|launch|link-skills|local|log-action|plane|reviewers|run-log|run-meta|run-times|runs-watch|setup|skill-refs|spec-session|stage|text|host|verify|wiki-lint'
+# The 7 runnable .ts files that never had a wrapper (host-self-test.ts is import-only).
+NAMES='check-target coachman-contract cut-scratch discover-project export-session find-projects fixture front-door front-door-acceptance github handoff-check host landing launch link-skills local log-action parallel-runs-acceptance plane probe-confine probe-harnesses probe-trackers project-settings review-decide review-findings review-forms review-page review-round reviewers run-log run-meta run-times runs-status runs-watch setup skill-refs spec-decisions spec-review-link spec-session stage style-findings text ticket-check ticket-parts tool-faults tracker-kind turnpikes verify verify-examples verify-journey verify-library view-stream wait-for-markers wiki-lint clean-checkout fixture-lanes run-clash summary-evidence synthesis-shares usage'
 set -- $NAMES
-[ $# -eq 57 ] || bad "oracle: NAMES lists $# scripts, want 57"
+[ $# -eq 60 ] || bad "oracle: NAMES lists $# scripts, want 60"
 
 SURFACES=(AGENTS.md README.md skills package.json .postmaster/project.toml project.example.toml config.example.toml fixtures docs/coachman-contract.toml scripts lint types)
 for s in "${SURFACES[@]}"; do
@@ -170,7 +170,7 @@ if [ -x scripts/run ]; then
     fi
     case "$got" in *"<--probe> <a> <b>"*) : ;; *) bad "AC1: entry drops args for $n: $got"; resolve_bad=$((resolve_bad + 1)) ;; esac
   done
-  [ "$resolve_bad" -eq 0 ] && ok "all 57 scripts resolve through the entry with both flags"
+  [ "$resolve_bad" -eq 0 ] && ok "all 60 scripts resolve through the entry with both flags"
   rm -rf "$STUB"
   err=$(scripts/run no-such-script-zzz 2>&1); rc=$?
   if [ "$rc" -eq 2 ] && [ "$err" = "run: no such script: no-such-script-zzz" ]; then

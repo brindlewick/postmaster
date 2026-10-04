@@ -7,6 +7,8 @@
 //   run run-meta path <dispatch>     print the canonical path of the run's tool checkout
 //   run run-meta check <dispatch>    the run's checkout still serves its dispatch commit
 //   run run-meta release <dispatch>  remove the pin when no claimed run is in flight
+//   run run-meta efforts <dispatch>  print the waybill's efforts line from run.json
+//   run run-meta run-pinned <dispatch> <name> [args...]  run a script from the run's pinned checkout
 //
 // Records when it was written; the run and project; the target repo's HEAD and branch; the
 // postmaster commit that dispatched it, and whether that checkout had uncommitted changes,
@@ -78,7 +80,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { tryTomlFile } from "./lib/data.ts";
+import { tryJsonFile, tryTomlFile } from "./lib/data.ts";
 import { runPinned } from "./lib/pinned.ts";
 import { toolRoot } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
@@ -87,7 +89,7 @@ import { pySplitLines, pyTrim } from "./lib/text.ts";
 const TOOL = toolRoot(import.meta);
 
 const USAGE =
-  "usage: run run-meta <dispatch> <repo> | pin <repo> <commit> | path <dispatch> | run-pinned <dispatch> <name> [args...] | check <dispatch> | release <dispatch>";
+  "usage: run run-meta <dispatch> <repo> | pin <repo> <commit> | path <dispatch> | run-pinned <dispatch> <name> [args...] | check <dispatch> | release <dispatch> | efforts <dispatch>";
 
 // Every command returns its exit code with the bytes for each stream; the CLI boundary writes
 // them, and the tests inspect them. stdout carries results (the pin path, the checkout,
@@ -401,8 +403,51 @@ function pathOf(d: string): Outcome {
   return ok(`${canonical}\n`);
 }
 
-// check_pin <dispatch>: the run's checkout still serves its dispatch commit. Silent on success.
-function checkPin(d: string): Outcome {
+// check_confinement <run.json>: the recorded mode agrees with the recorded config.
+// Mode disagreeing with config.confine fails; a run without the object is accepted
+// only when its config resolves to off.
+function checkConfinement(runJson: string): Outcome {
+  let r: unknown;
+  try {
+    r = JSON.parse(readFileSync(runJson, "utf8")) as unknown;
+  } catch {
+    return fail(`run-meta: ${runJson} cannot be read\n`);
+  }
+  if (typeof r !== "object" || r === null || Array.isArray(r)) {
+    return fail(`run-meta: ${runJson} is not an object\n`);
+  }
+  const rec = r as Record<string, unknown>;
+  const cfg = rec.config;
+  const configConfine =
+    typeof cfg === "object" && cfg !== null && !Array.isArray(cfg)
+      ? String((cfg as Record<string, unknown>).confine ?? "") === "on"
+      : false;
+  const conf = rec.confinement;
+  if (conf === undefined || conf === null) {
+    // A run without the object is accepted only when its config resolves to off.
+    if (configConfine) {
+      return fail(
+        `run-meta: ${runJson} records no confinement object but its config has confine on\n`,
+      );
+    }
+    return ok();
+  }
+  if (typeof conf !== "object" || Array.isArray(conf)) {
+    return fail(`run-meta: ${runJson} records a confinement that is not an object\n`);
+  }
+  const mode = (conf as Record<string, unknown>).mode;
+  const recordedOn = mode === "on";
+  if (recordedOn !== configConfine) {
+    return fail(
+      `run-meta: ${runJson} records confinement mode "${String(mode)}" but its config confine is ${configConfine ? "on" : "not on"}\n`,
+    );
+  }
+  return ok();
+}
+
+// check_pin <dispatch>: the run's checkout still serves its dispatch commit,
+// and its recorded confinement mode agrees with its config. Silent on success.
+function checkPinAndConfinement(d: string): Outcome {
   const runJson = join(d, "run.json");
   const at = pathOf(d);
   if (at.code !== 0) return at;
@@ -416,7 +461,7 @@ function checkPin(d: string): Outcome {
     if (git(checkout, "rev-parse", "--git-dir") === null) {
       return fail(`run-meta: ${checkout} is not a git checkout\n`);
     }
-    return ok();
+    return checkConfinement(runJson);
   }
   const commit = fieldCommit(runJson);
   if (commit === "") return fail(`run-meta: ${d}/run.json records no postmaster commit\n`);
@@ -436,7 +481,7 @@ function checkPin(d: string): Outcome {
         "it does not serve that commit's versions\n",
     );
   }
-  return ok();
+  return checkConfinement(runJson);
 }
 
 // --- pin scan -------------------------------------------------------------------------------
@@ -690,7 +735,66 @@ function collectHarnesses(cfg: Record<string, unknown>): string[] {
   return [...harnesses].sort();
 }
 
-type Built = { ok: true; record: Record<string, unknown> } | { ok: false; messages: string[] };
+const LOWEST_EFFORT: Readonly<Record<string, string>> = {
+  codex: "low",
+  claude: "low",
+  muse: "minimal",
+  mimo: "low",
+};
+
+function teamSpecs(cfg: Record<string, unknown>): [string, Record<string, unknown>][] {
+  const specs: [string, Record<string, unknown>][] = [];
+  const lanes = (cfg.lanes ?? {}) as Record<string, Record<string, unknown>>;
+  for (const [name, spec] of Object.entries(lanes)) {
+    if (spec && typeof spec === "object") specs.push([name, spec]);
+  }
+  const team = (cfg.team ?? {}) as Record<string, unknown>;
+  for (const name of ["coachman", "coachman_fallback", "postmaster"]) {
+    const spec = team[name];
+    if (spec && typeof spec === "object") specs.push([name, spec as Record<string, unknown>]);
+  }
+  const legs = (team.coachman_legs ?? {}) as Record<string, Record<string, unknown>>;
+  for (const [name, spec] of Object.entries(legs)) {
+    if (spec && typeof spec === "object") specs.push([`coachman.${name}`, spec]);
+  }
+  return specs;
+}
+
+function fixtureEfforts(cfg: Record<string, unknown>): string[] {
+  const warnings: string[] = [];
+  for (const [name, spec] of teamSpecs(cfg)) {
+    if (typeof spec.effort !== "string" || !spec.effort) continue;
+    const harness = String(spec.harness ?? "");
+    const lowest = LOWEST_EFFORT[harness];
+    if (lowest === undefined) {
+      warnings.push(`run-meta: no lowest effort for ${name} on ${harness}; keeping ${spec.effort}`);
+    } else {
+      spec.effort = lowest;
+    }
+  }
+  return warnings;
+}
+
+export function effortsLine(cfg: Record<string, unknown>): string {
+  const pairs = teamSpecs(cfg)
+    .filter(
+      ([name, spec]) => name !== "postmaster" && typeof spec.effort === "string" && !!spec.effort,
+    )
+    .map(([name, spec]) => `${name}=${spec.effort}`);
+  return `efforts:${pairs.length > 0 ? ` ${pairs.join(", ")}` : ""}`;
+}
+
+export function efforts(d: string): Outcome {
+  const record = tryJsonFile<Record<string, unknown>>(join(d, "run.json"));
+  if (!record) return fail(`run-meta: no readable run.json in ${d}\n`);
+  const cfg = record.config;
+  if (!cfg || typeof cfg !== "object") return fail(`run-meta: no config in ${d}/run.json\n`);
+  return ok(`${effortsLine(cfg as Record<string, unknown>)}\n`);
+}
+
+type Built =
+  | { ok: true; record: Record<string, unknown>; warnings: string[] }
+  | { ok: false; messages: string[] };
 
 function parseSettingsJson(text: string, what: string): { value: unknown } | { error: string } {
   try {
@@ -729,11 +833,17 @@ function buildRecord(
   }
   const cfg = parseSettingsJson(effective.out, "effective machine config");
   if ("error" in cfg) return { ok: false, messages: [cfg.error] };
+  const resolvedConfig = cfg.value as Record<string, unknown>;
+  const warnings = existsSync(join(resolvedRepo, ".postmaster", "fixture"))
+    ? fixtureEfforts(resolvedConfig)
+    : [];
   const harnessVersions: Record<string, string> = {};
-  for (const h of collectHarnesses(cfg.value as Record<string, unknown>))
-    harnessVersions[h] = version(h);
+  for (const h of collectHarnesses(resolvedConfig)) harnessVersions[h] = version(h);
+  const confineVal = resolvedConfig.confine;
+  const confinementMode = String(confineVal ?? "") === "on" ? "on" : "off";
   return {
     ok: true,
+    warnings,
     record: {
       written: utcStamp(new Date()),
       coachman_contract: 2,
@@ -749,7 +859,8 @@ function buildRecord(
         uncommitted_changes: (git(TOOL, "status", "--porcelain") ?? "") !== "",
         checkout,
       },
-      config: cfg.value,
+      config: resolvedConfig,
+      confinement: { mode: confinementMode },
       harness_versions: harnessVersions,
     },
   };
@@ -830,7 +941,11 @@ export function meta(d: string, repo: string): Outcome {
       return { code: 1, out: "", err };
     }
     const commit12 = (commit === "" ? "?" : commit).slice(0, 12);
-    return ok(`run-meta: wrote ${runJson} (postmaster ${commit12}, pinned at ${checkout})\n`);
+    return {
+      code: 0,
+      out: `run-meta: wrote ${runJson} (postmaster ${commit12}, pinned at ${checkout})\n`,
+      err: built.warnings.map((warning) => `${warning}\n`).join(""),
+    };
   });
   if (!held.locked) return fail(`run-meta: could not lock ${tools}\n`);
   return held.value;
@@ -981,12 +1096,13 @@ if (import.meta.main) {
   }
   {
     const cmd = argv[0];
-    const verbs = ["pin", "path", "check", "release", "run-pinned"];
+    const verbs = ["pin", "path", "check", "release", "efforts", "run-pinned"];
     let outcome: Outcome;
     if (cmd === "pin" && argv.length === 3)
       outcome = pin(argv[1] as string, argv[2] as string, readTools());
     else if (cmd === "path" && argv.length === 2) outcome = pathOf(argv[1] as string);
-    else if (cmd === "check" && argv.length === 2) outcome = checkPin(argv[1] as string);
+    else if (cmd === "check" && argv.length === 2)
+      outcome = checkPinAndConfinement(argv[1] as string);
     else if (cmd === "release" && argv.length === 2) outcome = releasePin(argv[1] as string);
     else if (cmd === "run-pinned" && argv.length >= 3) {
       const pinned = pathOf(argv[1] as string);
@@ -995,7 +1111,8 @@ if (import.meta.main) {
         const result = runPinned(pinned.out.trim(), argv[2] as string, argv.slice(3));
         outcome = { code: result.code, out: result.out, err: result.err };
       }
-    } else if (cmd !== undefined && !verbs.includes(cmd) && argv.length === 2) {
+    } else if (cmd === "efforts" && argv.length === 2) outcome = efforts(argv[1] as string);
+    else if (cmd !== undefined && !verbs.includes(cmd) && argv.length === 2) {
       outcome = meta(argv[0] as string, argv[1] as string);
     } else usage();
     if (outcome.out !== "") process.stdout.write(outcome.out);

@@ -62,6 +62,7 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { readTomlFile, tryJsonFile } from "./lib/data.ts";
+import { startCheck, wrapCommand } from "./lib/confine.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
 import { BOUND_L, BOUND_R, PY_S_CLASS } from "./lib/text.ts";
@@ -69,6 +70,15 @@ import { BOUND_L, BOUND_R, PY_S_CLASS } from "./lib/text.ts";
 const CONFIG =
   process.env.POSTMASTER_CONFIG ?? join(process.env.HOME ?? "", ".postmaster/config.toml");
 const LEGS = ["synthesis", "review", "ship"] as const;
+
+// The harness top review level, named when the lane's config names no effort. Without a named
+// level claude's `/code-review` reuses whatever level an interactive session last used, which
+// is nondeterministic; and an effortless lane's review must stay as today.
+const TOP_REVIEW_EFFORT: Record<string, string> = {
+  codex: "max",
+  claude: "max",
+  mimo: "high",
+};
 
 const ATTEMPT_PHASE_FILE = process.env.POSTMASTER_ATTEMPT_PHASE ?? "";
 let PHASE_TRACKING = 0;
@@ -106,6 +116,7 @@ interface Spec {
   model: string;
   effort: string;
   envFile: string;
+  confine: boolean;
 }
 
 function baseModel(model: unknown): string {
@@ -224,6 +235,7 @@ function resolveSpec(
     model: str(s.model),
     effort: str(s.effort),
     envFile: str(s.env_file),
+    confine: String(cfg.confine ?? "") === "on",
   };
 }
 
@@ -283,6 +295,8 @@ function buildForms(
   const cmd: string[] = [];
   const isResume = cmdMode === "resume" || cmdMode === "form-resume";
   const isReview = cmdMode === "review";
+  // Review takes the lane's recorded effort; when the lane names none, the harness top level.
+  const reviewEffort = effort || TOP_REVIEW_EFFORT[harness] || "";
   switch (harness) {
     case "codex": {
       if (isReview) cmd.push("codex", "exec", "review", "--base", base, "--json");
@@ -290,7 +304,7 @@ function buildForms(
       else cmd.push("codex", "exec", "-C", cwd, "--json");
       if (last) cmd.push("-o", last);
       cmd.push("-m", model);
-      if (isReview) cmd.push("-c", 'model_reasoning_effort="max"');
+      if (isReview) cmd.push("-c", `model_reasoning_effort="${reviewEffort}"`);
       else if (effort) cmd.push("-c", `model_reasoning_effort="${effort}"`);
       cmd.push("--dangerously-bypass-approvals-and-sandbox");
       if (cmdMode === "launch" || isReview) {
@@ -334,13 +348,13 @@ function buildForms(
       break;
     }
     case "claude": {
-      const text = isReview ? `/code-review max ${base}...HEAD` : promptText;
+      const text = isReview ? `/code-review ${reviewEffort} ${base}...HEAD` : promptText;
       if (isResume) cmd.push("claude", "-p", "--resume", thread, text);
       else cmd.push("claude", "-p", text);
       // A review's text is already literal; only a launch or resume splices the file after the cd.
       if (!isReview) promptArg = cmd.length - 1;
       cmd.push("--model", model);
-      if (isReview) cmd.push("--effort", "max");
+      if (isReview) cmd.push("--effort", reviewEffort);
       else if (effort) cmd.push("--effort", effort);
       const launchName = process.env.POSTMASTER_LAUNCH_NAME;
       if (launchName) cmd.push("--name", launchName);
@@ -382,7 +396,7 @@ function buildForms(
       );
       if (isReview) cmd.push("--command", "review");
       if (isResume) cmd.push("-s", thread);
-      if (isReview) cmd.push("--variant", "high");
+      if (isReview) cmd.push("--variant", reviewEffort);
       else if (effort) cmd.push("--variant", effort);
       if (cmdMode === "launch") {
         const launchName = process.env.POSTMASTER_LAUNCH_NAME;
@@ -1109,6 +1123,45 @@ if (import.meta.main) {
   let ENV_FILE = spec.envFile;
   if (!HARNESS) die(`${NAME} has no harness in ${source}`);
   if (!MODEL) die(`${NAME} has no model in ${source}`);
+  // A lane in the effective [lanes] table runs in a process space of its own
+  // when confine is on. Coachman, fallback and postmaster are not confined.
+  // form shows the wrapped command whenever one applies; it runs no start
+  // check. launch, resume and review start the confinement with a no-op, and
+  // run the lane unconfined with a warning when it cannot start.
+  const isLane = NAME !== "coachman" && NAME !== "coachman_fallback" && NAME !== "postmaster";
+  const showWrap = spec.confine && isLane;
+  let confineWrap = false;
+  if (spec.confine && isLane && CMD !== "skill" && CMD !== "form") {
+    const check = startCheck();
+    if (check.ok) {
+      confineWrap = true;
+    } else {
+      // A nonfatal warning, so without the launch: prefix: that prefix is
+      // the classifier's mark of a launch refusal, and the lane still runs.
+      console.error(
+        `warning: confinement cannot start (${check.cause}); running ${NAME} unconfined`,
+      );
+      if (RUN) {
+        const logged = run(join(scriptsDir(import.meta), "run"), [
+          "log-action",
+          RUN,
+          `lane:${NAME}`,
+          "note",
+          NAME,
+          `confinement fallback: ${check.cause}`,
+        ]);
+        if (logged.code !== 0) {
+          // Fail closed: without the fallback action an unconfined lane
+          // would read as a confined one. The harness never starts, so this
+          // is a launch refusal, correctly classified.
+          const why = logged.err.trim().split("\n")[0] ?? "";
+          die(
+            `cannot log the confinement fallback for ${NAME}; refusing to run it unconfined${why ? `: ${why}` : ""}`,
+          );
+        }
+      }
+    }
+  }
   if (CMD === "review") {
     const forms = run(join(scriptsDir(import.meta), "run"), ["review-forms", "has", HARNESS]);
     if (forms.code !== 0) {
@@ -1275,6 +1328,11 @@ if (import.meta.main) {
 
   if (CMD === "form") {
     const show = (a: string): string => showArg(a);
+    const maybeWrap = (cmd: string[]): string[] => {
+      if (!showWrap) return cmd;
+      const w = wrapCommand(cmd);
+      return w ?? cmd;
+    };
     const put = (cwd: string, cmd: string[], stdinFile: string): string => {
       let s = `cd ${show(cwd)}&& `;
       for (const a of cmd) s += show(a);
@@ -1282,7 +1340,9 @@ if (import.meta.main) {
       return s;
     };
     const launchForms = mkForms("form");
-    process.stdout.write(`launch: ${put(CWD, launchForms.cmd, launchForms.stdinFile)}\n`);
+    process.stdout.write(
+      `launch: ${put(CWD, maybeWrap(launchForms.cmd), launchForms.stdinFile)}\n`,
+    );
     try {
       const resumeForms = (() => {
         // Build the resume form: as the launch form's twin, with a placeholder data directory.
@@ -1302,7 +1362,9 @@ if (import.meta.main) {
           BASE,
         );
       })();
-      process.stdout.write(`resume: ${put(CWD, resumeForms.cmd, resumeForms.stdinFile)}\n`);
+      process.stdout.write(
+        `resume: ${put(CWD, maybeWrap(resumeForms.cmd), resumeForms.stdinFile)}\n`,
+      );
     } catch (e) {
       const msg = String(e instanceof Error ? e.message : e).replace(/^launch: /u, "");
       process.stdout.write(`resume: none: ${msg}\n`);
@@ -1526,6 +1588,14 @@ exit "$rc"
   } else if (forms.promptArg >= 0) {
     cmd = "bash";
     cmdArgs = promptedArgv(PROMPT, forms.promptArg, forms.cmd);
+  }
+
+  if (confineWrap) {
+    const wrapped = wrapCommand([cmd, ...cmdArgs]);
+    if (wrapped) {
+      cmd = wrapped[0] ?? cmd;
+      cmdArgs = wrapped.slice(1);
+    }
   }
 
   if (!attemptPhase("started")) die("cannot record that the harness started");

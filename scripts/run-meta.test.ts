@@ -11,6 +11,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -1435,6 +1436,110 @@ beforeAll(async () => {
       rcRo === 1 && !claimsAfter.includes(rorun),
       `exit ${rcRo}`,
     );
+    // Confinement mode recording (#200): dispatch writes the mode from
+    // top-level confine, and check holds the recorded mode to the config.
+    const mkConfRun = (tag: string, confineLine: string): string => {
+      const cfg = join(tmp, `conf-${tag}.toml`);
+      writeFileSync(cfg, `${confineLine}[lanes.one]\nharness = "bash"\nmodel = "m1"\n[team]\n`);
+      const dir = join(tmp, `confrun-${tag}`);
+      mkdirSync(dir, { recursive: true });
+      const r = cli([dir, repo], { ...process.env, POSTMASTER_CONFIG: cfg });
+      check(`dispatch with confine ${tag} writes run.json`, r.code === 0, r.out);
+      return dir;
+    };
+    const dOn = mkConfRun("on", 'confine = "on"\n');
+    const dOff = mkConfRun("off", 'confine = "off"\n');
+    const dAbsent = mkConfRun("absent", "");
+    const modeOf = (dir: string): unknown => {
+      try {
+        const r = JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as Record<string, any>;
+        return (r.confinement as Record<string, unknown> | undefined)?.mode;
+      } catch {
+        return undefined;
+      }
+    };
+    check("dispatch with on records mode on", modeOf(dOn) === "on");
+    check("dispatch with off records mode off", modeOf(dOff) === "off");
+    check("dispatch with absent confine records mode off", modeOf(dAbsent) === "off");
+    {
+      const t = cli(["check", dOn]);
+      check("check passes a run whose mode agrees with its config", t.code === 0, t.out);
+    }
+    // A mode that disagrees with the config fails. Edited copies share the
+    // dispatch's pin, so the pin check passes and the mode check decides.
+    const editRun = (src: string, tag: string, edit: (r: Record<string, any>) => void): string => {
+      const dir = join(tmp, `confrun-${tag}`);
+      mkdirSync(dir, { recursive: true });
+      const r = JSON.parse(readFileSync(join(src, "run.json"), "utf8")) as Record<string, any>;
+      edit(r);
+      writeFileSync(join(dir, "run.json"), JSON.stringify(r));
+      return dir;
+    };
+    {
+      const dDis = editRun(dOn, "disagree", (r) => {
+        r.confinement = { mode: "off" };
+      });
+      const t = cli(["check", dDis]);
+      check("check fails a mode that disagrees with its config", t.code === 1, t.out);
+    }
+    {
+      const dNoObjOff = editRun(dOff, "no-object-off", (r) => {
+        delete r.confinement;
+      });
+      const t = cli(["check", dNoObjOff]);
+      check(
+        "check passes a run without the object when its config resolves to off",
+        t.code === 0,
+        t.out,
+      );
+    }
+    {
+      const dNoObjOn = editRun(dOn, "no-object-on", (r) => {
+        delete r.confinement;
+      });
+      const t = cli(["check", dNoObjOn]);
+      check(
+        "check fails a run without the object when its config has confine on",
+        t.code === 1,
+        t.out,
+      );
+    }
+    // An old unpinned waybill holds its mode to its config too. The edited
+    // copies drop the checkout (kind "no") and name it from a waybill, so the
+    // pin check passes on the waybill path and the mode check decides.
+    const unpinRun = (src: string, tag: string, edit: (r: Record<string, any>) => void): string => {
+      const dir = join(tmp, `confrun-${tag}`);
+      mkdirSync(dir, { recursive: true });
+      const r = JSON.parse(readFileSync(join(src, "run.json"), "utf8")) as Record<string, any>;
+      const checkout = (r.postmaster as Record<string, any>).checkout as string;
+      delete (r.postmaster as Record<string, any>).checkout;
+      edit(r);
+      writeFileSync(join(dir, "run.json"), JSON.stringify(r));
+      writeFileSync(join(dir, "brief.md"), `## Dispatch\ntool: ${checkout}\n`);
+      return dir;
+    };
+    {
+      const dNoPinOn = unpinRun(dOn, "no-pin-on", (r) => {
+        delete r.confinement;
+      });
+      const t = cli(["check", dNoPinOn]);
+      check(
+        "check fails an unpinned run without the object when its config has confine on",
+        t.code === 1,
+        t.out,
+      );
+    }
+    {
+      const dNoPinOff = unpinRun(dOff, "no-pin-off", (r) => {
+        delete r.confinement;
+      });
+      const t = cli(["check", dNoPinOff]);
+      check(
+        "check passes an unpinned run without the object when its config resolves to off",
+        t.code === 0,
+        t.out,
+      );
+    }
   });
 }, 300000);
 
@@ -1443,6 +1548,127 @@ afterAll(() => {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
+});
+
+describe("fixture effort records", () => {
+  test("a moved fixture copy lowers every named effort, while a fixture-named ticket repo keeps its config", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const config = join(tmp, "machine.toml");
+      const pins = join(tmp, "pins");
+      const bin = join(tmp, "bin");
+      mkdirSync(bin);
+      for (const harness of ["codex", "claude", "muse", "mimo"]) {
+        writeFileSync(join(bin, harness), "#!/bin/sh\necho stub-version\n");
+        chmodSync(join(bin, harness), 0o755);
+      }
+      writeFileSync(
+        config,
+        '[lanes.codex_lane]\nharness = "codex"\nmodel = "c"\neffort = "max"\n' +
+          '[lanes.claude_lane]\nharness = "claude"\nmodel = "c"\neffort = "max"\n' +
+          '[lanes.muse_lane]\nharness = "muse"\nmodel = "m"\neffort = "high"\n' +
+          '[lanes.mimo_lane]\nharness = "mimo"\nmodel = "p/m"\neffort = "high"\n' +
+          '[lanes.no_effort]\nharness = "codex"\nmodel = "c"\n' +
+          '[lanes.unknown]\nharness = "agy"\nmodel = "a"\neffort = "high"\n' +
+          '[team]\nworkhorses = ["codex_lane"]\n' +
+          'coachman = { harness = "claude", model = "c", effort = "max" }\n' +
+          'coachman_fallback = { harness = "muse", model = "m", effort = "high" }\n' +
+          'postmaster = { harness = "codex", model = "c", effort = "max" }\n' +
+          '[team.coachman_legs]\nsynthesis = { harness = "mimo", model = "p/m", effort = "high" }\n' +
+          'review = { harness = "codex", model = "c", effort = "max" }\n',
+      );
+      const before = readFileSync(config);
+      const env = {
+        ...process.env,
+        POSTMASTER_CONFIG: config,
+        POSTMASTER_TOOL_PINS: pins,
+        PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
+      };
+      const original = join(tmp, "original");
+      const created = run(join(import.meta.dir, "run"), ["fixture", "new", original, "remove"], {
+        env,
+      });
+      expect(created.code).toBe(0);
+      const moved = join(tmp, "neutral");
+      renameSync(original, moved);
+      expect(run("git", ["-C", moved, "show", "HEAD:.postmaster/fixture"]).out).toBe(
+        "postmaster fixture v1\n",
+      );
+      const dispatch = join(moved, ".postmaster", "runs", "7");
+      mkdirSync(dispatch, { recursive: true });
+      const fixtureRecord = run(join(import.meta.dir, "run"), ["run-meta", dispatch, moved], {
+        env,
+      });
+      expect(fixtureRecord.code).toBe(0);
+      expect(fixtureRecord.err).toContain("no lowest effort for unknown on agy; keeping high");
+      const recorded = JSON.parse(readFileSync(join(dispatch, "run.json"), "utf8"));
+      const cfg = recorded.config;
+      expect(cfg.lanes.codex_lane.effort).toBe("low");
+      expect(cfg.lanes.claude_lane.effort).toBe("low");
+      expect(cfg.lanes.muse_lane.effort).toBe("minimal");
+      expect(cfg.lanes.mimo_lane.effort).toBe("low");
+      expect(cfg.lanes.no_effort.effort).toBeUndefined();
+      expect(cfg.lanes.unknown.effort).toBe("high");
+      expect(cfg.team.coachman.effort).toBe("low");
+      expect(cfg.team.coachman_fallback.effort).toBe("minimal");
+      expect(cfg.team.postmaster.effort).toBe("low");
+      expect(cfg.team.coachman_legs.synthesis.effort).toBe("low");
+      expect(cfg.team.coachman_legs.review.effort).toBe("low");
+      expect(readFileSync(config).equals(before)).toBe(true);
+      const line = run(join(import.meta.dir, "run"), ["run-meta", "efforts", dispatch], { env });
+      expect(line.code).toBe(0);
+      expect(line.out.trim()).toContain("codex_lane=low");
+      expect(line.out.trim()).toContain("coachman.synthesis=low");
+      expect(line.out.trim()).toContain("coachman.review=low");
+      expect(line.out.trim()).not.toContain("postmaster=");
+      expect(line.out.trim()).not.toContain("no_effort=");
+
+      const ticketRepo = join(tmp, "fixture-in-name");
+      mkdirSync(ticketRepo);
+      expect(run("git", ["-C", ticketRepo, "init", "-q", "-b", "main"]).code).toBe(0);
+      expect(
+        run("git", [
+          "-C",
+          ticketRepo,
+          "-c",
+          "user.name=brindlewick",
+          "-c",
+          "user.email=332054101+brindlewick@users.noreply.github.com",
+          "commit",
+          "-q",
+          "--allow-empty",
+          "-m",
+          "init",
+        ]).code,
+      ).toBe(0);
+      const ticketDispatch = join(ticketRepo, ".postmaster", "runs", "8");
+      mkdirSync(ticketDispatch, { recursive: true });
+      const ticketRecord = run(
+        join(import.meta.dir, "run"),
+        ["run-meta", ticketDispatch, ticketRepo],
+        {
+          env,
+        },
+      );
+      expect(ticketRecord.code).toBe(0);
+      const ticketCfg = JSON.parse(readFileSync(join(ticketDispatch, "run.json"), "utf8")).config;
+      expect(ticketCfg.lanes.codex_lane.effort).toBe("max");
+      expect(ticketCfg.lanes.mimo_lane.effort).toBe("high");
+      expect(ticketCfg.team.coachman_legs.synthesis.effort).toBe("high");
+      expect(ticketRecord.err).toBe("");
+      expect(readFileSync(config).equals(before)).toBe(true);
+      const ticketLine = run(
+        join(import.meta.dir, "run"),
+        ["run-meta", "efforts", ticketDispatch],
+        {
+          env,
+        },
+      );
+      expect(ticketLine.code).toBe(0);
+      expect(ticketLine.out.trim()).toContain("codex_lane=max");
+      expect(ticketLine.out.trim()).toContain("coachman.review=max");
+    });
+  }, 60000);
 });
 
 describe("positive controls", () => {
@@ -1822,4 +2048,45 @@ describe("pin lock beside the bash flow", () => {
       }
     });
   }, 180000);
+});
+
+describe("confinement mode recording", () => {
+  test("dispatch with confine on writes run.json", () => {
+    assertControl("dispatch with confine on writes run.json");
+  });
+  test("dispatch with confine off writes run.json", () => {
+    assertControl("dispatch with confine off writes run.json");
+  });
+  test("dispatch with confine absent writes run.json", () => {
+    assertControl("dispatch with confine absent writes run.json");
+  });
+  test("dispatch with on records mode on", () => {
+    assertControl("dispatch with on records mode on");
+  });
+  test("dispatch with off records mode off", () => {
+    assertControl("dispatch with off records mode off");
+  });
+  test("dispatch with absent confine records mode off", () => {
+    assertControl("dispatch with absent confine records mode off");
+  });
+  test("check passes a run whose mode agrees with its config", () => {
+    assertControl("check passes a run whose mode agrees with its config");
+  });
+  test("check fails a mode that disagrees with its config", () => {
+    assertControl("check fails a mode that disagrees with its config");
+  });
+  test("check passes a run without the object when its config resolves to off", () => {
+    assertControl("check passes a run without the object when its config resolves to off");
+  });
+  test("check fails a run without the object when its config has confine on", () => {
+    assertControl("check fails a run without the object when its config has confine on");
+  });
+  test("check fails an unpinned run without the object when its config has confine on", () => {
+    assertControl("check fails an unpinned run without the object when its config has confine on");
+  });
+  test("check passes an unpinned run without the object when its config resolves to off", () => {
+    assertControl(
+      "check passes an unpinned run without the object when its config resolves to off",
+    );
+  });
 });

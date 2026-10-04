@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-10-01
+updated: 2026-10-03
 ---
 
 # postmaster wiki
@@ -116,6 +116,18 @@ Why the design is shaped as it is.
 - [A gate on the default branch after a merge runs from a clean checkout](concepts/clean-checkout-gates.md):
   **claimed**. The run's working copies stay under `.worktrees/`; the flow's post-merge gate
   runs from a clean checkout of the branch outside the project folder, so it never reads them.
+- [The dashboard shows the fleet and can do nothing to it](concepts/dashboard.md): **claimed**.
+  A read-only web page for phone, iPad and desktop. It takes every figure from the scripts that
+  already compute it, listens on a Unix socket, and is reached only by the machine's owner
+  through Tailscale's proxy over plain HTTP. It never acts, because anything it could do, an
+  agent running as the user could do too.
+- [No library covers what the private-data scanner checks, so postmaster publishes one](concepts/scanner-library.md):
+  **claimed**. A survey of 32 tools found none checking agent transcripts and git history together
+  for personal data and secrets. A trial wrote #135's rules as data, and every one agreed with
+  the scanner. Two more measured Jev and patterns for personal data: patterns match Jev on data
+  with a shape or a label, raise less on real code, and leave names in prose, so the check uses
+  patterns alone (#216). The gap is the reason to publish; the library is a later change of its
+  own.
 
 ## Sources
 

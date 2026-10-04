@@ -249,7 +249,8 @@ on every launch and every resume.
 **The containment is the WORKTREE, not a permission flag.** No harness has verified mechanical
 write enforcement, so a workhorse is confined by having its own worktree and a reviewer by having its
 own disposable scratch. **The one prohibition for a reviewer is modifying the code under
-review.**
+review.** When `confine = "on"`, lanes also run in a process space of their own and cannot
+signal processes they did not start (`harnesses.md`, Confinement).
 
 **Say so in every workhorse brief.** A workhorse that does not know it may run the suite reasons
 about the code instead of executing it. A reviewer checks a finding with a targeted probe and
@@ -679,8 +680,8 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
      pass vacuously when a row, file or entry is missing?), and defects in the change. Only
      lanes whose harness has a code-review form review for bugs; no brief is written and no
      fallback is used. Launch: `<tool>/scripts/run launch review "$L" "$DEST" <BASE> --last
-     <dispatch>/logs/review-r<round>-bug-$L-last.md --run <dispatch>`. The form fixes each
-     harness at its highest review level and names the base-to-HEAD change. Normalize its
+     <dispatch>/logs/review-r<round>-bug-$L-last.md --run <dispatch>`. The form names the
+     base-to-HEAD change at the run-recorded lane effort. Normalize its
      report with `<tool>/scripts/run review-findings`; missing fields such as severity stay
      `not provided`.
      [Why a lane may review through its harness's own skill](../../wiki/concepts/own-review-skills.md)

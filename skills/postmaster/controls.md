@@ -18,6 +18,7 @@ A fault in one of these is a fault in a control, whatever the step that ran it.
 |---|---|---|
 | `<tool>/scripts/run` | check | the entry every control script runs through; a fault here stops every check |
 | `<tool>/scripts/run ticket-check` | check | a ticket has its shape before it is accepted or dispatched |
+| `<tool>/scripts/run ticket-parts` | check | a two-part ticket is fit to be signed off: its plain part is plain, and its checks, notes and decisions line up |
 | `<tool>/scripts/run check-target` | check | the target is a clean git repository before anything is cut from it |
 | `<tool>/scripts/run handoff-check` | check | a leg ends only on a complete hand-off |
 | `<tool>/scripts/run wiki-lint` | check | the wiki's citations, links and standings hold |

@@ -63,6 +63,7 @@ config. Do not guess an answer, and do not hand the user a script to run instead
 ```sh
 scripts/run probe-harnesses     # which agent CLIs exist, and which read no ambient context
 scripts/run probe-trackers      # which ticket sources are reachable, and what would finish each
+scripts/run probe-confine       # whether lane confinement can run, and what would finish it
 ```
 
 What to settle, in this order, and why none of it is guessed:
@@ -81,6 +82,10 @@ What to settle, in this order, and why none of it is guessed:
   projects`. `local` needs no service and no login: it keeps each repo's tickets in the
   repo's own git directory, and a repo whose store exists uses it whatever this answer is.
   Anything else is `other`, described once outside this repo (`skills/postmaster/trackers.md`).
+- **Whether lanes run confined.** Show `scripts/run probe-confine`'s result, then ask once
+  whether `confine` is `on` or `off` (default `off`). `partial` names the next step. Any root
+  command is the user's to run, never the flow's; after they run it, probe again before
+  continuing. `unavailable` cannot be set to `on`. A config without `confine` reads as off.
 - **Where projects live.** `~/Code` is one convention, not a rule.
 - **Who says the merge word.** A person, or the postmaster itself (`ship.merge_authority`).
   A run never merges on its own authority; the config says whose authority that is.
@@ -261,3 +266,34 @@ its link: `<tool>/scripts/run stage`, never `scripts/run stage`, which resolves 
 repo's root. The run's own pinned tool goes through `<rt>`, resolved per run by
 `run run-meta path`. `scripts/run skill-refs` names every other path that does not go through
 `<tool>`, and `--fix` rewrites the bare ones; run both after writing a runbook and after a rebase.
+
+**Link what you mention.** Whenever you name something that has an address, in conversation, a pull request, a
+ticket or a comment, write it as a clickable link, so that nobody has to look it up. That covers:
+
+- A ticket: its page in the tracker, with the ticket's title the first time you name it in a message,
+  `[#200, Run every lane in its own process space, so it cannot kill processes it did not start](https://github.com/<owner>/<repo>/issues/200)`,
+  and `[#200](https://github.com/<owner>/<repo>/issues/200)` after that. For a tracker other than GitHub Issues, link the
+  address its adapter gives (`skills/postmaster/trackers.md`).
+- A file or folder in a repository on GitHub: its page at the commit or branch you mean,
+  `[scripts/launch.ts](https://github.com/<owner>/<repo>/blob/<commit>/scripts/launch.ts)`, with `#L<a>-L<b>` when you name lines.
+- A project's homepage, a published documentation or wiki page, an artifact or a document: its address (for an
+  artifact, `https://claude.ai/code/artifact/<uuid>`).
+
+A path that exists only on the machine, such as a run's record or a file a lane has not committed, stays plain
+text, since no link can reach it.
+
+**A ticket is brought to ready before it runs.** When the user wants to work on a ticket, a ticket session
+(`skills/postmaster/ticket-session.md`) rewrites it, with the user, into one document that is both the ticket and the
+spec (`skills/postmaster/ticket-template.md`). Its plain part is what the user signs off: the problem, the acceptance
+criteria, the decisions made and who made them, and the direction, with no file, function or command in it. Under
+`## For the agents` it carries what the lanes need, derived from the plain part: the checks, the technical notes and the
+premises verified at a base commit. The user reviews the plain part once. The coachman writes no spec of its own, and
+the workhorses decide the files and the tasks.
+
+**Comment auto-replies stay off.** Publishing or watching an artifact turns on automatic replies to comments sent to Claude,
+and a reply can land in a thread the conversation never sees. Right after each publish or watch, stop the session's watch on
+that artifact. The user says when they have left comments; then read each thread, answer it there, and make the change it asks for.
+**Show a change or a spec's code on a page made for the phone.** When the user reviews a change with automatic merging off,
+or opens the files a spec links to, publish it with the `review-pages` skill (`skills/review-pages/SKILL.md`): a review page
+with the ticket, the spec, the summary, the diff and the files as they stand, or a code viewer at the lines the spec cites.
+The user comments on the page and gives the verdict in the chat. Claude Code only, until the dashboard shows changes.

@@ -22,6 +22,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { harnessData, makeHeldDir } from "./launch.ts";
+import { startCheck, wrapCommand } from "./lib/confine.ts";
 import { toolRoot } from "./lib/paths.ts";
 import { run, withTempDir } from "./lib/proc.ts";
 import { BOUND_R, DOT_ALL, PY_M_START, PY_S_CLASS, pySplitLines, pyWords } from "./lib/text.ts";
@@ -32,8 +33,20 @@ const here = import.meta.dir;
 const skipPython = run("sh", ["-c", "command -v python3"]).code !== 0;
 if (skipPython) {
   console.log(
-    "skip parity: and handed-environment comparisons (16) and the resume PWD/OLDPWD/SHLVL match: python3 not on PATH",
+    "skip parity: and handed-environment comparisons (16) and the resume PWD/OLDPWD/SHLVL match and the battery socket checks (4): python3 not on PATH",
   );
+}
+
+// The confinement battery's confined checks run only when the mechanism
+// starts; a machine without one skips them loudly, never as silent passes.
+const confinementAvail = startCheck();
+const skipConfined = !confinementAvail.ok;
+if (skipConfined) {
+  console.log(`skip confinement battery confined checks (11): ${confinementAvail.cause}`);
+}
+const skipLinuxOnly = process.platform !== "linux";
+if (skipLinuxOnly) {
+  console.log("skip Linux-only confinement battery checks (6): not Linux");
 }
 
 interface ControlRecord {
@@ -3590,16 +3603,16 @@ beforeAll(() => {
       '[lanes.one]\nharness = "pi"\nmodel = "pi-model"\n\n[team]\ncoachman = { harness = "pi", model = "coach-model" }\n',
     );
     runsAs(
-      "claude review names the range and runs /code-review at max",
+      "claude review names the range and runs /code-review at the lane's effort",
       "review-claude",
-      `-p /code-review max ${base}...HEAD --model claude-model --effort max --output-format stream-json --verbose --dangerously-skip-permissions probe=`,
+      `-p /code-review low ${base}...HEAD --model claude-model --effort low --output-format stream-json --verbose --dangerously-skip-permissions probe=`,
       "review",
       "one",
       join(tmp, "cx-detached"),
       base,
     );
     runsAs(
-      "codex review uses --base, --last, max effort and the lane model",
+      "codex review uses --base, --last, the lane's effort and the lane model",
       "review-codex",
       lines(
         join(tmp, "cx-detached"),
@@ -3613,7 +3626,7 @@ beforeAll(() => {
         "-m",
         "lane-model",
         "-c",
-        'model_reasoning_effort="max"',
+        'model_reasoning_effort="low"',
         CODEX_BYPASS,
         "--skip-git-repo-check",
       ),
@@ -3641,7 +3654,7 @@ beforeAll(() => {
     }
     record("review-run", "review-codex");
     runsAs(
-      "codex review in a run uses the recorded config and the same top level",
+      "codex review in a run uses the recorded config and the recorded effort",
       "review-codex",
       lines(
         join(tmp, "cx-detached"),
@@ -3653,7 +3666,7 @@ beforeAll(() => {
         "-m",
         "lane-model",
         "-c",
-        'model_reasoning_effort="max"',
+        'model_reasoning_effort="low"',
         CODEX_BYPASS,
         "--skip-git-repo-check",
       ),
@@ -3668,12 +3681,12 @@ beforeAll(() => {
     if (
       rc === 0 &&
       out.includes("--command review") &&
-      out.includes("--variant high") &&
+      out.includes("--variant low") &&
       out.includes(`stdin=${base}...HEAD`)
     ) {
-      ok("mimo review uses --command review, the prompt file range and high variant");
+      ok("mimo review uses --command review, the prompt file range and the lane's variant");
     } else {
-      fail("mimo review uses --command review, the prompt file range and high variant");
+      fail("mimo review uses --command review, the prompt file range and the lane's variant");
     }
     const noPromptLeft = (): boolean =>
       !readdirSync(join(tmp, "cx-detached")).some((f) => f.startsWith(".postmaster-review-"));
@@ -3934,6 +3947,453 @@ beforeAll(() => {
           );
       }
     }
+
+    // --- confinement battery: every AC2 and AC3 item unconfined and confined ---
+    {
+      const confinement = confinementAvail;
+      const skipReason = confinement.ok
+        ? ""
+        : confinement.cause.includes("not installed")
+          ? "no confinement"
+          : "inside a confinement";
+      // Shell commands that stand in for the work a lane does. Each returns 0 on success.
+      const mkWorktree = (): string => {
+        const dir = join(tmp, `battery-wt-${Math.random().toString(36).slice(2)}`);
+        mkdirSync(dir, { recursive: true });
+        run("git", ["init", "-q", "-b", "main", dir]);
+        run("git", ["-C", dir, "config", "user.name", "t"]);
+        run("git", ["-C", dir, "config", "user.email", "t@example.invalid"]);
+        return dir;
+      };
+      const items: Array<{ name: string; bare: () => boolean; wrapped: () => boolean }> = [];
+
+      // AC2 item: the gate (a command that succeeds, standing in for the project gate)
+      items.push({
+        name: "the gate",
+        bare: () => run("sh", ["-c", "exit 0"]).code === 0,
+        wrapped: () => {
+          const w = wrapCommand(["sh", "-c", "exit 0"]);
+          if (!w) return false;
+          return run(w[0]!, w.slice(1), { timeout: 30000 }).code === 0;
+        },
+      });
+
+      // AC2 item: a commit in its own worktree
+      items.push({
+        name: "a commit in its own worktree",
+        bare: () => {
+          const dir = mkWorktree();
+          writeFileSync(join(dir, "f.txt"), "hello\n");
+          const add = run("git", ["-C", dir, "add", "f.txt"]);
+          const commit = run("git", [
+            "-C",
+            dir,
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "battery",
+          ]);
+          return add.code === 0 && commit.code === 0;
+        },
+        wrapped: () => {
+          const dir = mkWorktree();
+          const w = wrapCommand([
+            "sh",
+            "-c",
+            `cd "${dir}" && echo hello > f.txt && git add f.txt && git -c user.name=t -c user.email=t@example.invalid commit -q -m battery`,
+          ]);
+          if (!w) return false;
+          return run(w[0]!, w.slice(1), { timeout: 30000 }).code === 0;
+        },
+      });
+
+      // AC2 item: a write outside its worktree
+      items.push({
+        name: "a write outside its worktree",
+        bare: () => {
+          const f = join(tmp, `battery-out-${Math.random().toString(36).slice(2)}.txt`);
+          writeFileSync(f, "written\n");
+          return existsSync(f);
+        },
+        wrapped: () => {
+          const f = join(tmp, `battery-out-w-${Math.random().toString(36).slice(2)}.txt`);
+          const w = wrapCommand(["sh", "-c", `echo written > "${f}"`]);
+          if (!w) return false;
+          const r = run(w[0]!, w.slice(1), { timeout: 30000 });
+          return r.code === 0 && existsSync(f);
+        },
+      });
+
+      // AC2 item: a network reach (TCP to a loopback listener of its own, so
+      // the battery needs no live network and stays green on an offline machine)
+      const loopbackReach =
+        "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); s.listen(1); " +
+        "p=s.getsockname()[1]; c=socket.socket(); c.settimeout(5); " +
+        "c.connect(('127.0.0.1',p)); c.close(); s.close()";
+      // Both socket probes need python3; without it they skip loudly.
+      if (!skipPython) {
+        items.push({
+          name: "a network reach",
+          bare: () => run("python3", ["-c", loopbackReach]).code === 0,
+          wrapped: () => {
+            const w = wrapCommand(["python3", "-c", loopbackReach]);
+            if (!w) return false;
+            return run(w[0]!, w.slice(1), { timeout: 30000 }).code === 0;
+          },
+        });
+      }
+
+      // AC2 item: a Unix socket connection
+      const unixSocketTest = `
+import socket, os, tempfile
+d = tempfile.mkdtemp()
+p = os.path.join(d, 's.sock')
+s = socket.socket(socket.AF_UNIX)
+s.bind(p)
+s.listen(1)
+c = socket.socket(socket.AF_UNIX)
+c.connect(p)
+c.close()
+s.close()
+`;
+      if (!skipPython) {
+        items.push({
+          name: "a Unix socket connection",
+          bare: () => run("python3", ["-c", unixSocketTest]).code === 0,
+          wrapped: () => {
+            const w = wrapCommand(["python3", "-c", unixSocketTest]);
+            if (!w) return false;
+            return run(w[0]!, w.slice(1), { timeout: 30000 }).code === 0;
+          },
+        });
+      }
+
+      // AC2 item: a consistent /proc (Linux: the lane's PIDs match what its
+      // /proc shows, so ps and friends see the lane, not the host's table)
+      if (process.platform === "linux") {
+        // Fork-free: read runs in this shell, so /proc/self is the shell
+        // itself, not a subshell a $() would fork.
+        const selfProbe = 'read pid rest < /proc/self/stat; test "$pid" = "$$"';
+        items.push({
+          name: "a consistent /proc",
+          bare: () => run("sh", ["-c", selfProbe]).code === 0,
+          wrapped: () => {
+            const w = wrapCommand(["sh", "-c", selfProbe]);
+            if (!w) return false;
+            return run(w[0]!, w.slice(1), { timeout: 30000 }).code === 0;
+          },
+        });
+      }
+
+      // AC2 item: a host device node (Linux: a shared-memory object made
+      // outside stays visible inside, so the lane keeps the host's /dev)
+      if (process.platform === "linux") {
+        const devNode = (tag: string, probe: (node: string) => boolean): boolean => {
+          const node = `/dev/shm/battery-dev-${tag}-${Math.random().toString(36).slice(2)}`;
+          try {
+            writeFileSync(node, "x\n");
+          } catch {
+            return false;
+          }
+          const seen = probe(node);
+          rmSync(node, { force: true });
+          return seen;
+        };
+        items.push({
+          name: "a host device node",
+          bare: () => devNode("bare", (node) => run("sh", ["-c", `test -e "${node}"`]).code === 0),
+          wrapped: () =>
+            devNode("conf", (node) => {
+              const w = wrapCommand(["sh", "-c", `test -e "${node}"`]);
+              if (!w) return false;
+              return run(w[0]!, w.slice(1), { timeout: 30000 }).code === 0;
+            }),
+        });
+      }
+
+      let itemsRun = 0;
+      let itemsSkipped = 0;
+
+      for (const item of items) {
+        // Unconfined: always run (the paired control)
+        const bareOk = item.bare();
+        check(`${item.name}: unconfined: ${bareOk ? "ok" : "fail"}`, bareOk);
+        itemsRun++;
+        // Confined: run when available, skip by name when not
+        if (confinement.ok) {
+          const confOk = item.wrapped();
+          check(`${item.name}: confined: ${confOk ? "ok" : "fail"}`, confOk);
+          itemsRun++;
+        } else {
+          check(`${item.name}: confined: skipped (${skipReason})`, true);
+          itemsSkipped++;
+        }
+      }
+
+      // AC3: signalling a process started outside the lane
+      {
+        // Start an outside process, try to signal it from inside the wrap.
+        const outsideCmd = "sleep 60";
+        // Unconfined: the signal reaches
+        const outUnconf = run("sh", ["-c", `${outsideCmd} & echo $!`], { timeout: 5000 });
+        const outsidePid = outUnconf.out.trim();
+        const signalOutsideBare = run(
+          "sh",
+          ["-c", `kill -TERM ${outsidePid} 2>/dev/null; echo rc=$?`],
+          { timeout: 5000 },
+        );
+        const reachedBare = signalOutsideBare.out.includes("rc=0");
+        check(
+          `signalling a process started outside: unconfined: ${reachedBare ? "reached" : "failed"}`,
+          reachedBare,
+        );
+        itemsRun++;
+
+        // Confined: the signal is refused
+        if (confinement.ok) {
+          const outConf = run("sh", ["-c", `${outsideCmd} & echo $!`], { timeout: 5000 });
+          const confOutsidePid = outConf.out.trim();
+          const w = wrapCommand([
+            "sh",
+            "-c",
+            `kill -TERM ${confOutsidePid} 2>/dev/null; echo rc=$?`,
+          ]);
+          const r = w ? run(w[0]!, w.slice(1), { timeout: 30000 }) : { out: "", code: -1 };
+          const refused = r.out.includes("rc=1") || r.out.includes("No such process");
+          check(
+            `signalling a process started outside: confined: ${refused ? "refused" : "reached"}`,
+            refused,
+          );
+          itemsRun++;
+          // That process is still running afterwards
+          const still = run("sh", ["-c", `kill -0 ${confOutsidePid} 2>/dev/null`], {
+            timeout: 5000,
+          });
+          check(
+            `signalling a process started outside: still running: ${still.code === 0 ? "yes" : "no"}`,
+            still.code === 0,
+          );
+          itemsRun++;
+          // Clean up
+          run("sh", ["-c", `kill -TERM ${confOutsidePid} 2>/dev/null`], { timeout: 5000 });
+        } else {
+          check(`signalling a process started outside: confined: skipped (${skipReason})`, true);
+          itemsSkipped++;
+        }
+        // Clean up unconfined outside process
+        run("sh", ["-c", `kill -TERM ${outsidePid} 2>/dev/null`], { timeout: 5000 });
+      }
+
+      // AC3: signalling a process the lane started itself
+      if (confinement.ok) {
+        const w = wrapCommand([
+          "sh",
+          "-c",
+          "sleep 30 & CHILD=$!; kill -TERM $CHILD 2>/dev/null; wait $CHILD; echo rc=$?",
+        ]);
+        const r = w ? run(w[0]!, w.slice(1), { timeout: 30000 }) : { out: "", code: -1 };
+        // wait reports 143 when the TERM lands; a 0 would mean the signal never did.
+        const selfOk = r.out.includes("rc=143");
+        check(`signalling a process the lane started: confined: ${selfOk ? "ok" : "fail"}`, selfOk);
+        itemsRun++;
+      } else {
+        check(`signalling a process the lane started: confined: skipped (${skipReason})`, true);
+        itemsSkipped++;
+      }
+
+      // AC3: kill 0 from inside stays inside the lane (Linux: the bwrap row's
+      // --new-session; the Seatbelt profile answers it on macOS). The probe
+      // runs under setsid in a group of its own, so an uncontained kill 0 can
+      // only reach the probe's own processes, never the test runner.
+      if (process.platform === "linux") {
+        const middleman = join(tmp, "battery-kill0-mid.sh");
+        // The middleman catches TERM rather than ignoring it: an ignored
+        // disposition survives exec, and a shell that inherits one cannot
+        // re-trap it, so the sensor below would never fire.
+        writeFileSync(
+          middleman,
+          '#!/bin/sh\nFLAG=$1; shift\ntrap ":" TERM\n' +
+            'sh -c "trap \'echo HIT > \\"$FLAG\\"\' TERM; sleep 30" & C1=$!\n' +
+            'sleep 0.3\n"$@"\nsleep 2\nkill -KILL $C1 2>/dev/null\nexit 0\n',
+        );
+        const kill0 = (tag: string, inner: string[]): boolean => {
+          const flag = join(tmp, `battery-kill0-${tag}.flag`);
+          rmSync(flag, { force: true });
+          run("setsid", ["sh", middleman, flag, ...inner], { timeout: 30000 });
+          return existsSync(flag);
+        };
+        // Unconfined: the groupmate is hit (the positive control)
+        const bareHit = kill0("bare", ["sh", "-c", "kill -TERM 0"]);
+        check(`kill 0 from inside: unconfined: ${bareHit ? "hit" : "miss"}`, bareHit);
+        itemsRun++;
+        // Confined: the group signal stays inside the lane
+        if (confinement.ok) {
+          const w = wrapCommand(["sh", "-c", "kill -TERM 0"]);
+          const hit = w ? kill0("conf", w) : true;
+          check(`kill 0 from inside: confined: ${hit ? "hit" : "contained"}`, !hit);
+          itemsRun++;
+        } else {
+          check(`kill 0 from inside: confined: skipped (${skipReason})`, true);
+          itemsSkipped++;
+        }
+      }
+
+      // The count of items run and skipped (AC6)
+      check(
+        `confinement battery: ${itemsRun} run, ${itemsSkipped} skipped`,
+        true,
+        `${itemsRun} run, ${itemsSkipped} skipped`,
+      );
+    }
+
+    // --- confinement wiring: form shows the wrap, fallback warns and logs ---
+    {
+      const confLane = (name: string, confineLine: string): void => {
+        writeFileSync(
+          join(tmp, `${name}.toml`),
+          `${confineLine}[lanes.one]\nharness = "codex"\nmodel = "lane-model"\neffort = "high"\n\n[team]\ncoachman = { harness = "codex", model = "coach-model" }\n`,
+        );
+      };
+      confLane("conf-on", 'confine = "on"\n');
+      confLane("conf-off", 'confine = "off"\n');
+      confLane("conf-absent", "");
+      const mech =
+        process.platform === "linux"
+          ? "bwrap"
+          : process.platform === "darwin"
+            ? "sandbox-exec"
+            : "";
+      const launchLine = (form: string): string =>
+        form.split("\n").find((l) => l.startsWith("launch:")) ?? "";
+      const resumeLine = (form: string): string =>
+        form.split("\n").find((l) => l.startsWith("resume:")) ?? "";
+      doRun("conf-off", "form", "one");
+      const offForm = out;
+      const offRc = rc;
+      doRun("conf-absent", "form", "one");
+      check(
+        "form with confine off runs as absent",
+        offRc === 0 && rc === 0 && offForm === out,
+        `off=${offRc} absent=${rc}`,
+      );
+      doRun("conf-on", "form", "one");
+      const onForm = out;
+      const onRc = rc;
+      if (mech === "") {
+        check(
+          "form with confine on stays bare on a system with no row",
+          onRc === 0 && onForm === offForm,
+        );
+      } else {
+        check(
+          "form with confine on wraps the launch line",
+          onRc === 0 && launchLine(onForm).includes(mech),
+          onForm,
+        );
+        check(
+          "form with confine on wraps the resume line",
+          onRc === 0 && resumeLine(onForm).includes(mech),
+          onForm,
+        );
+        const launchAt = launchLine(offForm).indexOf("codex exec");
+        const resumeAt = resumeLine(offForm).indexOf("codex exec");
+        const bareLaunch = launchAt === -1 ? "" : launchLine(offForm).slice(launchAt);
+        const bareResume = resumeAt === -1 ? "" : resumeLine(offForm).slice(resumeAt);
+        check(
+          "the wrapped launch line carries the bare harness argv",
+          bareLaunch !== "" && launchLine(onForm).includes(bareLaunch),
+          onForm,
+        );
+        check(
+          "the wrapped resume line carries the bare harness argv",
+          bareResume !== "" && resumeLine(onForm).includes(bareResume),
+          onForm,
+        );
+      }
+      doRun("conf-on", "form", "coachman");
+      check(
+        "form for the coachman stays bare with confine on",
+        rc === 0 && (mech === "" || !out.includes(mech)),
+        out,
+      );
+      // The fallback: a refusing mechanism runs the lane unconfined, warns
+      // naming the cause, and logs the fallback as an action inside a run.
+      if (mech !== "") {
+        writeFileSync(join(tmp, "bin", mech), "#!/bin/sh\necho shadow-refused >&2\nexit 1\n");
+        chmodSync(join(tmp, "bin", mech), 0o755);
+      }
+      doRun("conf-on", "launch", "one", join(tmp, "wt"), join(tmp, "prompt.txt"));
+      check(
+        "a lane whose confinement cannot start still runs",
+        rc === 0 && out.includes("--dangerously-bypass-approvals-and-sandbox"),
+        `rc=${rc} out=${out} err=${err}`,
+      );
+      check(
+        "a lane whose confinement cannot start warns naming the cause",
+        err.includes("confinement cannot start"),
+        err,
+      );
+      // The warning is nonfatal, so it must not read as a launch refusal.
+      const warnErr = join(tmp, "fallback-err.txt");
+      writeFileSync(warnErr, err);
+      const warnClass = run(self, ["transient", warnErr], { timeout: 10000 });
+      check(
+        "the fallback warning classifies as other than a launch refusal",
+        warnClass.out.trim() !== "launch-refusal",
+        `class=${warnClass.out.trim()} err=${err}`,
+      );
+      doRun("conf-off", "launch", "one", join(tmp, "wt"), join(tmp, "prompt.txt"));
+      check(
+        "confine off runs with no warning past the refusing mechanism",
+        rc === 0 && !err.includes("confinement cannot start"),
+        `rc=${rc} err=${err}`,
+      );
+      record("confrun", "conf-on");
+      doRun(
+        "conf-on",
+        "launch",
+        "one",
+        join(tmp, "wt"),
+        join(tmp, "prompt.txt"),
+        "--run",
+        runDir("confrun"),
+      );
+      let fallbackLogged = false;
+      try {
+        const lines = readFileSync(join(runDir("confrun"), "actions.jsonl"), "utf8").split("\n");
+        const line = lines.find((l) => l.includes("confinement fallback"));
+        fallbackLogged = line !== undefined && line.includes('"action":"note"');
+      } catch {
+        fallbackLogged = false;
+      }
+      check(
+        "the fallback is logged as an action inside a run",
+        rc === 0 && fallbackLogged,
+        `rc=${rc} err=${err}`,
+      );
+      // A fallback the log cannot record refuses to run: an unconfined lane
+      // with no fallback action would read as a confined one.
+      record("confnolog", "conf-on");
+      mkdirSync(join(runDir("confnolog"), "actions.jsonl"), { recursive: true });
+      doRun(
+        "conf-on",
+        "launch",
+        "one",
+        join(tmp, "wt"),
+        join(tmp, "prompt.txt"),
+        "--run",
+        runDir("confnolog"),
+      );
+      check(
+        "a fallback that cannot be logged refuses to run",
+        rc !== 0 && err.includes("refusing to run it unconfined"),
+        `rc=${rc} err=${err}`,
+      );
+    }
   });
 }, 300000);
 
@@ -3942,6 +4402,162 @@ afterAll(() => {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
+});
+
+describe("run-recorded effort controls", () => {
+  test("identical forms and stub reviews use fixture lows or ticket levels", () => {
+    withTempDir((tmp) => {
+      const bin = join(tmp, "bin");
+      mkdirSync(bin);
+      for (const harness of ["codex", "claude", "mimo", "muse"]) {
+        writeFileSync(join(bin, harness), '#!/bin/sh\nprintf "%s stdin=%s\\n" "$*" "$(cat)"\n');
+        chmodSync(join(bin, harness), 0o755);
+      }
+      const config = join(tmp, "machine.toml");
+      writeFileSync(
+        config,
+        '[lanes.codex_lane]\nharness = "codex"\nmodel = "c"\neffort = "max"\n' +
+          '[lanes.claude_lane]\nharness = "claude"\nmodel = "c"\neffort = "max"\n' +
+          '[lanes.mimo_lane]\nharness = "mimo"\nmodel = "p/m"\neffort = "high"\n' +
+          '[lanes.effortless]\nharness = "codex"\nmodel = "c"\n' +
+          '[lanes.claude_effortless]\nharness = "claude"\nmodel = "c"\n' +
+          '[lanes.mimo_effortless]\nharness = "mimo"\nmodel = "p/m"\n' +
+          '[team]\nworkhorses = ["codex_lane"]\n' +
+          'coachman = { harness = "claude", model = "coach-model", effort = "max" }\n' +
+          '[team.coachman_legs]\nsynthesis = { harness = "claude", model = "coach-model", effort = "max" }\n',
+      );
+      const env = {
+        ...process.env,
+        POSTMASTER_CONFIG: config,
+        POSTMASTER_TOOL_PINS: join(tmp, "pins"),
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+      };
+      const dispatches: Record<string, string> = {};
+      for (const kind of ["fixture", "ticket"]) {
+        const repo = join(tmp, kind);
+        mkdirSync(repo);
+        expect(run("git", ["-C", repo, "init", "-q", "-b", "main"]).code).toBe(0);
+        if (kind === "fixture") {
+          mkdirSync(join(repo, ".postmaster"));
+          writeFileSync(join(repo, ".postmaster", "fixture"), "postmaster fixture v1\n");
+          run("git", ["-C", repo, "add", ".postmaster/fixture"]);
+        }
+        expect(
+          run("git", [
+            "-C",
+            repo,
+            "-c",
+            "user.name=brindlewick",
+            "-c",
+            "user.email=332054101+brindlewick@users.noreply.github.com",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+          ]).code,
+        ).toBe(0);
+        const dispatch = join(repo, ".postmaster", "runs", "7");
+        mkdirSync(dispatch, { recursive: true });
+        expect(run(join(here, "run"), ["run-meta", dispatch, repo], { env }).code).toBe(0);
+        dispatches[kind] = dispatch;
+      }
+      const reviewRepo = join(tmp, "review");
+      mkdirSync(reviewRepo);
+      run("git", ["-C", reviewRepo, "init", "-q", "-b", "main"]);
+      run("git", [
+        "-C",
+        reviewRepo,
+        "-c",
+        "user.name=brindlewick",
+        "-c",
+        "user.email=332054101+brindlewick@users.noreply.github.com",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "init",
+      ]);
+      const base = run("git", ["-C", reviewRepo, "rev-parse", "HEAD"]).out.trim();
+      const launched = (label: string, result: ReturnType<typeof run>): void => {
+        if (result.code !== 0)
+          throw new Error(`${label}: exit ${result.code}: ${result.err}${result.out}`);
+      };
+      for (const [kind, want] of [
+        ["fixture", { codex: "low", claude: "low", mimo: "low" }],
+        ["ticket", { codex: "max", claude: "max", mimo: "high" }],
+      ] as const) {
+        const dispatch = dispatches[kind]!;
+        const form = run(self, ["launch", "form", "codex_lane", "--run", dispatch], { env });
+        launched(`${kind} form`, form);
+        const formEfforts = [...form.out.matchAll(/model_reasoning_effort=[^ \t\r\n]+/gu)].map(
+          (match) => match[0],
+        );
+        expect(formEfforts).toHaveLength(2);
+        expect(formEfforts.every((entry) => entry.includes(want.codex))).toBe(true);
+        expect(form.out).toContain("resume:");
+        const coach = run(
+          self,
+          ["launch", "form", "coachman", "--leg", "synthesis", "--run", dispatch],
+          {
+            env,
+          },
+        );
+        launched(`${kind} coach form`, coach);
+        const coachForms = coach.out
+          .split("\n")
+          .filter((line) => line.startsWith("launch:") || line.startsWith("resume:"));
+        expect(coachForms).toHaveLength(2);
+        expect(coachForms.every((line) => line.includes(`--effort ${want.claude}`))).toBe(true);
+        const codexReview = run(
+          self,
+          ["launch", "review", "codex_lane", reviewRepo, base, "--run", dispatch],
+          { env },
+        );
+        launched(`${kind} codex review`, codexReview);
+        expect(codexReview.out).toContain(`model_reasoning_effort="${want.codex}"`);
+        const claudeReview = run(
+          self,
+          ["launch", "review", "claude_lane", reviewRepo, base, "--run", dispatch],
+          { env },
+        );
+        launched(`${kind} claude review`, claudeReview);
+        expect(claudeReview.out).toContain(`/code-review ${want.claude} ${base}...HEAD`);
+        expect(claudeReview.out).toContain(`--effort ${want.claude}`);
+        const mimoReview = run(
+          self,
+          ["launch", "review", "mimo_lane", reviewRepo, base, "--run", dispatch],
+          {
+            env,
+          },
+        );
+        launched(`${kind} mimo review`, mimoReview);
+        expect(mimoReview.out).toContain(`--variant ${want.mimo}`);
+        const effortlessReview = run(
+          self,
+          ["launch", "review", "effortless", reviewRepo, base, "--run", dispatch],
+          { env },
+        );
+        launched(`${kind} effortless review`, effortlessReview);
+        expect(effortlessReview.out).toContain('model_reasoning_effort="max"');
+        const claudeEffortless = run(
+          self,
+          ["launch", "review", "claude_effortless", reviewRepo, base, "--run", dispatch],
+          { env },
+        );
+        launched(`${kind} claude effortless review`, claudeEffortless);
+        expect(claudeEffortless.out).toContain(`/code-review max ${base}...HEAD`);
+        expect(claudeEffortless.out).toContain("--effort max");
+        const mimoEffortless = run(
+          self,
+          ["launch", "review", "mimo_effortless", reviewRepo, base, "--run", dispatch],
+          { env },
+        );
+        launched(`${kind} mimo effortless review`, mimoEffortless);
+        expect(mimoEffortless.out).toContain("--variant high");
+      }
+    });
+  }, 60000);
 });
 
 describe("preamble", () => {
@@ -4750,20 +5366,22 @@ describe("quote corpus: real wall phrasings wake, alone and beside every transie
 });
 
 describe("bug review forms", () => {
-  test("claude review names the range and runs /code-review at max", () => {
-    assertControl("claude review names the range and runs /code-review at max");
+  test("claude review names the range and runs /code-review at the lane's effort", () => {
+    assertControl("claude review names the range and runs /code-review at the lane's effort");
   });
-  test("codex review uses --base, --last, max effort and the lane model", () => {
-    assertControl("codex review uses --base, --last, max effort and the lane model");
+  test("codex review uses --base, --last, the lane's effort and the lane model", () => {
+    assertControl("codex review uses --base, --last, the lane's effort and the lane model");
   });
   test("a review launch removes a stale --last file before the harness runs", () => {
     assertControl("a review launch removes a stale --last file before the harness runs");
   });
-  test("codex review in a run uses the recorded config and the same top level", () => {
-    assertControl("codex review in a run uses the recorded config and the same top level");
+  test("codex review in a run uses the recorded config and the recorded effort", () => {
+    assertControl("codex review in a run uses the recorded config and the recorded effort");
   });
-  test("mimo review uses --command review, the prompt file range and high variant", () => {
-    assertControl("mimo review uses --command review, the prompt file range and high variant");
+  test("mimo review uses --command review, the prompt file range and the lane's variant", () => {
+    assertControl(
+      "mimo review uses --command review, the prompt file range and the lane's variant",
+    );
   });
   test("mimo's temporary range prompt is removed after launch", () => {
     assertControl("mimo's temporary range prompt is removed after launch");
@@ -4800,5 +5418,161 @@ describe("bug review forms", () => {
   });
   test.skipIf(skipPython)("a resume's check and harness match main's PWD, OLDPWD and SHLVL", () => {
     assertControl("a resume's check and harness match main's PWD, OLDPWD and SHLVL");
+  });
+});
+
+describe("confinement battery: every AC2 and AC3 item unconfined and confined", () => {
+  test("the gate: unconfined", () => {
+    assertControl("the gate: unconfined: ok");
+  });
+  test.skipIf(skipConfined)("the gate: confined", () => {
+    const r = records.find((x) => x.label.startsWith("the gate: confined:"));
+    expect(r).toBeDefined();
+    if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
+  });
+  test("a commit in its own worktree: unconfined", () => {
+    assertControl("a commit in its own worktree: unconfined: ok");
+  });
+  test.skipIf(skipConfined)("a commit in its own worktree: confined", () => {
+    const r = records.find((x) => x.label.startsWith("a commit in its own worktree: confined:"));
+    expect(r).toBeDefined();
+    if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
+  });
+  test("a write outside its worktree: unconfined", () => {
+    assertControl("a write outside its worktree: unconfined: ok");
+  });
+  test.skipIf(skipConfined)("a write outside its worktree: confined", () => {
+    const r = records.find((x) => x.label.startsWith("a write outside its worktree: confined:"));
+    expect(r).toBeDefined();
+    if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
+  });
+  test.skipIf(skipPython)("a network reach: unconfined", () => {
+    assertControl("a network reach: unconfined: ok");
+  });
+  test.skipIf(skipPython || skipConfined)("a network reach: confined", () => {
+    const r = records.find((x) => x.label.startsWith("a network reach: confined:"));
+    expect(r).toBeDefined();
+    if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
+  });
+  test.skipIf(skipPython)("a Unix socket connection: unconfined", () => {
+    assertControl("a Unix socket connection: unconfined: ok");
+  });
+  test.skipIf(skipPython || skipConfined)("a Unix socket connection: confined", () => {
+    const r = records.find((x) => x.label.startsWith("a Unix socket connection: confined:"));
+    expect(r).toBeDefined();
+    if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
+  });
+  test.skipIf(skipLinuxOnly)("a consistent /proc: unconfined", () => {
+    assertControl("a consistent /proc: unconfined: ok");
+  });
+  test.skipIf(skipLinuxOnly || skipConfined)("a consistent /proc: confined", () => {
+    const r = records.find((x) => x.label.startsWith("a consistent /proc: confined:"));
+    expect(r).toBeDefined();
+    if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
+  });
+  test.skipIf(skipLinuxOnly)("a host device node: unconfined", () => {
+    assertControl("a host device node: unconfined: ok");
+  });
+  test.skipIf(skipLinuxOnly || skipConfined)("a host device node: confined", () => {
+    const r = records.find((x) => x.label.startsWith("a host device node: confined:"));
+    expect(r).toBeDefined();
+    if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
+  });
+  test("signalling a process started outside: unconfined", () => {
+    assertControl("signalling a process started outside: unconfined: reached");
+  });
+  test.skipIf(skipConfined)("signalling a process started outside: confined", () => {
+    const r = records.find((x) =>
+      x.label.startsWith("signalling a process started outside: confined:"),
+    );
+    expect(r).toBeDefined();
+    if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
+  });
+  test.skipIf(skipConfined)(
+    "signalling a process started outside: still running afterwards",
+    () => {
+      const r = records.find((x) =>
+        x.label.startsWith("signalling a process started outside: still running:"),
+      );
+      expect(r).toBeDefined();
+      if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
+    },
+  );
+  test.skipIf(skipConfined)("signalling a process the lane started: confined", () => {
+    const r = records.find((x) => x.label.startsWith("signalling a process the lane started:"));
+    expect(r).toBeDefined();
+    if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
+  });
+  test.skipIf(skipLinuxOnly)("kill 0 from inside: unconfined", () => {
+    assertControl("kill 0 from inside: unconfined: hit");
+  });
+  test.skipIf(skipLinuxOnly || skipConfined)("kill 0 from inside: confined", () => {
+    const r = records.find((x) => x.label.startsWith("kill 0 from inside: confined:"));
+    expect(r).toBeDefined();
+    if (r !== undefined && !r.ok) throw new Error(r.detail === "" ? r.label : r.detail);
+  });
+  test("the battery ends with a count of items run and skipped", () => {
+    const r = records.find((x) => x.label.startsWith("confinement battery:"));
+    expect(r).toBeDefined();
+    expect(r?.ok).toBe(true);
+    expect(r?.detail).toMatch(/^\p{Nd}+ run, \p{Nd}+ skipped$/u);
+  });
+});
+
+describe("confinement wiring: form shows the wrap, fallback warns and logs", () => {
+  test("form with confine off runs as absent", () => {
+    assertControl("form with confine off runs as absent");
+  });
+  test("form with confine on wraps the launch line", () => {
+    const r = records.find((x) => x.label === "form with confine on wraps the launch line");
+    if (r === undefined) return; // no row on this system: the bare-form record holds instead
+    assertControl("form with confine on wraps the launch line");
+  });
+  test("form with confine on wraps the resume line", () => {
+    const r = records.find((x) => x.label === "form with confine on wraps the resume line");
+    if (r === undefined) return; // no row on this system: the bare-form record holds instead
+    assertControl("form with confine on wraps the resume line");
+  });
+  test("form with confine on stays bare on a system with no row", () => {
+    const r = records.find(
+      (x) => x.label === "form with confine on stays bare on a system with no row",
+    );
+    if (r === undefined) return; // this system has a row: the wrap records hold instead
+    assertControl("form with confine on stays bare on a system with no row");
+  });
+  test("the wrapped launch line carries the bare harness argv", () => {
+    const r = records.find(
+      (x) => x.label === "the wrapped launch line carries the bare harness argv",
+    );
+    if (r === undefined) return; // no row on this system
+    assertControl("the wrapped launch line carries the bare harness argv");
+  });
+  test("the wrapped resume line carries the bare harness argv", () => {
+    const r = records.find(
+      (x) => x.label === "the wrapped resume line carries the bare harness argv",
+    );
+    if (r === undefined) return; // no row on this system
+    assertControl("the wrapped resume line carries the bare harness argv");
+  });
+  test("form for the coachman stays bare with confine on", () => {
+    assertControl("form for the coachman stays bare with confine on");
+  });
+  test("a lane whose confinement cannot start still runs", () => {
+    assertControl("a lane whose confinement cannot start still runs");
+  });
+  test("a lane whose confinement cannot start warns naming the cause", () => {
+    assertControl("a lane whose confinement cannot start warns naming the cause");
+  });
+  test("the fallback warning classifies as other than a launch refusal", () => {
+    assertControl("the fallback warning classifies as other than a launch refusal");
+  });
+  test("confine off runs with no warning past the refusing mechanism", () => {
+    assertControl("confine off runs with no warning past the refusing mechanism");
+  });
+  test("the fallback is logged as an action inside a run", () => {
+    assertControl("the fallback is logged as an action inside a run");
+  });
+  test("a fallback that cannot be logged refuses to run", () => {
+    assertControl("a fallback that cannot be logged refuses to run");
   });
 });

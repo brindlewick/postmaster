@@ -5,7 +5,8 @@
 //   run fixture score <dispatch> <repo>
 //   run fixture hidden <ticket> <app-dir>
 //
-// `new` marks its copy with `postmaster.fixture` in that repository's local git config.
+// `new` marks its copy with `.postmaster/fixture` in the first commit and
+// `postmaster.fixture` in that repository's local git config.
 // `score` reports the merged result's hidden-test counts, then the harvested lane branches'
 // counts from `scripts/fixture-lanes.ts`; only the merged result decides the verdict.
 // Its gate runs from a clean checkout of main, outside the project folder, through
@@ -33,6 +34,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { tryJsonFile } from "./lib/data.ts";
+import { effortsLine } from "./run-meta.ts";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { die, run } from "./lib/proc.ts";
 import {
@@ -66,8 +68,18 @@ const HERE = scriptsDir(import.meta);
 const TOOL = toolRoot(import.meta);
 const APP = join(TOOL, "fixtures", "app");
 const TICKETS = join(TOOL, "fixtures", "tickets");
+export const FIXTURE_MARKER = "postmaster fixture v1\n";
 export const TIMEOUT = 1200;
-const _CHECKS = ["hidden-tests", "gate", "stages", "markers", "handoffs", "run.json", "ship-card"];
+const _CHECKS = [
+  "hidden-tests",
+  "gate",
+  "stages",
+  "markers",
+  "handoffs",
+  "run.json",
+  "efforts",
+  "ship-card",
+];
 
 function usage(): never {
   die(
@@ -129,7 +141,7 @@ export function appFiles(dir: string): string[] | null {
   if (r.code !== 0) return null;
   return r.out.split("\0").filter((n) => n !== "");
 }
-export function makeRepo(dest: string, src = APP): boolean {
+export function makeRepo(dest: string, src = APP, fixture = false): boolean {
   try {
     mkdirSync(dest, { recursive: true });
   } catch {
@@ -162,6 +174,15 @@ export function makeRepo(dest: string, src = APP): boolean {
   } catch {
     console.error(`fixture: could not copy the app to ${dest}`);
     return false;
+  }
+  if (fixture) {
+    try {
+      mkdirSync(join(dest, ".postmaster"), { recursive: true });
+      writeFileSync(join(dest, ".postmaster", "fixture"), FIXTURE_MARKER);
+    } catch {
+      console.error(`fixture: could not write the fixture marker in ${dest}`);
+      return false;
+    }
   }
   if (run("git", ["-C", dest, "init", "-q", "-b", "main"]).code !== 0) return false;
   for (const key of ["user.name", "user.email"]) {
@@ -209,7 +230,7 @@ export function makeAndFile(dest: string, ticket: string): number {
   };
 
   mkdirSync(dirname(dest), { recursive: true });
-  if (!makeRepo(dest)) {
+  if (!makeRepo(dest, APP, true)) {
     unmake();
     return 1;
   }
@@ -406,6 +427,7 @@ export function score(dispatch: string, repo: string): { code: number; out: stri
     { name: "markers", ...checkMarkers(dispatch, legs), out: "" },
     { name: "handoffs", ...checkHandoffs(dispatch, legs), out: "" },
     { name: "run.json", ...checkRunJson(dispatch), out: "" },
+    { name: "efforts", ...checkWaybillEfforts(dispatch), out: "" },
     { name: "ship-card", ...checkCard(dispatch), out: "" },
   ];
   rmSync(scratch, { recursive: true, force: true });
@@ -631,6 +653,86 @@ function checkRunJson(dispatch: string): { ok: boolean; detail: string } {
     return { ok: false, detail: "run.json is not a JSON object" };
   }
   return { ok: true, detail: "written, and parses" };
+}
+
+export function checkWaybillEfforts(dispatch: string): { ok: boolean; detail: string } {
+  const data = tryJsonFile<Record<string, unknown>>(join(dispatch, "run.json"));
+  if (!existsSync(join(dispatch, "run.json"))) {
+    return { ok: true, detail: "skipped: no run.json" };
+  }
+  if (!data || !data.config || typeof data.config !== "object") {
+    return { ok: false, detail: "no run.json config" };
+  }
+  const brief = join(dispatch, "brief.md");
+  if (!existsSync(brief)) return { ok: false, detail: "no brief.md" };
+  const teamText = sectionOf(readFileSync(brief, "utf8"), "Team");
+  const lines = teamText.split(/\r?\n/u).map((line) => line.trim());
+  const effortLines = lines.filter((line) => line.startsWith("efforts:"));
+  const config = data.config as Record<string, unknown>;
+  const expected = effortsLine(config);
+  if (effortLines.length !== 1 || effortLines[0] !== expected) {
+    return {
+      ok: false,
+      detail: `waybill efforts differ from run.json: expected ${expected}, got ${effortLines.length === 1 ? effortLines[0] : "missing or repeated"}`,
+    };
+  }
+  // Each Team entry's effort, the slot after the recorded `harness/model` because a
+  // model may itself hold a slash, against the recorded effort. An entry ending at the
+  // recorded prefix carries no effort, so both honest effortless renderings pass; an
+  // omitted slot for a recorded effort fails, as does a carried effort for an
+  // unrecorded name. A Team section with no workhorses or coachman line fails outright.
+  const lanes = (config.lanes ?? {}) as Record<string, Record<string, unknown>>;
+  const team = (config.team ?? {}) as Record<string, unknown>;
+  const recordedSpec = (name: string): { effort: string; prefix: string } => {
+    const spec =
+      name === "coachman" ? (team.coachman as Record<string, unknown> | undefined) : lanes[name];
+    const str = (v: unknown): string => (typeof v === "string" ? v : "");
+    const harness = str(spec?.harness);
+    const model = str(spec?.model);
+    return { effort: str(spec?.effort), prefix: harness && model ? `${harness}/${model}` : "" };
+  };
+  let seen = false;
+  for (const line of lines) {
+    const m = /^(workhorses|coachman):[ \t]*(.+)$/u.exec(line);
+    if (!m) continue;
+    seen = true;
+    for (const entry of m[2]!.split(",").map((s) => s.trim())) {
+      const eq = entry.indexOf("=");
+      if (m[1] === "workhorses" && eq < 0) continue; // a bare name carries nothing
+      const name = eq < 0 ? "coachman" : entry.slice(0, eq).trim();
+      const rest = eq < 0 ? entry : entry.slice(eq + 1);
+      const want = recordedSpec(name);
+      if (want.prefix) {
+        if (rest !== want.prefix && !rest.startsWith(`${want.prefix}/`)) {
+          return {
+            ok: false,
+            detail: `Team ${name} names ${rest}, recorded ${want.prefix}`,
+          };
+        }
+        const effort = rest.slice(want.prefix.length).replace(/^\//u, "").trim();
+        if (effort !== want.effort) {
+          return {
+            ok: false,
+            detail: `Team ${name} effort ${effort || "missing"}, expected ${want.effort || "missing"}`,
+          };
+        }
+        continue;
+      }
+      // No recorded harness and model to bound the effort slot: the entry's last `/`
+      // field, as before. A carried effort for an unrecorded name fails here.
+      const fields = rest.split("/");
+      if (fields.length < 3) continue;
+      const effort = fields[fields.length - 1]!.trim();
+      if (effort !== want.effort) {
+        return {
+          ok: false,
+          detail: `Team ${name} effort ${effort || "missing"}, expected ${want.effort || "missing"}`,
+        };
+      }
+    }
+  }
+  if (!seen) return { ok: false, detail: "no Team workhorses or coachman entries" };
+  return { ok: true, detail: "waybill Team efforts match run.json" };
 }
 
 function checkCard(dispatch: string): { ok: boolean; detail: string } {

@@ -1,12 +1,72 @@
 ---
 title: Log
 type: schema
-updated: 2026-10-01
+updated: 2026-10-03
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-03] query | should #216 build the check as a library module
+
+The user's word: no; whether it becomes a library is a later concern, so #216 builds the check
+for postmaster alone and the module work waits for a change of its own. Updated the
+recommendation in
+[No library covers what the private-data scanner checks, so postmaster publishes one](concepts/scanner-library.md),
+still **claimed**.
+
+## [2026-10-03] query | can patterns carry the private-data check without a model
+
+The user asked whether the check's patterns could cover what Jev catches. Answered from
+`raw/trials/pii-patterns/`: they match it on personal data with a shape or a label, raise less
+on real code, and leave names in prose. The user's word: #216 takes the narrowed scope with
+patterns alone, no model. #216's and #135's tickets were rewritten to match. Updated
+[No library covers what the private-data scanner checks, so postmaster publishes one](concepts/scanner-library.md),
+still **claimed**: the library's scope is patterns, and a judge for names in prose is a later,
+optional argument.
+
+## [2026-10-03] ingest | patterns for personal data, beside Jev
+
+Issue #208. A trial recorded in `raw/trials/pii-patterns/`: patterns in TypeScript for names in
+the places a name is written, email addresses, phone numbers, card, bank and ID numbers, dates of
+birth, street addresses and a few phrases, against Jev 1.13 on the same lines. On the Jev
+trial's corpus, a fit, they found 32 of 34. On two sets another model wrote, they found 23 of 33
+before fixes and 25 of 34 after, where Jev found 32 of 33 and 32 of 34, with about as many false
+alarms; the gap is names in prose. On this repository's 92,252 history lines they flagged 9 made-up
+test addresses in five seconds. Updated
+[No library covers what the private-data scanner checks, so postmaster publishes one](concepts/scanner-library.md),
+still **claimed**: patterns carry the check, and names in prose are what a model adds.
+
+## [2026-10-03] ingest | a model beside the private-data scanner
+
+Issue #208. Two trials. `raw/trials/ai-privacy-check/`: 188 made-up lines, #135's fixtures,
+probes and open-ended lines, given to Claude Haiku 4.5, Claude Opus 5.5, GPT-6 Sol, MiMo V2.6
+Pro, OpenAI's Privacy Filter run locally, and Jev 1.13; every general model found every
+open-ended positive, none replaced the patterns, and Opus raised the fewest false alarms.
+`raw/trials/jev-pii/`: after the user narrowed #135 to personal data and secrets on 2026-10-02,
+Jev asked atomic questions with every exclusion in code, in five versions. The last finds 33 of
+34 made-up personal-data lines at 0.8 and raises 2 of 37 hard negatives; over all 92,252 lines
+of this repository's history it flagged 15, none of them personal data. Its answers move by up
+to 0.2 between identical calls, a 1.1 MB line is past its context, and 21 requests failed after
+six attempts. Updated
+[No library covers what the private-data scanner checks, so postmaster publishes one](concepts/scanner-library.md),
+still **claimed**: the claim, the library's scope and the recommendation follow the narrowed
+#135, and the judge is an argument of the library, not built in.
+
+## [2026-10-01] ingest | whether to publish the private-data scanner as a library
+
+Issue #208. Thirty-two outside tools captured in `raw/articles/scanner-*`, each with the passages
+the survey rests on, read at a dated version; passages from GitHub were checked against the file
+at the pinned commit or tag. Seven more captures on who publishes agent transcripts and what they
+carry. A trial recorded in `raw/trials/scanner-rule-format/`: #135's rule table at `1223cc0`,
+written in a proposed rule format, agreed with the scanner on every one of 50,093 lines, under Bun
+and Node; its controls and mutations behaved, and round 5's table at `c47d246` already differs in
+three rules. Probes found three gaps in #135: Claude Code's pull-request attribution, JSON nested
+two deep, and encrypted reasoning blocks. New page
+[No library covers what the private-data scanner checks, so postmaster publishes one](concepts/scanner-library.md),
+at **claimed**. The user's word of 2026-10-02: a gap is reason enough to publish, with no wait for
+an outside request; the order is #135, then #109's port, then the package.
 
 ## [2026-10-01] ingest | what keeps a lane inside its worktree
 
@@ -39,6 +99,19 @@ a clean checkout of the branch outside the project folder, through `scripts/clea
 Hand-run tools in the main checkout still see the copies; the page says so. Standing `claimed`:
 those fixture runs are not in `raw/`, so the page marks the observation unverified. The
 colocated tests hold the positive and negative control.
+
+## [2026-09-29] ingest | a read-only dashboard, reached through Tailscale's proxy
+
+The design agreed with the user in issue #126. The dashboard shows every run by who acts next,
+each run's cards, timings, review rounds, gate results and live output, and the machine's load.
+Its layout follows the window's width, for a phone, an iPad or a desktop. It only shows,
+because an action it could take is one an agent running as the user could take too. It takes
+every figure from the scripts that already compute it, and listens on a Unix socket that
+`tailscale serve` publishes on the tailnet over plain HTTP, so no certificate publishes the
+machine's name. It answers only the owner's login at the machine's own name. New page at
+standing `claimed`; whether the identity header reaches a plain-HTTP service is left for the
+first ticket's live control. Tickets #146 to #150 build it, the first a dashboard the user can use
+on its own.
 
 ## [2026-09-29] ingest | the planning stage: every spec to the user before code
 
