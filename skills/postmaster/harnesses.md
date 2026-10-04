@@ -466,25 +466,25 @@ calls. It does not use a lane's final message to decide which files it touched. 
 reader, an unreadable stream or no recognized tool call is `not checked`; it never reads as
 clean. Pi's shape is not yet checked against a recorded stream.
 
-| harness | call record read by `reach.ts` | result used to identify refusal | normal settings and data folders |
-|---|---|---|---|
-| codex | completed `command_execution` items (`command`, `aggregated_output`, `exit_code`) and `file_change` items (`changes[].path`) | command output; file changes are writes | `~/.codex` for settings and sessions |
-| claude | assistant `tool_use` blocks (`name`, `input`) paired with user `tool_result`; for bug review, the copied `logs/<prefix>-claude-task-*` files too | tool result text; `is_error` alone is not a refusal | `~/.claude`, `~/.claude.json` |
-| muse | `tool.result` (`correlation_facts`, `edit_facts`, `text`) | result text | `~/.config/muse`; its lane's `XDG_DATA_HOME` |
-| mimo | `tool_use` (`part.tool`, `part.state.input`, `part.state.output`, `part.state.metadata.exit`) | output and metadata exit | `~/.config/mimocode`, `~/.mimocode`; its lane's `XDG_DATA_HOME` |
-| pi | `tool_execution_start` (`toolName`, `args`) paired with `tool_execution_end` | result; `isError` alone is not a refusal | `~/.pi/agent` |
-| grok, agy | no reader yet | not available | not exempted |
+| harness | call record read by `reach.ts` |
+|---|---|
+| codex | completed `command_execution` items (`command`, `aggregated_output`, `exit_code`) and `file_change` items (`changes[].path`) |
+| claude | assistant `tool_use` blocks (`name`, `input`) paired with user `tool_result`; for bug review, the copied `logs/<prefix>-claude-task-*` files too |
+| muse | `tool.result` (`correlation_facts`, `edit_facts`, `text`) |
+| mimo | `tool_use` (`part.tool`, `part.state.input`, `part.state.output`, `part.state.metadata.exit`) |
+| pi | `tool_execution_start` (`toolName`, `args`) paired with `tool_execution_end` |
+| grok, agy | no reader yet |
 
-The reader opens `/bin/bash -lc` commands but never executes them. It follows `cd`, splits
-command chains and substitutions, resolves the lane's home and worktree paths, and treats a
-git command as a write unless it only shows information. A successful or failed write remains
-a finding; only a refusal recorded by the harness or the system, or a read of a missing path,
-becomes a refused note. A generic tool-error flag is not enough to call an attempt refused.
-Reads of system files, the pinned postmaster checkout, lane prompts and
-briefs, the settings folders above, and paths outside the home and project are routine. The
-temporary folders, `/dev`, `~/.npm`, `~/.cache`, `~/.bun`, and a lane's own data folder are
-routine for reads and writes. Other writes outside a lane's folder are findings, including
-writes under its home directory or another project.
+The reader opens `/bin/bash -lc` commands but never executes them. From each command it
+takes the paths the command names — a token starting at `/`, `~` or `$HOME`, or climbing
+out with `..` — and from each file-tool call its path, resolves them against the lane's
+folder, and lists what falls outside that folder as a note naming the lane and the path,
+with what it cannot resolve marked unresolved. It does not say read or write, and a note
+voids nothing. A finding comes only from an observed change: a changed or new file in the
+main checkout, the main checkout off its default branch, or a change to this run's own
+branches or synthesis worktree around a round. A change is tied to a lane when that lane's
+record names the path or the branch; a change no record names is unexplained. Writes
+outside the repository are not detected here; preventing them is #221.
 
 ## Own review skills
 

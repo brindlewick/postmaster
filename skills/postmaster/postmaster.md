@@ -441,8 +441,8 @@ other line of this section holds.
    anything outside the repo, is a fault in a control (Tool faults), asks whether to fix a
    gating finding in a loop with no gating lens (`coachman.md`, Stage 2 step 5), is a reach
    (`coachman.md`, the reach check: a workhorse's finding, a main checkout change no lane's
-   record explains at `workhorses`, or a reviewer's write outside this run's own branches and
-   folders), or the user
+   record explains at `workhorses`, or an observed change tied to a reviewer outside this
+   run's own branches and folders), or the user
    asked to see it: write the question to the run's `.waiting-on-user`, add the run and the
    question to the waiting list (`<runs>/postmaster/ESCALATION.md`, owned by
    `<tool>/scripts/host.sh leg waiting add <runs> <ticket> <question-file>`), tell the user in

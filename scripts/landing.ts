@@ -401,6 +401,7 @@ function reachBlock(dispatch: string): string {
     "card",
   ];
   const lines = ["## Reach", ""];
+  lines.push("- Writes outside the repository are not detected here; preventing them is #221.");
   const card = lastPoint.get("card");
   const main = card?.main;
   if (main !== null && typeof main === "object" && !Array.isArray(main)) {
@@ -434,11 +435,7 @@ function reachBlock(dispatch: string): string {
       }
       const lane = event.lane ? `${event.lane}: ` : "";
       const access =
-        event.access === "write"
-          ? "write"
-          : event.access === "refused"
-            ? "refused attempt"
-            : "read";
+        event.access === "write" ? "write" : event.access === "names" ? "names" : "read";
       const place = event.place ? ` (${event.place})` : "";
       const path = reachPath(dispatch, event.path);
       const reason = event.reason ? ` — ${escapeCardPath(event.reason)}` : "";

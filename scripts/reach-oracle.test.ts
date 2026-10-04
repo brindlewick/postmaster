@@ -165,7 +165,7 @@ oracle("C4: the default branch moving forward reads clean, exit 0", (lay) => {
   expectExit(reach(REPO, lay.home, "check", lay.dispatch, "card"), 0);
 });
 
-oracle("C5/D6: the #200 merge event is a finding naming the synthesis worktree", (lay) => {
+oracle("C5/D6: the #200 merge event is a note naming the synthesis worktree", (lay) => {
   const sha = headOf(lay.synth);
   const cmd =
     `git -C ${lay.synth} status --short && git -C ${lay.synth} merge --ff-only ${sha} && ` +
@@ -173,10 +173,10 @@ oracle("C5/D6: the #200 merge event is a finding naming the synthesis worktree",
   const stream = join(lay.logs, "oracle-merge.jsonl");
   writeFileSync(stream, `${mimoBash(cmd, `Updating ${sha}..${sha}\nFast-forward\n`, 0)}\n`);
   const r = reach(REPO, lay.home, "stream", lay.dispatch, "mimo", stream, lay.mimoScratch);
-  expectExit(r, 2);
+  expectExit(r, 3);
   expect(both(r)).toContain(".worktrees/T");
   expect(both(r)).toContain("synthesis");
-  expect(both(r)).toContain("write");
+  expect(both(r)).not.toContain("finding");
 });
 
 oracle("C7: reads, refused attempts and unknown tools are notes, exit 3", (lay) => {
@@ -194,16 +194,15 @@ oracle("C7: reads, refused attempts and unknown tools are notes, exit 3", (lay) 
   expect(both(r)).toContain("n.txt");
   expect(both(r)).toContain("q.txt");
   expect(both(r)).toContain("o.txt");
-  expect(both(r)).toContain("read");
-  expect(both(r)).toContain("refused");
+  expect(both(r)).not.toContain("finding");
 });
 
-oracle("C7: a write whose command failed is still a finding", (lay) => {
+oracle("C7: a named path with no observed change is a note, never a finding", (lay) => {
   writeFileSync(join(lay.repo, "p.txt"), "landed\n");
   const stream = join(lay.logs, "oracle-failed-write.jsonl");
   writeFileSync(stream, `${mimoBash(`echo x > ${join(lay.repo, "p.txt")}; false`, "", 1)}\n`);
   const r = reach(REPO, lay.home, "stream", lay.dispatch, "mimo", stream, lay.mimoScratch);
-  expectExit(r, 2);
+  expectExit(r, 3);
   expect(both(r)).toContain("p.txt");
 });
 

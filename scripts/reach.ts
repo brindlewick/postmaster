@@ -1,4 +1,4 @@
-// Record and check filesystem reach by workhorse and reviewer lanes.
+// Check observed changes against the paths lane records name, by lane.
 //
 //   reach.ts stream <dispatch> <lane> <events> <own-folder>
 //   reach.ts before <dispatch> <round>
@@ -7,8 +7,14 @@
 //
 //   exit 0  checked, no findings or notes
 //   exit 1  the check could not run
-//   exit 2  a write or unapproved change was found
-//   exit 3  notes, refused attempts or records not checked
+//   exit 2  an observed change was found
+//   exit 3  notes or records not checked
+//
+// A finding comes only from an observed change: the main checkout, or this
+// run's branches and synthesis worktree around a round. What a lane's record
+// names outside its own folder is a note listing the lane and the path; it
+// never says read or write, and never voids a verdict. A change is tied to a
+// lane when that lane's record names the path or the branch.
 
 import {
   existsSync,
@@ -24,14 +30,14 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { reachTarget } from "./check-target.ts";
-import { harnessData } from "./launch.ts";
 import { toolRoot } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 type RecordOf<T = unknown> = Record<string, T>;
 type Harness = "codex" | "claude" | "muse" | "mimo" | "pi" | string;
-type Access = "read" | "write" | "refused";
+/** Observed changes read "read" or "write"; a named path reads "names", never either. */
+type Access = "read" | "write" | "names";
 type Place = "inside" | "main checkout" | "synthesis worktree" | "another worktree" | "elsewhere";
 
 interface ToolCall {
@@ -62,6 +68,8 @@ interface LaneRead {
   events: string;
   calls: ToolCall[];
   touches: Touch[];
+  /** Verbatim refs/heads/ and refs/tags/ tokens from the lane's commands. */
+  refs: string[];
   status: "checked" | "not checked";
   reason?: string;
 }
@@ -109,41 +117,7 @@ const HERE = import.meta.dir;
 const TOOL = toolRoot(import.meta);
 const LOG_ACTION = join(TOOL, "scripts", "log-action.ts");
 const RUN_LOG = join(TOOL, "scripts", "run-log.ts");
-const WRITE_COMMANDS = new Set([
-  "cp",
-  "mv",
-  "rm",
-  "mkdir",
-  "touch",
-  "tee",
-  "install",
-  "ln",
-  "truncate",
-  "chmod",
-  "chown",
-]);
-const READ_GIT = new Set([
-  "status",
-  "diff",
-  "log",
-  "show",
-  "rev-parse",
-  "rev-list",
-  "merge-base",
-  "ls-files",
-  "ls-tree",
-  "cat-file",
-  "show-ref",
-  "for-each-ref",
-  "describe",
-  "blame",
-  "grep",
-]);
-const READ_GIT_EXTRA = new Set(["worktree list", "stash list"]);
-const REFUSAL =
-  /permission denied|operation not permitted|read-only file system|access denied|approval required|blocked by (?:the )?(?:sandbox|policy)|not allowed/iu;
-const MISSING =
-  /no such file or directory|cannot find (?:the )?(?:file|path)|does not exist|enoent/iu;
+
 const DATA_RE = /^[ \t\r\n]*\{[^]*\}[ \t\r\n]*$/u;
 
 function rec(value: unknown): RecordOf {
@@ -222,9 +196,12 @@ function pathFromBrief(
   // The ticket travels in the waybill verbatim and may quote a repo: line, so
   // only the Project profile section counts; a waybill without one reads whole.
   const scope = briefSection(brief, "## Project profile") || brief;
-  const profile = /^repo:[ \t]*([^ \t\r\n]+)(?:[ \t]+default branch:[ \t]*([^ \t\r\n]+))?/mu.exec(
-    scope,
-  );
+  // The path runs to the end of the line: it may itself hold spaces, and only
+  // a "default branch:" marker ends it early.
+  const profile =
+    /^repo:[ \t]*([^ \r\n]*(?:[ \t]+(?!default branch:)[^ \t\r\n]+)*)(?:[ \t]+default branch:[ \t]*([^ \t\r\n]+))?/mu.exec(
+      scope,
+    );
   const namedRepo = profile?.[1] ? physical(profile[1]) : repo;
   const target = rec(run.target);
   let defaultBranch = profile?.[2] ?? text(target.branch);
@@ -287,78 +264,6 @@ function loadRun(dispatchArg: string): RunInfo {
   };
 }
 
-function withinAny(path: string, roots: string[]): boolean {
-  return roots.some((root) => root !== "" && inside(path, root));
-}
-
-function laneDataHome(info: RunInfo, lane: string, harness: Harness, ownFolder: string): string {
-  if (harness !== "muse" && harness !== "mimo") return "";
-  // Lanes launch with no --leg, so ask launch.sh's own function with an empty leg
-  // rather than repeating its key. HOME is the lane's home on this machine. The
-  // exemption holds by construction: a first write there creates the folder.
-  const savedHome = process.env.HOME;
-  process.env.HOME = info.home;
-  try {
-    return harnessData(harness, "launch", ownFolder, lane, "", info.dispatch);
-  } finally {
-    if (savedHome === undefined) delete process.env.HOME;
-    else process.env.HOME = savedHome;
-  }
-}
-
-function normalPath(info: RunInfo, path: string, access: Access, ownDataHome: string): boolean {
-  const p = path;
-  // Reads of the run's tool checkout and of the lane's own prompt and brief
-  // files are routine wherever those live.
-  if (access === "read" && inside(p, info.tool)) return true;
-  if (
-    access === "read" &&
-    inside(p, info.dispatch) &&
-    (basename(p) === "brief.md" ||
-      basename(p).endsWith("-prompt.txt") ||
-      basename(p).endsWith("-brief.md"))
-  )
-    return true;
-  // A test repository may itself live below /tmp. Once a path belongs to the
-  // project, its worktrees and main checkout take precedence over temp-folder rules.
-  if (inside(p, info.repo)) return false;
-  const homeReadRoots = [
-    join(info.home, ".codex"),
-    join(info.home, ".claude"),
-    join(info.home, ".claude.json"),
-    join(info.home, ".config", "muse"),
-    join(info.home, ".config", "mimocode"),
-    join(info.home, ".mimocode"),
-    join(info.home, ".pi", "agent"),
-  ];
-  const rwRoots = [join(info.home, ".npm"), join(info.home, ".cache"), join(info.home, ".bun")];
-  const xdg = text(rec(info.run.config).xdg_data_home);
-  if (xdg) rwRoots.push(physical(xdg));
-  const envXdg = process.env.XDG_DATA_HOME;
-  if (envXdg) rwRoots.push(physical(envXdg));
-  if (ownDataHome) rwRoots.push(ownDataHome);
-  if (inside(p, info.home)) {
-    if (access === "read" && withinAny(p, homeReadRoots)) return true;
-    if (withinAny(p, rwRoots)) return true;
-    // A lane's HOME may be under /tmp in a fixture. Keep ordinary home files
-    // visible before applying the broad temporary-directory allowance below.
-    return false;
-  }
-  // Reads outside the home directory and the project are routine; writes there
-  // are still reported.
-  if (access === "read" && !inside(p, info.home)) return true;
-  if (p === "/dev" || inside(p, "/dev")) return true;
-  for (const root of ["/tmp", "/private/tmp", "/var/folders"]) {
-    if (p === root || inside(p, root)) return true;
-  }
-  const temp = process.env.TMPDIR ? physical(process.env.TMPDIR) : "";
-  if (temp && (p === temp || inside(p, temp))) return true;
-
-  if (withinAny(p, rwRoots)) return true;
-
-  return false;
-}
-
 function placeOf(info: RunInfo, path: string, ownFolder: string): Place {
   // An empty folder means no lane owns the path; never resolve it against the
   // working directory.
@@ -387,324 +292,6 @@ function expandPath(token: string, cwd: string): string | null {
   if (value.includes("$") || value.includes("\u0000")) return null;
   if (!isAbsolute(value)) value = resolve(cwd, value);
   return physical(value);
-}
-
-function isPathToken(token: string, cwd: string): boolean {
-  if (!token || token.startsWith("-") || token.includes("=") || /^[0-9]+>&?[0-9]*$/u.test(token))
-    return false;
-  if (/^(?:https?|mailto|data):/iu.test(token)) return false;
-  if (
-    token.startsWith("/") ||
-    token.startsWith("~/") ||
-    token.startsWith("./") ||
-    token.startsWith("../")
-  )
-    return true;
-  if (token.includes("/") || /\.[A-Za-z0-9_-]{1,12}(?:[:#][0-9]+)?$/u.test(token)) return true;
-  try {
-    return existsSync(resolve(cwd, token));
-  } catch {
-    return false;
-  }
-}
-
-/**
- * A token in a write operand position: path-shaped, or carrying a variable
- * or glob the reader cannot resolve. Flags are never operands.
- */
-function maybeWritePath(token: string, cwd: string): boolean {
-  return isPathToken(token, cwd) || (!token.startsWith("-") && /[$*?\[\]]/u.test(token));
-}
-
-/**
- * Only a rooted operand can fail closed: starting at /, ~ or $, or
- * climbing with a .. segment. A sed script and the pattern operands of
- * find, grep and the like are never paths, so they never enter the
- * fail-closed rule; rooted globs and variables still do.
- */
-function canFailClosed(token: string): boolean {
-  if (token.startsWith("/") || token.startsWith("~") || token.startsWith("$")) return true;
-  return token.split("/").includes("..");
-}
-
-interface ShellGroup {
-  text: string;
-  /** A path inside this substitution is consumed as an operand of an outer write command. */
-  outerWrite: boolean;
-  /** This substitution is the target of an outer read redirect. */
-  outerRead: boolean;
-}
-
-/** The head command of a segment prefix, skipping leading assignments. */
-function segmentHead(part: string): { base: string; words: string[] } {
-  const words = shellWords(part);
-  let first = 0;
-  while (words[first] && /^[A-Za-z_][A-Za-z0-9_]*=/u.test(words[first]!)) first++;
-  return { base: basename(words[first] ?? ""), words };
-}
-
-function outerWrites(part: string): boolean {
-  const { base, words } = segmentHead(part);
-  if (WRITE_COMMANDS.has(base)) return true;
-  if (base === "sed" && words.some((word) => word === "-i" || word.startsWith("-i"))) return true;
-  // A write redirect whose target is computed runs the outer write on it.
-  return isWriteRedirect(words[words.length - 1] ?? "");
-}
-
-/** A read redirect whose target is computed: the inner paths stay reads. */
-function outerReads(part: string): boolean {
-  const { words } = segmentHead(part);
-  return isReadRedirect(words[words.length - 1] ?? "");
-}
-
-/** The inside of a `$(...)` starting at `at`, and the index past its close. */
-function substInner(source: string, at: number): { inner: string; end: number } {
-  let depth = 1;
-  let inner = "";
-  let i = at + 2;
-  for (; i < source.length && depth > 0; i++) {
-    const c = source[i] ?? "";
-    if (c === "(") depth++;
-    else if (c === ")") {
-      depth--;
-      if (depth === 0) break;
-    }
-    if (depth > 0) inner += c;
-  }
-  return { inner, end: i };
-}
-
-function splitShell(source: string, outerWrite = false, outerRead = false): ShellGroup[] {
-  const out: ShellGroup[] = [];
-  const push = (text: string, write: boolean, read: boolean): void => {
-    if (text.trim()) out.push({ text, outerWrite: write, outerRead: read });
-  };
-  let part = "";
-  let quote = "";
-  let escaped = false;
-  for (let i = 0; i < source.length; i++) {
-    const ch = source[i] ?? "";
-    if (escaped) {
-      part += ch;
-      escaped = false;
-      continue;
-    }
-    if (quote === "'" && ch !== "'") {
-      part += ch;
-      continue;
-    }
-    // The shell expands substitutions inside double quotes, never single ones.
-    if (quote === '"' && ch !== '"' && !(ch === "$" && source.startsWith("$(", i))) {
-      if (ch === "\\" && i + 1 < source.length && '\\"$`'.includes(source[i + 1] ?? "")) {
-        part += ch;
-        escaped = true;
-      } else part += ch;
-      continue;
-    }
-    if (ch === "\\" && quote !== "'") {
-      part += ch;
-      escaped = true;
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      part += ch;
-      if (quote === "") quote = ch;
-      else quote = "";
-      continue;
-    }
-    if ((quote === "" || quote === '"') && source.startsWith("$(", i)) {
-      push(part, outerWrite, outerRead);
-      const write = outerWrites(part);
-      const read = outerReads(part);
-      part = "";
-      const found = substInner(source, i);
-      if (found.inner.trim()) out.push(...splitShell(found.inner, write, read));
-      i = found.end;
-      continue;
-    }
-    if (
-      quote === "" &&
-      (ch === ";" ||
-        ch === "\n" ||
-        (ch === "|" && !part.endsWith(">")) ||
-        (ch === "&" && source[i + 1] === "&"))
-    ) {
-      push(part, outerWrite, outerRead);
-      part = "";
-      if (ch === "&") i++;
-      else if (ch === "|" && source[i + 1] === "&") i++;
-      continue;
-    }
-    part += ch;
-  }
-  push(part, outerWrite, outerRead);
-  return out;
-}
-
-/** A write redirect operator: an optional descriptor number or &, then >, >> or >|. */
-function isWriteRedirect(word: string): boolean {
-  return /^(?:[0-9]+|&)?(?:>>|>\||>)$/u.test(word);
-}
-
-/** A read redirect operator: an optional descriptor number, then <. */
-function isReadRedirect(word: string): boolean {
-  return /^(?:[0-9]+)?<$/u.test(word);
-}
-
-function shellWords(segment: string): string[] {
-  const words: string[] = [];
-  let word = "";
-  let quote = "";
-  let escaped = false;
-  const push = (): void => {
-    if (word !== "") words.push(word);
-    word = "";
-  };
-  for (let i = 0; i < segment.length; i++) {
-    const ch = segment[i] ?? "";
-    if (escaped) {
-      word += ch;
-      escaped = false;
-      continue;
-    }
-    if (quote === "'" && ch !== "'") {
-      word += ch;
-      continue;
-    }
-    if (quote === '"' && ch !== '"') {
-      if (ch === "\\" && i + 1 < segment.length && '\\"$`'.includes(segment[i + 1] ?? ""))
-        escaped = true;
-      else word += ch;
-      continue;
-    }
-    if (ch === "\\" && quote !== "'") {
-      escaped = true;
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      quote = quote === "" ? ch : "";
-      continue;
-    }
-    if (quote === "" && (ch === " " || ch === "\t" || ch === "\n")) {
-      push();
-      continue;
-    }
-    // The redirect family, longest first: a descriptor number before >, >>, >|
-    // or <, or & before >, >> or >| (&< is a background & beside an input).
-    if (quote === "") {
-      const found = /^(?:[0-9]+(?:>>|>\||>|<)|&(?:>>|>\||>)|>>|>\||>|<)/u.exec(segment.slice(i));
-      if (found) {
-        push();
-        words.push(found[0]);
-        i += found[0].length - 1;
-        continue;
-      }
-    }
-    word += ch;
-  }
-  push();
-  return words;
-}
-
-function unwrapShell(command: string): ShellGroup[] {
-  const words = shellWords(command.trim());
-  if (words.length >= 3 && /(?:^|\/)(?:ba)?sh$/u.test(words[0] ?? "")) {
-    const flag = words[1];
-    if (flag === "-lc" || flag === "-c") return splitShell(words.slice(2).join(" "));
-    if (flag === "-l" && words[2] === "-c") return splitShell(words.slice(3).join(" "));
-  }
-  return splitShell(command);
-}
-
-/** A redirect operand that names a descriptor, not a file. */
-function isFdOperand(op: string, target: string): boolean {
-  if (target === "-" || target.startsWith("&")) return true;
-  if ((op === "&>" || op === "&>>") && /^[0-9]+$/u.test(target)) return true;
-  return false;
-}
-
-/** Redirect targets in a word list: write targets and read targets. */
-function redirectTargets(words: string[]): { out: string[]; inp: string[] } {
-  const out: string[] = [];
-  const inp: string[] = [];
-  for (let i = 0; i < words.length; i++) {
-    const word = words[i] ?? "";
-    if (isReadRedirect(word)) {
-      const target = words[i + 1];
-      if (target && !isFdOperand(word, target)) inp.push(target);
-      i++;
-    } else if (isWriteRedirect(word)) {
-      const target = words[i + 1];
-      if (target && !isFdOperand(word, target)) out.push(target);
-      i++;
-    }
-  }
-  return { out, inp };
-}
-
-/** Whether a git branch/tag argument list only lists. */
-function gitLists(cmd: string, args: string[]): boolean {
-  if (cmd !== "branch" && cmd !== "tag") return false;
-  const readFlags = new Set([
-    "--list",
-    "--contains",
-    "--no-contains",
-    "--merged",
-    "--no-merged",
-    "-v",
-    "--verify",
-  ]);
-  if (args.some((word) => readFlags.has(word))) return true;
-  const writeFlags = new Set([
-    "-d",
-    "-D",
-    "-m",
-    "-M",
-    "-f",
-    "-c",
-    "--create",
-    "--set-upstream-to",
-    "--unset-upstream",
-  ]);
-  if (args.some((word) => writeFlags.has(word))) return false;
-  return !args.some((word) => !word.startsWith("-"));
-}
-
-/** Positional git operands, skipping options and the values they take. */
-function gitPositionals(args: string[], valued: Set<string>): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    const word = args[i] ?? "";
-    if (word === "-" || !word.startsWith("-")) {
-      if (word !== "-") out.push(word);
-      continue;
-    }
-    if (valued.has(word)) i++;
-  }
-  return out;
-}
-
-function workTreeForGitDir(gitDir: string): string {
-  if (basename(gitDir) === ".git") {
-    try {
-      if (statSync(gitDir).isDirectory()) return physical(dirname(gitDir));
-      const pointer = readFileSync(gitDir, "utf8").trim();
-      const linkedDir = /^gitdir:[ \t]*(.+)$/u.exec(pointer)?.[1];
-      if (linkedDir) return physical(dirname(resolve(dirname(gitDir), linkedDir)));
-    } catch {
-      // Fall through to git's own worktree discovery.
-    }
-  }
-  try {
-    const pointer = readFileSync(join(gitDir, "gitdir"), "utf8").trim();
-    if (pointer) return physical(dirname(pointer));
-  } catch {
-    // A bare repository has no linked-worktree pointer.
-  }
-  const top = run("git", [`--git-dir=${gitDir}`, "rev-parse", "--show-toplevel"], {
-    env: UNSET_GIT,
-  });
-  return top.code === 0 ? physical(top.out.trim()) : gitDir;
 }
 
 function toolCallsFromEvents(harness: Harness, events: unknown[]): ToolCall[] {
@@ -844,386 +431,144 @@ function inputPath(input: RecordOf): string | null {
   return null;
 }
 
-function commandTouches(
-  command: string,
-  result: string,
-  code: unknown,
+/**
+ * A command token that names a path: starting at /, ~ or $HOME, or climbing
+ * out with a .. segment. Flags, assignments, bare words, patterns and
+ * substitutions standing alone name nothing.
+ */
+function isMentionToken(token: string): boolean {
+  if (token.startsWith("/") || token.startsWith("~")) return true;
+  if (
+    token === "$HOME" ||
+    token === "${HOME}" ||
+    token.startsWith("$HOME/") ||
+    token.startsWith("${HOME}/")
+  )
+    return true;
+  return token.split("/").includes("..");
+}
+
+/** Strip the quoting and trailing punctuation prose leaves on a token. */
+function stripToken(token: string): string {
+  return token
+    .replace(/^['"`]+/u, "")
+    .replace(/['"`]+[.,:;!?]*$/u, "")
+    .replace(/[.,:;!?]+$/u, "");
+}
+
+function mentionTouch(
   info: RunInfo,
   lane: string,
   ownFolder: string,
-  ownDataHome: string,
+  path: string,
+  detail: string,
   lens?: string,
-): { touches: Touch[]; unresolved: string[] } {
-  const touches: Touch[] = [];
-  const unresolved: string[] = [];
-  const rawOf = new Map<Touch, string>();
-  const seenPaths = new Set<string>();
-  let cwd = ownFolder;
-  const home = process.env.HOME || homedir();
-  const shellGroups = unwrapShell(command);
-  const add = (
-    rawPath: string,
-    access: Access,
-    source: "stream" = "stream",
-    detail?: string,
-    base: string = cwd,
-  ): void => {
-    const path = expandPath(rawPath, base);
-    if (!path) {
-      // A surviving $( was single-quoted or escaped, so the shell never
-      // expands it: literal text, not a path. A rooted operand the reader
-      // cannot resolve fails closed instead of dropping silently, and
-      // counts toward refusal attribution like any other path.
-      if (rawPath && !rawPath.includes("$(") && canFailClosed(rawPath)) {
-        unresolved.push(`unresolved ${access} target: ${rawPath}`);
-        seenPaths.add(rawPath);
-      }
-      return;
-    }
-    // Every resolved path counts toward refusal attribution, including routine
-    // and inside ones: a denial beside two paths must not demote either blindly.
-    seenPaths.add(path);
-    const place = placeOf(info, path, ownFolder);
-    if (place === "inside") {
-      touches.push({
-        path,
-        access,
-        place,
-        kind: "expected",
-        lane,
-        ...(lens ? { lens } : {}),
-        source,
-        ...(detail ? { detail } : {}),
-      });
-      return;
-    }
-    if (normalPath(info, path, access, ownDataHome)) return;
-    const kind = access === "write" ? "finding" : "note";
-    const touch: Touch = {
-      path,
-      access,
-      place,
-      kind,
-      lane,
-      ...(lens ? { lens } : {}),
-      source,
-      ...(detail ? { detail } : {}),
-    };
-    touches.push(touch);
-    rawOf.set(touch, rawPath);
+): Touch {
+  const place = placeOf(info, path, ownFolder);
+  return {
+    path,
+    access: "names",
+    place,
+    kind: place === "inside" ? "expected" : "note",
+    lane,
+    ...(lens ? { lens } : {}),
+    source: "stream",
+    ...(detail ? { detail } : {}),
   };
-
-  const groupStarts: number[] = [];
-  for (const group of shellGroups) {
-    groupStarts.push(touches.length);
-    const words = shellWords(group.text);
-    if (words.length === 0) continue;
-    let first = 0;
-    const assignments: Record<string, string> = {};
-    while (words[first] && /^[A-Za-z_][A-Za-z0-9_]*=/u.test(words[first]!)) {
-      const [key, ...value] = (words[first] ?? "").split("=");
-      assignments[key ?? ""] = value.join("=");
-      first++;
-    }
-    const commandName = words[first] ?? "";
-    const baseCommand = basename(commandName);
-    if (baseCommand === "cd") {
-      const next = words[first + 1];
-      // A bare cd lands in $HOME. Unknown variables fail closed: expandPath
-      // answers null and the workdir stays where it is.
-      if (!next) cwd = physical(home);
-      else if (!next.startsWith("-")) cwd = expandPath(next, cwd) ?? cwd;
-      continue;
-    }
-
-    if (baseCommand === "git") {
-      let gitDir = cwd;
-      let targetWorktree = cwd;
-      let worktreeExplicit = false;
-      const assignedWorkTree = assignments.GIT_WORK_TREE
-        ? expandPath(assignments.GIT_WORK_TREE, cwd)
-        : null;
-      const assignedGitDir = assignments.GIT_DIR ? expandPath(assignments.GIT_DIR, cwd) : null;
-      if (assignedWorkTree) {
-        targetWorktree = assignedWorkTree;
-        worktreeExplicit = true;
-      }
-      if (assignedGitDir) {
-        gitDir = assignedGitDir;
-        if (!worktreeExplicit) targetWorktree = workTreeForGitDir(gitDir);
-      }
-      let cmd = "";
-      let subIndex = first + 1;
-      const refs: string[] = [];
-      while (subIndex < words.length) {
-        const word = words[subIndex] ?? "";
-        if (word === "-C" && words[subIndex + 1]) {
-          targetWorktree = expandPath(words[subIndex + 1]!, cwd) ?? targetWorktree;
-          gitDir = targetWorktree;
-          worktreeExplicit = true;
-          subIndex += 2;
-          continue;
-        }
-        if ((word === "--git-dir" || word === "--work-tree") && words[subIndex + 1]) {
-          const value = expandPath(words[subIndex + 1]!, cwd);
-          if (value) {
-            if (word === "--work-tree") {
-              targetWorktree = value;
-              worktreeExplicit = true;
-            } else {
-              gitDir = value;
-              if (!worktreeExplicit) targetWorktree = workTreeForGitDir(gitDir);
-            }
-          }
-          subIndex += 2;
-          continue;
-        }
-        if (word.startsWith("--git-dir=")) {
-          gitDir = expandPath(word.slice("--git-dir=".length), cwd) ?? gitDir;
-          if (!worktreeExplicit) targetWorktree = workTreeForGitDir(gitDir);
-          subIndex++;
-          continue;
-        }
-        if (word.startsWith("--work-tree=")) {
-          targetWorktree = expandPath(word.slice("--work-tree=".length), cwd) ?? targetWorktree;
-          worktreeExplicit = true;
-          subIndex++;
-          continue;
-        }
-        if (
-          (word === "-c" || word === "--config-env" || word === "--namespace") &&
-          words[subIndex + 1]
-        ) {
-          subIndex += 2;
-          continue;
-        }
-        if (word.startsWith("-")) {
-          subIndex++;
-          continue;
-        }
-        cmd = word;
-        subIndex++;
-        break;
-      }
-      const rest = words.slice(subIndex);
-      const gitRead =
-        READ_GIT.has(cmd) ||
-        READ_GIT_EXTRA.has(`${cmd} ${words[subIndex] ?? ""}`) ||
-        (cmd === "config" && words[subIndex] === "--get") ||
-        gitLists(cmd, rest);
-      const access: Access = gitRead ? "read" : "write";
-      add(targetWorktree, access, "stream", `git ${cmd}`);
-      // Path operands resolve where git runs: worktree add, clone and init
-      // create outside the lane's folder from inside it. Bare words are branch
-      // names, refspecs and option values, never paths.
-      for (const word of rest) {
-        if (word.startsWith("-")) continue;
-        if (
-          !word.startsWith("/") &&
-          !word.startsWith("~") &&
-          !word.startsWith(".") &&
-          !word.includes("/")
-        )
-          continue;
-        if (!isPathToken(word, targetWorktree)) continue;
-        add(word, access, "stream", `git ${cmd}`, targetWorktree);
-      }
-      // The shell owns redirects, so their targets resolve in the lane's folder.
-      const gitRedirects = redirectTargets(words);
-      for (const target of gitRedirects.out) add(target, "write");
-      for (const target of gitRedirects.inp) add(target, "read");
-      if (!gitRead) {
-        for (const word of rest) {
-          if (/^refs\/(?:heads|tags)\//u.test(word)) refs.push(word);
-        }
-        if (cmd === "update-ref") {
-          const ref = words[subIndex];
-          if (ref?.startsWith("refs/heads/") || ref?.startsWith("refs/tags/")) refs.push(ref);
-        } else if (["checkout", "switch", "branch", "worktree"].includes(cmd)) {
-          const flag = rest.findIndex((word) => ["-b", "-B", "-c", "--create"].includes(word));
-          if (flag >= 0 && rest[flag + 1]) refs.push(`refs/heads/${rest[flag + 1]}`);
-        }
-        if (cmd === "branch") {
-          const names = gitPositionals(rest, new Set(["-u", "--set-upstream-to"]));
-          if (names[0]) refs.push(`refs/heads/${names[0]}`);
-          if (names[1] && rest.some((word) => word === "-m" || word === "-M" || word === "-c"))
-            refs.push(`refs/heads/${names[1]}`);
-        }
-        if (cmd === "tag") {
-          const names = gitPositionals(rest, new Set(["-m", "-F", "-u"]));
-          if (names[0]) refs.push(`refs/tags/${names[0]}`);
-        }
-      }
-      for (const ref of new Set(refs)) {
-        if (!normalPath(info, join(info.repo, ".git", ref), "write", ownDataHome)) {
-          touches.push({
-            path: ref,
-            access: "write",
-            place: "elsewhere",
-            kind: "finding",
-            lane,
-            ...(lens ? { lens } : {}),
-            source: "stream",
-            detail: `git ${cmd}`,
-          });
-        }
-      }
-      continue;
-    }
-
-    const inPlace =
-      baseCommand === "sed" && words.some((word) => word === "-i" || word.startsWith("-i"));
-    const redirects = redirectTargets(words);
-    const args = words
-      .slice(first + 1)
-      .filter((word) => !isWriteRedirect(word) && !isReadRedirect(word));
-    if (WRITE_COMMANDS.has(baseCommand)) {
-      if (baseCommand === "cp" || baseCommand === "mv") {
-        const paths = args.filter((arg) => maybeWritePath(arg, cwd));
-        paths.slice(0, -1).forEach((path) => add(path, baseCommand === "mv" ? "write" : "read"));
-        if (paths.length) add(paths[paths.length - 1]!, "write");
-      } else {
-        args.filter((arg) => maybeWritePath(arg, cwd)).forEach((path) => add(path, "write"));
-      }
-    } else if (inPlace) {
-      args.filter((arg) => maybeWritePath(arg, cwd)).forEach((path) => add(path, "write"));
-    }
-    for (const path of redirects.out) add(path, "write");
-    for (const path of redirects.inp) add(path, "read");
-    if (!WRITE_COMMANDS.has(baseCommand) && !inPlace) {
-      args.filter((arg) => isPathToken(arg, cwd)).forEach((path) => add(path, "read"));
-    }
-    // Inside a substitution consumed by an outer write command, a path the
-    // inner command only reads is still written by the outer one.
-    if (group.outerWrite) {
-      for (const word of words.slice(first + 1)) {
-        if (maybeWritePath(word, cwd)) add(word, "write");
-      }
-    }
-  }
-  // A redirect whose target the reader cannot see fails closed: a
-  // substitution that names no path, or no target at all. A substitution
-  // that names a path resolves through the touches above instead.
-  shellGroups.forEach((group, gi) => {
-    const words = shellWords(group.text);
-    const last = words[words.length - 1] ?? "";
-    const next = shellGroups[gi + 1];
-    const shown = group.text.trim().slice(0, 120);
-    if (isWriteRedirect(last) && !next?.outerWrite)
-      unresolved.push(`a write redirect names no target: ${shown}`);
-    else if (isReadRedirect(last) && !next?.outerRead)
-      unresolved.push(`a read redirect names no target: ${shown}`);
-    const end = gi + 1 < groupStarts.length ? groupStarts[gi + 1]! : touches.length;
-    if (end === groupStarts[gi] && group.outerWrite)
-      unresolved.push(`a computed write target names no path: ${shown}`);
-    else if (end === groupStarts[gi] && group.outerRead)
-      unresolved.push(`a computed read target names no path: ${shown}`);
-  });
-  // A refusal demotes a path only when the result names it, or when the call
-  // touched a single path: a bare denial beside two writes fails closed.
-  if (REFUSAL.test(result) || MISSING.test(result)) {
-    const single = seenPaths.size === 1;
-    for (const touch of touches) {
-      if (touch.source !== "stream" || touch.place === "inside") continue;
-      const raw = rawOf.get(touch) ?? "";
-      const named = raw !== "" && (result.includes(raw) || result.includes(touch.path));
-      if (REFUSAL.test(result) && (single || named)) {
-        touch.access = "refused";
-        touch.kind = "note";
-      } else if (touch.access === "read" && MISSING.test(result) && (single || named)) {
-        touch.access = "refused";
-        touch.kind = "note";
-      }
-    }
-  }
-  return { touches, unresolved };
 }
 
-function directCallTouches(
+function unresolvedTouch(lane: string, token: string, lens?: string): Touch {
+  // The raw token stays in the path, so the run log keeps it; the reason
+  // stays generic, so the card cannot leak a private path through it.
+  return {
+    path: token,
+    access: "names",
+    place: "elsewhere",
+    kind: "note",
+    lane,
+    ...(lens ? { lens } : {}),
+    source: "stream",
+    detail: "unresolved",
+  };
+}
+
+/**
+ * The paths a shell command names, without judging them: each operand-shaped
+ * token outside the lane's folder becomes a note, each ref-shaped token a
+ * branch naming for the tie. Nothing here says read or write.
+ */
+function commandMentions(
+  command: string,
+  info: RunInfo,
+  lane: string,
+  ownFolder: string,
+  lens?: string,
+): { touches: Touch[]; refs: string[] } {
+  const touches: Touch[] = [];
+  const refs: string[] = [];
+  // Codex wraps every command; open the wrapper but never execute it.
+  let unwrapped = command;
+  if (unwrapped.startsWith("/bin/bash -lc '")) {
+    unwrapped = unwrapped.slice("/bin/bash -lc '".length);
+    if (unwrapped.endsWith("'")) unwrapped = unwrapped.slice(0, -1);
+  }
+  for (const raw of unwrapped.split(/[\s;&|()<>]+/u)) {
+    const token = stripToken(raw);
+    if (!token) continue;
+    if (/^refs\/(?:heads|tags)\/\S+$/u.test(token)) {
+      refs.push(token);
+      continue;
+    }
+    if (!isMentionToken(token)) continue;
+    const absolute = expandPath(token, ownFolder);
+    if (absolute === null) {
+      touches.push(unresolvedTouch(lane, token, lens));
+      continue;
+    }
+    touches.push(mentionTouch(info, lane, ownFolder, absolute, "", lens));
+  }
+  return { touches, refs };
+}
+
+function directCallMentions(
   calls: ToolCall[],
   info: RunInfo,
   lane: string,
   ownFolder: string,
-  ownDataHome: string,
   lens?: string,
-): { touches: Touch[]; unresolved: string[]; directUnresolved: string[] } {
+): { touches: Touch[]; refs: string[] } {
   const touches: Touch[] = [];
-  const unresolved: string[] = [];
-  const directUnresolved: string[] = [];
+  const refs: string[] = [];
   for (const call of calls) {
-    const name = call.name.toLowerCase(); // LOWER: harness tool names are ASCII identifiers
     const command = text(call.input.command ?? call.input.cmd);
     if (command) {
-      const judged = commandTouches(
-        command,
-        call.output,
-        call.exitCode,
-        info,
-        lane,
-        ownFolder,
-        ownDataHome,
-        lens,
-      );
-      touches.push(...judged.touches);
-      unresolved.push(...judged.unresolved);
+      const named = commandMentions(command, info, lane, ownFolder, lens);
+      touches.push(...named.touches);
+      refs.push(...named.refs);
       continue;
     }
+    // A file tool's path is a path, never a pattern: no shape test.
     const direct = [...call.direct];
     const path = inputPath(call.input);
-    if (path) {
-      let access: Access = "read";
-      if (/write|edit|create|patch|apply|delete|remove|move|copy|install|save/iu.test(name))
-        access = "write";
-      direct.push({ path, access });
-    }
-    if (direct.length === 0) continue;
-    const refused =
-      REFUSAL.test(call.output) ||
-      (direct.some((item) => item.access === "read") && MISSING.test(call.output));
+    if (path) direct.push({ path, access: "names" });
     for (const item of direct) {
       const absolute = expandPath(item.path, ownFolder);
-      // Fail closed like shell input: a file-tool path the reader cannot
-      // resolve leaves the lane not checked instead of reading clean.
       if (!absolute) {
-        directUnresolved.push(`unresolved ${item.access} target: ${item.path}`);
+        touches.push(unresolvedTouch(lane, item.path, lens));
         continue;
       }
-      const place = placeOf(info, absolute, ownFolder);
-      if (place === "inside") {
-        touches.push({
-          path: absolute,
-          access: item.access,
-          place,
-          kind: "expected",
-          lane,
-          ...(lens ? { lens } : {}),
-          source: "stream",
-        });
-        continue;
-      }
-      if (!refused && normalPath(info, absolute, item.access, ownDataHome)) continue;
-      const access: Access = refused ? "refused" : item.access;
-      touches.push({
-        path: absolute,
-        access,
-        place,
-        kind: access === "write" ? "finding" : "note",
-        lane,
-        ...(lens ? { lens } : {}),
-        source: "stream",
-      });
+      touches.push(mentionTouch(info, lane, ownFolder, absolute, "", lens));
     }
   }
-  return { touches, unresolved, directUnresolved };
+  return { touches, refs };
 }
 
 function mergeTouches(touches: Touch[]): Touch[] {
   const byPath = new Map<string, Touch>();
-  const rank: Record<Access, number> = { read: 1, refused: 2, write: 3 };
   for (const touch of touches) {
     const key = `${touch.lane}\0${touch.lens ?? ""}\0${touch.path}`;
-    const old = byPath.get(key);
-    if (!old || rank[touch.access] > rank[old.access]) byPath.set(key, touch);
+    // Mentions merge by path: one note per lane and path, the first telling kept.
+    if (!byPath.has(key)) byPath.set(key, touch);
   }
   return [...byPath.values()].sort((a, b) =>
     `${a.lane}\0${a.lens ?? ""}\0${a.path}`.localeCompare(`${b.lane}\0${b.lens ?? ""}\0${b.path}`),
@@ -1246,6 +591,7 @@ function readLane(
     events,
     calls: [],
     touches: [],
+    refs: [],
     status: "not checked",
   };
   if (!["codex", "claude", "muse", "mimo", "pi"].includes(harness)) {
@@ -1285,36 +631,17 @@ function readLane(
     return laneRecord;
   }
   laneRecord.status = "checked";
-  const dataHome = laneDataHome(info, lane, harness, laneRecord.ownFolder);
-  const judged = directCallTouches(
-    laneRecord.calls,
-    info,
-    lane,
-    laneRecord.ownFolder,
-    dataHome,
-    lens,
-  );
+  // An unresolvable naming is a note, never not checked: only a record that
+  // cannot be read at all leaves the lane not checked.
+  const judged = directCallMentions(laneRecord.calls, info, lane, laneRecord.ownFolder, lens);
   laneRecord.touches = mergeTouches(judged.touches);
-  // Unresolved input fails closed without discarding what resolved.
-  const capped = (reasons: string[]): string => {
-    const shown = reasons.slice(0, 3).join("; ");
-    return `${shown}${reasons.length > 3 ? ` (and ${reasons.length - 3} more)` : ""}`;
-  };
-  const kinds: string[] = [];
-  const shellReasons = [...new Set(judged.unresolved)];
-  if (shellReasons.length > 0) kinds.push(`unresolved shell input: ${capped(shellReasons)}`);
-  const fileReasons = [...new Set(judged.directUnresolved)];
-  if (fileReasons.length > 0) kinds.push(`unresolved file input: ${capped(fileReasons)}`);
-  if (kinds.length > 0) {
-    laneRecord.status = "not checked";
-    laneRecord.reason = kinds.join("; ");
-  }
+  laneRecord.refs = [...new Set(judged.refs)];
   return laneRecord;
 }
 
 function noShellDisplay(touch: Touch): string {
   if (touch.kind === "expected") return `expected ${touch.access} ${touch.path}`;
-  return `${touch.kind} ${touch.access} ${touch.path} (${touch.place})`;
+  return `${touch.kind} ${touch.access} ${touch.path} (${touch.place})${touch.detail ? ` · ${touch.detail}` : ""}`;
 }
 
 function readStreamMode(info: RunInfo, lane: string, stream: string, ownFolder: string): number {
@@ -1522,20 +849,25 @@ function addMainChanges(
   for (const path of result.changed) {
     const absolute = resolve(info.repo, path);
     const target = physical(absolute);
-    const explained = touches.some(
-      (touch) => (touch.path === absolute || touch.path === target) && touch.access === "write",
+    const tie = touches.find(
+      (touch) =>
+        (touch.path === absolute || touch.path === target) &&
+        touch.kind !== "expected" &&
+        touch.lane !== "",
     );
-    const severity: Touch["kind"] = initial && !explained ? "finding" : "note";
+    // A main checkout change a lane's record names is tied to that lane. At
+    // the workhorses point an untied change is the finding; at a round, a
+    // tied change is a finding about its reviewer, and an untied one a note.
+    const severity: Touch["kind"] = (initial && !tie) || (!initial && tie) ? "finding" : "note";
     touches.push({
-      lane: "",
+      lane: tie?.lane ?? "",
+      ...(tie?.lens ? { lens: tie.lens } : {}),
       path: absolute,
       access: "write",
       place: "main checkout",
       kind: severity,
       source: "checkout",
-      detail: explained
-        ? "changed by a lane record"
-        : "main checkout changed without a lane record",
+      detail: tie ? `tied to ${tie.lane}` : "main checkout changed without a lane record",
     });
   }
   if (result.offDefault) {
@@ -1591,8 +923,10 @@ function roundChanges(
   let unassignedTracked = false;
   const ticketRef = `refs/heads/${info.ticket}`;
   const checked = reads.filter((read) => read.status === "checked");
-  const wrote = (read: LaneRead, path: string): boolean =>
-    read.touches.some((touch) => touch.access === "write" && touch.path === path);
+  // A change is tied to a lane when that lane's record names the path or
+  // the branch: a mention of the path, or a verbatim refs/ naming.
+  const named = (read: LaneRead, path: string): boolean =>
+    read.touches.some((touch) => touch.path === path) || read.refs.includes(path);
   const worktreeOf = (refName: string): string => {
     if (refName === ticketRef) return ticketWorktree;
     if (refName.startsWith(`refs/heads/wb/${info.ticket}-`)) {
@@ -1614,9 +948,9 @@ function roundChanges(
     const checkedOut = refName ? worktreeOf(refName) : "";
     for (const read of checked) {
       if (
-        (refName && wrote(read, refName)) ||
-        (checkedOut && wrote(read, checkedOut)) ||
-        (isHead && wrote(read, ticketWorktree))
+        (refName && named(read, refName)) ||
+        (checkedOut && named(read, checkedOut)) ||
+        (isHead && named(read, ticketWorktree))
       )
         ticketRiders.add(read);
     }
@@ -1655,18 +989,18 @@ function roundChanges(
       !diskDiffers.has(`${movedPair.before}:${name}`)
     );
   };
-  const ticketRefOwner = checked.find((read) => wrote(read, ticketRef));
+  const ticketRefOwner = checked.find((read) => named(read, ticketRef));
   for (const change of changes) {
     const refName = change.path.startsWith("refs/heads/") ? change.path : "";
     const exactPath = change.path;
     const checkedOutWorktree = refName ? worktreeOf(refName) : "";
     const owners = checked.filter((read) => {
       if (refName || exactPath === ticketWorktree) {
-        if (wrote(read, exactPath)) return true;
-        if (checkedOutWorktree && wrote(read, checkedOutWorktree)) return true;
+        if (named(read, exactPath)) return true;
+        if (checkedOutWorktree && named(read, checkedOutWorktree)) return true;
         return false;
       }
-      if (wrote(read, exactPath)) return true;
+      if (named(read, exactPath)) return true;
       if (!ticketRiders.has(read)) return false;
       return moveProduced(relative(ticketWorktree, exactPath));
     });
@@ -1862,9 +1196,12 @@ function checkRound(info: RunInfo, round: number): number {
   const { result } = addMainChanges(info, `r${round}`, touches, false);
 
   const voided = new Set<string>();
-  for (const read of reads) {
-    const findings = read.touches.filter((touch) => touch.kind === "finding");
-    if (findings.length > 0) voided.add(`${read.lens ?? ""}\0${read.lane}`);
+  // A reviewer's verdict is voided when an observed change is tied to that
+  // reviewer: a round finding, or a main checkout change naming them.
+  for (const touch of touches) {
+    if (touch.kind === "finding" && touch.lane) {
+      voided.add(`${touch.lens ?? ""}\0${touch.lane}`);
+    }
   }
   if (changes.unassignedTracked) {
     for (const [lens, lane] of reviewers) voided.add(`${lens}\0${lane}`);
@@ -2012,6 +1349,12 @@ function restoreRound(info: RunInfo, round: number): number {
     const prefix = `wb/${info.ticket}-`;
     const lane = branch.startsWith(prefix) ? branch.slice(prefix.length) : "";
     const worktree = lane ? join(info.repo, ".worktrees", `${info.ticket}-${lane}`) : "";
+    if (before && !after) {
+      // The ref is gone but the worktree still names the branch, and its
+      // diff against HEAD fails. Put the ref back before reading the tree.
+      const update = runGit(info.repo, ["update-ref", ref, before]);
+      if (update.code !== 0) throw new Error(`cannot restore deleted ${ref}: ${update.err.trim()}`);
+    }
     if (before && worktree && existsSync(worktree) && branchName(info.repo, worktree) === branch) {
       const safe = ref.replace(/[^A-Za-z0-9._-]/gu, "_");
       const dirt = runGit(worktree, ["diff", "HEAD"]);

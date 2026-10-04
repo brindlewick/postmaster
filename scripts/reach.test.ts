@@ -15,7 +15,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./lib/proc.ts";
 import { toolRoot } from "./lib/paths.ts";
-import { harnessData } from "./launch.ts";
 
 const TOOL = toolRoot(import.meta);
 const SCRIPT = join(import.meta.dir, "reach.ts");
@@ -337,20 +336,29 @@ describe("C1-C2: point checks and audit records", () => {
     expect(check(layout, "card").code).toBe(0);
   });
 
-  test("C2 each point is logged, including clean points and findings", () => {
+  test("C2 each point is logged, including clean points, notes and findings", () => {
     const layout = makeLayout();
-    writeWorkhorse(layout, "codex", [codexFile(join(layout.repo, "out.txt"))]);
+    const out = join(layout.repo, "out.txt");
+    writeFileSync(out, "reached\n");
+    writeWorkhorse(layout, "codex", [codexFile(out)]);
     check(layout, "workhorses");
     before(layout);
+    const commit = addCommit(layout.repo, layout.reviewers.mimo, "reviewed.txt");
+    git(layout.repo, "-C", layout.synth, "merge", "--ff-only", commit);
+    writeReviewer(layout, "mimo", [
+      mimo("bash", { command: `git -C ${layout.synth} merge --ff-only ${commit}` }),
+    ]);
     check(layout, "r1");
     check(layout, "card");
     const events = reachEvents(layout);
     expect(
       events.filter(({ detail }) => detail.kind === "point").map(({ detail }) => detail.point),
     ).toEqual(["workhorses", "r1", "card"]);
+    expect(events.some(({ detail }) => detail.kind === "note" && detail.path === out)).toBe(true);
     expect(
       events.some(
-        ({ detail }) => detail.kind === "finding" && detail.path === join(layout.repo, "out.txt"),
+        ({ detail }) =>
+          detail.kind === "finding" && detail.point === "r1" && detail.path === "refs/heads/T",
       ),
     ).toBe(true);
   });
@@ -404,10 +412,10 @@ describe("C3-C4: main checkout reach", () => {
   });
 });
 
-describe("C5-C7: stream readers and access classification", () => {
+describe("C5: stream readers and path mentions", () => {
   const cases = ["codex", "claude", "muse", "mimo", "pi"] as const;
   for (const harness of cases) {
-    test(`C5 ${harness} stream finds outside paths and keeps the strongest access`, () => {
+    test(`C5 ${harness} stream notes outside paths once and never finds`, () => {
       const layout = makeLayout();
       const other = join(layout.repo, ".worktrees", "T-mimo", "a.ts");
       const homeFile = join(layout.home, "n.txt");
@@ -459,16 +467,20 @@ describe("C5-C7: stream readers and access classification", () => {
       const eventsPath = join(layout.dispatch, "logs", `${harness}-direct.jsonl`);
       writeEvents(eventsPath, events);
       const result = stream(layout, harness, eventsPath, layout.codex);
-      expect(result.code).toBe(2);
-      expect(result.out).toContain(`finding write ${join(layout.repo, "out.txt")} (main checkout)`);
-      expect(result.out).toContain(`finding write ${other} (another worktree)`);
-      expect(result.out).toContain(`note read ${homeFile} (elsewhere)`);
-      expect(result.out).toContain(`note read ${layout.synth} (synthesis worktree)`);
+      expect(result.code).toBe(3);
+      expect(result.out).toContain(`note names ${join(layout.repo, "out.txt")} (main checkout)`);
+      expect(result.out).toContain(`note names ${other} (another worktree)`);
+      expect(result.out).toContain(`note names ${homeFile} (elsewhere)`);
+      expect(result.out).toContain(`note names ${layout.synth} (synthesis worktree)`);
       expect(
         result.out.match(new RegExp(other.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "gu"))?.length,
       ).toBe(1);
-      expect(result.out).toContain(`expected write ${join(layout.codex, "in.txt")}`);
-      expect(result.out).not.toContain("/tmp/x");
+      expect(result.out).toContain(`expected names ${join(layout.codex, "in.txt")}`);
+      // No routine exemption: the temp folder is named like any outside path.
+      expect(result.out).toContain("note names /tmp/x (elsewhere)");
+      expect(result.out).toContain("note names /dev/null (elsewhere)");
+      expect(result.out).not.toContain("finding");
+      expect(result.out).not.toContain("not checked");
     });
   }
 
@@ -495,8 +507,9 @@ describe("C5-C7: stream readers and access classification", () => {
       join(layout.dispatch, "logs", "review-r1-bug-codex.jsonl"),
       layout.reviewers.codex,
     );
-    expect(result.code).toBe(2);
-    expect(result.out).toContain(`finding write ${path} (main checkout)`);
+    expect(result.code).toBe(3);
+    expect(result.out).toContain(`note names ${path} (main checkout)`);
+    expect(result.out).not.toContain("finding");
   });
 
   test("C5 unsupported, unreadable and empty records are not checked", () => {
@@ -561,99 +574,33 @@ describe("C5-C7: stream readers and access classification", () => {
     expect(result.out).not.toContain("round-tag");
     expect(result.out).not.toContain("main-forward");
   });
-
-  test("C7 refused attempts and reads are notes, while failed writes remain findings", () => {
-    const layout = makeLayout();
-    const denied = join(layout.home, ".codex", "settings.toml");
-    const streamPath = join(layout.dispatch, "logs", "refusal.jsonl");
-    writeEvents(streamPath, [...claude("Read", { file_path: denied }, "Permission denied", true)]);
-    const read = stream(layout, "claude", streamPath, layout.codex);
-    expect(read.code).toBe(3);
-    expect(read.out).toContain("refused");
-
-    const ordinaryFailure = join(layout.dispatch, "logs", "ordinary-read-error.jsonl");
-    const ordinaryFile = join(layout.home, "ordinary.txt");
-    writeFileSync(ordinaryFile, "present\n");
-    writeEvents(ordinaryFailure, claude("Read", { file_path: ordinaryFile }, "tool failed", true));
-    const ordinary = stream(layout, "claude", ordinaryFailure, layout.codex);
-    expect(ordinary.code).toBe(3);
-    expect(ordinary.out).toContain("note read");
-    expect(ordinary.out).not.toContain("refused");
-
-    const mimoPath = join(layout.dispatch, "logs", "mimo-refusal.jsonl");
-    writeEvents(mimoPath, [
-      mimo("bash", { command: `echo x > ${join(layout.repo, "o.txt")}` }, "Permission denied", 1),
-    ]);
-    expect(stream(layout, "mimo", mimoPath, layout.mimo).code).toBe(3);
-
-    const failedWrite = join(layout.dispatch, "logs", "failed-write.jsonl");
-    writeEvents(failedWrite, [codex(`echo x > ${join(layout.repo, "p.txt")}; false`, "", 1)]);
-    expect(stream(layout, "codex", failedWrite, layout.codex).code).toBe(2);
-
-    const unknown = join(layout.dispatch, "logs", "unknown-command.jsonl");
-    writeEvents(unknown, [codex(`some-tool ${join(layout.repo, "q.txt")}`)]);
-    const unknownResult = stream(layout, "codex", unknown, layout.codex);
-    expect(unknownResult.code).toBe(3);
-    expect(unknownResult.out).toContain("note read");
-
-    const museRead = join(layout.dispatch, "logs", "muse-read.jsonl");
-    const readTarget = join(layout.repo, "README.md");
-    writeEvents(museRead, [
-      muse("read_file", {}, `Read text file \`${readTarget}\`\nreach fixture\n`),
-    ]);
-    const museResult = stream(layout, "muse", museRead, layout.mimo);
-    expect(museResult.code).toBe(3);
-    expect(museResult.out).toContain(`note read ${readTarget} (main checkout)`);
-
-    const gitDirRead = join(layout.dispatch, "logs", "git-dir-read.jsonl");
-    writeEvents(gitDirRead, [codex(`GIT_DIR=${join(layout.repo, ".git")} git log -1`)]);
-    const gitDirResult = stream(layout, "codex", gitDirRead, layout.codex);
-    expect(gitDirResult.code).toBe(3);
-    expect(gitDirResult.out).toContain(`note read ${layout.repo} (main checkout)`);
-
-    const savedHome = process.env.HOME;
-    const savedData = process.env.POSTMASTER_HARNESS_DATA;
-    process.env.HOME = layout.home;
-    delete process.env.POSTMASTER_HARNESS_DATA;
-    try {
-      const dataDir = harnessData("mimo", "launch", layout.mimo, "mimo", "", layout.dispatch);
-      const dataFile = join(dataDir, "session.json");
-      const dataWrite = join(layout.dispatch, "logs", "mimo-data.jsonl");
-      writeEvents(dataWrite, [mimo("write_file", { path: dataFile })]);
-      expect(stream(layout, "mimo", dataWrite, layout.mimo).code).toBe(0);
-    } finally {
-      if (savedHome === undefined) delete process.env.HOME;
-      else process.env.HOME = savedHome;
-      if (savedData === undefined) delete process.env.POSTMASTER_HARNESS_DATA;
-      else process.env.POSTMASTER_HARNESS_DATA = savedData;
-    }
-
-    const outsideHome = join(layout.home, "other.txt");
-    const outsideWrite = join(layout.dispatch, "logs", "outside-home.jsonl");
-    writeEvents(outsideWrite, [mimo("write_file", { path: outsideHome })]);
-    expect(stream(layout, "mimo", outsideWrite, layout.mimo).code).toBe(2);
-  });
 });
 
 describe("C8-C9: escalation boundary", () => {
-  test("C8a a recorded workhorse write reaches the main checkout", () => {
+  test("C8a a main checkout change a workhorse record names is tied to that lane", () => {
     const layout = makeLayout();
-    writeWorkhorse(layout, "codex", [codexFile(join(layout.repo, "out.txt"))]);
+    const out = join(layout.repo, "out.txt");
+    writeFileSync(out, "reached\n");
+    writeWorkhorse(layout, "codex", [codexFile(out)]);
     const result = check(layout, "workhorses");
     expect(result.code).toBe(2);
     expect(result.out).toContain("out.txt");
+    expect(result.out).toContain("tied to codex");
     expect(readFileSync(join(TOOL, "skills/postmaster/coachman.md"), "utf8")).toContain(
       "before setting `synthesis` or staging any synthesis",
     );
   });
 
-  test("C8b an unrecorded main checkout path is a finding, while a read is only a note", () => {
+  test("C8b a main checkout change no record names is a finding at workhorses", () => {
     const layout = makeLayout();
     writeFileSync(join(layout.repo, "unrecorded.txt"), "new\n");
-    expect(check(layout, "workhorses").code).toBe(2);
-    const readOnly = makeLayout();
-    writeWorkhorse(readOnly, "codex", [codex(`cat ${join(readOnly.repo, "README.md")}`)]);
-    expect(check(readOnly, "workhorses").code).toBe(3);
+    const result = check(layout, "workhorses");
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("unrecorded.txt");
+    expect(result.out).toContain("main checkout changed without a lane record");
+    const named = makeLayout();
+    writeWorkhorse(named, "codex", [codex(`cat ${join(named.repo, "README.md")}`)]);
+    expect(check(named, "workhorses").code).toBe(3);
   });
 
   test("C9 an escalation marker is RULE, and no synthesis stage follows before the ruling", () => {
@@ -673,11 +620,13 @@ describe("C8-C9: escalation boundary", () => {
   test("C9b a reviewer reach waits before fixes or another review launch", () => {
     const layout = makeLayout();
     before(layout);
-    writeReviewer(layout, "mimo", [mimo("write_file", { path: join(layout.home, "outside.txt") })]);
+    const outside = join(layout.repo, "x.txt");
+    writeReviewer(layout, "mimo", [mimo("write_file", { path: outside })]);
+    writeFileSync(outside, "written\n");
     const round = check(layout, "r1");
     expect(round.code).toBe(2);
     expect(round.out).toContain("r1: finding");
-    expect(round.out).toContain(`escalate: mimo ${join(layout.home, "outside.txt")}`);
+    expect(round.out).toContain(`escalate: mimo ${outside}`);
     writeFileSync(join(layout.dispatch, ".escalation-ready"), "");
     const result = run("bash", [RUNS_STATUS, join(layout.repo, ".postmaster", "runs")]);
     expect(result.code).toBe(0);
@@ -784,8 +733,9 @@ describe("C10-C12: review rounds, verdicts and restore", () => {
 
     const internal = makeLayout();
     before(internal);
-    const insideRun = join(internal.codex, "created.txt");
+    const insideRun = join(internal.synth, "created.txt");
     writeReviewer(internal, "mimo", [mimo("bash", { command: `touch ${insideRun}` })]);
+    writeFileSync(insideRun, "created\n");
     expect(check(internal, "r1").code).toBe(2);
     const internalFinding = reachEvents(internal).find(
       ({ detail }) => detail.kind === "finding" && detail.path === insideRun,
@@ -914,292 +864,6 @@ describe("C13-C15: card, contract and balanced controls", () => {
 });
 
 describe("R1: review round 1 fixes", () => {
-  test("R1 a write after a newline is a finding, and a multiline read stays a note", () => {
-    const layout = makeLayout();
-    const target = join(layout.home, "target.txt");
-    const multi = join(layout.dispatch, "logs", "multiline.jsonl");
-    writeEvents(multi, [codex(`echo hi\nrm ${target}`)]);
-    const result = stream(layout, "codex", multi, layout.codex);
-    expect(result.code).toBe(2);
-    expect(result.out).toContain(`finding write ${target} (elsewhere)`);
-
-    const readOnly = join(layout.dispatch, "logs", "multiline-read.jsonl");
-    writeEvents(readOnly, [codex(`echo hi\ncat ${join(layout.home, "n.txt")}`)]);
-    const read = stream(layout, "codex", readOnly, layout.codex);
-    expect(read.code).toBe(3);
-    expect(read.out).toContain("note read");
-  });
-
-  test("R1 |& separates commands like a pipe, and a plain pipe still splits", () => {
-    const layout = makeLayout();
-    const piped = join(layout.home, "piped.txt");
-    const errPipe = join(layout.dispatch, "logs", "pipeamp.jsonl");
-    writeEvents(errPipe, [codex(`echo hi |& tee ${piped}`)]);
-    const result = stream(layout, "codex", errPipe, layout.codex);
-    expect(result.code).toBe(2);
-    expect(result.out).toContain(`finding write ${piped} (elsewhere)`);
-
-    const plain = join(layout.dispatch, "logs", "plain-pipe.jsonl");
-    writeEvents(plain, [codex(`echo hi | cat ${join(layout.home, "n.txt")}`)]);
-    const split = stream(layout, "codex", plain, layout.codex);
-    expect(split.code).toBe(3);
-    expect(split.out).toContain("note read");
-  });
-
-  test("R1 quoted redirect text is not a write, while a real redirect is", () => {
-    const layout = makeLayout();
-    const quoted = join(layout.dispatch, "logs", "quoted.jsonl");
-    writeEvents(quoted, [codex(`echo "> ${join(layout.repo, "README.md")}"`)]);
-    const result = stream(layout, "codex", quoted, layout.codex);
-    expect(result.code).toBe(0);
-    expect(result.out).toContain("clean");
-
-    const singleQuoted = join(layout.dispatch, "logs", "quoted-semi.jsonl");
-    writeEvents(singleQuoted, [codex(`echo 'a;b'`)]);
-    expect(stream(layout, "codex", singleQuoted, layout.codex).code).toBe(0);
-
-    const real = join(layout.dispatch, "logs", "real-redirect.jsonl");
-    writeEvents(real, [codex(`echo x > ${join(layout.repo, "r.txt")}`)]);
-    const finding = stream(layout, "codex", real, layout.codex);
-    expect(finding.code).toBe(2);
-    expect(finding.out).toContain("finding write");
-  });
-
-  test("R1 bare cd and cd $HOME move the workdir, and an unknown variable fails closed", () => {
-    const layout = makeLayout();
-    const bare = join(layout.dispatch, "logs", "bare-cd.jsonl");
-    writeEvents(bare, [codex(`cd && echo x > leaked.txt`)]);
-    const bareResult = stream(layout, "codex", bare, layout.codex);
-    expect(bareResult.code).toBe(2);
-    expect(bareResult.out).toContain(`finding write ${join(layout.home, "leaked.txt")}`);
-
-    const home = join(layout.dispatch, "logs", "cd-home.jsonl");
-    writeEvents(home, [codex(`cd $HOME && echo x > leaked3.txt`)]);
-    const homeResult = stream(layout, "codex", home, layout.codex);
-    expect(homeResult.code).toBe(2);
-    expect(homeResult.out).toContain(`finding write ${join(layout.home, "leaked3.txt")}`);
-
-    const tilde = join(layout.dispatch, "logs", "cd-tilde.jsonl");
-    writeEvents(tilde, [codex(`cd ~ && echo x > leaked2.txt`)]);
-    expect(stream(layout, "codex", tilde, layout.codex).code).toBe(2);
-
-    const unknown = join(layout.dispatch, "logs", "cd-unknown.jsonl");
-    writeEvents(unknown, [codex(`cd $NOPE_VAR_X && echo x > rel.txt`)]);
-    const closed = stream(layout, "codex", unknown, layout.codex);
-    expect(closed.code).toBe(0);
-    expect(closed.out).toContain("expected write");
-  });
-
-  test("R1 a path inside a substitution counts for an outer write command", () => {
-    const layout = makeLayout();
-    const target = join(layout.home, "del.txt");
-    const subst = join(layout.dispatch, "logs", "subst.jsonl");
-    writeEvents(subst, [codex(`rm -rf $(echo ${target})`)]);
-    const result = stream(layout, "codex", subst, layout.codex);
-    expect(result.code).toBe(2);
-    expect(result.out).toContain(`finding write ${target} (elsewhere)`);
-
-    const plain = join(layout.dispatch, "logs", "subst-plain.jsonl");
-    writeEvents(plain, [codex(`echo $(echo hi)`)]);
-    expect(stream(layout, "codex", plain, layout.codex).code).toBe(0);
-  });
-
-  test("R1 a refusal demotes only the path it names, and two bare writes fail closed", () => {
-    const layout = makeLayout();
-    const evil = join(layout.home, "evil.txt");
-    const locked = join(layout.home, "locked.txt");
-    const mixed = join(layout.dispatch, "logs", "mixed-refusal.jsonl");
-    writeEvents(mixed, [
-      codex(`echo pwned > ${evil}; cat ${locked}`, `cat: ${locked}: Permission denied`, 1),
-    ]);
-    const result = stream(layout, "codex", mixed, layout.codex);
-    expect(result.code).toBe(2);
-    expect(result.out).toContain(`finding write ${evil} (elsewhere)`);
-    expect(result.out).toContain(`note refused ${locked} (elsewhere)`);
-
-    const single = join(layout.dispatch, "logs", "single-refusal.jsonl");
-    writeEvents(single, [codex(`cat ${locked}`, "Permission denied", 1)]);
-    const named = stream(layout, "codex", single, layout.codex);
-    expect(named.code).toBe(3);
-    expect(named.out).toContain("note refused");
-
-    const bare = join(layout.dispatch, "logs", "bare-multi-refusal.jsonl");
-    const first = join(layout.home, "first.txt");
-    const second = join(layout.home, "second.txt");
-    writeEvents(bare, [codex(`echo x > ${first}; echo y > ${second}`, "Permission denied", 1)]);
-    const closed = stream(layout, "codex", bare, layout.codex);
-    expect(closed.code).toBe(2);
-    expect(closed.out).toContain(`finding write ${first} (elsewhere)`);
-    expect(closed.out).toContain(`finding write ${second} (elsewhere)`);
-
-    const exemptSibling = join(layout.dispatch, "logs", "exempt-sibling-refusal.jsonl");
-    writeEvents(exemptSibling, [
-      codex(`echo pwned > ${evil}; cat /etc/shadow`, "cat: /etc/shadow: Permission denied", 1),
-    ]);
-    const sibling = stream(layout, "codex", exemptSibling, layout.codex);
-    expect(sibling.code).toBe(2);
-    expect(sibling.out).toContain(`finding write ${evil} (elsewhere)`);
-  });
-
-  test("R1 a denied read inside the folder stays expected, outside it is refused", () => {
-    const layout = makeLayout();
-    writeFileSync(join(layout.codex, "in.txt"), "x\n");
-    const inside = join(layout.dispatch, "logs", "inside-denied.jsonl");
-    writeEvents(inside, [codex(`cat ${join(layout.codex, "in.txt")}`, "permission denied", 1)]);
-    const clean = stream(layout, "codex", inside, layout.codex);
-    expect(clean.code).toBe(0);
-    expect(clean.out).toContain("expected");
-
-    const outside = join(layout.dispatch, "logs", "outside-denied.jsonl");
-    writeEvents(outside, [codex(`cat ${join(layout.home, "o.txt")}`, "permission denied", 1)]);
-    const refused = stream(layout, "codex", outside, layout.codex);
-    expect(refused.code).toBe(3);
-    expect(refused.out).toContain("note refused");
-  });
-
-  test("R1 git -c values are skipped, in both directions", () => {
-    const layout = makeLayout();
-    const hidden = join(layout.dispatch, "logs", "git-c-hidden.jsonl");
-    writeEvents(hidden, [codex(`git -c x=y -C ${layout.repo} commit`)]);
-    const write = stream(layout, "codex", hidden, layout.codex);
-    expect(write.code).toBe(2);
-    expect(write.out).toContain(`finding write ${layout.repo} (main checkout)`);
-
-    const misjudged = join(layout.dispatch, "logs", "git-c-read.jsonl");
-    writeEvents(misjudged, [codex(`git -C ${layout.repo} -c core.pager=cat log`)]);
-    const read = stream(layout, "codex", misjudged, layout.codex);
-    expect(read.code).toBe(3);
-    expect(read.out).toContain("note read");
-    expect(read.out).not.toContain("finding");
-
-    const own = join(layout.dispatch, "logs", "git-c-own.jsonl");
-    writeEvents(own, [codex(`git -c x=y status`)]);
-    expect(stream(layout, "codex", own, layout.codex).code).toBe(0);
-  });
-
-  test("R1 creating a branch or tag is a ref write, and listing stays a read", () => {
-    const layout = makeLayout();
-    const branch = join(layout.dispatch, "logs", "git-branch.jsonl");
-    writeEvents(branch, [codex(`git branch sneaky`)]);
-    const created = stream(layout, "codex", branch, layout.codex);
-    expect(created.code).toBe(2);
-    expect(created.out).toContain("finding write refs/heads/sneaky");
-
-    const tag = join(layout.dispatch, "logs", "git-tag.jsonl");
-    writeEvents(tag, [codex(`git tag v9`)]);
-    const tagged = stream(layout, "codex", tag, layout.codex);
-    expect(tagged.code).toBe(2);
-    expect(tagged.out).toContain("finding write refs/tags/v9");
-
-    const forced = join(layout.dispatch, "logs", "git-branch-f.jsonl");
-    writeEvents(forced, [codex(`git branch -f moved main`)]);
-    const moved = stream(layout, "codex", forced, layout.codex);
-    expect(moved.code).toBe(2);
-    expect(moved.out).toContain("finding write refs/heads/moved");
-
-    const deleted = join(layout.dispatch, "logs", "git-tag-d.jsonl");
-    writeEvents(deleted, [codex(`git tag -d v1`)]);
-    const gone = stream(layout, "codex", deleted, layout.codex);
-    expect(gone.code).toBe(2);
-    expect(gone.out).toContain("finding write refs/tags/v1");
-
-    const bare = join(layout.dispatch, "logs", "git-branch-bare.jsonl");
-    writeEvents(bare, [codex(`git branch`)]);
-    expect(stream(layout, "codex", bare, layout.codex).code).toBe(0);
-
-    const list = join(layout.dispatch, "logs", "git-branch-list.jsonl");
-    writeEvents(list, [codex(`git branch -a`)]);
-    expect(stream(layout, "codex", list, layout.codex).code).toBe(0);
-  });
-
-  test("R1 git path operands and redirects are judged, and a push is clean", () => {
-    const layout = makeLayout();
-    const wt = join(layout.dispatch, "logs", "git-worktree.jsonl");
-    writeEvents(wt, [codex(`git worktree add ${join(layout.home, "wt-evil")}`)]);
-    const added = stream(layout, "codex", wt, layout.codex);
-    expect(added.code).toBe(2);
-    expect(added.out).toContain(`finding write ${join(layout.home, "wt-evil")} (elsewhere)`);
-
-    const branched = join(layout.dispatch, "logs", "git-worktree-b.jsonl");
-    writeEvents(branched, [codex(`git worktree add -b nbr ${join(layout.home, "w")}`)]);
-    const made = stream(layout, "codex", branched, layout.codex);
-    expect(made.code).toBe(2);
-    expect(made.out).toContain("finding write refs/heads/nbr");
-
-    const clone = join(layout.dispatch, "logs", "git-clone.jsonl");
-    writeEvents(clone, [codex(`git clone . ${join(layout.home, "clone-evil")}`)]);
-    const cloned = stream(layout, "codex", clone, layout.codex);
-    expect(cloned.code).toBe(2);
-    expect(cloned.out).toContain(`finding write ${join(layout.home, "clone-evil")} (elsewhere)`);
-
-    const redirect = join(layout.dispatch, "logs", "git-redirect.jsonl");
-    writeEvents(redirect, [codex(`git show HEAD:README.md > ${join(layout.home, "g.txt")}`)]);
-    const shown = stream(layout, "codex", redirect, layout.codex);
-    expect(shown.code).toBe(2);
-    expect(shown.out).toContain(`finding write ${join(layout.home, "g.txt")} (elsewhere)`);
-
-    const push = join(layout.dispatch, "logs", "git-push.jsonl");
-    writeEvents(push, [codex(`git push origin x:y`)]);
-    expect(stream(layout, "codex", push, layout.codex).code).toBe(0);
-  });
-
-  test("R1 a ref named by a git read is not a finding, and update-ref still is", () => {
-    const layout = makeLayout();
-    const logged = join(layout.dispatch, "logs", "git-log-ref.jsonl");
-    writeEvents(logged, [codex(`git log refs/heads/main`)]);
-    const read = stream(layout, "codex", logged, layout.codex);
-    expect(read.code).toBe(0);
-    expect(read.out).toContain("clean");
-
-    const moved = join(layout.dispatch, "logs", "git-update-ref.jsonl");
-    writeEvents(moved, [codex(`git update-ref refs/heads/side ${layout.base}`)]);
-    const written = stream(layout, "codex", moved, layout.codex);
-    expect(written.code).toBe(2);
-    expect(written.out).toContain("finding write refs/heads/side");
-  });
-
-  test("R1 reads outside the home and project are routine, writes are not", () => {
-    const layout = makeLayout();
-    const readPath = join(layout.dispatch, "logs", "outside-read.jsonl");
-    writeEvents(readPath, [codex(`cat /var/tmp/r1-outside.txt`)]);
-    const read = stream(layout, "codex", readPath, layout.codex);
-    expect(read.code).toBe(0);
-    expect(read.out).toContain("clean");
-
-    const writePath = join(layout.dispatch, "logs", "outside-write.jsonl");
-    writeEvents(writePath, [codex(`echo x > /var/tmp/r1-outside.txt`)]);
-    const written = stream(layout, "codex", writePath, layout.codex);
-    expect(written.code).toBe(2);
-    expect(written.out).toContain("finding write /var/tmp/r1-outside.txt (elsewhere)");
-  });
-
-  test("R1 tool-checkout and lane-brief reads are routine, other dispatch reads are not", () => {
-    const layout = makeLayout();
-    const tool = join(layout.home, "tool");
-    mkdirSync(join(tool, "scripts"), { recursive: true });
-    writeFileSync(join(tool, "scripts", "x.ts"), "x\n");
-    const runJson = JSON.parse(readFileSync(join(layout.dispatch, "run.json"), "utf8"));
-    runJson.postmaster.checkout = tool;
-    writeFileSync(join(layout.dispatch, "run.json"), JSON.stringify(runJson));
-    const toolPath = join(layout.dispatch, "logs", "tool-read.jsonl");
-    writeEvents(toolPath, [codex(`cat ${join(tool, "scripts", "x.ts")}`)]);
-    const toolRead = stream(layout, "codex", toolPath, layout.codex);
-    expect(toolRead.code).toBe(0);
-    expect(toolRead.out).toContain("clean");
-
-    const briefPath = join(layout.dispatch, "logs", "brief-read.jsonl");
-    writeEvents(briefPath, [codex(`cat ${join(layout.dispatch, "brief.md")}`)]);
-    const briefRead = stream(layout, "codex", briefPath, layout.codex);
-    expect(briefRead.code).toBe(0);
-    expect(briefRead.out).toContain("clean");
-
-    const otherPath = join(layout.dispatch, "logs", "dispatch-read.jsonl");
-    writeEvents(otherPath, [codex(`cat ${join(layout.dispatch, "run.json")}`)]);
-    const other = stream(layout, "codex", otherPath, layout.codex);
-    expect(other.code).toBe(3);
-    expect(other.out).toContain("note read");
-  });
-
   test("R1 a hyphenated lane restores its own worktree", () => {
     const layout = makeLayout();
     const lane = "my-lane";
@@ -1351,7 +1015,9 @@ describe("R1: review round 1 fixes", () => {
 
     const toolRead = join(layout.dispatch, "logs", "tool-read.jsonl");
     writeEvents(toolRead, [codex(`cat ${join(TOOL, "scripts", "launch.ts")}`)]);
-    expect(stream(layout, "codex", toolRead, layout.codex).code).toBe(0);
+    const toolResult = stream(layout, "codex", toolRead, layout.codex);
+    expect(toolResult.code).toBe(3);
+    expect(toolResult.out).toContain("note names");
 
     const old = makeLayout();
     writeFileSync(join(old.dispatch, "brief.md"), `repo: ${old.repo}\n`);
@@ -1384,47 +1050,6 @@ describe("R1: review round 1 fixes", () => {
     expect(card.out).toContain("new\\nline.txt");
     expect(card.out).not.toContain("<!--");
     expect(card.out).not.toContain("`tick");
-  });
-
-  test("R2 quoted substitutions expand, single-quoted ones do not", () => {
-    const layout = makeLayout();
-    const target = join(layout.home, "outside2.txt");
-    const quoted = join(layout.dispatch, "logs", "quoted-subst.jsonl");
-    writeEvents(quoted, [codex(`echo "$(touch ${target})"`)]);
-    const result = stream(layout, "codex", quoted, layout.codex);
-    expect(result.code).toBe(2);
-    expect(result.out).toContain(`finding write ${target} (elsewhere)`);
-
-    // Single quotes cannot survive the codex -lc wrapper, so this half speaks mimo.
-    const singleLayout = makeLayout();
-    const singleTarget = join(singleLayout.home, "outside2.txt");
-    const single = join(singleLayout.dispatch, "logs", "single-subst.jsonl");
-    writeEvents(single, [mimo("bash", { command: `echo '$(touch ${singleTarget})'` })]);
-    expect(stream(singleLayout, "mimo", single, singleLayout.mimo).code).toBe(0);
-
-    const plain = join(layout.dispatch, "logs", "quoted-plain.jsonl");
-    writeEvents(plain, [codex(`echo "$(echo hi)"`)]);
-    expect(stream(layout, "codex", plain, layout.codex).code).toBe(0);
-  });
-
-  test("R2 append-both redirects are writes, and 1> already is", () => {
-    const layout = makeLayout();
-    for (const [name, op] of [
-      ["err-append", "&>>"],
-      ["fd-append", "2>>"],
-      ["noclobber", ">|"],
-    ]) {
-      const target = join(layout.home, `${name}.txt`);
-      const path = join(layout.dispatch, "logs", `${name}.jsonl`);
-      writeEvents(path, [codex(`echo x ${op}${target}`)]);
-      const result = stream(layout, "codex", path, layout.codex);
-      expect(result.code).toBe(2);
-      expect(result.out).toContain(`finding write ${target} (elsewhere)`);
-    }
-
-    const one = join(layout.dispatch, "logs", "fd-one.jsonl");
-    writeEvents(one, [codex(`echo x 1>${join(layout.home, "o1.txt")}`)]);
-    expect(stream(layout, "codex", one, layout.codex).code).toBe(2);
   });
 
   test("R2 git reads and restores ignore inherited directory overrides", () => {
@@ -1596,28 +1221,6 @@ describe("R1: review round 1 fixes", () => {
 });
 
 describe("R4: ruled round fixes", () => {
-  test("R4 descriptor redirections are descriptor operations, and 2>file is a write", () => {
-    const layout = makeLayout();
-    for (const [name, cmd] of [
-      ["dup-out", `cd ${layout.repo} && echo hi 2>&1`],
-      ["dup-both", `cd ${layout.repo} && echo hi >&2`],
-      ["dup-close", `cd ${layout.home} && echo hi 2>&-`],
-      ["dup-in", `cd ${layout.repo} && cat <&0`],
-    ]) {
-      const path = join(layout.dispatch, "logs", `${name}.jsonl`);
-      writeEvents(path, [codex(cmd)]);
-      const result = stream(layout, "codex", path, layout.codex);
-      expect(result.code).toBe(0);
-      expect(result.out).toContain("clean");
-    }
-
-    const file = join(layout.dispatch, "logs", "fd-file.jsonl");
-    writeEvents(file, [codex(`cd ${layout.repo} && echo hi 2>${join(layout.repo, "real.txt")}`)]);
-    const written = stream(layout, "codex", file, layout.codex);
-    expect(written.code).toBe(2);
-    expect(written.out).toContain("finding write");
-  });
-
   test("R4 restore reattaches the recorded branch, keeping an earlier commit", () => {
     const layout = makeLayout();
     const kept = addCommit(layout.repo, layout.synth, "kept.txt");
@@ -1687,106 +1290,13 @@ describe("R4: ruled round fixes", () => {
       claude("Write", { file_path: join(fixed.repo, "forked.txt") }),
     );
     const read = stream(fixed, "opus", fixedStream, fixedOwn);
-    expect(read.code).toBe(2);
-    expect(read.out).toContain("finding write");
-  });
-});
-
-describe("R5: fail-closed shell input", () => {
-  test("R5 a write redirect onto a substitution is a finding under every operator", () => {
-    const layout = makeLayout();
-    const target = join(layout.home, "subst6.txt");
-    for (const [name, op] of [
-      ["out", ">"],
-      ["append", ">>"],
-      ["fd", "2>"],
-      ["both", "&>"],
-      ["fd-append", "2>>"],
-      ["both-append", "&>>"],
-      ["noclobber", ">|"],
-      ["fd-noclobber", "2>|"],
-      ["fd-one", "1>"],
-      ["fd-one-append", "1>>"],
-    ]) {
-      const path = join(layout.dispatch, "logs", `r5-${name}.jsonl`);
-      writeEvents(path, [codex(`echo x ${op} $(echo ${target})`)]);
-      const result = stream(layout, "codex", path, layout.codex);
-      expect(result.code).toBe(2);
-      expect(result.out).toContain(`finding write ${target} (elsewhere)`);
-    }
-  });
-
-  test("R5 a delete with a glob or unset variable is never clean", () => {
-    const layout = makeLayout();
-    const glob = join(layout.dispatch, "logs", "r5-glob.jsonl");
-    writeEvents(glob, [codex(`rm -rf $HOME/*.log`)]);
-    const globbed = stream(layout, "codex", glob, layout.codex);
-    expect(globbed.code).toBe(3);
-    expect(globbed.out).toContain("not checked");
-
-    const unset = join(layout.dispatch, "logs", "r5-unset.jsonl");
-    writeEvents(unset, [codex(`rm -rf $HOME/$R5_NOPE_X`)]);
-    const unsets = stream(layout, "codex", unset, layout.codex);
-    expect(unsets.code).toBe(3);
-    expect(unsets.out).toContain("not checked");
-
-    const bare = join(layout.dispatch, "logs", "r5-bare-unset.jsonl");
-    writeEvents(bare, [codex(`rm -rf $R5_NOPE_X`)]);
-    const bares = stream(layout, "codex", bare, layout.codex);
-    expect(bares.code).toBe(3);
-    expect(bares.out).toContain("not checked");
-  });
-
-  test("R5 a redirect onto a substitution that names no path is not checked", () => {
-    const layout = makeLayout();
-    const written = join(layout.dispatch, "logs", "r5-subst-write.jsonl");
-    writeEvents(written, [codex(`echo x > $(true)`)]);
-    const writes = stream(layout, "codex", written, layout.codex);
-    expect(writes.code).toBe(3);
-    expect(writes.out).toContain("not checked");
-
-    const read = join(layout.dispatch, "logs", "r5-subst-read.jsonl");
-    writeEvents(read, [codex(`cat < $(true)`)]);
-    const reads = stream(layout, "codex", read, layout.codex);
-    expect(reads.code).toBe(3);
-    expect(reads.out).toContain("not checked");
-  });
-
-  test("R5 literal redirect forms keep the findings they give today", () => {
-    const layout = makeLayout();
-    for (const [name, op] of [
-      ["out", ">"],
-      ["append", ">>"],
-      ["fd", "2>"],
-      ["both", "&>"],
-      ["fd-append", "2>>"],
-      ["both-append", "&>>"],
-      ["noclobber", ">|"],
-      ["fd-noclobber", "2>|"],
-      ["fd-one", "1>"],
-      ["fd-one-append", "1>>"],
-    ]) {
-      const target = join(layout.home, `r5-${name}.txt`);
-      const path = join(layout.dispatch, "logs", `r5-lit-${name}.jsonl`);
-      writeEvents(path, [codex(`echo x ${op}${target}`)]);
-      const result = stream(layout, "codex", path, layout.codex);
-      expect(result.code).toBe(2);
-      expect(result.out).toContain(`finding write ${target} (elsewhere)`);
-    }
-  });
-
-  test("R5 a plainly clean command still reads clean", () => {
-    const layout = makeLayout();
-    const path = join(layout.dispatch, "logs", "r5-clean.jsonl");
-    writeEvents(path, [codex(`touch ${join(layout.codex, "in.txt")} && echo done`)]);
-    const result = stream(layout, "codex", path, layout.codex);
-    expect(result.code).toBe(0);
-    expect(result.out).toContain("clean");
+    expect(read.code).toBe(3);
+    expect(read.out).toContain(`note names ${join(fixed.repo, "forked.txt")} (main checkout)`);
   });
 });
 
 describe("R6: ruled round fixes", () => {
-  test("R6 a not-checked reason carrying a private path stays off the card", () => {
+  test("R6 an unresolved note carrying a private path stays off the card", () => {
     const layout = makeLayout();
     const privateGlob = "/home/someone-else/proj/*.log";
     writeWorkhorse(layout, "codex", [codex(`rm -rf ${privateGlob}`)]);
@@ -1806,53 +1316,8 @@ describe("R6: ruled round fixes", () => {
     expect(card.code).toBe(0);
     expect(card.out).not.toContain("someone-else");
     expect(card.out).not.toContain(privateGlob);
-    expect(card.out).toContain("codex: not checked: unresolved shell input");
-  });
-
-  test("R6 unresolvable file-tool paths leave the lane not checked", () => {
-    const layout = makeLayout();
-    const runJson = JSON.parse(readFileSync(join(layout.dispatch, "run.json"), "utf8"));
-    runJson.config.lanes.opus = { harness: "claude" };
-    writeFileSync(join(layout.dispatch, "run.json"), JSON.stringify(runJson));
-    const opusOwn = join(layout.repo, ".worktrees", "T-opus");
-    mkdirSync(opusOwn, { recursive: true });
-
-    const outside = join(layout.home, "r6-direct.txt");
-    const codexVar = join(layout.dispatch, "logs", "r6-codex-var.jsonl");
-    writeEvents(codexVar, [codexFile("$R6_OUT/evil.txt")]);
-    const codexResult = stream(layout, "codex", codexVar, layout.codex);
-    expect(codexResult.code).toBe(3);
-    expect(codexResult.out).toContain("not checked: unresolved file input");
-
-    const codexPlain = join(layout.dispatch, "logs", "r6-codex-plain.jsonl");
-    writeEvents(codexPlain, [codexFile(outside)]);
-    const codexFinding = stream(layout, "codex", codexPlain, layout.codex);
-    expect(codexFinding.code).toBe(2);
-    expect(codexFinding.out).toContain(`finding write ${outside} (elsewhere)`);
-
-    const mimoGlob = join(layout.dispatch, "logs", "r6-mimo-glob.jsonl");
-    writeEvents(mimoGlob, [mimo("write", { path: join(layout.home, "*.log") })]);
-    const mimoResult = stream(layout, "mimo", mimoGlob, layout.mimo);
-    expect(mimoResult.code).toBe(3);
-    expect(mimoResult.out).toContain("not checked: unresolved file input");
-
-    const mimoPlain = join(layout.dispatch, "logs", "r6-mimo-plain.jsonl");
-    writeEvents(mimoPlain, [mimo("write", { path: outside })]);
-    const mimoFinding = stream(layout, "mimo", mimoPlain, layout.mimo);
-    expect(mimoFinding.code).toBe(2);
-    expect(mimoFinding.out).toContain(`finding write ${outside} (elsewhere)`);
-
-    const claudeVar = join(layout.dispatch, "logs", "r6-claude-var.jsonl");
-    writeEvents(claudeVar, claude("Write", { file_path: "$R6_OUT/evil.txt", content: "x" }));
-    const claudeResult = stream(layout, "opus", claudeVar, opusOwn);
-    expect(claudeResult.code).toBe(3);
-    expect(claudeResult.out).toContain("not checked: unresolved file input");
-
-    const claudePlain = join(layout.dispatch, "logs", "r6-claude-plain.jsonl");
-    writeEvents(claudePlain, claude("Write", { file_path: outside, content: "x" }));
-    const claudeFinding = stream(layout, "opus", claudePlain, opusOwn);
-    expect(claudeFinding.code).toBe(2);
-    expect(claudeFinding.out).toContain(`finding write ${outside} (elsewhere)`);
+    expect(card.out).toContain("outside the project");
+    expect(card.out).toContain("unresolved");
   });
 
   test("R6 the round reach step stops before restore when the check faults", () => {
@@ -1892,36 +1357,71 @@ describe("R6: ruled round fixes", () => {
   });
 });
 
-describe("R7: ruled round fixes", () => {
-  test("R7 pattern operands read clean and rooted unresolvable targets do not", () => {
+describe("R8: rescoped check", () => {
+  test("R8 a repository path with a space does not fault the check", () => {
     const layout = makeLayout();
-    for (const [name, cmd] of [
-      ["find-name", `find . -name "*.ts"`],
-      ["ls-glob", `ls src/*.ts`],
-      ["sed-regex", `sed -i "s/foo$/bar/" in.txt`],
-      ["grep-include", `grep -rn foo --include="*.ts" .`],
-    ]) {
-      const path = join(layout.dispatch, "logs", `r7-${name}.jsonl`);
-      writeEvents(path, [codex(cmd)]);
-      const result = stream(layout, "codex", path, layout.codex);
-      expect(result.code).toBe(0);
-      expect(result.out).toContain("clean");
-    }
-    for (const [name, cmd] of [
-      ["home-glob", `rm -rf $HOME/x*`],
-      ["climb-glob", `rm -rf ../*.log`],
-    ]) {
-      const path = join(layout.dispatch, "logs", `r7-${name}.jsonl`);
-      writeEvents(path, [codex(cmd)]);
-      const result = stream(layout, "codex", path, layout.codex);
-      expect(result.code).toBe(3);
-      expect(result.out).toContain("not checked");
-    }
-    const target = join(layout.home, "r7-plain.txt");
-    const plain = join(layout.dispatch, "logs", "r7-plain.jsonl");
-    writeEvents(plain, [codex(`echo x > ${target}`)]);
-    const finding = stream(layout, "codex", plain, layout.codex);
-    expect(finding.code).toBe(2);
-    expect(finding.out).toContain(`finding write ${target} (elsewhere)`);
+    const base = mkdtempSync(join(tmpdir(), "postmaster-r8-"));
+    CREATED.push(base);
+    const repo = join(base, "with space", "proj");
+    mkdirSync(repo, { recursive: true });
+    git(repo, "init", "-b", "main");
+    git(repo, "config", "user.email", "r8@example.invalid");
+    git(repo, "config", "user.name", "r8");
+    git(repo, "commit", "-q", "--allow-empty", "-m", "initial");
+    writeFileSync(join(repo, ".git", "info", "exclude"), ".postmaster/\n.worktrees/\n");
+    const dispatch = join(repo, ".postmaster", "runs", "T");
+    mkdirSync(join(dispatch, "logs"), { recursive: true });
+    writeFileSync(
+      join(dispatch, "run.json"),
+      JSON.stringify({
+        config: { lanes: {}, team: { workhorses: [] } },
+        postmaster: { checkout: TOOL },
+        target: { branch: "main" },
+      }),
+    );
+    writeFileSync(join(dispatch, "manifest.json"), JSON.stringify({ lanes: {} }));
+    writeFileSync(
+      join(dispatch, "brief.md"),
+      `## Project profile\n\nrepo: ${repo} default branch: main\n`,
+    );
+    const result = run(
+      "bun",
+      ["--no-env-file", "--config=/dev/null", SCRIPT, "check", dispatch, "workhorses"],
+      { env: { HOME: layout.home } },
+    );
+    expect(result.code).toBe(0);
+  });
+
+  test("R8 restore recovers a deleted run branch with a registered worktree", () => {
+    const layout = makeLayout();
+    expect(before(layout).code).toBe(0);
+    git(layout.repo, "update-ref", "-d", "refs/heads/wb/T-mimo");
+    const restore = call(layout, ["restore", layout.dispatch, "r1"]);
+    expect(restore.code).toBe(0);
+    expect(git(layout.repo, "rev-parse", "refs/heads/wb/T-mimo")).toBe(layout.base);
+  });
+
+  test("R8 a substitution directory and a home script target yield at most a note", () => {
+    const layout = makeLayout();
+    const streamPath = join(layout.dispatch, "logs", "r8-notes.jsonl");
+    writeEvents(streamPath, [
+      codex("git -C $(pwd) merge --ff-only HEAD"),
+      codex("sed --in-place s/a/b/ $HOME/f"),
+    ]);
+    const result = stream(layout, "codex", streamPath, layout.codex);
+    expect(result.code).toBe(3);
+    // The substitution names no path; $HOME resolves against the lane's home.
+    expect(result.out).not.toContain("$(pwd)");
+    expect(result.out).toContain(`note names ${join(layout.home, "f")} (elsewhere)`);
+    expect(result.out).not.toContain("finding");
+    expect(result.out).not.toContain("not checked");
+    expect(result.out).not.toContain("unresolved");
+
+    const globPath = join(layout.dispatch, "logs", "r8-glob.jsonl");
+    writeEvents(globPath, [codex("rm -rf /tmp/x*")]);
+    const glob = stream(layout, "codex", globPath, layout.codex);
+    expect(glob.code).toBe(3);
+    expect(glob.out).toContain("note names /tmp/x* (elsewhere) · unresolved");
+    expect(glob.out).not.toContain("finding");
   });
 });
