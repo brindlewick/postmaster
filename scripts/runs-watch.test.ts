@@ -1351,6 +1351,22 @@ describe("ready tickets wait for a run slot", () => {
     expect(out).toContain("needs READY #2");
   }, 30000);
 
+  test("a wake names no more tickets than free slots", () => {
+    const root = join(tmp, "ready-cap");
+    const config = join(tmp, "ready-cap.toml");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(config, "[postmaster]\npoll_seconds = 1\n[team]\nmax_runs = 2\n");
+    mkrun(root, "flight", "review", 2);
+    queued(root, "2");
+    queued(root, "3");
+    queued(root, "4");
+    expect(activeRunCount(root)).toBe(1);
+    const { rc, out } = watch(root, "0", config);
+    expect(rc).toBe(0);
+    expect(out.match(/needs READY/g)?.length ?? 0).toBe(1);
+    expect(out).toContain("needs READY 2");
+  }, 30000);
+
   test("a queued ticket waits until an in-flight run frees its slot", () => {
     const root = join(tmp, "ready-wait-slot");
     const config = join(tmp, "ready-one-slot.toml");

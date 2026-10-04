@@ -1427,8 +1427,10 @@ function watch(root: string, config: string, timeout: number | null): never {
     }
     const table = r.out.replace(/\n+$/u, "");
     const ready = pendingReadyTickets(root);
-    const readyNeeds =
-      activeRunCount(root) < runCapacity(config) ? ready.map((id) => `needs READY ${id}`) : [];
+    // Name no more tickets than free slots: the postmaster dispatches each
+    // name it wakes to, and the ceiling is checked here, not there.
+    const room = Math.max(runCapacity(config) - activeRunCount(root), 0);
+    const readyNeeds = ready.slice(0, room).map((id) => `needs READY ${id}`);
     if (steps.needs.length > 0 || readyNeeds.length > 0) {
       process.stdout.write(`${table}\n${[...steps.needs, ...readyNeeds].join("\n")}\n`);
       process.exit(0);
