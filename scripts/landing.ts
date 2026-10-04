@@ -363,6 +363,19 @@ function reachPath(dispatch: string, path: unknown): string {
   return escapeCardPath(shown);
 }
 
+/**
+ * Card-safe not-checked text: the lane and the kind of problem, never the
+ * raw path or text. Detail stays in the run's log. A reason is `<kind>:
+ * <detail>`; colon-free reasons are fixed diagnostics shown whole.
+ */
+function notCheckedShown(reason: string): string {
+  const detail = reason.startsWith("not checked:")
+    ? reason.slice("not checked:".length).trim()
+    : reason;
+  const head = detail.split(":", 1)[0]?.trim() ?? "";
+  return escapeCardPath(head || "not checked");
+}
+
 function reachBlock(dispatch: string): string {
   const actions = reachActions(dispatch);
   if (actions.length === 0) return "";
@@ -416,7 +429,7 @@ function reachBlock(dispatch: string): string {
         continue;
       }
       if (typeof event.reason === "string" && event.reason.startsWith("not checked:")) {
-        lines.push(`  - ${event.lane ?? "lane"}: ${event.reason}`);
+        lines.push(`  - ${event.lane ?? "lane"}: not checked: ${notCheckedShown(event.reason)}`);
         continue;
       }
       const lane = event.lane ? `${event.lane}: ` : "";

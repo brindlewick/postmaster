@@ -1135,9 +1135,10 @@ function directCallTouches(
   ownFolder: string,
   ownDataHome: string,
   lens?: string,
-): { touches: Touch[]; unresolved: string[] } {
+): { touches: Touch[]; unresolved: string[]; directUnresolved: string[] } {
   const touches: Touch[] = [];
   const unresolved: string[] = [];
+  const directUnresolved: string[] = [];
   for (const call of calls) {
     const name = call.name.toLowerCase(); // LOWER: harness tool names are ASCII identifiers
     const command = text(call.input.command ?? call.input.cmd);
@@ -1170,7 +1171,12 @@ function directCallTouches(
       (direct.some((item) => item.access === "read") && MISSING.test(call.output));
     for (const item of direct) {
       const absolute = expandPath(item.path, ownFolder);
-      if (!absolute) continue;
+      // Fail closed like shell input: a file-tool path the reader cannot
+      // resolve leaves the lane not checked instead of reading clean.
+      if (!absolute) {
+        directUnresolved.push(`unresolved ${item.access} target: ${item.path}`);
+        continue;
+      }
       const place = placeOf(info, absolute, ownFolder);
       if (place === "inside") {
         touches.push({
@@ -1197,7 +1203,7 @@ function directCallTouches(
       });
     }
   }
-  return { touches, unresolved };
+  return { touches, unresolved, directUnresolved };
 }
 
 function mergeTouches(touches: Touch[]): Touch[] {
@@ -1278,12 +1284,19 @@ function readLane(
     lens,
   );
   laneRecord.touches = mergeTouches(judged.touches);
-  // Unresolved shell input fails closed without discarding what resolved.
-  const reasons = [...new Set(judged.unresolved)];
-  if (reasons.length > 0) {
-    laneRecord.status = "not checked";
+  // Unresolved input fails closed without discarding what resolved.
+  const capped = (reasons: string[]): string => {
     const shown = reasons.slice(0, 3).join("; ");
-    laneRecord.reason = `unresolved shell input: ${shown}${reasons.length > 3 ? ` (and ${reasons.length - 3} more)` : ""}`;
+    return `${shown}${reasons.length > 3 ? ` (and ${reasons.length - 3} more)` : ""}`;
+  };
+  const kinds: string[] = [];
+  const shellReasons = [...new Set(judged.unresolved)];
+  if (shellReasons.length > 0) kinds.push(`unresolved shell input: ${capped(shellReasons)}`);
+  const fileReasons = [...new Set(judged.directUnresolved)];
+  if (fileReasons.length > 0) kinds.push(`unresolved file input: ${capped(fileReasons)}`);
+  if (kinds.length > 0) {
+    laneRecord.status = "not checked";
+    laneRecord.reason = kinds.join("; ");
   }
   return laneRecord;
 }

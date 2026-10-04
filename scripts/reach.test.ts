@@ -1784,3 +1784,110 @@ describe("R5: fail-closed shell input", () => {
     expect(result.out).toContain("clean");
   });
 });
+
+describe("R6: ruled round fixes", () => {
+  test("R6 a not-checked reason carrying a private path stays off the card", () => {
+    const layout = makeLayout();
+    const privateGlob = "/home/someone-else/proj/*.log";
+    writeWorkhorse(layout, "codex", [codex(`rm -rf ${privateGlob}`)]);
+    check(layout, "workhorses");
+    check(layout, "card");
+    writeFileSync(
+      join(layout.dispatch, "checks.json"),
+      JSON.stringify({
+        checks: [{ name: "gate", source: "default:gate", command: "true", shows: "gate" }],
+      }),
+    );
+    const sha = git(layout.synth, "rev-parse", "HEAD").slice(0, 12);
+    writeAction(layout, "coachman", "verify", "gate", `on=${sha}@${sha} result=pass exit=0 secs=1`);
+    const checkpoint = join(layout.dispatch, "checkpoint.md");
+    writeFileSync(checkpoint, "## Findings (bug)\n\nnone\n");
+    const card = run("bash", [LANDING, "card-block", layout.dispatch, layout.synth, checkpoint]);
+    expect(card.code).toBe(0);
+    expect(card.out).not.toContain("someone-else");
+    expect(card.out).not.toContain(privateGlob);
+    expect(card.out).toContain("codex: not checked: unresolved shell input");
+  });
+
+  test("R6 unresolvable file-tool paths leave the lane not checked", () => {
+    const layout = makeLayout();
+    const runJson = JSON.parse(readFileSync(join(layout.dispatch, "run.json"), "utf8"));
+    runJson.config.lanes.opus = { harness: "claude" };
+    writeFileSync(join(layout.dispatch, "run.json"), JSON.stringify(runJson));
+    const opusOwn = join(layout.repo, ".worktrees", "T-opus");
+    mkdirSync(opusOwn, { recursive: true });
+
+    const outside = join(layout.home, "r6-direct.txt");
+    const codexVar = join(layout.dispatch, "logs", "r6-codex-var.jsonl");
+    writeEvents(codexVar, [codexFile("$R6_OUT/evil.txt")]);
+    const codexResult = stream(layout, "codex", codexVar, layout.codex);
+    expect(codexResult.code).toBe(3);
+    expect(codexResult.out).toContain("not checked: unresolved file input");
+
+    const codexPlain = join(layout.dispatch, "logs", "r6-codex-plain.jsonl");
+    writeEvents(codexPlain, [codexFile(outside)]);
+    const codexFinding = stream(layout, "codex", codexPlain, layout.codex);
+    expect(codexFinding.code).toBe(2);
+    expect(codexFinding.out).toContain(`finding write ${outside} (elsewhere)`);
+
+    const mimoGlob = join(layout.dispatch, "logs", "r6-mimo-glob.jsonl");
+    writeEvents(mimoGlob, [mimo("write", { path: join(layout.home, "*.log") })]);
+    const mimoResult = stream(layout, "mimo", mimoGlob, layout.mimo);
+    expect(mimoResult.code).toBe(3);
+    expect(mimoResult.out).toContain("not checked: unresolved file input");
+
+    const mimoPlain = join(layout.dispatch, "logs", "r6-mimo-plain.jsonl");
+    writeEvents(mimoPlain, [mimo("write", { path: outside })]);
+    const mimoFinding = stream(layout, "mimo", mimoPlain, layout.mimo);
+    expect(mimoFinding.code).toBe(2);
+    expect(mimoFinding.out).toContain(`finding write ${outside} (elsewhere)`);
+
+    const claudeVar = join(layout.dispatch, "logs", "r6-claude-var.jsonl");
+    writeEvents(claudeVar, claude("Write", { file_path: "$R6_OUT/evil.txt", content: "x" }));
+    const claudeResult = stream(layout, "opus", claudeVar, opusOwn);
+    expect(claudeResult.code).toBe(3);
+    expect(claudeResult.out).toContain("not checked: unresolved file input");
+
+    const claudePlain = join(layout.dispatch, "logs", "r6-claude-plain.jsonl");
+    writeEvents(claudePlain, claude("Write", { file_path: outside, content: "x" }));
+    const claudeFinding = stream(layout, "opus", claudePlain, opusOwn);
+    expect(claudeFinding.code).toBe(2);
+    expect(claudeFinding.out).toContain(`finding write ${outside} (elsewhere)`);
+  });
+
+  test("R6 the round reach step stops before restore when the check faults", () => {
+    const text = readFileSync(join(TOOL, "skills/postmaster/coachman.md"), "utf8");
+    const marker = "**Check reach and restore before any fix.**";
+    const at = text.indexOf(marker);
+    expect(at).toBeGreaterThan(-1);
+    const fence = text.indexOf("```sh", at);
+    const end = text.indexOf("```", fence + 5);
+    const block = text.slice(fence + 5, end);
+    const runBlock = (checkExit: number): { code: number; restored: boolean } => {
+      const dir = mkdtempSync(join(tmpdir(), "postmaster-r6-"));
+      CREATED.push(dir);
+      const dispatch = join(dir, "dispatch");
+      mkdirSync(join(dispatch, "logs"), { recursive: true });
+      const bin = join(dir, "bin");
+      mkdirSync(bin, { recursive: true });
+      writeFileSync(
+        join(bin, "bun"),
+        `#!/bin/sh\nif printf '%s' "$*" | grep -q restore; then touch ${dir}/restored; exit 0; fi\nexit ${checkExit}\n`,
+        { mode: 0o755 },
+      );
+      const script = block
+        .replaceAll("<tool>", join(dir, "tool"))
+        .replaceAll("<dispatch>", dispatch)
+        .replaceAll("r<round>", "r1");
+      const result = run("sh", ["-c", script], { env: { PATH: `${bin}:/usr/bin:/bin` } });
+      return { code: result.code, restored: existsSync(join(dir, "restored")) };
+    };
+    // The sentence under the step: exit 1 from check is a control fault, stop.
+    const faulted = runBlock(1);
+    expect(faulted.restored).toBe(false);
+    expect(faulted.code).not.toBe(0);
+    const control = runBlock(0);
+    expect(control.restored).toBe(true);
+    expect(control.code).toBe(0);
+  });
+});

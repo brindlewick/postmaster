@@ -940,6 +940,7 @@ Set the stage first, `<tool>/scripts/stage.sh <dispatch> review`, then:
    bun --no-env-file --config=/dev/null <tool>/scripts/reach.ts check <dispatch> r<round> \
      > <dispatch>/logs/reach-r<round>.txt || REACH_EXIT=$?
    cat <dispatch>/logs/reach-r<round>.txt
+   if [ "$REACH_EXIT" -eq 1 ]; then exit 1; fi
    bun --no-env-file --config=/dev/null <tool>/scripts/reach.ts restore <dispatch> r<round> || exit 1
    ```
 
