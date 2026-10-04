@@ -228,6 +228,9 @@ whole system.
    is what a run is audited from and what the flow is improved from.
 7. **Shared code lives once.** A helper that two scripts need goes in `scripts/lib/`,
    imported by both, and is not copied between them.
+8. **Functional core, effects at the edges.** A computation takes its inputs as arguments and
+   returns its result. Reading files, the clock, the environment and processes happens at the
+   edge of a script, not inside the computation.
 
 The scripts run on Bun 1.4.2 or newer: `scripts/run <name> [args]` is the one entry for every
 tool script; it execs Bun with `--no-env-file` and the tool's own `bunfig.toml`, so a script run
