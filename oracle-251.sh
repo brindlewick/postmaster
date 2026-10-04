@@ -45,7 +45,7 @@ export GIT_COMMITTER_NAME=oracle GIT_COMMITTER_EMAIL=oracle@example.invalid
 # --- the test store: tickets 1..4 per the ticket's Checks preamble ---
 STORE=$SCR/store
 mkdir -p "$STORE" && git -C "$STORE" init -q
-scripts/local.sh "$STORE" store init >/dev/null
+scripts/run local "$STORE" store init >/dev/null
 # (a): a minimal two-part body passing ticket-check and ticket-parts --final at BASE.
 cat > "$SCR/a.md" <<'TICKET'
 ## Problem / feature
@@ -95,10 +95,10 @@ if ! git show "$BASE:fixtures/tickets/remove/ticket.md" > "$SCR/c.md" 2>/dev/nul
 else
   HAVE_STORE=1
   { echo "DRAFT: still being written"; echo; cat "$SCR/a.md"; } > "$SCR/d.md"
-  scripts/local.sh "$STORE" create "Sorted list" "$SCR/a.md" >/dev/null
-  scripts/local.sh "$STORE" create "Fix the list" "$SCR/a.md" >/dev/null
-  scripts/local.sh "$STORE" create "Remove" "$SCR/c.md" >/dev/null
-  scripts/local.sh "$STORE" create "Draft list" "$SCR/d.md" >/dev/null
+  scripts/run local "$STORE" create "Sorted list" "$SCR/a.md" >/dev/null
+  scripts/run local "$STORE" create "Fix the list" "$SCR/a.md" >/dev/null
+  scripts/run local "$STORE" create "Remove" "$SCR/c.md" >/dev/null
+  scripts/run local "$STORE" create "Draft list" "$SCR/d.md" >/dev/null
   python3 - "$STORE" <<'PY'
 import json, sys
 store = sys.argv[1]
@@ -127,7 +127,7 @@ else
 fi
 
 # --- AC2: setup asks for the clerk, launch resolves it ---
-KEYS=$(scripts/setup.sh --keys)
+KEYS=$(scripts/run setup --keys)
 for k in clerk.harness clerk.model 'clerk.effort?' 'clerk.env_file?'; do
   printf '%s\n' "$KEYS" | grep -q "^$k" && pass "AC2 --keys lists $k" || fail "AC2 --keys lacks $k"
 done
@@ -153,21 +153,21 @@ clerk.model=claude-clerk-w
 EOF
 grep -v '^clerk\.' "$SCR/answers-clerk.txt" > "$SCR/answers-noclerk.txt"
 sed 's/^clerk\.harness=claude$/clerk.harness=grok/' "$SCR/answers-clerk.txt" > "$SCR/answers-badharness.txt"
-timeout 60 scripts/setup.sh --answers "$SCR/answers-clerk.txt" --dry-run </dev/null >"$SCR/dry-clerk.out" 2>&1; RC=$?
+timeout 60 scripts/run setup --answers "$SCR/answers-clerk.txt" --dry-run </dev/null >"$SCR/dry-clerk.out" 2>&1; RC=$?
 if [ $RC -eq 0 ] && grep -q '^clerk = { harness = "claude", model = "claude-clerk-w"' "$SCR/dry-clerk.out"; then
   pass "AC2 dry-run writes the clerk under [team] in the postmaster's form"
 else
   fail "AC2 dry-run with a clerk on claude (exit $RC) lacks the clerk line"
 fi
-timeout 60 scripts/setup.sh --answers "$SCR/answers-badharness.txt" --dry-run </dev/null >"$SCR/dry-bad.out" 2>&1; RC=$?
+timeout 60 scripts/run setup --answers "$SCR/answers-badharness.txt" --dry-run </dev/null >"$SCR/dry-bad.out" 2>&1; RC=$?
 [ $RC -eq 1 ] && grep -qi clerk "$SCR/dry-bad.out" \
   && pass "AC2 a clerk harness not on PATH exits 1 naming it" \
   || fail "AC2 bad clerk harness: exit $RC, must be 1 naming the clerk"
-timeout 60 scripts/setup.sh --answers "$SCR/answers-noclerk.txt" --dry-run </dev/null >"$SCR/dry-no.out" 2>&1; RC=$?
+timeout 60 scripts/run setup --answers "$SCR/answers-noclerk.txt" --dry-run </dev/null >"$SCR/dry-no.out" 2>&1; RC=$?
 [ $RC -eq 1 ] && grep -qi clerk "$SCR/dry-no.out" \
   && pass "AC2 no clerk harness or model exits 1 naming it" \
   || fail "AC2 missing clerk keys: exit $RC, must be 1 naming the clerk"
-if grep -qi clerk scripts/setup.sh scripts/setup.ts 2>/dev/null; then
+if grep -qi clerk scripts/setup.ts 2>/dev/null; then
   pass "AC2 setup has a clerk path (adding verb judged from the diff)"
 else
   fail "AC2 setup mentions no clerk anywhere"
@@ -175,13 +175,13 @@ fi
 skip "AC2 the adding verb's behavior: its arguments are the lane's choice"
 printf '[team]\nclerk = { harness = "claude", model = "m1" }\n' > "$SCR/config-clerk.toml"
 printf '[team]\npostmaster = { harness = "claude", model = "m1" }\n' > "$SCR/config-noclerk.toml"
-if POSTMASTER_CONFIG=$SCR/config-clerk.toml timeout 60 scripts/launch.sh form clerk >"$SCR/form-clerk.out" 2>&1; then
+if POSTMASTER_CONFIG=$SCR/config-clerk.toml timeout 60 scripts/run launch form clerk >"$SCR/form-clerk.out" 2>&1; then
   grep -q claude "$SCR/form-clerk.out" && pass "AC2 launch form clerk prints the clerk's command" \
     || fail "AC2 launch form clerk names no claude command"
 else
   fail "AC2 launch form clerk exits nonzero on a config with team.clerk"
 fi
-POSTMASTER_CONFIG=$SCR/config-noclerk.toml timeout 60 scripts/launch.sh form clerk >"$SCR/form-no.out" 2>&1; RC=$?
+POSTMASTER_CONFIG=$SCR/config-noclerk.toml timeout 60 scripts/run launch form clerk >"$SCR/form-no.out" 2>&1; RC=$?
 [ $RC -eq 1 ] && grep -qi clerk "$SCR/form-no.out" \
   && pass "AC2 launch form clerk exits 1 naming it with no team.clerk" \
   || fail "AC2 launch form clerk without team.clerk: exit $RC, must be 1 naming it"
@@ -189,21 +189,21 @@ POSTMASTER_CONFIG=$SCR/config-noclerk.toml timeout 60 scripts/launch.sh form cle
 # --- AC3: the readiness script (discovered, then behavior-verified) ---
 READY=""
 if [ "$HAVE_STORE" -eq 1 ]; then
-  CANDS=$(grep -hi 'readiness' skills/postmaster/postmaster.md 2>/dev/null | grep -oE 'scripts/[a-z0-9-]+\.sh' | sort -u)
+  CANDS=$(grep -hi 'readiness' skills/postmaster/postmaster.md 2>/dev/null | grep -oE 'scripts/run [a-z0-9-]+' | awk '{print $2}' | sort -u)
   if [ -z "$CANDS" ]; then
-    if git cat-file -e "$BASE:scripts/launch.sh" 2>/dev/null; then
-      NEWSCRIPTS=$(comm -23 <(cd scripts && ls *.sh | sort) <(git ls-tree "$BASE" scripts/ --name-only | xargs -n1 basename | sort))
+    if git cat-file -e "$BASE:scripts/launch.ts" 2>/dev/null; then
+      NEWSCRIPTS=$(comm -23 <(cd scripts && ls *.ts | grep -v '\.test\.ts$' | sed 's/\.ts$//' | sort) <(git ls-tree "$BASE" scripts/ --name-only | xargs -n1 basename | sed 's/\.ts$//' | sort))
     else
-      NEWSCRIPTS=$(cd scripts && ls *.sh)
+      NEWSCRIPTS=$(cd scripts && ls *.ts | grep -v '\.test\.ts$' | sed 's/\.ts$//')
     fi
     for s in $NEWSCRIPTS; do
-      timeout 20 scripts/"$s" --help </dev/null >"$SCR/help-$s.out" 2>&1
-      grep -qiE 'readiness|ticket[^a-z]*ready|ready[^a-z]*(ticket|mark|label)' "$SCR/help-$s.out" 2>/dev/null && CANDS="$CANDS scripts/$s"
+      timeout 20 scripts/run "$s" --help </dev/null >"$SCR/help-$s.out" 2>&1
+      grep -qiE 'readiness|ticket[^a-z]*ready|ready[^a-z]*(ticket|mark|label)' "$SCR/help-$s.out" 2>/dev/null && CANDS="$CANDS $s"
     done
   fi
   for c in $CANDS; do
-    timeout 60 "$c" "$STORE" 1 </dev/null >"$SCR/ready-a.out" 2>&1; RA=$?
-    timeout 60 "$c" "$STORE" 2 </dev/null >"$SCR/ready-b.out" 2>&1; RB=$?
+    timeout 60 scripts/run "$c" "$STORE" 1 </dev/null >"$SCR/ready-a.out" 2>&1; RA=$?
+    timeout 60 scripts/run "$c" "$STORE" 2 </dev/null >"$SCR/ready-b.out" 2>&1; RB=$?
     if [ "$RA" -eq 0 ] && [ "$RB" -eq 2 ]; then READY=$c; break; fi
   done
 fi
@@ -215,31 +215,31 @@ else
   grep -qiE 'ready|label|mark' "$SCR/ready-b.out" \
     && pass "AC3 the unready ticket's reason names the missing mark" \
     || fail "AC3 ticket 2 names no missing mark"
-  timeout 60 "$READY" "$STORE" 3 </dev/null >"$SCR/ready-c.out" 2>&1; RC3=$?
+  timeout 60 scripts/run "$READY" "$STORE" 3 </dev/null >"$SCR/ready-c.out" 2>&1; RC3=$?
   [ "$RC3" -eq 2 ] && grep -qiE 'parts|for the agents|agents' "$SCR/ready-c.out" \
     && pass "AC3 the one-part ticket's reason names the parts finding" \
     || fail "AC3 ticket 3: exit $RC3, must be 2 naming the parts finding"
-  timeout 60 "$READY" "$STORE" 4 </dev/null >"$SCR/ready-d.out" 2>&1; RC4=$?
+  timeout 60 scripts/run "$READY" "$STORE" 4 </dev/null >"$SCR/ready-d.out" 2>&1; RC4=$?
   [ "$RC4" -eq 2 ] && grep -qi 'draft' "$SCR/ready-d.out" \
     && pass "AC3 the draft ticket's reason names the draft line" \
     || fail "AC3 ticket 4: exit $RC4, must be 2 naming the draft line"
   { echo "DRAFT: still being written"; echo; cat "$SCR/c.md"; } > "$SCR/e.md"
-  EID=$(scripts/local.sh "$STORE" create "Bad all ways" "$SCR/e.md")
-  timeout 60 "$READY" "$STORE" "$EID" </dev/null >"$SCR/ready-e.out" 2>&1; RC5=$?
+  EID=$(scripts/run local "$STORE" create "Bad all ways" "$SCR/e.md")
+  timeout 60 scripts/run "$READY" "$STORE" "$EID" </dev/null >"$SCR/ready-e.out" 2>&1; RC5=$?
   if [ "$RC5" -eq 2 ] && grep -qi 'draft' "$SCR/ready-e.out" && grep -qiE 'parts|for the agents' "$SCR/ready-e.out" \
       && grep -qiE 'ready|label|mark' "$SCR/ready-e.out"; then
     pass "AC3 a ticket failing several ways names every reason"
   else
     fail "AC3 ticket 5: exit $RC5, must be 2 naming the draft, parts and mark reasons"
   fi
-  timeout 60 "$READY" "$STORE" 9999 </dev/null >"$SCR/ready-unknown.out" 2>&1; RCU=$?
+  timeout 60 scripts/run "$READY" "$STORE" 9999 </dev/null >"$SCR/ready-unknown.out" 2>&1; RCU=$?
   [ "$RCU" -eq 1 ] && pass "AC3 an unknown id exits 1" || fail "AC3 unknown id: exit $RCU, must be 1"
   for ad in github plane local; do
-    # plane.sh takes no repo: it reads the project from the environment, so a
+    # run plane takes no repo: it reads the project from the environment, so a
     # repo argument is a verb, not a usage probe.
     if [ "$ad" = plane ]; then RARGS=""; else RARGS="$STORE"; fi
     # shellcheck disable=SC2086
-    timeout 20 scripts/$ad.sh $RARGS </dev/null >"$SCR/usage-$ad.out" 2>&1
+    timeout 20 scripts/run $ad $RARGS </dev/null >"$SCR/usage-$ad.out" 2>&1
     grep -qi 'label' "$SCR/usage-$ad.out" \
       && pass "AC3 the $ad adapter has label verbs" \
       || fail "AC3 the $ad adapter shows no label verb"
@@ -255,8 +255,8 @@ else
   skip "AC3 github and plane results through each adapter's test double: lane-internal seams"
   LABELFLAG=$(timeout 20 "$READY" --help </dev/null 2>&1 | grep -oiE '\-\-[a-z-]*label[a-z-]*' | head -1)
   if [ -n "$LABELFLAG" ]; then
-    timeout 60 "$READY" --body "$SCR/a.md" "$LABELFLAG" ready </dev/null >"$SCR/ready-other-a.out" 2>&1; RBO=$?
-    timeout 60 "$READY" --body "$SCR/a.md" "$LABELFLAG" '' </dev/null >"$SCR/ready-other-b.out" 2>&1; RBU=$?
+    timeout 60 scripts/run "$READY" --body "$SCR/a.md" "$LABELFLAG" ready </dev/null >"$SCR/ready-other-a.out" 2>&1; RBO=$?
+    timeout 60 scripts/run "$READY" --body "$SCR/a.md" "$LABELFLAG" '' </dev/null >"$SCR/ready-other-b.out" 2>&1; RBU=$?
     [ "$RBO" -eq 0 ] && [ "$RBU" -eq 2 ] \
       && pass "AC3 kind=other: body file plus label list reads ready/unready" \
       || fail "AC3 kind=other: exits $RBO/$RBU, must be 0/2"
@@ -281,15 +281,15 @@ if [ -z "$MARK" ]; then
 else
   pass "AC4 marking verb is $READY $MARK"
   BEFORE_C=$(labels_of 3)
-  timeout 60 "$READY" "$MARK" "$STORE" 3 </dev/null >"$SCR/mark-c.out" 2>&1; MC=$?
+  timeout 60 scripts/run "$READY" "$MARK" "$STORE" 3 </dev/null >"$SCR/mark-c.out" 2>&1; MC=$?
   [ "$MC" -eq 2 ] && [ "$(labels_of 3)" = "$BEFORE_C" ] \
     && pass "AC4 marking the one-part ticket exits 2, no label added" \
     || fail "AC4 marking ticket 3: exit $MC, must be 2 with labels unchanged"
-  MID=$(scripts/local.sh "$STORE" create "To mark" "$SCR/a.md")
-  timeout 60 "$READY" "$MARK" "$STORE" "$MID" </dev/null >"$SCR/mark-mid.out" 2>&1; MM=$?
+  MID=$(scripts/run local "$STORE" create "To mark" "$SCR/a.md")
+  timeout 60 scripts/run "$READY" "$MARK" "$STORE" "$MID" </dev/null >"$SCR/mark-mid.out" 2>&1; MM=$?
   if [ "$MM" -eq 0 ] && [ "$(labels_of "$MID")" = "ready" ]; then
     pass "AC4 marking a passing ticket adds the label"
-    timeout 60 "$READY" "$STORE" "$MID" </dev/null >"$SCR/ready-marked.out" 2>&1 \
+    timeout 60 scripts/run "$READY" "$STORE" "$MID" </dev/null >"$SCR/ready-marked.out" 2>&1 \
       && pass "AC4 the marked ticket then reads ready" \
       || fail "AC4 the marked ticket does not read ready"
     if grep -rq 'turnpikes:' "$STORE/.postmaster/" 2>/dev/null; then
@@ -328,12 +328,12 @@ grep -i 'ready' scripts/runs-watch.ts | grep -vi 'spec-review-ready' | grep -qwi
 skip "AC5/AC6/AC7 clerk sessions, headless refusal and pickup: needs a postmaster and a model"
 
 # --- AC8: the clerk opens in a new tab of the project's space ---
-grep -rn 'host\.sh spawn' skills/ | grep -q '\-\-label' \
-  && pass "AC8 control: host.sh spawn takes --label" \
+grep -rn 'run host spawn' skills/ | grep -q '\-\-label' \
+  && pass "AC8 control: run host spawn takes --label" \
   || fail "AC8 control: no spawn --label form in the skills"
-# The launch is a script (ticket L99), not runbook prose: it spawns through host.sh.
+# The launch is a script (ticket L99), not runbook prose: it spawns through run host.
 # The call may wrap across lines; the verbs on nearby lines are the check.
-grep -q '"host.sh"' scripts/clerk.ts && grep -q '"spawn"' scripts/clerk.ts && grep -q '"--label"' scripts/clerk.ts \
+grep -q '"host"' scripts/clerk.ts && grep -q '"spawn"' scripts/clerk.ts && grep -q '"--label"' scripts/clerk.ts \
   && pass "AC8 the clerk's launch spawns with a label" \
   || fail "AC8 the clerk's launch names no spawn with a label"
 skip "AC8 the live tab labelled '#2, Fix the list': needs Herdr and a model"
@@ -350,11 +350,11 @@ if git status --porcelain -- skills scripts/link-skills.ts | grep -q .; then
   skip "AC9 link-skills through a clone: the tree is dirty, run on committed state"
 else
   CLONE=$(mktemp -d) && git clone -q . "$CLONE" 2>/dev/null \
-    && ( cd "$CLONE" && timeout 60 scripts/link-skills.sh --dry-run </dev/null 2>&1 | grep -qi clerk ) \
+    && ( cd "$CLONE" && timeout 60 scripts/run link-skills --dry-run </dev/null 2>&1 | grep -qi clerk ) \
     && pass "AC9 link-skills finds the clerk skill" \
     || fail "AC9 link-skills finds no clerk skill"; rm -rf "$CLONE"
 fi
-# The start prompt is the one line clerk.sh sends: it names the skill's file by the
+# The start prompt is the one line run clerk sends: it names the skill's file by the
 # absolute path the brief resolves, not by a relative path in runbook prose.
 grep -q 'Read the skill at ${brief.skill}' scripts/clerk.ts && grep -q '"skills", "clerk", "SKILL.md"' scripts/clerk.ts \
   && pass "AC9 the postmaster's start prompt names the skill's file by path" \
@@ -384,14 +384,14 @@ grep -q 'Showing each criterion' $CM \
   && fail "AC11 coachman.md still names Showing each criterion" \
   || pass "AC11 no Showing each criterion in coachman.md"
 skip "AC11 the fixture run's spec-free history: needs a fixture run"
-if scripts/stage.sh --list | grep -qx 'planning'; then
-  fail "AC12 stage.sh --list still has planning"
+if scripts/run stage --list | grep -qx 'planning'; then
+  fail "AC12 run stage --list still has planning"
 else
-  pass "AC12 stage.sh --list has no planning"
+  pass "AC12 run stage --list has no planning"
 fi
-scripts/stage.sh --list | grep -qx 'synthesis' && scripts/stage.sh --list | grep -qx 'workhorses-running' \
+scripts/run stage --list | grep -qx 'synthesis' && scripts/run stage --list | grep -qx 'workhorses-running' \
   && pass "AC12 control: the other stages are still listed" \
-  || fail "AC12 control: stage.sh --list lost stages"
+  || fail "AC12 control: run stage --list lost stages"
 skip "AC12 the run's stageless history: needs a fixture run"
 
 # --- AC13: the premises check before any workhorse starts ---
@@ -520,11 +520,11 @@ mkdir -p "$SCR/act"
 printf '{"stage":"synthesis","leg":1,"base":"x","lanes":{}}' > "$SCR/act/manifest.json"
 printf '{"coachman_contract":2}' > "$SCR/act/run.json"
 # The premises line carries the verified commit, base= and result=, as the runbook logs it.
-if timeout 60 scripts/log-action.sh "$SCR/act" coachman premises "$V" "base=$V" "result=same" >/dev/null 2>&1 \
+if timeout 60 scripts/run log-action "$SCR/act" coachman premises "$V" "base=$V" "result=same" >/dev/null 2>&1 \
     && grep -q '"action":"premises"' "$SCR/act/actions.jsonl"; then
-  pass "AC13 log-action.sh records a premises line"
+  pass "AC13 run log-action records a premises line"
 else
-  fail "AC13 log-action.sh takes no premises action"
+  fail "AC13 run log-action takes no premises action"
 fi
 grep -qiE 'premis[^.]{0,120}before (any workhorse|the workhorses|launching)|before (any workhorse|the workhorses|launching)[^.]{0,120}premis' $CM \
   && pass "AC13 the coachman checks premises before any workhorse starts" \
@@ -563,12 +563,12 @@ mkdir -p "$SCR/runsroot/99"
 printf '{"stage":"planning","leg":1,"base":"ede70e2","lanes":{},"coachman":{"legs":{"1":{"thread_id":"t","name":"c"}}}}' > "$SCR/runsroot/99/manifest.json"
 printf '{"coachman_contract":2}' > "$SCR/runsroot/99/run.json"
 touch "$SCR/runsroot/99/.spec-review-ready" "$SCR/runsroot/99/.leg-1-exited"
-timeout 60 scripts/runs-status.sh "$SCR/runsroot" 2>/dev/null | grep -qE '99 +planning +1 +.*SPEC' \
+timeout 60 scripts/run runs-status "$SCR/runsroot" 2>/dev/null | grep -qE '99 +planning +1 +.*SPEC' \
   && pass "AC16 an old planning pause still reads NEXT SPEC" \
   || fail "AC16 runs-status does not read SPEC on the old pause"
-timeout 60 scripts/stage.sh "$SCR/runsroot/99" workhorses-running >/dev/null 2>&1 \
+timeout 60 scripts/run stage "$SCR/runsroot/99" workhorses-running >/dev/null 2>&1 \
   && pass "AC16 an old run's terminal move still works" \
-  || fail "AC16 stage.sh refuses the old run's terminal move"
+  || fail "AC16 run stage refuses the old run's terminal move"
 grep -qF '<rt>/skills/postmaster/postmaster.md' $PM \
   && pass "AC16 Spec review points at the old run's own copy" \
   || fail "AC16 postmaster.md points nowhere at <rt>"

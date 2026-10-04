@@ -6,14 +6,14 @@
 // not ready instead of dispatching it.
 //
 // Usage:
-//   ticket-ready.sh <repo> <id>                        exit 0 when ready, 2 with one line per reason
-//   ticket-ready.sh --body <file> --labels <list> --project <repo> --id <id> [--title <t>]
-//   ticket-ready.sh mark <repo> <id> [--body <file>] [--title <title>]
-//   ticket-ready.sh mark --body <file> --labels <list> --repo <repo> --id <id> [--title <t>]
-//   ticket-ready.sh unmark <repo> <id>
-//   ticket-ready.sh consume <repo> <id>
-//   ticket-ready.sh pending <repo>
-//   ticket-ready.sh queue <repo> <id>
+//   run ticket-ready <repo> <id>                       exit 0 when ready, 2 with one line per reason
+//   run ticket-ready --body <file> --labels <list> --project <repo> --id <id> [--title <t>]
+//   run ticket-ready mark <repo> <id> [--body <file>] [--title <title>]
+//   run ticket-ready mark --body <file> --labels <list> --repo <repo> --id <id> [--title <t>]
+//   run ticket-ready unmark <repo> <id>
+//   run ticket-ready consume <repo> <id>
+//   run ticket-ready pending <repo>
+//   run ticket-ready queue <repo> <id>
 //
 // The --body forms check a tracker of kind other from a body file and a label
 // list, as ticket-check --body does; the mark --body form records the marking
@@ -46,13 +46,13 @@ function die(message: string, code = 1): never {
 }
 
 function runScript(name: string, args: string[]): { code: number; out: string; err: string } {
-  const r = run(join(HERE, name), args);
+  const r = run(join(HERE, "run"), [name, ...args]);
   return { code: r.code, out: r.out ?? "", err: r.err ?? "" };
 }
 
 function trackerKind(repo: string): string {
-  const r = runScript("tracker-kind.sh", [repo]);
-  if (r.code !== 0) die(`tracker-kind.sh ${repo}: ${(r.out + r.err).trim() || `exit ${r.code}`}`);
+  const r = runScript("tracker-kind", [repo]);
+  if (r.code !== 0) die(`run tracker-kind ${repo}: ${(r.out + r.err).trim() || `exit ${r.code}`}`);
   return r.out.trim();
 }
 
@@ -65,7 +65,7 @@ function hasAdapter(kind: string): boolean {
 function needAdapter(kind: string, instead: string): void {
   if (hasAdapter(kind)) return;
   die(
-    `tracker kind '${kind}' has no adapter script; read the ticket with its own tooling (trackers.md, other) and run: ticket-ready.sh ${instead}`,
+    `tracker kind '${kind}' has no adapter script; read the ticket with its own tooling (trackers.md, other) and run: run ticket-ready ${instead}`,
   );
 }
 
@@ -106,7 +106,7 @@ function runChecks(input: CheckInput): { reasons: string[]; turnpikes: string } 
     const checkArgs = ["--body", bodyFile];
     if (input.title) checkArgs.push("--title", input.title);
     if (input.project) checkArgs.push("--project", input.project);
-    const checkR = runScript("ticket-check.sh", checkArgs);
+    const checkR = runScript("ticket-check", checkArgs);
     if (checkR.code !== 0) {
       for (const line of (checkR.out + checkR.err).split("\n")) {
         const t = line.trim();
@@ -117,7 +117,7 @@ function runChecks(input: CheckInput): { reasons: string[]; turnpikes: string } 
         if (line.startsWith("turnpikes:")) turnpikes = line.trim();
       }
     }
-    const partsR = runScript("ticket-parts.sh", [bodyFile, "--final"]);
+    const partsR = runScript("ticket-parts", [bodyFile, "--final"]);
     const partsText = partsR.out + partsR.err;
     if (partsR.code !== 0) {
       for (const line of partsText.split("\n")) {
@@ -150,7 +150,7 @@ function reportCheck(
   const queued = queuedMark(repo, id);
   if (!queued.bound && queued.malformed)
     reasons.push(
-      `the ready marker for ${id} is malformed; run ticket-ready.sh unmark ${repo} ${id} and sign the ticket off again`,
+      `the ready marker for ${id} is malformed; run run ticket-ready unmark ${repo} ${id} and sign the ticket off again`,
     );
   else if (queued.bound && queued.digest !== digestOf(title, stored))
     reasons.push(
@@ -259,14 +259,14 @@ function labelViaAdapter(
   name = "ready",
 ): void {
   const base = kind === "plane" ? [] : [repo];
-  const r = runScript(`${kind}.sh`, [...base, "label", id, verb, name]);
+  const r = runScript(`${kind}`, [...base, "label", id, verb, name]);
   if (r.code !== 0)
     die(`the ${kind} adapter could not ${verb} the label (${(r.out + r.err).trim()})`);
 }
 
 function readViaAdapter(repo: string, id: string, kind: string): { title: string; body: string } {
   const base = kind === "plane" ? [] : [repo];
-  const r = runScript(`${kind}.sh`, [...base, "read", id]);
+  const r = runScript(`${kind}`, [...base, "read", id]);
   if (r.code !== 0) die(`the ${kind} adapter could not read ${id} (${(r.out + r.err).trim()})`, 1);
   return parseTicketRead(r.out);
 }
@@ -275,7 +275,7 @@ function readViaAdapter(repo: string, id: string, kind: string): { title: string
 // edit base and the marker digest are taken from.
 function bodyViaAdapter(repo: string, id: string, kind: string): string {
   const base = kind === "plane" ? [] : [repo];
-  const r = runScript(`${kind}.sh`, [...base, "read", id, "--body"]);
+  const r = runScript(`${kind}`, [...base, "read", id, "--body"]);
   if (r.code !== 0)
     die(`the ${kind} adapter could not read the body of ${id} (${(r.out + r.err).trim()})`, 1);
   return r.out;
@@ -286,7 +286,7 @@ function bodyViaAdapter(repo: string, id: string, kind: string): string {
 // hold a comma and read back as two.
 function readyViaAdapter(repo: string, id: string, kind: string): boolean {
   const base = kind === "plane" ? [] : [repo];
-  const r = runScript(`${kind}.sh`, [...base, "has-label", id, "ready"]);
+  const r = runScript(`${kind}`, [...base, "has-label", id, "ready"]);
   if (r.code !== 0)
     die(
       `the ${kind} adapter could not check the ready label on ${id} (${(r.out + r.err).trim()})`,
@@ -306,14 +306,14 @@ function removeClerkRecord(repo: string, id: string): void {
 }
 
 function logLedgerNote(repo: string, id: string, turnpikes: string): void {
-  const r = runScript("log-action.sh", ["--project", repo, "clerk", "note", id, turnpikes]);
+  const r = runScript("log-action", ["--project", repo, "clerk", "note", id, turnpikes]);
   if (r.code !== 0) die(`the ledger note could not be written (${(r.out + r.err).trim()})`);
 }
 
 // Every tracker write the marking makes is also a ticket-edit line, as
 // trackers.md demands of every adapter write.
 function logTicketEdit(repo: string, id: string, what: string): void {
-  const r = runScript("log-action.sh", ["--project", repo, "clerk", "ticket-edit", id, what]);
+  const r = runScript("log-action", ["--project", repo, "clerk", "ticket-edit", id, what]);
   if (r.code !== 0) die(`the ticket-edit line could not be written (${(r.out + r.err).trim()})`);
 }
 
@@ -346,7 +346,7 @@ function markAdapterTicket(
       const newFile = join(work, "new.md");
       writeFileSync(baseFile, stored);
       writeFileSync(newFile, body);
-      const r = runScript(`${kind}.sh`, [...base, "edit", id, newFile, baseFile]);
+      const r = runScript(`${kind}`, [...base, "edit", id, newFile, baseFile]);
       if (r.code !== 0)
         die(`the ${kind} adapter could not write the body (${(r.out + r.err).trim()})`);
       logTicketEdit(repo, id, "body updated");
@@ -355,7 +355,7 @@ function markAdapterTicket(
     }
   }
   if (draftTitle && title !== live.title) {
-    const r = runScript(`${kind}.sh`, [...base, "title", id, title]);
+    const r = runScript(`${kind}`, [...base, "title", id, title]);
     if (r.code !== 0)
       die(`the ${kind} adapter could not write the title (${(r.out + r.err).trim()})`);
     logTicketEdit(repo, id, "title updated");
@@ -376,7 +376,7 @@ function markAdapterTicket(
   const confirm = storedMatches(repo, id, kind, signed);
   if (confirm !== null) {
     const baseArgs = kind === "plane" ? [] : [repo];
-    const back = runScript(`${kind}.sh`, [...baseArgs, "label", id, "remove", "ready"]);
+    const back = runScript(`${kind}`, [...baseArgs, "label", id, "remove", "ready"]);
     removeQueue(repo, id);
     if (back.code === 0) logTicketEdit(repo, id, "label remove ready (mark rolled back)");
     die(
@@ -405,7 +405,7 @@ export function storedMatches(
     const newFile = join(work, "new.md");
     writeFileSync(baseFile, signed);
     writeFileSync(newFile, signed);
-    const r = runScript(`${kind}.sh`, [...base, "edit", id, newFile, baseFile]);
+    const r = runScript(`${kind}`, [...base, "edit", id, newFile, baseFile]);
     return r.code === 0 ? null : (r.out + r.err).trim();
   } finally {
     rmSync(work, { recursive: true, force: true });
@@ -448,11 +448,11 @@ function labelsFromFlags(argv: string[]): string[] {
 
 function usage(): string {
   return [
-    "ticket-ready.sh <repo> <id>",
-    "ticket-ready.sh --body <file> --labels <list> --project <repo> --id <id> [--title <t>]",
-    "ticket-ready.sh mark <repo> <id> [--body <file>] [--title <title>]",
-    "ticket-ready.sh mark --body <file> --labels <list> --repo <repo> --id <id> [--title <t>]",
-    "ticket-ready.sh unmark <repo> <id> | consume <repo> <id> | pending <repo> | queue <repo> <id>",
+    "run ticket-ready <repo> <id>",
+    "run ticket-ready --body <file> --labels <list> --project <repo> --id <id> [--title <t>]",
+    "run ticket-ready mark <repo> <id> [--body <file>] [--title <title>]",
+    "run ticket-ready mark --body <file> --labels <list> --repo <repo> --id <id> [--title <t>]",
+    "run ticket-ready unmark <repo> <id> | consume <repo> <id> | pending <repo> | queue <repo> <id>",
   ].join(" | ");
 }
 
@@ -471,7 +471,7 @@ function main(argv: string[]): number {
     const queued = queuedMark(project, id);
     if (!queued.bound && queued.malformed)
       reasons.push(
-        `the ready marker for ${id} is malformed; remove the ready label through the tracker's own tooling, run ticket-ready.sh consume ${project} ${id}, and mark again`,
+        `the ready marker for ${id} is malformed; remove the ready label through the tracker's own tooling, run run ticket-ready consume ${project} ${id}, and mark again`,
       );
     else if (queued.bound && queued.digest !== digestOf(title, unsignedBody(body)))
       reasons.push(
@@ -530,7 +530,7 @@ function main(argv: string[]): number {
       const kind = trackerKind(repo);
       if (!hasAdapter(kind)) {
         die(
-          `tracker kind '${kind}' has no adapter script; remove the ready label through the tracker's own tooling (trackers.md, other), then run: ticket-ready.sh consume ${repo} ${id}`,
+          `tracker kind '${kind}' has no adapter script; remove the ready label through the tracker's own tooling (trackers.md, other), then run: run ticket-ready consume ${repo} ${id}`,
         );
       }
       labelViaAdapter(repo, id, kind, "remove");

@@ -38,14 +38,14 @@ import {
   textOf,
 } from "./plane";
 
-const wrapper = join(import.meta.dir, "plane.sh");
+const wrapper = join(import.meta.dir, "run");
 
 function cli(
   args: string[],
   env?: Record<string, string | undefined>,
   cwd?: string,
 ): { code: number; out: string; err: string } {
-  const r = spawnSync("bash", [wrapper, ...args], { encoding: "utf8", env, cwd });
+  const r = spawnSync(wrapper, ["plane", ...args], { encoding: "utf8", env, cwd });
   return { code: r.status ?? -1, out: r.stdout ?? "", err: r.stderr ?? "" };
 }
 
@@ -56,7 +56,7 @@ async function clix(
 ): Promise<{ code: number; out: string; err: string }> {
   // Async spawn: the in-process stub API can only answer while this loop runs,
   // and spawnSync would block it for the child's whole life.
-  const p = Bun.spawn(["bash", wrapper, ...args], {
+  const p = Bun.spawn(["bash", wrapper, "plane", ...args], {
     env: env as Record<string, string>,
     cwd,
     stdout: "pipe",
@@ -353,7 +353,7 @@ describe("CLI and API behavior", () => {
     expect(r.code).toBe(1);
     expect(r.out).toBe("");
     expect(r.err).toBe(
-      "plane: usage: plane.sh projects|create|edit|title|read|state|label|comment|list ...\n",
+      "plane: usage: run plane projects|create|edit|title|read|state|label|comment|list ...\n",
     );
   }, 30000);
 

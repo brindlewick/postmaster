@@ -15,7 +15,7 @@ import {
   MAX_DECISION_WORDS,
 } from "./ticket-parts.ts";
 
-const SELF = join(import.meta.dir, "ticket-parts.sh");
+const SELF = join(import.meta.dir, "run");
 const TEMPLATE = join(import.meta.dir, "..", "skills", "clerk", "ticket-template.md");
 const TICK = "`";
 const FENCE = "```";
@@ -41,7 +41,10 @@ interface Out {
 function cli(text: string, ...flags: string[]): Out {
   const file = join(tmp, `t${seq++}.md`);
   writeFileSync(file, text);
-  const r = spawnSync(SELF, [file, ...flags], { encoding: "utf8", timeout: 20000 });
+  const r = spawnSync(SELF, ["ticket-parts", file, ...flags], {
+    encoding: "utf8",
+    timeout: 20000,
+  });
   const lines = String(r.stdout ?? "")
     .split("\n")
     .filter((l) => l !== "");
@@ -622,7 +625,7 @@ describe("the notes", () => {
 describe("exit codes and usage", () => {
   test("1 for findings, 0 for fit, findings printed before the notes", () => {
     const bad = edit(FIT, "wants it fixed", "wants reach.sh fixed");
-    const r = spawnSync(SELF, [writeTmp(bad)], { encoding: "utf8" });
+    const r = spawnSync(SELF, ["ticket-parts", writeTmp(bad)], { encoding: "utf8" });
     expect(r.status).toBe(1);
     const lines = String(r.stdout)
       .split("\n")
@@ -632,7 +635,9 @@ describe("exit codes and usage", () => {
   });
 
   test("2 for an unreadable file, no agents heading, and usage", () => {
-    const missing = spawnSync(SELF, [join(tmp, "nope.md")], { encoding: "utf8" });
+    const missing = spawnSync(SELF, ["ticket-parts", join(tmp, "nope.md")], {
+      encoding: "utf8",
+    });
     expect(missing.status).toBe(2);
     expect(String(missing.stderr)).toContain("cannot read");
     const noHeading = cli(edit(FIT, "## For the agents", "## Notes"));
@@ -640,9 +645,9 @@ describe("exit codes and usage", () => {
     expect(noHeading.err).toContain('no "## For the agents" section');
     expect(noHeading.findings).toEqual([]);
     for (const args of [[], ["a", "b"], ["--nope"], ["--final"]]) {
-      const r = spawnSync(SELF, args, { encoding: "utf8" });
+      const r = spawnSync(SELF, ["ticket-parts", ...args], { encoding: "utf8" });
       expect(r.status).toBe(2);
-      expect(String(r.stderr)).toContain("usage: ticket-parts.sh <body-file> [--final]");
+      expect(String(r.stderr)).toContain("usage: run ticket-parts <body-file> [--final]");
     }
   });
 

@@ -2,10 +2,10 @@
 // private artifact. skills/review-pages/SKILL.md says how a page is published and how its
 // comments are read and answered.
 //
-//   review-page.ts change <out-dir> --pr <number>
-//   review-page.ts change <out-dir> --base <ref> --head <ref> [--ticket <number>] [--title <text>]
+//   scripts/run review-page change <out-dir> --pr <number>
+//   scripts/run review-page change <out-dir> --base <ref> --head <ref> [--ticket <number>] [--title <text>]
 //                  [--summary <file>]
-//   review-page.ts files <out-dir> <ref> <path>...
+//   scripts/run review-page files <out-dir> <ref> <path>...
 //
 // change: diffs the head against its merge base with the base, as GitHub does, and writes
 // <out-dir>/index.html (the review page, titled for its ticket), review.json and chunks/<k>.json.

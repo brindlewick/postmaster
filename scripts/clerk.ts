@@ -1,7 +1,7 @@
 // The booking clerk's launch: write the brief and start the session.
 //
-//   clerk.sh brief <repo> <id>                  write the draft and the brief
-//   clerk.sh start <repo> <id>                  write the brief and open the clerk in a new tab
+//   run clerk brief <repo> <id>                  write the draft and the brief
+//   run clerk start <repo> <id>                  write the brief and open the clerk in a new tab
 //
 // brief unmarks a marked ticket first, so the postmaster cannot dispatch it
 // while the clerk works; start refuses a ticket whose session the host still
@@ -68,14 +68,14 @@ function configPath(): string {
 
 function readConfig(): { path: string; doc: Record<string, unknown> } {
   const path = configPath();
-  if (!isFile(path)) die(`no machine config at ${path}; run setup.sh first`);
+  if (!isFile(path)) die(`no machine config at ${path}; run setup first`);
   const doc = tryTomlFile(path);
   if (!doc) die(`cannot parse ${path}`);
   return { path, doc };
 }
 
 function runScript(name: string, args: string[]): { code: number; out: string; err: string } {
-  const r = run(join(HERE, name), args);
+  const r = run(join(HERE, "run"), [name, ...args]);
   return { code: r.code, out: r.out ?? "", err: r.err ?? "" };
 }
 
@@ -86,7 +86,7 @@ function requireScript(name: string, args: string[], what: string): string {
 }
 
 function trackerKind(repo: string): string {
-  return requireScript("tracker-kind.sh", [repo], `tracker-kind.sh ${repo} failed`).trim();
+  return requireScript("tracker-kind", [repo], `run tracker-kind ${repo} failed`).trim();
 }
 
 function parseTicketRead(out: string): { title: string } {
@@ -112,9 +112,9 @@ function readTicket(
   kind: string,
 ): { title: string; ready: boolean } | null {
   const base = kind === "plane" ? [] : [repo];
-  const r = runScript(`${kind}.sh`, [...base, "read", id]);
+  const r = runScript(`${kind}`, [...base, "read", id]);
   if (r.code !== 0) return null;
-  const h = runScript(`${kind}.sh`, [...base, "has-label", id, "ready"]);
+  const h = runScript(`${kind}`, [...base, "has-label", id, "ready"]);
   if (h.code !== 0)
     die(`the ${kind} adapter could not check the ready label on ${id} (${(h.out + h.err).trim()})`);
   return { title: parseTicketRead(r.out).title, ready: h.out.trim() === "present" };
@@ -184,7 +184,7 @@ type Brief = {
   title: string;
 };
 
-// The ready queue ticket-ready.sh keeps: brief refuses an unreadable ticket
+// The ready queue ticket-ready keeps: brief refuses an unreadable ticket
 // while one of these names it.
 function readyMarker(repo: string, id: string): string {
   return join(
@@ -207,11 +207,11 @@ function writeBrief(repo: string, id: string): Brief {
     if (isFile(readyMarker(repo, id))) {
       if (kind === "github" || kind === "local" || kind === "plane") {
         die(
-          `could not read ${displayId(kind, id)} to check its ready mark, and a ready marker is queued for it; run brief again once the ticket reads, or clear a stale marker with: ticket-ready.sh consume ${repo} ${id}`,
+          `could not read ${displayId(kind, id)} to check its ready mark, and a ready marker is queued for it; run brief again once the ticket reads, or clear a stale marker with: run ticket-ready consume ${repo} ${id}`,
         );
       }
       die(
-        `tracker kind '${kind}' has no adapter script, and a ready marker is queued for ${id}; remove the ready label through the tracker's own tooling (trackers.md, other), clear the marker with: ticket-ready.sh consume ${repo} ${id}, then run brief again`,
+        `tracker kind '${kind}' has no adapter script, and a ready marker is queued for ${id}; remove the ready label through the tracker's own tooling (trackers.md, other), clear the marker with: run ticket-ready consume ${repo} ${id}, then run brief again`,
       );
     }
     if (kind !== "github" && kind !== "local" && kind !== "plane") {
@@ -225,7 +225,7 @@ function writeBrief(repo: string, id: string): Brief {
   const session = ticket.title ? `${name}, ${ticket.title}` : name;
   if (ticket.ready) {
     requireScript(
-      "ticket-ready.sh",
+      "ticket-ready",
       ["unmark", repo, id],
       `the ready mark on ${name} could not be removed; the clerk stops so the ticket is not dispatched mid-edit`,
     );
@@ -320,7 +320,7 @@ function readSession(repo: string, id: string): { handle: string } | null {
 
 function sessionAlive(handle: string): boolean {
   if (!handle) return false;
-  const r = runScript("host.sh", ["read", handle]);
+  const r = runScript("host", ["read", handle]);
   return r.code === 0;
 }
 
@@ -365,7 +365,7 @@ export function splitCommand(line: string): string[] {
 }
 
 function usage(): string {
-  return ["clerk.sh brief <repo> <id>", "clerk.sh start <repo> <id>"].join(" | ");
+  return ["run clerk brief <repo> <id>", "run clerk start <repo> <id>"].join(" | ");
 }
 
 function cmdBrief(repo: string, id: string): number {
@@ -382,17 +382,17 @@ function cmdStart(repo: string, id: string): number {
   const brief = writeBrief(repo, id);
   const briefPath = clerkFile(repo, id, ".brief.md");
   const startCmd = requireScript(
-    "launch.sh",
+    "launch",
     ["interactive", "clerk", "--project", repo, "--name", brief.session],
-    "launch.sh printed no interactive command for the clerk",
+    "run launch printed no interactive command for the clerk",
   ).trim();
-  if (!startCmd) die("launch.sh printed no interactive command for the clerk");
+  if (!startCmd) die("run launch printed no interactive command for the clerk");
   const form = splitCommand(startCmd);
-  if (form.length === 0) die("launch.sh printed no interactive command for the clerk");
+  if (form.length === 0) die("run launch printed no interactive command for the clerk");
   // The handle names the project and the ticket's id, since both hosts check
   // session names globally; the tab carries the session's number and title.
   const handle = clerkHandle(repo, id);
-  const started = runScript("host.sh", [
+  const started = runScript("host", [
     "spawn",
     handle,
     repo,
@@ -420,7 +420,7 @@ function cmdStart(repo: string, id: string): number {
     promptFile,
     `You are the booking clerk for ${brief.session}. Read the skill at ${brief.skill}, then the runbook, then the brief at ${briefPath}. The draft is at ${brief.draft}; greet the user from there.\n`,
   );
-  const sent = runScript("host.sh", ["send", handle, promptFile]);
+  const sent = runScript("host", ["send", handle, promptFile]);
   if (sent.code !== 0)
     die(
       `the clerk session started but the brief could not be sent (${(sent.out + sent.err).trim()})`,

@@ -18,7 +18,7 @@
 // place changed or went missing, 1 on usage or an unreadable ticket, and 0
 // otherwise. The PREMISES summary line carries what the coachman logs.
 //
-// Usage: premises.sh <repo> <ticket-file> <base>
+// Usage: run premises <repo> <ticket-file> <base>
 import { readFileSync } from "node:fs";
 import { run } from "./lib/proc.ts";
 
@@ -284,7 +284,7 @@ export function formatReport(report: PremisesReport): string[] {
 
 function main(argv: string[]): number {
   if (argv.length !== 3) {
-    console.error("usage: premises.sh <repo> <ticket-file> <base>");
+    console.error("usage: run premises <repo> <ticket-file> <base>");
     return 1;
   }
   const [repo, ticketFile, base] = argv as [string, string, string];

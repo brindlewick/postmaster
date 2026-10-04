@@ -2,8 +2,8 @@
 // tickets are tracked, whether lanes run confined, where projects live and who says the merge word, then write
 // ~/.postmaster/config.toml in the shape of config.example.toml.
 //
-//   setup.sh [--answers <file>] [--dry-run] [--config <path>]
-//   setup.sh --keys
+//   run setup [--answers <file>] [--dry-run] [--config <path>]
+//   run setup --keys
 //
 // An agent drives it: the user's answers go in a file, one key=value per line (--keys
 // lists them with their prompts and defaults), and --answers reads them by name, so the order
@@ -18,7 +18,7 @@
 //           omitted {path}, or an existing config was not overwritten
 //
 // Control: the written file is parsed back as TOML where a parser is available, and its reviewer
-// lanes are resolved through scripts/reviewers.sh, so a config that would fail to load is never
+// lanes are resolved through scripts/run reviewers, so a config that would fail to load is never
 // left on disk as if it were fine.
 import { existsSync, mkdirSync, readFileSync, readSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -189,7 +189,7 @@ limits.coachman.tasks_max? (default)         coachman process cap override
 limits.reviewer.memory_max? (default)         reviewer memory cap override
 limits.reviewer.tasks_max? (default)          reviewer process cap override
 tracker                    github             github, plane, local or other
-confine                    off                lane confinement, on or off (see probe-confine.sh)
+confine                    off                lane confinement, on or off (see run probe-confine)
 plane.url                  https://api.plane.so   plane only
 plane.workspace                               plane only; the slug in the workspace's web URL
 plane.env_file             ~/.postmaster/plane.env   plane only; holds PLANE_API_KEY=<key>
@@ -203,9 +203,7 @@ planning.review_link?      (none)             code-server template with {path} f
 overwrite                  no                 yes replaces an existing config`);
     process.exit(0);
   } else {
-    console.error(
-      "usage: setup.sh [--answers <file>] [--dry-run] [--config <path>] | --add-clerk [options] | --keys",
-    );
+    console.error("usage: run setup [--answers <file>] [--dry-run] [--config <path>] | --add-clerk [options] | --keys");
     process.exit(1);
   }
   i++;
@@ -265,7 +263,7 @@ if (ADD_CLERK) {
 }
 
 console.log("== Installed agent CLIs ==");
-const probe = run("bash", [join(HERE, "probe-harnesses.sh")]);
+const probe = run(join(HERE, "run"), ["probe-harnesses"]);
 process.stdout.write(probe.out);
 process.stderr.write(probe.err);
 console.log("");
@@ -335,7 +333,7 @@ for (const rv of REVIEWERS.split(",")
 }
 let LENS_TABLE = "";
 let BUG_REVIEWERS = REVIEWERS;
-const lensesR = run("bash", [join(HERE, "reviewers.sh"), "lenses"]);
+const lensesR = run(join(HERE, "run"), ["reviewers", "lenses"]);
 const lenses = lensesR.out
   .trim()
   .split("\n")
@@ -372,7 +370,7 @@ for (const reviewer of BUG_REVIEWERS.split(",")
       break;
     }
   }
-  if (run("bash", [join(HERE, "review-forms.sh"), "has", harness]).code === 0) {
+  if (run(join(HERE, "run"), ["review-forms", "has", harness]).code === 0) {
     BUG_REVIEWABLE += 1;
   } else {
     console.log(`setup: bug reviewer '${reviewer}' uses ${harness}, which has no code-review form`);
@@ -520,20 +518,20 @@ if (TK === "plane") {
 
 console.log("");
 console.log("== Lane confinement: sandbox-runtime wraps each lane's harness. ==");
-const confineProbe = run("bash", [join(HERE, "probe-confine.sh")]);
+const confineProbe = run(join(HERE, "run"), ["probe-confine"]);
 if (confineProbe.code !== 0)
-  die("setup: probe-confine.sh failed; fix it before choosing confinement", 1);
+  die("setup: probe-confine failed; fix it before choosing confinement", 1);
 process.stdout.write(confineProbe.out);
 process.stderr.write(confineProbe.err);
 const CONFINE = ask("Run lanes confined (on/off)", "off", "confine", opts);
 if (CONFINE !== "on" && CONFINE !== "off") die("setup: confine must be on or off", 1);
 if (CONFINE === "on") {
-  const verdict = run("bash", [join(HERE, "probe-confine.sh"), "--verdict"]);
-  if (verdict.code !== 0) die("setup: probe-confine.sh --verdict failed", 1);
+  const verdict = run(join(HERE, "run"), ["probe-confine", "--verdict"]);
+  if (verdict.code !== 0) die("setup: probe-confine --verdict failed", 1);
   if (verdict.out.trim() === "unavailable")
-    die("setup: confine=on is unavailable here; run probe-confine.sh for the machine's result", 1);
+    die("setup: confine=on is unavailable here; run probe-confine for the machine's result", 1);
   if (verdict.out.trim() !== "ready" && verdict.out.trim() !== "partial")
-    die("setup: probe-confine.sh returned no usable verdict", 1);
+    die("setup: probe-confine returned no usable verdict", 1);
 }
 
 console.log("");
@@ -580,7 +578,7 @@ if (PWS) TRACKER_EXTRA = `url = "${PURL}"\nworkspace = "${PWS}"\nenv_file = "${P
 if (OTHER) TRACKER_EXTRA = `name = "${OTHER}"`;
 
 const dateStr = new Date().toISOString().slice(0, 10);
-const OUT = `# Written by scripts/setup.sh on ${dateStr}. Shape: config.example.toml.
+const OUT = `# Written by scripts/run setup on ${dateStr}. Shape: config.example.toml.
 projects_roots = ${tomlList(ROOTS)}
 confine = "${CONFINE}"
 ${LANE_BLOCKS}
@@ -636,7 +634,7 @@ try {
 } catch {
   die(`setup: ${CONFIG} does not parse as TOML; fix it before running anything`, 1);
 }
-const rev = run("bash", [join(HERE, "reviewers.sh"), "lines", "--config", CONFIG]);
+const rev = run(join(HERE, "run"), ["reviewers", "lines", "--config", CONFIG]);
 if (rev.code !== 0) {
   die(`setup: the reviewer lanes in ${CONFIG} do not resolve; fix them before running anything`, 1);
 }

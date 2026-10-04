@@ -1,11 +1,11 @@
 // Append one structured action to a run's audit log and to the project's ledger.
 //
-//   log-action.sh <dispatch-dir> <actor> <action> <target> [detail...]
-//   log-action.sh --project <repo> clerk note <target> [detail...]
-//   log-action.sh --project <repo> clerk ticket-edit <target> [detail...]
-//   log-action.sh --project <repo> postmaster dispatch clerk [detail...]
-//   log-action.sh --project <repo> postmaster ticket-check <target> [detail...]
-//   log-action.sh <dispatch-dir> <actor> tool-fault <postmaster-file> --ran <what ran>
+//   run log-action <dispatch-dir> <actor> <action> <target> [detail...]
+//   run log-action --project <repo> clerk note <target> [detail...]
+//   run log-action --project <repo> clerk ticket-edit <target> [detail...]
+//   run log-action --project <repo> postmaster dispatch clerk [detail...]
+//   run log-action --project <repo> postmaster ticket-check <target> [detail...]
+//   run log-action <dispatch-dir> <actor> tool-fault <postmaster-file> --ran <what ran>
 //                 --failed <what failed> --error <the error, or none> --diagnosis <why>
 //                 --fix <the fix proposed> [--workaround <what was done instead>] [--control <kind>]
 //
@@ -109,6 +109,9 @@ export function controlOf(text: string, t: string): string | undefined {
     if (c === `\`${t}\`` || c === `\`<tool>/${t}\``) {
       return (cells[2] ?? "").replace(/[ \t\n\v\f\r]/gu, "");
     }
+    const entry = /^`(?:<tool>\/)?scripts\/run ([A-Za-z0-9_-]+)(?: [^`]*)?`$/u.exec(c);
+    if (entry && (t === `scripts/${entry[1]}.ts` || t === `scripts/${entry[1]}.sh`))
+      return (cells[2] ?? "").replace(/[ \t\n\v\f\r]/gu, "");
   }
   return undefined;
 }
@@ -336,7 +339,7 @@ function logProjectEvent(
   const check = actor === "postmaster" && action === "ticket-check" && target !== "";
   if (!note && !edit && !dispatch && !check) {
     console.error(
-      "usage: log-action.sh --project <repo> clerk note <target> | clerk ticket-edit <target> [detail...] | postmaster dispatch clerk [detail...] | postmaster ticket-check <target> [detail...]",
+      "usage: run log-action --project <repo> clerk note <target> | clerk ticket-edit <target> [detail...] | postmaster dispatch clerk [detail...] | postmaster ticket-check <target> [detail...]",
     );
     return 1;
   }
@@ -370,7 +373,7 @@ if (import.meta.main) {
   if (argv[0] === "--project") {
     if (argv.length < 5) {
       console.error(
-        "usage: log-action.sh --project <repo> clerk note <target> | clerk ticket-edit <target> [detail...] | postmaster dispatch clerk [detail...] | postmaster ticket-check <target> [detail...]",
+        "usage: run log-action --project <repo> clerk note <target> | clerk ticket-edit <target> [detail...] | postmaster dispatch clerk [detail...] | postmaster ticket-check <target> [detail...]",
       );
       process.exit(1);
     }
@@ -400,12 +403,12 @@ if (import.meta.main) {
       );
     }
     console.error(
-      "usage: log-action.sh --project <repo> clerk note <target> | clerk ticket-edit <target> [detail...] | postmaster dispatch clerk [detail...] | postmaster ticket-check <target> [detail...]",
+      "usage: run log-action --project <repo> clerk note <target> | clerk ticket-edit <target> [detail...] | postmaster dispatch clerk [detail...] | postmaster ticket-check <target> [detail...]",
     );
     process.exit(1);
   }
   if (argv.length < 4 || !argv[0] || !argv[1] || !argv[2] || !argv[3]) {
-    console.error("usage: log-action.sh <dispatch-dir> <actor> <action> <target> [detail...]");
+    console.error("usage: run log-action <dispatch-dir> <actor> <action> <target> [detail...]");
     process.exit(1);
   }
   process.exit(

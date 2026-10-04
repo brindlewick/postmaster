@@ -1,9 +1,9 @@
 // Run the flow end to end against a small app whose tickets have a known outcome, and score a
 // finished run from its own records.
 //
-//   fixture.sh new <name or dest> <ticket>
-//   fixture.sh score <dispatch> <repo>
-//   fixture.sh hidden <ticket> <app-dir>
+//   run fixture new <name or dest> <ticket>
+//   run fixture score <dispatch> <repo>
+//   run fixture hidden <ticket> <app-dir>
 //
 // `new` marks its copy with `.postmaster/fixture` in the first commit and
 // `postmaster.fixture` in that repository's local git config.
@@ -83,7 +83,7 @@ const _CHECKS = [
 
 function usage(): never {
   die(
-    "usage: fixture.sh new <name or dest> <ticket> | score <dispatch> <repo> | hidden <ticket> <app-dir>",
+    "usage: run fixture new <name or dest> <ticket> | score <dispatch> <repo> | hidden <ticket> <app-dir>",
     1,
   );
 }
@@ -235,14 +235,16 @@ export function makeAndFile(dest: string, ticket: string): number {
     return 1;
   }
   // make ticket store
-  const localSh = process.env.LOCAL_SH || join(HERE, "local.sh");
-  const storeR = run("bash", [localSh, dest, "store", "init"]);
+  const localOverride = process.env.LOCAL_SH;
+  const localCommand = localOverride || join(HERE, "run");
+  const localArgs = localOverride ? [] : ["local"];
+  const storeR = run(localCommand, [...localArgs, dest, "store", "init"]);
   if (storeR.code !== 0) {
     unmake();
     console.error(`fixture: could not make the ticket store in ${dest}`);
     return 1;
   }
-  // file the ticket: local.sh create takes a body file, not the body text
+  // file the ticket: run local create takes a body file, not the body text
   const ticketBase = run("git", ["-C", dest, "rev-parse", "HEAD"]).out.trim();
   const body = ticketBody(ticket).replaceAll("FIXTURE_BASE", ticketBase);
   if (!/^[0-9a-f]{40}$/u.test(ticketBase) || body.includes("FIXTURE_BASE")) {
@@ -252,7 +254,7 @@ export function makeAndFile(dest: string, ticket: string): number {
   }
   const title = ticketTitle(ticket);
   const bodyFile = makeBodyFile(body);
-  const createR = run("bash", [localSh, dest, "create", title, bodyFile]);
+  const createR = run(localCommand, [...localArgs, dest, "create", title, bodyFile]);
   rmSync(bodyFile, { force: true });
   const number = createR.out.trim().split("\n").pop() ?? "";
   // ASCII: BASE matches ^[0-9]+$ for the filed number in bash; local create prints one line
@@ -263,7 +265,7 @@ export function makeAndFile(dest: string, ticket: string): number {
     );
     return 1;
   }
-  const labelR = run("bash", [localSh, dest, "label", number, "add", "ready"]);
+  const labelR = run(localCommand, [...localArgs, dest, "label", number, "add", "ready"]);
   if (labelR.code !== 0) {
     unmake();
     console.error(`fixture: could not mark ticket #${number} ready in ${dest}`);
@@ -282,7 +284,7 @@ export function makeAndFile(dest: string, ticket: string): number {
     `fixture: filed ticket ${ticket} in ${dest}'s own ticket store as #${number}: ${title}`,
   );
   console.log(
-    `fixture: dispatch ticket #${number} against ${dest}, then: scripts/fixture.sh score <its dispatch directory> ${dest}`,
+    `fixture: dispatch ticket #${number} against ${dest}, then: scripts/run fixture score <its dispatch directory> ${dest}`,
   );
   return 0;
 }
@@ -373,15 +375,7 @@ const LANE_LINE = /^(.*): ([0-9]+ pass, [0-9]+ fail|missing|failed to build)$/u;
 
 // Each lane's hidden status from fixture-lanes.ts; "" when there are no lanes.
 export function laneScores(dispatch: string, repo: string, ticket: string): string {
-  const r = sh([
-    "bun",
-    "--no-env-file",
-    `--config=${join(TOOL, "bunfig.toml")}`,
-    join(HERE, "fixture-lanes.ts"),
-    dispatch,
-    repo,
-    ticket,
-  ]);
+  const r = sh([join(HERE, "run"), "fixture-lanes", dispatch, repo, ticket]);
   if (r.code !== 0) return "lanes not scored";
   return r.out
     .split(/\r?\n/u)
@@ -549,25 +543,18 @@ function checkGate(
   repo: string,
   branch: string,
 ): { ok: boolean; detail: string; out: string } {
-  const r = sh(["bash", join(HERE, "discover-project.sh"), app]);
+  const r = sh([join(HERE, "run"), "discover-project", app]);
   const gate = (r.out ?? "")
     .split("\n")
     .find((l) => l.startsWith("gate="))
     ?.slice(5);
   if (!gate)
-    return { ok: false, detail: "scripts/discover-project.sh found no gate", out: r.out ?? "" };
+    return { ok: false, detail: "scripts/run discover-project found no gate", out: r.out ?? "" };
   const install = (r.out ?? "")
     .split("\n")
     .find((l) => l.startsWith("install="))
     ?.slice(8);
-  const argv = [
-    "bun",
-    "--no-env-file",
-    `--config=${join(TOOL, "bunfig.toml")}`,
-    join(HERE, "clean-checkout.ts"),
-    repo,
-    branch,
-  ];
+  const argv = [join(HERE, "run"), "clean-checkout", repo, branch];
   if (install) argv.push(install);
   argv.push(gate);
   const g = sh(argv);
@@ -579,15 +566,15 @@ function checkGate(
 }
 
 function checkStages(dispatch: string): { ok: boolean; detail: string } {
-  const r = sh(["bash", join(HERE, "stage.sh"), "--list"]);
+  const r = sh([join(HERE, "run"), "stage", "--list"]);
   const listed = pyWords(r.out ?? "");
   if (r.code !== 0 || !listed.includes("done")) {
-    return { ok: false, detail: "scripts/stage.sh --list names no done stage" };
+    return { ok: false, detail: "scripts/run stage --list names no done stage" };
   }
   let expected = listed.slice(0, listed.indexOf("done") + 1);
-  const legsR = sh(["bash", join(HERE, "turnpikes.sh"), "legs", dispatch]);
+  const legsR = sh([join(HERE, "run"), "turnpikes", "legs", dispatch]);
   if (legsR.code !== 0)
-    return { ok: false, detail: `scripts/turnpikes.sh legs: ${tail(legsR.out ?? "")}` };
+    return { ok: false, detail: `scripts/run turnpikes legs: ${tail(legsR.out ?? "")}` };
   const hasReview = pySplitLines(legsR.out ?? "").some((line) => {
     const words = pyWords(line);
     return words.length > 1 && words[1] === "review";
@@ -699,7 +686,7 @@ function checkHandoffs(dispatch: string, legs: number[]): { ok: boolean; detail:
       bad.push(`handoff-${n}.md missing`);
       continue;
     }
-    const r = sh(["bash", join(HERE, "handoff-check.sh"), f]);
+    const r = sh([join(HERE, "run"), "handoff-check", f]);
     if (r.code !== 0) {
       const said = (r.out ?? "")
         .split("\n")
@@ -710,7 +697,7 @@ function checkHandoffs(dispatch: string, legs: number[]): { ok: boolean; detail:
     }
   }
   if (bad.length > 0) return { ok: false, detail: bad.join("; ") };
-  return { ok: true, detail: `${legs.length} hand-offs pass scripts/handoff-check.sh` };
+  return { ok: true, detail: `${legs.length} hand-offs pass scripts/run handoff-check` };
 }
 
 function checkRunJson(dispatch: string): { ok: boolean; detail: string } {

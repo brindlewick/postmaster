@@ -15,7 +15,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { clerkHandle, splitCommand } from "./clerk.ts";
 
-const SELF = join(import.meta.dir, "clerk.sh");
+const SELF = join(import.meta.dir, "run");
+const LOCAL = join(import.meta.dir, "run");
 
 function sh(
   cmd: string,
@@ -68,8 +69,7 @@ function localRepo(): string {
     "-m",
     "base",
   ]);
-  const here = join(import.meta.dir, "local.sh");
-  const init = sh(here, [repo, "store", "init"]);
+  const init = sh(LOCAL, ["local", repo, "store", "init"]);
   if (init.code !== 0) throw new Error(`store init failed: ${init.err}`);
   return repo;
 }
@@ -77,7 +77,7 @@ function localRepo(): string {
 function localTicket(repo: string, title: string): string {
   const body = join(repo, "body.md");
   writeFileSync(body, "A body.\n");
-  const r = sh(join(import.meta.dir, "local.sh"), [repo, "create", title, body]);
+  const r = sh(LOCAL, ["local", repo, "create", title, body]);
   if (r.code !== 0) throw new Error(`create failed: ${r.err}`);
   return r.out.trim();
 }
@@ -139,12 +139,12 @@ describe("brief", () => {
   test("brief writes the draft and the brief, and unmarks a ready ticket", () => {
     const repo = localRepo();
     const id = localTicket(repo, "Fix the list");
-    const labels = sh(join(import.meta.dir, "local.sh"), [repo, "label", id, "add", "ready"]);
+    const labels = sh(LOCAL, ["local", repo, "label", id, "add", "ready"]);
     expect(labels.code).toBe(0);
     const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
     const cfg = stubConfig(cfgDir, `[planning]\nreview_link = "https://edit.example/{path}"`);
     writeFileSync(join(cfgDir, "preferences.md"), "Prefer short tickets.\n");
-    const r = sh(SELF, ["brief", repo, id], { POSTMASTER_CONFIG: cfg });
+    const r = sh(SELF, ["clerk", "brief", repo, id], { POSTMASTER_CONFIG: cfg });
     expect(r.code).toBe(0);
     const draft = readFileSync(join(repo, ".postmaster", "clerk", `${id}.md`), "utf8");
     expect(draft).toContain(`DRAFT: #${id} is being prepared`);
@@ -158,7 +158,7 @@ describe("brief", () => {
     expect(brief).toContain("Prefer short tickets.");
     expect(brief).toContain("Editor link: https://edit.example/");
     expect(brief).toContain("Title: Fix the list");
-    const read = sh(join(import.meta.dir, "local.sh"), [repo, "read", id]);
+    const read = sh(LOCAL, ["local", repo, "read", id]);
     const labelsLine = read.out.split("\n").find((l) => l.startsWith("labels:")) ?? "";
     expect(labelsLine).not.toContain("ready");
   });
@@ -166,7 +166,8 @@ describe("brief", () => {
   test("brief leaves one label holding a comma alone: it is not the ready mark", () => {
     const repo = localRepo();
     const id = localTicket(repo, "Fix the list");
-    const labels = sh(join(import.meta.dir, "local.sh"), [
+    const labels = sh(LOCAL, [
+      "local",
       repo,
       "label",
       id,
@@ -176,9 +177,9 @@ describe("brief", () => {
     expect(labels.code).toBe(0);
     const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
     const cfg = stubConfig(cfgDir);
-    const r = sh(SELF, ["brief", repo, id], { POSTMASTER_CONFIG: cfg });
+    const r = sh(SELF, ["clerk", "brief", repo, id], { POSTMASTER_CONFIG: cfg });
     expect(r.code).toBe(0);
-    const read = sh(join(import.meta.dir, "local.sh"), [repo, "read", id]);
+    const read = sh(LOCAL, ["local", repo, "read", id]);
     const labelsLine = read.out.split("\n").find((l) => l.startsWith("labels:")) ?? "";
     expect(labelsLine).toBe("labels: blocked, ready");
   });
@@ -187,11 +188,11 @@ describe("brief", () => {
     const repo = localRepo();
     const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
     const cfg = stubConfig(cfgDir);
-    const first = sh(SELF, ["brief", repo, "9"], { POSTMASTER_CONFIG: cfg });
+    const first = sh(SELF, ["clerk", "brief", repo, "9"], { POSTMASTER_CONFIG: cfg });
     expect(first.code).toBe(0);
     const draftPath = join(repo, ".postmaster", "clerk", "9.md");
     writeFileSync(draftPath, "The clerk's own words.\n");
-    const second = sh(SELF, ["brief", repo, "9"], { POSTMASTER_CONFIG: cfg });
+    const second = sh(SELF, ["clerk", "brief", repo, "9"], { POSTMASTER_CONFIG: cfg });
     expect(second.code).toBe(0);
     expect(readFileSync(draftPath, "utf8")).toBe("The clerk's own words.\n");
     const brief = readFileSync(join(repo, ".postmaster", "clerk", "9.brief.md"), "utf8");
@@ -218,7 +219,7 @@ describe("brief", () => {
     const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
     const cfg = join(cfgDir, "config.toml");
     writeFileSync(cfg, '[tracker]\nkind = "other"\n');
-    const r = sh(SELF, ["brief", otherRepo, "EXT-1"], { POSTMASTER_CONFIG: cfg });
+    const r = sh(SELF, ["clerk", "brief", otherRepo, "EXT-1"], { POSTMASTER_CONFIG: cfg });
     expect(r.code).toBe(0);
     expect(r.err).toContain("has no adapter script");
   });
@@ -230,10 +231,10 @@ describe("brief", () => {
     const dir = join(repo, ".postmaster", "runs", "postmaster", "ready");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "9.ready"), "9\n");
-    const r = sh(SELF, ["brief", repo, "9"], { POSTMASTER_CONFIG: cfg });
+    const r = sh(SELF, ["clerk", "brief", repo, "9"], { POSTMASTER_CONFIG: cfg });
     expect(r.code).toBe(1);
     expect(r.err).toContain("a ready marker is queued for it");
-    expect(r.err).toContain("ticket-ready.sh consume");
+    expect(r.err).toContain("run ticket-ready consume");
   });
 
   test("brief refuses a queued ticket on a tracker without an adapter", () => {
@@ -258,18 +259,18 @@ describe("brief", () => {
     const dir = join(otherRepo, ".postmaster", "runs", "postmaster", "ready");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "EXT-1.ready"), "EXT-1\n");
-    const r = sh(SELF, ["brief", otherRepo, "EXT-1"], { POSTMASTER_CONFIG: cfg });
+    const r = sh(SELF, ["clerk", "brief", otherRepo, "EXT-1"], { POSTMASTER_CONFIG: cfg });
     expect(r.code).toBe(1);
     expect(r.err).toContain("has no adapter script");
     expect(r.err).toContain("through the tracker's own tooling");
-    expect(r.err).toContain("ticket-ready.sh consume");
+    expect(r.err).toContain("run ticket-ready consume");
   });
 
   test("brief keeps a slashed id inside the clerk directory", () => {
     const repo = localRepo();
     const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
     const cfg = stubConfig(cfgDir);
-    const r = sh(SELF, ["brief", repo, "../../x"], { POSTMASTER_CONFIG: cfg });
+    const r = sh(SELF, ["clerk", "brief", repo, "../../x"], { POSTMASTER_CONFIG: cfg });
     expect(r.code).toBe(0);
     expect(existsSync(join(repo, "x.brief.md"))).toBe(false);
     expect(existsSync(join(repo, "x.md"))).toBe(false);
@@ -284,7 +285,7 @@ describe("start", () => {
     const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
     const cfg = stubConfig(cfgDir);
     const bin = stubBin();
-    const r = sh(SELF, ["start", repo, id], {
+    const r = sh(SELF, ["clerk", "start", repo, id], {
       POSTMASTER_CONFIG: cfg,
       POSTMASTER_HOST: "none",
       PATH: `${bin}:${process.env.PATH ?? ""}`,
@@ -300,10 +301,10 @@ describe("start", () => {
 
 describe("usage", () => {
   test("an unknown verb prints the two verbs and exits 1", () => {
-    const r = sh(SELF, ["reader", "m", "plain.md", "wt"]);
+    const r = sh(SELF, ["clerk", "reader", "m", "plain.md", "wt"]);
     expect(r.code).toBe(1);
-    expect(r.err).toContain("clerk.sh brief <repo> <id>");
-    expect(r.err).toContain("clerk.sh start <repo> <id>");
+    expect(r.err).toContain("run clerk brief <repo> <id>");
+    expect(r.err).toContain("run clerk start <repo> <id>");
     expect(r.err).not.toContain("reader");
   });
 });

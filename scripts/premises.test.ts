@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { run } from "./lib/proc.ts";
 import { citationsFromText, parseRange } from "./premises.ts";
 
-const SELF = join(import.meta.dir, "premises.sh");
+const SELF = join(import.meta.dir, "run");
 
 let root = "";
 let repo = "";
@@ -55,7 +55,7 @@ function ticketBody(sha: string, cites: string): string {
 }
 
 function cli(args: string[]): { code: number; out: string } {
-  const r = run("bash", [SELF, ...args]);
+  const r = run("bash", [SELF, "premises", ...args]);
   return { code: r.code, out: `${r.out ?? ""}${r.err ?? ""}` };
 }
 
@@ -255,7 +255,7 @@ describe("the verdicts", () => {
   test("prose in code spans is skipped, not failed", () => {
     const body = ticketBody(
       verified,
-      "- Set `team.clerk` beside `launch.sh form clerk` and `ready`.",
+      "- Set `team.clerk` beside `run launch form clerk` and `ready`.",
     );
     const r = cli([repo, body, verified]);
     expect(r.code).toBe(0);

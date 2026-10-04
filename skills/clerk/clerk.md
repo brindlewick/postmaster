@@ -18,7 +18,7 @@ postmaster command.
 In the target repository, run:
 
 ```sh
-<tool>/scripts/clerk.sh brief <repo> <ticket-id>
+<tool>/scripts/run clerk brief <repo> <ticket-id>
 ```
 
 This writes the shared brief and prints its path. It also removes a `ready` label when one was
@@ -39,8 +39,8 @@ number, or data shape there. Put checks, technical notes, and premises verified 
 under `## For the agents`. Follow [the template](ticket-template.md), and run:
 
 ```sh
-<tool>/scripts/ticket-check.sh --body <draft> --title "<title>" --project <repo>
-<tool>/scripts/ticket-parts.sh <draft>
+<tool>/scripts/run ticket-check --body <draft> --title "<title>" --project <repo>
+<tool>/scripts/run ticket-parts <draft>
 ```
 
 Keep the criteria and the decisions as simple as you can, one idea each. A criterion is one thing
@@ -86,14 +86,14 @@ Only when the user says it is ready, remove the first-line `DRAFT:` marker from 
 the final text there. Run both checks again:
 
 ```sh
-<tool>/scripts/ticket-check.sh --body <draft> --title "<title>" --project <repo>
-<tool>/scripts/ticket-parts.sh <draft> --final
+<tool>/scripts/run ticket-check --body <draft> --title "<title>" --project <repo>
+<tool>/scripts/run ticket-parts <draft> --final
 ```
 
 Both must exit 0. Then update the ticket and mark it ready through its adapter:
 
 ```sh
-<tool>/scripts/ticket-ready.sh mark <repo> <ticket-id> --body <draft> --title "<title>"
+<tool>/scripts/run ticket-ready mark <repo> <ticket-id> --body <draft> --title "<title>"
 ```
 
 The command checks both parts before writing, updates the body and title, adds the `ready` label,
@@ -103,7 +103,7 @@ postmaster. If it exits 2, show every reason, fix the draft, and retry. If it ex
 the ticket was updated; report the adapter error. For a tracker of kind `other`, follow its
 configured instructions in `~/.postmaster/trackers/` to apply the same final text and ready label,
 then list the ticket's labels through the tracker's tooling and run
-`<tool>/scripts/ticket-ready.sh mark --body <draft> --labels <list> --repo <repo> --id <ticket-id> --title "<title>"`,
+`<tool>/scripts/run ticket-ready mark --body <draft> --labels <list> --repo <repo> --id <ticket-id> --title "<title>"`,
 which records the sign-off and queues the ticket the same way. Pass `--labels` once per
 label, each flag one whole name; a lone flag with a comma is refused as ambiguous.
 

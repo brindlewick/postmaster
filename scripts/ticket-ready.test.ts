@@ -10,8 +10,8 @@ import { run } from "./lib/proc.ts";
 import { mdToHtml } from "./plane.ts";
 import { storedMatches } from "./ticket-ready.ts";
 
-const self = join(scriptsDir(import.meta), "ticket-ready.sh");
-const localSh = join(scriptsDir(import.meta), "local.sh");
+const self = join(scriptsDir(import.meta), "run");
+const localSh = join(scriptsDir(import.meta), "run");
 
 const TWO_PART = [
   "## Problem / feature",
@@ -82,13 +82,13 @@ let tmp = "";
 let repo = "";
 
 function ready(args: string[], env?: Record<string, string | undefined>) {
-  const r = run(self, args, env ? { env } : {});
+  const r = run(self, ["ticket-ready", ...args], env ? { env } : {});
   return { code: r.code, out: `${r.out ?? ""}${r.err ?? ""}` };
 }
 
 function local(args: string[]) {
-  const r = run(localSh, [repo, ...args]);
-  if (r.code !== 0) throw new Error(`local.sh ${args.join(" ")} failed: ${r.out}${r.err}`);
+  const r = run(localSh, ["local", repo, ...args]);
+  if (r.code !== 0) throw new Error(`run local ${args.join(" ")} failed: ${r.out}${r.err}`);
   return (r.out ?? "").trim();
 }
 
@@ -97,7 +97,7 @@ beforeAll(() => {
   repo = join(tmp, "repo");
   mkdirSync(repo, { recursive: true });
   if (run("git", ["init", "-q", repo]).code !== 0) throw new Error("git init failed");
-  if (run(localSh, [repo, "store", "init"]).code !== 0) throw new Error("store init failed");
+  if (run(localSh, ["local", repo, "store", "init"]).code !== 0) throw new Error("store init failed");
   const a = join(tmp, "a.md");
   const c = join(tmp, "c.md");
   const d = join(tmp, "d.md");
@@ -175,10 +175,10 @@ describe("the readiness matrix on a local store", () => {
 
 describe("the marking and queue verbs", () => {
   test("marking a failing ticket exits 2 and adds no label", () => {
-    const before = run(localSh, [repo, "read", "3"]);
+    const before = run(localSh, ["local", repo, "read", "3"]);
     const r = ready(["mark", repo, "3"]);
     expect(r.code).toBe(2);
-    const after = run(localSh, [repo, "read", "3"]);
+    const after = run(localSh, ["local", repo, "read", "3"]);
     expect(after.out).toContain("labels: ready");
     expect(before.out.split("\n").find((l) => l.startsWith("labels:"))).toBe(
       after.out.split("\n").find((l) => l.startsWith("labels:")),
@@ -189,7 +189,7 @@ describe("the marking and queue verbs", () => {
     const r = ready(["mark", repo, "2"]);
     expect(r.code).toBe(0);
     expect(r.out).toContain("marked ready and queued");
-    expect(run(localSh, [repo, "read", "2"]).out).toContain("labels: ready");
+    expect(run(localSh, ["local", repo, "read", "2"]).out).toContain("labels: ready");
     const ledger = readFileSync(join(repo, ".postmaster", "runs", "ledger.jsonl"), "utf8");
     expect(ledger).toContain('"action":"note"');
     expect(ledger).toContain("turnpikes: style, bug, security");
@@ -205,7 +205,7 @@ describe("the marking and queue verbs", () => {
     writeFileSync(f, TWO_PART);
     const r = ready(["mark", repo, n, "--body", f, "--title", "New title"]);
     expect(r.code).toBe(0);
-    const read = run(localSh, [repo, "read", n]).out;
+    const read = run(localSh, ["local", repo, "read", n]).out;
     expect(read).toContain("title: New title");
     expect(read).toContain("labels: ready");
     expect(read).toContain("## For the agents");
@@ -217,12 +217,12 @@ describe("the marking and queue verbs", () => {
 
   test("marking a commented ticket writes the draft against the stored body", () => {
     const n = local(["create", "Old title", join(tmp, "c.md")]);
-    expect(run(localSh, [repo, "comment", n, "coachman", "prior discussion"]).code).toBe(0);
+    expect(run(localSh, ["local", repo, "comment", n, "coachman", "prior discussion"]).code).toBe(0);
     const f = join(tmp, "final-commented.md");
     writeFileSync(f, TWO_PART);
     const r = ready(["mark", repo, n, "--body", f, "--title", "New title"]);
     expect(r.code).toBe(0);
-    const read = run(localSh, [repo, "read", n]).out;
+    const read = run(localSh, ["local", repo, "read", n]).out;
     expect(read).toContain("title: New title");
     expect(read).toContain("labels: ready");
     expect(read).toContain("## For the agents");
@@ -235,12 +235,12 @@ describe("the marking and queue verbs", () => {
     const n = local(["create", "Tailed text", f]);
     expect(ready(["mark", repo, n]).code).toBe(0);
     expect(ready([repo, n]).code).toBe(0);
-    const live = run(localSh, [repo, "read", n, "--body"]);
+    const live = run(localSh, ["local", repo, "read", n, "--body"]);
     const baseFile = join(tmp, "tail-base.md");
     const newFile = join(tmp, "tail-new.md");
     writeFileSync(baseFile, live.out ?? "");
     writeFileSync(newFile, (live.out ?? "").replace("- signed note", "- swapped note"));
-    expect(run(localSh, [repo, "edit", n, newFile, baseFile]).code).toBe(0);
+    expect(run(localSh, ["local", repo, "edit", n, newFile, baseFile]).code).toBe(0);
     const changed = ready([repo, n]);
     expect(changed.code).toBe(2);
     expect(changed.out).toContain("changed since it was signed off");
@@ -259,7 +259,7 @@ describe("the marking and queue verbs", () => {
     expect(marker[0]).toBe(n);
     expect(/^[0-9a-f]{64}$/u.test(marker[1] ?? "")).toBe(true);
     // The attack: drop the review leg after sign-off.
-    const live = run(localSh, [repo, "read", n, "--body"]);
+    const live = run(localSh, ["local", repo, "read", n, "--body"]);
     const baseFile = join(tmp, "bind-base.md");
     const newFile = join(tmp, "bind-new.md");
     writeFileSync(baseFile, live.out ?? "");
@@ -267,7 +267,7 @@ describe("the marking and queue verbs", () => {
       newFile,
       (live.out ?? "").replace("## Turnpikes\n\ndefault", "## Turnpikes\n\nnone"),
     );
-    expect(run(localSh, [repo, "edit", n, newFile, baseFile]).code).toBe(0);
+    expect(run(localSh, ["local", repo, "edit", n, newFile, baseFile]).code).toBe(0);
     const changed = ready([repo, n]);
     expect(changed.code).toBe(2);
     expect(changed.out).toContain("changed since it was signed off");
@@ -305,13 +305,13 @@ describe("the marking and queue verbs", () => {
   test("a comment after sign-off stays ready, and an edit under it still refuses", () => {
     const n = local(["create", "Commented text", join(tmp, "a.md")]);
     expect(ready(["mark", repo, n]).code).toBe(0);
-    expect(run(localSh, [repo, "comment", n, "coachman", "noting progress"]).code).toBe(0);
+    expect(run(localSh, ["local", repo, "comment", n, "coachman", "noting progress"]).code).toBe(0);
     expect(ready([repo, n]).code).toBe(0);
     expect(ready(["queue", repo, n]).code).toBe(0);
     // Queue binds the stored bytes it checked, not the display body: the
     // ticket stays ready with the comment present.
     expect(ready([repo, n]).code).toBe(0);
-    const live = run(localSh, [repo, "read", n, "--body"]);
+    const live = run(localSh, ["local", repo, "read", n, "--body"]);
     const baseFile = join(tmp, "comment-base.md");
     const newFile = join(tmp, "comment-new.md");
     writeFileSync(baseFile, live.out ?? "");
@@ -319,7 +319,7 @@ describe("the marking and queue verbs", () => {
       newFile,
       (live.out ?? "").replace("## Turnpikes\n\ndefault", "## Turnpikes\n\nnone"),
     );
-    expect(run(localSh, [repo, "edit", n, newFile, baseFile]).code).toBe(0);
+    expect(run(localSh, ["local", repo, "edit", n, newFile, baseFile]).code).toBe(0);
     const changed = ready([repo, n]);
     expect(changed.code).toBe(2);
     expect(changed.out).toContain("changed since it was signed off");
@@ -327,13 +327,13 @@ describe("the marking and queue verbs", () => {
 
   test("storedMatches compares with the adapter's own base check", () => {
     const n = local(["create", "Match probe", join(tmp, "a.md")]);
-    const first = run(localSh, [repo, "read", n, "--body"]).out ?? "";
+    const first = run(localSh, ["local", repo, "read", n, "--body"]).out ?? "";
     expect(storedMatches(repo, n, "local", first)).toBeNull();
     const baseFile = join(tmp, "match-base.md");
     const newFile = join(tmp, "match-new.md");
     writeFileSync(baseFile, first);
     writeFileSync(newFile, first.replace("## Turnpikes\n\ndefault", "## Turnpikes\n\nnone"));
-    expect(run(localSh, [repo, "edit", n, newFile, baseFile]).code).toBe(0);
+    expect(run(localSh, ["local", repo, "edit", n, newFile, baseFile]).code).toBe(0);
     const reason = storedMatches(repo, n, "local", first);
     expect(reason).toContain("changed since");
     // The mark-time rollback on a mismatch needs a concurrent edit mid-mark
@@ -343,7 +343,7 @@ describe("the marking and queue verbs", () => {
   test("a post-sign-off title edit refuses as well", () => {
     const n = local(["create", "Bound title", join(tmp, "a.md")]);
     expect(ready(["mark", repo, n]).code).toBe(0);
-    expect(run(localSh, [repo, "title", n, "Bound title, revised"]).code).toBe(0);
+    expect(run(localSh, ["local", repo, "title", n, "Bound title, revised"]).code).toBe(0);
     const changed = ready([repo, n]);
     expect(changed.code).toBe(2);
     expect(changed.out).toContain("changed since it was signed off");
@@ -352,14 +352,14 @@ describe("the marking and queue verbs", () => {
   test("unmark drops the label and the marker, consume drops only the marker", () => {
     const r = ready(["unmark", repo, "2"]);
     expect(r.code).toBe(0);
-    expect(run(localSh, [repo, "read", "2"]).out).toContain("labels: \n");
+    expect(run(localSh, ["local", repo, "read", "2"]).out).toContain("labels: \n");
     const ledger = readFileSync(join(repo, ".postmaster", "runs", "ledger.jsonl"), "utf8");
     expect(ledger).toContain("label remove ready");
     expect(ready(["pending", repo]).out.split("\n").includes("2")).toBe(false);
     expect(ready([repo, "2"]).code).toBe(2);
     expect(ready(["mark", repo, "2"]).code).toBe(0);
     expect(ready(["consume", repo, "2"]).code).toBe(0);
-    expect(run(localSh, [repo, "read", "2"]).out).toContain("labels: ready");
+    expect(run(localSh, ["local", repo, "read", "2"]).out).toContain("labels: ready");
     expect(ready(["pending", repo]).out.split("\n").includes("2")).toBe(false);
   }, 30000);
 
@@ -530,11 +530,11 @@ describe("a tracker of kind other", () => {
       expect(r.code).toBe(1);
       expect(r.out).toContain("has no adapter script");
     }
-    expect(ready([otherRepo, "EXT-1"], env).out).toContain("ticket-ready.sh --body <file>");
+    expect(ready([otherRepo, "EXT-1"], env).out).toContain("run ticket-ready --body <file>");
     expect(ready(["mark", otherRepo, "EXT-1"], env).out).toContain(
-      "ticket-ready.sh mark --body <file>",
+      "run ticket-ready mark --body <file>",
     );
-    expect(ready(["unmark", otherRepo, "EXT-1"], env).out).toContain("ticket-ready.sh consume ");
+    expect(ready(["unmark", otherRepo, "EXT-1"], env).out).toContain("run ticket-ready consume ");
   }, 60000);
 });
 
@@ -782,7 +782,7 @@ describe("the matrix through the plane double", () => {
 
 async function readyAsync(args: string[], env?: Record<string, string | undefined>) {
   // Async spawn: the in-process stub API can only answer while this loop runs.
-  const p = Bun.spawn([self, ...args], {
+  const p = Bun.spawn([self, "ticket-ready", ...args], {
     env: env as Record<string, string>,
     stdout: "pipe",
     stderr: "pipe",

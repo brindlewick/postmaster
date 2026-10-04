@@ -17,7 +17,7 @@ your harness loaded this file from, or `skills/clerk` when `AGENTS.md` sent a se
 the repo here.
 
 ```sh
-t=$(CDPATH= cd -P -- "<skill>/../.." 2>/dev/null && pwd) && test -f "$t/scripts/link-skills.sh" && echo "$t" || { echo "clerk: <skill> is not a link into a postmaster checkout" >&2; false; }
+t=$(CDPATH= cd -P -- "<skill>/../.." 2>/dev/null && pwd) && test -x "$t/scripts/run" && echo "$t" || { echo "clerk: <skill> is not a link into a postmaster checkout" >&2; false; }
 ```
 
 It prints `<tool>`. Write that absolute path wherever these runbooks say `<tool>`, and give it to

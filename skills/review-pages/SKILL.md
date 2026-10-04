@@ -14,9 +14,9 @@ repository the change belongs to.
 ## A review page for a change
 
 1. Build its data into a folder of your scratchpad:
-   - a pull request: `bun <tool>/scripts/review-page.ts change <dir> --pr <number>`. The title,
+   - a pull request: `<tool>/scripts/run review-page change <dir> --pr <number>`. The title,
      its text as the summary, and the ticket it names (`#<n>, <title>`) come from GitHub.
-   - a run's branch before its pull request: `bun <tool>/scripts/review-page.ts change <dir>
+   - a run's branch before its pull request: `<tool>/scripts/run review-page change <dir>
      --base <base> --head <branch> --ticket <n> --summary <file>`, the summary
      being what the card says the change does.
    It prints one line with the files, lines and chunks, and how many email addresses it removed.
@@ -43,7 +43,7 @@ repository the change belongs to.
    with `url`, `asset: true`), create a blob from it in the document, and fill a new tab from
    the blob; the Docs connector's `topic.uploads` and `topic.tabs` say how. Link each tab from
    the ticket with a tab chip.
-2. Code files go in one viewer: `bun <tool>/scripts/review-page.ts files <dir> <ref> <path>...`
+2. Code files go in one viewer: `<tool>/scripts/run review-page files <dir> <ref> <path>...`
    writes `index.html`, `files.json` and `files/<k>.txt`. Read them as step 2 above says, then
    publish `index.html` with `capabilities: {"comments": {}}` and `files` mapping `files.json`
    and each `files/<k>.txt`, and stop the watch at once.
