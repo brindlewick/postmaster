@@ -39,7 +39,7 @@ read the code to judge the ticket is reviewing your work twice.
    put what it showed after **At the base**. Tag each technical note with the criteria and decisions
    it follows from, such as (C2, D1). When a premise is wrong, or a check cannot tell the fix from a
    workaround, change the ticket and tell the user what changed and why. Then run
-   `<tool>/scripts/ticket-parts.sh <file>` and fix every finding. It fails on a file name, command,
+   `<tool>/scripts/run ticket-parts <file>` and fix every finding. It fails on a file name, command,
    flag or code in the plain part, and on a check, note or decision that does not line up with the
    rest. Its notes about a long criterion or decision are advice: split an item that holds two ideas.
    Do this before you show the draft.
@@ -55,9 +55,9 @@ read the code to judge the ticket is reviewing your work twice.
    ticket that is long is a ticket that is not reviewed.
 5. **Ready.** When the user says it is ready: remove the `DRAFT` line from the document and the
    file, save the final text as the ticket file the brief names, run
-   `<tool>/scripts/ticket-check.sh --body <file>` and `<tool>/scripts/ticket-parts.sh --final <file>`
+   `<tool>/scripts/run ticket-check --body <file>` and `<tool>/scripts/run ticket-parts --final <file>`
    until both exit 0, and update the GitHub ticket (body and title) through
-   `<tool>/scripts/github.sh <repo> edit <n> <new body> <the body you read first>`. Then tell the user
+   `<tool>/scripts/run github <repo> edit <n> <new body> <the body you read first>`. Then tell the user
    to tell the postmaster. The postmaster dispatches the run. The coachman commits the ticket as the
    run's spec without a second review.
 

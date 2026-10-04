@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { argvHasUndecodableBytes, run } from "./lib/proc.ts";
+import { processState } from "./lib/processes.ts";
 import { digitValue, pyWords } from "./lib/text.ts";
 
 const states = ["todo", "in-progress", "blocked", "done", "cancelled"];
@@ -40,7 +41,7 @@ function die(message: string, code = 1): never {
   throw new LocalFailure(message, code);
 }
 function usage(text: string): never {
-  return die(`usage: local.sh <repo> ${text}`);
+  return die(`usage: run local <repo> ${text}`);
 }
 function utf8(value: string, what: string): string {
   // A U+FFFD in a decoded argument is undecodable input only when the raw
@@ -114,7 +115,7 @@ type Meta = {
 };
 function needStore(store: string): void {
   if (!existsSync(store) || !statSync(store).isDirectory())
-    die(`no ticket store at ${store}; with the user's word, run: local.sh <repo> store init`, 3);
+    die(`no ticket store at ${store}; with the user's word, run: run local <repo> store init`, 3);
 }
 export function ticketPath(store: string, number: bigint, ext: string): string {
   return join(store, `${number}.${ext}`);
@@ -244,12 +245,7 @@ function writeMeta(store: string, number: bigint, meta: Meta): void {
   );
 }
 function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as any)?.code === "EPERM";
-  }
+  return processState(pid) === "live";
 }
 function locked<T>(store: string, action: () => T): T {
   needStore(store);

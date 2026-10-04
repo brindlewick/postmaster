@@ -19,10 +19,11 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
+import { processCommandLine, processInfo, processStart, processState } from "./lib/processes.ts";
 import { pyWords } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
-const SELF = join(HERE, "host.sh");
+const SELF = join(HERE, "run");
 const SCRIPT = join(HERE, "host-self-test.ts");
 type Result = { code: number; out: string; err: string };
 const sleep = (ms: number) => Bun.sleep(ms);
@@ -334,7 +335,7 @@ function herdrStubInner(args: string[], stateDir: string): void {
     if (flag(join(stateDir, "pane.dead"))) return;
     const prefix = flag(join(stateDir, "pane.late")) ? "sleep 5; " : "";
     const env = {
-      PATH: process.env.PATH,
+      PATH: process.env.POSTMASTER_STUB_PANE_PATH ?? process.env.PATH,
       HOME: process.env.HOME,
       STUB: stateDir,
       HERDR_ENV: "pane-env",
@@ -570,6 +571,7 @@ function host(
   cwd = `${root}/caller`,
   env: Record<string, string> = {},
 ): Result {
+  const procRoot = process.env.POSTMASTER_PROC_ROOT;
   const environment: Record<string, string> = {
     HOME: process.env.HOME ?? "/",
     PATH: path,
@@ -580,9 +582,10 @@ function host(
     POSTMASTER_HOST_CLAIM_WAIT: "3",
     POSTMASTER_HOST_CLOSE_WAIT: "3",
     POSTMASTER_HOST_FINISH_DELAY: finishDelay,
+    ...(procRoot === undefined ? {} : { POSTMASTER_PROC_ROOT: procRoot }),
     ...env,
   };
-  return exec(SELF, [...args], { cwd, env: environment });
+  return exec(SELF, ["host", ...args], { cwd, env: environment });
 }
 function testStopFinishers(root: string): void {
   const path = join(root, "finishers");
@@ -592,12 +595,7 @@ function testStopFinishers(root: string): void {
     const pidText = tab < 0 ? line : line.slice(0, tab);
     const marker = tab < 0 ? "" : line.slice(tab + 1);
     if (!/^[0-9]+$/u.test(pidText) || !marker) continue;
-    let command = "";
-    try {
-      command = readFileSync(`/proc/${pidText}/cmdline`, "utf8").replace(/\0/gu, " ");
-    } catch {
-      continue;
-    }
+    const command = processCommandLine(Number(pidText));
     if (command.includes(marker)) {
       try {
         process.kill(Number(pidText));
@@ -694,7 +692,8 @@ async function setup(
   ]);
   if (result.code) throw new Error(result.err);
   const clone = join(repo, ".worktrees", "T-1-rev-security-opus");
-  result = exec(join(HERE, "cut-scratch.sh"), [
+  result = exec(join(HERE, "run"), [
+    "cut-scratch",
     repo,
     repo,
     clone,
@@ -726,7 +725,7 @@ async function setup(
       "#!/usr/bin/env bash",
       'printf \'{"type":"system","subtype":"init","session_id":"probe-1","model":"m"}\\n\'',
       "if (: < /dev/tty) 2>/dev/null; then tty=yes; else tty=no; fi",
-      'printf \'from=%s|name=%s|pane=%s|tmuxpane=%s|var=%s|sid=%s|pid=%s|pgid=%s|tty=%s\\n\' "$PWD" "$POSTMASTER_LAUNCH_NAME" "$HERDR_PANE_ID" "$TMUX_PANE" "$CALLER_VAR" "$(ps -o sid= -p $$ | tr -d \' \')" "$$" "$(ps -o pgid= -p $$ | tr -d \' \')" "$tty"',
+      'printf \'from=%s|name=%s|pane=%s|tmuxpane=%s|var=%s|sid=|pid=%s|pgid=|tty=%s\\n\' "$PWD" "$POSTMASTER_LAUNCH_NAME" "$HERDR_PANE_ID" "$TMUX_PANE" "$CALLER_VAR" "$$" "$tty"',
       'count_path=$(printenv COUNT); if [ -n "$count_path" ]; then echo x >> "$count_path"; fi',
       'sleep "$(printenv EMIT_SLEEP || printf 0)"',
       "",
@@ -788,11 +787,15 @@ async function setup(
 function shellQuote(value: string): string {
   return `'${value.replace(/'/gu, "'\\''")}'`;
 }
-async function makeHarness(root: string): Promise<{ sys: string; stubs: string }> {
+async function makeHarness(
+  root: string,
+): Promise<{ sys: string; stubs: string; paneNoBun: string }> {
   const bin = join(root, "bin"),
-    sys = join(root, "sys");
+    sys = join(root, "sys"),
+    paneNoBun = join(root, "pane-no-bun");
   mkdirSync(bin);
   mkdirSync(sys);
+  mkdirSync(paneNoBun);
   mkdirSync(join(root, "stub"));
   const tools = [
     "bun",
@@ -836,13 +839,17 @@ async function makeHarness(root: string): Promise<{ sys: string; stubs: string }
     "mv",
     "tee",
   ];
-  for (const tool of tools) symlinkCommand(tool, sys);
+  for (const tool of tools) {
+    symlinkCommand(tool, sys);
+    if (tool !== "bun") symlinkCommand(tool, paneNoBun);
+  }
   for (const tool of ["herdr", "tmux"]) {
-    const script = `#!/bin/sh\nexec bun ${shellQuote(SCRIPT)} --stub ${tool} "$@"\n`;
+    const script = `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(SCRIPT)} --stub ${tool} "$@"\n`;
     const path = join(bin, tool);
     writeFileSync(path, script, { mode: 0o755 });
+    symlinkSync(path, join(paneNoBun, tool));
   }
-  return { sys, stubs: `${bin}:${sys}` };
+  return { sys, stubs: `${bin}:${sys}`, paneNoBun };
 }
 function resetHarness(root: string): void {
   testStopFinishers(root);
@@ -1283,10 +1290,16 @@ export async function runControls(): Promise<number> {
       ],
       noHost,
       f.caller,
-      { CALLER_VAR: "v", HERDR_PANE_ID: "caller-pane", TMUX_PANE: "%9" },
+      { CALLER_VAR: "v", HERDR_PANE_ID: "caller-pane", TMUX_PANE: "%9", EMIT_SLEEP: "2" },
     );
-    await marker(markerPath("n3"));
-    const probeText = readFileSync(join(logs, "n3.out"), "utf8");
+    const probePath = join(logs, "n3.out");
+    for (
+      let i = 0;
+      i < 40 && (!existsSync(probePath) || !readFileSync(probePath, "utf8").includes("from="));
+      i++
+    )
+      await sleep(50);
+    const probeText = readFileSync(probePath, "utf8");
     await pass(
       "it runs from the caller's directory, with the caller's environment and its name",
       () =>
@@ -1308,15 +1321,18 @@ export async function runControls(): Promise<number> {
     );
     await pass(
       "it is a session of its own: its group is its pid, not the caller's session",
-      () =>
-        field(probeText, "pgid") === field(probeText, "pid") &&
-        field(probeText, "sid") === field(probeText, "pid"),
-      probeText,
+      () => {
+        const pid = Number(field(probeText, "pid"));
+        const info = processInfo(pid);
+        return info?.group === pid && info.session === pid;
+      },
+      `${probeText}\n${JSON.stringify(processInfo(Number(field(probeText, "pid"))))}`,
     );
     await pass(
       "--pidfile holds the launch's pid",
       () => readFileSync(join(logs, "n3.pid"), "utf8").trim() === field(probeText, "pid"),
     );
+    await marker(markerPath("n3"));
     writeFileSync(
       join(f.caller, "argv.sh"),
       ["#!/usr/bin/env bash", 'printf "<%s>\\n" "$@"', ""].join("\n"),
@@ -1540,16 +1556,7 @@ export async function runControls(): Promise<number> {
     const termStop = execHost(["stop", join(f.repo, ".worktrees/T-1-luna")], noHost, root, {
       POSTMASTER_HOST_STOP_WAIT: "2",
     });
-    const alive = (pid: string) => {
-      try {
-        return !readFileSync(`/proc/${pid}/stat`, "utf8")
-          .slice(readFileSync(`/proc/${pid}/stat`, "utf8").lastIndexOf(")") + 1)
-          .trim()
-          .startsWith("Z");
-      } catch {
-        return false;
-      }
-    };
+    const alive = (pid: string) => processState(Number(pid)) === "live";
     const escapee = readFileSync(join(root, "tree/escapee.pid"), "utf8").trim();
     const deaf = readFileSync(join(root, "tree/deaf.pid"), "utf8").trim();
     await pass(
@@ -1580,17 +1587,13 @@ export async function runControls(): Promise<number> {
     // ASCII: /proc/stat is kernel-emitted ASCII; btime's fields split on spaces.
     const bootSeconds = Number(bootLine.split(/\s+/u)[1]);
     const ticks = Number(exec("getconf", ["CLK_TCK"]).out.trim()) || 100;
-    const procStart = (pid: string): string => {
-      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-      return (
-        stat
-          .slice(stat.lastIndexOf(")") + 1)
-          .trim()
-          // ASCII: /proc/<pid>/stat past the name is kernel-emitted ASCII numerics.
-          .split(/\s+/u)[19] ?? ""
-      );
+    const procStart = (pid: string): string => processStart(Number(pid)) ?? "";
+    const startedSeconds = (pid: string) => {
+      const start = procStart(pid);
+      return /^[0-9]+$/u.test(start)
+        ? bootSeconds + Number(start) / ticks
+        : Date.parse(start) / 1000;
     };
-    const startedSeconds = (pid: string) => bootSeconds + Number(procStart(pid)) / ticks;
     const record = (pid: string) => join(launchDir, pid);
     const stale = spawn("sleep", ["60"], { detached: true, stdio: "ignore" });
     stale.unref();
@@ -1792,15 +1795,11 @@ export async function runControls(): Promise<number> {
     const unrelatedStop = execHost(["stop", sol], noHost, root, { POSTMASTER_HOST_STOP_WAIT: "0" });
     await pass(
       "a process that works in the worktree but that no launch started is left alone",
-      () => {
-        if (unrelatedRun.code !== 0 || unrelatedStop.code !== 0 || !unrelated.pid) return false;
-        try {
-          process.kill(unrelated.pid, 0);
-          return true;
-        } catch {
-          return false;
-        }
-      },
+      () =>
+        unrelatedRun.code === 0 &&
+        unrelatedStop.code === 0 &&
+        !!unrelated.pid &&
+        processState(unrelated.pid) === "live",
     );
     try {
       if (unrelated.pid) process.kill(unrelated.pid, "SIGKILL");
@@ -1903,7 +1902,7 @@ export async function runControls(): Promise<number> {
       listedCalls,
     );
     await pass(
-      "host.sh marks the space it opened as its own",
+      "run host marks the space it opened as its own",
       () => state.spaces[spaceId]?.tokens?.postmaster === "opened",
     );
     await marker(markerPath("h1"));
@@ -1915,7 +1914,7 @@ export async function runControls(): Promise<number> {
       herdrOut,
     );
     await pass(
-      "and with its caller's environment, handed over by host.sh",
+      "and with its caller's environment, handed over by run host",
       () => field(herdrOut, "var") === "v" && field(herdrOut, "from") === f.caller,
       JSON.stringify({
         from: field(herdrOut, "from"),
@@ -1936,6 +1935,64 @@ export async function runControls(): Promise<number> {
         reportCalls.includes(`pane\treport-agent\t${pane}`) &&
         reportCalls.includes(`pane\trelease-agent\t${pane}`),
       reportCalls,
+    );
+    const noBunHerdr = execHost(
+      [
+        "run",
+        f.name,
+        worktree,
+        "--out",
+        "../logs/h-bunless.out",
+        "--marker",
+        "../logs/h-bunless.done",
+        "--",
+        "./fixed.sh",
+      ],
+      stubs,
+      f.caller,
+      {
+        EMIT_SLEEP: "5",
+        POSTMASTER_STUB_PANE_PATH: paths.paneNoBun,
+        POSTMASTER_HOST_FINISH_DELAY: "0.2",
+      },
+    );
+    const noBunPane = TRIPLE_RE.exec(noBunHerdr.out)?.[3] ?? "";
+    const noBunPaneOut = join(stub, `pane-${noBunPane}.out`);
+    for (
+      let i = 0;
+      i < 40 &&
+      (!existsSync(noBunPaneOut) || !readFileSync(noBunPaneOut, "utf8").includes("says: step one"));
+      i++
+    )
+      await sleep(50);
+    const paneHasNoBun =
+      exec("bash", ["-c", "command -v bun"], { env: { PATH: paths.paneNoBun } }).code !== 0;
+    const paneText = existsSync(noBunPaneOut) ? readFileSync(noBunPaneOut, "utf8") : "";
+    const runningHerdr = json(join(stub, "herdr.json"), { panes: {} });
+    const liveHerdrCalls = readCalls("herdr");
+    await pass(
+      "with no Bun in its PATH, the Herdr pane runs the launch, shows output, and stays open",
+      () =>
+        noBunHerdr.code === 0 &&
+        noBunHerdr.out.startsWith("host=herdr ") &&
+        paneHasNoBun &&
+        !existsSync(markerPath("h-bunless")) &&
+        noBunPane in (runningHerdr.panes ?? {}) &&
+        liveHerdrCalls.includes(`pane\treport-agent\t${noBunPane}`) &&
+        !liveHerdrCalls.includes(`pane\trelease-agent\t${noBunPane}`) &&
+        paneText.includes("says: step one"),
+      `${noBunHerdr.out}\n${paneText}`,
+    );
+    await marker(markerPath("h-bunless"), 15);
+    for (let i = 0; i < 40 && noBunPane in json(join(stub, "herdr.json"), { panes: {} }).panes; i++)
+      await sleep(50);
+    const doneHerdrCalls = readCalls("herdr");
+    await pass(
+      "the Herdr pane closes after the launch marker lands",
+      () =>
+        existsSync(markerPath("h-bunless")) &&
+        !(noBunPane in json(join(stub, "herdr.json"), { panes: {} }).panes) &&
+        doneHerdrCalls.includes(`pane\trelease-agent\t${noBunPane}`),
     );
     const secondHerdr = execHost(
       ["run", f.name, worktree, "--marker", "../logs/h2.done", "--", "./fixed.sh"],
@@ -2040,7 +2097,7 @@ export async function runControls(): Promise<number> {
     console.log("stop and close, Herdr (stub)");
     const closedHerdr = execHost(["close", worktree], stubs, root);
     await pass(
-      "a space host.sh opened, its launches done, is closed",
+      "a space run host opened, its launches done, is closed",
       () =>
         closedHerdr.code === 0 &&
         (json(join(stub, "herdr.json"), { open: {} }).open[worktree] ?? "") === "",
@@ -2082,7 +2139,7 @@ export async function runControls(): Promise<number> {
     save(herdrStatePath, currentState);
     const userSpaceClose = execHost(["close", revLuna], stubs, root);
     await pass(
-      "a space host.sh did not open is refused, and left open",
+      "a space run host did not open is refused, and left open",
       () =>
         userSpaceClose.code === 2 &&
         !calls(root, "herdr").includes(`workspace\tclose\t${userSpace}`),
@@ -2135,7 +2192,7 @@ export async function runControls(): Promise<number> {
         cloneCalls.some((line) => line.includes(`--cwd\t${f.clone}\t--label\t${f.name}`)),
     );
     await pass(
-      "host.sh marks that space as its own",
+      "run host marks that space as its own",
       () =>
         json(join(stub, "herdr.json"), { spaces: {} }).spaces[cloneSpace]?.tokens?.postmaster ===
         "opened",
@@ -2202,6 +2259,60 @@ export async function runControls(): Promise<number> {
     );
 
     console.log("run, stop and close, tmux (stub)");
+    resetHarness(root);
+    const tmuxLive = execHost(
+      [
+        "run",
+        f.name,
+        worktree,
+        "--out",
+        "../logs/t-live.out",
+        "--marker",
+        "../logs/t-live.done",
+        "--",
+        "./fixed.sh",
+      ],
+      stubs,
+      f.caller,
+      {
+        POSTMASTER_HOST: "tmux",
+        EMIT_SLEEP: "5",
+        POSTMASTER_HOST_FINISH_DELAY: "0.2",
+      },
+    );
+    const livePaneOut = join(stub, "win-1.out");
+    for (
+      let i = 0;
+      i < 40 &&
+      (!existsSync(livePaneOut) || !readFileSync(livePaneOut, "utf8").includes("step one"));
+      i++
+    )
+      await sleep(50);
+    const liveTmuxState = json(join(stub, "tmux.json"), { windows: {} });
+    const liveTmuxPane = readFileSync(livePaneOut, "utf8");
+    await pass(
+      "a live launch keeps its tmux window open and marked running while its output is shown",
+      () =>
+        tmuxLive.code === 0 &&
+        tmuxLive.out.includes("host=tmux") &&
+        !existsSync(markerPath("t-live")) &&
+        liveTmuxState.windows["@1"]?.opts?.["@postmaster_state"] === "running" &&
+        liveTmuxPane.includes("step one"),
+      `${tmuxLive.out}\n${JSON.stringify(liveTmuxState)}\n${liveTmuxPane}`,
+    );
+    await marker(markerPath("t-live"), 15);
+    for (let i = 0; i < 40 && "@1" in json(join(stub, "tmux.json"), { windows: {} }).windows; i++)
+      await sleep(50);
+    const doneTmuxState = json(join(stub, "tmux.json"), { windows: {} });
+    await pass(
+      "the tmux window is marked done and closes after the launch ends",
+      () =>
+        existsSync(markerPath("t-live")) &&
+        calls(root, "tmux").includes("set-option\t-w\t-t\t%1\t@postmaster_state\tdone") &&
+        !("@1" in doneTmuxState.windows),
+      JSON.stringify(doneTmuxState),
+    );
+
     resetHarness(root);
     const tmuxEnvRun = execHost(
       [
@@ -3013,10 +3124,10 @@ export async function runControls(): Promise<number> {
       }
       const unopenedClose = execHost(["close", sol], stubs, root);
       await pass(
-        "close names a space host.sh did not open instead of failing to read it",
+        "close names a space run host did not open instead of failing to read it",
         () =>
           unopenedClose.code === 2 &&
-          `${unopenedClose.out}${unopenedClose.err}`.includes("was not opened by host.sh"),
+          `${unopenedClose.out}${unopenedClose.err}`.includes("was not opened by run host"),
         `${unopenedClose.out}${unopenedClose.err}`,
       );
       await pass("and it leaves that space open", () => "w9" in (herdrState().spaces ?? {}));
@@ -3448,6 +3559,318 @@ export async function runControls(): Promise<number> {
       resetHarness(root);
     }
 
+    console.log("teardown reads only the round records");
+    // Record R: the lane and round records teardown reads, beside the log
+    // folder entries it must not take for state (findings, usage, notes).
+    resetHarness(root);
+    writeFileSync(join(stub, "herdr.down"), "");
+    const STOP_PREFIX = "no launch is running in ";
+    const CLOSE_PREFIX = "closed what run host opened for ";
+    const linesFor = (prefix: string, worktrees: string, names: string[]): string =>
+      names.map((name) => `${prefix}${join(worktrees, name)}`).join("\n");
+    const buildRecord = () => {
+      const t = realpathSync(mkdtempSync(join(root, "record-")));
+      const worktrees = join(t, "repo", ".worktrees");
+      for (const name of [
+        "227",
+        "227-sol",
+        "227-mimo",
+        "227-rev-bug-mimo",
+        "227-rev-bug-decoy",
+        "227-rev-security-opus",
+      ])
+        mkdirSync(join(worktrees, name), { recursive: true });
+      const dispatch = join(t, "runs", "227");
+      mkdirSync(join(dispatch, "logs"), { recursive: true });
+      writeFileSync(
+        join(dispatch, "brief.md"),
+        `## Dispatch\nname: #227, test\nsynthesis worktree: ${join(worktrees, "227")}\n`,
+      );
+      writeFileSync(
+        join(dispatch, "run.json"),
+        '{"config":{"team":{"workhorses":["sol","mimo"]}}}',
+      );
+      writeFileSync(join(dispatch, "manifest.json"), '{"lanes":{"sol":{},"mimo":{}}}');
+      writeFileSync(join(dispatch, "logs", "review-r1.json"), '{"reviewers":[["bug","mimo"]]}');
+      writeFileSync(
+        join(dispatch, "logs", "review-r1-bug-mimo-findings.json"),
+        '[{"finding":"one"}]',
+      );
+      writeFileSync(
+        join(dispatch, "logs", "review-r1-bug-mimo-usage.json"),
+        '{"reviewers":[["bug","decoy"]]}',
+      );
+      writeFileSync(join(dispatch, "logs", "review-r1-notes.json"), '["not","a","record"]');
+      return { t, dispatch, logs: join(dispatch, "logs"), worktrees };
+    };
+    const torn = (dispatch: string) => ({
+      stop: execHost(["stop-run", dispatch], stubs, root),
+      close: execHost(["close-run", dispatch], stubs, root),
+    });
+    const bothCover = (pair: { stop: Result; close: Result }, worktrees: string, names: string[]) =>
+      pair.stop.code === 0 &&
+      pair.close.code === 0 &&
+      pair.stop.err === "" &&
+      pair.close.err === "" &&
+      pair.stop.out === `${linesFor(STOP_PREFIX, worktrees, names)}\n` &&
+      pair.close.out === `${linesFor(CLOSE_PREFIX, worktrees, names)}\n`;
+    const bothSay = (pair: { stop: Result; close: Result }, message: string) =>
+      pair.stop.code === 2 &&
+      pair.close.code === 2 &&
+      pair.stop.out === "" &&
+      pair.close.out === "" &&
+      pair.stop.err === `host: ${message}\n` &&
+      pair.close.err === `host: ${message}\n`;
+    const FOUR = ["227-mimo", "227-sol", "227-rev-bug-mimo", "227"];
+    const FIVE = ["227-mimo", "227-sol", "227-rev-bug-mimo", "227-rev-security-opus", "227"];
+    const THREE = ["227-mimo", "227-sol", "227"];
+    {
+      const r = buildRecord();
+      const pair = torn(r.dispatch);
+      await pass(
+        "the reproduction: findings and usage beside the round record no longer stop teardown",
+        () => bothCover(pair, r.worktrees, FOUR),
+        `${pair.stop.out}${pair.stop.err}${pair.close.out}${pair.close.err}`,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(
+        join(r.dispatch, "actions.jsonl"),
+        '{"action":"review-launch","target":"opus","detail":"security r1"}\n',
+      );
+      const pair = torn(r.dispatch);
+      await pass("and an action-log review-launch adds its reviewer worktree", () =>
+        bothCover(pair, r.worktrees, FIVE),
+      );
+    }
+    {
+      const r = buildRecord();
+      rmSync(r.logs, { recursive: true, force: true });
+      const pair = torn(r.dispatch);
+      await pass("with no logs folder only the lane worktrees and synthesis remain", () =>
+        bothCover(pair, r.worktrees, THREE),
+      );
+    }
+    {
+      const r = buildRecord();
+      const recordPath = join(r.logs, "review-r1.json");
+      const cases = ['[["bug","mimo"]]', '"text"', "5", "true", "null"];
+      let ok = true;
+      let problem = "";
+      for (const body of cases) {
+        writeFileSync(recordPath, body);
+        const pair = torn(r.dispatch);
+        const named = bothSay(pair, `run review record is not a mapping: ${recordPath}`);
+        if (!named) {
+          ok = false;
+          problem = `${body} => ${pair.stop.code}/${pair.close.code} ${pair.stop.err}${pair.close.err}`;
+        }
+      }
+      await pass(
+        "a round record that is not a mapping stops teardown and names the record",
+        () => ok,
+        problem,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(join(r.logs, "review-r1.json"), '[["bug","mimo"]]');
+      const link = join(r.t, "link-to-227");
+      symlinkSync(r.dispatch, link);
+      const pair = torn(link);
+      await pass(
+        "and the message names the resolved record path through a link to the dispatch",
+        () =>
+          bothSay(
+            pair,
+            `run review record is not a mapping: ${join(r.dispatch, "logs", "review-r1.json")}`,
+          ),
+        `${pair.stop.err}${pair.close.err}`,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(join(r.logs, "review-r1.json"), "null");
+      writeFileSync(join(r.logs, "review-r2.json"), "null");
+      const pair = torn(r.dispatch);
+      const r1msg = `host: run review record is not a mapping: ${join(r.logs, "review-r1.json")}\n`;
+      const r2msg = `host: run review record is not a mapping: ${join(r.logs, "review-r2.json")}\n`;
+      const either = (err: string): boolean => err === r1msg || err === r2msg;
+      await pass(
+        "when several records are damaged just one is named, and teardown stops there",
+        () =>
+          pair.stop.code === 2 &&
+          pair.close.code === 2 &&
+          pair.stop.out === "" &&
+          pair.close.out === "" &&
+          either(pair.stop.err) &&
+          either(pair.close.err),
+        `${pair.stop.err}${pair.close.err}`,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(join(r.logs, "review-r1.json"), "null");
+      writeFileSync(
+        join(r.dispatch, "actions.jsonl"),
+        [
+          '{"action":"review-launch","target":"mimo","detail":"bug r1"}',
+          "",
+          "{broken",
+          '["review-launch"]',
+          "",
+        ].join("\n"),
+      );
+      const pair = torn(r.dispatch);
+      await pass("and a damaged action log behind a damaged record is not reached", () =>
+        bothSay(pair, `run review record is not a mapping: ${join(r.logs, "review-r1.json")}`),
+      );
+    }
+    {
+      const r = buildRecord();
+      const recordPath = join(r.logs, "review-r1.json");
+      const bodies: Array<{ name: string; setup: () => void }> = [
+        { name: "broken", setup: () => writeFileSync(recordPath, "{broken") },
+        { name: "empty", setup: () => writeFileSync(recordPath, "") },
+        {
+          name: "folder",
+          setup: () => {
+            rmSync(recordPath, { force: true });
+            mkdirSync(recordPath);
+          },
+        },
+        { name: "no reviewers", setup: () => writeFileSync(recordPath, "{}") },
+        {
+          name: "text reviewers",
+          setup: () => writeFileSync(recordPath, '{"reviewers":"bug"}'),
+        },
+      ];
+      let ok = true;
+      let problem = "";
+      for (const body of bodies) {
+        rmSync(recordPath, { recursive: true, force: true });
+        body.setup();
+        const pair = torn(r.dispatch);
+        if (!bothCover(pair, r.worktrees, THREE)) {
+          ok = false;
+          problem = `${body.name} => ${pair.stop.out}${pair.stop.err}${pair.close.out}${pair.close.err}`;
+        }
+      }
+      await pass(
+        "a round record that cannot be used is passed over without a word",
+        () => ok,
+        problem,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(
+        join(r.logs, "review-r1.json"),
+        '{"attempt":"1","reviewers":[["bug","mimo"],["bug"]]}',
+      );
+      const pair = torn(r.dispatch);
+      await pass("a bad reviewer pair is dropped and the good one kept", () =>
+        bothCover(pair, r.worktrees, FOUR),
+      );
+    }
+    {
+      const r = buildRecord();
+      rmSync(join(r.dispatch, "actions.jsonl"), { recursive: true, force: true });
+      mkdirSync(join(r.dispatch, "actions.jsonl"));
+      const pair = torn(r.dispatch);
+      await pass("a folder in place of the action log is passed over", () =>
+        bothCover(pair, r.worktrees, FOUR),
+      );
+    }
+    {
+      const r = buildRecord();
+      const logPath = join(r.dispatch, "actions.jsonl");
+      const cases = ['["review-launch"]', "null", '"text"'];
+      let ok = true;
+      let problem = "";
+      for (const body of cases) {
+        writeFileSync(
+          logPath,
+          [
+            '{"action":"review-launch","target":"mimo","detail":"bug r1"}',
+            "",
+            "{broken",
+            body,
+            "",
+          ].join("\n"),
+        );
+        const pair = torn(r.dispatch);
+        const named = bothSay(pair, `run action log line is not a mapping: ${logPath} line 4`);
+        if (!named) {
+          ok = false;
+          problem = `${body} => ${pair.stop.code}/${pair.close.code} ${pair.stop.err}${pair.close.err}`;
+        }
+      }
+      await pass(
+        "an action-log line that is not a mapping stops teardown and names the line",
+        () => ok,
+        problem,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(
+        join(r.dispatch, "actions.jsonl"),
+        ['{"action":"review-launch","target":"mimo","detail":"bug r1"}', "", "{broken", ""].join(
+          "\n",
+        ),
+      );
+      const pair = torn(r.dispatch);
+      await pass("without that line the run tears down", () => bothCover(pair, r.worktrees, FOUR));
+    }
+    {
+      const empty = realpathSync(mkdtempSync(join(root, "record-empty-")));
+      const pair = torn(empty);
+      await pass(
+        "an empty dispatch still refuses with the waybill message, word for word",
+        () => bothSay(pair, "run waybill has no synthesis worktree"),
+        `${pair.stop.err}${pair.close.err}`,
+      );
+    }
+    {
+      const r = buildRecord();
+      const elsewhere = join(r.t, "repo", "elsewhere", "227");
+      mkdirSync(elsewhere, { recursive: true });
+      writeFileSync(
+        join(r.dispatch, "brief.md"),
+        `## Dispatch\nname: #227, test\nsynthesis worktree: ${elsewhere}\n`,
+      );
+      const pair = torn(r.dispatch);
+      await pass(
+        "a synthesis worktree outside .worktrees still refuses that way, word for word",
+        () => bothSay(pair, "synthesis worktree is not under .worktrees"),
+        `${pair.stop.err}${pair.close.err}`,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(join(r.dispatch, "run.json"), "{broken");
+      writeFileSync(join(r.dispatch, "manifest.json"), "{broken");
+      const pair = torn(r.dispatch);
+      await pass(
+        "unreadable lane records still refuse that way, word for word",
+        () => bothSay(pair, "run lane records unreadable"),
+        `${pair.stop.err}${pair.close.err}`,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(join(r.dispatch, "run.json"), "{broken");
+      writeFileSync(join(r.dispatch, "manifest.json"), "{broken");
+      writeFileSync(join(r.logs, "review-r1.json"), '["not","a","record"]');
+      const pair = torn(r.dispatch);
+      await pass("and a damaged round record beside them adds no second message", () =>
+        bothSay(pair, "run lane records unreadable"),
+      );
+    }
+    resetHarness(root);
+
     console.log("interactive sessions");
     const noSpawn = execHost(["spawn", "postmaster-repo", f.repo, "--", "claude"]);
     const noSend = execHost(["send", "postmaster-repo", join(f.caller, "fixed.sh")]);
@@ -3639,12 +4062,12 @@ export async function runControls(): Promise<number> {
       '{"config":{"limits":{"memory_max":"8G","tasks_max":512,"lane":{"memory_max":"64M","tasks_max":16},"coachman":{"memory_max":"128M","tasks_max":32},"reviewer":{"tasks_max":24}}}}\n',
     );
     writeFileSync(
-      join(f.caller, "launch.sh"),
+      join(f.caller, "run"),
       ["#!/usr/bin/env bash", "printf 'role=%s\\n' \"${POSTMASTER_LAUNCH_ROLE:-unset}\"", ""].join(
         "\n",
       ),
     );
-    exec("chmod", ["+x", join(f.caller, "launch.sh")]);
+    exec("chmod", ["+x", join(f.caller, "run")]);
     execHost(
       [
         "run",
@@ -3661,7 +4084,8 @@ export async function runControls(): Promise<number> {
         "--marker",
         "../logs/role.done",
         "--",
-        "./launch.sh",
+        "./run",
+        "launch",
       ],
       noHost,
       f.caller,
@@ -3670,9 +4094,39 @@ export async function runControls(): Promise<number> {
     await marker(markerPath("role"));
     const roleOut = readFileSync(join(logs, "role.out"), "utf8");
     await pass(
-      "the run's explicit host role reaches launch.sh and an inherited role cannot replace it",
+      "the run's explicit host role reaches run launch and an inherited role cannot replace it",
       () => roleOut === "role=reviewer\n",
       roleOut,
+    );
+    execHost(
+      [
+        "run",
+        NAME,
+        f.repo,
+        "--under",
+        capDispatch,
+        "--role",
+        "reviewer",
+        "--run",
+        capDispatch,
+        "--out",
+        "../logs/other-role.out",
+        "--marker",
+        "../logs/other-role.done",
+        "--",
+        "./run",
+        "host",
+      ],
+      noHost,
+      f.caller,
+      { POSTMASTER_LAUNCH_ROLE: "spoof" },
+    );
+    await marker(markerPath("other-role"));
+    const otherRoleOut = readFileSync(join(logs, "other-role.out"), "utf8");
+    await pass(
+      "a command other than run launch receives no host role",
+      () => otherRoleOut === "role=unset\n",
+      otherRoleOut,
     );
 
     console.log("leg attempt controls");
@@ -3802,7 +4256,7 @@ export async function runControls(): Promise<number> {
         "    printf 'error é429 settled\\n' >&2",
         "    exit 1 ;;",
         "  *skill-caller*)",
-        '    "$TEST_LAUNCH" skill coachman security-review --leg synthesis --run "$TEST_DISPATCH" >/dev/null 2>&1',
+        '    "$TEST_LAUNCH" launch skill coachman security-review --leg synthesis --run "$TEST_DISPATCH" >/dev/null 2>&1',
         '    printf \'{"session_id":"thread-skilled"}\\n\'',
         "    exit 1 ;;",
         "  *pre-thread*) exit 1 ;;",
@@ -3825,7 +4279,7 @@ export async function runControls(): Promise<number> {
       TEST_DONE: join(legD, ".leg-1-done"),
       TEST_OBSERVED: join(legD, "retry-observed"),
       TEST_RUNJSON: join(legD, "run.json"),
-      TEST_LAUNCH: join(HERE, "launch.sh"),
+      TEST_LAUNCH: join(HERE, "run"),
       TEST_DISPATCH: legD,
       ...extra,
     });
@@ -4152,7 +4606,7 @@ export async function runControls(): Promise<number> {
     writeFileSync(prompt, "skill-caller mid-leg\n");
     r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
     await pass(
-      "a launch.sh call mid-leg does not overwrite the attempt's phase",
+      "a run launch call mid-leg does not overwrite the attempt's phase",
       () => r.code === 0 && lastRecord(attemptsPath).outcome === "incomplete",
       safeOutcome(attemptsPath),
     );
@@ -4268,20 +4722,24 @@ export async function runControls(): Promise<number> {
     writeFileSync(join(legD, ".leg-1-exited"), "");
     prompt = join(legD, "race.txt");
     writeFileSync(prompt, "race for the lock\n");
-    const spawnEnv = (extra: Record<string, string> = {}): Record<string, string | undefined> => ({
-      HOME: process.env.HOME ?? "/",
-      PATH: legPath,
-      STUB: join(root, "stub"),
-      TMPDIR: root,
-      POSTMASTER_HOST_STATE: join(root, "state"),
-      POSTMASTER_HOST_FIXTURE: root,
-      POSTMASTER_HOST_CLAIM_WAIT: "3",
-      POSTMASTER_HOST_CLOSE_WAIT: "3",
-      POSTMASTER_HOST_FINISH_DELAY: finishDelay,
-      ...legEnv(extra),
-    });
+    const spawnEnv = (extra: Record<string, string> = {}): Record<string, string | undefined> => {
+      const procRoot = process.env.POSTMASTER_PROC_ROOT;
+      return {
+        HOME: process.env.HOME ?? "/",
+        PATH: legPath,
+        STUB: join(root, "stub"),
+        TMPDIR: root,
+        POSTMASTER_HOST_STATE: join(root, "state"),
+        POSTMASTER_HOST_FIXTURE: root,
+        POSTMASTER_HOST_CLAIM_WAIT: "3",
+        POSTMASTER_HOST_CLOSE_WAIT: "3",
+        POSTMASTER_HOST_FINISH_DELAY: finishDelay,
+        ...(procRoot === undefined ? {} : { POSTMASTER_PROC_ROOT: procRoot }),
+        ...legEnv(extra),
+      };
+    };
     const spawnLeg = (args: string[], extra?: Record<string, string>) =>
-      spawn(SELF, args, { cwd: f.caller, env: spawnEnv(extra), stdio: "ignore" });
+      spawn(SELF, ["host", ...args], { cwd: f.caller, env: spawnEnv(extra), stdio: "ignore" });
     // Attached in the same tick as the spawn or the kill check, so the exit event can
     // never have fired already: a late attach after the event would never resolve.
     const exited = (child: ReturnType<typeof spawn>): Promise<number | null> =>
@@ -4312,8 +4770,7 @@ export async function runControls(): Promise<number> {
       safeOutcome(attemptsPath),
     );
     rmSync(join(legD, ".leg-1-exited"), { force: true });
-    const selfStat = readFileSync(`/proc/${process.pid}/stat`, "utf8");
-    const selfStart = pyWords(selfStat.slice(selfStat.lastIndexOf(")") + 1))[19] ?? "";
+    const selfStart = processStart(process.pid) ?? "";
     writeFileSync(activePath, `${process.pid} ${selfStart}\n`);
     before = nonEmptyLines(attemptsPath).length;
     prompt = join(legD, "livetest.txt");
@@ -4422,7 +4879,7 @@ export async function runControls(): Promise<number> {
     }
     let lockAlive = false;
     try {
-      if (/^[0-9]+$/u.test(lockpid)) process.kill(Number(lockpid), 0);
+      if (/^[0-9]+$/u.test(lockpid) && processState(Number(lockpid)) !== "live") lockpid = "";
       lockAlive = /^[0-9]+$/u.test(lockpid);
     } catch {
       lockAlive = false;
@@ -4562,12 +5019,12 @@ export async function runControls(): Promise<number> {
     for (let i = 0; i < 50; i++) {
       writeFileSync(join(root, "pair.lock"), "999999999 0\n");
       callsBefore = legCalls();
-      const p1 = spawn(SELF, directArgs(join(root, "pair.lock"), "999999999", "0"), {
+      const p1 = spawn(SELF, ["host", ...directArgs(join(root, "pair.lock"), "999999999", "0")], {
         cwd: f.caller,
         env: spawnEnv(directEnv()),
         stdio: "ignore",
       });
-      const p2 = spawn(SELF, directArgs(join(root, "pair.lock"), "999999999", "0"), {
+      const p2 = spawn(SELF, ["host", ...directArgs(join(root, "pair.lock"), "999999999", "0")], {
         cwd: f.caller,
         env: spawnEnv(directEnv()),
         stdio: "ignore",
@@ -4914,11 +5371,7 @@ export async function runControls(): Promise<number> {
         pp = readFileSync(join(fuzzD, "logs", "coachman-leg-1.pid"), "utf8").trim();
       } catch {}
       if (lp !== "" && lp === pp && /^[0-9]+$/u.test(lp)) {
-        try {
-          process.kill(Number(lp), 0);
-        } catch {
-          return;
-        }
+        if (processState(Number(lp)) !== "live") return;
         try {
           process.kill(Number(lp), "SIGKILL");
         } catch {}
@@ -4940,7 +5393,7 @@ export async function runControls(): Promise<number> {
               `T-FUZZ-${i}`,
               join(fuzzD, "prompt.txt"),
             ];
-      const starter = spawn(SELF, fuzzArgs, {
+      const starter = spawn(SELF, ["host", ...fuzzArgs], {
         cwd: f.caller,
         env: spawnEnv({
           TEST_DONE: join(fuzzD, ".leg-1-done"),
@@ -5995,7 +6448,8 @@ export async function runControls(): Promise<number> {
           "--marker",
           launchMarker,
           "--",
-          join(HERE, "launch.sh"),
+          join(HERE, "run"),
+          "launch",
           "launch",
           "test",
           lunaWorktree,
@@ -6073,7 +6527,8 @@ export async function runControls(): Promise<number> {
           "--marker",
           resumeMarker,
           "--",
-          join(HERE, "launch.sh"),
+          join(HERE, "run"),
+          "launch",
           "resume",
           "test",
           lunaWorktree,
@@ -6174,7 +6629,7 @@ function liveHost(
   root: string,
   env: Record<string, string> = {},
 ): Result {
-  return exec(SELF, [...args], {
+  return exec(SELF, ["host", ...args], {
     cwd,
     env: {
       ...process.env,
@@ -6347,14 +6802,24 @@ export async function live(): Promise<void> {
         ],
         f.caller,
         root,
+        { EMIT_SLEEP: "2" },
       );
-      await marker(join(f.logs, "l6.done"), 30);
-      const probe = readFileSync(join(f.logs, "l6.out"), "utf8");
+      const l6Path = join(f.logs, "l6.out");
+      for (
+        let i = 0;
+        i < 40 && (!existsSync(l6Path) || !readFileSync(l6Path, "utf8").includes("from="));
+        i++
+      )
+        await sleep(50);
+      const probe = readFileSync(l6Path, "utf8");
+      const probePid = Number(field(probe, "pid"));
+      const procInfo = processInfo(probePid);
       await pass(
         "the launch has no terminal, and a group of its own",
-        () => field(probe, "tty") === "no" && field(probe, "pgid") === field(probe, "pid"),
-        `${noTty.out}\n${probe}`,
+        () => field(probe, "tty") === "no" && procInfo?.group === probePid,
+        `${noTty.out}\n${probe}\n${JSON.stringify(procInfo)}`,
       );
+      await marker(join(f.logs, "l6.done"), 30);
 
       const stopped = liveHost(
         [
@@ -6573,13 +7038,7 @@ export async function live(): Promise<void> {
 }
 
 function processExists(pid: number): boolean {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as { code?: string }).code !== "ESRCH";
-  }
+  return pid > 0 && processState(pid) === "live";
 }
 
 if (resolve(process.argv[1] ?? "") === resolve(SCRIPT)) {

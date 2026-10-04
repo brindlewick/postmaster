@@ -14,9 +14,10 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { run, withTempDir } from "./lib/proc.ts";
+import { processState } from "./lib/processes.ts";
 import { ARG_SPLIT_RE, monotonic } from "./review-round.ts";
 
-const self = join(import.meta.dir, "review-round.sh");
+const self = join(import.meta.dir, "run");
 
 const skipBootId = !existsSync("/proc/sys/kernel/random/boot_id");
 if (skipBootId) {
@@ -148,7 +149,7 @@ esac
     }
     const runSelf = (...args: string[]): void => {
       const t0 = Date.now();
-      const r = run(self, args);
+      const r = run(self, ["review-round", ...args]);
       out = r.out + r.err;
       rc = r.code;
       took = Math.round((Date.now() - t0) / 1000);
@@ -163,13 +164,7 @@ esac
       }
     };
     const alive = (pid: number): boolean => {
-      try {
-        const r = run("ps", ["-o", "stat=", "-p", String(pid)]);
-        const s = r.out.trim();
-        return s !== "" && !s.startsWith("Z");
-      } catch {
-        return false;
-      }
+      return processState(pid) === "live";
     };
     // dead <pid> [<seconds>]: wait until a process is gone (or a zombie).
     // An empty pid is a failed fixture, never a dead process: fail, do not pass.
@@ -228,8 +223,9 @@ esac
     const launch = (round: number, lens: string, lane: string, kind: string): void => {
       n += 1;
       const r = run(
-        join(import.meta.dir, "host.sh"),
+        join(import.meta.dir, "run"),
         [
+          "host",
           "run",
           `T-1 · ${lane} ${lens} review`,
           join(repo, ".worktrees", `T-1-rev-${lens}-${lane}`),
@@ -254,7 +250,7 @@ esac
         console.log(`  (could not launch ${lens} ${lane})`);
         return;
       }
-      // host.sh run waits 10s for the launch pid itself; this covers a slower
+      // run host run waits 10s for the launch pid itself; this covers a slower
       // runner, so an empty pid below means the launch failed, never that it lags.
       const launchPidFile = join(tmp, "pids", `launch.${n}`);
       let i = 0;
@@ -406,7 +402,7 @@ esac
     const first = Bun.spawn([
       "bash",
       "-c",
-      `exec "${self}" wait "${d}" 2 "${repo}" bug:three > "${firstOut}" 2>&1`,
+      `exec "${self}" review-round wait "${d}" 2 "${repo}" bug:three > "${firstOut}" 2>&1`,
     ]);
     const firstRc = waitLine(firstOut, "round 2,", 60);
     // Let some deadline age while the first wait runs, so a reset (left back to the limit) stands out.
@@ -491,7 +487,7 @@ esac
     const stale = Bun.spawn([
       "bash",
       "-c",
-      `"${self}" wait "${d}" 4 "${repo}" bug:four > "${staleOut}" 2>&1; echo $? > "${staleRcFile}"`,
+      `"${self}" review-round wait "${d}" 4 "${repo}" bug:four > "${staleOut}" 2>&1; echo $? > "${staleRcFile}"`,
     ]);
     // The wait must have read this start's attempt before the next start replaces it.
     const staleRc = waitLine(staleOut, "round 4,", 60);
@@ -522,7 +518,7 @@ esac
     const _insideOut = join(tmp, "inside.out");
     const insideR = run("bash", [
       "-c",
-      `cd "$1" && "${self}" teardown "${d}" 4 "${repo}" bug:four`,
+      `cd "$1" && "${self}" review-round teardown "${d}" 4 "${repo}" bug:four`,
       "_",
       join(repo, ".worktrees/T-1-rev-bug-four"),
     ]);
