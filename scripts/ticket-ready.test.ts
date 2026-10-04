@@ -195,7 +195,7 @@ describe("the marking and queue verbs", () => {
     expect(ledger).toContain('"action":"ticket-edit"');
     expect(ledger).toContain("label add ready");
     expect(ready([repo, "2"]).code).toBe(0);
-    expect(ready(["pending", repo]).out).toContain("2");
+    expect(ready(["pending", repo]).out.split("\n")).toContain("2");
   }, 30000);
 
   test("mark writes a draft body and title through the adapter", () => {
@@ -214,12 +214,43 @@ describe("the marking and queue verbs", () => {
     expect(ledger).toContain("label add ready");
   }, 30000);
 
+  test("marking a commented ticket writes the draft against the stored body", () => {
+    const n = local(["create", "Old title", join(tmp, "c.md")]);
+    expect(run(localSh, [repo, "comment", n, "coachman", "prior discussion"]).code).toBe(0);
+    const f = join(tmp, "final-commented.md");
+    writeFileSync(f, TWO_PART);
+    const r = ready(["mark", repo, n, "--body", f, "--title", "New title"]);
+    expect(r.code).toBe(0);
+    const read = run(localSh, [repo, "read", n]).out;
+    expect(read).toContain("title: New title");
+    expect(read).toContain("labels: ready");
+    expect(read).toContain("## For the agents");
+    expect(ready([repo, n]).code).toBe(0);
+  }, 30000);
+
+  test("a genuine Log-shaped tail binds fully: editing it refuses", () => {
+    const f = join(tmp, "tailed.md");
+    writeFileSync(f, `${TWO_PART}\n## Log\n- signed note\n`);
+    const n = local(["create", "Tailed text", f]);
+    expect(ready(["mark", repo, n]).code).toBe(0);
+    expect(ready([repo, n]).code).toBe(0);
+    const live = run(localSh, [repo, "read", n, "--body"]);
+    const baseFile = join(tmp, "tail-base.md");
+    const newFile = join(tmp, "tail-new.md");
+    writeFileSync(baseFile, live.out ?? "");
+    writeFileSync(newFile, (live.out ?? "").replace("- signed note", "- swapped note"));
+    expect(run(localSh, [repo, "edit", n, newFile, baseFile]).code).toBe(0);
+    const changed = ready([repo, n]);
+    expect(changed.code).toBe(2);
+    expect(changed.out).toContain("changed since it was signed off");
+  }, 60000);
+
   test("a post-sign-off turnpikes edit refuses until the ticket is signed off again", () => {
     const n = local(["create", "Bound text", join(tmp, "a.md")]);
     expect(ready(["mark", repo, n]).code).toBe(0);
     expect(ready([repo, n]).code).toBe(0);
     expect(ready(["queue", repo, n]).code).toBe(0);
-    expect(ready(["pending", repo]).out).toContain(n);
+    expect(ready(["pending", repo]).out.split("\n")).toContain(n);
     const marker = readFileSync(
       join(repo, ".postmaster", "runs", "postmaster", "ready", `${n}.ready`),
       "utf8",
@@ -305,19 +336,19 @@ describe("the marking and queue verbs", () => {
     expect(run(localSh, [repo, "read", "2"]).out).toContain("labels: \n");
     const ledger = readFileSync(join(repo, ".postmaster", "runs", "ledger.jsonl"), "utf8");
     expect(ledger).toContain("label remove ready");
-    expect(ready(["pending", repo]).out.includes("2")).toBe(false);
+    expect(ready(["pending", repo]).out.split("\n").includes("2")).toBe(false);
     expect(ready([repo, "2"]).code).toBe(2);
     expect(ready(["mark", repo, "2"]).code).toBe(0);
     expect(ready(["consume", repo, "2"]).code).toBe(0);
     expect(run(localSh, [repo, "read", "2"]).out).toContain("labels: ready");
-    expect(ready(["pending", repo]).out.includes("2")).toBe(false);
+    expect(ready(["pending", repo]).out.split("\n").includes("2")).toBe(false);
   }, 30000);
 
   test("queue checks before it queues", () => {
     expect(ready(["queue", repo, "3"]).code).toBe(2);
-    expect(ready(["pending", repo]).out.includes("3")).toBe(false);
+    expect(ready(["pending", repo]).out.split("\n").includes("3")).toBe(false);
     expect(ready(["queue", repo, "1"]).code).toBe(0);
-    expect(ready(["pending", repo]).out).toContain("1");
+    expect(ready(["pending", repo]).out.split("\n")).toContain("1");
   }, 30000);
 });
 
@@ -372,7 +403,7 @@ describe("a tracker of kind other", () => {
     expect(early.out).toContain("through the tracker's own tooling");
     const r = ready(["mark", "--body", a, "--labels", "ready", "--repo", repo, "--id", "EXT-1"]);
     expect(r.code).toBe(0);
-    expect(ready(["pending", repo]).out).toContain("EXT-1");
+    expect(ready(["pending", repo]).out.split("\n")).toContain("EXT-1");
   }, 30000);
 
   test("a body changed after marking refuses until marked again", () => {

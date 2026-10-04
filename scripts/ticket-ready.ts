@@ -143,6 +143,7 @@ function reportCheck(
   title: string,
   ready: boolean,
   body: string,
+  stored: string,
 ): number {
   const reasons: string[] = [];
   if (!ready) reasons.push("ready label is missing");
@@ -151,7 +152,7 @@ function reportCheck(
     reasons.push(
       `the ready marker for ${id} is malformed; run ticket-ready.sh unmark ${repo} ${id} and sign the ticket off again`,
     );
-  else if (queued.bound && queued.digest !== digestOf(title, body))
+  else if (queued.bound && queued.digest !== digestOf(title, stored))
     reasons.push(
       "the ticket changed since it was signed off; open the clerk again to sign off the new text",
     );
@@ -178,14 +179,15 @@ function markerPath(repo: string, id: string): string {
 }
 
 // The marker binds the sign-off to the signed-off text: the ticket id, then
-// the sha256 of the title and body as the check reads them, minus the `##
-// Log` comment trailer the adapters append. A post-sign-off tracker edit
-// changes the digest, and the next check refuses until the user signs the
-// new text off again; a comment does not.
-// The signed text: the body without the `## Log` comment trailer the
-// adapters append to the display read. Comments are not sign-off text: a
-// comment after sign-off must not read as a changed ticket. Only a trailer
-// cuts: a `## Log` line whose following lines are all comments or blank.
+// the sha256 of the stored title and body. Adapter paths bind exactly what
+// `read --body` prints, never the display read: the display appends the
+// `## Log` comment trailer, which would false-refuse on any comment and
+// would let a genuine Log-shaped tail hide from the digest. A post-sign-off
+// tracker edit changes the digest, and the next check refuses until the user
+// signs the new text off again; a comment does not.
+// The --body forms take a caller-pasted file, which may be a display read
+// with its trailer: only there does a `## Log` line whose following lines
+// are all comments or blank cut.
 function unsignedBody(body: string): string {
   const lines = body.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -197,11 +199,11 @@ function unsignedBody(body: string): string {
 }
 
 function digestOf(title: string, body: string): string {
-  return createHash("sha256")
-    .update(`${title}\n${unsignedBody(body)}`)
-    .digest("hex");
+  return createHash("sha256").update(`${title}\n${body}`).digest("hex");
 }
 
+// The body here is the stored text: adapter callers pass `read --body`,
+// --body callers pass the file through unsignedBody.
 function writeQueue(repo: string, id: string, title: string, body: string): void {
   mkdirSync(readyDir(repo), { recursive: true });
   writeFileSync(markerPath(repo, id), `${id}\n${digestOf(title, body)}\n`);
@@ -269,6 +271,16 @@ function readViaAdapter(repo: string, id: string, kind: string): { title: string
   return parseTicketRead(r.out);
 }
 
+// The stored body, without the display read's comment trailer: what the
+// edit base and the marker digest are taken from.
+function bodyViaAdapter(repo: string, id: string, kind: string): string {
+  const base = kind === "plane" ? [] : [repo];
+  const r = runScript(`${kind}.sh`, [...base, "read", id, "--body"]);
+  if (r.code !== 0)
+    die(`the ${kind} adapter could not read the body of ${id} (${(r.out + r.err).trim()})`, 1);
+  return r.out;
+}
+
 // Exact membership, answered by the adapter against the tracker's own list:
 // never by splitting the comma-joined `labels:` line, where one name can
 // hold a comma and read back as two.
@@ -313,6 +325,7 @@ function markAdapterTicket(
   draftTitle: string,
 ): number {
   const live = readViaAdapter(repo, id, kind);
+  const stored = bodyViaAdapter(repo, id, kind);
   let body = live.body;
   let title = live.title;
   if (draftFile) body = readFileSync(draftFile, "utf8");
@@ -324,12 +337,14 @@ function markAdapterTicket(
   }
   if (!turnpikes) die(`checked ${id} but ticket-check printed no turnpikes line`);
   const base = kind === "plane" ? [] : [repo];
-  if (draftFile && body !== live.body) {
+  // The edit decision and base use the stored body: the display read carries
+  // the comment trailer, which the adapters do not compare against.
+  if (draftFile && body !== stored) {
     const work = mkdtempSync(join(tmpdir(), "ticket-ready-"));
     try {
       const baseFile = join(work, "base.md");
       const newFile = join(work, "new.md");
-      writeFileSync(baseFile, live.body);
+      writeFileSync(baseFile, stored);
       writeFileSync(newFile, body);
       const r = runScript(`${kind}.sh`, [...base, "edit", id, newFile, baseFile]);
       if (r.code !== 0)
@@ -351,8 +366,7 @@ function markAdapterTicket(
   removeClerkRecord(repo, id);
   // Bind the marker to the stored text as the check will read it, not to the
   // draft bytes, so storage normalization cannot break the comparison.
-  const signed = readViaAdapter(repo, id, kind);
-  writeQueue(repo, id, signed.title, signed.body);
+  writeQueue(repo, id, title, bodyViaAdapter(repo, id, kind));
   console.log(`ticket-ready: ${id} marked ready and queued`);
   return 0;
 }
@@ -417,7 +431,7 @@ function main(argv: string[]): number {
       reasons.push(
         `the ready marker for ${id} is malformed; remove the ready label through the tracker's own tooling, run ticket-ready.sh consume ${project} ${id}, and mark again`,
       );
-    else if (queued.bound && queued.digest !== digestOf(title, body))
+    else if (queued.bound && queued.digest !== digestOf(title, unsignedBody(body)))
       reasons.push(
         "the ticket changed since it was signed off; open the clerk again to sign off the new text",
       );
@@ -450,7 +464,7 @@ function main(argv: string[]): number {
     if (!turnpikes) die(`checked ${id} but ticket-check printed no turnpikes line`);
     logLedgerNote(repo, id, turnpikes);
     removeClerkRecord(repo, id);
-    writeQueue(repo, id, title, body);
+    writeQueue(repo, id, title, unsignedBody(body));
     console.log(`ticket-ready: ${id} marked ready and queued`);
     return 0;
   }
@@ -494,7 +508,14 @@ function main(argv: string[]): number {
       const kind = trackerKind(repo);
       needAdapter(kind, "mark --body <file> --labels <list> --repo <repo> --id <id>");
       const ticket = readViaAdapter(repo, id, kind);
-      const rc = reportCheck(repo, id, ticket.title, readyViaAdapter(repo, id, kind), ticket.body);
+      const rc = reportCheck(
+        repo,
+        id,
+        ticket.title,
+        readyViaAdapter(repo, id, kind),
+        ticket.body,
+        bodyViaAdapter(repo, id, kind),
+      );
       // The check above refuses a changed ticket, so this never rebinds the
       // marker silently; it refreshes an unchanged binding, or binds a ticket
       // whose label was applied by hand.
@@ -528,7 +549,14 @@ function main(argv: string[]): number {
   const kind = trackerKind(repo);
   needAdapter(kind, "--body <file> --labels <list> --project <repo> --id <id> [--title <t>]");
   const ticket = readViaAdapter(repo, id, kind);
-  return reportCheck(repo, id, ticket.title, readyViaAdapter(repo, id, kind), ticket.body);
+  return reportCheck(
+    repo,
+    id,
+    ticket.title,
+    readyViaAdapter(repo, id, kind),
+    ticket.body,
+    bodyViaAdapter(repo, id, kind),
+  );
 }
 
 if (import.meta.main) {
