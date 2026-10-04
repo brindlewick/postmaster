@@ -989,7 +989,10 @@ function runLogDone(
   } catch {
     return false;
   }
-  return raw.split("\n").some((entry) => /^- \d{2}:\d{2}:\d{2}Z (.*)$/u.exec(entry)?.[1] === line);
+  // ASCII: run-log.sh timestamps are tool-emitted HH:MM:SS digits.
+  return raw
+    .split("\n")
+    .some((entry) => /^- [0-9]{2}:[0-9]{2}:[0-9]{2}Z (.*)$/u.exec(entry)?.[1] === line);
 }
 
 function ticketState(
