@@ -340,6 +340,58 @@ describe("positive controls", () => {
     expect(out).not.toContain("without memory or process limits");
     expect(out).toContain("default memory cap");
   }, 30000);
+
+  test("interactive setup where no launch can be capped reports uncapped launches once", () => {
+    const answers = [
+      "",
+      "", // roots and lane names
+      "bash",
+      "lane-alpha",
+      "",
+      "", // alpha
+      "bash",
+      "lane-beta",
+      "",
+      "", // beta
+      "",
+      "", // workhorses and reviewers
+      "",
+      "",
+      "", // style, bug and security reviewer overrides
+      "bash",
+      "coachman",
+      "",
+      "", // coachman
+      "bash",
+      "fallback",
+      "",
+      "", // fallback
+      "bash",
+      "postmaster",
+      "",
+      "", // postmaster
+      "",
+      "", // run count and poll interval
+      "",
+      "", // tracker and confinement
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "", // create tickets, timeout, merge, checkpoint, links
+    ].join("\n");
+    const interactive = run(SELF, ["setup", "--dry-run"], {
+      env: { PATH: otherSystemPath() },
+      input: `${answers}\n`,
+    });
+    expect(interactive.code).toBe(0);
+    expect(interactive.out).not.toContain("Launch limits:");
+    expect(interactive.out).not.toContain("[limits]");
+    expect(interactive.out.match(/without memory or process limits/gu)?.length).toBe(1);
+  }, 30000);
 });
 
 describe("negative controls", () => {

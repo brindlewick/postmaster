@@ -462,3 +462,68 @@ test("a member with a five-word start matches its process, and close refuses whi
     rmSync(dir, { recursive: true, force: true });
   }
 }, 60000);
+
+test("Herdr checks time out when timeout is absent, and keep working when it is present", () => {
+  const dir = mkdtempSync(join(tmpdir(), "host-herdr-timeout-"));
+  const bin = join(dir, "bin");
+  const cwd = join(dir, "worktree");
+  const calls = join(dir, "herdr.calls");
+  mkdirSync(bin);
+  mkdirSync(cwd);
+  for (const [name, target] of [
+    ["bash", Bun.which("bash") ?? "/bin/bash"],
+    ["bun", process.execPath],
+    ["dirname", Bun.which("dirname") ?? "/usr/bin/dirname"],
+  ])
+    symlinkSync(target, join(bin, name));
+  const herdr = join(bin, "herdr");
+  writeFileSync(herdr, '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$HERDR_CALLS"\nexec /bin/sleep 30\n');
+  chmodSync(herdr, 0o755);
+
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    HOME: dir,
+    HERDR_CALLS: calls,
+    PATH: bin,
+    POSTMASTER_HOST_STATE: join(dir, "state"),
+    POSTMASTER_HOST_FIXTURE: dir,
+  };
+  delete env.POSTMASTER_HOST;
+  try {
+    for (const [label, args] of [
+      ["close", ["host", "close", cwd]],
+      ["run", ["host", "run", "timeout-probe", cwd, "--", "/bin/true"]],
+    ] as const) {
+      const started = Date.now();
+      const result = spawnSync(join(import.meta.dir, "run"), [...args], {
+        encoding: "utf8",
+        env,
+        timeout: 10000,
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(Date.now() - started).toBeLessThan(10000);
+      if (label === "close") expect(result.stdout).toContain("closed what run host opened");
+      else expect(result.stdout).toContain("host=none");
+    }
+    const requests = readFileSync(calls, "utf8");
+    expect(requests).toContain("workspace list");
+    expect(requests).not.toMatch(/pane|workspace close/u);
+
+    const timeout = Bun.which("timeout");
+    if (timeout) {
+      symlinkSync(timeout, join(bin, "timeout"));
+      const started = Date.now();
+      const detected = spawnSync(join(import.meta.dir, "run"), ["host", "detect"], {
+        encoding: "utf8",
+        env,
+        timeout: 10000,
+      });
+      expect(detected.status).toBe(0);
+      expect(detected.stdout?.trim()).toBe("none");
+      expect(Date.now() - started).toBeLessThan(10000);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 45000);
