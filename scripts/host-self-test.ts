@@ -1328,10 +1328,10 @@ export async function runControls(): Promise<number> {
       },
       `${probeText}\n${JSON.stringify(processInfo(Number(field(probeText, "pid"))))}`,
     );
-    await pass(
-      "--pidfile holds the launch's pid",
-      () => readFileSync(join(logs, "n3.pid"), "utf8").trim() === field(probeText, "pid"),
-    );
+    await pass("--pidfile holds the launch's pid, start and boot", () => {
+      const lines = readFileSync(join(logs, "n3.pid"), "utf8").trim().split("\n");
+      return lines.length === 3 && lines[0] === field(probeText, "pid");
+    });
     await marker(markerPath("n3"));
     writeFileSync(
       join(f.caller, "argv.sh"),
@@ -1672,7 +1672,7 @@ export async function runControls(): Promise<number> {
       { TREE: join(root, "tree") },
     );
     await marker(markerPath("k2"));
-    const leader = readFileSync(join(logs, "k2.pid"), "utf8").trim();
+    const leader = readFileSync(join(logs, "k2.pid"), "utf8").trim().split("\n")[0] ?? "";
     const leftPid = readFileSync(join(root, "tree/left.pid"), "utf8").trim();
     let memberText = "";
     for (let i = 0; i < 30; i++) {
@@ -1714,7 +1714,7 @@ export async function runControls(): Promise<number> {
       for (let i = 0; i < 30 && !existsSync(join(logs, "guard.pid")); i++) await sleep(100);
       await sleep(300);
       const refused = stopSol();
-      const guardedPid = readFileSync(join(logs, "guard.pid"), "utf8").trim();
+      const guardedPid = readFileSync(join(logs, "guard.pid"), "utf8").trim().split("\n")[0] ?? "";
       await pass(
         `stop refuses a tree holding ${label}, and leaves it all running`,
         () =>
@@ -4872,7 +4872,7 @@ export async function runControls(): Promise<number> {
       }
       let pidfile = "";
       try {
-        pidfile = readFileSync(pidfilePath, "utf8").trim();
+        pidfile = readFileSync(pidfilePath, "utf8").trim().split("\n")[0] ?? "";
       } catch {}
       if (lockpid !== "" && lockpid === pidfile) break;
       await sleep(200);
@@ -4915,7 +4915,7 @@ export async function runControls(): Promise<number> {
         lp = (readFileSync(activePath, "utf8").split(" ")[0] ?? "").trim();
       } catch {}
       try {
-        pp = readFileSync(pidfilePath, "utf8").trim();
+        pp = readFileSync(pidfilePath, "utf8").trim().split("\n")[0] ?? "";
       } catch {}
       if (lp !== "" && lp === pp) break;
       await sleep(200);
@@ -5100,7 +5100,7 @@ export async function runControls(): Promise<number> {
       }
       let pp = "";
       try {
-        pp = readFileSync(killPidfile, "utf8").trim();
+        pp = readFileSync(killPidfile, "utf8").trim().split("\n")[0] ?? "";
       } catch {}
       if (killpid !== "" && killpid === pp) break;
       await sleep(100);
@@ -5368,7 +5368,7 @@ export async function runControls(): Promise<number> {
         lp = (readFileSync(join(fuzzD, ".leg-1-active"), "utf8").split(" ")[0] ?? "").trim();
       } catch {}
       try {
-        pp = readFileSync(join(fuzzD, "logs", "coachman-leg-1.pid"), "utf8").trim();
+        pp = readFileSync(join(fuzzD, "logs", "coachman-leg-1.pid"), "utf8").trim().split("\n")[0] ?? "";
       } catch {}
       if (lp !== "" && lp === pp && /^[0-9]+$/u.test(lp)) {
         if (processState(Number(lp)) !== "live") return;
@@ -6570,7 +6570,9 @@ export async function runControls(): Promise<number> {
       for (const name of readdir(directory)) {
         if (!name.endsWith(".pid")) continue;
         try {
-          const pid = Number(readFileSync(join(directory, name), "utf8").trim());
+          const pid = Number(
+            readFileSync(join(directory, name), "utf8").trim().split("\n")[0] ?? "",
+          );
           if (!pid) continue;
           try {
             process.kill(-pid, "SIGKILL");
@@ -6840,7 +6842,9 @@ export async function live(): Promise<void> {
       await sleep(2000);
       const stoppedTab = kvOf(stopped.out, "tab");
       liveHerdr("tab", "close", stoppedTab);
-      const childPid = Number(readFileSync(join(f.logs, "l5.pid"), "utf8").trim());
+      const childPid = Number(
+        readFileSync(join(f.logs, "l5.pid"), "utf8").trim().split("\n")[0] ?? "",
+      );
       await pass(
         "closing a launch's pane mid-run stops it, and its marker still lands",
         async () => (await marker(join(f.logs, "l5.done"), 10)) && !processExists(childPid),
