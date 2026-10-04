@@ -202,6 +202,32 @@ function aftercare(r: Fixture, args: string[]): { code: number; out: string } {
 
 const WORDS = ["--comment", "closing words", "--run-log", "closing line"];
 
+/** A background sleeper stands in for a foreign process: its pid, liveness by signal 0. */
+function backgroundSleep(): number {
+  const out = sh("sh", ["-c", "sleep 300 </dev/null >/dev/null 2>&1 & echo $!"]).trim();
+  const pid = Number(out);
+  if (!Number.isInteger(pid) || pid <= 0)
+    throw new Error(`no sleeper pid in ${JSON.stringify(out)}`);
+  return pid;
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function killQuiet(pid: number): void {
+  try {
+    process.kill(pid);
+  } catch {
+    /* already gone */
+  }
+}
+
 function snapshot(r: Fixture): string {
   const parts: string[] = [];
   parts.push(run("git", ["-C", r.repo, "worktree", "list"]).out);
@@ -346,17 +372,17 @@ describe("aftercare on a landed run record", () => {
 
   test("a pid file naming a live process no record names: exit 0, the process left alone, the folder gone", () => {
     const r = makeR();
-    const proc = Bun.spawn(["sleep", "300"], { stdout: "ignore", stderr: "ignore" });
+    const pid = backgroundSleep();
     try {
-      writeFileSync(join(r.D, "render/preview.pid"), `${proc.pid}\n`);
+      writeFileSync(join(r.D, "render/preview.pid"), `${pid}\n`);
       const result = aftercare(r, WORDS);
       expect(result.code).toBe(0);
       expect(result.out).toContain("step preview: noted");
-      expect(result.out).toContain(`live pid ${proc.pid}`);
-      expect(proc.exitCode).toBeNull();
+      expect(result.out).toContain(`live pid ${pid}`);
+      expect(alive(pid)).toBe(true);
       expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
     } finally {
-      proc.kill();
+      killQuiet(pid);
     }
     // control: with no pid file at all there is no preview step
     const r2 = makeR();
@@ -365,22 +391,22 @@ describe("aftercare on a landed run record", () => {
 
   test("a registry record matching nothing running: exit 0, the reused pid never signalled", () => {
     const r = makeR();
-    const proc = Bun.spawn(["sleep", "300"], { stdout: "ignore", stderr: "ignore" });
+    const pid = backgroundSleep();
     try {
       mkdirSync(join(r.T, "state/launches"), { recursive: true });
       writeFileSync(
-        join(r.T, "state/launches", String(proc.pid)),
+        join(r.T, "state/launches", String(pid)),
         `${join(r.repo, ".worktrees/7")}\npreview server\nstart 0\nboot \n`,
       );
-      writeFileSync(join(r.D, "render/preview.pid"), `${proc.pid}\n`);
+      writeFileSync(join(r.D, "render/preview.pid"), `${pid}\n`);
       const result = aftercare(r, WORDS);
       expect(result.code).toBe(0);
       expect(result.out).toContain("step preview: noted");
       expect(result.out).toContain("reused pid");
-      expect(proc.exitCode).toBeNull();
+      expect(alive(pid)).toBe(true);
       expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
     } finally {
-      proc.kill();
+      killQuiet(pid);
     }
   }, 120_000);
 
