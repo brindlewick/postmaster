@@ -675,7 +675,7 @@ describe("switch-off detection", () => {
   test("a bare enable ends bare disables only", () => {
     freshRepo("bare-enable");
     const idFor = (out: string, name: string): string | undefined =>
-      new RegExp(`scripts/${name}:\\d+ [^(]*\\(id (comment:[0-9a-f]{16})\\)`, "u").exec(out)?.[1];
+      new RegExp(`scripts/${name}:[0-9]+ [^(]*\\(id (comment:[0-9a-f]{16})\\)`, "u").exec(out)?.[1];
     write(
       "scripts/named.ts",
       [
