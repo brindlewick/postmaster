@@ -19,6 +19,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -5902,6 +5903,23 @@ test("C3: a workhorse that committed WORKHORSE-BLOCKED.md first records no wall"
   expect(step.rc).toBe(0);
   expect(existsSync(join(c.wt, "WORKHORSE-BLOCKED.md"))).toBe(true);
   expect(wallsIn(step.actions).length).toBe(0);
+}, 60000);
+
+test("C3: a summary older than the launch does not excuse the wall", () => {
+  const c = dispatch("c3-old-summary");
+  const summary = join(c.wt, "WORKHORSE-SUMMARY.md");
+  writeFileSync(summary, "# delivered long ago\n");
+  utimesSync(summary, 946684800, 946684800);
+  const step = launchStep(
+    c,
+    "stub",
+    "lane",
+    `cat <<'EOF'\n${CODEX_WALL}\nEOF\nexit 1\n`,
+    "codex",
+    "stub-old-summary",
+  );
+  expect(step.rc).toBe(0);
+  expect(wallsIn(step.actions).length).toBe(1);
 }, 60000);
 
 describe("C4: a grok lane ending on a limit message is handled as today", () => {

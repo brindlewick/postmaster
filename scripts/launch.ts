@@ -669,6 +669,8 @@ const WALL_TOKENS = [
 // wild, each quote alone and beside every transient exemplar. When a run meets a
 // wall phrasing, append it here verbatim with where it was found.
 const WALL_QUOTES = [
+  "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 2:29 AM.",
+  "You've hit your weekly limit · resets 3am (UTC)",
   "You exceeded your current quota, please check your plan and billing details.",
   "quota was exceeded for this key",
   "Error: insufficient_quota",
@@ -1084,6 +1086,18 @@ function wallClockNow(): number {
   return Date.now();
 }
 
+/** A summary or blocked file written while this launch ran: the lane delivered first. */
+function deliveredDuringLaunch(cwd: string, launchedAt: number): boolean {
+  for (const f of ["WORKHORSE-SUMMARY.md", "WORKHORSE-BLOCKED.md"]) {
+    try {
+      if (statSync(join(cwd, f)).mtimeMs >= launchedAt) return true;
+    } catch {
+      /* absent */
+    }
+  }
+  return false;
+}
+
 /** Record the provider wall this launch ended on, if it ended on one. */
 function recordWallIfAny(o: {
   dispatch: string;
@@ -1094,6 +1108,7 @@ function recordWallIfAny(o: {
   role: string; // lane | reviewer
   cwd: string;
   stopped: boolean;
+  launchedAt: number;
 }): void {
   if (o.stopped) return; // stopped mid-run is not a wall (criterion 3)
   const text = readStreamTail(o.streamPath, o.offset);
@@ -1102,11 +1117,7 @@ function recordWallIfAny(o: {
   if (message === null) return;
   const first = message.split("\n")[0] ?? "";
   if (!isWallMessage(first)) return;
-  if (
-    o.role === "lane" &&
-    (existsSync(join(o.cwd, "WORKHORSE-SUMMARY.md")) ||
-      existsSync(join(o.cwd, "WORKHORSE-BLOCKED.md")))
-  ) {
+  if (o.role === "lane" && deliveredDuringLaunch(o.cwd, o.launchedAt)) {
     return; // it had delivered its result first
   }
   let lens = "-";
@@ -1754,6 +1765,8 @@ exit "$rc"
       return 0;
     }
   })();
+  // Machine time, not the tests' clock: it is compared against file mtimes.
+  const launchedAt = Date.now();
   const child = spawnSync(cmd, cmdArgs, {
     stdio: STDIN_FILE ? ["ignore", "inherit", "inherit"] : ["inherit", "inherit", "inherit"],
     // Raw bytes, as main's `exec < file` hands them: no UTF-8 decode.
@@ -1781,6 +1794,7 @@ exit "$rc"
         role: launchRole,
         cwd: CWD,
         stopped: child.signal !== null && child.signal !== undefined,
+        launchedAt,
       });
     }
     const r = run(join(scriptsDir(import.meta), "export-session.sh"), [
