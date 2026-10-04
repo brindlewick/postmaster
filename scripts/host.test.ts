@@ -422,9 +422,7 @@ test("a member with a five-word start matches its process, and close refuses whi
     expect(`${closed.stdout ?? ""}${closed.stderr ?? ""}`).toContain("still running");
     const stopped = spawnSync(hostSh, ["stop", dir], { encoding: "utf8", env });
     expect(stopped.status).toBe(0);
-    expect(`${stopped.stdout ?? ""}${stopped.stderr ?? ""}`).not.toContain(
-      "no launch is running",
-    );
+    expect(`${stopped.stdout ?? ""}${stopped.stderr ?? ""}`).not.toContain("no launch is running");
     const deadline = Date.now() + 10000;
     while (Date.now() < deadline && processState(memberPid) === "live") {
       await new Promise((resolve) => setTimeout(resolve, 100));

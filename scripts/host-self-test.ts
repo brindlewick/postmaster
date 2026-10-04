@@ -19,12 +19,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
-import {
-  processCommandLine,
-  processInfo,
-  processStart,
-  processState,
-} from "./lib/processes.ts";
+import { processCommandLine, processInfo, processStart, processState } from "./lib/processes.ts";
 import { pyWords } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
