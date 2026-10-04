@@ -690,3 +690,36 @@ describe("switch-off units", () => {
     ).toBe(true);
   });
 });
+
+describe("switch-off landing instructions", () => {
+  const coachman = readFileSync(
+    join(import.meta.dir, "../../skills/postmaster/coachman.md"),
+    "utf8",
+  );
+  const postmaster = readFileSync(
+    join(import.meta.dir, "../../skills/postmaster/postmaster.md"),
+    "utf8",
+  );
+
+  test("the coachman lists switch-offs before the gate and pastes the section after the block", () => {
+    expect(coachman).toContain("List the branch's switch-offs before anything else here");
+    expect(
+      coachman.indexOf("List the branch's switch-offs before anything else here"),
+    ).toBeLessThan(coachman.indexOf("1. **Verify the final HEAD.**"));
+    expect(coachman).toContain(
+      "pasted after the block as its own section, never retyped, so the card shows the",
+    );
+  });
+
+  test("Stage F holds both landing routes on the check and never approves itself", () => {
+    const check = "Check switch-offs after the claims and before step 2's landing route";
+    expect(postmaster).toContain(check);
+    expect(postmaster).toContain("on both routes");
+    expect(postmaster.indexOf(check)).toBeLessThan(
+      postmaster.indexOf("2. **Follow the landing route in the waybill.**"),
+    );
+    expect(postmaster).toContain("The merge authority never approves these entries");
+    expect(postmaster).toContain("before it opens a\n   pull request or merges");
+    expect(postmaster).toContain("with the refused\n   entry as the exact discrepancy");
+  });
+});

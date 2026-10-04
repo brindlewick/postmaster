@@ -562,6 +562,25 @@ missed.
    branch. If a claim
    fails, remove `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`, then
    resume that last leg with the exact discrepancy and wait for its corrected card.
+
+   Check switch-offs after the claims and before step 2's landing route, on both routes:
+   `<tool>/scripts/run landing switch-offs --repo <repo> --default <branch>
+   --ticket <the ticket ref> --dispatch <dispatch>`. Exit 0, the branch is clear. Exit 2,
+   put each listed entry to the user with the ship card: its file, line, form, the rules it
+   names and the reason beside it. For each entry they approve, record the word with
+   `<tool>/scripts/run log-action <dispatch> postmaster switch-off <its identity> approved
+   <the entry> <the user's words>`; for each entry they refuse, record it the same way with
+   `refused`, then withhold at once under the claim-fail clause above, with the refused
+   entry as the exact discrepancy. Run the check again after recording: a held remainder
+   repeats the ask, and anything still unapproved after the user's word withholds the same
+   way. Exit 3, entries miss their reasons: withhold under the claim-fail clause with the
+   listed entries as the exact discrepancy; the leg gives each its reason, or removes what
+   it should not switch off. Exit 4 is a recorded refusal: withhold the same way. Runs
+   dispatched before this check existed are held the same way at landing; only their cards
+   lack the list. The merge authority never approves these entries and never unholds them:
+   where it is the postmaster itself, it still asks and records the word before it opens a
+   pull request or merges. Any other exit is an input fault: stop the stage, fix the inputs
+   and re-run.
 2. **Follow the landing route in the waybill.** First ask whether the ticket already landed:
    `<tool>/scripts/run landing already-landed --repo <repo> --default <branch> --ticket
    <the ticket ref> --base <the manifest's base> --card-head <the card's final HEAD>`, adding
