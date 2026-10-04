@@ -137,12 +137,7 @@ export function mimoText(id: string, text: string): string {
   return JSON.stringify({ type: "text", sessionID: id, part: { type: "text", text } });
 }
 
-export function mimoToolError(
-  id: string,
-  tool: string,
-  command: string,
-  output: string,
-): string {
+export function mimoToolError(id: string, tool: string, command: string, output: string): string {
   return JSON.stringify({
     type: "tool_use",
     sessionID: id,
@@ -198,7 +193,10 @@ function writeStub(bin: string, harness: string): void {
 }
 
 function writeDead(bin: string, harness: string): void {
-  writeFileSync(join(bin, harness), `#!/bin/sh\necho "oracle: ${harness} must not run" >&2\nexit 1\n`);
+  writeFileSync(
+    join(bin, harness),
+    `#!/bin/sh\necho "oracle: ${harness} must not run" >&2\nexit 1\n`,
+  );
   chmodSync(join(bin, harness), 0o755);
 }
 
@@ -491,8 +489,7 @@ export function lineBody(l: ActionLine): string {
   return parts.join("\n");
 }
 
-const ISO_RE =
-  /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2}))/gu;
+const ISO_RE = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2}))/gu;
 
 export function findIsos(text: string): Array<{ raw: string; epoch: number }> {
   const out: Array<{ raw: string; epoch: number }> = [];

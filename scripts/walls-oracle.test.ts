@@ -80,16 +80,16 @@ function oracle(name: string, fn: (lay: Layout) => void, timeout = 120000): void
 
 function expectExit(r: Run, want: number): void {
   if (r.code !== want) {
-    throw new Error(`want exit ${want}, got ${r.code}\n--- out ---\n${r.out}\n--- err ---\n${r.err}`);
+    throw new Error(
+      `want exit ${want}, got ${r.code}\n--- out ---\n${r.out}\n--- err ---\n${r.err}`,
+    );
   }
 }
 
 function onlyWall(dispatch: string): ActionLine {
   const lines = wallLines(dispatch);
   if (lines.length !== 1) {
-    throw new Error(
-      `want 1 wall line, got ${lines.length}: ${lines.map((l) => l.raw).join("\n")}`,
-    );
+    throw new Error(`want 1 wall line, got ${lines.length}: ${lines.map((l) => l.raw).join("\n")}`);
   }
   return lines[0]!;
 }
@@ -130,7 +130,10 @@ function roundOk(body: string, n: string): boolean {
 }
 
 function startRound(lay: Layout, dispatch: string, n: string): void {
-  need(sh(join(SCRIPTS, "review-round.sh"), ["start", dispatch, n], lay.env, lay.tmp), `start ${n}`);
+  need(
+    sh(join(SCRIPTS, "review-round.sh"), ["start", dispatch, n], lay.env, lay.tmp),
+    `start ${n}`,
+  );
 }
 
 function pinTool(lay: Layout, dispatch: string): void {
@@ -157,7 +160,10 @@ function mimoWall(lay: Layout, tag: string, dispatch?: string): void {
   setStub(
     lay,
     "mimo",
-    [mimoStart(`s-${tag}`), mimoError(`s-${tag}`, "ProviderError", "You’ve hit your usage limit for this key.")],
+    [
+      mimoStart(`s-${tag}`),
+      mimoError(`s-${tag}`, "ProviderError", "You’ve hit your usage limit for this key."),
+    ],
     0,
   );
   const wt = mkWt(lay, `wt-${tag}`);
@@ -182,22 +188,25 @@ function mimoHealthy(lay: Layout, dispatch: string): void {
   patchManifestLanes(dispatch, { stub: { outcome: "approved" }, mimo: { outcome: "harvested" } });
 }
 
-oracle("C1: a workhorse ending on the Codex wall records one wall line before its marker", (lay) => {
-  setStub(lay, "codex", [codexThread("t-c1a"), codexWall(CODEX_WALL_MESSAGE)], 1);
-  const wt = mkWt(lay, "wt-c1a");
-  launchStep(REPO, lay, {
-    lane: "stub",
-    role: "lane",
-    form: "launch",
-    stream: "stub-events.jsonl",
-    marker: "stub.done",
-    cwd: wt,
-  });
-  expect(wallLines(lay.dispatch).length).toBe(1);
-  const actionsMtime = statSync(join(lay.dispatch, "actions.jsonl")).mtimeMs;
-  const markerMtime = statSync(join(lay.dispatch, "logs", "stub.done")).mtimeMs;
-  expect(markerMtime >= actionsMtime).toBe(true);
-});
+oracle(
+  "C1: a workhorse ending on the Codex wall records one wall line before its marker",
+  (lay) => {
+    setStub(lay, "codex", [codexThread("t-c1a"), codexWall(CODEX_WALL_MESSAGE)], 1);
+    const wt = mkWt(lay, "wt-c1a");
+    launchStep(REPO, lay, {
+      lane: "stub",
+      role: "lane",
+      form: "launch",
+      stream: "stub-events.jsonl",
+      marker: "stub.done",
+      cwd: wt,
+    });
+    expect(wallLines(lay.dispatch).length).toBe(1);
+    const actionsMtime = statSync(join(lay.dispatch, "actions.jsonl")).mtimeMs;
+    const markerMtime = statSync(join(lay.dispatch, "logs", "stub.done")).mtimeMs;
+    expect(markerMtime >= actionsMtime).toBe(true);
+  },
+);
 
 oracle("C1 control: a workhorse that ends clean records no wall", (lay) => {
   setStub(
@@ -259,7 +268,11 @@ oracle("C1: a security reviewer ending on the Claude limit records one wall line
 });
 
 oracle("C1/D3: a limit error about a too-long request still counts as a wall", (lay) => {
-  const line = workhorseWall(lay, "c1d", "This request exceeds the 200k token limit; shorten it and retry.");
+  const line = workhorseWall(
+    lay,
+    "c1d",
+    "This request exceeds the 200k token limit; shorten it and retry.",
+  );
   expect(lineBody(line)).toContain("exceeds the 200k token limit");
 });
 
@@ -325,7 +338,11 @@ oracle("C2: a wait of 20 minutes counts from when the lane stopped", (lay) => {
     "mimo",
     [
       mimoStart("s-c2wait"),
-      mimoError("s-c2wait", "ProviderError", "You’ve hit your usage limit. Try again in 20 minutes."),
+      mimoError(
+        "s-c2wait",
+        "ProviderError",
+        "You’ve hit your usage limit. Try again in 20 minutes.",
+      ),
     ],
     0,
   );
@@ -405,59 +422,62 @@ oracle("C3: a 504 and a 401 ending record no wall", (lay) => {
   expect(wallLines(lay.dispatch).length).toBe(0);
 });
 
-oracle("C3: a failed command printing limit words records no wall, and transient still wakes on it", (lay) => {
-  setStub(
-    lay,
-    "codex",
-    [
-      codexThread("t-c3cmd"),
-      codexCmdFailed("/bin/bash -lc 'bun test'", "usage limit exceeded for this tool call"),
-      codexDone(),
-    ],
-    0,
-  );
-  const wt = mkWt(lay, "wt-c3cmd");
-  launchStep(REPO, lay, {
-    lane: "stub",
-    role: "lane",
-    form: "launch",
-    stream: "stub-events.jsonl",
-    marker: "stub.done",
-    cwd: wt,
-  });
-  setStub(
-    lay,
-    "mimo",
-    [
-      mimoStart("s-c3tool"),
-      mimoToolError("s-c3tool", "bash", "bun test", "usage limit exceeded for this tool call"),
-      mimoFinish("s-c3tool"),
-    ],
-    0,
-  );
-  const wt2 = mkWt(lay, "wt-c3tool");
-  launchStep(REPO, lay, {
-    lane: "mimo",
-    role: "lane",
-    form: "launch",
-    stream: "mimo-events.jsonl",
-    marker: "mimo.done",
-    cwd: wt2,
-  });
-  expect(wallLines(lay.dispatch).length).toBe(0);
-  // classifyTransient stays as the watcher uses it: the shared list still wakes.
-  const errFile = join(lay.tmp, "transient.err");
-  writeFileSync(errFile, "");
-  for (const stream of ["stub-events.jsonl", "mimo-events.jsonl"]) {
-    const r = sh(
-      join(SCRIPTS, "launch.sh"),
-      ["transient", errFile, join(lay.dispatch, "logs", stream)],
-      lay.env,
-      lay.tmp,
+oracle(
+  "C3: a failed command printing limit words records no wall, and transient still wakes on it",
+  (lay) => {
+    setStub(
+      lay,
+      "codex",
+      [
+        codexThread("t-c3cmd"),
+        codexCmdFailed("/bin/bash -lc 'bun test'", "usage limit exceeded for this tool call"),
+        codexDone(),
+      ],
+      0,
     );
-    expect(r.out.trim()).toBe("provider-wall");
-  }
-});
+    const wt = mkWt(lay, "wt-c3cmd");
+    launchStep(REPO, lay, {
+      lane: "stub",
+      role: "lane",
+      form: "launch",
+      stream: "stub-events.jsonl",
+      marker: "stub.done",
+      cwd: wt,
+    });
+    setStub(
+      lay,
+      "mimo",
+      [
+        mimoStart("s-c3tool"),
+        mimoToolError("s-c3tool", "bash", "bun test", "usage limit exceeded for this tool call"),
+        mimoFinish("s-c3tool"),
+      ],
+      0,
+    );
+    const wt2 = mkWt(lay, "wt-c3tool");
+    launchStep(REPO, lay, {
+      lane: "mimo",
+      role: "lane",
+      form: "launch",
+      stream: "mimo-events.jsonl",
+      marker: "mimo.done",
+      cwd: wt2,
+    });
+    expect(wallLines(lay.dispatch).length).toBe(0);
+    // classifyTransient stays as the watcher uses it: the shared list still wakes.
+    const errFile = join(lay.tmp, "transient.err");
+    writeFileSync(errFile, "");
+    for (const stream of ["stub-events.jsonl", "mimo-events.jsonl"]) {
+      const r = sh(
+        join(SCRIPTS, "launch.sh"),
+        ["transient", errFile, join(lay.dispatch, "logs", stream)],
+        lay.env,
+        lay.tmp,
+      );
+      expect(r.out.trim()).toBe("provider-wall");
+    }
+  },
+);
 
 oracle("C3: a final message in prose mentioning a limit records no wall", (lay) => {
   setStub(
@@ -546,8 +566,13 @@ oracle("C3: a lane that delivered its summary or blocked file records no wall", 
     ["c3sum", "WORKHORSE-SUMMARY.md"],
     ["c3blk", "WORKHORSE-BLOCKED.md"],
   ]) {
-    setStub(lay, "codex", [codexThread(`t-${tag}`), codexWall(CODEX_WALL_MESSAGE)], 1,
-      `printf '# done\\n' > ${file} && git add ${file} && git -c user.name=o -c user.email=o@example.invalid commit -qm done`);
+    setStub(
+      lay,
+      "codex",
+      [codexThread(`t-${tag}`), codexWall(CODEX_WALL_MESSAGE)],
+      1,
+      `printf '# done\\n' > ${file} && git add ${file} && git -c user.name=o -c user.email=o@example.invalid commit -qm done`,
+    );
     const { wt } = mkScratch(lay, `wt-${tag}`);
     launchStep(REPO, lay, {
       lane: "stub",
@@ -627,7 +652,10 @@ oracle("C6: show names the run, lane, role, message and reset with its date, per
   setStub(
     lay,
     "codex",
-    [codexThread("t-c6"), codexWall("You’ve hit your usage limit. Try again Oct 5th, 2026 2:29 AM.")],
+    [
+      codexThread("t-c6"),
+      codexWall("You’ve hit your usage limit. Try again Oct 5th, 2026 2:29 AM."),
+    ],
     1,
   );
   const wt = mkWt(lay, "wt-c6");
@@ -743,7 +771,10 @@ oracle("C13: escalate names each walled workhorse, its reset and the ruling", (l
   setStub(
     lay,
     "mimo",
-    [mimoStart("s-c13b"), mimoError("s-c13b", "ProviderError", "You’ve hit your usage limit for this key.")],
+    [
+      mimoStart("s-c13b"),
+      mimoError("s-c13b", "ProviderError", "You’ve hit your usage limit for this key."),
+    ],
     0,
   );
   const wt = mkWt(lay, "wt-c13b");
@@ -758,7 +789,13 @@ oracle("C13: escalate names each walled workhorse, its reset and the ruling", (l
   expect(wallLines(lay.dispatch).length).toBe(2);
   expectExit(walls(REPO, lay, "escalate", lay.dispatch), 0);
   const esc = readFileSync(join(lay.dispatch, "ESCALATION.md"), "utf8");
-  for (const pinned of ["stub", "mimo", CODEX_WALL_MESSAGE, "You’ve hit your usage limit for this key.", "no reset time"]) {
+  for (const pinned of [
+    "stub",
+    "mimo",
+    CODEX_WALL_MESSAGE,
+    "You’ve hit your usage limit for this key.",
+    "no reset time",
+  ]) {
     expect(esc).toContain(pinned);
   }
   const resetShown = /oct/i.test(esc) || esc.includes("10-05") || esc.includes("10/05");
@@ -851,7 +888,10 @@ oracle("C16: carried go-on runs no harness and shows the DEGRADED wording", (lay
   setStub(
     lay,
     "mimo",
-    [mimoStart("s-c16b"), mimoError("s-c16b", "ProviderError", "You’ve hit your usage limit for this key.")],
+    [
+      mimoStart("s-c16b"),
+      mimoError("s-c16b", "ProviderError", "You’ve hit your usage limit for this key."),
+    ],
     0,
   );
   const wt = mkWt(lay, "wt-c16b");
@@ -892,7 +932,10 @@ oracle("C18: a refused ruling records nothing and the run stays paused", (lay) =
   setStub(
     lay,
     "mimo",
-    [mimoStart("s-c18b"), mimoError("s-c18b", "ProviderError", "You’ve hit your usage limit for this key.")],
+    [
+      mimoStart("s-c18b"),
+      mimoError("s-c18b", "ProviderError", "You’ve hit your usage limit for this key."),
+    ],
     0,
   );
   const wt = mkWt(lay, "wt-c18b");
@@ -920,7 +963,10 @@ oracle("C19: go on is refused for the last workhorse that could still produce wo
   setStub(
     lay,
     "mimo",
-    [mimoStart("s-c19b"), mimoError("s-c19b", "ProviderError", "You’ve hit your usage limit for this key.")],
+    [
+      mimoStart("s-c19b"),
+      mimoError("s-c19b", "ProviderError", "You’ve hit your usage limit for this key."),
+    ],
     0,
   );
   const wt = mkWt(lay, "wt-c19b");
