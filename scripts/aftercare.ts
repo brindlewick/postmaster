@@ -48,6 +48,7 @@ import {
 } from "./host.ts";
 import { beside } from "./lib/paths.ts";
 import { argvDecoded, run, signalExitCode } from "./lib/proc.ts";
+import { processIsLive } from "./lib/processes.ts";
 import type { RunResult } from "./lib/proc.ts";
 import { pyWords } from "./lib/text.ts";
 import { isCurrent } from "./stage.ts";
@@ -1276,14 +1277,6 @@ function mainFlow(args: Args): Result {
 
     // One aftercare at a time on a run.
     const lock = join(dispatch, ".aftercare.lock");
-    const alive = (pid: number): boolean => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch (error) {
-        return (error as NodeJS.ErrnoException)?.code === "EPERM";
-      }
-    };
     const holder = (): number => {
       try {
         const value = Number(readFileSync(lock, "utf8").trim());
@@ -1294,7 +1287,7 @@ function mainFlow(args: Args): Result {
     };
     if (dryRun) {
       const held = holder();
-      if (existsSync(lock) && held > 0 && held !== process.pid && alive(held))
+      if (existsSync(lock) && held > 0 && held !== process.pid && processIsLive(held))
         throw new Fault(
           1,
           "aftercare lock",
@@ -1318,7 +1311,7 @@ function mainFlow(args: Args): Result {
               `make ${dispatch} writable, then run again`,
             );
           const pid = holder();
-          if (pid !== 0 && pid !== process.pid && alive(pid))
+          if (pid !== 0 && pid !== process.pid && processIsLive(pid))
             throw new Fault(
               1,
               "aftercare lock",

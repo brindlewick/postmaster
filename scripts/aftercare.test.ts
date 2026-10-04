@@ -21,6 +21,7 @@ import { trackerArgv } from "./aftercare.ts";
 import { bootId, processes } from "./host.ts";
 import { run } from "./lib/proc.ts";
 import { scriptsDir } from "./lib/paths.ts";
+import { processIsLive } from "./lib/processes.ts";
 
 const HERE = scriptsDir(import.meta);
 
@@ -232,15 +233,6 @@ function backgroundSleep(): number {
   return pid;
 }
 
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function killQuiet(pid: number): void {
   try {
     process.kill(pid);
@@ -412,7 +404,7 @@ describe("aftercare on a landed run record", () => {
       expect(result.code).toBe(0);
       expect(result.out).toContain("step preview: noted");
       expect(result.out).toContain(`live pid ${pid}`);
-      expect(alive(pid)).toBe(true);
+      expect(processIsLive(pid)).toBe(true);
       expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
     } finally {
       killQuiet(pid);
@@ -436,7 +428,7 @@ describe("aftercare on a landed run record", () => {
       expect(result.code).toBe(0);
       expect(result.out).toContain("step preview: noted");
       expect(result.out).toContain("reused pid");
-      expect(alive(pid)).toBe(true);
+      expect(processIsLive(pid)).toBe(true);
       expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
     } finally {
       killQuiet(pid);
@@ -519,12 +511,12 @@ describe("aftercare on a landed run record", () => {
     ]);
     expect(started.code).toBe(0);
     const pid = Number(readFileSync(join(r.D, "render/preview.pid"), "utf8").trim());
-    expect(alive(pid)).toBe(true);
+    expect(processIsLive(pid)).toBe(true);
     try {
       const result = aftercare(r, WORDS);
       expect(result.code).toBe(0);
       expect(result.out).toContain("step preview: stopped");
-      expect(alive(pid)).toBe(false);
+      expect(processIsLive(pid)).toBe(false);
       expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
     } finally {
       killQuiet(pid);
@@ -547,7 +539,7 @@ describe("aftercare on a landed run record", () => {
       expect(result.code).toBe(0);
       expect(result.out).toContain("step preview: noted");
       expect(result.out).toContain("not this run's synthesis folder");
-      expect(alive(pid)).toBe(true);
+      expect(processIsLive(pid)).toBe(true);
       // control: with the start check passing, only the folder check stands between — and
       // the synthesis folder still went, since nothing runs in it
       expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
