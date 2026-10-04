@@ -33,13 +33,15 @@ command -v git >/dev/null && command -v bun >/dev/null || {
   exit 2
 }
 
-TDIRS=""
-cleanup() { [ -n "$TDIRS" ] && rm -rf $TDIRS; }
+TDIRS=()
+cleanup() { [ "${#TDIRS[@]}" -gt 0 ] && rm -rf -- "${TDIRS[@]}"; }
 trap cleanup EXIT
 
 freshT() {
-  T=$(cd "$(mktemp -d)" && pwd -P)
-  TDIRS="$TDIRS $T"
+  local d
+  d=$(mktemp -d) || exit 2
+  T=$(cd "$d" && pwd -P) || exit 2
+  TDIRS+=("$T")
 }
 
 mkstubs() {
