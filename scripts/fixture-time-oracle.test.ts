@@ -43,9 +43,11 @@ function fails(stdout: string): string[] {
   return stdout
     .split("\n")
     .filter((line) => line.startsWith("FAIL"))
+    // ASCII: score lines are machine-printed.
     .map((line) => line.split(/\s+/u)[1] ?? "");
 }
 
+// ASCII: duration figures are machine-printed.
 const FIG_RE = /\d+h \d+m|\d+m \d+s|\b\d+s\b/gu;
 
 function figures(s: string): string[] {
@@ -62,6 +64,7 @@ function countOcc(haystack: string, needle: string): number {
 }
 
 function wordPos(line: string, word: string): number {
+  // ASCII: score output is machine-printed.
   return line.search(new RegExp(`\\b${word}\\b`, "u"));
 }
 
@@ -78,6 +81,7 @@ const STAGES = [
 ];
 
 function stagesIn(line: string): string[] {
+  // ASCII: score lines are machine-printed.
   const toks = new Set(line.toLowerCase().split(/[^a-z0-9]+/u));
   return STAGES.filter((s) => (s.includes("-") ? line.includes(s) : toks.has(s)));
 }
@@ -196,6 +200,7 @@ describe("C2: the slowest workhorse and reviewer, with times", () => {
     }
   });
   test("a run with no review leg names no lens", () => {
+    // ASCII: score output is machine-printed.
     expect(sc("noreview").stdout).not.toMatch(/\b(?:bug|security|style)\b/u);
   });
   test("a workhorse with no marker is named as such", () => {

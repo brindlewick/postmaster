@@ -41,6 +41,7 @@ function need(cond: boolean, msg: string): void {
 
 // Whole seconds; the log carries no millis, as the real logger writes none.
 const T0 = Date.UTC(2026, 0, 5, 10, 0, 0);
+// ASCII: ISO timestamps are machine-printed.
 const iso = (ms: number): string => new Date(ms).toISOString().replace(/\.\d+Z$/u, "Z");
 
 const LANE_DUR: Record<string, number> = { one: 672, two: 216 };
@@ -271,6 +272,7 @@ function engineerTime(d: string, design: Design): void {
     else if (e.action === "handoff" && e.target === "leg-1") ts = iso(leg1Handoff);
     else if (e.action === "handoff" && e.target === "leg-2") ts = iso(leg2Handoff);
     else if (e.action === "review-launch") {
+      // ASCII: planted details are machine-made.
       const m = /^(\S+) round (\d+),/u.exec(e.detail);
       const round = Number(m?.[2] ?? 1);
       const k = seen[`r${round}`] ?? 0;

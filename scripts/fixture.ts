@@ -918,7 +918,9 @@ function reviewLaunch(
   round: number,
   since: Date | null,
 ): Date | null {
+  // ASCII: launch details are machine-logged lines.
   const lensRe = new RegExp(`\\b${lens.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\b`, "u");
+  // ASCII: launch details are machine-logged lines.
   const roundRe = new RegExp(`\\bround\\s*${round}\\b|\\br${round}\\b`, "u");
   let found: Date | null = null;
   let any = false;
@@ -946,6 +948,7 @@ function reviewRoundLines(dispatch: string, events: Array<Record<string, unknown
     return [];
   }
   const rounds = files
+    // ASCII: round files are machine-named review-rN.json.
     .map((f) => /^review-r(\d+)\.json$/u.exec(f))
     .filter((m): m is RegExpExecArray => m !== null)
     .sort((a, b) => parseInt(a[1]!, 10) - parseInt(b[1]!, 10));

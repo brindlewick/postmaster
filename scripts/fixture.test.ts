@@ -1414,8 +1414,10 @@ describe("score: the time lines after the checks (#265)", () => {
 
   test("the stage table follows the checks with each stage's waiting and the total", () => {
     const out = timeReport(waitRun());
+    // ASCII: time lines are machine-printed.
     expect(out).toMatch(/^stage\s+started \(UTC\)/mu);
     expect(out).toContain("11m 20s");
+    // ASCII: time lines are machine-printed.
     expect(out).toMatch(/^total\s+12m 20s/mu);
   }, 30000);
 
