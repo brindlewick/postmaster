@@ -184,13 +184,41 @@ type Brief = {
   title: string;
 };
 
+// The ready queue ticket-ready.sh keeps: brief refuses an unreadable ticket
+// while one of these names it.
+function readyMarker(repo: string, id: string): string {
+  return join(
+    repo,
+    ".postmaster",
+    "runs",
+    "postmaster",
+    "ready",
+    `${encodeURIComponent(id)}.ready`,
+  );
+}
+
 function writeBrief(repo: string, id: string): Brief {
   const kind = trackerKind(repo);
   const read = readTicket(repo, id, kind);
-  if (read === null && kind !== "github" && kind !== "local" && kind !== "plane") {
-    console.error(
-      `clerk: tracker kind '${kind}' has no adapter script; the brief cannot see the ticket's labels, so remove the ready label through the tracker's own tooling if the ticket carries one`,
-    );
+  if (read === null) {
+    // A ticket the brief cannot read may still be queued from its sign-off;
+    // opening the clerk then lets the queued stale version dispatch
+    // mid-revision. Refuse while a ready marker names this id.
+    if (isFile(readyMarker(repo, id))) {
+      if (kind === "github" || kind === "local" || kind === "plane") {
+        die(
+          `could not read ${displayId(kind, id)} to check its ready mark, and a ready marker is queued for it; run brief again once the ticket reads, or clear a stale marker with: ticket-ready.sh consume ${repo} ${id}`,
+        );
+      }
+      die(
+        `tracker kind '${kind}' has no adapter script, and a ready marker is queued for ${id}; remove the ready label through the tracker's own tooling (trackers.md, other), clear the marker with: ticket-ready.sh consume ${repo} ${id}, then run brief again`,
+      );
+    }
+    if (kind !== "github" && kind !== "local" && kind !== "plane") {
+      console.error(
+        `clerk: tracker kind '${kind}' has no adapter script; the brief cannot see the ticket's labels, so remove the ready label through the tracker's own tooling if the ticket carries one`,
+      );
+    }
   }
   const ticket = read ?? { title: "", ready: false };
   const name = displayId(kind, id);

@@ -223,6 +223,48 @@ describe("brief", () => {
     expect(r.err).toContain("has no adapter script");
   });
 
+  test("brief refuses an unreadable ticket while its ready marker is queued", () => {
+    const repo = localRepo();
+    const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
+    const cfg = stubConfig(cfgDir);
+    const dir = join(repo, ".postmaster", "runs", "postmaster", "ready");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "9.ready"), "9\n");
+    const r = sh(SELF, ["brief", repo, "9"], { POSTMASTER_CONFIG: cfg });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("a ready marker is queued for it");
+    expect(r.err).toContain("ticket-ready.sh consume");
+  });
+
+  test("brief refuses a queued ticket on a tracker without an adapter", () => {
+    const otherRepo = mkdtempSync(join(tmpdir(), "clerk-other-"));
+    sh("git", ["init", "-q", otherRepo]);
+    sh("git", [
+      "-C",
+      otherRepo,
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "base",
+    ]);
+    const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
+    const cfg = join(cfgDir, "config.toml");
+    writeFileSync(cfg, '[tracker]\nkind = "other"\n');
+    const dir = join(otherRepo, ".postmaster", "runs", "postmaster", "ready");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "EXT-1.ready"), "EXT-1\n");
+    const r = sh(SELF, ["brief", otherRepo, "EXT-1"], { POSTMASTER_CONFIG: cfg });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("has no adapter script");
+    expect(r.err).toContain("through the tracker's own tooling");
+    expect(r.err).toContain("ticket-ready.sh consume");
+  });
+
   test("brief keeps a slashed id inside the clerk directory", () => {
     const repo = localRepo();
     const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
