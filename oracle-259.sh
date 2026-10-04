@@ -38,11 +38,15 @@ bad() { FAIL=$((FAIL + 1)); FAILED="$FAILED [$1]"; printf '  FAIL %s\n%s\n' "$1"
 skip() { SKIP=$((SKIP + 1)); printf '  SKIP %s: %s\n' "$1" "$2"; }
 
 TMP=$(mktemp -d)
+# Every resource this run can kill or remove carries the run's tag, so cleanup
+# touches only what this invocation created, never a sibling run's or the
+# caller's own sessions and processes.
+STAG="oracle259sleep-$$"
 cleanup() {
-  tmux kill-session -t postmaster-tmuxbig 2>/dev/null || true
-  tmux kill-session -t postmaster-tmuxsmall 2>/dev/null || true
-  pkill -f "sleep 29[237]" 2>/dev/null || true
-  rm -f /tmp/claude-"$(id -u)"/oracle259-c5-* 2>/dev/null || true
+  tmux kill-session -t "postmaster-tmuxbig-$$" 2>/dev/null || true
+  tmux kill-session -t "postmaster-tmuxsmall-$$" 2>/dev/null || true
+  pkill -f "$STAG" 2>/dev/null || true
+  rm -f /tmp/claude-"$(id -u)"/oracle259-c5-b-$$.txt 2>/dev/null || true
   rm -rf "$TMP" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -81,9 +85,9 @@ C1=$TMP/c1; mkdir -p "$C1/bin" "$C1/repo" "$C1/state"
 git -C "$C1/repo" init -q
 C1CALLS=$C1/calls.log
 cat > "$C1/bin/herdr" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 echo "herdr \$*" >> "$C1CALLS"
-exec sleep 297
+exec -a "$STAG-297" sleep 297
 EOF
 chmod +x "$C1/bin/herdr"
 make_sys "$C1/sys" timeout herdr tmux
@@ -102,7 +106,7 @@ if grep -qi "close" "$C1CALLS" 2>/dev/null; then
 else
   ok "close shuts no Herdr pane"
 fi
-pkill -f "sleep 297" 2>/dev/null || true
+pkill -f "$STAG-297" 2>/dev/null || true
 
 start=$(date +%s)
 C1RUN_OUT=$($TIMEOUT 15 env -u POSTMASTER_HOST PATH="$C1/bin:$C1/sys" POSTMASTER_HOST_STATE="$C1/state" "$RUN" host run oracle259c1 "$C1/repo" --out "$C1/out.log" --err "$C1/err.log" --marker "$C1/done" -- echo hi 2>&1) && C1RUN_CODE=$? || C1RUN_CODE=$?
@@ -112,7 +116,7 @@ if [ "$C1RUN_CODE" -eq 0 ] && [ "$elapsed" -le 10 ] && printf '%s' "$C1RUN_OUT" 
 else
   bad "run without timeout detects host=none within 10 s" "exit $C1RUN_CODE after ${elapsed}s: $C1RUN_OUT"
 fi
-pkill -f "sleep 297" 2>/dev/null || true
+pkill -f "$STAG-297" 2>/dev/null || true
 
 start=$(date +%s)
 C1T_OUT=$($TIMEOUT 15 env -u POSTMASTER_HOST PATH="$C1/bin:$C1/syst" POSTMASTER_HOST_STATE="$C1/state" "$RUN" host close "$C1/repo" 2>&1) && C1T_CODE=$? || C1T_CODE=$?
@@ -122,7 +126,7 @@ if [ "$C1T_CODE" -eq 0 ] && [ "$elapsed" -le 10 ]; then
 else
   bad "close with timeout on PATH behaves as today" "exit $C1T_CODE after ${elapsed}s: $C1T_OUT"
 fi
-pkill -f "sleep 297" 2>/dev/null || true
+pkill -f "$STAG-297" 2>/dev/null || true
 
 printf '\nC2: the whole environment reaches a pane\n'
 C2=$TMP/c2; mkdir -p "$C2/logs"
@@ -178,11 +182,10 @@ c2_one() {
 c2_one herdbig 100000 herdr "$STUBBIN:$PATH"
 c2_one herdsmall 1000 herdr "$STUBBIN:$PATH"
 if command -v tmux >/dev/null; then
-  mkdir -p "$C2/tmuxbig" "$C2/tmuxsmall"
-  c2_one tmuxbig 100000 tmux "$PATH"
-  tmux kill-session -t postmaster-tmuxbig 2>/dev/null || true
-  c2_one tmuxsmall 1000 tmux "$PATH"
-  tmux kill-session -t postmaster-tmuxsmall 2>/dev/null || true
+  c2_one "tmuxbig-$$" 100000 tmux "$PATH"
+  tmux kill-session -t "postmaster-tmuxbig-$$" 2>/dev/null || true
+  c2_one "tmuxsmall-$$" 1000 tmux "$PATH"
+  tmux kill-session -t "postmaster-tmuxsmall-$$" 2>/dev/null || true
 else
   skip "tmuxbig runs in a tmux pane" "tmux is not on PATH"
   skip "tmuxsmall runs in a tmux pane" "tmux is not on PATH"
@@ -219,8 +222,8 @@ C3ENV="POSTMASTER_PROC_ROOT=$C3/missing-proc POSTMASTER_HOST=none"
 
 # A launch stopped across a clock correction: same boot session, new text.
 mkdir -p "$C3/ha"; echo A > "$C3/sysctl.state"
-$TIMEOUT 90 env $C3ENV PATH="$C3/bin:$PATH" POSTMASTER_HOST_STATE="$C3/state-a" "$RUN" host run oracle259c3a "$C3/ha" --out "$C3/a.out" --err "$C3/a.err" --marker "$C3/a.done" -- sleep 293 >"$C3/a.run" 2>&1
-SLEEP_A=$(pgrep -f "sleep 293" | head -1 || true)
+$TIMEOUT 90 env $C3ENV PATH="$C3/bin:$PATH" POSTMASTER_HOST_STATE="$C3/state-a" "$RUN" host run oracle259c3a "$C3/ha" --out "$C3/a.out" --err "$C3/a.err" --marker "$C3/a.done" -- bash -c "exec -a $STAG-293 sleep 293" >"$C3/a.run" 2>&1
+SLEEP_A=$(pgrep -f "$STAG-293" | head -1 || true)
 echo B > "$C3/sysctl.state"
 C3A_OUT=$($TIMEOUT 60 env $C3ENV PATH="$C3/bin:$PATH" POSTMASTER_HOST_STATE="$C3/state-a" "$RUN" host stop "$C3/ha" 2>&1) && C3A_CODE=$? || C3A_CODE=$?
 if [ "$C3A_CODE" -eq 0 ] && printf '%s' "$C3A_OUT" | grep -q "stopped 1 launch"; then
@@ -236,8 +239,8 @@ fi
 
 # A new boot session drops the record.
 mkdir -p "$C3/hb"; echo A > "$C3/sysctl.state"
-$TIMEOUT 90 env $C3ENV PATH="$C3/bin:$PATH" POSTMASTER_HOST_STATE="$C3/state-b" "$RUN" host run oracle259c3b "$C3/hb" --out "$C3/b.out" --err "$C3/b.err" --marker "$C3/b.done" -- sleep 293 >"$C3/b.run" 2>&1
-SLEEP_B=$(pgrep -f "sleep 293" | head -1 || true)
+$TIMEOUT 90 env $C3ENV PATH="$C3/bin:$PATH" POSTMASTER_HOST_STATE="$C3/state-b" "$RUN" host run oracle259c3b "$C3/hb" --out "$C3/b.out" --err "$C3/b.err" --marker "$C3/b.done" -- bash -c "exec -a $STAG-293 sleep 293" >"$C3/b.run" 2>&1
+SLEEP_B=$(pgrep -f "$STAG-293" | head -1 || true)
 echo uuid > "$C3/sysctl.state"
 C3B_OUT=$($TIMEOUT 60 env $C3ENV PATH="$C3/bin:$PATH" POSTMASTER_HOST_STATE="$C3/state-b" "$RUN" host stop "$C3/hb" 2>&1) && C3B_CODE=$? || C3B_CODE=$?
 if [ "$C3B_CODE" -eq 0 ] && printf '%s' "$C3B_OUT" | grep -q "no launch is running"; then
@@ -260,8 +263,8 @@ fi
 
 # A refused boot session reads the same: restart.
 mkdir -p "$C3/hc"; echo A > "$C3/sysctl.state"
-$TIMEOUT 90 env $C3ENV PATH="$C3/bin:$PATH" POSTMASTER_HOST_STATE="$C3/state-c" "$RUN" host run oracle259c3c "$C3/hc" --out "$C3/c.out" --err "$C3/c.err" --marker "$C3/c.done" -- sleep 293 >"$C3/c.run" 2>&1
-SLEEP_C=$(pgrep -f "sleep 293" | head -1 || true)
+$TIMEOUT 90 env $C3ENV PATH="$C3/bin:$PATH" POSTMASTER_HOST_STATE="$C3/state-c" "$RUN" host run oracle259c3c "$C3/hc" --out "$C3/c.out" --err "$C3/c.err" --marker "$C3/c.done" -- bash -c "exec -a $STAG-293 sleep 293" >"$C3/c.run" 2>&1
+SLEEP_C=$(pgrep -f "$STAG-293" | head -1 || true)
 echo refused > "$C3/sysctl.state"
 C3C_OUT=$($TIMEOUT 60 env $C3ENV PATH="$C3/bin:$PATH" POSTMASTER_HOST_STATE="$C3/state-c" "$RUN" host stop "$C3/hc" 2>&1) && C3C_CODE=$? || C3C_CODE=$?
 if [ "$C3C_CODE" -eq 0 ] && printf '%s' "$C3C_OUT" | grep -q "no launch is running"; then
@@ -273,7 +276,7 @@ fi
 
 # A record written by the base's code on the same boot still matches.
 mkdir -p "$C3/hd" "$C3/state-d/launches"; echo A > "$C3/sysctl.state"
-setsid sleep 292 &
+setsid bash -c "exec -a $STAG-292 sleep 292" &
 SLEEP_D=$!
 sleep 1
 D_PGID=$(ps -o pgid= -p "$SLEEP_D" | tr -d ' ')
@@ -294,8 +297,8 @@ fi
 
 # Unforced, the Linux boot id is read as today.
 mkdir -p "$C3/he"
-$TIMEOUT 90 env -u POSTMASTER_PROC_ROOT POSTMASTER_HOST=none PATH="$C3/bin:$PATH" POSTMASTER_HOST_STATE="$C3/state-e" "$RUN" host run oracle259c3e "$C3/he" --out "$C3/e.out" --err "$C3/e.err" --marker "$C3/e.done" -- sleep 293 >"$C3/e.run" 2>&1
-SLEEP_E=$(pgrep -f "sleep 293" | head -1 || true)
+$TIMEOUT 90 env -u POSTMASTER_PROC_ROOT POSTMASTER_HOST=none PATH="$C3/bin:$PATH" POSTMASTER_HOST_STATE="$C3/state-e" "$RUN" host run oracle259c3e "$C3/he" --out "$C3/e.out" --err "$C3/e.err" --marker "$C3/e.done" -- bash -c "exec -a $STAG-293 sleep 293" >"$C3/e.run" 2>&1
+SLEEP_E=$(pgrep -f "$STAG-293" | head -1 || true)
 REC_BOOT=$(grep -h "^boot " "$C3/state-e/launches"/* 2>/dev/null | head -1 | sed 's/^boot //')
 if [ "$REC_BOOT" = "$LINUX_BOOT" ]; then
   ok "unforced records carry the Linux boot id"
@@ -394,7 +397,12 @@ for (const sig of fatal) {
 }
 console.log("DEATHS total=" + fatal.length + " fails=" + deathFails.length);
 for (const f of deathFails) console.log("  " + f);
-if (signalExitCode.length >= 2) {
+// The seam is probed by behavior, not by shape: a defaulted parameter does not
+// count toward Function.length, so .length can never see it. Without a seam the
+// second argument is ignored and the probe equals the one-argument call.
+const seamProbe = (signalExitCode as (s: string, t: Record<string, number>) => number)("SIGUSR1", { SIGUSR1: 30 });
+const seamOneArg = (signalExitCode as (s: string) => number)("SIGUSR1");
+if (seamProbe === 158) {
   const mac = { SIGUSR1: 30, SIGBUS: 10, SIGSYS: 12 } as Record<string, number>;
   const picks = [
     ["SIGUSR1", 158],
@@ -408,8 +416,11 @@ if (signalExitCode.length >= 2) {
   }
   console.log("MAC fails=" + macFails.length);
   for (const f of macFails) console.log("  " + f);
-} else {
+} else if (seamProbe === seamOneArg) {
   console.log("SEAM none");
+} else {
+  console.log("MAC fails=1");
+  console.log("  numbers seam misbehaves: got " + seamProbe);
 }
 EOF
 C4_OUT=$(bun --no-env-file "$C4/check.ts" 2>&1) && C4_CODE=$? || C4_CODE=$?
@@ -450,10 +461,10 @@ else
   bad "output under the users own temporary folder is collected" "exit $C5A_CODE: $C5A_OUT"
 fi
 mkdir -p "/tmp/claude-$UIDN"
-echo "task output b" > "/tmp/claude-$UIDN/oracle259-c5-b.txt"
-printf '{"type":"system","subtype":"task_notification","output_file":"%s"}\n' "/tmp/claude-$UIDN/oracle259-c5-b.txt" > "$C5/ev-b.jsonl"
+echo "task output b" > "/tmp/claude-$UIDN/oracle259-c5-b-$$.txt"
+printf '{"type":"system","subtype":"task_notification","output_file":"%s"}\n' "/tmp/claude-$UIDN/oracle259-c5-b-$$.txt" > "$C5/ev-b.jsonl"
 C5B_OUT=$(env -u TMPDIR "$RUN" review-findings harvest "$C5/ev-b.jsonl" "$C5/logs-b" --prefix oracle259 2>&1) && C5B_CODE=$? || C5B_CODE=$?
-if [ "$C5B_CODE" -eq 0 ] && [ -e "$C5/logs-b/oracle259-claude-task-01-oracle259-c5-b.txt" ]; then
+if [ "$C5B_CODE" -eq 0 ] && [ -e "$C5/logs-b/oracle259-claude-task-01-oracle259-c5-b-$$.txt" ]; then
   ok "output under the shared temporary folder is collected, as today"
 else
   bad "output under the shared temporary folder is collected, as today" "exit $C5B_CODE: $C5B_OUT"
@@ -611,15 +622,18 @@ if printf '%s' "$SECTION" | grep -qE "scripts/|[A-Za-z0-9_-]+\.ts"; then
 else
   ok "the section names no file"
 fi
-# Stale self-test scratch from an earlier gate run is not part of the tree;
-# a failing suite leaves its own behind, and the gate still reports it red.
-rm -rf "$ROOT"/scripts/.host-self-test-*
+# Stale self-test scratch from a killed gate run is not part of the tree; a
+# failing suite leaves its own behind, and the gate still reports it red. Only
+# scratch older than 30 minutes goes: a concurrent run's is fresh, and a
+# self-test root lives only for its own suite.
+find "$ROOT/scripts" -maxdepth 1 -name '.host-self-test-*' -mmin +30 -exec rm -rf {} + || true
 if [ ! -x "$ROOT/node_modules/.bin/tsc" ]; then
   (cd "$ROOT" && $TIMEOUT 300 bun install --frozen-lockfile >/dev/null 2>&1) || true
 fi
+# The suite takes about 20 minutes on a quiet machine; the budget is twice that.
 if [ ! -x "$ROOT/node_modules/.bin/tsc" ]; then
   skip "bun run check passes" "dependencies are not installed and install failed"
-elif (cd "$ROOT" && $TIMEOUT 600 bun run check >"$TMP/gate.log" 2>&1); then
+elif (cd "$ROOT" && $TIMEOUT 2400 bun run check >"$TMP/gate.log" 2>&1); then
   ok "bun run check passes"
 else
   bad "bun run check passes" "$(tail -5 "$TMP/gate.log")"
