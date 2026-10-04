@@ -244,6 +244,14 @@ describe("the verdicts", () => {
     expect(r.out).toContain("the base commit is empty");
   });
 
+  test("unknown: a range ending past the last line, exit 0", () => {
+    const body = ticketBody(verified, `- Renders per ${LINK(verified, "docs/a.md", "L5-L99")}.`);
+    const r = cli([repo, body, verified]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("unknown");
+    expect(r.out).toContain("out of range at the Verified at commit");
+  });
+
   test("prose in code spans is skipped, not failed", () => {
     const body = ticketBody(
       verified,

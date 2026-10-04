@@ -171,6 +171,14 @@ export function compareCitation(
   }
   const start = citation.start;
   const end = citation.end;
+  // A finite end past the last verified line is an invalid cite, not a
+  // short file: the excerpt would clamp and could report it as same.
+  // Whole-file spans carry no finite end and are exempt.
+  if (end !== undefined && Number.isFinite(end)) {
+    const verifiedLines = verifiedText.split("\n").length;
+    if (end > verifiedLines)
+      return entry("unknown", `${span} is out of range at the Verified at commit`);
+  }
   const expected = excerptOf(verifiedText, start, end);
   if (!expected) return entry("unknown", `${span} is out of range at the Verified at commit`);
   const actual = excerptOf(baseText, start, end);
