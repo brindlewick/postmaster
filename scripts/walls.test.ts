@@ -3,7 +3,15 @@
 // C13-C21). The machine-zone forms run in a child with TZ pinned, so the clock the tests
 // set is the only variable.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./lib/proc.ts";
@@ -99,6 +107,31 @@ describe("the reset, in the shapes providers have used", () => {
   test("the claude wall's own message gives 3am UTC", () => {
     expect(parseIn(CLAUDE_MSG, NOW)).toBe("2026-10-05T03:00:00Z");
   });
+
+  test("a zoned time takes the calendar day in the named zone, not the machine's", () => {
+    expect(parseIn("resets 11pm (Pacific/Honolulu)", NOW, "Asia/Tokyo")).toBe(
+      "2026-10-05T09:00:00Z",
+    );
+  });
+
+  test("zones with digits and punctuation validate through the time-zone database", () => {
+    expect(parseIn("resets 3am (Etc/GMT+5)", NOW)).toBe("2026-10-05T08:00:00Z");
+    expect(parseIn("resets 3am (America/Port-au-Prince)", NOW)).toBe("2026-10-05T07:00:00Z");
+  });
+
+  test("only the record's first line is read: a stray timestamp below it never counts", () => {
+    expect(
+      parseIn(
+        "resets 9pm (UTC)\nturn log: 2026-10-02 17:00:44",
+        Date.parse("2026-10-02T18:00:00Z"),
+      ),
+    ).toBe("2026-10-02T21:00:00Z");
+    expect(parseIn("usage limit reached\ntry again at 2:29 AM", NOW)).toBe("none");
+  });
+
+  test("an out-of-range wait is no reset time, never a crash", () => {
+    expect(parseIn("usage limit in 9999999999 hours", NOW)).toBe("none");
+  });
 });
 
 describe("the wall lines, read back in file order", () => {
@@ -167,6 +200,16 @@ describe("the wall lines, read back in file order", () => {
     expect(w.role).toBe("workhorse");
     expect(w.told).toBe(false);
     expect(w.ruled).toBe(false);
+  });
+
+  test("a U+2028 in the message keeps the wall's role, lens and round", () => {
+    const d = dispatch("u2028");
+    const detail = `reviewer security 1 none msg${String.fromCharCode(0x2028)}split`;
+    writeFileSync(join(d, "actions.jsonl"), line("wall", "sec", detail, "lane:sec"));
+    const w = readWalls(d)[0]!;
+    expect(w.role).toBe("reviewer");
+    expect(w.lens).toBe("security");
+    expect(w.round).toBe("1");
   });
 });
 
@@ -351,6 +394,40 @@ describe("walls.sh rule: the one ruling, and what it refuses", () => {
     expect(actions()).toBe(before);
   });
 
+  test("a wall after a carry-out takes a new ruling (C21)", () => {
+    fresh("rule-after-carry-new", ["stub", "mimo"]);
+    const reviewerWall = (lane: string): string =>
+      `${JSON.stringify({ ts: "2026-10-05T00:00:01Z", actor: `lane:${lane}`, action: "wall", target: lane, detail: "reviewer bug 2 none stuck in review" })}\n`;
+    writeFileSync(join(d, "actions.jsonl"), wallLine("stub") + wallLine("mimo"));
+    expect(run(self, ["rule", d, "stub", "go-on"]).code).toBe(0);
+    expect(run(self, ["carry", d, "stub"]).code).toBe(0);
+    writeFileSync(join(d, "actions.jsonl"), actions() + reviewerWall("stub"));
+    const r = run(self, ["rule", d, "stub", "go-on"]);
+    expect(r.code).toBe(0);
+    expect(run(self, ["open", d]).code).toBe(1); // mimo's workhorse wall is still open
+  });
+
+  test("go-on for a reviewer wall is never refused as a last workhorse", () => {
+    fresh("rule-reviewer-last", ["stub"]);
+    const wt = join(tmp, "proj", ".worktrees", "rule-reviewer-last-stub");
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(join(wt, "WORKHORSE-SUMMARY.md"), "done\n");
+    writeFileSync(
+      join(d, "actions.jsonl"),
+      `${JSON.stringify({ ts: "2026-10-05T00:00:00Z", actor: "lane:stub", action: "wall", target: "stub", detail: "reviewer bug 1 none stuck in review" })}\n`,
+    );
+    const r = run(self, ["rule", d, "stub", "go-on"]);
+    expect(r.code).toBe(0);
+  });
+
+  test("go-on for a lone workhorse wall is still refused (C19 control)", () => {
+    fresh("rule-lone-horse", ["stub"]);
+    writeFileSync(join(d, "actions.jsonl"), wallLine("stub"));
+    const r = run(self, ["rule", d, "stub", "go-on"]);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("no other workhorse");
+  });
+
   test("a ruling for a lane with no wall is usage (exit 1), and an unknown ruling too", () => {
     fresh("rule-usage", ["stub"]);
     writeFileSync(join(d, "actions.jsonl"), wallLine("stub"));
@@ -436,6 +513,17 @@ describe("walls.sh told, escalate and carry", () => {
     expect(run(self, ["carry", d, "stub"]).code).toBe(0);
     expect(count("carry")).toBe(1);
     expect(run(self, ["carry", d, "nobody"]).code).toBe(1);
+  });
+
+  test("a go-on ruled after a carry-out gets its own carry line (C21)", () => {
+    const ruled = (ts: string): string =>
+      `${JSON.stringify({ ts, actor: "postmaster", action: "rule", target: "stub", detail: "wall go-on" })}\n`;
+    writeFileSync(join(d, "actions.jsonl"), wallLine("stub") + ruled("2026-10-05T00:00:01Z"));
+    expect(run(self, ["carry", d, "stub"]).code).toBe(0);
+    expect(count("carry")).toBe(1);
+    appendFileSync(join(d, "actions.jsonl"), wallLine("stub") + ruled("2026-10-05T00:00:03Z"));
+    expect(run(self, ["carry", d, "stub"]).code).toBe(0);
+    expect(count("carry")).toBe(2);
   });
 });
 

@@ -12,8 +12,9 @@
 //   exit 1  usage, an unreadable dispatch, no wall where one was named, or open: walls with
 //           no ruling, each listed on its own line
 //   exit 2  a ruling refused, the reason on stderr: rest, reset-now and substitute are the
-//           separate ticket's; go-on is refused for the last workhorse that could still
-//           produce work, and every ruling after the lane's carry-out
+//           separate ticket's; go-on for a workhorse wall is refused for the last workhorse
+//           that could still produce work, and every ruling once every wall of the lane
+//           is carried out
 //
 // Walls live in the run's actions.jsonl as `wall` lines (log-action.ts), each with the lane
 // as its target and `<role> <lens> <round> <reset> <the provider's first line>` as its
@@ -88,7 +89,9 @@ export function readWalls(dispatch: string): Wall[] {
     index += 1;
   }
   return raw.map((w) => {
-    const m = /^([^ ]+) ([^ ]+) ([^ ]+) ([^ ]+) (.*)$/u.exec(w.detail);
+    // The `s` flag: the message may hold U+2028 or U+2029, which `.` without it
+    // refuses, and a reviewer's wall would then read as a workhorse's.
+    const m = /^([^ ]+) ([^ ]+) ([^ ]+) ([^ ]+) (.*)$/su.exec(w.detail);
     const role = m ? m[1]! : "workhorse";
     const lens = m ? m[2]! : "-";
     const round = m ? m[3]! : "-";
@@ -324,7 +327,9 @@ export function wallsCommand(argv: string[]): number {
       console.error(`walls: refused: ${lane} has a wall with no ruling to carry`);
       return 2;
     }
-    if (laneWalls.some((w) => w.carried)) return 0; // each go-on is carried out once
+    // Each go-on is carried out once: a ruling recorded after an earlier carry-out
+    // still gets its own carry line (C21).
+    if (laneWalls.every((w) => w.carried)) return 0;
     if (logAction(dispatch, "coachman", "carry", lane, "wall go-on") !== 0) {
       console.error(`walls: the carry-out of ${lane}'s wall was not recorded`);
       return 1;
@@ -346,14 +351,20 @@ export function wallsCommand(argv: string[]): number {
     console.error(`walls: no wall for ${lane}`);
     return 1;
   }
-  if (laneWalls.some((w) => w.carried)) {
+  // A ruling answers the lane's walls that are not carried out yet: a wall from an
+  // earlier pause never blocks the ruling a later wall needs (C21). Only when every
+  // wall of the lane is carried out is there nothing left to rule.
+  if (laneWalls.every((w) => w.carried)) {
     console.error(
       `walls: refused: ${lane}'s wall was already carried out; a ruling after it is refused`,
     );
     return 2;
   }
   const horses = workhorses(dispatch);
-  if (horses.includes(lane)) {
+  // The safeguard is for workhorse walls (C19): a reviewer wall on a lane that also
+  // works takes no work away, so it is never refused as a last workhorse.
+  const answersWorkhorse = laneWalls.some((w) => !w.ruled && w.role === "workhorse");
+  if (horses.includes(lane) && answersWorkhorse) {
     const others = horses.filter((x) => x !== lane);
     if (!others.some((x) => couldProduce(dispatch, walls, x))) {
       console.error(

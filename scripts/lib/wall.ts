@@ -27,7 +27,10 @@ const MONTHS: Record<string, number> = {
 export function validZone(text: string): string | null {
   const z = text.trim();
   if (/^UTC$/iu.test(z)) return "UTC";
-  if (/^[A-Za-z]+(?:_[A-Za-z]+)*(?:\/[A-Za-z]+(?:_[A-Za-z]+)*)+$/u.test(z)) {
+  // The shape is loose on purpose: digits, hyphens and `+` all occur in real IANA
+  // names (Etc/GMT+5, America/Port-au-Prince), and the time-zone database below is
+  // the real validator. A bare name stays unreadable: an abbreviation never validates.
+  if (/^[A-Za-z0-9_+-]+(?:\/[A-Za-z0-9_+-]+)+$/u.test(z)) {
     try {
       new Intl.DateTimeFormat("en-US", { timeZone: z });
       return z;
@@ -85,6 +88,22 @@ function zonedInstant(
   }
 }
 
+/** The calendar date in a zone at an instant: a zoned reset counts its days there (D4). */
+function zonedYMD(ts: number, tz: string): [number, number, number] {
+  if (tz === "UTC") {
+    const n = new Date(ts);
+    return [n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()];
+  }
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(ts));
+  const get = (t: string): number => Number(parts.find((p) => p.type === t)?.value ?? "0");
+  return [get("year"), get("month") - 1, get("day")];
+}
+
 function hour12(h: number, ap: string | undefined): number {
   const lower = (ap ?? "").toLowerCase(); // ASCII: am/pm is ASCII however the message cases it
   if (lower === "pm" && h < 12) return h + 12;
@@ -106,18 +125,23 @@ function blank(m: string): string {
 
 /**
  * The reset a provider message gives, as an ISO time with offset, or null when it gives
- * none (D4, D5). `nowMs` is the moment the wall line is written.
+ * none (D4, D5). Read from the message's first line, the line the run keeps; `nowMs`
+ * is the moment the wall line is written.
  */
 export function parseWallReset(message: string, nowMs: number): string | null {
   const cands: number[] = [];
-  let text = message;
+  // The record's first line only: it is the text the run keeps, so a reset always
+  // traces to a recorded message, and a stray timestamp further down never counts (D5).
+  let text = message.split("\n")[0] ?? "";
 
   // `in N minutes|hours`, counted from when the lane stopped.
   text = text.replace(
     /(?:^|[^0-9A-Za-z_])in[ \t\n\f\r\v]+([0-9]+)[ \t\n\f\r\v]+(minutes?|hours?)(?:$|[^0-9A-Za-z_])/giu,
     (m, n: string, unit: string) => {
       const step = /^hour/iu.test(unit) ? 3600 : 60;
-      cands.push(nowMs + Number(n) * step * 1000);
+      const t = nowMs + Number(n) * step * 1000;
+      // An out-of-range wait is no reset time, never a crash (D5).
+      if (Number.isFinite(t) && !Number.isNaN(new Date(t).getTime())) cands.push(t);
       return blank(m);
     },
   );
@@ -161,11 +185,7 @@ export function parseWallReset(message: string, nowMs: number): string | null {
       const hour = hour12(Number(h), ap);
       const minute = Number(mi ?? "0");
       const instant = firstOccurrence(nowMs, (dayOffset) => {
-        const n = new Date(nowMs);
-        const [y, mo, day] =
-          tz === "UTC"
-            ? [n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()]
-            : [n.getFullYear(), n.getMonth(), n.getDate()];
+        const [y, mo, day] = zonedYMD(nowMs, tz);
         return zonedInstant(y, mo, day + dayOffset, hour, minute, tz);
       });
       if (instant !== null) cands.push(instant);
