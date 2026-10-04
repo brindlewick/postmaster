@@ -28,7 +28,7 @@ interface Scratch {
 }
 
 function scratch(): Scratch {
-  const tmp = mkdtempSync(join(tmpdir(), "spec-session-test-"));
+  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "spec-session-test-")));
   const root = join(tmp, "project");
   const d = join(root, ".postmaster", "runs", "RUN-1");
   const synth = join(root, ".worktrees", "RUN-1");

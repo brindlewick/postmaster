@@ -126,6 +126,11 @@ test("the list parses its shape and refuses what it cannot list honestly", () =>
   );
   expect(badSystem.faults.some((f) => f.includes("unknown system"))).toBe(true);
 
+  const dupSystem = parseSkipList(
+    '[[skip]]\nfile = "scripts/a.test.ts"\nname = "n"\nreason = "r"\nsystems = ["linux", "linux"]\n',
+  );
+  expect(dupSystem.faults.some((f) => f.includes("listed twice"))).toBe(true);
+
   const notTables = parseSkipList("skip = 3\n");
   expect(notTables.faults).toHaveLength(1);
 
