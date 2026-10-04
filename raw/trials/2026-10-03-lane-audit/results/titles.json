@@ -1,4 +1,5 @@
 {
+  "38": "Run the bug review through each harness's own code-review skill",
   "57": "A leg's launch, resume and takeover are run by a script that records how each ended",
   "75": "Dispatch refuses a run directory or branch that already exists",
   "90": "Explore OpenAI's Codex Security CLI as another security reviewer",
@@ -6,6 +7,7 @@
   "104": "Research: test each leg on its own, starting with planted bugs for the review leg",
   "109": "Rewrite the scripts in TypeScript, run by Bun",
   "110": "A project's gate never sees the run's own working copies",
+  "114": "A run uses the postmaster version it was dispatched from, so changes can merge with runs in flight",
   "122": "The watcher takes the mechanical steps itself, and wakes the postmaster only for decisions",
   "124": "The review leg ends with the run ready for the user's merge, with no separate ship leg",
   "135": "A gate check refuses any change that carries personal data or a secret",

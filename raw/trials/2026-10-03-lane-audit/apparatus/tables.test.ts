@@ -13,6 +13,7 @@ import {
   md,
   minutes,
   perRunTokens,
+  rankedFirst,
   realWorkhorses,
   recallTable,
   reviewTable,
@@ -367,5 +368,25 @@ describe("time and incident tables", () => {
     expect(out).toContain(
       "[#200](https://github.com/brindlewick/postmaster/issues/200), fixture-37",
     );
+  });
+});
+
+describe("rankedFirst", () => {
+  const ranked = (...lanes: string[]) => run({ synthesis: synthesis(lanes, "none") });
+
+  test("counts the lane each run ranked first, most first, ties by name", () => {
+    expect(
+      rankedFirst([
+        ranked("mimo", "luna"),
+        ranked("luna", "mimo"),
+        ranked("mimo", "sol"),
+        ranked("sol", "mimo"),
+      ]),
+    ).toBe("mimo 2, luna 1, sol 1");
+  });
+
+  test("a run with no synthesis is not counted, and no runs give nothing", () => {
+    expect(rankedFirst([run(), ranked("mimo", "luna")])).toBe("mimo 1");
+    expect(rankedFirst([])).toBe("");
   });
 });

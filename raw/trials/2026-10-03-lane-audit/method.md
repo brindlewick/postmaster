@@ -50,7 +50,10 @@ names whichever codex model the config gave that lane at the time. Most runs dis
 
 **Definitions.** Each is the earlier audit's unless it says it changed.
 
-- *Ranked*, *took*, *rejected*, *blind tests*: the fields of the SYNTHESIS line, as before.
+- *Ranked*, *took*, *rejected*, *blind tests*: the fields of the SYNTHESIS line, as before. The
+  coachman writes the ranking last, after it has composed the synthesis from the base part by part,
+  and it knows which lane is which. Nothing in the config sets a lead lane. *The second lane* in
+  every table is the lane ranked second.
 - *The second lane's part*: read from the card, against a rubric fixed before any run was
   classified. **A**: the second-ranked lane supplied something the card says the first lane's
   version got wrong or lacked, shown by a probe or a failing criterion, a defect fix or a part of
@@ -96,7 +99,7 @@ it. They show the
 code applies a rule the same way on a run where it must read non-zero and one where it must read
 zero. They cannot show that the rule is the right one. Who named a finding was read by hand on a
 sample of 45 lines drawn with a fixed generator, and all 45 match. The scripts in
-[apparatus/](apparatus/) have tests beside them, 150 in all, and the hidden-test run has its own
+[apparatus/](apparatus/) have tests beside them, 152 in all, and the hidden-test run has its own
 controls: the suite passes the fixture ticket's reference patch and fails the app before it.
 
 **Judgements, and who made them.** The second lane's part was classed by one reader from the
@@ -134,6 +137,9 @@ A reader without the records runs `render.ts` alone and gets every table from th
   had no blind tests, because the design question was the interface.
 - The fixture ticket is one small ticket, run at the lowest effort, and every lane passes it. It
   cannot show what a second workhorse adds on a hard one.
+- The ranking is the coachman's, given after the fact and not blind. It does not say whose code
+  shipped, and on the fixture ticket it cannot follow the hidden tests, which every lane passed.
+  *The second lane's part* is therefore the part of the lane the coachman ranked second.
 - *Verified* is the coachman's word, mostly by execution, and *severe* is its scale. A lane's
   finding the coachman dismissed is not counted, and only the newest runs list dismissals.
 - Who named a finding is the coachman's record. A line that names lenses and no lane reads as none:

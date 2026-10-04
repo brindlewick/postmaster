@@ -506,6 +506,19 @@ export { isSevere };
 const num = (n: number | null, digits = 0): string =>
   n === null ? "–" : n.toLocaleString("en-US", { maximumFractionDigits: digits });
 
+/** How many runs each lane was ranked first in, most first: `mimo 5, luna 2`. */
+export function rankedFirst(runs: readonly RunRecord[]): string {
+  const counts = new Map<string, number>();
+  for (const r of runs) {
+    const lane = r.synthesis?.ranked[0];
+    if (lane) counts.set(lane, (counts.get(lane) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([lane, n]) => `${lane} ${n}`)
+    .join(", ");
+}
+
 /**
  * Every figure the report's prose quotes, named, so that each sentence can cite one file. The
  * figures are computed here from the same data as the tables and are not typed in by hand.
@@ -620,9 +633,14 @@ export function figures(d: Data): Array<[string, string]> {
   );
   const realShares = real.flatMap((r) => {
     const w = workhorses(r);
-    return w?.code ? [`${r.id} ${w.code.secondOnly}%`] : [];
+    return w?.code ? [`${r.id} first ${w.code.firstOnly}%, second ${w.code.secondOnly}%`] : [];
   });
-  add("real runs with shares recorded, second lane's own share", realShares.join(", "));
+  add(
+    "real runs with shares recorded, each lane's own share of the code, first-ranked and second-ranked",
+    realShares.join("; "),
+  );
+  add("real runs, lane ranked first", rankedFirst(real));
+  add("fixture runs, lane ranked first", rankedFirst(fixtures));
 
   const waits = (runs: readonly RunRecord[]): number[] =>
     runs.flatMap((r) => {

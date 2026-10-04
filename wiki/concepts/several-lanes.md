@@ -80,6 +80,26 @@ coachman's harvest line. Hidden tests per lane, review findings, tokens and inci
 
 ### In this repository's runs
 
+**How to read "ranked".** The coachman does not pick a lead lane and then top it up from the other
+one. It reads both diffs, writes the synthesis from the base part by part, takes each part from
+whichever lane did it better, and writes the ranking last, on the SYNTHESIS line, lead lane first
+([the runbook](https://github.com/brindlewick/postmaster/blob/40d50ce/skills/postmaster/coachman.md)).
+Nothing in the config picks a lead lane. The runbook says "primary" only orders the launches. So
+the lead lane is on record for every run, but it is the coachman's own label, given after the fact,
+and it is not blind: the coachman knows which lane is which. Three things follow.
+
+- The label does not say whose code ships. In the five real runs with code shares, the lane ranked
+  first wrote 13% to 91% of the code and the second 0% to 25%. In the earlier audit's runs the
+  second-ranked lane wrote most of the synthesis in [#109, Rewrite the scripts in TypeScript, run by Bun](https://github.com/brindlewick/postmaster/issues/109) (73%) and [#114, A run uses the postmaster version it was dispatched from, so changes can merge with runs in flight](https://github.com/brindlewick/postmaster/issues/114) (65%), and most of the code
+  in [#38, Run the bug review through each harness's own code-review skill](https://github.com/brindlewick/postmaster/issues/38) (77%) [@trials/2026-09-29-synthesis-audit/share.md].
+- It varies by ticket and is not tied to test results. A codex lane was ranked first in 13 of the
+  18 real runs and mimo in 5. On the fixture ticket mimo was first in 19 of 24 runs, where every
+  lane passed every hidden test, so there the ranking cannot follow what the tests measure
+  [@trials/2026-10-03-lane-audit/results/numbers.md].
+- The line has to name something taken from each lane, so it always reads as if both helped. This
+  page does not use it to judge the second lane. It uses the defects the cards name, the code
+  shares and the tests.
+
 The second lane's part, read from each synthesis card against a rubric fixed first. **A**: a defect
 fix or a part the first lane lacked, shown by a probe or a failing criterion. **B**: real but
 optional items. **C**: nothing, the same items, or no code. A second reader, blind to the first,
