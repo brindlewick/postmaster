@@ -4,9 +4,12 @@
 // fall. Nothing here touches a live Herdr or tmux: herdr and tmux are stubs on PATH and the
 // host state lives under the temp folder.
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -14,6 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { bootId, processes } from "./host.ts";
 import { run } from "./lib/proc.ts";
 import { scriptsDir } from "./lib/paths.ts";
 
@@ -183,20 +187,36 @@ function makeR(): Fixture {
   return { T, repo, D, BASE, C, pin };
 }
 
-function aftercare(r: Fixture, args: string[]): { code: number; out: string } {
+function fixtureEnv(
+  r: Fixture,
+  extra?: Record<string, string>,
+): Record<string, string | undefined> {
+  return {
+    PATH: `${join(r.T, "bin")}:${process.env.PATH ?? ""}`,
+    POSTMASTER_HOST_STATE: join(r.T, "state"),
+    POSTMASTER_HOST_FIXTURE: r.T,
+    POSTMASTER_HOST_CLOSE_WAIT: "1",
+    POSTMASTER_TOOL_PINS: join(r.T, "pins"),
+    ...extra,
+  };
+}
+
+function aftercare(
+  r: Fixture,
+  args: string[],
+  extraEnv?: Record<string, string>,
+): { code: number; out: string } {
   const result = run(
     "bun",
     ["--no-env-file", "--config=/dev/null", join(HERE, "aftercare.ts"), r.D, ...args],
-    {
-      env: {
-        PATH: `${join(r.T, "bin")}:${process.env.PATH ?? ""}`,
-        POSTMASTER_HOST_STATE: join(r.T, "state"),
-        POSTMASTER_HOST_FIXTURE: r.T,
-        POSTMASTER_HOST_CLOSE_WAIT: "1",
-        POSTMASTER_TOOL_PINS: join(r.T, "pins"),
-      },
-    },
+    { env: fixtureEnv(r, extraEnv) },
   );
+  return { code: result.code, out: `${result.out}${result.err}` };
+}
+
+/** host.sh under the same fixture env, for starting a launch the command must stop. */
+function hostSh(r: Fixture, args: string[]): { code: number; out: string } {
+  const result = run("bash", [join(HERE, "host.sh"), ...args], { env: fixtureEnv(r) });
   return { code: result.code, out: `${result.out}${result.err}` };
 }
 
@@ -427,6 +447,248 @@ describe("aftercare on a landed run record", () => {
     const statuses = JSON.parse(againJson.out).steps.map((s: { status: string }) => s.status);
     expect(statuses).toContain("already");
     expect(statuses).not.toContain("already done");
+  }, 120_000);
+
+  test("non-UTF8 saves are byte-identical: the untracked archive extracts and the diff matches git's own bytes", () => {
+    const r = makeR();
+    const blob = randomBytes(1024);
+    blob[0] = 0xff;
+    blob[1] = 0xfe;
+    writeFileSync(join(r.repo, ".worktrees/7-sol/blob.bin"), blob);
+    const latin = Buffer.concat([
+      Buffer.from("export const a = '", "utf8"),
+      new Uint8Array([0xe9, 0xe8]),
+      Buffer.from("';\n", "utf8"),
+    ]);
+    writeFileSync(join(r.repo, ".worktrees/7-mimo/src/a.ts"), latin);
+    const wantDiff = Buffer.from(
+      spawnSync("git", ["-C", join(r.repo, ".worktrees/7-mimo"), "diff", "--binary"])
+        .stdout as Uint8Array,
+    );
+    const result = aftercare(r, WORDS);
+    expect(result.code).toBe(0);
+    // the archive lists the binary beside the text files and extracts it exactly
+    const listed = sh("tar", ["-tf", join(r.D, "stray/7-sol.untracked.tar")]);
+    for (const name of ["blob.bin", "one.txt", "two.txt", "three.txt"])
+      expect(listed).toContain(name);
+    const out = join(r.T, "extracted");
+    mkdirSync(out);
+    sh("tar", ["-xf", join(r.D, "stray/7-sol.untracked.tar"), "-C", out]);
+    expect(readFileSync(join(out, "blob.bin"))).toEqual(blob);
+    // the diff part holds git's own bytes, U+FFFD nowhere
+    expect(readFileSync(join(r.D, "stray/7-mimo.diff"))).toEqual(wantDiff);
+    // control: the saved folders are gone all the same
+    expect(existsSync(join(r.repo, ".worktrees/7-sol"))).toBe(false);
+    expect(existsSync(join(r.repo, ".worktrees/7-mimo"))).toBe(false);
+  }, 120_000);
+
+  test("a live preview is stopped: exit 0, its group dead, the synthesis folder gone", () => {
+    const r = makeR();
+    const started = hostSh(r, [
+      "run",
+      "preview server",
+      join(r.repo, ".worktrees/7"),
+      "--under",
+      r.D,
+      "--role",
+      "coachman",
+      "--run",
+      r.D,
+      "--pidfile",
+      join(r.D, "render/preview.pid"),
+      "--out",
+      join(r.T, "p.out"),
+      "--err",
+      join(r.T, "p.err"),
+      "--",
+      "sleep",
+      "300",
+    ]);
+    expect(started.code).toBe(0);
+    const pid = Number(readFileSync(join(r.D, "render/preview.pid"), "utf8").trim());
+    expect(alive(pid)).toBe(true);
+    try {
+      const result = aftercare(r, WORDS);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain("step preview: stopped");
+      expect(alive(pid)).toBe(false);
+      expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
+    } finally {
+      killQuiet(pid);
+    }
+  }, 120_000);
+
+  test("a record naming another folder is never signalled: exit 0, the process left alone", () => {
+    const r = makeR();
+    const pid = backgroundSleep();
+    try {
+      const start = processes().get(pid)?.start ?? "";
+      expect(start).not.toBe("");
+      mkdirSync(join(r.T, "state/launches"), { recursive: true });
+      writeFileSync(
+        join(r.T, "state/launches", String(pid)),
+        `${r.T}\npreview server\nstart ${start}\nboot ${bootId()}\n`,
+      );
+      writeFileSync(join(r.D, "render/preview.pid"), `${pid}\n`);
+      const result = aftercare(r, WORDS);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain("step preview: noted");
+      expect(result.out).toContain("not this run's synthesis folder");
+      expect(alive(pid)).toBe(true);
+      // control: with the start check passing, only the folder check stands between — and
+      // the synthesis folder still went, since nothing runs in it
+      expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
+    } finally {
+      killQuiet(pid);
+    }
+  }, 120_000);
+
+  test("a staged rename never flags; the same rename with new content does", () => {
+    const r = makeR();
+    const mimo = join(r.repo, ".worktrees/7-mimo");
+    writeFileSync(join(mimo, "Updated.md"), "export const a = 2;\n");
+    sh("git", ["add", "Updated.md"], mimo);
+    sh("git", ["commit", "-qm", "a note"], mimo);
+    sh("git", ["mv", "Updated.md", "Zed.md"], mimo);
+    const result = aftercare(r, WORDS);
+    expect(result.code).toBe(0);
+    expect(result.out).not.toContain("flagged");
+    // control: new content under the new name still flags with the new path
+    const r2 = makeR();
+    const mimo2 = join(r2.repo, ".worktrees/7-mimo");
+    writeFileSync(join(mimo2, "Updated.md"), "export const a = 2;\n");
+    sh("git", ["add", "Updated.md"], mimo2);
+    sh("git", ["commit", "-qm", "a note"], mimo2);
+    sh("git", ["mv", "Updated.md", "Zed.md"], mimo2);
+    writeFileSync(join(mimo2, "Zed.md"), "export const a = 9;\n");
+    const flagged = aftercare(r2, WORDS);
+    expect(flagged.code).toBe(0);
+    expect(flagged.out).toContain("flagged: Zed.md");
+  }, 180_000);
+
+  test("a torn lock never refuses the dry run; a live holder still does", () => {
+    const r = makeR();
+    writeFileSync(join(r.D, ".aftercare.lock"), "");
+    const before = snapshot(r);
+    const dry = aftercare(r, ["--dry-run", ...WORDS]);
+    expect(dry.code).toBe(0);
+    expect(dry.out).not.toContain("already running");
+    expect(snapshot(r)).toBe(before);
+    // control: a lock naming a live process refuses, in the same mode
+    const r2 = makeR();
+    const pid = backgroundSleep();
+    try {
+      writeFileSync(join(r2.D, ".aftercare.lock"), `${pid}\n`);
+      const refused = aftercare(r2, ["--dry-run", ...WORDS]);
+      expect(refused.code).toBe(1);
+      expect(refused.out).toContain(`already running on this run (pid ${pid})`);
+    } finally {
+      killQuiet(pid);
+    }
+  }, 120_000);
+
+  test("run again with no words after a done run: exit 0 and nothing changed", () => {
+    const r = makeR();
+    expect(aftercare(r, WORDS).code).toBe(0);
+    const before = snapshot(r);
+    const again = aftercare(r, []);
+    expect(again.code).toBe(0);
+    expect(again.out).toContain("outcome: done");
+    expect(again.out).toContain("step run-log: already done");
+    expect(snapshot(r)).toBe(before);
+    // control: the same call on an open run still faults for its words
+    const r2 = makeR();
+    const open = aftercare(r2, []);
+    expect(open.code).toBe(1);
+    expect(open.out).toContain("stop at closing words");
+  }, 120_000);
+
+  test("a posted comment whose log line never landed is reconciled, never reposted", () => {
+    const r = makeR();
+    expect(aftercare(r, WORDS).code).toBe(0);
+    const kept = readFileSync(join(r.D, "actions.jsonl"), "utf8")
+      .split("\n")
+      .filter((line) => line === "" || JSON.parse(line).action !== "ticket-comment");
+    writeFileSync(join(r.D, "actions.jsonl"), kept.join("\n"));
+    const again = aftercare(r, WORDS);
+    expect(again.code).toBe(0);
+    expect(again.out).toContain("reconciled");
+    const logged = readFileSync(join(r.repo, ".git/postmaster/tickets/7.json"), "utf8");
+    expect(logged.split("postmaster: closing words").length - 1).toBe(1);
+    // control: the marker path still shows already done and posts nothing either
+    const r2 = makeR();
+    expect(aftercare(r2, WORDS).code).toBe(0);
+    const marked = aftercare(r2, WORDS);
+    expect(marked.out).toContain("step ticket-comment: already done");
+  }, 120_000);
+
+  test("a ticket-dash symlink to a file, and a dangling one, are named left like a dir link", () => {
+    const r = makeR();
+    const fileLink = join(r.repo, ".worktrees/7-filelink");
+    const dangling = join(r.repo, ".worktrees/7-dangling");
+    sh("ln", ["-s", join(r.repo, "README.md"), fileLink]);
+    sh("ln", ["-s", join(r.T, "no-such-file"), dangling]);
+    const result = aftercare(r, WORDS);
+    expect(result.code).toBe(3);
+    for (const link of [fileLink, dangling]) {
+      expect(result.out).toContain(link);
+      expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    }
+    expect(result.out).toContain("symbolic link");
+    // control: the run's other folders still went
+    expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
+  }, 120_000);
+
+  test("an unreadable .worktrees stops exit 1 with the step and the next step; readable again it closes", () => {
+    const r = makeR();
+    chmodSync(join(r.repo, ".worktrees"), 0o000);
+    try {
+      const stopped = aftercare(r, WORDS);
+      expect(stopped.code).toBe(1);
+      expect(stopped.out).toContain("stop at folder");
+      expect(stopped.out).toContain("aftercare: next:");
+      expect(changedFolders(r).length).toBe(6);
+      expect(JSON.parse(readFileSync(join(r.D, "manifest.json"), "utf8")).stage).toBe("shipped");
+    } finally {
+      chmodSync(join(r.repo, ".worktrees"), 0o755);
+    }
+    // control: the same run closes once the folder lists again
+    expect(aftercare(r, WORDS).code).toBe(0);
+  }, 120_000);
+
+  test("a tracker kind that cannot be told stops the dry run as it stops the real run", () => {
+    const r = makeR();
+    sh("rm", ["-rf", join(r.repo, ".git/postmaster")]);
+    const env = { POSTMASTER_CONFIG: join(r.T, "no-config.toml") };
+    const dry = aftercare(r, ["--dry-run", ...WORDS], env);
+    expect(dry.code).toBe(3);
+    expect(dry.out).toContain("step ticket-state: failed");
+    expect(dry.out).toContain("step ticket-comment: waiting");
+    expect(dry.out).toContain("step release: waiting");
+    // control: the real run stops at the same step, its folders already gone
+    const real = aftercare(r, WORDS, env);
+    expect(real.code).toBe(3);
+    expect(real.out).toContain("step ticket-state: failed");
+    expect(real.out).toContain("step release: waiting");
+    expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(r.D, "manifest.json"), "utf8")).stage).toBe("shipped");
+  }, 180_000);
+
+  test("an unknown ticket state fails its step and leaves the later steps waiting", () => {
+    const r = makeR();
+    const ticketPath = join(r.repo, ".git/postmaster/tickets/7.json");
+    const ticket = JSON.parse(readFileSync(ticketPath, "utf8"));
+    ticket.state = "weird";
+    writeFileSync(ticketPath, `${JSON.stringify(ticket)}\n`);
+    const result = aftercare(r, WORDS);
+    expect(result.code).toBe(3);
+    expect(result.out).toContain("step ticket-state: failed");
+    expect(result.out).toContain("which this command does not move");
+    for (const step of ["ticket-comment", "stage", "release"])
+      expect(result.out).toContain(`step ${step}: waiting`);
+    // control: the run-log line before it still went, the folders too
+    expect(result.out).toContain("step run-log: done");
+    expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
   }, 120_000);
 
   test("a ticket-dash symlink is left in place with a note naming why", () => {

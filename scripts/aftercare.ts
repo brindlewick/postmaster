@@ -36,6 +36,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import {
   bootId,
@@ -46,8 +47,9 @@ import {
   runWorktreePaths,
 } from "./host.ts";
 import { beside } from "./lib/paths.ts";
-import { argvDecoded, run } from "./lib/proc.ts";
+import { argvDecoded, run, signalExitCode } from "./lib/proc.ts";
 import type { RunResult } from "./lib/proc.ts";
+import { pyWords } from "./lib/text.ts";
 import { isCurrent } from "./stage.ts";
 
 type Code = 0 | 1 | 2 | 3;
@@ -107,6 +109,50 @@ function tail(result: RunResult): string {
 
 function full(result: RunResult): string {
   return `${result.out}\n${result.err}`.trim();
+}
+
+interface BytesResult {
+  code: number;
+  out: Buffer;
+  err: string;
+}
+
+/** run() without the UTF-8 decode: tar streams and git bytes pass through untouched, so a
+ * save of non-UTF-8 files is byte-identical. Exit reporting matches run(): 127/126 when the
+ * command never starts, 128 plus the signal's number when killed. */
+function runBytes(cmd: string, args: string[], input?: string | Uint8Array): BytesResult {
+  const r = spawnSync(cmd, args, {
+    input,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  const error = r.error as NodeJS.ErrnoException | undefined;
+  if (error && (r.status === null || r.status === undefined) && !r.signal) {
+    if (error.code === "ENOENT")
+      return { code: 127, out: Buffer.alloc(0), err: `${cmd}: command not found\n` };
+    if (error.code === "EACCES")
+      return { code: 126, out: Buffer.alloc(0), err: `${cmd}: permission denied\n` };
+    return {
+      code: 1,
+      out: Buffer.alloc(0),
+      err: `${cmd}: ${error.message}\n`,
+    };
+  }
+  let code: number;
+  if (r.status !== null && r.status !== undefined) code = r.status;
+  else if (r.signal) code = signalExitCode(r.signal);
+  else code = 1;
+  return {
+    code,
+    out: Buffer.from(r.stdout ?? Buffer.alloc(0)),
+    err: String(r.stderr ?? ""),
+  };
+}
+
+function tailBytes(result: BytesResult): string {
+  const text = result.err.trim();
+  if (!text) return `exit ${result.code} with no message`;
+  const lines = text.split("\n").filter((line) => line !== "");
+  return lines[lines.length - 1] ?? `exit ${result.code}`;
 }
 
 function parse(text: string): unknown {
@@ -331,11 +377,18 @@ function folderSet(dispatch: string, alreadyRemoved: Set<string>): FolderSet {
   // A scratch the records never named is only in the log once this command removed it; a
   // rerun still has to show it as done.
   for (const path of alreadyRemoved) if (dirname(path) === worktreesDir) candidates.add(path);
-  let entries: string[] = [];
+  let entries: string[];
   try {
     entries = readdirSync(worktreesDir);
-  } catch {
-    entries = [];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") entries = [];
+    else
+      throw new Fault(
+        1,
+        `folder ${worktreesDir}`,
+        `cannot list ${worktreesDir}: ${String((error as NodeJS.ErrnoException)?.message ?? error)}`,
+        `make ${worktreesDir} listable, then run again`,
+      );
   }
   for (const name of entries) {
     if (!(name === ticket || name.startsWith(`${ticket}-`))) continue;
@@ -348,7 +401,7 @@ function folderSet(dispatch: string, alreadyRemoved: Set<string>): FolderSet {
     add(phys(raw));
   }
   const folders = [...candidates]
-    .filter((path) => isDir(path) || alreadyRemoved.has(path))
+    .filter((path) => isDir(path) || alreadyRemoved.has(path) || links.has(path))
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   return { repo, worktreesDir, ticket, folders, links };
 }
@@ -367,6 +420,19 @@ function gitIn(where: string, args: string[]): RunResult {
   return run("git", ["-C", where, ...args]);
 }
 
+function gitBytes(where: string, args: string[], folder: string): Buffer {
+  const result = runBytes("git", ["-C", where, ...args]);
+  if (result.code !== 0) {
+    throw new Fault(
+      1,
+      `save ${folder}`,
+      `git ${args.join(" ")} failed in ${where}: ${tailBytes(result)}`,
+      `inspect ${folder}, then run again`,
+    );
+  }
+  return result.out;
+}
+
 function gitText(where: string, args: string[], folder: string): string {
   const result = gitIn(where, args);
   if (result.code !== 0) {
@@ -381,68 +447,83 @@ function gitText(where: string, args: string[], folder: string): string {
 }
 
 /** Which of the five save parts a folder has, read-only: the dry run prints these names and
- * the real run writes them. A part with nothing in it is not written. */
+ * the real run writes them. A part with nothing in it is not written. Every capture is bytes,
+ * so names and content outside UTF-8 survive the save exactly. */
 function savePresence(folder: string): {
-  status: boolean;
-  diff: boolean;
-  staged: boolean;
-  untracked: string[];
+  status: Buffer;
+  diff: Buffer;
+  staged: Buffer;
+  untracked: Buffer[];
   commits: string[];
 } {
-  const status = gitText(folder, ["status", "--short"], folder) !== "";
-  const diff = gitText(folder, ["diff", "--binary"], folder) !== "";
-  const staged = gitText(folder, ["diff", "--cached", "--binary"], folder) !== "";
-  const rawList = gitText(folder, ["ls-files", "--others", "--exclude-standard", "-z"], folder);
-  const untracked = rawList === "" ? [] : rawList.split("\0").filter((name) => name !== "");
+  const status = gitBytes(folder, ["status", "--short"], folder);
+  const diff = gitBytes(folder, ["diff", "--binary"], folder);
+  const staged = gitBytes(folder, ["diff", "--cached", "--binary"], folder);
+  const rawList = gitBytes(folder, ["ls-files", "--others", "--exclude-standard", "-z"], folder);
+  const untracked =
+    rawList.length === 0 ? [] : splitNul(rawList).filter((name) => name.length !== 0);
   const rawCommits = gitText(folder, ["rev-list", "HEAD", "--not", "--branches"], folder);
   const commits = rawCommits.split("\n").filter((line) => line !== "");
   return { status, diff, staged, untracked, commits };
 }
 
-function untrackedTarBytes(folder: string, names: string[]): Buffer {
-  const list = `${names.join("\0")}\0`;
-  const result = run("tar", ["-cf", "-", "-C", folder, "--null", "-T", "-"], { input: list });
+function splitNul(raw: Buffer): Buffer[] {
+  const parts: Buffer[] = [];
+  let start = 0;
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] === 0) {
+      parts.push(Buffer.from(raw.subarray(start, i)));
+      start = i + 1;
+    }
+  }
+  if (start < raw.length) parts.push(Buffer.from(raw.subarray(start)));
+  return parts;
+}
+
+function untrackedTarBytes(folder: string, names: Buffer[]): Buffer {
+  const list = Buffer.concat(names.map((name) => Buffer.concat([name, Buffer.alloc(1)])));
+  const result = runBytes("tar", ["-cf", "-", "-C", folder, "--null", "-T", "-"], list);
   if (result.code !== 0) {
     throw new Fault(
       1,
       `save ${folder}`,
-      `tar could not archive the untracked files of ${folder}: ${tail(result)}`,
+      `tar could not archive the untracked files of ${folder}: ${tailBytes(result)}`,
       `inspect ${folder}, then run again`,
     );
   }
-  return Buffer.from(result.out, "utf8");
+  return result.out;
 }
 
 function commitPatchBytes(folder: string, commits: string[]): Buffer {
   const oldest = commits[commits.length - 1]!;
   const newest = commits[0]!;
   const hasParent = gitIn(folder, ["rev-parse", "-q", "--verify", `${oldest}^`]).code === 0;
-  const pieces: string[] = [];
+  const pieces: Buffer[] = [];
   if (hasParent) {
-    const r = run("git", ["-C", folder, "format-patch", "--stdout", `${oldest}^..${newest}`]);
-    if (r.code !== 0 || r.out === "") {
+    const r = runBytes("git", ["-C", folder, "format-patch", "--stdout", `${oldest}^..${newest}`]);
+    if (r.code !== 0 || r.out.length === 0) {
       throw new Fault(
         1,
         `save ${folder}`,
-        `git format-patch failed in ${folder}: ${r.code === 0 ? "no output" : tail(r)}`,
+        `git format-patch failed in ${folder}: ${r.code === 0 ? "no output" : tailBytes(r)}`,
         `inspect ${folder}, then run again`,
       );
     }
-    return Buffer.from(r.out, "utf8");
+    return r.out;
   }
   for (const commit of [...commits].reverse()) {
-    const r = run("git", ["-C", folder, "format-patch", "--stdout", "--root", commit]);
-    if (r.code !== 0 || r.out === "") {
+    const r = runBytes("git", ["-C", folder, "format-patch", "--stdout", "--root", commit]);
+    if (r.code !== 0 || r.out.length === 0) {
       throw new Fault(
         1,
         `save ${folder}`,
-        `git format-patch failed in ${folder}: ${r.code === 0 ? "no output" : tail(r)}`,
+        `git format-patch failed in ${folder}: ${r.code === 0 ? "no output" : tailBytes(r)}`,
         `inspect ${folder}, then run again`,
       );
     }
     pieces.push(r.out);
   }
-  return Buffer.from(pieces.join(""), "utf8");
+  return Buffer.concat(pieces);
 }
 
 const PARTS = ["status", "diff", "staged.diff", "untracked.tar", "commits.patch"] as const;
@@ -468,35 +549,25 @@ function existingSaves(stray: string, name: string, part: Part): string[] {
  * sit there is not written again; a changed part goes beside the first, which stays. */
 function saveFolder(dispatch: string, folder: string, name: string, dryRun: boolean): string[] {
   const presence = savePresence(folder);
-  const wanted: { part: Part; bytes: () => Buffer }[] = [];
-  if (presence.status)
-    wanted.push({
-      part: "status",
-      bytes: () => Buffer.from(gitText(folder, ["status", "--short"], folder), "utf8"),
-    });
-  if (presence.diff)
-    wanted.push({
-      part: "diff",
-      bytes: () => Buffer.from(gitText(folder, ["diff", "--binary"], folder), "utf8"),
-    });
-  if (presence.staged)
-    wanted.push({
-      part: "staged.diff",
-      bytes: () => Buffer.from(gitText(folder, ["diff", "--cached", "--binary"], folder), "utf8"),
-    });
+  const wanted: { part: Part; bytes: Buffer }[] = [];
+  if (presence.status.length) wanted.push({ part: "status", bytes: presence.status });
+  if (presence.diff.length) wanted.push({ part: "diff", bytes: presence.diff });
+  if (presence.staged.length) wanted.push({ part: "staged.diff", bytes: presence.staged });
   if (presence.untracked.length)
     wanted.push({
       part: "untracked.tar",
-      bytes: () => untrackedTarBytes(folder, presence.untracked),
+      bytes: untrackedTarBytes(folder, presence.untracked),
     });
   if (presence.commits.length)
-    wanted.push({ part: "commits.patch", bytes: () => commitPatchBytes(folder, presence.commits) });
+    wanted.push({
+      part: "commits.patch",
+      bytes: commitPatchBytes(folder, presence.commits),
+    });
   if (!wanted.length) return [];
   const stray = join(dispatch, "stray");
   const writes: { file: string; bytes: Buffer }[] = [];
   const names: string[] = [];
-  for (const { part, bytes } of wanted) {
-    const content = bytes();
+  for (const { part, bytes: content } of wanted) {
     if (content.length === 0) continue;
     const existing = existingSaves(stray, name, part);
     let covered = false;
@@ -555,7 +626,7 @@ function saveFolder(dispatch: string, folder: string, name: string, dryRun: bool
  * never flags; an unmerged path always does; untracked files never do. */
 function flaggedFiles(repo: string, folder: string): string[] {
   const flagged = new Set<string>();
-  const status = gitIn(folder, ["status", "--porcelain", "-z"]);
+  const status = gitIn(folder, ["status", "--porcelain", "--no-renames", "-z"]);
   if (status.code !== 0)
     throw new Fault(
       1,
@@ -778,8 +849,9 @@ function groupAlive(pid: number, members: Array<[number, string]>): boolean {
 }
 
 /** Stop the preview's whole process group, and only while the launch registry still records
- * that pid with its start time, so a pid since reused is never signalled. */
-function stopPreview(dispatch: string, dryRun: boolean): Preview {
+ * that pid with its start time for this run's synthesis folder, so a pid since reused by
+ * another launch is never signalled. */
+function stopPreview(dispatch: string, dryRun: boolean, synthesis: string): Preview {
   const pidfile = join(dispatch, "render", "preview.pid");
   if (!existsSync(pidfile)) return { status: "none", detail: "", path: null, next: "" };
   const raw = (() => {
@@ -840,6 +912,17 @@ function stopPreview(dispatch: string, dryRun: boolean): Preview {
     };
   }
   const path = phys(rec.dir);
+  if (path !== synthesis) {
+    // The pid was reused by a launch outside this run's synthesis folder, which overwrote
+    // the record: the start check passes for a process that is not this run's preview.
+    // Never signal it, note it, and carry on; the folder it runs in stays named below.
+    return {
+      status: "noted",
+      detail: `the registry record for pid ${pid} names ${rec.dir}, not this run's synthesis folder; left alone, nothing to stop`,
+      path: null,
+      next: "",
+    };
+  }
   if (dryRun)
     return {
       status: "would",
@@ -853,8 +936,10 @@ function stopPreview(dispatch: string, dryRun: boolean): Preview {
     } catch {
       /* the group may already be gone */
     }
-    for (const [member] of rec.members) {
+    const live = processes();
+    for (const [member, start] of rec.members) {
       if (member === pid) continue;
+      if (live.get(member)?.start !== start) continue;
       try {
         process.kill(member, name);
       } catch {
@@ -882,16 +967,36 @@ function stopPreview(dispatch: string, dryRun: boolean): Preview {
 
 // --- records a rerun reads ---------------------------------------------------------------------
 
-function runLogHas(dispatch: string, line: string | null): boolean {
+/** Whether this run's closing line is already in run-log.md: this command's own note, or
+ * a line carrying exactly the text (run-log.sh writes `- HH:MM:SSZ <text>`). A substring
+ * anywhere in the file is not enough: the rerun must write the line it was given. */
+function runLogDone(
+  dispatch: string,
+  actions: Record<string, unknown>[],
+  line: string | null,
+): boolean {
+  if (
+    actions.some(
+      (a) =>
+        text(a.actor) === "postmaster" && text(a.action) === "note" && text(a.target) === "run-log",
+    )
+  )
+    return true;
   if (line === null || line === "") return false;
+  let raw: string;
   try {
-    return readFileSync(join(dispatch, "run-log.md"), "utf8").includes(line);
+    raw = readFileSync(join(dispatch, "run-log.md"), "utf8");
   } catch {
     return false;
   }
+  return raw.split("\n").some((entry) => /^- \d{2}:\d{2}:\d{2}Z (.*)$/u.exec(entry)?.[1] === line);
 }
 
-function ticketState(adapter: string, repo: string, ticket: string): string {
+function ticketState(
+  adapter: string,
+  repo: string,
+  ticket: string,
+): { state: string; read: string } {
   const read = run("bash", [beside(import.meta, adapter), repo, "read", ticket]);
   if (read.code !== 0) {
     throw new Fault(
@@ -902,7 +1007,8 @@ function ticketState(adapter: string, repo: string, ticket: string): string {
     );
   }
   for (const line of read.out.split("\n")) {
-    if (line.startsWith("state: ")) return line.slice("state: ".length).trim();
+    if (line.startsWith("state: "))
+      return { state: line.slice("state: ".length).trim(), read: read.out };
   }
   throw new Fault(
     3,
@@ -910,6 +1016,22 @@ function ticketState(adapter: string, repo: string, ticket: string): string {
     `${adapter} read of ticket ${ticket} printed no state line`,
     `read the ticket yourself, then run again`,
   );
+}
+
+/** Whether the ticket's log already carries this command's closing comment: every adapter
+ * prints its log as `- <stamp> <actor>: <text>` lines under `## Log`, with whitespace runs
+ * collapsed. A post the tracker took but whose log line never landed is reconciled, not
+ * reposted. */
+function ticketHasComment(read: string, comment: string | null): boolean {
+  const collapsed = pyWords(comment ?? "").join(" ");
+  if (collapsed === "") return false;
+  const want = `postmaster: ${collapsed}`;
+  let inLog = false;
+  for (const line of read.split("\n")) {
+    if (line === "## Log") inLog = true;
+    else if (inLog && line.startsWith("- ") && line.includes(want)) return true;
+  }
+  return false;
 }
 
 // --- the flow ------------------------------------------------------------------------------------
@@ -937,7 +1059,7 @@ function mainFlow(args: Args): Result {
   const steps: Step[] = [];
   const folders: Folder[] = [];
   const stops: Stop[] = [];
-  const actions = actionsOf(dispatch);
+  let actions = actionsOf(dispatch);
   let locked = false;
 
   const pendingClosing = (from: number): void => {
@@ -967,7 +1089,7 @@ function mainFlow(args: Args): Result {
     };
   }
 
-  const alreadyRemoved = priorTeardowns(actions);
+  let alreadyRemoved = priorTeardowns(actions);
   let postLock = false;
   try {
     if (!isDir(dispatch))
@@ -1045,17 +1167,6 @@ function mainFlow(args: Args): Result {
       detail: `stage ${stage}; leg ${String(leg)} exited; ${styleLast}`,
     });
 
-    // Closing words: required while any closing step remains.
-    const commentPosted = hasClosingComment(actions, basename(dispatch));
-    const wordsNeeded = stage !== "done" || !commentPosted;
-    if (wordsNeeded && (args.comment === null || args.runLog === null))
-      throw new Fault(
-        1,
-        "closing words",
-        "--comment and --run-log are required while closing steps remain",
-        `run again with --comment "<text>" --run-log "<text>"`,
-      );
-
     // One aftercare at a time on a run.
     const lock = join(dispatch, ".aftercare.lock");
     const alive = (pid: number): boolean => {
@@ -1075,11 +1186,12 @@ function mainFlow(args: Args): Result {
       }
     };
     if (dryRun) {
-      if (existsSync(lock) && holder() !== process.pid && alive(holder()))
+      const held = holder();
+      if (existsSync(lock) && held > 0 && held !== process.pid && alive(held))
         throw new Fault(
           1,
           "aftercare lock",
-          `aftercare is already running on this run (pid ${String(holder())})`,
+          `aftercare is already running on this run (pid ${String(held)})`,
           "wait for that run to finish, then run again",
         );
     } else {
@@ -1125,6 +1237,21 @@ function mainFlow(args: Args): Result {
         );
     }
     postLock = true;
+    // The log may have moved between the first read and the lock: a run that finished in
+    // between posted its markers, and this run must see them before judging any step done.
+    actions = actionsOf(dispatch);
+    alreadyRemoved = priorTeardowns(actions);
+
+    // Closing words: required while any closing step remains, judged from the fresh markers.
+    const commentPosted = hasClosingComment(actions, basename(dispatch));
+    const wordsNeeded = stage !== "done" || !commentPosted;
+    if (wordsNeeded && (args.comment === null || args.runLog === null))
+      throw new Fault(
+        1,
+        "closing words",
+        "--comment and --run-log are required while closing steps remain",
+        `run again with --comment "<text>" --run-log "<text>"`,
+      );
 
     // The style-sort note: one line, once per run.
     if (hasStyleNote(actions)) {
@@ -1142,7 +1269,7 @@ function mainFlow(args: Args): Result {
 
     // The preview server: stopped first, so closing the folders never waits on it. A preview
     // that outlives its stop leaves the synthesis folder in place.
-    const preview = stopPreview(dispatch, dryRun);
+    const preview = stopPreview(dispatch, dryRun, synthesis);
     const leftEarly = new Map<string, string>();
     if (preview.status !== "none") {
       steps.push({ name: "preview", status: preview.status, detail: preview.detail });
@@ -1243,6 +1370,13 @@ function mainFlow(args: Args): Result {
       );
       return finish(3, steps, folders, stops);
     }
+    if (stops.length) {
+      // Only the preview can have stopped without leaving a folder: the synthesis folder
+      // was already gone while its preview outlived the stop. The run stays open.
+      pendingWindows();
+      pendingClosing(0);
+      return finish(3, steps, folders, stops);
+    }
 
     // The run's spaces and windows, once every folder is gone.
     if (dryRun) {
@@ -1284,7 +1418,7 @@ function mainFlow(args: Args): Result {
     // 1. the run-log line
     closingIndex = 0;
     const runLogText = args.runLog;
-    if (runLogHas(dispatch, runLogText)) {
+    if (runLogDone(dispatch, actions, runLogText)) {
       steps.push({ name: "run-log", status: "already", detail: "the closing line is written" });
     } else if (runLogText === null) {
       throw new Fault(
@@ -1327,14 +1461,28 @@ function mainFlow(args: Args): Result {
         kindResult.code === 0
           ? `tracker '${kind}' has no adapter: the postmaster sets the ticket's state and comment itself`
           : `the tracker kind cannot be told: ${tail(kindResult)}`;
-      if (kindResult.code !== 0 && !dryRun)
+      if (kindResult.code !== 0) {
+        // The dry run ends with the real run's exit status: a stop here stops there too.
+        if (dryRun) {
+          steps.push({ name: "ticket-state", status: "failed", detail: why });
+          pendingClosing(2);
+          stops.push({
+            step: "ticket-state",
+            reason: why,
+            next: `check the tracker, then run again`,
+          });
+          return finish(3, steps, folders, stops);
+        }
         throw new Fault(3, "ticket-state", why, `check the tracker, then run again`);
+      }
       steps.push({ name: "ticket-state", status: "skipped", detail: why });
       steps.push({ name: "ticket-comment", status: "skipped", detail: why });
     } else {
       // state
       closingIndex = 1;
-      const state = runClosing(() => ticketState(adapter, set.repo, ticket));
+      const read = runClosing(() => ticketState(adapter, set.repo, ticket));
+      const state = read.state;
+      const ticketRead = read.read;
       if (state === "done") {
         steps.push({ name: "ticket-state", status: "already", detail: `ticket ${ticket} is done` });
       } else if (state === "cancelled") {
@@ -1382,11 +1530,33 @@ function mainFlow(args: Args): Result {
       }
       // comment
       closingIndex = 2;
+      const reconciled = ticketHasComment(ticketRead, args.comment);
       if (hasClosingComment(actions, ticket)) {
         steps.push({
           name: "ticket-comment",
           status: "already",
           detail: "the closing comment is posted",
+        });
+      } else if (reconciled && dryRun) {
+        steps.push({
+          name: "ticket-comment",
+          status: "already",
+          detail: "the closing comment is on the ticket",
+        });
+      } else if (reconciled) {
+        runClosing(() => {
+          logAction(
+            dispatch,
+            "ticket-comment",
+            ticket,
+            `closing comment already on ticket: ${args.comment ?? ""}`,
+            "ticket-comment",
+          );
+        });
+        steps.push({
+          name: "ticket-comment",
+          status: "done",
+          detail: "reconciled: the closing comment is already on the ticket",
         });
       } else if (dryRun) {
         steps.push({
@@ -1520,7 +1690,12 @@ function mainFlow(args: Args): Result {
         steps.push({ name: error.step, status: "failed", detail: error.reason });
       if (postLock && error.code !== 2) {
         if (!steps.some((step) => step.name === "close-run")) pendingWindows();
-        if (!steps.some((step) => CLOSING.includes(step.name))) pendingClosing(0);
+        // Steps after the failed one wait; runClosing may have listed them already.
+        if (!steps.some((step) => step.status === "waiting")) {
+          const at = CLOSING.indexOf(error.step);
+          if (at >= 0) pendingClosing(at + 1);
+          else if (!steps.some((step) => CLOSING.includes(step.name))) pendingClosing(0);
+        }
       }
       stops.push({ step: error.step, reason: error.reason, next: error.whatNext });
       return finish(error.code, steps, folders, stops);
