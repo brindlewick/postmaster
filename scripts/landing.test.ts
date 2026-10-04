@@ -1405,6 +1405,27 @@ describe("card-results", () => {
     );
   });
 
+  test("a Switch-offs section after the block still matches", () => {
+    // A card written by a run that carries this ticket's list, and a card
+    // written before it (the faithful card above): the rendered block is the
+    // same either way, so both answer match.
+    writeFileSync(
+      join(S.d!, "card-switch.md"),
+      `${S.card!}\n## Switch-offs\n\n- comment scripts/x.ts:1 ts-ignore every rule -- ` +
+        `reason: r (id comment:0123456789abcdef)\n`,
+    );
+    check(
+      ["card-results", S.d!, S.w!, join(S.d!, "checkpoint.md"), join(S.d!, "card-switch.md")],
+      0,
+      "match",
+    );
+    check(
+      ["card-findings", S.d!, S.w!, join(S.d!, "checkpoint.md"), join(S.d!, "card-switch.md")],
+      0,
+      "match",
+    );
+  });
+
   test("a block edited in one character is an input fault", () => {
     writeFileSync(join(S.d!, "card-edited.md"), S.card!.replace("- gate: pass", "- gate: pasz"));
     check(
