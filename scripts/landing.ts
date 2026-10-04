@@ -449,12 +449,20 @@ function pullRequestChecks(o: string[]): number {
   const result = run("gh", ["pr", "checks", pr, "--json", "name,state,bucket,link"], {
     cwd: repo,
   });
-  if (![0, 1, 8].includes(result.code) || (result.code !== 0 && result.out.trim() === "")) {
+  if (![0, 1, 8].includes(result.code)) {
+    die(`cannot read pull request checks: ${pyTrim(result.err || result.out)}`);
+  }
+  // A pull request with no checks is exit 1 with empty stdout and "no checks
+  // reported ..." on stderr (gh 2.101.0): that is none, not a failure. Any
+  // other empty report is a failure, never none: an unknown pull request and
+  // a refused login fail the same way, with their own message.
+  const empty = result.out.trim() === "";
+  if (empty && !/no checks reported/.test(result.err ?? "")) {
     die(`cannot read pull request checks: ${pyTrim(result.err || result.out)}`);
   }
   let checks: PullRequestCheck[];
   try {
-    const parsed: unknown = result.out.trim() === "" ? [] : JSON.parse(result.out);
+    const parsed: unknown = empty ? [] : JSON.parse(result.out);
     if (!Array.isArray(parsed)) throw new Error("not an array");
     checks = parsed as PullRequestCheck[];
   } catch {

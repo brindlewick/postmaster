@@ -13,7 +13,6 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PASS=0
 FAIL=0
-SCRATCHES=""
 
 note_pass() {
   PASS=$((PASS + 1))
@@ -25,16 +24,14 @@ note_fail() {
   echo "ORACLE-258 FAIL: $1"
 }
 
+ORACLE_PARENT=$(mktemp -d)
 cleanup() {
-  for d in $SCRATCHES; do
-    [ -n "$d" ] && [ -d "$d" ] && rm -rf "$d"
-  done
+  rm -rf "$ORACLE_PARENT"
 }
 trap cleanup EXIT
 
 mk_scratch() {
-  MKSCRATCH=$(mktemp -d)
-  SCRATCHES="$SCRATCHES $MKSCRATCH"
+  MKSCRATCH=$(mktemp -d "$ORACLE_PARENT/scratch.XXXXXX")
 }
 
 # --- C11: the README names Linux and macOS as supported; Intel Macs not tested.
@@ -156,7 +153,6 @@ if bump_minimum "$T5A/package.json" "9.9.9"; then
     note_pass "C8 refusal precedes the load error"
   fi
 else
-  note_fail "C8 oracle setup: could not raise the copy's minimum to 9.9.9"
   note_fail "C8 oracle setup: could not raise the copy's minimum to 9.9.9"
 fi
 

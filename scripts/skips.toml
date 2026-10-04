@@ -164,7 +164,7 @@ systems = ["darwin"]
 file = "scripts/launch.test.ts"
 name = "confinement battery: every AC2 and AC3 item unconfined and confined > a consistent /proc: confined"
 reason = "the probe reads Linux's /proc, or the confinement mechanism does not start here"
-systems = ["darwin"]
+systems = ["linux", "darwin"]
 
 [[skip]]
 file = "scripts/launch.test.ts"
@@ -176,7 +176,7 @@ systems = ["darwin"]
 file = "scripts/launch.test.ts"
 name = "confinement battery: every AC2 and AC3 item unconfined and confined > a host device node: confined"
 reason = "the probe needs Linux's /dev/shm, or the confinement mechanism does not start here"
-systems = ["darwin"]
+systems = ["linux", "darwin"]
 
 [[skip]]
 file = "scripts/launch.test.ts"
@@ -206,7 +206,7 @@ systems = ["darwin"]
 file = "scripts/launch.test.ts"
 name = "confinement battery: every AC2 and AC3 item unconfined and confined > kill 0 from inside: confined"
 reason = "the group-signal probe needs setsid(1) and Linux's process groups, or confinement does not start here"
-systems = ["darwin"]
+systems = ["linux", "darwin"]
 
 [[skip]]
 file = "scripts/local.test.ts"

@@ -211,44 +211,48 @@ function main(argv: string[]): number {
   }
   const reportDir = mkdtempSync(join(tmpdir(), "postmaster-skip-"));
   const report = join(reportDir, "report.xml");
-  // Inherited stdio: the suite's own output still streams while it runs. The same
-  // interpreter that runs this check runs the suite, not whatever bun is on PATH.
-  const suite = spawnSync(
-    process.execPath,
-    ["test", "scripts/", "lint/", "--reporter=junit", `--reporter-outfile=${report}`],
-    { cwd: TOOL, stdio: "inherit" },
-  );
-  const suiteCode = suite.status;
-  let xml: string;
   try {
-    xml = readFileSync(report, "utf-8");
-  } catch {
-    console.error(`skip-check: no report at ${report}; the suite exited ${suiteCode}`);
-    return 1;
+    // Inherited stdio: the suite's own output still streams while it runs. The same
+    // interpreter that runs this check runs the suite, not whatever bun is on PATH.
+    const suite = spawnSync(
+      process.execPath,
+      ["test", "scripts/", "lint/", "--reporter=junit", `--reporter-outfile=${report}`],
+      { cwd: TOOL, stdio: "inherit" },
+    );
+    const suiteCode = suite.status;
+    let xml: string;
+    try {
+      xml = readFileSync(report, "utf-8");
+    } catch {
+      console.error(`skip-check: no report at ${report}; the suite exited ${suiteCode}`);
+      return 1;
+    }
+    const list = parseSkipList(readFileSync(LIST, "utf-8"));
+    const system = process.platform;
+    const res = checkReport(xml, list.entries, system);
+    const faults = [...list.faults, ...res.faults];
+    console.log(
+      `skip-check: ${res.tests} tests, ${res.skipped} skipped, ${res.vacuous} passed without checking`,
+    );
+    for (const m of res.matched) {
+      console.log(`skip: ${m.file}: ${m.name} (${m.reason}) [${m.system}]`);
+    }
+    if (res.skipped === 0) console.log("skip-check: no test skipped on this system");
+    for (const f of faults) console.error(`skip-check: ${f}`);
+    if (suiteCode !== 0) {
+      console.error(`skip-check: the suite exited ${suiteCode}`);
+      return 1;
+    }
+    return faults.length > 0 ? 1 : 0;
+  } finally {
+    // The report carries this machine's host name: it stays in the temporary
+    // folder only, whatever the exit.
+    try {
+      rmSync(reportDir, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
   }
-  const list = parseSkipList(readFileSync(LIST, "utf-8"));
-  const system = process.platform;
-  const res = checkReport(xml, list.entries, system);
-  const faults = [...list.faults, ...res.faults];
-  console.log(
-    `skip-check: ${res.tests} tests, ${res.skipped} skipped, ${res.vacuous} passed without checking`,
-  );
-  for (const m of res.matched) {
-    console.log(`skip: ${m.file}: ${m.name} (${m.reason}) [${m.system}]`);
-  }
-  if (res.skipped === 0) console.log("skip-check: no test skipped on this system");
-  for (const f of faults) console.error(`skip-check: ${f}`);
-  // The report carries this machine's host name: it stays in the temporary folder only.
-  try {
-    rmSync(reportDir, { recursive: true, force: true });
-  } catch {
-    /* best-effort */
-  }
-  if (suiteCode !== 0) {
-    console.error(`skip-check: the suite exited ${suiteCode}`);
-    return 1;
-  }
-  return faults.length > 0 ? 1 : 0;
 }
 
 if (import.meta.main) {

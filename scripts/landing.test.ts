@@ -2090,7 +2090,10 @@ describe("pull-request checks", () => {
     checks: unknown[],
     checksExit = 0,
     headAfter: string | null = null,
-  ): { output: string; head: string } {
+    rawOut: string | null = null,
+    checksErr = "",
+    wantCode = 0,
+  ): { output: string; head: string; code: number; err: string } {
     const repo = join(tmp, `pr-checks-${label}`);
     mkrepo(repo);
     commitFile(repo, "tracked.txt", "card", "card");
@@ -2104,7 +2107,7 @@ describe("pull-request checks", () => {
         "#!/bin/sh",
         'case "$2" in',
         '  view) if [ -f "$GH_VIEW_MARK" ]; then printf \'{"headRefOid":"%s"}\\n\' "$GH_HEAD_AFTER"; else : > "$GH_VIEW_MARK"; printf \'{"headRefOid":"%s"}\\n\' "$GH_HEAD"; fi ;;',
-        '  checks) cat "$GH_CHECKS_FILE"; exit "$GH_CHECKS_EXIT" ;;',
+        '  checks) cat "$GH_CHECKS_FILE"; printf \'%s\' "$GH_CHECKS_ERR" >&2; exit "$GH_CHECKS_EXIT" ;;',
         '  *) echo "unexpected gh call: $*" >&2; exit 2 ;;',
         "esac",
         "",
@@ -2112,7 +2115,7 @@ describe("pull-request checks", () => {
     );
     chmodSync(gh, 0o755);
     const checksPath = join(tmp, `pr-checks-${label}.json`);
-    writeFileSync(checksPath, `${JSON.stringify(checks)}\n`);
+    writeFileSync(checksPath, rawOut ?? `${JSON.stringify(checks)}\n`);
     const r = run(
       join(HERE, "run"),
       ["landing", "pull-request-checks", "--repo", repo, "--pr", pr, "--card-head", head],
@@ -2125,11 +2128,12 @@ describe("pull-request checks", () => {
           GH_VIEW_MARK: join(tmp, `pr-checks-${label}.viewed`),
           GH_CHECKS_FILE: checksPath,
           GH_CHECKS_EXIT: String(checksExit),
+          GH_CHECKS_ERR: checksErr,
         },
       },
     );
-    expect(r.code).toBe(0);
-    return { output: r.out.trim(), head };
+    expect(r.code).toBe(wantCode);
+    return { output: r.out.trim(), head, code: r.code, err: r.err };
   }
 
   test("all checks passed on the card head", () => {
@@ -2192,8 +2196,27 @@ describe("pull-request checks", () => {
     ).toBe("fail: macos (FAILURE) https://example.test/macos");
   });
 
-  test("no reported checks answers none", () => {
-    expect(askChecks("none", null, [], 1).output).toBe("none");
+  test("no reported checks answers none, in gh's real shape", () => {
+    // Real gh with no checks: exit 1, empty stdout, "no checks reported ..."
+    // on stderr (gh 2.101.0) — never exit 1 with `[]` on stdout.
+    expect(
+      askChecks("none", null, [], 1, null, "", "no checks reported on the 'x' branch\n").output,
+    ).toBe("none");
+  });
+
+  test("an empty report with any other message fails closed", () => {
+    const r = askChecks(
+      "none-err",
+      null,
+      [],
+      1,
+      null,
+      "",
+      "GraphQL: Could not resolve to a PullRequest with the number of 99999.\n",
+      1,
+    );
+    expect(r.output).toBe("");
+    expect(r.err).toContain("cannot read pull request checks");
   });
 
   test("checks for a different head never pass", () => {
