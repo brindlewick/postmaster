@@ -86,6 +86,18 @@ The brief's three groups map as follows: "a pure core would have made it checkab
 `both`; "a stated property or a small model would have caught it" is `prop` and `both`; "neither"
 is `neither`. `both` is counted in each of the first two and is also shown alone.
 
+## Changes made after the first commit
+
+Two, both before the second reader began, and both visible in the history of this folder.
+
+1. **The description column of `data/findings.tsv` was corrected** for runs #216, #252 and #268.
+   The first version cut each log line at the wrong comma, so those descriptions read "gating P2 r2
+   bug luna". The full log line was already in the `log_detail` column and the table is rebuilt from it.
+2. **A cost field was added to the rubric.** The first reading showed that "a property would have
+   caught it" was true of nearly every finding and said nothing about what the check costs. A `prop`
+   label now also says `cheap` (the check runs in process on data) or `heavy` (its oracle or inputs
+   need git, a shell or a real tool). The six anchors and the labels expected for them are unchanged.
+
 ## The controls
 
 1. **Anchors.** Six findings chosen before the rest were read, two for which the answer is obviously

@@ -59,6 +59,10 @@ or the expected result is known only from the defect.
 
 - `label`: `prop` (Q-PROP yes, Q-CORE no), `core` (Q-CORE yes, Q-PROP no), `both`, `neither`, or
   `unclear`.
+- `cost`: for a label of `prop` only. `cheap` when the check runs in process on data, with no
+  subprocess (a few temporary files are allowed); `heavy` when its oracle or its inputs need git, a
+  shell or a real tool (the compiler, the formatter, a linter) to run. `-` for every other label.
+  A `both` finding is cheap after the separation and heavy before it, so it carries no cost.
 - `property`: the one sentence, if Q-PROP is yes.
 - `extract`: the function you would extract, and its arguments, if Q-CORE is yes.
 - `confidence`: `clear`, or `arguable` when a reasonable reader could answer the other way.
