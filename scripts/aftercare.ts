@@ -1584,13 +1584,7 @@ function mainFlow(args: Args): Result {
     const kindResult = run(beside(import.meta, "run"), ["tracker-kind", set.repo]);
     const kind = kindResult.code === 0 ? kindResult.out.trim() : "";
     const adapter =
-      kind === "local"
-        ? "local"
-        : kind === "github"
-          ? "github"
-          : kind === "plane"
-            ? "plane"
-            : null;
+      kind === "local" ? "local" : kind === "github" ? "github" : kind === "plane" ? "plane" : null;
     const ticket = basename(dispatch);
     if (adapter === null) {
       const why =
