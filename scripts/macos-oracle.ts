@@ -634,9 +634,17 @@ async function platformLineApis(): Promise<void> {
   const osImport = [...src.matchAll(/import \{[^}]*\} from "node:os"/gu)]
     .map((m) => m[0])
     .join("\n");
-  const namesOsType = src.includes("os.type()") || /type as [A-Za-z]+/u.test(osImport);
-  const namesRelease = src.includes("os.release()") || osImport.includes("release");
-  const namesMachine = src.includes("os.machine()") || osImport.includes("machine");
+  const osNamespaces = [
+    ...src.matchAll(/import \* as ([A-Za-z]+) from "node:os"/gu),
+  ].map((m) => m[1] as string);
+  const namespaced = (call: string): boolean =>
+    osNamespaces.some((ns) => src.includes(`${ns}.${call}()`));
+  const namesOsType =
+    src.includes("os.type()") || /type as [A-Za-z]+/u.test(osImport) || namespaced("type");
+  const namesRelease =
+    src.includes("os.release()") || osImport.includes("release") || namespaced("release");
+  const namesMachine =
+    src.includes("os.machine()") || osImport.includes("machine") || namespaced("machine");
   if (!namesOsType || !namesRelease || !namesMachine) {
     fail("fixture.ts names no live os type/release/machine reading");
   }
