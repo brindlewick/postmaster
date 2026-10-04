@@ -527,6 +527,8 @@ fallback.harness=bash
 fallback.model=spare
 postmaster.harness=bash
 postmaster.model=pm
+clerk.harness=bash
+clerk.model=clerk
 limits.memory_max=bogus
 EOF
 C7_KEYS_D=$(PATH="$C7/bin:$PATH" "$RUN" setup --keys 2>&1) && C7_KEYS_DC=$? || C7_KEYS_DC=$?
@@ -565,7 +567,7 @@ fi
 # Interactive answers in setup's question order: defaults everywhere except the
 # harness and model each role requires. The limits block takes only defaults,
 # so the same input fits Linux and a Mac that skips it (trailing lines unread).
-printf '%s\n' "" "" claude m1 "" "" codex m2 "" "" "" "" "" "" "" mimo m3 "" "" pi m4 "" "" claude m5 "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" > "$C7/interactive.in"
+printf '%s\n' "" "" claude m1 "" "" codex m2 "" "" "" "" "" "" "" mimo m3 "" "" pi m4 "" "" claude m5 "" "" codex m6 "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" > "$C7/interactive.in"
 C8_DI=$($TIMEOUT 60 env PATH="$C7/bin:$PATH" "$RUN" setup --dry-run <"$C7/interactive.in" 2>&1) && C8_DIC=$? || C8_DIC=$?
 C8_DI_N=$(printf '%s' "$C8_DI" | grep -ci "without.*limit\|limit.*without" || true)
 if [ "$C8_DIC" -eq 0 ] && [ "$C8_DI_N" -eq 1 ]; then
