@@ -1240,6 +1240,20 @@ function resumeTransient(d: string, runName: string, number: string, root: strin
  * 1 wakes, 3 held. */
 function deliverWallPause(d: string, runName: string, root: string): StepResult {
   const heldDir = join(root, "postmaster");
+  // The pause being delivered must still be the wall pause: a stale .wall-pause
+  // beside a later escalation never triggers a wall resume.
+  let first = "";
+  try {
+    first = (readFileSync(join(d, "ESCALATION.md"), "utf8").split("\n")[0] ?? "").trim();
+  } catch {
+    first = "";
+  }
+  if (first !== "# Escalation: provider walls") {
+    return {
+      rc: 1,
+      error: "the wall-pause marker is stale: the current escalation is not a provider-wall pause",
+    };
+  }
   let number = "";
   let thread = "";
   try {
@@ -1412,11 +1426,12 @@ function processTable(root: string, table: string): TableResult {
         const r = deliverWallPause(d, runName, root);
         if (r.rc !== 0 && r.rc !== 3) markNeeds(needs, runName, "RULE", r.error);
       } else if (open.code === 1) {
+        const listed = (open.out + open.err).trim().replace(/\n+/gu, "; ");
         markNeeds(
           needs,
           runName,
           "RULE",
-          "the pause is for provider walls that still have no ruling",
+          `the pause is for provider walls that still have no ruling: ${listed}`,
         );
       } else {
         markNeeds(needs, runName, "RULE", `walls.sh open failed (exit ${open.code})`);

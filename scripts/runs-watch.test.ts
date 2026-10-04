@@ -1514,9 +1514,8 @@ describe("provider walls: the watcher wakes, gates dispatch, delivers the pause"
       wallLine("sec") +
         `${JSON.stringify({ ts: new Date().toISOString(), actor: "postmaster", action: "told", target: "sec", detail: "reviewer - -" })}\n`,
     );
+    expect(run(wallsSh, ["escalate", d]).code).toBe(0);
     expect(run(wallsSh, ["rule", d, "sec", "go-on"]).code).toBe(0);
-    writeFileSync(join(d, ".escalation-ready"), "");
-    writeFileSync(join(d, ".wall-pause"), "");
     const { rc, out } = watchStub(root);
     expect(rc).toBe(3); // taken, nothing left to wake on
     expect(out).not.toContain("needs ");
@@ -1546,6 +1545,31 @@ describe("provider walls: the watcher wakes, gates dispatch, delivers the pause"
     const { rc, out } = watchStub(root);
     expect(rc).toBe(0);
     expect(out).toContain("needs walledopen RULE");
+    expect(out).toContain("sec");
     expect(existsSync(join(tmp, "calls", "resume-walledopen-1"))).toBe(false);
+  }, 60000);
+
+  test("a stale wall-pause marker never delivers a later escalation", () => {
+    const root = join(tmp, "watch-wall-stale");
+    mkdirSync(root, { recursive: true });
+    autoRun(root, "wallstale", 1, "thread-wall-3");
+    const d = join(root, "wallstale");
+    handoff(d, "1");
+    writeFileSync(
+      join(d, "actions.jsonl"),
+      wallLine("sec") +
+        `${JSON.stringify({ ts: new Date().toISOString(), actor: "postmaster", action: "told", target: "sec", detail: "reviewer - -" })}\n`,
+    );
+    expect(run(wallsSh, ["rule", d, "sec", "go-on"]).code).toBe(0);
+    writeFileSync(join(d, "ESCALATION.md"), "# Escalation: a later question\n\nNot a wall.\n");
+    writeFileSync(join(d, ".escalation-ready"), "");
+    writeFileSync(join(d, ".wall-pause"), "");
+    const { rc, out } = watchStub(root);
+    expect(rc).toBe(0);
+    expect(out).toContain("needs wallstale RULE");
+    expect(out).toContain("stale");
+    expect(existsSync(join(tmp, "calls", "resume-wallstale-1"))).toBe(false);
+    expect(existsSync(join(d, ".escalation-ready"))).toBe(true);
+    expect(existsSync(join(d, ".wall-pause"))).toBe(true);
   }, 60000);
 });
