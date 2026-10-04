@@ -365,9 +365,15 @@ at all.
 
 ## What would change the answer
 
-- **A single-workhorse baseline** on tickets with blind tests, scored the same way. If one lane
-  alone passes as often as the pair, the second workhorse stops earning its keep. If it fails where
-  the pair passes, it does.
+- **A comparison of runs with no workhorse lanes against runs as the flow makes them**, over
+  alternating tickets, judged by review rounds with the severe findings of round 1, the time and the
+  tokens beside. If runs with no lanes need about as many rounds and cost less, the lanes stop
+  earning their keep. If they need clearly more rounds, they do. Eight tickets in each mode can show
+  a difference of two rounds, and about 29 in each mode are needed to show one, from the 15 runs of
+  six rounds or fewer, whose rounds have a standard deviation of 1.35
+  [@trials/2026-10-03-lane-audit/method.md]. The flow cannot make such a run today. A
+  single-workhorse baseline on tickets with blind tests, scored the same way, is the later test if
+  the coachman writing the change loses.
 - **A hard fixture ticket**, one a single lane at full effort fails. If the second lane rescues it,
   the fixtures stop being a ceiling.
 - **Findings recorded one by one** with lane, severity, verdict and how each was verified. If
@@ -387,6 +393,13 @@ at all.
 - **One workhorse, all reviewers.** Saves the second lane's tokens, a median 18 minutes of waiting
   and about 11 minutes of gate time a run. Loses the hedge against a wall, and the fixes in the 12 A
   runs unless the reviewers catch them, which the records cannot say.
+- **No workhorse lanes: the coachman writes the change.** Saves the workhorse stage and the
+  synthesis, a median 1 hour 35 minutes and 31 minutes a run, and the lanes' tokens. It gives up
+  the hedge against a wall and the second lane's part, a defect fix or a missing part in 12 of the
+  18 runs by the coachman's cards, unless the reviews catch it. The coachman's own writing time
+  replaces some of the saving, and the coachman would rule on findings about code it wrote, as it
+  already does with its own synthesis. The records cannot say how many more rounds the reviews would
+  need, because the flow has no such run.
 - **Two workhorses only for tickets that change the coachman contract.** By the contract's file list
   this keeps two workhorses almost everywhere: 17 of the 18 runs changed at least one listed file.
   The checker itself decides by part of a file, and was in use for three runs. It said yes for [#182](https://github.com/brindlewick/postmaster/issues/182)
@@ -406,24 +419,27 @@ at all.
 
 ## Candidate tickets, ranked
 
-None is filed. Three open tickets already cover work this audit points to:
+None is filed. Items 1 and 2 are drafted. Three open tickets already cover work this audit points to:
 [#255, Bug reviewers are told to change nothing](https://github.com/brindlewick/postmaster/issues/255)
 for the reviewer that changed the code under review in [#200](https://github.com/brindlewick/postmaster/issues/200),
 [#221, Run every lane with only the files, hosts and sockets it needs, on Linux and macOS](https://github.com/brindlewick/postmaster/issues/221) for what a lane may write, and [#104](https://github.com/brindlewick/postmaster/issues/104) for planted bugs.
 
-1. Run a single-workhorse baseline: for the next tickets that have blind tests, score a run with one
-   workhorse and a run with two against the same tests, to settle whether a second workhorse changes
-   a result.
-2. Have the coachman write each review finding to a record as it triages, with its lane, lens,
+1. Give the flow a single-thread mode, in which the coachman writes the change itself and no
+   workhorse lane runs. The postmaster chooses the mode when it dispatches a run, and synthesis stays
+   the default. It changes the coachman's steps, so it needs a fixture run in each mode.
+2. Run the next 16 real tickets with the mode alternating from ticket to ticket, eight in each, and
+   judge the modes by review rounds, with the severe findings of round 1, the time and the tokens
+   beside. It waits for item 1 and for this audit to merge.
+3. Have the coachman write each review finding to a record as it triages, with its lane, lens,
    severity, verdict and how it was verified, so that who found what and what was dismissed are
    counted from data and not read from prose.
-3. Write blind tests for every ticket whose criteria can be checked at an interface, as the
+4. Write blind tests for every ticket whose criteria can be checked at an interface, as the
    coachman did for 6 of the 14 runs judged here, so that each lane is measured alone.
-4. Decide whether opus's security review runs every round or only on a change that touches a risk
+5. Decide whether opus's security review runs every round or only on a change that touches a risk
    surface, since it is the largest recorded cost and named no finding on the fixture ticket.
-5. Have a coachman leg's usage record read the leg's session record, so that a resumed leg, or one
+6. Have a coachman leg's usage record read the leg's session record, so that a resumed leg, or one
    that exited without a record, still has its tokens counted.
-6. Add a hard fixture ticket, one a single lane at full effort fails, so that the fixtures can show a
+7. Add a hard fixture ticket, one a single lane at full effort fails, so that the fixtures can show a
    second workhorse's worth.
 
 ## Evidence
