@@ -108,8 +108,10 @@ import {
   PY_DOT,
   PY_S_CLASS,
   pyLower,
+  pyRstrip,
   pySplitLines,
   pyTrim,
+  pyWords,
 } from "./lib/text.ts";
 
 const SCRIPTS = scriptsDir(import.meta);
@@ -501,7 +503,7 @@ export function scanComments(text: string): SwitchComment[] {
         i++;
       }
       i = i < n ? i + 2 : i;
-      out.push({ line: start, raw: text.slice(s, i).replace(/\s+$/u, "") });
+      out.push({ line: start, raw: pyRstrip(text.slice(s, i)) });
       continue;
     }
     if (ch === "'" || ch === '"') {
@@ -573,7 +575,7 @@ export function scanComments(text: string): SwitchComment[] {
     }
     if (/[A-Za-z_$]/u.test(ch)) {
       const s = i;
-      while (i < n && /[\w$]/u.test(text[i]!)) i++;
+      while (i < n && /[A-Za-z0-9_$]/u.test(text[i]!)) i++;
       last = text.slice(s, i);
       continue;
     }
@@ -600,9 +602,10 @@ export interface SwitchOff {
 }
 
 const LINTER_RE =
-  /^(eslint|oxlint)-(disable-line|disable-next-line|enable-line|enable-next-line|disable|enable)(?![\w-])/u;
-const BIOME_RE = /^(biome-ignore-all|biome-ignore-start|biome-ignore-end|biome-ignore)(?![\w-])/u;
-const TS_RE = /^@(ts-ignore|ts-expect-error|ts-nocheck)(?![\w-])/u;
+  /^(eslint|oxlint)-(disable-line|disable-next-line|enable-line|enable-next-line|disable|enable)(?![A-Za-z0-9_-])/u;
+const BIOME_RE =
+  /^(biome-ignore-all|biome-ignore-start|biome-ignore-end|biome-ignore)(?![A-Za-z0-9_-])/u;
+const TS_RE = /^@(ts-ignore|ts-expect-error|ts-nocheck)(?![A-Za-z0-9_-])/u;
 
 /** Parse one comment as a switch-off directive, or null when it is not one (or,
  * for Biome, when it carries no `category: reason`, which switches nothing off).
@@ -621,12 +624,12 @@ export function parseSwitchOff(raw: string): SwitchOff | null {
     return null;
   }
   body = body.trim();
-  if (block) body = body.replace(/^\*+\s*/u, "").trim();
+  if (block) body = body.replace(/^\*+[ \t]*/u, "").trim();
 
   const ts = TS_RE.exec(body);
   if (ts !== null) {
     const rest = body.slice(ts[0].length).trim();
-    const reason = rest.replace(/^(?:--|:)\s*/u, "").trim();
+    const reason = rest.replace(/^(?:--|:)[ \t]*/u, "").trim();
     return {
       form: ts[1]!,
       scope: ts[1] === "ts-nocheck" ? "file" : "next",
@@ -869,9 +872,7 @@ export function packageSettingsDiffer(a: string | null, b: string | null): boole
   if (pb === null || typeof pb !== "object" || Array.isArray(pb)) return true;
   const oa = pa as Record<string, unknown>;
   const ob = pb as Record<string, unknown>;
-  return ["scripts", "eslintConfig", "prettier"].some(
-    (k) => canonJson(oa[k]) !== canonJson(ob[k]),
-  );
+  return ["scripts", "eslintConfig", "prettier"].some((k) => canonJson(oa[k]) !== canonJson(ob[k]));
 }
 
 function blobAt(repo: string, rev: string, path: string): string | null {
@@ -908,7 +909,7 @@ function approvalIds(repo: string): Set<string> {
     const r = rec as Record<string, unknown>;
     if (r["action"] !== "switch-off") continue;
     if (typeof r["target"] !== "string" || typeof r["detail"] !== "string") continue;
-    if (!/^approved\b/u.test(r["detail"])) continue;
+    if ((pyWords(r["detail"])[0] ?? "") !== "approved") continue;
     out.add(r["target"]);
   }
   return out;
@@ -990,9 +991,7 @@ function switchOffs(o: string[]): number {
     code = 2;
   }
   console.log(status);
-  process.stdout.write(
-    `## Switch-offs\n\n${linesOut.length > 0 ? linesOut.join("\n") : "none"}\n`,
-  );
+  process.stdout.write(`## Switch-offs\n\n${linesOut.length > 0 ? linesOut.join("\n") : "none"}\n`);
   return code;
 }
 

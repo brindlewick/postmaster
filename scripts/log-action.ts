@@ -48,6 +48,7 @@ import { appendFileSync, existsSync, readFileSync, realpathSync, statSync } from
 import { basename, dirname, join, resolve } from "node:path";
 import { toolRoot } from "./lib/paths.ts";
 import { argvDecoded } from "./lib/proc.ts";
+import { pyWords } from "./lib/text.ts";
 
 const VERBS =
   " dispatch resume refuse harvest synthesize review-launch review-harvest finding apply escalate rule ticket-check ticket-create ticket-edit ticket-state ticket-comment gate verify merge teardown degrade handoff-accept handoff stage spec-review switch-off tool-fault note ";
@@ -270,9 +271,11 @@ function logAction(
       );
       return 1;
     }
-    const words = detail.split(/\s+/u).filter((w) => w !== "");
+    const words = pyWords(detail);
     if (words[0] !== "approved" && words[0] !== "refused") {
-      console.error("log-action: a switch-off's detail opens with its decision, approved or refused");
+      console.error(
+        "log-action: a switch-off's detail opens with its decision, approved or refused",
+      );
       return 1;
     }
     if (words.length < 2) {
