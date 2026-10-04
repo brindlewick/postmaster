@@ -173,9 +173,8 @@ settings only say what `default` means for that project.
 
 ## What it needs
 
-**Linux and macOS** are supported. Apple silicon Macs are tested; Intel Macs are not
-tested. At least two agent CLIs that can
-run headless. Any git repository as a target. A session host
+**Linux and macOS** are supported. Apple silicon Macs are tested; Intel Macs are not tested.
+At least two agent CLIs that can run headless. Any git repository as a target. A session host
 to watch the fleet in: [Herdr](https://herdr.dev) by default wherever it is running, where each
 launch appears in its worktree's space under the project's, or tmux. With neither, launches run
 in the background and the flow still works (`skills/postmaster/hosts.md`). Bun 1.4.2 or newer, which
