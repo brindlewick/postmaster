@@ -491,7 +491,7 @@ function nameCmd(dispatch: string, ...args: string[]): string {
 }
 
 type ProcessInfo = { group: number; start: string };
-export type Registry = {
+type Registry = {
   dir: string;
   name: string;
   start: string;
@@ -540,7 +540,7 @@ function procStat(pid: number): { name: string; fields: string[] } | null {
     return null;
   }
 }
-export function startOf(pid: number): string {
+function startOf(pid: number): string {
   const p = procStat(pid);
   if (p) return p.fields[0] !== "Z" ? (p.fields[19] ?? "") : "";
   const fields = run("ps", ["-o", "stat=,lstart=", "-p", String(pid)], {

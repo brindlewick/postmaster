@@ -392,8 +392,38 @@ describe("aftercare on a landed run record", () => {
     expect(again.code).toBe(0);
     expect(snapshot(r)).toBe(before);
     for (const step of ["style-sort", "run-log", "ticket-comment", "stage", "release"])
-      expect(again.out).toContain(`step ${step}: already`);
+      expect(again.out).toContain(`step ${step}: already done`);
     for (const folder of ["7", "7-sol", "7-mimo", "7-oracle-sol"])
       expect(again.out).toContain(`.worktrees/${folder}: already removed`);
+    // control: the JSON record keeps the short status
+    const againJson = aftercare(r, ["--json", ...WORDS]);
+    expect(againJson.code).toBe(0);
+    const statuses = JSON.parse(againJson.out).steps.map((s: { status: string }) => s.status);
+    expect(statuses).toContain("already");
+    expect(statuses).not.toContain("already done");
+  }, 120_000);
+
+  test("a ticket-dash symlink is left in place with a note naming why", () => {
+    const r = makeR();
+    const link = join(r.repo, ".worktrees/7-link");
+    sh("ln", ["-s", join(r.repo, ".worktrees/70-x"), link]);
+    const result = aftercare(r, WORDS);
+    expect(result.code).toBe(3);
+    expect(result.out).toContain(".worktrees/7-link");
+    expect(result.out).toContain("symbolic link");
+    const noted = readFileSync(join(r.D, "actions.jsonl"), "utf8")
+      .split("\n")
+      .map((line) => (line ? JSON.parse(line) : null))
+      .some(
+        (e) =>
+          e &&
+          e.action === "note" &&
+          e.target === link &&
+          e.detail.includes("symbolic link"),
+      );
+    expect(noted).toBe(true);
+    expect(existsSync(link)).toBe(true);
+    // control: the run's other folders still went
+    expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
   }, 120_000);
 });

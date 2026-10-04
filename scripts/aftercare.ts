@@ -1156,19 +1156,23 @@ function mainFlow(args: Args): Result {
       const name = basename(path);
       const entry: Folder = { path, saves: [], result: "", flagged: false, why: null };
       folders.push(entry);
-      if (!isDir(path)) {
-        entry.result = alreadyRemoved.has(path) ? "already removed" : "already gone";
-        continue;
-      }
       if (set.links.has(path)) {
         entry.result = "left";
         entry.why = "a symbolic link, not a worktree or clone; left in place";
+        if (!dryRun)
+          logAction(dispatch, "note", path, `left in place: ${entry.why}`, `folder ${path}`);
+        continue;
+      }
+      if (!isDir(path)) {
+        entry.result = alreadyRemoved.has(path) ? "already removed" : "already gone";
         continue;
       }
       const cwd = phys(process.cwd());
       if (cwd === path || cwd.startsWith(`${path}${sep}`)) {
         entry.result = "left";
         entry.why = "this command runs inside it; left in place";
+        if (!dryRun)
+          logAction(dispatch, "note", path, `left in place: ${entry.why}`, `folder ${path}`);
         continue;
       }
       const early = leftEarly.get(path);
@@ -1547,8 +1551,12 @@ function mainFlow(args: Args): Result {
 
 function printPlain(result: Result): void {
   console.log(`aftercare: run ${result.run}${result.dryRun ? " (dry run)" : ""}`);
-  for (const step of result.steps)
-    console.log(`step ${step.name}: ${step.status}${step.detail ? ` — ${step.detail}` : ""}`);
+  for (const step of result.steps) {
+    // A skipped step shows as already done, in the ticket's words; the JSON
+    // record keeps the short status.
+    const shown = step.status === "already" ? "already done" : step.status;
+    console.log(`step ${step.name}: ${shown}${step.detail ? ` — ${step.detail}` : ""}`);
+  }
   for (const folder of result.folders) {
     const bits: string[] = [];
     if (folder.saves.length)
