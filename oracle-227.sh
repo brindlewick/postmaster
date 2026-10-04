@@ -7,13 +7,13 @@
 # fresh in temporary folders, plus the host suite's green run. Never a function shape,
 # which is what the lanes were dispatched to choose.
 #
-# One documented deviation from the check text: C1 and C4 write the action-log key as
-# "Detail" (capital D). The flow's real form is lowercase "detail": log-action.sh writes
-# it (verified by running it), every review-launch line in runs 216 and 218 uses it,
-# and host.ts reads only it (case-sensitive hasOwn). With the literal capital-D line,
-# no reviewer is added (verified at base: 3 lines, not 5), so the check's own "five
-# lines" expectation and the ticket's "review-launch lines keep adding reviewers" only
-# hold with lowercase. This oracle uses lowercase "detail" throughout.
+# Casing note: the action-log fixtures below use the key "detail" (byte 100),
+# exactly as the ticket writes it and as log-action.sh writes it. The first
+# committed revision of this file used "Detail" (byte 68) in its fixtures by
+# mistake, and its R+opus checks failed on correct implementations. The
+# fixtures were corrected to the ticket's spelling (verified byte by byte
+# against the ticket text and the base reader, not against any lane's work),
+# and both lanes were scored with the corrected oracle.
 #
 #   ./oracle-227.sh        run every check; exit 0 when all pass, 1 otherwise
 #
@@ -127,7 +127,7 @@ CMDS="stop-run close-run"
 mkR
 for c in $CMDS; do check_ok "C1 R" "$c" "$T/runs/227" 227-mimo 227-sol 227-rev-bug-mimo 227; done
 mkR
-printf '{"action":"review-launch","target":"opus","Detail":"security r1"}' >"$T/runs/227/actions.jsonl"
+printf '{"action":"review-launch","target":"opus","detail":"security r1"}' >"$T/runs/227/actions.jsonl"
 for c in $CMDS; do check_ok "C1 R+opus" "$c" "$T/runs/227" 227-mimo 227-sol 227-rev-bug-mimo 227-rev-security-opus 227; done
 mkR
 rm -rf "$T/runs/227/logs"
@@ -168,7 +168,7 @@ done
 mkR
 printf '[["bug","mimo"]]' >"$T/runs/227/logs/review-r1.json"
 {
-  printf '%s\n' '{"action":"review-launch","target":"mimo","Detail":"bug r1"}' '' '{broken' '["review-launch"]'
+  printf '%s\n' '{"action":"review-launch","target":"mimo","detail":"bug r1"}' '' '{broken' '["review-launch"]'
 } >"$T/runs/227/actions.jsonl"
 for c in $CMDS; do
   exechost "$c" "$T/runs/227"
@@ -204,13 +204,13 @@ for c in $CMDS; do check_ok "C3 actionsdir" "$c" "$T/runs/227" 227-mimo 227-sol 
 for fourth in '["review-launch"]' 'null' '"text"'; do
   mkR
   {
-    printf '%s\n' '{"action":"review-launch","target":"mimo","Detail":"bug r1"}' '' '{broken' "$fourth"
+    printf '%s\n' '{"action":"review-launch","target":"mimo","detail":"bug r1"}' '' '{broken' "$fourth"
   } >"$T/runs/227/actions.jsonl"
   for c in $CMDS; do check_refuse_named "C4 fourth=$fourth" "$c" "$T/runs/227" "$T/runs/227/actions.jsonl" "line 4"; done
 done
 mkR
 {
-  printf '%s\n' '{"action":"review-launch","target":"mimo","Detail":"bug r1"}' '' '{broken'
+  printf '%s\n' '{"action":"review-launch","target":"mimo","detail":"bug r1"}' '' '{broken'
 } >"$T/runs/227/actions.jsonl"
 for c in $CMDS; do check_ok "C4 three-lines" "$c" "$T/runs/227" 227-mimo 227-sol 227-rev-bug-mimo 227; done
 
