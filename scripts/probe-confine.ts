@@ -2,8 +2,8 @@
 // harness in Bubblewrap on Linux and Seatbelt on macOS; the user chooses the key, this
 // reports what is genuinely available and what finishes it.
 //
-//   probe-confine.sh            the table and the footer
-//   probe-confine.sh --verdict  ready, partial or unavailable, and nothing else
+//   scripts/run probe-confine            the table and the footer
+//   scripts/run probe-confine --verdict  ready, partial or unavailable, and nothing else
 //
 //   exit 0 always; the table is the result. Every action in the output is advice for the
 //   user; this probe never installs a package or changes a system rule.
@@ -415,7 +415,7 @@ if (import.meta.main) {
   } else if (args.length === 1 && args[0] === "--verdict") {
     console.log(decide(collect()).verdict);
   } else {
-    console.error("usage: probe-confine.sh [--verdict]");
+    console.error("usage: run probe-confine [--verdict]");
     process.exit(1);
   }
 }

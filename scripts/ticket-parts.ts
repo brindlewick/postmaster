@@ -1,7 +1,7 @@
 // Check a ticket in the two-part shape (skills/postmaster/ticket-template.md): the plain part, which the
 // user signs off, is plain, and the part for the agents follows from it.
 //
-//   ticket-parts.sh <body-file> [--final]
+//   scripts/run ticket-parts <body-file> [--final]
 //
 // The plain part is everything above the first `## For the agents` heading. The agents' part is
 // everything below it. A first non-empty line that starts `DRAFT:` is ignored, unless --final.
@@ -450,7 +450,7 @@ export function analyze(text: string, final: boolean): Report | null {
 }
 
 // --- entry ------------------------------------------------------------------------------------
-const USAGE = "usage: ticket-parts.sh <body-file> [--final]";
+const USAGE = "usage: run ticket-parts <body-file> [--final]";
 
 function main(argv: string[]): number {
   let final = false;

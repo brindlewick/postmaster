@@ -23,9 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export const repoRoot = import.meta.dir;
-const hostSh = join(repoRoot, "scripts", "host.sh");
-const viewSh = join(repoRoot, "scripts", "view-stream.sh");
-const fixtureSh = join(repoRoot, "scripts", "fixture.sh");
+const runEntry = join(repoRoot, "scripts", "run");
 const sharesTs = join(repoRoot, "scripts", "synthesis-shares.ts");
 
 export type Check = { name: string; timeoutMs: number; run: () => Promise<void> };
@@ -210,8 +208,8 @@ async function hostRun(
   mkdirSync(bg.cwd, { recursive: true });
   return await new Promise<ProcOut>((resolve) => {
     const child = spawn(
-      hostSh,
-      ["run", name, bg.cwd, "--out", bg.out, "--err", bg.err, "--marker", bg.mark, "--", ...cmd],
+      runEntry,
+      ["host", "run", name, bg.cwd, "--out", bg.out, "--err", bg.err, "--marker", bg.mark, "--", ...cmd],
       { env: bg.env, stdio: ["ignore", "pipe", "pipe"] },
     );
     let out = "";
@@ -225,7 +223,7 @@ async function hostRun(
       } catch {
         // Gone.
       }
-      resolve({ code: null, out, err: `${err}\nORACLE: host.sh run timed out` });
+      resolve({ code: null, out, err: `${err}\nORACLE: run host run timed out` });
     }, 30000);
     child.on("close", (code) => {
       clearTimeout(timer);
@@ -238,7 +236,7 @@ async function hostRun(
 async function markerTiming(forced: boolean): Promise<void> {
   const bg = bgSetup(forced ? "mark-f" : "mark-u", forced);
   const r = await hostRun(bg, "mark-probe", ["sleep", "4"]);
-  if (r.code !== 0) fail(`host.sh run exit ${r.code}: ${r.err}`);
+  if (r.code !== 0) fail(`run host run exit ${r.code}: ${r.err}`);
   if (!r.out.includes("host=none")) fail(`expected host=none, got: ${r.out}`);
   const live = await pollTrue(() => launchRecordPids(bg.state).length > 0, 10000);
   if (!live) fail("launch never registered while it should be live");
@@ -252,7 +250,7 @@ async function markerTiming(forced: boolean): Promise<void> {
 async function bgStart(forced: boolean): Promise<void> {
   const bg = bgSetup(forced ? "bg-f" : "bg-u", forced);
   const r = await hostRun(bg, "bg-probe", ["sleep", "1"]);
-  if (r.code !== 0) fail(`host.sh run exit ${r.code}: ${r.out} ${r.err}`);
+  if (r.code !== 0) fail(`run host run exit ${r.code}: ${r.out} ${r.err}`);
   if (!r.out.includes("host=none")) fail(`expected host=none, got: ${r.out}`);
   if (r.err.includes("did not start")) fail(`live launch reported as not started: ${r.err}`);
   const landed = await pollTrue(() => existsSync(bg.mark), 10000);
@@ -278,7 +276,7 @@ async function zombieWatch(forced: boolean): Promise<void> {
     if (!Number.isInteger(zpid) || zpid <= 0) fail(`no zombie pid from helper: ${JSON.stringify(out)}`);
     if (!alive(parent.pid ?? 0)) fail("helper parent died before the watch");
     const mark = join(dir, "zw.done");
-    const watcher = spawn(hostSh, ["_watch", String(zpid), mark], {
+    const watcher = spawn(runEntry, ["host", "_watch", String(zpid), mark], {
       env,
       stdio: "ignore",
     });
@@ -316,7 +314,7 @@ async function followStream(forced: boolean): Promise<void> {
   if (forced) env.POSTMASTER_PROC_ROOT = join(dir, "no-such-proc");
   const writer = spawn("bash", [script, file], { stdio: "ignore" });
   try {
-    const r = runSync(viewSh, ["--follow", file, "--pid", String(writer.pid)], {
+    const r = runSync(runEntry, ["view-stream", "--follow", file, "--pid", String(writer.pid)], {
       env,
       timeoutMs: 20000,
     });
@@ -355,7 +353,7 @@ async function stopClose(forced: boolean): Promise<void> {
       err: join(cwd, `${name}.err`),
     };
     const r = await hostRun(bg, name, cmd);
-    if (r.code !== 0) fail(`${name}: host.sh run exit ${r.code}: ${r.err}`);
+    if (r.code !== 0) fail(`${name}: run host run exit ${r.code}: ${r.err}`);
   };
   await runLaunch("sleep-A", ["sleep", "300"]);
   const pidFile = join(cwd, "b.pid");
@@ -386,7 +384,7 @@ async function stopClose(forced: boolean): Promise<void> {
   const unrelated = spawn("sleep", ["300"], { cwd, stdio: "ignore" });
   try {
     await sleepMs(500);
-    const closeLive = runSync(hostSh, ["close", cwd], {
+    const closeLive = runSync(runEntry, ["host", "close", cwd], {
       env: { ...env, POSTMASTER_HOST_CLOSE_WAIT: "1" },
       timeoutMs: 30000,
     });
@@ -399,7 +397,7 @@ async function stopClose(forced: boolean): Promise<void> {
     if (!closeLive.err.includes("sleep-A") || !closeLive.err.includes("sleep-B")) {
       fail(`close while live names fewer than both launches: ${closeLive.err}`);
     }
-    const stopped = runSync(hostSh, ["stop", cwd], {
+    const stopped = runSync(runEntry, ["host", "stop", cwd], {
       env: { ...env, POSTMASTER_HOST_STOP_WAIT: "5" },
       timeoutMs: 60000,
     });
@@ -411,7 +409,7 @@ async function stopClose(forced: boolean): Promise<void> {
     const stillLive = liveBefore.filter((pid) => alive(pid));
     if (stillLive.length > 0) fail(`launch pids survived stop: ${stillLive}`);
     if (!alive(unrelated.pid ?? 0)) fail("unrelated sleep in the same folder was stopped");
-    const closeAfter = runSync(hostSh, ["close", cwd], {
+    const closeAfter = runSync(runEntry, ["host", "close", cwd], {
       env: { ...env, POSTMASTER_HOST_CLOSE_WAIT: "1" },
       timeoutMs: 30000,
     });
@@ -483,7 +481,7 @@ async function runsStatus(
     }
     const env: Record<string, string | undefined> = { ...process.env };
     if (forced) env.POSTMASTER_PROC_ROOT = join(dir, "no-such-proc");
-    const r = runSync(join(repoRoot, "scripts", "runs-status.sh"), [root], {
+    const r = runSync(runEntry, ["runs-status", root], {
       env,
       timeoutMs: 30000,
     });
@@ -608,8 +606,8 @@ function toolBin(hide: string): string {
 async function scoreWithout(hide: "jq" | "npm"): Promise<void> {
   const bin = toolBin(hide);
   const r = runSync(
-    fixtureSh,
-    ["score", join(bin, "no-such-dispatch"), join(bin, "no-such-repo")],
+    runEntry,
+    ["fixture", "score", join(bin, "no-such-dispatch"), join(bin, "no-such-repo")],
     { env: { ...process.env, PATH: bin }, timeoutMs: 30000 },
   );
   const text = `${r.out}\n${r.err}`;

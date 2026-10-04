@@ -1,4 +1,4 @@
-// Tests beside scripts/host.ts, moved from its --self-test on #109: 320 controls.
+// Tests beside scripts/host.ts, moved from its --self-test on #109: 338 controls.
 // host.ts's suite lives in ./host-self-test.ts's runControls (shared sequential fixture);
 // this file drives it once in beforeAll, splits its printed lines on the section headers,
 // and asserts each section's control count with no FAIL. Portable process controls are below.
@@ -48,8 +48,9 @@ const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "review round 2 fixes, tmux (stub)", count: 1 },
   { name: "review round 4 fixes, Herdr (stub)", count: 16 },
   { name: "review round 4 fixes, tmux (stub)", count: 11 },
+  { name: "teardown reads only the round records", count: 16 },
   { name: "interactive sessions", count: 15 },
-  { name: "run role: the explicit host role", count: 1 },
+  { name: "run role: the explicit host role", count: 2 },
   { name: "leg attempt controls", count: 89 },
   {
     name: "run environment identity, Claude session and lane env file: Herdr, tmux and no host",
@@ -73,6 +74,12 @@ beforeAll(async () => {
     failures = await runControls();
   } finally {
     console.log = origLog;
+  }
+  if (failures > 0) {
+    for (const line of lines.filter(
+      (line) => line.includes("FAIL") || line.includes("setup failed"),
+    ))
+      process.stderr.write(`${line}\n`);
   }
 }, 600000);
 
@@ -165,12 +172,12 @@ describe("waiting list lock", () => {
         join(runs, "postmaster", "ESCALATION.md"),
         Array.from({ length: 500 }, (_, i) => `## FILL-${i}\nfill ${i}\n`).join(""),
       );
-      const wrapper = join(import.meta.dir, "host.sh");
+      const wrapper = join(import.meta.dir, "run");
       const worker = [
         `import { spawnSync } from "node:child_process";`,
         `const [wrapper, runs, qfile, idx] = process.argv.slice(process.argv.length - 4);`,
         `for (let j = 0; j < 8; j++) {`,
-        `  const r = spawnSync(wrapper, ["leg", "waiting", "add", runs, "T" + idx + "-" + j, qfile], { encoding: "utf8" });`,
+        `  const r = spawnSync(wrapper, ["host", "leg", "waiting", "add", runs, "T" + idx + "-" + j, qfile], { encoding: "utf8" });`,
         `  if (r.status !== 0) { process.stderr.write(String(r.stderr)); process.exit(1); }`,
         `}`,
       ].join("\n");
@@ -206,7 +213,7 @@ describe("waiting list lock", () => {
       const runs = join(dir, "runs");
       const qfile = join(dir, "q.md");
       writeFileSync(qfile, "why is the run waiting?\n");
-      const wrapper = join(import.meta.dir, "host.sh");
+      const wrapper = join(import.meta.dir, "run");
       // A PATH with no flock: bash for the wrapper's shebang, bun and dirname
       // for its exec.
       const bin = join(dir, "bin");
@@ -218,7 +225,7 @@ describe("waiting list lock", () => {
         `import { spawnSync } from "node:child_process";`,
         `const [wrapper, runs, qfile, idx] = process.argv.slice(process.argv.length - 4);`,
         `for (let j = 0; j < 2; j++) {`,
-        `  const r = spawnSync(wrapper, ["leg", "waiting", "add", runs, "T" + idx + "-" + j, qfile], { encoding: "utf8" });`,
+        `  const r = spawnSync(wrapper, ["host", "leg", "waiting", "add", runs, "T" + idx + "-" + j, qfile], { encoding: "utf8" });`,
         `  if (r.status !== 0) { process.stderr.write(String(r.stderr)); process.exit(1); }`,
         `}`,
       ].join("\n");
@@ -278,8 +285,8 @@ test("_watch touches its marker for a zombie while the zombie's parent still run
     process.env.POSTMASTER_PROC_ROOT = procRoot;
     expect(processState(childPid)).toBe("zombie");
     const result = spawnSync(
-      join(import.meta.dir, "host.sh"),
-      ["_watch", String(childPid), marker],
+      join(import.meta.dir, "run"),
+      ["host", "_watch", String(childPid), marker],
       {
         encoding: "utf8",
         timeout: 5000,
@@ -311,8 +318,8 @@ test("a background runner that dies before reading its spec is rejected", async 
   let removedSpec = false;
   let error = "";
   const child = spawn(
-    join(import.meta.dir, "host.sh"),
-    ["run", "dead-runner", cwd, "--err", err, "--marker", marker, "--", "sleep", "30"],
+    join(import.meta.dir, "run"),
+    ["host", "run", "dead-runner", cwd, "--err", err, "--marker", marker, "--", "sleep", "30"],
     {
       cwd,
       env: {
@@ -417,11 +424,11 @@ test("a member with a five-word start matches its process, and close refuses whi
       POSTMASTER_HOST_FIXTURE: dir,
       POSTMASTER_PROC_ROOT: join(dir, "missing-proc"),
     };
-    const hostSh = join(import.meta.dir, "host.sh");
-    const closed = spawnSync(hostSh, ["close", dir], { encoding: "utf8", env });
+    const wrapper = join(import.meta.dir, "run");
+    const closed = spawnSync(wrapper, ["host", "close", dir], { encoding: "utf8", env });
     expect(closed.status).toBe(2);
     expect(`${closed.stdout ?? ""}${closed.stderr ?? ""}`).toContain("still running");
-    const stopped = spawnSync(hostSh, ["stop", dir], { encoding: "utf8", env });
+    const stopped = spawnSync(wrapper, ["host", "stop", dir], { encoding: "utf8", env });
     expect(stopped.status).toBe(0);
     expect(`${stopped.stdout ?? ""}${stopped.stderr ?? ""}`).not.toContain("no launch is running");
     const deadline = Date.now() + 10000;
@@ -429,7 +436,7 @@ test("a member with a five-word start matches its process, and close refuses whi
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     expect(processState(memberPid)).not.toBe("live");
-    const after = spawnSync(hostSh, ["close", dir], { encoding: "utf8", env });
+    const after = spawnSync(wrapper, ["host", "close", dir], { encoding: "utf8", env });
     expect(after.status).toBe(0);
   } finally {
     try {

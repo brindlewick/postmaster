@@ -20,8 +20,8 @@ It has two parts.
 Small gaps are for the lanes to fill, and that is what having different models is for. The plain part
 still states every choice that changes what a person sees or what the flow does.
 
-Keep the headings and their order. `<tool>/scripts/ticket-check.sh` requires `## Problem / feature`,
-`## Acceptance criteria`, `## Direction` and `## Turnpikes`. `<tool>/scripts/ticket-parts.sh` checks
+Keep the headings and their order. `<tool>/scripts/run ticket-check` requires `## Problem / feature`,
+`## Acceptance criteria`, `## Direction` and `## Turnpikes`. `<tool>/scripts/run ticket-parts` checks
 the rest of the shape: that the plain part is plain, and that the checks, the notes and the
 decisions line up.
 
