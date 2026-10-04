@@ -713,6 +713,17 @@ function synthesisPath(info: RunInfo): string {
  */
 function assertSynth(info: RunInfo, needBranch: boolean): void {
   const synth = synthesisPath(info);
+  // Lstat the path itself: a symlink to the main checkout would resolve both
+  // sides of the comparison below to the same directory and pass.
+  let stat: { isDirectory(): boolean; isSymbolicLink(): boolean } | null = null;
+  try {
+    stat = lstatSync(synth);
+  } catch {
+    stat = null;
+  }
+  if (!stat || !stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error(`synthesis worktree is not a worktree: ${synth}`);
+  }
   const top = runGit(synth, ["rev-parse", "--show-toplevel"]);
   if (top.code !== 0 || physical(top.out.trim()) !== physical(synth)) {
     throw new Error(`synthesis worktree is not a worktree: ${synth}`);

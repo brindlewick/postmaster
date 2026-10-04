@@ -1474,3 +1474,17 @@ describe("R9: ruled round fixes", () => {
     expect(card).toContain("outside the project");
   });
 });
+
+describe("Post-9: ruled fixes without a review round", () => {
+  test("bug-57 a symlinked synthesis worktree faults restore instead of clobbering", () => {
+    const layout = makeLayout();
+    before(layout);
+    rmSync(layout.synth, { recursive: true, force: true });
+    symlinkSync(layout.repo, layout.synth);
+    const restore = call(layout, ["restore", layout.dispatch, "r1"]);
+    expect(restore.code).toBe(1);
+    expect(restore.out).toContain("not a worktree");
+    expect(git(layout.repo, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+    expect(git(layout.repo, "status", "--porcelain")).toBe("");
+  });
+});
