@@ -18,7 +18,18 @@
 # - C3 "in order": the dry run's folder order (first single-folder line per
 #   folder, in output order) must match the real run's teardown order on a twin
 #   record. Lines naming two or more folders (list lines) are skipped, since
-#   only ordered steps show order.
+#   only ordered steps show order. Folder 7 reads only by its full worktree
+#   path: a bare 7 also names the run.
+# - Folder identity in action lines reads only target and detail, never the
+#   whole line: every line carries "run":"7", which would otherwise pass the
+#   pin's teardown off as the synthesis folder's (C10, C14).
+#
+# Repairs after the first scoring (commit after the blind one, each proven by
+# the ticket's own text, never by a lane's output): the C2 fixture's finding
+# key is lowercase "detail" as the ticket writes it; the C15 steps parser reads
+# lowercase "detail" as the ticket shapes it; C16 accepts the ticket's own
+# "exit 2 or 3" phrasing; folder identity is target/detail-scoped as above;
+# C14 counts five teardowns total.
 # - C6/C15 flag reading: the ticket's C15 calls the folders entry field "its
 #   flag" and its technical notes call it "flagged". Both spellings are
 #   accepted; exactly one must be present per entry.
@@ -311,6 +322,9 @@ othersRemain() {
   if [ "$kept" = 1 ]; then ok "$label others remain"; else bad "$label others remain"; fi
 }
 
+# Folder identity in an action line reads only its target and detail: the whole
+# line also carries the run ("run":"7"), which a bare-7 match would mistake for
+# the synthesis folder on every line, including the pin's teardown.
 teardownOrder() {
   # $1 = actions file; prints run-folder names in first-teardown-mention order.
   python3 - "$1" <<'EOF'
@@ -326,11 +340,14 @@ for line in open(sys.argv[1], encoding="utf-8"):
         continue
     if not isinstance(e, dict) or e.get("action") != "teardown":
         continue
-    text = json.dumps(e)
+    tgt = str(e.get("target", ""))
+    det = str(e.get("detail", ""))
+    blob = tgt + "\n" + det
+    base = tgt.rsplit("/", 1)[-1]
     for f in ("7-oracle-sol", "7-mimo", "7-sol"):
-        if f in text and f not in seen:
+        if f in blob and f not in seen:
             seen.append(f)
-    if re.search(r"(?<![\w-])7(?![-\w])", text) and "7" not in seen:
+    if (base == "7" or re.search(r"(?<![\w-])7(?![-\w])", det)) and "7" not in seen:
         seen.append("7")
 print(" ".join(seen))
 EOF
@@ -428,7 +445,7 @@ printf '%s\n%s\n' "$OUT" "$ERR" | grep -qi "leg\|exit\|marker\|runn" \
   && ok "C2-leg reason" || bad "C2-leg reason"
 twoLines "C2-leg"
 mkR
-printf '{"ts":"2026-10-03T10:00:00Z","actor":"coachman","action":"finding","target":"src/a.ts:1","Detail":"style P3 r1 style mimo, verified by reading"}\n' >>"$D/actions.jsonl"
+printf '{"ts":"2026-10-03T10:00:00Z","actor":"coachman","action":"finding","target":"src/a.ts:1","detail":"style P3 r1 style mimo, verified by reading"}\n' >>"$D/actions.jsonl"
 grep -c '"detail":"style P3' "$D/actions.jsonl" | grep -q "^1$" \
   && ok "C2-style fixture byte" || bad "C2-style fixture byte"
 snapR
@@ -457,16 +474,16 @@ grep -q "ticket-7-base" "$T/dry.out" && bad "C3 omits ticket-7-base" || ok "C3 o
 grep -qi "sav" "$T/dry.out" && ok "C3 says what it saves" || bad "C3 says what it saves"
 DRYORDER=$(python3 - "$T/dry.out" <<'EOF'
 import re, sys
+# Only unambiguous folder references carry order: dashed names, and folder 7
+# by its full worktree path. A bare 7 also names the run ("run 7" headers),
+# so it is never read as the folder here.
 order = []
 for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
     found = []
     for f in ("7-oracle-sol", "7-mimo", "7-sol"):
         if f in line and f not in found:
             found.append(f)
-    rest = line
-    for f in ("7-oracle-sol", "7-mimo", "7-sol"):
-        rest = rest.replace(f, " ")
-    if re.search(r"(?<![\w-])7(?![-\w])", rest):
+    if re.search(r"\.worktrees/7(?![-\w])", line) and "7" not in found:
         found.append("7")
     if len(found) == 1 and found[0] not in order:
         order.append(found[0])
@@ -760,7 +777,13 @@ for i, line in enumerate(open(sys.argv[1], encoding="utf-8"), 1):
     except Exception:
         continue
     a = e.get("action")
-    if a == "teardown" and ("7-sol" in line or "7-mimo" in line or "7-oracle-sol" in line or re.search(r"(?<![\w-])7(?![-\w])", line)):
+    tgt = str(e.get("target", ""))
+    det = str(e.get("detail", ""))
+    blob = tgt + "\n" + det
+    base = tgt.rsplit("/", 1)[-1]
+    isFolder = ("7-sol" in blob or "7-mimo" in blob or "7-oracle-sol" in blob
+                or base == "7" or re.search(r"(?<![\w-])7(?![-\w])", det))
+    if a == "teardown" and isFolder:
         lastFolderTear = i
     elif a == "ticket-state" and not firstState:
         firstState = i
@@ -979,18 +1002,33 @@ for line in open('$D/actions.jsonl', encoding='utf-8'):
     if line and json.loads(line).get('action') == 'teardown':
         n += 1
 print(n)")
+[ "$NTEAR7" = 5 ] && ok "C14 five teardowns total" || bad "C14 five teardowns total (got $NTEAR7)"
 SECOND_TEARDOWNS=$(python3 -c "
-import json
+import json, re
 out = []
 for line in open('$D/actions.jsonl', encoding='utf-8'):
     line = line.strip()
-    if line and json.loads(line).get('action') == 'teardown':
-        out.append(line)
+    if not line:
+        continue
+    e = json.loads(line)
+    if e.get('action') != 'teardown':
+        continue
+    tgt = str(e.get('target', ''))
+    det = str(e.get('detail', ''))
+    blob = tgt + '\n' + det
+    base = tgt.rsplit('/', 1)[-1]
+    folders = [f for f in ('7-sol', '7-mimo', '7-oracle-sol') if f in blob]
+    if base == '7' or re.search(r'(?<![\w-])7(?![-\w])', det):
+        folders.append('7')
+    out.append(' '.join(folders) if folders else 'pin')
 print('\n'.join(out))" | tail -n 2)
 echo "$SECOND_TEARDOWNS" | grep -q "7-sol" \
   && ok "C14 second run tears 7-sol" || bad "C14 second run tears 7-sol"
-echo "$SECOND_TEARDOWNS" | grep -qE "7-mimo|7-oracle-sol|(^|[^0-9-])7([^0-9-]|$)" \
-  && bad "C14 no second teardown" || ok "C14 no second teardown"
+if [ "$SECOND_TEARDOWNS" = "$(printf '7-sol\npin')" ]; then
+  ok "C14 no second teardown"
+else
+  bad "C14 no second teardown ($SECOND_TEARDOWNS)"
+fi
 
 # --- C15: one record a script can read ---
 mkR
@@ -1018,7 +1056,7 @@ if isinstance(folders, list) and len(folders) == 4:
             good += 1
     fok = 1 if good == 4 else 0
 steps = o.get("steps", [])
-sok = 1 if isinstance(steps, list) and len(steps) > 0 and all("name" in s and "status" in s and "Detail" in s for s in steps) else 0
+sok = 1 if isinstance(steps, list) and len(steps) > 0 and all("name" in s and "status" in s and "detail" in s for s in steps) else 0
 print("json", 1 if solo else 0, 1 if keys else 0, fok, sok, 1 if o.get("dry_run") is False else 0)
 EOF
 read -r J TAG KEYS FOK SOK DRY <"$T/c15.txt"
@@ -1081,8 +1119,12 @@ EOF
 [ -s "$T/stageg.txt" ] && ok "C16 stage G present" || bad "C16 stage G present"
 grep -qi "aftercare" "$T/stageg.txt" && ok "C16 names command" || bad "C16 names command"
 grep -qi "dry" "$T/stageg.txt" && ok "C16 dry run" || bad "C16 dry run"
-grep -q "exit 2" "$T/stageg.txt" && grep -q "exit 3" "$T/stageg.txt" \
-  && ok "C16 exits 2 and 3" || bad "C16 exits 2 and 3"
+if grep -q "exit 2 or 3" "$T/stageg.txt" \
+  || { grep -q "exit 2" "$T/stageg.txt" && grep -q "exit 3" "$T/stageg.txt"; }; then
+  ok "C16 exits 2 and 3"
+else
+  bad "C16 exits 2 and 3"
+fi
 grep -qi "flag" "$T/stageg.txt" && ok "C16 flagged folders" || bad "C16 flagged folders"
 grep -qi "fault" "$T/stageg.txt" && ok "C16 fault to user" || bad "C16 fault to user"
 grep -q "host.sh close-run" "$T/stageg.txt" && bad "C16 no close-run step" || ok "C16 no close-run step"
