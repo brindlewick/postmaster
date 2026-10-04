@@ -1,0 +1,13 @@
+# read at 2026-10-04T09:15Z
+$ per_summary.py <this repository>
+summaries with an Evidence section, by entries and not shown
+ticket  lane  date         entries not shown
+216     mimo  2026-10-03        29        29
+200     mimo  2026-10-03        10         3
+217     luna  2026-10-04        17         1
+217     mimo  2026-10-04        17         1
+237     luna  2026-10-04        22         1
+... and 16 summaries with none: entries 154
+
+summaries whose every entry is not shown: [('216', 'mimo', 29)]
+total entries 249 not shown 35

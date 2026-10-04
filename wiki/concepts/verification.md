@@ -3,7 +3,7 @@ title: Each project defines how a change to it is verified
 type: concept
 standing: claimed
 sources: []
-updated: 2026-09-27
+updated: 2026-10-04
 ---
 
 # Each project defines how a change to it is verified
@@ -95,6 +95,12 @@ checks set beside runs without them: whether the checks change what the runs shi
 lines in each run's log count how often a check fails on a workhorse's branch, how often a
 summary's claim disagrees with the coachman's run, and how often a check is not run. A check that
 is never anything but not run is one the defaults should not offer.
+
+Outside work bears on it too. [pstack](../sources/pstack.md) keeps a standing driver and a feature
+map for each project, which this concept has no counterpart for, and its candidate 7 is a trial of
+that. A first look at the skill that makes them [@trials/pstack-verification-skill] and a count of
+the evidence entries that lanes leave `not shown` [@trials/not-shown-evidence] are recorded as
+trials for that candidate. They do not move the standing.
 
 ## What changed because of it
 

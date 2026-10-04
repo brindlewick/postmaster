@@ -1,12 +1,47 @@
 ---
 title: Log
 type: schema
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-04] query | should setup create a project's verifiers with pstack's skill
+
+The user's word: yes, as part of setup on a new project, using pstack's `/create-verification-skill`.
+Filed as #273, on the board in Todo, for a ticket session to settle where setup runs it, what it
+produces and where that lives, and what counts as done. Candidate 7 in
+[pstack](sources/pstack.md) now belongs in #273, with the QA turnpike (#97) taking the record as
+input. The trial of whether lanes do better with the record stays the way to measure it, on a
+project with a user interface. No standing changed.
+
+## [2026-10-04] ingest | how often a lane's evidence is `not shown`, and whether the check bounds it
+
+Recorded `raw/trials/not-shown-evidence/`. A read-only count of the Evidence entries in lane
+summaries, in this repository's runs and in the fixture repositories: 249 entries in this
+repository's 21 summaries with the section, 35 of them `not shown` and 29 of those in one summary,
+and 152 of 152 shown in the fixture repositories. Four made-up summaries for one ticket run through
+`summary-evidence`: it passes eight `not shown` entries and refuses a missing entry and a missing
+file. Cited from [pstack](sources/pstack.md), where it is the baseline for candidate 7. No
+standing changed.
+
+## [2026-10-04] ingest | a first look at pstack's verification skill
+
+Recorded `raw/trials/pstack-verification-skill/`. The skill followed by hand, once, on a scratch
+copy of the `todo` fixture app. The 37-claim walk of the feature map it made held all 37, and after
+the reference solution of the fixture ticket `remove` it held 22. The first walk's output, the
+files as first generated and the failing gate run were not kept, and the record says so. Cited from
+[pstack](sources/pstack.md). No standing changed.
+
+## [2026-10-04] lint | the pstack page follows main
+
+[pstack](sources/pstack.md) was written against `40d50ce`. Main has since ended the `.sh` wrappers
+(#218), so script names are now in the `scripts/run <name>` form and link to the `.ts` files. Read
+as a diff with the script names made alike, the rules and sections the page cites did not change.
+Candidate 2's search was repeated on main with the same result. The autonomous-run row and
+candidate 5 now cite #264 and #265.
 
 ## [2026-10-03] ingest | audit of three days of runs, for what several lanes earn
 
@@ -20,6 +55,16 @@ coachman's cards, and each lane alone passed every hidden test in all 22 scorabl
 Added [A second reviewer earns its keep; a second workhorse is cheap and not shown to](concepts/several-lanes.md),
 **claimed**, and linked it from [Combining models](concepts/combining-models.md), whose standings do
 not move: the trial promotes no run.
+
+## [2026-10-03] ingest | pstack, a plugin and guide of skills for verified agent work
+
+Captured the plugin at commit 23e4138 and Part 1 of its guide into `raw/articles/`, as passages
+only, and wrote [pstack](sources/pstack.md). It sets each of the plugin's 52 skills, 23 playbooks
+and 24 principles beside what postmaster holds, gives each a verdict, and ranks nine candidate
+changes. None is filed. Linked from
+[each project defines how a change to it is verified](concepts/verification.md) and from
+[a fixture run tests the flow end to end](concepts/fixture-runs.md), under what would change or
+settle them. No standing changed, since outside work does not move one.
 
 ## [2026-10-03] query | should #216 build the check as a library module
 

@@ -1,0 +1,37 @@
+# read at 2026-10-04T09:15Z; each line is a not shown entry's reason, with the lane branch it came from
+$ count_not_shown.py <this repository> --reasons
+- [postmaster wb/200-mimo] moved to #221 by the user's word (2026-10-02)
+- [postmaster wb/200-mimo] moved to #221 by the user's word (2026-10-02)
+- [postmaster wb/200-mimo] dropped by the user's word (2026-10-01); no version is pinned or recorded
+- [postmaster wb/216-mimo] wrappers use exec bun; no Python in new files; verified by inspection
+- [postmaster wb/216-mimo] authors/committers not scanned; merge resolutions and messages are
+- [postmaster wb/216-mimo] decode.ts implements ANSI/JSON/UTF-16 but no transcript fixture test kept
+- [postmaster wb/216-mimo] token/dotenv rules ported; key-block tests pass but no transcript evidence kept
+- [postmaster wb/216-mimo] #208 patterns ported in personal.ts; no network/model calls confirmed
+- [postmaster wb/216-mimo] held-out comparison not implemented
+- [postmaster wb/216-mimo] private-context rules work and tests pass; narrowing per D2 incomplete
+- [postmaster wb/216-mimo] census not run
+- [postmaster wb/216-mimo] finding format commit:path:line: rule confirmed in tests
+- [postmaster wb/216-mimo] safePath redacts; tested in scrub-check.test.ts
+- [postmaster wb/216-mimo] runbook changes not made
+- [postmaster wb/216-mimo] runs-status TELL not implemented
+- [postmaster wb/216-mimo] ship card findings not implemented
+- [postmaster wb/216-mimo] markers suppress findings; tested
+- [postmaster wb/216-mimo] stale marker faults; tested
+- [postmaster wb/216-mimo] marker in message suppresses nothing; tested
+- [postmaster wb/216-mimo] scrub-rewrite reports but does not rewrite
+- [postmaster wb/216-mimo] pushed branch refused; tested
+- [postmaster wb/216-mimo] raw-promote replaces with placeholders; tested
+- [postmaster wb/216-mimo] encrypted reasoning removal not implemented
+- [postmaster wb/216-mimo] raw-promote rechecks; tested
+- [postmaster wb/216-mimo] tree-check fails on .postmaster/; tested
+- [postmaster wb/216-mimo] rules have tests but not yet 3+ pos/neg per rule
+- [postmaster wb/216-mimo] scan is clean after fragmenting values
+- [postmaster wb/216-mimo] goldens not recorded
+- [postmaster wb/216-mimo] runbook diffs not compared
+- [postmaster wb/216-mimo] memory bound not proven
+- [postmaster wb/216-mimo] speed on 1 MB lines not tested
+- [postmaster wb/216-mimo] posting scan not implemented
+- [postmaster wb/217-luna] a post-merge Mac score is required before its unedited output can be posted on the ticket.
+- [postmaster wb/217-mimo] the Mac score comment waits on C16's Mac run.
+- [postmaster wb/237-luna] the fixture run is dispatched and scored at landing, outside any lane's worktree
