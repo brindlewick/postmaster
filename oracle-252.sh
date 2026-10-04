@@ -15,11 +15,11 @@
 # not against any lane's work; the C2 style case re-checks the byte.
 #
 # Check notes, all from the ticket text alone:
-# - C3 "in order": the dry run's folder order (first single-folder line per
-#   folder, in output order) must match the real run's teardown order on a twin
-#   record. Lines naming two or more folders (list lines) are skipped, since
-#   only ordered steps show order. Folder 7 reads only by its full worktree
-#   path: a bare 7 also names the run.
+# - C3 "in order": the dry run's dashed-folder order (first single-folder line
+#   per folder, in output order) must match the real run's teardown order on a
+#   twin record. Lines naming two or more folders (list lines) are skipped,
+#   since only ordered steps show order. Folder 7's position is not checked:
+#   its bare name also names the run.
 # - Folder identity in action lines reads only target and detail, never the
 #   whole line: every line carries "run":"7", which would otherwise pass the
 #   pin's teardown off as the synthesis folder's (C10, C14).
