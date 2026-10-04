@@ -90,6 +90,9 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    If there is no session host (`clerk.sh start` exits 3), put the ticket id and a
    request to start `/clerk <id>` in `ESCALATION.md` and ask the user to do so. Do not start a
    clerk for a ticket the user did not ask you to implement.
+   When every requested ticket ended at a clerk and no run is active, go to Stage D all the
+   same and keep the watcher running: the sign-off marker wakes you through `READY`, and
+   without the watcher the ticket stalls until the user polls.
    A `ready` label on its own is insufficient: every dispatch, including one from the ready
    queue, repeats this check before writing anything for the run.
    If the ticket is ready and a run slot is not free, run
