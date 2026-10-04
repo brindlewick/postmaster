@@ -446,6 +446,10 @@ describe("positive controls", () => {
       "postmaster",
       "",
       "", // postmaster
+      "bash",
+      "clerk",
+      "",
+      "", // clerk
       "",
       "", // run count and poll interval
       "",
