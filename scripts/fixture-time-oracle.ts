@@ -201,16 +201,8 @@ function buildRepo(dest: string, ticket: string): string {
   );
   need(git(dest, ["checkout", "-q", "main"]).code === 0, "could not return to main");
   need(
-    git(dest, [
-      "-c",
-      "commit.gpgsign=false",
-      "merge",
-      "-q",
-      "--no-ff",
-      "-m",
-      "Merge branch 7",
-      "7",
-    ]).code === 0,
+    git(dest, ["-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", "-m", "Merge branch 7", "7"])
+      .code === 0,
     "could not merge branch 7",
   );
   return base;

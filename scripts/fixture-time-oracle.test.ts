@@ -90,7 +90,9 @@ describe("sanity: the engineered timelines read back as designed", () => {
       expect(rt("floor").stdout.includes(fig)).toBe(true);
     }
     const figs = (
-      rt("floor").stdout.split("\n").find((l) => l.startsWith("total")) ?? ""
+      rt("floor")
+        .stdout.split("\n")
+        .find((l) => l.startsWith("total")) ?? ""
     ).match(FIG_RE);
     expect(figs?.[1]).toBe("11m 14s");
   });
@@ -162,8 +164,13 @@ describe("C2: the slowest workhorse and reviewer, with times", () => {
       const b = wordPos(line, "rmid");
       const c = wordPos(line, "rfast");
       return (
-        a >= 0 && b >= 0 && c >= 0 && a < b && b < c &&
-        line.includes("bug") && line.includes("style")
+        a >= 0 &&
+        b >= 0 &&
+        c >= 0 &&
+        a < b &&
+        b < c &&
+        line.includes("bug") &&
+        line.includes("style")
       );
     });
     const round2 = lines.some((line) => {
