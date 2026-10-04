@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { splitCommand } from "./clerk.ts";
+import { clerkHandle, splitCommand } from "./clerk.ts";
 
 const SELF = join(import.meta.dir, "clerk.sh");
 
@@ -110,6 +110,13 @@ describe("splitCommand", () => {
 
   test("a form without a cd prefix splits as printed", () => {
     expect(splitCommand("launch: claude -p hello")).toEqual(["claude", "-p", "hello"]);
+  });
+
+  test("the spawn handle names the project and the ticket", () => {
+    expect(clerkHandle("/home/user/Code/blog", "1")).toBe("clerk-blog-1");
+    expect(clerkHandle("/home/user/Code/blog", "1")).not.toBe(
+      clerkHandle("/home/user/Code/shop", "1"),
+    );
   });
 
   test("a quoted hostile session name stays one argv word", () => {

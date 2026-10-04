@@ -14,7 +14,7 @@
 
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { tryTomlFile } from "./lib/data.ts";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
@@ -155,6 +155,13 @@ function clerkDir(repo: string): string {
 // files always stay inside the clerk directory.
 function clerkFile(repo: string, id: string, suffix: string): string {
   return join(clerkDir(repo), `${encodeURIComponent(id)}${suffix}`);
+}
+
+// The spawn handle, qualified by the project so two projects' ticket 1 do
+// not collide on a host. The host sanitizes it further; send, read and the
+// session record all use this same form.
+export function clerkHandle(repo: string, id: string): string {
+  return `clerk-${basename(repo)}-${id}`;
 }
 
 function sessionDir(repo: string): string {
@@ -355,8 +362,9 @@ function cmdStart(repo: string, id: string): number {
   if (!startCmd) die("launch.sh printed no interactive command for the clerk");
   const form = splitCommand(startCmd);
   if (form.length === 0) die("launch.sh printed no interactive command for the clerk");
-  // The handle is the ticket's id; the tab carries the session's number and title.
-  const handle = brief.name;
+  // The handle names the project and the ticket's id, since both hosts check
+  // session names globally; the tab carries the session's number and title.
+  const handle = clerkHandle(repo, id);
   const started = runScript("host.sh", [
     "spawn",
     handle,
