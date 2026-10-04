@@ -12,9 +12,9 @@
 projects_roots = ["~/Code"]
 
 # Whether lanes run confined in sandbox-runtime (Bubblewrap on Linux, Seatbelt on macOS).
-# "off" when the key is absent, so an existing config keeps today's behavior. setup.sh
-# writes this from the confine answer; scripts/run probe-confine says whether the machine
-# can run it and what finishes it. launch.sh reading the key is a separate change.
+# "off" when the key is absent, so an existing config keeps today's behavior. scripts/run
+# setup writes this from the confine answer; scripts/run probe-confine says whether the machine
+# can run it and what finishes it. scripts/run launch reading the key is a separate change.
 confine = "off"
 
 # A lane is a harness plus a model plus an effort, and is a workhorse or a reviewer or
