@@ -1,16 +1,24 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { reviews } from "./analyze.ts";
 import {
   candidatesIn,
   controlsReport,
   countControls,
   exitAfterHarvest,
+  grepSevere,
+  handReport,
   missingEvidence,
   parseSpan,
   reconcileCoachman,
   reconcileUsage,
+  roundOneControls,
   sampleFindings,
   sampleReport,
   totalFromTable,
+  verifiedColumn,
 } from "./controls.ts";
 import { parseOracle } from "./parse.ts";
 import type { FindingRow, Gate, LaneTimes, RunRecord, UsageLaunch } from "./records.ts";
@@ -387,5 +395,213 @@ describe("sampleFindings", () => {
     const out = sampleReport(sampleFindings(lines, 10, 7), 3);
     expect(out).toContain("| 4 | none |");
     expect(out).toContain("3 of the 3 severe finding lines");
+  });
+});
+
+describe("verifiedColumn", () => {
+  test("reads the Verified P1/P2 column of the first table by run, links and suffixes resolved", () => {
+    const md = [
+      "# Reviews",
+      "",
+      "| Run | Rounds | Verified P1/P2 | Names no lane |",
+      "| --- | --- | --- | --- |",
+      "| [#57](https://example.test/issues/57) | 6 | 24 | 0 |",
+      "| [#200](https://example.test/issues/200)-parked-20261002 | 2 | 3 | 0 |",
+      "| fixture-15 | 2 | 1 | 0 |",
+      "",
+      "| Run | Rounds | Verified P1/P2 |",
+      "| --- | --- | --- |",
+      "| 999 | 1 | 99 |",
+    ].join("\n");
+    expect([...verifiedColumn(md)]).toEqual([
+      ["57", 24],
+      ["200-parked-20261002", 3],
+      ["fixture-15", 1],
+    ]);
+  });
+
+  test("a table without the column, or no table, reads nothing", () => {
+    expect(verifiedColumn("| a | b |\n| --- | --- |\n| 1 | 2 |").size).toBe(0);
+    expect(verifiedColumn("no table here").size).toBe(0);
+  });
+});
+
+describe("grepSevere", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "lane-audit-controls-"));
+  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+  const line = (action: string, detail: string): string =>
+    `${JSON.stringify({ ts: "2026-10-03T00:00:00Z", action, target: "a.ts:1", detail })}\n`;
+  const log = join(scratch, "actions.jsonl");
+  writeFileSync(
+    log,
+    [
+      line("finding", "gating P2 r1 bug luna, verified by execution: first"),
+      line("finding", "gating P1 r1 style mimo, verified by reading: second"),
+      line("finding", "gating P3 r1 bug mimo, verified by reading: minor"),
+      line("finding", "style P3 r1 style mimo, verified by reading: style class"),
+      line("finding", "gating P2 r1 bug luna DISMISSED: not a defect"),
+      line("finding", "gating P2 r2 bug luna, verified by execution: later round"),
+      line("note", "gating P2 r1 bug luna is only mentioned in a note"),
+    ].join(""),
+  );
+
+  test("counts the gating P1 and P2 lines of a round that are not dismissed, from the log's own text", () => {
+    const g = grepSevere(log, 1);
+    expect(g.count).toBe(2);
+    expect(g.lines[0]).toContain("first");
+    expect(g.lines[1]).toContain("second");
+  });
+
+  test("a round with none, and a log that is not there, read zero", () => {
+    expect(grepSevere(log, 3).count).toBe(0);
+    expect(grepSevere(join(scratch, "missing.jsonl"), 1).count).toBe(0);
+    expect(grepSevere(log, 2).count).toBe(1);
+  });
+});
+
+describe("roundOneControls", () => {
+  const sev = (round: number | null, n: number): FindingRow[] =>
+    Array.from({ length: n }, () => ({ ...finding([]), round }));
+  const launches = (rounds: number[]) =>
+    rounds.map((round) => ({ ts: "t", lane: "luna", lens: "bug", round }));
+  const harvests = (rounds: number[]) =>
+    rounds.map((round) => ({
+      ts: "t",
+      lane: "luna",
+      lens: "bug",
+      round,
+      verdict: "reviewed" as const,
+      raw: null,
+    }));
+  const reviewed = (id: string, over: Partial<RunRecord>): RunRecord =>
+    run({
+      id,
+      synthesis: {
+        ranked: ["luna", "mimo"],
+        took: {},
+        rejected: {},
+        basis: "",
+        oracle: null,
+        oracleRaw: "none",
+      },
+      ...over,
+    });
+  const runs = (): RunRecord[] => [
+    reviewed("98", {
+      findings: [...sev(1, 3), { ...finding([]), severity: "P3", round: 2 }],
+      reviewLaunches: launches([1, 2]),
+    }),
+    reviewed("109", {
+      findings: [...sev(1, 21), ...sev(null, 2)],
+      reviewLaunches: [...launches([1, 13]), { ts: "t", lane: "luna", lens: null, round: null }],
+    }),
+    reviewed("110", {
+      findings: sev(1, 4),
+      reviewLaunches: launches([1, 2, 3, 4]),
+      reviewHarvests: harvests([4, 5]),
+    }),
+    reviewed("160", { findings: sev(1, 1), reviewLaunches: launches([1, 2]) }),
+    reviewed("182", { findings: sev(1, 1), reviewLaunches: launches([1, 2]) }),
+    reviewed("200", {
+      findings: sev(1, 4),
+      reviewLaunches: launches([1, 2, 3, 4]),
+      reviewHarvests: harvests([1, 2, 3, 4]),
+    }),
+    run({
+      id: "fixture-30",
+      kind: "fixture",
+      synthesis: {
+        ranked: ["luna", "mimo"],
+        took: {},
+        rejected: {},
+        basis: "",
+        oracle: null,
+        oracleRaw: "none",
+      },
+      reviewLaunches: launches([1]),
+    }),
+  ];
+  const table = (rs: RunRecord[]) => new Map(rs.map((r) => [r.id, reviews(r).severe] as const));
+  const hand = [
+    { run: "98", round: 1, grepped: 3, lines: [] },
+    { run: "98", round: 2, grepped: 0, lines: [] },
+    { run: "160", round: 1, grepped: 1, lines: [] },
+    { run: "160", round: 2, grepped: 0, lines: [] },
+    { run: "182", round: 1, grepped: 1, lines: [] },
+    { run: "182", round: 2, grepped: 0, lines: [] },
+  ];
+
+  test("every control behaves on records that hold what it needs", () => {
+    const rs = runs();
+    const checks = roundOneControls(rs, table(rs), hand);
+    expect(checks.filter((c) => !c.ok).map((c) => c.name)).toEqual([]);
+    expect(checks.length).toBe(5);
+  });
+
+  test("without the run folders the grep control is left out", () => {
+    const rs = runs();
+    expect(roundOneControls(rs, table(rs), null).length).toBe(4);
+  });
+
+  test("a control fails when round 1 reads zero where it must read non-zero", () => {
+    const broken = runs().map((r) => (r.id === "98" ? { ...r, findings: [] } : r));
+    const failed = roundOneControls(broken, table(broken), null).filter((c) => !c.ok);
+    expect(failed.map((c) => c.name)).toContain(
+      "round 1 counts the severe findings whose lines name round 1 and no others",
+    );
+  });
+
+  test("a control fails when the review table's total differs from the by-round counts", () => {
+    const rs = runs();
+    const wrong = table(rs);
+    wrong.set("200", 5);
+    const failed = roundOneControls(rs, wrong, null).filter((c) => !c.ok);
+    expect(failed.map((c) => c.name)).toEqual([
+      "a run's severe findings by round add up to its total, and the total is the review table's",
+    ]);
+  });
+
+  test("a control fails when grep and the parser disagree", () => {
+    const rs = runs();
+    const bad = hand.map((h) => (h.run === "98" && h.round === 1 ? { ...h, grepped: 2 } : h));
+    const failed = roundOneControls(rs, table(rs), bad).filter((c) => !c.ok);
+    expect(failed.map((c) => c.name)).toEqual([
+      "round 1 read again from a run's own log with grep gives the parser's count",
+    ]);
+  });
+
+  test("a control fails when a round after the cap, named only by a harvest, is not counted", () => {
+    const broken = runs().map((r) => (r.id === "110" ? { ...r, reviewHarvests: [] } : r));
+    const failed = roundOneControls(broken, table(broken), null).filter((c) => !c.ok);
+    expect(failed.map((c) => c.name)).toEqual([
+      "a run's rounds are the highest round any launch, harvest or finding line names",
+    ]);
+  });
+
+  test("two launch lines that name no round fail the control for them", () => {
+    const broken = runs().map((r) =>
+      r.id === "98"
+        ? {
+            ...r,
+            reviewLaunches: [
+              ...r.reviewLaunches,
+              ...launches([1]).map((l) => ({ ...l, round: null })),
+            ],
+          }
+        : r,
+    );
+    const failed = roundOneControls(broken, table(broken), null).filter((c) => !c.ok);
+    expect(failed.map((c) => c.name)).toEqual([
+      "review launch lines name a round, except one that has no text",
+    ]);
+  });
+
+  test("the hand-read table has a row per run and round, with the lines scrubbed and the pipe escaped", () => {
+    const rs = runs();
+    const out = handReport(
+      [{ run: "98", round: 1, grepped: 3, lines: ["gating P2 r1 a | b"] }],
+      rs,
+    );
+    expect(out).toContain("| 98 | 1 | 3 | 3 | gating P2 r1 a / b |");
   });
 });

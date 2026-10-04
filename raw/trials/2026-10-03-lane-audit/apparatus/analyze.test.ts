@@ -3,8 +3,10 @@ import {
   chapman,
   coverage,
   family,
+  groupByRoundOne,
   isSevere,
   laneGate,
+  lastRound,
   median,
   percentile,
   recallOf,
@@ -13,9 +15,12 @@ import {
   reviews,
   roundTimes,
   runTokens,
+  sampleSd,
+  severeByRound,
   severeTotals,
   singleLaneSufficed,
   spend,
+  ticketsPerGroup,
   times,
   tokensByRole,
   workhorses,
@@ -258,6 +263,136 @@ describe("reviews", () => {
     expect(s.severe).toBe(0);
     expect(s.byLane).toEqual({});
     expect(s.rounds).toBe(0);
+  });
+});
+
+describe("lastRound", () => {
+  const launch = (round: number | null) => ({ ts: "t", lane: "luna", lens: "bug", round });
+  const harvest = (round: number | null) => ({
+    ...launch(round),
+    verdict: "reviewed" as const,
+    raw: null,
+  });
+
+  test("the highest round any launch line names", () => {
+    expect(lastRound(run({ reviewLaunches: [launch(1), launch(3), launch(2)] }))).toBe(3);
+  });
+
+  test("a round past the cap has a harvest and no launch line, and still counts", () => {
+    const r = run({
+      reviewLaunches: [launch(1), launch(2), launch(3), launch(4)],
+      reviewHarvests: [harvest(4), harvest(5)],
+    });
+    expect(lastRound(r)).toBe(5);
+  });
+
+  test("a finding's round counts where no review line names one", () => {
+    expect(lastRound(run({ findings: [finding({ round: 1 }), finding({ round: 4 })] }))).toBe(4);
+  });
+
+  test("lines that name no round, and a run with no review lines, read zero", () => {
+    expect(
+      lastRound(run({ reviewLaunches: [launch(null)], reviewHarvests: [harvest(null)] })),
+    ).toBe(0);
+    expect(lastRound(run())).toBe(0);
+  });
+});
+
+describe("severeByRound", () => {
+  const r = run({
+    findings: [
+      finding({ round: 1 }),
+      finding({ round: 1, severity: "P1" }),
+      finding({ round: 2 }),
+      finding({ round: 1, severity: "P3" }),
+      finding({ round: 1, class: "style" }),
+      finding({ round: 1, dismissed: true }),
+      finding({ round: null }),
+    ],
+  });
+
+  test("severe findings in all and in each round, by the round the line names", () => {
+    expect(severeByRound(r)).toEqual({
+      run: "1",
+      byRound: { 1: 2, 2: 1 },
+      noRound: 1,
+      total: 4,
+      roundOne: 2,
+      lastWithFinding: 2,
+    });
+  });
+
+  test("a finding with no round is in the total and in no round", () => {
+    const s = severeByRound(run({ findings: [finding({ round: null })] }));
+    expect(s.total).toBe(1);
+    expect(s.byRound).toEqual({});
+    expect(s.roundOne).toBe(0);
+  });
+
+  test("the total is the one reviews() reports", () => {
+    expect(severeByRound(r).total).toBe(reviews(r).severe);
+  });
+
+  test("no findings, or only P3, style or dismissed ones, read zero everywhere", () => {
+    expect(severeByRound(run())).toEqual({
+      run: "1",
+      byRound: {},
+      noRound: 0,
+      total: 0,
+      roundOne: 0,
+      lastWithFinding: 0,
+    });
+    const minor = run({
+      findings: [
+        finding({ severity: "P3" }),
+        finding({ class: "style" }),
+        finding({ dismissed: true }),
+      ],
+    });
+    expect(severeByRound(minor).total).toBe(0);
+    expect(severeByRound(minor).roundOne).toBe(0);
+  });
+});
+
+describe("groupByRoundOne", () => {
+  const rows = [
+    { run: "a", roundOne: 1, rounds: 2 },
+    { run: "b", roundOne: 3, rounds: 3 },
+    { run: "c", roundOne: 4, rounds: 4 },
+    { run: "d", roundOne: 7, rounds: 6 },
+    { run: "e", roundOne: 8, rounds: 5 },
+    { run: "f", roundOne: 21, rounds: 13 },
+  ];
+
+  test("three groups by the round-1 count, with each group's rounds and their median", () => {
+    expect(groupByRoundOne(rows)).toEqual([
+      { label: "3 or fewer", runs: ["a", "b"], rounds: [2, 3], median: 2.5 },
+      { label: "4 to 7", runs: ["c", "d"], rounds: [4, 6], median: 5 },
+      { label: "8 or more", runs: ["e", "f"], rounds: [5, 13], median: 9 },
+    ]);
+  });
+
+  test("a group with no run has no median", () => {
+    const groups = groupByRoundOne(rows.filter((x) => x.roundOne < 4));
+    expect(groups[1]).toEqual({ label: "4 to 7", runs: [], rounds: [], median: null });
+  });
+});
+
+describe("sampleSd and ticketsPerGroup", () => {
+  test("the sample standard deviation divides by n minus one", () => {
+    expect(sampleSd([2, 4, 4, 4, 5, 5, 7, 9])).toBeCloseTo(2.138, 3);
+    expect(sampleSd([3, 3, 3])).toBe(0);
+  });
+
+  test("fewer than two values have none", () => {
+    expect(sampleSd([5])).toBeNull();
+    expect(sampleSd([])).toBeNull();
+  });
+
+  test("a difference of one standard deviation needs 16 a group, and the need scales with 1/delta squared", () => {
+    expect(ticketsPerGroup(1, 1)).toBe(16);
+    expect(ticketsPerGroup(1, 2)).toBe(4);
+    expect(ticketsPerGroup(2, 1)).toBe(63);
   });
 });
 

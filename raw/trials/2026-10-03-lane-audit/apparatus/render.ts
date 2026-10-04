@@ -7,14 +7,15 @@
 // writes the tables as markdown beside them. Output that names the machine is refused.
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { median } from "./analyze.ts";
 import type { Extract } from "./extract.ts";
 import type { FixtureScore } from "./hidden.ts";
 import { privacyFaults, type RunRecord } from "./records.ts";
 import {
   coverageTable,
   type Data,
-  fixtureSummary,
   figuresList,
+  fixtureSummary,
   fixtureWorkhorses,
   incidentTable,
   inventory,
@@ -23,6 +24,11 @@ import {
   realWorkhorsesCompact,
   recallTable,
   reviewTable,
+  roundOneGroupTable,
+  roundOneRows,
+  roundOneTable,
+  roundsAfterSentence,
+  runLabel,
   timeTable,
   tokensTable,
 } from "./tables.ts";
@@ -55,6 +61,34 @@ export function load(dir: string): Data {
   };
 }
 
+/** The severe findings by round, with what a round means here and the runs grouped by their first round. */
+function roundOneFile(real: readonly RunRecord[]): string {
+  const rows = roundOneRows(real);
+  if (rows.length === 0) {
+    return "# Severe findings by review round, this repository's runs\n\nNo run reached review.\n";
+  }
+  const noRound = rows.filter((x) => x.noRound > 0);
+  const roundOnes = rows.map((x) => x.roundOne);
+  return [
+    "# Severe findings by review round, this repository's runs",
+    "",
+    "A severe finding is a verified gating P1 or P2 that was not dismissed, counted in the round its line names. *Rounds* is the highest round that any launch, harvest or finding line of the run names.",
+    "",
+    `Severe findings in round 1: median ${median(roundOnes)}, from ${Math.min(...roundOnes)} to ${Math.max(...roundOnes)}. ${roundsAfterSentence(rows)}`,
+    "",
+    noRound.length > 0
+      ? `${noRound.reduce((s, x) => s + x.noRound, 0)} severe findings name no round (${noRound.map((x) => `${runLabel(x.run)}: ${x.noRound}`).join(", ")}); they are in the totals and in no round.`
+      : "Every severe finding names a round.",
+    "",
+    roundOneTable(real),
+    "",
+    "## Runs grouped by severe findings in round 1",
+    "",
+    roundOneGroupTable(real),
+    "",
+  ].join("\n");
+}
+
 /** The files `render` writes, by name. */
 export function render(d: Data): Record<string, string> {
   const real = d.runs.filter((r) => r.kind === "real" && !r.parked && r.synthesis);
@@ -80,6 +114,7 @@ export function render(d: Data): Record<string, string> {
         { label: "fixture runs", runs: fixtures },
       ],
     )}\n`,
+    "reviews-round-one.md": roundOneFile(real),
     "reviews-fixture.md": `# Reviews, fixture runs\n\n${reviewTable(fixtures)}\n`,
     "tokens.md": `# Tokens by role and lane\n\n${tokensTable(sets)}\n\n${perRunTokens(sets)}\n`,
     "time.md": `# Time\n\n${timeTable(sets)}\n`,

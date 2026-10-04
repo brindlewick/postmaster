@@ -125,6 +125,20 @@ export type Reviews = {
   unattributed: number;
 };
 
+/**
+ * The highest review round a run's launch, harvest or finding lines name. A round past the cap
+ * runs on the user's ruling, and some runs logged no launch line for it, so the launch lines alone
+ * read low there; a harvest or a finding names a round that happened.
+ */
+export function lastRound(run: RunRecord): number {
+  return Math.max(
+    0,
+    ...run.reviewLaunches.map((l) => l.round ?? 0),
+    ...run.reviewHarvests.map((h) => h.round ?? 0),
+    ...run.findings.map((f) => f.round ?? 0),
+  );
+}
+
 export function reviews(run: RunRecord): Reviews {
   const severe = run.findings.filter(isSevere);
   const byLane: Reviews["byLane"] = {};
@@ -141,7 +155,7 @@ export function reviews(run: RunRecord): Reviews {
   }
   return {
     run: run.id,
-    rounds: Math.max(0, ...run.reviewLaunches.map((l) => l.round ?? 0)),
+    rounds: lastRound(run),
     launches: run.reviewLaunches.length,
     degraded: run.reviewHarvests.filter((h) => h.verdict === "degraded").length,
     findings: run.findings.length,
@@ -351,6 +365,86 @@ export function severeTotals(runs: readonly RunRecord[]): SevereTotals {
     }
   }
   return out;
+}
+
+export type SevereByRound = {
+  run: string;
+  /** severe findings by the review round their line names */
+  byRound: Record<number, number>;
+  /** severe findings whose line names no round: in the total, in no round */
+  noRound: number;
+  total: number;
+  roundOne: number;
+  /** the last round that holds a severe finding, 0 for none */
+  lastWithFinding: number;
+};
+
+/** A run's severe findings, in all and in each review round, by the round each finding's line names. */
+export function severeByRound(run: RunRecord): SevereByRound {
+  const byRound: Record<number, number> = {};
+  let noRound = 0;
+  let total = 0;
+  for (const f of run.findings.filter(isSevere)) {
+    total += 1;
+    if (f.round === null) noRound += 1;
+    else byRound[f.round] = (byRound[f.round] ?? 0) + 1;
+  }
+  return {
+    run: run.id,
+    byRound,
+    noRound,
+    total,
+    roundOne: byRound[1] ?? 0,
+    lastWithFinding: Math.max(0, ...Object.keys(byRound).map(Number)),
+  };
+}
+
+export type RoundOneGroup = {
+  label: string;
+  runs: string[];
+  /** the rounds each of the group's runs took, smallest first */
+  rounds: number[];
+  median: number | null;
+};
+
+/** The groups the report reads rounds by: runs with 3 or fewer severe findings in round 1, 4 to 7, 8 or more. */
+export function groupByRoundOne(
+  rows: ReadonlyArray<{ run: string; roundOne: number; rounds: number }>,
+): RoundOneGroup[] {
+  const groups: Array<{ label: string; has: (n: number) => boolean }> = [
+    { label: "3 or fewer", has: (n) => n <= 3 },
+    { label: "4 to 7", has: (n) => n >= 4 && n <= 7 },
+    { label: "8 or more", has: (n) => n >= 8 },
+  ];
+  return groups.map((g) => {
+    const members = rows.filter((r) => g.has(r.roundOne));
+    const rounds = members.map((r) => r.rounds).sort((a, b) => a - b);
+    return { label: g.label, runs: members.map((r) => r.run), rounds, median: median(rounds) };
+  });
+}
+
+/** The sample standard deviation (n minus one), null for fewer than two values. */
+export function sampleSd(values: readonly number[]): number | null {
+  if (values.length < 2) return null;
+  const mean = values.reduce((s, v) => s + v, 0) / values.length;
+  const sumSquares = values.reduce((s, v) => s + (v - mean) ** 2, 0);
+  return Math.sqrt(sumSquares / (values.length - 1));
+}
+
+/**
+ * The most rounds an ordinary run took, for the spread the sample sizes use. No run in the audit
+ * took between 7 and 12, so the cut sits in the gap the data has; it was set after seeing it.
+ */
+export const ORDINARY_MAX_ROUNDS = 6;
+
+/**
+ * Tickets needed in each of two groups to see a difference of `delta` rounds between their means,
+ * by the normal approximation for a two-sided test at 5% and 80% power: 2 (z1 + z2)^2 sd^2 / delta^2,
+ * rounded up. Rough: rounds are whole numbers and skewed.
+ */
+export function ticketsPerGroup(sd: number, delta: number): number {
+  const z = 1.959964 + 0.841621;
+  return Math.ceil((2 * z * z * sd * sd) / (delta * delta));
 }
 
 export type RoleTokens = { launches: number; input: number; output: number; usd: number | null };

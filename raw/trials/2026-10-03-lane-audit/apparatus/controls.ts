@@ -9,10 +9,19 @@
 // checks are exported and tested; the CLI is the edge that reads the records again.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { family, laneGate, reviews, roundTimes, severeTotals, workhorses } from "./analyze.ts";
-import { extract } from "./extract.ts";
+import {
+  family,
+  laneGate,
+  lastRound,
+  reviews,
+  roundTimes,
+  severeByRound,
+  severeTotals,
+  workhorses,
+} from "./analyze.ts";
+import { type Extract, extract } from "./extract.ts";
 import { KNOWN_LANES, parseActions, parseFinding, secondsBetween } from "./parse.ts";
-import { discover, loadReader, type RunRecord, scrub } from "./records.ts";
+import { discover, loadReader, privacyFaults, type RunRecord, scrub } from "./records.ts";
 import type { Incident } from "./tables.ts";
 
 export type Check = {
@@ -389,13 +398,17 @@ export function sampleReport(sample: ReturnType<typeof sampleFindings>, total: n
 }
 
 /** The checks as a markdown table. */
-export function controlsReport(checks: readonly Check[], extra: string): string {
+export function controlsReport(
+  checks: readonly Check[],
+  extra: string,
+  title = "Controls",
+): string {
   const rows = checks.map(
     (c) => `| ${c.ok ? "ok" : "FAIL"} | ${c.name} | ${c.positive} | ${c.negative} |`,
   );
   const notes = checks.filter((c) => c.detail).map((c) => `- ${c.name}: ${c.detail}`);
   return [
-    "# Controls",
+    `# ${title}`,
     "",
     "Each count is run through the same code on a run where it must read non-zero (the positive control) and on a run where it must read zero (the negative control), or against a second program's figure.",
     "",
@@ -408,12 +421,243 @@ export function controlsReport(checks: readonly Check[], extra: string): string 
   ].join("\n");
 }
 
+/** The `Verified P1/P2` column of the first table in `reviews-real.md`, by run id. */
+export function verifiedColumn(markdown: string): Map<string, number> {
+  const out = new Map<string, number>();
+  let header: string[] | null = null;
+  for (const line of markdown.split("\n")) {
+    if (!line.startsWith("|")) {
+      if (header) break;
+      continue;
+    }
+    const cells = line
+      .split("|")
+      .slice(1, -1)
+      .map((c) => c.trim());
+    if (!header) {
+      header = cells;
+      continue;
+    }
+    if (cells.every((c) => /^-+$/u.test(c))) continue;
+    const column = header.indexOf("Verified P1/P2");
+    const id = (cells[0] ?? "").replace(/^\[#([0-9]+)\]\([^)]*\)/u, "$1");
+    const n = Number(cells[column]);
+    if (column >= 0 && id && Number.isFinite(n)) out.set(id, n);
+  }
+  return out;
+}
+
+export type HandRead = { run: string; round: number; grepped: number; lines: string[] };
+
+/**
+ * A run's severe finding lines in one round, read with grep and not with the parser: the detail
+ * begins `gating P1` or `gating P2`, names the round as `r<N>`, and is not marked DISMISSED.
+ */
+export function grepSevere(logPath: string, round: number): { count: number; lines: string[] } {
+  const pattern = `"action":"finding".*"detail":"gating P[12] r${round} `;
+  const out = Bun.spawnSync(
+    ["sh", "-c", 'grep -E "$1" "$2" | grep -v DISMISSED', "sh", pattern, logPath],
+    { stdout: "pipe", stderr: "pipe", stdin: "ignore" },
+  );
+  const lines = new TextDecoder()
+    .decode(out.stdout)
+    .split("\n")
+    .filter((l) => l.length > 0)
+    .map((l) => {
+      try {
+        return String((JSON.parse(l) as { detail?: unknown }).detail ?? "");
+      } catch {
+        return l;
+      }
+    });
+  return { count: lines.length, lines };
+}
+
+const inRound = (run: RunRecord, round: number): number => severeByRound(run).byRound[round] ?? 0;
+
+/**
+ * The controls for the round-1 figures (see ../method.md): the by-round counts against the totals
+ * the review table gives, round 1 where it must read non-zero and where it must read zero, the
+ * same counts read again from three runs' own logs with grep, and the rule for a run's rounds.
+ * `hand` is null where the run folders were not given.
+ */
+export function roundOneControls(
+  runs: readonly RunRecord[],
+  verified: ReadonlyMap<string, number>,
+  hand: readonly HandRead[] | null,
+): Check[] {
+  const checks: Check[] = [];
+  const add = (c: Check): void => {
+    checks.push(c);
+  };
+  const reviewed = runs.filter(
+    (r) =>
+      r.kind === "real" &&
+      !r.parked &&
+      r.synthesis &&
+      (r.reviewLaunches.length > 0 || r.findings.length > 0),
+  );
+
+  // 1. By-round counts add up to the run's total, and the total is the review table's.
+  const sums = reviewed.map((r) => {
+    const s = severeByRound(r);
+    const byRound = Object.values(s.byRound).reduce((a, b) => a + b, 0);
+    return { id: r.id, total: s.total, summed: byRound + s.noRound, table: verified.get(r.id) };
+  });
+  const agree = sums.filter((x) => x.summed === x.total && x.table === x.total);
+  const r109 = severeByRound(run1(runs, "109"));
+  add({
+    name: "a run's severe findings by round add up to its total, and the total is the review table's",
+    positive: `${agree.length} of ${sums.length} runs agree, ${agree.reduce((s, x) => s + x.total, 0)} severe findings in all`,
+    negative: `a finding that names no round is in the total and in no round: #109 has ${r109.noRound} of its ${r109.total}`,
+    ok: sums.length > 0 && agree.length === sums.length && r109.noRound > 0,
+  });
+
+  // 2. Round 1 reads non-zero where the first round held severe findings and zero where it did not.
+  const a = inRound(run1(runs, "98"), 1);
+  const b = inRound(run1(runs, "109"), 1);
+  const clean = inRound(run1(runs, "fixture-30"), 1);
+  const second = inRound(run1(runs, "98"), 2);
+  add({
+    name: "round 1 counts the severe findings whose lines name round 1 and no others",
+    positive: `#98 reads ${a} and #109 reads ${b}`,
+    negative: `fixture-30, whose first round was clean, reads ${clean}; #98's round 2, which held only P3 findings, reads ${second}`,
+    ok: a === 3 && b === 21 && clean === 0 && second === 0,
+  });
+
+  // 3. The same counts read again with grep.
+  if (hand) {
+    const rows = hand.map((h) => ({ ...h, parsed: inRound(run1(runs, h.run), h.round) }));
+    const show = (round: number): string =>
+      rows
+        .filter((h) => h.round === round)
+        .map((h) => `#${h.run}: ${h.grepped} by grep, ${h.parsed} by the parser`)
+        .join("; ");
+    add({
+      name: "round 1 read again from a run's own log with grep gives the parser's count",
+      positive: show(1),
+      negative: `round 2, through the same command: ${show(2)}`,
+      ok:
+        rows.length > 0 &&
+        rows.every((h) => h.grepped === h.parsed) &&
+        rows.filter((h) => h.round === 1).every((h) => h.grepped > 0) &&
+        rows.filter((h) => h.round === 2).every((h) => h.grepped === 0),
+    });
+  }
+
+  // 4. A run's rounds are the highest round any launch, harvest or finding line names.
+  const launchMax = (r: RunRecord): number =>
+    Math.max(0, ...r.reviewLaunches.map((l) => l.round ?? 0));
+  const harvestMax = (r: RunRecord): number =>
+    Math.max(0, ...r.reviewHarvests.map((h) => h.round ?? 0));
+  const r110 = run1(runs, "110");
+  const r200 = run1(runs, "200");
+  add({
+    name: "a run's rounds are the highest round any launch, harvest or finding line names",
+    positive: `#110: launch lines name ${launchMax(r110)}, a harvest names ${harvestMax(r110)} (a round run on the user's ruling, with no launch line), so ${lastRound(r110)}`,
+    negative: `#200: launch, harvest and finding lines all name ${launchMax(r200)}, so ${lastRound(r200)}`,
+    ok:
+      launchMax(r110) === 4 &&
+      lastRound(r110) === 5 &&
+      launchMax(r200) === 4 &&
+      harvestMax(r200) === 4 &&
+      lastRound(r200) === 4,
+  });
+
+  // 5. Launch lines that name a round.
+  const withLaunches = runs.filter((r) => r.reviewLaunches.length > 0);
+  const named = withLaunches.reduce(
+    (s, r) => s + r.reviewLaunches.filter((l) => l.round !== null).length,
+    0,
+  );
+  const unnamedBy = withLaunches
+    .map((r) => [r.id, r.reviewLaunches.filter((l) => l.round === null).length] as const)
+    .filter(([, n]) => n > 0);
+  const unnamed = unnamedBy.reduce((s, [, n]) => s + n, 0);
+  const harvestsUnnamed = runs.reduce(
+    (s, r) => s + r.reviewHarvests.filter((h) => h.round === null).length,
+    0,
+  );
+  add({
+    name: "review launch lines name a round, except one that has no text",
+    positive: `${named} of ${named + unnamed} launch lines name a round`,
+    negative: `${unnamed} name none${unnamedBy.length ? ` (${unnamedBy.map(([id, n]) => `${id}: ${n}`).join(", ")})` : ""}`,
+    ok: named > 0 && unnamed <= 1,
+    detail: `The launch line that names no round is #109's and has an empty detail. ${harvestsUnnamed} harvest lines name none, in #109 (empty) and #124 (summaries of a round's findings that name the lens and no round); they add nothing a launch line or a finding does not.`,
+  });
+  return checks;
+}
+
+/** The grep read of the three runs as a markdown table, with each line as written, scrubbed. */
+export function handReport(hand: readonly HandRead[], runs: readonly RunRecord[]): string {
+  const rows = hand.map(
+    (h) =>
+      `| ${h.run} | ${h.round} | ${h.grepped} | ${inRound(run1(runs, h.run), h.round)} | ${h.lines.map((l) => scrub(l, 110).replace(/\|/gu, "/")).join("<br>") || "none"} |`,
+  );
+  return [
+    "## Severe findings in round 1 and round 2, read again with grep",
+    "",
+    "For each of three runs, the lines of the run's own action log that begin `gating P1` or `gating P2`, name the round as `r<N>`, and are not marked DISMISSED, found with `grep -E` and counted without the parser. The parser's count for the same run and round is beside it. Each line was read on 2026-10-04.",
+    "",
+    "| Run | Round | By grep | By the parser | The lines, as written |",
+    "| --- | --- | --- | --- | --- |",
+    ...rows,
+    "",
+  ].join("\n");
+}
+
 const arg = (args: string[], name: string): string | undefined => {
   const at = args.indexOf(name);
   return at >= 0 ? args[at + 1] : undefined;
 };
 
+/** The round-1 controls, from the committed data and, where the run folders are given, their logs. */
+const mainRoundOne = (args: string[]): void => {
+  const results = arg(args, "--results");
+  if (!results) {
+    throw new Error(
+      "usage: controls.ts --round-one --results <dir> [--project <repo> --legacy <dir> --fixtures <dir>]",
+    );
+  }
+  const extracted = JSON.parse(readFileSync(join(results, "runs.json"), "utf8")) as Extract;
+  const verified = verifiedColumn(readFileSync(join(results, "reviews-real.md"), "utf8"));
+  const roots = {
+    project: arg(args, "--project"),
+    legacy: arg(args, "--legacy"),
+    fixtures: arg(args, "--fixtures"),
+  };
+  const dirs = new Map(discover(roots).map((s) => [s.id, s.dir] as const));
+  const hand: HandRead[] = [];
+  for (const id of ["98", "160", "182"]) {
+    const dir = dirs.get(id);
+    if (!dir) continue;
+    for (const round of [1, 2]) {
+      const g = grepSevere(join(dir, "actions.jsonl"), round);
+      hand.push({ run: id, round, grepped: g.count, lines: g.lines });
+    }
+  }
+  const checks = roundOneControls(extracted.runs, verified, hand.length > 0 ? hand : null);
+  const text = `${controlsReport(
+    checks,
+    hand.length > 0
+      ? handReport(hand, extracted.runs)
+      : "The grep read of three runs' logs was not run: no run folders were given.\n",
+    "Controls for the round-1 figures",
+  )}\n`;
+  const faults = privacyFaults(text);
+  if (faults.length > 0)
+    throw new Error(`the controls hold ${faults.join(" and ")}; nothing was written`);
+  writeFileSync(join(results, "controls-round-one.md"), text);
+  const failed = checks.filter((c) => !c.ok);
+  console.error(`${checks.length - failed.length} of ${checks.length} round-one controls behaved`);
+  if (failed.length > 0) {
+    for (const c of failed) console.error(`FAIL ${c.name}: ${c.positive} | ${c.negative}`);
+    process.exitCode = 2;
+  }
+};
+
 const main = async (args: string[]): Promise<void> => {
+  if (args.includes("--round-one")) return mainRoundOne(args);
   const since = arg(args, "--since");
   const until = arg(args, "--until");
   const results = arg(args, "--results");

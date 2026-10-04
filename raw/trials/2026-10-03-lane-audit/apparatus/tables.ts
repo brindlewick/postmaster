@@ -5,8 +5,10 @@ import {
   chapman,
   coverage,
   family,
+  groupByRoundOne,
   isSevere,
   median,
+  ORDINARY_MAX_ROUNDS,
   percentile,
   recallOf,
   reviewerRunning,
@@ -14,8 +16,11 @@ import {
   reviews,
   roundTimes,
   runTokens,
+  sampleSd,
+  severeByRound,
   severeTotals,
   singleLaneSufficed,
+  ticketsPerGroup,
   tokensByRole,
   type Workhorses,
   workhorses,
@@ -351,6 +356,98 @@ export function reviewTable(runs: readonly RunRecord[]): string {
     ],
     rows,
   );
+}
+
+export type RoundOneRow = {
+  run: RunRecord;
+  rounds: number;
+  roundOne: number;
+  total: number;
+  /** rounds from the last round that holds a severe finding to the last round run; 1 is a clean last round */
+  after: number;
+  byRound: string;
+  noRound: number;
+};
+
+/** Each run that reached review: its rounds, and its severe findings in all, in round 1 and by round. */
+export function roundOneRows(runs: readonly RunRecord[]): RoundOneRow[] {
+  return runs
+    .filter((r) => r.reviewLaunches.length > 0 || r.findings.length > 0)
+    .map((r) => {
+      const s = severeByRound(r);
+      const rounds = reviews(r).rounds;
+      const per = Object.entries(s.byRound)
+        .map(([round, n]) => [Number(round), n] as const)
+        .sort((a, b) => a[0] - b[0])
+        .map(([round, n]) => `${round}: ${n}`);
+      if (s.noRound > 0) per.push(`no round: ${s.noRound}`);
+      return {
+        run: r,
+        rounds,
+        roundOne: s.roundOne,
+        total: s.total,
+        after: rounds - s.lastWithFinding,
+        byRound: per.join(", ") || "none",
+        noRound: s.noRound,
+      };
+    });
+}
+
+/** Severe findings per review round, one row per run. */
+export function roundOneTable(runs: readonly RunRecord[]): string {
+  return md(
+    [
+      "Run",
+      "Rounds",
+      "Severe findings in round 1",
+      "Severe findings in all",
+      "By round",
+      "Rounds after the last round with a severe finding",
+    ],
+    roundOneRows(runs).map((x) => [
+      runLabel(x.run),
+      String(x.rounds),
+      String(x.roundOne),
+      String(x.total),
+      x.byRound,
+      String(x.after),
+    ]),
+  );
+}
+
+/** The same runs grouped by their round-1 count: how many rounds each group's runs took. */
+export function roundOneGroupTable(runs: readonly RunRecord[]): string {
+  const groups = groupByRoundOne(
+    roundOneRows(runs).map((x) => ({ run: x.run.id, roundOne: x.roundOne, rounds: x.rounds })),
+  );
+  return md(
+    ["Severe findings in round 1", "Runs", "Which", "Rounds each took", "Median rounds"],
+    groups.map((g) => [
+      g.label,
+      String(g.runs.length),
+      g.runs.map(ticketLink).join(", ") || "–",
+      g.rounds.join(", ") || "–",
+      g.median === null ? "–" : String(g.median),
+    ]),
+  );
+}
+
+/** In words: how many runs ended on a clean round, and which did not. */
+export function roundsAfterSentence(rows: readonly RoundOneRow[]): string {
+  const by = new Map<number, string[]>();
+  for (const r of rows) by.set(r.after, [...(by.get(r.after) ?? []), runLabel(r.run)]);
+  const clean = by.get(1)?.length ?? 0;
+  const parts = [
+    `In ${clean} of the ${rows.length} runs the last round is the one after the last round that holds a severe finding: the clean round.`,
+  ];
+  for (const [after, labels] of [...by].filter(([a]) => a !== 1).sort((a, b) => a[0] - b[0])) {
+    parts.push(
+      after === 0
+        ? `In ${labels.join(", ")} the last round is a round that still holds a severe finding, so the run ended without a clean round after it.`
+        : `In ${labels.join(", ")} the last round is ${after} rounds after the last severe finding.`,
+    );
+  }
+  return parts.join(" ");
 }
 
 const DESIGNS: Array<{ name: string; lanes: string[] }> = [
@@ -830,6 +927,68 @@ export function figures(d: Data): Array<[string, string]> {
     "real runs with more than three review rounds, each past the third needing a ruling",
     `${long.length} of ${real.length}`,
   );
+
+  const rows = roundOneRows(real);
+  if (rows.length > 0) {
+    const roundOnes = rows.map((x) => x.roundOne);
+    const rounds = rows.map((x) => x.rounds);
+    add(
+      "real runs, severe findings in round 1, median (range)",
+      `${median(roundOnes)} (${Math.min(...roundOnes)} to ${Math.max(...roundOnes)})`,
+    );
+    add(
+      "real runs, rounds by severe findings in round 1",
+      groupByRoundOne(rows.map((x) => ({ run: x.run.id, roundOne: x.roundOne, rounds: x.rounds })))
+        .map(
+          (g) =>
+            `${g.label}: ${g.runs.length} runs, rounds ${g.rounds.join(", ") || "–"}, median ${g.median ?? "–"}`,
+        )
+        .join("; "),
+    );
+    add(
+      "real runs, severe findings that name no round",
+      rows
+        .filter((x) => x.noRound > 0)
+        .map((x) => `${x.run.id}: ${x.noRound}`)
+        .join(", ") || "none",
+    );
+    add(
+      "real runs, review rounds, median (range)",
+      `${median(rounds)} (${Math.min(...rounds)} to ${Math.max(...rounds)})`,
+    );
+    add(
+      "real runs, last round is the one after the last severe finding",
+      `${rows.filter((x) => x.after === 1).length} of ${rows.length}`,
+    );
+    const ordinary = rounds.filter((n) => n <= ORDINARY_MAX_ROUNDS);
+    const sd = sampleSd(ordinary);
+    add(
+      `real runs, review rounds, the runs of ${ORDINARY_MAX_ROUNDS} or fewer`,
+      `${ordinary.length} of ${rounds.length}, median ${median(ordinary)}, standard deviation ${num(sd, 2)}`,
+    );
+    const sdAll = sampleSd(rounds);
+    add("real runs, review rounds, standard deviation, all runs", num(sdAll, 2));
+    if (sdAll !== null) {
+      add(
+        "tickets in each of two groups to see a one-round difference in mean rounds, all runs",
+        String(ticketsPerGroup(sdAll, 1)),
+      );
+      add(
+        "tickets in each of two groups to see a two-round difference in mean rounds, all runs",
+        String(ticketsPerGroup(sdAll, 2)),
+      );
+    }
+    if (sd !== null) {
+      add(
+        "tickets in each of two groups to see a one-round difference in mean rounds, runs of 6 rounds or fewer",
+        String(ticketsPerGroup(sd, 1)),
+      );
+      add(
+        "tickets in each of two groups to see a two-round difference in mean rounds, runs of 6 rounds or fewer",
+        String(ticketsPerGroup(sd, 2)),
+      );
+    }
+  }
 
   const kinds = new Map<string, number>();
   for (const i of d.incidents) kinds.set(i.kind, (kinds.get(i.kind) ?? 0) + 1);

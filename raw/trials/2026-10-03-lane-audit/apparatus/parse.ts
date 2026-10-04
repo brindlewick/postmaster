@@ -338,10 +338,22 @@ export type ReviewHarvest = {
   raw: number | null;
 };
 
-/** The lens and round a `review-launch` or `review-harvest` detail names. */
+/**
+ * The lens and round a `review-launch` or `review-harvest` detail names. The usual line puts the
+ * round right after the lens (`bug round 3`, `style r2`). The older runs wrote it other ways, and
+ * those are read when the usual form is absent: `round 2`, `sol round 1`, `lens=bug round=8`,
+ * `review round 11: bug luna+mimo via review form`, `{"lens":"bug","round":5}` and a leading
+ * `r1 style tid …`. A line that names no round reads as none.
+ */
 export function parseReviewRef(detail: string): { lens: string | null; round: number | null } {
-  const m = /\b(style|bug|security)[ ,]+(?:round[ -]?|r)([0-9]+)\b/u.exec(detail);
-  return m ? { lens: m[1] as string, round: Number(m[2]) } : { lens: null, round: null };
+  const usual = /\b(style|bug|security)[ ,]+(?:round[ -]?|r)([0-9]+)\b/u.exec(detail);
+  if (usual) return { lens: usual[1] as string, round: Number(usual[2]) };
+  const round = /\bround[ =]?([0-9]+)\b|"round":([0-9]+)|^r([0-9]+)[ ]/u.exec(detail);
+  const lens = /\b(style|bug|security)\b/u.exec(detail);
+  return {
+    lens: lens ? (lens[1] as string) : null,
+    round: round ? Number(round[1] ?? round[2] ?? round[3]) : null,
+  };
 }
 
 /** A `review-harvest` line: which lens and round, whether the lane gave a verdict, how many findings. */

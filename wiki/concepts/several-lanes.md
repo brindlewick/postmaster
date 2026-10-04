@@ -3,7 +3,7 @@ title: A second reviewer earns its keep, and a second workhorse has not been sho
 type: concept
 standing: claimed
 sources: [trials/2026-10-03-lane-audit, trials/2026-09-29-synthesis-audit]
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 # A second reviewer earns its keep, and a second workhorse has not been shown to
@@ -25,7 +25,8 @@ of the coachman's cards. [@trials/2026-10-03-lane-audit/method.md]
 The audit is [#257, Research: audit the last three days of runs, to see whether several lanes still
 earn their keep](https://github.com/brindlewick/postmaster/issues/257). Its definitions, its limits
 and the controls for each count are in the trial's method and controls
-[@trials/2026-10-03-lane-audit/method.md] [@trials/2026-10-03-lane-audit/results/controls.md].
+[@trials/2026-10-03-lane-audit/method.md] [@trials/2026-10-03-lane-audit/results/controls.md]
+[@trials/2026-10-03-lane-audit/results/controls-round-one.md].
 Every figure quoted below is in one list [@trials/2026-10-03-lane-audit/results/numbers.md].
 
 ## The answer
@@ -34,7 +35,7 @@ Every figure quoted below is in one list [@trials/2026-10-03-lane-audit/results/
 runs that reached synthesis. A codex lane named 138 of them and mimo 154, and the two named the same
 finding only 51 times. Between them they found 241, and with opus's security review 259. A review
 by one lane alone would have missed 42% to 48% of what the coachman verified. A round lasts a median
-25 minutes, and its last reviewer finishes a median 11 minutes after its first. All reviewers
+26 minutes, and its last reviewer finishes a median 11 minutes after its first. All reviewers
 together wrote a median quarter of a run's output tokens.
 
 **Second workhorse: not shown, and cheap.** In 12 of the 18 real runs the second-ranked lane's part
@@ -188,16 +189,16 @@ that for every run in the window, which the earlier audit could not
 | review | 8h 47m | 53m |
 | of which the reviewers running, each round from launch to last exit | 1h 30m | 38m |
 | slower workhorse's extra wait, median (90th percentile) | 18 min (55) | 6 min (11) |
-| one review round, launch to last reviewer, median (90th percentile) | 25 min (56) | 15 min (28) |
-| gap between the first and last reviewer of a round, median (90th percentile) | 11 min (33) | 16 min (23) |
-| review rounds per run, median (most) | 3.5 (20) | 2 (4) |
+| one review round, launch to last reviewer, median (90th percentile) | 26 min (53) | 15 min (28) |
+| gap between the first and last reviewer of a round, median (90th percentile) | 11 min (31) | 16 min (23) |
+| review rounds per run, median (most) | 4 (20) | 2 (4) |
 
 - The slower workhorse made the run wait a median 18 minutes, 55 at the 90th percentile, over 16
   real runs, and a median 6 minutes over 18 fixture runs. Lanes restarted after a kill lengthen the
   longest waits.
 - Of the review stage's median 8 hours 47 minutes, the reviewers themselves run 1 hour 30 minutes,
   25% of the stage at the median. The rest is the coachman's triage, fixes and gate runs, and a wait
-  for the user's ruling at each round past the third. 9 of the 18 runs went past three rounds
+  for the user's ruling at each round past the third. 10 of the 18 runs went past three rounds
   [@trials/2026-10-03-lane-audit/results/numbers.md].
 - The coachman ran the gate on lane branches 36 times, 6.5 hours, in the real runs, and on the
   synthesis 260 times, 43.5 hours. The lane branches' share is about 22 minutes a run for the two
@@ -254,14 +255,43 @@ record, read by a script and checked by hand on 45 lines, all of which match
 - mimo alone would have found 58% and a codex lane alone 52%. The recorded tokens put a codex lane's
   reviews at 119 launches, 240M in and 2.9M out, and mimo's at 118 launches, 17M in and 1.0M out.
   mimo's plan reports a zero price.
-- A round lasts a median 25 minutes, 56 at the 90th percentile, and the first and last reviewer
-  finish a median 11 minutes apart, 33 at the 90th.
+- A round lasts a median 26 minutes, 53 at the 90th percentile, and the first and last reviewer
+  finish a median 11 minutes apart, 31 at the 90th.
 - 9 of 298 reviewer launches in these real runs were harvested as degraded: three luna reviews (a
   revoked login, and two findings files that did not parse), four mimo (no verdict after handing the
   work to a helper, a change to the code under review, a memory-cap kill, and a verdict withheld by
   the provider's content filter), one astra (a turn that failed) and one opus (a 529 overload). The
   incidents below say more. In [#200](https://github.com/brindlewick/postmaster/issues/200)'s third round the mimo reviewer committed a change and merged it
   into the synthesis worktree, and the coachman voided its verdict and recovered the branch.
+
+### Rounds follow the first round
+
+A run's review rounds track its first round. The 8 runs with 3 or fewer severe findings in round 1
+finished in 2 or 3 rounds, and the 5 runs with 8 or more took 5, 5, 6, 13 and 20. The 5 in between
+took 4, 4, 5, 5 and 13. Round 1 holds a median 4 severe findings a run, from 1 to 21
+[@trials/2026-10-03-lane-audit/results/numbers.md].
+
+| Severe findings in round 1 | Runs | Which | Rounds each took | Median rounds |
+| --- | --- | --- | --- | --- |
+| 3 or fewer | 8 | [#75](https://github.com/brindlewick/postmaster/issues/75), [#98](https://github.com/brindlewick/postmaster/issues/98), [#158](https://github.com/brindlewick/postmaster/issues/158), [#159](https://github.com/brindlewick/postmaster/issues/159), [#160](https://github.com/brindlewick/postmaster/issues/160), [#170](https://github.com/brindlewick/postmaster/issues/170), [#182](https://github.com/brindlewick/postmaster/issues/182), [#201](https://github.com/brindlewick/postmaster/issues/201) | 2, 2, 2, 2, 3, 3, 3, 3 | 2.5 |
+| 4 to 7 | 5 | [#110](https://github.com/brindlewick/postmaster/issues/110), [#122](https://github.com/brindlewick/postmaster/issues/122), [#165](https://github.com/brindlewick/postmaster/issues/165), [#179](https://github.com/brindlewick/postmaster/issues/179), [#200](https://github.com/brindlewick/postmaster/issues/200) | 4, 4, 5, 5, 13 | 5 |
+| 8 or more | 5 | [#57](https://github.com/brindlewick/postmaster/issues/57), [#109](https://github.com/brindlewick/postmaster/issues/109), [#124](https://github.com/brindlewick/postmaster/issues/124), [#135](https://github.com/brindlewick/postmaster/issues/135), [#163](https://github.com/brindlewick/postmaster/issues/163) | 5, 5, 6, 13, 20 | 6 |
+
+In 14 of the 18 runs the last round is the clean one, one past the last round with a severe
+finding. In [#124](https://github.com/brindlewick/postmaster/issues/124), [#135](https://github.com/brindlewick/postmaster/issues/135) and [#163](https://github.com/brindlewick/postmaster/issues/163) the run ended on a round that still held one, and in [#200](https://github.com/brindlewick/postmaster/issues/200) two
+rounds followed its last finding, the first of them the third round, which incident I11 describes
+[@trials/2026-10-03-lane-audit/results/reviews-round-one.md].
+
+The limits: this is 18 runs from one repository, and a ticket's size sets both its first round and
+its rounds, so the table does not show that a smaller first round causes fewer rounds. [#122](https://github.com/brindlewick/postmaster/issues/122) had 6
+severe findings in round 1 and took 13 rounds. The count is the coachman's verified list and
+depends on who reviewed, since a codex lane alone named 52% of the severe findings and mimo alone
+58%. A round past the third runs on the user's ruling, and [#109](https://github.com/brindlewick/postmaster/issues/109), [#122](https://github.com/brindlewick/postmaster/issues/122), [#124](https://github.com/brindlewick/postmaster/issues/124) and [#135](https://github.com/brindlewick/postmaster/issues/135) ran on earlier
+versions of the flow
+[@trials/2026-10-03-lane-audit/method.md].
+
+It matters because a run's rounds can be judged from round 1, when the first round ends, and not
+only after a review stage that takes a median 8 hours 47 minutes.
 
 ## What the lanes cost in tokens
 

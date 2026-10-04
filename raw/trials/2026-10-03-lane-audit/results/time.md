@@ -8,6 +8,6 @@
 | review | 8h 47m | 53m |
 | of which the reviewers running, each round from launch to last exit | 1h 30m | 38m |
 | slower workhorse's extra wait, median (90th percentile) | 18 min (55) | 6 min (11) |
-| one review round, launch to last reviewer, median (90th percentile) | 25 min (56) | 15 min (28) |
-| gap between the first and last reviewer of a round, median (90th percentile) | 11 min (33) | 16 min (23) |
-| review rounds per run, median (most) | 3.5 (20) | 2 (4) |
+| one review round, launch to last reviewer, median (90th percentile) | 26 min (53) | 15 min (28) |
+| gap between the first and last reviewer of a round, median (90th percentile) | 11 min (31) | 16 min (23) |
+| review rounds per run, median (most) | 4 (20) | 2 (4) |

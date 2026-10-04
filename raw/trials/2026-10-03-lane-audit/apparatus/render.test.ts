@@ -39,6 +39,7 @@ describe("render", () => {
       "workhorses-real-compact.md",
       "workhorses-fixture.md",
       "reviews-real.md",
+      "reviews-round-one.md",
       "reviews-fixture.md",
       "tokens.md",
       "time.md",
@@ -47,6 +48,7 @@ describe("render", () => {
     ]);
     for (const text of Object.values(files)) expect(privacyFaults(text)).toEqual([]);
     expect(files["inventory.md"]).toContain("A title");
+    expect(files["reviews-round-one.md"]).toContain("No run reached review.");
   });
 });
 

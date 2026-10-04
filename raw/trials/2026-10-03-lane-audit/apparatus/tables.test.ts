@@ -5,8 +5,8 @@ import type { FindingRow, Gate, LaneTimes, RunRecord, StreamUsage } from "./reco
 import {
   coverageTable,
   type Data,
-  fixtureSummary,
   figures,
+  fixtureSummary,
   fixtureWorkhorses,
   hm,
   incidentTable,
@@ -18,6 +18,10 @@ import {
   realWorkhorses,
   recallTable,
   reviewTable,
+  roundOneGroupTable,
+  roundOneRows,
+  roundOneTable,
+  roundsAfterSentence,
   runLabel,
   timeTable,
   tokensTable,
@@ -313,6 +317,117 @@ describe("review and token tables", () => {
     const out = perRunTokens([{ label: "runs", runs: [reviewed, run()] }]);
     expect(out).toContain("workhorse | 2.0M in, 30k out");
     expect(out).toContain("(2 runs)");
+  });
+});
+
+describe("severe findings by round", () => {
+  const launch = (round: number) => ({ ts: "t", lane: "luna", lens: "bug", round });
+  const withSynthesis = { synthesis: synthesis(["luna", "mimo"], "none") };
+  const found = (round: number | null, n: number) =>
+    Array.from({ length: n }, () => finding({ round }));
+  const a = run({
+    id: "10",
+    ...withSynthesis,
+    reviewLaunches: [launch(1), launch(2), launch(3)],
+    findings: [...found(1, 3), ...found(2, 1)],
+  });
+  const b = run({
+    id: "11",
+    ...withSynthesis,
+    reviewLaunches: [launch(1), launch(2)],
+    findings: [...found(1, 9), ...found(2, 1)],
+  });
+  const c = run({
+    id: "12",
+    ...withSynthesis,
+    reviewLaunches: [launch(1)],
+    findings: [finding({ severity: "P3" })],
+  });
+  const dd = run({
+    id: "13",
+    ...withSynthesis,
+    reviewLaunches: [launch(1), launch(2)],
+    findings: [...found(1, 5), ...found(null, 1)],
+  });
+  const ended = run({
+    id: "14",
+    ...withSynthesis,
+    reviewLaunches: [launch(1), launch(2)],
+    findings: [...found(1, 2), ...found(2, 1)],
+  });
+  const rows = [a, b, c, dd, ended];
+
+  test("a run's rounds, its severe findings in all and in round 1, and by round", () => {
+    const out = roundOneRows(rows).map((x) => [
+      x.run.id,
+      x.rounds,
+      x.roundOne,
+      x.total,
+      x.byRound,
+      x.after,
+    ]);
+    expect(out).toEqual([
+      ["10", 3, 3, 4, "1: 3, 2: 1", 1],
+      ["11", 2, 9, 10, "1: 9, 2: 1", 0],
+      ["12", 1, 0, 0, "none", 1],
+      ["13", 2, 5, 6, "1: 5, no round: 1", 1],
+      ["14", 2, 2, 3, "1: 2, 2: 1", 0],
+    ]);
+  });
+
+  test("a run with no review lines and no findings has no row", () => {
+    expect(roundOneRows([run({ id: "9" })])).toEqual([]);
+  });
+
+  test("the table has a row per run with the numbers in the order of its header", () => {
+    const out = roundOneTable(rows);
+    expect(out.split("\n").length).toBe(7);
+    expect(out).toContain("| 3 | 3 | 4 | 1: 3, 2: 1 | 1 |");
+    expect(out).toContain("| 1 | 0 | 0 | none | 1 |");
+  });
+
+  test("the groups show each group's runs, rounds and median", () => {
+    const out = roundOneGroupTable(rows);
+    expect(out).toContain(
+      "| 3 or fewer | 3 | [#10](https://github.com/brindlewick/postmaster/issues/10), [#12](https://github.com/brindlewick/postmaster/issues/12), [#14](https://github.com/brindlewick/postmaster/issues/14) | 1, 2, 3 | 2 |",
+    );
+    expect(out).toContain("| 4 to 7 | 1 |");
+    expect(out).toContain("| 8 or more | 1 |");
+  });
+
+  test("in words: how many ended on a clean round and which did not", () => {
+    const s = roundsAfterSentence(roundOneRows(rows));
+    expect(s).toContain("In 3 of the 5 runs the last round is the one after the last round");
+    expect(s).toContain("[#11]");
+    expect(s).toContain("[#14]");
+    expect(s).toContain("still holds a severe finding");
+  });
+
+  test("the figures: round-1 median and range, groups, rounds, and the sample sizes", () => {
+    const f = new Map(figures(data(rows)));
+    expect(f.get("real runs, severe findings in round 1, median (range)")).toBe("3 (0 to 9)");
+    expect(f.get("real runs, rounds by severe findings in round 1")).toBe(
+      "3 or fewer: 3 runs, rounds 1, 2, 3, median 2; 4 to 7: 1 runs, rounds 2, median 2; 8 or more: 1 runs, rounds 2, median 2",
+    );
+    expect(f.get("real runs, severe findings that name no round")).toBe("13: 1");
+    expect(f.get("real runs, review rounds, median (range)")).toBe("2 (1 to 3)");
+    expect(f.get("real runs, last round is the one after the last severe finding")).toBe("3 of 5");
+    expect(f.get("real runs, review rounds, the runs of 6 or fewer")).toBe(
+      "5 of 5, median 2, standard deviation 0.71",
+    );
+    expect(
+      f.get("tickets in each of two groups to see a one-round difference in mean rounds, all runs"),
+    ).toBe("8");
+    expect(
+      f.get("tickets in each of two groups to see a two-round difference in mean rounds, all runs"),
+    ).toBe("2");
+  });
+
+  test("a set with no run that reached review gives none of these figures", () => {
+    const names = figures(data([run({ id: "9", synthesis: synthesis(["a", "b"], "none") })])).map(
+      ([name]) => name,
+    );
+    expect(names.filter((n) => n.includes("severe findings in round 1"))).toEqual([]);
   });
 });
 

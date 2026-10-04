@@ -58,8 +58,8 @@ Each is computed from the tables' data by render.ts.
 - set-aside runs that launched workhorses, input tokens: 182-parked-20261001: workhorses 1.0M, coachman 11M; 200-parked-20261002: workhorses 2.4M, coachman 7.7M
 - real runs, gate runs on lane branches: 36, 6.5 hours
 - real runs, gate runs on the synthesis branch: 260, 43.5 hours
-- real runs, review round length, median (90th percentile), rounds: 25 min (56), 82
-- real runs, gap between first and last reviewer of a round, median (90th percentile): 11 min (33)
+- real runs, review round length, median (90th percentile), rounds: 26 min (53), 94
+- real runs, gap between first and last reviewer of a round, median (90th percentile): 11 min (31)
 - real runs, median time in workhorses-running, synthesis, review: 1h 35m, 31m, 8h 47m
 - real runs whose review checkpoint lists each finding: 4
 - real runs, listed findings, all severities: 168: closed 82, open 45, dismissed 41
@@ -68,6 +68,17 @@ Each is computed from the tables' data by render.ts.
 - fixture runs, listed findings, all severities: 199: closed 48, open 130, dismissed 21
 - fixture runs, listed P1 and P2 findings: 37: closed 33, open 0, dismissed 4
 - real runs, reviewers' running time as a share of the review stage, median: 25% over 18 runs
-- real runs with more than three review rounds, each past the third needing a ruling: 9 of 18
+- real runs with more than three review rounds, each past the third needing a ruling: 10 of 18
+- real runs, severe findings in round 1, median (range): 4 (1 to 21)
+- real runs, rounds by severe findings in round 1: 3 or fewer: 8 runs, rounds 2, 2, 2, 2, 3, 3, 3, 3, median 2.5; 4 to 7: 5 runs, rounds 4, 4, 5, 5, 13, median 5; 8 or more: 5 runs, rounds 5, 5, 6, 13, 20, median 6
+- real runs, severe findings that name no round: 109: 2
+- real runs, review rounds, median (range): 4 (2 to 20)
+- real runs, last round is the one after the last severe finding: 14 of 18
+- real runs, review rounds, the runs of 6 or fewer: 15 of 18, median 3, standard deviation 1.35
+- real runs, review rounds, standard deviation, all runs: 4.87
+- tickets in each of two groups to see a one-round difference in mean rounds, all runs: 372
+- tickets in each of two groups to see a two-round difference in mean rounds, all runs: 93
+- tickets in each of two groups to see a one-round difference in mean rounds, runs of 6 rounds or fewer: 29
+- tickets in each of two groups to see a two-round difference in mean rounds, runs of 6 rounds or fewer: 8
 - incidents by kind: kill 4, session-lost 1, degraded 5, wall 2, overload 1, duplicate-launch 1, auth 1
 - incidents, runs touched: 16

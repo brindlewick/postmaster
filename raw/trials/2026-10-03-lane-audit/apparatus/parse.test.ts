@@ -6,9 +6,9 @@ import {
   parseCostLines,
   parseFinding,
   parseOracle,
-  parseReviewReport,
   parseReviewHarvest,
   parseReviewRef,
+  parseReviewReport,
   parseShares,
   parseSynthesis,
   parseUsageName,
@@ -329,6 +329,32 @@ describe("review lines", () => {
     expect(parseReviewRef("bug r5 thread x")).toEqual({ lens: "bug", round: 5 });
     expect(parseReviewRef("security round 3, thread x")).toEqual({ lens: "security", round: 3 });
     expect(parseReviewRef("pre-round gate")).toEqual({ lens: null, round: null });
+  });
+
+  test("the round in the shapes the older runs wrote it", () => {
+    expect(parseReviewRef("lens=bug round=8")).toEqual({ lens: "bug", round: 8 });
+    expect(parseReviewRef("lens=bug round=11 attempt=2")).toEqual({ lens: "bug", round: 11 });
+    expect(
+      parseReviewRef("review round 12: bug luna+mimo via review form, security opus via skill"),
+    ).toEqual({ lens: "bug", round: 12 });
+    expect(parseReviewRef('{"lens":"bug","round":5,"thread":"x","findings":"1 P2"}')).toEqual({
+      lens: "bug",
+      round: 5,
+    });
+    expect(parseReviewRef("r2 security tid f34e4775")).toEqual({ lens: "security", round: 2 });
+    expect(parseReviewRef("sol round 1")).toEqual({ lens: null, round: 1 });
+    expect(parseReviewRef("round 10: P2x5 P3x2, all reproduced")).toEqual({
+      lens: null,
+      round: 10,
+    });
+  });
+
+  test("a line that names no round reads as none, with the lens it names", () => {
+    expect(parseReviewRef("bug luna+mimo: P1x2 P2x7 after adjudication")).toEqual({
+      lens: "bug",
+      round: null,
+    });
+    expect(parseReviewRef("")).toEqual({ lens: null, round: null });
   });
 
   test("a harvest: verdict and the findings it counts", () => {
