@@ -235,7 +235,7 @@ describe("the current index recognises its new files", () => {
         const { repo, base } = realFixture(dir, NEW_FILES);
         appendFileSync(join(repo, f), "\n");
         const head = commitAll(repo, "touch");
-        return run(SELF, [repo, base, head]);
+        return run(SELF, ["coachman-contract", repo, base, head]);
       });
       expect(r.code).toBe(1);
       expect(r.out).toBe(`yes ${f}\n`);

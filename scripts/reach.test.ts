@@ -1307,10 +1307,10 @@ describe("R6: ruled round fixes", () => {
       CREATED.push(dir);
       const dispatch = join(dir, "dispatch");
       mkdirSync(join(dispatch, "logs"), { recursive: true });
-      const bin = join(dir, "bin");
-      mkdirSync(bin, { recursive: true });
+      const toolDir = join(dir, "tool", "scripts");
+      mkdirSync(toolDir, { recursive: true });
       writeFileSync(
-        join(bin, "bun"),
+        join(toolDir, "run"),
         `#!/bin/sh\nif printf '%s' "$*" | grep -q restore; then touch ${dir}/restored; exit 0; fi\nexit ${checkExit}\n`,
         { mode: 0o755 },
       );
@@ -1318,7 +1318,7 @@ describe("R6: ruled round fixes", () => {
         .replaceAll("<tool>", join(dir, "tool"))
         .replaceAll("<dispatch>", dispatch)
         .replaceAll("r<round>", "r1");
-      const result = run("sh", ["-c", script], { env: { PATH: `${bin}:/usr/bin:/bin` } });
+      const result = run("sh", ["-c", script], { env: { PATH: "/usr/bin:/bin" } });
       return { code: result.code, restored: existsSync(join(dir, "restored")) };
     };
     // The sentence under the step: exit 1 from check is a control fault, stop.

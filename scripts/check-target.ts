@@ -20,12 +20,6 @@ function runGit(dir: string, args: string[]) {
   return run("git", ["-C", dir, ...args], { env: UNSET_GIT });
 }
 
-const T = process.argv[2];
-if (T === undefined) {
-  console.error("usage: run check-target <path>");
-  process.exit(1);
-}
-
 export interface TargetReach {
   code: number;
   out: string;
@@ -157,7 +151,7 @@ function standardCheck(target: string): number {
 export function main(argv: string[]): number {
   if (argv[0] === "reach") {
     if (argv.length !== 3 || !argv[1] || !argv[2]) {
-      console.error("usage: check-target.sh reach <path> <default-branch>");
+      console.error("usage: run check-target reach <path> <default-branch>");
       return 1;
     }
     const result = reachTarget(argv[1], argv[2]);
@@ -165,7 +159,7 @@ export function main(argv: string[]): number {
     return result.code;
   }
   if (argv.length !== 1 || !argv[0]) {
-    console.error("usage: check-target.sh <path>");
+    console.error("usage: run check-target <path>");
     return 1;
   }
   return standardCheck(argv[0]);
