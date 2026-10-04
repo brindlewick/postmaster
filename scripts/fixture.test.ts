@@ -352,7 +352,7 @@ function expectScore(key: string, failing: string, failText?: string): void {
   const lines = out.split("\n").filter((l) => l.trim()).length;
   expect(rc).toBe(failing === "none" ? 0 : 2);
   expect(failingChecks).toBe(failing);
-  expect(lines).toBe(9);
+  expect(lines).toBe(10);
   expect(
     out
       .split("\n", 1)[0]
