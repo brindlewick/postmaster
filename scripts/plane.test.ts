@@ -647,6 +647,27 @@ describe("labels and titles through a stub API", () => {
     }
   }, 30000);
 
+  test("has-label answers exact membership, and a comma in a name is one label", async () => {
+    const item = stubItem(1);
+    item.labels = ["l-9"];
+    const { server, url } = startStub({ "PM-1": item }, [{ id: "l-9", name: "blocked, ready" }]);
+    try {
+      const dir = join(root, "plane-label-has");
+      mkdirSync(dir, { recursive: true });
+      const cfg = join(dir, "config.toml");
+      writeFileSync(cfg, `[tracker]\nkind = "plane"\nurl = "${url}"\nworkspace = "ws"\n`);
+      const env = penv(cfg, dir);
+      const absent = await clix(["has-label", "PM-1", "ready"], env, dir);
+      expect(absent.code).toBe(0);
+      expect(absent.out.trim()).toBe("absent");
+      const present = await clix(["has-label", "PM-1", "blocked, ready"], env, dir);
+      expect(present.code).toBe(0);
+      expect(present.out.trim()).toBe("present");
+    } finally {
+      server.stop(true);
+    }
+  }, 30000);
+
   test("title retitles the work item", async () => {
     const { server, requests, url } = startStub({ "PM-1": stubItem(1) }, []);
     try {

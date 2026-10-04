@@ -54,7 +54,9 @@ required headings stay required, in the order above.
 The flow's states are `todo`, `in-progress`, `blocked`, `done` and `cancelled`, and each
 adapter maps them onto what its tracker has. Every adapter script prints a ticket the same
 way (`id`, `title`, `state`, `labels`, `created`, the body, then a `## Log` of comments), so
-a runbook reads a ticket without knowing which tracker it came from.
+a runbook reads a ticket without knowing which tracker it came from. The `labels:` line is
+display-only: a label name may itself hold commas, so a caller that needs membership asks
+the adapter with `has-label`, which answers `present` or `absent`, and never splits the line.
 
 ## github
 
@@ -83,6 +85,7 @@ a board name; its owner and the user's GitHub login are machine-side.
 <tool>/scripts/github.sh <repo> edit <n> <body-file> <base-file>
 <tool>/scripts/github.sh <repo> title <n> "<title>"
 <tool>/scripts/github.sh <repo> label <n> add|remove <label>
+<tool>/scripts/github.sh <repo> has-label <n> <label>      # present or absent: exact membership
 <tool>/scripts/github.sh <repo> state <n> in-progress
 <tool>/scripts/github.sh <repo> comment <n> coachman "<text>"
 <tool>/scripts/github.sh <repo> list [state]
@@ -109,7 +112,8 @@ a board name; its owner and the user's GitHub login are machine-side.
   `blocked` adds the label; `done` closes the issue and moves the card to Done; `cancelled`
   closes it as not planned.
 - **Labels:** `label`, which adds or removes a label without changing the issue's state. The
-  booking clerk uses `ready` to record the user's sign-off.
+  booking clerk uses `ready` to record the user's sign-off. `has-label` answers whether the
+  issue carries a label, by exact name.
 - **Comment:** `comment`, dated to the minute, actor first (`postmaster`, `coachman`, or the
   user's word for themselves). The ready-to-merge comment is one such line pointing at
   `<dispatch>/card.md`.
@@ -155,6 +159,7 @@ projects, and `<tool>/scripts/probe-trackers.sh` runs it.
 <tool>/scripts/plane.sh edit PM-12 <body-file> <base-file>
 <tool>/scripts/plane.sh title PM-12 "<title>"
 <tool>/scripts/plane.sh label PM-12 add|remove <label>
+<tool>/scripts/plane.sh has-label PM-12 <label>            # present or absent: exact membership
 <tool>/scripts/plane.sh state PM-12 in-progress
 <tool>/scripts/plane.sh comment PM-12 coachman "<text>"
 <tool>/scripts/plane.sh list PM [state]
@@ -176,7 +181,8 @@ projects, and `<tool>/scripts/probe-trackers.sh` runs it.
 - **Set state:** `state`, one API call per change; `blocked` is the label. State changes leave
   other labels alone.
 - **Labels:** `label`, which adds or removes a label without changing the work item's state. The
-  booking clerk uses `ready` to record the user's sign-off.
+  booking clerk uses `ready` to record the user's sign-off. `has-label` answers whether the
+  work item carries a label, by exact name.
 - **Comment:** `comment`, the same dated line as on GitHub.
 
 ## local
@@ -207,6 +213,7 @@ worktree included:
 <tool>/scripts/local.sh <repo> edit <n> <body-file> <base-file>
 <tool>/scripts/local.sh <repo> title <n> "<title>"
 <tool>/scripts/local.sh <repo> label <n> add|remove <label>
+<tool>/scripts/local.sh <repo> has-label <n> <label>      # present or absent: exact membership
 <tool>/scripts/local.sh <repo> state <n> in-progress
 <tool>/scripts/local.sh <repo> comment <n> coachman "<text>"
 <tool>/scripts/local.sh <repo> list [state]                  # every ticket, grouped by state
@@ -229,9 +236,9 @@ worktree included:
 - **Title:** `title` is where the user sets a title, as they would on GitHub's page. Like any
   change to a ticket's text, it waits for the user's word.
 - **Set state:** `state`. All five states are the ticket's own, `blocked` included.
-- **Labels:** the tracker must let the user add and remove labels. The booking clerk uses the
-  `ready` label to record sign-off. Configure that capability with the tracker in
-  `~/.postmaster/trackers/<name>.md`.
+- **Labels:** `label`, which adds or removes a label without changing the ticket's state. The
+  booking clerk uses `ready` to record the user's sign-off. `has-label` answers whether the
+  ticket carries a label, by exact name.
 - **Comment:** `comment`, the same dated line as on GitHub, kept in the ticket's log.
 
 [Why a repo's tickets live in its git directory, and its tracker is discovered](../../wiki/concepts/local-tracker.md)
@@ -244,6 +251,12 @@ it, and the setup session records how each of the five demands is met in
 above, so the user's instance never enters the flow. Until that file exists the tracker is
 not configured, however reachable it is. One written before a body could be replaced says
 nothing about it; until it does, the user makes an approved change in the tracker.
+
+The readiness scripts refuse an `other` tracker with the form that serves it: read the
+ticket's body, title and labels through the tracker's own tooling and pass them by hand,
+e.g. `<tool>/scripts/ticket-ready.sh --body <file> --labels <list> --title "<title>"
+--project <repo>`. Pass `--labels` once per label when a label name holds a comma; one
+`--labels` takes a comma-joined list.
 
 ## postmaster's own tracker
 

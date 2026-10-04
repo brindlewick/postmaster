@@ -160,6 +160,16 @@ describe("the readiness matrix on a local store", () => {
     const r = ready([repo, "9999"]);
     expect(r.code).toBe(1);
   }, 30000);
+
+  test("one label holding a comma is not the ready mark", () => {
+    const n = local(["create", "Comma label", join(tmp, "a.md")]);
+    local(["label", n, "add", "blocked, ready"]);
+    const r = ready([repo, n]);
+    expect(r.code).toBe(2);
+    expect(r.out).toContain("ready label is missing");
+    local(["label", n, "add", "ready"]);
+    expect(ready([repo, n]).code).toBe(0);
+  }, 30000);
 });
 
 describe("the marking and queue verbs", () => {
@@ -243,6 +253,18 @@ describe("a tracker of kind other", () => {
     const bad = ready(["--body", a, "--labels", "", "--title", "Sorted list", "--project", repo]);
     expect(bad.code).toBe(2);
     expect(bad.out).toContain("ready label is missing");
+  }, 30000);
+
+  test("repeated --labels flags name one label each", () => {
+    const a = join(tmp, "a.md");
+    const base = ["--body", a, "--title", "Sorted list", "--project", repo];
+    const split = ready([...base, "--labels", "blocked, ready"]);
+    expect(split.code).toBe(0);
+    const exact = ready([...base, "--labels", "blocked, ready", "--labels", "other"]);
+    expect(exact.code).toBe(2);
+    expect(exact.out).toContain("ready label is missing");
+    const marked = ready([...base, "--labels", "blocked, ready", "--labels", "ready"]);
+    expect(marked.code).toBe(0);
   }, 30000);
 
   test("mark records the marking once the label is applied outside", () => {
@@ -374,6 +396,7 @@ describe("the matrix through the github double", () => {
     storedIssue(stub, 2, join(tmp, "a.md"), []);
     storedIssue(stub, 3, join(tmp, "c.md"), ["ready"]);
     storedIssue(stub, 4, join(tmp, "d.md"), ["ready"]);
+    storedIssue(stub, 5, join(tmp, "a.md"), ["blocked, ready"]);
     const env = {
       ...process.env,
       PATH: `${bin}:${process.env.PATH ?? ""}`,
@@ -391,6 +414,9 @@ describe("the matrix through the github double", () => {
     expect(draft.code).toBe(2);
     expect(/draft/iu.test(draft.out)).toBe(true);
     expect(ready([repoGh, "9999"], env).code).toBe(1);
+    const comma = ready([repoGh, "5"], env);
+    expect(comma.code).toBe(2);
+    expect(comma.out).toContain("ready label is missing");
   }, 60000);
 });
 
@@ -406,7 +432,10 @@ type StubItem = {
 };
 
 function startPlaneStub(items: Record<string, StubItem>) {
-  const labels = [{ id: "l-1", name: "ready" }];
+  const labels = [
+    { id: "l-1", name: "ready" },
+    { id: "l-2", name: "blocked, ready" },
+  ];
   const server = Bun.serve({
     port: 0,
     async fetch(req) {
@@ -462,6 +491,7 @@ describe("the matrix through the plane double", () => {
       "PM-2": planeItem(2, join(tmp, "a.md"), []),
       "PM-3": planeItem(3, join(tmp, "c.md"), ["l-1"]),
       "PM-4": planeItem(4, join(tmp, "d.md"), ["l-1"]),
+      "PM-5": planeItem(5, join(tmp, "a.md"), ["l-2"]),
     });
     try {
       const dir = join(tmp, "plane-double");
@@ -490,6 +520,9 @@ describe("the matrix through the plane double", () => {
       expect(draft.code).toBe(2);
       expect(/draft/iu.test(draft.out)).toBe(true);
       expect((await readyAsync([repoPl, "PM-9999"], env)).code).toBe(1);
+      const comma = await readyAsync([repoPl, "PM-5"], env);
+      expect(comma.code).toBe(2);
+      expect(comma.out).toContain("ready label is missing");
     } finally {
       server.stop(true);
     }

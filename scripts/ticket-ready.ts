@@ -17,11 +17,12 @@
 //
 // The --body forms check a tracker of kind other from a body file and a label
 // list, as ticket-check --body does; the mark --body form records the marking
-// after the label is applied through the tracker's own tooling. mark writes
-// the ledger note with the ticket's turnpikes line as the user's word, and
-// every marking queues a ready marker under the project's run root; consume
-// drops the marker when the postmaster dispatches, and unmark drops the mark
-// with it.
+// after the label is applied through the tracker's own tooling. Pass --labels
+// once per label when a label name holds a comma; one --labels takes a
+// comma-joined list. mark writes the ledger note with the ticket's turnpikes
+// line as the user's word, and every marking queues a ready marker under the
+// project's run root; consume drops the marker when the postmaster dispatches,
+// and unmark drops the mark with it.
 //
 // Exit 0 the ticket is ready, or the verb did its work; 2 the ticket is not
 // ready, or the marking was refused; 1 anything else (an unreadable ticket,
@@ -65,11 +66,12 @@ function needAdapter(kind: string, instead: string): void {
 
 // The read every adapter prints: header fields, a blank line, then the body.
 // ticket-parts tolerates the ## Log trailer the adapters append, so the body
-// is checked as read, exactly as ticket-check reads it.
-function parseTicketRead(out: string): { title: string; labels: string[]; body: string } {
+// is checked as read, exactly as ticket-check reads it. The `labels:` line is
+// display-only and never parsed back: a label name may itself hold commas, so
+// membership is asked of the adapter with has-label instead.
+function parseTicketRead(out: string): { title: string; body: string } {
   const lines = out.split("\n");
   let title = "";
-  let labels: string[] = [];
   let i = 0;
   for (; i < lines.length; i++) {
     const line = (lines[i] ?? "").replace(/\r$/u, "");
@@ -77,15 +79,9 @@ function parseTicketRead(out: string): { title: string; labels: string[]; body: 
     const m = /^([A-Za-z-]+):[ \t]*(.*)$/u.exec(line);
     if (!m) continue;
     // ASCII: adapter header names are machine-written; folded once against ASCII literals.
-    const key = m[1]!.toLowerCase();
-    if (key === "title") title = m[2]!;
-    if (key === "labels")
-      labels = m[2]!
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
+    if (m[1]!.toLowerCase() === "title") title = m[2]!;
   }
-  return { title, labels, body: lines.slice(i + 1).join("\n") };
+  return { title, body: lines.slice(i + 1).join("\n") };
 }
 
 function hasReadyMark(labels: string[]): boolean {
@@ -140,11 +136,11 @@ function reportCheck(
   repo: string,
   id: string,
   title: string,
-  labels: string[],
+  ready: boolean,
   body: string,
 ): number {
   const reasons: string[] = [];
-  if (!hasReadyMark(labels)) reasons.push("ready label is missing");
+  if (!ready) reasons.push("ready label is missing");
   const { reasons: found, turnpikes } = runChecks({ body, title, project: repo });
   reasons.push(...found);
   if (reasons.length > 0) {
@@ -209,15 +205,25 @@ function labelViaAdapter(
     die(`the ${kind} adapter could not ${verb} the label (${(r.out + r.err).trim()})`);
 }
 
-function readViaAdapter(
-  repo: string,
-  id: string,
-  kind: string,
-): { title: string; labels: string[]; body: string } {
+function readViaAdapter(repo: string, id: string, kind: string): { title: string; body: string } {
   const base = kind === "plane" ? [] : [repo];
   const r = runScript(`${kind}.sh`, [...base, "read", id]);
   if (r.code !== 0) die(`the ${kind} adapter could not read ${id} (${(r.out + r.err).trim()})`, 1);
   return parseTicketRead(r.out);
+}
+
+// Exact membership, answered by the adapter against the tracker's own list:
+// never by splitting the comma-joined `labels:` line, where one name can
+// hold a comma and read back as two.
+function readyViaAdapter(repo: string, id: string, kind: string): boolean {
+  const base = kind === "plane" ? [] : [repo];
+  const r = runScript(`${kind}.sh`, [...base, "has-label", id, "ready"]);
+  if (r.code !== 0)
+    die(
+      `the ${kind} adapter could not check the ready label on ${id} (${(r.out + r.err).trim()})`,
+      1,
+    );
+  return r.out.trim() === "present";
 }
 
 function removeClerkRecord(repo: string, id: string): void {
@@ -299,6 +305,31 @@ function takeFlag(argv: string[], name: string): string {
   return value;
 }
 
+function takeFlags(argv: string[], name: string): string[] {
+  const values: string[] = [];
+  for (let i = 0; i + 1 < argv.length; i++) {
+    if (argv[i] === name) {
+      const value = argv[i + 1]!;
+      if (value.startsWith("--")) die(`${name} needs a value; got ${value}`);
+      values.push(value);
+    }
+  }
+  if (values.length === 0) die(`usage: ${usage()}`);
+  return values;
+}
+
+// A caller naming the ticket's labels by hand (kind other) passes --labels
+// once per label when a name holds a comma; a single --labels keeps the old
+// comma-joined form.
+function labelsFromFlags(argv: string[]): string[] {
+  const values = takeFlags(argv, "--labels");
+  if (values.length > 1) return values.map((v) => v.trim()).filter(Boolean);
+  return values[0]!
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 function usage(): string {
   return [
     "ticket-ready.sh <repo> <id>",
@@ -314,10 +345,7 @@ function main(argv: string[]): number {
   if (argv[0] === "--body") {
     if (argv[1] === "--labels" || argv[1] === undefined) die(`usage: ${usage()}`);
     const body = readFileSync(argv[1]!, "utf8");
-    const labels = takeFlag(argv, "--labels")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const labels = labelsFromFlags(argv);
     const title = argv.includes("--title") ? takeFlag(argv, "--title") : "";
     const project = argv.includes("--project") ? takeFlag(argv, "--project") : "";
     if (project) process.env.POSTMASTER_PROJECT = resolve(project);
@@ -337,10 +365,7 @@ function main(argv: string[]): number {
   const verb = argv[0]!;
   if (verb === "mark" && argv[1] === "--body") {
     const body = readFileSync(takeFlag(argv, "--body"), "utf8");
-    const labels = takeFlag(argv, "--labels")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const labels = labelsFromFlags(argv);
     const repo = takeFlag(argv, "--repo");
     const id = takeFlag(argv, "--id");
     const title = argv.includes("--title") ? takeFlag(argv, "--title") : "";
@@ -399,7 +424,7 @@ function main(argv: string[]): number {
       const kind = trackerKind(repo);
       needAdapter(kind, "mark --body <file> --labels <list> --repo <repo> --id <id>");
       const ticket = readViaAdapter(repo, id, kind);
-      const rc = reportCheck(repo, id, ticket.title, ticket.labels, ticket.body);
+      const rc = reportCheck(repo, id, ticket.title, readyViaAdapter(repo, id, kind), ticket.body);
       if (rc !== 0) return rc;
       writeQueue(repo, id);
       console.log(`ticket-ready: ${id} queued for dispatch`);
@@ -430,7 +455,7 @@ function main(argv: string[]): number {
   const kind = trackerKind(repo);
   needAdapter(kind, "--body <file> --labels <list> [--title <title>] [--project <repo>]");
   const ticket = readViaAdapter(repo, id, kind);
-  return reportCheck(repo, id, ticket.title, ticket.labels, ticket.body);
+  return reportCheck(repo, id, ticket.title, readyViaAdapter(repo, id, kind), ticket.body);
 }
 
 if (import.meta.main) {

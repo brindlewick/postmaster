@@ -1296,6 +1296,20 @@ async function runCommands(): Promise<void> {
       });
     }
     console.log(`${tid}: label ${verb === "add" ? "added" : "removed"} ${name}`);
+  } else if (cmd === "has-label") {
+    if (args.length !== 2) dieP("usage: plane.sh has-label <IDENT-n> <label>");
+    const name = args[1]!;
+    const [, item] = await itemFor(cfg, args[0]!);
+    const pid = String(ref(item.project));
+    const labels = await labelsOf(cfg, pid);
+    const names: Record<string, string> = {};
+    for (const l of labels) names[l.id] = l.name;
+    // Exact membership: a label name may itself hold commas, so the
+    // comma-joined `labels:` line is display-only and never parsed back.
+    const has = (item.labels ?? []).some(
+      (l: unknown) => pyLower(names[String(ref(l))] ?? "") === pyLower(name),
+    );
+    console.log(has ? "present" : "absent");
   } else if (cmd === "read") {
     const rest = args.filter((a) => a !== "--body");
     if (rest.length !== 1 || args.length > 2) dieP("usage: plane.sh read <IDENT-n> [--body]");

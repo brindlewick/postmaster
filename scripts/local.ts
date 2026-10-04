@@ -489,6 +489,17 @@ function main(args: string[]): number {
     console.log(`#${number}: label ${verb === "add" ? "added" : "removed"} ${label}`);
     return 0;
   }
+  if (cmd === "has-label") {
+    if (rest.length !== 2) return usage("has-label <n> <label>");
+    const number = numberArg(rest[0]);
+    const label = utf8(rest[1], "label").trim();
+    needStore(store);
+    const meta = metaOrDie(store, number);
+    // Exact membership: a label name may itself hold commas, so the
+    // comma-joined `labels:` line is display-only and never parsed back.
+    console.log(meta.labels.some((l) => pyLower(l) === pyLower(label)) ? "present" : "absent");
+    return 0;
+  }
   if (cmd === "comment") {
     if (rest.length < 3) return usage("comment <n> <actor> <text>");
     const number = numberArg(rest[0]);

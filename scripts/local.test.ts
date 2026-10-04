@@ -680,6 +680,19 @@ describe("controls: labels on a ticket", () => {
     check(lt(repo, "label", n, "remove", "ready"), 0, "label removed ready");
   }, 30000);
 
+  test("has-label answers exact membership, and a comma in a name is one label", () => {
+    const created = lt(repo, "create", "Comma label", bodyPath);
+    const n = created.out.trim();
+    check(lt(repo, "has-label", n, "ready"), 0, "absent");
+    check(lt(repo, "label", n, "add", "blocked, ready"), 0, "label added blocked, ready");
+    expect(lt(repo, "read", n).out).toContain("labels: blocked, ready");
+    check(lt(repo, "has-label", n, "ready"), 0, "absent");
+    check(lt(repo, "has-label", n, "blocked, ready"), 0, "present");
+    check(lt(repo, "has-label", n, "BLOCKED, READY"), 0, "present");
+    check(lt(repo, "label", n, "add", "ready"), 0, "label added ready");
+    check(lt(repo, "has-label", n, "ready"), 0, "present");
+  }, 30000);
+
   test("an empty label and a bad verb are refused, nothing written", () => {
     const created = lt(repo, "create", "Unlabelled", bodyPath);
     const n = created.out.trim();

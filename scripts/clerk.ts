@@ -89,35 +89,35 @@ function trackerKind(repo: string): string {
   return requireScript("tracker-kind.sh", [repo], `tracker-kind.sh ${repo} failed`).trim();
 }
 
-function parseTicketRead(out: string): { title: string; labels: string[] } {
+function parseTicketRead(out: string): { title: string } {
   let title = "";
-  let labels: string[] = [];
   for (const raw of out.split("\n")) {
     const line = raw.replace(/\r$/u, "");
     if (line === "") break;
     const m = /^([A-Za-z-]+):[ \t]*(.*)$/u.exec(line);
     if (!m) continue;
     // ASCII: adapter header names are machine-written; folded once against ASCII literals.
-    const key = m[1]!.toLowerCase();
-    if (key === "title") title = m[2]!;
-    if (key === "labels")
-      labels = m[2]!
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
+    if (m[1]!.toLowerCase() === "title") title = m[2]!;
   }
-  return { title, labels };
+  return { title };
 }
 
+// The ready mark is asked of the adapter with has-label, never read off the
+// comma-joined `labels:` line, where one name can hold a comma and read back
+// as two. A read that worked but a membership that fails stops the clerk:
+// the unmark guard below must not silently skip.
 function readTicket(
   repo: string,
   id: string,
   kind: string,
-): { title: string; labels: string[] } | null {
+): { title: string; ready: boolean } | null {
   const base = kind === "plane" ? [] : [repo];
   const r = runScript(`${kind}.sh`, [...base, "read", id]);
   if (r.code !== 0) return null;
-  return parseTicketRead(r.out);
+  const h = runScript(`${kind}.sh`, [...base, "has-label", id, "ready"]);
+  if (h.code !== 0)
+    die(`the ${kind} adapter could not check the ready label on ${id} (${(h.out + h.err).trim()})`);
+  return { title: parseTicketRead(r.out).title, ready: h.out.trim() === "present" };
 }
 
 function displayId(kind: string, id: string): string {
@@ -192,11 +192,10 @@ function writeBrief(repo: string, id: string): Brief {
       `clerk: tracker kind '${kind}' has no adapter script; the brief cannot see the ticket's labels, so remove the ready label through the tracker's own tooling if the ticket carries one`,
     );
   }
-  const ticket = read ?? { title: "", labels: [] };
+  const ticket = read ?? { title: "", ready: false };
   const name = displayId(kind, id);
   const session = ticket.title ? `${name}, ${ticket.title}` : name;
-  // ASCII: folds label names for the ASCII literal "ready"; only ASCII-equal names match.
-  if (ticket.labels.some((l) => l.toLowerCase() === "ready")) {
+  if (ticket.ready) {
     requireScript(
       "ticket-ready.sh",
       ["unmark", repo, id],

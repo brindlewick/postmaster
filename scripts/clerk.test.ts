@@ -163,6 +163,26 @@ describe("brief", () => {
     expect(labelsLine).not.toContain("ready");
   });
 
+  test("brief leaves one label holding a comma alone: it is not the ready mark", () => {
+    const repo = localRepo();
+    const id = localTicket(repo, "Fix the list");
+    const labels = sh(join(import.meta.dir, "local.sh"), [
+      repo,
+      "label",
+      id,
+      "add",
+      "blocked, ready",
+    ]);
+    expect(labels.code).toBe(0);
+    const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
+    const cfg = stubConfig(cfgDir);
+    const r = sh(SELF, ["brief", repo, id], { POSTMASTER_CONFIG: cfg });
+    expect(r.code).toBe(0);
+    const read = sh(join(import.meta.dir, "local.sh"), [repo, "read", id]);
+    const labelsLine = read.out.split("\n").find((l) => l.startsWith("labels:")) ?? "";
+    expect(labelsLine).toBe("labels: blocked, ready");
+  });
+
   test("brief keeps an existing draft and proceeds for an unreadable ticket", () => {
     const repo = localRepo();
     const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));

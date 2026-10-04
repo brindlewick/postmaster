@@ -558,6 +558,20 @@ describe("labels and titles", () => {
     expect(r.out.split("\n")).toContain("labels: ready, blocked");
   }, 30000);
 
+  test("has-label answers exact membership, and a comma in a name is one label", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"), ["blocked, ready"]);
+    const absent = ghSh(["has-label", "7", "ready"]);
+    expect(absent.code).toBe(0);
+    expect(absent.out.trim()).toBe("absent");
+    const folded = ghSh(["has-label", "7", "BLOCKED, READY"]);
+    expect(folded.code).toBe(0);
+    expect(folded.out.trim()).toBe("present");
+    const present = ghSh(["has-label", "7", "blocked, ready"]);
+    expect(present.code).toBe(0);
+    expect(present.out.trim()).toBe("present");
+  }, 30000);
+
   test("title retitles the issue", () => {
     plainBoards();
     stored(7, join(tmp, "lf.md"));

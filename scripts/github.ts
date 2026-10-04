@@ -541,6 +541,18 @@ function main(): void {
     issueOf(OWNER, NAME, NWO, n);
     setLabel(NWO, n, verb === "add", name);
     console.log(`#${n}: label ${verb === "add" ? "added" : "removed"} ${name}`);
+  } else if (cmd === "has-label") {
+    if (args.length !== 3) dieGh("usage: github.sh <repo> has-label <n> <label>");
+    const n = numberArg(args[1] ?? "");
+    const name = args[2] ?? "";
+    const iss = issueOf(OWNER, NAME, NWO, n);
+    // Exact membership: a label name may itself hold commas, so the
+    // comma-joined `labels:` line is display-only and never parsed back.
+    console.log(
+      (iss.labels ?? []).some((l) => pyLower(l.name ?? "") === pyLower(name))
+        ? "present"
+        : "absent",
+    );
   } else if (cmd === "read") {
     const bodyOnly = args.slice(2).length === 1 && args[2] === "--body";
     if (args.length !== 2 && !bodyOnly) dieGh("usage: github.sh <repo> read <n> [--body]");
