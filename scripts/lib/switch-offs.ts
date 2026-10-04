@@ -153,14 +153,16 @@ function breakLen(text: string, i: number): number {
 
 /** The comments in source text, told apart from strings, template literals (with
  * `${}` scanned as code) and regex literals. A string ends at LF or CR, never
- * at U+2028 or U+2029, which ES2019 allows inside; an unterminated string
- * must not swallow the real comments on later lines. */
+ * at U+2028 or U+2029, which ES2019 allows inside; an unterminated quote is
+ * JSX text or invalid code, never a string, so the rest of its line is
+ * rescanned as code and swallows no directive on it or a later line. */
 export function scanComments(text: string): SwitchComment[] {
   const out: SwitchComment[] = [];
   const n = text.length;
   let i = 0;
   let line = 1;
   let last = "";
+  let noRegex = false;
   const parens: boolean[] = [];
   const frames: { tpl: boolean; interp: boolean; brace: number }[] = [
     { tpl: false, interp: false, brace: 0 },
@@ -203,6 +205,7 @@ export function scanComments(text: string): SwitchComment[] {
     if (b > 0) {
       line++;
       i += b;
+      noRegex = false;
       continue;
     }
     if (ch === " " || ch === "\t") {
@@ -239,6 +242,9 @@ export function scanComments(text: string): SwitchComment[] {
         i++;
         continue;
       }
+      const opener = i;
+      const resumeLine = line;
+      const resumeLast = last;
       i++;
       while (i < n && text[i] !== ch) {
         if (text[i] === "\n" || text[i] === "\r") break;
@@ -261,8 +267,21 @@ export function scanComments(text: string): SwitchComment[] {
         }
         i++;
       }
-      if (i < n && text[i] === ch) i++;
-      last = "value";
+      if (i < n && text[i] === ch) {
+        i++;
+        last = "value";
+        continue;
+      }
+      // No closer on this line: the quote was JSX text or invalid code, so
+      // rewind past the opener and rescan the rest of the line as code. No
+      // regex opens on the rescan, since a `/` in JSX text would take the
+      // directive's own first slash as its closer. Anything the rescan
+      // lists errs toward asking, and a genuinely unterminated string in
+      // real code fails the gate loudly.
+      i = opener + 1;
+      line = resumeLine;
+      last = resumeLast;
+      noRegex = true;
       continue;
     }
     if (ch === "`") {
@@ -284,7 +303,7 @@ export function scanComments(text: string): SwitchComment[] {
         last = "value";
         continue;
       }
-      if (REGEX_AFTER.has(last)) {
+      if (REGEX_AFTER.has(last) && !noRegex) {
         i++;
         let cls = false;
         let closed = false;
@@ -1046,7 +1065,7 @@ function approvals(
     }
     const words = pyWords(rec.detail);
     const decision = words[0] === "approved" ? "approved" : words[0] === "refused" ? "refused" : "";
-    if (decision === "" || words.length < 2) {
+    if (decision === "" || words.length < 3) {
       warn(`ignoring a malformed switch-off line in ${actionPath}`);
       continue;
     }

@@ -810,6 +810,19 @@ describe("negative controls: nothing is written", () => {
     expect(r.err.includes("carries the decision")).toBe(true);
   }, 30000);
 
+  test("a switch-off with the decision and entry but no user words", () => {
+    const before = lines();
+    const r = logAction([
+      "coachman",
+      "switch-off",
+      "comment:0123456789abcdef",
+      "approved bunfig.toml",
+    ]);
+    expect(r.code).toBe(1);
+    expect(lines()).toBe(before);
+    expect(r.err.includes("carries the decision")).toBe(true);
+  }, 30000);
+
   test("a tool-fault with no fix", () => {
     const before = lines();
     const r = logAction(["coachman", "tool-fault", "scripts/launch.ts", ...FIELDS.slice(0, 8)]);

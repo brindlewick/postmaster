@@ -529,11 +529,15 @@ describe("switch-off detection", () => {
       "this line is not JSON\n" +
         line({ ...valid, run: "OTHER-9" }) +
         line({ ...valid, actor: "lane:mimo" }) +
-        line({ ...valid, detail: "maybe yes" }),
+        line({ ...valid, detail: "maybe yes" }) +
+        line({ ...valid, detail: "approved scripts/held.ts:1" }),
     );
     const ledgerPath = join(repo, ".postmaster", "runs", "ledger.jsonl");
     mkdirSync(join(repo, ".postmaster", "runs"), { recursive: true });
-    writeFileSync(ledgerPath, line({ ...valid, run: "OTHER-9" }));
+    writeFileSync(
+      ledgerPath,
+      line({ ...valid, run: "OTHER-9" }) + line({ ...valid, detail: "approved scripts/held.ts:1" }),
+    );
     const held = run(
       SELF,
       [
@@ -913,6 +917,30 @@ describe("switch-off detection", () => {
     const result = check();
     expect(result.code).toBe(2);
     expect(result.out).toContain("scripts/q.tsx:1 eslint-disable-line no-debugger");
+  });
+
+  test("an unclosed quote in JSX text hides no trailing directive", () => {
+    freshRepo("jsx-unclosed");
+    write(
+      "scripts/uq.tsx",
+      "<p>Note: 'hello</p>; debugger; // eslint-disable-line no-debugger -- jsx unclosed quote\n",
+    );
+    commit("add jsx unclosed quote case");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/uq.tsx:1 eslint-disable-line no-debugger");
+  });
+
+  test("an unclosed quote before a tag close hides no trailing directive", () => {
+    freshRepo("jsx-unclosed-slash");
+    write(
+      "scripts/us.tsx",
+      'const el = <p>Tip: "/</p>; debugger; // eslint-disable-line no-debugger -- rescan slash\n',
+    );
+    commit("add jsx unclosed slash case");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/us.tsx:1 eslint-disable-line no-debugger");
   });
 
   test("a regex after a condition hides no trailing directive", () => {

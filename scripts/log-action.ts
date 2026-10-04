@@ -278,7 +278,7 @@ function logAction(
       );
       return 1;
     }
-    if (words.length < 2) {
+    if (words.length < 3) {
       console.error(
         "log-action: a switch-off's detail carries the decision, then the entry and the user's words",
       );
