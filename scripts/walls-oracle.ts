@@ -538,7 +538,11 @@ export function liveLock(dispatch: string, leg: string): void {
       .split(/[ \t\n]+/u)[19]!;
   } catch {
     const r = sh("ps", ["-o", "lstart=", "-p", String(process.pid)], { ...process.env });
-    start = r.out.trim().split(/[ \t\n]+/u).slice(0, 5).join(" ");
+    start = r.out
+      .trim()
+      .split(/[ \t\n]+/u)
+      .slice(0, 5)
+      .join(" ");
   }
   writeFileSync(join(dispatch, `.leg-${leg}-active`), `${process.pid} ${start}\n`);
 }
