@@ -11,6 +11,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -19,7 +20,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runControls } from "./host-self-test.ts";
-import { processState } from "./lib/processes.ts";
+import { processStart, processState } from "./lib/processes.ts";
 
 const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "preamble", count: 6 },
@@ -366,3 +367,77 @@ test("a background runner that dies before reading its spec is rejected", async 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// The boot id as host.ts reads it: the Linux file, else macOS kern.boottime
+// under LC_ALL=C, so the test's record matches on either system.
+function currentBootId(): string {
+  try {
+    return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+  } catch {
+    const booted = spawnSync("sysctl", ["-n", "kern.boottime"], {
+      encoding: "utf8",
+      env: { ...process.env, LC_ALL: "C" },
+    });
+    return (booted.stdout ?? "").trim().split(/\s+/u).join(" ");
+  }
+}
+
+test("a member with a five-word start matches its process, and close refuses while it lives", async () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "host-member-start-")));
+  const state = join(dir, "state");
+  mkdirSync(join(state, "launches"), { recursive: true });
+  const priorProcRoot = process.env.POSTMASTER_PROC_ROOT;
+  const sleep = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+  sleep.unref();
+  try {
+    // Forced: the registry holds ps lstart's five words, not a tick count.
+    process.env.POSTMASTER_PROC_ROOT = join(dir, "missing-proc");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const memberPid = sleep.pid ?? 0;
+    const start = processStart(memberPid);
+    if (!start) throw new Error("no start for the member sleep");
+    expect(start.split(" ").length).toBe(5);
+    expect(processState(memberPid)).toBe("live");
+    // The group is gone: only the member line can match this record.
+    const reaped = spawn("sh", ["-c", "exit 0"], { stdio: "ignore" });
+    const groupPid = reaped.pid ?? 0;
+    await new Promise<void>((resolve) => reaped.once("exit", () => resolve()));
+    expect(processState(groupPid)).toBe("absent");
+    writeFileSync(
+      join(state, "launches", String(groupPid)),
+      `${dir}\nmember-probe\nmember ${memberPid} ${start}\nboot ${currentBootId()}\n`,
+    );
+    const env = {
+      ...process.env,
+      POSTMASTER_HOST: "none",
+      POSTMASTER_HOST_STATE: state,
+      POSTMASTER_HOST_STOP_WAIT: "5",
+      POSTMASTER_HOST_CLOSE_WAIT: "1",
+      POSTMASTER_HOST_FIXTURE: dir,
+      POSTMASTER_PROC_ROOT: join(dir, "missing-proc"),
+    };
+    const hostSh = join(import.meta.dir, "host.sh");
+    const closed = spawnSync(hostSh, ["close", dir], { encoding: "utf8", env });
+    expect(closed.status).toBe(2);
+    expect(`${closed.stdout ?? ""}${closed.stderr ?? ""}`).toContain("still running");
+    const stopped = spawnSync(hostSh, ["stop", dir], { encoding: "utf8", env });
+    expect(stopped.status).toBe(0);
+    expect(`${stopped.stdout ?? ""}${stopped.stderr ?? ""}`).not.toContain(
+      "no launch is running",
+    );
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline && processState(memberPid) === "live") {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    expect(processState(memberPid)).not.toBe("live");
+    const after = spawnSync(hostSh, ["close", dir], { encoding: "utf8", env });
+    expect(after.status).toBe(0);
+  } finally {
+    try {
+      sleep.kill("SIGKILL");
+    } catch {}
+    if (priorProcRoot === undefined) delete process.env.POSTMASTER_PROC_ROOT;
+    else process.env.POSTMASTER_PROC_ROOT = priorProcRoot;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 60000);
