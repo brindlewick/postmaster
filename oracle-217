@@ -1,14 +1,12 @@
-// Blind acceptance oracle for #217 (postmaster runs on macOS).
+#!/usr/bin/env bun
+// Oracle for #217: blind acceptance tests at the ticket's interface, written before any
+// lane's diff was read. Run from the repository root: ./oracle-217
 //
-// Written before any lane's diff, from the ticket's ### Checks. Each check
-// exercises the ticket's own interface on Linux; forced checks set
+// Each check exercises the ticket's own interface on Linux; forced checks set
 // POSTMASTER_PROC_ROOT to a missing directory (D3), so postmaster takes its
 // Mac path while Linux tools answer. Checks that need a Mac (C16, C17), a
 // Herdr/tmux stub, or a live harness (C4, C8, the dying half of C3) are not
-// here: the lanes' tests cover those, and the checkpoint card says so.
-//
-// Run: bun test scripts/macos-oracle.test.ts (the gate runs it), or
-// bun scripts/macos-oracle.ts to run every check directly.
+// here: the shipped tests cover those, and the checkpoint card says so.
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -24,7 +22,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export const repoRoot = join(import.meta.dir, "..");
+export const repoRoot = import.meta.dir;
 const hostSh = join(repoRoot, "scripts", "host.sh");
 const viewSh = join(repoRoot, "scripts", "view-stream.sh");
 const fixtureSh = join(repoRoot, "scripts", "fixture.sh");
