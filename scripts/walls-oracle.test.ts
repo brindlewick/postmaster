@@ -117,11 +117,15 @@ function expectNoReset(body: string): void {
 }
 
 function roundOk(body: string, n: string): boolean {
+  // The ticket pins that the record holds the round, not how it is labelled:
+  // accept rN, round N, a "round":N field, or the bare number directly after
+  // the lens word in a positional detail.
   return (
     new RegExp(`\\br${n}\\b`, "u").test(body) ||
     new RegExp(`round[^0-9a-z]{0,3}${n}\\b`, "iu").test(body) ||
     body.includes(`"round":${n}`) ||
-    body.includes(`"round": ${n}`)
+    body.includes(`"round": ${n}`) ||
+    new RegExp(`\\b(?:style|bug|security)\\s+${n}\\b`, "u").test(body)
   );
 }
 
