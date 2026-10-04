@@ -171,4 +171,23 @@ describe("portable process state", () => {
     }
     expect(processProbeViolations('readFileSync("/proc/self/cmdline")')).toEqual([]);
   });
+
+  test("the ps queries use sess, which macOS accepts, never sid", () => {
+    const source = readFileSync(join(SCRIPTS, "lib", "processes.ts"), "utf8");
+    expect(source).toContain("sess=");
+    expect(source).not.toContain("sid=");
+  });
+
+  test("an existing proc root with no pids falls through to ps", () => {
+    const root = mkdtempSync(join(tmpdir(), "process-empty-root-"));
+    try {
+      withProcRoot(root, () => {
+        const table = processTable();
+        expect(table.size).toBeGreaterThan(0);
+        expect(table.get(process.pid)?.state).toBe("live");
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

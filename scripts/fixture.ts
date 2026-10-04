@@ -445,11 +445,14 @@ export function score(dispatch: string, repo: string): { code: number; out: stri
   return { code: scored.code, out: `${platformLine()}\n${scored.out}` };
 }
 
+export function gitVersionNumber(output: string): string {
+  // ASCII: the version digits are tool-printed ASCII; a vendor suffix is not the number.
+  return /\b([0-9]+(?:\.[0-9]+)+)/u.exec(output.trim())?.[1] ?? output.trim();
+}
+
 function platformLine(): string {
   const git = run("git", ["--version"]);
-  // ASCII: the version digits are tool-printed ASCII; a vendor suffix is not the number.
-  const version = /\b([0-9]+(?:\.[0-9]+)+)/u.exec(git.out.trim())?.[1] ?? git.out.trim();
-  return `platform: ${osType()} ${release()} ${machine()}, bun ${Bun.version}, git ${version}`;
+  return `platform: ${osType()} ${release()} ${machine()}, bun ${Bun.version}, git ${gitVersionNumber(git.out)}`;
 }
 
 function makeTmpDir(): string {

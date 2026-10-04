@@ -27,6 +27,7 @@ import {
   checkWaybillEfforts,
   FIXTURE_MARKER,
   HIDDEN_RE,
+  gitVersionNumber,
   hidden,
   laneScores,
   legsOf,
@@ -876,12 +877,15 @@ describe("score: a recorded run that meets every check scores clean", () => {
 
   test("score's platform line names the OS, release, architecture and tool versions", () => {
     const result = bgResults.get(`clean-${first}`);
-    const git = run("git", ["--version"])
-      .out.trim()
-      .replace(/^git version +/u, "");
+    const git = gitVersionNumber(run("git", ["--version"]).out);
     expect(result?.out.split("\n", 1)[0]).toBe(
       `platform: ${osType()} ${release()} ${machine()}, bun ${Bun.version}, git ${git}`,
     );
+  });
+
+  test("the platform line's git number drops a vendor suffix", () => {
+    expect(gitVersionNumber("git version 2.43.0")).toBe("2.43.0");
+    expect(gitVersionNumber("git version 2.40.1 (Apple Git-123)")).toBe("2.40.1");
   });
 
   test("a failing record keeps the platform line first", () => {

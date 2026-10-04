@@ -97,9 +97,14 @@ function parseLinuxProcess(pid: number, stat: ProcStat): ProcessInfo | null {
 }
 
 function psProcessInfo(pid: number): ProcessInfo | null {
-  const result = run("ps", ["-o", "pid=,ppid=,pgid=,sid=,stat=,lstart=,comm=", "-p", String(pid)], {
-    env: { LC_ALL: "C" },
-  });
+  // sess, not sid: macOS rejects sid, and Linux accepts both.
+  const result = run(
+    "ps",
+    ["-o", "pid=,ppid=,pgid=,sess=,stat=,lstart=,comm=", "-p", String(pid)],
+    {
+      env: { LC_ALL: "C" },
+    },
+  );
   const fields = result.out.trim().split(/[ \t]+/u);
   if (fields.length < 11 || !fields.slice(0, 4).every((field) => /^[0-9]+$/u.test(field)))
     return null;
@@ -131,12 +136,14 @@ export function processTable(): Map<number, ProcessInfo> {
       const info = stat ? parseLinuxProcess(pid, stat) : null;
       if (info) table.set(pid, info);
     }
-    return table;
+    // A live proc root always lists pids; none means the root is not a procfs.
+    if (table.size > 0) return table;
   } catch {
     // A missing or non-proc root forces the portable ps path used on macOS.
   }
 
-  const result = run("ps", ["-A", "-o", "pid=,ppid=,pgid=,sid=,stat=,lstart=,comm="], {
+  // sess, not sid: macOS rejects sid, and Linux accepts both.
+  const result = run("ps", ["-A", "-o", "pid=,ppid=,pgid=,sess=,stat=,lstart=,comm="], {
     env: { LC_ALL: "C" },
   });
   for (const line of result.out.split(/\r?\n/u)) {
