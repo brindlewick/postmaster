@@ -151,7 +151,7 @@ property or the function to extract, and the reason. The second reader's rows ar
   The count says a check could have caught a finding, not that it would have been written. The
   [proposed trials](../../../wiki/concepts/functional-core-and-verification.md) include one that
   measures it.
-- **Few runs, clustered findings:** four runs, two of them in review; 20 of the 84 sit in one family,
+- **Few runs, clustered findings:** four runs, two of them in review; 18 of the 84 sit in one family,
   the shell-command classifier of #202.
 
 ## Deviations
