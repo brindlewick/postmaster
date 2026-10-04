@@ -143,7 +143,9 @@ export function lostWalls(dispatch: string): Array<{ lane: string; details: stri
     if (!f.endsWith(".wall-lost")) continue;
     let lines: string[];
     try {
-      lines = readFileSync(join(dispatch, "logs", f), "utf8").split("\n").filter((l) => l !== "");
+      lines = readFileSync(join(dispatch, "logs", f), "utf8")
+        .split("\n")
+        .filter((l) => l !== "");
     } catch {
       continue;
     }
