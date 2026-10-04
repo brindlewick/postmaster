@@ -54,7 +54,7 @@ function keependsLines(text: string): string[] {
 // into run-log.md, and the ship card's ## Cost block rewritten around it.
 function closeUsage(d: string): number {
   const here = scriptsDir(import.meta);
-  const s = run(join(here, "run"), ["usage", "sum", d]);
+  const s = run(process.execPath, [join(here, "usage.ts"), "sum", d]);
   let logStatus = 0;
   let summary: string;
   if (s.code === 0) {

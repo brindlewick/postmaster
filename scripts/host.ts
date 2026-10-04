@@ -125,6 +125,12 @@ import { parseTomlText } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
 import {
+  processCommandLine,
+  processStart,
+  processState,
+  processTable as sharedProcessTable,
+} from "./lib/processes.ts";
+import {
   BOUND_L,
   BOUND_R,
   END_OF_STRING,
@@ -137,7 +143,6 @@ import {
 } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
-const SELF = join(HERE, "run");
 const SOURCE = "custom:postmaster";
 const META = "custom:postmaster-meta";
 let STATE = process.env.POSTMASTER_HOST_STATE ?? join(homedir(), ".postmaster", "host");
@@ -524,60 +529,14 @@ function bootTime(): number | null {
   const seconds = Number(words[at + 2]);
   return Number.isInteger(seconds) ? seconds : null;
 }
-function procStat(pid: number): { name: string; fields: string[] } | null {
-  try {
-    const raw = readFileSync(`/proc/${pid}/stat`, "utf8");
-    const pos = raw.lastIndexOf(")");
-    return {
-      name: raw.slice(raw.indexOf("(") + 1, pos),
-      fields: raw
-        .slice(pos + 1)
-        .trim()
-        // ASCII: /proc/<pid>/stat past the name is kernel-emitted ASCII numerics.
-        .split(/\s+/u),
-    };
-  } catch {
-    return null;
-  }
-}
 function startOf(pid: number): string {
-  const p = procStat(pid);
-  if (p) return p.fields[0] !== "Z" ? (p.fields[19] ?? "") : "";
-  const fields = run("ps", ["-o", "stat=,lstart=", "-p", String(pid)], {
-    env: { LC_ALL: "C" },
-  })
-    .out.trim()
-    // ASCII: ps -o stat/lstart is tool-emitted ASCII; the date holds single spaces.
-    .split(/\s+/u);
-  return fields.length >= 6 && !fields[0]!.startsWith("Z") ? fields.slice(1, 6).join(" ") : "";
+  return processStart(pid) ?? "";
 }
 function processes(): Map<number, ProcessInfo> {
   const table = new Map<number, ProcessInfo>();
-  try {
-    for (const entry of readdirSync("/proc")) {
-      if (!/^[0-9]+$/u.test(entry)) continue;
-      const stat = procStat(Number(entry));
-      if (stat && stat.fields[0] !== "Z" && stat.fields[2] && stat.fields[19])
-        table.set(Number(entry), { group: Number(stat.fields[2]), start: stat.fields[19]! });
-    }
-    return table;
-  } catch {}
-  const output = run("ps", ["-A", "-o", "pid=,pgid=,stat=,lstart="], {
-    env: { LC_ALL: "C" },
-  }).out;
-  for (const line of output.split(/\r?\n/u)) {
-    // ASCII: ps -A -o pid/pgid/stat/lstart is tool-emitted ASCII.
-    const fields = line.trim().split(/\s+/u);
-    if (
-      fields.length >= 8 &&
-      /^[0-9]+$/u.test(fields[0]!) &&
-      /^[0-9]+$/u.test(fields[1]!) &&
-      !fields[2]!.startsWith("Z")
-    )
-      table.set(Number(fields[0]), {
-        group: Number(fields[1]),
-        start: fields.slice(3, 8).join(" "),
-      });
+  for (const [pid, info] of sharedProcessTable()) {
+    if (info.state === "live" && info.start)
+      table.set(pid, { group: info.group, start: info.start });
   }
   return table;
 }
@@ -645,7 +604,9 @@ function loadRecord(path: string): Registry | null {
       if (key === "start") rec.start = value;
       else if (key === "boot") rec.boot = value;
       else if (key === "member") {
-        const [pid, start] = value.split(" ", 2);
+        const separator = value.indexOf(" ");
+        const pid = separator < 0 ? value : value.slice(0, separator);
+        const start = separator < 0 ? "" : value.slice(separator + 1);
         if (/^[0-9]+$/u.test(pid ?? "") && start) rec.members.push([Number(pid), start]);
       }
     }
@@ -1636,13 +1597,7 @@ function readable(path: string): boolean {
 }
 
 function processAlive(pid: number): boolean {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as { code?: string }).code !== "ESRCH";
-  }
+  return pid > 0 && processState(pid) === "live";
 }
 
 const MEMORY_MAX_PATTERN = new RegExp("^[1-9][0-9]*(?:K|M|G|T)" + END_OF_STRING, "u");
@@ -1982,7 +1937,7 @@ function appendFailure(err: string, marker: string, message: string): never {
   die(message);
 }
 function startDetached(args: string[], env?: Record<string, string | undefined>) {
-  const child = spawn(SELF, ["host", ...args], {
+  const child = spawn(process.execPath, [join(HERE, "host.ts"), ...args], {
     detached: true,
     stdio: "ignore",
     env: env ?? process.env,
@@ -1992,7 +1947,7 @@ function startDetached(args: string[], env?: Record<string, string | undefined>)
 }
 async function watch(pid: number, marker: string): Promise<void> {
   while (true) {
-    if (!procStat(pid) || procStat(pid)?.fields[0] === "Z") break;
+    if (processState(pid) !== "live") break;
     await Bun.sleep(500);
   }
   touch(marker);
@@ -2065,6 +2020,8 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
     touch(spec.marker);
     throw hostError("", 1);
   }
+  if (paneEnv.POSTMASTER_PROC_ROOT === undefined) delete process.env.POSTMASTER_PROC_ROOT;
+  else process.env.POSTMASTER_PROC_ROOT = paneEnv.POSTMASTER_PROC_ROOT;
   // Strip caller identity at the one boundary every run launch crosses. The Claude list is
   // intentionally exact plus session-identity families: other CLAUDE_CODE_* names configure
   // the harness and must reach it. Add a new identity name or family here and to the
@@ -2248,8 +2205,16 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
     if (spec.out)
       followed = new Promise((resolveFollow) => {
         const follower = spawn(
-          join(HERE, "run"),
-          ["view-stream", "--follow", spec.out, "--pid", String(pid), "--from", String(from)],
+          process.execPath,
+          [
+            join(HERE, "view-stream.ts"),
+            "--follow",
+            spec.out,
+            "--pid",
+            String(pid),
+            "--from",
+            String(from),
+          ],
           { stdio: "inherit" },
         );
         follower.once("error", () => resolveFollow(null));
@@ -2537,7 +2502,7 @@ async function runCmd(args: string[]): Promise<void> {
       startFinishWatcher("herdr", placed.space, placed.tab, placed.pane, cwd, marker);
       run("mkfifo", [join(specDir, "env")]);
       startDetached(["_env-write", join(specDir, "env")]);
-      const line = ` cd -- ${quote(cwd)} && ${quote(SELF)} host _run herdr ${quote(specDir)}`;
+      const line = ` cd -- ${quote(cwd)} && ${quote(process.execPath)} ${quote(join(HERE, "host.ts"))} _run herdr ${quote(specDir)}`;
       if (herdr(["pane", "run", placed.pane, line]).code === 0)
         where = `host=herdr space=${placed.space} tab=${placed.tab} pane=${placed.pane}`;
     }
@@ -2549,8 +2514,8 @@ async function runCmd(args: string[]): Promise<void> {
     const argsForPane = [
       "bash",
       "-c",
-      ['"$0" host _run tmux "$1"; exec "', String.fromCharCode(36), '{SHELL:-/bin/sh}"'].join(""),
-      SELF,
+      `${quote(process.execPath)} "$0" _run tmux "$1"; exec "${String.fromCharCode(36)}{SHELL:-/bin/sh}"`,
+      join(HERE, "host.ts"),
       specDir,
     ];
     const target = `=${session}`;
@@ -2635,10 +2600,10 @@ async function runCmd(args: string[]): Promise<void> {
     where = "host=none";
   }
   for (let i = 0; i < 120 && existsSync(specDir); i++) {
-    if (runnerPid && !procStat(runnerPid)) break;
+    if (runnerPid && processState(runnerPid) !== "live") break;
     await Bun.sleep(250);
   }
-  if (existsSync(specDir) && runnerPid && !procStat(runnerPid)) {
+  if (existsSync(specDir) && runnerPid && processState(runnerPid) !== "live") {
     dropSpec(specDir);
     appendFailure(err, marker, `'${launchName}' did not start in the background`);
   }
@@ -2659,63 +2624,19 @@ function pidSize(path: string): number {
 type ProcRow = { ppid: number; group: number; start: string; zombie: boolean; name: string };
 function processTable(): Map<number, ProcRow> {
   const rows = new Map<number, ProcRow>();
-  try {
-    for (const entry of readdirSync("/proc")) {
-      if (!/^[0-9]+$/u.test(entry)) continue;
-      try {
-        const raw = readFileSync(`/proc/${entry}/stat`, "utf8");
-        const close = raw.lastIndexOf(")");
-        const name = raw.slice(raw.indexOf("(") + 1, close);
-        const fields = raw
-          .slice(close + 1)
-          .trim()
-          // ASCII: /proc/<pid>/stat past the name is kernel-emitted ASCII numerics.
-          .split(/\s+/u);
-        rows.set(Number(entry), {
-          ppid: Number(fields[1]),
-          group: Number(fields[2]),
-          start: fields[19] ?? "",
-          zombie: fields[0] === "Z",
-          name,
-        });
-      } catch {}
-    }
-    return rows;
-  } catch {}
-  const output = run("ps", ["-A", "-o", "pid=,ppid=,pgid=,stat=,lstart=,comm="], {
-    env: { LC_ALL: "C" },
-  }).out;
-  for (const line of output.split(/\r?\n/u)) {
-    // ASCII: ps -A -o ... is tool-emitted ASCII; comm may hold spaces, hence the limit.
-    const fields = line.trim().split(/\s+/u, 10);
-    if (
-      fields.length !== 10 ||
-      !/^[0-9]+$/u.test(fields[0]!) ||
-      !/^[0-9]+$/u.test(fields[1]!) ||
-      !/^[0-9]+$/u.test(fields[2]!)
-    )
-      continue;
-    rows.set(Number(fields[0]), {
-      ppid: Number(fields[1]),
-      group: Number(fields[2]),
-      start: fields.slice(4, 9).join(" "),
-      zombie: fields[3]!.startsWith("Z"),
-      name: fields[9]!,
+  for (const [pid, info] of sharedProcessTable()) {
+    rows.set(pid, {
+      ppid: info.parent,
+      group: info.group,
+      start: info.start,
+      zombie: info.state === "zombie",
+      name: info.name,
     });
   }
   return rows;
 }
 function commandLine(pid: number): string {
-  try {
-    return readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/gu, " ").trim();
-  } catch {
-    // Main falls back to ps only where there is no /proc at all.
-    try {
-      statSync("/proc/self");
-      return "";
-    } catch {}
-    return run("ps", ["-o", "args=", "-p", String(pid)], { env: { LC_ALL: "C" } }).out.trim();
-  }
+  return processCommandLine(pid);
 }
 function protectedProcess(pid: number, name: string): string {
   // ASCII: argv words are NUL-separated and the joiner spaces them;
@@ -2999,7 +2920,7 @@ function herdrReport(pid: number, name: string): Promise<void> {
     `pgid=${pid}`,
   ]);
   return (async () => {
-    while (procStat(pid) && procStat(pid)?.fields[0] !== "Z") await Bun.sleep(250);
+    while (processState(pid) === "live") await Bun.sleep(250);
     herdr(["pane", "release-agent", pane, "--source", SOURCE, "--agent", "headless"]);
     herdr([
       "pane",
@@ -3338,44 +3259,13 @@ function legNumber(text: string): number {
   if (n <= 0) die("leg number must be positive");
   return n;
 }
-// A process's start time in the lock's owner format, or null when it has none: /proc's
-// starttime past the command name, else ps lstart, skipping zombies both ways.
+// A process's start time in the lock's owner format, or null when it has none.
 function legStartOf(pid: number): string | null {
-  try {
-    if (statSync("/proc/self").isDirectory()) {
-      let rest: string[];
-      try {
-        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-        rest = pyWords(stat.slice(stat.lastIndexOf(")") + 1));
-      } catch {
-        return null;
-      }
-      return rest[0] !== "Z" && rest.length > 19 ? (rest[19] ?? null) : null;
-    }
-  } catch {
-    // No /proc/self: fall through to ps.
-  }
-  const out = run("ps", ["-o", "stat=,lstart=", "-p", String(pid)], { env: { LC_ALL: "C" } }).out;
-  const fields = pyWords(out);
-  return fields.length >= 6 && !fields[0]!.startsWith("Z") ? fields.slice(1, 6).join(" ") : null;
+  return processStart(pid);
 }
 // This process's start time, in the lock's owner format.
 function legSelfStart(): string | null {
-  let readable = false;
-  try {
-    accessSync(`/proc/${process.pid}/stat`, constants.R_OK);
-    readable = true;
-  } catch {}
-  if (readable) {
-    try {
-      const stat = readFileSync(`/proc/${process.pid}/stat`, "utf8");
-      const fields = pyWords(stat.slice(stat.lastIndexOf(")") + 1));
-      if (fields.length >= 20 && fields[19]) return fields[19];
-    } catch {}
-    return null;
-  }
-  const start = pyWords(run("ps", ["-o", "lstart=", "-p", String(process.pid)]).out).join(" ");
-  return start === "" ? null : start;
+  return processStart(process.pid);
 }
 // End a newline-less tail line, if the file has one: a record write torn by a kill leaves a
 // tail with no line terminator, and the next append would fuse onto it and stay corrupt.
@@ -3421,12 +3311,7 @@ function legMutexOwnerDead(mutexPath: string): boolean {
   }
   const pid = Number(text.trim());
   if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException)?.code === "ESRCH";
-  }
+  return processState(pid) !== "live";
 }
 type MutexTake = { status: "taken" } | { status: "busy" } | { status: "error"; error: unknown };
 // The steal races a fresh holder: the liveness verdict names a pid, but the
@@ -4402,8 +4287,8 @@ async function legStart(
   if (append) runargs.push("--append");
   runargs.push(
     "--",
-    SELF,
-    "host",
+    process.execPath,
+    join(HERE, "host.ts"),
     "_leg_exec",
     d,
     wt,
