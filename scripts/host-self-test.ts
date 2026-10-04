@@ -844,6 +844,8 @@ async function makeHarness(
     "ps",
     "sysctl",
     "getconf",
+    "python3",
+    "setsid",
     "chmod",
     "ln",
     "cp",
@@ -1532,13 +1534,14 @@ export async function runControls(): Promise<number> {
       [
         "#!/usr/bin/env bash",
         "trap 'echo term >> \"$TREE/term\"; exit 0' TERM",
+        // Record the escaped sleep's pid, not the background shell that starts setsid.
         // A session of its own: setsid(1) where it exists, else python's setsid, since
-        // macOS ships no setsid binary. Either way $! is the escapee's pid.
+        // macOS ships no setsid binary.
         "if command -v setsid >/dev/null 2>&1; then",
-        '  setsid sleep 120 & echo $! > "$TREE/escapee.pid"',
+        "  setsid sh -c 'echo $$ > \"$TREE/escapee.pid\"; exec sleep 120'",
         "else",
-        '  python3 -c \'import os, sys; os.setsid(); os.execvp("sleep", ["sleep", "120"])\' & echo $! > "$TREE/escapee.pid"',
-        "fi",
+        '  python3 -c \'import os; os.setsid(); os.execlp("sh", "sh", "-c", "echo $$ > \\"$TREE/escapee.pid\\"; exec sleep 120")\'',
+        "fi &",
         'sh -c \'trap "" TERM; while :; do sleep 1; done\' & echo $! > "$TREE/deaf.pid"',
         "sleep 120 & wait",
         "",
@@ -1572,9 +1575,15 @@ export async function runControls(): Promise<number> {
     const escapee = readFileSync(join(root, "tree/escapee.pid"), "utf8").trim();
     const deaf = readFileSync(join(root, "tree/deaf.pid"), "utf8").trim();
     // Both must be running as the stop begins: without this the controls below would
-    // pass on a machine where neither ever started.
-    const escapeeRan = alive(escapee);
-    const deafRan = alive(deaf);
+    // pass on a machine where neither ever started. Retry: the session leader and
+    // the deaf child may need a moment after their pid files land.
+    let escapeeRan = false;
+    let deafRan = false;
+    for (let i = 0; i < 50 && !(escapeeRan && deafRan); i++) {
+      escapeeRan = escapeeRan || alive(escapee);
+      deafRan = deafRan || alive(deaf);
+      if (!(escapeeRan && deafRan)) await sleep(100);
+    }
     const ranBeforeStop = escapeeRan && deafRan;
     const outsider = spawn("sleep", ["60"], { cwd: sol, detached: true, stdio: "ignore" });
     outsider.unref();
