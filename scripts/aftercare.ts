@@ -13,7 +13,7 @@
 // in place and named while the rest go on. The closing steps run in this order once every run
 // folder is gone: the run-log line, the ticket's state, the comment, stage done, release.
 //
-//   exit 0  done, or a dry run whose plan meets no stop
+//   exit 0  done, or a dry run whose plan meets no stop it can tell
 //   exit 1  a fault in the call: bad arguments, a run this command does not serve, records
 //           that cannot be read, a log line that cannot be written, a save that cannot be made
 //   exit 2  not ready, nothing changed
@@ -1597,7 +1597,7 @@ function mainFlow(args: Args): Result {
           ? `tracker '${kind}' has no adapter: the postmaster sets the ticket's state and comment itself`
           : `the tracker kind cannot be told: ${tail(kindResult)}`;
       if (kindResult.code !== 0) {
-        // The dry run ends with the real run's exit status: a stop here stops there too.
+        // The dry run exits as the real run would where it can tell: a stop here stops there too.
         if (dryRun) {
           steps.push({ name: "ticket-state", status: "failed", detail: why });
           pendingClosing(2);
@@ -1890,6 +1890,8 @@ function printPlain(result: Result): void {
     if (folder.flagged && folder.result !== "already removed" && folder.result !== "already gone")
       console.log(`flagged folder: ${folder.path} — ${folder.why ?? ""}`);
   console.log(`outcome: ${result.outcome}`);
+  if (result.dryRun)
+    console.log("note: the real run may still stop where the dry run could not tell");
   if (result.next !== null) console.log(`next: ${result.next}`);
 }
 

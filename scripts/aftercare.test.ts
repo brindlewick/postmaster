@@ -346,6 +346,18 @@ describe("aftercare on a landed run record", () => {
     expect(snapshot(r2)).toBe(before2);
   }, 120_000);
 
+  test("the dry run says plainly the real run may still stop; the real run says no such thing", () => {
+    const r = makeR();
+    const dry = aftercare(r, ["--dry-run", ...WORDS]);
+    expect(dry.code).toBe(0);
+    expect(dry.out).toContain("the real run may still stop where the dry run could not tell");
+    // control: the real run carries no such caveat
+    const r2 = makeR();
+    const real = aftercare(r2, WORDS);
+    expect(real.code).toBe(0);
+    expect(real.out).not.toContain("may still stop");
+  }, 120_000);
+
   test("a folder whose work no branch holds is flagged; the same file on a branch's content is not", () => {
     const r = makeR();
     writeFileSync(join(r.repo, ".worktrees/7-mimo/src/a.ts"), "export const a = 9;\n");
