@@ -764,7 +764,7 @@ function logAction(
 // --- the preview server ---------------------------------------------------------------------
 
 interface Preview {
-  status: "none" | "would" | "stopped" | "already" | "left";
+  status: "none" | "would" | "stopped" | "already" | "left" | "noted";
   detail: string;
   path: string | null;
   next: string;
@@ -802,11 +802,13 @@ function stopPreview(dispatch: string, dryRun: boolean): Preview {
   const rec = launchRecord(pid);
   if (rec === null) {
     if (procs.has(pid))
+      // A live process no record names is not this run's preview: never signal it, note
+      // it, and carry on. Stopping here would wedge every rerun on a stale pid file.
       return {
-        status: "left",
-        detail: `the launch registry names no record for pid ${pid}; not signalling it, so the preview outlives this run`,
+        status: "noted",
+        detail: `the pid file names live pid ${pid}, which no launch record names; left alone, nothing to stop`,
         path: null,
-        next: `stop the process at pid ${pid} yourself if it is the preview, then run again`,
+        next: "",
       };
     return {
       status: "already",
@@ -822,11 +824,13 @@ function stopPreview(dispatch: string, dryRun: boolean): Preview {
       rec.members.some(([member, start]) => procs.get(member)?.start === start));
   if (!recorded) {
     if (procs.has(pid) || groupAlive(pid, rec.members))
+      // A record that matches nothing running is verified as nobody's preview, same as
+      // no record: never signal the reused pid, note it, and carry on.
       return {
-        status: "left",
-        detail: `the registry record for pid ${pid} does not match the running process; not signalling a reused pid`,
+        status: "noted",
+        detail: `the registry record for pid ${pid} matches nothing running; not signalling a reused pid, nothing to stop`,
         path: null,
-        next: `stop the preview's process group yourself, then run again`,
+        next: "",
       };
     return {
       status: "already",

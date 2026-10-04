@@ -344,6 +344,46 @@ describe("aftercare on a landed run record", () => {
     expect(JSON.parse(dry.out).dry_run).toBe(true);
   }, 120_000);
 
+  test("a pid file naming a live process no record names: exit 0, the process left alone, the folder gone", () => {
+    const r = makeR();
+    const proc = Bun.spawn(["sleep", "300"], { stdout: "ignore", stderr: "ignore" });
+    try {
+      writeFileSync(join(r.D, "render/preview.pid"), `${proc.pid}\n`);
+      const result = aftercare(r, WORDS);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain("step preview: noted");
+      expect(result.out).toContain(`live pid ${proc.pid}`);
+      expect(proc.exitCode).toBeNull();
+      expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
+    } finally {
+      proc.kill();
+    }
+    // control: with no pid file at all there is no preview step
+    const r2 = makeR();
+    expect(aftercare(r2, WORDS).out).not.toContain("step preview:");
+  }, 120_000);
+
+  test("a registry record matching nothing running: exit 0, the reused pid never signalled", () => {
+    const r = makeR();
+    const proc = Bun.spawn(["sleep", "300"], { stdout: "ignore", stderr: "ignore" });
+    try {
+      mkdirSync(join(r.T, "state/launches"), { recursive: true });
+      writeFileSync(
+        join(r.T, "state/launches", String(proc.pid)),
+        `${join(r.repo, ".worktrees/7")}\npreview server\nstart 0\nboot \n`,
+      );
+      writeFileSync(join(r.D, "render/preview.pid"), `${proc.pid}\n`);
+      const result = aftercare(r, WORDS);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain("step preview: noted");
+      expect(result.out).toContain("reused pid");
+      expect(proc.exitCode).toBeNull();
+      expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
+    } finally {
+      proc.kill();
+    }
+  }, 120_000);
+
   test("run again after a done run: exit 0, nothing changed, every step already done", () => {
     const r = makeR();
     expect(aftercare(r, WORDS).code).toBe(0);
