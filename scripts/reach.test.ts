@@ -1487,4 +1487,36 @@ describe("Post-9: ruled fixes without a review round", () => {
     expect(git(layout.repo, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
     expect(git(layout.repo, "status", "--porcelain")).toBe("");
   });
+
+  test("bug-58 two reviewers naming one move are both voided", () => {
+    const layout = makeLayout();
+    before(layout);
+    const commit = addCommit(layout.repo, layout.reviewers.mimo, "reviewed.txt");
+    git(layout.repo, "-C", layout.synth, "merge", "--ff-only", commit);
+    writeReviewer(layout, "mimo", [
+      mimo("bash", { command: `git -C ${layout.synth} merge --ff-only ${commit}` }),
+    ]);
+    writeReviewer(layout, "codex", [codex(`git -C ${layout.synth} status --short`)]);
+    const result = check(layout, "r1");
+    expect(result.code).toBe(2);
+    const degraded = actionLines(layout)
+      .filter((line) => line.action === "degrade")
+      .map((line) => line.target)
+      .sort();
+    expect(degraded).toEqual(["codex", "mimo"]);
+
+    const main = makeLayout();
+    before(main);
+    const changed = join(main.repo, "x.txt");
+    writeFileSync(changed, "written\n");
+    writeReviewer(main, "mimo", [mimo("bash", { command: `cat ${changed}` })]);
+    writeReviewer(main, "codex", [codex(`cat ${changed}`)]);
+    const round = check(main, "r1");
+    expect(round.code).toBe(2);
+    const mainDegraded = actionLines(main)
+      .filter((line) => line.action === "degrade")
+      .map((line) => line.target)
+      .sort();
+    expect(mainDegraded).toEqual(["codex", "mimo"]);
+  });
 });

@@ -860,26 +860,47 @@ function addMainChanges(
   for (const path of result.changed) {
     const absolute = resolve(info.repo, path);
     const target = physical(absolute);
-    const tie = touches.find(
+    const ties = touches.filter(
       (touch) =>
         (touch.path === absolute || touch.path === target) &&
         touch.kind !== "expected" &&
         touch.lane !== "",
     );
-    // A main checkout change a lane's record names is tied to that lane. At
-    // the workhorses point an untied change is the finding; at a round, a
-    // tied change is a finding about its reviewer, and an untied one a note.
-    const severity: Touch["kind"] = (initial && !tie) || (!initial && tie) ? "finding" : "note";
-    touches.push({
-      lane: tie?.lane ?? "",
-      ...(tie?.lens ? { lens: tie.lens } : {}),
-      path: absolute,
-      access: "write",
-      place: "main checkout",
-      kind: severity,
-      source: "checkout",
-      detail: tie ? `tied to ${tie.lane}` : "main checkout changed without a lane record",
+    // One tying lane each: a main checkout change a lane's record names is
+    // tied to every lane that names it. At the workhorses point an untied
+    // change is the finding; at a round, a tied change is a finding about
+    // each of its reviewers, and an untied one a note.
+    const seen = new Set<string>();
+    const lanes = ties.filter((tie) => {
+      const key = `${tie.lens ?? ""}\0${tie.lane}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
+    if (lanes.length === 0) {
+      touches.push({
+        lane: "",
+        path: absolute,
+        access: "write",
+        place: "main checkout",
+        kind: initial ? "finding" : "note",
+        source: "checkout",
+        detail: "main checkout changed without a lane record",
+      });
+      continue;
+    }
+    for (const tie of lanes) {
+      touches.push({
+        lane: tie.lane,
+        ...(tie.lens ? { lens: tie.lens } : {}),
+        path: absolute,
+        access: "write",
+        place: "main checkout",
+        kind: initial ? "note" : "finding",
+        source: "checkout",
+        detail: `tied to ${tie.lane}`,
+      });
+    }
   }
   if (result.offDefault) {
     touches.push({
@@ -1015,21 +1036,26 @@ function roundChanges(
       if (!ticketRiders.has(read)) return false;
       return moveProduced(relative(ticketWorktree, exactPath));
     });
-    const owner =
-      owners[0] ??
-      (exactPath === ticketWorktree && ticketRefOwner && ticketRiders.has(ticketRefOwner)
-        ? ticketRefOwner
-        : undefined);
-    if (owner) {
-      const touch = pathChangeTouch(
-        info,
-        change.path,
-        "write",
-        owner.lane,
-        `${change.before} -> ${change.after}`,
-      );
-      touch.lens = owner.lens;
-      touches.push(touch);
+    // Every tied reviewer gets the finding: voiding derives from findings, and a
+    // tied reviewer past the first must not stay trusted.
+    const allOwners =
+      owners.length > 0
+        ? owners
+        : exactPath === ticketWorktree && ticketRefOwner && ticketRiders.has(ticketRefOwner)
+          ? [ticketRefOwner]
+          : [];
+    if (allOwners.length > 0) {
+      for (const owner of allOwners) {
+        const touch = pathChangeTouch(
+          info,
+          change.path,
+          "write",
+          owner.lane,
+          `${change.before} -> ${change.after}`,
+        );
+        touch.lens = owner.lens;
+        touches.push(touch);
+      }
     } else {
       const humanPath = change.path.startsWith("refs/")
         ? change.path
