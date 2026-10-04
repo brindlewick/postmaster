@@ -339,12 +339,15 @@ export function codeFaults(file: string, text: string): Fault[] {
           faults.push({ file, line: step.line, what: "bare scripts/run", ref: ref(step.text) });
         } else {
           const tail = doubleDashTail(step.text);
-          const tailProgram = tail === null ? "ok" : callProgram(tail, agents);
+          // A quoted program quotes a path holding spaces; the call is the same.
+          const unquoted =
+            tail === null ? null : tail.replace(/^"([^"]+)"(?=$|[ \t])/u, "$1");
+          const tailProgram = unquoted === null ? "ok" : callProgram(unquoted, agents);
           const tailOk =
-            tail === null || tailProgram === "ok" || /^<[^<>]+>$/u.test(tail);
+            unquoted === null || tailProgram === "ok" || /^<[^<>]+>$/u.test(unquoted);
           if (!tailOk) {
             let what = "not a scripts/run call after --";
-            if (tail === "") what = "double dash without a command";
+            if (unquoted === "") what = "double dash without a command";
             else if (tailProgram === "bare") what = "bare scripts/run after --";
             faults.push({ file, line: step.line, what, ref: ref(step.text) });
           }

@@ -51,6 +51,7 @@ describe("step lines in a code block", () => {
     '<tool>/scripts/run host run "watch · <project>" <repo> -- <tool>/scripts/run runs-watch <runs>',
     "<tool>/scripts/run host spawn <handle> <cwd> --label <name> -- <interactive form>",
     "<tool>/scripts/run host run x -- <command>",
+    "<tool>/scripts/run host run \"w\" \"<r>\" --out \"o\" --err \"e\" --marker \"m\" -- \"<tool>/scripts/run\" runs-watch \"<runs>\"",
     "<tool>/scripts/run verify run . --format=json",
     "<tool>/scripts/run stage <dispatch> synthesis  # use -- force here",
     "<tool>/scripts/run run-meta run-pinned <dispatch> host leg launch <dispatch> <wt> <leg> <n> <prompt>",
