@@ -378,6 +378,7 @@ function currentBootId(): string {
       encoding: "utf8",
       env: { ...process.env, LC_ALL: "C" },
     });
+    // ASCII: sysctl kern.boottime is kernel-emitted ASCII on macOS.
     return (booted.stdout ?? "").trim().split(/\s+/u).join(" ");
   }
 }
