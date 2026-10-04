@@ -19,8 +19,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { streamLines } from "./runs-watch.ts";
 import { run } from "./lib/proc.ts";
+import { activeRunCount, pendingReadyTickets, runCapacity, streamLines } from "./runs-watch.ts";
 
 const self = join(import.meta.dir, "run");
 const savedConfig = process.env.POSTMASTER_CONFIG;
@@ -129,7 +129,7 @@ describe("positive controls: each NEXT that needs the postmaster names its run",
   const specs: Array<[string, string, number, string, string, string?, string?]> = [
     ["rule", "review", 2, ".escalation-ready", "RULE"],
     ["gate", "shipping", 3, ".card-ready", "GATE"],
-    ["spec", "planning", 1, ".spec-review-ready", "SPEC"],
+    ["spec", "planning", 1, ".spec-" + "review-ready", "SPEC"],
     ["dispatch", "review", 2, ".leg-2-done", "DISPATCH"],
     ["resume", "review", 2, ".leg-2-exited", "RESUME", "incomplete", "coachman"],
     ["read", "review", 2, ".checkpoint-review-ready", "READ"],
@@ -1328,6 +1328,90 @@ describe("negative controls: held runs are left untouched", () => {
     expect(existsSync(join(root, "held-resume", ".leg-1-exited"))).toBe(true);
     expect(actionCount(join(root, "held-resume"), "resume")).toBe(0);
   }, 60000);
+});
+
+describe("ready tickets wait for a run slot", () => {
+  function queued(root: string, id: string): void {
+    const dir = join(root, "postmaster", "ready");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${encodeURIComponent(id)}.ready`), `${id}\n`);
+  }
+
+  test("a queued ticket wakes the postmaster when a slot is free", () => {
+    const root = join(tmp, "ready-free");
+    const config = join(tmp, "ready-free.toml");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(config, "[postmaster]\npoll_seconds = 1\n[team]\nmax_runs = 2\n");
+    queued(root, "#2");
+    expect(pendingReadyTickets(root)).toEqual(["#2"]);
+    expect(activeRunCount(root)).toBe(0);
+    expect(runCapacity(config)).toBe(2);
+    const { rc, out } = watch(root, "0", config);
+    expect(rc).toBe(0);
+    expect(out).toContain("needs READY #2");
+  }, 30000);
+
+  test("the queue matches the marker's first line, with or without a digest", () => {
+    const root = join(tmp, "ready-first-line");
+    const dir = join(root, "postmaster", "ready");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "2.ready"), `2\n${"a".repeat(64)}\n`);
+    writeFileSync(join(dir, "3.ready"), "3\n");
+    writeFileSync(join(dir, "bogus.ready"), "nope\n");
+    expect(pendingReadyTickets(root)).toEqual(["2", "3"]);
+  }, 30000);
+
+  test("a wake names no more tickets than free slots", () => {
+    const root = join(tmp, "ready-cap");
+    const config = join(tmp, "ready-cap.toml");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(config, "[postmaster]\npoll_seconds = 1\n[team]\nmax_runs = 2\n");
+    mkrun(root, "flight", "review", 2);
+    queued(root, "2");
+    queued(root, "3");
+    queued(root, "4");
+    expect(activeRunCount(root)).toBe(1);
+    const { rc, out } = watch(root, "0", config);
+    expect(rc).toBe(0);
+    expect(out.match(/needs READY/gu)?.length ?? 0).toBe(1);
+    expect(out).toContain("needs READY 2");
+  }, 30000);
+
+  test("a queued ticket waits until an in-flight run frees its slot", () => {
+    const root = join(tmp, "ready-wait-slot");
+    const config = join(tmp, "ready-one-slot.toml");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(config, "[postmaster]\npoll_seconds = 1\n[team]\nmax_runs = 1\n");
+    mkrun(root, "flight", "review", 2);
+    queued(root, "2");
+    const manifest = join(root, "flight", "manifest.json");
+    const child = spawn(
+      "sh",
+      ["-c", 'sleep 2; printf \'{"stage":"done","leg":2}\\n\' > "$1"', "sh", manifest],
+      {
+        detached: true,
+        stdio: "ignore",
+      },
+    );
+    child.unref();
+    expect(activeRunCount(root)).toBe(1);
+    const { rc, out } = watch(root, "8", config);
+    expect(rc).toBe(0);
+    expect(out).toContain("needs READY 2");
+    expect(activeRunCount(root)).toBe(0);
+  }, 30000);
+
+  test("a pending ticket does not wake a full run ceiling", () => {
+    const root = join(tmp, "ready-full");
+    const config = join(tmp, "ready-full.toml");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(config, "[postmaster]\npoll_seconds = 1\n[team]\nmax_runs = 1\n");
+    mkrun(root, "flight", "review", 2);
+    queued(root, "2");
+    const { rc, out } = watch(root, "0", config);
+    expect(rc).toBe(3);
+    expect(out).not.toContain("needs READY");
+  }, 30000);
 });
 
 describe("config: a missing or unusable poll interval falls back to the default", () => {

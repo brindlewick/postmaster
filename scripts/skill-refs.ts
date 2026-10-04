@@ -1,12 +1,12 @@
-// Find every script reference in the postmaster skill that would not resolve from an installed
-// skill. An installed skill is a link from a harness's skills folder into the postmaster repo,
-// and a session reaches the repo only as <tool>, the path SKILL.md finds from that link once.
-// A reference resolves from any working directory only when it goes through <tool> and names
-// a script the repo has. The run's pinned checkout goes through <rt> instead, resolved per run
-// by run-meta path. A pinned checkout can use an older entry form, so runbooks invoke it
-// through run-meta run-pinned rather than naming a script under <rt> themselves.
+// Find every script reference in the postmaster and clerk skills that would not resolve from
+// an installed skill. An installed skill is a link from a harness's skills folder into the
+// postmaster repo, and a session reaches the repo only as <tool>, the path SKILL.md finds from
+// that link once. A reference resolves from any working directory only when it goes through
+// <tool> and names a script the repo has. The run's pinned checkout goes through <rt> instead,
+// resolved per run by run-meta path. A pinned checkout can use an older entry form, so runbooks
+// invoke it through run-meta run-pinned rather than naming a script under <rt> themselves.
 //
-//   scripts/run skill-refs [<file>...]          default: skills/postmaster/*.md
+//   scripts/run skill-refs [<file>...]          default: skills/postmaster/*.md and skills/clerk/*.md
 //   scripts/run skill-refs --fix [<file>...]    upgrade old paths and prefix bare tool paths
 //
 // A reference is any scripts/ path. It is a fault when it is bare (scripts/run x, which resolves
@@ -164,6 +164,16 @@ function isFile(p: string): boolean {
   }
 }
 
+/** The runbook pages the bare check covers: the postmaster skill and the clerk skill. */
+export function defaultFiles(root: string): string[] {
+  const out: string[] = [];
+  for (const skill of ["postmaster", "clerk"]) {
+    const dir = join(root, "skills", skill);
+    for (const n of readdirSync(dir).filter((name) => name.endsWith(".md"))) out.push(join(dir, n));
+  }
+  return out;
+}
+
 function libScript(after: string, root: string): boolean {
   const rest = /^\/([A-Za-z0-9_-]+)\.ts(?=$|[^A-Za-z0-9_.-]|[.-](?![A-Za-z0-9_-]))/u.exec(after);
   return !!rest && isFile(join(root, "scripts", "lib", `${rest[1]}.ts`));
@@ -199,16 +209,14 @@ if (import.meta.main) {
 
   let files = argv;
   if (files.length === 0) {
-    const dir = join(root, "skills", "postmaster");
     try {
-      const entries = readdirSync(dir).filter((n) => n.endsWith(".md"));
-      files = entries.map((n) => join(dir, n));
+      files = defaultFiles(root);
       if (files.length === 0) {
-        console.error(`skill-refs: no skills/postmaster/*.md in ${root}`);
+        console.error(`skill-refs: no skills/postmaster/*.md or skills/clerk/*.md in ${root}`);
         process.exit(2);
       }
     } catch {
-      console.error(`skill-refs: no skills/postmaster/*.md in ${root}`);
+      console.error(`skill-refs: no skills/postmaster/*.md or skills/clerk/*.md in ${root}`);
       process.exit(2);
     }
   }

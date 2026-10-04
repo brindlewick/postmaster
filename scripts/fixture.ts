@@ -245,7 +245,13 @@ export function makeAndFile(dest: string, ticket: string): number {
     return 1;
   }
   // file the ticket: run local create takes a body file, not the body text
-  const body = ticketBody(ticket);
+  const ticketBase = run("git", ["-C", dest, "rev-parse", "HEAD"]).out.trim();
+  const body = ticketBody(ticket).replaceAll("FIXTURE_BASE", ticketBase);
+  if (!/^[0-9a-f]{40}$/u.test(ticketBase) || body.includes("FIXTURE_BASE")) {
+    unmake();
+    console.error(`fixture: could not write the verified base into ${ticket}'s ticket`);
+    return 1;
+  }
   const title = ticketTitle(ticket);
   const bodyFile = makeBodyFile(body);
   const createR = run(localCommand, [...localArgs, dest, "create", title, bodyFile]);
@@ -257,6 +263,12 @@ export function makeAndFile(dest: string, ticket: string): number {
     console.error(
       `fixture: filing the ticket in ${dest}'s own store failed (exit ${createR.code})`,
     );
+    return 1;
+  }
+  const labelR = run(localCommand, [...localArgs, dest, "label", number, "add", "ready"]);
+  if (labelR.code !== 0) {
+    unmake();
+    console.error(`fixture: could not mark ticket #${number} ready in ${dest}`);
     return 1;
   }
   const mark = run("git", ["-C", dest, "config", "--local", "postmaster.fixture", ticket]);
@@ -439,6 +451,7 @@ export function score(dispatch: string, repo: string): { code: number; out: stri
     { name: "markers", ...checkMarkers(dispatch, legs), out: "" },
     { name: "handoffs", ...checkHandoffs(dispatch, legs), out: "" },
     { name: "run.json", ...checkRunJson(dispatch), out: "" },
+    { name: "premises-order", ...checkPremisesOrder(dispatch), out: "" },
     { name: "efforts", ...checkWaybillEfforts(dispatch), out: "" },
     { name: "ship-card", ...checkCard(dispatch), out: "" },
   ];
@@ -622,6 +635,48 @@ function checkStages(dispatch: string): { ok: boolean; detail: string } {
     };
   }
   return { ok: false, detail: `entered ${entered[due.length]} after done` };
+}
+
+/** The coachman must record the base check before its first workhorse dispatch. */
+export function checkPremisesOrder(dispatch: string): { ok: boolean; detail: string } {
+  const events = readActions(dispatch);
+  if (events === null) return { ok: false, detail: "no readable actions.jsonl" };
+  const meta = tryJsonFile<Record<string, unknown>>(join(dispatch, "run.json"));
+  const config = meta?.config as Record<string, unknown> | undefined;
+  const team = config?.team as Record<string, unknown> | undefined;
+  let names = Array.isArray(team?.workhorses) ? team.workhorses.map(String) : [];
+  if (names.length === 0) {
+    try {
+      const brief = readFileSync(join(dispatch, "brief.md"), "utf8");
+      const line = brief.split(/\r?\n/u).find((row) => row.startsWith("workhorses:")) ?? "";
+      names = line
+        .slice("workhorses:".length)
+        .split(",")
+        .map((entry) => entry.trim().split("=")[0] ?? "")
+        .filter(Boolean);
+    } catch {
+      names = [];
+    }
+  }
+  const lanes = new Set(names);
+  const premiseIndex = events.findIndex(
+    (event) => event.action === "premises" && event.actor === "coachman",
+  );
+  const dispatchIndex = events.findIndex(
+    (event) =>
+      event.action === "dispatch" &&
+      event.actor === "coachman" &&
+      typeof event.target === "string" &&
+      lanes.has(event.target),
+  );
+  if (premiseIndex < 0) return { ok: false, detail: "no coachman premises action" };
+  if (dispatchIndex >= 0 && premiseIndex >= dispatchIndex)
+    return { ok: false, detail: "the first workhorse dispatch precedes the premises action" };
+  // A run that recorded its premises and stopped before any lane (a premise
+  // escalation) holds the order: only dispatch-before-premises fails it.
+  if (dispatchIndex < 0)
+    return { ok: true, detail: "premises action recorded and no workhorse dispatched" };
+  return { ok: true, detail: "premises action precedes the first workhorse dispatch" };
 }
 
 function readActions(dispatch: string): Array<Record<string, unknown>> | null {

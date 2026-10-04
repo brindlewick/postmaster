@@ -1,7 +1,7 @@
 # The ticket shape: one document that is both the ticket and the spec
 
-A ticket reaches a run in this shape. It is brought to it in a ticket session
-([ticket-session.md](ticket-session.md)) with the user, before it is dispatched. From then on it is
+A ticket reaches a run in this shape. The booking clerk
+([clerk.md](clerk.md)) prepares it with the user before dispatch. From then on it is
 both the ticket and the run's spec: the user reviews it once, the coachman writes no separate spec,
 and the workhorses implement from it. The request it replaces may be replaced in full.
 

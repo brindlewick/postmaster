@@ -25,6 +25,7 @@ import { dirname, join } from "node:path";
 import {
   appFiles,
   checkWaybillEfforts,
+  checkPremisesOrder,
   FIXTURE_MARKER,
   HIDDEN_RE,
   gitVersionNumber,
@@ -141,6 +142,26 @@ function record(
     const runJson = JSON.parse(readFileSync(join(d, "run.json"), "utf-8"));
     delete runJson.coachman_contract;
     writeFileSync(join(d, "run.json"), JSON.stringify(runJson, null, 2));
+  }
+  if (
+    run("bash", [
+      join(HERE, "run"),
+      "log-action",
+      d,
+      "coachman",
+      "premises",
+      base,
+      `base=${base}`,
+      "result=same",
+    ]).code !== 0
+  )
+    return 1;
+  for (const lane of recordedConfig.team.workhorses as string[]) {
+    if (
+      run("bash", [join(HERE, "run"), "log-action", d, "coachman", "dispatch", lane, "workhorse"])
+        .code !== 0
+    )
+      return 1;
   }
 
   const stageList = stages.split("\n").filter(Boolean);
@@ -331,7 +352,7 @@ function expectScore(key: string, failing: string, failText?: string): void {
   const lines = out.split("\n").filter((l) => l.trim()).length;
   expect(rc).toBe(failing === "none" ? 0 : 2);
   expect(failingChecks).toBe(failing);
-  expect(lines).toBe(9);
+  expect(lines).toBe(10);
   expect(
     out
       .split("\n", 1)[0]
@@ -686,8 +707,9 @@ describe("new: a fresh repo outside every other, with its ticket in its own stor
     const localSh = join(HERE, "run");
     const listR = run(localSh, ["local", dest, "list"]);
     const readR = run(localSh, ["local", dest, "read", "1", "--body"]);
-    expect(listR.out.trim()).toBe(`#1\ttodo\t${ticketTitle(first)}`);
-    expect(readR.out).toBe(ticketBody(first));
+    const base = run("git", ["-C", dest, "rev-parse", "HEAD"]).out.trim();
+    expect(listR.out.trim()).toBe(`#1\ttodo\t${ticketTitle(first)}\tready`);
+    expect(readR.out).toBe(ticketBody(first).replaceAll("FIXTURE_BASE", base));
   }, 30000);
   test("a run against it reads the local tracker, though the config names github", () => {
     const trackerKind = run(join(HERE, "run"), ["tracker-kind", dest]);
@@ -860,7 +882,7 @@ describe("score: a recorded run that meets every check scores clean", () => {
     const clean = runScore(dispatch, repo, { ...process.env, PATH: path });
     expect(clean.code).toBe(0);
     const lines = clean.out.trim().split("\n");
-    expect(lines).toHaveLength(9);
+    expect(lines).toHaveLength(10);
     expect(lines.slice(1).every((line) => line.startsWith("ok  "))).toBe(true);
     console.log(`score without jq:\n${clean.out.trimEnd()}`);
 
@@ -892,7 +914,7 @@ describe("score: a recorded run that meets every check scores clean", () => {
     const out = bgResults.get("break-gate")?.out ?? "";
     const cleanOut = bgResults.get(`clean-${first}`)?.out ?? "";
     expect(out.split("\n", 1)[0]).toBe(cleanOut.split("\n", 1)[0]);
-    expect(out.split("\n")).toHaveLength(10);
+    expect(out.split("\n")).toHaveLength(11);
     console.log(`failing score:\n${out.trimEnd()}`);
   });
 
@@ -920,6 +942,52 @@ describe("score: a recorded run that meets every check scores clean", () => {
       bgResults.get(`clean-${first}`)?.out.split("\n", 1)[0],
     );
   }, 120000);
+});
+
+describe("score: premises are checked before workhorse dispatch", () => {
+  function recordOrder(name: string, rows: Array<Record<string, string>>): string {
+    const dispatch = join(tmp, `premises-${name}`);
+    mkdirSync(dispatch, { recursive: true });
+    writeFileSync(
+      join(dispatch, "run.json"),
+      JSON.stringify({ config: { team: { workhorses: ["one", "two"] } } }),
+    );
+    writeFileSync(
+      join(dispatch, "actions.jsonl"),
+      `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
+    );
+    return dispatch;
+  }
+
+  const premise = { actor: "coachman", action: "premises", target: "base", detail: "result=same" };
+  const laneDispatch = {
+    actor: "coachman",
+    action: "dispatch",
+    target: "one",
+    detail: "workhorse",
+  };
+
+  test("a premises action before the first workhorse dispatch passes", () => {
+    expect(checkPremisesOrder(recordOrder("before", [premise, laneDispatch])).ok).toBe(true);
+  });
+
+  test("a workhorse dispatch before the premises action fails", () => {
+    const result = checkPremisesOrder(recordOrder("after", [laneDispatch, premise]));
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("precedes");
+  });
+
+  test("a missing premises action fails", () => {
+    const result = checkPremisesOrder(recordOrder("missing", [laneDispatch]));
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("no coachman premises action");
+  });
+
+  test("premises with no workhorse dispatch passes", () => {
+    const result = checkPremisesOrder(recordOrder("stopped", [premise]));
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("no workhorse dispatched");
+  });
 });
 
 describe("score: a record's stages are entered by the legs the contract names", () => {
