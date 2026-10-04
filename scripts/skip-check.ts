@@ -92,6 +92,8 @@ export function parseSkipList(text: string): { entries: SkipEntry[]; faults: str
           break;
         }
       }
+      const known = systemsRaw.filter((s): s is string => typeof s === "string");
+      if (new Set(known).size !== known.length) faults.push(`${at}: a system is listed twice`);
     }
     const key = entryKey(file, name);
     if (seen.has(key)) faults.push(`${at}: listed twice: ${file}: ${name}`);
@@ -209,9 +211,10 @@ function main(argv: string[]): number {
   }
   const reportDir = mkdtempSync(join(tmpdir(), "postmaster-skip-"));
   const report = join(reportDir, "report.xml");
-  // Inherited stdio: the suite's own output still streams while it runs.
+  // Inherited stdio: the suite's own output still streams while it runs. The same
+  // interpreter that runs this check runs the suite, not whatever bun is on PATH.
   const suite = spawnSync(
-    "bun",
+    process.execPath,
     ["test", "scripts/", "lint/", "--reporter=junit", `--reporter-outfile=${report}`],
     { cwd: TOOL, stdio: "inherit" },
   );

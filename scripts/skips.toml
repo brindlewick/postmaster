@@ -30,7 +30,7 @@ systems = ["linux", "darwin"]
 
 [[skip]]
 file = "scripts/launch.test.ts"
-name = "negative controls > parity: exec /bin/true in the file exits 0 without launching"
+name = "negative controls > parity: exec /usr/bin/true in the file exits 0 without launching"
 reason = "BASE's script refuses python below 3.11 (tomllib), which is not runnable on this machine"
 systems = ["linux", "darwin"]
 
@@ -48,7 +48,7 @@ systems = ["linux", "darwin"]
 
 [[skip]]
 file = "scripts/launch.test.ts"
-name = "negative controls > parity: a roughly 840 KB environment launches whole"
+name = "negative controls > parity: a roughly 400 KB environment launches whole"
 reason = "BASE's script refuses python below 3.11 (tomllib), which is not runnable on this machine"
 systems = ["linux", "darwin"]
 
@@ -263,12 +263,6 @@ reason = "the differential pins glibc's iconv: macOS ships libiconv, or iconv is
 systems = ["linux", "darwin"]
 
 [[skip]]
-file = "scripts/probe-confine.test.ts"
-name = "the probe says ready, partial or unavailable > a bwrap is vetted only on a root-owned chain"
-reason = "this machine's system directories are not root-owned, so the vetting chain cannot pass"
-systems = ["linux", "darwin"]
-
-[[skip]]
 file = "scripts/review-round.test.ts"
 name = "negative controls > a round started before the machine restarted is not waited on"
 reason = "the machine reports no boot id from either source"
@@ -289,25 +283,25 @@ systems = ["linux", "darwin"]
 [[skip]]
 file = "scripts/tool-faults.test.ts"
 name = "negative controls > folding parity: BASE and port harvests agree on ids and drafts, ß/İ/ς alike"
-reason = "python3 runs BASE's pinned script for the parity comparison and cannot run here"
+reason = "BASE's pinned script needs python 3.11 and bash 4: it cannot run here, or this is a Mac"
 systems = ["linux", "darwin"]
 
 [[skip]]
 file = "scripts/tool-faults.test.ts"
 name = "negative controls > unicode primitives: BASE and port harvests agree, email/digits/ſßİ alike"
-reason = "python3 runs BASE's pinned script for the parity comparison and cannot run here"
+reason = "BASE's pinned script needs python 3.11 and bash 4: it cannot run here, or this is a Mac"
 systems = ["linux", "darwin"]
 
 [[skip]]
 file = "scripts/tool-faults.test.ts"
 name = "negative controls > the stub tracker search folds as BASE's stub does, ß/İ/ς alike"
-reason = "python3 runs BASE's pinned script for the parity comparison and cannot run here"
+reason = "BASE's pinned script needs python 3.11 and bash 4: it cannot run here, or this is a Mac"
 systems = ["linux", "darwin"]
 
 [[skip]]
 file = "scripts/tool-faults.test.ts"
 name = "negative controls > the planted-marker search matches grep -qiF marker for marker, ß/İ/ς alike"
-reason = "python3 runs BASE's pinned script for the parity comparison and cannot run here"
+reason = "BASE's pinned script needs python 3.11 and bash 4: it cannot run here, or this is a Mac"
 systems = ["linux", "darwin"]
 
 [[skip]]
