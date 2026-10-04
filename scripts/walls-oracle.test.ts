@@ -113,19 +113,22 @@ function expectNoReset(body: string): void {
   if (isos.length > 0) {
     throw new Error(`want no reset time, found ${isos.map((i) => i.raw).join(",")} in: ${body}`);
   }
-  if (!/\bnone\b/u.test(body)) throw new Error(`want "none" for the reset in: ${body}`);
+  if (!/(?:^|[^0-9A-Za-z_])none(?:$|[^0-9A-Za-z_])/u.test(body))
+    throw new Error(`want "none" for the reset in: ${body}`);
 }
 
 function roundOk(body: string, n: string): boolean {
   // The ticket pins that the record holds the round, not how it is labelled:
   // accept rN, round N, a "round":N field, or the bare number directly after
   // the lens word in a positional detail.
+  const edge = "(?:^|[^0-9A-Za-z_])";
+  const end = "(?:$|[^0-9A-Za-z_])";
   return (
-    new RegExp(`\\br${n}\\b`, "u").test(body) ||
-    new RegExp(`round[^0-9a-z]{0,3}${n}\\b`, "iu").test(body) ||
+    new RegExp(`${edge}r${n}${end}`, "u").test(body) ||
+    new RegExp(`round[^0-9a-z]{0,3}${n}${end}`, "iu").test(body) ||
     body.includes(`"round":${n}`) ||
     body.includes(`"round": ${n}`) ||
-    new RegExp(`\\b(?:style|bug|security)\\s+${n}\\b`, "u").test(body)
+    new RegExp(`${edge}(?:style|bug|security)[ \t\n]+${n}${end}`, "u").test(body)
   );
 }
 
@@ -279,7 +282,7 @@ oracle("C1/D3: a limit error about a too-long request still counts as a wall", (
 oracle("C2: a workhorse wall holds the lane, role, message and the 2:29 reset", (lay) => {
   const line = workhorseWall(lay, "c2", CODEX_WALL_MESSAGE);
   const body = lineBody(line);
-  expect(/\bstub\b/u.test(body)).toBe(true);
+  expect(/(?:^|[^0-9A-Za-z_])stub(?:$|[^0-9A-Za-z_])/u.test(body)).toBe(true);
   expect(body).toContain("workhorse");
   expect(body).toContain(CODEX_WALL_MESSAGE);
   expectReset(body, expectedDaily(2, 29, line.ts), 1000);
@@ -298,7 +301,7 @@ oracle("C2: a reviewer wall holds its lens and round, and the 3am UTC reset", (l
     cwd: wt,
   });
   const body = lineBody(onlyWall(lay.dispatch));
-  expect(/\bsec\b/u.test(body)).toBe(true);
+  expect(/(?:^|[^0-9A-Za-z_])sec(?:$|[^0-9A-Za-z_])/u.test(body)).toBe(true);
   expect(body).toContain("security");
   expect(roundOk(body, "1")).toBe(true);
   expect(body).toContain(CLAUDE_WALL_MESSAGE);
@@ -798,7 +801,7 @@ oracle("C13: escalate names each walled workhorse, its reset and the ruling", (l
   ]) {
     expect(esc).toContain(pinned);
   }
-  const resetShown = /oct/i.test(esc) || esc.includes("10-05") || esc.includes("10/05");
+  const resetShown = /oct/iu.test(esc) || esc.includes("10-05") || esc.includes("10/05");
   expect(resetShown).toBe(true);
   expect(esc.includes("go-on") || esc.includes("go on")).toBe(true);
   expect(existsSync(join(lay.dispatch, ".escalation-ready"))).toBe(true);

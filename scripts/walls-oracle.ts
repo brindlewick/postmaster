@@ -489,7 +489,8 @@ export function lineBody(l: ActionLine): string {
   return parts.join("\n");
 }
 
-const ISO_RE = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2}))/gu;
+const ISO_RE =
+  /([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?::[0-9]{2})?(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:?[0-9]{2}))/gu;
 
 export function findIsos(text: string): Array<{ raw: string; epoch: number }> {
   const out: Array<{ raw: string; epoch: number }> = [];
@@ -516,7 +517,7 @@ export function nextOf(repoRoot: string, lay: Layout, run: string): string {
   const r = sh(join(repoRoot, "scripts", "runs-status.sh"), [lay.root], lay.env, lay.tmp);
   need(r, "runs-status.sh");
   for (const line of r.out.split("\n")) {
-    const cells = line.trim().split(/\s+/u);
+    const cells = line.trim().split(/[ \t\n]+/u);
     if (cells[0] === run) return cells[cells.length - 1] ?? "";
   }
   throw new Error(`no status row for ${run}:\n${r.out}`);
@@ -534,10 +535,10 @@ export function liveLock(dispatch: string, leg: string): void {
     start = stat
       .slice(stat.lastIndexOf(")") + 1)
       .trim()
-      .split(/\s+/u)[19]!;
+      .split(/[ \t\n]+/u)[19]!;
   } catch {
     const r = sh("ps", ["-o", "lstart=", "-p", String(process.pid)], { ...process.env });
-    start = r.out.trim().split(/\s+/u).slice(0, 5).join(" ");
+    start = r.out.trim().split(/[ \t\n]+/u).slice(0, 5).join(" ");
   }
   writeFileSync(join(dispatch, `.leg-${leg}-active`), `${process.pid} ${start}\n`);
 }

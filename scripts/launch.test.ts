@@ -3560,7 +3560,7 @@ beforeAll(() => {
       ok(`quote corpus: ${quotes} phrasings wake alone and beside every transient`);
     } else {
       fail(
-        "quote corpus: 23 phrasings wake alone and beside every transient",
+        "quote corpus: 25 phrasings wake alone and beside every transient",
         matrixBad.join("; ") || "empty corpus",
       );
     }
@@ -5329,8 +5329,8 @@ describe("structured values: known transients resume, anything else wakes", () =
 });
 
 describe("quote corpus: real wall phrasings wake, alone and beside every transient", () => {
-  test("quote corpus: 23 phrasings wake alone and beside every transient", () => {
-    assertControl("quote corpus: 23 phrasings wake alone and beside every transient");
+  test("quote corpus: 25 phrasings wake alone and beside every transient", () => {
+    assertControl("quote corpus: 25 phrasings wake alone and beside every transient");
   });
   test("a missing error file is refused", () => {
     assertControl("a missing error file is refused");
