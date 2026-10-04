@@ -3455,7 +3455,7 @@ export async function runControls(): Promise<number> {
     resetHarness(root);
     writeFileSync(join(stub, "herdr.down"), "");
     const STOP_PREFIX = "no launch is running in ";
-    const CLOSE_PREFIX = "closed what host.sh opened for ";
+    const CLOSE_PREFIX = "closed what run host opened for ";
     const linesFor = (prefix: string, worktrees: string, names: string[]): string =>
       names.map((name) => `${prefix}${join(worktrees, name)}`).join("\n");
     const buildRecord = () => {

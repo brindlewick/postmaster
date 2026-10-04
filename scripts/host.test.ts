@@ -1,4 +1,4 @@
-// Tests beside scripts/host.ts, moved from its --self-test on #109: 337 controls.
+// Tests beside scripts/host.ts, moved from its --self-test on #109: 338 controls.
 // host.ts's suite lives in ./host-self-test.ts's runControls (shared sequential fixture);
 // this file drives it once in beforeAll, splits its printed lines on the section headers,
 // and asserts each section's control count with no FAIL. No fixture state is restructured.
