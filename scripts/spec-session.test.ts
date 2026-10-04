@@ -13,6 +13,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnPlan } from "./spec-session";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const tool = dirname(here);
@@ -442,6 +443,88 @@ describe("an approval", () => {
       expect(readFileSync(join(s.d, "spec-decisions.md"), "utf8")).toBe("");
     } finally {
       s.cleanup();
+    }
+  });
+});
+
+describe("a spawn plan", () => {
+  const gitAt = (path: string, ...args: string[]): string => {
+    const r = spawnSync("git", ["-C", path, ...args], { encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+    return String(r.stdout ?? "").trim();
+  };
+
+  const spawnFixture = (): { d: string; root: string; sha: string; cleanup: () => void } => {
+    const tmp = mkdtempSync(join(tmpdir(), "spec-spawn-"));
+    const root = join(tmp, "project");
+    const d = join(root, ".postmaster", "runs", "RUN-1");
+    mkdirSync(d, { recursive: true });
+    gitAt(root, "init", "-q", "-b", "main");
+    gitAt(root, "config", "user.name", "test");
+    gitAt(root, "config", "user.email", "test@example.invalid");
+    gitAt(root, "commit", "-q", "--allow-empty", "-m", "spec");
+    const sha = gitAt(root, "rev-parse", "HEAD");
+    return { d, root, sha, cleanup: () => rmSync(tmp, { recursive: true, force: true }) };
+  };
+
+  test("the handle carries the short spec commit, the label is the name and spec", () => {
+    const f = spawnFixture();
+    try {
+      const form = ["muse", "--model", "m", "--yolo"];
+      const plan = spawnPlan(f.d, f.root, f.sha, form);
+      const short = gitAt(f.root, "rev-parse", "--short", f.sha);
+      expect(plan.handle).toBe(`spec-RUN-1-${short}`);
+      expect(plan.label).toBe("RUN-1 · spec");
+      expect(plan.form).toEqual(form);
+    } finally {
+      f.cleanup();
+    }
+  });
+
+  test("spawn refuses a missing dir, a missing form and a missing --", () => {
+    const f = spawnFixture();
+    try {
+      const missing = spawnSync(
+        script,
+        ["spec-session", "spawn", join(f.d, "nowhere"), f.root, f.sha, "--", "muse"],
+        { encoding: "utf8" },
+      );
+      expect(missing.status).toBe(1);
+      expect(missing.stderr).toContain("no such dir");
+      const noForm = spawnSync(script, ["spec-session", "spawn", f.d, f.root, f.sha, "--"], {
+        encoding: "utf8",
+      });
+      expect(noForm.status).toBe(1);
+      expect(noForm.stderr).toContain("no interactive form after --");
+      const noDash = spawnSync(script, ["spec-session", "spawn", f.d, f.root, f.sha], {
+        encoding: "utf8",
+      });
+      expect(noDash.status).toBe(1);
+      expect(noDash.stderr).toContain("usage: run spec-session spawn");
+      const malformed = spawnSync(
+        script,
+        ["spec-session", "spawn", f.d, f.root, "!!!", "--", "muse"],
+        { encoding: "utf8" },
+      );
+      expect(malformed.status).toBe(1);
+      expect(malformed.stderr).toContain("is not a commit of");
+    } finally {
+      f.cleanup();
+    }
+  });
+
+  test("spawn reaches host spawn and carries its exit: no session host is exit 3", () => {
+    const f = spawnFixture();
+    try {
+      const r = spawnSync(script, ["spec-session", "spawn", f.d, f.root, f.sha, "--", "muse"], {
+        encoding: "utf8",
+        env: { ...process.env, POSTMASTER_HOST: "none" },
+      });
+      expect(r.status).toBe(3);
+      expect(r.stderr).toContain("no Herdr or tmux");
+      expect(r.stdout).not.toContain("spec-RUN-1-");
+    } finally {
+      f.cleanup();
     }
   });
 });

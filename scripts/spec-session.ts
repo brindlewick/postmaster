@@ -1,8 +1,10 @@
-// The spec session's two verbs: brief writes the interactive session's brief, and approve
-// commits the text the user approved and records the approval.
+// The spec session's verbs: brief writes the interactive session's brief, approve commits
+// the text the user approved and records the approval, and spawn starts the session's
+// interactive host spawn with the handle, label and the caller's form.
 //
 //   run spec-session brief <dispatch>
 //   run spec-session approve <dispatch>
+//   run spec-session spawn <dispatch> <repo> <commit> -- <form...>
 //
 // brief writes <dispatch>/spec-session-brief.md and prints its path. The brief holds the
 // ticket as the waybill carries it; the editor link and the path of the copy under review
@@ -18,7 +20,9 @@
 // spec it holds matches neither the committed spec nor the copy. It then records
 // approved at the resulting commit through spec-decisions and prints that commit.
 //
-//   exit 0  done; brief and approve print a path or a commit
+//   exit 0  done; brief and approve print a path or a commit; spawn prints the handle it
+//           spawned under, as `host spawn` reports success
+//   exit 3  spawn: no session host (as `host spawn` says)
 //   exit 1  usage, no such dispatch, a missing waybill or copy, or a commit that failed
 //   exit 2  a refusal: the synthesis worktree holds another change or a stray spec edit,
 //           or the copy is missing
@@ -332,21 +336,77 @@ function approve(dispatch: string): void {
   console.log(commit);
 }
 
+// --- spawn ---------------------------------------------------------------------------------------
+/**
+ * spawnPlan: the handle, the label and the interactive form for the session. The
+ * handle carries the short spec commit, so a revised package spawns a new session.
+ * The commit comes from spec-review.md and the form from harnesses.md's table, both
+ * read by the caller; the script only shortens the commit and composes the call.
+ */
+export function spawnPlan(
+  dispatch: string,
+  repo: string,
+  commit: string,
+  form: string[],
+): { handle: string; label: string; form: string[] } {
+  if (!isDir(dispatch)) die(`spec-session: no such dir: ${dispatch}`, 1);
+  if (form.length === 0) die("spec-session: no interactive form after --", 1);
+  const short = git(repo, "rev-parse", "--short", commit);
+  if (short.code !== 0)
+    die(`spec-session: ${commit} is not a commit of ${repo} (${short.err.trim()})`, 1);
+  const nameCall = spawnSync(join(HERE, "run"), ["host", "name", dispatch], {
+    encoding: "utf8",
+  });
+  const name = (nameCall.stdout ?? "").trim();
+  if ((nameCall.status ?? 1) !== 0 || name === "")
+    die(`spec-session: no name for the run (${(nameCall.stderr || "").trim()})`, 1);
+  const label = `${name} \u00b7 spec`;
+  return {
+    handle: `spec-${name}-${short.out.trim()}`,
+    label,
+    form,
+  };
+}
+
+function spawnSession(dispatch: string, repo: string, commit: string, form: string[]): void {
+  const plan = spawnPlan(dispatch, repo, commit, form);
+  const child = spawnSync(
+    join(HERE, "run"),
+    ["host", "spawn", plan.handle, repo, "--label", plan.label, "--", ...plan.form],
+    { encoding: "utf8" },
+  );
+  if (child.stdout) process.stdout.write(child.stdout);
+  if (child.stderr) process.stderr.write(child.stderr);
+  const code = child.status ?? 1;
+  if (code === 0) console.log(plan.handle);
+  process.exit(code);
+}
+
 // --- entry --------------------------------------------------------------------------------------
-const argv = process.argv.slice(2);
-if (argv[0] === "brief") {
-  if (argv.length !== 2) {
-    console.error("usage: run spec-session brief <dispatch>");
+if (import.meta.main) {
+  const argv = process.argv.slice(2);
+  if (argv[0] === "brief") {
+    if (argv.length !== 2) {
+      console.error("usage: run spec-session brief <dispatch>");
+      process.exit(1);
+    }
+    brief(argv[1]!);
+  } else if (argv[0] === "approve") {
+    if (argv.length !== 2) {
+      console.error("usage: run spec-session approve <dispatch>");
+      process.exit(1);
+    }
+    approve(argv[1]!);
+  } else if (argv[0] === "spawn") {
+    if (argv[4] !== "--") {
+      console.error("usage: run spec-session spawn <dispatch> <repo> <commit> -- <form...>");
+      process.exit(1);
+    }
+    spawnSession(argv[1]!, argv[2]!, argv[3]!, argv.slice(5));
+  } else {
+    console.error(
+      "usage: run spec-session brief|approve <dispatch> | spawn <dispatch> <repo> <commit> -- <form...>",
+    );
     process.exit(1);
   }
-  brief(argv[1]!);
-} else if (argv[0] === "approve") {
-  if (argv.length !== 2) {
-    console.error("usage: run spec-session approve <dispatch>");
-    process.exit(1);
-  }
-  approve(argv[1]!);
-} else {
-  console.error("usage: run spec-session brief|approve <dispatch>");
-  process.exit(1);
 }
