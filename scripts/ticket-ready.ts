@@ -367,8 +367,49 @@ function markAdapterTicket(
   // Bind the marker to the stored text as the check will read it, not to the
   // draft bytes, so storage normalization cannot break the comparison.
   writeQueue(repo, id, title, bodyViaAdapter(repo, id, kind));
+  // An edit that landed between the write and the binding read would bind as
+  // signed. Verify the stored text still matches the signed bytes with the
+  // adapter's own comparison, and roll the mark back (label and marker) on
+  // mismatch; a body the adapter refuses to compare fails the same way, and
+  // retrying converges.
+  const signed = draftFile ? body : stored;
+  const confirm = storedMatches(repo, id, kind, signed);
+  if (confirm !== null) {
+    const baseArgs = kind === "plane" ? [] : [repo];
+    const back = runScript(`${kind}.sh`, [...baseArgs, "label", id, "remove", "ready"]);
+    removeQueue(repo, id);
+    if (back.code === 0) logTicketEdit(repo, id, "label remove ready (mark rolled back)");
+    die(
+      back.code === 0
+        ? `the ticket changed while it was being marked (${confirm}); run mark again`
+        : `the ticket changed while it was being marked (${confirm}); the ready label could not be removed (${(back.out + back.err).trim()}): remove it and run mark again`,
+    );
+  }
   console.log(`ticket-ready: ${id} marked ready and queued`);
   return 0;
+}
+
+// Null when the tracker still holds the signed bytes, else the adapter's
+// reason: a no-op edit, so the comparison is the adapter's own and no
+// normalization is reimplemented here.
+export function storedMatches(
+  repo: string,
+  id: string,
+  kind: string,
+  signed: string,
+): string | null {
+  const base = kind === "plane" ? [] : [repo];
+  const work = mkdtempSync(join(tmpdir(), "ticket-ready-"));
+  try {
+    const baseFile = join(work, "base.md");
+    const newFile = join(work, "new.md");
+    writeFileSync(baseFile, signed);
+    writeFileSync(newFile, signed);
+    const r = runScript(`${kind}.sh`, [...base, "edit", id, newFile, baseFile]);
+    return r.code === 0 ? null : (r.out + r.err).trim();
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 }
 
 function takeFlag(argv: string[], name: string): string {
@@ -509,19 +550,23 @@ function main(argv: string[]): number {
       const kind = trackerKind(repo);
       needAdapter(kind, "mark --body <file> --labels <list> --repo <repo> --id <id>");
       const ticket = readViaAdapter(repo, id, kind);
+      const stored = bodyViaAdapter(repo, id, kind);
       const rc = reportCheck(
         repo,
         id,
         ticket.title,
         readyViaAdapter(repo, id, kind),
         ticket.body,
-        bodyViaAdapter(repo, id, kind),
+        stored,
       );
       // The check above refuses a changed ticket, so this never rebinds the
       // marker silently; it refreshes an unchanged binding, or binds a ticket
       // whose label was applied by hand.
       if (rc !== 0) return rc;
-      writeQueue(repo, id, ticket.title, ticket.body);
+      // Bind the same bytes the check just verified, never a fresh read or
+      // the display body: a mid-queue tracker edit must refuse next time,
+      // not bind silently, and comments are not sign-off text.
+      writeQueue(repo, id, ticket.title, stored);
       console.log(`ticket-ready: ${id} queued for dispatch`);
       return 0;
     }

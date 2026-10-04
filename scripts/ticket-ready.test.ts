@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
 import { mdToHtml } from "./plane.ts";
+import { storedMatches } from "./ticket-ready.ts";
 
 const self = join(scriptsDir(import.meta), "ticket-ready.sh");
 const localSh = join(scriptsDir(import.meta), "local.sh");
@@ -307,6 +308,9 @@ describe("the marking and queue verbs", () => {
     expect(run(localSh, [repo, "comment", n, "coachman", "noting progress"]).code).toBe(0);
     expect(ready([repo, n]).code).toBe(0);
     expect(ready(["queue", repo, n]).code).toBe(0);
+    // Queue binds the stored bytes it checked, not the display body: the
+    // ticket stays ready with the comment present.
+    expect(ready([repo, n]).code).toBe(0);
     const live = run(localSh, [repo, "read", n, "--body"]);
     const baseFile = join(tmp, "comment-base.md");
     const newFile = join(tmp, "comment-new.md");
@@ -320,6 +324,21 @@ describe("the marking and queue verbs", () => {
     expect(changed.code).toBe(2);
     expect(changed.out).toContain("changed since it was signed off");
   }, 60000);
+
+  test("storedMatches compares with the adapter's own base check", () => {
+    const n = local(["create", "Match probe", join(tmp, "a.md")]);
+    const first = run(localSh, [repo, "read", n, "--body"]).out ?? "";
+    expect(storedMatches(repo, n, "local", first)).toBeNull();
+    const baseFile = join(tmp, "match-base.md");
+    const newFile = join(tmp, "match-new.md");
+    writeFileSync(baseFile, first);
+    writeFileSync(newFile, first.replace("## Turnpikes\n\ndefault", "## Turnpikes\n\nnone"));
+    expect(run(localSh, [repo, "edit", n, newFile, baseFile]).code).toBe(0);
+    const reason = storedMatches(repo, n, "local", first);
+    expect(reason).toContain("changed since");
+    // The mark-time rollback on a mismatch needs a concurrent edit mid-mark
+    // and stays untested; every mark test exercises the match path.
+  }, 30000);
 
   test("a post-sign-off title edit refuses as well", () => {
     const n = local(["create", "Bound title", join(tmp, "a.md")]);
@@ -634,6 +653,10 @@ describe("the matrix through the github double", () => {
     const comma = ready([repoGh, "5"], env);
     expect(comma.code).toBe(2);
     expect(comma.out).toContain("ready label is missing");
+    // Mark through the double exercises the post-write verify on github
+    // semantics: the no-op edit must match.
+    expect(ready(["mark", repoGh, "1"], env).code).toBe(0);
+    expect(ready([repoGh, "1"], env).code).toBe(0);
   }, 60000);
 });
 
@@ -682,6 +705,13 @@ function startPlaneStub(items: Record<string, StubItem>) {
       const mComments =
         /^\/api\/v1\/workspaces\/ws\/projects\/p1\/work-items\/([^/]+)\/comments\/$/u.exec(p);
       if (req.method === "GET" && mComments) return j({ results: [], next_page_results: false });
+      const mPatch = /^\/api\/v1\/workspaces\/ws\/projects\/p1\/work-items\/([^/]+)\/$/u.exec(p);
+      if (req.method === "PATCH" && mPatch) {
+        const it = Object.values(items).find((v) => v.id === mPatch[1]);
+        if (!it) return new Response("no such item", { status: 404 });
+        Object.assign(it, JSON.parse(await req.text()) as Record<string, unknown>);
+        return j(it);
+      }
       return new Response(`stub plane: unexpected ${req.method} ${p}`, { status: 500 });
     },
   });
@@ -740,6 +770,10 @@ describe("the matrix through the plane double", () => {
       const comma = await readyAsync([repoPl, "PM-5"], env);
       expect(comma.code).toBe(2);
       expect(comma.out).toContain("ready label is missing");
+      // Mark through the double exercises the post-write verify on plane
+      // semantics: the no-op edit must match the rendered body.
+      expect((await readyAsync(["mark", repoPl, "PM-1"], env)).code).toBe(0);
+      expect((await readyAsync([repoPl, "PM-1"], env)).code).toBe(0);
     } finally {
       server.stop(true);
     }
