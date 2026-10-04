@@ -98,9 +98,21 @@ const REGEX_AFTER = new Set([
   "throw",
 ]);
 
+/** The length of the JS line break at this offset: CRLF counts once, and a lone
+ * CR, U+2028 or U+2029 breaks like LF does. tsc honors them as breaks, so a
+ * scanner that counts LF alone attributes the wrong line and the wrong
+ * covered code after one; Oxlint reads them as whitespace instead, which
+ * only ever lists a directive it cannot honor, never misses a live one. */
+function breakLen(text: string, i: number): number {
+  const ch = text[i];
+  if (ch === "\n" || ch === "\u2028" || ch === "\u2029") return 1;
+  if (ch === "\r") return text[i + 1] === "\n" ? 2 : 1;
+  return 0;
+}
+
 /** The comments in source text, told apart from strings, template literals (with
- * `${}` scanned as code) and regex literals. A string ends at its newline: an
- * unterminated string must not swallow the real comments on later lines. */
+ * `${}` scanned as code) and regex literals. A string ends at its line break:
+ * an unterminated string must not swallow the real comments on later lines. */
 export function scanComments(text: string): SwitchComment[] {
   const out: SwitchComment[] = [];
   const n = text.length;
@@ -115,8 +127,13 @@ export function scanComments(text: string): SwitchComment[] {
     const ch = text[i]!;
     if (f.tpl) {
       if (ch === "\\") {
-        if (text[i + 1] === "\n") line++;
-        i += 2;
+        const b = breakLen(text, i + 1);
+        if (b > 0) {
+          line++;
+          i += 1 + b;
+        } else {
+          i += 2;
+        }
         continue;
       }
       if (ch === "`") {
@@ -130,16 +147,22 @@ export function scanComments(text: string): SwitchComment[] {
         i += 2;
         continue;
       }
-      if (ch === "\n") line++;
+      const bt = breakLen(text, i);
+      if (bt > 0) {
+        line++;
+        i += bt;
+        continue;
+      }
       i++;
       continue;
     }
-    if (ch === "\n") {
+    const b = breakLen(text, i);
+    if (b > 0) {
       line++;
-      i++;
+      i += b;
       continue;
     }
-    if (ch === " " || ch === "\t" || ch === "\r") {
+    if (ch === " " || ch === "\t") {
       i++;
       continue;
     }
@@ -147,7 +170,7 @@ export function scanComments(text: string): SwitchComment[] {
       const start = line;
       const s = i;
       i += 2;
-      while (i < n && text[i] !== "\n") i++;
+      while (i < n && breakLen(text, i) === 0) i++;
       out.push({ line: start, raw: pyRstrip(text.slice(s, i)), start: s, end: i });
       continue;
     }
@@ -156,7 +179,12 @@ export function scanComments(text: string): SwitchComment[] {
       const s = i;
       i += 2;
       while (i < n && !(text[i] === "*" && text[i + 1] === "/")) {
-        if (text[i] === "\n") line++;
+        const b = breakLen(text, i);
+        if (b > 0) {
+          line++;
+          i += b;
+          continue;
+        }
         i++;
       }
       i = i < n ? i + 2 : i;
@@ -166,11 +194,16 @@ export function scanComments(text: string): SwitchComment[] {
     if (ch === "'" || ch === '"') {
       i++;
       while (i < n && text[i] !== ch) {
-        if (text[i] === "\n") break;
+        if (breakLen(text, i) > 0) break;
         if (text[i] === "\\") {
           i++;
-          if (i < n && text[i] === "\n") line++;
-          i++;
+          const b = breakLen(text, i);
+          if (b > 0) {
+            line++;
+            i += b;
+          } else {
+            i++;
+          }
           continue;
         }
         i++;
@@ -189,7 +222,7 @@ export function scanComments(text: string): SwitchComment[] {
         i++;
         let cls = false;
         let closed = false;
-        while (i < n && text[i] !== "\n") {
+        while (i < n && breakLen(text, i) === 0) {
           const r = text[i]!;
           if (r === "\\") {
             i += 2;
@@ -403,42 +436,133 @@ interface SwitchEntry {
 
 const LISTED_SCOPES = new Set<SwitchDirective["scope"]>(["line", "next", "open", "file"]);
 
-/** Every listed switch-off in one file's text, each with its identity. Opens
- * match closes on one stack per tool family — the linter's two spellings share
- * one, since the linter honors both — and removing the close that ended a block
- * widens it, so the block's open counts as added then. */
+/** The rule names a linter open or close lists, or null for a bare one. The
+ * parser normalizes separators already, so the names split on commas. */
+function linterRuleSet(d: PlacedDirective): Set<string> | null {
+  if (d.rules === "every rule") return null;
+  return new Set(
+    d.rules
+      .split(",")
+      .map((r) => r.trim())
+      .filter((r) => r !== ""),
+  );
+}
+
+interface BlockEnd {
+  closes: { raw: string; line: number }[];
+  end?: { raw: string; line: number };
+}
+
+/** The code a `biome-ignore` covers: the next node, approximated as the next
+ * non-empty line plus its bracket continuation. Biome suppresses the whole
+ * node, so hashing one line would let an edit to a later line of the node
+ * keep an old approval. Single-quote spans are stripped before counting,
+ * and a line holding a backtick never ends the run, since a template can
+ * span lines. Residual: a bracket inside a multiline string can end the run
+ * early; that errs toward the old one-line shape, never toward missing the
+ * directive. */
+function biomeCovered(code: string[], from: number): string[] {
+  let start = from;
+  while (start < code.length && code[start] === "") start++;
+  if (start >= code.length) return [];
+  let depth = 0;
+  let end = start;
+  for (let k = start; k < code.length; k++) {
+    end = k;
+    const stripped = code[k]!.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/gu, "");
+    if (stripped.includes("`")) continue;
+    for (const ch of stripped) {
+      if (ch === "(" || ch === "[" || ch === "{") depth++;
+      else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    }
+    if (depth <= 0) break;
+  }
+  return code.slice(start, end + 1).filter((entry) => entry !== "");
+}
+
+/** Every listed switch-off in one file's text, each with its identity. The
+ * linter's opens match closes by rule set, on one machine for both
+ * spellings, since probes show Oxlint 1.86 honors either spelling against
+ * either: a bare close ends bare opens only, a named close removes its
+ * rules from every named open, and one close can narrow several opens.
+ * (A bare close after a named open, and a named close after a bare open,
+ * are both no-ops there; matching any close to any open would end blocks
+ * the tool still honors.) Biome keeps stack pairing. Every close that
+ * narrows an open joins its identity, so removing one counts the open as
+ * added. */
 function fileSwitches(file: string, text: string): SwitchEntry[] {
   const comments = scanComments(text);
   const code = maskedLines(text, comments);
   const placed = placeDirectives(text);
-  const ends = new Map<number, { raw: string; line: number }>();
-  const stacks = new Map<string, number[]>();
+  const ends = new Map<number, BlockEnd>();
+  const endOf = (index: number): BlockEnd => {
+    let e = ends.get(index);
+    if (!e) {
+      e = { closes: [] };
+      ends.set(index, e);
+    }
+    return e;
+  };
+  const bareOpens: number[] = [];
+  const namedOpens: { index: number; rules: Set<string> }[] = [];
+  const biomeStack: number[] = [];
   placed.forEach((d, index) => {
     if (d.scope !== "open" && d.scope !== "close") return;
-    const stack = stacks.get(d.tool) ?? [];
-    if (d.scope === "open") {
-      stack.push(index);
-    } else {
-      const open = stack.pop();
-      if (open !== undefined) ends.set(open, { raw: d.raw, line: d.line });
+    if (d.tool === "linter") {
+      const rules = linterRuleSet(d);
+      if (d.scope === "open") {
+        if (rules === null) bareOpens.push(index);
+        else namedOpens.push({ index, rules });
+        return;
+      }
+      const close = { raw: d.raw, line: d.line };
+      if (rules === null) {
+        for (const open of bareOpens.splice(0)) {
+          const e = endOf(open);
+          e.closes.push(close);
+          e.end = close;
+        }
+        return;
+      }
+      for (const open of namedOpens) {
+        let narrowed = false;
+        for (const r of rules) if (open.rules.delete(r)) narrowed = true;
+        if (!narrowed) continue;
+        const e = endOf(open.index);
+        e.closes.push(close);
+        if (open.rules.size === 0 && e.end === undefined) e.end = close;
+      }
+      return;
     }
-    stacks.set(d.tool, stack);
+    if (d.scope === "open") {
+      biomeStack.push(index);
+    } else {
+      const open = biomeStack.pop();
+      if (open === undefined) return;
+      const e = endOf(open);
+      e.closes.push({ raw: d.raw, line: d.line });
+      e.end = { raw: d.raw, line: d.line };
+    }
   });
   const out: SwitchEntry[] = [];
   placed.forEach((d, index) => {
     if (!LISTED_SCOPES.has(d.scope)) return;
     let covered: string[];
-    let scopeEnd = "";
+    let tail = [""];
     if (d.scope === "line") {
       covered = [code[d.line - 1] ?? ""];
     } else if (d.scope === "next") {
-      covered = [code[d.line] ?? ""];
+      covered = d.form === "biome-ignore" ? biomeCovered(code, d.line) : [code[d.line] ?? ""];
     } else if (d.scope === "file") {
       covered = code.filter((entry) => entry !== "");
     } else {
-      const close = ends.get(index);
-      scopeEnd = close === undefined ? "to end of file" : close.raw;
-      const stop = close === undefined ? code.length : Math.max(d.line, close.line - 1);
+      const e = ends.get(index);
+      const end = e?.end;
+      tail = [
+        ...(e?.closes.map((c) => c.raw) ?? []),
+        ...(end === undefined ? ["to end of file"] : []),
+      ];
+      const stop = end === undefined ? code.length : Math.max(d.line, end.line - 1);
       covered = code.slice(d.line, stop).filter((entry) => entry !== "");
     }
     out.push({
@@ -447,7 +571,7 @@ function fileSwitches(file: string, text: string): SwitchEntry[] {
       form: d.form,
       rules: d.rules,
       reason: d.reason,
-      id: switchOffId("comment", [file, d.raw, ...covered, scopeEnd]),
+      id: switchOffId("comment", [file, d.raw, ...covered, ...tail]),
     });
   });
   return out;
@@ -503,7 +627,10 @@ function addedSwitches(repo: string, base: string, head: string): SwitchEntry[] 
   for (const path of paths) {
     if (!before.has(path)) continue;
     const source = blobAt(repo, base, path);
-    if (source === null) continue;
+    if (source === null)
+      throw new Error(
+        `cannot read ${path} at ${base}: refusing to report clear over unreadable input`,
+      );
     for (const entry of fileSwitches(path, source)) {
       oldCounts.set(entry.id, (oldCounts.get(entry.id) ?? 0) + 1);
     }
@@ -514,7 +641,10 @@ function addedSwitches(repo: string, base: string, head: string): SwitchEntry[] 
   for (const path of paths) {
     if (!after.has(path)) continue;
     const source = blobAt(repo, head, path);
-    if (source === null) continue;
+    if (source === null)
+      throw new Error(
+        `cannot read ${path} at ${head}: refusing to report clear over unreadable input`,
+      );
     for (const entry of fileSwitches(path, source)) {
       const index = seen.get(entry.id) ?? 0;
       seen.set(entry.id, index + 1);
@@ -630,7 +760,7 @@ function settingsChanges(repo: string, base: string, head: string): SettingsEntr
         base,
         head,
         "--",
-        path,
+        `:(literal)${path}`,
       ],
       { env: UNSET_GIT },
     );
@@ -658,7 +788,8 @@ interface LoggedApproval {
  * sit in the run's actions and the project's ledger alike, be the postmaster's
  * word for this run, and open with approved or refused plus the user's words.
  * Anything else is ignored with a warning, never silently obeyed and never
- * fatal to the listing. */
+ * fatal to the listing. Where the record holds both words for one identity,
+ * refused wins: a refusal stands until the entry itself changes. */
 function approvals(
   dispatch: string,
   warn: (message: string) => void,
@@ -703,7 +834,7 @@ function approvals(
       warn(`ignoring a malformed switch-off line in ${actionPath}`);
       continue;
     }
-    result.set(rec.target, decision);
+    if (decision === "refused" || !result.has(rec.target)) result.set(rec.target, decision);
   }
   return result;
 }

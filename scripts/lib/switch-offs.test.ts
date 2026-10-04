@@ -576,6 +576,222 @@ describe("switch-off detection", () => {
     );
     expect(clear.code).toBe(0);
   });
+
+  test("a biome-ignore covers its whole node, not just its next line", () => {
+    freshRepo("biome-node");
+    const node = (a: string, after: string): string =>
+      [
+        "// biome-ignore format: generated table",
+        "const table = {",
+        `  a: ${a},`,
+        "};",
+        `const after = ${after};`,
+        "",
+      ].join("\n");
+    const idOf = (out: string): string | undefined =>
+      /\(id (comment:[0-9a-f]{16})\)/u.exec(out)?.[1];
+    write("scripts/node.ts", node("1", "2"));
+    commit("add biome node");
+    const first = check();
+    expect(first.code).toBe(2);
+    const id = idOf(first.out);
+    expect(id).toBeDefined();
+    write("scripts/node.ts", node("2", "2"));
+    commit("edit a later line of the node");
+    const edited = idOf(check().out);
+    expect(edited).toBeDefined();
+    expect(edited).not.toBe(id);
+    write("scripts/node.ts", node("2", "3"));
+    commit("edit past the node");
+    expect(idOf(check().out)).toBe(edited);
+  });
+
+  test("a partial enable narrows a block instead of ending it", () => {
+    freshRepo("partial-enable");
+    const idOf = (out: string): string | undefined =>
+      /\(id (comment:[0-9a-f]{16})\)/u.exec(out)?.[1];
+    write(
+      "scripts/partial.ts",
+      [
+        "/* eslint-disable rule-a, rule-b -- two rules */",
+        "const first = 1;",
+        "/* eslint-enable rule-a */",
+        "const second = 2;",
+        "",
+      ].join("\n"),
+    );
+    commit("add narrowed block");
+    const id = idOf(check().out);
+    expect(id).toBeDefined();
+    write(
+      "scripts/partial.ts",
+      [
+        "/* eslint-disable rule-a, rule-b -- two rules */",
+        "const first = 1;",
+        "/* eslint-enable rule-a */",
+        "const second = 2;",
+        "const third = 3;",
+        "",
+      ].join("\n"),
+    );
+    commit("append code still suppressed by rule-b");
+    const grown = idOf(check().out);
+    expect(grown).toBeDefined();
+    expect(grown).not.toBe(id);
+  });
+
+  test("closes match opens across the linter's two spellings", () => {
+    freshRepo("cross-spelling");
+    const idOf = (out: string): string | undefined =>
+      /\(id (comment:[0-9a-f]{16})\)/u.exec(out)?.[1];
+    write(
+      "scripts/cross.ts",
+      [
+        "/* eslint-disable rule-a -- one rule */",
+        "const first = 1;",
+        "/* oxlint-enable rule-a */",
+        "const second = 2;",
+        "",
+      ].join("\n"),
+    );
+    commit("add cross-spelling block");
+    const id = idOf(check().out);
+    expect(id).toBeDefined();
+    write(
+      "scripts/cross.ts",
+      [
+        "/* eslint-disable rule-a -- one rule */",
+        "const first = 1;",
+        "/* oxlint-enable rule-a */",
+        "const second = 2;",
+        "const third = 3;",
+        "",
+      ].join("\n"),
+    );
+    commit("append past the close");
+    expect(idOf(check().out)).toBe(id);
+  });
+
+  test("a bare enable ends bare disables only", () => {
+    freshRepo("bare-enable");
+    const idFor = (out: string, name: string): string | undefined =>
+      new RegExp(`scripts/${name}:\\d+ [^(]*\\(id (comment:[0-9a-f]{16})\\)`, "u").exec(out)?.[1];
+    write(
+      "scripts/named.ts",
+      [
+        "/* eslint-disable rule-a -- named */",
+        "const first = 1;",
+        "/* eslint-enable */",
+        "const second = 2;",
+        "",
+      ].join("\n"),
+    );
+    write(
+      "scripts/bare.ts",
+      [
+        "/* eslint-disable -- all */",
+        "const first = 1;",
+        "/* eslint-enable */",
+        "const second = 2;",
+        "",
+      ].join("\n"),
+    );
+    commit("add blocks");
+    const first = check();
+    expect(first.code).toBe(2);
+    const namedId = idFor(first.out, "named.ts");
+    const bareId = idFor(first.out, "bare.ts");
+    expect(namedId).toBeDefined();
+    expect(bareId).toBeDefined();
+    write(
+      "scripts/named.ts",
+      [
+        "/* eslint-disable rule-a -- named */",
+        "const first = 1;",
+        "/* eslint-enable */",
+        "const second = 2;",
+        "const third = 3;",
+        "",
+      ].join("\n"),
+    );
+    write(
+      "scripts/bare.ts",
+      [
+        "/* eslint-disable -- all */",
+        "const first = 1;",
+        "/* eslint-enable */",
+        "const second = 2;",
+        "const third = 3;",
+        "",
+      ].join("\n"),
+    );
+    commit("append past both closes");
+    const second = check().out;
+    expect(idFor(second, "named.ts")).not.toBe(namedId);
+    expect(idFor(second, "bare.ts")).toBe(bareId);
+  });
+
+  test("a refusal stands even when an approval for the same entry is recorded", () => {
+    freshRepo("refusal-sticky");
+    write("scripts/held.ts", "// @ts-ignore held reason\nconst x: string = 1;\n");
+    commit("add switch-off");
+    const id = /\(id (comment:[0-9a-f]{16})\)/u.exec(check().out)?.[1];
+    expect(id).toBeDefined();
+    const record = (dispatch: string, decision: string, words: string): void => {
+      const r = run(
+        SELF,
+        ["log-action", dispatch, "postmaster", "switch-off", id!, decision, words],
+        { env: CLEAN_GIT_ENV },
+      );
+      expect(r.code).toBe(0);
+    };
+    const statusOf = (dispatch: string): { code: number; out: string } =>
+      call("--repo", repo, "--default", "main", "--ticket", "ticket", "--dispatch", dispatch);
+    const refusedFirst = join(repo, ".postmaster", "runs", "TEST-4");
+    mkdirSync(refusedFirst, { recursive: true });
+    record(refusedFirst, "refused", "remove this suppression");
+    record(refusedFirst, "approved", "changed my mind");
+    const first = statusOf(refusedFirst);
+    expect(first.code).toBe(4);
+    expect(first.out.startsWith("refused\n")).toBe(true);
+    const approvedFirst = join(repo, ".postmaster", "runs", "TEST-4b");
+    mkdirSync(approvedFirst, { recursive: true });
+    record(approvedFirst, "approved", "looks fine");
+    record(approvedFirst, "refused", "on reflection remove it");
+    const second = statusOf(approvedFirst);
+    expect(second.code).toBe(4);
+    expect(second.out.startsWith("refused\n")).toBe(true);
+  });
+
+  test("a settings diff shows even under a colon-led directory", () => {
+    freshRepo("colon-settings");
+    write(":odd/bunfig.toml", "x = 1\n");
+    commit("add colon settings");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("- settings :odd/bunfig.toml (added)");
+    expect(result.out).toContain("x = 1");
+    expect(result.out).not.toContain("(no textual diff)");
+  });
+
+  test("an unreadable source blob fails the check instead of reporting clear", () => {
+    freshRepo("unreadable");
+    write("scripts/real.ts", "export const ok = true;\n");
+    git(repo, "add", "-A");
+    git(
+      repo,
+      "update-index",
+      "--add",
+      "--cacheinfo",
+      "160000",
+      git(repo, "rev-parse", "HEAD"),
+      "scripts/ghost.ts",
+    );
+    git(repo, "commit", "-qm", "add unreadable source path");
+    const result = check();
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("cannot read scripts/ghost.ts");
+  });
 });
 
 describe("switch-off units", () => {
@@ -599,6 +815,24 @@ describe("switch-off units", () => {
     const cs = scanComments('const a = "oops;\n// @ts-ignore real reason\nconst x: string = 1;\n');
     expect(cs.length).toBe(1);
     expect(cs[0]!.line).toBe(2);
+  });
+
+  test("the scanner counts CR, CRLF and U+2028 as line breaks", () => {
+    const cr = scanComments("const a = 1;\r// @ts-ignore cr reason\rconst x: string = 1;\r");
+    expect(cr.length).toBe(1);
+    expect(cr[0]!.line).toBe(2);
+    expect(cr[0]!.raw).toBe("// @ts-ignore cr reason");
+    const crlf = scanComments(
+      "const a = 1;\r\n// @ts-ignore crlf reason\r\nconst x: string = 1;\r\n",
+    );
+    expect(crlf.length).toBe(1);
+    expect(crlf[0]!.line).toBe(2);
+    const u = scanComments("const a = 1;\u2028// @ts-ignore u reason\u2028const x: string = 1;\n");
+    expect(u.length).toBe(1);
+    expect(u[0]!.line).toBe(2);
+    const block = scanComments("/* one\r two */\n// @ts-ignore block reason\ncode;\n");
+    expect(block.length).toBe(2);
+    expect(block[1]!.line).toBe(3);
   });
 
   test("parseSwitchOff reads each form and its reason", () => {
