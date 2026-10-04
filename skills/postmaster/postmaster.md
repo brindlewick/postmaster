@@ -74,7 +74,7 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    On exit 1, report the adapter error. When the refusal says the tracker kind has no adapter
    script, read the ticket's body, title and labels through the tracker's own tooling
    (`trackers.md`, other), save the body to a temp file outside the repo, and run the check as
-   `<tool>/scripts/ticket-ready.sh --body <file> --labels <list> --title "<title>" --project <repo>`;
+   `<tool>/scripts/ticket-ready.sh --body <file> --labels <list> --title "<title>" --project <repo> --id <id>`;
    its exits mean the same as the `<repo> <id>` form. Pass `--labels` once per label when a
    label name holds a comma; one `--labels` takes a comma-joined list. On exit 2, start a
    booking clerk with
@@ -94,7 +94,8 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    same and keep the watcher running: the sign-off marker wakes you through `READY`, and
    without the watcher the ticket stalls until the user polls.
    A `ready` label on its own is insufficient: every dispatch, including one from the ready
-   queue, repeats this check before writing anything for the run.
+   queue, repeats this check — which refuses a ticket changed since sign-off — before
+   writing anything for the run.
    If the ticket is ready and a run slot is not free, run
    `<tool>/scripts/ticket-ready.sh queue <repo> <id>`; the watcher dispatches it when a slot
    opens. Continue with other tickets the user asked you to implement.

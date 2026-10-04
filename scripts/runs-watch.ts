@@ -1358,7 +1358,9 @@ export function pendingReadyTickets(root: string): string[] {
         let id = "";
         try {
           id = decodeURIComponent(name.slice(0, -6));
-          if (readFileSync(join(dir, name), "utf8").trim() !== id) return [];
+          // The marker's first line is the id; the second binds the sign-off
+          // to the signed-off text, and only the check reads it.
+          if ((readFileSync(join(dir, name), "utf8").split("\n")[0] ?? "") !== id) return [];
         } catch {
           return [];
         }

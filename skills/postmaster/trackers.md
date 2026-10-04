@@ -255,8 +255,10 @@ nothing about it; until it does, the user makes an approved change in the tracke
 The readiness scripts refuse an `other` tracker with the form that serves it: read the
 ticket's body, title and labels through the tracker's own tooling and pass them by hand,
 e.g. `<tool>/scripts/ticket-ready.sh --body <file> --labels <list> --title "<title>"
---project <repo>`. Pass `--labels` once per label when a label name holds a comma; one
-`--labels` takes a comma-joined list.
+--project <repo> --id <id>`. Pass `--labels` once per label when a label name holds a comma; one
+`--labels` takes a comma-joined list. Pass the same title the marking took: the check binds
+the sign-off to the signed-off title and body, and a title passed differently reads as a
+changed ticket.
 
 ## postmaster's own tracker
 

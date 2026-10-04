@@ -1351,6 +1351,16 @@ describe("ready tickets wait for a run slot", () => {
     expect(out).toContain("needs READY #2");
   }, 30000);
 
+  test("the queue matches the marker's first line, with or without a digest", () => {
+    const root = join(tmp, "ready-first-line");
+    const dir = join(root, "postmaster", "ready");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "2.ready"), `2\n${"a".repeat(64)}\n`);
+    writeFileSync(join(dir, "3.ready"), "3\n");
+    writeFileSync(join(dir, "bogus.ready"), "nope\n");
+    expect(pendingReadyTickets(root)).toEqual(["2", "3"]);
+  }, 30000);
+
   test("a wake names no more tickets than free slots", () => {
     const root = join(tmp, "ready-cap");
     const config = join(tmp, "ready-cap.toml");

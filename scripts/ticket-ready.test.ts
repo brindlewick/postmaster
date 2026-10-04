@@ -214,6 +214,51 @@ describe("the marking and queue verbs", () => {
     expect(ledger).toContain("label add ready");
   }, 30000);
 
+  test("a post-sign-off turnpikes edit refuses until the ticket is signed off again", () => {
+    const n = local(["create", "Bound text", join(tmp, "a.md")]);
+    expect(ready(["mark", repo, n]).code).toBe(0);
+    expect(ready([repo, n]).code).toBe(0);
+    expect(ready(["queue", repo, n]).code).toBe(0);
+    expect(ready(["pending", repo]).out).toContain(n);
+    const marker = readFileSync(
+      join(repo, ".postmaster", "runs", "postmaster", "ready", `${n}.ready`),
+      "utf8",
+    ).split("\n");
+    expect(marker[0]).toBe(n);
+    expect(/^[0-9a-f]{64}$/u.test(marker[1] ?? "")).toBe(true);
+    // The attack: drop the review leg after sign-off.
+    const live = run(localSh, [repo, "read", n, "--body"]);
+    const baseFile = join(tmp, "bind-base.md");
+    const newFile = join(tmp, "bind-new.md");
+    writeFileSync(baseFile, live.out ?? "");
+    writeFileSync(
+      newFile,
+      (live.out ?? "").replace("## Turnpikes\n\ndefault", "## Turnpikes\n\nnone"),
+    );
+    expect(run(localSh, [repo, "edit", n, newFile, baseFile]).code).toBe(0);
+    const changed = ready([repo, n]);
+    expect(changed.code).toBe(2);
+    expect(changed.out).toContain("changed since it was signed off");
+    // Queue does not rebind a changed ticket.
+    const q = ready(["queue", repo, n]);
+    expect(q.code).toBe(2);
+    expect(q.out).toContain("changed since it was signed off");
+    // Re-signing binds the new text.
+    expect(ready(["mark", repo, n]).code).toBe(0);
+    const again = ready([repo, n]);
+    expect(again.code).toBe(0);
+    expect(again.out).toContain("turnpikes: none");
+  }, 60000);
+
+  test("a post-sign-off title edit refuses as well", () => {
+    const n = local(["create", "Bound title", join(tmp, "a.md")]);
+    expect(ready(["mark", repo, n]).code).toBe(0);
+    expect(run(localSh, [repo, "title", n, "Bound title, revised"]).code).toBe(0);
+    const changed = ready([repo, n]);
+    expect(changed.code).toBe(2);
+    expect(changed.out).toContain("changed since it was signed off");
+  }, 60000);
+
   test("unmark drops the label and the marker, consume drops only the marker", () => {
     const r = ready(["unmark", repo, "2"]);
     expect(r.code).toBe(0);
@@ -248,16 +293,29 @@ describe("a tracker of kind other", () => {
       "Sorted list",
       "--project",
       repo,
+      "--id",
+      "EXT-9",
     ]);
     expect(good.code).toBe(0);
-    const bad = ready(["--body", a, "--labels", "", "--title", "Sorted list", "--project", repo]);
+    const bad = ready([
+      "--body",
+      a,
+      "--labels",
+      "",
+      "--title",
+      "Sorted list",
+      "--project",
+      repo,
+      "--id",
+      "EXT-9",
+    ]);
     expect(bad.code).toBe(2);
     expect(bad.out).toContain("ready label is missing");
   }, 30000);
 
   test("repeated --labels flags name one label each", () => {
     const a = join(tmp, "a.md");
-    const base = ["--body", a, "--title", "Sorted list", "--project", repo];
+    const base = ["--body", a, "--title", "Sorted list", "--project", repo, "--id", "EXT-8"];
     const split = ready([...base, "--labels", "blocked, ready"]);
     expect(split.code).toBe(0);
     const exact = ready([...base, "--labels", "blocked, ready", "--labels", "other"]);
@@ -275,6 +333,55 @@ describe("a tracker of kind other", () => {
     const r = ready(["mark", "--body", a, "--labels", "ready", "--repo", repo, "--id", "EXT-1"]);
     expect(r.code).toBe(0);
     expect(ready(["pending", repo]).out).toContain("EXT-1");
+  }, 30000);
+
+  test("a body changed after marking refuses until marked again", () => {
+    const f = join(tmp, "bind-other.md");
+    writeFileSync(f, readFileSync(join(tmp, "a.md"), "utf8"));
+    const markArgs = (file: string) => [
+      "mark",
+      "--body",
+      file,
+      "--labels",
+      "ready",
+      "--repo",
+      repo,
+      "--id",
+      "EXT-7",
+      "--title",
+      "Sorted list",
+    ];
+    const checkArgs = (file: string) => [
+      "--body",
+      file,
+      "--labels",
+      "ready",
+      "--title",
+      "Sorted list",
+      "--project",
+      repo,
+      "--id",
+      "EXT-7",
+    ];
+    expect(ready(markArgs(f)).code).toBe(0);
+    expect(ready(checkArgs(f)).code).toBe(0);
+    writeFileSync(
+      f,
+      readFileSync(f, "utf8").replace("## Turnpikes\n\ndefault", "## Turnpikes\n\nnone"),
+    );
+    const changed = ready(checkArgs(f));
+    expect(changed.code).toBe(2);
+    expect(changed.out).toContain("changed since it was signed off");
+    expect(ready(markArgs(f)).code).toBe(0);
+    const again = ready(checkArgs(f));
+    expect(again.code).toBe(0);
+    expect(again.out).toContain("turnpikes: none");
+  }, 60000);
+
+  test("the check without a project or id is refused", () => {
+    const a = join(tmp, "a.md");
+    expect(ready(["--body", a, "--labels", "ready", "--project", repo]).code).toBe(1);
+    expect(ready(["--body", a, "--labels", "ready", "--id", "EXT-9"]).code).toBe(1);
   }, 30000);
 
   test("the adapter verbs refuse with the body-and-labels form", () => {

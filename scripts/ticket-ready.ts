@@ -7,7 +7,7 @@
 //
 // Usage:
 //   ticket-ready.sh <repo> <id>                        exit 0 when ready, 2 with one line per reason
-//   ticket-ready.sh --body <file> --labels <list> [--title <t>] [--project <p>]
+//   ticket-ready.sh --body <file> --labels <list> --project <repo> --id <id> [--title <t>]
 //   ticket-ready.sh mark <repo> <id> [--body <file>] [--title <title>]
 //   ticket-ready.sh mark --body <file> --labels <list> --repo <repo> --id <id> [--title <t>]
 //   ticket-ready.sh unmark <repo> <id>
@@ -21,12 +21,17 @@
 // once per label when a label name holds a comma; one --labels takes a
 // comma-joined list. mark writes the ledger note with the ticket's turnpikes
 // line as the user's word, and every marking queues a ready marker under the
-// project's run root; consume drops the marker when the postmaster dispatches,
-// and unmark drops the mark with it.
+// project's run root; the marker binds the sign-off to the signed-off title
+// and body, and a check against a changed ticket refuses until the user signs
+// the new text off again. The check --body form takes the same --project,
+// --id and --title the marking took, so it verifies that binding; a title
+// passed differently reads as a changed ticket. consume drops the marker when
+// the postmaster dispatches, and unmark drops the mark with it.
 //
 // Exit 0 the ticket is ready, or the verb did its work; 2 the ticket is not
 // ready, or the marking was refused; 1 anything else (an unreadable ticket,
 // an unknown tracker, usage).
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -141,6 +146,11 @@ function reportCheck(
 ): number {
   const reasons: string[] = [];
   if (!ready) reasons.push("ready label is missing");
+  const queued = queuedDigest(repo, id);
+  if (queued !== null && queued !== digestOf(title, body))
+    reasons.push(
+      "the ticket changed since it was signed off; open the clerk again to sign off the new text",
+    );
   const { reasons: found, turnpikes } = runChecks({ body, title, project: repo });
   reasons.push(...found);
   if (reasons.length > 0) {
@@ -163,9 +173,29 @@ function markerPath(repo: string, id: string): string {
   return join(readyDir(repo), `${encodeURIComponent(id)}.ready`);
 }
 
-function writeQueue(repo: string, id: string): void {
+// The marker binds the sign-off to the signed-off text: the ticket id, then
+// the sha256 of the title and body as the check reads them. A post-sign-off
+// tracker edit changes the digest, and the next check refuses until the user
+// signs the new text off again.
+function digestOf(title: string, body: string): string {
+  return createHash("sha256").update(`${title}\n${body}`).digest("hex");
+}
+
+function writeQueue(repo: string, id: string, title: string, body: string): void {
   mkdirSync(readyDir(repo), { recursive: true });
-  writeFileSync(markerPath(repo, id), `${id}\n`);
+  writeFileSync(markerPath(repo, id), `${id}\n${digestOf(title, body)}\n`);
+}
+
+function queuedDigest(repo: string, id: string): string | null {
+  let text = "";
+  try {
+    text = readFileSync(markerPath(repo, id), "utf8");
+  } catch {
+    return null;
+  }
+  const [first, second] = text.split("\n");
+  if (first !== id || !/^[0-9a-f]{64}$/u.test(second ?? "")) return null;
+  return second as string;
 }
 
 function removeQueue(repo: string, id: string): void {
@@ -183,8 +213,8 @@ function pendingQueue(repo: string): string[] {
   for (const name of names.sort()) {
     if (!name.endsWith(".ready")) continue;
     try {
-      const id = readFileSync(join(readyDir(repo), name), "utf8").trim();
-      if (id === decodeURIComponent(name.slice(0, -".ready".length))) out.push(id);
+      const first = readFileSync(join(readyDir(repo), name), "utf8").split("\n")[0] ?? "";
+      if (first === decodeURIComponent(name.slice(0, -".ready".length))) out.push(first);
     } catch {
       // A marker being written beside this listing is listed next time.
     }
@@ -292,7 +322,10 @@ function markAdapterTicket(
   logTicketEdit(repo, id, "label add ready");
   logLedgerNote(repo, id, turnpikes);
   removeClerkRecord(repo, id);
-  writeQueue(repo, id);
+  // Bind the marker to the stored text as the check will read it, not to the
+  // draft bytes, so storage normalization cannot break the comparison.
+  const signed = readViaAdapter(repo, id, kind);
+  writeQueue(repo, id, signed.title, signed.body);
   console.log(`ticket-ready: ${id} marked ready and queued`);
   return 0;
 }
@@ -333,7 +366,7 @@ function labelsFromFlags(argv: string[]): string[] {
 function usage(): string {
   return [
     "ticket-ready.sh <repo> <id>",
-    "ticket-ready.sh --body <file> --labels <list> [--title <t>] [--project <p>]",
+    "ticket-ready.sh --body <file> --labels <list> --project <repo> --id <id> [--title <t>]",
     "ticket-ready.sh mark <repo> <id> [--body <file>] [--title <title>]",
     "ticket-ready.sh mark --body <file> --labels <list> --repo <repo> --id <id> [--title <t>]",
     "ticket-ready.sh unmark <repo> <id> | consume <repo> <id> | pending <repo> | queue <repo> <id>",
@@ -347,10 +380,16 @@ function main(argv: string[]): number {
     const body = readFileSync(argv[1]!, "utf8");
     const labels = labelsFromFlags(argv);
     const title = argv.includes("--title") ? takeFlag(argv, "--title") : "";
-    const project = argv.includes("--project") ? takeFlag(argv, "--project") : "";
-    if (project) process.env.POSTMASTER_PROJECT = resolve(project);
+    const project = takeFlag(argv, "--project");
+    const id = takeFlag(argv, "--id");
+    process.env.POSTMASTER_PROJECT = resolve(project);
     const reasons: string[] = [];
     if (!hasReadyMark(labels)) reasons.push("ready label is missing");
+    const queued = queuedDigest(project, id);
+    if (queued !== null && queued !== digestOf(title, body))
+      reasons.push(
+        "the ticket changed since it was signed off; open the clerk again to sign off the new text",
+      );
     const { reasons: found, turnpikes } = runChecks({ body, title, project });
     reasons.push(...found);
     if (reasons.length > 0) {
@@ -380,7 +419,7 @@ function main(argv: string[]): number {
     if (!turnpikes) die(`checked ${id} but ticket-check printed no turnpikes line`);
     logLedgerNote(repo, id, turnpikes);
     removeClerkRecord(repo, id);
-    writeQueue(repo, id);
+    writeQueue(repo, id, title, body);
     console.log(`ticket-ready: ${id} marked ready and queued`);
     return 0;
   }
@@ -425,8 +464,11 @@ function main(argv: string[]): number {
       needAdapter(kind, "mark --body <file> --labels <list> --repo <repo> --id <id>");
       const ticket = readViaAdapter(repo, id, kind);
       const rc = reportCheck(repo, id, ticket.title, readyViaAdapter(repo, id, kind), ticket.body);
+      // The check above refuses a changed ticket, so this never rebinds the
+      // marker silently; it refreshes an unchanged binding, or binds a ticket
+      // whose label was applied by hand.
       if (rc !== 0) return rc;
-      writeQueue(repo, id);
+      writeQueue(repo, id, ticket.title, ticket.body);
       console.log(`ticket-ready: ${id} queued for dispatch`);
       return 0;
     }
@@ -453,7 +495,7 @@ function main(argv: string[]): number {
   const id = argv[1]!;
   process.env.POSTMASTER_PROJECT = resolve(repo);
   const kind = trackerKind(repo);
-  needAdapter(kind, "--body <file> --labels <list> [--title <title>] [--project <repo>]");
+  needAdapter(kind, "--body <file> --labels <list> --project <repo> --id <id> [--title <t>]");
   const ticket = readViaAdapter(repo, id, kind);
   return reportCheck(repo, id, ticket.title, readyViaAdapter(repo, id, kind), ticket.body);
 }
