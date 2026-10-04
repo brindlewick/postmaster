@@ -226,6 +226,8 @@ whole system.
 6. **Every action on a project is logged as it happens**, one JSON line per action through
    `scripts/run log-action`, per run and per project. The narrative is for reading; the log
    is what a run is audited from and what the flow is improved from.
+7. **Shared code lives once.** A helper that two scripts need goes in `scripts/lib/`,
+   imported by both, and is not copied between them.
 
 The scripts run on Bun 1.4.2 or newer: `scripts/run <name> [args]` is the one entry for every
 tool script; it execs Bun with `--no-env-file` and the tool's own `bunfig.toml`, so a script run
