@@ -8,6 +8,20 @@ updated: 2026-10-04
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-10-04] ingest | what exists for coding with several models, whether mixing models is proven, and what postmaster adds
+
+Issue #277. Captured 107 papers and 128 pages into `raw/papers/` and `raw/articles/`, each with its
+address, the day it was read and the passages relied on, and recorded the search in
+`raw/trials/2026-10-04-landscape-search/`: every query, the rule for choosing in each group, the controls,
+what was not read, and the marks of the count that ranks the closest tools. Added
+[Mixing models for coding](concepts/mixing-models-for-coding.md), **claimed**, with a map in six groups, the
+evidence on four claims about mixing models in code and in general work, the closest tools beside
+postmaster, what postmaster shares and adds, the README checked line by line against
+[the lane audit](concepts/several-lanes.md), and what can and cannot be said in public. The README's
+claim that the synthesis took contributions from both lanes every time is not supported by the audit.
+Linked it from [Combining models](concepts/combining-models.md). No standing changed: outside work moves
+none, and the page rests on the audits, which promote no run.
+
 ## [2026-10-04] query | should setup create a project's verifiers with pstack's skill
 
 The user's word: yes, as part of setup on a new project, using pstack's `/create-verification-skill`.

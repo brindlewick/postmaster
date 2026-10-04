@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 # postmaster wiki
@@ -30,6 +30,12 @@ produce better software than one good model? If so, how?
   findings the coachman verified and two found over nine tenths. A second workhorse supplied a fix or
   a missing part in 12 of 18 real runs by the coachman's cards, and in 22 fixture runs each lane
   alone passed every hidden test. The coachman, the review loop and one security review cost most.
+- [Mixing models for coding: what exists, what is shown, and what postmaster adds](concepts/mixing-models-for-coding.md):
+  **claimed**. A read of 238 papers and project pages on 2026-10-04. Each part of the flow exists
+  elsewhere, mixing models for coding is neither proven nor disproven, and independently built versions
+  fail together. The whole combination run as an audited process, and an audit of its own flow, were
+  not found elsewhere. The README's claim that the synthesis took from both lanes every time is not
+  supported, and the lane audit is.
 
 ## Harnesses
 
