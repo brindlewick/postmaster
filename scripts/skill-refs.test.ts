@@ -317,8 +317,8 @@ function runBlock(source: string, shell: string): RunResult & { root: string } {
 describe("coachman shell blocks", () => {
   const blocks = blocksFrom(readFileSync(DOC, "utf8"));
 
-  test("all eleven shell blocks have the same arguments and status in bash and zsh", () => {
-    expect(blocks.length).toBe(11);
+  test("all thirteen shell blocks have the same arguments and status in bash and zsh", () => {
+    expect(blocks.length).toBe(13);
     const bash = Bun.which("bash");
     if (!bash) throw new Error("bash is not on PATH");
     const zsh = Bun.which("zsh");
@@ -340,7 +340,7 @@ describe("coachman shell blocks", () => {
       if (zsh) expect(norm(runBlock(block.source, zsh))).toEqual(norm(bashResult));
     }
 
-    const reviewers = runBlock(blocks[8]!.source, bash).calls;
+    const reviewers = runBlock(blocks[9]!.source, bash).calls;
     const cloneCall = reviewers.find(
       (args) => args[0] === "run" && args[1] === "cut-scratch" && args.includes("--clone"),
     );
@@ -350,7 +350,7 @@ describe("coachman shell blocks", () => {
     );
     expect(wait?.slice(6)).toEqual(["bug:luna", "bug:mimo", "security:luna", "security:mimo"]);
 
-    const failedLaneLogs = runBlock(blocks[9]!.source, bash).calls.filter(
+    const failedLaneLogs = runBlock(blocks[10]!.source, bash).calls.filter(
       (args) => args[0] === "run" && args[1] === "run-log" && args[3]?.includes("normalize failed"),
     );
     expect(failedLaneLogs.map((args) => args[3]?.split(" ")[3])).toEqual(["luna:", "mimo:"]);
@@ -359,7 +359,7 @@ describe("coachman shell blocks", () => {
   test("the argument checks reject unquoted expansions of multword shell arrays", () => {
     const bash = Bun.which("bash");
     if (!bash) throw new Error("bash is not on PATH");
-    const reviewBlock = blocks[8]!.source;
+    const reviewBlock = blocks[9]!.source;
     const correct = runBlock(reviewBlock, bash);
     const cloneMutation = runBlock(reviewBlock.replaceAll('"${CLONE[@]}"', "$CLONE"), bash);
     const reviewerMutation = runBlock(
