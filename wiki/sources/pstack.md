@@ -226,8 +226,8 @@ negative). The playbook stays **not a fit**; its nearest problem here is the gat
 Landed since the first report's last check (2026-10-04, `5c58c83`): [#251][i251], the booking clerk, which took the spec pause out of a
 run; [#252][i252], the cleanup script; [#265][i265], a time section in every fixture score; [#237][i237], the pause when a lane hits a
 provider limit; [#259][i259], what only degrades on macOS; [#291][i291], the rule that a criterion must be finishable; design rule 7 in
-`AGENTS.md` ([#282][i282]) and design rule 8 ([#298][i298]). In flight: [#202][i202], [#258][i258] (CI on Linux and macOS), [#270][i270] (single-thread mode),
-[#216][i216], [#266][i266] and [#268][i268]. Three research pages sit on branches that are not merged: the criteria of a ticket ([#293][i293]),
+`AGENTS.md` ([#282][i282]) and design rule 8 ([#298][i298]); and, while this page was being written, [#202][i202], the check for a lane's reach outside its worktree
+(2026-10-05, 14:51 UTC). In flight: [#258][i258] (CI on Linux and macOS), [#270][i270] (single-thread mode), [#216][i216], [#266][i266] and [#268][i268]. Three research pages sit on branches that are not merged: the criteria of a ticket ([#293][i293]),
 what a functional core opens up ([#300][i300]) and what exists for mixing models ([#277][i277]). Only the second is cited below, as unmerged.
 Today's incidents bear on four of the changes and are named where they do. Those taken from run folders are marked unverified, because
 a run folder is not promoted.
@@ -341,8 +341,8 @@ that reports every difference is noise.
 
 **Now: stands, in another form.** [#133][i133] has asked since 2026-09-29 for evidence that every control fails when the behaviour it names is broken,
 after three controls that passed whatever the code did. A fourth shape came on 2026-10-05. A fixture score added its reach item only if the run's pinned
-tool still held the script, so once the cleanup script released the pin, the score passed by leaving the item out; a later commit scores it from the run's
-recorded commit instead (unverified: the card and branch of the run for [#202][i202], not promoted). That is a check that passes when its input is missing,
+tool still held the script, so once the cleanup script released the pin, the score passed by leaving the item out. Commit `27a66d6`, now on main with [#202][i202], scores it from the run's
+recorded commit instead, and its comment in [`scripts/fixture.ts`][fixture-ts] says why: the pin may be released once the run is done, "and the score must not pass by leaving the item out". That is a check that passes when its input is missing,
 which pstack's five shapes of a test that cannot fail do not list [@articles/pstack-plugin-e43c7ee/passages.md].
 
 *Pstack's check does not fit as worded.* It asks whether a test would still pass if every function it imports returned nothing. Of this repository's 62 test
@@ -641,17 +641,17 @@ pages on three branches are cited as read on 2026-10-05 and move nothing here.
   names, in how scripts are called and in shell syntax made to run under zsh. None of that
   changes a rule or a section this page cites, read as a diff with the script names made alike.
   The contract list still names the files the ranked table says it does. Each ticket linked here
-  was read again, and all are open except #218.
+  was read again on 2026-10-04, and all were open except #218.
 - The plugin at commit [`e43c7ee`][c-e43c7ee] (2026-10-04, version 0.15.9), captured in
   `raw/articles/pstack-plugin-e43c7ee/`. Read: the comparison with `23e4138`, whole, and the eight
   files it changes, of which the new `/correct` skill is read in full, and two files it leaves unchanged that the page quotes, the principle on test
   shapes and the maintain-verification skill. Nothing else in the folder was read again.
 - Postmaster on main at `a265197`, 2026-10-05, after [#252][i252] landed, for the part "Read again on
-  2026-10-05": the runbooks, the scripts and their tests, and the tickets named there. Of the 47 tickets
-  this page links, nine have closed since the first reading, [#237][i237], [#251][i251],
-  [#252][i252], [#256][i256], [#257][i257], [#259][i259], [#265][i265], [#291][i291] and
-  [#298][i298]. Three were closed before it, [#115][i115], [#127][i127] and [#218][i218], and the
-  other 35 are open. The unmerged research pages on the
+  2026-10-05" (main moved to `c954eb2` when [#202][i202] landed, and the page was merged with it; claims about main are read at `a265197` unless they say otherwise): the runbooks, the scripts and their tests, and the tickets named there. Of the 48 tickets
+  this page links, eleven have closed since the first reading, [#202][i202], [#237][i237],
+  [#251][i251], [#252][i252], [#256][i256], [#257][i257], [#259][i259], [#265][i265], [#282][i282],
+  [#291][i291] and [#298][i298]. Three were closed before it, [#115][i115], [#127][i127] and
+  [#218][i218], and the other 34 are open (read 2026-10-05, 15:20 UTC). The unmerged research pages on the
   branches of [#293][i293], [#300][i300] and [#277][i277] were read for the parts that bear on
   candidates 4, 8 and 9; only the page on #300 is cited.
 - Six trials of this repository's own, recorded for the second reading:
@@ -743,6 +743,7 @@ so neither changes.
 [wiki-lint]: ../../scripts/wiki-lint.ts
 [aftercare]: ../../scripts/aftercare.ts
 [aftercare-test]: ../../scripts/aftercare.test.ts
+[fixture-ts]: https://github.com/brindlewick/postmaster/blob/c954eb2308aa92ebb19a247ece03b146d0832495/scripts/fixture.ts#L461-L481
 [github]: ../../scripts/github.ts
 [ticket-ready]: ../../scripts/ticket-ready.ts
 [verify]: ../../scripts/verify.ts
