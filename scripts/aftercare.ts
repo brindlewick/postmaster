@@ -39,7 +39,6 @@ import {
 import { spawnSync } from "node:child_process";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import {
-  bootId,
   dispatchInfo,
   launchRecord,
   liveLaunchNames,
@@ -48,7 +47,7 @@ import {
 } from "./host.ts";
 import { beside } from "./lib/paths.ts";
 import { argvDecoded, run, signalExitCode } from "./lib/proc.ts";
-import { processIsLive } from "./lib/processes.ts";
+import { bootId, processIsLive } from "./lib/processes.ts";
 import type { RunResult } from "./lib/proc.ts";
 import { pyWords } from "./lib/text.ts";
 import { isCurrent } from "./stage.ts";

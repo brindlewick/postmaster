@@ -18,10 +18,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { trackerArgv } from "./aftercare.ts";
-import { bootId, processes } from "./host.ts";
+import { processes } from "./host.ts";
 import { run } from "./lib/proc.ts";
 import { scriptsDir } from "./lib/paths.ts";
-import { processIsLive } from "./lib/processes.ts";
+import { bootId, processIsLive } from "./lib/processes.ts";
 
 const HERE = scriptsDir(import.meta);
 
