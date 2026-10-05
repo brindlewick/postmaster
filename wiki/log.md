@@ -1,12 +1,24 @@
 ---
 title: Log
 type: schema
-updated: 2026-10-04
+updated: 2026-10-05
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-05] ingest | functional programming, formal verification and AI coding
+
+Issue #300. Recorded `raw/trials/2026-10-04-review-findings-classified/`: the 84 serious review findings of runs
+#202, #216, #252 and #268, read against a rubric written first, with six anchors labelled before the rest, a
+second reader on 26 of them and the controls for the count. A stated property or a small model would have caught
+79; a pure core made the check possible for 24, none without a property; 5 were prose or inference. Added
+[What a functional core opens up for checking code, and what it does for coding with AI](concepts/functional-core-and-verification.md),
+**claimed**, with a map of 125 sources in five groups, captured under `raw/papers/` and
+`raw/articles/`, four claims weighed in both directions, four proposed changes to the design rules and the
+ticket template, and five small trials, none run. No standing changed.
+
 
 ## [2026-10-04] query | should setup create a project's verifiers with pstack's skill
 
