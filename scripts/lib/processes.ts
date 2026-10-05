@@ -172,6 +172,36 @@ export function processCommandLine(pid: number): string {
   }
 }
 
+/** Every process's command line in one listing: the /proc tree when it
+ * lists pids, else a single portable ps. A per-pid caller would pay a
+ * spawn per process on macOS. */
+export function processCommandLines(): Map<number, string> {
+  const table = new Map<number, string>();
+  try {
+    const root = procRoot();
+    for (const entry of readdirSync(root)) {
+      if (!/^[0-9]+$/u.test(entry)) continue;
+      const pid = Number(entry);
+      try {
+        table.set(pid, readFileSync(`${root}/${pid}/cmdline`, "utf8").replace(/\0/gu, " ").trim());
+      } catch {
+        // A process that exits mid-listing simply has no line.
+      }
+    }
+    // A live proc root always lists pids; none means the root is not a procfs.
+    if (table.size > 0) return table;
+  } catch {
+    // A missing or non-proc root forces the portable ps path used on macOS.
+  }
+  const result = run("ps", ["-A", "-o", "pid=,args="], { env: { LC_ALL: "C" } });
+  for (const row of result.out.split(/\r?\n/u)) {
+    const pid = Number(row.trim().split(/[ \t]+/u)[0]);
+    if (!Number.isSafeInteger(pid) || pid <= 0) continue;
+    table.set(pid, row.trim());
+  }
+  return table;
+}
+
 function runC(...args: string[]): string {
   return run(args[0]!, args.slice(1), { env: { LC_ALL: "C" } }).out.trim();
 }

@@ -127,6 +127,7 @@ import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
 import {
   bootId,
   processCommandLine,
+  processCommandLines,
   processStart,
   processState,
   processTable as sharedProcessTable,
@@ -1857,39 +1858,12 @@ function markerRemove(path: string): void {
 // path costs a spawn per process.
 function killPriorWatchers(marker: string): void {
   if (!marker) return;
-  const match = (pid: number, line: string): boolean => {
-    if (pid === process.pid) return false;
-    return line.split(/\s+/u).includes("_watch") && line.includes(marker);
-  };
-  const kill = (pid: number): void => {
+  for (const [pid, line] of processCommandLines()) {
+    if (pid === process.pid) continue;
+    if (!line.split(/[ \t]+/u).includes("_watch") || !line.includes(marker)) continue;
     try {
       process.kill(pid, "SIGKILL");
     } catch {}
-  };
-  try {
-    const root = process.env.POSTMASTER_PROC_ROOT || "/proc";
-    let listed = false;
-    for (const entry of readdirSync(root)) {
-      if (!/^[0-9]+$/u.test(entry)) continue;
-      listed = true;
-      const pid = Number(entry);
-      let line = "";
-      try {
-        line = readFileSync(`${root}/${pid}/cmdline`, "utf8").replace(/\0/gu, " ").trim();
-      } catch {
-        continue;
-      }
-      if (match(pid, line)) kill(pid);
-    }
-    if (listed) return;
-  } catch {
-    // A missing or non-proc root falls through to the single ps listing.
-  }
-  const result = run("ps", ["-A", "-o", "pid=,args="], { env: { LC_ALL: "C" } });
-  for (const row of result.out.split("\n")) {
-    const pid = Number(row.trim().split(/\s+/u)[0]);
-    if (!Number.isSafeInteger(pid) || pid <= 0) continue;
-    if (match(pid, row)) kill(pid);
   }
 }
 function _writeEnvPipe(path: string): void {

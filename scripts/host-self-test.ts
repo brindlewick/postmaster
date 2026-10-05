@@ -646,10 +646,10 @@ function field(text: string, key: string): string {
   return new RegExp(`(?:^|\\n|\\|)${key}=([^|\\n]*)`, "u").exec(text)?.[1] ?? "";
 }
 // A process's POSIX session id from the kernel's own call, through the
-// fixture's python3: `ps -o sess` is one column's reading, getsid is the
-// thing itself. Null when the link cannot run at all; an error string when
-// the link is viable but the call fails, which names a broken session maker
-// rather than a wrong session.
+// fixture's python3: the sess column is one reading, getsid is the thing
+// itself. Null when the link cannot run at all; an error string when
+// the link is viable but the call fails, which names a broken session
+// maker rather than a wrong session.
 function posixSession(pid: number, sysDir: string): { sid: number } | { error: string } | null {
   const tool = join(sysDir, "python3");
   try {

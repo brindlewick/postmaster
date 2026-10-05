@@ -14,6 +14,7 @@ import { join } from "node:path";
 import {
   bootId,
   bootTime,
+  processCommandLines,
   processInfo,
   processStart,
   processState,
@@ -202,6 +203,22 @@ describe("portable process state", () => {
         const table = processTable();
         expect(table.size).toBeGreaterThan(0);
         expect(table.get(process.pid)?.state).toBe("live");
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("the command-line listing names this process on both paths", () => {
+    const live = processCommandLines();
+    expect(live.size).toBeGreaterThan(0);
+    expect(live.get(process.pid)?.length ?? 0).toBeGreaterThan(0);
+    const root = mkdtempSync(join(tmpdir(), "process-lines-ps-"));
+    try {
+      withProcRoot(join(root, "missing-proc"), () => {
+        const fallback = processCommandLines();
+        expect(fallback.size).toBeGreaterThan(0);
+        expect(fallback.get(process.pid)?.length ?? 0).toBeGreaterThan(0);
       });
     } finally {
       rmSync(root, { recursive: true, force: true });
