@@ -40,3 +40,9 @@ language-model
 
 G4     claims: C2     direction: mixed (proof alone: a tuned 8B model beats general frontier models by a wide margin)
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The comparison above is between systems run on different budgets: the baselines ran at pass@128, while the new framework uses iterative hierarchical search with up to 128 decomposition iterations. The abstract says the figures hold "under the reported inference settings".
+
+The one-sentence summary under `says` above is replaced, in `source.md` and on the wiki page, by: On 427 Lean code-verification tasks with program and specification given, a specialised 8B proving model succeeded on 62.0%, against 23.8% for the best other model in the comparison, and general frontier models scored below about 24% on the same tasks; the baselines ran at pass@128 and the new system used up to 128 decomposition iterations, so the budgets differ.
+

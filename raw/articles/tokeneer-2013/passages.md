@@ -36,3 +36,9 @@ older (project 2003; reports 2006 to 2021)
 
 G2-adjacent (SPARK and Z, not in the brief's list, but the best-known industrial proof-and-specification project)     claims: C2, C3     direction: mixed (the clearest report that the cost was low, and the clearest that "verified" software still had defects)
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The sentence above includes "under a fixed price". Neither these notes nor the cited slides give it: slide 9 of the deck reads "Lines of code : 9939", "Total effort (days) : 260" and "Defects found to date : 5". The phrase is removed.
+
+The one-sentence summary under `says` above is replaced, in `source.md` and on the wiki page, by: A verified, 10,000-line security system was built in 260 person-days and the NSA's testers found no faults at the time, yet five defects were counted by 2013 and later work reports further problems that the proofs had not caught.
+

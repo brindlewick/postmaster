@@ -49,3 +49,9 @@ Route: arXiv abstract page, read by the research session on 2026-10-04.
 - "Claude generates arguably valid specifications for 98.8% of problems (with 81.3% also accepted by CLEVER's isomorphism-based scoring on the correct portion of the benchmark)" (single read (this read only))
 - "reaches a 98.1% success rate on the end-to-end program generation and verification pipeline over entries with self-consistent premises" (single read (this read only))
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The 98.1% is 154 of 157 entries: the paper says that across both runs 154 entries had at least one successful attempt, and "if we remove the 4 instances of issue in the benchmark itself, this success rate further rises to 98.1%" (Section 3.2). An entry counts if any attempt over two runs worked.
+
+The one-sentence summary under `says` above is replaced, in `source.md` and on the wiki page, by: Run through a compiler-in-the-loop coding-agent harness, Claude Opus 4.6 reached 98.1% end-to-end on CLEVER's Lean problems (154 of 157 entries, after setting aside 4 whose premises the benchmark broke, counting any success over two runs) where the benchmark paper's own end-to-end result had been 1 of 161, and in doing so it flagged bugs in about half of the benchmark's reference specifications.
+

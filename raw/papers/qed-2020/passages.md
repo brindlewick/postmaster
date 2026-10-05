@@ -36,3 +36,9 @@ older (2020)
 
 G2     claims: C2, C3     direction: mixed (survey; supports "proofs work at scale", records the costs and the trust gaps)
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The survey says (page 220): "An overwhelming majority of large successful software verification projects using proof assistants are carried out and maintained by small teams of highly specialized and trained researchers". That is a majority, not all.
+
+The one-sentence summary under `says` above is replaced, in `source.md` and on the wiki page, by: A survey of how large machine-checked proofs of programs are built, which says that large projects have mostly been carried out by small expert teams, that the cost literature finds proof effort tracking proof size, and that proof assistants and their extraction and linking steps are themselves part of what must be trusted.
+

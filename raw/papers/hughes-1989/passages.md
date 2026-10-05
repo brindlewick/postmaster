@@ -38,3 +38,7 @@ background for C1 (no group)     claims: C1     direction: mixed
 
 The reading helper's url line for this entry says it was VERIFIED against the page images of the source, naming the pages; the helper's notes for this group say an entry is verified only if its url line says so.
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The paper's own note says "This paper dates from 1984, and circulated as a Chalmers memo for many years." Its introduction says the advantages of functional programming "are often summed up more or less as follows": no side effects at all, which "eliminates a major source of bugs", and programs that are "more tractable mathematically". It then calls such a catalogue of advantages "not very convincing" and argues for modularity instead. Read in the saved PDF by the research session on 2026-10-05.
+

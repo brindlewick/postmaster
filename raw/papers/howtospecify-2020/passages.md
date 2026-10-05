@@ -38,3 +38,7 @@ G1     claims: C4, C1     direction: mixed
 
 The reading helper's url line for this entry says it was VERIFIED against the page images of the source, naming the pages; the helper's notes for this group say an entry is verified only if its url line says so.
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The version of record is 2020 (LNCS 12053); the work was presented at TFP 2019. Section 7 reads: "... code with side-effects demands a somewhat different approach. ... Nevertheless, the same ideas can be adapted to this setting; in particular, there are a number of state-machine modelling libraries for property-based testing tools that support a 'model-based' approach in a stateful setting." Read in the saved PDF by the research session on 2026-10-05.
+

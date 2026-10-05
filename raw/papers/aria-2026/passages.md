@@ -42,3 +42,9 @@ language-model
 
 G4 (also G2: Coq, Lean)     claims: C2     direction: supports C2 narrowly (proofs of given statements in a real verified library) with a contamination caveat
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The notes above record that the lemma statements already exist in public libraries, that no held-out lemmas or other contamination test were used, and that Iris is a public GitHub project whose proofs may be in the training data. The abstract says "no Coq expert intervention", not that no human was involved.
+
+The one-sentence summary under `says` above is replaced, in `source.md` and on the wiki page, by: A general coding agent wrapped in a verification harness re-proved every lemma it was given in the Iris separation-logic library (4,257 lemmas), 217 lemmas in Rust's standard libraries built on it, and 318 in a regular-language library, with no Coq expert intervention, using Claude Opus 4.7; the lemma statements come from public libraries and no held-out set was used.
+

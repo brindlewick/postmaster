@@ -35,3 +35,9 @@ older (2019)
 
 G2 (Coq)     claims: C2, C3     direction: supports (for C2; for the narrow case of finite-field arithmetic) with a stated trust base
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The sentence above says the code behind "most browser TLS handshakes in 2018" was machine-proved. The paper (IEEE S&P 2019, page 2) says: "so today about half of HTTPS connections opened by Web browsers worldwide use our fast verified code (Chrome versions since 65 have about 60% market share, and 90% of connections use X25519 or P-256)". That is the authors' estimate, for the key-exchange field arithmetic and not the whole handshake, and it says "today", not 2018.
+
+The one-sentence summary under `says` above is replaced, in `source.md` and on the wiki page, by: A Coq-checked generator for cryptographic arithmetic replaced hand-written code in BoringSSL, so that, by the authors' estimate, about half of the HTTPS connections that browsers open use the verified field arithmetic, with the proof covering one algorithm for many parameter sets.
+

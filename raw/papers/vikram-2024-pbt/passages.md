@@ -41,3 +41,9 @@ Route: arXiv abstract page, read by the research session on 2026-10-05.
 - "we find that with the best model and prompting approach, a valid and sound PBT can be synthesized in 2.4 samples on average" (single read (this read only))
 - "the best model (GPT-4) is able to automatically synthesize correct PBTs for 21% of properties extractable from API documentation" (checked: the reading helper's quote and this read give the same words)
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The properties were extracted from the API documentation by a model (GPT-4, five per method), and coverage is measured with property mutants; the 21% (about 20.5% in the body) is the best setting, and the other settings reach about 12% to 13%.
+
+The one-sentence summary under `says` above is replaced, in `source.md` and on the wiki page, by: Given only API documentation, the best model needed about 2.4 samples to get a Hypothesis test that runs and passes, but its tests covered only about a fifth of the properties a model had extracted from the documentation.
+

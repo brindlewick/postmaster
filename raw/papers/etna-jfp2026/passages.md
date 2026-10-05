@@ -38,3 +38,9 @@ G1     claims: C4 (and its cost side)     direction: background (it compares gen
 
 The reading helper's url line for this entry says it was VERIFIED against the page images of the source, naming the pages; the helper's notes for this group say an entry is verified only if its url line says so.
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The platform's journal paper was submitted to arXiv on 27 March 2026 and appears in the Journal of Functional Programming, volume 36 (2026); the 2023 ICFP experience report is an earlier account of the same work.
+
+The year given on the wiki page is 2026.
+

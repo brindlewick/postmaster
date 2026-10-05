@@ -34,3 +34,9 @@ language-model
 
 G3, G4     claims: C3     direction: supports, and it measures how the judging changes the figure
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The same outputs score from 10.0% to 1.7% as the screen gets stricter. The 18.7% adds a change to the input, the interface-supply choice, where the model is told the configuration's names.
+
+The one-sentence summary under `says` above is replaced, in `source.md` and on the wiki page, by: Every model wrote parseable TLA+ far more often than correct TLA+ (the best was correct 16% of the time by default), and the same outputs score from 10.0% to 1.7% depending on how strictly "correct" is screened, or 18.7% when the model is also told the configuration's names.
+

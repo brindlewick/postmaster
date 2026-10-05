@@ -41,3 +41,7 @@ Route: arXiv abstract page, read by the research session on 2026-10-05.
 - "24 state-of-the-art LLMs were evaluated on a freshly prepared dataset of 40 tasks." (single read (this read only))
 - "However, none of the LLMs were able to correctly formalize all the tasks in our benchmark." (single read (this read only))
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The abstract speaks of "full" pre- and postconditions and says that "none of the LLMs were able to correctly formalize all the tasks": the 40 tasks ask for both.
+

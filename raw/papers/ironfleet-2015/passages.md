@@ -36,3 +36,9 @@ older (2015)
 
 G2 (Dafny)     claims: C2, C3     direction: mixed
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The paper (SOSP 2015, page 12) says: "At the implementation layer, our ratio of proof annotation to executable code is 3.6 to 1." Figure 12 totals 39,253 lines of proof annotation against 5,114 lines of implementation, about 7.7 to 1 in all (my arithmetic from those totals).
+
+The one-sentence summary under `says` above is replaced, in `source.md` and on the wiki page, by: Two verified distributed systems (a Paxos-based replicated state machine library and a sharded key-value store), written in Dafny, cost about 3.7 person-years including inventing the method and carry about 3.6 lines of proof annotation per line of executable code at the implementation layer, and about 7.7 to 1 in total by Figure 12's counts.
+

@@ -40,3 +40,9 @@ language-model
 
 G4 (also G1: property-based testing of specifications)     claims: C2, C3, C4     direction: supports (PBT found real defects in expert-written reference specifications; staged checking beat a single verifier) with a stated limit
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The sentence above says the same tests found 16 defective reference specifications in Verina and 18 in CLEVER. The paper (Section 5.2) says property-based testing found 13 issues in Verina and 18 in CLEVER "purely via PBT", and "in total, we identify 16 issues in VERINA ... with the help of Aristotle", an AI prover doing equivalence checking, which takes about 8 hours.
+
+The one-sentence summary under `says` above is replaced, in `source.md` and on the wiki page, by: A pipeline in Lean that tests each model-written specification with randomised property-based tests before any code is written certified 28 of 50 LeetCode-style problems against 17 for a single-mode Lean baseline at a $5 budget per problem; the same tests found 13 defective reference specifications in Verina and 18 in CLEVER, and an AI prover's equivalence check brought the Verina total to 16.
+

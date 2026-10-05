@@ -46,4 +46,6 @@ Route: PDF pages 1, 12 and 13 read as page images, and the text layer of the sav
 - "Those two activities uncovered 16 defects in the implementation before verification had started in earnest, the formal verification has uncovered another 144 defects and resulted in 54 further changes to the code to aid in the proof." (single read (this read only))
 - "which suggests that normal testing may not only miss hard and subtle bugs, but also a larger number of simple, obvious faults than one may expect." (single read (this read only))
 - "By the time the second refinement started, the kernel had been used by a number of internal student projects and the x86 port was underway." (single read (this read only))
+- "None of the bugs found in the C verification stage were deep in the sense that the corresponding algorithm was flawed." (single read (this read only))
+- "The bugs discovered in the second proof from executable spec to C were mainly typos, misreading the specification, or failing to update all relevant code parts for specification changes." (single read (this read only))
 

@@ -34,3 +34,9 @@ language-model
 
 G4     claims: C3     direction: supports (the user must confirm the intent; the model alone cannot)
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The paper's evaluation used "between 1 to 5 simulated user queries": the answers in the lifts above are simulated, not from people.
+
+The one-sentence summary under `says` above is replaced, in `source.md` and on the wiki page, by: The model proposes input-output tests, a person answers yes or no to each, and the answers prune and rank code candidates, lifting Codex's pass@1 by 22-38 points on MBPP and 25-54 points on HumanEval within one to five questions, which in the paper's evaluation were answered by simulated users.
+

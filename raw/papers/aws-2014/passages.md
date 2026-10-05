@@ -35,3 +35,9 @@ older (2014)
 
 G3 (TLA+, another helper's area); used here only for what it says about specification effort and limits     claims: C3 (also C2)     direction: mixed
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The table in the report (page 3) has six component rows, not five: S3 low-level network algorithm (2 bugs), S3 background redistribution (1 bug, and a bug in the first proposed fix), DynamoDB replication (3 bugs), EBS volume management (3 bugs), the lock manager's lock-free data structure ("Improved confidence. Failed to find a liveness bug") and the lock manager's replication algorithm (1 bug). That is bugs in five of the six.
+
+The one-sentence summary under `says` above is replaced, in `source.md` and on the wiki page, by: Amazon engineers learned TLA+ in two to three weeks and wrote design-level specifications of 102 to 939 lines that, in the authors' account, "added significant value" in all 10 systems (bugs found in five of the six components in their table; the sixth, a lock-free structure, got "improved confidence" and missed a liveness bug the spec did not state), while the authors state that nothing checks that the code implements the verified design.
+

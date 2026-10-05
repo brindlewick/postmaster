@@ -34,3 +34,9 @@ language-model
 
 G2, G4     claims: C3     direction: supports
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The paper's abstract says only that the outputs "preserve functional behavior, but struggle to be verifiable". The notes above count 106 of 126 outputs that kept the intended functional behaviour in the pre- and postconditions (84%) and 123 of 126 in the source code.
+
+The one-sentence summary under `says` above is replaced, in `source.md` and on the wiki page, by: GPT-4o kept the intended functional behaviour in most outputs (106 of 126 specification files) but only 9 of 126 output files verified.
+

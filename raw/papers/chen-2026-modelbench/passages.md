@@ -34,3 +34,9 @@ language-model
 
 G3, G4     claims: C3     direction: supports (models are weak at modelling code formally)
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The abstract's own summary is "only 66.25% runnable and 49.55% state similarity under in-context learning at best": DeepSeek-V3 is 51.75% at Runnable@1 and 66.25% at Runnable@3.
+
+The one-sentence summary under `says` above is replaced, in `source.md` and on the wiki page, by: Open-weight models turn Python programs into TLA+ models that run in about half of the cases on the first try and in two thirds in three tries at best, and reproduce about half of the program's states.
+

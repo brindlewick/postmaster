@@ -36,3 +36,7 @@ older (2017)
 
 G2 (Dafny, Coq)     claims: C2, C3     direction: mixed (it is the main source that a verified system still failed, and where)
 
+## Corrected after an independent check of the page against its sources, 2026-10-05
+
+The `how chosen` and `strength` lines above call this an independent study "by people outside the teams". The paper does not say that. Its authors are Pedro Fonseca, Kaiyuan Zhang, Xi Wang and Arvind Krishnamurthy (University of Washington); the Verdi paper, one of the three systems studied, lists Xi Wang among its authors. The paper says only that its authors "searched for protocol bugs and spent more than eight months in this process". Of the 2 bugs in the specification, the developers disputed one: they stated that their understanding of linearizability does not include exactly-once semantics, and the authors "consider this a bug because generally applications expect" it (bug I1). The wiki page says "a group that included a co-author of one of them (Verdi)" and "the developers disputed one".
+
