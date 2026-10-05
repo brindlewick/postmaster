@@ -3,7 +3,7 @@ title: The dashboard shows the fleet and can do nothing to it
 type: concept
 standing: claimed
 sources: []
-updated: 2026-09-29
+updated: 2026-10-05
 ---
 
 # The dashboard shows the fleet and can do nothing to it
@@ -66,6 +66,54 @@ work too.
 
 Every control works by touch, and none depends on hover. The page follows the device's light or
 dark setting.
+
+## How it looks
+
+The user chose the look on 2026-10-05, from clickable prototypes on made-up sample data, before
+any of the dashboard was built ([#238](https://github.com/brindlewick/postmaster/issues/238)).
+
+**The choice.** The prototype GPT-6 Astra built on the seed "engraved navy and coral", a
+landing page published on [Dribbble](https://dribbble.com/shots/11124390). In the user's words:
+"let's go with engraved navy and coral from astra".
+
+**How it was reached**, in the user's words at each step:
+
+1. Five models each built a prototype from the same brief. The user first took Opus 5.5's as a
+   starting point, then turned all five down: "I don't like any of them, can you use dribble.com
+   to find five suitable design seeds, and then have each model crate a prototype based on each
+   seed".
+2. Each model built on each of five Dribbble designs, then on postmaster's own README poster as
+   well: "i want to add one more seed which is the image in the readme of postmaster". GPT-6 Astra
+   joined as a sixth model: "let's have astra do a prototype for each seed".
+3. The user asked for seeds from the coaching era: "websites inspired by typography or letters
+   and aesthetics from the postmaster time period". Of eight such designs: "I want all 8 as seeds
+   and I only want astra to work on them".
+
+That made 44 prototypes. Each was read whole before the user saw it, and what reading found was
+shown beside it.
+
+**What the chosen prototype carries.**
+
+- Cream paper, navy ink and coral, from the seed. Dark mode keeps them on deep navy.
+- Headings in a display serif (DM Serif Display) underlined in coral, reading text in Source
+  Serif 4, and times, figures and code in IBM Plex Mono.
+- Ruled boxes with their label set into the top rule, like a form. The postmaster's own question
+  sits in one washed in coral.
+- Four large counts under the masthead: waiting on you, waiting on the postmaster, running and
+  closed. Under them, a navy bar names the stalled runs, with a coral button to them.
+- A stalled run has a coral border, a coral wash and a coral band. A held run has a dashed label.
+- Diamond marks drawn for the page, in place of the seed's engravings, which it does not copy.
+- On a wide screen, the user's questions in a side column, and a board with a column for each
+  stage in use, the postmaster's waits above the running runs.
+
+**What to fix when it is built.** Reading the prototype found two places where it does not follow
+its data. The project's name in the masthead is typed in, and the wide board always has six stage
+columns, the number the sample happens to fill.
+
+The prototypes are throwaway pages, kept out of this repository. All 44 are on one private page
+on the user's account,
+[Seed Round Prototypes](https://claude.ai/code/artifact/e9a96b9b-1f24-4c22-80d2-3bf124f2e255),
+each beside its seed's pictures.
 
 ## What the user can do from it
 
