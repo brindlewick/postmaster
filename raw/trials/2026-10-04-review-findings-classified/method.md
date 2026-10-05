@@ -200,7 +200,7 @@ first reading were committed. Its seven `finding` lines are in
 [data/finding-lines-268-round4.jsonl](data/finding-lines-268-round4.jsonl) and the run's escalation card, which
 now supersedes the round-3 one, in [data/cards/268-ESCALATION-round4.md](data/cards/268-ESCALATION-round4.md). Four
 are serious: two P1 and two P2. They are not in the 84. The first reader labelled them against the same rubric,
-alone and without a second reader, in [held-out.tsv](held-out.tsv): all four are `prop`, two cheap clear or
-arguable and one heavy. Two are further cases of the lexing family that had already produced the round-2 findings,
+alone and without a second reader, in [held-out.tsv](held-out.tsv): all four are `prop`, three cheap and one
+heavy. Two are further cases of the lexing family that had already produced the round-2 findings,
 one is identical directives sharing an approval identity and one is five settings file names the check did not
 list. None is the identity-coverage class that the round-3 escalation proposed to close with a conservative window.
