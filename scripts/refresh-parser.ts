@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { toolRoot } from "./lib/paths.ts";
 
 const REGISTRY = "https://registry.npmjs.org/@babel/parser";
-const VERSION_RE = /^(\d+)\.(\d+)\.(\d+)$/u;
+const VERSION_RE = /^([0-9]+)\.([0-9]+)\.([0-9]+)$/u;
 
 /** The version to vendor: the argument when given, else the registry's
  * latest. A major other than 7 refuses: a new Babel major needs a look
