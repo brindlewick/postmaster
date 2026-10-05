@@ -686,6 +686,72 @@ describe("ticket #202 fixture reach score", () => {
       writeFileSync(actionsPath, originalActions);
     }
   }, 240000);
+
+  function withPostmaster(
+    dispatch: string,
+    mutate: (postmaster: Record<string, unknown>) => void,
+  ): string {
+    const runPath = join(dispatch, "run.json");
+    const original = readFileSync(runPath, "utf8");
+    const run = JSON.parse(original) as Record<string, unknown>;
+    mutate(run.postmaster as Record<string, unknown>);
+    writeFileSync(runPath, JSON.stringify(run));
+    return original;
+  }
+
+  test("a run whose pin directory is gone is still scored on reach", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const head = run("git", ["-C", TOOL, "rev-parse", "HEAD"]).out.trim();
+    const runPath = join(dispatch, "run.json");
+    const original = withPostmaster(dispatch, (postmaster) => {
+      postmaster.checkout = join(tmp, "no-such-pin");
+      postmaster.commit = head;
+    });
+    try {
+      const result = runScore(dispatch, repo);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain("ok   reach");
+    } finally {
+      writeFileSync(runPath, original);
+    }
+  }, 120000);
+
+  test("a recorded commit without reach.ts scores no reach item", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const root = run("git", ["-C", TOOL, "rev-list", "--max-parents=0", "HEAD"])
+      .out.trim()
+      .split("\n")[0]!;
+    const runPath = join(dispatch, "run.json");
+    const original = withPostmaster(dispatch, (postmaster) => {
+      postmaster.commit = root;
+    });
+    try {
+      const result = runScore(dispatch, repo);
+      expect(result.code).toBe(0);
+      expect(result.out).not.toContain("reach");
+    } finally {
+      writeFileSync(runPath, original);
+    }
+  }, 120000);
+
+  test("a recorded commit git cannot read fails the score", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const runPath = join(dispatch, "run.json");
+    const original = withPostmaster(dispatch, (postmaster) => {
+      postmaster.commit = "0".repeat(40);
+    });
+    try {
+      const result = runScore(dispatch, repo);
+      expect(result.code).toBe(1);
+      expect(result.out).toContain("fixture:");
+      expect(result.out).toContain("reach");
+    } finally {
+      writeFileSync(runPath, original);
+    }
+  }, 120000);
 });
 
 function captureStderr<T>(fn: () => T): { value: T; errs: string[] } {

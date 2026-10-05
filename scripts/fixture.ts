@@ -458,16 +458,28 @@ export function score(dispatch: string, repo: string): { code: number; out: stri
     { name: "efforts", ...checkWaybillEfforts(dispatch), out: "" },
     { name: "ship-card", ...checkCard(dispatch), out: "" },
   ];
+  // The reach item follows the run's recorded commit, not its pin directory:
+  // aftercare may release the pin once the run is done, and the score must
+  // not pass by leaving the item out. No recorded commit (a run from before
+  // pins) scores no item, as before; an unreadable commit fails the score.
   const postmaster = meta?.postmaster;
-  const pinnedTool =
-    typeof postmaster === "object" &&
-    postmaster !== null &&
-    !Array.isArray(postmaster) &&
-    typeof (postmaster as Record<string, unknown>).checkout === "string"
-      ? ((postmaster as Record<string, unknown>).checkout as string)
-      : "";
-  if (pinnedTool && existsSync(join(pinnedTool, "scripts", "reach.ts"))) {
-    results.push({ name: "reach", ...checkReach(dispatch), out: "" });
+  const recorded =
+    typeof postmaster === "object" && postmaster !== null && !Array.isArray(postmaster)
+      ? (postmaster as Record<string, unknown>).commit
+      : undefined;
+  if (typeof recorded === "string" && recorded) {
+    const known = sh(["git", "-C", TOOL, "rev-parse", "--verify", "-q", `${recorded}^{commit}`]);
+    if (known.code !== 0 || !(known.out ?? "").trim()) {
+      rmSync(scratch, { recursive: true, force: true });
+      return {
+        code: 1,
+        out: `fixture: cannot tell whether ${recorded.slice(0, 12)} holds the reach check: git cannot read that commit\n`,
+      };
+    }
+    const blob = sh(["git", "-C", TOOL, "cat-file", "-e", `${recorded}:scripts/reach.ts`]);
+    if (blob.code === 0) {
+      results.push({ name: "reach", ...checkReach(dispatch), out: "" });
+    }
   }
   rmSync(scratch, { recursive: true, force: true });
   const scored = report(results);
