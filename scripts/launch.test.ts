@@ -1362,7 +1362,10 @@ beforeAll(() => {
       // Native, so no shell startup bump colors the reading: dash keeps the
       // handed level while bash counts one more, and the control pins what
       // the launcher hands, not what the stub's interpreter does with it.
-      writeFileSync(claude, '#!/usr/bin/env bun\nconsole.log(`shlvl=${process.env.SHLVL ?? "<unset>"}`);\n');
+      writeFileSync(
+        claude,
+        '#!/usr/bin/env bun\nconsole.log(`shlvl=${process.env.SHLVL ?? "<unset>"}`);\n',
+      );
       envx = { SHLVL: "7" };
       carries(
         "an env file launch hands the launcher's level",

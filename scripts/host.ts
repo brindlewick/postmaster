@@ -3395,11 +3395,7 @@ function legMutexTake(mutexPath: string, maxTries: number): MutexTake {
       // verdict belongs to a fresh holder: unlinking either would take a live
       // file with it. Only the dead verdict's own content is stolen.
       const seen = legMutexVerdict(mutexPath);
-      if (
-        seen.verdict === "dead" &&
-        seen.text !== null &&
-        legMutexRead(mutexPath) === seen.text
-      ) {
+      if (seen.verdict === "dead" && seen.text !== null && legMutexRead(mutexPath) === seen.text) {
         try {
           rmSync(mutexPath, { force: true });
         } catch {}
