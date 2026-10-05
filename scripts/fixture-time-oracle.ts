@@ -374,6 +374,13 @@ function buildDispatch(
       runTool(["log-action", d, "coachman", "dispatch", lane, `thread-${lane}`]).code === 0,
       `could not log the ${lane} dispatch for ${name}`,
     );
+    // A synthesis run keeps its workhorse branches; the mode check wants one per lane.
+    if (git(repoDir, ["show-ref", "--verify", "-q", `refs/heads/wb/7-${lane}`]).code !== 0) {
+      need(
+        git(repoDir, ["branch", `wb/7-${lane}`, base]).code === 0,
+        `could not cut wb/7-${lane} for ${name}`,
+      );
+    }
   }
   const through1 = ["bootstrapped", "workhorses-running", "synthesis", "checkpoint-1"];
   if (design.legs === 1) {
