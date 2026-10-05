@@ -813,7 +813,7 @@ oracle("C13: escalate names each walled workhorse, its reset and the ruling", (l
   ]) {
     expect(esc).toContain(pinned);
   }
-  const resetShown = /oct/iu.test(esc) || esc.includes("10-05") || esc.includes("10/05");
+  const resetShown = /Reset: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}/u.test(esc);
   expect(resetShown).toBe(true);
   expect(esc.includes("go-on") || esc.includes("go on")).toBe(true);
   expect(existsSync(join(lay.dispatch, ".escalation-ready"))).toBe(true);
