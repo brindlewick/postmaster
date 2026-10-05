@@ -314,7 +314,7 @@ function handleOf(text: string): string {
 // text.ts: BASE re.sub(r"\s{2,}\(.*\)$", "", line[5:]).strip() (host.sh:142).
 const NOTE_STRIP = new RegExp("[" + PY_S_CLASS + "]{2,}\\(" + PY_DOT + "*\\)" + END_OF_STRING, "u");
 
-function dispatchInfo(dispatch: string): { name: string; worktree: string } {
+export function dispatchInfo(dispatch: string): { name: string; worktree: string } {
   let lines: string[] = [];
   try {
     lines = pySplitLines(readFileSync(join(dispatch, "brief.md"), "utf8"));
@@ -513,6 +513,7 @@ type Registry = {
 function runBoot(...args: string[]): string {
   return run(args[0]!, args.slice(1), { env: { LC_ALL: "C" } }).out.trim();
 }
+
 function bootTime(): number | null {
   try {
     const text = readFileSync("/proc/stat", "utf8");
@@ -531,7 +532,7 @@ function bootTime(): number | null {
 function startOf(pid: number): string {
   return processStart(pid) ?? "";
 }
-function processes(): Map<number, ProcessInfo> {
+export function processes(): Map<number, ProcessInfo> {
   const table = new Map<number, ProcessInfo>();
   for (const [pid, info] of sharedProcessTable()) {
     if (info.state === "live" && info.start)
@@ -4916,14 +4917,16 @@ async function main(): Promise<void> {
       );
   }
 }
-main().catch((error: unknown) => {
-  if (isHostError(error)) {
-    if (error.message) console.error(`host: ${error.message}`);
-    process.exit(hostCode(error));
-  }
-  console.error(`host: ${String((error as Error)?.message ?? error)}`);
-  process.exit(1);
-});
+// The one entry: imported for its helpers (aftercare.ts), the module runs nothing.
+if (import.meta.main)
+  main().catch((error: unknown) => {
+    if (isHostError(error)) {
+      if (error.message) console.error(`host: ${error.message}`);
+      process.exit(hostCode(error));
+    }
+    console.error(`host: ${String((error as Error)?.message ?? error)}`);
+    process.exit(1);
+  });
 function tmuxCloseWindow(window: string, pane: string): number {
   if (pane) return tmuxFinishPlacement(window, pane);
   // A window from before panes were recorded: a lone pane is the host's own
@@ -5365,8 +5368,42 @@ function pyStrScalar(value: unknown): string {
   }
 }
 
+/** The launch registry's record for a group leader, as `run` writes it. aftercare.ts reads
+ * it to verify a recorded launch before signalling its process group. */
+export function launchRecord(group: number): Registry | null {
+  return loadRecord(recordPath(group));
+}
+
+/** Live launches registered for one directory, read-only: their names, as close's scan
+ * finds them, with nothing removed. aftercare.ts's dry run reads this, skipping the preview
+ * group it plans to stop. */
+export function liveLaunchNames(dir: string, exceptGroup?: number): string[] {
+  const procs = processes();
+  const boot = bootId();
+  let names: string[] = [];
+  try {
+    names = readdirSync(registryDir()).sort();
+  } catch {
+    return [];
+  }
+  const found: string[] = [];
+  for (const name of names) {
+    if (!/^[0-9]+$/u.test(name)) continue;
+    const rec = loadRecord(join(registryDir(), name));
+    if (!rec || rec.dir !== dir) continue;
+    const group = Number(name);
+    if (exceptGroup !== undefined && group === exceptGroup) continue;
+    const live =
+      (rec.start !== "" && procs.get(group)?.start === rec.start) ||
+      rec.members.some(([pid, start]) => procs.get(pid)?.start === start) ||
+      (rec.start === "" && procs.has(group));
+    if (live && (!rec.boot || sameBoot(rec.boot, boot))) found.push(rec.name);
+  }
+  return found;
+}
+
 // NUL-separated worktrees made for one dispatch, from its waybill and records.
-function runWorktreePaths(givenDispatch: string): string[] {
+export function runWorktreePaths(givenDispatch: string): string[] {
   // One parser for the waybill: dispatch_info takes the last ## Dispatch
   // section, so ticket text quoting a waybill cannot redirect teardown.
   const dispatch = realpathLoose(givenDispatch);
