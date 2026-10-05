@@ -717,9 +717,9 @@ describe("ticket #202 fixture reach score", () => {
     expect(result.code).toBe(0);
     expect(result.out).toContain("ok   reach");
     const scored = result.out.split("\n").filter(Boolean);
-    expect(scored.filter((l) => l.startsWith("ok  ") || l.startsWith("FAIL"))).toHaveLength(10);
+    expect(scored.filter((l) => l.startsWith("ok  ") || l.startsWith("FAIL"))).toHaveLength(11);
     expect(
-      scored.slice(11).some((l) => l.startsWith("stage ") || l.includes("could not be timed")),
+      scored.slice(12).some((l) => l.startsWith("stage ") || l.includes("could not be timed")),
     ).toBe(true);
   }, 120000);
 
@@ -1372,9 +1372,9 @@ describe("score: a recorded run that meets every check scores clean", () => {
     const clean = runScore(dispatch, repo, { ...process.env, PATH: path });
     expect(clean.code).toBe(0);
     const lines = clean.out.trim().split("\n");
-    expect(lines.slice(1, 11).every((line) => line.startsWith("ok  "))).toBe(true);
-    expect(lines[11]?.startsWith("stage ")).toBe(true);
-    expect(lines.length).toBeGreaterThan(11);
+    expect(lines.slice(1, 12).every((line) => line.startsWith("ok  "))).toBe(true);
+    expect(lines[12]?.startsWith("stage ")).toBe(true);
+    expect(lines.length).toBeGreaterThan(12);
     console.log(`score without jq:\n${clean.out.trimEnd()}`);
 
     const withoutNpm = scorePath(["jq", "npm"]);
@@ -1407,7 +1407,7 @@ describe("score: a recorded run that meets every check scores clean", () => {
     expect(out.split("\n", 1)[0]).toBe(cleanOut.split("\n", 1)[0]);
     expect(
       out.split("\n").filter((l) => l.startsWith("ok  ") || l.startsWith("FAIL")),
-    ).toHaveLength(10);
+    ).toHaveLength(11);
     console.log(`failing score:\n${out.trimEnd()}`);
   });
 
