@@ -618,6 +618,70 @@ describe("workhorse and stop-pidfile", () => {
     }
   }, 40000);
 
+  test("host stop-pidfile stops members orphaned after the leader exits", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "host-pidfile-orphan-"));
+    try {
+      const orphanPidFile = join(dir, "orphan.pid");
+      const child = spawn("bash", ["-c", `sleep 300 & echo $! > ${orphanPidFile} && sleep 2`], {
+        stdio: "ignore",
+        detached: true,
+      });
+      const leader = child.pid!;
+      const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      const pidfile = join(dir, "preview.pid");
+      writeFileSync(pidfile, `${leader}\n`);
+      const deadline = Date.now() + 15000;
+      while (Date.now() < deadline && processState(leader) === "live") await Bun.sleep(50);
+      await Promise.race([exited, Bun.sleep(15000)]);
+      const orphan = Number(readFileSync(orphanPidFile, "utf8").trim());
+      expect(processState(orphan)).toBe("live");
+      const r = spawnSync(join(import.meta.dir, "run"), ["host", "stop-pidfile", pidfile], {
+        encoding: "utf8",
+        timeout: 30000,
+      });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain("stopped the process group of");
+      const gone = Date.now() + 15000;
+      while (Date.now() < gone && processState(orphan) === "live") await Bun.sleep(50);
+      expect(processState(orphan)).not.toBe("live");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
+
+  test("a recorded pidfile stops orphans too, not just a live leader", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "host-pidfile-orphan-recorded-"));
+    try {
+      const orphanPidFile = join(dir, "orphan.pid");
+      const child = spawn("bash", ["-c", `sleep 300 & echo $! > ${orphanPidFile} && sleep 2`], {
+        stdio: "ignore",
+        detached: true,
+      });
+      const leader = child.pid!;
+      const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      const start = processStart(leader);
+      expect(start).not.toBeNull();
+      const pidfile = join(dir, "preview.pid");
+      writeFileSync(pidfile, `${leader}\n${start}\n${currentBootId()}\n`);
+      const deadline = Date.now() + 15000;
+      while (Date.now() < deadline && processState(leader) === "live") await Bun.sleep(50);
+      await Promise.race([exited, Bun.sleep(15000)]);
+      const orphan = Number(readFileSync(orphanPidFile, "utf8").trim());
+      expect(processState(orphan)).toBe("live");
+      const r = spawnSync(join(import.meta.dir, "run"), ["host", "stop-pidfile", pidfile], {
+        encoding: "utf8",
+        timeout: 30000,
+      });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain("stopped the process group of");
+      const gone = Date.now() + 15000;
+      while (Date.now() < gone && processState(orphan) === "live") await Bun.sleep(50);
+      expect(processState(orphan)).not.toBe("live");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
+
   test("a pidfile a launch wrote stops that launch", async () => {
     const dir = mkdtempSync(join(tmpdir(), "host-pidfile-roundtrip-"));
     try {

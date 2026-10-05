@@ -2852,7 +2852,8 @@ async function workhorseCmd(args: string[]): Promise<void> {
  * The process group a pidfile names, stopped as `stop` stops a worktree's launches.
  * A pidfile in the form `run` writes (pid, start, boot) stops only the launch it
  * recorded: a reused number whose start or boot differs is already gone. A bare pid
- * stops whatever holds the number now.
+ * stops whatever holds the number now. A dead leader with live members is an orphaned
+ * group, stopped through its members as the registry's backfill does.
  */
 async function stopPidfileCmd(args: string[]): Promise<void> {
   const file = args[0] ?? "";
@@ -2870,17 +2871,27 @@ async function stopPidfileCmd(args: string[]): Promise<void> {
   if (pid <= 0) die(`${file} does not hold a pid: ${text.trim()}`);
   const table = processTable();
   const row = table.get(pid);
-  if (row === undefined || row.zombie) {
-    console.log(`no process group of ${pid} is running`);
-    return;
+  if (row !== undefined && !row.zombie && parts.length === 3) {
+    if (row.start !== parts[1] || bootId() !== parts[2]) {
+      console.log(`no process group of ${pid} is running`);
+      return;
+    }
   }
-  if (parts.length === 3 && (row.start !== parts[1] || bootId() !== parts[2])) {
+  // A leader no live process holds leaves either nothing or an orphaned group: a
+  // stranger's group always has its leader alive, so live members here are ours.
+  const roots =
+    row !== undefined && !row.zombie
+      ? [`group|${pid}|${row.start}`]
+      : [...table]
+          .filter(([, r]) => r.group === pid && !r.zombie)
+          .map(([member, r]) => `tree|${member}|${r.start}`);
+  if (roots.length === 0) {
     console.log(`no process group of ${pid} is running`);
     return;
   }
   const grace = count(process.env.POSTMASTER_HOST_STOP_WAIT ?? "20", "POSTMASTER_HOST_STOP_WAIT");
   const most = count(process.env.POSTMASTER_HOST_STOP_MAX ?? "512", "POSTMASTER_HOST_STOP_MAX");
-  const result = await stopTree(grace, most, [`group|${pid}|${row.start}`]);
+  const result = await stopTree(grace, most, roots);
   const fields = result.text.split("\t");
   if (result.code === 0)
     console.log(`stopped the process group of ${pid}: ${fields[0]} process(es)`);
