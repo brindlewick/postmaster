@@ -1,7 +1,7 @@
 ---
 title: Sources
 type: source
-updated: 2026-10-03
+updated: 2026-10-05
 ---
 
 # Sources
@@ -12,6 +12,10 @@ captured into `raw/`, saying what it claims and what it would mean here if true.
 
 ## Articles
 
+- [Sources read for tickets and acceptance criteria](../concepts/ticket-and-criteria-design.md#the-map):
+  69 papers and pages on requirements, acceptance criteria, formal limits and coding-agent specs, read
+  on 2026-10-04. They have no page here, and the page that cites them lists each with the day it was
+  read.
 - [pstack](pstack.md) (2026): a plugin of skills and principles for verified agent work, and
   Part 1 of its guide. Postmaster already holds most of it, and nine changes are worth making.
 - [The AI-native SDLC playbook](ai-native-sdlc-playbook.md) (2026): design review happens
