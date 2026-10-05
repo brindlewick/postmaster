@@ -183,3 +183,12 @@ property or the function to extract, and the reason. The second reader's rows ar
   which make unique names and not inputs. The control through the same command is `scripts/log-action.test.ts`
   on `origin/main`, which matches (its decoder test is described as seeded cases against `iconv -c`). A
   `test(` that does not open its line is not counted, so the case counts are a floor.
+
+## Round 4 of #252, logged after the count
+
+Run #252's fourth review round was logged at 2026-10-04 23:13 UTC, after the 84 findings were counted.
+Its nine `finding` lines, read on 2026-10-05 at 00:26 UTC and copied unchanged to
+[data/finding-lines-252-round4.jsonl](data/finding-lines-252-round4.jsonl), are one style finding and eight gating
+P3 findings: none is serious, so the same command that reads 14 serious lines on the first 37 reads 0 on
+these (`grep -cE '"detail": ?"gating P[12] '`). They are not in the 84, and #268's round 4 had not been
+logged when they were read.
