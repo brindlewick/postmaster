@@ -475,6 +475,24 @@ from it.
   its journey reports included, to
   `<dispatch>/audit/<lane>-verify/`. Attach every audit to the checkpoint 1 card. Do the same for
   any later fix thread a checkpoint relies on.
+- **Check lane reach before synthesis.** Run the reach control on the run layout after every
+  workhorse has been harvested and audited, before setting `synthesis` or staging any synthesis
+  work:
+
+  ```sh
+  REACH_EXIT=0
+  <tool>/scripts/run reach check <dispatch> workhorses \
+    > <dispatch>/logs/reach-workhorses.txt || REACH_EXIT=$?
+  cat <dispatch>/logs/reach-workhorses.txt
+  ```
+
+  Exit 1 is a fault in the `reach` control: follow Tool faults and stop the leg. Exit 0 or 3
+  continues; 3 means notes or a lane record the script could not read, and that lane is never
+  called clean. On exit 2, do not stage synthesis. Write `ESCALATION.md` with the reach lines,
+  the affected workhorse where a lane's record explains the reach, and your advice on whether
+  its work is safe to use, log `escalate`,
+  touch `.escalation-ready`, and exit. The postmaster sends every reach to the user, who decides
+  whether synthesis may proceed. Do not decide it on the user's behalf.
 - **THERE IS NO SYNTHESIS BASE. You are the synthesizer: judge, then compose.** Set the stage
   first, `<tool>/scripts/run stage <dispatch> synthesis`. Do not fast-forward the ticket branch onto any
   lane. Start from BASE and write the synthesis
@@ -779,6 +797,7 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
          || { echo "SCRATCH NOT READY: <TICKET>-rev-$LENS-$L; nothing launched"; exit 1; }
      done
    done
+   <tool>/scripts/run reach before <dispatch> <round> || exit 1
    <tool>/scripts/run review-round start <dispatch> <round> || exit 1
    REVIEWERS=()
    for LENS in <open lenses>; do
@@ -895,10 +914,35 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    round. A scratch it leaves in place is named with its reason, such as the user having its
    space open, and reported; it is never removed by hand. A scratch never holds work, and its
    contents were just checked.
-   Also assert the synthesis worktree itself is still clean. With every lane on a copy, nothing
-   should touch it during a review round; a dirty synthesis tree is an escape and an incident to
-   investigate before continuing. When later staging fixes in the synthesis worktree, prefer a
-   targeted `git add <paths>` over `git add -A`.
+   **Check reach and restore before any fix.** Once every reviewer has been harvested and each
+   scratch's tracked diff has been checked, but before teardown or triage, run:
+
+   ```sh
+   REACH_EXIT=0
+   <tool>/scripts/run reach check <dispatch> r<round> \
+     > <dispatch>/logs/reach-r<round>.txt || REACH_EXIT=$?
+   cat <dispatch>/logs/reach-r<round>.txt
+   if [ "$REACH_EXIT" -eq 1 ]; then exit 1; fi
+   <tool>/scripts/run reach restore <dispatch> r<round> || exit 1
+   ```
+
+   Exit 1 from `check` or `restore` is a fault in the `reach` control: follow Tool faults and
+   stop. The check logs a `degrade` line for each reviewer whose verdict it voids. That verdict
+   never counts as clean; still inspect that reviewer's findings, and launch the reviewer again
+   if another round runs. An unexplained change to a run branch or tracked synthesis file voids
+   every reviewer and requires another round, counting toward the three-round cap. A move of
+   the run branch or synthesis worktree whose commits are exactly the `apply` actions the
+   coachman logged, in order, reads as explained rather than unexplained: log every fix
+   commit with `log-action apply`. Restore saves
+   the undone diff under `<dispatch>/reach/` and moves new synthesis files there before resetting
+   the branch and worktree. An `escalate:` line in the check's output means an observed change
+   tied to a reviewer lies outside this run's branches and worktree folders: after restore,
+   write `ESCALATION.md` with the finding and
+   your advice, log `escalate`, touch `.escalation-ready`, and exit before applying a fix or
+   launching another review round. The postmaster sends it to the user and waits for their answer.
+   Other findings and notes are recorded for the card and do not stop the run. Then tear the round
+   down as below. When later staging fixes in the synthesis worktree, prefer a targeted
+   `git add <paths>` over `git add -A`.
 3. **Dedup across lenses and adversarially verify** every finding against the code before it
    reaches the card or the diff; discard what does not hold. A defect reported under more than
    one lens is one finding, and it keeps every lens that reported it. A finding is gating or
@@ -1015,10 +1059,14 @@ Set the stage first: `<tool>/scripts/run stage <dispatch> shipping`.
    `run.json` config has `ship.review_link`, its value with the path filled in. Reuse a review
    surface already running; never start a duplicate. Verify the link from the user's device or
    mark it unverified.
-4. **Write `card.md`.** Include the branch, final HEAD, diff stat and commit list; the output
+4. **Check reach before the card.** Run `<tool>/scripts/run reach check <dispatch> card`
+   and record its output. Exit 1 is a fault in the `reach` control: follow Tool faults and
+   stop. Findings, notes and `not checked` records at this point are shown on the card and do
+   not stop the run.
+5. **Write `card.md`.** Include the branch, final HEAD, diff stat and commit list; the output
    of `<tool>/scripts/run landing card-block <dispatch> <synthesis-wt> <the leg's
    checkpoint>` pasted verbatim as the card's `## Checks`,
-   `## Open findings` and `## Not re-reviewed` sections, appearing exactly once —
+   `## Open findings`, `## Not re-reviewed` and `## Reach` sections, appearing exactly once —
    never retyped or indented, never repeated even inside a fence — and no HTML comment
    anywhere in the card; a card quoting `<!--`, in a commit subject or finding title,
    escapes it, for example as `&lt;!--` (the leg's checkpoint is
@@ -1037,7 +1085,7 @@ Set the stage first: `<tool>/scripts/run stage <dispatch> shipping`.
    The card's branch state is before merge: the
    ticket branch is ready, and every other branch is either retained or abandoned. The gate is
    listed as the gate, never as a turnpike.
-5. **Write the final hand-off.** Write
+6. **Write the final hand-off.** Write
    `<dispatch>/handoff-<n>.md` with the verified results, all decisions and open findings, and
    state that no coachman leg follows and the postmaster must verify the card and handle
    landing. `<tool>/scripts/run handoff-check` must exit 0. Close the open run-log section, log
