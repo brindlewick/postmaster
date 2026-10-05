@@ -8,6 +8,14 @@ updated: 2026-10-05
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-10-05] query | how the dashboard looks
+
+The user chose the look in #238's design session: "let's go with engraved navy and coral from
+astra", because "it felt the easiest to read". Recorded in [the dashboard](concepts/dashboard.md) under "How it looks": the choice, how it
+was reached in the user's words, what the chosen prototype carries, and where it does not follow its
+data. On the user's word, the chosen prototype is kept in `docs/design/dashboard` with full-page
+pictures and a spec, so the look can be reproduced exactly. No standing changed.
+
 ## [2026-10-05] ingest | pstack read again at e43c7ee, and its nine ranked changes judged again
 
 Issue #309. The link the user gave (`c47b128`) is four commits before the first report's `23e4138`. The head
