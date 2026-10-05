@@ -42,8 +42,7 @@ industrial report found that states a functional core as a verification policy, 
 **What AI coding has shown.** With the statement to prove fixed, how many proofs get accepted depends on the language and the
 setup. In the largest benchmark, off-the-shelf models solved 82% of the Dafny tasks, 44% of the Verus tasks and 27% of the
 Lean tasks, counting a task as solved if any one model solved it; on an older Dafny set the best single model went from 68%
-to 89% in about 14 months [@papers/vericoding-2025/passages.md]. On 849 proof tasks from real Verus systems, agents with a
-compiler in the loop completed 81% for the best model [@papers/verusage-2025/passages.md]. A proof checker rejects every wrong proof,
+to 89% in about 14 months [@papers/vericoding-2025/passages.md]. On 849 proof tasks from real Verus systems, coding agents completed 81% for the best model [@papers/verusage-2025/passages.md]. A proof checker rejects every wrong proof,
 so the trust moves to the statement. An agent that must write its own specification gains nothing over an unaided
 one, and only 56% of its specifications pass an audit [@papers/swe-proof-2026/passages.md]. Models cheat a verifier that
 is not guarded, and verified solutions often fail the original tests. Models write specifications well for small
@@ -307,7 +306,7 @@ instead [@papers/hughes-1989/passages.md].
 ### C2. Machine-checked proofs make AI-written code trustworthy
 
 **Verdict: shown only narrowly, and shown the opposite as worded.** When the statement to prove is fixed and
-given, a proof checker rejects every wrong proof and, on the benchmarks read, agents with a compiler in the loop now get most such proofs accepted. That is not the
+given, a proof checker rejects every wrong proof and, on the benchmarks read, the best coding agents now get most such proofs accepted. That is not the
 same as trustworthy code, because the trust moves to the statement, the definitions and the scripts that stop a
 model cheating. Strength: controlled studies on narrow benchmarks, mostly run by the authors who made them;
 single-team reports for the 2026 agent results; one team's account for each older cost figure.

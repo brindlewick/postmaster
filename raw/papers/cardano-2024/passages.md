@@ -36,3 +36,11 @@ older (not language-model work; 2024)
 
 G2/G3/G5-adjacent (Agda, Haskell, property-based conformance testing, a pure core with an impure outer layer)     claims: C1, C2, C3     direction: supports C1 (qualitatively), mixed on C2 and C3
 
+## Read again by the research session on 2026-10-05
+
+Route: text layer of the saved PDF, read with a text extractor, by the research session on 2026-10-05.
+
+- "From the formal methods perspective we tune our approach to each component and apply heavier techniques with a greater emphasis on verification to the more tractable inner components and more lightweight approach (type-safety, at minimum) with a greater emphasis on testing to the impure outer components." (single read (this read only))
+- "Three artifacts are involved in ensuring correctness of the software: (1) the Agda code, which is verified, (2) the Haskell code generated from Agda, and (3) the hand-written Haskell production code." (single read (this read only))
+- "Equivalence between (1) and (2) is established by contruction, then (3) is verified by running conformance tests, which pass the same input to both the executable specification implementation and the production Haskell implementation, then check that the same output is produced." (single read (this read only))
+
