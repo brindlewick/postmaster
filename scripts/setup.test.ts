@@ -51,6 +51,8 @@ function answers(name: string, extra?: string): void {
     "fallback.model=spare",
     "postmaster.harness=bash",
     "postmaster.model=pm",
+    "clerk.harness=claude",
+    "clerk.model=clerk-model",
   ];
   if (extra) lines.push(extra);
   writeFileSync(join(tmp, `${name}.answers`), `${lines.join("\n")}\n`, "utf8");
@@ -119,10 +121,84 @@ describe("positive controls", () => {
     const cfg = tryTomlFile(join(tmp, "plain.toml"));
     expect(keys.code).toBe(0);
     expect(keys.out).toContain("confine                    off");
+    expect(keys.out).toContain("clerk.harness");
+    expect(keys.out).toContain("clerk.model");
+    expect(keys.out).toContain("clerk.effort?");
+    expect(keys.out).toContain("clerk.env_file?");
     expect(plainRc).toBe(0);
     expect(cfg?.confine).toBe("off");
     expect(out).toContain("lane confinement:");
     expect(out.match(/Run lanes confined \(on\/off\)/gu)?.length).toBe(1);
+  }, 30000);
+
+  test("the adding verb inserts clerk in [team] and preserves the other config lines", () => {
+    const before = `[team]\nworkhorses = ["alpha", "beta"]\npostmaster = { harness = "claude", model = "pm" }\n\n[postmaster]\npoll_seconds = 9\n`;
+    writeFileSync(join(tmp, "legacy.toml"), before);
+    answers("legacy", "clerk.harness=claude");
+    const r = run(
+      "bash",
+      [
+        SELF,
+        "setup",
+        "--add-clerk",
+        "--answers",
+        join(tmp, "legacy.answers"),
+        "--config",
+        join(tmp, "legacy.toml"),
+      ],
+      {
+        env: { ...process.env, PATH: `${join(tmp, "bin")}:${process.env.PATH}` },
+      },
+    );
+    expect(r.code).toBe(0);
+    const after = readFileSync(join(tmp, "legacy.toml"), "utf8");
+    expect(after.replace('clerk = { harness = "claude", model = "clerk-model" }\n', "")).toBe(
+      before,
+    );
+    const team = tryTomlFile(join(tmp, "legacy.toml"))?.team as Record<string, unknown>;
+    expect(team.clerk).toBeDefined();
+    expect((team.clerk as Record<string, unknown>).harness).toBe("claude");
+    expect((team.clerk as Record<string, unknown>).model).toBe("clerk-model");
+  }, 30000);
+
+  test("the adding verb names a missing clerk harness or model", () => {
+    writeFileSync(join(tmp, "missing-clerk.toml"), `[team]\nworkhorses = ["alpha", "beta"]\n`);
+    writeFileSync(join(tmp, "missing-harness.answers"), "clerk.model=clerk-model\n");
+    const noHarness = run(
+      "bash",
+      [
+        SELF,
+        "setup",
+        "--add-clerk",
+        "--answers",
+        join(tmp, "missing-harness.answers"),
+        "--config",
+        join(tmp, "missing-clerk.toml"),
+      ],
+      {
+        env: { ...process.env, PATH: `${join(tmp, "bin")}:${process.env.PATH}` },
+      },
+    );
+    expect(noHarness.code).toBe(1);
+    expect(noHarness.err).toContain("clerk.harness");
+    writeFileSync(join(tmp, "missing-model.answers"), "clerk.harness=claude\n");
+    const noModel = run(
+      "bash",
+      [
+        SELF,
+        "setup",
+        "--add-clerk",
+        "--answers",
+        join(tmp, "missing-model.answers"),
+        "--config",
+        join(tmp, "missing-clerk.toml"),
+      ],
+      {
+        env: { ...process.env, PATH: `${join(tmp, "bin")}:${process.env.PATH}` },
+      },
+    );
+    expect(noModel.code).toBe(1);
+    expect(noModel.err).toContain("clerk.model");
   }, 30000);
 
   test("confine=on is written when Bubblewrap starts", () => {
@@ -300,6 +376,101 @@ describe("positive controls", () => {
     expect(mixedBugRc).toBe(0);
     expect(out).toContain("bug reviewer 'beta' uses pi, which has no code-review form");
     expect(er.out.trim()).toBe("alpha");
+  }, 30000);
+
+  // A stand-in uname names another system: setup decides by the test
+  // systemdCapability() uses, so this takes the same path a Mac takes.
+  const otherSystemPath = (): string => {
+    const bin = join(tmp, "other-system");
+    mkdirSync(bin, { recursive: true });
+    const uname = join(bin, "uname");
+    writeFileSync(uname, '#!/bin/sh\nif [ "$1" = "-s" ]; then echo Darwin; else exit 1; fi\n');
+    chmodSync(uname, 0o755);
+    return `${bin}:${join(tmp, "bin")}:${process.env.PATH}`;
+  };
+
+  test("where no launch can be capped, the keys list carries no limits and no limits line", () => {
+    const keys = run(SELF, ["setup", "--keys"], { env: { PATH: otherSystemPath() } });
+    expect(keys.code).toBe(0);
+    expect(keys.out).not.toContain("limits.");
+    expect(keys.out.match(/^limits\./gmu)).toBeNull();
+    const linuxKeys = run(SELF, ["setup", "--keys"]);
+    expect(linuxKeys.out).toContain("limits.memory_max");
+  }, 30000);
+
+  test("where no launch can be capped, setup asks no limit question, says so once, and writes no limits table", () => {
+    answers("no-cap", "limits.memory_max=bogus");
+    const rc = runSetup("no-cap", { PATH: otherSystemPath() });
+    const out = readFileSync(join(tmp, "no-cap.out"), "utf8");
+    expect(rc).toBe(0);
+    expect(out.match(/without memory or process limits/gu)?.length).toBe(1);
+    expect(out).not.toContain("default memory cap");
+    expect(out).not.toContain("[limits]");
+    const cfg = tryTomlFile(join(tmp, "no-cap.toml"));
+    expect(cfg).not.toBeNull();
+    expect(cfg?.limits).toBeUndefined();
+  }, 30000);
+
+  test("where launches can be capped, setup never says they run without limits", () => {
+    const out = readFileSync(join(tmp, "plain.out"), "utf8");
+    expect(out).not.toContain("without memory or process limits");
+    expect(out).toContain("default memory cap");
+  }, 30000);
+
+  test("interactive setup where no launch can be capped reports uncapped launches once", () => {
+    const answers = [
+      "",
+      "", // roots and lane names
+      "bash",
+      "lane-alpha",
+      "",
+      "", // alpha
+      "bash",
+      "lane-beta",
+      "",
+      "", // beta
+      "",
+      "", // workhorses and reviewers
+      "",
+      "",
+      "", // style, bug and security reviewer overrides
+      "bash",
+      "coachman",
+      "",
+      "", // coachman
+      "bash",
+      "fallback",
+      "",
+      "", // fallback
+      "bash",
+      "postmaster",
+      "",
+      "", // postmaster
+      "bash",
+      "clerk",
+      "",
+      "", // clerk
+      "",
+      "", // run count and poll interval
+      "",
+      "", // tracker and confinement
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "", // create tickets, timeout, merge, checkpoint, links
+    ].join("\n");
+    const interactive = run(SELF, ["setup", "--dry-run"], {
+      env: { PATH: otherSystemPath() },
+      input: `${answers}\n`,
+    });
+    expect(interactive.code).toBe(0);
+    expect(interactive.out).not.toContain("Launch limits:");
+    expect(interactive.out).not.toContain("[limits]");
+    expect(interactive.out.match(/without memory or process limits/gu)?.length).toBe(1);
   }, 30000);
 });
 

@@ -131,13 +131,20 @@ function hasKey(file: string, key: string): boolean {
 
 // --- entry -----------------------------------------------------------------------------------
 const argv = process.argv.slice(2);
+// Launch caps are applied only where postmaster can cap a launch: Linux, as
+// systemdCapability() reads it (uname -s on PATH). Everywhere else setup neither
+// asks about limits nor lists them, and says once that launches run without them.
+const onLinux = run("uname", ["-s"]).out.replace(/\n+$/u, "") === "Linux";
 let DRY = 0;
 let ANSWERS = "";
 let CONFIG = join(process.env.HOME ?? "~", ".postmaster", "config.toml");
+let ADD_CLERK = false;
 let i = 0;
 while (i < argv.length) {
   const a = argv[i];
-  if (a === "--dry-run") {
+  if (a === "--add-clerk") {
+    ADD_CLERK = true;
+  } else if (a === "--dry-run") {
     DRY = 1;
   } else if (a === "--config") {
     const v = argv[++i];
@@ -171,8 +178,14 @@ postmaster.harness
 postmaster.model
 postmaster.effort?         (none)
 postmaster.env_file?       (none)
+clerk.harness
+clerk.model
+clerk.effort?              (none)
+clerk.env_file?            (none)             env file for its key or backend
 max_runs                   2                  concurrent runs per project
-poll_seconds               120                postmaster poll interval
+poll_seconds               120                postmaster poll interval${
+      onLinux
+        ? `
 limits.memory_max          8G                 default memory cap per launch (K, M, G or T)
 limits.tasks_max           512                default process cap per launch
 limits.lane.memory_max?    (default)          lane memory cap override
@@ -180,7 +193,9 @@ limits.lane.tasks_max?     (default)          lane process cap override
 limits.coachman.memory_max? (default)         coachman memory cap override
 limits.coachman.tasks_max? (default)         coachman process cap override
 limits.reviewer.memory_max? (default)         reviewer memory cap override
-limits.reviewer.tasks_max? (default)          reviewer process cap override
+limits.reviewer.tasks_max? (default)          reviewer process cap override`
+        : ""
+    }
 tracker                    github             github, plane, local or other
 confine                    off                lane confinement, on or off (see run probe-confine)
 plane.url                  https://api.plane.so   plane only
@@ -192,17 +207,71 @@ round_timeout_seconds      2400               seconds a review round may run, 1 
 merge_authority            user               user or postmaster
 checkpoint_mode            autonomous         autonomous or consult
 review_link?               (none)             template with {path}
-planning.review_link?      (none)             code-server template with {path} for workhorse specs
+planning.review_link?      (none)             code-server template with {path} for ticket drafts
 overwrite                  no                 yes replaces an existing config`);
     process.exit(0);
   } else {
-    console.error("usage: run setup [--answers <file>] [--dry-run] [--config <path>] | --keys");
+    console.error(
+      "usage: run setup [--answers <file>] [--dry-run] [--config <path>] | --add-clerk [options] | --keys",
+    );
     process.exit(1);
   }
   i++;
 }
 
 const opts: AskOpts = { answers: ANSWERS };
+
+if (ADD_CLERK) {
+  if (!existsSync(CONFIG)) die(`setup: no config at ${CONFIG}; run normal setup first`, 1);
+  let original = "";
+  let parsed: Record<string, any>;
+  try {
+    original = readFileSync(CONFIG, "utf8");
+    parsed = readTomlFile(CONFIG) as Record<string, any>;
+  } catch {
+    die(`setup: ${CONFIG} does not parse`, 1);
+  }
+  const team = parsed!.team;
+  if (!team || typeof team !== "object" || Array.isArray(team))
+    die(`setup: [team] is missing in ${CONFIG}`, 1);
+  if (team.clerk !== undefined) die(`setup: ${CONFIG} already has team.clerk`, 1);
+  console.log("== The booking clerk: prepares a ticket with the user. ==");
+  const harness = ask("  clerk: harness", "", "clerk.harness", opts);
+  needHarness(harness);
+  const model = ask("  clerk: model id", "", "clerk.model", opts);
+  const effort = ask("  clerk: effort (blank if none)", "", "clerk.effort?", opts);
+  const envFile = ask(
+    "  clerk: env file for its key or backend (blank if none)",
+    "",
+    "clerk.env_file?",
+    opts,
+  );
+  const entry = `clerk = { harness = "${harness}", model = "${model}"${roleExtra(effort, envFile)} }`;
+  const header = /^\[team\][ \t]*(?:#.*)?(?:\r?\n|$)/mu.exec(original);
+  if (!header) die(`setup: ${CONFIG} has no [team] table`, 1);
+  const start = header.index + header[0].length;
+  const next = /^\[[^\n]+\][^\n]*(?:\r?\n|$)/mu.exec(original.slice(start));
+  const end = next ? start + next.index : original.length;
+  let before = original.slice(0, end);
+  if (before && !before.endsWith("\n")) before += "\n";
+  const changed = `${before}${entry}\n${original.slice(end)}`;
+  if (DRY) {
+    console.log(changed.replace(/\n+$/u, ""));
+    process.exit(0);
+  }
+  writeFileSync(CONFIG, changed, "utf8");
+  try {
+    const reread = readTomlFile(CONFIG) as Record<string, any>;
+    if (reread.team?.clerk?.harness !== harness || reread.team?.clerk?.model !== model)
+      throw new Error("mismatch");
+  } catch {
+    writeFileSync(CONFIG, original, "utf8");
+    die(`setup: ${CONFIG} did not parse after adding team.clerk; restored the original`, 1);
+  }
+  console.log(`updated ${CONFIG}; every previous line is preserved`);
+  process.exit(0);
+}
+
 console.log("== Installed agent CLIs ==");
 const probe = run(join(HERE, "run"), ["probe-harnesses"]);
 process.stdout.write(probe.out);
@@ -367,42 +436,64 @@ const PEF = ask(
   "postmaster.env_file?",
   opts,
 );
+console.log("");
+console.log("== The booking clerk: prepares tickets with the user. ==");
+const CLH = ask("  clerk: harness", "", "clerk.harness", opts);
+needHarness(CLH);
+const CLM = ask("  clerk: model id", "", "clerk.model", opts);
+const CLE = ask("  clerk: effort (blank if none)", "", "clerk.effort?", opts);
+const CLEF = ask(
+  "  clerk: env file for its key or backend (blank if none)",
+  "",
+  "clerk.env_file?",
+  opts,
+);
 const MR = ask("  concurrent runs per project", "2", "max_runs", opts);
 const PS = ask("  postmaster poll interval, seconds", "120", "poll_seconds", opts);
 
 console.log("");
-console.log("== Launch limits: per-launch memory and process caps when the host supports them. ==");
-const LM = ask("  default memory cap (number plus K, M, G or T)", "8G", "limits.memory_max", opts);
-if (!/^[1-9][0-9]*[KMGT]$/u.test(LM))
-  die("setup: memory_max must be a positive whole number followed by K, M, G or T", 1);
-const LT = ask("  default process cap (whole number)", "512", "limits.tasks_max", opts);
-if (!validTasks(LT)) die("setup: tasks_max must be a whole number from 1 to 2147483647", 1);
+let LM = "8G";
+let LT = "512";
 let LIMIT_ROLE_TABLES = "";
-for (const limitRole of ["lane", "coachman", "reviewer"]) {
-  const LR_MEM = ask(
-    `  ${limitRole} memory cap override (blank inherits the default)`,
-    "",
-    `limits.${limitRole}.memory_max?`,
-    opts,
+if (onLinux) {
+  console.log(
+    "== Launch limits: per-launch memory and process caps when the host supports them. ==",
   );
-  if (LR_MEM && !/^[1-9][0-9]*[KMGT]$/u.test(LR_MEM))
-    die(
-      `setup: limits.${limitRole}.memory_max must be a positive whole number followed by K, M, G or T`,
-      1,
+  LM = ask("  default memory cap (number plus K, M, G or T)", "8G", "limits.memory_max", opts);
+  if (!/^[1-9][0-9]*[KMGT]$/u.test(LM))
+    die("setup: memory_max must be a positive whole number followed by K, M, G or T", 1);
+  LT = ask("  default process cap (whole number)", "512", "limits.tasks_max", opts);
+  if (!validTasks(LT)) die("setup: tasks_max must be a whole number from 1 to 2147483647", 1);
+  for (const limitRole of ["lane", "coachman", "reviewer"]) {
+    const LR_MEM = ask(
+      `  ${limitRole} memory cap override (blank inherits the default)`,
+      "",
+      `limits.${limitRole}.memory_max?`,
+      opts,
     );
-  const LR_TASKS = ask(
-    `  ${limitRole} process cap override (blank inherits the default)`,
-    "",
-    `limits.${limitRole}.tasks_max?`,
-    opts,
-  );
-  if (LR_TASKS && !validTasks(LR_TASKS))
-    die(`setup: limits.${limitRole}.tasks_max must be a whole number from 1 to 2147483647`, 1);
-  if (LR_MEM || LR_TASKS) {
-    LIMIT_ROLE_TABLES += `\n[limits.${limitRole}]\n`;
-    if (LR_MEM) LIMIT_ROLE_TABLES += `memory_max = "${LR_MEM}"\n`;
-    if (LR_TASKS) LIMIT_ROLE_TABLES += `tasks_max = ${LR_TASKS}\n`;
+    if (LR_MEM && !/^[1-9][0-9]*[KMGT]$/u.test(LR_MEM))
+      die(
+        `setup: limits.${limitRole}.memory_max must be a positive whole number followed by K, M, G or T`,
+        1,
+      );
+    const LR_TASKS = ask(
+      `  ${limitRole} process cap override (blank inherits the default)`,
+      "",
+      `limits.${limitRole}.tasks_max?`,
+      opts,
+    );
+    if (LR_TASKS && !validTasks(LR_TASKS))
+      die(`setup: limits.${limitRole}.tasks_max must be a whole number from 1 to 2147483647`, 1);
+    if (LR_MEM || LR_TASKS) {
+      LIMIT_ROLE_TABLES += `\n[limits.${limitRole}]\n`;
+      if (LR_MEM) LIMIT_ROLE_TABLES += `memory_max = "${LR_MEM}"\n`;
+      if (LR_TASKS) LIMIT_ROLE_TABLES += `tasks_max = ${LR_TASKS}\n`;
+    }
   }
+} else {
+  // Nothing here can cap a launch, so setup asks no question about it, and its
+  // list of settings leaves the limit settings out with the questions.
+  console.log("launches on this system run without memory or process limits");
 }
 
 console.log("");
@@ -495,7 +586,7 @@ const RL = ask(
   opts,
 );
 const PRL = ask(
-  "Code-server link template with {path} for a workhorse spec (blank for none)",
+  "Code-server link template with {path} for a ticket draft (blank for none)",
   "",
   "planning.review_link?",
   opts,
@@ -507,6 +598,11 @@ if (PWS) TRACKER_EXTRA = `url = "${PURL}"\nworkspace = "${PWS}"\nenv_file = "${P
 if (OTHER) TRACKER_EXTRA = `name = "${OTHER}"`;
 
 const dateStr = new Date().toISOString().slice(0, 10);
+// The list of settings matches the questions: the limit table appears only
+// where setup asked for it.
+const LIMITS_BLOCK = onLinux
+  ? `[limits]\nmemory_max = "${LM}"\ntasks_max = ${LT}\n${LIMIT_ROLE_TABLES}\n`
+  : "";
 const OUT = `# Written by scripts/run setup on ${dateStr}. Shape: config.example.toml.
 projects_roots = ${tomlList(ROOTS)}
 confine = "${CONFINE}"
@@ -518,14 +614,11 @@ reviewers = ${tomlList(REVIEWERS)}
 coachman = { harness = "${CH}", model = "${CM}"${roleExtra(CE, CEF)} }
 coachman_fallback = { harness = "${FH}", model = "${FM}"${roleExtra(FE, FEF)} }
 postmaster = { harness = "${PH}", model = "${PM}"${roleExtra(PE, PEF)} }
+clerk = { harness = "${CLH}", model = "${CLM}"${roleExtra(CLE, CLEF)} }
 max_runs = ${MR}
 ${LENS_TABLE}
 
-[limits]
-memory_max = "${LM}"
-tasks_max = ${LT}
-${LIMIT_ROLE_TABLES}
-[postmaster]
+${LIMITS_BLOCK}[postmaster]
 poll_seconds = ${PS}
 
 [tracker]
