@@ -163,3 +163,23 @@ property or the function to extract, and the reason. The second reader's rows ar
   changed, and the agreement is reported as it came out.
 - The second reader saw other files' names in directory listings and reports that it opened none of
   them.
+
+## Other things read for the page
+
+- **The runs' cards.** [data/cards/](data/cards/) holds, copied unchanged on 2026-10-05 at 00:10 UTC, the
+  review checkpoint card of each run, and the escalation card of #216, #252 and #268. The page cites them
+  for what the runs said about their own rounds. #252 and #268 were still in review, and a card written
+  after that time is not in this folder. Run logs were not copied: they carry thread identifiers.
+- **Kinds.** [results/kinds.md](results/kinds.md) groups the findings by the shape of the missing check, from the
+  first reader's family tags (`python3 apparatus/kinds.py first-reading.tsv`). The grouping was made
+  after the labels, and the script refuses a family it has no kind for.
+- **The tests the runs added.** The test files a run's branch added are
+  `git diff --name-only --diff-filter=A main...<branch> -- 'scripts/*.test.ts' 'scripts/lib/*.test.ts'`.
+  Cases are the lines of each that open with `test(` or `it(` (with `.skipIf` or `.each`), counted by
+  `git show <branch>:<file> | grep -cE '^\s*(test|it)(\.skipIf\([^)]*\))?(\.each\([^)]*\))?\('`, and a
+  generator is any line matching `Math.random`, `seeded`, `fast-check`, `forAll` or `fuzz`, counted
+  with `grep -ciE`. Read on 2026-10-05: #202 added 2 files with 52 cases, #216 8 files with 52, #252 one
+  with 30 and #268 one with 54. The only match is three `Math.random` calls in #202's `reach.test.ts`,
+  which make unique names and not inputs. The control through the same command is `scripts/log-action.test.ts`
+  on `origin/main`, which matches (its decoder test is described as seeded cases against `iconv -c`). A
+  `test(` that does not open its line is not counted, so the case counts are a floor.
