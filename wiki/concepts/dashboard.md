@@ -74,7 +74,8 @@ any of the dashboard was built ([#238](https://github.com/brindlewick/postmaster
 
 **The choice.** The prototype GPT-6 Astra built on the seed "engraved navy and coral", a
 landing page published on [Dribbble](https://dribbble.com/shots/11124390). In the user's words:
-"let's go with engraved navy and coral from astra".
+"let's go with engraved navy and coral from astra". Why, in the user's words: "the reason for my
+choice is that it felt the easiest to read".
 
 **How it was reached**, in the user's words at each step:
 

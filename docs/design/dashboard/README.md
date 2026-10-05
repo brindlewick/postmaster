@@ -18,7 +18,8 @@ When this page and the prototype disagree, the prototype is right, except where
 
 ## Where it came from
 
-The user chose it on 2026-10-05, from 44 prototypes built on made-up data. GPT-6 Astra built it
+The user chose it on 2026-10-05, from 44 prototypes built on made-up data, because "it felt the
+easiest to read". GPT-6 Astra built it
 (`gpt-6-astra` on codex CLI 0.157.1, reasoning effort max) from a seed the user picked: a landing
 page in engraved navy and coral, [Dribbble shot 11124390](https://dribbble.com/shots/11124390). It
 takes the seed's palette and manner, not its pictures. The record of the choice, in the user's

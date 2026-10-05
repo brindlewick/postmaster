@@ -11,7 +11,7 @@ Append-only. Newest first. One entry per operation, prefixed so it can be parsed
 ## [2026-10-05] query | how the dashboard looks
 
 The user chose the look in #238's design session: "let's go with engraved navy and coral from
-astra". Recorded in [the dashboard](concepts/dashboard.md) under "How it looks": the choice, how it
+astra", because "it felt the easiest to read". Recorded in [the dashboard](concepts/dashboard.md) under "How it looks": the choice, how it
 was reached in the user's words, what the chosen prototype carries, and where it does not follow its
 data. On the user's word, the chosen prototype is kept in `docs/design/dashboard` with full-page
 pictures and a spec, so the look can be reproduced exactly. No standing changed.
