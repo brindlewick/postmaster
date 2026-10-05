@@ -359,6 +359,31 @@ function record(
     manifest.coachman.legs[String(n)] = { thread_id: `thread-${n}` };
   }
   writeFileSync(join(d, "manifest.json"), JSON.stringify(manifest, null, 2));
+
+  const point = (name: string, lanes: Array<Record<string, string>>): void => {
+    const detail = JSON.stringify({ kind: "point", point: name, result: "clean", lanes });
+    const logged = run(join(HERE, "run"), ["log-action", d, "coachman", "reach", name, detail]);
+    if (logged.code !== 0) throw new Error(`could not make fixture reach record: ${logged.err}`);
+  };
+  const laneRecords = (names: string[]) =>
+    names.map((name: string) => ({
+      lane: name,
+      lens: "",
+      harness: recordedConfig.lanes[name]?.harness ?? "codex",
+      status: "checked",
+      reason: "",
+    }));
+  const workhorseNames: string[] = recordedConfig.team.workhorses ?? [];
+  point("workhorses", laneRecords(workhorseNames));
+  if (legs >= 2) {
+    const reviewer = workhorseNames[0] ?? "one";
+    writeFileSync(
+      join(d, "logs", "review-r1.json"),
+      JSON.stringify({ reviewers: [["bug", reviewer]] }),
+    );
+    point("r1", laneRecords([reviewer]));
+  }
+  point("card", laneRecords(workhorseNames));
   return 0;
 }
 
@@ -614,9 +639,11 @@ function expectScore(key: string, failing: string, failText?: string): void {
   const lines = out.split("\n").filter((l) => l.trim());
   expect(rc).toBe(failing === "none" ? 0 : 2);
   expect(failingChecks).toBe(failing);
-  // platform + ten check lines, then the score's time section (#265)
-  expect(lines.filter((l) => l.startsWith("ok  ") || l.startsWith("FAIL"))).toHaveLength(10);
-  expect(lines.length).toBeGreaterThanOrEqual(12);
+  // platform + eleven check lines, then the score's time section (#265); with no
+  // run.json the pinned tool is unknown, so the reach check prints no line
+  const checks = failing === "run.json" ? 10 : 11;
+  expect(lines.filter((l) => l.startsWith("ok  ") || l.startsWith("FAIL"))).toHaveLength(checks);
+  expect(lines.length).toBeGreaterThanOrEqual(checks + 2);
   expect(
     lines[0]?.startsWith(
       `platform: ${osType()} ${release()} ${machine()}, bun ${Bun.version}, git `,
@@ -681,6 +708,165 @@ function runScore(
   const r = spawnSync(wrapper, ["fixture", "score", dispatch, repo], { encoding: "utf8", env });
   return { code: r.status ?? -1, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
+
+describe("ticket #202 fixture reach score", () => {
+  test("C16 a clean fixture score includes the reach check", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const result = runScore(dispatch, repo);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("ok   reach");
+    const scored = result.out.split("\n").filter(Boolean);
+    expect(scored.filter((l) => l.startsWith("ok  ") || l.startsWith("FAIL"))).toHaveLength(10);
+    expect(
+      scored.slice(11).some((l) => l.startsWith("stage ") || l.includes("could not be timed")),
+    ).toBe(true);
+  }, 120000);
+
+  test("C17 findings, missing points and supported-reader gaps fail fixture score", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const actionsPath = join(dispatch, "actions.jsonl");
+    const originalActions = readFileSync(actionsPath, "utf8");
+    try {
+      const finding = run("bash", [
+        wrapper,
+        "log-action",
+        dispatch,
+        "lane:one",
+        "reach",
+        "workhorses",
+        JSON.stringify({
+          kind: "finding",
+          point: "workhorses",
+          lane: "one",
+          access: "write",
+          path: "/tmp/out.txt",
+        }),
+      ]);
+      expect(finding.code).toBe(0);
+      const found = runScore(dispatch, repo);
+      expect(found.code).toBe(2);
+      expect(found.out).toContain("FAIL reach");
+
+      const cleanLines = readFileSync(actionsPath, "utf8").split("\n").filter(Boolean);
+      writeFileSync(
+        actionsPath,
+        `${cleanLines
+          .filter((line) => {
+            const row = JSON.parse(line) as Record<string, unknown>;
+            if (row.action !== "reach") return true;
+            const event = JSON.parse(String(row.detail)) as Record<string, unknown>;
+            return !(event.kind === "finding" && event.point === "workhorses");
+          })
+          .join("\n")}\n`,
+      );
+      const withoutRound = readFileSync(actionsPath, "utf8").split("\n").filter(Boolean);
+      writeFileSync(
+        actionsPath,
+        `${withoutRound
+          .filter((line) => {
+            const row = JSON.parse(line) as Record<string, unknown>;
+            if (row.action !== "reach") return true;
+            const event = JSON.parse(String(row.detail)) as Record<string, unknown>;
+            return !(event.kind === "point" && event.point === "r1");
+          })
+          .join("\n")}\n`,
+      );
+      const missing = runScore(dispatch, repo);
+      expect(missing.code).toBe(2);
+      expect(missing.out).toContain("FAIL reach");
+      expect(missing.out).toContain("not checked: r1");
+
+      const laneGap = run("bash", [
+        wrapper,
+        "log-action",
+        dispatch,
+        "coachman",
+        "reach",
+        "r1",
+        JSON.stringify({
+          kind: "point",
+          point: "r1",
+          result: "note",
+          lanes: [{ lane: "mimo", harness: "mimo", status: "not checked" }],
+        }),
+      ]);
+      expect(laneGap.code).toBe(0);
+      const unchecked = runScore(dispatch, repo);
+      expect(unchecked.code).toBe(2);
+      expect(unchecked.out).toContain("not checked: mimo at r1");
+    } finally {
+      writeFileSync(actionsPath, originalActions);
+    }
+  }, 240000);
+
+  function withPostmaster(
+    dispatch: string,
+    mutate: (postmaster: Record<string, unknown>) => void,
+  ): string {
+    const runPath = join(dispatch, "run.json");
+    const original = readFileSync(runPath, "utf8");
+    const run = JSON.parse(original) as Record<string, unknown>;
+    mutate(run.postmaster as Record<string, unknown>);
+    writeFileSync(runPath, JSON.stringify(run));
+    return original;
+  }
+
+  test("a run whose pin directory is gone is still scored on reach", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const head = run("git", ["-C", TOOL, "rev-parse", "HEAD"]).out.trim();
+    const runPath = join(dispatch, "run.json");
+    const original = withPostmaster(dispatch, (postmaster) => {
+      postmaster.checkout = join(tmp, "no-such-pin");
+      postmaster.commit = head;
+    });
+    try {
+      const result = runScore(dispatch, repo);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain("ok   reach");
+    } finally {
+      writeFileSync(runPath, original);
+    }
+  }, 120000);
+
+  test("a recorded commit without reach.ts scores no reach item", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const root = run("git", ["-C", TOOL, "rev-list", "--max-parents=0", "HEAD"])
+      .out.trim()
+      .split("\n")[0]!;
+    const runPath = join(dispatch, "run.json");
+    const original = withPostmaster(dispatch, (postmaster) => {
+      postmaster.commit = root;
+    });
+    try {
+      const result = runScore(dispatch, repo);
+      expect(result.code).toBe(0);
+      expect(result.out).not.toContain("reach");
+    } finally {
+      writeFileSync(runPath, original);
+    }
+  }, 120000);
+
+  test("a recorded commit git cannot read fails the score", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const runPath = join(dispatch, "run.json");
+    const original = withPostmaster(dispatch, (postmaster) => {
+      postmaster.commit = "0".repeat(40);
+    });
+    try {
+      const result = runScore(dispatch, repo);
+      expect(result.code).toBe(1);
+      expect(result.out).toContain("fixture:");
+      expect(result.out).toContain("reach");
+    } finally {
+      writeFileSync(runPath, original);
+    }
+  }, 120000);
+});
 
 function captureStderr<T>(fn: () => T): { value: T; errs: string[] } {
   const errs: string[] = [];
@@ -1326,7 +1512,8 @@ describe("score: timing on whole copied runs with ticket-figure timelines (#265)
 
   test("a one-leg run has no review-round timing line", () => {
     const scored = bgResults.get("clean-one")!;
-    expect(scored.out).not.toContain("review round");
+    // The timing line is `review round N:`; the reach summary shares the words.
+    expect(scored.out).not.toContain("review round ");
   }, 30000);
 });
 

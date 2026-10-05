@@ -425,6 +425,40 @@ function buildDispatch(
       }
     }
   }
+  // The score's reach check expects a clean point per workhorse, round and card
+  // record; without them the reach line fails every oracle verdict (#202).
+  const reachPoint = (point: string, lanes: Array<Record<string, string>>): void => {
+    const detail = JSON.stringify({ kind: "point", point, result: "clean", lanes });
+    need(
+      runTool(["log-action", d, "coachman", "reach", point, detail]).code === 0,
+      `could not log the ${point} reach point for ${name}`,
+    );
+  };
+  reachPoint(
+    "workhorses",
+    config.team.workhorses.map((lane) => ({
+      lane,
+      lens: "",
+      harness: config.lanes[lane]?.harness ?? "codex",
+      status: "checked",
+      reason: "",
+    })),
+  );
+  if (design.legs === 2) {
+    for (let r = 0; r < ROUNDS.length; r++) {
+      reachPoint(
+        `r${r + 1}`,
+        (ROUNDS[r] ?? []).map((rev) => ({
+          lane: rev.lane,
+          lens: rev.lens,
+          harness: "codex",
+          status: "checked",
+          reason: "",
+        })),
+      );
+    }
+  }
+  reachPoint("card", []);
   engineerTime(d, design);
   if (design.stages === "strip") {
     const kept = readFileSync(join(d, "actions.jsonl"), "utf8")

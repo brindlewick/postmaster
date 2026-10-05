@@ -42,6 +42,7 @@ import {
 } from "./fixture-lanes.ts";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { die, run } from "./lib/proc.ts";
+import { reachActions } from "./reach.ts";
 import { computeTimes, fmt, parseTs } from "./run-times.ts";
 import {
   DOT_ALL,
@@ -86,6 +87,7 @@ const _CHECKS = [
   "efforts",
   "ship-card",
 ];
+const REACH_READERS = new Set(["codex", "claude", "muse", "mimo", "pi"]);
 
 function usage(): never {
   die(
@@ -462,6 +464,29 @@ export function score(dispatch: string, repo: string): { code: number; out: stri
     { name: "efforts", ...checkWaybillEfforts(dispatch), out: "" },
     { name: "ship-card", ...checkCard(dispatch), out: "" },
   ];
+  // The reach item follows the run's recorded commit, not its pin directory:
+  // aftercare may release the pin once the run is done, and the score must
+  // not pass by leaving the item out. No recorded commit (a run from before
+  // pins) scores no item, as before; an unreadable commit fails the score.
+  const postmaster = meta?.postmaster;
+  const recorded =
+    typeof postmaster === "object" && postmaster !== null && !Array.isArray(postmaster)
+      ? (postmaster as Record<string, unknown>).commit
+      : undefined;
+  if (typeof recorded === "string" && recorded) {
+    const known = sh(["git", "-C", TOOL, "rev-parse", "--verify", "-q", `${recorded}^{commit}`]);
+    if (known.code !== 0 || !(known.out ?? "").trim()) {
+      rmSync(scratch, { recursive: true, force: true });
+      return {
+        code: 1,
+        out: `fixture: cannot tell whether ${recorded.slice(0, 12)} holds the reach check: git cannot read that commit\n`,
+      };
+    }
+    const blob = sh(["git", "-C", TOOL, "cat-file", "-e", `${recorded}:scripts/reach.ts`]);
+    if (blob.code === 0) {
+      results.push({ name: "reach", ...checkReach(dispatch), out: "" });
+    }
+  }
   rmSync(scratch, { recursive: true, force: true });
   const scored = report(results);
   return { code: scored.code, out: `${platformLine()}\n${scored.out}${timeReport(dispatch)}` };
@@ -914,6 +939,55 @@ export function checkWaybillEfforts(dispatch: string): { ok: boolean; detail: st
   }
   if (!seen) return { ok: false, detail: "no Team workhorses or coachman entries" };
   return { ok: true, detail: "waybill Team efforts match run.json" };
+}
+
+function checkReach(dispatch: string): { ok: boolean; detail: string } {
+  let actions: ReturnType<typeof reachActions>;
+  try {
+    actions = reachActions(dispatch);
+  } catch (e) {
+    return { ok: false, detail: `cannot read reach actions: ${String(e)}` };
+  }
+  const points = actions.filter(({ event }) => event.kind === "point");
+  const pointNames = new Set(points.map(({ event }) => event.point));
+  const expected = new Set(["workhorses", "card"]);
+  const logs = join(dispatch, "logs");
+  try {
+    for (const name of readdirSync(logs)) {
+      const match = /^review-r([1-9][0-9]*)\.json$/u.exec(name);
+      if (match) expected.add(`r${match[1]}`);
+    }
+  } catch (e) {
+    return { ok: false, detail: `cannot list review records: ${String(e)}` };
+  }
+  const missing = [...expected].filter((point) => !pointNames.has(point));
+  if (missing.length > 0) return { ok: false, detail: `not checked: ${missing.join(", ")}` };
+
+  const findings = actions.filter(({ event }) => event.kind === "finding" || event.kind === "void");
+  if (findings.length > 0) {
+    const first = findings[0]!.event;
+    return {
+      ok: false,
+      detail: `reach found at ${first.point}: ${first.path ?? first.reason ?? first.kind}`,
+    };
+  }
+  for (const { event } of points) {
+    if (event.result === "finding") return { ok: false, detail: `reach found at ${event.point}` };
+    const lanes = Array.isArray(event.lanes) ? event.lanes : [];
+    for (const laneValue of lanes) {
+      const lane =
+        typeof laneValue === "object" && laneValue !== null
+          ? (laneValue as Record<string, unknown>)
+          : {};
+      if (lane.status === "not checked" && REACH_READERS.has(String(lane.harness ?? ""))) {
+        return {
+          ok: false,
+          detail: `not checked: ${String(lane.lane ?? "lane")} at ${event.point}`,
+        };
+      }
+    }
+  }
+  return { ok: true, detail: "workhorses, review rounds and card checked with no reach" };
 }
 
 function checkCard(dispatch: string): { ok: boolean; detail: string } {
