@@ -948,6 +948,11 @@ function loggedApplies(repo: string, dispatch: string): string[] | null {
   return expanded;
 }
 
+/** How a changed path prints: refs verbatim, files relative to the repo. */
+function displayPath(info: RunInfo, path: string): string {
+  return path.startsWith("refs/") ? path : relative(info.repo, path) || path;
+}
+
 /** Whether a run-branch move is exactly the logged applies, in order.
  * Anything else — an unlogged commit, a rewind, a longer chain — reads
  * as unexplained, as before. */
@@ -1120,9 +1125,7 @@ function roundChanges(
       // lanes keep their findings; anything unlogged reads as before.
       const isTicket = refName === ticketRef || exactPath === ticketWorktree;
       if (isTicket && moveExplained(info.repo, applies, change.before, change.after)) continue;
-      const humanPath = change.path.startsWith("refs/")
-        ? change.path
-        : relative(info.repo, change.path) || change.path;
+      const humanPath = displayPath(info, change.path);
       const detail = `${change.before} -> ${change.after}`;
       const touch = pathChangeTouch(info, change.path, "read", "", `unexplained change ${detail}`);
       touch.kind = "note";
@@ -1362,12 +1365,29 @@ function restoreRound(info: RunInfo, round: number): number {
   const snapshot = loadSnapshot(info, round);
   const saved = saveDir(info, round);
   mkdirSync(saved, { recursive: true });
+  // The same rule as check: a move that is exactly the logged applies, in
+  // order, is the coachman's own fix and is left as it is, never archived
+  // as undone work. Everything else restores exactly as before.
+  const applies = loggedApplies(info.repo, info.dispatch);
+  const ticketRef = `refs/heads/${info.ticket}`;
   const nowRefs = refsMap(info.repo, info.ticket);
+  const refExplained = moveExplained(
+    info.repo,
+    applies,
+    snapshot.refs[ticketRef] ?? "",
+    nowRefs[ticketRef] ?? "",
+  );
   const changedRefs = new Set([...Object.keys(snapshot.refs), ...Object.keys(nowRefs)]);
   for (const ref of [...changedRefs].sort()) {
     const before = snapshot.refs[ref] ?? "";
     const after = nowRefs[ref] ?? "";
     if (before === after) continue;
+    if (ref === ticketRef && refExplained) {
+      console.log(
+        `left an explained move in place: ${displayPath(info, ref)}: ${before} -> ${after}`,
+      );
+      continue;
+    }
     const safe = ref.replace(/[^A-Za-z0-9._-]/gu, "_");
     const patch =
       before && after
@@ -1383,11 +1403,17 @@ function restoreRound(info: RunInfo, round: number): number {
 
   const synth = synthesisPath(info);
   const currentHead = currentHeadForRestore(info.repo, synth);
+  const synthExplained = moveExplained(info.repo, applies, snapshot.synthesisHead, currentHead);
+  if (synthExplained) {
+    console.log(
+      `left an explained move in place: ${displayPath(info, synth)}: ${snapshot.synthesisHead} -> ${currentHead}`,
+    );
+  }
   const tracked = runGit(synth, ["diff", "--binary", "HEAD"]);
   if (tracked.code !== 0)
     throw new Error(`cannot save synthesis worktree diff: ${tracked.err.trim()}`);
   const commitPatch =
-    snapshot.synthesisHead === currentHead
+    synthExplained || snapshot.synthesisHead === currentHead
       ? ""
       : runGit(info.repo, ["diff", "--binary", snapshot.synthesisHead, currentHead]).out;
   savePatch(join(saved, "synthesis.patch"), `${commitPatch}${tracked.out}`);
@@ -1416,13 +1442,10 @@ function restoreRound(info: RunInfo, round: number): number {
   // run branches by ref. Reviewers can move a branch with update-ref from any scratch, and can
   // detach or switch the worktree: the checkout reattaches the recorded branch either way.
   const recorded = snapshot.synthesisBranch ?? info.ticket;
-  const reattach = runGit(synth, [
-    "checkout",
-    "-f",
-    "-B",
-    recorded,
-    snapshot.refs[`refs/heads/${info.ticket}`] ?? snapshot.synthesisHead,
-  ]);
+  const anchor = refExplained
+    ? (nowRefs[ticketRef] ?? "")
+    : (snapshot.refs[ticketRef] ?? snapshot.synthesisHead);
+  const reattach = runGit(synth, ["checkout", "-f", "-B", recorded, anchor]);
   if (reattach.code !== 0)
     throw new Error(`cannot restore synthesis branch: ${reattach.err.trim()}`);
   for (const ref of [...changedRefs].sort()) {

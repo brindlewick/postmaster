@@ -1601,4 +1601,43 @@ describe("Fixture: a fix logged as apply before the check reads explained", () =
     expect(result.out).toContain("unexplained refs/heads/wb/T-codex");
     expect(degrades(layout)).toEqual(["codex", "mimo"]);
   });
+
+  test("restore leaves a logged fix in place and says so", () => {
+    const layout = makeLayout();
+    expect(before(layout).code).toBe(0);
+    const fix = addCommit(layout.repo, layout.synth, "fix.txt", "fixed\n");
+    writeAction(layout, "coachman", "apply", fix, "fix.txt:1");
+    expect(check(layout, "r1").code).toBe(0);
+    const restore = call(layout, ["restore", layout.dispatch, "r1"]);
+    expect(restore.code).toBe(0);
+    expect(restore.out).toContain(
+      `left an explained move in place: refs/heads/T: ${layout.base} -> ${fix}`,
+    );
+    expect(restore.out).toContain(
+      `left an explained move in place: .worktrees/T: ${layout.base} -> ${fix}`,
+    );
+    expect(git(layout.repo, "rev-parse", "refs/heads/T")).toBe(fix);
+    expect(git(layout.repo, "-C", layout.synth, "rev-parse", "HEAD")).toBe(fix);
+    expect(readFileSync(join(layout.synth, "fix.txt"), "utf8")).toBe("fixed\n");
+    expect(existsSync(join(layout.dispatch, "reach", "r1", "branches", "refs_heads_T.patch"))).toBe(
+      false,
+    );
+    expect(readFileSync(join(layout.dispatch, "reach", "r1", "synthesis.patch"), "utf8")).toBe("");
+  });
+
+  test("restore resets an unlogged fix as before", () => {
+    const layout = makeLayout();
+    expect(before(layout).code).toBe(0);
+    addCommit(layout.repo, layout.synth, "fix.txt", "fixed\n");
+    expect(check(layout, "r1").code).toBe(3);
+    const restore = call(layout, ["restore", layout.dispatch, "r1"]);
+    expect(restore.code).toBe(0);
+    expect(restore.out).not.toContain("explained move");
+    expect(git(layout.repo, "rev-parse", "refs/heads/T")).toBe(layout.base);
+    expect(git(layout.repo, "-C", layout.synth, "rev-parse", "HEAD")).toBe(layout.base);
+    expect(existsSync(join(layout.synth, "fix.txt"))).toBe(false);
+    expect(existsSync(join(layout.dispatch, "reach", "r1", "branches", "refs_heads_T.patch"))).toBe(
+      true,
+    );
+  });
 });
