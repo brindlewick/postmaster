@@ -82,7 +82,7 @@ checkable (Q-CORE), giving four labels, `prop`, `core`, `both` and `neither`. Ea
 one-line reason, the property sentence or the function that would be extracted, and how sure the
 reader is (`clear` or `arguable`).
 
-The brief's three groups map as follows: "a pure core would have made it checkable" is `core` and
+The ticket's three groups (criterion 3) map as follows: "a pure core would have made it checkable" is `core` and
 `both`; "a stated property or a small model would have caught it" is `prop` and `both`; "neither"
 is `neither`. `both` is counted in each of the first two and is also shown alone.
 
