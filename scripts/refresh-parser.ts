@@ -67,7 +67,10 @@ async function refresh(version: string, root: string): Promise<void> {
   if (typeof tarball !== "string" || typeof integrity !== "string") {
     throw new Error(`refresh-parser: no tarball in the registry record for ${version}`);
   }
-  const bytes = new Uint8Array(await (await fetch(tarball)).arrayBuffer());
+  // The ambient response type exposes text and json only; Bun's runtime
+  // response carries the body as bytes too.
+  const body = (await fetch(tarball)) as unknown as { arrayBuffer(): Promise<ArrayBuffer> };
+  const bytes = new Uint8Array(await body.arrayBuffer());
   if (!verifyIntegrity(bytes, integrity)) {
     throw new Error(`refresh-parser: integrity mismatch for ${tarball}`);
   }

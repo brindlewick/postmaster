@@ -1,21 +1,23 @@
 // Switch-offs a run adds: comments that switch off a check, and changes to the
 // settings of the project's checks, compared file by file between the ticket head
-// and its merge base with the default branch. Only real comments count, so this
-// uses a small scanner instead of a parser dependency: strings, template text and
-// regex literals are skipped, while comments inside template substitutions stay
-// comments. Each tool reads its own line: TypeScript the last line of a block
-// comment, the linter the first non-empty one, Biome any line carrying the
-// whole directive. Probed against Oxlint 1.86, tsc 7 and Biome 2.5 wherever
-// the ticket's first-line note would miss what a tool honors. Blind spots a
-// small scanner cannot close: a backtick in JSX text (a tagged template
-// follows a word, so the quote rule cannot exclude it) and a /* opener in
-// JSX text; both need a real parser to tell from live code.
+// and its merge base with the default branch. Only real comments count, so comment
+// discovery comes from a parser library's own comment list (the vendored
+// @babel/parser, the ticket's D11 exception): strings, template text and regex
+// literals are told apart by the language's grammar, never guessed. Each tool
+// reads its own line: TypeScript the last line of a block comment, the linter
+// the first non-empty one, Biome any line carrying the whole directive. Probed
+// against Oxlint 1.86, tsc 7 and Biome 2.5 wherever the ticket's first-line note
+// would miss what a tool honors. A file the parser cannot read fails loud,
+// never clear: the check refuses to report over input it cannot read by the
+// grammar, as it refuses unreadable blobs.
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { run } from "./proc.ts";
 import { pyRstrip, pySplitLines, pyTrim, pyWords } from "./text.ts";
+import { parse } from "./vendor/babel-parser.js";
+import type { BabelNode, BabelOptions } from "./vendor/babel-parser.js";
 
 const UNSET_GIT = {
   GIT_DIR: undefined,
@@ -56,94 +58,14 @@ export interface SwitchOffReport {
 
 export interface SwitchComment {
   line: number;
+  endLine: number;
   raw: string;
   start: number;
   end: number;
 }
 
-/** The tokens after which a `/` starts a regex rather than dividing. The last
- * significant token in code decides; identifiers and values divide. */
-const REGEX_AFTER = new Set([
-  "",
-  "(",
-  ",",
-  "=",
-  ":",
-  "[",
-  "!",
-  "&",
-  "|",
-  "?",
-  "{",
-  "}",
-  ";",
-  "+",
-  "-",
-  "*",
-  "/",
-  "%",
-  "^",
-  "~",
-  "<",
-  ">",
-  ")stmt",
-  "return",
-  "typeof",
-  "instanceof",
-  "in",
-  "of",
-  "new",
-  "delete",
-  "void",
-  "case",
-  "do",
-  "else",
-  "yield",
-  "await",
-  "throw",
-]);
-
-/** Keywords whose parenthesized condition ends in statement position, where a
- * `/` opens a regex: `if (a) /re/` divides nowhere. Any other `)` keeps the
- * divide reading. */
-const CONDITION_KEYWORDS = new Set(["if", "while", "for", "with", "switch", "catch"]);
-
-/** Whether the `(` at this offset opens one of the condition keywords: the
- * keyword must be the last token, and not a property (`x.if (` calls). */
-function isConditionParen(text: string, i: number, last: string): boolean {
-  if (!CONDITION_KEYWORDS.has(last)) return false;
-  let j = i - 1;
-  while (j >= 0 && (text[j] === " " || text[j] === "\t" || text[j] === "\n" || text[j] === "\r"))
-    j--;
-  j -= last.length;
-  while (j >= 0 && (text[j] === " " || text[j] === "\t" || text[j] === "\n" || text[j] === "\r"))
-    j--;
-  return j < 0 || text[j] !== ".";
-}
-
-/** Keywords after which a quote opens a string, past the regex set's: module
- * and type positions take string operands but never regexes. */
-const QUOTE_EXTRA = new Set(["import", "from", "as", "satisfies", "is"]);
-
-/** Whether a quote opens a string here: quotes open in operand positions
- * only, a twin of the regex rule. After a word, a value or `]` a quote can
- * only be JSX text or invalid code, and invalid code fails the gate loudly.
- * After `)` the paren stack decides: a condition ends in statement position
- * and a prologue string may follow, while an expression cannot be followed
- * by one. Backticks always open: a tagged template follows a word, so a
- * backtick in JSX text stays a known blind spot, documented with the tests. */
-function quoteOpens(last: string): boolean {
-  if (last === ")stmt" || QUOTE_EXTRA.has(last)) return true;
-  if (last === "value" || last === ")") return false;
-  if (last.length === 1) return !/[A-Za-z0-9_$\]]/u.test(last);
-  return REGEX_AFTER.has(last);
-}
-
 /** The length of the JS line break at this offset: CRLF counts once, and a lone
- * CR, U+2028 or U+2029 breaks like LF does. tsc honors them as breaks, so a
- * scanner that counts LF alone attributes the wrong line and the wrong
- * covered code after one; Oxlint reads them as whitespace instead, which
- * only ever lists a directive it cannot honor, never misses a live one. */
+ * CR, U+2028 or U+2029 breaks like LF does, as the parser counts them. */
 function breakLen(text: string, i: number): number {
   const ch = text[i];
   if (ch === "\n" || ch === "\u2028" || ch === "\u2029") return 1;
@@ -151,260 +73,115 @@ function breakLen(text: string, i: number): number {
   return 0;
 }
 
-/** The comments in source text, told apart from strings, template literals (with
- * `${}` scanned as code) and regex literals. A string ends at LF or CR, never
- * at U+2028 or U+2029, which ES2019 allows inside; an unterminated quote is
- * JSX text or invalid code, never a string, so the rest of its line is
- * rescanned as code and swallows no directive on it or a later line. */
-export function scanComments(text: string): SwitchComment[] {
-  return scanAll(text).comments;
+/** The comments in source text, from the parser's own comment list for the
+ * file, with their start, end and kind: strings, template literals and regex
+ * literals are told apart by the language's grammar. The path picks the
+ * grammar (TypeScript for ts/tsx/mts/cts, JavaScript with JSX otherwise). A
+ * file the parser cannot read throws, and the check fails loud on it, never
+ * clear. */
+export function scanComments(text: string, path: string): SwitchComment[] {
+  return parseSource(text, path).comments;
 }
 
-interface ScanAll {
+interface ParsedFile {
   comments: SwitchComment[];
-  depths: number[];
+  blocks: { start: number; end: number }[];
 }
 
-/** The comments and, for the identity window, the brace depth at the start of
- * every line: braces inside strings, comments, regexes and template text
- * never reach the depth counter, since the scanner consumes those spans
- * whole. */
-function scanAll(text: string): ScanAll {
-  const out: SwitchComment[] = [];
-  const n = text.length;
-  let i = 0;
-  let line = 1;
-  let last = "";
-  let noRegex = false;
-  let depth = 0;
-  const depths = [0];
-  const parens: boolean[] = [];
-  const frames: { tpl: boolean; interp: boolean; brace: number }[] = [
-    { tpl: false, interp: false, brace: 0 },
-  ];
-  while (i < n) {
-    while (depths.length < line) depths.push(depth);
-    const f = frames[frames.length - 1]!;
-    const ch = text[i]!;
-    if (f.tpl) {
-      if (ch === "\\") {
-        const b = breakLen(text, i + 1);
-        if (b > 0) {
-          line++;
-          i += 1 + b;
-        } else {
-          i += 2;
-        }
-        continue;
-      }
-      if (ch === "`") {
-        frames.pop();
-        last = "value";
-        i++;
-        continue;
-      }
-      if (ch === "$" && text[i + 1] === "{") {
-        frames.push({ tpl: false, interp: true, brace: 0 });
-        depth++;
-        i += 2;
-        continue;
-      }
-      const bt = breakLen(text, i);
-      if (bt > 0) {
-        line++;
-        i += bt;
-        continue;
-      }
-      i++;
-      continue;
+const TS_PLUGINS = [
+  "typescript",
+  "jsx",
+  "decorators-legacy",
+  "explicitResourceManagement",
+  "importAttributes",
+  "importAssertions",
+];
+const JS_PLUGINS = [
+  "jsx",
+  "decorators-legacy",
+  "explicitResourceManagement",
+  "importAttributes",
+  "importAssertions",
+];
+
+/** The parser options for a path: the file's own grammar, tolerant flags so
+ * sloppy-but-parseable shapes still list their comments, and recovery where
+ * the parser offers it. What still throws fails loud at the call. */
+function parserOptions(path: string): BabelOptions {
+  const ts = /\.(?:ts|tsx|mts|cts)$/u.test(path);
+  return {
+    plugins: [...(ts ? TS_PLUGINS : JS_PLUGINS)],
+    sourceType: "unambiguous",
+    errorRecovery: true,
+    allowImportExportEverywhere: true,
+    allowAwaitOutsideFunction: true,
+    allowReturnOutsideFunction: true,
+    allowSuperOutsideMethod: true,
+    allowUndeclaredExports: true,
+  };
+}
+
+/** Node types whose range is delimited by braces: a window ends at the
+ * innermost one around the comment. A braced shape missing here extends the
+ * window past it, which errs toward asking. */
+const BRACED = new Set([
+  "BlockStatement",
+  "StaticBlock",
+  "ClassBody",
+  "ObjectExpression",
+  "ObjectPattern",
+  "TSModuleBlock",
+  "TSInterfaceBody",
+  "TSEnumBody",
+  "TSTypeLiteral",
+]);
+
+function isBabelNode(value: unknown): value is BabelNode {
+  if (typeof value !== "object" || value === null) return false;
+  const node = value as Partial<BabelNode>;
+  return (
+    typeof node.type === "string" && typeof node.start === "number" && typeof node.end === "number"
+  );
+}
+
+/** Every braced range in the tree, by plain field walk: no grammar is guessed
+ * here, the parser already built the nodes. */
+function collectBlocks(node: BabelNode, out: { start: number; end: number }[]): void {
+  if (BRACED.has(node.type)) out.push({ start: node.start, end: node.end });
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) {
+      for (const item of value) if (isBabelNode(item)) collectBlocks(item, out);
+    } else if (isBabelNode(value)) {
+      collectBlocks(value, out);
     }
-    const b = breakLen(text, i);
-    if (b > 0) {
-      line++;
-      i += b;
-      noRegex = false;
-      continue;
-    }
-    if (ch === " " || ch === "\t") {
-      i++;
-      continue;
-    }
-    if (ch === "/" && text[i + 1] === "/") {
-      const start = line;
-      const s = i;
-      i += 2;
-      while (i < n && breakLen(text, i) === 0) i++;
-      out.push({ line: start, raw: pyRstrip(text.slice(s, i)), start: s, end: i });
-      continue;
-    }
-    if (ch === "/" && text[i + 1] === "*") {
-      const start = line;
-      const s = i;
-      i += 2;
-      while (i < n && !(text[i] === "*" && text[i + 1] === "/")) {
-        const b = breakLen(text, i);
-        if (b > 0) {
-          line++;
-          i += b;
-          continue;
-        }
-        i++;
-      }
-      i = i < n ? i + 2 : i;
-      out.push({ line: start, raw: pyRstrip(text.slice(s, i)), start: s, end: i });
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      if (!quoteOpens(last)) {
-        i++;
-        continue;
-      }
-      const opener = i;
-      const resumeLine = line;
-      const resumeLast = last;
-      i++;
-      while (i < n && text[i] !== ch) {
-        if (text[i] === "\n" || text[i] === "\r") break;
-        const sb = breakLen(text, i);
-        if (sb > 0) {
-          line++;
-          i += sb;
-          continue;
-        }
-        if (text[i] === "\\") {
-          i++;
-          const b = breakLen(text, i);
-          if (b > 0) {
-            line++;
-            i += b;
-          } else {
-            i++;
-          }
-          continue;
-        }
-        i++;
-      }
-      if (i < n && text[i] === ch) {
-        i++;
-        last = "value";
-        continue;
-      }
-      // No closer on this line: the quote was JSX text or invalid code, so
-      // rewind past the opener and rescan the rest of the line as code. No
-      // regex opens on the rescan, since a `/` in JSX text would take the
-      // directive's own first slash as its closer. Anything the rescan
-      // lists errs toward asking, and a genuinely unterminated string in
-      // real code fails the gate loudly.
-      i = opener + 1;
-      line = resumeLine;
-      last = resumeLast;
-      noRegex = true;
-      continue;
-    }
-    if (ch === "`") {
-      frames.push({ tpl: true, interp: false, brace: 0 });
-      i++;
-      continue;
-    }
-    if (ch === "/") {
-      // A tag-shaped close (`</div>`) is JSX text, not a regex: skipping to
-      // its `>` keeps the divide-and-regex reading for real code, where a
-      // `<` directly before a `/` never shapes a tag. Residual: a directive
-      // comment between the slashes of a compared regex.
-      if (
-        last === "<" &&
-        text[i - 1] === "<" &&
-        /^<\/[A-Za-z][A-Za-z0-9._-]*[ \t]*>/u.test(text.slice(i - 1))
-      ) {
-        i = text.indexOf(">", i) + 1;
-        last = "value";
-        continue;
-      }
-      if (REGEX_AFTER.has(last) && !noRegex) {
-        i++;
-        let cls = false;
-        let closed = false;
-        while (i < n) {
-          if (text[i] === "\n" || text[i] === "\r") break;
-          const rb = breakLen(text, i);
-          if (rb > 0) {
-            line++;
-            i += rb;
-            continue;
-          }
-          const r = text[i]!;
-          if (r === "\\") {
-            i += 2;
-            continue;
-          }
-          if (r === "[") cls = true;
-          else if (r === "]") cls = false;
-          else if (r === "/" && !cls) {
-            i++;
-            while (i < n && /[a-z]/iu.test(text[i]!)) i++;
-            closed = true;
-            break;
-          }
-          i++;
-        }
-        last = closed ? "value" : "/";
-        continue;
-      }
-      last = "/";
-      i++;
-      continue;
-    }
-    if (ch === "(") {
-      parens.push(isConditionParen(text, i, last));
-      last = "(";
-      i++;
-      continue;
-    }
-    if (ch === ")") {
-      last = (parens.pop() ?? false) ? ")stmt" : ")";
-      i++;
-      continue;
-    }
-    if (ch === "{") {
-      if (f.interp) f.brace++;
-      depth++;
-      last = "{";
-      i++;
-      continue;
-    }
-    if (ch === "}") {
-      depth = Math.max(0, depth - 1);
-      if (f.interp && f.brace === 0) {
-        frames.pop();
-        last = "value";
-        i++;
-        continue;
-      }
-      if (f.interp) f.brace--;
-      last = "}";
-      i++;
-      continue;
-    }
-    if (/[A-Za-z_$]/u.test(ch)) {
-      const s = i;
-      while (i < n && /[A-Za-z0-9_$]/u.test(text[i]!)) i++;
-      last = text.slice(s, i);
-      continue;
-    }
-    if (/[0-9]/u.test(ch)) {
-      while (i < n && /[0-9a-fA-FxXoObB._]/u.test(text[i]!)) i++;
-      last = "value";
-      continue;
-    }
-    if ((ch === "+" || ch === "-") && text[i + 1] === ch) {
-      last = "value";
-      i += 2;
-      continue;
-    }
-    last = ch;
-    i++;
   }
-  return { comments: out, depths };
+}
+
+/** The comments and braced ranges of one file's text. Throws on input the
+ * parser cannot read: the check reports that loud, never clear. */
+export function parseSource(text: string, path: string): ParsedFile {
+  let file;
+  try {
+    file = parse(text, parserOptions(path));
+  } catch {
+    throw new Error(`cannot parse ${path}: refusing to report clear over unparseable input`);
+  }
+  const comments: SwitchComment[] = [];
+  for (const c of file.comments ?? []) {
+    if (c.loc === null) {
+      throw new Error(`cannot place a comment in ${path}: refusing to report over it`);
+    }
+    comments.push({
+      line: c.loc.start.line,
+      endLine: c.loc.end.line,
+      raw: pyRstrip(text.slice(c.start, c.end)),
+      start: c.start,
+      end: c.end,
+    });
+  }
+  const blocks: { start: number; end: number }[] = [];
+  collectBlocks(file.program, blocks);
+  return { comments, blocks };
 }
 
 /** What a comment switches off, and how far. `line` covers its own line, `next`
@@ -584,36 +361,15 @@ function parseAllDirectives(raw: string): SwitchDirective[] {
 interface PlacedDirective extends SwitchDirective {
   line: number;
   end: number;
+  endOff: number;
   raw: string;
 }
 
-function placeDirectives(text: string): PlacedDirective[] {
+function placeDirectives(comments: SwitchComment[]): PlacedDirective[] {
   const out: PlacedDirective[] = [];
-  const starts = lineStarts(text);
-  let end = 1;
-  let s = 0;
-  for (const c of scanComments(text)) {
-    while (s + 1 < starts.length && starts[s + 1]! <= c.end - 1) {
-      s++;
-      end++;
-    }
-    const found = parseAllDirectives(c.raw);
-    if (found.length > 0) {
-      for (const off of found) out.push({ ...off, line: c.line, end, raw: c.raw });
-      continue;
-    }
-    // A // opener inside JSX text starts a comment the tools never see, and
-    // a real directive trailing on the same line still suppresses. Reparse
-    // after each later // on the line and list what parses there, under its
-    // own text, so edits to the leading prose never invalidate it. The cost
-    // is a spurious listing where prose itself quotes a directive; that errs
-    // toward asking, never toward missing.
-    if (!c.raw.startsWith("//")) continue;
-    let k = c.raw.indexOf("//", 2);
-    while (k >= 0) {
-      const sub = c.raw.slice(k);
-      for (const off of parseAllDirectives(sub)) out.push({ ...off, line: c.line, end, raw: sub });
-      k = c.raw.indexOf("//", k + 2);
+  for (const c of comments) {
+    for (const off of parseAllDirectives(c.raw)) {
+      out.push({ ...off, line: c.line, end: c.endLine, endOff: c.end, raw: c.raw });
     }
   }
   return out;
@@ -630,7 +386,7 @@ function maskedLines(text: string, comments: SwitchComment[]): string[] {
   return splitJsLines(masked.join("")).map((line) => pyTrim(line));
 }
 
-/** The offset where each 0-based line starts, on the scanner's breaks. */
+/** The offset where each 0-based line starts, on JS line breaks. */
 function lineStarts(text: string): number[] {
   const starts = [0];
   for (let i = 0; i < text.length; ) {
@@ -646,33 +402,40 @@ function lineStarts(text: string): number[] {
 }
 
 /** The conservative window a line or next-line identity holds: the masked code
- * from the given 1-based line to the end of the enclosing block, or to the
- * end of the file where no block closes around it (top level, unbalanced
- * braces). Blank lines stay in: the tools treat a blank between the
- * directive and its code differently, so a blank-line edit asks again. The
- * window errs wide on purpose: no tool's coverage rule is predicted, and a
- * window wider than the coverage is correct by design. */
-function blockWindow(code: string[], depths: number[], from: number): string[] {
-  const start = from - 1;
-  if (start >= code.length) return [];
-  const d0 = depths[from] ?? depths[from - 1] ?? 0;
-  let stop = start;
-  for (let k = start + 1; k < code.length; k++) {
-    if ((depths[k] ?? d0) < d0) break;
-    stop = k;
+ * from the given 1-based line through the line holding the block end offset,
+ * or to the end of the file where no block closes around it. Blank lines
+ * stay in: the tools treat a blank between the directive and its code
+ * differently, so a blank-line edit asks again. The window errs wide on
+ * purpose: no tool's coverage rule is predicted, and a window wider than
+ * the coverage is correct by design. */
+function blockWindow(code: string[], starts: number[], from: number, blockEnd: number): string[] {
+  const out: string[] = [];
+  for (let k = from - 1; k < code.length; k++) {
+    if (starts[k]! >= blockEnd) break;
+    out.push(code[k]!);
   }
-  return code.slice(start, stop + 1);
+  return out;
 }
 
-/** The approval identity of a switch-off: its file, its comment text and, for a
- * line or next-line form, the conservative window after it (masked code to
- * the end of its enclosing block, to the end of the file where no block
- * closes); for a block or file form, the code it covers and the close that
- * ends it. Whether the run added it is judged separately, by file, text and
- * place among identical comments, so a merge that moves lines asks nothing
- * new. A window wider than the tool's coverage is correct by design: any
- * later edit in it asks again. Settings use the file's content object id at
- * the head instead. */
+/** The end of the innermost braced node around the offset, or infinity where
+ * none closes around it (top level): the window then runs to the file end. */
+function enclosingBlockEnd(blocks: { start: number; end: number }[], offset: number): number {
+  let best: number | null = null;
+  for (const b of blocks) {
+    if (b.start <= offset && offset < b.end && (best === null || b.end < best)) best = b.end;
+  }
+  return best ?? Number.POSITIVE_INFINITY;
+}
+
+/** The approval identity of a switch-off: its file, its comment text, its place
+ * among identical twins, and, for a line or next-line form, the conservative
+ * window after it (masked code to the end of its enclosing block, to the end
+ * of the file where no block closes); for a block or file form, the code it
+ * covers and the close that ends it. Whether the run added it is judged
+ * separately, by file, text and place among identical comments, so a merge
+ * that moves lines asks nothing new. A window wider than the tool's coverage
+ * is correct by design: any later edit in it asks again. Settings use the
+ * file's content object id at the head instead. */
 function switchOffId(kind: "comment" | "settings", parts: string[]): string {
   const hex = createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16);
   return `${kind}:${hex}`;
@@ -719,9 +482,10 @@ interface BlockEnd {
  * narrows an open joins its identity, so removing one counts the open as
  * added. */
 function fileSwitches(file: string, text: string): SwitchEntry[] {
-  const { comments, depths } = scanAll(text);
-  const code = maskedLines(text, comments);
-  const placed = placeDirectives(text);
+  const parsed = parseSource(text, file);
+  const code = maskedLines(text, parsed.comments);
+  const starts = lineStarts(text);
+  const placed = placeDirectives(parsed.comments);
   const ends = new Map<number, BlockEnd>();
   const endOf = (index: number): BlockEnd => {
     let e = ends.get(index);
@@ -773,14 +537,15 @@ function fileSwitches(file: string, text: string): SwitchEntry[] {
     }
   });
   const out: SwitchEntry[] = [];
+  const twins = new Map<string, number>();
   placed.forEach((d, index) => {
     if (!LISTED_SCOPES.has(d.scope)) return;
     let covered: string[];
     let tail = [""];
     if (d.scope === "line") {
-      covered = blockWindow(code, depths, d.line);
+      covered = blockWindow(code, starts, d.line, enclosingBlockEnd(parsed.blocks, d.endOff));
     } else if (d.scope === "next") {
-      covered = blockWindow(code, depths, d.end);
+      covered = blockWindow(code, starts, d.end, enclosingBlockEnd(parsed.blocks, d.endOff));
     } else if (d.scope === "file") {
       covered = code.filter((entry) => entry !== "");
     } else {
@@ -793,15 +558,19 @@ function fileSwitches(file: string, text: string): SwitchEntry[] {
       const stop = end === undefined ? code.length : Math.max(d.line, end.line - 1);
       covered = code.slice(d.line, stop).filter((entry) => entry !== "");
     }
+    const span = [...covered, ...tail].join("\n");
+    const twinKey = `${d.raw}\0${span}`;
+    const occurrence = twins.get(twinKey) ?? 0;
+    twins.set(twinKey, occurrence + 1);
     out.push({
       file,
       line: d.line,
       form: d.form,
       rules: d.rules,
       reason: d.reason,
-      id: switchOffId("comment", [file, d.raw, ...covered, ...tail]),
+      id: switchOffId("comment", [file, d.raw, String(occurrence), ...covered, ...tail]),
       raw: d.raw,
-      span: [...covered, ...tail].join("\n"),
+      span,
     });
   });
   return out;
@@ -901,11 +670,16 @@ function settingsKind(path: string): "plain" | "package" | null {
     /^tsconfig.*\.json$/u.test(name) ||
     /^jsconfig.*\.json$/u.test(name) ||
     name === ".oxlintrc.json" ||
+    name === ".oxlintrc.jsonc" ||
+    name === "oxlint.config.ts" ||
+    name === "oxlint.config.mts" ||
     name.startsWith(".eslintrc") ||
     name.startsWith("eslint.config.") ||
     name === ".eslintignore" ||
     name === "biome.json" ||
     name === "biome.jsonc" ||
+    name === ".biome.json" ||
+    name === ".biome.jsonc" ||
     name.startsWith(".prettierrc") ||
     name.startsWith("prettier.config.") ||
     name === ".prettierignore" ||

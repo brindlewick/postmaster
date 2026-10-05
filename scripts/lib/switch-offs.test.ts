@@ -118,7 +118,10 @@ describe("switch-off detection", () => {
     );
     write("docs/switch-offs.md", "// @ts-nocheck this is Markdown\n");
     commit("add directive text inputs");
-    const comments = scanComments(readFileSync(join(repo, "scripts/text-input.ts"), "utf8"));
+    const comments = scanComments(
+      readFileSync(join(repo, "scripts/text-input.ts"), "utf8"),
+      "scripts/text-input.ts",
+    );
     expect(comments).toHaveLength(1);
     const result = check();
     expect(result.code).toBe(2);
@@ -1062,6 +1065,36 @@ describe("switch-off detection", () => {
     expect(result.out).toContain("clear");
   });
 
+  test("identical twins hold distinct approval identities", () => {
+    freshRepo("twin-ids");
+    write(
+      "scripts/t.ts",
+      "export function f(): void {\n  // eslint-disable-next-line no-debugger -- same\n  debugger;\n}\nexport function g(): void {\n  // eslint-disable-next-line no-debugger -- same\n  debugger;\n}\n",
+    );
+    commit("add twins");
+    const ids = [...check().out.matchAll(/\(id (comment:[0-9a-f]{16})\)/gu)].map(
+      (match) => match[1]!,
+    );
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).not.toBe(ids[1]);
+    const dispatch = join(repo, ".postmaster", "runs", "TEST-TWIN");
+    mkdirSync(dispatch, { recursive: true });
+    const line = (rec: Record<string, unknown>): string => `${JSON.stringify(rec)}\n`;
+    const approval = {
+      run: "TEST-TWIN",
+      actor: "postmaster",
+      action: "switch-off",
+      target: ids[0],
+      detail: "approved scripts/t.ts:2 eslint-disable-line -- yes",
+    };
+    writeFileSync(join(dispatch, "actions.jsonl"), line(approval));
+    writeFileSync(join(repo, ".postmaster", "runs", "ledger.jsonl"), line(approval));
+    const held = check("--dispatch", dispatch);
+    expect(held.code).toBe(2);
+    expect(held.out).toContain(`(id ${ids[1]})`);
+    expect(held.out.match(/\(approved\)/gu) ?? []).toHaveLength(1);
+  });
+
   test("main's launch comments are listed when a run edits inside their window", () => {
     freshRepo("launch-window");
     write(
@@ -1078,6 +1111,107 @@ describe("switch-off detection", () => {
     const result = call("--repo", repo, "--default", "ticket", "--ticket", "ticket2");
     expect(result.code).toBe(3);
     expect(result.out).toContain("no-control-regex");
+  });
+
+  for (const [name, content] of [
+    [".oxlintrc.jsonc", '{"rules":{}}\n'],
+    ["oxlint.config.ts", "export default {};\n"],
+    ["oxlint.config.mts", "export default {};\n"],
+    [".biome.json", '{"linter":{}}\n'],
+    [".biome.jsonc", '{"linter":{}}\n'],
+  ] as const) {
+    test(`a ${name} change alone is listed`, () => {
+      freshRepo(`settings-${name.replace(/[^a-z]+/gu, "-")}`);
+      write(name, content);
+      commit(`add ${name}`);
+      const result = check();
+      expect(result.code).toBe(2);
+      expect(result.out).toContain(`- settings ${name} (added)`);
+    });
+  }
+
+  test("a nested oxlint jsonc change is listed", () => {
+    freshRepo("settings-nested");
+    write("scripts/sub/.oxlintrc.jsonc", '{"rules":{}}\n');
+    commit("add nested jsonc");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("- settings scripts/sub/.oxlintrc.jsonc (added)");
+  });
+
+  test("a file the parser cannot read fails loud, never clear", () => {
+    freshRepo("unparseable");
+    write(
+      "scripts/broken.ts",
+      'const s = "oops;\n// @ts-ignore real reason\nconst x: string = 1;\n',
+    );
+    commit("add unparseable file");
+    const result = check();
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("refusing to report clear over unparseable input");
+  });
+
+  test("a decorated file lists its directives", () => {
+    freshRepo("decorated");
+    write(
+      "scripts/deco.ts",
+      "@Component\nexport class A {\n  // @ts-ignore window reason\n  field: string = 1;\n}\n",
+    );
+    commit("add decorated file");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/deco.ts:3 ts-ignore");
+  });
+
+  test("module extensions list their directives", () => {
+    freshRepo("extensions");
+    write("scripts/m.mts", "// @ts-ignore m reason\nconst x: string = 1;\n");
+    write("scripts/c.cts", "// @ts-ignore c reason\nconst y: string = 2;\n");
+    write("scripts/e.mjs", "/* eslint-disable -- e reason */\ndebugger;\n");
+    write("scripts/j.cjs", "/* eslint-disable -- j reason */\ndebugger;\n");
+    commit("add module files");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/m.mts:1 ts-ignore");
+    expect(result.out).toContain("scripts/c.cts:1 ts-ignore");
+    expect(result.out).toContain("scripts/e.mjs:1 eslint-disable");
+    expect(result.out).toContain("scripts/j.cjs:1 eslint-disable");
+  });
+
+  test("a divide after a non-null assertion hides no trailing directive", () => {
+    freshRepo("nonnull-divide");
+    write(
+      "scripts/n.ts",
+      "export function h(size: number): void {\n  const half = size! / 2; // @ts-ignore the caller narrows it\n  const label: string = half;\n}\n",
+    );
+    commit("add non-null divide case");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/n.ts:2 ts-ignore");
+  });
+
+  test("a glob in a quoted member hides no later directive", () => {
+    freshRepo("quoted-glob");
+    write(
+      "scripts/g.ts",
+      'export interface Routes {\n  readonly "/api/*": string;\n}\nexport function f(): number {\n  // @ts-ignore the caller narrows it\n  const x: string = 1;\n  return x.length;\n}\n',
+    );
+    commit("add quoted glob case");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/g.ts:5 ts-ignore");
+  });
+
+  test("a regex after an unclosed quote hides no next-line directive", () => {
+    freshRepo("rescan-regex");
+    write(
+      "scripts/r.tsx",
+      "export const tip = <p>'</p>; export const re = /\\/*/g;\n/* eslint-disable -- x */\ndebugger;\n",
+    );
+    commit("add rescan regex case");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/r.tsx:2 eslint-disable");
   });
 
   test("a regex after a condition hides no trailing directive", () => {
@@ -1123,11 +1257,9 @@ describe("switch-off detection", () => {
     expect(idOf(check().out)).not.toBe(id);
   });
 
-  test("a backtick in JSX text is a known blind spot", () => {
-    // Deferred as r2bug-12: a tagged template follows a word, so the quote
-    // rule cannot exclude backticks, and telling JSX text from a template
-    // needs a real parser. This test pins the miss so a future fix updates
-    // it deliberately.
+  test("a backtick in JSX text hides no trailing directive", () => {
+    // Closed r2bug-12/security-11: the miss was pinned for a future fix, and
+    // the parser is that fix — the grammar tells JSX text from a template.
     freshRepo("jsx-tick");
     write(
       "scripts/t.tsx",
@@ -1135,8 +1267,8 @@ describe("switch-off detection", () => {
     );
     commit("add backtick jsx case");
     const result = check();
-    expect(result.code).toBe(0);
-    expect(result.out).not.toContain("scripts/t.tsx");
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/t.tsx:1 eslint-disable-line no-debugger");
   });
 });
 
@@ -1149,7 +1281,7 @@ describe("switch-off units", () => {
       "// eslint-disable-next-line no-debugger -- real-reason",
       "debugger;",
     ].join("\n");
-    const cs = scanComments(text);
+    const cs = scanComments(text, "x.ts");
     expect(cs.length).toBe(2);
     expect(cs[0]!.line).toBe(2);
     expect(cs[0]!.raw).toBe("/* real */");
@@ -1157,52 +1289,61 @@ describe("switch-off units", () => {
     expect(cs[1]!.raw).toBe("// eslint-disable-next-line no-debugger -- real-reason");
   });
 
-  test("an unterminated string ends at its newline and swallows no later comment", () => {
-    const cs = scanComments('const a = "oops;\n// @ts-ignore real reason\nconst x: string = 1;\n');
-    expect(cs.length).toBe(1);
-    expect(cs[0]!.line).toBe(2);
+  test("an unterminated string fails loud instead of guessing", () => {
+    expect(() =>
+      scanComments('const a = "oops;\n// @ts-ignore real reason\nconst x: string = 1;\n', "x.ts"),
+    ).toThrow("refusing to report clear over unparseable input");
   });
 
   test("the scanner counts CR, CRLF and U+2028 as line breaks", () => {
-    const cr = scanComments("const a = 1;\r// @ts-ignore cr reason\rconst x: string = 1;\r");
+    const cr = scanComments(
+      "const a = 1;\r// @ts-ignore cr reason\rconst x: string = 1;\r",
+      "x.ts",
+    );
     expect(cr.length).toBe(1);
     expect(cr[0]!.line).toBe(2);
     expect(cr[0]!.raw).toBe("// @ts-ignore cr reason");
     const crlf = scanComments(
       "const a = 1;\r\n// @ts-ignore crlf reason\r\nconst x: string = 1;\r\n",
+      "x.ts",
     );
     expect(crlf.length).toBe(1);
     expect(crlf[0]!.line).toBe(2);
-    const u = scanComments("const a = 1;\u2028// @ts-ignore u reason\u2028const x: string = 1;\n");
+    const u = scanComments(
+      "const a = 1;\u2028// @ts-ignore u reason\u2028const x: string = 1;\n",
+      "x.ts",
+    );
     expect(u.length).toBe(1);
     expect(u[0]!.line).toBe(2);
-    const block = scanComments("/* one\r two */\n// @ts-ignore block reason\ncode;\n");
+    const block = scanComments("/* one\r two */\n// @ts-ignore block reason\ncode;\n", "x.ts");
     expect(block.length).toBe(2);
     expect(block[1]!.line).toBe(3);
   });
 
   test("the scanner tells JSX text and operands from strings", () => {
-    const jsx = scanComments("const el = <div>don't</div>; // @ts-ignore r\ncode;\n");
+    const jsx = scanComments("const el = <div>don't</div>; // @ts-ignore r\ncode;\n", "x.tsx");
     expect(jsx.length).toBe(1);
     expect(jsx[0]!.line).toBe(1);
-    const paren = scanComments("if (a) /\\//.test(b); // c\ncode;\n");
+    const paren = scanComments("if (a) /\\//.test(b); // c\ncode;\n", "x.ts");
     expect(paren.length).toBe(1);
     expect(paren[0]!.raw).toBe("// c");
-    const plus = scanComments("n++ / 2; // c\ncode;\n");
+    const plus = scanComments("n++ / 2; // c\ncode;\n", "x.ts");
     expect(plus.length).toBe(1);
-    const prop = scanComments("x.if(y) / 2; // c\ncode;\n");
+    const prop = scanComments("x.if(y) / 2; // c\ncode;\n", "x.ts");
     expect(prop.length).toBe(1);
-    const prologue = scanComments("if (a) 'b'; // c\ncode;\n");
+    const prologue = scanComments("if (a) 'b'; // c\ncode;\n", "x.ts");
     expect(prologue.length).toBe(1);
   });
 
-  test("the scanner keeps U+2028 inside strings and regexes", () => {
-    const ustr = scanComments('const s = "a\u2028b"; // c\ncode;\n');
+  test("the scanner keeps U+2028 inside strings and fails a raw one in a regex", () => {
+    const ustr = scanComments('const s = "a\u2028b"; // c\ncode;\n', "x.ts");
     expect(ustr.length).toBe(1);
     expect(ustr[0]!.line).toBe(2);
-    const ure = scanComments("const r = /a\u2028b\\/\\//; // d\ncode;\n");
-    expect(ure.length).toBe(1);
-    expect(ure[0]!.line).toBe(2);
+    // A raw U+2028 ends a regex literal by the grammar (Oxlint rejects it),
+    // so the file fails loud instead of guessing where the pattern ends.
+    expect(() => scanComments("const r = /a\u2028b\\/\\//; // d\ncode;\n", "x.ts")).toThrow(
+      "refusing to report clear over unparseable input",
+    );
   });
 
   test("parseSwitchOff reads each form and its reason", () => {
