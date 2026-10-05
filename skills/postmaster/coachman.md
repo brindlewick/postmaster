@@ -41,6 +41,7 @@ half, how a run is prepared and what the waybill carries, is `SKILL.md`. You do 
 | `<repo>/.worktrees/<TICKET>-<lane>` | workhorse worktree, branch `wb/<TICKET>-<lane>` (`wb` for workhorse branch) |
 | `<dispatch>/checkpoint-<n>.md` | checkpoint cards: `1` and `review` |
 | `<repo>/.worktrees/<TICKET>-rev-<lens>-<lane>` | reviewer scratch, one per lens per lane, detached at the synthesis HEAD, fresh every round: a clone under the security lens, a worktree under the others |
+| `<repo>/.worktrees/<TICKET>-oracle-<lane>` | blind-test scratch, one per lane, cut at harvest with the oracle commit cherry-picked onto it, removed with the run |
 | `<dispatch>/style-sort.md` | aftercare's sort of the run's style findings, which the postmaster puts to the user |
 
 ## Audit log: every action, as it happens
@@ -408,8 +409,10 @@ from it.
   which is what the lanes were dispatched to choose. Commit
   them on the ticket branch before any synthesis code. They are the run's only oracle no lane
   wrote, and they stay that only if they are finished before you open a diff. At harvest,
-  cherry-pick that commit onto a scratch of each lane and run it: the result ranks
-  the lanes on the ticket's criteria before you have read a line of either. Where the ticket's
+  cut a scratch of each lane at `<repo>/.worktrees/<TICKET>-oracle-<lane>` with `<tool>/scripts/run
+  cut-scratch`, cherry-pick that commit onto it and run it: the result ranks
+  the lanes on the ticket's criteria before you have read a line of either. aftercare removes
+  those scratches with the run's other folders, which is why they are named for the ticket. Where the ticket's
   design question IS the interface, do not write them, say so on the checkpoint 1 card, and
   compose on reading alone. Your reading of the ticket is a single reading: in a run with a
   review leg, the reviewers see these tests with the synthesis and may challenge them like any
