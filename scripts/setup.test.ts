@@ -377,6 +377,101 @@ describe("positive controls", () => {
     expect(out).toContain("bug reviewer 'beta' uses pi, which has no code-review form");
     expect(er.out.trim()).toBe("alpha");
   }, 30000);
+
+  // A stand-in uname names another system: setup decides by the test
+  // systemdCapability() uses, so this takes the same path a Mac takes.
+  const otherSystemPath = (): string => {
+    const bin = join(tmp, "other-system");
+    mkdirSync(bin, { recursive: true });
+    const uname = join(bin, "uname");
+    writeFileSync(uname, '#!/bin/sh\nif [ "$1" = "-s" ]; then echo Darwin; else exit 1; fi\n');
+    chmodSync(uname, 0o755);
+    return `${bin}:${join(tmp, "bin")}:${process.env.PATH}`;
+  };
+
+  test("where no launch can be capped, the keys list carries no limits and no limits line", () => {
+    const keys = run(SELF, ["setup", "--keys"], { env: { PATH: otherSystemPath() } });
+    expect(keys.code).toBe(0);
+    expect(keys.out).not.toContain("limits.");
+    expect(keys.out.match(/^limits\./gmu)).toBeNull();
+    const linuxKeys = run(SELF, ["setup", "--keys"]);
+    expect(linuxKeys.out).toContain("limits.memory_max");
+  }, 30000);
+
+  test("where no launch can be capped, setup asks no limit question, says so once, and writes no limits table", () => {
+    answers("no-cap", "limits.memory_max=bogus");
+    const rc = runSetup("no-cap", { PATH: otherSystemPath() });
+    const out = readFileSync(join(tmp, "no-cap.out"), "utf8");
+    expect(rc).toBe(0);
+    expect(out.match(/without memory or process limits/gu)?.length).toBe(1);
+    expect(out).not.toContain("default memory cap");
+    expect(out).not.toContain("[limits]");
+    const cfg = tryTomlFile(join(tmp, "no-cap.toml"));
+    expect(cfg).not.toBeNull();
+    expect(cfg?.limits).toBeUndefined();
+  }, 30000);
+
+  test("where launches can be capped, setup never says they run without limits", () => {
+    const out = readFileSync(join(tmp, "plain.out"), "utf8");
+    expect(out).not.toContain("without memory or process limits");
+    expect(out).toContain("default memory cap");
+  }, 30000);
+
+  test("interactive setup where no launch can be capped reports uncapped launches once", () => {
+    const answers = [
+      "",
+      "", // roots and lane names
+      "bash",
+      "lane-alpha",
+      "",
+      "", // alpha
+      "bash",
+      "lane-beta",
+      "",
+      "", // beta
+      "",
+      "", // workhorses and reviewers
+      "",
+      "",
+      "", // style, bug and security reviewer overrides
+      "bash",
+      "coachman",
+      "",
+      "", // coachman
+      "bash",
+      "fallback",
+      "",
+      "", // fallback
+      "bash",
+      "postmaster",
+      "",
+      "", // postmaster
+      "bash",
+      "clerk",
+      "",
+      "", // clerk
+      "",
+      "", // run count and poll interval
+      "",
+      "", // tracker and confinement
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "", // create tickets, timeout, merge, checkpoint, links
+    ].join("\n");
+    const interactive = run(SELF, ["setup", "--dry-run"], {
+      env: { PATH: otherSystemPath() },
+      input: `${answers}\n`,
+    });
+    expect(interactive.code).toBe(0);
+    expect(interactive.out).not.toContain("Launch limits:");
+    expect(interactive.out).not.toContain("[limits]");
+    expect(interactive.out.match(/without memory or process limits/gu)?.length).toBe(1);
+  }, 30000);
 });
 
 describe("negative controls", () => {
