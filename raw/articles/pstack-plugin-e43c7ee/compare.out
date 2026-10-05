@@ -1,0 +1,51 @@
+# GitHub compare, read 2026-10-05
+
+Three reads of the GitHub API for cursor/plugins, each with --jq to keep the commit, its date and the first line of its message, and for the files their name, status and size of change.
+
+## c47b128 (the commit in the ticket) to 23e4138 (the commit the first report read)
+
+status ahead, ahead_by 4, behind_by 0
+fc520b2 2026-10-02T15:41:26Z chore(todoist): use the official red Todoist mark from todoist.com as the logo
+49684fa 2026-10-02T15:41:26Z chore(todoist): bump plugin to 1.0.1
+7022c81 2026-10-02T15:53:26Z Merge pull request #490
+23e4138 2026-10-03T04:37:34Z feat(pstack): port explain-the-number, fresh subagents, hourly autopilot tick, PR headings, schema-first cast (0.15.6)
+
+## 23e4138 to the head of the default branch
+
+status ahead, ahead_by 3, behind_by 0
+9511e60 2026-10-03T20:28:30Z feat(pstack): add /correct skill (#494)
+a586282 2026-10-03T23:19:16Z feat(pstack): make /architect designs resist agent mistakes (#495)
+e43c7ee 2026-10-04T00:06:48Z refactor(pstack): use bare performance mantras in perf-issue step 2 (#496)
+
+files:
+pstack/.cursor-plugin/plugin.json modified +1 -1
+pstack/README.md modified +2 -0
+pstack/skills/architect/SKILL.md modified +1 -1
+pstack/skills/architect/references/design-red-flags.md modified +24 -0
+pstack/skills/benchmark-checklist/SKILL.md modified +1 -1
+pstack/skills/correct/SKILL.md added +32 -0
+pstack/skills/poteto-mode/playbooks/hillclimb.md modified +1 -1
+pstack/skills/poteto-mode/playbooks/perf-issue.md modified +10 -9
+
+## the head of the default branch
+
+e43c7ee26e0038c6c1fa8380dd34ce86ff94cb2a 2026-10-04T00:06:48Z refactor(pstack): use bare performance mantras in perf-issue step 2 (#496)
+
+## Counts at e43c7ee, read 2026-10-05
+
+From the listings of `pstack/skills`, `pstack/skills/poteto-mode/playbooks` and `pstack/automations/benny/skills` at the head, and the plugin README.
+
+- folders under `pstack/skills`: 50, of which 24 are `principle-*` and 26 are not (the first report counted 25 working skills)
+- playbook files: 23
+- folders under `pstack/automations/benny/skills`: 3
+- README, `twenty-three playbooks`: 2 lines; `twenty-four short skills`: 1 line
+- control, a count the README does not give (`twenty-nine playbooks`): 0 lines
+
+## The top-level folder each of the first four commits changes, read 2026-10-05
+
+From one read of each commit with the GitHub API, keeping the first path component of every changed file.
+
+- fc520b2: third_party
+- 49684fa: third_party
+- 7022c81: third_party
+- 23e4138: pstack

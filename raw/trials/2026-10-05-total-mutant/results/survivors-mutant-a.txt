@@ -1,0 +1,98 @@
+== clerk
+brief > brief leaves one label holding a comma alone: it is not the ready mark
+== discover-project
+
+== landing
+fresh > Z1: the default branch's upstream resolves
+fresh > AA5: the default branch's upstream remote resolves
+fresh > AB2: one format names the upstream ref and its remote
+fresh > AC6: no upstream prints a blank answer
+fresh > AC6: a local upstream prints a dot remote
+== premises
+
+== review-decide
+
+== review-forms
+positive controls > a claude lane has a code-review form
+positive controls > a codex lane has a code-review form
+positive controls > a mimo lane has a code-review form
+== review-page
+
+== reviewers
+
+== run-clash
+
+== run-log
+negative controls > --close with no open section writes nothing
+== run-times
+
+== runs-status
+negative controls > the postmaster's own directory is not a run
+== skill-refs
+fixing script references > --fix leaves a file with no bare reference alone
+coachman shell blocks > all eleven shell blocks have the same arguments and status in bash and zsh
+coachman shell blocks > the argument checks reject unquoted expansions of multword shell arrays
+== stage
+negative controls > mkstemp names are unique, mode 0600, and hold their own bytes
+== summary-evidence
+the script > --ticket reads a waybill's ticket part
+== synthesis-shares
+
+== ticket-check
+positive controls > a well-formed ticket passes
+positive controls > Notes and User journey are optional
+positive controls > without --title only the body is judged
+positive controls > headings match ignoring case, a colon, the slash's spacing and a closing #
+positive controls > a criterion's text may start on the line below its number
+positive controls > a list indented three spaces, and a thematic break after it
+positive controls > a question mark in quotes or inside a word is not a question
+positive controls > a code span that wraps onto the next line is still code
+positive controls > a comment marker inside code hides nothing
+positive controls > a <!-- inside a line that the line does not close is text
+positive controls > a <!-- at the start of a line that nothing closes is text
+positive controls > a comment inside a line is not read
+positive controls > a criterion that opens with a fenced block
+positive controls > a line opening with a three-backtick code span is not a fence
+positive controls > TODO as a word is not a mark
+positive controls > a body with CRLF line endings passes
+positive controls > a byte-order mark hides no heading
+positive controls > a body read from standard input
+positive controls > a ticket read through the adapter passes, its log included
+negative controls: each part is named on its own > a title in another script has words
+negative controls: each part is named on its own > a section in another script has words
+== ticket-parts
+plain part: file > plain words, a version number and a site name are not files
+plain part: path > and/or, yes/no and the home folder in words are not paths
+plain part: codelink > a link to an issue or a pull request is fine
+agents' part: check > a paragraph before the list and indented sub-items are not checks
+agents' part: note and decision > a tag group may sit anywhere in the note, on any of its lines
+agents' part: note and decision > a tag in a check counts as a citation
+the draft marker > without --final the marker line is ignored
+exit codes and usage > a byte-order mark and Windows line ends are read as plain text
+the template's example > with a hex sha filled in, it is fit under --final
+== turnpikes
+positive controls: a ticket's section > --list does not read project settings
+positive controls: a ticket's section > the waybill's line resolves to itself
+positive controls: a run's legs > short names nothing for a line that leaves none out
+controls: a one-leg run, walked from synthesis to the card through the poll, the hand-off check and the stages > the final synthesis hand-off passes its check
+controls: a one-leg run, walked from synthesis to the card through the poll, the hand-off check and the stages > a one-leg run's card is GATE
+controls: a one-leg run, walked from synthesis to the card through the poll, the hand-off check and the stages > a one-leg run closes at done
+controls: a one-leg run, walked from synthesis to the card through the poll, the hand-off check and the stages > a one-leg run's stages after the card are the postmaster's
+controls: a two-leg run, walked from synthesis through review to the card > after synthesis the poll says DISPATCH
+controls: a two-leg run, walked from synthesis through review to the card > the review leg ends with the card, and no leg follows
+controls: a two-leg run, walked from synthesis through review to the card > it closes through the postmaster's stages
+controls: a three-leg run dispatched before this change, walked from review to ship > the legacy ship hand-off still passes its check
+controls: a three-leg run dispatched before this change, walked from review to ship > after ship the card is GATE, and no leg follows
+controls: a three-leg run dispatched before this change, walked from review to ship > a three-leg run keeps its stages
+== usage
+
+== verify-journey
+
+== wait-for-markers
+
+== wiki-lint
+
+== zzctl
+ > vacuous: add is defined
+ > vacuous: no assertion
+ > vacuous: absence only
