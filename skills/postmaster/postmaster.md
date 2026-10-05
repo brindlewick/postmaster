@@ -399,11 +399,14 @@ spec and pauses for no spec review.
    what Stage D's WALL step tells them about, and step 6 takes their words.
 2. **Decide within the user's standing instructions** when the question is about the
    work: a within-brief ambiguity, a scope call the ticket's own criteria answer, a round to
-   stop at the cap. A walled workhorse is never yours to drop: it goes to the user as Stage
-   D's WALL step says. Log `escalate` with your ruling.
+   stop at the cap. A reach is never decided here. A walled workhorse is never yours to drop:
+   it goes to the user as Stage D's WALL step says. Log `escalate` with your ruling.
 3. **Send it up** when it is genuinely destructive, changes the ticket's scope, touches
    anything outside the repo, is a fault in a control (Tool faults), asks whether to fix a
-   gating finding in a loop with no gating lens (`coachman.md`, Stage 2 step 5), or the user
+   gating finding in a loop with no gating lens (`coachman.md`, Stage 2 step 5), is a reach
+   (`coachman.md`, the reach check: a workhorse's finding, a main checkout change no lane's
+   record explains at `workhorses`, or an observed change tied to a reviewer outside this
+   run's own branches and folders), or the user
    asked to see it: write the question to the run's `.waiting-on-user`, add the run and the
    question to the waiting list (`<runs>/postmaster/ESCALATION.md`, owned by
    `<tool>/scripts/run host leg waiting add <runs> <ticket> <question-file>`), tell the user in
@@ -412,7 +415,8 @@ spec and pauses for no spec review.
    pass a postmaster grant up as if it needed the user's word, and never take the user's word
    for something the config gives you. On the user's answer, remove `.waiting-on-user`, remove
    the run from the list with `<tool>/scripts/run host leg waiting remove <runs> <ticket>`, and
-   act on the answer as the record named.
+   act on the answer as the record named. In a fixture run there is no user to ask: when the
+   project carries `.postmaster/fixture`, rule on a reach yourself, and let the fixture score fail.
 4. **For a premise ruling, follow the user's choice.** Log either answer with
    `<tool>/scripts/run log-action <dispatch> postmaster rule <TICKET> "premises <choice>"`.
    On `go on`, deliver that ruling to the coachman. On `send it back`, set the run to `abandoned` with
