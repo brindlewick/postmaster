@@ -204,3 +204,19 @@ alone and without a second reader, in [held-out.tsv](held-out.tsv): all four are
 heavy. Two are further cases of the lexing family that had already produced the round-2 findings,
 one is identical directives sharing an approval identity and one is five settings file names the check did not
 list. None is the identity-coverage class that the round-3 escalation proposed to close with a conservative window.
+
+## Checks after the page was built
+
+An independent fact-checker, who had not seen the first reading's work, read the page's account of this trial against
+this folder on 2026-10-05. It recomputed the counts with the scripts and by hand and found them right: the tables of
+`results/numbers.md` and `results/kinds.md` reproduce, the appendix rows equal `data/findings.tsv` and
+`first-reading.tsv`, and the serious counts, the per-round counts, the second reader's figures and the test-case counts
+reproduce. It found statements in the page's first draft that said more than the data does, and they were corrected on
+the page, not here.
+
+It also read eight findings drawn at random (seed 7) at their snapshots, and judged six labels reasonable, one with an
+over-confident mark and one whose cost label the code does not bear. The first, 202/bug-14, is marked `clear` where its
+sibling anchor 252/bug-22, the same law, was read the other way by the second reader. The second, 216/sec-4, and its twin
+216/bug-4, are labelled cheap, but the code is a script driven from outside, so the check is cheap only once a function of
+text is extracted. The first reading's labels were not changed after this. The first reading did not record, for each
+finding, whether its code was opened or only its card description read.
