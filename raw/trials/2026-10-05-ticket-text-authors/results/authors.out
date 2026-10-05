@@ -1,0 +1,9 @@
+issues 197, pull requests 112, highest number 309
+issue authors {"owner":197}
+issue comment authors {"owner":185}
+pull request authors {"owner":110,"other-1":2}
+pull request comment authors {"owner":6,"other-1":1}
+pull request review authors {"owner":1}
+pull requests by someone other than the owner ["other-1: closed","other-1: merged"]
+most comments on one issue 12
+control: items by a login that is not in the data 0
