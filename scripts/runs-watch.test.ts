@@ -501,7 +501,9 @@ describe("watcher steps: dispatch and resume controls", () => {
     expect(call).toContain("leg=review");
     expect(call).toContain("number=2");
     expect(call).toContain("thread=");
-    expect(call).toContain(`prompt=${join(root, "dispatch", "leg-2-prompt.txt")}`);
+    // Physically, as the watcher resolves the dispatch it was given (like pin
+    // above); the logical spelling differs under a linked parent.
+    expect(call).toContain(`prompt=${join(realpathSync(root), "dispatch", "leg-2-prompt.txt")}`);
     const prompt = readFileSync(join(root, "dispatch", "leg-2-prompt.txt"), "utf8");
     expect(prompt).toContain("Your review leg covers stage 2");
     expect(prompt).toContain(`${pin}/skills/postmaster/coachman.md`);

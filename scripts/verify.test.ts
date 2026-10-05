@@ -651,7 +651,7 @@ describe("record, arm and run", () => {
   test("a failed check names its log", () => {
     expect(
       laneOut.includes(
-        `log: ${join(tmp, "proj", ".worktrees/T-1-a")}/.postmaster/verify/logs/red.log`,
+        `log: ${join(realpathSync(join(tmp, "proj", ".worktrees/T-1-a")), ".postmaster/verify/logs/red.log")}`,
       ),
     ).toBe(true);
   });
@@ -698,7 +698,9 @@ describe("the coachman's run", () => {
   test("and leaves the workhorse's own copy as the workhorse left it", () => {
     const wt = join(tmp, "proj", ".worktrees/T-1-a");
     const spec = JSON.parse(readFileSync(join(wt, ".postmaster/verify/spec.json"), "utf-8"));
-    expect(spec.journey_dir).toBe(join(wt, ".postmaster/verify/journey"));
+    // Physically: verify builds the spec dir from git's own toplevel, which
+    // resolves a linked parent (as /tmp is on macOS).
+    expect(spec.journey_dir).toBe(join(realpathSync(wt), ".postmaster/verify/journey"));
     expect(spec.checks.some((c: { name: string }) => c.name === "red")).toBe(false);
   });
 
@@ -736,7 +738,7 @@ describe("the coachman's run", () => {
     const d = join(tmp, "proj", ".postmaster", "runs", "T-1");
     const fullSha = run("git", ["-C", wt, "rev-parse", "HEAD"]).out.trim();
     const r = run(SELF, ["verify", "journey-path", wt, d]);
-    expect(r.out.trim()).toBe(join(d, "journey", `${fullSha}.md`));
+    expect(r.out.trim()).toBe(join(realpathSync(d), "journey", `${fullSha}.md`));
   });
 
   test("a workhorse's in its worktree", () => {
@@ -745,7 +747,9 @@ describe("the coachman's run", () => {
     const r = run(SELF, ["verify", "journey-path", wt], {
       env: { POSTMASTER_VERIFY: undefined },
     });
-    expect(r.out.trim()).toBe(join(wt, ".postmaster/verify/journey", `${fullSha}.md`));
+    expect(r.out.trim()).toBe(
+      join(realpathSync(wt), ".postmaster/verify/journey", `${fullSha}.md`),
+    );
   });
 
   test("a dispatch path holding $(...) resolves literally, and runs nothing", () => {
@@ -1100,7 +1104,10 @@ describe("nothing a check starts outlives it", () => {
     }
     writeFileSync(checksPath, JSON.stringify(checksData));
     const r = run(SELF, ["verify", "run", mp, md]);
-    expect((r.out + r.err).includes("try: not run, exit 127,")).toBe(true);
+    const logged = r.out + r.err;
+    if (!logged.includes("try: not run, exit 127,"))
+      throw new Error(`verify run said:\n${logged}\n(exit ${r.code})`);
+    expect(logged.includes("try: not run, exit 127,")).toBe(true);
   }, 60000);
 });
 

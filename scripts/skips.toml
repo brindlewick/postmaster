@@ -381,3 +381,9 @@ file = "scripts/lib/confine.test.ts"
 name = "confinement table > a confined child can signal a process it started itself"
 reason = "the confinement mechanism does not start on this machine"
 systems = ["linux", "darwin"]
+
+[[skip]]
+file = "scripts/lib/processes.test.ts"
+name = "portable process state > proc path distinguishes live, zombie and reaped pids"
+reason = "macOS has no /proc, so the proc path cannot run there"
+systems = ["darwin"]

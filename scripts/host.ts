@@ -2131,10 +2131,36 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
       );
     } else {
       launchNotice("launch running uncapped (no supported per-launch limits available)");
-      child = spawn(spec.argv[0] ?? "", spec.argv.slice(1), {
+      // A session of its own without systemd: setsid(1) where it exists, else
+      // python's setsid, since macOS ships no setsid binary. Either execs the
+      // command in place, so the pidfile still names the launch's own pid —
+      // which is why this spawn is not detached: a detached child is already
+      // a group leader, and setsid would fork past the recorded pid.
+      let bin = spec.argv[0] ?? "";
+      let args = spec.argv.slice(1);
+      let alone = false;
+      const sid = which("setsid");
+      if (sid) {
+        args = [bin, ...args];
+        bin = sid;
+        alone = true;
+      } else {
+        const py = which("python3");
+        if (py) {
+          args = [
+            "-c",
+            "import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])",
+            bin,
+            ...args,
+          ];
+          bin = py;
+          alone = true;
+        }
+      }
+      child = spawn(bin, args, {
         cwd: spec.rundir,
         env,
-        detached: true,
+        ...(alone ? {} : { detached: true }),
         stdio: ["ignore", stdioFor(stdoutFd), stdioFor(stderrFd)],
       });
     }
@@ -3294,30 +3320,46 @@ function legTerminateTail(path: string): void {
 // empty file is a creator between its creation and its pid write. The mutex serializes the
 // check-and-write sections only — acquire, claim and release each drop it before returning —
 // so a kill mid-section leaves a dead owner's file the next take steals.
-function legMutexOwnerDead(mutexPath: string): boolean {
+type MutexVerdict = "absent" | "live" | "dead";
+function legMutexVerdict(mutexPath: string): { verdict: MutexVerdict; text: string | null } {
   let text: string;
   try {
     text = readFileSync(mutexPath, "utf8");
   } catch (error) {
-    return (error as NodeJS.ErrnoException)?.code === "ENOENT";
+    return {
+      verdict: (error as NodeJS.ErrnoException)?.code === "ENOENT" ? "absent" : "live",
+      text: null,
+    };
   }
   if (text.trim() === "") {
     try {
-      return Date.now() - statSync(mutexPath).mtimeMs > 5000;
+      return {
+        verdict: Date.now() - statSync(mutexPath).mtimeMs > 5000 ? "dead" : "live",
+        text,
+      };
     } catch {
-      return true;
+      return { verdict: "dead", text };
     }
   }
   const pid = Number(text.trim());
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  return processState(pid) !== "live";
+  if (!Number.isInteger(pid) || pid <= 0) return { verdict: "live", text };
+  return { verdict: processState(pid) !== "live" ? "dead" : "live", text };
 }
 type MutexTake = { status: "taken" } | { status: "busy" } | { status: "error"; error: unknown };
-// The steal races a fresh holder: the liveness verdict names a pid, but the
-// unlink acts on a path, and a new holder can create between the two, losing
-// its file to the unlink and holding the mutex beside the stealer. The window
-// is one read-to-unlink wide; callers whose write must survive verify it
+// The steal re-verifies the file it verdicts: the verdict names a pid, but the
+// unlink acts on a path, and a verdict that spans a drop and a fresh create —
+// the old owner exits after dropping, the liveness check straddles it — would
+// otherwise unlink the fresh holder's file and hold the mutex beside it. Only
+// a file still carrying the dead verdict's content is stolen; anything else
+// waits for the next try. Callers whose write must survive still verify it
 // after the write and redo, rather than trusting the hold alone.
+function legMutexRead(mutexPath: string): string | null {
+  try {
+    return readFileSync(mutexPath, "utf8");
+  } catch {
+    return null;
+  }
+}
 function legMutexTake(mutexPath: string, maxTries: number): MutexTake {
   for (let i = 0; maxTries < 0 || i < maxTries; i++) {
     try {
@@ -3331,7 +3373,15 @@ function legMutexTake(mutexPath: string, maxTries: number): MutexTake {
       return { status: "taken" };
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") return { status: "error", error };
-      if (legMutexOwnerDead(mutexPath)) {
+      // A file already gone steals nothing, and a file changed since the
+      // verdict belongs to a fresh holder: unlinking either would take a live
+      // file with it. Only the dead verdict's own content is stolen.
+      const seen = legMutexVerdict(mutexPath);
+      if (
+        seen.verdict === "dead" &&
+        seen.text !== null &&
+        legMutexRead(mutexPath) === seen.text
+      ) {
         try {
           rmSync(mutexPath, { force: true });
         } catch {}
@@ -4411,13 +4461,24 @@ function legWaitingEscape(question: string): string {
     .map((line) => (line.startsWith("## ") ? `\\## ${line.slice(3)}` : line))
     .join("\n");
 }
-function legWaitingAddInner(f: string, ticket: string, escaped: string): void {
-  let text = "";
-  let listIsFile = false;
+function legWaitingRead(f: string): string | null {
   try {
-    listIsFile = statSync(f).isFile();
-  } catch {}
-  if (listIsFile) text = readFileSync(f, "utf8");
+    if (!statSync(f).isFile()) return null;
+  } catch {
+    return null;
+  }
+  try {
+    return readFileSync(f, "utf8");
+  } catch {
+    return null;
+  }
+}
+// The update stores only onto the content it read: a second read past the
+// compute that differs means another writer landed between, so this one
+// reports unwritten and the caller redoes from the newer list. False never
+// means the ticket is missing, only that this write did not land.
+function legWaitingAddInner(f: string, ticket: string, escaped: string): boolean {
+  const text = legWaitingRead(f) ?? "";
   const blocks = text.split(/^## /mu);
   const head = blocks[0] ?? "";
   const rest: string[] = [];
@@ -4426,18 +4487,23 @@ function legWaitingAddInner(f: string, ticket: string, escaped: string): void {
     if (pyTrim(pySplitLines(b)[0] ?? "") !== ticket) rest.push(b);
   }
   rest.push(`${ticket}\n${escaped}\n`);
+  if ((legWaitingRead(f) ?? "") !== text) return false;
   legWaitingStore(f, head + rest.map((b) => `## ${b}`).join(""));
+  return true;
 }
-function legWaitingRemoveInner(f: string, ticket: string): void {
-  const text = readFileSync(f, "utf8");
+function legWaitingRemoveInner(f: string, ticket: string): boolean {
+  const text = legWaitingRead(f);
+  if (text === null) return true;
   const parts = text.split(/^## /mu);
   const keep: string[] = [parts[0] ?? ""];
   for (const b of parts.slice(1)) {
     if (pyTrim(pySplitLines(b)[0] ?? "") !== ticket) keep.push(`## ${b}`);
   }
   const out = keep.join("");
+  if ((legWaitingRead(f) ?? "") !== text) return false;
   legWaitingStore(f, pyTrim(out) === "" ? "" : out);
   if (pyTrim(out) === "") rmSync(f);
+  return true;
 }
 // Run the inner waiting update with the kernel holding the list: flock runs us
 // again as its child, so the read and the write are exclusive by construction —
@@ -4470,10 +4536,10 @@ function legWaitingAdd(runs: string, ticket: string, qfile: string): void {
   // phantom entry and remove takes the whole block. The escape renders identically in markdown.
   const escaped = legWaitingEscape(pyTrim(readFileSync(qfile, "utf8")));
   // Two postmasters adding together read one list and the last write wins, dropping an
-  // entry, and no pid file can close that race: the liveness verdict names a pid while
-  // the steal unlinks a path, so the kernel holds the list instead. Without flock(1)
-  // the pid mutex with verify-and-redo is the fallback — bash's class, a plain RMW
-  // there, which can still drop an entry under contention.
+  // entry, so the kernel holds the list instead: flock runs the inner update
+  // exclusively. Without flock(1) the pid mutex with verify-and-redo is the
+  // fallback, whose steal takes only a stale file — contended files never
+  // age one, so under contention the atomic create alone decides.
   const lock = join(runs, "postmaster", ".waiting.lock");
   if (legWaitingUnderFlock(lock, ["_waiting_add", runs, ticket, qfile])) return;
   for (let attempt = 0; attempt < 10; attempt++) {
@@ -4483,7 +4549,7 @@ function legWaitingAdd(runs: string, ticket: string, qfile: string): void {
         `leg: cannot take the waiting-list mutex: ${spawnStrerror(take.status === "error" ? take.error : null)}`,
       );
     try {
-      legWaitingAddInner(f, ticket, escaped);
+      if (!legWaitingAddInner(f, ticket, escaped)) continue;
       let back = "";
       try {
         back = readFileSync(f, "utf8");
@@ -4511,7 +4577,7 @@ function legWaitingRemove(runs: string, ticket: string): void {
         `leg: cannot take the waiting-list mutex: ${spawnStrerror(take.status === "error" ? take.error : null)}`,
       );
     try {
-      legWaitingRemoveInner(f, ticket);
+      if (!legWaitingRemoveInner(f, ticket)) continue;
       let back: string | null = null;
       try {
         back = readFileSync(f, "utf8");

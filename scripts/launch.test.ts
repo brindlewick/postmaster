@@ -5,6 +5,7 @@
 // self/here resolve beside this file; the launcher env deletions are restored in afterAll.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   accessSync,
   chmodSync,
@@ -16,6 +17,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -205,30 +207,34 @@ beforeAll(() => {
       rc = r.status ?? 1;
     };
 
+    // What the launch did, on every failure: a bare label says nothing on a
+    // system this machine cannot see.
+    const ran = (want: string): string =>
+      `rc=${rc} out=${JSON.stringify(out.slice(0, 400))} want=${JSON.stringify(want.slice(0, 400))} err=${JSON.stringify(err.slice(0, 200))}`;
     const runsAs = (label: string, f: string, want: string, ...args: string[]): void => {
       doRun(f, ...args);
       if (rc === 0 && bashOut(out) === bashOut(want)) ok(label);
-      else fail(label);
+      else fail(label, ran(want));
     };
     const runsOn = (label: string, f: string, m: string, ...args: string[]): void => {
       doRun(f, ...args);
       if (rc === 0 && out.includes(`--model ${m} `)) ok(label);
-      else fail(label);
+      else fail(label, ran(`--model ${m} `));
     };
     const refused = (label: string, f: string, want: string, ...args: string[]): void => {
       doRun(f, ...args);
       if (rc === 1 && out === "" && err.includes(want)) ok(label);
-      else fail(label);
+      else fail(label, ran(want));
     };
     const carries = (label: string, f: string, want: string, ...args: string[]): void => {
       doRun(f, ...args);
       if (rc === 0 && out.includes(want)) ok(label);
-      else fail(label);
+      else fail(label, ran(want));
     };
     const lacks = (label: string, f: string, bad: string, ...args: string[]): void => {
       doRun(f, ...args);
       if (rc === 0 && !out.includes(bad)) ok(label);
-      else fail(label);
+      else fail(label, ran(`lacks ${bad}`));
     };
     const printed = (label: string, ...texts: string[]): void => {
       for (const t of texts) {
@@ -940,7 +946,10 @@ beforeAll(() => {
       "a codex resume runs in its worktree on its lane's model and effort, streams JSON, writes -o, and passes a prompt that starts with -",
       "codex",
       lines(
-        join(tmp, "wt"),
+        // Physically: the harness's PWD names the entered directory resolved,
+        // as BASE's cd after pwd -P does; the caller may spell it through a
+        // link (as /tmp is on macOS).
+        realpathSync(join(tmp, "wt")),
         "exec",
         "resume",
         "T-1",
@@ -967,7 +976,7 @@ beforeAll(() => {
       "a codex coachman resumes with --leg review on the review entry's model and effort",
       "codex",
       lines(
-        join(tmp, "wt"),
+        realpathSync(join(tmp, "wt")),
         "exec",
         "resume",
         "T-1",
@@ -993,7 +1002,7 @@ beforeAll(() => {
       "a codex launch on a branch runs with -C and --json, and no --skip-git-repo-check",
       "codex",
       lines(
-        join(tmp, "cx"),
+        realpathSync(join(tmp, "cx")),
         "exec",
         "-C",
         join(tmp, "cx"),
@@ -1014,7 +1023,7 @@ beforeAll(() => {
       "a codex launch in a detached worktree adds --skip-git-repo-check",
       "codex",
       lines(
-        join(tmp, "cx-detached"),
+        realpathSync(join(tmp, "cx-detached")),
         "exec",
         "-C",
         join(tmp, "cx-detached"),
@@ -1350,7 +1359,10 @@ beforeAll(() => {
     {
       const claude = join(tmp, "bin", "claude");
       const saved = readFileSync(claude, "utf8");
-      writeFileSync(claude, '#!/bin/sh\nprintf "%s\\n" "shlvl=${SHLVL-<unset>}"\n');
+      // Native, so no shell startup bump colors the reading: dash keeps the
+      // handed level while bash counts one more, and the control pins what
+      // the launcher hands, not what the stub's interpreter does with it.
+      writeFileSync(claude, '#!/usr/bin/env bun\nconsole.log(`shlvl=${process.env.SHLVL ?? "<unset>"}`);\n');
       envx = { SHLVL: "7" };
       carries(
         "an env file launch hands the launcher's level",
@@ -1492,7 +1504,9 @@ beforeAll(() => {
       const handedPath = join(tmp, "parity-handed.out");
       writeFileSync(claude, envDumpStub(handedPath, "echo STUB-RAN >&2"));
       const savedEnvx = envx;
-      envx = { HOME: join(tmp, "home") };
+      // SHELL is handed, never manufactured: the runner may or may not carry
+      // one, so the control provides it and both sides inherit the same.
+      envx = { HOME: join(tmp, "home"), SHELL: "/bin/sh" };
       // `_` is each launcher's own last command and always differs; a shell's
       // `file: line N:` prefix names its own $0. Both normalize away. So does
       // the exec/fork split: BASE execs the harness, which fails `$PWD/<cmd>:`,
@@ -1505,6 +1519,19 @@ beforeAll(() => {
             l.replace(/^[^:]*: line [0-9]+: /u, "").replace(/^\/[^:]+?([^/]+): /u, "$1: "),
           )
           .join("\n");
+      // Names with value lengths and hashes, never values: a runner masks
+      // secret-looking text, and a hash still says which side differs how.
+      const digestEnv = (entries: string[]): string =>
+        entries
+          .slice(0, 5)
+          .map((e) => {
+            const at = e.indexOf("=");
+            const name = at === -1 ? e : e.slice(0, at);
+            const value = at === -1 ? "" : e.slice(at + 1);
+            const hash = createHash("sha256").update(value).digest("hex").slice(0, 12);
+            return `${name}=<${value.length} chars sha:${hash}>`;
+          })
+          .join(" ");
       const handedEnv = (): string[] => {
         let raw: string;
         try {
@@ -1516,9 +1543,22 @@ beforeAll(() => {
         // while the merged main fork-spawns it (one above), so the two oracles
         // differ by construction. SHLVL follows main, pinned by the resume
         // control against main's launcher.
+        // PWD is compared resolved: this oracle is the last launcher that
+        // execs, whose logical cd predates main's resolve-first; main and the
+        // port hand the entered directory resolved. Both spellings name the
+        // same directory; the comparison is over every other variable whole.
+        const physicalPwd = (e: string): string => {
+          if (!e.startsWith("PWD=")) return e;
+          try {
+            return `PWD=${realpathSync(e.slice(4))}`;
+          } catch {
+            return e;
+          }
+        };
         return raw
           .split("\0")
           .filter((e) => e.includes("=") && !e.startsWith("_=") && !e.startsWith("SHLVL="))
+          .map(physicalPwd)
           .sort();
       };
       const parity = (
@@ -1581,8 +1621,9 @@ beforeAll(() => {
         const detail = agree
           ? `shape missing on ${sig ? "neither" : "a"} side: ${sigDetail}`
           : `port rc=${pRc} base rc=${bRc}; port handed ${pHanded.length}, base ${bHanded.length}; ` +
-            `first port-only: ${JSON.stringify(pHanded.filter((e) => !bHanded.includes(e)).slice(0, 3))} ` +
-            `first base-only: ${JSON.stringify(bHanded.filter((e) => !pHanded.includes(e)).slice(0, 3))}`;
+            `port-only: ${digestEnv(pHanded.filter((e) => !bHanded.includes(e)))} ` +
+            `base-only: ${digestEnv(bHanded.filter((e) => !pHanded.includes(e)))} ` +
+            `port err=${JSON.stringify(normStreams(pErr).slice(0, 200))} base err=${JSON.stringify(normStreams(bErr).slice(0, 200))}`;
         check(`parity: ${label}`, agree && sig, detail);
       };
       // A divergence BASE predates by construction: #57 refuses the launch (rc 1)
@@ -1647,13 +1688,22 @@ beforeAll(() => {
           `parity: ${label}`,
           pOk && bOk,
           `port ${pOk ? "refused" : `rc=${pRc} err=${JSON.stringify(pErr.slice(0, 80))}`}, ` +
-            `base ${bOk ? "exec'd to 127" : `rc=${bRc}`}: ${sigDetail}`,
+            `base ${bOk ? `exec'd to ${expectedDarkRc()}` : `rc=${bRc} err=${JSON.stringify(normStreams(bErr).slice(0, 160))}`}: ${sigDetail}`,
         );
       };
+      // BASE's dark exec, per system: where the harness cannot be found, the
+      // old script execs and the shell reports it — 127 on Linux bash, 126
+      // under the macOS bash 3.2, each with its own failure message. Either
+      // way the harness never ran.
+      const expectedDarkRc = (): number => (process.platform === "darwin" ? 126 : 127);
+      const DARK_MESSAGE =
+        /No such file or directory|command not found|Permission denied|is a directory|bad interpreter|cannot execute/u;
       const execDark = (_rc: number, _out: string, err: string, _h: string[]): boolean =>
-        _rc === 127 &&
+        _rc === expectedDarkRc() &&
         !err.includes("STUB-RAN") &&
-        normStreams(err).includes("No such file or directory");
+        (process.platform === "darwin"
+          ? DARK_MESSAGE.test(normStreams(err))
+          : normStreams(err).includes("No such file or directory"));
       const ran = (_rc: number, _out: string, err: string, _h: string[]): boolean =>
         err.includes("STUB-RAN");
       const notRan = (_rc: number, _out: string, err: string, _h: string[]): boolean =>
@@ -1897,7 +1947,7 @@ beforeAll(() => {
         const nBOut = String(nb.stdout ?? "");
         const nBErr = String(nb.stderr ?? "");
         const nBHanded = handedEnv();
-        const pwdWant = `PWD=${join(tmp, "wt")}`;
+        const pwdWant = `PWD=${realpathSync(join(tmp, "wt"))}`;
         check(
           "parity: without an env file the harness's full environment matches BASE, PWD naming the worktree",
           nPRc === 0 &&
@@ -1909,7 +1959,10 @@ beforeAll(() => {
             JSON.stringify(nPHanded) === JSON.stringify(nBHanded) &&
             nPHanded.includes(pwdWant) &&
             nBHanded.includes(pwdWant),
-          `port rc=${nPRc} base rc=${nBRc} port ${nPHanded.length} base ${nBHanded.length}`,
+          `port rc=${nPRc} base rc=${nBRc} port ${nPHanded.length} base ${nBHanded.length} ` +
+            `port-only: ${digestEnv(nPHanded.filter((e) => !nBHanded.includes(e)))} ` +
+            `base-only: ${digestEnv(nBHanded.filter((e) => !nPHanded.includes(e)))} ` +
+            `want ${pwdWant}`,
         );
         // Stdin reaches the harness byte for byte, NUL included: no UTF-8 decode.
         const pi = join(tmp, "bin", "pi");
@@ -2131,7 +2184,7 @@ beforeAll(() => {
       "a codex resume with no effort and no --last passes neither -c nor -o",
       "codex-noeffort",
       lines(
-        join(tmp, "wt"),
+        realpathSync(join(tmp, "wt")),
         "exec",
         "resume",
         "T-1",
@@ -2392,7 +2445,7 @@ beforeAll(() => {
       err = r.stderr ?? "";
       rc = r.status ?? 1;
       process.chdir(origCwd);
-      const wantPrefix = `exec --json --prompt-file ${join(tmp, "wt/sub/p.txt")} --model muse-model --yolo `;
+      const wantPrefix = `exec --json --prompt-file ${realpathSync(join(tmp, "wt/sub/p.txt"))} --model muse-model --yolo `;
       if (rc === 0 && out.startsWith(wantPrefix)) {
         ok(
           "a relative prompt file is made absolute before the cd, and no effort means no effort flag",
@@ -3678,7 +3731,7 @@ beforeAll(() => {
       "codex review uses --base, --last, the lane's effort and the lane model",
       "review-codex",
       lines(
-        join(tmp, "cx-detached"),
+        realpathSync(join(tmp, "cx-detached")),
         "exec",
         "review",
         "--base",
@@ -3720,7 +3773,7 @@ beforeAll(() => {
       "codex review in a run uses the recorded config and the recorded effort",
       "review-codex",
       lines(
-        join(tmp, "cx-detached"),
+        realpathSync(join(tmp, "cx-detached")),
         "exec",
         "review",
         "--base",
@@ -3935,7 +3988,9 @@ beforeAll(() => {
         };
         for (const [n, body] of Object.entries(cfgs)) writeFileSync(join(f1, `${n}.toml`), body);
         // The thread where BASE's own key formula puts it: RUN, the physical
-        // cwd, NAME and LEG through cksum exactly as harness_data does.
+        // cwd, NAME and LEG through cksum exactly as harness_data does. The
+        // key spells the directory physically, as the launchers resolve it,
+        // never the logical spelling the scenario starts from.
         const keyed = spawnSync(
           "bash",
           [
@@ -3943,7 +3998,7 @@ beforeAll(() => {
             'printf "%s|%s|%s|%s" "$1" "$2" "$3" "$4" | cksum | tr " " "-"',
             "_",
             "",
-            physSub,
+            realpathSync(physSub),
             "x",
             "",
           ],
@@ -3970,6 +4025,7 @@ beforeAll(() => {
           const args = ["resume", "x", "sub", "ses_x", join(tmp, "prompt.txt")];
           const sides: Record<string, string[]> = {};
           const codes: Record<string, number> = {};
+          const errs: Record<string, string> = {};
           for (const [side, bin, argv] of [
             ["base", "bash", [baseLaunch, ...args]],
             ["port", self, ["launch", ...args]],
@@ -3977,6 +4033,7 @@ beforeAll(() => {
             rmSync(recOf(harness), { force: true });
             const r = spawnSync(bin, argv, { cwd: startlink, encoding: "utf8", env });
             codes[side] = r.status ?? -1;
+            errs[side] = String(r.stderr ?? "").slice(0, 300);
             sides[side] = existsSync(recOf(harness))
               ? readFileSync(recOf(harness), "utf8").trim().split("\n")
               : [`<no record: exit ${r.status ?? -1} ${(r.stderr ?? "").slice(0, 200)}>`];
@@ -3992,7 +4049,9 @@ beforeAll(() => {
             b[1] !== p[1]
           ) {
             mismatches.push(
-              `${label}: base exit ${codes.base ?? -1} [${b.join(" / ")}] vs port exit ${codes.port ?? -1} [${p.join(" / ")}]`,
+              `${label}: base exit ${codes.base ?? -1} [${b.join(" / ")}] vs port exit ${codes.port ?? -1} [${p.join(" / ")}] ` +
+                `base err=${JSON.stringify(errs.base ?? "")} port err=${JSON.stringify(errs.port ?? "")} ` +
+                `key=${key} phys=${realpathSync(physSub)}`,
             );
           }
         };

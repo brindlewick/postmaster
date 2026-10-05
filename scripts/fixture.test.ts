@@ -835,10 +835,13 @@ describe("new: a fresh repo outside every other, with its ticket in its own stor
     expect(status).toBe("");
   }, 30000);
   test("it holds the app's files as git sees them, symlink included, and nothing else", () => {
-    const listed2 = run("bash", [
-      "-c",
-      `git -C "${APP}" ls-files --cached --others --exclude-standard`,
-    ])
+    // Under the same HOME the fresh repo was made with: global git ignores
+    // shape --exclude-standard, and the runner's own would list differently.
+    const listed2 = run(
+      "bash",
+      ["-c", `git -C "${APP}" ls-files --cached --others --exclude-standard`],
+      { env: { HOME: join(tmp, "home") } },
+    )
       .out.trim()
       .split("\n")
       .sort();

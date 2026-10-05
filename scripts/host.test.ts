@@ -474,6 +474,9 @@ test("Herdr checks time out when timeout is absent, and keep working when it is 
     ["bash", Bun.which("bash") ?? "/bin/bash"],
     ["bun", process.execPath],
     ["dirname", Bun.which("dirname") ?? "/usr/bin/dirname"],
+    // The minimal PATH is about timeout, not ps: without /proc, macOS reads
+    // every process state through ps, and a missing ps reads as absent.
+    ["ps", Bun.which("ps") ?? "/bin/ps"],
   ])
     symlinkSync(target, join(bin, name));
   const herdr = join(bin, "herdr");
@@ -500,11 +503,20 @@ test("Herdr checks time out when timeout is absent, and keep working when it is 
         env,
         timeout: 10000,
       });
+      const elapsed = Date.now() - started;
+      const detail =
+        `${label}: run ${args.join(" ")} error=${result.error ? String(result.error) : "none"} ` +
+        `status=${result.status} signal=${result.signal} elapsed=${elapsed}ms\n` +
+        `--- stdout ---\n${result.stdout ?? ""}\n--- stderr ---\n${result.stderr ?? ""}`;
+      // The guards below fail with the evidence; the expects keep the count.
+      if (result.error !== undefined || result.status !== 0 || elapsed >= 10000)
+        throw new Error(detail);
       expect(result.error).toBeUndefined();
       expect(result.status).toBe(0);
-      expect(Date.now() - started).toBeLessThan(10000);
-      if (label === "close") expect(result.stdout).toContain("closed what run host opened");
-      else expect(result.stdout).toContain("host=none");
+      expect(elapsed).toBeLessThan(10000);
+      const want = label === "close" ? "closed what run host opened" : "host=none";
+      if (!result.stdout.includes(want)) throw new Error(detail);
+      expect(result.stdout).toContain(want);
     }
     const requests = readFileSync(calls, "utf8");
     expect(requests).toContain("workspace list");

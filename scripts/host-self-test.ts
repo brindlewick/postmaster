@@ -4349,6 +4349,14 @@ export async function runControls(): Promise<number> {
         "    exit 1 ;;",
         "  *pre-thread*) exit 1 ;;",
         '  *sleepy*) sleep "${TEST_SLEEP:-5}"; printf \'{"session_id":"thread-sleepy"}\\n\'; exit 1 ;;',
+        // ? for the space: an unquoted space is a syntax error in a pattern.
+        "  *direct?claim*)",
+        // The paired-claim race holds the lock while the loser arrives: on a
+        // fast machine the winner would otherwise finish and release before
+        // the loser reads, and the pair would run twice in a row.
+        "    sleep 0.5",
+        '    printf \'{"session_id":"thread-plain"}\\n\'',
+        "    exit 1 ;;",
         "  *)",
         '    printf \'{"session_id":"thread-plain"}\\n\'',
         "    exit 1 ;;",
@@ -5104,6 +5112,7 @@ export async function runControls(): Promise<number> {
       `rc=${r.code}`,
     );
     let pairsBad = 0;
+    let liveHist = "";
     for (let i = 0; i < 50; i++) {
       writeFileSync(join(root, "pair.lock"), "999999999 0\n");
       callsBefore = legCalls();
@@ -5119,12 +5128,15 @@ export async function runControls(): Promise<number> {
       });
       const [r1, r2] = await Promise.all([exited(p1), exited(p2)]);
       const live = (r1 === 0 ? 1 : 0) + (r2 === 0 ? 1 : 0);
-      if (live !== 1 || legCalls() !== callsBefore + 1) pairsBad++;
+      if (live !== 1 || legCalls() !== callsBefore + 1) {
+        pairsBad++;
+        if (liveHist.length < 60) liveHist += live === 0 ? "z" : live === 1 ? "s" : "t";
+      }
     }
     await pass(
       "fifty paired claims each run exactly one attempt live",
       () => pairsBad === 0,
-      `bad=${pairsBad}`,
+      `bad=${pairsBad} live-histogram(z0/single-legcalls/t2)=${liveHist || "clean"}`,
     );
     const mutexPath = join(legD, ".leg-1-mutex");
     const recsBeforeMutex = nonEmptyLines(attemptsPath).length;

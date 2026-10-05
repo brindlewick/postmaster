@@ -1583,6 +1583,12 @@ describe("fixture effort records", () => {
         POSTMASTER_CONFIG: config,
         POSTMASTER_TOOL_PINS: pins,
         PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
+        // fixture new commits the fresh repo; the checkout it runs from may
+        // carry no identity of its own, so the test provides it outright.
+        GIT_AUTHOR_NAME: "fixture",
+        GIT_AUTHOR_EMAIL: "fixture@example.invalid",
+        GIT_COMMITTER_NAME: "fixture",
+        GIT_COMMITTER_EMAIL: "fixture@example.invalid",
       };
       const original = join(tmp, "original");
       const created = run(join(import.meta.dir, "run"), ["fixture", "new", original, "remove"], {

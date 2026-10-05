@@ -85,41 +85,49 @@ function withProcRoot<T>(root: string | undefined, action: () => T): T {
 
 describe("portable process state", () => {
   for (const forced of [false, true]) {
-    test(`${forced ? "forced ps path" : "proc path"} distinguishes live, zombie and reaped pids`, async () => {
-      const absentRoot = join(import.meta.dir, `absent-${process.pid}-${Date.now()}`);
-      const root = forced ? absentRoot : undefined;
-      const { parent, childPid } = await startZombieChild();
-      try {
-        await Bun.sleep(350);
-        const liveState = withProcRoot(root, () => processState(parent.pid));
-        const liveStart = withProcRoot(root, () => processStart(parent.pid));
-        const zombieState = withProcRoot(root, () => processState(childPid));
-        expect(liveState).toBe("live");
-        expect(liveStart).not.toBeNull();
-        expect(liveStart!.split(/[ \t]+/u).length).toBe(forced ? 5 : 1);
-        expect(zombieState).toBe("zombie");
-        if (forced) {
-          const info = withProcRoot(root, () => processInfo(parent.pid));
-          const tableRow = withProcRoot(root, () => processTable().get(parent.pid));
-          expect(info?.pid).toBe(parent.pid);
-          expect(info?.group).toBeGreaterThan(0);
-          expect(info?.session).toBeGreaterThan(0);
-          expect(tableRow?.pid).toBe(parent.pid);
-          expect(tableRow?.start.split(/[ \t]+/u).length).toBe(5);
+    // macOS has no /proc, so the proc path cannot run there; the forced ps
+    // path beside it covers the fallback the module takes instead.
+    test.skipIf(!forced && process.platform === "darwin")(
+      `${forced ? "forced ps path" : "proc path"} distinguishes live, zombie and reaped pids`,
+      async () => {
+        const absentRoot = join(import.meta.dir, `absent-${process.pid}-${Date.now()}`);
+        const root = forced ? absentRoot : undefined;
+        const { parent, childPid } = await startZombieChild();
+        try {
+          await Bun.sleep(350);
+          const liveState = withProcRoot(root, () => processState(parent.pid));
+          const liveStart = withProcRoot(root, () => processStart(parent.pid));
+          const zombieState = withProcRoot(root, () => processState(childPid));
+          expect(liveState).toBe("live");
+          expect(liveStart).not.toBeNull();
+          expect(liveStart!.split(/[ \t]+/u).length).toBe(forced ? 5 : 1);
+          expect(zombieState).toBe("zombie");
+          if (forced) {
+            const info = withProcRoot(root, () => processInfo(parent.pid));
+            const tableRow = withProcRoot(root, () => processTable().get(parent.pid));
+            expect(info?.pid).toBe(parent.pid);
+            expect(info?.group).toBeGreaterThan(0);
+            // Session 0 is real: a launchd daemon's children sit in session 0,
+            // which is what the macOS runner reports.
+            expect(info?.session).toBeGreaterThanOrEqual(0);
+            expect(tableRow?.pid).toBe(parent.pid);
+            expect(tableRow?.start.split(/[ \t]+/u).length).toBe(5);
+          }
+        } finally {
+          parent.kill("SIGKILL");
+          await parent.exited;
         }
-      } finally {
-        parent.kill("SIGKILL");
-        await parent.exited;
-      }
-      const deadline = Date.now() + 5000;
-      while (
-        Date.now() < deadline &&
-        withProcRoot(root, () => processState(childPid)) !== "absent"
-      ) {
-        await Bun.sleep(50);
-      }
-      expect(withProcRoot(root, () => processState(childPid))).toBe("absent");
-    }, 10000);
+        const deadline = Date.now() + 5000;
+        while (
+          Date.now() < deadline &&
+          withProcRoot(root, () => processState(childPid)) !== "absent"
+        ) {
+          await Bun.sleep(50);
+        }
+        expect(withProcRoot(root, () => processState(childPid))).toBe("absent");
+      },
+      10000,
+    );
   }
 
   test("portable start times always use the C locale", () => {
