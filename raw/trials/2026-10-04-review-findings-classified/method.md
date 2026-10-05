@@ -192,3 +192,15 @@ Its nine `finding` lines, read on 2026-10-05 at 00:26 UTC and copied unchanged t
 P3 findings: none is serious, so the same command that reads 14 serious lines on the first 37 reads 0 on
 these (`grep -cE '"detail": ?"gating P[12] '`). They are not in the 84, and #268's round 4 had not been
 logged when they were read.
+
+## Round 4 of #268, logged after the first reading was committed
+
+Run #268's fourth review round was logged on 2026-10-05 at 00:30 UTC, after the rubric, the anchors and the
+first reading were committed. Its seven `finding` lines are in
+[data/finding-lines-268-round4.jsonl](data/finding-lines-268-round4.jsonl) and the run's escalation card, which
+now supersedes the round-3 one, in [data/cards/268-ESCALATION-round4.md](data/cards/268-ESCALATION-round4.md). Four
+are serious: two P1 and two P2. They are not in the 84. The first reader labelled them against the same rubric,
+alone and without a second reader, in [held-out.tsv](held-out.tsv): all four are `prop`, two cheap clear or
+arguable and one heavy. Two are further cases of the lexing family that had already produced the round-2 findings,
+one is identical directives sharing an approval identity and one is five settings file names the check did not
+list. None is the identity-coverage class that the round-3 escalation proposed to close with a conservative window.
