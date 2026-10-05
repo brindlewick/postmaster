@@ -95,23 +95,30 @@ shown beside it.
 **What the chosen prototype carries.**
 
 - Cream paper, navy ink and coral, from the seed. Dark mode keeps them on deep navy.
-- Headings in a display serif (DM Serif Display) underlined in coral, reading text in Source
-  Serif 4, and times, figures and code in IBM Plex Mono.
+- Headings and large counts in a display serif (DM Serif Display), section headings underlined
+  in coral, reading text in Source Serif 4, and labels, times and code in IBM Plex Mono.
 - Ruled boxes with their label set into the top rule, like a form. The postmaster's own question
   sits in one washed in coral.
-- Four large counts under the masthead: waiting on you, waiting on the postmaster, running and
-  closed. Under them, a navy bar names the stalled runs, with a coral button to them.
-- A stalled run has a coral border, a coral wash and a coral band. A held run has a dashed label.
+- Four large counts under the opening heading: waiting on you, waiting on the postmaster, running
+  and closed. Under them, a navy bar counts the stalled runs, with a coral button to them.
+- A stalled run has a coral border, a coral wash and a coral band. A held run sits on a wash, with
+  a ruled "Ⅱ HELD" label.
 - Diamond marks drawn for the page, in place of the seed's engravings, which it does not copy.
 - On a wide screen, the user's questions in a side column, and a board with a column for each
   stage in use, the postmaster's waits above the running runs.
 
 **What to fix when it is built.** Reading the prototype found two places where it does not follow
 its data. The project's name in the masthead is typed in, and the wide board always has six stage
-columns, the number the sample happens to fill.
+columns, the number the sample happens to fill. Writing its spec found three more: the cap on
+review rounds is typed in, a count of one still takes a plural, and the project's description
+drops a sentence only the sample has.
 
-The prototypes are throwaway pages, kept out of this repository. All 44 are on one private page
-on the user's account,
+**Where it is kept.** The user asked whether another agent could reproduce the look exactly, and
+agreed to keep it in the repository. The chosen prototype is in
+[docs/design/dashboard](https://github.com/brindlewick/postmaster/tree/main/docs/design/dashboard),
+unchanged, with full-page pictures of its three pages at phone and iPad width in both themes, and
+a spec of its exact colours, type, layout, parts and behaviour, with each flaw's line. The other
+43 prototypes stay out of the repository. All 44 are on one private page on the user's account,
 [Seed Round Prototypes](https://claude.ai/code/artifact/e9a96b9b-1f24-4c22-80d2-3bf124f2e255),
 each beside its seed's pictures.
 
