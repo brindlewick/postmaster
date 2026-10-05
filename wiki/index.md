@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-10-03
+updated: 2026-10-05
 ---
 
 # postmaster wiki
@@ -139,5 +139,5 @@ Why the design is shaped as it is.
 
 [Recorded runs and captured reading](sources/index.md): one run, the review rounds of #36,
 fourteen papers on review, fixes and severity, an article on review before implementation, and
-[pstack](sources/pstack.md), a plugin of skills for verified agent work, set beside what
-postmaster holds.
+[pstack](sources/pstack.md), a plugin of skills for verified agent work, read twice and set beside
+what postmaster holds.

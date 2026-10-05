@@ -1,0 +1,43 @@
+== clerk
+
+== landing
+fresh > Z1: the default branch's upstream resolves
+fresh > AA5: the default branch's upstream remote resolves
+fresh > AB2: one format names the upstream ref and its remote
+fresh > AC6: no upstream prints a blank answer
+fresh > AC6: a local upstream prints a dot remote
+== review-forms
+
+== run-log
+
+== runs-status
+
+== skill-refs
+coachman shell blocks > all eleven shell blocks have the same arguments and status in bash and zsh
+coachman shell blocks > the argument checks reject unquoted expansions of multword shell arrays
+== stage
+negative controls > mkstemp names are unique, mode 0600, and hold their own bytes
+== summary-evidence
+
+== ticket-check
+
+== ticket-parts
+plain part: file > plain words, a version number and a site name are not files
+plain part: path > and/or, yes/no and the home folder in words are not paths
+plain part: codelink > a link to an issue or a pull request is fine
+agents' part: check > a paragraph before the list and indented sub-items are not checks
+agents' part: note and decision > a tag group may sit anywhere in the note, on any of its lines
+agents' part: note and decision > a tag in a check counts as a citation
+== turnpikes
+controls: a one-leg run, walked from synthesis to the card through the poll, the hand-off check and the stages > the final synthesis hand-off passes its check
+controls: a one-leg run, walked from synthesis to the card through the poll, the hand-off check and the stages > a one-leg run's card is GATE
+controls: a one-leg run, walked from synthesis to the card through the poll, the hand-off check and the stages > a one-leg run closes at done
+controls: a one-leg run, walked from synthesis to the card through the poll, the hand-off check and the stages > a one-leg run's stages after the card are the postmaster's
+controls: a two-leg run, walked from synthesis through review to the card > after synthesis the poll says DISPATCH
+controls: a two-leg run, walked from synthesis through review to the card > the review leg ends with the card, and no leg follows
+controls: a two-leg run, walked from synthesis through review to the card > it closes through the postmaster's stages
+controls: a three-leg run dispatched before this change, walked from review to ship > the legacy ship hand-off still passes its check
+controls: a three-leg run dispatched before this change, walked from review to ship > after ship the card is GATE, and no leg follows
+controls: a three-leg run dispatched before this change, walked from review to ship > a three-leg run keeps its stages
+== zzctl
+ > vacuous: add is defined
