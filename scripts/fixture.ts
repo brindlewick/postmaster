@@ -32,9 +32,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, machine, release, tmpdir, type as osType } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { tryJsonFile } from "./lib/data.ts";
+import { runMode } from "./lib/run-mode.ts";
 import { effortsLine } from "./run-meta.ts";
+import {
+  laneNamesFromBranches,
+  laneNamesFromWorkhorses,
+  ticketIdFromWaybill,
+} from "./fixture-lanes.ts";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { die, run } from "./lib/proc.ts";
 import { reachActions } from "./reach.ts";
@@ -455,6 +461,7 @@ export function score(dispatch: string, repo: string): { code: number; out: stri
     { name: "handoffs", ...checkHandoffs(dispatch, legs), out: "" },
     { name: "run.json", ...checkRunJson(dispatch), out: "" },
     { name: "premises-order", ...checkPremisesOrder(dispatch), out: "" },
+    { name: "mode", ...checkMode(dispatch, repo), out: "" },
     { name: "efforts", ...checkWaybillEfforts(dispatch), out: "" },
     { name: "ship-card", ...checkCard(dispatch), out: "" },
   ];
@@ -636,6 +643,11 @@ function checkStages(dispatch: string): { ok: boolean; detail: string } {
     return words.length > 1 && words[1] === "review";
   });
   expected = expected.filter((s) => s !== "review" || hasReview);
+  // A single-thread run never enters workhorses-running: the coachman writes the change
+  // itself in the synthesis stage, so that stage is not part of its schedule (D5).
+  if (runMode(dispatch) === "single-thread") {
+    expected = expected.filter((s) => s !== "workhorses-running");
+  }
   const events = readActions(dispatch);
   if (events === null) return { ok: false, detail: "no actions.jsonl" };
   const entered = events.filter((e) => e.action === "stage").map((e) => e.target);
@@ -703,6 +715,83 @@ export function checkPremisesOrder(dispatch: string): { ok: boolean; detail: str
   if (dispatchIndex < 0)
     return { ok: true, detail: "premises action recorded and no workhorse dispatched" };
   return { ok: true, detail: "premises action precedes the first workhorse dispatch" };
+}
+
+export { runMode };
+
+/** The run's ticket id, from its waybill's first line, else the dispatch directory's name. */
+function waybillTicket(dispatch: string): string {
+  try {
+    const id = ticketIdFromWaybill(readFileSync(join(dispatch, "brief.md"), "utf8"));
+    if (id !== null) return id;
+  } catch {
+    /* fall through */
+  }
+  return basename(dispatch);
+}
+
+/** The run kept its mode: no workhorse dispatch and no wb/ branch in a single-thread run; one
+ * coachman dispatch and one wb/<ticket>-<lane> branch per configured workhorse in a synthesis
+ * run. A record with no mode reads as synthesis (D14). */
+export function checkMode(dispatch: string, repo: string): { ok: boolean; detail: string } {
+  const meta = tryJsonFile<Record<string, unknown>>(join(dispatch, "run.json"));
+  if (!meta) return { ok: true, detail: "skipped: no run.json" };
+  const raw = meta.mode;
+  const mode = raw === undefined ? "synthesis" : raw;
+  if (mode !== "synthesis" && mode !== "single-thread") {
+    return {
+      ok: false,
+      detail: `run.json records mode ${String(mode)}, which is neither synthesis nor single-thread`,
+    };
+  }
+  const events = readActions(dispatch);
+  if (events === null) return { ok: false, detail: "no actions.jsonl" };
+  const dispatched = events.filter(
+    (e) => e.action === "dispatch" && e.actor === "coachman" && typeof e.target === "string",
+  );
+  const listed = sh(["git", "-C", repo, "for-each-ref", "--format=%(refname)", "refs/heads/wb/"]);
+  const refs = listed.code === 0 ? listed.out.split(/\r?\n/u).filter((r) => r !== "") : [];
+  const ticket = waybillTicket(dispatch);
+  const branched = laneNamesFromBranches(refs, ticket);
+  if (mode === "single-thread") {
+    if (dispatched.length > 0) {
+      return {
+        ok: false,
+        detail: `single-thread run logged a workhorse dispatch: ${dispatched
+          .map((e) => String(e.target))
+          .join(", ")}`,
+      };
+    }
+    if (branched.length > 0) {
+      return {
+        ok: false,
+        detail: `single-thread run has workhorse branches: ${branched.join(", ")}`,
+      };
+    }
+    return { ok: true, detail: "single-thread: no workhorse dispatch, no workhorse branch" };
+  }
+  const config = meta.config as Record<string, unknown> | undefined;
+  const team = config?.team as Record<string, unknown> | undefined;
+  let lanes = Array.isArray(team?.workhorses) ? team.workhorses.map(String) : [];
+  if (lanes.length === 0) {
+    try {
+      const brief = readFileSync(join(dispatch, "brief.md"), "utf8");
+      lanes = laneNamesFromWorkhorses(brief);
+    } catch {
+      lanes = [];
+    }
+  }
+  if (lanes.length === 0) return { ok: false, detail: "synthesis run names no workhorses" };
+  const targets = new Set(dispatched.map((e) => String(e.target)));
+  const undispatched = lanes.filter((lane) => !targets.has(lane));
+  if (undispatched.length > 0) {
+    return { ok: false, detail: `synthesis run never dispatched: ${undispatched.join(", ")}` };
+  }
+  const unbranched = lanes.filter((lane) => !branched.includes(lane));
+  if (unbranched.length > 0) {
+    return { ok: false, detail: `synthesis run has no branch for: ${unbranched.join(", ")}` };
+  }
+  return { ok: true, detail: `synthesis: dispatched and branched ${lanes.join(", ")}` };
 }
 
 function readActions(dispatch: string): Array<Record<string, unknown>> | null {
@@ -855,7 +944,12 @@ function checkReach(dispatch: string): { ok: boolean; detail: string } {
   }
   const points = actions.filter(({ event }) => event.kind === "point");
   const pointNames = new Set(points.map(({ event }) => event.point));
-  const expected = new Set(["workhorses", "card"]);
+  // A single-thread run never runs "Check lane reach before synthesis", so the
+  // workhorses point is expected only of a synthesis run; a record with no mode
+  // reads as synthesis, as the mode item does.
+  const expected = new Set(["card"]);
+  const single = runMode(dispatch) === "single-thread";
+  if (!single) expected.add("workhorses");
   const logs = join(dispatch, "logs");
   try {
     for (const name of readdirSync(logs)) {
@@ -892,7 +986,12 @@ function checkReach(dispatch: string): { ok: boolean; detail: string } {
       }
     }
   }
-  return { ok: true, detail: "workhorses, review rounds and card checked with no reach" };
+  return {
+    ok: true,
+    detail: single
+      ? "review rounds and card checked with no reach"
+      : "workhorses, review rounds and card checked with no reach",
+  };
 }
 
 function checkCard(dispatch: string): { ok: boolean; detail: string } {

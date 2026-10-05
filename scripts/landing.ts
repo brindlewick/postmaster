@@ -89,6 +89,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
+import { runMode } from "./lib/run-mode.ts";
 import { physical, reachActions } from "./reach.ts";
 import {
   D_CLASS,
@@ -408,8 +409,10 @@ function reachBlock(dispatch: string): string {
     const m = /^r([1-9][0-9]*)$/u.exec(event.point);
     if (m) roundNumbers.add(Number(m[1]));
   }
+  // A single-thread run has no workhorses point to show: it never runs "Check lane
+  // reach before synthesis", and the fixture reach item does not expect one of it.
   const points = [
-    "workhorses",
+    ...(runMode(dispatch) === "single-thread" ? [] : ["workhorses"]),
     ...[...roundNumbers].sort((a, b) => a - b).map((n) => `r${n}`),
     "card",
   ];

@@ -1389,6 +1389,38 @@ describe("card-block", () => {
         "## Not re-reviewed\n\nnone",
     );
   });
+
+  test("the Reach section omits the workhorses line for a single-thread run", () => {
+    const reachPoint = (point: string): string =>
+      `${JSON.stringify({
+        ts: "2026-01-01T00:00:00Z",
+        actor: "coachman",
+        action: "reach",
+        target: point,
+        detail: JSON.stringify({ kind: "point", point, result: "clean", lanes: [] }),
+      })}\n`;
+    for (const [name, mode, want] of [
+      ["st", "single-thread", false],
+      ["syn", "synthesis", true],
+    ] as const) {
+      const d = join(tmp, `d-reach-${name}`);
+      mkdirSync(join(d, "logs"), { recursive: true });
+      writeFileSync(join(d, "checks.json"), GATE_UNIT_CHECKS);
+      writeFileSync(
+        join(d, "actions.jsonl"),
+        action("gate", `main@${S.sha12}`, "pass", 0) + reachPoint("card"),
+      );
+      writeFileSync(join(d, "run.json"), JSON.stringify({ mode }));
+      writeFileSync(
+        join(d, "checkpoint.md"),
+        checkpoint("## Findings (bug)", "", "- [P1] bug-1: open"),
+      );
+      const r = sh(["card-block", d, S.w!, join(d, "checkpoint.md")]);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("## Reach");
+      expect(r.out.includes("- workhorses:")).toBe(want);
+    }
+  });
 });
 
 describe("card-results", () => {
