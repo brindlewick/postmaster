@@ -34,6 +34,7 @@ import {
 import { homedir, machine, release, tmpdir, type as osType } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { tryJsonFile } from "./lib/data.ts";
+import { runMode } from "./lib/run-mode.ts";
 import { effortsLine } from "./run-meta.ts";
 import {
   laneNamesFromBranches,
@@ -716,14 +717,7 @@ export function checkPremisesOrder(dispatch: string): { ok: boolean; detail: str
   return { ok: true, detail: "premises action precedes the first workhorse dispatch" };
 }
 
-/** The run's mode from run.json: `single-thread` only when the record says so; a record with
- * no mode is a synthesis run, and any other shape reads as synthesis here (the mode check is
- * what refuses a record that names no mode this flow knows). */
-export function runMode(dispatch: string): string {
-  const meta = tryJsonFile<Record<string, unknown>>(join(dispatch, "run.json"));
-  const m = meta?.mode;
-  return typeof m === "string" && m === "single-thread" ? "single-thread" : "synthesis";
-}
+export { runMode };
 
 /** The run's ticket id, from its waybill's first line, else the dispatch directory's name. */
 function waybillTicket(dispatch: string): string {
@@ -950,7 +944,12 @@ function checkReach(dispatch: string): { ok: boolean; detail: string } {
   }
   const points = actions.filter(({ event }) => event.kind === "point");
   const pointNames = new Set(points.map(({ event }) => event.point));
-  const expected = new Set(["workhorses", "card"]);
+  // A single-thread run never runs "Check lane reach before synthesis", so the
+  // workhorses point is expected only of a synthesis run; a record with no mode
+  // reads as synthesis, as the mode item does.
+  const expected = new Set(["card"]);
+  const single = runMode(dispatch) === "single-thread";
+  if (!single) expected.add("workhorses");
   const logs = join(dispatch, "logs");
   try {
     for (const name of readdirSync(logs)) {
@@ -987,7 +986,12 @@ function checkReach(dispatch: string): { ok: boolean; detail: string } {
       }
     }
   }
-  return { ok: true, detail: "workhorses, review rounds and card checked with no reach" };
+  return {
+    ok: true,
+    detail: single
+      ? "review rounds and card checked with no reach"
+      : "workhorses, review rounds and card checked with no reach",
+  };
 }
 
 function checkCard(dispatch: string): { ok: boolean; detail: string } {

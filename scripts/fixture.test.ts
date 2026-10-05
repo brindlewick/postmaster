@@ -374,7 +374,9 @@ function record(
       reason: "",
     }));
   const workhorseNames: string[] = recordedConfig.team.workhorses ?? [];
-  point("workhorses", laneRecords(workhorseNames));
+  // A single-thread run never runs "Check lane reach before synthesis", so its
+  // record holds no workhorses point; the builder mirrors real runs here.
+  if (mode === "synthesis") point("workhorses", laneRecords(workhorseNames));
   if (legs >= 2) {
     const reviewer = workhorseNames[0] ?? "one";
     writeFileSync(
@@ -865,6 +867,48 @@ describe("ticket #202 fixture reach score", () => {
     } finally {
       writeFileSync(runPath, original);
     }
+  }, 120000);
+});
+
+describe("the reach item reads the run's mode", () => {
+  const dispatchOf = (name: string): string => join(tmp, name, "repo", ".postmaster", "runs", "7");
+  const repoOf = (name: string): string => join(tmp, name, "repo");
+
+  function withoutPoint(d: string, point: string): void {
+    const actionsPath = join(d, "actions.jsonl");
+    const kept = readFileSync(actionsPath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .filter((line) => {
+        const row = JSON.parse(line) as Record<string, unknown>;
+        if (row.action !== "reach") return true;
+        const event = JSON.parse(String(row.detail)) as Record<string, unknown>;
+        return !(event.kind === "point" && event.point === point);
+      });
+    writeFileSync(actionsPath, `${kept.join("\n")}\n`);
+  }
+
+  test("a single-thread record with round and card points scores the reach item ok", () => {
+    const output = bgResults.get("clean-single")?.out ?? "";
+    expect(output).toContain("ok   reach");
+  }, 30000);
+
+  test("a synthesis record without the workhorses point still fails the reach item", () => {
+    const d = brokenCopy("st-syn-no-workhorses", dispatchOf(`clean-${first}`));
+    withoutPoint(d, "workhorses");
+    const result = runScore(d, repoOf(`clean-${first}`));
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("FAIL reach");
+    expect(result.out).toContain("not checked: workhorses");
+  }, 120000);
+
+  test("a single-thread record without the card point still fails the reach item", () => {
+    const d = brokenCopy("st-single-no-card", dispatchOf("clean-single"));
+    withoutPoint(d, "card");
+    const result = runScore(d, repoOf("clean-single"));
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("FAIL reach");
+    expect(result.out).toContain("not checked: card");
   }, 120000);
 });
 
