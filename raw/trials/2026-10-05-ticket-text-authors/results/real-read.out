@@ -1,0 +1,14 @@
+id: #7
+title: A made-up ticket
+state: todo
+labels: 
+created: 2026-10-05
+url: https://github.com/o/r/issues/7
+
+## Problem / feature
+A body.
+
+## Log
+- 2026-10-05 someone-else: please look at this
+- 2026-10-05 12:00 coachman: ready
+- 2026-10-05 12:00 owner: approved, go ahead

@@ -1,0 +1,38 @@
+clerk	base 14	survive A 1	survive B 0	survive both 0
+landing	base 119	survive A 5	survive B 5	survive both 5
+     both: fresh > Z1: the default branch's upstream resolves
+     both: fresh > AA5: the default branch's upstream remote resolves
+     both: fresh > AB2: one format names the upstream ref and its remote
+     both: fresh > AC6: no upstream prints a blank answer
+     both: fresh > AC6: a local upstream prints a dot remote
+review-forms	base 10	survive A 3	survive B 0	survive both 0
+run-log	base 7	survive A 1	survive B 0	survive both 0
+runs-status	base 53	survive A 1	survive B 0	survive both 0
+skill-refs	base 19	survive A 3	survive B 2	survive both 2
+     both: coachman shell blocks > all eleven shell blocks have the same arguments and status in bash and zsh
+     both: coachman shell blocks > the argument checks reject unquoted expansions of multword shell arrays
+stage	base 31	survive A 1	survive B 1	survive both 1
+     both: negative controls > mkstemp names are unique, mode 0600, and hold their own bytes
+summary-evidence	base 42	survive A 1	survive B 0	survive both 0
+ticket-check	base 154	survive A 21	survive B 0	survive both 0
+ticket-parts	base 76	survive A 9	survive B 6	survive both 6
+     both: plain part: file > plain words, a version number and a site name are not files
+     both: plain part: path > and/or, yes/no and the home folder in words are not paths
+     both: plain part: codelink > a link to an issue or a pull request is fine
+     both: agents' part: check > a paragraph before the list and indented sub-items are not checks
+     both: agents' part: note and decision > a tag group may sit anywhere in the note, on any of its lines
+     both: agents' part: note and decision > a tag in a check counts as a citation
+turnpikes	base 90	survive A 13	survive B 10	survive both 10
+     both: controls: a one-leg run, walked from synthesis to the card through the poll, the hand-off check and the stages > the final synthesis hand-off passes its check
+     both: controls: a one-leg run, walked from synthesis to the card through the poll, the hand-off check and the stages > a one-leg run's card is GATE
+     both: controls: a one-leg run, walked from synthesis to the card through the poll, the hand-off check and the stages > a one-leg run closes at done
+     both: controls: a one-leg run, walked from synthesis to the card through the poll, the hand-off check and the stages > a one-leg run's stages after the card are the postmaster's
+     both: controls: a two-leg run, walked from synthesis through review to the card > after synthesis the poll says DISPATCH
+     both: controls: a two-leg run, walked from synthesis through review to the card > the review leg ends with the card, and no leg follows
+     both: controls: a two-leg run, walked from synthesis through review to the card > it closes through the postmaster's stages
+     both: controls: a three-leg run dispatched before this change, walked from review to ship > the legacy ship hand-off still passes its check
+     both: controls: a three-leg run dispatched before this change, walked from review to ship > after ship the card is GATE, and no leg follows
+     both: controls: a three-leg run dispatched before this change, walked from review to ship > a three-leg run keeps its stages
+zzctl	base 5	survive A 3	survive B 1	survive both 1
+     both:  > vacuous: add is defined
+TOTAL (scripts that had an A survivor)	base 620	A 62	both 25
