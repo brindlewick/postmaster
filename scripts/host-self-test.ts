@@ -645,6 +645,29 @@ function calls(root: string, which: string): string[] {
 function field(text: string, key: string): string {
   return new RegExp(`(?:^|\\n|\\|)${key}=([^|\\n]*)`, "u").exec(text)?.[1] ?? "";
 }
+// A process's POSIX session id from the kernel's own call, through the
+// fixture's python3: `ps -o sess` is one column's reading, getsid is the
+// thing itself. Null when the link cannot run at all; an error string when
+// the link is viable but the call fails, which names a broken session maker
+// rather than a wrong session.
+function posixSession(pid: number, sysDir: string): { sid: number } | { error: string } | null {
+  const tool = join(sysDir, "python3");
+  try {
+    accessSync(tool, constants.X_OK);
+  } catch {
+    return null;
+  }
+  const result = exec(tool, [
+    "-c",
+    "import os,sys;print(os.getsid(int(sys.argv[1])))",
+    String(pid),
+  ]);
+  const sid = Number(result.out.trim());
+  if (result.code === 0 && Number.isInteger(sid)) return { sid };
+  return {
+    error: `code=${result.code} out=${result.out.trim().slice(0, 200)} err=${result.err.trim().slice(0, 200)}`,
+  };
+}
 const UNCAPPED_NOTICE = "host: launch running uncapped (no supported per-launch limits available)";
 function titleAbsent(text: string): boolean {
   return ["#1", "Stop", "touch", "canary", "breaking", "shell"].every(
@@ -1363,14 +1386,17 @@ export async function runControls(): Promise<number> {
       () => field(probeText, "pane") === "" && field(probeText, "tmuxpane") === "",
       probeText,
     );
+    const sessionPid = Number(field(probeText, "pid"));
+    const sessionInfo = processInfo(sessionPid);
+    const sessionSid = posixSession(sessionPid, noHost);
     await pass(
       "it is a session of its own: its group is its pid, not the caller's session",
-      () => {
-        const pid = Number(field(probeText, "pid"));
-        const info = processInfo(pid);
-        return info?.group === pid && info.session === pid;
-      },
-      `${probeText}\n${JSON.stringify(processInfo(Number(field(probeText, "pid"))))}`,
+      () =>
+        sessionInfo?.group === sessionPid &&
+        (sessionSid === null
+          ? sessionInfo.session === sessionPid
+          : "sid" in sessionSid && sessionSid.sid === sessionPid),
+      `${probeText}\n${JSON.stringify(sessionInfo)}\nsid=${JSON.stringify(sessionSid)}`,
     );
     await pass(
       "--pidfile holds the launch's pid",
@@ -2595,6 +2621,11 @@ export async function runControls(): Promise<number> {
         ].join("\n"),
       );
       exec("chmod", ["+x", resumeScript]);
+      // Both legs share one marker, as a real resume does: its existence
+      // settles the previous launch, and runCmd kills the prior leg's
+      // still-polling _watch on reuse, so its late touch cannot finish the
+      // new leg early. The events file stays shared too: both legs'
+      // records landing there is what the second check asserts.
       const resumeArgs = (extraEnv: Record<string, string>, outArgs: string[]) => ({
         argv: [
           "run",
@@ -2630,27 +2661,52 @@ export async function runControls(): Promise<number> {
       const secondSpace = kvOf(secondRun.out, "space");
       const secondTab = kvOf(secondRun.out, "tab");
       const secondPane = kvOf(secondRun.out, "pane");
-      await pass("a resumed leg has one live tab, with the previous tab gone", () => {
-        const st = herdrState();
-        const tabs = st.spaces[secondSpace]?.tabs ?? [];
-        return (
-          tabs.length === 1 &&
-          tabs[0] === secondTab &&
-          (st.open ?? {})[lunaReal] === secondSpace &&
-          !(firstSpace in (st.spaces ?? {}))
-        );
-      });
+      await pass(
+        "a resumed leg has one live tab, with the previous tab gone",
+        () => {
+          const st = herdrState();
+          const tabs = st.spaces[secondSpace]?.tabs ?? [];
+          return (
+            tabs.length === 1 &&
+            tabs[0] === secondTab &&
+            (st.open ?? {})[lunaReal] === secondSpace &&
+            !(firstSpace in (st.spaces ?? {}))
+          );
+        },
+        `code=${secondRun.code} out=${secondRun.out} err=${secondRun.err} firstSpace=${firstSpace} secondSpace=${secondSpace} secondTab=${secondTab} spaces=${JSON.stringify(herdrState().spaces ?? {})} open=${JSON.stringify(herdrState().open ?? {})}`,
+      );
       await marker(markerPath("resume"));
       await waitHerdrPaneGone(root, secondPane);
-      await pass("the resumed leg leaves no history tab and preserves both event records", () => {
+      // The events land when the payload prints, the history tab goes when
+      // the finisher closes it: wait for the asserted state rather than
+      // reading once after the waits, which a loaded runner misses.
+      for (let i = 0; i < 300; i++) {
         const st = herdrState();
-        const data = readFileSync(join(logs, "resume.events"), "utf8");
-        return (
+        let data = "";
+        try {
+          data = readFileSync(join(logs, "resume.events"), "utf8");
+        } catch {}
+        if (
           !Object.values(st.spaces ?? {}).some((w: any) => w.label === RUN_NAME) &&
           data.split("resume").length - 1 === 2 &&
           data.split("success").length - 1 === 2
-        );
-      });
+        )
+          break;
+        await sleep(100);
+      }
+      await pass(
+        "the resumed leg leaves no history tab and preserves both event records",
+        () => {
+          const st = herdrState();
+          const data = readFileSync(join(logs, "resume.events"), "utf8");
+          return (
+            !Object.values(st.spaces ?? {}).some((w: any) => w.label === RUN_NAME) &&
+            data.split("resume").length - 1 === 2 &&
+            data.split("success").length - 1 === 2
+          );
+        },
+        `spaces=${JSON.stringify(herdrState().spaces ?? {})} events=${JSON.stringify(readFileSync(join(logs, "resume.events"), "utf8").slice(0, 600))}`,
+      );
 
       console.log("finished review round cleanup, Herdr (stub)");
       resetHarness(root);
@@ -2864,6 +2920,10 @@ export async function runControls(): Promise<number> {
           "--out",
           "../logs/tmux-resume.events",
           "--append",
+          // The first leg's marker, as a real resume reuses it: its
+          // existence settles the previous launch, and runCmd kills the
+          // prior leg's still-polling _watch on reuse, so its late touch
+          // cannot finish this leg early.
           "--marker",
           "../logs/tmux-resume.done",
           "--",
@@ -2891,6 +2951,23 @@ export async function runControls(): Promise<number> {
       );
       await marker(join(logs, "tmux-resume.done"));
       await waitTmuxPaneGone(root, tmuxSecondPane);
+      // Wait for the asserted state: the second record lands when the
+      // payload prints, the window goes when the finisher closes it, and a
+      // loaded runner misses a single read after the waits.
+      for (let i = 0; i < 300; i++) {
+        const st = tmuxState();
+        let data = "";
+        try {
+          data = readFileSync(join(logs, "tmux-resume.events"), "utf8");
+        } catch {}
+        if (
+          Object.keys(st.windows ?? {}).length === 0 &&
+          data.split("resume").length - 1 === 2 &&
+          data.split("success").length - 1 === 2
+        )
+          break;
+        await sleep(100);
+      }
       await pass(
         "the resumed tmux leg leaves no history window and keeps both event records",
         () => {

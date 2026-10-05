@@ -1883,7 +1883,11 @@ exit "$rc"
     // Raw bytes, as main's `exec < file` hands them: no UTF-8 decode.
     ...(stdinBytes ? { input: stdinBytes } : {}),
     // A sourcing shell starts with SHLVL unset and takes the level as $1.
-    ...(freshShell ? { env: { ...process.env, SHLVL: undefined } } : {}),
+    // Always explicit, never inherited: Bun on macOS drops process.env
+    // additions (keys absent at startup) from an inherited spawn
+    // environment while keeping overwrites, so the harness would miss
+    // OLDPWD there. The snapshot carries identical content elsewhere.
+    env: freshShell ? { ...process.env, SHLVL: undefined } : { ...process.env },
   });
   let rc =
     child.status !== null && child.status !== undefined

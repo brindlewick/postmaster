@@ -1847,6 +1847,51 @@ function markerRemove(path: string): void {
       rmSync(path, { force: true });
     } catch {}
 }
+// A reused marker's prior watchers are dead legs walking: the previous
+// launch's _watch polls its payload every 500ms and may still be polling
+// when the marker is reset, and its late touch would read as the new
+// launch's completion, finishing it before its payload prints. Kill them
+// before the reset; the new launch spawns its own during placement.
+// SIGKILL, not SIGTERM: the watcher is stateless, and only a synchronous
+// death closes the race. One listing, not a scan per pid: the portable ps
+// path costs a spawn per process.
+function killPriorWatchers(marker: string): void {
+  if (!marker) return;
+  const match = (pid: number, line: string): boolean => {
+    if (pid === process.pid) return false;
+    return line.split(/\s+/u).includes("_watch") && line.includes(marker);
+  };
+  const kill = (pid: number): void => {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {}
+  };
+  try {
+    const root = process.env.POSTMASTER_PROC_ROOT || "/proc";
+    let listed = false;
+    for (const entry of readdirSync(root)) {
+      if (!/^[0-9]+$/u.test(entry)) continue;
+      listed = true;
+      const pid = Number(entry);
+      let line = "";
+      try {
+        line = readFileSync(`${root}/${pid}/cmdline`, "utf8").replace(/\0/gu, " ").trim();
+      } catch {
+        continue;
+      }
+      if (match(pid, line)) kill(pid);
+    }
+    if (listed) return;
+  } catch {
+    // A missing or non-proc root falls through to the single ps listing.
+  }
+  const result = run("ps", ["-A", "-o", "pid=,args="], { env: { LC_ALL: "C" } });
+  for (const row of result.out.split("\n")) {
+    const pid = Number(row.trim().split(/\s+/u)[0]);
+    if (!Number.isSafeInteger(pid) || pid <= 0) continue;
+    if (match(pid, row)) kill(pid);
+  }
+}
 function _writeEnvPipe(path: string): void {
   let fd = -1;
   const deadline = Date.now() + 120_000;
@@ -2528,6 +2573,10 @@ async function runCmd(args: string[]): Promise<void> {
     }
   }
   if (pidfile) markerRemove(pidfile);
+  // A marker that already exists may still have the previous launch's
+  // _watch polling behind it; without the kill its late touch lands after
+  // the reset and finishes this launch before its payload prints.
+  if (marker && existsSync(marker)) killPriorWatchers(marker);
   if (marker) markerRemove(marker);
   const specDir = mkdtempSync(join(tmpdir(), "postmaster-host."));
   writeSpec(specDir, {
