@@ -786,7 +786,7 @@ oracle("C11: the round closes with each walled reviewer DEGRADED, no escalation"
 });
 
 oracle("C13: escalate names each walled workhorse, its reset and the ruling", (lay) => {
-  workhorseWall(lay, "c13a", CODEX_WALL_MESSAGE);
+  const wall = workhorseWall(lay, "c13a", CODEX_WALL_MESSAGE);
   setStub(
     lay,
     "mimo",
@@ -817,7 +817,9 @@ oracle("C13: escalate names each walled workhorse, its reset and the ruling", (l
   ]) {
     expect(esc).toContain(pinned);
   }
-  const resetShown = /oct/iu.test(esc) || esc.includes("10-05") || esc.includes("10/05");
+  // The reset shown is the wall's own 2:29 reset, whatever day that is.
+  const want = expectedDaily(2, 29, wall.ts);
+  const resetShown = findIsos(esc).some((i) => Math.abs(i.epoch - want) <= 60_000);
   expect(resetShown).toBe(true);
   expect(esc.includes("go-on") || esc.includes("go on")).toBe(true);
   expect(existsSync(join(lay.dispatch, ".escalation-ready"))).toBe(true);

@@ -934,6 +934,8 @@ describe("anything-to-land", () => {
     git(outer, "-c", "protocol.file.allow=always", "submodule", "-q", "add", "../sub", "sub");
     identify(join(outer, "sub"));
     git(outer, "config", "-f", ".gitmodules", "submodule.sub.ignore", "all");
+    // Ship the ignore line: the bump below must commit with .gitmodules clean.
+    git(outer, "add", ".gitmodules");
     git(outer, "commit", "-qm", "addsub");
     S.sgb = sha(outer);
     git(outer, "checkout", "-qb", "ticket");
