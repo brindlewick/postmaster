@@ -34,3 +34,10 @@ language-model
 
 G4     claims: C3, C4     direction: mixed (leans against "models write good properties")
 
+## Read again by the research session on 2026-10-05
+
+Route: arXiv abstract page, read by the research session on 2026-10-05.
+
+- "we find that with the best model and prompting approach, a valid and sound PBT can be synthesized in 2.4 samples on average" (single read (this read only))
+- "the best model (GPT-4) is able to automatically synthesize correct PBTs for 21% of properties extractable from API documentation" (checked: the reading helper's quote and this read give the same words)
+

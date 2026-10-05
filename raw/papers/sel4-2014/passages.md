@@ -44,3 +44,9 @@ older (2014; covers work from 2004 to 2012)
 
 G2 (Isabelle/HOL)     claims: C2, C3     direction: mixed
 
+## Read again by the research session on 2026-10-05
+
+Route: text layer of the saved PDF, read with a text extractor, by the research session on 2026-10-05.
+
+- "While the effort of the whole seL4 microkernel development, including design, documentation, coding, and testing, was 2.2 person-years (py), the total effort of the seL4 correctness proof was about 20 py" (single read (this read only))
+

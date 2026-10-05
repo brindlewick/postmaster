@@ -1,6 +1,6 @@
 ---
 url: https://arxiv.org/abs/2601.12845
-retrieved: 2026-10-04
+retrieved: 2026-10-05
 title: Automatic Generation of Formal Specification and Verification Annotations Using LLMs and Test Oracles
 author: Faria, Trigo, Honorato, Abreu
 ---

@@ -1,6 +1,6 @@
 ---
 url: https://arxiv.org/abs/2603.17193
-retrieved: 2026-10-04
+retrieved: 2026-10-05
 title: Talk is Cheap, Logic is Hard: Benchmarking LLMs on Post-Condition Formalization
 author: Prasetya, Kifetew, Prandi
 ---

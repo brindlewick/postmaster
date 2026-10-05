@@ -1,6 +1,6 @@
 ---
 url: https://arxiv.org/abs/2607.22883
-retrieved: 2026-10-04
+retrieved: 2026-10-05
 title: Evaluating and Mitigating the Misguidance Effect of Buggy Code in LLM-Generated Unit Tests
 author: Zhao, Zhou, Cohen
 ---

@@ -1,6 +1,6 @@
 ---
 url: https://arxiv.org/abs/2510.25297
-retrieved: 2026-10-04
+retrieved: 2026-10-05
 title: Understanding the Characteristics of LLM-Generated Property-Based Tests in Exploring Edge Cases
 author: Tanaka, Tanaka, Shimari, Matsumoto
 ---

@@ -1,6 +1,6 @@
 ---
 url: https://arxiv.org/abs/2307.04346
-retrieved: 2026-10-04
+retrieved: 2026-10-05
 title: Can Large Language Models Write Good Property-Based Tests?
 author: Vikram, Lemieux, Sunshine, Padhye
 ---

@@ -1,6 +1,6 @@
 ---
 url: https://sel4.systems/Research/pdfs/comprehensive-formal-verification-os-microkernel.pdf
-retrieved: 2026-10-04
+retrieved: 2026-10-05
 title: Comprehensive Formal Verification of an OS Microkernel (ACM TOCS 32(1), Article 2)
 author: Klein, Andronick, Elphinstone, Murray, Sewell, Kolanski, Heiser
 ---

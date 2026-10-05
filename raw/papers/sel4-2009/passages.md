@@ -37,7 +37,7 @@ G2 (Isabelle/HOL)     claims: C2, C3     direction: mixed
 
 ## Read again by the research session on 2026-10-05
 
-Route: PDF pages 1, 12 and 13 read as page images by the research session on 2026-10-05.
+Route: PDF pages 1, 12 and 13 read as page images, and the text layer of the saved PDF read with a text extractor, by the research session on 2026-10-05.
 
 - "seL4, a third-generation microkernel of L4 provenance, comprises 8,700 lines of C code and 600 lines of assembler." (single read (this read only))
 - "The overall size of the proof, including framework, libraries, and generated proofs (not shown in the table) is 200,000 lines of Isabelle script." (single read (this read only))
@@ -45,4 +45,5 @@ Route: PDF pages 1, 12 and 13 read as page images by the research session on 202
 - "The total effort for the seL4-specific proof was 11 py." (single read (this read only))
 - "Those two activities uncovered 16 defects in the implementation before verification had started in earnest, the formal verification has uncovered another 144 defects and resulted in 54 further changes to the code to aid in the proof." (single read (this read only))
 - "which suggests that normal testing may not only miss hard and subtle bugs, but also a larger number of simple, obvious faults than one may expect." (single read (this read only))
+- "By the time the second refinement started, the kernel had been used by a number of internal student projects and the x86 port was underway." (single read (this read only))
 

@@ -1,6 +1,6 @@
 ---
 url: https://arxiv.org/abs/2605.26457
-retrieved: 2026-10-04
+retrieved: 2026-10-05
 title: Verus-SpecGym: An Agentic Environment for Evaluating Specification Autoformalization
 author: Agarwal, Neamtu, Aggarwal, Kim, Limperg, Flamant, Shimizu, Parno, Welleck
 ---

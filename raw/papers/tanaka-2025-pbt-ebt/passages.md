@@ -34,3 +34,10 @@ language-model
 
 G4     claims: C4     direction: mixed
 
+## Read again by the research session on 2026-10-05
+
+Route: arXiv abstract page, read by the research session on 2026-10-05.
+
+- "Our experimental results reveal that while each method individually achieved a 68.75% bug detection rate, combining both approaches improved detection to 81.25%." (single read (this read only))
+- "We analyze 16 HumanEval problems where standard solutions failed on extended test cases, generating both PBT and EBT test codes using Claude-4-sonnet." (single read (this read only))
+

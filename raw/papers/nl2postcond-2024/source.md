@@ -1,6 +1,6 @@
 ---
 url: https://arxiv.org/abs/2310.01831
-retrieved: 2026-10-04
+retrieved: 2026-10-05
 title: Can Large Language Models Transform Natural Language Intent into Formal Method Postconditions?
 author: Endres, Fakhoury, Chakraborty, Lahiri
 ---

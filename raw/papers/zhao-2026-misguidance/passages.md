@@ -34,3 +34,9 @@ language-model
 
 G4     claims: C3, C4     direction: contradicts (tests written from code repeat the code's bug) and mixed (a specification in place of the code helps)
 
+## Read again by the research session on 2026-10-05
+
+Route: arXiv HTML page, Section 3.1, read by the research session on 2026-10-05.
+
+- "On average, the models generate 137.69 misguided tests (3.84%). In contrast, when given the corresponding fixed code, the average drops to 16.46 (0.46%)." (single read (this read only))
+

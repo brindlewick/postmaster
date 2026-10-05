@@ -1,6 +1,6 @@
 ---
 url: https://arxiv.org/abs/2303.04864
-retrieved: 2026-10-04
+retrieved: 2026-10-05
 title: nl2spec: Interactively Translating Unstructured Natural Language to Temporal Logics with Large Language Models
 author: Cosler, Hahn, Mendoza, Schmitt, Trippel
 ---

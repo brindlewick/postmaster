@@ -41,3 +41,10 @@ language-model
 
 G4     claims: C3 (also C2)     direction: mixed (frontier models can write faithful specifications for a majority of competition tasks, but not all, and a model judge misses a quarter of the errors tests catch). Overlaps with the other helper's specification-generation scope; kept here because it is built on a verifier for Rust.
 
+## Read again by the research session on 2026-10-05
+
+Route: arXiv abstract page, read by the research session on 2026-10-05.
+
+- "On Verus-SpecBench, the strongest model, Gemini 3.1 Pro, solves 77.8% of tasks, other frontier models solve 51.1--57.8% & OSS models reach only 21.5--25.5%." (single read (this read only))
+- "We also find that LLM-as-a-judge evaluation misses 26% of the failures our evaluator catches." (single read (this read only))
+

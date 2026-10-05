@@ -41,3 +41,10 @@ Route: arXiv abstract page, read by the research session on 2026-10-04.
 - "nl2postcond generated postconditions were able to catch 64 real-world historical bugs from Defects4J." (single read (this read only))
 - "finding that they are generally correct and able to discriminate incorrect code" (checked: the reading helper's quote and this read give the same words)
 
+## Read again by the research session on 2026-10-05
+
+Route: arXiv HTML page, read by the research session on 2026-10-05.
+
+- "77% of postconditions were test-set-correct and a test-set-correct postcondition was generated for 96% of problems" (single read (this read only))
+- "we were able to generate a bug-discriminating postcondition for 70 buggy methods from 64 unique bugs in Defects4J, 12.2% of all bugs considered." (single read (this read only))
+

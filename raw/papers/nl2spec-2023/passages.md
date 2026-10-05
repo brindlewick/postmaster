@@ -34,3 +34,10 @@ language-model
 
 G4     claims: C3     direction: supports (models are weak at first-try specifications; a person in the loop repairs them)
 
+## Read again by the research session on 2026-10-05
+
+Route: arXiv HTML page, read by the research session on 2026-10-05.
+
+- "Codex in the backend outperforms Bloom on this task, by correctly translating 44.4% of the instances using the minimal prompt." (single read (this read only))
+- "In total, we correctly translated 31 out of 36 instances, i.e., 86.11% using the nl2spec sub-translation methodology by performing only 1.4 translation loops on average." (single read (this read only))
+

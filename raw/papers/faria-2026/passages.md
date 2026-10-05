@@ -62,3 +62,9 @@ the intent is supplied as comments plus tests that a person wrote, so the human 
 
 controlled study (one team)
 
+## Read again by the research session on 2026-10-05
+
+Route: arXiv abstract page, read by the research session on 2026-10-05.
+
+- "a multimodel approach combining Claude Opus 4.5 and GPT-5.2 generated correct annotations for 98.2% of the programs within at most 8 repair iterations, using verifier feedback" (single read (this read only))
+

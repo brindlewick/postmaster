@@ -34,3 +34,10 @@ language-model
 
 G4     claims: C3     direction: mixed
 
+## Read again by the research session on 2026-10-05
+
+Route: arXiv abstract page, read by the research session on 2026-10-05.
+
+- "24 state-of-the-art LLMs were evaluated on a freshly prepared dataset of 40 tasks." (single read (this read only))
+- "However, none of the LLMs were able to correctly formalize all the tasks in our benchmark." (single read (this read only))
+
