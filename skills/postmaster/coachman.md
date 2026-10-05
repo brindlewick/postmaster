@@ -927,7 +927,10 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    stop. The check logs a `degrade` line for each reviewer whose verdict it voids. That verdict
    never counts as clean; still inspect that reviewer's findings, and launch the reviewer again
    if another round runs. An unexplained change to a run branch or tracked synthesis file voids
-   every reviewer and requires another round, counting toward the three-round cap. Restore saves
+   every reviewer and requires another round, counting toward the three-round cap. A move of
+   the run branch or synthesis worktree whose commits are exactly the `apply` actions the
+   coachman logged, in order, reads as explained rather than unexplained: log every fix
+   commit with `log-action apply`. Restore saves
    the undone diff under `<dispatch>/reach/` and moves new synthesis files there before resetting
    the branch and worktree. An `escalate:` line in the check's output means an observed change
    tied to a reviewer lies outside this run's branches and worktree folders: after restore,

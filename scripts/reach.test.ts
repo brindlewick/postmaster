@@ -1535,3 +1535,70 @@ describe("Post-9: ruled fixes without a review round", () => {
     expect(card).toContain("outside the project");
   });
 });
+
+describe("Fixture: a fix logged as apply before the check reads explained", () => {
+  function degrades(layout: Layout): string[] {
+    return actionLines(layout)
+      .filter((line) => line.action === "degrade")
+      .map((line) => String(line.target))
+      .sort();
+  }
+
+  test("a before-snapshot, a logged fix commit, then the check is clean", () => {
+    const layout = makeLayout();
+    expect(before(layout).code).toBe(0);
+    const fix = addCommit(layout.repo, layout.synth, "fix.txt");
+    writeAction(layout, "coachman", "apply", fix, "fix.txt:1");
+    const result = check(layout, "r1");
+    expect(result.code).toBe(0);
+    expect(result.out).not.toContain("unexplained");
+    expect(degrades(layout)).toEqual([]);
+  });
+
+  test("a fix logged under its short sha reads explained", () => {
+    const layout = makeLayout();
+    expect(before(layout).code).toBe(0);
+    const fix = addCommit(layout.repo, layout.synth, "fix.txt");
+    writeAction(layout, "coachman", "apply", fix.slice(0, 7), "fix.txt:1");
+    const result = check(layout, "r1");
+    expect(result.code).toBe(0);
+    expect(result.out).not.toContain("unexplained");
+    expect(degrades(layout)).toEqual([]);
+  });
+
+  test("a chain with an unlogged commit stays unexplained", () => {
+    const layout = makeLayout();
+    expect(before(layout).code).toBe(0);
+    addCommit(layout.repo, layout.synth, "first.txt");
+    const tip = addCommit(layout.repo, layout.synth, "second.txt");
+    writeAction(layout, "coachman", "apply", tip, "second.txt:1");
+    const result = check(layout, "r1");
+    expect(result.code).toBe(3);
+    expect(result.out).toContain("unexplained refs/heads/T");
+    expect(degrades(layout)).toEqual(["codex", "mimo"]);
+  });
+
+  test("a logged fix a lane record names still voids that lane", () => {
+    const layout = makeLayout();
+    expect(before(layout).code).toBe(0);
+    const fix = addCommit(layout.repo, layout.synth, "fix.txt");
+    writeAction(layout, "coachman", "apply", fix, "fix.txt:1");
+    writeReviewer(layout, "mimo", [mimo("bash", { command: `git show refs/heads/T --stat` })]);
+    const result = check(layout, "r1");
+    expect(result.code).toBe(2);
+    expect(degrades(layout)).toEqual(["mimo"]);
+  });
+
+  test("a logged fix excuses only the run branch and its worktree", () => {
+    const layout = makeLayout();
+    expect(before(layout).code).toBe(0);
+    const fix = addCommit(layout.repo, layout.synth, "fix.txt");
+    writeAction(layout, "coachman", "apply", fix, "fix.txt:1");
+    addCommit(layout.repo, layout.codex, "lane.txt");
+    const result = check(layout, "r1");
+    expect(result.code).toBe(3);
+    expect(result.out).not.toContain("unexplained refs/heads/T");
+    expect(result.out).toContain("unexplained refs/heads/wb/T-codex");
+    expect(degrades(layout)).toEqual(["codex", "mimo"]);
+  });
+});

@@ -915,6 +915,64 @@ function addMainChanges(
   return { result, mainDirty: result.code === 2 };
 }
 
+/** Coachman apply targets, oldest first, expanded to full commits.
+ * An unreadable log or an unresolvable target excuses nothing: the
+ * caller treats a null return as no exemption. */
+function loggedApplies(repo: string, dispatch: string): string[] | null {
+  let contents: string;
+  try {
+    contents = readFileSync(join(dispatch, "actions.jsonl"), "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+    return null;
+  }
+  const targets: string[] = [];
+  for (const line of contents.split(/\r?\n/u)) {
+    if (!line.trim()) continue;
+    let row: Record<string, unknown>;
+    try {
+      row = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+    if (row.action !== "apply" || row.actor !== "coachman") continue;
+    if (typeof row.target !== "string" || !/^[0-9a-f]{4,40}$/iu.test(row.target)) return null;
+    targets.push(row.target);
+  }
+  const expanded: string[] = [];
+  for (const target of targets) {
+    const sha = runGit(repo, ["rev-parse", "--verify", "--quiet", `${target}^{commit}`]);
+    if (sha.code !== 0 || !/^[0-9a-f]{40}$/u.test(sha.out.trim())) return null;
+    expanded.push(sha.out.trim());
+  }
+  return expanded;
+}
+
+/** Whether a run-branch move is exactly the logged applies, in order.
+ * Anything else — an unlogged commit, a rewind, a longer chain — reads
+ * as unexplained, as before. */
+function moveExplained(
+  repo: string,
+  applies: string[] | null,
+  before: string,
+  after: string,
+): boolean {
+  if (applies === null) return false;
+  if (!/^[0-9a-f]{40}$/u.test(before) || !/^[0-9a-f]{40}$/u.test(after)) return false;
+  const chain = runGit(repo, [
+    "rev-list",
+    "--reverse",
+    `--max-count=${applies.length + 1}`,
+    `${before}..${after}`,
+  ]);
+  if (chain.code !== 0) return false;
+  const commits = chain.out.split("\n").filter(Boolean);
+  if (commits.length === 0 || commits.length > applies.length) return false;
+  const inChain = new Set(commits);
+  const logged = applies.filter((sha) => inChain.has(sha));
+  return logged.length === commits.length && logged.every((sha, i) => sha === commits[i]);
+}
+
 function roundChanges(
   info: RunInfo,
   round: number,
@@ -1021,6 +1079,7 @@ function roundChanges(
     );
   };
   const ticketRefOwner = checked.find((read) => named(read, ticketRef));
+  const applies = loggedApplies(info.repo, info.dispatch);
   for (const change of changes) {
     const refName = change.path.startsWith("refs/heads/") ? change.path : "";
     const exactPath = change.path;
@@ -1056,6 +1115,11 @@ function roundChanges(
         touches.push(touch);
       }
     } else {
+      // A run-branch move that is exactly the coachman's logged applies, in
+      // order, is the coachman's own fix, not an unexplained change. Tied
+      // lanes keep their findings; anything unlogged reads as before.
+      const isTicket = refName === ticketRef || exactPath === ticketWorktree;
+      if (isTicket && moveExplained(info.repo, applies, change.before, change.after)) continue;
       const humanPath = change.path.startsWith("refs/")
         ? change.path
         : relative(info.repo, change.path) || change.path;
