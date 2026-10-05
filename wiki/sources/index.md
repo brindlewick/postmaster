@@ -14,7 +14,7 @@ captured into `raw/`, saying what it claims and what it would mean here if true.
 
 - [pstack](pstack.md) (2026): a plugin of skills and principles for verified agent work, and
   Part 1 of its guide. Postmaster already holds most of it. Read twice, on 2026-10-03 and 2026-10-05: of
-  the changes, the user took two to draft tickets, folded a third into a larger change and left the rest.
+  the changes, the user took two, the skills that make a project's verifiers and keep them current, and left the rest.
 - [The AI-native SDLC playbook](ai-native-sdlc-playbook.md) (2026): design review happens
   before any code is generated, and nothing is implemented without an accepted plan.
 

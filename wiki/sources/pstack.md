@@ -30,16 +30,15 @@ declares, so the trial belongs on a project with a user interface. The user has 
 the record as part of setup on a new project, and that is filed as [#273][i273].
 
 Read again on 2026-10-05, against pstack's newer commit and what this project has learned since, the
-user took two things to draft tickets, three drafts in all, folded a third into a larger change, and left the rest. Pstack's habit of treating outside text as
-data became two drafts, one for what the ticket reader shows and tells the clerk, and one for holding
-a stranger's ticket until the user accepts the account; checking it found that the reader prints a
-comment that starts with a date with no author. Pstack's upkeep pass for a verification record became a
-draft that waits on [#273][i273]. Pstack's rule that a resume carries the standing orders was folded
-into a larger change to how a leg ends, because legs have ended before their last steps (unverified, see
-idea 11) and pstack's own principle calls instructions in text easy to miss. The other changes were left, each with its reason
-below: the cleanup already had a rerun criterion, the tests mostly can fail, a dry run for every script
-costs more than it gives, and the rest are small. Pstack's new `/correct` and its two other commits moved
-no verdict. Nothing was filed.
+user took two things from it: the skill that makes a project's verifiers, already filed as [#273][i273], and the
+skill that keeps them current, which is a draft ticket that waits on #273. Everything else was left, each change
+with its reason below. Pstack's habit of treating outside text as data was first taken to two draft tickets and
+then set aside; checking it found that the ticket reader prints a comment that starts with a date with no author.
+Pstack's rule that a resume carries the standing orders was not made a ticket of its own, because legs have
+ended before their last steps (unverified, see idea 11) and pstack's own principle calls instructions in text
+easy to miss. The cleanup already had a rerun criterion, the tests mostly can fail, a dry run for every script
+costs more than it gives, and the rest are small. Pstack's new `/correct` and its two other commits moved no
+verdict. This reading filed nothing.
 
 ## What pstack claims
 
@@ -237,16 +236,16 @@ a run folder is not promoted.
 | # | change | now | what it costs | outcome, the user's word of 2026-10-05 |
 |---|---|---|---|---|
 | 1 | a cleanup safe to run twice or after a crash (`make-operations-idempotent`, the cleanup playbook) | done in intent; three gaps found by reading | a test-only follow-up, about 60 lines | left; the gaps stay on this page |
-| 2 | other accounts' text is data (the benny pack, `babysit`, `make-bot-ui`) | stands, narrower | small without a contract file, larger with | two draft tickets, not filed |
-| 3 | a daily check of harness versions (`/maintain-verification-skill`) | a small trial by hand first | no code for the trial | left; the upkeep goes to the verification record instead (a draft ticket) |
+| 2 | other accounts' text is data (the benny pack, `babysit`, `make-bot-ui`) | stands, narrower | small without a contract file, larger with | left; two draft tickets were written, then set aside |
+| 3 | a daily check of harness versions (`/maintain-verification-skill`) | a small trial by hand first | no code for the trial | left; its upkeep pass is taken under row 7, for the verifiers |
 | 4 | a control is shown to fail (`test-behavior-not-implementation`, `/tdd`) | stands, in another form | a script of its own, and two stub runs of changed tests | left; the gate stays as it is |
 | 5 | score a fixture ticket five times (Part 1: a swarm of runs; the `eval` playbook) | not as written | about 3 hours now, not 11 | left |
 | 6 | the flow's failure cases run with stub lanes (no pstack skill traced) | partly there; the rest cannot be stubbed | medium | left |
-| 7 | a verification record for a target (`/create-verification-skill`) | stands, filed | unchanged | filed as [#273][i273]; an upkeep pass for its record is a draft ticket |
+| 7 | the verifiers of a target (`/create-verification-skill`) and their upkeep pass (`/maintain-verification-skill`) | stands, filed | unchanged | taken: the making is filed as [#273][i273], and the upkeep pass is a draft ticket that waits on it |
 | 8 | ask the user only what running cannot settle (the question filter of `/poteto-mode`) | its home is gone; small | a sentence in the clerk's runbook | left |
 | 9 | a dry run for every script that removes or rewrites (Part 1) | the blanket rule does not stand | tens of hours | left; the narrow form is a trial on an unmerged page |
 | 10 | a table pairing each rule with what enforces it (`/correct`) | low; the gate is already taking rules one by one | a page of docs | left |
-| 11 | a resume carries the leg's end steps, left out in the first report (the `orchestrate` playbook) | the problem has evidence (see below); as wording it is text, which pstack calls easy to miss | a sentence in two prompts; contract files | folded into the leg-end ticket, when that is filed |
+| 11 | a resume carries the leg's end steps, left out in the first report (the `orchestrate` playbook) | the problem has evidence (see below); as wording it is text, which pstack calls easy to miss | a sentence in two prompts; contract files | left; the evidence stays here for the leg-end ticket |
 
 #### Candidate 1. A cleanup that is run twice, or after a crash at any step, finishes the job
 
@@ -308,9 +307,9 @@ both through the identical command. Not tried: a planted instruction in a commen
 account, not a person. The flow's own comments and the tickets an agent files use the owner's login, so a check on the author cannot see text an
 agent copied from outside.
 
-**Decision:** the user's word, 2026-10-05: do the part that touches no contract file, and make a ticket for the contract part as well. Two
-draft tickets were written and are not filed. The first covers the reader's marks and the clerk's instructions, and the second the hold on a
-stranger's ticket and the statement in the postmaster's, the coachman's and the lanes' instructions. The second needs the first.
+**Decision:** the user's word, 2026-10-05: first, do the part that touches no contract file and make a ticket for the contract part, and two draft tickets were
+written. Later the same day the user took only the two verification skills, so both drafts were set aside and the change is left. The finding about the comment
+log stays on this page.
 
 #### Candidate 3. A daily check of harness versions
 
@@ -333,7 +332,7 @@ standing that changes. No contract file. A script would be one ordinary ticket, 
 would touch a contract file. *What would show it failed.* If both re-runs find nothing changed, the case for building anything is thin, and a script
 that reports every difference is noise.
 
-**Decision:** the user's word, 2026-10-05: no daily version check. The upkeep pass of pstack's maintain-verification skill is wanted for the verification record that setup creates, since the user will be asked to specify verifiers. A draft ticket was written for that, not filed. It waits for [#273][i273].
+**Decision:** the user's word, 2026-10-05: no daily version check. Pstack's maintain-verification skill is taken instead, for the verifiers that setup creates (candidate 7), since the user will be asked to specify verifiers.
 
 #### Candidate 4. A control is shown to fail
 
@@ -407,10 +406,10 @@ count of past contract breaks that such scenarios catch and the gate does not. [
 `/create-verification-skill` or `/maintain-verification-skill` [@articles/pstack-plugin-e43c7ee/compare.out], and the two trials of the first report are unchanged. What
 would settle it is as before: the two-ticket comparison on a project with a user interface.
 
-**Decision:** none needed, it is filed. The user added on 2026-10-05 that the record also needs an upkeep pass, since the user will be asked to specify verifiers. Pstack's
+**Decision:** the user's word, 2026-10-05: taken, with its upkeep pass. [#273][i273] is the making, and it is filed. The user added that the verifiers also need an upkeep pass, since the user will be asked to specify them. Pstack's
 maintain-verification skill is the model: it re-checks a record with "one read-only subagent per feature file" and a live pass that is "required even when source looks clean", changes
 only the record's own folder, and reports "a product regression" instead of papering over it [@articles/pstack-plugin-e43c7ee/passages.md]. The first look found the need: after one ticket's change, 15 of the record's 37 claims no longer held
-[@trials/pstack-verification-skill/walk-after-remove.out]. A draft ticket was written, not filed, and it waits for [#273][i273].
+[@trials/pstack-verification-skill/walk-after-remove.out]. A draft ticket for the upkeep pass was written, not filed, and it waits for [#273][i273]. That ticket already lists "kept current" among the questions left to its own ticket session, so the pass may be folded into it.
 
 #### Candidate 8. A decision goes to the user only if running something cannot settle it
 
@@ -464,7 +463,7 @@ again with nothing behind it is not in the record: the test of [#307][i307] pred
 
 *pstack:* the `orchestrate` playbook: "Every spawn and every resume carries the standing orders verbatim." [@articles/pstack-plugin/passages.md].
 
-**Now: not as a rule of its own; folded into a larger change.** The first report weighed pstack's rule that every spawn and every resume carries the standing orders verbatim
+**Now: not as a rule of its own; the evidence belongs to a larger change.** The first report weighed pstack's rule that every spawn and every resume carries the standing orders verbatim
 [@articles/pstack-plugin/passages.md] and left it out: "no failure in the records to point at". There is one now, and it is not about the wording. A coachman leg ended its turn before
 its last steps at least five times between 2026-10-03 and 2026-10-05: [#251][i251] at 18:51 UTC and [#218][i218] at 21:10 on the first day, with the hand-off mostly missing; #252 on
 2026-10-04 at 08:48, with two headings of the hand-off to fix; #237 on 2026-10-04, with only the two markers missing; and #270 on 2026-10-05 at 05:21, with only the log line and the done
@@ -478,7 +477,7 @@ ended without its marker, and a restart message that names the end steps and the
 contract files, so it needs a fixture run, about 35 minutes. *What would show it failed:* a leg still ends without its marker, or such legs do not become fewer over the next ten runs.
 No ticket for the leg-end change was found among the titles on 2026-10-05.
 
-**Decision:** the user's word, 2026-10-05: not a separate ticket. The restart message goes into the leg-end and fresh-coachman ticket, when that is filed.
+**Decision:** the user's word, 2026-10-05: not a separate ticket, and later the same day only the two verification skills were taken, so it is left. The evidence stays on this page for the leg-end and fresh-coachman ticket, when the user files it.
 
 #### The perf mantras and the gate's length
 
