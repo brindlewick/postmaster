@@ -17,7 +17,9 @@ second reader on 26 of them and the controls for the count. A stated property or
 [What a functional core opens up for checking code, and what it does for coding with AI](concepts/functional-core-and-verification.md),
 **claimed**, with a map of 125 sources in five groups, captured under `raw/papers/` and
 `raw/articles/`, four claims weighed in both directions, four proposed changes to the design rules and the
-ticket template, and five small trials, none run. No standing changed.
+ticket template, and five small trials, none run. Two independent checks of the built page against its captures
+and sources, one of the record and one of the literature, found 28 and 43 problems (wrong, overstated,
+unsupported, missing a limit, minor); all were corrected before publication. No standing changed.
 
 
 ## [2026-10-04] query | should setup create a project's verifiers with pstack's skill

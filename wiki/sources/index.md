@@ -21,6 +21,7 @@ captured into `raw/`, saying what it claims and what it would mean here if true.
 
 
 
+
 ## Formal methods and functional programming
 
 Captured for [what a functional core opens up for checking code](../concepts/functional-core-and-verification.md): 97 papers and
