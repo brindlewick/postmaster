@@ -35,7 +35,8 @@ produce better software than one good model? If so, how?
   elsewhere, mixing models for coding is neither proven nor disproven, and independently built versions
   fail together. The whole combination run as an audited process, and an audit of its own flow, were
   not found elsewhere. The README's claim that the synthesis took from both lanes every time is not
-  supported, and the lane audit is.
+  supported, and the lane audit is. A scan of 60 lane streams found no lane reading the other's code, one
+  reading its plan and two reaching the run's blind tests.
 
 ## Harnesses
 
@@ -51,7 +52,8 @@ How each agent CLI really behaves, as distinct from what its documentation says.
   **claimed**. In bypass mode every harness wrote into the main checkout and read another lane's
   worktree; their own guards switch off or check only what a tool call names. sandbox-runtime
   around the harness stopped every reach on all five, and every lane still passed the gate.
-  A worktree still shares its repository's store; a shared clone per lane does not.
+  A worktree still shares its repository's store; a shared clone per lane does not. The flow's `confine`
+  setting isolates processes only, and a scan of 60 lane streams found reaches it did not stop.
 
 ## Trackers and tooling
 

@@ -8,6 +8,17 @@ updated: 2026-10-05
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-10-05] ingest | whether the lanes saw each other's work
+
+Issue #277. Read the events streams of 60 workhorse lanes in 30 real runs, and recorded the scan in
+`raw/trials/2026-10-05-lane-isolation-scan/`: the script with its self-test, its output, the controls and the
+readings. No stream named the other lane's worktree or showed its code. One lane read the other's plan, two
+reached the run's blind tests, and only one of those two runs recorded it. The sandbox that the `confine`
+setting turns on isolates processes and not files. Added "Whether its lanes were kept apart" to
+[Mixing models for coding](concepts/mixing-models-for-coding.md) and a line to
+[Lane confinement](concepts/lane-confinement.md). No standing changed: the scan reads the runs' own records
+and promotes no run.
+
 ## [2026-10-05] ingest | pstack read again at e43c7ee, and its nine ranked changes judged again
 
 Issue #309. The link the user gave (`c47b128`) is four commits before the first report's `23e4138`. The head
