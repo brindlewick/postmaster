@@ -200,39 +200,56 @@ describe("a broken contract list is an error", () => {
   });
 });
 
+/** A git repo carrying the real contract index and the named files. */
+function realFixture(dir: string, files: string[]): { repo: string; base: string } {
+  const repo = join(dir, "real");
+  mkdirSync(join(repo, "docs"), { recursive: true });
+  copyFileSync(
+    join(TOOL, "docs", "coachman-contract.toml"),
+    join(repo, "docs", "coachman-contract.toml"),
+  );
+  for (const f of files) {
+    const target = join(repo, f);
+    mkdirSync(dirname(target), { recursive: true });
+    copyFileSync(join(TOOL, f), target);
+  }
+  const g = (...args: string[]): string => {
+    const r = run("git", ["-C", repo, ...args]);
+    if (r.code !== 0) throw new Error(`git ${args.join(" ")}: ${r.err.trim()}`);
+    return r.out;
+  };
+  expect(run("git", ["init", "-q", "-b", "main", repo]).code).toBe(0);
+  g("config", "user.name", "brindlewick");
+  g("config", "user.email", "332054101+brindlewick@users.noreply.github.com");
+  g("add", ".");
+  g("commit", "-q", "-m", "baseline");
+  return { repo, base: g("rev-parse", "HEAD").trim() };
+}
+
 describe("the current index recognises its new files", () => {
   const NEW_FILES = ["scripts/premises.ts", "scripts/ticket-ready.ts"];
-
-  /** A git repo carrying the real contract index and the two new files. */
-  function realFixture(dir: string): { repo: string; base: string } {
-    const repo = join(dir, "real");
-    mkdirSync(join(repo, "docs"), { recursive: true });
-    copyFileSync(
-      join(TOOL, "docs", "coachman-contract.toml"),
-      join(repo, "docs", "coachman-contract.toml"),
-    );
-    for (const f of NEW_FILES) {
-      const target = join(repo, f);
-      mkdirSync(dirname(target), { recursive: true });
-      copyFileSync(join(TOOL, f), target);
-    }
-    const g = (...args: string[]): string => {
-      const r = run("git", ["-C", repo, ...args]);
-      if (r.code !== 0) throw new Error(`git ${args.join(" ")}: ${r.err.trim()}`);
-      return r.out;
-    };
-    expect(run("git", ["init", "-q", "-b", "main", repo]).code).toBe(0);
-    g("config", "user.name", "brindlewick");
-    g("config", "user.email", "332054101+brindlewick@users.noreply.github.com");
-    g("add", ".");
-    g("commit", "-q", "-m", "baseline");
-    return { repo, base: g("rev-parse", "HEAD").trim() };
-  }
 
   for (const f of NEW_FILES) {
     test(`a change in ${f} answers yes`, () => {
       const r = withTempDir((dir) => {
-        const { repo, base } = realFixture(dir);
+        const { repo, base } = realFixture(dir, NEW_FILES);
+        appendFileSync(join(repo, f), "\n");
+        const head = commitAll(repo, "touch");
+        return run(SELF, ["coachman-contract", repo, base, head]);
+      });
+      expect(r.code).toBe(1);
+      expect(r.out).toBe(`yes ${f}\n`);
+    });
+  }
+});
+
+describe("the current index recognises the reach helpers", () => {
+  const REACH_HELPERS = ["scripts/check-target.ts", "scripts/landing.ts", "scripts/log-action.ts"];
+
+  for (const f of REACH_HELPERS) {
+    test(`a change in ${f} answers yes`, () => {
+      const r = withTempDir((dir) => {
+        const { repo, base } = realFixture(dir, REACH_HELPERS);
         appendFileSync(join(repo, f), "\n");
         const head = commitAll(repo, "touch");
         return run(SELF, ["coachman-contract", repo, base, head]);

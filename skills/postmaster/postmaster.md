@@ -163,7 +163,11 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    turnpikes: line>'` exits 0 and
    prints the legs for the `turnpikes:` line step 1 printed, before anything is launched.
    Record `coachman contract fixture: pending` and `contract fixture check: -`; no
-   implementation branch exists yet to classify.
+   implementation branch exists yet to classify. Where the target is a fixture copy
+   (`<tool>/scripts/run front-door` reports one), add the brief's line `wall ruling: go on —
+   this fixture run asks nobody: the postmaster rules every wall go on itself as soon as it
+   is told; the coachman escalates and waits`, so the run's postmaster
+   rules its own walls and a fixture run never waits on a user (D7).
 9. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. Under
    contract 2 the coachman never touches the ticket's state and the postmaster marks it done
    after the merge; under the legacy contract the coachman touches it only at stage 3's merge.
@@ -199,7 +203,9 @@ ones it names.
    clears its done marker. Then wait for its done marker.
 3. **Launch** through the leg command. It uses the host in the synthesis worktree's space,
    clears prior markers and stream state, writes the attempt record, and owns the event and
-   error paths:
+   error paths. A run with a wall that has no ruling is paused, not dispatched: `<tool>/scripts/run walls
+   open <dispatch>` must exit 0 first; on exit 1 put each open wall to the user (Stage D,
+   WALL, if they are untold) and launch nothing (D8).
 
    ```sh
    <tool>/scripts/run run-meta run-pinned <dispatch> host leg launch <dispatch> <repo>/.worktrees/<TICKET> <leg-name> <n> \
@@ -241,12 +247,14 @@ the reason is in `<runs>/postmaster/watch.err` — fix the cause (harnesses.md, 
 watcher running) before starting it again. A watcher that is not running is a run nobody
 notices.
 
-The watcher takes two mechanical steps on its own, logging each through `<tool>/scripts/run log-action`
+The watcher takes three mechanical steps on its own, logging each through `<tool>/scripts/run log-action`
 with `the watcher took it` in the detail:
 
 - **A dispatch whose hand-off checks out.** When `.leg-<n>-done` is present and
   `<tool>/scripts/run handoff-check <dispatch>/handoff-<n>.md` exits 0, it dispatches the next
-  leg `<tool>/scripts/run turnpikes legs <dispatch>` lists, exactly as Stage C says. A hand-off
+  leg `<tool>/scripts/run turnpikes legs <dispatch>` lists, exactly as Stage C says — but not
+  while `<tool>/scripts/run walls open <dispatch>` exits 1: an unruling wall stops the next
+  leg, and the watcher names the run instead (D8). A hand-off
   that fails, a `run turnpikes legs` that exits non-zero, no next leg after the ship leg, or a
   launch it cannot complete are steps it could not complete: it names the run and you act.
 - **A resume on a transient provider error.** When a leg's process ended with no hand-off,
@@ -255,6 +263,11 @@ with `the watcher took it` in the detail:
   `harnesses.md`) — it resumes the leg on its own thread with the remount prompt, at most
   three times per leg (the count is in `<dispatch>/watcher.json` and survives a restart).
   A fourth such end, a non-transient end, or a resume it cannot complete is named to you.
+- **A wall pause whose walls are all ruled.** When `.wall-pause` is present and
+  `<tool>/scripts/run walls open <dispatch>` exits 0, it removes `.wall-pause` and
+  `.escalation-ready` and resumes the leg with a prompt naming every wall's ruling, exactly
+  as Stage E step 4 resumes an escalation; a ruling given during the pause takes effect at
+  the watcher's next look, without you (criterion 20). You rule; the watcher delivers.
 
 When `READY <id>` is named, repeat the readiness check and dispatch through Stage B without
 asking the user again. Consume its ready marker with
@@ -278,6 +291,19 @@ pause — never to stop a wake you have not acted on.
 Each `NEXT` names the act. The watcher has already taken the mechanical ones; what it names
 is what needs judgment or what it could not complete:
 
+- **WALL:** a lane stopped on its provider's usage limit and the user has not been told yet.
+  For each run the watcher names, read `<tool>/scripts/run walls show <dispatch>` and tell the
+  user about **every new wall of this look in one message**: the run, the lane and its role,
+  the provider's message, and the reset with its date in the machine's time zone, as `show`
+  prints them. Then mark each wall told — `<tool>/scripts/run walls told <dispatch> <lane>`
+  once per lane with a new wall — so a wall is told exactly once. Write the wall's question
+  to the run's `.waiting-on-user` **beside** any question that file already holds (append,
+  never replace) and add the run to the waiting list with `<tool>/scripts/run host leg
+  waiting add <runs> <ticket> <dispatch>/.waiting-on-user`, so a question already waiting
+  stays open beside the wall's. The wall stays visible in the status until it is told, even
+  while the run is busy or already waiting on you. The user may answer at any time after
+  being told; their words are a ruling (Stage E, step 6). You never drop a walled workhorse
+  yourself (Stage E, step 2).
   - **USER:** the run waits on the user, and its `.waiting-on-user` holds the question (Stage E
   step 3, current Stage F step 2 or Legacy Stage F step 2). Put the question to the user again if you have not in this session;
   otherwise nothing to do until they answer. When they answer, remove the marker and follow the
@@ -368,13 +394,19 @@ spec and pauses for no spec review.
 ## Stage E: rulings
 
 1. **Read `<dispatch>/ESCALATION.md`.** It carries the question, the options the coachman
-   sees, its recommendation, and the state of the branches.
+   sees, its recommendation, and the state of the branches. Where the escalation is a
+   provider wall (`.wall-pause` is present), the wall is the user's to rule: the walls are
+   what Stage D's WALL step tells them about, and step 6 takes their words.
 2. **Decide within the user's standing instructions** when the question is about the
-   work: a within-brief ambiguity, a scope call the ticket's own criteria answer, a lane to
-   drop as DEGRADED, a round to stop at the cap. Log `escalate` with your ruling.
+   work: a within-brief ambiguity, a scope call the ticket's own criteria answer, a round to
+   stop at the cap. A reach is never decided here. A walled workhorse is never yours to drop:
+   it goes to the user as Stage D's WALL step says. Log `escalate` with your ruling.
 3. **Send it up** when it is genuinely destructive, changes the ticket's scope, touches
    anything outside the repo, is a fault in a control (Tool faults), asks whether to fix a
-   gating finding in a loop with no gating lens (`coachman.md`, Stage 2 step 5), or the user
+   gating finding in a loop with no gating lens (`coachman.md`, Stage 2 step 5), is a reach
+   (`coachman.md`, the reach check: a workhorse's finding, a main checkout change no lane's
+   record explains at `workhorses`, or an observed change tied to a reviewer outside this
+   run's own branches and folders), or the user
    asked to see it: write the question to the run's `.waiting-on-user`, add the run and the
    question to the waiting list (`<runs>/postmaster/ESCALATION.md`, owned by
    `<tool>/scripts/run host leg waiting add <runs> <ticket> <question-file>`), tell the user in
@@ -383,7 +415,8 @@ spec and pauses for no spec review.
    pass a postmaster grant up as if it needed the user's word, and never take the user's word
    for something the config gives you. On the user's answer, remove `.waiting-on-user`, remove
    the run from the list with `<tool>/scripts/run host leg waiting remove <runs> <ticket>`, and
-   act on the answer as the record named.
+   act on the answer as the record named. In a fixture run there is no user to ask: when the
+   project carries `.postmaster/fixture`, rule on a reach yourself, and let the fixture score fail.
 4. **For a premise ruling, follow the user's choice.** Log either answer with
    `<tool>/scripts/run log-action <dispatch> postmaster rule <TICKET> "premises <choice>"`.
    On `go on`, deliver that ruling to the coachman. On `send it back`, set the run to `abandoned` with
@@ -398,7 +431,17 @@ spec and pauses for no spec review.
 5. **Deliver the ruling:** remove `.escalation-ready`. On `go on`, resume the current leg
    (Stage C, step 5) with the ruling as the prompt. The ruling is a prompt to a resumed thread,
    never text typed into anything. On `send it back`, leave the leg stopped and let the clerk
-   prepare the ticket again.
+   prepare the ticket again. A pause for a wall (`.wall-pause`) is delivered by the watcher
+   instead, once every wall in the run is ruled (Stage D's mechanical steps): rule it, remove
+   `.waiting-on-user` and the run from the waiting list, and leave the resume to the watcher.
+6. **A wall ruling comes in plain words,** at any time after you have told the user
+   (Stage D, WALL). Turn them into `<tool>/scripts/run walls rule <dispatch> <lane> go-on`:
+   words like "go on", "continue" or "let it go on" fit go-on, the one ruling this ticket
+   takes. Words that fit no ruling: ask the user again with the one ruling the run takes
+   (go on) and record nothing. A refusal (exit 2) passes its reason on to the user verbatim
+   and the run stays paused; on exit 0 the run is ruled, and the watcher delivers the pause
+   (step 5). A ruling on a reviewer's wall is the same command; the lane is keyed by its
+   lens where the run has one.
 
 ## Stage F (contract 2): verify and land the ship card
 
@@ -426,7 +469,10 @@ answers that. When a branch has no upstream, pass the branch itself: with nothin
 tracking it there is no fresher ref, and remote movement it does not track can be
 missed.
 
-1. **Verify the card's claims against the code**, never against the card.
+1. **Verify the card's claims against the code**, never against the card. Land nothing while
+   a wall has no ruling: `<tool>/scripts/run walls open <dispatch>` must exit 0 before this
+   stage's first call, and on exit 1 each open wall goes to the user (Stage D, WALL) and
+   nothing is landed (D8). Then
    `<tool>/scripts/run landing fresh --repo <repo> --default <branch> --ticket
    <ticket-branch> --dispatch <dispatch> --wt <synthesis-wt>` must print `fresh`: the
    ticket branch holds the current default branch and the record shows the gate passing at
@@ -579,30 +625,38 @@ missed.
 
 ## Stage G (contract 2): after merge
 
-1. Confirm the default branch contains the merge and the ticket is done — or, where the
-   ticket closed on nothing-to-land with no merge, that `anything-to-land --repo <repo>
-   --default <branch> --ticket <the ticket ref> --base <the manifest's base>` still says
-   `nothing-to-land` and the `merge` line holds the step's evidence: the user's word that
-   there was nothing to land (step 2), or the merge word with the no-diff evidence
-   (step 3). Stop the preview
-   process group from `<dispatch>/render/preview.pid`, if one was started. Run
-   `<tool>/scripts/run style-findings check <dispatch>`. The postmaster writes or corrects
-   `<dispatch>/style-sort.md` using the sorting rules in `coachman.md`, then checks it again
-   until exit 0; it does not resume a coachman leg that already handed off. Log a `note` with
-   the check's last line.
-2. **Finish the record.** Final `run-log.md` entry (per-lane win record, findings counts, cost)
-   plus a closing dated comment on the ticket, logging `ticket-comment`. Archive finished
-   threads where the harness has an archive form (`harnesses.md`).
-3. Once `.leg-<leg>-exited` is present, close every run-created worktree's host space with
-   `<tool>/scripts/run host close-run <dispatch>`; on exit 2, stop and report. Remove
-   the worktree from outside it, never with force unless it is clean and the card confirmed it,
-   and log `teardown`. Remove any surviving workhorse worktrees the same way after preserving
-   stray files in `<dispatch>/stray/`. Keep the run-created branches as the local archive.
-4. Close the run with `<tool>/scripts/run stage <dispatch> done postmaster`. This appends stage
-   timings from `actions.jsonl`; never write timings by hand. Never delete the dispatch or
-   manifest.
-5. Put tool faults and style-sort proposals to the user once aftercare ends, as Legacy Stage G
-   steps 4 and 5 describe, then dispatch the next ticket.
+1. **Write what needs judgment.** Confirm the default branch contains the merge and the
+   ticket is done — or, where the ticket closed on nothing-to-land with no merge, that
+   `anything-to-land --repo <repo> --default <branch> --ticket <the ticket ref> --base
+   <the manifest's base>` still says `nothing-to-land` and the `merge` line holds the
+   step's evidence: the user's word that there was nothing to land (step 2), or the merge
+   word with the no-diff evidence (step 3). Run `<tool>/scripts/run style-findings check
+   <dispatch>`. The postmaster writes or corrects `<dispatch>/style-sort.md` using the
+   sorting rules in `coachman.md`, then checks it again until exit 0; it does not resume a
+   coachman leg that already handed off. Log a `note` with the check's last line. On exit
+   1, tell the user what it printed. Compose the closing words here too: a closing line
+   for `run-log.md` (per-lane win record, findings counts, cost) and a dated closing
+   comment for the ticket. The shipped mark is the proof of the landing; confirm nothing
+   by hand again.
+2. **Run the cleanup command, first as a dry run.**
+   `<tool>/scripts/run aftercare <dispatch> --dry-run --comment "<text>" --run-log
+   "<text>"` prints its plan and changes nothing; read it, then run the same command
+   without `--dry-run`. The command saves each run folder's leftovers into
+   `<dispatch>/stray/`, closes the folder's windows, removes the folder, stops the
+   preview, closes the run's windows, writes the closing line, moves the ticket to done
+   (leaving a cancelled ticket as it is) and posts the closing comment, marks the run done
+   (stage timings come from `actions.jsonl`; never write them by hand) and releases its
+   pinned tool, logging every action as it happens. On exit 2 or 3, do the next step it
+   prints and run it again; on exit 1, or any fault it reports, put the fault to the user
+   as Tool faults says and stop — never work the cleanup's steps by hand, which would
+   bring the judgment calls back. With `--json` its summary is one record a script can
+   read. Never delete the dispatch or manifest; the run's branches stay.
+3. **Put what needs the user to the user once aftercare ends:** each flagged folder — the
+   ones aftercare's summary flags as holding work no branch's commits have, with the files
+   it names — then tool faults and style-sort proposals as Legacy Stage G steps 4 and 5
+   describe. Archive finished threads where the harness has an archive form
+   (`harnesses.md`).
+4. Dispatch the next ticket.
 
 ## Legacy Stage F: the gate (run.json has no coachman_contract 2)
 

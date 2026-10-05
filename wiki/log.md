@@ -1,12 +1,26 @@
 ---
 title: Log
 type: schema
-updated: 2026-10-04
+updated: 2026-10-05
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-05] ingest | pstack read again at e43c7ee, and its nine ranked changes judged again
+
+Issue #309. The link the user gave (`c47b128`) is four commits before the first report's `23e4138`. The head
+at `e43c7ee` adds `/correct` and changes `/architect` and the perf-issue playbook, and moves no verdict.
+Captured its passages and the comparison in `raw/articles/pstack-plugin-e43c7ee/`. Recorded six trials: which
+test cases pass when their script is replaced by a stub (`2026-10-05-total-mutant`), who writes on the tickets and what
+the comment log shows (`2026-10-05-ticket-text-authors`), the decisions of eight tickets marked by what could settle
+them (`2026-10-05-decisions-sample`), the versions the runs were dispatched with
+(`2026-10-05-harness-versions-in-runs`), what a fixture run takes (`2026-10-05-fixture-run-times`), and which
+scripts remove or rewrite something and which have a dry run (`2026-10-05-state-changing-scripts`). Added "Read again on
+2026-10-05" to [pstack](sources/pstack.md), which judges the nine changes again with the user's word on each and weighs
+two more, one from `/correct` and one the first report had left out. Fixed a link in the page: the ticket template moved with
+#251. No standing changed.
 
 ## [2026-10-04] ingest | what exists for coding with several models, whether mixing models is proven, and what postmaster adds
 

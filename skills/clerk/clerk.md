@@ -48,12 +48,21 @@ that is true when the work is done, in a sentence or two; an "and" that adds a s
 makes two criteria. A decision is one choice, the reason, and what it beat, a sentence each; mark
 each `(proposed)`, or `(given by the user)` where it is their own word. State each by what it
 changes for the flow or its user, not by where it is made in the code: a choice only the lanes
-care about, such as a name, a file or an order, is not a decision. Detail that only the
-implementation needs goes under `## For the agents`, in the checks or the technical notes. Never
-drop a choice that changes what a person sees or what the flow does: simplify the words and move
-the detail down. Keep every decision that changes what a person sees or what the flow does in the
-plain part. The technical part follows from it and adds no behavior. Tag each technical note with
-the criteria and decisions it follows from, such as (C2, D1).
+care about, such as a name, a file or an order, is not a decision. Write `## Decisions` in two
+parts: `### Not covered by the acceptance criteria` first, holding only the decisions whose effect
+no criterion states, then `### Covered by the acceptance criteria`, holding the rest under one line
+saying each is stated by a criterion above and is there for its reason and the alternative it beat.
+A decision keeps its number whichever part it is in, and a part with no decisions is left out.
+Detail that only the implementation needs goes under `## For the agents`, in the checks or the
+technical notes. Never drop a choice that changes what a person sees or what the flow does:
+simplify the words and move the detail down. Keep every decision that changes what a person sees
+or what the flow does in the plain part. The technical part follows from it and adds no behavior.
+Tag each technical note with the criteria and decisions it follows from, such as (C2, D1).
+
+Check each criterion against the four shapes that cannot be finished, which
+[the template](ticket-template.md) lists under "A criterion must be finishable", and rewrite it in
+its bounded form before the user sees the draft. If the whole point of a ticket is one of those
+shapes, say so to the user in plain words and propose the bounded form.
 
 Verify every premise in the notes at the stated base, and name that base under **Verified at** in
 the agents' part: each file, function, flag, line range and count exists and says what the notes
@@ -66,7 +75,8 @@ code details separately.
 ### Show the draft and work through the user's feedback
 
 Tell the user in two or three plain sentences what the ticket asks for. List each decision you
-made, numbered, with the alternative you rejected and why. Show the plain part as the
+made, numbered, with the alternative you rejected and why, starting with the ones not covered by
+the acceptance criteria, which are the ones the user has to read. Show the plain part as the
 part they sign off; the technical part follows from it.
 
 Publish the draft as an editable document when your harness can publish one. Otherwise give the
