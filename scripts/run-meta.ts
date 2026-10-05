@@ -945,11 +945,14 @@ function checkMode(d: string): Outcome {
 }
 
 // teamModeLine <brief>: the value of the `mode:` line in the waybill's Team section, "" when
-// the section or the line is absent. Read only from that section, so a line the ticket quotes
-// is not the run's mode.
+// the section or the line is absent. Read from the last Team section: the ticket is copied
+// verbatim before the generated one, so the first match may be a quoted heading.
 export function teamModeLine(brief: string): string {
   const lines = brief.split("\n");
-  const start = lines.findIndex((l) => /^##[ \t]+Team[ \t]*$/iu.test(l));
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^##[ \t]+Team[ \t]*$/iu.test(lines[i] as string)) start = i;
+  }
   if (start < 0) return "";
   const rest = lines.slice(start + 1);
   const end = rest.findIndex((l) => /^##[ \t]+/u.test(l));

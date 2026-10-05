@@ -2337,6 +2337,21 @@ describe("dispatch mode", () => {
     });
   }, 60000);
 
+  test("check reads the generated Team section, not a quoted one in the ticket", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const m = machine(tmp, "quoted", 'mode = "synthesis"\n');
+      const r = run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env });
+      expect(r.code).toBe(0);
+      const brief = join(m.dispatch, "brief.md");
+      writeFileSync(
+        brief,
+        "# Waybill: T1\n\n## Ticket\nabout the template:\n\n## Team\nmode: single-thread\n\n## Team\nmode: synthesis\nreviewers: one\n",
+      );
+      expect(run(wrapper, ["run-meta", "check", m.dispatch], { env: m.env }).code).toBe(0);
+    });
+  }, 60000);
+
   test("the latest write wins whatever its stage", () => {
     withTempDir((raw) => {
       const tmp = realpathSync(raw);
