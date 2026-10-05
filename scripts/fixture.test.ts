@@ -1177,6 +1177,20 @@ describe("score: the run kept its mode (D14)", () => {
     expect(result.ok).toBe(true);
     expect(result.detail).toContain("skipped");
   });
+  test("the waybill fallback reads lanes from the Team section, ignoring a quoted line", () => {
+    const d = brokenCopy("fallback-team", dispatchOf(`clean-${first}`));
+    const path = join(d, "run.json");
+    const rec = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+    const team = (rec.config as Record<string, unknown>).team as Record<string, unknown>;
+    delete team.workhorses;
+    writeFileSync(path, JSON.stringify(rec));
+    const briefPath = join(d, "brief.md");
+    const brief = readFileSync(briefPath, "utf-8");
+    writeFileSync(briefPath, brief.replace("\n", "\nworkhorses: phantom=h/x\n"));
+    const result = checkMode(d, repoOf(`clean-${first}`));
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("dispatched and branched");
+  });
 });
 
 describe("score: a record's stages are entered by the legs the contract names", () => {

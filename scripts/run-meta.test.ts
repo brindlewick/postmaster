@@ -228,6 +228,8 @@ beforeAll(async () => {
       const t = cli(["path", d]);
       check("path prints the pin", t.code === 0 && sh(t.out) === livePin, t.out);
     }
+    // The dispatch records mode synthesis; the waybill carries it, as a real one does.
+    writeFileSync(join(d, "brief.md"), "# Waybill: T1\n\n## Team\nmode: synthesis\n");
     {
       const t = cli(["check", d]);
       check("check passes a pin that serves its commit", t.code === 0, t.out);
@@ -1219,6 +1221,7 @@ beforeAll(async () => {
         return "";
       }
     })();
+    writeFileSync(join(g1new, "brief.md"), "# Waybill: T1\n\n## Team\nmode: synthesis\n");
     const tG1 = cli(["check", g1new]);
     check(
       "a dispatch racing a release records a pin that checks out",
@@ -1441,6 +1444,8 @@ beforeAll(async () => {
       mkdirSync(dir, { recursive: true });
       const r = cli([dir, repo], { ...process.env, POSTMASTER_CONFIG: cfg });
       check(`dispatch with confine ${tag} writes run.json`, r.code === 0, r.out);
+      // The dispatch records mode synthesis; the waybill carries it, as a real one does.
+      writeFileSync(join(dir, "brief.md"), "# Waybill: T1\n\n## Team\nmode: synthesis\n");
       return dir;
     };
     const dOn = mkConfRun("on", 'confine = "on"\n');
@@ -1469,6 +1474,7 @@ beforeAll(async () => {
       const r = JSON.parse(readFileSync(join(src, "run.json"), "utf8")) as Record<string, any>;
       edit(r);
       writeFileSync(join(dir, "run.json"), JSON.stringify(r));
+      writeFileSync(join(dir, "brief.md"), "# Waybill: T1\n\n## Team\nmode: synthesis\n");
       return dir;
     };
     {
@@ -1511,7 +1517,10 @@ beforeAll(async () => {
       delete (r.postmaster as Record<string, any>).checkout;
       edit(r);
       writeFileSync(join(dir, "run.json"), JSON.stringify(r));
-      writeFileSync(join(dir, "brief.md"), `## Dispatch\ntool: ${checkout}\n`);
+      writeFileSync(
+        join(dir, "brief.md"),
+        `## Dispatch\ntool: ${checkout}\n\n## Team\nmode: synthesis\n`,
+      );
       return dir;
     };
     {
@@ -2160,6 +2169,8 @@ describe("dispatch mode", () => {
       const r = run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env });
       expect(r.code).toBe(0);
       expect(r.out).toContain("mode=synthesis");
+      expect(r.out).toContain("mode_source=setting");
+      expect(r.out).toContain("mode_setting=synthesis");
       const rec = recordOf(m.dispatch);
       expect(rec.mode).toBe("synthesis");
       expect(rec.mode_source).toBe("setting");
@@ -2193,6 +2204,8 @@ describe("dispatch mode", () => {
       });
       expect(r.code).toBe(0);
       expect(r.out).toContain("mode=single-thread");
+      expect(r.out).toContain("mode_source=user");
+      expect(r.out).toContain("mode_setting=synthesis");
       const rec = recordOf(m.dispatch);
       expect(rec.mode).toBe("single-thread");
       expect(rec.mode_source).toBe("user");
@@ -2289,6 +2302,38 @@ describe("dispatch mode", () => {
       expect(verb.code).toBe(0);
       expect(verb.out).toContain("mode: synthesis");
       expect(verb.out).toContain("mode source: unrecorded");
+    });
+  }, 60000);
+
+  test("check refuses a mode record with one side missing, naming the side that has one", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const m = machine(tmp, "onesided", 'mode = "synthesis"\n');
+      const r = run(wrapper, ["run-meta", m.dispatch, m.repo, "--mode", "single-thread"], {
+        env: m.env,
+      });
+      expect(r.code).toBe(0);
+      const brief = join(m.dispatch, "brief.md");
+
+      // The record names a mode but the waybill has no mode line.
+      writeFileSync(brief, "# Waybill: T1\n\n## Team\nreviewers: one\n");
+      const missingLine = run(wrapper, ["run-meta", "check", m.dispatch], { env: m.env });
+      expect(missingLine.code).toBe(1);
+      expect(missingLine.out + missingLine.err).toContain("single-thread");
+      expect(missingLine.out + missingLine.err).toContain("no mode");
+
+      // The waybill names a mode but the record was written before the mode existed.
+      const path = join(m.dispatch, "run.json");
+      const rec = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+      delete rec.mode;
+      delete rec.mode_source;
+      delete rec.mode_setting;
+      writeFileSync(path, JSON.stringify(rec));
+      writeFileSync(brief, "# Waybill: T1\n\n## Team\nmode: synthesis\nreviewers: one\n");
+      const missingRecord = run(wrapper, ["run-meta", "check", m.dispatch], { env: m.env });
+      expect(missingRecord.code).toBe(1);
+      expect(missingRecord.out + missingRecord.err).toContain("synthesis");
+      expect(missingRecord.out + missingRecord.err).toContain("no mode");
     });
   }, 60000);
 

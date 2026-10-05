@@ -19,7 +19,8 @@
 // (user or setting) and the setting's value at dispatch as top-level keys beside confinement;
 // a config without team.mode reads as synthesis. `mode` prints the three. `check` also compares
 // the waybill's Team section `mode:` line with the record: both present and different fails
-// naming both, and a run with neither, or only one, is accepted.
+// naming both, one side missing fails naming the side that has one, and a run with neither
+// is accepted.
 //
 // Records when it was written; the run and project; the target repo's HEAD and branch; the
 // postmaster commit that dispatched it, and whether that checkout had uncommitted changes,
@@ -905,8 +906,9 @@ export function mode(d: string): Outcome {
 }
 
 // check_mode <dispatch>: the waybill's Team section `mode:` line and the record's mode agree.
-// A mismatch fails naming both; a run that names neither, or only one, is accepted, so a
-// dispatch from before the mode existed still passes.
+// A mismatch fails naming both; a run that names neither is accepted, so a dispatch from
+// before the mode existed still passes. One side missing fails too: a missing line reads as
+// synthesis, so accepting it would let a mistreated single-thread run down the workhorse path.
 function checkMode(d: string): Outcome {
   const runJson = join(d, "run.json");
   let rec: unknown;
@@ -929,8 +931,14 @@ function checkMode(d: string): Outcome {
   } catch {
     waybill = "";
   }
-  if (recorded === "" || waybill === "") return ok();
-  if (recorded === waybill) return ok();
+  if (recorded === "" && waybill === "") return ok();
+  if (recorded !== "" && waybill !== "" && recorded === waybill) return ok();
+  if (recorded === "") {
+    return fail(`run-meta: the waybill names mode ${waybill}, but the run records no mode\n`);
+  }
+  if (waybill === "") {
+    return fail(`run-meta: the run records mode ${recorded}, but the waybill names no mode\n`);
+  }
   return fail(
     `run-meta: the waybill names mode ${waybill}, and the run records mode ${recorded}\n`,
   );
@@ -1111,7 +1119,7 @@ export function meta(d: string, repo: string, requestedMode?: string): Outcome {
     const commit12 = (commit === "" ? "?" : commit).slice(0, 12);
     return {
       code: 0,
-      out: `run-meta: wrote ${runJson} (postmaster ${commit12}, pinned at ${checkout}, mode=${String(built.record.mode)})\n`,
+      out: `run-meta: wrote ${runJson} (postmaster ${commit12}, pinned at ${checkout}, mode=${String(built.record.mode)}, mode_source=${String(built.record.mode_source)}, mode_setting=${String(built.record.mode_setting)})\n`,
       err: built.warnings.map((warning) => `${warning}\n`).join(""),
     };
   });

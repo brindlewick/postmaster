@@ -35,7 +35,11 @@ import { homedir, machine, release, tmpdir, type as osType } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { tryJsonFile } from "./lib/data.ts";
 import { effortsLine } from "./run-meta.ts";
-import { laneNamesFromBranches, ticketIdFromWaybill } from "./fixture-lanes.ts";
+import {
+  laneNamesFromBranches,
+  laneNamesFromWorkhorses,
+  ticketIdFromWaybill,
+} from "./fixture-lanes.ts";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { die, run } from "./lib/proc.ts";
 import {
@@ -752,12 +756,7 @@ export function checkMode(dispatch: string, repo: string): { ok: boolean; detail
   if (lanes.length === 0) {
     try {
       const brief = readFileSync(join(dispatch, "brief.md"), "utf8");
-      const line = brief.split(/\r?\n/u).find((row) => row.startsWith("workhorses:")) ?? "";
-      lanes = line
-        .slice("workhorses:".length)
-        .split(",")
-        .map((entry) => entry.split("=")[0]?.trim() ?? "")
-        .filter((name) => name !== "");
+      lanes = laneNamesFromWorkhorses(brief);
     } catch {
       lanes = [];
     }

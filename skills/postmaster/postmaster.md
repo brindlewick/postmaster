@@ -144,8 +144,8 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    dispatch commit, shared by every run
    dispatched at it; the waybill names it as `tool:`, and every leg of this run reads its
    runbooks and runs its scripts from there. Log the `run run-meta` output as a `note`, keeping
-   its trailing `mode=<...>` field in the detail, so the run's log says which mode the run runs
-   in and where it came from.
+   its `mode=<...>`, `mode_source=<...>` and `mode_setting=<...>` fields in the detail, so the
+   run's log says which mode the run runs in and where it came from.
    `<tool>/scripts/run verify record
    <repo> <dispatch> --gate '<gate>'` writes `checks.json`, the checks the run is held to, and
    prints them for the waybill; a gate the project declares wins over the launch card's, and
