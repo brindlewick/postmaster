@@ -50,7 +50,7 @@ holds = "the detector itself, whole: classification, command and controls"
 
 [[files]]
 path = "scripts/landing.ts"
-holds = "the landing's deterministic checks: landed state, freshness, card rendering and matching, journey gating"
+holds = "the landing's deterministic checks: landed state, freshness, card rendering and matching, journey gating, and the ship card's reach section rendering"
 
 [[files]]
 path = "scripts/runs-watch.ts"
@@ -87,6 +87,18 @@ holds = "the attempt phase: refused before preflight, started once the harness i
 [[files]]
 path = "scripts/fixture.ts"
 holds = "the fixture command the flow invokes; the fixture-copy mark new writes, and scoring a run from its records"
+
+[[files]]
+path = "scripts/reach.ts"
+holds = "lane record reading, round snapshots and restoration"
+
+[[files]]
+path = "scripts/check-target.ts"
+holds = "the main-checkout reach reading the reach check compares against"
+
+[[files]]
+path = "scripts/log-action.ts"
+holds = "the reach action the reach check records"
 
 [[files]]
 path = "scripts/summary-evidence.ts"
