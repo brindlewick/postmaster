@@ -1965,7 +1965,17 @@ beforeAll(() => {
           `port rc=${nPRc} base rc=${nBRc} port ${nPHanded.length} base ${nBHanded.length} ` +
             `port-only: ${digestEnv(nPHanded.filter((e) => !nBHanded.includes(e)))} ` +
             `base-only: ${digestEnv(nBHanded.filter((e) => !nPHanded.includes(e)))} ` +
-            `want ${pwdWant}`,
+            `want ${pwdWant} testpwd=${process.env.PWD ?? "<unset>"} testcwd=${(() => {
+              try {
+                return process.cwd();
+              } catch {
+                return "<thrown>";
+              }
+            })()} ` +
+            `portErr=${JSON.stringify(nPErr.slice(0, 200))} baseErr=${JSON.stringify(nBErr.slice(0, 200))} ` +
+            `pwdWantPort=${nPHanded.includes(pwdWant)} pwdWantBase=${nBHanded.includes(pwdWant)} ` +
+            `portNames=${nPHanded.map((e) => e.slice(0, Math.max(0, e.indexOf("=")))).join(",")} ` +
+            `baseNames=${nBHanded.map((e) => e.slice(0, Math.max(0, e.indexOf("=")))).join(",")}`,
         );
         // Stdin reaches the harness byte for byte, NUL included: no UTF-8 decode.
         const pi = join(tmp, "bin", "pi");

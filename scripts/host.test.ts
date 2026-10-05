@@ -24,7 +24,7 @@ import { runControls } from "./host-self-test.ts";
 import { bootId, processStart, processState } from "./lib/processes.ts";
 
 const SECTIONS: Array<{ name: string; count: number }> = [
-  { name: "preamble", count: 6 },
+  { name: "preamble", count: 8 },
   { name: "detect", count: 5 },
   { name: "launch labels and run identity", count: 31 },
   { name: "name: from the waybill, so no title is typed into a shell", count: 5 },

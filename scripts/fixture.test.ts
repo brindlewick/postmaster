@@ -857,10 +857,13 @@ describe("new: a fresh repo outside every other, with its ticket in its own stor
         if (cmp.code !== 0) same = false;
       }
     }
+    // Byte order, like the JS sort below: the stock BSD sort follows the
+    // locale (case-insensitive on the runner) and would list CLAUDE.md and
+    // README.md among the lowercase names.
     const heldFiles = run("bash", [
       "-c",
       `cd "${dest}" && find . -path ./.git -prune -o \\( -type f -o -type l \\) -print | ` +
-        `sed 's|^\\./||' | sort`,
+        `sed 's|^\\./||' | LC_ALL=C sort`,
     ]).out.trim();
     const isSymlink =
       existsSync(join(dest, "CLAUDE.md")) && lstatSync(join(dest, "CLAUDE.md")).isSymbolicLink();

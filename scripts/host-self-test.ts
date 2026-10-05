@@ -59,6 +59,12 @@ function json(path: string, fallback: any): any {
     return fallback;
   }
 }
+// A test-side read of stub state, under the same lock the stubs take: the
+// state files are truncated and rewritten, and a lockless read can land
+// between and parse a torn half, which reads as empty state.
+function readStubJson(stubDir: string, name: string, fallback: any): any {
+  return withStubLock(stubDir, () => json(join(stubDir, name), fallback));
+}
 function save(path: string, value: unknown): void {
   writeFileSync(path, JSON.stringify(value));
 }
@@ -565,7 +571,12 @@ function symlinkCommand(name: string, bin: string): void {
     if (existsSync(path)) {
       try {
         symlinkSync(path, join(bin, name));
-      } catch {}
+      } catch (error) {
+        // The tool list names some twice; anything else is a real failure,
+        // and a silent one would surface pages later as a missing command.
+        if ((error as NodeJS.ErrnoException)?.code !== "EEXIST")
+          throw new Error(`cannot link ${path} into ${bin}: ${String(error)}`);
+      }
       return;
     }
   }
@@ -984,6 +995,26 @@ export async function runControls(): Promise<number> {
       () => TRIPLE_RE.exec("space=a tab=t pane=p\n")?.[3] === "p",
     );
     const paths = await makeHarness(root);
+    // The headless launch makes its session with setsid(1) where the
+    // fixture has it, else the python3 link below; without either it can
+    // only detach, which is a group but no session on some systems. Fail
+    // here, naming the miss, rather than pages later on the session check.
+    for (const tool of ["setsid", "python3"]) {
+      const linked = join(root, "sys", tool);
+      const onPath = (process.env.PATH ?? "").split(":").some((dir) => existsSync(join(dir, tool)));
+      let viable = false;
+      try {
+        accessSync(linked, constants.X_OK);
+        viable = true;
+      } catch {
+        viable = false;
+      }
+      await pass(
+        `the fixture ${tool} link matches its PATH availability`,
+        () => viable === onPath,
+        `PATH=${process.env.PATH ?? ""} link=${linked} onPath=${onPath} viable=${viable}`,
+      );
+    }
     const f = await setup(root);
     const noHost = paths.sys,
       stubs = paths.stubs;
@@ -1910,7 +1941,7 @@ export async function runControls(): Promise<number> {
       herdrRun.out + herdrRun.err,
     );
     const pane = place?.[3] ?? "";
-    const state = json(join(stub, "herdr.json"), { spaces: {}, panes: {}, open: {} });
+    const state = readStubJson(stub, "herdr.json", { spaces: {}, panes: {}, open: {} });
     const spaceId = place?.[1] ?? "";
     const worktree = join(f.repo, ".worktrees/T-1-luna");
     const listedCalls = readCalls("herdr");
@@ -1997,7 +2028,7 @@ export async function runControls(): Promise<number> {
     const paneHasNoBun =
       exec("bash", ["-c", "command -v bun"], { env: { PATH: paths.paneNoBun } }).code !== 0;
     const paneText = existsSync(noBunPaneOut) ? readFileSync(noBunPaneOut, "utf8") : "";
-    const runningHerdr = json(join(stub, "herdr.json"), { panes: {} });
+    const runningHerdr = readStubJson(stub, "herdr.json", { panes: {} });
     const liveHerdrCalls = readCalls("herdr");
     await pass(
       "with no Bun in its PATH, the Herdr pane runs the launch, shows output, and stays open",
@@ -2013,14 +2044,18 @@ export async function runControls(): Promise<number> {
       `${noBunHerdr.out}\n${paneText}`,
     );
     await marker(markerPath("h-bunless"), 15);
-    for (let i = 0; i < 40 && noBunPane in json(join(stub, "herdr.json"), { panes: {} }).panes; i++)
+    for (
+      let i = 0;
+      i < 40 && noBunPane in readStubJson(stub, "herdr.json", { panes: {} }).panes;
+      i++
+    )
       await sleep(50);
     const doneHerdrCalls = readCalls("herdr");
     await pass(
       "the Herdr pane closes after the launch marker lands",
       () =>
         existsSync(markerPath("h-bunless")) &&
-        !(noBunPane in json(join(stub, "herdr.json"), { panes: {} }).panes) &&
+        !(noBunPane in readStubJson(stub, "herdr.json", { panes: {} }).panes) &&
         doneHerdrCalls.includes(`pane\trelease-agent\t${noBunPane}`),
     );
     const secondHerdr = execHost(
@@ -2157,7 +2192,7 @@ export async function runControls(): Promise<number> {
       "a space run host opened, its launches done, is closed",
       () =>
         closedHerdr.code === 0 &&
-        (json(join(stub, "herdr.json"), { open: {} }).open[worktree] ?? "") === "",
+        (readStubJson(stub, "herdr.json", { open: {} }).open[worktree] ?? "") === "",
       closedHerdr.err,
     );
     const ownClose = execHost(["close", f.repo], stubs, root);
@@ -2251,7 +2286,7 @@ export async function runControls(): Promise<number> {
     await pass(
       "run host marks that space as its own",
       () =>
-        json(join(stub, "herdr.json"), { spaces: {} }).spaces[cloneSpace]?.tokens?.postmaster ===
+        readStubJson(stub, "herdr.json", { spaces: {} }).spaces[cloneSpace]?.tokens?.postmaster ===
         "opened",
     );
     await marker(markerPath("c1"));
@@ -2275,7 +2310,7 @@ export async function runControls(): Promise<number> {
       "close shuts it",
       () =>
         cloneClose.code === 0 &&
-        (json(join(stub, "herdr.json"), { open: {} }).open[f.clone] ?? "") === "",
+        (readStubJson(stub, "herdr.json", { open: {} }).open[f.clone] ?? "") === "",
       cloneClose.err,
     );
     const plain = join(root, "plain");
@@ -2298,7 +2333,7 @@ export async function runControls(): Promise<number> {
     await pass(
       "a plain clone is no scratch: close removes its finished launch and preserves the user's tab",
       () => {
-        const st = json(join(stub, "herdr.json"), { spaces: {}, panes: {}, tabs: {} });
+        const st = readStubJson(stub, "herdr.json", { spaces: {}, panes: {}, tabs: {} });
         const tabs = st.spaces[plainSpace]?.tabs ?? [];
         return (
           calls(root, "herdr").some(
@@ -2345,7 +2380,19 @@ export async function runControls(): Promise<number> {
       i++
     )
       await sleep(50);
-    const liveTmuxState = json(join(stub, "tmux.json"), { windows: {} });
+    // The running mark lands after the first output: the payload prints
+    // while run host is still making its option calls, so wait for the mark
+    // rather than reading the window once.
+    for (
+      let i = 0;
+      i < 40 &&
+      readStubJson(stub, "tmux.json", { windows: {} }).windows["@1"]?.opts?.[
+        "@postmaster_state"
+      ] !== "running";
+      i++
+    )
+      await sleep(50);
+    const liveTmuxState = readStubJson(stub, "tmux.json", { windows: {} });
     const liveTmuxPane = readFileSync(livePaneOut, "utf8");
     await pass(
       "a live launch keeps its tmux window open and marked running while its output is shown",
@@ -2358,9 +2405,9 @@ export async function runControls(): Promise<number> {
       `${tmuxLive.out}\n${JSON.stringify(liveTmuxState)}\n${liveTmuxPane}`,
     );
     await marker(markerPath("t-live"), 15);
-    for (let i = 0; i < 40 && "@1" in json(join(stub, "tmux.json"), { windows: {} }).windows; i++)
+    for (let i = 0; i < 40 && "@1" in readStubJson(stub, "tmux.json", { windows: {} }).windows; i++)
       await sleep(50);
-    const doneTmuxState = json(join(stub, "tmux.json"), { windows: {} });
+    const doneTmuxState = readStubJson(stub, "tmux.json", { windows: {} });
     await pass(
       "the tmux window is marked done and closes after the launch ends",
       () =>
@@ -2454,7 +2501,7 @@ export async function runControls(): Promise<number> {
       { POSTMASTER_HOST: "tmux" },
     );
     await marker(markerPath("t3"));
-    const tmuxState = json(join(stub, "tmux.json"), { sessions: [], windows: {} });
+    const tmuxState = readStubJson(stub, "tmux.json", { sessions: [], windows: {} });
     const cloneWindow = Object.values(tmuxState.windows).some(
       (window: any) =>
         window.session === `postmaster-${basename(f.repo)}` &&
@@ -2530,8 +2577,8 @@ export async function runControls(): Promise<number> {
       const lunaReal = realpathSync(luna);
       const solReal = realpathSync(sol);
       const herdrState = () =>
-        json(join(stub, "herdr.json"), { spaces: {}, panes: {}, tabs: {}, open: {} });
-      const tmuxState = () => json(join(stub, "tmux.json"), { sessions: [], windows: {} });
+        readStubJson(stub, "herdr.json", { spaces: {}, panes: {}, tabs: {}, open: {} });
+      const tmuxState = () => readStubJson(stub, "tmux.json", { sessions: [], windows: {} });
       const resumeScript = join(f.caller, "resume.sh");
 
       console.log("completion cleanup controls, Herdr (stub)");
@@ -2789,14 +2836,19 @@ export async function runControls(): Promise<number> {
       );
       const tmuxFirstWin = kvOf(tmuxFirst.out, "window");
       const tmuxFirstPane = Object.keys(tmuxState().windows[tmuxFirstWin]?.panes ?? {})[0] ?? "";
-      await pass("tmux has one live launch window for the first leg", () => {
-        const st = tmuxState();
-        const wins = Object.keys(st.windows ?? {});
-        return (
-          wins.length === 1 &&
-          Object.keys(st.windows[tmuxFirstWin]?.panes ?? {}).join(",") === tmuxFirstPane
-        );
-      });
+      await pass(
+        "tmux has one live launch window for the first leg",
+        () => {
+          const st = tmuxState();
+          const wins = Object.keys(st.windows ?? {});
+          return (
+            tmuxFirst.code === 0 &&
+            wins.length === 1 &&
+            Object.keys(st.windows[tmuxFirstWin]?.panes ?? {}).join(",") === tmuxFirstPane
+          );
+        },
+        `code=${tmuxFirst.code} out=${tmuxFirst.out} err=${tmuxFirst.err} wins=${JSON.stringify(tmuxState().windows ?? {})}`,
+      );
       await marker(join(logs, "tmux-resume.done"));
       const tmuxSecond = execHost(
         [
@@ -2829,11 +2881,13 @@ export async function runControls(): Promise<number> {
           const st = tmuxState();
           const wins = Object.keys(st.windows ?? {});
           return (
+            tmuxSecond.code === 0 &&
             wins.length === 1 &&
             Object.keys(st.windows[tmuxSecondWin]?.panes ?? {}).join(",") === tmuxSecondPane &&
             !(tmuxFirstWin in (st.windows ?? {}))
           );
         },
+        `code=${tmuxSecond.code} out=${tmuxSecond.out} err=${tmuxSecond.err} firstWin=${tmuxFirstWin} secondWin=${tmuxSecondWin} wins=${JSON.stringify(tmuxState().windows ?? {})}`,
       );
       await marker(join(logs, "tmux-resume.done"));
       await waitTmuxPaneGone(root, tmuxSecondPane);
@@ -2848,6 +2902,7 @@ export async function runControls(): Promise<number> {
             data.split("success").length - 1 === 2
           );
         },
+        `wins=${JSON.stringify(tmuxState().windows ?? {})} events=${JSON.stringify(readFileSync(join(logs, "tmux-resume.events"), "utf8").slice(0, 600))}`,
       );
 
       console.log("finished review round cleanup, tmux (stub)");

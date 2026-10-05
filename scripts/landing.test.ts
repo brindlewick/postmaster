@@ -941,8 +941,18 @@ describe("anything-to-land", () => {
     git(outer, "checkout", "-qb", "ticket");
     writeFileSync(join(outer, "sub", "f"), "S2\n");
     git(join(outer, "sub"), "commit", "-qam", "s2");
+    const bumped = git(join(outer, "sub"), "rev-parse", "HEAD");
     git(outer, "add", "sub");
+    // Newer git leaves the bump unstaged: with submodule.ignore in effect,
+    // `git add` honors the ignore instead of staging the new gitlink (2.55
+    // does, 2.43 does not). The bump the test needs is the gitlink itself,
+    // so stage it directly when the add left nothing.
+    if (!git(outer, "diff", "--cached", "--name-only").split("\n").includes("sub")) {
+      git(outer, "update-index", "--cacheinfo", `160000,${bumped},sub`);
+    }
     git(outer, "commit", "-qm", "bump");
+    // The setup holds on both: the bump commit carries the new gitlink.
+    expect(git(outer, "rev-parse", "HEAD:sub")).toBe(bumped);
     check(
       [
         "anything-to-land",

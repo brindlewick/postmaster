@@ -1105,9 +1105,12 @@ describe("nothing a check starts outlives it", () => {
     writeFileSync(checksPath, JSON.stringify(checksData));
     const r = run(SELF, ["verify", "run", mp, md]);
     const logged = r.out + r.err;
-    if (!logged.includes("try: not run, exit 127,"))
-      throw new Error(`verify run said:\n${logged}\n(exit ${r.code})`);
-    expect(logged.includes("try: not run, exit 127,")).toBe(true);
+    // The status is the assertion; the code is the shell's own number for
+    // an unstartable command (127 where bash is 4+, 1 under bash 3.2).
+    const notRun =
+      logged.includes("try: not run, exit ") && logged.includes("bash could not start it");
+    if (!notRun) throw new Error(`verify run said:\n${logged}\n(exit ${r.code})`);
+    expect(notRun).toBe(true);
   }, 60000);
 });
 

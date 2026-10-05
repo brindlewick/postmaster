@@ -2165,9 +2165,23 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
       } else {
         const py = which("python3");
         if (py) {
+          // Shed a group leadership first: setsid fails on a group leader,
+          // and a spawn that arrives already leading would die without ever
+          // execing. Either failure still execs, group-led at worst.
           args = [
             "-c",
-            "import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])",
+            [
+              "import os,sys",
+              "try:",
+              " os.setpgid(0,os.getpgid(os.getppid()))",
+              "except Exception:",
+              " pass",
+              "try:",
+              " os.setsid()",
+              "except Exception:",
+              " pass",
+              "os.execvp(sys.argv[1],sys.argv[1:])",
+            ].join("\n"),
             bin,
             ...args,
           ];
