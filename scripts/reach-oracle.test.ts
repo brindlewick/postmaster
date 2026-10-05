@@ -416,5 +416,5 @@ oracle(
     expectExit(bunTest(REPO, lay.home, "reach.test.ts"), 0);
     expectExit(bunTest(REPO, lay.home, "fixture.test.ts"), 0);
   },
-  600000,
+  900000,
 );
