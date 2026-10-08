@@ -29,13 +29,18 @@ interface Run {
   err: string;
 }
 
-function runCli(args: string[], env: Record<string, string | undefined>): Run {
+function runCli(args: string[], env: Record<string, string | undefined>, input?: string): Run {
   const merged: Record<string, string | undefined> = { ...process.env };
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined) delete merged[k];
     else merged[k] = v;
   }
-  const r = spawnSync(CLI, args, { encoding: "utf8", timeout: 60000, env: merged });
+  const r = spawnSync(CLI, args, {
+    encoding: "utf8",
+    timeout: 60000,
+    env: merged,
+    input: input ?? undefined,
+  });
   return { code: r.status ?? 1, out: String(r.stdout ?? ""), err: String(r.stderr ?? "") };
 }
 
@@ -701,4 +706,34 @@ describe("Review round 1 regressions", () => {
       chmodSync(index, 0o644);
     }
   }, 60000);
+});
+
+describe("Review round 2 regressions", () => {
+  test("a confine typo is refused; on and off pass", () => {
+    const { repo, config } = scratch();
+    const env = envFor(config);
+    writeSettings(repo, 'confine = "onn"\n');
+    const bad = runCli(["project-settings", "effective", repo], env);
+    expect(bad.code).toBe(1);
+    expect(bad.err).toContain('confine must be "on" or "off"');
+    writeSettings(repo, 'confine = "off"\n');
+    expect(runCli(["project-settings", "effective", repo], env).code).toBe(0);
+    writeSettings(repo, 'confine = "on"\n');
+    expect(runCli(["project-settings", "effective", repo], env).code).toBe(0);
+  }, 60000);
+
+  test("effective reads a piped machine config from stdin", () => {
+    const { repo } = scratch();
+    writeSettings(repo, '[lanes.luna]\nmodel = "gpt-other"\n');
+    const missing = join(tmp, `missing-${n}.toml`);
+    const r = runCli(
+      ["project-settings", "effective", repo, "-"],
+      envFor(missing),
+      '{"lanes": {"a": {"harness": "codex", "model": "m-a"}}}',
+    );
+    expect(r.code).toBe(0);
+    const cfg = JSON.parse(r.out) as Rec;
+    expect(((cfg.lanes as Rec).luna as Rec).model).toBe("gpt-other");
+    expect(((cfg.lanes as Rec).a as Rec).model).toBe("m-a");
+  }, 30000);
 });

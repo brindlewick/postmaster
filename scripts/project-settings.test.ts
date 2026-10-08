@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseTomlText } from "./lib/data";
-import { globalConfigPath, recordAcceptance } from "./lib/effective-config";
+import { globalConfigPath, isTracked, recordAcceptance } from "./lib/effective-config";
 import {
   asTable,
   effectiveConfig,
@@ -515,6 +515,33 @@ describe("project overrides", () => {
     const after = effectiveConfig(r, loadMachine(machine));
     expect(((after.lanes as Rec).alpha as Rec).model).toBe("x");
   }, 30000);
+});
+
+describe("tracked files", () => {
+  const id = ["-c", "user.name=t", "-c", "user.email=t@example.invalid"];
+
+  test("a case-variant directory counts as tracked", () => {
+    const dir = join(tmp, "case-dir");
+    mkdirSync(dir, { recursive: true });
+    expect(git(["init", "-q", dir])).toBe(0);
+    mkdirSync(join(dir, ".POSTMASTER"), { recursive: true });
+    writeFileSync(join(dir, ".POSTMASTER", "settings.toml"), '[lanes.a]\nmodel = "m"\n');
+    expect(git(["-C", dir, "add", ".POSTMASTER/settings.toml"])).toBe(0);
+    expect(git(["-C", dir, ...id, "commit", "-qm", "upper"])).toBe(0);
+    // On a case-insensitive filesystem this file opens as
+    // .postmaster/settings.toml; it must still count as tracked. Linux cannot
+    // open it under the lower-case name, so this pins the outcome on the
+    // macOS-observable bypass, with the control below proving the check runs.
+    expect(isTracked(dir, join(dir, ".postmaster", "settings.toml"))).toBe(true);
+  });
+
+  test("a genuinely untracked file counts as untracked", () => {
+    const dir = join(tmp, "plain-track");
+    mkdirSync(join(dir, ".postmaster"), { recursive: true });
+    expect(git(["init", "-q", dir])).toBe(0);
+    writeFileSync(join(dir, ".postmaster", "settings.toml"), '[lanes.a]\nmodel = "m"\n');
+    expect(isTracked(dir, join(dir, ".postmaster", "settings.toml"))).toBe(false);
+  });
 });
 
 describe("global config path", () => {
