@@ -362,7 +362,7 @@ const LABEL_COLORS: Record<string, [string, string]> = {
   [READY]: ["0E8A16", "Signed off by the user, ready to run"],
 };
 
-const NOT_FOUND_RE = /\b404\b|Not Found|does not exist/iu;
+const NOT_FOUND_RE = /404|Not Found|does not exist/iu;
 
 // One REST call. `false` when GitHub says 404 and the caller allows it; any other failure stops.
 function rest(argv: string[], allow404 = false): boolean {
