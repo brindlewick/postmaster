@@ -19,15 +19,14 @@ import { splitCommand } from "./clerk.ts";
 const SELF = join(import.meta.dir, "run");
 
 // A bun stub, so no shell startup bump touches the SHLVL it reports. It runs
-// from a project dir the layout owns, which holds no .env file.
-const STUB = `#!/usr/bin/env bun
-import { spawnSync } from "node:child_process";
+// from a project dir the layout owns, which holds no .env file, and measures
+// itself through the shared process module, where every process probe lives.
+const stubSource = (processesPath: string): string => `#!/usr/bin/env bun
 import { appendFileSync } from "node:fs";
-const pid = process.pid;
-const pgid = spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
-const tpgid = spawnSync("ps", ["-o", "tpgid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
+import { processInfo } from ${JSON.stringify(processesPath)};
+const info = processInfo(process.pid);
 const e = process.env;
-const line = \`PROBE pid=\${pid} pgid=\${pgid} tpgid=\${tpgid} shlvl=\${e.SHLVL ?? "UNSET"} foo=\${e.FOO ?? "UNSET"} parent=\${e.ORACLE_PARENT ?? "UNSET"} launch_name=\${e.POSTMASTER_LAUNCH_NAME ?? "UNSET"} launch_role=\${e.POSTMASTER_LAUNCH_ROLE ?? "UNSET"} stream=\${e.POSTMASTER_EVENT_STREAM ?? "UNSET"}\`;
+const line = \`PROBE pid=\${process.pid} pgid=\${info?.group ?? "UNSET"} tpgid=\${info?.terminal ?? "UNSET"} shlvl=\${e.SHLVL ?? "UNSET"} foo=\${e.FOO ?? "UNSET"} parent=\${e.ORACLE_PARENT ?? "UNSET"} launch_name=\${e.POSTMASTER_LAUNCH_NAME ?? "UNSET"} launch_role=\${e.POSTMASTER_LAUNCH_ROLE ?? "UNSET"} stream=\${e.POSTMASTER_EVENT_STREAM ?? "UNSET"}\`;
 console.log(line);
 if (e.ORACLE_REPORT) appendFileSync(e.ORACLE_REPORT, line + "\\n");
 `;
@@ -52,7 +51,7 @@ function makeLayout(): Layout {
   mkdirSync(repo, { recursive: true });
   const init = spawnSync("git", ["init", "-q", repo], { encoding: "utf8" });
   if (init.status !== 0) throw new Error(`git init -q failed: ${init.stderr}`);
-  writeFileSync(join(bin, "claude"), STUB);
+  writeFileSync(join(bin, "claude"), stubSource(join(import.meta.dir, "lib", "processes.ts")));
   chmodSync(join(bin, "claude"), 0o755);
   const fooEnv = join(dir, "foo.env");
   const shlvlEnv = join(dir, "shlvl.env");
@@ -125,6 +124,7 @@ interface Probe {
 
 function parseProbe(text: string): Probe {
   const m =
+    // ASCII: the stub reports one machine-made ASCII line.
     /PROBE pid=(\S+) pgid=(\S+) tpgid=(\S+) shlvl=(\S+) foo=(\S+) parent=(\S+) launch_name=(\S+) launch_role=(\S+) stream=(\S+)/u.exec(
       text,
     );

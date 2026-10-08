@@ -134,6 +134,7 @@ oracle("without an env file the form is the bare harness command", (lay) => {
   const r = runPlain(lay, `echo PARENT_SHLVL=$SHLVL; ${form}`);
   if (r.code !== 0)
     throw new Error(`form exited ${r.code}\n--- out ---\n${r.out}\n--- err ---\n${r.err}`);
+  // ASCII: the marker line is machine-made ASCII.
   const parent = /PARENT_SHLVL=(\S+)/u.exec(r.out);
   if (!parent) throw new Error(`no parent level in:\n${r.out}`);
   // No wrapper, so the harness sees the parent environment verbatim, as today.
