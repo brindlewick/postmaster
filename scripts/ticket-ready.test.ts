@@ -580,8 +580,12 @@ case "$1 $2" in
     for a in "$@"; do [ "$prev" = --body-file ] && { f=$a; body=1; }; prev=$a; done
     printf 'call:%s\\n' "$(printf ' [%s]' "$@")" >> "$d/edits.log"
     if [ $body = 1 ]; then cp -- "$f" "$d/edited-body"; fi ;;
-  "label list") echo '[{"name": "ready"}]' ;;
-  "label create") echo '{}' ;;
+  "api "*)
+    case "$*" in
+      "api repos/o/r/labels/"*) echo '{}' ;;
+      "api -X POST repos/o/r/issues/"*) echo '[]' ;;
+      *) echo "stub gh: unexpected REST call: $*" >&2; exit 1 ;;
+    esac ;;
   *) echo "stub gh: unexpected: $*" >&2; exit 1 ;;
 esac
 `;

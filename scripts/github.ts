@@ -30,6 +30,12 @@
 // goes through the gh CLI, which must be logged in with the `project` scope
 // (`gh auth refresh -s project`); scripts/run probe-trackers says whether it is.
 //
+// Cost: GitHub gives all tools and agents together 5,000 GraphQL points an hour, and listing a
+// board of about 200 items costs about 300 of them. So a ticket's column is read from the issue's
+// own project items in the one query that reads the issue, an item is found the same way, `list`
+// asks for each issue's column in the query that lists the issues, and a label is added or
+// removed over REST, which has a budget of its own. Nothing here lists the board.
+//
 // edit takes the body as it was read when the change was drafted (read --body) and refuses when
 // the issue no longer matches it, so a change made in the tracker meanwhile is not lost.
 //
@@ -86,6 +92,11 @@ interface IssueComment {
   createdAt?: string;
   author?: { login?: string } | null;
 }
+interface ProjectItemNode {
+  id: string;
+  project?: { id?: string } | null;
+  fieldValueByName?: { name?: string } | null;
+}
 interface Issue {
   number: number;
   title: string;
@@ -96,6 +107,7 @@ interface Issue {
   createdAt: string;
   labels: IssueLabel[];
   comments: IssueComment[];
+  items: ProjectItemNode[];
 }
 interface ListItem {
   number: number;
@@ -103,6 +115,7 @@ interface ListItem {
   state: string;
   stateReason: string | null;
   labels: IssueLabel[];
+  items: ProjectItemNode[];
 }
 
 // --- remote parsing ---------------------------------------------------------------------------
@@ -221,24 +234,26 @@ function statusField(b: Board): [string, Record<string, string>] {
   dieGh(`board #${b.number} has no Status field`);
 }
 
-function itemId(b: Board, nwo: string, number: number, url: string): [string, string | null] {
-  const items = ghj<any>([
-    "project",
-    "item-list",
-    String(b.number),
-    "--owner",
-    b.ownerLogin ?? "",
-    "--format",
-    "json",
-    "--limit",
-    "1000",
-  ]);
-  for (const it of items.items ?? []) {
-    const c = it.content ?? {};
-    if (c.type === "Issue" && c.number === number && c.repository === nwo) {
-      return [it.id, it.status ?? null];
-    }
+// The issue's own project items, asked for in the query that reads the issue (about one point
+// where a board listing costs about 300). `project{id}` tells the boards apart.
+const ITEMS_QUERY =
+  "projectItems(first:20){nodes{id project{id} " +
+  'fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}}}';
+
+function boardItem(
+  items: ProjectItemNode[] | undefined,
+  b: Board,
+): { id: string; status: string | null } | null {
+  for (const it of items ?? []) {
+    if (it.project?.id === b.id) return { id: it.id, status: it.fieldValueByName?.name ?? null };
   }
+  return null;
+}
+
+// The id of the issue's item on the board: the one it already has, else a new one. item-add is
+// idempotent, so an issue that a board workflow added meanwhile gets its existing item back.
+function itemId(b: Board, url: string, item: { id: string } | null): string {
+  if (item) return item.id;
   const added = ghj<any>([
     "project",
     "item-add",
@@ -250,10 +265,10 @@ function itemId(b: Board, nwo: string, number: number, url: string): [string, st
     "--format",
     "json",
   ]);
-  return [added.id, null];
+  return added.id;
 }
 
-function setColumn(b: Board, nwo: string, number: number, url: string, flow: string): void {
+function setColumn(b: Board, url: string, flow: string, item: { id: string } | null): void {
   const [field, opts] = statusField(b);
   const key = COLUMN[flow];
   if (key === undefined || !(key in opts)) {
@@ -261,7 +276,7 @@ function setColumn(b: Board, nwo: string, number: number, url: string, flow: str
       `board #${b.number} has no Status column for ${flow} (its columns: ${Object.keys(opts).join(", ")})`,
     );
   }
-  const [iid] = itemId(b, nwo, number, url);
+  const iid = itemId(b, url, item);
   gh([
     "project",
     "item-edit",
@@ -276,34 +291,13 @@ function setColumn(b: Board, nwo: string, number: number, url: string, flow: str
   ]);
 }
 
-function boardStatuses(b: Board, nwo: string): Record<number, string> {
-  const items = ghj<any>([
-    "project",
-    "item-list",
-    String(b.number),
-    "--owner",
-    b.ownerLogin ?? "",
-    "--format",
-    "json",
-    "--limit",
-    "1000",
-  ]);
-  const out: Record<number, string> = {};
-  for (const it of items.items ?? []) {
-    const c = it.content ?? {};
-    if (c.type === "Issue" && c.repository === nwo) {
-      out[c.number as number] = it.status ?? "";
-    }
-  }
-  return out;
-}
-
 // --- issues -----------------------------------------------------------------------------------
 function issueOf(owner: string, name: string, nwo: string, number: number): Issue {
   const q =
     "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){" +
     "issue(number:$number){number title body state stateReason url createdAt " +
-    "labels(first:50){nodes{name}} comments(first:100){nodes{body createdAt author{login}}}}}}";
+    "labels(first:50){nodes{name}} comments(first:100){nodes{body createdAt author{login}}} " +
+    `${ITEMS_QUERY}}}}`;
   const data = ghj<any>([
     "api",
     "graphql",
@@ -320,6 +314,7 @@ function issueOf(owner: string, name: string, nwo: string, number: number): Issu
   if (!iss) dieGh(`no issue #${number} in ${nwo}`);
   iss.labels = iss.labels?.nodes ?? [];
   iss.comments = iss.comments?.nodes ?? [];
+  iss.items = iss.projectItems?.nodes ?? [];
   return iss as Issue;
 }
 
@@ -327,7 +322,8 @@ function allIssues(owner: string, name: string): ListItem[] {
   const q =
     "query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){" +
     "issues(first:100,after:$after,states:[OPEN,CLOSED],orderBy:{field:CREATED_AT,direction:ASC}){" +
-    "pageInfo{hasNextPage endCursor} nodes{number title state stateReason labels(first:50){nodes{name}}}}}}";
+    "pageInfo{hasNextPage endCursor} nodes{number title state stateReason labels(first:50){nodes{name}} " +
+    `${ITEMS_QUERY}}}}}`;
   const out: ListItem[] = [];
   let after: string | null = null;
   for (;;) {
@@ -350,6 +346,7 @@ function allIssues(owner: string, name: string): ListItem[] {
         state: n.state,
         stateReason: n.stateReason ?? null,
         labels: n.labels?.nodes ?? [],
+        items: n.projectItems?.nodes ?? [],
       });
     }
     if (!page.pageInfo?.hasNextPage) return out;
@@ -371,30 +368,44 @@ const LABEL_COLORS: Record<string, [string, string]> = {
   [READY]: ["0E8A16", "Signed off by the user, ready to run"],
 };
 
-function ensureLabel(nwo: string, name: string): void {
-  const labels = ghj<Array<{ name: string }>>([
-    "label",
-    "list",
-    "-R",
-    nwo,
-    "--json",
-    "name",
-    "--limit",
-    "200",
-  ]);
-  const names = new Set(labels.map((l) => pyLower(l.name)));
-  if (!names.has(pyLower(name))) {
-    const [color, description] = LABEL_COLORS[pyLower(name)] ?? ["D4C5F9", name];
-    gh(["label", "create", name, "-R", nwo, "--color", color, "--description", description]);
-  }
+const NOT_FOUND_RE = /\b404\b|Not Found|does not exist/iu;
+
+// One REST call. `false` when GitHub says 404 and the caller allows it; any other failure stops.
+function rest(argv: string[], allow404 = false): boolean {
+  const r = run("gh", ["api", ...argv, "--silent"]);
+  if (r.code === 0) return true;
+  const said = `${r.err}\n${r.out}`;
+  if (allow404 && NOT_FOUND_RE.test(said)) return false;
+  dieGh(`gh api ${argv.slice(0, 3).join(" ")}: ${said.trim().slice(0, 300)}`);
 }
 
+function ensureLabel(nwo: string, name: string): void {
+  if (rest([`repos/${nwo}/labels/${encodeURIComponent(name)}`], true)) return;
+  const [color, description] = LABEL_COLORS[pyLower(name)] ?? ["D4C5F9", name];
+  rest([
+    "-X",
+    "POST",
+    `repos/${nwo}/labels`,
+    "-f",
+    `name=${name}`,
+    "-f",
+    `color=${color}`,
+    "-f",
+    `description=${description}`,
+  ]);
+}
+
+// Labels go over REST: gh's own `issue edit --add-label` reads the issue's projects and labels
+// through GraphQL first, about 100 points each time. Removing a label the issue lacks is fine.
 function setLabel(nwo: string, number: number, present: boolean, name = BLOCKED): void {
   if (present) {
     ensureLabel(nwo, name);
-    gh(["issue", "edit", String(number), "-R", nwo, "--add-label", name]);
+    rest(["-X", "POST", `repos/${nwo}/issues/${number}/labels`, "-f", `labels[]=${name}`]);
   } else {
-    gh(["issue", "edit", String(number), "-R", nwo, "--remove-label", name]);
+    rest(
+      ["-X", "DELETE", `repos/${nwo}/issues/${number}/labels/${encodeURIComponent(name)}`],
+      true,
+    );
   }
 }
 
@@ -498,7 +509,7 @@ function main(): void {
     const url = createOut.trim().split("\n").pop() ?? "";
     const number = parseInt(url.replace(/\/$/u, "").split("/").pop() ?? "0", 10);
     try {
-      setColumn(b, NWO, number, url, "todo");
+      setColumn(b, url, "todo", null);
     } catch (e) {
       if (e instanceof DieError) {
         console.log(String(number));
@@ -563,10 +574,9 @@ function main(): void {
       process.stdout.write(`${iss.body ?? ""}\n`);
       return;
     }
-    const statuses = boardStatuses(b, NWO);
     console.log(`id: #${n}`);
     console.log(`title: ${iss.title ?? ""}`);
-    console.log(`state: ${flowState(iss, statuses[n])}`);
+    console.log(`state: ${flowState(iss, boardItem(iss.items, b)?.status ?? undefined)}`);
     console.log(`labels: ${(iss.labels ?? []).map((l) => l.name).join(", ")}`);
     console.log(`created: ${String(iss.createdAt ?? "").slice(0, 10)}`);
     console.log(`url: ${iss.url ?? ""}`);
@@ -610,7 +620,7 @@ function main(): void {
         if (closed) gh(["issue", "reopen", String(n), "-R", NWO]);
         gh(["issue", "close", String(n), "-R", NWO, "--reason", "not planned"]);
       }
-      setColumn(b, NWO, n, iss.url, newSt);
+      setColumn(b, iss.url, newSt, boardItem(iss.items, b));
     }
     console.log(`#${n}: ${newSt}`);
   } else if (cmd === "comment") {
@@ -629,9 +639,9 @@ function main(): void {
     if (want && !STATES.includes(want)) {
       dieGh(`invalid state ${want} (one of: ${STATES.join(", ")})`, 2);
     }
-    const statuses = boardStatuses(boardOf(NWO, OWNER, NAME), NWO);
+    const board = boardOf(NWO, OWNER, NAME);
     for (const iss of [...allIssues(OWNER, NAME)].sort((a, b) => a.number - b.number)) {
-      const st = flowState(iss, statuses[iss.number]);
+      const st = flowState(iss, boardItem(iss.items, board)?.status ?? undefined);
       if (want === null || st === want) {
         console.log(`#${iss.number}\t${st}\t${iss.title ?? ""}`);
       }
