@@ -1,4 +1,4 @@
-// Tests beside scripts/project-settings.ts, moved from its --self-test on #109: 122 controls.
+// Tests beside scripts/project-settings.ts, moved from its --self-test on #109: 123 controls.
 // CLI spawns go through a local spawnSync helper with a timeout option instead of the
 // timeout command; env merges over process.env with undefined deleting, as lib/proc run().
 // POSTMASTER_CONFIG points at the fixture machine config for the suite, restored after.
@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseTomlText } from "./lib/data";
-import { recordAcceptance } from "./lib/effective-config";
+import { globalConfigPath, recordAcceptance } from "./lib/effective-config";
 import {
   asTable,
   effectiveConfig,
@@ -515,4 +515,23 @@ describe("project overrides", () => {
     const after = effectiveConfig(r, loadMachine(machine));
     expect(((after.lanes as Rec).alpha as Rec).model).toBe("x");
   }, 30000);
+});
+
+describe("global config path", () => {
+  test("the default builds from $HOME exactly, and unset HOME reads as the root", () => {
+    const saveConfig = process.env.POSTMASTER_CONFIG;
+    const saveHome = process.env.HOME;
+    try {
+      delete process.env.POSTMASTER_CONFIG;
+      process.env.HOME = join(tmp, "fake-home");
+      expect(globalConfigPath()).toBe(join(tmp, "fake-home", ".postmaster", "config.toml"));
+      delete process.env.HOME;
+      expect(globalConfigPath()).toBe("/.postmaster/config.toml");
+    } finally {
+      if (saveConfig === undefined) delete process.env.POSTMASTER_CONFIG;
+      else process.env.POSTMASTER_CONFIG = saveConfig;
+      if (saveHome === undefined) delete process.env.HOME;
+      else process.env.HOME = saveHome;
+    }
+  });
 });

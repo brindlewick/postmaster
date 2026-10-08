@@ -65,11 +65,13 @@ const errText = (e: unknown): string => (e instanceof Error ? e.message : String
 
 // --- the global config path ----------------------------------------------------------------------
 // The one place the path is built: every reader calls this instead of joining it.
+// The default builds from $HOME exactly, as the base readers did — never the
+// passwd home, so a stubbed or unset HOME reads the same here as everywhere.
 // An empty override reads as unset, and a leading ~ expands.
 export const globalConfigPath = (): string => {
   const override = process.env.POSTMASTER_CONFIG;
   if (override !== undefined && override !== "") return expandUser(override);
-  return join(homedir(), ".postmaster", "config.toml");
+  return `${process.env.HOME ?? ""}/.postmaster/config.toml`;
 };
 
 /** The acceptance store beside a resolved global config path. */

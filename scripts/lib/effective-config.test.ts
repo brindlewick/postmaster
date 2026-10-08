@@ -53,7 +53,7 @@ let n = 0;
 beforeAll(() => {
   tmp = mkdtempSync(join(tmpdir(), "project-overrides-"));
   example = readFileSync(join(import.meta.dir, "..", "..", "config.example.toml"), "utf8").replace(
-    /^postmaster = .*/m,
+    /^postmaster = .*/mu,
     'postmaster = { harness = "claude", model = "opus-x" }',
   );
   stubBin = join(tmp, "bin");
@@ -111,7 +111,7 @@ function commitFile(repo: string, rel: string): void {
 }
 
 /** Shell quoting off: the launch form quotes args with spaces or quotes in them. */
-const bare = (s: string): string => s.replace(/["'\\]/g, "");
+const bare = (s: string): string => s.replace(/["'\\]/gu, "");
 
 /** Leaf paths where a and b differ; tables recurse, lists and values compare whole. */
 function diffPaths(a: unknown, b: unknown, path: string[] = []): string[][] {
@@ -357,9 +357,11 @@ describe("C2: every step reads the project settings over the global config", () 
     const scripts = join(root, "scripts");
     const part1 = ".postmaster";
     const part2 = "config.toml";
-    const slash = new RegExp(`${part1.replace(/\./g, "\\.")}/${part2.replace(/\./g, "\\.")}`);
+    // ASCII: the pattern holds no \p and no i; u would change nothing.
+    const slash = new RegExp(`${part1.replace(/\./gu, "\\.")}/${part2.replace(/\./gu, "\\.")}`);
     const joined = new RegExp(
-      `"${part1.replace(/\./g, "\\.")}"\\s*,\\s*"${part2.replace(/\./g, "\\.")}"`,
+      // ASCII: join() args in TS source split on ASCII whitespace.
+      `"${part1.replace(/\./gu, "\\.")}"\\s*,\\s*"${part2.replace(/\./gu, "\\.")}"`,
     );
     const found: string[] = [];
     const walk = (dir: string): void => {
@@ -367,9 +369,11 @@ describe("C2: every step reads the project settings over the global config", () 
         const p = join(dir, name.name);
         if (name.isDirectory()) {
           walk(p);
-        } else if (name.isFile() && p.endsWith(".ts")) {
+        } else if (name.isFile() && p.endsWith(".ts") && !p.endsWith(".test.ts")) {
+          // Tests spell the path to assert on it; the invariant covers shipped code.
           const src = readFileSync(p, "utf8");
-          const noBlocks = src.replace(/\/\*[\s\S]*?\*\//g, "");
+          // ASCII: [\s\S] matches every character; the strip cannot miss a closer.
+          const noBlocks = src.replace(/\/\*[\s\S]*?\*\//gu, "");
           const code = noBlocks
             .split("\n")
             .filter((l) => !l.trimStart().startsWith("//"))
