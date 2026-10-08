@@ -40,7 +40,7 @@ half, how a run is prepared and what the waybill carries, is `SKILL.md`. You do 
 | `<repo>/.worktrees/<TICKET>` | synthesis worktree, branch `<TICKET>` |
 | `<repo>/.worktrees/<TICKET>-<lane>` | workhorse worktree, branch `wb/<TICKET>-<lane>` (`wb` for workhorse branch) |
 | `<dispatch>/checkpoint-<n>.md` | checkpoint cards: `1` and `review` |
-| `<repo>/.worktrees/<TICKET>-rev-<lens>-<lane>` | reviewer scratch, one per lens per lane, detached at the synthesis HEAD, fresh every round: a clone under the security lens, a worktree under the others |
+| `<repo>/.worktrees/<TICKET>-rev-<lens>-<lane>` | reviewer scratch, one per lens per lane, detached at the synthesis HEAD, fresh every round: a clone of the repository under every lens |
 | `<repo>/.worktrees/<TICKET>-oracle-<lane>` | blind-test scratch, one per lane, cut at harvest with the oracle commit cherry-picked onto it, removed with the run |
 | `<dispatch>/style-sort.md` | aftercare's sort of the run's style findings, which the postmaster puts to the user |
 
@@ -796,8 +796,8 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    - **P2:** A defect materially impairs an important capability or protection, with impact limited by its scope or a workable alternative.
    - **P3:** A defect has limited impact and does not materially impair normal use.
 
-   **State in every brief that the lane is working in its own disposable worktree with dependencies
-   installed, that it checks a finding with a targeted probe rather than running the project's
+   **State in every brief that the lane is working in its own disposable copy of the repository
+   with dependencies installed, that it checks a finding with a targeted probe rather than running the project's
    gate, lint, build or tests, and that the one thing it must not do is modify the code under
    review.** It is expected to RUN things to check its own claims, and to say for each finding
    whether it was verified by execution or by reading. A finding verified by execution outranks
@@ -904,12 +904,13 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
          git -C "$DEST" diff --name-only "$SNAP" | sed "s|^|LEFT BEHIND AND MODIFIED, $DEST: |"
          <tool>/scripts/run review-round teardown <dispatch> <round> <repo> "$LENS:$L" || exit 1
        fi
-       # The security lens reviews from clones, whose origin/HEAD leads back to BASE, which a
+       # Every lens reviews from clones, each a repository of its own, so a
+       # reviewer's git commands cannot move the run's branches. Under the
+       # security lens the clone's origin/HEAD leads back to BASE, which a
        # harness's own security review skill needs (harnesses.md, Own review skills).
-       CLONE=(); [ "$LENS" = security ] && CLONE=(--clone <BASE>)
        # ASSERT the scratch is cut at SNAP before launching a lane into it. The coachman runs
        # the project's recorded checks once on the snapshot; reviewers do not build or run them.
-       <tool>/scripts/run cut-scratch <repo> <synthesis-wt> "$DEST" "$SNAP" "${CLONE[@]}" \
+       <tool>/scripts/run cut-scratch <repo> <synthesis-wt> "$DEST" "$SNAP" --clone <BASE> \
          || echo "SCRATCH BROKEN: $DEST is not cut at $SNAP; fix before launching $L under $LENS"
      done
    done
@@ -921,8 +922,8 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
 
    Then do every open lens's preparation, and launch every reviewer under every open lens in the
    same breath, each through its lens's launch step run by `run host` (`hosts.md`). The command
-   first checks every scratch with `run cut-scratch --check`: at the snapshot, and under the
-   security lens a clone whose `origin/HEAD` leads back to BASE. It launches nothing if one
+   first checks every scratch with `run cut-scratch --check`: at the snapshot, and a clone
+   whose `origin/HEAD` leads back to BASE. It launches nothing if one
    fails; then it starts the round, which clears its markers and fixes its deadline. `run host`
    lands each marker, naming the round, the lens and the lane, when its process exits, whatever
    its exit, and the command ends in the wait for the whole round, given every reviewer the loop
@@ -935,9 +936,8 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    SNAP=$(git -C <synthesis-wt> rev-parse HEAD)
    for LENS in <open lenses>; do
      <tool>/scripts/run reviewers lanes <dispatch>/brief.md "$LENS" >/dev/null || exit 1
-     CLONE=(); [ "$LENS" = security ] && CLONE=(--clone <BASE>)
      for L in $(<tool>/scripts/run reviewers lanes <dispatch>/brief.md "$LENS"); do
-       <tool>/scripts/run cut-scratch --check <repo>/.worktrees/<TICKET>-rev-$LENS-$L "$SNAP" "${CLONE[@]}" \
+       <tool>/scripts/run cut-scratch --check <repo>/.worktrees/<TICKET>-rev-$LENS-$L "$SNAP" --clone <BASE> \
          || { echo "SCRATCH NOT READY: <TICKET>-rev-$LENS-$L; nothing launched"; exit 1; }
      done
    done
