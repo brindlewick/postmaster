@@ -510,3 +510,22 @@ describe("front door fixture routing", () => {
     );
   });
 });
+
+describe("subdirectory targets", () => {
+  test("a subdirectory target reads the repository root's settings", () => {
+    const sub = join(fixture, "sub");
+    mkdirSync(sub, { recursive: true });
+    mkdirSync(join(fixture, ".postmaster"), { recursive: true });
+    writeFileSync(
+      join(fixture, ".postmaster", "settings.toml"),
+      '[team]\npostmaster = { harness = "codex", model = "sub-model" }\n',
+    );
+    const r = run(
+      SCRIPT,
+      ["front-door", "codex", "sub-model", sub, "yes", sub, "--config", config],
+      { env: { ...gitEnv, POSTMASTER_HOST: "none" }, input: "" },
+    );
+    expect(r.code).toBe(0);
+    expect(firstWord(r.out)).toBe("self");
+  }, 10000);
+});
