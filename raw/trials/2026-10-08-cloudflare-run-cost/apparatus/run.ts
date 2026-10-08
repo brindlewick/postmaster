@@ -1,0 +1,116 @@
+// Draw the trial's tables from the lane audit's derived data (see ../method.md). It reads no run's
+// records, so anyone with this repository can run it.
+//
+//   bun run.ts [--runs <runs.json>] [--out <results dir>]
+//
+// Reads the audit's runs.json and writes instance-time.json, instance-time.md and cost.md.
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import type { Extract } from "../../2026-10-03-lane-audit/apparatus/extract.ts";
+import { median } from "../../2026-10-03-lane-audit/apparatus/analyze.ts";
+import { covered, runTime, type RunTime, summarizeRole } from "./instance-time.ts";
+import { perRunTable, rateTable, type Scenario, scenarioTable, timeTable } from "./tables.ts";
+import type { RunUptime } from "./uptime.ts";
+
+const here = dirname(new URL(import.meta.url).pathname);
+const arg = (name: string, fallback: string): string => {
+  const i = process.argv.indexOf(name);
+  return i >= 0 && process.argv[i + 1] ? (process.argv[i + 1] as string) : fallback;
+};
+
+const runsFile = resolve(arg("--runs", join(here, "../../2026-10-03-lane-audit/results/runs.json")));
+const outDir = resolve(arg("--out", join(here, "../results")));
+
+const data = JSON.parse(readFileSync(runsFile, "utf8")) as Extract;
+const real: RunTime[] = covered(data.runs, "real").map(runTime);
+const fixture: RunTime[] = covered(data.runs, "fixture").map(runTime);
+
+const uptimeFile = join(outDir, "coachman-uptime.json");
+const uptime = (JSON.parse(readFileSync(uptimeFile, "utf8")) as { rows: RunUptime[] }).rows;
+const ceilingOf = (ids: string[]): number[] =>
+  real.filter((t) => ids.includes(t.run)).map((t) => t.coachmanUpper);
+const measured = uptime.map((u) => u.run);
+const coachman = {
+  floor: median(uptime.map((u) => u.seconds)) as number,
+  ceiling: median(real.map((t) => t.coachmanUpper)) as number,
+};
+const coachmanLine = `The coachman's process time is not recorded for every launch, so it is bracketed. The floor
+is the sum, over a run's coachman threads, of the last process's uptime from each thread's session
+export: the median of ${uptime.length} runs is ${(coachman.floor / 3600).toFixed(1)} hours, and over the same runs the ceiling
+(every stage a leg can run in, the wait for the user's spec review included) has a median of
+${((median(ceilingOf(measured)) as number) / 3600).toFixed(1)} hours. The cost tables use the floor above and, as the ceiling, the median over all
+${real.length} runs, ${(coachman.ceiling / 3600).toFixed(1)} hours.`;
+
+const SCENARIOS: Scenario[] = [
+  { name: "all standard-2", lanes: "standard-2", reviewers: "standard-2", coachman: "standard-2" },
+  { name: "all standard-3", lanes: "standard-3", reviewers: "standard-3", coachman: "standard-3" },
+  { name: "all standard-4", lanes: "standard-4", reviewers: "standard-4", coachman: "standard-4" },
+  { name: "lanes and reviewers standard-3, coachman standard-4", lanes: "standard-3", reviewers: "standard-3", coachman: "standard-4" },
+];
+
+const instanceTime = `# Container time per role
+
+A launch is one lane, one reviewer, or one coachman leg. Each row is the time such a launch ran, from
+the lane audit's derived data (\`2026-10-03-lane-audit/results/runs.json\`). [method.md](../method.md)
+says what each column means and what it leaves out.
+
+## Real runs (${real.length} that reached synthesis)
+
+${timeTable(real)}
+
+Lanes with no recorded time, left out above: ${real.reduce((a, t) => a + t.lanesUnmeasured, 0)}.
+
+## Fixture runs (${fixture.length} that reached synthesis)
+
+${timeTable(fixture)}
+
+Lanes with no recorded time, left out above: ${fixture.reduce((a, t) => a + t.lanesUnmeasured, 0)}.
+
+## Per run, real
+
+${perRunTable(real)}
+`;
+
+const cost = `# What that time costs on Cloudflare Containers
+
+Rates: [pricing.mdx at cloudflare-docs 6e1b964](https://github.com/cloudflare/cloudflare-docs/blob/6e1b96433cf016efd2c0c9057a7e27a8e112376f/src/content/docs/containers/platform/pricing.mdx),
+read 2026-10-08. Memory and disk are charged for what the instance type provisions, for as long as
+the instance runs; CPU for active use only. The tables bracket CPU use at none, a quarter and all
+vCPUs busy, since the audit holds no CPU measurement.
+
+## One running hour
+
+${rateTable(["lite", "basic", "standard-1", "standard-2", "standard-3", "standard-4"])}
+
+## The median real run's container time
+
+Lanes and reviewers at the median run's seconds from the audit. ${coachmanLine}
+The gates run inside these launches and add nothing of their own. List rates, with no monthly
+allowance taken off. Each cell reads "coachman at its floor to coachman at its ceiling".
+
+${scenarioTable(real, SCENARIOS, coachman)}
+
+## The median fixture run
+
+The audit holds no session uptime for fixture runs, so the coachman is bracketed by zero and the
+median fixture run's stage seconds (${((median(fixture.map((t) => t.coachmanUpper)) as number) / 3600).toFixed(1)} hours).
+
+${scenarioTable(fixture, SCENARIOS, { floor: 0, ceiling: median(fixture.map((t) => t.coachmanUpper)) as number })}
+`;
+
+mkdirSync(outDir, { recursive: true });
+const summary = (times: RunTime[]) => ({
+  runs: times.length,
+  lanes: summarizeRole(times, "lanes"),
+  reviewers: summarizeRole(times, "reviewers"),
+  gatesOnLanes: summarizeRole(times, "gatesOnLanes"),
+  gatesOnSynthesis: summarizeRole(times, "gatesOnSynthesis"),
+  coachmanUpperTotalSeconds: times.reduce((a, t) => a + t.coachmanUpper, 0),
+});
+writeFileSync(
+  join(outDir, "instance-time.json"),
+  `${JSON.stringify({ real: summary(real), fixture: summary(fixture), perRun: real }, null, 2)}\n`,
+);
+writeFileSync(join(outDir, "instance-time.md"), instanceTime);
+writeFileSync(join(outDir, "cost.md"), cost);
+process.stdout.write(`wrote ${outDir}\n`);

@@ -1,12 +1,22 @@
 ---
 title: Log
 type: schema
-updated: 2026-10-05
+updated: 2026-10-08
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-08] query | could the flow run on Cloudflare
+
+Issue #341. Read Cloudflare's documentation for Containers, Sandboxes, Workers, Durable Objects, Workflows, the Agents SDK, R2,
+D1, Queues and AI Gateway at commit 6e1b964, the login and terms pages of seven agent harnesses' vendors, and four price pages;
+captured the passages relied on in ten `raw/articles/` folders, each with a page in `sources/`. Recorded one trial,
+`2026-10-08-cloudflare-run-cost`: the container time and the model bill of the 18 audited real runs, the coachman's process time
+bracketed, the scripts' use of one machine's files and processes, and 18 controls. New concept
+[running the flow on Cloudflare](concepts/running-the-flow-on-cloudflare.md), standing claimed. The lane isolation scan was read from its
+branch, pull request 285 being open. No standing changed.
 
 ## [2026-10-05] query | how the dashboard looks
 

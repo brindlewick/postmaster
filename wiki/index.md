@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-10-05
+updated: 2026-10-08
 ---
 
 # postmaster wiki
@@ -135,9 +135,21 @@ Why the design is shaped as it is.
   patterns alone (#216). The gap is the reason to publish; the library is a later change of its
   own.
 
+## Running the flow elsewhere
+
+What it would take to run the flow on someone else's machines, and what the harness vendors say about it.
+
+- [The flow could run on Cloudflare as a control plane and one container per launch, but not on a Worker, and not yet on
+  subscription logins](concepts/running-the-flow-on-cloudflare.md): **claimed**. A Worker cannot run a lane; a container can, and
+  Cloudflare's tutorials show Claude Code, Codex and Pi in one with the model key held outside it, for API credentials only. No
+  vendor's terms settle a subscription login in a cloud container. A median run's container time is $0.50 to $12; its model
+  tokens at API prices are $16 to $39, 92% of it the Opus security review. A container per lane stops every reach the isolation
+  scan found inside the machine.
+
 ## Sources
 
 [Recorded runs and captured reading](sources/index.md): one run, the review rounds of #36,
-fourteen papers on review, fixes and severity, an article on review before implementation, and
+fourteen papers on review, fixes and severity, an article on review before implementation,
 [pstack](sources/pstack.md), a plugin of skills for verified agent work, read twice and set beside
-what postmaster holds.
+what postmaster holds, and the Cloudflare documentation, the harness vendors' pages and their price pages read for
+running the flow on Cloudflare.

@@ -1,7 +1,7 @@
 ---
 title: Sources
 type: source
-updated: 2026-10-05
+updated: 2026-10-08
 ---
 
 # Sources
@@ -11,6 +11,21 @@ One page per piece of evidence somebody chose to keep: a run promoted from a pro
 captured into `raw/`, saying what it claims and what it would mean here if true. Newest first.
 
 ## Articles
+
+Read on 2026-10-08 for [running the flow on Cloudflare](../concepts/running-the-flow-on-cloudflare.md), newest first:
+
+- [The vendors' price pages](model-api-prices.md): what a million tokens cost on each lane's model.
+- [pi, Grok Build and the Antigravity CLI](other-harnesses-login-and-terms.md): headless logins, endpoints and terms.
+- [Xiaomi on MiMo Code](xiaomi-mimo-code-login-and-terms.md): keys, the Token Plan's "programming tools" clause.
+- [Meta on Muse Code](meta-muse-code-login-and-terms.md): API keys, the subscription credential, the contributor tier.
+- [Anthropic on Claude Code](anthropic-claude-code-login-and-terms.md): the one-year CI token, what third parties may not do with plan credentials.
+- [OpenAI on Codex](openai-codex-login-and-terms.md): one `auth.json` per runner, single-use refresh tokens, the terms.
+- [Cloudflare AI Gateway](cloudflare-ai-gateway.md): how a model key stays outside a sandbox.
+- [Cloudflare Workers, Durable Objects, Workflows, the Agents SDK, R2, D1 and Queues](cloudflare-control-plane.md): what a Worker can and cannot be.
+- [User reports on Cloudflare Containers and Sandboxes](cloudflare-containers-issue-reports.md): what people ran into.
+- [Cloudflare Containers and Sandboxes](cloudflare-containers-sandboxes.md): a microVM per instance, lifetimes, deploys, credential injection.
+
+Earlier reading:
 
 - [pstack](pstack.md) (2026): a plugin of skills and principles for verified agent work, and
   Part 1 of its guide. Postmaster already holds most of it. Read twice, on 2026-10-03 and 2026-10-05: of
