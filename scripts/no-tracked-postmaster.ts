@@ -26,7 +26,11 @@ export function check(root: string): CheckResult {
   const top = run("git", ["-C", root, "rev-parse", "--show-toplevel"]);
   if (top.code !== 0) {
     const detail = top.err.trim() || top.out.trim() || `exit ${top.code}`;
-    return { code: 2, out: "", err: `no-tracked-postmaster: cannot find the repository: ${detail}\n` };
+    return {
+      code: 2,
+      out: "",
+      err: `no-tracked-postmaster: cannot find the repository: ${detail}\n`,
+    };
   }
   const dir = top.out.trim();
   if (dir === "") {
