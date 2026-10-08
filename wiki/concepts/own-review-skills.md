@@ -57,14 +57,14 @@ what each tool's code-review skill needs in order to review a run's change at al
 
 Under the bug lens, only lanes whose harness has a code-review skill review. Each is launched
 through `<tool>/scripts/run launch review <lane> <scratch> <BASE>`, on the same snapshot and in
-its own worktree scratch, at the harness's top level (`max` for claude and codex, `high` for
+its own scratch clone, at the harness's top level (`max` for claude and codex, `high` for
 MiMo Code on MiMo V2.6 Pro). No bug brief is written. A lane whose harness has none does not
 review for bugs; `run setup` names such lanes at setup and warns when none of the chosen bug
 reviewers has one, and a run whose turnpikes include the bug review and whose config gives it
 no such lane is refused at the pre-flight.
 
 **Every form names the change from BASE.** A skill left to choose its own diff cannot be
-trusted in a review scratch, which is a worktree detached at the snapshot with no upstream. In
+trusted in a review scratch, which is a clone detached at the snapshot with no upstream. In
 the trial [`raw/trials/code-review-scope/`](../../raw/trials/code-review-scope/method.md),
 claude 2.1.283's `/code-review` looked at the last commit alone first, at `low` and at
 `medium`, and reached the whole change only because the branch list showed the target's
