@@ -71,11 +71,9 @@ function resolved(
     err.push(msg);
     return { code: 2, out: "", err: `${err.join("\n")}\n` };
   };
-  if (!existsSync(configPath)) {
-    return fail1(`reviewers: no config at ${configPath} (POSTMASTER_CONFIG overrides the path)`);
-  }
   let cfg: Record<string, unknown>;
   if (project !== "") {
+    // With --project the loader decides: a complete project file needs no global config.
     const resolved = effectiveConfigForProject(project, configPath);
     if (resolved.notice !== null) err.push(resolved.notice);
     if (resolved.config === null || resolved.error !== null) {
@@ -84,6 +82,9 @@ function resolved(
     }
     cfg = resolved.config;
   } else {
+    if (!existsSync(configPath)) {
+      return fail1(`reviewers: no config at ${configPath} (POSTMASTER_CONFIG overrides the path)`);
+    }
     try {
       cfg = readTomlFile(configPath);
     } catch (e) {

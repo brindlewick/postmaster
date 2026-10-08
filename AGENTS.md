@@ -245,7 +245,8 @@ Precedence, stated once and followed everywhere: **discovery** supplies defaults
 shared `.postmaster/project.toml`, where one exists, declares what the project requires of
 every run; the person's `.postmaster/settings.toml` overrides `~/.postmaster/config.toml`
 setting by setting for that project, a group merging and a list or single value replaced
-whole; the global config supplies the machine's defaults. None of these sets a floor of
+whole, except `projects_roots`, which always comes from the global config; the global
+config supplies the machine's defaults. None of these sets a floor of
 turnpikes: a ticket names the turnpikes its run passes through (#40), and project settings
 only say what `default` means for that project. The person's file may name models, env
 files and other machine settings; the shared file names no credential and no filesystem

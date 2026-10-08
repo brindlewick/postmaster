@@ -160,17 +160,19 @@ exactly like one that has.
 What a project may declare to everyone who works on it is one file, `.postmaster/project.toml`,
 committed on purpose with `git add -f`: the checks that show a change works, the default
 turnpikes, the tracker binding by name, and the risk surfaces. It names no credential, no
-filesystem path, no machine name and no role assignment. This person's choices on this machine
-— which lanes fill the roles — are in `.postmaster/settings.toml`, which never travels. The
+filesystem path, no machine name and no role assignment. This person's choices for the
+project are in `.postmaster/settings.toml`, written like the global config: they override it
+setting by setting, models and env files included. The file may be committed with `git add -f`
+to share it; a tracked file is used only after the user has accepted it. The
 shapes are `project.example.toml` and `settings.example.toml`. With neither file, the flow
 discovers what it can and the agent conducts the rest in conversation: a missing settings file
 is never an error and never a prompt to create one.
 
 Precedence is stated once and followed everywhere: discovery supplies defaults; the shared
-file declares what the project requires; local settings are this person's choices; the machine
-config supplies what is machine-specific and is never overridden by a project. None of these
-sets a floor of turnpikes: a ticket names the turnpikes its run passes through, and project
-settings only say what `default` means for that project.
+file declares what the project requires; the person's settings override the global config
+setting by setting for that project; the global config supplies the machine's defaults. None
+of these sets a floor of turnpikes: a ticket names the turnpikes its run passes through, and
+project settings only say what `default` means for that project.
 
 ## What it needs
 

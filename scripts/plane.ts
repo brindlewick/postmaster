@@ -1026,6 +1026,7 @@ function loadConfig(): PlaneConfig {
     process.env.POSTMASTER_PROJECT || (toplevel.code === 0 ? toplevel.out.trim() : "");
   let tracker: Record<string, unknown>;
   let binding = "";
+  let source = configPath;
   if (project !== "") {
     const resolved = effectiveConfigForProject(project, configPath);
     if (resolved.notice !== null) console.error(resolved.notice);
@@ -1033,6 +1034,9 @@ function loadConfig(): PlaneConfig {
       dieP(resolved.error ?? "cannot resolve project settings");
     }
     tracker = (resolved.config.tracker ?? {}) as Record<string, unknown>;
+    // The tracker's values came from the effective config: name the project
+    // file that carries them, not the global path, which may not hold them.
+    if (resolved.projectFile !== null) source = resolved.projectFile;
     try {
       const facts = inspect(project, { storePath: acceptanceStorePath(configPath) });
       const bound = (facts.tracker as Record<string, unknown> | undefined)?.binding;
@@ -1056,7 +1060,7 @@ function loadConfig(): PlaneConfig {
   const machineWorkspace = String(tracker.workspace ?? "");
   if (binding !== "" && binding !== machineWorkspace)
     dieP(
-      `the project's Plane workspace binding '${binding}' does not match the machine workspace '${machineWorkspace}' in ${configPath}`,
+      `the project's Plane workspace binding '${binding}' does not match the machine workspace '${machineWorkspace}' in ${source}`,
     );
   if (!process.env.PLANE_API_KEY && existsSync(envFile)) {
     const text = readFileSync(envFile, "utf8");
@@ -1074,7 +1078,7 @@ function loadConfig(): PlaneConfig {
   const WS = String(tracker.workspace ?? "");
   if (!BASE || !WS) {
     dieP(
-      `[tracker] url and workspace are needed in ${configPath} (skills/postmaster/trackers.md, plane)`,
+      `[tracker] url and workspace are needed in ${source} (skills/postmaster/trackers.md, plane)`,
     );
   }
   return { BASE, WS, KEY };

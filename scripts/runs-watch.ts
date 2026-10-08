@@ -566,7 +566,12 @@ export function watchConfig(root: string, configPath: string): WatchConfig {
   if (repo === "") return { poll, capacity };
   const resolved = effectiveConfigForProject(repo, configPath);
   if (resolved.notice !== null) console.error(resolved.notice);
-  if (resolved.config === null || resolved.error !== null) return { poll, capacity };
+  if (resolved.config === null || resolved.error !== null) {
+    // A malformed project file falls back to the global values, but never
+    // silently: say what was dropped, every look, like the notice above.
+    console.error(`runs-watch: ${resolved.error ?? "cannot resolve project settings"}`);
+    return { poll, capacity };
+  }
   return {
     poll: projectPoll(resolved, poll),
     capacity: projectCapacity(resolved, capacity),

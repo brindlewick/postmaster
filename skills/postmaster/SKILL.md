@@ -211,7 +211,8 @@ in the shared file; in the person's file a key itself stays in its env file, nev
 4. **Launch card**: one self-contained confirmation covering whether the postmaster is this
    session or a new one, whether it runs headless (the script's `headless` line), with every
    reason the script printed, the postmaster's harness,
-   model and effort (`team.postmaster` in the config), the team the config names, whether
+   model and effort (`team.postmaster` in the target's effective config), the team the
+   target's effective config names, whether
    lanes will run confined (top-level `confine` in the config; a missing key means `off`;
    recorded but not yet enforced, until launch reads the key in #200), who says
    the merge word for local-merge projects (`ship.merge_authority`), the landing route
@@ -257,14 +258,15 @@ in the shared file; in the person's file a key itself stays in its env file, nev
    ```sh
    <tool>/scripts/run host run "postmaster" "$TARGET_ROOT" --out "$RUNS/postmaster/events.jsonl" \
      --err "$RUNS/postmaster/postmaster.err" --marker "$RUNS/postmaster/.exited" -- \
-     <tool>/scripts/run launch launch postmaster "$TARGET_ROOT" "$RUNS/postmaster/brief.md"
+     <tool>/scripts/run launch launch postmaster "$TARGET_ROOT" "$RUNS/postmaster/brief.md" --project "$TARGET_ROOT"
    ```
 
    That form needs a harness with a resume form (`hosts.md`, none), so the user can answer an
    escalation by resuming it. When the route has a `headless` line and `team.postmaster` names
    a harness with none, run the postmaster on another harness that has one, as `hosts.md` says,
    and never fall back to interactive for a marked fixture. Without a `headless` line, start an
-   interactive session of the postmaster's harness (`team.postmaster` in the config), rooted in
+   interactive session of the postmaster's harness (`team.postmaster` in the target's
+   effective config), rooted in
    the target repo, in the harness's interactive form from `harnesses.md`: its bypass mode, named
    `postmaster`. Hand it a
    one-line prompt file that says to read the brief at `$RUNS/postmaster/brief.md` first:

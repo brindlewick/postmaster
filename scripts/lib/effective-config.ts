@@ -20,6 +20,7 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -29,7 +30,7 @@ import {
   writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { parseTomlText } from "./data.ts";
 import { scriptsDir } from "./paths.ts";
 import { mkstempSync, run } from "./proc.ts";
@@ -683,7 +684,26 @@ const GIT_ENV_KEYS = [
 export const isTracked = (repo: string, file: string): boolean => {
   const env: Record<string, string | undefined> = {};
   for (const k of GIT_ENV_KEYS) env[k] = undefined;
-  return run("git", ["-C", repo, "ls-files", "--error-unmatch", "--", file], { env }).code === 0;
+  const r = run("git", ["-C", repo, "ls-files", "--error-unmatch", "--", file], { env });
+  if (r.code === 0) return true;
+  if (r.code !== 1) return true; // git could not answer: fail closed
+  // Exit 1 is "did not match": untracked only when the file is positively the
+  // person's own. A case-variant of a committed name still opens on a
+  // case-insensitive filesystem while git matches case-sensitively, and a file
+  // inside a submodule is absent from the superproject's index: both read as
+  // tracked, so committed content cannot skip acceptance either way.
+  let names: string[];
+  try {
+    names = readdirSync(dirname(file));
+  } catch {
+    return true;
+  }
+  if (!names.includes(basename(file))) return true;
+  const rel = relative(repo, dirname(file));
+  const sub = run("git", ["-C", repo, "ls-files", "-s", "--", rel === "" ? "." : rel], { env });
+  if (sub.code !== 0) return true;
+  if (pySplitLines(sub.out).some((line) => line.startsWith("160000 "))) return true;
+  return false;
 };
 
 const canonRepo = (repo: string): string => {
@@ -727,6 +747,29 @@ const readStore = (storePath: string): AcceptanceStore => {
 
 const SETTINGS_REL = join(".postmaster", "settings.toml");
 
+/** Write text to dest through a temp file in dir, fsynced and renamed, so a
+ * crash cannot leave a truncation behind. The caller creates dir first. */
+const atomicWriteFileSync = (dir: string, dest: string, text: string): void => {
+  const tmpName = mkstempSync(dir, `.${basename(dest)}.`);
+  try {
+    const fd = openSync(tmpName, "w");
+    try {
+      writeSync(fd, text);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(tmpName, dest);
+  } catch (e) {
+    try {
+      unlinkSync(tmpName);
+    } catch {
+      // The write already failed; a leftover temp file is not the error to report.
+    }
+    throw e;
+  }
+};
+
 const isAccepted = (storePath: string, repo: string, settingsFile: string): boolean => {
   let bytes: Uint8Array;
   try {
@@ -757,13 +800,21 @@ export const recordAcceptance = (repo: string, configPath: string): string => {
   // Accepted content must be usable: validate before recording.
   const local = readToml(settingsFile, "local project settings", false);
   validateCommon(local.data, "local project settings", true);
+  const candidateRoles = Object.hasOwn(local.data, "roles") ? local.data.roles : {};
+  if (isRec(candidateRoles) && Object.keys(candidateRoles).length > 0) {
+    // A [roles] table naming a lane the resolved config does not define would
+    // fail every later read: resolve it now, against the same config the
+    // readers use, and refuse the acceptance instead.
+    const machine = isFile(expandUser(configPath)) ? loadMachine(configPath) : {};
+    effectiveConfig(resolved, machine, { shared: {}, local: local.data });
+  }
   store[key] = {
     file: SETTINGS_REL,
     sha256: sha256Bytes(bytes),
     accepted_at: new Date().toISOString(),
   };
   mkdirSync(dirname(storePath), { recursive: true });
-  writeFileSync(storePath, `${JSON.stringify(store, null, 2)}\n`);
+  atomicWriteFileSync(dirname(storePath), storePath, `${JSON.stringify(store, null, 2)}\n`);
   return `accepted ${settingsFile}`;
 };
 
@@ -1007,7 +1058,9 @@ const failed = (error: string, notice: string | null, globalPath: string): Effec
 // tracked file waiting for acceptance reads as absent, and the notice says so.
 // Readers print the notice to stderr and die on the error with their own prefix.
 export const effectiveConfigForProject = (repo: string, configPath?: string): EffectiveResult => {
-  const globalPath = configPath ?? globalConfigPath();
+  // An explicitly passed path may carry a ~; expand once so the probe below and
+  // the read agree. globalConfigPath already expands; expandUser is idempotent.
+  const globalPath = expandUser(configPath ?? globalConfigPath());
   try {
     const resolved = projectRoot(repo);
     const storePath = acceptanceStorePath(globalPath);
@@ -1123,32 +1176,15 @@ export const writeProfile = (repo: string, layer: string, source: string): void 
   validateCommon(nextLocal, "local project settings", true);
   const nextRoles = Object.hasOwn(nextLocal, "roles") ? nextLocal.roles : {};
   if (isRec(nextRoles) && Object.keys(nextRoles).length > 0) {
+    // Roles resolve against the same config the readers use: the global file
+    // where one exists, the local candidate alone where the project stands alone.
     const configPath = globalConfigPath();
-    if (!isFile(configPath))
-      fail(`local role assignments need the machine config at ${configPath}`);
-    effectiveConfig(repo, loadMachine(configPath), { shared: nextShared, local: nextLocal });
+    const machine = isFile(configPath) ? loadMachine(configPath) : {};
+    effectiveConfig(repo, machine, { shared: nextShared, local: nextLocal });
   }
   mkdirSync(d, { recursive: true });
   ensureIgnore(repo, true);
   if (existsSync(dest) && !isFile(dest)) fail(`${dest} is not a regular file`);
-  const tmpName = mkstempSync(d, `.${name}.`);
-  try {
-    const text = raw.endsWith("\n") ? raw : `${raw}\n`;
-    const fd = openSync(tmpName, "w");
-    try {
-      writeSync(fd, text);
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-    renameSync(tmpName, dest);
-  } catch (e) {
-    try {
-      unlinkSync(tmpName);
-    } catch {
-      // The rename already failed; a leftover temp file is not the error to report.
-    }
-    throw e;
-  }
+  atomicWriteFileSync(d, dest, raw.endsWith("\n") ? raw : `${raw}\n`);
   console.log(`project-settings: wrote ${dest}`);
 };

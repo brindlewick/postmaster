@@ -2,10 +2,10 @@
 #
 # This person's choices for this project, written like ~/.postmaster/config.toml: every
 # setting here overrides the same setting of the global config for this project, a group
-# merging and a list or single value replaced whole. Models, env files and other machine
-# settings may be set here; a key itself stays in its env file, never here. A project
-# whose file is complete needs no global config. This file is an example, not a file to
-# copy whole.
+# merging and a list or single value replaced whole, except projects_roots, which always
+# comes from the global config. Models, env files and other machine settings may be set
+# here; a key itself stays in its env file, never here. A project whose file is complete
+# needs no global config. This file is an example, not a file to copy whole.
 #
 # The folder's own .gitignore covers the whole of .postmaster/, so this file is never
 # committed unless the project chooses to share it, with git add -f. A tracked file is
