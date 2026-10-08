@@ -97,7 +97,8 @@ oracle("an env file that sets FOO hands FOO and SHLVL=1, without the launch name
     `clerk = { harness = "claude", model = "m", env_file = "${lay.fooEnv}" }`,
   );
   const r = runPlain(lay, printForm(lay, cfg, "clerk"));
-  if (r.code !== 0) throw new Error(`form exited ${r.code}\n--- out ---\n${r.out}\n--- err ---\n${r.err}`);
+  if (r.code !== 0)
+    throw new Error(`form exited ${r.code}\n--- out ---\n${r.out}\n--- err ---\n${r.err}`);
   expectEnv(parseProbe(r.out), lay, "1", "bar");
 });
 
@@ -108,7 +109,8 @@ oracle("an env file that sets SHLVL hands it verbatim", (lay) => {
     `clerk = { harness = "claude", model = "m", env_file = "${lay.shlvlEnv}" }`,
   );
   const r = runPlain(lay, printForm(lay, cfg, "clerk"));
-  if (r.code !== 0) throw new Error(`form exited ${r.code}\n--- out ---\n${r.out}\n--- err ---\n${r.err}`);
+  if (r.code !== 0)
+    throw new Error(`form exited ${r.code}\n--- out ---\n${r.out}\n--- err ---\n${r.err}`);
   expectEnv(parseProbe(r.out), lay, "9", "UNSET");
 });
 
@@ -130,7 +132,8 @@ oracle("without an env file the form is the bare harness command", (lay) => {
   expect(form.includes("bash")).toBe(false);
   expect(form.startsWith(`cd ${lay.repo} && claude `)).toBe(true);
   const r = runPlain(lay, `echo PARENT_SHLVL=$SHLVL; ${form}`);
-  if (r.code !== 0) throw new Error(`form exited ${r.code}\n--- out ---\n${r.out}\n--- err ---\n${r.err}`);
+  if (r.code !== 0)
+    throw new Error(`form exited ${r.code}\n--- out ---\n${r.out}\n--- err ---\n${r.err}`);
   const parent = /PARENT_SHLVL=(\S+)/u.exec(r.out);
   if (!parent) throw new Error(`no parent level in:\n${r.out}`);
   // No wrapper, so the harness sees the parent environment verbatim, as today.
