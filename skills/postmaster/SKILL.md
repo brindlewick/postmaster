@@ -1,11 +1,11 @@
 ---
 name: postmaster
-description: 'Start work with postmaster on this machine, from any directory. It is the front door and establishes its own preconditions: it finds the postmaster repo from its own link, if the machine has no ~/.postmaster/config.toml it conducts setup first rather than failing later, and if a session already chose a target it picks up from there instead of asking again. Then it lists the git projects by recency, asks which to dispatch against, verifies that target is a git repository and refuses if it is not, handles an uncommitted tree by offering to commit or stash rather than stopping, discovers the gate command, docs and tracker instead of demanding config, decides whether this session is the postmaster or a new one must be, confirms a launch card, and starts the postmaster — in this conversation when the decision says self, or as a session it spawns — which decomposes a stream into tickets and dispatches one coachman per ticket. A coachman drives one leg of one ticket and its runbook is coachman.md beside this file. The postmaster runs no model lanes and edits no source. Reached by typing /postmaster, or by AGENTS.md sending a session here.'
+description: 'Start work with postmaster on this machine, from any directory. It is the front door: it finds the postmaster repo from its own link, asks which project to work on, postmaster itself or another, listing the git projects by recency, and if a session already chose a target it picks up from there instead of asking again. Then it establishes its own preconditions: if the machine has no ~/.postmaster/config.toml it conducts setup rather than failing later. Then it verifies that target is a git repository and refuses if it is not, handles an uncommitted tree by offering to commit or stash rather than stopping, discovers the gate command, docs and tracker instead of demanding config, decides whether this session is the postmaster or a new one must be, confirms a launch card, and starts the postmaster — in this conversation when the decision says self, or as a session it spawns — which decomposes a stream into tickets and dispatches one coachman per ticket. A coachman drives one leg of one ticket and its runbook is coachman.md beside this file. The postmaster runs no model lanes and edits no source. Reached by typing /postmaster, or by AGENTS.md sending a session here.'
 ---
 
 # /postmaster: start work with postmaster
 
-You get the machine ready if it is not, choose a target, confirm a launch card, and start the
+You choose a target, get the machine ready if it is not, confirm a launch card, and start the
 postmaster. When the decision script says `self`, that is you: carry on in this conversation
 from `postmaster.md` beside this file. When it says `spawn`, start a separate postmaster
 session, hand over, report where to watch it, and stop.
@@ -38,42 +38,16 @@ copied, or its link points somewhere else. `<checkout>/scripts/run link-skills`,
 
 [Why a skill is a link, and the repo is found from it](../../wiki/concepts/skill-links.md)
 
-## Next: establish the preconditions yourself
-
-You are reached two ways, and they arrive in different states. A session opened in this repo
-comes through `AGENTS.md`, which may already have set the machine up and chosen a target.
-Someone typing `/postmaster` arrives cold. **Assume neither. Check.**
-
-```sh
-cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
-<tool>/scripts/run link-skills --check
-```
-
-Report the link check with the config status. It names every missing or blocked link and
-prints the install command, `<tool>/scripts/run link-skills`; the check never installs or
-changes anything. Keep installation on the user's word. When links are missing and the config
-is present, offer that command; for a missing config, follow the setup section of
-`<tool>/AGENTS.md`.
-
-**No config: stop and set the machine up first**, in conversation, per the setup section of
-`<tool>/AGENTS.md`; each path there is relative to `<tool>`. Do not continue to target
-selection: every later step reads the config for the team, the tracker and the merge word,
-and without it the launch card cannot be filled. Come back here when it is written.
-
-**Config present, and this session has already chosen and verified a target:** skip to
-"Work out what the project needs" and do not ask again.
-
-**Config present, no target yet:** carry on below.
-
-Say which of these you found, in one line, before doing anything else — including any
-missing skill links.
-A session that cannot tell whether it is setting up or dispatching is one nobody can follow.
-
 ## Choose the target project
 
-**Ask the user which project to dispatch against, whatever the cwd.** The cwd may be `<tool>`
-itself or any other project, and neither is the target until the user says so. Do the finding
-for them:
+**First ask whether to work on postmaster itself or on another project, before any config
+check.** Postmaster itself is `<tool>`, the checkout this skill runs from: it makes that
+checkout the target. When the session stands in another project — its working directory's
+common git directory (`git rev-parse --git-common-dir`) differs from `<tool>`'s — offer
+that project first, beside postmaster itself and another project. From the postmaster
+checkout itself, nothing is offered ahead of postmaster itself. A project the user has
+already named is not asked for again. Nothing is the target until the user says so.
+Do the finding for them:
 
 ```sh
 <tool>/scripts/run find-projects [root ...]   # most recently worked first; ~/Code unless roots are given
@@ -93,6 +67,35 @@ branch they target. If the project does not say, ask the user before dispatch. A
 itself does not decide the route.
 
 Adjust the search roots to the machine. `~/Code` is one convention, not a rule.
+
+## Then: establish the preconditions yourself
+
+You are reached two ways, and they arrive in different states. A session opened in this repo
+comes through `AGENTS.md`, which may already have chosen a target and set the machine up.
+Someone typing `/postmaster` arrives cold. **Assume neither. Check.** The target is chosen
+above; what remains is the machine:
+
+```sh
+cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
+<tool>/scripts/run link-skills --check
+```
+
+Report the link check with the config status. It names every missing or blocked link and
+prints the install command, `<tool>/scripts/run link-skills`; the check never installs or
+changes anything. Keep installation on the user's word. When links are missing and the config
+is present, offer that command; for a missing config, follow the setup section of
+`<tool>/AGENTS.md`.
+
+**No config: stop and set the machine up**, in conversation, per the setup section of
+`<tool>/AGENTS.md`; each path there is relative to `<tool>`. Every later step reads the
+config for the team, the tracker and the merge word, and without it the launch card cannot
+be filled. Come back here when it is written.
+
+**Config present:** carry on below.
+
+Say which of these you found, in one line, before going on — including any
+missing skill links.
+A session that cannot tell whether it is setting up or dispatching is one nobody can follow.
 
 ## Precondition: verify the chosen target, and fail if it does not hold
 
