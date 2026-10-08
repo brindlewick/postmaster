@@ -62,6 +62,13 @@ function repoOf(path: string): string {
   return r.code === 0 ? r.out.trim() : "";
 }
 
+/** The work-tree top level a path is in, or empty when git cannot say. */
+function topLevel(path: string): string {
+  if (!path) return "";
+  const r = run("git", ["-C", path, "rev-parse", "--show-toplevel"]);
+  return r.code === 0 ? r.out.trim() : "";
+}
+
 /** Whether run fixture marked the target repository in its own git config. */
 function isFixtureCopy(path: string): boolean {
   if (!path) return false;
@@ -138,7 +145,9 @@ function decide(
   let source = cfgPath;
   let notice = "";
   if (target !== "" && isDir(target)) {
-    const resolved = effectiveConfigForProject(target, cfgPath);
+    // Settings live at the repository root, whatever subdirectory names the
+    // target; a path git cannot place keeps its own .postmaster, as before.
+    const resolved = effectiveConfigForProject(topLevel(target) || target, cfgPath);
     if (resolved.notice !== null) notice = `${resolved.notice}\n`;
     if (resolved.config === null || resolved.error !== null) {
       return die1(`${notice}front-door: ${resolved.error ?? "no effective config"}`);
