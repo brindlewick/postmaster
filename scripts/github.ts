@@ -212,26 +212,20 @@ function boardInit(owner: string, name: string, nwo: string, title: string): voi
   console.log(`board created: #${made.number} ${title} ${made.url ?? ""}`);
 }
 
+// The board's Status field and its options by one direct query on the board's node id: gh's
+// own `project field-list` reads every field with its options and costs about 100 points.
 function statusField(b: Board): [string, Record<string, string>] {
-  const fields = ghj<any>([
-    "project",
-    "field-list",
-    String(b.number),
-    "--owner",
-    b.ownerLogin ?? "",
-    "--format",
-    "json",
-  ]);
-  for (const f of fields.fields ?? []) {
-    if (pyLower(f.name ?? "") === "status" && f.options != null) {
-      const opts: Record<string, string> = {};
-      for (const o of f.options) {
-        opts[pyLower((o.name as string).replace(NONWORD_RE, ""))] = o.id;
-      }
-      return [f.id, opts];
-    }
+  const q =
+    "query($id:ID!){node(id:$id){... on ProjectV2{" +
+    'field(name:"Status"){... on ProjectV2SingleSelectField{id options{id name}}}}}}';
+  const data = ghj<any>(["api", "graphql", "-f", `query=${q}`, "-F", `id=${b.id}`]);
+  const f = data?.data?.node?.field;
+  if (!f?.id || !Array.isArray(f.options)) dieGh(`board #${b.number} has no Status field`);
+  const opts: Record<string, string> = {};
+  for (const o of f.options) {
+    opts[pyLower((o.name as string).replace(NONWORD_RE, ""))] = o.id;
   }
-  dieGh(`board #${b.number} has no Status field`);
+  return [f.id as string, opts];
 }
 
 // The issue's own project items, asked for in the query that reads the issue (about one point

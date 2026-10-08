@@ -27,12 +27,14 @@ const TWO_DUP =
   '{"id":"PVT_2","number":2,"title":"dup","closed":false,' +
   '"url":"https://github.com/users/o/projects/2","owner":{"login":"o"}}]}}}}';
 const NO_BOARDS = '{"data": {"repository": {"projectsV2": {"nodes": []}}}}';
+// The answer to the direct query for the board's Status field.
 const FIELDS_JSON =
-  '{"fields": [{"id": "F1", "name": "Status", "options": [{"id": "o1", "name": "Todo"}, ' +
-  '{"id": "o2", "name": "In Progress"}, {"id": "o3", "name": "Done"}]}]}';
+  '{"data": {"node": {"field": {"id": "F1", "options": [{"id": "o1", "name": "Todo"}, ' +
+  '{"id": "o2", "name": "In Progress"}, {"id": "o3", "name": "Done"}]}}}}';
 const NO_TODO_FIELDS =
-  '{"fields": [{"id": "F1", "name": "Status", "options": [{"id": "o1", "name": "Backlog"}, ' +
-  '{"id": "o3", "name": "Done"}]}]}';
+  '{"data": {"node": {"field": {"id": "F1", "options": [{"id": "o1", "name": "Backlog"}, ' +
+  '{"id": "o3", "name": "Done"}]}}}}';
+const NO_STATUS_FIELD = '{"data": {"node": {"field": null}}}';
 const ACCESS_ADMIN = '{"data": {"repository": {"viewerPermission": "ADMIN"}}}';
 const ACCESS_READ = '{"data": {"repository": {"viewerPermission": "READ"}}}';
 const ACCESS_NONE = '{"data": {"repository": null}}';
@@ -63,6 +65,7 @@ case "$1 $2" in
     case $q in
       *projectsV2*) cat "$d/boards.json" ;;
       *viewerPermission*) cat "$d/access.json" ;;
+      *ProjectV2SingleSelectField*) cat "$d/fields.json" ;;
       *"issue(number:"*) if [ -f "$d/issue-$n.json" ]; then cat "$d/issue-$n.json"
                          else echo '{"data": {"repository": {"issue": null}}}'; fi ;;
       *"issues(first:100"*) cat "$d/issues.json" ;;
@@ -85,7 +88,7 @@ case "$1 $2" in
       *) echo "stub gh: unexpected REST call: $*" >&2; exit 1 ;;
     esac ;;
   "project item-list") echo "stub gh: the board must not be listed" >&2; exit 1 ;;
-  "project field-list") cat "$d/fields.json" ;;
+  "project field-list") echo "stub gh: the fields must be asked for directly" >&2; exit 1 ;;
   "project item-add") if [ -f "$d/no-item-add" ]; then \\
     echo "stub gh: item-add refused" >&2; exit 1; fi
                       echo '{"id": "PVTI_new"}' ;;
@@ -501,6 +504,21 @@ describe("create and search", () => {
       expect(r.err.includes("#60 was created, but is not on the board")).toBe(true);
     } finally {
       rmSync(join(S, "no-item-add"), { force: true });
+    }
+  }, 30000);
+
+  test("a board with no Status field is refused before anything is created", () => {
+    plainBoards();
+    writeFileSync(join(S, "creates.log"), "");
+    const origFields = readFileSync(join(S, "fields.json"));
+    writeFileSync(join(S, "fields.json"), `${NO_STATUS_FIELD}\n`);
+    try {
+      const r = ghSh(["create", "A title", join(tmp, "new.md")]);
+      expect(r.code).toBe(1);
+      expect(createsCount()).toBe(0);
+      expect((r.out + r.err).includes("has no Status field")).toBe(true);
+    } finally {
+      writeFileSync(join(S, "fields.json"), origFields);
     }
   }, 30000);
 
