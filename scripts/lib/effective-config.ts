@@ -686,7 +686,15 @@ export const isTracked = (repo: string, file: string): boolean => {
   for (const k of GIT_ENV_KEYS) env[k] = undefined;
   const r = run("git", ["-C", repo, "ls-files", "--error-unmatch", "--", file], { env });
   if (r.code === 0) return true;
-  if (r.code !== 1) return true; // git could not answer: fail closed
+  if (r.code !== 1) {
+    // git could not answer: fail closed, unless the directory is not a
+    // repository at all, where no file can be tracked. --show-toplevel needs
+    // no index, so it still answers when the index is unreadable; when it
+    // fails too, git itself is missing or broken, which also fails closed.
+    const top = run("git", ["-C", repo, "rev-parse", "--show-toplevel"], { env });
+    if (top.code === 0) return true;
+    return run("git", ["--version"], { env }).code !== 0;
+  }
   // Exit 1 is "did not match": untracked only when the file is positively the
   // person's own. A case-variant of a committed name still opens on a
   // case-insensitive filesystem while git matches case-sensitively, and a file
