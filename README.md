@@ -152,9 +152,10 @@ scripts/run fixture new|score|hidden …                              # a run on
 
 A project may carry a `.postmaster/` folder. It holds the project's settings and every run's
 full record — the ledger, the narrative, the cards, each lane's harness events stream and its
-exported durable session — under `runs/`. Nothing in the folder is committed by default; it
-carries its own `.gitignore`, so a checkout never brings another instance's ledgers, paths,
-ticket text, harness sessions or choices. A project that has never been run against looks
+exported durable session — under `runs/`. The runs are never committed: the folder carries
+its own `.gitignore`, so a checkout never brings another instance's ledgers, paths, ticket
+text or harness sessions. The two settings files are the exception: each may be committed on
+purpose with `git add -f` to share it. A project that has never been run against looks
 exactly like one that has.
 
 What a project may declare to everyone who works on it is one file, `.postmaster/project.toml`,
