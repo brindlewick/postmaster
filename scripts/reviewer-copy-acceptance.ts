@@ -137,7 +137,7 @@ export function accept(root: string): AcceptResult {
     const label =
       claim === "reviewer worktree"
         ? "a reviewer works in a worktree"
-        : "a review scratch is a worktree";
+        : "a review scratch remains a worktree";
     stale(coach, COACH, label, claim);
     stale(harness, HARNESS, label, claim);
     stale(hosts, HOSTS, label, claim);
