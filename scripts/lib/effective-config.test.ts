@@ -314,7 +314,7 @@ describe("C2: every step reads the project settings over the global config", () 
     expect(r.out.split("\n")[0]).toBe("reviewers: mimo");
   }, 30000);
 
-  test("plane reads the project tracker", () => {
+  test("plane reads the project tracker", async () => {
     const { repo, config } = scratch();
     const keyFile = join(tmp, `plane-${n}.env`);
     writeFileSync(keyFile, "PLANE_API_KEY=dummy\n");
@@ -331,9 +331,22 @@ describe("C2: every step reads the project settings over the global config", () 
         repo,
         `[tracker]\nkind = "plane"\nurl = "http://127.0.0.1:${server.port}"\nworkspace = "stub-ws"\nenv_file = "${keyFile}"\n`,
       );
-      const r = runCli(["plane", "projects"], envFor(config, { POSTMASTER_PROJECT: repo }));
-      expect(r.code).toBe(0);
-      expect(r.out).toContain("Stub project");
+      // Async spawn: a blocking spawn would stall this process's event loop and
+      // the stub server would never answer.
+      const merged: Record<string, string | undefined> = {
+        ...process.env,
+        ...envFor(config, { POSTMASTER_PROJECT: repo }),
+      };
+      const proc = Bun.spawn([CLI, "plane", "projects"], {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: merged,
+      });
+      const out = await new Response(proc.stdout).text();
+      const err = await new Response(proc.stderr).text();
+      expect(await proc.exited).toBe(0);
+      expect(err).toBe("");
+      expect(out).toContain("Stub project");
     } finally {
       server.stop(true);
     }
