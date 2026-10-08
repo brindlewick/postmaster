@@ -13,12 +13,14 @@
 //   at-terminal  yes when a person is at the terminal, no otherwise
 //
 // POSTMASTER_CONFIG overrides the config path (~/.postmaster/config.toml).
+// team.postmaster is read from the target's effective config: its own settings
+// over the global config, or its own settings alone with no global config.
 //
 //   exit 0  printed `self` or `spawn` with its reasons, and `headless` for a fixture copy
 //   exit 1  no config or one that does not parse, team.postmaster missing, or a bad value
 //   exit 2  usage
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
 import { readTomlFile } from "./lib/data.ts";
 import { run } from "./lib/proc.ts";
 
@@ -35,8 +37,15 @@ for (const k of [
   delete process.env[k];
 }
 
-const CONFIG =
-  process.env.POSTMASTER_CONFIG ?? join(process.env.HOME ?? "", ".postmaster/config.toml");
+const CONFIG = globalConfigPath();
+
+const isDir = (p: string): boolean => {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
 
 function usage(): never {
   console.error(
@@ -123,14 +132,28 @@ function decide(
   if (term !== "yes" && term !== "no") {
     return die1(`front-door: at-terminal is yes or no, not '${term}'`);
   }
-  if (!existsSync(cfgPath)) {
-    return die1(`front-door: no config at ${cfgPath} (POSTMASTER_CONFIG overrides the path)`);
-  }
+  // The target's own settings override the global config; a target that is no
+  // directory reads the global config alone, and the route below fails it closed.
   let cfg: Record<string, unknown>;
-  try {
-    cfg = readTomlFile(cfgPath);
-  } catch (e) {
-    return die1(`front-door: ${cfgPath} does not parse: ${String(e)}`);
+  let source = cfgPath;
+  let notice = "";
+  if (target !== "" && isDir(target)) {
+    const resolved = effectiveConfigForProject(target, cfgPath);
+    if (resolved.notice !== null) notice = `${resolved.notice}\n`;
+    if (resolved.config === null || resolved.error !== null) {
+      return die1(`${notice}front-door: ${resolved.error ?? "no effective config"}`);
+    }
+    cfg = resolved.config;
+    if (resolved.projectAlone && resolved.projectFile !== null) source = resolved.projectFile;
+  } else {
+    if (!existsSync(cfgPath)) {
+      return die1(`front-door: no config at ${cfgPath} (POSTMASTER_CONFIG overrides the path)`);
+    }
+    try {
+      cfg = readTomlFile(cfgPath);
+    } catch (e) {
+      return die1(`front-door: ${cfgPath} does not parse: ${String(e)}`);
+    }
   }
   const team = cfg.team;
   const spec =
@@ -138,19 +161,19 @@ function decide(
       ? (team as Record<string, unknown>).postmaster
       : undefined;
   if (spec === null || typeof spec !== "object" || Array.isArray(spec)) {
-    return die1(`front-door: ${cfgPath} has no team.postmaster with a harness and a model`);
+    return die1(`front-door: ${source} has no team.postmaster with a harness and a model`);
   }
   const s = spec as Record<string, unknown>;
   const harness = s.harness;
   const model = s.model;
   if (!harness || !model) {
-    return die1(`front-door: ${cfgPath} has no team.postmaster with a harness and a model`);
+    return die1(`front-door: ${source} has no team.postmaster with a harness and a model`);
   }
   if (typeof harness !== "string" || typeof model !== "string") {
-    return die1(`front-door: ${cfgPath} team.postmaster harness and model must be strings`);
+    return die1(`front-door: ${source} team.postmaster harness and model must be strings`);
   }
   if (!harness.trim() || !model.trim()) {
-    return die1(`front-door: ${cfgPath} team.postmaster harness and model must not be blank`);
+    return die1(`front-door: ${source} team.postmaster harness and model must not be blank`);
   }
   if (
     [...(harness + model)].some((c) => {
@@ -159,7 +182,7 @@ function decide(
     })
   ) {
     return die1(
-      `front-door: ${cfgPath} team.postmaster harness and model must not contain control characters`,
+      `front-door: ${source} team.postmaster harness and model must not contain control characters`,
     );
   }
   const out = route(
@@ -174,7 +197,7 @@ function decide(
     repoOf(target),
     isFixtureCopy(target),
   );
-  return { code: 0, out, err: "" };
+  return { code: 0, out, err: notice };
 }
 
 function printResult(r: DecideResult): never {

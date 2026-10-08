@@ -63,14 +63,14 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { readTomlFile, tryJsonFile } from "./lib/data.ts";
+import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
 import { startCheck, wrapCommand } from "./lib/confine.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
 import { BOUND_L, BOUND_R, PY_S_CLASS } from "./lib/text.ts";
 import { parseWallReset } from "./lib/wall.ts";
 
-const CONFIG =
-  process.env.POSTMASTER_CONFIG ?? join(process.env.HOME ?? "", ".postmaster/config.toml");
+const CONFIG = globalConfigPath();
 const LEGS = ["synthesis", "review", "ship"] as const;
 
 // The harness top review level, named when the lane's config names no effort. Without a named
@@ -142,23 +142,12 @@ function resolveSpec(
     }
     cfg = c as Record<string, unknown>;
   } else if (project) {
-    try {
-      readTomlFile(sourcePath);
-    } catch (e) {
-      die(`cannot read ${sourcePath}: ${String(e)}`);
+    const resolved = effectiveConfigForProject(project, sourcePath);
+    if (resolved.notice !== null) console.error(resolved.notice);
+    if (resolved.config === null || resolved.error !== null) {
+      die(resolved.error ?? "cannot resolve project settings");
     }
-    const r = run(join(scriptsDir(import.meta), "run"), [
-      "project-settings",
-      "effective",
-      project,
-      sourcePath,
-    ]);
-    if (r.code !== 0) die(r.err.trim() || "cannot resolve project role choices");
-    try {
-      cfg = JSON.parse(r.out);
-    } catch (e) {
-      die(`project settings gave no effective config: ${String(e)}`);
-    }
+    cfg = resolved.config;
   } else {
     try {
       cfg = readTomlFile(sourcePath);
@@ -1359,7 +1348,8 @@ if (import.meta.main) {
     recorded = true;
   } else {
     source = CONFIG;
-    if (!existsSync(source)) {
+    // With --project the loader decides: a complete project file needs no global config.
+    if (!PROJECT && !existsSync(source)) {
       die(`no config at ${CONFIG} (POSTMASTER_CONFIG overrides the path)`);
     }
   }

@@ -92,7 +92,15 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { tryJsonFile, tryTomlFile } from "./lib/data.ts";
+import { tryJsonFile } from "./lib/data.ts";
+import {
+  acceptanceStorePath,
+  effectiveConfigForProject,
+  globalConfigPath,
+  inspect,
+  isDie,
+  sortedJson,
+} from "./lib/effective-config.ts";
 import { runPinned } from "./lib/pinned.ts";
 import { toolRoot } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
@@ -963,22 +971,11 @@ export function teamModeLine(brief: string): string {
 }
 
 type Built =
-  | { ok: true; record: Record<string, unknown>; warnings: string[] }
-  | { ok: false; messages: string[] };
+  | { ok: true; record: Record<string, unknown>; warnings: string[]; notice: string | null }
+  | { ok: false; messages: string[]; notice: string | null };
 
-function parseSettingsJson(text: string, what: string): { value: unknown } | { error: string } {
-  try {
-    return { value: JSON.parse(text) as unknown };
-  } catch (e) {
-    // main reports the Python JSON error; V8's text is the documented approximation.
-    return { error: `${what} gave no JSON: ${(e as Error).message}` };
-  }
-}
-
-// The python heredoc: resolve the effective config and project settings, then build the
-// record. Expected failures report their message; unexpected throws fail bare, the way an
-// uncaught exception (including a bad TOML load, whose value main never uses) fails the
-// heredoc with only the traceback main prints and this port does not.
+// Resolve the effective config and project settings, then build the record. Expected
+// failures report their message; unexpected throws fail bare.
 function buildRecord(
   d: string,
   resolvedRepo: string,
@@ -987,26 +984,30 @@ function buildRecord(
   pinnedCommit: string,
   requestedMode: string | undefined,
 ): Built {
-  if (tryTomlFile(config) === null) return { ok: false, messages: [] };
-  const settingsScript = join(TOOL, "scripts", "run");
-  const inspected = run(settingsScript, ["project-settings", "inspect", resolvedRepo]);
-  if (inspected.code !== 0) {
-    return { ok: false, messages: [pyTrim(inspected.err) || "project settings could not be read"] };
-  }
-  const settings = parseSettingsJson(inspected.out, "project settings");
-  if ("error" in settings) return { ok: false, messages: [settings.error] };
-  const effective = run(settingsScript, ["project-settings", "effective", resolvedRepo, config]);
-  if (effective.code !== 0) {
+  const resolved = effectiveConfigForProject(resolvedRepo, config);
+  if (resolved.config === null || resolved.error !== null) {
     return {
       ok: false,
-      messages: [pyTrim(effective.err) || "effective machine config could not be resolved"],
+      messages: [`run-meta: ${resolved.error ?? "effective config could not be resolved"}`],
+      notice: resolved.notice,
     };
   }
-  const cfg = parseSettingsJson(effective.out, "effective machine config");
-  if ("error" in cfg) return { ok: false, messages: [cfg.error] };
-  const resolvedConfig = cfg.value as Record<string, unknown>;
+  let settings: unknown;
+  try {
+    settings = JSON.parse(
+      sortedJson(inspect(resolvedRepo, { storePath: acceptanceStorePath(config) })),
+    ) as unknown;
+  } catch (e) {
+    if (isDie(e)) {
+      return { ok: false, messages: [`run-meta: ${e.message}`], notice: resolved.notice };
+    }
+    throw e;
+  }
+  // Sorted back through JSON so run.json keeps the key order the printed
+  // project-settings output always had.
+  const resolvedConfig = JSON.parse(sortedJson(resolved.config)) as Record<string, unknown>;
   const mode = resolveRunMode(resolvedConfig, d, requestedMode);
-  if ("error" in mode) return { ok: false, messages: [mode.error] };
+  if ("error" in mode) return { ok: false, messages: [mode.error], notice: resolved.notice };
   const warnings = existsSync(join(resolvedRepo, ".postmaster", "fixture"))
     ? fixtureEfforts(resolvedConfig)
     : [];
@@ -1017,12 +1018,13 @@ function buildRecord(
   return {
     ok: true,
     warnings,
+    notice: resolved.notice,
     record: {
       written: utcStamp(new Date()),
       coachman_contract: 2,
       project: projectName(d),
       run: basename(realpathSync(d)),
-      project_settings: settings.value,
+      project_settings: settings,
       target: {
         head: git(resolvedRepo, "rev-parse", "HEAD"),
         branch: git(resolvedRepo, "symbolic-ref", "--short", "-q", "HEAD"),
@@ -1043,7 +1045,7 @@ function buildRecord(
 }
 
 function readConfig(): string {
-  return process.env.POSTMASTER_CONFIG ?? join(homedir(), ".postmaster/config.toml");
+  return globalConfigPath();
 }
 
 function readTools(): string {
@@ -1061,7 +1063,6 @@ export function meta(d: string, repo: string, requestedMode?: string): Outcome {
   if (git(repo, "rev-parse", "--git-dir") === null) {
     return fail(`run-meta: not a git repo: ${repo}\n`);
   }
-  if (!isFile(config)) return fail(`run-meta: no config at ${config}\n`);
   const resolvedRepo = canon(repo);
   if (resolvedRepo === null) return fail(`run-meta: cannot resolve project ${repo}\n`);
   const runJson = join(d, "run.json");
@@ -1093,10 +1094,10 @@ export function meta(d: string, repo: string, requestedMode?: string): Outcome {
     try {
       built = buildRecord(d, resolvedRepo, config, checkout, commit, requestedMode);
     } catch {
-      built = { ok: false, messages: [] };
+      built = { ok: false, messages: [], notice: null };
     }
     if (!built.ok) {
-      let err = "";
+      let err = built.notice !== null ? `${built.notice}\n` : "";
       for (const m of built.messages) err += `${m}\n`;
       err += `run-meta: could not write ${d}/run.json\n`;
       err += unclaim(tools, commit, dc).err;
@@ -1120,10 +1121,11 @@ export function meta(d: string, repo: string, requestedMode?: string): Outcome {
       return { code: 1, out: "", err };
     }
     const commit12 = (commit === "" ? "?" : commit).slice(0, 12);
+    const warnings = built.warnings.map((warning) => `${warning}\n`).join("");
     return {
       code: 0,
       out: `run-meta: wrote ${runJson} (postmaster ${commit12}, pinned at ${checkout}, mode=${String(built.record.mode)}, mode_source=${String(built.record.mode_source)}, mode_setting=${String(built.record.mode_setting)})\n`,
-      err: built.warnings.map((warning) => `${warning}\n`).join(""),
+      err: built.notice !== null ? `${built.notice}\n${warnings}` : warnings,
     };
   });
   if (!held.locked) return fail(`run-meta: could not lock ${tools}\n`);
