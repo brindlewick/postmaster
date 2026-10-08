@@ -578,6 +578,39 @@ function sourcedLaunch(file: string, cmd: string[], level: string): string[] {
     ...cmd,
   ];
 }
+/** As sourcedLaunch, except the harness replaces the shell: for the
+ * interactive form, whose pane lists the session only when the harness is
+ * the pane's own process. The preamble is sourcedLaunch's verbatim — the
+ * level as $1 with SHLVL unset, the file sourced with the stream saved and
+ * the launch names unset — and only the ending differs: `exec` through
+ * `env`, so the harness keeps the wrapper's pid and foreground group.
+ *
+ * The `env` between them defeats what `exec` does to an exported SHLVL,
+ * pinned on bash 5.2: the shell lowers it by one before it replaces
+ * itself (1 becomes 0, a file-set 9 becomes 8, a non-number or an unset
+ * level becomes 0), so a plain `exec "$@"` hands the harness a level it
+ * never had. The assignment on `env` hands the sourced level back
+ * verbatim, whatever it is, and `-u` keeps an unset level unset; neither
+ * depends on the decrement existing, so macOS bash 3.2 behaves the same.
+ * `env` is resolved before the source, while PATH is intact and no
+ * file-defined function is in scope, and travels as $1: positional, so it
+ * is never exported, and a file that meddles with "$@" breaks this form
+ * exactly as it breaks sourcedLaunch's. `${@:2}` and `env -u` hold on
+ * both shells. An `exit` in the file still exits without launching.
+ *
+ * Headless launches stay on sourcedLaunch and sourcedPrompted: there the
+ * fork reports a signalled harness as status 128+N, which the launcher
+ * and its wall record read, and an exec would deliver the signal itself. */
+function sourcedExec(file: string, cmd: string[], level: string): string[] {
+  return [
+    "-c",
+    'SHLVL=$1; export SHLVL; f=$2; shift 2; set -- "$(command -v env)" "$@"; s=${POSTMASTER_EVENT_STREAM:-}; set -a; . "$f"; set +a; POSTMASTER_EVENT_STREAM=$s; unset POSTMASTER_LAUNCH_NAME POSTMASTER_LAUNCH_ROLE; if [ -n "${SHLVL+set}" ]; then exec "${1:-/usr/bin/env}" "SHLVL=$SHLVL" "${@:2}"; else exec "${1:-/usr/bin/env}" -u SHLVL "${@:2}"; fi',
+    "_",
+    level,
+    file,
+    ...cmd,
+  ];
+}
 /** As sourcedLaunch, for the resume export check. Main runs the check's
  * export as the last command of an `if` in its subshell, which forks: the
  * export sees the subshell's SHLVL, one above the caller's, and a file that
@@ -1600,7 +1633,7 @@ if (import.meta.main) {
       if (RUN) die("interactive form does not take --run");
       const interactive = mkForms("interactive");
       let cmd = interactive.cmd;
-      if (ENV_FILE) cmd = ["bash", ...sourcedLaunch(ENV_FILE, cmd, "1")];
+      if (ENV_FILE) cmd = ["bash", ...sourcedExec(ENV_FILE, cmd, "1")];
       const shown = [`cd ${show(CWD)}&& `, ...cmd.map(show)].join("");
       process.stdout.write(`launch: ${shown.trimEnd()}\n`);
       process.exit(0);
