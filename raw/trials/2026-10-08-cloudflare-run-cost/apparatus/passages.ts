@@ -44,7 +44,7 @@ export function kept(b: Block): string[] {
 export type Options = {
   ids?: RegExp;
   drop?: RegExp;
-  /** ids kept even when they hold no quotation, for a reader's plain summary of what was permitted */
+  /** ids kept whole, every line, even when they hold no quotation, for a reader's plain summary of what was permitted */
   always?: RegExp;
   /** number the entries `<prefix>1`, `<prefix>2`... in front of the reader's own heading, for notes whose ids repeat */
   prefix?: string;
@@ -55,11 +55,12 @@ export function render(bs: readonly Block[], intro: string, opt: Options = {}): 
   let n = 0;
   for (const b of bs) {
     if (opt.ids && !opt.ids.test(b.id)) continue;
-    const lines = kept(b);
+    const always = opt.always?.test(b.id) === true;
+    const lines = always ? b.lines.filter((l) => l.trim() !== "") : kept(b);
     if (lines.length === 0) continue;
     const hasQuote = lines.some((l) => /^- quote[^:]*:\s*"/u.test(l));
     const absent = lines.some((l) => /strength:\s*not found/u.test(l));
-    if (!hasQuote && !absent && !(opt.always && opt.always.test(b.id))) continue;
+    if (!hasQuote && !absent && !always) continue;
     n += 1;
     parts.push((opt.prefix ? `### ${opt.prefix}${n} ${b.id} ${b.title}` : `### ${b.id} ${b.title}`).trim());
     const text = lines.filter((l) => !(opt.drop && opt.drop.test(l)));

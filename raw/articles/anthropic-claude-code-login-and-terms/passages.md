@@ -260,6 +260,9 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - strength: stated (live) and shown (archive). Applies to: Free, Pro, Max (consumer terms); Team, Enterprise, API (commercial terms).
 
 ### ANT38 H4-claude-12 Plain verdict for the Claude side (permit / forbid / not said)
+- permit (stated by Anthropic): `claude -p`, the Agent SDK and third-party apps "still draw from your subscription limits" (help center, paused change); `claude setup-token` + `CLAUDE_CODE_OAUTH_TOKEN` "for CI pipelines and scripts" (authentication page) and as a GitHub Actions secret on Pro, Max, Team, Enterprise (GitHub Actions page); an end user signing in to "the unmodified Claude Code binary with their own Claude subscription, including where a platform hosts Claude Code"; self-hosted environments on Team and Enterprise (public beta); cloud sessions in parallel.
+- forbid (stated by Anthropic): third-party developers offering Claude.ai login or routing requests through Free/Pro/Max credentials on behalf of their users; collecting, storing or intermediating Claude.ai credentials or session tokens; (page dated Nov 12, 2026) services that route requests through consumer subscriptions or misrepresent the client; sharing account credentials with anyone else or making the account available to anyone else; automated or non-human access to the Services unless via API key or explicitly permitted.
+- not said: whether the user's own CI job on a rented cloud machine is "automated or non-human means" under the Consumer Terms or is "otherwise explicitly permit[ted]" by the docs above; whether one person may hold copies of one login on several machines; any cap on concurrent sessions. Nothing read ties a login to a machine, IP or device.
 - strength: argued (summary of the entries above)
 
 ### ANT39 H3-claude-3b Gateway + subscription (second read agrees; verbatim now)
@@ -289,71 +292,79 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - source: https://platform.claude.com/docs/en/about-claude/api-credits-for-subscribers ; https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-and-team-plans ; read 2026-10-08
 - strength: stated
 
-### ANT43 H5-claude-3 The study's model id is on the pricing and models pages
+### ANT43 H4-claude-13 Items upgraded to verbatim by second reads
+- Self-hosted environments overview (two fetches): "Self-hosted environments are in public beta on Team and Enterprise plans and are off by default." ; "Billing: sessions in a self-hosted environment consume your organization's Claude Code usage the same way sessions in Anthropic-hosted environments do." ; "the session authenticates with an Anthropic-issued, session-scoped OAuth token." ; "Environment secret: The single shared credential runners use to authenticate and register with the environment." (the page's table cell) ; "If you want to run Claude Code on your own always-on machine and drive it from other devices, use Remote Control, which is also available on Pro and Max plans."
+- Agent SDK overview (two fetches): "Unless previously approved, Anthropic does not allow third party developers to offer claude.ai login or rate limits for their products, including agents built on the Claude Agent SDK." ; "Use of the Claude Agent SDK is governed by Anthropic's Commercial Terms of Service, including when you use it to power products and services that you make available to your own customers and end users"
+- Cloud sessions page (two fetches): "Cloud sessions are available on Pro, Max, and Team plans, and for Enterprise users with premium seats or Chat + Claude Code seats." ; "It counts toward your plan's usage limits alongside the rest of your Claude and Claude Code usage, and there's no separate charge for the cloud VM." ; "Rate limits: cloud sessions share rate limits with all other Claude and Claude Code usage within your account. Running multiple tasks in parallel consumes more rate limits proportionately." ; "Run tasks in parallel: each `--cloud` command creates its own cloud session that runs independently."
+- Gateway page (two fetches): see H3-claude-3b.
+- sources: https://code.claude.com/docs/en/self-hosted-environments ; https://code.claude.com/docs/en/agent-sdk/overview ; https://code.claude.com/docs/en/claude-code-on-the-web ; read 2026-10-08
+- strength: stated
+
+### ANT44 H5-claude-3 The study's model id is on the pricing and models pages
 - finding: The models overview lists "Claude Opus 5.5" with Claude API ID `claude-opus-5-5`, base price "$4 / input MTok, $20 / output MTok", context window 1M tokens, max output 128K tokens, default effort `medium`, reliable knowledge cutoff Jun 2026, retirement "Not sooner than September 22, 2027". So `claude-opus-5-5` is on the pricing page under the name Claude Opus 5.5 (H5-claude-2 / 2b); no substitute model is needed.
 - quote: "Claude API ID | `claude-fable-5-1` | `claude-opus-5-5` | `claude-sonnet-5-5` | `claude-haiku-5-5`"   (verbatim row, one fetch of https://platform.claude.com/docs/en/about-claude/models/overview, which redirects to /docs/en/models/overview)
 - source: https://platform.claude.com/docs/en/about-claude/models/overview ; no date ; read 2026-10-08
 - strength: stated
 
-### ANT44 H1-claude-10 Hosts Claude Code must reach (egress allowlist) and which are for login
+### ANT45 H1-claude-10 Hosts Claude Code must reach (egress allowlist) and which are for login
 - finding: Anthropic's network page lists `api.anthropic.com` (API), `claude.ai` (claude.ai account authentication), `claude.com` (sign-in page), `platform.claude.com` (Console auth; "OAuth token exchange, refresh, and revocation also go to this host for claude.ai accounts"), `mcp-proxy.anthropic.com` (claude.ai MCP connectors), `downloads.claude.ai` and `storage.googleapis.com` (installer, plugins), `registry.npmjs.org`, and optional telemetry hosts (two Datadog intake hosts). A run authenticated with an API key can drop `claude.ai` and `platform.claude.com` (sandbox-environments page, one fetch).
 - quote: "OAuth token exchange, refresh, and revocation also go to this host for claude.ai accounts, so both Console and claude.ai sign-ins require it"   (verbatim, one fetch of https://code.claude.com/docs/en/network-config, row `platform.claude.com`)
 - quote: "`claude.ai` and `platform.claude.com`, which OAuth sign-in and token refresh require. Runs authenticated with an API key can drop these two."   (verbatim, one fetch of https://code.claude.com/docs/en/sandbox-environments; link markup removed)
 - source: as above ; no dates ; read 2026-10-08
 - strength: stated
 
-### ANT45 H1-claude-6b Bare mode: second read agrees (verbatim now)
+### ANT46 H1-claude-6b Bare mode: second read agrees (verbatim now)
 - quote: "In bare mode, Claude Code never reads OAuth credentials or the system keychain."   (verbatim, two fetches of https://code.claude.com/docs/en/headless)
 - quote: "`--bare` is the recommended mode for scripted and SDK calls, and will become the default for `-p` in a future release."   (verbatim, two fetches)
 - quote: "Set `ANTHROPIC_API_KEY` before running it, because bare mode doesn't use your subscription login:"   (verbatim, two fetches)
 - strength: stated
 
-### ANT46 H4-claude-14 The Usage Policy's 2026-11-12 date: no announcement found
+### ANT47 H4-claude-14 The Usage Policy's 2026-11-12 date: no announcement found
 - finding: Searched for a notice of the version "Effective November 12, 2026": the help-center article on usage-policy updates (dated note "March 16, 2026", one fetch) has 0 hits for "November 12, 2026", "consumer subscriptions", "resale", "proxy"; the news post https://www.anthropic.com/news/usage-policy-update is dated Aug 15, 2025 and says "These changes will take effect on September 15, 2025." (one fetch); one WebSearch found no report of a November 2026 update. So the only source for the November 12 date and the "consumer subscriptions" bullet is the AUP page itself (read twice).
 - source: https://support.claude.com/en/articles/9301722-updates-to-our-acceptable-use-policy-now-usage-policy-consumer-terms-of-service-and-privacy-policy ; https://www.anthropic.com/news/usage-policy-update ; read 2026-10-08
 - strength: not found (announcement). Queries: the two fetches above plus WebSearch "Anthropic Usage Policy update November 12 2026 consumer subscriptions resell proxy Claude" (0 relevant hits).
 
-### ANT47 H1-claude-11 CLI commands for login and token minting
+### ANT48 H1-claude-11 CLI commands for login and token minting
 - finding: `claude auth login` has `--email`, `--sso` and `--console` (API billing instead of a subscription); `claude auth status` prints JSON whose `authMethod` is one of `none`, `claude.ai`, `oauth_token`, `api_key`, `api_key_helper`, `third_party`, and exits 1 when not logged in; `claude setup-token` "Generate a long-lived OAuth token for CI and scripts. Prints the token to the terminal without saving it. Requires a Claude subscription."; `claude self-hosted-runner` registers "this machine or container with a self-hosted environment"; `claude -p ... --environment ccpool_<id>` dispatches a session to a self-hosted environment; `--max-budget-usd`, `--no-session-persistence`, `--exclude-dynamic-system-prompt-sections` ("Improves prompt-cache reuse across different users and machines running the same task") are print-mode flags.
 - quote: "Generate a long-lived OAuth token for CI and scripts. Prints the token to the terminal without saving it. Requires a Claude subscription."   (verbatim, one fetch)
 - quote: "Show authentication status as JSON. Use `--text` for human-readable output. Exits with code 0 if logged in, 1 if not."   (verbatim, one fetch)
 - source: https://code.claude.com/docs/en/cli-reference, table "CLI commands" and "CLI flags" ; no date ; read 2026-10-08
 - strength: stated
 
-### ANT48 H1-claude-4b Credential file field NAMES: only two are visible in public text
+### ANT49 H1-claude-4b Credential file field NAMES: only two are visible in public text
 - finding: Anthropic's docs do not list the fields of `~/.claude/.credentials.json`. The public changelog names two: `scopes` (an array) and `subscriptionType` (shown as "Claude Pro"/"Claude Max"). Other field names are not documented in the sources I read; I did not open any credential file (rules forbid reading `~/.claude`). A changelog entry says a leftover `.credentials.json` on macOS can make sessions show "Not logged in" after a login elsewhere (the macOS Keychain is the primary store, the file a fallback).
 - quote: "Fixed a corrupt `.credentials.json` with a non-array `scopes` value hanging the CLI on startup or silently aborting OAuth token refresh"   (verbatim, CHANGELOG.md line 4921, version 2.1.143)
 - quote: "Fixed `.credentials.json` losing `subscriptionType` (showing \"Claude API\" instead of \"Claude Pro\"/\"Claude Max\") when the profile endpoint transiently fails during token refresh"   (verbatim, CHANGELOG.md line 6668, version 2.1.69)
 - source: https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md (repo head 602df92, 2026-10-08T19:48:16Z) ; read 2026-10-08
 - strength: shown for the two names; not found for the rest (searches: changelog grep for "claudeAiOauth|expiresAt|accessToken|refreshToken|subscriptionType|rateLimitTier|.credentials.json": 4 hits, 2 field names; authentication page read twice: 0 field names)
 
-### ANT49 H1-claude-12 Workload Identity Federation: a keyless CI route to the API (not a subscription route)
+### ANT50 H1-claude-12 Workload Identity Federation: a keyless CI route to the API (not a subscription route)
 - finding: Anthropic documents federation with "any standards-compliant OIDC issuer such as GitHub Actions, Kubernetes, SPIFFE, Microsoft Entra ID, or Okta": a workload presents a signed JWT, Anthropic returns a short-lived `sk-ant-oat01-...` access token bound to a Console service account; default token lifetime 3,600 seconds (rule setting 60 to 86,400); the SDK refreshes at expiry minus 120 s (advisory) and minus 30 s (mandatory); identity tokens carrying a `jti` are single-use by default. Claude Code reads `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_IDENTITY_TOKEN_FILE`. The page's examples use model `claude-opus-5-5`. Billing is the organization's API billing; subscription limits do not apply.
 - quote: "any standards-compliant OIDC issuer such as GitHub Actions, Kubernetes, SPIFFE, Microsoft Entra ID, or Okta"   (verbatim, one fetch of https://platform.claude.com/docs/en/manage-claude/workload-identity-federation)
 - quote: "returns a short-lived `sk-ant-oat01-...` token that acts on behalf of the rule's target service account"   (verbatim, same page)
 - source: https://platform.claude.com/docs/en/manage-claude/workload-identity-federation ; no date ; read 2026-10-08
 - strength: stated
 
-### ANT50 H4-claude-5b Anthropic login help article: use the same account on several devices; no device cap stated
+### ANT51 H4-claude-5b Anthropic login help article: use the same account on several devices; no device cap stated
 - finding: Anthropic's "Log in to your Claude account" article (page date "May 19, 2026") says how to use one account across devices; one fetch of it found no sentence on a device or simultaneous-session limit, and WebSearch found none in the support centre; the Cowork article (a different product) says "Shared logins aren't supported" (search-tool summary).
 - quote: "To use your Claude account across multiple devices, enter the same email address you use to log in on your usual device."   (verbatim, one fetch of https://support.claude.com/en/articles/13189465-logging-in-to-your-claude-account)
 - source: that article ; read 2026-10-08
 - strength: stated (the sentence); not found (a cap). Searches: WebFetch of the article ("device or simultaneous session limits": NOT PRESENT); WebSearch "Claude account use on multiple devices at the same time sessions limit": 0 hits describing a cap.
 
-### ANT51 H3-claude-7 Vendor-recommended credential-injecting proxy via ANTHROPIC_BASE_URL (API-key route)
+### ANT52 H3-claude-7 Vendor-recommended credential-injecting proxy via ANTHROPIC_BASE_URL (API-key route)
 - finding: Anthropic's "Securely deploying AI agents" page recommends running "a proxy outside the agent's security boundary that injects credentials into outgoing requests"; for Claude Code and the Agent SDK it names `ANTHROPIC_BASE_URL` ("simple but only for sampling API requests") and `HTTP_PROXY`/`HTTPS_PROXY`; the proxy "receives plaintext HTTP requests, can inspect and modify them (including injecting credentials)". It lists Envoy (`credential_injector`), mitmproxy, Squid and LiteLLM as proxies. The "Hosting the Agent SDK" page says the same for the Anthropic API: "the subprocess reads `ANTHROPIC_API_KEY` from its environment. Supply it from your secret manager, or set `ANTHROPIC_BASE_URL` to route model calls through a proxy that injects the key outside the container." Neither page mentions Cloudflare or subscription (claude.ai) login for hosted agents; both are about API keys.
 - quote: "The recommended approach is to run a proxy outside the agent's security boundary that injects credentials into outgoing requests."   (verbatim, one fetch of the Claude Code docs page agent-sdk/secure-deployment, section "The proxy pattern")
 - quote: "Supply it from your secret manager, or set `ANTHROPIC_BASE_URL` to route model calls through a proxy that injects the key outside the container."   (verbatim, one fetch of the page agent-sdk/hosting, section "Auth and secrets")
 - source: https://code.claude.com/docs/en/agent-sdk/secure-deployment ; https://code.claude.com/docs/en/agent-sdk/hosting ; no dates ; read 2026-10-08 (Cloudflare: 0 mentions on both; checked by reading the full text the tool returned)
 - strength: stated
 
-### ANT52 H1-claude-13 Hosting guide: per-agent container sizing, network, ephemeral pattern
+### ANT53 H1-claude-13 Hosting guide: per-agent container sizing, network, ephemeral pattern
 - finding: "The Agent SDK spawns and supervises a `claude` CLI subprocess"; starting point "1 GiB RAM, 5 GiB disk, and 1 CPU per agent"; needs outbound HTTPS to `api.anthropic.com` (or the Bedrock/Agent Platform endpoint); the ephemeral pattern creates "a container for each user task" that reads the task from `TASK_PROMPT`, calls the SDK and exits; sessions on local disk are lost with the container unless a `SessionStore` is used; the cookbook has deployable code for local Docker, Modal and Kubernetes. Authentication in these pages is `ANTHROPIC_API_KEY` or a proxy.
 - quote: "1 GiB RAM, 5 GiB disk, and 1 CPU per agent is a reasonable starting point for a freshly started instance."   (verbatim, one fetch of https://code.claude.com/docs/en/agent-sdk/hosting, section "Resources")
 - source: https://code.claude.com/docs/en/agent-sdk/hosting ; read 2026-10-08
 - strength: stated
 
-### ANT53 H6-claude-6 Hosting guide admits parallel fan-out can hit rate limits
+### ANT54 H6-claude-6 Hosting guide admits parallel fan-out can hit rate limits
 - finding: In its known-limitations table the hosting guide says "Large parallel-subagent fanouts can hit rate limits" and advises breaking work into smaller batches (this is about API/Agent SDK usage; it does not say which credential).
 - quote: "Large parallel-subagent fanouts can hit rate limits"   (verbatim fragment, one fetch)
 - source: https://code.claude.com/docs/en/agent-sdk/hosting, section "Known limitations" ; read 2026-10-08

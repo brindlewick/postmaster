@@ -38,3 +38,9 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - quote: "AI Gateway's core features available today are offered for free" (verbatim, partial)
 - source: docs/ai-gateway/reference/pricing.mdx:13 ; integrations/coding-agents/index.mdx:23, 41-47
 - strength: stated
+
+### B21 AI Gateway, Agents, Sandbox and Containers documentation: no subscription login shown
+- finding: a search of the documentation source for a Claude or ChatGPT subscription login, an OAuth sign-in of a coding agent, or a plan name found nothing that shows one; the two files that matched are incidental (a download link in the Claude Desktop setup page, and a description of MCP hosts)
+- quote: n/a
+- source: grep -r -i -E "claude (pro|max)|max plan|pro plan|chatgpt (plus|pro)|subscription login|sign in with chatgpt|claude\.ai|chatgpt\.com|codex login|claude login" over docs/ai-gateway (1 file), docs/agents (1 file), docs/sandbox (0), docs/containers (0), docs/workers/platform (0) and partials (0) @6e1b964 ; docs/ai-gateway/integrations/coding-agents/claude-desktop.mdx:13 and docs/agents/model-context-protocol/index.mdx:21 are the two hits ; run 2026-10-08
+- strength: not found

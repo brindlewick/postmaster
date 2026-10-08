@@ -265,7 +265,10 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - source: https://openai.com/policies/usage-policies/ as captured in OpenTermsArchive/genai-contrib-versions ChatGPT/Acceptable Use Policy.md ; read 2026-10-08
 - strength: shown (third-party archive copy)
 
-### OAI36 H4-codex-8 Plain verdict for the Codex side (what the documents I read permit, forbid, or leave unsaid)
+### OAI36 H4-codex-8 Plain verdict for the Codex side (what the documents read permit, forbid, or leave unsaid)
+- permit (stated by OpenAI): copying one's own `auth.json` to one's own headless machine (docs/auth); running a ChatGPT-managed login on a trusted private CI runner as an advanced option, with one auth.json per runner (docs/auth/ci-cd-auth); Codex access tokens and service accounts for non-interactive automation on Business/Enterprise workspaces; API keys for any automation; SIWC preview for open-source apps incl. on a remote VM.
+- discourage/forbid (stated by OpenAI): sharing one auth.json across concurrent jobs or machines; use of the ChatGPT-managed CI workflow for public or open-source repositories; exposing access tokens on public CI or forked pull requests; the consumer Terms bar sharing credentials with, or making the account available to, anyone else; the Services Agreement bars sharing login credentials between multiple users.
+- not said in any document I could read: whether a Plus/Pro login may run in a vendor-neutral cloud container; whether one person's login may be used from several machines at once; whether `codex exec` counts as "automatically or programmatically extracting data or Output"; a cap on simultaneous sessions.
 - strength: argued (summary of the entries above)
 
 ### OAI37 H3-codex-6 OpenAI ships a credential-injecting proxy for the API-key route (`codex-responses-api-proxy`)

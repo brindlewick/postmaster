@@ -69,6 +69,7 @@ describe("render", () => {
   test("an always pattern keeps a named entry that holds no quotation", () => {
     const kept = render(blocks(notes), "# P", { always: /^A1\.9$/u });
     expect(kept).toContain("### A1.9 A mere comment");
+    expect(kept).toContain("- finding: nothing quoted here");
     expect(render(blocks(notes), "# P")).not.toContain("### A1.9");
   });
 

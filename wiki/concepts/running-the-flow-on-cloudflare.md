@@ -10,7 +10,7 @@ updated: 2026-10-08
 
 **Claim.** The flow could run on Cloudflare with Workers, Durable Objects and Workflows as the control plane and one
 container for each lane, reviewer and coachman leg. A Worker alone cannot run a lane. Cloudflare's own tutorials run
-Claude Code, Codex and Pi headless in a container with the model key held in the Worker, and that pattern covers API
+Claude Code, Codex and Pi headless in a container with the model key held in the Worker, and they show that for API
 credentials only. Whether a subscription login may be used from a cloud container is not settled by any vendor's
 words. Container time is the small part of the cost. The large part is the model bill at pay-per-token prices, and 92% of
 that is the Opus security review. [Issue #341](https://github.com/brindlewick/postmaster/issues/341), "Research: could postmaster's
@@ -32,9 +32,9 @@ standing.
    The largest is 4 vCPU, 12 GiB and 20 GB [@articles/cloudflare-containers-sandboxes/passages.md] (A6.2, A3.1).
    Cloudflare publishes a runnable tutorial for Claude Code, Codex, Pi and OpenCode (A7). Three of those are among
    the flow's seven harnesses.
-3. **The credential stays outside the sandbox only for API credentials.** The sandbox holds a placeholder; the Worker adds the
-   real key, through AI Gateway credits or a stored provider key. No Cloudflare page shows a subscription login
-   [@articles/cloudflare-containers-sandboxes/passages.md] (A7.6) [@articles/cloudflare-ai-gateway/passages.md] (B12, B13).
+3. **Cloudflare shows the model key staying outside the sandbox for API credentials only.** The sandbox holds a placeholder;
+   the Worker adds the real key, through AI Gateway credits or a stored provider key. No Cloudflare page shows a subscription login
+   [@articles/cloudflare-containers-sandboxes/passages.md] (A7.6) [@articles/cloudflare-ai-gateway/passages.md] (B12, B13, B21; a search of the AI Gateway, Agents, Sandbox and Containers documentation for a subscription login found none).
 4. **The vendors' words leave a subscription login open.** OpenAI says "The right way to authenticate automation is
    with an API key", documents a ChatGPT login on a trusted private runner as an advanced option, and says not to share
    one `auth.json` across concurrent jobs or machines. Anthropic documents a one-year token for CI and bars third-party
@@ -242,7 +242,8 @@ Whatever the lane writes there is its own word.
 
 A local route to most of this exists without Cloudflare. [#203, Cut each lane as a shared clone of the repository, so it cannot
 read another lane's commits](https://github.com/brindlewick/postmaster/issues/203) and [#221, Run every lane with only the
-files, hosts and sockets it needs, on Linux and macOS](https://github.com/brindlewick/postmaster/issues/221) are filed, and
+files, hosts and sockets it needs, on Linux and macOS](https://github.com/brindlewick/postmaster/issues/221) are filed, as is
+[#342, Every reviewer works in its own copy of the repository](https://github.com/brindlewick/postmaster/issues/342), and
 [the confinement page](lane-confinement.md) records that a sandbox around the harness stopped every reach in its trial. A
 virtual machine per lane on any provider gives the same isolation properties; nothing in this section is special to Cloudflare.
 
@@ -356,7 +357,7 @@ None is filed. Titles are in the form the repository uses.
    with a price: 92% of the model dollars at list price.
 5. **The gate is timed on a machine with 4 vCPU and nothing else running.** Any cloud machine will do. It separates the
    gate's own time from the machine's load, which is half of the reason for this research.
-6. **Not new: finish #203 and #221 first.** They give most of the isolation locally and are filed.
+6. **Not new: finish #203, #221 and #342 first.** They give most of the isolation locally and are filed.
 
 Not a ticket: ask Anthropic and OpenAI, in writing, whether a person's own subscription login may be held by their
 own Worker and used from their own containers. Only the user can ask.
