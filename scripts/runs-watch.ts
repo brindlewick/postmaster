@@ -43,8 +43,9 @@
 // INSPECT (a stall, or an attempt without its record), and any step the watcher could not
 // complete. USER (already put to the user), WAIT (a leg at work) and - (closed) never do.
 //
-// It looks at once, then every postmaster.poll_seconds (default 120) from the config
-// (POSTMASTER_CONFIG overrides the path). A run listed in <runs>/postmaster/held, one ticket
+// It looks at once, then every postmaster.poll_seconds (default 120) from the watched
+// project's effective config (POSTMASTER_CONFIG overrides the path). A run listed in
+// <runs>/postmaster/held, one ticket
 // per line, is never touched: hold a run by writing its ticket there exactly as the RUN column
 // shows it, and release it by removing the line. A held line that matches no run warns on
 // stderr. The held list and the config are read on every look, and the held list is re-read
@@ -91,6 +92,11 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { tryJsonFile, tryTomlFile } from "./lib/data.ts";
+import {
+  type EffectiveResult,
+  effectiveConfigForProject,
+  globalConfigPath,
+} from "./lib/effective-config.ts";
 import { beside, scriptsDir } from "./lib/paths.ts";
 import { pinnedCommand, runPinned } from "./lib/pinned.ts";
 import { die, run } from "./lib/proc.ts";
@@ -492,6 +498,79 @@ function pollSeconds(configPath: string): number {
     );
   }
   return ps;
+}
+
+// --- the watched project's interval and capacity --------------------------------------------------
+/** The git repository a watched root is in, or empty when it is in none. */
+function rootRepo(root: string): string {
+  const r = run("git", ["-C", root, "rev-parse", "--show-toplevel"], {
+    env: {
+      GIT_DIR: undefined,
+      GIT_WORK_TREE: undefined,
+      GIT_COMMON_DIR: undefined,
+      GIT_INDEX_FILE: undefined,
+      GIT_OBJECT_DIRECTORY: undefined,
+      GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined,
+      GIT_NAMESPACE: undefined,
+    },
+  });
+  return r.code === 0 ? r.out.trim() : "";
+}
+
+/** The project's own poll interval over the global one, or the global one. */
+function projectPoll(resolved: EffectiveResult, fallback: number): number {
+  const pm = resolved.local.postmaster;
+  const value = isPlainTable(pm) && "poll_seconds" in pm ? pm.poll_seconds : undefined;
+  if (value === undefined) return fallback;
+  const file = resolved.projectFile ?? "project settings";
+  if (typeof value !== "number") {
+    console.error(
+      `runs-watch: ${file} postmaster.poll_seconds is ${pyRepr(value)}, not a whole number of seconds from 1 to 999999999; the poll interval is ${fallback}s`,
+    );
+    return fallback;
+  }
+  if (!Number.isInteger(value)) {
+    console.error(
+      `runs-watch: ${file} postmaster.poll_seconds is ${pyFloatRepr(value)}, not a whole number of seconds from 1 to 999999999; the poll interval is ${fallback}s`,
+    );
+    return fallback;
+  }
+  if (value < 1 || value > 999999999) {
+    console.error(
+      `runs-watch: ${file} postmaster.poll_seconds is ${String(value)}, not a whole number of seconds from 1 to 999999999; the poll interval is ${fallback}s`,
+    );
+    return fallback;
+  }
+  return value;
+}
+
+/** The project's own run capacity over the global one, or the global one. */
+function projectCapacity(resolved: EffectiveResult, fallback: number): number {
+  const team = resolved.local.team;
+  const value = isPlainTable(team) ? Number(team.max_runs) : NaN;
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
+export interface WatchConfig {
+  poll: number;
+  capacity: number;
+}
+
+/** The poll interval and run capacity for a watched root: the project's effective
+ * values over the global ones, read fresh on every look. A root outside any
+ * repository reads the global config alone. */
+export function watchConfig(root: string, configPath: string): WatchConfig {
+  const poll = pollSeconds(configPath);
+  const capacity = runCapacity(configPath);
+  const repo = rootRepo(root);
+  if (repo === "") return { poll, capacity };
+  const resolved = effectiveConfigForProject(repo, configPath);
+  if (resolved.notice !== null) console.error(resolved.notice);
+  if (resolved.config === null || resolved.error !== null) return { poll, capacity };
+  return {
+    poll: projectPoll(resolved, poll),
+    capacity: projectCapacity(resolved, capacity),
+  };
 }
 
 // --- the held list ----------------------------------------------------------------------------
@@ -1564,7 +1643,8 @@ function watch(root: string, config: string, timeout: number | null): never {
   const statusSh = beside(import.meta, "run");
   let left = timeout ?? 0;
   for (;;) {
-    const poll = pollSeconds(config);
+    const seen = watchConfig(root, config);
+    const poll = seen.poll;
     const held = readHeld(pm);
     let r = run(statusSh, ["runs-status", root]);
     if (r.code !== 0) {
@@ -1585,7 +1665,7 @@ function watch(root: string, config: string, timeout: number | null): never {
     const ready = pendingReadyTickets(root);
     // Name no more tickets than free slots: the postmaster dispatches each
     // name it wakes to, and the ceiling is checked here, not there.
-    const room = Math.max(runCapacity(config) - activeRunCount(root), 0);
+    const room = Math.max(seen.capacity - activeRunCount(root), 0);
     const readyNeeds = ready.slice(0, room).map((id) => `needs READY ${id}`);
     if (steps.needs.length > 0 || readyNeeds.length > 0) {
       process.stdout.write(`${table}\n${[...steps.needs, ...readyNeeds].join("\n")}\n`);
@@ -1668,11 +1748,5 @@ if (import.meta.main) {
     // so the message names no root.
     die("runs-watch: no such root: ", 1);
   }
-  const pc = process.env.POSTMASTER_CONFIG;
-  const home = process.env.HOME;
-  const config =
-    pc !== undefined && pc !== ""
-      ? pc
-      : `${home !== undefined && home !== "" ? home : ""}/.postmaster/config.toml`;
-  watch(root, config, timeout);
+  watch(root, globalConfigPath(), timeout);
 }
