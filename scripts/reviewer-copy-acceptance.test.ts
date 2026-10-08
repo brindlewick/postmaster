@@ -1,13 +1,14 @@
-// Acceptance tests for #342: every reviewer works in its own copy of the repository.
-// The runbook is the artifact under test: its review cut and pre-launch check must
-// pass --clone for every lens, and its prose must call the reviewer folders clones.
-// The C1 folder checks cut those folders on a scratch repository in the runbook's
-// cut shape and remove them with review-round teardown. Order-dependent, as in
-// cut-scratch.test.ts: cut, then properties, then teardown.
+// Tests beside scripts/reviewer-copy-acceptance.ts: the oracle's stale and presence
+// checks over planted trees, plus the C1 mechanism checks from #342's acceptance:
+// the runbook's cut shape on a scratch repository and teardown's removal.
+// Each fault control builds its own copy of the clean tree, so tests pass alone and
+// in order; the live-tree check reads the tool root. The C1 checks are
+// order-dependent: cut, then properties, then teardown.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -18,11 +19,380 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { accept } from "./reviewer-copy-acceptance";
+import { toolRoot } from "./lib/paths";
 
 const cli = join(import.meta.dir, "run");
-const coachmanPath = join(import.meta.dir, "..", "skills", "postmaster", "coachman.md");
-const harnessesPath = join(import.meta.dir, "..", "skills", "postmaster", "harnesses.md");
-const hostsPath = join(import.meta.dir, "..", "skills", "postmaster", "hosts.md");
+const ROOT = toolRoot(import.meta);
+const COACH = "skills/postmaster/coachman.md";
+const HARNESS = "skills/postmaster/harnesses.md";
+const HOSTS = "skills/postmaster/hosts.md";
+const WIKI = "wiki/concepts/own-review-skills.md";
+
+const PIN_CUT = 'cut-scratch <repo> <synthesis-wt> "$DEST" "$SNAP" --clone <BASE>';
+const PIN_CHECK =
+  'cut-scratch --check <repo>/.worktrees/<TICKET>-rev-$LENS-$L "$SNAP" --clone <BASE>';
+const PIN_TABLE = "a clone of the repository under every lens";
+const PIN_BRIEF = "its own disposable copy of the repository";
+const PIN_EVERY = "Every lens reviews from clones";
+const PIN_PROSE = "and a clone whose `origin/HEAD` leads back to BASE";
+const PIN_SCRATCH_CLONE = "which is a clone detached at the snapshot";
+const PIN_HOSTS = "That includes reviewer scratches: a clone is never opened as a separate";
+const PIN_WIKI_BUG = "its own scratch clone";
+
+let otmp = "";
+let oclean = "";
+let ostale = "";
+
+function strip(out: string): string {
+  return out.replace(/\n+$/u, "");
+}
+
+function plantClean(dir: string): void {
+  mkdirSync(join(dir, "skills/postmaster"), { recursive: true });
+  mkdirSync(join(dir, "wiki/concepts"), { recursive: true });
+  writeFileSync(
+    join(dir, COACH),
+    "| <repo>/.worktrees/<TICKET>-rev-<lens>-<lane> | reviewer scratch, " +
+      `${PIN_TABLE} |\n` +
+      "State in every brief that the lane is working in " +
+      `${PIN_BRIEF} with dependencies installed.\n` +
+      `${PIN_EVERY}, each a repository of its own.\n` +
+      `The command first checks every scratch: at the snapshot, ${PIN_PROSE}.\n` +
+      `Run ${PIN_CUT} to cut it.\n` +
+      `Run ${PIN_CHECK} before launching.\n`,
+  );
+  writeFileSync(
+    join(dir, HARNESS),
+    "A skill left to choose its own diff cannot be trusted in a review scratch, " +
+      `${PIN_SCRATCH_CLONE} with no upstream.\n`,
+  );
+  writeFileSync(join(dir, HOSTS), `${PIN_HOSTS} workspace.\n`);
+  writeFileSync(
+    join(dir, WIKI),
+    "A skill left to choose its own diff cannot be trusted in a review scratch, " +
+      `${PIN_SCRATCH_CLONE} with no upstream. ` +
+      `Each is launched in ${PIN_WIKI_BUG}.\n`,
+  );
+}
+
+function plantStale(dir: string): void {
+  cpSync(oclean, dir, { recursive: true });
+  writeFileSync(
+    join(dir, COACH),
+    'CLONE=(); [ "$LENS" = security ] && CLONE=(--clone <BASE>)\n' +
+      'cut "$DEST" "$SNAP" "${CLONE[@]}"\n' +
+      "a clone under the security lens, a worktree under the others\n" +
+      "working in its own disposable worktree with dependencies\n" +
+      "The security lens reviews from clones, whose origin/HEAD leads back\n" +
+      "at the snapshot, and under the security lens a clone whose origin/HEAD leads back\n",
+    { flag: "a" },
+  );
+  writeFileSync(
+    join(dir, HARNESS),
+    "cannot be trusted in a review scratch, which is a worktree detached at the snapshot.\n",
+    { flag: "a" },
+  );
+  writeFileSync(
+    join(dir, HOSTS),
+    "That includes reviewer worktrees and security-review clones: never a workspace.\n",
+    { flag: "a" },
+  );
+  writeFileSync(
+    join(dir, WIKI),
+    "cannot be trusted in a review scratch, which is a worktree detached at the snapshot.\n" +
+      "Each is launched in its own worktree scratch, at the top level.\n",
+    { flag: "a" },
+  );
+}
+
+function plantFault(dir: string, file: string, fault: string): string {
+  const one = join(otmp, dir);
+  rmSync(one, { recursive: true, force: true });
+  cpSync(oclean, one, { recursive: true });
+  writeFileSync(join(one, file), `${fault}\n`, { flag: "a" });
+  return one;
+}
+
+function dropPin(dir: string, file: string, pin: string): string {
+  const one = join(otmp, dir);
+  rmSync(one, { recursive: true, force: true });
+  cpSync(oclean, one, { recursive: true });
+  const p = join(one, file);
+  writeFileSync(p, readFileSync(p, "utf8").replace(pin, "REWORDED"));
+  return one;
+}
+
+beforeAll(() => {
+  otmp = mkdtempSync(join(tmpdir(), "reviewer-copy-acceptance-"));
+  oclean = join(otmp, "clean");
+  plantClean(oclean);
+  ostale = join(otmp, "stale");
+  plantStale(ostale);
+});
+
+afterAll(() => {
+  rmSync(otmp, { recursive: true, force: true });
+});
+
+describe("each stale check fires on its own fault alone", () => {
+  test("coach conditional", () => {
+    const one = plantFault(
+      "one",
+      COACH,
+      'CLONE=(); [ "$LENS" = security ] && CLONE=(--clone <BASE>)',
+    );
+    const r = accept(one);
+    expect(r.code).toBe(1);
+    expect(strip(r.out)).toBe(
+      `${COACH}: still says the clone flag is conditional on the security lens`,
+    );
+  }, 30000);
+
+  test("coach clone array", () => {
+    const one = plantFault("one", COACH, 'cut "$DEST" "$SNAP" "${CLONE[@]}"');
+    const r = accept(one);
+    expect(r.code).toBe(1);
+    expect(strip(r.out)).toBe(
+      `${COACH}: still says the scratch is cut through a conditional clone flag`,
+    );
+  }, 30000);
+
+  test("coach table", () => {
+    const one = plantFault(
+      "one",
+      COACH,
+      "a clone under the security lens, a worktree under the others",
+    );
+    const r = accept(one);
+    expect(r.code).toBe(1);
+    expect(strip(r.out)).toBe(
+      `${COACH}: still says reviewer folders are worktrees outside security`,
+    );
+  }, 30000);
+
+  test("coach brief", () => {
+    const one = plantFault(
+      "one",
+      COACH,
+      "working in its own disposable worktree with dependencies",
+    );
+    const r = accept(one);
+    expect(r.code).toBe(1);
+    expect(strip(r.out)).toBe(`${COACH}: still says the lane works in a disposable worktree`);
+  }, 30000);
+
+  test("coach comment", () => {
+    const one = plantFault(
+      "one",
+      COACH,
+      "The security lens reviews from clones, whose origin/HEAD leads back",
+    );
+    const r = accept(one);
+    expect(r.code).toBe(1);
+    expect(strip(r.out)).toBe(`${COACH}: still says the security lens alone reviews from clones`);
+  }, 30000);
+
+  test("coach check prose", () => {
+    const one = plantFault(
+      "one",
+      COACH,
+      "at the snapshot, and under the security lens a clone whose origin/HEAD leads back",
+    );
+    const r = accept(one);
+    expect(r.code).toBe(1);
+    expect(strip(r.out)).toBe(`${COACH}: still says only the security check requires a clone`);
+  }, 30000);
+
+  test("harness scratch fires its check and the general one", () => {
+    const one = plantFault(
+      "one",
+      HARNESS,
+      "cannot be trusted in a review scratch, which is a worktree detached at the snapshot.",
+    );
+    const r = accept(one);
+    const lines = strip(r.out).split("\n");
+    expect(r.code).toBe(1);
+    expect(lines.length).toBe(2);
+    expect(lines).toContain(`${HARNESS}: still says a review scratch is a worktree`);
+    expect(lines).toContain(`${HARNESS}: still says a review scratch remains a worktree`);
+  }, 30000);
+
+  test("hosts launches fires its check and the general one", () => {
+    const one = plantFault(
+      "one",
+      HOSTS,
+      "That includes reviewer worktrees and security-review clones: never a workspace.",
+    );
+    const r = accept(one);
+    const lines = strip(r.out).split("\n");
+    expect(r.code).toBe(1);
+    expect(lines.length).toBe(2);
+    expect(lines).toContain(`${HOSTS}: still says reviewer launches run in worktrees`);
+    expect(lines).toContain(`${HOSTS}: still says a reviewer works in a worktree`);
+  }, 30000);
+
+  test("wiki scratch fires its check and the general one", () => {
+    const one = plantFault(
+      "one",
+      WIKI,
+      "cannot be trusted in a review scratch, which is a worktree detached at the snapshot.",
+    );
+    const r = accept(one);
+    const lines = strip(r.out).split("\n");
+    expect(r.code).toBe(1);
+    expect(lines.length).toBe(2);
+    expect(lines).toContain(`${WIKI}: still says a review scratch is a worktree`);
+    expect(lines).toContain(`${WIKI}: still says a review scratch remains a worktree`);
+  }, 30000);
+
+  test("wiki bug scratch", () => {
+    const one = plantFault(
+      "one",
+      WIKI,
+      "Each is launched in its own worktree scratch, at the top level.",
+    );
+    const r = accept(one);
+    expect(r.code).toBe(1);
+    expect(strip(r.out)).toBe(`${WIKI}: still says the bug reviewer runs in a worktree scratch`);
+  }, 30000);
+});
+
+describe("each presence pin fires when dropped", () => {
+  for (const [name, file, pin, label] of [
+    ["cut", COACH, PIN_CUT, "passes --clone for every lens in the review cut"],
+    ["check", COACH, PIN_CHECK, "requires a clone for every lens in the pre-launch check"],
+    ["table", COACH, PIN_TABLE, "calls the reviewer folders clones in the paths table"],
+    ["brief", COACH, PIN_BRIEF, "briefs the lane on its own copy of the repository"],
+    ["every", COACH, PIN_EVERY, "says every lens reviews from clones"],
+    ["prose", COACH, PIN_PROSE, "checks every scratch is a clone"],
+    ["harness scratch", HARNESS, PIN_SCRATCH_CLONE, "calls a review scratch a clone"],
+    ["hosts", HOSTS, PIN_HOSTS, "places reviewer scratches, never reviewer worktrees"],
+    ["wiki scratch", WIKI, PIN_SCRATCH_CLONE, "calls a review scratch a clone"],
+    ["wiki bug", WIKI, PIN_WIKI_BUG, "runs the bug reviewer in a scratch clone"],
+  ]) {
+    test(`${file} ${name}`, () => {
+      const one = dropPin("one", file, pin);
+      const r = accept(one);
+      expect(r.code).toBe(1);
+      expect(strip(r.out)).toBe(`${file}: no longer ${label}`);
+    }, 30000);
+  }
+});
+
+describe("the general claims fire in every file", () => {
+  for (const f of [COACH, HARNESS, HOSTS, WIKI]) {
+    test(`${f} reviewer-worktree claim`, () => {
+      const one = plantFault("one", f, "the reviewer worktree holds the round");
+      const r = accept(one);
+      expect(r.code).toBe(1);
+      expect(strip(r.out)).toBe(`${f}: still says a reviewer works in a worktree`);
+    }, 30000);
+    test(`${f} worktree-scratch claim`, () => {
+      const one = plantFault("one", f, "a worktree detached at the snapshot holds the round");
+      const r = accept(one);
+      expect(r.code).toBe(1);
+      expect(strip(r.out)).toBe(`${f}: still says a review scratch remains a worktree`);
+    }, 30000);
+  }
+});
+
+describe("all faults together", () => {
+  test("stale tree exits 1", () => {
+    expect(accept(ostale).code).toBe(1);
+  }, 30000);
+
+  test("stale tree lists 13 faults", () => {
+    const lines = strip(accept(ostale).out)
+      .split("\n")
+      .filter((l) => l !== "");
+    expect(lines.length).toBe(13);
+  }, 30000);
+
+  for (const [name, line] of [
+    [
+      "stale coach conditional",
+      `${COACH}: still says the clone flag is conditional on the security lens`,
+    ],
+    [
+      "stale coach array",
+      `${COACH}: still says the scratch is cut through a conditional clone flag`,
+    ],
+    ["stale coach table", `${COACH}: still says reviewer folders are worktrees outside security`],
+    ["stale coach brief", `${COACH}: still says the lane works in a disposable worktree`],
+    ["stale coach comment", `${COACH}: still says the security lens alone reviews from clones`],
+    ["stale coach check", `${COACH}: still says only the security check requires a clone`],
+    ["stale harness scratch", `${HARNESS}: still says a review scratch is a worktree`],
+    ["stale harness general", `${HARNESS}: still says a review scratch remains a worktree`],
+    ["stale hosts launches", `${HOSTS}: still says reviewer launches run in worktrees`],
+    ["stale hosts general", `${HOSTS}: still says a reviewer works in a worktree`],
+    ["stale wiki scratch", `${WIKI}: still says a review scratch is a worktree`],
+    ["stale wiki bug", `${WIKI}: still says the bug reviewer runs in a worktree scratch`],
+    ["stale wiki general", `${WIKI}: still says a review scratch remains a worktree`],
+  ]) {
+    test(`${name}`, () => {
+      expect(accept(ostale).out.split("\n")).toContain(line);
+    }, 30000);
+  }
+
+  test("clean tree passes", () => {
+    const r = accept(oclean);
+    expect(r.code).toBe(0);
+    expect(r.out).toBe("");
+  }, 30000);
+
+  test("missing tree exits 2", () => {
+    expect(accept(join(otmp, "nowhere")).code).toBe(2);
+  }, 30000);
+
+  test("an extra argument exits 2", () => {
+    const r = spawnSync(cli, ["reviewer-copy-acceptance", oclean, "extra"], {
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(2);
+  }, 30000);
+
+  test("an unknown flag exits 2", () => {
+    const r = spawnSync(cli, ["reviewer-copy-acceptance", "--no-such-flag", "extra"], {
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(2);
+  }, 30000);
+
+  test("a CRLF stale sentence is still caught", () => {
+    const dir = join(otmp, "crlf");
+    rmSync(dir, { recursive: true, force: true });
+    cpSync(oclean, dir, { recursive: true });
+    writeFileSync(
+      join(dir, COACH),
+      "a clone under the security lens,\r\na worktree under the others.\r\n",
+      { flag: "a" },
+    );
+    const r = accept(dir);
+    expect(r.code).toBe(1);
+    expect(strip(r.out)).toBe(
+      `${COACH}: still says reviewer folders are worktrees outside security`,
+    );
+  }, 30000);
+
+  test("an unreadable file exits 2, not a clean result", () => {
+    const dir = join(otmp, "locked");
+    rmSync(dir, { recursive: true, force: true });
+    cpSync(oclean, dir, { recursive: true });
+    chmodSync(join(dir, COACH), 0o000);
+    try {
+      expect(accept(dir).code).toBe(2);
+    } finally {
+      chmodSync(join(dir, COACH), 0o644);
+    }
+  }, 30000);
+
+  test("the live tree passes", () => {
+    const r = accept(ROOT);
+    expect(r.code).toBe(0);
+    expect(r.out).toBe("");
+  }, 30000);
+});
 
 interface Run {
   code: number;
@@ -43,50 +413,6 @@ function git(...args: string[]): Run {
 function need(r: Run, what: string): void {
   if (r.code !== 0) throw new Error(`${what} failed: ${r.out}${r.err}`);
 }
-
-function squash(s: string): string {
-  return s.replace(/\s+/gu, " ");
-}
-
-describe("the runbook prescribes a clone under every lens", () => {
-  test("the review cut passes --clone for every lens, not only security", () => {
-    const coach = readFileSync(coachmanPath, "utf8");
-    expect(coach).not.toContain('[ "$LENS" = security ] && CLONE=');
-    expect(coach).toContain('cut-scratch <repo> <synthesis-wt> "$DEST" "$SNAP" --clone <BASE>');
-    expect(coach).toContain("Every lens reviews from clones");
-  });
-
-  test("the pre-launch check requires a clone under every lens", () => {
-    const coach = readFileSync(coachmanPath, "utf8");
-    expect(coach).toContain(
-      'cut-scratch --check <repo>/.worktrees/<TICKET>-rev-$LENS-$L "$SNAP" --clone <BASE>',
-    );
-    expect(squash(coach)).toContain("and a clone whose `origin/HEAD` leads back to BASE");
-    expect(squash(coach)).not.toContain("under the security lens a clone whose");
-  });
-
-  test("the paths table and the brief wording call reviewer folders clones", () => {
-    const coach = readFileSync(coachmanPath, "utf8");
-    expect(coach).toContain("a clone of the repository under every lens");
-    expect(coach).not.toContain("a worktree under the others");
-    expect(coach).toContain("its own disposable copy of the repository");
-    expect(coach).not.toContain("its own disposable worktree");
-  });
-
-  test("the bug lens text calls a review scratch a clone", () => {
-    const harnesses = readFileSync(harnessesPath, "utf8");
-    expect(harnesses).toContain("which is a clone detached at the snapshot");
-    expect(harnesses).not.toContain("which is a worktree detached at the snapshot");
-  });
-
-  test("the host placement text covers reviewer scratches, not reviewer worktrees", () => {
-    const hosts = readFileSync(hostsPath, "utf8");
-    expect(hosts).toContain(
-      "That includes reviewer scratches: a clone is never opened as a separate",
-    );
-    expect(hosts).not.toContain("reviewer worktrees and security-review clones");
-  });
-});
 
 describe("C1: reviewer folders cut as clones", () => {
   const lenses = ["style", "bug", "security"];
