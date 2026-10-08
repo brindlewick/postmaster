@@ -4,6 +4,7 @@
 // window's own command, it keeps its environment including the role's env
 // file, and the headless launches behave exactly as at the base. The Herdr
 // leg of C1 needs a live space, so it stays hand-verified and out of this file.
+// The tmux control is gated by test.skipIf with a top notice.
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -11,6 +12,7 @@ import type { Layout } from "./launch-interactive-oracle.ts";
 import {
   expectEnv,
   expectLead,
+  haveTmux,
   makeLayout,
   parseProbe,
   printForm,
@@ -23,6 +25,26 @@ import {
 
 function oracle(name: string, fn: (lay: Layout) => void, timeout = 120000): void {
   test(
+    name,
+    () => {
+      const lay = makeLayout();
+      try {
+        fn(lay);
+      } finally {
+        lay.cleanup();
+      }
+    },
+    timeout,
+  );
+}
+
+function oracleSkipIf(
+  cond: boolean,
+  name: string,
+  fn: (lay: Layout) => void,
+  timeout = 120000,
+): void {
+  test.skipIf(cond)(
     name,
     () => {
       const lay = makeLayout();
@@ -76,17 +98,14 @@ oracle("pty: the postmaster's harness keeps its environment", (lay) => {
   expectEnv(parseProbe(text), lay, "1", "bar");
 });
 
-oracle("tmux: the clerk's harness is the window's own process", (lay) => {
+oracleSkipIf(!haveTmux(), "tmux: the clerk's harness is the window's own process", (lay) => {
   const cfg = teamConfig(
     lay,
     "clerk",
     `clerk = { harness = "claude", model = "m", env_file = "${lay.fooEnv}" }`,
   );
   const text = runTmux(lay, printForm(lay, cfg, "clerk"));
-  if (text === null) {
-    console.log("skip tmux window probe: tmux not on PATH");
-    return;
-  }
+  if (text === null) throw new Error("tmux vanished mid-run");
   expectLead(parseProbe(text), text);
 });
 

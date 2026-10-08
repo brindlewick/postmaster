@@ -269,6 +269,7 @@ export type { Layout, Probe };
 export {
   expectEnv,
   expectLead,
+  haveTmux,
   makeLayout,
   parseProbe,
   printForm,
