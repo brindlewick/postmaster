@@ -45,7 +45,7 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - strength: stated
 
 ### B8 Durable Objects: duration billing and pending I/O
-- finding: duration is 128 MB times active seconds, $12.50 per million GB-s with 400,000 GB-s included (from the worked example); inactive objects incur no duration; "Pending I/O operations keep an object in memory for up to 15 minutes each" and are billed as duration. Container-fronting detail is in notes-A.
+- finding: duration is 128 MB times active seconds, $12.50 per million GB-s with 400,000 GB-s included (from the worked example); inactive objects incur no duration; "Pending I/O operations keep an object in memory for up to 15 minutes each" and are billed as duration. Container-fronting detail is in the sandboxes capture (A1.13).
 - quote: "Pending I/O operations keep an object in memory for up to 15 minutes each." (verbatim)
 - source: docs/durable-objects/platform/pricing.mdx (worked examples, "Compute billing examples" section)
 - strength: stated
@@ -85,3 +85,13 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - quote: "Consumer duration (wall clock time) | 15 minutes" (verbatim, table row) ; "Message size | 128 KB" (verbatim, table row)
 - source: docs/queues/platform/limits.mdx:20, 26, 29
 - strength: stated
+
+### B-SECOND Second reads of the control-plane and AI Gateway pages on the published site through the fetch tool (2026-10-08; the tool allows quotes of about 125 characters)
+- Agreed with the repository text: B1, B2 (CPU row, memory row, duration sentence start, 15-minute rows), B3 (child_process in the stub table, 2026-03-17, first sentence), B5 (six table rows), B14 (5% fee sentence), B13 (credential precedence), B12 (Codex wire API note).
+- Differed: the rendered Unified Billing page is not marked Beta, while the source file's sidebar group is (see B13).
+
+### B-NOTCHECKED What the reading of the control-plane and AI Gateway pages did not cover
+- The published pages through the fetch tool (second read) for B4, B6-B11, B15-B20.
+- Workers Logs pricing and retention (referenced by AI Gateway pricing for new customers).
+- Pricing of Secrets Store, KV, Hyperdrive.
+- Durable Object limits beyond the front-door topics, which the sandboxes capture covers.

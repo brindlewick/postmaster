@@ -20,13 +20,17 @@ Anthropic's Claude Code and API documentation, support articles and legal pages,
 - "Anthropic does not permit third-party developers to ... route requests through Free, Pro, or Max plan credentials on
   behalf of their users", and developers "may not collect, store, or intermediate Claude.ai credentials or session tokens". An
   end user signing in to the unmodified binary with their own subscription "including where a platform hosts Claude Code" is
-  not prevented (H4-claude-1).
+  not prevented (H4-claude-1). The same page says that running Claude Code "in hosted sandboxes or other agent
+  infrastructure" requires agreeing to the Commercial Terms, with the binary unmodified and each end user authenticating with
+  their own credentials, and that customers may not pay for, resell or intermediate usage on end users' behalf
+  (H4-claude-2). Whether one person's own sandbox counts as offering Claude Code is not defined.
 - The consumer terms bar "automated or non-human means" except with an API key or "where we otherwise explicitly permit
-  it" (H4-claude-3). A usage policy page showing "Effective November 12, 2026" adds a bar on services that "route requests
-  through consumer subscriptions"; no announcement of it was found (H4-claude-7, H4-claude-14).
+  it" (H4-claude-3). A usage policy page showing "Effective November 12, 2026" adds a bar on reselling, proxying or otherwise
+  providing access "through unauthorized means, including services that route requests through consumer subscriptions"; the
+  page does not define "unauthorized", and no announcement was found (H4-claude-7, H4-claude-14).
 - Plan limits are shared across Claude and Claude Code; no cap on concurrent sessions or devices is stated (H6-claude-1,
-  H6-claude-2). Cloud sessions and self-hosted environments (public beta) are Anthropic's own cloud routes on a subscription
-  (H4-claude-13).
+  H6-claude-2). Cloud sessions (Pro, Max, Team, and Enterprise with premium seats) and self-hosted environments (public beta,
+  Team and Enterprise) are Anthropic's own cloud routes on a subscription (H6-claude-3, H1-claude-8).
 - `claude-opus-5-5` costs $4 per million input tokens, $0.20 for a cache read, $5 or $8 for a cache write (five minutes or an
   hour) and $20 for output (H5-claude-2).
 

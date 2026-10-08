@@ -23,8 +23,9 @@ Cloudflare, documentation at commit 6e1b964, read 2026-10-08.
 - R2 is strongly consistent, allows one write a second to a key and has no append call listed; D1 holds 10 GB a database; a
   queue message is 128 KB (B18 to B20).
 
-**On what evidence.** The vendor's documentation as repository text; six figures were also read on the published pages and
-agreed. Every quotation checked against the cited file by script was found
+**On what evidence.** The vendor's documentation as repository text; four entries (B1, B2, B3, B5) were also read on the published pages and
+agreed (B-SECOND); the others were not (B-NOTCHECKED). Every quotation checked against the cited
+file by script was found
 [@trials/2026-10-08-cloudflare-run-cost/results/quote-check.md].
 
 **What it would mean here if true.** A Worker can supervise a run and hold its state and cannot run a harness. Workflows and

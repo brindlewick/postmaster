@@ -12,7 +12,8 @@ Xiaomi's Token Plan and pay-as-you-go documentation, the MiMo Code repository at
 
 **What it claims.**
 
-- MiMo Code reads `XIAOMI_API_KEY` from the environment at each process start, or a whole `auth.json` from
+- MiMo Code reads the variable its provider catalog names, `XIAOMI_API_KEY` (the name comes from the models.dev provider
+  file, not from a Xiaomi page), from the environment at each process start, or a whole `auth.json` from
   `MIMOCODE_AUTH_CONTENT`; `mimo run` is the headless form. A provider block takes `baseURL` and an `apiKey` that may be
   `{env:NAME}` [@articles/xiaomi-mimo-code-login-and-terms/passages.md] (XMI, entries H1, H3).
 - A Token Plan is a prepaid package of credits with its own key (`tp-`), separate from a pay-as-you-go key (`sk-`). The suffix
@@ -27,6 +28,7 @@ Xiaomi's Token Plan and pay-as-you-go documentation, the MiMo Code repository at
 and was not read. Nothing was run.
 
 **What it would mean here if true.** A Token Plan key may not be usable for an unattended agent in a container, and the documents do
-not say; a pay-as-you-go key has no such sentence in the pages that could be read.
+not say; a pay-as-you-go key has no such sentence in the pages that could be read. The page gives "automated scripts" as an
+example of an obvious non-coding scenario, not as a use named apart.
 
 Bears on [running the flow on Cloudflare](../concepts/running-the-flow-on-cloudflare.md).

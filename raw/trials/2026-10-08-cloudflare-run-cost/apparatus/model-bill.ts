@@ -82,12 +82,37 @@ export function rows(
     .sort((a, b) => a.key.localeCompare(b.key));
 }
 
+export type PerRun = { run: string; opus: number; other: number };
+
+/** The prices with one model's tokens billed at another model's rates, to ask what a different tier would cost. */
+export function withRatesOf(prices: Prices, swap: { from: string; to: string }): Prices {
+  const to = prices.models[swap.to];
+  if (!to) throw new Error(`no price for ${swap.to}`);
+  return { ...prices, models: { ...prices.models, [swap.from]: to } };
+}
+
+/** Dollars as measured, summed over the launches of one role that have a price. */
+export function roleDollars(
+  launches: readonly Launch[],
+  runs: ReadonlyMap<string, RunRecord>,
+  prices: Prices,
+  role: Launch["role"],
+): number {
+  let total = 0;
+  for (const l of launches) {
+    if (l.role !== role) continue;
+    const d = launchDollars(l, prices.models[modelOf(runs.get(l.run), l) ?? "unknown"]);
+    if (d !== null) total += d.measured;
+  }
+  return total;
+}
+
 /** Dollars as measured per run, split into the Opus security review and everything else. */
 export function perRun(
   launches: readonly Launch[],
   runs: ReadonlyMap<string, RunRecord>,
   prices: Prices,
-): Array<{ run: string; opus: number; other: number }> {
+): PerRun[] {
   const out = new Map<string, { opus: number; other: number }>();
   for (const l of launches) {
     const model = modelOf(runs.get(l.run), l) ?? "unknown";
@@ -103,6 +128,34 @@ export function perRun(
 
 const m = (n: number): string => (n / 1e6).toFixed(1);
 const usd = (n: number): string => (n < 100 ? n.toFixed(2) : n.toFixed(0));
+const rate = (p: Price): string => `$${p.input} / $${p.cachedInput} / $${p.output}`;
+
+/** The two tiers of the coachman's model, which differ only in price and in what the vendor may train on. */
+export const CONTRIBUTOR_TIER = "muse-spark-1.3-contributor";
+export const STANDARD_TIER = "muse-spark-1.3";
+
+const sum = (xs: readonly number[]): number => xs.reduce((a, b) => a + b, 0);
+const median = (xs: readonly number[]): number => {
+  const v = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(v.length / 2);
+  return v.length % 2 === 1 ? (v[mid] as number) : ((v[mid - 1] as number) + (v[mid] as number)) / 2;
+};
+
+/** The per-run dollars as a table: mean, median and most of the Opus security review, everything else and the total. */
+export function perRunSection(per: readonly PerRun[], what: string): string {
+  const totals = per.map((p) => p.opus + p.other);
+  const others = per.map((p) => p.other);
+  const opuses = per.map((p) => p.opus);
+  return `Per run (${per.length} runs with priced launches), ${what}:
+
+| | Opus security review | Everything else | Total |
+| --- | --- | --- | --- |
+| mean | ${usd(sum(opuses) / per.length)} | ${usd(sum(others) / per.length)} | ${usd(sum(totals) / per.length)} |
+| median | ${usd(median(opuses))} | ${usd(median(others))} | ${usd(median(totals))} |
+| most | ${usd(Math.max(...opuses))} | ${usd(Math.max(...others))} | ${usd(Math.max(...totals))} |
+| share of all dollars | ${((100 * sum(opuses)) / sum(totals)).toFixed(0)}% | ${((100 * sum(others)) / sum(totals)).toFixed(0)}% | |
+`;
+}
 
 export function table(rs: readonly Row[], runCount: number): string {
   const lines = [
@@ -137,26 +190,21 @@ function main(): void {
   const runIds = new Set(launches.map((l) => l.run));
   const rs = rows(launches, runs, prices);
   const input = launches.reduce((a, l) => a + totalInput(l.tokens), 0);
-  const per = perRun(launches, runs, prices);
-  const totals = per.map((p) => p.opus + p.other);
-  const others = per.map((p) => p.other);
-  const opuses = per.map((p) => p.opus);
-  const sorted = (xs: number[]): number[] => [...xs].sort((a, b) => a - b);
-  const med = (xs: number[]): number => {
-    const v = sorted(xs);
-    const mid = Math.floor(v.length / 2);
-    return v.length % 2 === 1 ? (v[mid] as number) : ((v[mid - 1] as number) + (v[mid] as number)) / 2;
-  };
-  const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
-  const perRunText = `Per run (${per.length} runs with priced launches), dollars as measured:
+  const perRunText = perRunSection(perRun(launches, runs, prices), "dollars as measured");
+  const standard = prices.models[STANDARD_TIER];
+  const contributor = prices.models[CONTRIBUTOR_TIER];
+  const tierText =
+    standard && contributor
+      ? `
+## If the coachman ran on Meta's standard tier
 
-| | Opus security review | Everything else | Total |
-| --- | --- | --- | --- |
-| mean | ${usd(sum(opuses) / per.length)} | ${usd(sum(others) / per.length)} | ${usd(sum(totals) / per.length)} |
-| median | ${usd(med(opuses))} | ${usd(med(others))} | ${usd(med(totals))} |
-| most | ${usd(Math.max(...opuses))} | ${usd(Math.max(...others))} | ${usd(Math.max(...totals))} |
-| share of all dollars | ${((100 * sum(opuses)) / sum(totals)).toFixed(0)}% | ${((100 * sum(others)) / sum(totals)).toFixed(0)}% | |
-`;
+The coachman ran on \`${CONTRIBUTOR_TIER}\` (${rate(contributor)} per million tokens: input, cached input, output),
+the tier that lets Meta train on what is sent. The standard tier, \`${STANDARD_TIER}\`, is ${rate(standard)}.
+The coachman's tokens come to $${usd(roleDollars(launches, runs, prices, "coachman"))} at the contributor tier and
+$${usd(roleDollars(launches, runs, withRatesOf(prices, { from: CONTRIBUTOR_TIER, to: STANDARD_TIER }), "coachman"))} at the standard tier. Everything else as above.
+
+${perRunSection(perRun(launches, runs, withRatesOf(prices, { from: CONTRIBUTOR_TIER, to: STANDARD_TIER })), "coachman at the standard tier, dollars as measured")}`
+      : "";
   const text = `# The model bill at pay-per-token prices
 
 ${runIds.size} audited real runs, ${launches.length} launches (the coachman as one row per run, from its
@@ -168,7 +216,7 @@ Input in total: ${m(input)} M tokens.
 
 ${table(rs, runIds.size)}
 
-${perRunText}`;
+${perRunText}${tierText}`;
   writeFileSync(join(results, "model-bill.md"), text);
   process.stdout.write("wrote model-bill.md\n");
 }

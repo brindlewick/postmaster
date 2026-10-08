@@ -44,3 +44,9 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - quote: n/a
 - source: grep -r -i -E "claude (pro|max)|max plan|pro plan|chatgpt (plus|pro)|subscription login|sign in with chatgpt|claude\.ai|chatgpt\.com|codex login|claude login" over docs/ai-gateway (1 file), docs/agents (1 file), docs/sandbox (0), docs/containers (0), docs/workers/platform (0) and partials (0) @6e1b964 ; docs/ai-gateway/integrations/coding-agents/claude-desktop.mdx:13 and docs/agents/model-context-protocol/index.mdx:21 are the two hits ; run 2026-10-08
 - strength: not found
+
+### B22 AI Gateway: spend limits (Beta)
+- finding: Spend limits set cost-based budgets, scoped by provider, model or a custom metadata key, and block further requests with a `429` when the budget for the window is reached. They apply to Unified Billing requests and to stored-key (BYOK) requests for models with known pricing. They are eventually consistent: a burst of concurrent requests can briefly exceed the limit. The page's sidebar entry carries a Beta badge.
+- quote: "When cumulative spend reaches the limit within a time window, AI Gateway blocks further requests with a `429` response until the window resets." (verbatim, repository text, line 14) ; "Spend limits are eventually consistent." (verbatim, repository text, line 28)
+- source: docs/ai-gateway/features/spend-limits.mdx@6e1b964 lines 7, 14, 18, 28 ; the same page on the published documentation site ; read 2026-10-08 (repository text only)
+- strength: stated

@@ -105,6 +105,19 @@ describe("summarizeRole", () => {
     expect(s.medianEach).toBe(250); // 100, 200, 300, 600
     expect(s.longestEach).toBe(600);
   });
+
+  test("the 90th percentile is below the longest launch when there are enough launches", () => {
+    const many = runTime(run({ id: "m", lanes: Array.from({ length: 20 }, (_, i) => lane((i + 1) * 100)) }));
+    const s = summarizeRole([many], "lanes");
+    expect(s.p90Each).toBe(1900);
+    expect(s.longestEach).toBe(2000);
+  });
+
+  test("negative control: with a single launch the 90th percentile and the longest are the same", () => {
+    const one = summarizeRole([runTime(run({ id: "o", lanes: [lane(700)] }))], "lanes");
+    expect(one.p90Each).toBe(700);
+    expect(one.longestEach).toBe(700);
+  });
 });
 
 describe("covered", () => {

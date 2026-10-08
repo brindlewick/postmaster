@@ -141,10 +141,11 @@ What it would take to run the flow on someone else's machines, and what the harn
 
 - [The flow could run on Cloudflare as a control plane and one container per launch, but not on a Worker, and not yet on
   subscription logins](concepts/running-the-flow-on-cloudflare.md): **claimed**. A Worker cannot run a lane; a container can, and
-  Cloudflare's tutorials show Claude Code, Codex and Pi in one with the model key held outside it, for API credentials only. No
-  vendor's terms settle a subscription login in a cloud container. A median run's container time is $0.50 to $12; its model
-  tokens at API prices are $16 to $39, 92% of it the Opus security review. A container per lane stops every reach the isolation
-  scan found inside the machine.
+  Cloudflare's tutorials show Claude Code, Codex and Pi in one with the model key held outside it, for API credentials; an
+  earlier example in its sandbox repository did the same for a Claude subscription token. No vendor's terms settle a
+  subscription login held by a Worker for a cloud container. A median run's container time is $0.50 to $9.60; its model
+  tokens at API prices are $16 to $39, 92% of it the Opus security review. A container per lane would stop every reach the
+  isolation scan found inside the machine, by the documented design.
 
 ## Sources
 

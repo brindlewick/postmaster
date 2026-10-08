@@ -6,7 +6,7 @@
       "totalSeconds": 236817,
       "medianPerRun": 7500.5,
       "medianEach": 3833.5,
-      "p90Each": 54340,
+      "p90Each": 8377,
       "longestEach": 54340
     },
     "reviewers": {
@@ -14,7 +14,7 @@
       "totalSeconds": 440318,
       "medianPerRun": 11065.5,
       "medianEach": 1015,
-      "p90Each": 20664,
+      "p90Each": 2622,
       "longestEach": 20664
     },
     "gatesOnLanes": {
@@ -22,7 +22,7 @@
       "totalSeconds": 23533,
       "medianPerRun": 1466.5,
       "medianEach": 734,
-      "p90Each": 1000,
+      "p90Each": 930,
       "longestEach": 1000
     },
     "gatesOnSynthesis": {
@@ -30,7 +30,7 @@
       "totalSeconds": 156627,
       "medianPerRun": 7453.5,
       "medianEach": 708.5,
-      "p90Each": 1257,
+      "p90Each": 956,
       "longestEach": 1257
     },
     "coachmanUpperTotalSeconds": 1715307
@@ -42,7 +42,7 @@
       "totalSeconds": 35409,
       "medianPerRun": 730.5,
       "medianEach": 399,
-      "p90Each": 9478,
+      "p90Each": 851,
       "longestEach": 9478
     },
     "reviewers": {
@@ -50,7 +50,7 @@
       "totalSeconds": 89535,
       "medianPerRun": 3065,
       "medianEach": 105.5,
-      "p90Each": 9199,
+      "p90Each": 1184,
       "longestEach": 9199
     },
     "gatesOnLanes": {
@@ -58,7 +58,7 @@
       "totalSeconds": 45,
       "medianPerRun": 2,
       "medianEach": 1,
-      "p90Each": 2,
+      "p90Each": 1,
       "longestEach": 2
     },
     "gatesOnSynthesis": {
@@ -66,7 +66,7 @@
       "totalSeconds": 145,
       "medianPerRun": 5,
       "medianEach": 1,
-      "p90Each": 3,
+      "p90Each": 2,
       "longestEach": 3
     },
     "coachmanUpperTotalSeconds": 166882

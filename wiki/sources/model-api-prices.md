@@ -19,6 +19,8 @@ OpenAI, Anthropic, Meta and Xiaomi, from their own price pages, read 2026-10-08.
 | `claude-opus-5-5` | 4 | 0.20 | 20 |
 | `muse-spark-1.3-contributor` | 0.10 | 0.002 | 0.20 |
 | `mimo-v2.6-pro` | 0.435 | 0.0036 | 0.87 |
+| `muse-spark-1.3` (standard tier, used only to ask what the coachman would cost off the contributor tier) | 1.25 | 0.15 | 4.25 |
+| `mimo-v2.6-flash` | 0.14 | 0.0028 | 0.28 |
 
 OpenAI and Anthropic also price cache writes (OpenAI $0.125 to $12.50; Anthropic $5 for five minutes, $8 for an hour for Opus 5.5)
 [@articles/model-api-prices/passages.md].

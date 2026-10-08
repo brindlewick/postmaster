@@ -22,14 +22,17 @@ OpenAI's Codex documentation (now at learn.chatgpt.com), the Codex source at com
 - A custom endpoint takes only the Responses API; a ChatGPT login talks to `chatgpt.com/backend-api/codex`, and OpenAI documents a
   gateway for that on its Enterprise pages (H3-codex-1, H3-codex-3).
 - The consumer terms bar sharing credentials or making the account available "to anyone else" and list "Automatically or
-  programmatically extract data or Output" among prohibited acts. App-server sign-in "has never been permitted for commercial or
-  hosted services" (H4-codex-2b, H4-codex-9).
+  programmatically extract data or Output" among prohibited acts. The Services Agreement for Business and Enterprise bars sharing
+  login credentials between users and gives each account one end user. App-server sign-in "has never been permitted for
+  commercial or hosted services" (H4-codex-2b, H4-codex-2c, H4-codex-9).
 - Prices per million tokens: `gpt-6-luna` $0.10 input, $0.01 cached, $0.50 output; `gpt-6-sol` $2, $0.20, $10; `gpt-6-astra`
   $10, $1, $50 (H5-codex-2).
 
 **On what evidence.** The vendor's pages and open-source code, two reads for each sentence quoted as verbatim. OpenAI's policy
-pages answered 403 to the fetch tool, so its terms are third-party copies (Open Terms Archive) and one public text converter
-read of the rest-of-world Terms of Use, both marked in the entries. The code was read, not run.
+pages answered 403 to the fetch tool, so its consumer terms are a third party's capture (Open Terms Archive), and the
+rest-of-world Terms of Use was read through a public text converter that fetches the vendor's page, twice with two
+wordings; both are marked in the entries (H4-codex-2b, H4-codex-2e). The archive's EU copy says "extracting" where the
+rest-of-world page says "extract". The code was read, not run.
 
 **What it would mean here if true.** Parallel codex lanes need either an API key or one login each, and the documents allow
 a login on a trusted private runner without saying whether a Plus or Pro login may sit in a vendor-neutral cloud container.

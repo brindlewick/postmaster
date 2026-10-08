@@ -19,18 +19,20 @@ and price page, read 2026-10-08.
   only with the coding harness under your Coding Harness Subscription". Keys made in the dashboard are pay-as-you-go, may be used in
   other tools, and may not be shared with a third party, including through "any model aggregator, API gateway, proxy, or similar
   offering" (H2, H4 b, H4 d).
-- The public docs give no setting for another base URL ("It needs no provider config"). Meta's own SDK test fixture sets
-  `endpoint_transport.base_url` in `settings.json` (H3).
+- The public docs give no setting for another base URL ("It needs no provider config"). Meta's own SDK quickstart, a sample
+  program, writes `endpoint_transport.base_url` into `settings.json` (H3, entry "Muse (source)"). Access is limited to
+  the jurisdictions Meta has enabled, and no binding of a key to a machine or address is stated (H2).
 - `muse-spark-1.3-contributor` is the discounted tier "in exchange for permission to use your prompts and completions to train future
-  Meta models"; Terms 6.2 say code that must stay confidential must not be sent to it. Its limits are 100 requests and 3,000,000 tokens
-  a minute for a team (H2, H4 e).
+  Meta models"; Terms 6.2 bar sending it code or other information that must stay confidential, and "sensitive, confidential, or
+  personal information". Its limits are 100 requests and 3,000,000 tokens a minute for a team (H2, H4 e).
 - The contributor tier costs $0.10 per million input tokens, $0.002 cached and $0.20 output; the standard tier $1.25, $0.15 and
   $4.25 (H5).
-- By the code of a third-party harness, the key a subscription login mints lives about a day and the identity token cannot be
-  renewed [@articles/other-harnesses-login-and-terms/passages.md].
+- By the code of a third-party harness, a subscription login gives an identity token that cannot be renewed, exchanged for a
+  key that lives about a day and is minted again from the token; the token's own lifetime is not stated
+  [@articles/other-harnesses-login-and-terms/passages.md].
 
 **On what evidence.** The vendor's pages downloaded as text and read again through the fetch tool, the vendor's launcher script and
-test fixture. Nothing was run, and the binary was not downloaded.
+SDK quickstart, at commit 537cc8d. Nothing was run, and the binary was not downloaded.
 
 **What it would mean here if true.** The coachman's route in a cloud container is a pay-as-you-go key, not a subscription, and the
 contributor tier is a choice about who may train on the code it is sent.

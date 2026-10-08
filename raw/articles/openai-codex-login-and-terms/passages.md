@@ -141,8 +141,8 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - strength: not found. Searches: pricing page (2 reads) for "concurrent|parallel": 0 sentences; usage-limits page (1 read): 0 sentences; ci-cd-auth page (2 reads): no device/IP binding sentence; source grep of manager.rs for "device_id|machine_id|ip_addr": not run (the file was read around the refresh paths only).
 
 ### OAI20 H4-codex-0 openai.com policy pages are unreadable to this tool
-- finding: Every openai.com/policies page I tried answered HTTP 403 to WebFetch: terms-of-use, row-terms-of-use, eu-terms-of-use, service-terms, business-terms, services-agreement, usage-policies, and /de-DE/policies/terms-of-use. help.openai.com articles answered 403 as well (the "Using Codex with your ChatGPT plan" article and the Bedrock article). web.archive.org is blocked by the tool ("unable to fetch from web.archive.org"). Shell curl is limited to the allowlist, which has no openai.com host. So I have NO first-hand read of any OpenAI terms page. What I have: (1) WebSearch result text (a search tool's summary, not the page); (2) third-party notes on GitHub that also report 403 and quote the clauses from search summaries.
-- source: WebFetch 403 on 2026-10-08 for each URL above
+- finding: Every openai.com/policies page I tried answered HTTP 403 to the fetch tool: terms-of-use, row-terms-of-use, eu-terms-of-use, service-terms, business-terms, services-agreement, usage-policies, and /de-DE/policies/terms-of-use. help.openai.com articles answered 403 as well (the "Using Codex with your ChatGPT plan" article and the Bedrock article). web.archive.org is blocked by the tool ("unable to fetch from web.archive.org"). Shell curl is limited to the allowlist, which has no openai.com host. So I have NO first-hand read of any OpenAI terms page. What I have: (1) the search tool result text (a search tool's summary, not the page); (2) third-party notes on GitHub that also report 403 and quote the clauses from search summaries.
+- source: The fetch tool 403 on 2026-10-08 for each URL above
 - strength: not found (as a read). Not proof the pages say nothing.
 
 ### OAI21 H4-codex-1 (a) subscription login from a cloud machine / CI / automated process -- what OpenAI's own Codex docs say
@@ -155,10 +155,10 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - strength: stated. Applies to: ChatGPT subscription (managed) login. Verdict on the documents I could read: the CLI docs permit it as an advanced, trusted-runner option and discourage it; the Terms are unread.
 
 ### OAI22 H4-codex-2 What the Terms of Use say, as reported by a search tool (NOT a page read)
-- finding: A WebSearch summary says OpenAI's consumer Terms of Use (rest-of-world version, openai.com/policies/row-terms-of-use/) put account-sharing under "Registration and access" and list "Automatically or programmatically extract data or Output (defined below)" under "What you cannot do". Several unrelated GitHub research notes (2026-09/10) quote the same two phrases and say they too could not fetch openai.com (403).
-- quote: "You may not share your account credentials or make your account available to anyone else and are responsible for all activities that occur under your account."   (paraphrase: WebSearch tool's text, one query, vendor page not read)
-- quote: "Automatically or programmatically extract data or Output (defined below)."   (paraphrase: WebSearch tool's text; also quoted by third parties in c10dev/atc docs and others)
-- source: WebSearch 2026-10-08 ("OpenAI Terms of Use ... make your account available to anyone else"); the search tool said the cached results were "roughly 265 to 280 days" old and showed no effective date. Third-party: github.com/c10dev/atc docs/research/chatgpt-codex-accounts.md (2026-09-30; says wording "came through search summaries: unverified as exact text")
+- finding: A search-tool summary says OpenAI's consumer Terms of Use (rest-of-world version, openai.com/policies/row-terms-of-use/) put account-sharing under "Registration and access" and list "Automatically or programmatically extract data or Output (defined below)" under "What you cannot do". Several unrelated GitHub research notes (2026-09/10) quote the same two phrases and say they too could not fetch openai.com (403).
+- quote: "You may not share your account credentials or make your account available to anyone else and are responsible for all activities that occur under your account."   (paraphrase: The search tool tool's text, one query, vendor page not read)
+- quote: "Automatically or programmatically extract data or Output (defined below)."   (paraphrase: The search tool tool's text; also quoted by third parties in c10dev/atc docs and others)
+- source: The search tool 2026-10-08 ("OpenAI Terms of Use ... make your account available to anyone else"); the search tool said the cached results were "roughly 265 to 280 days" old and showed no effective date. Third-party: github.com/c10dev/atc docs/research/chatgpt-codex-accounts.md (2026-09-30; says wording "came through search summaries: unverified as exact text")
 - strength: argued (not the vendor's page). Applies to: consumer ChatGPT accounts (Plus/Pro) per the ROW terms; the Business terms are a separate document I could not read.
 
 ### OAI23 H1-codex-9 Access tokens: Business and Enterprise only (second read agrees); what the token is in the CLI
@@ -243,8 +243,8 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 
 ### OAI33 H4-codex-2b (a)(b)(d) OpenAI consumer terms (Plus, Pro): credentials, programmatic extraction, rate limits
 - finding: The consumer Terms of Use (EU text) say you may not share your credentials or make your account available to anyone else; list "Automatically or programmatically extracting data or Output" among prohibited acts; and forbid circumventing rate limits or restrictions. None of these sentences names Codex, CI, containers, several machines for one person, or ChatGPT-plan use from another tool. Section 4 of the Terms says only that Codex output "may be subject to third party licenses". The sentence on programmatic extraction is about extracting data or Output (scraping-like); whether `codex exec` in a job is within it is not answered by the page (ambiguity). The Terms point businesses to the Business Terms.
-- quote: "You may not share your account credentials or make your account available to anyone else and are responsible for all activities that occur under your account."   (verbatim in the archive copy of the EU terms; same words returned by WebSearch for the ROW terms)
-- quote: "Automatically or programmatically extracting data or Output (defined below)."   (verbatim in the archive copy; ROW version per WebSearch reads "extract")
+- quote: "You may not share your account credentials or make your account available to anyone else and are responsible for all activities that occur under your account."   (verbatim in the archive copy of the EU terms; same words returned by the search tool for the ROW terms)
+- quote: "Automatically or programmatically extracting data or Output (defined below)."   (verbatim in the archive copy; ROW version per the search tool reads "extract")
 - quote: "Interfering with or disrupting our Services, including circumventing any rate limits or restrictions or bypassing any protective measures or safety mitigations we put on our Services."   (verbatim, archive copy)
 - quote: "Our Business Terms govern use of ChatGPT Enterprise, our APIs, and our other services for businesses and developers."   (verbatim, archive copy)
 - source: https://openai.com/policies/eu-terms-of-use/ as captured in OpenTermsArchive/genai-contrib-versions ChatGPT/Terms of Service.md@5f624c86c2 lines 51, 68, 72 (section "Registration and access", "What you cannot do"), line 284 (section "4. Codex and Code Generation") ; read 2026-10-08
@@ -256,7 +256,7 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - quote: "End User Accounts may only be provisioned to, registered for, and used by, a single End User."   (verbatim, clause 3.2)
 - quote: "(i) violate or circumvent Usage Limits or otherwise configure the Services to avoid Usage Limits."   (verbatim, clause 3.3(i); 3.3(f) "extract data from the Services other than as permitted through the Services", 3.3(g) "buy, sell, or transfer API keys from, to, or with a third party")
 - quote: "“Usage Limits” means End User, messaging, token, throughput rate, or other limits on Customer’s use of the Services as described in the applicable Order Form or Documentation."   (verbatim, definition)
-- source: https://openai.com/policies/services-agreement/ (403 to WebFetch) as captured in OpenTermsArchive/genai-contrib-versions ChatGPT/Commercial Terms.md@87eaac64c1 lines 51, 53, 55, 354 ; read 2026-10-08
+- source: https://openai.com/policies/services-agreement/ (403 to the fetch tool) as captured in OpenTermsArchive/genai-contrib-versions ChatGPT/Commercial Terms.md@87eaac64c1 lines 51, 53, 55, 354 ; read 2026-10-08
 - strength: shown (third-party archive copy). Applies to: API keys and Business/Enterprise workspaces; not to Plus/Pro.
 
 ### OAI35 H4-codex-2d OpenAI Usage policies: circumventing restrictions (agents)
@@ -266,7 +266,7 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - strength: shown (third-party archive copy)
 
 ### OAI36 H4-codex-8 Plain verdict for the Codex side (what the documents read permit, forbid, or leave unsaid)
-- permit (stated by OpenAI): copying one's own `auth.json` to one's own headless machine (docs/auth); running a ChatGPT-managed login on a trusted private CI runner as an advanced option, with one auth.json per runner (docs/auth/ci-cd-auth); Codex access tokens and service accounts for non-interactive automation on Business/Enterprise workspaces; API keys for any automation; SIWC preview for open-source apps incl. on a remote VM.
+- permit (stated by OpenAI): copying one's own `auth.json` to one's own headless machine (docs/auth); running a ChatGPT-managed login on a trusted private CI runner as an advanced option, with one auth.json per runner (docs/auth/ci-cd-auth); Codex access tokens and service accounts for non-interactive automation on Business/Enterprise workspaces; API keys, the documented default for automation; SIWC preview for open-source apps incl. on a remote VM.
 - discourage/forbid (stated by OpenAI): sharing one auth.json across concurrent jobs or machines; use of the ChatGPT-managed CI workflow for public or open-source repositories; exposing access tokens on public CI or forked pull requests; the consumer Terms bar sharing credentials with, or making the account available to, anyone else; the Services Agreement bars sharing login credentials between multiple users.
 - not said in any document I could read: whether a Plus/Pro login may run in a vendor-neutral cloud container; whether one person's login may be used from several machines at once; whether `codex exec` counts as "automatically or programmatically extracting data or Output"; a cap on simultaneous sessions.
 - strength: argued (summary of the entries above)
@@ -315,14 +315,30 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - source: argued from H2-codex-2, H2-codex-3, H2-codex-7 (documents named there)
 - strength: argued
 
-### OAI43 H4-codex-11 OpenAI consumer terms, section "10. Licensed Materials": downloaded software may run on "private cloud infrastructure" (ambiguous relevance)
+### OAI43 H4-not-found-controls Greps over the archived terms (full text) with controls
+- finding: Counts of whole-text matches, case-insensitive, in the Open Terms Archive copies (OpenAI EU Terms of Use, header "Updated: 16 January 2026"; OpenAI Services Agreement "Effective: January 1, 2026"; Anthropic Consumer Terms "Effective October 8, 2025"; Anthropic Commercial Terms "Effective June 17, 2025"):
+  | term | OpenAI ToU | OpenAI Services Agr. | Anthropic Consumer | Anthropic Commercial |
+  | simultaneous | 0 | 0 | 0 | 0 |
+  | concurrent | 0 | 1 ("concurrently", unrelated: services-term proration) | 0 | 0 |
+  | device | 1 (in vitro diagnostic devices, unrelated) | 0 | 0 | 0 |
+  | IP address | 0 | 0 | 0 | 0 |
+  | CI/CD, continuous integration | 0 | 0 | 0 | 0 |
+  | container, cloud, virtual machine | container 1, cloud 1 (both in the "Licensed Materials" clause, below), VM 0 | 0 | 0 | 0 |
+  | Claude Code | 0 | 0 | 0 | 0 |
+  | Codex | 3 (code-generation clause and links) | 0 | 0 | 0 |
+  Positive controls through the same command: "multiple users" returns 1 in the Services Agreement (clause 3.1); "automated or non-human" returns 1 in the Anthropic Consumer Terms (item 7); "Codex" returns 3 in the OpenAI Terms of Use.
+  So none of the four documents (as archived) mentions simultaneous sessions, devices, IP addresses, CI, Claude Code, or machine/cloud limits for a login. Neither Anthropic document mentions Claude Code at all; the Claude Code link to the Terms is on the Claude Code legal page.
+- source: the archive copies of the four documents (OpenTermsArchive/genai-contrib-versions, commits 5f624c86c2, 87eaac64c1, 2de35b9576, 817278488c) ; read 2026-10-08
+- strength: not found (as a negative result over third-party copies; the live pages themselves were read only for Anthropic)
+
+### OAI44 H4-codex-11 OpenAI consumer terms, section "10. Licensed Materials": downloaded software may run on "private cloud infrastructure" (ambiguous relevance)
 - finding: A clause in the EU Terms of Use says Services may involve downloading "software, packages, code, containers, or other modules" ("Licensed Materials") to "local machines, private cloud infrastructure, or other customer-managed systems (Customer Systems)", licensed "solely on Customer Systems", only "in connection with your permitted use of the Services". It names neither Codex nor the CLI (the Codex CLI is a separate open-source repository), so whether it governs the Codex CLI is not said.
 - quote: "on local machines, private cloud infrastructure, or other customer-managed systems (“Customer Systems”)"   (verbatim, archive copy line 339)
 - quote: "You may access and use the Licensed Materials solely for the purposes of using the Licensed Materials with or connecting to the Services."   (verbatim, archive copy, clause 10(b))
 - source: OpenTermsArchive/genai-contrib-versions ChatGPT/Terms of Service.md@5f624c86c2 lines 335-345 (https://openai.com/policies/eu-terms-of-use/) ; read 2026-10-08
 - strength: shown (third-party archive copy)
 
-### OAI44 H2-codex-9 SIWC token lifetimes and rotation (vendor developer docs; same issuer as the Codex CLI, but a different program)
+### OAI45 H2-codex-9 SIWC token lifetimes and rotation (vendor developer docs; same issuer as the Codex CLI, but a different program)
 - finding: OpenAI's SIWC "Token reference" page says access tokens last one hour, refresh tokens 30 days, and "each successful refresh returns a replacement refresh token with a fresh 30-day lifetime"; the "Accounts and sessions" page says to "Store and use the latest replacement" refresh token and to serialize refreshes so "two processes do not race a rotating token". Both pages are for the SIWC client, not the Codex CLI's own client id (the CLI uses a constant client id against the same `auth.openai.com/oauth/token`); applying the lifetimes to the CLI's `auth.json` is my inference. The pages do not say whether an old refresh token stays valid after a refresh, and give no error codes for reuse.
 - quote: "Access tokens are valid for one hour (`expires_in: 3600`)."   (verbatim, one fetch of https://developers.openai.com/siwc/token-sharing-open-source/token-reference)
 - quote: "Each successful refresh returns a replacement refresh token with a fresh 30-day lifetime."   (verbatim, one fetch, same page)
@@ -330,39 +346,46 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - source: the two pages above ; no dates ; read 2026-10-08
 - strength: stated (SIWC); argued for the Codex CLI
 
-### OAI45 H4-codex-12 SIWC Terms (openai.com/policies/sign-in-with-chatgpt-terms/): clauses reported by a search tool, page itself 403
-- finding: A WebSearch summary (2026-10-08) of OpenAI's "Sign in with ChatGPT Terms" reports these clauses, all about apps built on SIWC (not about the Codex CLI's own login): a ban on "creating multiple accounts, splitting usage, rotating accounts, or otherwise bypassing usage limits"; a ban on pooling, transferring, reselling, gifting or sharing plan usage or tokens; a ban on using one user's subscription to fulfil another user's requests; requests must be for the authenticated user and arise from their activity "or expressly authorized automations or background processes", with express consent for background use; use the plan only for the application the user connected; and "Any persistent storage of Authentication Tokens must be local and under the user's control, not in a remote or managed environment." I could not read the page (HTTP 403) and the summary skips section 3, so these are search-tool paraphrases; a third-party note (aelaguiz/aimgr, 2026-09-29) quotes similar fragments and says the terms "appear to have been published on 2026-09-29".
-- quote: "Any persistent storage of Authentication Tokens must be local and under the user's control, not in a remote or managed environment."   (paraphrase: WebSearch summary text; page unread)
-- quote: "Requests must be for the authenticated user and arise from their activity or expressly authorized automations or background processes."   (paraphrase: WebSearch summary text; page unread)
-- source: WebSearch 2026-10-08 (query on SIWC terms, results listed https://openai.com/policies/sign-in-with-chatgpt-terms/ and help.openai.com articles 20001410 and 20001542); third party https://github.com/aelaguiz/aimgr docs/CODEX_PRO11_PRO13_DEACTIVATION_ANALYSIS_2026-09-29.md lines 36, 123-129
+### OAI46 H4-codex-12 SIWC Terms (openai.com/policies/sign-in-with-chatgpt-terms/): clauses reported by a search tool, page itself 403
+- finding: A search-tool summary (2026-10-08) of OpenAI's "Sign in with ChatGPT Terms" reports these clauses, all about apps built on SIWC (not about the Codex CLI's own login): a ban on "creating multiple accounts, splitting usage, rotating accounts, or otherwise bypassing usage limits"; a ban on pooling, transferring, reselling, gifting or sharing plan usage or tokens; a ban on using one user's subscription to fulfil another user's requests; requests must be for the authenticated user and arise from their activity "or expressly authorized automations or background processes", with express consent for background use; use the plan only for the application the user connected; and "Any persistent storage of Authentication Tokens must be local and under the user's control, not in a remote or managed environment." I could not read the page (HTTP 403) and the summary skips section 3, so these are search-tool paraphrases; a third-party note (aelaguiz/aimgr, 2026-09-29) quotes similar fragments and says the terms "appear to have been published on 2026-09-29".
+- quote: "Any persistent storage of Authentication Tokens must be local and under the user's control, not in a remote or managed environment."   (paraphrase: search-tool summary text; page unread)
+- quote: "Requests must be for the authenticated user and arise from their activity or expressly authorized automations or background processes."   (paraphrase: search-tool summary text; page unread)
+- source: The search tool 2026-10-08 (query on SIWC terms, results listed https://openai.com/policies/sign-in-with-chatgpt-terms/ and help.openai.com articles 20001410 and 20001542); third party https://github.com/aelaguiz/aimgr docs/CODEX_PRO11_PRO13_DEACTIVATION_ANALYSIS_2026-09-29.md lines 36, 123-129
 - strength: argued (search-tool excerpt only)
 
-### OAI46 H4-codex-13 SIWC eligibility on the cookbook page (vendor-hosted developer page)
+### OAI47 H4-codex-13 SIWC eligibility on the cookbook page (vendor-hosted developer page)
 - finding: The OpenAI cookbook article says ChatGPT plan usage is available "to open-source projects, personal projects that run locally", that eligible Plus and Pro users can try such a tool, and that for a "paid or remotely hosted app" the developer must join a waitlist first.
 - quote: "If you're building a paid or remotely hosted app, join the waitlist to request access before offering it to users."   (one fetch of https://developers.openai.com/cookbook/articles/sign-in-with-chatgpt)
 - quote: "The ChatGPT plan usage integration described here is available for open-source tools and personal projects that run locally."   (one fetch)
 - source: https://developers.openai.com/cookbook/articles/sign-in-with-chatgpt ; no date shown ; read 2026-10-08
 - strength: stated (single read)
 
-### OAI47 H5-codex-4 Model pages for the three models (third read of the prices; adds endpoints and API rate limits)
+### OAI48 H5-codex-4 Model pages for the three models (third read of the prices; adds endpoints and API rate limits)
 - finding: Each model has a page under https://developers.openai.com/api/docs/models/<id>: context window 1,050,000 tokens and max output 128,000 tokens for all three; knowledge cutoff gpt-6-luna May 18, 2026, gpt-6-sol Apr 20, 2026, gpt-6-astra Apr 30, 2026; endpoints: Responses (`v1/responses`) and Chat Completions (`v1/chat/completions`) are both supported by the API (the Codex CLI itself accepts only the Responses format: H3-codex-1); default rate limits (Standard): gpt-6-sol and gpt-6-astra Build 5,000 RPM / 1,000,000 TPM, Launch 10,000 RPM / 4,000,000 TPM, Grow 15,000 RPM / 40,000,000 TPM; gpt-6-luna Build 5,000 RPM / 2,000,000 TPM, Launch 10,000 RPM / 10,000,000 TPM, Grow 30,000 RPM / 180,000,000 TPM. Prices on these pages equal the pricing page (luna $0.1 / $0.01 / $0.5; sol $2 / $0.20 / $10; astra $10 / $1 / $50 per 1M tokens: input / cached input / output).
 - quote: "GPT-6 Sol ... Input is $2, cached input is $0.2, and output is $10."   (paraphrase of the tool's rendering of the page; the tool did not return a table row for sol's price)
 - source: https://developers.openai.com/api/docs/models/gpt-6-sol ; .../gpt-6-luna ; .../gpt-6-astra ; no dates ; read 2026-10-08
 - strength: stated (one fetch per page; prices now read three times across pricing page twice and model pages once)
 
-### OAI48 H1-codex-12 Codex has a workload-identity route too (source only; docs page not found)
+### OAI49 H1-codex-12 Codex has a workload-identity route too (source only; docs page not found)
 - finding: The Codex source reads `OPENAI_FEDERATION_RULE_ID`, `OPENAI_IDENTITY_TOKEN_FILE` and `OPENAI_WORKLOAD_IDENTITY_CONTEXT` and exchanges the identity-token file at `auth.openai.com/oauth/token`; it requires "a login policy that permits ChatGPT authentication". I found no Codex documentation page for it (learn.chatgpt.com/llms.txt filtered for workload, federation, OIDC, identity: 0 matching titles), so what it unlocks (ChatGPT-workspace access vs API) is not stated in anything I read.
 - quote: "workload identity requires a login policy that permits ChatGPT authentication"   (verbatim, source error string)
 - source: codex-rs/login/src/auth/workload_identity.rs@2c3156a lines 12-14, 140-160 ; codex-rs/protocol/src/shell_environment.rs@2c3156a lines 10-12 ; read 2026-10-08
 - strength: shown (code); docs: not found
 
-### OAI49 H4-codex-6b OpenAI Account Sharing Policy (help centre): several devices allowed, usage limits may apply  [search-tool summary; page 403]
-- finding: WebSearch's summary of the help-centre article "OpenAI Account Sharing Policy" (help.openai.com/en/articles/10471989) says an account is meant only for the person who created it, that one may use it on several devices, that "usage limits may apply depending on your account activity and subscription level", and that it found no stated cap on simultaneous sessions; for ChatGPT Business the usage terms list "Sharing your account credentials or making your account available to anyone else" as prohibited. WebFetch gets HTTP 403 on that article and on "Can I access my ChatGPT subscription from another device?" (8980438), so the wording is the search tool's, not the page's.
+### OAI50 H4-codex-6b OpenAI Account Sharing Policy (help centre): several devices allowed, usage limits may apply  [search-tool summary; page 403]
+- finding: The search tool's summary of the help-centre article "OpenAI Account Sharing Policy" (help.openai.com/en/articles/10471989) says an account is meant only for the person who created it, that one may use it on several devices, that "usage limits may apply depending on your account activity and subscription level", and that it found no stated cap on simultaneous sessions; for ChatGPT Business the usage terms list "Sharing your account credentials or making your account available to anyone else" as prohibited. The fetch tool gets HTTP 403 on that article and on "Can I access my ChatGPT subscription from another device?" (8980438), so the wording is the search tool's, not the page's.
 - quote: "usage limits may apply depending on your account activity and subscription level"   (paraphrase: search-tool wording; page unread)
-- source: WebSearch 2026-10-08 (allowed_domains help.openai.com) ; https://help.openai.com/en/articles/10471989-openai-account-sharing-policy (403)
+- source: The search tool 2026-10-08 (allowed_domains help.openai.com) ; https://help.openai.com/en/articles/10471989-openai-account-sharing-policy (403)
 - strength: argued (search-tool summary only)
 
-### OAI50 H1-codex-13 Exact sentences on refresh, device code, API key and copying
+### OAI51 H4-geo Supported locations (side finding; both vendors)
+- finding: Anthropic's Supported Regions Policy page says the products "are available only in the countries and regions listed below" and excludes "Use by persons while physically located in an unsupported region"; it does not mention cloud servers or VPNs (one fetch, no date, "© 2026 Anthropic PBC"). OpenAI's Services Agreement (archive copy, "Effective: January 1, 2026") says "Customer and End Users may not access or offer access to the Services outside of the Supported Countries and Territories." Neither text says where a cloud container's location counts.
+- quote: "Customer and End Users may not access or offer access to the Services outside of the Supported Countries and Territories."   (verbatim, archive copy, clause 16.12)
+- quote: "are available only in the countries and regions listed below."   (verbatim fragment, one fetch of https://www.anthropic.com/supported-countries)
+- source: https://www.anthropic.com/supported-countries ; OpenTermsArchive/genai-contrib-versions ChatGPT/Commercial Terms.md@87eaac64c1 line 224 ; the Anthropic Consumer and Commercial Terms incorporate the policy (archive copies lines 45 and 36) ; read 2026-10-08
+- strength: stated
+
+### OAI52 H1-codex-13 Exact sentences on refresh, device code, API key and copying
 - finding: The Codex authentication page states, in full sentences, that managed ChatGPT sessions refresh automatically during use, that device code login must be enabled by the user (personal) or a workspace admin, that API-key authentication is the page's advice for CI/CD, and that copying the cached credentials to a headless machine is allowed after logging in elsewhere.
 - quote: "For sign in with ChatGPT sessions, Codex refreshes tokens automatically during use before they expire, so active sessions usually continue without requiring another browser login."   (verbatim, two fetches of https://learn.chatgpt.com/docs/auth; the tool returned it in two pieces both times)
 - quote: "Enable device code login in your ChatGPT security settings (personal account) or ChatGPT workspace permissions (workspace admin)."   (verbatim, two fetches)
@@ -371,3 +394,9 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - quote: "Codex cloud requires signing in with ChatGPT."   (verbatim, two fetches)
 - source: https://learn.chatgpt.com/docs/auth (formerly https://developers.openai.com/codex/auth) ; no date shown ; read 2026-10-08
 - strength: stated
+
+### OAI53 H4-codex-2e OpenAI rest-of-world Terms of Use, read through a public text converter (effective January 1, 2026)
+- finding: The page openai.com/policies/row-terms-of-use answers HTTP 403 to the fetch tool. The same page, fetched through a public text converter (a third-party service that fetches the vendor's page and returns its text), was read twice with two differently worded requests, and the two reads agree on every sentence quoted below. The page shows "Effective: January 1, 2026"; the second read adds that the line links a previous version, 2024-12-11. The second read found the programmatic-extraction item the only item under "What you cannot do" that mentions extracting data, scraping, or automated or programmatic access. The Open Terms Archive copy of the EU Terms of Use (entry H4-codex-2b) reads "extracting" where this page reads "extract". Neither read was asked whether the page names Codex or command-line tools, so the entry says nothing on that. A converter is not the vendor's server, so the read is marked shown, not stated.
+- quote: "Effective: January 1, 2026" (verbatim, two reads through the converter) ; "Automatically or programmatically extract data or Output (defined below)." (verbatim, same) ; "Use Output to develop models that compete with OpenAI." (paraphrase: one read) ; "Our Business Terms govern use of ChatGPT Enterprise, our APIs, and our other services for businesses and developers." (verbatim, same two reads) ; "You may not share your account credentials or make your account available to anyone else" (verbatim, same two reads; the fetch tool cut the sentence there, and both reads give its end as "and are responsible for all activities that occur under your account." outside quotation marks, so the end counts as paraphrase)
+- source: the vendor's page https://openai.com/policies/row-terms-of-use/ fetched through a public text converter service (third party) ; read 2026-10-08
+- strength: shown

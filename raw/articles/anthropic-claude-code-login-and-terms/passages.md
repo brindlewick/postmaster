@@ -25,7 +25,7 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - strength: stated
 
 ### ANT4 H1-claude-4 Credential file: path, mode, and field NAMES (names only; no values read)
-- finding: Linux: `~/.claude/.credentials.json`, mode 0600. macOS: Keychain, falling back to the same file when the Keychain rejects the write (for example locked in an SSH session). Windows: `%USERPROFILE%\.claude\.credentials.json`. `CLAUDE_CONFIG_DIR` relocates it. The doc does not list the file's field names; I did not open any credential file (rules forbid reading `~/.claude`). Field names: not documented on the pages read.
+- finding: Linux: `~/.claude/.credentials.json`, mode 0600. macOS: Keychain, falling back to the same file when the Keychain rejects the write (for example locked in an SSH session). Windows: `%USERPROFILE%\.claude\.credentials.json`. `CLAUDE_CONFIG_DIR` relocates it. The doc does not list the file's field names; no credential file was opened. Field names: not documented on the pages read.
 - quote: "On Linux, credentials are stored in `~/.claude/.credentials.json` with file mode `0600`."   (verbatim: two fetches)
 - quote: "Claude Code manages `.credentials.json` through `/login` and `/logout`."   (verbatim: two fetches)
 - source: https://code.claude.com/docs/en/authentication, "Credential management" ; read 2026-10-08
@@ -90,7 +90,7 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - quote: "Renewing early matters most for sessions that run unattended."   (verbatim, two fetches)
 - quote: "These limits are shared across Claude and Claude Code, meaning all activity in both tools counts against the same limits."   (one fetch of https://support.claude.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan; second read still due)
 - source: https://code.claude.com/docs/en/authentication ; support article above (page says "Updated today", no date) ; read 2026-10-08
-- strength: not found (machine/IP/device binding and concurrency cap). Searches: authentication page full text: "IP", "device", "machine-bound", "concurrent": hits only for Remote Control and CLAUDE_CONFIG_DIR; errors page (all 5 offsets): "another device" 0 hits; support article: "multiple sessions", "parallel", "headless", "CI", "remote machines": 0 hits (WebFetch said so explicitly); CHANGELOG.md: "tied to (this )?machine|IP address" not run yet (see below if added).
+- strength: not found (machine/IP/device binding and concurrency cap). Searches: authentication page full text: "IP", "device", "machine-bound", "concurrent": hits only for Remote Control and CLAUDE_CONFIG_DIR; errors page (all 5 offsets): "another device" 0 hits; support article: "multiple sessions", "parallel", "headless", "CI", "remote machines": 0 hits (the fetch tool said so explicitly); CHANGELOG.md: "tied to (this )?machine|IP address" not run yet (see below if added).
 
 ### ANT14 H3-claude-1 Base URL and credential variables; wire format is Anthropic Messages
 - finding: `ANTHROPIC_BASE_URL` points Claude Code at a gateway that serves the Anthropic Messages format (`/v1/messages`, optional `/v1/messages/count_tokens`, optional `/v1/models`). The credential goes in `ANTHROPIC_AUTH_TOKEN` (sent as `Authorization: Bearer`), `ANTHROPIC_API_KEY` (`x-api-key`) or an `apiKeyHelper` (both headers). Bedrock InvokeModel and Vertex rawPredict formats are also supported through `ANTHROPIC_BEDROCK_BASE_URL` / `ANTHROPIC_VERTEX_BASE_URL` with `CLAUDE_CODE_USE_BEDROCK=1` / `CLAUDE_CODE_USE_VERTEX=1`. Extra headers: `ANTHROPIC_CUSTOM_HEADERS`.
@@ -166,7 +166,7 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - strength: not found (one pass; queries: "automated", "resell", "Claude Code", "End Users", "rate limits"). A search is not proof.
 
 ### ANT25 H4-claude-7 (d) Usage Policy: new bullet on routing requests through consumer subscriptions, on a page dated in the future
-- finding: The page at https://www.anthropic.com/legal/aup shows "Effective November 12, 2026", i.e. five weeks AFTER today (2026-10-08); its "Previous Version" link leads to an archived copy "effective September 15, 2025" which lacks the bullet. The new-version bullet, under "Do Not Abuse Our Platform / This includes using our products or services to:", bans reselling, proxying or providing access to Claude "through unauthorized means, including services that route requests through consumer subscriptions or misrepresent the product or client being used". I found no announcement of the November change (one WebSearch). Whether the page is a pre-announced version not yet in force is therefore my reading of the dates, not stated by the page.
+- finding: The page at https://www.anthropic.com/legal/aup shows "Effective November 12, 2026", i.e. five weeks AFTER today (2026-10-08); its "Previous Version" link leads to an archived copy "effective September 15, 2025" which lacks the bullet. The new-version bullet, under "Do Not Abuse Our Platform / This includes using our products or services to:", bans reselling, proxying or providing access to Claude "through unauthorized means, including services that route requests through consumer subscriptions or misrepresent the product or client being used". I found no announcement of the November change (one search-tool query). Whether the page is a pre-announced version not yet in force is therefore my reading of the dates, not stated by the page.
 - quote: "Resell, proxy, or otherwise provide access to Claude through unauthorized means, including services that route requests through consumer subscriptions or misrepresent the product or client being used"   (verbatim: two fetches, each returning it in two pieces; the full bullet exceeds the tool's 125-char quote limit so the join is mine)
 - quote: "Agentic use cases must comply with the Usage Policy."   (verbatim: two fetches)
 - quote: "Effective November 12, 2026"   (verbatim: three fetches)
@@ -211,7 +211,7 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - strength: stated
 
 ### ANT31 H6-claude-2 Concurrent sessions: no cap stated; usage budget is the only stated limit
-- finding: No page read states a maximum number of concurrent Claude Code sessions or devices on a Pro/Max/Team login. Searches (WebFetch prompts over the Pro/Max Claude Code article, the Max plan article, the usage-and-length article, the errors page, the authentication page): "multiple instances", "parallel", "subagents", "concurrent", "simultaneous" returned NOT PRESENT or only changelog/Remote Control text. CHANGELOG.md has entries about concurrent sessions sharing one login ("Fixed multiple concurrent Claude Code sessions requiring repeated re-authentication when one session refreshes its OAuth token", version 2.1.81, line 6272), which shows multiple sessions on one login are an expected case.
+- finding: No page read states a maximum number of concurrent Claude Code sessions or devices on a Pro/Max/Team login. Searches (the fetch tool prompts over the Pro/Max Claude Code article, the Max plan article, the usage-and-length article, the errors page, the authentication page): "multiple instances", "parallel", "subagents", "concurrent", "simultaneous" returned NOT PRESENT or only changelog/Remote Control text. CHANGELOG.md has entries about concurrent sessions sharing one login ("Fixed multiple concurrent Claude Code sessions requiring repeated re-authentication when one session refreshes its OAuth token", version 2.1.81, line 6272), which shows multiple sessions on one login are an expected case.
 - source: pages above ; https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md line 6272 ; read 2026-10-08
 - strength: not found (cap); shown (concurrent sessions expected)
 
@@ -227,7 +227,7 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - quote: "Self-hosted environments are in public beta on Team and Enterprise plans and are off by default."   (verbatim, one fetch of https://code.claude.com/docs/en/self-hosted-environments)
 - quote: "Billing: sessions in a self-hosted environment consume your organization's Claude Code usage the same way sessions in Anthropic-hosted environments do."   (one fetch; the page's bullet reads "**Billing**: sessions in a self-hosted environment consume ...")
 - quote: "the session authenticates with an Anthropic-issued, session-scoped OAuth token."   (one fetch)
-- source: https://code.claude.com/docs/en/self-hosted-environments ; no date ; read 2026-10-08. The "deploy" and "configuration" subpages were returned in full but too large for the tool (76 KB, 61 KB) and were saved by the harness under ~/.claude, which the rules forbid me to read; so they are NOT read.
+- source: https://code.claude.com/docs/en/self-hosted-environments ; no date ; read 2026-10-08. The "deploy" and "configuration" subpages were returned in full but too large for the tool (76 KB, 61 KB) so they are NOT read.
 - strength: stated (overview page, single read). Not checked: whether a Cloudflare Container is a supported host (the deploy page was not read).
 
 ### ANT34 H6-claude-3 Cloud sessions (Anthropic-hosted): parallel sessions allowed; they share the account's limits
@@ -280,7 +280,7 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - strength: stated (single read)
 
 ### ANT41 H6-claude-4 Team/Enterprise seats (single read of the help article, "Updated yesterday")
-- finding: Team and seat-based Enterprise can buy usage credits for members who reach their included limits; usage-based Enterprise (including self-serve Enterprise) has "no per-seat usage limits" and is billed at API rates; Premium seats "offer more usage"; the article gives no multiple of Pro, no weekly-limit sentence and nothing on automated or parallel use. (A WebSearch summary of the same article's other cached version says Standard seats get 1.25x and Premium 6.25x the Pro per-session allowance; I did not see that in my fetch of the live article, so it is unconfirmed.)
+- finding: Team and seat-based Enterprise can buy usage credits for members who reach their included limits; usage-based Enterprise (including self-serve Enterprise) has "no per-seat usage limits" and is billed at API rates; Premium seats "offer more usage"; the article gives no multiple of Pro, no weekly-limit sentence and nothing on automated or parallel use. (A search-tool summary of the same article's other cached version says Standard seats get 1.25x and Premium 6.25x the Pro per-session allowance; I did not see that in my fetch of the live article, so it is unconfirmed.)
 - quote: "If your organization is on a usage-based Enterprise plan (including self-serve Enterprise), there are no per-seat usage limits—usage is based on consumption and billed at API rates."   (one fetch of https://support.claude.com/en/articles/11845131-use-claude-code-with-your-team-or-enterprise-plan; the tool split it in two pieces)
 - source: that article ; read 2026-10-08
 - strength: stated (single read)
@@ -320,51 +320,74 @@ Read on 2026-10-08. Each entry is the reader's note, the quotations with the mar
 - strength: stated
 
 ### ANT47 H4-claude-14 The Usage Policy's 2026-11-12 date: no announcement found
-- finding: Searched for a notice of the version "Effective November 12, 2026": the help-center article on usage-policy updates (dated note "March 16, 2026", one fetch) has 0 hits for "November 12, 2026", "consumer subscriptions", "resale", "proxy"; the news post https://www.anthropic.com/news/usage-policy-update is dated Aug 15, 2025 and says "These changes will take effect on September 15, 2025." (one fetch); one WebSearch found no report of a November 2026 update. So the only source for the November 12 date and the "consumer subscriptions" bullet is the AUP page itself (read twice).
+- finding: Searched for a notice of the version "Effective November 12, 2026": the help-center article on usage-policy updates (dated note "March 16, 2026", one fetch) has 0 hits for "November 12, 2026", "consumer subscriptions", "resale", "proxy"; the news post https://www.anthropic.com/news/usage-policy-update is dated Aug 15, 2025 and says "These changes will take effect on September 15, 2025." (one fetch); one search found no report of a November 2026 update. So the only source for the November 12 date and the "consumer subscriptions" bullet is the AUP page itself (read twice).
 - source: https://support.claude.com/en/articles/9301722-updates-to-our-acceptable-use-policy-now-usage-policy-consumer-terms-of-service-and-privacy-policy ; https://www.anthropic.com/news/usage-policy-update ; read 2026-10-08
-- strength: not found (announcement). Queries: the two fetches above plus WebSearch "Anthropic Usage Policy update November 12 2026 consumer subscriptions resell proxy Claude" (0 relevant hits).
+- strength: not found (announcement). Queries: the two fetches above plus a search-tool query "Anthropic Usage Policy update November 12 2026 consumer subscriptions resell proxy Claude" (0 relevant hits).
 
-### ANT48 H1-claude-11 CLI commands for login and token minting
+### ANT48 H4-not-found-controls Greps over the archived terms (full text) with controls
+- finding: Counts of whole-text matches, case-insensitive, in the Open Terms Archive copies (OpenAI EU Terms of Use, header "Updated: 16 January 2026"; OpenAI Services Agreement "Effective: January 1, 2026"; Anthropic Consumer Terms "Effective October 8, 2025"; Anthropic Commercial Terms "Effective June 17, 2025"):
+  | term | OpenAI ToU | OpenAI Services Agr. | Anthropic Consumer | Anthropic Commercial |
+  | simultaneous | 0 | 0 | 0 | 0 |
+  | concurrent | 0 | 1 ("concurrently", unrelated: services-term proration) | 0 | 0 |
+  | device | 1 (in vitro diagnostic devices, unrelated) | 0 | 0 | 0 |
+  | IP address | 0 | 0 | 0 | 0 |
+  | CI/CD, continuous integration | 0 | 0 | 0 | 0 |
+  | container, cloud, virtual machine | container 1, cloud 1 (both in the "Licensed Materials" clause, below), VM 0 | 0 | 0 | 0 |
+  | Claude Code | 0 | 0 | 0 | 0 |
+  | Codex | 3 (code-generation clause and links) | 0 | 0 | 0 |
+  Positive controls through the same command: "multiple users" returns 1 in the Services Agreement (clause 3.1); "automated or non-human" returns 1 in the Anthropic Consumer Terms (item 7); "Codex" returns 3 in the OpenAI Terms of Use.
+  So none of the four documents (as archived) mentions simultaneous sessions, devices, IP addresses, CI, Claude Code, or machine/cloud limits for a login. Neither Anthropic document mentions Claude Code at all; the Claude Code link to the Terms is on the Claude Code legal page.
+- source: the archive copies of the four documents (OpenTermsArchive/genai-contrib-versions, commits 5f624c86c2, 87eaac64c1, 2de35b9576, 817278488c) ; read 2026-10-08
+- strength: not found (as a negative result over third-party copies; the live pages themselves were read only for Anthropic)
+
+### ANT49 H1-claude-11 CLI commands for login and token minting
 - finding: `claude auth login` has `--email`, `--sso` and `--console` (API billing instead of a subscription); `claude auth status` prints JSON whose `authMethod` is one of `none`, `claude.ai`, `oauth_token`, `api_key`, `api_key_helper`, `third_party`, and exits 1 when not logged in; `claude setup-token` "Generate a long-lived OAuth token for CI and scripts. Prints the token to the terminal without saving it. Requires a Claude subscription."; `claude self-hosted-runner` registers "this machine or container with a self-hosted environment"; `claude -p ... --environment ccpool_<id>` dispatches a session to a self-hosted environment; `--max-budget-usd`, `--no-session-persistence`, `--exclude-dynamic-system-prompt-sections` ("Improves prompt-cache reuse across different users and machines running the same task") are print-mode flags.
 - quote: "Generate a long-lived OAuth token for CI and scripts. Prints the token to the terminal without saving it. Requires a Claude subscription."   (verbatim, one fetch)
 - quote: "Show authentication status as JSON. Use `--text` for human-readable output. Exits with code 0 if logged in, 1 if not."   (verbatim, one fetch)
 - source: https://code.claude.com/docs/en/cli-reference, table "CLI commands" and "CLI flags" ; no date ; read 2026-10-08
 - strength: stated
 
-### ANT49 H1-claude-4b Credential file field NAMES: only two are visible in public text
-- finding: Anthropic's docs do not list the fields of `~/.claude/.credentials.json`. The public changelog names two: `scopes` (an array) and `subscriptionType` (shown as "Claude Pro"/"Claude Max"). Other field names are not documented in the sources I read; I did not open any credential file (rules forbid reading `~/.claude`). A changelog entry says a leftover `.credentials.json` on macOS can make sessions show "Not logged in" after a login elsewhere (the macOS Keychain is the primary store, the file a fallback).
+### ANT50 H1-claude-4b Credential file field NAMES: only two are visible in public text
+- finding: Anthropic's docs do not list the fields of `~/.claude/.credentials.json`. The public changelog names two: `scopes` (an array) and `subscriptionType` (shown as "Claude Pro"/"Claude Max"). Other field names are not documented in the sources I read; no credential file was opened. A changelog entry says a leftover `.credentials.json` on macOS can make sessions show "Not logged in" after a login elsewhere (the macOS Keychain is the primary store, the file a fallback).
 - quote: "Fixed a corrupt `.credentials.json` with a non-array `scopes` value hanging the CLI on startup or silently aborting OAuth token refresh"   (verbatim, CHANGELOG.md line 4921, version 2.1.143)
 - quote: "Fixed `.credentials.json` losing `subscriptionType` (showing \"Claude API\" instead of \"Claude Pro\"/\"Claude Max\") when the profile endpoint transiently fails during token refresh"   (verbatim, CHANGELOG.md line 6668, version 2.1.69)
 - source: https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md (repo head 602df92, 2026-10-08T19:48:16Z) ; read 2026-10-08
 - strength: shown for the two names; not found for the rest (searches: changelog grep for "claudeAiOauth|expiresAt|accessToken|refreshToken|subscriptionType|rateLimitTier|.credentials.json": 4 hits, 2 field names; authentication page read twice: 0 field names)
 
-### ANT50 H1-claude-12 Workload Identity Federation: a keyless CI route to the API (not a subscription route)
+### ANT51 H1-claude-12 Workload Identity Federation: a keyless CI route to the API (not a subscription route)
 - finding: Anthropic documents federation with "any standards-compliant OIDC issuer such as GitHub Actions, Kubernetes, SPIFFE, Microsoft Entra ID, or Okta": a workload presents a signed JWT, Anthropic returns a short-lived `sk-ant-oat01-...` access token bound to a Console service account; default token lifetime 3,600 seconds (rule setting 60 to 86,400); the SDK refreshes at expiry minus 120 s (advisory) and minus 30 s (mandatory); identity tokens carrying a `jti` are single-use by default. Claude Code reads `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_IDENTITY_TOKEN_FILE`. The page's examples use model `claude-opus-5-5`. Billing is the organization's API billing; subscription limits do not apply.
 - quote: "any standards-compliant OIDC issuer such as GitHub Actions, Kubernetes, SPIFFE, Microsoft Entra ID, or Okta"   (verbatim, one fetch of https://platform.claude.com/docs/en/manage-claude/workload-identity-federation)
 - quote: "returns a short-lived `sk-ant-oat01-...` token that acts on behalf of the rule's target service account"   (verbatim, same page)
 - source: https://platform.claude.com/docs/en/manage-claude/workload-identity-federation ; no date ; read 2026-10-08
 - strength: stated
 
-### ANT51 H4-claude-5b Anthropic login help article: use the same account on several devices; no device cap stated
-- finding: Anthropic's "Log in to your Claude account" article (page date "May 19, 2026") says how to use one account across devices; one fetch of it found no sentence on a device or simultaneous-session limit, and WebSearch found none in the support centre; the Cowork article (a different product) says "Shared logins aren't supported" (search-tool summary).
+### ANT52 H4-claude-5b Anthropic login help article: use the same account on several devices; no device cap stated
+- finding: Anthropic's "Log in to your Claude account" article (page date "May 19, 2026") says how to use one account across devices; one fetch of it found no sentence on a device or simultaneous-session limit, and the search tool found none in the support centre; the Cowork article (a different product) says "Shared logins aren't supported" (search-tool summary).
 - quote: "To use your Claude account across multiple devices, enter the same email address you use to log in on your usual device."   (verbatim, one fetch of https://support.claude.com/en/articles/13189465-logging-in-to-your-claude-account)
 - source: that article ; read 2026-10-08
-- strength: stated (the sentence); not found (a cap). Searches: WebFetch of the article ("device or simultaneous session limits": NOT PRESENT); WebSearch "Claude account use on multiple devices at the same time sessions limit": 0 hits describing a cap.
+- strength: stated (the sentence); not found (a cap). Searches: a fetch-tool read of the article ("device or simultaneous session limits": NOT PRESENT); a search-tool query "Claude account use on multiple devices at the same time sessions limit": 0 hits describing a cap.
 
-### ANT52 H3-claude-7 Vendor-recommended credential-injecting proxy via ANTHROPIC_BASE_URL (API-key route)
+### ANT53 H4-geo Supported locations (side finding; both vendors)
+- finding: Anthropic's Supported Regions Policy page says the products "are available only in the countries and regions listed below" and excludes "Use by persons while physically located in an unsupported region"; it does not mention cloud servers or VPNs (one fetch, no date, "© 2026 Anthropic PBC"). OpenAI's Services Agreement (archive copy, "Effective: January 1, 2026") says "Customer and End Users may not access or offer access to the Services outside of the Supported Countries and Territories." Neither text says where a cloud container's location counts.
+- quote: "Customer and End Users may not access or offer access to the Services outside of the Supported Countries and Territories."   (verbatim, archive copy, clause 16.12)
+- quote: "are available only in the countries and regions listed below."   (verbatim fragment, one fetch of https://www.anthropic.com/supported-countries)
+- source: https://www.anthropic.com/supported-countries ; OpenTermsArchive/genai-contrib-versions ChatGPT/Commercial Terms.md@87eaac64c1 line 224 ; the Anthropic Consumer and Commercial Terms incorporate the policy (archive copies lines 45 and 36) ; read 2026-10-08
+- strength: stated
+
+### ANT54 H3-claude-7 Vendor-recommended credential-injecting proxy via ANTHROPIC_BASE_URL (API-key route)
 - finding: Anthropic's "Securely deploying AI agents" page recommends running "a proxy outside the agent's security boundary that injects credentials into outgoing requests"; for Claude Code and the Agent SDK it names `ANTHROPIC_BASE_URL` ("simple but only for sampling API requests") and `HTTP_PROXY`/`HTTPS_PROXY`; the proxy "receives plaintext HTTP requests, can inspect and modify them (including injecting credentials)". It lists Envoy (`credential_injector`), mitmproxy, Squid and LiteLLM as proxies. The "Hosting the Agent SDK" page says the same for the Anthropic API: "the subprocess reads `ANTHROPIC_API_KEY` from its environment. Supply it from your secret manager, or set `ANTHROPIC_BASE_URL` to route model calls through a proxy that injects the key outside the container." Neither page mentions Cloudflare or subscription (claude.ai) login for hosted agents; both are about API keys.
 - quote: "The recommended approach is to run a proxy outside the agent's security boundary that injects credentials into outgoing requests."   (verbatim, one fetch of the Claude Code docs page agent-sdk/secure-deployment, section "The proxy pattern")
 - quote: "Supply it from your secret manager, or set `ANTHROPIC_BASE_URL` to route model calls through a proxy that injects the key outside the container."   (verbatim, one fetch of the page agent-sdk/hosting, section "Auth and secrets")
 - source: https://code.claude.com/docs/en/agent-sdk/secure-deployment ; https://code.claude.com/docs/en/agent-sdk/hosting ; no dates ; read 2026-10-08 (Cloudflare: 0 mentions on both; checked by reading the full text the tool returned)
 - strength: stated
 
-### ANT53 H1-claude-13 Hosting guide: per-agent container sizing, network, ephemeral pattern
+### ANT55 H1-claude-13 Hosting guide: per-agent container sizing, network, ephemeral pattern
 - finding: "The Agent SDK spawns and supervises a `claude` CLI subprocess"; starting point "1 GiB RAM, 5 GiB disk, and 1 CPU per agent"; needs outbound HTTPS to `api.anthropic.com` (or the Bedrock/Agent Platform endpoint); the ephemeral pattern creates "a container for each user task" that reads the task from `TASK_PROMPT`, calls the SDK and exits; sessions on local disk are lost with the container unless a `SessionStore` is used; the cookbook has deployable code for local Docker, Modal and Kubernetes. Authentication in these pages is `ANTHROPIC_API_KEY` or a proxy.
 - quote: "1 GiB RAM, 5 GiB disk, and 1 CPU per agent is a reasonable starting point for a freshly started instance."   (verbatim, one fetch of https://code.claude.com/docs/en/agent-sdk/hosting, section "Resources")
 - source: https://code.claude.com/docs/en/agent-sdk/hosting ; read 2026-10-08
 - strength: stated
 
-### ANT54 H6-claude-6 Hosting guide admits parallel fan-out can hit rate limits
+### ANT56 H6-claude-6 Hosting guide admits parallel fan-out can hit rate limits
 - finding: In its known-limitations table the hosting guide says "Large parallel-subagent fanouts can hit rate limits" and advises breaking work into smaller batches (this is about API/Agent SDK usage; it does not say which credential).
 - quote: "Large parallel-subagent fanouts can hit rate limits"   (verbatim fragment, one fetch)
 - source: https://code.claude.com/docs/en/agent-sdk/hosting, section "Known limitations" ; read 2026-10-08

@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import type { Extract } from "../../2026-10-03-lane-audit/apparatus/extract.ts";
 import { median } from "../../2026-10-03-lane-audit/apparatus/analyze.ts";
 import { covered, runTime, type RunTime, summarizeRole } from "./instance-time.ts";
-import { perRunTable, rateTable, type Scenario, scenarioTable, timeTable } from "./tables.ts";
+import { dollars, perRunTable, rateTable, type Scenario, scenarioCost, scenarioTable, timeTable } from "./tables.ts";
 import type { RunUptime } from "./uptime.ts";
 
 const here = dirname(new URL(import.meta.url).pathname);
@@ -30,16 +30,21 @@ const uptime = (JSON.parse(readFileSync(uptimeFile, "utf8")) as { rows: RunUptim
 const ceilingOf = (ids: string[]): number[] =>
   real.filter((t) => ids.includes(t.run)).map((t) => t.coachmanUpper);
 const measured = uptime.map((u) => u.run);
-const coachman = {
-  floor: median(uptime.map((u) => u.seconds)) as number,
-  ceiling: median(real.map((t) => t.coachmanUpper)) as number,
-};
+const hoursOf = (seconds: number): string => (seconds / 3600).toFixed(1);
+const floor = median(uptime.map((u) => u.seconds)) as number;
+// the ceiling over the same runs as the floor, so both ends describe the same group of runs
+const ceilingSameRuns = median(ceilingOf(measured)) as number;
+const ceilingAllRuns = median(real.map((t) => t.coachmanUpper)) as number;
+const coachman = { floor, ceiling: ceilingSameRuns };
+const biggest: Scenario = { name: "all standard-4", lanes: "standard-4", reviewers: "standard-4", coachman: "standard-4" };
 const coachmanLine = `The coachman's process time is not recorded for every launch, so it is bracketed. The floor
 is the sum, over a run's coachman threads, of the last process's uptime from each thread's session
-export: the median of ${uptime.length} runs is ${(coachman.floor / 3600).toFixed(1)} hours, and over the same runs the ceiling
-(every stage a leg can run in, the wait for the user's spec review included) has a median of
-${((median(ceilingOf(measured)) as number) / 3600).toFixed(1)} hours. The cost tables use the floor above and, as the ceiling, the median over all
-${real.length} runs, ${(coachman.ceiling / 3600).toFixed(1)} hours.`;
+export: the median of ${uptime.length} runs is ${hoursOf(floor)} hours. The ceiling is the seconds in the stages
+a leg can run in (the wait for the user's spec review included) over the same ${uptime.length} runs: a median of
+${hoursOf(ceilingSameRuns)} hours. The ${real.length - uptime.length} runs without session exports are the longest by stage seconds; over all
+${real.length} runs the ceiling's median is ${hoursOf(ceilingAllRuns)} hours, which would raise the top of every cell
+below (the largest cell, all standard-4 with every vCPU busy, from $${dollars(scenarioCost(real, biggest, 1, ceilingSameRuns).total)}
+to $${dollars(scenarioCost(real, biggest, 1, ceilingAllRuns).total)}). The cost tables use the floor and the ceiling of the same ${uptime.length} runs.`;
 
 const SCENARIOS: Scenario[] = [
   { name: "all standard-2", lanes: "standard-2", reviewers: "standard-2", coachman: "standard-2" },

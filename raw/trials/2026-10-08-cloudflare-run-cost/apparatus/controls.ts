@@ -8,7 +8,7 @@ import { median } from "../../2026-10-03-lane-audit/apparatus/analyze.ts";
 import { cost, INSTANCE_TYPES, type InstanceType } from "./cost.ts";
 import { covered, runTime, seconds, summarizeRole } from "./instance-time.ts";
 import type { Launch } from "./measure.ts";
-import type { Prices } from "./model-bill.ts";
+import { CONTRIBUTOR_TIER, type Prices, roleDollars, STANDARD_TIER, withRatesOf } from "./model-bill.ts";
 import { totalInput } from "./tokens.ts";
 import type { RunUptime } from "./uptime.ts";
 
@@ -189,7 +189,7 @@ export function runControls(inp: Inputs): Control[] {
     id: "C14",
     kind: "positive",
     what: "MiMo output differs from the audit's by its reasoning tokens, which the audit left out",
-    expected: "more than the audit's 1019k reviewer output, since reasoning is billed as output",
+    expected: "more than the audit's 1019k reviewer output, since reasoning tokens are counted as output (how Xiaomi bills them is not stated, so this is an assumption)",
     got: `${fmt(rm.output, 0)}k`,
     pass: rm.output > 1019,
   });
@@ -257,6 +257,46 @@ export function runControls(inp: Inputs): Control[] {
     got: `${missing.length} missing of ${Object.keys(inp.prices.models).length}`,
     pass: missing.length === 0,
   });
+
+  // 8b. the coachman re-priced at Meta's standard tier: summed launch by launch, and from the summed tokens
+  const runsById = new Map(inp.audit.runs.map((r) => [r.id, r]));
+  const standardPrices = inp.prices.models[STANDARD_TIER];
+  if (standardPrices) {
+    const coach = inp.launches.filter((l) => l.role === "coachman");
+    const sumKind = (k: "uncached" | "cacheRead" | "cacheWrite" | "output"): number =>
+      sum(coach.map((l) => l.tokens[k]));
+    const byHand =
+      (sumKind("uncached") * standardPrices.input +
+        sumKind("cacheRead") * standardPrices.cachedInput +
+        sumKind("cacheWrite") * standardPrices.cacheWrite +
+        sumKind("output") * standardPrices.output) /
+      1e6;
+    const swapped = withRatesOf(inp.prices, { from: CONTRIBUTOR_TIER, to: STANDARD_TIER });
+    const launchByLaunch = roleDollars(inp.launches, runsById, swapped, "coachman");
+    add({
+      id: "C19",
+      kind: "positive",
+      what: "the coachman's dollars at Meta's standard tier, summed launch by launch and recomputed from the summed tokens",
+      expected: "the two agree to a cent",
+      got: `$${launchByLaunch.toFixed(2)} and $${byHand.toFixed(2)} (${coach.length} runs)`,
+      pass: coach.length > 0 && within(launchByLaunch, byHand, 0.01),
+    });
+    const base = roleDollars(inp.launches, runsById, inp.prices, "coachman");
+    const none = roleDollars(
+      inp.launches,
+      runsById,
+      withRatesOf(inp.prices, { from: "no-launch-used-this", to: STANDARD_TIER }),
+      "coachman",
+    );
+    add({
+      id: "C20",
+      kind: "negative",
+      what: "the same re-pricing for a model no launch used",
+      expected: "the coachman's dollars do not move",
+      got: `$${base.toFixed(2)} before and $${none.toFixed(2)} after`,
+      pass: base > 0 && base === none,
+    });
+  }
 
   // 9. the median helper agrees with a count by hand
   add({

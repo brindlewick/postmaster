@@ -8,10 +8,10 @@ says what each column means and what it leaves out.
 
 | Role | Launches | Total hours | Median run, hours | Median launch, min | 90th percentile, min | Longest, min |
 | --- | --- | --- | --- | --- | --- | --- |
-| workhorse lanes | 36 | 65.8 | 2.1 | 64 | 906 | 906 |
-| reviewers | 289 | 122.3 | 3.1 | 17 | 344 | 344 |
-| gate runs on a lane's branch (inside the coachman) | 36 | 6.5 | 0.4 | 12 | 17 | 17 |
-| gate runs on the synthesis (inside the coachman) | 260 | 43.5 | 2.1 | 12 | 21 | 21 |
+| workhorse lanes | 36 | 65.8 | 2.1 | 64 | 140 | 906 |
+| reviewers | 289 | 122.3 | 3.1 | 17 | 44 | 344 |
+| gate runs on a lane's branch (inside the coachman) | 36 | 6.5 | 0.4 | 12 | 16 | 17 |
+| gate runs on the synthesis (inside the coachman) | 260 | 43.5 | 2.1 | 12 | 16 | 21 |
 | coachman, upper bound (stages a leg can run in) | 18 | 476.5 | 23.8 | – | – | – |
 
 Lanes with no recorded time, left out above: 0.
@@ -20,8 +20,8 @@ Lanes with no recorded time, left out above: 0.
 
 | Role | Launches | Total hours | Median run, hours | Median launch, min | 90th percentile, min | Longest, min |
 | --- | --- | --- | --- | --- | --- | --- |
-| workhorse lanes | 44 | 9.8 | 0.2 | 7 | 158 | 158 |
-| reviewers | 192 | 24.9 | 0.9 | 2 | 153 | 153 |
+| workhorse lanes | 44 | 9.8 | 0.2 | 7 | 14 | 158 |
+| reviewers | 192 | 24.9 | 0.9 | 2 | 20 | 153 |
 | gate runs on a lane's branch (inside the coachman) | 42 | 0.0 | 0.0 | 0 | 0 | 0 |
 | gate runs on the synthesis (inside the coachman) | 118 | 0.0 | 0.0 | 0 | 0 | 0 |
 | coachman, upper bound (stages a leg can run in) | 24 | 46.4 | 1.6 | – | – | – |

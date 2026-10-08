@@ -20,19 +20,21 @@ vCPUs busy, since the audit holds no CPU measurement.
 
 Lanes and reviewers at the median run's seconds from the audit. The coachman's process time is not recorded for every launch, so it is bracketed. The floor
 is the sum, over a run's coachman threads, of the last process's uptime from each thread's session
-export: the median of 14 runs is 3.6 hours, and over the same runs the ceiling
-(every stage a leg can run in, the wait for the user's spec review included) has a median of
-18.8 hours. The cost tables use the floor above and, as the ceiling, the median over all
-18 runs, 23.8 hours.
+export: the median of 14 runs is 3.6 hours. The ceiling is the seconds in the stages
+a leg can run in (the wait for the user's spec review included) over the same 14 runs: a median of
+18.8 hours. The 4 runs without session exports are the longest by stage seconds; over all
+18 runs the ceiling's median is 23.8 hours, which would raise the top of every cell
+below (the largest cell, all standard-4 with every vCPU busy, from $9.60
+to $12). The cost tables use the floor and the ceiling of the same 14 runs.
 The gates run inside these launches and add nothing of their own. List rates, with no monthly
 allowance taken off. Each cell reads "coachman at its floor to coachman at its ceiling".
 
 | Scenario | Lanes | Reviewers | Coachman | Run total, $ (CPU 0% busy) | Run total, $ (CPU 25% busy) | Run total, $ (CPU 100% busy) |
 | --- | --- | --- | --- | --- | --- | --- |
-| all standard-2 | standard-2 | standard-2 | standard-2 | 0.50 to 1.65 | 0.65 to 2.18 | 1.12 to 3.74 |
-| all standard-3 | standard-3 | standard-3 | standard-3 | 0.66 to 2.21 | 0.98 to 3.25 | 1.92 to 6.38 |
-| all standard-4 | standard-4 | standard-4 | standard-4 | 0.98 to 3.28 | 1.61 to 5.37 | 3.49 to 12 |
-| lanes and reviewers standard-3, coachman standard-4 | standard-3 | standard-3 | standard-4 | 0.79 to 3.09 | 1.24 to 4.99 | 2.56 to 11 |
+| all standard-2 | standard-2 | standard-2 | standard-2 | 0.50 to 1.37 | 0.65 to 1.80 | 1.12 to 3.09 |
+| all standard-3 | standard-3 | standard-3 | standard-3 | 0.66 to 1.82 | 0.98 to 2.68 | 1.92 to 5.27 |
+| all standard-4 | standard-4 | standard-4 | standard-4 | 0.98 to 2.71 | 1.61 to 4.43 | 3.49 to 9.60 |
+| lanes and reviewers standard-3, coachman standard-4 | standard-3 | standard-3 | standard-4 | 0.79 to 2.52 | 1.24 to 4.06 | 2.56 to 8.67 |
 
 ## The median fixture run
 

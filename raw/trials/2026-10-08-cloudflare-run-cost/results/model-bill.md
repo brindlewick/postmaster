@@ -30,3 +30,19 @@ Per run (18 runs with priced launches), dollars as measured:
 | median | 14.56 | 2.12 | 16.13 |
 | most | 294 | 9.24 | 301 |
 | share of all dollars | 92% | 8% | |
+
+## If the coachman ran on Meta's standard tier
+
+The coachman ran on `muse-spark-1.3-contributor` ($0.1 / $0.002 / $0.2 per million tokens: input, cached input, output),
+the tier that lets Meta train on what is sent. The standard tier, `muse-spark-1.3`, is $1.25 / $0.15 / $4.25.
+The coachman's tokens come to $11.75 at the contributor tier and
+$331 at the standard tier. Everything else as above.
+
+Per run (18 runs with priced launches), coachman at the standard tier, dollars as measured:
+
+| | Opus security review | Everything else | Total |
+| --- | --- | --- | --- |
+| mean | 35.79 | 21.04 | 56.83 |
+| median | 14.56 | 19.05 | 34.63 |
+| most | 294 | 81.35 | 301 |
+| share of all dollars | 63% | 37% | |

@@ -84,7 +84,7 @@ export function summarizeRole(times: readonly RunTime[], role: Role): RoleSummar
     totalSeconds: sum(each),
     medianPerRun: median(times.map((t) => seconds(t[role]))),
     medianEach: median(each),
-    p90Each: percentile(each, 90),
+    p90Each: percentile(each, 0.9),
     longestEach: each.length === 0 ? null : Math.max(...each),
   };
 }

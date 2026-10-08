@@ -58,7 +58,8 @@ export function render(bs: readonly Block[], intro: string, opt: Options = {}): 
     const always = opt.always?.test(b.id) === true;
     const lines = always ? b.lines.filter((l) => l.trim() !== "") : kept(b);
     if (lines.length === 0) continue;
-    const hasQuote = lines.some((l) => /^- quote[^:]*:\s*"/u.test(l));
+    // a quotation line is any `- quote...:` line that says something other than n/a, whether the words are in marks or are code
+    const hasQuote = lines.some((l) => /^- quote[^:]*:\s*\S/u.test(l) && !/^- quote[^:]*:\s*n\/a/u.test(l));
     const absent = lines.some((l) => /strength:\s*not found/u.test(l));
     if (!hasQuote && !absent && !always) continue;
     n += 1;

@@ -27,7 +27,8 @@ that the flow runs on Cloudflare, which needs a trial of its own.
   repository at commit 6e1b96433cf016efd2c0c9057a7e27a8e112376f, read on 2026-10-08. The models': each vendor's own
   pricing page, read on 2026-10-08, with the page and tier in `results/prices.json`.
 - The flow's scripts, `scripts/` and `scripts/lib/` of this repository at the base of this branch, for the table of
-  what they lean on.
+  what they lean on. The seven scripts that test the flow itself (self-tests, oracles, acceptance runs) and every
+  `.test.ts` are left out, which leaves 69.
 
 **Definitions.**
 
@@ -41,7 +42,9 @@ that the flow runs on Cloudflare, which needs a trial of its own.
 - *The coachman's seconds* are bracketed. The floor is the sum, over a run's coachman threads, of the uptime of the
   thread's last process, from the session export; a thread resumed after a stop ran in several processes and the
   export keeps only the last, so the sum is a floor. The ceiling is the seconds in the stages in which a leg can run
-  (planning, workhorses running, synthesis, checkpoint, review), which counts the user's wait for a spec review.
+  (planning, workhorses running, synthesis, checkpoint, review), which counts the user's wait for a spec review. The cost
+  tables use the median of both over the same 14 runs that have session exports; the ceiling over all 18 runs, which
+  includes the four longest, is reported beside them and in what the largest cell would read.
 - *Cost of container time*: seconds times the per-second rate of an instance type, memory and disk for what the type
   provisions and CPU for active use only, from the Containers pricing page. The audit holds no CPU measurement, so
   CPU use is bracketed at none, a quarter and all vCPUs busy. List rates; the monthly allowance is not taken off,
@@ -53,10 +56,11 @@ that the flow runs on Cloudflare, which needs a trial of its own.
 - *Model bill*: the tokens of each kind times the vendor's rate for that kind. For Claude Code the figure is the
   dollars the harness reported, which are cumulative for the session; its top-level usage is the last iteration's and
   reads low. "If no cache hit" prices every input token at the plain input rate and brackets what the vendors'
-  caches do.
+  caches do. A second pricing puts the coachman's tokens at Meta's standard tier instead of the contributor tier it ran on,
+  since the two differ twelvefold in input price.
 
 **Counts and controls.** Every count has a control, listed with its result in
-[results/controls.md](results/controls.md), 18 in all, and `apparatus/controls.test.ts` runs them against the
+[results/controls.md](results/controls.md), 20 in all, and `apparatus/controls.test.ts` runs them against the
 committed data. They include: the audit's own published gate totals reproduced through the new code (36 lane-branch
 gate runs, 6.5 hours; 260 synthesis runs, 43.5 hours); one lane's seconds recomputed from its two timestamps; that
 lane's cost recomputed by hand; a run with nothing in it reading zero everywhere; the coachman's floor below its
@@ -65,8 +69,12 @@ reproducing the audit's published ones (coachman 1478M in and 5253k out, codex r
 codex workhorses 18 launches and 438M in, Opus 71 launches and $644.17); and Claude Code's reported dollars
 recomputed from each launch's own per-model tokens at the published Opus 5.5 prices, inside the bracket from all
 cache writes at five minutes to all at one hour for 61 of 61 launches that used one model, against 0 launches when
-the same arithmetic uses Opus 4.1's prices. The unit tests beside each module hold the other positive and negative
-cases, 65 tests in all. They show the code applies a rule the same way on a case that must read non-zero and one that
+the same arithmetic uses Opus 4.1's prices; and the coachman's dollars at Meta's standard tier summed launch by launch
+and recomputed from the summed tokens, against the same re-pricing of a model no launch used, which moves nothing. The
+unit tests beside each module hold the other positive and negative cases, 82 tests in all. For the scan of scripts they
+include a package-manager lock file and a process's own `.pid` property, which must not count as marker files, and
+another tool's `worktree` command, which must not count as a `git worktree` call; a hand count of calls to `git` with a
+worktree verb in the 69 scripts finds the same six scripts as the scan. They show the code applies a rule the same way on a case that must read non-zero and one that
 must read zero. They cannot show that the rule is the right one.
 
 **To repeat.** From a checkout of this repository, with the run folders for the two steps that read them:
@@ -102,12 +110,14 @@ the ten captures.
   true figure is between. Four of the 18 runs have no session exports and are missing from the floor, and from the
   coachman's tokens, as they are from the audit's own coachman figure.
 - Reviewer seconds read low where a round has no launch line, and high where a lane was restarted after a kill:
-  the longest single reviewer is 344 minutes.
+  the longest single reviewer is 344 minutes. The container table holds 289 reviewer launches and the model bill 308; the
+  other 19 have no recorded time.
 - The model bill prices the lanes at pay-per-token list prices. The MiMo lane ran on a Token Plan billed in credits,
   and Meta's contributor tier lets the vendor train on what is sent. Under a subscription the contributor model gives
   no discount (Meta's Terms 13.4, read the same day).
 - Fixture runs are cheap and short and say little about a real ticket's tokens. Their tokens were not measured here;
   the trial's cost for a fixture lane uses the audit's medians.
 - A price is the vendor's page on the day it was read. Pages carry no date of their own, and prices change.
-- The scan of scripts counts files that match a pattern. A file that reaches a machine primitive through a library the
+- The scan of scripts counts files whose code matches a pattern, with comments removed and a target project's lock file
+  names blanked. It lists the files behind each count. A file that reaches a machine primitive through a library the
   patterns do not name is missed, and a match is a file that uses the primitive, not a measure of how much.

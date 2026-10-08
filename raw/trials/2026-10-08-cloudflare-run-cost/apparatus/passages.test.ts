@@ -23,6 +23,12 @@ preamble that is dropped
 - quote: n/a
 - strength: not found
 
+### A4.0 Code quoted without marks
+- finding: a settings key
+- quote: { endpoint_transport: { base_url: x } } (verbatim, repository text)
+- source: https://example.com/c
+- strength: shown
+
 ### A4.1 Another
 - finding: kept
 - quote: "A second sentence that is long enough to count." (verbatim)
@@ -33,7 +39,7 @@ preamble that is dropped
 
 describe("blocks", () => {
   test("splits on ### headings and drops the preamble", () => {
-    expect(blocks(notes).map((b) => b.id)).toEqual(["A1.2", "A1.9", "A3.8", "A4.1"]);
+    expect(blocks(notes).map((b) => b.id)).toEqual(["A1.2", "A1.9", "A3.8", "A4.0", "A4.1"]);
   });
 });
 
@@ -55,6 +61,11 @@ describe("render", () => {
     expect(text).toContain("### A4.1 Another");
   });
 
+  test("code quoted without quotation marks counts as a quotation, and n/a does not", () => {
+    expect(text).toContain("### A4.0 Code quoted without marks");
+    expect(text).not.toContain("- quote: n/a\n- strength: argued");
+  });
+
   test("negative control: an entry with no quotation and no absence is left out", () => {
     expect(text).not.toContain("A1.9");
   });
@@ -63,7 +74,8 @@ describe("render", () => {
     const numbered = render(blocks(notes), "# P", { prefix: "P" });
     expect(numbered).toContain("### P1 A1.2 Idle timeout");
     expect(numbered).toContain("### P2 A3.8 Not found: a rate limit");
-    expect(numbered).toContain("### P3 A4.1 Another");
+    expect(numbered).toContain("### P3 A4.0 Code quoted without marks");
+    expect(numbered).toContain("### P4 A4.1 Another");
   });
 
   test("an always pattern keeps a named entry that holds no quotation", () => {

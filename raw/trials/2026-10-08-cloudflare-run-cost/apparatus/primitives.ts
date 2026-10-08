@@ -1,12 +1,17 @@
 // Which of the flow's scripts lean on a machine's own files, processes and sockets (see ../method.md).
-// A script is counted once per pattern, however often it uses it. Pure core; the edge at the bottom
-// reads `scripts/` of a checkout and writes a table.
+// A script is counted once per pattern, however often it uses it. The patterns are tested against the
+// script's code, not its comments, and the names of a target project's package-manager lock files are
+// blanked first, since they are not the flow's own lock files. The scripts that test the flow itself
+// (self-tests, oracles, acceptance runs) are left out. Pure core; the edge at the bottom reads `scripts/`
+// of a checkout and writes a table.
 //
 //   bun primitives.ts --repo <checkout> --out <file.md>
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export type Primitive = { id: string; label: string; pattern: RegExp };
+
+const WORKTREE_VERB = "(?:add|remove|list|prune|move|repair|lock|unlock)";
 
 export const PRIMITIVES: Primitive[] = [
   {
@@ -32,20 +37,23 @@ export const PRIMITIVES: Primitive[] = [
   },
   {
     id: "sandbox",
-    label: "wraps a harness in bwrap or sandbox-exec",
+    label: "uses bwrap or sandbox-exec, to wrap a harness or to probe for them",
     pattern: /bwrap|bubblewrap|sandbox-exec/u,
   },
   { id: "host", label: "drives herdr or tmux", pattern: /herdr|tmux/iu },
   { id: "symlink", label: "makes symbolic links", pattern: /symlinkSync|symlink\(/u },
   {
     id: "marker",
-    label: "writes or waits on marker, pid or lock files",
-    pattern: /\.done\b|\.pid\b|\.lock\b|\.marker|wait-for-markers|O_EXCL|flock/u,
+    label: "names a marker, pid or lock file, waits on markers or creates a file exclusively",
+    pattern: /-done\b|\.done\b|\.marker\b|wait-for-markers|O_EXCL|flock|\.pid["'`]|\.lock["'`]/u,
   },
   {
     id: "worktree",
-    label: "runs git worktree commands",
-    pattern: /["'` ]worktree["'` ]/u,
+    label: "runs git worktree commands (not herdr's own worktree commands)",
+    pattern: new RegExp(
+      `(?:\\bgit\\w*\\(|["'\`]git["'\`]\\s*,)[^;]{0,160}?["'\`]worktree["'\`]\\s*,\\s*["'\`]${WORKTREE_VERB}["'\`]|\\bgit\\b[^\\n]{0,60}\\bworktree\\s+${WORKTREE_VERB}\\b`,
+      "u",
+    ),
   },
   {
     id: "home",
@@ -54,13 +62,31 @@ export const PRIMITIVES: Primitive[] = [
   },
 ];
 
+const LOCKFILES =
+  /\b(?:bun\.lockb?|yarn\.lock|Cargo\.lock|composer\.lock|Gemfile\.lock|poetry\.lock|uv\.lock|Pipfile\.lock|package-lock\.json|pnpm-lock\.yaml)\b/gu;
+
+/** The text a pattern is tested against: comments removed and a target project's lock file names blanked. */
+export function code(text: string): string {
+  return text
+    .replace(/^[ \t]*\/\*[\s\S]*?\*\//gmu, " ")
+    .split("\n")
+    .map((line) => line.replace(/(^|\s)\/\/.*$/u, "$1"))
+    .join("\n")
+    .replace(LOCKFILES, " ");
+}
+
+/** A script that is part of the flow, as against a test of it: not a `.test.ts`, self-test, oracle or acceptance run. */
+export const isFlowScript = (name: string): boolean =>
+  name.endsWith(".ts") && !/(?:\.test|-self-test|-oracle|-acceptance)\.ts$/u.test(name);
+
 export type Hits = Record<string, string[]>;
 
-/** For each primitive, the names of the files whose text matches it. */
+/** For each primitive, the names of the files whose code matches it. */
 export function scan(files: Record<string, string>, primitives: readonly Primitive[] = PRIMITIVES): Hits {
+  const stripped = Object.entries(files).map(([name, text]) => [name, code(text)] as const);
   const hits: Hits = {};
   for (const p of primitives) {
-    hits[p.id] = Object.entries(files)
+    hits[p.id] = stripped
       .filter(([, text]) => p.pattern.test(text))
       .map(([name]) => name)
       .sort();
@@ -73,6 +99,13 @@ export function table(hits: Hits, total: number, primitives: readonly Primitive[
   const lines = ["| What a script does | Scripts | Of |", "| --- | --- | --- |"];
   for (const p of primitives) lines.push(`| ${p.label} | ${hits[p.id]?.length ?? 0} | ${total} |`);
   return lines.join("\n");
+}
+
+/** The files behind each count, so a count can be checked by hand. */
+export function listing(hits: Hits, primitives: readonly Primitive[] = PRIMITIVES): string {
+  return primitives
+    .map((p) => `- ${p.label}: ${(hits[p.id] ?? []).map((f) => f.replace(/^scripts\//u, "")).join(", ") || "none"}`)
+    .join("\n");
 }
 
 function main(): void {
@@ -88,14 +121,31 @@ function main(): void {
     process.exit(2);
   }
   const files: Record<string, string> = {};
+  let left = 0;
   for (const dir of ["scripts", "scripts/lib"]) {
     for (const name of readdirSync(join(repo, dir))) {
       if (!name.endsWith(".ts") || name.endsWith(".test.ts")) continue;
+      if (!isFlowScript(name)) {
+        left += 1;
+        continue;
+      }
       files[`${dir}/${name}`] = readFileSync(join(repo, dir, name), "utf8");
     }
   }
   const total = Object.keys(files).length;
-  const text = `# Scripts by what they lean on\n\n${total} non-test scripts under scripts/ and scripts/lib/.\n\n${table(scan(files), total)}\n`;
+  const hits = scan(files);
+  const text = [
+    "# Scripts by what they lean on",
+    "",
+    `${total} scripts of the flow under scripts/ and scripts/lib/. ${left} more, which test the flow itself (self-tests, oracles and acceptance runs), and every \`.test.ts\`, are left out. Patterns are tested against code, not comments, and a target project's package-manager lock file names are blanked first.`,
+    "",
+    table(hits, total),
+    "",
+    "## The files behind each count",
+    "",
+    listing(hits),
+    "",
+  ].join("\n");
   writeFileSync(out, text);
 }
 
