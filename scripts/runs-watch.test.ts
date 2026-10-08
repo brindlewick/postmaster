@@ -1719,6 +1719,23 @@ describe("project poll and capacity", () => {
     expect(seen.capacity).toBe(2);
   }, 30000);
 
+  test("a malformed project file falls back loudly, not silently", () => {
+    const { root, config } = watched("wc-broken", "[[[unparseable\n");
+    const errs: string[] = [];
+    const orig = console.error;
+    console.error = (...args: unknown[]) => {
+      errs.push(args.map(String).join(" "));
+    };
+    try {
+      const seen = watchConfig(root, config);
+      expect(seen.poll).toBe(120);
+      expect(seen.capacity).toBe(2);
+    } finally {
+      console.error = orig;
+    }
+    expect(errs.join("\n")).toContain("runs-watch: local project settings does not parse");
+  }, 30000);
+
   test("a pending file reads the global values until it is accepted", () => {
     const dir = join(tmp, "wc-pending");
     const root = join(dir, ".postmaster", "runs");

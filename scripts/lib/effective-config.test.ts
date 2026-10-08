@@ -603,3 +603,102 @@ describe("C5: changed settings wait again", () => {
     expect(r.err).toContain("no config");
   }, 30000);
 });
+
+describe("Review round 1 regressions", () => {
+  test("reviewers lines serves a complete project file with no global config", () => {
+    const { repo } = scratch();
+    writeSettings(
+      repo,
+      '[lanes.b]\nharness = "codex"\nmodel = "m-b"\n[team]\nworkhorses = ["b"]\nreviewers = ["b"]\n',
+    );
+    const missing = join(tmp, `missing-${n}.toml`);
+    const r = runCli(["reviewers", "lines", "--project", repo], envFor(missing));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("reviewers: b");
+  }, 30000);
+
+  test("write keeps roles that resolve against the local candidate alone", () => {
+    const { repo } = scratch();
+    const cand = join(tmp, `cand-${n}.toml`);
+    writeFileSync(
+      cand,
+      '[lanes.b]\nharness = "codex"\nmodel = "m-b"\n[roles]\nworkhorses = ["b"]\n',
+    );
+    const missing = join(tmp, `missing-${n}.toml`);
+    const r = runCli(["project-settings", "write", repo, "local", cand], envFor(missing));
+    expect(r.code).toBe(0);
+    expect(existsSync(join(repo, ".postmaster", "settings.toml"))).toBe(true);
+  }, 30000);
+
+  test("accept refuses roles no resolved lane defines, and the file still waits", () => {
+    const { repo, config } = scratch();
+    writeSettings(
+      repo,
+      '[lanes.b]\nharness = "codex"\nmodel = "m-b"\n[roles]\nworkhorses = ["ghost"]\n',
+    );
+    commitSettings(repo);
+    const env = envFor(config);
+    const accept = runCli(["project-settings", "accept", repo], env);
+    expect(accept.code).toBe(1);
+    expect(accept.err).toContain("ghost");
+    const inspect = runCli(["project-settings", "inspect", repo], env);
+    expect(inspect.code).toBe(0);
+    expect((JSON.parse(inspect.out) as Rec).local_acceptance).toBe("pending");
+  }, 60000);
+
+  test("an explicit machine config under ~ merges instead of dropping the global file", () => {
+    const { repo } = scratch();
+    writeSettings(repo, '[lanes.luna]\nmodel = "gpt-other"\n');
+    writeFileSync(join(stubHome, `m-${n}.toml`), example);
+    const env = envFor(join(tmp, `missing-${n}.toml`));
+    const r = runCli(["project-settings", "effective", repo, `~/m-${n}.toml`], env);
+    expect(r.code).toBe(0);
+    const cfg = JSON.parse(r.out) as Rec;
+    expect(((cfg.lanes as Rec).luna as Rec).model).toBe("gpt-other");
+    expect(((cfg.team as Rec).postmaster as Rec).model).toBe("opus-x");
+  }, 30000);
+
+  test("a settings file inside a submodule waits for acceptance", () => {
+    const { repo, config } = scratch();
+    n += 1;
+    const src = join(tmp, `subsrc-${n}`);
+    mkdirSync(src, { recursive: true });
+    const init = spawnSync("git", ["init", "-q", src], { encoding: "utf8", timeout: 30000 });
+    if ((init.status ?? 1) !== 0) throw new Error(`git init failed: ${init.stderr}`);
+    git(src, ["config", "user.email", "test@example.com"]);
+    git(src, ["config", "user.name", "test"]);
+    writeFileSync(join(src, "settings.toml"), '[lanes.luna]\nmodel = "gpt-other"\n');
+    git(src, ["add", "settings.toml"]);
+    git(src, ["commit", "-qm", "sub"]);
+    rmSync(join(repo, ".postmaster"), { recursive: true, force: true });
+    git(repo, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", src, ".postmaster"]);
+    git(repo, ["commit", "-qm", "outer"]);
+    const env = envFor(config);
+    const inspect = runCli(["project-settings", "inspect", repo], env);
+    expect(inspect.code).toBe(0);
+    expect((JSON.parse(inspect.out) as Rec).local_acceptance).toBe("pending");
+    expect(inspect.err).toContain("waits for acceptance");
+    const effective = runCli(["project-settings", "effective", repo], env);
+    expect((((JSON.parse(effective.out) as Rec).lanes as Rec).luna as Rec).model).toBe(
+      "gpt-5.6-luna",
+    );
+  }, 60000);
+
+  test("a repository git cannot read waits instead of reading free", () => {
+    const { repo, config } = scratch();
+    writeSettings(repo, '[lanes.luna]\nmodel = "gpt-other"\n');
+    writeFileSync(join(repo, ".postmaster", "project.toml"), '[tracker]\nbinding = "b"\n');
+    git(repo, ["add", "-f", ".postmaster/project.toml"]);
+    git(repo, ["commit", "-qm", "project"]);
+    const index = join(repo, ".git", "index");
+    chmodSync(index, 0o000);
+    try {
+      const inspect = runCli(["project-settings", "inspect", repo], envFor(config));
+      expect(inspect.code).toBe(0);
+      expect((JSON.parse(inspect.out) as Rec).local_acceptance).toBe("pending");
+      expect(inspect.err).toContain("waits for acceptance");
+    } finally {
+      chmodSync(index, 0o644);
+    }
+  }, 60000);
+});

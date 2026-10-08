@@ -304,6 +304,33 @@ describe("CLI and API behavior", () => {
     expect(r.err.includes("does not match the machine workspace")).toBe(true);
   }, 30000);
 
+  test("a project workspace mismatch names the project file, not the global one", () => {
+    const bd = join(root, "binding-project");
+    mkdirSync(join(bd, "proj", ".postmaster"), { recursive: true });
+    const cfg = join(bd, "config.toml");
+    writeFileSync(cfg, '[tracker]\nkind = "plane"\nurl = "http://127.0.0.1:9"\n');
+    writeFileSync(
+      join(bd, "proj", ".postmaster", "project.toml"),
+      '[tracker]\nbinding = "bound-ws"\n',
+    );
+    const settings = join(bd, "proj", ".postmaster", "settings.toml");
+    writeFileSync(settings, '[tracker]\nworkspace = "other-ws"\n');
+    const r = cli(
+      ["read"],
+      {
+        ...process.env,
+        POSTMASTER_CONFIG: cfg,
+        PLANE_API_KEY: "self-test",
+        POSTMASTER_PROJECT: join(bd, "proj"),
+      },
+      bd,
+    );
+    expect(r.code).toBe(1);
+    expect(r.err.includes("does not match the machine workspace")).toBe(true);
+    expect(r.err.includes(settings)).toBe(true);
+    expect(r.err.includes(cfg)).toBe(false);
+  }, 30000);
+
   test("a matching binding reaches usage, with no request", () => {
     const bd = join(root, "binding-good");
     mkdirSync(join(bd, "proj", ".postmaster"), { recursive: true });
