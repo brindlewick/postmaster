@@ -661,7 +661,8 @@ export const validateCommon = (data: Rec, label: string, local: boolean): Rec =>
       if (!Array.isArray(roots)) fail(`${label}.projects_roots must be a list of roots`);
     }
     if (Object.hasOwn(data, "confine")) {
-      if (typeof data.confine !== "string") fail(`${label}.confine must be "on" or "off"`);
+      if (data.confine !== "on" && data.confine !== "off")
+        fail(`${label}.confine must be "on" or "off"`);
     }
   }
   return data;
@@ -696,17 +697,25 @@ export const isTracked = (repo: string, file: string): boolean => {
     return run("git", ["--version"], { env }).code !== 0;
   }
   // Exit 1 is "did not match": untracked only when the file is positively the
-  // person's own. A case-variant of a committed name still opens on a
-  // case-insensitive filesystem while git matches case-sensitively, and a file
-  // inside a submodule is absent from the superproject's index: both read as
-  // tracked, so committed content cannot skip acceptance either way.
-  let names: string[];
-  try {
-    names = readdirSync(dirname(file));
-  } catch {
-    return true;
+  // person's own. A case-variant of a committed name at any level still opens
+  // on a case-insensitive filesystem while git matches case-sensitively, and
+  // a file inside a submodule is absent from the superproject's index: both
+  // read as tracked, so committed content cannot skip acceptance either way.
+  // Every component from the repository to the file must match on disk exactly.
+  let current = file;
+  for (;;) {
+    const parent = dirname(current);
+    let entries: string[];
+    try {
+      entries = readdirSync(parent);
+    } catch {
+      return true;
+    }
+    if (!entries.includes(basename(current))) return true;
+    if (parent === repo) break;
+    if (relative(repo, parent).startsWith("..")) return true;
+    current = parent;
   }
-  if (!names.includes(basename(file))) return true;
   const rel = relative(repo, dirname(file));
   const sub = run("git", ["-C", repo, "ls-files", "-s", "--", rel === "" ? "." : rel], { env });
   if (sub.code !== 0) return true;
@@ -1071,11 +1080,18 @@ export const effectiveConfigForProject = (repo: string, configPath?: string): Ef
   const globalPath = expandUser(configPath ?? globalConfigPath());
   try {
     const resolved = projectRoot(repo);
-    const storePath = acceptanceStorePath(globalPath);
+    // A piped machine config ("-", as loadMachine reads it) names no file the
+    // acceptance store can sit beside: it shares the default store.
+    const storePath =
+      globalPath === "-"
+        ? acceptanceStorePath(globalConfigPath())
+        : acceptanceStorePath(globalPath);
     const profiles = loadProfiles(resolved, { storePath });
     const notice = profiles.acceptance === "pending" ? pendingNotice(profiles.settingsFile) : null;
     let global: Rec | null = null;
-    if (isFile(globalPath)) {
+    if (globalPath === "-") {
+      global = loadMachine("-");
+    } else if (isFile(globalPath)) {
       let raw: string;
       try {
         raw = strictRead(expandUser(globalPath));
