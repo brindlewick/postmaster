@@ -48,8 +48,8 @@ up if it is not, launch the postmaster. Work out where the user is and pick up f
 **1. Which project are we working on?**
 
 Ask first, before any config check, whether to work on postmaster itself or on another
-project. Postmaster itself is this checkout: it makes this repo the target. Another
-project lists the projects as below. A project the user has already named is not asked
+project. Postmaster itself is this checkout: it makes this repo the target. For another
+project, list the projects as below. A project the user has already named is not asked
 for again.
 
 ```sh
