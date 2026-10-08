@@ -12,6 +12,7 @@ import type { Layout } from "./launch-interactive-oracle.ts";
 import {
   expectEnv,
   expectLead,
+  formHarnessArgv,
   haveTmux,
   makeLayout,
   parseProbe,
@@ -115,10 +116,17 @@ oracle("an env file that sets FOO hands FOO and SHLVL=1, without the launch name
     "clerk",
     `clerk = { harness = "claude", model = "m", env_file = "${lay.fooEnv}" }`,
   );
-  const r = runPlain(lay, printForm(lay, cfg, "clerk"));
+  const form = printForm(lay, cfg, "clerk");
+  const r = runPlain(lay, form);
   if (r.code !== 0)
     throw new Error(`form exited ${r.code}\n--- out ---\n${r.out}\n--- err ---\n${r.err}`);
-  expectEnv(parseProbe(r.out), lay, "1", "bar");
+  const p = parseProbe(r.out);
+  expectEnv(p, lay, "1", "bar");
+  // The file sees the harness argv as $@, as under the headless wrapper: no
+  // extra word, no shifted first word.
+  const harness = formHarnessArgv(form, lay.fooEnv);
+  expect(p.argc).toBe(String(harness.length));
+  expect(p.arg1).toBe(harness[0] ?? "");
 });
 
 oracle("an env file that sets SHLVL hands it verbatim", (lay) => {

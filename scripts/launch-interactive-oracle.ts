@@ -26,7 +26,7 @@ import { appendFileSync } from "node:fs";
 import { processInfo } from ${JSON.stringify(processesPath)};
 const info = processInfo(process.pid);
 const e = process.env;
-const line = \`PROBE pid=\${process.pid} pgid=\${info?.group ?? "UNSET"} tpgid=\${info?.terminal ?? "UNSET"} shlvl=\${e.SHLVL ?? "UNSET"} foo=\${e.FOO ?? "UNSET"} parent=\${e.ORACLE_PARENT ?? "UNSET"} launch_name=\${e.POSTMASTER_LAUNCH_NAME ?? "UNSET"} launch_role=\${e.POSTMASTER_LAUNCH_ROLE ?? "UNSET"} stream=\${e.POSTMASTER_EVENT_STREAM ?? "UNSET"}\`;
+const line = \`PROBE pid=\${process.pid} pgid=\${info?.group ?? "UNSET"} tpgid=\${info?.terminal ?? "UNSET"} shlvl=\${e.SHLVL ?? "UNSET"} foo=\${e.FOO ?? "UNSET"} parent=\${e.ORACLE_PARENT ?? "UNSET"} launch_name=\${e.POSTMASTER_LAUNCH_NAME ?? "UNSET"} launch_role=\${e.POSTMASTER_LAUNCH_ROLE ?? "UNSET"} stream=\${e.POSTMASTER_EVENT_STREAM ?? "UNSET"} argc=\${e.ORACLE_ARGC ?? "UNSET"} arg1=\${e.ORACLE_ARG1 ?? "UNSET"}\`;
 console.log(line);
 if (e.ORACLE_REPORT) appendFileSync(e.ORACLE_REPORT, line + "\\n");
 `;
@@ -56,7 +56,7 @@ function makeLayout(): Layout {
   const fooEnv = join(dir, "foo.env");
   const shlvlEnv = join(dir, "shlvl.env");
   const exit3Env = join(dir, "exit3.env");
-  writeFileSync(fooEnv, "export FOO=bar\n");
+  writeFileSync(fooEnv, 'export FOO=bar\nexport ORACLE_ARGC=$#\nexport ORACLE_ARG1="$1"\n');
   writeFileSync(shlvlEnv, "export SHLVL=9\n");
   writeFileSync(exit3Env, "exit 3\n");
   const stream = join(dir, "parent.stream");
@@ -120,12 +120,14 @@ interface Probe {
   launchName: string;
   launchRole: string;
   stream: string;
+  argc: string;
+  arg1: string;
 }
 
 function parseProbe(text: string): Probe {
   const m =
     // ASCII: the stub reports one machine-made ASCII line.
-    /PROBE pid=(\S+) pgid=(\S+) tpgid=(\S+) shlvl=(\S+) foo=(\S+) parent=(\S+) launch_name=(\S+) launch_role=(\S+) stream=(\S+)/u.exec(
+    /PROBE pid=(\S+) pgid=(\S+) tpgid=(\S+) shlvl=(\S+) foo=(\S+) parent=(\S+) launch_name=(\S+) launch_role=(\S+) stream=(\S+) argc=(\S+) arg1=(\S+)/u.exec(
       text,
     );
   if (!m) throw new Error(`no PROBE line in:\n${text}`);
@@ -139,7 +141,18 @@ function parseProbe(text: string): Probe {
     launchName: m[7] ?? "",
     launchRole: m[8] ?? "",
     stream: m[9] ?? "",
+    argc: m[10] ?? "",
+    arg1: m[11] ?? "",
   };
+}
+
+// The harness argv of a printed interactive form: the words after the env
+// file, the words the sourced file sees as $@.
+function formHarnessArgv(form: string, envFile: string): string[] {
+  const argv = splitCommand(`launch: ${form}`);
+  const at = argv.indexOf(envFile);
+  if (at < 0) throw new Error(`env file not in form:\n${form}`);
+  return argv.slice(at + 1);
 }
 
 function runPty(lay: Layout, form: string): string {
@@ -269,6 +282,7 @@ export type { Layout, Probe };
 export {
   expectEnv,
   expectLead,
+  formHarnessArgv,
   haveTmux,
   makeLayout,
   parseProbe,
