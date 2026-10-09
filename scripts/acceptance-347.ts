@@ -69,7 +69,15 @@ export function makeRun(dir: string): RunFixture {
   writeFileSync(join(dispatch, "brief.md"), "# Waybill: T\n\n## Ticket\n\ntest\n");
   gitOrThrow(repo, "worktree", "add", join(repo, ".worktrees", "T"), "-b", "T", base);
   for (const lane of LANES) {
-    gitOrThrow(repo, "worktree", "add", join(repo, ".worktrees", `T-${lane}`), "-b", `wb/T-${lane}`, base);
+    gitOrThrow(
+      repo,
+      "worktree",
+      "add",
+      join(repo, ".worktrees", `T-${lane}`),
+      "-b",
+      `wb/T-${lane}`,
+      base,
+    );
   }
   return {
     dir: root,

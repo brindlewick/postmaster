@@ -180,7 +180,11 @@ describe("C1: taken in only once no workhorse is running or waiting", () => {
       expect(firstTake).toBeGreaterThan(carry);
       expect(stage).toBeGreaterThan(firstTake);
       expect(takeLines(fx)).toEqual([
-        { action: "take-in", target: "luna", detail: `on=wb/T-luna@${fx.base} contributing=nothing` },
+        {
+          action: "take-in",
+          target: "luna",
+          detail: `on=wb/T-luna@${fx.base} contributing=nothing`,
+        },
         { action: "take-in", target: "mimo", detail: `on=wb/T-mimo@${mimoHead}` },
       ]);
     });
@@ -287,7 +291,11 @@ describe("C2: taken in only at the commit its checks ran on", () => {
       expect(r.code).toBe(0);
       expect(r.out).toBe(`luna=${fx.base}\nmimo=${mimoHead}\n`);
       expect(takeLines(fx)).toEqual([
-        { action: "take-in", target: "luna", detail: `on=wb/T-luna@${fx.base} contributing=nothing` },
+        {
+          action: "take-in",
+          target: "luna",
+          detail: `on=wb/T-luna@${fx.base} contributing=nothing`,
+        },
         { action: "take-in", target: "mimo", detail: `on=wb/T-mimo@${mimoHead}` },
       ]);
     });
