@@ -1480,7 +1480,7 @@ function landPullRequest(
   if (pr.code !== 0) {
     const text = pr.err.trim() !== "" ? pr.err : pr.out;
     return {
-      line: `error: gh pr create failed: ${lastLine(text, pr.code)}`,
+      line: `error: pushed ${o.branch} to origin, but gh pr create failed: ${lastLine(text, pr.code)}`,
       verb: "note",
       code: 1,
     };
