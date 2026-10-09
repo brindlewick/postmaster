@@ -79,7 +79,7 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    each flag one whole name; a lone flag with a comma is refused as ambiguous.
    On exit 2, start a booking clerk with
    `<tool>/scripts/run clerk start <repo> <id>`, then log the dispatch yourself with
-   `<tool>/scripts/run log-action --project <repo> postmaster dispatch clerk ticket=<id>`.
+   `<tool>/scripts/run log-action --project <repo> postmaster dispatch clerk "ticket=<id>"`.
    Do not create a run directory, branch or worktree for this
    ticket. Continue with other tickets the
    user asked you to implement. If a clerk is already open, tell the user and do not start a
@@ -176,9 +176,9 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    prints the legs for the `turnpikes:` line step 1 printed, before anything is launched.
    Record `coachman contract fixture: pending` and `contract fixture check: -`; no
    implementation branch exists yet to classify. Where the target is a fixture copy
-   (`<tool>/scripts/run front-door` reports one), add the brief's line `wall ruling: go on —
+   (`<tool>/scripts/run front-door` reports one), add the brief's line "wall ruling: go on —
    this fixture run asks nobody: the postmaster rules every wall go on itself as soon as it
-   is told; the coachman escalates and waits`, so the run's postmaster
+   is told; the coachman escalates and waits", so the run's postmaster
    rules its own walls and a fixture run never waits on a user (D7).
 9. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. Under
    contract 2 the coachman never touches the ticket's state and the postmaster marks it done

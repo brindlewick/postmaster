@@ -110,7 +110,6 @@ Someone typing `/postmaster` arrives cold. **Assume neither. Check.** The target
 above; what remains is the machine:
 
 ```sh
-cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
 <tool>/scripts/run link-skills --check
 ```
 

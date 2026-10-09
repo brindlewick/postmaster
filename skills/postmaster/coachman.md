@@ -448,11 +448,8 @@ second implementer wrote (single-thread).
    <dispatch>/render` is idempotent) and that the synthesis worktree the postmaster cut is at
    BASE and is your cwd; then, in synthesis mode, cut one workhorse worktree per workhorse
    from BASE **on that lane's own `wb/` branch**, the archive branch the Where-things-live
-   table names and the harvest keeps:
-
-   ```sh
-   git -C <repo> worktree add .worktrees/<TICKET>-<lane> -b wb/<TICKET>-<lane> <BASE>
-   ```
+   table names and the harvest keeps, with
+   `git -C <repo> worktree add .worktrees/<TICKET>-<lane> -b wb/<TICKET>-<lane> <BASE>`.
 
    A worktree cut without `-b` leaves the lane on a detached head and the run with no
    `wb/` branch to keep. Arm each
@@ -613,10 +610,7 @@ from it.
   work:
 
   ```sh
-  REACH_EXIT=0
-  <tool>/scripts/run reach check <dispatch> workhorses \
-    > <dispatch>/logs/reach-workhorses.txt || REACH_EXIT=$?
-  cat <dispatch>/logs/reach-workhorses.txt
+  <tool>/scripts/run reach check <dispatch> workhorses
   ```
 
   Exit 1 is a fault in the `reach` control: follow Tool faults and stop the leg. Exit 0 or 3
@@ -993,12 +987,8 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    scratch's tracked diff has been checked, but before teardown or triage, run:
 
    ```sh
-   REACH_EXIT=0
-   <tool>/scripts/run reach check <dispatch> r<round> \
-     > <dispatch>/logs/reach-r<round>.txt || REACH_EXIT=$?
-   cat <dispatch>/logs/reach-r<round>.txt
-   if [ "$REACH_EXIT" -eq 1 ]; then exit 1; fi
-   <tool>/scripts/run reach restore <dispatch> r<round> || exit 1
+   <tool>/scripts/run reach check <dispatch> r<round>
+   <tool>/scripts/run reach restore <dispatch> r<round>
    ```
 
    Exit 1 from `check` or `restore` is a fault in the `reach` control: follow Tool faults and
