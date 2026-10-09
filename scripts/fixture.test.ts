@@ -25,6 +25,7 @@ import {
 import { machine, release, tmpdir, type as osType } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  appCached,
   appFiles,
   checkWaybillEfforts,
   checkPremisesOrder,
@@ -938,6 +939,7 @@ beforeAll(() => {
     "HOME",
     "LOCAL_SH",
     "POSTMASTER_FIXTURES",
+    "POSTMASTER_FIXTURE_APP_CACHE",
   ]) {
     savedEnv[k] = process.env[k];
   }
@@ -956,6 +958,9 @@ beforeAll(() => {
   process.env.GIT_AUTHOR_EMAIL = "fixture@example.invalid";
   process.env.GIT_COMMITTER_NAME = "fixture";
   process.env.GIT_COMMITTER_EMAIL = "fixture@example.invalid";
+  // The example app's own checks (hidden tests, lanes, gate) cost about 17 s per score and come out
+  // the same for every record of one app, so the records below share them. See appCached.
+  process.env.POSTMASTER_FIXTURE_APP_CACHE = join(tmp, "app-cache");
 
   uni = mkdtempSync(join(tmpdir(), "fixture-uni-"));
   uni2 = mkdtempSync(join(tmpdir(), "fixture-uni2-"));
@@ -1041,6 +1046,69 @@ afterAll(() => {
   rmSync(uni, { recursive: true, force: true });
   rmSync(uni2, { recursive: true, force: true });
   rmSync(uni3, { recursive: true, force: true });
+});
+
+describe("the app result cache", () => {
+  /** Run fn with POSTMASTER_FIXTURE_APP_CACHE set to value (undefined removes it), then put it back. */
+  function withCache<T>(value: string | undefined, fn: () => T): T {
+    const before = process.env.POSTMASTER_FIXTURE_APP_CACHE;
+    if (value === undefined) delete process.env.POSTMASTER_FIXTURE_APP_CACHE;
+    else process.env.POSTMASTER_FIXTURE_APP_CACHE = value;
+    try {
+      return fn();
+    } finally {
+      if (before === undefined) delete process.env.POSTMASTER_FIXTURE_APP_CACHE;
+      else process.env.POSTMASTER_FIXTURE_APP_CACHE = before;
+    }
+  }
+
+  test("a result is computed once per key and read back afterwards", () => {
+    const dir = join(tmp, "cache-unit");
+    let computed = 0;
+    const compute = (): { n: number } => ({ n: ++computed });
+    withCache(dir, () => {
+      expect(appCached("k1", compute)).toEqual({ n: 1 });
+      expect(appCached("k1", compute)).toEqual({ n: 1 });
+      expect(computed).toBe(1);
+      expect(appCached("k2", compute)).toEqual({ n: 2 });
+      expect(readdirSync(dir).filter((f) => f.endsWith(".json"))).toHaveLength(2);
+    });
+  }, 30000);
+
+  test("with no cache set every call computes, and nothing is written", () => {
+    let computed = 0;
+    withCache(undefined, () => {
+      appCached("k1", () => ++computed);
+      appCached("k1", () => ++computed);
+    });
+    expect(computed).toBe(2);
+  }, 30000);
+
+  test("a stored result that cannot be read is computed again, and a directory that cannot be written costs only time", () => {
+    const dir = join(tmp, "cache-bad");
+    mkdirSync(dir, { recursive: true });
+    let computed = 0;
+    withCache(dir, () => {
+      appCached("k1", () => ++computed);
+      for (const f of readdirSync(dir)) writeFileSync(join(dir, f), "{ not json");
+      expect(appCached("k1", () => ++computed)).toBe(2);
+    });
+    const file = join(tmp, "cache-is-a-file");
+    writeFileSync(file, "");
+    withCache(file, () => {
+      expect(appCached("k1", () => 7)).toBe(7);
+    });
+  }, 30000);
+
+  test("a score reads the same from the cache as from a run of the app's own checks", () => {
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const dispatch = join(repo, ".postmaster", "runs", "7");
+    const shared = score(dispatch, repo);
+    const fresh = withCache(undefined, () => score(dispatch, repo));
+    expect(fresh.code).toBe(shared.code);
+    expect(fresh.out).toBe(shared.out);
+    expect(shared.code).toBe(0);
+  }, 120000);
 });
 
 describe("unicode text edges", () => {
@@ -1413,7 +1481,13 @@ describe("score: a recorded run that meets every check scores clean", () => {
     const dispatch = join(repo, ".postmaster", "runs", "7");
     const path = scorePath(["jq"]);
     expect(run("bash", ["-c", "command -v jq"], { env: { PATH: path } }).code).toBe(1);
-    const clean = runScore(dispatch, repo, { ...process.env, PATH: path });
+    // This test is about what the example app's checks need from PATH, so they must really run.
+    const uncached = (extra: Record<string, string>): Record<string, string | undefined> => ({
+      ...process.env,
+      POSTMASTER_FIXTURE_APP_CACHE: undefined,
+      ...extra,
+    });
+    const clean = runScore(dispatch, repo, uncached({ PATH: path }));
     expect(clean.code).toBe(0);
     const lines = clean.out.trim().split("\n");
     expect(lines.slice(1, 12).every((line) => line.startsWith("ok  "))).toBe(true);
@@ -1422,12 +1496,12 @@ describe("score: a recorded run that meets every check scores clean", () => {
     console.log(`score without jq:\n${clean.out.trimEnd()}`);
 
     const withoutNpm = scorePath(["jq", "npm"]);
-    const missing = runScore(dispatch, repo, { ...process.env, PATH: withoutNpm });
+    const missing = runScore(dispatch, repo, uncached({ PATH: withoutNpm }));
     expect(missing.code).toBe(1);
     expect(missing.out).toContain("fixture: npm is not on PATH");
 
     const withoutNode = scorePath(["jq", "node"]);
-    const missingNode = runScore(dispatch, repo, { ...process.env, PATH: withoutNode });
+    const missingNode = runScore(dispatch, repo, uncached({ PATH: withoutNode }));
     expect(missingNode.code).toBe(1);
     expect(missingNode.out).toContain("fixture: node is not on PATH");
   }, 120000);
