@@ -11,6 +11,7 @@ import {
   branchHasPath,
   commitsPastBase,
   defaultBase,
+  failureOutcome,
   isSurface,
   parseArgs,
   pickBranch,
@@ -343,6 +344,22 @@ describe("branchHasPath", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("failureOutcome", () => {
+  test("a started session keeps its worktree and branch, named", () => {
+    expect(failureOutcome(true, "/x/app-verify-cli", "verify-cli")).toEqual({
+      cleanup: false,
+      suffix: "; the worktree /x/app-verify-cli and branch verify-cli were left behind",
+    });
+  });
+
+  test("a failure before any session cleans up", () => {
+    expect(failureOutcome(false, "/x/app-verify-cli", "verify-cli")).toEqual({
+      cleanup: true,
+      suffix: "",
+    });
   });
 });
 

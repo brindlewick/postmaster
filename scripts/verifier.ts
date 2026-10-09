@@ -7,8 +7,8 @@
 //   surface    cli | web | library: the surface the verifier covers
 //   prompt     print the session's instructions for the repo and surface
 //   make       cut a worktree on a branch of its own beside the repo, removed again
-//              when make fails, render the prompt, launch the coachman role headless
-//              through run launch under run host, wait,
+//              when make fails before any session starts, render the prompt,
+//              launch the coachman role headless through run launch under run host, wait,
 //              fall back to coachman_fallback on a provider wall read from the session
 //              stream, stop the session at the limit by the pid host recorded, and log
 //              one dispatch action per launch
@@ -394,7 +394,7 @@ function readRunConfig(dispatch: string): unknown {
   }
 }
 
-function launchAndWait(o: LaunchOpts): Attempt {
+function launchAndWait(o: LaunchOpts, sessionStarted: { started: boolean }): Attempt {
   const base = join(o.logs, `verifier-${o.branch}-${o.role}`);
   const stream = `${base}-events.jsonl`;
   const errFile = `${base}.err`;
@@ -445,6 +445,7 @@ function launchAndWait(o: LaunchOpts): Attempt {
       `the host would not start the ${o.role} session: ${fileText(errFile) || started.err.trim() || `exit ${started.code}`}`,
     );
   }
+  sessionStarted.started = true;
   const waited = run(RUN, ["wait-for-markers", o.logs, basename(marker), "1", String(o.timeout)]);
   if (waited.code !== 0) {
     // Stopping an already-exited session is a no-op, so every wait failure
@@ -496,9 +497,9 @@ function logLaunch(dispatch: string, surface: string, branch: string, a: Attempt
 }
 
 /** One launch and its one dispatch line, on success and on every failure past the start. */
-function attempt(o: LaunchOpts): Attempt {
+function attempt(o: LaunchOpts, sessionStarted: { started: boolean }): Attempt {
   try {
-    const a = launchAndWait(o);
+    const a = launchAndWait(o, sessionStarted);
     logLaunch(o.dispatch, o.surface, o.branch, a);
     return a;
   } catch (e) {
@@ -520,6 +521,31 @@ export function removeProvisioning(repo: string, wt: string, branch: string): st
   return problems.length === 0 ? "" : `; the cleanup failed too: ${problems.join("; ")}`;
 }
 
+/** What a make failure past the cut does with the branch and worktree. */
+export interface FailureOutcome {
+  cleanup: boolean;
+  suffix: string;
+}
+
+/**
+ * A failure before any session started cleans up pure scaffolding; once a
+ * session ran, its work may hold the diagnosis, so the worktree and branch
+ * stay, named in the error for the operator.
+ */
+export function failureOutcome(
+  sessionStarted: boolean,
+  wt: string,
+  branch: string,
+): FailureOutcome {
+  if (sessionStarted) {
+    return {
+      cleanup: false,
+      suffix: `; the worktree ${wt} and branch ${branch} were left behind`,
+    };
+  }
+  return { cleanup: true, suffix: "" };
+}
+
 function runMake(req: ParsedMake): number {
   const repo = resolve(req.repo);
   if (!isRepo(repo)) throw new UsageError(`not a git repository: ${req.repo}`);
@@ -537,16 +563,18 @@ function runMake(req: ParsedMake): number {
   if (added.code !== 0) {
     throw new RunError(`the worktree would not cut: ${added.err.trim() || added.out.trim()}`);
   }
+  const sessionStarted = { started: false };
   try {
-    return runMakeLaunches(req, repo, dispatch, base, branch, wt, vdir);
+    return runMakeLaunches(req, repo, dispatch, base, branch, wt, vdir, sessionStarted);
   } catch (e) {
-    const cleanup = removeProvisioning(repo, wt, branch);
-    if (e instanceof RunError && cleanup !== "") throw new RunError(`${e.message}${cleanup}`);
+    const outcome = failureOutcome(sessionStarted.started, wt, branch);
+    const extra = outcome.cleanup ? removeProvisioning(repo, wt, branch) : outcome.suffix;
+    if (e instanceof RunError && extra !== "") throw new RunError(`${e.message}${extra}`);
     throw e;
   }
 }
 
-/** Everything past the cut: a thrower here leaves no branch or worktree behind. */
+/** Everything past the cut: a thrower here cleans up only before any session starts. */
 function runMakeLaunches(
   req: ParsedMake,
   repo: string,
@@ -555,6 +583,7 @@ function runMakeLaunches(
   branch: string,
   wt: string,
   vdir: string,
+  sessionStarted: { started: boolean },
 ): number {
   const logs = join(dispatch, "logs");
   mkdirSync(logs, { recursive: true });
@@ -574,22 +603,9 @@ function runMakeLaunches(
     throw new RunError(`the launch could not be named: ${named.err.trim() || named.out.trim()}`);
   }
   const name = named.out.trim();
-  const first = attempt({
-    role: "coachman",
-    leg: "synthesis",
-    wt,
-    name,
-    logs,
-    branch,
-    surface: req.surface,
-    promptFile,
-    dispatch,
-    timeout: req.timeout,
-  });
-  let final = first;
-  if (first.walled) {
-    const second = attempt({
-      role: "coachman_fallback",
+  const first = attempt(
+    {
+      role: "coachman",
       leg: "synthesis",
       wt,
       name,
@@ -599,7 +615,26 @@ function runMakeLaunches(
       promptFile,
       dispatch,
       timeout: req.timeout,
-    });
+    },
+    sessionStarted,
+  );
+  let final = first;
+  if (first.walled) {
+    const second = attempt(
+      {
+        role: "coachman_fallback",
+        leg: "synthesis",
+        wt,
+        name,
+        logs,
+        branch,
+        surface: req.surface,
+        promptFile,
+        dispatch,
+        timeout: req.timeout,
+      },
+      sessionStarted,
+    );
     if (second.walled) {
       throw new RunError(
         `both roles walled: coachman: ${first.wallDetail}; coachman_fallback: ${second.wallDetail}`,
