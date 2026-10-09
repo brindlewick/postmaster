@@ -253,6 +253,18 @@ test("markers inside JSON escapes are inert", () => {
   expect(rules(line)).not.toContain("marker");
 });
 
+test("a quoted marker faults beside a finding instead of suppressing", () => {
+  // Review round 10 (bug-51): a marker inside a string is an example, not a
+  // directive. The inner string units accepted it, so a real finding beside
+  // an example passed the gate unseen; now the finding flags and the marker
+  // faults, while a clean example still passes silently.
+  const line = joined('"call ', email(), ": ", marker("email"), '" for details');
+  expect(rules(line)).toContain("email");
+  expect(rules(line)).toContain("marker");
+  const clean = joined('"see ', marker("email"), '" for the syntax');
+  expect(rules(clean)).toEqual([]);
+});
+
 test("markers and guards inside escape sequences are not seen at all", () => {
   // Review round 6, closed input: escape sequences strip first, by one
   // treatment for markers and guards alike.

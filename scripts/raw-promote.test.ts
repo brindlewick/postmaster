@@ -123,6 +123,40 @@ test("promotion strips reasoning embedded in a prose line", () => {
   expect(fixed.startsWith("note: ")).toBe(true);
 });
 
+test("promotion refuses a quoted marker beside a finding instead of truncating", () => {
+  // Review round 10 (bug-51): the strip deleted from the marker to the end
+  // of the line even when the marker was a quoted example, so the copy lost
+  // real trailing content while promotion succeeded. Now the example faults
+  // like any marker that cannot cover its line, and nothing is copied.
+  const repo = initRepo();
+  const source = join(scratchDir(), "source");
+  mkdirSync(source);
+  const line = `"call ${email()}: ${marker("email")}" for details`;
+  writeFileSync(join(source, "quoted.txt"), `${line}\n`);
+  const refused = runScript("raw-promote", [source, "raw/fixed"], repo);
+  expect(refused.status).toBe(1);
+  expect(refused.stdout).toContain("marker");
+  expect(refused.stdout + refused.stderr).not.toContain(email());
+  expect(() => readFileSync(join(repo, "raw/fixed", "quoted.txt"))).toThrow();
+});
+
+test("promotion preserves a quoted marker example beside an outside finding", () => {
+  // Review round 10 (bug-51): with the finding outside the string the marker
+  // is inert text, so the copy redacts the finding and keeps the example
+  // and everything after it.
+  const repo = initRepo();
+  const source = join(scratchDir(), "source");
+  mkdirSync(source);
+  const line = `"see ${marker("email")}" contact ${email()} today`;
+  writeFileSync(join(source, "quoted.txt"), `${line}\n`);
+  const copied = runScript("raw-promote", [source, "raw/fixed"], repo);
+  expect(copied.status).toBe(0);
+  const fixed = readFileSync(join(repo, "raw/fixed", "quoted.txt"), "utf8");
+  expect(fixed.includes(email())).toBe(false);
+  expect(fixed).toContain("today");
+  expect(fixed).toContain("private-data");
+});
+
 test("C21 promotion rescans clean, refuses repeats and copies nothing on a marker fault", () => {
   const repo = initRepo();
   const source = join(scratchDir(), "good");

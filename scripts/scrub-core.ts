@@ -1166,6 +1166,25 @@ function markersIn(text: string): ParsedMarker[] {
   });
 }
 
+// The marker spans the scanner treats as directives: valid markers on the
+// physical line outside strings, in raw coordinates. The promoter strips
+// exactly these, so a quoted example is never treated as a directive to
+// delete to. Mirrors scanLine's unit-0 acceptance span for span.
+export function activeMarkerSpans(text: string): Array<[number, number]> {
+  const cleaned = stripAnsi(text, null);
+  if (!cleaned.text.includes("private-data:allow")) return [];
+  const ranges: Array<[number, number]> = [];
+  for (const m of jsonStringTokens(cleaned.text)) ranges.push([m.start, m.end]);
+  const spans: Array<[number, number]> = [];
+  for (const m of markersIn(cleaned.text)) {
+    if (!m.valid) continue;
+    if (cleaned.map && cleaned.map.slice(m.start, m.end).some(([a, b]) => b - a > 1)) continue;
+    if (ranges.some(([a, b]) => a <= m.start && m.start < b)) continue;
+    spans.push(homeSpan(cleaned.map, m.start, m.end));
+  }
+  return spans;
+}
+
 export function scanLine(
   line: string,
   opts: { markers?: boolean; context?: string; keyBlock?: boolean } = {},
@@ -1222,6 +1241,13 @@ export function scanLine(
         if (unit.map && unit.map.slice(m.start, m.end).some(([a, b]) => b - a > 1)) return false;
         if (i !== 0) return true;
         return !stringRanges.some(([a, b]) => a <= m.start && m.start < b);
+      })
+      .map((m) => {
+        // A marker inside a string is an example, never a directive: it
+        // cannot suppress, and beside a finding it faults rather than
+        // passing silently. Only the physical line carries live markers.
+        if (i !== 0) return { ...m, rule: null, valid: false };
+        return m;
       })
       .map((m) => {
         const [start, end] = homeSpan(unit.map, m.start, m.end);

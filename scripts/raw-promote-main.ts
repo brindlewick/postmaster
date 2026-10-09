@@ -14,7 +14,14 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { randomBytes } from "node:crypto";
-import { git, keyBlockStep, RefusedError, StreamScanner, streamLines } from "./scrub-core.ts";
+import {
+  activeMarkerSpans,
+  git,
+  keyBlockStep,
+  RefusedError,
+  StreamScanner,
+  streamLines,
+} from "./scrub-core.ts";
 import {
   firstNonWsChar,
   maybeWholeJson,
@@ -28,7 +35,6 @@ import {
   fail,
   findingRow,
   logFinding,
-  replaceReset,
   REASONING_PLACEHOLDER,
   safePath,
 } from "./scrub-report.ts";
@@ -57,8 +63,21 @@ function repoRoot(): string {
   return git(["rev-parse", "--show-toplevel"]).toString("utf8").trim();
 }
 
-const ALLOW_MARKER =
-  /(?:<!--|#|\/\/)?[ \t]*private-data:allow(?:-next-line)?[ \t]+[^ \t]+[ \t]+--[ \t]+[^\r\n]*(?:-->)?$/gu;
+// Strip only the markers the scanner treats as directives. The old regex
+// deleted from any marker-shaped text to the end of the line, so a quoted
+// example ate its closing quote and the real trailing text with it.
+function stripActiveMarkers(text: string): string {
+  const spans = activeMarkerSpans(text);
+  if (!spans.length) return text;
+  let out = "";
+  let cursor = 0;
+  for (const [start, end] of spans) {
+    if (start < cursor) continue;
+    out += text.slice(cursor, start);
+    cursor = end;
+  }
+  return out + text.slice(cursor);
+}
 
 function parsesAsJson(text: string): boolean {
   const trimmed = text.trim();
@@ -134,7 +153,7 @@ async function inspectFile(path: string, report: boolean): Promise<FileScan> {
     // A valid marker is stripped on copy; when the strip would break a JSON
     // row's syntax the placement is refused instead of publishing a
     // malformed record.
-    const stripped = replaceReset(ALLOW_MARKER, line.text, "");
+    const stripped = stripActiveMarkers(line.text);
     if (stripped !== line.text && parsesAsJson(line.text) && !parsesAsJson(stripped))
       faults.push(`${line.number}: marker`);
     if (report) {
@@ -233,7 +252,7 @@ async function writeScrubbed(source: string, target: string, destLabel: string):
     const replaced = replaceFindings(out, [...result.findings, ...result.suppressed]);
     for (const rule of replaced.rules)
       reports.push(`${findingRow(destLabel, number, rule)} scrubbed`);
-    out = replaceReset(ALLOW_MARKER, replaced.text, "");
+    out = stripActiveMarkers(replaced.text);
     writeFileSync(fd, out, "utf8");
     if (newline) writeFileSync(fd, "\n", "utf8");
   };
