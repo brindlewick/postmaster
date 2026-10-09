@@ -232,9 +232,17 @@ describe("naming", () => {
     );
   });
 
-  test("the handle names the repo and the branch", () => {
-    expect(verifierHandle("/x/app", "verify-cli")).toBe("verifier-app-verify-cli");
-    expect(verifierHandle("/x/app", "verify-cli-2")).toBe("verifier-app-verify-cli-2");
+  test("the handle names the repo and the branch, tagged by its path", () => {
+    expect(verifierHandle("/x/app", "verify-cli")).toMatch(/^verifier-app-verify-cli-[0-9a-f]{8}$/u);
+    expect(verifierHandle("/x/app", "verify-cli-2")).toMatch(
+      /^verifier-app-verify-cli-2-[0-9a-f]{8}$/u,
+    );
+  });
+
+  test("the same directory name in different parents gets different handles", () => {
+    const a = verifierHandle("/x/app", "verify-cli");
+    expect(verifierHandle("/x/app", "verify-cli")).toBe(a);
+    expect(verifierHandle("/y/app", "verify-cli")).not.toBe(a);
   });
 });
 

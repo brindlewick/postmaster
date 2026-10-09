@@ -29,6 +29,7 @@
 //   exit 2  usage: an unknown command or surface, a missing argument, a bad flag or
 //           timeout, a path that is not a git repository or not its top, a repo holding
 //           no commit, or no run at the dispatch
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -260,11 +261,14 @@ export function pickWorktree(
 }
 
 /**
- * The spawn handle: the repo and the session's branch, since both hosts check
- * session names globally and the branch numbers past sessions taken.
+ * The spawn handle: the repo, the session's branch, and a tag from the repo's
+ * path, since both hosts check session names globally: the branch numbers
+ * past sessions taken in one repo, and the tag keeps two checkouts that share
+ * a directory name apart.
  */
 export function verifierHandle(repo: string, branch: string): string {
-  return `verifier-${basename(repo)}-${branch}`;
+  const tag = createHash("sha256").update(resolve(repo)).digest("hex").slice(0, 8);
+  return `verifier-${basename(repo)}-${branch}-${tag}`;
 }
 
 /**
