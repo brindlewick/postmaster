@@ -86,6 +86,7 @@ export function scanComments(text: string, path: string): SwitchComment[] {
 interface ParsedFile {
   comments: SwitchComment[];
   blocks: { start: number; end: number }[];
+  statements: { start: number; end: number }[];
 }
 
 const TS_PLUGINS = [
@@ -164,6 +165,24 @@ function collectBlocks(node: BabelNode, out: { start: number; end: number }[]): 
   }
 }
 
+/** Every statement-like range in the tree, by node-name suffix: a next-line
+ * window ends no earlier than the statement or braced node holding its first
+ * covered line. A name this misses only takes the braced end instead, and the
+ * maximum below keeps the covered line itself; either way the window errs
+ * toward asking. */
+const STATEMENT = /(?:Statement|Declaration)$/u;
+
+function collectStatements(node: BabelNode, out: { start: number; end: number }[]): void {
+  if (STATEMENT.test(node.type)) out.push({ start: node.start, end: node.end });
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) {
+      for (const item of value) if (isBabelNode(item)) collectStatements(item, out);
+    } else if (isBabelNode(value)) {
+      collectStatements(value, out);
+    }
+  }
+}
+
 /** The comments and braced ranges of one file's text. Throws on input the
  * parser cannot read cleanly, recovered errors included: recovery invents
  * structure that can hide a directive, so a recovered parse is unparseable
@@ -186,7 +205,9 @@ export function parseSource(text: string, path: string): ParsedFile {
   }
   const blocks: { start: number; end: number }[] = [];
   collectBlocks(file.program, blocks);
-  return { comments, blocks };
+  const statements: { start: number; end: number }[] = [];
+  collectStatements(file.program, statements);
+  return { comments, blocks, statements };
 }
 
 /** One parse that must come back clean: a throw or a recovered error fails
@@ -400,7 +421,7 @@ function parseAllDirectives(raw: string): SwitchDirective[] {
 interface PlacedDirective extends SwitchDirective {
   line: number;
   end: number;
-  endOff: number;
+  startOff: number;
   raw: string;
 }
 
@@ -408,7 +429,7 @@ function placeDirectives(comments: SwitchComment[]): PlacedDirective[] {
   const out: PlacedDirective[] = [];
   for (const c of comments) {
     for (const off of parseAllDirectives(c.raw)) {
-      out.push({ ...off, line: c.line, end: c.endLine, endOff: c.end, raw: c.raw });
+      out.push({ ...off, line: c.line, end: c.endLine, startOff: c.start, raw: c.raw });
     }
   }
   return out;
@@ -464,6 +485,34 @@ function enclosingBlockEnd(blocks: { start: number; end: number }[], offset: num
     if (b.start <= offset && offset < b.end && (best === null || b.end < best)) best = b.end;
   }
   return best ?? Number.POSITIVE_INFINITY;
+}
+
+/** The floor under a next-line window: the end of the statement or braced
+ * node holding the first code line after the comment, whichever reaches
+ * further, and at least that line itself. Blank and comment-only lines are
+ * skipped, since a directive covers past them. */
+function holderEndAfter(
+  text: string,
+  code: string[],
+  starts: number[],
+  parsed: ParsedFile,
+  endLine: number,
+): number {
+  let after = -1;
+  for (let k = endLine; k < code.length; k++) {
+    if (code[k] !== "") {
+      after = k;
+      break;
+    }
+  }
+  if (after < 0) return Number.NEGATIVE_INFINITY;
+  const a0 = starts[after]!;
+  const a1 = after + 1 < starts.length ? starts[after + 1]! : text.length;
+  return Math.max(
+    a1,
+    enclosingBlockEnd(parsed.blocks, a0),
+    enclosingBlockEnd(parsed.statements, a0),
+  );
 }
 
 /** The approval identity of a switch-off: its file, its comment text, its place
@@ -582,9 +631,11 @@ function fileSwitches(file: string, text: string): SwitchEntry[] {
     let covered: string[];
     let tail = [""];
     if (d.scope === "line") {
-      covered = blockWindow(code, starts, d.line, enclosingBlockEnd(parsed.blocks, d.endOff));
+      covered = blockWindow(code, starts, d.line, enclosingBlockEnd(parsed.blocks, d.startOff));
     } else if (d.scope === "next") {
-      covered = blockWindow(code, starts, d.end, enclosingBlockEnd(parsed.blocks, d.endOff));
+      const blockEnd = enclosingBlockEnd(parsed.blocks, d.startOff);
+      const floor = holderEndAfter(text, code, starts, parsed, d.end);
+      covered = blockWindow(code, starts, d.end, Math.max(blockEnd, floor));
     } else if (d.scope === "file") {
       covered = code.filter((entry) => entry !== "");
     } else {
