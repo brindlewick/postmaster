@@ -16,6 +16,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { randomBytes } from "node:crypto";
 import { git, keyBlockStep, RefusedError, StreamScanner, streamLines } from "./scrub-core.ts";
 import {
+  firstNonWsChar,
   maybeWholeJson,
   parseWholeJson,
   redactReasoning,
@@ -88,8 +89,8 @@ interface WholeGate {
 const trackGate = (gate: WholeGate, text: string): void => {
   gate.lines++;
   if (!gate.firstNonWs) {
-    const found = /\S/u.exec(text);
-    if (found) gate.firstNonWs = found[0]!;
+    const found = firstNonWsChar(text);
+    if (found) gate.firstNonWs = found;
   }
   if (!parsesAsJson(text)) gate.anyParseFail = true;
 };

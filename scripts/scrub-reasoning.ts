@@ -11,7 +11,7 @@
 // gate; the detector walks iteratively and uncapped, so no nesting depth
 // is a bypass. What they share is the match below, the brace scan and the
 // embedded walk: neither side scans prose for JSON on its own.
-import { pyLower } from "./lib/text.ts";
+import { pyLower, pyTrim } from "./lib/text.ts";
 import { REASONING_PLACEHOLDER } from "./scrub-report.ts";
 
 export function isLiveReasoning(type: unknown, key: string, value: unknown): boolean {
@@ -140,6 +140,16 @@ export function transformReasoning(value: unknown): { value: unknown; count: num
 // The cap bounds the re-read DoS-style inputs to a fixed multiple of the
 // longest-line budget; past it the per-line path stands.
 export const WHOLE_JSON_CAP = 32 * 1024 * 1024;
+
+export function firstNonWsChar(text: string): string {
+  // The whole-file entry's first-character probe, shared so the promoter and
+  // the detector cannot disagree on where the blob starts. Python whitespace
+  // covers JSON's, so only unparseable bytes are ever skipped past; iteration
+  // keeps astral characters whole.
+  const trimmed = pyTrim(text);
+  for (const ch of trimmed) return ch;
+  return "";
+}
 
 export function maybeWholeJson(
   lineCount: number,

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  firstNonWsChar,
   hasReasoning,
   isLiveReasoning,
   parseWholeJson,
@@ -85,4 +86,13 @@ test("a pretty-printed record counts on both sides through the whole-file entry"
   expect(JSON.stringify(transformed.value)).toContain(REASONING_PLACEHOLDER);
   expect(parseWholeJson(`${pretty}\n${pretty}`)).toBe(undefined);
   expect(parseWholeJson("not json at all")).toBe(undefined);
+});
+
+test("the whole-file probe reads the first visible character", () => {
+  expect(firstNonWsChar("")).toBe("");
+  expect(firstNonWsChar("   \t ")).toBe("");
+  expect(firstNonWsChar('  {"a": 1}')).toBe("{");
+  expect(firstNonWsChar("\u00a0[1]")).toBe("[");
+  expect(firstNonWsChar("\x1c{junk}")).toBe("{");
+  expect(firstNonWsChar("\u{1F600}x")).toBe("\u{1F600}");
 });

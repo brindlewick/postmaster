@@ -11,7 +11,13 @@ import {
   StreamScanner,
 } from "./scrub-core.ts";
 import { pyWords } from "./lib/text.ts";
-import { hasReasoning, maybeWholeJson, parseWholeJson, WHOLE_JSON_CAP } from "./scrub-reasoning.ts";
+import {
+  firstNonWsChar,
+  hasReasoning,
+  maybeWholeJson,
+  parseWholeJson,
+  WHOLE_JSON_CAP,
+} from "./scrub-reasoning.ts";
 import { errorText, fail, findingRow, logFinding, safePath } from "./scrub-report.ts";
 
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -55,9 +61,9 @@ async function scanBlob(
     const text = raw;
     if (whole !== null) {
       if (!firstNonWs) {
-        const found = /\S/u.exec(text);
+        const found = firstNonWsChar(text);
         if (found) {
-          firstNonWs = found[0]!;
+          firstNonWs = found;
           if (firstNonWs !== "{" && firstNonWs !== "[") whole = null;
         }
       }
