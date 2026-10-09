@@ -1125,7 +1125,9 @@ function branchFilesUnder(repo: string, branch: string, folder: string): string[
 
 /** What the branch adds past the merge base, or null when git cannot compare. */
 function branchDiffPaths(repo: string, base: string, branch: string): string[] | null {
-  const r = git(repo, ["diff", "--name-only", "-z", `${base}...${branch}`]);
+  // No rename detection: --name-only names a rename by its new path alone,
+  // which would hide a deletion outside the folder from the scope check.
+  const r = git(repo, ["diff", "--name-only", "--no-renames", "-z", `${base}...${branch}`]);
   if (r.code !== 0) return null;
   return r.out.split("\0").filter((p) => p !== "");
 }
