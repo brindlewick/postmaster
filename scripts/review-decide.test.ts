@@ -1,11 +1,12 @@
 // Tests beside scripts/review-decide.ts, moved from its --self-test on #109; #316 rewrote
-// the cap controls for the rise rule: 58 controls. Each test builds its own run so it
+// the cap controls for the rise rule: 59 controls. Each test builds its own run so it
 // passes alone as well as in file order.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./lib/proc.ts";
+import { harvestRound, launchRound, type StepChild, type StepDeps } from "./review-round.ts";
 
 const SELF = join(import.meta.dir, "run");
 const COACHMAN = join(import.meta.dir, "../skills/postmaster/coachman.md");
@@ -100,6 +101,43 @@ describe("round 1 runs round 2 when it applied a fix or lacked a working reviewe
     launched(d, "luna", "security", 1);
     degraded(d, "luna", "security", 1, "r");
     checkWhole(decide(d, "1"), 0, "RUN 2: round 1 had no working reviewer for security");
+  });
+
+  test("rows the scripts wrote fire the rule for a lens whose every lane degraded", () => {
+    const d = newRun("r1-scriptrows");
+    mkdirSync(join(d, "logs"), { recursive: true });
+    writeFileSync(join(d, "manifest.json"), `${JSON.stringify({ base: "BASESHA" })}\n`);
+    writeFileSync(join(d, "brief.md"), "waybill\n");
+    const recorded: string[][] = [];
+    const answer = (name: string, args: string[]): StepChild => {
+      if (name === "turnpikes")
+        return { code: 0, out: "1 synthesis\n2 review style bug security\n", err: "" };
+      if (name === "reviewers" && args[0] === "lanes") return { code: 0, out: "luna\n", err: "" };
+      if (name === "review-findings" && args[0] === "harvest")
+        return { code: 1, out: "", err: "no stream\n" };
+      return { code: 0, out: "", err: "" };
+    };
+    const deps: StepDeps = {
+      tool: (name, args) => {
+        if (name === "log-action") recorded.push(args);
+        return answer(name, args);
+      },
+      git: (args) =>
+        args.includes("rev-parse") ? { code: 0, out: "SNAP\n", err: "" } : answer("git", args),
+    };
+    const launched = launchRound(
+      { dispatch: d, round: "1", repo: join(tmp, "repo"), synthesis: join(tmp, "syn") },
+      deps,
+    );
+    expect(launched.code).toBe(0);
+    harvestRound({ dispatch: d, round: "1", repo: join(tmp, "repo") }, deps);
+    for (const args of recorded) {
+      if (args[2] === "review-launch" || args[2] === "degrade") {
+        logged(d, args[2]!, args[3]!, args[4]!);
+      }
+    }
+    logged(d, "finding", "src/f.ts:6", "style P3 r1 style luna reading: a style note");
+    checkWhole(decide(d, "1"), 0, "RUN 2: round 1 had no working reviewer for bug");
   });
 
   test("round 1 reviewed at full strength and applied no fix still stops", () => {

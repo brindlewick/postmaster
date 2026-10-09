@@ -21,8 +21,8 @@ cards, and you never do its job.
 | `<runs>/postmaster/` | your own dispatch directory: `brief.md`, `actions.jsonl`, `ESCALATION.md` (the waiting list, written only through `<tool>/scripts/run host leg waiting`) |
 | `<runs>/<TICKET>/` | one run: the waybill, manifest, logs, cards, hand-offs (`coachman.md`, Where things live) |
 | `<repo>/.worktrees/<TICKET>` | the synthesis worktree you cut at dispatch, branch `<TICKET>` |
-| `<repo>/.postmaster/project.toml` | what the project requires of a run, if it declares one; the one file it may commit |
-| `<repo>/.postmaster/settings.toml` | this person's choices on this machine; never committed |
+| `<repo>/.postmaster/project.toml` | what the project requires of a run, if it declares one; the shared file, committed on purpose |
+| `<repo>/.postmaster/settings.toml` | this person's choices for the project; committed only to share, used only after acceptance |
 
 ## Memory is the disk
 
@@ -79,7 +79,7 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    each flag one whole name; a lone flag with a comma is refused as ambiguous.
    On exit 2, start a booking clerk with
    `<tool>/scripts/run clerk start <repo> <id>`, then log the dispatch yourself with
-   `<tool>/scripts/run log-action --project <repo> postmaster dispatch clerk ticket=<id>`.
+   `<tool>/scripts/run log-action --project <repo> postmaster dispatch clerk "ticket=<id>"`.
    Do not create a run directory, branch or worktree for this
    ticket. Continue with other tickets the
    user asked you to implement. If a clerk is already open, tell the user and do not start a
@@ -124,8 +124,8 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    to the old run — archive it, rename it, or pick another id — and Stage B starts again on
    their word. On exit 1 the refusal goes to the user the same way.
 5. **Exclude worktrees without a commit,** before any is cut, or the next pre-flight reads
-   them as dirt: `grep -qxF '.worktrees/' <repo>/.git/info/exclude || echo '.worktrees/' >>
-   <repo>/.git/info/exclude`.
+   them as dirt: `<tool>/scripts/run project-settings exclude-worktrees <repo>` keeps
+   `.worktrees/` in the repository's own git exclude.
 6. **Create the run directory** `<runs>/<TICKET>/` with `logs/`, `audit/` and `render/`, and the
    manifest: `{"stage": "dispatched", "leg": 1, "base": "<sha>", "lanes": {}, "coachman":
    {"legs": {}}}`. You own `leg`, `base`, `coachman` and the terminal stages, `done` and
@@ -176,9 +176,9 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    prints the legs for the `turnpikes:` line step 1 printed, before anything is launched.
    Record `coachman contract fixture: pending` and `contract fixture check: -`; no
    implementation branch exists yet to classify. Where the target is a fixture copy
-   (`<tool>/scripts/run front-door` reports one), add the brief's line `wall ruling: go on —
+   (`<tool>/scripts/run front-door` reports one), add the brief's line "wall ruling: go on —
    this fixture run asks nobody: the postmaster rules every wall go on itself as soon as it
-   is told; the coachman escalates and waits`, so the run's postmaster
+   is told; the coachman escalates and waits", so the run's postmaster
    rules its own walls and a fixture run never waits on a user (D7).
 9. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. Under
    contract 2 the coachman never touches the ticket's state and the postmaster marks it done
@@ -572,6 +572,31 @@ missed.
    branch. If a claim
    fails, remove `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`, then
    resume that last leg with the exact discrepancy and wait for its corrected card.
+
+   Check switch-offs after the claims and before step 2's landing route, on both routes:
+   `<tool>/scripts/run landing switch-offs --repo <repo> --default <branch>
+   --ticket <the ticket ref> --dispatch <dispatch>`. Exit 0, the branch is clear. Exit 2,
+   put each listed entry to the user with the ship card: its file, line, form, the rules it
+   names and the reason beside it — or, for a settings entry, its file, its change and its
+   diff. For each entry they approve, record the word with
+   `<tool>/scripts/run log-action <dispatch> postmaster switch-off <its identity> approved
+   <the entry> <the user's words>`; for each entry they refuse, record it the same way with
+   `refused`, then withhold at once under the claim-fail clause above, with the refused
+   entry as the exact discrepancy. Run the check again after recording: a held remainder
+   repeats the ask, and anything still unapproved after the user's word withholds the same
+   way. While an ask is outstanding, the question sits in the run's `.waiting-on-user`;
+   remove it when the user's word arrives. Exit 3, entries miss their reasons: withhold
+   under the claim-fail clause with the listed entries as the exact discrepancy; the leg
+   gives each its reason, or removes what it should not switch off. Exit 4 is a recorded
+   refusal: withhold the same way. Runs dispatched before this check existed are held the
+   same way at landing; only their cards lack the list.
+   The merge authority never approves these entries and never unholds them: where
+   it is the postmaster itself, it still asks and records the word before it opens a
+   pull request or merges. Compare the card's `## Switch-offs` section with the
+   fresh output, approval marks aside, and withhold on any difference with the
+   mismatch as the exact discrepancy; a card from a run pinned before this check has
+   no such section, and those runs are judged by the live list alone. Any other exit
+   is an input fault: stop the stage, fix the inputs and re-run.
 2. **Follow the landing route in the waybill.** First ask whether the ticket already landed:
    `<tool>/scripts/run landing already-landed --repo <repo> --default <branch> --ticket
    <the ticket ref> --base <the manifest's base> --card-head <the card's final HEAD>`, adding
@@ -606,9 +631,21 @@ missed.
      (`gh pr create` on a GitHub project). Include the card, final checks, diff stat,
      preview and review links, and thread ids. Log a `note` with the push and
      pull-request URL, and leave a dated tracker comment linking the pull request and
-     summarizing the same evidence, logging `ticket-comment`. Put the pull-request URL and its
+     summarizing the same evidence, logging `ticket-comment`. Before saying it is ready to
+     merge or writing merge instructions, ask the pull request's checks at the card's HEAD:
+     `<tool>/scripts/run landing pull-request-checks --repo <repo> --pr <pull-request-url>
+     --card-head <the card's final HEAD>`. On `pass`, put the pull-request URL and
      merge instructions in `.waiting-on-user`; the user merges it in the project's review
-     surface and says so, and that word is the answer step 3 waits on.
+     surface and says so, and that word is the answer step 3 waits on. On `none`, ask once
+     more after a minute's wait, since GitHub creates the checks seconds after the pull
+     request opens and the first ask can land before they exist; move on only if the second
+     ask still says `none`, and follow the `pending` or `fail:` branch when it says that
+     instead. On `pending`, write
+     nothing to `.waiting-on-user`, and wait; at the next look, ask the same question again. On
+     `fail:`, in either shape (`fail: <name> (<state>) <link>` or `fail: pull request head
+     <sha> does not match card <sha> <pr>`), remove `.card-ready` and `.leg-<n>-done` for the
+     manifest's current leg `<n>`, then resume that last leg on the same branch with the
+     exact `fail:` line as the discrepancy and wait for its corrected card.
      Do not use `MERGE_AUTHORITY` to merge a pull request on the user's behalf.
    - For `landing: local`, obey `MERGE_AUTHORITY`. With `user`, put the card and
      verification in front of the user, write the requested merge word to `.waiting-on-user`,
@@ -694,6 +731,12 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    the synthesis HEAD, and the card gives each one that did not pass as its result is; a
    check that did not run is `not run`, never passed and never omitted; the Style
    residue's count is what `<tool>/scripts/run style-findings count <dispatch>` prints.
+   Check switch-offs as current Stage F does: `<tool>/scripts/run landing switch-offs
+   --repo <repo> --default <branch> --ticket <the ticket ref> --dispatch <dispatch>`. On
+   exit 0 the branch is clear; otherwise put each listed entry to the user with the card,
+   record each word through `<tool>/scripts/run log-action`, and withhold under step 2
+   until the check clears — the merge authority never approves these entries itself.
+   While the ask is outstanding the question sits in the run's `.waiting-on-user`.
 2. **Grant or withhold.** Every word is delivered by resuming leg 3 (Stage C, step 5), and
    `.card-ready` is removed before it is; the coachman touches it afresh when the card changes.
    `MERGE_AUTHORITY: postmaster` and every check above holds: deliver "MERGE GRANTED" and log

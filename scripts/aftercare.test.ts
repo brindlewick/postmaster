@@ -15,11 +15,12 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { trackerArgv } from "./aftercare.ts";
 import { FIXTURE_MARKER } from "./fixture.ts";
 import { processes } from "./host.ts";
@@ -558,7 +559,9 @@ describe("aftercare on a landed run record", () => {
       "300",
     ]);
     expect(started.code).toBe(0);
-    const pid = Number(readFileSync(join(r.D, "render/preview.pid"), "utf8").trim());
+    const pid = Number(
+      (readFileSync(join(r.D, "render/preview.pid"), "utf8").trim().split("\n")[0] ?? "").trim(),
+    );
     expect(processIsLive(pid)).toBe(true);
     try {
       const result = aftercare(r, WORDS);
@@ -937,7 +940,9 @@ describe("aftercare on a landed run record", () => {
       "300",
     ]);
     expect(started.code).toBe(0);
-    const pid = Number(readFileSync(join(r.D, "render/preview.pid"), "utf8").trim());
+    const pid = Number(
+      (readFileSync(join(r.D, "render/preview.pid"), "utf8").trim().split("\n")[0] ?? "").trim(),
+    );
     try {
       const dry = aftercare(r, ["--dry-run", ...WORDS]);
       expect(dry.code).toBe(0);
@@ -1057,11 +1062,15 @@ describe("aftercare on a landed run record", () => {
     expect(result.code).toBe(3);
     expect(result.out).toContain(".worktrees/7-link");
     expect(result.out).toContain("symbolic link");
+    // Aftercare logs folder paths physical, so the want is too: under a
+    // symlinked TMPDIR the as-given spelling never equals the logged one.
+    // The link itself is not resolved, only the directory holding it.
+    const want = join(realpathSync(dirname(link)), basename(link));
     const noted = readFileSync(join(r.D, "actions.jsonl"), "utf8")
       .split("\n")
       .map((line) => (line ? JSON.parse(line) : null))
       .some(
-        (e) => e && e.action === "note" && e.target === link && e.detail.includes("symbolic link"),
+        (e) => e && e.action === "note" && e.target === want && e.detail.includes("symbolic link"),
       );
     expect(noted).toBe(true);
     expect(existsSync(link)).toBe(true);

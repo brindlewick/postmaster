@@ -84,7 +84,7 @@ a board name; its owner and the user's GitHub login are machine-side.
 <tool>/scripts/run github <repo> read <n> --body              # the body alone, the stored body followed by one newline
 <tool>/scripts/run github <repo> edit <n> <body-file> <base-file>
 <tool>/scripts/run github <repo> title <n> "<title>"
-<tool>/scripts/run github <repo> label <n> add|remove <label>
+<tool>/scripts/run github <repo> label <n> <add|remove> <label>
 <tool>/scripts/run github <repo> has-label <n> <label>      # present or absent: exact membership
 <tool>/scripts/run github <repo> state <n> in-progress
 <tool>/scripts/run github <repo> comment <n> coachman "<text>"
@@ -158,7 +158,7 @@ projects, and `<tool>/scripts/run probe-trackers` runs it.
 <tool>/scripts/run plane read PM-12 --body                    # the body alone, as markdown
 <tool>/scripts/run plane edit PM-12 <body-file> <base-file>
 <tool>/scripts/run plane title PM-12 "<title>"
-<tool>/scripts/run plane label PM-12 add|remove <label>
+<tool>/scripts/run plane label PM-12 <add|remove> <label>
 <tool>/scripts/run plane has-label PM-12 <label>            # present or absent: exact membership
 <tool>/scripts/run plane state PM-12 in-progress
 <tool>/scripts/run plane comment PM-12 coachman "<text>"
@@ -188,7 +188,7 @@ projects, and `<tool>/scripts/run probe-trackers` runs it.
 ## local
 
 Tickets in the target repository's own git directory, for a repo with no remote, or a user
-with no network or no login. Nothing is installed or configured beyond bash, git and python3.
+with no network or no login. Nothing is installed or configured beyond bash and git.
 The store is `postmaster/tickets/` in the repository's common git directory
 (`.git/postmaster/tickets/` in a plain checkout): outside the working tree and every branch,
 the same for every worktree, and removed with the repository. A ticket is `<n>.md`, its body
@@ -212,7 +212,7 @@ worktree included:
 <tool>/scripts/run local <repo> read <n> --body               # the body alone, as stored
 <tool>/scripts/run local <repo> edit <n> <body-file> <base-file>
 <tool>/scripts/run local <repo> title <n> "<title>"
-<tool>/scripts/run local <repo> label <n> add|remove <label>
+<tool>/scripts/run local <repo> label <n> <add|remove> <label>
 <tool>/scripts/run local <repo> has-label <n> <label>      # present or absent: exact membership
 <tool>/scripts/run local <repo> state <n> in-progress
 <tool>/scripts/run local <repo> comment <n> coachman "<text>"

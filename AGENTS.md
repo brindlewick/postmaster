@@ -76,9 +76,11 @@ the section above for the two things that differ.
 **2. Is this machine set up?**
 
 ```sh
-cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
 scripts/run link-skills --check  # names missing or blocked links; read its exit status
 ```
+
+Read `~/.postmaster/config.toml` with your file-reading tools. A missing file means the
+machine is not set up.
 
 Include both results when you say whether the machine is set up. The link check is read-only.
 If the config is present but the check names missing or blocked links, report them and offer
@@ -164,9 +166,8 @@ A four-role flow for getting one ticket implemented well by several models at on
 
 The postmaster runs no model lanes and edits no source. A coachman never takes a second
 load. The **waybill** (`<dispatch>/brief.md`) is the only thing that travels between them.
-Harness-specific invocations live in `skills/postmaster/harnesses.md`, and
-`scripts/run launch` is their executable form: the runbooks name a form (launch, resume,
-thread id), that file gives the command, the script runs it. Where a launch runs, and how the
+Harness-specific behavior lives in `skills/postmaster/harnesses.md`; `scripts/run launch form <lane>`
+prints the exact launch and resume forms for a configured lane. Where a launch runs, and how the
 user watches it, is the session host's: `skills/postmaster/hosts.md` records Herdr, tmux and no
 host at all, and `scripts/run host` runs every launch through them. `SKILL.md` is the front door —
 reached from this file or by typing `/postmaster`, it gets the machine ready if it is not and
@@ -242,7 +243,9 @@ whole system.
 The scripts run on Bun 1.4.2 or newer: `scripts/run <name> [args]` is the one entry for every
 tool script; it execs Bun with `--no-env-file` and the tool's own `bunfig.toml`, so a script run
 inside a target project never loads that project's `.env` or Bun config. Runtime imports are
-Bun's built-ins and Node's standard modules only; `typescript`, `@biomejs/biome` and `oxlint`
+Bun's built-ins and Node's standard modules only, except the vendored parser
+(`scripts/lib/vendor/babel-parser.js`, @babel/parser 7.x, the one dependency #268 added with
+the user's word); `typescript`, `@biomejs/biome` and `oxlint`
 are the development dependencies, and `bun run check` is the type check, Oxlint, the Biome
 format check, the tests beside every script, the runbook reference check and the wiki lint.
 
@@ -250,13 +253,16 @@ format check, the tests beside every script, the runbook reference check and the
 
 Precedence, stated once and followed everywhere: **discovery** supplies defaults; the
 shared `.postmaster/project.toml`, where one exists, declares what the project requires of
-every run; local `.postmaster/settings.toml` are this person's choices on this machine;
-`~/.postmaster/config.toml` supplies what is machine-specific and is never overridden by a
-project. None of these sets a floor of turnpikes: a ticket names the turnpikes its run
-passes through (#40), and project settings only say what `default` means for that project.
-A project's settings name no credential and no filesystem path, in either file
-(`scripts/run project-settings`). Nothing in `.postmaster/` is committed by default; the one
-shared file is committed on purpose with `git add -f`.
+every run; the person's `.postmaster/settings.toml` overrides `~/.postmaster/config.toml`
+setting by setting for that project, a group merging and a list or single value replaced
+whole, except `projects_roots`, which always comes from the global config; the global
+config supplies the machine's defaults. None of these sets a floor of
+turnpikes: a ticket names the turnpikes its run passes through (#40), and project settings
+only say what `default` means for that project. The person's file may name models, env
+files and other machine settings; the shared file names no credential and no filesystem
+path (`scripts/run project-settings`). Nothing in `.postmaster/` is committed by default;
+project.toml is committed on purpose with `git add -f`, and a tracked settings.toml is
+used only after the user has accepted it, and again after it changes.
 
 ## Working on this repository
 

@@ -1,14 +1,25 @@
-// Tests beside scripts/project-settings.ts, moved from its --self-test on #109: 118 controls.
+// Tests beside scripts/project-settings.ts, moved from its --self-test on #109: 123 controls.
 // CLI spawns go through a local spawnSync helper with a timeout option instead of the
 // timeout command; env merges over process.env with undefined deleting, as lib/proc run().
 // POSTMASTER_CONFIG points at the fixture machine config for the suite, restored after.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseTomlText } from "./lib/data";
+import { globalConfigPath, isTracked, recordAcceptance } from "./lib/effective-config";
 import {
   asTable,
   effectiveConfig,
@@ -457,5 +468,231 @@ describe("repo profile", () => {
     expect(() => {
       inspect(join(import.meta.dir, ".."));
     }).not.toThrow();
+  });
+});
+
+describe("run-root and exclude-worktrees", () => {
+  const gitIn = (dir: string, ...args: string[]): number =>
+    spawnSync("git", ["-C", dir, ...args], { encoding: "utf8", timeout: 10000 }).status ?? 1;
+
+  test("run-root creates the runs folder and its ignore rule, and prints the run root", () => {
+    const target = at("run-root-target");
+    mkdirSync(target, { recursive: true });
+    expect(gitIn(target, "init", "-q")).toBe(0);
+    const r = runCli(SELF, ["project-settings", "run-root", target]);
+    expect(r.code).toBe(0);
+    expect(r.out.trim().endsWith(join(".postmaster", "runs"))).toBe(true);
+    expect(existsSync(join(r.out.trim(), "postmaster"))).toBe(true);
+    expect(existsSync(join(target, ".postmaster", ".gitignore"))).toBe(true);
+    expect(gitIn(target, "check-ignore", "-q", ".postmaster/runs/T-1/card.md")).toBe(0);
+  }, 30000);
+
+  test("run-root refuses a directory that is not a repository", () => {
+    const plain = at("run-root-plain");
+    mkdirSync(plain, { recursive: true });
+    const r = runCli(SELF, ["project-settings", "run-root", plain]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("not a git repository");
+  }, 30000);
+
+  test("exclude-worktrees keeps exactly one line in the repo's exclude, run twice", () => {
+    const target = at("exclude-target");
+    mkdirSync(target, { recursive: true });
+    expect(gitIn(target, "init", "-q")).toBe(0);
+    const first = runCli(SELF, ["project-settings", "exclude-worktrees", target]);
+    expect(first.code).toBe(0);
+    expect(first.out).toContain("excluded .worktrees/");
+    const second = runCli(SELF, ["project-settings", "exclude-worktrees", target]);
+    expect(second.code).toBe(0);
+    const text = readFileSync(join(target, ".git", "info", "exclude"), "utf8");
+    expect(text.split("\n").filter((line) => line === ".worktrees/").length).toBe(1);
+    expect(gitIn(target, "status", "--porcelain")).toBe(0);
+  }, 30000);
+
+  test("exclude-worktrees refuses a directory that is not a repository", () => {
+    const plain = at("exclude-plain");
+    mkdirSync(plain, { recursive: true });
+    const r = runCli(SELF, ["project-settings", "exclude-worktrees", plain]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("not a git repository");
+  }, 30000);
+
+  test("run-root refuses a symlinked .postmaster before creating anything outside", () => {
+    const target = at("run-root-symlink");
+    mkdirSync(target, { recursive: true });
+    expect(gitIn(target, "init", "-q")).toBe(0);
+    const outside = at("run-root-symlink-outside");
+    mkdirSync(outside, { recursive: true });
+    symlinkSync(outside, join(target, ".postmaster"));
+    const r = runCli(SELF, ["project-settings", "run-root", target]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("not a symlink");
+    expect(readdirSync(outside).length).toBe(0);
+  }, 30000);
+
+  test("run-root refuses a symlinked runs folder instead of printing a root through it", () => {
+    const target = at("run-root-runs-symlink");
+    mkdirSync(join(target, ".postmaster"), { recursive: true });
+    expect(gitIn(target, "init", "-q")).toBe(0);
+    const outside = at("run-root-runs-symlink-outside");
+    mkdirSync(outside, { recursive: true });
+    symlinkSync(outside, join(target, ".postmaster", "runs"));
+    const r = runCli(SELF, ["project-settings", "run-root", target]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("not a symlink");
+    expect(readdirSync(outside).length).toBe(0);
+  }, 30000);
+
+  test("exclude-worktrees lands where git reads it in a linked worktree", () => {
+    const main = at("exclude-linked-main");
+    mkdirSync(main, { recursive: true });
+    expect(gitIn(main, "init", "-q")).toBe(0);
+    expect(gitIn(main, "config", "user.name", "brindlewick")).toBe(0);
+    expect(
+      gitIn(main, "config", "user.email", "332054101+brindlewick@users.noreply.github.com"),
+    ).toBe(0);
+    expect(gitIn(main, "commit", "-q", "--allow-empty", "-m", "init")).toBe(0);
+    const linked = at("exclude-linked-wt");
+    expect(gitIn(main, "worktree", "add", "--detach", linked, "HEAD")).toBe(0);
+    const r = runCli(SELF, ["project-settings", "exclude-worktrees", linked]);
+    expect(r.code).toBe(0);
+    mkdirSync(join(linked, ".worktrees", "x"), { recursive: true });
+    expect(gitIn(linked, "check-ignore", "-q", ".worktrees/x")).toBe(0);
+  }, 30000);
+
+  test("exclude-worktrees ignores a GIT_DIR that points at another repository", () => {
+    const target = at("exclude-gitdir-target");
+    const decoy = at("exclude-gitdir-decoy");
+    mkdirSync(target, { recursive: true });
+    mkdirSync(decoy, { recursive: true });
+    expect(gitIn(target, "init", "-q")).toBe(0);
+    expect(gitIn(decoy, "init", "-q")).toBe(0);
+    const r = runCli(SELF, ["project-settings", "exclude-worktrees", target], {
+      env: { GIT_DIR: join(decoy, ".git") },
+    });
+    expect(r.code).toBe(0);
+    expect(readFileSync(join(target, ".git", "info", "exclude"), "utf8")).toContain(".worktrees/");
+    expect(readFileSync(join(decoy, ".git", "info", "exclude"), "utf8")).not.toContain(
+      ".worktrees/",
+    );
+  }, 30000);
+
+  test("run-root ignores a GIT_WORK_TREE that points at another repository", () => {
+    const target = at("run-root-worktree-target");
+    const decoy = at("run-root-worktree-decoy");
+    mkdirSync(target, { recursive: true });
+    mkdirSync(decoy, { recursive: true });
+    expect(gitIn(target, "init", "-q")).toBe(0);
+    expect(gitIn(decoy, "init", "-q")).toBe(0);
+    const r = runCli(SELF, ["project-settings", "run-root", target], {
+      env: { GIT_WORK_TREE: decoy },
+    });
+    expect(r.code).toBe(0);
+    // The printed root is resolved; under a linked temporary folder (macOS /var)
+    // the built path is not, so resolve the expected side first.
+    expect(r.out.trim()).toBe(join(realpathSync(target), ".postmaster", "runs"));
+    expect(existsSync(join(decoy, ".postmaster"))).toBe(false);
+  }, 30000);
+});
+
+describe("project overrides", () => {
+  test("tracker.binding stays a fact while kind merges into the config", () => {
+    const r = at("override-binding");
+    write(
+      join(r, ".postmaster", "settings.toml"),
+      '[tracker]\nbinding = "board"\nkind = "plane"\n',
+    );
+    const merged = effectiveConfig(r, loadMachine(machine));
+    expect((merged.tracker as Rec).kind).toBe("plane");
+    expect(Object.hasOwn(merged.tracker as Rec, "binding")).toBe(false);
+    expect((inspect(r).tracker as Rec).binding).toBe("board");
+  }, 30000);
+
+  test("override tables must keep their shape", () => {
+    const r = at("override-shape");
+    write(join(r, ".postmaster", "settings.toml"), 'team = "x"\n');
+    let message = "";
+    try {
+      effectiveConfig(r, loadMachine(machine));
+    } catch (e) {
+      if (isDie(e)) message = e.message;
+      else throw e;
+    }
+    expect(message).toBe("local project settings.team must be a table");
+  }, 30000);
+
+  test("an unknown top-level key is still refused", () => {
+    const r = at("override-unknown");
+    write(join(r, ".postmaster", "settings.toml"), "[frobnicate]\nx = 1\n");
+    let message = "";
+    try {
+      effectiveConfig(r, loadMachine(machine));
+    } catch (e) {
+      if (isDie(e)) message = e.message;
+      else throw e;
+    }
+    expect(message).toBe("local project settings has unsupported table or key: frobnicate");
+  }, 30000);
+
+  test("acceptance gates a tracked file until the user accepts it", () => {
+    const r = at("override-accept");
+    write(join(r, ".postmaster", "settings.toml"), '[lanes.alpha]\nmodel = "x"\n');
+    const id = ["-c", "user.name=t", "-c", "user.email=t@example.invalid"];
+    expect(git(["init", "-q", "-b", "main", r])).toBe(0);
+    expect(git(["-C", r, "add", "-f", ".postmaster/settings.toml"])).toBe(0);
+    expect(git(["-C", r, ...id, "commit", "-qm", "settings"])).toBe(0);
+    expect(inspect(r).local_acceptance).toBe("pending");
+    const before = effectiveConfig(r, loadMachine(machine));
+    expect(((before.lanes as Rec).alpha as Rec).model).toBe("a");
+    expect(recordAcceptance(r, machine)).toContain("accepted");
+    expect(inspect(r).local_acceptance).toBe("accepted");
+    const after = effectiveConfig(r, loadMachine(machine));
+    expect(((after.lanes as Rec).alpha as Rec).model).toBe("x");
+  }, 30000);
+});
+
+describe("tracked files", () => {
+  const id = ["-c", "user.name=t", "-c", "user.email=t@example.invalid"];
+
+  test("a case-variant directory counts as tracked", () => {
+    const dir = join(tmp, "case-dir");
+    mkdirSync(dir, { recursive: true });
+    expect(git(["init", "-q", dir])).toBe(0);
+    mkdirSync(join(dir, ".POSTMASTER"), { recursive: true });
+    writeFileSync(join(dir, ".POSTMASTER", "settings.toml"), '[lanes.a]\nmodel = "m"\n');
+    expect(git(["-C", dir, "add", ".POSTMASTER/settings.toml"])).toBe(0);
+    expect(git(["-C", dir, ...id, "commit", "-qm", "upper"])).toBe(0);
+    // On a case-insensitive filesystem this file opens as
+    // .postmaster/settings.toml; it must still count as tracked. Linux cannot
+    // open it under the lower-case name, so this pins the outcome on the
+    // macOS-observable bypass, with the control below proving the check runs.
+    expect(isTracked(dir, join(dir, ".postmaster", "settings.toml"))).toBe(true);
+  });
+
+  test("a genuinely untracked file counts as untracked", () => {
+    const dir = join(tmp, "plain-track");
+    mkdirSync(join(dir, ".postmaster"), { recursive: true });
+    expect(git(["init", "-q", dir])).toBe(0);
+    writeFileSync(join(dir, ".postmaster", "settings.toml"), '[lanes.a]\nmodel = "m"\n');
+    expect(isTracked(dir, join(dir, ".postmaster", "settings.toml"))).toBe(false);
+  });
+});
+
+describe("global config path", () => {
+  test("the default builds from $HOME exactly, and unset HOME reads as the root", () => {
+    const saveConfig = process.env.POSTMASTER_CONFIG;
+    const saveHome = process.env.HOME;
+    try {
+      delete process.env.POSTMASTER_CONFIG;
+      process.env.HOME = join(tmp, "fake-home");
+      expect(globalConfigPath()).toBe(join(tmp, "fake-home", ".postmaster", "config.toml"));
+      delete process.env.HOME;
+      expect(globalConfigPath()).toBe("/.postmaster/config.toml");
+    } finally {
+      if (saveConfig === undefined) delete process.env.POSTMASTER_CONFIG;
+      else process.env.POSTMASTER_CONFIG = saveConfig;
+      if (saveHome === undefined) delete process.env.HOME;
+      else process.env.HOME = saveHome;
+    }
   });
 });

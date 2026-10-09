@@ -4,11 +4,15 @@
 //   run reach before <dispatch> <round>
 //   run reach check <dispatch> workhorses|r<round>|card
 //   run reach restore <dispatch> r<round>
+//   run reach round <dispatch> r<round>
 //
 //   exit 0  checked, no findings or notes
 //   exit 1  the check could not run
 //   exit 2  an observed change was found
 //   exit 3  notes or records not checked
+//
+//   round checks, then restores unless the check faulted: exit 1 with no
+//   restore when the check could not run, else restore's exit.
 //
 // A finding comes only from an observed change: the main checkout, or this
 // run's branches and synthesis worktree around a round. What a lane's record
@@ -1488,6 +1492,15 @@ function currentHeadForRestore(repo: string, where: string): string {
   return currentHead(repo, where);
 }
 
+/** The round reach step the runbook runs before any fix: check, then restore
+ * unless the check faulted. A faulted check (exit 1) stops before restore;
+ * any other check exit restores, and the step exits with restore's code. */
+function roundStep(info: RunInfo, round: number): number {
+  const checked = checkRound(info, round);
+  if (checked === 1) return 1;
+  return restoreRound(info, round);
+}
+
 function pointFromAction(line: string, index: number): { actor: string; event: ReachEvent } {
   let parsed: unknown;
   try {
@@ -1565,6 +1578,13 @@ function main(argv: string[]): number {
       const round = /^r([1-9][0-9]*)$/u.exec(argv[2]!);
       if (!round) usage();
       return restoreRound(info, Number(round[1]));
+    }
+    if (command === "round") {
+      if (argv.length !== 3) usage();
+      const info = loadRun(argv[1]!);
+      const round = /^r([1-9][0-9]*)$/u.exec(argv[2]!);
+      if (!round) usage();
+      return roundStep(info, Number(round[1]));
     }
     usage();
   } catch (e) {
