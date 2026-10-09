@@ -109,7 +109,9 @@ choosing the global config as it is writes nothing. When git does not ignore the
 settings yet, setup offers to have git ignore the project's settings, and nothing ignores
 them without the user's yes.
 
-After each step run the next-step command again; a step the user declines ends setup there,
+After a step that writes, run the next-step command again. A skipped global step goes
+to the project step without rerunning: the skip lives in the conversation, setup-next keeps
+no record of it and would say global again. A declined project step ends setup there,
 and the pass waits until the check says the project is set up.
 
 ```sh

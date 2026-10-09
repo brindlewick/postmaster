@@ -31,6 +31,7 @@
 import { existsSync, mkdirSync, readFileSync, readSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
+  checkLaneEntry,
   coachmanModelProblem,
   harnessProblem,
   laneCountProblem,
@@ -40,16 +41,21 @@ import {
 import { readTomlFile } from "./lib/data.ts";
 import {
   asTable,
+  atomicWriteFileSync,
   effectiveConfig,
   ensureIgnore,
   globalConfigPath,
   ignoreSettings,
   isDie,
+  isFile,
+  isSymlink,
   loadMachine,
   parseTomlStrict,
   pendingNoticeFor,
-  repoTopLevel,
   type Rec,
+  repoTopLevel,
+  settingsDir,
+  settingsIgnored,
 } from "./lib/effective-config.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { die, run } from "./lib/proc.ts";
@@ -205,9 +211,6 @@ function askProject(
         console.log(`${prompt}: (cleared)`);
         return "";
       }
-      if (def === "" && !optional) {
-        die(`setup: no answer for ${k} in ${opts.answers} (${prompt})`, 1);
-      }
       console.log(`${prompt}: (not set)`);
       return "";
     }
@@ -250,6 +253,166 @@ function hasKey(file: string, key: string): boolean {
     return text.split("\n").some((l) => l.startsWith(`${key}=`));
   } catch {
     return false;
+  }
+}
+
+// --- project merge -------------------------------------------------------------------------------
+// A second setup run merges its answers into the existing file instead of
+// replacing it, so the settings grow over several runs. Text surgery keeps
+// what this run did not touch byte for byte: unknown sections, comments and
+// hand formatting survive. Only answered keys move.
+interface TomlSection {
+  header: string;
+  key: string;
+  body: string[];
+}
+
+function splitSections(text: string): { preamble: string[]; sections: TomlSection[] } {
+  const preamble: string[] = [];
+  const sections: TomlSection[] = [];
+  let current: TomlSection | null = null;
+  for (const line of text.split("\n")) {
+    const m = /^[ \t]*\[([^\]]+)\][ \t]*(?:#.*)?$/u.exec(line);
+    if (m?.[1] !== undefined) {
+      current = { header: line, key: m[1].trim(), body: [] };
+      sections.push(current);
+    } else if (current === null) {
+      preamble.push(line);
+    } else {
+      current.body.push(line);
+    }
+  }
+  return { preamble, sections };
+}
+
+function keyOf(line: string): string | null {
+  const m = /^[ \t]*([^= \t][^=]*?)[ \t]*=/u.exec(line);
+  return m?.[1] === undefined ? null : m[1].trim();
+}
+
+// Merge one inline table line (`coachman = { harness = "x" }`) key-wise, so a
+// run answering one role key keeps the keys an earlier run set. Flat pairs
+// only; anything else falls back to the whole line.
+function mergeInlineLine(oldLine: string, newLine: string): string {
+  const parse = (text: string): Array<[string, string]> | null => {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end < start) return null;
+    const pairs: Array<[string, string]> = [];
+    let depth = 0;
+    let quote = false;
+    let escaped = false;
+    let current = "";
+    const parts: string[] = [];
+    for (const ch of text.slice(start + 1, end)) {
+      if (quote) {
+        current += ch;
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') quote = false;
+      } else if (ch === '"') {
+        quote = true;
+        current += ch;
+      } else if (ch === "[" || ch === "{") {
+        depth += 1;
+        current += ch;
+      } else if (ch === "]" || ch === "}") {
+        depth -= 1;
+        current += ch;
+      } else if (ch === "," && depth === 0) {
+        parts.push(current);
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+    parts.push(current);
+    for (const part of parts) {
+      const eq = part.indexOf("=");
+      if (eq < 0) return null;
+      const k = part.slice(0, eq).trim();
+      const v = part.slice(eq + 1).trim();
+      if (k === "" || v === "" || v.startsWith("{") || v.startsWith("[")) return null;
+      pairs.push([k, v]);
+    }
+    return pairs;
+  };
+  const oldPairs = parse(oldLine);
+  const newPairs = parse(newLine);
+  if (oldPairs === null || newPairs === null) return newLine;
+  const merged: Array<[string, string]> = [...oldPairs];
+  for (const [k, v] of newPairs) {
+    const at = merged.findIndex(([ek]) => ek === k);
+    if (at >= 0) merged[at] = [k, v];
+    else merged.push([k, v]);
+  }
+  const key = keyOf(newLine) ?? keyOf(oldLine) ?? "";
+  return `${key} = { ${merged.map(([k, v]) => `${k} = ${v}`).join(", ")} }`;
+}
+
+/** mergeSettings <existing> <out>: this run's TOML over the existing file:
+ * answered keys replaced or added, everything else kept verbatim. */
+function mergeSettings(existing: string, out: string): string {
+  const oldFile = splitSections(existing);
+  const newFile = splitSections(out);
+  const merged: TomlSection[] = oldFile.sections.map((s) => ({ ...s, body: [...s.body] }));
+  for (const section of newFile.sections) {
+    let target = merged.find((s) => s.key === section.key);
+    if (target === undefined) {
+      target = { header: section.header, key: section.key, body: [] };
+      merged.push(target);
+    }
+    for (const line of section.body) {
+      if (line.trim() === "") continue;
+      const key = keyOf(line);
+      if (key === null) {
+        target.body.push(line);
+        continue;
+      }
+      const at = target.body.findIndex((l) => keyOf(l) === key);
+      if (at < 0) {
+        target.body.push(line);
+      } else {
+        const oldLine = target.body[at] as string;
+        if (oldLine.includes("{") && line.includes("{")) {
+          target.body[at] = mergeInlineLine(oldLine, line);
+        } else {
+          target.body[at] = line;
+        }
+      }
+    }
+  }
+  // The header names the latest write; any other preamble lines stay.
+  const outHeader = newFile.preamble.find((l) => l.startsWith("# Written by "));
+  const writtenBy = "# Written by scripts/run setup --project";
+  let preamble = [...oldFile.preamble];
+  const at = preamble.findIndex((l) => l.startsWith(writtenBy));
+  if (outHeader !== undefined) {
+    if (at >= 0) preamble[at] = outHeader;
+    else preamble = [outHeader, ...preamble];
+  }
+  const lines = [...preamble];
+  for (const section of merged) {
+    lines.push(section.header, ...section.body);
+  }
+  return `${lines.join("\n").replace(/\n+$/u, "")}\n`;
+}
+
+// Report whether git ignores the settings from git itself, not from the
+// answer: an older rule can keep the file ignored after a no, and a tracked
+// file stays shared after a yes. Either mismatch says so.
+function reportIgnored(answer: string): void {
+  const ignored = settingsIgnored(PROJECT_ROOT);
+  console.log(`settings ignored: ${ignored ? "yes" : "no"}`);
+  if (answer === "no" && ignored) {
+    console.log(
+      "setup: note: an existing ignore rule covers the settings file, although the answer was no; remove it from .postmaster/.gitignore to share them",
+    );
+  }
+  if (answer === "yes" && !ignored) {
+    console.log(
+      "setup: note: git still does not ignore the settings file, although the answer was yes",
+    );
   }
 }
 
@@ -427,7 +590,6 @@ if (PROJECT !== "") {
   }
 }
 const MACHINE_LANES = recOf(MACHINE.lanes);
-const MACHINE_TEAM = recOf(MACHINE.team);
 const MACHINE_TRACKER = recOf(MACHINE.tracker);
 const MACHINE_TRACKER_KIND = typeof MACHINE_TRACKER.kind === "string" ? MACHINE_TRACKER.kind : "";
 const MACHINE_TRACKER_WS =
@@ -946,7 +1108,7 @@ if (PROJECT !== "") {
   if (sections.length === 0) {
     if (IGNORE === "yes" && existsSync(PROJECT_SETTINGS)) {
       ignoreSettings(PROJECT_ROOT);
-      console.log("settings ignored: yes");
+      reportIgnored(IGNORE);
       process.exit(0);
     }
     die("setup: no project settings given", 1);
@@ -954,12 +1116,33 @@ if (PROJECT !== "") {
   const projectDate = new Date().toISOString().slice(0, 10);
   const OUT = `# Written by scripts/run setup --project on ${projectDate}. Only what was set for this project.\n${sections.join("\n")}`;
 
-  // The merged view, global with these answers: every list below resolves
-  // against it, as the readers will read it. The shared file never merges,
-  // and the previous local file is replaced, not read, so neither is loaded.
+  // A write through a symlink lands outside the project, and a dangling one
+  // reads as absent, so the guard runs before the backup is read.
+  settingsDir(PROJECT_ROOT);
+  if (isSymlink(PROJECT_SETTINGS)) die(`setup: ${PROJECT_SETTINGS} must not be a symlink`, 1);
+  if (existsSync(PROJECT_SETTINGS) && !isFile(PROJECT_SETTINGS))
+    die(`setup: ${PROJECT_SETTINGS} is not a regular file`, 1);
+  const backup = existsSync(PROJECT_SETTINGS) ? readFileSync(PROJECT_SETTINGS, "utf8") : null;
+  if (backup !== null) {
+    try {
+      parseTomlStrict(backup, "existing project settings");
+    } catch (e) {
+      die(
+        `setup: the existing ${PROJECT_SETTINGS} does not parse${isDie(e) ? `: ${e.message}` : ""}; fix or remove it before setting more`,
+        1,
+      );
+    }
+  }
+  // This run's answers over the existing file, so the settings grow over
+  // several runs; a first run writes its answers alone.
+  const fileText = backup === null ? OUT : mergeSettings(backup, OUT);
+
+  // The merged view, global with the file as written: every list below
+  // resolves against it, as the readers will read it. The shared file never
+  // merges, so it is not loaded.
   let merged: Rec;
   try {
-    const candidate = asTable(parseTomlStrict(OUT, "project settings"), "project settings");
+    const candidate = asTable(parseTomlStrict(fileText, "project settings"), "project settings");
     merged = effectiveConfig(PROJECT_ROOT, MACHINE, { shared: {}, local: candidate });
   } catch (e) {
     if (isDie(e)) die(`setup: ${e.message}`, 1);
@@ -969,6 +1152,14 @@ if (PROJECT !== "") {
   const mergedNames = Object.keys(mergedLanes);
   const mergedIssue = laneCountProblem(mergedNames);
   if (mergedIssue !== null) die(mergedIssue, 1);
+  // Each lane this run touches must read complete once merged: a new lane
+  // with a model but no harness, or the reverse, is refused here, not left
+  // for check-setup to report after a file claimed success.
+  for (const name of laneSet) {
+    const touched = LANE_VALS[name];
+    if (touched.h === "" && touched.m === "" && touched.e === "" && touched.ef === "") continue;
+    for (const p of checkLaneEntry(name, mergedLanes[name]).problems) die(p, 1);
+  }
   const mergedTeam = recOf(merged.team);
   const laneModels: string[] = [];
   for (const name of mergedNames) {
@@ -1025,10 +1216,9 @@ if (PROJECT !== "") {
   }
 
   if (DRY === 1) {
-    console.log(OUT.replace(/\n+$/u, ""));
+    console.log(fileText.replace(/\n+$/u, ""));
     process.exit(0);
   }
-  const backup = existsSync(PROJECT_SETTINGS) ? readFileSync(PROJECT_SETTINGS, "utf8") : null;
   if (backup !== null) {
     const OW = ask(`${PROJECT_SETTINGS} exists; overwrite (yes/no)`, "no", "overwrite", opts);
     if (OW !== "yes") die(`setup: left ${PROJECT_SETTINGS} as it was`, 1);
@@ -1037,19 +1227,33 @@ if (PROJECT !== "") {
     if (backup === null) rmSync(PROJECT_SETTINGS, { force: true });
     else writeFileSync(PROJECT_SETTINGS, backup, "utf8");
   };
+  const undone = backup === null ? "removed the file it wrote" : "restored the previous file";
   mkdirSync(dirname(PROJECT_SETTINGS), { recursive: true });
-  writeFileSync(PROJECT_SETTINGS, `${OUT.replace(/\n+$/u, "")}\n`, "utf8");
+  atomicWriteFileSync(
+    dirname(PROJECT_SETTINGS),
+    PROJECT_SETTINGS,
+    `${fileText.replace(/\n+$/u, "")}\n`,
+  );
   try {
     readTomlFile(PROJECT_SETTINGS);
   } catch {
     restore();
-    die(`setup: ${PROJECT_SETTINGS} does not parse as TOML; restored the previous file`, 1);
+    die(`setup: ${PROJECT_SETTINGS} does not parse as TOML; ${undone}`, 1);
   }
   // The file control runs only when the readers see the file as written: a
   // tracked file waits for acceptance, and the merged checks above already
   // passed. Without any team lists the reviewers cannot resolve yet, which is
   // a warning, not a refusal: the settings grow over several setup runs.
-  const notice = pendingNoticeFor(PROJECT_ROOT);
+  let notice: string | null;
+  try {
+    notice = pendingNoticeFor(PROJECT_ROOT);
+  } catch (e) {
+    restore();
+    die(
+      `setup: ${PROJECT_SETTINGS} fails the readers' validation${isDie(e) ? `: ${e.message}` : ""}; ${undone}`,
+      1,
+    );
+  }
   if (notice === null) {
     const rev = run(join(HERE, "run"), ["reviewers", "lines", "--project", PROJECT_ROOT]);
     if (rev.code !== 0) {
@@ -1061,10 +1265,7 @@ if (PROJECT !== "") {
         process.stderr.write(rev.out);
         process.stderr.write(rev.err);
         restore();
-        die(
-          `setup: the reviewer lanes for ${PROJECT_ROOT} do not resolve; restored the previous file`,
-          1,
-        );
+        die(`setup: the reviewer lanes for ${PROJECT_ROOT} do not resolve; ${undone}`, 1);
       }
       console.log(
         "setup: warning: no reviewers are configured yet; check-setup names what is still missing",
@@ -1076,7 +1277,7 @@ if (PROJECT !== "") {
   ensureIgnore(PROJECT_ROOT, true);
   if (IGNORE === "yes") ignoreSettings(PROJECT_ROOT);
   console.log(`wrote ${PROJECT_SETTINGS} (parsed back as TOML)`);
-  console.log(`settings ignored: ${IGNORE}`);
+  reportIgnored(IGNORE);
   process.exit(0);
 }
 

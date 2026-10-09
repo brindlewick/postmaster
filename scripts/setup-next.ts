@@ -10,20 +10,38 @@
 //
 // next=global means no usable global config: set it up or skip it.
 // next=project means set up the project's own settings or use the global
-// config as it is; with no global config it goes straight to the project's
-// own settings. next=done means the check says the project is set up.
-// POSTMASTER_CONFIG overrides the global config path, as check-setup reads it.
-import { existsSync } from "node:fs";
+// config as it is; once the project step is reached with no global config,
+// it offers only the project's own settings, since there is no global
+// config to keep as it is. next=done means the check says the project is
+// set up. A skipped global step is the runbook's transition, not script
+// state: rerunning this command still says global, so the runbook goes to
+// the project step without rerunning. POSTMASTER_CONFIG overrides the
+// global config path, as check-setup reads it.
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { check } from "./check-setup.ts";
-import { tryTomlFile } from "./lib/data.ts";
-import { globalConfigPath, repoTopLevel, settingsIgnored } from "./lib/effective-config.ts";
+import {
+  globalConfigPath,
+  parseTomlStrict,
+  repoTopLevel,
+  settingsIgnored,
+} from "./lib/effective-config.ts";
 
 const USAGE = "usage: run setup-next <project>";
 
 function usage(): never {
   console.error(USAGE);
   process.exit(1);
+}
+
+/** strictGlobal <path>: the global config parses the way the readers read it. */
+function strictGlobal(path: string): boolean {
+  try {
+    parseTomlStrict(readFileSync(path, "utf8"), "global config");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function main(argv: string[]): number {
@@ -34,7 +52,9 @@ export function main(argv: string[]): number {
   const globalPresent = existsSync(globalPath);
   // A global config that does not parse is no base for the project step: the
   // global step replaces it, or its removal leaves the project step alone.
-  const globalUsable = globalPresent && tryTomlFile(globalPath) !== null;
+  // Usable means strictly usable, as the readers read it: a file the lenient
+  // parse accepts but the strict one refuses routes back to the global step.
+  const globalUsable = globalPresent && strictGlobal(globalPath);
   const settingsPath = join(root, ".postmaster", "settings.toml");
   const settingsPresent = existsSync(settingsPath);
   const verdict = check(target);

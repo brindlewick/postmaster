@@ -80,7 +80,7 @@ export const acceptanceStorePath = (configPath: string): string =>
   join(dirname(configPath), "accepted-project-settings.json");
 
 // --- filesystem edges ---------------------------------------------------------------------
-const isSymlink = (p: string): boolean => {
+export const isSymlink = (p: string): boolean => {
   try {
     return lstatSync(p).isSymbolicLink();
   } catch {
@@ -88,7 +88,7 @@ const isSymlink = (p: string): boolean => {
   }
 };
 
-const isFile = (p: string): boolean => {
+export const isFile = (p: string): boolean => {
   try {
     return statSync(p).isFile();
   } catch {
@@ -809,7 +809,7 @@ const SETTINGS_REL = join(".postmaster", "settings.toml");
 
 /** Write text to dest through a temp file in dir, fsynced and renamed, so a
  * crash cannot leave a truncation behind. The caller creates dir first. */
-const atomicWriteFileSync = (dir: string, dest: string, text: string): void => {
+export const atomicWriteFileSync = (dir: string, dest: string, text: string): void => {
   const tmpName = mkstempSync(dir, `.${basename(dest)}.`);
   try {
     const fd = openSync(tmpName, "w");
@@ -1295,30 +1295,57 @@ const ruleMatches = (rule: string, path: string): boolean => {
   return path === rule || path.startsWith(`${rule}/`);
 };
 
-/** ignoredBy <rules> <path>: the last matching rule decides, negations not. */
-const ignoredBy = (rules: string[], path: string): boolean => {
-  let ignored = false;
-  for (const line of rules) {
-    if (line.startsWith("!")) {
-      if (ruleMatches(line.slice(1), path)) ignored = false;
-    } else if (ruleMatches(line, path)) {
-      ignored = true;
-    }
-  }
-  return ignored;
-};
-
 /** effectiveRules <text>: the ignore file's rules, blanks and comments out. */
 const effectiveRules = (text: string): string[] =>
   pySplitLines(text)
     .map((line) => pyTrim(line))
     .filter((line) => line !== "" && !line.startsWith("#"));
 
-const RECORD_PROBES: Record<string, string> = {
-  "runs/": "runs/T-1/card.md",
-  "clerk/": "clerk/d/brief.md",
-  "project.toml": "project.toml",
-  ".gitignore": ".gitignore",
+/** coveringRule <rule> <target>: whether one positive rule covers a record
+ * target wholesale: the whole directory for runs/ and clerk/, the file for
+ * project.toml and .gitignore. A narrow rule such as runs/T-1/ covers only
+ * part of a directory and never counts. */
+const coveringRule = (rule: string, target: string): boolean => {
+  const bare = rule.startsWith("/") ? rule.slice(1) : rule;
+  if (bare === "*") return true;
+  if (target.endsWith("/")) {
+    const dir = target.slice(0, -1);
+    return bare === dir || bare === target || bare === `${dir}/**`;
+  }
+  return bare === target;
+};
+
+/** negationHits <rule> <target>: whether one negation reaches a record
+ * target: the file itself, the directory itself, or anything below it. */
+const negationHits = (rule: string, target: string): boolean => {
+  if (target.endsWith("/")) {
+    const dir = target.slice(0, -1);
+    return (
+      rule === "*" ||
+      rule === dir ||
+      rule === target ||
+      rule === `/${dir}` ||
+      rule === `/${target}` ||
+      rule.startsWith(target) ||
+      rule.startsWith(`/${target}`)
+    );
+  }
+  return ruleMatches(rule, target);
+};
+
+/** coveredBy <rules> <target>: the last word on a record target. A positive
+ * rule covering it counts until a negation reaching it, and a later
+ * covering rule counts again. */
+const coveredBy = (rules: string[], target: string): boolean => {
+  let covered = false;
+  for (const line of rules) {
+    if (line.startsWith("!")) {
+      if (negationHits(line.slice(1), target)) covered = false;
+    } else if (coveringRule(line, target)) {
+      covered = true;
+    }
+  }
+  return covered;
 };
 
 export const ensureIgnore = (repo: string, quiet = false): void => {
@@ -1329,12 +1356,10 @@ export const ensureIgnore = (repo: string, quiet = false): void => {
   if (existsSync(ignore) && !isFile(ignore)) fail(`${ignore} is not a regular file`);
   const existing = existsSync(ignore) ? strictRead(ignore) : "";
   const effective = effectiveRules(existing);
-  // Append each record rule its probe shows missing; a path already ignored,
-  // by a star or by an earlier line, is left alone. No rule added here ever
-  // ignores the person's settings file.
-  const missing = IGNORE_RECORDS.filter(
-    (rule) => !ignoredBy(effective, RECORD_PROBES[rule] ?? rule),
-  );
+  // Append each record rule no covering rule holds; a target already
+  // ignored, by a star or by an earlier line, is left alone. No rule added
+  // here ever ignores the person's settings file.
+  const missing = IGNORE_RECORDS.filter((rule) => !coveredBy(effective, rule));
   if (missing.length > 0) {
     let prefix = existing;
     if (prefix !== "" && !prefix.endsWith("\n")) prefix += "\n";
@@ -1358,12 +1383,20 @@ export const settingsIgnored = (repo: string): boolean => {
 };
 
 /** ignoreSettings <repo>: ignore the person's settings file, on the user's yes.
- * Setup asks; this applies. Idempotent: a file already ignored stays as it is. */
+ * Setup asks; this applies. Idempotent: a literal already last, or a file
+ * git already ignores through another rule, stays as it is. Git is the
+ * truth where this file's matcher cannot read a rule. */
 export const ignoreSettings = (repo: string): void => {
   ensureIgnore(repo, true);
   const ignore = join(settingsDir(repo), ".gitignore");
   const effective = effectiveRules(strictRead(ignore));
-  if (ignoredBy(effective, "settings.toml")) return;
+  let last: string | null = null;
+  for (const r of effective) {
+    const body = r.startsWith("!") ? r.slice(1) : r;
+    if (ruleMatches(body, "settings.toml")) last = r;
+  }
+  if (last === "settings.toml") return;
+  if (settingsIgnored(repo)) return;
   let prefix = strictRead(ignore);
   if (prefix !== "" && !prefix.endsWith("\n")) prefix += "\n";
   writeFileSync(ignore, `${prefix}settings.toml\n`);

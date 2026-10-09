@@ -9,8 +9,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -19,7 +19,12 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseTomlText } from "./lib/data";
-import { globalConfigPath, isTracked, recordAcceptance } from "./lib/effective-config";
+import {
+  globalConfigPath,
+  ignoreSettings,
+  isTracked,
+  recordAcceptance,
+} from "./lib/effective-config";
 import {
   asTable,
   effectiveConfig,
@@ -28,10 +33,10 @@ import {
   isDie,
   loadMachine,
   pyTruthy,
+  type Rec,
   scanMachineData,
   validateCommon,
   writeProfile,
-  type Rec,
 } from "./project-settings";
 
 const SELF = join(import.meta.dir, "run");
@@ -171,6 +176,42 @@ describe("missing profiles and ensure", () => {
     const before = readFileSync(join(negated, ".postmaster", ".gitignore"), "utf8");
     ensureIgnore(negated);
     expect(readFileSync(join(negated, ".postmaster", ".gitignore"), "utf8")).toBe(before);
+  });
+
+  test("ensure completes a narrow rule that covers only one records directory", () => {
+    const narrow = at("narrow");
+    mkdirSync(narrow, { recursive: true });
+    write(join(narrow, ".postmaster", ".gitignore"), "runs/T-1/\n");
+    ensureIgnore(narrow);
+    const kept = readFileSync(join(narrow, ".postmaster", ".gitignore"), "utf8");
+    expect(kept.includes("runs/T-1/\n")).toBe(true);
+    expect(kept.includes("\nruns/\n")).toBe(true);
+    expect(git(["init", "-q", narrow])).toBe(0);
+    expect(git(["-C", narrow, "check-ignore", "-q", ".postmaster/runs/T-1/card.md"])).toBe(0);
+    expect(git(["-C", narrow, "check-ignore", "-q", ".postmaster/runs/T-2/card.md"])).toBe(0);
+  });
+
+  test("ignoreSettings appends where the matcher misreads a wildcard negation", () => {
+    const wild = at("wild");
+    mkdirSync(wild, { recursive: true });
+    expect(git(["init", "-q", wild])).toBe(0);
+    write(join(wild, ".postmaster", ".gitignore"), "*\n!settings.*\n");
+    write(join(wild, ".postmaster", "settings.toml"), '[tracker]\nkind = "local"\n');
+    expect(git(["-C", wild, "check-ignore", "-q", ".postmaster/settings.toml"])).toBe(1);
+    ignoreSettings(wild);
+    expect(git(["-C", wild, "check-ignore", "-q", ".postmaster/settings.toml"])).toBe(0);
+  });
+
+  test("ignoreSettings stays idempotent where git already ignores the file", () => {
+    const star = at("star");
+    mkdirSync(star, { recursive: true });
+    expect(git(["init", "-q", star])).toBe(0);
+    write(join(star, ".postmaster", ".gitignore"), "*\n");
+    write(join(star, ".postmaster", "settings.toml"), '[tracker]\nkind = "local"\n');
+    ignoreSettings(star);
+    ignoreSettings(star);
+    const kept = readFileSync(join(star, ".postmaster", ".gitignore"), "utf8");
+    expect(kept).toBe("*\n");
   });
 });
 

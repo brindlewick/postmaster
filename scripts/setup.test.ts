@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -590,5 +591,154 @@ describe("negative controls", () => {
     expect(badlinkRc).toBe(1);
     expect(existsSync(join(tmp, "badlink.toml"))).toBe(false);
     expect(out).toContain("planning.review_link must contain {path}");
+  });
+});
+
+describe("project mode", () => {
+  const GLOBAL = `projects_roots = ["~/Code"]
+confine = "off"
+[lanes.alpha]
+harness = "claude"
+model = "m-a"
+[lanes.beta]
+harness = "codex"
+model = "m-b"
+[team]
+workhorses = ["alpha", "beta"]
+reviewers = ["alpha", "beta"]
+coachman = { harness = "muse", model = "m-c" }
+coachman_fallback = { harness = "muse", model = "m-f" }
+postmaster = { harness = "claude", model = "m-p" }
+clerk = { harness = "claude", model = "m-k" }
+max_runs = 2
+mode = "synthesis"
+[postmaster]
+poll_seconds = 120
+[tracker]
+kind = "local"
+postmaster_may_create = false
+[review]
+round_timeout_seconds = 2400
+[ship]
+merge_authority = "user"
+checkpoint_mode = "autonomous"
+review_link = ""
+`;
+
+  let projCounter = 0;
+
+  function stageProject(): { repo: string; config: string } {
+    projCounter += 1;
+    const dir = join(tmp, `proj-${projCounter}`);
+    const repo = join(dir, "repo");
+    mkdirSync(repo, { recursive: true });
+    run("git", ["init", "-q", repo]);
+    const config = join(dir, "config.toml");
+    writeFileSync(config, GLOBAL, "utf8");
+    return { repo, config };
+  }
+
+  function runProject(
+    repo: string,
+    config: string,
+    answersText: string,
+    extra: string[] = [],
+  ): { code: number; out: string } {
+    const answersPath = join(tmp, `proj-${projCounter}.answers`);
+    writeFileSync(answersPath, `${answersText}\n`, "utf8");
+    const r = run(SELF, ["setup", "--project", repo, "--answers", answersPath, ...extra], {
+      env: {
+        ...(process.env as Record<string, string>),
+        PATH: `${join(tmp, "bin")}:${process.env.PATH}`,
+        POSTMASTER_CONFIG: config,
+      },
+    });
+    return { code: r.code, out: r.out + r.err };
+  }
+
+  function settingsOf(repo: string): string {
+    return readFileSync(join(repo, ".postmaster", "settings.toml"), "utf8");
+  }
+
+  test("blank answers-file values are left unset, like blank interactive answers", () => {
+    const s = stageProject();
+    const r = runProject(s.repo, s.config, "lanes=\ntracker=local");
+    expect(r.code).toBe(0);
+    const written = settingsOf(s.repo);
+    expect(written).toContain('kind = "local"');
+    expect(written).not.toContain("[lanes.");
+  });
+
+  test("a second run merges: earlier settings stay, new answers land", () => {
+    const s = stageProject();
+    const first = runProject(s.repo, s.config, "workhorses=alpha, beta\nreviewers=alpha, beta");
+    expect(first.code).toBe(0);
+    const second = runProject(s.repo, s.config, "tracker=local\noverwrite=yes");
+    expect(second.code).toBe(0);
+    const written = settingsOf(s.repo);
+    expect(written).toContain('workhorses = ["alpha", "beta"]');
+    expect(written).toContain('kind = "local"');
+  });
+
+  test("merging keeps role keys, unknown sections and comments verbatim", () => {
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "settings.toml"),
+      '# hand note\n[team]\ncoachman = { harness = "claude" }\n[roles]\nworkhorses = ["alpha"]\n',
+      "utf8",
+    );
+    const r = runProject(s.repo, s.config, "coachman.model=m-x\noverwrite=yes");
+    expect(r.code).toBe(0);
+    const written = settingsOf(s.repo);
+    expect(written).toContain('coachman = { harness = "claude", model = "m-x" }');
+    expect(written).toContain("[roles]");
+    expect(written).toContain("# hand note");
+  });
+
+  test("a lane with no harness is refused before anything is written", () => {
+    const s = stageProject();
+    const r = runProject(s.repo, s.config, "lanes=gamma\nlane.gamma.model=model-g");
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("lane 'gamma' names no harness");
+    expect(existsSync(join(s.repo, ".postmaster", "settings.toml"))).toBe(false);
+  });
+
+  test("a symlinked settings file is refused and its target is untouched", () => {
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    const victim = join(tmp, `proj-${projCounter}.victim`);
+    writeFileSync(victim, "untouched\n", "utf8");
+    const link = join(dir, "settings.toml");
+    symlinkSync(victim, link);
+    const r = runProject(s.repo, s.config, "tracker=local");
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("must not be a symlink");
+    expect(readFileSync(victim, "utf8")).toBe("untouched\n");
+  });
+
+  test("the ignored report follows git when an older rule lingers after a no", () => {
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".gitignore"), "# old\n*\n", "utf8");
+    const r = runProject(s.repo, s.config, "tracker=local\nignore_settings=no");
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("settings ignored: yes");
+    expect(r.out).toContain("existing ignore rule");
+  });
+
+  test("a yes appends the rule where a wildcard negation fooled the matcher", () => {
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".gitignore"), "*\n!settings.*\n", "utf8");
+    const r = runProject(s.repo, s.config, "tracker=local\nignore_settings=yes");
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("settings ignored: yes");
+    const ignored = run("git", ["-C", s.repo, "check-ignore", "-q", ".postmaster/settings.toml"]);
+    expect(ignored.code).toBe(0);
   });
 });
