@@ -133,11 +133,13 @@ import { parseTomlText } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
 import {
+  bootId,
   processCommandLine,
   processInfo,
   processStart,
   processState,
   processTable as sharedProcessTable,
+  sameBoot,
 } from "./lib/processes.ts";
 import {
   BOUND_L,
@@ -220,7 +222,12 @@ function hasOwn(obj: object, key: string): boolean {
   return Object.hasOwn(obj, key);
 }
 function limit(seconds: number, program: string, args: string[] = []) {
-  return has("timeout") ? run("timeout", [String(seconds), program, ...args]) : run(program, args);
+  // timeout(1) where it exists; otherwise run()'s own millisecond timeout, so
+  // a program that never answers cannot hold a launch or a close forever on a
+  // system without coreutils.
+  return has("timeout")
+    ? run("timeout", [String(seconds), program, ...args])
+    : run(program, args, { timeout: seconds * 1000 });
 }
 function clean(value: string): string {
   return [...value]
@@ -316,7 +323,7 @@ function handleOf(text: string): string {
 // text.ts: BASE re.sub(r"\s{2,}\(.*\)$", "", line[5:]).strip() (host.sh:142).
 const NOTE_STRIP = new RegExp("[" + PY_S_CLASS + "]{2,}\\(" + PY_DOT + "*\\)" + END_OF_STRING, "u");
 
-function dispatchInfo(dispatch: string): { name: string; worktree: string } {
+export function dispatchInfo(dispatch: string): { name: string; worktree: string } {
   let lines: string[] = [];
   try {
     lines = pySplitLines(readFileSync(join(dispatch, "brief.md"), "utf8"));
@@ -515,14 +522,7 @@ type Registry = {
 function runBoot(...args: string[]): string {
   return run(args[0]!, args.slice(1), { env: { LC_ALL: "C" } }).out.trim();
 }
-function bootId(): string {
-  try {
-    return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
-  } catch {
-    // ASCII: sysctl kern.boottime is kernel-emitted ASCII on macOS.
-    return runBoot("sysctl", "-n", "kern.boottime").split(/\s+/u).join(" ");
-  }
-}
+
 function bootTime(): number | null {
   try {
     const text = readFileSync("/proc/stat", "utf8");
@@ -541,7 +541,7 @@ function bootTime(): number | null {
 function startOf(pid: number): string {
   return processStart(pid) ?? "";
 }
-function processes(): Map<number, ProcessInfo> {
+export function processes(): Map<number, ProcessInfo> {
   const table = new Map<number, ProcessInfo>();
   for (const [pid, info] of sharedProcessTable()) {
     if (info.state === "live" && info.start)
@@ -662,7 +662,7 @@ function recordRoots(
     rec.boot = boot;
     saveRecord(path, rec);
   }
-  if (!rec.boot || rec.boot !== boot) return [];
+  if (!rec.boot || !sameBoot(rec.boot, boot)) return [];
   if (procs.has(group) && rec.start && procs.get(group)!.start === rec.start)
     return [`group|${group}|${rec.start}`];
   return rec.members
@@ -1964,28 +1964,45 @@ async function watch(pid: number, marker: string): Promise<void> {
 async function envWrite(path: string): Promise<void> {
   const until = Date.now() + 120_000;
   while (Date.now() < until && existsSync(dirname(path))) {
+    let fd: number;
     try {
-      const fd = openSync(path, constants.O_WRONLY | constants.O_NONBLOCK);
-      try {
-        const data = new TextEncoder().encode(
-          `${Object.entries(process.env)
-            .filter((entry): entry is [string, string] => entry[1] !== undefined)
-            .map(([key, value]) => `${key}=${value}\0`)
-            .join("")}POSTMASTER_ENV_OK=1\0`,
-        );
-        let at = 0;
-        while (at < data.length) at += writeSync(fd, data, at, data.length - at);
-      } finally {
-        closeSync(fd);
-      }
-      return;
+      fd = openSync(path, constants.O_WRONLY | constants.O_NONBLOCK);
     } catch (error) {
+      // ENXIO: no reader yet; ENOENT: no FIFO yet. Anything else cannot arrive.
       if (
         (error as { code?: string }).code !== "ENXIO" &&
         (error as { code?: string }).code !== "ENOENT"
       )
         return;
       await Bun.sleep(100);
+      continue;
+    }
+    try {
+      const data = new TextEncoder().encode(
+        `${Object.entries(process.env)
+          .filter((entry): entry is [string, string] => entry[1] !== undefined)
+          .map(([key, value]) => `${key}=${value}\0`)
+          .join("")}POSTMASTER_ENV_OK=1\0`,
+      );
+      let at = 0;
+      while (at < data.length) {
+        try {
+          at += writeSync(fd, data, at, data.length - at);
+        } catch (error) {
+          const code = (error as { code?: string }).code;
+          // The FIFO is full: wait for the reader to drain it and write the
+          // rest, so an environment larger than the pipe arrives whole.
+          if (code === "EAGAIN" || code === "EWOULDBLOCK") {
+            if (Date.now() >= until) return;
+            await Bun.sleep(10);
+            continue;
+          }
+          return; // the reader is gone; nothing more can arrive
+        }
+      }
+      return;
+    } finally {
+      closeSync(fd);
     }
   }
 }
@@ -4649,7 +4666,7 @@ function legWaitingRemoveInner(f: string, ticket: string): void {
 function legWaitingUnderFlock(lockPath: string, inner: string[]): boolean {
   if (Bun.which("flock") === null) return false;
   const self = fileURLToPath(import.meta.url);
-  const r = spawnSync("flock", ["--exclusive", lockPath, process.execPath, self, ...inner], {
+  const r = spawnSync("flock", ["-x", lockPath, process.execPath, self, ...inner], {
     stdio: "inherit",
   });
   if (r.error) return false;
@@ -5107,14 +5124,16 @@ async function main(): Promise<void> {
       );
   }
 }
-main().catch((error: unknown) => {
-  if (isHostError(error)) {
-    if (error.message) console.error(`host: ${error.message}`);
-    process.exit(hostCode(error));
-  }
-  console.error(`host: ${String((error as Error)?.message ?? error)}`);
-  process.exit(1);
-});
+// The one entry: imported for its helpers (aftercare.ts), the module runs nothing.
+if (import.meta.main)
+  main().catch((error: unknown) => {
+    if (isHostError(error)) {
+      if (error.message) console.error(`host: ${error.message}`);
+      process.exit(hostCode(error));
+    }
+    console.error(`host: ${String((error as Error)?.message ?? error)}`);
+    process.exit(1);
+  });
 function tmuxCloseWindow(window: string, pane: string): number {
   if (pane) return tmuxFinishPlacement(window, pane);
   // A window from before panes were recorded: a lone pane is the host's own
@@ -5556,8 +5575,42 @@ function pyStrScalar(value: unknown): string {
   }
 }
 
+/** The launch registry's record for a group leader, as `run` writes it. aftercare.ts reads
+ * it to verify a recorded launch before signalling its process group. */
+export function launchRecord(group: number): Registry | null {
+  return loadRecord(recordPath(group));
+}
+
+/** Live launches registered for one directory, read-only: their names, as close's scan
+ * finds them, with nothing removed. aftercare.ts's dry run reads this, skipping the preview
+ * group it plans to stop. */
+export function liveLaunchNames(dir: string, exceptGroup?: number): string[] {
+  const procs = processes();
+  const boot = bootId();
+  let names: string[] = [];
+  try {
+    names = readdirSync(registryDir()).sort();
+  } catch {
+    return [];
+  }
+  const found: string[] = [];
+  for (const name of names) {
+    if (!/^[0-9]+$/u.test(name)) continue;
+    const rec = loadRecord(join(registryDir(), name));
+    if (!rec || rec.dir !== dir) continue;
+    const group = Number(name);
+    if (exceptGroup !== undefined && group === exceptGroup) continue;
+    const live =
+      (rec.start !== "" && procs.get(group)?.start === rec.start) ||
+      rec.members.some(([pid, start]) => procs.get(pid)?.start === start) ||
+      (rec.start === "" && procs.has(group));
+    if (live && (!rec.boot || sameBoot(rec.boot, boot))) found.push(rec.name);
+  }
+  return found;
+}
+
 // NUL-separated worktrees made for one dispatch, from its waybill and records.
-function runWorktreePaths(givenDispatch: string): string[] {
+export function runWorktreePaths(givenDispatch: string): string[] {
   // One parser for the waybill: dispatch_info takes the last ## Dispatch
   // section, so ticket text quoting a waybill cannot redirect teardown.
   const dispatch = realpathLoose(givenDispatch);

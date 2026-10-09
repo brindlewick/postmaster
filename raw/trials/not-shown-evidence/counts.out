@@ -1,0 +1,20 @@
+# read at 2026-10-04T09:15Z; the repository's own runs are the lane branches wb/* of this repository
+$ count_not_shown.py <this repository>
+lane branches 88; with a summary 78; with an Evidence section 21
+Evidence sections dated 2026-10-01 to 2026-10-04
+entries 249: shown 214, not shown 35, other 0
+  luna     summaries   7  entries   87  not shown   2  other   0
+  mimo     summaries  12  entries  153  not shown  33  other   0
+  sol      summaries   2  entries    9  not shown   0  other   0
+summaries with at least one not shown: 5 of 21
+
+# the fixture repositories are the copies that scripts/run fixture new makes
+$ count_not_shown.py <each fixture repository>
+lane branches 86; with a summary 73; with an Evidence section 19
+Evidence sections dated 2026-10-01 to 2026-10-04
+entries 152: shown 152, not shown 0, other 0
+  astra    summaries   1  entries    8  not shown   0  other   0
+  luna     summaries   3  entries   24  not shown   0  other   0
+  mimo     summaries  10  entries   80  not shown   0  other   0
+  sol      summaries   5  entries   40  not shown   0  other   0
+summaries with at least one not shown: 0 of 19

@@ -10,11 +10,12 @@ the adversarial review rounds its ticket names, then leaves a ship card for the
 project's landing route. Pull-request projects are merged by the user; local-merge projects use
 the merge authority in the config.
 
-## The three roles
+## The four roles
 
 | role | does | never does |
 |---|---|---|
 | **postmaster** | splits a stream into tickets, dispatches one coachman per ticket, supervises, answers escalations, grants merges | run a model lane, edit source |
+| **booking clerk** | prepares one ticket with the user and marks it ready after sign-off | dispatch, edit the target repository |
 | **coachman** | drives one leg of a ticket; at most two legs, synthesis and review, each a fresh coachman, carry it from waybill to ship card with a written hand-off between them; the last leg ends the run ready for merge | take a second leg, merge |
 | **the team** | several lanes implementing the same ticket in blinkers | see each other's work |
 
@@ -93,11 +94,13 @@ record at a time. `skills/wiki` carries the three operations: ingest, query, lin
 
 Clone this repo, open your agent in it, and say hi. Any first message starts the flow.
 There is no command to memorise and no wizard to run: `AGENTS.md` tells the agent what to
-do, and the first time that is setting the machine up with you, one question at a time (which
-agent CLIs fill which role, where tickets live, where your projects are, who says the merge
-word), and linking the skills into your agent CLIs so you can start from any project
-afterwards. After that it helps you choose a project and is the postmaster in the session you
-opened, or launches one when it cannot be.
+do. There are two ways to start. From a session in the postmaster project, say hi: the
+first question is which project to work on, postmaster itself or another, and the session
+is the postmaster in the chosen project's folder, or starts one there when it cannot be.
+Or run the postmaster command in a session already in that project: setup offers that
+project first. Either way setup asks one question at a time (which agent CLIs fill which
+role, where tickets live, where your projects are, who says the merge word), and links the
+skills into your agent CLIs. The first start in a new folder may ask whether to trust it.
 
 ```sh
 scripts/run probe-harnesses      # which agent CLIs are installed
@@ -119,9 +122,9 @@ scripts/run review-round start|wait|teardown <dispatch> <round> … # a review r
 scripts/run log-action <dispatch> <actor> <action> <target> …     # one JSON line per action
 scripts/run tool-faults harvest|comment|file|decline <dispatch> …  # a closed run's tool faults, as tickets
 scripts/run stage <dispatch> <stage>                               # the one way a run changes stage
-scripts/run spec-review-link <dispatch> <spec-folder>              # resolve a reviewed spec's code-server link
-scripts/run spec-decisions <dispatch> fresh|record|count           # record the spec decision, count the package
-scripts/run spec-session brief|approve <dispatch>                  # the spec session's brief; approve commits and records
+scripts/run clerk brief|start …                                    # prepare a ticket with the user
+scripts/run ticket-ready <repo> <id> | mark|queue|pending …        # check, sign off, and queue tickets
+scripts/run premises <repo> <waybill> <base>                       # compare ticket premises with the run base
 scripts/run run-times <dispatch>                                   # how long each stage took, from the log
 scripts/run run-log <dispatch> <text> | --section <title> | --close # the narrative, timestamped
 scripts/run run-meta <dispatch> <repo> | path|check|release <dispatch> | run-pinned <dispatch> <name> [args] # the pinned tool and its scripts
@@ -181,6 +184,37 @@ runs the TypeScript scripts and reads the config, and Node and npm, which the fi
 needs to run its gate.
 Python 3.11 or newer, which the bash scripts use to read the config, and for discovering a
 JavaScript project's gate.
+
+## On a Mac
+
+The flow runs on macOS. What still differs from Linux, and what you see for it:
+
+- **Launches run without memory or process limits.** Caps need Linux with systemd, so a Mac
+  launch says `launch running uncapped (no supported per-launch limits available)` and runs
+  as it is. [#140](https://github.com/brindlewick/postmaster/issues/140) plans to cap them
+  there.
+- **Whether Muse and MiMo keep each lane's data apart is not known.** Only a Mac with those
+  agents logged in can show it, so until
+  [#205](https://github.com/brindlewick/postmaster/issues/205) runs that trial there, nothing
+  here claims they do or do not.
+- **Without `flock`, two runs adding a waiting question at once can rarely lose one entry.**
+  macOS ships no flock, and the waiting list then falls back to its lock-file guard. Installing
+  flock (Homebrew's) gives it the kernel lock again; until then, one of two simultaneous
+  additions may be dropped.
+- **A path written as `~username` for another user stays as written.** macOS keeps its users
+  outside the file Linux reads them from, so such a command fails with an error naming the
+  path exactly as you wrote it.
+- **An argument that is not valid text is taken with its bad bytes replaced, not refused.**
+  macOS shows a program its raw arguments only through native code, and terminals send valid
+  text, so you will not normally see it; if it happened, the argument would arrive with
+  replacement characters instead of an error.
+- **A review round's time limit follows the clock.** Setting the clock while a round runs
+  shortens or lengthens its time left. Time spent asleep counts just as it does on Linux.
+- **Changing the time zone while a run is going makes the run lose track of its launches.**
+  Stop and close no longer find the launches that were started before the change, so they are
+  left running. Change the time zone between runs.
+- **The archived trial scripts under `raw/trials/` and the root `oracle-*.sh` files run on
+  Linux only.** On a Mac they produce no result.
 
 ## Installing the skills
 

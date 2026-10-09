@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-10-03
+updated: 2026-10-05
 ---
 
 # postmaster wiki
@@ -30,6 +30,13 @@ produce better software than one good model? If so, how?
   findings the coachman verified and two found over nine tenths. A second workhorse supplied a fix or
   a missing part in 12 of 18 real runs by the coachman's cards, and in 22 fixture runs each lane
   alone passed every hidden test. The coachman, the review loop and one security review cost most.
+- [Mixing models for coding: what exists, what is shown, and what postmaster adds](concepts/mixing-models-for-coding.md):
+  **claimed**. A read of 249 papers and project pages on 2026-10-04. Each part of the flow exists
+  elsewhere, mixing models for coding is neither proven nor disproven, and independently built versions
+  fail together. The whole combination run as an audited process, and an audit of its own flow, were
+  not found elsewhere. The README's claim that the synthesis took from both lanes every time is not
+  supported, and the lane audit is. A scan of 60 lane streams found no lane reading the other's code, one
+  reading its plan and two reaching the run's blind tests.
 
 ## Harnesses
 
@@ -45,7 +52,8 @@ How each agent CLI really behaves, as distinct from what its documentation says.
   **claimed**. In bypass mode every harness wrote into the main checkout and read another lane's
   worktree; their own guards switch off or check only what a tool call names. sandbox-runtime
   around the harness stopped every reach on all five, and every lane still passed the gate.
-  A worktree still shares its repository's store; a shared clone per lane does not.
+  A worktree still shares its repository's store; a shared clone per lane does not. The flow's `confine`
+  setting isolates processes only, and a scan of 60 lane streams found reaches it did not stop.
 
 ## Trackers and tooling
 
@@ -65,6 +73,18 @@ How the flow is checked, and what each check can and cannot see.
 - [Fixture runs](concepts/fixture-runs.md): **claimed**. A run against a small app whose tickets
   have hidden tests, scored from the run's own records, catches a broken contract between roles
   and a run that ships the wrong thing, which the offline gate cannot.
+
+## Checking code
+
+What would find a defect in postmaster's own scripts before a reviewer does, and what it would cost.
+
+- [What a functional core opens up for checking code, and what it does for coding with AI](concepts/functional-core-and-verification.md):
+  **claimed**. Of 84 serious review findings in four runs, a stated property or a small model would have
+  caught 79 and a pure core made the check possible for 24, none of them without a property. Proofs cost
+  far more than the code they check, the one tool found that verifies TypeScript is a tech preview, and
+  with language models the trust moves to the specification. Four changes to the design rules and the
+  ticket template are proposed, and five trials, one of which tests a cleanup script with its git swapped
+  for a mock that is checked against real git.
 
 ## Decisions
 
@@ -125,7 +145,8 @@ Why the design is shaped as it is.
   A read-only web page for phone, iPad and desktop. It takes every figure from the scripts that
   already compute it, listens on a Unix socket, and is reached only by the machine's owner
   through Tailscale's proxy over plain HTTP. It never acts, because anything it could do, an
-  agent running as the user could do too.
+  agent running as the user could do too. Its look, chosen by the user from 44 prototypes in #238
+  as the easiest to read: navy and coral on cream, in the manner of an engraved notice.
 - [No library covers what the private-data scanner checks, so postmaster publishes one](concepts/scanner-library.md):
   **claimed**. A survey of 32 tools found none checking agent transcripts and git history together
   for personal data and secrets. A trial wrote #135's rules as data, and every one agreed with
@@ -137,4 +158,7 @@ Why the design is shaped as it is.
 ## Sources
 
 [Recorded runs and captured reading](sources/index.md): one run, the review rounds of #36,
-fourteen papers on review, fixes and severity, and an article on review before implementation.
+fourteen papers on review, fixes and severity, an article on review before implementation, and
+[pstack](sources/pstack.md), a plugin of skills for verified agent work, read twice and set beside
+what postmaster holds, and the reading on functional programming and verification (97 papers and
+28 articles).

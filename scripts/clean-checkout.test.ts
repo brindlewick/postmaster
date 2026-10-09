@@ -358,7 +358,7 @@ describe("cleanCheckout", () => {
       await new Promise((resolve) => setTimeout(resolve, 5000));
       expect(existsSync(survivor)).toBe(false);
     });
-  }, 30000);
+  });
 });
 
 describe("--file", () => {

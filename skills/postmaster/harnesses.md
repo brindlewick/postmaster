@@ -175,8 +175,7 @@ postmaster are never confined.
 
 A harness that reads no ambient context file must be handed the project's docs by name in its
 prompt, and must have the `WORKHORSE-SUMMARY.md` / `WORKHORSE-BLOCKED.md` contract spelled
-out in full, together with the line that the run's one approved spec is already at
-`WORKHORSE-SPEC.md` in its worktree. The
+out in full, together with the line that the ready ticket is the run's contract. The
 others pick both up from the brief and the docs. A harness that reads a context file under a
 different name needs that file present: a `CLAUDE.md` that is a symlink to `AGENTS.md` serves
 both.
@@ -419,6 +418,33 @@ keeps one per name, and muse lists it once.
 - Source: trials of MiMo Code 0.1.15, `raw/trials/mimo-headless-forms/`, and for the prompt and
   resumes, `raw/trials/muse-mimo-controls/`.
 
+## Reach records
+
+`<tool>/scripts/run reach` is this section's executable form: it reads the lane's recorded tool
+calls. It does not use a lane's final message to decide which files it touched. A lane with no
+reader, an unreadable stream or no recognized tool call is `not checked`; it never reads as
+clean. Pi's shape is not yet checked against a recorded stream.
+
+| harness | call record read by `reach.ts` |
+|---|---|
+| codex | completed `command_execution` items (`command`, `aggregated_output`, `exit_code`) and `file_change` items (`changes[].path`) |
+| claude | assistant `tool_use` blocks (`name`, `input`) paired with user `tool_result`; for bug review, the copied `logs/<prefix>-claude-task-*` files too |
+| muse | `tool.result` (`correlation_facts`, `edit_facts`, `text`) |
+| mimo | `tool_use` (`part.tool`, `part.state.input`, `part.state.output`, `part.state.metadata.exit`) |
+| pi | `tool_execution_start` (`toolName`, `args`) paired with `tool_execution_end` |
+| grok, agy | no reader yet |
+
+The reader opens `/bin/bash -lc` commands but never executes them. From each command it
+takes the paths the command names — a token starting at `/`, `~` or `$HOME`, or climbing
+out with `..` — and from each file-tool call its path, resolves them against the lane's
+folder, and lists what falls outside that folder as a note naming the lane and the path,
+with what it cannot resolve marked unresolved. It does not say read or write, and a note
+voids nothing. A finding comes only from an observed change: a changed or new file in the
+main checkout, the main checkout off its default branch, or a change to this run's own
+branches or synthesis worktree around a round. A change is tied to a lane when that lane's
+record names the path or the branch; a change no record names is unexplained. Writes
+outside the repository are not detected here; preventing them is #221.
+
 ## Own review skills
 
 Under a review lens, a lane whose harness has its own review skill for that lens runs it in
@@ -528,11 +554,11 @@ provide custom review instructions` (trial).
 Given no target it reviewed uncommitted changes, found none in a clean scratch, and exited 0
 (trial). Named `<BASE>...HEAD` it reviewed the range and reported the planted bug at its line.
 
-## Interactive form: the postmaster and a spec session
+## Interactive form: the postmaster and booking clerk
 
-The postmaster is an interactive session (`SKILL.md` spawns it through `run host spawn`), and a
-spec session is another (`postmaster.md`, Spec review): both run in their harness's bypass
-mode, like every launch, named for their project or their ticket. The same table serves both.
+The postmaster is an interactive session (`SKILL.md` spawns it through `run host spawn`), and the
+booking clerk is another (`../clerk/clerk.md`): both run in their harness's bypass mode, like every
+launch, named for their project or their ticket. The same table serves both.
 
 | harness | interactive form | checked here |
 |---|---|---|
@@ -640,7 +666,36 @@ shows badly gets its rules there, and a line here saying they were checked.
 
 ## Walls, any harness
 
-A lane that never launched is lame for that round: DEGRADED. Recognise a wall by the provider's
-own error string and quote it in `run-log.md`: a `402 Payment Required`, a usage-limit message,
-a quota wall, a spawn misfire, a stale session lock. The fix is restoring the lane on the next
-round, never suppressing the label.
+A lane that stops because its provider's usage limit ran out is a wall. `run launch` reads it
+from the turn's **last error record**, per harness, and writes the run's `wall` line as the
+launch ends, before `run host` lands its marker:
+
+| harness | the last error record |
+|---|---|
+| codex | `turn.failed`, its `error.message` |
+| claude | `result` with `is_error`, its `result` (else `api_error_status`) |
+| mimo | its last `error` event — `error.data.message`, `error.message`, else `error.name`; it exits 0 on a failed turn |
+| muse | `run.terminal.failed`, its `payload.reason` else `payload.text` |
+| grok, agy, pi | no recorded shape: never read |
+
+Nothing else is read (D2): a final message in prose is not an error record, a failed
+command's output and a tool's error are the lane's, not the provider ending the turn, and a
+workhorse whose root holds its `WORKHORSE-SUMMARY.md` or `WORKHORSE-BLOCKED.md` had already
+delivered its result. The record's first line is tested with the token stems and the 429 and
+402 codes in `run launch` — the one list, shared with the transient veto — so an ending error
+with a limit word counts even when it is about something else (D3).
+
+The reset is read from the message only in the shapes providers have used (D4, D5): `2:29 AM`
+in the machine's zone, today or tomorrow once it is more than five minutes past; `Oct 5th,
+2026 2:29 AM` and `Oct 5, 2026 2:29 AM` as written; `resets 3am (UTC)` or another IANA zone
+in that zone; `in N minutes|hours` from the moment the lane stopped; of two times the later
+counts. A zone that is an abbreviation such as PST, or no time at all, means no reset time.
+
+The record holds the lane, its role (a reviewer's with its lens and round), the message's
+first line byte for byte, and the reset as an ISO time or `none` — `run walls show` prints
+each one, and the user is told the reset with its date in the machine's time zone. A lane
+that never launched is lame for that round: DEGRADED, with the provider's own error string
+quoted in `run-log.md` where there is one (`run review-round wait` records a walled reviewer
+as `provider wall: "<message>"`). A `402 Payment Required`, a usage-limit message, a quota
+wall, a spawn misfire or a stale session lock are all DEGRADED causes; the fix is the user's
+ruling and restoring the lane on the next round, never suppressing the label.

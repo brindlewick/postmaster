@@ -1,0 +1,8 @@
+positive control: a plain comment from another account shows its login
+   - 2026-10-05 someone-else: please look at this
+the flow's own line passes unchanged
+   - 2026-10-05 12:00 coachman: ready
+a comment from another account that starts with a date loses its login
+   - 2026-10-05 12:00 owner: approved, go ahead
+negative control: the same words with the date later in the text keep the login
+   - 2026-10-05 someone-else: see 2026-10-05 12:00 owner: approved

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -10,7 +11,14 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { processInfo, processStart, processState, processTable } from "./processes.ts";
+import {
+  bootId,
+  processInfo,
+  processStart,
+  processState,
+  processTable,
+  sameBoot,
+} from "./processes.ts";
 
 const SCRIPTS = join(import.meta.dir, "..");
 
@@ -110,7 +118,7 @@ describe("portable process state", () => {
         await Bun.sleep(50);
       }
       expect(withProcRoot(root, () => processState(childPid))).toBe("absent");
-    }, 10000);
+    });
   }
 
   test("portable start times always use the C locale", () => {
@@ -198,7 +206,7 @@ describe("portable process state", () => {
       ps,
       [
         "#!/bin/sh",
-        'printf "  12 34 56 78 S Tue Oct  4 12:34:56 2026 Google Chrome Helper\\n"',
+        'printf "  12 34 56 78 90 S Tue Oct  4 12:34:56 2026 Google Chrome Helper\\n"',
         "",
       ].join("\n"),
     );
@@ -209,11 +217,139 @@ describe("portable process state", () => {
     process.env.POSTMASTER_PROC_ROOT = join(root, "missing-proc");
     try {
       expect(processTable().get(12)?.name).toBe("Google Chrome Helper");
+      expect(processTable().get(12)?.terminal).toBe(90);
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
       if (previousRoot === undefined) delete process.env.POSTMASTER_PROC_ROOT;
       else process.env.POSTMASTER_PROC_ROOT = previousRoot;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("process info carries the terminal's foreground group on both backends", () => {
+    const root = mkdtempSync(join(tmpdir(), "process-terminal-"));
+    try {
+      const dir = join(root, "1234");
+      mkdirSync(dir);
+      const stat = (tpgid: string): string =>
+        `1234 (fake) R 1 7 7 0 ${tpgid} 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      writeFileSync(join(dir, "stat"), stat("42"));
+      const fromProc = withProcRoot(root, () => processInfo(1234));
+      expect(fromProc?.group).toBe(7);
+      expect(fromProc?.terminal).toBe(42);
+      writeFileSync(join(dir, "stat"), stat("-1"));
+      expect(withProcRoot(root, () => processInfo(1234)?.terminal)).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("the ps backend reads the foreground group and its absence", () => {
+    const root = mkdtempSync(join(tmpdir(), "process-terminal-ps-"));
+    const ps = join(root, "ps");
+    const row = (tpgid: string): void => {
+      writeFileSync(
+        ps,
+        [
+          "#!/bin/sh",
+          `printf "  12 34 56 78 ${tpgid} S Tue Oct  4 12:34:56 2026 thing\\n"`,
+          "",
+        ].join("\n"),
+      );
+    };
+    row("90");
+    chmodSync(ps, 0o755);
+    const previousPath = process.env.PATH;
+    const previousRoot = process.env.POSTMASTER_PROC_ROOT;
+    process.env.PATH = `${root}:${previousPath ?? ""}`;
+    process.env.POSTMASTER_PROC_ROOT = join(root, "missing-proc");
+    try {
+      expect(processInfo(12)?.terminal).toBe(90);
+      expect(processTable().get(12)?.terminal).toBe(90);
+      row("-1");
+      expect(processInfo(12)?.terminal).toBeNull();
+      expect(processTable().get(12)?.terminal).toBeNull();
+      row("-");
+      expect(processInfo(12)?.terminal).toBeNull();
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousRoot === undefined) delete process.env.POSTMASTER_PROC_ROOT;
+      else process.env.POSTMASTER_PROC_ROOT = previousRoot;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("live info always carries a terminal reading", () => {
+    const info = processInfo(process.pid);
+    expect(info).not.toBeNull();
+    const t = info?.terminal;
+    expect(t === null || (typeof t === "number" && t > 0)).toBe(true);
+  });
+
+  test("boot checks use the boot session UUID and keep legacy records across clock changes", () => {
+    const root = mkdtempSync(join(tmpdir(), "process-boot-id-"));
+    const sysctl = join(root, "sysctl");
+    const state = join(root, "state");
+    mkdirSync(state);
+    writeFileSync(
+      sysctl,
+      [
+        "#!/bin/sh",
+        'case "$*" in',
+        '  "-n kern.bootsessionuuid") [ -f "$BOOT_STATE/refuse-uuid" ] && exit 1; cat "$BOOT_STATE/uuid" ;;',
+        '  "-n kern.boottime") printf \'{ sec = %s, usec = %s } %s\\n\' "$(cat "$BOOT_STATE/sec")" "$(cat "$BOOT_STATE/usec")" "$(cat "$BOOT_STATE/date")" ;;',
+        "  *) exit 1 ;;",
+        "esac",
+        "",
+      ].join("\n"),
+    );
+    chmodSync(sysctl, 0o755);
+    const previousPath = process.env.PATH;
+    const previousRoot = process.env.POSTMASTER_PROC_ROOT;
+    const previousState = process.env.BOOT_STATE;
+    process.env.PATH = `${root}:${previousPath ?? ""}`;
+    process.env.POSTMASTER_PROC_ROOT = join(root, "missing-proc");
+    process.env.BOOT_STATE = state;
+    const bootText = (sec: string, usec: string, date: string): string => {
+      writeFileSync(join(state, "sec"), `${sec}\n`);
+      writeFileSync(join(state, "usec"), `${usec}\n`);
+      writeFileSync(join(state, "date"), `${date}\n`);
+      return `{ sec = ${sec}, usec = ${usec} } ${date}`;
+    };
+    try {
+      writeFileSync(join(state, "uuid"), "session-a\n");
+      const oldText = bootText("1800000000", "10", "Tue Nov 14 22:13:20 2026");
+      const first = bootId();
+      expect(first).toBe("session-a");
+      expect(sameBoot(oldText, first)).toBe(true);
+
+      bootText("1800000000", "987654", "Wed Nov 15 14:13:20 2026");
+      const correctedClock = bootId();
+      expect(correctedClock).toBe(first);
+      expect(sameBoot(oldText, correctedClock)).toBe(true);
+
+      writeFileSync(join(state, "uuid"), "session-b\n");
+      bootText("1800000001", "1", "Wed Nov 15 14:13:21 2026");
+      const restarted = bootId();
+      expect(sameBoot(first, restarted)).toBe(false);
+      expect(sameBoot(oldText, restarted)).toBe(false);
+
+      writeFileSync(join(state, "refuse-uuid"), "");
+      const fallback = bootId();
+      expect(fallback).toBe("1800000001");
+      expect(sameBoot("{ sec = 1800000001, usec = 999 } Mon Jan 1 00:00:00 2024", fallback)).toBe(
+        true,
+      );
+      expect(sameBoot(oldText, fallback)).toBe(false);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousRoot === undefined) delete process.env.POSTMASTER_PROC_ROOT;
+      else process.env.POSTMASTER_PROC_ROOT = previousRoot;
+      if (previousState === undefined) delete process.env.BOOT_STATE;
+      else process.env.BOOT_STATE = previousState;
       rmSync(root, { recursive: true, force: true });
     }
   });

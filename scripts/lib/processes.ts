@@ -8,6 +8,8 @@ export type ProcessInfo = Readonly<{
   parent: number;
   group: number;
   session: number;
+  /** Foreground group of the controlling terminal, null when there is none. */
+  terminal: number | null;
   start: string;
   state: ProcessState;
   name: string;
@@ -21,6 +23,15 @@ function procRoot(): string {
 
 function validPid(pid: number): boolean {
   return Number.isSafeInteger(pid) && pid > 0;
+}
+
+/** A raw tpgid field as the terminal it names: a positive group id, or null
+ * when the process has no terminal. Both backends print -1 there, and a
+ * foreign ps its own nothing, so anything but a positive number reads as none. */
+function terminalGroup(raw: string | undefined): number | null {
+  if (raw === undefined || !/^-?[0-9]+$/u.test(raw)) return null;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
 function readProcStat(pid: number): ProcStat | null {
@@ -90,6 +101,7 @@ function parseLinuxProcess(pid: number, stat: ProcStat): ProcessInfo | null {
     parent: Number(fields[1]),
     group: Number(fields[2]),
     session: Number(fields[3]),
+    terminal: terminalGroup(fields[5]),
     start: fields[19] ?? "",
     state: fields[0] === "Z" ? "zombie" : "live",
     name: stat.name,
@@ -97,25 +109,27 @@ function parseLinuxProcess(pid: number, stat: ProcStat): ProcessInfo | null {
 }
 
 function psProcessInfo(pid: number): ProcessInfo | null {
-  // sess, not sid: macOS rejects sid, and Linux accepts both.
+  // sess, not sid: macOS rejects sid, and Linux accepts both. tpgid rides
+  // along: the terminal's foreground group, -1 when there is no terminal.
   const result = run(
     "ps",
-    ["-o", "pid=,ppid=,pgid=,sess=,stat=,lstart=,comm=", "-p", String(pid)],
+    ["-o", "pid=,ppid=,pgid=,sess=,tpgid=,stat=,lstart=,comm=", "-p", String(pid)],
     {
       env: { LC_ALL: "C" },
     },
   );
   const fields = result.out.trim().split(/[ \t]+/u);
-  if (fields.length < 11 || !fields.slice(0, 4).every((field) => /^[0-9]+$/u.test(field)))
+  if (fields.length < 12 || !fields.slice(0, 4).every((field) => /^[0-9]+$/u.test(field)))
     return null;
   return {
     pid: Number(fields[0]),
     parent: Number(fields[1]),
     group: Number(fields[2]),
     session: Number(fields[3]),
-    state: fields[4]!.startsWith("Z") ? "zombie" : "live",
-    start: fields.slice(5, 10).join(" "),
-    name: fields.slice(10).join(" "),
+    terminal: terminalGroup(fields[4]),
+    state: fields[5]!.startsWith("Z") ? "zombie" : "live",
+    start: fields.slice(6, 11).join(" "),
+    name: fields.slice(11).join(" "),
   };
 }
 
@@ -142,23 +156,25 @@ export function processTable(): Map<number, ProcessInfo> {
     // A missing or non-proc root forces the portable ps path used on macOS.
   }
 
-  // sess, not sid: macOS rejects sid, and Linux accepts both.
-  const result = run("ps", ["-A", "-o", "pid=,ppid=,pgid=,sess=,stat=,lstart=,comm="], {
+  // sess, not sid: macOS rejects sid, and Linux accepts both. tpgid rides
+  // along: the terminal's foreground group, -1 when there is no terminal.
+  const result = run("ps", ["-A", "-o", "pid=,ppid=,pgid=,sess=,tpgid=,stat=,lstart=,comm="], {
     env: { LC_ALL: "C" },
   });
   for (const line of result.out.split(/\r?\n/u)) {
     // No split limit: JS drops everything past it, and comm may hold spaces.
     const fields = line.trim().split(/[ \t]+/u);
-    if (fields.length < 11 || !fields.slice(0, 4).every((field) => /^[0-9]+$/u.test(field)))
+    if (fields.length < 12 || !fields.slice(0, 4).every((field) => /^[0-9]+$/u.test(field)))
       continue;
     table.set(Number(fields[0]), {
       pid: Number(fields[0]),
       parent: Number(fields[1]),
       group: Number(fields[2]),
       session: Number(fields[3]),
-      state: fields[4]!.startsWith("Z") ? "zombie" : "live",
-      start: fields.slice(5, 10).join(" "),
-      name: fields.slice(10).join(" "),
+      terminal: terminalGroup(fields[4]),
+      state: fields[5]!.startsWith("Z") ? "zombie" : "live",
+      start: fields.slice(6, 11).join(" "),
+      name: fields.slice(11).join(" "),
     });
   }
   return table;
@@ -170,4 +186,54 @@ export function processCommandLine(pid: number): string {
   } catch {
     return run("ps", ["-o", "args=", "-p", String(pid)], { env: { LC_ALL: "C" } }).out.trim();
   }
+}
+
+/** `sysctl -n kern.boottime`'s whole seconds, or null when it cannot be read.
+ * The seconds survive a corrected clock, which the microseconds and the local
+ * date text do not. */
+function macBootSeconds(): number | null {
+  // ASCII: sysctl kern.boottime is kernel-emitted ASCII on macOS.
+  const text = run("sysctl", ["-n", "kern.boottime"], { env: { LC_ALL: "C" } }).out;
+  // ASCII: the words of kernel-emitted ASCII, split on spaces.
+  const words = text.replace(/,/gu, " ").split(/\s+/u);
+  const at = words.indexOf("sec");
+  if (at < 0 || at + 2 >= words.length) return null;
+  const seconds = Number(words[at + 2]);
+  return Number.isInteger(seconds) ? seconds : null;
+}
+
+/** The machine's boot id: the Linux file when the proc root holds it (the
+ * test setting sends a run down the portable path), else macOS's
+ * `kern.bootsessionuuid`, which a corrected clock leaves alone, else the whole
+ * seconds of `kern.boottime`. Empty when none can be read. */
+export function bootId(): string {
+  try {
+    return readFileSync(`${procRoot()}/sys/kernel/random/boot_id`, "utf8").trim();
+  } catch {
+    // A missing proc root forces the portable path used on macOS.
+  }
+  const session = run("sysctl", ["-n", "kern.bootsessionuuid"], { env: { LC_ALL: "C" } });
+  const uuid = session.out.trim();
+  if (session.code === 0 && uuid !== "") return uuid;
+  const seconds = macBootSeconds();
+  return seconds === null ? "" : String(seconds);
+}
+
+/** A recorded `sysctl kern.boottime` text, as this module's seconds form. */
+function recordedBootSeconds(text: string): number | null {
+  if (/^[0-9]+$/u.test(text)) return Number(text);
+  // ASCII: `sec = <n>` is sysctl's kernel-emitted ASCII.
+  const match = /sec\s*=\s*([0-9]+)/u.exec(text);
+  return match ? Number(match[1]) : null;
+}
+
+/** Whether a recorded boot id names the current boot. Equal ids match; a
+ * record in the older `kern.boottime` text form matches while its whole
+ * seconds still name this boot, so a run already going keeps its launches. */
+export function sameBoot(recorded: string, current: string): boolean {
+  if (recorded === current) return true;
+  const recordedSeconds = recordedBootSeconds(recorded);
+  if (recordedSeconds === null) return false;
+  const currentSeconds = recordedBootSeconds(current) ?? macBootSeconds();
+  return currentSeconds !== null && recordedSeconds === currentSeconds;
 }
