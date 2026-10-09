@@ -144,17 +144,19 @@ function findInterpolatedRuns(text: string, exprs: string[]): { line: number; te
   let blockIndent: number | null = null;
   for (const [i, line] of lines.entries()) {
     if (blockIndent !== null) {
-      const indent = /^( *)/.exec(line)?.[1].length ?? 0;
+      const indent = /^( *)/u.exec(line)?.[1].length ?? 0;
       if (line.trim() === "" || indent > blockIndent) {
         if (exprs.some((e) => line.includes(e))) hits.push({ line: i + 1, text: line.trim() });
         continue;
       }
       blockIndent = null;
     }
-    const m = /^(\s*)(?:-\s+)?run:(.*)$/.exec(line);
+    // ASCII: workflow indentation is spaces; GitHub rejects anything else before this runs.
+    const m = /^(\s*)(?:-\s+)?run:(.*)$/u.exec(line);
     if (m) {
       const rest = m[2].trim();
-      if (/^[|>](\s|$)/.test(rest)) blockIndent = m[1].length;
+      // ASCII: as above; the block header after `run:` is `|` or `>` plus spaces.
+      if (/^[|>](\s|$)/u.test(rest)) blockIndent = m[1].length;
       else if (rest !== "" && exprs.some((e) => rest.includes(e)))
         hits.push({ line: i + 1, text: rest });
     }

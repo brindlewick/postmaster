@@ -13,7 +13,8 @@ import { spawnSync } from "node:child_process";
 
 /** The FILES value split on whitespace; empty pieces dropped. */
 export function splitFiles(raw: string): string[] {
-  return raw.split(/\s+/).filter((s) => s.length > 0);
+  // ASCII: splitting wider than ASCII only adds refusals; entries must match tracked paths exactly.
+  return raw.split(/\s+/u).filter((s) => s.length > 0);
 }
 
 /** True when the entry names a test file this repository runs. */
