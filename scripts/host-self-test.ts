@@ -193,8 +193,24 @@ function herdrStubInner(args: string[], stateDir: string): void {
     tab_n: {},
     open: {},
     agents: [],
+    agentPanes: {},
     prompt: [],
   });
+  if (!Array.isArray(st.agents)) st.agents = [];
+  if (st.agentPanes === null || typeof st.agentPanes !== "object" || Array.isArray(st.agentPanes))
+    st.agentPanes = {};
+  // An agent name follows its pane's occupant and clears when that pane goes,
+  // as the server does; a spawn under the freed handle starts a new session.
+  const dropAgents = (): void => {
+    st.agents = st.agents.filter((name: string) => {
+      const pane = st.agentPanes[name];
+      if (typeof pane !== "string" || !(pane in st.panes)) {
+        delete st.agentPanes[name];
+        return false;
+      }
+      return true;
+    });
+  };
   const command = args.slice(0, 2).join(" ");
   if (command === "workspace list") {
     out({ workspaces: Object.keys(st.spaces).map((workspace_id) => ({ workspace_id })) });
@@ -264,6 +280,7 @@ function herdrStubInner(args: string[], stateDir: string): void {
       delete st.panes[t.pane];
       if (!st.spaces[ws].tabs.length) destroySpace(st, ws);
     }
+    dropAgents();
     save(path, st);
     return;
   }
@@ -285,6 +302,7 @@ function herdrStubInner(args: string[], stateDir: string): void {
       }
       if (!st.spaces[ws].tabs.length) destroySpace(st, ws);
     }
+    dropAgents();
     save(path, st);
     return;
   }
@@ -379,8 +397,24 @@ function herdrStubInner(args: string[], stateDir: string): void {
   if (command === "agent start") {
     if (st.agents.includes(args[2])) fail("agent_name_taken");
     st.agents.push(args[2]);
+    st.agentPanes[args[2]!] = opt(args, "--pane") ?? "";
     save(path, st);
     if (flag(join(stateDir, "agent.notready"))) fail("agent_not_ready");
+    return;
+  }
+  if (command === "agent rename") {
+    const pane = args[2] ?? "";
+    const name = args[3] ?? "";
+    // The name follows the pane's occupant: whatever it was called before is freed.
+    for (const [known, at] of Object.entries(st.agentPanes) as Array<[string, unknown]>) {
+      if (at === pane) {
+        st.agents = st.agents.filter((entry: string) => entry !== known);
+        delete st.agentPanes[known];
+      }
+    }
+    if (name && !st.agents.includes(name)) st.agents.push(name);
+    if (name) st.agentPanes[name] = pane;
+    save(path, st);
     return;
   }
   if (command === "agent prompt") {
@@ -391,11 +425,13 @@ function herdrStubInner(args: string[], stateDir: string): void {
     return;
   }
   if (command === "agent wait") {
+    if (!st.agents.includes(args[2])) fail("agent_not_found");
     if (flag(join(stateDir, "agent.blocked"))) fail("agent_blocked");
     out({ settled: true });
     return;
   }
   if (command === "agent read") {
+    if (!st.agents.includes(args[2])) fail("agent_not_found");
     console.log(`stub screen of ${args[2]}`);
     return;
   }
@@ -537,7 +573,11 @@ function tmuxStubInner(args: string[], stateDir: string): void {
     if (stateFlag("tmux.dead") || stateFlag("windows.fail")) throw new StubFail(1);
     for (const [win, value] of Object.entries(st.windows) as Array<[string, any]>) {
       if (flag("-a")) {
-        if (fmt.includes("#{@postmaster_run}"))
+        if (fmt.includes("#{@postmaster_handle}"))
+          console.log(
+            `${win}\t${value.name}\t${value.opts["@postmaster_cwd"] ?? ""}\t${value.opts["@postmaster_handle"] ?? ""}\t${value.opts["@postmaster_pane"] ?? ""}`,
+          );
+        else if (fmt.includes("#{@postmaster_run}"))
           console.log(
             `${win}\t${value.opts["@postmaster_cwd"] ?? ""}\t${value.opts["@postmaster_run"] ?? ""}\t${value.opts["@postmaster_pane"] ?? ""}`,
           );
@@ -600,7 +640,7 @@ function host(
   };
   return exec(SELF, ["host", ...args], { cwd, env: environment });
 }
-function testStopFinishers(root: string): void {
+export function testStopFinishers(root: string): void {
   const path = join(root, "finishers");
   if (!existsSync(path)) return;
   for (const line of readFileSync(path, "utf8").split("\n")) {
@@ -7033,6 +7073,55 @@ export async function live(): Promise<void> {
           existsSync(join(f.logs, "l3.err")) &&
           readFileSync(join(f.logs, "direct.out")).equals(readFileSync(join(f.logs, "l3.out"))) &&
           readFileSync(join(f.logs, "direct.err")).equals(readFileSync(join(f.logs, "l3.err"))),
+      );
+
+      console.log("close-handle, the positive control");
+      const liveHandle = `liveclose-${process.pid % 100000}`;
+      const spawned = liveHost(
+        ["spawn", liveHandle, f.repo, "--label", "live close probe", "--", "sh"],
+        f.caller,
+        root,
+      );
+      const placed = spawned.out.trim();
+      const liveSpace = kvOf(placed, "space");
+      const liveTab = kvOf(placed, "tab");
+      if (liveSpace) opened.push(liveSpace);
+      await pass(
+        "spawn records the session under its handle",
+        () =>
+          spawned.code === 0 &&
+          Boolean(liveSpace) &&
+          Boolean(liveTab) &&
+          liveHerdr("agent", "get", liveHandle).code === 0,
+        placed,
+      );
+      const closed = liveHost(["close-handle", liveHandle], f.caller, root);
+      const tabsAfter = liveHerdr("tab", "list", "--workspace", liveSpace);
+      await pass(
+        "close-handle closes its tab",
+        () =>
+          closed.code === 0 &&
+          closed.out.includes(`closed ${liveHandle}`) &&
+          !tabsAfter.out.includes(liveTab),
+        `${closed.out}\n${closed.err}\n${tabsAfter.out}`,
+      );
+      await pass(
+        "and frees its agent name",
+        () => liveHerdr("agent", "get", liveHandle).code !== 0,
+      );
+      const respawned = liveHost(["spawn", liveHandle, f.repo, "--", "sh"], f.caller, root);
+      await pass(
+        "a new session starts under the freed handle",
+        () => respawned.code === 0 && liveHerdr("agent", "get", liveHandle).code === 0,
+        respawned.out,
+      );
+      const closedAgain = liveHost(["close-handle", liveHandle], f.caller, root);
+      await pass("closing it again leaves nothing behind", () => closedAgain.code === 0);
+      const missing = liveHost(["close-handle", `never-spawned-${process.pid % 100000}`], f.caller, root);
+      await pass(
+        "an unknown handle reports no session, exit 0",
+        () => missing.code === 0 && missing.out.includes("no session"),
+        missing.out,
       );
     } else {
       console.log("Herdr: no server answers here; its controls are skipped");
