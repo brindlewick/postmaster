@@ -16,7 +16,7 @@ Counted mutation twice in the 79 non-test scripts on `main` (at `67d4ae2`) and i
 its 105 controls, both counts at every commit, the findings joined to the functions that hold their lines, and a draw of
 30 flagged places read by one reader and 10 of them by a second. The first count flags 360 places on `main`, an estimated
 312 of them not hazards, so its first failure test is met; 8 of the 78 findings that cite a TypeScript line sit in a
-function it flags, so its second failure test is not met, and 8 is no more than random placement would give. The result is
+function it flags, so its second failure test is not met, and 8 is about what random placement would give. The result is
 in the trial 4 section, with one sentence in the second part of proposal 1. Nothing was installed in the project, and
 nothing in the gate, the rules or the runbooks changed. No standing changed.
 

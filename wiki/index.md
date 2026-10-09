@@ -85,8 +85,8 @@ What would find a defect in postmaster's own scripts before a reviewer does, and
   with language models the trust moves to the specification. Four changes to the design rules and the
   ticket template are proposed, and five trials, one of which tests a cleanup script with its git swapped
   for a mock that is checked against real git. The mutation counts of trial 4 have been run: the first flags 360 places on
-  `main`, an estimated 312 of them not hazards, and reaches the function of 8 of the 78 findings that cite a line, as
-  many as random placement would give.
+  `main`, an estimated 312 of them not hazards, and reaches the function of 8 of the 78 findings that cite a line, about
+  as many as random placement would give.
 
 ## Decisions
 

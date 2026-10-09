@@ -788,7 +788,7 @@ from a nested one. Nothing was exempt as being at the edge.
 - **The findings.** Of the 78 findings that cite a TypeScript line, 8 sit in a function that holds a place of the first count
   (1 of 30 in #202, 3 of 17 in #216, 0 of 14 in #252, 4 of 17 in #268) and 21 in such a function or around one; 3 cite a runbook
   line and 3 no line. If each finding fell on a random line of its own file, 5.9 would sit in a flagged function and 27.1 in or
-  around one, so the count reaches the findings' functions no more than chance would. In 1 of the 8 the flagged place bears on
+  around one, so the count reaches the findings' functions about as often as chance would. In 1 of the 8 the flagged place bears on
   the defect (216/bug-14, whose cause is the `lastIndex` of global regexes kept in module state), in 1 partly, in 1 it sits beside
   the defect, and in 5 it has nothing to do with it. The second count reaches 57 of the 78, where 49.2 are expected
   [@trials/2026-10-09-mutation-counts/results/findings-summary.txt]
@@ -871,7 +871,7 @@ is that a name that never changes is easier to follow, for a reader and for a mo
 something to iterate against. Neither is measured here: no study found compares a reader's or a model's grasp of mutable
 and immutable versions of the same code, and the 84 findings were not classified by mutation. The second part is not tied
 to a finding; trial 4 tests whether it connects to any. It has tested it: the first count flags 360 places on `main`, an
-estimated 312 of them not hazards, and 8 of the 78 findings that cite a TypeScript line sit in a function it flags, as many as
+estimated 312 of them not hazards, and 8 of the 78 findings that cite a TypeScript line sit in a function it flags, about as many as
 random placement would give [@trials/2026-10-09-mutation-counts/results/marks-tally.txt]
 [@trials/2026-10-09-mutation-counts/results/findings-summary.txt].
 *Tied to (the first part):* the 8 findings of kind E, 4 of them the ambient environment in 3 runs, and to #216's round-1 style
