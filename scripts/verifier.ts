@@ -403,6 +403,15 @@ export function outsideAdded(added: string[]): string[] {
   return added.filter((p) => p !== "HANDOVER.md" && !p.startsWith("verifier/"));
 }
 
+/** Added verifier/ paths outside the listed verifiers and the index. */
+export function strayVerifierPaths(added: string[], surfaces: Surface[]): string[] {
+  return addedUnder(added, "verifier").filter((p) => {
+    if (p === "verifier/README.md") return false;
+    const seg = p.slice("verifier/".length).split("/")[0] ?? "";
+    return !(surfaces as string[]).includes(seg);
+  });
+}
+
 /** The base the session's branch is cut from: origin's head, main, master, or HEAD. */
 export function defaultBase(repo: string): string | null {
   const sym = git(repo, ["symbolic-ref", "refs/remotes/origin/HEAD"]);
@@ -826,11 +835,10 @@ export function checkMultiVerifiers(
       );
     }
   }
-  for (const kind of SURFACES) {
-    if (surfaces.includes(kind)) continue;
-    if (addedUnder(added, `verifier/${kind}`).length > 0) {
-      throw new RunError(`the session made a verifier for unlisted ${kind} on ${branch}`);
-    }
+  const stray = strayVerifierPaths(added, surfaces);
+  if (stray.length > 0) {
+    const names = [...new Set(stray.map((p) => p.slice("verifier/".length).split("/")[0]))].sort();
+    throw new RunError(`the session made a verifier for unlisted ${names.join(", ")} on ${branch}`);
   }
   const outside = outsideAdded(added);
   if (outside.length > 0) {

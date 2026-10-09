@@ -39,6 +39,7 @@ import {
   repoTop,
   roleHarness,
   scrubGitEnv,
+  strayVerifierPaths,
   surfaceKind,
   surfaceProse,
   unlistedSentence,
@@ -793,6 +794,24 @@ describe("addedUnder", () => {
   });
 });
 
+describe("strayVerifierPaths", () => {
+  test("keeps added verifier paths outside the listed verifiers and the index", () => {
+    expect(
+      strayVerifierPaths(
+        [
+          "verifier/README.md",
+          "verifier/cli/README.md",
+          "verifier/library/README.md",
+          "verifier/api/README.md",
+          "verifier/notes.md",
+        ],
+        ["cli", "web"],
+      ).sort(),
+    ).toEqual(["verifier/api/README.md", "verifier/library/README.md", "verifier/notes.md"]);
+    expect(strayVerifierPaths(["verifier/README.md", "verifier/cli/x.md"], ["cli"])).toEqual([]);
+  });
+});
+
 describe("addedFeaturePages", () => {
   test("counts added markdown pages besides the features index", () => {
     expect(
@@ -914,6 +933,17 @@ describe("checkMultiVerifiers", () => {
         ["cli", "library"],
       ),
     ).not.toThrow();
+  });
+
+  test("an unknown verifier folder and a stray index sibling fail", () => {
+    const api = goodVerifiers();
+    api["verifier/api/README.md"] = "# api\n";
+    expect(checkBranch({ "README.md": "# app\n" }, api, ["cli", "web"])).toThrow(/unlisted api/u);
+    const sibling = goodVerifiers();
+    sibling["verifier/notes.md"] = "stray\n";
+    expect(checkBranch({ "README.md": "# app\n" }, sibling, ["cli", "web"])).toThrow(
+      /unlisted notes\.md/u,
+    );
   });
 
   test("files added outside verifier/ fail, wherever they land", () => {
