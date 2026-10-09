@@ -13,9 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./lib/proc.ts";
 import { RUN, commitAll, initRepo, writeRepoFile } from "./acceptance-323.ts";
-
-const UPKEEP_LINE =
-  "A change which adds, changes or removes a feature updates that feature's page in the same change.";
+import { UPKEEP_LINE } from "./acceptance-324.ts";
 
 function tempRepo(): { dir: string; repo: string } {
   const dir = mkdtempSync(join(tmpdir(), "acceptance-324-"));
