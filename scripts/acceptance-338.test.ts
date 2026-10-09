@@ -48,6 +48,11 @@ const PM_ONLY = `[team]
 postmaster = { harness = "stub-harness-c", model = "model-c" }
 `;
 
+const TEAM_REVIEWERS_PM = `[team]
+reviewers = ["alpha", "beta"]
+postmaster = { harness = "stub-harness-c", model = "model-c" }
+`;
+
 interface Staged {
   dir: string;
   repo: string;
@@ -129,7 +134,7 @@ describe("C1: one check says whether a project is set up", () => {
   });
 
   test("complete project settings alone, with no global config, are set up", () => {
-    const s = stage({ settings: `${LANES}\n${TEAM_NO_PM}\n${PM_ONLY}` });
+    const s = stage({ settings: `${LANES}\n${TEAM_REVIEWERS_PM}` });
     try {
       const r = checkSetup(s.repo, s.configPath, s.bin);
       expect(r.code).toBe(0);
