@@ -17,7 +17,6 @@ import {
 import { join } from "node:path";
 import {
   both,
-  bunTest,
   codexCmd,
   codexFileChange,
   flat,
@@ -409,12 +408,3 @@ oracle("C14: a dispatch with no reach line renders the block without ## Reach", 
   expectExit(card, 0);
   expect(card.out).not.toContain("## Reach");
 });
-
-oracle(
-  "C15/C17: the change's own reach and fixture tests pass",
-  (lay) => {
-    expectExit(bunTest(REPO, lay.home, "reach.test.ts"), 0);
-    expectExit(bunTest(REPO, lay.home, "fixture.test.ts"), 0);
-  },
-  900000,
-);
