@@ -170,9 +170,7 @@ describe("discovery names map to the #323 surfaces and dedup", () => {
   test("names of one surface dedup to its single rendering", () => {
     const { dir, repo } = tempRepo();
     try {
-      expect(promptOrThrow(repo, "browser-suite", "web-journey")).toBe(
-        promptOrThrow(repo, "web"),
-      );
+      expect(promptOrThrow(repo, "browser-suite", "web-journey")).toBe(promptOrThrow(repo, "web"));
       expect(promptOrThrow(repo, "cli", "cli")).toBe(promptOrThrow(repo, "cli"));
     } finally {
       rmSync(dir, { recursive: true, force: true });
