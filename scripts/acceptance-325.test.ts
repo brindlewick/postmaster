@@ -7,10 +7,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitAll, gitOrThrow, writeRepoFile } from "./acceptance-323.ts";
 import {
-  HELPER_BAD,
-  HELPER_GOOD,
-  PR_URL,
-  RUN,
   bareOrigin,
   branchHasFile,
   checksDirExists,
@@ -18,12 +14,16 @@ import {
   cleanupTemplate,
   freshApp,
   gateLogOf,
+  HELPER_BAD,
+  HELPER_GOOD,
   handoverDoc,
   handoverEntry,
   headOf,
   makeDispatch,
+  PR_URL,
   parentsOf,
   plantBranch,
+  RUN,
   readActions,
   runCheck,
   runLand,
@@ -291,7 +291,10 @@ describe("C4: a verifier that fails its proof is left out", () => {
       plantBranch(
         repo,
         "verify-both",
-        { ...verifierFiles("verify-app/web", HELPER_GOOD), "verify-app/README.md": "# verifiers\n" },
+        {
+          ...verifierFiles("verify-app/web", HELPER_GOOD),
+          "verify-app/README.md": "# verifiers\n",
+        },
         "web verifier only",
       );
       const r = runLand(repo, "verify-both", dispatch, handover, ["--landing", "local"]);
@@ -386,7 +389,8 @@ describe("C5: the user is told what was left out, or why nothing landed", () => 
       const dispatch = makeDispatch(dir, "postmaster");
       plantBranch(repo, "verify-cli", verifierFiles("verify-app", HELPER_GOOD), "clean verifier");
       const r = runCheck(repo, "verify-cli", dispatch, handover);
-      const want = "refuse: verify-cli lands nothing: no proven verifier (the hand-over names none)";
+      const want =
+        "refuse: verify-cli lands nothing: no proven verifier (the hand-over names none)";
       expect(r.code).toBe(1);
       expect(r.out).toBe(`${want}\n`);
       const actions = readActions(dispatch);
@@ -421,7 +425,8 @@ describe("C5: the user is told what was left out, or why nothing landed", () => 
         "--timeout",
         "1",
       ]);
-      const want = "refuse: verify-sleepy lands nothing: past its limit (the checks ran longer than 1s)";
+      const want =
+        "refuse: verify-sleepy lands nothing: past its limit (the checks ran longer than 1s)";
       expect(r.code).toBe(1);
       expect(r.out).toBe(`${want}\n`);
       expect(headOf(repo, "main")).toBe(before);
@@ -482,9 +487,9 @@ describe("landing refuses cleanly", () => {
       const r = runLand(repo, "verify-cli", dispatch, handover, ["--landing", "local"]);
       expect(r.code).toBe(1);
       expect(r.out.split("\n")[0]).toContain("accept: verify-cli lands 1 verifier");
-      expect(r.out.split("\n")[1]?.startsWith("error: the merge of verify-cli into main failed")).toBe(
-        true,
-      );
+      expect(
+        r.out.split("\n")[1]?.startsWith("error: the merge of verify-cli into main failed"),
+      ).toBe(true);
       expect(headOf(repo, "main")).toBe(before);
       expect(gitOrThrow(repo, "status", "--porcelain").trim()).toBe("");
       expect(readActions(dispatch).map((a) => a.action)).toEqual(["note", "note"]);
@@ -524,11 +529,7 @@ describe("landing refuses cleanly", () => {
     const { dir, repo } = freshApp();
     try {
       const proof = writeProof(dir, "proof-web.log");
-      const handover = writeHandover(
-        dir,
-        "HANDOVER.md",
-        `## Verifier: web\nProof: ${proof}\n`,
-      );
+      const handover = writeHandover(dir, "HANDOVER.md", `## Verifier: web\nProof: ${proof}\n`);
       const dispatch = makeDispatch(dir, "postmaster");
       plantBranch(
         repo,
@@ -555,12 +556,7 @@ describe("landing refuses cleanly", () => {
         "HANDOVER.md",
         handoverDoc(handoverEntry("cli", "custom", proof)),
       );
-      plantBranch(
-        repo,
-        "verify-custom",
-        verifierFiles("custom", HELPER_GOOD),
-        "custom folder",
-      );
+      plantBranch(repo, "verify-custom", verifierFiles("custom", HELPER_GOOD), "custom folder");
       const dispatch = makeDispatch(dir, "postmaster");
       const r1 = runCheck(repo, "verify-custom", dispatch, handover);
       expect(r1.code).toBe(1);
