@@ -21,7 +21,14 @@
 //   exit 2  usage: an unknown command or surface, a missing argument, a bad timeout, a path
 //           that is not a git repository or not its top, a repo holding no commit, or no
 //           run at the dispatch
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { endingWallMessage, isWallMessage } from "./launch.ts";
 import { beside, scriptsDir } from "./lib/paths.ts";
@@ -235,6 +242,19 @@ export function commitsPastBase(repo: string, base: string, branch: string): num
 export function branchHasPath(repo: string, branch: string, path: string): boolean {
   const r = git(repo, ["ls-tree", "--name-only", branch, "--", path]);
   return r.code === 0 && r.out.trim() !== "";
+}
+
+/** The handover was written after the cut, so this session made it. */
+export function handoverFresh(handoverMtimeMs: number, cutMs: number): boolean {
+  return handoverMtimeMs >= cutMs;
+}
+
+function handoverMtimeMs(path: string): number | null {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return null;
+  }
 }
 
 /** Markdown pages committed under the verifier's features folder, besides its index. */
@@ -581,8 +601,9 @@ function runMake(req: ParsedMake): number {
     throw new RunError(`the worktree would not cut: ${added.err.trim() || added.out.trim()}`);
   }
   const sessionStarted = { started: false };
+  const cutAt = Date.now();
   try {
-    return runMakeLaunches(req, repo, dispatch, base, branch, wt, vdir, sessionStarted);
+    return runMakeLaunches(req, repo, dispatch, base, branch, wt, vdir, sessionStarted, cutAt);
   } catch (e) {
     const outcome = failureOutcome(sessionStarted.started, wt, branch);
     const extra = outcome.cleanup ? removeProvisioning(repo, wt, branch) : outcome.suffix;
@@ -601,6 +622,7 @@ function runMakeLaunches(
   wt: string,
   vdir: string,
   sessionStarted: { started: boolean },
+  cutAt: number,
 ): number {
   const logs = join(dispatch, "logs");
   mkdirSync(logs, { recursive: true });
@@ -660,8 +682,12 @@ function runMakeLaunches(
     final = second;
   }
   const handover = join(wt, "HANDOVER.md");
-  if (!existsSync(handover)) {
+  const written = handoverMtimeMs(handover);
+  if (written === null) {
     throw new RunError(`the session ended with no HANDOVER.md in ${wt}`);
+  }
+  if (!handoverFresh(written, cutAt)) {
+    throw new RunError(`the HANDOVER.md in ${wt} predates this session`);
   }
   const made = commitsPastBase(wt, base, branch);
   if (made === null) {

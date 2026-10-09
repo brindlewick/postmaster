@@ -13,6 +13,7 @@ import {
   committedFeaturePages,
   defaultBase,
   failureOutcome,
+  handoverFresh,
   isSurface,
   parseArgs,
   pickBranch,
@@ -366,6 +367,14 @@ describe("branchHasPath", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("handoverFresh", () => {
+  test("written at or after the cut reads fresh, before reads stale", () => {
+    expect(handoverFresh(2000, 1000)).toBe(true);
+    expect(handoverFresh(1000, 1000)).toBe(true);
+    expect(handoverFresh(999, 1000)).toBe(false);
   });
 });
 
