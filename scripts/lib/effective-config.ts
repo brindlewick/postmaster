@@ -1046,6 +1046,76 @@ const applyRoles = (merged: Rec, roles: Rec, explicitTeam: Rec): void => {
   }
 };
 
+// One merged lane/role selection with its local-layer counterpart: which file
+// set a value is decided here, once, for launch's env base and run-meta's
+// recording. The legs rule matches resolveSpec: a won leg reads its leg
+// table, anything else the role table. Pure lookup, never dies.
+export const specPairFor = (
+  merged: Rec,
+  local: Rec,
+  name: string,
+  leg: string,
+): { merged: Rec; local: Rec } => {
+  const asTable = (v: unknown): Rec =>
+    v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Rec) : {};
+  const mteam = asTable(merged.team);
+  const lteam = asTable(local.team);
+  if (name === "coachman") {
+    const wonLeg = leg !== "" ? asTable(mteam.coachman_legs)[leg] : undefined;
+    if (wonLeg !== undefined && wonLeg !== null) {
+      return { merged: asTable(wonLeg), local: asTable(asTable(lteam.coachman_legs)[leg]) };
+    }
+    return { merged: asTable(mteam.coachman), local: asTable(lteam.coachman) };
+  }
+  if (name === "coachman_fallback") {
+    return { merged: asTable(mteam.coachman_fallback), local: asTable(lteam.coachman_fallback) };
+  }
+  if (name === "postmaster") {
+    return { merged: asTable(mteam.postmaster), local: asTable(lteam.postmaster) };
+  }
+  if (name === "clerk") {
+    return { merged: asTable(mteam.clerk), local: asTable(lteam.clerk) };
+  }
+  const mlanes = asTable(merged.lanes);
+  const llanes = asTable(local.lanes);
+  return { merged: asTable(mlanes[name]), local: asTable(llanes[name]) };
+};
+
+// Record-time normalization: a relative env_file the project's settings set
+// resolves against the project root, so --run launches agree with --project
+// ones. Global-set relatives stay relative for the live config's directory;
+// absolute and ~ values pass through. Mutates the merged record it owns.
+export const absolutizeProjectEnvFiles = (merged: Rec, local: Rec, root: string): void => {
+  const fixPair = (site: { merged: Rec; local: Rec }): void => {
+    const value = site.merged.env_file;
+    const localValue = site.local.env_file;
+    if (
+      typeof value === "string" &&
+      value !== "" &&
+      !value.startsWith("~") &&
+      !value.startsWith("/") &&
+      typeof localValue === "string" &&
+      localValue !== ""
+    ) {
+      site.merged.env_file = join(root, value);
+    }
+  };
+  const asTable = (v: unknown): Rec =>
+    v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Rec) : {};
+  for (const key of Object.keys(asTable(merged.lanes))) {
+    fixPair(specPairFor(merged, local, key, ""));
+  }
+  const legs = asTable(asTable(merged.team).coachman_legs);
+  const roles: Array<[string, string]> = [
+    ["coachman", ""],
+    ["coachman_fallback", ""],
+    ["postmaster", ""],
+    ["clerk", ""],
+    ...Object.keys(legs).map((leg): [string, string] => ["coachman", leg]),
+  ];
+  for (const [name, leg] of roles) fixPair(specPairFor(merged, local, name, leg));
+};
+
 export const effectiveConfig = (
   repo: string,
   machine: Rec,

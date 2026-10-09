@@ -94,6 +94,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { tryJsonFile } from "./lib/data.ts";
 import {
+  absolutizeProjectEnvFiles,
   acceptanceStorePath,
   effectiveConfigForProject,
   globalConfigPath,
@@ -1006,6 +1007,16 @@ function buildRecord(
   // Sorted back through JSON so run.json keeps the key order the printed
   // project-settings output always had.
   const resolvedConfig = JSON.parse(sortedJson(resolved.config)) as Record<string, unknown>;
+  // The record carries the project base in its values: project-set relative
+  // env paths resolve against the project root here, so --run launches
+  // agree with --project ones.
+  if (resolved.projectFile !== null) {
+    absolutizeProjectEnvFiles(
+      resolvedConfig,
+      resolved.local,
+      dirname(dirname(resolved.projectFile)),
+    );
+  }
   const mode = resolveRunMode(resolvedConfig, d, requestedMode);
   if ("error" in mode) return { ok: false, messages: [mode.error], notice: resolved.notice };
   const warnings = existsSync(join(resolvedRepo, ".postmaster", "fixture"))

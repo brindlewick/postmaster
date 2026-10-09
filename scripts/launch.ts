@@ -63,7 +63,11 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { readTomlFile, tryJsonFile } from "./lib/data.ts";
-import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
+import {
+  effectiveConfigForProject,
+  globalConfigPath,
+  specPairFor,
+} from "./lib/effective-config.ts";
 import { startCheck, wrapCommand } from "./lib/confine.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
@@ -235,33 +239,11 @@ function resolveSpec(
   const str = (v: unknown): string => (v === undefined || v === null ? "" : String(v));
   // A relative env_file the project's settings set resolves against the
   // project root; one the global config sets keeps the global directory.
-  // The local table that wins the same selection the merged config made
-  // decides which file set it.
+  // The shared selection decides which file set it.
   let envFileBase = "";
   if (localLayer !== null && projectRootDir !== "") {
-    const asTable = (v: unknown): Record<string, unknown> =>
-      v !== null && typeof v === "object" && !Array.isArray(v)
-        ? (v as Record<string, unknown>)
-        : {};
-    const mteam = asTable(cfg.team);
-    const lteam = asTable(localLayer.team);
-    let localPick: unknown;
-    if (name === "coachman") {
-      const wonLeg = leg ? asTable(mteam.coachman_legs)[leg] : undefined;
-      localPick =
-        wonLeg !== undefined && wonLeg !== null
-          ? asTable(lteam.coachman_legs)[leg]
-          : lteam.coachman;
-    } else if (name === "coachman_fallback") {
-      localPick = lteam.coachman_fallback;
-    } else if (name === "postmaster") {
-      localPick = lteam.postmaster;
-    } else if (name === "clerk") {
-      localPick = lteam.clerk;
-    } else {
-      localPick = asTable(localLayer.lanes)[name];
-    }
-    if (str(asTable(localPick).env_file) !== "") envFileBase = projectRootDir;
+    const site = specPairFor(cfg, localLayer, name, leg);
+    if (str(site.local.env_file) !== "") envFileBase = projectRootDir;
   }
   return {
     harness: str(s.harness),
