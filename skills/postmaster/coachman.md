@@ -597,7 +597,7 @@ from it.
   messages.
 - **Run the checks on each workhorse's branch** once its thread has exited, in its copy:
   `<tool>/scripts/run verify run <workhorse-wt> <dispatch>`, which runs the run's checks whatever the
-  copy's ticket says, and logs each result. It refuses a copy with uncommitted changes: run it on
+  copy's armed checks say, and logs each result. It refuses a copy with uncommitted changes: run it on
   a scratch cut at BASE with `<tool>/scripts/run cut-scratch`, fetch the branch's HEAD from the
   copy into the scratch and check it out, instead, and put what the workhorse left uncommitted on
   the card. Where a check's source names `web-journey`,
