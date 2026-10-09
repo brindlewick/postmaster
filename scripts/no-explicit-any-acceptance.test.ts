@@ -108,7 +108,11 @@ describe("a clean tree", () => {
 describe("the rule's setting", () => {
   test("off fails naming the config", () => {
     const dir = fresh();
-    plant(dir, { rules: { [RULE]: "off" }, ignorePatterns: ["fixtures/**", "scripts/lib/vendor/**"] }, CHECK);
+    plant(
+      dir,
+      { rules: { [RULE]: "off" }, ignorePatterns: ["fixtures/**", "scripts/lib/vendor/**"] },
+      CHECK,
+    );
     const r = accept(dir, stub(GOOD));
     expect(r.code).toBe(1);
     expect(r.out).toContain(".oxlintrc.json");
