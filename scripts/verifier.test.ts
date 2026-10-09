@@ -28,6 +28,7 @@ import {
   scrubGitEnv,
   sendText,
   surfaceProse,
+  spawnCommand,
   verifierHandle,
   verifyDirName,
   waitForHandover,
@@ -242,6 +243,24 @@ describe("sendText", () => {
     const text = sendText("/d/logs/verifier-verify-cli-prompt.txt");
     expect(text).toContain("/d/logs/verifier-verify-cli-prompt.txt");
     expect(text.endsWith("\n")).toBe(true);
+  });
+});
+
+describe("spawnCommand", () => {
+  test("starts the form in the worktree explicitly, then execs it", () => {
+    expect(spawnCommand("/wt", ["muse", "--model", "probe-model"])).toEqual([
+      "bash",
+      "-c",
+      `cd -- '/wt' && exec "$@"`,
+      "_",
+      "muse",
+      "--model",
+      "probe-model",
+    ]);
+  });
+
+  test("quotes spaces and single quotes in the worktree path", () => {
+    expect(spawnCommand("/o'brien/r e", ["muse"])[2]).toBe(`cd -- '/o'\\''brien/r e' && exec "$@"`);
   });
 });
 

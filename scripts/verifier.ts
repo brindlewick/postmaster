@@ -766,7 +766,9 @@ function runMakeLaunches(
   const form = formOrNull(wt, name);
   const handle = verifierHandle(repo, branch);
   const spawned =
-    form === null ? null : run(RUN, ["host", "spawn", handle, wt, "--label", name, "--", ...form]);
+    form === null
+      ? null
+      : run(RUN, ["host", "spawn", handle, wt, "--label", name, "--", ...spawnCommand(wt, form)]);
   if (spawned === null || spawned.code === 3) {
     // No session host keeps an interactive session: run headless, as #323 did,
     // with the no-host instructions, which report what could not be asked. The
@@ -857,6 +859,22 @@ function interactiveForm(wt: string, name: string): string[] {
     );
   }
   return form;
+}
+
+/** Single-quote a word for sh, the twin of host.ts's quote, which stays there. */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/gu, "'\\''")}'`;
+}
+
+/**
+ * The argv spawn runs: the form wrapped so it starts in the worktree even when
+ * the pane opens elsewhere. host spawn may place a linked worktree's pane at
+ * the repo root instead (tool-fault, run 344), so the wrapper cds explicitly,
+ * as host run's own pane line does, and execs the form, so the pane lists the
+ * session itself, with the harness as the pane's own process as before.
+ */
+export function spawnCommand(wt: string, form: string[]): string[] {
+  return ["bash", "-c", `cd -- ${shellQuote(wt)} && exec "$@"`, "_", ...form];
 }
 
 /**
