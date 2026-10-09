@@ -71,10 +71,24 @@
 //       evidence, not a result to weigh. `judge` when the waybill mentions none, or the
 //       journey check failed with its report written: the postmaster weighs it like any
 //       other non-pass.
+//   run landing switch-offs --repo <repo> --default <branch> --ticket <ref>
+//       [--dispatch <dispatch>]
+//       every switch-off comment the run adds, and every change to the settings of
+//       the project's checks, compared between the ticket head and its merge base
+//       with the default branch. The first line is `clear` when the branch adds
+//       nothing or every entry carries the user's recorded approval, `held` when
+//       entries wait on the user's word, `no reason` when any lacks its reason,
+//       and `refused` when the user refused any. The rest is the `## Switch-offs`
+//       section: one line per comment with its file, line, form, rules, reason
+//       and identity, and one per settings change with its diff; approved entries
+//       are marked. Without --dispatch no approval can match, so any entry holds.
+//       An approval names the run, the identity and the user's words, written
+//       through `run log-action` so it sits in the run's actions and the
+//       project's ledger alike.
 //
 //   exit 0  already-landed, anything-to-land, pull-request-checks, results, card-block, card-open: the answer,
 //           printed; card-results, card-findings: `match`; journey: `clear` or `judge`;
-//           fresh: `fresh`
+//           fresh: `fresh`; switch-offs: `clear`
 //   exit 1  usage; a resolving input that does not resolve (--default, --base,
 //           --card-head, --local-ticket, --pr-merge, and --ticket without a
 //           report: --pr-head answers `re-verify` instead); a file that cannot
@@ -84,10 +98,13 @@
 //           be read (a duplicate id, a finding-shaped line that is not a finding, an
 //           unreadable state, a fence marker line, or a quoted line); a card holding an
 //           HTML comment or not holding the rendered block exactly once
-//   exit 2  fresh: the faults, one line each; journey: `blocked`
+//   exit 2  fresh: the faults, one line each; journey: `blocked`; switch-offs: `held`
+//   exit 3  switch-offs: `no reason`
+//   exit 4  switch-offs: `refused`
 import { readFileSync, readdirSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
+import { inspectSwitchOffs } from "./lib/switch-offs.ts";
 import { run } from "./lib/proc.ts";
 import { runMode } from "./lib/run-mode.ts";
 import { physical, reachActions } from "./reach.ts";
@@ -501,7 +518,8 @@ const TOP_USAGE =
   "--pr <pull-request> --card-head <sha> | results <dispatch> <synthesis-wt> | " +
   "card-block <dispatch> <synthesis-wt> <checkpoint> | card-results <dispatch> <synthesis-wt> " +
   "<checkpoint> <card> | card-findings <dispatch> <synthesis-wt> <checkpoint> <card> | " +
-  "card-open <checkpoint> | journey <dispatch> <synthesis-wt> <waybill>";
+  "card-open <checkpoint> | journey <dispatch> <synthesis-wt> <waybill> | switch-offs " +
+  "--repo <repo> --default <branch> --ticket <ref> [--dispatch <dispatch>]";
 const ALREADY_USAGE =
   "usage: run landing already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> " +
   "--card-head <sha> [--local-ticket <branch>] [--pr-merge <sha> --pr-head <sha>]";
@@ -630,6 +648,9 @@ function pullRequestChecks(o: string[]): number {
   console.log("pass");
   return 0;
 }
+
+const SWITCH_OFFS_USAGE =
+  "usage: run landing switch-offs --repo <repo> --default <branch> --ticket <ref> [--dispatch <dispatch>]";
 
 function alreadyLanded(o: string[]): number {
   if (
@@ -854,6 +875,36 @@ function journey(dispatch: string, wt: string, waybill: string): number {
   return 0;
 }
 
+function switchOffs(o: string[]): number {
+  if (
+    (o.length !== 6 && o.length !== 8) ||
+    o[0] !== "--repo" ||
+    o[2] !== "--default" ||
+    o[4] !== "--ticket" ||
+    (o.length === 8 && o[6] !== "--dispatch")
+  ) {
+    usage(SWITCH_OFFS_USAGE);
+  }
+  try {
+    const report = inspectSwitchOffs({
+      repo: o[1]!,
+      defaultRef: o[3]!,
+      ticketRef: o[5]!,
+      ...(o.length === 8 ? { dispatch: o[7]! } : {}),
+    });
+    process.stdout.write(`${report.status}\n${report.output}`);
+    return report.status === "clear"
+      ? 0
+      : report.status === "held"
+        ? 2
+        : report.status === "no reason"
+          ? 3
+          : 4;
+  } catch (e) {
+    throw new LandingFailure(`switch-offs: ${e instanceof Error ? e.message : String(e)}`, 1);
+  }
+}
+
 function main(argv: string[]): number {
   try {
     const mode = argv[0];
@@ -889,6 +940,7 @@ function main(argv: string[]): number {
       if (argv.length !== 4) usage(JOURNEY_USAGE);
       return journey(argv[1]!, argv[2]!, argv[3]!);
     }
+    if (mode === "switch-offs") return switchOffs(argv.slice(1));
     usage(TOP_USAGE);
   } catch (e) {
     if (e instanceof LandingFailure) {

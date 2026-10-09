@@ -572,6 +572,31 @@ missed.
    branch. If a claim
    fails, remove `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`, then
    resume that last leg with the exact discrepancy and wait for its corrected card.
+
+   Check switch-offs after the claims and before step 2's landing route, on both routes:
+   `<tool>/scripts/run landing switch-offs --repo <repo> --default <branch>
+   --ticket <the ticket ref> --dispatch <dispatch>`. Exit 0, the branch is clear. Exit 2,
+   put each listed entry to the user with the ship card: its file, line, form, the rules it
+   names and the reason beside it — or, for a settings entry, its file, its change and its
+   diff. For each entry they approve, record the word with
+   `<tool>/scripts/run log-action <dispatch> postmaster switch-off <its identity> approved
+   <the entry> <the user's words>`; for each entry they refuse, record it the same way with
+   `refused`, then withhold at once under the claim-fail clause above, with the refused
+   entry as the exact discrepancy. Run the check again after recording: a held remainder
+   repeats the ask, and anything still unapproved after the user's word withholds the same
+   way. While an ask is outstanding, the question sits in the run's `.waiting-on-user`;
+   remove it when the user's word arrives. Exit 3, entries miss their reasons: withhold
+   under the claim-fail clause with the listed entries as the exact discrepancy; the leg
+   gives each its reason, or removes what it should not switch off. Exit 4 is a recorded
+   refusal: withhold the same way. Runs dispatched before this check existed are held the
+   same way at landing; only their cards lack the list.
+   The merge authority never approves these entries and never unholds them: where
+   it is the postmaster itself, it still asks and records the word before it opens a
+   pull request or merges. Compare the card's `## Switch-offs` section with the
+   fresh output, approval marks aside, and withhold on any difference with the
+   mismatch as the exact discrepancy; a card from a run pinned before this check has
+   no such section, and those runs are judged by the live list alone. Any other exit
+   is an input fault: stop the stage, fix the inputs and re-run.
 2. **Follow the landing route in the waybill.** First ask whether the ticket already landed:
    `<tool>/scripts/run landing already-landed --repo <repo> --default <branch> --ticket
    <the ticket ref> --base <the manifest's base> --card-head <the card's final HEAD>`, adding
@@ -705,6 +730,12 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    the synthesis HEAD, and the card gives each one that did not pass as its result is; a
    check that did not run is `not run`, never passed and never omitted; the Style
    residue's count is what `<tool>/scripts/run style-findings count <dispatch>` prints.
+   Check switch-offs as current Stage F does: `<tool>/scripts/run landing switch-offs
+   --repo <repo> --default <branch> --ticket <the ticket ref> --dispatch <dispatch>`. On
+   exit 0 the branch is clear; otherwise put each listed entry to the user with the card,
+   record each word through `<tool>/scripts/run log-action`, and withhold under step 2
+   until the check clears — the merge authority never approves these entries itself.
+   While the ask is outstanding the question sits in the run's `.waiting-on-user`.
 2. **Grant or withhold.** Every word is delivered by resuming leg 3 (Stage C, step 5), and
    `.card-ready` is removed before it is; the coachman touches it afresh when the card changes.
    `MERGE_AUTHORITY: postmaster` and every check above holds: deliver "MERGE GRANTED" and log
