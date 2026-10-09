@@ -1147,7 +1147,7 @@ async function* pages(
   path: string,
   params?: Record<string, string>,
 ): AsyncGenerator<any> {
-  const p: Record<string, string> = { ...(params ?? {}), per_page: "100" };
+  const p: Record<string, string> = { ...params, per_page: "100" };
   for (;;) {
     const page = await api(cfg, "GET", path, undefined, p);
     for (const item of page?.results ?? []) yield item;
