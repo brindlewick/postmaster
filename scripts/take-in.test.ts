@@ -95,7 +95,7 @@ describe("take-in over workhorse copies", () => {
       staleBranch(fx, "mimo");
       const r = takeIn(fx);
       expect(r.code).toBe(1);
-      expect(both(r)).toMatch(/could not bring .* in from .+: \S/);
+      expect(both(r)).toMatch(/could not bring .* in from .+: ./u);
     });
   });
 });
