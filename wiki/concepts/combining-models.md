@@ -3,7 +3,7 @@ title: Combining models
 type: concept
 standing: claimed
 sources: [runs/2026-09-26-postmaster-36, trials/2026-09-29-synthesis-audit, trials/2026-10-03-lane-audit]
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 # Combining models
@@ -171,3 +171,9 @@ A second trial, three days of runs, reads what the lanes added and cost
 was a fix in most real runs by the coachman's cards, and each fixture lane alone passed every
 hidden test, and the second reviewer found most of the severe findings the first missed. It moves
 no standing for the same reason. [Several lanes](several-lanes.md) holds its answer.
+
+Outside work on whether mixing models helps is read in
+[Mixing models for coding](mixing-models-for-coding.md): the papers and tools on all four claims, the
+older work on whether independently built versions fail independently, and the README's claims checked
+against these audits. It bears on H1 and H2, and on the open questions about vendor diversity and
+blinkers, and moves no standing.

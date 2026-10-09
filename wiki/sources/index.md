@@ -12,6 +12,9 @@ captured into `raw/`, saying what it claims and what it would mean here if true.
 
 ## Articles
 
+- [Sources read for mixing models for coding](../concepts/mixing-models-for-coding.md#sources): 107 papers
+  and 139 project pages, vendor posts and repositories, read on 2026-10-04. They have no page here, and
+  the page that cites them lists each with the day it was read.
 - [pstack](pstack.md) (2026): a plugin of skills and principles for verified agent work, and
   Part 1 of its guide. Postmaster already holds most of it. Read twice, on 2026-10-03 and 2026-10-05: of
   the changes, the user took two, the skills that make a project's verifiers and keep them current, and left the rest.
