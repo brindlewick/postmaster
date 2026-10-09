@@ -1,0 +1,33 @@
+PASS read of the other lane's worktree -> [('sibling', False)] 
+PASS edit inside the run's shared worktree -> [('shared', False)] 
+PASS listing another worktree -> [('other', False)] 
+PASS relative path to the shared worktree -> [('shared', False)] 
+PASS git log --all -> [('refs', False)] 
+PASS git branch -a in the repository -> [('refs', False)] 
+PASS git -C the repository branch -a -> [('refs', False)] 
+PASS git show on the other lane's branch -> [('refs', False)] 
+PASS read in the private memory folder -> [('outside', False)] 
+PASS read of the run's own records -> [('outside', False)] 
+PASS a private draft the ticket names -> [('outside', True)] 
+PASS a path that is only the start of a longer path the prompt names -> [('outside', False)] 
+PASS a private draft the ticket does not name -> [('outside', False)] 
+PASS python reading the machine config from a heredoc -> [('outside', False)] 
+PASS the other lane's commit id in output, made after dispatch -> [('commit', False)] 
+PASS the other lane's launch command in a process list -> [('commit', False)] 
+PASS read of its own worktree -> nothing 
+PASS git status --short --branch -> nothing 
+PASS git branch --show-current -> nothing 
+PASS text written into a file -> nothing 
+PASS a copy of the layout in a temp folder -> nothing 
+PASS a scratch layout inside its own worktree -> nothing 
+PASS a commit id that is not the other lane's -> nothing 
+PASS the other lane's commit id, made before dispatch -> nothing 
+PASS git log on its own branch -> nothing 
+PASS git branch -a on a variable target -> [('refs-other', False)] 
+PASS git branch -a in another folder -> [('refs-other', False)] 
+PASS git log --all inside a heredoc written to a file -> nothing 
+PASS the private config path in a printf written to a file -> nothing 
+PASS git ls-remote of another project's URL -> [('refs-other', False)] 
+PASS git ls-remote of the repository's own remote -> [('refs', False)] 
+PASS the private config path inside a heredoc written to a file -> nothing 
+32 of 32 cases passed (17 positive, 15 negative)

@@ -31,6 +31,17 @@ generator, two states that only the findings had named (a submodule and an unbra
 the findings now writes the list. A third independent check of the rewrite found 16 problems (3 overstated, 1
 unsupported, 5 missing a limit, 3 stale, 4 minor), all corrected. Nothing was run or installed. No standing changed.
 
+## [2026-10-05] ingest | whether the lanes saw each other's work
+
+Issue #277. Read the events streams of 60 workhorse lanes in 30 real runs, and recorded the scan in
+`raw/trials/2026-10-05-lane-isolation-scan/`: the script with its self-test, its output, the controls and the
+readings. No stream named the other lane's worktree or showed its code. One lane read the other's plan, two
+reached the run's blind tests, and only one of those two runs recorded it. The sandbox that the `confine`
+setting turns on isolates processes and not files. Added "Whether its lanes were kept apart" to
+[Mixing models for coding](concepts/mixing-models-for-coding.md) and a line to
+[Lane confinement](concepts/lane-confinement.md). No standing changed: the scan reads the runs' own records
+and promotes no run.
+
 ## [2026-10-05] query | how the dashboard looks
 
 The user chose the look in #238's design session: "let's go with engraved navy and coral from
@@ -66,6 +77,19 @@ ticket template, and five small trials, none run. Two independent checks of the 
 and sources, one of the record and one of the literature, found 28 and 43 problems (wrong, overstated,
 unsupported, missing a limit, minor); all were corrected before publication. No standing changed.
 
+## [2026-10-04] ingest | what exists for coding with several models, whether mixing models is proven, and what postmaster adds
+
+Issue #277. Captured 107 papers and 139 pages into `raw/papers/` and `raw/articles/`, each with its
+address, the day it was read and the passages relied on, and recorded the search in
+`raw/trials/2026-10-04-landscape-search/`: every query, the rule for choosing in each group, the controls,
+what was not read, and the marks of the count that ranks the closest tools. Added
+[Mixing models for coding](concepts/mixing-models-for-coding.md), **claimed**, with a map in six groups, the
+evidence on four claims about mixing models in code and in general work, the closest tools beside
+postmaster, what postmaster shares and adds, the README checked line by line against
+[the lane audit](concepts/several-lanes.md), and what can and cannot be said in public. The README's
+claim that the synthesis took contributions from both lanes every time is not supported by the audit.
+Linked it from [Combining models](concepts/combining-models.md). No standing changed: outside work moves
+none, and the page rests on the audits, which promote no run.
 
 ## [2026-10-04] query | should setup create a project's verifiers with pstack's skill
 
