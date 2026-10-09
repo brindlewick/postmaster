@@ -8,8 +8,14 @@ import { join } from "node:path";
 import { commitAll, gitOrThrow, initRepo, RUN, writeRepoFile } from "./acceptance-323.ts";
 import { run } from "./lib/proc.ts";
 import {
+  UPKEEP_LINE,
   acceptLine,
+  addedFeaturePages,
+  addedPaths,
+  addedUnder,
+  branchFileText,
   branchHasPath,
+  checkMultiVerifiers,
   type CheapFacts,
   type ChecksOutcome,
   type ClassifiedEntry,
@@ -20,29 +26,40 @@ import {
   decideChecks,
   defaultBase,
   defaultLanding,
+  dirLines,
   failureOutcome,
   handoverFresh,
+  hasUpkeepLine,
+  indexNames,
   isSurface,
+  joinBodies,
   landTarget,
   lastLine,
   mergeAuthorityOf,
   normalizeFolder,
+  orderKinds,
+  outsideAdded,
   outsidePaths,
   parseArgs,
   parseHandover,
   parseVerifyResults,
   pickBranch,
   pickWorktree,
+  proseList,
   pruneWorktrees,
   refuseLine,
   remoteFromSymbolicRef,
   removeProvisioning,
   renderPrompt,
+  renderTemplate,
   repoTop,
   roleHarness,
   scrubGitEnv,
+  strayVerifierPaths,
+  surfaceKind,
   surfaceProse,
   timeoutMs,
+  unlistedSentence,
   unrunProject,
   verifyDirName,
   wallInStream,
@@ -59,7 +76,22 @@ describe("parseArgs", () => {
   test("prompt takes a repo and a surface", () => {
     expect(parseArgs(["prompt", "/r", "cli"])).toEqual({
       ok: true,
-      req: { cmd: "prompt", repo: "/r", surface: "cli" },
+      req: { cmd: "prompt", repo: "/r", surfaces: ["cli"] },
+    });
+  });
+
+  test("prompt takes several surfaces as distinct kinds in canonical order", () => {
+    expect(parseArgs(["prompt", "/r", "web", "cli"])).toEqual({
+      ok: true,
+      req: { cmd: "prompt", repo: "/r", surfaces: ["cli", "web"] },
+    });
+    expect(parseArgs(["prompt", "/r", "cli", "cli-examples"])).toEqual({
+      ok: true,
+      req: { cmd: "prompt", repo: "/r", surfaces: ["cli"] },
+    });
+    expect(parseArgs(["prompt", "/r", "browser-suite", "web-journey"])).toEqual({
+      ok: true,
+      req: { cmd: "prompt", repo: "/r", surfaces: ["web"] },
     });
   });
 
@@ -75,8 +107,17 @@ describe("parseArgs", () => {
     });
     expect(parseArgs(["prompt", "/r", "telegraph"])).toEqual({
       ok: false,
-      error: "unknown surface: telegraph (cli, web or library)",
+      error:
+        "unknown surface: telegraph (cli, web, library, cli-examples, browser-suite, web-journey or library-tests)",
     });
+    expect(parseArgs(["prompt", "/r", "cli", "telegraph"]).ok).toBe(false);
+  });
+
+  test("prototype names are unknown surfaces, not silent empty kinds", () => {
+    for (const name of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      expect(parseArgs(["prompt", "/r", name]).ok).toBe(false);
+      expect(parseArgs(["prompt", "/r", "cli", name]).ok).toBe(false);
+    }
   });
 
   test("prompt takes no flags", () => {
@@ -89,11 +130,21 @@ describe("parseArgs", () => {
   test("make needs --run and defaults the timeout", () => {
     expect(parseArgs(["make", "/r", "web", "--run", "/d"])).toEqual({
       ok: true,
-      req: { cmd: "make", repo: "/r", surface: "web", dispatch: "/d", timeout: 3600 },
+      req: { cmd: "make", repo: "/r", surfaces: ["web"], dispatch: "/d", timeout: 3600 },
     });
     expect(parseArgs(["make", "/r", "web", "--run", "/d", "--timeout", "60"])).toEqual({
       ok: true,
-      req: { cmd: "make", repo: "/r", surface: "web", dispatch: "/d", timeout: 60 },
+      req: { cmd: "make", repo: "/r", surfaces: ["web"], dispatch: "/d", timeout: 60 },
+    });
+    expect(parseArgs(["make", "/r", "cli-examples", "browser-suite", "--run", "/d"])).toEqual({
+      ok: true,
+      req: {
+        cmd: "make",
+        repo: "/r",
+        surfaces: ["cli", "web"],
+        dispatch: "/d",
+        timeout: 3600,
+      },
     });
   });
 
@@ -628,6 +679,385 @@ describe("roleHarness", () => {
     expect(roleHarness({ team: {} }, "coachman_fallback", "synthesis")).toBe(null);
     expect(roleHarness(null, "coachman", "synthesis")).toBe(null);
     expect(roleHarness(config, "postmaster", "synthesis")).toBe(null);
+  });
+});
+
+describe("surfaceKind", () => {
+  test("both vocabularies denote their kind, the rest denote none", () => {
+    expect(surfaceKind("cli")).toBe("cli");
+    expect(surfaceKind("web")).toBe("web");
+    expect(surfaceKind("library")).toBe("library");
+    expect(surfaceKind("cli-examples")).toBe("cli");
+    expect(surfaceKind("browser-suite")).toBe("web");
+    expect(surfaceKind("web-journey")).toBe("web");
+    expect(surfaceKind("library-tests")).toBe("library");
+    expect(surfaceKind("telegraph")).toBe(null);
+    expect(surfaceKind("")).toBe(null);
+    expect(surfaceKind("constructor")).toBe(null);
+    expect(surfaceKind("toString")).toBe(null);
+    expect(surfaceKind("__proto__")).toBe(null);
+    expect(surfaceKind("hasOwnProperty")).toBe(null);
+  });
+});
+
+describe("orderKinds", () => {
+  test("dedups to canonical cli, web, library order", () => {
+    expect(orderKinds(["web", "cli"])).toEqual(["cli", "web"]);
+    expect(orderKinds(["library", "library", "cli"])).toEqual(["cli", "library"]);
+    expect(orderKinds([])).toEqual([]);
+  });
+});
+
+describe("renderTemplate", () => {
+  test("fills from explicit names and refuses leftovers", () => {
+    expect(renderTemplate("{{A}} and {{B}}", { A: "x", B: "y" })).toBe("x and y");
+    expect(() => renderTemplate("{{A}} {{NOPE}}", { A: "x" })).toThrow(
+      "unknown placeholder in the prompt template: {{NOPE}}",
+    );
+  });
+
+  test("a value copies literally, never rescanned", () => {
+    expect(renderTemplate("{{A}}", { A: "$& {{B}}" })).toBe("$& {{B}}");
+  });
+});
+
+describe("hasUpkeepLine", () => {
+  test("the line reads present exact near the top, even wrapped across lines", () => {
+    expect(hasUpkeepLine(`# Title\n\nParagraph.\n\n${UPKEEP_LINE}\n\n## Launch`)).toBe(true);
+    expect(hasUpkeepLine(UPKEEP_LINE.replace(/ /gu, "\n"))).toBe(true);
+  });
+
+  test("a changed case, a buried copy and a paraphrase read absent", () => {
+    expect(
+      hasUpkeepLine(
+        "A CHANGE which adds, changes or removes a feature updates that feature's page in the same change.",
+      ),
+    ).toBe(false);
+    expect(hasUpkeepLine(`${"filler\n".repeat(30)}${UPKEEP_LINE}`)).toBe(false);
+    expect(hasUpkeepLine("Keep the pages current when features change.")).toBe(false);
+    expect(hasUpkeepLine("")).toBe(false);
+  });
+});
+
+describe("indexNames", () => {
+  test("folder and prose together read named", () => {
+    expect(indexNames("- cli (verifier/cli/): command line", "cli")).toBe(true);
+    expect(indexNames("- WEB (verifier/web/): Web Pages", "web")).toBe(true);
+  });
+
+  test("a relative folder link reads named", () => {
+    expect(indexNames("- [cli](cli/) verifies the command line.", "cli")).toBe(true);
+    expect(indexNames("- [web](web/) verifies the web pages.", "web")).toBe(true);
+  });
+
+  test("a missing folder or prose reads unnamed", () => {
+    expect(indexNames("- cli: command line", "cli")).toBe(false);
+    expect(indexNames("- cli (verifier/cli/)", "cli")).toBe(false);
+    expect(indexNames("- [cli](cli/)", "cli")).toBe(false);
+    expect(indexNames("", "cli")).toBe(false);
+  });
+
+  test("a wrong folder with the prose elsewhere reads unnamed", () => {
+    expect(indexNames("- [cli](verifier/cli-extra/): command line", "cli")).toBe(false);
+    expect(
+      indexNames("- [cli](verifier/cli/): command line. See web pages at https://x/web/.", "web"),
+    ).toBe(false);
+    expect(
+      indexNames("- [cli](cli/): command line. Web pages (web/) are not covered here.", "web"),
+    ).toBe(false);
+  });
+
+  test("folder and prose on different lines read unnamed", () => {
+    expect(indexNames("- [cli](cli/)\n- the command line verifier", "cli")).toBe(false);
+  });
+});
+
+describe("proseList", () => {
+  test("joins the prose with commas", () => {
+    expect(proseList(["cli", "web"])).toBe("command line, web pages");
+    expect(proseList(["library"])).toBe("library interface");
+  });
+});
+
+describe("dirLines", () => {
+  test("one mapping line per kind", () => {
+    expect(dirLines(["cli", "web"])).toBe(
+      "- the command line (cli) verifier goes in verifier/cli/\n- the web pages (web) verifier goes in verifier/web/",
+    );
+  });
+});
+
+describe("unlistedSentence", () => {
+  test("none left out leaves no sentence", () => {
+    expect(unlistedSentence(["cli", "web", "library"])).toBe("");
+  });
+
+  test("one left out is named", () => {
+    expect(unlistedSentence(["cli", "web"])).toBe(
+      "- Make no verifier for the library interface. If you notice it while you work, leave it out.",
+    );
+  });
+
+  test("two left out share the sentence", () => {
+    expect(unlistedSentence(["web"])).toBe(
+      "- Make no verifier for the command line and the library interface. If you notice them while you work, leave them out.",
+    );
+  });
+});
+
+describe("joinBodies", () => {
+  test("numbers each body and separates with rules", () => {
+    expect(
+      joinBodies([
+        { kind: "cli", text: "CLI BODY" },
+        { kind: "web", text: "WEB BODY" },
+      ]),
+    ).toBe(
+      "---\n\n**Verifier 1 of 2: command line (cli).**\n\nCLI BODY\n\n---\n\n**Verifier 2 of 2: web pages (web).**\n\nWEB BODY",
+    );
+  });
+});
+
+describe("branchFileText", () => {
+  test("a committed file reads its text, the rest read null", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "note.md", "hi");
+      commitAll(repo, "first");
+      expect(branchFileText(repo, "main", "note.md")).toBe("hi");
+      expect(branchFileText(repo, "main", "missing.md")).toBe(null);
+      expect(branchFileText(repo, "nope", "note.md")).toBe(null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("addedPaths", () => {
+  test("lists paths added past the base, null for a bad ref", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "base");
+      const base = gitOrThrow(repo, "rev-parse", "HEAD").trim();
+      gitOrThrow(repo, "checkout", "-qb", "verify-cli-web");
+      writeRepoFile(repo, "verifier/README.md", "index\n");
+      writeRepoFile(repo, "README.md", "# app changed\n");
+      commitAll(repo, "session work");
+      expect(addedPaths(repo, base, "verify-cli-web")).toEqual(["verifier/README.md"]);
+      expect(addedPaths(repo, base, "nope")).toBe(null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("outsideAdded", () => {
+  test("flags added paths outside verifier/, besides the handover", () => {
+    expect(outsideAdded(["verifier/README.md", "HANDOVER.md"])).toEqual([]);
+    expect(outsideAdded(["verifier/cli/README.md", "verify-old/x.md"])).toEqual([
+      "verify-old/x.md",
+    ]);
+    expect(outsideAdded(["verifier/cli/README.md", "verifier-cli/README.md"])).toEqual([
+      "verifier-cli/README.md",
+    ]);
+    expect(outsideAdded(["notes.md"])).toEqual(["notes.md"]);
+  });
+});
+
+describe("addedUnder", () => {
+  test("keeps added paths under a directory", () => {
+    expect(
+      addedUnder(["verifier/web/README.md", "verifier/cli/README.md"], "verifier/web"),
+    ).toEqual(["verifier/web/README.md"]);
+    expect(addedUnder(["verifier/README.md"], "verifier/web")).toEqual([]);
+  });
+});
+
+describe("strayVerifierPaths", () => {
+  test("keeps added verifier paths outside the listed verifiers and the index", () => {
+    expect(
+      strayVerifierPaths(
+        [
+          "verifier/README.md",
+          "verifier/cli/README.md",
+          "verifier/library/README.md",
+          "verifier/api/README.md",
+          "verifier/notes.md",
+        ],
+        ["cli", "web"],
+      ).sort(),
+    ).toEqual(["verifier/api/README.md", "verifier/library/README.md", "verifier/notes.md"]);
+    expect(strayVerifierPaths(["verifier/README.md", "verifier/cli/x.md"], ["cli"])).toEqual([]);
+  });
+});
+
+describe("addedFeaturePages", () => {
+  test("counts added markdown pages besides the features index", () => {
+    expect(
+      addedFeaturePages(
+        ["verifier/cli/features/README.md", "verifier/cli/features/a.md", "verifier/cli/x.txt"],
+        "verifier/cli",
+      ),
+    ).toEqual(["verifier/cli/features/a.md"]);
+  });
+});
+
+function seedMultiBranch(
+  repo: string,
+  baseFiles: Record<string, string>,
+  branchFiles: Record<string, string>,
+): { base: string; branch: string } {
+  for (const [rel, text] of Object.entries(baseFiles)) writeRepoFile(repo, rel, text);
+  commitAll(repo, "base");
+  const base = gitOrThrow(repo, "rev-parse", "HEAD").trim();
+  gitOrThrow(repo, "checkout", "-qb", "verify-cli-web");
+  for (const [rel, text] of Object.entries(branchFiles)) writeRepoFile(repo, rel, text);
+  commitAll(repo, "session work");
+  return { base, branch: "verify-cli-web" };
+}
+
+function goodVerifiers(
+  kinds: ("cli" | "web" | "library")[] = ["cli", "web"],
+): Record<string, string> {
+  const prose: Record<string, string> = {
+    cli: "command line",
+    web: "web pages",
+    library: "library interface",
+  };
+  const files: Record<string, string> = {
+    "verifier/README.md": `# Verifiers\n\n${kinds
+      .map((k) => `- [${k}](${k}/) verifies the ${prose[k]}.`)
+      .join("\n")}\n`,
+    "HANDOVER.md": "proved both\n",
+  };
+  for (const kind of kinds) {
+    files[`verifier/${kind}/README.md`] = `# ${kind}\n\nDrives it.\n\n${UPKEEP_LINE}\n`;
+    files[`verifier/${kind}/features/README.md`] = "# features\n";
+    for (const page of ["a.md", "b.md", "c.md"]) {
+      files[`verifier/${kind}/features/${page}`] = "# f\n";
+    }
+  }
+  return files;
+}
+
+function checkBranch(
+  baseFiles: Record<string, string>,
+  branchFiles: Record<string, string>,
+  surfaces: ("cli" | "web" | "library")[],
+): () => void {
+  const dir = tempDir();
+  const repo = join(dir, "app");
+  initRepo(repo);
+  const { base, branch } = seedMultiBranch(repo, baseFiles, branchFiles);
+  return () => {
+    try {
+      checkMultiVerifiers(repo, branch, base, surfaces);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+}
+
+describe("checkMultiVerifiers", () => {
+  test("a branch adding two complete verifiers passes", () => {
+    expect(checkBranch({ "README.md": "# app\n" }, goodVerifiers(), ["cli", "web"])).not.toThrow();
+  });
+
+  test("a missing index fails", () => {
+    const files = goodVerifiers();
+    delete files["verifier/README.md"];
+    expect(checkBranch({ "README.md": "# app\n" }, files, ["cli", "web"])).toThrow();
+  });
+
+  test("a missing verifier README fails", () => {
+    const files = goodVerifiers();
+    delete files["verifier/cli/README.md"];
+    expect(checkBranch({ "README.md": "# app\n" }, files, ["cli", "web"])).toThrow();
+  });
+
+  test("a missing features index fails", () => {
+    const files = goodVerifiers();
+    delete files["verifier/cli/features/README.md"];
+    expect(checkBranch({ "README.md": "# app\n" }, files, ["cli", "web"])).toThrow();
+  });
+
+  test("a missing feature page fails", () => {
+    const files = goodVerifiers();
+    delete files["verifier/cli/features/c.md"];
+    expect(checkBranch({ "README.md": "# app\n" }, files, ["cli", "web"])).toThrow();
+  });
+
+  test("a missing upkeep line and a wrong index entry fail", () => {
+    const noUpkeep = goodVerifiers();
+    noUpkeep["verifier/cli/README.md"] = "# cli\n\nDrives it.\n";
+    expect(checkBranch({ "README.md": "# app\n" }, noUpkeep, ["cli", "web"])).toThrow(/upkeep/u);
+    const wrongIndex = goodVerifiers();
+    wrongIndex["verifier/README.md"] =
+      "# Verifiers\n\n- [cli](verifier/cli-extra/): command line.\n- [web](web/) verifies the web pages.\n";
+    expect(checkBranch({ "README.md": "# app\n" }, wrongIndex, ["cli", "web"])).toThrow(
+      /names no command line/u,
+    );
+  });
+
+  test("an added unlisted verifier fails, pre-existing content passes", () => {
+    const stray = goodVerifiers();
+    stray["verifier/library/README.md"] = "# library\n";
+    expect(checkBranch({ "README.md": "# app\n" }, stray, ["cli", "web"])).toThrow(
+      /unlisted library/u,
+    );
+    expect(
+      checkBranch(
+        { "README.md": "# app\n", "verifier/web/README.md": "# old web\n" },
+        goodVerifiers(["cli", "library"]),
+        ["cli", "library"],
+      ),
+    ).not.toThrow();
+  });
+
+  test("an unknown verifier folder and a stray index sibling fail", () => {
+    const api = goodVerifiers();
+    api["verifier/api/README.md"] = "# api\n";
+    expect(checkBranch({ "README.md": "# app\n" }, api, ["cli", "web"])).toThrow(/unlisted api/u);
+    const sibling = goodVerifiers();
+    sibling["verifier/notes.md"] = "stray\n";
+    expect(checkBranch({ "README.md": "# app\n" }, sibling, ["cli", "web"])).toThrow(
+      /unlisted notes\.md/u,
+    );
+  });
+
+  test("files added outside verifier/ fail, wherever they land", () => {
+    const top = goodVerifiers();
+    top["verifier-cli/README.md"] = "# stray\n";
+    expect(checkBranch({ "README.md": "# app\n" }, top, ["cli", "web"])).toThrow(
+      /outside verifier/u,
+    );
+    const nested = goodVerifiers();
+    nested["verify-app/extra.md"] = "stray\n";
+    expect(
+      checkBranch({ "README.md": "# app\n", "verify-app/README.md": "# old\n" }, nested, [
+        "cli",
+        "web",
+      ]),
+    ).toThrow(/outside verifier/u);
+  });
+
+  test("an unlistable comparison fails instead of passing", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      const { base } = seedMultiBranch(repo, { "README.md": "# app\n" }, goodVerifiers());
+      expect(() => checkMultiVerifiers(repo, "nope", base, ["cli", "web"])).toThrow(
+        /cannot be compared/u,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
