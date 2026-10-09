@@ -1266,6 +1266,61 @@ export const inspect = (repo: string, opts?: { storePath?: string }): Rec => {
 };
 
 // --- writes ----------------------------------------------------------------------------------------
+// The folder's own ignore rules: run records and drafts stay ignored whatever the
+// user answers. The person's settings file is never ignored here: setup offers to
+// have git ignore it, and only the user's yes adds that rule (ignoreSettings).
+const IGNORE_RECORDS = ["runs/", "clerk/", "project.toml", ".gitignore"] as const;
+
+const IGNORE_HEADER =
+  "# .postmaster/ holds this instance's settings and every run's full record.\n" +
+  "# Run records and drafts stay ignored. settings.toml is ignored only on the\n" +
+  "# user's yes, during setup. To share what a run requires of everyone,\n" +
+  "# commit project.toml with: git add -f .postmaster/project.toml\n";
+
+/** ruleMatches <rule> <path>: whether one ignore rule matches a path under
+ * .postmaster/. Enough of gitignore for the rules this file writes and the
+ * negations around them: a star matches all, a trailing slash matches the
+ * directory and all below it, `dir/**` matches all below it, and anything
+ * else matches that path. */
+const ruleMatches = (rule: string, path: string): boolean => {
+  if (rule === "*") return true;
+  if (rule.endsWith("/**")) {
+    const dir = rule.slice(0, -3);
+    return path === dir || path.startsWith(`${dir}/`);
+  }
+  if (rule.endsWith("/")) {
+    const dir = rule.slice(0, -1);
+    return path === dir || path.startsWith(`${dir}/`);
+  }
+  return path === rule || path.startsWith(`${rule}/`);
+};
+
+/** ignoredBy <rules> <path>: the last matching rule decides, negations not. */
+const ignoredBy = (rules: string[], path: string): boolean => {
+  let ignored = false;
+  for (const line of rules) {
+    if (line.startsWith("!")) {
+      if (ruleMatches(line.slice(1), path)) ignored = false;
+    } else if (ruleMatches(line, path)) {
+      ignored = true;
+    }
+  }
+  return ignored;
+};
+
+/** effectiveRules <text>: the ignore file's rules, blanks and comments out. */
+const effectiveRules = (text: string): string[] =>
+  pySplitLines(text)
+    .map((line) => pyTrim(line))
+    .filter((line) => line !== "" && !line.startsWith("#"));
+
+const RECORD_PROBES: Record<string, string> = {
+  "runs/": "runs/T-1/card.md",
+  "clerk/": "clerk/d/brief.md",
+  "project.toml": "project.toml",
+  ".gitignore": ".gitignore",
+};
+
 export const ensureIgnore = (repo: string, quiet = false): void => {
   const d = settingsDir(repo);
   mkdirSync(d, { recursive: true });
@@ -1273,23 +1328,45 @@ export const ensureIgnore = (repo: string, quiet = false): void => {
   if (isSymlink(ignore)) fail(`${ignore} must not be a symlink`);
   if (existsSync(ignore) && !isFile(ignore)) fail(`${ignore} is not a regular file`);
   const existing = existsSync(ignore) ? strictRead(ignore) : "";
-  // A bare star anywhere is not enough: a later negation (!settings.toml) re-includes
-  // what it ignored. The last effective rule decides, so it must be the star.
-  const effective = pySplitLines(existing)
-    .map((line) => pyTrim(line))
-    .filter((line) => line !== "" && !line.startsWith("#"));
-  if (effective.length === 0 || effective[effective.length - 1] !== "*") {
+  const effective = effectiveRules(existing);
+  // Append each record rule its probe shows missing; a path already ignored,
+  // by a star or by an earlier line, is left alone. No rule added here ever
+  // ignores the person's settings file.
+  const missing = IGNORE_RECORDS.filter(
+    (rule) => !ignoredBy(effective, RECORD_PROBES[rule] ?? rule),
+  );
+  if (missing.length > 0) {
     let prefix = existing;
     if (prefix !== "" && !prefix.endsWith("\n")) prefix += "\n";
-    if (prefix === "") {
-      prefix =
-        "# .postmaster/ holds this instance's settings and every run's full record.\n" +
-        "# Nothing in it is committed by default. To share what a run requires of\n" +
-        "# everyone, commit project.toml with: git add -f .postmaster/project.toml\n";
-    }
-    writeFileSync(ignore, `${prefix}*\n`);
+    if (prefix === "") prefix = IGNORE_HEADER;
+    writeFileSync(ignore, `${prefix}${missing.join("\n")}\n`);
   }
   if (!quiet) console.log(`project-settings: ensured ${ignore}`);
+};
+
+/** settingsIgnored <repo>: whether git ignores the person's settings file. A path
+ * git cannot place, or a git that fails, reads as not ignored. */
+export const settingsIgnored = (repo: string): boolean => {
+  const env: Record<string, string | undefined> = {};
+  for (const k of GIT_ENV_KEYS) env[k] = undefined;
+  const r = run(
+    "git",
+    ["-C", repo, "check-ignore", "-q", join(settingsDir(repo), "settings.toml")],
+    { env },
+  );
+  return r.code === 0;
+};
+
+/** ignoreSettings <repo>: ignore the person's settings file, on the user's yes.
+ * Setup asks; this applies. Idempotent: a file already ignored stays as it is. */
+export const ignoreSettings = (repo: string): void => {
+  ensureIgnore(repo, true);
+  const ignore = join(settingsDir(repo), ".gitignore");
+  const effective = effectiveRules(strictRead(ignore));
+  if (ignoredBy(effective, "settings.toml")) return;
+  let prefix = strictRead(ignore);
+  if (prefix !== "" && !prefix.endsWith("\n")) prefix += "\n";
+  writeFileSync(ignore, `${prefix}settings.toml\n`);
 };
 
 export const writeProfile = (repo: string, layer: string, source: string): void => {

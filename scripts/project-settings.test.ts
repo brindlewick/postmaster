@@ -122,9 +122,17 @@ describe("missing profiles and ensure", () => {
 
   test("ensure creates the folder ignore without prompting for settings", () => {
     ensureIgnore(repo);
-    expect(readFileSync(join(repo, ".postmaster", ".gitignore"), "utf8").endsWith("*\n")).toBe(
-      true,
-    );
+    const created = readFileSync(join(repo, ".postmaster", ".gitignore"), "utf8");
+    const rules = created
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "" && !line.startsWith("#"));
+    expect(rules).toContain("runs/");
+    expect(rules).toContain("clerk/");
+    expect(rules).toContain("project.toml");
+    expect(rules).toContain(".gitignore");
+    expect(rules).not.toContain("*");
+    expect(rules).not.toContain("settings.toml");
     expect(existsSync(join(repo, ".postmaster", "settings.toml"))).toBe(false);
   });
 
@@ -133,20 +141,21 @@ describe("missing profiles and ensure", () => {
     ensureIgnore(repo);
     const kept = readFileSync(join(repo, ".postmaster", ".gitignore"), "utf8");
     expect(kept.startsWith("# existing local rules\n")).toBe(true);
-    expect(kept.endsWith("*\n")).toBe(true);
+    expect(kept.includes("!keep-me\n")).toBe(true);
+    expect(kept.includes("\nruns/\n")).toBe(true);
+    expect(kept.endsWith(".gitignore\n")).toBe(true);
   });
 
-  test("ensure re-ignores a folder a negation had re-included, keeping its rules", () => {
+  test("ensure leaves a negation that re-included the settings file alone", () => {
     const negated = at("negated");
     mkdirSync(negated, { recursive: true });
     ensureIgnore(negated);
     write(join(negated, ".postmaster", ".gitignore"), "*\n!settings.toml\n");
     ensureIgnore(negated);
-    const repaired = readFileSync(join(negated, ".postmaster", ".gitignore"), "utf8");
-    expect(repaired.endsWith("*\n")).toBe(true);
-    expect(repaired.includes("!settings.toml\n")).toBe(true);
+    const kept = readFileSync(join(negated, ".postmaster", ".gitignore"), "utf8");
+    expect(kept).toBe("*\n!settings.toml\n");
     expect(git(["init", "-q", negated])).toBe(0);
-    expect(git(["-C", negated, "check-ignore", "-q", ".postmaster/settings.toml"])).toBe(0);
+    expect(git(["-C", negated, "check-ignore", "-q", ".postmaster/settings.toml"])).toBe(1);
     expect(git(["-C", negated, "check-ignore", "-q", ".postmaster/runs/T-1/card.md"])).toBe(0);
   });
 
@@ -188,10 +197,12 @@ describe("shared and local profiles", () => {
     expect(shared.shared_present).toBe(true);
     expect(JSON.stringify((shared.project as Rec).default_turnpikes)).toBe('["bug"]');
     expect((shared.sources as Rec)["project.default_turnpikes"]).toBe("shared");
-    expect(readFileSync(join(postmaster, ".gitignore"), "utf8").endsWith("*\n")).toBe(true);
+    const ignore = readFileSync(join(postmaster, ".gitignore"), "utf8");
+    expect(ignore.includes("\nruns/\n")).toBe(true);
+    expect(ignore.includes("settings.toml")).toBe(false);
     expect(repoInit).toBe(0);
     expect(sharedIgnored).toBe(0);
-    expect(localIgnored).toBe(0);
+    expect(localIgnored).toBe(1);
     expect(runIgnored).toBe(0);
   });
 
