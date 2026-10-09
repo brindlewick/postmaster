@@ -765,8 +765,10 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    worktree with `git -C <repo> worktree remove .worktrees/<TICKET>`, never with force unless
    the tree is clean and the card confirmed it, and log `teardown`. The workhorse copies are
    the coachman's; if any survive, remove each with `<tool>/scripts/run cut-scratch --remove
-   <repo> <folder>` after preserving any stray file into `<dispatch>/stray/`. Teardown uses the
-   live checkout's run host, never the run's pinned one: it
+   <repo> <folder>` after preserving any stray file into `<dispatch>/stray/`. A survivor from a
+   run dispatched before workhorse copies is a worktree on its `wb/` branch, which `--remove`
+   refuses; remove those with `git -C <repo> worktree remove <folder>` instead. Teardown uses
+   the live checkout's run host, never the run's pinned one: it
    must work even when the pin is gone or fails its check.
 3. **Close the run** with `<tool>/scripts/run stage <dispatch> done postmaster`, then release the
    run's pinned tool: `<tool>/scripts/run run-meta release <dispatch>`. It removes the checkout
@@ -797,7 +799,10 @@ word, stop launches in every folder the run created with `<tool>/scripts/run hos
 `<tool>/scripts/run stage <dispatch> abandoned postmaster`. Close all of its spaces with
 `<tool>/scripts/run host close-run <dispatch>` before removing each folder after preserving
 stray files, a workhorse copy the way a reviewer's is removed, with
-`<tool>/scripts/run cut-scratch --remove <repo> <folder>`. Release the run's pinned tool
+`<tool>/scripts/run cut-scratch --remove <repo> <folder>`. A workhorse folder from a run
+dispatched before workhorse copies is a worktree on its `wb/` branch, which `--remove`
+refuses; remove those with `git -C <repo> worktree remove <folder>` instead. Release the
+run's pinned tool
 (`<tool>/scripts/run run-meta release <dispatch>`, as
 Stage G step 3 does; log the result as `teardown`), and move the ticket back to todo or to
 cancelled as the user says. The dispatch directory stays. Then put the run's tool faults to the
