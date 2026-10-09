@@ -871,9 +871,9 @@ if (a[0] === "api" && a[1] === "graphql") {
       const bLine = lineOf(out, B);
       check(
         "a ticket holding the id in its title or its body is known; one only like it is not; a draft already shown is asked",
-        / known #57 \(open\)$/u.test(aLine) &&
+        aLine.endsWith(" known #57 (open)") &&
           / asked, like #57 {2}tool-faults\//u.test(cLine) &&
-          / known #58 \(open\)$/u.test(d1Line) &&
+          d1Line.endsWith(" known #58 (open)") &&
           / asked {2}tool-faults\//u.test(bLine),
         out,
       );
@@ -1013,7 +1013,7 @@ if (a[0] === "api" && a[1] === "graphql") {
       const cLine = lineOf(out, C);
       check(
         "in a later run, a fault a comment names on any ticket is known there",
-        / known #12 \(closed\)$/u.test(cLine),
+        cLine.endsWith(" known #12 (closed)"),
         out,
       );
     }
