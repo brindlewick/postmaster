@@ -626,12 +626,7 @@ test("a pattern-code line with a literal value scans instead of exempting", () =
   // regex operators is a literal value and must flag wherever it sits; the
   // round-1 operator shape above stays exempt.
   expect(rules(`const EMAIL = /${email()}/;`)).toContain("email");
-  const call = joined(
-    "scan(new Reg",
-    'Exp(P("email", "search", "x", "", "',
-    email(),
-    '")))',
-  );
+  const call = joined("scan(new Reg", 'Exp(P("email", "search", "x", "", "', email(), '")))');
   expect(rules(call)).toContain("email");
 });
 
