@@ -174,7 +174,7 @@ describe("C2: the project step offers settings or the global config as it is", (
   test("project settings that leave the project short route back to the project step", () => {
     const s = stage({
       config: `${LANES}\n${TEAM_NO_PM}`,
-      settings: `max_runs = 5\n`,
+      settings: `[team]\nmax_runs = 5\n`,
     });
     try {
       const r = setupNext(s.repo, s.configPath, s.bin);
@@ -259,7 +259,10 @@ describe("C3: project settings hold only what the user changed", () => {
       expect(written).not.toContain("confine");
       const merged = projectSettings(s.repo, s.configPath, s.bin, ["effective", s.repo]);
       expect(merged.code).toBe(0);
-      const parsed = JSON.parse(merged.out) as Record<string, Record<string, Record<string, string>>>;
+      const parsed = JSON.parse(merged.out) as Record<
+        string,
+        Record<string, Record<string, string>>
+      >;
       expect(parsed.lanes?.alpha?.model).toBe("model-x");
       expect(parsed.lanes?.beta?.model).toBe("model-b");
       expect(readFileSync(s.configPath, "utf8")).toBe(config);
@@ -355,7 +358,7 @@ describe("C3: project settings hold only what the user changed", () => {
   test("project setup keeps an existing file unless overwrite=yes", () => {
     const s = stage({
       config: `${LANES}\n${TEAM_FULL}`,
-      settings: "max_runs = 5\n",
+      settings: "[team]\nmax_runs = 5\n",
     });
     try {
       const file = answers(s.dir, "one", "lane.alpha.model=model-x");
@@ -363,7 +366,7 @@ describe("C3: project settings hold only what the user changed", () => {
       expect(kept.code).toBe(1);
       expect(`${kept.out}${kept.err}`).toContain("settings.toml");
       expect(readFileSync(join(s.repo, ".postmaster", "settings.toml"), "utf8")).toBe(
-        "max_runs = 5\n",
+        "[team]\nmax_runs = 5\n",
       );
       const fileYes = answers(s.dir, "yes", "lane.alpha.model=model-x\noverwrite=yes");
       const replaced = setupProject(s.repo, s.configPath, s.bin, ["--answers", fileYes]);
@@ -381,7 +384,7 @@ describe("C4: setup offers to have git ignore the project's settings", () => {
   test("unignored settings report settings_ignored=no", () => {
     const s = stage({
       config: `${LANES}\n${TEAM_NO_PM}`,
-      settings: "max_runs = 5\n",
+      settings: "[team]\nmax_runs = 5\n",
     });
     try {
       const r = setupNext(s.repo, s.configPath, s.bin);
@@ -421,7 +424,7 @@ describe("C4: setup offers to have git ignore the project's settings", () => {
   test("already ignored settings report settings_ignored=yes", () => {
     const s = stage({
       config: `${LANES}\n${TEAM_NO_PM}`,
-      settings: "max_runs = 5\n",
+      settings: "[team]\nmax_runs = 5\n",
     });
     try {
       writeRepoFile(s.repo, ".postmaster/.gitignore", "runs/\nsettings.toml\n");
@@ -479,7 +482,7 @@ describe("C5: nothing ignores the settings without the user's yes", () => {
       expect(checkIgnore(s.repo, join(".postmaster", "runs", "1", "brief.md")).code).toBe(0);
       expect(checkIgnore(s.repo, join(".postmaster", "clerk", "d", "brief.md")).code).toBe(0);
       expect(checkIgnore(s.repo, join(".postmaster", "project.toml")).code).toBe(0);
-      writeRepoFile(s.repo, ".postmaster/settings.toml", "max_runs = 5\n");
+      writeRepoFile(s.repo, ".postmaster/settings.toml", "[team]\nmax_runs = 5\n");
       expect(checkIgnore(s.repo, join(".postmaster", "settings.toml")).code).toBe(1);
     } finally {
       cleanup(s);
@@ -489,7 +492,7 @@ describe("C5: nothing ignores the settings without the user's yes", () => {
   test("ensure never adds a rule that ignores the settings", () => {
     const s = stage({ config: `${LANES}\n${TEAM_FULL}` });
     try {
-      writeRepoFile(s.repo, ".postmaster/settings.toml", "max_runs = 5\n");
+      writeRepoFile(s.repo, ".postmaster/settings.toml", "[team]\nmax_runs = 5\n");
       writeRepoFile(s.repo, ".postmaster/.gitignore", "*\n!settings.toml\n");
       const before = readFileSync(join(s.repo, ".postmaster", ".gitignore"), "utf8");
       const ensured = projectSettings(s.repo, s.configPath, s.bin, ["ensure", s.repo]);
