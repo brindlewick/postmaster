@@ -165,7 +165,12 @@ declare const Bun: {
   sleep(ms: number): Promise<void>;
   hash(data: string | Uint8Array): string;
   Transpiler: {
-    new (options: { loader: string }): { transformSync(code: string): string };
+    new (options: {
+      loader: string;
+      minifyWhitespace?: boolean;
+    }): {
+      transformSync(code: string): string;
+    };
   };
   serve(options: { port: number; fetch(req: ServeRequest): Response | Promise<Response> }): {
     port: number;
