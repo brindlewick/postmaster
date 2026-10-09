@@ -637,3 +637,21 @@ test("successive bare key fields each flag key: no lastIndex leaks between lines
   expect(rules(`mail: ${email()}`)).toContain("key");
   expect(rules(`email: ${email()}`)).toContain("key");
 });
+
+test("a markdown code span flags beside a template marker anywhere else", () => {
+  // Review round 11 (bug-61): odd backticks before the path plus ${ anywhere
+  // on the line skipped it, so appending ${x} published a spanned path. Only
+  // a marker inside the same span reads as a template literal now.
+  const spanned = joined("see `", privatePath(), "` and ", "${x}");
+  expect(rules(spanned)).toContain("private-path");
+  const opposite = joined("export X=", "${Y}", " and see `", privatePath(), "`");
+  expect(rules(opposite)).toContain("private-path");
+  const plain = joined("see `", privatePath(), "` alone");
+  expect(rules(plain)).toContain("private-path");
+  const literal = joined("const p = `/home/", "bluejay", "/${dir}/x`;");
+  expect(rules(literal)).not.toContain("private-path");
+  const unclosed = joined("take `", privatePath(), " with ", "${y}");
+  expect(rules(unclosed)).not.toContain("private-path");
+  const composed = joined("open ", "/home/", "bluejay", "$suffix", " now");
+  expect(rules(composed)).not.toContain("private-path");
+});
