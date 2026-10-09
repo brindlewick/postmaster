@@ -2,7 +2,14 @@
 // detection and the wall scan. The live session stays out; acceptance-323 covers the
 // command boundary as a subprocess.
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitAll, gitOrThrow, initRepo, RUN, writeRepoFile } from "./acceptance-323.ts";
@@ -28,13 +35,16 @@ import {
   defaultLanding,
   dirLines,
   failureOutcome,
+  featurePageNames,
   handoverFresh,
   hasUpkeepLine,
   indexNames,
   isSurface,
   joinBodies,
+  kindProse,
   landTarget,
   lastLine,
+  listVerifiers,
   mergeAuthorityOf,
   normalizeFolder,
   orderKinds,
@@ -50,12 +60,14 @@ import {
   refuseLine,
   remoteFromSymbolicRef,
   removeProvisioning,
+  renderListing,
   renderPrompt,
   renderTemplate,
   repoTop,
   roleHarness,
   scrubGitEnv,
   strayVerifierPaths,
+  surfaceFromReadme,
   surfaceKind,
   surfaceProse,
   timeoutMs,
@@ -1480,5 +1492,187 @@ describe("acceptLine and refuseLine", () => {
     expect(refuseLine("verify-x", "no proven verifier (none named)")).toBe(
       "refuse: verify-x lands nothing: no proven verifier (none named)",
     );
+  });
+});
+
+describe("listArgs", () => {
+  test("list takes a repo alone", () => {
+    expect(parseArgs(["list", "/r"])).toEqual({ ok: true, req: { cmd: "list", repo: "/r" } });
+  });
+
+  test("list without a repo or with a third word fails", () => {
+    expect(parseArgs(["list"])).toEqual({ ok: false, error: "list takes a repo" });
+    expect(parseArgs(["list", "/r", "cli"])).toEqual({ ok: false, error: "list takes a repo" });
+  });
+});
+
+describe("kindProse", () => {
+  test("known kinds read in prose, unknown kinds read null", () => {
+    expect(kindProse("cli")).toBe("command line");
+    expect(kindProse("web")).toBe("web pages");
+    expect(kindProse("library")).toBe("library interface");
+    expect(kindProse("telegraph")).toBeNull();
+  });
+});
+
+describe("surfaceFromReadme", () => {
+  test("the H1 prose names the surface", () => {
+    expect(surfaceFromReadme("# todo on the command line\n")).toBe("command line");
+    expect(surfaceFromReadme("# Driving the web pages\n")).toBe("web pages");
+    expect(surfaceFromReadme("# Notes on the library interface\n")).toBe("library interface");
+  });
+
+  test("the earliest phrase wins over a later aside", () => {
+    expect(surfaceFromReadme("For the web pages, unlike the command line below")).toBe("web pages");
+    expect(surfaceFromReadme("On the command line, never the web pages")).toBe("command line");
+  });
+
+  test("a short token alone names its surface", () => {
+    expect(surfaceFromReadme("Run `bun src/cli.ts` with a fresh file.\n")).toBe("command line");
+  });
+
+  test("a token inside a longer word names nothing", () => {
+    expect(surfaceFromReadme("Click the button twice.\n")).toBeNull();
+  });
+
+  test("a bare library names nothing: it is usually the project's own code", () => {
+    expect(surfaceFromReadme("Driven through the project's own library.\n")).toBeNull();
+  });
+
+  test("past the head, and an empty file, name nothing", () => {
+    const buried = `${"filler\n".repeat(30)}on the command line\n`;
+    expect(surfaceFromReadme(buried)).toBeNull();
+    expect(surfaceFromReadme("")).toBeNull();
+  });
+});
+
+describe("featurePageNames", () => {
+  test("markdown besides the index, sorted", () => {
+    expect(featurePageNames(["list.md", "README.md", "helper.ts", "add.md"])).toEqual([
+      "add.md",
+      "list.md",
+    ]);
+    expect(featurePageNames(["README.md"])).toEqual([]);
+  });
+});
+
+describe("renderListing", () => {
+  test("no verifiers print the none line", () => {
+    expect(renderListing({ indexes: [], verifiers: [] })).toBe("verifiers: none");
+  });
+
+  test("one verifier prints its block under the index", () => {
+    expect(
+      renderListing({
+        indexes: ["verifier/README.md"],
+        verifiers: [
+          {
+            folder: "verifier/cli",
+            surface: "command line",
+            pages: ["verifier/cli/features/add.md", "verifier/cli/features/list.md"],
+          },
+        ],
+      }),
+    ).toBe(
+      [
+        "index: verifier/README.md",
+        "verifier: verifier/cli",
+        "surface: command line",
+        "features: verifier/cli/features/add.md verifier/cli/features/list.md",
+      ].join("\n"),
+    );
+  });
+
+  test("a verifier without pages prints features none", () => {
+    expect(
+      renderListing({
+        indexes: ["verify-app/README.md"],
+        verifiers: [{ folder: "verify-app", surface: "command line", pages: [] }],
+      }),
+    ).toContain("features: none");
+  });
+});
+
+describe("listVerifiers", () => {
+  const plant = (root: string, rel: string, text: string): void => {
+    const target = join(root, rel);
+    mkdirSync(join(target, ".."), { recursive: true });
+    writeFileSync(target, text);
+  };
+
+  test("multi: the index with one verifier per folder", () => {
+    const root = tempDir();
+    try {
+      plant(root, "verifier/README.md", "# Verifiers\n");
+      plant(root, "verifier/cli/README.md", "# todo on the command line\n");
+      plant(root, "verifier/cli/features/add.md", "# add\n");
+      plant(root, "verifier/cli/features/README.md", "# features\n");
+      expect(listVerifiers(root)).toEqual({
+        indexes: ["verifier/README.md"],
+        verifiers: [
+          {
+            folder: "verifier/cli",
+            surface: "command line",
+            pages: ["verifier/cli/features/add.md"],
+          },
+        ],
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("multi without the index: each verifier README is the read-first entry", () => {
+    const root = tempDir();
+    try {
+      plant(root, "verifier/cli/README.md", "# todo on the command line\n");
+      expect(listVerifiers(root)).toEqual({
+        indexes: ["verifier/cli/README.md"],
+        verifiers: [{ folder: "verifier/cli", surface: "command line", pages: [] }],
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("single: a verify- folder with a README", () => {
+    const root = tempDir();
+    try {
+      plant(root, "verify-app/README.md", "Run `bun src/cli.ts`.\n");
+      plant(root, "verify-app/features/add.md", "# add\n");
+      expect(listVerifiers(root)).toEqual({
+        indexes: ["verify-app/README.md"],
+        verifiers: [
+          {
+            folder: "verify-app",
+            surface: "command line",
+            pages: ["verify-app/features/add.md"],
+          },
+        ],
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a surface the README never states reads unstated", () => {
+    const root = tempDir();
+    try {
+      plant(root, "verify-app/README.md", "# Notes\n\nDrive it somehow.\n");
+      expect(listVerifiers(root)?.verifiers[0]?.surface).toBe("unstated");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a verify- file, a README-less folder and a bare tree hold nothing", () => {
+    const root = tempDir();
+    try {
+      plant(root, "verify-notes.txt", "not a verifier\n");
+      mkdirSync(join(root, "verify-empty"));
+      expect(listVerifiers(root)).toEqual({ indexes: [], verifiers: [] });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
