@@ -94,6 +94,20 @@ interface TmuxStubState {
   sessions: string[];
   windows: Record<string, TmuxWindow>;
 }
+// Entries of the stub's worktree list.
+interface WtEntry {
+  path: string;
+  is_linked_worktree: boolean;
+  open_workspace_id?: string;
+}
+interface WtSource {
+  repo_root: string;
+  repo_name: string;
+  source_workspace_id?: string;
+}
+// A stub store reads a partial fallback and answers a full state.
+function json(path: string, fallback: Partial<HerdrStubState>): HerdrStubState;
+function json(path: string, fallback: Partial<TmuxStubState>): TmuxStubState;
 function json<T>(path: string, fallback: unknown): T {
   try {
     return JSON.parse(readFileSync(path, "utf8")) as T;
@@ -232,7 +246,7 @@ function herdrStubInner(args: string[], stateDir: string): void {
     throw new StubFail(2);
   }
   const path = join(stateDir, "herdr.json");
-  const st = json<HerdrStubState>(path, {
+  const st = json(path, {
     n: 0,
     spaces: {},
     panes: {},
@@ -257,17 +271,11 @@ function herdrStubInner(args: string[], stateDir: string): void {
       .filter(Boolean)
       .map((block) => {
         const worktreePath = resolve(block.split("\n", 1)[0]!.slice(9));
-        const entry: { path: string; is_linked_worktree: boolean; open_workspace_id?: string } = {
-          path: worktreePath,
-          is_linked_worktree: worktreePath !== root,
-        };
+        const entry: WtEntry = { path: worktreePath, is_linked_worktree: worktreePath !== root };
         if (st.open[worktreePath]) entry.open_workspace_id = st.open[worktreePath];
         return entry;
       });
-    const source: { repo_root: string; repo_name: string; source_workspace_id?: string } = {
-      repo_root: root,
-      repo_name: basename(root),
-    };
+    const source: WtSource = { repo_root: root, repo_name: basename(root) };
     if (st.open[root]) source.source_workspace_id = st.open[root];
     out({ source, worktrees });
     return;
@@ -464,7 +472,7 @@ function tmuxStub(args: string[]): void {
 function tmuxStubInner(args: string[], stateDir: string): void {
   writeFileSync(join(stateDir, "tmux.calls"), `${args.join("\t")}\n`, { flag: "a" });
   const path = join(stateDir, "tmux.json");
-  const st = json<TmuxStubState>(path, { n: 0, sessions: [], windows: {} });
+  const st = json(path, { n: 0, sessions: [], windows: {} });
   const fmt = opt(args, "-F") ?? "";
   const flag = (name: string) => args.includes(name);
   const stateFlag = (name: string): boolean => existsSync(join(stateDir, name));
@@ -927,7 +935,7 @@ function resetHarness(root: string): void {
 function updateHerdrJson(root: string, fn: (st: HerdrStubState) => void): void {
   withStubLock(join(root, "stub"), () => {
     const path = join(root, "stub", "herdr.json");
-    const st = json<HerdrStubState>(path, { spaces: {}, panes: {}, tabs: {}, open: {} });
+    const st = json(path, { spaces: {}, panes: {}, tabs: {}, open: {} });
     fn(st);
     save(path, st);
   });
@@ -935,7 +943,7 @@ function updateHerdrJson(root: string, fn: (st: HerdrStubState) => void): void {
 function updateTmuxJson(root: string, fn: (st: TmuxStubState) => void): void {
   withStubLock(join(root, "stub"), () => {
     const path = join(root, "stub", "tmux.json");
-    const st = json<TmuxStubState>(path, { sessions: [], windows: {} });
+    const st = json(path, { sessions: [], windows: {} });
     fn(st);
     save(path, st);
   });
@@ -1884,11 +1892,7 @@ export async function runControls(): Promise<number> {
       herdrRun.out + herdrRun.err,
     );
     const pane = place?.[3] ?? "";
-    const state = json<HerdrStubState>(join(stub, "herdr.json"), {
-      spaces: {},
-      panes: {},
-      open: {},
-    });
+    const state = json(join(stub, "herdr.json"), { spaces: {}, panes: {}, open: {} });
     const spaceId = place?.[1] ?? "";
     const worktree = join(f.repo, ".worktrees/T-1-luna");
     const listedCalls = readCalls("herdr");
@@ -1975,7 +1979,7 @@ export async function runControls(): Promise<number> {
     const paneHasNoBun =
       exec("bash", ["-c", "command -v bun"], { env: { PATH: paths.paneNoBun } }).code !== 0;
     const paneText = existsSync(noBunPaneOut) ? readFileSync(noBunPaneOut, "utf8") : "";
-    const runningHerdr = json<HerdrStubState>(join(stub, "herdr.json"), { panes: {} });
+    const runningHerdr = json(join(stub, "herdr.json"), { panes: {} });
     const liveHerdrCalls = readCalls("herdr");
     await pass(
       "with no Bun in its PATH, the Herdr pane runs the launch, shows output, and stays open",
@@ -1992,18 +1996,14 @@ export async function runControls(): Promise<number> {
     );
     writeFileSync(join(logs, "h-bunless.go"), "");
     await marker(markerPath("h-bunless"), 15);
-    for (
-      let i = 0;
-      i < 40 && noBunPane in json<HerdrStubState>(join(stub, "herdr.json"), { panes: {} }).panes;
-      i++
-    )
+    for (let i = 0; i < 40 && noBunPane in json(join(stub, "herdr.json"), { panes: {} }).panes; i++)
       await sleep(50);
     const doneHerdrCalls = readCalls("herdr");
     await pass(
       "the Herdr pane closes after the launch marker lands",
       () =>
         existsSync(markerPath("h-bunless")) &&
-        !(noBunPane in json<HerdrStubState>(join(stub, "herdr.json"), { panes: {} }).panes) &&
+        !(noBunPane in json(join(stub, "herdr.json"), { panes: {} }).panes) &&
         doneHerdrCalls.includes(`pane\trelease-agent\t${noBunPane}`),
     );
     const secondHerdr = execHost(
@@ -2143,7 +2143,7 @@ export async function runControls(): Promise<number> {
       "a space run host opened, its launches done, is closed",
       () =>
         closedHerdr.code === 0 &&
-        (json<HerdrStubState>(join(stub, "herdr.json"), { open: {} }).open[worktree] ?? "") === "",
+        (json(join(stub, "herdr.json"), { open: {} }).open[worktree] ?? "") === "",
       closedHerdr.err,
     );
     const ownClose = execHost(["close", f.repo], stubs, root);
@@ -2152,7 +2152,7 @@ export async function runControls(): Promise<number> {
       () => ownClose.code === 2 && ownClose.err.includes("own checkout"),
     );
     const herdrStatePath = join(stub, "herdr.json");
-    const currentState = json<HerdrStubState>(herdrStatePath, {
+    const currentState = json(herdrStatePath, {
       n: 0,
       spaces: {},
       panes: {},
@@ -2237,8 +2237,8 @@ export async function runControls(): Promise<number> {
     await pass(
       "run host marks that space as its own",
       () =>
-        json<HerdrStubState>(join(stub, "herdr.json"), { spaces: {} }).spaces[cloneSpace]?.tokens
-          ?.postmaster === "opened",
+        json(join(stub, "herdr.json"), { spaces: {} }).spaces[cloneSpace]?.tokens?.postmaster ===
+        "opened",
     );
     await marker(markerPath("c1"));
     const cloneAgain = execHost(
@@ -2261,7 +2261,7 @@ export async function runControls(): Promise<number> {
       "close shuts it",
       () =>
         cloneClose.code === 0 &&
-        (json<HerdrStubState>(join(stub, "herdr.json"), { open: {} }).open[f.clone] ?? "") === "",
+        (json(join(stub, "herdr.json"), { open: {} }).open[f.clone] ?? "") === "",
       cloneClose.err,
     );
     const plain = join(root, "plain");
@@ -2284,11 +2284,7 @@ export async function runControls(): Promise<number> {
     await pass(
       "a plain clone is no scratch: close removes its finished launch and preserves the user's tab",
       () => {
-        const st = json<HerdrStubState>(join(stub, "herdr.json"), {
-          spaces: {},
-          panes: {},
-          tabs: {},
-        });
+        const st = json(join(stub, "herdr.json"), { spaces: {}, panes: {}, tabs: {} });
         const tabs = st.spaces[plainSpace]?.tabs ?? [];
         return (
           calls(root, "herdr").some(
@@ -2335,7 +2331,7 @@ export async function runControls(): Promise<number> {
       i++
     )
       await sleep(50);
-    const liveTmuxState = json<TmuxStubState>(join(stub, "tmux.json"), { windows: {} });
+    const liveTmuxState = json(join(stub, "tmux.json"), { windows: {} });
     const liveTmuxPane = readFileSync(livePaneOut, "utf8");
     await pass(
       "a live launch keeps its tmux window open and marked running while its output is shown",
@@ -2349,13 +2345,9 @@ export async function runControls(): Promise<number> {
     );
     writeFileSync(join(logs, "t-live.go"), "");
     await marker(markerPath("t-live"), 15);
-    for (
-      let i = 0;
-      i < 40 && "@1" in json<TmuxStubState>(join(stub, "tmux.json"), { windows: {} }).windows;
-      i++
-    )
+    for (let i = 0; i < 40 && "@1" in json(join(stub, "tmux.json"), { windows: {} }).windows; i++)
       await sleep(50);
-    const doneTmuxState = json<TmuxStubState>(join(stub, "tmux.json"), { windows: {} });
+    const doneTmuxState = json(join(stub, "tmux.json"), { windows: {} });
     await pass(
       "the tmux window is marked done and closes after the launch ends",
       () =>
@@ -2449,7 +2441,7 @@ export async function runControls(): Promise<number> {
       { POSTMASTER_HOST: "tmux" },
     );
     await marker(markerPath("t3"));
-    const tmuxState = json<TmuxStubState>(join(stub, "tmux.json"), { sessions: [], windows: {} });
+    const tmuxState = json(join(stub, "tmux.json"), { sessions: [], windows: {} });
     const cloneWindow = Object.values(tmuxState.windows).some(
       (window) =>
         window.session === `postmaster-${basename(f.repo)}` &&
@@ -2525,14 +2517,8 @@ export async function runControls(): Promise<number> {
       const lunaReal = realpathSync(luna);
       const solReal = realpathSync(sol);
       const herdrState = () =>
-        json<HerdrStubState>(join(stub, "herdr.json"), {
-          spaces: {},
-          panes: {},
-          tabs: {},
-          open: {},
-        });
-      const tmuxState = () =>
-        json<TmuxStubState>(join(stub, "tmux.json"), { sessions: [], windows: {} });
+        json(join(stub, "herdr.json"), { spaces: {}, panes: {}, tabs: {}, open: {} });
+      const tmuxState = () => json(join(stub, "tmux.json"), { sessions: [], windows: {} });
       const resumeScript = join(f.caller, "resume.sh");
 
       console.log("completion cleanup controls, Herdr (stub)");
