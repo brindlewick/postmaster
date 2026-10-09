@@ -119,3 +119,7 @@ holds = "the run root and the worktree exclude the runbooks invoke, beside the p
 [[files]]
 path = "scripts/aftercare.ts"
 holds = "the run's cleanup: which folders go, how they are saved, the closing steps and the summary"
+
+[[files]]
+path = "scripts/take-in.ts"
+holds = "the take-in step: quiescence and commit identity before synthesis"
