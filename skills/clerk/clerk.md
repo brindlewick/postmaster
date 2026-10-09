@@ -119,7 +119,8 @@ which records the sign-off and queues the ticket the same way. Pass `--labels` o
 label, each flag one whole name; a lone flag with a comma is refused as ambiguous.
 
 Tell the user the ticket is ready and the postmaster will pick it up when a run slot is free. They
-do not need to ask the postmaster again.
+do not need to ask the postmaster again. The mark closes this session once your turn ends, so say
+goodbye briefly and start nothing new: the tab closes itself.
 
 ## Safety
 

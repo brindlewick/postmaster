@@ -660,7 +660,8 @@ missed.
    "<text>"` prints its plan and changes nothing; read it, then run the same command
    without `--dry-run`. The command saves each run folder's leftovers into
    `<dispatch>/stray/`, closes the folder's windows, removes the folder, stops the
-   preview, closes the run's windows, writes the closing line, moves the ticket to done
+   preview, stops a fixture copy's root launches, closes the run's windows, writes
+   the closing line, moves the ticket to done
    (leaving a cancelled ticket as it is) and posts the closing comment, marks the run done
    (stage timings come from `actions.jsonl`; never write them by hand) and releases its
    pinned tool, logging every action as it happens. On exit 2 or 3, do the next step it
@@ -749,7 +750,8 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
 
 **Abandoning a run** happens only on the user's word for that run: log `note` with the
 word, stop launches in every worktree the run created with `<tool>/scripts/run host stop-run
-<dispatch>` while the run still counts as in flight and holds its pin, then set the stage with
+<dispatch>` while the run still counts as in flight and holds its pin — on a fixture copy run
+that from outside the copy, since `stop` refuses from inside it — then set the stage with
 `<tool>/scripts/run stage <dispatch> abandoned postmaster`. Close all of its spaces with
 `<tool>/scripts/run host close-run <dispatch>` before removing each worktree after preserving
 stray files. Release the run's pinned tool (`<tool>/scripts/run run-meta release <dispatch>`, as
