@@ -950,7 +950,9 @@ function stopPreview(dispatch: string, dryRun: boolean, synthesis: string): Prev
   if (!existsSync(pidfile)) return { status: "none", detail: "", path: null, next: "" };
   const raw = (() => {
     try {
-      return readFileSync(pidfile, "utf8").trim();
+      // The pid is the first line; later lines carry the start, boot and command
+      // identity, which the registry verification below checks in its own way.
+      return (readFileSync(pidfile, "utf8").trim().split("\n")[0] ?? "").trim();
     } catch {
       return "";
     }

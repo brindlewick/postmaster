@@ -76,9 +76,11 @@ the section above for the two things that differ.
 **2. Is this machine set up?**
 
 ```sh
-cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
 scripts/run link-skills --check  # names missing or blocked links; read its exit status
 ```
+
+Read `~/.postmaster/config.toml` with your file-reading tools. A missing file means the
+machine is not set up.
 
 Include both results when you say whether the machine is set up. The link check is read-only.
 If the config is present but the check names missing or blocked links, report them and offer
@@ -164,9 +166,8 @@ A four-role flow for getting one ticket implemented well by several models at on
 
 The postmaster runs no model lanes and edits no source. A coachman never takes a second
 load. The **waybill** (`<dispatch>/brief.md`) is the only thing that travels between them.
-Harness-specific invocations live in `skills/postmaster/harnesses.md`, and
-`scripts/run launch` is their executable form: the runbooks name a form (launch, resume,
-thread id), that file gives the command, the script runs it. Where a launch runs, and how the
+Harness-specific behavior lives in `skills/postmaster/harnesses.md`; `scripts/run launch form <lane>`
+prints the exact launch and resume forms for a configured lane. Where a launch runs, and how the
 user watches it, is the session host's: `skills/postmaster/hosts.md` records Herdr, tmux and no
 host at all, and `scripts/run host` runs every launch through them. `SKILL.md` is the front door —
 reached from this file or by typing `/postmaster`, it gets the machine ready if it is not and

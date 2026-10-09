@@ -393,3 +393,15 @@ file = "scripts/launch-interactive-oracle.test.ts"
 name = "tmux: the clerk's harness is the window's own process"
 reason = "the tmux control runs only where the tmux binary is installed"
 systems = ["linux", "darwin"]
+
+[[skip]]
+file = "scripts/host.test.ts"
+name = "workhorse and stop-pidfile > a stale pidfile whose leader is a zombie reports the members, and kills nothing"
+reason = "the zombie-leader probe is built on setsid(1) and Linux's process groups"
+systems = ["darwin"]
+
+[[skip]]
+file = "scripts/host.test.ts"
+name = "workhorse and stop-pidfile > a recorded pidfile still stops the members of its zombie leader"
+reason = "the zombie-leader probe is built on setsid(1) and Linux's process groups"
+systems = ["darwin"]
