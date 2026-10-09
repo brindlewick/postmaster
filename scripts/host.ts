@@ -2189,7 +2189,8 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
         // bare pid checks nothing.
         const start = startOf(pid);
         const boot = bootId();
-        const command = await settledCommand(pid);
+        const wrapper = spec.capmode === "systemd" && spec.setsid ? basename(spec.setsid) : null;
+        const command = await settledCommand(pid, wrapper);
         const body =
           start && boot && command
             ? `${pid}\n${start}\n${boot}\n${command}\n`
@@ -2867,34 +2868,44 @@ function pidfileCommand(name: string): string {
 }
 
 /**
- * The leader's command once it is stable: a child read before it execs still looks like
- * its parent, mid-exec its command line can read empty, and a wrapper may exec again
- * (setsid becomes systemd-run), so the command line must read the same three times
- * before its holder's name is recorded. "" when the process is gone or never settles,
- * in which case the pidfile holds no command.
+ * The leader's command once it is past every exec: a child read before it execs still
+ * looks like its parent (same command line, stably, until it is scheduled), mid-exec
+ * its command line can read empty, and the launch chain execs twice more — the spawned
+ * wrapper becomes systemd-run, which execs the target in place after scope setup, a
+ * D-Bus roundtrip no stability window can outwait — so a reading counts only past the
+ * parent's command line and the transient names, and the name is recorded after three
+ * such stable readings. "" when the process is gone or never settles, in which case
+ * the pidfile holds no command.
  */
-async function settledCommand(pid: number): Promise<string> {
+async function settledCommand(pid: number, spawned: string | null): Promise<string> {
+  const parent = processCommandLine(process.pid);
+  // The chain's turning names: the wrapper run spawned, and a --scope systemd-run,
+  // which always becomes its target (or, under a systemd that waits instead, the
+  // record honestly degrades to start and boot).
+  const transient = new Set([spawned, "systemd-run"]);
   let prev: string | null = null;
   let stable = 0;
-  const end = Date.now() + 500;
+  const end = Date.now() + 2000;
   for (;;) {
     const cur = processCommandLine(pid);
-    if (cur !== "") {
-      if (cur === prev) stable += 1;
-      else {
-        stable = 0;
-        prev = cur;
-      }
-      if (stable >= 2) break;
-    } else if (processState(pid) === "absent") {
-      // Gone for good: a failed launch records no command.
-      return "";
+    const name = cur === "" ? "" : pidfileCommand(processInfo(pid)?.name ?? "");
+    const ready = cur !== "" && cur !== parent && name !== "" && !transient.has(name);
+    if (!ready) {
+      if (cur === "" && processState(pid) === "absent") return "";
+      // Unreadable but present (mid-exec, or a zombie awaiting reap), pre-exec, or a
+      // turning name: none of it is the target, so wait it out.
+      stable = 0;
+      prev = null;
+    } else if (cur === prev) {
+      stable += 1;
+      if (stable >= 2) return name;
+    } else {
+      stable = 0;
+      prev = cur;
     }
-    // Else unreadable but present (mid-exec, or a zombie awaiting reap): wait it out.
     if (Date.now() >= end) return "";
     await Bun.sleep(10);
   }
-  return pidfileCommand(processInfo(pid)?.name ?? "");
 }
 
 /** A leftover member for the report: its command line, or its bare name. */
