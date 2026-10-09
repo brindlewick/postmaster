@@ -15,7 +15,13 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { randomBytes } from "node:crypto";
 import { git, keyBlockStep, RefusedError, StreamScanner, streamLines } from "./scrub-core.ts";
-import { redactReasoning } from "./scrub-reasoning.ts";
+import {
+  maybeWholeJson,
+  parseWholeJson,
+  redactReasoning,
+  transformReasoning,
+  WHOLE_JSON_CAP,
+} from "./scrub-reasoning.ts";
 import {
   errorText,
   fail,
@@ -70,13 +76,48 @@ interface FileScan {
   findings: string[];
 }
 
+// The whole-file gate both promoter passes share with the tree check: the
+// first non-whitespace byte, the line count and whether any line failed to
+// parse. Tracked while streaming so the common case never re-reads.
+interface WholeGate {
+  lines: number;
+  firstNonWs: string;
+  anyParseFail: boolean;
+}
+
+const trackGate = (gate: WholeGate, text: string): void => {
+  gate.lines++;
+  if (!gate.firstNonWs) {
+    const found = /\S/u.exec(text);
+    if (found) gate.firstNonWs = found[0]!;
+  }
+  if (!parsesAsJson(text)) gate.anyParseFail = true;
+};
+
+// Re-reads through the same streaming reader (flat, closed input) and joins
+// up to the shared cap; null past it, and the per-line path stands.
+async function readWholeCapped(path: string): Promise<{ text: string; newline: boolean } | null> {
+  const parts: string[] = [];
+  let size = 0;
+  let newline = false;
+  for await (const line of streamLines(path)) {
+    size += line.text.length + 1;
+    if (size > WHOLE_JSON_CAP) return null;
+    parts.push(line.text);
+    newline = line.newline;
+  }
+  return { text: parts.join("\n") + (newline ? "\n" : ""), newline };
+}
+
 async function inspectFile(path: string, report: boolean): Promise<FileScan> {
   const scanner = new StreamScanner();
   let inKeyBlock = false;
   let changed = false;
   const faults: string[] = [];
   const findings: string[] = [];
+  const gate: WholeGate = { lines: 0, firstNonWs: "", anyParseFail: false };
   for await (const line of streamLines(path)) {
+    trackGate(gate, line.text);
     const reasoned = redactReasoning(line.text);
     if (reasoned.count) {
       changed = true;
@@ -100,6 +141,28 @@ async function inspectFile(path: string, report: boolean): Promise<FileScan> {
       for (const finding of result.findings) logFinding(finding.rule, path, line.number, "");
       for (const finding of result.suppressed)
         logFinding(finding.rule, path, line.number, "", "marker");
+    }
+  }
+  if (maybeWholeJson(gate.lines, gate.firstNonWs, gate.anyParseFail)) {
+    // Review round 9 (bug-36): a record pretty-printed across lines never
+    // parsed per line. The whole value goes through the same transform the
+    // detector walks, cited at line 1 where the value starts.
+    const whole = await readWholeCapped(path);
+    if (whole !== null) {
+      const parsed = parseWholeJson(whole.text);
+      if (parsed !== undefined) {
+        let count = 0;
+        try {
+          count = transformReasoning(parsed).count;
+        } catch {
+          /* deep whole: per-line stands, as redactReasoning does */
+        }
+        if (count) {
+          changed = true;
+          findings.push("1: encrypted-reasoning");
+          if (report) logFinding("encrypted-reasoning", path, 1, "");
+        }
+      }
     }
   }
   for (const marker of scanner.flush()) {
@@ -153,25 +216,59 @@ function replaceFindings(
 }
 
 async function writeScrubbed(source: string, target: string, destLabel: string): Promise<string[]> {
-  const fd = openSync(target, "w", 0o600);
-  const scanner = new StreamScanner();
-  const reports: string[] = [];
+  let fd = openSync(target, "w", 0o600);
+  let scanner = new StreamScanner();
+  let reports: string[] = [];
   let inKeyBlock = false;
+  const gate: WholeGate = { lines: 0, firstNonWs: "", anyParseFail: false };
+  const processLine = (number: number, text: string, newline: boolean): void => {
+    const reasoned = redactReasoning(text);
+    let out = reasoned.text;
+    if (reasoned.count)
+      reports.push(`${findingRow(destLabel, number, "encrypted-reasoning")} scrubbed`);
+    const key = keyBlockStep(out, inKeyBlock);
+    inKeyBlock = key.inBlock;
+    const result = scanner.feed(number, out, { keyBlock: key.flagged });
+    const replaced = replaceFindings(out, [...result.findings, ...result.suppressed]);
+    for (const rule of replaced.rules)
+      reports.push(`${findingRow(destLabel, number, rule)} scrubbed`);
+    out = replaceReset(ALLOW_MARKER, replaced.text, "");
+    writeFileSync(fd, out, "utf8");
+    if (newline) writeFileSync(fd, "\n", "utf8");
+  };
   try {
     for await (const line of streamLines(source)) {
-      const reasoned = redactReasoning(line.text);
-      let text = reasoned.text;
-      if (reasoned.count)
-        reports.push(`${findingRow(destLabel, line.number, "encrypted-reasoning")} scrubbed`);
-      const key = keyBlockStep(text, inKeyBlock);
-      inKeyBlock = key.inBlock;
-      const result = scanner.feed(line.number, text, { keyBlock: key.flagged });
-      const replaced = replaceFindings(text, [...result.findings, ...result.suppressed]);
-      for (const rule of replaced.rules)
-        reports.push(`${findingRow(destLabel, line.number, rule)} scrubbed`);
-      text = replaceReset(ALLOW_MARKER, replaced.text, "");
-      writeFileSync(fd, text, "utf8");
-      if (line.newline) writeFileSync(fd, "\n", "utf8");
+      trackGate(gate, line.text);
+      processLine(line.number, line.text, line.newline);
+    }
+    if (maybeWholeJson(gate.lines, gate.firstNonWs, gate.anyParseFail)) {
+      // Review round 9 (bug-36): the whole value goes through the same
+      // transform inspectFile counts, and when it scrubs anything the copy
+      // is replayed from the scrubbed text, so the bytes and the reports
+      // agree with the rescan.
+      const whole = await readWholeCapped(source);
+      if (whole !== null) {
+        const parsed = parseWholeJson(whole.text);
+        if (parsed !== undefined) {
+          let count = 0;
+          let scrubbed = "";
+          try {
+            const transformed = transformReasoning(parsed);
+            count = transformed.count;
+            scrubbed = JSON.stringify(transformed.value);
+          } catch {
+            /* deep whole: per-line stands, as redactReasoning does */
+          }
+          if (count) {
+            closeSync(fd);
+            fd = openSync(target, "w", 0o600);
+            scanner = new StreamScanner();
+            inKeyBlock = false;
+            reports = [`${findingRow(destLabel, 1, "encrypted-reasoning")} scrubbed`];
+            processLine(1, scrubbed, whole.newline);
+          }
+        }
+      }
     }
     const faults = scanner.flush();
     if (faults.length) throw new Error("marker fault");

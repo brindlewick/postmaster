@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test";
-import { hasReasoning, isLiveReasoning, redactReasoning } from "./scrub-reasoning.ts";
+import {
+  hasReasoning,
+  isLiveReasoning,
+  parseWholeJson,
+  redactReasoning,
+  transformReasoning,
+} from "./scrub-reasoning.ts";
 import { REASONING_PLACEHOLDER } from "./scrub-report.ts";
 
 const sealed = (): string => ["sealed", "text"].join("");
@@ -64,4 +70,19 @@ test("detection and redaction agree line for line", () => {
     }
     expect(hasReasoning(parsed)).toBe(redactReasoning(line).count > 0);
   }
+});
+
+test("a pretty-printed record counts on both sides through the whole-file entry", () => {
+  // Review round 9 (bug-36): per-line callers never saw a record spanning
+  // lines. Both sides share parseWholeJson, so they cannot split again.
+  const pretty = JSON.stringify({ type: "reasoning", encrypted_content: sealed() }, null, 2);
+  expect(pretty.includes("\n")).toBe(true);
+  const whole = parseWholeJson(pretty);
+  expect(whole).not.toBe(undefined);
+  expect(hasReasoning(whole)).toBe(true);
+  const transformed = transformReasoning(whole);
+  expect(transformed.count).toBe(1);
+  expect(JSON.stringify(transformed.value)).toContain(REASONING_PLACEHOLDER);
+  expect(parseWholeJson(`${pretty}\n${pretty}`)).toBe(undefined);
+  expect(parseWholeJson("not json at all")).toBe(undefined);
 });

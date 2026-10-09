@@ -2,7 +2,8 @@
 // The one shared definition of what counts as encrypted reasoning. The
 // promoter scrubs by it and the tree check flags by it, so the two cannot
 // disagree: the record type whatever its case, reasoning inside
-// prose-embedded JSON, and a field the promoter already scrubbed (exactly
+// prose-embedded JSON, a record pretty-printed across lines through the one
+// whole-file entry, and a field the promoter already scrubbed (exactly
 // the placeholder, nothing else) counting as clean on both sides.
 //
 // The two traversals differ on purpose and must stay that way: the
@@ -129,6 +130,35 @@ export function transformReasoning(value: unknown): { value: unknown; count: num
     }
   }
   return { value: result, count };
+}
+
+// The whole-file fallback both sides share: when a file's full text parses
+// as one JSON value (a pretty-printed record spanning lines), the promoter
+// scrubs it and the tree check flags it through the same entry, so the two
+// cannot split again. Single-line files and JSONL never qualify: a lone
+// line is already handled per line, and several values cannot parse whole.
+// The cap bounds the re-read DoS-style inputs to a fixed multiple of the
+// longest-line budget; past it the per-line path stands.
+export const WHOLE_JSON_CAP = 32 * 1024 * 1024;
+
+export function maybeWholeJson(
+  lineCount: number,
+  firstNonWs: string,
+  anyParseFail: boolean,
+): boolean {
+  return (
+    lineCount > 1 &&
+    (firstNonWs === "{" || firstNonWs === "[") &&
+    anyParseFail
+  );
+}
+
+export function parseWholeJson(text: string): unknown | undefined {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
 }
 
 export function redactReasoning(line: string): { text: string; count: number } {

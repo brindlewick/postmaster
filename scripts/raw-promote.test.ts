@@ -80,6 +80,30 @@ test("C20 promotion removes all encrypted reasoning forms, including one nested 
   expect(promoted.join("\n").includes("proseseal")).toBe(false);
 });
 
+test("promotion strips pretty-printed reasoning spanning lines, one-line form unchanged", () => {
+  // Review round 9 (bug-36): both sides only recognised whole lines that
+  // parse as JSON, so a pretty-printed record sailed through promote and
+  // the tree check alike.
+  const repo = initRepo();
+  const source = join(scratchDir(), "source");
+  mkdirSync(source);
+  const live = ["sealed", "blob"].join("");
+  const pretty = JSON.stringify({ type: "reasoning", encrypted_content: live }, null, 2);
+  expect(pretty.includes("\n")).toBe(true);
+  writeFileSync(join(source, "pretty.jsonl"), `${pretty}\n`);
+  const single = JSON.stringify({ encrypted_content: live });
+  writeFileSync(join(source, "single.jsonl"), `${single}\n`);
+  const copied = runScript("raw-promote", [source, "raw/fixed"], repo);
+  expect(copied.status).toBe(0);
+  expect(copied.stdout).toContain("encrypted-reasoning scrubbed");
+  const fixedPretty = readFileSync(join(repo, "raw/fixed", "pretty.jsonl"), "utf8");
+  expect(fixedPretty.includes(live)).toBe(false);
+  expect(fixedPretty).toContain("<redacted:encrypted-reasoning>");
+  const fixedSingle = readFileSync(join(repo, "raw/fixed", "single.jsonl"), "utf8");
+  expect(fixedSingle.includes(live)).toBe(false);
+  expect(JSON.parse(fixedSingle).encrypted_content).toBe("<redacted:encrypted-reasoning>");
+});
+
 test("C21 promotion rescans clean, refuses repeats and copies nothing on a marker fault", () => {
   const repo = initRepo();
   const source = join(scratchDir(), "good");

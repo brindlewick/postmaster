@@ -64,6 +64,24 @@ test("tree check finds encrypted reasoning nested past any depth", () => {
   expect(checked.stdout).toContain("raw/deep.jsonl:1: encrypted-reasoning");
 });
 
+test("tree check flags pretty-printed reasoning spanning lines", () => {
+  // Review round 9 (bug-36): the detector only parsed whole lines, so a
+  // pretty-printed record passed the gate. Same fix as promote's, one
+  // shared whole-file entry, so the two cannot split again.
+  const repo = initRepo();
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  mkdirSync(join(repo, "raw"));
+  const live = ["sealed", "blob"].join("");
+  const pretty = JSON.stringify({ type: "reasoning", encrypted_content: live }, null, 2);
+  writeFileSync(join(repo, "raw", "pretty.jsonl"), `${pretty}\n`);
+  writeFileSync(join(repo, "raw", "single.jsonl"), `${JSON.stringify({ encrypted_content: live })}\n`);
+  commit(repo, "add records");
+  const checked = runScript("tree-check", [base, "HEAD"], repo);
+  expect(checked.status).toBe(1);
+  expect(checked.stdout).toContain("raw/pretty.jsonl:1: encrypted-reasoning");
+  expect(checked.stdout).toContain("raw/single.jsonl:1: encrypted-reasoning");
+});
+
 test("tree check flags raw content even when SCRUB_CHECK_DISABLE is set", () => {
   // Review round 3: ambient DISABLE silenced the tree scan in-process.
   const repo = initRepo();

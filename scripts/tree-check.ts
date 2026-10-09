@@ -11,7 +11,12 @@ import {
   StreamScanner,
 } from "./scrub-core.ts";
 import { pyWords } from "./lib/text.ts";
-import { hasReasoning } from "./scrub-reasoning.ts";
+import {
+  hasReasoning,
+  maybeWholeJson,
+  parseWholeJson,
+  WHOLE_JSON_CAP,
+} from "./scrub-reasoning.ts";
 import { errorText, fail, findingRow, logFinding, safePath } from "./scrub-report.ts";
 
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -43,10 +48,30 @@ async function scanBlob(
   const failures: string[] = [];
   let line = 0;
   let inBlock = false;
+  // The whole-file accumulation the promoter's re-read mirrors: kept only
+  // while the blob can still parse whole, and bounded by the shared cap.
+  let whole: string[] | null = [];
+  let wholeSize = 0;
+  let firstNonWs = "";
+  let anyParseFail = false;
   for await (const raw of childLines(child.stdout)) {
     line++;
     refuseUnlessText(raw, path);
     const text = raw;
+    if (whole !== null) {
+      if (!firstNonWs) {
+        const found = /\S/u.exec(text);
+        if (found) {
+          firstNonWs = found[0]!;
+          if (firstNonWs !== "{" && firstNonWs !== "[") whole = null;
+        }
+      }
+      if (whole !== null) {
+        wholeSize += text.length + 1;
+        if (wholeSize > WHOLE_JSON_CAP) whole = null;
+        else whole.push(text);
+      }
+    }
     if (!disabled("encrypted-reasoning")) {
       try {
         const parsed = JSON.parse(text) as unknown;
@@ -55,6 +80,7 @@ async function scanBlob(
           logFinding("encrypted-reasoning", path, line, commit);
         }
       } catch {
+        anyParseFail = true;
         /* non-JSON raw records are scanned as text */
       }
     }
@@ -67,6 +93,19 @@ async function scanBlob(
     }
     for (const f of result.suppressed) logFinding(f.rule, path, line, commit, "marker");
     for (const marker of result.markers) failures.push(findingRow(path, line, "marker"));
+  }
+  if (
+    !disabled("encrypted-reasoning") &&
+    whole !== null &&
+    maybeWholeJson(line, firstNonWs, anyParseFail)
+  ) {
+    // Review round 9 (bug-36): the same whole-file entry the promoter
+    // scrubs through. A spanning record flags at line 1, where it starts.
+    const parsed = parseWholeJson(whole.join("\n"));
+    if (parsed !== undefined && hasReasoning(parsed)) {
+      failures.push(findingRow(path, 1, "encrypted-reasoning"));
+      logFinding("encrypted-reasoning", path, 1, commit);
+    }
   }
   for (const marker of scanner.flush()) failures.push(findingRow(path, line || 1, "marker"));
   const status = await closed;
