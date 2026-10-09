@@ -27,6 +27,7 @@ import { lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "no
 import { resolve } from "node:path";
 import { toolRoot } from "./lib/paths.ts";
 import { casefold } from "./lib/text.ts";
+import { thrownCode, thrownDetail } from "./lib/thrown.ts";
 
 function usage(): never {
   console.error("usage: run parallel-runs-acceptance [repo-root]");
@@ -153,18 +154,6 @@ function physicalDir(path: string): string {
     throw new Error(`no such directory: ${path}`);
   }
   return resolved;
-}
-
-/** A thrown value's code, when it is an object carrying one. */
-function thrownCode(e: unknown): unknown {
-  return typeof e === "object" && e !== null ? (e as { code?: unknown }).code : undefined;
-}
-
-/** A thrown value's message, or the value itself when it has none. */
-function thrownDetail(e: unknown): unknown {
-  const message: unknown =
-    typeof e === "object" && e !== null ? (e as { message?: unknown }).message : undefined;
-  return message ?? e;
 }
 
 /** Walk one path as find -L would: a dangling link is silently skipped, a loop,
