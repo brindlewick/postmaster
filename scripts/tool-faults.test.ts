@@ -80,12 +80,12 @@ function plantLegacyTargets(copy: string): void {
   }
 }
 
-const skipPython = run("sh", ["-c", "command -v python3"]).code !== 0;
-if (skipPython) {
-  console.log(
-    "skip folding parity, unicode primitives, stub tracker search, planted-marker search: python3 not on PATH",
-  );
-}
+// The parity comparisons run BASE's pinned script through a python3 that runs;
+// a Command Line Tools stub that cannot run skips instead. skips.toml says so.
+const skipPython =
+  run("python3", ["-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"])
+    .code !== 0;
+const skipBaseParity = skipPython || process.platform === "darwin";
 
 // #163 deliberately reworded the draft's Notes on main; the pinned BASE still carries
 // the old sentence, so parity remaps BASE's drafts to the new wording before comparing.
@@ -2062,7 +2062,7 @@ if (a[0] === "api" && a[1] === "graphql") {
         );
       }
     }
-    if (!skipPython) {
+    if (!skipBaseParity) {
       const shown = run("git", [
         "-C",
         TOOL,
@@ -2334,7 +2334,7 @@ describe("negative controls", () => {
   test("casefold folds as Python's str.casefold", () => {
     assertControl("casefold folds as Python's str.casefold");
   });
-  test.skipIf(skipPython)(
+  test.skipIf(skipBaseParity)(
     "folding parity: BASE and port harvests agree on ids and drafts, \u00df/\u0130/\u03c2 alike",
     () => {
       assertControl(
@@ -2342,7 +2342,7 @@ describe("negative controls", () => {
       );
     },
   );
-  test.skipIf(skipPython)(
+  test.skipIf(skipBaseParity)(
     "unicode primitives: BASE and port harvests agree, email/digits/\u017f\u00df\u0130 alike",
     () => {
       assertControl(
@@ -2356,7 +2356,7 @@ describe("negative controls", () => {
   test("sameRepo folds remotes as BASE: own-repo waybill public, foreign withheld", () => {
     assertControl("sameRepo folds remotes as BASE: own-repo waybill public, foreign withheld");
   });
-  test.skipIf(skipPython)(
+  test.skipIf(skipBaseParity)(
     "the stub tracker search folds as BASE's stub does, \u00df/\u0130/\u03c2 alike",
     () => {
       assertControl(
@@ -2364,7 +2364,7 @@ describe("negative controls", () => {
       );
     },
   );
-  test.skipIf(skipPython)(
+  test.skipIf(skipBaseParity)(
     "the planted-marker search matches grep -qiF marker for marker, \u00df/\u0130/\u03c2 alike",
     () => {
       assertControl(

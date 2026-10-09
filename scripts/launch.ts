@@ -1882,6 +1882,15 @@ exit "$rc"
   delete process.env.POSTMASTER_LAUNCH_NAME;
   delete process.env.POSTMASTER_LAUNCH_ROLE;
   delete process.env.POSTMASTER_ATTEMPT_PHASE;
+  // Re-hand the cd pair after the deletes: PWD and OLDPWD are the last
+  // additions the harness must inherit, so they are set last, closest to
+  // the spawn, where no later mutation can drop them unnoticed.
+  if (from !== "") process.env.OLDPWD = from;
+  try {
+    process.env.PWD = logicalPwd(CWD, from, process.cwd());
+  } catch {
+    /* keep the inherited PWD on any surprise */
+  }
 
   // With an env file a shell sources it and runs the harness as a child, as
   // main does: file output reaches the launch streams, an `exit` in the file
@@ -1937,7 +1946,9 @@ exit "$rc"
     // Raw bytes, as main's `exec < file` hands them: no UTF-8 decode.
     ...(stdinBytes ? { input: stdinBytes } : {}),
     // A sourcing shell starts with SHLVL unset and takes the level as $1.
-    ...(freshShell ? { env: { ...process.env, SHLVL: undefined } } : {}),
+    // Always explicit, never inherited: the spawn carries a snapshot taken
+    // after the cd pair is re-set above. Identical content elsewhere.
+    env: freshShell ? { ...process.env, SHLVL: undefined } : { ...process.env },
   });
   let rc =
     child.status !== null && child.status !== undefined

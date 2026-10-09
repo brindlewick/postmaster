@@ -29,6 +29,10 @@ beforeAll(() => {
   }
   answers("plain");
   plainRc = runSetup("plain");
+  // The capping controls below force Linux either way (linuxSystemPath),
+  // since launch caps are probed from uname and a Mac cannot cap.
+  answers("capped");
+  runSetup("capped", { PATH: linuxSystemPath() });
 });
 
 afterAll(() => {
@@ -72,6 +76,20 @@ function runSetup(name: string, extraEnv: Record<string, string> = {}): number {
   );
   writeFileSync(join(tmp, `${name}.out`), r.out + r.err, "utf8");
   return r.code;
+}
+
+// A stand-in uname names another system: setup decides capping by uname -s,
+// so the controls take the Mac path and the Linux path on either machine.
+function systemPath(system: string): string {
+  const bin = join(tmp, `system-${system}`);
+  mkdirSync(bin, { recursive: true });
+  const uname = join(bin, "uname");
+  writeFileSync(uname, `#!/bin/sh\nif [ "$1" = "-s" ]; then echo ${system}; else exit 1; fi\n`);
+  chmodSync(uname, 0o755);
+  return `${bin}:${join(tmp, "bin")}:${process.env.PATH}`;
+}
+function linuxSystemPath(): string {
+  return systemPath("Linux");
 }
 
 function confineEnv(bwrapExit: number): Record<string, string> {
@@ -313,8 +331,8 @@ describe("positive controls", () => {
   });
 
   test("launch memory and process caps default to 8G and 512", () => {
-    expect(capLimit("plain", "default", "memory_max")).toBe("8G");
-    expect(capLimit("plain", "default", "tasks_max")).toBe("512");
+    expect(capLimit("capped", "default", "memory_max")).toBe("8G");
+    expect(capLimit("capped", "default", "tasks_max")).toBe("512");
   });
 
   test("a role can override either cap and inherit the other", () => {
@@ -322,7 +340,7 @@ describe("positive controls", () => {
       "caps",
       "limits.memory_max=8G\nlimits.tasks_max=384\nlimits.lane.memory_max=2G\nlimits.reviewer.tasks_max=96",
     );
-    const capsRc = runSetup("caps");
+    const capsRc = runSetup("caps", { PATH: linuxSystemPath() });
     expect(capsRc).toBe(0);
     expect(capLimit("caps", "default", "memory_max")).toBe("8G");
     expect(capLimit("caps", "default", "tasks_max")).toBe("384");
@@ -334,7 +352,7 @@ describe("positive controls", () => {
 
   test("a malformed default memory cap is refused, and nothing is written", () => {
     answers("badmemory", "limits.memory_max=4.5G");
-    const badmemoryRc = runSetup("badmemory");
+    const badmemoryRc = runSetup("badmemory", { PATH: linuxSystemPath() });
     const out = readFileSync(join(tmp, "badmemory.out"), "utf8");
     expect(badmemoryRc).toBe(1);
     expect(existsSync(join(tmp, "badmemory.toml"))).toBe(false);
@@ -343,7 +361,7 @@ describe("positive controls", () => {
 
   test("a zero role process cap is refused, and nothing is written", () => {
     answers("badtasks", "limits.reviewer.tasks_max=0");
-    const badtasksRc = runSetup("badtasks");
+    const badtasksRc = runSetup("badtasks", { PATH: linuxSystemPath() });
     const out = readFileSync(join(tmp, "badtasks.out"), "utf8");
     expect(badtasksRc).toBe(1);
     expect(existsSync(join(tmp, "badtasks.toml"))).toBe(false);
@@ -394,21 +412,14 @@ describe("positive controls", () => {
 
   // A stand-in uname names another system: setup decides by the test
   // systemdCapability() uses, so this takes the same path a Mac takes.
-  const otherSystemPath = (): string => {
-    const bin = join(tmp, "other-system");
-    mkdirSync(bin, { recursive: true });
-    const uname = join(bin, "uname");
-    writeFileSync(uname, '#!/bin/sh\nif [ "$1" = "-s" ]; then echo Darwin; else exit 1; fi\n');
-    chmodSync(uname, 0o755);
-    return `${bin}:${join(tmp, "bin")}:${process.env.PATH}`;
-  };
+  const otherSystemPath = (): string => systemPath("Darwin");
 
   test("where no launch can be capped, the keys list carries no limits and no limits line", () => {
     const keys = run(SELF, ["setup", "--keys"], { env: { PATH: otherSystemPath() } });
     expect(keys.code).toBe(0);
     expect(keys.out).not.toContain("limits.");
     expect(keys.out.match(/^limits\./gmu)).toBeNull();
-    const linuxKeys = run(SELF, ["setup", "--keys"]);
+    const linuxKeys = run(SELF, ["setup", "--keys"], { env: { PATH: linuxSystemPath() } });
     expect(linuxKeys.out).toContain("limits.memory_max");
   });
 
@@ -426,7 +437,7 @@ describe("positive controls", () => {
   });
 
   test("where launches can be capped, setup never says they run without limits", () => {
-    const out = readFileSync(join(tmp, "plain.out"), "utf8");
+    const out = readFileSync(join(tmp, "capped.out"), "utf8");
     expect(out).not.toContain("without memory or process limits");
     expect(out).toContain("default memory cap");
   });
