@@ -416,7 +416,10 @@ if (a[0] === "api" && a[1] === "graphql") {
     run("chmod", ["+x", stubGh]);
 
     const db = (access: string, ...rest: string[]): void => {
-      const issues: Record<string, any> = {};
+      const issues: Record<
+        string,
+        { state: string; title: string; body: string; comments: unknown[] }
+      > = {};
       for (let i = 0; i < rest.length; i += 4) {
         issues[rest[i]!] = {
           state: rest[i + 1],
@@ -559,10 +562,12 @@ if (a[0] === "api" && a[1] === "graphql") {
 
     const stateOf = (d: string, id: string): string => {
       try {
-        const st = JSON.parse(readFileSync(join(d, "tool-faults.json"), "utf-8"));
+        const st = JSON.parse(readFileSync(join(d, "tool-faults.json"), "utf-8")) as {
+          faults?: Array<{ id?: unknown; state?: unknown }>;
+        };
         return (st.faults || [])
-          .filter((x: any) => x.id === id)
-          .map((x: any) => x.state)
+          .filter((x) => x.id === id)
+          .map((x) => x.state)
           .join(" ");
       } catch {
         return "";
@@ -570,8 +575,10 @@ if (a[0] === "api" && a[1] === "graphql") {
     };
 
     const draftOf = (d: string, id: string): string => {
-      const st = JSON.parse(readFileSync(join(d, "tool-faults.json"), "utf-8"));
-      const x = (st.faults || []).filter((x: any) => x.id === id).pop();
+      const st = JSON.parse(readFileSync(join(d, "tool-faults.json"), "utf-8")) as {
+        faults?: Array<{ id?: unknown; draft?: string }>;
+      };
+      const x = (st.faults || []).filter((x) => x.id === id).pop() as { draft: string };
       return join(d, x.draft);
     };
 

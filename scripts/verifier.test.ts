@@ -8,17 +8,33 @@ import { join } from "node:path";
 import { commitAll, gitOrThrow, initRepo, RUN, writeRepoFile } from "./acceptance-323.ts";
 import { run } from "./lib/proc.ts";
 import {
+  acceptLine,
   branchHasPath,
+  type CheapFacts,
+  type ChecksOutcome,
+  type ClassifiedEntry,
+  classifyEntries,
   commitsPastBase,
   committedFeaturePages,
+  decideCheap,
+  decideChecks,
   defaultBase,
+  defaultLanding,
   failureOutcome,
   handoverFresh,
   isSurface,
+  landTarget,
+  lastLine,
+  mergeAuthorityOf,
+  normalizeFolder,
+  outsidePaths,
   parseArgs,
+  parseHandover,
+  parseVerifyResults,
   pickBranch,
   pickWorktree,
   pruneWorktrees,
+  refuseLine,
   remoteFromSymbolicRef,
   removeProvisioning,
   renderPrompt,
@@ -26,6 +42,8 @@ import {
   roleHarness,
   scrubGitEnv,
   surfaceProse,
+  timeoutMs,
+  unrunProject,
   verifyDirName,
   wallInStream,
 } from "./verifier.ts";
@@ -267,6 +285,72 @@ describe("defaultBase", () => {
       const empty = join(dir, "empty");
       initRepo(empty);
       expect(defaultBase(empty)).toBe(null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("landTarget", () => {
+  const pointOriginHead = (repo: string, branch: string): void => {
+    const sha = gitOrThrow(repo, "rev-parse", "HEAD").trim();
+    gitOrThrow(repo, "update-ref", `refs/remotes/origin/${branch}`, sha);
+    gitOrThrow(repo, "symbolic-ref", "refs/remotes/origin/HEAD", `refs/remotes/origin/${branch}`);
+  };
+
+  test("origin's head wins over a stale local main", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      gitOrThrow(repo, "branch", "master");
+      pointOriginHead(repo, "master");
+      expect(landTarget(repo)).toBe("master");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a trunk default lands onto trunk", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      gitOrThrow(repo, "branch", "-m", "main", "trunk");
+      pointOriginHead(repo, "trunk");
+      expect(landTarget(repo)).toBe("trunk");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("without an origin, main wins over master", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      gitOrThrow(repo, "branch", "master");
+      expect(landTarget(repo)).toBe("main");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a default that is not checked out lands nowhere", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      pointOriginHead(repo, "other");
+      expect(landTarget(repo)).toBe(null);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -544,5 +628,427 @@ describe("roleHarness", () => {
     expect(roleHarness({ team: {} }, "coachman_fallback", "synthesis")).toBe(null);
     expect(roleHarness(null, "coachman", "synthesis")).toBe(null);
     expect(roleHarness(config, "postmaster", "synthesis")).toBe(null);
+  });
+});
+
+describe("check and land args", () => {
+  test("check takes a repo, a branch, a run and a hand-over", () => {
+    expect(parseArgs(["check", "/r", "verify-x", "--run", "/d", "--handover", "/h"])).toEqual({
+      ok: true,
+      req: {
+        cmd: "check",
+        repo: "/r",
+        branch: "verify-x",
+        dispatch: "/d",
+        handover: "/h",
+        folder: null,
+        timeout: 3600,
+      },
+    });
+  });
+
+  test("land takes the same plus an optional route", () => {
+    expect(
+      parseArgs([
+        "land",
+        "/r",
+        "verify-x",
+        "--run",
+        "/d",
+        "--handover",
+        "/h",
+        "--folder",
+        "custom/",
+        "--timeout",
+        "60",
+        "--landing",
+        "local",
+      ]),
+    ).toEqual({
+      ok: true,
+      req: {
+        cmd: "land",
+        repo: "/r",
+        branch: "verify-x",
+        dispatch: "/d",
+        handover: "/h",
+        folder: "custom",
+        timeout: 60,
+        landing: "local",
+      },
+    });
+    const bare = parseArgs(["land", "/r", "verify-x", "--run", "/d", "--handover", "/h"]);
+    expect(bare).toEqual({
+      ok: true,
+      req: {
+        cmd: "land",
+        repo: "/r",
+        branch: "verify-x",
+        dispatch: "/d",
+        handover: "/h",
+        folder: null,
+        timeout: 3600,
+        landing: null,
+      },
+    });
+  });
+
+  test("a missing branch, run, hand-over or folder value fails", () => {
+    expect(parseArgs(["check", "/r"])).toEqual({
+      ok: false,
+      error: "check takes a repo and a branch",
+    });
+    expect(parseArgs(["check", "/r", "b", "--handover", "/h"])).toEqual({
+      ok: false,
+      error: "check needs --run <dispatch>",
+    });
+    expect(parseArgs(["land", "/r", "b", "--run", "/d"])).toEqual({
+      ok: false,
+      error: "land needs --handover <file>",
+    });
+    expect(parseArgs(["check", "/r", "b", "--run", "/d", "--handover", "/h", "--folder"])).toEqual({
+      ok: false,
+      error: "check needs --folder <dir>",
+    });
+  });
+
+  test("a bad folder, route, timeout or flag fails", () => {
+    expect(
+      parseArgs(["check", "/r", "b", "--run", "/d", "--handover", "/h", "--folder", "/abs"]).ok,
+    ).toBe(false);
+    expect(
+      parseArgs(["land", "/r", "b", "--run", "/d", "--handover", "/h", "--landing", "sideways"]),
+    ).toEqual({ ok: false, error: "bad landing: sideways (local or pull-request)" });
+    expect(
+      parseArgs(["check", "/r", "b", "--run", "/d", "--handover", "/h", "--landing", "local"]),
+    ).toEqual({ ok: false, error: "unknown flag for check: --landing" });
+    expect(
+      parseArgs(["land", "/r", "b", "--run", "/d", "--handover", "/h", "--timeout", "soon"]).ok,
+    ).toBe(false);
+    expect(parseArgs(["check", "/r", "b", "--run", "/d", "--handover", "/h", "--fresh"]).ok).toBe(
+      false,
+    );
+  });
+});
+
+describe("normalizeFolder", () => {
+  test("strips a leading ./ and trailing slashes", () => {
+    expect(normalizeFolder("verify-app/")).toEqual({ ok: true, folder: "verify-app" });
+    expect(normalizeFolder("./verify-app")).toEqual({ ok: true, folder: "verify-app" });
+    expect(normalizeFolder("./a/b//")).toEqual({ ok: true, folder: "a/b" });
+    expect(normalizeFolder("a/b")).toEqual({ ok: true, folder: "a/b" });
+  });
+
+  test("an empty, absolute or escaping folder fails", () => {
+    expect(normalizeFolder("").ok).toBe(false);
+    expect(normalizeFolder(".").ok).toBe(false);
+    expect(normalizeFolder("/tmp/x").ok).toBe(false);
+    expect(normalizeFolder("a/../b").ok).toBe(false);
+    expect(normalizeFolder("..").ok).toBe(false);
+  });
+});
+
+describe("parseHandover", () => {
+  test("one section with its folder and proof", () => {
+    expect(
+      parseHandover("# Handover\n\n## Verifier: cli\nFolder: verify-app\nProof: /tmp/p.log\n"),
+    ).toEqual({
+      ok: true,
+      entries: [{ name: "cli", folder: "verify-app", proof: "/tmp/p.log" }],
+    });
+  });
+
+  test("several sections keep their order and prose is ignored", () => {
+    const parsed = parseHandover(
+      [
+        "# Handover",
+        "",
+        "Proved below.",
+        "## Verifier: cli",
+        "Folder: verify-app/cli",
+        "Proof: none - the drive never finished",
+        "",
+        "What was left undone: the cli drive.",
+        "## Verifier: web",
+        "Folder: verify-app/web/",
+        "Drive: second",
+        "Proof: /tmp/w.log",
+        "",
+      ].join("\n"),
+    );
+    expect(parsed).toEqual({
+      ok: true,
+      entries: [
+        { name: "cli", folder: "verify-app/cli", proof: "none - the drive never finished" },
+        { name: "web", folder: "verify-app/web", proof: "/tmp/w.log" },
+      ],
+    });
+  });
+
+  test("the first Folder: and Proof: line wins, and no section means no entries", () => {
+    const parsed = parseHandover(
+      "## Verifier: cli\nFolder: a\nFolder: b\nProof: /tmp/1\nProof: /tmp/2\n",
+    );
+    expect(parsed).toEqual({
+      ok: true,
+      entries: [{ name: "cli", folder: "a", proof: "/tmp/1" }],
+    });
+    expect(parseHandover("# Handover\n\nNothing was proved.\n")).toEqual({ ok: true, entries: [] });
+  });
+
+  test("a missing Proof: line names no proof file", () => {
+    expect(parseHandover("## Verifier: cli\nFolder: verify-app\n")).toEqual({
+      ok: true,
+      entries: [{ name: "cli", folder: "verify-app", proof: null }],
+    });
+  });
+
+  test("a missing or escaping folder, a missing or doubled name fails", () => {
+    expect(parseHandover("## Verifier: cli\nProof: /tmp/p\n")).toEqual({
+      ok: false,
+      error: "the hand-over names no folder for cli",
+    });
+    expect(parseHandover("## Verifier: cli\nFolder: /tmp/x\nProof: /tmp/p\n")).toEqual({
+      ok: false,
+      error: "the hand-over folder for cli is not inside the repo: /tmp/x",
+    });
+    expect(parseHandover("## Verifier:\nFolder: a\n")).toEqual({
+      ok: false,
+      error: "the hand-over has a verifier with no name",
+    });
+    expect(parseHandover("## Verifier: cli\nFolder: a\n## Verifier: cli\nFolder: b\n")).toEqual({
+      ok: false,
+      error: "the hand-over names cli twice",
+    });
+  });
+});
+
+describe("classifyEntries", () => {
+  const entries = [
+    { name: "kept", folder: "v/kept", proof: "/tmp/kept.log" },
+    { name: "gone", folder: "v/gone", proof: "/tmp/gone.log" },
+    { name: "none", folder: "v/none", proof: "none - no drive" },
+    { name: "blank", folder: "v/blank", proof: null },
+  ];
+  const isFile = (p: string): boolean => p === "/tmp/kept.log";
+
+  test("proven means the proof names an existing absolute file", () => {
+    const out = classifyEntries(entries, isFile);
+    expect(out.filter((e) => e.proven).map((e) => e.name)).toEqual(["kept"]);
+    expect(out.find((e) => e.name === "gone")?.failReason).toBe("proof /tmp/gone.log missing");
+    expect(out.find((e) => e.name === "none")?.failReason).toBe("no proof file");
+    expect(out.find((e) => e.name === "blank")?.failReason).toBe("no proof file");
+  });
+
+  test("a relative proof is no proof file", () => {
+    const out = classifyEntries([{ name: "r", folder: "v/r", proof: "proof.log" }], () => true);
+    expect(out[0]?.proven).toBe(false);
+    expect(out[0]?.failReason).toBe("no proof file");
+  });
+});
+
+describe("outsidePaths", () => {
+  test("only paths under the folder pass", () => {
+    expect(outsidePaths(["verify-app/a.md", "verify-app/x/b.ts"], "verify-app")).toEqual([]);
+    expect(outsidePaths(["biome.json", "verify-app/a.md", "src/x.ts"], "verify-app")).toEqual([
+      "biome.json",
+      "src/x.ts",
+    ]);
+    expect(outsidePaths(["verify-app"], "verify-app")).toEqual(["verify-app"]);
+    expect(outsidePaths(["verify-app2/a.md"], "verify-app")).toEqual(["verify-app2/a.md"]);
+  });
+});
+
+describe("parseVerifyResults", () => {
+  test("the gate, the failures and every result in order", () => {
+    const summary = parseVerifyResults(
+      [
+        "gate: pass, exit 0, 1s: npm run check",
+        "examples: not run, exit 3, 0s: /tool/scripts/run verify-examples",
+        "  the ticket has no User journey",
+        "cli: pass, exit 0, 0s: bun src/cli.ts",
+      ].join("\n"),
+    );
+    expect(summary.gate).toBe("pass");
+    expect(summary.failed).toEqual([]);
+    expect(summary.notRun).toEqual(["examples"]);
+    expect(summary.results).toEqual([
+      { name: "gate", result: "pass" },
+      { name: "examples", result: "not run" },
+      { name: "cli", result: "pass" },
+    ]);
+  });
+
+  test("failures are named and a missing gate reads as none", () => {
+    const summary = parseVerifyResults(
+      ["gate: fail, exit 1, 1s: npm run check", "cli: fail, exit 1, 0s: bun src/cli.ts"].join("\n"),
+    );
+    expect(summary.gate).toBe("fail");
+    expect(summary.failed).toEqual(["gate", "cli"]);
+    expect(summary.notRun).toEqual([]);
+    expect(parseVerifyResults("nothing reported\n").gate).toBe(null);
+  });
+});
+
+describe("unrunProject", () => {
+  const kinds = { gate: "project", browser: "project", examples: "tool", journey: "tool" };
+
+  test("a project check unrun refuses; a tool check unrun is expected", () => {
+    expect(unrunProject(["browser"], kinds)).toEqual(["browser"]);
+    expect(unrunProject(["examples", "journey"], kinds)).toEqual([]);
+    expect(unrunProject(["examples", "browser", "journey"], kinds)).toEqual(["browser"]);
+  });
+
+  test("the gate stays out, and an unknown kind fails closed", () => {
+    expect(unrunProject(["gate"], kinds)).toEqual([]);
+    expect(unrunProject(["strange"], kinds)).toEqual(["strange"]);
+  });
+});
+
+describe("mergeAuthorityOf and defaultLanding", () => {
+  test("postmaster is named, anything else is the user", () => {
+    expect(mergeAuthorityOf('{"config":{"ship":{"merge_authority":"postmaster"}}}')).toBe(
+      "postmaster",
+    );
+    expect(mergeAuthorityOf('{"config":{"ship":{"merge_authority":"user"}}}')).toBe("user");
+    expect(mergeAuthorityOf("{}")).toBe("user");
+    expect(mergeAuthorityOf("not json")).toBe("user");
+    expect(mergeAuthorityOf("")).toBe("user");
+  });
+
+  test("an origin remote means a pull request", () => {
+    expect(defaultLanding(true)).toBe("pull-request");
+    expect(defaultLanding(false)).toBe("local");
+  });
+});
+
+describe("timeoutMs and lastLine", () => {
+  test("seconds to milliseconds, capped past the timer's range", () => {
+    expect(timeoutMs(1)).toBe(1000);
+    expect(timeoutMs(3600)).toBe(3600000);
+    expect(timeoutMs(999999999)).toBe(2147483647);
+  });
+
+  test("the last non-empty trimmed line, or the exit", () => {
+    expect(lastLine("first\nsecond\n", 1)).toBe("second");
+    expect(lastLine("  padded  \n\n", 2)).toBe("padded");
+    expect(lastLine("", 3)).toBe("exit 3");
+    expect(lastLine("   \n", 127)).toBe("exit 127");
+  });
+});
+
+describe("decideCheap and decideChecks", () => {
+  const entry = (
+    name: string,
+    folder: string,
+    proven: boolean,
+    failReason: string,
+    proof: string | null = null,
+  ): ClassifiedEntry => ({ name, folder, proof, proven, failReason });
+  const cheap = (over: Partial<CheapFacts>): CheapFacts => ({
+    branch: "verify-x",
+    classified: [],
+    failedPresent: [],
+    provenEmpty: [],
+    outside: [],
+    ...over,
+  });
+
+  test("no proven verifier names each failure", () => {
+    expect(
+      decideCheap(
+        cheap({
+          classified: [
+            entry("cli", "v/cli", false, "no proof file"),
+            entry("web", "v/web", false, "proof /tmp/w missing", "/tmp/w"),
+          ],
+        }),
+      ),
+    ).toBe("no proven verifier (cli: no proof file; web: proof /tmp/w missing)");
+    expect(decideCheap(cheap({}))).toBe("no proven verifier (the hand-over names none)");
+  });
+
+  test("a failed folder, an empty proven verifier, then outside paths", () => {
+    const landed = [entry("web", "v/web", true, "", "/tmp/w")];
+    expect(
+      decideCheap(
+        cheap({
+          classified: [...landed, entry("cli", "v/cli", false, "no proof file")],
+          failedPresent: [entry("cli", "v/cli", false, "no proof file")],
+        }),
+      ),
+    ).toBe("failed verifier still on the branch: cli (v/cli)");
+    expect(
+      decideCheap(
+        cheap({ classified: landed, provenEmpty: [entry("web", "v/web", true, "", "/tmp/w")] }),
+      ),
+    ).toBe("proven verifier has no files on the branch: web (v/web)");
+    expect(decideCheap(cheap({ classified: landed, outside: ["biome.json", "AGENTS.md"] }))).toBe(
+      "outside the verifiers' folder: biome.json, AGENTS.md",
+    );
+    expect(decideCheap(cheap({ classified: landed }))).toBe(null);
+  });
+
+  test("a long outside list is capped", () => {
+    const landed = [entry("web", "v/web", true, "", "/tmp/w")];
+    const outside = Array.from({ length: 12 }, (_, n) => `f${n}.md`);
+    expect(decideCheap(cheap({ classified: landed, outside }))).toBe(
+      "outside the verifiers' folder: f0.md, f1.md, f2.md, f3.md, f4.md, f5.md, f6.md, f7.md, f8.md, f9.md and 2 more",
+    );
+  });
+
+  test("the timeout, the failures, then the gate", () => {
+    const ran = (summary: { gate: string | null; failed: string[] }): ChecksOutcome => ({
+      kind: "ran",
+      summary: { ...summary, notRun: [], results: [] },
+      unrunProject: [],
+    });
+    expect(decideChecks({ kind: "timeout", seconds: 1 })).toBe(
+      "past its limit (the checks ran longer than 1s)",
+    );
+    expect(decideChecks({ kind: "unrunnable", error: "the checks could not run: exit 1" })).toBe(
+      "the checks could not run: exit 1",
+    );
+    expect(decideChecks(ran({ gate: "fail", failed: ["gate", "cli"] }))).toBe(
+      "checks failed (gate: fail; cli: fail)",
+    );
+    expect(decideChecks(ran({ gate: "not run", failed: [] }))).toBe("gate did not pass (not run)");
+    expect(decideChecks(ran({ gate: null, failed: [] }))).toBe("gate did not pass (not reported)");
+    expect(decideChecks(ran({ gate: "pass", failed: [] }))).toBe(null);
+  });
+
+  test("an unrun project check refuses, after the failures", () => {
+    const ran = (unrunProject: string[], failed: string[] = []): ChecksOutcome => ({
+      kind: "ran",
+      summary: { gate: "pass", failed, notRun: unrunProject, results: [] },
+      unrunProject,
+    });
+    expect(decideChecks(ran(["browser"]))).toBe("checks not run (browser: not run)");
+    expect(decideChecks(ran(["browser", "cli"]))).toBe(
+      "checks not run (browser: not run; cli: not run)",
+    );
+    expect(decideChecks(ran(["browser"], ["cli"]))).toBe("checks failed (cli: fail)");
+    expect(decideChecks(ran([]))).toBe(null);
+  });
+});
+
+describe("acceptLine and refuseLine", () => {
+  test("one line naming what lands and what stays out", () => {
+    expect(
+      acceptLine("verify-both", [
+        { name: "cli", folder: "v/cli", proof: null, proven: false, failReason: "no proof file" },
+        { name: "web", folder: "v/web", proof: "/tmp/w", proven: true, failReason: "" },
+      ]),
+    ).toBe(
+      "accept: verify-both lands 1 verifier: web (v/web, proof /tmp/w); left out: cli (no proof file)",
+    );
+    expect(
+      acceptLine("verify-cli", [
+        { name: "cli", folder: "v", proof: "/tmp/p", proven: true, failReason: "" },
+      ]),
+    ).toBe("accept: verify-cli lands 1 verifier: cli (v, proof /tmp/p); left out: none");
+    expect(refuseLine("verify-x", "no proven verifier (none named)")).toBe(
+      "refuse: verify-x lands nothing: no proven verifier (none named)",
+    );
   });
 });

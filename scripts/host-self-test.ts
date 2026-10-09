@@ -59,18 +59,92 @@ function exec(
     err: String(result.stderr ?? ""),
   };
 }
-function json(path: string, fallback: any): any {
+// The stub Herdr server's state file.
+interface StubSpace {
+  label: string;
+  tokens: Record<string, string>;
+  panes: string[];
+  tabs: string[];
+  path: string | null;
+}
+interface StubPane {
+  ws: string;
+  tab?: string;
+  cwd?: string;
+  tokens: Record<string, string>;
+}
+interface StubTab {
+  ws: string;
+  pane: string;
+  cwd: string;
+  label: string;
+}
+interface HerdrStubState {
+  n: number;
+  tab_n: Record<string, number>;
+  spaces: Record<string, StubSpace>;
+  panes: Record<string, StubPane>;
+  tabs: Record<string, StubTab>;
+  open: Record<string, string>;
+  agents: Array<string | undefined>;
+  agentPanes: Record<string, string>;
+  prompt?: string[][];
+}
+// The stub tmux server's state file.
+interface TmuxWindow {
+  session: string;
+  name: string | undefined;
+  opts: Record<string, string>;
+  panes: Record<string, { opts: Record<string, string> }>;
+}
+interface TmuxStubState {
+  n: number;
+  sessions: string[];
+  windows: Record<string, TmuxWindow>;
+}
+// Entries of the stub's worktree list.
+interface WtEntry {
+  path: string;
+  is_linked_worktree: boolean;
+  open_workspace_id?: string;
+}
+interface WtSource {
+  repo_root: string;
+  repo_name: string;
+  source_workspace_id?: string;
+}
+// A stub store reads a partial fallback and answers a full state.
+function json(path: string, fallback: Partial<HerdrStubState>): HerdrStubState;
+function json(path: string, fallback: Partial<TmuxStubState>): TmuxStubState;
+function json<T>(path: string, fallback: unknown): T {
   try {
-    return JSON.parse(readFileSync(path, "utf8"));
+    return JSON.parse(readFileSync(path, "utf8")) as T;
   } catch {
-    return fallback;
+    return fallback as T;
   }
 }
 // A test-side read of stub state, under the same lock the stubs take: the
 // state files are truncated and rewritten, and a lockless read can land
 // between and parse a torn half, which reads as empty state.
-function readStubJson(stubDir: string, name: string, fallback: any): any {
-  return withStubLock(stubDir, () => json(join(stubDir, name), fallback));
+function readStubJson(
+  stubDir: string,
+  name: string,
+  fallback: Partial<HerdrStubState>,
+): HerdrStubState;
+function readStubJson(
+  stubDir: string,
+  name: string,
+  fallback: Partial<TmuxStubState>,
+): TmuxStubState;
+function readStubJson(
+  stubDir: string,
+  name: string,
+  fallback: unknown,
+): HerdrStubState | TmuxStubState {
+  // The cast bridges the overloads: the inner read casts to the state either way.
+  return withStubLock(stubDir, () =>
+    json(join(stubDir, name), fallback as Partial<HerdrStubState>),
+  );
 }
 function save(path: string, value: unknown): void {
   writeFileSync(path, JSON.stringify(value));
@@ -82,7 +156,7 @@ function opt(args: string[], name: string): string | undefined {
 function flag(path: string): boolean {
   return existsSync(path);
 }
-function next(st: any, prefix: string): string {
+function next(st: HerdrStubState, prefix: string): string {
   st.n++;
   return prefix + st.n;
 }
@@ -149,11 +223,16 @@ function b36(n: number): string {
   }
   return s;
 }
-function newTab(st: any, ws: string): string {
+function newTab(st: HerdrStubState, ws: string): string {
   st.tab_n[ws] = (st.tab_n[ws] ?? 0) + 1;
   return `${ws}:t${b36(st.tab_n[ws])}`;
 }
-function space(st: any, label: string, cwd = ""): any {
+interface PlacedSpace {
+  workspace: { workspace_id: string };
+  tab: { tab_id: string };
+  root_pane: { pane_id: string };
+}
+function space(st: HerdrStubState, label: string, cwd = ""): PlacedSpace {
   const ws = next(st, "w"),
     tab = newTab(st, ws),
     pane = next(st, "p");
@@ -163,7 +242,7 @@ function space(st: any, label: string, cwd = ""): any {
   st.tabs[tab] = { ws, pane, cwd, label };
   return { workspace: { workspace_id: ws }, tab: { tab_id: tab }, root_pane: { pane_id: pane } };
 }
-function destroySpace(st: any, ws: string): void {
+function destroySpace(st: HerdrStubState, ws: string): void {
   const w = st.spaces[ws];
   delete st.spaces[ws];
   if (!w) return;
@@ -210,12 +289,14 @@ function herdrStubInner(args: string[], stateDir: string): void {
     prompt: [],
   });
   if (!Array.isArray(st.agents)) st.agents = [];
-  if (st.agentPanes === null || typeof st.agentPanes !== "object" || Array.isArray(st.agentPanes))
-    st.agentPanes = {};
+  // The file's content is untrusted, so the shape check reads through unknown.
+  const panes: unknown = st.agentPanes;
+  if (panes === null || typeof panes !== "object" || Array.isArray(panes)) st.agentPanes = {};
   // An agent name follows its pane's occupant and clears when that pane goes,
   // as the server does; a spawn under the freed handle starts a new session.
   const dropAgents = (): void => {
-    st.agents = st.agents.filter((name: string) => {
+    st.agents = st.agents.filter((name: string | undefined) => {
+      if (typeof name !== "string") return false;
       const pane = st.agentPanes[name];
       if (typeof pane !== "string" || !(pane in st.panes)) {
         delete st.agentPanes[name];
@@ -239,11 +320,11 @@ function herdrStubInner(args: string[], stateDir: string): void {
       .filter(Boolean)
       .map((block) => {
         const worktreePath = resolve(block.split("\n", 1)[0]!.slice(9));
-        const entry: any = { path: worktreePath, is_linked_worktree: worktreePath !== root };
+        const entry: WtEntry = { path: worktreePath, is_linked_worktree: worktreePath !== root };
         if (st.open[worktreePath]) entry.open_workspace_id = st.open[worktreePath];
         return entry;
       });
-    const source: any = { repo_root: root, repo_name: basename(root) };
+    const source: WtSource = { repo_root: root, repo_name: basename(root) };
     if (st.open[root]) source.source_workspace_id = st.open[root];
     out({ source, worktrees });
     return;
@@ -305,9 +386,7 @@ function herdrStubInner(args: string[], stateDir: string): void {
       const ws = p.ws;
       st.spaces[ws].panes = st.spaces[ws].panes.filter((id: string) => id !== pane);
       for (const tab of [...st.spaces[ws].tabs]) {
-        const kept = Object.values(st.panes as Record<string, any>).some(
-          (q) => q.ws === ws && (q.tab || tab) === tab,
-        );
+        const kept = Object.values(st.panes).some((q) => q.ws === ws && (q.tab || tab) === tab);
         if (!kept) {
           st.spaces[ws].tabs = st.spaces[ws].tabs.filter((id: string) => id !== tab);
           delete st.tabs[tab];
@@ -426,10 +505,10 @@ function herdrStubInner(args: string[], stateDir: string): void {
     // A pane with no agent takes no name: the server registers nothing there, so a
     // shell spawn stays unregistered, as on the live server.
     let hosted = false;
-    for (const [known, at] of Object.entries(st.agentPanes) as Array<[string, unknown]>) {
+    for (const [known, at] of Object.entries(st.agentPanes)) {
       if (at === pane) {
         hosted = true;
-        st.agents = st.agents.filter((entry: string) => entry !== known);
+        st.agents = st.agents.filter((entry: string | undefined) => entry !== known);
         delete st.agentPanes[known];
       }
     }
@@ -439,7 +518,7 @@ function herdrStubInner(args: string[], stateDir: string): void {
     return;
   }
   if (command === "agent prompt") {
-    st.prompt.push(args.slice(2));
+    st.prompt!.push(args.slice(2));
     save(path, st);
     if (flag(join(stateDir, "agent.blocked"))) fail("agent_blocked");
     out({ accepted: true });
@@ -533,7 +612,7 @@ function tmuxStubInner(args: string[], stateDir: string): void {
   if (command === "set-option") {
     const target = opt(args, "-t") ?? "";
     if (flag("-p")) {
-      for (const value of Object.values(st.windows) as Array<any>) {
+      for (const value of Object.values(st.windows)) {
         if (value.panes?.[target]) {
           value.panes[target].opts[args[args.length - 2]!] = args[args.length - 1];
           save(path, st);
@@ -563,19 +642,17 @@ function tmuxStubInner(args: string[], stateDir: string): void {
     if (stateFlag("panes.fail")) throw new StubFail(1);
     const target = opt(args, "-t") ?? "";
     if (!st.windows[target]) throw new StubFail(1);
-    for (const [pane, value] of Object.entries(st.windows[target].panes ?? {}) as Array<
-      [string, any]
-    >)
+    for (const [pane, value] of Object.entries(st.windows[target].panes ?? {}))
       console.log(`${pane}\t${value.opts["@postmaster_owned"] ?? ""}`);
     return;
   }
   if (command === "kill-pane") {
     const target = opt(args, "-t") ?? "";
-    for (const [win, value] of Object.entries(st.windows) as Array<[string, any]>) {
+    for (const [win, value] of Object.entries(st.windows)) {
       delete value.panes?.[target];
       if (!Object.keys(value.panes ?? {}).length) {
         delete st.windows[win];
-        if (!Object.values(st.windows).some((entry: any) => entry.session === value.session))
+        if (!Object.values(st.windows).some((entry) => entry.session === value.session))
           st.sessions = st.sessions.filter((session: string) => session !== value.session);
       }
       save(path, st);
@@ -585,14 +662,14 @@ function tmuxStubInner(args: string[], stateDir: string): void {
   if (command === "kill-window") {
     const gone = st.windows[opt(args, "-t") ?? ""];
     delete st.windows[opt(args, "-t") ?? ""];
-    if (gone && !Object.values(st.windows).some((entry: any) => entry.session === gone.session))
+    if (gone && !Object.values(st.windows).some((entry) => entry.session === gone.session))
       st.sessions = st.sessions.filter((session: string) => session !== gone.session);
     save(path, st);
     return;
   }
   if (command === "list-windows") {
     if (stateFlag("tmux.dead") || stateFlag("windows.fail")) throw new StubFail(1);
-    for (const [win, value] of Object.entries(st.windows) as Array<[string, any]>) {
+    for (const [win, value] of Object.entries(st.windows)) {
       if (flag("-a")) {
         if (fmt.includes("#{@postmaster_handle}"))
           console.log(
@@ -983,7 +1060,7 @@ function resetHarness(root: string): void {
 // A test-side read-modify-write of stub state, under the same lock the stubs
 // take: without it an async runner or watcher write lands between the read and
 // the save and one of the two updates is lost.
-function updateHerdrJson(root: string, fn: (st: any) => void): void {
+function updateHerdrJson(root: string, fn: (st: HerdrStubState) => void): void {
   withStubLock(join(root, "stub"), () => {
     const path = join(root, "stub", "herdr.json");
     const st = json(path, { spaces: {}, panes: {}, tabs: {}, open: {} });
@@ -991,7 +1068,7 @@ function updateHerdrJson(root: string, fn: (st: any) => void): void {
     save(path, st);
   });
 }
-function updateTmuxJson(root: string, fn: (st: any) => void): void {
+function updateTmuxJson(root: string, fn: (st: TmuxStubState) => void): void {
   withStubLock(join(root, "stub"), () => {
     const path = join(root, "stub", "tmux.json");
     const st = json(path, { sessions: [], windows: {} });
@@ -1018,7 +1095,7 @@ async function waitTmuxPaneGone(root: string, pane: string): Promise<boolean> {
       for (const value of Object.values(windows)) {
         if (value === null || typeof value !== "object" || Array.isArray(value))
           throw new Error("bad windows");
-        if (pane in ((value as any).panes ?? {})) {
+        if (pane in ((value as TmuxWindow).panes ?? {})) {
           present = true;
           break;
         }
@@ -2550,7 +2627,7 @@ export async function runControls(): Promise<number> {
     await marker(markerPath("t3"));
     const tmuxState = readStubJson(stub, "tmux.json", { sessions: [], windows: {} });
     const cloneWindow = Object.values(tmuxState.windows).some(
-      (window: any) =>
+      (window) =>
         window.session === `postmaster-${basename(f.repo)}` &&
         window.opts["@postmaster_cwd"] === f.clone,
     );
@@ -2708,7 +2785,7 @@ export async function runControls(): Promise<number> {
           data = readFileSync(join(logs, "resume.events"), "utf8");
         } catch {}
         if (
-          !Object.values(st.spaces ?? {}).some((w: any) => w.label === RUN_NAME) &&
+          !Object.values(st.spaces ?? {}).some((w) => w.label === RUN_NAME) &&
           data.split("resume").length - 1 === 2 &&
           data.split("success").length - 1 === 2
         )
@@ -2721,7 +2798,7 @@ export async function runControls(): Promise<number> {
           const st = herdrState();
           const data = readFileSync(join(logs, "resume.events"), "utf8");
           return (
-            !Object.values(st.spaces ?? {}).some((w: any) => w.label === RUN_NAME) &&
+            !Object.values(st.spaces ?? {}).some((w) => w.label === RUN_NAME) &&
             data.split("resume").length - 1 === 2 &&
             data.split("success").length - 1 === 2
           );
@@ -2774,7 +2851,7 @@ export async function runControls(): Promise<number> {
       await waitHerdrPaneGone(root, kvOf(secRun.out, "pane"));
       await pass(
         "a finished review round leaves no reviewer panes or tabs",
-        () => !Object.values(herdrState().spaces ?? {}).some((w: any) => w.label === RUN_NAME),
+        () => !Object.values(herdrState().spaces ?? {}).some((w) => w.label === RUN_NAME),
       );
 
       console.log("run-wide teardown, Herdr (stub)");
@@ -2808,13 +2885,14 @@ export async function runControls(): Promise<number> {
         () => !exec("git", ["-C", f.repo, "worktree", "list", "--porcelain"]).out.includes(f.clone),
       );
       {
-        const st: any = {
+        const st: HerdrStubState = {
           n: 4,
           spaces: {},
           panes: {},
           tabs: {},
           open: {},
           agents: [],
+          agentPanes: {},
           tab_n: {},
         };
         [luna, sol, revBugLuna, f.clone].forEach((cwd, i) => {
@@ -3067,7 +3145,7 @@ export async function runControls(): Promise<number> {
       resetHarness(root);
       {
         const session = `postmaster-${basename(f.repo)}`;
-        const st: any = { n: 4, sessions: [session], windows: {} };
+        const st: TmuxStubState = { n: 4, sessions: [session], windows: {} };
         [luna, sol, revBugLuna, f.clone].forEach((cwd, i) => {
           const win = `@${i + 1}`;
           const pane = `%${i + 1}`;
@@ -3340,7 +3418,7 @@ export async function runControls(): Promise<number> {
         rmSync(join(root, "state", "placements", name), { force: true });
       }
       {
-        const st: any = {
+        const st: HerdrStubState = {
           n: 9,
           spaces: {
             w9: { label: "T-1", tokens: {}, panes: ["p9"], tabs: ["w9:t1"], path: solReal },
@@ -3358,6 +3436,7 @@ export async function runControls(): Promise<number> {
           },
           open: { [solReal]: "w9" },
           agents: [],
+          agentPanes: {},
           tab_n: {},
         };
         save(join(stub, "herdr.json"), st);
@@ -3562,7 +3641,7 @@ export async function runControls(): Promise<number> {
       );
       resetHarness(root);
       {
-        const st: any = {
+        const st: HerdrStubState = {
           n: 9,
           spaces: {
             w9: {
@@ -3584,6 +3663,7 @@ export async function runControls(): Promise<number> {
           tabs: { "w9:t1": { ws: "w9", pane: "p9", cwd: lunaReal, label: "finished" } },
           open: { [lunaReal]: "w9" },
           agents: [],
+          agentPanes: {},
           tab_n: {},
         };
         save(join(stub, "herdr.json"), st);
@@ -3631,7 +3711,7 @@ export async function runControls(): Promise<number> {
         `${createHash("sha256").update("w9:t2").digest("hex")}.json`,
       );
       {
-        const st: any = {
+        const st: HerdrStubState = {
           n: 9,
           spaces: {
             w9: {
@@ -3653,6 +3733,7 @@ export async function runControls(): Promise<number> {
           tabs: { "w9:t2": { ws: "w9", pane: "p9", cwd: lunaReal, label: "finished" } },
           open: { [lunaReal]: "w9" },
           agents: [],
+          agentPanes: {},
           tab_n: {},
         };
         save(join(stub, "herdr.json"), st);
@@ -4663,9 +4744,9 @@ export async function runControls(): Promise<number> {
         return [];
       }
     };
-    const lastRecord = (path: string): any => {
+    const lastRecord = (path: string): Record<string, unknown> => {
       const lines = nonEmptyLines(path);
-      return JSON.parse(lines[lines.length - 1] ?? "");
+      return JSON.parse(lines[lines.length - 1] ?? "") as Record<string, unknown>;
     };
     const safeOutcome = (path: string): string => {
       try {
@@ -6444,10 +6525,10 @@ export async function runControls(): Promise<number> {
     let auditBad: Array<unknown> = [];
     let auditOk = false;
     try {
-      const rows: any[] = [];
+      const rows: Array<Record<string, unknown>> = [];
       for (const l of nonEmptyLines(attemptsPath)) {
         try {
-          rows.push(JSON.parse(l));
+          rows.push(JSON.parse(l) as Record<string, unknown>);
         } catch {
           // A corrupt line is superseded history, not a record to audit.
         }
@@ -6702,9 +6783,9 @@ export async function runControls(): Promise<number> {
       readText(path)
         .split("\n")
         .filter((line) => line !== "")
-        .map((line) => JSON.parse(line))
-        .filter((event: any) => event.subtype === "init")
-        .map((event: any) => String(event.session_id ?? ""))
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .filter((event) => event.subtype === "init")
+        .map((event) => String(event.session_id ?? ""))
         .join(",");
     const lunaWorktree = join(f.repo, ".worktrees/T-1-luna");
     for (const mode of ["herdr", "tmux", "none"]) {
@@ -7016,16 +7097,19 @@ function available(program: string): boolean {
   });
 }
 
-function parseJson(text: string): any {
+function parseJson(text: string): unknown {
   try {
-    return JSON.parse(text);
+    return JSON.parse(text) as unknown;
   } catch {
     return null;
   }
 }
 
-function at(value: any, path: string[]): any {
-  return path.reduce((current, key) => current?.[key], value);
+function at<T = unknown>(value: unknown, path: string[]): T {
+  return path.reduce<unknown>(
+    (current, key) => (current as Record<string, unknown> | null | undefined)?.[key],
+    value,
+  ) as T;
 }
 
 function liveHerdr(...args: string[]): Result {
@@ -7055,10 +7139,10 @@ function value(text: string, path: string[]): string {
 }
 
 function worktreeSpace(text: string, path: string): string {
-  const worktrees = at(parseJson(text), ["result", "worktrees"]);
+  const worktrees = at<Record<string, unknown>[]>(parseJson(text), ["result", "worktrees"]);
   if (!Array.isArray(worktrees)) return "";
-  const worktree = worktrees.find((entry: any) => entry.path === path);
-  return worktree?.open_workspace_id ?? "";
+  const worktree = worktrees.find((entry) => entry.path === path);
+  return (worktree?.open_workspace_id ?? "") as string;
 }
 
 export async function live(): Promise<void> {
@@ -7320,7 +7404,8 @@ export async function live(): Promise<void> {
       const countBefore = Array.isArray(
         at(parseJson(liveHerdr("workspace", "list").out), ["result", "workspaces"]),
       )
-        ? at(parseJson(liveHerdr("workspace", "list").out), ["result", "workspaces"]).length
+        ? at<unknown[]>(parseJson(liveHerdr("workspace", "list").out), ["result", "workspaces"])
+            .length
         : -1;
       const background = liveHost(
         [
@@ -7347,7 +7432,7 @@ export async function live(): Promise<void> {
       );
       const noHostSpaces = liveHerdr("workspace", "list");
       const countAfter = Array.isArray(at(parseJson(noHostSpaces.out), ["result", "workspaces"]))
-        ? at(parseJson(noHostSpaces.out), ["result", "workspaces"]).length
+        ? at<unknown[]>(parseJson(noHostSpaces.out), ["result", "workspaces"]).length
         : -1;
       await pass(
         "no space opens for it",
