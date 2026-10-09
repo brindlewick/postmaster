@@ -1181,6 +1181,19 @@ of this thread, `open` exits 0, and this stage starts from the top. A walled rev
 
 Set the stage first: `<tool>/scripts/run stage <dispatch> shipping`.
 
+List the branch's switch-offs before anything else here: run
+`<tool>/scripts/run landing switch-offs --repo <repo> --default <default-branch>
+--ticket <ticket-branch> --dispatch <dispatch>` before the gate below, and after any code
+change the run makes. Exit 0, the branch is clear. Exit 2, the entries wait on the user's
+word and already carry their reasons: remove what the run should not switch off, keep what
+it should, and paste the list on the card as below. Exit 3 names the entries missing their
+reasons: give each its reason, or remove what it should not switch off and rerun the gate
+and this call. Exit 4 is the user's recorded refusal of a listed entry: remove the entry,
+never argue it into the card. Any other exit is an input fault: stop, fix the inputs and
+re-run. This call is the same check the postmaster runs before it lands the run; its first
+line is the status, and everything after it is the `## Switch-offs` section the card
+carries.
+
 1. **Verify the final HEAD.** Run `<tool>/scripts/run verify run <synthesis-wt> <dispatch>` after
    the last code change; the gate must
    pass before the card is ready. No P1 or P2 finding may remain open.
@@ -1218,7 +1231,9 @@ Set the stage first: `<tool>/scripts/run stage <dispatch> shipping`.
    anywhere in the card; a card quoting `<!--`, in a commit subject or finding title,
    escapes it, for example as `&lt;!--` (the leg's checkpoint is
    `<dispatch>/checkpoint-review.md` after a review leg, `<dispatch>/checkpoint-1.md`
-   when this leg is synthesis); browser suite and QA when
+   when this leg is synthesis); then the `## Switch-offs` section from the call above,
+   pasted after the block as its own section, never retyped, so the card shows the
+   branch's list exactly as the check printed it; browser suite and QA when
    present; the journey report path where a
    check's source names `web-journey`; every ticket turnpike with its
    rounds and result from its checkpoint record, or `none`; the Style residue
