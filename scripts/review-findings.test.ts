@@ -1573,6 +1573,82 @@ describe("harvest conflicts", () => {
     expect(existsSync(got[0]!)).toBe(true);
   });
 
+  test("a task output that is a link into the session folder is harvested", () => {
+    const tree = join(root, "task-tree-session");
+    const sessions = join(root, "session-folder", "project", "session", "subagents");
+    mkdirSync(join(tree, "session", "tasks"), { recursive: true });
+    mkdirSync(sessions, { recursive: true });
+    writeFileSync(join(sessions, "agent-1.jsonl"), "transcript of the review task\n");
+    const named = join(tree, "session", "tasks", "task-1.output");
+    symlinkSync(join(sessions, "agent-1.jsonl"), named);
+    const events = writeEvents("harvest-session-link.events", [
+      { type: "system", subtype: "task_notification", output_file: named },
+    ]);
+    const got = harvest(
+      events,
+      join(root, "logs-session-link"),
+      "session",
+      tree,
+      join(root, "session-folder"),
+    );
+    expect(got.length).toBe(1);
+    expect(readFileSync(got[0]!, "utf8")).toBe("transcript of the review task\n");
+  });
+
+  test("control: a link under the task root that leads elsewhere is still refused", () => {
+    const tree = join(root, "task-tree-elsewhere");
+    mkdirSync(join(tree, "session", "tasks"), { recursive: true });
+    writeFileSync(join(root, "elsewhere-file.txt"), "not a transcript\n");
+    const named = join(tree, "session", "tasks", "task-2.output");
+    symlinkSync(join(root, "elsewhere-file.txt"), named);
+    const events = writeEvents("harvest-elsewhere-link.events", [
+      { type: "system", subtype: "task_notification", output_file: named },
+    ]);
+    let threw: unknown = null;
+    try {
+      harvest(
+        events,
+        join(root, "logs-elsewhere-link"),
+        "elsewhere",
+        tree,
+        join(root, "session-folder"),
+      );
+    } catch (e) {
+      threw = e;
+    }
+    expect(isReportError(threw)).toBe(true);
+    expect(errMsg(threw).includes("outside")).toBe(true);
+  });
+
+  test("control: a path named inside the session folder, with no link under a task root, is refused", () => {
+    const tree = join(root, "task-tree-direct");
+    mkdirSync(tree, { recursive: true });
+    const sessions = join(root, "session-folder-direct", "project", "session", "subagents");
+    mkdirSync(sessions, { recursive: true });
+    writeFileSync(join(sessions, "agent-3.jsonl"), "transcript named directly\n");
+    const events = writeEvents("harvest-direct-session.events", [
+      {
+        type: "system",
+        subtype: "task_notification",
+        output_file: join(sessions, "agent-3.jsonl"),
+      },
+    ]);
+    let threw: unknown = null;
+    try {
+      harvest(
+        events,
+        join(root, "logs-direct-session"),
+        "direct",
+        tree,
+        join(root, "session-folder-direct"),
+      );
+    } catch (e) {
+      threw = e;
+    }
+    expect(isReportError(threw)).toBe(true);
+    expect(errMsg(threw).includes("outside")).toBe(true);
+  });
+
   test("a task file outside the given root is still refused", () => {
     const realRoot = join(root, "task-real");
     mkdirSync(realRoot, { recursive: true });
