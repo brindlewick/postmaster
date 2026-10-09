@@ -96,6 +96,29 @@ const lsNames = (argv: string[]): string => {
 };
 const docs = lsNames(["AGENTS.md", "CLAUDE.md", "README.md", "CONTRIBUTING.md"]);
 const dirs = lsNames(["-d", "wiki", "docs", ".github"]);
+// sed 's/^<prefix> //' | paste -sd' ' -: every line, empty ones included, joined by one space.
+const joinWarn = (text: string, prefix: string): string =>
+  text
+    .replace(/\n+$/u, "")
+    .split("\n")
+    .map((l) => l.replace(prefix, ""))
+    .join(" ");
+// The verifiers' read-first entries join the docs, so a run's implementers
+// read the index first. A listing that fails warns and leaves docs= as today:
+// discovery never refuses a project over its verifiers.
+let verifiers = "";
+const listed = run(beside(import.meta, "run"), ["verifier", "list", ABS], {
+  cwd: toolRoot(import.meta),
+});
+if (listed.code === 0) {
+  verifiers = listed.out
+    .split("\n")
+    .filter((l) => l.startsWith("index: "))
+    .map((l) => l.slice("index: ".length))
+    .join(" ");
+} else {
+  console.error(`warn=verifiers: ${joinWarn(listed.out + listed.err, /^verifier: /u)}`);
+}
 
 // The tracker is visible in how the project already writes commits; nothing to configure.
 const oneline = run("git", ["log", "--oneline", "-200"]).out;
@@ -152,18 +175,13 @@ if (verified.code === 0) {
   }
 } else {
   checks = [];
-  // sed 's/^verify: //' | paste -sd' ' -: every line, empty ones included, joined by one space.
-  const text = (verified.out + verified.err).replace(/\n+$/u, "");
-  const joined = text
-    .split("\n")
-    .map((l) => l.replace(/^verify: /u, ""))
-    .join(" ");
-  console.error(`warn=checks: ${joined}`);
+  console.error(`warn=checks: ${joinWarn(verified.out + verified.err, /^verify: /u)}`);
 }
 
 console.log(`gate=${gate}`);
 console.log(`install=${install}`);
-console.log(`docs=${(docs + dirs).replace(/ *$/u, "")}`);
+const extra = verifiers === "" ? "" : `${verifiers} `;
+console.log(`docs=${(docs + dirs + extra).replace(/ *$/u, "")}`);
 console.log(`tracker=${kind}`);
 console.log(`tracker_prefix=${trackerPrefix}`);
 for (const l of settings.out.replace(/\n$/u, "").split("\n")) console.log(l);
