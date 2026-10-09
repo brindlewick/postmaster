@@ -10,7 +10,7 @@
 //   run github <repo> create <title> <body-file>    new issue on the board in Todo; prints its number
 //                                                  (exit 5: created, but not put on the board)
 //   run github <repo> read <n> [--body]             title, state, labels, body, comments; with
-//                                                  --body, only the body, exactly as stored
+//                                                  read --body prints the stored body followed by one newline
 //   run github <repo> edit <n> <body-file> <base-file>
 //                                                  replace the issue's body; never its title
 //   run github <repo> title <n> <title>             change the issue's title
@@ -334,18 +334,24 @@ function issueOf(owner: string, name: string, nwo: string, number: number): Issu
     "issue(number:$number){number title body state stateReason url createdAt " +
     "labels(first:50){nodes{name}} comments(first:100){nodes{body createdAt author{login}}} " +
     `${ITEMS_QUERY}}}}`;
-  const data = ghj<IssueData>([
-    "api",
-    "graphql",
-    "-f",
-    `query=${q}`,
-    "-F",
-    `owner=${owner}`,
-    "-F",
-    `name=${name}`,
-    "-F",
-    `number=${number}`,
-  ]);
+  let data: IssueData;
+  try {
+    data = ghj<IssueData>([
+      "api",
+      "graphql",
+      "-f",
+      `query=${q}`,
+      "-F",
+      `owner=${owner}`,
+      "-F",
+      `name=${name}`,
+      "-F",
+      `number=${number}`,
+    ]);
+  } catch (e) {
+    if (e instanceof DieError) dieGh(`could not read issue #${number} in ${nwo}: ${e.msg}`);
+    throw e;
+  }
   const iss = data?.data?.repository?.issue;
   if (!iss) dieGh(`no issue #${number} in ${nwo}`);
   const shaped = iss as unknown as Issue;

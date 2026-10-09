@@ -7,5 +7,5 @@
     "postmaster/test-beside-target": "error",
     "typescript/no-explicit-any": "error"
   },
-  "ignorePatterns": ["fixtures/**"]
+  "ignorePatterns": ["fixtures/**", "scripts/lib/vendor/**"]
 }
