@@ -618,7 +618,9 @@ describe("aftercare on a landed run record", () => {
       "300",
     ]);
     expect(started.code).toBe(0);
-    const pid = Number(readFileSync(join(r.T, "watch.pid"), "utf8").trim());
+    const pid = Number(
+      (readFileSync(join(r.T, "watch.pid"), "utf8").trim().split("\n")[0] ?? "").trim(),
+    );
     expect(processIsLive(pid)).toBe(true);
     try {
       const dry = aftercare(r, ["--dry-run", ...WORDS]);
@@ -653,7 +655,9 @@ describe("aftercare on a landed run record", () => {
       "300",
     ]);
     expect(started.code).toBe(0);
-    const pid = Number(readFileSync(join(r.T, "watch.pid"), "utf8").trim());
+    const pid = Number(
+      (readFileSync(join(r.T, "watch.pid"), "utf8").trim().split("\n")[0] ?? "").trim(),
+    );
     expect(processIsLive(pid)).toBe(true);
     try {
       const result = aftercare(r, WORDS);
