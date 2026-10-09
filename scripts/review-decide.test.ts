@@ -1,5 +1,5 @@
 // Tests beside scripts/review-decide.ts, moved from its --self-test on #109; #316 rewrote
-// the cap controls for the rise rule: 55 controls. Each test builds its own run so it
+// the cap controls for the rise rule: 58 controls. Each test builds its own run so it
 // passes alone as well as in file order.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -80,7 +80,7 @@ const checkHas = (r: { code: number; out: string }, exit: number, text: string):
   expect(r.out.includes(text)).toBe(true);
 };
 
-describe("round 1 runs round 2 only when it applied a fix", () => {
+describe("round 1 runs round 2 when it applied a fix or lacked a working reviewer", () => {
   test("round 1 applied a fix", () => {
     const d = newRun("r1-apply");
     logged(d, "finding", "src/a.ts:1", "gating P2 r1 bug luna reading: a defect");
@@ -91,6 +91,29 @@ describe("round 1 runs round 2 only when it applied a fix", () => {
   test("round 1 applied no fix", () => {
     const d = newRun("r1-noapply");
     logged(d, "finding", "src/f.ts:6", "style P3 r1 style luna reading: a style note");
+    checkWhole(decide(d, "1"), 0, "STOP 1: round 1 applied no fixes");
+  });
+
+  test("round 1 with no working reviewer runs round 2", () => {
+    const d = newRun("r1-lacking");
+    logged(d, "finding", "src/f.ts:6", "style P3 r1 style luna reading: a style note");
+    launched(d, "luna", "security", 1);
+    degraded(d, "luna", "security", 1, "r");
+    checkWhole(decide(d, "1"), 0, "RUN 2: round 1 had no working reviewer for security");
+  });
+
+  test("round 1 reviewed at full strength and applied no fix still stops", () => {
+    const d = newRun("r1-reviewed");
+    logged(d, "finding", "src/f.ts:6", "style P3 r1 style luna reading: a style note");
+    launched(d, "luna", "security", 1);
+    checkWhole(decide(d, "1"), 0, "STOP 1: round 1 applied no fixes");
+  });
+
+  test("round 1 with only style degraded still stops", () => {
+    const d = newRun("r1-style-degraded");
+    logged(d, "finding", "src/f.ts:6", "style P3 r1 style luna reading: a style note");
+    launched(d, "luna", "style", 1);
+    degraded(d, "luna", "style", 1, "r");
     checkWhole(decide(d, "1"), 0, "STOP 1: round 1 applied no fixes");
   });
 });
