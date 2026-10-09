@@ -233,7 +233,9 @@ describe("naming", () => {
   });
 
   test("the handle names the repo and the branch, tagged by its path", () => {
-    expect(verifierHandle("/x/app", "verify-cli")).toMatch(/^verifier-app-verify-cli-[0-9a-f]{8}$/u);
+    expect(verifierHandle("/x/app", "verify-cli")).toMatch(
+      /^verifier-app-verify-cli-[0-9a-f]{8}$/u,
+    );
     expect(verifierHandle("/x/app", "verify-cli-2")).toMatch(
       /^verifier-app-verify-cli-2-[0-9a-f]{8}$/u,
     );

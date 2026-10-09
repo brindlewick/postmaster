@@ -821,8 +821,7 @@ function runMakeLaunches(
   }
   logInteractive(dispatch, req.surface, branch, handle, "");
   if (!waitForHandover(wt, cutAt, req.timeout)) {
-    const failed =
-      `the verifier session is still running after ${req.timeout} seconds; it was left open in ${handle}`;
+    const failed = `the verifier session is still running after ${req.timeout} seconds; it was left open in ${handle}`;
     logInteractive(dispatch, req.surface, branch, handle, failed);
     throw new RunError(failed);
   }
