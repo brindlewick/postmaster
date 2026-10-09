@@ -70,7 +70,10 @@ export function makeFx(tag: string): Fx {
   return { root, bin, sys, stub, state, caller, logs };
 }
 
-export function fxEnv(fx: Fx, extra: Record<string, string | undefined> = {}): Record<string, string> {
+export function fxEnv(
+  fx: Fx,
+  extra: Record<string, string | undefined> = {},
+): Record<string, string> {
   const env: Record<string, string> = { ...process.env } as Record<string, string>;
   env.HOME = fx.root;
   env.PATH = `${fx.bin}:${fx.sys}`;
@@ -105,9 +108,7 @@ export function gitInit(repo: string): void {
     throw new Error("git config");
   if (sh("git", ["-C", repo, "config", "user.email", "test@example.invalid"], env).code !== 0)
     throw new Error("git config");
-  if (
-    sh("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], env).code !== 0
-  )
+  if (sh("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], env).code !== 0)
     throw new Error("git commit");
 }
 
@@ -150,7 +151,10 @@ export function writeDispatch(
   );
   const laneEntries: Record<string, unknown> = {};
   for (const lane of lanes) laneEntries[lane] = {};
-  writeFileSync(join(dispatch, "manifest.json"), `${JSON.stringify({ leg: 1, lanes: laneEntries })}\n`);
+  writeFileSync(
+    join(dispatch, "manifest.json"),
+    `${JSON.stringify({ leg: 1, lanes: laneEntries })}\n`,
+  );
   if (reviewers.length)
     writeFileSync(join(dispatch, "logs", "review-r1.json"), `${JSON.stringify({ reviewers })}\n`);
 }
@@ -159,7 +163,16 @@ export function writeDispatch(
 
 export interface HerdrState {
   n: number;
-  spaces: Record<string, { label: string; tokens: Record<string, string>; panes: string[]; tabs: string[]; path: string | null }>;
+  spaces: Record<
+    string,
+    {
+      label: string;
+      tokens: Record<string, string>;
+      panes: string[];
+      tabs: string[];
+      path: string | null;
+    }
+  >;
   panes: Record<string, { ws: string; tab: string; cwd: string; tokens: Record<string, string> }>;
   tabs: Record<string, { ws: string; pane: string; cwd: string; label: string }>;
   tab_n: Record<string, number>;
@@ -170,7 +183,17 @@ export interface HerdrState {
 }
 
 export function freshHerdr(): HerdrState {
-  return { n: 0, spaces: {}, panes: {}, tabs: {}, tab_n: {}, open: {}, agents: [], agentPanes: {}, prompt: [] };
+  return {
+    n: 0,
+    spaces: {},
+    panes: {},
+    tabs: {},
+    tab_n: {},
+    open: {},
+    agents: [],
+    agentPanes: {},
+    prompt: [],
+  };
 }
 
 export function b36(n: number): string {
@@ -182,7 +205,11 @@ export function b36(n: number): string {
   return s;
 }
 
-export function hSpace(st: HerdrState, label: string, path: string | null): { ws: string; tab: string; pane: string } {
+export function hSpace(
+  st: HerdrState,
+  label: string,
+  path: string | null,
+): { ws: string; tab: string; pane: string } {
   st.n++;
   const ws = `w${st.n}`;
   st.tab_n[ws] = 1;
@@ -195,7 +222,12 @@ export function hSpace(st: HerdrState, label: string, path: string | null): { ws
   return { ws, tab, pane };
 }
 
-export function hTab(st: HerdrState, ws: string, cwd: string, label: string): { tab: string; pane: string } {
+export function hTab(
+  st: HerdrState,
+  ws: string,
+  cwd: string,
+  label: string,
+): { tab: string; pane: string } {
   st.tab_n[ws] = (st.tab_n[ws] ?? 0) + 1;
   const tab = `${ws}:t${b36(st.tab_n[ws]!)}`;
   st.n++;
@@ -228,7 +260,15 @@ export function readHerdr(fx: Fx): HerdrState {
 export interface TmuxState {
   n: number;
   sessions: string[];
-  windows: Record<string, { session: string; name: string; opts: Record<string, string>; panes: Record<string, { opts: Record<string, string> }> }>;
+  windows: Record<
+    string,
+    {
+      session: string;
+      name: string;
+      opts: Record<string, string>;
+      panes: Record<string, { opts: Record<string, string> }>;
+    }
+  >;
 }
 
 export function freshTmux(): TmuxState {
@@ -274,11 +314,21 @@ export function readTmux(fx: Fx): TmuxState {
 
 export function place(
   fx: Fx,
-  entry: { workspace: string; tab: string; pane: string; cwd: string; run: string; handle?: string },
+  entry: {
+    workspace: string;
+    tab: string;
+    pane: string;
+    cwd: string;
+    run: string;
+    handle?: string;
+  },
 ): void {
   const dir = join(fx.state, "placements");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, `${createHash("sha256").update(entry.tab).digest("hex")}.json`), `${JSON.stringify(entry)}\n`);
+  writeFileSync(
+    join(dir, `${createHash("sha256").update(entry.tab).digest("hex")}.json`),
+    `${JSON.stringify(entry)}\n`,
+  );
 }
 
 export function readPlacement(fx: Fx, tab: string): Record<string, unknown> {
@@ -310,7 +360,10 @@ export function placementTabs(fx: Fx): string[] {
 
 export function calls(fx: Fx, which: string): string[] {
   try {
-    return readFileSync(join(fx.stub, `${which}.calls`), "utf8").trimEnd().split("\n").filter(Boolean);
+    return readFileSync(join(fx.stub, `${which}.calls`), "utf8")
+      .trimEnd()
+      .split("\n")
+      .filter(Boolean);
   } catch {
     return [];
   }
@@ -404,7 +457,13 @@ export function setupNormal(tag: string): NormalRun {
     [horse, "luna · workhorse · m"],
     [scratch, "solo · style review · m · r1"],
   ] as Array<[string, string]>) {
-    const win = tWindow(tm, session, name, { "@postmaster_cwd": cwd, "@postmaster_run": dispatch }, 1);
+    const win = tWindow(
+      tm,
+      session,
+      name,
+      { "@postmaster_cwd": cwd, "@postmaster_run": dispatch },
+      1,
+    );
     tm.windows[win.win]!.opts["@postmaster_pane"] = win.panes[0]!;
     runWindows.push(win.win);
   }
@@ -420,10 +479,22 @@ export function setupNormal(tag: string): NormalRun {
   tm.windows[wPost.win]!.opts["@postmaster_pane"] = wPost.panes[0]!;
   saveTmux(fx, tm);
   return {
-    fx, repo, dispatch, synth, horse, scratch,
-    runSpace: run.ws, runTabs,
-    projSpace: proj.ws, watcherTab: watcher.tab, watcherPane: watcher.pane, shellTab: proj.tab,
-    session, runWindows, watcherWindow: wWatcher.win, postWindow: wPost.win,
+    fx,
+    repo,
+    dispatch,
+    synth,
+    horse,
+    scratch,
+    runSpace: run.ws,
+    runTabs,
+    projSpace: proj.ws,
+    watcherTab: watcher.tab,
+    watcherPane: watcher.pane,
+    shellTab: proj.tab,
+    session,
+    runWindows,
+    watcherWindow: wWatcher.win,
+    postWindow: wPost.win,
   };
 }
 
@@ -508,7 +579,13 @@ export function setupFixture(tag: string, userTabInCopy: boolean): FixtureRun {
   const outerSp = hSpace(st, "outer", outer);
   const outerWatch = hTab(st, outerSp.ws, outer, "watch · outer");
   st.panes[outerWatch.pane]!.tokens = { postmaster: "launch" };
-  place(fx, { workspace: outerSp.ws, tab: outerWatch.tab, pane: outerWatch.pane, cwd: outer, run: "" });
+  place(fx, {
+    workspace: outerSp.ws,
+    tab: outerWatch.tab,
+    pane: outerWatch.pane,
+    cwd: outer,
+    run: "",
+  });
   st.open[fix] = copy.ws;
   st.open[synth] = run.ws;
   saveHerdr(fx, st);
@@ -521,7 +598,13 @@ export function setupFixture(tag: string, userTabInCopy: boolean): FixtureRun {
     [horse, "luna · workhorse · m"],
     [scratch, "solo · style review · m · r1"],
   ] as Array<[string, string]>) {
-    const win = tWindow(tm, sessionF, name, { "@postmaster_cwd": cwd, "@postmaster_run": dispatch }, 1);
+    const win = tWindow(
+      tm,
+      sessionF,
+      name,
+      { "@postmaster_cwd": cwd, "@postmaster_run": dispatch },
+      1,
+    );
     tm.windows[win.win]!.opts["@postmaster_pane"] = win.panes[0]!;
     runWindows.push(win.win);
   }
@@ -534,12 +617,26 @@ export function setupFixture(tag: string, userTabInCopy: boolean): FixtureRun {
   tm.windows[wOuter.win]!.opts["@postmaster_pane"] = wOuter.panes[0]!;
   saveTmux(fx, tm);
   return {
-    fx, fix, dispatch,
-    runSpace: run.ws, runTabs,
-    fixSpace: copy.ws, pmTab: pm.tab, pmPane: pm.pane, watchTab: watch.tab, watchPane: watch.pane,
-    outer, outerSpace: outerSp.ws, outerTab: outerWatch.tab, outerPane: outerWatch.pane,
-    sessionF, runWindows, watchWindowF: wWatch.win, pmWindowF: wPm.win,
-    sessionO, outerWindow: wOuter.win,
+    fx,
+    fix,
+    dispatch,
+    runSpace: run.ws,
+    runTabs,
+    fixSpace: copy.ws,
+    pmTab: pm.tab,
+    pmPane: pm.pane,
+    watchTab: watch.tab,
+    watchPane: watch.pane,
+    outer,
+    outerSpace: outerSp.ws,
+    outerTab: outerWatch.tab,
+    outerPane: outerWatch.pane,
+    sessionF,
+    runWindows,
+    watchWindowF: wWatch.win,
+    pmWindowF: wPm.win,
+    sessionO,
+    outerWindow: wOuter.win,
   };
 }
 
@@ -558,7 +655,15 @@ export function stubConfig(fx: Fx): string {
   const cfg = join(fx.root, "config.toml");
   writeFileSync(
     cfg,
-    ['[lanes.one]', 'harness = "claude"', 'model = "lane-model"', "", "[team]", 'clerk = { harness = "claude", model = "clerk-model" }', ""].join("\n"),
+    [
+      "[lanes.one]",
+      'harness = "claude"',
+      'model = "lane-model"',
+      "",
+      "[team]",
+      'clerk = { harness = "claude", model = "clerk-model" }',
+      "",
+    ].join("\n"),
   );
   return cfg;
 }
@@ -630,8 +735,14 @@ export function clerkRecord(repo: string, id: string): { handle: string } | null
   }
 }
 
-
-export interface ClerkSession { fx: Fx; repo: string; space: string; tab: string; pane: string; handle: string }
+export interface ClerkSession {
+  fx: Fx;
+  repo: string;
+  space: string;
+  tab: string;
+  pane: string;
+  handle: string;
+}
 
 export function setupSession(tag: string): ClerkSession {
   const fx = makeFx(tag);
@@ -645,7 +756,14 @@ export function setupSession(tag: string): ClerkSession {
   st.agentPanes["clerk-repo-1"] = tab.pane;
   st.open[repo] = proj.ws;
   saveHerdr(fx, st);
-  place(fx, { workspace: proj.ws, tab: tab.tab, pane: tab.pane, cwd: repo, run: "", handle: "clerk-repo-1" });
+  place(fx, {
+    workspace: proj.ws,
+    tab: tab.tab,
+    pane: tab.pane,
+    cwd: repo,
+    run: "",
+    handle: "clerk-repo-1",
+  });
   const tm = freshTmux();
   saveTmux(fx, tm);
   return { fx, repo, space: proj.ws, tab: tab.tab, pane: tab.pane, handle: "clerk-repo-1" };
@@ -660,6 +778,9 @@ export function launchAt(dir: string, state: string): { sleep: number; group: nu
   const start = processStart(pid) ?? "";
   if (!start) throw new Error("no start for sleep");
   mkdirSync(join(state, "launches"), { recursive: true });
-  writeFileSync(join(state, "launches", String(group)), `${dir}\nstop-probe\nmember ${pid} ${start}\nboot ${bootId()}\n`);
+  writeFileSync(
+    join(state, "launches", String(group)),
+    `${dir}\nstop-probe\nmember ${pid} ${start}\nboot ${bootId()}\n`,
+  );
   return { sleep: pid, group };
 }

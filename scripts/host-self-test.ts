@@ -7116,14 +7116,14 @@ export async function live(): Promise<void> {
         `${closed.out}\n${closed.err}\n${tabsAfter.out}`,
       );
       const respawned = liveHost(["spawn", liveHandle, f.repo, "--", "sh"], f.caller, root);
-      await pass(
-        "the handle spawns again",
-        () => respawned.code === 0,
-        respawned.out,
-      );
+      await pass("the handle spawns again", () => respawned.code === 0, respawned.out);
       const closedAgain = liveHost(["close-handle", liveHandle], f.caller, root);
       await pass("closing it again leaves nothing behind", () => closedAgain.code === 0);
-      const missing = liveHost(["close-handle", `never-spawned-${process.pid % 100000}`], f.caller, root);
+      const missing = liveHost(
+        ["close-handle", `never-spawned-${process.pid % 100000}`],
+        f.caller,
+        root,
+      );
       await pass(
         "an unknown handle reports no session, exit 0",
         () => missing.code === 0 && missing.out.includes("no session"),

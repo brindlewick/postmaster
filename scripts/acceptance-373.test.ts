@@ -76,8 +76,7 @@ describe("C1: close-run", () => {
       expect(tm.windows[t.postWindow]).not.toBeUndefined();
       expect(tm.sessions).toContain(t.session);
       const tcalls = calls(t.fx, "tmux");
-      for (const win of t.runWindows)
-        expect(touchesId(tcalls, win).length).toBe(1);
+      for (const win of t.runWindows) expect(touchesId(tcalls, win).length).toBe(1);
       expect(touchesId(tcalls, t.watcherWindow)).toEqual([]);
       expect(touchesId(tcalls, t.postWindow)).toEqual([]);
     } finally {
@@ -238,7 +237,12 @@ describe("a fixture copy's space is marked opened when the flow creates it", () 
     try {
       const fix = makeFixtureRepo(fx, "fixcopy");
       const env = fxEnv(fx, { POSTMASTER_CONFIG: stubConfig(fx) });
-      const r = sh(SELF, ["host", "spawn", "pm-one", fix, "--label", "postmaster", "--", "true"], env, fx.caller);
+      const r = sh(
+        SELF,
+        ["host", "spawn", "pm-one", fix, "--label", "postmaster", "--", "true"],
+        env,
+        fx.caller,
+      );
       expect(r.code).toBe(0);
       const hcalls = calls(fx, "herdr");
       const created = hcalls.find((line) => line.startsWith("workspace\tcreate\t"));
@@ -280,9 +284,24 @@ describe("a fixture copy's space is marked opened when the flow creates it", () 
       const marker = join(fx.logs, "l.done");
       const r = sh(
         SELF,
-        ["host", "run", "luna · workhorse · m", synth, "--under", dispatch, "--run", dispatch,
-          "--out", join(fx.logs, "l.out"), "--err", join(fx.logs, "l.err"), "--marker", marker,
-          "--", "/bin/true"],
+        [
+          "host",
+          "run",
+          "luna · workhorse · m",
+          synth,
+          "--under",
+          dispatch,
+          "--run",
+          dispatch,
+          "--out",
+          join(fx.logs, "l.out"),
+          "--err",
+          join(fx.logs, "l.err"),
+          "--marker",
+          marker,
+          "--",
+          "/bin/true",
+        ],
         env,
         fx.caller,
       );
@@ -307,7 +326,12 @@ describe("a fixture copy's space is marked opened when the flow creates it", () 
       const repo = join(fx.root, "repo");
       gitInit(repo);
       const env = fxEnv(fx, { POSTMASTER_CONFIG: stubConfig(fx) });
-      const r = sh(SELF, ["host", "spawn", "pm-plain", repo, "--label", "postmaster", "--", "true"], env, fx.caller);
+      const r = sh(
+        SELF,
+        ["host", "spawn", "pm-plain", repo, "--label", "postmaster", "--", "true"],
+        env,
+        fx.caller,
+      );
       expect(r.code).toBe(0);
       const st = readHerdr(fx);
       const spaces = Object.keys(st.spaces);
@@ -322,7 +346,6 @@ describe("a fixture copy's space is marked opened when the flow creates it", () 
   });
 });
 describe("close-handle", () => {
-
   test("a recorded session closes its tab and frees its handle", () => {
     const t = setupSession("ch-close");
     try {
@@ -404,7 +427,13 @@ describe("close-handle", () => {
       writeFileSync(join(fx.stub, "herdr.down"), "");
       const tm = freshTmux();
       const session = tmuxSessionFor(repo);
-      const win = tWindow(tm, session, "clerk-repo-1", { "@postmaster_cwd": repo, "@postmaster_handle": "clerk-repo-1" }, 1);
+      const win = tWindow(
+        tm,
+        session,
+        "clerk-repo-1",
+        { "@postmaster_cwd": repo, "@postmaster_handle": "clerk-repo-1" },
+        1,
+      );
       tm.windows[win.win]!.opts["@postmaster_pane"] = win.panes[0]!;
       const other = tWindow(tm, session, "user window", {}, 1);
       saveTmux(fx, tm);
@@ -448,7 +477,10 @@ describe("C2: a clerk session closes once its ticket is marked ready", () => {
     const fx = makeFx("c2");
     try {
       const { repo, id } = clerkRepo(fx);
-      const env = fxEnv(fx, { POSTMASTER_CONFIG: stubConfig(fx), POSTMASTER_CLERK_CLOSE_WAIT: "15" });
+      const env = fxEnv(fx, {
+        POSTMASTER_CONFIG: stubConfig(fx),
+        POSTMASTER_CLERK_CLOSE_WAIT: "15",
+      });
       const started = sh(SELF, ["clerk", "start", repo, id], env, fx.root);
       expect(`${started.out}\n${started.err}`).toContain("opened");
       expect(started.code).toBe(0);
@@ -462,13 +494,21 @@ describe("C2: a clerk session closes once its ticket is marked ready", () => {
 
       const final = join(fx.root, "final.md");
       writeFileSync(final, TWO_PART);
-      const marked = sh(SELF, ["ticket-ready", "mark", repo, id, "--body", final, "--title", "Sorted list"], env, fx.root);
+      const marked = sh(
+        SELF,
+        ["ticket-ready", "mark", repo, id, "--body", final, "--title", "Sorted list"],
+        env,
+        fx.root,
+      );
       expect(marked.code).toBe(0);
       expect(marked.out).toContain("marked ready and queued");
       expect(marked.out).toContain("closes when its turn ends");
 
       expect(
-        await waitFor(() => clerkRecord(repo, id) === null && readHerdr(fx).tabs[tab] === undefined, 30),
+        await waitFor(
+          () => clerkRecord(repo, id) === null && readHerdr(fx).tabs[tab] === undefined,
+          30,
+        ),
       ).toBe(true);
       const hcalls = calls(fx, "herdr");
       expect(hcalls.filter((line) => line === `tab\tclose\t${tab}`).length).toBe(1);
@@ -494,11 +534,18 @@ describe("C2: a clerk session closes once its ticket is marked ready", () => {
       const env = fxEnv(fx, { POSTMASTER_CONFIG: stubConfig(fx) });
       const final = join(fx.root, "final.md");
       writeFileSync(final, TWO_PART);
-      const marked = sh(SELF, ["ticket-ready", "mark", repo, id, "--body", final, "--title", "Sorted list"], env, fx.root);
+      const marked = sh(
+        SELF,
+        ["ticket-ready", "mark", repo, id, "--body", final, "--title", "Sorted list"],
+        env,
+        fx.root,
+      );
       expect(marked.code).toBe(0);
       expect(marked.out).toContain("marked ready and queued");
       expect(marked.out).not.toContain("closes when its turn ends");
-      expect(existsSync(join(repo, ".postmaster", "runs", "postmaster", "clerks", `${id}.close.log`))).toBe(false);
+      expect(
+        existsSync(join(repo, ".postmaster", "runs", "postmaster", "clerks", `${id}.close.log`)),
+      ).toBe(false);
     } finally {
       rmSync(fx.root, { recursive: true, force: true });
     }
@@ -517,7 +564,14 @@ describe("C2: a clerk session closes once its ticket is marked ready", () => {
       st.agentPanes["clerk-repo-1"] = tab.pane;
       saveHerdr(fx, st);
       saveTmux(fx, freshTmux());
-      place(fx, { workspace: proj.ws, tab: tab.tab, pane: tab.pane, cwd: repo, run: "", handle: "clerk-repo-1" });
+      place(fx, {
+        workspace: proj.ws,
+        tab: tab.tab,
+        pane: tab.pane,
+        cwd: repo,
+        run: "",
+        handle: "clerk-repo-1",
+      });
       const dir = join(repo, ".postmaster", "runs", "postmaster", "clerks");
       mkdirSync(dir, { recursive: true });
       writeFileSync(
@@ -537,8 +591,6 @@ describe("C2: a clerk session closes once its ticket is marked ready", () => {
   });
 });
 describe("stop-run on a fixture copy", () => {
-
-
   test("a launch at the copy's root stops; elsewhere it is left alone", async () => {
     const fx = makeFx("stoprun");
     let sleepF = 0;
