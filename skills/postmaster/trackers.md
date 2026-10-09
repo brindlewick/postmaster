@@ -81,7 +81,7 @@ a board name; its owner and the user's GitHub login are machine-side.
 <tool>/scripts/run github <repo> board init                   # create a board named after the repo and link it
 <tool>/scripts/run github <repo> create "<title>" <body-file> # prints the new issue number
 <tool>/scripts/run github <repo> read <n>
-<tool>/scripts/run github <repo> read <n> --body              # the body alone, exactly as stored
+<tool>/scripts/run github <repo> read <n> --body              # the body alone, the stored body followed by one newline
 <tool>/scripts/run github <repo> edit <n> <body-file> <base-file>
 <tool>/scripts/run github <repo> title <n> "<title>"
 <tool>/scripts/run github <repo> label <n> add|remove <label>
@@ -99,7 +99,7 @@ a board name; its owner and the user's GitHub login are machine-side.
   board made from the CLI opens in table layout, and the switch to the board layout is one
   click on the page.
 - **Read:** `read`, which prints the issue with its state worked out from the issue and
-  the board together. `read --body` prints the body alone, exactly as stored.
+  the board together. `read --body` prints the stored body followed by one newline.
 - **Create:** `create` with a body file in the ticket shape; the issue is added to the board
   in Todo. An empty body file is refused, and so is a board with no Todo column, before
   anything is created. An issue created but not put on the board still prints its number, and

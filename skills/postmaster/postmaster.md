@@ -414,7 +414,7 @@ spec and pauses for no spec review.
    what Stage D's WALL step tells them about, and step 6 takes their words.
 2. **Decide within the user's standing instructions** when the question is about the
    work: a within-brief ambiguity, a scope call the ticket's own criteria answer, a round to
-   stop at the cap. A reach is never decided here. A walled workhorse is never yours to drop:
+   stop of the review loop. A reach is never decided here. A walled workhorse is never yours to drop:
    it goes to the user as Stage D's WALL step says. Log `escalate` with your ruling.
 3. **Send it up** when it is genuinely destructive, changes the ticket's scope, touches
    anything outside the repo, is a fault in a control (Tool faults), asks whether to fix a

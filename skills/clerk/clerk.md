@@ -92,8 +92,9 @@ has a `ready` label; your brief command takes that label off first.
 
 ## Mark the ticket ready
 
-Only when the user says it is ready, remove the first-line `DRAFT:` marker from the draft and save
-the final text there. Run both checks again:
+Only when the user says it is ready, read back what they reviewed — the published page when you published one, otherwise the editor's copy — and show them any difference from the draft file. Where the two differ, save the user's version from the document to the draft file and mark that. When you cannot read back what the user reviewed, tell the user so and mark only after they confirm the draft.
+
+Remove the first-line `DRAFT:` marker from the draft and save the final text there. Run both checks again:
 
 ```sh
 <tool>/scripts/run ticket-check --body <draft> --title "<title>" --project <repo>
