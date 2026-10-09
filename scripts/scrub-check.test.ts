@@ -17,6 +17,7 @@ import {
   cleanupScratch,
   commit,
   email,
+  gitAt,
   initRepo,
   opaqueId,
   phone,
@@ -291,6 +292,51 @@ test("an invalid byte in commit metadata refuses by name like file content", () 
   const pass = runScript("scrub-check", [clean.base, "HEAD"], clean.repo);
   expect(pass.status).toBe(1);
   expect(pass.stdout).toContain(clean.sha.slice(0, 7));
+});
+
+test("a merge repeating base-identical binaries passes instead of refusing", () => {
+  // Merging main brings main's delta into the merge diff against the first
+  // parent; blobs identical to the range base are not new content.
+  const repo = initRepo();
+  writeFileSync(join(repo, "seed.txt"), "branch point\n");
+  commit(repo, "seed");
+  gitAt(repo, ["switch", "-q", "-c", "feature"]);
+  writeFileSync(join(repo, "clean.txt"), "nothing sensitive here\n");
+  commit(repo, "add clean file");
+  gitAt(repo, ["switch", "-q", "main"]);
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01, 0x02, 0x03]);
+  writeFileSync(join(repo, "shot.png"), png);
+  commit(repo, "add screenshot");
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  gitAt(repo, ["switch", "-q", "feature"]);
+  gitAt(repo, ["merge", "-q", "--no-edit", "main"]);
+  const scanned = runScript("scrub-check", [base, "HEAD"], repo);
+  expect(scanned.status).toBe(0);
+  expect(scanned.stdout).toBe("");
+});
+
+test("a merge repeating an ascii-first base-identical binary passes", () => {
+  // A binary whose first line is clean text reaches the key-block reader
+  // before any +line refuses; the blob comparison must cover that path too.
+  const repo = initRepo();
+  writeFileSync(join(repo, "seed.txt"), "branch point\n");
+  commit(repo, "seed");
+  gitAt(repo, ["switch", "-q", "-c", "feature"]);
+  writeFileSync(join(repo, "clean.txt"), "nothing sensitive here\n");
+  commit(repo, "add clean file");
+  gitAt(repo, ["switch", "-q", "main"]);
+  const blob = Buffer.concat([
+    Buffer.from("c2VjcmV0YmxvYm1hcmtlcmFiY2Q=\n"),
+    Buffer.from([0x00, 0x01, 0x02, 0x89, 0x50, 0x4e, 0x47]),
+  ]);
+  writeFileSync(join(repo, "mixed.bin"), blob);
+  commit(repo, "add mixed blob");
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  gitAt(repo, ["switch", "-q", "feature"]);
+  gitAt(repo, ["merge", "-q", "--no-edit", "main"]);
+  const scanned = runScript("scrub-check", [base, "HEAD"], repo);
+  expect(scanned.status).toBe(0);
+  expect(scanned.stdout).toBe("");
 });
 
 test("range scan strips git's trailing tab on spaced +++ paths", () => {

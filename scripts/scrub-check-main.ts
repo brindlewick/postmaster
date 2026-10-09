@@ -375,17 +375,44 @@ function citationText(content: Buffer): string {
   return title && source ? "title: citation\nurl: citation" : "";
 }
 
+async function blobMatchesBase(
+  commit: string,
+  base: string,
+  path: string,
+  root: string,
+): Promise<boolean> {
+  // A merge diff repeats the other side's delta against the first parent, and
+  // a revert restores base bytes; in both, a blob identical to the range base
+  // is not new content. Compared only on the refusal path, so the hot path
+  // spawns nothing.
+  if (!path || path === "/dev/null" || base === EMPTY_TREE) return false;
+  const id = (rev: string): string | null => {
+    const out = spawnSync("git", ["rev-parse", "--verify", `${rev}:${path}`], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (out.status !== 0) return null;
+    const text = out.stdout.trim();
+    return text === "" ? null : text;
+  };
+  const want = id(base);
+  return want !== null && want === id(commit);
+}
+
 async function scanPatchSection(
   commit: string,
   patch: string[],
   cite: (path: string) => Promise<string>,
   root: string,
+  base: string,
 ): Promise<FindingRow[]> {
   const nameRows: FindingRow[] = [];
   const rows: FindingRow[] = [];
   let path = "";
   let diffPath = "";
   let newFile = false;
+  let skipFile = false;
   let lineNumber: number | null = null;
   let scanner = new StreamScanner();
   let keyLines: Set<number> | null = null;
@@ -413,6 +440,7 @@ async function scanPatchSection(
       diffPath = parseDiffPath(line);
       lineNumber = null;
       newFile = false;
+      skipFile = false;
       keyLines = null;
       context = "";
       continue;
@@ -435,14 +463,29 @@ async function scanPatchSection(
       continue;
     }
     if (lineNumber === null || !line.startsWith("+")) continue;
+    if (skipFile) continue;
     const text = line.slice(1);
-    refuseUnlessText(text, path);
+    try {
+      refuseUnlessText(text, path);
+    } catch (error) {
+      if (!(error instanceof RefusedError)) throw error;
+      if (!(await blobMatchesBase(commit, base, path, root))) throw error;
+      skipFile = true;
+      continue;
+    }
     if (
       keyLines === null &&
       (/^[A-Za-z0-9+/=]{20,}$/u.test(text.trim()) ||
         /PRIVATE KEY|Private-MAC:|SSH2 ENCRYPTED/u.test(text))
     ) {
-      keyLines = await keyBlockLines(commit, path, root);
+      try {
+        keyLines = await keyBlockLines(commit, path, root);
+      } catch (error) {
+        if (!(error instanceof RefusedError)) throw error;
+        if (!(await blobMatchesBase(commit, base, path, root))) throw error;
+        skipFile = true;
+        continue;
+      }
     }
     const isKey = keyLines?.has(lineNumber) ?? false;
     const result = scanner.feed(lineNumber, text, { keyBlock: isKey, context });
@@ -570,6 +613,7 @@ async function rangeScan(
         section.patch,
         (path) => cite(commit, path),
         root,
+        base,
       );
       for (const row of found) {
         const id = `${row.rule}\0${row.path}\0${row.content ?? ""}`;
@@ -590,6 +634,7 @@ async function rangeScan(
         section.patch,
         (path) => cite(commit, path),
         root,
+        base,
       );
       for (const row of found) {
         // A resolution line already introduced by another parent was scanned at its original commit.
