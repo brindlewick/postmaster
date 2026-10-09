@@ -759,6 +759,47 @@ function resolveLink(repo: string, rev: string, path: string, modes: Map<string,
   return resolved;
 }
 
+/** tryResolveLink resolves, or null where the link does not: for comparing an
+ * unchanged link's target across revisions, where either side may dangle. */
+function tryResolveLink(
+  repo: string,
+  rev: string,
+  path: string,
+  modes: Map<string, string>,
+): string | null {
+  try {
+    return resolveLink(repo, rev, path, modes);
+  } catch {
+    return null;
+  }
+}
+
+/** Links the diff did not touch whose targets changed content between the
+ * revisions: the tools read the target under the link's name, so a
+ * target-only change is the link's change. A link dangling at both ends is
+ * stable, not changed: it carries no content for any tool to read. */
+function changedAliases(
+  repo: string,
+  base: string,
+  head: string,
+  before: Map<string, string>,
+  after: Map<string, string>,
+  changed: Set<string>,
+  wanted: (path: string) => boolean,
+): string[] {
+  const out: string[] = [];
+  for (const [path, mode] of after) {
+    if (mode !== "120000" || changed.has(path) || !wanted(path)) continue;
+    if (before.get(path) !== "120000") continue;
+    const oldAt = tryResolveLink(repo, base, path, before);
+    const newAt = tryResolveLink(repo, head, path, after);
+    const oldText = oldAt === null ? null : blobAt(repo, base, oldAt);
+    const newText = newAt === null ? null : blobAt(repo, head, newAt);
+    if (oldText !== newText) out.push(path);
+  }
+  return out;
+}
+
 function blobShaAt(
   repo: string,
   rev: string,
@@ -778,15 +819,23 @@ function blobShaAt(
  * by file, comment text and place among identical comments, or when the
  * code in its span changed under a comment the base already had: a run that
  * edits inside a main switch-off's window is asked, while one that edits
- * past its block is not. */
+ * past its block is not. An unchanged link whose target changed counts as
+ * changed itself, under the link's name. */
 function addedSwitches(repo: string, base: string, head: string): SwitchEntry[] {
   const before = treeModes(repo, base);
   const after = treeModes(repo, head);
-  const paths = changedPaths(repo, base, head).filter(isSource);
+  const changed = changedPaths(repo, base, head);
+  const aliases = new Set(
+    changedAliases(repo, base, head, before, after, new Set(changed), isSource),
+  );
+  const paths = [...changed.filter(isSource), ...aliases];
   const oldSpans = new Map<string, string[]>();
   for (const path of paths) {
     if (!before.has(path)) continue;
-    const at = resolveLink(repo, base, path, before);
+    const at = aliases.has(path)
+      ? tryResolveLink(repo, base, path, before)
+      : resolveLink(repo, base, path, before);
+    if (at === null) continue;
     const source = blobAt(repo, base, at);
     if (source === null)
       throw new Error(
@@ -906,15 +955,28 @@ interface SettingsEntry {
 function settingsChanges(repo: string, base: string, head: string): SettingsEntry[] {
   const before = treeModes(repo, base);
   const after = treeModes(repo, head);
-  const candidates = changedPaths(repo, base, head)
-    .filter((path) => settingsKind(path) !== null)
-    .sort();
+  const changed = changedPaths(repo, base, head);
+  const aliases = new Set(
+    changedAliases(repo, base, head, before, after, new Set(changed), (path) => {
+      return settingsKind(path) !== null;
+    }),
+  );
+  const candidates = [
+    ...changed.filter((path) => settingsKind(path) !== null),
+    ...aliases,
+  ].sort();
   const result: SettingsEntry[] = [];
   for (const path of candidates) {
     const kind = settingsKind(path)!;
-    const oldText = before.has(path)
-      ? blobAt(repo, base, resolveLink(repo, base, path, before))
-      : null;
+    let oldText: string | null = null;
+    if (before.has(path)) {
+      if (aliases.has(path)) {
+        const at = tryResolveLink(repo, base, path, before);
+        oldText = at === null ? null : blobAt(repo, base, at);
+      } else {
+        oldText = blobAt(repo, base, resolveLink(repo, base, path, before));
+      }
+    }
     const newText = after.has(path)
       ? blobAt(repo, head, resolveLink(repo, head, path, after))
       : null;
