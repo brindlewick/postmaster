@@ -3,7 +3,7 @@
 // commit its checks ran on (C2). Each test builds a scratch run T and drives
 // the real scripts as subprocesses, never importing the change.
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./lib/proc.ts";
@@ -331,6 +331,22 @@ describe("C2: taken in only at the commit its checks ran on", () => {
         },
         { action: "take-in", target: "mimo", detail: `on=wb/T-mimo@${mimoHead}` },
       ]);
+    });
+  });
+
+  test("a broken action line stops the read", () => {
+    withRun((fx) => {
+      laneCommit(fx, "luna", "luna.txt", "luna\n");
+      laneCommit(fx, "mimo", "mimo.txt", "mimo\n");
+      checkLane(fx, "luna");
+      checkLane(fx, "mimo");
+      touchDone(fx, "luna");
+      touchDone(fx, "mimo");
+      appendFileSync(join(fx.dispatch, "actions.jsonl"), "not json\n");
+      const r = takeIn(fx);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("does not parse");
+      expect(readFileSync(join(fx.dispatch, "actions.jsonl"), "utf8")).not.toContain('"take-in"');
     });
   });
 });
