@@ -44,6 +44,9 @@ export type PlaceRow = RulePlace &
     file: string;
     first: boolean;
     fnName: string;
+    /** the lines of the innermost function, 0 and 0 at the module's top level */
+    fnStart: number;
+    fnEnd: number;
     fnTags: readonly Tag[];
     moduleTags: readonly Tag[];
   }>;
@@ -88,6 +91,8 @@ export const placeRows = (
       file,
       first: inFirstCount(p.root, policy),
       fnName: fnPath(out.functions, p.fn),
+      fnStart: f?.startLine ?? 0,
+      fnEnd: f?.endLine ?? 0,
       fnTags: f === undefined ? mod : tagsWithin(out.events, f.start, f.end),
       moduleTags: mod,
     };

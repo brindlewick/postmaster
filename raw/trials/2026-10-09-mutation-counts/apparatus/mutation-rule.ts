@@ -295,7 +295,8 @@ const rule = {
         context.report({
           node,
           message: JSON.stringify({
-            lines: sc.lines.length,
+            // a final newline leaves an empty last element, which is no line of the file
+            lines: sc.lines.length - (sc.lines[sc.lines.length - 1] === "" ? 1 : 0),
             blank,
             imports,
             functions,

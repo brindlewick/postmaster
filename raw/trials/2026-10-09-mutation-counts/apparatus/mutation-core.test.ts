@@ -137,6 +137,17 @@ test("a draw is repeatable, has no repeats, and returns all of a short list", ()
   expect(sample([1, 2, 3], 30, 372)).toEqual([1, 2, 3]);
 });
 
+test("a draw of 30 from 0 to 99 with seed 372, and of 10 from 0 to 29 with seed 373, match a second implementation", () => {
+  // the lists below were made by an independent Python implementation of the same algorithm
+  const hundred = Array.from({ length: 100 }, (_, i) => i);
+  expect(sample(hundred, 30, 372)).toEqual([
+    32, 21, 82, 37, 62, 12, 98, 45, 47, 55, 97, 75, 44, 9, 72, 19, 10, 25, 77, 6, 48, 38, 88, 46,
+    80, 2, 52, 23, 76, 68,
+  ]);
+  const thirty = Array.from({ length: 30 }, (_, i) => i);
+  expect(sample(thirty, 10, 373)).toEqual([29, 0, 20, 23, 24, 13, 17, 19, 5, 1]);
+});
+
 test("the generator's first values are fixed, so a draw reads the same on every machine", () => {
   const next = mulberry32(372);
   expect([next(), next(), next()].map((x) => Math.floor(x * 1e6))).toEqual([
