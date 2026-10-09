@@ -445,10 +445,10 @@ describe("review round 1: the step reads its inputs as they are", () => {
         const r = takeIn(fx);
         expect(r.code).toBe(1);
         expect(r.err).toContain("cannot read");
-        expect(takeLines(fx)).toEqual([]);
       } finally {
         chmodSync(log, 0o644);
       }
+      expect(takeLines(fx)).toEqual([]);
     });
   });
 
