@@ -1376,6 +1376,54 @@ describe("switch-off detection", () => {
     expect(result.code).toBe(2);
     expect(result.out).toContain(".gitignore");
   });
+
+  test("a directive added through an unchanged link's target is listed", () => {
+    // Round 6 luna P2: the link is unchanged, so only its target is in the
+    // diff, and the target's non-source name is filtered before resolving.
+    freshRepo("link-target");
+    git(repo, "checkout", "-q", "main");
+    write("scripts/shared.txt", "export const n: number = 1;\n");
+    symlink("shared.txt", "scripts/example.ts");
+    commit("link and clean target on main");
+    git(repo, "checkout", "-q", "-B", "ticket", "main");
+    write(
+      "scripts/shared.txt",
+      '// @ts-ignore link target reason\nexport const n: number = "not a number";\n',
+    );
+    commit("add directive to target only");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/example.ts:1 ts-ignore");
+  });
+
+  test("a settings change through an unchanged link's target is listed", () => {
+    // Round 6 luna P2, settings side: same root cause through settingsKind.
+    freshRepo("link-settings");
+    git(repo, "checkout", "-q", "main");
+    write("config.txt", '{"rules":{}}\n');
+    symlink("config.txt", ".oxlintrc.json");
+    commit("linked settings on main");
+    git(repo, "checkout", "-q", "-B", "ticket", "main");
+    write("config.txt", '{"rules":{"no-debugger":"off"}}\n');
+    commit("change target only");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain(".oxlintrc.json");
+  });
+
+  test("an edit to same-line code after an inline block disable asks again", () => {
+    // Round 6 mimo low: the open window started after the comment's line.
+    freshRepo("open-line");
+    git(repo, "checkout", "-q", "main");
+    write("scripts/inline.ts", "/* eslint-disable no-debugger -- r */ var z = 1;\n");
+    commit("inline disable on main");
+    git(repo, "checkout", "-q", "-B", "ticket", "main");
+    write("scripts/inline.ts", "/* eslint-disable no-debugger -- r */ var z = 2;\n");
+    commit("edit same-line trailing code");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/inline.ts:1 eslint-disable");
+  });
 });
 
 describe("switch-off units", () => {
