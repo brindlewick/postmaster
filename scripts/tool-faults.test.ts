@@ -2171,9 +2171,13 @@ if (a[0] === "api" && a[1] === "graphql") {
       ];
       const mismatches: string[] = [];
       for (const text of texts) {
-        const want = markers.filter(
-          (p) => run("grep", ["-qiF", "--", p], { input: text }).code === 0,
-        );
+        // File-fed like leaks(): the same binary and matches, without the
+        // stdin pipe an early-exiting grep -q can hang (see leaks()).
+        const want = withTempDir((dir) => {
+          const haystack = join(dir, "haystack.txt");
+          writeFileSync(haystack, text);
+          return markers.filter((p) => run("grep", ["-qiF", "--", p, haystack]).code === 0);
+        }, "tool-faults-oracle-");
         const got = leaks(text, markers);
         if (JSON.stringify(got) !== JSON.stringify(want)) {
           mismatches.push(
