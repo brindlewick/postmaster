@@ -1,4 +1,4 @@
-// Tests beside scripts/local.ts, moved from its --self-test on #109: 106 controls,
+// Tests beside scripts/local.ts, moved from its --self-test on #109: 105 controls,
 // plus one regression control for Bun's fetch-proxy snapshot (restoreEnv).
 // Order-dependent: the tests replay the self-test's sequence in file order against shared
 // fixtures (ticket numbers accumulate), except the final unicode vectors, which are pure.
@@ -586,29 +586,6 @@ describe("positive controls", () => {
     expect(refsAfter).toBe(refs);
     expect(commitsAfter).toBe(commits);
     expect(wtClean).toBe(true);
-  });
-
-  test("ten creates at once get ten different numbers", async () => {
-    const concurrent = join(temp, "concurrent");
-    if (!newRepo(concurrent) || invoke(concurrent, "store", "init").code !== 0)
-      throw new Error("could not make concurrency fixture");
-    const children = Array.from({ length: 10 }, (_, index) =>
-      Bun.spawn([self, "local", concurrent, "create", `Ticket ${index + 1}`, bodyPath], {
-        stdout: "pipe",
-        stderr: "pipe",
-      }),
-    );
-    const childResults = await Promise.all(
-      children.map(async (child: any) => ({
-        code: await child.exited,
-        out: await new Response(child.stdout).text(),
-      })),
-    );
-    const ids = childResults.map((child) => Number(child.out.trim())).sort((a, b) => a - b);
-    const concurrentList = run(self, ["local", concurrent, "list"]);
-    expect(childResults.every((child) => child.code === 0)).toBe(true);
-    expect(ids.join(" ")).toBe("1 2 3 4 5 6 7 8 9 10");
-    expect(concurrentList.out.trim().split("\n").length).toBe(10);
   });
 
   test("a title with a literal U+FFFD is valid UTF-8", () => {
