@@ -101,6 +101,7 @@ describe("C1: the brief lists the checks beside the verifiers", () => {
 describe("C2 and C3: the runbook drives checks through the verifier", () => {
   test("clerk.md carries the rule word for word", () => {
     const clerkMd = readFileSync(join(ROOT, "skills/clerk/clerk.md"), "utf8");
+    // ASCII: widening to Unicode whitespace only folds more runs, never splits a match
     const flat = (s: string): string => s.replace(/\s+/gu, " ");
     expect(flat(clerkMd)).toContain(flat(VERIFIER_RULE));
   });
