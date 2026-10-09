@@ -1424,6 +1424,42 @@ describe("switch-off detection", () => {
     expect(result.code).toBe(2);
     expect(result.out).toContain("scripts/inline.ts:1 eslint-disable");
   });
+
+  test("a symlinked settings change shows the target's diff", () => {
+    // Round 7 luna P2: the link path has no diff, so the user approved blind.
+    freshRepo("link-diff");
+    git(repo, "checkout", "-q", "main");
+    write("probe/config.txt", '{"rules":{}}\n');
+    symlink("config.txt", "probe/.oxlintrc.json");
+    commit("linked settings on main");
+    git(repo, "checkout", "-q", "-B", "ticket", "main");
+    write("probe/config.txt", '{"rules":{"no-debugger":"off"}}\n');
+    commit("change target only");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("no-debugger");
+    expect(result.out).not.toContain("(no textual diff)");
+  });
+
+  test("an edit to code before an inline close asks again", () => {
+    // Round 7 opus lead: the open window stopped before the close's line.
+    freshRepo("close-line");
+    git(repo, "checkout", "-q", "main");
+    write(
+      "scripts/close.js",
+      "/* eslint-disable no-debugger -- r */\ndebugger; /* eslint-enable no-debugger -- r */\n",
+    );
+    commit("close on a code line on main");
+    git(repo, "checkout", "-q", "-B", "ticket", "main");
+    write(
+      "scripts/close.js",
+      "/* eslint-disable no-debugger -- r */\ndebugger; debugger; /* eslint-enable no-debugger -- r */\n",
+    );
+    commit("edit before the close");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/close.js:1 eslint-disable");
+  });
 });
 
 describe("switch-off units", () => {
