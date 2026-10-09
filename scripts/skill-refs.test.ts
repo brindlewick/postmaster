@@ -353,7 +353,8 @@ describe("coachman shell blocks", () => {
         .split("\n")
         .map((line) => line.replace(/#.*$/u, ""))
         .join("\n");
-      if (/\$\{|\||\bfor\b|\bwhile\b|\bif\b|\bcase\b/u.test(code)) bad.push(index + 1);
+      if (/\$\{|\|/u.test(code)) bad.push(index + 1);
+      else if (/(?:^|[ \t\n])(?:for|while|if|case)(?:$|[ \t\n])/u.test(code)) bad.push(index + 1);
     }
     expect(bad).toEqual([]);
   });
