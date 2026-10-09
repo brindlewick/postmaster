@@ -751,14 +751,16 @@ export type SendVerdict = "sent" | "retry" | "failed";
  * Read a `host send --wait` result. Exit 0 settled, and exit 3 short of
  * settling still received the instructions, so both proceed; exit 3 with no
  * turn started means the prompt was dropped and the send goes again; a
- * session at an approval or a question keeps its instructions while the user
- * answers in the watched tab, so it proceeds too. Anything else failed.
+ * session that took the prompt and then stopped at an approval or a question
+ * keeps its instructions while the user answers in the watched tab, so it
+ * proceeds too. A block met before the prompt was accepted never received
+ * it. Anything else failed.
  */
 export function sendVerdict(code: number, output: string): SendVerdict {
   if (code === 0) return "sent";
   if (code === 3 && output.includes("did not settle")) return "sent";
   if (code === 3 && output.includes("no turn start")) return "retry";
-  if (code === 3 && output.includes("approval or a question")) return "sent";
+  if (code === 3 && output.includes("stopped at an approval or a question")) return "sent";
   return "failed";
 }
 
@@ -767,8 +769,8 @@ export function sendVerdict(code: number, output: string): SendVerdict {
  * a dropped prompt as no turn started, and the send goes again, bounded, with
  * a read first (hosts.md). A handle the read cannot reach never registered,
  * so retrying is futile and the failure says so. The runner is injected for
- * tests. On tmux a paste into a shell that is not reading yet still reads as
- * settled, so a drop there is not detected.
+ * tests. Tmux panes exec the harness directly, so the paste waits in the pty
+ * buffer until the harness reads it; no readiness check is needed there.
  */
 export function deliverInstructions(
   runFn: (args: string[]) => { code: number; out: string; err: string },

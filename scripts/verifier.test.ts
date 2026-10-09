@@ -290,9 +290,11 @@ describe("sendVerdict", () => {
     expect(sendVerdict(3, "no Herdr or tmux here")).toBe("failed");
   });
 
-  test("a session at an approval keeps its instructions", () => {
+  test("a block after accepting keeps the prompt; a block before accepting fails", () => {
     expect(sendVerdict(3, "sent; h stopped at an approval or a question")).toBe("sent");
-    expect(sendVerdict(3, "h is at an approval or a question; answer first")).toBe("sent");
+    expect(
+      sendVerdict(3, "h is at an approval or a question; the user answers it in Herdr first"),
+    ).toBe("failed");
   });
 });
 
