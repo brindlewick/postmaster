@@ -210,6 +210,11 @@ function git(repo: string, args: string[]) {
   return run("git", ["-C", repo, ...args], { env });
 }
 
+/** Drop stale worktree registrations, best-effort: a hand-deleted worktree blocks its path. */
+export function pruneWorktrees(repo: string): void {
+  git(repo, ["worktree", "prune"]);
+}
+
 /** The top of the repo holding a path, or null when no repo holds it. */
 export function repoTop(repo: string): string | null {
   const r = git(repo, ["rev-parse", "--show-toplevel"]);
@@ -567,6 +572,7 @@ function runMake(req: ParsedMake): number {
   }
   const base = defaultBase(repo);
   if (base === null) throw new UsageError(`no commit to cut from in ${req.repo}`);
+  pruneWorktrees(repo);
   const branch = pickBranch((name) => branchTaken(repo, name), req.surface);
   const wt = pickWorktree(repo, req.surface, existsSync);
   const vdir = verifyDirName(repo);

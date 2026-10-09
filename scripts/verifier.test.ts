@@ -17,6 +17,7 @@ import {
   parseArgs,
   pickBranch,
   pickWorktree,
+  pruneWorktrees,
   remoteFromSymbolicRef,
   removeProvisioning,
   renderPrompt,
@@ -178,6 +179,26 @@ describe("naming", () => {
     expect(pickWorktree("/x/app", "cli", (p) => p === "/x/app-verify-cli")).toBe(
       "/x/app-verify-cli-2",
     );
+  });
+});
+
+describe("pruneWorktrees", () => {
+  test("a hand-deleted worktree frees its path again", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      const wt = join(dir, "app-verify-cli");
+      gitOrThrow(repo, "worktree", "add", wt, "-b", "verify-cli", "main");
+      rmSync(wt, { recursive: true, force: true });
+      pruneWorktrees(repo);
+      gitOrThrow(repo, "worktree", "add", wt, "-b", "verify-cli-2", "main");
+      expect(gitOrThrow(repo, "branch", "--list", "verify-cli-2")).toContain("verify-cli-2");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
