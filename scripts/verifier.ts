@@ -1,11 +1,15 @@
-// Make a verifier for one surface of a project: one model session, in a worktree of its
-// own, writes the verifier and proves it once before handing it over (#323).
+// Make verifiers for a project's surfaces: one model session, in a worktree of its
+// own, writes one verifier per surface and proves each once before handing over.
+// One surface keeps #323's shape; several share a folder with an index (#324).
 //
-//   run verifier prompt <repo> <surface>
-//   run verifier make <repo> <surface> --run <dispatch> [--timeout <seconds>]
+//   run verifier prompt <repo> <surface>...
+//   run verifier make <repo> <surface>... --run <dispatch> [--timeout <seconds>]
 //
-//   surface    cli | web | library: the surface the verifier covers
-//   prompt     print the session's instructions for the repo and surface
+//   surface    one or more of cli, web, library, cli-examples, browser-suite,
+//              web-journey, library-tests. cli-examples is the command line,
+//              browser-suite and web-journey are web pages, library-tests is
+//              the library interface; names of one surface make one verifier.
+//   prompt     print the session's instructions for the repo and surfaces
 //   make       cut a worktree on a branch of its own beside the repo, removed again
 //              when make fails before any session starts, render the prompt,
 //              launch the coachman role headless through run launch under run host, wait,
@@ -16,8 +20,9 @@
 //
 //   exit 0  prompt printed; make: the session ended with no wall and HANDOVER.md present
 //   exit 1  make failed: the launch would not start, the session was still running at the
-//           limit, both roles walled, the handover, commit or verifier is missing, or the
-//           action was not logged
+//           limit, both roles walled, the handover, commit, verifier, upkeep line or
+//           index entry is missing, a verifier was made for an unlisted surface,
+//           verifier files landed outside the folder, or the action was not logged
 //   exit 2  usage: an unknown command or surface, a missing argument, a bad timeout, a path
 //           that is not a git repository or not its top, a repo holding no commit, or no
 //           run at the dispatch
@@ -34,10 +39,14 @@ import { endingWallMessage, isWallMessage } from "./launch.ts";
 import { beside, scriptsDir } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
 
-const USAGE = `usage: run verifier prompt <repo> <surface>
-       run verifier make <repo> <surface> --run <dispatch> [--timeout <seconds>]
+const USAGE = `usage: run verifier prompt <repo> <surface>...
+       run verifier make <repo> <surface>... --run <dispatch> [--timeout <seconds>]
 
-       surface is cli, web or library`;
+       each surface is cli, web, library, cli-examples, browser-suite, web-journey or library-tests`;
+
+/** The accepted surface names as the unknown-surface error lists them. */
+const KNOWN_SURFACES =
+  "cli, web, library, cli-examples, browser-suite, web-journey or library-tests";
 
 const RUN = beside(import.meta, "run");
 const DEFAULT_TIMEOUT = 3600;
@@ -83,13 +92,13 @@ export function orderKinds(kinds: Surface[]): Surface[] {
 export interface ParsedPrompt {
   cmd: "prompt";
   repo: string;
-  surface: Surface;
+  surfaces: Surface[];
 }
 
 export interface ParsedMake {
   cmd: "make";
   repo: string;
-  surface: Surface;
+  surfaces: Surface[];
   dispatch: string;
   timeout: number;
 }
@@ -101,20 +110,31 @@ export function parseArgs(argv: string[]): Parsed {
   if (cmd === undefined) return { ok: false, error: "no command" };
   if (cmd !== "prompt" && cmd !== "make") return { ok: false, error: `unknown command: ${cmd}` };
   const repo = argv[1];
-  const surface = argv[2];
-  if (repo === undefined || surface === undefined) {
-    return { ok: false, error: `${cmd} takes a repo and a surface` };
+  if (repo === undefined) return { ok: false, error: `${cmd} takes a repo and a surface` };
+  const names: string[] = [];
+  let i = 2;
+  for (; i < argv.length; i++) {
+    const token = argv[i] as string;
+    if (token.startsWith("-")) break;
+    names.push(token);
   }
-  if (!isSurface(surface)) {
-    return { ok: false, error: `unknown surface: ${surface} (cli, web or library)` };
+  if (names.length === 0) return { ok: false, error: `${cmd} takes a repo and a surface` };
+  const kinds: Surface[] = [];
+  for (const name of names) {
+    const kind = surfaceKind(name);
+    if (kind === null) {
+      return { ok: false, error: `unknown surface: ${name} (${KNOWN_SURFACES})` };
+    }
+    kinds.push(kind);
   }
+  const surfaces = orderKinds(kinds);
   if (cmd === "prompt") {
-    if (argv.length !== 3) return { ok: false, error: "prompt takes a repo and a surface" };
-    return { ok: true, req: { cmd, repo, surface } };
+    if (i !== argv.length) return { ok: false, error: "prompt takes a repo and a surface" };
+    return { ok: true, req: { cmd, repo, surfaces } };
   }
   let dispatch: string | null = null;
   let timeout = DEFAULT_TIMEOUT;
-  const rest = argv.slice(3);
+  const rest = argv.slice(i);
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i] as string;
     if (flag === "--run") {
@@ -134,7 +154,7 @@ export function parseArgs(argv: string[]): Parsed {
     }
   }
   if (dispatch === null) return { ok: false, error: "make needs --run <dispatch>" };
-  return { ok: true, req: { cmd, repo, surface, dispatch, timeout } };
+  return { ok: true, req: { cmd, repo, surfaces, dispatch, timeout } };
 }
 
 export interface PromptVars {
@@ -456,21 +476,55 @@ function readTemplate(): string {
 const SINGLE_HANDOVER_RULE =
   "Then write HANDOVER.md at the top of this working\ncopy: what you proved and under which drive name, where the proof file sits as an\nabsolute path (or why there is none), and what you left undone. Send the same text as\nyour final message.";
 
+/** The handover paragraph per verifier when one session makes several. */
+const MULTI_HANDOVER_RULE =
+  "Prove this verifier as above before going on to the next; write the single HANDOVER.md only after every verifier in this session is proven, covering each verifier: what you proved and under which drive name, where each proof file sits as an absolute path (or why there is none), and what you left undone. Send the same text as your final message.";
+
+function readMultiTemplate(): string {
+  return readFileSync(join(scriptsDir(import.meta), "verifier-multi-prompt.md"), "utf8");
+}
+
+/** The session prompt: one body for one surface, a header plus one body per kind. */
+function renderSessionPrompt(repo: string, surfaces: Surface[], base: string): string {
+  const body = readTemplate();
+  if (surfaces.length === 1) {
+    const kind = surfaces[0] as Surface;
+    return renderPrompt(body, {
+      repo,
+      surface: kind,
+      surfaceProse: surfaceProse(kind),
+      verifyDir: verifyDirName(repo),
+      base,
+      handoverRule: SINGLE_HANDOVER_RULE,
+    });
+  }
+  const bodies = surfaces.map((kind) => ({
+    kind,
+    text: renderPrompt(body, {
+      repo,
+      surface: kind,
+      surfaceProse: surfaceProse(kind),
+      verifyDir: `verifier/${kind}`,
+      base,
+      handoverRule: MULTI_HANDOVER_RULE,
+    }),
+  }));
+  return renderTemplate(readMultiTemplate(), {
+    SURFACE_LIST: proseList(surfaces),
+    COUNT: String(surfaces.length),
+    DIR_LINES: dirLines(surfaces),
+    UNLISTED_SENTENCE: unlistedSentence(surfaces),
+    PER_SURFACE: joinBodies(bodies),
+  });
+}
+
 function runPrompt(req: ParsedPrompt): number {
   const repo = resolve(req.repo);
   if (!isRepo(repo)) throw new UsageError(`not a git repository: ${req.repo}`);
   if (!isRepoTop(repo)) throw new UsageError(`not the top of its repository: ${req.repo}`);
   const base = defaultBase(repo);
   if (base === null) throw new UsageError(`no commit to cut from in ${req.repo}`);
-  const out = renderPrompt(readTemplate(), {
-    repo,
-    surface: req.surface,
-    surfaceProse: surfaceProse(req.surface),
-    verifyDir: verifyDirName(repo),
-    base,
-    handoverRule: SINGLE_HANDOVER_RULE,
-  });
-  process.stdout.write(out);
+  process.stdout.write(renderSessionPrompt(repo, req.surfaces, base));
   return 0;
 }
 
@@ -701,9 +755,10 @@ function runMake(req: ParsedMake): number {
   const base = defaultBase(repo);
   if (base === null) throw new UsageError(`no commit to cut from in ${req.repo}`);
   pruneWorktrees(repo);
-  const branch = pickBranch((name) => branchTaken(repo, name), req.surface);
-  const wt = pickWorktree(repo, req.surface, existsSync);
-  const vdir = verifyDirName(repo);
+  const label = req.surfaces.join("-");
+  const branch = pickBranch((name) => branchTaken(repo, name), label);
+  const wt = pickWorktree(repo, label, existsSync);
+  const vdir = req.surfaces.length === 1 ? verifyDirName(repo) : "verifier";
   const added = git(repo, ["worktree", "add", wt, "-b", branch, base]);
   if (added.code !== 0) {
     throw new RunError(`the worktree would not cut: ${added.err.trim() || added.out.trim()}`);
@@ -717,6 +772,54 @@ function runMake(req: ParsedMake): number {
     const extra = outcome.cleanup ? removeProvisioning(repo, wt, branch) : outcome.suffix;
     if (e instanceof RunError && extra !== "") throw new RunError(`${e.message}${extra}`);
     throw e;
+  }
+}
+
+/** Every multi verifier's README, pages, upkeep line and index entry; none unlisted. */
+function checkMultiVerifiers(
+  repo: string,
+  branch: string,
+  base: string,
+  surfaces: Surface[],
+): void {
+  if (!branchHasPath(repo, branch, "verifier/README.md")) {
+    throw new RunError(`the session left no verifier/README.md committed on ${branch}`);
+  }
+  const index = branchFileText(repo, branch, "verifier/README.md") ?? "";
+  for (const kind of surfaces) {
+    if (!branchHasPath(repo, branch, `verifier/${kind}/README.md`)) {
+      throw new RunError(`the session left no verifier/${kind}/README.md committed on ${branch}`);
+    }
+    const pages = committedFeaturePages(repo, branch, `verifier/${kind}`) ?? [];
+    if (pages.length < 3) {
+      throw new RunError(
+        `the session left fewer than 3 feature pages for ${kind} committed on ${branch}`,
+      );
+    }
+    const main = branchFileText(repo, branch, `verifier/${kind}/README.md`) ?? "";
+    if (!hasUpkeepLine(main)) {
+      throw new RunError(`the verifier/${kind}/README.md on ${branch} carries no upkeep line`);
+    }
+    if (!indexNames(index, kind)) {
+      throw new RunError(
+        `the verifier/README.md on ${branch} names no ${surfaceProse(kind)} (${kind}) verifier`,
+      );
+    }
+  }
+  for (const kind of SURFACES) {
+    if (surfaces.includes(kind)) continue;
+    const stray = committedUnder(repo, branch, `verifier/${kind}`) ?? [];
+    if (stray.length > 0) {
+      throw new RunError(`the session made a verifier for unlisted ${kind} on ${branch}`);
+    }
+  }
+  const branchTop = topLevelNames(repo, branch) ?? [];
+  const baseTop = topLevelNames(repo, base) ?? [];
+  const outside = addedVerifyNames(branchTop, baseTop);
+  if (outside.length > 0) {
+    throw new RunError(
+      `the session left verifier files outside verifier/ on ${branch}: ${outside.join(", ")}`,
+    );
   }
 }
 
@@ -735,18 +838,9 @@ function runMakeLaunches(
   const logs = join(dispatch, "logs");
   mkdirSync(logs, { recursive: true });
   const promptFile = join(logs, `verifier-${branch}-prompt.txt`);
-  writeFileSync(
-    promptFile,
-    renderPrompt(readTemplate(), {
-      repo,
-      surface: req.surface,
-      surfaceProse: surfaceProse(req.surface),
-      verifyDir: vdir,
-      base,
-      handoverRule: SINGLE_HANDOVER_RULE,
-    }),
-  );
-  const named = run(RUN, ["host", "name", dispatch, "role", `verifier-${req.surface}`]);
+  writeFileSync(promptFile, renderSessionPrompt(repo, req.surfaces, base));
+  const label = req.surfaces.join("-");
+  const named = run(RUN, ["host", "name", dispatch, "role", `verifier-${label}`]);
   if (named.code !== 0) {
     throw new RunError(`the launch could not be named: ${named.err.trim() || named.out.trim()}`);
   }
@@ -759,7 +853,7 @@ function runMakeLaunches(
       name,
       logs,
       branch,
-      surface: req.surface,
+      surface: label,
       promptFile,
       dispatch,
       timeout: req.timeout,
@@ -776,7 +870,7 @@ function runMakeLaunches(
         name,
         logs,
         branch,
-        surface: req.surface,
+        surface: label,
         promptFile,
         dispatch,
         timeout: req.timeout,
@@ -805,12 +899,16 @@ function runMakeLaunches(
   if (made === 0) {
     throw new RunError(`the session committed nothing on ${branch}`);
   }
-  if (!branchHasPath(wt, branch, `${vdir}/README.md`)) {
-    throw new RunError(`the session left no ${vdir}/README.md committed on ${branch}`);
-  }
-  const pages = committedFeaturePages(wt, branch, vdir) ?? [];
-  if (pages.length < 3) {
-    throw new RunError(`the session left fewer than 3 feature pages committed on ${branch}`);
+  if (req.surfaces.length === 1) {
+    if (!branchHasPath(wt, branch, `${vdir}/README.md`)) {
+      throw new RunError(`the session left no ${vdir}/README.md committed on ${branch}`);
+    }
+    const pages = committedFeaturePages(wt, branch, vdir) ?? [];
+    if (pages.length < 3) {
+      throw new RunError(`the session left fewer than 3 feature pages committed on ${branch}`);
+    }
+  } else {
+    checkMultiVerifiers(wt, branch, base, req.surfaces);
   }
   for (const line of [
     `branch ${branch}`,

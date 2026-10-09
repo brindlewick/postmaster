@@ -55,7 +55,22 @@ describe("parseArgs", () => {
   test("prompt takes a repo and a surface", () => {
     expect(parseArgs(["prompt", "/r", "cli"])).toEqual({
       ok: true,
-      req: { cmd: "prompt", repo: "/r", surface: "cli" },
+      req: { cmd: "prompt", repo: "/r", surfaces: ["cli"] },
+    });
+  });
+
+  test("prompt takes several surfaces as distinct kinds in canonical order", () => {
+    expect(parseArgs(["prompt", "/r", "web", "cli"])).toEqual({
+      ok: true,
+      req: { cmd: "prompt", repo: "/r", surfaces: ["cli", "web"] },
+    });
+    expect(parseArgs(["prompt", "/r", "cli", "cli-examples"])).toEqual({
+      ok: true,
+      req: { cmd: "prompt", repo: "/r", surfaces: ["cli"] },
+    });
+    expect(parseArgs(["prompt", "/r", "browser-suite", "web-journey"])).toEqual({
+      ok: true,
+      req: { cmd: "prompt", repo: "/r", surfaces: ["web"] },
     });
   });
 
@@ -71,8 +86,10 @@ describe("parseArgs", () => {
     });
     expect(parseArgs(["prompt", "/r", "telegraph"])).toEqual({
       ok: false,
-      error: "unknown surface: telegraph (cli, web or library)",
+      error:
+        "unknown surface: telegraph (cli, web, library, cli-examples, browser-suite, web-journey or library-tests)",
     });
+    expect(parseArgs(["prompt", "/r", "cli", "telegraph"]).ok).toBe(false);
   });
 
   test("prompt takes no flags", () => {
@@ -85,11 +102,23 @@ describe("parseArgs", () => {
   test("make needs --run and defaults the timeout", () => {
     expect(parseArgs(["make", "/r", "web", "--run", "/d"])).toEqual({
       ok: true,
-      req: { cmd: "make", repo: "/r", surface: "web", dispatch: "/d", timeout: 3600 },
+      req: { cmd: "make", repo: "/r", surfaces: ["web"], dispatch: "/d", timeout: 3600 },
     });
     expect(parseArgs(["make", "/r", "web", "--run", "/d", "--timeout", "60"])).toEqual({
       ok: true,
-      req: { cmd: "make", repo: "/r", surface: "web", dispatch: "/d", timeout: 60 },
+      req: { cmd: "make", repo: "/r", surfaces: ["web"], dispatch: "/d", timeout: 60 },
+    });
+    expect(
+      parseArgs(["make", "/r", "cli-examples", "browser-suite", "--run", "/d"]),
+    ).toEqual({
+      ok: true,
+      req: {
+        cmd: "make",
+        repo: "/r",
+        surfaces: ["cli", "web"],
+        dispatch: "/d",
+        timeout: 3600,
+      },
     });
   });
 
