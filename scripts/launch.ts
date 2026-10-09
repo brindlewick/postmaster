@@ -48,6 +48,7 @@
 import { spawnSync } from "node:child_process";
 import {
   accessSync,
+  appendFileSync,
   existsSync,
   constants as fsConstants,
   mkdirSync,
@@ -66,6 +67,7 @@ import { startCheck, wrapCommand } from "./lib/confine.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
 import { BOUND_L, BOUND_R, PY_S_CLASS } from "./lib/text.ts";
+import { parseWallReset } from "./lib/wall.ts";
 
 const CONFIG =
   process.env.POSTMASTER_CONFIG ?? join(process.env.HOME ?? "", ".postmaster/config.toml");
@@ -221,6 +223,9 @@ function resolveSpec(
   } else if (name === "postmaster") {
     const team = (cfg.team as Record<string, unknown>) ?? {};
     spec = team.postmaster;
+  } else if (name === "clerk") {
+    const team = (cfg.team as Record<string, unknown>) ?? {};
+    spec = team.clerk;
   } else {
     spec = lanes[name];
   }
@@ -289,6 +294,48 @@ function buildForms(
   runDir: string,
   base: string,
 ): FormsResult {
+  if (cmdMode === "interactive") {
+    const cmd: string[] = [];
+    const launchName = process.env.POSTMASTER_LAUNCH_NAME ?? "";
+    switch (harness) {
+      case "codex":
+        cmd.push("codex", "-m", model);
+        if (effort) cmd.push("-c", `model_reasoning_effort="${effort}"`);
+        cmd.push("--dangerously-bypass-approvals-and-sandbox");
+        break;
+      case "grok":
+        cmd.push("grok", "-m", model);
+        if (effort) cmd.push("--reasoning-effort", effort);
+        cmd.push("--always-approve");
+        break;
+      case "agy":
+        cmd.push("agy", "--model", model, "--dangerously-skip-permissions");
+        break;
+      case "claude":
+        cmd.push("claude", "--model", model);
+        if (effort) cmd.push("--effort", effort);
+        if (launchName) cmd.push("--name", launchName);
+        cmd.push("--dangerously-skip-permissions");
+        break;
+      case "pi":
+        cmd.push("pi", "--model", model);
+        if (effort) cmd.push("--thinking", effort);
+        if (launchName) cmd.push("--name", launchName);
+        cmd.push("--approve");
+        break;
+      case "muse":
+        cmd.push("muse", "--model", model);
+        if (effort) cmd.push("--reasoning-effort", effort);
+        cmd.push("--yolo");
+        break;
+      case "mimo":
+        cmd.push("mimo", "-m", model, "--dangerously-skip-permissions");
+        break;
+      default:
+        die(`no form for harness '${harness}'`);
+    }
+    return { cmd, data: "", stdinFile: "", promptArg: -1 };
+  }
   let data = "";
   let stdinFile = "";
   let promptArg = -1;
@@ -444,8 +491,27 @@ function shellQuote(s: string): string {
   return s.replace(/[ !"#$&'()*,;:<>?[\\\]^`{|}~]/gu, "\\$&");
 }
 
+// Words the form printer leaves unquoted: exactly the placeholders it
+// composes, never a value that merely looks like one. A hostile value such
+// as a ticket title must always pass through shellQuote, or the clerk's
+// print-and-reparse would split it into extra argv words.
+const FORM_PLACEHOLDERS = [
+  "<cwd>",
+  "<prompt-file>",
+  "<thread-id>",
+  "<review-prompt-file>",
+  "<harness-data>",
+  "<key>",
+];
+
 function showArg(a: string): string {
-  if (/^<.*>$/u.test(a) || /=<.*>$/u.test(a) || a === "$(cat <prompt-file>)") return `${a} `;
+  if (a === "$(cat <prompt-file>)") return `${a} `;
+  let glue = a;
+  for (const p of FORM_PLACEHOLDERS) glue = glue.split(p).join("");
+  // A bare placeholder, or placeholders joined by shell-inert glue such as
+  // XDG_DATA_HOME=<harness-data>/muse/<key>, prints as is. Anything else,
+  // with placeholders embedded or not, is quoted: the glue decides.
+  if (glue !== a && /^[A-Za-z0-9_@%+=:,./-]*$/u.test(glue)) return `${a} `;
   return `${shellQuote(a)} `;
 }
 
@@ -506,6 +572,43 @@ function sourcedLaunch(file: string, cmd: string[], level: string): string[] {
   return [
     "-c",
     'SHLVL=$1; export SHLVL; f=$2; shift 2; s=${POSTMASTER_EVENT_STREAM:-}; set -a; . "$f"; set +a; POSTMASTER_EVENT_STREAM=$s; unset POSTMASTER_LAUNCH_NAME POSTMASTER_LAUNCH_ROLE; "$@"; s=$?; exit $s',
+    "_",
+    level,
+    file,
+    ...cmd,
+  ];
+}
+/** As sourcedLaunch, except the harness replaces the shell: for the
+ * interactive form, whose pane lists the session only when the harness is
+ * the pane's own process. The preamble is sourcedLaunch's with one line
+ * added — `env` resolved before the source into a shell variable — and
+ * only the ending differs otherwise: `exec` through `env`, so the harness
+ * keeps the wrapper's pid and foreground group. The sourced file sees the
+ * same positional parameters as under sourcedLaunch.
+ *
+ * The `env` between them defeats what `exec` does to an exported SHLVL,
+ * pinned on bash 5.2: the shell lowers it by one before it replaces
+ * itself (1 becomes 0, a file-set 9 becomes 8, a non-number or an unset
+ * level becomes 0), so a plain `exec "$@"` hands the harness a level it
+ * never had. The assignment on `env` hands the sourced level back
+ * verbatim, whatever it is, and `-u` keeps an unset level unset; neither
+ * depends on the decrement existing, so macOS bash 3.2 behaves the same.
+ * `env` is resolved before the source, while PATH is intact and no
+ * file-defined function is in scope, and travels in
+ * `__postmaster_exec_env`: assigned before `set -a`, so it is never
+ * exported, and `$@` is untouched, so a file reads the same `$1` and `$#`
+ * and a `shift` or `set --` breaks this form as it breaks sourcedLaunch's.
+ * The `:-` fallback covers a file that empties the stash; only assigning
+ * it a wrong non-empty value diverges. `env -u` holds on both shells. An
+ * `exit` in the file still exits without launching.
+ *
+ * Headless launches stay on sourcedLaunch and sourcedPrompted: there the
+ * fork reports a signalled harness as status 128+N, which the launcher
+ * and its wall record read, and an exec would deliver the signal itself. */
+function sourcedExec(file: string, cmd: string[], level: string): string[] {
+  return [
+    "-c",
+    'SHLVL=$1; export SHLVL; f=$2; shift 2; __postmaster_exec_env=$(command -v env); s=${POSTMASTER_EVENT_STREAM:-}; set -a; . "$f"; set +a; POSTMASTER_EVENT_STREAM=$s; unset POSTMASTER_LAUNCH_NAME POSTMASTER_LAUNCH_ROLE; if [ -n "${SHLVL+set}" ]; then exec "${__postmaster_exec_env:-/usr/bin/env}" "SHLVL=$SHLVL" "$@"; else exec "${__postmaster_exec_env:-/usr/bin/env}" -u SHLVL "$@"; fi',
     "_",
     level,
     file,
@@ -669,6 +772,8 @@ const WALL_TOKENS = [
 // wild, each quote alone and beside every transient exemplar. When a run meets a
 // wall phrasing, append it here verbatim with where it was found.
 const WALL_QUOTES = [
+  "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 2:29 AM.",
+  "You've hit your weekly limit · resets 3am (UTC)",
   "You exceeded your current quota, please check your plan and billing details.",
   "quota was exceeded for this key",
   "Error: insufficient_quota",
@@ -992,6 +1097,179 @@ function classifyTransient(
   return { out: "not-transient", code: 1 };
 }
 
+// --- walls: a lane stopped on its provider's usage limit ------------------------------------------
+// A wall is read from the turn's last error record, per harness (harnesses.md, Walls), and
+// nothing else: a final message in prose is not an error record, a failed command's output
+// and a tool's error are not the provider ending the turn, and grok, agy and pi have no
+// recorded shape and are not read (D2). The first line of that record's message is tested
+// with the one token list transient vetoes on, so the flow keeps one list of limit words
+// (D3). The line is written as the launch ends, before run host lands its marker.
+export function isWallMessage(firstLine: string): boolean {
+  return vetoed(firstLine);
+}
+
+function recMessage(v: unknown): string | null {
+  return typeof v === "string" && v.trim() !== "" ? v : null;
+}
+
+function obj(v: unknown): Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : {};
+}
+
+/** The message of the last error record in the stream this launch's harness ended on. */
+export function endingWallMessage(text: string, harness: string): string | null {
+  let found: string | null = null;
+  for (const raw of text.split("\n")) {
+    if (raw.trim() === "") continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (typeof event !== "object" || event === null || Array.isArray(event)) continue;
+    const ev = event as Record<string, unknown>;
+    let msg: string | null = null;
+    if (harness === "codex") {
+      // {"type":"turn.failed","error":{"message":"..."}}
+      if (ev.type === "turn.failed") msg = recMessage(obj(ev.error).message);
+    } else if (harness === "claude") {
+      // {"type":"result","is_error":true,"result":"...","api_error_status":429}
+      if (ev.type === "result" && pyTruthy(ev.is_error)) {
+        msg = recMessage(ev.result);
+        if (msg === null && ev.api_error_status !== undefined && ev.api_error_status !== null) {
+          msg = `error ${pyStr(ev.api_error_status)}`;
+        }
+      }
+    } else if (harness === "mimo") {
+      // {"type":"error","error":{"name":"...","data":{"message":"..."}}} — exits 0 on a
+      // failed turn, so the ending error record alone marks it.
+      if (ev.type === "error") {
+        const err = obj(ev.error);
+        msg = recMessage(obj(err.data).message) ?? recMessage(err.message) ?? recMessage(err.name);
+      }
+    } else if (harness === "muse") {
+      // {"payload_type":"run.terminal.failed","payload":{"reason":"..."}}
+      if (ev.payload_type === "run.terminal.failed") {
+        const p = obj(ev.payload);
+        msg = recMessage(p.reason) ?? recMessage(p.text);
+      }
+    }
+    // grok, agy and pi have no recorded shape: never read.
+    if (msg !== null) found = msg;
+  }
+  return found;
+}
+
+/** The stream's bytes past what the launch found when it started: a resumed stream keeps
+ * its history, and a partial line the earlier attempt left is skipped whole. */
+function readStreamTail(path: string, offset: number): string {
+  let buf: Buffer;
+  try {
+    buf = readFileSync(path);
+  } catch {
+    return "";
+  }
+  if (offset <= 0) return buf.toString("utf8");
+  if (offset >= buf.length) return "";
+  let start = offset;
+  if (buf[start - 1] !== 0x0a) {
+    const nl = buf.indexOf(0x0a, start);
+    start = nl === -1 ? buf.length : nl + 1;
+  }
+  return new TextDecoder("utf-8").decode(buf.subarray(start));
+}
+
+/** The clock a wall's reset counts from: POSTMASTER_CLOCK is the tests' clock. */
+function wallClockNow(): number {
+  const c = process.env.POSTMASTER_CLOCK;
+  if (c !== undefined && /^[0-9]+$/u.test(c)) return Number(c);
+  return Date.now();
+}
+
+/** A summary or blocked file written while this launch ran: the lane delivered first. */
+function deliveredDuringLaunch(cwd: string, launchedAt: number): boolean {
+  for (const f of ["WORKHORSE-SUMMARY.md", "WORKHORSE-BLOCKED.md"]) {
+    try {
+      if (statSync(join(cwd, f)).mtimeMs >= launchedAt) return true;
+    } catch {
+      /* absent */
+    }
+  }
+  return false;
+}
+
+/**
+ * Record the provider wall this launch ended on, if it ended on one. True when a
+ * detected wall could not be recorded: the launch fails closed on that, so the run
+ * investigates instead of proceeding without the user's ruling.
+ */
+function recordWallIfAny(o: {
+  dispatch: string;
+  streamPath: string;
+  offset: number;
+  harness: string;
+  lane: string;
+  role: string; // lane | reviewer
+  cwd: string;
+  stopped: boolean;
+  launchedAt: number;
+}): boolean {
+  if (o.stopped) return false; // stopped mid-run is not a wall (criterion 3)
+  const text = readStreamTail(o.streamPath, o.offset);
+  if (text === "") return false;
+  const message = endingWallMessage(text, o.harness);
+  if (message === null) return false;
+  const first = message.split("\n")[0] ?? "";
+  if (!isWallMessage(first)) return false;
+  if (o.role === "lane" && deliveredDuringLaunch(o.cwd, o.launchedAt)) {
+    return false; // it had delivered its result first
+  }
+  let lens = "-";
+  let round = "-";
+  if (o.role === "reviewer") {
+    const m = /^review-r([0-9]+)-([^-]+)-(.+)$/u.exec(
+      basename(o.streamPath).replace(/\.jsonl$/u, ""),
+    );
+    if (m) {
+      round = m[1]!;
+      lens = m[2]!;
+    }
+  }
+  const roleWord = o.role === "lane" ? "workhorse" : "reviewer";
+  const reset = parseWallReset(message, wallClockNow()) ?? "none";
+  const detail = `${roleWord} ${lens} ${round} ${reset} ${first}`;
+  let recorded = false;
+  let problem = "";
+  try {
+    const r = run(join(scriptsDir(import.meta), "run"), [
+      "log-action",
+      o.dispatch,
+      `lane:${o.lane}`,
+      "wall",
+      o.lane,
+      detail,
+    ]);
+    recorded = r.code === 0;
+    if (!recorded) problem = (r.err || r.out).trim();
+  } catch (e) {
+    problem = String(e).split("\n")[0] ?? "could not run";
+  }
+  if (!recorded) {
+    console.error(`launch: the provider wall on ${o.lane} was not recorded: ${problem}`);
+    // The gates refuse on this marker until the wall is repaired and re-recorded.
+    try {
+      appendFileSync(join(o.dispatch, "logs", `${o.lane}.wall-lost`), `${detail}\n`);
+    } catch {
+      /* nothing further can be recorded */
+    }
+    return true;
+  }
+  return false;
+}
+
 function readRegularFile(path: string, missing: string): string {
   let st;
   try {
@@ -1058,7 +1336,7 @@ if (import.meta.main) {
   }
   if (argv.length < 2)
     die(
-      "usage: run launch form|launch|review|resume|skill <name> ... | thread-id <events-file> | transient <err-file> [<stream-file> [<skip-lines>]] | wall-tokens | wall-quotes",
+      "usage: run launch form|interactive|launch|review|resume|skill <name> ... | thread-id <events-file> | transient <err-file> [<stream-file> [<skip-lines>]] | wall-tokens | wall-quotes",
     );
   const CMD: string = argv[0] ?? "";
   const NAME = argv[1] ?? "";
@@ -1070,6 +1348,7 @@ if (import.meta.main) {
   let LAST = "";
   let RUN = "";
   let PROJECT = "";
+  let SESSION_NAME = "";
   const args: string[] = [];
   let i = 2;
   while (i < argv.length) {
@@ -1090,6 +1369,10 @@ if (import.meta.main) {
       if (i + 1 >= argv.length || !argv[i + 1]) die("--project needs a project directory");
       PROJECT = argv[i + 1] ?? "";
       i += 2;
+    } else if (a === "--name") {
+      if (i + 1 >= argv.length || !argv[i + 1]) die("--name needs a value");
+      SESSION_NAME = argv[i + 1] ?? "";
+      i += 2;
     } else {
       args.push(a ?? "");
       i += 1;
@@ -1098,6 +1381,7 @@ if (import.meta.main) {
   if (NAME === "coachman" && CMD !== "form" && !LEG) {
     die(`coachman needs --leg synthesis, review or ship to ${CMD}`);
   }
+  if (SESSION_NAME) process.env.POSTMASTER_LAUNCH_NAME = SESSION_NAME;
 
   let source: string;
   let recorded = false;
@@ -1128,7 +1412,11 @@ if (import.meta.main) {
   // form shows the wrapped command whenever one applies; it runs no start
   // check. launch, resume and review start the confinement with a no-op, and
   // run the lane unconfined with a warning when it cannot start.
-  const isLane = NAME !== "coachman" && NAME !== "coachman_fallback" && NAME !== "postmaster";
+  const isLane =
+    NAME !== "coachman" &&
+    NAME !== "coachman_fallback" &&
+    NAME !== "postmaster" &&
+    NAME !== "clerk";
   const showWrap = spec.confine && isLane;
   let confineWrap = false;
   if (spec.confine && isLane && CMD !== "skill" && CMD !== "form") {
@@ -1235,6 +1523,12 @@ if (import.meta.main) {
     PROMPT = "<prompt-file>";
     THREAD = "<thread-id>";
     PTEXT = "$(cat <prompt-file>)";
+  } else if (CMD === "interactive") {
+    if (args.length !== 0) die("interactive takes no argument but --project and --name");
+    CWD = PROJECT || process.cwd();
+    PROMPT = "";
+    THREAD = "";
+    PTEXT = "";
   } else if (CMD === "launch") {
     if (args.length !== 2) die("launch needs <cwd> <prompt-file>");
     CWD = args[0] ?? "";
@@ -1326,7 +1620,7 @@ if (import.meta.main) {
       BASE,
     );
 
-  if (CMD === "form") {
+  if (CMD === "form" || CMD === "interactive") {
     const show = (a: string): string => showArg(a);
     const maybeWrap = (cmd: string[]): string[] => {
       if (!showWrap) return cmd;
@@ -1339,6 +1633,15 @@ if (import.meta.main) {
       if (stdinFile) s += `< ${show(stdinFile)}`;
       return s;
     };
+    if (CMD === "interactive") {
+      if (RUN) die("interactive form does not take --run");
+      const interactive = mkForms("interactive");
+      let cmd = interactive.cmd;
+      if (ENV_FILE) cmd = ["bash", ...sourcedExec(ENV_FILE, cmd, "1")];
+      const shown = [`cd ${show(CWD)}&& `, ...cmd.map(show)].join("");
+      process.stdout.write(`launch: ${shown.trimEnd()}\n`);
+      process.exit(0);
+    }
     const launchForms = mkForms("form");
     process.stdout.write(
       `launch: ${put(CWD, maybeWrap(launchForms.cmd), launchForms.stdinFile)}\n`,
@@ -1599,6 +1902,19 @@ exit "$rc"
   }
 
   if (!attemptPhase("started")) die("cannot record that the harness started");
+  // Where this launch's own stream lines begin: a resumed stream keeps the lines it held
+  // when the launch started, and the wall is read only past them.
+  const streamStart = (() => {
+    const p = process.env.POSTMASTER_EVENT_STREAM ?? "";
+    if (p === "") return 0;
+    try {
+      return statSync(p).size;
+    } catch {
+      return 0;
+    }
+  })();
+  // Machine time, not the tests' clock: it is compared against file mtimes.
+  const launchedAt = Date.now();
   const child = spawnSync(cmd, cmdArgs, {
     stdio: STDIN_FILE ? ["ignore", "inherit", "inherit"] : ["inherit", "inherit", "inherit"],
     // Raw bytes, as main's `exec < file` hands them: no UTF-8 decode.
@@ -1606,7 +1922,7 @@ exit "$rc"
     // A sourcing shell starts with SHLVL unset and takes the level as $1.
     ...(freshShell ? { env: { ...process.env, SHLVL: undefined } } : {}),
   });
-  const rc =
+  let rc =
     child.status !== null && child.status !== undefined
       ? child.status
       : child.signal
@@ -1614,6 +1930,24 @@ exit "$rc"
         : 1;
   const stream = process.env.POSTMASTER_EVENT_STREAM ?? "";
   if (RUN && stream) {
+    // Before anything else the wall is read and recorded: run host lands the marker when
+    // this process exits, so the line has to be in actions.jsonl by then.
+    let wallLost = false;
+    if (launchRole === "lane" || launchRole === "reviewer") {
+      wallLost = recordWallIfAny({
+        dispatch: RUN,
+        streamPath: stream,
+        offset: streamStart,
+        harness: HARNESS,
+        lane: NAME,
+        role: launchRole,
+        cwd: CWD,
+        stopped: child.signal !== null && child.signal !== undefined,
+        launchedAt,
+      });
+    }
+    // A detected wall that could not be recorded must not read as a clean end.
+    if (wallLost && rc === 0) rc = 1;
     const r = run(join(scriptsDir(import.meta), "run"), [
       "export-session",
       RUN,

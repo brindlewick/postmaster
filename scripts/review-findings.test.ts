@@ -455,6 +455,40 @@ describe("harvest", () => {
     expect(clobber.err.includes("refusing to overwrite")).toBe(true);
   });
 
+  test("a task output under this system's per-user temporary folder is harvested", () => {
+    const userTmp = join(root, "user-tmp");
+    const taskDir = join(userTmp, `claude-${process.getuid?.() ?? 0}`);
+    mkdirSync(taskDir, { recursive: true });
+    const localOutput = join(taskDir, "task-out.txt");
+    writeFileSync(localOutput, "per-user temp output\n");
+    const events = writeEvents("harvest-tmpdir.events", [
+      { type: "system", subtype: "task_notification", output_file: localOutput },
+    ]);
+    const tmpLogs = join(root, "logs-tmpdir");
+    const r = run(SELF, ["review-findings", "harvest", events, tmpLogs, "--prefix", "tmpdir"], {
+      env: { TMPDIR: userTmp },
+    });
+    expect(r.code).toBe(0);
+    expect(existsSync(join(tmpLogs, "tmpdir-claude-task-01-task-out.txt"))).toBe(true);
+  });
+
+  test("a task output under neither the shared folder nor the per-user one is refused", () => {
+    const elsewhere = join(root, "elsewhere");
+    mkdirSync(elsewhere);
+    const loose = join(elsewhere, "loose.txt");
+    writeFileSync(loose, "loose\n");
+    const events = writeEvents("harvest-loose.events", [
+      { type: "system", subtype: "task_notification", output_file: loose },
+    ]);
+    const looseLogs = join(root, "logs-loose");
+    const r = run(SELF, ["review-findings", "harvest", events, looseLogs, "--prefix", "loose"], {
+      env: { TMPDIR: join(root, "user-tmp") },
+    });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("Claude task output is outside");
+    expect(readdirSync(looseLogs).length).toBe(0);
+  });
+
   const negatives: Array<[string, unknown, string]> = [
     [
       "a task_notification without an output file fails",
@@ -667,7 +701,7 @@ describe("degrade", () => {
     expect(ran.code).toBe(0);
     expect(degraded.length).toBe(1);
     expect(narrative.includes("one bug: DEGRADED,")).toBe(true);
-  }, 60000);
+  });
 });
 
 describe("JSON lists", () => {
@@ -1537,6 +1571,82 @@ describe("harvest conflicts", () => {
     const got = harvest(linkEvents, join(root, "logs-link"), "link", linkRoot);
     expect(got.length).toBe(1);
     expect(existsSync(got[0]!)).toBe(true);
+  });
+
+  test("a task output that is a link into the session folder is harvested", () => {
+    const tree = join(root, "task-tree-session");
+    const sessions = join(root, "session-folder", "project", "session", "subagents");
+    mkdirSync(join(tree, "session", "tasks"), { recursive: true });
+    mkdirSync(sessions, { recursive: true });
+    writeFileSync(join(sessions, "agent-1.jsonl"), "transcript of the review task\n");
+    const named = join(tree, "session", "tasks", "task-1.output");
+    symlinkSync(join(sessions, "agent-1.jsonl"), named);
+    const events = writeEvents("harvest-session-link.events", [
+      { type: "system", subtype: "task_notification", output_file: named },
+    ]);
+    const got = harvest(
+      events,
+      join(root, "logs-session-link"),
+      "session",
+      tree,
+      join(root, "session-folder"),
+    );
+    expect(got.length).toBe(1);
+    expect(readFileSync(got[0]!, "utf8")).toBe("transcript of the review task\n");
+  });
+
+  test("control: a link under the task root that leads elsewhere is still refused", () => {
+    const tree = join(root, "task-tree-elsewhere");
+    mkdirSync(join(tree, "session", "tasks"), { recursive: true });
+    writeFileSync(join(root, "elsewhere-file.txt"), "not a transcript\n");
+    const named = join(tree, "session", "tasks", "task-2.output");
+    symlinkSync(join(root, "elsewhere-file.txt"), named);
+    const events = writeEvents("harvest-elsewhere-link.events", [
+      { type: "system", subtype: "task_notification", output_file: named },
+    ]);
+    let threw: unknown = null;
+    try {
+      harvest(
+        events,
+        join(root, "logs-elsewhere-link"),
+        "elsewhere",
+        tree,
+        join(root, "session-folder"),
+      );
+    } catch (e) {
+      threw = e;
+    }
+    expect(isReportError(threw)).toBe(true);
+    expect(errMsg(threw).includes("outside")).toBe(true);
+  });
+
+  test("control: a path named inside the session folder, with no link under a task root, is refused", () => {
+    const tree = join(root, "task-tree-direct");
+    mkdirSync(tree, { recursive: true });
+    const sessions = join(root, "session-folder-direct", "project", "session", "subagents");
+    mkdirSync(sessions, { recursive: true });
+    writeFileSync(join(sessions, "agent-3.jsonl"), "transcript named directly\n");
+    const events = writeEvents("harvest-direct-session.events", [
+      {
+        type: "system",
+        subtype: "task_notification",
+        output_file: join(sessions, "agent-3.jsonl"),
+      },
+    ]);
+    let threw: unknown = null;
+    try {
+      harvest(
+        events,
+        join(root, "logs-direct-session"),
+        "direct",
+        tree,
+        join(root, "session-folder-direct"),
+      );
+    } catch (e) {
+      threw = e;
+    }
+    expect(isReportError(threw)).toBe(true);
+    expect(errMsg(threw).includes("outside")).toBe(true);
   });
 
   test("a task file outside the given root is still refused", () => {

@@ -1,0 +1,18 @@
+turnpikes.test.ts, tests that survive both mutants of turnpikes.ts: 10
+mutant A of runs-status.ts, run on turnpikes.test.ts, kills 7 of them:
+    a one-leg run's card is GATE
+    a one-leg run closes at done
+    after synthesis the poll says DISPATCH
+    the review leg ends with the card, and no leg follows
+    it closes through the postmaster's stages
+    after ship the card is GATE, and no leg follows
+    a three-leg run keeps its stages
+mutant A of stage.ts, run on turnpikes.test.ts, kills 4 of them:
+    a one-leg run closes at done
+    a one-leg run's stages after the card are the postmaster's
+    it closes through the postmaster's stages
+    a three-leg run keeps its stages
+mutant B of handoff-check.ts, run on turnpikes.test.ts, kills 2 of them:
+    the final synthesis hand-off passes its check
+    the legacy ship hand-off still passes its check
+Together the three mutants kill all 10: 7 + 1 + 2, with "a one-leg run closes at done", "it closes through the postmaster's stages" and "a three-leg run keeps its stages" counted under both runs-status and stage.

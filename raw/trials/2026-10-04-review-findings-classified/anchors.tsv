@@ -1,0 +1,7 @@
+key	expected_label	why_obvious
+202/bug-2	prop	A classifier that already took a string and returned a set. The answer for two commands joined by a newline must be the union of the answers for each; a generator of small commands finds it at once. No effect to separate.
+252/bug-17	prop	A pure function of two strings that matched a log entry by substring. A property says an entry counts only when it equals the comment, and a generator of comment pairs, one holding the other, finds it. No effect to separate.
+252/bug-4	both	A read error caught and turned into an empty list, inside a function that also decides which folders are candidates. As a function of a result that can be an error, a test feeds the error, and the law "an error is not an empty answer" is the property.
+252/bug-22	both	Git calls that honour GIT_DIR and GIT_WORK_TREE from the ambient environment. As a function of an explicit environment, a test sets them; the property is that the result does not depend on the ambient environment.
+268/bug-6	neither	A paragraph of runbook prose that misdescribed a state and a remedy. There is no code to run a property against and no decision to extract.
+268/bug-5	neither	A step the runbook prose omitted (writing a marker file when the run asks the user). No code, and a model of a design that has the step cannot flag prose that forgot it.

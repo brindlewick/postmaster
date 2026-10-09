@@ -12,14 +12,17 @@ import {
   existsSync,
   constants as fsConstants,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readdirSync,
   readFileSync,
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { harnessData, makeHeldDir } from "./launch.ts";
 import { startCheck, wrapCommand } from "./lib/confine.ts";
@@ -117,6 +120,7 @@ beforeAll(() => {
 
     const fixture = (name: string, ...keys: string[]): void => {
       let body = `[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n\n[team]\n`;
+      body += `clerk = { harness = "claude", model = "clerk-model" }\n`;
       body += `coachman = { harness = "claude", model = "coach-model" }\n`;
       body += `coachman_fallback = { harness = "claude", model = "fallback-model" }\n\n[team.coachman_legs]\n`;
       for (const k of keys) body += `${k} = { harness = "claude", model = "${k}-model" }\n`;
@@ -2685,6 +2689,38 @@ beforeAll(() => {
       "launch: cd <cwd> && claude -p ",
       "resume: cd <cwd> && claude -p --resume <thread-id> ",
     );
+    doRun("phase-start", "form", "clerk");
+    printed(
+      "the clerk role resolves from team.clerk",
+      "launch: cd <cwd> && claude -p ",
+      "--model clerk-model",
+    );
+    doRun(
+      "phase-start",
+      "interactive",
+      "clerk",
+      "--project",
+      join(tmp, "repo"),
+      "--name",
+      "#2, Fix the list",
+    );
+    printed(
+      "the clerk interactive form is named for its ticket",
+      `launch: cd ${join(tmp, "repo")} && claude --model clerk-model --name \\#2\\,\\ Fix\\ the\\ list --dangerously-skip-permissions`,
+    );
+    doRun(
+      "phase-start",
+      "interactive",
+      "clerk",
+      "--project",
+      join(tmp, "repo"),
+      "--name",
+      "#1, =< --tools x>",
+    );
+    printed(
+      "a hostile session name prints quoted, never as extra words",
+      `launch: cd ${join(tmp, "repo")} && claude --model clerk-model --name \\#1\\,\\ =\\<\\ --tools\\ x\\> --dangerously-skip-permissions`,
+    );
     writeFileSync(join(tmp, "agy.toml"), '[lanes.g]\nharness = "agy"\nmodel = "agy-model"\n');
     writeFileSync(join(tmp, "bin/agy"), "#!/bin/sh\n");
     chmodSync(join(tmp, "bin/agy"), 0o755);
@@ -3584,7 +3620,7 @@ beforeAll(() => {
       ok(`quote corpus: ${quotes} phrasings wake alone and beside every transient`);
     } else {
       fail(
-        "quote corpus: 23 phrasings wake alone and beside every transient",
+        "quote corpus: 25 phrasings wake alone and beside every transient",
         matrixBad.join("; ") || "empty corpus",
       );
     }
@@ -4561,7 +4597,7 @@ describe("run-recorded effort controls", () => {
         expect(mimoEffortless.out).toContain("--variant high");
       }
     });
-  }, 60000);
+  });
 });
 
 describe("preamble", () => {
@@ -4660,6 +4696,9 @@ describe("positive controls", () => {
   });
   test("form with no --leg shows team.coachman", () => {
     assertControl("form with no --leg shows team.coachman");
+  });
+  test("a hostile session name prints quoted, never as extra words", () => {
+    assertControl("a hostile session name prints quoted, never as extra words");
   });
   test("a lane's env file reaches the harness's environment", () => {
     assertControl("a lane's env file reaches the harness's environment");
@@ -5361,8 +5400,8 @@ describe("structured values: known transients resume, anything else wakes", () =
 });
 
 describe("quote corpus: real wall phrasings wake, alone and beside every transient", () => {
-  test("quote corpus: 23 phrasings wake alone and beside every transient", () => {
-    assertControl("quote corpus: 23 phrasings wake alone and beside every transient");
+  test("quote corpus: 25 phrasings wake alone and beside every transient", () => {
+    assertControl("quote corpus: 25 phrasings wake alone and beside every transient");
   });
   test("a missing error file is refused", () => {
     assertControl("a missing error file is refused");
@@ -5578,5 +5617,471 @@ describe("confinement wiring: form shows the wrap, fallback warns and logs", () 
   });
   test("a fallback that cannot be logged refuses to run", () => {
     assertControl("a fallback that cannot be logged refuses to run");
+  });
+});
+
+// --- the provider wall record: what a launch writes as it ends (C1, C3, C4) ---------------------
+// Tests beside this file for the wall record run launch writes through run host's own step.
+
+const host = join(import.meta.dir, "run");
+
+let tmp = "";
+let bin = "";
+const CLOCK = "1790000000000"; // 2026-09-21T08:53:20Z, pinned in every launch
+
+const CODEX_WALL = JSON.stringify({
+  type: "turn.failed",
+  error: {
+    message:
+      "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 2:29 AM.",
+  },
+});
+const CLAUDE_WALL = JSON.stringify({
+  type: "result",
+  subtype: "success",
+  is_error: true,
+  result: "You've hit your weekly limit · resets 3am (UTC)",
+  api_error_status: 429,
+});
+const MIMO_WALL = JSON.stringify({
+  sessionID: "s-wall",
+  type: "error",
+  error: { name: "UsageLimitError", data: { message: "You have hit your usage limit." } },
+});
+
+interface Dispatch {
+  d: string;
+  wt: string;
+}
+
+function dispatch(name: string): Dispatch {
+  const d = join(tmp, "runs", name);
+  const wt = join(tmp, "wt", name);
+  mkdirSync(join(d, "logs"), { recursive: true });
+  mkdirSync(wt, { recursive: true });
+  // The review form needs a real repo with a HEAD; every worktree has one.
+  spawnSync("git", ["init", "-q", "-b", "main", wt]);
+  spawnSync("git", [
+    "-C",
+    wt,
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@example.invalid",
+    "commit",
+    "-q",
+    "--allow-empty",
+    "-m",
+    "init",
+  ]);
+  writeFileSync(
+    join(d, "run.json"),
+    `${JSON.stringify({
+      config: {
+        lanes: {
+          stub: { harness: "codex", model: "test-model" },
+          mimo: { harness: "mimo", model: "prov/mimo" },
+          sec: { harness: "claude", model: "test-claude" },
+          gr: { harness: "grok", model: "test-grok" },
+        },
+        team: { workhorses: ["stub", "mimo"] },
+      },
+    })}\n`,
+  );
+  writeFileSync(
+    join(d, "brief.md"),
+    `# Waybill: ${name}\nturnpikes: default\n\n## Project profile\nrepo: ${tmp}\n\n## Dispatch\nname: #1, ${name}\ndispatch: ${d}\nsynthesis worktree: ${wt}\ntool: ${join(import.meta.dir, "..")}\n`,
+  );
+  writeFileSync(join(tmp, "prompt.txt"), "Do the work.\n");
+  return { d, wt };
+}
+
+/** Write the stub harness: its stdout is the stream, its exit the launch's. */
+function stub(name: string, script: string): void {
+  writeFileSync(join(bin, name), `#!/bin/sh\n${script}`);
+  chmodSync(join(bin, name), 0o755);
+}
+
+function baseEnv(): Record<string, string | undefined> {
+  return {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH ?? ""}`,
+    POSTMASTER_HOST: "none",
+    POSTMASTER_HOST_STATE: join(tmp, "hoststate"),
+    POSTMASTER_CLOCK: CLOCK,
+    TZ: "UTC",
+  };
+}
+
+/** Wait until a launch's marker file exists: 0 when it does, 1 at the deadline. The marker lands a
+ * second after the stub exits; wait-for-markers, the script the coachman uses, looks every 20
+ * seconds, which suits a lane that runs for hours and cost each wall test 20 seconds. */
+function waitForMarker(dir: string, name: string, seconds: number): number {
+  const path = join(dir, name);
+  const deadline = Date.now() + seconds * 1000;
+  for (;;) {
+    if (existsSync(path)) return 0;
+    if (Date.now() >= deadline) return 1;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+  }
+}
+
+/** The coachman's own launch step; returns once the marker has landed. */
+function launchStep(
+  c: Dispatch,
+  lane: string,
+  kind: "lane" | "reviewer",
+  harnessScript: string,
+  harness: string,
+  out: string,
+  extra: string[] = [],
+): { rc: number; marker: string; actions: string } {
+  stub(harness, harnessScript);
+  const marker = join(c.d, "logs", `${out}.done`);
+  const argv = [
+    host,
+    "host",
+    "run",
+    `${kind} · ${lane}`,
+    c.wt,
+    "--under",
+    c.d,
+    "--role",
+    kind,
+    "--run",
+    c.d,
+    "--out",
+    join(c.d, "logs", `${out}.jsonl`),
+    "--err",
+    join(c.d, "logs", `${out}.err`),
+    "--marker",
+    marker,
+    "--",
+    join(import.meta.dir, "run"),
+    "launch",
+    kind === "reviewer" && extra.includes("review") ? "review" : "launch",
+    ...(kind === "reviewer" && extra.includes("review")
+      ? [lane, c.wt, "HEAD"]
+      : [lane, c.wt, join(tmp, "prompt.txt")]),
+    ...(kind === "reviewer" && extra.includes("review") ? [] : []),
+    "--run",
+    c.d,
+  ];
+  const r = spawnSync("bash", [argv[0]!, ...argv.slice(1)], { encoding: "utf8", env: baseEnv() });
+  const rc = r.status ?? 1;
+  const waited = waitForMarker(join(c.d, "logs"), `${out}.done`, 60);
+  return { rc: waited, marker, actions: join(c.d, "actions.jsonl") };
+}
+
+function wallsIn(actions: string): string[] {
+  let text = "";
+  try {
+    text = readFileSync(actions, "utf8");
+  } catch {
+    return [];
+  }
+  return text.split("\n").filter((l) => l.includes('"action":"wall"'));
+}
+
+beforeAll(() => {
+  tmp = mkdtempSync(join(tmpdir(), "launch-walls-"));
+  bin = join(tmp, "bin");
+  mkdirSync(bin, { recursive: true });
+});
+
+afterAll(() => {
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+describe("C1: a launch that ends on its provider's limit records one wall", () => {
+  test("a codex workhorse wall: one line, its role, the first line byte for byte, the reset", () => {
+    const c = dispatch("c1-codex");
+    const step = launchStep(
+      c,
+      "stub",
+      "lane",
+      `cat <<'EOF'\n${CODEX_WALL}\nEOF\nexit 1\n`,
+      "codex",
+      "stub",
+    );
+    expect(step.rc).toBe(0);
+    const lines = wallsIn(step.actions);
+    expect(lines.length).toBe(1);
+    const rec = JSON.parse(lines[0]!) as { target: string; detail: string; actor: string };
+    expect(rec.target).toBe("stub");
+    expect(rec.actor).toBe("lane:stub");
+    expect(rec.detail).toContain("workhorse - - 2026-09-22T02:29:00Z ");
+    expect(rec.detail).toContain("You’ve hit your usage limit.");
+    // The line was written as the launch ended: no later than the marker.
+    expect(statSync(step.marker).mtimeMs).toBeGreaterThanOrEqual(statSync(step.actions).mtimeMs);
+  });
+
+  test("a claude bug-reviewer wall: the role carries its lens and round, and the reset is UTC", () => {
+    const c = dispatch("c1-claude");
+    const step = launchStep(
+      c,
+      "sec",
+      "reviewer",
+      `cat <<'EOF'\n${CLAUDE_WALL}\nEOF\nexit 1\n`,
+      "claude",
+      "review-r1-bug-sec",
+      ["review"],
+    );
+    expect(step.rc).toBe(0);
+    const lines = wallsIn(step.actions);
+    expect(lines.length).toBe(1);
+    const rec = JSON.parse(lines[0]!) as { target: string; detail: string };
+    expect(rec.target).toBe("sec");
+    expect(rec.detail).toContain("reviewer bug 1 2026-09-22T03:00:00Z ");
+    expect(rec.detail).toContain("You've hit your weekly limit · resets 3am (UTC)");
+  });
+
+  test("a mimo workhorse limit error event with exit 0 still records a wall", () => {
+    const c = dispatch("c1-mimo");
+    const step = launchStep(
+      c,
+      "mimo",
+      "lane",
+      `cat >/dev/null\ncat <<'EOF'\n${MIMO_WALL}\nEOF\nexit 0\n`,
+      "mimo",
+      "mimo",
+    );
+    expect(step.rc).toBe(0);
+    const lines = wallsIn(step.actions);
+    expect(lines.length).toBe(1);
+    const rec = JSON.parse(lines[0]!) as { target: string; detail: string };
+    expect(rec.target).toBe("mimo");
+    expect(rec.detail).toContain("workhorse - - none You have hit your usage limit.");
+  });
+
+  /** run launch straight, reading its own exit: stdout is the stream, as run host arranges. */
+  const directStep = (
+    c: Dispatch,
+    lane: string,
+    out: string,
+  ): { rc: number; err: string; actions: string } => {
+    const streamFile = join(c.d, "logs", `${out}.jsonl`);
+    mkdirSync(join(c.d, "logs"), { recursive: true });
+    const fd = openSync(streamFile, "w");
+    const r = spawnSync(
+      join(import.meta.dir, "run"),
+      ["launch", "launch", lane, c.wt, join(tmp, "prompt.txt"), "--run", c.d],
+      {
+        encoding: "utf8",
+        stdio: ["inherit", fd, "pipe"],
+        env: { ...baseEnv(), POSTMASTER_EVENT_STREAM: streamFile, POSTMASTER_LAUNCH_ROLE: "lane" },
+      },
+    );
+    closeSync(fd);
+    return { rc: r.status ?? 1, err: String(r.stderr ?? ""), actions: join(c.d, "actions.jsonl") };
+  };
+
+  test("a detected wall the log cannot record fails the launch closed", () => {
+    const c = dispatch("c1-lost-wall");
+    stub(
+      "mimo",
+      `cat >/dev/null\nrm -rf ${c.d}/actions.jsonl; mkdir ${c.d}/actions.jsonl\ncat <<'EOF'\n${MIMO_WALL}\nEOF\nexit 0\n`,
+    );
+    const step = directStep(c, "mimo", "mimo-lost");
+    expect(step.rc).toBe(1);
+    expect(step.err).toContain("was not recorded");
+    expect(readFileSync(join(c.d, "logs", "mimo.wall-lost"), "utf8")).toContain(
+      "workhorse - - none You have hit your usage limit.",
+    );
+  });
+
+  test("a recorded mimo wall keeps the harness exit 0 (fail-closed control)", () => {
+    const c = dispatch("c1-kept-wall");
+    stub("mimo", `cat >/dev/null\ncat <<'EOF'\n${MIMO_WALL}\nEOF\nexit 0\n`);
+    const step = directStep(c, "mimo", "mimo-kept");
+    expect(step.rc).toBe(0);
+    expect(wallsIn(step.actions).length).toBe(1);
+    expect(existsSync(join(c.d, "logs", "mimo.wall-lost"))).toBe(false);
+  });
+
+  test("a NUL in the wall message is contained as a lost wall, not a crash", () => {
+    const c = dispatch("c1-nul-wall");
+    const nul = JSON.stringify({
+      sessionID: "s-nul",
+      type: "error",
+      error: {
+        name: "UsageLimitError",
+        data: { message: "You have hit your usage limit.\u0000junk" },
+      },
+    });
+    stub("mimo", `cat >/dev/null\ncat <<'EOF'\n${nul}\nEOF\nexit 0\n`);
+    const step = directStep(c, "mimo", "mimo-nul");
+    expect(step.rc).toBe(1);
+    expect(step.err).toContain("was not recorded");
+    expect(existsSync(join(c.d, "logs", "mimo.wall-lost"))).toBe(true);
+    expect(wallsIn(step.actions).length).toBe(0);
+  });
+});
+
+describe("C3: an ending that is not the provider's limit records no wall", () => {
+  const noWall = (
+    label: string,
+    lane: string,
+    kind: "lane" | "reviewer",
+    script: string,
+    harness: string,
+    out: string,
+    extra: string[] = [],
+  ): void => {
+    test(label, () => {
+      const c = dispatch(`c3-${label.replace(/[^a-z0-9]+/gu, "-").slice(0, 40)}`);
+      const step = launchStep(c, lane, kind, script, harness, out, extra);
+      expect(step.rc).toBe(0);
+      expect(existsSync(step.marker)).toBe(true);
+      expect(wallsIn(step.actions).length).toBe(0);
+    });
+  };
+
+  noWall(
+    "a 504 Gateway Timeout ending records no wall",
+    "stub",
+    "lane",
+    `cat <<'EOF'\n{"type":"turn.failed","error":{"message":"504 Gateway Timeout"}}\nEOF\nexit 1\n`,
+    "codex",
+    "stub-504",
+  );
+  noWall(
+    "a 401 ending records no wall",
+    "sec",
+    "reviewer",
+    `cat <<'EOF'\n{"type":"result","subtype":"error","is_error":true,"result":"401 Unauthorized","api_error_status":401}\nEOF\nexit 1\n`,
+    "claude",
+    "review-r1-bug-sec",
+    ["review"],
+  );
+  noWall(
+    "a failed command whose output says usage and limit records no wall (codex)",
+    "stub",
+    "lane",
+    `cat <<'EOF'\n{"type":"item.completed","item":{"type":"command_execution","status":"failed","command":"npm run check","output":"usage limit reached in usage"}}\n{"type":"turn.completed","usage":{"input_tokens":1}}\nEOF\nexit 0\n`,
+    "codex",
+    "stub-cmd",
+  );
+  noWall(
+    "a failed tool part whose output says usage and limit records no wall (mimo)",
+    "mimo",
+    "lane",
+    `cat >/dev/null\ncat <<'EOF'\n{"sessionID":"s","type":"tool_use","part":{"tool":"bash","state":{"status":"error","output":"usage and limit"}}}\n{"sessionID":"s","type":"step_finish","part":{"reason":"stop"}}\nEOF\nexit 0\n`,
+    "mimo",
+    "mimo-tool",
+  );
+  noWall(
+    "a final message in prose that mentions a usage limit records no wall",
+    "sec",
+    "reviewer",
+    `cat <<'EOF'\n{"type":"result","subtype":"success","is_error":false,"result":"The usage limit should be documented for users."}\nEOF\nexit 0\n`,
+    "claude",
+    "review-r1-style-sec",
+    ["review"],
+  );
+  noWall(
+    "a workhorse that committed WORKHORSE-SUMMARY.md first records no wall",
+    "stub",
+    "lane",
+    `: > WORKHORSE-SUMMARY.md\ncat <<'EOF'\n${CODEX_WALL}\nEOF\nexit 1\n`,
+    "codex",
+    "stub-summary",
+  );
+});
+
+test("C3: a lane stopped mid-run with run host stop records no wall", () => {
+  const c = dispatch("c3-stop");
+  stub("codex", `echo started; sleep 300\n`);
+  const marker = join(c.d, "logs", "stub-stop.done");
+  const child = spawnSync(
+    "bash",
+    [
+      host,
+      "host",
+      "run",
+      "lane · stub",
+      c.wt,
+      "--under",
+      c.d,
+      "--role",
+      "lane",
+      "--run",
+      c.d,
+      "--out",
+      join(c.d, "logs", "stub-stop.jsonl"),
+      "--err",
+      join(c.d, "logs", "stub-stop.err"),
+      "--marker",
+      marker,
+      "--",
+      join(import.meta.dir, "run"),
+      "launch",
+      "launch",
+      "stub",
+      c.wt,
+      join(tmp, "prompt.txt"),
+      "--run",
+      c.d,
+    ],
+    { encoding: "utf8", env: baseEnv() },
+  );
+  expect(child.status ?? 1).toBe(0);
+  // Give the launch its moment, then stop it in its own worktree, as review-round does.
+  spawnSync("sleep", ["1"]);
+  const stopped = spawnSync("bash", [host, "host", "stop", c.wt], {
+    encoding: "utf8",
+    env: baseEnv(),
+  });
+  expect(stopped.status ?? 1).toBe(0);
+  waitForMarker(join(c.d, "logs"), "stub-stop.done", 60);
+  expect(wallsIn(join(c.d, "actions.jsonl")).length).toBe(0);
+}, 90000);
+
+test("C3: a workhorse that committed WORKHORSE-BLOCKED.md first records no wall", () => {
+  const c = dispatch("c3-blocked");
+  const step = launchStep(
+    c,
+    "stub",
+    "lane",
+    `: > WORKHORSE-BLOCKED.md\ncat <<'EOF'\n${CODEX_WALL}\nEOF\nexit 1\n`,
+    "codex",
+    "stub-blocked",
+  );
+  expect(step.rc).toBe(0);
+  expect(existsSync(join(c.wt, "WORKHORSE-BLOCKED.md"))).toBe(true);
+  expect(wallsIn(step.actions).length).toBe(0);
+});
+
+test("C3: a summary older than the launch does not excuse the wall", () => {
+  const c = dispatch("c3-old-summary");
+  const summary = join(c.wt, "WORKHORSE-SUMMARY.md");
+  writeFileSync(summary, "# delivered long ago\n");
+  utimesSync(summary, 946684800, 946684800);
+  const step = launchStep(
+    c,
+    "stub",
+    "lane",
+    `cat <<'EOF'\n${CODEX_WALL}\nEOF\nexit 1\n`,
+    "codex",
+    "stub-old-summary",
+  );
+  expect(step.rc).toBe(0);
+  expect(wallsIn(step.actions).length).toBe(1);
+});
+
+describe("C4: a grok lane ending on a limit message is handled as today", () => {
+  test("no wall line, and the lane ends on its own exit", () => {
+    const c = dispatch("c4-grok");
+    const step = launchStep(
+      c,
+      "gr",
+      "lane",
+      `cat <<'EOF'\n{"type":"error","message":"You have hit your usage limit"}\nEOF\nexit 1\n`,
+      "grok",
+      "gr",
+    );
+    expect(step.rc).toBe(0);
+    expect(existsSync(step.marker)).toBe(true);
+    expect(wallsIn(step.actions).length).toBe(0);
   });
 });

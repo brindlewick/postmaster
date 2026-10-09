@@ -8,7 +8,10 @@
 //   run plane read <IDENT-n> [--body]                 title, state, labels, body, comments; with
 //                                                    --body, the body alone
 //   run plane edit <IDENT-n> <body-file> <base-file>  replace its description; the title stays
+//   run plane title <IDENT-n> <title>                change the work item's title
 //   run plane state <IDENT-n> <state>                 todo | in-progress | blocked | done | cancelled
+//   run plane label <IDENT-n> add|remove <label>      add or remove a label, creating it when
+//                                                    missing; a state change leaves `ready` alone
 //   run plane comment <IDENT-n> <actor> <text>        one comment, dated to the minute, actor first
 //   run plane list <IDENT> [state]                    one line per work item: id, state, title
 //
@@ -1253,6 +1256,64 @@ async function runCommands(): Promise<void> {
       },
     );
     console.log(`${tid}: edited`);
+  } else if (cmd === "title") {
+    if (args.length !== 2) dieP("usage: run plane title <IDENT-n> <title>");
+    const [ident, item] = await itemFor(cfg, args[0]!);
+    const tid = `${ident}-${item.sequence_id}`;
+    await api(
+      cfg,
+      "PATCH",
+      `workspaces/${cfg.WS}/projects/${ref(item.project)}/work-items/${item.id}/`,
+      { name: args[1] },
+    );
+    console.log(`${tid}: title changed`);
+  } else if (cmd === "label") {
+    if (args.length !== 3 || (args[1] !== "add" && args[1] !== "remove"))
+      dieP("usage: run plane label <IDENT-n> add|remove <label>");
+    const verb = args[1] as "add" | "remove";
+    const name = args[2]!;
+    const [ident, item] = await itemFor(cfg, args[0]!);
+    const tid = `${ident}-${item.sequence_id}`;
+    const pid = String(ref(item.project));
+    const labels = await labelsOf(cfg, pid);
+    const current = (item.labels ?? []).map((l: unknown) => ref(l));
+    const named = labels
+      .filter((l: any) => pyLower(l.name) === pyLower(name))
+      .map((l: any) => l.id);
+    let labelId = named[0];
+    if (verb === "add") {
+      if (!labelId) {
+        const created = await api(cfg, "POST", `workspaces/${cfg.WS}/projects/${pid}/labels/`, {
+          name,
+        });
+        labelId = created.id;
+      }
+      const next = [...new Set([...current, labelId])].sort();
+      await api(cfg, "PATCH", `workspaces/${cfg.WS}/projects/${pid}/work-items/${item.id}/`, {
+        labels: next,
+      });
+    } else {
+      const drop = new Set(named);
+      const next = current.filter((l: unknown) => !drop.has(l));
+      await api(cfg, "PATCH", `workspaces/${cfg.WS}/projects/${pid}/work-items/${item.id}/`, {
+        labels: next,
+      });
+    }
+    console.log(`${tid}: label ${verb === "add" ? "added" : "removed"} ${name}`);
+  } else if (cmd === "has-label") {
+    if (args.length !== 2) dieP("usage: run plane has-label <IDENT-n> <label>");
+    const name = args[1]!;
+    const [, item] = await itemFor(cfg, args[0]!);
+    const pid = String(ref(item.project));
+    const labels = await labelsOf(cfg, pid);
+    const names: Record<string, string> = {};
+    for (const l of labels) names[l.id] = l.name;
+    // Exact membership: a label name may itself hold commas, so the
+    // comma-joined `labels:` line is display-only and never parsed back.
+    const has = (item.labels ?? []).some(
+      (l: unknown) => pyLower(names[String(ref(l))] ?? "") === pyLower(name),
+    );
+    console.log(has ? "present" : "absent");
   } else if (cmd === "read") {
     const rest = args.filter((a) => a !== "--body");
     if (rest.length !== 1 || args.length > 2) dieP("usage: run plane read <IDENT-n> [--body]");
@@ -1348,7 +1409,7 @@ async function runCommands(): Promise<void> {
       }
     }
   } else {
-    dieP("usage: run plane projects|create|edit|read|state|comment|list ...");
+    dieP("usage: run plane projects|create|edit|title|read|state|label|comment|list ...");
   }
 }
 
@@ -1357,7 +1418,7 @@ const firstArg = process.argv[2];
 if (import.meta.main) {
   if (!firstArg) {
     try {
-      dieP("usage: run plane projects|create|edit|read|state|comment|list ...");
+      dieP("usage: run plane projects|create|edit|title|read|state|label|comment|list ...");
     } catch (e) {
       fatal(e);
     }

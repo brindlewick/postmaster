@@ -50,11 +50,19 @@ holds = "the detector itself, whole: classification, command and controls"
 
 [[files]]
 path = "scripts/landing.ts"
-holds = "the landing's deterministic checks: landed state, freshness, card rendering and matching, journey gating"
+holds = "the landing's deterministic checks: landed state, freshness, card rendering and matching, journey gating, and the ship card's reach section rendering"
 
 [[files]]
 path = "scripts/runs-watch.ts"
 holds = "the mechanical leg steps, next-leg dispatch and transient remounts, and what wakes the postmaster"
+
+[[files]]
+path = "scripts/walls.ts"
+holds = "the wall record's shape, the ruling refusals, and the escalation a pause writes; the wall's entrypoint: show, open, told, rule, escalate, carry"
+
+[[files]]
+path = "scripts/lib/wall.ts"
+holds = "the reset forms a wall message gives (D4, D5)"
 
 [[files]]
 path = "scripts/run-meta.ts"
@@ -65,16 +73,12 @@ path = "scripts/ticket-check.ts"
 holds = "the flow's one reading of whether a ticket mentions a user journey"
 
 [[files]]
-path = "skills/postmaster/spec-session.md"
-holds = "the spec session role: its brief, the spec copy it edits, the approval handoff"
+path = "scripts/premises.ts"
+holds = "the premise comparison command the coachman invokes before any workhorse starts; the cited-source comparison between the ticket's verified commit and the run base"
 
 [[files]]
-path = "scripts/spec-session.ts"
-holds = "the spec session command the runbooks invoke; the spec brief shape and the approval commit and record"
-
-[[files]]
-path = "scripts/spec-decisions.ts"
-holds = "the spec decisions command the runbooks invoke; the approval stanza shape and the count vocabulary Spec review branches on"
+path = "scripts/ticket-ready.ts"
+holds = "the readiness command the postmaster invokes before every dispatch; the readiness check: both ticket checks plus the ready mark"
 
 [[files]]
 path = "scripts/launch.ts"
@@ -85,9 +89,21 @@ path = "scripts/fixture.ts"
 holds = "the fixture command the flow invokes; the fixture-copy mark new writes, and scoring a run from its records"
 
 [[files]]
-path = "skills/postmaster/workhorse-spec-template.md"
-holds = "the workhorse spec shape, including the per-criterion checks section the brief's loop rests on"
+path = "scripts/reach.ts"
+holds = "lane record reading, round snapshots and restoration"
+
+[[files]]
+path = "scripts/check-target.ts"
+holds = "the main-checkout reach reading the reach check compares against"
+
+[[files]]
+path = "scripts/log-action.ts"
+holds = "the reach action the reach check records"
 
 [[files]]
 path = "scripts/summary-evidence.ts"
 holds = "the evidence-shape enforcement the runbook invokes at harvest"
+
+[[files]]
+path = "scripts/aftercare.ts"
+holds = "the run's cleanup: which folders go, how they are saved, the closing steps and the summary"

@@ -27,6 +27,13 @@ const SELF = join(HERE, "run");
 const SCRIPT = join(HERE, "host-self-test.ts");
 type Result = { code: number; out: string; err: string };
 const sleep = (ms: number) => Bun.sleep(ms);
+
+/** What the stand-in launches do before they finish. A test that checks something while the launch
+ * is still running sets EMIT_GO to a file and creates it when the checks are done, so the launch
+ * ends the moment it is wanted to and never on a timer. EMIT_SLEEP, a number of seconds, is the
+ * older form. The 60 second cap keeps a forgotten file from leaving the launch running. */
+const EMIT_WAIT =
+  'go=$(printenv EMIT_GO); if [ -n "$go" ]; then n=0; while [ ! -e "$go" ] && [ "$n" -lt 1200 ]; do sleep 0.05; n=$((n + 1)); done; else sleep "$(printenv EMIT_SLEEP || printf 0)"; fi';
 function exec(
   program: string,
   args: string[] = [],
@@ -333,7 +340,10 @@ function herdrStubInner(args: string[], stateDir: string): void {
       ws = st.panes[pane].ws;
     save(path, st);
     if (flag(join(stateDir, "pane.dead"))) return;
-    const prefix = flag(join(stateDir, "pane.late")) ? "sleep 5; " : "";
+    const late = flag(join(stateDir, "pane.late"));
+    const prefix = late ? "sleep 5; " : "";
+    // The late pane leaves a note once its command has run, so a test can wait for that and not for a timer.
+    const suffix = late ? `; : > "${join(stateDir, "pane.late.ran")}"` : "";
     const env = {
       PATH: process.env.POSTMASTER_STUB_PANE_PATH ?? process.env.PATH,
       HOME: process.env.HOME,
@@ -346,7 +356,7 @@ function herdrStubInner(args: string[], stateDir: string): void {
       HERDR_WORKSPACE_ID: ws,
     };
     const paneOut = openSync(join(stateDir, `pane-${pane}.out`), "a");
-    const child = spawn("/bin/bash", ["-c", prefix + text], {
+    const child = spawn("/bin/bash", ["-c", prefix + text + suffix], {
       env,
       detached: true,
       stdio: ["ignore", paneOut, paneOut],
@@ -579,7 +589,10 @@ function host(
     TMPDIR: root,
     POSTMASTER_HOST_STATE: join(root, "state"),
     POSTMASTER_HOST_FIXTURE: root,
-    POSTMASTER_HOST_CLAIM_WAIT: "3",
+    // A pane has this long to claim its launch. A pane that is only slow must not fall back to the
+    // background on a loaded machine, so the wait is long; the two tests of a pane that never starts
+    // set their own short one.
+    POSTMASTER_HOST_CLAIM_WAIT: "30",
     POSTMASTER_HOST_CLOSE_WAIT: "3",
     POSTMASTER_HOST_FINISH_DELAY: finishDelay,
     ...(procRoot === undefined ? {} : { POSTMASTER_PROC_ROOT: procRoot }),
@@ -640,12 +653,22 @@ function errStreamEqual(directErrPath: string, launchErrPath: string): boolean {
     .join("\n");
   return readFileSync(directErrPath, "utf8") === kept;
 }
-async function marker(path: string, seconds = 20): Promise<boolean> {
-  for (let i = 0; i < seconds * 10; i++) {
-    if (existsSync(path)) return true;
-    await sleep(100);
+/** Waits for a condition and not for a timer: true the moment `done` holds, false only once
+ * `seconds` have passed without it. A stand-in process that takes milliseconds on a quiet
+ * machine takes seconds on a loaded one, so a test names what it needs to see and bounds the wait
+ * for a hang. A condition that throws, such as a file that is not there yet, has not held yet. */
+export async function waitFor(done: () => boolean, seconds = 30): Promise<boolean> {
+  const deadline = Date.now() + seconds * 1000;
+  for (;;) {
+    try {
+      if (done()) return true;
+    } catch {}
+    if (Date.now() >= deadline) return false;
+    await sleep(50);
   }
-  return existsSync(path);
+}
+function marker(path: string, seconds = 20): Promise<boolean> {
+  return waitFor(() => existsSync(path), seconds);
 }
 async function setup(
   root: string,
@@ -713,7 +736,7 @@ async function setup(
       'printf \'{"type":"system","subtype":"init","session_id":"fixed-1","model":"m"}\\n\'',
       'printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"step one"}]}}\\n\'',
       "printf 'a line on stderr\\n' >&2",
-      'sleep "$(printenv EMIT_SLEEP || printf 0)"',
+      EMIT_WAIT,
       'printf \'{"type":"result","subtype":"success","num_turns":1}\\n\'',
       "exit 3",
       "",
@@ -727,7 +750,7 @@ async function setup(
       "if (: < /dev/tty) 2>/dev/null; then tty=yes; else tty=no; fi",
       'printf \'from=%s|name=%s|pane=%s|tmuxpane=%s|var=%s|sid=|pid=%s|pgid=|tty=%s\\n\' "$PWD" "$POSTMASTER_LAUNCH_NAME" "$HERDR_PANE_ID" "$TMUX_PANE" "$CALLER_VAR" "$$" "$tty"',
       'count_path=$(printenv COUNT); if [ -n "$count_path" ]; then echo x >> "$count_path"; fi',
-      'sleep "$(printenv EMIT_SLEEP || printf 0)"',
+      EMIT_WAIT,
       "",
     ].join("\n"),
   );
@@ -1265,12 +1288,13 @@ export async function runControls(): Promise<number> {
       ["run", f.name, f.repo, "--marker", "../logs/n2.done", "--", "./fixed.sh"],
       noHost,
       f.caller,
-      { EMIT_SLEEP: "1" },
+      { EMIT_GO: join(logs, "n2.go") },
     );
     await pass(
       "an earlier launch's marker is gone once run returns",
       () => pending.code === 0 && !existsSync(markerPath("n2")),
     );
+    writeFileSync(join(logs, "n2.go"), "");
     await pass("and it lands again when this one exits, whatever its exit", () =>
       marker(markerPath("n2"), 15),
     );
@@ -1290,7 +1314,12 @@ export async function runControls(): Promise<number> {
       ],
       noHost,
       f.caller,
-      { CALLER_VAR: "v", HERDR_PANE_ID: "caller-pane", TMUX_PANE: "%9", EMIT_SLEEP: "2" },
+      {
+        CALLER_VAR: "v",
+        HERDR_PANE_ID: "caller-pane",
+        TMUX_PANE: "%9",
+        EMIT_GO: join(logs, "n3.go"),
+      },
     );
     const probePath = join(logs, "n3.out");
     for (
@@ -1332,6 +1361,7 @@ export async function runControls(): Promise<number> {
       "--pidfile holds the launch's pid",
       () => readFileSync(join(logs, "n3.pid"), "utf8").trim() === field(probeText, "pid"),
     );
+    writeFileSync(join(logs, "n3.go"), "");
     await marker(markerPath("n3"));
     writeFileSync(
       join(f.caller, "argv.sh"),
@@ -1376,12 +1406,13 @@ export async function runControls(): Promise<number> {
       ],
       noHost,
       f.caller,
-      { EMIT_SLEEP: "2" },
+      { EMIT_GO: join(logs, "n5.go") },
     );
     await pass(
       "and it is there, for a live process, the moment run returns",
       () => live.code === 0 && existsSync(join(logs, "n5.pid")),
     );
+    writeFileSync(join(logs, "n5.go"), "");
     await marker(markerPath("n5"), 20);
     writeFileSync(join(logs, "n4.out"), "before\n");
     writeFileSync(join(logs, "n4.err"), "old error\n");
@@ -1774,74 +1805,10 @@ export async function runControls(): Promise<number> {
       () => withinBound.code === 0 && marker(markerPath("wide"), 10),
     );
 
-    const unrelated = spawn("sleep", ["60"], { cwd: sol, detached: true, stdio: "ignore" });
-    unrelated.unref();
-    const unrelatedRun = execHost(
-      [
-        "run",
-        f.name,
-        sol,
-        "--marker",
-        "../logs/unrelated.done",
-        "--pidfile",
-        "../logs/unrelated.pid",
-        "--",
-        "sleep",
-        "60",
-      ],
-      noHost,
-      f.caller,
-    );
-    const unrelatedStop = execHost(["stop", sol], noHost, root, { POSTMASTER_HOST_STOP_WAIT: "0" });
-    await pass(
-      "a process that works in the worktree but that no launch started is left alone",
-      () =>
-        unrelatedRun.code === 0 &&
-        unrelatedStop.code === 0 &&
-        !!unrelated.pid &&
-        processState(unrelated.pid) === "live",
-    );
-    try {
-      if (unrelated.pid) process.kill(unrelated.pid, "SIGKILL");
-    } catch {}
-    await marker(markerPath("unrelated"), 10);
     const inside = execHost(["stop", sol], noHost, sol);
     await pass(
       "stop refuses to run from inside the worktree it would stop",
       () => inside.code === 1 && inside.err.includes("from inside it"),
-    );
-    const badMaxRun = execHost(
-      [
-        "run",
-        f.name,
-        sol,
-        "--marker",
-        "../logs/wide.done",
-        "--pidfile",
-        "../logs/wide.pid",
-        "--",
-        "bash",
-        "-c",
-        "sleep 60 & sleep 60 & wait",
-      ],
-      noHost,
-      f.caller,
-    );
-    const badMax = execHost(["stop", sol], noHost, root, {
-      POSTMASTER_HOST_STOP_MAX: "1",
-      POSTMASTER_HOST_STOP_WAIT: "0",
-    });
-    await pass(
-      "stop refuses a tree larger than POSTMASTER_HOST_STOP_MAX, and leaves it running",
-      () =>
-        badMaxRun.code === 0 &&
-        badMax.code === 2 &&
-        badMax.err.includes("more than POSTMASTER_HOST_STOP_MAX"),
-    );
-    const withinMax = execHost(["stop", sol], noHost, root, { POSTMASTER_HOST_STOP_WAIT: "0" });
-    await pass(
-      "within the bound, the same tree is stopped",
-      () => withinMax.code === 0 && marker(markerPath("wide"), 10),
     );
     const outsideFixture = execHost(["stop", sol], noHost, root, {
       POSTMASTER_HOST_STATE: `${root}.elsewhere`,
@@ -1906,7 +1873,12 @@ export async function runControls(): Promise<number> {
       () => state.spaces[spaceId]?.tokens?.postmaster === "opened",
     );
     await marker(markerPath("h1"));
-    await sleep(300);
+    // The marker lands when the launch ends. The pane is done with it, and has shown the rendered
+    // stream and released its agent, when it prints its last line.
+    if (pane)
+      await waitFor(() =>
+        /\nexit [0-9]+ at /u.test(readFileSync(join(stub, `pane-${pane}.out`), "utf8")),
+      );
     const herdrOut = readFileSync(join(logs, "h1.out"), "utf8");
     await pass(
       "the launch ran in that pane, with that pane's identity",
@@ -1951,20 +1923,21 @@ export async function runControls(): Promise<number> {
       stubs,
       f.caller,
       {
-        EMIT_SLEEP: "5",
+        EMIT_GO: join(logs, "h-bunless.go"),
         POSTMASTER_STUB_PANE_PATH: paths.paneNoBun,
         POSTMASTER_HOST_FINISH_DELAY: "0.2",
       },
     );
     const noBunPane = TRIPLE_RE.exec(noBunHerdr.out)?.[3] ?? "";
     const noBunPaneOut = join(stub, `pane-${noBunPane}.out`);
-    for (
-      let i = 0;
-      i < 40 &&
-      (!existsSync(noBunPaneOut) || !readFileSync(noBunPaneOut, "utf8").includes("says: step one"));
-      i++
-    )
-      await sleep(50);
+    // The pane shows the first step by the process that follows the stream and reports the launch
+    // working from its own: wait for both and for neither to be first.
+    if (noBunPane)
+      await waitFor(
+        () =>
+          readFileSync(noBunPaneOut, "utf8").includes("says: step one") &&
+          readCalls("herdr").includes(`pane\treport-agent\t${noBunPane}`),
+      );
     const paneHasNoBun =
       exec("bash", ["-c", "command -v bun"], { env: { PATH: paths.paneNoBun } }).code !== 0;
     const paneText = existsSync(noBunPaneOut) ? readFileSync(noBunPaneOut, "utf8") : "";
@@ -1983,9 +1956,15 @@ export async function runControls(): Promise<number> {
         paneText.includes("says: step one"),
       `${noBunHerdr.out}\n${paneText}`,
     );
+    writeFileSync(join(logs, "h-bunless.go"), "");
     await marker(markerPath("h-bunless"), 15);
-    for (let i = 0; i < 40 && noBunPane in json(join(stub, "herdr.json"), { panes: {} }).panes; i++)
-      await sleep(50);
+    // The pane releases its agent as the launch ends and the finisher closes the pane after the
+    // marker, from two processes: wait for both.
+    await waitFor(
+      () =>
+        !(noBunPane in json(join(stub, "herdr.json"), { panes: {} }).panes) &&
+        readCalls("herdr").includes(`pane\trelease-agent\t${noBunPane}`),
+    );
     const doneHerdrCalls = readCalls("herdr");
     await pass(
       "the Herdr pane closes after the launch marker lands",
@@ -2054,7 +2033,7 @@ export async function runControls(): Promise<number> {
       ],
       stubs,
       f.caller,
-      { COUNT: join(logs, "h4.count") },
+      { POSTMASTER_HOST_CLAIM_WAIT: "3", COUNT: join(logs, "h4.count") },
     );
     await marker(markerPath("h4"));
     await pass(
@@ -2082,14 +2061,45 @@ export async function runControls(): Promise<number> {
       { POSTMASTER_HOST_CLAIM_WAIT: "1", COUNT: join(logs, "h5.count") },
     );
     await marker(markerPath("h5"));
-    await sleep(5200);
+    const lateRan = join(stub, "pane.late.ran");
+    await waitFor(() => existsSync(lateRan));
     await pass(
       "a pane that starts it late: it still runs exactly once",
       () =>
+        existsSync(lateRan) &&
         late.out.trim() === "host=none" &&
         readFileSync(join(logs, "h5.count"), "utf8").trim().split("\n").length === 1,
     );
     rmSync(join(stub, "pane.late"), { force: true });
+    rmSync(lateRan, { force: true });
+    const bigHerdr = execHost(
+      [
+        "run",
+        f.name,
+        worktree,
+        "--out",
+        "../logs/h-big.out",
+        "--marker",
+        "../logs/h-big.done",
+        "--",
+        "sh",
+        "-c",
+        "echo big=${#BIG} small=${#SMALL}",
+      ],
+      stubs,
+      f.caller,
+      { BIG: "x".repeat(100_000), SMALL: "y".repeat(1_000) },
+    );
+    await marker(markerPath("h-big"));
+    await pass(
+      "an environment larger than the FIFO arrives whole, and the launch runs",
+      () =>
+        bigHerdr.code === 0 &&
+        readFileSync(join(logs, "h-big.out"), "utf8").trim() === "big=100000 small=1000",
+      `${bigHerdr.out}${bigHerdr.err}${
+        existsSync(join(logs, "h-big.out")) ? readFileSync(join(logs, "h-big.out"), "utf8") : ""
+      }`,
+    );
     await pass("no launch leaves its hand-over directory behind", () =>
       readdir(root).every((name) => !name.startsWith("postmaster-host.")),
     );
@@ -2159,6 +2169,7 @@ export async function runControls(): Promise<number> {
       ],
       stubs,
       f.caller,
+      { POSTMASTER_HOST_CLAIM_WAIT: "3" },
     );
     rmSync(join(stub, "pane.dead"), { force: true });
     const refusedClose = execHost(["close", join(f.repo, ".worktrees/T-1-sol")], stubs, root);
@@ -2276,20 +2287,21 @@ export async function runControls(): Promise<number> {
       f.caller,
       {
         POSTMASTER_HOST: "tmux",
-        EMIT_SLEEP: "5",
+        EMIT_GO: join(logs, "t-live.go"),
         POSTMASTER_HOST_FINISH_DELAY: "0.2",
       },
     );
     const livePaneOut = join(stub, "win-1.out");
-    for (
-      let i = 0;
-      i < 40 &&
-      (!existsSync(livePaneOut) || !readFileSync(livePaneOut, "utf8").includes("step one"));
-      i++
-    )
-      await sleep(50);
+    // The window is marked running by the pane's own process and shows the first step by the process
+    // that follows the stream: two processes, so the test waits for both and for neither to be first.
+    await waitFor(
+      () =>
+        json(join(stub, "tmux.json"), { windows: {} }).windows["@1"]?.opts?.[
+          "@postmaster_state"
+        ] === "running" && readFileSync(livePaneOut, "utf8").includes("step one"),
+    );
     const liveTmuxState = json(join(stub, "tmux.json"), { windows: {} });
-    const liveTmuxPane = readFileSync(livePaneOut, "utf8");
+    const liveTmuxPane = existsSync(livePaneOut) ? readFileSync(livePaneOut, "utf8") : "";
     await pass(
       "a live launch keeps its tmux window open and marked running while its output is shown",
       () =>
@@ -2300,9 +2312,14 @@ export async function runControls(): Promise<number> {
         liveTmuxPane.includes("step one"),
       `${tmuxLive.out}\n${JSON.stringify(liveTmuxState)}\n${liveTmuxPane}`,
     );
+    writeFileSync(join(logs, "t-live.go"), "");
     await marker(markerPath("t-live"), 15);
-    for (let i = 0; i < 40 && "@1" in json(join(stub, "tmux.json"), { windows: {} }).windows; i++)
-      await sleep(50);
+    // The pane marks the window done and the finisher closes it, from two processes: wait for both.
+    await waitFor(
+      () =>
+        !("@1" in json(join(stub, "tmux.json"), { windows: {} }).windows) &&
+        calls(root, "tmux").includes("set-option\t-w\t-t\t%1\t@postmaster_state\tdone"),
+    );
     const doneTmuxState = json(join(stub, "tmux.json"), { windows: {} });
     await pass(
       "the tmux window is marked done and closes after the launch ends",
@@ -2435,6 +2452,36 @@ export async function runControls(): Promise<number> {
       dottedRun.out,
     );
     execHost(["close", dotted], stubs, root, { POSTMASTER_HOST: "tmux" });
+
+    const bigTmux = execHost(
+      [
+        "run",
+        f.name,
+        worktree,
+        "--out",
+        "../logs/t-big.out",
+        "--marker",
+        "../logs/t-big.done",
+        "--",
+        "sh",
+        "-c",
+        "echo big=${#BIG} small=${#SMALL}",
+      ],
+      stubs,
+      f.caller,
+      { POSTMASTER_HOST: "tmux", BIG: "x".repeat(100_000), SMALL: "y".repeat(1_000) },
+    );
+    await marker(markerPath("t-big"));
+    await pass(
+      "an environment larger than the FIFO arrives whole in the tmux window",
+      () =>
+        bigTmux.code === 0 &&
+        readFileSync(join(logs, "t-big.out"), "utf8").trim() === "big=100000 small=1000",
+      `${bigTmux.out}${bigTmux.err}${
+        existsSync(join(logs, "t-big.out")) ? readFileSync(join(logs, "t-big.out"), "utf8") : ""
+      }`,
+    );
+    execHost(["close", worktree], stubs, root, { POSTMASTER_HOST: "tmux" });
 
     {
       // Completion, review-round and run-wide teardown controls, Herdr then tmux.
@@ -4260,6 +4307,10 @@ export async function runControls(): Promise<number> {
         '    printf \'{"session_id":"thread-skilled"}\\n\'',
         "    exit 1 ;;",
         "  *pre-thread*) exit 1 ;;",
+        "  *pair-gate*)",
+        '    n=0; while [ ! -e "$TEST_GATE" ] && [ "$n" -lt 1200 ]; do sleep 0.05; n=$((n + 1)); done',
+        '    printf \'{"session_id":"thread-gated"}\\n\'',
+        "    exit 1 ;;",
         '  *sleepy*) sleep "${TEST_SLEEP:-5}"; printf \'{"session_id":"thread-sleepy"}\\n\'; exit 1 ;;',
         "  *)",
         '    printf \'{"session_id":"thread-plain"}\\n\'',
@@ -4949,7 +5000,12 @@ export async function runControls(): Promise<number> {
       join(directD, "brief.md"),
       `# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, direct\nsynthesis worktree: ${legWt}\n`,
     );
-    const directArgs = (active: string, starterPid: string, starterStart: string): string[] => [
+    const directArgs = (
+      active: string,
+      starterPid: string,
+      starterStart: string,
+      promptFile = join(directD, "prompt.txt"),
+    ): string[] => [
       "_leg_exec",
       directD,
       legWt,
@@ -4957,7 +5013,7 @@ export async function runControls(): Promise<number> {
       "1",
       "launch",
       "coachman",
-      join(directD, "prompt.txt"),
+      promptFile,
       "",
       join(root, "direct-stream.jsonl"),
       join(root, "direct.err"),
@@ -5016,27 +5072,51 @@ export async function runControls(): Promise<number> {
       `rc=${r.code}`,
     );
     let pairsBad = 0;
-    for (let i = 0; i < 50; i++) {
+    let pairsRun = 0;
+    // The claimants meet only if they are both there while the lock is held. The one that wins keeps
+    // its harness stand-in at a gate until the other has been refused and has ended, so the other
+    // always meets a held lock however long its process takes to start. Left to run free, a claimant
+    // that started after the winner had finished found the lock released, and a lock nobody holds is
+    // free to claim: it ran an attempt of its own, and the pair read as two attempts.
+    const pairGate = join(root, "pair.gate");
+    const pairPrompt = join(directD, "pair-prompt.txt");
+    writeFileSync(pairPrompt, "paired claim at the pair-gate\n");
+    const pairsFrom = legCalls();
+    // A round that goes wrong ends the loop: the check has failed, and each such round would
+    // otherwise wait out the 30 seconds below.
+    for (let i = 0; i < 50 && pairsBad === 0; i++) {
+      pairsRun++;
       writeFileSync(join(root, "pair.lock"), "999999999 0\n");
+      rmSync(pairGate, { force: true });
       callsBefore = legCalls();
-      const p1 = spawn(SELF, ["host", ...directArgs(join(root, "pair.lock"), "999999999", "0")], {
-        cwd: f.caller,
-        env: spawnEnv(directEnv()),
-        stdio: "ignore",
-      });
-      const p2 = spawn(SELF, ["host", ...directArgs(join(root, "pair.lock"), "999999999", "0")], {
-        cwd: f.caller,
-        env: spawnEnv(directEnv()),
-        stdio: "ignore",
-      });
-      const [r1, r2] = await Promise.all([exited(p1), exited(p2)]);
-      const live = (r1 === 0 ? 1 : 0) + (r2 === 0 ? 1 : 0);
+      const ends: Array<number | null | undefined> = [undefined, undefined];
+      for (const k of [0, 1]) {
+        const claimant = spawn(
+          SELF,
+          ["host", ...directArgs(join(root, "pair.lock"), "999999999", "0", pairPrompt)],
+          {
+            cwd: f.caller,
+            env: spawnEnv({ ...directEnv(), TEST_GATE: pairGate }),
+            stdio: "ignore",
+          },
+        );
+        void exited(claimant).then((code) => {
+          ends[k] = code;
+        });
+      }
+      // The refused claimant ends first and opens the gate. If neither ends, two attempts are
+      // holding at the gate, and opening it lets them finish to be counted.
+      await waitFor(() => ends.some((end) => end !== undefined));
+      writeFileSync(pairGate, "");
+      await waitFor(() => ends.every((end) => end !== undefined));
+      const live = ends.filter((end) => end === 0).length;
       if (live !== 1 || legCalls() !== callsBefore + 1) pairsBad++;
     }
+    const pairsStray = await waitFor(() => legCalls() > pairsFrom + 50, 0.5);
     await pass(
       "fifty paired claims each run exactly one attempt live",
-      () => pairsBad === 0,
-      `bad=${pairsBad}`,
+      () => pairsBad === 0 && !pairsStray,
+      `bad=${pairsBad} of ${pairsRun} rounds run, stray=${pairsStray}`,
     );
     const mutexPath = join(legD, ".leg-1-mutex");
     const recsBeforeMutex = nonEmptyLines(attemptsPath).length;
@@ -5079,6 +5159,7 @@ export async function runControls(): Promise<number> {
       `# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, kill\nsynthesis worktree: ${legWt}\n`,
     );
     writeFileSync(join(killD, "prompt.txt"), "sleepy kill holder\n");
+    const callsBeforeKillLaunch = legCalls();
     r = execHost(
       ["leg", "launch", killD, legWt, "synthesis", "1", join(killD, "prompt.txt")],
       legPath,
@@ -5092,19 +5173,16 @@ export async function runControls(): Promise<number> {
     const killActive = join(killD, ".leg-1-active");
     const killPidfile = join(killD, "logs", "coachman-leg-1.pid");
     let killpid = "";
-    for (let i = 0; i < 50; i++) {
-      try {
-        killpid = (readFileSync(killActive, "utf8").split(" ")[0] ?? "").trim();
-      } catch {
-        killpid = "";
-      }
-      let pp = "";
-      try {
-        pp = readFileSync(killPidfile, "utf8").trim();
-      } catch {}
-      if (killpid !== "" && killpid === pp) break;
-      await sleep(100);
-    }
+    // The holder is killed when it owns the lock and its harness stand-in has recorded its call.
+    // The kill takes the holder and leaves the stand-in running: a call it recorded after the kill
+    // would be counted against the next attempt, so it is on record before the kill.
+    await waitFor(() => {
+      const owner = (readFileSync(killActive, "utf8").split(" ")[0] ?? "").trim();
+      if (owner === "" || owner !== readFileSync(killPidfile, "utf8").trim()) return false;
+      killpid = owner;
+      return true;
+    });
+    await waitFor(() => legCalls() > callsBeforeKillLaunch);
     if (/^[0-9]+$/u.test(killpid)) {
       try {
         process.kill(Number(killpid), "SIGKILL");
@@ -5123,6 +5201,9 @@ export async function runControls(): Promise<number> {
       }),
     );
     await marker(join(killD, ".leg-1-exited"), 30);
+    // The next attempt's call is on record before its marker; one more call would be a second start.
+    await waitFor(() => legCalls() > callsMidKill);
+    const startedTwice = await waitFor(() => legCalls() > callsMidKill + 1, 0.5);
     const killAttempts = join(killD, "logs", "coachman-leg-1-attempts.jsonl");
     let killGot = "missing";
     try {
@@ -5141,6 +5222,7 @@ export async function runControls(): Promise<number> {
         killpid !== "" &&
         r2.code === 0 &&
         legCalls() === callsMidKill + 1 &&
+        !startedTwice &&
         killGot === "ok",
       `rc=${r.code} rc2=${r2.code} got=${killGot}`,
     );

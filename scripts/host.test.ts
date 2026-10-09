@@ -1,4 +1,4 @@
-// Tests beside scripts/host.ts, moved from its --self-test on #109: 338 controls.
+// Tests beside scripts/host.ts, moved from its --self-test on #109: 335 controls.
 // host.ts's suite lives in ./host-self-test.ts's runControls (shared sequential fixture);
 // this file drives it once in beforeAll, splits its printed lines on the section headers,
 // and asserts each section's control count with no FAIL. Portable process controls are below.
@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -19,8 +20,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runControls } from "./host-self-test.ts";
-import { processStart, processState } from "./lib/processes.ts";
+import { runControls, waitFor } from "./host-self-test.ts";
+import { bootId, processStart, processState } from "./lib/processes.ts";
 
 const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "preamble", count: 6 },
@@ -30,11 +31,11 @@ const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "run, no host: headless launch", count: 16 },
   { name: "a run launch without a named run space is refused", count: 1 },
   { name: "stop: owned process trees and refusal controls", count: 5 },
-  { name: "stop: registry identity and process membership", count: 16 },
-  { name: "run, Herdr (stub): pane placement and environment handover", count: 15 },
+  { name: "stop: registry identity and process membership", count: 13 },
+  { name: "run, Herdr (stub): pane placement and environment handover", count: 16 },
   { name: "stop and close, Herdr (stub)", count: 6 },
   { name: "a reviewer's scratch clone, Herdr (stub)", count: 5 },
-  { name: "run, stop and close, tmux (stub)", count: 10 },
+  { name: "run, stop and close, tmux (stub)", count: 11 },
   { name: "completion cleanup controls, Herdr (stub)", count: 3 },
   { name: "finished review round cleanup, Herdr (stub)", count: 1 },
   { name: "run-wide teardown, Herdr (stub)", count: 2 },
@@ -64,7 +65,8 @@ let failures = -1;
 const lines: string[] = [];
 const origLog = console.log;
 
-// bun:test's types omit the hook timeout, though the runtime honors it.
+// bun:test's types omit the hook timeout, though the runtime honors it. The limit only catches a
+// hang, so it is ten times the 180 s this setup takes on a quiet machine.
 
 beforeAll(async () => {
   console.log = (...args: unknown[]) => {
@@ -81,7 +83,7 @@ beforeAll(async () => {
     ))
       process.stderr.write(`${line}\n`);
   }
-}, 600000);
+}, 1800000);
 
 afterAll(() => {
   console.log = origLog;
@@ -157,7 +159,28 @@ describe("stub state lock", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  }, 60000);
+  });
+});
+
+describe("waitFor, the wait the self-test uses for a stand-in", () => {
+  test("it returns the moment its condition holds, not at its bound", async () => {
+    const start = Date.now();
+    const readyAt = start + 300;
+    expect(await waitFor(() => Date.now() >= readyAt, 30)).toBe(true);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(300);
+    expect(Date.now() - start).toBeLessThan(10000);
+  });
+  test("a condition that throws has not held yet, and one that never holds gives up at its bound", async () => {
+    let looks = 0;
+    const start = Date.now();
+    const never = await waitFor(() => {
+      looks++;
+      throw new Error("not there yet");
+    }, 0.3);
+    expect(never).toBe(false);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(300);
+    expect(looks).toBeGreaterThan(1);
+  });
 });
 
 describe("waiting list lock", () => {
@@ -375,19 +398,27 @@ test("a background runner that dies before reading its spec is rejected", async 
   }
 });
 
-// The boot id as host.ts reads it: the Linux file, else macOS kern.boottime
-// under LC_ALL=C, so the test's record matches on either system.
-function currentBootId(): string {
-  try {
-    return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
-  } catch {
-    const booted = spawnSync("sysctl", ["-n", "kern.boottime"], {
-      encoding: "utf8",
-      env: { ...process.env, LC_ALL: "C" },
-    });
-    // ASCII: sysctl kern.boottime is kernel-emitted ASCII on macOS.
-    return (booted.stdout ?? "").trim().split(/\s+/u).join(" ");
-  }
+// The boot id as host.ts reads it under this test's forced proc root: the
+// portable path, with a stand-in sysctl answering the macOS keys, so the
+// record matches what the spawned host computes.
+function installStandInSysctl(dir: string): string {
+  const bin = join(dir, "bin");
+  mkdirSync(bin, { recursive: true });
+  const sysctl = join(bin, "sysctl");
+  writeFileSync(
+    sysctl,
+    [
+      "#!/bin/sh",
+      'case "$*" in',
+      '  *"kern.bootsessionuuid"*) echo "0B00D005-7E57-40DE-AD10-C0FFEE0C0DE5" ;;',
+      '  *"kern.boottime"*) echo "{ sec = 1700000000, usec = 123456 } Mon Jan  1 00:00:00 2024" ;;',
+      "  *) exit 1 ;;",
+      "esac",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(sysctl, 0o755);
+  return bin;
 }
 
 test("a member with a five-word start matches its process, and close refuses while it lives", async () => {
@@ -395,10 +426,14 @@ test("a member with a five-word start matches its process, and close refuses whi
   const state = join(dir, "state");
   mkdirSync(join(state, "launches"), { recursive: true });
   const priorProcRoot = process.env.POSTMASTER_PROC_ROOT;
+  const priorPath = process.env.PATH;
   const sleep = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
   sleep.unref();
   try {
-    // Forced: the registry holds ps lstart's five words, not a tick count.
+    // Forced: the registry holds ps lstart's five words, not a tick count, and
+    // the boot id comes from the portable sysctl path with its stand-in.
+    const standIn = installStandInSysctl(dir);
+    process.env.PATH = `${standIn}:${priorPath ?? ""}`;
     process.env.POSTMASTER_PROC_ROOT = join(dir, "missing-proc");
     await new Promise((resolve) => setTimeout(resolve, 200));
     const memberPid = sleep.pid ?? 0;
@@ -413,7 +448,7 @@ test("a member with a five-word start matches its process, and close refuses whi
     expect(processState(groupPid)).toBe("absent");
     writeFileSync(
       join(state, "launches", String(groupPid)),
-      `${dir}\nmember-probe\nmember ${memberPid} ${start}\nboot ${currentBootId()}\n`,
+      `${dir}\nmember-probe\nmember ${memberPid} ${start}\nboot ${bootId()}\n`,
     );
     const env = {
       ...process.env,
@@ -444,6 +479,95 @@ test("a member with a five-word start matches its process, and close refuses whi
     } catch {}
     if (priorProcRoot === undefined) delete process.env.POSTMASTER_PROC_ROOT;
     else process.env.POSTMASTER_PROC_ROOT = priorProcRoot;
+    if (priorPath === undefined) delete process.env.PATH;
+    else process.env.PATH = priorPath;
     rmSync(dir, { recursive: true, force: true });
   }
-}, 60000);
+});
+
+test("Herdr checks time out when timeout is absent, and keep working when it is present", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "host-herdr-timeout-"));
+  // A herdr that never answers: each probe below waits out the host's own time limit, about five
+  // seconds, so the three run side by side, each with a folder, a state and a bin of its own.
+  const probe = (name: string, withTimeout: boolean) => {
+    const home = join(dir, name);
+    const bin = join(home, "bin");
+    const cwd = join(home, "worktree");
+    const calls = join(home, "herdr.calls");
+    mkdirSync(bin, { recursive: true });
+    mkdirSync(cwd);
+    for (const [tool, target] of [
+      ["bash", Bun.which("bash") ?? "/bin/bash"],
+      ["bun", process.execPath],
+      ["dirname", Bun.which("dirname") ?? "/usr/bin/dirname"],
+    ])
+      symlinkSync(target, join(bin, tool));
+    const timeout = Bun.which("timeout");
+    if (withTimeout && timeout) symlinkSync(timeout, join(bin, "timeout"));
+    const herdr = join(bin, "herdr");
+    writeFileSync(
+      herdr,
+      '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$HERDR_CALLS"\nexec /bin/sleep 30\n',
+    );
+    chmodSync(herdr, 0o755);
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      HOME: home,
+      HERDR_CALLS: calls,
+      PATH: bin,
+      POSTMASTER_HOST_STATE: join(home, "state"),
+      POSTMASTER_HOST_FIXTURE: home,
+    };
+    delete env.POSTMASTER_HOST;
+    return { cwd, calls, env, hasTimeout: Boolean(withTimeout && timeout) };
+  };
+  const exec = (
+    args: string[],
+    env: Record<string, string | undefined>,
+  ): Promise<{ status: number | null; stdout: string; elapsed: number }> =>
+    new Promise((resolve, reject) => {
+      const started = Date.now();
+      const child = spawn(join(import.meta.dir, "run"), args, {
+        env,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      let stdout = "";
+      child.stdout?.on("data", (chunk) => {
+        stdout += String(chunk);
+      });
+      const killer = setTimeout(() => child.kill("SIGKILL"), 10000);
+      child.on("error", reject);
+      child.on("close", (status) => {
+        clearTimeout(killer);
+        resolve({ status, stdout, elapsed: Date.now() - started });
+      });
+    });
+  try {
+    const close = probe("close", false);
+    const run = probe("run", false);
+    const detect = probe("detect", true);
+    const [closed, ran, detected] = await Promise.all([
+      exec(["host", "close", close.cwd], close.env),
+      exec(["host", "run", "timeout-probe", run.cwd, "--", "/bin/true"], run.env),
+      detect.hasTimeout ? exec(["host", "detect"], detect.env) : Promise.resolve(null),
+    ]);
+    expect(closed.status).toBe(0);
+    expect(closed.elapsed).toBeLessThan(10000);
+    expect(closed.stdout).toContain("closed what run host opened");
+    expect(ran.status).toBe(0);
+    expect(ran.elapsed).toBeLessThan(10000);
+    expect(ran.stdout).toContain("host=none");
+    for (const side of [close, run]) {
+      const requests = readFileSync(side.calls, "utf8");
+      expect(requests).toContain("workspace list");
+      expect(requests).not.toMatch(/pane|workspace close/u);
+    }
+    if (detected) {
+      expect(detected.status).toBe(0);
+      expect(detected.stdout.trim()).toBe("none");
+      expect(detected.elapsed).toBeLessThan(10000);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { refs } from "./skill-refs";
+import { defaultFiles, refs } from "./skill-refs";
 
 let tmp = "";
 let root = "";
@@ -113,6 +113,21 @@ describe("checking script references", () => {
     expect(result.code).toBe(1);
     expect(result.faults.map((f) => f.line)).toEqual([1, 2]);
   });
+
+  test("the bare check covers the postmaster skill and the clerk skill", () => {
+    const covered = join(tmp, "covered");
+    for (const skill of ["postmaster", "clerk"]) {
+      mkdirSync(join(covered, "skills", skill), { recursive: true });
+      writeFileSync(join(covered, "skills", skill, "runbook.md"), "run\n");
+    }
+    writeFileSync(join(covered, "skills", "postmaster", "notes.txt"), "not a runbook\n");
+    expect(defaultFiles(covered).toSorted()).toEqual(
+      [
+        join(covered, "skills", "postmaster", "runbook.md"),
+        join(covered, "skills", "clerk", "runbook.md"),
+      ].toSorted(),
+    );
+  });
 });
 
 describe("fixing script references", () => {
@@ -172,6 +187,14 @@ describe("fixing script references", () => {
     const prefixed = put("count-prefixed.md", "See <tool>/scripts/usage.sh now.\n");
     const second = refs(root, "fix", [prefixed]);
     expect(second.fixMessages).toEqual([`${prefixed}: 1 reference(s) updated`]);
+  });
+
+  test("--fix leaves a file with no bare reference alone", () => {
+    const file = put("good-copy.md", "Use `<tool>/scripts/run stage <dispatch> synthesis`.\n");
+    refs(root, "fix", [file]);
+    expect(readFileSync(file, "utf8")).toBe(
+      "Use `<tool>/scripts/run stage <dispatch> synthesis`.\n",
+    );
   });
 });
 type RunResult = Readonly<{ code: number; calls: string[][] }>;
@@ -294,8 +317,8 @@ function runBlock(source: string, shell: string): RunResult {
 describe("coachman shell blocks", () => {
   const blocks = blocksFrom(readFileSync(DOC, "utf8"));
 
-  test("all ten shell blocks have the same arguments and status in bash and zsh", () => {
-    expect(blocks.length).toBe(10);
+  test("all fourteen shell blocks have the same arguments and status in bash and zsh", () => {
+    expect(blocks.length).toBe(14);
     const bash = Bun.which("bash");
     if (!bash) throw new Error("bash is not on PATH");
     const zsh = Bun.which("zsh");
@@ -311,7 +334,7 @@ describe("coachman shell blocks", () => {
       if (zsh) expect(runBlock(block.source, zsh)).toEqual(bashResult);
     }
 
-    const reviewers = runBlock(blocks[7]!.source, bash).calls;
+    const reviewers = runBlock(blocks[10]!.source, bash).calls;
     const cloneCall = reviewers.find(
       (args) => args[0] === "run" && args[1] === "cut-scratch" && args.includes("--clone"),
     );
@@ -321,7 +344,7 @@ describe("coachman shell blocks", () => {
     );
     expect(wait?.slice(6)).toEqual(["bug:luna", "bug:mimo", "security:luna", "security:mimo"]);
 
-    const failedLaneLogs = runBlock(blocks[8]!.source, bash).calls.filter(
+    const failedLaneLogs = runBlock(blocks[11]!.source, bash).calls.filter(
       (args) => args[0] === "run" && args[1] === "run-log" && args[3]?.includes("normalize failed"),
     );
     expect(failedLaneLogs.map((args) => args[3]?.split(" ")[3])).toEqual(["luna:", "mimo:"]);
@@ -330,7 +353,7 @@ describe("coachman shell blocks", () => {
   test("the argument checks reject unquoted expansions of multword shell arrays", () => {
     const bash = Bun.which("bash");
     if (!bash) throw new Error("bash is not on PATH");
-    const reviewBlock = blocks[7]!.source;
+    const reviewBlock = blocks[10]!.source;
     const correct = runBlock(reviewBlock, bash);
     const cloneMutation = runBlock(reviewBlock.replaceAll('"${CLONE[@]}"', "$CLONE"), bash);
     const reviewerMutation = runBlock(
@@ -340,7 +363,7 @@ describe("coachman shell blocks", () => {
     expect(cloneMutation.calls).not.toEqual(correct.calls);
     expect(reviewerMutation.calls).not.toEqual(correct.calls);
 
-    const normalizeBlock = blocks[8]!.source;
+    const normalizeBlock = blocks[11]!.source;
     const normalized = runBlock(normalizeBlock, bash);
     const mutation = runBlock(
       normalizeBlock.replaceAll('"${NORMALIZE_FAILED[@]}"', "$NORMALIZE_FAILED"),

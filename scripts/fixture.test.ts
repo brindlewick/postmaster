@@ -6,6 +6,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   chmodSync,
   cpSync,
   existsSync,
@@ -18,13 +19,17 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { machine, release, tmpdir, type as osType } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  appCached,
   appFiles,
   checkWaybillEfforts,
+  checkPremisesOrder,
+  checkMode,
   FIXTURE_MARKER,
   HIDDEN_RE,
   gitVersionNumber,
@@ -36,6 +41,7 @@ import {
   makeRepo,
   makeScoreDir,
   onPath,
+  runMode,
   score,
   sectionOf,
   sh,
@@ -45,6 +51,7 @@ import {
   ticketBody,
   tickets,
   ticketTitle,
+  timeReport,
 } from "./fixture";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
@@ -69,6 +76,135 @@ const savedEnv: Record<string, string | undefined> = {};
 const bgResults = new Map<string, { code: number; out: string }>();
 const hiddenResults: Record<string, number> = {};
 
+function timestamp(seconds: number): string {
+  return new Date(Date.UTC(2026, 0, 1, 0, 0, seconds)).toISOString().replace(/\.000Z$/u, "Z");
+}
+
+function writeMarker(path: string, seconds: number): void {
+  writeFileSync(path, "");
+  const date = new Date(Date.UTC(2026, 0, 1, 0, 0, seconds));
+  utimesSync(path, date, date);
+}
+
+function timedCopy(name: string, kind: "floor" | "short" | "long-wait" | "no-stages"): void {
+  const source = join(tmp, `clean-${first}`, "repo");
+  const repo = join(tmp, name, "repo");
+  mkdirSync(dirname(repo), { recursive: true });
+  cpSync(source, repo, { recursive: true, preserveTimestamps: true });
+  const dispatch = join(repo, ".postmaster", "runs", "7");
+  const actionsPath = join(dispatch, "actions.jsonl");
+  const events = readFileSync(actionsPath, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const stageSeconds =
+    kind === "short"
+      ? {
+          bootstrapped: 120,
+          "workhorses-running": 600,
+          synthesis: 1320,
+          "checkpoint-1": 2040,
+          review: 2400,
+          shipping: 2880,
+          shipped: 3300,
+          done: 3441,
+        }
+      : kind === "long-wait"
+        ? {
+            bootstrapped: 120,
+            "workhorses-running": 720,
+            synthesis: 1560,
+            "checkpoint-1": 2520,
+            review: 3872,
+            shipping: 4200,
+            shipped: 4986,
+            done: 5580,
+          }
+        : {
+            bootstrapped: 120,
+            "workhorses-running": 720,
+            synthesis: 1560,
+            "checkpoint-1": 2520,
+            review: 2880,
+            shipping: 3600,
+            shipped: 3900,
+            done: 3960,
+          };
+  const legOneHandoff = kind === "short" ? 2220 : 2700;
+  const legTwoAccept = kind === "long-wait" ? 3871 : kind === "short" ? 2340 : 2820;
+  const legTwoHandoff = kind === "long-wait" ? 4201 : kind === "short" ? 3120 : 3720;
+  for (const event of events) {
+    let seconds = 0;
+    if (event.action === "stage" && typeof event.target === "string") {
+      seconds = stageSeconds[event.target as keyof typeof stageSeconds] ?? 0;
+    } else if (event.action === "handoff-accept") {
+      seconds = event.target === "leg-1" ? 60 : legTwoAccept;
+    } else if (event.action === "handoff") {
+      seconds = event.target === "leg-1" ? legOneHandoff : legTwoHandoff;
+    } else if (event.action === "dispatch" && event.actor === "postmaster") {
+      seconds = event.detail === "leg 2" ? legOneHandoff + 60 : 0;
+    } else if (event.action === "dispatch" && event.actor === "coachman") {
+      seconds = event.target === "two" ? 1 : 0;
+    }
+    event.ts = timestamp(seconds);
+  }
+  if (kind === "no-stages") {
+    writeFileSync(
+      actionsPath,
+      `${events
+        .filter((event) => event.action !== "stage")
+        .map((event) => JSON.stringify(event))
+        .join("\n")}\n`,
+    );
+    return;
+  }
+
+  const logs = join(dispatch, "logs");
+  mkdirSync(logs, { recursive: true });
+  writeMarker(join(logs, "one.done"), 600);
+  writeMarker(join(logs, "two.done"), 241);
+  const reviewStart = stageSeconds.review + 1;
+  for (const [lens, lane, elapsed] of [
+    ["bug", "mimo", 900],
+    ["bug", "codex", 180],
+  ] as const) {
+    events.push({
+      ts: timestamp(reviewStart),
+      project: "repo",
+      run: "7",
+      actor: "coachman",
+      action: "review-launch",
+      target: lane,
+      detail: `${lens} round 1`,
+    });
+    const doneSeconds =
+      kind === "long-wait"
+        ? Math.min(stageSeconds.done - 1, reviewStart + elapsed)
+        : reviewStart + elapsed;
+    writeMarker(join(logs, `review-r1-${lens}-${lane}.done`), doneSeconds);
+  }
+  writeFileSync(
+    join(logs, "review-r1.json"),
+    JSON.stringify({
+      started: timestamp(reviewStart),
+      reviewers: [
+        ["bug", "mimo"],
+        ["bug", "codex"],
+      ],
+    }),
+  );
+  writeFileSync(actionsPath, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
+  if (kind === "long-wait") {
+    writeFileSync(
+      join(dispatch, "brief.md"),
+      readFileSync(join(dispatch, "brief.md"), "utf8").replace(
+        /^efforts:.*$/mu,
+        "efforts: one=wrong",
+      ),
+    );
+  }
+}
+
 function background(name: string, fn: () => number | { code: number; out: string }): void {
   const r = fn();
   if (typeof r === "number") bgResults.set(name, { code: r, out: "" });
@@ -84,6 +220,7 @@ function record(
   t: string,
   shipped: "reference" | "app" | "broken",
   legs = 2,
+  mode: "synthesis" | "single-thread" = "synthesis",
 ): number {
   const repo = join(tmp, name, "repo");
   const d = join(tmp, name, "repo", ".postmaster", "runs", "7");
@@ -123,7 +260,12 @@ function record(
     join(d, "brief.md"),
     `# Waybill: 7\n${turnpikes}\n\n## Ticket\n\n${ticketBody(t)}\n## Project profile\nrepo: ${repo}\n`,
   );
-  run(join(HERE, "run"), ["run-meta", d, repo]);
+  run(join(HERE, "run"), [
+    "run-meta",
+    d,
+    repo,
+    ...(mode === "single-thread" ? ["--mode", "single-thread"] : []),
+  ]);
   const recordedConfig = JSON.parse(readFileSync(join(d, "run.json"), "utf8")).config;
   const workhorses = (recordedConfig.team.workhorses ?? [])
     .map((name: string) => {
@@ -133,21 +275,49 @@ function record(
     .join(", ");
   const coachman = recordedConfig.team.coachman;
   const efforts = run(join(HERE, "run"), ["run-meta", "efforts", d]).out.trim();
+  const workhorsesLine = mode === "single-thread" ? "" : `workhorses: ${workhorses}\n`;
   writeFileSync(
     join(d, "brief.md"),
-    `${readFileSync(join(d, "brief.md"), "utf8")}\n## Team\nworkhorses: ${workhorses}\ncoachman: ${coachman.harness}/${coachman.model}/${coachman.effort ?? ""}\n${efforts}\n`,
+    `${readFileSync(join(d, "brief.md"), "utf8")}\n## Team\nmode: ${mode}\n${workhorsesLine}coachman: ${coachman.harness}/${coachman.model}/${coachman.effort ?? ""}\n${efforts}\n`,
   );
   if (legs === 3) {
     const runJson = JSON.parse(readFileSync(join(d, "run.json"), "utf-8"));
     delete runJson.coachman_contract;
     writeFileSync(join(d, "run.json"), JSON.stringify(runJson, null, 2));
   }
+  if (
+    run("bash", [
+      join(HERE, "run"),
+      "log-action",
+      d,
+      "coachman",
+      "premises",
+      base,
+      `base=${base}`,
+      "result=same",
+    ]).code !== 0
+  )
+    return 1;
+  for (const lane of recordedConfig.team.workhorses as string[]) {
+    if (mode === "single-thread") continue;
+    if (
+      run("bash", [join(HERE, "run"), "log-action", d, "coachman", "dispatch", lane, "workhorse"])
+        .code !== 0
+    )
+      return 1;
+    // The harvested archive branch each workhorse keeps; a synthesis run has one per lane and
+    // a single-thread run none.
+    if (run("git", ["-C", repo, "branch", `wb/7-${lane}`, "7"]).code !== 0) return 1;
+  }
 
   const stageList = stages.split("\n").filter(Boolean);
   // Leg 1 enters every stage through checkpoint-1; each later leg its own slice of the rest;
   // the postmaster closes. A current run's shipped is the postmaster's; a pre-change ship leg
-  // sets its own, as the runbooks have it.
-  const walked = legs === 1 ? stageList.filter((s) => s !== "review") : stageList;
+  // sets its own, as the runbooks have it. A single-thread run never enters
+  // workhorses-running, so its walk leaves that stage out.
+  const schedule =
+    mode === "single-thread" ? stageList.filter((s) => s !== "workhorses-running") : stageList;
+  const walked = legs === 1 ? schedule.filter((s) => s !== "review") : schedule;
   const cpIdx = walked.indexOf("checkpoint-1");
   const through1 = cpIdx < 0 ? [...walked] : walked.slice(0, cpIdx + 1);
   const rest = cpIdx < 0 ? [] : walked.slice(cpIdx + 1);
@@ -190,6 +360,33 @@ function record(
     manifest.coachman.legs[String(n)] = { thread_id: `thread-${n}` };
   }
   writeFileSync(join(d, "manifest.json"), JSON.stringify(manifest, null, 2));
+
+  const point = (name: string, lanes: Array<Record<string, string>>): void => {
+    const detail = JSON.stringify({ kind: "point", point: name, result: "clean", lanes });
+    const logged = run(join(HERE, "run"), ["log-action", d, "coachman", "reach", name, detail]);
+    if (logged.code !== 0) throw new Error(`could not make fixture reach record: ${logged.err}`);
+  };
+  const laneRecords = (names: string[]) =>
+    names.map((name: string) => ({
+      lane: name,
+      lens: "",
+      harness: recordedConfig.lanes[name]?.harness ?? "codex",
+      status: "checked",
+      reason: "",
+    }));
+  const workhorseNames: string[] = recordedConfig.team.workhorses ?? [];
+  // A single-thread run never runs "Check lane reach before synthesis", so its
+  // record holds no workhorses point; the builder mirrors real runs here.
+  if (mode === "synthesis") point("workhorses", laneRecords(workhorseNames));
+  if (legs >= 2) {
+    const reviewer = workhorseNames[0] ?? "one";
+    writeFileSync(
+      join(d, "logs", "review-r1.json"),
+      JSON.stringify({ reviewers: [["bug", reviewer]] }),
+    );
+    point("r1", laneRecords([reviewer]));
+  }
+  point("card", laneRecords(workhorseNames));
   return 0;
 }
 
@@ -218,6 +415,22 @@ function breaks(cleanDir: string, repo: string): void {
     kept.push(line);
   }
   writeFileSync(actionsPath, `${kept.join("\n")}\n`);
+
+  d = brokenCopy("break-notime", cleanDir);
+  writeFileSync(
+    join(d, "actions.jsonl"),
+    `${readFileSync(join(cleanDir, "actions.jsonl"), "utf-8")
+      .split("\n")
+      .filter((line) => {
+        if (!line.trim()) return false;
+        try {
+          return JSON.parse(line).action !== "stage";
+        } catch {
+          return true;
+        }
+      })
+      .join("\n")}\n`,
+  );
 
   d = brokenCopy("break-markers", cleanDir);
   rmSync(join(d, ".leg-2-done"), { force: true });
@@ -255,8 +468,41 @@ function breaks(cleanDir: string, repo: string): void {
     readFileSync(join(d, "brief.md"), "utf-8").replace(/^efforts:.*$/mu, "efforts: one=wrong"),
   );
 
+  // A synthesis run with its workhorse dispatch lines removed: the mode check fails it (D14).
+  d = brokenCopy("break-syn-dispatch", cleanDir);
+  const noDispatchPath = join(d, "actions.jsonl");
+  const noDispatch = readFileSync(noDispatchPath, "utf-8")
+    .split("\n")
+    .filter((line) => {
+      if (!line.trim()) return false;
+      try {
+        const e = JSON.parse(line) as Record<string, unknown>;
+        return !(e.action === "dispatch" && e.actor === "coachman");
+      } catch {
+        return true;
+      }
+    });
+  writeFileSync(noDispatchPath, `${noDispatch.join("\n")}\n`);
+
+  // A synthesis run that never entered workhorses-running: the stages check fails it.
+  d = brokenCopy("break-syn-stages", cleanDir);
+  const noStagePath = join(d, "actions.jsonl");
+  const noStage = readFileSync(noStagePath, "utf-8")
+    .split("\n")
+    .filter((line) => {
+      if (!line.trim()) return false;
+      try {
+        const e = JSON.parse(line) as Record<string, unknown>;
+        return !(e.action === "stage" && e.target === "workhorses-running");
+      } catch {
+        return true;
+      }
+    });
+  writeFileSync(noStagePath, `${noStage.join("\n")}\n`);
+
   for (const b of [
     "stages",
+    "notime",
     "markers",
     "handoffs",
     "runjson",
@@ -264,6 +510,8 @@ function breaks(cleanDir: string, repo: string): void {
     "waybill",
     "legs",
     "efforts",
+    "syn-dispatch",
+    "syn-stages",
   ]) {
     background(`break-${b}`, () =>
       score(join(tmp, `break-${b}`, "repo", ".postmaster", "runs", "7"), repo),
@@ -271,13 +519,76 @@ function breaks(cleanDir: string, repo: string): void {
   }
 }
 
+/** The single-thread run's negatives, scored against its own repo: a workhorse dispatch line,
+ * a wb/ branch, or the workhorses-running stage each fail the run that records single-thread.
+ * The branch is removed again so later re-scores of the clean record stay clean. */
+function singleThreadBreaks(cleanDir: string, repo: string): void {
+  const copy = (name: string): string => {
+    const d = join(tmp, name, "repo", ".postmaster", "runs", "7");
+    mkdirSync(dirname(d), { recursive: true });
+    cpSync(cleanDir, d, { recursive: true });
+    return d;
+  };
+
+  let d = copy("break-st-dispatch");
+  const dispatchPath = join(d, "actions.jsonl");
+  appendFileSync(
+    dispatchPath,
+    `${JSON.stringify({
+      ts: "2026-01-01T00:00:00Z",
+      actor: "coachman",
+      action: "dispatch",
+      target: "one",
+      detail: "workhorse",
+    })}\n`,
+  );
+  background("break-st-dispatch", () => score(d, repo));
+
+  // The branch control copies the repo whole, so the clean record's own refs never change.
+  const branchRepo = join(tmp, "break-st-branch", "repo");
+  mkdirSync(dirname(branchRepo), { recursive: true });
+  cpSync(repo, branchRepo, { recursive: true });
+  d = join(branchRepo, ".postmaster", "runs", "7");
+  if (run("git", ["-C", branchRepo, "branch", "wb/7-one", "7"]).code !== 0) {
+    console.log("could not make wb/7-one for the single-thread branch control");
+  }
+  background("break-st-branch", () => score(d, branchRepo));
+
+  d = copy("break-st-stages");
+  const stagePath = join(d, "actions.jsonl");
+  // Insert a workhorses-running stage line after bootstrapped, as a run that entered it logs.
+  const rows: string[] = [];
+  for (const line of readFileSync(stagePath, "utf-8").split("\n")) {
+    if (line.trim()) rows.push(line);
+    try {
+      const e = JSON.parse(line) as Record<string, unknown>;
+      if (e.action === "stage" && e.target === "bootstrapped") {
+        rows.push(
+          JSON.stringify({
+            ts: "2026-01-01T00:00:01Z",
+            actor: "coachman",
+            action: "stage",
+            target: "workhorses-running",
+            detail: "from bootstrapped",
+          }),
+        );
+      }
+    } catch {
+      /* keep */
+    }
+  }
+  writeFileSync(stagePath, `${rows.join("\n")}\n`);
+  background("break-st-stages", () => score(d, repo));
+}
+
 function recorded(
   name: string,
   t: string,
   shipped: "reference" | "app" | "broken",
   legs = 2,
+  mode: "synthesis" | "single-thread" = "synthesis",
 ): number | { code: number; out: string } {
-  const rc = record(name, t, shipped, legs);
+  const rc = record(name, t, shipped, legs, mode);
   if (rc !== 0) {
     console.log(`the record could not be built for ${name}`);
     return 1;
@@ -328,14 +639,21 @@ function expectScore(key: string, failing: string, failText?: string): void {
     .filter((l) => l.startsWith("FAIL"))
     .map((l) => pyWords(l)[1] ?? "");
   const failingChecks = failLines.join(",") || "none";
-  const lines = out.split("\n").filter((l) => l.trim()).length;
+  const lines = out.split("\n").filter((l) => l.trim());
   expect(rc).toBe(failing === "none" ? 0 : 2);
   expect(failingChecks).toBe(failing);
-  expect(lines).toBe(9);
+  // platform + eleven check lines, then the score's time section (#265); with no
+  // run.json the pinned tool is unknown, so the reach check prints no line
+  const checks = failing === "run.json" ? 10 : 11;
+  expect(lines.filter((l) => l.startsWith("ok  ") || l.startsWith("FAIL"))).toHaveLength(checks);
+  expect(lines.length).toBeGreaterThanOrEqual(checks + 2);
   expect(
-    out
-      .split("\n", 1)[0]
-      ?.startsWith(`platform: ${osType()} ${release()} ${machine()}, bun ${Bun.version}, git `),
+    lines[0]?.startsWith(
+      `platform: ${osType()} ${release()} ${machine()}, bun ${Bun.version}, git `,
+    ),
+  ).toBe(true);
+  expect(
+    lines.slice(10).some((l) => l.startsWith("stage ") || l.includes("could not be timed")),
   ).toBe(true);
   if (failText !== undefined) {
     expect(
@@ -394,6 +712,207 @@ function runScore(
   return { code: r.status ?? -1, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
 
+describe("ticket #202 fixture reach score", () => {
+  test("C16 a clean fixture score includes the reach check", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const result = runScore(dispatch, repo);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("ok   reach");
+    const scored = result.out.split("\n").filter(Boolean);
+    expect(scored.filter((l) => l.startsWith("ok  ") || l.startsWith("FAIL"))).toHaveLength(11);
+    expect(
+      scored.slice(12).some((l) => l.startsWith("stage ") || l.includes("could not be timed")),
+    ).toBe(true);
+  }, 120000);
+
+  test("C17 findings, missing points and supported-reader gaps fail fixture score", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const actionsPath = join(dispatch, "actions.jsonl");
+    const originalActions = readFileSync(actionsPath, "utf8");
+    try {
+      const finding = run("bash", [
+        wrapper,
+        "log-action",
+        dispatch,
+        "lane:one",
+        "reach",
+        "workhorses",
+        JSON.stringify({
+          kind: "finding",
+          point: "workhorses",
+          lane: "one",
+          access: "write",
+          path: "/tmp/out.txt",
+        }),
+      ]);
+      expect(finding.code).toBe(0);
+      const found = runScore(dispatch, repo);
+      expect(found.code).toBe(2);
+      expect(found.out).toContain("FAIL reach");
+
+      const cleanLines = readFileSync(actionsPath, "utf8").split("\n").filter(Boolean);
+      writeFileSync(
+        actionsPath,
+        `${cleanLines
+          .filter((line) => {
+            const row = JSON.parse(line) as Record<string, unknown>;
+            if (row.action !== "reach") return true;
+            const event = JSON.parse(String(row.detail)) as Record<string, unknown>;
+            return !(event.kind === "finding" && event.point === "workhorses");
+          })
+          .join("\n")}\n`,
+      );
+      const withoutRound = readFileSync(actionsPath, "utf8").split("\n").filter(Boolean);
+      writeFileSync(
+        actionsPath,
+        `${withoutRound
+          .filter((line) => {
+            const row = JSON.parse(line) as Record<string, unknown>;
+            if (row.action !== "reach") return true;
+            const event = JSON.parse(String(row.detail)) as Record<string, unknown>;
+            return !(event.kind === "point" && event.point === "r1");
+          })
+          .join("\n")}\n`,
+      );
+      const missing = runScore(dispatch, repo);
+      expect(missing.code).toBe(2);
+      expect(missing.out).toContain("FAIL reach");
+      expect(missing.out).toContain("not checked: r1");
+
+      const laneGap = run("bash", [
+        wrapper,
+        "log-action",
+        dispatch,
+        "coachman",
+        "reach",
+        "r1",
+        JSON.stringify({
+          kind: "point",
+          point: "r1",
+          result: "note",
+          lanes: [{ lane: "mimo", harness: "mimo", status: "not checked" }],
+        }),
+      ]);
+      expect(laneGap.code).toBe(0);
+      const unchecked = runScore(dispatch, repo);
+      expect(unchecked.code).toBe(2);
+      expect(unchecked.out).toContain("not checked: mimo at r1");
+    } finally {
+      writeFileSync(actionsPath, originalActions);
+    }
+  }, 240000);
+
+  function withPostmaster(
+    dispatch: string,
+    mutate: (postmaster: Record<string, unknown>) => void,
+  ): string {
+    const runPath = join(dispatch, "run.json");
+    const original = readFileSync(runPath, "utf8");
+    const run = JSON.parse(original) as Record<string, unknown>;
+    mutate(run.postmaster as Record<string, unknown>);
+    writeFileSync(runPath, JSON.stringify(run));
+    return original;
+  }
+
+  test("a run whose pin directory is gone is still scored on reach", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const head = run("git", ["-C", TOOL, "rev-parse", "HEAD"]).out.trim();
+    const runPath = join(dispatch, "run.json");
+    const original = withPostmaster(dispatch, (postmaster) => {
+      postmaster.checkout = join(tmp, "no-such-pin");
+      postmaster.commit = head;
+    });
+    try {
+      const result = runScore(dispatch, repo);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain("ok   reach");
+    } finally {
+      writeFileSync(runPath, original);
+    }
+  }, 120000);
+
+  test("a recorded commit without reach.ts scores no reach item", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const root = run("git", ["-C", TOOL, "rev-list", "--max-parents=0", "HEAD"])
+      .out.trim()
+      .split("\n")[0]!;
+    const runPath = join(dispatch, "run.json");
+    const original = withPostmaster(dispatch, (postmaster) => {
+      postmaster.commit = root;
+    });
+    try {
+      const result = runScore(dispatch, repo);
+      expect(result.code).toBe(0);
+      expect(result.out).not.toContain("reach");
+    } finally {
+      writeFileSync(runPath, original);
+    }
+  }, 120000);
+
+  test("a recorded commit git cannot read fails the score", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const runPath = join(dispatch, "run.json");
+    const original = withPostmaster(dispatch, (postmaster) => {
+      postmaster.commit = "0".repeat(40);
+    });
+    try {
+      const result = runScore(dispatch, repo);
+      expect(result.code).toBe(1);
+      expect(result.out).toContain("fixture:");
+      expect(result.out).toContain("reach");
+    } finally {
+      writeFileSync(runPath, original);
+    }
+  }, 120000);
+});
+
+describe("the reach item reads the run's mode", () => {
+  const dispatchOf = (name: string): string => join(tmp, name, "repo", ".postmaster", "runs", "7");
+  const repoOf = (name: string): string => join(tmp, name, "repo");
+
+  function withoutPoint(d: string, point: string): void {
+    const actionsPath = join(d, "actions.jsonl");
+    const kept = readFileSync(actionsPath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .filter((line) => {
+        const row = JSON.parse(line) as Record<string, unknown>;
+        if (row.action !== "reach") return true;
+        const event = JSON.parse(String(row.detail)) as Record<string, unknown>;
+        return !(event.kind === "point" && event.point === point);
+      });
+    writeFileSync(actionsPath, `${kept.join("\n")}\n`);
+  }
+
+  test("a single-thread record with round and card points scores the reach item ok", () => {
+    const output = bgResults.get("clean-single")?.out ?? "";
+    expect(output).toContain("ok   reach");
+  }, 30000);
+
+  test("a synthesis record without the workhorses point still fails the reach item", () => {
+    const d = brokenCopy("st-syn-no-workhorses", dispatchOf(`clean-${first}`));
+    withoutPoint(d, "workhorses");
+    const result = runScore(d, repoOf(`clean-${first}`));
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("FAIL reach");
+    expect(result.out).toContain("not checked: workhorses");
+  }, 120000);
+
+  test("a single-thread record without the card point still fails the reach item", () => {
+    const d = brokenCopy("st-single-no-card", dispatchOf("clean-single"));
+    withoutPoint(d, "card");
+    const result = runScore(d, repoOf("clean-single"));
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("FAIL reach");
+    expect(result.out).toContain("not checked: card");
+  }, 120000);
+});
+
 function captureStderr<T>(fn: () => T): { value: T; errs: string[] } {
   const errs: string[] = [];
   const origErr = console.error;
@@ -420,6 +939,7 @@ beforeAll(() => {
     "HOME",
     "LOCAL_SH",
     "POSTMASTER_FIXTURES",
+    "POSTMASTER_FIXTURE_APP_CACHE",
   ]) {
     savedEnv[k] = process.env[k];
   }
@@ -438,6 +958,9 @@ beforeAll(() => {
   process.env.GIT_AUTHOR_EMAIL = "fixture@example.invalid";
   process.env.GIT_COMMITTER_NAME = "fixture";
   process.env.GIT_COMMITTER_EMAIL = "fixture@example.invalid";
+  // The example app's own checks (hidden tests, lanes, gate) cost about 17 s per score and come out
+  // the same for every record of one app, so the records below share them. See appCached.
+  process.env.POSTMASTER_FIXTURE_APP_CACHE = join(tmp, "app-cache");
 
   uni = mkdtempSync(join(tmpdir(), "fixture-uni-"));
   uni2 = mkdtempSync(join(tmpdir(), "fixture-uni2-"));
@@ -464,8 +987,37 @@ beforeAll(() => {
   }
   background("clean-one", () => recorded("clean-one", first, "reference", 1));
   background("clean-three", () => recorded("clean-three", first, "reference", 3));
+  for (const kind of ["floor", "short", "long-wait", "no-stages"] as const) {
+    const name = `timing-${kind}`;
+    timedCopy(name, kind);
+    const repo = join(tmp, name, "repo");
+    background(name, () => runScore(join(repo, ".postmaster", "runs", "7"), repo));
+  }
+  const cardRepo = join(tmp, "timing-card", "repo");
+  cpSync(join(tmp, "timing-floor", "repo"), cardRepo, {
+    recursive: true,
+    preserveTimestamps: true,
+  });
+  const cardDispatch = join(cardRepo, ".postmaster", "runs", "7");
+  rmSync(join(cardDispatch, "card.md"), { force: true });
+  background("timing-card", () => runScore(cardDispatch, cardRepo));
+  const missingMarkerRepo = join(tmp, "timing-missing-marker", "repo");
+  cpSync(join(tmp, "timing-floor", "repo"), missingMarkerRepo, {
+    recursive: true,
+    preserveTimestamps: true,
+  });
+  const missingMarkerDispatch = join(missingMarkerRepo, ".postmaster", "runs", "7");
+  rmSync(join(missingMarkerDispatch, "logs", "one.done"), { force: true });
+  background("timing-missing-marker", () => runScore(missingMarkerDispatch, missingMarkerRepo));
   background("break-hidden", () => recorded("break-hidden", first, "app"));
   background("break-gate", () => recorded("break-gate", first, "broken"));
+  background("clean-single", () =>
+    recorded("clean-single", first, "reference", 2, "single-thread"),
+  );
+  singleThreadBreaks(
+    join(tmp, "clean-single", "repo", ".postmaster", "runs", "7"),
+    join(tmp, "clean-single", "repo"),
+  );
 
   for (const t of tickets()) {
     const appDir = join(tmp, `app-${t}`);
@@ -483,7 +1035,7 @@ beforeAll(() => {
       return h.passed ? 0 : 2;
     });
   }
-}, 900000);
+}, 1800000);
 
 afterAll(() => {
   for (const [k, v] of Object.entries(savedEnv)) {
@@ -494,6 +1046,69 @@ afterAll(() => {
   rmSync(uni, { recursive: true, force: true });
   rmSync(uni2, { recursive: true, force: true });
   rmSync(uni3, { recursive: true, force: true });
+});
+
+describe("the app result cache", () => {
+  /** Run fn with POSTMASTER_FIXTURE_APP_CACHE set to value (undefined removes it), then put it back. */
+  function withCache<T>(value: string | undefined, fn: () => T): T {
+    const before = process.env.POSTMASTER_FIXTURE_APP_CACHE;
+    if (value === undefined) delete process.env.POSTMASTER_FIXTURE_APP_CACHE;
+    else process.env.POSTMASTER_FIXTURE_APP_CACHE = value;
+    try {
+      return fn();
+    } finally {
+      if (before === undefined) delete process.env.POSTMASTER_FIXTURE_APP_CACHE;
+      else process.env.POSTMASTER_FIXTURE_APP_CACHE = before;
+    }
+  }
+
+  test("a result is computed once per key and read back afterwards", () => {
+    const dir = join(tmp, "cache-unit");
+    let computed = 0;
+    const compute = (): { n: number } => ({ n: ++computed });
+    withCache(dir, () => {
+      expect(appCached("k1", compute)).toEqual({ n: 1 });
+      expect(appCached("k1", compute)).toEqual({ n: 1 });
+      expect(computed).toBe(1);
+      expect(appCached("k2", compute)).toEqual({ n: 2 });
+      expect(readdirSync(dir).filter((f) => f.endsWith(".json"))).toHaveLength(2);
+    });
+  }, 30000);
+
+  test("with no cache set every call computes, and nothing is written", () => {
+    let computed = 0;
+    withCache(undefined, () => {
+      appCached("k1", () => ++computed);
+      appCached("k1", () => ++computed);
+    });
+    expect(computed).toBe(2);
+  }, 30000);
+
+  test("a stored result that cannot be read is computed again, and a directory that cannot be written costs only time", () => {
+    const dir = join(tmp, "cache-bad");
+    mkdirSync(dir, { recursive: true });
+    let computed = 0;
+    withCache(dir, () => {
+      appCached("k1", () => ++computed);
+      for (const f of readdirSync(dir)) writeFileSync(join(dir, f), "{ not json");
+      expect(appCached("k1", () => ++computed)).toBe(2);
+    });
+    const file = join(tmp, "cache-is-a-file");
+    writeFileSync(file, "");
+    withCache(file, () => {
+      expect(appCached("k1", () => 7)).toBe(7);
+    });
+  }, 30000);
+
+  test("a score reads the same from the cache as from a run of the app's own checks", () => {
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const dispatch = join(repo, ".postmaster", "runs", "7");
+    const shared = score(dispatch, repo);
+    const fresh = withCache(undefined, () => score(dispatch, repo));
+    expect(fresh.code).toBe(shared.code);
+    expect(fresh.out).toBe(shared.out);
+    expect(shared.code).toBe(0);
+  }, 120000);
 });
 
 describe("unicode text edges", () => {
@@ -686,8 +1301,9 @@ describe("new: a fresh repo outside every other, with its ticket in its own stor
     const localSh = join(HERE, "run");
     const listR = run(localSh, ["local", dest, "list"]);
     const readR = run(localSh, ["local", dest, "read", "1", "--body"]);
-    expect(listR.out.trim()).toBe(`#1\ttodo\t${ticketTitle(first)}`);
-    expect(readR.out).toBe(ticketBody(first));
+    const base = run("git", ["-C", dest, "rev-parse", "HEAD"]).out.trim();
+    expect(listR.out.trim()).toBe(`#1\ttodo\t${ticketTitle(first)}\tready`);
+    expect(readR.out).toBe(ticketBody(first).replaceAll("FIXTURE_BASE", base));
   }, 30000);
   test("a run against it reads the local tracker, though the config names github", () => {
     const trackerKind = run(join(HERE, "run"), ["tracker-kind", dest]);
@@ -851,26 +1467,41 @@ describe("score: a recorded run that meets every check scores clean", () => {
   test("a three-leg run dispatched before this change scores clean", () => {
     expectScore("clean-three", "none");
   }, 30000);
+  test("a single-thread run scores clean and its hidden suite reports no lane", () => {
+    expectScore("clean-single", "none");
+    const output = bgResults.get("clean-single")?.out ?? "";
+    const hidden = output.split("\n").find((line) => line.includes("hidden-tests")) ?? "";
+    expect(hidden).toContain("on main");
+    expect(hidden).not.toContain("; one:");
+    expect(hidden).not.toContain("; two:");
+  }, 30000);
 
   test("fixture score passes without jq on PATH and still requires npm", () => {
     const repo = join(tmp, `clean-${first}`, "repo");
     const dispatch = join(repo, ".postmaster", "runs", "7");
     const path = scorePath(["jq"]);
     expect(run("bash", ["-c", "command -v jq"], { env: { PATH: path } }).code).toBe(1);
-    const clean = runScore(dispatch, repo, { ...process.env, PATH: path });
+    // This test is about what the example app's checks need from PATH, so they must really run.
+    const uncached = (extra: Record<string, string>): Record<string, string | undefined> => ({
+      ...process.env,
+      POSTMASTER_FIXTURE_APP_CACHE: undefined,
+      ...extra,
+    });
+    const clean = runScore(dispatch, repo, uncached({ PATH: path }));
     expect(clean.code).toBe(0);
     const lines = clean.out.trim().split("\n");
-    expect(lines).toHaveLength(9);
-    expect(lines.slice(1).every((line) => line.startsWith("ok  "))).toBe(true);
+    expect(lines.slice(1, 12).every((line) => line.startsWith("ok  "))).toBe(true);
+    expect(lines[12]?.startsWith("stage ")).toBe(true);
+    expect(lines.length).toBeGreaterThan(12);
     console.log(`score without jq:\n${clean.out.trimEnd()}`);
 
     const withoutNpm = scorePath(["jq", "npm"]);
-    const missing = runScore(dispatch, repo, { ...process.env, PATH: withoutNpm });
+    const missing = runScore(dispatch, repo, uncached({ PATH: withoutNpm }));
     expect(missing.code).toBe(1);
     expect(missing.out).toContain("fixture: npm is not on PATH");
 
     const withoutNode = scorePath(["jq", "node"]);
-    const missingNode = runScore(dispatch, repo, { ...process.env, PATH: withoutNode });
+    const missingNode = runScore(dispatch, repo, uncached({ PATH: withoutNode }));
     expect(missingNode.code).toBe(1);
     expect(missingNode.out).toContain("fixture: node is not on PATH");
   }, 120000);
@@ -892,7 +1523,9 @@ describe("score: a recorded run that meets every check scores clean", () => {
     const out = bgResults.get("break-gate")?.out ?? "";
     const cleanOut = bgResults.get(`clean-${first}`)?.out ?? "";
     expect(out.split("\n", 1)[0]).toBe(cleanOut.split("\n", 1)[0]);
-    expect(out.split("\n")).toHaveLength(10);
+    expect(
+      out.split("\n").filter((l) => l.startsWith("ok  ") || l.startsWith("FAIL")),
+    ).toHaveLength(11);
     console.log(`failing score:\n${out.trimEnd()}`);
   });
 
@@ -920,6 +1553,206 @@ describe("score: a recorded run that meets every check scores clean", () => {
       bgResults.get(`clean-${first}`)?.out.split("\n", 1)[0],
     );
   }, 120000);
+});
+
+describe("score: timing on whole copied runs with ticket-figure timelines (#265)", () => {
+  const result = (name: string): { code: number; out: string } => bgResults.get(name)!;
+  const dispatchFor = (name: string): string => join(tmp, name, "repo", ".postmaster", "runs", "7");
+
+  test("the over-hour clean copy prints the run-times table, lane times and round times", () => {
+    const scored = result("timing-floor");
+    const dispatch = dispatchFor("timing-floor");
+    const repo = join(tmp, "timing-floor", "repo");
+    const direct = run(join(HERE, "run"), ["run-times", dispatch]);
+    expect(scored.code).toBe(0);
+    expect(scored.out).toContain(direct.out.trimEnd());
+    expect(scored.out).toContain("total                                            1h 06m");
+    expect(scored.out).toContain("workhorses: one 10m 00s, two 4m 00s");
+    expect(scored.out).toContain("review round 1: mimo bug 15m 00s, codex bug 3m 00s");
+    expect(scored.out).toContain("the run took longer than an hour: 1h 06m");
+    expect(scored.out).not.toContain("long wait:");
+    console.log(
+      `$ scripts/run fixture score ${dispatch} ${repo}\n${scored.out.trimEnd()}\nexit: ${scored.code}`,
+    );
+    console.log(
+      `$ scripts/run run-times ${dispatch}\n${direct.out.trimEnd()}\nexit: ${direct.code}`,
+    );
+  }, 30000);
+
+  test("the short copy has no over-hour line", () => {
+    const scored = result("timing-short");
+    expect(scored.code).toBe(0);
+    expect(scored.out).toContain("total                                            57m 21s");
+    expect(scored.out).not.toContain("longer than an hour");
+    console.log(
+      `$ scripts/run fixture score ${dispatchFor("timing-short")} ${join(tmp, "timing-short", "repo")}\n${scored.out.trimEnd()}\nexit: ${scored.code}`,
+    );
+  }, 30000);
+
+  test("long waits are named and an efforts failure stays the only failure", () => {
+    const scored = result("timing-long-wait");
+    const failures = scored.out.split("\n").filter((line) => line.startsWith("FAIL"));
+    expect(scored.code).toBe(2);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain("efforts");
+    expect(scored.out).toContain("checkpoint-1 19m 31s, shipping 13m 05s");
+    console.log(
+      `$ scripts/run fixture score ${dispatchFor("timing-long-wait")} ${join(tmp, "timing-long-wait", "repo")}\n${scored.out.trimEnd()}\nexit: ${scored.code}`,
+    );
+  }, 30000);
+
+  test("a missing card still fails while the over-hour line remains", () => {
+    const scored = result("timing-card");
+    expect(scored.code).toBe(2);
+    expect(scored.out).toContain("FAIL ship-card");
+    expect(scored.out).toContain("the run took longer than an hour: 1h 06m");
+    console.log(
+      `$ scripts/run fixture score ${dispatchFor("timing-card")} ${join(tmp, "timing-card", "repo")}\n${scored.out.trimEnd()}\nexit: ${scored.code}`,
+    );
+  }, 30000);
+
+  test("without stage lines the score says it could not time the run and keeps its check verdict", () => {
+    const scored = result("timing-no-stages");
+    expect(scored.code).toBe(2);
+    expect(scored.out).toContain("the run could not be timed");
+    expect(scored.out).toContain("FAIL stages");
+    expect(scored.out).not.toContain("longer than an hour");
+    console.log(
+      `$ scripts/run fixture score ${dispatchFor("timing-no-stages")} ${join(tmp, "timing-no-stages", "repo")}\n${scored.out.trimEnd()}\nexit: ${scored.code}`,
+    );
+  }, 30000);
+
+  test("a workhorse with no marker is named and receives no inferred duration", () => {
+    const scored = result("timing-missing-marker");
+    expect(scored.code).toBe(0);
+    expect(scored.out).toContain("workhorses: two 4m 00s, one no marker");
+  }, 30000);
+
+  test("a one-leg run has no review-round timing line", () => {
+    const scored = bgResults.get("clean-one")!;
+    // The timing line is `review round N:`; the reach summary shares the words.
+    expect(scored.out).not.toContain("review round ");
+  }, 30000);
+});
+
+describe("score: premises are checked before workhorse dispatch", () => {
+  function recordOrder(name: string, rows: Array<Record<string, string>>): string {
+    const dispatch = join(tmp, `premises-${name}`);
+    mkdirSync(dispatch, { recursive: true });
+    writeFileSync(
+      join(dispatch, "run.json"),
+      JSON.stringify({ config: { team: { workhorses: ["one", "two"] } } }),
+    );
+    writeFileSync(
+      join(dispatch, "actions.jsonl"),
+      `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
+    );
+    return dispatch;
+  }
+
+  const premise = { actor: "coachman", action: "premises", target: "base", detail: "result=same" };
+  const laneDispatch = {
+    actor: "coachman",
+    action: "dispatch",
+    target: "one",
+    detail: "workhorse",
+  };
+
+  test("a premises action before the first workhorse dispatch passes", () => {
+    expect(checkPremisesOrder(recordOrder("before", [premise, laneDispatch])).ok).toBe(true);
+  });
+
+  test("a workhorse dispatch before the premises action fails", () => {
+    const result = checkPremisesOrder(recordOrder("after", [laneDispatch, premise]));
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("precedes");
+  });
+
+  test("a missing premises action fails", () => {
+    const result = checkPremisesOrder(recordOrder("missing", [laneDispatch]));
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("no coachman premises action");
+  });
+
+  test("premises with no workhorse dispatch passes", () => {
+    const result = checkPremisesOrder(recordOrder("stopped", [premise]));
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("no workhorse dispatched");
+  });
+});
+
+describe("score: the run kept its mode (D14)", () => {
+  const dispatchOf = (name: string): string => join(tmp, name, "repo", ".postmaster", "runs", "7");
+  const repoOf = (name: string): string => join(tmp, name, "repo");
+
+  test("a single-thread run with a workhorse dispatch line fails the mode check", () => {
+    expectScore("break-st-dispatch", "mode", "workhorse dispatch");
+  }, 30000);
+  test("a single-thread run with a wb/ branch fails the mode check", () => {
+    expectScore("break-st-branch", "mode", "workhorse branches");
+  }, 30000);
+  test("a synthesis run with its workhorse dispatch lines removed fails the mode check", () => {
+    expectScore("break-syn-dispatch", "mode", "never dispatched");
+  }, 30000);
+  test("a single-thread run that entered workhorses-running fails the stages check", () => {
+    expectScore("break-st-stages", "stages", "workhorses-running");
+  }, 30000);
+  test("a synthesis run that never entered workhorses-running fails the stages check", () => {
+    expectScore("break-syn-stages", "stages", "workhorses-running");
+  }, 30000);
+  test("the recorded mode reads the schedule: single-thread skips workhorses-running", () => {
+    expect(runMode(dispatchOf("clean-single"))).toBe("single-thread");
+    expect(runMode(dispatchOf(`clean-${first}`))).toBe("synthesis");
+  });
+  test("a record with no mode reads as synthesis and keeps its lanes", () => {
+    const d = brokenCopy("no-mode", dispatchOf(`clean-${first}`));
+    const path = join(d, "run.json");
+    const rec = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+    delete rec.mode;
+    delete rec.mode_source;
+    delete rec.mode_setting;
+    writeFileSync(path, JSON.stringify(rec));
+    expect(runMode(d)).toBe("synthesis");
+    const result = checkMode(d, repoOf(`clean-${first}`));
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("dispatched and branched");
+  });
+  test("a record naming an unknown mode fails the mode check", () => {
+    const d = brokenCopy("bad-mode", dispatchOf(`clean-${first}`));
+    const path = join(d, "run.json");
+    const rec = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+    rec.mode = "two-lanes";
+    writeFileSync(path, JSON.stringify(rec));
+    const result = checkMode(d, repoOf(`clean-${first}`));
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("two-lanes");
+  });
+  test("a single-thread dispatch with nothing pulled passes the mode check", () => {
+    const result = checkMode(dispatchOf("clean-single"), repoOf("clean-single"));
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("no workhorse dispatch");
+  });
+  test("a dispatch without run.json skips the mode check", () => {
+    const d = join(tmp, "no-record", "repo", ".postmaster", "runs", "7");
+    mkdirSync(d, { recursive: true });
+    const result = checkMode(d, repoOf(`clean-${first}`));
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("skipped");
+  });
+  test("the waybill fallback reads lanes from the Team section, ignoring a quoted line", () => {
+    const d = brokenCopy("fallback-team", dispatchOf(`clean-${first}`));
+    const path = join(d, "run.json");
+    const rec = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+    const team = (rec.config as Record<string, unknown>).team as Record<string, unknown>;
+    delete team.workhorses;
+    writeFileSync(path, JSON.stringify(rec));
+    const briefPath = join(d, "brief.md");
+    const brief = readFileSync(briefPath, "utf-8");
+    writeFileSync(briefPath, brief.replace("\n", "\nworkhorses: phantom=h/x\n"));
+    const result = checkMode(d, repoOf(`clean-${first}`));
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("dispatched and branched");
+  });
 });
 
 describe("score: a record's stages are entered by the legs the contract names", () => {
@@ -969,6 +1802,10 @@ describe("score: negative controls, the same record with one check broken at a t
   test("a stage change never logged: stages alone fails", () => {
     expectScore("break-stages", "stages", ", not ");
   }, 30000);
+  test("no stage lines at all: stages alone fails, and the score could not time the run", () => {
+    expectScore("break-notime", "stages");
+    expect(bgResults.get("break-notime")?.out ?? "").toContain("could not be timed");
+  }, 30000);
   test("a leg's done marker missing: markers alone fails", () => {
     expectScore("break-markers", "markers", ".leg-2-done");
   }, 30000);
@@ -986,6 +1823,178 @@ describe("score: negative controls, the same record with one check broken at a t
   }, 30000);
   test("a waybill with mismatched efforts: efforts alone fails", () => {
     expectScore("break-efforts", "efforts", "efforts:");
+  }, 30000);
+});
+
+describe("score: the time lines after the checks (#265)", () => {
+  const T0 = Date.UTC(2026, 0, 5, 10, 0, 0);
+  const at = (sec: number): string => `${new Date(T0 + sec * 1000).toISOString().slice(0, 19)}Z`;
+
+  const act = (
+    sec: number,
+    actor: string,
+    action: string,
+    target: string,
+    detail = "",
+  ): Record<string, unknown> => ({ ts: at(sec), actor, action, target, detail });
+
+  function plant(
+    name: string,
+    events: Array<Record<string, unknown>>,
+    markers: Array<[string, number]> = [],
+    files: Record<string, string> = {},
+  ): string {
+    const d = join(scratch, `time-${name}`);
+    mkdirSync(join(d, "logs"), { recursive: true });
+    writeFileSync(
+      join(d, "actions.jsonl"),
+      `${events.map((e) => JSON.stringify({ project: "p", run: "1", ...e })).join("\n")}\n`,
+    );
+    for (const [rel, content] of Object.entries(files)) {
+      writeFileSync(join(d, rel), content);
+    }
+    for (const [rel, sec] of markers) {
+      const p = join(d, rel);
+      writeFileSync(p, "");
+      const when = new Date(T0 + sec * 1000);
+      utimesSync(p, when, when);
+    }
+    return d;
+  }
+
+  /** 12m 20s total; checkpoint-1 waits 11m 00s across a leg gap. */
+  function waitRun(): string {
+    return plant(
+      "wait",
+      [
+        act(0, "postmaster", "dispatch", "7"),
+        act(1, "coachman", "dispatch", "slow", "thread-slow"),
+        act(2, "coachman", "dispatch", "fast", "thread-fast"),
+        act(3, "coachman", "dispatch", "ghost", "thread-ghost"),
+        act(5, "coachman", "handoff-accept", "leg-1"),
+        act(10, "coachman", "stage", "bootstrapped"),
+        act(20, "coachman", "stage", "checkpoint-1"),
+        act(30, "coachman", "handoff", "leg-1"),
+        act(70, "coachman", "review-launch", "fast", "bug round 1"),
+        act(72, "coachman", "review-launch", "slow", "bug round 1"),
+        act(690, "coachman", "handoff-accept", "leg-2"),
+        act(700, "coachman", "stage", "review"),
+        act(710, "coachman", "handoff", "leg-2"),
+        act(720, "coachman", "stage", "shipping"),
+        act(730, "coachman", "stage", "shipped"),
+        act(740, "coachman", "stage", "done"),
+      ],
+      [
+        ["logs/slow.done", 60],
+        ["logs/fast.done", 15],
+        ["logs/review-r1-bug-fast.done", 170],
+        ["logs/review-r1-bug-slow.done", 102],
+      ],
+      {
+        "logs/review-r1.json": `${JSON.stringify({
+          started: at(66),
+          reviewers: [
+            ["bug", "fast"],
+            ["bug", "slow"],
+          ],
+        })}\n`,
+      },
+    );
+  }
+
+  /** 1h 00m total; no wait over a minute; no review leg, no markers. */
+  function hourRun(): string {
+    return plant("hour", [
+      act(0, "postmaster", "dispatch", "7"),
+      act(5, "coachman", "handoff-accept", "leg-1"),
+      act(10, "coachman", "stage", "bootstrapped"),
+      act(20, "coachman", "stage", "workhorses-running"),
+      act(30, "coachman", "handoff", "leg-1"),
+      act(40, "coachman", "handoff-accept", "leg-2"),
+      act(50, "coachman", "stage", "synthesis"),
+      act(60, "coachman", "stage", "review"),
+      act(3600, "coachman", "handoff", "leg-2"),
+      act(3610, "coachman", "stage", "shipping"),
+      act(3620, "coachman", "stage", "shipped"),
+      act(3630, "coachman", "stage", "done"),
+    ]);
+  }
+
+  test("the stage table follows the checks with each stage's waiting and the total", () => {
+    const out = timeReport(waitRun());
+    // ASCII: time lines are machine-printed.
+    expect(out).toMatch(/^stage\s+started \(UTC\)/mu);
+    expect(out).toContain("11m 20s");
+    // ASCII: time lines are machine-printed.
+    expect(out).toMatch(/^total\s+12m 20s/mu);
+  }, 30000);
+
+  test("a wait over ten minutes names the stage, and no hour is claimed", () => {
+    const out = timeReport(waitRun());
+    expect(out).toContain("long wait: checkpoint-1 11m 00s");
+    expect(out).not.toContain("longer than an hour");
+  }, 30000);
+
+  test("a total over an hour is named, and no short wait is", () => {
+    const out = timeReport(hourRun());
+    expect(out).toContain("the run took longer than an hour: 1h 00m");
+    expect(out).not.toContain("long wait:");
+  }, 30000);
+
+  test("workhorses read slowest first, and the lane with no marker is named as such", () => {
+    expect(timeReport(waitRun())).toContain("workhorses: slow 59s, fast 13s, ghost no marker");
+  }, 30000);
+
+  test("a reviewer is named with its lens, slowest first", () => {
+    expect(timeReport(waitRun())).toContain("review round 1: fast bug 1m 40s, slow bug 30s");
+  }, 30000);
+
+  test("a run with no review round files says nothing about rounds", () => {
+    expect(timeReport(hourRun())).not.toContain("review round");
+  }, 30000);
+
+  test("a log with no stage lines could not be timed, and prints no table", () => {
+    const d = plant("notiming", [
+      act(0, "postmaster", "dispatch", "7"),
+      act(5, "coachman", "dispatch", "slow", "thread-slow"),
+      act(10, "coachman", "note", "x"),
+    ]);
+    const out = timeReport(d);
+    expect(out).toContain("the run could not be timed");
+    expect(out).not.toContain("started (UTC)");
+    expect(out).toContain("workhorses: slow no marker");
+  }, 30000);
+
+  test("a wait of exactly ten minutes stays silent while 601 seconds is named", () => {
+    const d = plant("boundary-wait", [
+      act(0, "postmaster", "dispatch", "7"),
+      act(5, "coachman", "handoff-accept", "leg-1"),
+      act(10, "coachman", "stage", "bootstrapped"),
+      act(20, "coachman", "stage", "checkpoint-1"),
+      act(30, "coachman", "handoff", "leg-1"),
+      act(630, "coachman", "handoff-accept", "leg-2"),
+      act(640, "coachman", "stage", "shipping"),
+      act(650, "coachman", "handoff", "leg-2"),
+      act(1251, "coachman", "stage", "shipped"),
+      act(1261, "coachman", "stage", "done"),
+    ]);
+    const out = timeReport(d);
+    const lines = out.split("\n").filter((l) => l.startsWith("long wait:"));
+    expect(lines).toEqual(["long wait: shipping 10m 01s"]);
+  }, 30000);
+
+  test("a total of exactly an hour stays silent", () => {
+    const d = plant("boundary-hour", [
+      act(0, "postmaster", "dispatch", "7"),
+      act(5, "coachman", "handoff-accept", "leg-1"),
+      act(10, "coachman", "stage", "bootstrapped"),
+      act(20, "coachman", "stage", "shipping"),
+      act(30, "coachman", "stage", "shipped"),
+      act(3600, "coachman", "stage", "done"),
+    ]);
+    const out = timeReport(d);
+    expect(out).toContain("1h 00m");
+    expect(out).not.toContain("longer than an hour");
   }, 30000);
 });
 

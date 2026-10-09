@@ -42,10 +42,38 @@ quality, not about the runs in flight. [Why](wiki/concepts/fixture-runs.md).
 ## When a session opens in this repo, do this
 
 No slash command, and no wizard for the user to run. The user opens their agent in this
-folder and says hi. Any first message starts the flow: set the machine up if it is not,
-choose a target, launch the postmaster. Work out where the user is and pick up from there.
+folder and says hi. Any first message starts the flow: choose a target, set the machine
+up if it is not, launch the postmaster. Work out where the user is and pick up from there.
 
-**1. Is this machine set up?**
+**1. Which project are we working on?**
+
+Ask first, before any config check, whether to work on postmaster itself or on another
+project. Postmaster itself is this checkout: it makes this repo the target. For another
+project, list the projects as below. A project the user has already named is not asked
+for again.
+
+```sh
+scripts/run find-projects                 # most recently worked first
+scripts/run check-target <chosen>         # 0 usable · 1 not a repo · 2 dirty, ask first
+scripts/run discover-project <chosen>     # gate command, docs, tracker and its prefix, checks
+scripts/run project-settings report <chosen>  # shared/local presence and per-fact sources
+```
+
+**When a decision belongs to the project rather than the machine, offer it for
+`.postmaster/` and write it there on agreement, never silently.** `run discover-project`
+reports whether the target already has settings. If a fact is one every run against this
+project needs — the default turnpikes, the tracker binding by name, the risk surfaces —
+propose the shared `project.toml` and say which file you are proposing, since that one is
+committed. If it is this person's choice on this machine — which lanes fill the roles —
+propose local `settings.toml`. If the machine has no config yet, hold the local offer
+until step 2 has written it: recording lane roles needs the machine config, and the
+write is refused without it. A missing settings file is never an error and never a
+prompt to create one; the normal case is nothing written.
+
+**The target may be this repo.** Developing postmaster with postmaster is supported; see
+the section above for the two things that differ.
+
+**2. Is this machine set up?**
 
 ```sh
 cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
@@ -56,9 +84,9 @@ Include both results when you say whether the machine is set up. The link check 
 If the config is present but the check names missing or blocked links, report them and offer
 the install step below on the user's word.
 
-If it is missing, set it up now, in conversation, before anything else. You conduct it:
-probe first, ask one thing at a time, verify each answer, then have the script write the
-config. Do not guess an answer, and do not hand the user a script to run instead.
+If it is missing, set it up now, in conversation, with the target already chosen. You
+conduct it: probe first, ask one thing at a time, verify each answer, then have the script
+write the config. Do not guess an answer, and do not hand the user a script to run instead.
 
 ```sh
 scripts/run probe-harnesses     # which agent CLIs exist, and which read no ambient context
@@ -68,8 +96,8 @@ scripts/run probe-confine       # whether lane confinement can run, and what wou
 
 What to settle, in this order, and why none of it is guessed:
 
-- **Which harness and model fills each role:** the horses, the reviewers, the coachman and
-  its fallback, the postmaster. Offer only what the probe found, and do not assume: a
+- **Which harness, model and effort fills each role:** the horses, the reviewers, the coachman and
+  its fallback, the booking clerk and the postmaster. Offer only what the probe found, and do not assume: a
   harness on PATH can still be walled, out of credit, or reading no ambient context. The
   shape of the answer is `config.example.toml` at the repo root.
 - **How tickets are created.** GitHub Issues on a GitHub Projects board is the default: a
@@ -112,31 +140,10 @@ scripts/run link-skills --dry-run   # the links it would make, and anything in t
 scripts/run link-skills             # only after the user agrees; makes links, replaces nothing
 ```
 
-**2. Which project are we dispatching against?**
-
-```sh
-scripts/run find-projects                 # most recently worked first
-scripts/run check-target <chosen>         # 0 usable · 1 not a repo · 2 dirty, ask first
-scripts/run discover-project <chosen>     # gate command, docs, tracker and its prefix, checks
-scripts/run project-settings report <chosen>  # shared/local presence and per-fact sources
-```
-
-**When a decision belongs to the project rather than the machine, offer it for
-`.postmaster/` and write it there on agreement, never silently.** `run discover-project`
-reports whether the target already has settings. If a fact is one every run against this
-project needs — the default turnpikes, the tracker binding by name, the risk surfaces —
-propose the shared `project.toml` and say which file you are proposing, since that one is
-committed. If it is this person's choice on this machine — which lanes fill the roles —
-propose local `settings.toml`. A missing settings file is never an error and never a
-prompt to create one; the normal case is nothing written.
-
-**The target may be this repo.** Developing postmaster with postmaster is supported; see
-the section above for the two things that differ.
-
 **3. Start the postmaster** per `skills/postmaster/SKILL.md`, and hand over if it spawns one.
 It checks the same preconditions again, cheaply, because it is also reached by someone typing
 `/postmaster` on a machine that has done none of the above. Tell it what this session has
-already settled — the config, the chosen target — and it will pick up from there rather than
+already settled — the chosen target, the config — and it will pick up from there rather than
 asking twice. When the decision script says `self`, this session carries on as the postmaster;
 when it says `spawn`, a separate postmaster session is started and this one stops.
 
@@ -146,11 +153,12 @@ costs tokens, and is how the wrong answer gets produced confidently.
 
 ## What it is
 
-A three-role flow for getting one ticket implemented well by several models at once.
+A four-role flow for getting one ticket implemented well by several models at once.
 
 | role | what it does | where it is defined |
 |---|---|---|
 | **postmaster** | decomposes a stream into tickets, dispatches one coachman per ticket leg by leg, supervises, answers escalations, grants merges | `skills/postmaster/postmaster.md` (the front door session, or one it spawned) |
+| **booking clerk** | prepares a ticket with the user and marks it ready after sign-off | `skills/clerk/clerk.md` |
 | **coachman** | drives one leg of one ticket; at most two legs, `synthesis` and `review`, each a fresh coachman with a written hand-off between them, carry a ticket from waybill to ship card: harnessing the team, judging their work, running the turnpikes its ticket names, clearing the gate | `skills/postmaster/coachman.md` |
 | **the team** | several model lanes implementing the same ticket independently, in **blinkers**: separate worktrees, unable to see each other's work | `coachman.md`, lane table |
 
@@ -193,8 +201,7 @@ metaphor expresses them.
 
 **waybill** the brief that travels with a load · **harness** the CLI wrapping a model ·
 **blinkers** worktree isolation between lanes · **workhorse** a lane that implements the ticket,
-as against a reviewer · **workhorse spec** a workhorse's own plan for the ticket, committed before
-its code (`WORKHORSE-SPEC.md`) · **lead horse / wheeler** the ranked lanes ·
+as against a reviewer · **lead horse / wheeler** the ranked lanes ·
 **turnpike** a check a run must pass through before it ships, named by its ticket: `default` is
 the style, bug and security reviews, and the project's gate always runs besides them ·
 **remount** resuming a stalled run ·
@@ -226,6 +233,11 @@ whole system.
 6. **Every action on a project is logged as it happens**, one JSON line per action through
    `scripts/run log-action`, per run and per project. The narrative is for reading; the log
    is what a run is audited from and what the flow is improved from.
+7. **Shared code lives once.** A helper that two scripts need goes in `scripts/lib/`,
+   imported by both, and is not copied between them.
+8. **Functional core, effects at the edges.** A computation takes its inputs as arguments and
+   returns its result. Reading files, the clock, the environment and processes happens at the
+   edge of a script, not inside the computation.
 
 The scripts run on Bun 1.4.2 or newer: `scripts/run <name> [args]` is the one entry for every
 tool script; it execs Bun with `--no-env-file` and the tool's own `bunfig.toml`, so a script run
@@ -269,6 +281,14 @@ repo's root. The run's own pinned tool goes through `<rt>`, resolved per run by
 `run run-meta path`. `scripts/run skill-refs` names every other path that does not go through
 `<tool>`, and `--fix` rewrites the bare ones; run both after writing a runbook and after a rebase.
 
+**A test states a time limit only when it needs more than the default.** `bunfig.toml` loads
+`scripts/lib/test-defaults.ts` for every `bun test` run, and that sets 60 seconds for each test and each
+setup hook. A limit is there to catch a hang. Ten flows on one machine run every test at half speed or
+less, so a limit close to the time a test takes on a quiet machine fails the gate on load alone. A test
+or hook that needs longer states its own limit, at ten times its quiet time at least. Bun applies a preload's
+default to the first file of a serial run and to every file of a `--parallel` run, so run more than one
+test file by hand with `--parallel=1`, or run `bun run check`.
+
 **Link what you mention.** Whenever you name something that has an address, in conversation, a pull request, a
 ticket or a comment, write it as a clickable link, so that nobody has to look it up. That covers:
 
@@ -284,9 +304,9 @@ ticket or a comment, write it as a clickable link, so that nobody has to look it
 A path that exists only on the machine, such as a run's record or a file a lane has not committed, stays plain
 text, since no link can reach it.
 
-**A ticket is brought to ready before it runs.** When the user wants to work on a ticket, a ticket session
-(`skills/postmaster/ticket-session.md`) rewrites it, with the user, into one document that is both the ticket and the
-spec (`skills/postmaster/ticket-template.md`). Its plain part is what the user signs off: the problem, the acceptance
+**A ticket is brought to ready before it runs.** When the user asks the postmaster to implement a ticket that is not
+ready, it starts the booking clerk (`skills/clerk/clerk.md`) to prepare it with the user in one document that is both the
+ticket and the spec (`skills/clerk/ticket-template.md`). Its plain part is what the user signs off: the problem, the acceptance
 criteria, the decisions made and who made them, and the direction, with no file, function or command in it. Under
 `## For the agents` it carries what the lanes need, derived from the plain part: the checks, the technical notes and the
 premises verified at a base commit. The user reviews the plain part once. The coachman writes no spec of its own, and
@@ -295,7 +315,7 @@ the workhorses decide the files and the tasks.
 **Comment auto-replies stay off.** Publishing or watching an artifact turns on automatic replies to comments sent to Claude,
 and a reply can land in a thread the conversation never sees. Right after each publish or watch, stop the session's watch on
 that artifact. The user says when they have left comments; then read each thread, answer it there, and make the change it asks for.
-**Show a change or a spec's code on a page made for the phone.** When the user reviews a change with automatic merging off,
-or opens the files a spec links to, publish it with the `review-pages` skill (`skills/review-pages/SKILL.md`): a review page
-with the ticket, the spec, the summary, the diff and the files as they stand, or a code viewer at the lines the spec cites.
+**Show a change or ticket-linked code on a page made for the phone.** When the user reviews a change with automatic merging off,
+or opens files named in the ticket's technical notes, publish it with the `review-pages` skill (`skills/review-pages/SKILL.md`): a review page
+with the ticket, the summary, the diff and the files as they stand, or a code viewer at the cited lines.
 The user comments on the page and gives the verdict in the chat. Claude Code only, until the dashboard shows changes.
