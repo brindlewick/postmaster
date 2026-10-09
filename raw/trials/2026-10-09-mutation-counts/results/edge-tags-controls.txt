@@ -10,6 +10,14 @@ module	3	0	0
 param	41	7	9
 this	1	0	0
 
+root	name given a value	property assigned	in-place call	delete	Object.assign
+captured	0	0	1	0	0
+global	0	2	0	0	0
+import	0	1	1	0	0
+module	1	0	2	0	0
+param	1	11	27	1	1
+this	0	0	1	0	0
+
 tag	places in a function with it	places in a module with it
 env	2	11
 clock	2	9
@@ -23,3 +31,8 @@ edge_function	8
 no_edge_function	42
 edge_module	11
 no_edge_module	39
+op_rebind	2
+op_prop	14
+op_call	32
+op_delete	1
+op_assign	1

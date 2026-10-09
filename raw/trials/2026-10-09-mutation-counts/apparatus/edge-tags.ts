@@ -40,6 +40,13 @@ export const edgeTags = (
     );
   }
   out.push("");
+  out.push("root\tname given a value\tproperty assigned\tin-place call\tdelete\tObject.assign");
+  const ops = ["rebind", "prop", "call", "delete", "assign"];
+  for (const root of roots) {
+    const g = first.filter((r) => r.root === root);
+    out.push(`${root}\t${ops.map((op) => g.filter((r) => r.op === op).length).join("\t")}`);
+  }
+  out.push("");
   out.push("tag\tplaces in a function with it\tplaces in a module with it");
   for (const tag of ["env", "clock", "files", "proc", "os"]) {
     const has =
@@ -56,6 +63,9 @@ export const edgeTags = (
     no_edge_function: String(first.length - inFn.length),
     edge_module: String(inMod.length),
     no_edge_module: String(first.length - inMod.length),
+    ...Object.fromEntries(
+      ops.map((op) => [`op_${op}`, String(first.filter((r) => r.op === op).length)]),
+    ),
   };
   out.push("");
   out.push("summary");

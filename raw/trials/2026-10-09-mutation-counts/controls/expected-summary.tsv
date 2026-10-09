@@ -15,3 +15,8 @@ edge-tags	edge_function	8	the positive control: seven in the tags module whose f
 edge-tags	no_edge_function	42	the negative control: the rest, in functions that touch nothing tagged
 edge-tags	edge_module	11	nine in the tags module and the two of the module that assigns process.env
 edge-tags	no_edge_module	39	
+edge-tags	op_call	32	worked by hand from the control files: 13 in-place methods, 9 in the tags module, and 10 others
+edge-tags	op_prop	14	
+edge-tags	op_rebind	2	an argument given a new value, and a module-level counter
+edge-tags	op_delete	1	
+edge-tags	op_assign	1	

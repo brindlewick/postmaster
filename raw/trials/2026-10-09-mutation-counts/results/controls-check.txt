@@ -68,6 +68,11 @@ edge-tags edge_function	8	8	yes	the positive control: seven in the tags module w
 edge-tags no_edge_function	42	42	yes	the negative control: the rest, in functions that touch nothing tagged
 edge-tags edge_module	11	11	yes	nine in the tags module and the two of the module that assigns process.env
 edge-tags no_edge_module	39	39	yes	
+edge-tags op_call	32	32	yes	worked by hand from the control files: 13 in-place methods, 9 in the tags module, and 10 others
+edge-tags op_prop	14	14	yes	
+edge-tags op_rebind	2	2	yes	an argument given a new value, and a module-level counter
+edge-tags op_delete	1	1	yes	
+edge-tags op_assign	1	1	yes	
 
 marks tally	expected	observed	ok	why
 all-hazard hazard	30	30	yes	the positive control: every place marked a hazard reads 30
@@ -108,4 +113,4 @@ split nonedge_hazard	7	7	yes
 split nonedge_population	60	60	yes	
 split nonedge_not_hazard	27	27	yes	9 of 20 harmless, of 60
 
-controls: 100 of 100 read as expected
+controls: 105 of 105 read as expected
