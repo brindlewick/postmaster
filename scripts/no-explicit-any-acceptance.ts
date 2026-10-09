@@ -246,10 +246,12 @@ export function accept(root: string, run: Runner = spawnRunner, base?: string): 
   if (!counted.ran) {
     return { code: 2, out: "", err: `${me}: the count run never started: ${counted.err}` };
   }
-  const m = /(\d+) problems/u.exec(counted.out);
-  const n = m === null ? -1 : Number(m[1]);
+  // At zero the count run prints nothing and exits 0; the "N problems" line only
+  // appears when N is not zero, singular for one.
+  const m = /(\d+) problems?/u.exec(counted.out);
+  const n = m === null ? 0 : Number(m[1]);
   if (counted.code !== 0 || n !== 0) {
-    findings.push(`${RULE}: ${n < 0 ? "no count" : `${n} problems`} reported, want 0 problems`);
+    findings.push(`${RULE}: ${m === null ? `exit ${counted.code}` : m[0]} reported, want 0 problems`);
   }
   const probe = join(root, "scripts", "zz-probe.ts");
   if (existsSync(probe)) {

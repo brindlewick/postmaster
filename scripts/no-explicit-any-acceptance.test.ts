@@ -26,7 +26,7 @@ const REASONED_TAIL = "no-explicit-any -- an old JSON shape\n";
 const BARE_TAIL = "no-explicit-any\n";
 
 const CLEAN: RunResult = { code: 0, out: "", err: "", ran: true };
-const ZERO: RunResult = { code: 0, out: "\n0 problems\n", err: "", ran: true };
+const ZERO: RunResult = { code: 0, out: "", err: "", ran: true };
 const FLAGGED: RunResult = {
   code: 1,
   out: `scripts/zz-probe.ts:1:21: Unexpected any. [Error/${RULE}]\n\n1 problem\n`,
@@ -36,6 +36,12 @@ const FLAGGED: RunResult = {
 const MANY: RunResult = {
   code: 1,
   out: "scripts/host.ts:9:9: Unexpected any.\n\n181 problems\n",
+  err: "",
+  ran: true,
+};
+const ONE: RunResult = {
+  code: 1,
+  out: "scripts/zz-probe.ts:1:21: Unexpected any.\n\n1 problem\n",
   err: "",
   ran: true,
 };
@@ -197,6 +203,14 @@ describe("the lint runs", () => {
     const r = accept(dir, stub({ flagged: FLAGGED, clean: CLEAN, zero: MANY }));
     expect(r.code).toBe(1);
     expect(r.out).toContain("181 problems");
+  });
+
+  test("a singular count fails too", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), CHECK);
+    const r = accept(dir, stub({ flagged: FLAGGED, clean: CLEAN, zero: ONE }));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("1 problem");
   });
 
   test("a count run that never starts exits 2", () => {
