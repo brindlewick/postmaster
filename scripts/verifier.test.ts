@@ -42,6 +42,7 @@ import {
   scrubGitEnv,
   surfaceProse,
   timeoutMs,
+  unrunProject,
   verifyDirName,
   wallInStream,
 } from "./verifier.ts";
@@ -803,6 +804,7 @@ describe("parseVerifyResults", () => {
     );
     expect(summary.gate).toBe("pass");
     expect(summary.failed).toEqual([]);
+    expect(summary.notRun).toEqual(["examples"]);
     expect(summary.results).toEqual([
       { name: "gate", result: "pass" },
       { name: "examples", result: "not run" },
@@ -816,7 +818,23 @@ describe("parseVerifyResults", () => {
     );
     expect(summary.gate).toBe("fail");
     expect(summary.failed).toEqual(["gate", "cli"]);
+    expect(summary.notRun).toEqual([]);
     expect(parseVerifyResults("nothing reported\n").gate).toBe(null);
+  });
+});
+
+describe("unrunProject", () => {
+  const kinds = { gate: "project", browser: "project", examples: "tool", journey: "tool" };
+
+  test("a project check unrun refuses; a tool check unrun is expected", () => {
+    expect(unrunProject(["browser"], kinds)).toEqual(["browser"]);
+    expect(unrunProject(["examples", "journey"], kinds)).toEqual([]);
+    expect(unrunProject(["examples", "browser", "journey"], kinds)).toEqual(["browser"]);
+  });
+
+  test("the gate stays out, and an unknown kind fails closed", () => {
+    expect(unrunProject(["gate"], kinds)).toEqual([]);
+    expect(unrunProject(["strange"], kinds)).toEqual(["strange"]);
   });
 });
 
@@ -915,7 +933,8 @@ describe("decideCheap and decideChecks", () => {
   test("the timeout, the failures, then the gate", () => {
     const ran = (summary: { gate: string | null; failed: string[] }): ChecksOutcome => ({
       kind: "ran",
-      summary: { ...summary, results: [] },
+      summary: { ...summary, notRun: [], results: [] },
+      unrunProject: [],
     });
     expect(decideChecks({ kind: "timeout", seconds: 1 })).toBe(
       "past its limit (the checks ran longer than 1s)",
@@ -929,6 +948,20 @@ describe("decideCheap and decideChecks", () => {
     expect(decideChecks(ran({ gate: "not run", failed: [] }))).toBe("gate did not pass (not run)");
     expect(decideChecks(ran({ gate: null, failed: [] }))).toBe("gate did not pass (not reported)");
     expect(decideChecks(ran({ gate: "pass", failed: [] }))).toBe(null);
+  });
+
+  test("an unrun project check refuses, after the failures", () => {
+    const ran = (unrunProject: string[], failed: string[] = []): ChecksOutcome => ({
+      kind: "ran",
+      summary: { gate: "pass", failed, notRun: unrunProject, results: [] },
+      unrunProject,
+    });
+    expect(decideChecks(ran(["browser"]))).toBe("checks not run (browser: not run)");
+    expect(decideChecks(ran(["browser", "cli"]))).toBe(
+      "checks not run (browser: not run; cli: not run)",
+    );
+    expect(decideChecks(ran(["browser"], ["cli"]))).toBe("checks failed (cli: fail)");
+    expect(decideChecks(ran([]))).toBe(null);
   });
 });
 

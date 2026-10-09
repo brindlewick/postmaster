@@ -542,6 +542,8 @@ export function outsidePaths(paths: string[], folder: string): string[] {
 export interface VerifySummary {
   gate: string | null;
   failed: string[];
+  /** Names reporting "not run", in the order reported. */
+  notRun: string[];
   /** Every check's result, in the order reported, for the pull-request body. */
   results: Array<{ name: string; result: string }>;
 }
@@ -556,8 +558,19 @@ export function parseVerifyResults(output: string): VerifySummary {
   return {
     gate: results.find((r) => r.name === "gate")?.result ?? null,
     failed: results.filter((r) => r.result === "fail").map((r) => r.name),
+    notRun: results.filter((r) => r.result === "not run").map((r) => r.name),
     results,
   };
+}
+
+/**
+ * The not-run checks that refuse the landing: every project check but the
+ * gate, which its own rule covers. Tool checks report not run when the
+ * landing brief gives them no ticket, which is expected; an unknown kind
+ * fails closed.
+ */
+export function unrunProject(notRun: string[], kinds: Record<string, string>): string[] {
+  return notRun.filter((n) => n !== "gate" && kinds[n] !== "tool");
 }
 
 /** The merge authority the run recorded, defaulting to the user when absent. */
@@ -634,11 +647,11 @@ export function decideCheap(facts: CheapFacts): string | null {
 
 /** What the project's checks reported: their summary, a timeout, or no result. */
 export type ChecksOutcome =
-  | { kind: "ran"; summary: VerifySummary }
+  | { kind: "ran"; summary: VerifySummary; unrunProject: string[] }
   | { kind: "timeout"; seconds: number }
   | { kind: "unrunnable"; error: string };
 
-/** The decision's expensive half: the timeout, the failures, then the gate. */
+/** The decision's expensive half: the timeout, the failures, the unrun, then the gate. */
 export function decideChecks(outcome: ChecksOutcome): string | null {
   if (outcome.kind === "timeout") {
     return `past its limit (the checks ran longer than ${outcome.seconds}s)`;
@@ -646,6 +659,9 @@ export function decideChecks(outcome: ChecksOutcome): string | null {
   if (outcome.kind === "unrunnable") return outcome.error;
   if (outcome.summary.failed.length > 0) {
     return `checks failed (${outcome.summary.failed.map((n) => `${n}: fail`).join("; ")})`;
+  }
+  if (outcome.unrunProject.length > 0) {
+    return `checks not run (${outcome.unrunProject.map((n) => `${n}: not run`).join("; ")})`;
   }
   if (outcome.summary.gate !== "pass") {
     return `gate did not pass (${outcome.summary.gate ?? "not reported"})`;
@@ -1148,6 +1164,29 @@ function refused(branch: string, classified: ClassifiedEntry[], reason: string):
   return { classified, accepted: false, summary: null, line: refuseLine(branch, reason) };
 }
 
+/** Check name to kind from the spec verify run wrote, or null when unreadable. */
+function specKinds(checksDir: string): Record<string, string> | null {
+  try {
+    const raw = JSON.parse(
+      readFileSync(join(checksDir, "verify", "spec", "spec.json"), "utf8"),
+    ) as {
+      checks?: unknown;
+    };
+    if (!Array.isArray(raw.checks)) return null;
+    const kinds: Record<string, string> = {};
+    for (const c of raw.checks) {
+      if (typeof c === "object" && c !== null) {
+        const name = (c as Record<string, unknown>).name;
+        const kind = (c as Record<string, unknown>).kind;
+        if (typeof name === "string" && typeof kind === "string") kinds[name] = kind;
+      }
+    }
+    return kinds;
+  } catch {
+    return null;
+  }
+}
+
 /** Run the project's checks on a scratch at the branch head, then remove it. */
 function runProjectChecks(o: {
   repo: string;
@@ -1189,7 +1228,19 @@ function runProjectChecks(o: {
         error: `the checks could not run: ${lastLine(text, verify.code)}`,
       };
     }
-    return { kind: "ran", summary: parseVerifyResults(verify.out) };
+    const summary = parseVerifyResults(verify.out);
+    let unrun: string[] = [];
+    if (summary.notRun.length > 0) {
+      const kinds = specKinds(checksDir);
+      if (kinds === null) {
+        return {
+          kind: "unrunnable",
+          error: "the checks ran but their kinds could not be read",
+        };
+      }
+      unrun = unrunProject(summary.notRun, kinds);
+    }
+    return { kind: "ran", summary, unrunProject: unrun };
   } finally {
     run(RUN, ["cut-scratch", "--remove", o.repo, scratch]);
     try {
