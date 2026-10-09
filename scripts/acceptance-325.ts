@@ -254,7 +254,9 @@ export function gateLogOf(dispatch: string): string {
     .filter((d) => d.isDirectory())
     .map((d) => d.name);
   if (dirs.length !== 1) throw new Error(`expected one checks dir, found ${dirs.length}`);
-  const shas = readdirSync(join(dispatch, "verifier-land", dirs[0] as string, "verify"));
+  const shas = readdirSync(join(dispatch, "verifier-land", dirs[0] as string, "verify")).filter(
+    (s) => /^[0-9a-f]+$/u.test(s),
+  );
   if (shas.length !== 1) throw new Error(`expected one verify run, found ${shas.length}`);
   return readFileSync(
     join(dispatch, "verifier-land", dirs[0] as string, "verify", shas[0] as string, "gate.log"),
