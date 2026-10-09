@@ -65,7 +65,9 @@ reports whether the target already has settings. If a fact is one every run agai
 project needs — the default turnpikes, the tracker binding by name, the risk surfaces —
 propose the shared `project.toml` and say which file you are proposing, since that one is
 committed. If it is this person's choice on this machine — which lanes fill the roles —
-propose local `settings.toml`. A missing settings file is never an error and never a
+propose local `settings.toml`. If the machine has no config yet, hold the local offer
+until step 2 has written it: recording lane roles needs the machine config, and the
+write is refused without it. A missing settings file is never an error and never a
 prompt to create one; the normal case is nothing written.
 
 **The target may be this repo.** Developing postmaster with postmaster is supported; see
