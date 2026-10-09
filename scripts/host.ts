@@ -19,6 +19,12 @@
 //   run host run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>]
 //               [--project <repo>] [--out <file>] [--err <file>] [--append] [--marker <file>]
 //               [--pidfile <file>] -- <command...>
+//   run host workhorse <dispatch> <lane> <worktree>
+//                                         launch one workhorse into its worktree: its name from
+//                                         `name ... workhorse`, its events/err/marker under the
+//                                         dispatch's logs, `run launch launch` with --run
+//   run host stop-pidfile <pidfile>        stop the recorded launch and its group while its
+//                                         identity matches, else report the leftover members
 //   run host limits [--role lane|coachman|reviewer] [--run <dispatch>|--project <repo>]
 //                                         print the launch limits that would apply:
 //                                         memory=<max> and tasks=<max>
@@ -42,8 +48,10 @@
 // --append, and its stderr to --err, which holds only this launch's errors. --marker is removed
 // as it starts and touched when it exits,
 // whatever its exit, and also when run host cannot start it, with the reason in --err. --pidfile
-// gets its pid, which is also its process group: `kill -- -<pid>` stops all of it. <cwd> is the
-// directory the launch belongs to, usually its worktree: in Herdr the launch runs in a new tab of
+// gets its pid, which is also its process group, with the start, boot and command that prove
+// it: stop-pidfile stops all of it while that identity matches, else reports the leftover
+// members. <cwd> is the directory the launch belongs to, usually its worktree: in Herdr the
+// launch runs in a new tab of
 // that worktree's space, opened with `herdr worktree open` under the repository's space if it is
 // not open yet; in tmux in a window of session postmaster-<repo>; with no host, detached from
 // the caller. A run launch's <cwd>, including a reviewer's scratch clone, is its tab's working
@@ -132,6 +140,7 @@ import {
   bootId,
   processCommandLine,
   processCommandLines,
+  processInfo,
   processStart,
   processState,
   processTable as sharedProcessTable,
@@ -2232,6 +2241,9 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
     fd >= 0 ? fd : mode === "bg" ? "ignore" : "inherit";
   let child: ReturnType<typeof spawn> | null = null;
   let spawnError: unknown = null;
+  // The wrapper phase's command-line prefix, where the plain path wraps: the
+  // settled command waits past it, since a python wrapper outlasts the window.
+  let wrapperPrefix: string | null = null;
   try {
     if (spec.capmode === "systemd") {
       child = spawn(
@@ -2270,6 +2282,7 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
         args = [bin, ...args];
         bin = sid;
         alone = true;
+        wrapperPrefix = `${sid} `;
       } else {
         const py = which("python3");
         if (py) {
@@ -2295,6 +2308,9 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
           ];
           bin = py;
           alone = true;
+          // The -c program's first line: only this wrapper's command line
+          // starts this way, so a python target still settles by name.
+          wrapperPrefix = `${py} -c import os,sys`;
         }
       }
       child = spawn(bin, args, {
@@ -2339,7 +2355,21 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
     } catch {}
     if (spec.pidfile) {
       try {
-        writeFileSync(spec.pidfile, `${String(pid)}\n`);
+        // The start, boot and command identity travels with the pid, so stop-pidfile
+        // refuses a number the OS has since reused for another process. Each missing
+        // line weakens the form: without a command it checks start and boot, and a
+        // bare pid checks nothing.
+        const start = startOf(pid);
+        const boot = bootId();
+        const wrapper = spec.capmode === "systemd" && spec.setsid ? basename(spec.setsid) : null;
+        const command = await settledCommand(pid, wrapper, wrapperPrefix);
+        const body =
+          start && boot && command
+            ? `${pid}\n${start}\n${boot}\n${command}\n`
+            : start && boot
+              ? `${pid}\n${start}\n${boot}\n`
+              : `${pid}\n`;
+        writeFileSync(spec.pidfile, body);
       } catch {}
     }
   }
@@ -2972,6 +3002,192 @@ async function stopTree(
     .join(" ");
   return { code: survivors.size ? 2 : 0, text: `${known.size}\t${names}` };
 }
+/** One workhorse, named and placed as the runbook's block did: the host owns the composition. */
+async function workhorseCmd(args: string[]): Promise<void> {
+  const [dispatch, lane, worktree] = args;
+  if (args.length !== 3 || !dispatch || !lane || !worktree)
+    die("usage: run host workhorse <dispatch> <lane> <worktree>");
+  const d = absolute(dispatch);
+  const name = nameCmd(d, "workhorse", lane);
+  await runCmd([
+    name,
+    worktree,
+    "--under",
+    d,
+    "--role",
+    "lane",
+    "--run",
+    d,
+    "--out",
+    join(d, "logs", `${lane}-events.jsonl`),
+    "--err",
+    join(d, "logs", `${lane}.err`),
+    "--marker",
+    join(d, "logs", `${lane}.done`),
+    "--",
+    join(HERE, "run"),
+    "launch",
+    "launch",
+    lane,
+    worktree,
+    join(d, `${lane}-prompt.txt`),
+    "--last",
+    join(d, "logs", `${lane}-last.md`),
+    "--run",
+    d,
+  ]);
+}
+
+/** A process name as a pidfile records it: one line, since the form is line-based. */
+function pidfileCommand(name: string): string {
+  return name.split("\n")[0] ?? "";
+}
+
+/**
+ * The leader's command once it is past every exec: a child read before it execs still
+ * looks like its parent (same command line, stably, until it is scheduled), mid-exec
+ * its command line can read empty, and the launch chain execs twice more — the spawned
+ * wrapper becomes systemd-run, which execs the target in place after scope setup, a
+ * D-Bus roundtrip no stability window can outwait — so a reading counts only past the
+ * parent's command line, the transient names and the wrapper's own command line, and
+ * the name is recorded after three such stable readings. "" when the process is gone
+ * or never settles, in which case the pidfile holds no command.
+ */
+async function settledCommand(
+  pid: number,
+  spawned: string | null,
+  wrapperPrefix: string | null,
+): Promise<string> {
+  const parent = processCommandLine(process.pid);
+  // The chain's turning names: the wrapper run spawned, and a --scope systemd-run,
+  // which always becomes its target (or, under a systemd that waits instead, the
+  // record honestly degrades to start and boot). The plain path's wrapper is known
+  // by its command line instead: a setsid phase by name would also match a target
+  // that wraps itself, and a python phase by name would swallow a python target,
+  // while the wrapper's own invocation matches nothing else.
+  const transient = new Set([spawned, "systemd-run"]);
+  let prev: string | null = null;
+  let stable = 0;
+  const end = Date.now() + 2000;
+  for (;;) {
+    const cur = processCommandLine(pid);
+    const name = cur === "" ? "" : pidfileCommand(processInfo(pid)?.name ?? "");
+    const wrapped = wrapperPrefix !== null && cur.startsWith(wrapperPrefix);
+    const ready = cur !== "" && cur !== parent && name !== "" && !transient.has(name) && !wrapped;
+    if (!ready) {
+      if (cur === "" && processState(pid) === "absent") return "";
+      // Unreadable but present (mid-exec, or a zombie awaiting reap), pre-exec, or a
+      // turning name: none of it is the target, so wait it out.
+      stable = 0;
+      prev = null;
+    } else if (cur === prev) {
+      stable += 1;
+      if (stable >= 2) return name;
+    } else {
+      stable = 0;
+      prev = cur;
+    }
+    if (Date.now() >= end) return "";
+    await Bun.sleep(10);
+  }
+}
+
+/** A leftover member for the report: its command line, or its bare name. */
+function describeCommand(pid: number, name: string): string {
+  // ASCII: \s stays ASCII under u; collapsing ASCII runs is the whole of this report line.
+  const line = clean(processCommandLine(pid).replace(/\s+/gu, " ").trim());
+  if (line !== "") return line.slice(0, 200);
+  return name;
+}
+
+/**
+ * The process group a pidfile names, stopped as `stop` stops a worktree's launches.
+ * A pidfile in the form `run` writes (pid, start, boot, command) stops only the launch it
+ * recorded: the leader and its group die only while the recorded start, boot and command
+ * still match the holder of the number, live or zombie. A legacy pidfile without the
+ * command (pid, start, boot) is checked on start and boot alone. A bare pid stops
+ * whatever live holder and group hold the number now. Members no check proves are never
+ * killed: they are reported as leftover members, each pid with its command, and the stop
+ * exits 2 so the caller sees it. Nothing here assumes a dead leader means an owned group:
+ * a stranger's group may hold the number with a zombie leader or with none.
+ */
+async function stopPidfileCmd(args: string[]): Promise<void> {
+  const file = args[0] ?? "";
+  if (!file) die("usage: run host stop-pidfile <pidfile>");
+  let text = "";
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    die(`no such pidfile: ${file}`);
+  }
+  const parts = text.trim().split("\n");
+  const pidText =
+    parts.length === 1 || parts.length === 3 || parts.length === 4 ? (parts[0] ?? "") : "";
+  if (!/^[0-9]+$/u.test(pidText)) die(`${file} does not hold a pid: ${text.trim()}`);
+  const pid = Number(pidText);
+  if (pid <= 0) die(`${file} does not hold a pid: ${text.trim()}`);
+  const recorded = parts.length === 3 || parts.length === 4;
+  const table = processTable();
+  const row = table.get(pid);
+  // The live members of the numbered group, the holder included: the processes a stop
+  // would end. A zombie needs no killing and is never reported as leftover.
+  const members = [...table]
+    .filter(([, r]) => r.group === pid && !r.zombie)
+    .map(([member]) => member)
+    .sort((a, b) => a - b);
+  const matches =
+    recorded &&
+    row !== undefined &&
+    row.start === parts[1] &&
+    sameBoot(parts[2], bootId()) &&
+    (parts.length === 3 || pidfileCommand(row.name) === parts[3]);
+  if (matches || (!recorded && row !== undefined && !row.zombie)) {
+    // Proven, so the leader and its group die: through the group while the leader is
+    // live, else through the proven members one by one, since a stop root needs a
+    // live holder.
+    const roots =
+      row !== undefined && !row.zombie
+        ? [`group|${pid}|${row.start}`]
+        : members.map((member) => `tree|${member}|${table.get(member)!.start}`);
+    if (roots.length === 0) {
+      console.log(`no process group of ${pid} is running`);
+      return;
+    }
+    const grace = count(process.env.POSTMASTER_HOST_STOP_WAIT ?? "20", "POSTMASTER_HOST_STOP_WAIT");
+    const most = count(process.env.POSTMASTER_HOST_STOP_MAX ?? "512", "POSTMASTER_HOST_STOP_MAX");
+    const result = await stopTree(grace, most, roots);
+    const fields = result.text.split("\t");
+    if (result.code === 0)
+      console.log(`stopped the process group of ${pid}: ${fields[0]} process(es)`);
+    else if (result.code === 2) {
+      warn(`stopped the process group of ${pid}, but these still run: ${fields[1] ?? ""}`);
+      throw hostError("", 2);
+    } else if (result.code === 3) {
+      warn(
+        `refused to stop the process group of ${pid}, and left it running: ${fields.slice(1).join("\t")}`,
+      );
+      throw hostError("", 2);
+    } else die(`could not stop the process group of ${pid}: ${result.text}`);
+    return;
+  }
+  if (members.length === 0) {
+    console.log(`no process group of ${pid} is running`);
+    return;
+  }
+  const pairs = members
+    .map((member) => `${member} ${describeCommand(member, table.get(member)!.name)}`)
+    .join(", ");
+  const reason = !recorded
+    ? "the pidfile records no identity and the leader is gone"
+    : row === undefined
+      ? "the recorded leader is gone"
+      : "the recorded identity does not match";
+  warn(
+    `left ${members.length} leftover member(s) of ${pid} running: ${pairs} (${reason}; killed nothing)`,
+  );
+  throw hostError("", 2);
+}
+
 async function stopCmd(args: string[]): Promise<void> {
   const path = worktreeArg(args[0] ?? "", "stop");
   if ((resolve(process.cwd()) + sep).startsWith(path + sep))
@@ -5016,11 +5232,17 @@ async function main(): Promise<void> {
     case "run":
       await runCmd(args);
       return;
+    case "workhorse":
+      await workhorseCmd(args);
+      return;
     case "limits":
       limitsCmd(args);
       return;
     case "stop":
       await stopCmd(args);
+      return;
+    case "stop-pidfile":
+      await stopPidfileCmd(args);
       return;
     case "close":
       await closeCmd(args);

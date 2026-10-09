@@ -48,10 +48,12 @@ way on every row, only less visibly on the last.
 <tool>/scripts/run host name <dispatch> review <lane> <lens> <round>
 <tool>/scripts/run host name <dispatch> postmaster
 <tool>/scripts/run host name <dispatch> role <text...>
-<tool>/scripts/run host leg launch|resume|takeover|retry|outcome|backfill|waiting ...
-<tool>/scripts/run host run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--project <repo>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
-<tool>/scripts/run host limits [--role lane|coachman|reviewer] [--run <dispatch>|--project <repo>]
+<tool>/scripts/run host leg <launch|resume|takeover|retry|outcome|backfill|waiting> ...
+<tool>/scripts/run host run <name> <cwd> [--under <dispatch>] [--role <lane|coachman|reviewer>] [--run <dispatch>] [--project <repo>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
+<tool>/scripts/run host workhorse <dispatch> <lane> <worktree>
+<tool>/scripts/run host limits [--role <lane|coachman|reviewer>] [--run <dispatch>] [--project <repo>]
 <tool>/scripts/run host stop <worktree>
+<tool>/scripts/run host stop-pidfile <pidfile>
 <tool>/scripts/run host close <worktree>
 <tool>/scripts/run host stop-run <dispatch>
 <tool>/scripts/run host close-run <dispatch>
@@ -119,8 +121,12 @@ onto the fragment it supersedes.
   labels and prompt text never identify ownership. A user pane split into a launch tab or window
   survives: `run host` closes only its own pane and leaves the shared tab or window open. The event
   stream and logs stay on disk.
-- **`--pidfile` gets its pid, which is also its process group:** `kill -- -<pid>` stops all of
-  it. `run host run` returns as soon as the launch has started. The wait still goes in the same
+- **`--pidfile` gets its pid, which is also its process group, with the start, boot and
+  command that prove it:** `<tool>/scripts/run host stop-pidfile <pidfile>` stops the recorded
+  launch and its group only while that identity still matches. Members it cannot prove are
+  never killed: they are reported as leftover members, each pid with its command, and the
+  stop exits 2. `run host run` returns as soon as the launch has started.
+  The wait still goes in the same
   command as the launch, as `<tool>/scripts/run wait-for-markers`, or for a review round
   `<tool>/scripts/run review-round wait`.
 - **`--role` selects per-role limits; `--run` selects the dispatch's recorded config.** Use
@@ -291,7 +297,7 @@ with `herdr agent start`. It is a pane whose agent `run host` reports. So when i
 
 - A launch is a detached process in a session of its own, with no terminal. There is nothing to
   watch but its files: `<tool>/scripts/run runs-status`, the events file, and
-  `<tool>/scripts/run view-stream < <events-file>` for the readable form.
+  `<tool>/scripts/run view-stream <events-file>` for the readable form.
 - **The postmaster runs headless, as a native session**, like every other role:
   `<tool>/scripts/run host run "postmaster" <repo> --out <runs>/postmaster/events.jsonl
   --err <runs>/postmaster/postmaster.err --marker <runs>/postmaster/.exited -- <tool>/scripts/run launch

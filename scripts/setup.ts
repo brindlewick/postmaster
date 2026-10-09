@@ -23,6 +23,12 @@
 // left on disk as if it were fine.
 import { existsSync, mkdirSync, readFileSync, readSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import {
+  coachmanModelProblem,
+  harnessProblem,
+  laneCountProblem,
+  reviewerProblem,
+} from "./lib/config-check.ts";
 import { readTomlFile } from "./lib/data.ts";
 import { globalConfigPath } from "./lib/effective-config.ts";
 import { scriptsDir } from "./lib/paths.ts";
@@ -45,20 +51,14 @@ function roleExtra(effort: string, envFile: string): string {
   return s;
 }
 
-function installed(tool: string): boolean {
-  // command -v is a shell builtin: BASE ran it in the shell, so the port must too.
-  return run("bash", ["-c", 'command -v "$1" >/dev/null 2>&1', "_", tool]).code === 0;
-}
-
 function validTasks(v: string): boolean {
   if (!/^[1-9][0-9]*$/u.test(v)) return false;
   return v.length <= 10 && Number(v) <= 2147483647;
 }
 
 function needHarness(h: string): void {
-  if (!installed(h)) {
-    die(`setup: harness '${h}' is not on PATH; install it or choose another`, 1);
-  }
+  const problem = harnessProblem(h);
+  if (problem !== null) die(problem, 1);
 }
 
 interface AskOpts {
@@ -294,7 +294,8 @@ const LANES = ask("Lane names, comma separated", "alpha, beta", "lanes", opts);
 const laneList = LANES.split(",")
   .map((x) => x.trim())
   .filter((x) => x !== "");
-if (laneList.length < 2) die("setup: at least two lanes are needed", 1);
+const laneIssue = laneCountProblem(laneList);
+if (laneIssue !== null) die(laneIssue, 1);
 let LANE_BLOCKS = "";
 const LANE_MODELS: string[] = [];
 const LANE_HARNESSES: string[] = [];
@@ -345,7 +346,8 @@ const REVIEWERS = ask("Reviewer lanes, comma separated", WORKHORSES, "reviewers"
 for (const rv of REVIEWERS.split(",")
   .map((x) => x.trim())
   .filter((x) => x !== "")) {
-  if (!laneList.includes(rv)) die(`setup: reviewer '${rv}' is not one of the lanes (${LANES})`, 1);
+  const reviewerIssue = reviewerProblem(rv, laneList, LANES);
+  if (reviewerIssue !== null) die(reviewerIssue, 1);
 }
 let LENS_TABLE = "";
 let BUG_REVIEWERS = REVIEWERS;
@@ -366,8 +368,8 @@ for (const lens of lenses) {
   for (const rv of LR.split(",")
     .map((x) => x.trim())
     .filter((x) => x !== "")) {
-    if (!laneList.includes(rv))
-      die(`setup: ${lens} reviewer '${rv}' is not one of the lanes (${LANES})`, 1);
+    const lensIssue = reviewerProblem(rv, laneList, LANES, lens);
+    if (lensIssue !== null) die(lensIssue, 1);
   }
   LENS_TABLE += `${lens} = ${tomlList(LR)}\n`;
 }
@@ -405,7 +407,8 @@ console.log(
 const CH = ask("  coachman: harness", "", "coachman.harness", opts);
 needHarness(CH);
 const CM = ask("  coachman: model id", "", "coachman.model", opts);
-if (LANE_MODELS.includes(CM)) die(`setup: the coachman cannot run on a lane's model (${CM})`, 1);
+const coachmanIssue = coachmanModelProblem(CM, LANE_MODELS, "the coachman");
+if (coachmanIssue !== null) die(coachmanIssue, 1);
 const CE = ask("  coachman: effort (blank if none)", "", "coachman.effort?", opts);
 const CEF = ask(
   "  coachman: env file for its key or backend (blank if none)",
@@ -420,8 +423,8 @@ console.log(
 const FH = ask("  fallback: harness", "", "fallback.harness", opts);
 needHarness(FH);
 const FM = ask("  fallback: model id", "", "fallback.model", opts);
-if (LANE_MODELS.includes(FM))
-  die(`setup: the fallback coachman cannot run on a lane's model (${FM})`, 1);
+const fallbackIssue = coachmanModelProblem(FM, LANE_MODELS, "the fallback coachman");
+if (fallbackIssue !== null) die(fallbackIssue, 1);
 const FE = ask("  fallback: effort (blank if none)", "", "fallback.effort?", opts);
 const FEF = ask(
   "  fallback: env file for its key or backend (blank if none)",
