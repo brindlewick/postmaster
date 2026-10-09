@@ -241,8 +241,7 @@ export async function checkTree(
     const path = staged[i + 1]!;
     if (path.startsWith(".postmaster/") && path !== ".postmaster/project.toml")
       privatePaths.set(path, "staged");
-    if (scansNewBlob(status) && path.startsWith("raw/"))
-      rawScans.push({ commit: "", path });
+    if (scansNewBlob(status) && path.startsWith("raw/")) rawScans.push({ commit: "", path });
   }
   // One detection, two renderings: text rows print as before and the
   // findings listing carries the same rows structured, so the rewrite
@@ -276,7 +275,8 @@ export async function checkTree(
         listed.push({ commit: row.commit, path: row.path, line, rule: row.rule });
     }
     listed.sort((a, b) =>
-      `${a.commit}\0${a.path}\0${a.line}\0${a.rule}` < `${b.commit}\0${b.path}\0${b.line}\0${b.rule}`
+      `${a.commit}\0${a.path}\0${a.line}\0${a.rule}` <
+      `${b.commit}\0${b.path}\0${b.line}\0${b.rule}`
         ? -1
         : 1,
     );

@@ -300,10 +300,7 @@ test("tree check scans a renamed raw file through its added side", () => {
   const repo = initRepo();
   mkdirSync(join(repo, "raw"));
   const live = ["sealed", "blob"].join("");
-  writeFileSync(
-    join(repo, "raw", "old.jsonl"),
-    `${JSON.stringify({ encrypted_content: live })}\n`,
-  );
+  writeFileSync(join(repo, "raw", "old.jsonl"), `${JSON.stringify({ encrypted_content: live })}\n`);
   gitAt(repo, ["add", "raw/old.jsonl"]);
   const added = commit(repo, "add the record");
   gitAt(repo, ["mv", "raw/old.jsonl", "raw/new.jsonl"]);
