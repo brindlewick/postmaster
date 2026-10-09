@@ -1564,7 +1564,15 @@ describe("switch-off units", () => {
       rules: "every rule",
       reason: "r",
     });
-    expect(parseSwitchOff("/* // @ts-ignore r */")).toBeNull();
+    // tsc skips slash and star runs before @ on a block's last line (probed
+    // in round 5), so the superset rule lists this; the old null hid it.
+    expect(parseSwitchOff("/* // @ts-ignore r */")).toEqual({
+      form: "ts-ignore",
+      scope: "next",
+      tool: "ts",
+      rules: "every rule",
+      reason: "r",
+    });
     expect(parseSwitchOff("/* eslint-disable\nno-debugger -- r */")).toEqual({
       form: "eslint-disable",
       scope: "open",

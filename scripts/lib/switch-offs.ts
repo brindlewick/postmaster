@@ -253,11 +253,16 @@ export interface SwitchDirective {
   reason: string | null;
 }
 
-const TS_RE = /^@(ts-ignore|ts-expect-error|ts-nocheck)(?![A-Za-z0-9_-])/u;
-const LINTER_RE =
-  /^(eslint|oxlint)-(disable-line|disable-next-line|disable|enable)(?![A-Za-z0-9_-])/u;
-const BIOME_RE =
-  /^(biome-ignore-all|biome-ignore-start|biome-ignore-end|biome-ignore)(?![A-Za-z0-9_-])/u;
+/** One superset rule per tool: a comment that names a directive word, in any
+ * spelling or case, counts as a switch-off. The tools match loosely (tsc by
+ * prefix, Biome joining word and category), so the check matches looser:
+ * every spelling a tool honors is listed, and a spelling no tool honors only
+ * asks a needless question. Position still rules — a mid-line mention names
+ * no directive — and Biome still needs its category and reason, which switch
+ * nothing off when missing. */
+const TS_RE = /^@(ts-ignore|ts-expect-error|ts-nocheck)/iu;
+const LINTER_RE = /^(eslint|oxlint)-(disable-line|disable-next-line|disable|enable)/iu;
+const BIOME_RE = /^(biome-ignore-all|biome-ignore-start|biome-ignore-end|biome-ignore)/iu;
 
 /** Split source text on JS line breaks only: LF, CRLF (once), CR, U+2028 and
  * U+2029. Python's wider set would split where the scanner counts no break
@@ -277,9 +282,10 @@ function splitJsLines(text: string): string[] {
 function tsDirective(match: RegExpExecArray, line: string): SwitchDirective {
   const rest = pyTrim(line.slice(match[0].length));
   const reason = pyTrim(rest.replace(/^(?:--|:)[ \t]*/u, ""));
+  const form = match[1]!.toLowerCase();
   return {
-    form: match[1]!,
-    scope: match[1] === "ts-nocheck" ? "file" : "next",
+    form,
+    scope: form === "ts-nocheck" ? "file" : "next",
     tool: "ts",
     rules: "every rule",
     reason: reason === "" ? null : reason,
@@ -287,7 +293,7 @@ function tsDirective(match: RegExpExecArray, line: string): SwitchDirective {
 }
 
 function linterDirective(match: RegExpExecArray, rest: string): SwitchDirective {
-  const what = match[2]!;
+  const what = match[2]!.toLowerCase();
   const scope: SwitchDirective["scope"] =
     what === "disable"
       ? "open"
@@ -309,7 +315,7 @@ function linterDirective(match: RegExpExecArray, rest: string): SwitchDirective 
   }
   if (reason === "") reason = null;
   return {
-    form: `${match[1]}-${what}`,
+    form: `${match[1]!.toLowerCase()}-${what}`,
     scope,
     tool: "linter",
     rules: rest === "" ? "every rule" : pyWords(rest.replace(/,/gu, " ")).join(", "),
@@ -324,7 +330,7 @@ function biomeDirective(match: RegExpExecArray, line: string): SwitchDirective |
   const rules = pyTrim(rest.slice(0, colon));
   const reason = pyTrim(rest.slice(colon + 1));
   if (rules === "" || reason === "") return null;
-  const what = match[1]!;
+  const what = match[1]!.toLowerCase();
   return {
     form: what,
     scope:
@@ -341,7 +347,7 @@ function biomeDirective(match: RegExpExecArray, line: string): SwitchDirective |
   };
 }
 
-const noStars = (entry: string): string => pyTrim(entry.replace(/^\*+[ \t]*/u, ""));
+const noMarks = (entry: string): string => pyTrim(entry.replace(/^[\/* \t]+/u, ""));
 
 /** The directives in a `//` comment: at most one, since one line leads with
  * one directive. TypeScript honors extra slashes after the opener (`///`
@@ -365,18 +371,18 @@ function parseLineComment(body: string): SwitchDirective[] {
 }
 
 /** The directives in a block comment: up to one per tool, since each tool
- * reads its own line. TypeScript reads the last line, stars dropped; the
- * linter's directive starts the first non-empty line, with rules and reason
- * running across the block's lines; Biome matches any line carrying
- * directive, category and reason together, stars dropped. All three rules
- * are probed against tsc, Oxlint 1.86 and Biome 2.5, and each differs from
- * the ticket's first-line note where the tool honors what that note would
+ * reads its own line. TypeScript reads the last line, slashes and stars
+ * dropped; the linter's directive starts the first non-empty line, with
+ * rules and reason running across the block's lines; Biome matches any line
+ * carrying directive, category and reason together. All three rules are
+ * probed against tsc, Oxlint 1.86 and Biome 2.5, and each differs from the
+ * ticket's first-line note where the tool honors what that note would
  * miss. */
 function parseBlockComment(body: string): SwitchDirective[] {
   const out: SwitchDirective[] = [];
   const lines = splitJsLines(body).map((entry) => pyTrim(entry));
   if (lines.every((entry) => entry === "")) return out;
-  const tsLine = noStars(lines[lines.length - 1]!);
+  const tsLine = noMarks(lines[lines.length - 1]!);
   const ts = TS_RE.exec(tsLine);
   if (ts !== null) out.push(tsDirective(ts, tsLine));
   const fi = lines.findIndex((entry) => entry !== "");
@@ -387,7 +393,7 @@ function parseBlockComment(body: string): SwitchDirective[] {
     out.push(linterDirective(lint, rest));
   }
   for (const entry of lines) {
-    const cand = noStars(entry);
+    const cand = noMarks(entry);
     const biome = BIOME_RE.exec(cand);
     if (biome === null) continue;
     const off = biomeDirective(biome, cand);
