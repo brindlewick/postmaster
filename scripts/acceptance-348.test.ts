@@ -128,7 +128,14 @@ describe("C2: each copy is checked before the workhorses start; one failure stop
       const other = join(fx.dir, "other");
       expect(run("git", ["clone", "-q", "--shared", fx.repo, other]).code).toBe(0);
       const dest = join(fx.dir, "copy-of-other");
-      const cut = run(RUN, ["cut-scratch", "--cut-workhorse", other, dest, fx.base, fx.branch("luna")]);
+      const cut = run(RUN, [
+        "cut-scratch",
+        "--cut-workhorse",
+        other,
+        dest,
+        fx.base,
+        fx.branch("luna"),
+      ]);
       expect(cut.code).toBe(0);
       const r = run(RUN, [
         "cut-scratch",

@@ -112,7 +112,14 @@ export function copyHead(fx: RunFixture, lane: string): string {
 }
 
 export function repoBranchHead(fx: RunFixture, lane: string): string | null {
-  const r = run("git", ["-C", fx.repo, "rev-parse", "--verify", "-q", `${fx.branch(lane)}^{commit}`]);
+  const r = run("git", [
+    "-C",
+    fx.repo,
+    "rev-parse",
+    "--verify",
+    "-q",
+    `${fx.branch(lane)}^{commit}`,
+  ]);
   return r.code === 0 ? r.out.trim() : null;
 }
 
