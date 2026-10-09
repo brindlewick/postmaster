@@ -579,11 +579,11 @@ describe("C2: a clerk session closes once its ticket is marked ready", () => {
         `${JSON.stringify({ ticket: "#1, x", brief: join(repo, "b.md"), handle: "clerk-repo-1", opened: new Date().toISOString() })}\n`,
       );
       const env = fxEnv(fx);
-      const r = sh(SELF, ["host", "_clerk-close", repo, "1"], env, fx.root);
+      const r = sh(SELF, ["host", "_clerk-close", repo, "1", "clerk-repo-1"], env, fx.root);
       expect(r.code).toBe(0);
       expect(readHerdr(fx).tabs[tab.tab]).toBeUndefined();
       expect(clerkRecord(repo, "1")).toBeNull();
-      const repeat = sh(SELF, ["host", "_clerk-close", repo, "1"], env, fx.root);
+      const repeat = sh(SELF, ["host", "_clerk-close", repo, "1", "clerk-repo-1"], env, fx.root);
       expect(repeat.code).toBe(0);
     } finally {
       rmSync(fx.root, { recursive: true, force: true });
