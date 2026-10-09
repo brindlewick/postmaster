@@ -6,7 +6,6 @@
     "scripts/host.test.ts": 224700,
     "scripts/aftercare.test.ts": 205600,
     "scripts/tool-faults.test.ts": 203400,
-    "scripts/fixture-time-oracle.test.ts": 161300,
     "scripts/review-round.test.ts": 89400,
     "scripts/walls-oracle.test.ts": 78500,
     "scripts/runs-watch.test.ts": 65300,
