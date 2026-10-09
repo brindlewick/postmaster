@@ -68,10 +68,12 @@ step 1 found, with no placeholders left behind:
 - Helpers: any script the verifier ships runs as shown, and the body shows how to call
   it. A helper the reader must take apart to use is no helper.
 
-Every drive gets state of its own, so no drive touches real data and two drives can run
-side by side. The proof folder is set by whoever drives the verifier, through an
-environment variable the verifier names, defaulting to the system's temp folder. Run the
-project's formatter over every file you add, and leave its checks passing.
+Where step 1 found two copies can run side by side, every drive gets state of
+its own, so no drive touches real data. Where they cannot, say so plainly and
+run drives one at a time. The proof folder is set by whoever drives the
+verifier, through an environment variable the verifier names, defaulting to
+the system's temp folder. Run the project's formatter over every file you add,
+and leave its checks passing.
 
 ## 3. Map three to five features
 
