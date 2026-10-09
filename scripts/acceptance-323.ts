@@ -10,8 +10,7 @@ export const ROOT = toolRoot(import.meta);
 export const RUN = beside(import.meta, "run");
 export const PSTACK_DIR = join(ROOT, "scripts/fixtures/pstack-create-verification-skill");
 export const PSTACK_SKILL = join(PSTACK_DIR, "SKILL.md");
-export const PSTACK_SHA256 =
-  "644f2551403c1bca01a2855b34611b6e7be0ce0dc5b204514c376c0f6a6e6ac4";
+export const PSTACK_SHA256 = "644f2551403c1bca01a2855b34611b6e7be0ce0dc5b204514c376c0f6a6e6ac4";
 
 export function gitOrThrow(repo: string, ...args: string[]): string {
   const r = run("git", ["-C", repo, ...args]);
