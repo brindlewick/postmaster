@@ -12,7 +12,6 @@ import {
   BOUND_L,
   BOUND_R,
   D_CLASS,
-  DOT_ALL,
   digitValue,
   literalI,
   PY_DOT,
