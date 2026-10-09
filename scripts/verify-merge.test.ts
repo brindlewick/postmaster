@@ -77,3 +77,23 @@ test("verify-merge logs its findings to the named dispatch", () => {
   expect(rows[0]?.rule).toBe("phone");
   expect(rows[0]?.file).toBe("base.txt");
 });
+
+function localRouteScans(text: string): boolean {
+  const start = text.indexOf("For `landing: local`");
+  const end = text.indexOf("- An unknown landing route");
+  if (start === -1 || end === -1 || end < start) return false;
+  const section = text.slice(start, end);
+  return section.includes("verify-merge") && section.includes("--dispatch");
+}
+
+test("verify-merge is called by the local landing route", () => {
+  // Review round 11 (bug-56): the check existed but no runbook step
+  // called it, so local-route conflict resolutions landed unscanned.
+  const pm = readFileSync(join(import.meta.dir, "../skills/postmaster/postmaster.md"), "utf8");
+  expect(localRouteScans(pm)).toBe(true);
+  // Negative control: the pre-fix wording names the merge but no scan.
+  const old =
+    "For `landing: local`, obey. Merge the ticket branch with `git merge --no-ff`; " +
+    "never rebase. Log `merge`.\n- An unknown landing route is a dispatch fault.";
+  expect(localRouteScans(old)).toBe(false);
+});

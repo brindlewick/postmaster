@@ -678,7 +678,12 @@ every project and does not change that project's gate.
      its default branch; if it is not, stop and tell the user. Leave a dated ready-to-merge
      tracker comment with the evidence (what the change does, branch name, gate output summary,
      diff stat, review link, thread ids), logging `ticket-comment`. Merge the ticket branch
-     with `git merge --no-ff`; never rebase. Log `merge`, move the ticket to done, logging
+     with `git merge --no-ff`; never rebase. Then scan the merge:
+     `<tool>/scripts/run verify-merge <repo> --dispatch <dispatch>` reads HEAD, which must
+     be the merge. Exit 0, the resolution is clean. Exit 1 names a finding the resolution
+     introduced: undo the merge with `git reset --hard` to the pre-merge tip, merge again
+     resolving cleanly, and scan again. Any other exit is an input fault: stop, fix the
+     inputs and re-run. Log `merge`, move the ticket to done, logging
      `ticket-state`, remove `.card-ready`, and set the stage with
      `<tool>/scripts/run stage <dispatch> shipped postmaster`.
    - An unknown landing route is a dispatch fault to resolve before this point. Do not infer
