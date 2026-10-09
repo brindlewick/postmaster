@@ -82,7 +82,12 @@ async function scanBlob(
         }
       } catch {
         anyParseFail = true;
-        /* non-JSON raw records are scanned as text */
+        // A prose line can embed reasoning JSON without parsing whole; the
+        // shared string walk visits the same spans the promoter scrubs.
+        if (hasReasoning(text)) {
+          failures.push(findingRow(path, line, "encrypted-reasoning"));
+          logFinding("encrypted-reasoning", path, line, commit);
+        }
       }
     }
     const key = keyBlockStep(text, inBlock);

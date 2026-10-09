@@ -88,6 +88,21 @@ test("a pretty-printed record counts on both sides through the whole-file entry"
   expect(parseWholeJson("not json at all")).toBe(undefined);
 });
 
+test("reasoning in a prose line's embedded JSON counts on both sides", () => {
+  // Review round 10 (bug-53): both sides only recognised whole lines that
+  // parse as JSON, so a prose line embedding a reasoning record sailed
+  // through promote and the tree check alike.
+  const blob = `{"type":"reasoning","encrypted_content":"${sealed()}"}`;
+  const line = `note: ${blob} done`;
+  expect(hasReasoning(line)).toBe(true);
+  const redacted = redactReasoning(line);
+  expect(redacted.count).toBe(1);
+  expect(redacted.text).toContain(REASONING_PLACEHOLDER);
+  expect(redacted.text).not.toContain(sealed());
+  expect(redacted.text.startsWith("note: ")).toBe(true);
+  expect(redacted.text.endsWith(" done")).toBe(true);
+});
+
 test("the whole-file probe reads the first visible character", () => {
   expect(firstNonWsChar("")).toBe("");
   expect(firstNonWsChar("   \t ")).toBe("");

@@ -104,6 +104,25 @@ test("promotion strips pretty-printed reasoning spanning lines, one-line form un
   expect(JSON.parse(fixedSingle).encrypted_content).toBe("<redacted:encrypted-reasoning>");
 });
 
+test("promotion strips reasoning embedded in a prose line", () => {
+  // Review round 10 (bug-53): the per-line transform only recognised whole
+  // lines that parse as JSON, so a prose line embedding a reasoning record
+  // was copied whole.
+  const repo = initRepo();
+  const source = join(scratchDir(), "source");
+  mkdirSync(source);
+  const live = ["sealed", "blob"].join("");
+  const line = `note: {"type":"reasoning","encrypted_content":"${live}"} done`;
+  writeFileSync(join(source, "prose.jsonl"), `${line}\n`);
+  const copied = runScript("raw-promote", [source, "raw/fixed"], repo);
+  expect(copied.status).toBe(0);
+  expect(copied.stdout).toContain("encrypted-reasoning scrubbed");
+  const fixed = readFileSync(join(repo, "raw/fixed", "prose.jsonl"), "utf8");
+  expect(fixed.includes(live)).toBe(false);
+  expect(fixed).toContain("<redacted:encrypted-reasoning>");
+  expect(fixed.startsWith("note: ")).toBe(true);
+});
+
 test("C21 promotion rescans clean, refuses repeats and copies nothing on a marker fault", () => {
   const repo = initRepo();
   const source = join(scratchDir(), "good");

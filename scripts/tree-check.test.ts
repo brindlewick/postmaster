@@ -130,6 +130,21 @@ test("tree check flags pretty-printed reasoning spanning lines", () => {
   expect(checked.stdout).toContain("raw/single.jsonl:1: encrypted-reasoning");
 });
 
+test("tree check flags reasoning embedded in a prose line", () => {
+  // Review round 10 (bug-53): the detector only recognised whole lines that
+  // parse as JSON, so a prose line embedding a reasoning record passed.
+  const repo = initRepo();
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  mkdirSync(join(repo, "raw"));
+  const live = ["sealed", "blob"].join("");
+  const line = `note: {"type":"reasoning","encrypted_content":"${live}"} done`;
+  writeFileSync(join(repo, "raw", "prose.jsonl"), `${line}\n`);
+  commit(repo, "add record");
+  const checked = runScript("tree-check", [base, "HEAD"], repo);
+  expect(checked.status).toBe(1);
+  expect(checked.stdout).toContain("raw/prose.jsonl:1: encrypted-reasoning");
+});
+
 test("tree check flags raw content even when SCRUB_CHECK_DISABLE is set", () => {
   // Review round 3: ambient DISABLE silenced the tree scan in-process.
   const repo = initRepo();

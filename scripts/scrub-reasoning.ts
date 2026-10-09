@@ -177,7 +177,11 @@ export function redactReasoning(line: string): { text: string; count: number } {
       ? { text: JSON.stringify(transformed.value), count: transformed.count }
       : { text: line, count: 0 };
   } catch {
-    return { text: line, count: 0 };
+    // A prose line can embed reasoning JSON without parsing whole; the
+    // shared string walk visits the same spans the detector walks.
+    const walked = transformReasoning(line);
+    if (!walked.count || typeof walked.value !== "string") return { text: line, count: 0 };
+    return { text: walked.value, count: walked.count };
   }
 }
 
