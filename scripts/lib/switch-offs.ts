@@ -665,7 +665,7 @@ function fileSwitches(file: string, text: string): SwitchEntry[] {
         ...(end === undefined ? ["to end of file"] : []),
       ];
       const stop = end === undefined ? code.length : Math.max(d.line, end.line - 1);
-      covered = code.slice(d.line, stop).filter((entry) => entry !== "");
+      covered = code.slice(d.line - 1, stop).filter((entry) => entry !== "");
     }
     const span = [...covered, ...tail].join("\n");
     const twinKey = `${d.raw}\0${span}`;
