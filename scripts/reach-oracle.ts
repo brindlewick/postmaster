@@ -65,15 +65,6 @@ export function landing(repoRoot: string, home: string, ...args: string[]): Run 
   return { code: r.status ?? -1, out: r.stdout ?? "", err: r.stderr ?? "" };
 }
 
-export function bunTest(repoRoot: string, home: string, file: string): Run {
-  const r = spawnSync("bun", ["test", join("scripts", file)], {
-    encoding: "utf8",
-    cwd: repoRoot,
-    env: { ...process.env, HOME: home },
-  });
-  return { code: r.status ?? -1, out: r.stdout ?? "", err: r.stderr ?? "" };
-}
-
 export function codexCmd(id: string, command: string, output: string, exit: number): string {
   return JSON.stringify({
     type: "item.completed",
