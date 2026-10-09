@@ -1313,6 +1313,43 @@ beforeAll(() => {
       );
       process.chdir(origCwd);
     }
+    // A relative env_file the project's settings set resolves against the
+    // project root; the global config's own relative paths keep the global
+    // directory (#335).
+    run("git", ["init", "-q", join(tmp, "envrepo")]);
+    mkdirSync(join(tmp, "envrepo", ".postmaster"), { recursive: true });
+    writeFileSync(
+      join(tmp, "envproj.toml"),
+      '[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n',
+    );
+    writeFileSync(join(tmp, "envrepo", ".postmaster", "proj.env"), "PROBE=project-root\n");
+    writeFileSync(join(tmp, "only-global.env"), "PROBE=global-dir\n");
+    writeFileSync(
+      join(tmp, "envrepo", ".postmaster", "settings.toml"),
+      '[lanes.one]\nenv_file = ".postmaster/proj.env"\n',
+    );
+    carries(
+      "a relative env file the project's settings set is read from the project root",
+      "envproj",
+      "launch: cd ",
+      "form",
+      "one",
+      "--project",
+      join(tmp, "envrepo"),
+    );
+    writeFileSync(
+      join(tmp, "envrepo", ".postmaster", "settings.toml"),
+      '[lanes.one]\nenv_file = "only-global.env"\n',
+    );
+    refused(
+      "a project-set relative env file is not read from the global config's directory",
+      "envproj",
+      join(tmp, "envrepo", "only-global.env"),
+      "form",
+      "one",
+      "--project",
+      join(tmp, "envrepo"),
+    );
     writeFileSync(join(tmp, "shell.env"), 'FIRST=one\nexport PROBE="v-$FIRST/x" # trailing\n');
     writeFileSync(
       join(tmp, "shellenv.toml"),
@@ -4800,6 +4837,12 @@ describe("negative controls", () => {
   });
   test("a relative env file is read from the config's directory, never the worktree", () => {
     assertControl("a relative env file is read from the config's directory, never the worktree");
+  });
+  test("a relative env file the project's settings set is read from the project root", () => {
+    assertControl("a relative env file the project's settings set is read from the project root");
+  });
+  test("a project-set relative env file is not read from the global config's directory", () => {
+    assertControl("a project-set relative env file is not read from the global config's directory");
   });
   test("an env file is shell: export, quotes, comments and expansion reach the harness", () => {
     assertControl("an env file is shell: export, quotes, comments and expansion reach the harness");
