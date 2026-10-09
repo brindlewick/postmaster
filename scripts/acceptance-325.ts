@@ -250,7 +250,9 @@ export function branchHasFile(repo: string, branch: string, path: string): boole
 
 /** The gate's log from the run's one checks dir; throws unless there is exactly one. */
 export function gateLogOf(dispatch: string): string {
-  const dirs = readdirSync(join(dispatch, "verifier-land"));
+  const dirs = readdirSync(join(dispatch, "verifier-land"), { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
   if (dirs.length !== 1) throw new Error(`expected one checks dir, found ${dirs.length}`);
   const shas = readdirSync(join(dispatch, "verifier-land", dirs[0] as string, "verify"));
   if (shas.length !== 1) throw new Error(`expected one verify run, found ${shas.length}`);
