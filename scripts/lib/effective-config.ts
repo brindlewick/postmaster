@@ -1172,7 +1172,10 @@ export const effectiveConfigForProject = (repo: string, configPath?: string): Ef
     let global: Rec | null = null;
     if (globalPath === "-") {
       global = loadMachine("-");
-    } else if (isFile(globalPath)) {
+    } else if (existsSync(globalPath) || isSymlink(globalPath)) {
+      if (!isFile(globalPath)) {
+        return failed(`${globalPath} is not a regular file`, notice, globalPath);
+      }
       let raw: string;
       try {
         raw = strictRead(expandUser(globalPath));
