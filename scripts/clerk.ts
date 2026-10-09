@@ -13,9 +13,8 @@
 // Exit 0 done; 3 no session host; 1 anything else.
 
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { tryTomlFile } from "./lib/data.ts";
+import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
 
@@ -60,18 +59,14 @@ function findString(doc: Record<string, unknown>, path: string[]): string {
   return typeof value === "string" ? value : "";
 }
 
-function configPath(): string {
-  const override = (process.env.POSTMASTER_CONFIG ?? "").trim();
-  if (override) return override;
-  return join(homedir(), ".postmaster", "config.toml");
-}
-
-function readConfig(): { path: string; doc: Record<string, unknown> } {
-  const path = configPath();
-  if (!isFile(path)) die(`no machine config at ${path}; run setup first`);
-  const doc = tryTomlFile(path);
-  if (!doc) die(`cannot parse ${path}`);
-  return { path, doc };
+function readConfig(repo: string): { path: string; doc: Record<string, unknown> } {
+  const path = globalConfigPath();
+  const resolved = effectiveConfigForProject(repo, path);
+  if (resolved.notice !== null) console.error(resolved.notice);
+  if (resolved.config === null || resolved.error !== null) {
+    die(resolved.error ?? "cannot resolve project settings");
+  }
+  return { path, doc: resolved.config };
 }
 
 function runScript(name: string, args: string[]): { code: number; out: string; err: string } {
@@ -230,7 +225,7 @@ function writeBrief(repo: string, id: string): Brief {
       `the ready mark on ${name} could not be removed; the clerk stops so the ticket is not dispatched mid-edit`,
     );
   }
-  const { path: cfgPath, doc } = readConfig();
+  const { path: cfgPath, doc } = readConfig(repo);
   const template = findString(doc, ["planning", "review_link"]);
   const prefsPath = join(dirname(cfgPath), "preferences.md");
   const preferences = isFile(prefsPath)
