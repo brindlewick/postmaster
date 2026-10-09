@@ -527,7 +527,7 @@ reads a lane's final message.
 
 The bug lens runs each harness's own code-review skill on the run's change, never postmaster's
 brief. Every form below names that change explicitly: a skill left to choose its own diff
-cannot be trusted in a review scratch, which is a worktree detached at the snapshot with no
+cannot be trusted in a review scratch, which is a clone detached at the snapshot with no
 upstream. `<tool>/scripts/run launch review <lane> <cwd> <base>` runs the form on the change
 from `<base>` to the scratch's `HEAD`, and exits 3 for a harness with none. It runs every
 review at the effort the run recorded for that lane, the same source as launch and resume;
