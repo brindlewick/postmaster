@@ -1,12 +1,35 @@
 ---
 title: Log
 type: schema
-updated: 2026-10-05
+updated: 2026-10-09
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-09] query | would banning mutation make code easier to follow, for a reader and for a model
+
+Issue #300. The user asked whether code without mutation is easier for a model to follow and proposed starting with a ban
+and some exceptions. Answered from the reading already captured: the benefit is argued and not measured (no study found
+compares mutable and immutable versions of the same code, and the 84 findings were not classified by mutation), and local
+mutation does not change whether a function can be tested without the outside. What can be measured is how much a rule
+would flag. Filed back into [the functional-core page](concepts/functional-core-and-verification.md): proposal 1 has a
+possible second part against mutating what escapes a function, and trial 4 counts escaping mutation and every mutation,
+with controls, on `main` and at the review snapshots. The research session alone read this addition. Nothing was run or
+installed. No standing changed.
+
+## [2026-10-09] query | does passing git in, or Effect, make the cleanup checks more effective
+
+Issue #300. Two questions on [the functional-core page](concepts/functional-core-and-verification.md): would wrapping
+side effects in Effect help, and are tests more effective when the live run and the test run differ only in a mock git
+swapped for real git. Answered from the reading already captured and from #252's code at its round-1 snapshot, and
+filed back into the page. Trial 5 is now one program with its git swapped, a mock checked against real git on a scratch
+repository, and a plain version compared with an Effect version, in three steps, each later step run only if the one
+before did not fail. Proposal 2, the Effect sentences and the answer say the same. The old trial 5 listed, in its
+generator, two states that only the findings had named (a submodule and an unbranched merge); a model that has not seen
+the findings now writes the list. A third independent check of the rewrite found 16 problems (3 overstated, 1
+unsupported, 5 missing a limit, 3 stale, 4 minor), all corrected. Nothing was run or installed. No standing changed.
 
 ## [2026-10-05] query | how the dashboard looks
 
@@ -29,6 +52,20 @@ scripts remove or rewrite something and which have a dry run (`2026-10-05-state-
 2026-10-05" to [pstack](sources/pstack.md), which judges the nine changes again with the user's word on each and weighs
 two more, one from `/correct` and one the first report had left out. Fixed a link in the page: the ticket template moved with
 #251. No standing changed.
+
+## [2026-10-05] ingest | functional programming, formal verification and AI coding
+
+Issue #300. Recorded `raw/trials/2026-10-04-review-findings-classified/`: the 84 serious review findings of runs
+#202, #216, #252 and #268, read against a rubric written first, with six anchors labelled before the rest, a
+second reader on 26 of them and the controls for the count. A stated property or a small model would have caught
+79; a pure core made the check possible for 24, none without a property; 5 were prose or inference. Added
+[What a functional core opens up for checking code, and what it does for coding with AI](concepts/functional-core-and-verification.md),
+**claimed**, with a map of 125 sources in five groups, captured under `raw/papers/` and
+`raw/articles/`, four claims weighed in both directions, four proposed changes to the design rules and the
+ticket template, and five small trials, none run. Two independent checks of the built page against its captures
+and sources, one of the record and one of the literature, found 28 and 43 problems (wrong, overstated,
+unsupported, missing a limit, minor); all were corrected before publication. No standing changed.
+
 
 ## [2026-10-04] query | should setup create a project's verifiers with pstack's skill
 

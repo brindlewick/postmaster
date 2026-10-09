@@ -110,7 +110,7 @@ describe("each check fires on its own fault alone", () => {
     expect(strip(r.out)).toBe(
       "skills/postmaster/SKILL.md: still says the spawned session does that instead",
     );
-  }, 30000);
+  });
 
   test("SKILL only-flow", () => {
     const one = plantFault(
@@ -124,7 +124,7 @@ describe("each check fires on its own fault alone", () => {
     expect(strip(r.out)).toBe(
       "skills/postmaster/SKILL.md: still says spawn, hand over and stop is the only flow",
     );
-  }, 30000);
+  });
 
   test("postmaster spawned", () => {
     const one = plantFault(
@@ -138,7 +138,7 @@ describe("each check fires on its own fault alone", () => {
     expect(strip(r.out)).toBe(
       "skills/postmaster/postmaster.md: still says the bootstrap always spawned it",
     );
-  }, 30000);
+  });
 
   test("AGENTS table", () => {
     const one = plantFault(
@@ -149,7 +149,7 @@ describe("each check fires on its own fault alone", () => {
     const r = accept(one);
     expect(r.code).toBe(1);
     expect(strip(r.out)).toBe("AGENTS.md: still says the postmaster is spawned by SKILL.md");
-  }, 30000);
+  });
 
   test("AGENTS door", () => {
     const one = plantFault(
@@ -160,7 +160,7 @@ describe("each check fires on its own fault alone", () => {
     const r = accept(one);
     expect(r.code).toBe(1);
     expect(strip(r.out)).toBe("AGENTS.md: still says the front door only spawns a postmaster");
-  }, 30000);
+  });
 
   for (const f of [
     "skills/postmaster/SKILL.md",
@@ -173,19 +173,19 @@ describe("each check fires on its own fault alone", () => {
       const r = accept(one);
       expect(r.code).toBe(1);
       expect(strip(r.out)).toBe(`${f}: still says the front door never runs the stream`);
-    }, 30000);
+    });
     test(`${f} does-not claim`, () => {
       const one = plantFault("one", f, "The front door does not run the stream.");
       const r = accept(one);
       expect(r.code).toBe(1);
       expect(strip(r.out)).toBe(`${f}: still says the front door never runs the stream`);
-    }, 30000);
+    });
     test(`${f} do-not claim`, () => {
       const one = plantFault("one", f, "Front doors do not run the stream.");
       const r = accept(one);
       expect(r.code).toBe(1);
       expect(strip(r.out)).toBe(`${f}: still says the front door never runs the stream`);
-    }, 30000);
+    });
   }
 
   test("SKILL itself fires its check and the general one", () => {
@@ -204,7 +204,7 @@ describe("each check fires on its own fault alone", () => {
     expect(lines).toContain(
       "skills/postmaster/SKILL.md: still says the front door never runs the stream",
     );
-  }, 30000);
+  });
 
   test("SKILL bootstrap fires its check and the general one", () => {
     const one = plantFault(
@@ -222,20 +222,20 @@ describe("each check fires on its own fault alone", () => {
     expect(lines).toContain(
       "skills/postmaster/SKILL.md: still says the front door never runs the stream",
     );
-  }, 30000);
+  });
 });
 
 describe("all faults together", () => {
   test("stale tree exits 1", () => {
     expect(accept(join(tmp, "stale")).code).toBe(1);
-  }, 30000);
+  });
 
   test("stale tree lists 19 faults", () => {
     const lines = strip(accept(join(tmp, "stale")).out)
       .split("\n")
       .filter((l) => l !== "");
     expect(lines.length).toBe(19);
-  }, 30000);
+  });
 
   for (const [name, line] of [
     [
@@ -273,32 +273,32 @@ describe("all faults together", () => {
   ]) {
     test(`${name}`, () => {
       expect(accept(join(tmp, "stale")).out.split("\n")).toContain(line);
-    }, 30000);
+    });
   }
 
   test("clean tree passes", () => {
     const r = accept(join(tmp, "clean"));
     expect(r.code).toBe(0);
     expect(r.out).toBe("");
-  }, 30000);
+  });
 
   test("missing tree exits 2", () => {
     expect(accept(join(tmp, "nowhere")).code).toBe(2);
-  }, 30000);
+  });
 
   test("an extra argument exits 2", () => {
     const r = spawnSync(cli, ["front-door-acceptance", join(tmp, "clean"), "extra"], {
       encoding: "utf8",
     });
     expect(r.status).toBe(2);
-  }, 30000);
+  });
 
   test("an unknown flag exits 2", () => {
     const r = spawnSync(cli, ["front-door-acceptance", "--no-such-flag", "extra"], {
       encoding: "utf8",
     });
     expect(r.status).toBe(2);
-  }, 30000);
+  });
 
   test("a CRLF stale sentence is still caught", () => {
     const dir = join(tmp, "crlf");
@@ -315,7 +315,7 @@ describe("all faults together", () => {
     expect(strip(r.out)).toBe(
       "skills/postmaster/SKILL.md: still says spawn, hand over and stop is the only flow",
     );
-  }, 30000);
+  });
 
   test("an unreadable file exits 2, not a clean result", () => {
     const dir = join(tmp, "locked");
@@ -327,7 +327,7 @@ describe("all faults together", () => {
     } finally {
       chmodSync(join(dir, "skills/postmaster/SKILL.md"), 0o644);
     }
-  }, 30000);
+  });
 
   test("a stale sentence ahead of 16 MB is still caught", () => {
     const dir = join(tmp, "big");
@@ -340,7 +340,7 @@ describe("all faults together", () => {
     const r = accept(dir);
     expect(r.code).toBe(1);
     expect(r.out).toContain("still says the front door never runs the stream itself");
-  }, 30000);
+  });
 
   test("a clean 16 MB file still passes", () => {
     const dir = join(tmp, "big-clean");
@@ -348,9 +348,9 @@ describe("all faults together", () => {
     cpSync(join(tmp, "clean"), dir, { recursive: true });
     writeFileSync(join(dir, "skills/postmaster/SKILL.md"), `${"y".repeat(16777216)}\n`);
     expect(accept(dir).code).toBe(0);
-  }, 30000);
+  });
 
   test("live tree passes", () => {
     expect(accept(ROOT).code).toBe(0);
-  }, 30000);
+  });
 });
