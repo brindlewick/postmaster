@@ -56,6 +56,14 @@ function git(dir: string, ...args: string[]): string {
   return strip(r.out);
 }
 
+function markedResolutions(text: string): boolean {
+  const start = text.indexOf("Run the checks on each workhorse's branch");
+  const end = text.indexOf("- **", start + 1);
+  if (start === -1 || end === -1 || end < start) return false;
+  const section = text.slice(start, end);
+  return section.includes("via: marker") && section.includes("detections-resolved.jsonl");
+}
+
 function identify(dir: string): void {
   git(dir, "config", "user.email", "t@t");
   git(dir, "config", "user.name", "t");
@@ -1727,6 +1735,38 @@ describe("private-data-card", () => {
     const block = privateDataBlock(dispatch);
     expect(block).toContain("none");
     expect(block).not.toContain("(pr-description)");
+  });
+
+  test("the block dies on a marked finding with no resolution", () => {
+    // Review round 12 (bug-67): unlike drafts, marker-suppressed rows need
+    // a resolution; the die below is what the missing procedure runs into.
+    const dispatch = join(tmp, "private-data-marked");
+    mkdirSync(dispatch, { recursive: true });
+    const record = {
+      rule: "email",
+      file: "notes.txt",
+      line: 1,
+      commit: "b".repeat(40),
+      via: "marker",
+    };
+    writeFileSync(join(dispatch, "detections.jsonl"), `${JSON.stringify(record)}\n`);
+    const r = sh(["private-data-block", dispatch]);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("has no resolution");
+  });
+
+  test("the synthesis procedure resolves marked findings the gate never reports", () => {
+    // Review round 12 (bug-67): a valid marker silences the gate but still
+    // logs the finding, so the leg-1 procedure must resolve via: marker
+    // rows even when the gate passes.
+    const doc = readFileSync(join(import.meta.dir, "../skills/postmaster/coachman.md"), "utf8");
+    expect(markedResolutions(doc)).toBe(true);
+    // Negative control: the pre-fix wording only resolves reported findings.
+    const old =
+      "- **Run the checks on each workhorse's branch** once its thread has exited. " +
+      "If the gate reports a private-data finding, fix it and append one " +
+      "`detections-resolved.jsonl` row per finding.\n- **Next step.**";
+    expect(markedResolutions(old)).toBe(false);
   });
 
   test("the card scan still refuses a card when SCRUB_CHECK_DISABLE hides email", () => {

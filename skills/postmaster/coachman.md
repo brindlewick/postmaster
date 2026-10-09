@@ -592,8 +592,11 @@ from it.
   fix it in the branch without asking the user, then run the gate again. Remove real data,
   rebuild made-up test values from fragments or mark them beside the finding with its rule and
   reason, and append one `detections-resolved.jsonl` row per finding with its rule, redacted
-  file, line, commit and `resolution` (`removed`, `marked` or `scrubbed`). If a finding is
-  already in a pushed commit, do not rewrite it; escalate it under Stage E. Where a check's
+  file, line, commit and `resolution` (`removed`, `marked` or `scrubbed`). Whether the gate
+  reports or not, read `<dispatch>/detections.jsonl` for rows logged `via: marker`: a valid
+  marker silences the gate but still logs the finding, and the ship card's check refuses a
+  detection with no resolution. Append a `marked` row for each before the leg ends. If a
+  finding is already in a pushed commit, do not rewrite it; escalate it under Stage E. Where a check's
   source names `web-journey`,
   first walk the ticket's User journey on that branch, in the format
   `<tool>/scripts/run verify-journey --format` gives, to the path `<tool>/scripts/run verify
