@@ -266,6 +266,9 @@ describe("make with a host: the interactive open", () => {
       expect(calls).toContain("muse");
       expect(calls).toContain("probe-model");
       expect(calls).toContain("load-buffer");
+      const wt = summaryLine(r.out, "worktree");
+      expect(wt).not.toBe("");
+      expect(calls).toContain(`cd -- '${wt}'`);
       const promptFile = summaryLine(r.out, "prompt");
       expect(promptFile).not.toBe("");
       const prompt = readFileSync(promptFile, "utf8");
