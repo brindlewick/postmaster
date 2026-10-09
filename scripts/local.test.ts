@@ -599,7 +599,7 @@ describe("positive controls", () => {
       }),
     );
     const childResults = await Promise.all(
-      children.map(async (child: any) => ({
+      children.map(async (child) => ({
         code: await child.exited,
         out: await new Response(child.stdout).text(),
       })),
