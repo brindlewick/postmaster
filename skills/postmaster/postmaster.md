@@ -134,10 +134,18 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    `<tool>/scripts/run run-meta <dispatch> <repo>` writes `run.json` with the postmaster commit,
    the pinned checkout of that commit, the coachman contract version, the resolved machine
    config (with fixture efforts lowered for a marked copy), project settings and their sources,
-   and the harness versions, and nothing edits it
-   afterwards. The pin is a worktree of this repo at the dispatch commit, shared by every run
+   the harness versions, and the run's dispatch mode with its source and the setting's value at
+   dispatch, and nothing edits it
+   afterwards. The mode comes from the machine config's `team.mode` — synthesis when the key is
+   absent, or single-thread, or alternate, which gives this project the mode its latest run did
+   not have — **except that a mode the user named for this ticket wins: pass it as
+   `<tool>/scripts/run run-meta <dispatch> <repo> --mode <synthesis|single-thread>`**, and a
+   refusal naming the two values goes to the user. The pin is a worktree of this repo at the
+   dispatch commit, shared by every run
    dispatched at it; the waybill names it as `tool:`, and every leg of this run reads its
-   runbooks and runs its scripts from there. Log the `run run-meta` output as a `note`.
+   runbooks and runs its scripts from there. Log the `run run-meta` output as a `note`, keeping
+   its `mode=<...>`, `mode_source=<...>` and `mode_setting=<...>` fields in the detail, so the
+   run's log says which mode the run runs in and where it came from.
    `<tool>/scripts/run verify record
    <repo> <dispatch> --gate '<gate>'` writes `checks.json`, the checks the run is held to, and
    prints them for the waybill; a gate the project declares wins over the launch card's, and
@@ -153,6 +161,10 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    `<tool>/scripts/run verify record` printed them, docs to read first, tracker, risk
    surfaces), the team from `run.json` — the resolved machine config step 6 recorded — with
    its reviewer lines as `<tool>/scripts/run reviewers lines --project <repo>` prints them,
+   the `mode:` line pasted whole from the `mode:` line `<tool>/scripts/run run-meta mode
+   <dispatch>` printed (the Team section's first line), and the `workhorses:` line **only when
+   that mode is `synthesis`**: a single-thread waybill names no workhorse lane, so nothing
+   downstream finds one to run,
    and the `efforts:` line pasted from `<tool>/scripts/run run-meta efforts <dispatch>`,
    never composed by hand; each project's facts sourced as discovered, shared or local,
    `CHECKPOINT_MODE` from `ship.checkpoint_mode` and `MERGE_AUTHORITY` from
@@ -184,9 +196,12 @@ Below, `<p>` is the leg before leg `<n>` in that list, and **`<rt>` is the run's
 tool checkout** — `<tool>/scripts/run run-meta path <dispatch>`, the waybill's `tool:`, never
 the live `<tool>`. Every launch, resume and takeover of this run's legs runs from `<rt>`:
 its `run host`, its `run launch`, and the runbook the prompt names. Before anything is launched
-or resumed, `<tool>/scripts/run run-meta check <dispatch>` exits 0; on a refusal, stop and
+or resumed, `<tool>/scripts/run run-meta check <dispatch>` exits 0; it checks the pin, the
+recorded confinement and the waybill's `mode:` line against the run's mode, so a waybill that
+names a different mode from the run's record refuses the leg here and it does not start. On a
+refusal, stop and
 take its message to the user (Stage E step 3), because the checkout no longer serves the
-versions the run was dispatched from. Expand `<rt>` to its absolute path in every prompt
+versions the run was dispatched from, or the run's records disagree about its mode. Expand `<rt>` to its absolute path in every prompt
 file; the postmaster keeps using its main `<tool>` for every other supervision script.
 The watcher takes a dispatch whose hand-off checks out on its own (Stage D); you take the
 ones it names.
@@ -399,11 +414,14 @@ spec and pauses for no spec review.
    what Stage D's WALL step tells them about, and step 6 takes their words.
 2. **Decide within the user's standing instructions** when the question is about the
    work: a within-brief ambiguity, a scope call the ticket's own criteria answer, a round to
-   stop at the cap. A walled workhorse is never yours to drop: it goes to the user as Stage
-   D's WALL step says. Log `escalate` with your ruling.
+   stop at the cap. A reach is never decided here. A walled workhorse is never yours to drop:
+   it goes to the user as Stage D's WALL step says. Log `escalate` with your ruling.
 3. **Send it up** when it is genuinely destructive, changes the ticket's scope, touches
    anything outside the repo, is a fault in a control (Tool faults), asks whether to fix a
-   gating finding in a loop with no gating lens (`coachman.md`, Stage 2 step 5), or the user
+   gating finding in a loop with no gating lens (`coachman.md`, Stage 2 step 5), is a reach
+   (`coachman.md`, the reach check: a workhorse's finding, a main checkout change no lane's
+   record explains at `workhorses`, or an observed change tied to a reviewer outside this
+   run's own branches and folders), or the user
    asked to see it: write the question to the run's `.waiting-on-user`, add the run and the
    question to the waiting list (`<runs>/postmaster/ESCALATION.md`, owned by
    `<tool>/scripts/run host leg waiting add <runs> <ticket> <question-file>`), tell the user in
@@ -412,7 +430,8 @@ spec and pauses for no spec review.
    pass a postmaster grant up as if it needed the user's word, and never take the user's word
    for something the config gives you. On the user's answer, remove `.waiting-on-user`, remove
    the run from the list with `<tool>/scripts/run host leg waiting remove <runs> <ticket>`, and
-   act on the answer as the record named.
+   act on the answer as the record named. In a fixture run there is no user to ask: when the
+   project carries `.postmaster/fixture`, rule on a reach yourself, and let the fixture score fail.
 4. **For a premise ruling, follow the user's choice.** Log either answer with
    `<tool>/scripts/run log-action <dispatch> postmaster rule <TICKET> "premises <choice>"`.
    On `go on`, deliver that ruling to the coachman. On `send it back`, set the run to `abandoned` with
@@ -529,8 +548,9 @@ missed.
    the earlier score. Where dispatch BASE has no copy to run, the no-copy rule above ends
    the comparison in a fixture without classifying.
    Verify that every branch the card
-   lists exists and has the stated state; `run-log.md`'s
-   SYNTHESIS line accounts for each lane; every DEGRADED lane matches `degrade` actions; the
+   lists exists and has the stated state; `run-log.md`'s SYNTHESIS line accounts for each
+   workhorse in synthesis mode, or says `mode=single-thread` with no workhorses in single-thread
+   mode; the mode in `run.json`, the waybill and the card agree; every DEGRADED lane matches `degrade` actions; the
    turnpikes match the waybill, `actions.jsonl` has `review-launch` lines under each review lens
    the run's legs name and under no other lens, and each other turnpike's result on the card is
    in the record its step writes; when `<tool>/scripts/run turnpikes short '<the waybill's
@@ -621,30 +641,39 @@ missed.
 
 ## Stage G (contract 2): after merge
 
-1. Confirm the default branch contains the merge and the ticket is done — or, where the
-   ticket closed on nothing-to-land with no merge, that `anything-to-land --repo <repo>
-   --default <branch> --ticket <the ticket ref> --base <the manifest's base>` still says
-   `nothing-to-land` and the `merge` line holds the step's evidence: the user's word that
-   there was nothing to land (step 2), or the merge word with the no-diff evidence
-   (step 3). Stop the preview
-   process group from `<dispatch>/render/preview.pid`, if one was started. Run
-   `<tool>/scripts/run style-findings check <dispatch>`. The postmaster writes or corrects
-   `<dispatch>/style-sort.md` using the sorting rules in `coachman.md`, then checks it again
-   until exit 0; it does not resume a coachman leg that already handed off. Log a `note` with
-   the check's last line.
-2. **Finish the record.** Final `run-log.md` entry (per-lane win record, findings counts, cost)
-   plus a closing dated comment on the ticket, logging `ticket-comment`. Archive finished
-   threads where the harness has an archive form (`harnesses.md`).
-3. Once `.leg-<leg>-exited` is present, close every run-created worktree's host space with
-   `<tool>/scripts/run host close-run <dispatch>`; on exit 2, stop and report. Remove
-   the worktree from outside it, never with force unless it is clean and the card confirmed it,
-   and log `teardown`. Remove any surviving workhorse worktrees the same way after preserving
-   stray files in `<dispatch>/stray/`. Keep the run-created branches as the local archive.
-4. Close the run with `<tool>/scripts/run stage <dispatch> done postmaster`. This appends stage
-   timings from `actions.jsonl`; never write timings by hand. Never delete the dispatch or
-   manifest.
-5. Put tool faults and style-sort proposals to the user once aftercare ends, as Legacy Stage G
-   steps 4 and 5 describe, then dispatch the next ticket.
+1. **Write what needs judgment.** Confirm the default branch contains the merge and the
+   ticket is done — or, where the ticket closed on nothing-to-land with no merge, that
+   `anything-to-land --repo <repo> --default <branch> --ticket <the ticket ref> --base
+   <the manifest's base>` still says `nothing-to-land` and the `merge` line holds the
+   step's evidence: the user's word that there was nothing to land (step 2), or the merge
+   word with the no-diff evidence (step 3). Run `<tool>/scripts/run style-findings check
+   <dispatch>`. The postmaster writes or corrects `<dispatch>/style-sort.md` using the
+   sorting rules in `coachman.md`, then checks it again until exit 0; it does not resume a
+   coachman leg that already handed off. Log a `note` with the check's last line. On exit
+   1, tell the user what it printed. Compose the closing words here too: a closing line
+   for `run-log.md` (per-lane win record — none in a single-thread run, which has no
+   lanes — findings counts, cost) and a dated closing
+   comment for the ticket. The shipped mark is the proof of the landing; confirm nothing
+   by hand again.
+2. **Run the cleanup command, first as a dry run.**
+   `<tool>/scripts/run aftercare <dispatch> --dry-run --comment "<text>" --run-log
+   "<text>"` prints its plan and changes nothing; read it, then run the same command
+   without `--dry-run`. The command saves each run folder's leftovers into
+   `<dispatch>/stray/`, closes the folder's windows, removes the folder, stops the
+   preview, closes the run's windows, writes the closing line, moves the ticket to done
+   (leaving a cancelled ticket as it is) and posts the closing comment, marks the run done
+   (stage timings come from `actions.jsonl`; never write them by hand) and releases its
+   pinned tool, logging every action as it happens. On exit 2 or 3, do the next step it
+   prints and run it again; on exit 1, or any fault it reports, put the fault to the user
+   as Tool faults says and stop — never work the cleanup's steps by hand, which would
+   bring the judgment calls back. With `--json` its summary is one record a script can
+   read. Never delete the dispatch or manifest; the run's branches stay.
+3. **Put what needs the user to the user once aftercare ends:** each flagged folder — the
+   ones aftercare's summary flags as holding work no branch's commits have, with the files
+   it names — then tool faults and style-sort proposals as Legacy Stage G steps 4 and 5
+   describe. Archive finished threads where the harness has an archive form
+   (`harnesses.md`).
+4. Dispatch the next ticket.
 
 ## Legacy Stage F: the gate (run.json has no coachman_contract 2)
 

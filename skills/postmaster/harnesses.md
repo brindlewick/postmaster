@@ -458,6 +458,33 @@ cd <wt> && env XDG_DATA_HOME=<harness-data>/mimo/<key> MIMOCODE_DISABLE_CLAUDE_I
 - Source: trials of MiMo Code 0.1.15, `raw/trials/mimo-headless-forms/`, and for the prompt and
   resumes, `raw/trials/muse-mimo-controls/`.
 
+## Reach records
+
+`<tool>/scripts/run reach` is this section's executable form: it reads the lane's recorded tool
+calls. It does not use a lane's final message to decide which files it touched. A lane with no
+reader, an unreadable stream or no recognized tool call is `not checked`; it never reads as
+clean. Pi's shape is not yet checked against a recorded stream.
+
+| harness | call record read by `reach.ts` |
+|---|---|
+| codex | completed `command_execution` items (`command`, `aggregated_output`, `exit_code`) and `file_change` items (`changes[].path`) |
+| claude | assistant `tool_use` blocks (`name`, `input`) paired with user `tool_result`; for bug review, the copied `logs/<prefix>-claude-task-*` files too |
+| muse | `tool.result` (`correlation_facts`, `edit_facts`, `text`) |
+| mimo | `tool_use` (`part.tool`, `part.state.input`, `part.state.output`, `part.state.metadata.exit`) |
+| pi | `tool_execution_start` (`toolName`, `args`) paired with `tool_execution_end` |
+| grok, agy | no reader yet |
+
+The reader opens `/bin/bash -lc` commands but never executes them. From each command it
+takes the paths the command names — a token starting at `/`, `~` or `$HOME`, or climbing
+out with `..` — and from each file-tool call its path, resolves them against the lane's
+folder, and lists what falls outside that folder as a note naming the lane and the path,
+with what it cannot resolve marked unresolved. It does not say read or write, and a note
+voids nothing. A finding comes only from an observed change: a changed or new file in the
+main checkout, the main checkout off its default branch, or a change to this run's own
+branches or synthesis worktree around a round. A change is tied to a lane when that lane's
+record names the path or the branch; a change no record names is unexplained. Writes
+outside the repository are not detected here; preventing them is #221.
+
 ## Own review skills
 
 Under a review lens, a lane whose harness has its own review skill for that lens runs it in

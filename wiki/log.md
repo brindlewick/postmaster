@@ -8,6 +8,28 @@ updated: 2026-10-05
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-10-05] query | how the dashboard looks
+
+The user chose the look in #238's design session: "let's go with engraved navy and coral from
+astra", because "it felt the easiest to read". Recorded in [the dashboard](concepts/dashboard.md) under "How it looks": the choice, how it
+was reached in the user's words, what the chosen prototype carries, and where it does not follow its
+data. On the user's word, the chosen prototype is kept in `docs/design/dashboard` with full-page
+pictures and a spec, so the look can be reproduced exactly. No standing changed.
+
+## [2026-10-05] ingest | pstack read again at e43c7ee, and its nine ranked changes judged again
+
+Issue #309. The link the user gave (`c47b128`) is four commits before the first report's `23e4138`. The head
+at `e43c7ee` adds `/correct` and changes `/architect` and the perf-issue playbook, and moves no verdict.
+Captured its passages and the comparison in `raw/articles/pstack-plugin-e43c7ee/`. Recorded six trials: which
+test cases pass when their script is replaced by a stub (`2026-10-05-total-mutant`), who writes on the tickets and what
+the comment log shows (`2026-10-05-ticket-text-authors`), the decisions of eight tickets marked by what could settle
+them (`2026-10-05-decisions-sample`), the versions the runs were dispatched with
+(`2026-10-05-harness-versions-in-runs`), what a fixture run takes (`2026-10-05-fixture-run-times`), and which
+scripts remove or rewrite something and which have a dry run (`2026-10-05-state-changing-scripts`). Added "Read again on
+2026-10-05" to [pstack](sources/pstack.md), which judges the nine changes again with the user's word on each and weighs
+two more, one from `/correct` and one the first report had left out. Fixed a link in the page: the ticket template moved with
+#251. No standing changed.
+
 ## [2026-10-05] ingest | functional programming, formal verification and AI coding
 
 Issue #300. Recorded `raw/trials/2026-10-04-review-findings-classified/`: the 84 serious review findings of runs

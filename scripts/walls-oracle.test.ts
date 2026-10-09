@@ -3,16 +3,19 @@
 // the ticket pins: exits, the wall line's contents, the reset moment, the quoted wordings,
 // the needs and NEXT names. Output wording beyond that is the lane's to choose and is
 // never matched. See walls-oracle.ts for what a blind test cannot cover and why.
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ageFiles,
@@ -139,10 +142,33 @@ function startRound(lay: Layout, dispatch: string, n: string): void {
   );
 }
 
-function pinTool(lay: Layout, dispatch: string): void {
+// A run's tool checkout must be clean at its dispatch commit (run-meta check). REPO is the live
+// working tree, which another test file running beside this one can dirty for a moment, so the
+// pin is a private clone of HEAD, made once per file.
+let toolClone: { dir: string; head: string } | null = null;
+
+function pinnedTool(): { dir: string; head: string } {
+  if (toolClone) return toolClone;
   const head = git("-C", REPO, "rev-parse", "HEAD");
   need(head, "head of the repo under test");
-  patchRunJson(dispatch, { postmaster: { commit: head.out.trim(), checkout: REPO } });
+  const dir = mkdtempSync(join(tmpdir(), "walls-oracle-tool-"));
+  need(git("clone", "-q", "--shared", "--no-checkout", REPO, dir), "clone of the repo under test");
+  need(
+    git("-C", dir, "checkout", "-q", "--detach", head.out.trim()),
+    "HEAD checked out in the clone",
+  );
+  toolClone = { dir, head: head.out.trim() };
+  return toolClone;
+}
+
+afterAll(() => {
+  if (toolClone) rmSync(toolClone.dir, { recursive: true, force: true });
+  toolClone = null;
+});
+
+function pinTool(lay: Layout, dispatch: string): void {
+  const tool = pinnedTool();
+  patchRunJson(dispatch, { postmaster: { commit: tool.head, checkout: tool.dir } });
 }
 
 function workhorseWall(lay: Layout, tag: string, message: string): ActionLine {
@@ -813,7 +839,7 @@ oracle("C13: escalate names each walled workhorse, its reset and the ruling", (l
   ]) {
     expect(esc).toContain(pinned);
   }
-  const resetShown = /oct/iu.test(esc) || esc.includes("10-05") || esc.includes("10/05");
+  const resetShown = /Reset: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}/u.test(esc);
   expect(resetShown).toBe(true);
   expect(esc.includes("go-on") || esc.includes("go on")).toBe(true);
   expect(existsSync(join(lay.dispatch, ".escalation-ready"))).toBe(true);

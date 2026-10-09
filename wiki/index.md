@@ -136,7 +136,8 @@ Why the design is shaped as it is.
   A read-only web page for phone, iPad and desktop. It takes every figure from the scripts that
   already compute it, listens on a Unix socket, and is reached only by the machine's owner
   through Tailscale's proxy over plain HTTP. It never acts, because anything it could do, an
-  agent running as the user could do too.
+  agent running as the user could do too. Its look, chosen by the user from 44 prototypes in #238
+  as the easiest to read: navy and coral on cream, in the manner of an engraved notice.
 - [No library covers what the private-data scanner checks, so postmaster publishes one](concepts/scanner-library.md):
   **claimed**. A survey of 32 tools found none checking agent transcripts and git history together
   for personal data and secrets. A trial wrote #135's rules as data, and every one agreed with
@@ -149,6 +150,6 @@ Why the design is shaped as it is.
 
 [Recorded runs and captured reading](sources/index.md): one run, the review rounds of #36,
 fourteen papers on review, fixes and severity, an article on review before implementation, and
-[pstack](sources/pstack.md), a plugin of skills for verified agent work, set beside what
-postmaster holds, and the reading on functional programming and verification (97 papers and
+[pstack](sources/pstack.md), a plugin of skills for verified agent work, read twice and set beside
+what postmaster holds, and the reading on functional programming and verification (97 papers and
 28 articles).

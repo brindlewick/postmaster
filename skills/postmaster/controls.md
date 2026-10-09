@@ -20,6 +20,7 @@ A fault in one of these is a fault in a control, whatever the step that ran it.
 | `<tool>/scripts/run ticket-check` | check | a ticket has its shape before it is accepted or dispatched |
 | `<tool>/scripts/run ticket-parts` | check | a two-part ticket is fit to be signed off: its plain part is plain, and its checks, notes and decisions line up |
 | `<tool>/scripts/run check-target` | check | the target is a clean git repository before anything is cut from it |
+| `<tool>/scripts/run reach` | check | lane records, the main checkout and this run's branches are checked at the named points |
 | `<tool>/scripts/run handoff-check` | check | a leg ends only on a complete hand-off |
 | `<tool>/scripts/run wiki-lint` | check | the wiki's citations, links and standings hold |
 | `<tool>/scripts/run discover-project` | gate | which command is the project's gate |
@@ -34,6 +35,7 @@ A fault in one of these is a fault in a control, whatever the step that ran it.
 | `<tool>/scripts/run stage` | action-log | every stage change is recorded, and the run is timed from the record |
 | `<tool>/scripts/run run-meta` | action-log | what a run started from, and the pinned checkout it runs on |
 | `<tool>/scripts/run tool-faults` | action-log | every fault a run met reaches a ticket or the run's records |
+| `<tool>/scripts/run aftercare` | check | a run folder is removed only after everything in it that git would lose is saved, and work that never landed is flagged, so a fault in it stops the cleanup and goes to the user |
 
 ## Steps within a file
 

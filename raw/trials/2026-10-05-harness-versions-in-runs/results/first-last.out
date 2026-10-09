@@ -1,0 +1,16 @@
+run.json files 40
+claude
+  2.1.284 (Claude Code): 2 runs, first 2026-09-29T10:09:38Z, last 2026-09-29T13:29:44Z
+  2.1.285 (Claude Code): 11 runs, first 2026-09-29T20:49:20Z, last 2026-09-30T14:01:22Z
+  2.1.286 (Claude Code): 4 runs, first 2026-09-30T21:12:43Z, last 2026-10-01T09:21:16Z
+  2.1.287 (Claude Code): 5 runs, first 2026-10-02T06:07:54Z, last 2026-10-02T11:55:16Z
+  2.1.288 (Claude Code): 10 runs, first 2026-10-02T23:27:30Z, last 2026-10-03T22:40:31Z
+  2.1.289 (Claude Code): 8 runs, first 2026-10-04T03:50:13Z, last 2026-10-04T19:15:52Z
+muse
+  Muse Code 1.4.1 (1.4.1-R4503.1): 15 runs, first 2026-09-29T10:09:38Z, last 2026-09-30T23:11:06Z
+  Muse Code 1.4.2 (1.4.2-R4684.1): 25 runs, first 2026-10-01T09:20:36Z, last 2026-10-04T19:15:52Z
+codex
+  codex-cli 0.157.1: 40 runs, first 2026-09-29T10:09:38Z, last 2026-10-04T19:15:52Z
+mimo
+  0.1.15: 40 runs, first 2026-09-29T10:09:38Z, last 2026-10-04T19:15:52Z
+negative control: runs on a version string that no run holds: 0
