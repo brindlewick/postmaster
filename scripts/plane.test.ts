@@ -120,19 +120,19 @@ afterAll(() => {
 describe("positive controls", () => {
   test("the ticket-check fixture reads back with the same words and structure", () => {
     expect(readbackDiff).toBeNull();
-  }, 30000);
+  });
 
   test("it keeps exactly 3 top-level criteria, and one Direction heading", () => {
     expect(criteria(mdToHtml(once))).toBe(3);
     expect(mdToHtml(once).split("<h2>Direction</h2>").length - 1).toBe(1);
-  }, 30000);
+  });
 
   test("a line running straight on stays in its criterion, and a comment stays hidden", () => {
     const runsOn =
       "3. A question or a marker in code, `a?` or `TODO`, is not read, and a line that runs straight on";
     expect(once.includes(runsOn)).toBe(true);
     expect(outHtml.includes("template comment")).toBe(false);
-  }, 30000);
+  });
 
   test("a code block in a criterion keeps its less indented lines", () => {
     const h = mdToHtml("1. Runs:\n   ```\n## not a heading\n\nnot indented\n   ```\n2. Names.");
@@ -141,42 +141,42 @@ describe("positive controls", () => {
     expect(
       h.includes("<li><p>Runs:</p><pre><code>## not a heading\n\nnot indented\n</code></pre></li>"),
     ).toBe(true);
-  }, 30000);
+  });
 
   test("the writer drops a heading's closing #s and a code span's padding, and keeps a hard break", () => {
     const h = mdToHtml("## Direction ##\n\nuse ``a`b`` and `` `x `` here\\\nnext line");
     expect(h).toBe(
       "<h2>Direction</h2>\n<p>use <code>a`b</code> and <code>`x</code> here<br>next line</p>",
     );
-  }, 30000);
+  });
 
   test("a second cycle gives the same text", () => {
     expect(htmlToText(mdToHtml(once))).toBe(once);
-  }, 30000);
+  });
 
   test("Plane editor lists read as one line per item", () => {
     expect(htmlToText(editor).includes("1. The check runs.\n2. It names each part.")).toBe(true);
-  }, 30000);
+  });
 
   test("blank lines between items leave one list of three", () => {
     const h = mdToHtml("1. A\n\n2. B\n\n3. C");
     expect(h.split("<ol").length - 1).toBe(1);
     expect(h.split("<li>").length - 1).toBe(3);
-  }, 30000);
+  });
 
   test("nested lists read back indented", () => {
     expect(nestedText).toBe("- a\n  1. b\n  2. c\n- d");
-  }, 30000);
+  });
 
   test("and render to the same structure", () => {
     expect(firstDifference(shape(nestedHtml), shape(mdToHtml(nestedText)))).toBeNull();
-  }, 30000);
+  });
 
   test("a code block keeps its language", () => {
     const out = htmlToText('<pre><code class="language-python">print("x")\n</code></pre>');
     expect(out).toBe('```python\nprint("x")\n```');
     expect(mdToHtml(out).includes('class="language-python"')).toBe(true);
-  }, 30000);
+  });
 
   test("links survive: an href with parentheses, mailto and a relative one", () => {
     const links =
@@ -185,7 +185,7 @@ describe("positive controls", () => {
     const linksText = htmlToText(links);
     expect(firstDifference(shape(links), shape(mdToHtml(linksText)))).toBeNull();
     expect(linksText.includes("Foo_%28bar%29")).toBe(true);
-  }, 30000);
+  });
 
   test("line breaks, rules, a list's start and two lists in a row survive", () => {
     const misc =
@@ -198,7 +198,7 @@ describe("positive controls", () => {
     expect(miscText.includes("3. c")).toBe(true);
     expect(miscText.includes("- x")).toBe(true);
     expect(miscText.includes("* y")).toBe(true);
-  }, 30000);
+  });
 
   test("edit writes stored editor HTML back with the approved part added and the list kept", () => {
     const [editCode, editOut] = planEdit(
@@ -209,7 +209,7 @@ describe("positive controls", () => {
     expect(editCode).toBe(0);
     expect(editOut.includes("<h2>Direction</h2>")).toBe(true);
     expect(editOut.split("<li>").length - 1).toBe(2);
-  }, 30000);
+  });
 });
 
 describe("negative controls", () => {
@@ -220,24 +220,24 @@ describe("negative controls", () => {
     for (const s of ["<em>", "<table>", "<img>", "an HTML comment"]) {
       expect(why.includes(s)).toBe(true);
     }
-  }, 30000);
+  });
 
   test("edit refuses a description read does not show as stored", () => {
     const [code, why] = planEdit("<p>1. not a list</p>", "1. not a list", "x");
     expect(code).toBe(1);
     expect(why.includes("as Plane stores it")).toBe(true);
-  }, 30000);
+  });
 
   test("edit refuses a work item that changed since the base was read", () => {
     const [code] = planEdit(editor, `${baseText}\n\nAn edit made in Plane since.`, "x");
     expect(code).toBe(4);
-  }, 30000);
+  });
 
   test("edit refuses an empty body", () => {
     const [code, why] = planEdit(editor, baseText, " \n\n");
     expect(code).toBe(1);
     expect(why.includes("empty")).toBe(true);
-  }, 30000);
+  });
 
   test("the read-back check reports a lost list item", () => {
     const lost = firstDifference(
@@ -245,7 +245,7 @@ describe("negative controls", () => {
       shape(mdToHtml("1. A\n2. B")),
     );
     expect(lost?.includes("a list item")).toBe(true);
-  }, 30000);
+  });
 
   test("the read-back check reports a flattened list", () => {
     const flat = firstDifference(
@@ -253,14 +253,14 @@ describe("negative controls", () => {
       shape(mdToHtml("1. A\n- x\n- y")),
     );
     expect(flat?.includes("a bullet list")).toBe(true);
-  }, 30000);
+  });
 
   test("a body a reader would flatten is refused", () => {
     const [, diff] = readback("1. A\n   - x\n   - y\n", (ht) =>
       htmlToText(ht).replace(/\n {3}- /gu, "\n- "),
     );
     expect(diff?.includes("a bullet list")).toBe(true);
-  }, 30000);
+  });
 });
 
 describe("CLI and API behavior", () => {
@@ -279,7 +279,7 @@ describe("CLI and API behavior", () => {
     expect(r.code).toBe(1);
     expect(r.err.includes("usage:")).toBe(true);
     expect(r.err.includes("GET")).toBe(false);
-  }, 30000);
+  });
 
   test("a project binding that does not match the machine workspace is refused", () => {
     const bd = join(root, "binding-bad");
@@ -302,7 +302,7 @@ describe("CLI and API behavior", () => {
     );
     expect(r.code).toBe(1);
     expect(r.err.includes("does not match the machine workspace")).toBe(true);
-  }, 30000);
+  });
 
   test("a matching binding reaches usage, with no request", () => {
     const bd = join(root, "binding-good");
@@ -323,7 +323,7 @@ describe("CLI and API behavior", () => {
     expect(r.code).toBe(1);
     expect(r.err.includes("usage:")).toBe(true);
     expect(r.err.includes("does not match")).toBe(false);
-  }, 30000);
+  });
 
   test("with no project in scope the check is skipped and usage follows", () => {
     const bd = join(root, "binding-none");
@@ -341,7 +341,7 @@ describe("CLI and API behavior", () => {
     expect(r.code).toBe(1);
     expect(r.err.includes("usage:")).toBe(true);
     expect(r.err.includes("does not match")).toBe(false);
-  }, 30000);
+  });
 
   test("no arguments prints BASE's usage line without reading any config", () => {
     const env: Record<string, string | undefined> = {
@@ -355,7 +355,7 @@ describe("CLI and API behavior", () => {
     expect(r.err).toBe(
       "plane: usage: run plane projects|create|edit|title|read|state|label|comment|list ...\n",
     );
-  }, 30000);
+  });
 
   test("a stalled API is cut off after 30 seconds with BASE's words", async () => {
     const held: Array<{ destroy: () => void }> = [];
@@ -381,95 +381,95 @@ describe("CLI and API behavior", () => {
     await new Promise<void>((resolve) => stall.close(() => resolve()));
     expect(msg).toBe("GET workspaces/ws/projects: timed out");
     expect(secs >= 29 && secs < 45).toBe(true);
-  }, 60000);
+  });
 });
 
 describe("BASE parity", () => {
   test("ORDERED takes an Arabic-Indic number like BASE", () => {
     expect(ORDERED.test("\u0661. x")).toBe(true);
-  }, 30000);
+  });
 
   test("FENCE info crosses a CR like BASE", () => {
     expect(FENCE.test("```\rfoo")).toBe(true);
-  }, 30000);
+  });
 
   test("LINK_RE refuses a U+001C url like BASE", () => {
     expect("[a](b\x1cc)".match(LINK_RE)).toBeNull();
-  }, 30000);
+  });
 
   test("BOLD refuses a U+001C close like BASE", () => {
     expect("**a\x1c**".match(BOLD)).toBeNull();
-  }, 30000);
+  });
 
   test("attrs read through U+001C like BASE", () => {
     expect(parseAttrs('b\x1c="c"').b).toBe("c");
-  }, 30000);
+  });
 
   test("end tags split at U+001C like BASE", () => {
     expect(endTagOf("a\x1c")).toBe("a");
-  }, 30000);
+  });
 
   test("end tags keep U+FEFF like BASE", () => {
     expect(endTagOf("\ufeffa")).toBe("\ufeffa");
-  }, 30000);
+  });
 
   test("mdCode splits U+001C like BASE", () => {
     const codeNode = makeNode("code");
     codeNode.children.push("a\x1cb");
     expect(mdCode(codeNode)).toBe("`a b`");
-  }, 30000);
+  });
 
   test("mdLink splits U+001C like BASE", () => {
     const linkNode = makeNode("a", { href: "u" });
     linkNode.children.push("a\x1cb");
     expect(mdLink(linkNode)).toBe("[a b](u)");
-  }, 30000);
+  });
 
   test("paraLines splits U+001C like BASE", () => {
     expect(paraLines(["a\x1cb"]).join("|")).toBe("a b");
-  }, 30000);
+  });
 
   test("mdHeading splits U+001C like BASE", () => {
     const headNode = makeNode("h2");
     headNode.children.push("a\x1cb");
     expect(mdHeading(headNode).join("|")).toBe("## a b");
-  }, 30000);
+  });
 
   test("codeLang splits U+001C like BASE", () => {
     const preNode = makeNode("pre", { class: "" });
     preNode.children.push(makeNode("code", { class: "language-p\x1cq" }));
     expect(codeLang(preNode)).toBe("p");
-  }, 30000);
+  });
 
   test("fence langs split U+001C like BASE", () => {
     expect(mdToHtml("```p\x1cq\nx\n```").includes('language-p"')).toBe(true);
-  }, 30000);
+  });
 
   test("shape splits U+001C like BASE", () => {
     expect(shape("<code>a\x1cb</code>").join(" ").includes("<code a b>")).toBe(true);
-  }, 30000);
+  });
 
   test("criteria read through U+001C like BASE", () => {
     expect(criteria("<h2>Acceptance\x1ccriteria</h2><ol><li>x</li></ol>")).toBe(1);
-  }, 30000);
+  });
 
   test("parseId reads an Arabic-Indic tail like BASE", () => {
     const tid = parseId("A-\u0661\u0662");
     expect(tid[0]).toBe("A");
     expect(tid[1]).toBe(12);
-  }, 30000);
+  });
 
   test("env lines refuse NBSP like bash", () => {
     expect(envOf("export\u00a0A=x")).toBeNull();
-  }, 30000);
+  });
 
   test("env lines refuse a FEFF like bash", () => {
     expect(envOf("\ufeffexport A=x")).toBeNull();
-  }, 30000);
+  });
 
   test("env lines keep matching plain exports", () => {
     expect(envOf("export A=x")).toEqual(["A", "x"]);
-  }, 30000);
+  });
 });
 
 type StubItem = {
@@ -587,7 +587,7 @@ describe("labels and titles through a stub API", () => {
     } finally {
       server.stop(true);
     }
-  }, 30000);
+  });
 
   test("label add uses the label when it exists, creating nothing", async () => {
     const { server, requests, url } = startStub({ "PM-1": stubItem(1) }, [
@@ -607,7 +607,7 @@ describe("labels and titles through a stub API", () => {
     } finally {
       server.stop(true);
     }
-  }, 30000);
+  });
 
   test("label remove clears the label", async () => {
     const item = stubItem(1);
@@ -627,7 +627,7 @@ describe("labels and titles through a stub API", () => {
     } finally {
       server.stop(true);
     }
-  }, 30000);
+  });
 
   test("read shows the work item's labels", async () => {
     const item = stubItem(1);
@@ -645,7 +645,7 @@ describe("labels and titles through a stub API", () => {
     } finally {
       server.stop(true);
     }
-  }, 30000);
+  });
 
   test("has-label answers exact membership, and a comma in a name is one label", async () => {
     const item = stubItem(1);
@@ -666,7 +666,7 @@ describe("labels and titles through a stub API", () => {
     } finally {
       server.stop(true);
     }
-  }, 30000);
+  });
 
   test("title retitles the work item", async () => {
     const { server, requests, url } = startStub({ "PM-1": stubItem(1) }, []);
@@ -684,7 +684,7 @@ describe("labels and titles through a stub API", () => {
     } finally {
       server.stop(true);
     }
-  }, 30000);
+  });
 
   test("a state change leaves the ready label alone", async () => {
     const item = stubItem(1);
@@ -710,5 +710,5 @@ describe("labels and titles through a stub API", () => {
     } finally {
       server.stop(true);
     }
-  }, 30000);
+  });
 });

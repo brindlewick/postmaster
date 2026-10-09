@@ -74,6 +74,18 @@ How the flow is checked, and what each check can and cannot see.
   have hidden tests, scored from the run's own records, catches a broken contract between roles
   and a run that ships the wrong thing, which the offline gate cannot.
 
+## Checking code
+
+What would find a defect in postmaster's own scripts before a reviewer does, and what it would cost.
+
+- [What a functional core opens up for checking code, and what it does for coding with AI](concepts/functional-core-and-verification.md):
+  **claimed**. Of 84 serious review findings in four runs, a stated property or a small model would have
+  caught 79 and a pure core made the check possible for 24, none of them without a property. Proofs cost
+  far more than the code they check, the one tool found that verifies TypeScript is a tech preview, and
+  with language models the trust moves to the specification. Four changes to the design rules and the
+  ticket template are proposed, and five trials, one of which tests a cleanup script with its git swapped
+  for a mock that is checked against real git.
+
 ## Decisions
 
 Why the design is shaped as it is.
@@ -148,4 +160,5 @@ Why the design is shaped as it is.
 [Recorded runs and captured reading](sources/index.md): one run, the review rounds of #36,
 fourteen papers on review, fixes and severity, an article on review before implementation, and
 [pstack](sources/pstack.md), a plugin of skills for verified agent work, read twice and set beside
-what postmaster holds.
+what postmaster holds, and the reading on functional programming and verification (97 papers and
+28 articles).

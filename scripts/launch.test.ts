@@ -4597,7 +4597,7 @@ describe("run-recorded effort controls", () => {
         expect(mimoEffortless.out).toContain("--variant high");
       }
     });
-  }, 60000);
+  });
 });
 
 describe("preamble", () => {
@@ -5624,7 +5624,6 @@ describe("confinement wiring: form shows the wrap, fallback warns and logs", () 
 // Tests beside this file for the wall record run launch writes through run host's own step.
 
 const host = join(import.meta.dir, "run");
-const waitMarkers = join(import.meta.dir, "run");
 
 let tmp = "";
 let bin = "";
@@ -5714,6 +5713,19 @@ function baseEnv(): Record<string, string | undefined> {
   };
 }
 
+/** Wait until a launch's marker file exists: 0 when it does, 1 at the deadline. The marker lands a
+ * second after the stub exits; wait-for-markers, the script the coachman uses, looks every 20
+ * seconds, which suits a lane that runs for hours and cost each wall test 20 seconds. */
+function waitForMarker(dir: string, name: string, seconds: number): number {
+  const path = join(dir, name);
+  const deadline = Date.now() + seconds * 1000;
+  for (;;) {
+    if (existsSync(path)) return 0;
+    if (Date.now() >= deadline) return 1;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+  }
+}
+
 /** The coachman's own launch step; returns once the marker has landed. */
 function launchStep(
   c: Dispatch,
@@ -5757,15 +5769,8 @@ function launchStep(
   ];
   const r = spawnSync("bash", [argv[0]!, ...argv.slice(1)], { encoding: "utf8", env: baseEnv() });
   const rc = r.status ?? 1;
-  const waited = spawnSync(
-    "bash",
-    [waitMarkers, "wait-for-markers", join(c.d, "logs"), `${out}.done`, "1", "60"],
-    {
-      encoding: "utf8",
-      env: baseEnv(),
-    },
-  );
-  return { rc: waited.status ?? 1, marker, actions: join(c.d, "actions.jsonl") };
+  const waited = waitForMarker(join(c.d, "logs"), `${out}.done`, 60);
+  return { rc: waited, marker, actions: join(c.d, "actions.jsonl") };
 }
 
 function wallsIn(actions: string): string[] {
@@ -5809,7 +5814,7 @@ describe("C1: a launch that ends on its provider's limit records one wall", () =
     expect(rec.detail).toContain("You’ve hit your usage limit.");
     // The line was written as the launch ended: no later than the marker.
     expect(statSync(step.marker).mtimeMs).toBeGreaterThanOrEqual(statSync(step.actions).mtimeMs);
-  }, 60000);
+  });
 
   test("a claude bug-reviewer wall: the role carries its lens and round, and the reset is UTC", () => {
     const c = dispatch("c1-claude");
@@ -5829,7 +5834,7 @@ describe("C1: a launch that ends on its provider's limit records one wall", () =
     expect(rec.target).toBe("sec");
     expect(rec.detail).toContain("reviewer bug 1 2026-09-22T03:00:00Z ");
     expect(rec.detail).toContain("You've hit your weekly limit · resets 3am (UTC)");
-  }, 60000);
+  });
 
   test("a mimo workhorse limit error event with exit 0 still records a wall", () => {
     const c = dispatch("c1-mimo");
@@ -5847,7 +5852,7 @@ describe("C1: a launch that ends on its provider's limit records one wall", () =
     const rec = JSON.parse(lines[0]!) as { target: string; detail: string };
     expect(rec.target).toBe("mimo");
     expect(rec.detail).toContain("workhorse - - none You have hit your usage limit.");
-  }, 60000);
+  });
 
   /** run launch straight, reading its own exit: stdout is the stream, as run host arranges. */
   const directStep = (
@@ -5883,7 +5888,7 @@ describe("C1: a launch that ends on its provider's limit records one wall", () =
     expect(readFileSync(join(c.d, "logs", "mimo.wall-lost"), "utf8")).toContain(
       "workhorse - - none You have hit your usage limit.",
     );
-  }, 60000);
+  });
 
   test("a recorded mimo wall keeps the harness exit 0 (fail-closed control)", () => {
     const c = dispatch("c1-kept-wall");
@@ -5892,7 +5897,7 @@ describe("C1: a launch that ends on its provider's limit records one wall", () =
     expect(step.rc).toBe(0);
     expect(wallsIn(step.actions).length).toBe(1);
     expect(existsSync(join(c.d, "logs", "mimo.wall-lost"))).toBe(false);
-  }, 60000);
+  });
 
   test("a NUL in the wall message is contained as a lost wall, not a crash", () => {
     const c = dispatch("c1-nul-wall");
@@ -5910,7 +5915,7 @@ describe("C1: a launch that ends on its provider's limit records one wall", () =
     expect(step.err).toContain("was not recorded");
     expect(existsSync(join(c.d, "logs", "mimo.wall-lost"))).toBe(true);
     expect(wallsIn(step.actions).length).toBe(0);
-  }, 60000);
+  });
 });
 
 describe("C3: an ending that is not the provider's limit records no wall", () => {
@@ -5929,7 +5934,7 @@ describe("C3: an ending that is not the provider's limit records no wall", () =>
       expect(step.rc).toBe(0);
       expect(existsSync(step.marker)).toBe(true);
       expect(wallsIn(step.actions).length).toBe(0);
-    }, 60000);
+    });
   };
 
   noWall(
@@ -6028,14 +6033,7 @@ test("C3: a lane stopped mid-run with run host stop records no wall", () => {
     env: baseEnv(),
   });
   expect(stopped.status ?? 1).toBe(0);
-  spawnSync(
-    "bash",
-    [waitMarkers, "wait-for-markers", join(c.d, "logs"), "stub-stop.done", "1", "60"],
-    {
-      encoding: "utf8",
-      env: baseEnv(),
-    },
-  );
+  waitForMarker(join(c.d, "logs"), "stub-stop.done", 60);
   expect(wallsIn(join(c.d, "actions.jsonl")).length).toBe(0);
 }, 90000);
 
@@ -6052,7 +6050,7 @@ test("C3: a workhorse that committed WORKHORSE-BLOCKED.md first records no wall"
   expect(step.rc).toBe(0);
   expect(existsSync(join(c.wt, "WORKHORSE-BLOCKED.md"))).toBe(true);
   expect(wallsIn(step.actions).length).toBe(0);
-}, 60000);
+});
 
 test("C3: a summary older than the launch does not excuse the wall", () => {
   const c = dispatch("c3-old-summary");
@@ -6069,7 +6067,7 @@ test("C3: a summary older than the launch does not excuse the wall", () => {
   );
   expect(step.rc).toBe(0);
   expect(wallsIn(step.actions).length).toBe(1);
-}, 60000);
+});
 
 describe("C4: a grok lane ending on a limit message is handled as today", () => {
   test("no wall line, and the lane ends on its own exit", () => {
@@ -6085,5 +6083,5 @@ describe("C4: a grok lane ending on a limit message is handled as today", () => 
     expect(step.rc).toBe(0);
     expect(existsSync(step.marker)).toBe(true);
     expect(wallsIn(step.actions).length).toBe(0);
-  }, 60000);
+  });
 });

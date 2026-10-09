@@ -21,6 +21,18 @@ captured into `raw/`, saying what it claims and what it would mean here if true.
 - [The AI-native SDLC playbook](ai-native-sdlc-playbook.md) (2026): design review happens
   before any code is generated, and nothing is implemented without an accepted plan.
 
+
+
+
+
+
+## Formal methods and functional programming
+
+Captured for [what a functional core opens up for checking code](../concepts/functional-core-and-verification.md): 97 papers and
+28 articles in `raw/papers/` and `raw/articles/`, each with the reading helper's notes and its quotes.
+The concept's tables list them by group, with the day each was read and what each says, so they have no
+page of their own here.
+
 ## Runs
 
 - [2026-09-26, `postmaster`, #36: the review rounds of pull request #39](2026-09-26-postmaster-36.md).

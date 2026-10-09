@@ -51,25 +51,25 @@ afterAll(() => {
 describe("positive controls", () => {
   test("a section heading carries its start time", () => {
     expect(lines()).toContain("## Harvest (2026-01-01 12:00:00 UTC)");
-  }, 10000);
+  });
 
   test("an entry carries the time", () => {
     expect(lines()).toContain("- 12:03:07Z luna harvested, 4 commits");
-  }, 10000);
+  });
 
   test("starting a section closes the last, with its time", () => {
     expect(lines()).toContain("- 12:30:00Z section Harvest took 30m 00s");
-  }, 10000);
+  });
 
   test("--close closes the open section", () => {
     expect(lines()).toContain("- 12:45:30Z section Synthesis took 15m 30s");
-  }, 10000);
+  });
 });
 
 describe("negative controls", () => {
   test("closing twice writes one line", () => {
     expect(count("section Synthesis took")).toBe(1);
-  }, 10000);
+  });
 
   test("--close with no open section writes nothing", () => {
     try {
@@ -86,7 +86,7 @@ describe("negative controls", () => {
       empty = true;
     }
     expect(empty).toBe(true);
-  }, 10000);
+  });
 
   test("a missing dispatch directory is refused", () => {
     const orig = process.stderr.write.bind(process.stderr);
@@ -98,5 +98,5 @@ describe("negative controls", () => {
       process.stderr.write = orig;
     }
     expect(rc).toBe(1);
-  }, 10000);
+  });
 });

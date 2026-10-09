@@ -272,6 +272,14 @@ repo's root. The run's own pinned tool goes through `<rt>`, resolved per run by
 `run run-meta path`. `scripts/run skill-refs` names every other path that does not go through
 `<tool>`, and `--fix` rewrites the bare ones; run both after writing a runbook and after a rebase.
 
+**A test states a time limit only when it needs more than the default.** `bunfig.toml` loads
+`scripts/lib/test-defaults.ts` for every `bun test` run, and that sets 60 seconds for each test and each
+setup hook. A limit is there to catch a hang. Ten flows on one machine run every test at half speed or
+less, so a limit close to the time a test takes on a quiet machine fails the gate on load alone. A test
+or hook that needs longer states its own limit, at ten times its quiet time at least. Bun applies a preload's
+default to the first file of a serial run and to every file of a `--parallel` run, so run more than one
+test file by hand with `--parallel=1`, or run `bun run check`.
+
 **Link what you mention.** Whenever you name something that has an address, in conversation, a pull request, a
 ticket or a comment, write it as a clickable link, so that nobody has to look it up. That covers:
 
