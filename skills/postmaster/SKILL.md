@@ -157,11 +157,11 @@ not say; the security lens reviews against them.
 
 ### Optional project settings
 
-`.postmaster/project.toml` is the one shared file a project may choose to commit. It can declare
+`.postmaster/project.toml` is the shared file a project may choose to commit. It declares
 what `default` means for its tickets, the tracker binding by name, risk surfaces, and checks. It
 cannot assign roles or name credentials, machine paths or machines. `.postmaster/settings.toml`
-holds this person's choices on this checkout, including which machine-defined lanes fill local
-roles. It cannot set harnesses, models, env files, credentials or paths. Both are optional; a
+holds this person's choices for this project, written like the global config: it overrides the
+global config setting by setting, models and env files included. Both are optional; a
 missing file is normal and is never a reason to create an empty one or pause discovery.
 
 Follow the resolved values and source labels from `run discover-project` and
@@ -169,14 +169,22 @@ Follow the resolved values and source labels from `run discover-project` and
 discovered, shared or local. A ticket still names its own turnpikes: project settings define only
 the meaning of `default`.
 
+A settings file git tracks is used only after the user has accepted it, and again after it
+changes: `run project-settings inspect` reports it as `local_acceptance: pending`, and until
+it is accepted every reader uses the global value. When the launch card shows a pending file,
+show the user the file and ask whether to accept it; on yes, run
+`<tool>/scripts/run project-settings accept "$TARGET"`. No run, lane or script accepts on
+its own.
+
 When the conversation settles a project decision that should stay on this checkout, offer
 `.postmaster/settings.toml` and show its contents before writing it. When maintainers should set
 the same requirement for everyone, offer `.postmaster/project.toml` instead and say that is the
-shared file being proposed. Wait for agreement, then write the agreed file with
+shared file being proposed. A project may also commit its settings file to share it, with
+`git add -f .postmaster/settings.toml`; it takes effect for everyone once they accept it.
+Wait for agreement, then write the agreed file with
 `<tool>/scripts/run project-settings write "$TARGET" local <file>` or `project <file>`.
-The script validates the file and keeps `.postmaster/` ignored. A shared file is ignored by
-default too; commit only that file deliberately with `git add -f .postmaster/project.toml`.
-Never put paths or credentials in either file.
+The script validates the file and keeps `.postmaster/` ignored. Never put paths or credentials
+in the shared file; in the person's file a key itself stays in its env file, never in settings.
 
 ## Stage 0: scope, confirm, start
 
@@ -209,7 +217,8 @@ Never put paths or credentials in either file.
 4. **Launch card**: one self-contained confirmation covering whether the postmaster is this
    session or a new one, whether it runs headless (the script's `headless` line), with every
    reason the script printed, the postmaster's harness,
-   model and effort (`team.postmaster` in the config), the team the config names, whether
+   model and effort (`team.postmaster` in the target's effective config), the team the
+   target's effective config names, whether
    lanes will run confined (top-level `confine` in the config; a missing key means `off`;
    recorded but not yet enforced, until launch reads the key in #200), who says
    the merge word for local-merge projects (`ship.merge_authority`), the landing route
@@ -254,15 +263,17 @@ Never put paths or credentials in either file.
 
    ```sh
    <tool>/scripts/run host run "postmaster" "$TARGET_ROOT" --out "$RUNS/postmaster/events.jsonl" \
-     --err "$RUNS/postmaster/postmaster.err" --marker "$RUNS/postmaster/.exited" -- \
-     <tool>/scripts/run launch launch postmaster "$TARGET_ROOT" "$RUNS/postmaster/brief.md"
+     --err "$RUNS/postmaster/postmaster.err" --marker "$RUNS/postmaster/.exited" \
+     --project "$TARGET_ROOT" -- \
+     <tool>/scripts/run launch launch postmaster "$TARGET_ROOT" "$RUNS/postmaster/brief.md" --project "$TARGET_ROOT"
    ```
 
    That form needs a harness with a resume form (`hosts.md`, none), so the user can answer an
    escalation by resuming it. When the route has a `headless` line and `team.postmaster` names
    a harness with none, run the postmaster on another harness that has one, as `hosts.md` says,
    and never fall back to interactive for a marked fixture. Without a `headless` line, start an
-   interactive session of the postmaster's harness (`team.postmaster` in the config), rooted in
+   interactive session of the postmaster's harness (`team.postmaster` in the target's
+   effective config), rooted in
    the target repo, in the harness's interactive form from `harnesses.md`: its bypass mode, named
    `postmaster`. Hand it a
    one-line prompt file that says to read the brief at `$RUNS/postmaster/brief.md` first:

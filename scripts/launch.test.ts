@@ -1313,6 +1313,106 @@ beforeAll(() => {
       );
       process.chdir(origCwd);
     }
+    // A relative env_file the project's settings set resolves against the
+    // project root; the global config's own relative paths keep the global
+    // directory (#335).
+    run("git", ["init", "-q", join(tmp, "envrepo")]);
+    mkdirSync(join(tmp, "envrepo", ".postmaster"), { recursive: true });
+    writeFileSync(
+      join(tmp, "envproj.toml"),
+      '[lanes.one]\nharness = "claude"\nmodel = "lane-model"\n',
+    );
+    writeFileSync(join(tmp, "envrepo", ".postmaster", "proj.env"), "PROBE=project-root\n");
+    writeFileSync(join(tmp, "only-global.env"), "PROBE=global-dir\n");
+    writeFileSync(
+      join(tmp, "envrepo", ".postmaster", "settings.toml"),
+      '[lanes.one]\nenv_file = ".postmaster/proj.env"\n',
+    );
+    carries(
+      "a relative env file the project's settings set is read from the project root",
+      "envproj",
+      "launch: cd ",
+      "form",
+      "one",
+      "--project",
+      join(tmp, "envrepo"),
+    );
+    // The recorded run carries the project base in its values, so --run
+    // launches agree with --project ones (#335).
+    const envRunDir = (runName: string): string =>
+      join(tmp, "envrepo", ".postmaster", "runs", runName);
+    const recordEnv = (runName: string): void => {
+      mkdirSync(envRunDir(runName), { recursive: true });
+      const r = spawnSync(
+        join(here, "run"),
+        ["run-meta", envRunDir(runName), join(tmp, "envrepo")],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            POSTMASTER_CONFIG: join(tmp, "envproj.toml"),
+            POSTMASTER_TOOL_PINS: join(tmp, "tools"),
+            PATH: `${join(tmp, "bin")}:${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+      if (r.status !== 0) fail(`run-meta records ${runName} for the env repo`);
+    };
+    recordEnv("T-proj");
+    carries(
+      "a recorded run resolves a project-set relative env file against the project root",
+      "envproj",
+      "launch: cd ",
+      "form",
+      "one",
+      "--run",
+      envRunDir("T-proj"),
+    );
+    carries(
+      "a launch from a recorded run sources the project-root env file",
+      "envproj",
+      "probe=project-root",
+      "launch",
+      "one",
+      join(tmp, "envrepo"),
+      join(tmp, "prompt.txt"),
+      "--run",
+      envRunDir("T-proj"),
+    );
+    writeFileSync(
+      join(tmp, "envrepo", ".postmaster", "settings.toml"),
+      '[lanes.one]\nenv_file = "only-global.env"\n',
+    );
+    refused(
+      "a project-set relative env file is not read from the global config's directory",
+      "envproj",
+      join(tmp, "envrepo", "only-global.env"),
+      "form",
+      "one",
+      "--project",
+      join(tmp, "envrepo"),
+    );
+    recordEnv("T-neg");
+    refused(
+      "a recorded run does not read a project-set env file from the global config's directory",
+      "envproj",
+      join(tmp, "envrepo", "only-global.env"),
+      "form",
+      "one",
+      "--run",
+      envRunDir("T-neg"),
+    );
+    refused(
+      "a launch from a recorded run does not source a global-dir env file for a project-set path",
+      "envproj",
+      join(tmp, "envrepo", "only-global.env"),
+      "launch",
+      "one",
+      join(tmp, "envrepo"),
+      join(tmp, "prompt.txt"),
+      "--run",
+      envRunDir("T-neg"),
+    );
     writeFileSync(join(tmp, "shell.env"), 'FIRST=one\nexport PROBE="v-$FIRST/x" # trailing\n');
     writeFileSync(
       join(tmp, "shellenv.toml"),
@@ -4800,6 +4900,30 @@ describe("negative controls", () => {
   });
   test("a relative env file is read from the config's directory, never the worktree", () => {
     assertControl("a relative env file is read from the config's directory, never the worktree");
+  });
+  test("a relative env file the project's settings set is read from the project root", () => {
+    assertControl("a relative env file the project's settings set is read from the project root");
+  });
+  test("a project-set relative env file is not read from the global config's directory", () => {
+    assertControl("a project-set relative env file is not read from the global config's directory");
+  });
+  test("a recorded run resolves a project-set relative env file against the project root", () => {
+    assertControl(
+      "a recorded run resolves a project-set relative env file against the project root",
+    );
+  });
+  test("a launch from a recorded run sources the project-root env file", () => {
+    assertControl("a launch from a recorded run sources the project-root env file");
+  });
+  test("a recorded run does not read a project-set env file from the global config's directory", () => {
+    assertControl(
+      "a recorded run does not read a project-set env file from the global config's directory",
+    );
+  });
+  test("a launch from a recorded run does not source a global-dir env file for a project-set path", () => {
+    assertControl(
+      "a launch from a recorded run does not source a global-dir env file for a project-set path",
+    );
   });
   test("an env file is shell: export, quotes, comments and expansion reach the harness", () => {
     assertControl("an env file is shell: export, quotes, comments and expansion reach the harness");

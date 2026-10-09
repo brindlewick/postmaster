@@ -252,13 +252,16 @@ format check, the tests beside every script, the runbook reference check and the
 
 Precedence, stated once and followed everywhere: **discovery** supplies defaults; the
 shared `.postmaster/project.toml`, where one exists, declares what the project requires of
-every run; local `.postmaster/settings.toml` are this person's choices on this machine;
-`~/.postmaster/config.toml` supplies what is machine-specific and is never overridden by a
-project. None of these sets a floor of turnpikes: a ticket names the turnpikes its run
-passes through (#40), and project settings only say what `default` means for that project.
-A project's settings name no credential and no filesystem path, in either file
-(`scripts/run project-settings`). Nothing in `.postmaster/` is committed by default; the one
-shared file is committed on purpose with `git add -f`.
+every run; the person's `.postmaster/settings.toml` overrides `~/.postmaster/config.toml`
+setting by setting for that project, a group merging and a list or single value replaced
+whole, except `projects_roots`, which always comes from the global config; the global
+config supplies the machine's defaults. None of these sets a floor of
+turnpikes: a ticket names the turnpikes its run passes through (#40), and project settings
+only say what `default` means for that project. The person's file may name models, env
+files and other machine settings; the shared file names no credential and no filesystem
+path (`scripts/run project-settings`). Nothing in `.postmaster/` is committed by default;
+project.toml is committed on purpose with `git add -f`, and a tracked settings.toml is
+used only after the user has accepted it, and again after it changes.
 
 ## Working on this repository
 
