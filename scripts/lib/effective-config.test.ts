@@ -832,3 +832,106 @@ describe("Review round 4 regressions", () => {
     );
   }, 60000);
 });
+
+describe("Review round 9 regressions", () => {
+  function committedUnaccepted(): { repo: string; config: string; settings: string } {
+    const { repo, config } = scratch();
+    const settings = writeSettings(repo, '[lanes.luna]\nmodel = "gpt-other"\n');
+    commitSettings(repo);
+    return { repo, config, settings };
+  }
+
+  /** A git that answers the ownership refusal: ls-files 128, rev-parse 128, --version 0. */
+  function refusalStub(): string {
+    n += 1;
+    const dir = join(tmp, `gitstub-${n}`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "git"),
+      '#!/bin/sh\nfor a in "$@"; do\n  case "$a" in\n' +
+        '    ls-files) echo "fatal: detected dubious ownership in repository" >&2; exit 128;;\n' +
+        '    rev-parse) echo "fatal: detected dubious ownership in repository" >&2; exit 128;;\n' +
+        '    --version) echo "git version 2.43.0-stub"; exit 0;;\n' +
+        '  esac\ndone\necho "stub git: unexpected: $*" >&2; exit 128\n',
+    );
+    chmodSync(join(dir, "git"), 0o755);
+    return dir;
+  }
+
+  /** A PATH with only what runs the CLI: no git at all. */
+  function noGitDir(): string {
+    n += 1;
+    const dir = join(tmp, `nogit-${n}`);
+    mkdirSync(dir, { recursive: true });
+    symlinkSync(process.execPath, join(dir, "bun"));
+    for (const tool of ["bash", "dirname"]) {
+      const p = existsSync(`/bin/${tool}`) ? `/bin/${tool}` : `/usr/bin/${tool}`;
+      symlinkSync(p, join(dir, tool));
+    }
+    return dir;
+  }
+
+  test("committed unaccepted settings read pending with working git", () => {
+    const { repo, config, settings } = committedUnaccepted();
+    const env = envFor(config);
+    const inspect = runCli(["project-settings", "inspect", repo], env);
+    expect(inspect.code).toBe(0);
+    expect((JSON.parse(inspect.out) as Rec).local_acceptance).toBe("pending");
+    expect(inspect.err).toContain(settings);
+    expect(inspect.err).toContain("waits for acceptance");
+    const effective = runCli(["project-settings", "effective", repo], env);
+    expect((((JSON.parse(effective.out) as Rec).lanes as Rec).luna as Rec).model).toBe(
+      "gpt-5.6-luna",
+    );
+  }, 60000);
+
+  test("committed unaccepted settings still read pending when git refuses the repository", () => {
+    const { repo, config, settings } = committedUnaccepted();
+    const env = envFor(config, { PATH: `${refusalStub()}:${process.env.PATH ?? ""}` });
+    const inspect = runCli(["project-settings", "inspect", repo], env);
+    expect(inspect.code).toBe(0);
+    expect((JSON.parse(inspect.out) as Rec).local_acceptance).toBe("pending");
+    expect(inspect.err).toContain(settings);
+    expect(inspect.err).toContain("waits for acceptance");
+  }, 60000);
+
+  test("a folder with no repository reads untracked and is used", () => {
+    n += 1;
+    const repo = join(tmp, `norepo-${n}`);
+    mkdirSync(join(repo, ".postmaster"), { recursive: true });
+    writeSettings(repo, '[lanes.luna]\nmodel = "gpt-other"\n');
+    const config = join(tmp, `config-norepo-${n}.toml`);
+    writeFileSync(config, example);
+    const env = envFor(config);
+    const inspect = runCli(["project-settings", "inspect", repo], env);
+    expect(inspect.code).toBe(0);
+    expect((JSON.parse(inspect.out) as Rec).local_acceptance).toBe("not-needed");
+    const effective = runCli(["project-settings", "effective", repo], env);
+    expect((((JSON.parse(effective.out) as Rec).lanes as Rec).luna as Rec).model).toBe("gpt-other");
+  }, 60000);
+
+  test("missing git with a repository present fails closed and waits for acceptance", () => {
+    const { repo, config, settings } = committedUnaccepted();
+    const env = envFor(config, { PATH: noGitDir() });
+    const inspect = runCli(["project-settings", "inspect", repo], env);
+    expect(inspect.code).toBe(0);
+    expect((JSON.parse(inspect.out) as Rec).local_acceptance).toBe("pending");
+    expect(inspect.err).toContain(settings);
+    expect(inspect.err).toContain("waits for acceptance");
+  }, 60000);
+
+  test("missing git with no repository reads untracked and is used", () => {
+    n += 1;
+    const repo = join(tmp, `nogitrepo-${n}`);
+    mkdirSync(join(repo, ".postmaster"), { recursive: true });
+    writeSettings(repo, '[lanes.luna]\nmodel = "gpt-other"\n');
+    const config = join(tmp, `config-nogitrepo-${n}.toml`);
+    writeFileSync(config, example);
+    const env = envFor(config, { PATH: noGitDir() });
+    const inspect = runCli(["project-settings", "inspect", repo], env);
+    expect(inspect.code).toBe(0);
+    expect((JSON.parse(inspect.out) as Rec).local_acceptance).toBe("not-needed");
+    const effective = runCli(["project-settings", "effective", repo], env);
+    expect((((JSON.parse(effective.out) as Rec).lanes as Rec).luna as Rec).model).toBe("gpt-other");
+  }, 60000);
+});
