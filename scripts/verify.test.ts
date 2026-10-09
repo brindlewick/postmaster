@@ -895,7 +895,7 @@ describe("exits", () => {
     run(SELF, ["verify", "record", q, e]);
     const r = run(SELF, ["verify", "run", q, e]);
     expect(r.code).toBe(0);
-  }, 60000);
+  });
 
   test("a run with a check not run and none failed exits 3", () => {
     const rg = join(tmp, "grey");
@@ -903,7 +903,7 @@ describe("exits", () => {
     run(SELF, ["verify", "record", rg, f]);
     const r = run(SELF, ["verify", "run", rg, f]);
     expect(r.code).toBe(3);
-  }, 60000);
+  });
 
   test("a worktree nobody armed is refused", () => {
     const r = run(SELF, ["verify", "run", join(tmp, "plain")]);
@@ -926,7 +926,7 @@ describe("a check sees what it would from a terminal", () => {
       env: { POSTMASTER_LAUNCH_NAME: "#11, a run" },
     });
     expect(r.code).toBe(0);
-  }, 60000);
+  });
 });
 
 describe("a result belongs to a commit", () => {
@@ -964,7 +964,7 @@ describe("a result belongs to a commit", () => {
     expect(
       out.includes("it changed files git sees, so its result is not its commit's: src.txt"),
     ).toBe(true);
-  }, 60000);
+  });
 
   test("and the checks after it do not run", () => {
     const sp = join(tmp, "spoil");
@@ -993,7 +993,7 @@ describe("a result belongs to a commit", () => {
     const out = r.out + r.err;
     expect(out.includes("gate: fail, exit 0,")).toBe(true);
     expect(out.includes("gate.log")).toBe(true);
-  }, 60000);
+  });
 
   test("the runner waits without os.waitid, which python lacks on macOS before 3.13", () => {
     expect(readFileSync(SELF, "utf-8").includes("os.waitid")).toBe(false);
@@ -1101,7 +1101,7 @@ describe("nothing a check starts outlives it", () => {
     writeFileSync(checksPath, JSON.stringify(checksData));
     const r = run(SELF, ["verify", "run", mp, md]);
     expect((r.out + r.err).includes("try: not run, exit 127,")).toBe(true);
-  }, 60000);
+  });
 });
 
 describe("discovery reports the checks", () => {

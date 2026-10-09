@@ -329,6 +329,8 @@ function runPatternParity(tmp: string): void {
 }
 
 // bun:test's types omit the hook timeout, though the runtime honors it.
+// The setup below runs the whole tool many times and takes about 190 s on a quiet machine. Its limit
+// only catches a hang, so it is about ten times that: a loaded machine ran it past 300 s.
 
 beforeAll(() => {
   withTempDir((tmp) => {
@@ -369,6 +371,8 @@ if (a[0] === "api" && a[1] === "graphql") {
     console.log(JSON.stringify({ data: { repository: { viewerPermission: db.access } } }));
   } else if (q.includes("projectsV2")) {
     console.log(JSON.stringify({ data: { repository: { projectsV2: { nodes: [{ id: "PVT_1", number: 1, title: "postmaster", closed: false, url: "https://github.com/users/o/projects/1", owner: { login: "o" } }] } } } }));
+  } else if (q.includes("ProjectV2SingleSelectField")) {
+    console.log(JSON.stringify({ data: { node: { field: { id: "F1", options: [{ id: "o1", name: "Todo" }, { id: "o2", name: "In Progress" }, { id: "o3", name: "Done" }] } } } }));
   } else if (q.includes("issue(number:")) {
     const n = (a.find((x: string) => x.startsWith("number=")) ?? "").split("=")[1] ?? "";
     const i = db.issues[n];
@@ -390,8 +394,6 @@ if (a[0] === "api" && a[1] === "graphql") {
   console.log(JSON.stringify(hits));
 } else if (a[0] === "project" && a[1] === "item-list") {
   console.log('{"items": []}');
-} else if (a[0] === "project" && a[1] === "field-list") {
-  console.log('{"fields": [{"id": "F1", "name": "Status", "options": [{"id": "o1", "name": "Todo"}, {"id": "o2", "name": "In Progress"}, {"id": "o3", "name": "Done"}]}]}');
 } else if (a[0] === "project" && a[1] === "item-add") {
   if (existsSync(d + "/no-item-add")) { console.error("stub gh: item-add refused"); process.exit(1); }
   console.log('{"id": "PVTI_new"}');
@@ -2180,7 +2182,7 @@ if (a[0] === "api" && a[1] === "graphql") {
       );
     }
   });
-}, 300000);
+}, 1800000);
 
 describe("positive controls", () => {
   test("seven fault lines are five faults: one seen three ways, and two naming different scripts kept apart", () => {
