@@ -17,10 +17,10 @@ export function oxlintStep(): string[] {
   const segment = pkg.scripts.check
     .split("&&")
     .map((s) => s.trim())
-    .find((s) => s.split(/\s+/).includes("oxlint"));
+    .find((s) => s.split(/\s+/u).includes("oxlint")); // ASCII: a shell splits words on ASCII whitespace
   if (segment === undefined) throw new Error("check script runs no oxlint step");
-  if (/["'\\|<>;&$`]/.test(segment)) throw new Error(`oxlint step is not plain argv: ${segment}`);
-  return segment.split(/\s+/);
+  if (/["'\\|<>;&$`]/u.test(segment)) throw new Error(`oxlint step is not plain argv: ${segment}`);
+  return segment.split(/\s+/u); // ASCII: a shell splits words on ASCII whitespace
 }
 
 /** Run the gate's Oxlint step from the repo root with extra args appended. */
@@ -36,7 +36,7 @@ export const STARTS_WITH_SRC = 'const l = "## hi";\nif (/^## /u.test(l)) console
 export const CLEAN_SRC = 'console.log("clean");\n';
 
 /** A lint finding line: path:line:col: warning|error. */
-const FINDING_RE = /:\d+:\d+: (?:warning|error) /;
+const FINDING_RE = /:\d+:\d+: (?:warning|error) /u; // ASCII: oxlint prints line:col in ASCII digits
 
 export function findingLines(output: string): string[] {
   return output.split("\n").filter((line) => FINDING_RE.test(line));
