@@ -112,7 +112,7 @@ function lines(): number {
 
 interface ActionLine {
   action?: unknown;
-  detail?: unknown;
+  detail: string;
   fault?: { control?: unknown; error?: unknown; failed?: unknown; workaround?: unknown };
   project?: unknown;
   run?: unknown;
