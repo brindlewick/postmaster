@@ -329,6 +329,8 @@ function runPatternParity(tmp: string): void {
 }
 
 // bun:test's types omit the hook timeout, though the runtime honors it.
+// The setup below runs the whole tool many times and takes about 190 s on a quiet machine; the
+// limit is 600 s so that a loaded machine fails a check, not the whole file on a timeout.
 
 beforeAll(() => {
   withTempDir((tmp) => {
@@ -2180,7 +2182,7 @@ if (a[0] === "api" && a[1] === "graphql") {
       );
     }
   });
-}, 300000);
+}, 600000);
 
 describe("positive controls", () => {
   test("seven fault lines are five faults: one seen three ways, and two naming different scripts kept apart", () => {
