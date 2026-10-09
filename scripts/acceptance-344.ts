@@ -45,6 +45,15 @@ export function makeSandbox(): Sandbox {
       config: { team: { coachman: { harness: "claude", model: "stub-model" } } },
     }),
   );
+  // host run --under names its space from the brief's synthesis worktree, which
+  // must exist; the headless fallback goes through host run, so the sandbox
+  // carries a minimal brief pointing at its own repo.
+  writeFileSync(
+    join(dispatch, "brief.md"),
+    ["# Waybill: oracle", "", "## Dispatch", "name: #0, oracle", `synthesis worktree: ${repo}`, ""].join(
+      "\n",
+    ),
+  );
   return { dir, repo, bin, dispatch };
 }
 
