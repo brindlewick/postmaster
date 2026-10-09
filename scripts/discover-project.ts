@@ -97,7 +97,7 @@ const lsNames = (argv: string[]): string => {
 const docs = lsNames(["AGENTS.md", "CLAUDE.md", "README.md", "CONTRIBUTING.md"]);
 const dirs = lsNames(["-d", "wiki", "docs", ".github"]);
 // sed 's/^<prefix> //' | paste -sd' ' -: every line, empty ones included, joined by one space.
-const joinWarn = (text: string, prefix: string): string =>
+const joinWarn = (text: string, prefix: string | RegExp): string =>
   text
     .replace(/\n+$/u, "")
     .split("\n")
