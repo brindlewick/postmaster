@@ -90,12 +90,12 @@ interface ParsedFile {
 
 const TS_PLUGINS = [
   "typescript",
-  "jsx",
   "decorators-legacy",
   "explicitResourceManagement",
   "importAttributes",
   "importAssertions",
 ];
+const TSX_PLUGINS = [...TS_PLUGINS.slice(0, 1), "jsx", ...TS_PLUGINS.slice(1)];
 const JS_PLUGINS = [
   "jsx",
   "decorators-legacy",
@@ -106,11 +106,18 @@ const JS_PLUGINS = [
 
 /** The parser options for a path: the file's own grammar, tolerant flags so
  * sloppy-but-parseable shapes still list their comments, and recovery where
- * the parser offers it. What still throws fails loud at the call. */
+ * the parser offers it. What still throws fails loud at the call. Only
+ * `.tsx` takes the `jsx` plugin among the TypeScript extensions: in `.ts`,
+ * `.mts` and `.cts` the tools read `<T>x` as an assertion, and JSX would
+ * swallow the comments after one. */
 function parserOptions(path: string): BabelOptions {
-  const ts = /\.(?:ts|tsx|mts|cts)$/u.test(path);
+  if (/\.tsx$/u.test(path)) return { plugins: [...TSX_PLUGINS], ...parserCommon() };
+  if (/\.(?:ts|mts|cts)$/u.test(path)) return { plugins: [...TS_PLUGINS], ...parserCommon() };
+  return { plugins: [...JS_PLUGINS], ...parserCommon() };
+}
+
+function parserCommon(): Omit<BabelOptions, "plugins"> {
   return {
-    plugins: [...(ts ? TS_PLUGINS : JS_PLUGINS)],
     sourceType: "unambiguous",
     errorRecovery: true,
     allowImportExportEverywhere: true,
