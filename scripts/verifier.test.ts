@@ -2,30 +2,22 @@
 // detection and the wall scan. The live session stays out; acceptance-323 covers the
 // command boundary as a subprocess.
 import { describe, expect, test } from "bun:test";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitAll, gitOrThrow, initRepo, RUN, writeRepoFile } from "./acceptance-323.ts";
 import { run } from "./lib/proc.ts";
 import {
-  UPKEEP_LINE,
   acceptLine,
   addedFeaturePages,
   addedPaths,
   addedUnder,
   branchFileText,
   branchHasPath,
-  checkMultiVerifiers,
   type CheapFacts,
   type ChecksOutcome,
   type ClassifiedEntry,
+  checkMultiVerifiers,
   classifyEntries,
   commitsPastBase,
   committedFeaturePages,
@@ -71,6 +63,7 @@ import {
   surfaceKind,
   surfaceProse,
   timeoutMs,
+  UPKEEP_LINE,
   unlistedSentence,
   unrunProject,
   verifyDirName,

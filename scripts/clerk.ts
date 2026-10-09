@@ -248,8 +248,7 @@ function writeBrief(repo: string, id: string): Brief {
     ["checks", repo, "--lines"],
     `run verify checks ${repo} --lines failed`,
   ).replace(/\n+$/u, "");
-  const checksBlock =
-    checksOut === "" ? ["(no checks reported)"] : checksOut.split("\n");
+  const checksBlock = checksOut === "" ? ["(no checks reported)"] : checksOut.split("\n");
   const verifiersOut = requireScript(
     "verifier",
     ["list", repo],
