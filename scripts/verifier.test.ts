@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { commitAll, gitOrThrow, initRepo, RUN, writeRepoFile } from "./acceptance-323.ts";
 import { run } from "./lib/proc.ts";
 import {
+  branchHasPath,
   commitsPastBase,
   defaultBase,
   isSurface,
@@ -314,6 +315,30 @@ describe("repoTop", () => {
       expect(repoTop(repo)).toBe(repo);
       expect(repoTop(join(repo, "src"))).toBe(repo);
       expect(repoTop(join(dir, "nope"))).toBe(null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("branchHasPath", () => {
+  test("a committed file reads present, an uncommitted one absent", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      gitOrThrow(repo, "branch", "verify-cli");
+      writeRepoFile(repo, "verify-app/README.md", "v\n");
+      writeRepoFile(repo, "note.md", "hi\n");
+      gitOrThrow(repo, "checkout", "-q", "verify-cli");
+      gitOrThrow(repo, "add", "note.md");
+      gitOrThrow(repo, "commit", "-q", "-m", "other file");
+      expect(branchHasPath(repo, "verify-cli", "verify-app/README.md")).toBe(false);
+      expect(branchHasPath(repo, "verify-cli", "note.md")).toBe(true);
+      expect(branchHasPath(repo, "verify-cli", "missing.md")).toBe(false);
+      expect(branchHasPath(repo, "nope", "note.md")).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

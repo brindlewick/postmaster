@@ -225,6 +225,12 @@ export function commitsPastBase(repo: string, base: string, branch: string): num
   return Number.isInteger(n) ? n : null;
 }
 
+/** A path is present in the branch's committed tree. */
+export function branchHasPath(repo: string, branch: string, path: string): boolean {
+  const r = git(repo, ["ls-tree", "--name-only", branch, "--", path]);
+  return r.code === 0 && r.out.trim() !== "";
+}
+
 /** The base the session's branch is cut from: origin's head, main, master, or HEAD. */
 export function defaultBase(repo: string): string | null {
   const sym = git(repo, ["symbolic-ref", "refs/remotes/origin/HEAD"]);
@@ -579,8 +585,8 @@ function runMake(req: ParsedMake): number {
   if (made === 0) {
     throw new RunError(`the session committed nothing on ${branch}`);
   }
-  if (!existsSync(join(wt, vdir, "README.md"))) {
-    throw new RunError(`the session left no ${vdir}/README.md in ${wt}`);
+  if (!branchHasPath(wt, branch, `${vdir}/README.md`)) {
+    throw new RunError(`the session left no ${vdir}/README.md committed on ${branch}`);
   }
   for (const line of [
     `branch ${branch}`,
