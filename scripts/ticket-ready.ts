@@ -315,7 +315,10 @@ function armClerkClose(repo: string, id: string): boolean {
   // the record. A missing record, or none naming a session, arms nothing.
   let record: Record<string, unknown> = {};
   try {
-    record = JSON.parse(readFileSync(clerkSessionPath(repo, id), "utf8")) as Record<string, unknown>;
+    record = JSON.parse(readFileSync(clerkSessionPath(repo, id), "utf8")) as Record<
+      string,
+      unknown
+    >;
   } catch {
     return false;
   }

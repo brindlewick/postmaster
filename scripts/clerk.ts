@@ -312,7 +312,9 @@ function recordOpen(repo: string, id: string, name: string, brief: string, handl
 
 function readSession(repo: string, id: string): { handle: string } | null {
   try {
-    const raw = JSON.parse(readFileSync(clerkSessionPath(repo, id), "utf8")) as { handle?: unknown };
+    const raw = JSON.parse(readFileSync(clerkSessionPath(repo, id), "utf8")) as {
+      handle?: unknown;
+    };
     if (typeof raw.handle !== "string") return null;
     return { handle: raw.handle };
   } catch {

@@ -3420,7 +3420,9 @@ async function clerkCloseCmd(args: string[]): Promise<void> {
   try {
     patience = count(process.env.POSTMASTER_CLERK_CLOSE_WAIT ?? "600", "seconds");
   } catch (error) {
-    warn(`POSTMASTER_CLERK_CLOSE_WAIT is not a number; waiting 600s: ${String((error as Error).message)}`);
+    warn(
+      `POSTMASTER_CLERK_CLOSE_WAIT is not a number; waiting 600s: ${String((error as Error).message)}`,
+    );
   }
   try {
     await waitCmd([handle, String(patience)]);
