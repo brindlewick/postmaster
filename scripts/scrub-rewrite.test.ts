@@ -1,5 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import {
   cleanupScratch,
@@ -186,4 +193,94 @@ test("rewrite refuses a run record under .postmaster instead of renaming it", ()
   expect(refused.status).toBe(2);
   expect(refused.stdout + refused.stderr).toContain("needs a manual rewrite");
   expect(gitAt(repo, ["rev-parse", "HEAD"])).toBe(head);
+});
+
+function goneFileRepo(): { repo: string; base: string; head: string } {
+  const repo = initRepo();
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  writeFileSync(join(repo, "gone.txt"), `${email()}\n`);
+  commit(repo, "add a note");
+  gitAt(repo, ["rm", "-q", "gone.txt"]);
+  commit(repo, "delete the note");
+  return { repo, base, head: gitAt(repo, ["rev-parse", "HEAD"]) };
+}
+
+test("rewrite refuses an untracked file colliding with a rewritten path", () => {
+  // Review round 13 (bug-74): the snapshot loop checks each row tree out
+  // over the live worktree. An untracked file at a path in a row tree is
+  // adopted and then deleted or overwritten by the suspect rewrite.
+  const { repo, base, head } = goneFileRepo();
+  const body = `${email()}\n`;
+  writeFileSync(join(repo, "gone.txt"), body);
+  const refused = runScript("scrub-rewrite", [base], repo);
+  expect(refused.status).toBe(2);
+  expect(refused.stdout + refused.stderr).toContain("gone.txt");
+  expect(refused.stdout + refused.stderr).toContain("collides with the rewritten history");
+  expect(existsSync(join(repo, "gone.txt"))).toBe(true);
+  expect(readFileSync(join(repo, "gone.txt"), "utf8")).toBe(body);
+  expect(gitAt(repo, ["rev-parse", "HEAD"])).toBe(head);
+});
+
+test("rewrite refuses an ignored file colliding with a rewritten path", () => {
+  // Review round 13 (bug-74): ignored files are untracked to git, so the
+  // same adoption deletes them; the guard covers both.
+  const { repo, base, head } = goneFileRepo();
+  const body = `${email()}\n`;
+  writeFileSync(join(repo, ".gitignore"), "gone.txt\n");
+  writeFileSync(join(repo, "gone.txt"), body);
+  const refused = runScript("scrub-rewrite", [base], repo);
+  expect(refused.status).toBe(2);
+  expect(refused.stdout + refused.stderr).toContain("gone.txt");
+  expect(refused.stdout + refused.stderr).toContain("collides with the rewritten history");
+  expect(existsSync(join(repo, "gone.txt"))).toBe(true);
+  expect(readFileSync(join(repo, "gone.txt"), "utf8")).toBe(body);
+  expect(gitAt(repo, ["rev-parse", "HEAD"])).toBe(head);
+});
+
+test("rewrite names a non-identical colliding file instead of aborting mid-loop", () => {
+  // Review round 13 (bug-74): a differing file at a row-tree path used to
+  // fail the snapshot read-tree with a cryptic message after rewriting
+  // started; the guard refuses up front with the path.
+  const { repo, base, head } = goneFileRepo();
+  writeFileSync(join(repo, "gone.txt"), "something else\n");
+  const refused = runScript("scrub-rewrite", [base], repo);
+  expect(refused.status).toBe(2);
+  expect(refused.stdout + refused.stderr).toContain("gone.txt");
+  expect(refused.stdout + refused.stderr).toContain("collides with the rewritten history");
+  expect(readFileSync(join(repo, "gone.txt"), "utf8")).toBe("something else\n");
+  expect(gitAt(repo, ["rev-parse", "HEAD"])).toBe(head);
+});
+
+test("rewrite refuses an untracked file at a finding-free row-tree path", () => {
+  // Review round 13 (bug-74): the snapshot checks out whole trees, not
+  // suspect paths, so a colliding file without a finding is destroyed too.
+  const repo = initRepo();
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  writeFileSync(join(repo, "gone.txt"), `${email()}\n`);
+  writeFileSync(join(repo, "data.txt"), "data\n");
+  commit(repo, "add notes");
+  gitAt(repo, ["rm", "-q", "gone.txt", "data.txt"]);
+  commit(repo, "delete the notes");
+  const head = gitAt(repo, ["rev-parse", "HEAD"]);
+  writeFileSync(join(repo, "data.txt"), "user data\n");
+  const refused = runScript("scrub-rewrite", [base], repo);
+  expect(refused.status).toBe(2);
+  expect(refused.stdout + refused.stderr).toContain("data.txt");
+  expect(refused.stdout + refused.stderr).toContain("collides with the rewritten history");
+  expect(readFileSync(join(repo, "data.txt"), "utf8")).toBe("user data\n");
+  expect(gitAt(repo, ["rev-parse", "HEAD"])).toBe(head);
+});
+
+test("rewrite allows untracked and ignored files outside the rewritten paths", () => {
+  // Review round 13 (bug-74): files at novel paths are never checked out
+  // by the snapshot loop, so they survive a successful rewrite untouched.
+  const { repo, base } = goneFileRepo();
+  writeFileSync(join(repo, "scratch.txt"), "scratch\n");
+  writeFileSync(join(repo, ".gitignore"), "cache.bin\n");
+  writeFileSync(join(repo, "cache.bin"), "cache\n");
+  const rewritten = runScript("scrub-rewrite", [base], repo);
+  expect(rewritten.status).toBe(0);
+  expect(rewritten.stdout).toContain(":gone.txt:1: email removed");
+  expect(readFileSync(join(repo, "scratch.txt"), "utf8")).toBe("scratch\n");
+  expect(readFileSync(join(repo, "cache.bin"), "utf8")).toBe("cache\n");
 });

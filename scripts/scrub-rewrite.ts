@@ -365,6 +365,37 @@ async function main(args: string[]): Promise<number> {
       fail(`a finding in ${safePath(item.path)} remains in the final tree`);
     suspects.push({ sourceCommit: item.commit, path: item.path, line: item.line, text });
   }
+  // Review round 13 (bug-74): each snapshot checks its whole row tree out
+  // over the live worktree through a scratch index, which gives untracked
+  // and ignored files no protection: one at a path in any row tree is
+  // silently adopted and then deleted or overwritten. Refuse the collision
+  // up front, naming the path through the redacting print.
+  const rowPaths = new Set<string>();
+  for (const row of rows) {
+    const listed = git(["ls-tree", "-r", "--name-only", "-z", row.commit], root).toString("utf8");
+    for (const entry of listed.split("\0")) if (entry) rowPaths.add(entry);
+  }
+  const others = git(
+    ["-c", "core.quotePath=false", "status", "--porcelain=v1", "--ignored", "--untracked-files=all"],
+    root,
+  )
+    .toString("utf8")
+    .split("\n");
+  for (const line of others) {
+    if (line.length < 4) continue;
+    const code = line.slice(0, 2);
+    if (code !== "??" && code !== "!!") continue;
+    const entry = line.slice(3);
+    const hit = entry.endsWith("/")
+      ? [...rowPaths].some((path) => path.startsWith(entry))
+      : [...rowPaths].some(
+          (path) => path === entry || path.startsWith(`${entry}/`) || entry.startsWith(`${path}/`),
+        );
+    if (hit)
+      fail(
+        `the ${code === "??" ? "untracked" : "ignored"} path ${safePath(entry)} collides with the rewritten history`,
+      );
+  }
   const ancestors = ancestorSets(rows);
   const indexFile = join(
     root,
