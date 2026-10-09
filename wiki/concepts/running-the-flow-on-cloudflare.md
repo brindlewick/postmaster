@@ -485,8 +485,8 @@ fixture lane's tokens were not measured; the audit's medians are 0.8M in and 20k
 
 ## Isolation
 
-The [lane isolation scan](https://github.com/brindlewick/postmaster/blob/cff24d1e493bf3083f04a0548808b4343c8a2d4a/raw/trials/2026-10-05-lane-isolation-scan/results.md)
-(pull request 285, still open) read 60 workhorse-lane streams in 30 runs; the coachman, the reviewers and the postmaster
+The [lane isolation scan](../../raw/trials/2026-10-05-lane-isolation-scan/results.md)
+(pull request 285, merged) read 60 workhorse-lane streams in 30 runs; the coachman, the reviewers and the postmaster
 were not read. Nothing there is retested. This table sets what it found against what a container per lane is documented
 to isolate. Whether each reach would really be stopped is argued from the documented design, not tried.
 
@@ -727,7 +727,7 @@ next 20 or so real runs at on-demand rates and reports how much of the provision
   rendered by script and was not read. Anthropic's Commercial Terms were read in one pass. The 2026-11-12 usage policy
   page has no announcement anywhere that was found. OpenAI's and Anthropic's plan prices were not gathered; Meta's and
   Xiaomi's are in the captures.
-- The lane isolation scan was read from its branch and not re-run. The coachman's process time, the CPU use of any
+- The lane isolation scan was read and not re-run. The coachman's process time, the CPU use of any
   launch and the gate's speed in a container are bracketed or unknown.
 - Whether a subscription login held in a Worker and injected in place of a placeholder works for Codex or Claude Code at
   all was not tried. The vendors' gateway pages describe a gateway that forwards a login the client holds; Cloudflare's
