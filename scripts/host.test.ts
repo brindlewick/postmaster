@@ -65,7 +65,8 @@ let failures = -1;
 const lines: string[] = [];
 const origLog = console.log;
 
-// bun:test's types omit the hook timeout, though the runtime honors it.
+// bun:test's types omit the hook timeout, though the runtime honors it. The limit only catches a
+// hang, so it is ten times the 180 s this setup takes on a quiet machine.
 
 beforeAll(async () => {
   console.log = (...args: unknown[]) => {
@@ -82,7 +83,7 @@ beforeAll(async () => {
     ))
       process.stderr.write(`${line}\n`);
   }
-}, 600000);
+}, 1800000);
 
 afterAll(() => {
   console.log = origLog;
