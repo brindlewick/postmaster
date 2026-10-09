@@ -38,7 +38,9 @@ function withRun(body: (fx: RunFixture) => void): void {
 }
 
 function takeLines(fx: RunFixture) {
-  return readActions(fx).filter((a) => a.action === "take-in");
+  return readActions(fx)
+    .filter((a) => a.action === "take-in")
+    .map((a) => ({ action: a.action, target: a.target, detail: a.detail }));
 }
 
 describe("C1: taken in only once no workhorse is running or waiting", () => {
