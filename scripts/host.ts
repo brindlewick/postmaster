@@ -976,8 +976,10 @@ function herdrRecordPlacement(
 
 // A fixture copy exists for one run: everything in it counts as opened for that
 // run, its project space included, so the space carries the ownership token and
-// its root pane reads settled. A tag that does not land leaves the space for a
-// later close to name; the launch itself still runs.
+// its root pane carries ownership too. No state token goes on the root pane:
+// the server merges tokens, so a settled mark would survive the re-tag when a
+// launch reuses the pane and read as settled while live. A tag that does not
+// land leaves the space for a later close to name; the launch itself still runs.
 function tagFixtureSpace(space: string, rootPane: string): void {
   if (!space) return;
   if (
@@ -987,19 +989,10 @@ function tagFixtureSpace(space: string, rootPane: string): void {
     warn(`could not mark fixture copy space ${space} as opened by run host`);
   if (
     rootPane &&
-    herdr([
-      "pane",
-      "report-metadata",
-      rootPane,
-      "--source",
-      META,
-      "--token",
-      "postmaster=root",
-      "--token",
-      "state=done",
-    ]).code !== 0
+    herdr(["pane", "report-metadata", rootPane, "--source", META, "--token", "postmaster=root"])
+      .code !== 0
   )
-    warn(`could not settle fixture copy root pane ${rootPane} in space ${space}`);
+    warn(`could not mark fixture copy root pane ${rootPane} in space ${space}`);
 }
 
 function rollbackRootTab(tab: string): void {
