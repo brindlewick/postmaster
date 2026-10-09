@@ -626,7 +626,9 @@ describe("which checkout is linked", () => {
       "first",
     ]);
     run("git", ["-C", repo, "worktree", "add", "-q", join(repo, ".worktrees", "wt"), "-b", "wt"]);
-    repoReal = resolve(repo);
+    // Physically, as git reports the main checkout; resolve() alone keeps a
+    // linked parent (as /tmp is on macOS) spelled the caller's way.
+    repoReal = realpathSync(repo);
     const pkg = join(tmp, "pkg");
     mkdirSync(pkg, { recursive: true });
     mkdirSync(join(repo, "node_modules", "pkg"), { recursive: true });

@@ -24,7 +24,7 @@ import { runControls, waitFor } from "./host-self-test.ts";
 import { bootId, processStart, processState } from "./lib/processes.ts";
 
 const SECTIONS: Array<{ name: string; count: number }> = [
-  { name: "preamble", count: 6 },
+  { name: "preamble", count: 8 },
   { name: "detect", count: 5 },
   { name: "launch labels and run identity", count: 31 },
   { name: "name: from the waybill, so no title is typed into a shell", count: 5 },
@@ -303,10 +303,17 @@ test("_watch touches its marker for a zombie while the zombie's parent still run
       }),
     );
     expect(Number.isSafeInteger(childPid) && childPid > 0).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 300));
-
+    // The child exits 0.2s after the shell starts it, but shell and sleep
+    // startup drift under load, so wait for the zombie rather than reading
+    // once after a fixed sleep, which a loaded runner misses.
     process.env.POSTMASTER_PROC_ROOT = procRoot;
-    expect(processState(childPid)).toBe("zombie");
+    let zombieSeen = "";
+    for (let i = 0; i < 100; i++) {
+      zombieSeen = processState(childPid);
+      if (zombieSeen === "zombie") break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(zombieSeen).toBe("zombie");
     const result = spawnSync(
       join(import.meta.dir, "run"),
       ["host", "_watch", String(childPid), marker],
@@ -325,6 +332,63 @@ test("_watch touches its marker for a zombie while the zombie's parent still run
     else process.env.POSTMASTER_PROC_ROOT = priorProcRoot;
     try {
       parent.kill("SIGTERM");
+    } catch {}
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a reused marker kills the previous launch's _watch before the reset", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "host-watch-reuse-"));
+  const temp = join(dir, "tmp");
+  const cwd = join(dir, "work");
+  const marker = join(dir, "leg.done");
+  mkdirSync(temp);
+  mkdirSync(cwd);
+  writeFileSync(marker, "old marker");
+  const sleeper = spawn("/bin/sleep", ["30"], { stdio: "ignore" });
+  const watcher = spawn(
+    join(import.meta.dir, "run"),
+    ["host", "_watch", String(sleeper.pid), marker],
+    {
+      stdio: "ignore",
+      detached: true,
+    },
+  );
+  watcher.unref();
+  try {
+    expect(processState(watcher.pid ?? 0)).toBe("live");
+    const result = spawnSync(
+      join(import.meta.dir, "run"),
+      ["host", "run", "watch-reuse", cwd, "--marker", marker, "--", "sleep", "1"],
+      {
+        cwd,
+        encoding: "utf8",
+        timeout: 30000,
+        env: {
+          ...process.env,
+          HOME: dir,
+          TMPDIR: temp,
+          POSTMASTER_HOST: "none",
+          POSTMASTER_HOST_STATE: join(dir, "state"),
+        },
+      },
+    );
+    expect(result.status).toBe(0);
+    // The watcher died with the reuse: without the kill it polls on behind
+    // the reset marker, and its late touch finishes the new launch early.
+    for (let i = 0; i < 40 && processState(watcher.pid ?? 0) === "live"; i++)
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(processState(watcher.pid ?? 0)).not.toBe("live");
+    expect(processState(sleeper.pid ?? 0)).toBe("live");
+    for (let i = 0; i < 50 && !existsSync(marker); i++)
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(existsSync(marker)).toBe(true);
+  } finally {
+    try {
+      watcher.kill("SIGKILL");
+    } catch {}
+    try {
+      sleeper.kill("SIGTERM");
     } catch {}
     rmSync(dir, { recursive: true, force: true });
   }
@@ -500,6 +564,9 @@ test("Herdr checks time out when timeout is absent, and keep working when it is 
       ["bash", Bun.which("bash") ?? "/bin/bash"],
       ["bun", process.execPath],
       ["dirname", Bun.which("dirname") ?? "/usr/bin/dirname"],
+      // The minimal PATH is about timeout, not ps: without /proc, macOS reads
+      // every process state through ps, and a missing ps reads as absent.
+      ["ps", Bun.which("ps") ?? "/bin/ps"],
     ])
       symlinkSync(target, join(bin, tool));
     const timeout = Bun.which("timeout");

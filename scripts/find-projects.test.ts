@@ -2,20 +2,26 @@
 // global config alone; a project's own settings never change where projects live.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const CLI = join(import.meta.dir, "run");
 
 let tmp = "";
+let real = "";
 
 beforeAll(() => {
-  tmp = mkdtempSync(join(tmpdir(), "find-projects-test-"));
+  // The fixture lives behind a link on every system, as macOS TMPDIR does, so the
+  // canonical-path assertion below pins the behavior where no Mac runs either.
+  real = mkdtempSync(join(tmpdir(), "find-projects-test-"));
+  tmp = `${real}-link`;
+  symlinkSync(real, tmp);
 });
 
 afterAll(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  rmSync(tmp, { force: true });
+  rmSync(real, { recursive: true, force: true });
 });
 
 describe("find-projects", () => {

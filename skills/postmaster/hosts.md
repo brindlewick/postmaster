@@ -204,9 +204,9 @@ onto the fragment it supersedes.
   worktree from the waybill. `herdr worktree open --workspace <repository's space> --path
   <synthesis worktree> --label <ticket>` opens the run's space. Every launch gets a tab
   in the same space, with its own checkout as the tab's working directory, the first one
-  included: it closes the run space's root tab once its own tab exists. That includes
-  reviewer worktrees and security-review clones: a clone is never opened as a separate
-  workspace. A failure before the launch lands rolls back instead — the root tab
+  included: it closes the run space's root tab once its own tab exists.
+  That includes reviewer scratches: a clone is never opened as a separate workspace. A
+  failure before the launch lands rolls back instead — the root tab
   while the launch tab does not exist yet, the launch tab after — so a failed
   placement leaves nothing a later close could refuse. A run launch without `--under` is refused
   instead of opening a top-level space.
