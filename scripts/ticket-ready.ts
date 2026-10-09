@@ -323,6 +323,7 @@ function armClerkClose(repo: string, id: string): boolean {
     return false;
   }
   if (typeof record.handle !== "string" || !record.handle) return false;
+  const handle = record.handle;
   let log = -1;
   try {
     log = openSync(
@@ -334,11 +335,15 @@ function armClerkClose(repo: string, id: string): boolean {
     return false;
   }
   try {
-    const child = spawn(join(HERE, "run"), ["host", "_clerk-close", repo, id], {
+    const child = spawn(join(HERE, "run"), ["host", "_clerk-close", repo, id, handle], {
       detached: true,
       stdio: ["ignore", log, log],
     });
+    // A spawn failure arrives as async 'error', never as a throw: listen for
+    // it, and read the pid while still synchronous. No pid means no closer.
+    child.on("error", () => {});
     child.unref();
+    if (child.pid === undefined) throw new Error("the clerk closer did not start");
   } catch {
     console.error("ticket-ready: could not start the clerk closer; close the session by hand");
     try {
@@ -465,10 +470,10 @@ function markAdapterTicket(
     labelViaAdapter(repo, id, kind, "add");
     logTicketEdit(repo, id, "label add ready");
     logLedgerNote(repo, id, turnpikes);
-    armed = armClerkClose(repo, id);
     // Bind the marker to the bytes just verified, as the check will read
     // them, not to the draft bytes.
     writeQueue(repo, id, freshLive.title, freshBodyRaw);
+    armed = armClerkClose(repo, id);
   } else {
     // Bind and confirm with the adapter's own comparison before the label
     // goes on, so a mismatch or read failure leaves nothing to undo. An edit
@@ -483,8 +488,8 @@ function markAdapterTicket(
     labelViaAdapter(repo, id, kind, "add");
     logTicketEdit(repo, id, "label add ready");
     logLedgerNote(repo, id, turnpikes);
-    armed = armClerkClose(repo, id);
     writeQueue(repo, id, title, boundBody);
+    armed = armClerkClose(repo, id);
   }
   console.log(`ticket-ready: ${id} marked ready and queued`);
   if (armed) console.log(`ticket-ready: its clerk session closes when its turn ends`);
@@ -607,8 +612,8 @@ function main(argv: string[]): number {
     }
     if (!turnpikes) die(`checked ${id} but ticket-check printed no turnpikes line`);
     logLedgerNote(repo, id, turnpikes);
-    const armed = armClerkClose(repo, id);
     writeQueue(repo, id, title, unsignedBody(body));
+    const armed = armClerkClose(repo, id);
     console.log(`ticket-ready: ${id} marked ready and queued`);
     if (armed) console.log(`ticket-ready: its clerk session closes when its turn ends`);
     return 0;

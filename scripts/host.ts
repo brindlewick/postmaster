@@ -32,8 +32,9 @@
 //                                         and with --wait block until it settles (default 600)
 //   run host wait <handle> [<seconds>]     block until it settles, when nothing was just sent
 //   run host read <handle> [<lines>]       print what it shows (default 120 lines)
-//   run host close-handle <handle>         close that one spawned session's tab or window;
-//                                         a spawned session from before this form exists closes by hand
+//   run host close-handle <handle>         close every session recorded under the handle, on each
+//                                         host that answers; a spawned session from before this
+//                                         form exists closes by hand
 //   run host --live-test                   the ticket's controls, against the hosts on this machine
 //
 // run: <command> is the same headless command a caller would otherwise background with `&`. It
@@ -3276,16 +3277,38 @@ function readCmd(args: string[]): void {
     if (result.code) throw hostError("", result.code);
   } else noSessionHost();
 }
-// A spawned session still shows: a live Herdr agent under the handle, or a
-// tmux window named for it. Gone servers hold no sessions.
+// A spawned session still shows: a live Herdr agent under the handle, a
+// recorded pane that still answers, or a tmux window carrying its tag. A
+// shell spawn registers no agent and a user rename changes the window name,
+// so neither the agent list nor the name decides alone. Gone servers hold no
+// sessions.
 function sessionPresent(handle: string): boolean {
-  if (herdrUp() && herdr(["agent", "get", handle]).code === 0) return true;
+  if (herdrUp()) {
+    if (herdr(["agent", "get", handle]).code === 0) return true;
+    for (const file of placementFiles()) {
+      let item: any = null;
+      try {
+        item = JSON.parse(readFileSync(file, "utf8"));
+      } catch {
+        continue;
+      }
+      if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
+      if (item.handle !== handle) continue;
+      if (typeof item.pane !== "string" || !item.pane) continue;
+      if (herdr(["pane", "get", item.pane]).code === 0) return true;
+    }
+  }
   if (has("tmux")) {
-    const rows = run("tmux", ["list-windows", "-a", "-F", "#{window_id}\t#{window_name}"]);
+    const rows = run("tmux", [
+      "list-windows",
+      "-a",
+      "-F",
+      "#{window_id}\t#{window_name}\t#{@postmaster_cwd}\t#{@postmaster_handle}\t#{@postmaster_pane}",
+    ]);
     if (rows.code === 0) {
       for (const line of pySplitLines(rows.out)) {
         const cells = line.split("\t");
-        if (cells[0] && cells[1] === handle) return true;
+        if (cells[0] && cells[3] === handle) return true;
       }
     }
   }
@@ -3357,6 +3380,9 @@ function closeHandleTmux(handle: string): { code: number; found: boolean } {
   }
   return { code: rc, found: true };
 }
+// Every session recorded under the handle closes, on each host that
+// answers: handles are unique per spawn, so two matches means two spawns
+// under one name, and a close that left one behind would lie about it.
 function closeHandleCore(handle: string): number {
   let rc = 0;
   let found = false;
@@ -3383,25 +3409,17 @@ function closeHandleCmd(args: string[]): void {
 // A booking clerk session after its ticket is marked ready: ticket-ready mark
 // starts this detached, since the mark runs inside the session's own turn. It
 // waits for the turn to end, closes that one session, and drops its record.
-// The record goes only when it still names this session: a new clerk for the
-// same ticket starts under another handle and is never touched here.
+// The handle arrives on the command line, bound at marking: the record is
+// read only to drop it, so a replacement session recorded since is never
+// waited on or closed here. The record goes only when it still names this
+// session: a new clerk for the same ticket starts under another handle and is
+// never touched here.
 async function clerkCloseCmd(args: string[]): Promise<void> {
   const repo = args[0] ?? "";
   const id = args[1] ?? "";
-  if (!repo || !id || args.length !== 2) die("usage: run host _clerk-close <repo> <id>");
-  let handle = "";
-  try {
-    const raw = JSON.parse(readFileSync(clerkSessionPath(repo, id), "utf8")) as {
-      handle?: unknown;
-    };
-    if (typeof raw.handle === "string") handle = raw.handle;
-  } catch {
-    handle = "";
-  }
-  if (!handle) {
-    console.log(`no clerk session for ${id}`);
-    return;
-  }
+  const handle = args[2] ?? "";
+  if (!repo || !id || !handle || args.length !== 3)
+    die("usage: run host _clerk-close <repo> <id> <handle>");
   const drop = (): void => {
     try {
       const raw = JSON.parse(readFileSync(clerkSessionPath(repo, id), "utf8")) as {
@@ -3410,9 +3428,11 @@ async function clerkCloseCmd(args: string[]): Promise<void> {
       if (raw.handle === handle) rmSync(clerkSessionPath(repo, id), { force: true });
     } catch {}
   };
-  if (!sessionPresent(handleOf(handle))) {
+  const settled = handleOf(handle);
+  if (!sessionPresent(settled)) {
     console.log(`${handle} is already gone; dropping its record`);
-    closeHandleCore(handleOf(handle));
+    const gone = closeHandleCore(settled);
+    if (gone !== 0) throw hostError("", gone);
     drop();
     return;
   }
@@ -3427,14 +3447,15 @@ async function clerkCloseCmd(args: string[]): Promise<void> {
   try {
     await waitCmd([handle, String(patience)]);
   } catch (error) {
-    if (!sessionPresent(handleOf(handle))) {
-      closeHandleCore(handleOf(handle));
+    if (!sessionPresent(settled)) {
+      const gone = closeHandleCore(settled);
+      if (gone !== 0) throw hostError("", gone);
       drop();
       return;
     }
     throw error;
   }
-  const rc = closeHandleCore(handleOf(handle));
+  const rc = closeHandleCore(settled);
   if (rc !== 0) throw hostError("", rc);
   drop();
   console.log(`closed clerk session ${handle}`);

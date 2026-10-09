@@ -72,9 +72,9 @@ takes input and drop what it is sent, so read the session before sending the mes
 first start to ask something, such as whether to trust the folder: the user answers it in the
 pane. A booking clerk is spawned the same way (`postmaster.md`, Stage B).
 `spawn`, `send`, `wait` and `read` exit 3 on `none`.
-`run host close-handle <handle>` closes that one spawned session's tab or window, and only it:
-on Herdr the tab the placement record names for the handle, on tmux the window carrying its
-handle tag. A live session with no record is refused, and an unknown handle reports `no
+`run host close-handle <handle>` closes every session recorded under the handle, and only
+those: on Herdr the tabs the placement records name for the handle, on tmux the windows
+carrying its handle tag. A live session with no record is refused, and an unknown handle reports `no
 session`, exit 0. A booking clerk session closes this way once its ticket is marked ready: the
 mark arms a closer that waits for the clerk's turn to end, then closes its tab and drops its
 record. A session spawned from before this form exists has no record and closes by hand.

@@ -352,6 +352,7 @@ function herdrStubInner(args: string[], stateDir: string): void {
     return;
   }
   if (command === "pane get") {
+    if (!st.panes[args[2]!]) fail("pane_not_found");
     out({ pane: { pane_id: args[2], agent: null } });
     return;
   }
@@ -409,14 +410,18 @@ function herdrStubInner(args: string[], stateDir: string): void {
     const pane = args[2] ?? "";
     const name = args[3] ?? "";
     // The name follows the pane's occupant: whatever it was called before is freed.
+    // A pane with no agent takes no name: the server registers nothing there, so a
+    // shell spawn stays unregistered, as on the live server.
+    let hosted = false;
     for (const [known, at] of Object.entries(st.agentPanes) as Array<[string, unknown]>) {
       if (at === pane) {
+        hosted = true;
         st.agents = st.agents.filter((entry: string) => entry !== known);
         delete st.agentPanes[known];
       }
     }
-    if (name && !st.agents.includes(name)) st.agents.push(name);
-    if (name) st.agentPanes[name] = pane;
+    if (hosted && name && !st.agents.includes(name)) st.agents.push(name);
+    if (hosted && name) st.agentPanes[name] = pane;
     save(path, st);
     return;
   }
@@ -4139,6 +4144,119 @@ export async function runControls(): Promise<number> {
         calls(root, "tmux").some((line) => line === "capture-pane\t-p\t-J\t-S\t-7\t-t\t@1") &&
         tmuxRead.code === 0,
     );
+
+    console.log("clerk close");
+    const writeClerkRecord = (repo: string, id: string, handle: string): void => {
+      const dir = join(repo, ".postmaster", "runs", "postmaster", "clerks");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, `${id}.json`),
+        `${JSON.stringify({ ticket: `#${id}, x`, brief: join(repo, "b.md"), handle, opened: "2026-10-09T00:00:00.000Z" })}\n`,
+      );
+    };
+    const recordedClerkHandle = (repo: string, id: string): string => {
+      try {
+        const raw = JSON.parse(
+          readFileSync(
+            join(repo, ".postmaster", "runs", "postmaster", "clerks", `${id}.json`),
+            "utf8",
+          ),
+        ) as { handle?: unknown };
+        return typeof raw.handle === "string" ? raw.handle : "";
+      } catch {
+        return "";
+      }
+    };
+    resetHarness(root);
+    const shellSpawn = execHost(["spawn", "clerk-shell", f.repo, "--", "true"], stubs, root);
+    const shellTab = kvOf(shellSpawn.out, "tab");
+    const shellRead = execHost(["read", "clerk-shell", "5"], stubs, root);
+    await pass(
+      "a shell spawn registers no agent, as on the live server",
+      () => shellSpawn.code === 0 && shellRead.code !== 0,
+      `${shellSpawn.out}\n${shellRead.err}`,
+    );
+    writeClerkRecord(f.repo, "9", "clerk-shell");
+    const shellClose = execHost(["_clerk-close", f.repo, "9", "clerk-shell"], stubs, root);
+    const shellState = json(join(stub, "herdr.json"), { tabs: {} });
+    await pass(
+      "the closer leaves an agentless live session open and fails, keeping its record",
+      () =>
+        shellClose.code !== 0 &&
+        shellState.tabs[shellTab] !== undefined &&
+        recordedClerkHandle(f.repo, "9") === "clerk-shell",
+      `${shellClose.out}\n${shellClose.err}`,
+    );
+    const shellGone = execHost(["close-handle", "clerk-shell"], stubs, root);
+    const shellReap = execHost(["_clerk-close", f.repo, "9", "clerk-shell"], stubs, root);
+    await pass(
+      "once its pane is gone the closer reports gone and drops the record",
+      () =>
+        shellGone.code === 0 &&
+        shellReap.code === 0 &&
+        shellReap.out.includes("already gone") &&
+        recordedClerkHandle(f.repo, "9") === "",
+      `${shellReap.out}\n${shellReap.err}`,
+    );
+    resetHarness(root);
+    const keptSpawn = execHost(["spawn", "clerk-kept", f.repo, "--", "claude"], stubs, root);
+    const keptTab = kvOf(keptSpawn.out, "tab");
+    writeClerkRecord(f.repo, "7", "clerk-kept");
+    const staleClose = execHost(["_clerk-close", f.repo, "7", "clerk-stale"], stubs, root);
+    const keptState = json(join(stub, "herdr.json"), { tabs: {}, agents: [] });
+    await pass(
+      "a closer bound to a replaced handle touches neither the new session nor its record",
+      () =>
+        staleClose.code === 0 &&
+        keptState.tabs[keptTab] !== undefined &&
+        (keptState.agents as string[]).includes("clerk-kept") &&
+        recordedClerkHandle(f.repo, "7") === "clerk-kept",
+      `${staleClose.out}\n${staleClose.err}`,
+    );
+    resetHarness(root);
+    const renamedSpawn = execHost(["spawn", "clerk-renamed", f.repo, "--", "true"], stubs, root, {
+      POSTMASTER_HOST: "tmux",
+    });
+    const renamedWin = kvOf(renamedSpawn.out, "window");
+    updateTmuxJson(root, (st) => {
+      if (st.windows[renamedWin]) st.windows[renamedWin].name = "user words";
+    });
+    writeClerkRecord(f.repo, "8", "clerk-renamed");
+    const renamedClose = execHost(["_clerk-close", f.repo, "8", "clerk-renamed"], stubs, root, {
+      POSTMASTER_HOST: "tmux",
+    });
+    const renamedState = json(join(stub, "tmux.json"), { windows: {} });
+    await pass(
+      "a renamed tmux window still reads present, and the closer leaves it open",
+      () =>
+        renamedClose.code !== 0 &&
+        renamedState.windows[renamedWin] !== undefined &&
+        renamedState.windows[renamedWin].name === "user words" &&
+        recordedClerkHandle(f.repo, "8") === "clerk-renamed",
+      `${renamedClose.out}\n${renamedClose.err}`,
+    );
+    resetHarness(root);
+    const squatSpawn = execHost(["spawn", "clerk-squat", f.repo, "--", "true"], stubs, root, {
+      POSTMASTER_HOST: "tmux",
+    });
+    const squatWin = kvOf(squatSpawn.out, "window");
+    updateTmuxJson(root, (st) => {
+      if (st.windows[squatWin]) delete st.windows[squatWin].opts["@postmaster_handle"];
+    });
+    writeClerkRecord(f.repo, "6", "clerk-squat");
+    const squatClose = execHost(["_clerk-close", f.repo, "6", "clerk-squat"], stubs, root, {
+      POSTMASTER_HOST: "tmux",
+    });
+    const squatState = json(join(stub, "tmux.json"), { windows: {} });
+    await pass(
+      "a refused close in the gone branch fails instead of dropping the record",
+      () =>
+        squatClose.code === 2 &&
+        squatState.windows[squatWin] !== undefined &&
+        recordedClerkHandle(f.repo, "6") === "clerk-squat",
+      `${squatClose.out}\n${squatClose.err}`,
+    );
+    resetHarness(root);
 
     console.log("run role: the explicit host role");
     const capDispatch = join(root, "cap-dispatch");
