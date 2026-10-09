@@ -43,10 +43,13 @@ copied, or its link points somewhere else. `<checkout>/scripts/run link-skills`,
 **First ask whether to work on postmaster itself or on another project, before any config
 check.** Postmaster itself is `<tool>`, the checkout this skill runs from: it makes that
 checkout the target. When the session stands in another project — its working directory's
-common git directory (`git rev-parse --git-common-dir`) differs from `<tool>`'s — offer
-that project first, beside postmaster itself and another project. From the postmaster
-checkout itself, nothing is offered ahead of postmaster itself. A project the user has
-already named is not asked for again. Nothing is the target until the user says so.
+common git directory differs from `<tool>`'s, comparing absolute paths
+(`git rev-parse --path-format=absolute --git-common-dir` in each; the bare command
+prints `.git` on both sides) — offer that project first, beside postmaster itself and
+another project. When that command fails the session stands in no project: offer
+postmaster itself or another project. From the postmaster checkout itself, nothing is
+offered ahead of postmaster itself. A project the user has already named is not asked
+for again. Nothing is the target until the user says so.
 Do the finding for them:
 
 ```sh
