@@ -277,10 +277,7 @@ model = "model-a"
 
 describe("review round 1: malformed reviewers and postmaster attribution", () => {
   test("a reviewers list holding a non-string is not set up and names it", () => {
-    const team = TEAM_FULL.replace(
-      'reviewers = ["alpha", "beta"]',
-      'reviewers = ["alpha", 7]',
-    );
+    const team = TEAM_FULL.replace('reviewers = ["alpha", "beta"]', 'reviewers = ["alpha", 7]');
     const s = stage({ config: `${LANES}\n${team}` });
     try {
       const r = checkSetup(s.repo, s.configPath, s.bin);
