@@ -22,7 +22,8 @@
 //              launch either way
 //   --timeout  seconds to wait for the session (default 3600, at most 9 digits)
 //
-//   exit 0  prompt printed; make: the session ended with no wall and HANDOVER.md present
+//   exit 0  prompt printed; make: HANDOVER.md validated, the interactive session
+//           left open in its tab, the headless one ended with no wall
 //   exit 1  make failed: the launch would not start, the session was still running at the
 //           limit, both roles walled, the handover, commit or verifier is missing, or the
 //           action was not logged
@@ -820,11 +821,23 @@ function runMakeLaunches(
   }
   logInteractive(dispatch, req.surface, branch, handle, "");
   if (!waitForHandover(wt, cutAt, req.timeout)) {
-    throw new RunError(
-      `the verifier session is still running after ${req.timeout} seconds; it was left open in ${handle}`,
-    );
+    const failed =
+      `the verifier session is still running after ${req.timeout} seconds; it was left open in ${handle}`;
+    logInteractive(dispatch, req.surface, branch, handle, failed);
+    throw new RunError(failed);
   }
-  validateSession(wt, base, branch, vdir, cutAt);
+  try {
+    validateSession(wt, base, branch, vdir, cutAt);
+  } catch (e) {
+    logInteractive(
+      dispatch,
+      req.surface,
+      branch,
+      handle,
+      e instanceof Error ? e.message : String(e),
+    );
+    throw e;
+  }
   for (const line of [
     `branch ${branch}`,
     `base ${base}`,
