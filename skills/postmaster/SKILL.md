@@ -36,39 +36,6 @@ again.
 
 [Why a skill is a link, and the repo is found from it](../../wiki/concepts/skill-links.md)
 
-## Next: establish the preconditions yourself
-
-You are reached two ways, and they arrive in different states. A session opened in this repo
-comes through `AGENTS.md`, which may already have set the machine up and chosen a target.
-Someone typing `/postmaster` arrives cold. **Assume neither. Check.**
-
-Read `~/.postmaster/config.toml` with your file-reading tools — a missing file means the
-machine is not set up — then:
-
-```sh
-<tool>/scripts/run link-skills --check
-```
-
-Report the link check with the config status. It names every missing or blocked link and
-prints the install command, `<tool>/scripts/run link-skills`; the check never installs or
-changes anything. Keep installation on the user's word. When links are missing and the config
-is present, offer that command; for a missing config, follow the setup section of
-`<tool>/AGENTS.md`.
-
-**No config: stop and set the machine up first**, in conversation, per the setup section of
-`<tool>/AGENTS.md`; each path there is relative to `<tool>`. Do not continue to target
-selection: every later step reads the config for the team, the tracker and the merge word,
-and without it the launch card cannot be filled. Come back here when it is written.
-
-**Config present, and this session has already chosen and verified a target:** skip to
-"Work out what the project needs" and do not ask again.
-
-**Config present, no target yet:** carry on below.
-
-Say which of these you found, in one line, before doing anything else — including any
-missing skill links.
-A session that cannot tell whether it is setting up or dispatching is one nobody can follow.
-
 ## Choose the target project
 
 **First ask whether to work on postmaster itself or on another project, before any config
