@@ -682,6 +682,25 @@ const GIT_ENV_KEYS = [
   "GIT_NAMESPACE",
 ] as const;
 
+// Whether a .git entry exists at the directory or any ancestor: git discovery
+// would find a repository here, so a failed rev-parse is a refusal, not a
+// missing repository. An unreadable directory fails closed.
+const hasGitEntry = (dir: string): boolean => {
+  let current = dir;
+  for (;;) {
+    let entries: string[];
+    try {
+      entries = readdirSync(current);
+    } catch {
+      return true;
+    }
+    if (entries.includes(".git")) return true;
+    const parent = dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
+};
+
 export const isTracked = (repo: string, file: string): boolean => {
   const env: Record<string, string | undefined> = {};
   for (const k of GIT_ENV_KEYS) env[k] = undefined;
@@ -694,13 +713,16 @@ export const isTracked = (repo: string, file: string): boolean => {
   });
   if (r.code === 0) return true;
   if (r.code !== 1) {
-    // git could not answer: fail closed, unless the directory is not a
-    // repository at all, where no file can be tracked. --show-toplevel needs
-    // no index, so it still answers when the index is unreadable; when it
-    // fails too, git itself is missing or broken, which also fails closed.
+    // git could not answer: fail closed, unless the directory is cleanly not
+    // a repository, where no file can be tracked. --show-toplevel needs no
+    // index, so it still answers when the index is unreadable; when it fails
+    // too, a .git entry anywhere up-tree means git refused (ownership,
+    // permissions, a broken .git), which fails closed, and only its absence
+    // reads as untracked. A missing git with a repository present fails
+    // closed; with no repository there is nothing to be tracked in.
     const top = run("git", ["-C", repo, "rev-parse", "--show-toplevel"], { env });
     if (top.code === 0) return true;
-    return run("git", ["--version"], { env }).code !== 0;
+    return hasGitEntry(repo);
   }
   // Exit 1 is "did not match": untracked only when the file is positively the
   // person's own. A file inside a submodule is absent from the superproject's
