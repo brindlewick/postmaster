@@ -63,7 +63,7 @@ describe("C1: the project's checks decide", () => {
       expect(r.out).toBe("refuse: verify-cli lands nothing: checks failed (gate: fail)\n");
       const log = gateLogOf(dispatch);
       expect(log).toContain("verify-app/helper.ts");
-      expect(log).toMatch(/format/i);
+      expect(log).toMatch(/format/iu);
       expect(branchHasFile(repo, "main", "verify-app/README.md")).toBe(false);
     } finally {
       cleanup(dir);
@@ -303,7 +303,7 @@ describe("C4: a verifier that fails its proof is left out", () => {
         "left out: cli (no proof file)";
       expect(r.code).toBe(0);
       expect(r.out.split("\n")[0]).toBe(want);
-      expect(r.out.split("\n")[1]).toMatch(/^merge: verify-both into main \([0-9a-f]+\)$/);
+      expect(r.out.split("\n")[1]).toMatch(/^merge: verify-both into main \([0-9a-f]+\)$/u);
       expect(branchHasFile(repo, "main", "verify-app/web/README.md")).toBe(true);
       expect(branchHasFile(repo, "main", "verify-app/README.md")).toBe(true);
       expect(branchHasFile(repo, "main", "verify-app/cli/README.md")).toBe(false);
@@ -586,7 +586,7 @@ describe("the session instructions carry the landable hand-over shape", () => {
       expect(r.out).toContain("## Verifier:");
       expect(r.out).toContain("Folder:");
       expect(r.out).toContain("Proof:");
-      expect(r.out).toMatch(/remove its folder/i);
+      expect(r.out).toMatch(/remove its folder/iu);
     } finally {
       cleanup(dir);
     }
