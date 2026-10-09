@@ -928,7 +928,9 @@ function setupKeepingDouble(name: string): {
   writeFileSync(join(bin, "gh"), STUB_GH_KEEPING);
   chmodSync(join(bin, "gh"), 0o755);
   if (run("git", ["init", "-q", repoGh]).code !== 0) throw new Error("git init failed");
-  if (run("git", ["-C", repoGh, "remote", "add", "origin", "https://github.com/o/r.git"]).code !== 0)
+  if (
+    run("git", ["-C", repoGh, "remote", "add", "origin", "https://github.com/o/r.git"]).code !== 0
+  )
     throw new Error("git remote add failed");
   const cfg = join(dir, "config.toml");
   writeFileSync(cfg, '[tracker]\nkind = "github"\n');
@@ -1005,9 +1007,7 @@ function bodyWrites(stub: string, n: number): number {
   }
   const needle1 = `[${n}]`;
   const needle2 = "[--body-file]";
-  return log
-    .split("\n")
-    .filter((l) => l.includes(needle1) && l.includes(needle2)).length;
+  return log.split("\n").filter((l) => l.includes(needle1) && l.includes(needle2)).length;
 }
 
 function readCount(stub: string): number {
