@@ -657,11 +657,11 @@ function promptedArgv(promptFile: string, idx: number, cmd: string[]): string[] 
  * script target itself; spawning the shell routes around that, and PWD and
  * OLDPWD ride the inherited environment as in the sourced forms. */
 function directArgv(level: string | undefined, cmd: string[]): string[] {
-  // TEMP-DIAG-R6 v2: fork instead of exec, to split exec from env. Removed
-  // before the card, whatever it proves.
+  // TEMP-DIAG-R6 v3: the with-file tail with no env binary and no exec, SHLVL
+  // verbatim set or unset. Removed or reworked before the card.
   return [
     "-c",
-    'e=$(command -v env); s=$1; l=$2; shift 2; if [ "$s" = set ]; then "${e:-/usr/bin/env}" "SHLVL=$l" "$@"; s=$?; exit $s; else "${e:-/usr/bin/env}" -u SHLVL "$@"; s=$?; exit $s; fi',
+    'if [ "$1" = set ]; then SHLVL=$2; export SHLVL; else unset SHLVL; fi; shift 2; "$@"; s=$?; exit $s',
     "_",
     level === undefined ? "unset" : "set",
     level ?? "",
@@ -1951,10 +1951,12 @@ exit "$rc"
   })();
   // Machine time, not the tests' clock: it is compared against file mtimes.
   const launchedAt = Date.now();
-  // TEMP-DIAG-R6, removed before the card: a 3-bit diagnosis of the handed
-  // OLDPWD rides one extra variable into the harness, so the mac parity
-  // messages carry it: 4 = the snapshot's OLDPWD equals `from`, 2 = `from`
-  // is non-empty, 1 = process.env holds OLDPWD at the spawn.
+  // TEMP-DIAG-R6, removed before the card: the diagnosis rides extra
+  // variables into the harness, so the mac parity messages carry it. DIAG_R6
+  // is 3 bits: 4 = the snapshot's OLDPWD equals `from`, 2 = `from` is
+  // non-empty, 1 = process.env holds OLDPWD at the spawn. DIAG_FROM is
+  // `from` itself (its digest length names it); DIAG_FROM_X says whether
+  // `from` exists.
   const diagSnap: Record<string, string | undefined> = freshShell
     ? { ...process.env, SHLVL: undefined }
     : { ...process.env };
@@ -1962,6 +1964,7 @@ exit "$rc"
     (diagSnap["OLDPWD"] === from && from !== "" ? 4 : 0) +
     (from !== "" ? 2 : 0) +
     ("OLDPWD" in process.env ? 1 : 0);
+  const diagFromX = from !== "" && existsSync(from) ? "1" : "0";
   const child = spawnSync(cmd, cmdArgs, {
     stdio: STDIN_FILE ? ["ignore", "inherit", "inherit"] : ["inherit", "inherit", "inherit"],
     // Raw bytes, as main's `exec < file` hands them: no UTF-8 decode.
@@ -1972,7 +1975,7 @@ exit "$rc"
     // after the cd pair is re-set above. The bare launch runs under a shell
     // too (directArgv): Bun on macOS drops the handed OLDPWD when it spawns
     // a script target itself, and the snapshot alone did not survive that.
-    env: { ...diagSnap, DIAG_R6: String(diagBits) },
+    env: { ...diagSnap, DIAG_FROM: from, DIAG_FROM_X: diagFromX, DIAG_R6: String(diagBits) },
   });
   let rc =
     child.status !== null && child.status !== undefined
