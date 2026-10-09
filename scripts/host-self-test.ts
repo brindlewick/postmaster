@@ -6723,9 +6723,9 @@ function value(text: string, path: string[]): string {
 }
 
 function worktreeSpace(text: string, path: string): string {
-  const worktrees = at(parseJson(text), ["result", "worktrees"]);
+  const worktrees = at<Record<string, unknown>[]>(parseJson(text), ["result", "worktrees"]);
   if (!Array.isArray(worktrees)) return "";
-  const worktree = worktrees.find((entry: Record<string, unknown>) => entry.path === path);
+  const worktree = worktrees.find((entry) => entry.path === path);
   return (worktree?.open_workspace_id ?? "") as string;
 }
 
