@@ -99,6 +99,7 @@ const main = (argv: readonly string[]): void => {
       "places_here",
       "holder_tags",
       "file_share_first",
+      "file_share_within_first",
       "file_share_every",
       "description",
     ],
@@ -139,19 +140,12 @@ const main = (argv: readonly string[]): void => {
       const base = [f.key, f.run, f.round, f.sev, f.location, f.snapshot, loc.kind];
       const data = loc.kind === "ts-line" ? output.get(loc.file) : undefined;
       if (data === undefined) {
+        // the columns between in_scope and description are empty for a finding with no function
+        const empties = (joinRows[0] as unknown[]).length - base.length - 2;
         joinRows.push([
           ...base,
           loc.kind === "ts-line" ? "no" : "n/a",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
+          ...Array.from({ length: empties }, () => ""),
           f.description,
         ]);
         continue;
@@ -177,6 +171,7 @@ const main = (argv: readonly string[]): void => {
           .join(" "),
         j.holderTags.join(","),
         (row.linesInFirst / Math.max(1, row.nonblank)).toFixed(4),
+        (row.linesWithinFirst / Math.max(1, row.nonblank)).toFixed(4),
         (row.linesInEvery / Math.max(1, row.nonblank)).toFixed(4),
         f.description,
       ]);

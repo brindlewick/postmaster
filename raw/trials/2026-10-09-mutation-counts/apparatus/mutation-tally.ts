@@ -12,7 +12,10 @@ import {
   holderOf,
   inFirstCount,
   isWithin,
+  kappa,
+  mulberry32,
   tagsWithin,
+  wilson,
 } from "./mutation-core.ts";
 
 /** One change as the rule reports it. */
@@ -118,6 +121,8 @@ export type FileRow = Readonly<{
   every: number;
   /** non-blank lines whose innermost function holds a place of the first count */
   linesInFirst: number;
+  /** non-blank lines whose innermost function holds such a place or has one nested inside it */
+  linesWithinFirst: number;
   /** non-blank lines whose innermost function holds any change at all */
   linesInEvery: number;
   byRoot: Readonly<Record<string, number>>;
@@ -133,14 +138,25 @@ export const fileRow = (
   const everyFns = new Set(rows.map((r) => r.fn));
   const owner = paintLines(out.functions, out.lines);
   const blank = new Set(out.blank);
+  const parentOf = new Map(out.functions.map((f) => [f.id, f.parent]));
+  const withinFirst = new Set<number>();
+  for (const id of firstFns) {
+    for (let at = id; !withinFirst.has(at); at = parentOf.get(at) ?? MODULE_LEVEL) {
+      withinFirst.add(at);
+      if (at === MODULE_LEVEL) break;
+    }
+    withinFirst.add(MODULE_LEVEL);
+  }
   let nonblank = 0;
   let linesInFirst = 0;
+  let linesWithinFirst = 0;
   let linesInEvery = 0;
   for (let line = 1; line <= out.lines; line++) {
     if (blank.has(line)) continue;
     nonblank++;
     const id = owner[line] as number;
     if (firstFns.has(id)) linesInFirst++;
+    if (withinFirst.has(id)) linesWithinFirst++;
     if (everyFns.has(id)) linesInEvery++;
   }
   const byRoot: Record<string, number> = {};
@@ -156,6 +172,7 @@ export const fileRow = (
     first: rows.filter((r) => r.first).length,
     every: rows.length,
     linesInFirst,
+    linesWithinFirst,
     linesInEvery,
     byRoot,
   };
@@ -233,4 +250,86 @@ export const parseLocation = (location: string): Location => {
 export const roundLabel = (findings: readonly Finding[], snapshot: string): string => {
   const f = findings.find((x) => x.snapshot === snapshot);
   return f === undefined ? snapshot : `${f.run} r${f.round}`;
+};
+
+// ---------------------------------------------------------------- marks
+
+export type Estimate = Readonly<{
+  hits: number;
+  n: number;
+  share: number;
+  low: number;
+  high: number;
+  /** the population times the share, and times the ends of the interval */
+  estimate: number;
+  estimateLow: number;
+  estimateHigh: number;
+}>;
+
+/** How many of a population a share of a sample stands for, with the Wilson 95% interval. */
+export const estimateOf = (hits: number, n: number, population: number): Estimate => {
+  const [low, high] = wilson(hits, n);
+  const share = n === 0 ? 0 : hits / n;
+  return {
+    hits,
+    n,
+    share,
+    low,
+    high,
+    estimate: share * population,
+    estimateLow: low * population,
+    estimateHigh: high * population,
+  };
+};
+
+export type MarkTally = Readonly<{
+  n: number;
+  hazard: number;
+  harmless: number;
+  unclear: number;
+  /** places not marked hazard: harmless alone, and harmless with unclear */
+  notHazardHarmless: Estimate;
+  notHazardAll: Estimate;
+}>;
+
+export const tallyMarks = (marks: readonly string[], population: number): MarkTally => {
+  const count = (m: string): number => marks.filter((x) => x === m).length;
+  const hazard = count("hazard");
+  const harmless = count("harmless");
+  const unclear = count("unclear");
+  return {
+    n: marks.length,
+    hazard,
+    harmless,
+    unclear,
+    notHazardHarmless: estimateOf(harmless, marks.length, population),
+    notHazardAll: estimateOf(harmless + unclear, marks.length, population),
+  };
+};
+
+export type Agreement = Readonly<{
+  n: number;
+  same: number;
+  low: number;
+  high: number;
+  kappa: number;
+}>;
+
+export const agreementOf = (a: readonly string[], b: readonly string[]): Agreement => {
+  const same = a.filter((x, i) => x === b[i]).length;
+  const [low, high] = wilson(same, a.length);
+  return { n: a.length, same, low, high, kappa: kappa(a, b) };
+};
+
+/** A seeded full shuffle (Fisher-Yates from the end), for the control against chance. */
+export const shuffled = <T>(items: readonly T[], seed: number): T[] => {
+  const rand = mulberry32(seed);
+  const a = [...items];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    const held = a[i] as T;
+    a[i] = a[j] as T;
+    a[j] = held;
+  }
+  return a;
 };

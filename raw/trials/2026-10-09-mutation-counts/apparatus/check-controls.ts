@@ -6,6 +6,9 @@
 // Exits 1 when any control reads other than expected, so a drift in the rule cannot pass quietly.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { edgeTags } from "./edge-tags.ts";
+import { summarise } from "./summarise-join.ts";
+import { readInputs, report } from "./tally.ts";
 
 export const readTsv = (text: string): Record<string, string>[] => {
   const [head, ...rows] = text.split("\n").filter((l) => l !== "");
@@ -73,6 +76,39 @@ const main = (controls: string, out: string, joined: string): number => {
     [r.kind, r.in_scope, r.first_here, r.first_within, r.every_here].map(dash).join(" "),
   );
 
+  // the marks tally, run on three mark lists with the command that tallies the real marks
+  const tallies = new Map<string, Record<string, string>>();
+  for (const name of ["all-hazard", "none-hazard", "split"]) {
+    tallies.set(name, report(readInputs(join(controls, "marks", name))).summary);
+  }
+  const byTally = read(join(controls, "expected-marks.tsv")).map((row) => {
+    const got = tallies.get(row.case ?? "")?.[row.key ?? ""] ?? "(not read)";
+    return {
+      name: `${row.case} ${row.key}`,
+      expected: row.value ?? "",
+      observed: got,
+      ok: got === row.value,
+      why: row.why ?? "",
+    };
+  });
+
+  // the count of findings in flagged functions, on all the control findings and on the clean one alone
+  const summaries = new Map<string, Record<string, string>>([
+    ["all", summarise(joinRows).summary],
+    ["clean-only", summarise(joinRows.filter((r) => r.key === "control/in-clean")).summary],
+    ["edge-tags", edgeTags(places).summary],
+  ]);
+  const bySummary = read(join(controls, "expected-summary.tsv")).map((row) => {
+    const got = summaries.get(row.case ?? "")?.[row.key ?? ""] ?? "(not read)";
+    return {
+      name: `${row.case} ${row.key}`,
+      expected: row.value ?? "",
+      observed: got,
+      ok: got === row.value,
+      why: row.why ?? "",
+    };
+  });
+
   console.log("module\texpected first every\tobserved first every\tok\twhy");
   for (const r of byCount)
     console.log([r.name, r.expected, r.observed, r.ok ? "yes" : "NO", r.why].join("\t"));
@@ -84,7 +120,13 @@ const main = (controls: string, out: string, joined: string): number => {
   );
   for (const r of byJoin)
     console.log([r.name, r.expected, r.observed, r.ok ? "yes" : "NO", r.why].join("\t"));
-  const all = [...byCount, ...byTags, ...byJoin];
+  console.log("\nfindings in flagged functions\texpected\tobserved\tok\twhy");
+  for (const r of bySummary)
+    console.log([r.name, r.expected, r.observed, r.ok ? "yes" : "NO", r.why].join("\t"));
+  console.log("\nmarks tally\texpected\tobserved\tok\twhy");
+  for (const r of byTally)
+    console.log([r.name, r.expected, r.observed, r.ok ? "yes" : "NO", r.why].join("\t"));
+  const all = [...byCount, ...byTags, ...byJoin, ...bySummary, ...byTally];
   const agree = all.filter((r) => r.ok).length;
   console.log(`\ncontrols: ${agree} of ${all.length} read as expected`);
   return agree === all.length ? 0 : 1;
