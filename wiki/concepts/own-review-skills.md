@@ -113,7 +113,8 @@ run's base until another run merges. So the security lens reviews from clones cu
 decides what its scratch is. The cut, and the check before each launch, refuse a clone whose
 `origin/HEAD` does not lead back to BASE. Another run's merge moves `origin/HEAD` on but leaves
 the merge base where it was, so the skill still reviews exactly the run's change. A named range
-needs no clone, so the bug lens keeps the ordinary worktree scratch.
+needs no clone for its diff, but since #342 every lens reviews from clones, so the bug lens
+keeps a clone scratch like the rest.
 
 ## What would settle it
 
@@ -141,11 +142,12 @@ who has one. `scripts/run review-findings` turns each form's report into the fin
 `skills/postmaster/harnesses.md` records which harnesses have each skill and where each answer
 came from. The coachman launches a security lane through its skill where it has one, and from
 the brief otherwise; it launches every bug lane through `run launch review` and writes no bug
-brief. `scripts/run cut-scratch` cuts the security lens's scratches as clones, checks every
-scratch before a lane is launched into it, tells a scratch from anything else, and removes a
-scratch of either kind. `scripts/run host` hosts a clone in a space of its
-own, which it closes like a worktree's. `scripts/run reviewers` names as bug reviewers only the
-configured ones whose harness has a form; `run setup` warns when none has one; the pre-flight
-refuses a bug turnpike with no such lane. No reviewer runs the project's full gate: the
+brief. `scripts/run cut-scratch` cuts every lens's scratches as clones, the security lens's
+since this page and the rest since #342, checks every scratch before a lane is launched into
+it, tells a scratch from anything else, and removes a scratch of either kind.
+`scripts/run host` hosts a clone in a space of its own, which it closes like a worktree's.
+`scripts/run reviewers` names as bug reviewers only the configured ones whose harness has
+a form; `run setup` warns when none has one; the pre-flight refuses a bug turnpike with no
+such lane. No reviewer runs the project's full gate: the
 coachman runs it once per round on the snapshot, and a reviewer checks a finding with a
 targeted probe.
