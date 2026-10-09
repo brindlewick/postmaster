@@ -512,10 +512,16 @@ if (a[0] === "api" && a[1] === "graphql") {
     // casefold (it equates σ/ς/Σ but neither ß/s nor i/İ). Spawning the
     // same binary under the same environment is the only exact port, so
     // this runs grep itself, one marker at a time, matching on status.
-    // The markers parameter exists for the control; production passes
-    // the planted set.
+    // The haystack goes through a file, not a stdin pipe: grep -q exits
+    // on its first match, and feeding stdin to an early-exiting grep
+    // hangs the spawn under load. The markers parameter exists for the
+    // control; production passes the planted set.
     const leaks = (text: string, markers: string[] = PLANTED): string[] => {
-      return markers.filter((p) => run("grep", ["-qiF", "--", p], { input: text }).code === 0);
+      return withTempDir((dir) => {
+        const haystack = join(dir, "haystack.txt");
+        writeFileSync(haystack, text);
+        return markers.filter((p) => run("grep", ["-qiF", "--", p, haystack]).code === 0);
+      }, "tool-faults-leaks-");
     };
 
     const newrun = (project: string, ticket: string, stage: string): string => {
