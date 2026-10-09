@@ -388,16 +388,17 @@ function markAdapterTicket(
     const freshLive = readViaAdapter(repo, id, kind);
     const signedBody = draftFile ? body : stored;
     const diffs: string[] = [];
-    if (didWriteBody) {
-      const freshStored = stripOneNewline(freshBodyRaw);
-      if (freshStored !== signedBody) {
-        const d = firstDifferingLine(signedBody, freshStored);
-        const aDisp = d.aLine === undefined ? "(no line)" : JSON.stringify(d.aLine);
-        const bDisp = d.bLine === undefined ? "(no line)" : JSON.stringify(d.bLine);
-        diffs.push(`the body differs at line ${d.line} (signed ${aDisp} vs stored ${bDisp})`);
-      }
-    } else if (freshBodyRaw !== stored) {
-      die("the ticket changed while it was being marked; run mark again");
+    // On either path the stored bytes are the raw read with the one newline
+    // read --body adds taken off: the draft when the mark wrote, else the
+    // bytes the mark started from. A difference names its first line, so a
+    // refusal on a mark that wrote nothing says as much as one that wrote.
+    const freshStored = stripOneNewline(freshBodyRaw);
+    const expectStored = didWriteBody ? signedBody : stripOneNewline(stored);
+    if (freshStored !== expectStored) {
+      const d = firstDifferingLine(expectStored, freshStored);
+      const aDisp = d.aLine === undefined ? "(no line)" : JSON.stringify(d.aLine);
+      const bDisp = d.bLine === undefined ? "(no line)" : JSON.stringify(d.bLine);
+      diffs.push(`the body differs at line ${d.line} (signed ${aDisp} vs stored ${bDisp})`);
     }
     if (freshLive.title !== title) {
       diffs.push(
