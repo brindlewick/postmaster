@@ -6,12 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./lib/proc.ts";
-import {
-  commitAll,
-  gitOrThrow,
-  initRepo,
-  writeRepoFile,
-} from "./acceptance-323.ts";
+import { commitAll, gitOrThrow, initRepo, writeRepoFile } from "./acceptance-323.ts";
 import {
   defaultBase,
   isSurface,

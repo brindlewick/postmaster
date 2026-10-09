@@ -63,9 +63,7 @@ export interface ParsedMake {
   timeout: number;
 }
 
-export type Parsed =
-  | { ok: true; req: ParsedPrompt | ParsedMake }
-  | { ok: false; error: string };
+export type Parsed = { ok: true; req: ParsedPrompt | ParsedMake } | { ok: false; error: string };
 
 export function parseArgs(argv: string[]): Parsed {
   const cmd = argv[0];
@@ -220,7 +218,9 @@ function isRepo(repo: string): boolean {
 }
 
 function branchTaken(repo: string, name: string): boolean {
-  return run("git", ["-C", repo, "show-ref", "--verify", "--quiet", `refs/heads/${name}`]).code === 0;
+  return (
+    run("git", ["-C", repo, "show-ref", "--verify", "--quiet", `refs/heads/${name}`]).code === 0
+  );
 }
 
 function readTemplate(): string {
@@ -318,13 +318,7 @@ function launchAndWait(o: {
       `the host would not start the ${o.role} session: ${fileText(errFile) || started.err.trim() || `exit ${started.code}`}`,
     );
   }
-  const waited = run(RUN, [
-    "wait-for-markers",
-    o.logs,
-    basename(marker),
-    "1",
-    String(o.timeout),
-  ]);
+  const waited = run(RUN, ["wait-for-markers", o.logs, basename(marker), "1", String(o.timeout)]);
   if (waited.code === 3) {
     run(RUN, ["host", "stop", o.wt]);
     throw new RunError(
@@ -332,7 +326,9 @@ function launchAndWait(o: {
     );
   }
   if (waited.code !== 0) {
-    throw new RunError(`waiting for the ${o.role} session failed: ${waited.err.trim() || waited.out.trim()}`);
+    throw new RunError(
+      `waiting for the ${o.role} session failed: ${waited.err.trim() || waited.out.trim()}`,
+    );
   }
   const wallDetail = wallForRole(readActionLines(o.dispatch).slice(before), o.role);
   const id = run(RUN, ["launch", "thread-id", stream]);
@@ -347,8 +343,16 @@ function launchAndWait(o: {
 
 function logLaunch(dispatch: string, surface: string, branch: string, a: Attempt): void {
   const detail = `thread ${a.thread} role ${a.role} branch ${branch}${a.walled ? " walled" : ""}`;
-  const r = run(RUN, ["log-action", dispatch, "coachman", "dispatch", `verifier-${surface}`, detail]);
-  if (r.code !== 0) throw new RunError(`the launch was not logged: ${r.err.trim() || r.out.trim()}`);
+  const r = run(RUN, [
+    "log-action",
+    dispatch,
+    "coachman",
+    "dispatch",
+    `verifier-${surface}`,
+    detail,
+  ]);
+  if (r.code !== 0)
+    throw new RunError(`the launch was not logged: ${r.err.trim() || r.out.trim()}`);
 }
 
 function runMake(req: ParsedMake): number {
