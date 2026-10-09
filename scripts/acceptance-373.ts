@@ -27,8 +27,10 @@ export const STUB_SCRIPT = join(HERE, "host-self-test.ts");
 
 // The tools a stubbed host call may use: bun for scripts/run, sh and bash for
 // the wrappers, git for the stub's worktree answers, env and dirname for the
-// wrapper itself, cksum for long handles. No herdr, no tmux but the stubs.
-export const SYS_TOOLS = ["bun", "bash", "sh", "git", "env", "dirname", "cksum"];
+// wrapper itself, cksum for long handles, ps and sysctl for the process
+// readings macOS takes through them instead of /proc. No herdr, no tmux but
+// the stubs.
+export const SYS_TOOLS = ["bun", "bash", "sh", "git", "env", "dirname", "cksum", "ps", "sysctl"];
 
 export interface Fx {
   root: string;
