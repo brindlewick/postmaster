@@ -922,16 +922,17 @@ describe("the round's three steps", () => {
         expect(of(calls, "reviewers").map((c) => c.args[2])).toEqual(["style", "bug", "security"]);
         const cuts = of(calls, "cut-scratch");
         expect(cuts.length).toBe(3);
-        const security = cuts.find((c) => c.args.includes("--clone"));
-        expect(security?.args).toEqual([
-          p.repo,
-          p.synthesis,
-          join(p.repo, ".worktrees", "T-1-rev-security-luna"),
-          "SNAP",
-          "--clone",
-          "BASESHA",
-        ]);
-        expect(cuts.filter((c) => c.args.includes("--clone")).length).toBe(1);
+        for (const lens of ["style", "bug", "security"]) {
+          const cut = cuts.find((c) => c.args[2] === join(p.repo, ".worktrees", `T-1-rev-${lens}-luna`));
+          expect(cut?.args).toEqual([
+            p.repo,
+            p.synthesis,
+            join(p.repo, ".worktrees", `T-1-rev-${lens}-luna`),
+            "SNAP",
+            "--clone",
+            "BASESHA",
+          ]);
+        }
       }, "review-round-cut-");
     });
 
@@ -1134,6 +1135,7 @@ describe("the round's three steps", () => {
         const startAt = calls.findIndex((c) => c.name === "review-round" && c.args[0] === "start");
         const checks = of(calls, "cut-scratch").filter((c) => c.args[0] === "--check");
         expect(checks.length).toBe(3);
+        expect(checks.every((c) => c.args.includes("--clone"))).toBe(true);
         expect(checks.every((c) => calls.indexOf(c) < startAt)).toBe(true);
         const runs = of(calls, "host").filter((c) => c.args[0] === "run");
         expect(runs.length).toBe(3);

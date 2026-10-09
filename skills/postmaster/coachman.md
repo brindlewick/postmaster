@@ -856,9 +856,9 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    then, per scratch: one left behind by an interrupted round has its changed tracked files
    printed as `LEFT BEHIND AND MODIFIED, <dest>: <file>` and is torn down alone, a teardown
    that fails stopping the cut, and the scratch is cut at the snapshot, from a clone with
-   `--clone <BASE>` under the security lens. A scratch that will not cut prints
-   `SCRATCH BROKEN: ...` and the cut goes on. The coachman runs the project's recorded checks
-   once on the snapshot; reviewers do not build or run them.
+   `--clone <BASE>` under every lens. Every lens reviews from clones. A scratch that will not
+   cut prints `SCRATCH BROKEN: ...` and the cut goes on. The coachman runs the project's
+   recorded checks once on the snapshot; reviewers do not build or run them.
 
    Never install into a scratch. If the synthesis worktree has no installed dependencies,
    install there first and clone from it. Every reviewer reviews from a scratch, never from the
@@ -870,8 +870,8 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    own security-review skill (`launch skill <lane> security-review --run <dispatch>`: exit 0 is
    the skill's prompt, exit 3 a copy of the lens's file, and any other exit stopping the round
    with `NO SECURITY PROMPT FOR <lane>` and nothing launched) — then checks every scratch with
-   `cut-scratch --check`, at the snapshot and, under the security lens, a clone whose
-   `origin/HEAD` leads back to BASE. It launches nothing if one fails, with
+   `cut-scratch --check`, at the snapshot and a clone whose `origin/HEAD` leads back to BASE,
+   under every lens. It launches nothing if one fails, with
    `SCRATCH NOT READY: <TICKET>-rev-<lens>-<lane>` and nothing launched; then it starts the
    round, a round that will not start stopping it, which clears its markers and fixes its
    deadline, and starts every reviewer under

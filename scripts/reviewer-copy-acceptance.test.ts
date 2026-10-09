@@ -29,9 +29,9 @@ const HARNESS = "skills/postmaster/harnesses.md";
 const HOSTS = "skills/postmaster/hosts.md";
 const WIKI = "wiki/concepts/own-review-skills.md";
 
-const PIN_CUT = 'cut-scratch <repo> <synthesis-wt> "$DEST" "$SNAP" --clone <BASE>';
-const PIN_CHECK =
-  'cut-scratch --check <repo>/.worktrees/<TICKET>-rev-$LENS-$L "$SNAP" --clone <BASE>';
+const PIN_CUT =
+  "the scratch is cut at the snapshot, from a clone with `--clone <BASE>` under every lens";
+const PIN_CHECK = "checks every scratch with `cut-scratch --check`";
 const PIN_TABLE = "a clone of the repository under every lens";
 const PIN_BRIEF = "its own disposable copy of the repository";
 const PIN_EVERY = "Every lens reviews from clones";
@@ -59,8 +59,8 @@ function plantClean(dir: string): void {
       `${PIN_BRIEF} with dependencies installed.\n` +
       `${PIN_EVERY}, each a repository of its own.\n` +
       `The command first checks every scratch: at the snapshot, ${PIN_PROSE}.\n` +
-      `Run ${PIN_CUT} to cut it.\n` +
-      `Run ${PIN_CHECK} before launching.\n`,
+      `The cut: ${PIN_CUT}.\n` +
+      `The launch ${PIN_CHECK}.\n`,
   );
   writeFileSync(
     join(dir, HARNESS),
@@ -119,7 +119,7 @@ function dropPin(dir: string, file: string, pin: string): string {
   rmSync(one, { recursive: true, force: true });
   cpSync(oclean, one, { recursive: true });
   const p = join(one, file);
-  writeFileSync(p, readFileSync(p, "utf8").replace(pin, "REWORDED"));
+  writeFileSync(p, readFileSync(p, "utf8").replaceAll(pin, "REWORDED"));
   return one;
 }
 

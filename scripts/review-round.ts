@@ -477,13 +477,7 @@ export function cutRound(a: StepArgs, deps: StepDeps): StepResult {
           return res;
         }
       }
-      const cut = deps.tool("cut-scratch", [
-        a.repo,
-        a.synthesis,
-        dest,
-        snap,
-        ...(lens === "security" ? ["--clone", base] : []),
-      ]);
+      const cut = deps.tool("cut-scratch", [a.repo, a.synthesis, dest, snap, "--clone", base]);
       passOut(res, cut);
       passErr(res, cut);
       if (cut.code !== 0) {
@@ -563,12 +557,7 @@ export function launchRound(a: StepArgs, deps: StepDeps): StepResult {
   for (const [lens, lanes] of lenses) {
     for (const lane of lanes) {
       const dest = scratchPath(a.repo, ticket, lens, lane);
-      const check = deps.tool("cut-scratch", [
-        "--check",
-        dest,
-        snap,
-        ...(lens === "security" ? ["--clone", base] : []),
-      ]);
+      const check = deps.tool("cut-scratch", ["--check", dest, snap, "--clone", base]);
       if (check.code !== 0) {
         passOut(res, check);
         passErr(res, check);
