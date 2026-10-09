@@ -8,8 +8,10 @@
 # never a script name, flag or file the lanes chose. The runbook check is found
 # by reading package.json's check line and running each scripts/run step in it
 # except wiki-lint, so the oracle works whether the lane extended skill-refs or
-# wrote a new script. Nothing is planted in the worktree: every planting goes to
-# a scratch copy, as the ticket requires.
+# wrote a new script. skip-check is excepted too: it audits the suite's skips
+# on a live checkout, not the runbooks, and the suite cannot run in a scratch
+# copy (no git, no node_modules). Nothing is planted in the worktree: every
+# planting goes to a scratch copy, as the ticket requires.
 #
 # Three checks have no oracle coverage here. C5's full gate is the harvest's own
 # `verify run` on each lane; the oracle only runs the check steps on the
@@ -56,6 +58,7 @@ while IFS= read -r seg; do
   if [ -z "$seg" ]; then continue; fi
   case "$seg" in
     *wiki-lint*) continue ;;
+    *skip-check*) continue ;;
     *scripts/run*) printf '%s\n' "$seg" >> "$WORK/segments.txt" ;;
     bun\ scripts/*.ts*)
       case "$seg" in
