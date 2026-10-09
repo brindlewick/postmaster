@@ -1,5 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { cleanupScratch, commit, email, gitAt, initRepo, runScript } from "./scrub-test-kit.ts";
 
@@ -240,4 +247,114 @@ test("tree check scans modified raw blobs like added ones", () => {
   const checked = runScript("tree-check", [base, "HEAD"], repo);
   expect(checked.status).toBe(1);
   expect(checked.stdout).toContain("raw/record.jsonl:2: encrypted-reasoning");
+});
+
+test("tree check scans a raw file whose git type changes", () => {
+  // Review round 11 (bug-58): the intake took only A and M, so a raw/
+  // symlink replaced by a regular file (status T) passed both gates.
+  const repo = initRepo();
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  mkdirSync(join(repo, "raw"));
+  symlinkSync("/nonexistent-target", join(repo, "raw", "record.jsonl"));
+  gitAt(repo, ["add", "raw/record.jsonl"]);
+  commit(repo, "link the record");
+  unlinkSync(join(repo, "raw", "record.jsonl"));
+  const live = ["sealed", "blob"].join("");
+  writeFileSync(
+    join(repo, "raw", "record.jsonl"),
+    `${JSON.stringify({ encrypted_content: live })}\n`,
+  );
+  gitAt(repo, ["add", "raw/record.jsonl"]);
+  commit(repo, "replace the link with a record");
+  expect(gitAt(repo, ["diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD"])).toMatch(
+    /^T\traw\/record\.jsonl$/mu,
+  );
+  const checked = runScript("tree-check", [base, "HEAD"], repo);
+  expect(checked.status).toBe(1);
+  expect(checked.stdout).toContain("raw/record.jsonl:1: encrypted-reasoning");
+});
+
+test("tree check scans a staged raw file whose git type changes", () => {
+  // Review round 11 (bug-58): the staged intake had the same A/M-only
+  // filter as the committed one; both take T through one predicate.
+  const repo = initRepo();
+  mkdirSync(join(repo, "raw"));
+  symlinkSync("/nonexistent-target", join(repo, "raw", "record.jsonl"));
+  gitAt(repo, ["add", "raw/record.jsonl"]);
+  commit(repo, "link the record");
+  unlinkSync(join(repo, "raw", "record.jsonl"));
+  const live = ["sealed", "blob"].join("");
+  writeFileSync(
+    join(repo, "raw", "record.jsonl"),
+    `${JSON.stringify({ encrypted_content: live })}\n`,
+  );
+  gitAt(repo, ["add", "raw/record.jsonl"]);
+  const checked = runScript("tree-check", ["HEAD", "HEAD"], repo);
+  expect(checked.status).toBe(1);
+  expect(checked.stdout).toContain("raw/record.jsonl:1: encrypted-reasoning");
+});
+
+test("tree check scans a renamed raw file through its added side", () => {
+  // Review round 11 (bug-58): with rename detection off a rename is D+A
+  // and the added side carries the blob; R itself never appears.
+  const repo = initRepo();
+  mkdirSync(join(repo, "raw"));
+  const live = ["sealed", "blob"].join("");
+  writeFileSync(
+    join(repo, "raw", "old.jsonl"),
+    `${JSON.stringify({ encrypted_content: live })}\n`,
+  );
+  gitAt(repo, ["add", "raw/old.jsonl"]);
+  const added = commit(repo, "add the record");
+  gitAt(repo, ["mv", "raw/old.jsonl", "raw/new.jsonl"]);
+  commit(repo, "rename the record");
+  const renamed = runScript("tree-check", [added, "HEAD"], repo);
+  expect(renamed.status).toBe(1);
+  expect(renamed.stdout).toContain("raw/new.jsonl:1: encrypted-reasoning");
+});
+
+test("tree check passes a raw file deleted with no new blob", () => {
+  // Review round 11 (bug-58): D removes content, so there is nothing to
+  // scan; the deletion itself is clean (the addition still flags).
+  const repo = initRepo();
+  mkdirSync(join(repo, "raw"));
+  const live = ["sealed", "blob"].join("");
+  writeFileSync(
+    join(repo, "raw", "record.jsonl"),
+    `${JSON.stringify({ encrypted_content: live })}\n`,
+  );
+  gitAt(repo, ["add", "raw/record.jsonl"]);
+  const added = commit(repo, "add the record");
+  gitAt(repo, ["rm", "-q", "raw/record.jsonl"]);
+  commit(repo, "delete the record");
+  const deleted = runScript("tree-check", [added, "HEAD"], repo);
+  expect(deleted.status).toBe(0);
+  expect(deleted.stdout).toBe("");
+});
+
+test("tree check leaves an unmerged staged path alone", () => {
+  // Review round 11 (bug-58): U has no staged blob and git blocks the
+  // commit, so there is nothing to scan and nothing to refuse.
+  const repo = initRepo();
+  mkdirSync(join(repo, "raw"));
+  writeFileSync(join(repo, "raw", "record.jsonl"), '{"note": "clean"}\n');
+  gitAt(repo, ["add", "raw/record.jsonl"]);
+  commit(repo, "add the record");
+  gitAt(repo, ["switch", "-q", "-c", "side"]);
+  writeFileSync(join(repo, "raw", "record.jsonl"), '{"note": "side"}\n');
+  gitAt(repo, ["add", "raw/record.jsonl"]);
+  commit(repo, "side edit");
+  gitAt(repo, ["switch", "-q", "main"]);
+  writeFileSync(join(repo, "raw", "record.jsonl"), '{"note": "main"}\n');
+  gitAt(repo, ["add", "raw/record.jsonl"]);
+  commit(repo, "main edit");
+  try {
+    gitAt(repo, ["merge", "--no-ff", "--no-commit", "side"]);
+  } catch {
+    // The conflict is the fixture.
+  }
+  expect(gitAt(repo, ["ls-files", "-u"])).toContain("raw/record.jsonl");
+  const checked = runScript("tree-check", ["HEAD", "HEAD"], repo);
+  expect(checked.status).toBe(0);
+  expect(checked.stdout).toBe("");
 });

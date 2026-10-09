@@ -8,6 +8,7 @@ import {
   openSync,
   readFileSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
   writeSync,
 } from "node:fs";
@@ -846,3 +847,42 @@ test("C27 --files and raw promotion stream a 175 MB file below 512 MB", () => {
   const wholeRead = withinLimit(process.execPath, [join(scratchDir(), "whole-read.ts"), file]);
   expect(wholeRead.status).not.toBe(0);
 }, 600_000);
+
+test("range scan sees values through a typechange, a rename and never a bare deletion", () => {
+  // Review round 11 (bug-58): the patch intake already sees every status
+  // that carries content; this pins T, R-as-D+A and the D negative.
+  const typeRepo = initRepo();
+  const typeBase = gitAt(typeRepo, ["rev-parse", "HEAD"]);
+  symlinkSync("/nonexistent-target", join(typeRepo, "note.txt"));
+  gitAt(typeRepo, ["add", "note.txt"]);
+  commit(typeRepo, "link the note");
+  unlinkSync(join(typeRepo, "note.txt"));
+  const value = email();
+  writeFileSync(join(typeRepo, "note.txt"), `contact ${value}\n`);
+  gitAt(typeRepo, ["add", "note.txt"]);
+  const changed = commit(typeRepo, "replace the link with a note");
+  const typed = runScript("scrub-check", [typeBase, "HEAD"], typeRepo);
+  expect(typed.status).toBe(1);
+  expect(typed.stdout.trim()).toBe(`${changed}:note.txt:1: email`);
+  expect(typed.stdout.includes(value)).toBe(false);
+
+  const renameRepo = initRepo();
+  writeFileSync(join(renameRepo, "old.txt"), `contact ${email()}\n`);
+  gitAt(renameRepo, ["add", "old.txt"]);
+  const added = commit(renameRepo, "add the note");
+  gitAt(renameRepo, ["mv", "old.txt", "new.txt"]);
+  commit(renameRepo, "rename the note");
+  const renamed = runScript("scrub-check", [added, "HEAD"], renameRepo);
+  expect(renamed.status).toBe(1);
+  expect(renamed.stdout).toMatch(/new\.txt:1: email$/mu);
+
+  const deleteRepo = initRepo();
+  writeFileSync(join(deleteRepo, "note.txt"), `contact ${email()}\n`);
+  gitAt(deleteRepo, ["add", "note.txt"]);
+  const dirty = commit(deleteRepo, "add the note");
+  gitAt(deleteRepo, ["rm", "-q", "note.txt"]);
+  commit(deleteRepo, "delete the note");
+  const deleted = runScript("scrub-check", [dirty, "HEAD"], deleteRepo);
+  expect(deleted.status).toBe(0);
+  expect(deleted.stdout).toBe("");
+});

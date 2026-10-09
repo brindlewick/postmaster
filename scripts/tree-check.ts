@@ -130,6 +130,21 @@ function blobId(root: string, rev: string, path: string): string | null {
   }
 }
 
+// Statuses whose new blob must scan, shared by the committed and staged
+// intakes so they cannot split again. A and M carry new content; T
+// (typechange) carries a new blob behind the same path. D removes
+// content, so there is nothing to scan. U has no staged blob and git
+// blocks the commit, so there is nothing to scan and nothing to
+// refuse. R and C never appear (--no-renames is pinned, --find-copies
+// is never passed), and X and B are not produced; the rename test
+// pins the flags by failing if a rename ever surfaces as R. Both
+// intakes use --name-status, so only single letters occur and the
+// two-letter unmerged forms never appear.
+// Review round 11 (bug-58).
+function scansNewBlob(status: string): boolean {
+  return status === "A" || status === "M" || status === "T";
+}
+
 function commitPaths(
   root: string,
   parent: string,
@@ -181,7 +196,7 @@ export async function checkTree(root: string, base: string, head: string): Promi
           privatePaths.set(item.path, commit);
         // Additions and modifications alike: an edit can smuggle reasoning
         // into a record the promoter already wrote.
-        if ((item.status === "A" || item.status === "M") && item.path.startsWith("raw/")) {
+        if (scansNewBlob(item.status) && item.path.startsWith("raw/")) {
           // A merge repeats the other side's delta against each parent; a blob
           // identical to the range base already landed and is not new content.
           // Unresolvable blobs scan, so the comparison only skips known-same.
@@ -205,7 +220,7 @@ export async function checkTree(root: string, base: string, head: string): Promi
     const path = staged[i + 1]!;
     if (path.startsWith(".postmaster/") && path !== ".postmaster/project.toml")
       privatePaths.set(path, "staged");
-    if ((status === "A" || status === "M") && path.startsWith("raw/"))
+    if (scansNewBlob(status) && path.startsWith("raw/"))
       rawScans.push({ commit: "", path });
   }
   const failures: string[] = [];
