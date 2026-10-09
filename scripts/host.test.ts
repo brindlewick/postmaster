@@ -567,6 +567,19 @@ test("a member with a five-word start matches its process, and close refuses whi
 });
 
 describe("workhorse and stop-pidfile", () => {
+  // A status assertion that says why it failed: bun's expect takes no message
+  // argument, so the command's own output travels in a thrown error instead.
+  const expectStatus = (
+    result: { status: unknown; stdout: unknown; stderr: unknown },
+    code: number,
+  ): void => {
+    if (result.status !== code) {
+      throw new Error(
+        `exit ${String(result.status)}, want ${code}: ${String(result.stdout ?? "")}${String(result.stderr ?? "")}`,
+      );
+    }
+  };
+
   test("host workhorse composes the workhorse launch and lands its marker", async () => {
     const dir = mkdtempSync(join(tmpdir(), "host-workhorse-"));
     try {
@@ -603,7 +616,7 @@ describe("workhorse and stop-pidfile", () => {
           timeout: 30000,
         },
       );
-      expect(r.status).toBe(0);
+      expectStatus(r, 0);
       expect(existsSync(join(dispatch, "logs", "luna-events.jsonl"))).toBe(true);
       const marker = join(dispatch, "logs", "luna.done");
       const deadline = Date.now() + 20000;
@@ -640,7 +653,7 @@ describe("workhorse and stop-pidfile", () => {
         encoding: "utf8",
         timeout: 30000,
       });
-      expect(r.status).toBe(0);
+      expectStatus(r, 0);
       expect(r.stdout).toContain(`stopped the process group of ${pid}`);
       await Promise.race([exited, Bun.sleep(15000)]);
       expect(processState(pid)).not.toBe("live");
@@ -650,21 +663,21 @@ describe("workhorse and stop-pidfile", () => {
         encoding: "utf8",
         timeout: 10000,
       });
-      expect(again.status).toBe(0);
+      expectStatus(again, 0);
       expect(again.stdout).toContain("no process group");
       writeFileSync(pidfile, "not-a-pid\n");
       const bad = spawnSync(join(import.meta.dir, "run"), ["host", "stop-pidfile", pidfile], {
         encoding: "utf8",
         timeout: 10000,
       });
-      expect(bad.status).toBe(1);
+      expectStatus(bad, 1);
       expect(bad.stderr).toContain("does not hold a pid");
       const missing = spawnSync(
         join(import.meta.dir, "run"),
         ["host", "stop-pidfile", join(dir, "nowhere.pid")],
         { encoding: "utf8", timeout: 10000 },
       );
-      expect(missing.status).toBe(1);
+      expectStatus(missing, 1);
       expect(missing.stderr).toContain("no such pidfile");
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -677,7 +690,7 @@ describe("workhorse and stop-pidfile", () => {
         encoding: "utf8",
         timeout: 10000,
       });
-      expect(r.status).toBe(1);
+      expectStatus(r, 1);
       expect(r.stderr).toContain("usage: run host workhorse <dispatch> <lane> <worktree>");
     }
   }, 40000);
@@ -694,7 +707,7 @@ describe("workhorse and stop-pidfile", () => {
         encoding: "utf8",
         timeout: 10000,
       });
-      expect(r.status).toBe(1);
+      expectStatus(r, 1);
       expect(r.stderr).toContain("does not hold a pid");
       expect(processState(pid)).toBe("live");
       child.kill("SIGKILL");
@@ -718,7 +731,7 @@ describe("workhorse and stop-pidfile", () => {
         encoding: "utf8",
         timeout: 10000,
       });
-      expect(stale.status).toBe(2);
+      expectStatus(stale, 2);
       expect(stale.stderr).toContain(`${pid} sleep 300`);
       expect(processState(pid)).toBe("live");
       // The live start with a foreign boot: still not the recorded launch.
@@ -761,7 +774,7 @@ describe("workhorse and stop-pidfile", () => {
         encoding: "utf8",
         timeout: 30000,
       });
-      expect(legacy.status).toBe(0);
+      expectStatus(legacy, 0);
       expect(legacy.stdout).toContain(`stopped the process group of ${pid}`);
       await Promise.race([exited, Bun.sleep(15000)]);
       expect(processState(pid)).not.toBe("live");
@@ -794,7 +807,7 @@ describe("workhorse and stop-pidfile", () => {
         encoding: "utf8",
         timeout: 30000,
       });
-      expect(r.status).toBe(2);
+      expectStatus(r, 2);
       expect(r.stderr).toContain(`${orphan} sleep 300`);
       expect(processState(orphan)).toBe("live");
     } finally {
@@ -831,7 +844,7 @@ describe("workhorse and stop-pidfile", () => {
         encoding: "utf8",
         timeout: 30000,
       });
-      expect(r.status).toBe(2);
+      expectStatus(r, 2);
       expect(r.stderr).toContain(`${orphan} sleep 300`);
       expect(processState(orphan)).toBe("live");
     } finally {
@@ -904,7 +917,7 @@ describe("workhorse and stop-pidfile", () => {
           encoding: "utf8",
           timeout: 30000,
         });
-        expect(r.status).toBe(2);
+        expectStatus(r, 2);
         expect(r.stderr).toContain(`${member} sleep 300`);
         expect(processState(member)).toBe("live");
         expect(processState(z.leader)).toBe("zombie");
@@ -945,7 +958,7 @@ describe("workhorse and stop-pidfile", () => {
           encoding: "utf8",
           timeout: 30000,
         });
-        expect(r.status).toBe(0);
+        expectStatus(r, 0);
         expect(r.stdout).toContain(`stopped the process group of ${z.leader}`);
         const gone = Date.now() + 15000;
         while (Date.now() < gone && processState(member) === "live") await Bun.sleep(50);
@@ -1012,7 +1025,7 @@ describe("workhorse and stop-pidfile", () => {
         ],
         { encoding: "utf8", env, timeout: 30000 },
       );
-      expect(launched.status).toBe(0);
+      expectStatus(launched, 0);
       const pidfile = join(dispatch, "s.pid");
       const recorded = readFileSync(pidfile, "utf8").trim().split("\n");
       expect(recorded.length).toBe(4);
@@ -1021,7 +1034,7 @@ describe("workhorse and stop-pidfile", () => {
         encoding: "utf8",
         timeout: 30000,
       });
-      expect(r.status).toBe(0);
+      expectStatus(r, 0);
       expect(r.stdout).toContain("stopped the process group of");
     } finally {
       rmSync(dir, { recursive: true, force: true });

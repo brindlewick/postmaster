@@ -2189,6 +2189,9 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
   const stdioFor = (fd: number): any => (fd >= 0 ? fd : mode === "bg" ? "ignore" : "inherit");
   let child: ReturnType<typeof spawn> | null = null;
   let spawnError: unknown = null;
+  // The wrapper phase's command-line prefix, where the plain path wraps: the
+  // settled command waits past it, since a python wrapper outlasts the window.
+  let wrapperPrefix: string | null = null;
   try {
     if (spec.capmode === "systemd") {
       child = spawn(
@@ -2227,6 +2230,7 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
         args = [bin, ...args];
         bin = sid;
         alone = true;
+        wrapperPrefix = `${sid} `;
       } else {
         const py = which("python3");
         if (py) {
@@ -2252,6 +2256,9 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
           ];
           bin = py;
           alone = true;
+          // The -c program's first line: only this wrapper's command line
+          // starts this way, so a python target still settles by name.
+          wrapperPrefix = `${py} -c import os,sys`;
         }
       }
       child = spawn(bin, args, {
@@ -2303,7 +2310,7 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
         const start = startOf(pid);
         const boot = bootId();
         const wrapper = spec.capmode === "systemd" && spec.setsid ? basename(spec.setsid) : null;
-        const command = await settledCommand(pid, wrapper);
+        const command = await settledCommand(pid, wrapper, wrapperPrefix);
         const body =
           start && boot && command
             ? `${pid}\n${start}\n${boot}\n${command}\n`
@@ -2990,15 +2997,22 @@ function pidfileCommand(name: string): string {
  * its command line can read empty, and the launch chain execs twice more — the spawned
  * wrapper becomes systemd-run, which execs the target in place after scope setup, a
  * D-Bus roundtrip no stability window can outwait — so a reading counts only past the
- * parent's command line and the transient names, and the name is recorded after three
- * such stable readings. "" when the process is gone or never settles, in which case
- * the pidfile holds no command.
+ * parent's command line, the transient names and the wrapper's own command line, and
+ * the name is recorded after three such stable readings. "" when the process is gone
+ * or never settles, in which case the pidfile holds no command.
  */
-async function settledCommand(pid: number, spawned: string | null): Promise<string> {
+async function settledCommand(
+  pid: number,
+  spawned: string | null,
+  wrapperPrefix: string | null,
+): Promise<string> {
   const parent = processCommandLine(process.pid);
   // The chain's turning names: the wrapper run spawned, and a --scope systemd-run,
   // which always becomes its target (or, under a systemd that waits instead, the
-  // record honestly degrades to start and boot).
+  // record honestly degrades to start and boot). The plain path's wrapper is known
+  // by its command line instead: a setsid phase by name would also match a target
+  // that wraps itself, and a python phase by name would swallow a python target,
+  // while the wrapper's own invocation matches nothing else.
   const transient = new Set([spawned, "systemd-run"]);
   let prev: string | null = null;
   let stable = 0;
@@ -3006,7 +3020,8 @@ async function settledCommand(pid: number, spawned: string | null): Promise<stri
   for (;;) {
     const cur = processCommandLine(pid);
     const name = cur === "" ? "" : pidfileCommand(processInfo(pid)?.name ?? "");
-    const ready = cur !== "" && cur !== parent && name !== "" && !transient.has(name);
+    const wrapped = wrapperPrefix !== null && cur.startsWith(wrapperPrefix);
+    const ready = cur !== "" && cur !== parent && name !== "" && !transient.has(name) && !wrapped;
     if (!ready) {
       if (cur === "" && processState(pid) === "absent") return "";
       // Unreadable but present (mid-exec, or a zombie awaiting reap), pre-exec, or a
