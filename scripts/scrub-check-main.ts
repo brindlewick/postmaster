@@ -296,7 +296,10 @@ class CatBatch {
 
   private async ensure(): Promise<void> {
     if (this.child) return;
-    const child = spawn("git", ["cat-file", "--batch"], {
+    // NUL-separated requests: a newline inside a path must not end the
+    // request, or the responses desynchronize and the scan never lands.
+    // Review round 12 (bug-68).
+    const child = spawn("git", ["cat-file", "-z", "--batch"], {
       cwd: this.root,
       stdio: ["pipe", "pipe", "ignore"],
     });
@@ -332,7 +335,7 @@ class CatBatch {
     await this.ensure();
     const child = this.child!;
     if (!child.stdin) fail("scrub-check", "the requested history could not be read");
-    child.stdin.write(`${rev}:${path}\n`);
+    child.stdin.write(`${rev}:${path}\0`);
     const header = await this.takeLine();
     if (header.endsWith(" missing")) return null;
     const size = Number(header.split(" ")[2]);

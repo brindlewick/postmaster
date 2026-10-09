@@ -886,3 +886,21 @@ test("range scan sees values through a typechange, a rename and never a bare del
   expect(deleted.status).toBe(0);
   expect(deleted.stdout).toBe("");
 });
+
+test("range scan survives a newline in a path it looks up", () => {
+  // Review round 12 (bug-68): the batch request went out unterminated, so a
+  // newline-named file desynchronized git cat-file and the scan spun silent.
+  const repo = initRepo();
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  writeFileSync(
+    join(repo, "cite.md"),
+    "---\ntitle: A Study\nurl: https://example.org/s\n---\ntext\n",
+  );
+  writeFileSync(join(repo, "x\nHEAD:cite.md"), "weird\n");
+  writeFileSync(join(repo, "z.md"), `Author: ${["Ada", "Lovelace"].join(" ")}\n`);
+  gitAt(repo, ["add", "-A"]);
+  commit(repo, "add a citation, a newline name and an author");
+  const scanned = runScript("scrub-check", [base, "HEAD"], repo);
+  expect(scanned.status).toBe(1);
+  expect(scanned.stdout).toMatch(/z\.md:1: author-field$/mu);
+});
