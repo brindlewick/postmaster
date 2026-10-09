@@ -7,16 +7,20 @@ pstack's create-verification-skill, read at cursor/plugins commit 23e4138
 (https://github.com/cursor/plugins/blob/23e4138daa01c42d4969f7a5465f82704e64f798/pstack/skills/create-verification-skill/SKILL.md),
 restated here in this tool's own words. Where the two disagree, these instructions win.
 
-- Project checkout: {{REPO}}
+- Reference checkout, read-only, never edit it: {{REPO}}
 - Surface: {{SURFACE_PROSE}} ({{SURFACE}})
 - Write the verifier to: {{VERIFY_DIR}}/ at the top of this working copy
+- Your working copy: this directory, cut from {{BASE}}. It may differ from the
+  reference checkout; the working copy is what you verify.
 
-Do all of your work inside this working copy. Learn the project from its files, never
-from the user: this session cannot ask anyone anything.
+Do all of your work inside this working copy and edit nothing outside it. Learn
+the project from its files, never from the user: this session cannot ask anyone
+anything.
 
-## 1. Learn the surface from the checkout
+## 1. Learn the surface from the working copy
 
-Answer every question below from the code, the docs and the commands in this checkout:
+Answer every question below from the code, the docs and the commands in this
+working copy:
 
 - Start: how does the surface start here? Prefer the project's own documented way in
   (its scripts, its make targets, its README quickstart). Note ports, environment
@@ -29,11 +33,12 @@ Answer every question below from the code, the docs and the commands in this che
 - Side by side: can two copies run next to each other (ports, data folders, profiles)?
   If not, say so in the verifier: declining a second copy beats wrecking the first.
 
-When the checkout does not build or start as it stands, mend that first, or report
-exactly what is broken, before writing anything: a verifier written while the base is
-broken learns every step wrong. When some side file the surface never touches blocks
-startup, the verifier may lay it down, marked plainly as scaffolding for verification,
-and take it away again in cleanup.
+When the working copy does not build or start as it stands, mend that first, or
+report exactly what is broken, before writing anything: a verifier written while
+the base is broken learns every step wrong. Never mend the reference checkout.
+When some side file the surface never touches blocks startup, the verifier may
+lay it down, marked plainly as scaffolding for verification, and take it away
+again in cleanup.
 
 ## 2. Write the verifier
 

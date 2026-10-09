@@ -5,8 +5,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { commitAll, gitOrThrow, initRepo, RUN, writeRepoFile } from "./acceptance-323.ts";
 import { run } from "./lib/proc.ts";
-import { commitAll, gitOrThrow, initRepo, writeRepoFile } from "./acceptance-323.ts";
 import {
   defaultBase,
   isSurface,
@@ -99,13 +99,25 @@ describe("surfaces", () => {
 
 describe("renderPrompt", () => {
   test("fills every placeholder", () => {
-    const out = renderPrompt("{{REPO}} {{SURFACE}} {{SURFACE_PROSE}} {{VERIFY_DIR}}", {
+    const out = renderPrompt("{{REPO}} {{SURFACE}} {{SURFACE_PROSE}} {{VERIFY_DIR}} {{BASE}}", {
       repo: "/r",
       surface: "cli",
       surfaceProse: "command line",
       verifyDir: "verify-app",
+      base: "origin/main",
     });
-    expect(out).toBe("/r cli command line verify-app");
+    expect(out).toBe("/r cli command line verify-app origin/main");
+  });
+
+  test("dollar patterns in a value copy literally", () => {
+    const out = renderPrompt("{{REPO}} {{VERIFY_DIR}}", {
+      repo: "/x/app$$x",
+      surface: "cli",
+      surfaceProse: "command line",
+      verifyDir: "verify-$&-'",
+      base: "main",
+    });
+    expect(out).toBe("/x/app$$x verify-$&-'");
   });
 
   test("a leftover placeholder throws", () => {
@@ -115,6 +127,7 @@ describe("renderPrompt", () => {
         surface: "cli",
         surfaceProse: "command line",
         verifyDir: "verify-app",
+        base: "main",
       }),
     ).toThrow("unknown placeholder in the prompt template: {{NOPE}}");
   });
@@ -202,6 +215,21 @@ describe("defaultBase", () => {
       const empty = join(dir, "empty");
       initRepo(empty);
       expect(defaultBase(empty)).toBe(null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("prompt needs a commit to name", () => {
+  test("prompt on a repo with no commit exits 2", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "empty");
+      initRepo(repo);
+      const r = run(RUN, ["verifier", "prompt", repo, "cli"]);
+      expect(r.code).toBe(2);
+      expect(r.err).toContain("usage: run verifier");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

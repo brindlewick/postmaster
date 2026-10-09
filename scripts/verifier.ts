@@ -111,15 +111,19 @@ export interface PromptVars {
   surface: string;
   surfaceProse: string;
   verifyDir: string;
+  base: string;
 }
 
 /** Fill the template's placeholders. A placeholder left over is a bug, and throws. */
 export function renderPrompt(template: string, vars: PromptVars): string {
+  // Each value rides a replacer function: as a plain string, $ patterns in a
+  // repo path would expand instead of copying.
   const out = template
-    .replaceAll("{{REPO}}", vars.repo)
-    .replaceAll("{{SURFACE}}", vars.surface)
-    .replaceAll("{{SURFACE_PROSE}}", vars.surfaceProse)
-    .replaceAll("{{VERIFY_DIR}}", vars.verifyDir);
+    .replaceAll("{{REPO}}", () => vars.repo)
+    .replaceAll("{{SURFACE}}", () => vars.surface)
+    .replaceAll("{{SURFACE_PROSE}}", () => vars.surfaceProse)
+    .replaceAll("{{VERIFY_DIR}}", () => vars.verifyDir)
+    .replaceAll("{{BASE}}", () => vars.base);
   const left = out.match(/\{\{[A-Z_]+\}\}/u);
   if (left !== null) throw new Error(`unknown placeholder in the prompt template: ${left[0]}`);
   return out;
@@ -230,11 +234,14 @@ function readTemplate(): string {
 function runPrompt(req: ParsedPrompt): number {
   const repo = resolve(req.repo);
   if (!isRepo(repo)) throw new UsageError(`not a git repository: ${req.repo}`);
+  const base = defaultBase(repo);
+  if (base === null) throw new UsageError(`no commit to cut from in ${req.repo}`);
   const out = renderPrompt(readTemplate(), {
     repo,
     surface: req.surface,
     surfaceProse: surfaceProse(req.surface),
     verifyDir: verifyDirName(repo),
+    base,
   });
   process.stdout.write(out);
   return 0;
@@ -380,6 +387,7 @@ function runMake(req: ParsedMake): number {
       surface: req.surface,
       surfaceProse: surfaceProse(req.surface),
       verifyDir: verifyDirName(repo),
+      base,
     }),
   );
   const named = run(RUN, ["host", "name", dispatch, "role", `verifier-${req.surface}`]);
@@ -426,6 +434,7 @@ function runMake(req: ParsedMake): number {
   }
   for (const line of [
     `branch ${branch}`,
+    `base ${base}`,
     `worktree ${wt}`,
     `role ${final.role}`,
     `thread ${final.thread}`,
