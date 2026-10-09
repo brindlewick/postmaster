@@ -12,6 +12,7 @@ import {
   commitsPastBase,
   committedFeaturePages,
   defaultBase,
+  deliverInstructions,
   failureOutcome,
   handoverFresh,
   isSurface,
@@ -27,6 +28,7 @@ import {
   roleHarness,
   scrubGitEnv,
   sendText,
+  sendVerdict,
   surfaceProse,
   spawnCommand,
   verifierHandle,
@@ -273,6 +275,115 @@ describe("spawnCommand", () => {
     expect(spawnCommand("/o'brien/r e", ["muse"])[2]).toBe(
       "cd -- '/o'\\''brien/r e' && exec \"$@\"",
     );
+  });
+});
+
+describe("sendVerdict", () => {
+  test("settled and still-working both count as delivered", () => {
+    expect(sendVerdict(0, "sent 10 bytes to h, and it settled")).toBe("sent");
+    expect(sendVerdict(3, "sent; h did not settle within 60s")).toBe("sent");
+  });
+
+  test("no turn started retries, anything else fails", () => {
+    expect(sendVerdict(3, "h got the message, but Herdr saw no turn start")).toBe("retry");
+    expect(sendVerdict(1, "herdr could not prompt h")).toBe("failed");
+    expect(sendVerdict(3, "no Herdr or tmux here")).toBe("failed");
+  });
+
+  test("a session at an approval keeps its instructions", () => {
+    expect(sendVerdict(3, "sent; h stopped at an approval or a question")).toBe("sent");
+    expect(sendVerdict(3, "h is at an approval or a question; answer first")).toBe("sent");
+  });
+});
+
+describe("deliverInstructions", () => {
+  type Run = { code: number; out: string; err: string };
+  const sent: Run = { code: 0, out: "sent 10 bytes to h, and it settled", err: "" };
+  const stalled: Run = { code: 3, out: "", err: "h got the message, but Herdr saw no turn start" };
+  const readOk: Run = { code: 0, out: "You are making a verifier", err: "" };
+
+  test("a first-try send makes no other call", () => {
+    const calls: string[][] = [];
+    const r = deliverInstructions(
+      (args) => {
+        calls.push(args);
+        return sent;
+      },
+      "h",
+      "/f",
+    );
+    expect(r).toEqual({ delivered: true, attempts: 1, lastError: "" });
+    expect(calls).toEqual([["host", "send", "h", "/f", "--wait", "60"]]);
+  });
+
+  test("a dropped prompt is read and resent", () => {
+    const calls: string[][] = [];
+    let sends = 0;
+    const r = deliverInstructions(
+      (args) => {
+        calls.push(args);
+        if (args[1] === "read") return readOk;
+        sends++;
+        return sends === 1 ? stalled : sent;
+      },
+      "h",
+      "/f",
+    );
+    expect(r).toEqual({ delivered: true, attempts: 2, lastError: "" });
+    expect(calls).toEqual([
+      ["host", "send", "h", "/f", "--wait", "60"],
+      ["host", "read", "h", "20"],
+      ["host", "send", "h", "/f", "--wait", "60"],
+    ]);
+  });
+
+  test("a failure that is not a drop stops at once", () => {
+    const calls: string[][] = [];
+    const r = deliverInstructions(
+      (args) => {
+        calls.push(args);
+        return { code: 1, out: "", err: "herdr could not prompt h" };
+      },
+      "h",
+      "/f",
+    );
+    expect(r.delivered).toBe(false);
+    expect(r.attempts).toBe(1);
+    expect(r.lastError).toContain("could not prompt");
+    expect(calls).toHaveLength(1);
+  });
+
+  test("drops past the bound fail with the last send's error", () => {
+    const calls: string[][] = [];
+    const r = deliverInstructions(
+      (args) => {
+        calls.push(args);
+        return args[1] === "read" ? readOk : stalled;
+      },
+      "h",
+      "/f",
+    );
+    expect(r.delivered).toBe(false);
+    expect(r.attempts).toBe(3);
+    expect(r.lastError).toContain("no turn start");
+    expect(calls.filter((c) => c[1] === "send")).toHaveLength(3);
+    expect(calls.filter((c) => c[1] === "read")).toHaveLength(2);
+  });
+
+  test("a handle the read cannot reach fails without another send", () => {
+    const calls: string[][] = [];
+    const r = deliverInstructions(
+      (args) => {
+        calls.push(args);
+        if (args[1] === "read") return { code: 1, out: "", err: "no live Herdr agent named h" };
+        return stalled;
+      },
+      "h",
+      "/f",
+    );
+    expect(r.delivered).toBe(false);
+    expect(r.lastError).toContain("never registered");
+    expect(calls.filter((c) => c[1] === "send")).toHaveLength(1);
   });
 });
 

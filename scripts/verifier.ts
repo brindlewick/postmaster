@@ -740,6 +740,62 @@ function runMake(req: ParsedMake): number {
   }
 }
 
+/** Seconds one send waits for the session's turn, and how many sends before make gives up. */
+export const SEND_WAIT_SECONDS = 60;
+export const SEND_ATTEMPTS = 3;
+
+/** What a `host send --wait` result means for delivery. */
+export type SendVerdict = "sent" | "retry" | "failed";
+
+/**
+ * Read a `host send --wait` result. Exit 0 settled, and exit 3 short of
+ * settling still received the instructions, so both proceed; exit 3 with no
+ * turn started means the prompt was dropped and the send goes again; a
+ * session at an approval or a question keeps its instructions while the user
+ * answers in the watched tab, so it proceeds too. Anything else failed.
+ */
+export function sendVerdict(code: number, output: string): SendVerdict {
+  if (code === 0) return "sent";
+  if (code === 3 && output.includes("did not settle")) return "sent";
+  if (code === 3 && output.includes("no turn start")) return "retry";
+  if (code === 3 && output.includes("approval or a question")) return "sent";
+  return "failed";
+}
+
+/**
+ * Send the instructions with receipt confirmation: `host send --wait` reports
+ * a dropped prompt as no turn started, and the send goes again, bounded, with
+ * a read first (hosts.md). A handle the read cannot reach never registered,
+ * so retrying is futile and the failure says so. The runner is injected for
+ * tests. On tmux a paste into a shell that is not reading yet still reads as
+ * settled, so a drop there is not detected.
+ */
+export function deliverInstructions(
+  runFn: (args: string[]) => { code: number; out: string; err: string },
+  handle: string,
+  sendFile: string,
+): { delivered: boolean; attempts: number; lastError: string } {
+  let lastError = "";
+  for (let attempt = 1; attempt <= SEND_ATTEMPTS; attempt++) {
+    const sent = runFn(["host", "send", handle, sendFile, "--wait", String(SEND_WAIT_SECONDS)]);
+    const text = `${sent.out}\n${sent.err}`;
+    const verdict = sendVerdict(sent.code, text);
+    if (verdict === "sent") return { delivered: true, attempts: attempt, lastError: "" };
+    lastError = text.trim() || `exit ${sent.code}`;
+    if (verdict === "failed") return { delivered: false, attempts: attempt, lastError };
+    if (attempt === SEND_ATTEMPTS) return { delivered: false, attempts: attempt, lastError };
+    const read = runFn(["host", "read", handle, "20"]);
+    if (read.code !== 0) {
+      return {
+        delivered: false,
+        attempts: attempt,
+        lastError: `the session never registered under ${handle}: ${(read.out + read.err).trim() || `exit ${read.code}`}`,
+      };
+    }
+  }
+  return { delivered: false, attempts: SEND_ATTEMPTS, lastError };
+}
+
 /** Everything past the cut: a thrower here cleans up only before any session starts. */
 function runMakeLaunches(
   req: ParsedMake,
@@ -806,18 +862,15 @@ function runMakeLaunches(
   sessionStarted.started = true;
   const sendFile = join(logs, `verifier-${branch}-send.txt`);
   writeFileSync(sendFile, sendText(promptFile));
-  const sent = run(RUN, ["host", "send", handle, sendFile]);
-  if (sent.code !== 0) {
-    logInteractive(
-      dispatch,
-      req.surface,
-      branch,
-      handle,
-      `the instructions could not be sent: ${(sent.out + sent.err).trim() || `exit ${sent.code}`}`,
-    );
-    throw new RunError(
-      `the verifier session started but its instructions could not be sent; it was left open in ${handle}`,
-    );
+  const delivery = deliverInstructions((args) => run(RUN, args), handle, sendFile);
+  if (!delivery.delivered) {
+    const tries =
+      delivery.attempts === 1
+        ? "could not be sent"
+        : `could not be sent after ${delivery.attempts} tries`;
+    const failed = `the instructions ${tries}: ${delivery.lastError}; the session was left open in ${handle}`;
+    logInteractive(dispatch, req.surface, branch, handle, failed);
+    throw new RunError(`${failed}; read the session and resend if it is idle`);
   }
   logInteractive(dispatch, req.surface, branch, handle, "");
   if (!waitForHandover(wt, cutAt, req.timeout)) {
