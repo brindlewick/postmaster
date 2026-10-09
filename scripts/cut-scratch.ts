@@ -44,8 +44,9 @@
 //
 //   exit 0  scratch created, the dependency clone reported per directory; a scratch checked; a
 //           scratch's kind printed; the scratch removed; or a workhorse copy cut or checked
-//   exit 1  usage; a dest that exists; git could not create the scratch or copy; a scratch or
-//           copy not at <commit>; a worktree where a clone is needed, or a clone whose
+//   exit 1  usage; a dest that exists; a repository that already holds <branch>;
+//           git could not create the scratch or copy; a scratch or copy not at <commit>;
+//           a worktree where a clone is needed, or a clone whose
 //           origin/HEAD does not lead back to <base>; a copy on another branch or of another
 //           repository; not a scratch, or not one of <repo>
 import {
@@ -328,6 +329,11 @@ function workhorseCut(repoArg: string, dest: string, commit: string, branch: str
     return { code: 1, out: "", err: `${err.join("\n")}\n` };
   }
   const repo = mainOf(repoCommon);
+  const heldR = run("git", ["-C", repo, "rev-parse", "--verify", "-q", `${branch}^{commit}`]);
+  if (heldR.code === 0) {
+    err.push(`cut-scratch: ${repo} already holds ${branch} at ${heldR.out.trim()}`);
+    return { code: 1, out: "", err: `${err.join("\n")}\n` };
+  }
   const wantR = run("git", ["-C", repo, "rev-parse", "--verify", "-q", `${commit}^{commit}`]);
   if (wantR.code !== 0) {
     err.push(`cut-scratch: no such commit in ${repo}: ${commit}`);
