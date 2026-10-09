@@ -214,9 +214,20 @@ function main(argv: string[]): number {
   try {
     // Inherited stdio: the suite's own output still streams while it runs. The same
     // interpreter that runs this check runs the suite, not whatever bun is on PATH.
+    // The suite runs as the check script on main runs it: files in parallel with
+    // per-test timeouts and the shared timings file, plus this check's own report.
     const suite = spawnSync(
       process.execPath,
-      ["test", "scripts/", "lint/", "--reporter=junit", `--reporter-outfile=${report}`],
+      [
+        "test",
+        `--parallel=${process.env.POSTMASTER_TEST_WORKERS || "4"}`,
+        "--timings=test-timings.json",
+        "--timeout=60000",
+        "scripts/",
+        "lint/",
+        "--reporter=junit",
+        `--reporter-outfile=${report}`,
+      ],
       { cwd: TOOL, stdio: "inherit" },
     );
     const suiteCode = suite.status;

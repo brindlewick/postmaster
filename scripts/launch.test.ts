@@ -5746,7 +5746,6 @@ describe("confinement wiring: form shows the wrap, fallback warns and logs", () 
 // Tests beside this file for the wall record run launch writes through run host's own step.
 
 const host = join(import.meta.dir, "run");
-const waitMarkers = join(import.meta.dir, "run");
 
 let tmp = "";
 let bin = "";
@@ -5836,6 +5835,19 @@ function baseEnv(): Record<string, string | undefined> {
   };
 }
 
+/** Wait until a launch's marker file exists: 0 when it does, 1 at the deadline. The marker lands a
+ * second after the stub exits; wait-for-markers, the script the coachman uses, looks every 20
+ * seconds, which suits a lane that runs for hours and cost each wall test 20 seconds. */
+function waitForMarker(dir: string, name: string, seconds: number): number {
+  const path = join(dir, name);
+  const deadline = Date.now() + seconds * 1000;
+  for (;;) {
+    if (existsSync(path)) return 0;
+    if (Date.now() >= deadline) return 1;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+  }
+}
+
 /** The coachman's own launch step; returns once the marker has landed. */
 function launchStep(
   c: Dispatch,
@@ -5879,15 +5891,8 @@ function launchStep(
   ];
   const r = spawnSync("bash", [argv[0]!, ...argv.slice(1)], { encoding: "utf8", env: baseEnv() });
   const rc = r.status ?? 1;
-  const waited = spawnSync(
-    "bash",
-    [waitMarkers, "wait-for-markers", join(c.d, "logs"), `${out}.done`, "1", "60"],
-    {
-      encoding: "utf8",
-      env: baseEnv(),
-    },
-  );
-  return { rc: waited.status ?? 1, marker, actions: join(c.d, "actions.jsonl") };
+  const waited = waitForMarker(join(c.d, "logs"), `${out}.done`, 60);
+  return { rc: waited, marker, actions: join(c.d, "actions.jsonl") };
 }
 
 function wallsIn(actions: string): string[] {
@@ -6150,14 +6155,7 @@ test("C3: a lane stopped mid-run with run host stop records no wall", () => {
     env: baseEnv(),
   });
   expect(stopped.status ?? 1).toBe(0);
-  spawnSync(
-    "bash",
-    [waitMarkers, "wait-for-markers", join(c.d, "logs"), "stub-stop.done", "1", "60"],
-    {
-      encoding: "utf8",
-      env: baseEnv(),
-    },
-  );
+  waitForMarker(join(c.d, "logs"), "stub-stop.done", 60);
   expect(wallsIn(join(c.d, "actions.jsonl")).length).toBe(0);
 }, 90000);
 

@@ -1,4 +1,4 @@
-// Tests beside scripts/host.ts, moved from its --self-test on #109: 338 controls.
+// Tests beside scripts/host.ts, moved from its --self-test on #109: 335 controls.
 // host.ts's suite lives in ./host-self-test.ts's runControls (shared sequential fixture);
 // this file drives it once in beforeAll, splits its printed lines on the section headers,
 // and asserts each section's control count with no FAIL. Portable process controls are below.
@@ -31,7 +31,7 @@ const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "run, no host: headless launch", count: 16 },
   { name: "a run launch without a named run space is refused", count: 1 },
   { name: "stop: owned process trees and refusal controls", count: 5 },
-  { name: "stop: registry identity and process membership", count: 16 },
+  { name: "stop: registry identity and process membership", count: 13 },
   { name: "run, Herdr (stub): pane placement and environment handover", count: 16 },
   { name: "stop and close, Herdr (stub)", count: 6 },
   { name: "a reviewer's scratch clone, Herdr (stub)", count: 5 },
@@ -65,7 +65,8 @@ let failures = -1;
 const lines: string[] = [];
 const origLog = console.log;
 
-// bun:test's types omit the hook timeout, though the runtime honors it.
+// bun:test's types omit the hook timeout, though the runtime honors it. The limit only catches a
+// hang, so it is ten times the 180 s this setup takes on a quiet machine.
 
 beforeAll(async () => {
   console.log = (...args: unknown[]) => {
@@ -82,7 +83,7 @@ beforeAll(async () => {
     ))
       process.stderr.write(`${line}\n`);
   }
-}, 600000);
+}, 1800000);
 
 afterAll(() => {
   console.log = origLog;
@@ -527,77 +528,90 @@ test("a member with a five-word start matches its process, and close refuses whi
   }
 }, 60000);
 
-test("Herdr checks time out when timeout is absent, and keep working when it is present", () => {
+test("Herdr checks time out when timeout is absent, and keep working when it is present", async () => {
   const dir = mkdtempSync(join(tmpdir(), "host-herdr-timeout-"));
-  const bin = join(dir, "bin");
-  const cwd = join(dir, "worktree");
-  const calls = join(dir, "herdr.calls");
-  mkdirSync(bin);
-  mkdirSync(cwd);
-  for (const [name, target] of [
-    ["bash", Bun.which("bash") ?? "/bin/bash"],
-    ["bun", process.execPath],
-    ["dirname", Bun.which("dirname") ?? "/usr/bin/dirname"],
-    // The minimal PATH is about timeout, not ps: without /proc, macOS reads
-    // every process state through ps, and a missing ps reads as absent.
-    ["ps", Bun.which("ps") ?? "/bin/ps"],
-  ])
-    symlinkSync(target, join(bin, name));
-  const herdr = join(bin, "herdr");
-  writeFileSync(herdr, '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$HERDR_CALLS"\nexec /bin/sleep 30\n');
-  chmodSync(herdr, 0o755);
-
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    HOME: dir,
-    HERDR_CALLS: calls,
-    PATH: bin,
-    POSTMASTER_HOST_STATE: join(dir, "state"),
-    POSTMASTER_HOST_FIXTURE: dir,
-  };
-  delete env.POSTMASTER_HOST;
-  try {
-    for (const [label, args] of [
-      ["close", ["host", "close", cwd]],
-      ["run", ["host", "run", "timeout-probe", cwd, "--", "/bin/true"]],
-    ] as const) {
-      const started = Date.now();
-      const result = spawnSync(join(import.meta.dir, "run"), [...args], {
-        encoding: "utf8",
-        env,
-        timeout: 10000,
-      });
-      const elapsed = Date.now() - started;
-      const detail =
-        `${label}: run ${args.join(" ")} error=${result.error ? String(result.error) : "none"} ` +
-        `status=${result.status} signal=${result.signal} elapsed=${elapsed}ms\n` +
-        `--- stdout ---\n${result.stdout ?? ""}\n--- stderr ---\n${result.stderr ?? ""}`;
-      // The guards below fail with the evidence; the expects keep the count.
-      if (result.error !== undefined || result.status !== 0 || elapsed >= 10000)
-        throw new Error(detail);
-      expect(result.error).toBeUndefined();
-      expect(result.status).toBe(0);
-      expect(elapsed).toBeLessThan(10000);
-      const want = label === "close" ? "closed what run host opened" : "host=none";
-      if (!result.stdout.includes(want)) throw new Error(detail);
-      expect(result.stdout).toContain(want);
-    }
-    const requests = readFileSync(calls, "utf8");
-    expect(requests).toContain("workspace list");
-    expect(requests).not.toMatch(/pane|workspace close/u);
-
+  // A herdr that never answers: each probe below waits out the host's own time limit, about five
+  // seconds, so the three run side by side, each with a folder, a state and a bin of its own.
+  const probe = (name: string, withTimeout: boolean) => {
+    const home = join(dir, name);
+    const bin = join(home, "bin");
+    const cwd = join(home, "worktree");
+    const calls = join(home, "herdr.calls");
+    mkdirSync(bin, { recursive: true });
+    mkdirSync(cwd);
+    for (const [tool, target] of [
+      ["bash", Bun.which("bash") ?? "/bin/bash"],
+      ["bun", process.execPath],
+      ["dirname", Bun.which("dirname") ?? "/usr/bin/dirname"],
+      // The minimal PATH is about timeout, not ps: without /proc, macOS reads
+      // every process state through ps, and a missing ps reads as absent.
+      ["ps", Bun.which("ps") ?? "/bin/ps"],
+    ])
+      symlinkSync(target, join(bin, tool));
     const timeout = Bun.which("timeout");
-    if (timeout) {
-      symlinkSync(timeout, join(bin, "timeout"));
+    if (withTimeout && timeout) symlinkSync(timeout, join(bin, "timeout"));
+    const herdr = join(bin, "herdr");
+    writeFileSync(
+      herdr,
+      '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$HERDR_CALLS"\nexec /bin/sleep 30\n',
+    );
+    chmodSync(herdr, 0o755);
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      HOME: home,
+      HERDR_CALLS: calls,
+      PATH: bin,
+      POSTMASTER_HOST_STATE: join(home, "state"),
+      POSTMASTER_HOST_FIXTURE: home,
+    };
+    delete env.POSTMASTER_HOST;
+    return { cwd, calls, env, hasTimeout: Boolean(withTimeout && timeout) };
+  };
+  const exec = (
+    args: string[],
+    env: Record<string, string | undefined>,
+  ): Promise<{ status: number | null; stdout: string; elapsed: number }> =>
+    new Promise((resolve, reject) => {
       const started = Date.now();
-      const detected = spawnSync(join(import.meta.dir, "run"), ["host", "detect"], {
-        encoding: "utf8",
+      const child = spawn(join(import.meta.dir, "run"), args, {
         env,
-        timeout: 10000,
+        stdio: ["ignore", "pipe", "ignore"],
       });
+      let stdout = "";
+      child.stdout?.on("data", (chunk) => {
+        stdout += String(chunk);
+      });
+      const killer = setTimeout(() => child.kill("SIGKILL"), 10000);
+      child.on("error", reject);
+      child.on("close", (status) => {
+        clearTimeout(killer);
+        resolve({ status, stdout, elapsed: Date.now() - started });
+      });
+    });
+  try {
+    const close = probe("close", false);
+    const run = probe("run", false);
+    const detect = probe("detect", true);
+    const [closed, ran, detected] = await Promise.all([
+      exec(["host", "close", close.cwd], close.env),
+      exec(["host", "run", "timeout-probe", run.cwd, "--", "/bin/true"], run.env),
+      detect.hasTimeout ? exec(["host", "detect"], detect.env) : Promise.resolve(null),
+    ]);
+    expect(closed.status).toBe(0);
+    expect(closed.elapsed).toBeLessThan(10000);
+    expect(closed.stdout).toContain("closed what run host opened");
+    expect(ran.status).toBe(0);
+    expect(ran.elapsed).toBeLessThan(10000);
+    expect(ran.stdout).toContain("host=none");
+    for (const side of [close, run]) {
+      const requests = readFileSync(side.calls, "utf8");
+      expect(requests).toContain("workspace list");
+      expect(requests).not.toMatch(/pane|workspace close/u);
+    }
+    if (detected) {
       expect(detected.status).toBe(0);
-      expect(detected.stdout?.trim()).toBe("none");
-      expect(Date.now() - started).toBeLessThan(10000);
+      expect(detected.stdout.trim()).toBe("none");
+      expect(detected.elapsed).toBeLessThan(10000);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

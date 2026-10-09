@@ -1,9 +1,10 @@
-// Tests beside scripts/aftercare.ts: a landed run record built fresh in a temp folder, the
+// Tests beside scripts/aftercare.ts: a landed run record built in a temp folder and put back
+// byte for byte before each test, the
 // command run against it the way the checks run it, and a control beside every count — a
 // refusal that must change nothing, a foreign worktree that must stay, a flag that must not
 // fall. Nothing here touches a live Herdr or tmux: herdr and tmux are stubs on PATH and the
 // host state lives under the temp folder.
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
@@ -12,8 +13,10 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -190,6 +193,50 @@ function makeR(): Fixture {
   return { T, repo, D, BASE, C, pin };
 }
 
+let pristine: { fx: Fixture; tar: string } | null = null;
+
+/** The world makeR builds, built the first time and put back byte for byte, in the same folder, for
+ * every test that asks. Building it costs about 65 programs, 1.25 s; putting it back costs one
+ * tar. The worktrees, the pin and the records keep absolute paths, so the folder must be the same
+ * one: a test must not use a world after asking for the next. Nothing a test leaves behind (a
+ * state folder, a lock, a pin gone) reaches the next test. */
+function restoredR(): Fixture {
+  if (pristine === null) {
+    const fx = makeR();
+    const tar = `${fx.T}.world.tar`;
+    sh("tar", ["-C", fx.T, "-cpf", tar, "."]);
+    pristine = { fx, tar };
+    return fx;
+  }
+  const { fx, tar } = pristine;
+  mkdirSync(fx.T, { recursive: true });
+  const empty = (): void => {
+    for (const name of readdirSync(fx.T))
+      rmSync(join(fx.T, name), { recursive: true, force: true });
+  };
+  try {
+    empty();
+  } catch {
+    // a test that failed half way can leave a folder it made unreadable
+    sh("chmod", ["-R", "u+rwX", fx.T]);
+    empty();
+  }
+  sh("tar", ["-C", fx.T, "-xpf", tar]);
+  return fx;
+}
+
+afterAll(() => {
+  if (pristine === null) return;
+  try {
+    sh("chmod", ["-R", "u+rwX", pristine.fx.T]);
+  } catch {
+    // already gone
+  }
+  rmSync(pristine.fx.T, { recursive: true, force: true });
+  rmSync(pristine.tar, { force: true });
+  pristine = null;
+});
+
 function fixtureEnv(
   r: Fixture,
   extra?: Record<string, string>,
@@ -277,7 +324,7 @@ function changedFolders(r: Fixture): string[] {
 
 describe("aftercare on a landed run record", () => {
   test("a full run: exit 0, the four run folders gone and nothing else, the run done, eleven lines logged", () => {
-    const r = makeR();
+    const r = restoredR();
     const run1 = aftercare(r, WORDS);
     expect(run1.code).toBe(0);
     // the folders the run made are gone; control: the worktrees that are not the run's stay
@@ -307,7 +354,7 @@ describe("aftercare on a landed run record", () => {
   }, 120_000);
 
   test("a run not ready: exit 2 and nothing changed (control: the same run at shipped closes)", () => {
-    const r = makeR();
+    const r = restoredR();
     const manifest = JSON.parse(readFileSync(join(r.D, "manifest.json"), "utf8"));
     manifest.stage = "shipping";
     writeFileSync(join(r.D, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -320,7 +367,7 @@ describe("aftercare on a landed run record", () => {
   }, 120_000);
 
   test("the dry run: exit 0, the plan names the four folders, nothing changed, no foreign folder", () => {
-    const r = makeR();
+    const r = restoredR();
     const before = snapshot(r);
     const dry = aftercare(r, ["--dry-run", ...WORDS]);
     expect(dry.code).toBe(0);
@@ -331,7 +378,7 @@ describe("aftercare on a landed run record", () => {
     expect(dry.out).not.toContain("ticket-7-base:");
     expect(snapshot(r)).toBe(before);
     // control: without the closing words the same call is a fault in the call, still unchanged
-    const r2 = makeR();
+    const r2 = restoredR();
     const before2 = snapshot(r2);
     const noWords = aftercare(r2, ["--dry-run"]);
     expect(noWords.code).toBe(1);
@@ -340,19 +387,19 @@ describe("aftercare on a landed run record", () => {
   }, 120_000);
 
   test("the dry run says plainly the real run may still stop; the real run says no such thing", () => {
-    const r = makeR();
+    const r = restoredR();
     const dry = aftercare(r, ["--dry-run", ...WORDS]);
     expect(dry.code).toBe(0);
     expect(dry.out).toContain("the real run may still stop where the dry run could not tell");
     // control: the real run carries no such caveat
-    const r2 = makeR();
+    const r2 = restoredR();
     const real = aftercare(r2, WORDS);
     expect(real.code).toBe(0);
     expect(real.out).not.toContain("may still stop");
   }, 120_000);
 
   test("a folder whose work no branch holds is flagged; the same file on a branch's content is not", () => {
-    const r = makeR();
+    const r = restoredR();
     writeFileSync(join(r.repo, ".worktrees/7-mimo/src/a.ts"), "export const a = 9;\n");
     const flagged = aftercare(r, WORDS);
     expect(flagged.code).toBe(0);
@@ -364,7 +411,7 @@ describe("aftercare on a landed run record", () => {
     expect(teardown!.detail).toContain("flagged: src/a.ts");
     expect(flagged.out.split("flagged folder:").length - 1).toBe(1);
     // control: content branch 7 commits never flags
-    const r2 = makeR();
+    const r2 = restoredR();
     writeFileSync(join(r2.repo, ".worktrees/7-mimo/src/a.ts"), "export const a = 2;\n");
     const clean = aftercare(r2, WORDS);
     expect(clean.code).toBe(0);
@@ -373,7 +420,7 @@ describe("aftercare on a landed run record", () => {
   }, 120_000);
 
   test("--json prints one object with the summary shape", () => {
-    const r = makeR();
+    const r = restoredR();
     const result = aftercare(r, ["--json", ...WORDS]);
     expect(result.code).toBe(0);
     const parsed = JSON.parse(result.out);
@@ -390,14 +437,14 @@ describe("aftercare on a landed run record", () => {
     }
     expect(parsed.next).toBeNull();
     // control: the dry run's record says so
-    const r2 = makeR();
+    const r2 = restoredR();
     const dry = aftercare(r2, ["--dry-run", "--json", ...WORDS]);
     expect(dry.code).toBe(0);
     expect(JSON.parse(dry.out).dry_run).toBe(true);
   }, 120_000);
 
   test("a pid file naming a live process no record names: exit 0, the process left alone, the folder gone", () => {
-    const r = makeR();
+    const r = restoredR();
     const pid = backgroundSleep();
     try {
       writeFileSync(join(r.D, "render/preview.pid"), `${pid}\n`);
@@ -411,12 +458,12 @@ describe("aftercare on a landed run record", () => {
       killQuiet(pid);
     }
     // control: with no pid file at all there is no preview step
-    const r2 = makeR();
+    const r2 = restoredR();
     expect(aftercare(r2, WORDS).out).not.toContain("step preview:");
   }, 120_000);
 
   test("a registry record matching nothing running: exit 0, the reused pid never signalled", () => {
-    const r = makeR();
+    const r = restoredR();
     const pid = backgroundSleep();
     try {
       mkdirSync(join(r.T, "state/launches"), { recursive: true });
@@ -437,7 +484,7 @@ describe("aftercare on a landed run record", () => {
   }, 120_000);
 
   test("run again after a done run: exit 0, nothing changed, every step already done", () => {
-    const r = makeR();
+    const r = restoredR();
     expect(aftercare(r, WORDS).code).toBe(0);
     const before = snapshot(r);
     const again = aftercare(r, WORDS);
@@ -456,7 +503,7 @@ describe("aftercare on a landed run record", () => {
   }, 120_000);
 
   test("non-UTF8 saves are byte-identical: the untracked archive extracts and the diff matches git's own bytes", () => {
-    const r = makeR();
+    const r = restoredR();
     const blob = randomBytes(1024);
     blob[0] = 0xff;
     blob[1] = 0xfe;
@@ -489,7 +536,7 @@ describe("aftercare on a landed run record", () => {
   }, 120_000);
 
   test("a live preview is stopped: exit 0, its group dead, the synthesis folder gone", () => {
-    const r = makeR();
+    const r = restoredR();
     const started = hostSh(r, [
       "run",
       "preview server",
@@ -525,7 +572,7 @@ describe("aftercare on a landed run record", () => {
   }, 120_000);
 
   test("a record naming another folder is never signalled: exit 0, the process left alone", () => {
-    const r = makeR();
+    const r = restoredR();
     const pid = backgroundSleep();
     try {
       const start = processes().get(pid)?.start ?? "";
@@ -550,7 +597,7 @@ describe("aftercare on a landed run record", () => {
   }, 120_000);
 
   test("a staged rename never flags; the same rename with new content does", () => {
-    const r = makeR();
+    const r = restoredR();
     const mimo = join(r.repo, ".worktrees/7-mimo");
     writeFileSync(join(mimo, "Updated.md"), "export const a = 2;\n");
     sh("git", ["add", "Updated.md"], mimo);
@@ -560,7 +607,7 @@ describe("aftercare on a landed run record", () => {
     expect(result.code).toBe(0);
     expect(result.out).not.toContain("flagged");
     // control: new content under the new name still flags with the new path
-    const r2 = makeR();
+    const r2 = restoredR();
     const mimo2 = join(r2.repo, ".worktrees/7-mimo");
     writeFileSync(join(mimo2, "Updated.md"), "export const a = 2;\n");
     sh("git", ["add", "Updated.md"], mimo2);
@@ -573,7 +620,7 @@ describe("aftercare on a landed run record", () => {
   }, 180_000);
 
   test("a torn lock never refuses the dry run; a live holder still does", () => {
-    const r = makeR();
+    const r = restoredR();
     writeFileSync(join(r.D, ".aftercare.lock"), "");
     const before = snapshot(r);
     const dry = aftercare(r, ["--dry-run", ...WORDS]);
@@ -581,7 +628,7 @@ describe("aftercare on a landed run record", () => {
     expect(dry.out).not.toContain("already running");
     expect(snapshot(r)).toBe(before);
     // control: a lock naming a live process refuses, in the same mode
-    const r2 = makeR();
+    const r2 = restoredR();
     const pid = backgroundSleep();
     try {
       writeFileSync(join(r2.D, ".aftercare.lock"), `${pid}\n`);
@@ -594,7 +641,7 @@ describe("aftercare on a landed run record", () => {
   }, 120_000);
 
   test("run again with no words after a done run: exit 0 and nothing changed", () => {
-    const r = makeR();
+    const r = restoredR();
     expect(aftercare(r, WORDS).code).toBe(0);
     const before = snapshot(r);
     const again = aftercare(r, []);
@@ -603,14 +650,14 @@ describe("aftercare on a landed run record", () => {
     expect(again.out).toContain("step run-log: already done");
     expect(snapshot(r)).toBe(before);
     // control: the same call on an open run still faults for its words
-    const r2 = makeR();
+    const r2 = restoredR();
     const open = aftercare(r2, []);
     expect(open.code).toBe(1);
     expect(open.out).toContain("stop at closing words");
   }, 120_000);
 
   test("a posted comment whose log line never landed is reconciled, never reposted", () => {
-    const r = makeR();
+    const r = restoredR();
     expect(aftercare(r, WORDS).code).toBe(0);
     const kept = readFileSync(join(r.D, "actions.jsonl"), "utf8")
       .split("\n")
@@ -622,14 +669,14 @@ describe("aftercare on a landed run record", () => {
     const logged = readFileSync(join(r.repo, ".git/postmaster/tickets/7.json"), "utf8");
     expect(logged.split("postmaster: closing words").length - 1).toBe(1);
     // control: the marker path still shows already done and posts nothing either
-    const r2 = makeR();
+    const r2 = restoredR();
     expect(aftercare(r2, WORDS).code).toBe(0);
     const marked = aftercare(r2, WORDS);
     expect(marked.out).toContain("step ticket-comment: already done");
   }, 120_000);
 
   test("a ticket-dash symlink to a file, and a dangling one, are named left like a dir link", () => {
-    const r = makeR();
+    const r = restoredR();
     const fileLink = join(r.repo, ".worktrees/7-filelink");
     const dangling = join(r.repo, ".worktrees/7-dangling");
     sh("ln", ["-s", join(r.repo, "README.md"), fileLink]);
@@ -646,7 +693,7 @@ describe("aftercare on a landed run record", () => {
   }, 120_000);
 
   test("an unreadable .worktrees stops exit 1 with the step and the next step; readable again it closes", () => {
-    const r = makeR();
+    const r = restoredR();
     chmodSync(join(r.repo, ".worktrees"), 0o000);
     try {
       const stopped = aftercare(r, WORDS);
@@ -663,7 +710,7 @@ describe("aftercare on a landed run record", () => {
   }, 120_000);
 
   test("a tracker kind that cannot be told stops the dry run as it stops the real run", () => {
-    const r = makeR();
+    const r = restoredR();
     sh("rm", ["-rf", join(r.repo, ".git/postmaster")]);
     const env = { POSTMASTER_CONFIG: join(r.T, "no-config.toml") };
     const dry = aftercare(r, ["--dry-run", ...WORDS], env);
@@ -681,7 +728,7 @@ describe("aftercare on a landed run record", () => {
   }, 180_000);
 
   test("an unknown ticket state fails its step and leaves the later steps waiting", () => {
-    const r = makeR();
+    const r = restoredR();
     const ticketPath = join(r.repo, ".git/postmaster/tickets/7.json");
     const ticket = JSON.parse(readFileSync(ticketPath, "utf8"));
     ticket.state = "weird";
@@ -712,7 +759,7 @@ describe("aftercare on a landed run record", () => {
       sh("git", ["commit", "-qm", "add submodule"], mimo);
       return mimo;
     };
-    const r = makeR();
+    const r = restoredR();
     const mimo = sub(r);
     writeFileSync(join(mimo, "sm/untracked.txt"), "dirty\n");
     const result = aftercare(r, WORDS);
@@ -723,7 +770,7 @@ describe("aftercare on a landed run record", () => {
     // control: the run's other folders still went
     expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
     // control: a clean submodule never holds its folder
-    const r2 = makeR();
+    const r2 = restoredR();
     sub(r2);
     const clean = aftercare(r2, WORDS);
     expect(clean.code).toBe(0);
@@ -731,7 +778,7 @@ describe("aftercare on a landed run record", () => {
   }, 180_000);
 
   test("a folder with an unbranched merge is left and named; a linear commit is saved", () => {
-    const r = makeR();
+    const r = restoredR();
     const scratch = join(r.repo, ".worktrees/7-mergetest");
     sh("git", ["worktree", "add", "-q", "--detach", scratch, r.BASE], r.repo);
     sh("git", ["checkout", "-q", "-b", "mg1"], scratch);
@@ -752,7 +799,7 @@ describe("aftercare on a landed run record", () => {
     // control: the run's other folders still went
     expect(existsSync(join(r.repo, ".worktrees/7"))).toBe(false);
     // control: a linear unbranched commit is saved as a patch and the folder goes
-    const r2 = makeR();
+    const r2 = restoredR();
     const scratch2 = join(r2.repo, ".worktrees/7-lineartest");
     sh("git", ["worktree", "add", "-q", "--detach", scratch2, r2.BASE], r2.repo);
     writeFileSync(join(scratch2, "note.txt"), "note\n");
@@ -765,7 +812,7 @@ describe("aftercare on a landed run record", () => {
   }, 180_000);
 
   test("a locked worktree: the dry run predicts the refusal, the real run meets it, unlocked it goes", () => {
-    const r = makeR();
+    const r = restoredR();
     const mimo = join(r.repo, ".worktrees/7-mimo");
     sh("git", ["-C", r.repo, "worktree", "lock", "--reason", "held for inspection", mimo]);
     const dry = aftercare(r, ["--dry-run", ...WORDS]);
@@ -783,7 +830,7 @@ describe("aftercare on a landed run record", () => {
   }, 180_000);
 
   test("a longer comment on the ticket never reconciles a shorter closing comment", () => {
-    const r = makeR();
+    const r = restoredR();
     sh(
       join(HERE, "run"),
       ["local", r.repo, "comment", "7", "postmaster", "closing words extended"],
@@ -801,7 +848,7 @@ describe("aftercare on a landed run record", () => {
   }, 120_000);
 
   test("a live preview never holds the dry run; another live launch still does", () => {
-    const r = makeR();
+    const r = restoredR();
     const started = hostSh(r, [
       "run",
       "preview server",
@@ -835,7 +882,7 @@ describe("aftercare on a landed run record", () => {
       killQuiet(pid);
     }
     // control: a live launch that is not the preview still holds its folder in a dry run
-    const r2 = makeR();
+    const r2 = restoredR();
     const other = hostSh(r2, [
       "run",
       "probe",
@@ -860,7 +907,7 @@ describe("aftercare on a landed run record", () => {
   }, 180_000);
 
   test("inherited git location overrides never redirect a scan: the dirty folder is saved", () => {
-    const r = makeR();
+    const r = restoredR();
     const seven = join(r.repo, ".worktrees/7");
     const gitdir = sh("git", ["-C", seven, "rev-parse", "--absolute-git-dir"], r.T);
     writeFileSync(join(r.repo, ".worktrees/7-mimo/src/a.ts"), "export const a = 9;\n");
@@ -871,14 +918,14 @@ describe("aftercare on a landed run record", () => {
     expect(diff).toContain("export const a = 9;");
     expect(existsSync(join(r.repo, ".worktrees/7-mimo"))).toBe(false);
     // control: the same run without overrides saves the same part
-    const r2 = makeR();
+    const r2 = restoredR();
     writeFileSync(join(r2.repo, ".worktrees/7-mimo/src/a.ts"), "export const a = 9;\n");
     expect(aftercare(r2, WORDS).code).toBe(0);
     expect(readFileSync(join(r2.D, "stray/7-mimo.diff"), "utf8")).toContain("export const a = 9;");
   }, 120_000);
 
   test("a locked pin: the dry run predicts the stop, the real run meets it, unlocked it releases", () => {
-    const r = makeR();
+    const r = restoredR();
     const record = JSON.parse(readFileSync(join(r.D, "run.json"), "utf8"));
     const pin = record.postmaster.checkout as string;
     sh("git", ["worktree", "lock", pin], join(r.T, "pinrepo"));
@@ -898,7 +945,7 @@ describe("aftercare on a landed run record", () => {
   }, 180_000);
 
   test("an unlanded edit under a non-ASCII name flags with its true spelling", () => {
-    const r = makeR();
+    const r = restoredR();
     const mimo = join(r.repo, ".worktrees/7-mimo");
     const name = "café.txt";
     writeFileSync(join(mimo, name), "export const a = 2;\n");
@@ -936,7 +983,7 @@ describe("aftercare on a landed run record", () => {
   });
 
   test("a ticket-dash symlink is left in place with a note naming why", () => {
-    const r = makeR();
+    const r = restoredR();
     const link = join(r.repo, ".worktrees/7-link");
     sh("ln", ["-s", join(r.repo, ".worktrees/70-x"), link]);
     const result = aftercare(r, WORDS);
