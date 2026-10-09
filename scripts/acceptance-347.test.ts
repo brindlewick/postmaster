@@ -3,7 +3,15 @@
 // commit its checks ran on (C2). Each test builds a scratch run T and drives
 // the real scripts as subprocesses, never importing the change.
 import { describe, expect, test } from "bun:test";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./lib/proc.ts";
@@ -403,6 +411,71 @@ describe("abandoning a lane on a ruling", () => {
     withRun((fx) => {
       expect(run(RUN, ["take-in"]).code).toBe(1);
       expect(run(RUN, ["take-in", join(fx.dir, "no-such-dispatch")]).code).toBe(1);
+      expect(takeLines(fx)).toEqual([]);
+    });
+  });
+});
+
+describe("review round 1: the step reads its inputs as they are", () => {
+  test("a dispatch given as . is read from the current directory", () => {
+    withRun((fx) => {
+      const lunaHead = laneCommit(fx, "luna", "luna.txt", "luna\n");
+      const mimoHead = laneCommit(fx, "mimo", "mimo.txt", "mimo\n");
+      checkLane(fx, "luna");
+      checkLane(fx, "mimo");
+      touchDone(fx, "luna");
+      touchDone(fx, "mimo");
+      const r = run(RUN, ["take-in", "."], { cwd: fx.dispatch });
+      expect(r.code).toBe(0);
+      expect(r.out).toBe(`luna=${lunaHead}\nmimo=${mimoHead}\n`);
+    });
+  });
+
+  test("an unreadable action log exits 1, not 3", () => {
+    withRun((fx) => {
+      laneCommit(fx, "luna", "luna.txt", "luna\n");
+      laneCommit(fx, "mimo", "mimo.txt", "mimo\n");
+      checkLane(fx, "luna");
+      checkLane(fx, "mimo");
+      touchDone(fx, "luna");
+      touchDone(fx, "mimo");
+      const log = join(fx.dispatch, "actions.jsonl");
+      chmodSync(log, 0o000);
+      try {
+        const r = takeIn(fx);
+        expect(r.code).toBe(1);
+        expect(r.err).toContain("cannot read");
+        expect(takeLines(fx)).toEqual([]);
+      } finally {
+        chmodSync(log, 0o644);
+      }
+    });
+  });
+
+  test("a missing action log still admits lanes at BASE as contributing nothing", () => {
+    withRun((fx) => {
+      touchDone(fx, "luna");
+      touchDone(fx, "mimo");
+      unlinkSync(join(fx.dispatch, "actions.jsonl"));
+      const r = takeIn(fx);
+      expect(r.code).toBe(0);
+      expect(r.out).toBe(`luna=${fx.base}\nmimo=${fx.base}\n`);
+    });
+  });
+
+  test("a recorded repo that is a file exits 1 as not a directory", () => {
+    withRun((fx) => {
+      const plain = join(fx.dir, "plain-file");
+      writeFileSync(plain, "not a repo\n");
+      const p = join(fx.dispatch, "checks.json");
+      const c = JSON.parse(readFileSync(p, "utf8")) as { repo: string };
+      c.repo = plain;
+      writeFileSync(p, JSON.stringify(c));
+      touchDone(fx, "luna");
+      touchDone(fx, "mimo");
+      const r = takeIn(fx);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("not a directory");
       expect(takeLines(fx)).toEqual([]);
     });
   });
