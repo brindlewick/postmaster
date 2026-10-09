@@ -267,6 +267,9 @@ function expectLead(p: Probe, text: string): void {
       `harness is not the foreground leader: pid=${p.pid} pgid=${p.pgid} tpgid=${p.tpgid}\n${text}`,
     );
   }
+  // A counted assertion, not just a throw: a test whose only checks throw
+  // reports zero assertions and reads as vacuous.
+  expect(p.pid === p.pgid && p.pgid === p.tpgid).toBe(true);
 }
 
 function expectEnv(p: Probe, lay: Layout, wantShlvl: string, wantFoo: string): void {

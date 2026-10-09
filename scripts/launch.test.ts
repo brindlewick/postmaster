@@ -1908,10 +1908,10 @@ beforeAll(() => {
           `port rc=${pRc} base rc=${bRc} port-marked=${pMarked} base-marked=${existsSync(marker)}`,
         );
       }
-      // Without an env file no bash stands between the launcher and the
-      // harness, so a shell stub would rewrite PWD before reporting it. A
-      // native stub dumps the handed environment; port and BASE agree on all
-      // of it, including PWD naming the worktree.
+      // Without an env file a shell still stands between the launcher and
+      // the harness, but it only pins SHLVL and execs (directArgv), so a
+      // native stub dumps the handed environment untouched; port and BASE
+      // agree on all of it, including PWD naming the worktree.
       {
         const codex = join(tmp, "bin", "codex");
         const savedCodex = readFileSync(codex, "utf8");

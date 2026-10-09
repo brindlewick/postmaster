@@ -2,15 +2,23 @@
 # Apple silicon, each running the full check, plus the refusal a too-old Bun must print
 # from the start command before any script loads. The Mac job keeps the bash every Mac
 # comes with; the old-Bun job installs no dependencies, so nothing can mask a version
-# check that does not run first.
+# check that does not run first. A manual dispatch with files runs only those test files
+# on the Mac, for fast feedback while fixing it; empty files runs the full check.
 name: check
 on:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      files:
+        description: "Test files to run on macOS only, space-separated; empty runs everything"
+        required: false
+        default: ""
 permissions:
   contents: read
 jobs:
   linux:
     name: linux
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -56,7 +64,13 @@ jobs:
         with:
           bun-version: ${{ steps.bun.outputs.version }}
       - run: bun install --frozen-lockfile
-      - run: bun run check
+      - name: The full check, or only the named test files on a manual run
+        run: |
+          if [ -n "${{ inputs.files }}" ]; then
+            bun test ${{ inputs.files }}
+          else
+            bun run check
+          fi
   old-bun:
     name: old-bun
     runs-on: ubuntu-latest

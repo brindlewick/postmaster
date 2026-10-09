@@ -467,8 +467,10 @@ describe("C5: stream readers and path mentions", () => {
         result.out.match(new RegExp(other.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "gu"))?.length,
       ).toBe(1);
       expect(result.out).toContain(`expected names ${join(layout.codex, "in.txt")}`);
-      // No routine exemption: the temp folder is named like any outside path.
-      expect(result.out).toContain("note names /tmp/x (elsewhere)");
+      // No routine exemption: the temp folder is named like any outside path. The tool
+      // reports the path as the filesystem resolves it, so the expectation resolves
+      // the temp folder the same way (/tmp is a link to /private/tmp on macOS).
+      expect(result.out).toContain(`note names ${join(realpathSync("/tmp"), "x")} (elsewhere)`);
       expect(result.out).toContain("note names /dev/null (elsewhere)");
       expect(result.out).not.toContain("finding");
       expect(result.out).not.toContain("not checked");

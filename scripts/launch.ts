@@ -645,6 +645,27 @@ function promptedArgv(promptFile: string, idx: number, cmd: string[]): string[] 
     ...cmd,
   ];
 }
+/** argv for `bash` to exec cmd with the launcher's level pinned, for a launch
+ * with no env file and no prompt splice: the shell is the spawn target, a
+ * binary, and the harness replaces it, so the harness keeps the wrapper's
+ * pid, argv and signals exactly as a direct spawn hands them. The pin is
+ * verbatim, set or unset: the shell starts with SHLVL unset and takes the
+ * level as $2 with a set flag as $1, since its own startup bump would
+ * otherwise add one the harness never had — and, as in sourcedExec, the
+ * level travels on `env`, because a plain `exec` lowers an exported SHLVL
+ * by one first. Bun on macOS drops the handed OLDPWD when it spawns a
+ * script target itself; spawning the shell routes around that, and PWD and
+ * OLDPWD ride the inherited environment as in the sourced forms. */
+function directArgv(level: string | undefined, cmd: string[]): string[] {
+  return [
+    "-c",
+    'e=$(command -v env); s=$1; l=$2; shift 2; if [ "$s" = set ]; then exec "${e:-/usr/bin/env}" "SHLVL=$l" "$@"; else exec "${e:-/usr/bin/env}" -u SHLVL "$@"; fi',
+    "_",
+    level === undefined ? "unset" : "set",
+    level ?? "",
+    ...cmd,
+  ];
+}
 /** sourcedLaunch and promptedArgv in one shell, in main's order: the prompt
  * is read before the file is sourced (so `cat` runs with PATH intact and no
  * file-defined function in scope), then the source, then the harness as a
@@ -1900,6 +1921,10 @@ exit "$rc"
   } else if (forms.promptArg >= 0) {
     cmd = "bash";
     cmdArgs = promptedArgv(PROMPT, forms.promptArg, forms.cmd);
+  } else {
+    cmd = "bash";
+    cmdArgs = directArgv(process.env.SHLVL, forms.cmd);
+    freshShell = true;
   }
 
   if (confineWrap) {
@@ -1928,10 +1953,12 @@ exit "$rc"
     stdio: STDIN_FILE ? ["ignore", "inherit", "inherit"] : ["inherit", "inherit", "inherit"],
     // Raw bytes, as main's `exec < file` hands them: no UTF-8 decode.
     ...(stdinBytes ? { input: stdinBytes } : {}),
-    // A sourcing shell starts with SHLVL unset and takes the level as $1.
-    // Always explicit, never inherited: Bun on macOS drops the post-startup
-    // OLDPWD from what the harness receives, so the spawn carries a snapshot
-    // taken after the pair is re-set above. Identical content elsewhere.
+    // A shell that takes the level as a parameter starts with SHLVL unset; the
+    // prompted splice keeps the inherited level and takes its own bump.
+    // Always explicit, never inherited: the spawn carries a snapshot taken
+    // after the cd pair is re-set above. The bare launch runs under a shell
+    // too (directArgv): Bun on macOS drops the handed OLDPWD when it spawns
+    // a script target itself, and the snapshot alone did not survive that.
     env: freshShell ? { ...process.env, SHLVL: undefined } : { ...process.env },
   });
   let rc =
