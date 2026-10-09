@@ -275,6 +275,85 @@ model = "model-a"
   });
 });
 
+describe("review round 1: malformed reviewers and postmaster attribution", () => {
+  test("a reviewers list holding a non-string is not set up and names it", () => {
+    const team = TEAM_FULL.replace(
+      'reviewers = ["alpha", "beta"]',
+      'reviewers = ["alpha", 7]',
+    );
+    const s = stage({ config: `${LANES}\n${team}` });
+    try {
+      const r = checkSetup(s.repo, s.configPath, s.bin);
+      expect(r.code).toBe(1);
+      expect(r.out).toContain("[team] reviewers is not a list of lane names");
+    } finally {
+      cleanup(s);
+    }
+  });
+
+  test("a lens reviewers list holding a non-string is not set up and names it", () => {
+    const team = `${TEAM_FULL}\n[team.lens_reviewers]\nbug = ["alpha", 7]\n`;
+    const s = stage({ config: `${LANES}\n${team}` });
+    try {
+      const r = checkSetup(s.repo, s.configPath, s.bin);
+      expect(r.code).toBe(1);
+      expect(r.out).toContain("[team.lens_reviewers] bug is not a list of lane names");
+    } finally {
+      cleanup(s);
+    }
+  });
+
+  test("a bad postmaster the project settings set is blamed on the project file", () => {
+    const s = stage({
+      config: `${LANES}\n${TEAM_REVIEWERS_PM}`,
+      settings: `[team]\npostmaster = { harness = "", model = "model-c" }\n`,
+    });
+    try {
+      const r = checkSetup(s.repo, s.configPath, s.bin);
+      expect(r.code).toBe(1);
+      expect(r.out).toContain(join(".postmaster", "settings.toml"));
+      expect(r.out).not.toContain(s.configPath);
+    } finally {
+      cleanup(s);
+    }
+  });
+
+  test("a bad postmaster only the global config sets is blamed on the global file", () => {
+    const team = TEAM_REVIEWERS_PM.replace(
+      'postmaster = { harness = "stub-harness-c", model = "model-c" }',
+      'postmaster = { harness = "", model = "model-c" }',
+    );
+    const s = stage({ config: `${LANES}\n${team}`, settings: TEAM_NO_PM });
+    try {
+      const r = checkSetup(s.repo, s.configPath, s.bin);
+      expect(r.code).toBe(1);
+      expect(r.out).toContain(s.configPath);
+      expect(r.out).not.toContain(join(".postmaster", "settings.toml"));
+    } finally {
+      cleanup(s);
+    }
+  });
+
+  test("a bad key the global config sets is blamed on it when the project sets the other", () => {
+    const team = TEAM_REVIEWERS_PM.replace(
+      'postmaster = { harness = "stub-harness-c", model = "model-c" }',
+      'postmaster = { harness = "", model = "model-c" }',
+    );
+    const s = stage({
+      config: `${LANES}\n${team}`,
+      settings: `[team]\npostmaster = { model = "model-z" }\n`,
+    });
+    try {
+      const r = checkSetup(s.repo, s.configPath, s.bin);
+      expect(r.code).toBe(1);
+      expect(r.out).toContain(s.configPath);
+      expect(r.out).not.toContain(join(".postmaster", "settings.toml"));
+    } finally {
+      cleanup(s);
+    }
+  });
+});
+
 describe("runbooks: the front door calls the one check", () => {
   const agents = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
   const skill = readFileSync(join(ROOT, "skills", "postmaster", "SKILL.md"), "utf8");
