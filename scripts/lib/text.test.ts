@@ -74,7 +74,7 @@ describe("goldens", () => {
       }
     }
     expect([missing, missingCp]).toEqual([0, 0]);
-  }, 60000);
+  });
 
   test(`module goldens vs python3 (${goldenCasesBuilt.length} cases, fixture ${goldenFixture.python})`, () => {
     const cases = goldenCasesBuilt;

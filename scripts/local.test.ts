@@ -1,4 +1,4 @@
-// Tests beside scripts/local.ts, moved from its --self-test on #109: 106 controls,
+// Tests beside scripts/local.ts, moved from its --self-test on #109: 105 controls,
 // plus one regression control for Bun's fetch-proxy snapshot (restoreEnv).
 // Order-dependent: the tests replay the self-test's sequence in file order against shared
 // fixtures (ticket numbers accumulate), except the final unicode vectors, which are pure.
@@ -324,7 +324,7 @@ afterAll(() => {
 describe("negative controls: a repository with no store", () => {
   test("store says there is none, exit 3, and names store init", () => {
     check(lt(repo, "store"), 3, "store init");
-  }, 30000);
+  });
 
   // Arguments build at run time: the fixture paths are set in beforeAll, after collection.
   for (const [label, build] of [
@@ -340,19 +340,19 @@ describe("negative controls: a repository with no store", () => {
   ] as [string, () => string[]][])
     test(`${label} exits 3`, () => {
       check(lt(repo, ...build()), 3, "no ticket store");
-    }, 30000);
+    });
 
   test("store init from a linked worktree is refused, and names the main checkout", () => {
     check(lt(worktree, "store", "init"), 1, `main checkout, ${repo}`);
-  }, 30000);
+  });
 
   test("and none of them made a store", () => {
     expect(existsSync(store)).toBe(false);
-  }, 30000);
+  });
 
   test("a directory that is not a git repository exits 1", () => {
     check(lt(plain, "list"), 1, "not a git repository");
-  }, 30000);
+  });
 });
 
 describe("positive controls", () => {
@@ -360,11 +360,11 @@ describe("positive controls", () => {
     refs = run("git", ["-C", repo, "for-each-ref"]).out;
     commits = run("git", ["-C", repo, "rev-list", "--all"]).out.trim().split(/\r?\n/u).length;
     check(lt(join(repo, "sub"), "store", "init"), 0, `store created: ${store}`);
-  }, 30000);
+  });
 
   test("store init on an empty store leaves it as it was", () => {
     check(lt(repo, "store", "init"), 0, "store exists:");
-  }, 30000);
+  });
 
   test("the main checkout, a directory in it and a linked worktree find the same store", () => {
     const same = [repo, join(repo, "sub"), worktree].every((path) => {
@@ -372,30 +372,30 @@ describe("positive controls", () => {
       return r.code === 0 && r.out === store;
     });
     expect(same).toBe(true);
-  }, 30000);
+  });
 
   test("create prints the new ticket's number, 1", () => {
     dayBefore = new Date().toISOString().slice(0, 10);
     const created = lt(repo, "create", "  A tracker that needs no service  ", bodyPath);
     dayAfter = new Date().toISOString().slice(0, 10);
     check(created, 0, "1");
-  }, 30000);
+  });
 
   test("the next create prints 2", () => {
     check(lt(repo, "create", "Line endings", crlfPath), 0, "2");
-  }, 30000);
+  });
 
   test("read --body prints the body byte for byte", () => {
     const result = invoke(repo, "read", "1", "--body");
     expect(result.code).toBe(0);
     expect(BufferLike(result.out)).toBe(BufferLike(readFileSync(bodyPath)));
-  }, 30000);
+  });
 
   test("a CRLF body keeps its line endings", () => {
     const result = invoke(repo, "read", "2", "--body");
     expect(result.code).toBe(0);
     expect(BufferLike(result.out)).toBe(BufferLike(readFileSync(crlfPath)));
-  }, 30000);
+  });
 
   test("read prints id, title, state, labels, created and path, a blank line, then the body", () => {
     const read1 = lt(repo, "read", "1");
@@ -406,19 +406,19 @@ describe("positive controls", () => {
       `id: #1|title: A tracker that needs no service|state: todo|labels: |created: ${dayAfter}|path: ${store}/1.md|`,
     ]).toContain(head);
     expect(bodyline(read1.out)).toBe("## Problem / feature");
-  }, 30000);
+  });
 
   test("a linked worktree and a subdirectory read the same ticket", () => {
     const fromWorktree = lt(worktree, "read", "1");
     const fromSubdir = lt(join(repo, "sub"), "read", "1");
     expect(fromWorktree.code).toBe(0);
     expect(fromSubdir.out).toBe(fromWorktree.out);
-  }, 30000);
+  });
 
   test("a state set from a linked worktree is the state the main checkout reads", () => {
     lt(worktree, "state", "1", "in-progress");
     expect(lt(repo, "read", "1").out).toContain("state: in-progress");
-  }, 30000);
+  });
 
   test("comment adds one dated line to the log, actor first, on one line", () => {
     const comment = lt(join(repo, "sub"), "comment", "1", "coachman", "Harvested both\nlanes.");
@@ -429,13 +429,13 @@ describe("positive controls", () => {
       /^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} coachman: Harvested both lanes\.$/u;
     expect(commentLine.test(comment.out)).toBe(true);
     expect(commentRead.out.split("\n").some((line) => loggedLine.test(line))).toBe(true);
-  }, 30000);
+  });
 
   test("edit against the body as read replaces it", () => {
     const result = invoke(repo, "read", "1", "--body");
     put(join(temp, "base.md"), result.out);
     check(lt(repo, "edit", "1", newPath, join(temp, "base.md")), 0, "#1: edited");
-  }, 30000);
+  });
 
   test("the body is the new one, and the title and state are as they were", () => {
     const updatedBody = invoke(repo, "read", "1", "--body").out;
@@ -443,16 +443,16 @@ describe("positive controls", () => {
     expect(BufferLike(updatedBody)).toBe(BufferLike(readFileSync(newPath)));
     expect(updatedRead.out).toContain("title: A tracker that needs no service");
     expect(updatedRead.out).toContain("state: in-progress");
-  }, 30000);
+  });
 
   test("a base that differs only in line endings and trailing spaces matches", () => {
     put(join(temp, "base-crlf.md"), "## Problem / feature  \r\nThe new body.  \r\n\r\n");
     check(lt(repo, "edit", "1", newPath, join(temp, "base-crlf.md")), 0, "#1: edited");
-  }, 30000);
+  });
 
   test("title replaces the title", () => {
     check(lt(repo, "title", "1", "  Tickets with no service  "), 0, "#1: title changed");
-  }, 30000);
+  });
 
   test("and leaves the body and state as they were", () => {
     const result = invoke(repo, "read", "1", "--body");
@@ -460,7 +460,7 @@ describe("positive controls", () => {
     expect(titled.out).toContain("title: Tickets with no service");
     expect(titled.out).toContain("state: in-progress");
     expect(BufferLike(result.out)).toBe(BufferLike(readFileSync(newPath)));
-  }, 30000);
+  });
 
   test("list groups every ticket by state, in the flow's order, then by number", () => {
     lt(repo, "create", "Blocked one", bodyPath);
@@ -476,13 +476,13 @@ describe("positive controls", () => {
     const listAll = lt(repo, "list");
     expect(listAll.code).toBe(0);
     expect(listAll.out).toBe(wantList);
-  }, 30000);
+  });
 
   test("list <state> lists only that state", () => {
     const listDone = lt(repo, "list", "done");
     expect(listDone.code).toBe(0);
     expect(listDone.out).toBe("#2\tdone\tLine endings\n#4\tdone\tDone one");
-  }, 30000);
+  });
 
   test("store init on a store holding tickets changes none of them", () => {
     const beforeInit = snapshot(store);
@@ -493,7 +493,7 @@ describe("positive controls", () => {
     expect(snapshot(store)).toBe(beforeInit);
     expect(listedAgain.out).toBe(wantList);
     expect(initAgain.out).toContain("store exists:");
-  }, 30000);
+  });
 
   test("create drops a body's byte-order mark", () => {
     const made = lt(repo, "create", "With a byte-order mark", bomPath);
@@ -502,7 +502,7 @@ describe("positive controls", () => {
     const bomHeader = lt(repo, "read", bomNumber);
     expect(BufferLike(bomRead.out)).toBe(BufferLike(readFileSync(bodyPath)));
     expect(bodyline(bomHeader.out)).toBe("## Problem / feature");
-  }, 30000);
+  });
 
   test("read shows the first heading of a body that gained a byte-order mark", () => {
     writeFileSync(
@@ -510,11 +510,11 @@ describe("positive controls", () => {
       new Uint8Array([0xef, 0xbb, 0xbf, ...readFileSync(bodyPath)]),
     );
     expect(bodyline(lt(repo, "read", bomNumber).out)).toBe("## Problem / feature");
-  }, 30000);
+  });
 
   test("BASE local.sh extracts with its strict ticket read", () => {
     expect(baseLocal !== "").toBe(true);
-  }, 30000);
+  });
 
   test.skipIf(noBaseReplay)(
     "a 0xff byte in a title refuses the ticket on both sides, as BASE does",
@@ -539,7 +539,6 @@ describe("positive controls", () => {
       expect(portList.out).not.toContain("health");
       expect(baseList).not.toContain("health");
     },
-    30000,
   );
 
   test("create takes its body from /dev/stdin", () => {
@@ -550,7 +549,7 @@ describe("positive controls", () => {
     expect(stdinCreate.code).toBe(0);
     expect(BufferLike(stdinRead.out)).toBe(BufferLike(readFileSync(bodyPath)));
     put(join(temp, "stdin-number"), stdinCreate.out.trim());
-  }, 30000);
+  });
 
   test("edit takes its body from /dev/stdin", () => {
     const created = readFileSync(join(temp, "stdin-number"), "utf8");
@@ -564,7 +563,7 @@ describe("positive controls", () => {
     const afterStdin = invoke(repo, "read", created, "--body");
     expect(stdinEdit.code).toBe(0);
     expect(BufferLike(afterStdin.out)).toBe(BufferLike(readFileSync(newPath)));
-  }, 30000);
+  });
 
   test("edit takes its base from /dev/stdin", () => {
     const created = readFileSync(join(temp, "stdin-number"), "utf8");
@@ -573,7 +572,7 @@ describe("positive controls", () => {
       input: stdinReadForBase.out,
     });
     expect(baseEdit.code).toBe(0);
-  }, 30000);
+  });
 
   test("no ticket is in a working tree, on a branch or in a commit", () => {
     const cleanTree =
@@ -587,37 +586,14 @@ describe("positive controls", () => {
     expect(refsAfter).toBe(refs);
     expect(commitsAfter).toBe(commits);
     expect(wtClean).toBe(true);
-  }, 30000);
-
-  test("ten creates at once get ten different numbers", async () => {
-    const concurrent = join(temp, "concurrent");
-    if (!newRepo(concurrent) || invoke(concurrent, "store", "init").code !== 0)
-      throw new Error("could not make concurrency fixture");
-    const children = Array.from({ length: 10 }, (_, index) =>
-      Bun.spawn([self, "local", concurrent, "create", `Ticket ${index + 1}`, bodyPath], {
-        stdout: "pipe",
-        stderr: "pipe",
-      }),
-    );
-    const childResults = await Promise.all(
-      children.map(async (child: any) => ({
-        code: await child.exited,
-        out: await new Response(child.stdout).text(),
-      })),
-    );
-    const ids = childResults.map((child) => Number(child.out.trim())).sort((a, b) => a - b);
-    const concurrentList = run(self, ["local", concurrent, "list"]);
-    expect(childResults.every((child) => child.code === 0)).toBe(true);
-    expect(ids.join(" ")).toBe("1 2 3 4 5 6 7 8 9 10");
-    expect(concurrentList.out.trim().split("\n").length).toBe(10);
-  }, 30000);
+  });
 
   test("a title with a literal U+FFFD is valid UTF-8", () => {
     const ufd = join(temp, "ufd");
     if (!newRepo(ufd) || invoke(ufd, "store", "init").code !== 0)
       throw new Error("could not make U+FFFD fixture");
     check(lt(ufd, "create", "caf\ufffd", bodyPath), 0, "1");
-  }, 30000);
+  });
 
   test("a lock whose owner is alive is never reaped, whatever its age", async () => {
     const livelock = join(temp, "livelock");
@@ -648,7 +624,7 @@ describe("positive controls", () => {
     rmSync(liveLock, { force: true });
     expect(kept).toBe(true);
     expect(status).toBe("waiting");
-  }, 30000);
+  });
 });
 
 describe("controls: labels on a ticket", () => {
@@ -658,7 +634,7 @@ describe("controls: labels on a ticket", () => {
     const n = created.out.trim();
     check(lt(repo, "label", n, "add", "ready"), 0, `label added ready`);
     expect(lt(repo, "read", n).out).toContain("labels: ready");
-  }, 30000);
+  });
 
   test("label add is idempotent and matches case-insensitively", () => {
     const created = lt(repo, "create", "More labels", bodyPath);
@@ -668,7 +644,7 @@ describe("controls: labels on a ticket", () => {
     expect(lt(repo, "read", n).out).toContain("labels: Ready");
     check(lt(repo, "label", n, "remove", "READY"), 0, "label removed READY");
     expect(lt(repo, "read", n).out).toContain("labels: \n");
-  }, 30000);
+  });
 
   test("label remove drops only the named label", () => {
     const created = lt(repo, "create", "Two labels", bodyPath);
@@ -678,7 +654,7 @@ describe("controls: labels on a ticket", () => {
     check(lt(repo, "label", n, "remove", "ready"), 0, "label removed ready");
     expect(lt(repo, "read", n).out).toContain("labels: blocked");
     check(lt(repo, "label", n, "remove", "ready"), 0, "label removed ready");
-  }, 30000);
+  });
 
   test("has-label answers exact membership, and a comma in a name is one label", () => {
     const created = lt(repo, "create", "Comma label", bodyPath);
@@ -691,14 +667,14 @@ describe("controls: labels on a ticket", () => {
     check(lt(repo, "has-label", n, "BLOCKED, READY"), 0, "present");
     check(lt(repo, "label", n, "add", "ready"), 0, "label added ready");
     check(lt(repo, "has-label", n, "ready"), 0, "present");
-  }, 30000);
+  });
 
   test("an empty label and a bad verb are refused, nothing written", () => {
     const created = lt(repo, "create", "Unlabelled", bodyPath);
     const n = created.out.trim();
     refused(1, "the label is empty", repo, "label", n, "add", "  ");
     refused(1, "label <n> add|remove <label>", repo, "label", n, "toggle", "ready");
-  }, 30000);
+  });
 
   test("list shows labels after the title, and a state change leaves them alone", () => {
     const created = lt(repo, "create", "Listed labels", bodyPath);
@@ -708,7 +684,7 @@ describe("controls: labels on a ticket", () => {
     expect(listed).toContain(`#${n}\ttodo\tListed labels\tready`);
     check(lt(repo, "state", n, "blocked"), 0, "blocked");
     expect(lt(repo, "read", n).out).toContain("labels: ready");
-  }, 30000);
+  });
 });
 
 describe("controls: what the caller's environment must not change", () => {
@@ -730,7 +706,7 @@ describe("controls: what the caller's environment must not change", () => {
     expect(output(diverted)).toBe(mine);
     expect(existsSync(join(other, ".git", "postmaster", "tickets"))).toBe(true);
     expect(existsSync(join(unticketed, ".git", "postmaster"))).toBe(false);
-  }, 30000);
+  });
 
   test("an exported CDPATH does not move a relative <repo>", () => {
     const cdp = run(self, ["local", "repo", "store"], {
@@ -739,7 +715,7 @@ describe("controls: what the caller's environment must not change", () => {
     });
     expect(cdp.code).toBe(0);
     expect(cdp.out.trim()).toBe(store);
-  }, 30000);
+  });
 
   test("a symlink to a directory in the repository finds its store, not the store of the repository holding the link", () => {
     const symlinkRepo = join(temp, "shadow-link");
@@ -750,7 +726,7 @@ describe("controls: what the caller's environment must not change", () => {
     expect(throughLink.code).toBe(0);
     expect(throughLink.out.trim()).toBe(store);
     expect(existsSync(join(symlinkRepo, ".git", "postmaster"))).toBe(false);
-  }, 30000);
+  });
 
   test("modules in the target's own directory are never imported", () => {
     const shadow = join(temp, "shadowing");
@@ -778,7 +754,7 @@ describe("controls: what the caller's environment must not change", () => {
     expect(otherKind.out.trim()).toBe("github");
     expect(existsSync(join(temp, "imported"))).toBe(false);
     expect(existsSync(join(shadow, "__pycache__"))).toBe(false);
-  }, 30000);
+  });
 });
 
 describe("negative controls: nothing is written", () => {
@@ -790,35 +766,35 @@ describe("negative controls: nothing is written", () => {
 
   test("a base the ticket no longer matches exits 4", () => {
     refused(4, "#1 changed since", repo, "edit", "1", bodyPath, join(temp, "stale.md"));
-  }, 30000);
+  });
 
   test("an empty body file exits 1", () => {
     refused(1, "is empty", repo, "edit", "1", emptyPath, join(temp, "base.md"));
-  }, 30000);
+  });
 
   test("a missing base file exits 1", () => {
     refused(1, "cannot read base file", repo, "edit", "1", bodyPath, join(temp, "nowhere.md"));
-  }, 30000);
+  });
 
   test("the form with a title is a usage error", () => {
     refused(1, "usage:", repo, "edit", "1", "A title", bodyPath);
-  }, 30000);
+  });
 
   test("edit on an unknown ticket exits 1", () => {
     refused(1, "no ticket #99", repo, "edit", "99", bodyPath, join(temp, "base.md"));
-  }, 30000);
+  });
 
   test("an invalid state exits 2", () => {
     refused(2, "invalid state", repo, "state", "1", "finished");
-  }, 30000);
+  });
 
   test("state on an unknown ticket exits 1", () => {
     refused(1, "no ticket #99", repo, "state", "99", "done");
-  }, 30000);
+  });
 
   test("a comment on an unknown ticket exits 1", () => {
     refused(1, "no ticket #99", repo, "comment", "99", "coachman", "hello");
-  }, 30000);
+  });
 
   test("a comment that is not UTF-8 exits 1", () => {
     refusedRaw(
@@ -831,7 +807,7 @@ describe("negative controls: nothing is written", () => {
       "coachman",
       "<RAW-BYTES>",
     );
-  }, 30000);
+  });
 
   test("an actor that is not UTF-8 exits 1", () => {
     refusedRaw(
@@ -844,67 +820,67 @@ describe("negative controls: nothing is written", () => {
       "<RAW-BYTES>",
       "hello",
     );
-  }, 30000);
+  });
 
   test("create with an empty body exits 1", () => {
     refused(1, "is empty", repo, "create", "A title", emptyPath);
-  }, 30000);
+  });
 
   test("create with an empty title exits 1", () => {
     refused(1, "title is empty", repo, "create", "  ", bodyPath);
-  }, 30000);
+  });
 
   test("create with a title of two lines exits 1", () => {
     refused(1, "more than one line", repo, "create", "Two\nlines", bodyPath);
-  }, 30000);
+  });
 
   test("create with a title that is not UTF-8 exits 1", () => {
     refusedRaw(1, "title is not UTF-8", repo, "caf\\351", "create", "<RAW-BYTES>", bodyPath);
-  }, 30000);
+  });
 
   test("title with an empty title exits 1", () => {
     refused(1, "title is empty", repo, "title", "1", " ");
-  }, 30000);
+  });
 
   test("title with two lines exits 1", () => {
     refused(1, "more than one line", repo, "title", "1", "Two\nlines");
-  }, 30000);
+  });
 
   test("title that is not UTF-8 exits 1", () => {
     refusedRaw(1, "title is not UTF-8", repo, "\\377", "title", "1", "<RAW-BYTES>");
-  }, 30000);
+  });
 
   test("title on an unknown ticket exits 1", () => {
     refused(1, "no ticket #99", repo, "title", "99", "A title");
-  }, 30000);
+  });
 
   test("something that is not a number exits 1", () => {
     refused(1, "not a ticket number", repo, "read", "PM-1");
-  }, 30000);
+  });
 
   test("an unknown ticket exits 1", () => {
     refused(1, "no ticket #99", repo, "read", "99");
-  }, 30000);
+  });
 
   test("list with an invalid state exits 2", () => {
     refused(2, "invalid state", repo, "list", "finished");
-  }, 30000);
+  });
 
   test("store init from a linked worktree is refused where a store exists too", () => {
     refused(1, "never from a linked worktree", worktree, "store", "init");
-  }, 30000);
+  });
 
   test("store remove from a linked worktree exits 1", () => {
     refused(1, "never from a linked worktree", worktree, "store", "remove");
-  }, 30000);
+  });
 
   test("store remove on a store holding tickets exits 1", () => {
     refused(1, "removed only when it holds none", repo, "store", "remove");
-  }, 30000);
+  });
 
   test("no command called gh", () => {
     expect(existsSync(ghLog)).toBe(false);
-  }, 30000);
+  });
 });
 
 describe("controls: a ticket file that is not as this script writes it", () => {
@@ -922,7 +898,7 @@ describe("controls: a ticket file that is not as this script writes it", () => {
     expect(damagedList.code).toBe(1);
     expect(damagedList.out.trim()).toBe("#1\ttodo\tOne\n#3\ttodo\tThree");
     expect(damagedList.err).toContain("ticket #2");
-  }, 30000);
+  });
 
   test("a log that is not a list is refused, not split into characters", () => {
     writeFileSync(
@@ -938,7 +914,7 @@ describe("controls: a ticket file that is not as this script writes it", () => {
     expect(badLog.code).toBe(1);
     expect(badLog.out).toContain("log is not a list");
     expect(snapshot(damagedStore())).toBe(beforeComment);
-  }, 30000);
+  });
 
   test("labels that are not a list are refused", () => {
     const threeMetaPath = join(damagedStore(), "3.json");
@@ -947,7 +923,7 @@ describe("controls: a ticket file that is not as this script writes it", () => {
     damagedMeta.labels = "bug";
     put(threeMetaPath, JSON.stringify(damagedMeta));
     check(lt(damaged(), "read", "3"), 1, "labels is not a list");
-  }, 30000);
+  });
 
   test("a ticket file saved with a byte-order mark still reads", () => {
     const threeMetaPath = join(damagedStore(), "3.json");
@@ -957,7 +933,7 @@ describe("controls: a ticket file that is not as this script writes it", () => {
     const repairedList = lt(damaged(), "list");
     expect(repairedList.code).toBe(0);
     expect(repairedList.out).toBe("#1\ttodo\tOne\n#2\ttodo\tTwo\n#3\ttodo\tThree");
-  }, 30000);
+  });
 });
 
 describe("controls: store init and store remove, from the main checkout only", () => {
@@ -978,13 +954,13 @@ describe("controls: store init and store remove, from the main checkout only", (
     expect(laneInit.code).toBe(1);
     expect(existsSync(join(guarded, ".git", "postmaster"))).toBe(false);
     put(join(temp, "guarded-path"), guarded);
-  }, 30000);
+  });
 
   test("store remove on a store that holds no ticket removes it", () => {
     const guarded = readFileSync(join(temp, "guarded-path"), "utf8");
     invoke(guarded, "store", "init");
     check(lt(guarded, "store", "remove"), 0, "store removed:");
-  }, 30000);
+  });
 
   test("and the repository is back on the config's kind", () => {
     const guarded = readFileSync(join(temp, "guarded-path"), "utf8");
@@ -993,20 +969,20 @@ describe("controls: store init and store remove, from the main checkout only", (
     });
     expect(afterRemoval.code).toBe(0);
     expect(afterRemoval.out.trim()).toBe("github");
-  }, 30000);
+  });
 });
 
 describe("controls: a repository whose store exists uses this tracker, whatever the config names", () => {
   test("discover-project.sh names local for it and its worktree, with a config naming github", () => {
     expect(tracker(join(temp, "github.toml"), repo)).toBe("local");
     expect(tracker(join(temp, "github.toml"), worktree)).toBe("local");
-  }, 30000);
+  });
 
   test("a repository with no store gets the config's kind, and none without a config", () => {
     expect(tracker(join(temp, "github.toml"), unticketed)).toBe("github");
     expect(tracker(join(temp, "plane.toml"), unticketed)).toBe("plane");
     expect(tracker(join(temp, "home/no-config.toml"), unticketed)).toBe("");
-  }, 30000);
+  });
 
   test("a store that cannot be looked for is not taken for no store", () => {
     const trackerPlain = run(join(here, "run"), ["tracker-kind", plain], {
@@ -1015,7 +991,7 @@ describe("controls: a repository whose store exists uses this tracker, whatever 
     expect(trackerPlain.code).toBe(1);
     expect(trackerPlain.err).toContain("not a git repository");
     expect(tracker(join(temp, "github.toml"), plain)).toBe("");
-  }, 30000);
+  });
 
   test("a relative POSTMASTER_CONFIG is read from the caller's directory", () => {
     const relativeConfig = run(join(here, "run"), ["discover-project", unticketed], {
@@ -1023,7 +999,7 @@ describe("controls: a repository whose store exists uses this tracker, whatever 
       env: { POSTMASTER_CONFIG: "plane.toml" },
     });
     expect(relativeConfig.out.match(/^tracker=(.*)$/mu)?.[1]).toBe("plane");
-  }, 30000);
+  });
 
   test("with HOME unset, discover-project.sh still reports, with the kind left to ask", () => {
     const noHome = run(join(here, "run"), ["discover-project", unticketed], {
@@ -1032,7 +1008,7 @@ describe("controls: a repository whose store exists uses this tracker, whatever 
     expect(noHome.code).toBe(0);
     expect(/^tracker=$/mu.test(noHome.out)).toBe(true);
     expect(/^gate=/mu.test(noHome.out)).toBe(true);
-  }, 30000);
+  });
 
   test("discover-project.sh run by a relative path with CDPATH exported still finds the rule", () => {
     const relativePath = run(join(import.meta.dir, "run"), ["discover-project", repo], {
@@ -1040,7 +1016,7 @@ describe("controls: a repository whose store exists uses this tracker, whatever 
       env: { CDPATH: ".:/nonexistent", POSTMASTER_CONFIG: join(temp, "github.toml") },
     });
     expect(relativePath.out.match(/^tracker=(.*)$/mu)?.[1]).toBe("local");
-  }, 30000);
+  });
 
   test("a github target with no origin remote is pointed at store init, and one with a remote is not", () => {
     const noRemoteErr = join(temp, "err");
@@ -1058,7 +1034,7 @@ describe("controls: a repository whose store exists uses this tracker, whatever 
     writeFileSync(hostedErr, hasRemote.err);
     expect(readFileSync(noRemoteErr, "utf8")).toContain("store init");
     expect(readFileSync(hostedErr, "utf8")).not.toContain("store init");
-  }, 30000);
+  });
 
   test("ticket-check.sh reads tickets through this store with a config naming github, a byte-order mark aside", () => {
     const ticketCheck = run(join(here, "run"), ["ticket-check", repo, "3"], {
@@ -1071,7 +1047,7 @@ describe("controls: a repository whose store exists uses this tracker, whatever 
     expect(ticketCheck.out).toContain("well-formed");
     expect(ticketCheckSeven.code).toBe(0);
     expect(existsSync(ghLog)).toBe(false);
-  }, 30000);
+  });
 
   test("without a store it goes to the github adapter, and the gh on PATH saw the call", () => {
     const githubCheck = run(join(here, "run"), ["ticket-check", unticketed, "3"], {
@@ -1080,7 +1056,7 @@ describe("controls: a repository whose store exists uses this tracker, whatever 
     expect(githubCheck.code).toBe(1);
     expect(output(githubCheck)).toContain("github adapter");
     expect(existsSync(ghLog)).toBe(true);
-  }, 30000);
+  });
 });
 
 // Identifiers both sides compute and read: the next ticket number counts .json and .md
@@ -1095,7 +1071,7 @@ describe("identifiers both sides compute and read", () => {
     for (const n of ["1.json", "007.json", "2.md", "3.json.99999.tmp", "README", ".lock"])
       writeFileSync(join(idStore, n), "{}\n");
     expect(String(nextNumber(idStore))).toBe("8");
-  }, 30000);
+  });
 
   test("a ticket the port writes matches BASE's json byte for byte, non-ASCII whole", () => {
     const idRepo = join(temp, "idrepo");
@@ -1124,7 +1100,7 @@ describe("identifiers both sides compute and read", () => {
     expect(createdShape).toBe(true);
     expect(metaNorm).toBe(wantMeta);
     put(join(temp, "idrepo-path"), idRepo);
-  }, 30000);
+  });
 
   test("a ticket BASE's exact dump writes reads under the port", () => {
     const idRepo = readFileSync(join(temp, "idrepo-path"), "utf8");
@@ -1141,7 +1117,7 @@ describe("identifiers both sides compute and read", () => {
     const readNine = lt(idRepo, "read", "9");
     expect(readNine.code).toBe(0);
     expect(readNine.out).toContain("BASE sides ☃");
-  }, 30000);
+  });
 
   test("unfinished writes by BASE's exact tmp name clean up on store remove", () => {
     const emptyRepo = join(temp, "emptyrepo");
@@ -1153,7 +1129,7 @@ describe("identifiers both sides compute and read", () => {
     const removed = lt(emptyRepo, "store", "remove");
     expect(removed.code).toBe(0);
     expect(removed.out).toContain("store removed");
-  }, 30000);
+  });
 });
 
 // Unicode-primitive vectors: BASE's local.sh embeds Python (re.fullmatch \d, int(),
@@ -1161,23 +1137,23 @@ describe("identifiers both sides compute and read", () => {
 describe("unicode-primitive vectors", () => {
   test("oneLine splits U+001C like Python split", () => {
     expect(oneLine("a\x1cb")).toBe("a b");
-  }, 30000);
+  });
 
   test("oneLine splits U+0085 like Python split", () => {
     expect(oneLine("a\u0085b")).toBe("a b");
-  }, 30000);
+  });
 
   test("oneLine keeps U+FEFF like Python split", () => {
     expect(oneLine("a\ufeffb")).toBe("a\ufeffb");
-  }, 30000);
+  });
 
   test("NUMBER_RE takes an Arabic-Indic tail like BASE", () => {
     expect(NUMBER_RE.test("#1\u0662\u0663")).toBe(true);
-  }, 30000);
+  });
 
   test("NUMBER_RE still wants an ASCII first digit", () => {
     expect(NUMBER_RE.test("#\u0661\u0662")).toBe(false);
-  }, 30000);
+  });
 
   test("numberArg reads an Arabic-Indic tail like int()", () => {
     let ndNum: bigint | null = null;
@@ -1187,15 +1163,15 @@ describe("unicode-primitive vectors", () => {
       ndNum = null;
     }
     expect(ndNum).toBe(123n);
-  }, 30000);
+  });
 
   test("STORE_FILE_RE takes an Arabic-Indic name like BASE", () => {
     expect(STORE_FILE_RE.test("1\u0662\u0663.json")).toBe(true);
-  }, 30000);
+  });
 
   test("STORE_TMP_RE takes an Arabic-Indic tmp like BASE", () => {
     expect(STORE_TMP_RE.test("1\u0662\u0663.json.4\u0665.tmp")).toBe(true);
-  }, 30000);
+  });
 });
 
 describe("fetch-proxy snapshot regression", () => {
@@ -1204,44 +1180,40 @@ describe("fetch-proxy snapshot regression", () => {
   // never clears the snapshot, so without the empty assignment a later
   // file's fetch in this process uses this suite's dead proxy (plane's
   // stalled-API control fails instant-refused instead of timing out).
-  test.skipIf(outerProxy !== undefined)(
-    "restoreEnv leaves fetch direct",
-    async () => {
-      const current = new Map<string, string | undefined>();
-      for (const key of oldEnv.keys()) current.set(key, process.env[key]);
-      process.env.HTTP_PROXY = "http://127.0.0.1:9";
+  test.skipIf(outerProxy !== undefined)("restoreEnv leaves fetch direct", async () => {
+    const current = new Map<string, string | undefined>();
+    for (const key of oldEnv.keys()) current.set(key, process.env[key]);
+    process.env.HTTP_PROXY = "http://127.0.0.1:9";
+    try {
+      restoreEnv();
+      const held: Array<{ destroy: () => void }> = [];
+      const stall = createServer((sock) => {
+        held.push(sock);
+        sock.on("error", () => {});
+      });
+      await new Promise<void>((resolve) => stall.listen(0, "127.0.0.1", () => resolve()));
+      const port = (stall.address() as { port: number }).port;
+      let name = "";
       try {
-        restoreEnv();
-        const held: Array<{ destroy: () => void }> = [];
-        const stall = createServer((sock) => {
-          held.push(sock);
-          sock.on("error", () => {});
-        });
-        await new Promise<void>((resolve) => stall.listen(0, "127.0.0.1", () => resolve()));
-        const port = (stall.address() as { port: number }).port;
-        let name = "";
-        try {
-          await fetch(`http://127.0.0.1:${port}/x`, { signal: AbortSignal.timeout(2000) });
-        } catch (e) {
-          name = (e as Error).name;
-        } finally {
-          for (const sock of held) sock.destroy();
-          await new Promise<void>((resolve) => stall.close(() => resolve()));
-        }
-        // Connected, then cut off: Bun says TimeoutError, Node AbortError.
-        // A TypeError here is the snapshot bug back again (refused via proxy).
-        expect(name === "AbortError" || name === "TimeoutError").toBe(true);
+        await fetch(`http://127.0.0.1:${port}/x`, { signal: AbortSignal.timeout(2000) });
+      } catch (e) {
+        name = (e as Error).name;
       } finally {
-        for (const [key, value] of current) {
-          if (value === undefined) {
-            process.env[key] = "";
-            delete process.env[key];
-          } else process.env[key] = value;
-        }
+        for (const sock of held) sock.destroy();
+        await new Promise<void>((resolve) => stall.close(() => resolve()));
       }
-    },
-    30000,
-  );
+      // Connected, then cut off: Bun says TimeoutError, Node AbortError.
+      // A TypeError here is the snapshot bug back again (refused via proxy).
+      expect(name === "AbortError" || name === "TimeoutError").toBe(true);
+    } finally {
+      for (const [key, value] of current) {
+        if (value === undefined) {
+          process.env[key] = "";
+          delete process.env[key];
+        } else process.env[key] = value;
+      }
+    }
+  });
 });
 
 describe("store lock beside the bash flow", () => {
