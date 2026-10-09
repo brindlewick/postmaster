@@ -10,6 +10,7 @@ import { run } from "./lib/proc.ts";
 import {
   branchHasPath,
   commitsPastBase,
+  committedFeaturePages,
   defaultBase,
   failureOutcome,
   isSurface,
@@ -390,6 +391,29 @@ describe("removeProvisioning", () => {
       commitAll(repo, "first");
       const out = removeProvisioning(repo, join(dir, "nope"), "nope");
       expect(out.startsWith("; the cleanup failed too: ")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("committedFeaturePages", () => {
+  test("committed pages besides the index, uncommitted ones excluded", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      writeRepoFile(repo, "verify-app/README.md", "v\n");
+      writeRepoFile(repo, "verify-app/features/README.md", "map\n");
+      writeRepoFile(repo, "verify-app/features/add.md", "a\n");
+      writeRepoFile(repo, "verify-app/features/list.md", "l\n");
+      commitAll(repo, "first");
+      writeRepoFile(repo, "verify-app/features/done.md", "d\n");
+      const pages = committedFeaturePages(repo, "main", "verify-app");
+      expect(pages?.sort()).toEqual(["verify-app/features/add.md", "verify-app/features/list.md"]);
+      expect(committedFeaturePages(repo, "nope", "verify-app")).toBe(null);
+      expect(committedFeaturePages(repo, "main", "verify-other")).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
