@@ -807,7 +807,7 @@ async function readyAsync(args: string[], env?: Record<string, string | undefine
 // STUB_GH above answers its REST label calls without changing anything and
 // never updates issue-<n>.json, so a mark followed by a check passes on the
 // newline bug. This double applies --body-file edits, --title edits and the
-// label calls to issue-<n>.json with jq, so the bytes on disk are what the
+// label calls to issue-<n>.json with python3, so the bytes on disk are what the
 // next read sees. GH_CORRUPT_BODY=1 stores each written body with one
 // trailing space added to its first line, GH_CORRUPT_TITLE=1 stores each
 // written title with one character added, a swap-once/swap-body pair
@@ -816,6 +816,48 @@ async function readyAsync(args: string[], env?: Record<string, string | undefine
 
 const STUB_GH_KEEPING = `#!/usr/bin/env bash
 d="$GITHUB_SH_STUB"
+py_json() {
+  python3 - "$@" <<'PYEOF' || return 1
+import json
+import sys
+
+
+def load(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def save(path, doc):
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(doc, ensure_ascii=False) + "\\n")
+
+
+def ascii_lower(s):
+    return "".join(chr(ord(c) + 32) if "A" <= c <= "Z" else c for c in s)
+
+
+op = sys.argv[1]
+path = sys.argv[2]
+doc = load(path)
+issue = doc["data"]["repository"]["issue"]
+if op == "body":
+    with open(sys.argv[3], "rb") as fh:
+        issue["body"] = fh.read().decode("utf-8")
+elif op == "title":
+    issue["title"] = sys.argv[3]
+elif op == "label-add":
+    name = sys.argv[3]
+    nodes = issue["labels"]["nodes"]
+    if not any(ascii_lower(n.get("name", "")) == ascii_lower(name) for n in nodes):
+        nodes.append({"name": name})
+elif op == "label-remove":
+    name = sys.argv[3]
+    issue["labels"]["nodes"] = [
+        n for n in issue["labels"]["nodes"] if ascii_lower(n.get("name", "")) != ascii_lower(name)
+    ]
+save(path, doc)
+PYEOF
+}
 case "$1 $2" in
   "auth status") exit 0 ;;
   "api graphql")
@@ -864,19 +906,16 @@ case "$1 $2" in
         sed '1s/$/ /' "$bodyfile" > "$corrupted"
         src="$corrupted"
       fi
-      tmp="$d/issue-$n.json.tmp"
-      jq --rawfile body "$src" '.data.repository.issue.body = $body' "$d/issue-$n.json" > "$tmp" && mv "$tmp" "$d/issue-$n.json" || exit 1
+      py_json body "$d/issue-$n.json" "$src" || exit 1
       if [ -f "$d/swap-once" ]; then
-        tmp2="$d/issue-$n.json.tmp2"
-        jq --rawfile swapped "$d/swap-body" '.data.repository.issue.body = $swapped' "$d/issue-$n.json" > "$tmp2" && mv "$tmp2" "$d/issue-$n.json" || exit 1
+        py_json body "$d/issue-$n.json" "$d/swap-body" || exit 1
         rm "$d/swap-once"
       fi
     fi
     if [ -n "$title" ]; then
       t="$title"
       if [ "$GH_CORRUPT_TITLE" = "1" ]; then t="$t"X; fi
-      tmp="$d/issue-$n.json.tmp"
-      jq --arg title "$t" '.data.repository.issue.title = $title' "$d/issue-$n.json" > "$tmp" && mv "$tmp" "$d/issue-$n.json" || exit 1
+      py_json title "$d/issue-$n.json" "$t" || exit 1
     fi
     ;;
   "api "*)
@@ -891,8 +930,7 @@ case "$1 $2" in
             labels[]=*) name=$(echo "$a" | cut -d= -f2-) ;;
           esac
         done
-        tmp="$d/issue-$n.json.tmp"
-        jq --arg name "$name" '.data.repository.issue.labels.nodes |= (if any(.name | ascii_downcase == ($name | ascii_downcase)) then . else . + [{name: $name}] end)' "$d/issue-$n.json" > "$tmp" && mv "$tmp" "$d/issue-$n.json" || exit 1
+        py_json label-add "$d/issue-$n.json" "$name" || exit 1
         echo '[]' ;;
       "api -X DELETE repos/o/r/issues/"*)
         n=""
@@ -902,8 +940,7 @@ case "$1 $2" in
             repos/o/r/issues/*/labels/*) n=$(echo "$a" | cut -d/ -f5); name=$(echo "$a" | cut -d/ -f7) ;;
           esac
         done
-        tmp="$d/issue-$n.json.tmp"
-        jq --arg name "$name" '.data.repository.issue.labels.nodes |= map(select(.name | ascii_downcase != ($name | ascii_downcase)))' "$d/issue-$n.json" > "$tmp" && mv "$tmp" "$d/issue-$n.json" || exit 1
+        py_json label-remove "$d/issue-$n.json" "$name" || exit 1
         echo '{}' ;;
       *) echo "stub gh: unexpected REST call: $*" >&2; exit 1 ;;
     esac ;;
@@ -1164,4 +1201,20 @@ describe("the mark through a github double that keeps writes (C1-C4, C7-C9)", ()
       }
     }
   }, 180000);
+
+  test("the keeping double marks with jq shadowed by a failing one", () => {
+    const { stub, repoGh, env } = setupKeepingDouble("gh-keeping-nojq");
+    const fakeBin = join(tmp, "gh-keeping-nojq-fakebin");
+    mkdirSync(fakeBin, { recursive: true });
+    const fakeJq = join(fakeBin, "jq");
+    writeFileSync(fakeJq, '#!/usr/bin/env bash\necho "jq: command not found" >&2\nexit 127\n');
+    chmodSync(fakeJq, 0o755);
+    keepingIssue(stub, 50, TWO_PART, "Ticket 50", []);
+    const envNoJq = { ...env, PATH: `${fakeBin}:${env.PATH ?? ""}` };
+    const m = ready(["mark", repoGh, "50"], envNoJq);
+    expect(m.code).toBe(0);
+    const chk = ready([repoGh, "50"], envNoJq);
+    expect(chk.code).toBe(0);
+    expect(chk.out).toContain("ready: 50");
+  }, 60000);
 });
