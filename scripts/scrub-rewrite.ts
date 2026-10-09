@@ -376,7 +376,14 @@ async function main(args: string[]): Promise<number> {
     for (const entry of listed.split("\0")) if (entry) rowPaths.add(entry);
   }
   const others = git(
-    ["-c", "core.quotePath=false", "status", "--porcelain=v1", "--ignored", "--untracked-files=all"],
+    [
+      "-c",
+      "core.quotePath=false",
+      "status",
+      "--porcelain=v1",
+      "--ignored",
+      "--untracked-files=all",
+    ],
     root,
   )
     .toString("utf8")
