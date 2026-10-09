@@ -1908,17 +1908,21 @@ beforeAll(() => {
           `port rc=${pRc} base rc=${bRc} port-marked=${pMarked} base-marked=${existsSync(marker)}`,
         );
       }
-      // Without an env file a shell still stands between the launcher and
-      // the harness, but it only pins SHLVL and execs (directArgv), so a
-      // native stub dumps the handed environment untouched; port and BASE
-      // agree on all of it, including PWD naming the worktree.
+      // Without an env file nothing stands between the launcher and the
+      // harness, and the harness is a shell stub dumping os.environ through
+      // python3 — the same instrument as the with-file controls, reading
+      // environ directly as native harnesses do. A shell stub is safe for
+      // PWD here: a shell only rewrites a PWD that does not name its
+      // directory, and both sides always hand a valid one. A bun stub's
+      // process.env dump is not used: it drops OLDPWD from the port's
+      // launches on macOS (seen across the sixth return's dispatches)
+      // while the same value survives everywhere else, so it measures
+      // the dumper instead of the handoff. Port and BASE agree on all of
+      // the handed environment, including PWD naming the worktree.
       {
         const codex = join(tmp, "bin", "codex");
         const savedCodex = readFileSync(codex, "utf8");
-        writeFileSync(
-          codex,
-          `#!/usr/bin/env bun\nimport { writeFileSync } from "node:fs";\nconst e = Object.entries(process.env).sort(([a], [b]) => (a < b ? -1 : 1));\nwriteFileSync("${handedPath}", e.map(([k, v]) => k + "=" + v).join("\\0"));\nconsole.log("NATIVE-RAN");\n`,
-        );
+        writeFileSync(codex, envDumpStub(handedPath, "echo SHELL-RAN"));
         writeFileSync(
           join(tmp, "bytes.toml"),
           `${head}[lanes.cx]\nharness = "codex"\nmodel = "m"\n\n[lanes.px]\nharness = "pi"\nmodel = "m"\n`,
@@ -1955,8 +1959,8 @@ beforeAll(() => {
           "parity: without an env file the harness's full environment matches BASE, PWD naming the worktree",
           nPRc === 0 &&
             nBRc === 0 &&
-            nPOut.includes("NATIVE-RAN") &&
-            nBOut.includes("NATIVE-RAN") &&
+            nPOut.includes("SHELL-RAN") &&
+            nBOut.includes("SHELL-RAN") &&
             nPErr === "" &&
             nBErr === "" &&
             JSON.stringify(nPHanded) === JSON.stringify(nBHanded) &&

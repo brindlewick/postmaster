@@ -645,29 +645,6 @@ function promptedArgv(promptFile: string, idx: number, cmd: string[]): string[] 
     ...cmd,
   ];
 }
-/** argv for `bash` to exec cmd with the launcher's level pinned, for a launch
- * with no env file and no prompt splice: the shell is the spawn target, a
- * binary, and the harness replaces it, so the harness keeps the wrapper's
- * pid, argv and signals exactly as a direct spawn hands them. The pin is
- * verbatim, set or unset: the shell starts with SHLVL unset and takes the
- * level as $2 with a set flag as $1, since its own startup bump would
- * otherwise add one the harness never had — and, as in sourcedExec, the
- * level travels on `env`, because a plain `exec` lowers an exported SHLVL
- * by one first. Bun on macOS drops the handed OLDPWD when it spawns a
- * script target itself; spawning the shell routes around that, and PWD and
- * OLDPWD ride the inherited environment as in the sourced forms. */
-function directArgv(level: string | undefined, cmd: string[]): string[] {
-  // TEMP-DIAG-R6 v3: the with-file tail with no env binary and no exec, SHLVL
-  // verbatim set or unset. Removed or reworked before the card.
-  return [
-    "-c",
-    'if [ "$1" = set ]; then SHLVL=$2; export SHLVL; else unset SHLVL; fi; shift 2; "$@"; s=$?; exit $s',
-    "_",
-    level === undefined ? "unset" : "set",
-    level ?? "",
-    ...cmd,
-  ];
-}
 /** sourcedLaunch and promptedArgv in one shell, in main's order: the prompt
  * is read before the file is sourced (so `cat` runs with PATH intact and no
  * file-defined function in scope), then the source, then the harness as a
@@ -1923,10 +1900,6 @@ exit "$rc"
   } else if (forms.promptArg >= 0) {
     cmd = "bash";
     cmdArgs = promptedArgv(PROMPT, forms.promptArg, forms.cmd);
-  } else {
-    cmd = "bash";
-    cmdArgs = directArgv(process.env.SHLVL, forms.cmd);
-    freshShell = true;
   }
 
   if (confineWrap) {
@@ -1951,31 +1924,14 @@ exit "$rc"
   })();
   // Machine time, not the tests' clock: it is compared against file mtimes.
   const launchedAt = Date.now();
-  // TEMP-DIAG-R6, removed before the card: the diagnosis rides extra
-  // variables into the harness, so the mac parity messages carry it. DIAG_R6
-  // is 3 bits: 4 = the snapshot's OLDPWD equals `from`, 2 = `from` is
-  // non-empty, 1 = process.env holds OLDPWD at the spawn. DIAG_FROM is
-  // `from` itself (its digest length names it); DIAG_FROM_X says whether
-  // `from` exists.
-  const diagSnap: Record<string, string | undefined> = freshShell
-    ? { ...process.env, SHLVL: undefined }
-    : { ...process.env };
-  const diagBits =
-    (diagSnap["OLDPWD"] === from && from !== "" ? 4 : 0) +
-    (from !== "" ? 2 : 0) +
-    ("OLDPWD" in process.env ? 1 : 0);
-  const diagFromX = from !== "" && existsSync(from) ? "1" : "0";
   const child = spawnSync(cmd, cmdArgs, {
     stdio: STDIN_FILE ? ["ignore", "inherit", "inherit"] : ["inherit", "inherit", "inherit"],
     // Raw bytes, as main's `exec < file` hands them: no UTF-8 decode.
     ...(stdinBytes ? { input: stdinBytes } : {}),
-    // A shell that takes the level as a parameter starts with SHLVL unset; the
-    // prompted splice keeps the inherited level and takes its own bump.
+    // A sourcing shell starts with SHLVL unset and takes the level as $1.
     // Always explicit, never inherited: the spawn carries a snapshot taken
-    // after the cd pair is re-set above. The bare launch runs under a shell
-    // too (directArgv): Bun on macOS drops the handed OLDPWD when it spawns
-    // a script target itself, and the snapshot alone did not survive that.
-    env: { ...diagSnap, DIAG_FROM: from, DIAG_FROM_X: diagFromX, DIAG_R6: String(diagBits) },
+    // after the cd pair is re-set above. Identical content elsewhere.
+    env: freshShell ? { ...process.env, SHLVL: undefined } : { ...process.env },
   });
   let rc =
     child.status !== null && child.status !== undefined
