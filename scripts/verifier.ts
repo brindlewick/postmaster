@@ -584,7 +584,10 @@ export function timeoutMs(seconds: number): number {
 
 /** The last non-empty line, for a one-line verdict; the exit when there is none. */
 export function lastLine(text: string, code: number): string {
-  const lines = text.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "");
   return lines.length === 0 ? `exit ${code}` : (lines[lines.length - 1] as string);
 }
 
@@ -623,8 +626,7 @@ export function decideCheap(facts: CheapFacts): string | null {
   }
   if (facts.outside.length > 0) {
     const shown = facts.outside.slice(0, 10).join(", ");
-    const more =
-      facts.outside.length > 10 ? ` and ${facts.outside.length - 10} more` : "";
+    const more = facts.outside.length > 10 ? ` and ${facts.outside.length - 10} more` : "";
     return `outside the verifiers' folder: ${shown}${more}`;
   }
   return null;
@@ -1277,7 +1279,13 @@ function validateLanding(req: ParsedCheck | ParsedLand): Validated {
   } catch {
     throw new UsageError(`no hand-over to read: ${req.handover}`);
   }
-  return { repo, branch: req.branch, dispatch, folder: req.folder ?? verifyDirName(repo), handoverText };
+  return {
+    repo,
+    branch: req.branch,
+    dispatch,
+    folder: req.folder ?? verifyDirName(repo),
+    handoverText,
+  };
 }
 
 function decideFromValidated(v: Validated, timeout: number): Decided {
@@ -1301,7 +1309,8 @@ function decideFromValidated(v: Validated, timeout: number): Decided {
 
 function logVerdict(dispatch: string, branch: string, verb: "note" | "merge", line: string): void {
   const r = run(RUN, ["log-action", dispatch, "coachman", verb, branch, line]);
-  if (r.code !== 0) throw new RunError(`the verdict was not logged: ${r.err.trim() || r.out.trim()}`);
+  if (r.code !== 0)
+    throw new RunError(`the verdict was not logged: ${r.err.trim() || r.out.trim()}`);
 }
 
 function runCheckCmd(req: ParsedCheck): number {
@@ -1442,15 +1451,15 @@ function runLandCmd(req: ParsedLand): number {
   const outcome =
     target === null
       ? {
-        line: `error: no local default branch to land ${v.branch} onto`,
-        verb: "note" as const,
-        code: 1,
-      }
+          line: `error: no local default branch to land ${v.branch} onto`,
+          verb: "note" as const,
+          code: 1,
+        }
       : route === "pull-request"
         ? landPullRequest(
-          { repo: v.repo, branch: v.branch, acceptLine: decided.line, summary: decided.summary },
-          target,
-        )
+            { repo: v.repo, branch: v.branch, acceptLine: decided.line, summary: decided.summary },
+            target,
+          )
         : landLocal({ repo: v.repo, branch: v.branch, dispatch: v.dispatch }, target);
   console.log(outcome.line);
   logVerdict(v.dispatch, v.branch, outcome.verb, outcome.line);

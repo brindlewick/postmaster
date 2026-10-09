@@ -10,6 +10,9 @@ import { run } from "./lib/proc.ts";
 import {
   acceptLine,
   branchHasPath,
+  type CheapFacts,
+  type ChecksOutcome,
+  type ClassifiedEntry,
   classifyEntries,
   commitsPastBase,
   committedFeaturePages,
@@ -39,9 +42,6 @@ import {
   scrubGitEnv,
   surfaceProse,
   timeoutMs,
-  type CheapFacts,
-  type ChecksOutcome,
-  type ClassifiedEntry,
   verifyDirName,
   wallInStream,
 } from "./verifier.ts";
@@ -657,9 +657,9 @@ describe("check and land args", () => {
     expect(
       parseArgs(["land", "/r", "b", "--run", "/d", "--handover", "/h", "--timeout", "soon"]).ok,
     ).toBe(false);
-    expect(
-      parseArgs(["check", "/r", "b", "--run", "/d", "--handover", "/h", "--fresh"]).ok,
-    ).toBe(false);
+    expect(parseArgs(["check", "/r", "b", "--run", "/d", "--handover", "/h", "--fresh"]).ok).toBe(
+      false,
+    );
   });
 });
 
@@ -748,9 +748,10 @@ describe("parseHandover", () => {
       ok: false,
       error: "the hand-over has a verifier with no name",
     });
-    expect(
-      parseHandover("## Verifier: cli\nFolder: a\n## Verifier: cli\nFolder: b\n"),
-    ).toEqual({ ok: false, error: "the hand-over names cli twice" });
+    expect(parseHandover("## Verifier: cli\nFolder: a\n## Verifier: cli\nFolder: b\n")).toEqual({
+      ok: false,
+      error: "the hand-over names cli twice",
+    });
   });
 });
 
@@ -811,9 +812,7 @@ describe("parseVerifyResults", () => {
 
   test("failures are named and a missing gate reads as none", () => {
     const summary = parseVerifyResults(
-      ["gate: fail, exit 1, 1s: npm run check", "cli: fail, exit 1, 0s: bun src/cli.ts"].join(
-        "\n",
-      ),
+      ["gate: fail, exit 1, 1s: npm run check", "cli: fail, exit 1, 0s: bun src/cli.ts"].join("\n"),
     );
     expect(summary.gate).toBe("fail");
     expect(summary.failed).toEqual(["gate", "cli"]);
@@ -888,8 +887,10 @@ describe("decideCheap and decideChecks", () => {
     const landed = [entry("web", "v/web", true, "", "/tmp/w")];
     expect(
       decideCheap(
-        cheap({ classified: [...landed, entry("cli", "v/cli", false, "no proof file")] ,
-          failedPresent: [entry("cli", "v/cli", false, "no proof file")] }),
+        cheap({
+          classified: [...landed, entry("cli", "v/cli", false, "no proof file")],
+          failedPresent: [entry("cli", "v/cli", false, "no proof file")],
+        }),
       ),
     ).toBe("failed verifier still on the branch: cli (v/cli)");
     expect(
