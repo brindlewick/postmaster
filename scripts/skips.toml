@@ -387,3 +387,9 @@ file = "scripts/lib/processes.test.ts"
 name = "portable process state > proc path distinguishes live, zombie and reaped pids"
 reason = "macOS has no /proc, so the proc path cannot run there"
 systems = ["darwin"]
+
+[[skip]]
+file = "scripts/launch-interactive-oracle.test.ts"
+name = "tmux: the clerk's harness is the window's own process"
+reason = "the tmux control runs only where the tmux binary is installed"
+systems = ["linux", "darwin"]
