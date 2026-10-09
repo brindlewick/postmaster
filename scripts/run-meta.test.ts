@@ -1469,7 +1469,10 @@ beforeAll(async () => {
     const dAbsent = mkConfRun("absent", "");
     const modeOf = (dir: string): unknown => {
       try {
-        const r = JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as Record<string, unknown>;
+        const r = JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as Record<
+          string,
+          unknown
+        >;
         return (r.confinement as Record<string, unknown> | undefined)?.mode;
       } catch {
         return undefined;
@@ -1484,7 +1487,11 @@ beforeAll(async () => {
     }
     // A mode that disagrees with the config fails. Edited copies share the
     // dispatch's pin, so the pin check passes and the mode check decides.
-    const editRun = (src: string, tag: string, edit: (r: Record<string, unknown>) => void): string => {
+    const editRun = (
+      src: string,
+      tag: string,
+      edit: (r: Record<string, unknown>) => void,
+    ): string => {
       const dir = join(tmp, `confrun-${tag}`);
       mkdirSync(dir, { recursive: true });
       const r = JSON.parse(readFileSync(join(src, "run.json"), "utf8")) as Record<string, unknown>;
@@ -1525,7 +1532,11 @@ beforeAll(async () => {
     // An old unpinned waybill holds its mode to its config too. The edited
     // copies drop the checkout (kind "no") and name it from a waybill, so the
     // pin check passes on the waybill path and the mode check decides.
-    const unpinRun = (src: string, tag: string, edit: (r: Record<string, unknown>) => void): string => {
+    const unpinRun = (
+      src: string,
+      tag: string,
+      edit: (r: Record<string, unknown>) => void,
+    ): string => {
       const dir = join(tmp, `confrun-${tag}`);
       mkdirSync(dir, { recursive: true });
       const r = JSON.parse(readFileSync(join(src, "run.json"), "utf8")) as Record<string, unknown>;

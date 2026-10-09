@@ -328,9 +328,7 @@ function herdrStubInner(args: string[], stateDir: string): void {
       const ws = p.ws;
       st.spaces[ws].panes = st.spaces[ws].panes.filter((id: string) => id !== pane);
       for (const tab of [...st.spaces[ws].tabs]) {
-        const kept = Object.values(st.panes).some(
-          (q) => q.ws === ws && (q.tab || tab) === tab,
-        );
+        const kept = Object.values(st.panes).some((q) => q.ws === ws && (q.tab || tab) === tab);
         if (!kept) {
           st.spaces[ws].tabs = st.spaces[ws].tabs.filter((id: string) => id !== tab);
           delete st.tabs[tab];
@@ -1886,7 +1884,11 @@ export async function runControls(): Promise<number> {
       herdrRun.out + herdrRun.err,
     );
     const pane = place?.[3] ?? "";
-    const state = json<HerdrStubState>(join(stub, "herdr.json"), { spaces: {}, panes: {}, open: {} });
+    const state = json<HerdrStubState>(join(stub, "herdr.json"), {
+      spaces: {},
+      panes: {},
+      open: {},
+    });
     const spaceId = place?.[1] ?? "";
     const worktree = join(f.repo, ".worktrees/T-1-luna");
     const listedCalls = readCalls("herdr");
@@ -1990,7 +1992,11 @@ export async function runControls(): Promise<number> {
     );
     writeFileSync(join(logs, "h-bunless.go"), "");
     await marker(markerPath("h-bunless"), 15);
-    for (let i = 0; i < 40 && noBunPane in json<HerdrStubState>(join(stub, "herdr.json"), { panes: {} }).panes; i++)
+    for (
+      let i = 0;
+      i < 40 && noBunPane in json<HerdrStubState>(join(stub, "herdr.json"), { panes: {} }).panes;
+      i++
+    )
       await sleep(50);
     const doneHerdrCalls = readCalls("herdr");
     await pass(
@@ -2231,8 +2237,8 @@ export async function runControls(): Promise<number> {
     await pass(
       "run host marks that space as its own",
       () =>
-        json<HerdrStubState>(join(stub, "herdr.json"), { spaces: {} }).spaces[cloneSpace]?.tokens?.postmaster ===
-        "opened",
+        json<HerdrStubState>(join(stub, "herdr.json"), { spaces: {} }).spaces[cloneSpace]?.tokens
+          ?.postmaster === "opened",
     );
     await marker(markerPath("c1"));
     const cloneAgain = execHost(
@@ -2278,7 +2284,11 @@ export async function runControls(): Promise<number> {
     await pass(
       "a plain clone is no scratch: close removes its finished launch and preserves the user's tab",
       () => {
-        const st = json<HerdrStubState>(join(stub, "herdr.json"), { spaces: {}, panes: {}, tabs: {} });
+        const st = json<HerdrStubState>(join(stub, "herdr.json"), {
+          spaces: {},
+          panes: {},
+          tabs: {},
+        });
         const tabs = st.spaces[plainSpace]?.tabs ?? [];
         return (
           calls(root, "herdr").some(
@@ -2339,7 +2349,11 @@ export async function runControls(): Promise<number> {
     );
     writeFileSync(join(logs, "t-live.go"), "");
     await marker(markerPath("t-live"), 15);
-    for (let i = 0; i < 40 && "@1" in json<TmuxStubState>(join(stub, "tmux.json"), { windows: {} }).windows; i++)
+    for (
+      let i = 0;
+      i < 40 && "@1" in json<TmuxStubState>(join(stub, "tmux.json"), { windows: {} }).windows;
+      i++
+    )
       await sleep(50);
     const doneTmuxState = json<TmuxStubState>(join(stub, "tmux.json"), { windows: {} });
     await pass(
@@ -2511,8 +2525,14 @@ export async function runControls(): Promise<number> {
       const lunaReal = realpathSync(luna);
       const solReal = realpathSync(sol);
       const herdrState = () =>
-        json<HerdrStubState>(join(stub, "herdr.json"), { spaces: {}, panes: {}, tabs: {}, open: {} });
-      const tmuxState = () => json<TmuxStubState>(join(stub, "tmux.json"), { sessions: [], windows: {} });
+        json<HerdrStubState>(join(stub, "herdr.json"), {
+          spaces: {},
+          panes: {},
+          tabs: {},
+          open: {},
+        });
+      const tmuxState = () =>
+        json<TmuxStubState>(join(stub, "tmux.json"), { sessions: [], windows: {} });
       const resumeScript = join(f.caller, "resume.sh");
 
       console.log("completion cleanup controls, Herdr (stub)");
@@ -6719,9 +6739,7 @@ function value(text: string, path: string[]): string {
 function worktreeSpace(text: string, path: string): string {
   const worktrees = at(parseJson(text), ["result", "worktrees"]);
   if (!Array.isArray(worktrees)) return "";
-  const worktree = worktrees.find(
-    (entry: Record<string, unknown>) => entry.path === path,
-  );
+  const worktree = worktrees.find((entry: Record<string, unknown>) => entry.path === path);
   return (worktree?.open_workspace_id ?? "") as string;
 }
 

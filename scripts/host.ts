@@ -1056,7 +1056,9 @@ function finishOwnership(panesText: string, target: string, tab: string): string
   if (pane === null) return "missing";
   if (tokensOf(pane).postmaster !== "launch") return "unowned";
   if (!HERDR_TAB_ID.test((pane.tab_id ?? "") as string) || pane.tab_id !== tab) return "pane";
-  if (rows.some((row) => row.pane_id !== target && !HERDR_TAB_ID.test((row.tab_id ?? "") as string)))
+  if (
+    rows.some((row) => row.pane_id !== target && !HERDR_TAB_ID.test((row.tab_id ?? "") as string))
+  )
     return "pane";
   if (rows.some((row) => row.pane_id !== target && row.tab_id === tab)) return "pane";
   return "tab";

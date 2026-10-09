@@ -416,8 +416,10 @@ if (a[0] === "api" && a[1] === "graphql") {
     run("chmod", ["+x", stubGh]);
 
     const db = (access: string, ...rest: string[]): void => {
-      const issues: Record<string, { state: string; title: string; body: string; comments: unknown[] }> =
-        {};
+      const issues: Record<
+        string,
+        { state: string; title: string; body: string; comments: unknown[] }
+      > = {};
       for (let i = 0; i < rest.length; i += 4) {
         issues[rest[i]!] = {
           state: rest[i + 1],

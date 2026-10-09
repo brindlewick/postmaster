@@ -162,7 +162,10 @@ describe("suppressions", () => {
   test("six reasoned ones fail on the cap", () => {
     const dir = fresh();
     plant(dir, cleanConfig(), CHECK);
-    const lines = Array.from({ length: 6 }, (_, i) => `${OXLINT_HEAD + REASONED_TAIL}const v${i} = ${i};\n`);
+    const lines = Array.from(
+      { length: 6 },
+      (_, i) => `${OXLINT_HEAD + REASONED_TAIL}const v${i} = ${i};\n`,
+    );
     writeFileSync(join(dir, "scripts", "a.ts"), lines.join(""));
     const r = accept(dir, stub(GOOD));
     expect(r.code).toBe(1);
@@ -254,9 +257,9 @@ describe("strippedEqual", () => {
 });
 
 describe("type-only test changes", () => {
-  const BEFORE = 'const v: any = 1;\nexpect(v).toBe(1);\n';
-  const TYPED = 'const v: unknown = 1;\nexpect(v).toBe(1);\n';
-  const CHANGED = 'const v: unknown = 1;\nexpect(v).toBe(2);\n';
+  const BEFORE = "const v: any = 1;\nexpect(v).toBe(1);\n";
+  const TYPED = "const v: unknown = 1;\nexpect(v).toBe(1);\n";
+  const CHANGED = "const v: unknown = 1;\nexpect(v).toBe(2);\n";
 
   function git(dir: string, args: string[]): void {
     const r = spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], {
@@ -274,7 +277,10 @@ describe("type-only test changes", () => {
     git(dir, ["init", "-q", "-b", "main"]);
     git(dir, ["add", "."]);
     git(dir, ["commit", "-qm", "base"]);
-    const base = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+    const base = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: dir,
+      encoding: "utf8",
+    }).stdout.trim();
     return { dir, base };
   }
 

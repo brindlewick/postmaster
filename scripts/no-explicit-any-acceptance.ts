@@ -121,7 +121,9 @@ function lintConfigFindings(value: unknown): string[] {
   }
   const ignore: unknown = value["ignorePatterns"];
   if (JSON.stringify(ignore) !== WANT_IGNORE) {
-    out.push(`.oxlintrc.json: ignorePatterns is ${JSON.stringify(ignore) ?? "missing"}, want ${WANT_IGNORE}`);
+    out.push(
+      `.oxlintrc.json: ignorePatterns is ${JSON.stringify(ignore) ?? "missing"}, want ${WANT_IGNORE}`,
+    );
   }
   return out;
 }
@@ -135,7 +137,9 @@ function gateFindings(value: unknown): string[] {
   if (typeof check !== "string") return ["package.json: no check script runs the linter"];
   if (!check.includes("oxlint")) return ["package.json: the check script does not run oxlint"];
   if (check.includes("--deny-warnings")) {
-    return ["package.json: the check script fails on every warning, want only this rule to fail it"];
+    return [
+      "package.json: the check script fails on every warning, want only this rule to fail it",
+    ];
   }
   return [];
 }
@@ -181,7 +185,9 @@ function walk(dir: string, root: string, hits: Hit[]): void {
 }
 
 function suppressionFindings(hits: Hit[]): string[] {
-  const out = hits.filter((h) => !h.reasoned).map((h) => `${h.loc}: suppression without ' -- <reason>'`);
+  const out = hits
+    .filter((h) => !h.reasoned)
+    .map((h) => `${h.loc}: suppression without ' -- <reason>'`);
   if (hits.length > MAX_SUPPRESS) {
     out.push(`${RULE}: ${hits.length} suppressions stand, at most ${MAX_SUPPRESS}`);
   }
@@ -199,11 +205,22 @@ export function strippedEqual(a: string, b: string): boolean {
  * when git itself cannot answer, as against a file that fails the comparison. */
 function typesOnly(root: string, run: Runner, base: string): { findings: string[]; fatal: string } {
   const diff = run(
-    ["git", "diff", "--name-only", `${base}...HEAD`, "--", "scripts/*.test.ts", "scripts/host-self-test.ts"],
+    [
+      "git",
+      "diff",
+      "--name-only",
+      `${base}...HEAD`,
+      "--",
+      "scripts/*.test.ts",
+      "scripts/host-self-test.ts",
+    ],
     root,
   );
   if (!diff.ran || diff.code !== 0) {
-    return { findings: [], fatal: `cannot list test changes at ${base}: ${diff.err || `exit ${diff.code}`}` };
+    return {
+      findings: [],
+      fatal: `cannot list test changes at ${base}: ${diff.err || `exit ${diff.code}`}`,
+    };
   }
   const findings: string[] = [];
   for (const name of diff.out.split("\n").filter((l) => l !== "")) {
@@ -233,10 +250,12 @@ export function accept(root: string, run: Runner = spawnRunner, base?: string): 
     findings.push(...t.findings);
   }
   const cfg = readJson(join(root, ".oxlintrc.json"));
-  if (!cfg.ok) return { code: 2, out: "", err: `${me}: cannot read ${join(root, ".oxlintrc.json")}\n` };
+  if (!cfg.ok)
+    return { code: 2, out: "", err: `${me}: cannot read ${join(root, ".oxlintrc.json")}\n` };
   findings.push(...lintConfigFindings(cfg.value));
   const pkg = readJson(join(root, "package.json"));
-  if (!pkg.ok) return { code: 2, out: "", err: `${me}: cannot read ${join(root, "package.json")}\n` };
+  if (!pkg.ok)
+    return { code: 2, out: "", err: `${me}: cannot read ${join(root, "package.json")}\n` };
   findings.push(...gateFindings(pkg.value));
   const hits: Hit[] = [];
   for (const dir of ["scripts", "lint", "types"]) walk(join(root, dir), root, hits);
@@ -251,7 +270,9 @@ export function accept(root: string, run: Runner = spawnRunner, base?: string): 
   const m = /(\d+) problems?/u.exec(counted.out);
   const n = m === null ? 0 : Number(m[1]);
   if (counted.code !== 0 || n !== 0) {
-    findings.push(`${RULE}: ${m === null ? `exit ${counted.code}` : m[0]} reported, want 0 problems`);
+    findings.push(
+      `${RULE}: ${m === null ? `exit ${counted.code}` : m[0]} reported, want 0 problems`,
+    );
   }
   const probe = join(root, "scripts", "zz-probe.ts");
   if (existsSync(probe)) {
@@ -270,13 +291,23 @@ export function accept(root: string, run: Runner = spawnRunner, base?: string): 
     leftover = true;
   }
   if (leftover) {
-    return { code: 2, out: "", err: `${me}: the probe is left behind at ${PROBE_REL}; remove it\n` };
+    return {
+      code: 2,
+      out: "",
+      err: `${me}: the probe is left behind at ${PROBE_REL}; remove it\n`,
+    };
   }
   if (!flagged.ran) {
     return { code: 2, out: "", err: `${me}: the planted run never started: ${flagged.err}` };
   }
-  if (flagged.code !== 1 || !flagged.out.includes(RULE) || !flagged.out.includes(`${PROBE_REL}:1`)) {
-    findings.push(`probe: the gate exits ${flagged.code} on the planted file without naming ${RULE} at ${PROBE_REL}:1`);
+  if (
+    flagged.code !== 1 ||
+    !flagged.out.includes(RULE) ||
+    !flagged.out.includes(`${PROBE_REL}:1`)
+  ) {
+    findings.push(
+      `probe: the gate exits ${flagged.code} on the planted file without naming ${RULE} at ${PROBE_REL}:1`,
+    );
   }
   const calm = run(["bunx", "oxlint"], root);
   if (!calm.ran) {
@@ -285,7 +316,11 @@ export function accept(root: string, run: Runner = spawnRunner, base?: string): 
   if (calm.code !== 0) {
     findings.push(`probe: the gate exits ${calm.code} without the probe, want 0`);
   }
-  return { code: findings.length === 0 ? 0 : 1, out: findings.map((l) => `${l}\n`).join(""), err: "" };
+  return {
+    code: findings.length === 0 ? 0 : 1,
+    out: findings.map((l) => `${l}\n`).join(""),
+    err: "",
+  };
 }
 
 function printAccept(r: AcceptResult): never {

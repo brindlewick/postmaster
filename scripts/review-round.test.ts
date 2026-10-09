@@ -392,7 +392,10 @@ esac
     }
     const readState2 = (): Record<string, unknown> => {
       try {
-        return JSON.parse(readFileSync(join(d, "logs/review-r2.json"), "utf8")) as Record<string, unknown>;
+        return JSON.parse(readFileSync(join(d, "logs/review-r2.json"), "utf8")) as Record<
+          string,
+          unknown
+        >;
       } catch {
         return {};
       }

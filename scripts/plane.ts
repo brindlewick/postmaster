@@ -1201,7 +1201,11 @@ function flowStateOf(item: PlaneObj, states: PlaneObj[], labels: PlaneObj[]): st
 
 async function itemFor(cfg: PlaneConfig, tid: string): Promise<[string, PlaneObj]> {
   const [ident, n] = parseId(tid);
-  const item = (await api(cfg, "GET", `workspaces/${cfg.WS}/work-items/${ident}-${n}/`)) as PlaneObj;
+  const item = (await api(
+    cfg,
+    "GET",
+    `workspaces/${cfg.WS}/work-items/${ident}-${n}/`,
+  )) as PlaneObj;
   return [ident, item];
 }
 
@@ -1236,16 +1240,11 @@ async function runCommands(): Promise<void> {
     if (diff) dieP(`the body would not read back as written (${diff})`);
     const proj = await projectFor(cfg, ident);
     const todo = stateIdFor(await statesOf(cfg, proj.id as string), "todo");
-    const made = (await api(
-      cfg,
-      "POST",
-      `workspaces/${cfg.WS}/projects/${proj.id}/work-items/`,
-      {
-        name: title,
-        description_html: outHtml,
-        state: todo,
-      },
-    )) as PlaneObj;
+    const made = (await api(cfg, "POST", `workspaces/${cfg.WS}/projects/${proj.id}/work-items/`, {
+      name: title,
+      description_html: outHtml,
+      state: todo,
+    })) as PlaneObj;
     console.log(`${proj.identifier}-${made.sequence_id}`);
   } else if (cmd === "edit") {
     if (args.length !== 3 || !existsSync(args[1] ?? "")) {
@@ -1297,14 +1296,9 @@ async function runCommands(): Promise<void> {
     let labelId = named[0];
     if (verb === "add") {
       if (!labelId) {
-        const created = (await api(
-          cfg,
-          "POST",
-          `workspaces/${cfg.WS}/projects/${pid}/labels/`,
-          {
-            name,
-          },
-        )) as PlaneObj;
+        const created = (await api(cfg, "POST", `workspaces/${cfg.WS}/projects/${pid}/labels/`, {
+          name,
+        })) as PlaneObj;
         labelId = created.id;
       }
       const next = [...new Set([...current, labelId])].sort();
@@ -1382,14 +1376,9 @@ async function runCommands(): Promise<void> {
     let patch: Record<string, unknown>;
     if (newSt === "blocked") {
       if (blockedIds.length === 0) {
-        const created = (await api(
-          cfg,
-          "POST",
-          `workspaces/${cfg.WS}/projects/${pid}/labels/`,
-          {
-            name: BLOCKED,
-          },
-        )) as PlaneObj;
+        const created = (await api(cfg, "POST", `workspaces/${cfg.WS}/projects/${pid}/labels/`, {
+          name: BLOCKED,
+        })) as PlaneObj;
         blockedIds.push(created.id);
       }
       patch = { labels: [...new Set([...current, blockedIds[0]])].sort() };

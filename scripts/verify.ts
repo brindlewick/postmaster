@@ -337,7 +337,7 @@ function declared(repo: string, gate: string, suite: string): Check[] | null {
           gate,
           suite,
           name,
-          shows as (string | undefined),
+          shows as string | undefined,
           `declared:${c.use}`,
         );
       }
