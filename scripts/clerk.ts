@@ -239,6 +239,32 @@ function writeBrief(repo: string, id: string): Brief {
   const skill = join(TOOL, "skills", "clerk", "SKILL.md");
   const runbook = join(TOOL, "skills", "clerk", "clerk.md");
   const briefPath = clerkFile(repo, id, ".brief.md");
+  // The checks every run is held to, and the project's verifiers beside them:
+  // a check the clerk writes should fit the checks every run already runs, and
+  // drive a surface with a verifier through it. Both print verbatim, so the
+  // brief never paraphrases what the scripts say.
+  const checksOut = requireScript(
+    "verify",
+    ["checks", repo, "--lines"],
+    `run verify checks ${repo} --lines failed`,
+  ).replace(/\n+$/u, "");
+  const checksBlock =
+    checksOut === "" ? ["(no checks reported)"] : checksOut.split("\n");
+  const verifiersOut = requireScript(
+    "verifier",
+    ["list", repo],
+    `run verifier list ${repo} failed`,
+  ).replace(/\n+$/u, "");
+  const verifiersBlock =
+    verifiersOut === "verifiers: none"
+      ? ["Verifiers: none."]
+      : [
+          `The project's verifiers, as \`scripts/run verifier list ${repo}\` prints them:`,
+          "",
+          "```text",
+          ...verifiersOut.split("\n"),
+          "```",
+        ];
   const lines = [
     `# Brief: booking clerk for ${session}`,
     "",
@@ -258,6 +284,16 @@ function writeBrief(repo: string, id: string): Brief {
     "",
     `Skill: ${skill}`,
     `Runbook: ${runbook}`,
+    "",
+    "## Checks and verifiers",
+    "",
+    `The checks every run is held to, as \`scripts/run verify checks ${repo} --lines\` prints them:`,
+    "",
+    "```text",
+    ...checksBlock,
+    "```",
+    "",
+    ...verifiersBlock,
     "",
   ];
   if (ticket.title) lines.push(`## The ticket as read`, "", `Title: ${ticket.title}`, "");
