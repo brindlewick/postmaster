@@ -1,7 +1,8 @@
 // Tests beside scripts/no-explicit-any-acceptance.ts: fixture controls plus the live-tree
 // step. Each control plants its own tree, so tests pass alone and in order. The stub
 // runner answers the lint runs from canned outputs, reading the probe file's presence to
-// tell the planted run from the calm one. The two usage controls spawn the wrapper;
+// tell the planted run from the calm one. The type-only controls run real git in a
+// planted repository and stub only the lint runs. The usage controls spawn the wrapper;
 // every other control calls accept() directly.
 import { afterAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -9,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { toolRoot } from "./lib/paths.ts";
-import { accept } from "./no-explicit-any-acceptance";
+import { accept, spawnRunner, strippedEqual } from "./no-explicit-any-acceptance";
 import type { RunResult, Runner } from "./no-explicit-any-acceptance";
 
 const wrapper = join(import.meta.dir, "run");
@@ -224,6 +225,89 @@ describe("tree errors", () => {
   });
 });
 
+describe("strippedEqual", () => {
+  test("a type-only edit compares equal", () => {
+    expect(strippedEqual("const v: any = 1;\n", "const v: unknown = 1;\n")).toBe(true);
+  });
+
+  test("comments and line breaks compare equal", () => {
+    expect(strippedEqual("// a\nconst v = 1;\n", "const v = 1;\n// b\n")).toBe(true);
+  });
+
+  test("a value change compares different", () => {
+    expect(strippedEqual("const v = 1;\n", "const v = 2;\n")).toBe(false);
+  });
+});
+
+describe("type-only test changes", () => {
+  const BEFORE = 'const v: any = 1;\nexpect(v).toBe(1);\n';
+  const TYPED = 'const v: unknown = 1;\nexpect(v).toBe(1);\n';
+  const CHANGED = 'const v: unknown = 1;\nexpect(v).toBe(2);\n';
+
+  function git(dir: string, args: string[]): void {
+    const r = spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  }
+
+  function repoWithTest(): { dir: string; base: string } {
+    const dir = fresh();
+    plant(dir, cleanConfig(), CHECK);
+    writeFileSync(join(dir, "scripts", "w.test.ts"), BEFORE);
+    writeFileSync(join(dir, "scripts", "keep.ts"), "const k = 1;\n");
+    git(dir, ["init", "-q", "-b", "main"]);
+    git(dir, ["add", "."]);
+    git(dir, ["commit", "-qm", "base"]);
+    const base = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+    return { dir, base };
+  }
+
+  function both(cmd: string[], cwd: string): RunResult {
+    return cmd[0] === "git" ? spawnRunner(cmd, cwd) : stub(GOOD)(cmd, cwd);
+  }
+
+  test("a type-only edit passes", () => {
+    const { dir, base } = repoWithTest();
+    writeFileSync(join(dir, "scripts", "w.test.ts"), TYPED);
+    git(dir, ["commit", "-qam", "types"]);
+    expect(accept(dir, both, base).code).toBe(0);
+  });
+
+  test("a value change fails naming the file", () => {
+    const { dir, base } = repoWithTest();
+    writeFileSync(join(dir, "scripts", "w.test.ts"), CHANGED);
+    git(dir, ["commit", "-qam", "value"]);
+    const r = accept(dir, both, base);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("scripts/w.test.ts");
+  });
+
+  test("an added test file is skipped", () => {
+    const { dir, base } = repoWithTest();
+    writeFileSync(join(dir, "scripts", "n.test.ts"), "const n = 1;\n");
+    git(dir, ["add", "."]);
+    git(dir, ["commit", "-qm", "added"]);
+    expect(accept(dir, both, base).code).toBe(0);
+  });
+
+  test("a deleted test file fails", () => {
+    const { dir, base } = repoWithTest();
+    git(dir, ["rm", "-q", "scripts/w.test.ts"]);
+    git(dir, ["commit", "-qm", "deleted"]);
+    const r = accept(dir, both, base);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("scripts/w.test.ts");
+  });
+
+  test("an unknown base exits 2", () => {
+    const { dir } = repoWithTest();
+    const r = accept(dir, both, "0000000000000000000000000000000000000000");
+    expect(r.code).toBe(2);
+  });
+});
+
 describe("the live tree", () => {
   test("passes on the finished branch", () => {
     const r = accept(ROOT);
@@ -243,6 +327,14 @@ describe("usage", () => {
 
   test("a dash argument exits 2", () => {
     const r = spawnSync(wrapper, ["no-explicit-any-acceptance", "--nope"], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(2);
+  });
+
+  test("--base without a value exits 2", () => {
+    const r = spawnSync(wrapper, ["no-explicit-any-acceptance", "--base"], {
       cwd: ROOT,
       encoding: "utf8",
     });

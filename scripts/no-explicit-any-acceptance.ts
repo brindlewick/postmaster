@@ -2,12 +2,17 @@
 // use of it apart from a few reasoned suppressions. Pure file reads plus the gate's own
 // lint command, run as a user runs it; nothing here imports the change's own modules.
 //
-//   run no-explicit-any-acceptance [repo-root]   default: the repo this script lives in
+//   run no-explicit-any-acceptance [--base <commit>] [repo-root]
+//           default root: the repo this script lives in
 //
-//   exit 0  the rule is on, the gate refuses a planted probe, no use remains, and at
-//           most five reasoned suppressions stand
+//   exit 0  the rule is on, the gate refuses a planted probe, no use remains, at most
+//           five reasoned suppressions stand, and with --base every test file changed
+//           since the base is the same program with its types stripped
 //   exit 1  findings, one per line on stdout: <file>: <what fails>
-//   exit 2  usage, an unreadable tree, a probe left behind, or a lint run that never started
+//   exit 2  usage, an unreadable tree, a probe left behind, or a run that never started
+//
+// With --base, a test file added on the branch has nothing at the base to compare and
+// is skipped; a deleted one fails, since dropping a test is not a type-only change.
 //
 // The beside-script test fails on a tree that still carries the old shape, at its
 // live-tree step; that failure is the control proving the checks bite on the real
@@ -183,9 +188,50 @@ function suppressionFindings(hits: Hit[]): string[] {
   return out;
 }
 
-export function accept(root: string, run: Runner = spawnRunner): AcceptResult {
+const stripper = new Bun.Transpiler({ loader: "ts" });
+
+/** Both sources compile to the same JavaScript once their types are stripped. */
+export function strippedEqual(a: string, b: string): boolean {
+  return stripper.transformSync(a) === stripper.transformSync(b);
+}
+
+/** Every test file changed since the base is the same stripped program. `fatal` is set
+ * when git itself cannot answer, as against a file that fails the comparison. */
+function typesOnly(root: string, run: Runner, base: string): { findings: string[]; fatal: string } {
+  const diff = run(
+    ["git", "diff", "--name-only", `${base}...HEAD`, "--", "scripts/*.test.ts", "scripts/host-self-test.ts"],
+    root,
+  );
+  if (!diff.ran || diff.code !== 0) {
+    return { findings: [], fatal: `cannot list test changes at ${base}: ${diff.err || `exit ${diff.code}`}` };
+  }
+  const findings: string[] = [];
+  for (const name of diff.out.split("\n").filter((l) => l !== "")) {
+    let head: string;
+    try {
+      head = readFileSync(join(root, name), "utf8");
+    } catch {
+      findings.push(`${name}: deleted, want type-only changes`);
+      continue;
+    }
+    const shown = run(["git", "show", `${base}:${name}`], root);
+    if (!shown.ran) return { findings, fatal: `cannot read ${base}:${name}: ${shown.err}` };
+    if (shown.code !== 0) continue;
+    if (!strippedEqual(shown.out, head)) {
+      findings.push(`${name}: stripped program differs from the base`);
+    }
+  }
+  return { findings, fatal: "" };
+}
+
+export function accept(root: string, run: Runner = spawnRunner, base?: string): AcceptResult {
   const me = "no-explicit-any-acceptance";
   const findings: string[] = [];
+  if (base !== undefined) {
+    const t = typesOnly(root, run, base);
+    if (t.fatal !== "") return { code: 2, out: "", err: `${me}: ${t.fatal}\n` };
+    findings.push(...t.findings);
+  }
   const cfg = readJson(join(root, ".oxlintrc.json"));
   if (!cfg.ok) return { code: 2, out: "", err: `${me}: cannot read ${join(root, ".oxlintrc.json")}\n` };
   findings.push(...lintConfigFindings(cfg.value));
@@ -247,8 +293,31 @@ function printAccept(r: AcceptResult): never {
 }
 
 function usage(): never {
-  console.error("usage: run no-explicit-any-acceptance [repo-root]");
+  console.error("usage: run no-explicit-any-acceptance [--base <commit>] [repo-root]");
   process.exit(2);
+}
+
+function parseArgs(argv: string[]): { base?: string; root?: string } {
+  let base: string | undefined;
+  let root: string | undefined;
+  let i = 0;
+  while (i < argv.length) {
+    const a: string = argv[i] ?? "";
+    if (a === "--base") {
+      const v: string = argv[i + 1] ?? "";
+      if (v === "" || v.startsWith("-") || base !== undefined) usage();
+      base = v;
+      i += 2;
+    } else if (a === "" || a.startsWith("-")) {
+      usage();
+    } else if (root !== undefined) {
+      usage();
+    } else {
+      root = a;
+      i++;
+    }
+  }
+  return { base, root };
 }
 
 // --- entry ------------------------------------------------------------------------------
@@ -256,8 +325,6 @@ const ROOT = toolRoot(import.meta);
 const argv = process.argv.slice(2);
 
 if (import.meta.main) {
-  if (argv.length > 1 || (argv.length === 1 && (argv[0] === "" || argv[0].startsWith("-")))) {
-    usage();
-  }
-  printAccept(accept(argv[0] ?? ROOT));
+  const args = parseArgs(argv);
+  printAccept(accept(args.root ?? ROOT, spawnRunner, args.base));
 }
