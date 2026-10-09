@@ -118,6 +118,9 @@ interface Spec {
   model: string;
   effort: string;
   envFile: string;
+  // The project root a relative env_file resolves against when the
+  // project's settings set it; "" keeps the global config's directory.
+  envFileBase: string;
   confine: boolean;
 }
 
@@ -133,6 +136,8 @@ function resolveSpec(
   project: string,
 ): Spec {
   let cfg: Record<string, unknown>;
+  let localLayer: Record<string, unknown> | null = null;
+  let projectRootDir = "";
   if (recorded) {
     const data = tryJsonFile<Record<string, unknown>>(sourcePath);
     if (!data) die(`cannot read ${sourcePath}: it does not parse`);
@@ -148,6 +153,10 @@ function resolveSpec(
       die(resolved.error ?? "cannot resolve project settings");
     }
     cfg = resolved.config;
+    localLayer = resolved.local;
+    if (resolved.projectFile !== null) {
+      projectRootDir = dirname(dirname(resolved.projectFile));
+    }
   } else {
     try {
       cfg = readTomlFile(sourcePath);
@@ -224,11 +233,42 @@ function resolveSpec(
   }
   const s = spec as Record<string, unknown>;
   const str = (v: unknown): string => (v === undefined || v === null ? "" : String(v));
+  // A relative env_file the project's settings set resolves against the
+  // project root; one the global config sets keeps the global directory.
+  // The local table that wins the same selection the merged config made
+  // decides which file set it.
+  let envFileBase = "";
+  if (localLayer !== null && projectRootDir !== "") {
+    const asTable = (v: unknown): Record<string, unknown> =>
+      v !== null && typeof v === "object" && !Array.isArray(v)
+        ? (v as Record<string, unknown>)
+        : {};
+    const mteam = asTable(cfg.team);
+    const lteam = asTable(localLayer.team);
+    let localPick: unknown;
+    if (name === "coachman") {
+      const wonLeg = leg ? asTable(mteam.coachman_legs)[leg] : undefined;
+      localPick =
+        wonLeg !== undefined && wonLeg !== null
+          ? asTable(lteam.coachman_legs)[leg]
+          : lteam.coachman;
+    } else if (name === "coachman_fallback") {
+      localPick = lteam.coachman_fallback;
+    } else if (name === "postmaster") {
+      localPick = lteam.postmaster;
+    } else if (name === "clerk") {
+      localPick = lteam.clerk;
+    } else {
+      localPick = asTable(localLayer.lanes)[name];
+    }
+    if (str(asTable(localPick).env_file) !== "") envFileBase = projectRootDir;
+  }
   return {
     harness: str(s.harness),
     model: str(s.model),
     effort: str(s.effort),
     envFile: str(s.env_file),
+    envFileBase,
     confine: String(cfg.confine ?? "") === "on",
   };
 }
@@ -1395,6 +1435,7 @@ if (import.meta.main) {
   const MODEL = spec.model;
   const EFFORT = spec.effort;
   let ENV_FILE = spec.envFile;
+  const ENV_BASE = spec.envFileBase;
   if (!HARNESS) die(`${NAME} has no harness in ${source}`);
   if (!MODEL) die(`${NAME} has no model in ${source}`);
   // A lane in the effective [lanes] table runs in a process space of its own
@@ -1458,12 +1499,16 @@ if (import.meta.main) {
       ENV_FILE = (process.env.HOME ?? "") + ENV_FILE.slice(1);
     }
     if (!ENV_FILE.startsWith("/")) {
-      // A relative path is read from the live config's directory, under --run too.
-      let configDir: string;
-      try {
-        configDir = dirname(realpathSync(CONFIG));
-      } catch {
-        configDir = dirname(resolve(CONFIG));
+      // A relative path the project's settings set is read from the project
+      // root; any other relative path is read from the live config's
+      // directory, under --run too.
+      let configDir = ENV_BASE;
+      if (configDir === "") {
+        try {
+          configDir = dirname(realpathSync(CONFIG));
+        } catch {
+          configDir = dirname(resolve(CONFIG));
+        }
       }
       ENV_FILE = join(configDir, ENV_FILE);
     }

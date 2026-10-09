@@ -40,6 +40,7 @@
 //   exit 2  invalid state
 //   exit 4  the work item changed since the base was read
 import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tryTomlFile } from "./lib/data.ts";
 import {
   acceptanceStorePath,
@@ -1027,6 +1028,7 @@ function loadConfig(): PlaneConfig {
   let tracker: Record<string, unknown>;
   let binding = "";
   let source = configPath;
+  let projectEnvBase = "";
   if (project !== "") {
     const resolved = effectiveConfigForProject(project, configPath);
     if (resolved.notice !== null) console.error(resolved.notice);
@@ -1034,6 +1036,19 @@ function loadConfig(): PlaneConfig {
       dieP(resolved.error ?? "cannot resolve project settings");
     }
     tracker = (resolved.config.tracker ?? {}) as Record<string, unknown>;
+    // A relative env_file the project's settings set resolves against the
+    // project root; one the global config sets reads as before.
+    const localTracker = resolved.local.tracker;
+    if (
+      resolved.projectFile !== null &&
+      localTracker !== null &&
+      typeof localTracker === "object" &&
+      !Array.isArray(localTracker) &&
+      typeof (localTracker as Record<string, unknown>).env_file === "string" &&
+      ((localTracker as Record<string, unknown>).env_file as string) !== ""
+    ) {
+      projectEnvBase = dirname(dirname(resolved.projectFile));
+    }
     // The tracker's values came from the effective config: name the project
     // file that carries them, not the global path, which may not hold them.
     if (resolved.projectFile !== null) source = resolved.projectFile;
@@ -1056,7 +1071,10 @@ function loadConfig(): PlaneConfig {
     tracker = (cfg.tracker ?? {}) as Record<string, unknown>;
   }
   const envFileRaw = (tracker.env_file as string) || "~/.postmaster/plane.env";
-  const envFile = envFileRaw.replace(/^~/u, process.env.HOME ?? "");
+  let envFile = envFileRaw.replace(/^~/u, process.env.HOME ?? "");
+  if (projectEnvBase !== "" && !envFile.startsWith("/")) {
+    envFile = join(projectEnvBase, envFile);
+  }
   const machineWorkspace = String(tracker.workspace ?? "");
   if (binding !== "" && binding !== machineWorkspace)
     dieP(
