@@ -184,97 +184,97 @@ describe("each check fires on its own fault alone", () => {
       `${POST}: still says the Order-them step orders by file surfaces`,
       "5. **Order them.** Dependencies first; then the file surfaces.",
     );
-  }, 30000);
+  });
   test("two tickets one module", () => {
     checkAlone(
       POST,
       `${POST}: still says two tickets on one module do not run together`,
       TWO_TICKETS,
     );
-  }, 30000);
+  });
   test("disjoint files", () => {
     checkAlone(
       COACH,
       `${COACH}: still says parallel runs are safe only on disjoint files`,
       "Parallel runs are safe when their tickets touch disjoint files.",
     );
-  }, 30000);
+  });
   test("prefer sequencing", () => {
     checkAlone(
       COACH,
       `${COACH}: still says prefer sequencing colliding tickets`,
       "Prefer sequencing those tickets, or accept conflict resolution at each gated merge;",
     );
-  }, 30000);
+  });
   test("check surfaces", () => {
     checkAlone(
       COACH,
       `${COACH}: still says check file surfaces before mass-launching`,
       "check the file surfaces before mass-launching.",
     );
-  }, 30000);
+  });
   test("AGENTS general claim", () => {
     checkAlone("AGENTS.md", `AGENTS.md: ${GENERAL}`, "Two runs must not change the same files.");
-  }, 30000);
+  });
   test("README general claim", () => {
     checkAlone("README.md", `README.md: ${GENERAL}`, "Two runs do not touch the same files.");
-  }, 30000);
+  });
   test("wiki general claim", () => {
     checkAlone(
       "wiki/concepts/review-loop.md",
       `wiki/concepts/review-loop.md: ${GENERAL}`,
       "Two runs must not edit the same files.",
     );
-  }, 30000);
+  });
   test("SKILL general claim", () => {
     checkAlone(
       "skills/postmaster/SKILL.md",
       `skills/postmaster/SKILL.md: ${GENERAL}`,
       "The old overlapping file surfaces rule is gone.",
     );
-  }, 30000);
+  });
   test("order-them kept", () => {
     checkWithout(
       POST,
       `${POST}: no longer orders tickets in an Order-them step`,
       dropLines("Order them"),
     );
-  }, 30000);
+  });
   test("max_runs kept", () => {
     checkWithout(
       POST,
       `${POST}: no longer limits runs with team.max_runs`,
       dropLines("team.max_runs"),
     );
-  }, 30000);
+  });
   test("order-them dependencies", () => {
     checkWithout(
       POST,
       `${POST}: no longer orders by dependencies in the Order-them step`,
       sub("Dependencies first:", "Order kept:"),
     );
-  }, 30000);
+  });
   test("note kept", () => {
     checkWithout(
       COACH,
       `${COACH}: no longer keeps a concurrency note`,
       dropLines("Concurrency note"),
     );
-  }, 30000);
+  });
   test("order-them independence", () => {
     checkWithout(
       POST,
       `${POST}: no longer orders by dependencies in the Order-them step`,
       sub("Dependencies first:", "Order kept for independence of lanes:"),
     );
-  }, 30000);
+  });
   test("order-them unrelated text", () => {
     checkWithout(
       POST,
       `${POST}: no longer orders tickets in an Order-them step`,
       sub("5. **Order them.** Dependencies first:", "Order them whenever. Dependencies are fine:"),
     );
-  }, 30000);
+  });
   test("max_runs relocated", () => {
     checkWithout(
       POST,
@@ -285,63 +285,63 @@ describe("each check fires on its own fault alone", () => {
           "- Never launch runs without a ticket.",
         )}See also team.max_runs in the example config.\n`,
     );
-  }, 30000);
+  });
   test("note body resolves", () => {
     checkWithout(
       COACH,
       `${COACH}: no longer says the second merger resolves the conflicts`,
       sub("merges second", "resolves things"),
     );
-  }, 30000);
+  });
   test("note body rebase", () => {
     checkWithout(
       COACH,
       `${COACH}: no longer says merge, never rebase`,
       sub("never rebase", "always rebase"),
     );
-  }, 30000);
+  });
   test("skills txt claim", () => {
     checkAlone(
       "skills/NOTES.txt",
       `skills/NOTES.txt: ${GENERAL}`,
       "Two runs must not change the same files.",
     );
-  }, 30000);
+  });
   test("wiki yml claim", () => {
     checkAlone(
       "wiki/_config.yml",
       `wiki/_config.yml: ${GENERAL}`,
       "Two runs must not edit the same files.",
     );
-  }, 30000);
+  });
   test("AGENTS known sentence", () => {
     checkAlone(
       "AGENTS.md",
       "AGENTS.md: still says prefer sequencing colliding tickets",
       "Prefer sequencing those tickets, or accept conflict resolution at each gated merge;",
     );
-  }, 30000);
+  });
   test("README known sentence", () => {
     checkAlone(
       "README.md",
       "README.md: still says check file surfaces before mass-launching",
       "check the file surfaces before mass-launching.",
     );
-  }, 30000);
+  });
   test("wiki known sentence", () => {
     checkAlone(
       "wiki/concepts/review-loop.md",
       "wiki/concepts/review-loop.md: still says parallel runs are safe only on disjoint files",
       "Parallel runs are safe when their tickets touch disjoint files.",
     );
-  }, 30000);
+  });
   test("capitalised claim", () => {
     checkAlone(
       "skills/postmaster/SKILL.md",
       `skills/postmaster/SKILL.md: ${GENERAL}`,
       "Two Runs Must Not Change The Same Files.",
     );
-  }, 30000);
+  });
   test("hard-rule clause fires its check and the general one twice", () => {
     const one = freshOne();
     writeFileSync(
@@ -356,7 +356,7 @@ describe("each check fires on its own fault alone", () => {
     expect(lines.length).toBe(3);
     expect(lines).toContain(`${POST}: still says never two runs on overlapping file surfaces`);
     expect(lines.filter((l) => l === `${POST}: ${GENERAL}`).length).toBe(2);
-  }, 30000);
+  });
   test("capitalised clause fires its check and the general one twice", () => {
     const one = freshOne();
     writeFileSync(
@@ -372,62 +372,62 @@ describe("each check fires on its own fault alone", () => {
       "skills/postmaster/SKILL.md: still says never two runs on overlapping file surfaces",
     );
     expect(lines.filter((l) => l === `skills/postmaster/SKILL.md: ${GENERAL}`).length).toBe(2);
-  }, 30000);
+  });
 });
 
 describe("all faults together", () => {
   test("stale tree exits 1", () => {
     expect(staleCode).toBe(1);
-  }, 30000);
+  });
   test("stale tree lists 11 faults", () => {
     expect(staleOut.replace(/\n+$/u, "").split("\n").length).toBe(11);
-  }, 30000);
+  });
   test("stale order-them surfaces", () => {
     has(staleOut, `${POST}: still says the Order-them step orders by file surfaces`);
-  }, 30000);
+  });
   test("stale two tickets", () => {
     has(staleOut, `${POST}: still says two tickets on one module do not run together`);
-  }, 30000);
+  });
   test("stale hard rule", () => {
     has(staleOut, `${POST}: still says never two runs on overlapping file surfaces`);
-  }, 30000);
+  });
   test("stale disjoint", () => {
     has(staleOut, `${COACH}: still says parallel runs are safe only on disjoint files`);
-  }, 30000);
+  });
   test("stale sequencing", () => {
     has(staleOut, `${COACH}: still says prefer sequencing colliding tickets`);
-  }, 30000);
+  });
   test("stale check surfaces", () => {
     has(staleOut, `${COACH}: still says check file surfaces before mass-launching`);
-  }, 30000);
+  });
   test("stale postmaster general", () => {
     has(staleOut, `${POST}: ${GENERAL}`);
-  }, 30000);
+  });
   test("stale AGENTS general", () => {
     has(staleOut, `AGENTS.md: ${GENERAL}`);
-  }, 30000);
+  });
   test("stale README general", () => {
     has(staleOut, `README.md: ${GENERAL}`);
-  }, 30000);
+  });
   test("stale wiki general", () => {
     has(staleOut, `wiki/concepts/review-loop.md: ${GENERAL}`);
-  }, 30000);
+  });
 });
 
 describe("a clean tree passes, a missing tree and bad usage exit 2", () => {
   test("clean tree passes", () => {
     const r = accept(clean);
     expect({ code: r.code, out: r.out }).toEqual({ code: 0, out: "" });
-  }, 30000);
+  });
   test("missing tree exits 2", () => {
     expect(accept(join(tmp, "nowhere")).code).toBe(2);
-  }, 30000);
+  });
   test("an extra argument exits 2", () => {
     expect(runCli(clean, "extra").code).toBe(2);
-  }, 30000);
+  });
   test("an unknown flag exits 2", () => {
     expect(runCli("--no-such-flag", "extra").code).toBe(2);
-  }, 30000);
+  });
 });
 
 describe("edges: encodings, permissions, reflows and links", () => {
@@ -444,7 +444,7 @@ describe("edges: encodings, permissions, reflows and links", () => {
       code: 1,
       out: `${COACH}: still says prefer sequencing colliding tickets`,
     });
-  }, 30000);
+  });
   test("an unreadable file exits 2, not a clean result", () => {
     const dir = freshCopy("locked");
     const p = join(dir, POST);
@@ -454,7 +454,7 @@ describe("edges: encodings, permissions, reflows and links", () => {
     } finally {
       chmodSync(p, 0o644);
     }
-  }, 30000);
+  });
   test("an unreadable subtree exits 2, not a clean result", () => {
     const dir = freshCopy("lockeddir");
     mkdirSync(join(dir, "skills/hidden"));
@@ -465,7 +465,7 @@ describe("edges: encodings, permissions, reflows and links", () => {
     } finally {
       chmodSync(join(dir, "skills/hidden"), 0o755);
     }
-  }, 30000);
+  });
   test("a reflowed Order-them step still passes, silently", () => {
     const dir = freshCopy("reflow");
     writeFileSync(
@@ -484,7 +484,7 @@ describe("edges: encodings, permissions, reflows and links", () => {
     );
     const r = accept(dir);
     expect({ code: r.code, out: r.out, err: r.err }).toEqual({ code: 0, out: "", err: "" });
-  }, 30000);
+  });
   test("a split Order-them still passes, silently", () => {
     const dir = freshCopy("split");
     writeFileSync(
@@ -498,7 +498,7 @@ describe("edges: encodings, permissions, reflows and links", () => {
     );
     const r = accept(dir);
     expect({ code: r.code, out: r.out, err: r.err }).toEqual({ code: 0, out: "", err: "" });
-  }, 30000);
+  });
   test("a root path with a pipe still sweeps, silently", () => {
     rmSync(join(tmp, "piped"), { recursive: true, force: true });
     mkdirSync(join(tmp, "piped"), { recursive: true });
@@ -515,7 +515,7 @@ describe("edges: encodings, permissions, reflows and links", () => {
       out: `skills/postmaster/SKILL.md: ${GENERAL}`,
       err: "",
     });
-  }, 30000);
+  });
   test("a rewrapped hard rule still passes, silently", () => {
     const dir = freshCopy("reflowrule");
     const p = join(dir, POST);
@@ -528,7 +528,7 @@ describe("edges: encodings, permissions, reflows and links", () => {
     );
     const r = accept(dir);
     expect({ code: r.code, out: r.out, err: r.err }).toEqual({ code: 0, out: "", err: "" });
-  }, 30000);
+  });
   test("a hard rule quoted outside its section still faults", () => {
     const dir = freshCopy("quoted");
     writeFileSync(
@@ -546,7 +546,7 @@ describe("edges: encodings, permissions, reflows and links", () => {
       out: `${POST}: no longer limits runs with team.max_runs`,
       err: "",
     });
-  }, 30000);
+  });
   test("a hard rule moved within its section still passes, silently", () => {
     const dir = freshCopy("movedin");
     writeFileSync(
@@ -559,7 +559,7 @@ describe("edges: encodings, permissions, reflows and links", () => {
     );
     const r = accept(dir);
     expect({ code: r.code, out: r.out, err: r.err }).toEqual({ code: 0, out: "", err: "" });
-  }, 30000);
+  });
   test("a claim behind a file symlink faults", () => {
     const dir = freshCopy("flink");
     writeFileSync(join(dir, "claim.txt"), "Two runs must not change the same files.\n");
@@ -570,7 +570,7 @@ describe("edges: encodings, permissions, reflows and links", () => {
       out: `skills/evil-link.md: ${GENERAL}`,
       err: "",
     });
-  }, 30000);
+  });
   test("a claim behind a directory symlink faults", () => {
     const dir = freshCopy("dlink");
     mkdirSync(join(dir, "realdir"));
@@ -582,16 +582,16 @@ describe("edges: encodings, permissions, reflows and links", () => {
       out: `wiki/sub/evil.md: ${GENERAL}`,
       err: "",
     });
-  }, 30000);
+  });
   test("a symlink loop exits 2, not a clean result", () => {
     const dir = freshCopy("eloop");
     symlinkSync("loop", join(dir, "skills/loop"));
     expect(accept(dir).code).toBe(2);
-  }, 30000);
+  });
 });
 
 describe("the live tree", () => {
   test("live tree passes", () => {
     expect(accept(ROOT).code).toBe(0);
-  }, 30000);
+  });
 });

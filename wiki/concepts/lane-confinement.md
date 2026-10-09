@@ -2,7 +2,7 @@
 title: A lane stays inside its worktree only when a sandbox wraps its harness
 type: concept
 standing: claimed
-sources: [trials/confine-lanes, trials/mimo-headless-forms]
+sources: [trials/confine-lanes, trials/mimo-headless-forms, trials/2026-10-05-lane-isolation-scan]
 updated: 2026-10-08
 ---
 
@@ -19,8 +19,11 @@ to be allowed user namespaces, which Ubuntu 24.04 and later refuse until root al
 Whatever confines it, a worktree shares its repository's store, so a lane can read another lane's
 commits through git; a shared clone per lane closes that.
 
-**Standing: claimed.** One trial on one Linux machine [@trials/confine-lanes]. No run has
-dispatched confined lanes yet, and nothing was tried on macOS.
+**Standing: claimed.** One trial on one Linux machine [@trials/confine-lanes]. The flow's `confine` setting
+now wraps a lane in a process namespace only, and 13 runs recorded it on, so no run has dispatched file-confined
+lanes. A scan of 60 lane streams found a lane that worked in the run's shared worktree, and lanes that read the
+blind tests and files outside their worktrees [@trials/2026-10-05-lane-isolation-scan/results.md]. Nothing was
+tried on macOS.
 
 ## What a lane needs, and what it must never reach
 
@@ -87,7 +90,8 @@ not promoted). A PID namespace per launch, which sandbox-runtime gives, stops th
 - **Each lane's own stream.** A lane's events stream names the paths its tools touched: codex's
   file changes name the absolute path, Claude Code's and pi's tool calls carry it in their input,
   MiMo Code's in its tool events and Muse Code's in its tool results. A scan for paths outside the
-  lane's worktree finds a reach, done or attempted, before the coachman synthesizes. A shell
+  lane's worktree finds a reach, done or attempted, before the coachman synthesizes. That scan was run once,
+  over 60 streams, on 2026-10-05 [@trials/2026-10-05-lane-isolation-scan/method.md]. A shell
   command names paths only in its text, so a scan of it is a best effort.
 - **What a confinement leaves.** Inside sandbox-runtime a read outside fails with `No such file
   or directory` and a write outside reports success and never lands; under Landlock both fail with

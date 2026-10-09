@@ -30,11 +30,26 @@ Read on 2026-10-08 and 2026-10-09 for [running the flow on Cloudflare](../concep
 
 Earlier reading:
 
+- [Sources read for mixing models for coding](../concepts/mixing-models-for-coding.md#sources): 107 papers
+  and 139 project pages, vendor posts and repositories, read on 2026-10-04. They have no page here, and
+  the page that cites them lists each with the day it was read.
 - [pstack](pstack.md) (2026): a plugin of skills and principles for verified agent work, and
   Part 1 of its guide. Postmaster already holds most of it. Read twice, on 2026-10-03 and 2026-10-05: of
   the changes, the user took two, the skills that make a project's verifiers and keep them current, and left the rest.
 - [The AI-native SDLC playbook](ai-native-sdlc-playbook.md) (2026): design review happens
   before any code is generated, and nothing is implemented without an accepted plan.
+
+
+
+
+
+
+## Formal methods and functional programming
+
+Captured for [what a functional core opens up for checking code](../concepts/functional-core-and-verification.md): 97 papers and
+28 articles in `raw/papers/` and `raw/articles/`, each with the reading helper's notes and its quotes.
+The concept's tables list them by group, with the day each was read and what each says, so they have no
+page of their own here.
 
 ## Runs
 
