@@ -60,31 +60,58 @@ export function coachmanModelProblem(
   return null;
 }
 
-/** front-door's postmaster rule, without its prefix: the spec is a table
- * naming a harness and a model, both non-blank strings without control
- * characters. At most one problem: the first the route would refuse. */
-export function postmasterProblems(spec: unknown, source: string): string[] {
-  if (spec === null || typeof spec !== "object" || Array.isArray(spec)) {
-    return [`${source} has no team.postmaster with a harness and a model`];
-  }
-  const s = spec as Record<string, unknown>;
-  const harness = s.harness;
-  const model = s.model;
-  if (!harness || !model) {
-    return [`${source} has no team.postmaster with a harness and a model`];
-  }
-  if (typeof harness !== "string" || typeof model !== "string") {
-    return [`${source} team.postmaster harness and model must be strings`];
-  }
-  if (!harness.trim() || !model.trim()) {
-    return [`${source} team.postmaster harness and model must not be blank`];
-  }
+/** How one side of a postmaster spec fails the route's needs: missing
+ * is falsy, nonstring truthy but not a string, blank all whitespace, and
+ * control a string carrying control characters. */
+export type PostmasterKeyFailure = "missing" | "nonstring" | "blank" | "control";
+
+/** Where a postmaster spec fails: absent when it is no table, else per key.
+ * The single analysis behind postmasterProblems' messages and check-setup's
+ * per-layer attribution, so the two never disagree. */
+export interface PostmasterFailure {
+  absent: boolean;
+  harness: PostmasterKeyFailure | null;
+  model: PostmasterKeyFailure | null;
+}
+
+function keyFailure(v: unknown): PostmasterKeyFailure | null {
+  if (!v) return "missing";
+  if (typeof v !== "string") return "nonstring";
+  if (v.trim() === "") return "blank";
   if (
-    [...(harness + model)].some((c) => {
+    [...v].some((c) => {
       const o = c.codePointAt(0) ?? 0;
       return o < 0x20 || o === 0x7f;
     })
   ) {
+    return "control";
+  }
+  return null;
+}
+
+export function postmasterFailure(spec: unknown): PostmasterFailure {
+  if (spec === null || typeof spec !== "object" || Array.isArray(spec)) {
+    return { absent: true, harness: null, model: null };
+  }
+  const s = spec as Record<string, unknown>;
+  return { absent: false, harness: keyFailure(s.harness), model: keyFailure(s.model) };
+}
+
+/** front-door's postmaster rule, without its prefix: the spec is a table
+ * naming a harness and a model, both non-blank strings without control
+ * characters. At most one problem: the first the route would refuse. */
+export function postmasterProblems(spec: unknown, source: string): string[] {
+  const f = postmasterFailure(spec);
+  if (f.absent || f.harness === "missing" || f.model === "missing") {
+    return [`${source} has no team.postmaster with a harness and a model`];
+  }
+  if (f.harness === "nonstring" || f.model === "nonstring") {
+    return [`${source} team.postmaster harness and model must be strings`];
+  }
+  if (f.harness === "blank" || f.model === "blank") {
+    return [`${source} team.postmaster harness and model must not be blank`];
+  }
+  if (f.harness === "control" || f.model === "control") {
     return [`${source} team.postmaster harness and model must not contain control characters`];
   }
   return [];
@@ -137,13 +164,17 @@ export function roleModel(spec: unknown): string | null {
 
 /** setup's reviewer-membership rule over merged settings: team.reviewers and
  * every team.lens_reviewers list name lanes. Values that are not lists are
- * shapes setup never writes, and are not judged. */
+ * shapes setup never writes, and are not judged; a list holding a non-string
+ * is judged, since reviewers lines refuses it downstream. */
 export function reviewersProblems(team: unknown, laneNames: string[]): string[] {
   if (!isTable(team)) return [];
   const problems: string[] = [];
   const text = laneNames.join(", ");
   const reviewers = team.reviewers;
   if (Array.isArray(reviewers)) {
+    if (!reviewers.every((n) => typeof n === "string")) {
+      problems.push("setup: [team] reviewers is not a list of lane names");
+    }
     for (const name of reviewers) {
       if (typeof name !== "string") continue;
       const p = reviewerProblem(name, laneNames, text);
@@ -155,6 +186,9 @@ export function reviewersProblems(team: unknown, laneNames: string[]): string[] 
     for (const lens of Object.keys(lenses).sort()) {
       const names = lenses[lens];
       if (!Array.isArray(names)) continue;
+      if (!names.every((n) => typeof n === "string")) {
+        problems.push(`setup: [team.lens_reviewers] ${lens} is not a list of lane names`);
+      }
       for (const name of names) {
         if (typeof name !== "string") continue;
         const p = reviewerProblem(name, laneNames, text, lens);

@@ -18,6 +18,7 @@ import {
   coachmanModelProblem,
   harnessProblem,
   laneCountProblem,
+  postmasterFailure,
   postmasterProblems,
   reviewersProblems,
   roleHarness,
@@ -74,6 +75,29 @@ function checkMerged(cfg: Record<string, unknown>, postmasterSource: string): st
   return problems;
 }
 
+/** Which file the failing side of the merged team.postmaster came from. The
+ * merge combines the global config with the project's settings key by key,
+ * a set key replacing, so a failing harness (or model) is blamed on the
+ * project file exactly when that file sets it. */
+function postmasterSource(
+  local: unknown,
+  projectFile: string | null,
+  globalPath: string,
+  projectAlone: boolean,
+  spec: unknown,
+): string {
+  if (projectFile === null) return globalPath;
+  if (projectAlone) return projectFile;
+  const team = isTable(local) && isTable(local.team) ? local.team : {};
+  const pm = team.postmaster;
+  if (pm === undefined) return globalPath;
+  const f = postmasterFailure(spec);
+  if (f.absent || !isTable(pm)) return projectFile;
+  if (f.harness !== null && Object.hasOwn(pm, "harness")) return projectFile;
+  if (f.model !== null && Object.hasOwn(pm, "model")) return projectFile;
+  return globalPath;
+}
+
 export function main(argv: string[]): number {
   if (argv.length !== 1 || !argv[0]) usage();
   const target = argv[0] as string;
@@ -93,10 +117,14 @@ export function main(argv: string[]): number {
     console.log(`not set up: ${root}\n${problems.join("\n")}`);
     return 1;
   }
-  const source =
-    resolved.projectAlone && resolved.projectFile !== null
-      ? resolved.projectFile
-      : resolved.globalPath;
+  const mergedTeam = isTable(resolved.config.team) ? resolved.config.team : {};
+  const source = postmasterSource(
+    resolved.local,
+    resolved.projectFile,
+    resolved.globalPath,
+    resolved.projectAlone,
+    mergedTeam.postmaster,
+  );
   const problems = checkMerged(resolved.config, source);
   if (problems.length > 0) {
     console.log(`not set up: ${root}\n${problems.join("\n")}`);
