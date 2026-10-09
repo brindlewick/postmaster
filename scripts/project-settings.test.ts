@@ -11,6 +11,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -587,7 +588,9 @@ describe("run-root and exclude-worktrees", () => {
       env: { GIT_WORK_TREE: decoy },
     });
     expect(r.code).toBe(0);
-    expect(r.out.trim()).toBe(join(target, ".postmaster", "runs"));
+    // The printed root is resolved; under a linked temporary folder (macOS /var)
+    // the built path is not, so resolve the expected side first.
+    expect(r.out.trim()).toBe(join(realpathSync(target), ".postmaster", "runs"));
     expect(existsSync(join(decoy, ".postmaster"))).toBe(false);
   }, 30000);
 });

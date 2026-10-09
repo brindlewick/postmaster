@@ -144,11 +144,13 @@ const runBounded = (
       }
       resolve(code);
     };
-    child.on("error", (error) => {
+    child.once("error", (error) => {
       process.stderr.write(`clean-checkout: ${error.message}\n`);
       finish(1);
     });
-    child.on("close", (code) => finish(code ?? 1));
+    // Settle on exit, as host.ts does for its children: stdio is inherited, so
+    // there are no pipes for a close to wait on, and exit always fires.
+    child.once("exit", (code) => finish(code ?? 1));
   });
 
 export const cleanCheckout = async (

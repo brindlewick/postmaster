@@ -3072,7 +3072,7 @@ async function stopPidfileCmd(args: string[]): Promise<void> {
     recorded &&
     row !== undefined &&
     row.start === parts[1] &&
-    bootId() === parts[2] &&
+    sameBoot(parts[2], bootId()) &&
     (parts.length === 3 || pidfileCommand(row.name) === parts[3]);
   if (matches || (!recorded && row !== undefined && !row.zombie)) {
     // Proven, so the leader and its group die: through the group while the leader is
