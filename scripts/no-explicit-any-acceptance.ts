@@ -200,10 +200,9 @@ function suppressionFindings(hits: Hit[]): string[] {
   return out;
 }
 
-const stripper = new Bun.Transpiler({ loader: "ts", minifyWhitespace: true });
+const stripper = new Bun.Transpiler({ loader: "ts" });
 
-/** Both sources minify to the same JavaScript once their types are stripped, so a
- * reflow compares equal and only a changed program differs. */
+/** Both sources compile to the same JavaScript once their types are stripped. */
 export function strippedEqual(a: string, b: string): boolean {
   return stripper.transformSync(a) === stripper.transformSync(b);
 }
