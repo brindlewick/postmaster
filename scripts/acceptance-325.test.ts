@@ -23,12 +23,15 @@ import {
   PR_URL,
   parentsOf,
   plantBranch,
+  pointOriginHead,
   RUN,
   readActions,
   runCheck,
   runLand,
   sleepRepo,
+  stubFailingGh,
   stubGh,
+  suitelessRepo,
   templateApp,
   verifierFiles,
   withBinOnPath,
@@ -132,6 +135,28 @@ describe("C2: nothing outside the folder changes", () => {
       }
     });
   }
+
+  test("a rename from outside the folder into it is refused, naming the source", () => {
+    const { dir, repo } = freshApp();
+    try {
+      const proof = writeProof(dir, "proof-cli.log");
+      const handover = goodHandover(dir, proof);
+      const dispatch = makeDispatch(dir, "postmaster");
+      plantBranch(repo, "verify-cli", verifierFiles("verify-app", HELPER_GOOD), "clean verifier");
+      gitOrThrow(repo, "checkout", "-q", "verify-cli");
+      gitOrThrow(repo, "mv", "src/cli.ts", "verify-app/moved-cli.ts");
+      commitAll(repo, "move the cli into the folder");
+      gitOrThrow(repo, "checkout", "-q", "main");
+      const r = runCheck(repo, "verify-cli", dispatch, handover);
+      expect(r.code).toBe(1);
+      expect(r.out).toBe(
+        "refuse: verify-cli lands nothing: outside the verifiers' folder: src/cli.ts\n",
+      );
+      expect(checksDirExists(dispatch)).toBe(false);
+    } finally {
+      cleanup(dir);
+    }
+  });
 });
 
 describe("C3: one change, by the project's route", () => {
@@ -268,6 +293,92 @@ describe("C3: one change, by the project's route", () => {
       expect(r.code).toBe(0);
       expect(r.out).toContain("waiting: verify-cli is ready to merge into main");
       expect(headOf(repo, "main")).toBe(before);
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("local land follows origin's head, not a stale local main", () => {
+    const { dir, repo } = freshApp();
+    try {
+      gitOrThrow(repo, "branch", "master");
+      pointOriginHead(repo, "master");
+      gitOrThrow(repo, "checkout", "-q", "master");
+      const proof = writeProof(dir, "proof-cli.log");
+      const handover = goodHandover(dir, proof);
+      const dispatch = makeDispatch(dir, "postmaster");
+      plantBranch(
+        repo,
+        "verify-cli",
+        verifierFiles("verify-app", HELPER_GOOD),
+        "clean verifier",
+        "master",
+      );
+      const mainBefore = headOf(repo, "main");
+      const r = runLand(repo, "verify-cli", dispatch, handover, ["--landing", "local"]);
+      expect(r.code).toBe(0);
+      expect(r.out.split("\n")[0]).toContain("accept: verify-cli lands 1 verifier");
+      expect(r.out).toContain("merge: verify-cli into master");
+      expect(parentsOf(repo, "master")).toContain(headOf(repo, "verify-cli"));
+      expect(headOf(repo, "main")).toBe(mainBefore);
+      expect(branchHasFile(repo, "master", "verify-app/README.md")).toBe(true);
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("local land reaches a trunk default", () => {
+    const { dir, repo } = freshApp();
+    try {
+      gitOrThrow(repo, "branch", "-m", "main", "trunk");
+      pointOriginHead(repo, "trunk");
+      const proof = writeProof(dir, "proof-cli.log");
+      const handover = goodHandover(dir, proof);
+      const dispatch = makeDispatch(dir, "postmaster");
+      plantBranch(
+        repo,
+        "verify-cli",
+        verifierFiles("verify-app", HELPER_GOOD),
+        "clean verifier",
+        "trunk",
+      );
+      const r = runLand(repo, "verify-cli", dispatch, handover, ["--landing", "local"]);
+      expect(r.code).toBe(0);
+      expect(r.out.split("\n")[0]).toContain("accept: verify-cli lands 1 verifier");
+      expect(r.out).toContain("merge: verify-cli into trunk");
+      expect(parentsOf(repo, "trunk")).toContain(headOf(repo, "verify-cli"));
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("a failed pull request opening reports the push that landed", () => {
+    const { dir, repo } = freshApp();
+    try {
+      const bare = bareOrigin(dir);
+      gitOrThrow(repo, "remote", "add", "origin", bare);
+      const { bin } = stubFailingGh(dir);
+      const proof = writeProof(dir, "proof-cli.log");
+      const handover = goodHandover(dir, proof);
+      const dispatch = makeDispatch(dir, "postmaster");
+      plantBranch(repo, "verify-cli", verifierFiles("verify-app", HELPER_GOOD), "clean verifier");
+      const r = runLand(
+        repo,
+        "verify-cli",
+        dispatch,
+        handover,
+        ["--landing", "pull-request"],
+        withBinOnPath(bin),
+      );
+      expect(r.code).toBe(1);
+      expect(r.out.split("\n")[0]).toContain("accept: verify-cli lands 1 verifier");
+      expect(r.out).toContain(
+        "error: pushed verify-cli to origin, but gh pr create failed: stub gh: pr create refused\n",
+      );
+      expect(headOf(bare, "verify-cli")).toBe(headOf(repo, "verify-cli"));
+      const actions = readActions(dispatch);
+      expect(actions.map((a) => a.action)).toEqual(["note", "note"]);
+      expect(actions[1]?.detail).toContain("pushed verify-cli to origin");
     } finally {
       cleanup(dir);
     }
@@ -464,6 +575,35 @@ describe("C5: the user is told what was left out, or why nothing landed", () => 
       expect(r.code).toBe(1);
       expect(r.out).toBe(`${want}\n`);
       expect(headOf(repo, "main")).toBe(before);
+      const actions = readActions(dispatch);
+      expect(actions).toHaveLength(1);
+      expect(actions[0]?.detail).toBe(want);
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("a project check that never runs refuses the landing, naming it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "acceptance-325-suiteless-"));
+    try {
+      const repo = suitelessRepo(dir);
+      const proof = writeProof(dir, "proof-suiteless.log");
+      const handover = writeHandover(
+        dir,
+        "HANDOVER.md",
+        handoverDoc(handoverEntry("suiteless", "verify-suiteless", proof)),
+      );
+      plantBranch(
+        repo,
+        "verify-suiteless",
+        { "verify-suiteless/README.md": "# suiteless verifier\n" },
+        "suiteless verifier",
+      );
+      const dispatch = makeDispatch(dir, "postmaster");
+      const r = runCheck(repo, "verify-suiteless", dispatch, handover);
+      const want = "refuse: verify-suiteless lands nothing: checks not run (browser: not run)";
+      expect(r.code).toBe(1);
+      expect(r.out).toBe(`${want}\n`);
       const actions = readActions(dispatch);
       expect(actions).toHaveLength(1);
       expect(actions[0]?.detail).toBe(want);

@@ -144,17 +144,25 @@ export function cleanup(dir: string): void {
   rmSync(dir, { recursive: true, force: true });
 }
 
-/** Commit files on a new branch, leaving the checkout on main. */
+/** Commit files on a new branch, leaving the checkout on back (main). */
 export function plantBranch(
   repo: string,
   branch: string,
   files: Record<string, string>,
   message: string,
+  back = "main",
 ): void {
   gitOrThrow(repo, "checkout", "-qb", branch);
   for (const [rel, text] of Object.entries(files)) writeRepoFile(repo, rel, text);
   commitAll(repo, message);
-  gitOrThrow(repo, "checkout", "-q", "main");
+  gitOrThrow(repo, "checkout", "-q", back);
+}
+
+/** Point a repo's origin HEAD at a branch, with the remote ref to match. */
+export function pointOriginHead(repo: string, branch: string): void {
+  const sha = gitOrThrow(repo, "rev-parse", "HEAD").trim();
+  gitOrThrow(repo, "update-ref", `refs/remotes/origin/${branch}`, sha);
+  gitOrThrow(repo, "symbolic-ref", "refs/remotes/origin/HEAD", `refs/remotes/origin/${branch}`);
 }
 
 /** A dispatch holding only the merge authority the case needs. */
@@ -278,15 +286,38 @@ echo "stub gh: unexpected: $*" >&2
 exit 1
 `;
 
-/** A stub gh first on PATH: it records pr create and prints a canned URL. */
-export function stubGh(dir: string): { bin: string; state: string } {
+function writeStubGh(dir: string, script: string): { bin: string; state: string } {
   const bin = join(dir, "bin");
   const state = join(dir, "gh-state");
   mkdirSync(bin, { recursive: true });
   mkdirSync(state, { recursive: true });
-  writeFileSync(join(bin, "gh"), STUB_GH);
+  writeFileSync(join(bin, "gh"), script);
   chmodSync(join(bin, "gh"), 0o755);
   return { bin, state };
+}
+
+/** A stub gh first on PATH: it records pr create and prints a canned URL. */
+export function stubGh(dir: string): { bin: string; state: string } {
+  return writeStubGh(dir, STUB_GH);
+}
+
+const FAILING_GH = `#!/bin/bash
+here=$(dirname "$0")
+state="$here/../gh-state"
+mkdir -p "$state"
+pwd > "$state/cwd"
+printf '%s\\n' "$@" > "$state/args"
+if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
+  echo "stub gh: pr create refused" >&2
+  exit 1
+fi
+echo "stub gh: unexpected: $*" >&2
+exit 1
+`;
+
+/** A stub gh first on PATH: it records pr create, then refuses it. */
+export function stubFailingGh(dir: string): { bin: string; state: string } {
+  return writeStubGh(dir, FAILING_GH);
 }
 
 export function withBinOnPath(bin: string): Record<string, string | undefined> {
@@ -316,4 +347,18 @@ export function sleepRepo(dir: string): string {
 
 export function checksDirExists(dispatch: string): boolean {
   return existsSync(join(dispatch, "verifier-land"));
+}
+
+/** A repo whose gate passes and whose browser suite was never wired up. */
+export function suitelessRepo(dir: string): string {
+  const repo = join(dir, "suiteless");
+  initRepo(repo);
+  writeRepoFile(
+    repo,
+    ".postmaster/project.toml",
+    '[checks.gate]\ncommand = "true"\nshows = "true passes"\n[checks.browser]\nuse = "browser-suite"\nshows = "the browser suite passes"\n',
+  );
+  writeRepoFile(repo, "README.md", "# suiteless\n");
+  commitAll(repo, "first");
+  return repo;
 }
