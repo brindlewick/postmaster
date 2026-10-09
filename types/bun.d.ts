@@ -851,4 +851,5 @@ declare module "bun:test" {
   export function afterAll(fn: () => unknown, timeout?: number): void;
   export function beforeEach(fn: () => unknown, timeout?: number): void;
   export function afterEach(fn: () => unknown, timeout?: number): void;
+  export function setDefaultTimeout(milliseconds: number): void;
 }
