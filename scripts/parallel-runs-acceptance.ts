@@ -155,6 +155,18 @@ function physicalDir(path: string): string {
   return resolved;
 }
 
+/** A thrown value's code, when it is an object carrying one. */
+function thrownCode(e: unknown): unknown {
+  return typeof e === "object" && e !== null ? (e as { code?: unknown }).code : undefined;
+}
+
+/** A thrown value's message, or the value itself when it has none. */
+function thrownDetail(e: unknown): unknown {
+  const message: unknown =
+    typeof e === "object" && e !== null ? (e as { message?: unknown }).message : undefined;
+  return message ?? e;
+}
+
 /** Walk one path as find -L would: a dangling link is silently skipped, a loop,
 // an unreadable directory or a missing top makes the tree unsweepable. Ancestor
 // canonical paths (not a global visited set) catch loops, so a directory
@@ -168,23 +180,23 @@ function walkInto(
   let st;
   try {
     st = statSync(path);
-  } catch (e: any) {
-    if (!top && e?.code === "ENOENT") return null;
-    return `${path}: ${e?.message ?? e}`;
+  } catch (e) {
+    if (!top && thrownCode(e) === "ENOENT") return null;
+    return `${path}: ${thrownDetail(e)}`;
   }
   if (st.isDirectory()) {
     let key: string;
     try {
       key = physicalDir(path);
-    } catch (e: any) {
-      return `${path}: ${e?.message ?? e}`;
+    } catch (e) {
+      return `${path}: ${thrownDetail(e)}`;
     }
     if (ancestry.has(key)) return `${path}: file system loop detected`;
     let entries: string[];
     try {
       entries = readdirSync(path);
-    } catch (e: any) {
-      return `${path}: ${e?.message ?? e}`;
+    } catch (e) {
+      return `${path}: ${thrownDetail(e)}`;
     }
     ancestry.add(key);
     for (const entry of entries) {
