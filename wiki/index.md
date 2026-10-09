@@ -75,7 +75,8 @@ What would find a defect in postmaster's own scripts before a reviewer does, and
   caught 79 and a pure core made the check possible for 24, none of them without a property. Proofs cost
   far more than the code they check, the one tool found that verifies TypeScript is a tech preview, and
   with language models the trust moves to the specification. Four changes to the design rules and the
-  ticket template are proposed, and five small trials.
+  ticket template are proposed, and five trials, one of which tests a cleanup script with its git swapped
+  for a mock that is checked against real git.
 
 ## Decisions
 

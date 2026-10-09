@@ -1,12 +1,24 @@
 ---
 title: Log
 type: schema
-updated: 2026-10-05
+updated: 2026-10-09
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-09] query | does passing git in, or Effect, make the cleanup checks more effective
+
+Issue #300. Two questions on [the functional-core page](concepts/functional-core-and-verification.md): would wrapping
+side effects in Effect help, and are tests more effective when the live run and the test run differ only in a mock git
+swapped for real git. Answered from the reading already captured and from #252's code at its round-1 snapshot, and
+filed back into the page. Trial 5 is now one program with its git swapped, a mock checked against real git on a scratch
+repository, and a plain version compared with an Effect version, in three steps, each later step run only if the one
+before did not fail. Proposal 2, the Effect sentences and the answer say the same. The old trial 5 listed, in its
+generator, two states that only the findings had named (a submodule and an unbranched merge); a model that has not seen
+the findings now writes the list. A third independent check of the rewrite found 16 problems (3 overstated, 1
+unsupported, 5 missing a limit, 3 stale, 4 minor), all corrected. Nothing was run or installed. No standing changed.
 
 ## [2026-10-05] query | how the dashboard looks
 

@@ -3,7 +3,7 @@ title: What a functional core opens up for checking code, and what it does for c
 type: concept
 standing: claimed
 sources: [trials/2026-10-04-review-findings-classified, articles/alloy-tools, articles/anthropic-2026-pbt-blog, articles/biome-noprocessenv, articles/dafny-2022, articles/dafny-lang, articles/effect-schema, articles/effect-ts, articles/eslint-plugin-functional, articles/fastcheck-ts, articles/fpts, articles/galois-dodds-2025, articles/hacl-2017, articles/hypothesis-py, articles/isabelle, articles/kiro-2025-pbt, articles/kleppmann-2025, articles/lemmafit-2026, articles/lemmascript-2026, articles/meyer-1992, articles/neverthrow, articles/oxlint-no-process-env, articles/quint, articles/rocq-coq, articles/stryker-js, articles/tlaplus-tla, articles/tokeneer-2013, articles/ts-pattern, articles/zod, papers/agda-2024, papers/agentic-pbt-2025, papers/agentic-proving-2026, papers/algoveri-2026, papers/alphaverus-2024, papers/aria-2026, papers/atlas-2025, papers/autospec-2024, papers/autoverus-2024, papers/aws-2014, papers/axdafny-2026, papers/berger-2019, papers/bicarregui-2009, papers/bisharat-2026-tla-bench, papers/bisharat-2026-tla-write, papers/cardano-2024, papers/cedar-2024, papers/chen-2026-modelbench, papers/cheng-2026-sysmobench, papers/clever-2025, papers/clover-2023, papers/dafny-ir-2025, papers/dafnybench-2024, papers/dafnypro-2026, papers/danso-2026-ltl, papers/erlang-pulse-2009, papers/estler-2014, papers/etna-jfp2026, papers/fakhoury-2024-ticoder-study, papers/fan-2025-verifast, papers/faria-2026, papers/fiatcrypto-2019, papers/fonseca-2017, papers/formalbench-2025, papers/fstar-2016, papers/fstar-neural-2024, papers/fvapps-2025, papers/gleirscher-2020, papers/goedel-code-prover-2026, papers/goldstein-icse2024, papers/he-2025-pgs, papers/hong-2025-alloy, papers/howtospecify-2020, papers/huang-2026, papers/hughes-1989, papers/hughes-2016, papers/ironfleet-2015, papers/jing-2026-pbtbench, papers/kamath-2023-loopy, papers/konstantinou-2024-oracles, papers/lahiri-2024-intent-formalization, papers/lahiri-2026, papers/laurel-2024, papers/lean4-2021, papers/leetproof-2026, papers/leroy-2009, papers/li-2026-probe, papers/liquidhaskell-2025, papers/liu-2023-evalplus, papers/mariposa-2023, papers/matichuk-2015, papers/misu-2024, papers/mongodb-xmodelling-2020, papers/nl2postcond-2024, papers/nl2spec-2023, papers/pei-2023-invariants, papers/prasetya-2026-postconditions, papers/propertygpt-2025, papers/qed-2020, papers/quickcheck-2000, papers/rango-2024, papers/ravi-coblenz-2025, papers/richter-2025-nl2contract, papers/rsc-2016, papers/schneider-2025, papers/sel4-2009, papers/sel4-2014, papers/selene-2024, papers/shefer-2025, papers/specgen-2025, papers/swe-proof-2026, papers/tan-2026, papers/tanaka-2025-pbt-ebt, papers/ticoder-2024, papers/verdi-2015, papers/vericoding-2025, papers/vericontest-2026, papers/verifythisbench-2025, papers/verina-2025, papers/vero-2026, papers/verus-2024, papers/verus-specbench-2026, papers/verusage-2025, papers/vikram-2024-pbt, papers/yang-2011, papers/yuan-2014, papers/zhao-2026-misguidance]
-updated: 2026-10-05
+updated: 2026-10-09
 ---
 
 # What a functional core opens up for checking code, and what it does for coding with AI
@@ -61,14 +61,18 @@ measures any of this in TypeScript, apart from the case studies of LemmaScript's
 | Property-based tests find defects that example tests miss | shown that they find defects; in the one small head-to-head each kind caught defects the other missed, and no controlled comparison on real code was found | experience reports, one corpus study and one small head-to-head |
 
 **What follows.** Four changes are proposed to the design rules and the ticket template (give rule 8 a mechanical
-check, which asks the user to reverse a decision they gave in #298; plan then act for anything that runs dry or undoes;
-a law over generated inputs for each reader of text; a state table for each undo), and five small trials of 2 to 12 hours each, none run; one of them prices LemmaScript on a
-single function. A proof tool is not proposed yet, and neither are the Effect and fp-ts libraries: nothing read shows
-they would have caught what the reviews caught, or what they would cost a project of this size.
+check, which asks the user to reverse a decision they gave in #298; one program for the dry run, the tests and the real run of anything that runs dry or undoes;
+a law over generated inputs for each reader of text; a state table for each undo), and five trials, none run: four of 2 to 12 hours each, and a fifth in three steps of 4 to 12 hours, each later step run
+only if the one before did not fail. One of the four prices LemmaScript on a single function. The fifth writes a cleanup script's
+decisions once, with git passed in and swapped for a mock that is checked against real git, and compares a plain version
+with an Effect version. A proof tool is not proposed yet, and neither are the Effect and fp-ts libraries as dependencies: nothing
+read shows they would have caught what the reviews caught, or what they would cost a project of this size, and the fifth
+trial measures one comparison.
 
 **Standing: claimed.** The page rests on reading, and on a count of four runs by a first reader and a second. Two
-independent readers checked it against its captures and sources before it was published, and what they found was
-corrected; [what was not read](#what-was-not-read) says what they did not reach. By
+independent readers checked it against its captures and sources before it was published, and a third checked the
+rewrite of the fifth trial; what they found was corrected, and [what was not read](#what-was-not-read) says what they did
+not reach. By
 [the schema](../schema.md) outside work moves no standing, and the count is a trial, not a promoted run, as
 [the lane audit](several-lanes.md) was. What would settle it: runs made under a changed practice that show fewer
 serious findings per round than these four, and the first trial's result.
@@ -507,8 +511,15 @@ Oxlint, the Biome format check, the tests, the runbook reference check and the w
   ts-pattern makes the compiler reject an unhandled case of a union, and Zod validates untrusted data at runtime
   [@articles/neverthrow/passages.md] [@articles/ts-pattern/passages.md] [@articles/zod/passages.md]. Each is a
   runtime dependency, against the rule that runtime imports are built-ins. A plain function that returns a union
-  of a value and an error gives the same data-in, data-out shape with no dependency; that is argued here, not measured,
-  and no study found measures what adopting any of them costs a small tool.
+  of a value and an error, and that receives the calls it makes as arguments, gives the same shape with no dependency;
+  that is argued here, not measured, and no study found measures what adopting any of them costs a small tool. A lint
+  rule might back either style: the gate already loads one custom Oxlint rule, whether its linters can scope a rule to a
+  folder or restrict imports was not checked, and trial 4 prices an environment, clock and import check, not a ban on
+  `any` and casts. TypeScript tracks Effect's types, so `any` and casts can bypass them, as they can the parameter types
+  of plain functions [@articles/effect-ts/passages.md] (the reading helper's note; the docs pages read do not say), and a
+  rule would have to ban those in either style. What the capture credits Effect with is a type that carries a function's
+  needs and expected errors. Whether that adds anything over the plain style is what the third step of trial 5
+  compares.
 
 ## Postmaster's own record
 
@@ -676,7 +687,7 @@ of them in review when counted, and 34 of the 84 sit in two families.
 
 ## Trials postmaster could run
 
-Five small trials, none run here. Each gives its cost in hours, what it would show and what would show it
+Five trials, none run here; the fifth is in three steps, and a later step runs only if the one before did not fail. Each gives its cost in hours, what it would show and what would show it
 failed. The costs are estimates, not measurements. The first measures what the count above cannot: how much of
 it is hindsight.
 
@@ -736,15 +747,48 @@ reaches, and how many places on `main` it flags that no one would call a defect.
 call that inherits `GIT_DIR`, sit at the edge, where a check on core modules does not look, and the trial counts them.
 *It failed if* it flags none of the eight, or flags more than about twenty places on `main` that are not defects.
 
-**5. Plan, then act, for the cleanup script's dry run.** At #252's round-1 snapshot, write a generator of
-folder states (clean, dirty, locked, with a submodule, with an unbranched merge, with a preview running) and the
-law "the dry run's plan equals what the real run does when nothing changes in between", and run it on a scratch
-copy. Then move one decision, the refusal of a locked folder, into a `plan(state)` that both modes consume, and
-run it again.
-*Cost:* 8 to 10 hours. *It would show* whether generated states reach the three dry-run findings (252/bug-16,
-bug-18, bug-23) before a reviewer does, and whether the shared plan makes the law hold by construction.
-*It failed if* the generator cannot reach the locked or live-preview states without hand-built cases, or if the
-law has to be told the findings to define its states.
+**5. One program with its git swapped, for the cleanup script's dry run.** Take #252's cleanup at its round-1
+snapshot (`a793251` in the trial's data): 1,624 lines that run ten different git commands (`status`, `diff`,
+`diff-tree`, `ls-files`, `rev-list`, `rev-parse`, `format-patch`, `hash-object`, `log` and `worktree`). Three steps. Step 2
+runs only if step 1 did not fail, and step 3 only if step 2 did not fail.
+
+1. *One program, three gits.* First put a seam at the git call, change nothing else, and run the law below against the
+   snapshot as it is. Count how many of the two dry-run findings that turn on git (252/bug-16 and bug-23) it reaches.
+   Then, on a scratch copy, write the cleanup's decisions once, in code that receives the git calls it makes as an
+   argument. The real run passes real git. The dry run passes a git that records each write and does not do it. The test
+   passes a mock. Run the law again. A model that has not seen the findings writes, from the ticket and git's manual, the
+   list of folder states to generate (the ticket names a locked folder and a running preview server; clean and dirty are
+   the obvious others). The law is given: the writes the dry run records equal the writes the real run makes when nothing
+   changes in between. The seam leaves out what is not git: the process table and the launch registry behind 252/bug-18
+   (a live preview), the `tar` call and the calls to other scripts. A read that follows one of the dry run's own writes can
+   also differ, because the dry run does not do the write; in the snapshot, the dry run's pin check skips the run's own
+   folder to stand in for the done mark it did not set. The trial counts these places.
+2. *Keep the mock honest.* Run the same generated operations through the mock and through real git on a scratch
+   repository, and compare what each returns. Where they differ, find out why. If real git is doing what git does, change
+   the mock. If the cause is how our code calls git, such as an inherited environment variable, fix the code. Either way
+   keep the sequence as a fixed case. Cedar's team checks its Lean model of Cedar against its Rust code this way, and
+   Cardano's team checks the Haskell generated from its Agda specification against its hand-written Haskell
+   [@papers/cedar-2024/passages.md] [@papers/cardano-2024/passages.md]. Both compare a model of their own system with
+   that system, not a mock of an outside tool with the tool, and Cedar's testing missed 10 bugs, for reasons such as an
+   input too hard to generate. Count the changes the mock needs.
+3. *The same in Effect.* Write the same decisions as an Effect program that needs git as a service, with the same three
+   gits and the same laws. Compare it with step 1 on size, on hours taken and on what the compiler tracks for you, with
+   the same lint rule on both (trial 4 prices an environment, clock and import check).
+
+*Cost:* 10 to 12 hours for step 1, 4 to 6 for step 2 and about 8 for step 3, which includes reading Effect's
+documentation: 22 to 26 if all three run. *It would show* whether generated states reach the two dry-run findings that
+turn on git before a reviewer does, and whether writing the decisions once makes the law hold by construction. It would
+show how many of the states that the findings of #252 name beyond the obvious ones (a dirty submodule, an unbranched
+merge, a locked pin) the blind list contains, counting an entry only if it names the same kind of folder or pin. It would
+show whether comparing the mock with real git reaches the four findings of #252 that the first reader marked as needing
+real repositories or tools (252/bug-1, bug-14, bug-15, bug-24; the second reader judged a pure parser given recorded git
+output enough for bug-24), and how many changes the mock needs to get there, which is the price of keeping it honest. And
+it would show whether step 3 gives anything that step 1 with a lint rule does not.
+*Step 1 failed if* the generator cannot reach the locked state without hand-built cases, if the law has to be told the
+findings to define its states, or if the dry run still needs its own copy of a refusal that turns on git. *Step 2 failed
+if* it reaches none of the four findings (either the mock only repeats what its author already knew, or the findings do
+not lie in what git returns), or if the mock needs more than about 400 lines (a guess: a quarter of the cleanup) to agree
+with real git on those commands. *Step 3 failed if* it shows nothing that step 1 with a lint rule does not.
 
 What the trials would settle: the page stays **claimed** until runs made under a changed practice show fewer
 serious findings per round than these four. The measure is close to the one
@@ -770,13 +814,18 @@ user to reverse the "no check" half of D2. No module on `main` is named `*-core.
 finding that named the environment read in a core module at the lowest severity while two serious findings
 traced to it.
 
-**2. Add a design rule for tools that run dry or undo: plan, then act.** Proposed text: "A tool that can run dry
-or undo builds its plan as data from the state it read. The dry run prints the plan and the real run carries it
-out, so the two cannot disagree." *Tied to:* #252's three dry-run findings (252/bug-16, bug-18, bug-23), whose own
-escalation names re-implementing every real-run decision inline as the design signal
+**2. Add a design rule for tools that run dry or undo: decide once, with git, files and processes passed in.**
+Proposed text: "A tool that can run dry or undo makes each decision once, in code that the dry run, the tests and the
+real run all use, and receives the calls it makes outside itself (to git, the file system, the process table and other
+programs) as arguments. The three differ only in what they pass in, so they cannot disagree about a decision made from
+the same reads. A read that follows a write can still differ, because the dry run does not do the write." *Tied to:*
+#252's three dry-run findings (252/bug-16, bug-18, bug-23), whose own escalation names re-implementing every real-run
+decision inline as the design signal
 [@trials/2026-10-04-review-findings-classified/data/cards/252-ESCALATION.md], and #202's five restore findings
-(sec-1, sec-4, bug-22, bug-51, bug-57), where the restore decided between git calls. Trial 5 checks it on one
-decision.
+(sec-1, sec-4, bug-22, bug-51, bug-57), where the restore decided between git calls. Of the three dry-run findings,
+bug-16 and bug-23 turn on git worktree locks, and bug-18 on the process table and the launch registry, which trial 5 does
+not pass in. Trial 5 checks the rule on the cleanup's decisions, with git swapped for a mock that is itself checked
+against real git.
 
 **3. In the template's Checks, give each reader a law.** The template asks for one check per criterion, and #202's
 criterion 15 asked for one test that must find a thing and one that must find nothing. For a criterion about
@@ -807,11 +856,12 @@ from a list that no one had written.
   another order; and in Cedar, the report found that counts both, differential and property-based testing found more
   bugs than the proofs did [@papers/cedar-2024/passages.md]. Trial 3 prices LemmaScript on the simplest finding, and an
   independent evaluation of it, or a measured result with models on TypeScript, would change this.
-- **Effect and fp-ts are not proposed.** They shape code and prove nothing about its logic
+- **Effect and fp-ts are not proposed as dependencies.** They shape code and prove nothing about its logic
   [@articles/effect-ts/passages.md] [@articles/fpts/passages.md]. Each is a runtime dependency, against the rule that
   runtime imports are Bun's built-ins and Node's standard modules, and no study found measures what adopting either
-  costs a small tool. A function that returns a union of a value and an error gives the same shape with no
-  dependency, and trial 5 uses that shape for the plan.
+  costs a small tool. What the capture credits Effect with is a type that carries a function's needs and expected errors. Whether
+  that adds anything over plain functions that receive their git as an argument is what step 3 of trial 5 compares.
+  What Effect offers for processes, locks, time-outs and cleanup was not read.
 
 ## What was not read
 
@@ -877,8 +927,8 @@ used. Every other number was read from a table or from the text beside it.
   paper behind Refined TypeScript was read from its abstract only, and JaVerT and Gillian-JS, tools for verifying
   JavaScript, were seen in search results only.
 - Not checked: whether Oxlint or Biome can restrict imports or the clock for one folder, whether fast-check or StrykerJS
-  runs under `bun test` and Bun, and whether postmaster's own scripts lie inside the subset LemmaScript verifies. Not
-  found: any measurement of what adopting Effect or fp-ts costs a small tool.
+  runs under `bun test` and Bun, and whether postmaster's own scripts lie inside the subset LemmaScript verifies. Not found: any measurement of what adopting Effect or fp-ts costs a small tool. Not read: what Effect offers for
+  processes, locks, time-outs and cleanup, how well models write it, and whether it runs under Bun's test runner.
 
 **Postmaster's own record.** Runs #252 and #268 were still in review: their round-4 findings, logged after the count,
 are in the trial's data and are not among the 84. The first reading's labels rest on the descriptions on the runs'
@@ -891,7 +941,9 @@ figures and quotes, with the sources themselves, and compared the record's count
 data. What they found wrong, overstated, unsupported or missing a limit was corrected. Figures that only a reading
 helper's notes support and the independent readers did not reach include PropertyGPT's precision and its per-project
 recall range, the per-model numbers of Verus-SpecGym, and the rows for SysMoBench, Hong's Alloy study and Danso's
-temporal-logic study; each capture says which of its quotes were read twice.
+temporal-logic study; each capture says which of its quotes were read twice. Trial 5, proposal 2 and the sentences about
+Effect were rewritten on 2026-10-09 and checked by a third reader against the captures, the trial's data and the code at
+the snapshot; what it found was corrected.
 
 ## Every serious finding, and what would have caught it
 
@@ -899,7 +951,8 @@ The 84 serious findings of the four runs, in the order of [the table of findings
 each with the first reader's label. `prop, cheap` and `prop, heavy` are a property that runs in process or
 needs git, a shell or a real tool; `both` is a property and a pure core; `neither` is nothing to run. A
 finding is `arguable` where a reasonable reader could have answered the other way. The keys are the ids the
-runs' own review cards use.
+runs' own review cards use. The last column is the first reader's suggestion, written before the proposals, and not
+the proposal itself.
 
 | finding | round | what it was | label | what would have caught it, or why nothing |
 |---|---|---|---|---|
