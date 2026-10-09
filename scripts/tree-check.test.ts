@@ -358,3 +358,92 @@ test("tree check leaves an unmerged staged path alone", () => {
   expect(checked.status).toBe(0);
   expect(checked.stdout).toBe("");
 });
+
+interface FindingRow {
+  commit: string;
+  path: string;
+  line: number;
+  rule: string;
+}
+
+function findingRows(output: string): FindingRow[] {
+  return output
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as FindingRow);
+}
+
+test("tree check --findings emits structured rows with commits", () => {
+  // Review round 11 (bug-59): the rewrite plans from this listing, so it
+  // carries the commit each finding belongs to, like scrub-check's.
+  const repo = initRepo();
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  mkdirSync(join(repo, "raw"));
+  const live = ["sealed", "blob"].join("");
+  writeFileSync(
+    join(repo, "raw", "record.jsonl"),
+    `${JSON.stringify({ encrypted_content: live })}\n`,
+  );
+  gitAt(repo, ["add", "raw/record.jsonl"]);
+  const added = commit(repo, "add the record");
+  const listed = runScript("tree-check", ["--findings", base, "HEAD"], repo);
+  expect(listed.status).toBe(1);
+  expect(findingRows(listed.stdout)).toEqual([
+    { commit: added, path: "raw/record.jsonl", line: 1, rule: "encrypted-reasoning" },
+  ]);
+
+  const stagedRepo = initRepo();
+  mkdirSync(join(stagedRepo, "raw"));
+  writeFileSync(
+    join(stagedRepo, "raw", "record.jsonl"),
+    `${JSON.stringify({ encrypted_content: live })}\n`,
+  );
+  gitAt(stagedRepo, ["add", "raw/record.jsonl"]);
+  const staged = runScript("tree-check", ["--findings", "HEAD", "HEAD"], stagedRepo);
+  expect(staged.status).toBe(1);
+  expect(findingRows(staged.stdout)).toEqual([
+    { commit: "", path: "raw/record.jsonl", line: 1, rule: "encrypted-reasoning" },
+  ]);
+});
+
+test("tree check --findings expands whole-file reasoning to every line", () => {
+  // Review round 11 (bug-59): a spanning record flags at line 1 in text,
+  // but the rewrite removes lines, so the listing names each of them.
+  const repo = initRepo();
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  mkdirSync(join(repo, "raw"));
+  const live = ["sealed", "blob"].join("");
+  const pretty = JSON.stringify({ type: "reasoning", encrypted_content: live }, null, 2);
+  writeFileSync(join(repo, "raw", "pretty.jsonl"), `${pretty}\n`);
+  gitAt(repo, ["add", "raw/pretty.jsonl"]);
+  const added = commit(repo, "add the record");
+  const count = pretty.split("\n").length;
+  expect(count).toBeGreaterThan(1);
+  const listed = runScript("tree-check", ["--findings", base, "HEAD"], repo);
+  expect(listed.status).toBe(1);
+  expect(findingRows(listed.stdout)).toEqual(
+    Array.from({ length: count }, (_, i) => ({
+      commit: added,
+      path: "raw/pretty.jsonl",
+      line: i + 1,
+      rule: "encrypted-reasoning",
+    })),
+  );
+});
+
+test("tree check --findings names run records under .postmaster/", () => {
+  // Review round 11 (bug-59): path findings list at line 0, and the
+  // rewrite refuses them loudly instead of renaming private content.
+  const repo = initRepo();
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  mkdirSync(join(repo, ".postmaster"));
+  writeFileSync(join(repo, ".postmaster", "run.json"), "{}\n");
+  gitAt(repo, ["add", ".postmaster/run.json"]);
+  const added = commit(repo, "add a run record");
+  const listed = runScript("tree-check", ["--findings", base, "HEAD"], repo);
+  expect(listed.status).toBe(1);
+  expect(findingRows(listed.stdout)).toEqual([
+    { commit: added, path: ".postmaster/run.json", line: 0, rule: "private-record" },
+  ]);
+});

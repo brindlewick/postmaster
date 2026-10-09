@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   cleanupScratch,
@@ -124,4 +124,66 @@ test("rewrite keeps untouched commits byte-identical, with or without a trailing
   expect(rewritten.status).toBe(0);
   expect(gitAt(repo, ["log", "--format=%H", "--grep=normal ancestor", "HEAD"])).toBe(normal);
   expect(gitAt(repo, ["log", "--format=%H", "--grep=no trailing newline", "HEAD"])).toBe(bare);
+});
+
+test("rewrite removes reasoning that survives only in earlier history", () => {
+  // Review round 11 (bug-59): the plan read scrub-check only, which never
+  // detects reasoning, so the rewrite exited 0 and the exposed commit stood.
+  const repo = initRepo();
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  mkdirSync(join(repo, "raw"));
+  const live = ["sealed", "blob"].join("");
+  writeFileSync(
+    join(repo, "raw", "secret.jsonl"),
+    `${JSON.stringify({ encrypted_content: live })}\n`,
+  );
+  commit(repo, "add the record");
+  gitAt(repo, ["rm", "-q", "raw/secret.jsonl"]);
+  commit(repo, "delete the record");
+  const tree = gitAt(repo, ["rev-parse", "HEAD^{tree}"]);
+  expect(runScript("tree-check", [base, "HEAD"], repo).status).toBe(1);
+  const rewritten = runScript("scrub-rewrite", [base], repo);
+  expect(rewritten.status).toBe(0);
+  expect(rewritten.stdout).toContain(":raw/secret.jsonl:1: encrypted-reasoning removed");
+  expect(rewritten.stdout.includes(live)).toBe(false);
+  expect(gitAt(repo, ["rev-parse", "HEAD^{tree}"])).toBe(tree);
+  expect(runScript("tree-check", [base, "HEAD"], repo).status).toBe(0);
+  expect(runScript("scrub-check", [base, "HEAD"], repo).status).toBe(0);
+});
+
+test("rewrite removes every line of a spanning record in earlier history", () => {
+  // Review round 11 (bug-59): a pretty-printed record flags at line 1 in
+  // text, but removing one line would leave the value behind in pieces.
+  const repo = initRepo();
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  mkdirSync(join(repo, "raw"));
+  const live = ["sealed", "blob"].join("");
+  const pretty = JSON.stringify({ type: "reasoning", encrypted_content: live }, null, 2);
+  writeFileSync(join(repo, "raw", "pretty.jsonl"), `${pretty}\n`);
+  commit(repo, "add the record");
+  gitAt(repo, ["rm", "-q", "raw/pretty.jsonl"]);
+  commit(repo, "delete the record");
+  const tree = gitAt(repo, ["rev-parse", "HEAD^{tree}"]);
+  const rewritten = runScript("scrub-rewrite", [base], repo);
+  expect(rewritten.status).toBe(0);
+  expect(gitAt(repo, ["rev-parse", "HEAD^{tree}"])).toBe(tree);
+  expect(runScript("tree-check", [base, "HEAD"], repo).status).toBe(0);
+  expect(rewritten.stdout.includes(live)).toBe(false);
+});
+
+test("rewrite refuses a run record under .postmaster instead of renaming it", () => {
+  // Review round 11 (bug-59): renaming would keep private content in
+  // history under another name, so the rewrite fails loud for a manual one.
+  const repo = initRepo();
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  mkdirSync(join(repo, ".postmaster"));
+  writeFileSync(join(repo, ".postmaster", "run.json"), "{}\n");
+  commit(repo, "add a run record");
+  gitAt(repo, ["rm", "-q", ".postmaster/run.json"]);
+  commit(repo, "delete the run record");
+  const head = gitAt(repo, ["rev-parse", "HEAD"]);
+  const refused = runScript("scrub-rewrite", [base], repo);
+  expect(refused.status).toBe(2);
+  expect(refused.stdout + refused.stderr).toContain("needs a manual rewrite");
+  expect(gitAt(repo, ["rev-parse", "HEAD"])).toBe(head);
 });

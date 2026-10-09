@@ -68,31 +68,47 @@ function headHasLine(path: string, text: string, root: string): boolean {
 }
 
 function parseFindings(root: string, base: string, head: string): Item[] {
-  const checker = resolve(import.meta.dir, "scrub-check.ts");
-  const result = runCommand(
-    process.execPath,
-    [
-      "--no-env-file",
-      `--config=${resolve(import.meta.dir, "../bunfig.toml")}`,
-      checker,
-      "--findings",
-      base,
-      head,
-    ],
-    root,
-    { POSTMASTER_DETECTIONS_LOG: "", SCRUB_CHECK_DISABLE: undefined },
-  );
-  if (result.code !== 0 && result.code !== 1) fail("the range could not be scanned");
-  try {
-    return result.out.trim()
-      ? result.out
-          .trim()
-          .split("\n")
-          .map((line) => JSON.parse(line) as Item)
-      : [];
-  } catch {
-    fail("the scanner returned unreadable findings");
+  // Review round 11 (bug-59): the plan reads both detectors, since
+  // scrub-check never detects reasoning and tree-check never reads
+  // patches; planning from one silently kept the other's findings.
+  const checkers = ["scrub-check.ts", "tree-check.ts"];
+  const seen = new Set<string>();
+  const items: Item[] = [];
+  for (const name of checkers) {
+    const result = runCommand(
+      process.execPath,
+      [
+        "--no-env-file",
+        `--config=${resolve(import.meta.dir, "../bunfig.toml")}`,
+        resolve(import.meta.dir, name),
+        "--findings",
+        base,
+        head,
+      ],
+      root,
+      { POSTMASTER_DETECTIONS_LOG: "", SCRUB_CHECK_DISABLE: undefined },
+    );
+    if (result.code !== 0 && result.code !== 1) fail("the range could not be scanned");
+    try {
+      const rows: Item[] = result.out.trim()
+        ? result.out
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line) as Item)
+        : [];
+      // Both detectors read raw/ values, so the same finding lists twice;
+      // the key dedupes it before the plan counts removals.
+      for (const item of rows) {
+        const key = `${item.commit}\0${item.path}\0${item.line}\0${item.rule}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        items.push(item);
+      }
+    } catch {
+      fail("the scanner returned unreadable findings");
+    }
   }
+  return items;
 }
 
 function commitsInRange(root: string, base: string, head: string): CommitRow[] {
@@ -331,6 +347,11 @@ async function main(args: string[]): Promise<number> {
   const namePaths = new Map<string, Set<string>>();
   for (const item of found) {
     if (item.line === 0) {
+      // A run record's content is private, so renaming it in history would
+      // keep the finding under another name; only a manual rewrite removes
+      // it. Review round 11 (bug-59).
+      if (item.path.startsWith(".postmaster/") && item.path !== ".postmaster/project.toml")
+        fail(`a finding under ${safePath(item.path)} needs a manual rewrite`);
       (namePaths.get(item.path) ?? namePaths.set(item.path, new Set()).get(item.path)!).add(
         item.commit,
       );

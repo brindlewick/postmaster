@@ -21,7 +21,7 @@ import {
 import { errorText, fail, findingRow, logFinding, safePath } from "./scrub-report.ts";
 
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-const USAGE = "usage: run tree-check [<base> [<head>]] | --help";
+const USAGE = "usage: run tree-check [<base> [<head>]] | --findings <base> <head> | --help";
 // Read lazily, like the core's set: main sheds the test hook first.
 let DISABLED: Set<string> | null = null;
 function disabled(rule: string): boolean {
@@ -31,12 +31,20 @@ function disabled(rule: string): boolean {
   return DISABLED.has(rule);
 }
 
+interface BlobRow {
+  line: number;
+  rule: string;
+  // A spanning record flags at line 1 in text; the listing expands it to
+  // every line so a line-based consumer removes the whole record.
+  span?: number;
+}
+
 async function scanBlob(
   root: string,
   object: string,
   path: string,
   commit: string,
-): Promise<string[]> {
+): Promise<BlobRow[]> {
   const child = runGit(["show", object], root);
   if (!child.stdout) fail("tree-check", "the tree could not be read");
   // The close listener goes on before the first read: a small blob's git
@@ -46,7 +54,7 @@ async function scanBlob(
     child.once("error", () => resolve(1));
   });
   const scanner = new StreamScanner();
-  const failures: string[] = [];
+  const rows: BlobRow[] = [];
   let line = 0;
   let inBlock = false;
   // The whole-file accumulation the promoter's re-read mirrors: kept only
@@ -77,7 +85,7 @@ async function scanBlob(
       try {
         const parsed = JSON.parse(text) as unknown;
         if (hasReasoning(parsed)) {
-          failures.push(findingRow(path, line, "encrypted-reasoning"));
+          rows.push({ line, rule: "encrypted-reasoning" });
           logFinding("encrypted-reasoning", path, line, commit);
         }
       } catch {
@@ -85,7 +93,7 @@ async function scanBlob(
         // A prose line can embed reasoning JSON without parsing whole; the
         // shared string walk visits the same spans the promoter scrubs.
         if (hasReasoning(text)) {
-          failures.push(findingRow(path, line, "encrypted-reasoning"));
+          rows.push({ line, rule: "encrypted-reasoning" });
           logFinding("encrypted-reasoning", path, line, commit);
         }
       }
@@ -94,11 +102,11 @@ async function scanBlob(
     inBlock = key.inBlock;
     const result = scanner.feed(line, text, { keyBlock: key.flagged });
     for (const f of result.findings) {
-      failures.push(findingRow(path, line, f.rule));
+      rows.push({ line, rule: f.rule });
       if (f.rule !== "marker") logFinding(f.rule, path, line, commit);
     }
     for (const f of result.suppressed) logFinding(f.rule, path, line, commit, "marker");
-    for (const marker of result.markers) failures.push(findingRow(path, line, "marker"));
+    for (const marker of result.markers) rows.push({ line, rule: "marker" });
   }
   if (
     !disabled("encrypted-reasoning") &&
@@ -109,14 +117,14 @@ async function scanBlob(
     // scrubs through. A spanning record flags at line 1, where it starts.
     const parsed = parseWholeJson(whole.join("\n"));
     if (parsed !== undefined && hasReasoning(parsed)) {
-      failures.push(findingRow(path, 1, "encrypted-reasoning"));
+      rows.push({ line: 1, rule: "encrypted-reasoning", span: line });
       logFinding("encrypted-reasoning", path, 1, commit);
     }
   }
-  for (const marker of scanner.flush()) failures.push(findingRow(path, line || 1, "marker"));
+  for (const marker of scanner.flush()) rows.push({ line: line || 1, rule: "marker" });
   const status = await closed;
   if (status !== 0) fail("tree-check", "the tree could not be read");
-  return failures;
+  return rows;
 }
 
 function blobId(root: string, rev: string, path: string): string | null {
@@ -172,7 +180,20 @@ function commitPaths(
   return result;
 }
 
-export async function checkTree(root: string, base: string, head: string): Promise<number> {
+interface TreeRow {
+  commit: string;
+  path: string;
+  line: number;
+  rule: string;
+  span?: number;
+}
+
+export async function checkTree(
+  root: string,
+  base: string,
+  head: string,
+  findings = false,
+): Promise<number> {
   const revArgs =
     base === EMPTY_TREE
       ? ["rev-list", "--parents", "--reverse", head]
@@ -223,20 +244,50 @@ export async function checkTree(root: string, base: string, head: string): Promi
     if (scansNewBlob(status) && path.startsWith("raw/"))
       rawScans.push({ commit: "", path });
   }
-  const failures: string[] = [];
+  // One detection, two renderings: text rows print as before and the
+  // findings listing carries the same rows structured, so the rewrite
+  // plans from exactly what the detector reports. Review round 11 (bug-59).
+  const rows: TreeRow[] = [];
   for (const [path, commit] of privatePaths)
-    failures.push(
-      `${safePath(path)}: ${commit === "staged" ? "staged" : "committed under .postmaster/"}`,
-    );
+    rows.push({
+      commit: commit === "staged" ? "" : commit,
+      path,
+      line: 0,
+      rule: "private-record",
+    });
   for (const { commit, path } of rawScans) {
     const nameFindings = await import("./scrub-core.ts").then((m) => m.detectLine(path));
     for (const finding of nameFindings) {
-      failures.push(findingRow(path, 0, finding.rule));
+      rows.push({ commit, path, line: 0, rule: finding.rule });
       logFinding(finding.rule, path, 0, commit);
     }
     const object = commit ? `${commit}:${path}` : `:${path}`;
-    failures.push(...(await scanBlob(root, object, path, commit)));
+    for (const row of await scanBlob(root, object, path, commit))
+      rows.push({ commit, path, line: row.line, rule: row.rule, span: row.span });
   }
+  if (findings) {
+    const listed: Array<{ commit: string; path: string; line: number; rule: string }> = [];
+    for (const row of rows) {
+      // A spanning record expands to every line it covers: the rewrite
+      // removes lines, and removing one line of a record would leave the
+      // value behind in pieces.
+      const last = row.span ?? row.line;
+      for (let line = row.line; line <= last; line++)
+        listed.push({ commit: row.commit, path: row.path, line, rule: row.rule });
+    }
+    listed.sort((a, b) =>
+      `${a.commit}\0${a.path}\0${a.line}\0${a.rule}` < `${b.commit}\0${b.path}\0${b.line}\0${b.rule}`
+        ? -1
+        : 1,
+    );
+    for (const row of listed) console.log(JSON.stringify(row));
+    return listed.length ? 1 : 0;
+  }
+  const failures = rows.map((row) =>
+    row.rule === "private-record"
+      ? `${safePath(row.path)}: ${row.commit ? "committed under .postmaster/" : "staged"}`
+      : findingRow(row.path, row.line, row.rule),
+  );
   failures.sort();
   for (const line of failures) console.log(line);
   return failures.length ? 1 : 0;
@@ -248,6 +299,15 @@ async function main(args: string[]): Promise<number> {
   if (args.length === 1 && args[0] === "--help") {
     console.error(USAGE);
     return 0;
+  }
+  if (args[0] === "--findings" && args.length === 3) {
+    const root = git(["rev-parse", "--show-toplevel"]).toString("utf8").trim();
+    return checkTree(
+      root,
+      args[1] === EMPTY_TREE ? EMPTY_TREE : resolveCommit(args[1]!, root),
+      resolveCommit(args[2]!, root),
+      true,
+    );
   }
   if (args.length > 2) fail("tree-check", USAGE);
   const root = git(["rev-parse", "--show-toplevel"]).toString("utf8").trim();
