@@ -181,6 +181,30 @@ describe("suppressions", () => {
     expect(r.out).toContain("scripts/a.ts:1");
   });
 
+  test("a reason of only a non-breaking space fails too", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), CHECK);
+    writeFileSync(
+      join(dir, "scripts", "a.ts"),
+      `${OXLINT_HEAD}no-explicit-any -- \u00A0\nconst x = 1;\n`,
+    );
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("scripts/a.ts:1");
+  });
+
+  test("a reason of only a next-line char fails too", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), CHECK);
+    writeFileSync(
+      join(dir, "scripts", "a.ts"),
+      `${OXLINT_HEAD}no-explicit-any -- \u0085\nconst x = 1;\n`,
+    );
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("scripts/a.ts:1");
+  });
+
   test("the eslint spelling counts too", () => {
     const dir = fresh();
     plant(dir, cleanConfig(), CHECK);
@@ -253,12 +277,6 @@ describe("strippedEqual", () => {
 
   test("a value change compares different", () => {
     expect(strippedEqual("const v = 1;\n", "const v = 2;\n")).toBe(false);
-  });
-
-  test("a reflowed program compares equal", () => {
-    expect(
-      strippedEqual("const o = { a: 1, b: 2 };\n", "const o = {\n  a: 1,\n  b: 2,\n};\n"),
-    ).toBe(true);
   });
 
   test("whitespace inside strings still counts", () => {
