@@ -438,10 +438,15 @@ describe("committedFeaturePages", () => {
       writeRepoFile(repo, "verify-app/features/README.md", "map\n");
       writeRepoFile(repo, "verify-app/features/add.md", "a\n");
       writeRepoFile(repo, "verify-app/features/list.md", "l\n");
+      writeRepoFile(repo, "verify-app/features/café.md", "c\n");
       commitAll(repo, "first");
       writeRepoFile(repo, "verify-app/features/done.md", "d\n");
       const pages = committedFeaturePages(repo, "main", "verify-app");
-      expect(pages?.sort()).toEqual(["verify-app/features/add.md", "verify-app/features/list.md"]);
+      expect(pages?.sort()).toEqual([
+        "verify-app/features/add.md",
+        "verify-app/features/café.md",
+        "verify-app/features/list.md",
+      ]);
       expect(committedFeaturePages(repo, "nope", "verify-app")).toBe(null);
       expect(committedFeaturePages(repo, "main", "verify-other")).toEqual([]);
     } finally {

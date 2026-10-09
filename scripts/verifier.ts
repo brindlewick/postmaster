@@ -259,13 +259,11 @@ function handoverMtimeMs(path: string): number | null {
 
 /** Markdown pages committed under the verifier's features folder, besides its index. */
 export function committedFeaturePages(repo: string, branch: string, vdir: string): string[] | null {
-  const r = git(repo, ["ls-tree", "-r", "--name-only", branch, "--", `${vdir}/features/`]);
+  // -z: NUL-separated and never quoted, so non-ASCII names count as written.
+  const r = git(repo, ["ls-tree", "-z", "-r", "--name-only", branch, "--", `${vdir}/features/`]);
   if (r.code !== 0) return null;
   const index = `${vdir}/features/README.md`;
-  return r.out
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l !== "" && l !== index && l.endsWith(".md"));
+  return r.out.split("\0").filter((l) => l !== "" && l !== index && l.endsWith(".md"));
 }
 
 /** The base the session's branch is cut from: origin's head, main, master, or HEAD. */
