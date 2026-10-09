@@ -685,7 +685,13 @@ const GIT_ENV_KEYS = [
 export const isTracked = (repo: string, file: string): boolean => {
   const env: Record<string, string | undefined> = {};
   for (const k of GIT_ENV_KEYS) env[k] = undefined;
-  const r = run("git", ["-C", repo, "ls-files", "--error-unmatch", "--", file], { env });
+  // Both pathspecs match case-insensitively: on a case-insensitive
+  // filesystem a committed variant at any level opens under this name — a
+  // committed .POSTMASTER/settings.toml lands inside a pre-existing
+  // .postmaster/ directory — while git matches case-sensitively.
+  const r = run("git", ["-C", repo, "ls-files", "--error-unmatch", "--", `:(icase)${file}`], {
+    env,
+  });
   if (r.code === 0) return true;
   if (r.code !== 1) {
     // git could not answer: fail closed, unless the directory is not a
@@ -697,11 +703,10 @@ export const isTracked = (repo: string, file: string): boolean => {
     return run("git", ["--version"], { env }).code !== 0;
   }
   // Exit 1 is "did not match": untracked only when the file is positively the
-  // person's own. A case-variant of a committed name at any level still opens
-  // on a case-insensitive filesystem while git matches case-sensitively, and
-  // a file inside a submodule is absent from the superproject's index: both
-  // read as tracked, so committed content cannot skip acceptance either way.
-  // Every component from the repository to the file must match on disk exactly.
+  // person's own. A file inside a submodule is absent from the superproject's
+  // index and reads as tracked, and every component from the repository to
+  // the file must match on disk exactly, so committed content cannot skip
+  // acceptance either way.
   let current = file;
   for (;;) {
     const parent = dirname(current);
@@ -717,7 +722,11 @@ export const isTracked = (repo: string, file: string): boolean => {
     current = parent;
   }
   const rel = relative(repo, dirname(file));
-  const sub = run("git", ["-C", repo, "ls-files", "-s", "--", rel === "" ? "." : rel], { env });
+  const sub = run(
+    "git",
+    ["-C", repo, "ls-files", "-s", "--", `:(icase)${rel === "" ? "." : rel}`],
+    { env },
+  );
   if (sub.code !== 0) return true;
   if (pySplitLines(sub.out).some((line) => line.startsWith("160000 "))) return true;
   return false;
