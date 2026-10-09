@@ -117,7 +117,7 @@ beforeAll(async () => {
       const child: any = Bun.spawn([wrapper, "run-meta", ...args], {
         stdout: "pipe",
         stderr: "pipe",
-        env: { ...process.env, ...(env ?? {}) },
+        env: { ...process.env, ...env },
       });
       return (async () => {
         const code = (await child.exited) as number;
