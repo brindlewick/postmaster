@@ -587,7 +587,6 @@ describe("positive controls", () => {
     expect(last?.detail).toBe(words);
   }, 30000);
 
-
   test("a detail ending in a newline is written", () => {
     const before = lines();
     const r = logAction(["postmaster", "note", "RUN-1", "kept whole\n"]);
