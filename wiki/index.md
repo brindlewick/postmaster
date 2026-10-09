@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-10-05
+updated: 2026-10-09
 ---
 
 # postmaster wiki
@@ -84,7 +84,8 @@ What would find a defect in postmaster's own scripts before a reviewer does, and
   far more than the code they check, the one tool found that verifies TypeScript is a tech preview, and
   with language models the trust moves to the specification. Four changes to the design rules and the
   ticket template are proposed, and five trials, one of which tests a cleanup script with its git swapped
-  for a mock that is checked against real git.
+  for a mock that is checked against real git. The first part of trial 4 has been run: a check on environment, clock and
+  import use flags 13 places on `main`, 3 of them defects, and points at the cause of 6 of the 8 findings it was tried on.
 
 ## Decisions
 
