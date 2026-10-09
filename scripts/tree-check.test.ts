@@ -50,6 +50,51 @@ test("C22 merge commits are checked against each parent", () => {
   expect(checked.stdout).toContain(".postmaster/detections.jsonl");
 });
 
+test("tree check passes raw blobs a merge repeats from the base", () => {
+  // Merging main repeats main's raw delta against the first parent; blobs
+  // identical to the range base already landed and are not new content.
+  const repo = initRepo();
+  writeFileSync(join(repo, "seed.txt"), "branch point\n");
+  commit(repo, "seed");
+  gitAt(repo, ["switch", "-q", "-c", "feature"]);
+  writeFileSync(join(repo, "clean.txt"), "nothing sensitive here\n");
+  commit(repo, "add clean file");
+  gitAt(repo, ["switch", "-q", "main"]);
+  mkdirSync(join(repo, "raw"));
+  writeFileSync(join(repo, "raw", "capture.jsonl"), `{"note": "hello ${email()}"}\n`);
+  commit(repo, "add capture");
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  gitAt(repo, ["switch", "-q", "feature"]);
+  gitAt(repo, ["merge", "--no-ff", "-m", "merge main", "main"]);
+  const checked = runScript("tree-check", [base, "HEAD"], repo);
+  expect(checked.status).toBe(0);
+  expect(checked.stdout).toBe("");
+});
+
+test("tree check still flags a merge's own new raw blob", () => {
+  // An evil merge smuggles new content into a repeated file; its blob
+  // differs from the base, so the base comparison must not skip it.
+  const repo = initRepo();
+  writeFileSync(join(repo, "seed.txt"), "branch point\n");
+  commit(repo, "seed");
+  gitAt(repo, ["switch", "-q", "-c", "feature"]);
+  writeFileSync(join(repo, "clean.txt"), "nothing sensitive here\n");
+  commit(repo, "add clean file");
+  gitAt(repo, ["switch", "-q", "main"]);
+  mkdirSync(join(repo, "raw"));
+  writeFileSync(join(repo, "raw", "capture.jsonl"), '{"note": "clean"}\n');
+  commit(repo, "add capture");
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  gitAt(repo, ["switch", "-q", "feature"]);
+  gitAt(repo, ["merge", "--no-commit", "--no-ff", "main"]);
+  writeFileSync(join(repo, "raw", "capture.jsonl"), `{"note": "hello ${email()}"}\n`);
+  gitAt(repo, ["add", "-A"]);
+  gitAt(repo, ["commit", "-q", "-m", "merge main"]);
+  const checked = runScript("tree-check", [base, "HEAD"], repo);
+  expect(checked.status).toBe(1);
+  expect(checked.stdout).toContain("raw/capture.jsonl:1: email");
+});
+
 test("tree check finds encrypted reasoning nested past any depth", () => {
   // Review round 3: the traversal gave up past 64 levels and passed the gate.
   const repo = initRepo();

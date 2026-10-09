@@ -113,6 +113,15 @@ async function scanBlob(
   return failures;
 }
 
+function blobId(root: string, rev: string, path: string): string | null {
+  try {
+    const id = git(["rev-parse", "--verify", `${rev}:${path}`], root).toString("ascii").trim();
+    return id === "" ? null : id;
+  } catch {
+    return null;
+  }
+}
+
 function commitPaths(
   root: string,
   parent: string,
@@ -164,8 +173,15 @@ export async function checkTree(root: string, base: string, head: string): Promi
           privatePaths.set(item.path, commit);
         // Additions and modifications alike: an edit can smuggle reasoning
         // into a record the promoter already wrote.
-        if ((item.status === "A" || item.status === "M") && item.path.startsWith("raw/"))
-          rawScans.push({ commit, path: item.path });
+        if ((item.status === "A" || item.status === "M") && item.path.startsWith("raw/")) {
+          // A merge repeats the other side's delta against each parent; a blob
+          // identical to the range base already landed and is not new content.
+          // Unresolvable blobs scan, so the comparison only skips known-same.
+          const commitId = blobId(root, commit, item.path);
+          const baseId = base === EMPTY_TREE ? null : blobId(root, base, item.path);
+          if (commitId === null || baseId === null || commitId !== baseId)
+            rawScans.push({ commit, path: item.path });
+        }
       }
     }
   }
