@@ -31,14 +31,19 @@
 //   run host stop <worktree>               stop every launch still running in a worktree, and
 //                                         everything each one started
 //   run host close <worktree>              close its tabs/space (Herdr) and its windows (tmux)
-//   run host stop-run <dispatch>           stop launches in every worktree the run created
-//   run host close-run <dispatch>          close spaces/windows for every worktree the run created
+//   run host stop-run <dispatch>           stop launches in every worktree the run created,
+//                                         and at a fixture copy's root
+//   run host close-run <dispatch>          close spaces/windows for every worktree the run created,
+//                                         and for a fixture copy the copy's own space too
 //   run host spawn <handle> <cwd> [--label <text>] -- <command...>   an interactive session;
 //                                         the handle becomes a Herdr agent name
 //   run host send <handle> <file> [--wait [<seconds>]]   submit the file's text to that session,
 //                                         and with --wait block until it settles (default 600)
 //   run host wait <handle> [<seconds>]     block until it settles, when nothing was just sent
 //   run host read <handle> [<lines>]       print what it shows (default 120 lines)
+//   run host close-handle <handle>         close every session recorded under the handle, on each
+//                                         host that answers; a spawned session from before this
+//                                         form exists closes by hand
 //   run host --live-test                   the ticket's controls, against the hosts on this machine
 //
 // run: <command> is the same headless command a caller would otherwise background with `&`. It
@@ -132,6 +137,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { clerkSessionPath } from "./clerk.ts";
 import { parseTomlText } from "./lib/data.ts";
 import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
 import { scriptsDir } from "./lib/paths.ts";
@@ -328,6 +334,26 @@ function repoOf(path: string): string {
 function tmuxSession(path: string): string {
   const repo = repoOf(path) || path;
   return `postmaster-${basename(repo).replace(/[.:]/gu, "_")}`;
+}
+// A fixture copy: made by run fixture new for one run, marked with
+// .postmaster/fixture and postmaster.fixture in its local git config.
+export function isFixtureRepo(root: string): boolean {
+  if (!root) return false;
+  try {
+    if (statSync(join(root, ".postmaster", "fixture")).isFile()) return true;
+  } catch {}
+  const result = run("git", ["-C", root, "config", "--local", "--get", "postmaster.fixture"]);
+  return result.code === 0 && result.out.trim() !== "";
+}
+// The repository a run's synthesis worktree stands in, "" when the waybill
+// names none: the same guards runWorktreePaths applies to the same path.
+function dispatchRepo(givenDispatch: string): string {
+  const dispatch = realpathLoose(givenDispatch);
+  const synthesis = dispatchInfo(dispatch).worktree;
+  if (!synthesis) return "";
+  const synth = realpathLoose(synthesis);
+  if (basename(dirname(synth)) !== ".worktrees") return "";
+  return dirname(dirname(synth));
 }
 function handleOf(text: string): string {
   // Byte for byte the way BASE's tr sees it: tr folds ASCII case and replaces
@@ -767,6 +793,7 @@ function herdrPlace(
   cwd: string,
   where = "worktree",
   dispatch = "",
+  handle = "",
 ): { space: string; tab: string; pane: string } | null {
   const rootResult = run("git", ["-C", cwd, "rev-parse", "--show-toplevel"]);
   const top = rootResult.code === 0 ? resolve(rootResult.out.trim()) : "";
@@ -866,6 +893,7 @@ function herdrPlace(
     if (response.code !== 0) return null;
     const created = parseJson<{ result?: HerdrPlaced }>(response.out)?.result;
     source = jsonValue(created?.workspace?.workspace_id);
+    if (isFixtureRepo(root)) tagFixtureSpace(source, jsonValue(created?.root_pane?.pane_id));
     // This is the first pane of the project space. Use it for a project-level launch such as
     // the postmaster, instead of leaving an empty shell beside the launch tab.
     if (where === "repo" || worktreeKind === "main") {
@@ -936,7 +964,7 @@ function herdrPlace(
     "--token",
     "postmaster=launch",
   ]);
-  if (!herdrRecordPlacement(space, tab, pane, cwd, dispatch)) {
+  if (!herdrRecordPlacement(space, tab, pane, cwd, dispatch, handle)) {
     // The pane was tagged but never ran the launch. Keep the ownership token
     // alongside its settled state so a later close can safely remove it.
     herdr([
@@ -971,6 +999,7 @@ function herdrRecordPlacement(
   pane: string,
   cwd: string,
   dispatch: string,
+  handle = "",
 ): boolean {
   const directory = join(STATE, "placements");
   try {
@@ -983,7 +1012,7 @@ function herdrRecordPlacement(
     temporary = mkstempSync(directory, ".placement-");
     writeFileSync(
       temporary,
-      `${JSON.stringify({ workspace: space, tab, pane, cwd: realpathLoose(cwd), run: dispatch ? realpathLoose(dispatch) : "" })}\n`,
+      `${JSON.stringify({ workspace: space, tab, pane, cwd: realpathLoose(cwd), run: dispatch ? realpathLoose(dispatch) : "", ...(handle ? { handle } : {}) })}\n`,
     );
     renameSync(
       temporary,
@@ -994,6 +1023,27 @@ function herdrRecordPlacement(
     if (temporary) markerRemove(temporary);
     return false;
   }
+}
+
+// A fixture copy exists for one run: everything in it counts as opened for that
+// run, its project space included, so the space carries the ownership token and
+// its root pane carries ownership too. No state token goes on the root pane:
+// the server merges tokens, so a settled mark would survive the re-tag when a
+// launch reuses the pane and read as settled while live. A tag that does not
+// land leaves the space for a later close to name; the launch itself still runs.
+function tagFixtureSpace(space: string, rootPane: string): void {
+  if (!space) return;
+  if (
+    herdr(["workspace", "report-metadata", space, "--source", META, "--token", "postmaster=opened"])
+      .code !== 0
+  )
+    warn(`could not mark fixture copy space ${space} as opened by run host`);
+  if (
+    rootPane &&
+    herdr(["pane", "report-metadata", rootPane, "--source", META, "--token", "postmaster=root"])
+      .code !== 0
+  )
+    warn(`could not mark fixture copy root pane ${rootPane} in space ${space}`);
 }
 
 function rollbackRootTab(tab: string): void {
@@ -1401,10 +1451,9 @@ function herdrRunPlace(
       "--no-focus",
     ]);
     if (response.code !== 0) return null;
-    source = jsonValue(
-      parseJson<{ result?: { workspace?: HerdrSpace } }>(response.out)?.result?.workspace
-        ?.workspace_id,
-    );
+    const created = parseJson<{ result?: HerdrPlaced }>(response.out)?.result;
+    source = jsonValue(created?.workspace?.workspace_id);
+    if (isFixtureRepo(root)) tagFixtureSpace(source, jsonValue(created?.root_pane?.pane_id));
   }
   let tab = "";
   let pane = "";
@@ -3358,7 +3407,7 @@ function spawnCmd(args: string[]): void {
   if (host === "herdr") {
     if (herdr(["agent", "get", handle]).code === 0)
       die(`a live Herdr agent is already named ${handle}; spawn under another handle`);
-    const placed = herdrPlace(label, cwd, "repo");
+    const placed = herdrPlace(label, cwd, "repo", "", handle);
     if (!placed) die(`Herdr could not open a tab for ${handle}`);
     const kind = basename(commandArgs[0]!);
     if (isKind(kind)) {
@@ -3435,7 +3484,14 @@ function spawnCmd(args: string[]): void {
       ]);
     const window = result.out.trim();
     if (!window) die(`tmux could not start ${handle}`);
+    run("tmux", ["set-option", "-w", "-t", window, "@postmaster_cwd", cwd]);
+    run("tmux", ["set-option", "-w", "-t", window, "@postmaster_handle", handle]);
     run("tmux", ["set-option", "-w", "-t", window, "automatic-rename", "off"]);
+    const pane = run("tmux", ["display-message", "-p", "-t", window, "#{pane_id}"]).out.trim();
+    if (pane) {
+      run("tmux", ["set-option", "-p", "-t", pane, "@postmaster_owned", "yes"]);
+      run("tmux", ["set-option", "-w", "-t", window, "@postmaster_pane", pane]);
+    }
     console.log(`host=tmux session=${session} window=${window} handle=${handle}`);
     return;
   }
@@ -3578,6 +3634,189 @@ function readCmd(args: string[]): void {
     if (result.err) process.stderr.write(result.err);
     if (result.code) throw hostError("", result.code);
   } else noSessionHost();
+}
+// A spawned session still shows: a live Herdr agent under the handle, a
+// recorded pane that still answers, or a tmux window carrying its tag. A
+// shell spawn registers no agent and a user rename changes the window name,
+// so neither the agent list nor the name decides alone. Gone servers hold no
+// sessions.
+function sessionPresent(handle: string): boolean {
+  if (herdrUp()) {
+    if (herdr(["agent", "get", handle]).code === 0) return true;
+    for (const file of placementFiles()) {
+      let item: Record<string, unknown> | null = null;
+      try {
+        item = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
+      if (item.handle !== handle) continue;
+      if (typeof item.pane !== "string" || !item.pane) continue;
+      if (herdr(["pane", "get", item.pane]).code === 0) return true;
+    }
+  }
+  if (has("tmux")) {
+    const rows = run("tmux", [
+      "list-windows",
+      "-a",
+      "-F",
+      "#{window_id}\t#{window_name}\t#{@postmaster_cwd}\t#{@postmaster_handle}\t#{@postmaster_pane}",
+    ]);
+    if (rows.code === 0) {
+      for (const line of pySplitLines(rows.out)) {
+        const cells = line.split("\t");
+        if (cells[0] && cells[3] === handle) return true;
+      }
+    }
+  }
+  return false;
+}
+function closeHandleHerdr(handle: string): { code: number; found: boolean } {
+  const records: Array<{ file: string; space: string; tab: string; pane: string }> = [];
+  for (const file of placementFiles()) {
+    let item: Record<string, unknown> | null = null;
+    try {
+      item = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
+    if (item.handle !== handle) continue;
+    if (
+      typeof item.workspace !== "string" ||
+      typeof item.tab !== "string" ||
+      typeof item.pane !== "string"
+    )
+      continue;
+    records.push({ file, space: item.workspace, tab: item.tab, pane: item.pane });
+  }
+  if (!records.length) {
+    if (herdr(["agent", "get", handle]).code === 0) {
+      warn(`session ${handle} is live but run host recorded no tab for it; left it open`);
+      return { code: 2, found: true };
+    }
+    return { code: 0, found: false };
+  }
+  let rc = 0;
+  for (const rec of records) {
+    if (herdrCloseOnePlacement(rec.space, rec.tab, rec.pane, rec.file, "session") !== 0) rc = 2;
+  }
+  return { code: rc, found: true };
+}
+function closeHandleTmux(handle: string): { code: number; found: boolean } {
+  const rows = run("tmux", [
+    "list-windows",
+    "-a",
+    "-F",
+    "#{window_id}\t#{window_name}\t#{@postmaster_cwd}\t#{@postmaster_handle}\t#{@postmaster_pane}",
+  ]);
+  if (rows.code !== 0) {
+    if (run("tmux", ["ls"]).code !== 0) return { code: 0, found: false };
+    warn(`could not inspect tmux windows for session ${handle}; left it open`);
+    return { code: 2, found: true };
+  }
+  const hits: Array<{ window: string; pane: string }> = [];
+  let named = "";
+  for (const line of pySplitLines(rows.out)) {
+    const [w, name, , tag, ...paneRest] = line.split("\t");
+    if (!w) continue;
+    if (tag === handle) hits.push({ window: w, pane: paneRest.join("\t") });
+    if (name === handle) named = w;
+  }
+  if (!hits.length) {
+    if (named) {
+      warn(`tmux window ${named} is named ${handle} but run host did not open it; left it open`);
+      return { code: 2, found: true };
+    }
+    return { code: 0, found: false };
+  }
+  let rc = 0;
+  for (const hit of hits) {
+    if (tmuxCloseWindow(hit.window, hit.pane) !== 0) rc = 2;
+    else console.log(`host=tmux: closed session window ${hit.window}`);
+  }
+  return { code: rc, found: true };
+}
+// Every session recorded under the handle closes, on each host that
+// answers: handles are unique per spawn, so two matches means two spawns
+// under one name, and a close that left one behind would lie about it.
+function closeHandleCore(handle: string): number {
+  let rc = 0;
+  let found = false;
+  if (has("tmux")) {
+    const tm = closeHandleTmux(handle);
+    if (tm.code !== 0) rc = tm.code;
+    found = found || tm.found;
+  }
+  if (herdrUp()) {
+    const hd = closeHandleHerdr(handle);
+    if (hd.code !== 0) rc = hd.code;
+    found = found || hd.found;
+  }
+  if (rc !== 0) return rc;
+  console.log(found ? `closed ${handle}` : `no session ${handle}`);
+  return 0;
+}
+function closeHandleCmd(args: string[]): void {
+  const raw = args[0] ?? "";
+  if (!raw || args.length !== 1) die("usage: run host close-handle <handle>");
+  const rc = closeHandleCore(handleOf(raw));
+  if (rc !== 0) throw hostError("", rc);
+}
+// A booking clerk session after its ticket is marked ready: ticket-ready mark
+// starts this detached, since the mark runs inside the session's own turn. It
+// waits for the turn to end, closes that one session, and drops its record.
+// The handle arrives on the command line, bound at marking: the record is
+// read only to drop it, so a replacement session recorded since is never
+// waited on or closed here. The record goes only when it still names this
+// session: a new clerk for the same ticket starts under another handle and is
+// never touched here.
+async function clerkCloseCmd(args: string[]): Promise<void> {
+  const repo = args[0] ?? "";
+  const id = args[1] ?? "";
+  const handle = args[2] ?? "";
+  if (!repo || !id || !handle || args.length !== 3)
+    die("usage: run host _clerk-close <repo> <id> <handle>");
+  const drop = (): void => {
+    try {
+      const raw = JSON.parse(readFileSync(clerkSessionPath(repo, id), "utf8")) as {
+        handle?: unknown;
+      };
+      if (raw.handle === handle) rmSync(clerkSessionPath(repo, id), { force: true });
+    } catch {}
+  };
+  const settled = handleOf(handle);
+  if (!sessionPresent(settled)) {
+    console.log(`${handle} is already gone; dropping its record`);
+    const gone = closeHandleCore(settled);
+    if (gone !== 0) throw hostError("", gone);
+    drop();
+    return;
+  }
+  let patience = 600;
+  try {
+    patience = count(process.env.POSTMASTER_CLERK_CLOSE_WAIT ?? "600", "seconds");
+  } catch (error) {
+    warn(
+      `POSTMASTER_CLERK_CLOSE_WAIT is not a number; waiting 600s: ${String((error as Error).message)}`,
+    );
+  }
+  try {
+    await waitCmd([handle, String(patience)]);
+  } catch (error) {
+    if (!sessionPresent(settled)) {
+      const gone = closeHandleCore(settled);
+      if (gone !== 0) throw hostError("", gone);
+      drop();
+      return;
+    }
+    throw error;
+  }
+  const rc = closeHandleCore(settled);
+  if (rc !== 0) throw hostError("", rc);
+  drop();
+  console.log(`closed clerk session ${handle}`);
 }
 
 // --- coachman legs ---------------------------------------------------------------------------
@@ -5265,6 +5504,12 @@ async function main(): Promise<void> {
     case "read":
       readCmd(args);
       return;
+    case "close-handle":
+      closeHandleCmd(args);
+      return;
+    case "_clerk-close":
+      await clerkCloseCmd(args);
+      return;
     case "_leg_exec":
       await legExec(args);
       return;
@@ -5326,7 +5571,7 @@ async function main(): Promise<void> {
       return;
     default:
       die(
-        "usage: run host leg | detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--project <repo>] | limits | stop | close | stop-run | close-run | spawn | send | wait | read | --live-test (see the header)",
+        "usage: run host leg | detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--project <repo>] | limits | stop | close | stop-run | close-run | spawn | send | wait | read | close-handle | --live-test (see the header)",
       );
   }
 }
@@ -5463,69 +5708,81 @@ function herdrClosePlacements(worktree: string): number {
     } catch {
       continue;
     }
-    if (!space || !tab || !pane) {
-      warn(`invalid launch placement in ${file}; left it open`);
-      return 2;
-    }
-    const panesResult = herdr(["pane", "list", "--workspace", space]);
-    if (panesResult.code !== 0) {
-      if (herdrSpaceGone(space)) {
-        markerRemove(file);
-        continue;
-      }
-      warn(`could not inspect launch tab ${tab} in space ${space}; left it open`);
-      return 2;
-    }
-    let ownership = "";
-    try {
-      ownership = placementOwnership(panesResult.out, pane, tab);
-    } catch {
-      warn(`could not verify ownership of launch tab ${tab}; left it open`);
-      return 2;
-    }
-    if (ownership === "missing") {
+    if (herdrCloseOnePlacement(space, tab, pane, file, "launch") !== 0) return 2;
+  }
+  return 0;
+}
+
+// Close one recorded tab: a launch's or a spawned session's. A tab closes only
+// when every pane in it carries the launch token, as a space does: a split tab
+// keeps the user's pane. A tab the list cannot fully place refuses too: a row
+// counts as placed only when its tab_id is a string of the shape Herdr sends
+// (w…:t…), and anything else is unattributable. Where the recorded pane itself
+// carries no attributable tab, only that pane closes, never the tab, whose
+// sharers are unknown.
+function herdrCloseOnePlacement(
+  space: string,
+  tab: string,
+  pane: string,
+  file: string,
+  noun: string,
+): number {
+  if (!space || !tab || !pane) {
+    warn(`invalid ${noun} placement in ${file}; left it open`);
+    return 2;
+  }
+  const panesResult = herdr(["pane", "list", "--workspace", space]);
+  if (panesResult.code !== 0) {
+    if (herdrSpaceGone(space)) {
       markerRemove(file);
-      continue;
+      return 0;
     }
-    // A tab closes only when every pane in it carries the launch token, as a
-    // space does: a split tab keeps the user's pane. A tab the list cannot
-    // fully place refuses too: a row counts as placed only when its tab_id
-    // is a string of the shape Herdr sends (w…:t…), and anything else is
-    // unattributable. Where the recorded pane itself carries no attributable
-    // tab, only that pane closes, never the tab, whose sharers are unknown.
-    if (ownership === "split") {
-      if (herdr(["pane", "close", pane]).code !== 0) {
-        warn(`herdr could not close launch pane ${pane}; left it open`);
-        return 2;
-      }
-      markerRemove(file);
-      warn(`launch tab ${tab} in space ${space} holds panes run host did not open; left it open`);
-      return 2;
-    }
-    if (ownership === "mixed") {
-      warn(`launch tab ${tab} in space ${space} holds panes run host cannot place; left it open`);
-      return 2;
-    }
-    if (ownership === "idless") {
-      if (herdr(["pane", "close", pane]).code !== 0) {
-        warn(`herdr could not close launch pane ${pane}; left it open`);
-        return 2;
-      }
-      markerRemove(file);
-      console.log(`host=herdr: closed launch pane ${pane}`);
-      continue;
-    }
-    if (ownership !== "owned") {
-      warn(`launch tab ${tab} in space ${space} is no longer owned by run host; left it open`);
-      return 2;
-    }
-    if (herdr(["tab", "close", tab]).code !== 0) {
-      warn(`herdr could not close launch tab ${tab}; left it open`);
+    warn(`could not inspect ${noun} tab ${tab} in space ${space}; left it open`);
+    return 2;
+  }
+  let ownership = "";
+  try {
+    ownership = placementOwnership(panesResult.out, pane, tab);
+  } catch {
+    warn(`could not verify ownership of ${noun} tab ${tab}; left it open`);
+    return 2;
+  }
+  if (ownership === "missing") {
+    markerRemove(file);
+    return 0;
+  }
+  if (ownership === "split") {
+    if (herdr(["pane", "close", pane]).code !== 0) {
+      warn(`herdr could not close ${noun} pane ${pane}; left it open`);
       return 2;
     }
     markerRemove(file);
-    console.log(`host=herdr: closed launch tab ${tab}`);
+    warn(`${noun} tab ${tab} in space ${space} holds panes run host did not open; left it open`);
+    return 2;
   }
+  if (ownership === "mixed") {
+    warn(`${noun} tab ${tab} in space ${space} holds panes run host cannot place; left it open`);
+    return 2;
+  }
+  if (ownership === "idless") {
+    if (herdr(["pane", "close", pane]).code !== 0) {
+      warn(`herdr could not close ${noun} pane ${pane}; left it open`);
+      return 2;
+    }
+    markerRemove(file);
+    console.log(`host=herdr: closed ${noun} pane ${pane}`);
+    return 0;
+  }
+  if (ownership !== "owned") {
+    warn(`${noun} tab ${tab} in space ${space} is no longer owned by run host; left it open`);
+    return 2;
+  }
+  if (herdr(["tab", "close", tab]).code !== 0) {
+    warn(`herdr could not close ${noun} tab ${tab}; left it open`);
+    return 2;
+  }
+  markerRemove(file);
+  console.log(`host=herdr: closed ${noun} tab ${tab}`);
   return 0;
 }
 
@@ -5986,6 +6243,25 @@ async function stopRunCmd(args: string[]): Promise<void> {
       } else throw error;
     }
   }
+  // A fixture copy exists for its one run: launches at the copy's root, such
+  // as its watcher, stop with the run, so the later close can take their tabs.
+  const repo = dispatchRepo(dispatch);
+  if (repo !== "" && isFixtureRepo(repo)) {
+    let isDir = false;
+    try {
+      isDir = statSync(repo).isDirectory();
+    } catch {}
+    if (isDir) {
+      try {
+        await stopCmd([repo]);
+      } catch (error) {
+        if (isHostError(error)) {
+          if (error.message) console.error(`host: ${error.message}`);
+          rc = hostCode(error);
+        } else throw error;
+      }
+    }
+  }
   if (rc !== 0) throw hostError("", rc);
 }
 
@@ -6011,6 +6287,16 @@ function runSpaceVerdict(infoText: string, panesText: string): string {
 
 function herdrCloseRunPlacements(givenDispatch: string): number {
   const dispatch = realpathLoose(givenDispatch);
+  const repo = dispatchRepo(dispatch);
+  const fixture = repo !== "" && isFixtureRepo(repo);
+  // A fixture copy exists for its one run: placements recorded with no run and
+  // the copy's checkout as their cwd belong to that run, told apart from the
+  // project's own watcher by the checkout, never by a label.
+  const mine = (item: Record<string, unknown>): boolean => {
+    if (item.run === dispatch) return true;
+    if (!fixture || item.run !== "") return false;
+    return typeof item.cwd === "string" && realpathLoose(item.cwd) === repo;
+  };
   try {
     if (!statSync(join(STATE, "placements")).isDirectory()) return 0;
   } catch {
@@ -6031,7 +6317,7 @@ function herdrCloseRunPlacements(givenDispatch: string): number {
       collectOk = false;
       break;
     }
-    if (item.run === dispatch && item.workspace) {
+    if (mine(item) && item.workspace) {
       if (typeof item.workspace !== "string") {
         collectOk = false;
         break;
@@ -6051,7 +6337,7 @@ function herdrCloseRunPlacements(givenDispatch: string): number {
     try {
       const item = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
       if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
-      if (item.run !== dispatch) continue;
+      if (!mine(item)) continue;
       fields = ["workspace", "tab", "pane", "cwd"].map((key) => jsonValue(item[key]));
     } catch {
       continue;
@@ -6106,6 +6392,8 @@ function herdrCloseRunPlacements(givenDispatch: string): number {
 
 function tmuxCloseRunWindows(givenDispatch: string): number {
   const dispatch = realpathLoose(givenDispatch);
+  const repo = dispatchRepo(dispatch);
+  const fixture = repo !== "" && isFixtureRepo(repo);
   const rows = run("tmux", [
     "list-windows",
     "-a",
@@ -6120,7 +6408,12 @@ function tmuxCloseRunWindows(givenDispatch: string): number {
   let rc = 0;
   for (const line of pySplitLines(rows.out)) {
     const [w, cwd, runTag, ...paneRest] = line.split("\t");
-    if (!w || runTag !== dispatch) continue;
+    if (!w) continue;
+    // A fixture copy's untagged windows belong to its one run when their
+    // checkout is the copy's, told apart from the project's own watcher by
+    // the checkout, never by a label.
+    const fixtureOwn = fixture && !runTag && !!cwd && realpathLoose(cwd) === repo;
+    if (runTag !== dispatch && !fixtureOwn) continue;
     if (!cwd) {
       warn(`run window ${w} has no recorded directory; left it open`);
       rc = 2;
