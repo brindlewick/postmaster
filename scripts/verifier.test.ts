@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { commitAll, gitOrThrow, initRepo, RUN, writeRepoFile } from "./acceptance-323.ts";
 import { run } from "./lib/proc.ts";
 import {
+  commitsPastBase,
   defaultBase,
   isSurface,
   parseArgs,
@@ -15,7 +16,9 @@ import {
   pickWorktree,
   remoteFromSymbolicRef,
   renderPrompt,
+  repoTop,
   roleHarness,
+  scrubGitEnv,
   surfaceProse,
   verifyDirName,
   wallInStream,
@@ -231,6 +234,88 @@ describe("prompt needs a commit to name", () => {
       const r = run(RUN, ["verifier", "prompt", repo, "cli"]);
       expect(r.code).toBe(2);
       expect(r.err).toContain("usage: run verifier");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("prompt on a path below the repo top exits 2", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      writeRepoFile(repo, "src/keep.md", "x\n");
+      commitAll(repo, "first");
+      const r = run(RUN, ["verifier", "prompt", join(repo, "src"), "cli"]);
+      expect(r.code).toBe(2);
+      expect(r.err).toContain("not the top of its repository");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an inherited GIT_DIR does not redirect the repo check", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      const r = run(RUN, ["verifier", "prompt", dir, "cli"], {
+        env: { GIT_DIR: join(repo, ".git") },
+      });
+      expect(r.code).toBe(2);
+      expect(r.err).toContain("not a git repository");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("scrubGitEnv", () => {
+  test("drops the redirectors and keeps the rest", () => {
+    expect(scrubGitEnv({ GIT_DIR: "/x", GIT_WORK_TREE: "/y", PATH: "/bin", HOME: "/h" })).toEqual({
+      PATH: "/bin",
+      HOME: "/h",
+    });
+    expect(scrubGitEnv({ PATH: "/bin" })).toEqual({ PATH: "/bin" });
+  });
+});
+
+describe("repoTop", () => {
+  test("the top for the top and its subdir, none outside a repo", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      writeRepoFile(repo, "src/keep.md", "x\n");
+      commitAll(repo, "first");
+      expect(repoTop(repo)).toBe(repo);
+      expect(repoTop(join(repo, "src"))).toBe(repo);
+      expect(repoTop(join(dir, "nope"))).toBe(null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("commitsPastBase", () => {
+  test("none on a fresh branch, one after a commit, none for a bad base", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      gitOrThrow(repo, "branch", "verify-cli");
+      expect(commitsPastBase(repo, "main", "verify-cli")).toBe(0);
+      gitOrThrow(repo, "checkout", "-q", "verify-cli");
+      writeRepoFile(repo, "note.md", "hi\n");
+      commitAll(repo, "second");
+      expect(commitsPastBase(repo, "main", "verify-cli")).toBe(1);
+      expect(commitsPastBase(repo, "nope", "verify-cli")).toBe(null);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

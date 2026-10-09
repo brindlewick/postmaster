@@ -15,10 +15,12 @@
 //
 //   exit 0  prompt printed; make: the session ended with no wall and HANDOVER.md present
 //   exit 1  make failed: the launch would not start, the session was still running at the
-//           limit, both roles walled, the handover is missing, or the action was not logged
-//   exit 2  usage: an unknown command or surface, a missing argument, a bad timeout, a repo
-//           that is not a git repository or holds no commit, or no run at the dispatch
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+//           limit, both roles walled, the handover, commit or verifier is missing, or the
+//           action was not logged
+//   exit 2  usage: an unknown command or surface, a missing argument, a bad timeout, a path
+//           that is not a git repository or not its top, a repo holding no commit, or no
+//           run at the dispatch
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { endingWallMessage, isWallMessage } from "./launch.ts";
 import { beside, scriptsDir } from "./lib/paths.ts";
@@ -176,24 +178,64 @@ export function remoteFromSymbolicRef(out: string): string | null {
   return ref.slice(prefix.length);
 }
 
+/** Inherited variables that redirect git away from -C: dropped for every git call. */
+export const GIT_REDIRECT_ENV = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_NAMESPACE",
+  "GIT_COMMON_DIR",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_INDEX_FILE",
+];
+
+/** A copy of the environment with the git redirectors dropped. */
+export function scrubGitEnv(env: Record<string, string | undefined>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (!GIT_REDIRECT_ENV.includes(k) && v !== undefined) out[k] = v;
+  }
+  return out;
+}
+
+/** git in a repo, blind to any inherited redirectors. */
+function git(repo: string, args: string[]) {
+  const env: Record<string, string | undefined> = {};
+  for (const k of GIT_REDIRECT_ENV) env[k] = undefined;
+  return run("git", ["-C", repo, ...args], { env });
+}
+
+/** The top of the repo holding a path, or null when no repo holds it. */
+export function repoTop(repo: string): string | null {
+  const r = git(repo, ["rev-parse", "--show-toplevel"]);
+  if (r.code !== 0) return null;
+  const top = r.out.trim();
+  return top === "" ? null : top;
+}
+
+/** Commits on the branch past the base, or null when they cannot be counted. */
+export function commitsPastBase(repo: string, base: string, branch: string): number | null {
+  const r = git(repo, ["rev-list", "--count", `${base}..${branch}`]);
+  if (r.code !== 0) return null;
+  const n = Number(r.out.trim());
+  return Number.isInteger(n) ? n : null;
+}
+
 /** The base the session's branch is cut from: origin's head, main, master, or HEAD. */
 export function defaultBase(repo: string): string | null {
-  const sym = run("git", ["-C", repo, "symbolic-ref", "refs/remotes/origin/HEAD"]);
+  const sym = git(repo, ["symbolic-ref", "refs/remotes/origin/HEAD"]);
   if (sym.code === 0) {
     const name = remoteFromSymbolicRef(sym.out);
-    if (
-      name !== null &&
-      run("git", ["-C", repo, "rev-parse", "--verify", "--quiet", name]).code === 0
-    ) {
+    if (name !== null && git(repo, ["rev-parse", "--verify", "--quiet", name]).code === 0) {
       return name;
     }
   }
   for (const b of ["main", "master"]) {
-    if (run("git", ["-C", repo, "show-ref", "--verify", "--quiet", `refs/heads/${b}`]).code === 0) {
+    if (git(repo, ["show-ref", "--verify", "--quiet", `refs/heads/${b}`]).code === 0) {
       return b;
     }
   }
-  const head = run("git", ["-C", repo, "rev-parse", "HEAD"]);
+  const head = git(repo, ["rev-parse", "HEAD"]);
   if (head.code === 0) return head.out.trim();
   return null;
 }
@@ -238,13 +280,22 @@ class UsageError extends Error {}
 class RunError extends Error {}
 
 function isRepo(repo: string): boolean {
-  return run("git", ["-C", repo, "rev-parse", "--git-dir"]).code === 0;
+  return git(repo, ["rev-parse", "--git-dir"]).code === 0;
+}
+
+/** The path is the top of its repo, not a path below it. Symlinks resolved both sides. */
+function isRepoTop(repo: string): boolean {
+  const top = repoTop(repo);
+  if (top === null) return false;
+  try {
+    return realpathSync(repo) === realpathSync(top);
+  } catch {
+    return false;
+  }
 }
 
 function branchTaken(repo: string, name: string): boolean {
-  return (
-    run("git", ["-C", repo, "show-ref", "--verify", "--quiet", `refs/heads/${name}`]).code === 0
-  );
+  return git(repo, ["show-ref", "--verify", "--quiet", `refs/heads/${name}`]).code === 0;
 }
 
 function readTemplate(): string {
@@ -254,6 +305,7 @@ function readTemplate(): string {
 function runPrompt(req: ParsedPrompt): number {
   const repo = resolve(req.repo);
   if (!isRepo(repo)) throw new UsageError(`not a git repository: ${req.repo}`);
+  if (!isRepoTop(repo)) throw new UsageError(`not the top of its repository: ${req.repo}`);
   const base = defaultBase(repo);
   if (base === null) throw new UsageError(`no commit to cut from in ${req.repo}`);
   const out = renderPrompt(readTemplate(), {
@@ -447,6 +499,7 @@ function attempt(o: LaunchOpts): Attempt {
 function runMake(req: ParsedMake): number {
   const repo = resolve(req.repo);
   if (!isRepo(repo)) throw new UsageError(`not a git repository: ${req.repo}`);
+  if (!isRepoTop(repo)) throw new UsageError(`not the top of its repository: ${req.repo}`);
   const dispatch = resolve(req.dispatch);
   if (!existsSync(join(dispatch, "run.json"))) {
     throw new UsageError(`no run at the dispatch: ${req.dispatch}`);
@@ -455,7 +508,8 @@ function runMake(req: ParsedMake): number {
   if (base === null) throw new UsageError(`no commit to cut from in ${req.repo}`);
   const branch = pickBranch((name) => branchTaken(repo, name), req.surface);
   const wt = pickWorktree(repo, req.surface, existsSync);
-  const added = run("git", ["-C", repo, "worktree", "add", wt, "-b", branch, base]);
+  const vdir = verifyDirName(repo);
+  const added = git(repo, ["worktree", "add", wt, "-b", branch, base]);
   if (added.code !== 0) {
     throw new RunError(`the worktree would not cut: ${added.err.trim() || added.out.trim()}`);
   }
@@ -468,7 +522,7 @@ function runMake(req: ParsedMake): number {
       repo,
       surface: req.surface,
       surfaceProse: surfaceProse(req.surface),
-      verifyDir: verifyDirName(repo),
+      verifyDir: vdir,
       base,
     }),
   );
@@ -513,6 +567,16 @@ function runMake(req: ParsedMake): number {
   const handover = join(wt, "HANDOVER.md");
   if (!existsSync(handover)) {
     throw new RunError(`the session ended with no HANDOVER.md in ${wt}`);
+  }
+  const made = commitsPastBase(wt, base, branch);
+  if (made === null) {
+    throw new RunError(`the session's commits could not be counted on ${branch}`);
+  }
+  if (made === 0) {
+    throw new RunError(`the session committed nothing on ${branch}`);
+  }
+  if (!existsSync(join(wt, vdir, "README.md"))) {
+    throw new RunError(`the session left no ${vdir}/README.md in ${wt}`);
   }
   for (const line of [
     `branch ${branch}`,
