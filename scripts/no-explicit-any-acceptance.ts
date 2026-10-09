@@ -39,6 +39,9 @@ export interface RunResult {
 export type Runner = (cmd: string[], cwd: string) => RunResult;
 
 const RULE = "typescript/no-explicit-any";
+// Findings render the rule with parens, so the probe match uses this form while the
+// config checks use the key above.
+const RULE_RENDERED = `${RULE.replace("/", "(")})`;
 const PROBE_REL = "scripts/zz-probe.ts";
 const PROBE_SRC = "export const z = (x: any): number => x;\n";
 const MAX_SUPPRESS = 5;
@@ -194,9 +197,10 @@ function suppressionFindings(hits: Hit[]): string[] {
   return out;
 }
 
-const stripper = new Bun.Transpiler({ loader: "ts" });
+const stripper = new Bun.Transpiler({ loader: "ts", minifyWhitespace: true });
 
-/** Both sources compile to the same JavaScript once their types are stripped. */
+/** Both sources minify to the same JavaScript once their types are stripped, so a
+ * reflow compares equal and only a changed program differs. */
 export function strippedEqual(a: string, b: string): boolean {
   return stripper.transformSync(a) === stripper.transformSync(b);
 }
@@ -302,7 +306,7 @@ export function accept(root: string, run: Runner = spawnRunner, base?: string): 
   }
   if (
     flagged.code !== 1 ||
-    !flagged.out.includes(RULE) ||
+    !flagged.out.includes(RULE_RENDERED) ||
     !flagged.out.includes(`${PROBE_REL}:1`)
   ) {
     findings.push(
