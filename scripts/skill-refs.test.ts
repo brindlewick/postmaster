@@ -127,7 +127,7 @@ describe("checking script references", () => {
         join(covered, "skills", "clerk", "runbook.md"),
       ].toSorted(),
     );
-  }, 10000);
+  });
 });
 
 describe("fixing script references", () => {
@@ -195,7 +195,7 @@ describe("fixing script references", () => {
     expect(readFileSync(file, "utf8")).toBe(
       "Use `<tool>/scripts/run stage <dispatch> synthesis`.\n",
     );
-  }, 10000);
+  });
 });
 type RunResult = Readonly<{ code: number; calls: string[][] }>;
 

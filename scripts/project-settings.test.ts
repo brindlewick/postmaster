@@ -101,14 +101,14 @@ describe("missing profiles and ensure", () => {
     expect(missing.shared_present).toBe(false);
     expect(missing.local_present).toBe(false);
     expect((missing.sources as Rec)["project.default_turnpikes"]).toBe("discovery");
-  }, 30000);
+  });
 
   test("project modules cannot shadow the settings reader's standard library imports", () => {
     const shadow = at("shadow");
     write(join(shadow, "json", "__init__.py"), 'raise SystemExit("target module imported")\n');
     const isolated = runCli(SELF, ["project-settings", "inspect", shadow], { cwd: shadow });
     expect(isolated.code).toBe(0);
-  }, 30000);
+  });
 
   test("ensure creates the folder ignore without prompting for settings", () => {
     ensureIgnore(repo);
@@ -116,7 +116,7 @@ describe("missing profiles and ensure", () => {
       true,
     );
     expect(existsSync(join(repo, ".postmaster", "settings.toml"))).toBe(false);
-  }, 30000);
+  });
 
   test("ensure completes an existing ignore file without discarding its rules", () => {
     write(join(repo, ".postmaster", ".gitignore"), "# existing local rules\n!keep-me\n");
@@ -124,7 +124,7 @@ describe("missing profiles and ensure", () => {
     const kept = readFileSync(join(repo, ".postmaster", ".gitignore"), "utf8");
     expect(kept.startsWith("# existing local rules\n")).toBe(true);
     expect(kept.endsWith("*\n")).toBe(true);
-  }, 30000);
+  });
 
   test("ensure re-ignores a folder a negation had re-included, keeping its rules", () => {
     const negated = at("negated");
@@ -138,21 +138,21 @@ describe("missing profiles and ensure", () => {
     expect(git(["init", "-q", negated])).toBe(0);
     expect(git(["-C", negated, "check-ignore", "-q", ".postmaster/settings.toml"])).toBe(0);
     expect(git(["-C", negated, "check-ignore", "-q", ".postmaster/runs/T-1/card.md"])).toBe(0);
-  }, 30000);
+  });
 
   test("ensure re-ignores run artifacts a negation had re-included", () => {
     const negated = at("negated");
     write(join(negated, ".postmaster", ".gitignore"), "*\n!runs/\n!runs/**\n");
     ensureIgnore(negated);
     expect(git(["-C", negated, "check-ignore", "-q", ".postmaster/runs/T-1/card.md"])).toBe(0);
-  }, 30000);
+  });
 
   test("ensure is a no-op once the last rule is the star", () => {
     const negated = at("negated");
     const before = readFileSync(join(negated, ".postmaster", ".gitignore"), "utf8");
     ensureIgnore(negated);
     expect(readFileSync(join(negated, ".postmaster", ".gitignore"), "utf8")).toBe(before);
-  }, 30000);
+  });
 });
 
 describe("shared and local profiles", () => {
@@ -162,7 +162,7 @@ describe("shared and local profiles", () => {
       env: { POSTMASTER_PROJECT: repo },
     });
     expect(guarded.code).toBe(0);
-  }, 30000);
+  });
 
   test("the shared file writes, and .postmaster ignores it by default", () => {
     writeShared();
@@ -183,7 +183,7 @@ describe("shared and local profiles", () => {
     expect(sharedIgnored).toBe(0);
     expect(localIgnored).toBe(0);
     expect(runIgnored).toBe(0);
-  }, 30000);
+  });
 
   test("a project may define an empty default turnpike set", () => {
     const emptyRepo = at("empty-default");
@@ -192,7 +192,7 @@ describe("shared and local profiles", () => {
     write(emptySettings, "[project]\ndefault_turnpikes = []\n");
     writeProfile(emptyRepo, "project", emptySettings);
     expect(JSON.stringify((inspect(emptyRepo).project as Rec).default_turnpikes)).toBe("[]");
-  }, 30000);
+  });
 
   test("local choices override shared defaults and select machine-defined roles", () => {
     const local = at("local.toml");
@@ -209,7 +209,7 @@ describe("shared and local profiles", () => {
     expect((team.coachman as Rec).model as string).toBe("backup");
     expect(JSON.stringify(team.workhorses)).toBe('["alpha","beta"]');
     expect(!Object.hasOwn(team, "postmaster") || pyTruthy(team.postmaster)).toBe(true);
-  }, 30000);
+  });
 });
 
 describe("refusals", () => {
@@ -309,7 +309,7 @@ describe("refusals", () => {
         else throw e;
       }
       expect(refused).toBe(true);
-    }, 30000);
+    });
   }
 });
 
@@ -366,7 +366,7 @@ describe("acceptances", () => {
           localSettings,
         );
       }).not.toThrow();
-    }, 30000);
+    });
   }
 });
 
@@ -417,7 +417,7 @@ describe("check shapes agree with verify.sh", () => {
       const checked = runCli(VERIFY, ["verify", "checks", shapeRepo]);
       expect(writeRefused).toBe(true);
       expect(checked.code).not.toBe(0);
-    }, 30000);
+    });
   });
 
   const goodShapes: Array<[string, string]> = [
@@ -449,7 +449,7 @@ describe("check shapes agree with verify.sh", () => {
       const checked = runCli(VERIFY, ["verify", "checks", shapeRepo]);
       expect(writeError).toBe(null);
       expect(checked.code).toBe(0);
-    }, 30000);
+    });
   });
 });
 
@@ -458,7 +458,7 @@ describe("repo profile", () => {
     expect(() => {
       inspect(join(import.meta.dir, ".."));
     }).not.toThrow();
-  }, 30000);
+  });
 });
 
 describe("project overrides", () => {

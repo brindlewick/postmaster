@@ -94,11 +94,13 @@ record at a time. `skills/wiki` carries the three operations: ingest, query, lin
 
 Clone this repo, open your agent in it, and say hi. Any first message starts the flow.
 There is no command to memorise and no wizard to run: `AGENTS.md` tells the agent what to
-do, and the first time that is setting the machine up with you, one question at a time (which
-agent CLIs fill which role, where tickets live, where your projects are, who says the merge
-word), and linking the skills into your agent CLIs so you can start from any project
-afterwards. After that it helps you choose a project and is the postmaster in the session you
-opened, or launches one when it cannot be.
+do. There are two ways to start. From a session in the postmaster project, say hi: the
+first question is which project to work on, postmaster itself or another, and the session
+is the postmaster in the chosen project's folder, or starts one there when it cannot be.
+Or run the postmaster command in a session already in that project: setup offers that
+project first. Either way setup asks one question at a time (which agent CLIs fill which
+role, where tickets live, where your projects are, who says the merge word), and links the
+skills into your agent CLIs. The first start in a new folder may ask whether to trust it.
 
 ```sh
 scripts/run probe-harnesses      # which agent CLIs are installed

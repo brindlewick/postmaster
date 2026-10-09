@@ -163,15 +163,15 @@ describe("unicode primitives", () => {
   test("kinds keep NBSP and join inner spaces (awk gsub)", () => {
     const kinds = kindsOf("| `a` | k\u00a0ind |\n| `b` | k ind |\n");
     expect(kinds).toEqual(["kind", "k\u00a0ind"]);
-  }, 30000);
+  });
 
   test("an NBSP-padded path does not match (ASCII trim)", () => {
     expect(controlOf("| \u00a0`t`\u00a0 | kind |\n", "t")).toBeUndefined();
-  }, 30000);
+  });
 
   test("a plain path still matches", () => {
     expect(controlOf("| `t` | kind |\n", "t")).toBe("kind");
-  }, 30000);
+  });
 
   test("a diagnosis of only NBSP is non-blank (ASCII space)", () => {
     const fields = [...FIELDS];
@@ -180,7 +180,7 @@ describe("unicode primitives", () => {
     const r = logAction(["coachman", "tool-fault", "scripts/launch.ts", ...fields]);
     expect(r.code).toBe(0);
     expect(lines()).toBe(before + 1);
-  }, 30000);
+  });
 
   test("a finding whose class is followed by a tab is refused", () => {
     const before = lines();
@@ -188,7 +188,7 @@ describe("unicode primitives", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("opens with its class")).toBe(true);
-  }, 30000);
+  });
 });
 
 describe("positive controls", () => {
@@ -197,7 +197,7 @@ describe("positive controls", () => {
     const r = logAction(["postmaster", "note", "RUN-1", "a plain", '"detail"']);
     expect(r.code).toBe(0);
     expect(lines()).toBe(before + 1);
-  }, 30000);
+  });
 
   test("as one line in the run's log and the same line in the ledger", () => {
     const r = logAction(["postmaster", "note", "RUN-1", "ledger check"]);
@@ -205,7 +205,7 @@ describe("positive controls", () => {
     const actions = readFileSync(join(d, "actions.jsonl"), "utf8");
     const ledger = readFileSync(join(tmp, "proj", ".postmaster", "runs", "ledger.jsonl"), "utf8");
     expect(actions).toBe(ledger);
-  }, 30000);
+  });
 
   test("the detail is everything after the target", () => {
     const r = logAction(["postmaster", "note", "RUN-1", "a plain", '"detail"']);
@@ -218,7 +218,7 @@ describe("positive controls", () => {
         last.run === "RUN-1" &&
         !last.fault,
     ).toBe(true);
-  }, 30000);
+  });
 
   test("a project postmaster dispatch is written to the postmaster log and ledger", () => {
     const project = join(tmp, "project-dispatch");
@@ -236,7 +236,7 @@ describe("positive controls", () => {
     expect(entry.action).toBe("dispatch");
     expect(entry.target).toBe("clerk");
     expect(entry.detail).toBe("ticket=2");
-  }, 30000);
+  });
 
   test("a project clerk ticket-edit is written to the ledger only", () => {
     const project = join(tmp, "project-edit");
@@ -253,7 +253,7 @@ describe("positive controls", () => {
     expect(existsSync(join(project, ".postmaster", "runs", "postmaster", "actions.jsonl"))).toBe(
       false,
     );
-  }, 30000);
+  });
 
   test("a project postmaster ticket-check is written to the postmaster log and ledger", () => {
     const project = join(tmp, "project-check");
@@ -271,7 +271,7 @@ describe("positive controls", () => {
     expect(entry.action).toBe("ticket-check");
     expect(entry.target).toBe("2");
     expect(entry.detail).toBe("ready");
-  }, 30000);
+  });
 
   test("a project clerk note is written to the ledger only", () => {
     const project = join(tmp, "project-note");
@@ -288,14 +288,14 @@ describe("positive controls", () => {
     expect(existsSync(join(project, ".postmaster", "runs", "postmaster", "actions.jsonl"))).toBe(
       false,
     );
-  }, 30000);
+  });
 
   test("a tool-fault with every field is written", () => {
     const before = lines();
     const r = logAction(FAULT_EVERY);
     expect(r.code).toBe(0);
     expect(lines()).toBe(before + 1);
-  }, 30000);
+  });
 
   test("its fields are a fault object, with --failed as the detail and the error whole", () => {
     const r = logAction(FAULT_EVERY);
@@ -311,20 +311,20 @@ describe("positive controls", () => {
         String(last.fault?.workaround ?? "").startsWith("launched") &&
         last.fault?.control === "",
     ).toBe(true);
-  }, 30000);
+  });
 
   test("and a part that is no control says nothing", () => {
     const r = logAction(FAULT_EVERY);
     expect(r.code).toBe(0);
     expect(r.err.trim()).toBe("");
-  }, 30000);
+  });
 
   test("a listed script named by its absolute path is written", () => {
     const before = lines();
     const r = logAction(FAULT_ABS);
     expect(r.code).toBe(0);
     expect(lines()).toBe(before + 1);
-  }, 30000);
+  });
 
   test("as a control of its kind, relative to the checkout", () => {
     const r = logAction(FAULT_ABS);
@@ -336,7 +336,7 @@ describe("positive controls", () => {
         last.target === "scripts/log-action.ts" &&
         last.fault?.control === "action-log",
     ).toBe(true);
-  }, 30000);
+  });
 
   test("and the message says to stop", () => {
     const r = logAction(FAULT_ABS);
@@ -344,7 +344,7 @@ describe("positive controls", () => {
     expect(r.err.includes("scripts/log-action.ts is a control (action-log): stop the leg")).toBe(
       true,
     );
-  }, 30000);
+  });
 
   test("the entry itself is a control that stops the leg", () => {
     const r = logAction(["coachman", "tool-fault", "scripts/run", ...FIELDS]);
@@ -352,14 +352,14 @@ describe("positive controls", () => {
     const last = lastLine();
     expect(last !== null && last.fault?.control === "check").toBe(true);
     expect(r.err.includes("scripts/run is a control (check): stop the leg")).toBe(true);
-  }, 30000);
+  });
 
   test("a listed script with another --control is written", () => {
     const before = lines();
     const r = logAction(FAULT_OTHER);
     expect(r.code).toBe(0);
     expect(lines()).toBe(before + 1);
-  }, 30000);
+  });
 
   test("with the list's kind", () => {
     const r = logAction(FAULT_OTHER);
@@ -368,14 +368,14 @@ describe("positive controls", () => {
     expect(
       last !== null && last.fault?.failed === "second" && last.fault?.control === "action-log",
     ).toBe(true);
-  }, 30000);
+  });
 
   test("a runbook step with --control is written", () => {
     const before = lines();
     const r = logAction(FAULT_STEP);
     expect(r.code).toBe(0);
     expect(lines()).toBe(before + 1);
-  }, 30000);
+  });
 
   test("with the kind --control gives", () => {
     const r = logAction(FAULT_STEP);
@@ -387,14 +387,14 @@ describe("positive controls", () => {
         last.target === "skills/postmaster/coachman.md" &&
         last.fault?.control === "wait",
     ).toBe(true);
-  }, 30000);
+  });
 
   test("another spelling of a listed path is written", () => {
     const before = lines();
     const r = logAction(FAULT_SPELL);
     expect(r.code).toBe(0);
     expect(lines()).toBe(before + 1);
-  }, 30000);
+  });
 
   test("as that path, and that control", () => {
     const r = logAction(FAULT_SPELL);
@@ -406,14 +406,14 @@ describe("positive controls", () => {
         last.target === "scripts/wait-for-markers.ts" &&
         last.fault?.control === "wait",
     ).toBe(true);
-  }, 30000);
+  });
 
   test("a path through .. that stays in the checkout is written", () => {
     const before = lines();
     const r = logAction(FAULT_DOTDOT);
     expect(r.code).toBe(0);
     expect(lines()).toBe(before + 1);
-  }, 30000);
+  });
 
   test("as the file it reaches", () => {
     const r = logAction(FAULT_DOTDOT);
@@ -425,7 +425,7 @@ describe("positive controls", () => {
         last.target === "scripts/log-action.ts" &&
         last.fault?.control === "action-log",
     ).toBe(true);
-  }, 30000);
+  });
 
   test("a path through a link to the checkout is written", () => {
     const before = lines();
@@ -439,7 +439,7 @@ describe("positive controls", () => {
     ]);
     expect(r.code).toBe(0);
     expect(lines()).toBe(before + 1);
-  }, 30000);
+  });
 
   test("as the real path", () => {
     const r = logAction([
@@ -455,7 +455,7 @@ describe("positive controls", () => {
     expect(
       last !== null && last.fault?.failed === "sixth" && last.target === "scripts/verify.ts",
     ).toBe(true);
-  }, 30000);
+  });
 
   test("a style finding is written", () => {
     const before = lines();
@@ -467,7 +467,7 @@ describe("positive controls", () => {
     ]);
     expect(r.code).toBe(0);
     expect(lines()).toBe(before + 1);
-  }, 30000);
+  });
 
   test("with its class as the first word of its detail", () => {
     const r = logAction([
@@ -481,7 +481,7 @@ describe("positive controls", () => {
     expect(
       last !== null && last.action === "finding" && String(last.detail).split(" ")[0] === "style",
     ).toBe(true);
-  }, 30000);
+  });
 
   test("a gating finding is written", () => {
     const before = lines();
@@ -493,7 +493,7 @@ describe("positive controls", () => {
     ]);
     expect(r.code).toBe(0);
     expect(lines()).toBe(before + 1);
-  }, 30000);
+  });
 
   test("the premise result names the verified and base commits", () => {
     const before = lines();
@@ -503,6 +503,88 @@ describe("positive controls", () => {
     const last = lastLine();
     expect(last !== null && last.action === "premises" && last.target === "abc1234").toBe(true);
     expect(last !== null && last.detail === "base=def5678 result=moved").toBe(true);
+  });
+
+  test("an approved switch-off is written", () => {
+    const before = lines();
+    const r = logAction([
+      "postmaster",
+      "switch-off",
+      "comment:0123456789abcdef",
+      "approved",
+      "scripts/a.ts:1",
+      "eslint-disable-next-line",
+      "--",
+      "yes,",
+      "it",
+      "is",
+      "test-only",
+    ]);
+    expect(r.code).toBe(0);
+    expect(lines()).toBe(before + 1);
+  }, 30000);
+
+  test("with its identity, decision and the user's words", () => {
+    const r = logAction([
+      "postmaster",
+      "switch-off",
+      "settings:89abcdef01234567",
+      "approved",
+      "bunfig.toml",
+      "keep",
+      "the",
+      "test",
+      "table",
+    ]);
+    expect(r.code).toBe(0);
+    const last = lastLine();
+    expect(
+      last !== null &&
+        last.action === "switch-off" &&
+        last.target === "settings:89abcdef01234567" &&
+        last.detail === "approved bunfig.toml keep the test table",
+    ).toBe(true);
+  }, 30000);
+
+  test("a refused switch-off is written", () => {
+    const before = lines();
+    const r = logAction([
+      "postmaster",
+      "switch-off",
+      "comment:fedcba9876543210",
+      "refused",
+      "scripts/a.ts:1",
+      "ts-ignore",
+      "--",
+      "not",
+      "while",
+      "it",
+      "hides",
+      "a",
+      "failure",
+    ]);
+    expect(r.code).toBe(0);
+    expect(lines()).toBe(before + 1);
+    const last = lastLine();
+    expect(
+      last !== null &&
+        last.action === "switch-off" &&
+        last.detail.startsWith("refused scripts/a.ts:1 ts-ignore"),
+    ).toBe(true);
+  }, 30000);
+
+  test("an approved switch-off lands identically in both files", () => {
+    const target = "comment:abcdef0123456789";
+    const words = "approved scripts/other.ts:1 oxlint-disable-line yes, test-only";
+    const r = logAction(["postmaster", "switch-off", target, words]);
+    expect(r.code).toBe(0);
+    const actions = readFileSync(join(d, "actions.jsonl"), "utf8");
+    const ledger = readFileSync(join(tmp, "proj", ".postmaster", "runs", "ledger.jsonl"), "utf8");
+    expect(actions).toBe(ledger);
+    const last = lastLine();
+    expect(last?.action).toBe("switch-off");
+    expect(last?.target).toBe(target);
+    expect(last?.detail).toBe(words);
   }, 30000);
 
   test("a detail ending in a newline is written", () => {
@@ -510,14 +592,14 @@ describe("positive controls", () => {
     const r = logAction(["postmaster", "note", "RUN-1", "kept whole\n"]);
     expect(r.code).toBe(0);
     expect(lines()).toBe(before + 1);
-  }, 30000);
+  });
 
   test("with its newline", () => {
     const r = logAction(["postmaster", "note", "RUN-1", "kept whole\n"]);
     expect(r.code).toBe(0);
     const last = lastLine();
     expect(last !== null && last.detail === "kept whole\n").toBe(true);
-  }, 30000);
+  });
 
   test("an older runs/<project>/<TICKET> layout is still read as that project", () => {
     const old = join(tmp, "oldlayout", "legacy-proj", "RUN-2");
@@ -538,49 +620,49 @@ describe("positive controls", () => {
         oldEntry.project === "legacy-proj" &&
         oldEntry.run === "RUN-2",
     ).toBe(true);
-  }, 30000);
+  });
 
   test("a line separator and a byte that is not UTF-8 are written", () => {
     const before = lines();
     const r = rawDetail("one\\342\\200\\250two \\377 three", "postmaster", "note", "RUN-1");
     expect(r.code).toBe(0);
     expect(lines()).toBe(before + 1);
-  }, 30000);
+  });
 
   test("the separator escaped and the byte dropped", () => {
     const r = rawDetail("one\\342\\200\\250two \\377 three", "postmaster", "note", "RUN-1");
     expect(r.code).toBe(0);
     const last = lastLine();
     expect(last !== null && last.detail === "one\u2028two  three").toBe(true);
-  }, 30000);
+  });
 
   test("a literal U+FFFD is a legitimate character and is kept", () => {
     const before = lines();
     const r = logAction(["postmaster", "note", "RUN-1", "one\u2028two \uFFFD three"]);
     expect(r.code).toBe(0);
     expect(lines()).toBe(before + 1);
-  }, 30000);
+  });
 
   test("the legitimate character survives the log", () => {
     const r = logAction(["postmaster", "note", "RUN-1", "one\u2028two \uFFFD three"]);
     expect(r.code).toBe(0);
     const last = lastLine();
     expect(last !== null && last.detail === "one\u2028two \uFFFD three").toBe(true);
-  }, 30000);
+  });
 
   test("a mixed bad byte and literal U+FFFD are written", () => {
     const before = lines();
     const r = mixedRawWrite();
     expect(r.code).toBe(0);
     expect(lines()).toBe(before + 1);
-  }, 30000);
+  });
 
   test("the damage dropped and the legitimate character kept", () => {
     const r = mixedRawWrite();
     expect(r.code).toBe(0);
     const last = lastLine();
     expect(last !== null && last.detail === "xy keep \uFFFDhere").toBe(true);
-  }, 30000);
+  });
 
   test("the decoder drops damage and keeps valid edges", () => {
     const edges: Array<[number[], string]> = [
@@ -611,61 +693,57 @@ describe("positive controls", () => {
       if (decodeDropInvalid(buf) !== want) edgeBad++;
     }
     expect(edgeBad).toBe(0);
-  }, 30000);
+  });
 
-  test.skipIf(noIconv)(
-    "the decoder matches iconv -c on 300 seeded cases",
-    () => {
-      let seed = 109;
-      const rnd = (): number => {
-        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-        return seed;
-      };
-      const boundary = [
-        0x00, 0x7f, 0x80, 0xbf, 0xc0, 0xc1, 0xc2, 0xdf, 0xe0, 0xed, 0xef, 0xf0, 0xf4, 0x8f, 0x90,
-        0xa0,
-      ];
-      const cases: Buffer[] = [];
-      for (let n = 0; n < 300; n++) {
-        const len = rnd() % 9;
-        const b = Buffer.alloc(len);
-        for (let i = 0; i < len; i++) {
-          const v = rnd() % 2 === 0 ? boundary[rnd() % boundary.length]! : rnd() % 256;
-          b[i] = v >= 0xf5 ? v - 0x0b : v; // out of glibc's lenient corners
-        }
-        for (let i = 0; i + 1 < len; i++) {
-          if (b[i] === 0xf4 && b[i + 1]! >= 0x90 && b[i + 1]! <= 0xbf) {
-            b[i + 1] = 0x80 | (b[i + 1]! & 0x0f); // past U+10FFFF is glibc's corner too
-          }
-        }
-        cases.push(b);
+  test.skipIf(noIconv)("the decoder matches iconv -c on 300 seeded cases", () => {
+    let seed = 109;
+    const rnd = (): number => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed;
+    };
+    const boundary = [
+      0x00, 0x7f, 0x80, 0xbf, 0xc0, 0xc1, 0xc2, 0xdf, 0xe0, 0xed, 0xef, 0xf0, 0xf4, 0x8f, 0x90,
+      0xa0,
+    ];
+    const cases: Buffer[] = [];
+    for (let n = 0; n < 300; n++) {
+      const len = rnd() % 9;
+      const b = Buffer.alloc(len);
+      for (let i = 0; i < len; i++) {
+        const v = rnd() % 2 === 0 ? boundary[rnd() % boundary.length]! : rnd() % 256;
+        b[i] = v >= 0xf5 ? v - 0x0b : v; // out of glibc's lenient corners
       }
-      let bad = 0;
-      let first = "";
-      // The bytes travel in a file: spawnSync sends input as UTF-8, which would
-      // re-encode them on the way to iconv's stdin.
-      const q = (p: string): string => `'${p.replace(/'/gu, `'\\''`)}'`;
-      const bin = join(tmp, "fuzz.bin");
-      for (const c of cases) {
-        writeFileSync(bin, c);
-        const iconv = spawnSync("bash", ["-c", `iconv -f UTF-8 -t UTF-8 -c < ${q(bin)}`], {
-          encoding: "utf8",
-        });
-        // iconv still drops trailing damage, but exits 1 for it
-        // ("incomplete character at end of buffer"); the output is the oracle.
-        const want = iconv.status === 0 || iconv.status === 1 ? (iconv.stdout ?? "") : null;
-        const got = decodeDropInvalid(c);
-        if (want === null || got !== want) {
-          bad++;
-          if (!first) {
-            first = `${c.toString("hex")}: got ${JSON.stringify(got)}, iconv ${JSON.stringify(want)}`;
-          }
+      for (let i = 0; i + 1 < len; i++) {
+        if (b[i] === 0xf4 && b[i + 1]! >= 0x90 && b[i + 1]! <= 0xbf) {
+          b[i + 1] = 0x80 | (b[i + 1]! & 0x0f); // past U+10FFFF is glibc's corner too
         }
       }
-      expect(bad).toBe(0);
-    },
-    30000,
-  );
+      cases.push(b);
+    }
+    let bad = 0;
+    let first = "";
+    // The bytes travel in a file: spawnSync sends input as UTF-8, which would
+    // re-encode them on the way to iconv's stdin.
+    const q = (p: string): string => `'${p.replace(/'/gu, `'\\''`)}'`;
+    const bin = join(tmp, "fuzz.bin");
+    for (const c of cases) {
+      writeFileSync(bin, c);
+      const iconv = spawnSync("bash", ["-c", `iconv -f UTF-8 -t UTF-8 -c < ${q(bin)}`], {
+        encoding: "utf8",
+      });
+      // iconv still drops trailing damage, but exits 1 for it
+      // ("incomplete character at end of buffer"); the output is the oracle.
+      const want = iconv.status === 0 || iconv.status === 1 ? (iconv.stdout ?? "") : null;
+      const got = decodeDropInvalid(c);
+      if (want === null || got !== want) {
+        bad++;
+        if (!first) {
+          first = `${c.toString("hex")}: got ${JSON.stringify(got)}, iconv ${JSON.stringify(want)}`;
+        }
+      }
+    }
+    expect(bad).toBe(0);
+  });
 
   test("every line in both files is UTF-8 JSON, one to a line", () => {
     const r = logAction(["postmaster", "note", "RUN-1", "json check"]);
@@ -674,7 +752,7 @@ describe("positive controls", () => {
     for (const row of text.split("\n").filter((l) => l !== "")) JSON.parse(row);
     const ledger = readFileSync(join(tmp, "proj", ".postmaster", "runs", "ledger.jsonl"), "utf8");
     expect(text).toBe(ledger);
-  }, 30000);
+  });
 });
 
 describe("negative controls: nothing is written", () => {
@@ -684,7 +762,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("is not an action")).toBe(true);
-  }, 30000);
+  });
 
   test("an empty target", () => {
     const before = lines();
@@ -692,7 +770,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("usage:")).toBe(true);
-  }, 30000);
+  });
 
   test("a finding with no class", () => {
     const before = lines();
@@ -700,7 +778,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("opens with its class, gating or style")).toBe(true);
-  }, 30000);
+  });
 
   test("a finding whose class is another word", () => {
     const before = lines();
@@ -708,7 +786,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("opens with its class, gating or style")).toBe(true);
-  }, 30000);
+  });
 
   test("a premise result without its base is refused", () => {
     const before = lines();
@@ -716,6 +794,43 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("base=<commit>")).toBe(true);
+  });
+
+  test("a switch-off with a target out of shape", () => {
+    const before = lines();
+    const r = logAction(["coachman", "switch-off", "scripts/a.ts:1", "approved fine by me"]);
+    expect(r.code).toBe(1);
+    expect(lines()).toBe(before);
+    expect(r.err.includes("comment:<16 hex> or settings:<16 hex>")).toBe(true);
+  }, 30000);
+
+  test("a switch-off whose decision is another word", () => {
+    const before = lines();
+    const r = logAction(["coachman", "switch-off", "comment:0123456789abcdef", "maybe yes"]);
+    expect(r.code).toBe(1);
+    expect(lines()).toBe(before);
+    expect(r.err.includes("opens with its decision, approved or refused")).toBe(true);
+  }, 30000);
+
+  test("a switch-off with the decision and nothing after it", () => {
+    const before = lines();
+    const r = logAction(["coachman", "switch-off", "comment:0123456789abcdef", "approved"]);
+    expect(r.code).toBe(1);
+    expect(lines()).toBe(before);
+    expect(r.err.includes("carries the decision")).toBe(true);
+  }, 30000);
+
+  test("a switch-off with the decision and entry but no user words", () => {
+    const before = lines();
+    const r = logAction([
+      "coachman",
+      "switch-off",
+      "comment:0123456789abcdef",
+      "approved bunfig.toml",
+    ]);
+    expect(r.code).toBe(1);
+    expect(lines()).toBe(before);
+    expect(r.err.includes("carries the decision")).toBe(true);
   }, 30000);
 
   test("a tool-fault with no fix", () => {
@@ -724,7 +839,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("needs --fix")).toBe(true);
-  }, 30000);
+  });
 
   test("a tool-fault with a blank diagnosis", () => {
     const before = lines();
@@ -739,7 +854,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("needs --diagnosis")).toBe(true);
-  }, 30000);
+  });
 
   test("a tool-fault as plain words", () => {
     const before = lines();
@@ -755,7 +870,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("a tool-fault takes")).toBe(true);
-  }, 30000);
+  });
 
   test("a flag with no value", () => {
     const before = lines();
@@ -763,7 +878,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("--workaround needs a value")).toBe(true);
-  }, 30000);
+  });
 
   test("a file postmaster does not have", () => {
     const before = lines();
@@ -771,7 +886,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("names the postmaster file")).toBe(true);
-  }, 30000);
+  });
 
   test("a file outside the checkout", () => {
     const before = lines();
@@ -779,7 +894,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("names the postmaster file")).toBe(true);
-  }, 30000);
+  });
 
   test("a path that climbs out of the checkout to a file", () => {
     const before = lines();
@@ -792,7 +907,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("names the postmaster file")).toBe(true);
-  }, 30000);
+  });
 
   test("an unknown kind of control", () => {
     const before = lines();
@@ -807,7 +922,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("is not a kind of control")).toBe(true);
-  }, 30000);
+  });
 
   test("two kinds of control in one", () => {
     const before = lines();
@@ -822,7 +937,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("is not a kind of control")).toBe(true);
-  }, 30000);
+  });
 
   test("a missing dispatch directory is refused, and named", () => {
     const missing = join(tmp, "nowhere");
@@ -831,5 +946,5 @@ describe("negative controls: nothing is written", () => {
     });
     expect(r.status).toBe(1);
     expect((r.stderr ?? "").includes(`no such dir: ${missing}`)).toBe(true);
-  }, 30000);
+  });
 });

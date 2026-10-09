@@ -42,10 +42,38 @@ quality, not about the runs in flight. [Why](wiki/concepts/fixture-runs.md).
 ## When a session opens in this repo, do this
 
 No slash command, and no wizard for the user to run. The user opens their agent in this
-folder and says hi. Any first message starts the flow: set the machine up if it is not,
-choose a target, launch the postmaster. Work out where the user is and pick up from there.
+folder and says hi. Any first message starts the flow: choose a target, set the machine
+up if it is not, launch the postmaster. Work out where the user is and pick up from there.
 
-**1. Is this machine set up?**
+**1. Which project are we working on?**
+
+Ask first, before any config check, whether to work on postmaster itself or on another
+project. Postmaster itself is this checkout: it makes this repo the target. For another
+project, list the projects as below. A project the user has already named is not asked
+for again.
+
+```sh
+scripts/run find-projects                 # most recently worked first
+scripts/run check-target <chosen>         # 0 usable · 1 not a repo · 2 dirty, ask first
+scripts/run discover-project <chosen>     # gate command, docs, tracker and its prefix, checks
+scripts/run project-settings report <chosen>  # shared/local presence and per-fact sources
+```
+
+**When a decision belongs to the project rather than the machine, offer it for
+`.postmaster/` and write it there on agreement, never silently.** `run discover-project`
+reports whether the target already has settings. If a fact is one every run against this
+project needs — the default turnpikes, the tracker binding by name, the risk surfaces —
+propose the shared `project.toml` and say which file you are proposing, since that one is
+committed. If it is this person's choice on this machine — which lanes fill the roles —
+propose local `settings.toml`. If the machine has no config yet, hold the local offer
+until step 2 has written it: recording lane roles needs the machine config, and the
+write is refused without it. A missing settings file is never an error and never a
+prompt to create one; the normal case is nothing written.
+
+**The target may be this repo.** Developing postmaster with postmaster is supported; see
+the section above for the two things that differ.
+
+**2. Is this machine set up?**
 
 ```sh
 cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
@@ -56,9 +84,9 @@ Include both results when you say whether the machine is set up. The link check 
 If the config is present but the check names missing or blocked links, report them and offer
 the install step below on the user's word.
 
-If it is missing, set it up now, in conversation, before anything else. You conduct it:
-probe first, ask one thing at a time, verify each answer, then have the script write the
-config. Do not guess an answer, and do not hand the user a script to run instead.
+If it is missing, set it up now, in conversation, with the target already chosen. You
+conduct it: probe first, ask one thing at a time, verify each answer, then have the script
+write the config. Do not guess an answer, and do not hand the user a script to run instead.
 
 ```sh
 scripts/run probe-harnesses     # which agent CLIs exist, and which read no ambient context
@@ -112,31 +140,10 @@ scripts/run link-skills --dry-run   # the links it would make, and anything in t
 scripts/run link-skills             # only after the user agrees; makes links, replaces nothing
 ```
 
-**2. Which project are we dispatching against?**
-
-```sh
-scripts/run find-projects                 # most recently worked first
-scripts/run check-target <chosen>         # 0 usable · 1 not a repo · 2 dirty, ask first
-scripts/run discover-project <chosen>     # gate command, docs, tracker and its prefix, checks
-scripts/run project-settings report <chosen>  # shared/local presence and per-fact sources
-```
-
-**When a decision belongs to the project rather than the machine, offer it for
-`.postmaster/` and write it there on agreement, never silently.** `run discover-project`
-reports whether the target already has settings. If a fact is one every run against this
-project needs — the default turnpikes, the tracker binding by name, the risk surfaces —
-propose the shared `project.toml` and say which file you are proposing, since that one is
-committed. If it is this person's choice on this machine — which lanes fill the roles —
-propose local `settings.toml`. A missing settings file is never an error and never a
-prompt to create one; the normal case is nothing written.
-
-**The target may be this repo.** Developing postmaster with postmaster is supported; see
-the section above for the two things that differ.
-
 **3. Start the postmaster** per `skills/postmaster/SKILL.md`, and hand over if it spawns one.
 It checks the same preconditions again, cheaply, because it is also reached by someone typing
 `/postmaster` on a machine that has done none of the above. Tell it what this session has
-already settled — the config, the chosen target — and it will pick up from there rather than
+already settled — the chosen target, the config — and it will pick up from there rather than
 asking twice. When the decision script says `self`, this session carries on as the postmaster;
 when it says `spawn`, a separate postmaster session is started and this one stops.
 
@@ -235,7 +242,9 @@ whole system.
 The scripts run on Bun 1.4.2 or newer: `scripts/run <name> [args]` is the one entry for every
 tool script; it execs Bun with `--no-env-file` and the tool's own `bunfig.toml`, so a script run
 inside a target project never loads that project's `.env` or Bun config. Runtime imports are
-Bun's built-ins and Node's standard modules only; `typescript`, `@biomejs/biome` and `oxlint`
+Bun's built-ins and Node's standard modules only, except the vendored parser
+(`scripts/lib/vendor/babel-parser.js`, @babel/parser 7.x, the one dependency #268 added with
+the user's word); `typescript`, `@biomejs/biome` and `oxlint`
 are the development dependencies, and `bun run check` is the type check, Oxlint, the Biome
 format check, the tests beside every script, the runbook reference check and the wiki lint.
 
@@ -274,6 +283,14 @@ its link: `<tool>/scripts/run stage`, never `scripts/run stage`, which resolves 
 repo's root. The run's own pinned tool goes through `<rt>`, resolved per run by
 `run run-meta path`. `scripts/run skill-refs` names every other path that does not go through
 `<tool>`, and `--fix` rewrites the bare ones; run both after writing a runbook and after a rebase.
+
+**A test states a time limit only when it needs more than the default.** `bunfig.toml` loads
+`scripts/lib/test-defaults.ts` for every `bun test` run, and that sets 60 seconds for each test and each
+setup hook. A limit is there to catch a hang. Ten flows on one machine run every test at half speed or
+less, so a limit close to the time a test takes on a quiet machine fails the gate on load alone. A test
+or hook that needs longer states its own limit, at ten times its quiet time at least. Bun applies a preload's
+default to the first file of a serial run and to every file of a `--parallel` run, so run more than one
+test file by hand with `--parallel=1`, or run `bun run check`.
 
 **Link what you mention.** Whenever you name something that has an address, in conversation, a pull request, a
 ticket or a comment, write it as a clickable link, so that nobody has to look it up. That covers:

@@ -11,7 +11,8 @@
 //   exit 4  wait: the deadline passed, but a record could not be written
 //   exit 1  usage; the round was not started, or the machine restarted or the round was started
 //           again since the wait began; a marker no reviewer of the round lands; teardown: a
-//           scratch left in place
+//           scratch left in place, or the round's own teardown, naming no reviewers, comes before
+//           the reach check of a round that took its reach snapshot (nothing is removed)
 import {
   existsSync,
   mkdirSync,
@@ -26,6 +27,7 @@ import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run } from "./lib/proc.ts";
 import { bootId, sameBoot } from "./lib/processes.ts";
 import { PY_S_CLASS } from "./lib/text.ts";
+import { reachActions } from "./reach.ts";
 import { wallFor } from "./walls.ts";
 
 const HERE = scriptsDir(import.meta);
@@ -46,6 +48,18 @@ export function monotonic(): number {
   } catch {
     return Date.now() / 1000;
   }
+}
+
+/**
+ * Whether teardown must still wait for the round's reach check: it is the round's own teardown,
+ * the round took its reach snapshot, and no point named for the round is recorded.
+ */
+export function reachCheckMissing(
+  waitsForReach: boolean,
+  points: readonly string[],
+  round: string,
+): boolean {
+  return waitsForReach && !points.includes(`r${round}`);
 }
 
 interface RoundState {
@@ -455,6 +469,29 @@ if (import.meta.main) {
 
   // teardown
   const reviewers = readReviewers("pairs", ...reviewerArgs);
+  // A teardown that names its reviewers cleans up named scratches, as the cut does for one an
+  // interrupted round left behind. The round's own teardown names none and follows its reach check.
+  const waitsForReach =
+    reviewerArgs.length === 0 && existsSync(join(D, "reach", `before-r${R}.json`));
+  let points: string[] = [];
+  if (waitsForReach) {
+    try {
+      points = reachActions(D)
+        .filter(({ event }) => event.kind === "point")
+        .map(({ event }) => String(event.point));
+    } catch (e) {
+      die(`cannot read the reach record to teardown round ${R}: ${String(e)}`);
+    }
+  }
+  if (reachCheckMissing(waitsForReach, points, R)) {
+    record(
+      `round ${R} took its reach snapshot and no reach check r${R} is recorded: nothing was removed. Run reach check and reach restore for r${R} (Check reach and restore before any fix), then teardown again`,
+      "note",
+      D,
+      `r${R}: teardown waits for the reach check`,
+    );
+    process.exit(1);
+  }
   let removed = 0;
   let kept = 0;
   let gone = 0;
