@@ -66,7 +66,7 @@ function plant(dir: string, oxlintrc: unknown, check: string): void {
 }
 
 function cleanConfig(): unknown {
-  return { rules: { [RULE]: "error" }, ignorePatterns: ["fixtures/**"] };
+  return { rules: { [RULE]: "error" }, ignorePatterns: ["fixtures/**", "scripts/lib/vendor/**"] };
 }
 
 function stub(canned: {
@@ -108,7 +108,7 @@ describe("a clean tree", () => {
 describe("the rule's setting", () => {
   test("off fails naming the config", () => {
     const dir = fresh();
-    plant(dir, { rules: { [RULE]: "off" }, ignorePatterns: ["fixtures/**"] }, CHECK);
+    plant(dir, { rules: { [RULE]: "off" }, ignorePatterns: ["fixtures/**", "scripts/lib/vendor/**"] }, CHECK);
     const r = accept(dir, stub(GOOD));
     expect(r.code).toBe(1);
     expect(r.out).toContain(".oxlintrc.json");
@@ -116,7 +116,7 @@ describe("the rule's setting", () => {
 
   test("missing fails", () => {
     const dir = fresh();
-    plant(dir, { rules: {}, ignorePatterns: ["fixtures/**"] }, CHECK);
+    plant(dir, { rules: {}, ignorePatterns: ["fixtures/**", "scripts/lib/vendor/**"] }, CHECK);
     const r = accept(dir, stub(GOOD));
     expect(r.code).toBe(1);
     expect(r.out).toContain(RULE);
@@ -128,7 +128,7 @@ describe("the rule's setting", () => {
       dir,
       {
         rules: { [RULE]: "error" },
-        ignorePatterns: ["fixtures/**"],
+        ignorePatterns: ["fixtures/**", "scripts/lib/vendor/**"],
         overrides: [{ files: ["x.ts"], rules: { [RULE]: "off" } }],
       },
       CHECK,
@@ -144,7 +144,7 @@ describe("the rule's setting", () => {
       dir,
       {
         rules: { [RULE]: "error" },
-        ignorePatterns: ["fixtures/**"],
+        ignorePatterns: ["fixtures/**", "scripts/lib/vendor/**"],
         overrides: [{ files: ["x.ts"], rules: { [RULE]: "warn" } }],
       },
       CHECK,
@@ -160,7 +160,7 @@ describe("the rule's setting", () => {
       dir,
       {
         rules: { [RULE]: "error" },
-        ignorePatterns: ["fixtures/**"],
+        ignorePatterns: ["fixtures/**", "scripts/lib/vendor/**"],
         overrides: [{ files: ["x.ts"], rules: { [RULE]: 1 } }],
       },
       CHECK,
@@ -176,7 +176,7 @@ describe("the rule's setting", () => {
       dir,
       {
         rules: { [RULE]: "error" },
-        ignorePatterns: ["fixtures/**"],
+        ignorePatterns: ["fixtures/**", "scripts/lib/vendor/**"],
         overrides: [{ files: ["x.ts"], rules: { [RULE]: "error" } }],
       },
       CHECK,
@@ -191,7 +191,7 @@ describe("the rule's setting", () => {
       dir,
       {
         rules: { [RULE]: "error" },
-        ignorePatterns: ["fixtures/**"],
+        ignorePatterns: ["fixtures/**", "scripts/lib/vendor/**"],
         overrides: [{ files: ["x.ts"], rules: { "no-debugger": "off" } }],
       },
       CHECK,

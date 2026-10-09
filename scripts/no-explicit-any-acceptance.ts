@@ -49,7 +49,7 @@ const PROBE_SRC = "export const z = (x: any): number => x;\n";
 // the two are provably the same command.
 const COUNT_ARGS = ["bunx", "oxlint", "-A", "all", "-D", RULE, "-f", "unix"];
 const MAX_SUPPRESS = 5;
-const WANT_IGNORE = '["fixtures/**"]';
+const WANT_IGNORE = '["fixtures/**","scripts/lib/vendor/**"]';
 // The matcher is built from the constant so this file holds no line the walk below
 // would count: the literal rule name and the comment form never share one.
 const SUPPRESS = new RegExp(`(oxlint|eslint)-disable.*${RULE}`, "u");
