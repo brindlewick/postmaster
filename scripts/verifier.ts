@@ -672,6 +672,9 @@ function runMakeLaunches(
 }
 
 function main(argv: string[]): number {
+  // The verifier names every repo explicitly, so inherited git redirectors
+  // can only corrupt: drop them for this process and every session it starts.
+  for (const k of GIT_REDIRECT_ENV) delete process.env[k];
   try {
     const parsed = parseArgs(argv);
     if (!parsed.ok) throw new UsageError(parsed.error);
