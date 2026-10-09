@@ -4,9 +4,15 @@
 # comes with; the old-Bun job installs no dependencies, so nothing can mask a version
 # check that does not run first. A manual dispatch with files runs only those test files
 # on the Mac, for fast feedback while fixing it; empty files runs the full check.
+# A pull request that changes only wiki/ and raw/ gets the wiki workflow (wiki.yml) instead.
 name: check
 on:
   pull_request:
+    # A pull request whose files are all under wiki/ or raw/ is checked by the wiki workflow
+    # instead; any other file in it brings this full check back.
+    paths-ignore:
+      - "wiki/**"
+      - "raw/**"
   workflow_dispatch:
     inputs:
       files:
