@@ -383,7 +383,7 @@ const REGEX_FLAGS = new Set(["d", "g", "i", "m", "s", "u", "v", "y"]);
 // launder a literal into an exemption; dots never count, since every address
 // and domain carries them.
 function hasPatternOperators(content: string): boolean {
-  return /[()[\]{}^$|*+?]/.test(content.replace(/\\./g, ""));
+  return /[()[\]{}^$|*+?]/u.test(content.replace(/\\./gu, ""));
 }
 
 // The span a pattern-code line exempts: the regex literal or RegExp call
