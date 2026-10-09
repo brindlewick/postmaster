@@ -811,8 +811,10 @@ async function readyAsync(args: string[], env?: Record<string, string | undefine
 // next read sees. GH_CORRUPT_BODY=1 stores each written body with one
 // trailing space added to its first line, GH_CORRUPT_TITLE=1 stores each
 // written title with one character added, a swap-once/swap-body pair
-// replaces the stored body once right after the next body write, and
-// GH_REFUSE_FROM=N refuses every issue read from the Nth one on.
+// replaces the stored body once right after the next body write,
+// GH_SWAP_ON_READ=N replaces it once from swap-body before serving the
+// Nth issue read, and GH_REFUSE_FROM=N refuses every issue read from
+// the Nth one on.
 
 const STUB_GH_KEEPING = `#!/usr/bin/env bash
 d="$GITHUB_SH_STUB"
@@ -882,6 +884,10 @@ case "$1 $2" in
             echo "stub gh: rate limit, refusing issue read" >&2
             exit 1
           fi
+        fi
+        if [ -n "$GH_SWAP_ON_READ" ] && [ "$count" -eq "$GH_SWAP_ON_READ" ] && [ ! -f "$d/swapped" ]; then
+          py_json body "$d/issue-$n.json" "$d/swap-body" || exit 1
+          touch "$d/swapped"
         fi
         if [ -f "$d/issue-$n.json" ]; then cat "$d/issue-$n.json"
         else echo '{"data": {"repository": {"issue": null}}}'; fi ;;
@@ -1216,5 +1222,21 @@ describe("the mark through a github double that keeps writes (C1-C4, C7-C9)", ()
     const chk = ready([repoGh, "50"], envNoJq);
     expect(chk.code).toBe(0);
     expect(chk.out).toContain("ready: 50");
+  }, 60000);
+
+  test("a no-write concurrent edit refuses with the differing line", () => {
+    const { stub, repoGh, env } = setupKeepingDouble("gh-keeping-nowrite");
+    keepingIssue(stub, 51, TWO_PART, "Ticket 51", []);
+    writeFileSync(
+      join(stub, "swap-body"),
+      TWO_PART.replace("## Problem / feature", "## Problem / FEATURE"),
+    );
+    const envSwap = { ...env, GH_SWAP_ON_READ: "3" };
+    const m = ready(["mark", repoGh, "51"], envSwap);
+    expect(m.code).toBe(1);
+    expect(m.out).toContain("changed while it was being marked");
+    expect(m.out).toContain("the body differs at line 1");
+    expect(storedLabels(stub, 51).some((l) => l.toLowerCase() === "ready")).toBe(false);
+    expect(hasMarker(repoGh, 51)).toBe(false);
   }, 60000);
 });
