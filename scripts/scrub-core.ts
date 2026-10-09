@@ -378,6 +378,14 @@ const PATTERN_CODE = new RegExp(
 // means the line is not the declaration the exemption is for.
 const REGEX_FLAGS = new Set(["d", "g", "i", "m", "s", "u", "v", "y"]);
 
+// The exemption is for patterns: a span with no regex operators is a literal
+// value and scans in full. Escapes strip first, so an escaped slash cannot
+// launder a literal into an exemption; dots never count, since every address
+// and domain carries them.
+function hasPatternOperators(content: string): boolean {
+  return /[()[\]{}^$|*+?]/.test(content.replace(/\\./g, ""));
+}
+
 // The span a pattern-code line exempts: the regex literal or RegExp call
 // alone, never the whole line. Null when the construct does not validate,
 // so an unrecognized shape scans in full rather than passing unseen.
@@ -389,27 +397,40 @@ function patternSpan(line: string): [number, number] | null {
     if (open < 0) return null;
     let depth = 0;
     let quote = "";
+    let argStart = -1;
+    const args: string[] = [];
     for (let i = open; i < line.length; i++) {
       const ch = line[i]!;
       if (quote) {
         if (ch === "\\") i++;
-        else if (ch === quote) quote = "";
+        else if (ch === quote) {
+          args.push(line.slice(argStart, i));
+          quote = "";
+        }
         continue;
       }
       if (ch === "'" || ch === '"' || ch === "`") {
         quote = ch;
+        argStart = i + 1;
         continue;
       }
       if (ch === "(") depth++;
       else if (ch === ")") {
         depth--;
-        if (depth === 0) return [m.index, i + 1];
+        if (depth === 0) {
+          // The pattern is the trailing string argument; a literal there
+          // scans instead of exempting.
+          const pattern = args.length ? args[args.length - 1]! : "";
+          if (!hasPatternOperators(pattern)) return null;
+          return [m.index, i + 1];
+        }
       }
     }
     return null;
   }
   let i = m.index + m[0].length - 1;
   if (line[i] !== "/") return null;
+  const open = i;
   i++;
   let inClass = false;
   while (i < line.length) {
@@ -433,6 +454,7 @@ function patternSpan(line: string): [number, number] | null {
     i++;
   }
   if (i >= line.length || line[i] !== "/") return null;
+  if (!hasPatternOperators(line.slice(open + 1, i))) return null;
   i++;
   while (i < line.length && REGEX_FLAGS.has(line[i]!)) i++;
   const rest = line.slice(i, i + 1);
