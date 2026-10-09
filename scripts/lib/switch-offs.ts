@@ -683,6 +683,7 @@ function settingsKind(path: string): "plain" | "package" | null {
     name.startsWith(".eslintrc") ||
     name.startsWith("eslint.config.") ||
     name === ".eslintignore" ||
+    name === ".gitignore" ||
     name === "biome.json" ||
     name === "biome.jsonc" ||
     name === ".biome.json" ||
