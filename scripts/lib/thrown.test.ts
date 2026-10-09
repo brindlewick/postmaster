@@ -1,6 +1,6 @@
 // Tests beside scripts/lib/thrown.ts: 8 controls over the shapes catch sites read.
 import { describe, expect, test } from "bun:test";
-import { thrownCode, thrownDetail } from "./thrown.ts";
+import { thrownCode, thrownDetail, thrownMessage } from "./thrown.ts";
 
 describe("thrownCode", () => {
   test("an object carrying a code gives it", () => {
@@ -15,6 +15,22 @@ describe("thrownCode", () => {
     expect(thrownCode("x")).toBe(undefined);
     expect(thrownCode(null)).toBe(undefined);
     expect(thrownCode(undefined)).toBe(undefined);
+  });
+});
+
+describe("thrownMessage", () => {
+  test("an error gives its message", () => {
+    expect(thrownMessage(new Error("boom"))).toBe("boom");
+  });
+
+  test("an object with a message gives it", () => {
+    expect(thrownMessage({ message: "m" })).toBe("m");
+  });
+
+  test("anything else gives undefined", () => {
+    expect(thrownMessage("str")).toBe(undefined);
+    expect(thrownMessage({ code: "E" })).toBe(undefined);
+    expect(thrownMessage(null)).toBe(undefined);
   });
 });
 

@@ -4,8 +4,10 @@ export function thrownCode(e: unknown): unknown {
   return typeof e === "object" && e !== null ? (e as { code?: unknown }).code : undefined;
 }
 
+export function thrownMessage(e: unknown): unknown {
+  return typeof e === "object" && e !== null ? (e as { message?: unknown }).message : undefined;
+}
+
 export function thrownDetail(e: unknown): unknown {
-  const message: unknown =
-    typeof e === "object" && e !== null ? (e as { message?: unknown }).message : undefined;
-  return message ?? e;
+  return thrownMessage(e) ?? e;
 }
