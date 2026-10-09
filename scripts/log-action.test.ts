@@ -112,12 +112,21 @@ function lines(): number {
   }
 }
 
-function lastLine(): Record<string, any> | null {
+interface ActionLine {
+  action?: unknown;
+  detail: string;
+  fault?: { control?: unknown; error?: unknown; failed?: unknown; workaround?: unknown };
+  project?: unknown;
+  run?: unknown;
+  target?: unknown;
+}
+
+function lastLine(): ActionLine | null {
   try {
     const all = readFileSync(join(d, "actions.jsonl"), "utf8")
       .split("\n")
       .filter((l) => l !== "");
-    return all.length > 0 ? JSON.parse(all[all.length - 1]!) : null;
+    return all.length > 0 ? (JSON.parse(all[all.length - 1]!) as ActionLine) : null;
   } catch {
     return null;
   }
@@ -609,10 +618,10 @@ describe("positive controls", () => {
     const r = spawnSync(SELF, ["log-action", old, "postmaster", "note", "RUN-2", "old"], {
       encoding: "utf8",
     });
-    let oldEntry: Record<string, any> | null = null;
+    let oldEntry: ActionLine | null = null;
     try {
       const rows = readFileSync(join(old, "actions.jsonl"), "utf8").split("\n").filter(Boolean);
-      oldEntry = JSON.parse(rows[rows.length - 1] ?? "null");
+      oldEntry = JSON.parse(rows[rows.length - 1] ?? "null") as ActionLine;
     } catch {
       oldEntry = null;
     }

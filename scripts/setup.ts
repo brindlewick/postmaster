@@ -227,17 +227,18 @@ const opts: AskOpts = { answers: ANSWERS };
 if (ADD_CLERK) {
   if (!existsSync(CONFIG)) die(`setup: no config at ${CONFIG}; run normal setup first`, 1);
   let original = "";
-  let parsed: Record<string, any>;
+  let parsed: Record<string, unknown>;
   try {
     original = readFileSync(CONFIG, "utf8");
-    parsed = readTomlFile(CONFIG) as Record<string, any>;
+    parsed = readTomlFile(CONFIG);
   } catch {
     die(`setup: ${CONFIG} does not parse`, 1);
   }
   const team = parsed!.team;
   if (!team || typeof team !== "object" || Array.isArray(team))
     die(`setup: [team] is missing in ${CONFIG}`, 1);
-  if (team.clerk !== undefined) die(`setup: ${CONFIG} already has team.clerk`, 1);
+  if ((team as Record<string, unknown>).clerk !== undefined)
+    die(`setup: ${CONFIG} already has team.clerk`, 1);
   console.log("== The booking clerk: prepares a ticket with the user. ==");
   const harness = ask("  clerk: harness", "", "clerk.harness", opts);
   needHarness(harness);
@@ -264,7 +265,9 @@ if (ADD_CLERK) {
   }
   writeFileSync(CONFIG, changed, "utf8");
   try {
-    const reread = readTomlFile(CONFIG) as Record<string, any>;
+    const reread = readTomlFile(CONFIG) as {
+      team?: { clerk?: { harness?: unknown; model?: unknown } };
+    };
     if (reread.team?.clerk?.harness !== harness || reread.team?.clerk?.model !== model)
       throw new Error("mismatch");
   } catch {
