@@ -317,8 +317,8 @@ function runBlock(source: string, shell: string): RunResult & { root: string } {
 describe("coachman shell blocks", () => {
   const blocks = blocksFrom(readFileSync(DOC, "utf8"));
 
-  test("all fourteen shell blocks have the same arguments and status in bash and zsh", () => {
-    expect(blocks.length).toBe(14);
+  test("all eleven shell blocks have the same arguments and status in bash and zsh", () => {
+    expect(blocks.length).toBe(11);
     const bash = Bun.which("bash");
     if (!bash) throw new Error("bash is not on PATH");
     const zsh = Bun.which("zsh");
@@ -340,41 +340,22 @@ describe("coachman shell blocks", () => {
       if (zsh) expect(norm(runBlock(block.source, zsh))).toEqual(norm(bashResult));
     }
 
-    const reviewers = runBlock(blocks[10]!.source, bash).calls;
-    const cloneCall = reviewers.find(
-      (args) => args[0] === "run" && args[1] === "cut-scratch" && args.includes("--clone"),
-    );
-    expect(cloneCall?.slice(-2)).toEqual(["--clone", "BASE"]);
-    const wait = reviewers.find(
-      (args) => args[0] === "run" && args[1] === "review-round" && args[2] === "wait",
-    );
-    expect(wait?.slice(6)).toEqual(["bug:luna", "bug:mimo", "security:luna", "security:mimo"]);
-
-    const failedLaneLogs = runBlock(blocks[11]!.source, bash).calls.filter(
-      (args) => args[0] === "run" && args[1] === "run-log" && args[3]?.includes("normalize failed"),
-    );
-    expect(failedLaneLogs.map((args) => args[3]?.split(" ")[3])).toEqual(["luna:", "mimo:"]);
+    const sources = blocks.map((b) => b.source);
+    expect(sources.some((s) => s.includes("review-round cut"))).toBe(true);
+    expect(sources.some((s) => s.includes("review-round launch"))).toBe(true);
+    expect(sources.some((s) => s.includes("review-round harvest"))).toBe(true);
   });
 
-  test("the argument checks reject unquoted expansions of multword shell arrays", () => {
-    const bash = Bun.which("bash");
-    if (!bash) throw new Error("bash is not on PATH");
-    const reviewBlock = blocks[10]!.source;
-    const correct = runBlock(reviewBlock, bash);
-    const cloneMutation = runBlock(reviewBlock.replaceAll('"${CLONE[@]}"', "$CLONE"), bash);
-    const reviewerMutation = runBlock(
-      reviewBlock.replaceAll('"${REVIEWERS[@]}"', "$REVIEWERS"),
-      bash,
-    );
-    expect(cloneMutation.calls).not.toEqual(correct.calls);
-    expect(reviewerMutation.calls).not.toEqual(correct.calls);
-
-    const normalizeBlock = blocks[11]!.source;
-    const normalized = runBlock(normalizeBlock, bash);
-    const mutation = runBlock(
-      normalizeBlock.replaceAll('"${NORMALIZE_FAILED[@]}"', "$NORMALIZE_FAILED"),
-      bash,
-    );
-    expect(mutation.calls).not.toEqual(normalized.calls);
+  test("no shell block holds loops, arrays or pipes: the loop runs through review-round", () => {
+    for (const [index, block] of blocks.entries()) {
+      const code = block.source
+        .split("\n")
+        .map((line) => line.replace(/#.*$/u, ""))
+        .join("\n");
+      expect({ block: index + 1, code }).toEqual({
+        block: index + 1,
+        code: expect.not.stringMatching(/\$\{|\||\bfor\b|\bwhile\b|\bif\b|\bcase\b/u),
+      });
+    }
   });
 });

@@ -48,10 +48,10 @@ way on every row, only less visibly on the last.
 <tool>/scripts/run host name <dispatch> review <lane> <lens> <round>
 <tool>/scripts/run host name <dispatch> postmaster
 <tool>/scripts/run host name <dispatch> role <text...>
-<tool>/scripts/run host leg launch|resume|takeover|retry|outcome|backfill|waiting ...
-<tool>/scripts/run host run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--project <repo>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
+<tool>/scripts/run host leg <launch|resume|takeover|retry|outcome|backfill|waiting> ...
+<tool>/scripts/run host run <name> <cwd> [--under <dispatch>] [--role <lane|coachman|reviewer>] [--run <dispatch>] [--project <repo>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
 <tool>/scripts/run host workhorse <dispatch> <lane> <worktree>
-<tool>/scripts/run host limits [--role lane|coachman|reviewer] [--run <dispatch>|--project <repo>]
+<tool>/scripts/run host limits [--role <lane|coachman|reviewer>] [--run <dispatch>] [--project <repo>]
 <tool>/scripts/run host stop <worktree>
 <tool>/scripts/run host stop-pidfile <pidfile>
 <tool>/scripts/run host close <worktree>

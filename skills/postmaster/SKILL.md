@@ -170,14 +170,14 @@ A settings file git tracks is used only after the user has accepted it, and agai
 changes: `run project-settings inspect` reports it as `local_acceptance: pending`, and until
 it is accepted every reader uses the global value. When the launch card shows a pending file,
 show the user the file and ask whether to accept it; on yes, run
-`<tool>/scripts/run project-settings accept "$TARGET"`. No run, lane or script accepts on
+`<tool>/scripts/run project-settings accept <target>`. No run, lane or script accepts on
 its own.
 
 When the conversation settles a project decision that should stay on this checkout, offer
 `.postmaster/settings.toml` and show its contents before writing it. When maintainers should set
 the same requirement for everyone, offer `.postmaster/project.toml` instead and say that is the
 shared file being proposed. Wait for agreement, then write the agreed file with
-`<tool>/scripts/run project-settings write "$TARGET" local <file>` or `project <file>`.
+`<tool>/scripts/run project-settings write <target> local <file>` or `project <file>`.
 The script validates the file and keeps `.postmaster/` ignored. A shared file is ignored by
 default too; commit only that file deliberately with `git add -f .postmaster/project.toml`.
 A project may also commit its settings file to share it, with
@@ -259,10 +259,10 @@ its env file, never in settings.
    `<runs>/postmaster/`, and has no terminal to stop at a question:
 
    ```sh
-   <tool>/scripts/run host run "postmaster" "$TARGET_ROOT" --out "$RUNS/postmaster/events.jsonl" \
-     --err "$RUNS/postmaster/postmaster.err" --marker "$RUNS/postmaster/.exited" \
-     --project "$TARGET_ROOT" -- \
-     <tool>/scripts/run launch launch postmaster "$TARGET_ROOT" "$RUNS/postmaster/brief.md" --project "$TARGET_ROOT"
+   <tool>/scripts/run host run "postmaster" <target root> --out <runs>/postmaster/events.jsonl \
+     --err <runs>/postmaster/postmaster.err --marker <runs>/postmaster/.exited \
+     --project <target root> -- \
+     <tool>/scripts/run launch launch postmaster <target root> <runs>/postmaster/brief.md --project <target root>
    ```
 
    That form needs a harness with a resume form (`hosts.md`, none), so the user can answer an
