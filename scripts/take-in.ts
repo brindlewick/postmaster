@@ -22,14 +22,14 @@
 //           reason, and nothing is taken in
 //   exit 3  a taken branch is off its checked commit; the lane is named with
 //           both commits, and nothing is taken in
-import { existsSync, readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { liveLaunchNames } from "./host.ts";
 import { tryJsonFile } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { die, run } from "./lib/proc.ts";
 import { DETAIL_RE } from "./verify.ts";
-import { lostWalls, readWalls } from "./walls.ts";
+import { logUnreadable, lostWalls, readWalls } from "./walls.ts";
 
 const HERE = scriptsDir(import.meta);
 const USAGE = "usage: run take-in <dispatch> [--skip <lane> ...]";
@@ -97,13 +97,20 @@ function readRepo(dispatch: string): string {
     die(`take-in: no repo recorded at ${p}`, 1);
   }
   const repo = c["repo"] as string;
-  if (!existsSync(repo)) die(`take-in: the recorded repo is not a directory: ${repo}`, 1);
+  let isDir = false;
+  try {
+    isDir = statSync(repo).isDirectory();
+  } catch {
+    isDir = false;
+  }
+  if (!isDir) die(`take-in: the recorded repo is not a directory: ${repo}`, 1);
   return repo;
 }
 
 /** Every verify line's claim, oldest first; a broken line stops the read. */
 function checkClaims(dispatch: string): CheckClaim[] {
   const p = join(dispatch, "actions.jsonl");
+  if (logUnreadable(dispatch)) die(`take-in: cannot read ${p}`, 1);
   let text: string;
   try {
     text = readFileSync(p, "utf8");
@@ -179,7 +186,7 @@ function main(argv: string[]): number {
   }
   if (pos.length !== 1) usage();
   const dispatch = pos[0]!;
-  const runName = basename(dispatch);
+  const runName = basename(resolve(dispatch));
   const { base, lanes } = readManifest(dispatch);
   const repo = readRepo(dispatch);
   const skipSet = new Set(skips);
