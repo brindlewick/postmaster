@@ -17,7 +17,7 @@
 //   run host leg backfill <dispatch> <leg> <number>
 //   run host leg waiting add|remove|list <runs> <ticket> [<question-file>]
 //   run host run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>]
-//               [--out <file>] [--err <file>] [--append] [--marker <file>]
+//               [--project <repo>] [--out <file>] [--err <file>] [--append] [--marker <file>]
 //               [--pidfile <file>] -- <command...>
 //   run host workhorse <dispatch> <lane> <worktree>
 //                                         launch one workhorse into its worktree: its name from
@@ -25,6 +25,9 @@
 //                                         dispatch's logs, `run launch launch` with --run
 //   run host stop-pidfile <pidfile>        stop the recorded launch and its group while its
 //                                         identity matches, else report the leftover members
+//   run host limits [--role lane|coachman|reviewer] [--run <dispatch>|--project <repo>]
+//                                         print the launch limits that would apply:
+//                                         memory=<max> and tasks=<max>
 //   run host stop <worktree>               stop every launch still running in a worktree, and
 //                                         everything each one started
 //   run host close <worktree>              close its tabs/space (Herdr) and its windows (tmux)
@@ -130,11 +133,13 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseTomlText } from "./lib/data.ts";
+import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
 import {
   bootId,
   processCommandLine,
+  processCommandLines,
   processInfo,
   processStart,
   processState,
@@ -1615,6 +1620,7 @@ function launchLimits(
   role: string,
   dispatch: string,
   configPath: string,
+  project = "",
 ): { memory: string; tasks: number } {
   const memoryDefault = "8G";
   const tasksDefault = 512;
@@ -1635,6 +1641,13 @@ function launchLimits(
     if (typeof top !== "object" || top === null || Array.isArray(top))
       die("run.json must hold an object");
     config = (top as Record<string, unknown>).config ?? {};
+  } else if (project) {
+    const resolved = effectiveConfigForProject(project, configPath);
+    if (resolved.notice !== null) console.error(resolved.notice);
+    if (resolved.config === null || resolved.error !== null) {
+      die(`cannot read launch limits: ${resolved.error ?? "cannot resolve project settings"}`);
+    }
+    config = resolved.config;
   } else if (isRegularFile(configPath)) {
     let text: string;
     try {
@@ -1674,6 +1687,31 @@ function launchLimits(
   if (typeof tasks !== "number" || !Number.isInteger(tasks) || tasks < 1 || tasks > 2147483647)
     die("tasks_max must be a whole number from 1 to 2147483647");
   return { memory, tasks };
+}
+
+function limitsCmd(args: string[]): void {
+  let role = "default";
+  let dispatch = "";
+  let project = "";
+  let at = 0;
+  while (at < args.length) {
+    const option = args[at]!;
+    if (option === "--role" || option === "--run" || option === "--project") {
+      if (at + 1 >= args.length) die(`${option} needs a value`);
+      if (option === "--role") role = args[at + 1]!;
+      else if (option === "--run") dispatch = args[at + 1]!;
+      else project = args[at + 1]!;
+      at += 2;
+    } else {
+      die(
+        "usage: run host limits [--role lane|coachman|reviewer] [--run <dispatch>|--project <repo>]",
+      );
+    }
+  }
+  if (role !== "default" && role !== "lane" && role !== "coachman" && role !== "reviewer")
+    die(`unknown launch role: ${role}`);
+  const limits = launchLimits(role, absolute(dispatch), globalConfigPath(), absolute(project));
+  console.log(`memory=${limits.memory}\ntasks=${limits.tasks}`);
 }
 
 function random31(): number {
@@ -1855,6 +1893,24 @@ function markerRemove(path: string): void {
     try {
       rmSync(path, { force: true });
     } catch {}
+}
+// A reused marker's prior watchers are dead legs walking: the previous
+// launch's _watch polls its payload every 500ms and may still be polling
+// when the marker is reset, and its late touch would read as the new
+// launch's completion, finishing it before its payload prints. Kill them
+// before the reset; the new launch spawns its own during placement.
+// SIGKILL, not SIGTERM: the watcher is stateless, and only a synchronous
+// death closes the race. One listing, not a scan per pid: the portable ps
+// path costs a spawn per process.
+function killPriorWatchers(marker: string): void {
+  if (!marker) return;
+  for (const [pid, line] of processCommandLines()) {
+    if (pid === process.pid) continue;
+    if (!line.split(/[ \t]+/u).includes("_watch") || !line.includes(marker)) continue;
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {}
+  }
 }
 function _writeEnvPipe(path: string): void {
   let fd = -1;
@@ -2158,10 +2214,50 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
       );
     } else {
       launchNotice("launch running uncapped (no supported per-launch limits available)");
-      child = spawn(spec.argv[0] ?? "", spec.argv.slice(1), {
+      // A session of its own without systemd: setsid(1) where it exists, else
+      // python's setsid, since macOS ships no setsid binary. Either execs the
+      // command in place, so the pidfile still names the launch's own pid —
+      // which is why this spawn is not detached: a detached child is already
+      // a group leader, and setsid would fork past the recorded pid.
+      let bin = spec.argv[0] ?? "";
+      let args = spec.argv.slice(1);
+      let alone = false;
+      const sid = which("setsid");
+      if (sid) {
+        args = [bin, ...args];
+        bin = sid;
+        alone = true;
+      } else {
+        const py = which("python3");
+        if (py) {
+          // Shed a group leadership first: setsid fails on a group leader,
+          // and a spawn that arrives already leading would die without ever
+          // execing. Either failure still execs, group-led at worst.
+          args = [
+            "-c",
+            [
+              "import os,sys",
+              "try:",
+              " os.setpgid(0,os.getpgid(os.getppid()))",
+              "except Exception:",
+              " pass",
+              "try:",
+              " os.setsid()",
+              "except Exception:",
+              " pass",
+              "os.execvp(sys.argv[1],sys.argv[1:])",
+            ].join("\n"),
+            bin,
+            ...args,
+          ];
+          bin = py;
+          alone = true;
+        }
+      }
+      child = spawn(bin, args, {
         cwd: spec.rundir,
         env,
-        detached: true,
+        ...(alone ? {} : { detached: true }),
         stdio: ["ignore", stdioFor(stdoutFd), stdioFor(stderrFd)],
       });
     }
@@ -2352,6 +2448,7 @@ async function runCmd(args: string[]): Promise<void> {
   let under = "";
   let role = "default";
   let dispatch = "";
+  let project = "";
   let out = "";
   let err = "";
   let marker = "";
@@ -2365,6 +2462,7 @@ async function runCmd(args: string[]): Promise<void> {
       option === "--under" ||
       option === "--role" ||
       option === "--run" ||
+      option === "--project" ||
       option === "--out" ||
       option === "--err" ||
       option === "--marker" ||
@@ -2377,6 +2475,7 @@ async function runCmd(args: string[]): Promise<void> {
       if (option === "--under") under = args[at + 1]!;
       else if (option === "--role") role = args[at + 1]!;
       else if (option === "--run") dispatch = args[at + 1]!;
+      else if (option === "--project") project = args[at + 1]!;
       else if (option === "--out") out = args[at + 1]!;
       else if (option === "--err") err = args[at + 1]!;
       else if (option === "--marker") marker = args[at + 1]!;
@@ -2398,6 +2497,7 @@ async function runCmd(args: string[]): Promise<void> {
   marker = absolute(marker);
   pidfile = absolute(pidfile);
   dispatch = absolute(dispatch);
+  project = absolute(project);
   under = absolute(under);
   if (bad) appendFailure(err, marker, bad);
   if (!name || !givenCwd)
@@ -2460,11 +2560,7 @@ async function runCmd(args: string[]): Promise<void> {
   let memory = "";
   let tasks = "";
   try {
-    const limits = launchLimits(
-      role,
-      dispatch,
-      process.env.POSTMASTER_CONFIG || join(homedir(), ".postmaster", "config.toml"),
-    );
+    const limits = launchLimits(role, dispatch, globalConfigPath(), project);
     memory = limits.memory;
     tasks = String(limits.tasks);
   } catch (error) {
@@ -2511,6 +2607,10 @@ async function runCmd(args: string[]): Promise<void> {
     }
   }
   if (pidfile) markerRemove(pidfile);
+  // A marker that already exists may still have the previous launch's
+  // _watch polling behind it; without the kill its late touch lands after
+  // the reset and finishes this launch before its payload prints.
+  if (marker && existsSync(marker)) killPriorWatchers(marker);
   if (marker) markerRemove(marker);
   const specDir = mkdtempSync(join(tmpdir(), "postmaster-host."));
   writeSpec(specDir, {
@@ -3513,30 +3613,46 @@ function legTerminateTail(path: string): void {
 // empty file is a creator between its creation and its pid write. The mutex serializes the
 // check-and-write sections only — acquire, claim and release each drop it before returning —
 // so a kill mid-section leaves a dead owner's file the next take steals.
-function legMutexOwnerDead(mutexPath: string): boolean {
+type MutexVerdict = "absent" | "live" | "dead";
+function legMutexVerdict(mutexPath: string): { verdict: MutexVerdict; text: string | null } {
   let text: string;
   try {
     text = readFileSync(mutexPath, "utf8");
   } catch (error) {
-    return (error as NodeJS.ErrnoException)?.code === "ENOENT";
+    return {
+      verdict: (error as NodeJS.ErrnoException)?.code === "ENOENT" ? "absent" : "live",
+      text: null,
+    };
   }
   if (text.trim() === "") {
     try {
-      return Date.now() - statSync(mutexPath).mtimeMs > 5000;
+      return {
+        verdict: Date.now() - statSync(mutexPath).mtimeMs > 5000 ? "dead" : "live",
+        text,
+      };
     } catch {
-      return true;
+      return { verdict: "dead", text };
     }
   }
   const pid = Number(text.trim());
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  return processState(pid) !== "live";
+  if (!Number.isInteger(pid) || pid <= 0) return { verdict: "live", text };
+  return { verdict: processState(pid) !== "live" ? "dead" : "live", text };
 }
 type MutexTake = { status: "taken" } | { status: "busy" } | { status: "error"; error: unknown };
-// The steal races a fresh holder: the liveness verdict names a pid, but the
-// unlink acts on a path, and a new holder can create between the two, losing
-// its file to the unlink and holding the mutex beside the stealer. The window
-// is one read-to-unlink wide; callers whose write must survive verify it
+// The steal re-verifies the file it verdicts: the verdict names a pid, but the
+// unlink acts on a path, and a verdict that spans a drop and a fresh create —
+// the old owner exits after dropping, the liveness check straddles it — would
+// otherwise unlink the fresh holder's file and hold the mutex beside it. Only
+// a file still carrying the dead verdict's content is stolen; anything else
+// waits for the next try. Callers whose write must survive still verify it
 // after the write and redo, rather than trusting the hold alone.
+function legMutexRead(mutexPath: string): string | null {
+  try {
+    return readFileSync(mutexPath, "utf8");
+  } catch {
+    return null;
+  }
+}
 function legMutexTake(mutexPath: string, maxTries: number): MutexTake {
   for (let i = 0; maxTries < 0 || i < maxTries; i++) {
     try {
@@ -3550,7 +3666,11 @@ function legMutexTake(mutexPath: string, maxTries: number): MutexTake {
       return { status: "taken" };
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") return { status: "error", error };
-      if (legMutexOwnerDead(mutexPath)) {
+      // A file already gone steals nothing, and a file changed since the
+      // verdict belongs to a fresh holder: unlinking either would take a live
+      // file with it. Only the dead verdict's own content is stolen.
+      const seen = legMutexVerdict(mutexPath);
+      if (seen.verdict === "dead" && seen.text !== null && legMutexRead(mutexPath) === seen.text) {
         try {
           rmSync(mutexPath, { force: true });
         } catch {}
@@ -4630,13 +4750,24 @@ function legWaitingEscape(question: string): string {
     .map((line) => (line.startsWith("## ") ? `\\## ${line.slice(3)}` : line))
     .join("\n");
 }
-function legWaitingAddInner(f: string, ticket: string, escaped: string): void {
-  let text = "";
-  let listIsFile = false;
+function legWaitingRead(f: string): string | null {
   try {
-    listIsFile = statSync(f).isFile();
-  } catch {}
-  if (listIsFile) text = readFileSync(f, "utf8");
+    if (!statSync(f).isFile()) return null;
+  } catch {
+    return null;
+  }
+  try {
+    return readFileSync(f, "utf8");
+  } catch {
+    return null;
+  }
+}
+// The update stores only onto the content it read: a second read past the
+// compute that differs means another writer landed between, so this one
+// reports unwritten and the caller redoes from the newer list. False never
+// means the ticket is missing, only that this write did not land.
+function legWaitingAddInner(f: string, ticket: string, escaped: string): boolean {
+  const text = legWaitingRead(f) ?? "";
   const blocks = text.split(/^## /mu);
   const head = blocks[0] ?? "";
   const rest: string[] = [];
@@ -4645,18 +4776,23 @@ function legWaitingAddInner(f: string, ticket: string, escaped: string): void {
     if (pyTrim(pySplitLines(b)[0] ?? "") !== ticket) rest.push(b);
   }
   rest.push(`${ticket}\n${escaped}\n`);
+  if ((legWaitingRead(f) ?? "") !== text) return false;
   legWaitingStore(f, head + rest.map((b) => `## ${b}`).join(""));
+  return true;
 }
-function legWaitingRemoveInner(f: string, ticket: string): void {
-  const text = readFileSync(f, "utf8");
+function legWaitingRemoveInner(f: string, ticket: string): boolean {
+  const text = legWaitingRead(f);
+  if (text === null) return true;
   const parts = text.split(/^## /mu);
   const keep: string[] = [parts[0] ?? ""];
   for (const b of parts.slice(1)) {
     if (pyTrim(pySplitLines(b)[0] ?? "") !== ticket) keep.push(`## ${b}`);
   }
   const out = keep.join("");
+  if ((legWaitingRead(f) ?? "") !== text) return false;
   legWaitingStore(f, pyTrim(out) === "" ? "" : out);
   if (pyTrim(out) === "") rmSync(f);
+  return true;
 }
 // Run the inner waiting update with the kernel holding the list: flock runs us
 // again as its child, so the read and the write are exclusive by construction —
@@ -4689,10 +4825,10 @@ function legWaitingAdd(runs: string, ticket: string, qfile: string): void {
   // phantom entry and remove takes the whole block. The escape renders identically in markdown.
   const escaped = legWaitingEscape(pyTrim(readFileSync(qfile, "utf8")));
   // Two postmasters adding together read one list and the last write wins, dropping an
-  // entry, and no pid file can close that race: the liveness verdict names a pid while
-  // the steal unlinks a path, so the kernel holds the list instead. Without flock(1)
-  // the pid mutex with verify-and-redo is the fallback — bash's class, a plain RMW
-  // there, which can still drop an entry under contention.
+  // entry, so the kernel holds the list instead: flock runs the inner update
+  // exclusively. Without flock(1) the pid mutex with verify-and-redo is the
+  // fallback, whose steal takes only a stale file — contended files never
+  // age one, so under contention the atomic create alone decides.
   const lock = join(runs, "postmaster", ".waiting.lock");
   if (legWaitingUnderFlock(lock, ["_waiting_add", runs, ticket, qfile])) return;
   for (let attempt = 0; attempt < 10; attempt++) {
@@ -4702,7 +4838,7 @@ function legWaitingAdd(runs: string, ticket: string, qfile: string): void {
         `leg: cannot take the waiting-list mutex: ${spawnStrerror(take.status === "error" ? take.error : null)}`,
       );
     try {
-      legWaitingAddInner(f, ticket, escaped);
+      if (!legWaitingAddInner(f, ticket, escaped)) continue;
       let back = "";
       try {
         back = readFileSync(f, "utf8");
@@ -4730,7 +4866,7 @@ function legWaitingRemove(runs: string, ticket: string): void {
         `leg: cannot take the waiting-list mutex: ${spawnStrerror(take.status === "error" ? take.error : null)}`,
       );
     try {
-      legWaitingRemoveInner(f, ticket);
+      if (!legWaitingRemoveInner(f, ticket)) continue;
       let back: string | null = null;
       try {
         back = readFileSync(f, "utf8");
@@ -5032,6 +5168,9 @@ async function main(): Promise<void> {
     case "workhorse":
       await workhorseCmd(args);
       return;
+    case "limits":
+      limitsCmd(args);
+      return;
     case "stop":
       await stopCmd(args);
       return;
@@ -5120,7 +5259,7 @@ async function main(): Promise<void> {
       return;
     default:
       die(
-        "usage: run host leg | detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] | stop | close | stop-run | close-run | spawn | send | wait | read | --live-test (see the header)",
+        "usage: run host leg | detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--project <repo>] | limits | stop | close | stop-run | close-run | spawn | send | wait | read | --live-test (see the header)",
       );
   }
 }

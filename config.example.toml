@@ -6,7 +6,9 @@
 # serves under the harness; confirm each with one trial launch (scripts/run launch form <name>
 # prints the exact command). Every value below is one that scripts/run launch can run today.
 # A run keeps the config it was dispatched with, recorded in its run.json: an edit here
-# reaches the next run, never one already in flight.
+# reaches the next run, never one already in flight. A project may override any setting
+# here from its own .postmaster/settings.toml (see settings.example.toml); a settings
+# file git tracks takes effect once the user has accepted it.
 
 # Where projects live. scripts/run find-projects reads this when given no roots.
 projects_roots = ["~/Code"]

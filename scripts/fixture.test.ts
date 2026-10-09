@@ -1254,10 +1254,13 @@ describe("new: a fresh repo outside every other, with its ticket in its own stor
     expect(status).toBe("");
   }, 30000);
   test("it holds the app's files as git sees them, symlink included, and nothing else", () => {
-    const listed2 = run("bash", [
-      "-c",
-      `git -C "${APP}" ls-files --cached --others --exclude-standard`,
-    ])
+    // Under the same HOME the fresh repo was made with: global git ignores
+    // shape --exclude-standard, and the runner's own would list differently.
+    const listed2 = run(
+      "bash",
+      ["-c", `git -C "${APP}" ls-files --cached --others --exclude-standard`],
+      { env: { HOME: join(tmp, "home") } },
+    )
       .out.trim()
       .split("\n")
       .sort();
@@ -1273,10 +1276,13 @@ describe("new: a fresh repo outside every other, with its ticket in its own stor
         if (cmp.code !== 0) same = false;
       }
     }
+    // Byte order, like the JS sort below: the stock BSD sort follows the
+    // locale (case-insensitive on the runner) and would list CLAUDE.md and
+    // README.md among the lowercase names.
     const heldFiles = run("bash", [
       "-c",
       `cd "${dest}" && find . -path ./.git -prune -o \\( -type f -o -type l \\) -print | ` +
-        `sed 's|^\\./||' | sort`,
+        `sed 's|^\\./||' | LC_ALL=C sort`,
     ]).out.trim();
     const isSymlink =
       existsSync(join(dest, "CLAUDE.md")) && lstatSync(join(dest, "CLAUDE.md")).isSymbolicLink();

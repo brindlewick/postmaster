@@ -48,9 +48,10 @@ way on every row, only less visibly on the last.
 <tool>/scripts/run host name <dispatch> review <lane> <lens> <round>
 <tool>/scripts/run host name <dispatch> postmaster
 <tool>/scripts/run host name <dispatch> role <text...>
-<tool>/scripts/run host leg <launch|resume|takeover|retry|outcome|backfill|waiting> ...
-<tool>/scripts/run host run <name> <cwd> [--under <dispatch>] [--role <lane|coachman|reviewer>] [--run <dispatch>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
+<tool>/scripts/run host leg launch|resume|takeover|retry|outcome|backfill|waiting ...
+<tool>/scripts/run host run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--project <repo>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
 <tool>/scripts/run host workhorse <dispatch> <lane> <worktree>
+<tool>/scripts/run host limits [--role lane|coachman|reviewer] [--run <dispatch>|--project <repo>]
 <tool>/scripts/run host stop <worktree>
 <tool>/scripts/run host stop-pidfile <pidfile>
 <tool>/scripts/run host close <worktree>
@@ -131,7 +132,9 @@ onto the fragment it supersedes.
 - **`--role` selects per-role limits; `--run` selects the dispatch's recorded config.** Use
   `lane` for a workhorse, `coachman` for a leg, and `reviewer` for a review launch. Direct host
   launches use the default limits. With `--run <dispatch>`, the limits come from the config in
-  `<dispatch>/run.json`, so an edit to the live config does not change an in-flight run.
+  `<dispatch>/run.json`, so an edit to the live config does not change an in-flight run. With
+  `--project <repo>` and no `--run`, they come from the project's effective config. `host
+  limits` prints the limits a launch would get, as `memory=<max>` and `tasks=<max>`.
 - **A Linux user scope contains each launch and its descendants.** When systemd can verify a
   cgroup v2 memory controller, pids controller and the requested scope properties, `run host`
   applies `MemoryMax` (default `8G`), `MemorySwapMax=0` and `TasksMax` (default `512`). Systemd
@@ -207,9 +210,9 @@ onto the fragment it supersedes.
   worktree from the waybill. `herdr worktree open --workspace <repository's space> --path
   <synthesis worktree> --label <ticket>` opens the run's space. Every launch gets a tab
   in the same space, with its own checkout as the tab's working directory, the first one
-  included: it closes the run space's root tab once its own tab exists. That includes
-  reviewer worktrees and security-review clones: a clone is never opened as a separate
-  workspace. A failure before the launch lands rolls back instead — the root tab
+  included: it closes the run space's root tab once its own tab exists.
+  That includes reviewer scratches: a clone is never opened as a separate workspace. A
+  failure before the launch lands rolls back instead — the root tab
   while the launch tab does not exist yet, the launch tab after — so a failed
   placement leaves nothing a later close could refuse. A run launch without `--under` is refused
   instead of opening a top-level space.

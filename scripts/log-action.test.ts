@@ -1,7 +1,6 @@
 // Tests beside scripts/log-action.ts, moved from its --self-test on #109: 61 controls.
 // Each test repeats the write it checks, so it passes alone as well as in file order.
 // Repeated tool-fault argument lists are module constants; the mixed bad-byte write is a helper.
-// Without iconv the differential is gated off and the file logs a skip notice naming it.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -13,12 +12,15 @@ import { controlOf, kindsOf } from "./log-action";
 
 const SELF = join(import.meta.dir, "run");
 const TOOL = toolRoot(import.meta);
-const noIconv = spawnSync("bash", ["-c", "command -v iconv"], { encoding: "utf8" }).status !== 0;
-if (noIconv) {
-  console.log(
-    "skip the decoder matches iconv -c on 300 seeded cases: no iconv here; BASE skips it too",
-  );
-}
+// The differential pins glibc's iconv, byte for byte; macOS ships libiconv with
+// different corner behaviour, and some systems ship no iconv at all. Both skips
+// and their reasons live in scripts/skips.toml.
+const noIconv =
+  process.platform !== "linux" ||
+  spawnSync("bash", ["-c", "command -v iconv"], { encoding: "utf8" }).status !== 0;
+// Raw non-UTF-8 argv can only be told from U+FFFD through /proc/self/cmdline,
+// which macOS does not have.
+const skipRawArgv = !existsSync("/proc/self/cmdline");
 
 const FIELDS = [
   "--ran",
@@ -505,6 +507,88 @@ describe("positive controls", () => {
     expect(last !== null && last.detail === "base=def5678 result=moved").toBe(true);
   });
 
+  test("an approved switch-off is written", () => {
+    const before = lines();
+    const r = logAction([
+      "postmaster",
+      "switch-off",
+      "comment:0123456789abcdef",
+      "approved",
+      "scripts/a.ts:1",
+      "eslint-disable-next-line",
+      "--",
+      "yes,",
+      "it",
+      "is",
+      "test-only",
+    ]);
+    expect(r.code).toBe(0);
+    expect(lines()).toBe(before + 1);
+  }, 30000);
+
+  test("with its identity, decision and the user's words", () => {
+    const r = logAction([
+      "postmaster",
+      "switch-off",
+      "settings:89abcdef01234567",
+      "approved",
+      "bunfig.toml",
+      "keep",
+      "the",
+      "test",
+      "table",
+    ]);
+    expect(r.code).toBe(0);
+    const last = lastLine();
+    expect(
+      last !== null &&
+        last.action === "switch-off" &&
+        last.target === "settings:89abcdef01234567" &&
+        last.detail === "approved bunfig.toml keep the test table",
+    ).toBe(true);
+  }, 30000);
+
+  test("a refused switch-off is written", () => {
+    const before = lines();
+    const r = logAction([
+      "postmaster",
+      "switch-off",
+      "comment:fedcba9876543210",
+      "refused",
+      "scripts/a.ts:1",
+      "ts-ignore",
+      "--",
+      "not",
+      "while",
+      "it",
+      "hides",
+      "a",
+      "failure",
+    ]);
+    expect(r.code).toBe(0);
+    expect(lines()).toBe(before + 1);
+    const last = lastLine();
+    expect(
+      last !== null &&
+        last.action === "switch-off" &&
+        last.detail.startsWith("refused scripts/a.ts:1 ts-ignore"),
+    ).toBe(true);
+  }, 30000);
+
+  test("an approved switch-off lands identically in both files", () => {
+    const target = "comment:abcdef0123456789";
+    const words = "approved scripts/other.ts:1 oxlint-disable-line yes, test-only";
+    const r = logAction(["postmaster", "switch-off", target, words]);
+    expect(r.code).toBe(0);
+    const actions = readFileSync(join(d, "actions.jsonl"), "utf8");
+    const ledger = readFileSync(join(tmp, "proj", ".postmaster", "runs", "ledger.jsonl"), "utf8");
+    expect(actions).toBe(ledger);
+    const last = lastLine();
+    expect(last?.action).toBe("switch-off");
+    expect(last?.target).toBe(target);
+    expect(last?.detail).toBe(words);
+  }, 30000);
+
   test("a detail ending in a newline is written", () => {
     const before = lines();
     const r = logAction(["postmaster", "note", "RUN-1", "kept whole\n"]);
@@ -547,7 +631,7 @@ describe("positive controls", () => {
     expect(lines()).toBe(before + 1);
   });
 
-  test("the separator escaped and the byte dropped", () => {
+  test.skipIf(skipRawArgv)("the separator escaped and the byte dropped", () => {
     const r = rawDetail("one\\342\\200\\250two \\377 three", "postmaster", "note", "RUN-1");
     expect(r.code).toBe(0);
     const last = lastLine();
@@ -575,7 +659,7 @@ describe("positive controls", () => {
     expect(lines()).toBe(before + 1);
   });
 
-  test("the damage dropped and the legitimate character kept", () => {
+  test.skipIf(skipRawArgv)("the damage dropped and the legitimate character kept", () => {
     const r = mixedRawWrite();
     expect(r.code).toBe(0);
     const last = lastLine();
@@ -713,6 +797,43 @@ describe("negative controls: nothing is written", () => {
     expect(lines()).toBe(before);
     expect(r.err.includes("base=<commit>")).toBe(true);
   });
+
+  test("a switch-off with a target out of shape", () => {
+    const before = lines();
+    const r = logAction(["coachman", "switch-off", "scripts/a.ts:1", "approved fine by me"]);
+    expect(r.code).toBe(1);
+    expect(lines()).toBe(before);
+    expect(r.err.includes("comment:<16 hex> or settings:<16 hex>")).toBe(true);
+  }, 30000);
+
+  test("a switch-off whose decision is another word", () => {
+    const before = lines();
+    const r = logAction(["coachman", "switch-off", "comment:0123456789abcdef", "maybe yes"]);
+    expect(r.code).toBe(1);
+    expect(lines()).toBe(before);
+    expect(r.err.includes("opens with its decision, approved or refused")).toBe(true);
+  }, 30000);
+
+  test("a switch-off with the decision and nothing after it", () => {
+    const before = lines();
+    const r = logAction(["coachman", "switch-off", "comment:0123456789abcdef", "approved"]);
+    expect(r.code).toBe(1);
+    expect(lines()).toBe(before);
+    expect(r.err.includes("carries the decision")).toBe(true);
+  }, 30000);
+
+  test("a switch-off with the decision and entry but no user words", () => {
+    const before = lines();
+    const r = logAction([
+      "coachman",
+      "switch-off",
+      "comment:0123456789abcdef",
+      "approved bunfig.toml",
+    ]);
+    expect(r.code).toBe(1);
+    expect(lines()).toBe(before);
+    expect(r.err.includes("carries the decision")).toBe(true);
+  }, 30000);
 
   test("a tool-fault with no fix", () => {
     const before = lines();
