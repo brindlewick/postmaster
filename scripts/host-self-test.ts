@@ -7089,14 +7089,21 @@ export async function live(): Promise<void> {
       const liveSpace = kvOf(placed, "space");
       const liveTab = kvOf(placed, "tab");
       if (liveSpace) opened.push(liveSpace);
+      const tabsBefore = liveHerdr("tab", "list", "--workspace", liveSpace);
       await pass(
-        "spawn records the session under its handle",
+        "spawn places the session in its own tab",
         () =>
           spawned.code === 0 &&
           Boolean(liveSpace) &&
           Boolean(liveTab) &&
-          liveHerdr("agent", "get", liveHandle).code === 0,
-        placed,
+          tabsBefore.out.includes(liveTab),
+        `${placed}\n${tabsBefore.out}`,
+      );
+      // A shell pane hosts no agent, so no name registers; the close below
+      // works from the placement record, never from the agent list.
+      await pass(
+        "a shell pane hosts no agent",
+        () => liveHerdr("agent", "get", liveHandle).code !== 0,
       );
       const closed = liveHost(["close-handle", liveHandle], f.caller, root);
       const tabsAfter = liveHerdr("tab", "list", "--workspace", liveSpace);
@@ -7108,14 +7115,10 @@ export async function live(): Promise<void> {
           !tabsAfter.out.includes(liveTab),
         `${closed.out}\n${closed.err}\n${tabsAfter.out}`,
       );
-      await pass(
-        "and frees its agent name",
-        () => liveHerdr("agent", "get", liveHandle).code !== 0,
-      );
       const respawned = liveHost(["spawn", liveHandle, f.repo, "--", "sh"], f.caller, root);
       await pass(
-        "a new session starts under the freed handle",
-        () => respawned.code === 0 && liveHerdr("agent", "get", liveHandle).code === 0,
+        "the handle spawns again",
+        () => respawned.code === 0,
         respawned.out,
       );
       const closedAgain = liveHost(["close-handle", liveHandle], f.caller, root);

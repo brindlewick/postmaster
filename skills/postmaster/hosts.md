@@ -331,5 +331,5 @@ ticket's controls against the hosts on this machine, in a scratch repository it 
 postmaster using the project's first tab; a coachman in a ticket-labeled run space with no spare
 shell tab; a workhorse and style, bug, and security launches under that run, including a security
 clone whose tab closes without closing the run space; a spawned session that `close-handle`
-closes, freeing its handle for a new session; then the same launch with no host and on
-tmux. It opens only its own spaces and tmux session, and closes them.
+closes from its placement record, and the handle spawns again; then the same launch with no
+host and on tmux. It opens only its own spaces and tmux session, and closes them.
