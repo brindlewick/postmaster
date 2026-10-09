@@ -572,9 +572,9 @@ from it.
   (resume) or re-dispatch. A lane silent for about 15 minutes with no exit is inspected. Stall cutoff 90
   minutes: stop the workhorse still running with `<tool>/scripts/run host stop <workhorse-wt>`,
   wait for its marker with `<tool>/scripts/run wait-for-markers <dispatch>/logs '<lane>.done' 1 120`
-  (on exit 3 the launch would not stop: escalate), mark `outcome: stalled`, and bring partial
-  results to checkpoint 1 rather than blocking; synthesis from the completed workhorses is an
-  option there.
+  (on exit 3 the launch would not stop: escalate), mark the workhorse stalled with
+  manifest `outcome: stalled`, and bring partial results to checkpoint 1 rather than blocking;
+  synthesis from the completed workhorses is an option there.
 - **Reap = let the thread exit.** Nothing to kill: workhorse threads end themselves and their
   conversations are durable in each harness's own store. Verification runs against the code,
   never by interrogating a workhorse. Keep threads UNARCHIVED while the run lives; that preserves
