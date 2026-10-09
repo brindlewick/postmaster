@@ -1,7 +1,7 @@
 // Oracle helpers for #338: one check says whether a project is set up. The
 // tests spawn scripts/run as a subprocess over scratch configs and scratch
 // git repositories; nothing here imports the change.
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beside, toolRoot } from "./lib/paths.ts";
@@ -11,7 +11,9 @@ export const ROOT = toolRoot(import.meta);
 export const RUN = beside(import.meta, "run");
 
 export function tempDir(): string {
-  return mkdtempSync(join(tmpdir(), "acceptance-338-"));
+  // Resolved: the command prints git-resolved paths, and the tests compare
+  // them with paths under this folder, which differ where tmp is a symlink.
+  return realpathSync(mkdtempSync(join(tmpdir(), "acceptance-338-")));
 }
 
 export function gitOrThrow(repo: string, ...args: string[]): string {
