@@ -147,7 +147,7 @@ describe("each stale check fires on its own fault alone", () => {
     expect(strip(r.out)).toBe(
       `${COACH}: still says the clone flag is conditional on the security lens`,
     );
-  }, 30000);
+  });
 
   test("coach clone array", () => {
     const one = plantFault("one", COACH, 'cut "$DEST" "$SNAP" "${CLONE[@]}"');
@@ -156,7 +156,7 @@ describe("each stale check fires on its own fault alone", () => {
     expect(strip(r.out)).toBe(
       `${COACH}: still says the scratch is cut through a conditional clone flag`,
     );
-  }, 30000);
+  });
 
   test("coach table", () => {
     const one = plantFault(
@@ -169,7 +169,7 @@ describe("each stale check fires on its own fault alone", () => {
     expect(strip(r.out)).toBe(
       `${COACH}: still says reviewer folders are worktrees outside security`,
     );
-  }, 30000);
+  });
 
   test("coach brief", () => {
     const one = plantFault(
@@ -180,7 +180,7 @@ describe("each stale check fires on its own fault alone", () => {
     const r = accept(one);
     expect(r.code).toBe(1);
     expect(strip(r.out)).toBe(`${COACH}: still says the lane works in a disposable worktree`);
-  }, 30000);
+  });
 
   test("coach comment", () => {
     const one = plantFault(
@@ -191,7 +191,7 @@ describe("each stale check fires on its own fault alone", () => {
     const r = accept(one);
     expect(r.code).toBe(1);
     expect(strip(r.out)).toBe(`${COACH}: still says the security lens alone reviews from clones`);
-  }, 30000);
+  });
 
   test("coach check prose", () => {
     const one = plantFault(
@@ -202,7 +202,7 @@ describe("each stale check fires on its own fault alone", () => {
     const r = accept(one);
     expect(r.code).toBe(1);
     expect(strip(r.out)).toBe(`${COACH}: still says only the security check requires a clone`);
-  }, 30000);
+  });
 
   test("harness scratch fires its check and the general one", () => {
     const one = plantFault(
@@ -216,7 +216,7 @@ describe("each stale check fires on its own fault alone", () => {
     expect(lines.length).toBe(2);
     expect(lines).toContain(`${HARNESS}: still says a review scratch is a worktree`);
     expect(lines).toContain(`${HARNESS}: still says a review scratch remains a worktree`);
-  }, 30000);
+  });
 
   test("hosts launches fires its check and the general one", () => {
     const one = plantFault(
@@ -230,7 +230,7 @@ describe("each stale check fires on its own fault alone", () => {
     expect(lines.length).toBe(2);
     expect(lines).toContain(`${HOSTS}: still says reviewer launches run in worktrees`);
     expect(lines).toContain(`${HOSTS}: still says a reviewer works in a worktree`);
-  }, 30000);
+  });
 
   test("wiki scratch fires its check and the general one", () => {
     const one = plantFault(
@@ -244,7 +244,7 @@ describe("each stale check fires on its own fault alone", () => {
     expect(lines.length).toBe(2);
     expect(lines).toContain(`${WIKI}: still says a review scratch is a worktree`);
     expect(lines).toContain(`${WIKI}: still says a review scratch remains a worktree`);
-  }, 30000);
+  });
 
   test("wiki bug scratch", () => {
     const one = plantFault(
@@ -255,7 +255,7 @@ describe("each stale check fires on its own fault alone", () => {
     const r = accept(one);
     expect(r.code).toBe(1);
     expect(strip(r.out)).toBe(`${WIKI}: still says the bug reviewer runs in a worktree scratch`);
-  }, 30000);
+  });
 });
 
 describe("each presence pin fires when dropped", () => {
@@ -276,7 +276,7 @@ describe("each presence pin fires when dropped", () => {
       const r = accept(one);
       expect(r.code).toBe(1);
       expect(strip(r.out)).toBe(`${file}: no longer ${label}`);
-    }, 30000);
+    });
   }
 });
 
@@ -287,27 +287,27 @@ describe("the general claims fire in every file", () => {
       const r = accept(one);
       expect(r.code).toBe(1);
       expect(strip(r.out)).toBe(`${f}: still says a reviewer works in a worktree`);
-    }, 30000);
+    });
     test(`${f} worktree-scratch claim`, () => {
       const one = plantFault("one", f, "a worktree detached at the snapshot holds the round");
       const r = accept(one);
       expect(r.code).toBe(1);
       expect(strip(r.out)).toBe(`${f}: still says a review scratch remains a worktree`);
-    }, 30000);
+    });
   }
 });
 
 describe("all faults together", () => {
   test("stale tree exits 1", () => {
     expect(accept(ostale).code).toBe(1);
-  }, 30000);
+  });
 
   test("stale tree lists 13 faults", () => {
     const lines = strip(accept(ostale).out)
       .split("\n")
       .filter((l) => l !== "");
     expect(lines.length).toBe(13);
-  }, 30000);
+  });
 
   for (const [name, line] of [
     [
@@ -332,32 +332,32 @@ describe("all faults together", () => {
   ]) {
     test(`${name}`, () => {
       expect(accept(ostale).out.split("\n")).toContain(line);
-    }, 30000);
+    });
   }
 
   test("clean tree passes", () => {
     const r = accept(oclean);
     expect(r.code).toBe(0);
     expect(r.out).toBe("");
-  }, 30000);
+  });
 
   test("missing tree exits 2", () => {
     expect(accept(join(otmp, "nowhere")).code).toBe(2);
-  }, 30000);
+  });
 
   test("an extra argument exits 2", () => {
     const r = spawnSync(cli, ["reviewer-copy-acceptance", oclean, "extra"], {
       encoding: "utf8",
     });
     expect(r.status).toBe(2);
-  }, 30000);
+  });
 
   test("an unknown flag exits 2", () => {
     const r = spawnSync(cli, ["reviewer-copy-acceptance", "--no-such-flag", "extra"], {
       encoding: "utf8",
     });
     expect(r.status).toBe(2);
-  }, 30000);
+  });
 
   test("a CRLF stale sentence is still caught", () => {
     const dir = join(otmp, "crlf");
@@ -373,7 +373,7 @@ describe("all faults together", () => {
     expect(strip(r.out)).toBe(
       `${COACH}: still says reviewer folders are worktrees outside security`,
     );
-  }, 30000);
+  });
 
   test("an unreadable file exits 2, not a clean result", () => {
     const dir = join(otmp, "locked");
@@ -385,13 +385,13 @@ describe("all faults together", () => {
     } finally {
       chmodSync(join(dir, COACH), 0o644);
     }
-  }, 30000);
+  });
 
   test("the live tree passes", () => {
     const r = accept(ROOT);
     expect(r.code).toBe(0);
     expect(r.out).toBe("");
-  }, 30000);
+  });
 });
 
 interface Run {
@@ -496,7 +496,7 @@ describe("C1: reviewer folders cut as clones", () => {
       if (r.code !== 0) throw new Error(`${lens} cut failed: ${r.out}${r.err}`);
       expect(r.code).toBe(0);
     }
-  }, 30000);
+  });
 
   test("each folder is a repository of its own at the snapshot, detached", () => {
     for (const lens of lenses) {
@@ -519,7 +519,7 @@ describe("C1: reviewer folders cut as clones", () => {
       expect(git("-C", f, "symbolic-ref", "-q", "HEAD").code).not.toBe(0);
       expect(cliRun("cut-scratch", "--kind", f).out.trim()).toBe(`clone ${repo}`);
     }
-  }, 15000);
+  });
 
   test("negative control: without --clone the same cut is a worktree", () => {
     const plain = join(tmp, "wt-control");
@@ -529,7 +529,7 @@ describe("C1: reviewer folders cut as clones", () => {
     const rm = cliRun("cut-scratch", "--remove", repo, plain);
     expect(rm.code).toBe(0);
     expect(existsSync(plain)).toBe(false);
-  }, 15000);
+  });
 
   test("review-round teardown removes each reviewer folder", () => {
     const pairs = lenses.map((lens) => `${lens}:${lane}`);
@@ -540,5 +540,5 @@ describe("C1: reviewer folders cut as clones", () => {
       "round 1: removed 3 of 3 scratches",
     );
     for (const lens of lenses) expect(existsSync(dest(lens))).toBe(false);
-  }, 30000);
+  });
 });
