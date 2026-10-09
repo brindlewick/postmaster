@@ -2868,9 +2868,10 @@ function pidfileCommand(name: string): string {
 
 /**
  * The leader's command once it is stable: a child read before it execs still looks like
- * its parent, and a wrapper may exec again (setsid becomes systemd-run), so the command
- * line must read the same three times before its holder's name is recorded. "" when the
- * process is gone or never settles, in which case the pidfile holds no command.
+ * its parent, mid-exec its command line can read empty, and a wrapper may exec again
+ * (setsid becomes systemd-run), so the command line must read the same three times
+ * before its holder's name is recorded. "" when the process is gone or never settles,
+ * in which case the pidfile holds no command.
  */
 async function settledCommand(pid: number): Promise<string> {
   let prev: string | null = null;
@@ -2878,13 +2879,18 @@ async function settledCommand(pid: number): Promise<string> {
   const end = Date.now() + 500;
   for (;;) {
     const cur = processCommandLine(pid);
-    if (cur === "") return "";
-    if (cur === prev) stable += 1;
-    else {
-      stable = 0;
-      prev = cur;
+    if (cur !== "") {
+      if (cur === prev) stable += 1;
+      else {
+        stable = 0;
+        prev = cur;
+      }
+      if (stable >= 2) break;
+    } else if (processState(pid) === "absent") {
+      // Gone for good: a failed launch records no command.
+      return "";
     }
-    if (stable >= 2) break;
+    // Else unreadable but present (mid-exec, or a zombie awaiting reap): wait it out.
     if (Date.now() >= end) return "";
     await Bun.sleep(10);
   }
@@ -2893,6 +2899,7 @@ async function settledCommand(pid: number): Promise<string> {
 
 /** A leftover member for the report: its command line, or its bare name. */
 function describeCommand(pid: number, name: string): string {
+  // ASCII: \s stays ASCII under u; collapsing ASCII runs is the whole of this report line.
   const line = clean(processCommandLine(pid).replace(/\s+/gu, " ").trim());
   if (line !== "") return line.slice(0, 200);
   return name;
