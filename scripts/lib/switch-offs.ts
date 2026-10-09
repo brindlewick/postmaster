@@ -965,50 +965,72 @@ function settingsChanges(repo: string, base: string, head: string): SettingsEntr
   const result: SettingsEntry[] = [];
   for (const path of candidates) {
     const kind = settingsKind(path)!;
-    let oldText: string | null = null;
+    const isAlias = aliases.has(path);
+    let oldAt: string | null = null;
+    let newAt: string | null = null;
     if (before.has(path)) {
-      if (aliases.has(path)) {
-        const at = tryResolveLink(repo, base, path, before);
-        oldText = at === null ? null : blobAt(repo, base, at);
-      } else {
-        oldText = blobAt(repo, base, resolveLink(repo, base, path, before));
-      }
+      oldAt = isAlias
+        ? tryResolveLink(repo, base, path, before)
+        : resolveLink(repo, base, path, before);
     }
-    const newText = after.has(path)
-      ? blobAt(repo, head, resolveLink(repo, head, path, after))
-      : null;
+    if (after.has(path)) {
+      newAt = resolveLink(repo, head, path, after);
+    }
+    const oldText = oldAt === null ? null : blobAt(repo, base, oldAt);
+    const newText = newAt === null ? null : blobAt(repo, head, newAt);
     const differs =
       kind === "package" ? packageSettingsDiffer(oldText, newText) : oldText !== newText;
     if (!differs) continue;
     const change = !before.has(path) ? "added" : !after.has(path) ? "deleted" : "changed";
-    const d = run(
-      "git",
-      [
-        "-C",
-        repo,
-        "diff",
-        "--no-color",
-        "--no-ext-diff",
-        "--no-textconv",
-        "--unified=3",
-        "--no-renames",
-        base,
-        head,
-        "--",
-        `:(literal)${path}`,
-      ],
-      { env: UNSET_GIT },
-    );
-    if (d.code !== 0) throw new Error(`git diff ${path}: ${d.err.trim()}`);
+    const diff = settingsDiffText(repo, base, head, path, oldAt, newAt, isAlias);
     const sha = blobShaAt(repo, head, path, after) ?? "absent";
     result.push({
       file: path,
       change,
       id: switchOffId("settings", [path, sha]),
-      diff: d.out.replace(/\n+$/u, ""),
+      diff,
     });
   }
   return result;
+}
+
+/** The diff shown for a settings entry: the path's own diff, except an
+ * unchanged link shows its target's diff instead, since the link path
+ * itself has none. The headers name the target the bytes come from; an
+ * unresolvable side renders as an added or deleted file. */
+function settingsDiffText(
+  repo: string,
+  base: string,
+  head: string,
+  path: string,
+  oldAt: string | null,
+  newAt: string | null,
+  isAlias: boolean,
+): string {
+  const target = isAlias ? (newAt ?? oldAt) : path;
+  if (target === null) {
+    throw new Error(`git diff ${path}: alias has no resolvable side`);
+  }
+  const d = run(
+    "git",
+    [
+      "-C",
+      repo,
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--unified=3",
+      "--no-renames",
+      base,
+      head,
+      "--",
+      `:(literal)${target}`,
+    ],
+    { env: UNSET_GIT },
+  );
+  if (d.code !== 0) throw new Error(`git diff ${path}: ${d.err.trim()}`);
+  return d.out.replace(/\n+$/u, "");
 }
 
 interface LoggedApproval {
