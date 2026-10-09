@@ -1,0 +1,251 @@
+// Tests beside scripts/no-explicit-any-acceptance.ts: fixture controls plus the live-tree
+// step. Each control plants its own tree, so tests pass alone and in order. The stub
+// runner answers the lint runs from canned outputs, reading the probe file's presence to
+// tell the planted run from the calm one. The two usage controls spawn the wrapper;
+// every other control calls accept() directly.
+import { afterAll, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { toolRoot } from "./lib/paths.ts";
+import { accept } from "./no-explicit-any-acceptance";
+import type { RunResult, Runner } from "./no-explicit-any-acceptance";
+
+const wrapper = join(import.meta.dir, "run");
+const ROOT = toolRoot(import.meta);
+const RULE = "typescript/no-explicit-any";
+const CHECK = "tsc --noEmit && bunx oxlint";
+
+// The comment head and the rule tail stay on separate lines, so this file holds no line
+// the oracle's own walk would count; the planted fixture gets the joined form.
+const OXLINT_HEAD = "// oxlint-disable-next-line typescript/";
+const ESLINT_HEAD = "// eslint-disable-next-line typescript/";
+const REASONED_TAIL = "no-explicit-any -- an old JSON shape\n";
+const BARE_TAIL = "no-explicit-any\n";
+
+const CLEAN: RunResult = { code: 0, out: "", err: "", ran: true };
+const ZERO: RunResult = { code: 0, out: "\n0 problems\n", err: "", ran: true };
+const FLAGGED: RunResult = {
+  code: 1,
+  out: `scripts/zz-probe.ts:1:21: Unexpected any. [Error/${RULE}]\n\n1 problem\n`,
+  err: "",
+  ran: true,
+};
+const MANY: RunResult = {
+  code: 1,
+  out: "scripts/host.ts:9:9: Unexpected any.\n\n181 problems\n",
+  err: "",
+  ran: true,
+};
+const DEAD: RunResult = { code: 127, out: "", err: "bunx: never exited\n", ran: false };
+
+const tmpDirs: string[] = [];
+afterAll(() => {
+  for (const d of tmpDirs) rmSync(d, { recursive: true, force: true });
+});
+
+function fresh(): string {
+  const d = mkdtempSync(join(tmpdir(), "any233-"));
+  tmpDirs.push(d);
+  return d;
+}
+
+function plant(dir: string, oxlintrc: unknown, check: string): void {
+  mkdirSync(join(dir, "scripts"), { recursive: true });
+  writeFileSync(join(dir, ".oxlintrc.json"), JSON.stringify(oxlintrc));
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { check } }));
+}
+
+function cleanConfig(): unknown {
+  return { rules: { [RULE]: "error" }, ignorePatterns: ["fixtures/**"] };
+}
+
+function stub(canned: { flagged: RunResult; clean: RunResult; zero: RunResult }): Runner {
+  return (cmd: string[], cwd: string): RunResult => {
+    if (cmd.includes("-f")) return canned.zero;
+    if (existsSync(join(cwd, "scripts", "zz-probe.ts"))) return canned.flagged;
+    return canned.clean;
+  };
+}
+
+const GOOD = { flagged: FLAGGED, clean: CLEAN, zero: ZERO };
+
+describe("a clean tree", () => {
+  test("passes with reasoned suppressions under the cap", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), CHECK);
+    writeFileSync(join(dir, "scripts", "a.ts"), `${OXLINT_HEAD + REASONED_TAIL}const x = 1;\n`);
+    writeFileSync(join(dir, "scripts", "b.ts"), `${ESLINT_HEAD + REASONED_TAIL}const y = 2;\n`);
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(0);
+    expect(r.out).toBe("");
+  });
+
+  test("removes the probe it plants", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), CHECK);
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(0);
+    expect(existsSync(join(dir, "scripts", "zz-probe.ts"))).toBe(false);
+  });
+});
+
+describe("the rule's setting", () => {
+  test("off fails naming the config", () => {
+    const dir = fresh();
+    plant(dir, { rules: { [RULE]: "off" }, ignorePatterns: ["fixtures/**"] }, CHECK);
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(".oxlintrc.json");
+  });
+
+  test("missing fails", () => {
+    const dir = fresh();
+    plant(dir, { rules: {}, ignorePatterns: ["fixtures/**"] }, CHECK);
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(RULE);
+  });
+
+  test("an overrides entry switching it off fails", () => {
+    const dir = fresh();
+    plant(
+      dir,
+      {
+        rules: { [RULE]: "error" },
+        ignorePatterns: ["fixtures/**"],
+        overrides: [{ files: ["x.ts"], rules: { [RULE]: "off" } }],
+      },
+      CHECK,
+    );
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("overrides[0]");
+  });
+
+  test("changed ignorePatterns fail", () => {
+    const dir = fresh();
+    plant(dir, { rules: { [RULE]: "error" }, ignorePatterns: ["src/**"] }, CHECK);
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("ignorePatterns");
+  });
+});
+
+describe("the gate's shape", () => {
+  test("failing every warning fails", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), "tsc --noEmit && bunx oxlint --deny-warnings");
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("package.json");
+  });
+
+  test("a check that never runs the linter fails", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), "tsc --noEmit");
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("package.json");
+  });
+});
+
+describe("suppressions", () => {
+  test("six reasoned ones fail on the cap", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), CHECK);
+    const lines = Array.from({ length: 6 }, (_, i) => `${OXLINT_HEAD + REASONED_TAIL}const v${i} = ${i};\n`);
+    writeFileSync(join(dir, "scripts", "a.ts"), lines.join(""));
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("at most 5");
+  });
+
+  test("one without a reason fails naming its line", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), CHECK);
+    writeFileSync(join(dir, "scripts", "a.ts"), `${OXLINT_HEAD + BARE_TAIL}const x = 1;\n`);
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("scripts/a.ts:1");
+  });
+
+  test("the eslint spelling counts too", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), CHECK);
+    writeFileSync(join(dir, "scripts", "a.ts"), `${ESLINT_HEAD + BARE_TAIL}const x = 1;\n`);
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("scripts/a.ts:1");
+  });
+});
+
+describe("the lint runs", () => {
+  test("a probe the gate ignores fails", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), CHECK);
+    const r = accept(dir, stub({ flagged: CLEAN, clean: CLEAN, zero: ZERO }));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("probe");
+  });
+
+  test("a nonzero count fails naming the count", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), CHECK);
+    const r = accept(dir, stub({ flagged: FLAGGED, clean: CLEAN, zero: MANY }));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("181 problems");
+  });
+
+  test("a count run that never starts exits 2", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), CHECK);
+    const r = accept(dir, stub({ flagged: FLAGGED, clean: CLEAN, zero: DEAD }));
+    expect(r.code).toBe(2);
+  });
+});
+
+describe("tree errors", () => {
+  test("a probe already standing exits 2", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), CHECK);
+    writeFileSync(join(dir, "scripts", "zz-probe.ts"), "const z = 1;\n");
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(2);
+  });
+
+  test("a missing config exits 2", () => {
+    const dir = fresh();
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { check: CHECK } }));
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(2);
+  });
+});
+
+describe("the live tree", () => {
+  test("passes on the finished branch", () => {
+    const r = accept(ROOT);
+    expect(r.code).toBe(0);
+    expect(r.out).toBe("");
+  });
+});
+
+describe("usage", () => {
+  test("two roots exits 2", () => {
+    const r = spawnSync(wrapper, ["no-explicit-any-acceptance", "a", "b"], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(2);
+  });
+
+  test("a dash argument exits 2", () => {
+    const r = spawnSync(wrapper, ["no-explicit-any-acceptance", "--nope"], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(2);
+  });
+});
