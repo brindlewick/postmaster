@@ -108,9 +108,7 @@ describe("parseArgs", () => {
       ok: true,
       req: { cmd: "make", repo: "/r", surfaces: ["web"], dispatch: "/d", timeout: 60 },
     });
-    expect(
-      parseArgs(["make", "/r", "cli-examples", "browser-suite", "--run", "/d"]),
-    ).toEqual({
+    expect(parseArgs(["make", "/r", "cli-examples", "browser-suite", "--run", "/d"])).toEqual({
       ok: true,
       req: {
         cmd: "make",
