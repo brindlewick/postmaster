@@ -9,12 +9,14 @@ import { commitAll, gitOrThrow, initRepo, RUN, writeRepoFile } from "./acceptanc
 import { run } from "./lib/proc.ts";
 import {
   UPKEEP_LINE,
-  addedVerifyNames,
+  addedFeaturePages,
+  addedPaths,
+  addedUnder,
   branchFileText,
   branchHasPath,
+  checkMultiVerifiers,
   commitsPastBase,
   committedFeaturePages,
-  committedUnder,
   defaultBase,
   dirLines,
   failureOutcome,
@@ -24,6 +26,7 @@ import {
   isSurface,
   joinBodies,
   orderKinds,
+  outsideAdded,
   parseArgs,
   pickBranch,
   pickWorktree,
@@ -38,7 +41,6 @@ import {
   scrubGitEnv,
   surfaceKind,
   surfaceProse,
-  topLevelNames,
   unlistedSentence,
   verifyDirName,
   wallInStream,
@@ -90,6 +92,13 @@ describe("parseArgs", () => {
         "unknown surface: telegraph (cli, web, library, cli-examples, browser-suite, web-journey or library-tests)",
     });
     expect(parseArgs(["prompt", "/r", "cli", "telegraph"]).ok).toBe(false);
+  });
+
+  test("prototype names are unknown surfaces, not silent empty kinds", () => {
+    for (const name of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      expect(parseArgs(["prompt", "/r", name]).ok).toBe(false);
+      expect(parseArgs(["prompt", "/r", "cli", name]).ok).toBe(false);
+    }
   });
 
   test("prompt takes no flags", () => {
@@ -599,6 +608,10 @@ describe("surfaceKind", () => {
     expect(surfaceKind("library-tests")).toBe("library");
     expect(surfaceKind("telegraph")).toBe(null);
     expect(surfaceKind("")).toBe(null);
+    expect(surfaceKind("constructor")).toBe(null);
+    expect(surfaceKind("toString")).toBe(null);
+    expect(surfaceKind("__proto__")).toBe(null);
+    expect(surfaceKind("hasOwnProperty")).toBe(null);
   });
 });
 
@@ -624,17 +637,18 @@ describe("renderTemplate", () => {
 });
 
 describe("hasUpkeepLine", () => {
-  test("the line reads present exact, wrapped and mixed-case", () => {
-    expect(hasUpkeepLine(`intro\n${UPKEEP_LINE}\nrest`)).toBe(true);
+  test("the line reads present exact near the top, even wrapped across lines", () => {
+    expect(hasUpkeepLine(`# Title\n\nParagraph.\n\n${UPKEEP_LINE}\n\n## Launch`)).toBe(true);
     expect(hasUpkeepLine(UPKEEP_LINE.replace(/ /gu, "\n"))).toBe(true);
+  });
+
+  test("a changed case, a buried copy and a paraphrase read absent", () => {
     expect(
       hasUpkeepLine(
         "A CHANGE which adds, changes or removes a feature updates that feature's page in the same change.",
       ),
-    ).toBe(true);
-  });
-
-  test("a paraphrase and an empty page read absent", () => {
+    ).toBe(false);
+    expect(hasUpkeepLine(`${"filler\n".repeat(30)}${UPKEEP_LINE}`)).toBe(false);
     expect(hasUpkeepLine("Keep the pages current when features change.")).toBe(false);
     expect(hasUpkeepLine("")).toBe(false);
   });
@@ -656,6 +670,20 @@ describe("indexNames", () => {
     expect(indexNames("- cli (verifier/cli/)", "cli")).toBe(false);
     expect(indexNames("- [cli](cli/)", "cli")).toBe(false);
     expect(indexNames("", "cli")).toBe(false);
+  });
+
+  test("a wrong folder with the prose elsewhere reads unnamed", () => {
+    expect(indexNames("- [cli](verifier/cli-extra/): command line", "cli")).toBe(false);
+    expect(
+      indexNames("- [cli](verifier/cli/): command line. See web pages at https://x/web/.", "web"),
+    ).toBe(false);
+    expect(
+      indexNames("- [cli](cli/): command line. Web pages (web/) are not covered here.", "web"),
+    ).toBe(false);
+  });
+
+  test("folder and prose on different lines read unnamed", () => {
+    expect(indexNames("- [cli](cli/)\n- the command line verifier", "cli")).toBe(false);
   });
 });
 
@@ -722,52 +750,195 @@ describe("branchFileText", () => {
   });
 });
 
-describe("committedUnder", () => {
-  test("lists committed paths under a dir, none for a missing dir", () => {
+describe("addedPaths", () => {
+  test("lists paths added past the base, null for a bad ref", () => {
     const dir = tempDir();
     try {
       const repo = join(dir, "app");
       initRepo(repo);
       writeRepoFile(repo, "README.md", "# app\n");
-      writeRepoFile(repo, "verifier/cli/README.md", "v\n");
-      writeRepoFile(repo, "verifier/cli-notes.md", "n\n");
-      commitAll(repo, "first");
-      expect(committedUnder(repo, "main", "verifier/cli")?.sort()).toEqual([
-        "verifier/cli/README.md",
-      ]);
-      expect(committedUnder(repo, "main", "verifier/web")).toEqual([]);
-      expect(committedUnder(repo, "nope", "verifier/cli")).toBe(null);
+      commitAll(repo, "base");
+      const base = gitOrThrow(repo, "rev-parse", "HEAD").trim();
+      gitOrThrow(repo, "checkout", "-qb", "verify-cli-web");
+      writeRepoFile(repo, "verifier/README.md", "index\n");
+      writeRepoFile(repo, "README.md", "# app changed\n");
+      commitAll(repo, "session work");
+      expect(addedPaths(repo, base, "verify-cli-web")).toEqual(["verifier/README.md"]);
+      expect(addedPaths(repo, base, "nope")).toBe(null);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 });
 
-describe("topLevelNames", () => {
-  test("lists the top level, null for a bad ref", () => {
+describe("outsideAdded", () => {
+  test("flags added paths outside verifier/, besides the handover", () => {
+    expect(outsideAdded(["verifier/README.md", "HANDOVER.md"])).toEqual([]);
+    expect(outsideAdded(["verifier/cli/README.md", "verify-old/x.md"])).toEqual([
+      "verify-old/x.md",
+    ]);
+    expect(outsideAdded(["verifier/cli/README.md", "verifier-cli/README.md"])).toEqual([
+      "verifier-cli/README.md",
+    ]);
+    expect(outsideAdded(["notes.md"])).toEqual(["notes.md"]);
+  });
+});
+
+describe("addedUnder", () => {
+  test("keeps added paths under a directory", () => {
+    expect(
+      addedUnder(["verifier/web/README.md", "verifier/cli/README.md"], "verifier/web"),
+    ).toEqual(["verifier/web/README.md"]);
+    expect(addedUnder(["verifier/README.md"], "verifier/web")).toEqual([]);
+  });
+});
+
+describe("addedFeaturePages", () => {
+  test("counts added markdown pages besides the features index", () => {
+    expect(
+      addedFeaturePages(
+        ["verifier/cli/features/README.md", "verifier/cli/features/a.md", "verifier/cli/x.txt"],
+        "verifier/cli",
+      ),
+    ).toEqual(["verifier/cli/features/a.md"]);
+  });
+});
+
+function seedMultiBranch(
+  repo: string,
+  baseFiles: Record<string, string>,
+  branchFiles: Record<string, string>,
+): { base: string; branch: string } {
+  for (const [rel, text] of Object.entries(baseFiles)) writeRepoFile(repo, rel, text);
+  commitAll(repo, "base");
+  const base = gitOrThrow(repo, "rev-parse", "HEAD").trim();
+  gitOrThrow(repo, "checkout", "-qb", "verify-cli-web");
+  for (const [rel, text] of Object.entries(branchFiles)) writeRepoFile(repo, rel, text);
+  commitAll(repo, "session work");
+  return { base, branch: "verify-cli-web" };
+}
+
+function goodVerifiers(
+  kinds: ("cli" | "web" | "library")[] = ["cli", "web"],
+): Record<string, string> {
+  const prose: Record<string, string> = {
+    cli: "command line",
+    web: "web pages",
+    library: "library interface",
+  };
+  const files: Record<string, string> = {
+    "verifier/README.md": `# Verifiers\n\n${kinds
+      .map((k) => `- [${k}](${k}/) verifies the ${prose[k]}.`)
+      .join("\n")}\n`,
+    "HANDOVER.md": "proved both\n",
+  };
+  for (const kind of kinds) {
+    files[`verifier/${kind}/README.md`] = `# ${kind}\n\nDrives it.\n\n${UPKEEP_LINE}\n`;
+    files[`verifier/${kind}/features/README.md`] = "# features\n";
+    for (const page of ["a.md", "b.md", "c.md"]) {
+      files[`verifier/${kind}/features/${page}`] = "# f\n";
+    }
+  }
+  return files;
+}
+
+function checkBranch(
+  baseFiles: Record<string, string>,
+  branchFiles: Record<string, string>,
+  surfaces: ("cli" | "web" | "library")[],
+): () => void {
+  const dir = tempDir();
+  const repo = join(dir, "app");
+  initRepo(repo);
+  const { base, branch } = seedMultiBranch(repo, baseFiles, branchFiles);
+  return () => {
+    try {
+      checkMultiVerifiers(repo, branch, base, surfaces);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+}
+
+describe("checkMultiVerifiers", () => {
+  test("a branch adding two complete verifiers passes", () => {
+    expect(checkBranch({ "README.md": "# app\n" }, goodVerifiers(), ["cli", "web"])).not.toThrow();
+  });
+
+  test("a missing index, README, features index or page fails", () => {
+    const cases: [string, (f: Record<string, string>) => void][] = [
+      ["index", (f) => delete f["verifier/README.md"]],
+      ["README", (f) => delete f["verifier/cli/README.md"]],
+      ["features index", (f) => delete f["verifier/cli/features/README.md"]],
+      ["page", (f) => delete f["verifier/cli/features/c.md"]],
+    ];
+    for (const [label, drop] of cases) {
+      const files = goodVerifiers();
+      drop(files);
+      let threw = false;
+      try {
+        checkBranch({ "README.md": "# app\n" }, files, ["cli", "web"])();
+      } catch {
+        threw = true;
+      }
+      if (!threw) throw new Error(`case ${label} did not throw`);
+    }
+  });
+
+  test("a missing upkeep line and a wrong index entry fail", () => {
+    const noUpkeep = goodVerifiers();
+    noUpkeep["verifier/cli/README.md"] = "# cli\n\nDrives it.\n";
+    expect(checkBranch({ "README.md": "# app\n" }, noUpkeep, ["cli", "web"])).toThrow(/upkeep/);
+    const wrongIndex = goodVerifiers();
+    wrongIndex["verifier/README.md"] =
+      "# Verifiers\n\n- [cli](verifier/cli-extra/): command line.\n- [web](web/) verifies the web pages.\n";
+    expect(checkBranch({ "README.md": "# app\n" }, wrongIndex, ["cli", "web"])).toThrow(
+      /names no command line/,
+    );
+  });
+
+  test("an added unlisted verifier fails, pre-existing content passes", () => {
+    const stray = goodVerifiers();
+    stray["verifier/library/README.md"] = "# library\n";
+    expect(checkBranch({ "README.md": "# app\n" }, stray, ["cli", "web"])).toThrow(
+      /unlisted library/,
+    );
+    expect(
+      checkBranch(
+        { "README.md": "# app\n", "verifier/web/README.md": "# old web\n" },
+        goodVerifiers(["cli", "library"]),
+        ["cli", "library"],
+      ),
+    ).not.toThrow();
+  });
+
+  test("files added outside verifier/ fail, wherever they land", () => {
+    const top = goodVerifiers();
+    top["verifier-cli/README.md"] = "# stray\n";
+    expect(checkBranch({ "README.md": "# app\n" }, top, ["cli", "web"])).toThrow(
+      /outside verifier/,
+    );
+    const nested = goodVerifiers();
+    nested["verify-app/extra.md"] = "stray\n";
+    expect(
+      checkBranch({ "README.md": "# app\n", "verify-app/README.md": "# old\n" }, nested, [
+        "cli",
+        "web",
+      ]),
+    ).toThrow(/outside verifier/);
+  });
+
+  test("an unlistable comparison fails instead of passing", () => {
     const dir = tempDir();
     try {
       const repo = join(dir, "app");
       initRepo(repo);
-      writeRepoFile(repo, "README.md", "# app\n");
-      writeRepoFile(repo, "verifier/cli/README.md", "v\n");
-      commitAll(repo, "first");
-      expect(topLevelNames(repo, "main")?.sort()).toEqual(["README.md", "verifier"]);
-      expect(topLevelNames(repo, "nope")).toBe(null);
+      const { base } = seedMultiBranch(repo, { "README.md": "# app\n" }, goodVerifiers());
+      expect(() => checkMultiVerifiers(repo, "nope", base, ["cli", "web"])).toThrow(
+        /cannot be compared/,
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
-});
-
-describe("addedVerifyNames", () => {
-  test("flags added verify-* names, besides verifier/ and pre-existing ones", () => {
-    expect(addedVerifyNames(["README.md", "verifier", "verify-old"], ["README.md"])).toEqual([
-      "verify-old",
-    ]);
-    expect(addedVerifyNames(["verifier", "verify-notes.md"], ["verifier"])).toEqual([
-      "verify-notes.md",
-    ]);
-    expect(addedVerifyNames(["README.md", "verify-old"], ["README.md", "verify-old"])).toEqual([]);
   });
 });

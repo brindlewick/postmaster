@@ -81,6 +81,9 @@ const DISCOVERY_SURFACES: Record<string, Surface> = {
 /** The surface kind a name denotes, in either vocabulary, or null. */
 export function surfaceKind(name: string): Surface | null {
   if (isSurface(name)) return name;
+  // Own keys only: constructor, toString and __proto__ live on the prototype,
+  // and accepting them would render a prompt for no surface at all.
+  if (!Object.hasOwn(DISCOVERY_SURFACES, name)) return null;
   return DISCOVERY_SURFACES[name] ?? null;
 }
 
@@ -195,21 +198,26 @@ export function renderPrompt(template: string, vars: PromptVars): string {
 export const UPKEEP_LINE =
   "A change which adds, changes or removes a feature updates that feature's page in the same change.";
 
-/** The upkeep line is present, ignoring case and whitespace runs. */
+/** The upkeep line verbatim in the README head, where an agent reads first. */
 export function hasUpkeepLine(text: string): boolean {
-  // LOWER: lowered for an ASCII keyword match
-  const lower = (s: string): string => s.toLowerCase();
+  // The head is the first 30 lines: the live verifiers carry the line at line
+  // 5, so a copy past this window is buried, not read first.
+  const head = text.split("\n").slice(0, 30).join("\n");
   // ASCII: widening to Unicode whitespace only folds more runs, never splits a match
   const flat = (s: string): string => s.replace(/\s+/gu, " ");
-  return flat(lower(text)).includes(flat(lower(UPKEEP_LINE)));
+  return flat(head).includes(flat(UPKEEP_LINE));
 }
 
-/** The index names the kind's folder and its surface prose. */
+/** One index entry names the kind's folder and its surface prose together. */
 export function indexNames(text: string, kind: Surface): boolean {
-  // LOWER: lowered for an ASCII keyword match
-  const lower = text.toLowerCase();
-  const folder = lower.includes(`verifier/${kind}`) || lower.includes(`${kind}/`);
-  return folder && lower.includes(PROSE[kind]);
+  const prose = PROSE[kind];
+  return text.split("\n").some((line) => {
+    const lower = line.toLowerCase();
+    if (!lower.includes(prose)) return false;
+    // A full verifier/<kind>/ path bounded past the kind, so verifier/cli-extra/
+    // never reads as the cli verifier, or a relative folder link [cli](cli/).
+    return new RegExp(`verifier/${kind}(?![A-Za-z0-9_-])|\\]\\(\\s*${kind}/`, "u").test(lower);
+  });
 }
 
 /** The kinds as prose for the multi header: "command line, web pages". */
@@ -370,26 +378,28 @@ export function branchFileText(repo: string, branch: string, path: string): stri
   return r.code === 0 ? r.out : null;
 }
 
-/** Committed paths under a directory on the branch, or null when unlistable. */
-export function committedUnder(repo: string, branch: string, dir: string): string[] | null {
-  // -z: NUL-separated and never quoted, so non-ASCII names count as written.
-  const r = git(repo, ["ls-tree", "-z", "-r", "--name-only", branch, "--", `${dir}/`]);
-  if (r.code !== 0) return null;
-  return r.out.split("\0").filter((l) => l !== "");
-}
-
-/** Top-level names on a ref, or null when the ref cannot be listed. */
-export function topLevelNames(repo: string, ref: string): string[] | null {
+/** Paths the branch adds past its base, or null when they cannot be listed. */
+export function addedPaths(repo: string, base: string, branch: string): string[] | null {
   // -z: NUL-separated and never quoted, so non-ASCII names list as written.
-  const r = git(repo, ["ls-tree", "-z", "--name-only", ref]);
+  const r = git(repo, ["diff", "--name-only", "--diff-filter=A", "-z", base, branch, "--"]);
   if (r.code !== 0) return null;
   return r.out.split("\0").filter((l) => l !== "");
 }
 
-/** Added top-level names starting with verify-: verifier files outside verifier/. */
-export function addedVerifyNames(branchTop: string[], baseTop: string[]): string[] {
-  const before = new Set(baseTop);
-  return branchTop.filter((n) => n.startsWith("verify-") && !before.has(n));
+/** Added paths under a directory. */
+export function addedUnder(added: string[], dir: string): string[] {
+  return added.filter((p) => p.startsWith(`${dir}/`));
+}
+
+/** Added markdown pages under a features folder, besides its index. */
+export function addedFeaturePages(added: string[], vdir: string): string[] {
+  const index = `${vdir}/features/README.md`;
+  return added.filter((p) => p.startsWith(`${vdir}/features/`) && p !== index && p.endsWith(".md"));
+}
+
+/** Added paths with nowhere to be: HANDOVER.md alone sits beside verifier/. */
+export function outsideAdded(added: string[]): string[] {
+  return added.filter((p) => p !== "HANDOVER.md" && !p.startsWith("verifier/"));
 }
 
 /** The base the session's branch is cut from: origin's head, main, master, or HEAD. */
@@ -776,26 +786,34 @@ function runMake(req: ParsedMake): number {
   }
 }
 
-/** Every multi verifier's README, pages, upkeep line and index entry; none unlisted. */
-function checkMultiVerifiers(
+/** What the session added: every multi verifier complete, nothing unlisted or outside. */
+export function checkMultiVerifiers(
   repo: string,
   branch: string,
   base: string,
   surfaces: Surface[],
 ): void {
-  if (!branchHasPath(repo, branch, "verifier/README.md")) {
-    throw new RunError(`the session left no verifier/README.md committed on ${branch}`);
+  // Added past the base, never the branch tree: content the base already
+  // carries is not this session's work, and must neither satisfy nor fail it.
+  const added = addedPaths(repo, base, branch);
+  if (added === null) {
+    throw new RunError(`the session's branch ${branch} cannot be compared with its base`);
+  }
+  const has = (path: string): boolean => added.includes(path);
+  if (!has("verifier/README.md")) {
+    throw new RunError(`the session added no verifier/README.md on ${branch}`);
   }
   const index = branchFileText(repo, branch, "verifier/README.md") ?? "";
   for (const kind of surfaces) {
-    if (!branchHasPath(repo, branch, `verifier/${kind}/README.md`)) {
-      throw new RunError(`the session left no verifier/${kind}/README.md committed on ${branch}`);
+    if (!has(`verifier/${kind}/README.md`)) {
+      throw new RunError(`the session added no verifier/${kind}/README.md on ${branch}`);
     }
-    const pages = committedFeaturePages(repo, branch, `verifier/${kind}`) ?? [];
+    if (!has(`verifier/${kind}/features/README.md`)) {
+      throw new RunError(`the session added no verifier/${kind}/features/README.md on ${branch}`);
+    }
+    const pages = addedFeaturePages(added, `verifier/${kind}`);
     if (pages.length < 3) {
-      throw new RunError(
-        `the session left fewer than 3 feature pages for ${kind} committed on ${branch}`,
-      );
+      throw new RunError(`the session added fewer than 3 feature pages for ${kind} on ${branch}`);
     }
     const main = branchFileText(repo, branch, `verifier/${kind}/README.md`) ?? "";
     if (!hasUpkeepLine(main)) {
@@ -809,14 +827,11 @@ function checkMultiVerifiers(
   }
   for (const kind of SURFACES) {
     if (surfaces.includes(kind)) continue;
-    const stray = committedUnder(repo, branch, `verifier/${kind}`) ?? [];
-    if (stray.length > 0) {
+    if (addedUnder(added, `verifier/${kind}`).length > 0) {
       throw new RunError(`the session made a verifier for unlisted ${kind} on ${branch}`);
     }
   }
-  const branchTop = topLevelNames(repo, branch) ?? [];
-  const baseTop = topLevelNames(repo, base) ?? [];
-  const outside = addedVerifyNames(branchTop, baseTop);
+  const outside = outsideAdded(added);
   if (outside.length > 0) {
     throw new RunError(
       `the session left verifier files outside verifier/ on ${branch}: ${outside.join(", ")}`,
