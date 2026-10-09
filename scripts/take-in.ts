@@ -1,7 +1,8 @@
 // Take in the workhorses' work: admit each lane's branch at the commit its
-// checks ran on, once no workhorse is running or waiting. The coachman runs
-// this after the walls pause and before stage synthesis, and gives
-// synthesis-shares the commits it took.
+// checks ran on, once no workhorse is running or waiting, bringing each
+// checked commit from its workhorse copy into the repository under
+// wb/<TICKET>-<lane>. The coachman runs this after the walls pause and before
+// stage synthesis, and gives synthesis-shares the commits it took.
 //
 //   run take-in <dispatch> [--skip <lane> ...]
 //
@@ -230,27 +231,37 @@ function main(argv: string[]): number {
   }
 
   const claims = checkClaims(dispatch);
-  const taken: Array<{ lane: string; branch: string; head: string; nothing: boolean }> = [];
+  const taken: Array<{
+    lane: string;
+    branch: string;
+    head: string;
+    nothing: boolean;
+    copy: string;
+  }> = [];
   const moved: string[] = [];
   for (const h of horses) {
     if (h.skipped) continue;
-    const head = gitCommit(repo, h.branch);
-    if (head === null) die(`take-in: ${h.name}: no branch ${h.branch} in ${repo}`, 1);
+    const repoHead = gitCommit(repo, h.branch);
+    const copyHead = gitCommit(h.worktree, h.branch) ?? gitCommit(h.worktree, "HEAD");
+    const head = copyHead ?? repoHead;
+    if (head === null)
+      die(`take-in: ${h.name}: no branch ${h.branch} in ${repo} and no copy at ${h.worktree}`, 1);
     if (sameCommit(head, base)) {
-      taken.push({ lane: h.name, branch: h.branch, head, nothing: true });
+      taken.push({ lane: h.name, branch: h.branch, head, nothing: true, copy: h.worktree });
       continue;
     }
     const own = claims.filter((c) => c.branch === h.branch);
     const match = [...own, ...claims.filter((c) => c.branch === "detached")].some(
       (c) =>
         (c.sha.length >= 7 && head.startsWith(c.sha)) ||
-        sameCommit(gitCommit(repo, c.sha) ?? "", head),
+        sameCommit(gitCommit(repo, c.sha) ?? gitCommit(h.worktree, c.sha) ?? "", head),
     );
     if (match) {
-      taken.push({ lane: h.name, branch: h.branch, head, nothing: false });
+      taken.push({ lane: h.name, branch: h.branch, head, nothing: false, copy: h.worktree });
     } else if (own.length > 0) {
       const last = own[own.length - 1]!.sha;
-      const checked = gitCommit(repo, last) ?? `${last} (unknown to git)`;
+      const checked =
+        gitCommit(repo, last) ?? gitCommit(h.worktree, last) ?? `${last} (unknown to git)`;
       moved.push(
         `take-in: ${h.name}: branch ${h.branch} is at ${head} but its checks ran on ${checked}`,
       );
@@ -262,6 +273,37 @@ function main(argv: string[]): number {
   }
   if (moved.length > 0) {
     die(moved.join("\n"), 3);
+  }
+
+  for (const t of taken) {
+    const have = gitCommit(repo, t.branch);
+    if (have !== null && sameCommit(have, t.head)) continue;
+    if (t.nothing) {
+      const made = run("git", ["-C", repo, "branch", t.branch, t.head]);
+      if (made.code !== 0)
+        die(
+          `take-in: ${t.lane}: could not create ${t.branch} at ${t.head}: ${(made.err || made.out).trim()}`,
+          1,
+        );
+    } else {
+      const fetched = run("git", [
+        "-C",
+        repo,
+        "fetch",
+        "-q",
+        t.copy,
+        `${t.head}:refs/heads/${t.branch}`,
+      ]);
+      if (fetched.code !== 0)
+        die(
+          `take-in: ${t.lane}: could not bring ${t.head} in from ${t.copy}: ${(fetched.err || fetched.out).trim()}`,
+          1,
+        );
+    }
+    const now = gitCommit(repo, t.branch);
+    if (now === null || !sameCommit(now, t.head))
+      die(`take-in: ${t.lane}: ${t.branch} is not at ${t.head} after the bring-in`, 1);
+    t.head = now;
   }
 
   for (const t of taken) {

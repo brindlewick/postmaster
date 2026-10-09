@@ -190,9 +190,9 @@ onto the fragment it supersedes.
   never runs from inside that worktree, which would stop the caller too. `run host close
   <worktree>` refuses while one runs there, after waiting 15 seconds for one that is just ending.
 - `run host stop-run <dispatch>` and `run host close-run <dispatch>` cover the synthesis worktree,
-  workhorse worktrees in the run config, and reviewer scratches in its round records and action
-  log, including scratch clones that Git does not list as worktrees, plus any pane or window
-  still tagged for the run. Either exits 2 when the run's records cannot be read; a round
+  workhorse copies in the run config, and reviewer scratches in its round records and action
+  log, including workhorse and scratch clones that Git does not list as worktrees, plus any pane
+  or window still tagged for the run. Either exits 2 when the run's records cannot be read; a round
   record or action-log line it can read but not use is named in the refusal.
 - **It degrades rather than refuses.** If the host cannot place the launch, or its pane has not
   started it within 20 seconds, it runs in the background instead, exactly once, and `run host`
