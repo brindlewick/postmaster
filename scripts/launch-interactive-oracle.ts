@@ -158,12 +158,13 @@ function formHarnessArgv(form: string, envFile: string): string[] {
 function runPty(lay: Layout, form: string): string {
   // macOS script takes the form as its command: fed through stdin it dies in
   // tcgetattr on that stdin (a socket under Bun's pipes), prints nothing and
-  // exits 1. Monitor mode keeps job control, so the harness still leads the
-  // foreground group; stdin stays a pipe the command never reads.
+  // exits 1. The shell stays interactive, as on Linux, so job control puts
+  // the harness in its own foreground group; -c supplies the form, so stdin
+  // stays a pipe nothing reads.
   if (process.platform === "darwin") {
     const r = spawnSync(
       "script",
-      ["-q", "/dev/null", "bash", "--norc", "--noprofile", "-m", "-c", form],
+      ["-q", "/dev/null", "bash", "--norc", "--noprofile", "-i", "-c", form],
       { timeout: 60000, encoding: "utf8", env: lay.env },
     );
     if (r.error) throw new Error(`script failed to run: ${String(r.error)}`);
