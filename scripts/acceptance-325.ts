@@ -115,9 +115,16 @@ export function templateApp(): string {
   if (cp.code !== 0) throw new Error(`cp template: ${cp.err.trim() || cp.out.trim()}`);
   initRepo(repo);
   commitAll(repo, "first");
-  const install = run("npm", ["install", "--no-audit", "--no-fund"], { cwd: repo });
+  // npm ci, never npm install: install rewrites the tracked lockfile under some
+  // npms, which dirtied the template on CI's Linux runner and refused every
+  // planted branch naming package-lock.json.
+  const install = run("npm", ["ci", "--no-audit", "--no-fund"], { cwd: repo });
   if (install.code !== 0) {
-    throw new Error(`npm install: ${install.err.trim() || install.out.trim()}`);
+    throw new Error(`npm ci: ${install.err.trim() || install.out.trim()}`);
+  }
+  const dirty = gitOrThrow(repo, "status", "--porcelain").trim();
+  if (dirty !== "") {
+    throw new Error(`template dirty after install: ${dirty.split("\n")[0]}`);
   }
   template = repo;
   return repo;
