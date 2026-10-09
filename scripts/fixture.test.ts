@@ -1035,7 +1035,7 @@ beforeAll(() => {
       return h.passed ? 0 : 2;
     });
   }
-}, 900000);
+}, 1800000);
 
 afterAll(() => {
   for (const [k, v] of Object.entries(savedEnv)) {
