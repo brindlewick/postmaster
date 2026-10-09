@@ -13,7 +13,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, posix, resolve } from "node:path";
 import { run } from "./proc.ts";
 import { pyRstrip, pySplitLines, pyTrim, pyWords } from "./text.ts";
 import { parse } from "./vendor/babel-parser.js";
@@ -597,10 +597,24 @@ function isSource(path: string): boolean {
   return /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u.test(path);
 }
 
-function treePaths(repo: string, ref: string): string[] {
-  return git(repo, ["ls-tree", "-rz", "--full-tree", "--name-only", ref])
+/** Every path in the tree at a revision with its mode. Quoting is off and
+ * entries split on NUL, so a name holding whitespace or quotes still parses:
+ * the entry's meta holds no tab, and the path is everything past the first. */
+function treeModes(repo: string, rev: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const entries = git(repo, ["-c", "core.quotePath=false", "ls-tree", "-rz", "--full-tree", rev])
     .split("\0")
-    .filter((path) => path !== "");
+    .filter((entry) => entry !== "");
+  for (const entry of entries) {
+    const tab = entry.indexOf("\t");
+    if (tab < 0) throw new Error(`cannot read tree of ${rev}: refusing to report over it`);
+    const mode = entry.slice(0, tab).split(" ")[0];
+    if (mode === undefined || mode === "") {
+      throw new Error(`cannot read tree of ${rev}: refusing to report over it`);
+    }
+    out.set(entry.slice(tab + 1), mode);
+  }
+  return out;
 }
 
 function changedPaths(repo: string, base: string, head: string): string[] {
@@ -615,8 +629,53 @@ function blobAt(repo: string, rev: string, path: string): string | null {
   return r.out;
 }
 
-function blobShaAt(repo: string, rev: string, path: string): string | null {
-  const r = run("git", ["-C", repo, "rev-parse", "--verify", "--quiet", `${rev}:${path}`], {
+/** The tree path a scan reads for a path: through one symlink, since the
+ * tools read the target's content under the link's name. A link that dangles,
+ * leaves the tree or chains to another link fails loud: scanning the link's
+ * own text would report over content no tool sees. */
+function resolveLink(
+  repo: string,
+  rev: string,
+  path: string,
+  modes: Map<string, string>,
+): string {
+  if (modes.get(path) !== "120000") return path;
+  const link = blobAt(repo, rev, path);
+  if (link === null) throw new Error(`cannot read ${path} at ${rev}: refusing to report over it`);
+  const target = link.replace(/\r?\n$/u, "");
+  if (target.startsWith("/")) {
+    throw new Error(
+      `cannot resolve symlink ${path} at ${rev}: target ${target} leaves the tree`,
+    );
+  }
+  const resolved = posix.normalize(posix.join(posix.dirname(path), target));
+  if (resolved === ".." || resolved.startsWith("../")) {
+    throw new Error(
+      `cannot resolve symlink ${path} at ${rev}: target ${target} leaves the tree`,
+    );
+  }
+  const mode = modes.get(resolved);
+  if (mode === undefined) {
+    throw new Error(
+      `cannot resolve symlink ${path} at ${rev}: target ${target} is not in the tree`,
+    );
+  }
+  if (mode === "120000") {
+    throw new Error(
+      `cannot resolve symlink ${path} at ${rev}: target ${target} is itself a link`,
+    );
+  }
+  return resolved;
+}
+
+function blobShaAt(
+  repo: string,
+  rev: string,
+  path: string,
+  modes?: Map<string, string>,
+): string | null {
+  const at = modes === undefined ? path : resolveLink(repo, rev, path, modes);
+  const r = run("git", ["-C", repo, "rev-parse", "--verify", "--quiet", `${rev}:${at}`], {
     env: UNSET_GIT,
   });
   if (r.code !== 0 || r.out === "") return null;
@@ -630,13 +689,14 @@ function blobShaAt(repo: string, rev: string, path: string): string | null {
  * edits inside a main switch-off's window is asked, while one that edits
  * past its block is not. */
 function addedSwitches(repo: string, base: string, head: string): SwitchEntry[] {
-  const before = new Set(treePaths(repo, base));
-  const after = new Set(treePaths(repo, head));
+  const before = treeModes(repo, base);
+  const after = treeModes(repo, head);
   const paths = changedPaths(repo, base, head).filter(isSource);
   const oldSpans = new Map<string, string[]>();
   for (const path of paths) {
     if (!before.has(path)) continue;
-    const source = blobAt(repo, base, path);
+    const at = resolveLink(repo, base, path, before);
+    const source = blobAt(repo, base, at);
     if (source === null)
       throw new Error(
         `cannot read ${path} at ${base}: refusing to report clear over unreadable input`,
@@ -653,7 +713,8 @@ function addedSwitches(repo: string, base: string, head: string): SwitchEntry[] 
   const seen = new Map<string, number>();
   for (const path of paths) {
     if (!after.has(path)) continue;
-    const source = blobAt(repo, head, path);
+    const at = resolveLink(repo, head, path, after);
+    const source = blobAt(repo, head, at);
     if (source === null)
       throw new Error(
         `cannot read ${path} at ${head}: refusing to report clear over unreadable input`,
@@ -752,16 +813,20 @@ interface SettingsEntry {
 }
 
 function settingsChanges(repo: string, base: string, head: string): SettingsEntry[] {
-  const before = new Set(treePaths(repo, base));
-  const after = new Set(treePaths(repo, head));
+  const before = treeModes(repo, base);
+  const after = treeModes(repo, head);
   const candidates = changedPaths(repo, base, head)
     .filter((path) => settingsKind(path) !== null)
     .sort();
   const result: SettingsEntry[] = [];
   for (const path of candidates) {
     const kind = settingsKind(path)!;
-    const oldText = before.has(path) ? blobAt(repo, base, path) : null;
-    const newText = after.has(path) ? blobAt(repo, head, path) : null;
+    const oldText = before.has(path)
+      ? blobAt(repo, base, resolveLink(repo, base, path, before))
+      : null;
+    const newText = after.has(path)
+      ? blobAt(repo, head, resolveLink(repo, head, path, after))
+      : null;
     const differs =
       kind === "package" ? packageSettingsDiffer(oldText, newText) : oldText !== newText;
     if (!differs) continue;
@@ -785,7 +850,7 @@ function settingsChanges(repo: string, base: string, head: string): SettingsEntr
       { env: UNSET_GIT },
     );
     if (d.code !== 0) throw new Error(`git diff ${path}: ${d.err.trim()}`);
-    const sha = blobShaAt(repo, head, path) ?? "absent";
+    const sha = blobShaAt(repo, head, path, after) ?? "absent";
     result.push({
       file: path,
       change,
