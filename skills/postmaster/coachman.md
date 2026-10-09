@@ -660,7 +660,7 @@ from it.
   a `wall` line pauses the run.
 - **Take in the workhorses' work (D4, D7)** — synthesis mode: a single-thread run launches
   no workhorse, so this step never runs there. After the walls pause above, before
-  `<tool>/scripts/run stage <dispatch> synthesis`, run the take-in step once. It admits each
+  `<tool>/scripts/run stage <dispatch> synthesis`, run the take-in step. It admits each
   workhorse's branch only once no workhorse is running or waiting, and only at the commit its
   checks recorded, logging one `take-in` line per lane and printing one `<lane>=<commit>`
   per lane:
