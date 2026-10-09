@@ -10,7 +10,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { firstSentence, PSTACK_SKILL, sharedRuns } from "./acceptance-323.ts";
 import type { Sandbox } from "./acceptance-344.ts";
 import {
@@ -299,12 +299,57 @@ describe("make with a host: the interactive open", () => {
       expect(r.code).toBe(1);
       expect(r.err).toMatch(/left open/iu);
       expect(readFileSync(log, "utf8")).toContain("new-session");
+      const actions = readFileSync(join(sandbox.dispatch, "actions.jsonl"), "utf8");
+      expect(actions).toContain("failed: the verifier session is still running after 2 seconds");
       const streams = readdirSync(join(sandbox.dispatch, "logs")).filter((f) =>
         f.endsWith("-events.jsonl"),
       );
       expect(streams).toEqual([]);
     } finally {
       rmSync(sandbox.dir, { recursive: true, force: true });
+    }
+  });
+
+  test("two checkouts sharing a directory name spawn under different handles", () => {
+    const a = makeSandbox();
+    const b = makeSandbox();
+    try {
+      expect(basename(a.repo)).toBe("app");
+      expect(basename(b.repo)).toBe("app");
+      const log = join(a.dir, "tmux.log");
+      writeStubTmux(a.bin, log, join(a.dir, "tmux.state"));
+      const config = coachmanConfig(a);
+      const envA = makeEnv(a, {
+        POSTMASTER_HOST: "tmux",
+        POSTMASTER_CONFIG: config,
+        ORACLE_SESSION_WORK: "1",
+      });
+      const envB = makeEnv(b, {
+        POSTMASTER_HOST: "tmux",
+        POSTMASTER_CONFIG: config,
+        ORACLE_SESSION_WORK: "1",
+      });
+      envB.PATH = `${a.bin}:${process.env.PATH ?? ""}`;
+      const ra = run(
+        RUN,
+        ["verifier", "make", a.repo, "cli", "--run", a.dispatch, "--timeout", "120"],
+        { env: envA },
+      );
+      expect(ra.code).toBe(0);
+      const rb = run(
+        RUN,
+        ["verifier", "make", b.repo, "cli", "--run", b.dispatch, "--timeout", "120"],
+        { env: envB },
+      );
+      expect(rb.code).toBe(0);
+      const handleA = summaryLine(ra.out, "handle");
+      const handleB = summaryLine(rb.out, "handle");
+      expect(handleA).not.toBe("");
+      expect(handleB).not.toBe("");
+      expect(handleB).not.toBe(handleA);
+    } finally {
+      rmSync(a.dir, { recursive: true, force: true });
+      rmSync(b.dir, { recursive: true, force: true });
     }
   });
 
