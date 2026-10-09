@@ -369,11 +369,11 @@ describe("C3: project settings hold only what the user changed", () => {
         "[team]\nmax_runs = 5\n",
       );
       const fileYes = answers(s.dir, "yes", "lane.alpha.model=model-x\noverwrite=yes");
-      const replaced = setupProject(s.repo, s.configPath, s.bin, ["--answers", fileYes]);
-      expect(replaced.code).toBe(0);
+      const merged = setupProject(s.repo, s.configPath, s.bin, ["--answers", fileYes]);
+      expect(merged.code).toBe(0);
       const written = readFileSync(join(s.repo, ".postmaster", "settings.toml"), "utf8");
       expect(written).toContain('model = "model-x"');
-      expect(written).not.toContain("max_runs");
+      expect(written).toContain("max_runs = 5");
     } finally {
       cleanup(s);
     }
