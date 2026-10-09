@@ -330,9 +330,14 @@ function decide(dispatch: string, roundS: string): void {
   };
 
   if (r === "1") {
-    console.log(
-      appliedIn("1") ? "RUN 2: round 1 applied a fix" : "STOP 1: round 1 applied no fixes",
-    );
+    const lacking1 = lacking("1");
+    if (lacking1.length > 0) {
+      console.log(`RUN 2: round 1 had no working reviewer for ${lacking1.join(" and ")}`);
+    } else {
+      console.log(
+        appliedIn("1") ? "RUN 2: round 1 applied a fix" : "STOP 1: round 1 applied no fixes",
+      );
+    }
     return;
   }
   const prev = decStr(r);

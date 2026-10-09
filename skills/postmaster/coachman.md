@@ -1123,7 +1123,7 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    P1 or P2 finding that does not verify closed is logged as a `finding` of its own severity in
    the round that checked it, and a P3 fix that does not verify closed as a P3 `finding` there.
    A round in which no lane actually reviewed under a gating lens is never the last
-   (step 2): that lens runs again in the next round, and from round 2 on the decision keeps
+   (step 2): that lens runs again in the next round, and the decision keeps
    such a round from ending the loop.
    A loop with no gating lens is round 1 alone, and applies nothing: a verified gating
    finding in it, a bug or security defect the style lens reported, is escalated with the card
