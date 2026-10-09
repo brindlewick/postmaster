@@ -14,6 +14,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -480,6 +481,32 @@ describe("usable counts the keys that survive the strip (#335)", () => {
     expect(r.code).toBe(0);
     expect(r.out).toContain("gpt-other");
     expect(r.out).toContain("opus-x");
+  }, 30000);
+});
+
+describe("an existing global path that is not a regular file fails loud (#335)", () => {
+  test("a dangling symlink fails with the path named, even with complete project settings", () => {
+    const { repo } = scratch();
+    writeSettings(repo, '[lanes.luna]\nharness = "codex"\nmodel = "probe-model"\n');
+    const link = join(tmp, `dangling-${n}.toml`);
+    symlinkSync(join(tmp, "no-such-target.toml"), link);
+    const r = runCli(["project-settings", "effective", repo], envFor(link));
+    expect(r.code).not.toBe(0);
+    expect(r.out).toBe("");
+    expect(r.err).toContain(link);
+    expect(r.err).toContain("is not a regular file");
+  }, 30000);
+
+  test("a directory fails with the path named, even with complete project settings", () => {
+    const { repo } = scratch();
+    writeSettings(repo, '[lanes.luna]\nharness = "codex"\nmodel = "probe-model"\n');
+    const dir = join(tmp, `configdir-${n}`);
+    mkdirSync(dir, { recursive: true });
+    const r = runCli(["project-settings", "effective", repo], envFor(dir));
+    expect(r.code).not.toBe(0);
+    expect(r.out).toBe("");
+    expect(r.err).toContain(dir);
+    expect(r.err).toContain("is not a regular file");
   }, 30000);
 });
 
