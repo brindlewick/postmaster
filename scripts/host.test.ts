@@ -159,7 +159,7 @@ describe("stub state lock", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  }, 60000);
+  });
 });
 
 describe("waiting list lock", () => {
@@ -462,7 +462,7 @@ test("a member with a five-word start matches its process, and close refuses whi
     else process.env.PATH = priorPath;
     rmSync(dir, { recursive: true, force: true });
   }
-}, 60000);
+});
 
 test("Herdr checks time out when timeout is absent, and keep working when it is present", async () => {
   const dir = mkdtempSync(join(tmpdir(), "host-herdr-timeout-"));
@@ -549,4 +549,4 @@ test("Herdr checks time out when timeout is absent, and keep working when it is 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-}, 45000);
+});

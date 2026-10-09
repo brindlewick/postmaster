@@ -243,28 +243,28 @@ afterAll(() => {
 describe("unicode primitives", () => {
   test("option keys keep non-ASCII word chars", () => {
     expect(pyLower("café-2".replace(NONWORD_RE, ""))).toBe("café2");
-  }, 30000);
+  });
 
   test("option keys keep decimal digits", () => {
     expect(pyLower("a٣b!".replace(NONWORD_RE, ""))).toBe("a٣b");
-  }, 30000);
+  });
 
   test("issue numbers may be Arabic-Indic", () => {
     expect(NUMBER_RE.test("١٢")).toBe(true);
-  }, 30000);
+  });
 
   test("issue numbers reject a trailing LF (fullmatch)", () => {
     expect(NUMBER_RE.test("12\n")).toBe(false);
-  }, 30000);
+  });
 
   test("comment dates may be Arabic-Indic", () => {
     expect(DATE_PREFIX_RE.test("٠٢٠٦-٠١-٠١ x")).toBe(true);
-  }, 30000);
+  });
 
   test("comment dates keep the ASCII shape", () => {
     expect(DATE_PREFIX_RE.test("2026-01-01 x")).toBe(true);
     expect(DATE_PREFIX_RE.test("2026-1-1 x")).toBe(false);
-  }, 30000);
+  });
 });
 
 describe("positive controls", () => {
@@ -279,7 +279,7 @@ describe("positive controls", () => {
     } finally {
       plainBoards();
     }
-  }, 30000);
+  });
 
   test("a binding naming no linked board is refused", () => {
     mkdirSync(join(repo, ".postmaster"), { recursive: true });
@@ -292,7 +292,7 @@ describe("positive controls", () => {
     } finally {
       plainBoards();
     }
-  }, 30000);
+  });
 
   test("a binding matching two linked boards is refused", () => {
     mkdirSync(join(repo, ".postmaster"), { recursive: true });
@@ -305,7 +305,7 @@ describe("positive controls", () => {
     } finally {
       plainBoards();
     }
-  }, 30000);
+  });
 
   test("read --body prints the stored body byte for byte, then one newline", () => {
     plainBoards();
@@ -314,7 +314,7 @@ describe("positive controls", () => {
     const want = Buffer.concat([readFileSync(join(tmp, "lf.md")), Buffer.from("\n")]);
     expect(r.code).toBe(0);
     expect(Buffer.compare(Buffer.from(r.out, "utf8"), want)).toBe(0);
-  }, 30000);
+  });
 
   test("read --body keeps a CRLF body's line endings", () => {
     plainBoards();
@@ -323,7 +323,7 @@ describe("positive controls", () => {
     const want = Buffer.concat([readFileSync(join(tmp, "crlf.md")), Buffer.from("\n")]);
     expect(r.code).toBe(0);
     expect(Buffer.compare(Buffer.from(r.out, "utf8"), want)).toBe(0);
-  }, 30000);
+  });
 
   test("read without --body still prints the header before the body", () => {
     plainBoards();
@@ -332,7 +332,7 @@ describe("positive controls", () => {
     expect(r.code).toBe(0);
     expect(r.out.split("\n")[0]).toBe("id: #7");
     expect(r.out.split("\n").includes("title: Check a ticket's shape")).toBe(true);
-  }, 30000);
+  });
 
   test("edit against the body as read calls gh issue edit once, with the body file and no title", () => {
     plainBoards();
@@ -362,7 +362,7 @@ describe("positive controls", () => {
     expect(editsLog.includes("[--body-file]")).toBe(true);
     expect(editsLog.includes("[--title]")).toBe(false);
     expect(editedBodyMatches).toBe(true);
-  }, 30000);
+  });
 
   test("a body stored with CRLF matches the same base with LF", () => {
     plainBoards();
@@ -374,7 +374,7 @@ describe("positive controls", () => {
     expect(r.code).toBe(0);
     expect(r.out.trim()).toBe("#7: edited");
     expect(editsCount()).toBe(1);
-  }, 30000);
+  });
 });
 
 describe("negative controls: nothing is written", () => {
@@ -400,7 +400,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(4);
     expect(r.ed).toBe(0);
     expect((r.out + r.err).includes("#7 changed since")).toBe(true);
-  }, 30000);
+  });
 
   test("an empty body file exits 1", () => {
     negativeSetup();
@@ -408,7 +408,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(r.ed).toBe(0);
     expect((r.out + r.err).includes("is empty")).toBe(true);
-  }, 30000);
+  });
 
   test("a missing base file exits 1", () => {
     negativeSetup();
@@ -416,7 +416,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(r.ed).toBe(0);
     expect((r.out + r.err).includes("cannot read base file")).toBe(true);
-  }, 30000);
+  });
 
   test("a pull request number exits 1", () => {
     negativeSetup();
@@ -424,7 +424,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(r.ed).toBe(0);
     expect((r.out + r.err).includes("no issue #34")).toBe(true);
-  }, 30000);
+  });
 
   test("the old form, with a title, is a usage error", () => {
     negativeSetup();
@@ -432,7 +432,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(r.ed).toBe(0);
     expect((r.out + r.err).includes("usage:")).toBe(true);
-  }, 30000);
+  });
 
   test("no linked board exits 3", () => {
     negativeSetup();
@@ -445,7 +445,7 @@ describe("negative controls: nothing is written", () => {
     } finally {
       plainBoards();
     }
-  }, 30000);
+  });
 
   test("read --body without a linked board exits 3", () => {
     negativeSetup();
@@ -456,7 +456,7 @@ describe("negative controls: nothing is written", () => {
     } finally {
       plainBoards();
     }
-  }, 30000);
+  });
 });
 
 describe("access", () => {
@@ -465,21 +465,21 @@ describe("access", () => {
     const r = ghSh(["access"]);
     expect(r.code).toBe(0);
     expect(r.out.trim()).toBe("ADMIN");
-  }, 30000);
+  });
 
   test("a repository the user only reads says READ", () => {
     writeFileSync(join(S, "access.json"), `${ACCESS_READ}\n`);
     const r = ghSh(["access"]);
     expect(r.code).toBe(0);
     expect(r.out.trim()).toBe("READ");
-  }, 30000);
+  });
 
   test("a repository gh cannot see exits 1", () => {
     writeFileSync(join(S, "access.json"), `${ACCESS_NONE}\n`);
     const r = ghSh(["access"]);
     expect(r.code).toBe(1);
     expect((r.out + r.err).includes("no permission on o/r")).toBe(true);
-  }, 30000);
+  });
 });
 
 describe("create and search", () => {
@@ -490,7 +490,7 @@ describe("create and search", () => {
     expect(r.code).toBe(0);
     expect(r.out.trim()).toBe("60");
     expect(createsCount()).toBe(1);
-  }, 30000);
+  });
 
   test("an issue that misses the board still prints its number, and exits 5", () => {
     plainBoards();
@@ -505,7 +505,7 @@ describe("create and search", () => {
     } finally {
       rmSync(join(S, "no-item-add"), { force: true });
     }
-  }, 30000);
+  });
 
   test("a board with no Status field is refused before anything is created", () => {
     plainBoards();
@@ -520,7 +520,7 @@ describe("create and search", () => {
     } finally {
       writeFileSync(join(S, "fields.json"), origFields);
     }
-  }, 30000);
+  });
 
   test("a board with no Todo column is refused before anything is created", () => {
     plainBoards();
@@ -535,7 +535,7 @@ describe("create and search", () => {
     } finally {
       writeFileSync(join(S, "fields.json"), origFields);
     }
-  }, 30000);
+  });
 
   test("search asks for the phrase in this repository, and prints number, state and title", () => {
     plainBoards();
@@ -550,7 +550,7 @@ describe("create and search", () => {
     expect(r.code).toBe(0);
     expect(r.out.trimEnd()).toBe("#4\topen\tEarlier\n#9\tclosed\tLater");
     expect(searchesLog.includes('"tf-0a1b2c3d" --repo o/r')).toBe(true);
-  }, 30000);
+  });
 
   test("a colon in the text is searched as a space, which GitHub's query accepts", () => {
     plainBoards();
@@ -564,7 +564,7 @@ describe("create and search", () => {
     }
     const lastSearch = searchesLog.trimEnd().split("\n").pop() ?? "";
     expect(lastSearch.includes('"Tool fault in scripts/x.sh" --repo o/r')).toBe(true);
-  }, 30000);
+  });
 });
 
 describe("labels and titles", () => {
@@ -581,7 +581,7 @@ describe("labels and titles", () => {
     expect(created.includes("create:")).toBe(true);
     expect(created.includes("name=ready")).toBe(true);
     expect(restLog().includes("[repos/o/r/issues/7/labels] [-f] [labels[]=ready]")).toBe(true);
-  }, 30000);
+  });
 
   test("label add uses the repo label when it exists, creating nothing", () => {
     plainBoards();
@@ -597,7 +597,7 @@ describe("labels and titles", () => {
     } finally {
       rmSync(join(S, "repo-labels.json"), { force: true });
     }
-  }, 30000);
+  });
 
   test("label remove drops the label without creating anything", () => {
     plainBoards();
@@ -609,7 +609,7 @@ describe("labels and titles", () => {
     expect(r.out.trim()).toBe("#7: label removed ready");
     expect(labelsLog()).toBe("");
     expect(restLog().includes("[DELETE] [repos/o/r/issues/7/labels/ready]")).toBe(true);
-  }, 30000);
+  });
 
   test("read shows the issue's labels", () => {
     plainBoards();
@@ -617,7 +617,7 @@ describe("labels and titles", () => {
     const r = ghSh(["read", "7"]);
     expect(r.code).toBe(0);
     expect(r.out.split("\n")).toContain("labels: ready, blocked");
-  }, 30000);
+  });
 
   test("has-label answers exact membership, and a comma in a name is one label", () => {
     plainBoards();
@@ -631,7 +631,7 @@ describe("labels and titles", () => {
     const present = ghSh(["has-label", "7", "blocked, ready"]);
     expect(present.code).toBe(0);
     expect(present.out.trim()).toBe("present");
-  }, 30000);
+  });
 
   test("title retitles the issue", () => {
     plainBoards();
@@ -643,7 +643,7 @@ describe("labels and titles", () => {
     const log = readFileSync(join(S, "edits.log"), "utf8");
     expect(log.includes("[--title] [A new title]")).toBe(true);
     expect(log.includes("[--body-file]")).toBe(false);
-  }, 30000);
+  });
 
   test("a state change leaves the ready label alone", () => {
     plainBoards();
@@ -661,7 +661,7 @@ describe("labels and titles", () => {
     log = restLog();
     expect(log.includes("[DELETE] [repos/o/r/issues/7/labels/blocked]")).toBe(true);
     expect(log.includes("labels/ready")).toBe(false);
-  }, 30000);
+  });
 });
 
 describe("the board is never listed", () => {
@@ -673,7 +673,7 @@ describe("the board is never listed", () => {
       env: { ...process.env, GITHUB_SH_STUB: S },
     });
     expect(r.status).toBe(1);
-  }, 30000);
+  });
 
   test("read takes the column from the issue's own board item", () => {
     plainBoards();
@@ -683,7 +683,7 @@ describe("the board is never listed", () => {
     expect(r.code).toBe(0);
     expect(r.out.split("\n")).toContain("state: in-progress");
     expect(callsLog().includes("project item-list")).toBe(false);
-  }, 30000);
+  });
 
   test("negative control: an item on another board does not set the column", () => {
     plainBoards();
@@ -691,7 +691,7 @@ describe("the board is never listed", () => {
     const r = ghSh(["read", "7"]);
     expect(r.code).toBe(0);
     expect(r.out.split("\n")).toContain("state: todo");
-  }, 30000);
+  });
 
   test("negative control: an item with no Status value reads as todo", () => {
     plainBoards();
@@ -699,7 +699,7 @@ describe("the board is never listed", () => {
     const r = ghSh(["read", "7"]);
     expect(r.code).toBe(0);
     expect(r.out.split("\n")).toContain("state: todo");
-  }, 30000);
+  });
 
   test("state moves the issue's own item without adding or listing anything", () => {
     plainBoards();
@@ -712,7 +712,7 @@ describe("the board is never listed", () => {
     expect(itemEdits().includes("[--single-select-option-id] [o2]")).toBe(true);
     expect(callsLog().includes("project item-add")).toBe(false);
     expect(callsLog().includes("project item-list")).toBe(false);
-  }, 30000);
+  });
 
   test("state adds an issue that is not on the board, then moves its new item", () => {
     plainBoards();
@@ -727,7 +727,7 @@ describe("the board is never listed", () => {
         .filter((l) => l === "project item-add").length,
     ).toBe(1);
     expect(itemEdits().includes("[--id] [PVTI_new]")).toBe(true);
-  }, 30000);
+  });
 
   test("create adds the new issue to the board and moves its item, listing nothing", () => {
     plainBoards();
@@ -739,7 +739,7 @@ describe("the board is never listed", () => {
     expect(callsLog().includes("project item-list")).toBe(false);
     expect(itemEdits().includes("[--id] [PVTI_new]")).toBe(true);
     expect(itemEdits().includes("[--single-select-option-id] [o1]")).toBe(true);
-  }, 30000);
+  });
 
   test("list reads each column from the issue query and prints state and title", () => {
     plainBoards();
@@ -788,7 +788,7 @@ describe("the board is never listed", () => {
     expect(callsLog().includes("project item-list")).toBe(false);
     const only = ghSh(["list", "in-progress"]);
     expect(only.out.trim()).toBe("#9\tin-progress\tLater");
-  }, 30000);
+  });
 });
 
 describe("labels over REST", () => {
@@ -802,7 +802,7 @@ describe("labels over REST", () => {
     } finally {
       rmSync(join(S, "not-on-issue"), { force: true });
     }
-  }, 30000);
+  });
 
   test("negative control: a REST failure that is not a 404 stops the label change", () => {
     plainBoards();
@@ -817,5 +817,5 @@ describe("labels over REST", () => {
       rmSync(join(S, "rest-fails"), { force: true });
       rmSync(join(S, "repo-labels.json"), { force: true });
     }
-  }, 30000);
+  });
 });

@@ -701,7 +701,7 @@ describe("degrade", () => {
     expect(ran.code).toBe(0);
     expect(degraded.length).toBe(1);
     expect(narrative.includes("one bug: DEGRADED,")).toBe(true);
-  }, 60000);
+  });
 });
 
 describe("JSON lists", () => {
