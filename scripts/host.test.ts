@@ -20,7 +20,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runControls } from "./host-self-test.ts";
+import { runControls, waitFor } from "./host-self-test.ts";
 import { bootId, processStart, processState } from "./lib/processes.ts";
 
 const SECTIONS: Array<{ name: string; count: number }> = [
@@ -159,6 +159,27 @@ describe("stub state lock", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("waitFor, the wait the self-test uses for a stand-in", () => {
+  test("it returns the moment its condition holds, not at its bound", async () => {
+    const start = Date.now();
+    const readyAt = start + 300;
+    expect(await waitFor(() => Date.now() >= readyAt, 30)).toBe(true);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(300);
+    expect(Date.now() - start).toBeLessThan(10000);
+  });
+  test("a condition that throws has not held yet, and one that never holds gives up at its bound", async () => {
+    let looks = 0;
+    const start = Date.now();
+    const never = await waitFor(() => {
+      looks++;
+      throw new Error("not there yet");
+    }, 0.3);
+    expect(never).toBe(false);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(300);
+    expect(looks).toBeGreaterThan(1);
   });
 });
 
