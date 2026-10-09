@@ -17,11 +17,11 @@ import {
   plantMultiVerifier,
   plantSingleVerifier,
   ROOT,
+  RUN,
   runBrief,
   runChecksLines,
   runDiscover,
   runList,
-  RUN,
   stubConfig,
   VERIFIER_RULE,
 } from "./acceptance-327.ts";
@@ -34,7 +34,8 @@ function briefOf(repo: string, id: string): string {
 function briefOrThrow(repo: string, title: string, dir: string): { id: string; brief: string } {
   const id = localTicket(repo, title);
   const r = runBrief(repo, id, stubConfig(dir));
-  if (r.code !== 0) throw new Error(`clerk brief exited ${r.code}: ${r.err.trim() || r.out.trim()}`);
+  if (r.code !== 0)
+    throw new Error(`clerk brief exited ${r.code}: ${r.err.trim() || r.out.trim()}`);
   return { id, brief: briefOf(repo, id) };
 }
 
