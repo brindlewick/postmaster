@@ -19,6 +19,12 @@
 //   run host run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>]
 //               [--project <repo>] [--out <file>] [--err <file>] [--append] [--marker <file>]
 //               [--pidfile <file>] -- <command...>
+//   run host workhorse <dispatch> <lane> <worktree>
+//                                         launch one workhorse into its worktree: its name from
+//                                         `name ... workhorse`, its events/err/marker under the
+//                                         dispatch's logs, `run launch launch` with --run
+//   run host stop-pidfile <pidfile>        stop the recorded launch and its group while its
+//                                         identity matches, else report the leftover members
 //   run host limits [--role lane|coachman|reviewer] [--run <dispatch>|--project <repo>]
 //                                         print the launch limits that would apply:
 //                                         memory=<max> and tasks=<max>
@@ -42,8 +48,10 @@
 // --append, and its stderr to --err, which holds only this launch's errors. --marker is removed
 // as it starts and touched when it exits,
 // whatever its exit, and also when run host cannot start it, with the reason in --err. --pidfile
-// gets its pid, which is also its process group: `kill -- -<pid>` stops all of it. <cwd> is the
-// directory the launch belongs to, usually its worktree: in Herdr the launch runs in a new tab of
+// gets its pid, which is also its process group, with the start, boot and command that prove
+// it: stop-pidfile stops all of it while that identity matches, else reports the leftover
+// members. <cwd> is the directory the launch belongs to, usually its worktree: in Herdr the
+// launch runs in a new tab of
 // that worktree's space, opened with `herdr worktree open` under the repository's space if it is
 // not open yet; in tmux in a window of session postmaster-<repo>; with no host, detached from
 // the caller. A run launch's <cwd>, including a reviewer's scratch clone, is its tab's working
@@ -132,6 +140,7 @@ import {
   bootId,
   processCommandLine,
   processCommandLines,
+  processInfo,
   processStart,
   processState,
   processTable as sharedProcessTable,
@@ -243,9 +252,34 @@ function count(value: string | undefined, what: string): number {
 function quote(value: string): string {
   return `'${value.replace(/'/gu, "'\\''")}'`;
 }
-function parseJson(text: string): any {
+// Shapes of the Herdr CLI's JSON replies, per call site.
+interface HerdrReply {
+  result?: unknown;
+  error?: { code?: unknown };
+}
+interface HerdrTokens {
+  postmaster?: unknown;
+  state?: unknown;
+}
+interface HerdrSpace {
+  workspace_id?: unknown;
+  worktree?: unknown;
+  tokens?: HerdrTokens;
+}
+interface HerdrPane {
+  pane_id?: unknown;
+  tab_id?: unknown;
+  tokens?: HerdrTokens;
+}
+interface HerdrPlaced {
+  workspace?: HerdrSpace;
+  tab?: { tab_id?: unknown };
+  root_pane?: { pane_id?: unknown };
+}
+
+function parseJson<T = HerdrReply>(text: string): T | null {
   try {
-    return JSON.parse(text);
+    return JSON.parse(text) as T;
   } catch {
     return null;
   }
@@ -253,7 +287,7 @@ function parseJson(text: string): any {
 function jsonValue(value: unknown): string {
   return value === undefined || value === null ? "" : String(value);
 }
-function _jsonStdout(text: string, expression: (data: any) => unknown): string {
+function _jsonStdout(text: string, expression: (data: HerdrReply | null) => unknown): string {
   const value = parseJson(text);
   return value === null ? "" : jsonValue(expression(value));
 }
@@ -360,9 +394,9 @@ function isPathComponent(value: unknown): boolean {
 }
 
 // Stores are third-party text: anything not a mapping is no store at all.
-function asRecord(value: unknown): Record<string, any> {
+function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, any>)
+    ? (value as Record<string, unknown>)
     : {};
 }
 
@@ -408,18 +442,28 @@ function nameCmd(dispatch: string, ...args: string[]): string {
       die("cannot resolve the coachman leg from manifest.json");
     return raw;
   };
-  const needLaneModel = (lane: string, role: string): Record<string, any> => {
-    const spec = hasOwn(lanes, lane) ? lanes[lane] : undefined;
-    if (typeof spec !== "object" || spec === null || Array.isArray(spec) || !spec.model)
+  const needLaneModel = (lane: string, role: string): Record<string, unknown> => {
+    const spec: unknown = hasOwn(lanes, lane) ? lanes[lane] : undefined;
+    if (
+      typeof spec !== "object" ||
+      spec === null ||
+      Array.isArray(spec) ||
+      !(spec as Record<string, unknown>)["model"]
+    )
       die(`no recorded model for ${role} lane ${lane}`);
-    return spec as Record<string, any>;
+    return spec as Record<string, unknown>;
   };
-  const needCoachmanModel = (legName: string): Record<string, any> => {
+  const needCoachmanModel = (legName: string): Record<string, unknown> => {
     const legs = asRecord(team.coachman_legs);
-    const spec = (hasOwn(legs, legName) ? legs[legName] : undefined) || team.coachman;
-    if (typeof spec !== "object" || spec === null || Array.isArray(spec) || !spec.model)
+    const spec: unknown = (hasOwn(legs, legName) ? legs[legName] : undefined) || team.coachman;
+    if (
+      typeof spec !== "object" ||
+      spec === null ||
+      Array.isArray(spec) ||
+      !(spec as Record<string, unknown>)["model"]
+    )
       die(`no recorded model for coachman leg ${legName}`);
-    return spec as Record<string, any>;
+    return spec as Record<string, unknown>;
   };
   const needLens = (lens: string): string => {
     if (lens !== "style" && lens !== "bug" && lens !== "security")
@@ -712,9 +756,11 @@ function registryScan(dir: string): Array<{ group: string; name: string; roots: 
 function herdr(args: string[], timeout = 0) {
   return timeout ? limit(timeout, "herdr", args) : run("herdr", args);
 }
-function herdrData(args: string[]): any {
+function herdrData(args: string[]): { agent?: { agent_status?: unknown } } | null {
   const result = herdr(args);
-  return result.code === 0 ? (parseJson(result.out)?.result ?? null) : null;
+  return result.code === 0
+    ? ((parseJson(result.out)?.result ?? null) as { agent?: { agent_status?: unknown } } | null)
+    : null;
 }
 function herdrPlace(
   name: string,
@@ -733,9 +779,9 @@ function herdrPlace(
   const listed = top ? herdr(["worktree", "list", "--cwd", cwd]) : null;
   if (listed?.code === 0) {
     try {
-      const data = parseJson(listed.out)?.result;
+      const data = parseJson<{ result?: Record<string, unknown> }>(listed.out)?.result;
       if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("bad list");
-      const src = data.source ?? {};
+      const src = (data.source ?? {}) as Record<string, unknown>;
       if (typeof src !== "object" || src === null || Array.isArray(src))
         throw new Error("bad list");
       const rows = data.worktrees ?? [];
@@ -775,7 +821,7 @@ function herdrPlace(
       ...PLACE_ENV,
     ]);
     if (response.code !== 0) return null;
-    const data = parseJson(response.out)?.result;
+    const data = parseJson<{ result?: HerdrPlaced }>(response.out)?.result;
     const space = jsonValue(data?.workspace?.workspace_id);
     const tab = jsonValue(data?.tab?.tab_id);
     const pane = jsonValue(data?.root_pane?.pane_id);
@@ -818,7 +864,7 @@ function herdrPlace(
       ...PLACE_ENV,
     ]);
     if (response.code !== 0) return null;
-    const created = parseJson(response.out)?.result;
+    const created = parseJson<{ result?: HerdrPlaced }>(response.out)?.result;
     source = jsonValue(created?.workspace?.workspace_id);
     // This is the first pane of the project space. Use it for a project-level launch such as
     // the postmaster, instead of leaving an empty shell beside the launch tab.
@@ -842,7 +888,7 @@ function herdrPlace(
       "--no-focus",
     ]);
     if (response.code !== 0) return null;
-    const data = parseJson(response.out)?.result;
+    const data = parseJson<{ result?: HerdrPlaced }>(response.out)?.result;
     space = jsonValue(data?.workspace?.workspace_id);
     tab = jsonValue(data?.tab?.tab_id);
     pane = jsonValue(data?.root_pane?.pane_id);
@@ -863,7 +909,7 @@ function herdrPlace(
       ...PLACE_ENV,
     ]);
     if (response.code !== 0) return null;
-    const data = parseJson(response.out)?.result;
+    const data = parseJson<{ result?: HerdrPlaced }>(response.out)?.result;
     tab = jsonValue(data?.tab?.tab_id);
     pane = jsonValue(data?.root_pane?.pane_id);
   }
@@ -971,13 +1017,20 @@ function undash(value: unknown): string {
 function herdrSpaceOpened(space: string): boolean {
   const info = herdr(["workspace", "get", space]);
   if (info.code !== 0) return false;
-  return _jsonStdout(info.out, (d) => d?.result?.workspace?.tokens?.postmaster) === "opened";
+  return (
+    _jsonStdout(
+      info.out,
+      (d) =>
+        (d as { result?: { workspace?: HerdrSpace } } | null)?.result?.workspace?.tokens
+          ?.postmaster,
+    ) === "opened"
+  );
 }
 
 function herdrSpaceGone(space: string): boolean {
   const list = herdr(["workspace", "list"]);
   if (list.code !== 0) return false;
-  const data = parseJson(list.out);
+  const data = parseJson<{ result?: { workspaces?: HerdrSpace[] } }>(list.out);
   if (data === null || typeof data !== "object" || Array.isArray(data)) return false;
   const result = data.result;
   if (result === null || typeof result !== "object" || Array.isArray(result)) return false;
@@ -1008,18 +1061,20 @@ function tmuxWindowGone(window: string): boolean {
 }
 
 function finishOwnership(panesText: string, target: string, tab: string): string {
-  const rows = parseJson(panesText)?.result?.panes;
+  const rows = parseJson<{ result?: { panes?: HerdrPane[] } }>(panesText)?.result?.panes;
   if (!Array.isArray(rows)) throw new Error("bad panes");
   for (const row of rows) {
     if (row === null || typeof row !== "object" || Array.isArray(row)) throw new Error("bad panes");
   }
-  const pane = rows.find((row: any) => row.pane_id === target) ?? null;
+  const pane = rows.find((row) => row.pane_id === target) ?? null;
   if (pane === null) return "missing";
   if (tokensOf(pane).postmaster !== "launch") return "unowned";
-  if (!HERDR_TAB_ID.test(pane.tab_id ?? "") || pane.tab_id !== tab) return "pane";
-  if (rows.some((row: any) => row.pane_id !== target && !HERDR_TAB_ID.test(row.tab_id ?? "")))
+  if (!HERDR_TAB_ID.test((pane.tab_id ?? "") as string) || pane.tab_id !== tab) return "pane";
+  if (
+    rows.some((row) => row.pane_id !== target && !HERDR_TAB_ID.test((row.tab_id ?? "") as string))
+  )
     return "pane";
-  if (rows.some((row: any) => row.pane_id !== target && row.tab_id === tab)) return "pane";
+  if (rows.some((row) => row.pane_id !== target && row.tab_id === tab)) return "pane";
   return "tab";
 }
 
@@ -1175,8 +1230,8 @@ function finishPriorHerdr(cwd: string, runPath: string): void {
       if (panes.code === 0) {
         let present = false;
         try {
-          const rows = parseJson(panes.out)?.result?.panes;
-          present = Array.isArray(rows) && rows.some((row: any) => row?.pane_id === pane);
+          const rows = parseJson<{ result?: { panes?: HerdrPane[] } }>(panes.out)?.result?.panes;
+          present = Array.isArray(rows) && rows.some((row) => row?.pane_id === pane);
         } catch {
           present = false;
         }
@@ -1309,21 +1364,21 @@ function herdrRunPlace(
   let repoName = "";
   let runSpace = "";
   try {
-    const data = parseJson(listed.out)?.result;
+    const data = parseJson<{ result?: Record<string, unknown> }>(listed.out)?.result;
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("bad list");
     // Main reads d.get("source", {}): an explicit null is a failure, not an empty source.
     if (data.source === null) throw new Error("bad list");
-    const src = data.source ?? {};
+    const src = (data.source ?? {}) as Record<string, unknown>;
     if (typeof src !== "object" || Array.isArray(src)) throw new Error("bad list");
     const rows = data.worktrees ?? [];
     if (!Array.isArray(rows)) throw new Error("bad list");
     const runReal = realpathLoose(runPath);
-    let match: any = null;
+    let match: Record<string, unknown> | null = null;
     for (const entry of rows) {
       if (!entry || typeof entry !== "object" || typeof entry.path !== "string")
         throw new Error("bad list");
       if (realpathLoose(entry.path) === runReal) {
-        match = entry;
+        match = entry as Record<string, unknown>;
         break;
       }
     }
@@ -1346,7 +1401,10 @@ function herdrRunPlace(
       "--no-focus",
     ]);
     if (response.code !== 0) return null;
-    source = jsonValue(parseJson(response.out)?.result?.workspace?.workspace_id);
+    source = jsonValue(
+      parseJson<{ result?: { workspace?: HerdrSpace } }>(response.out)?.result?.workspace
+        ?.workspace_id,
+    );
   }
   let tab = "";
   let pane = "";
@@ -1363,7 +1421,7 @@ function herdrRunPlace(
       "--no-focus",
     ]);
     if (response.code !== 0) return null;
-    const opened = parseJson(response.out)?.result;
+    const opened = parseJson<{ result?: HerdrPlaced }>(response.out)?.result;
     runSpace = jsonValue(opened?.workspace?.workspace_id);
     const rootTab = jsonValue(opened?.tab?.tab_id);
     const rootPane = jsonValue(opened?.root_pane?.pane_id);
@@ -1418,7 +1476,7 @@ function herdrRunPlace(
       rollbackRootTab(rootTab);
       return null;
     }
-    const created = parseJson(launched.out)?.result;
+    const created = parseJson<{ result?: HerdrPlaced }>(launched.out)?.result;
     tab = jsonValue(created?.tab?.tab_id);
     pane = jsonValue(created?.root_pane?.pane_id);
     if (!tab || !pane) {
@@ -1442,7 +1500,7 @@ function herdrRunPlace(
       "--no-focus",
     ]);
     if (response.code !== 0) return null;
-    const created = parseJson(response.out)?.result;
+    const created = parseJson<{ result?: HerdrPlaced }>(response.out)?.result;
     tab = jsonValue(created?.tab?.tab_id);
     pane = jsonValue(created?.root_pane?.pane_id);
   }
@@ -1534,7 +1592,9 @@ const SPEC_FIELDS = [
 function writeSpec(spec: string, fields: Spec): void {
   mkdirSync(spec, { recursive: true, mode: 0o700 });
   for (const name of SPEC_FIELDS.slice(0, -2))
-    writeFileSync(join(spec, name), (fields as any)[name], { mode: 0o600 });
+    writeFileSync(join(spec, name), (fields as unknown as Record<string, string>)[name], {
+      mode: 0o600,
+    });
   writeFileSync(join(spec, "argv"), `${fields.argv.join("\0")}\0`, { mode: 0o600 });
 }
 function readSpec(spec: string): Spec {
@@ -2177,9 +2237,13 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
   const started = Date.now();
   const eventFile = `${specDir}.cap`;
   markerRemove(eventFile);
-  const stdioFor = (fd: number): any => (fd >= 0 ? fd : mode === "bg" ? "ignore" : "inherit");
+  const stdioFor = (fd: number): number | "ignore" | "inherit" =>
+    fd >= 0 ? fd : mode === "bg" ? "ignore" : "inherit";
   let child: ReturnType<typeof spawn> | null = null;
   let spawnError: unknown = null;
+  // The wrapper phase's command-line prefix, where the plain path wraps: the
+  // settled command waits past it, since a python wrapper outlasts the window.
+  let wrapperPrefix: string | null = null;
   try {
     if (spec.capmode === "systemd") {
       child = spawn(
@@ -2218,6 +2282,7 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
         args = [bin, ...args];
         bin = sid;
         alone = true;
+        wrapperPrefix = `${sid} `;
       } else {
         const py = which("python3");
         if (py) {
@@ -2243,6 +2308,9 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
           ];
           bin = py;
           alone = true;
+          // The -c program's first line: only this wrapper's command line
+          // starts this way, so a python target still settles by name.
+          wrapperPrefix = `${py} -c import os,sys`;
         }
       }
       child = spawn(bin, args, {
@@ -2287,7 +2355,21 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
     } catch {}
     if (spec.pidfile) {
       try {
-        writeFileSync(spec.pidfile, `${String(pid)}\n`);
+        // The start, boot and command identity travels with the pid, so stop-pidfile
+        // refuses a number the OS has since reused for another process. Each missing
+        // line weakens the form: without a command it checks start and boot, and a
+        // bare pid checks nothing.
+        const start = startOf(pid);
+        const boot = bootId();
+        const wrapper = spec.capmode === "systemd" && spec.setsid ? basename(spec.setsid) : null;
+        const command = await settledCommand(pid, wrapper, wrapperPrefix);
+        const body =
+          start && boot && command
+            ? `${pid}\n${start}\n${boot}\n${command}\n`
+            : start && boot
+              ? `${pid}\n${start}\n${boot}\n`
+              : `${pid}\n`;
+        writeFileSync(spec.pidfile, body);
       } catch {}
     }
   }
@@ -2920,6 +3002,192 @@ async function stopTree(
     .join(" ");
   return { code: survivors.size ? 2 : 0, text: `${known.size}\t${names}` };
 }
+/** One workhorse, named and placed as the runbook's block did: the host owns the composition. */
+async function workhorseCmd(args: string[]): Promise<void> {
+  const [dispatch, lane, worktree] = args;
+  if (args.length !== 3 || !dispatch || !lane || !worktree)
+    die("usage: run host workhorse <dispatch> <lane> <worktree>");
+  const d = absolute(dispatch);
+  const name = nameCmd(d, "workhorse", lane);
+  await runCmd([
+    name,
+    worktree,
+    "--under",
+    d,
+    "--role",
+    "lane",
+    "--run",
+    d,
+    "--out",
+    join(d, "logs", `${lane}-events.jsonl`),
+    "--err",
+    join(d, "logs", `${lane}.err`),
+    "--marker",
+    join(d, "logs", `${lane}.done`),
+    "--",
+    join(HERE, "run"),
+    "launch",
+    "launch",
+    lane,
+    worktree,
+    join(d, `${lane}-prompt.txt`),
+    "--last",
+    join(d, "logs", `${lane}-last.md`),
+    "--run",
+    d,
+  ]);
+}
+
+/** A process name as a pidfile records it: one line, since the form is line-based. */
+function pidfileCommand(name: string): string {
+  return name.split("\n")[0] ?? "";
+}
+
+/**
+ * The leader's command once it is past every exec: a child read before it execs still
+ * looks like its parent (same command line, stably, until it is scheduled), mid-exec
+ * its command line can read empty, and the launch chain execs twice more — the spawned
+ * wrapper becomes systemd-run, which execs the target in place after scope setup, a
+ * D-Bus roundtrip no stability window can outwait — so a reading counts only past the
+ * parent's command line, the transient names and the wrapper's own command line, and
+ * the name is recorded after three such stable readings. "" when the process is gone
+ * or never settles, in which case the pidfile holds no command.
+ */
+async function settledCommand(
+  pid: number,
+  spawned: string | null,
+  wrapperPrefix: string | null,
+): Promise<string> {
+  const parent = processCommandLine(process.pid);
+  // The chain's turning names: the wrapper run spawned, and a --scope systemd-run,
+  // which always becomes its target (or, under a systemd that waits instead, the
+  // record honestly degrades to start and boot). The plain path's wrapper is known
+  // by its command line instead: a setsid phase by name would also match a target
+  // that wraps itself, and a python phase by name would swallow a python target,
+  // while the wrapper's own invocation matches nothing else.
+  const transient = new Set([spawned, "systemd-run"]);
+  let prev: string | null = null;
+  let stable = 0;
+  const end = Date.now() + 2000;
+  for (;;) {
+    const cur = processCommandLine(pid);
+    const name = cur === "" ? "" : pidfileCommand(processInfo(pid)?.name ?? "");
+    const wrapped = wrapperPrefix !== null && cur.startsWith(wrapperPrefix);
+    const ready = cur !== "" && cur !== parent && name !== "" && !transient.has(name) && !wrapped;
+    if (!ready) {
+      if (cur === "" && processState(pid) === "absent") return "";
+      // Unreadable but present (mid-exec, or a zombie awaiting reap), pre-exec, or a
+      // turning name: none of it is the target, so wait it out.
+      stable = 0;
+      prev = null;
+    } else if (cur === prev) {
+      stable += 1;
+      if (stable >= 2) return name;
+    } else {
+      stable = 0;
+      prev = cur;
+    }
+    if (Date.now() >= end) return "";
+    await Bun.sleep(10);
+  }
+}
+
+/** A leftover member for the report: its command line, or its bare name. */
+function describeCommand(pid: number, name: string): string {
+  // ASCII: \s stays ASCII under u; collapsing ASCII runs is the whole of this report line.
+  const line = clean(processCommandLine(pid).replace(/\s+/gu, " ").trim());
+  if (line !== "") return line.slice(0, 200);
+  return name;
+}
+
+/**
+ * The process group a pidfile names, stopped as `stop` stops a worktree's launches.
+ * A pidfile in the form `run` writes (pid, start, boot, command) stops only the launch it
+ * recorded: the leader and its group die only while the recorded start, boot and command
+ * still match the holder of the number, live or zombie. A legacy pidfile without the
+ * command (pid, start, boot) is checked on start and boot alone. A bare pid stops
+ * whatever live holder and group hold the number now. Members no check proves are never
+ * killed: they are reported as leftover members, each pid with its command, and the stop
+ * exits 2 so the caller sees it. Nothing here assumes a dead leader means an owned group:
+ * a stranger's group may hold the number with a zombie leader or with none.
+ */
+async function stopPidfileCmd(args: string[]): Promise<void> {
+  const file = args[0] ?? "";
+  if (!file) die("usage: run host stop-pidfile <pidfile>");
+  let text = "";
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    die(`no such pidfile: ${file}`);
+  }
+  const parts = text.trim().split("\n");
+  const pidText =
+    parts.length === 1 || parts.length === 3 || parts.length === 4 ? (parts[0] ?? "") : "";
+  if (!/^[0-9]+$/u.test(pidText)) die(`${file} does not hold a pid: ${text.trim()}`);
+  const pid = Number(pidText);
+  if (pid <= 0) die(`${file} does not hold a pid: ${text.trim()}`);
+  const recorded = parts.length === 3 || parts.length === 4;
+  const table = processTable();
+  const row = table.get(pid);
+  // The live members of the numbered group, the holder included: the processes a stop
+  // would end. A zombie needs no killing and is never reported as leftover.
+  const members = [...table]
+    .filter(([, r]) => r.group === pid && !r.zombie)
+    .map(([member]) => member)
+    .sort((a, b) => a - b);
+  const matches =
+    recorded &&
+    row !== undefined &&
+    row.start === parts[1] &&
+    sameBoot(parts[2], bootId()) &&
+    (parts.length === 3 || pidfileCommand(row.name) === parts[3]);
+  if (matches || (!recorded && row !== undefined && !row.zombie)) {
+    // Proven, so the leader and its group die: through the group while the leader is
+    // live, else through the proven members one by one, since a stop root needs a
+    // live holder.
+    const roots =
+      row !== undefined && !row.zombie
+        ? [`group|${pid}|${row.start}`]
+        : members.map((member) => `tree|${member}|${table.get(member)!.start}`);
+    if (roots.length === 0) {
+      console.log(`no process group of ${pid} is running`);
+      return;
+    }
+    const grace = count(process.env.POSTMASTER_HOST_STOP_WAIT ?? "20", "POSTMASTER_HOST_STOP_WAIT");
+    const most = count(process.env.POSTMASTER_HOST_STOP_MAX ?? "512", "POSTMASTER_HOST_STOP_MAX");
+    const result = await stopTree(grace, most, roots);
+    const fields = result.text.split("\t");
+    if (result.code === 0)
+      console.log(`stopped the process group of ${pid}: ${fields[0]} process(es)`);
+    else if (result.code === 2) {
+      warn(`stopped the process group of ${pid}, but these still run: ${fields[1] ?? ""}`);
+      throw hostError("", 2);
+    } else if (result.code === 3) {
+      warn(
+        `refused to stop the process group of ${pid}, and left it running: ${fields.slice(1).join("\t")}`,
+      );
+      throw hostError("", 2);
+    } else die(`could not stop the process group of ${pid}: ${result.text}`);
+    return;
+  }
+  if (members.length === 0) {
+    console.log(`no process group of ${pid} is running`);
+    return;
+  }
+  const pairs = members
+    .map((member) => `${member} ${describeCommand(member, table.get(member)!.name)}`)
+    .join(", ");
+  const reason = !recorded
+    ? "the pidfile records no identity and the leader is gone"
+    : row === undefined
+      ? "the recorded leader is gone"
+      : "the recorded identity does not match";
+  warn(
+    `left ${members.length} leftover member(s) of ${pid} running: ${pairs} (${reason}; killed nothing)`,
+  );
+  throw hostError("", 2);
+}
+
 async function stopCmd(args: string[]): Promise<void> {
   const path = worktreeArg(args[0] ?? "", "stop");
   if ((resolve(process.cwd()) + sep).startsWith(path + sep))
@@ -4964,11 +5232,17 @@ async function main(): Promise<void> {
     case "run":
       await runCmd(args);
       return;
+    case "workhorse":
+      await workhorseCmd(args);
+      return;
     case "limits":
       limitsCmd(args);
       return;
     case "stop":
       await stopCmd(args);
+      return;
+    case "stop-pidfile":
+      await stopPidfileCmd(args);
       return;
     case "close":
       await closeCmd(args);
@@ -5134,28 +5408,28 @@ function placementFiles(): string[] {
   }
 }
 
-function tokensOf(entry: any): any {
+function tokensOf(entry: { tokens?: unknown }): Record<string, unknown> {
   const tokens = entry.tokens || {};
   if (typeof tokens !== "object" || tokens === null || Array.isArray(tokens))
     throw new Error("bad tokens");
-  return tokens;
+  return tokens as Record<string, unknown>;
 }
 
 function placementOwnership(panesText: string, paneId: string, tabId: string): string {
-  const panes = (parseJson(panesText) as any)?.result?.panes;
+  const panes = parseJson<{ result?: { panes?: HerdrPane[] } }>(panesText)?.result?.panes;
   if (!Array.isArray(panes)) throw new Error("bad panes");
   for (const entry of panes)
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("bad panes");
   const placed = (value: unknown): boolean => typeof value === "string" && HERDR_TAB_ID.test(value);
-  const pane = panes.find((entry: any) => entry.pane_id === paneId);
+  const pane = panes.find((entry) => entry.pane_id === paneId);
   if (!pane) return "missing";
   if (tokensOf(pane).postmaster !== "launch") return "unowned";
   if (!placed(pane.tab_id)) return "idless";
-  if (panes.some((entry: any) => !placed(entry.tab_id))) return "mixed";
+  if (panes.some((entry) => !placed(entry.tab_id))) return "mixed";
   if (
     panes
-      .filter((entry: any) => entry.tab_id === tabId)
-      .every((entry: any) => tokensOf(entry).postmaster === "launch")
+      .filter((entry) => entry.tab_id === tabId)
+      .every((entry) => tokensOf(entry).postmaster === "launch")
   )
     return "owned";
   return "split";
@@ -5263,15 +5537,15 @@ function herdrForgetSpace(workspace: string): void {
       continue;
     }
     try {
-      const item = JSON.parse(readFileSync(file, "utf8")) as any;
+      const item = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown> | null;
       if (item?.workspace === workspace) markerRemove(file);
     } catch {}
   }
 }
 
 function spaceVerdict(infoText: string, panesText: string): string {
-  const ws = (parseJson(infoText) as any)?.result?.workspace;
-  const panes = (parseJson(panesText) as any)?.result?.panes;
+  const ws = parseJson<{ result?: { workspace?: HerdrSpace } }>(infoText)?.result?.workspace;
+  const panes = parseJson<{ result?: { panes?: HerdrPane[] } }>(panesText)?.result?.panes;
   if (!ws || typeof ws !== "object" || Array.isArray(ws)) throw new Error("bad space");
   if (!Array.isArray(panes)) throw new Error("bad panes");
   for (const entry of panes)
@@ -5301,9 +5575,9 @@ function spaceVerdict(infoText: string, panesText: string): string {
 
 function herdrPlacementCwd(workspace: string, pane: string): string {
   for (const file of placementFiles()) {
-    let item: any = null;
+    let item: Record<string, unknown> | null = null;
     try {
-      item = JSON.parse(readFileSync(file, "utf8"));
+      item = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
     } catch {
       continue;
     }
@@ -5330,17 +5604,17 @@ function closeHerdr(path: string): number {
     kind = "main";
   } else {
     try {
-      const data = (parseJson(listText) as any)?.result;
+      const data = parseJson<{ result?: Record<string, unknown> }>(listText)?.result;
       if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("bad list");
       const rows = data.worktrees ?? [];
       if (!Array.isArray(rows)) throw new Error("bad list");
       const here = realpathLoose(path);
-      let match: any = null;
+      let match: Record<string, unknown> | null = null;
       for (const entry of rows) {
         if (!entry || typeof entry !== "object" || typeof entry.path !== "string")
           throw new Error("bad list");
         if (realpathLoose(entry.path) === here) {
-          match = entry;
+          match = entry as Record<string, unknown>;
           break;
         }
       }
@@ -5357,7 +5631,7 @@ function closeHerdr(path: string): number {
     let candidates: string[] = [];
     if (workspaces.code === 0) {
       try {
-        const data = parseJson(workspaces.out);
+        const data = parseJson<{ result?: { workspaces?: HerdrSpace[] } }>(workspaces.out);
         const result = data?.result;
         if (result === null || typeof result !== "object" || Array.isArray(result))
           throw new Error("bad spaces");
@@ -5381,7 +5655,9 @@ function closeHerdr(path: string): number {
         warn(`could not inspect space ${candidate}; left it open`);
         return 2;
       }
-      const tree = asRecord(parseJson(got.out)?.result?.workspace?.worktree);
+      const tree = asRecord(
+        parseJson<{ result?: { workspace?: HerdrSpace } }>(got.out)?.result?.workspace?.worktree,
+      );
       const actualPath = jsonValue(tree.checkout_path || tree.path);
       let resolved = "";
       try {
@@ -5408,7 +5684,9 @@ function closeHerdr(path: string): number {
     }
     infoText = infoResult.out;
   }
-  const tree = asRecord((parseJson(infoText) as any)?.result?.workspace?.worktree);
+  const tree = asRecord(
+    parseJson<{ result?: { workspace?: HerdrSpace } }>(infoText)?.result?.workspace?.worktree,
+  );
   const actualPath = jsonValue(tree.checkout_path || tree.path);
   if (!actualPath) return 0;
   try {
@@ -5609,9 +5887,12 @@ export function runWorktreePaths(givenDispatch: string): string[] {
     // Only the round records: findings lists, usage records and anything else
     // that shares the folder are not state for this lookup.
     if (!REVIEW_ROUND_FILE.test(entry)) continue;
-    let state: any = null;
+    let state: Record<string, unknown> | null = null;
     try {
-      state = JSON.parse(readFileSync(join(dispatch, "logs", entry), "utf8"));
+      state = JSON.parse(readFileSync(join(dispatch, "logs", entry), "utf8")) as Record<
+        string,
+        unknown
+      >;
     } catch {
       continue;
     }
@@ -5636,9 +5917,9 @@ export function runWorktreePaths(givenDispatch: string): string[] {
   try {
     const actionLog = join(dispatch, "actions.jsonl");
     for (const [lineIndex, line] of pySplitLines(readFileSync(actionLog, "utf8")).entries()) {
-      let action: any = null;
+      let action: Record<string, unknown> | null = null;
       try {
-        action = JSON.parse(line);
+        action = JSON.parse(line) as Record<string, unknown>;
       } catch {
         continue;
       }
@@ -5709,9 +5990,9 @@ async function stopRunCmd(args: string[]): Promise<void> {
 }
 
 function runSpaceVerdict(infoText: string, panesText: string): string {
-  const ws = parseJson(infoText)?.result?.workspace;
+  const ws = parseJson<{ result?: { workspace?: HerdrSpace } }>(infoText)?.result?.workspace;
   if (ws === null || typeof ws !== "object" || Array.isArray(ws)) throw new Error("bad space");
-  const panes = parseJson(panesText)?.result?.panes;
+  const panes = parseJson<{ result?: { panes?: HerdrPane[] } }>(panesText)?.result?.panes;
   if (!Array.isArray(panes)) throw new Error("bad panes");
   for (const entry of panes) {
     if (entry === null || typeof entry !== "object" || Array.isArray(entry))
@@ -5740,9 +6021,9 @@ function herdrCloseRunPlacements(givenDispatch: string): number {
   const found = new Set<string>();
   let collectOk = true;
   for (const file of placementFiles()) {
-    let item: any = null;
+    let item: Record<string, unknown> | null = null;
     try {
-      item = JSON.parse(readFileSync(file, "utf8"));
+      item = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
     } catch {
       continue;
     }
@@ -5768,7 +6049,7 @@ function herdrCloseRunPlacements(givenDispatch: string): number {
     }
     let fields: string[] | null = null;
     try {
-      const item: any = JSON.parse(readFileSync(file, "utf8"));
+      const item = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
       if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
       if (item.run !== dispatch) continue;
       fields = ["workspace", "tab", "pane", "cwd"].map((key) => jsonValue(item[key]));
